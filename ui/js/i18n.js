@@ -157,6 +157,8 @@ const STR = {
   "font.system": ["系统字体", "System fonts"],
 
   "exp.sizes": ["输出尺寸", "Output sizes"],
+  "exp.names": ["尺寸名称", "Size names"],
+  "exp.namesHint": ["给尺寸起个自己的名字（如「B 站封面」），缩略图下方会显示它；留空则显示比例和用途。", "Give a size your own name (e.g. “Bilibili cover”) and it is shown under its thumbnail; leave empty to show the ratio and use."],
   "exp.custom": ["自定义", "Custom"],
   "exp.addSize": ["添加", "Add"],
   "exp.scale": ["清晰度", "Resolution"],

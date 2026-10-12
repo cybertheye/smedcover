@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { virtualSize, layout, TEMPLATES } from "../ui/js/layout.js";
 import { parseCsv, csvToJobs } from "../ui/js/csv.js";
-import { normalizeProfile, normalizeCover, normalizeSettings, exportName, usedUserAssets } from "../ui/js/store.js";
+import { normalizeProfile, normalizeCover, normalizeSettings, exportName, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
 import { ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable } from "../ui/js/layers.js";
 import { sampleProfile, starterProfile } from "../ui/js/presets.js";
 
@@ -65,7 +65,7 @@ test("normalizeProfile repairs bad input and keeps good input", () => {
   assert.deepEqual(p.categories[0].graphic, { kind: "graphic", id: "gear", labels: [], stamp: "" });   // v1 shape upgraded
   assert.deepEqual(p.categories[1].graphic, { kind: "none" });
   assert.equal(p.style.template, "stack");
-  assert.deepEqual(p.sizes, [{ w: 64, h: 1080, label: "" }]);
+  assert.deepEqual(p.sizes, [{ w: 64, h: 1080, label: "", name: "" }]);
   assert.deepEqual(p.design.layers.map((l) => l.id), BOUND_TYPES);
   assert.equal(normalizeProfile(null).categories.length, 1);
   const sample = normalizeProfile(sampleProfile("zh"));
@@ -162,6 +162,20 @@ test("every interface string has both languages", async () => {
   const { keys, t, setLang } = await import("../ui/js/i18n.js");
   globalThis.document = { ...globalThis.document, documentElement: {} };
   for (const lang of ["zh", "en"]) { setLang(lang); for (const k of keys()) assert.ok(t(k).trim().length > 0, `${lang} ${k}`); }
+});
+
+test("size captions: custom name first, then ratio and use, never pixels", () => {
+  assert.equal(ratioText(1920, 1080), "16:9");
+  assert.equal(ratioText(1200, 1600), "3:4");
+  assert.equal(ratioText(1200, 1200), "1:1");
+  assert.equal(ratioText(900, 383), "2.35:1");
+  assert.equal(ratioText(1146, 717), "1.6:1");
+  assert.equal(ratioText(1000, 1257), "1:1.26");
+  assert.equal(sizeCaption(normalizeSize({ w: 1280, h: 720, label: "16:9 · YouTube", name: "  主站封面 " })), "主站封面");
+  assert.equal(sizeCaption(normalizeSize({ w: 1280, h: 720, label: "16:9 · YouTube" })), "16:9 · YouTube");
+  assert.equal(sizeCaption(normalizeSize({ w: 1500, h: 500 })), "3:1");
+  assert.equal(normalizeSize({ w: 100, h: 100, name: "x".repeat(99) }).name.length, 40);
+  assert.equal(normalizeProfile({ sizes: [{ w: 800, h: 600, name: "Blog" }] }).sizes[0].name, "Blog");
 });
 
 test("exportName fills the template and strips unsafe characters", () => {

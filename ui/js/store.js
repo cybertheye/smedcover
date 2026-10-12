@@ -47,7 +47,18 @@ function normalizeGraphic(g) {
   if (KINDS.includes(g.kind) && str(g.id)) return { kind: g.kind, id: g.id, ...extra };
   return { kind: "none" };
 }
-export const normalizeSize = (s) => ({ w: Math.round(num(s && s.w, 1920, 64, 8192)), h: Math.round(num(s && s.h, 1080, 64, 8192)), label: str(s && s.label) });
+/** An output size. `label` is the preset's own description ("16:9 · YouTube"); `name` is what the user calls it. */
+export const normalizeSize = (s) => ({ w: Math.round(num(s && s.w, 1920, 64, 8192)), h: Math.round(num(s && s.h, 1080, 64, 8192)), label: str(s && s.label), name: str(s && s.name).trim().slice(0, 40) });
+
+/** Aspect ratio as text: "16:9" when it reduces to small numbers, otherwise relative to 1 ("2.35:1", "1:1.25"). */
+export function ratioText(w, h) {
+  const gcd = (a, b) => (b ? gcd(b, a % b) : a), g = gcd(w, h), a = w / g, b = h / g;
+  if (a <= 32 && b <= 32) return `${a}:${b}`;
+  const r = (x) => String(Math.round(x * 100) / 100);
+  return w >= h ? `${r(w / h)}:1` : `1:${r(h / w)}`;
+}
+/** Short caption for a size: the user's name if any, else the preset's ratio and use, else just the ratio. No pixels. */
+export const sizeCaption = (s) => s.name || s.label || ratioText(s.w, s.h);
 
 /** Fills in defaults and drops anything malformed, so files from disk (or other people) are safe to use. */
 export function normalizeProfile(raw) {

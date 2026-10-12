@@ -6,11 +6,12 @@ import { drawCover, sizeKey, hexToRgb, hitAt, paintAccent } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
+import { ratioText } from "./store.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
 import { ACCENT_SHAPES, newLayer, isFree, isPickable, adjust, resetPlacement, writeKey, insertAbove, moveLayer, duplicate } from "./layers.js";
 import {
   native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
-  deleteAssetRecord, usedUserAssets, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName,
+  deleteAssetRecord, usedUserAssets, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
 } from "./store.js";
 
 const $ = (id) => document.getElementById(id);
@@ -47,7 +48,7 @@ const S = {
 const cat = () => S.profile.categories.find((c) => c.id === S.cover.catId) || S.profile.categories[0];
 const catIndex = () => Math.max(0, S.profile.categories.indexOf(cat()));
 const selSize = () => S.profile.sizes.find((s) => sizeKey(s) === S.sel) || S.profile.sizes[0];
-const sizeLabel = (s) => (s.label ? `${s.label} · ` : "") + `${s.w}×${s.h}`;
+const sizeLabel = (s) => `${sizeCaption(s)} · ${s.w}×${s.h}`;      // full form, with pixels
 const layer = (id = S.layerId) => S.cover.layers.find((l) => l.id === id) || null;
 /** Geometry context of the size on the main canvas, as the layer maths wants it. */
 const frame = () => { const s = selSize(), [vw, vh] = virtualSize(s.w, s.h); return { vw, vh, key: sizeKey(s), catId: cat().id }; };
@@ -179,10 +180,11 @@ function queueDraw() {
 }
 new ResizeObserver(() => S.profile && queueDraw()).observe($("stage"));
 
+$("strip").addEventListener("wheel", (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.preventDefault(); $("strip").scrollLeft += e.deltaY; } }, { passive: false });
 function buildStrip() {
   $("strip").replaceChildren(...S.profile.sizes.map((size) => {
     const key = sizeKey(size);
-    return el("figure", { class: key === S.sel ? "on" : "", onclick: () => selectSize(key) }, el("canvas", { id: "th-" + key }), el("figcaption", {}, sizeLabel(size)));
+    return el("figure", { class: key === S.sel ? "on" : "", onclick: () => selectSize(key) }, el("canvas", { id: "th-" + key }), el("figcaption", { title: sizeLabel(size) }, sizeCaption(size)));
   }));
 }
 function selectSize(key) {
@@ -444,7 +446,7 @@ function sizesTab() {
   const P = S.profile, se = S.settings;
   const has = (s) => P.sizes.some((x) => sizeKey(x) === sizeKey(s));
   const toggle = (s, on) => {
-    if (on && !has(s)) P.sizes.push({ w: s.w, h: s.h, label: s.label || "" });
+    if (on && !has(s)) P.sizes.push({ w: s.w, h: s.h, label: s.label || "", name: "" });
     if (!on) { if (P.sizes.length < 2) return renderPanel(); P.sizes = P.sizes.filter((x) => sizeKey(x) !== sizeKey(s)); }
     if (!P.sizes.some((x) => sizeKey(x) === S.sel)) S.sel = sizeKey(P.sizes[0]);
     syncToolbar(); touch({ profile: true, strip: true, panel: true });
@@ -457,6 +459,10 @@ function sizesTab() {
     el("div", { class: "box sizes" }, cap("exp.sizes"), SIZE_PRESETS.map(row), custom.map(row),
       el("div", { class: "row3", style: "margin-top:12px" }, cw, chh,
         el("button", { class: "btn", style: "padding:10px", onclick: () => toggle(normalizeSize({ w: cw.value, h: chh.value, label: "" }), true) }, t("exp.addSize")))),
+    el("div", { class: "box" }, cap("exp.names"),
+      P.sizes.map((s) => el("div", { class: "nm-row" }, el("span", {}, `${s.w}×${s.h}`),
+        textInput(s.name, (v) => { s.name = v.trim().slice(0, 40); persistProfile(); recordHistory(); later("strip", 250, () => { buildStrip(); syncToolbar(); queueDraw(); }); }, { placeholder: s.label || ratioText(s.w, s.h), maxLength: 40 }))),
+      el("div", { class: "hint" }, t("exp.namesHint"))),
     el("div", {}, cap("exp.scale"), select([1, 2, 3, 4].map((n) => [String(n), `${n}x`]), String(se.scale), (v) => setting("scale", Number(v)))),
     el("div", {}, cap("exp.format"), select([["png", "PNG"], ["jpeg", "JPEG"], ["webp", "WebP"]], se.format, (v) => setting("format", v, true)),
       se.format === "jpeg" && slider("exp.quality", 40, 100, 1, se.quality, px, (v) => setting("quality", v)),

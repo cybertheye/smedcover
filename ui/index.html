@@ -44,7 +44,7 @@
   .tabs{display:flex}
   .tabs button{flex:1;border:0;border-bottom:3px solid transparent;background:transparent;padding:12px 4px;cursor:pointer;font-weight:600;opacity:.55}
   .tabs button.on{opacity:1;border-bottom-color:var(--acc)}
-  .scroll{overflow-y:auto;min-height:0;padding:16px 14px 40px;display:flex;flex-direction:column;gap:16px;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#55556e var(--panel)}
+  .scroll{overflow-y:auto;min-height:0;padding:16px 14px 40px;display:flex;flex-direction:column;gap:16px;scrollbar-gutter:stable}
   .scroll>*{flex:none}
   .scroll::-webkit-scrollbar{width:10px}
   .scroll::-webkit-scrollbar-track{background:var(--panel)}
@@ -92,12 +92,20 @@
   #stage{min-height:0;min-width:0;display:grid;place-items:center;padding:18px;overflow:hidden;background:#06060b}
   #stage canvas{display:block;touch-action:none;box-shadow:0 0 0 2px var(--line2)}
   #stage.alpha canvas{background:repeating-conic-gradient(#3a3a48 0% 25%,#24242e 0% 50%) 0 0/20px 20px}
-  #strip{display:flex;gap:14px;padding:12px 18px;border-top:2px solid var(--line);overflow-x:auto;align-items:flex-end}
+  #strip{display:flex;gap:14px;padding:12px 18px 8px;border-top:2px solid var(--line);overflow-x:scroll;overflow-y:hidden;align-items:flex-end;min-width:0}
+  #strip::-webkit-scrollbar{height:12px}
+  #strip::-webkit-scrollbar-track{background:var(--panel)}
+  #strip::-webkit-scrollbar-thumb{background:#55556e;border:2px solid var(--panel)}
+  #strip::-webkit-scrollbar-thumb:hover{background:#8080a0}
+  .nm-row{display:grid;grid-template-columns:96px 1fr;gap:8px;align-items:center;margin-top:8px}
+  .nm-row span{font:600 12px var(--mono);opacity:.6}
   #strip figure{margin:0;cursor:pointer;outline:2px solid transparent;outline-offset:4px;flex:none}
   #strip figure.on{outline-color:var(--acc)}
   #strip canvas{display:block;height:84px;width:auto;background:#000}
   #strip.alpha canvas{background:repeating-conic-gradient(#3a3a48 0% 25%,#24242e 0% 50%) 0 0/12px 12px}
-  #strip figcaption{font:600 10px var(--mono);opacity:.5;margin-top:5px;white-space:nowrap}
+  #strip figcaption{font-size:12px;line-height:18px;font-weight:600;opacity:.75;margin-top:6px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+  #strip figure{padding-bottom:2px}
+  /* (scrollbars are styled with ::-webkit-scrollbar only: the standard scrollbar-* properties would switch them back to auto-hiding overlays) */
 
   /* layers */
   .layers{display:grid;gap:3px}
