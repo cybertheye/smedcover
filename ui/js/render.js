@@ -142,8 +142,12 @@ function strokeEdge(ctx, pts, nx, ny, sharp, lw = 16) {
   ctx.strokeStyle = INK; ctx.lineWidth = lw; run(0, 0);
   ctx.strokeStyle = "#fff"; ctx.lineWidth = 4; run(nx * (lw / 2 + 16), ny * (lw / 2 + 16));
 }
-/** Paints the colour block in `shape`. Returns its bounding box as a hit entry. */
-export function paintAccent(ctx, shape, G, C) {
+/**
+ * Paints the colour block in `shape` and returns the box {x,y,w,h} it covers on the untouched canvas.
+ * The block itself runs far beyond the canvas; `loose` (the layer was moved) also extends its
+ * screentone, so dragging or rotating it never reveals where it ends.
+ */
+export function paintAccent(ctx, shape, G, C, loose = false) {
   const acc = rgb(C), { nx, ny } = G.edge;
   let [A, B] = [G.accent[0], G.accent[1]];
   const axis = ny ? 1 : 0;                                   // the coordinate the edge is slanted in
@@ -151,19 +155,19 @@ export function paintAccent(ctx, shape, G, C) {
   if (shape === "reverse") { A = [...A]; B = [...B]; [A[axis], B[axis]] = [B[axis], A[axis]]; }
   const inset = shape === "double" ? 52 : 0, shift = (p, d) => [p[0] - nx * d, p[1] - ny * d];
   const len = Math.hypot(B[0] - A[0], B[1] - A[1]), dx = (B[0] - A[0]) / len, dy = (B[1] - A[1]) / len;
-  // run the edge a little past both ends so its inked stroke leaves the canvas cleanly
-  const ext = (pts) => [[pts[0][0] - dx * 20, pts[0][1] - dy * 20], ...pts, [pts[pts.length - 1][0] + dx * 20, pts[pts.length - 1][1] + dy * 20]];
+  const FAR = 5000, m = loose ? 900 : 60;
+  const ext = (pts) => [[pts[0][0] - dx * FAR, pts[0][1] - dy * FAR], ...pts, [pts[pts.length - 1][0] + dx * FAR, pts[pts.length - 1][1] + dy * FAR]];
   const edge = ext(edgePoints(shape, shift(A, inset), shift(B, inset), nx, ny));
-  const block = [...edge, ...G.accent.slice(2)];
+  const block = [...edge, shift(edge[edge.length - 1], FAR), shift(edge[0], FAR)];
   const xs = G.accent.map((p) => p[0]), ys = G.accent.map((p) => p[1]);
   const bx = Math.min(...xs), by = Math.min(...ys), bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
   polygon(ctx, block); ctx.fillStyle = acc; ctx.fill();
   ctx.save(); polygon(ctx, block); ctx.clip();
-  toneField(ctx, bx - 60, by - 60, bx + bw + 60, by + bh + 60, 28, rgb(mixc(C, BLK, 0.24)), (x, y) => ((y - by) / bh) * 1.15 - 0.4 + (x - bx) / (bw * 2.6));
+  toneField(ctx, bx - m, by - m, bx + bw + m, by + bh + m, 28, rgb(mixc(C, BLK, 0.24)), (x, y) => ((y - by) / bh) * 1.15 - 0.4 + (x - bx) / (bw * 2.6));
   if (shape === "stripes") {                                 // hazard band just inside the edge
     polygon(ctx, ext([A, B]).concat(ext([shift(A, 46), shift(B, 46)]).reverse())); ctx.clip();
     ctx.fillStyle = INK;
-    for (let d = -80; d < len + 80; d += 46) { polygon(ctx, [[A[0] + dx * d, A[1] + dy * d], [A[0] + dx * (d + 23), A[1] + dy * (d + 23)], shift([A[0] + dx * (d - 23), A[1] + dy * (d - 23)], 46), shift([A[0] + dx * (d - 46), A[1] + dy * (d - 46)], 46)]); ctx.fill(); }
+    for (let d = -46 * Math.ceil((m + 80) / 46); d < len + m + 80; d += 46) { polygon(ctx, [[A[0] + dx * d, A[1] + dy * d], [A[0] + dx * (d + 23), A[1] + dy * (d + 23)], shift([A[0] + dx * (d - 23), A[1] + dy * (d - 23)], 46), shift([A[0] + dx * (d - 46), A[1] + dy * (d - 46)], 46)]); ctx.fill(); }
   }
   ctx.restore();
   if (shape === "stripes") { ctx.strokeStyle = INK; ctx.lineWidth = 8; const q = ext([shift(A, 46), shift(B, 46)]); ctx.beginPath(); ctx.moveTo(...q[0]); ctx.lineTo(...q[q.length - 1]); ctx.stroke(); }
@@ -174,30 +178,36 @@ export function paintAccent(ctx, shape, G, C) {
     ctx.lineWidth = 10; ctx.beginPath(); edge.forEach((p, i) => (i ? ctx.lineTo(...p) : ctx.moveTo(...p))); ctx.stroke();
     ctx.strokeStyle = "#fff"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(band[0][0] + nx * 22, band[0][1] + ny * 22); ctx.lineTo(band[3][0] + nx * 22, band[3][1] + ny * 22); ctx.stroke();
   } else strokeEdge(ctx, edge, nx, ny, ["zigzag", "steps", "chevron"].includes(shape));
-  return { cx: bx + bw / 2, cy: by + bh / 2, hw: bw / 2, hh: bh / 2, r: 0 };
+  return { x: bx, y: by, w: bw, h: bh };
 }
 
 // ---------- layer painters. Each returns the box it covers for hit-testing:
 // {cx, cy, hw, hh, r} = centre, half-extents and rotation in virtual units (or null).
 
-/** Runs `fn` moved / scaled / rotated about the pivot (px, py); maps the local box it returns to the canvas. */
-function placed(ctx, px, py, tr, fn) {
-  const a = tr.r * RAD;
-  ctx.save();
-  ctx.translate(px + tr.dx, py + tr.dy); ctx.rotate(a); ctx.scale(tr.s, tr.s); ctx.translate(-px, -py);
-  const box = fn();
-  ctx.restore();
+let probe = null;
+/**
+ * Draws fn(ctx) moved / scaled / stretched / rotated about the centre of the box it returns
+ * ({x,y,w,h} in untransformed units), and maps that box to the canvas. The box is found first by
+ * running fn on a throw-away context, so the result does not depend on any earlier frame.
+ */
+function placed(ctx, tr, fn, known) {
+  probe = probe || document.createElement("canvas").getContext("2d");
+  const box = known || fn(probe);
   if (!box) return null;
-  const lx = box.x + box.w / 2 - px, ly = box.y + box.h / 2 - py;
-  return { cx: px + tr.dx + (lx * Math.cos(a) - ly * Math.sin(a)) * tr.s, cy: py + tr.dy + (lx * Math.sin(a) + ly * Math.cos(a)) * tr.s, hw: (box.w / 2) * tr.s, hh: (box.h / 2) * tr.s, r: tr.r };
-}
-/** Same for things drawn around their own centre (assets, free text). */
-function centred(ctx, cx, cy, s, r, fn) {
+  const px = box.x + box.w / 2, py = box.y + box.h / 2;
   ctx.save();
-  ctx.translate(cx, cy); ctx.rotate(r * RAD); ctx.scale(s, s);
+  ctx.translate(px + tr.dx, py + tr.dy); ctx.rotate(tr.r * RAD); ctx.scale(tr.s * tr.kx, tr.s * tr.ky); ctx.translate(-px, -py);
+  fn(ctx);
+  ctx.restore();
+  return { cx: px + tr.dx, cy: py + tr.dy, hw: (box.w / 2) * tr.s * tr.kx, hh: (box.h / 2) * tr.s * tr.ky, r: tr.r };
+}
+/** Same for things drawn around their own centre (assets, free text); fn returns half-extents. */
+function centred(ctx, cx, cy, tr, s, fn) {
+  ctx.save();
+  ctx.translate(cx, cy); ctx.rotate(tr.r * RAD); ctx.scale(s * tr.kx, s * tr.ky);
   const half = fn();
   ctx.restore();
-  return half ? { cx, cy, hw: half.hw * s, hh: half.hh * s, r } : null;
+  return half ? { cx, cy, hw: half.hw * s * tr.kx, hh: half.hh * s * tr.ky, r: tr.r } : null;
 }
 
 // free text: nominal 120-unit type, centred on the origin
@@ -239,53 +249,74 @@ const PAINT = {
     return { cx: w / 2, cy: h / 2, hw: w / 2, hh: h / 2, r: 0 };
   },
   accent(ctx, L, tr, env) {
-    return paintAccent(ctx, L.shape, env.G, env.C);
+    const xs = env.G.accent.map((p) => p[0]), ys = env.G.accent.map((p) => p[1]), x = Math.min(...xs), y = Math.min(...ys);
+    const loose = !!(tr.dx || tr.dy || tr.r || tr.s !== 1 || tr.kx !== 1 || tr.ky !== 1);
+    return placed(ctx, tr, (c) => paintAccent(c, L.shape, env.G, env.C, loose), { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y });
   },
   graphic(ctx, L, tr, env) {
     const g = env.cat.graphic;
     if (!g || g.kind === "none") return null;
-    return centred(ctx, env.G.art.x + tr.dx, env.G.art.y + tr.dy, env.G.art.s * tr.s, tr.r, () =>
+    return centred(ctx, env.G.art.x + tr.dx, env.G.art.y + tr.dy, tr, env.G.art.s * tr.s, () =>
       drawAsset(ctx, g, env.C, { tint: true, labels: g.labels, stamp: g.stamp, shadow: env.style.imageShadow }));
   },
   brand(ctx, L, tr, env) {
-    return placed(ctx, 72, 90, tr, () => drawHeader(ctx, env.o, env.w, env.th, env.C, env.G.template === "split", L.rail));
+    return placed(ctx, tr, (c) => drawHeader(c, env.o, env.w, env.th, env.C, env.G.template === "split", L.rail));
   },
   title(ctx, L, tr, env) {
     const { G, th } = env, top = env.hasBrand ? 150 : 84;
     const box = { x: G.title.x, y: top, w: G.title.w, h: G.title.h + (G.title.y - top) };
-    return placed(ctx, box.x + box.w / 2, box.y + box.h / 2, tr, () => drawTitle(ctx, env.cover.title, box, IDENTITY, {
+    return placed(ctx, tr, (c) => drawTitle(c, env.cover.title, box, IDENTITY, {
       font: fonts.cn, maxFs: 340, align: L.align, fill: th.titleFill, ink: th.titleInk, hi: env.acc, shadow: env.acc, hiShadow: th.titleFill,
       stroke: clamp(L.stroke, 0, 2), shadowAmt: clamp(L.shadow, 0, 2),
     }));
   },
   tag(ctx, L, tr, env) {
     if (!env.cover.tag) return null;
-    return placed(ctx, env.G.tag.x, env.G.tag.y, tr, () => accentTag(ctx, env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.acc));
+    return placed(ctx, tr, (c) => accentTag(c, env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.acc));
   },
   catname(ctx, L, tr, env) {
-    return placed(ctx, env.G.cat.x, env.G.cat.y, tr, () => drawCategory(ctx, env.cat, env.G, env.C, { name: L.showName, plate: L.plate }));
+    return placed(ctx, tr, (c) => drawCategory(c, env.cat, env.G, env.C, { name: L.showName, plate: L.plate }));
   },
   frame(ctx, L, tr, env) {
     brackets(ctx, 30, 30, env.w - 30, env.h - 30, 44, env.th.text, 3);
     return null;
   },
   asset(ctx, L, tr, env) {
-    return centred(ctx, tr.cx, tr.cy, tr.s, tr.r, () => drawAsset(ctx, L.ref, env.C, { tint: L.tint, shadow: env.style.imageShadow }));
+    return centred(ctx, tr.cx, tr.cy, tr, tr.s, () => drawAsset(ctx, L.ref, env.C, { tint: L.tint, shadow: env.style.imageShadow }));
   },
   text(ctx, L, tr, env) {
-    return centred(ctx, tr.cx, tr.cy, tr.s, tr.r, () => drawFreeText(ctx, L, env));
+    return centred(ctx, tr.cx, tr.cy, tr, tr.s, () => drawFreeText(ctx, L, env));
   },
 };
 
+/**
+ * The grab handles of a selected layer, in its own rotated frame (origin at the layer's centre):
+ * four corners (resize), four sides (stretch) and one above the top (rotate). `u` = virtual units
+ * per screen pixel, so handles keep the same size on screen.
+ */
+export function handles(hit, u) {
+  const hw = hit.hw + 6 * u, hh = hit.hh + 6 * u;
+  return [
+    { id: "nw", lx: -hw, ly: -hh }, { id: "ne", lx: hw, ly: -hh }, { id: "se", lx: hw, ly: hh }, { id: "sw", lx: -hw, ly: hh },
+    { id: "n", lx: 0, ly: -hh }, { id: "e", lx: hw, ly: 0 }, { id: "s", lx: 0, ly: hh }, { id: "w", lx: -hw, ly: 0 },
+    { id: "rot", lx: 0, ly: -hh - 34 * u },
+  ];
+}
 function drawSelection(ctx, hit, k) {
-  const u = 1 / k;   // one device pixel in virtual units
+  const u = 1 / k, hs = handles(hit, u), hw = hit.hw + 6 * u, hh = hit.hh + 6 * u;
   ctx.save();
   ctx.translate(hit.cx, hit.cy); ctx.rotate(hit.r * RAD);
-  const hw = hit.hw + 6 * u, hh = hit.hh + 6 * u;
   ctx.lineWidth = 4 * u; ctx.strokeStyle = "rgba(7,7,12,.9)"; ctx.setLineDash([]); ctx.strokeRect(-hw, -hh, hw * 2, hh * 2);
   ctx.lineWidth = 2 * u; ctx.strokeStyle = "#ffffff"; ctx.setLineDash([10 * u, 7 * u]); ctx.strokeRect(-hw, -hh, hw * 2, hh * 2);
   ctx.setLineDash([]);
-  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { ctx.fillStyle = "#ffffff"; ctx.fillRect(sx * hw - 6 * u, sy * hh - 6 * u, 12 * u, 12 * u); ctx.strokeStyle = INK; ctx.lineWidth = 2 * u; ctx.strokeRect(sx * hw - 6 * u, sy * hh - 6 * u, 12 * u, 12 * u); }
+  ctx.beginPath(); ctx.moveTo(0, -hh); ctx.lineTo(0, -hh - 34 * u); ctx.stroke();
+  for (const h of hs) {
+    ctx.fillStyle = "#ffffff"; ctx.strokeStyle = INK; ctx.lineWidth = 2 * u;
+    ctx.beginPath();
+    if (h.id === "rot") ctx.arc(h.lx, h.ly, 8 * u, 0, Math.PI * 2);
+    else { const a = h.id.length === 2 ? 6.5 * u : 5 * u; ctx.rect(h.lx - a, h.ly - a, a * 2, a * 2); }
+    ctx.fill(); ctx.stroke();
+  }
   ctx.restore();
 }
 

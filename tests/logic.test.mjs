@@ -126,12 +126,23 @@ test("layer placement: one edit maps to every size, per-size edits stay local", 
   { const d = resolve(a, 1920, 1080, land.key); assert.ok(d.cx === 960 && Math.abs(d.cy - 453.6) < 1e-6 && d.s === 0.35 && d.r === 0, JSON.stringify(d)); }
   // bound layers: offsets from the template; the category graphic is fine-tuned per category
   const g = newLayer("graphic");
-  assert.deepEqual(resolve(g, 1920, 1080, land.key, "c1"), { dx: 0, dy: 0, s: 1, r: 0 });
+  assert.deepEqual(resolve(g, 1920, 1080, land.key, "c1"), { dx: 0, dy: 0, s: 1, r: 0, kx: 1, ky: 1 });
   adjust(g, { ...land, catId: "c1" }, "size", { ddx: 40 });
   assert.equal(resolve(g, 1920, 1080, land.key, "c1").dx, 40);
   assert.equal(resolve(g, 1920, 1080, land.key, "c2").dx, 0);
   adjust(g, { ...land, catId: "c2" }, "all", { ddx: 192 });
   assert.ok(Math.abs(resolve(g, 1920, 1080, land.key, "c1").dx - 232) < 1e-6);
+});
+
+test("stretch: sides change one axis, everywhere or for one size", () => {
+  const land = { vw: 1920, vh: 1080, key: "1920x1080" }, t = newLayer("title");
+  adjust(t, land, "all", { kx: 1.5 });
+  adjust(t, land, "size", { ky: 0.5, kx: 2 });
+  assert.deepEqual([resolve(t, 1920, 1080, land.key).kx, resolve(t, 1920, 1080, land.key).ky], [3, 0.5]);
+  assert.deepEqual([resolve(t, 1080, 1920, "1080x1920").kx, resolve(t, 1080, 1920, "1080x1920").ky], [1.5, 1]);
+  const back = normalizeLayers([JSON.parse(JSON.stringify(t))]).find((l) => l.id === "title");
+  assert.equal(back.t.all.kx, 1.5); assert.deepEqual(back.t.by[land.key], { dx: 0, dy: 0, s: 1, r: 0, kx: 2, ky: 0.5 });
+  assert.equal(normalizeLayers([{ type: "title", t: { all: { x: 0.1 } } }]).find((l) => l.id === "title").t.all.kx, 1);   // older files
 });
 
 test("layer order: insert above the selection, the background never moves", () => {
@@ -145,7 +156,8 @@ test("layer order: insert above the selection, the background never moves", () =
   const copy = duplicate(s);
   assert.notEqual(copy.id, s.id); assert.deepEqual(copy.ref, s.ref);
   assert.equal(duplicate(ls[0]), null);                              // bound layers cannot be duplicated
-  assert.equal(isPickable(ls.find((l) => l.id === "accent")), false);
+  assert.equal(isPickable(ls.find((l) => l.id === "frame")), false);    // pinned to the canvas corners
+  assert.equal(isPickable(ls.find((l) => l.id === "accent")), true);    // the colour block can be dragged like the rest
   assert.equal(isPickable(s), true); s.locked = true; assert.equal(isPickable(s), false);
 });
 
@@ -156,6 +168,13 @@ test("the sticker pack has 50 uniquely named stickers in known groups", async ()
   assert.equal(new Set(STICKERS.map((s) => s.id)).size, 50);
   const groups = new Set(STICKER_GROUPS.map((g) => g.id));
   for (const s of STICKERS) { assert.ok(groups.has(s.group), s.id); assert.ok(s.name.zh && s.name.en && /^#[0-9a-f]{6}$/i.test(s.color), s.id); }
+});
+
+test("the graphic library has 20 uniquely named category graphics", async () => {
+  const { GRAPHICS } = await import("../ui/js/assets.js");
+  assert.equal(GRAPHICS.length, 20);
+  assert.equal(new Set(GRAPHICS.map((g) => g.id)).size, 20);
+  for (const g of GRAPHICS) assert.ok(g.name.zh && g.name.en && typeof g.draw === "function" && g.fit > 0, g.id);
 });
 
 test("every interface string has both languages", async () => {

@@ -2,6 +2,7 @@
 // An asset is referenced as {kind: "graphic" | "sticker" | "user", id}.
 import { GRAPHICS, drawGraphic, graphicRadius, rgb, INK } from "./cel.js";
 import { STICKERS, STICKER_GROUPS, stickerById, drawSticker } from "./stickers.js";
+import "./graphics.js";   // registers the extra category graphics
 
 export { GRAPHICS, STICKERS, STICKER_GROUPS };
 

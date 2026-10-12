@@ -10,9 +10,9 @@ category and type the title. SmedCover renders the cover in every size you need 
 ## Features
 
 - **Two modes** — *Setup* for what you configure once (brand, categories, output sizes, export defaults, fonts) and *Edit* for what you do per video (cover, assets, style, layers).
-- **Collage editing with layers** — every part of a cover is a layer: background, colour block, category graphic, brand row, title, tag, category name. Select, drag, resize, rotate, hide, lock, re-order and set opacity; add stickers, your own images and extra text on top. New items go in directly above the selected layer.
+- **Collage editing with layers** — every part of a cover is a layer: background, colour block, category graphic, brand row, title, tag, category name. Select and drag any of them; corner handles resize, side handles stretch, the top knob rotates; hide, lock, re-order and set opacity; add stickers, your own images and extra text on top. New items go in directly above the selected layer.
 - **One collage, every size** — a layer's placement is stored relative to the canvas, so it maps to every output size at once. Switch to "This size only" to fine-tune a single size.
-- **Asset library** — five cel-shaded category graphics that follow the category colour, a free pack of 50 stickers (badges, bubbles, arrows, marks, symbols, word stickers, everyday objects), eleven shapes for the colour block and its dividing edge, and your own uploads (PNG / SVG / JPG / WebP).
+- **Asset library** — twenty cel-shaded category graphics that follow the category colour, a free pack of 50 stickers (badges, bubbles, arrows, marks, symbols, word stickers, everyday objects), eleven shapes for the colour block and its dividing edge, and your own uploads (PNG / SVG / JPG / WebP).
 - **Profiles** — brand name, any number of categories with a colour and a graphic, plus a default design. Keep several, import and export them as JSON (uploaded assets travel with the file).
 - **Three templates** — *Stack*, *Split*, *Banner*; dark or light. Any pixel size: presets for common platforms or custom width × height.
 - **Title as the hero** — one typed line is one line on the cover; the size is fitted automatically. Wrap words in `*asterisks*` to colour them.
@@ -48,7 +48,8 @@ ui/                    static front end — plain ES modules, no bundler
   js/layout.js         geometry for any aspect ratio and template (pure)
   js/assets.js         asset library: graphics, stickers, uploads
   js/stickers.js       the 50 built-in stickers, drawn in code
-  js/cel.js            cel-shading kit and the category graphics
+  js/cel.js            cel-shading kit and the first five category graphics
+  js/graphics.js       fifteen more category graphics
   js/title.js          title parsing and fitting
   js/photo.js          background photo and cached gaussian blur
   js/store.js          data model, validation, persistence
@@ -72,9 +73,9 @@ SmedCover 是一个给视频频道批量做封面的桌面应用。先把品牌�
 只要选类目、写标题，就能同时得到所有需要的尺寸。
 
 - **两个入口**：「配置」放一次性设置（品牌与类目、尺寸与导出、字体），「编辑」放每条视频都要做的事（封面、资产、样式、图层）。
-- **图层式拼贴**：封面上的每个部分都是图层，可以选中、拖动、缩放、旋转、隐藏、锁定、调整层级和不透明度；还能叠加贴纸、自己的图片和额外文字，新素材加在当前选中图层的上方。
+- **图层式拼贴**：封面上的每个部分都是图层，都可以选中拖动，拖四角缩放、拖四边拉伸、拖顶部圆点旋转，还能隐藏、锁定、调整层级和不透明度；还能叠加贴纸、自己的图片和额外文字，新素材加在当前选中图层的上方。
 - **一处拼贴，所有尺寸**：图层位置按相对比例保存，自动映射到每个输出尺寸；切到「仅此尺寸」可以单独微调。
-- **资产库**：五个跟随类目主色的赛璐珞图形、50 个免费贴纸、11 种色块与分界线形状，以及自己上传的素材。
+- **资产库**：20 个跟随类目主色的赛璐珞图形、50 个免费贴纸、11 种色块与分界线形状，以及自己上传的素材。
 - **档案**：品牌名、任意数量的类目和一套默认设计；可保存多套并导入导出。
 - **三套版式**、深浅两种底色、任意像素尺寸。
 - **标题是主角**：输入的一行就是封面上的一行，字号自动适配；用 `*星号*` 标出强调色。

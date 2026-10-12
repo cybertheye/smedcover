@@ -920,4 +920,11 @@ export function drawGraphic(ctx, id, cx, cy, s, color, opts = {}) {
   ctx.setLineDash([]);
 }
 
+/** Adds graphics to the library (see graphics.js). Each: {id, draw(ctx, t, {c}), at, fit, name:{zh,en}}. */
+export function registerGraphics(list) {
+  for (const g of list) if (!BY_ID.has(g.id)) { GRAPHICS.push(g); BY_ID.set(g.id, g); }
+}
+
 export { clamp, lerp, rgb, mixc, BLK, WHT, tone, toneField, spaced, spacedW, para, brackets };
+// building blocks for graphics defined in other modules
+export { TAU, OC, OBJ_PAL, rot, box, prism, octa, drawPieces, path3, circ3, rect3, groundShadow };

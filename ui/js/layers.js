@@ -8,6 +8,7 @@
 //   t.all  applies to all sizes, stored as fractions of the canvas, so a layer keeps its relative
 //          position from 16:9 to 9:16.  For free layers x/y are the position of the centre; for
 //          bound layers they are an offset from where the template puts the element.
+//          s is the overall size, kx / ky stretch it horizontally / vertically, r is degrees.
 //   t.by   optional per-size fine-tuning in virtual pixels, keyed by "1920x1080". The category
 //          graphic may also be tuned per category, keyed by "1920x1080@<category id>".
 
@@ -17,7 +18,7 @@ export const FREE_TYPES = ["asset", "text"];
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes"];
 export const isFree = (type) => FREE_TYPES.includes(type);
 /** Layers that can be grabbed on the canvas (the others are selected from the layer list only). */
-export const isPickable = (layer) => layer.visible && !layer.locked && layer.type !== "accent" && layer.type !== "frame";
+export const isPickable = (layer) => layer.visible && !layer.locked && layer.type !== "frame";
 
 const PROPS = {
   bg: { grid: true, blur: 0, dim: 0 },
@@ -35,13 +36,13 @@ const LOOKS = ["title", "plain", "plate"], COLORS = ["white", "accent", "ink"];
 
 const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(hi, Math.max(lo, Number(v))) : d);
 const uid = () => "l" + Math.random().toString(36).slice(2, 9);
-const IDENTITY_BY = { dx: 0, dy: 0, s: 1, r: 0 };
+const IDENTITY_BY = { dx: 0, dy: 0, s: 1, r: 0, kx: 1, ky: 1 };
 
 export function newLayer(type, extra = {}) {
   const free = isFree(type);
   return {
     id: free ? uid() : type, type, visible: true, locked: false, o: 1,
-    t: { all: free ? { x: 0.5, y: 0.42, s: 0.35, r: 0 } : { x: 0, y: 0, s: 1, r: 0 }, by: {} },
+    t: { all: free ? { x: 0.5, y: 0.42, s: 0.35, r: 0, kx: 1, ky: 1 } : { x: 0, y: 0, s: 1, r: 0, kx: 1, ky: 1 }, by: {} },
     ...PROPS[type], ...extra,
   };
 }
@@ -51,10 +52,10 @@ function normalizeT(raw, free) {
   const a = (raw && raw.all) || {}, by = {};
   for (const [k, v] of Object.entries((raw && raw.by) || {})) {
     if (!v || typeof v !== "object") continue;
-    const e = { dx: num(v.dx, 0, -9000, 9000), dy: num(v.dy, 0, -9000, 9000), s: num(v.s, 1, 0.05, 20), r: num(v.r, 0, -360, 360) };
-    if (e.dx || e.dy || e.s !== 1 || e.r) by[k] = e;
+    const e = { dx: num(v.dx, 0, -9000, 9000), dy: num(v.dy, 0, -9000, 9000), s: num(v.s, 1, 0.05, 20), r: num(v.r, 0, -360, 360), kx: num(v.kx, 1, 0.05, 20), ky: num(v.ky, 1, 0.05, 20) };
+    if (e.dx || e.dy || e.s !== 1 || e.r || e.kx !== 1 || e.ky !== 1) by[k] = e;
   }
-  return { all: { x: num(a.x, free ? 0.5 : 0, -3, 3), y: num(a.y, free ? 0.42 : 0, -3, 3), s: num(a.s, free ? 0.35 : 1, 0.02, 20), r: num(a.r, 0, -360, 360) }, by };
+  return { all: { x: num(a.x, free ? 0.5 : 0, -3, 3), y: num(a.y, free ? 0.42 : 0, -3, 3), s: num(a.s, free ? 0.35 : 1, 0.02, 20), r: num(a.r, 0, -360, 360), kx: num(a.kx, 1, 0.05, 20), ky: num(a.ky, 1, 0.05, 20) }, by };
 }
 function normalizeLayer(raw) {
   if (!raw || typeof raw !== "object" || !(raw.type in PROPS)) return null;
@@ -111,17 +112,18 @@ export const writeKey = (layer, key, catId) => (layer.type === "graphic" && catI
  * Final placement of a layer on a virtual canvas of vw x vh.
  * Free layers: {cx, cy} centre, s scale (1 = a 600-unit asset on a 1080-high canvas), r degrees.
  * Bound layers: {dx, dy} offset from the template position, s scale multiplier, r degrees.
+ * Both also carry kx / ky, the horizontal / vertical stretch.
  */
 export function resolve(layer, vw, vh, key, catId) {
   const a = layer.t.all, b = layer.t.by[byKey(layer, key, catId)] || IDENTITY_BY;
-  const r = a.r + b.r;
-  if (isFree(layer.type)) return { cx: a.x * vw + b.dx, cy: a.y * vh + b.dy, s: a.s * b.s * (Math.min(vw, vh) / 1080), r };
-  return { dx: a.x * vw + b.dx, dy: a.y * vh + b.dy, s: a.s * b.s, r };
+  const r = a.r + b.r, kx = a.kx * b.kx, ky = a.ky * b.ky;
+  if (isFree(layer.type)) return { cx: a.x * vw + b.dx, cy: a.y * vh + b.dy, s: a.s * b.s * (Math.min(vw, vh) / 1080), r, kx, ky };
+  return { dx: a.x * vw + b.dx, dy: a.y * vh + b.dy, s: a.s * b.s, r, kx, ky };
 }
 
 /**
  * Applies an edit. scope "all" changes every size (fractions); scope "size" changes only `key`.
- * patch: {ddx, ddy} move in virtual px, {scale} multiply, {rot} add degrees.
+ * patch: {ddx, ddy} move in virtual px, {scale} multiply, {kx, ky} stretch (multiply), {rot} add degrees.
  */
 export function adjust(layer, { vw, vh, key, catId }, scope, patch) {
   const lim = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -131,6 +133,8 @@ export function adjust(layer, { vw, vh, key, catId }, scope, patch) {
     if (patch.ddy) a.y = lim(a.y + patch.ddy / vh, -3, 3);
     if (patch.scale) a.s = lim(a.s * patch.scale, 0.02, 20);
     if (patch.rot) a.r = lim(a.r + patch.rot, -360, 360);
+    if (patch.kx) a.kx = lim(a.kx * patch.kx, 0.05, 20);
+    if (patch.ky) a.ky = lim(a.ky * patch.ky, 0.05, 20);
     return;
   }
   const k = writeKey(layer, key, catId);
@@ -140,6 +144,8 @@ export function adjust(layer, { vw, vh, key, catId }, scope, patch) {
   if (patch.ddy) b.dy += patch.ddy;
   if (patch.scale) b.s = lim(b.s * patch.scale, 0.05, 20);
   if (patch.rot) b.r = lim(b.r + patch.rot, -360, 360);
+  if (patch.kx) b.kx = lim(b.kx * patch.kx, 0.05, 20);
+  if (patch.ky) b.ky = lim(b.ky * patch.ky, 0.05, 20);
 }
 /** Clears placement edits: scope "size" drops this size's fine-tuning, "all" restores the default. */
 export function resetPlacement(layer, scope, key, catId) {

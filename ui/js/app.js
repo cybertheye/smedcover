@@ -2,7 +2,7 @@
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
 import { virtualSize } from "./layout.js";
-import { drawCover, sizeKey, hexToRgb, hitAt, paintAccent } from "./render.js";
+import { drawCover, sizeKey, hexToRgb, hitAt, paintAccent, handles } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
@@ -16,7 +16,7 @@ import {
 
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
-const FIXED = ["accent", "frame"];        // layers that follow the template and cannot be moved
+const FIXED = ["frame"];                  // layers that follow the template and cannot be moved
 
 /** Tiny element builder: el("div", {class:"x", onclick}, child, "text"). */
 function el(tag, props = {}, ...kids) {
@@ -245,15 +245,54 @@ function layerAt(e) {
   if (!cv._hits) return null;
   const p = virtualPoint(e), ok = (h) => { const L = layer(h.id); return h.type !== "bg" && L && isPickable(L); };
   // the selected layer keeps the grab even when something sits on top of it
-  const mine = cv._hits.find((h) => h.id === S.layerId && ok(h));
-  const hit = (mine && hitAt([mine], p.x, p.y)) || hitAt(cv._hits, p.x, p.y, ok);
+  // the topmost layer wins, except that the selected layer keeps the grab under anything at least as big
+  // (so a sticker placed over the title stays reachable, and so does a small layer sitting on a big selected one)
+  const top = hitAt(cv._hits, p.x, p.y, ok), sel = cv._hits.find((h) => h.id === S.layerId && ok(h));
+  const mine = sel && hitAt([sel], p.x, p.y), area = (h) => h.hw * h.hh;
+  const hit = mine && (!top || top.id === mine.id || area(top) >= area(mine)) ? mine : top;
   return hit ? layer(hit.id) : layer("bg");
 }
 {
   const cv = $("cv");
-  cv.addEventListener("pointermove", (e) => { if (!e.buttons && S.mode === "edit") { const L = layerAt(e); cv.style.cursor = !L || L.type === "bg" ? (S.photo ? "move" : "default") : "grab"; } });
+  const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize", nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize" };
+  /** The pointer in the selected layer's own rotated frame, plus the handle under it (if any). */
+  function grip(e) {
+    const L = layer(), hit = cv._hits && cv._hits.find((h) => h.id === S.layerId);
+    if (!L || !hit || L.locked || L.type === "bg" || FIXED.includes(L.type)) return null;
+    const p = virtualPoint(e), a = (-hit.r * Math.PI) / 180, dx = p.x - hit.cx, dy = p.y - hit.cy;
+    const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+    const handle = handles(hit, p.k).find((h) => Math.hypot(lx - h.lx, ly - h.ly) <= 11 * p.k);
+    return { L, hit, p, lx, ly, handle: handle ? handle.id : null };
+  }
+  cv.addEventListener("pointermove", (e) => {
+    if (e.buttons || S.mode !== "edit") return;
+    const g = grip(e);
+    if (g && g.handle) { cv.style.cursor = CURSOR[g.handle]; return; }
+    const L = layerAt(e);
+    cv.style.cursor = !L || L.type === "bg" ? (S.photo ? "move" : "default") : "grab";
+  });
   cv.addEventListener("pointerdown", (e) => {
     if (S.mode !== "edit") return;
+    const done = (moved) => () => { cv.onpointermove = null; if (moved()) renderSide(); };
+    const g = grip(e);
+    if (g && g.handle) {   // a handle of the selected layer: corners resize, sides stretch, the knob rotates
+      const { L, hit, handle } = g, min = 6 * g.p.k;
+      let moved = false, prev = { ang: Math.atan2(g.p.y - hit.cy, g.p.x - hit.cx), dist: Math.max(min, Math.hypot(g.lx, g.ly)), lx: Math.max(min, Math.abs(g.lx)), ly: Math.max(min, Math.abs(g.ly)) };
+      cv.setPointerCapture(e.pointerId);
+      cv.onpointermove = (m) => {
+        const q = grip(m);
+        if (!q) return;
+        const now = { ang: Math.atan2(q.p.y - hit.cy, q.p.x - hit.cx), dist: Math.max(min, Math.hypot(q.lx, q.ly)), lx: Math.max(min, Math.abs(q.lx)), ly: Math.max(min, Math.abs(q.ly)) };
+        moved = true;
+        if (handle === "rot") { let d = ((now.ang - prev.ang) * 180) / Math.PI; d = ((d + 540) % 360) - 180; edit(L, { rot: m.shiftKey ? Math.round(d) : d }); }
+        else if (handle.length === 2) edit(L, { scale: now.dist / prev.dist });
+        else if (handle === "e" || handle === "w") edit(L, { kx: now.lx / prev.lx });
+        else edit(L, { ky: now.ly / prev.ly });
+        prev = now;
+      };
+      cv.onpointerup = cv.onpointercancel = done(() => moved);
+      return;
+    }
     const L = layerAt(e);
     if (!L) return;
     selectLayer(L.id);
@@ -261,7 +300,7 @@ function layerAt(e) {
     let last = virtualPoint(e), moved = false;
     cv.setPointerCapture(e.pointerId);
     cv.onpointermove = (m) => { const p = virtualPoint(m); moved = true; edit(L, { ddx: p.x - last.x, ddy: p.y - last.y }); last = p; };
-    cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; if (moved) renderSide(); };
+    cv.onpointerup = cv.onpointercancel = done(() => moved);
   });
   cv.addEventListener("wheel", (e) => {
     if (S.mode !== "edit") return;
@@ -517,7 +556,7 @@ function placementControls(L) {
   if (FIXED.includes(L.type)) return el("div", { class: "hint", style: "margin:0" }, t("props.fixedHint"));
   if (L.type === "bg" && !S.photo) return null;
   const f = frame(), all = S.settings.scope === "all", free = isFree(L.type), noRot = L.type === "bg";
-  const b = { dx: 0, dy: 0, s: 1, r: 0, ...L.t.by[writeKey(L, f.key, f.catId)] };
+  const b = { dx: 0, dy: 0, s: 1, r: 0, kx: 1, ky: 1, ...L.t.by[writeKey(L, f.key, f.catId)] };
   const setAll = (k, v) => { L.t.all[k] = v; touch({ cover: true }); };
   const setBy = (k, v) => { L.t.by[writeKey(L, f.key, f.catId)] = { ...b, ...L.t.by[writeKey(L, f.key, f.catId)], [k]: v }; touch({ cover: true }); };
   const lo = free ? 0 : -1, hi = free ? 1 : 1;
@@ -526,12 +565,14 @@ function placementControls(L) {
       slider("props.x", lo, hi, 0.002, L.t.all.x, pct, (v) => setAll("x", v)),
       slider("props.y", lo, hi, 0.002, L.t.all.y, pct, (v) => setAll("y", v)),
       slider("props.s", free ? 0.03 : 0.2, free ? 2.5 : 4, 0.01, L.t.all.s, times, (v) => setAll("s", v)),
-      !noRot && slider("props.r", -180, 180, 1, L.t.all.r, deg, (v) => setAll("r", v)),
+      !noRot && [slider("props.kx", 0.2, 4, 0.01, L.t.all.kx, times, (v) => setAll("kx", v)), slider("props.ky", 0.2, 4, 0.01, L.t.all.ky, times, (v) => setAll("ky", v)),
+        slider("props.r", -180, 180, 1, L.t.all.r, deg, (v) => setAll("r", v))],
     ] : [
       slider("props.x", -1500, 1500, 2, b.dx, px, (v) => setBy("dx", v)),
       slider("props.y", -1500, 1500, 2, b.dy, px, (v) => setBy("dy", v)),
       slider("props.s", 0.2, 4, 0.01, b.s, times, (v) => setBy("s", v)),
-      !noRot && slider("props.r", -180, 180, 1, b.r, deg, (v) => setBy("r", v)),
+      !noRot && [slider("props.kx", 0.2, 4, 0.01, b.kx, times, (v) => setBy("kx", v)), slider("props.ky", 0.2, 4, 0.01, b.ky, times, (v) => setBy("ky", v)),
+        slider("props.r", -180, 180, 1, b.r, deg, (v) => setBy("r", v))],
     ],
     el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { resetPlacement(L, S.settings.scope, f.key, f.catId); touch({ cover: true, side: true }); } }, `${t("props.reset")} · ${t("scope." + S.settings.scope)}`),
   ];
@@ -749,7 +790,7 @@ function syncTop() {
       [["zh", "中文"], ["en", "English"]].map(([v, l]) => el("option", { value: v, selected: v === getLang() }, l))));
   document.body.dataset.drop = t("msg.dropHere");
 }
-const TABS = { edit: { cover: coverTab, assets: assetsTab, style: styleTab }, setup: { brand: brandTab, sizes: sizesTab, fonts: fontsTab } };
+const TABS = { edit: { cover: coverTab, style: styleTab, assets: assetsTab }, setup: { brand: brandTab, sizes: sizesTab, fonts: fontsTab } };
 function syncTabs() {
   $("tabs").replaceChildren(...Object.keys(TABS[S.mode]).map((k) => el("button", { class: k === S.tab[S.mode] ? "on" : "", onclick: () => { S.tab[S.mode] = k; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, t("tab." + k))));
 }
