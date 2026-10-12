@@ -1,0 +1,24 @@
+[package]
+name = "smedcover"
+version = "0.1.0"
+description = "Branded cover-image generator for video channels"
+edition = "2021"
+
+[lib]
+name = "smedcover_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+fontdb = "0.23"

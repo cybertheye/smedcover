@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SmedCover</title>
+<style>
+  /* Bundled open fonts (SIL OFL, see fonts/OFL-*.txt) so covers look the same on every platform. */
+  @font-face{font-family:"Noto Sans SC";src:url("fonts/NotoSansSC.ttf");font-weight:100 900;font-display:block}
+  @font-face{font-family:"Bebas Neue";src:url("fonts/BebasNeue-Regular.ttf");font-weight:100 900;font-display:block}
+  @font-face{font-family:"JetBrains Mono";src:url("fonts/JetBrainsMono.ttf");font-weight:100 800;font-display:block}
+
+  :root{--bg:#0a0a12;--panel:#14141f;--line:#2a2a3c;--line2:#44445a;--ink:#07070c;--acc:#fcee0a;
+        --ui:"Noto Sans SC",-apple-system,"Segoe UI",sans-serif;--mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:#fff;font-family:var(--ui);font-size:14px;overflow:hidden}
+  button,input,select,textarea{font:inherit;color:inherit}
+  .app{display:grid;grid-template-rows:auto 1fr;height:100vh}
+
+  /* top bar */
+  header{display:flex;align-items:center;gap:16px;padding:9px 18px;border-bottom:2px solid var(--line);flex-wrap:wrap}
+  header h1{font:400 28px "Bebas Neue",sans-serif;letter-spacing:.08em;margin:0 4px 0 0}
+  .grp{display:flex;align-items:center;gap:6px}
+  .grp>span{font:600 11px var(--mono);letter-spacing:.12em;opacity:.55;text-transform:uppercase;margin-right:2px;white-space:nowrap}
+  .spacer{flex:1}
+  .btn{border:2px solid var(--line2);background:transparent;padding:6px 11px;cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap}
+  .btn:hover:not(:disabled){border-color:#fff}
+  .btn:disabled{opacity:.3;cursor:default}
+  .btn.on{background:#fff;color:var(--ink);border-color:#fff}
+  .btn.solid{background:#fff;color:var(--ink);border-color:#fff;box-shadow:4px 4px 0 var(--acc)}
+  .btn.wide{width:100%;padding:11px}
+  .seg{display:flex}
+  .seg .btn+.btn{border-left:0}
+  .seg.big .btn{padding:8px 20px;font-size:15px}
+  header select{background:var(--panel);border:2px solid var(--line);padding:6px 8px;max-width:180px}
+
+  /* body: tools | canvas | layers. Side columns scroll on their own; the canvas always stays in view. */
+  .body{display:grid;grid-template-columns:372px minmax(0,1fr) 320px;min-height:0}
+  .body.setup{grid-template-columns:420px minmax(0,1fr)}
+  .body.setup #right{display:none}
+  aside{display:flex;flex-direction:column;min-height:0}
+  #left{border-right:2px solid var(--line)}
+  #right{border-left:2px solid var(--line)}
+  .tabs{display:flex}
+  .tabs button{flex:1;border:0;border-bottom:3px solid transparent;background:transparent;padding:12px 4px;cursor:pointer;font-weight:600;opacity:.55}
+  .tabs button.on{opacity:1;border-bottom-color:var(--acc)}
+  .scroll{overflow-y:auto;min-height:0;padding:16px 14px 40px;display:flex;flex-direction:column;gap:16px;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#55556e var(--panel)}
+  .scroll>*{flex:none}
+  .scroll::-webkit-scrollbar{width:10px}
+  .scroll::-webkit-scrollbar-track{background:var(--panel)}
+  .scroll::-webkit-scrollbar-thumb{background:#55556e;border:2px solid var(--panel)}
+
+  label.cap,.cap{display:block;font:600 11px var(--mono);letter-spacing:.12em;opacity:.6;margin-bottom:8px;text-transform:uppercase}
+  input[type=text],input[type=number],textarea,select{width:100%;background:var(--panel);border:2px solid var(--line);padding:9px;border-radius:0}
+  textarea{height:100px;resize:vertical;font-size:16px}
+  input:focus,textarea:focus,select:focus{outline:none;border-color:#fff}
+  .hint{font-size:12px;opacity:.5;line-height:1.7;margin-top:6px}
+  .box{border:2px solid var(--line);padding:12px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chips button{border:2px solid var(--c,#fff);background:transparent;color:var(--c,#fff);padding:8px 12px;cursor:pointer;font-weight:600;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chips button.on{background:var(--c,#fff);color:var(--ink)}
+  .sl{display:grid;grid-template-columns:52px 1fr 52px;align-items:center;gap:8px;margin-top:10px;font-size:13px}
+  .sl input{accent-color:var(--acc);width:100%}
+  .sl output{font:600 12px var(--mono);text-align:right;opacity:.8}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+  .row3{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end}
+  .chk{display:flex;align-items:center;gap:10px;cursor:pointer;margin:8px 0}
+  .chk input{width:17px;height:17px;accent-color:var(--acc);flex:none}
+  .card{border:2px solid var(--line);border-left:8px solid var(--c);padding:12px;display:grid;gap:8px}
+  .card .head{display:grid;grid-template-columns:44px 1fr;gap:8px}
+  .card input[type=color]{width:44px;height:40px;padding:2px;background:var(--panel);border:2px solid var(--line);cursor:pointer}
+  .card .two{display:grid;grid-template-columns:1fr 110px;gap:8px}
+  .card .acts,.acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+  .acts .btn{padding:4px 9px;font-size:12px}
+  .sizes .chk{margin:6px 0;font-family:var(--mono);font-size:13px}
+  .sizes .chk span{opacity:.5;margin-left:auto}
+  .dl{display:grid;gap:8px}
+
+  /* asset tiles */
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .tile{position:relative;aspect-ratio:1;border:2px solid var(--line);background:#1b1b2a;cursor:pointer;padding:0;display:grid;place-items:center}
+  .tile:hover{border-color:#fff}
+  .tile canvas{width:100%;height:100%;display:block;pointer-events:none}
+  .tile .x{position:absolute;top:-8px;right:-8px;width:22px;height:22px;border:2px solid #fff;background:var(--ink);color:#fff;font-size:12px;line-height:1;cursor:pointer;padding:0;display:none}
+  .tile:hover .x{display:block}
+
+  /* canvas column */
+  #center{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;min-width:0}
+  #toolbar{display:flex;align-items:center;gap:14px;padding:10px 18px;border-bottom:2px solid var(--line);flex-wrap:wrap}
+  #toolbar .name{font:600 13px var(--mono);letter-spacing:.06em}
+  #toolbar .hint{margin:0}
+  #stage{min-height:0;min-width:0;display:grid;place-items:center;padding:18px;overflow:hidden;background:#06060b}
+  #stage canvas{display:block;touch-action:none;box-shadow:0 0 0 2px var(--line2)}
+  #stage.alpha canvas{background:repeating-conic-gradient(#3a3a48 0% 25%,#24242e 0% 50%) 0 0/20px 20px}
+  #strip{display:flex;gap:14px;padding:12px 18px;border-top:2px solid var(--line);overflow-x:auto;align-items:flex-end}
+  #strip figure{margin:0;cursor:pointer;outline:2px solid transparent;outline-offset:4px;flex:none}
+  #strip figure.on{outline-color:var(--acc)}
+  #strip canvas{display:block;height:84px;width:auto;background:#000}
+  #strip.alpha canvas{background:repeating-conic-gradient(#3a3a48 0% 25%,#24242e 0% 50%) 0 0/12px 12px}
+  #strip figcaption{font:600 10px var(--mono);opacity:.5;margin-top:5px;white-space:nowrap}
+
+  /* layers */
+  .layers{display:grid;gap:3px}
+  .layer{display:grid;grid-template-columns:26px 26px 1fr;align-items:center;gap:4px;border:2px solid var(--line);background:var(--panel);padding:3px 6px 3px 3px;cursor:pointer;user-select:none}
+  .layer.on{border-color:var(--acc)}
+  .layer.over{box-shadow:0 -3px 0 var(--acc)}
+  .layer.hidden .nm{opacity:.35}
+  .layer .ic{border:0;background:transparent;width:26px;height:26px;cursor:pointer;font-size:14px;opacity:.85;padding:0}
+  .layer .ic.off{opacity:.25}
+  .layer .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+  .layer .ty{font:600 10px var(--mono);opacity:.45;margin-left:6px}
+
+  #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#fff;color:var(--ink);padding:12px 22px;font-weight:600;box-shadow:6px 6px 0 var(--acc);opacity:0;pointer-events:none;transition:opacity .2s;z-index:50;max-width:80vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #toast.on{opacity:1}
+  body.drop::after{content:attr(data-drop);position:fixed;inset:12px;border:3px dashed var(--acc);background:rgba(10,10,18,.82);display:grid;place-items:center;font-size:28px;letter-spacing:.2em;z-index:45;pointer-events:none}
+  #modal{position:fixed;inset:0;background:rgba(5,5,10,.86);display:grid;place-items:center;z-index:40}
+  #modal[hidden]{display:none}
+  #modal .dlg{width:min(540px,92vw);max-height:88vh;overflow:auto;background:var(--bg);border:3px solid #fff;box-shadow:12px 12px 0 var(--acc);padding:26px;display:grid;gap:14px}
+  #modal h2{font:400 34px "Bebas Neue",var(--ui);letter-spacing:.06em;margin:0}
+  @media(max-width:1100px){html,body{overflow:auto}.app{height:auto}.body,.body.setup{grid-template-columns:1fr}aside{border:0!important}.scroll{overflow:visible}#stage{height:60vh}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header id="top"></header>
+  <div class="body" id="body">
+    <aside id="left">
+      <nav class="tabs" id="tabs"></nav>
+      <div class="scroll" id="panel"></div>
+    </aside>
+    <section id="center">
+      <div id="toolbar"></div>
+      <div id="stage"><canvas id="cv"></canvas></div>
+      <div id="strip"></div>
+    </section>
+    <aside id="right"><div class="scroll" id="side"></div></aside>
+  </div>
+</div>
+<div id="toast"></div>
+<div id="modal" hidden></div>
+<input type="file" id="file" hidden>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

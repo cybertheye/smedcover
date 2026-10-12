@@ -1,0 +1,810 @@
+// SmedCover UI. Two modes: Edit (cover content, assets, style + the layer stack) and Setup (brand,
+// sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
+import { fonts, clamp } from "./cel.js";
+import { virtualSize } from "./layout.js";
+import { drawCover, sizeKey, hexToRgb, hitAt } from "./render.js";
+import { csvToJobs } from "./csv.js";
+import { t, setLang, getLang, detectLang } from "./i18n.js";
+import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
+import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
+import { newLayer, isFree, isPickable, adjust, resetPlacement, writeKey, insertAbove, moveLayer, duplicate } from "./layers.js";
+import {
+  native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
+  deleteAssetRecord, usedUserAssets, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName,
+} from "./store.js";
+
+const $ = (id) => document.getElementById(id);
+const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
+const FIXED = ["accent", "frame"];        // layers that follow the template and cannot be moved
+
+/** Tiny element builder: el("div", {class:"x", onclick}, child, "text"). */
+function el(tag, props = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (v == null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k === "style") e.style.cssText = v;
+    else if (k === "dataset") Object.assign(e.dataset, v);
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k in e) e[k] = v;
+    else e.setAttribute(k, v);
+  }
+  for (const c of kids.flat(Infinity)) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return e;
+}
+
+// ---------- state
+const S = {
+  settings: normalizeSettings(null),
+  profiles: [], profile: null, cover: null,
+  photo: null, photoSrc: "",             // decoded background Image + its data URL
+  importedFonts: [], systemFonts: [],
+  mode: "edit", tab: { edit: "cover", setup: "brand" },
+  sel: "",                               // size key shown on the main canvas
+  layerId: "title",                      // selected layer
+  hist: [], histIdx: -1,
+};
+const cat = () => S.profile.categories.find((c) => c.id === S.cover.catId) || S.profile.categories[0];
+const catIndex = () => Math.max(0, S.profile.categories.indexOf(cat()));
+const selSize = () => S.profile.sizes.find((s) => sizeKey(s) === S.sel) || S.profile.sizes[0];
+const sizeLabel = (s) => (s.label ? `${s.label} · ` : "") + `${s.w}×${s.h}`;
+const layer = (id = S.layerId) => S.cover.layers.find((l) => l.id === id) || null;
+/** Geometry context of the size on the main canvas, as the layer maths wants it. */
+const frame = () => { const s = selSize(), [vw, vh] = virtualSize(s.w, s.h); return { vw, vh, key: sizeKey(s), catId: cat().id }; };
+function layerName(L) {
+  if (L.type === "asset") return assetExists(L.ref) ? assetName(L.ref, getLang()) : t("assets.missing");
+  if (L.type === "text") return L.text.split("\n")[0].replace(/\*/g, "").slice(0, 16) || t("layer.text");
+  return t("layer." + L.type);
+}
+
+let toastTimer;
+function toast(msg, sticky = false) {
+  const n = $("toast");
+  n.textContent = msg; n.classList.add("on");
+  clearTimeout(toastTimer);
+  if (!sticky) toastTimer = setTimeout(() => n.classList.remove("on"), 3400);
+}
+const fail = (e) => toast(t("msg.failed", e && e.message ? e.message : String(e)));
+
+/** Opens the system file picker and resolves with the chosen files (empty when cancelled). */
+function pickFiles(accept, multiple = false) {
+  return new Promise((resolve) => {
+    const f = $("file");
+    f.accept = accept; f.multiple = multiple; f.value = "";
+    f.onchange = () => resolve([...f.files]);
+    f.click();
+  });
+}
+const pickFile = async (accept) => (await pickFiles(accept))[0] || null;
+const readAs = (file, how) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r[how](file); });
+const loadImage = (src) => new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; });
+
+// ---------- persistence (debounced) and undo history
+const timers = {};
+const later = (key, ms, fn) => { clearTimeout(timers[key]); timers[key] = setTimeout(fn, ms); };
+const persistProfile = () => later("profile", 400, () => saveProfile(S.profile).catch(fail));
+const persistCover = () => later("cover", 400, () => writeJson("session.json", S.cover).catch(fail));
+const persistSettings = () => later("settings", 400, () => writeJson("settings.json", S.settings).catch(fail));
+
+const snapshot = () => JSON.stringify({ p: S.profile, c: S.cover });
+function resetHistory() { S.hist = [snapshot()]; S.histIdx = 0; syncTop(); }
+function recordHistory() {
+  later("hist", 500, () => {
+    const snap = snapshot();
+    if (snap === S.hist[S.histIdx]) return;
+    S.hist = S.hist.slice(0, S.histIdx + 1);
+    S.hist.push(snap);
+    if (S.hist.length > 80) S.hist.splice(0, S.hist.length - 80);
+    S.histIdx = S.hist.length - 1;
+    syncTop();
+  });
+}
+async function timeTravel(step) {
+  clearTimeout(timers.hist);
+  const i = S.histIdx + step;
+  if (i < 0 || i >= S.hist.length) return;
+  S.histIdx = i;
+  const { p, c } = JSON.parse(S.hist[i]);
+  const profile = normalizeProfile(p);
+  S.profiles[S.profiles.findIndex((x) => x.id === S.profile.id)] = profile;
+  S.profile = profile;
+  S.cover = normalizeCover(c, profile);
+  await applyProfile();
+  persistProfile(); persistCover();
+}
+
+/**
+ * Call after any change. profile/cover: what to save; panel/side: rebuild the left tool panel /
+ * the layer column; strip: rebuild the thumbnail strip (sizes changed).
+ */
+function touch({ profile = false, cover = false, panel = false, side = false, strip = false } = {}) {
+  if (profile) persistProfile();
+  if (cover) persistCover();
+  if (strip) buildStrip();
+  if (panel) renderPanel();
+  if (side) renderSide();
+  queueDraw();
+  recordHistory();
+}
+
+// ---------- fonts and the profile
+const quoted = (name) => `"${String(name).replace(/["\\]/g, "")}"`;
+async function applyFonts() {
+  const f = S.profile.fonts;
+  fonts.cn = [f.body, "Noto Sans SC"].filter(Boolean).map(quoted).join(",") + ",sans-serif";
+  fonts.en = [f.display, "Bebas Neue"].filter(Boolean).map(quoted).join(",") + ",sans-serif";
+  await Promise.all([`900 40px ${fonts.cn}`, `700 40px ${fonts.en}`, `600 20px ${fonts.mono}`].map((spec) => document.fonts.load(spec, "封面Aa01").catch(() => null)));
+}
+async function registerFont(family, dataUrl) {
+  try {
+    const face = new FontFace(family, `url(${dataUrl})`);
+    await face.load();
+    document.fonts.add(face);
+    if (!S.importedFonts.includes(family)) S.importedFonts.push(family);
+    return true;
+  } catch (e) { return false; }
+}
+/** Everything that has to happen when S.profile / S.cover are replaced or restored. */
+async function applyProfile() {
+  S.cover = normalizeCover(S.cover, S.profile);
+  if (!S.profile.sizes.some((s) => sizeKey(s) === S.sel)) S.sel = sizeKey(S.profile.sizes[0]);
+  if (!layer()) S.layerId = "title";
+  await applyFonts();
+  syncTop(); syncTabs(); renderPanel(); renderSide(); buildStrip(); syncToolbar(); queueDraw();
+}
+
+// ---------- drawing: the main canvas every frame, the thumbnails a little later
+function paint(cv, size, pixelW, cover = S.cover, index = catIndex(), select = null) {
+  drawCover(cv, { profile: S.profile, catIndex: index, size, pixelW, cover, photo: S.photo, select });
+}
+function drawMain() {
+  const stage = $("stage"), cv = $("cv"), size = selSize(), [vw, vh] = virtualSize(size.w, size.h);
+  const k = Math.max(0.05, Math.min((stage.clientWidth - 36) / vw, (stage.clientHeight - 36) / vh));
+  cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
+  paint(cv, size, Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null);
+  const clear = !layer("bg").visible;
+  stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
+}
+function drawThumbs() {
+  for (const size of S.profile.sizes) { const cv = $("th-" + sizeKey(size)); if (cv) paint(cv, size, virtualSize(size.w, size.h)[0] * 0.2); }
+}
+let drawQueued = false;
+function flushDraw() { if (!drawQueued) return; drawQueued = false; drawMain(); later("thumbs", 140, drawThumbs); }
+/** Redraws at most once per frame, however many input events arrive. */
+function queueDraw() {
+  if (drawQueued) return;
+  drawQueued = true;
+  requestAnimationFrame(flushDraw);
+  setTimeout(flushDraw, 150);   // animation frames pause while the window is hidden
+}
+new ResizeObserver(() => S.profile && queueDraw()).observe($("stage"));
+
+function buildStrip() {
+  $("strip").replaceChildren(...S.profile.sizes.map((size) => {
+    const key = sizeKey(size);
+    return el("figure", { class: key === S.sel ? "on" : "", onclick: () => selectSize(key) }, el("canvas", { id: "th-" + key }), el("figcaption", {}, sizeLabel(size)));
+  }));
+}
+function selectSize(key) {
+  S.sel = key;
+  [...$("strip").children].forEach((f, i) => f.classList.toggle("on", sizeKey(S.profile.sizes[i]) === key));
+  syncToolbar(); renderSide(); queueDraw();
+}
+function syncToolbar() {
+  const scope = (v) => el("button", { class: "btn" + (S.settings.scope === v ? " on" : ""), onclick: () => { S.settings.scope = v; persistSettings(); syncToolbar(); renderSide(); } }, t("scope." + v));
+  $("toolbar").replaceChildren(...[el("span", { class: "name" }, sizeLabel(selSize())),
+    S.mode === "edit" && el("div", { class: "grp" }, el("span", {}, t("props.scope")), el("div", { class: "seg" }, scope("all"), scope("size"))),
+    S.mode === "edit" && el("span", { class: "hint" }, t("cover.how"))].filter(Boolean));
+}
+
+// ---------- editing layers
+function selectLayer(id) { if (S.layerId === id) return; S.layerId = id; renderSide(); queueDraw(); }
+/** Applies a placement edit to a layer in the current scope, then redraws. */
+function edit(L, patch) { adjust(L, frame(), S.settings.scope, patch); touch({ cover: true }); }
+function addLayer(L) {
+  insertAbove(S.cover.layers, S.layerId === "bg" ? "bg" : S.layerId, L);
+  S.layerId = L.id;
+  touch({ cover: true, side: true });
+  return L;
+}
+function addAsset(ref, at) {
+  const L = newLayer("asset", { ref, tint: false });
+  if (at) { L.t.all.x = at.x; L.t.all.y = at.y; }
+  if (ref.kind === "sticker") L.t.all.s = 0.3;
+  addLayer(L);
+  toast(t("assets.added", assetName(ref, getLang())));
+}
+function removeLayer(id = S.layerId) {
+  const L = layer(id);
+  if (!L || !isFree(L.type)) return;
+  const i = S.cover.layers.indexOf(L);
+  S.cover.layers.splice(i, 1);
+  S.layerId = S.cover.layers[Math.max(1, i - 1)].id;
+  touch({ cover: true, side: true });
+}
+function duplicateLayer() {
+  const L = layer(), c = L && duplicate(L);
+  if (!c) return;
+  insertAbove(S.cover.layers, L.id, c); S.layerId = c.id;
+  touch({ cover: true, side: true });
+}
+function shiftLayer(dir) {
+  const i = S.cover.layers.findIndex((l) => l.id === S.layerId);
+  if (i > 0 && moveLayer(S.cover.layers, S.layerId, i + dir)) touch({ cover: true, side: true });
+}
+
+// pointer on the main canvas: click selects the topmost layer under it, drag moves, wheel resizes
+function virtualPoint(e) {
+  const cv = $("cv"), b = cv.getBoundingClientRect(), k = cv._virtual[0] / b.width;
+  return { x: (e.clientX - b.left) * k, y: (e.clientY - b.top) * k, k };
+}
+function layerAt(e) {
+  const cv = $("cv");
+  if (!cv._hits) return null;
+  const p = virtualPoint(e), ok = (h) => { const L = layer(h.id); return h.type !== "bg" && L && isPickable(L); };
+  // the selected layer keeps the grab even when something sits on top of it
+  const mine = cv._hits.find((h) => h.id === S.layerId && ok(h));
+  const hit = (mine && hitAt([mine], p.x, p.y)) || hitAt(cv._hits, p.x, p.y, ok);
+  return hit ? layer(hit.id) : layer("bg");
+}
+{
+  const cv = $("cv");
+  cv.addEventListener("pointermove", (e) => { if (!e.buttons && S.mode === "edit") { const L = layerAt(e); cv.style.cursor = !L || L.type === "bg" ? (S.photo ? "move" : "default") : "grab"; } });
+  cv.addEventListener("pointerdown", (e) => {
+    if (S.mode !== "edit") return;
+    const L = layerAt(e);
+    if (!L) return;
+    selectLayer(L.id);
+    if (L.locked || (L.type === "bg" && !S.photo)) return;
+    let last = virtualPoint(e), moved = false;
+    cv.setPointerCapture(e.pointerId);
+    cv.onpointermove = (m) => { const p = virtualPoint(m); moved = true; edit(L, { ddx: p.x - last.x, ddy: p.y - last.y }); last = p; };
+    cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; if (moved) renderSide(); };
+  });
+  cv.addEventListener("wheel", (e) => {
+    if (S.mode !== "edit") return;
+    e.preventDefault();
+    const L = layerAt(e);
+    if (!L || L.locked || FIXED.includes(L.type) || (L.type === "bg" && !S.photo)) return;
+    selectLayer(L.id);
+    edit(L, e.altKey ? { rot: e.deltaY > 0 ? 2 : -2 } : { scale: Math.exp(-e.deltaY * 0.0015) });
+    later("side", 250, renderSide);
+  }, { passive: false });
+  // assets dragged from the library land where they are dropped
+  cv.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("application/x-smed-asset")) e.preventDefault(); });
+  cv.addEventListener("drop", (e) => {
+    const raw = e.dataTransfer.getData("application/x-smed-asset");
+    if (!raw) return;
+    e.preventDefault(); e.stopPropagation();
+    const p = virtualPoint(e), [vw, vh] = cv._virtual;
+    addAsset(JSON.parse(raw), { x: clamp(p.x / vw, 0, 1), y: clamp(p.y / vh, 0, 1) });
+  });
+}
+
+// ---------- small form helpers
+const cap = (key, extra = "") => el("label", { class: "cap" }, t(key) + extra);
+function textInput(value, oninput, props = {}) { return el("input", { type: "text", value, spellcheck: false, oninput: (e) => oninput(e.target.value), ...props }); }
+function slider(labelKey, min, max, step, value, fmt, oninput) {
+  const out = el("output", {}, fmt(value));
+  return el("div", { class: "sl" }, el("span", {}, t(labelKey)),
+    el("input", { type: "range", min, max, step, value, oninput: (e) => { const v = Number(e.target.value); out.textContent = fmt(v); oninput(v); } }), out);
+}
+function check(labelKey, checked, onchange) {
+  return el("label", { class: "chk" }, el("input", { type: "checkbox", checked, onchange: (e) => onchange(e.target.checked) }), t(labelKey));
+}
+function select(options, value, onchange) {   // options: [[value, label]] or {group, items}
+  const opt = ([v, l]) => el("option", { value: v, selected: v === value }, l);
+  return el("select", { onchange: (e) => onchange(e.target.value) }, options.map((o) => (Array.isArray(o) ? opt(o) : o.items.length ? el("optgroup", { label: o.group }, o.items.map(opt)) : null)));
+}
+const px = (v) => String(Math.round(v)), times = (v) => v.toFixed(2) + "×", pct = (v) => Math.round(v * 100) + "%", deg = (v) => Math.round(v) + "°";
+
+// ---------- left panel, Edit mode
+function coverTab() {
+  const c = S.cover;
+  return [
+    el("div", {}, cap("cover.category"), el("div", { class: "chips" }, S.profile.categories.map((k) =>
+      el("button", { class: k.id === c.catId ? "on" : "", style: `--c:${k.color}`, onclick: () => { c.catId = k.id; touch({ cover: true, panel: true, side: true }); } }, k.name || k.code || "—")))),
+    el("div", {}, cap("cover.title"),
+      el("textarea", { value: c.title, spellcheck: false, oninput: (e) => { c.title = e.target.value; touch({ cover: true }); } }),
+      el("div", { class: "hint" }, t("cover.titleHint"))),
+    el("div", {}, cap("cover.tag"), textInput(c.tag, (v) => { c.tag = v; touch({ cover: true }); }, { placeholder: t("cover.tagPh") })),
+    el("div", { class: "box" }, cap("cover.photo"),
+      el("div", { class: "row", style: "margin-top:0" },
+        el("button", { class: "btn", onclick: async () => { const f = await pickFile("image/*"); if (f) setPhoto(await readAs(f, "readAsDataURL")); } }, t("cover.pick")),
+        el("button", { class: "btn", disabled: !S.photo, onclick: () => setPhoto("") }, t("cover.removePhoto"))),
+      el("div", { class: "hint" }, t("cover.photoHint"))),
+  ];
+}
+async function setPhoto(src) {
+  S.photoSrc = src || "";
+  S.photo = src ? await loadImage(src) : null;
+  if (src && !S.photo) { S.photoSrc = ""; toast(t("msg.badFile")); }
+  files.write("session-photo", S.photoSrc).catch(() => null);
+  if (S.photo) S.layerId = "bg";
+  touch({ panel: true, side: true });
+}
+
+function tile(ref, onRemove) {
+  const cv = el("canvas", { width: 132, height: 132 });
+  const x = cv.getContext("2d");
+  x.translate(66, 66); x.scale(0.19, 0.19);
+  drawAsset(x, ref, hexToRgb(cat().color), { tint: ref.kind === "graphic" });
+  return el("div", { class: "tile", title: assetName(ref, getLang()), draggable: true, onclick: () => addAsset(ref),
+    ondragstart: (e) => { e.dataTransfer.setData("application/x-smed-asset", JSON.stringify(ref)); e.dataTransfer.effectAllowed = "copy"; } },
+    cv, onRemove && el("button", { class: "x", title: t("assets.remove"), onclick: (e) => { e.stopPropagation(); onRemove(); } }, "×"));
+}
+function assetsTab() {
+  const lang = getLang(), mine = [...userAssets.values()];
+  return [
+    el("button", { class: "btn solid wide", onclick: uploadAssets }, t("assets.upload")),
+    el("div", { class: "hint", style: "margin:-6px 0 0" }, t("assets.hint")),
+    el("div", {}, cap("assets.mine", ` · ${mine.length}`), mine.length
+      ? el("div", { class: "tiles" }, mine.map((a) => tile({ kind: "user", id: a.id }, () => removeAsset(a.id))))
+      : el("div", { class: "hint", style: "margin:0" }, t("assets.mineEmpty"))),
+    el("div", {}, cap("assets.graphics"), el("div", { class: "tiles" }, GRAPHICS.map((g) => tile({ kind: "graphic", id: g.id })))),
+    STICKER_GROUPS.map((g) => el("div", {}, el("label", { class: "cap" }, g.name[lang]), el("div", { class: "tiles" }, STICKERS.filter((s) => s.group === g.id).map((s) => tile({ kind: "sticker", id: s.id }))))),
+  ];
+}
+/** Stores an image in the library (memory + disk). Returns its id, or null if unreadable. */
+async function adoptAsset(name, src, id = assetIdFor(src)) {
+  if (userAssets.has(id)) return id;
+  const a = await putUserAsset(id, name, src);
+  if (!a) return null;
+  await saveAssetRecord(a).catch(fail);
+  return id;
+}
+async function uploadAssets() {
+  let bad = 0;
+  for (const f of await pickFiles("image/png,image/svg+xml,image/webp,image/jpeg", true)) {
+    if (!(await adoptAsset(f.name.replace(/\.[^.]+$/, ""), await readAs(f, "readAsDataURL")))) bad++;
+  }
+  if (bad) toast(t("msg.badFile"));
+  renderPanel();
+}
+function removeAsset(id) {
+  const inUse = [...S.profiles.flatMap((p) => usedUserAssets(p, null)), ...usedUserAssets(null, S.cover)].includes(id);
+  if (inUse && !confirm(t("msg.assetInUse"))) return;
+  userAssets.delete(id);
+  deleteAssetRecord(id).catch(fail);
+  touch({ panel: true, side: true });
+}
+
+function styleTab() {
+  const st = S.profile.style, set = (k, v) => { st[k] = v; touch({ profile: true }); };
+  return [
+    el("div", {}, cap("style.template"), select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), st.template, (v) => set("template", v))),
+    el("div", {}, cap("style.theme"), select([["dark", t("theme.dark")], ["light", t("theme.light")]], st.theme, (v) => set("theme", v))),
+    check("style.imageShadow", st.imageShadow, (v) => set("imageShadow", v)),
+    el("div", { class: "box" }, cap("style.design"),
+      el("button", { class: "btn wide", onclick: () => { S.profile.design.layers = JSON.parse(JSON.stringify(S.cover.layers)); touch({ profile: true }); toast(t("style.designSaved")); } }, t("style.saveDesign")),
+      el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.cover.layers = JSON.parse(JSON.stringify(S.profile.design.layers)); S.layerId = "title"; touch({ cover: true, side: true }); } }, t("style.loadDesign")),
+      el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { for (const L of S.cover.layers) if (!isFree(L.type)) resetPlacement(L, "all"); touch({ cover: true, side: true }); } }, t("style.resetAll")),
+      el("div", { class: "hint" }, t("style.designHint"))),
+  ];
+}
+
+// ---------- left panel, Setup mode
+function brandTab() {
+  const P = S.profile, lang = getLang(), struct = () => touch({ profile: true, cover: true, panel: true, side: true });
+  const refValue = (g) => (g.kind === "none" ? "none" : `${g.kind}:${g.id}`);
+  const options = [["none", t("cat.none")],
+    { group: t("cat.groupGraphics"), items: GRAPHICS.map((g) => ["graphic:" + g.id, g.name[lang]]) },
+    { group: t("cat.groupMine"), items: [...userAssets.values()].map((a) => ["user:" + a.id, a.name]) },
+    { group: t("cat.groupStickers"), items: STICKERS.map((s) => ["sticker:" + s.id, s.name[lang]]) }];
+  const card = (c, i) => {
+    const lib = c.graphic.kind === "graphic" && GRAPHICS.find((g) => g.id === c.graphic.id);
+    return el("div", { class: "card", style: `--c:${c.color}` },
+      el("div", { class: "head" },
+        el("input", { type: "color", value: c.color, title: t("cat.color"), oninput: (e) => { c.color = e.target.value; e.target.closest(".card").style.setProperty("--c", c.color); touch({ profile: true }); } }),
+        textInput(c.name, (v) => { c.name = v; touch({ profile: true }); }, { placeholder: t("cat.name") })),
+      el("div", { class: "two" },
+        textInput(c.sub, (v) => { c.sub = v; touch({ profile: true }); }, { placeholder: t("cat.sub") }),
+        textInput(c.code, (v) => { c.code = v; touch({ profile: true }); }, { placeholder: t("cat.code") })),
+      select(options, refValue(c.graphic), (v) => {
+        const [kind, ...rest] = v.split(":");
+        c.graphic = kind === "none" ? { kind: "none" } : { kind, id: rest.join(":"), labels: [], stamp: "" };
+        struct();
+      }),
+      lib && lib.labels && textInput((c.graphic.labels || []).join("，"), (v) => { c.graphic.labels = v.split(/[,，]/).map((x) => x.trim()).filter(Boolean).slice(0, 4); touch({ profile: true }); }, { placeholder: t("cat.labels") }),
+      lib && lib.stamp && textInput(c.graphic.stamp || "", (v) => { c.graphic.stamp = v; touch({ profile: true }); }, { placeholder: t("cat.stamp") }),
+      el("div", { class: "acts" },
+        el("button", { class: "btn", disabled: i === 0, onclick: () => { P.categories.splice(i - 1, 0, P.categories.splice(i, 1)[0]); struct(); } }, t("cat.up")),
+        el("button", { class: "btn", disabled: i === P.categories.length - 1, onclick: () => { P.categories.splice(i + 1, 0, P.categories.splice(i, 1)[0]); struct(); } }, t("cat.down")),
+        el("button", { class: "btn", onclick: () => {
+          if (P.categories.length < 2) return toast(t("msg.lastCategory"));
+          P.categories.splice(i, 1);
+          S.cover = normalizeCover(S.cover, P); struct();
+        } }, t("cat.remove"))));
+  };
+  const act = (key) => el("button", { class: "btn", onclick: profileActions[key] }, t("prof." + key));
+  return [
+    el("div", { class: "box" }, cap("prof.manage"), el("div", { class: "acts", style: "justify-content:flex-start" }, ["new", "duplicate", "delete", "import", "export"].map(act))),
+    el("div", {}, cap("brand.profileName"), textInput(P.name, (v) => { P.name = v; touch({ profile: true }); later("top", 600, syncTop); })),
+    el("div", {}, cap("brand.name"), textInput(P.brand.name, (v) => { P.brand.name = v; touch({ profile: true }); })),
+    el("div", {}, cap("brand.unit"), textInput(P.brand.unit, (v) => { P.brand.unit = v; touch({ profile: true }); }), el("div", { class: "hint" }, t("brand.unitHint"))),
+    el("div", {}, cap("brand.categories"), el("div", { style: "display:grid;gap:10px" }, P.categories.map(card),
+      el("button", { class: "btn wide", onclick: () => {
+        const palette = ["#ffb703", "#fb5607", "#3a86ff", "#a855f7", "#06d6a0", "#ff5fa2"];
+        P.categories.push({ id: uid(), name: t("cat.new"), sub: "", code: "", color: palette[P.categories.length % palette.length], graphic: { kind: "graphic", id: GRAPHICS[P.categories.length % GRAPHICS.length].id, labels: [], stamp: "" } });
+        struct();
+      } }, t("brand.add")))),
+  ];
+}
+function sizesTab() {
+  const P = S.profile, se = S.settings;
+  const has = (s) => P.sizes.some((x) => sizeKey(x) === sizeKey(s));
+  const toggle = (s, on) => {
+    if (on && !has(s)) P.sizes.push({ w: s.w, h: s.h, label: s.label || "" });
+    if (!on) { if (P.sizes.length < 2) return renderPanel(); P.sizes = P.sizes.filter((x) => sizeKey(x) !== sizeKey(s)); }
+    if (!P.sizes.some((x) => sizeKey(x) === S.sel)) S.sel = sizeKey(P.sizes[0]);
+    syncToolbar(); touch({ profile: true, strip: true, panel: true });
+  };
+  const custom = P.sizes.filter((s) => !SIZE_PRESETS.some((p) => sizeKey(p) === sizeKey(s)));
+  const row = (s) => el("label", { class: "chk" }, el("input", { type: "checkbox", checked: has(s), onchange: (e) => toggle(s, e.target.checked) }), s.label || t("exp.custom"), el("span", {}, `${s.w}×${s.h}`));
+  const cw = el("input", { type: "number", min: 64, max: 8192, placeholder: "W", value: 1280 }), chh = el("input", { type: "number", min: 64, max: 8192, placeholder: "H", value: 720 });
+  const setting = (k, v, panel = false) => { se[k] = v; persistSettings(); if (panel) renderPanel(); };
+  return [
+    el("div", { class: "box sizes" }, cap("exp.sizes"), SIZE_PRESETS.map(row), custom.map(row),
+      el("div", { class: "row3", style: "margin-top:12px" }, cw, chh,
+        el("button", { class: "btn", style: "padding:10px", onclick: () => toggle(normalizeSize({ w: cw.value, h: chh.value, label: "" }), true) }, t("exp.addSize")))),
+    el("div", {}, cap("exp.scale"), select([1, 2, 3, 4].map((n) => [String(n), `${n}x`]), String(se.scale), (v) => setting("scale", Number(v)))),
+    el("div", {}, cap("exp.format"), select([["png", "PNG"], ["jpeg", "JPEG"], ["webp", "WebP"]], se.format, (v) => setting("format", v, true)),
+      se.format === "jpeg" && slider("exp.quality", 40, 100, 1, se.quality, px, (v) => setting("quality", v)),
+      se.format === "webp" && el("div", { class: "hint" }, t("exp.webpNote")),
+      el("div", { class: "hint" }, t("exp.transparentHint"))),
+    el("div", {}, cap("exp.name"), textInput(se.nameTemplate, (v) => setting("nameTemplate", v)), el("div", { class: "hint" }, t("exp.nameHint"))),
+  ];
+}
+function fontsTab() {
+  const options = (bundled) => [["", `${t("font.bundled")} · ${bundled}`],
+    { group: t("font.imported"), items: S.importedFonts.map((f) => [f, f]) },
+    { group: t("font.system"), items: S.systemFonts.map((f) => [f, f]) }];
+  const setFont = async (k, v) => { S.profile.fonts[k] = v; await applyFonts(); touch({ profile: true }); };
+  return [
+    el("div", {}, cap("font.body"), select(options("Noto Sans SC"), S.profile.fonts.body, (v) => setFont("body", v))),
+    el("div", {}, cap("font.display"), select(options("Bebas Neue"), S.profile.fonts.display, (v) => setFont("display", v))),
+    el("button", { class: "btn wide", onclick: importFont }, t("font.import")),
+  ];
+}
+async function importFont() {
+  const f = await pickFile(".ttf,.otf,.woff,.woff2");
+  if (!f) return;
+  const family = f.name.replace(/\.[^.]+$/, "").replace(/[^\w\u4e00-\u9fff -]+/g, " ").trim() || "Imported font";
+  const src = await readAs(f, "readAsDataURL");
+  if (!(await registerFont(family, src))) return toast(t("msg.badFile"));
+  await files.write(`fonts/${family}.font`, src).catch(fail);
+  toast(t("msg.fontAdded", family));
+  renderPanel();
+}
+
+// ---------- right column: layers and the selected layer's properties
+let dragId = null;
+function layerRow(L) {
+  const icon = (glyph, off, title, fn) => el("button", { class: "ic" + (off ? " off" : ""), title, onclick: (e) => { e.stopPropagation(); fn(); touch({ cover: true, side: true }); } }, glyph);
+  return el("div", { class: `layer${L.id === S.layerId ? " on" : ""}${L.visible ? "" : " hidden"}`, draggable: L.type !== "bg", onclick: () => selectLayer(L.id),
+    ondragstart: (e) => { dragId = L.id; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", L.id); },
+    ondragend: () => { dragId = null; },
+    ondragover: (e) => { if (dragId && dragId !== L.id) { e.preventDefault(); e.currentTarget.classList.add("over"); } },
+    ondragleave: (e) => e.currentTarget.classList.remove("over"),
+    ondrop: (e) => {   // dropping on a row puts the dragged layer directly above it
+      e.preventDefault(); e.stopPropagation();
+      const id = dragId; dragId = null;
+      if (!id) return;
+      const from = S.cover.layers.findIndex((l) => l.id === id), to = S.cover.layers.indexOf(L);
+      if (moveLayer(S.cover.layers, id, from < to ? to : to + 1)) touch({ cover: true, side: true }); else renderSide();
+    } },
+    icon(L.visible ? "◉" : "○", !L.visible, t("layers.show"), () => { L.visible = !L.visible; }),
+    icon(L.locked ? "▣" : "□", !L.locked, t("layers.lock"), () => { L.locked = !L.locked; }),
+    el("span", { class: "nm" }, layerName(L), isFree(L.type) && el("span", { class: "ty" }, L.type === "text" ? "T" : "+")));
+}
+function placementControls(L) {
+  if (FIXED.includes(L.type)) return el("div", { class: "hint", style: "margin:0" }, t("props.fixedHint"));
+  if (L.type === "bg" && !S.photo) return null;
+  const f = frame(), all = S.settings.scope === "all", free = isFree(L.type), noRot = L.type === "bg";
+  const b = { dx: 0, dy: 0, s: 1, r: 0, ...L.t.by[writeKey(L, f.key, f.catId)] };
+  const setAll = (k, v) => { L.t.all[k] = v; touch({ cover: true }); };
+  const setBy = (k, v) => { L.t.by[writeKey(L, f.key, f.catId)] = { ...b, ...L.t.by[writeKey(L, f.key, f.catId)], [k]: v }; touch({ cover: true }); };
+  const lo = free ? 0 : -1, hi = free ? 1 : 1;
+  return [
+    all ? [
+      slider("props.x", lo, hi, 0.002, L.t.all.x, pct, (v) => setAll("x", v)),
+      slider("props.y", lo, hi, 0.002, L.t.all.y, pct, (v) => setAll("y", v)),
+      slider("props.s", free ? 0.03 : 0.2, free ? 2.5 : 4, 0.01, L.t.all.s, times, (v) => setAll("s", v)),
+      !noRot && slider("props.r", -180, 180, 1, L.t.all.r, deg, (v) => setAll("r", v)),
+    ] : [
+      slider("props.x", -1500, 1500, 2, b.dx, px, (v) => setBy("dx", v)),
+      slider("props.y", -1500, 1500, 2, b.dy, px, (v) => setBy("dy", v)),
+      slider("props.s", 0.2, 4, 0.01, b.s, times, (v) => setBy("s", v)),
+      !noRot && slider("props.r", -180, 180, 1, b.r, deg, (v) => setBy("r", v)),
+    ],
+    el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { resetPlacement(L, S.settings.scope, f.key, f.catId); touch({ cover: true, side: true }); } }, `${t("props.reset")} · ${t("scope." + S.settings.scope)}`),
+  ];
+}
+function typeControls(L) {
+  const set = (k, v, side = false) => { L[k] = v; touch({ cover: true, side }); };
+  switch (L.type) {
+    case "bg": return [
+      select([["dark", t("theme.dark")], ["light", t("theme.light")]], S.profile.style.theme, (v) => { S.profile.style.theme = v; touch({ profile: true }); }),
+      check("props.grid", L.grid, (v) => set("grid", v)),
+      S.photo && [slider("props.blur", 0, 80, 1, L.blur, px, (v) => set("blur", v)), slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => set("dim", v))],
+    ];
+    case "brand": return check("props.rail", L.rail, (v) => set("rail", v));
+    case "title": return [
+      select([["left", `${t("props.align")} · ${t("align.left")}`], ["center", `${t("props.align")} · ${t("align.center")}`]], L.align, (v) => set("align", v)),
+      slider("props.stroke", 0, 2, 0.05, L.stroke, times, (v) => set("stroke", v)),
+      slider("props.shadow", 0, 2, 0.05, L.shadow, times, (v) => set("shadow", v)),
+      el("div", { class: "hint" }, t("props.boundHint")),
+    ];
+    case "tag": return el("div", { class: "hint", style: "margin:0" }, t("props.boundHint"));
+    case "catname": return [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v))];
+    case "graphic": return el("div", { class: "hint", style: "margin:0" }, t("props.graphicHint"));
+    case "asset": return canTint(L.ref) && L.ref.kind === "sticker" ? check("props.tint", L.tint, (v) => set("tint", v)) : null;
+    case "text": return [
+      cap("props.text"), el("textarea", { value: L.text, spellcheck: false, style: "height:72px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
+      el("div", { style: "margin-top:8px" }, select(["title", "plain", "plate"].map((k) => [k, `${t("props.look")} · ${t("look." + k)}`]), L.look, (v) => set("look", v))),
+      el("div", { style: "margin-top:8px" }, select(["white", "accent", "ink"].map((k) => [k, `${t("props.color")} · ${t("color." + k)}`]), L.color, (v) => set("color", v))),
+    ];
+  }
+  return null;
+}
+function renderSide() {
+  if (!S.cover) return;
+  const side = $("side"), y = side.scrollTop, L = layer(), free = L && isFree(L.type);
+  // keep typing in the text box alive across rebuilds
+  const typing = document.activeElement && side.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA";
+  if (typing) return;
+  const i = L ? S.cover.layers.indexOf(L) : -1;
+  side.replaceChildren(
+    el("div", {}, cap("layers.title"),
+      el("div", { class: "layers" }, [...S.cover.layers].reverse().map(layerRow)),
+      el("div", { class: "acts", style: "margin-top:10px;justify-content:flex-start" },
+        el("button", { class: "btn", onclick: () => addLayer(newLayer("text", { text: t("layer.newText") })) }, t("layers.addText")),
+        el("button", { class: "btn", disabled: !free, onclick: duplicateLayer }, t("layers.dup")),
+        el("button", { class: "btn", disabled: !free, onclick: () => removeLayer() }, t("layers.del")),
+        el("button", { class: "btn", title: t("layers.up"), disabled: i < 1 || i >= S.cover.layers.length - 1, onclick: () => shiftLayer(1) }, "▲"),
+        el("button", { class: "btn", title: t("layers.down"), disabled: i <= 1, onclick: () => shiftLayer(-1) }, "▼"))),
+    L ? el("div", { class: "box" }, el("label", { class: "cap" }, `${t("props.title")} · ${layerName(L)}`),
+      typeControls(L), placementControls(L),
+      L.type !== "bg" && slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { L.o = v; touch({ cover: true }); }))
+      : el("div", { class: "hint" }, t("layers.none")));
+  side.scrollTop = y;
+}
+
+// ---------- export
+function renderFull(size, cover, index) {
+  const cv = document.createElement("canvas");
+  paint(cv, size, size.w * S.settings.scale, cover, index);
+  return cv;
+}
+const nameFor = (size, cover, index) => exportName(S.settings.nameTemplate, { index, cat: S.profile.categories[index], title: cover.title, size, scale: S.settings.scale, ext: EXT[S.settings.format] });
+const pngData = (cv) => cv.toDataURL("image/png").split(",")[1];
+function browserSave(name, href) { const a = el("a", { href, download: name }); document.body.append(a); a.click(); a.remove(); }
+function browserSaveCanvas(cv, name) {   // plain-browser fallback: the browser encodes; a dark matte under JPEG
+  const { format, quality } = S.settings;
+  let src = cv;
+  if (format === "jpeg") { src = el("canvas", { width: cv.width, height: cv.height }); const x = src.getContext("2d"); x.fillStyle = "#0a0a12"; x.fillRect(0, 0, src.width, src.height); x.drawImage(cv, 0, 0); }
+  browserSave(name, src.toDataURL("image/" + format, quality / 100));
+}
+async function exportOne(size) {
+  const cv = renderFull(size, S.cover, catIndex()), name = nameFor(size, S.cover, catIndex());
+  if (!native) return browserSaveCanvas(cv, name);
+  try { const p = await invoke("save_image", { name, data: pngData(cv), format: S.settings.format, quality: S.settings.quality }); if (p) toast(t("msg.saved", p)); } catch (e) { fail(e); }
+}
+/** Writes every selected size of every job ({cover, index}) into one folder the user picks. */
+async function exportMany(jobs) {
+  const total = jobs.length * S.profile.sizes.length;
+  let dir = null, done = 0;
+  try {
+    if (native) { dir = await invoke("pick_folder"); if (!dir) return; }
+    closeModal();
+    for (const job of jobs) for (const size of S.profile.sizes) {
+      toast(t("msg.batch", ++done, total), true);
+      await new Promise((r) => setTimeout(r, 16));                 // let the progress text paint
+      const cv = renderFull(size, job.cover, job.index), name = nameFor(size, job.cover, job.index);
+      if (native) await invoke("write_image", { dir, name, data: pngData(cv), format: S.settings.format, quality: S.settings.quality });
+      else { browserSaveCanvas(cv, name); await new Promise((r) => setTimeout(r, 300)); }
+    }
+    toast(t("msg.savedN", total, dir || "Downloads"));
+  } catch (e) { fail(e); }
+}
+async function batchFromCsv() {
+  const f = await pickFile(".csv,.tsv,.txt,text/csv");
+  if (!f) return;
+  const rows = csvToJobs(await readAs(f, "readAsText"));
+  if (!rows.length) return toast(t("msg.batchEmpty"));
+  const norm = (s) => String(s).trim().toLowerCase();
+  let unknown = 0;
+  const jobs = rows.map((r) => {
+    const key = norm(r.category);
+    let index = S.profile.categories.findIndex((c, i) => key && (norm(c.name) === key || norm(c.code) === key || String(i + 1) === key || String(i + 1).padStart(2, "0") === key));
+    if (index < 0) { index = catIndex(); if (key) unknown++; }
+    return { index, cover: { ...S.cover, catId: S.profile.categories[index].id, title: r.title, tag: r.tag } };
+  });
+  await exportMany(jobs);
+  if (unknown) setTimeout(() => toast(t("msg.batchUnknown", unknown)), 3600);
+}
+function csvTemplate() {
+  const zh = getLang() === "zh", c = S.profile.categories;
+  const lines = [zh ? "类目,标题,角标" : "category,title,tag", `${c[0].name},"${zh ? "第一行\\n*第二行*" : "First line\\n*second line*"}",EP.01`, `${(c[1] || c[0]).name},${zh ? "另一个标题" : "Another title"},`];
+  saveText("smedcover-batch.csv", "\uFEFF" + lines.join("\n") + "\n");
+}
+async function saveText(name, text) {
+  if (!native) return browserSave(name, "data:text/plain;charset=utf-8," + encodeURIComponent(text));
+  try { const p = await invoke("save_text", { name, text }); if (p) toast(t("msg.saved", p)); } catch (e) { fail(e); }
+}
+function closeModal() { const m = $("modal"); m.hidden = true; m.replaceChildren(); }
+function exportDialog() {
+  const m = $("modal"), se = S.settings;
+  m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("exp.dialog")),
+    el("div", { class: "hint", style: "margin:0" }, t("exp.summary", se.format.toUpperCase(), se.scale)),
+    el("div", { class: "dl" }, S.profile.sizes.map((s) => el("button", { class: "btn wide", onclick: () => exportOne(s) }, `${t("exp.one")} ${sizeLabel(s)}`)),
+      el("button", { class: "btn solid wide", onclick: () => exportMany([{ cover: S.cover, index: catIndex() }]) }, `${t("exp.all")} (${S.profile.sizes.length})`)),
+    el("div", { class: "box" }, cap("exp.batch"), el("div", { class: "hint", style: "margin:0 0 12px" }, t("exp.batchHint")),
+      el("button", { class: "btn wide", onclick: batchFromCsv }, t("exp.csv")),
+      el("button", { class: "btn wide", style: "margin-top:8px", onclick: csvTemplate }, t("exp.csvTemplate"))),
+    el("button", { class: "btn wide", onclick: closeModal }, t("close"))));
+  m.hidden = false;
+}
+
+// ---------- profiles and projects (uploaded assets travel inside the exported files)
+const embedAssets = (ids) => ids.map((id) => userAssets.get(id)).filter(Boolean).map(({ id, name, src }) => ({ id, name, src }));
+async function adoptEmbedded(list) {
+  for (const a of Array.isArray(list) ? list : []) if (a && typeof a.id === "string" && typeof a.src === "string") await adoptAsset(a.name, a.src, a.id);
+}
+async function switchProfile(id) {
+  S.profile = S.profiles.find((p) => p.id === id) || S.profiles[0];
+  S.settings.profileId = S.profile.id; persistSettings();
+  S.cover = normalizeCover({ catId: S.cover && S.cover.catId, title: S.cover && S.cover.title, tag: S.cover && S.cover.tag }, S.profile);   // the new profile's own design
+  await applyProfile(); resetHistory(); persistCover();
+}
+async function addProfile(raw, activate = true) {
+  const p = normalizeProfile({ ...raw, id: uid() });
+  S.profiles.push(p);
+  await saveProfile(p).catch(fail);
+  if (activate) await switchProfile(p.id);
+  return p;
+}
+const profileActions = {
+  new: () => addProfile(starterProfile(getLang(), "")),
+  duplicate: () => addProfile({ ...JSON.parse(JSON.stringify(S.profile)), name: `${S.profile.name} ${t("msg.copy")}` }),
+  async delete() {
+    if (S.profiles.length < 2) return toast(t("msg.lastProfile"));
+    if (!confirm(t("msg.confirmDelete", S.profile.name))) return;
+    const gone = S.profile;
+    S.profiles = S.profiles.filter((p) => p !== gone);
+    await deleteProfile(gone).catch(fail);
+    await switchProfile(S.profiles[0].id);
+  },
+  async import() {
+    const f = await pickFile(".json,application/json");
+    if (!f) return;
+    try {
+      const raw = JSON.parse(await readAs(f, "readAsText"));
+      if (!raw || typeof raw !== "object") throw 0;
+      await adoptEmbedded(raw.assets);
+      await addProfile(raw.profile || raw);
+    } catch (e) { toast(t("msg.badFile")); }
+  },
+  export: () => saveText(`${S.profile.name || "profile"}.smedprofile.json`,
+    JSON.stringify({ app: "smedcover", kind: "profile", version: 2, profile: S.profile, assets: embedAssets(usedUserAssets(S.profile, null)) }, null, 2)),
+};
+const projectActions = {
+  async open() {
+    const f = await pickFile(".json,application/json");
+    if (!f) return;
+    try {
+      const raw = JSON.parse(await readAs(f, "readAsText"));
+      if (!raw || raw.kind !== "project") throw 0;
+      await adoptEmbedded(raw.assets);
+      S.cover = normalizeCover(raw.cover, S.profile);
+      S.photoSrc = typeof raw.photo === "string" && raw.photo.startsWith("data:image/") ? raw.photo : "";
+      S.photo = S.photoSrc ? await loadImage(S.photoSrc) : null;
+      files.write("session-photo", S.photoSrc).catch(() => null);
+      S.layerId = "title";
+      touch({ cover: true, panel: true, side: true });
+    } catch (e) { toast(t("msg.badFile")); }
+  },
+  save: () => saveText(`${(S.cover.title.split("\n")[0] || "cover").replace(/[*\\/:?"<>|]+/g, "").slice(0, 24) || "cover"}.smedcover.json`,
+    JSON.stringify({ app: "smedcover", kind: "project", version: 2, profileName: S.profile.name, cover: S.cover, photo: S.photoSrc || null, assets: embedAssets(usedUserAssets(null, S.cover)) })),
+  reset() { S.cover = normalizeCover({ catId: S.cover.catId }, S.profile); S.layerId = "title"; setPhoto(""); touch({ cover: true, panel: true, side: true }); },
+};
+
+// ---------- chrome
+function setMode(mode) {
+  S.mode = mode;
+  $("body").classList.toggle("setup", mode === "setup");
+  syncTop(); syncTabs(); renderPanel(); renderSide(); syncToolbar(); queueDraw();
+}
+function syncTop() {
+  if (!S.profile) return;
+  const b = (key, onclick, props = {}) => el("button", { class: "btn", onclick, ...props }, t(key));
+  const mode = (m) => el("button", { class: "btn" + (S.mode === m ? " on" : ""), onclick: () => setMode(m) }, t("mode." + m));
+  $("top").replaceChildren(
+    el("h1", {}, "SMEDCOVER"),
+    el("div", { class: "seg big" }, mode("edit"), mode("setup")),
+    el("div", { class: "grp" }, el("span", {}, t("top.profile")),
+      el("select", { onchange: (e) => switchProfile(e.target.value) }, S.profiles.map((p) => el("option", { value: p.id, selected: p.id === S.profile.id }, p.name)))),
+    el("div", { class: "grp" }, el("span", {}, t("top.project")), b("top.open", projectActions.open), b("top.save", projectActions.save), b("top.reset", projectActions.reset)),
+    el("div", { class: "grp" }, b("top.undo", () => timeTravel(-1), { disabled: S.histIdx <= 0 }), b("top.redo", () => timeTravel(1), { disabled: S.histIdx >= S.hist.length - 1 })),
+    el("div", { class: "spacer" }),
+    el("button", { class: "btn solid", style: "padding:8px 22px;font-size:15px", onclick: exportDialog }, t("top.export")),
+    el("select", { title: t("lang"), onchange: (e) => { S.settings.lang = e.target.value; setLang(e.target.value); persistSettings(); setMode(S.mode); buildStrip(); } },
+      [["zh", "中文"], ["en", "English"]].map(([v, l]) => el("option", { value: v, selected: v === getLang() }, l))));
+  document.body.dataset.drop = t("msg.dropHere");
+}
+const TABS = { edit: { cover: coverTab, assets: assetsTab, style: styleTab }, setup: { brand: brandTab, sizes: sizesTab, fonts: fontsTab } };
+function syncTabs() {
+  $("tabs").replaceChildren(...Object.keys(TABS[S.mode]).map((k) => el("button", { class: k === S.tab[S.mode] ? "on" : "", onclick: () => { S.tab[S.mode] = k; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, t("tab." + k))));
+}
+function renderPanel() {
+  if (!S.cover) return;
+  const panel = $("panel"), y = panel.scrollTop;
+  document.documentElement.style.setProperty("--acc", cat().color);
+  panel.replaceChildren(...TABS[S.mode][S.tab[S.mode]]().flat(Infinity).filter(Boolean));
+  panel.scrollTop = y;
+}
+
+function welcome() {
+  return new Promise((resolve) => {
+    const modal = $("modal"), name = textInput("", () => null, { placeholder: "MY CHANNEL" });
+    const go = (sample) => { closeModal(); resolve(sample ? sampleProfile(getLang()) : starterProfile(getLang(), name.value.trim())); };
+    modal.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("welcome.title")), el("div", {}, t("welcome.body")),
+      el("div", {}, cap("welcome.brand"), name),
+      el("button", { class: "btn solid wide", onclick: () => go(false) }, t("welcome.starter")),
+      el("button", { class: "btn wide", onclick: () => go(true) }, t("welcome.sample"))));
+    modal.hidden = false;
+    name.focus();
+  });
+}
+
+// ---------- window-level events
+let dragDepth = 0;
+const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; document.body.classList.add("drop"); });
+addEventListener("dragleave", (e) => { if (hasFiles(e) && --dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("drop"); } });
+addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
+addEventListener("drop", async (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault(); dragDepth = 0; document.body.classList.remove("drop");
+  const f = [...e.dataTransfer.files].find((x) => x.type.startsWith("image/"));
+  if (f) setPhoto(await readAs(f, "readAsDataURL"));
+});
+addEventListener("keydown", (e) => {
+  const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
+  if (mod && key === "s") { e.preventDefault(); return projectActions.save(); }
+  if (typing || !S.cover) return;
+  if (mod && key === "z") { e.preventDefault(); return timeTravel(e.shiftKey ? 1 : -1); }
+  if (S.mode !== "edit") return;
+  const L = layer();
+  if (mod && key === "d") { e.preventDefault(); return duplicateLayer(); }
+  if (key === "escape") return selectLayer("bg");
+  if (!L) return;
+  if (key === "delete" || key === "backspace") { e.preventDefault(); return removeLayer(); }
+  const step = e.shiftKey ? 10 : 1, move = { arrowleft: [-step, 0], arrowright: [step, 0], arrowup: [0, -step], arrowdown: [0, step] }[key];
+  if (move && !L.locked && !FIXED.includes(L.type)) { e.preventDefault(); edit(L, { ddx: move[0], ddy: move[1] }); later("side", 250, renderSide); }
+});
+
+// ---------- start
+async function start() {
+  S.settings = normalizeSettings(await readJson("settings.json").catch(() => null));
+  setLang(S.settings.lang || detectLang());
+  for (const name of await files.list("fonts").catch(() => [])) {
+    if (name.endsWith(".font")) { const src = await files.read("fonts/" + name).catch(() => null); if (src) await registerFont(name.slice(0, -5), src); }
+  }
+  for (const a of await loadAssetRecords().catch(() => [])) await putUserAsset(a.id, a.name, a.src);
+  if (native) S.systemFonts = await invoke("list_system_fonts").catch(() => []);
+  S.profiles = await loadProfiles().catch(() => []);
+  if (!S.profiles.length) await addProfile(await welcome(), false);
+  S.profile = S.profiles.find((p) => p.id === S.settings.profileId) || S.profiles[0];
+  S.settings.profileId = S.profile.id; persistSettings();
+  S.cover = normalizeCover(await readJson("session.json").catch(() => null), S.profile);
+  if (!S.cover.title) S.cover.title = getLang() === "zh" ? "在这里写标题\n*一行*就是一行" : "Write your title\n*one line* each";
+  S.photoSrc = (await files.read("session-photo").catch(() => "")) || "";
+  S.photo = S.photoSrc ? await loadImage(S.photoSrc) : null;
+  await applyProfile();
+  resetHistory();
+}
+// test hook: lets automated checks drive the app without the UI
+window.__smedcover = { S, drawCover, renderFull, nameFor, touch, addAsset, addLayer, newLayer, selectLayer, selectSize, setMode, layer };
+start().catch((e) => { console.error(e); fail(e); });
