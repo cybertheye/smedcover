@@ -2,12 +2,12 @@
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
 import { virtualSize } from "./layout.js";
-import { drawCover, sizeKey, hexToRgb, hitAt } from "./render.js";
+import { drawCover, sizeKey, hexToRgb, hitAt, paintAccent } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { newLayer, isFree, isPickable, adjust, resetPlacement, writeKey, insertAbove, moveLayer, duplicate } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isPickable, adjust, resetPlacement, writeKey, insertAbove, moveLayer, duplicate } from "./layers.js";
 import {
   native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName,
@@ -333,6 +333,15 @@ function tile(ref, onRemove) {
     ondragstart: (e) => { e.dataTransfer.setData("application/x-smed-asset", JSON.stringify(ref)); e.dataTransfer.effectAllowed = "copy"; } },
     cv, onRemove && el("button", { class: "x", title: t("assets.remove"), onclick: (e) => { e.stopPropagation(); onRemove(); } }, "×"));
 }
+/** Tile for a colour-block shape: applies it to the colour-block layer instead of adding a layer. */
+function shapeTile(shape) {
+  const cv = el("canvas", { width: 132, height: 132 }), x = cv.getContext("2d"), L = layer("accent");
+  x.fillStyle = "#0a0a12"; x.fillRect(0, 0, 132, 132);
+  x.scale(0.22, 0.22);
+  paintAccent(x, shape, { accent: [[0, 330], [600, 250], [600, 600], [0, 600]], edge: { nx: 0, ny: -1 } }, hexToRgb(cat().color));
+  return el("div", { class: "tile", title: t("shape." + shape), style: L.shape === shape ? "border-color:var(--acc)" : "",
+    onclick: () => { L.shape = shape; L.visible = true; S.layerId = "accent"; touch({ cover: true, panel: true, side: true }); } }, cv);
+}
 function assetsTab() {
   const lang = getLang(), mine = [...userAssets.values()];
   return [
@@ -342,6 +351,7 @@ function assetsTab() {
       ? el("div", { class: "tiles" }, mine.map((a) => tile({ kind: "user", id: a.id }, () => removeAsset(a.id))))
       : el("div", { class: "hint", style: "margin:0" }, t("assets.mineEmpty"))),
     el("div", {}, cap("assets.graphics"), el("div", { class: "tiles" }, GRAPHICS.map((g) => tile({ kind: "graphic", id: g.id })))),
+    el("div", {}, cap("assets.shapes"), el("div", { class: "tiles" }, ACCENT_SHAPES.map(shapeTile)), el("div", { class: "hint" }, t("assets.shapesHint"))),
     STICKER_GROUPS.map((g) => el("div", {}, el("label", { class: "cap" }, g.name[lang]), el("div", { class: "tiles" }, STICKERS.filter((s) => s.group === g.id).map((s) => tile({ kind: "sticker", id: s.id }))))),
   ];
 }
@@ -528,6 +538,7 @@ function typeControls(L) {
       check("props.grid", L.grid, (v) => set("grid", v)),
       S.photo && [slider("props.blur", 0, 80, 1, L.blur, px, (v) => set("blur", v)), slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => set("dim", v))],
     ];
+    case "accent": return el("div", { style: "margin-bottom:10px" }, select(ACCENT_SHAPES.map((k) => [k, `${t("props.shape")} · ${t("shape." + k)}`]), L.shape, (v) => set("shape", v, false)), null);
     case "brand": return check("props.rail", L.rail, (v) => set("rail", v));
     case "title": return [
       select([["left", `${t("props.align")} · ${t("align.left")}`], ["center", `${t("props.align")} · ${t("align.center")}`]], L.align, (v) => set("align", v)),

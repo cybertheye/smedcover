@@ -13,13 +13,15 @@
 
 export const BOUND_TYPES = ["bg", "accent", "graphic", "brand", "title", "tag", "catname", "frame"];
 export const FREE_TYPES = ["asset", "text"];
+/** Shapes the colour block and its dividing edge can take ("slant" is the template's own). */
+export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes"];
 export const isFree = (type) => FREE_TYPES.includes(type);
 /** Layers that can be grabbed on the canvas (the others are selected from the layer list only). */
 export const isPickable = (layer) => layer.visible && !layer.locked && layer.type !== "accent" && layer.type !== "frame";
 
 const PROPS = {
   bg: { grid: true, blur: 0, dim: 0 },
-  accent: {},
+  accent: { shape: "slant" },
   graphic: {},
   brand: { rail: true },
   title: { align: "left", stroke: 1, shadow: 1 },
@@ -62,6 +64,7 @@ function normalizeLayer(raw) {
   if (typeof raw.name === "string" && raw.name) L.name = raw.name.slice(0, 60);
   switch (raw.type) {
     case "bg": L.grid = raw.grid !== false; L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); break;
+    case "accent": L.shape = ACCENT_SHAPES.includes(raw.shape) ? raw.shape : "slant"; break;
     case "brand": L.rail = raw.rail !== false; break;
     case "title": L.align = raw.align === "center" ? "center" : "left"; L.stroke = num(raw.stroke, 1, 0, 2); L.shadow = num(raw.shadow, 1, 0, 2); break;
     case "catname": L.showName = raw.showName !== false; L.plate = raw.plate !== false; break;

@@ -36,15 +36,6 @@ function grid(ctx, color, w, h) {
   for (let y = 20; y < h; y += 60) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
   ctx.stroke();
 }
-// ink line + thin white line offset along (nx, ny)
-function inkEdge(ctx, [x0, y0, x1, y1], nx, ny) {
-  const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy), ex = (dx / len) * 14, ey = (dy / len) * 14;
-  ctx.lineCap = "butt";
-  ctx.strokeStyle = INK; ctx.lineWidth = 16;
-  ctx.beginPath(); ctx.moveTo(x0 - ex, y0 - ey); ctx.lineTo(x1 + ex, y1 + ey); ctx.stroke();
-  ctx.strokeStyle = "#fff"; ctx.lineWidth = 4;
-  ctx.beginPath(); ctx.moveTo(x0 - ex + nx * 24, y0 - ey + ny * 24); ctx.lineTo(x1 + ex + nx * 24, y1 + ey + ny * 24); ctx.stroke();
-}
 // accent plate with an offset white shadow; (x, y) = top-left
 function accentTag(ctx, str, x, y, fs, acc) {
   ctx.font = `700 ${fs}px ${fonts.en}, ${fonts.cn}`;
@@ -127,6 +118,65 @@ function drawCategory(ctx, cat, G, C, show) {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
+// ---------- colour block & dividing edge
+// The template gives the block as a polygon whose first two points are the dividing edge (A -> B)
+// and a normal (nx, ny) pointing away from the block. A shape re-draws that edge.
+const noise = (n) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+function edgePoints(shape, A, B, nx, ny) {
+  const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
+  const at = (u, off = 0) => [A[0] + (B[0] - A[0]) * u + nx * off, A[1] + (B[1] - A[1]) * u + ny * off];
+  const sample = (n, fn) => Array.from({ length: n + 1 }, (_, i) => at(i / n, fn(i / n, i)));
+  switch (shape) {
+    case "zigzag": { const n = Math.max(4, Math.round(len / 90)); return sample(n, (u, i) => (i % 2 ? 22 : -22)); }
+    case "wave": return sample(96, (u) => 24 * Math.sin((u * len * Math.PI * 2) / 420));
+    case "steps": { const n = Math.max(3, Math.round(len / 240)), pts = []; for (let i = 0; i < n; i++) { const o = i % 2 ? -24 : 24; pts.push(at(i / n, o), at((i + 1) / n, o)); } return pts; }
+    case "torn": return sample(Math.max(40, Math.round(len / 18)), (u, i) => (noise(i * 1.7) - 0.5) * 30 + (noise(Math.floor(i / 5) * 0.31) - 0.5) * 26);
+    case "chevron": { const d = 110 / len; return [at(0), at(0.5 - d), at(0.5, 74), at(0.5 + d), at(1)]; }
+    case "scallop": { const n = Math.max(3, Math.round(len / 150)); return sample(n * 12, (u) => 34 * Math.abs(Math.sin(u * n * Math.PI)) - 10); }
+    default: return [at(0), at(1)];
+  }
+}
+function strokeEdge(ctx, pts, nx, ny, sharp, lw = 16) {
+  const run = (ox, oy) => { ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p[0] + ox, p[1] + oy) : ctx.moveTo(p[0] + ox, p[1] + oy))); ctx.stroke(); };
+  ctx.lineCap = "butt"; ctx.lineJoin = sharp ? "miter" : "round";
+  ctx.strokeStyle = INK; ctx.lineWidth = lw; run(0, 0);
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 4; run(nx * (lw / 2 + 16), ny * (lw / 2 + 16));
+}
+/** Paints the colour block in `shape`. Returns its bounding box as a hit entry. */
+export function paintAccent(ctx, shape, G, C) {
+  const acc = rgb(C), { nx, ny } = G.edge;
+  let [A, B] = [G.accent[0], G.accent[1]];
+  const axis = ny ? 1 : 0;                                   // the coordinate the edge is slanted in
+  if (shape === "flat") { const m = (A[axis] + B[axis]) / 2; A = [...A]; B = [...B]; A[axis] = B[axis] = m; }
+  if (shape === "reverse") { A = [...A]; B = [...B]; [A[axis], B[axis]] = [B[axis], A[axis]]; }
+  const inset = shape === "double" ? 52 : 0, shift = (p, d) => [p[0] - nx * d, p[1] - ny * d];
+  const len = Math.hypot(B[0] - A[0], B[1] - A[1]), dx = (B[0] - A[0]) / len, dy = (B[1] - A[1]) / len;
+  // run the edge a little past both ends so its inked stroke leaves the canvas cleanly
+  const ext = (pts) => [[pts[0][0] - dx * 20, pts[0][1] - dy * 20], ...pts, [pts[pts.length - 1][0] + dx * 20, pts[pts.length - 1][1] + dy * 20]];
+  const edge = ext(edgePoints(shape, shift(A, inset), shift(B, inset), nx, ny));
+  const block = [...edge, ...G.accent.slice(2)];
+  const xs = G.accent.map((p) => p[0]), ys = G.accent.map((p) => p[1]);
+  const bx = Math.min(...xs), by = Math.min(...ys), bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
+  polygon(ctx, block); ctx.fillStyle = acc; ctx.fill();
+  ctx.save(); polygon(ctx, block); ctx.clip();
+  toneField(ctx, bx - 60, by - 60, bx + bw + 60, by + bh + 60, 28, rgb(mixc(C, BLK, 0.24)), (x, y) => ((y - by) / bh) * 1.15 - 0.4 + (x - bx) / (bw * 2.6));
+  if (shape === "stripes") {                                 // hazard band just inside the edge
+    polygon(ctx, ext([A, B]).concat(ext([shift(A, 46), shift(B, 46)]).reverse())); ctx.clip();
+    ctx.fillStyle = INK;
+    for (let d = -80; d < len + 80; d += 46) { polygon(ctx, [[A[0] + dx * d, A[1] + dy * d], [A[0] + dx * (d + 23), A[1] + dy * (d + 23)], shift([A[0] + dx * (d - 23), A[1] + dy * (d - 23)], 46), shift([A[0] + dx * (d - 46), A[1] + dy * (d - 46)], 46)]); ctx.fill(); }
+  }
+  ctx.restore();
+  if (shape === "stripes") { ctx.strokeStyle = INK; ctx.lineWidth = 8; const q = ext([shift(A, 46), shift(B, 46)]); ctx.beginPath(); ctx.moveTo(...q[0]); ctx.lineTo(...q[q.length - 1]); ctx.stroke(); }
+  if (shape === "double") {                                  // a detached band of the same colour, then the block
+    const band = ext([A, B]);
+    polygon(ctx, band.concat(ext([shift(A, 24), shift(B, 24)]).reverse())); ctx.fillStyle = acc; ctx.fill();
+    ctx.strokeStyle = INK; ctx.lineWidth = 8; ctx.lineJoin = "miter"; ctx.stroke();
+    ctx.lineWidth = 10; ctx.beginPath(); edge.forEach((p, i) => (i ? ctx.lineTo(...p) : ctx.moveTo(...p))); ctx.stroke();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(band[0][0] + nx * 22, band[0][1] + ny * 22); ctx.lineTo(band[3][0] + nx * 22, band[3][1] + ny * 22); ctx.stroke();
+  } else strokeEdge(ctx, edge, nx, ny, ["zigzag", "steps", "chevron"].includes(shape));
+  return { cx: bx + bw / 2, cy: by + bh / 2, hw: bw / 2, hh: bh / 2, r: 0 };
+}
+
 // ---------- layer painters. Each returns the box it covers for hit-testing:
 // {cx, cy, hw, hh, r} = centre, half-extents and rotation in virtual units (or null).
 
@@ -189,14 +239,7 @@ const PAINT = {
     return { cx: w / 2, cy: h / 2, hw: w / 2, hh: h / 2, r: 0 };
   },
   accent(ctx, L, tr, env) {
-    const { G, C } = env, xs = G.accent.map((p) => p[0]), ys = G.accent.map((p) => p[1]);
-    const bx = Math.min(...xs), by = Math.min(...ys), bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
-    polygon(ctx, G.accent); ctx.fillStyle = env.acc; ctx.fill();
-    ctx.save(); polygon(ctx, G.accent); ctx.clip();
-    toneField(ctx, bx - 30, by - 30, bx + bw + 30, by + bh + 30, 28, rgb(mixc(C, BLK, 0.24)), (x, y) => ((y - by) / bh) * 1.15 - 0.4 + (x - bx) / (bw * 2.6));
-    ctx.restore();
-    inkEdge(ctx, G.edge.line, G.edge.nx, G.edge.ny);
-    return { cx: bx + bw / 2, cy: by + bh / 2, hw: bw / 2, hh: bh / 2, r: 0 };
+    return paintAccent(ctx, L.shape, env.G, env.C);
   },
   graphic(ctx, L, tr, env) {
     const g = env.cat.graphic;

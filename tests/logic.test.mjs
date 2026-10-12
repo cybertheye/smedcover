@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { virtualSize, layout, TEMPLATES } from "../ui/js/layout.js";
 import { parseCsv, csvToJobs } from "../ui/js/csv.js";
 import { normalizeProfile, normalizeCover, normalizeSettings, exportName, usedUserAssets } from "../ui/js/store.js";
-import { BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable } from "../ui/js/layers.js";
+import { ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable } from "../ui/js/layers.js";
 import { sampleProfile, starterProfile } from "../ui/js/presets.js";
 
 test("virtualSize keeps the five tuned canvases and normalises everything else", () => {
@@ -42,6 +42,7 @@ test("every template yields a sane layout across extreme aspect ratios", () => {
     assert.ok(g.title.x >= 0 && g.title.x + g.title.w <= w && g.title.y + g.title.h <= h, `${t} ${rw}x${rh} title inside`);
     assert.ok(g.art.x > 0 && g.art.x < w && g.art.y > 0 && g.art.y < h && g.art.s > 0.2, `${t} ${rw}x${rh} art`);
     assert.ok(g.cat.maxW > 100, `${t} ${rw}x${rh} category width ${g.cat.maxW}`);
+    assert.deepEqual([...g.accent[0], ...g.accent[1]], g.edge.line, `${t} ${rw}x${rh} accent starts with the edge`);
   }
 });
 
@@ -103,6 +104,9 @@ test("normalizeLayers keeps every bound layer once, the background at the bottom
   assert.equal(new Set(ls.map((l) => l.id)).size, ls.length);        // the clashing id was replaced
   assert.deepEqual(normalizeLayers(null).map((l) => l.id), BOUND_TYPES);
   assert.deepEqual(defaultLayers().map((l) => l.id), BOUND_TYPES);
+  assert.equal(ACCENT_SHAPES.length, 11);                             // the default plus ten more
+  assert.equal(normalizeLayers([{ type: "accent", shape: "wave" }]).find((l) => l.id === "accent").shape, "wave");
+  assert.equal(normalizeLayers([{ type: "accent", shape: "bogus" }]).find((l) => l.id === "accent").shape, "slant");
 });
 
 test("layer placement: one edit maps to every size, per-size edits stay local", () => {

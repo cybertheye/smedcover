@@ -44,7 +44,7 @@ export const TEMPLATES = ["stack", "split", "banner"];
 
 /**
  * Layout for a virtual canvas of w x h. All values are in virtual units.
- *   accent   polygon of the accent-coloured region
+ *   accent   polygon of the accent-coloured region; its first two points are the dividing edge
  *   edge     the inked dividing line: [x0, y0, x1, y1] and the side its white hairline sits on
  *   title    box the title is fitted into
  *   tag      top-left corner and font size of the corner tag
@@ -93,7 +93,7 @@ function splitLayout(w, h, aspect) {
   const name = lerp(84, 110, wide);
   return {
     template: "split",
-    accent: [[px + slant, 0], [w, 0], [w, h], [px - slant, h]],
+    accent: [[px + slant, 0], [px - slant, h], [w, h], [w, 0]],
     edge: { line: [px + slant, 0, px - slant, h], nx: -1, ny: 0 },
     title: { x: 80, y: 150, w: px - slant - 150, h: Math.max(120, h - 150 - 400) },
     tag: { x: 84, y: h - 392, fs: lerp(64, 100, wide) },
