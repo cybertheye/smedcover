@@ -124,6 +124,9 @@
   #modal{position:fixed;inset:0;background:rgba(5,5,10,.86);display:grid;place-items:center;z-index:40}
   #modal[hidden]{display:none}
   #modal .dlg{width:min(540px,92vw);max-height:88vh;overflow:auto;background:var(--bg);border:3px solid #fff;box-shadow:12px 12px 0 var(--acc);padding:26px;display:grid;gap:14px}
+  #modal .bar{height:14px;border:2px solid #fff;background:var(--panel)}
+  #modal .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .15s}
+  #modal .count{font:600 15px var(--mono)}
   #modal h2{font:400 34px "Bebas Neue",var(--ui);letter-spacing:.06em;margin:0}
   @media(max-width:1100px){html,body{overflow:auto}.app{height:auto}.body,.body.setup{grid-template-columns:1fr}aside{border:0!important}.scroll{overflow:visible}#stage{height:60vh}}
 </style>

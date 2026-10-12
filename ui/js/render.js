@@ -143,11 +143,10 @@ function strokeEdge(ctx, pts, nx, ny, sharp, lw = 16) {
   ctx.strokeStyle = "#fff"; ctx.lineWidth = 4; run(nx * (lw / 2 + 16), ny * (lw / 2 + 16));
 }
 /**
- * Paints the colour block in `shape` and returns the box {x,y,w,h} it covers on the untouched canvas.
- * The block itself runs far beyond the canvas; `loose` (the layer was moved) also extends its
- * screentone, so dragging or rotating it never reveals where it ends.
+ * Paints the colour block in `shape`, fitted to the canvas, and returns the box {x,y,w,h} it covers.
+ * It is an ordinary layer: moved or shrunk, its sides simply show.
  */
-export function paintAccent(ctx, shape, G, C, loose = false) {
+export function paintAccent(ctx, shape, G, C) {
   const acc = rgb(C), { nx, ny } = G.edge;
   let [A, B] = [G.accent[0], G.accent[1]];
   const axis = ny ? 1 : 0;                                   // the coordinate the edge is slanted in
@@ -155,19 +154,22 @@ export function paintAccent(ctx, shape, G, C, loose = false) {
   if (shape === "reverse") { A = [...A]; B = [...B]; [A[axis], B[axis]] = [B[axis], A[axis]]; }
   const inset = shape === "double" ? 52 : 0, shift = (p, d) => [p[0] - nx * d, p[1] - ny * d];
   const len = Math.hypot(B[0] - A[0], B[1] - A[1]), dx = (B[0] - A[0]) / len, dy = (B[1] - A[1]) / len;
-  const FAR = 5000, m = loose ? 900 : 60;
-  const ext = (pts) => [[pts[0][0] - dx * FAR, pts[0][1] - dy * FAR], ...pts, [pts[pts.length - 1][0] + dx * FAR, pts[pts.length - 1][1] + dy * FAR]];
+  // the edge runs a little past both ends so its stroke is cut cleanly by the clip below
+  const ext = (pts) => [[pts[0][0] - dx * 30, pts[0][1] - dy * 30], ...pts, [pts[pts.length - 1][0] + dx * 30, pts[pts.length - 1][1] + dy * 30]];
   const edge = ext(edgePoints(shape, shift(A, inset), shift(B, inset), nx, ny));
-  const block = [...edge, shift(edge[edge.length - 1], FAR), shift(edge[0], FAR)];
+  const block = [...edge, ...G.accent.slice(2)];
   const xs = G.accent.map((p) => p[0]), ys = G.accent.map((p) => p[1]);
   const bx = Math.min(...xs), by = Math.min(...ys), bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
+  // nothing is drawn outside the block's own rectangle, plus the room the edge needs on its open side
+  ctx.save();
+  ctx.beginPath(); ctx.rect(bx - (nx < 0 ? 100 : 0), by - (ny < 0 ? 100 : 0), bw + (nx ? 100 : 0), bh + (ny ? 100 : 0)); ctx.clip();
   polygon(ctx, block); ctx.fillStyle = acc; ctx.fill();
   ctx.save(); polygon(ctx, block); ctx.clip();
-  toneField(ctx, bx - m, by - m, bx + bw + m, by + bh + m, 28, rgb(mixc(C, BLK, 0.24)), (x, y) => ((y - by) / bh) * 1.15 - 0.4 + (x - bx) / (bw * 2.6));
+  toneField(ctx, bx - 60, by - 60, bx + bw + 60, by + bh + 60, 28, rgb(mixc(C, BLK, 0.24)), (x, y) => ((y - by) / bh) * 1.15 - 0.4 + (x - bx) / (bw * 2.6));
   if (shape === "stripes") {                                 // hazard band just inside the edge
     polygon(ctx, ext([A, B]).concat(ext([shift(A, 46), shift(B, 46)]).reverse())); ctx.clip();
     ctx.fillStyle = INK;
-    for (let d = -46 * Math.ceil((m + 80) / 46); d < len + m + 80; d += 46) { polygon(ctx, [[A[0] + dx * d, A[1] + dy * d], [A[0] + dx * (d + 23), A[1] + dy * (d + 23)], shift([A[0] + dx * (d - 23), A[1] + dy * (d - 23)], 46), shift([A[0] + dx * (d - 46), A[1] + dy * (d - 46)], 46)]); ctx.fill(); }
+    for (let d = -92; d < len + 92; d += 46) { polygon(ctx, [[A[0] + dx * d, A[1] + dy * d], [A[0] + dx * (d + 23), A[1] + dy * (d + 23)], shift([A[0] + dx * (d - 23), A[1] + dy * (d - 23)], 46), shift([A[0] + dx * (d - 46), A[1] + dy * (d - 46)], 46)]); ctx.fill(); }
   }
   ctx.restore();
   if (shape === "stripes") { ctx.strokeStyle = INK; ctx.lineWidth = 8; const q = ext([shift(A, 46), shift(B, 46)]); ctx.beginPath(); ctx.moveTo(...q[0]); ctx.lineTo(...q[q.length - 1]); ctx.stroke(); }
@@ -178,6 +180,7 @@ export function paintAccent(ctx, shape, G, C, loose = false) {
     ctx.lineWidth = 10; ctx.beginPath(); edge.forEach((p, i) => (i ? ctx.lineTo(...p) : ctx.moveTo(...p))); ctx.stroke();
     ctx.strokeStyle = "#fff"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(band[0][0] + nx * 22, band[0][1] + ny * 22); ctx.lineTo(band[3][0] + nx * 22, band[3][1] + ny * 22); ctx.stroke();
   } else strokeEdge(ctx, edge, nx, ny, ["zigzag", "steps", "chevron"].includes(shape));
+  ctx.restore();
   return { x: bx, y: by, w: bw, h: bh };
 }
 
@@ -250,8 +253,7 @@ const PAINT = {
   },
   accent(ctx, L, tr, env) {
     const xs = env.G.accent.map((p) => p[0]), ys = env.G.accent.map((p) => p[1]), x = Math.min(...xs), y = Math.min(...ys);
-    const loose = !!(tr.dx || tr.dy || tr.r || tr.s !== 1 || tr.kx !== 1 || tr.ky !== 1);
-    return placed(ctx, tr, (c) => paintAccent(c, L.shape, env.G, env.C, loose), { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y });
+    return placed(ctx, tr, (c) => paintAccent(c, L.shape, env.G, env.C), { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y });
   },
   graphic(ctx, L, tr, env) {
     const g = env.cat.graphic;

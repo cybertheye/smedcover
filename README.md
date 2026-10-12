@@ -35,6 +35,13 @@ npm test           # front-end unit tests
 cd src-tauri && cargo test   # Rust unit tests
 ```
 
+End-to-end check of the web view / Rust bridge — the built app exports a few covers in every format
+into a folder, writes `report.json` there and quits (it does not touch your real app data):
+
+```bash
+SMEDCOVER_SELFTEST=/absolute/empty/folder src-tauri/target/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover
+```
+
 `.github/workflows/build.yml` builds installers for macOS, Windows and Linux on GitHub Actions.
 
 ## How it is put together
@@ -60,6 +67,10 @@ ui/                    static front end — plain ES modules, no bundler
 src-tauri/src/lib.rs   Rust side: sandboxed app-data store, PNG/JPEG/WebP export, system fonts
 tests/                 unit tests for the DOM-free modules
 ```
+
+Exports do not freeze the window: each cover is drawn, encoded to PNG asynchronously and sent to Rust
+as raw bytes (no base64), where it is converted and written on a worker thread, two at a time, with a
+progress bar and a cancel button.
 
 All drawing happens in the web view. The Rust side only touches files: profiles, settings and the
 current session live in the app data directory, and exports are written where you choose.

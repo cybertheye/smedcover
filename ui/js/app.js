@@ -635,35 +635,80 @@ function renderFull(size, cover, index) {
   return cv;
 }
 const nameFor = (size, cover, index) => exportName(S.settings.nameTemplate, { index, cat: S.profile.categories[index], title: cover.title, size, scale: S.settings.scale, ext: EXT[S.settings.format] });
-const pngData = (cv) => cv.toDataURL("image/png").split(",")[1];
+/** PNG bytes of a canvas. Encoding is asynchronous, so the window keeps responding meanwhile. */
+const toPng = (cv) => new Promise((res, rej) => cv.toBlob((b) => (b ? b.arrayBuffer().then((a) => res(new Uint8Array(a)), rej) : rej(new Error("could not encode the image"))), "image/png"));
+/** Body of a binary export call: [u32 LE length][JSON metadata][PNG bytes] (see parse_frame in lib.rs). */
+function framed(png, extra) {
+  const meta = new TextEncoder().encode(JSON.stringify({ dir: "", ...extra, format: S.settings.format, quality: S.settings.quality }));
+  const out = new Uint8Array(4 + meta.length + png.length);
+  new DataView(out.buffer).setUint32(0, meta.length, true);
+  out.set(meta, 4); out.set(png, 4 + meta.length);
+  return out;
+}
+/** Resolves once the browser has had a chance to paint (or shortly after, when the window is hidden). */
+const nextPaint = () => new Promise((r) => { requestAnimationFrame(() => setTimeout(r, 0)); setTimeout(r, 80); });
 function browserSave(name, href) { const a = el("a", { href, download: name }); document.body.append(a); a.click(); a.remove(); }
 function browserSaveCanvas(cv, name) {   // plain-browser fallback: the browser encodes; a dark matte under JPEG
   const { format, quality } = S.settings;
   let src = cv;
   if (format === "jpeg") { src = el("canvas", { width: cv.width, height: cv.height }); const x = src.getContext("2d"); x.fillStyle = "#0a0a12"; x.fillRect(0, 0, src.width, src.height); x.drawImage(cv, 0, 0); }
-  browserSave(name, src.toDataURL("image/" + format, quality / 100));
+  return new Promise((res) => src.toBlob((b) => { const url = URL.createObjectURL(b); browserSave(name, url); setTimeout(() => URL.revokeObjectURL(url), 4000); res(); }, "image/" + format, quality / 100));
+}
+
+/** Modal progress for exports: a bar, a counter, the current file and a cancel button. */
+function progress(total) {
+  const m = $("modal"), bar = el("div", { class: "bar" }, el("i")), count = el("div", { class: "count" }), file = el("div", { class: "hint", style: "margin:0;min-height:1.7em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" });
+  const state = { cancelled: false };
+  const cancel = el("button", { class: "btn wide", onclick: () => { state.cancelled = true; cancel.disabled = true; } }, t("exp.cancel"));
+  m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("exp.dialog")), count, bar, file, total > 1 && cancel));
+  m.hidden = false;
+  state.set = (done, name) => { count.textContent = t("msg.batch", Math.min(done + 1, total), total); bar.firstChild.style.width = (done / total) * 100 + "%"; if (name) file.textContent = name; };
+  state.close = closeModal;
+  state.set(0, "");
+  return state;
+}
+/**
+ * Exports jobs ([{cover, index, size}]) one after another without freezing the window: each cover is
+ * drawn, encoded to PNG off the main thread and handed to Rust as raw bytes, where it is converted
+ * and written on a worker thread (up to two at a time) while the next cover is already being drawn.
+ * save(bytes, name) does the writing; returns how many were written.
+ */
+async function runExport(jobs, save) {
+  const prog = progress(jobs.length), pending = new Set();
+  let done = 0, failed = null;
+  try {
+    for (const job of jobs) {
+      if (prog.cancelled || failed) break;
+      const name = nameFor(job.size, job.cover, job.index);
+      prog.set(done, name);
+      await nextPaint();
+      const cv = renderFull(job.size, job.cover, job.index);
+      const task = (native ? toPng(cv).then((bytes) => { cv.width = cv.height = 0; return save(bytes, name); }) : browserSaveCanvas(cv, name))
+        .then(() => { done++; prog.set(done); }, (e) => { failed = failed || e; })
+        .finally(() => pending.delete(task));
+      pending.add(task);
+      if (pending.size >= 2) await Promise.race(pending);
+    }
+    await Promise.all(pending);
+  } finally { prog.close(); }
+  if (failed) { fail(failed); return -1; }
+  if (prog.cancelled) toast(t("msg.cancelled", done, jobs.length));
+  return done;
 }
 async function exportOne(size) {
-  const cv = renderFull(size, S.cover, catIndex()), name = nameFor(size, S.cover, catIndex());
-  if (!native) return browserSaveCanvas(cv, name);
-  try { const p = await invoke("save_image", { name, data: pngData(cv), format: S.settings.format, quality: S.settings.quality }); if (p) toast(t("msg.saved", p)); } catch (e) { fail(e); }
+  const job = { cover: S.cover, index: catIndex(), size };
+  if (!native) return void (await runExport([job]));
+  let saved = null;
+  const n = await runExport([job], async (bytes, name) => { saved = await invoke("save_image", framed(bytes, { name })); });
+  if (n === 1 && saved) toast(t("msg.saved", saved));
 }
-/** Writes every selected size of every job ({cover, index}) into one folder the user picks. */
-async function exportMany(jobs) {
-  const total = jobs.length * S.profile.sizes.length;
-  let dir = null, done = 0;
-  try {
-    if (native) { dir = await invoke("pick_folder"); if (!dir) return; }
-    closeModal();
-    for (const job of jobs) for (const size of S.profile.sizes) {
-      toast(t("msg.batch", ++done, total), true);
-      await new Promise((r) => setTimeout(r, 16));                 // let the progress text paint
-      const cv = renderFull(size, job.cover, job.index), name = nameFor(size, job.cover, job.index);
-      if (native) await invoke("write_image", { dir, name, data: pngData(cv), format: S.settings.format, quality: S.settings.quality });
-      else { browserSaveCanvas(cv, name); await new Promise((r) => setTimeout(r, 300)); }
-    }
-    toast(t("msg.savedN", total, dir || "Downloads"));
-  } catch (e) { fail(e); }
+/** Writes every selected size of every cover ([{cover, index}]) into one folder the user picks. */
+async function exportMany(covers) {
+  let dir = null;
+  try { if (native) { dir = await invoke("pick_folder"); if (!dir) return; } } catch (e) { return fail(e); }
+  const jobs = covers.flatMap((c) => S.profile.sizes.map((size) => ({ ...c, size })));
+  const n = await runExport(jobs, (bytes, name) => invoke("write_image", framed(bytes, { dir, name })));
+  if (n === jobs.length) toast(t("msg.savedN", n, dir || "Downloads"));
 }
 async function batchFromCsv() {
   const f = await pickFile(".csv,.tsv,.txt,text/csv");
@@ -853,7 +898,8 @@ async function start() {
   for (const a of await loadAssetRecords().catch(() => [])) await putUserAsset(a.id, a.name, a.src);
   if (native) S.systemFonts = await invoke("list_system_fonts").catch(() => []);
   S.profiles = await loadProfiles().catch(() => []);
-  if (!S.profiles.length) await addProfile(await welcome(), false);
+  const selftest = native ? await invoke("selftest_dir").catch(() => null) : null;
+  if (!S.profiles.length) await addProfile(selftest ? sampleProfile("en") : await welcome(), false);
   S.profile = S.profiles.find((p) => p.id === S.settings.profileId) || S.profiles[0];
   S.settings.profileId = S.profile.id; persistSettings();
   S.cover = normalizeCover(await readJson("session.json").catch(() => null), S.profile);
@@ -862,6 +908,24 @@ async function start() {
   S.photo = S.photoSrc ? await loadImage(S.photoSrc) : null;
   await applyProfile();
   resetHistory();
+  if (selftest) selfTest(selftest);
+}
+/** SMEDCOVER_SELFTEST mode: export real covers in every format through the normal path, report, quit. */
+async function selfTest(dir) {
+  const report = { ok: false, files: [], errors: [] };
+  try {
+    S.cover.title = "Self test\n*binary* export"; S.cover.tag = "EP.01";
+    for (const format of ["png", "jpeg", "webp"]) {
+      S.settings.format = format;
+      const t0 = performance.now();
+      const jobs = S.profile.sizes.slice(0, 2).map((size) => ({ cover: S.cover, index: catIndex(), size }));
+      const n = await runExport(jobs, async (bytes, name) => { report.files.push({ path: await invoke("write_image", framed(bytes, { dir, name })), pngBytes: bytes.length }); });
+      report[format + "_ms"] = Math.round(performance.now() - t0);
+      if (n !== jobs.length) report.errors.push(`${format}: ${n}/${jobs.length} — ${$("toast").textContent}`);
+    }
+    report.ok = !report.errors.length;
+  } catch (e) { report.errors.push(String(e && e.message ? e.message : e)); }
+  await invoke("selftest_done", { report: JSON.stringify(report, null, 2) }).catch(() => null);
 }
 // test hook: lets automated checks drive the app without the UI
 window.__smedcover = { S, drawCover, renderFull, nameFor, touch, addAsset, addLayer, newLayer, selectLayer, selectSize, setMode, layer };

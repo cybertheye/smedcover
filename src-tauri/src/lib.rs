@@ -3,15 +3,17 @@
 //! All drawing happens in the web view (`ui/`). This side owns the file system:
 //!
 //! * a small sandboxed store under the app data directory (profiles, settings, session, fonts);
-//! * exporting covers: the web view sends a PNG, which is written as PNG, JPEG or WebP;
+//! * exporting covers: the web view sends PNG bytes in a raw, framed request body (no base64),
+//!   which are converted to PNG, JPEG or WebP and written here, off the main thread;
 //! * listing the fonts installed on the system.
 
 use std::fs;
 use std::io::{Cursor, ErrorKind};
 use std::path::{Component, Path, PathBuf};
 
-use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{codecs::jpeg::JpegEncoder, ImageFormat, RgbImage};
+use serde::Deserialize;
+use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
@@ -80,8 +82,33 @@ fn store_delete(root: &Path, rel: &str) -> Res<()> {
     }
 }
 
+/// Folder given in `SMEDCOVER_SELFTEST`, if any. In that mode the app keeps its data there instead
+/// of the real app data directory, exports a few covers into it through the normal code path,
+/// writes `report.json` and quits — an end-to-end check of the web view / Rust bridge.
+fn selftest_root() -> Option<PathBuf> {
+    std::env::var_os("SMEDCOVER_SELFTEST")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+}
+
+#[tauri::command]
+fn selftest_dir() -> Option<String> {
+    selftest_root().map(|p| p.display().to_string())
+}
+
+#[tauri::command]
+fn selftest_done(app: AppHandle, report: String) -> Res<()> {
+    let root = selftest_root().ok_or("not in self-test mode")?;
+    fs::write(root.join("report.json"), report).map_err(err)?;
+    app.exit(0);
+    Ok(())
+}
+
 fn data_root(app: &AppHandle) -> Res<PathBuf> {
-    let dir = app.path().app_data_dir().map_err(err)?;
+    let dir = match selftest_root() {
+        Some(root) => root.join("data"),
+        None => app.path().app_data_dir().map_err(err)?,
+    };
     fs::create_dir_all(&dir).map_err(err)?;
     Ok(dir)
 }
@@ -108,16 +135,13 @@ fn app_delete(app: AppHandle, path: String) -> Res<()> {
 
 // ---------------------------------------------------------------- image export
 
-/// Re-encodes a base64 PNG as `format` ("png" | "jpeg" | "webp"). JPEG is flattened onto
+/// Re-encodes PNG bytes as `format` ("png" | "jpeg" | "webp"). JPEG is flattened onto
 /// [`MATTE`]; WebP is lossless.
-fn encode(png_b64: &str, format: &str, quality: u8) -> Res<Vec<u8>> {
-    let png = STANDARD
-        .decode(png_b64)
-        .map_err(|e| format!("invalid image data: {e}"))?;
+fn encode(png: &[u8], format: &str, quality: u8) -> Res<Vec<u8>> {
     if format == "png" {
-        return Ok(png);
+        return Ok(png.to_vec());
     }
-    let img = image::load_from_memory_with_format(&png, ImageFormat::Png).map_err(err)?;
+    let img = image::load_from_memory_with_format(png, ImageFormat::Png).map_err(err)?;
     let mut out = Vec::new();
     match format {
         "jpeg" => {
@@ -143,6 +167,37 @@ fn encode(png_b64: &str, format: &str, quality: u8) -> Res<Vec<u8>> {
     Ok(out)
 }
 
+/// What accompanies the image bytes of an export request.
+#[derive(Deserialize)]
+struct ExportMeta {
+    name: String,
+    format: String,
+    quality: u8,
+    #[serde(default)]
+    dir: String,
+}
+
+/// Splits a binary export request into its metadata and PNG bytes. The body is framed as
+/// `[u32 little-endian length][JSON metadata][PNG]`, so file names and pixels travel together
+/// without base64 and without relying on request headers.
+fn parse_frame(body: &[u8]) -> Res<(ExportMeta, &[u8])> {
+    let len = body
+        .get(..4)
+        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize)
+        .ok_or("request too short")?;
+    let meta = body.get(4..4 + len).ok_or("truncated metadata")?;
+    let meta: ExportMeta =
+        serde_json::from_slice(meta).map_err(|e| format!("invalid metadata: {e}"))?;
+    Ok((meta, &body[4 + len..]))
+}
+
+fn frame_of<'a>(request: &'a Request<'_>) -> Res<(ExportMeta, &'a [u8])> {
+    match request.body() {
+        InvokeBody::Raw(body) => parse_frame(body),
+        _ => Err("expected a binary body".into()),
+    }
+}
+
 /// Keeps only the final path component, so a name can never escape the chosen folder.
 fn safe_name(name: &str) -> Res<&std::ffi::OsStr> {
     Path::new(name)
@@ -157,28 +212,23 @@ fn extension(name: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Asks where to save one cover and writes it. `None` when the dialog is cancelled.
-#[tauri::command]
-async fn save_image(
-    app: AppHandle,
-    name: String,
-    data: String,
-    format: String,
-    quality: u8,
-) -> Res<Option<String>> {
-    let bytes = encode(&data, &format, quality)?;
-    let ext = extension(&name);
+/// Asks where to save one cover (framed binary body, see [`parse_frame`]) and writes it.
+/// `None` when the dialog is cancelled.
+#[tauri::command(async)]
+fn save_image(app: AppHandle, request: Request<'_>) -> Res<Option<String>> {
+    let (meta, png) = frame_of(&request)?;
+    let ext = extension(&meta.name);
     let Some(target) = app
         .dialog()
         .file()
-        .set_file_name(safe_name(&name)?.to_string_lossy())
+        .set_file_name(safe_name(&meta.name)?.to_string_lossy())
         .add_filter(ext.to_uppercase(), &[ext.as_str()])
         .blocking_save_file()
     else {
         return Ok(None);
     };
     let path = target.into_path().map_err(err)?;
-    fs::write(&path, bytes).map_err(err)?;
+    fs::write(&path, encode(png, &meta.format, meta.quality)?).map_err(err)?;
     Ok(Some(path.display().to_string()))
 }
 
@@ -191,21 +241,17 @@ async fn pick_folder(app: AppHandle) -> Res<Option<String>> {
     }
 }
 
-/// Writes one cover into a folder previously returned by [`pick_folder`].
-#[tauri::command]
-async fn write_image(
-    dir: String,
-    name: String,
-    data: String,
-    format: String,
-    quality: u8,
-) -> Res<String> {
-    let dir = PathBuf::from(dir);
+/// Writes one cover (framed binary body) into `dir`, a folder previously returned by
+/// [`pick_folder`]. Runs on a worker thread, so several can be converted at once.
+#[tauri::command(async)]
+fn write_image(request: Request<'_>) -> Res<String> {
+    let (meta, png) = frame_of(&request)?;
+    let dir = PathBuf::from(&meta.dir);
     if !dir.is_absolute() || !dir.is_dir() {
         return Err(format!("not a folder: {}", dir.display()));
     }
-    let path = dir.join(safe_name(&name)?);
-    fs::write(&path, encode(&data, &format, quality)?).map_err(err)?;
+    let path = dir.join(safe_name(&meta.name)?);
+    fs::write(&path, encode(png, &meta.format, meta.quality)?).map_err(err)?;
     Ok(path.display().to_string())
 }
 
@@ -257,7 +303,9 @@ pub fn run() {
             pick_folder,
             write_image,
             save_text,
-            list_system_fonts
+            list_system_fonts,
+            selftest_dir,
+            selftest_done
         ])
         .run(tauri::generate_context!())
         .expect("error while running SmedCover");
@@ -268,11 +316,11 @@ mod tests {
     use super::*;
     use image::{Rgba, RgbaImage};
 
-    fn png_b64(img: &RgbaImage) -> String {
+    fn png(img: &RgbaImage) -> Vec<u8> {
         let mut bytes = Vec::new();
         img.write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
             .unwrap();
-        STANDARD.encode(bytes)
+        bytes
     }
 
     #[test]
@@ -322,13 +370,33 @@ mod tests {
 
     #[test]
     fn encode_png_is_passed_through() {
-        let b64 = png_b64(&RgbaImage::from_pixel(4, 3, Rgba([1, 2, 3, 255])));
+        let bytes = png(&RgbaImage::from_pixel(4, 3, Rgba([1, 2, 3, 255])));
+        assert_eq!(encode(&bytes, "png", 90).unwrap(), bytes);
+        assert!(encode(b"not a png", "jpeg", 90).is_err());
+        assert!(encode(&bytes, "gif", 90).is_err());
+    }
+
+    #[test]
+    fn parse_frame_splits_metadata_from_pixels() {
+        let meta = r#"{"name":"01-街拍_a b.png","format":"jpeg","quality":90,"dir":"/tmp/out"}"#
+            .as_bytes();
+        let mut body = (meta.len() as u32).to_le_bytes().to_vec();
+        body.extend_from_slice(meta);
+        body.extend_from_slice(b"PIXELS");
+        let (m, rest) = parse_frame(&body).unwrap();
         assert_eq!(
-            encode(&b64, "png", 90).unwrap(),
-            STANDARD.decode(&b64).unwrap()
+            (
+                m.name.as_str(),
+                m.format.as_str(),
+                m.quality,
+                m.dir.as_str()
+            ),
+            ("01-街拍_a b.png", "jpeg", 90, "/tmp/out")
         );
-        assert!(encode("not base64!", "png", 90).is_err());
-        assert!(encode(&b64, "gif", 90).is_err());
+        assert_eq!(rest, b"PIXELS");
+        assert!(parse_frame(b"\x01").is_err()); // no length
+        assert!(parse_frame(&[200, 0, 0, 0, b'{']).is_err()); // metadata cut short
+        assert!(parse_frame(&[2, 0, 0, 0, b'n', b'o']).is_err()); // not JSON
     }
 
     #[test]
@@ -339,7 +407,7 @@ mod tests {
                 img.put_pixel(x, y, Rgba([255, 0, 0, 0])); // fully transparent half
             }
         }
-        let jpg = encode(&png_b64(&img), "jpeg", 95).unwrap();
+        let jpg = encode(&png(&img), "jpeg", 95).unwrap();
         let back = image::load_from_memory_with_format(&jpg, ImageFormat::Jpeg)
             .unwrap()
             .to_rgb8();
@@ -357,7 +425,7 @@ mod tests {
     fn encode_webp_is_lossless() {
         let mut img = RgbaImage::from_pixel(5, 4, Rgba([10, 200, 30, 255]));
         img.put_pixel(1, 1, Rgba([250, 1, 99, 128]));
-        let webp = encode(&png_b64(&img), "webp", 80).unwrap();
+        let webp = encode(&png(&img), "webp", 80).unwrap();
         let back = image::load_from_memory_with_format(&webp, ImageFormat::WebP)
             .unwrap()
             .to_rgba8();

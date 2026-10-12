@@ -179,6 +179,8 @@ const STR = {
   "exp.csv": ["导入 CSV 并导出…", "Import CSV and export…"],
   "exp.csvTemplate": ["下载 CSV 模板", "Download CSV template"],
   "close": ["关闭", "Close"],
+  "exp.cancel": ["取消", "Cancel"],
+  "msg.cancelled": ["已取消：导出了 {0} / {1} 张。", "Cancelled: {0} of {1} exported."],
 
   "msg.saved": ["已保存：{0}", "Saved: {0}"],
   "msg.savedN": ["已导出 {0} 张到：{1}", "Exported {0} files to: {1}"],
