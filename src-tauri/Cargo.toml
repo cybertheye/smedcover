@@ -2,7 +2,8 @@
 name = "smedcover"
 version = "0.1.0"
 description = "Branded cover-image generator for video creators"
-license = "AGPL-3.0-only"
+license = "AGPL-3.0-or-later"
+authors = ["cybertheye"]
 edition = "2021"
 
 [lib]

@@ -215,12 +215,12 @@ are not public, so the plan is to export open formats that both can read.
 
 | What | Licence |
 |---|---|
-| The program (all source code) | [GNU AGPL v3](LICENSE) |
+| The program (all source code) | [GNU AGPL v3 or later](LICENSE) |
 | Built-in artwork: channel graphics, stickers, colour block shapes | [CC BY 4.0](LICENSE-ASSETS.md) |
 | Bundled fonts: Noto Sans SC, Bebas Neue, JetBrains Mono | SIL Open Font License, texts in `ui/fonts/` |
 
 In short: you may use, change and redistribute SmedCover, but if you distribute a modified version —
 or let people use one over a network — you must make its source available under the same licence.
-The built-in artwork may be reused elsewhere with credit.
+The built-in artwork may be reused elsewhere with credit; covers you make with SmedCover need no credit.
 
-Copyright © 2026 The SmedCover authors.
+Copyright © 2026 cybertheye.

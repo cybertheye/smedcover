@@ -208,11 +208,11 @@ SMEDCOVER_SELFTEST=/一个空目录的绝对路径 src-tauri/target/release/bund
 
 | 对象 | 许可证 |
 |---|---|
-| 程序（全部源代码） | [GNU AGPL v3](LICENSE) |
+| 程序（全部源代码） | [GNU AGPL v3 或更高版本](LICENSE) |
 | 内置素材：频道图形、贴纸、色块形状 | [CC BY 4.0](LICENSE-ASSETS.md) |
 | 内置字体：Noto Sans SC、Bebas Neue、JetBrains Mono | SIL Open Font License，文本在 `ui/fonts/` |
 
 简单说：你可以使用、修改和再分发 SmedCover；但如果你分发修改后的版本，或让别人通过网络使用它，
-就必须以同样的许可证公开其源代码。内置素材可以在别处使用，但须署名。
+就必须以同样的许可证公开其源代码。内置素材可以在别处使用，但须署名；用 SmedCover 制作的封面无需署名。
 
-Copyright © 2026 The SmedCover authors.
+Copyright © 2026 cybertheye.
