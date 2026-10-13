@@ -115,15 +115,21 @@ Deleting a channel also deletes the layers that belonged only to it.
 
 ### Generating assets with AI
 
-At the top of the Assets tab, type what you need ("a ginger cat", "a trophy", "an umbrella") and click **Generate** to get a sticker.
+At the top of the Assets tab, pick a kind, type what you need ("a washing machine", "a trophy", "a ginger cat") and click **Generate**.
+
+| Kind | Result | Best for |
+|---|---|---|
+| **3D object** (default) | An object built from boxes and cylinders, drawn like the built-in channel graphics: three tones, screentone, ink lines, a ground shadow | devices, machines, vehicles, buildings |
+| **Flat sticker** | Flat colour with a heavy outline, drawn like the built-in stickers | animals, characters, food, symbols |
 
 - The result is previewed twice: in its own colour, and following the current channel colour. If you like it, **Save to My assets** and use it like any other asset.
-- A generated sticker is the same kind of thing as a built-in one: sharp at any size and usable as a channel's graphic.
+- A generated asset is the same kind of thing as a built-in one: sharp at any size and usable as a channel's graphic.
 - Once on the canvas it **follows the channel colour by default**, changing as you switch channels; untick *Use the channel colour* in the layer's properties to keep its own colour.
 - The style comes from a prompt preset in the app; you only describe the subject.
 - You first connect your own model service under *Setup → AI*, see below.
 - While generating, the button shows the seconds waited and you can **Stop waiting** at any time. That only stops waiting: the request has been sent and your provider may still bill it.
-- A model sometimes answers in a form the app cannot use; you are told it failed and can simply generate again. Weaker models fail more often and draw cruder shapes.
+- A model sometimes answers in a form the app cannot use. The app then tells the model what was wrong and **retries automatically, up to 3 times**; the button shows which attempt is running. Each retry is a new call and is billed separately. Connection errors, timeouts and cut-off replies are not retried.
+- 3D objects are made of boxes and cylinders only — no spheres or curved surfaces — so round things (animals, fruit) come out blocky. Weaker models fail more often and build cruder shapes.
 
 ### Style and the default design
 

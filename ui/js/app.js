@@ -15,7 +15,7 @@ import {
 } from "./store.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
-import { AI_STYLES, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt } from "./ai.js";
+import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage } from "./ai.js";
 
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
@@ -422,7 +422,8 @@ function assetsTab() {
   ];
 }
 // ---------- AI-generated assets
-const AI = { target: "", busy: false, error: "", result: null, test: "", job: 0, since: 0 };
+const AI = { target: "", busy: false, error: "", result: null, test: "", job: 0, since: 0, attempt: 1 };
+const AI_RETRIES = 3;                      // extra attempts when a reply does not follow the format
 /** Sends one prompt to the configured endpoint and returns {text, truncated}. Throws with the provider's message. */
 async function aiCall(cfg, system, user) {
   const req = buildRequest(cfg, system, user), body = JSON.stringify(req.body);
@@ -434,23 +435,34 @@ async function aiCall(cfg, system, user) {
   if (out.error) throw new Error(out.error);
   return out;
 }
-/** Asks the model for a sticker of `target` and returns the validated spec. */
-async function requestSpec(cfg, target) {
-  const { system, user } = buildPrompt(target, cfg.notes);
-  const out = await aiCall(cfg, system, user), r = parseSpec(out.text);
-  if (r.error) throw new Error(out.truncated ? t("ai.truncated") : t("ai.badSpec", r.error));
-  return r.spec;
+/**
+ * Asks the model for an asset of `target` and returns the validated spec. A reply that does not
+ * follow the format is sent back with what was wrong, up to AI_RETRIES times; connection errors
+ * and cut-off replies are not retried, since asking again would not help.
+ * `onAttempt(n)` is told which attempt is running; `stillWanted()` lets the caller give up.
+ */
+async function requestSpec(cfg, target, onAttempt = () => null, stillWanted = () => true) {
+  const { system, user } = buildPrompt(target, cfg.notes, { kind: cfg.kind });
+  const turns = [{ role: "user", content: user }];
+  for (let attempt = 1; ; attempt++) {
+    onAttempt(attempt);
+    const out = await aiCall(cfg, system, turns), r = parseSpec(out.text);
+    if (!r.error) return r.spec;
+    if (out.truncated) throw new Error(t("ai.truncated"));
+    if (attempt > AI_RETRIES || !stillWanted()) throw new Error(t("ai.badSpec", r.error, attempt));
+    turns.push({ role: "assistant", content: out.text.slice(0, 12000) }, { role: "user", content: retryMessage(r.error) });
+  }
 }
 const onAssetsTab = () => S.mode === "edit" && S.tab.edit === "assets";
 async function generateAsset() {
   const target = AI.target.trim();
   if (!target || AI.busy) return;
   const job = ++AI.job;
-  Object.assign(AI, { busy: true, error: "", result: null, since: Date.now() });
+  Object.assign(AI, { busy: true, error: "", result: null, since: Date.now(), attempt: 1 });
   renderPanel();
   const tick = setInterval(() => { const b = document.getElementById("ai-go"); if (b && AI.busy) b.textContent = aiBusyText(); }, 1000);
   let result = null, error = "";
-  try { result = await requestSpec(S.ai, target); } catch (e) { error = String(e && e.message ? e.message : e); }
+  try { result = await requestSpec(S.ai, target, (n) => { if (job === AI.job) AI.attempt = n; }, () => job === AI.job); } catch (e) { error = String(e && e.message ? e.message : e); }
   clearInterval(tick);
   if (job !== AI.job) return;                       // cancelled meanwhile: the late answer is dropped
   Object.assign(AI, { busy: false, result, error });
@@ -458,7 +470,7 @@ async function generateAsset() {
 }
 /** Stops waiting for the reply. The request itself cannot be recalled, so the provider may still bill it. */
 function cancelGenerate() { AI.job++; Object.assign(AI, { busy: false, error: "", result: null }); renderPanel(); }
-const aiBusyText = () => t("ai.busy", Math.max(0, Math.round((Date.now() - AI.since) / 1000)));
+const aiBusyText = () => t("ai.busy", Math.max(0, Math.round((Date.now() - AI.since) / 1000))) + (AI.attempt > 1 ? t("ai.attempt", AI.attempt) : "");
 async function keepGenerated() {
   const spec = AI.result;
   if (!spec) return;
@@ -480,7 +492,9 @@ function aiSection() {
       el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; setMode("setup"); } }, t("ai.goSetup")));
   }
   const r = AI.result;
+  const setKind = (k) => { S.ai = normalizeAi({ ...S.ai, kind: k }); persistAi(); renderPanel(); };
   return el("div", { class: "box" }, cap("ai.title"),
+    el("div", { class: "seg", style: "margin-bottom:10px" }, AI_KINDS.map((k) => el("button", { class: "btn" + (S.ai.kind === k ? " on" : ""), style: "flex:1", disabled: AI.busy, title: t("ai.kindHint." + k), onclick: () => setKind(k) }, t("ai.kind." + k)))),
     textInput(AI.target, (v) => { AI.target = v; }, { placeholder: t("ai.targetPh"), maxLength: 300, disabled: AI.busy, onkeydown: (e) => { if (e.key === "Enter") generateAsset(); } }),
     el("button", { id: "ai-go", class: "btn solid wide", style: "margin-top:10px", disabled: AI.busy, onclick: generateAsset }, AI.busy ? aiBusyText() : t(r ? "ai.again" : "ai.generate")),
     AI.busy && el("button", { class: "btn wide", style: "margin-top:8px", onclick: cancelGenerate }, t("ai.cancel")),
@@ -492,7 +506,7 @@ function aiSection() {
         el("button", { class: "btn solid", onclick: keepGenerated }, t("ai.keep")),
         el("button", { class: "btn", onclick: () => { AI.result = null; renderPanel(); } }, t("ai.discard"))),
     ],
-    el("div", { class: "hint" }, t("ai.hint", S.ai.model)));
+    el("div", { class: "hint" }, t("ai.kindHint." + S.ai.kind) + " " + t("ai.hint", S.ai.model)));
 }
 function aiTab() {
   const c = S.ai, ph = AI_PLACEHOLDER[c.style];
@@ -1066,12 +1080,12 @@ async function selfTest(dir) {
       report.ai = [];
       for (const style of AI_STYLES) {
         const cfg = normalizeAi({ style, baseUrl: aiUrl + (style === "openai" ? "/v1" : ""), token: "selftest-token", model: "selftest-model" });
-        const spec = await requestSpec(cfg, "a star");
+        const spec = await requestSpec({ ...cfg, kind: style === "openai" ? "solid" : "flat" }, "a star");
         const a = putSpecAsset("a" + uid(), spec.name.en, spec);
         await saveAssetRecord(a);
         addAsset({ kind: "user", id: a.id });
         const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
-        report.ai.push({ style, name: a.name, ops: spec.ops.length, stored: !!(await readJson(`assets/${a.id}.json`))?.spec, drawn: cv._hits.some((h) => h.id === S.layerId) });
+        report.ai.push({ style, name: a.name, kind: spec.kind || "flat", pieces: (spec.ops || spec.parts).length, stored: !!(await readJson(`assets/${a.id}.json`))?.spec, drawn: cv._hits.some((h) => h.id === S.layerId) });
       }
       try { await aiCall(normalizeAi({ style: "openai", baseUrl: aiUrl + "/fail", model: "m" }), "s", "u"); report.errors.push("ai: an error reply was not reported"); }
       catch (e) { report.aiError = String(e.message); }

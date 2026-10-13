@@ -242,7 +242,8 @@ test("moving a layer up or down steps over layers of other categories", () => {
 
 // ---------- AI-generated assets
 import { normalizeSpec, parseSpec, drawSpec, SPEC_LIMITS } from "../ui/js/spec.js";
-import { normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, EXAMPLES, SYSTEM_PROMPT } from "../ui/js/ai.js";
+import { normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, EXAMPLES, SYSTEM_PROMPT, SOLID_EXAMPLES, solidPrompt } from "../ui/js/ai.js";
+import { normalizeSolid, drawSolid, SOLID_LIMITS, DEFAULT_VIEW } from "../ui/js/solid.js";
 
 /** A canvas context that accepts anything and counts what was called. */
 function fakeCtx() {
@@ -345,7 +346,8 @@ test("spec: found inside a chatty or fenced reply", () => {
 });
 
 test("ai: settings are normalised and endpoints are joined for both styles", () => {
-  assert.deepEqual(normalizeAi(null), { style: "openai", baseUrl: "", token: "", model: "", auth: "key", maxTokens: 4096, timeout: 300, proxy: "", notes: "" });
+  assert.deepEqual(normalizeAi(null), { style: "openai", baseUrl: "", token: "", model: "", auth: "key", maxTokens: 4096, timeout: 300, proxy: "", notes: "", kind: "solid" });
+  assert.deepEqual(["flat", "solid", "x"].map((kind) => normalizeAi({ kind }).kind), ["flat", "solid", "solid"]);
   assert.deepEqual([5, 99999, "x", 120].map((timeout) => normalizeAi({ timeout }).timeout), [30, 1800, 300, 120]);
   assert.equal(normalizeAi({ style: "x", maxTokens: 9e9 }).maxTokens, 64000);
   assert.equal(aiReady(normalizeAi({ baseUrl: "https://a.b/v1", model: "m" })), true);
@@ -388,11 +390,56 @@ test("ai: replies and errors are read for each API style", () => {
   assert.match(readReply("openai", 200, JSON.stringify({ choices: [] })).error, /no text/);
 });
 
+test("solid: the 3D prompt's own examples are valid and can be drawn", () => {
+  for (const e of SOLID_EXAMPLES) {
+    const { spec, error } = normalizeSpec(e.spec);                    // normalizeSpec recognises a solid by its kind
+    assert.equal(error, undefined, `${e.ask}: ${error}`);
+    assert.equal(spec.kind, "solid");
+    assert.deepEqual(normalizeSpec(spec).spec, spec);
+    assert.deepEqual(parseSpec("```json\n" + JSON.stringify(e.spec) + "\n```").spec, spec);
+    const ctx = fakeCtx(); drawSpec(ctx, spec, "#00e5ff");
+    assert.ok(ctx.calls.fill > spec.parts.length, e.ask);             // every part has several visible faces
+    assert.equal(ctx.calls.save, ctx.calls.restore, e.ask);
+    assert.ok(solidPrompt().includes(JSON.stringify(e.spec)));
+  }
+});
+
+test("solid: defaults, clamping and refusals", () => {
+  const { spec } = normalizeSolid({ name: "Box", parts: [{ box: [100, -50, 9999] }, { cyl: [50, 20], axis: "q", tip: 9999, sides: 99, tone: "black", at: [0, 0, 9999] }], marks: [{ circle: [0, 0, 10] }, { rect: [0, 0, 5, 5], fill: "red" }] });
+  assert.deepEqual(spec.view, DEFAULT_VIEW);
+  assert.deepEqual(spec.parts[0], { box: [100, 50, 480], at: [0, 0, 0], tone: "white" });
+  assert.deepEqual(spec.parts[1], { cyl: [50, 20], axis: "y", tip: 240, sides: 28, at: [0, 0, 300], tone: "dark" });
+  assert.deepEqual(spec.marks[0], { circle: [0, 0, 10], z: 0, line: 5 });   // a mark with neither fill nor line gets an outline
+  assert.deepEqual(spec.marks[1], { rect: [0, 0, 5, 5], z: 0, fill: "red" });
+  assert.equal(normalizeSpec({ parts: [{ box: [1, 2, 3] }] }).spec.kind, "solid");   // "parts" alone is enough to tell
+  const no = (raw, re) => { const r = normalizeSolid(raw); assert.equal(r.spec, undefined); assert.match(r.error, re); };
+  no({ kind: "solid" }, /parts: missing/); no({ parts: [{ sphere: [5] }] }, /needs box or cyl/);
+  no({ parts: [{ box: [1, 2] }] }, /3 numbers/); no({ parts: [{ box: [1, 2, "3"] }] }, /not a number/);
+  no({ parts: [{ box: [1, 2, 3], tone: "url(x)" }] }, /colour/); no({ parts: [{ box: [1, 2, 3] }], marks: [{ text: "hi" }] }, /rect, circle or path/);
+  no({ parts: Array(SOLID_LIMITS.parts + 1).fill({ box: [1, 2, 3] }) }, /more than/);
+  // any size is fitted to the same box: a tiny object and a huge one cover a similar area
+  const reach = (k) => { const pts = []; const ctx = new Proxy({}, { get: (t, p) => (...a) => { if (p === "lineTo" || p === "moveTo") pts.push(a); return {}; }, set: () => true });
+    drawSolid(ctx, normalizeSolid({ parts: [{ box: [40 * k, 40 * k, 40 * k] }] }).spec, null); return Math.max(...pts.flat().map(Math.abs)); };
+  assert.ok(Math.abs(reach(1) - reach(10)) < reach(1) * 0.35, `${reach(1)} vs ${reach(10)}`);
+});
+
+test("ai: a retry sends the conversation so far, in both API styles", () => {
+  const turns = [{ role: "user", content: "Request: x" }, { role: "assistant", content: "{bad" }, { role: "user", content: retryMessage("ops: missing") }];
+  assert.match(turns[2].content, /cannot be used: ops: missing/);
+  const o = buildRequest(normalizeAi({ style: "openai", baseUrl: "https://a/v1", model: "m" }), "SYS", turns);
+  assert.deepEqual(o.body.messages.map((m) => m.role), ["system", "user", "assistant", "user"]);
+  const a = buildRequest(normalizeAi({ style: "anthropic", baseUrl: "https://a", model: "m" }), "SYS", turns);
+  assert.equal(a.body.system, "SYS"); assert.deepEqual(a.body.messages, turns);
+});
+
 test("ai: the prompt carries the style, the format and the user's notes", () => {
+  const solid = buildPrompt("洗衣机", "", { kind: "solid" });
+  for (const word of ['"kind":"solid"', '"box"', '"cyl"', "three flat tones", "y runs DOWN", "Request: a robot", "never write code"]) assert.ok(solid.system.includes(word), word);
+  assert.notEqual(solid.system, buildPrompt("洗衣机").system);
   const p = buildPrompt("  一只猫  ");
   assert.equal(p.user, "Request: 一只猫");
   for (const word of ["flat colour", "ink outline", "-100 to 100", '"op":"shape"', '"op":"blob"', '"op":"line"', '"op":"detail"', '"op":"text"', "exactly one JSON object", "never write code", '"mirror": true', '"ellipse"', '"arc"', '"turn"', "do NOT draw outlines", "How to design a sticker", "Request: a cat"]) assert.ok(p.system.includes(word), word);
   assert.ok(!p.system.includes("Additional requirements"));
   assert.ok(buildPrompt("x", "always add a smile").system.endsWith("always add a smile"));
-  assert.equal(buildPrompt("x", "", "no-such-style").system, p.system);   // unknown styles fall back to the house style
+  assert.equal(buildPrompt("x", "", { style: "no-such-style" }).system, p.system);   // unknown styles fall back to the house style
 });

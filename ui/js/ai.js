@@ -6,7 +6,7 @@
 // any size, able to follow the channel colour — without ever executing what a model wrote.
 
 export const AI_STYLES = ["openai", "anthropic"];
-export const AI_DEFAULTS = { style: "openai", baseUrl: "", token: "", model: "", auth: "key", maxTokens: 4096, timeout: 300, proxy: "", notes: "" };
+export const AI_DEFAULTS = { style: "openai", baseUrl: "", token: "", model: "", auth: "key", maxTokens: 4096, timeout: 300, proxy: "", notes: "", kind: "solid" };
 export const AI_PLACEHOLDER = {
   openai: { baseUrl: "https://api.openai.com/v1" },
   anthropic: { baseUrl: "https://api.anthropic.com" },
@@ -24,6 +24,7 @@ export function normalizeAi(raw) {
     timeout: Number.isFinite(secs) && secs > 0 ? Math.min(1800, Math.max(30, secs)) : AI_DEFAULTS.timeout,   // seconds to wait for a reply
     proxy: str(a.proxy, 300),                                             // optional, e.g. http://127.0.0.1:7890
     notes: str(a.notes, 2000),
+    kind: a.kind === "flat" ? "flat" : "solid",                           // what the Assets tab generates
   };
 }
 /** Whether enough is filled in to send a request. A token is optional: local servers need none. */
@@ -45,14 +46,15 @@ export function endpoint(cfg) {
  *                    required max_tokens.
  */
 export function buildRequest(cfg, system, user) {
+  const turns = Array.isArray(user) ? user : [{ role: "user", content: user }];   // a string, or the conversation so far
   const headers = { "content-type": "application/json" };
   if (cfg.style === "anthropic") {
     headers["anthropic-version"] = "2023-06-01";
     if (cfg.token) { if (cfg.auth === "bearer") headers.authorization = "Bearer " + cfg.token; else headers["x-api-key"] = cfg.token; }
-    return { url: endpoint(cfg), headers, body: { model: cfg.model, max_tokens: cfg.maxTokens, system, messages: [{ role: "user", content: user }] } };
+    return { url: endpoint(cfg), headers, body: { model: cfg.model, max_tokens: cfg.maxTokens, system, messages: turns } };
   }
   if (cfg.token) headers.authorization = "Bearer " + cfg.token;
-  return { url: endpoint(cfg), headers, body: { model: cfg.model, messages: [{ role: "system", content: system }, { role: "user", content: user }] } };
+  return { url: endpoint(cfg), headers, body: { model: cfg.model, messages: [{ role: "system", content: system }, ...turns] } };
 }
 
 /**
@@ -216,9 +218,143 @@ The names are short (1–4 words). The request may be in any language.
 ${EXAMPLES.map((e) => `Request: ${e.ask}\n${JSON.stringify(e.spec)}`).join("\n\n")}`;
 export const SYSTEM_PROMPT = systemPrompt();
 
-/** The two halves of a request: the preset prompt (plus the user's standing notes) and the subject. */
-export function buildPrompt(target, notes = "", style = "cel") {
-  const SYSTEM_PROMPT = systemPrompt(style);
-  const system = notes ? `${SYSTEM_PROMPT}\n\n# Additional requirements from the user\n${notes}` : SYSTEM_PROMPT;
+/** Worked examples for solid (3D) assets. Each one is a valid spec (the tests check that). */
+export const SOLID_EXAMPLES = [
+  {
+    ask: "a camera",
+    spec: { kind: "solid", name: {"zh": "相机", "en": "Camera"}, color: "#fcee0a", view: [-17, -32, 3], parts: [
+      {"box": [440, 260, 150], "at": [0, 20, 0], "tone": "white"},
+      {"box": [170, 62, 110], "at": [-40, -141, 0], "tone": "white"},
+      {"box": [60, 26, 60], "at": [152, -123, 0], "tone": "main"},
+      {"box": [84, 260, 46], "at": [-176, 20, 98], "tone": "white"},
+      {"cyl": [128, 120], "axis": "z", "at": [40, 25, 135], "tone": "dark"},
+      {"cyl": [104, 56], "axis": "z", "at": [40, 25, 222], "tone": "dark"},
+    ], marks: [
+      {"circle": [40, 25, 80], "z": 251, "fill": "ink"},
+      {"circle": [40, 25, 52], "z": 252, "fill": "shade", "line": 5},
+      {"circle": [18, 3, 15], "z": 253, "fill": "white"},
+      {"rect": [-190, -78, -110, -44], "z": 76, "fill": "ink"},
+    ] },
+  },
+  {
+    ask: "a game controller",
+    spec: { kind: "solid", name: {"zh": "游戏手柄", "en": "Gamepad"}, color: "#fcee0a", view: [-24, -22, -5], parts: [
+      {"box": [400, 170, 90], "at": [0, -10, 0], "tone": "white"},
+      {"box": [116, 200, 80], "at": [-178, 66, -8], "tone": "white", "turn": [0, 0, 11]},
+      {"box": [116, 200, 80], "at": [178, 66, -8], "tone": "white", "turn": [0, 0, -11]},
+      {"box": [70, 26, 50], "at": [-110, -104, 0], "tone": "dark"},
+      {"box": [70, 26, 50], "at": [110, -104, 0], "tone": "dark"},
+    ], marks: [
+      {"rect": [-158, -32, -62, -2], "z": 46, "fill": "ink"},
+      {"rect": [-125, -65, -95, 31], "z": 46, "fill": "ink"},
+      {"circle": [110, -52, 19], "z": 46, "fill": "main", "line": 5},
+      {"circle": [150, -17, 19], "z": 46, "fill": "main", "line": 5},
+      {"circle": [70, -17, 19], "z": 46, "fill": "main", "line": 5},
+      {"circle": [110, 18, 19], "z": 46, "fill": "main", "line": 5},
+      {"rect": [-22, -30, 22, -14], "z": 46, "fill": "ink"},
+    ] },
+  },
+  {
+    ask: "a microphone",
+    spec: { kind: "solid", name: {"zh": "麦克风", "en": "Microphone"}, color: "#fcee0a", view: [-13, -29, 9], parts: [
+      {"cyl": [78, 34], "axis": "y", "tip": 52, "at": [0, -232, 0], "tone": "dark"},
+      {"cyl": [96, 190], "axis": "y", "at": [0, -120, 0], "tone": "dark"},
+      {"cyl": [102, 30], "axis": "y", "at": [0, -12, 0], "tone": "main"},
+      {"cyl": [62, 120], "axis": "y", "at": [0, 62, 0], "tone": "white"},
+      {"box": [26, 96, 26], "at": [0, 168, 0], "tone": "dark"},
+      {"cyl": [132, 26], "axis": "y", "at": [0, 228, 0], "tone": "dark", "sides": 22},
+    ], marks: [] },
+  },
+  {
+    ask: "a robot",
+    spec: { kind: "solid", name: {"zh": "机器人", "en": "Robot"}, color: "#fcee0a", view: [-14, -30, 0], parts: [
+      {"box": [150, 190, 110], "at": [0, 70, 0], "tone": "white"},
+      {"box": [210, 150, 130], "at": [0, -110, 0], "tone": "white"},
+      {"cyl": [9, 50], "axis": "y", "at": [0, -210, 0], "tone": "dark"},
+      {"cyl": [20, 20], "axis": "y", "at": [0, -244, 0], "tone": "main"},
+      {"box": [44, 150, 54], "at": [-102, 60, 0], "tone": "main"},
+      {"box": [44, 150, 54], "at": [102, 60, 0], "tone": "main"},
+      {"box": [56, 70, 70], "at": [-42, 200, 0], "tone": "dark"},
+      {"box": [56, 70, 70], "at": [42, 200, 0], "tone": "dark"},
+      {"cyl": [26, 24], "axis": "x", "at": [-118, -110, 0], "tone": "dark"},
+      {"cyl": [26, 24], "axis": "x", "at": [118, -110, 0], "tone": "dark"},
+    ], marks: [
+      {"rect": [-80, -150, 80, -80], "z": 66, "fill": "ink"},
+      {"circle": [-40, -115, 17], "z": 67, "fill": "main"},
+      {"circle": [40, -115, 17], "z": 67, "fill": "main"},
+      {"rect": [-40, 20, 40, 70], "z": 56, "fill": "shade", "line": 5},
+      {"circle": [-18, 45, 9], "z": 57, "fill": "white", "line": 4},
+      {"path": [[4, 36], [30, 36]], "z": 57, "closed": false, "line": 5},
+      {"path": [[4, 54], [30, 54]], "z": 57, "closed": false, "line": 5},
+    ] },
+  },
+];
+
+/** What a style asks of a solid object's construction (see STYLE_NOTES for the idea). */
+export const SOLID_STYLE_NOTES = {
+  cel: `Chunky cel-shaded 3D objects, like toys or low-poly models, that read at a glance on a busy cover:
+- built from a few boxes and cylinders with clear, exaggerated proportions; no realism, no fine detail;
+- the renderer shades every face in three flat tones, prints screentone dots on the shadow side, inks every edge and adds a ground shadow: do NOT try to draw shading, outlines or shadows yourself;
+- mostly "white" bodies, "dark" for screens, lenses, glass, rubber and metal, and "main" for a few accent parts and small marks. The app recolours "main" (and the screentone) to match a channel.`,
+};
+
+/** The preset prompt for solid assets. */
+export const solidPrompt = (style = "cel") => `You design small 3D objects for SmedCover, an app for making video cover images. You answer with an object described as DATA: one JSON object listing boxes and cylinders, which the app renders itself. You never write code, SVG or prose.
+
+# Style
+${SOLID_STYLE_NOTES[style] || SOLID_STYLE_NOTES.cel}
+
+# Space
+x runs right, y runs DOWN (the top of the object has NEGATIVE y), z runs toward the viewer. Build the object around the origin, about 400 units across in its largest dimension. It is scaled and centred to fit automatically, so only the proportions matter.
+The camera looks at the FRONT (the +z side) from slightly above and to the right: the front, the top and the right side (+x) are visible. Put what identifies the object on its front.
+
+# Parts
+Solid pieces. Each has "at": [x,y,z] (the position of its CENTRE) and "tone": "white" | "dark" | "main" (or a "#rrggbb" colour for a special part).
+- {"box":[width,height,depth],"at":[x,y,z],"tone":"white"} — width along x, height along y, depth along z.
+- {"cyl":[radius,length],"axis":"y","at":[x,y,z],"tone":"dark"} — a cylinder lying along "x", "y" (upright) or "z" (pointing at the viewer: lenses, dials, round doors, and the wheels of a vehicle built side-on).
+  Optional "tip": the radius of the end facing right / up / the viewer when it differs from the radius (a cone or taper), and "sides" (default 18; 6 gives a hexagonal nut).
+Any part may carry "turn": [aroundX, aroundY, aroundZ] in degrees to tilt it.
+
+# Marks
+Flat details painted on top of the finished object, on a plane facing the viewer at depth "z". To put a mark on the front of a part, use z = the part's at.z + half its depth + 1.
+- {"rect":[x0,y0,x1,y1],"z":46,"fill":"ink"}
+- {"circle":[x,y,r],"z":46,"fill":"main","line":5}
+- {"path":[[x,y],…],"z":46,"closed":false,"line":5} — a line or outline; add "fill" for a filled polygon.
+Fill colours: "ink" (near black), "white", "main", "shade" (a darker main) or "#rrggbb". "line" is an ink outline width (4–6).
+
+# How to design an object
+Think it through before writing, then output only the JSON.
+1. Reduce the subject to its main body (usually one big box or cylinder) and the 3–10 parts that make it recognisable. A washing machine is a box, a round door on the front, a control strip and a couple of dials; nothing more.
+2. Orient it so its most telling side is the front (+z): appliances and devices face the viewer; vehicles are built side-on, with their length along x.
+3. Exaggerate: thicker, shorter and simpler than reality. Small parts must still be at least 20 units in every dimension to be seen.
+4. Attach every part: neighbours must touch or overlap slightly. Compute each "at" from the sizes — a part sitting on top of a body of height H centred at y has its own centre at y - H/2 - (its height)/2. Nothing floats, and nothing is buried inside another part.
+5. Things that stick out of the front (a lens, a door, a knob, a nose) are short cylinders with axis "z" placed so they protrude from the front face: at.z = body front + length/2.
+6. Flat things on the front (a screen, buttons, a label, eyes, a slot) are marks, at the z of that front face plus 1.
+7. There are no spheres or curves: use a short fat cylinder, or stacked cylinders with "tip", for round things; build long curved things from a few turned boxes.
+8. Tones: the main body "white"; "dark" for a second material; "main" for one to three accent parts. Marks carry the small touches of "main".
+9. 5 to 16 parts and up to 12 marks is typical. Fewer, bigger pieces beat many small ones.
+
+# Answer format
+Reply with exactly one JSON object and nothing else — no code fence, no explanation:
+{"kind":"solid","name":{"zh":"中文名","en":"English name"},"color":"#rrggbb","parts":[…],"marks":[…]}
+"color" is the default for "main" (a bright "#rrggbb" value). The names are short (1–4 words). The request may be in any language.
+
+# Examples
+${SOLID_EXAMPLES.map((e) => `Request: ${e.ask}\n${JSON.stringify(e.spec)}`).join("\n\n")}`;
+
+/** The kinds of asset that can be generated: a solid 3D object, or a flat sticker. */
+export const AI_KINDS = ["solid", "flat"];
+
+
+/**
+ * The two halves of a request: the preset prompt (plus the user's standing notes) and the subject.
+ * kind "solid" asks for a 3D object, "flat" for a sticker.
+ */
+export function buildPrompt(target, notes = "", { kind = "flat", style = "cel" } = {}) {
+  const preset = kind === "solid" ? solidPrompt(style) : systemPrompt(style);
+  const system = notes ? `${preset}\n\n# Additional requirements from the user\n${notes}` : preset;
   return { system, user: `Request: ${String(target).trim().slice(0, 300)}` };
 }
+
+/** What to tell the model when its reply could not be used, so the next attempt can correct it. */
+export const retryMessage = (error) => `That reply cannot be used: ${error}. Answer again with exactly one corrected JSON object in the required format and nothing else.`;

@@ -25,6 +25,7 @@
 //   { curve: [["M", x, y], ["L", x, y], ["Q", cx, cy, x, y], ["C", c1x, c1y, c2x, c2y, x, y], …] }
 // An open line may also be { arc: [x, y, r, fromDegrees, toDegrees] } (0 = right, 90 = down).
 import { KIT, PALETTE } from "./stickers.js";
+import { normalizeSolid, drawSolid } from "./solid.js";
 
 export const SPEC_LIMITS = { ops: 40, points: 120, paths: 10, text: 10, coord: 160 };
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -138,6 +139,7 @@ function withMain(spec, hasOwnColour) {
  * Returns {spec} or {error}: anything unexpected is refused, never guessed at.
  */
 export function normalizeSpec(raw) {
+  if (raw && typeof raw === "object" && (raw.kind === "solid" || (Array.isArray(raw.parts) && !raw.ops))) return normalizeSolid(raw);   // a 3D object: see solid.js
   try {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) bad("not an object");
     if (!Array.isArray(raw.ops) || !raw.ops.length) bad("ops: missing");
@@ -214,6 +216,7 @@ function flipOp(o) {
 
 /** Draws a normalised spec centred on the origin in its 200-unit box. `tint` overrides its main colour. */
 export function drawSpec(ctx, spec, tint) {
+  if (spec.kind === "solid") return drawSolid(ctx, spec, tint);
   const main = tint || spec.color, col = (v) => (v === "main" ? main : PALETTE[v] || v);
   ctx.save();
   const placed = (o, fn) => {

@@ -55,6 +55,7 @@ ui/
   js/graphics.js     fifteen more channel graphics
   js/stickers.js     the sixty stickers, and the shared painters
   js/spec.js         stickers described as data: validation and interpreter (AI-generated assets)
+  js/solid.js        3D objects described as data: validation, drawn with the channel graphics' renderer
   js/ai.js           AI generation: settings, requests for both API styles, the preset prompt (pure)
   js/store.js        data model, validation, persistence
   js/presets.js      starter profiles and size presets
@@ -246,7 +247,29 @@ nothing in it is ever executed.
 ink lines, hard shadows and flat fills are added by the painters; the model only decides shapes and
 colours.
 
-### 7.2 Validation
+### 7.2 Solid objects (`solid.js`)
+
+There are two kinds of AI asset. Besides the flat sticker above there is the **solid**, the
+counterpart of the built-in channel graphics:
+
+```jsonc
+{ "kind": "solid", "name": { "zh": "洗衣机", "en": "Washing machine" }, "color": "#00e5ff",
+  "parts": [
+    { "box": [300, 380, 260], "at": [0, 0, 0],    "tone": "white" },
+    { "cyl": [110, 30], "axis": "z", "at": [0, 30, 145], "tone": "dark" }
+  ],
+  "marks": [ { "circle": [0, 30, 82], "z": 161, "fill": "shade", "line": 5 } ] }
+```
+
+- `parts` are boxes and cylinders, each with a centre and a tone (white, dark, main). They are turned into the same pieces the channel graphics use and handed to the same renderer, `drawPieces()`: sorted by depth, every face put into one of three tone bands by its orientation, screentone on the dark band, an ink line round every face.
+- `marks` are flat details on the front of the object (circles, rectangles, lines), painted over all the pieces.
+- The object is **scaled and centred automatically** from its projected extent, so the absolute size a model describes does not matter, only the proportions; the ground shadow is added from the same extent.
+- When tinted, the main-toned parts, the screentone and the ground shadow all take the channel colour.
+
+The renderer sorts whole parts, not pixels, so parts that pass deep through each other can come out
+in the wrong order. The prompt therefore asks for parts that only touch or overlap slightly.
+
+### 7.3 Validation
 
 `normalizeSpec()` checks a reply item by item: operations must be on the list, numbers must be finite
 and are clamped to their range, colours must be a palette name or a hex value, and the number of
@@ -258,7 +281,7 @@ a polite sentence.
 A spec that passes is stored as `assets/<id>.json` next to uploaded images. It is one of *My assets*
 and travels with exported profiles and projects.
 
-### 7.3 Requests and the prompt
+### 7.4 Requests and the prompt
 
 `buildRequest()` produces the request for each API style:
 
@@ -274,7 +297,12 @@ The OpenAI style deliberately sends no sampling or length parameters: models dis
 accept, and one too many gets the request rejected. `readReply()` reads replies, error messages and
 the "cut off" signal of both styles.
 
-The preset prompt comes from `systemPrompt(style)`: the style, the coordinate system, the colour
+When a reply fails validation, `requestSpec()` sends the reply and the validation error back as the
+next turns of the conversation so the model can correct it, up to three times. Connection errors
+and cut-off replies are not retried: asking again would not change the outcome.
+
+There are two preset prompts with the same structure: `systemPrompt(style)` for flat stickers and
+`solidPrompt(style)` for solids. The former contains the style, the coordinate system, the colour
 rules, the data format above, step-by-step guidance on designing a sticker, and six examples. Only
 the *Style* section is taken from `STYLE_NOTES[style]`; the rest is style-neutral, so a new style
 only adds one entry. The examples are themselves valid specs and the unit tests
@@ -371,7 +399,7 @@ frame waits for the fonts, otherwise the title would be fitted using the wrong g
 
 | Level | Command | Covers |
 |---|---|---|
-| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation, file name pattern, size and naming of the asset packs, validating and drawing sticker specs, requests and replies in both API styles, both languages present for every string |
+| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation, file name pattern, size and naming of the asset packs, validating and drawing sticker and solid specs, requests and replies in both API styles, both languages present for every string |
 | Rust unit tests | `cd src-tauri && cargo test` | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling, requests against a local stand-in server, proxy rules |
 | End-to-end self-test | `SMEDCOVER_SELFTEST=<folder> <executable>` | the full export path between the real web view and Rust |
 
@@ -400,4 +428,5 @@ as the header issue above.
 | add a property to a layer | `PROPS` and `normalizeLayer()` in `layers.js`, `PAINT` in `render.js`, `typeControls()` in `app.js` |
 | add an export format | `encode()` in `lib.rs`, `EXT` and the format picker in `app.js` |
 | add a drawing operation for AI assets | validation and `drawSpec()` in `spec.js`, the prompt and examples in `ai.js` |
+| add a kind of part to solids | validation and `pieces()` in `solid.js`, `solidPrompt()` and its examples in `ai.js` |
 | add an interface string | `i18n.js`, in both languages; a test checks that both are present |

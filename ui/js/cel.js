@@ -927,4 +927,4 @@ export function registerGraphics(list) {
 
 export { clamp, lerp, rgb, mixc, BLK, WHT, tone, toneField, spaced, spacedW, para, brackets };
 // building blocks for graphics defined in other modules
-export { TAU, OC, OBJ_PAL, rot, box, prism, octa, drawPieces, path3, circ3, rect3, groundShadow };
+export { TAU, OC, OBJ_PAL, rot, box, prism, octa, drawPieces, path3, circ3, rect3, groundShadow, ap, pj };
