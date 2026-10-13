@@ -497,7 +497,7 @@ test("looks: the house look changes nothing, the cyberpunk look re-maps what is 
   assert.ok(log.some((e) => e[0] === "fill=" && /240,246,250/.test(e[1])));                  // ink lettering on an object turns pale
   assert.equal(styled(ctx, [252, 238, 10], true), ctx);                                      // the small cover parts stay ink on colour
   // the hooks a look may bring are all functions (or absent)
-  for (const k of ["theme", "background", "runs", "wrap", "tag", "frame", "freeText", "subject", "image", "post"]) assert.equal(typeof LOOKS.cyber[k], "function", k);
+  for (const k of ["theme", "background", "runs", "wrap", "tag", "frame", "plate", "subject", "image", "post"]) assert.equal(typeof LOOKS.cyber[k], "function", k);
   assert.equal(LOOKS.cyber.seeded, true);
   for (const k of ["shape", "blob", "stroke", "thin", "word"]) assert.equal(typeof LOOKS.cyber.sticker[k], "function", k);
   assert.equal(LOOKS.cyber.oneTheme, true); assert.equal(LOOKS.cel.oneTheme, undefined);
@@ -548,7 +548,7 @@ test("lettering layers may carry their own colour", () => {
   assert.equal(by("tag").ink, "#123456"); assert.equal(by("tag").hi, undefined);       // only the title has highlighted words
   assert.equal(by("catname").ink, undefined); assert.equal(by("brand").ink, undefined); // not six-digit hex: left automatic
   assert.equal(by("accent").ink, undefined); assert.equal(by("asset").ink, undefined);   // not lettering
-  assert.equal(by("text").ink, "#0000ff");
+  assert.equal(by("text").ink, "#0000ff"); assert.equal(by("text").color, "custom");   // a text layer's own colour is its fourth colour choice
   assert.equal(duplicate(by("text")).ink, "#0000ff");
   assert.deepEqual(normalizeLayers(ls), ls);
   assert.deepEqual(LOOKS.cyber.params.map((q) => q.key).at(-1), "tearClear");            // the checkbox closes the list
@@ -685,4 +685,23 @@ test("text effects: a layer may choose one, and every one can be painted", async
   const [n1, c1] = recorder(), [n2, c2] = recorder();
   paintRuns(c1, pass(c1), { ...o }, "no-such-effect"); paintRuns(c2, pass(c2), { ...o }, "auto");
   assert.deepEqual(n1, n2);
+});
+
+test("text layers: a plate switch, one colour choice, and older layers carried over", () => {
+  const one = (raw) => normalizeLayers([{ type: "text", text: "x", ...raw }]).find((l) => l.type === "text");
+  const fresh = newLayer("text", { text: "x" });
+  assert.equal(fresh.plate, false); assert.equal(fresh.color, "white"); assert.equal(fresh.fx, undefined); assert.equal("look" in fresh, false);
+  // the three old looks: a headline follows the look as before; plain text and plates keep plain lettering
+  assert.deepEqual([one({ look: "title" }).plate, one({ look: "title" }).fx], [false, undefined]);
+  assert.deepEqual([one({ look: "plain" }).plate, one({ look: "plain" }).fx], [false, "plain"]);
+  assert.deepEqual([one({ look: "plate" }).plate, one({ look: "plate" }).fx], [true, "plain"]);
+  assert.equal(one({ look: "plate", fx: "dots" }).fx, "dots");                 // an effect already chosen stays
+  assert.equal("look" in one({ look: "plate" }), false);
+  // colour: a custom one beside a named one becomes "custom"; "custom" with nothing to show falls back
+  assert.deepEqual([one({ color: "accent", ink: "#112233" }).color, one({ color: "accent", ink: "#112233" }).ink], ["custom", "#112233"]);
+  assert.deepEqual([one({ color: "custom" }).color, one({ color: "custom" }).ink], ["white", undefined]);
+  assert.deepEqual([one({ color: "ink" }).color, one({ color: "ink" }).ink], ["ink", undefined]);
+  assert.equal(one({ color: "purple" }).color, "white");
+  // settled: normalising again changes nothing
+  for (const raw of [{ look: "plate", color: "accent", ink: "#112233" }, { plate: true, color: "custom", ink: "#445566", fx: "wave", fxAmt: 0.5 }, {}]) { const L = one(raw); assert.deepEqual(one(L), L); }
 });

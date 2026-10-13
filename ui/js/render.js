@@ -223,50 +223,39 @@ function centred(ctx, cx, cy, tr, s, fn) {
 // free text: nominal 120-unit type, centred on the origin
 function drawFreeText(ctx, L, env) {
   const raw = ctx;
-  // a look may draw plain and plate text its own way — unless the layer has asked for a text effect of its own
-  if (look().freeText && !L.fx) { const done = look().freeText(raw, L, parseTitle(L.text), env, lookValues()); if (done) return done; }
   ctx = styled(raw, env.C, true);
   const lines = parseTitle(L.text);
   if (!lines.length) return null;
-  const FS = 120, LH = 1.16, plate = L.look === "plate";
+  const FS = 120, LH = 1.16, plate = L.plate;
   ctx.font = plate ? `700 ${FS}px ${fonts.en}, ${fonts.cn}` : `900 ${FS}px ${fonts.cn}`;
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "round";
   const widths = lines.map((l) => l.reduce((s, a) => s + ctx.measureText(a.t).width, 0)), bw = Math.max(...widths), bh = lines.length * FS * LH;
-  const fill = L.ink || { white: "#ffffff", accent: env.acc, ink: INK }[L.color], pad = plate ? FS * 0.32 : 0;
+  // the layer's colour: of the lettering, or of the plate when there is one
+  const own = L.color === "custom" && L.ink ? hexToRgb(L.ink) : null;
+  const tone = own || { white: [255, 255, 255], accent: env.C, ink: [7, 7, 12] }[L.color] || [255, 255, 255], fill = rgb(tone), pad = plate ? FS * 0.32 : 0;
+  const dark = tone[0] + tone[1] + tone[2] < 200, onAccent = !own && L.color === "accent";
   if (plate) {
-    ctx.fillStyle = INK; para(ctx, -bw / 2 - pad + 10, -bh / 2 - pad * 0.3 + 10, bw + pad * 2, bh + pad * 0.6, -FS * 0.14); ctx.fill();
-    ctx.fillStyle = fill; para(ctx, -bw / 2 - pad, -bh / 2 - pad * 0.3, bw + pad * 2, bh + pad * 0.6, -FS * 0.14); ctx.fill();
-    ctx.lineWidth = 7; ctx.strokeStyle = INK; ctx.stroke();
+    const x = -bw / 2 - pad, y = -bh / 2 - pad * 0.3, w = bw + pad * 2, h = bh + pad * 0.6;
+    if (look().plate) look().plate(raw, x, y, w, h, fill, FS, lookValues());
+    else {
+      ctx.fillStyle = INK; para(ctx, x + 10, y + 10, w, h, -FS * 0.14); ctx.fill();
+      ctx.fillStyle = fill; para(ctx, x, y, w, h, -FS * 0.14); ctx.fill();
+      ctx.lineWidth = 7; ctx.strokeStyle = INK; ctx.stroke();
+    }
   }
-  const dark = L.ink ? hexToRgb(L.ink).reduce((sum, v) => sum + v, 0) < 200 : L.color === "ink";   // a dark plate takes light lettering
-  const textFill = plate ? (dark ? env.acc : INK) : fill, d = FS * 0.062;
+  // the lettering, by the layer's text effect. On a plate it takes the colour that reads against
+  // the plate and has no keyline or drop shadow of its own; off a plate it is a headline.
+  const light = onAccent ? "#ffffff" : env.acc, onPlate = dark ? env.C : [7, 7, 12], d = FS * 0.062;
   lines.forEach((line, li) => {
     ctx.save();
     ctx.translate(-widths[li] / 2, -bh / 2 + li * FS * LH + FS * (plate ? 0.94 : 0.9));
     if (!plate) ctx.transform(1, 0, -0.08, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
-    const m = raw.getTransform ? raw.getTransform() : null, light = L.color === "accent" ? "#ffffff" : env.acc, unit = m ? Math.hypot(m.a, m.b) : 1;
-    if (L.look === "title") {   // a headline: painted by the layer's text effect, like the title
-      paintRuns(raw, pass, {
-        fs: FS, d, strokeAmt: 1, shadowAmt: 1, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3,
-        fillCss: fill, hiCss: light, inkCss: L.color === "ink" ? "#ffffff" : INK, shadowCss: light, hiShadowCss: "#ffffff",
-        C: env.C, fill: L.ink ? hexToRgb(L.ink) : { white: [240, 246, 250], accent: env.C, ink: [5, 5, 8] }[L.color], unit,
-      }, L.fx);
-      raw.restore();
-      return;
-    }
-    if (L.fx) {   // plain text, or the lettering on a plate, with an effect chosen for it: no keyline or drop shadow of its own
-      const onPlate = plate ? (dark ? env.C : [7, 7, 12]) : null;
-      paintRuns(raw, pass, {
-        fs: FS, d: 0, strokeAmt: 0, shadowAmt: 1, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 5,
-        fillCss: textFill, hiCss: plate ? textFill : light, inkCss: plate && !dark ? fill : INK, shadowCss: INK, hiShadowCss: INK,
-        C: env.C, fill: onPlate || (L.ink ? hexToRgb(L.ink) : { white: [240, 246, 250], accent: env.C, ink: [5, 5, 8] }[L.color]), unit,
-      }, L.fx);
-      raw.restore();
-      return;
-    }
-    pass((a, cx) => { ctx.fillStyle = a.hi && !plate ? (L.color === "accent" ? "#ffffff" : env.acc) : textFill; ctx.fillText(a.t, cx, 0); });
-    ctx.restore();
+    const m = raw.getTransform ? raw.getTransform() : null, unit = m ? Math.hypot(m.a, m.b) : 1, base = { fs: FS, shadowAmt: 1, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit };
+    paintRuns(raw, pass, plate
+      ? { ...base, d: 0, strokeAmt: 0, fillCss: rgb(onPlate), hiCss: dark ? "#ffffff" : rgb(onPlate), inkCss: fill, shadowCss: INK, hiShadowCss: INK, fill: onPlate }
+      : { ...base, d, strokeAmt: 1, fillCss: fill, hiCss: light, inkCss: dark ? "#ffffff" : INK, shadowCss: light, hiShadowCss: "#ffffff", fill: tone }, L.fx);
+    raw.restore();
   });
   return { hw: bw / 2 + pad, hh: bh / 2 + pad * 0.3 };
 }

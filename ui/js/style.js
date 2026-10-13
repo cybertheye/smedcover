@@ -16,7 +16,7 @@
 //   sticker                      painters for flat stickers: { shape, blob, stroke, thin, word }
 //   tag(ctx, str, x, y, fs, C, p) paints the corner tag and returns its box
 //   frame(ctx, env, p)           paints the frame layer (corner brackets and any interface detail)
-//   freeText(ctx, L, lines, env, p)  paints a free text layer; returns its half-extents, or null to decline
+//   plate(ctx, x, y, w, h, colour, fs, p)  paints the plate under a text layer
 //   subject(ctx, half, env, p)   painted around the channel graphic, in its own space
 //   seeded                       true when the look scatters things at random (the user can shuffle them)
 //   titleFont(fonts)             the font stack of the title, when the look sets its own
@@ -243,31 +243,10 @@ const cyber = {
     }
   },
 
-  /**
-   * A free text layer in its "plain" and "plate" looks (the "title" look goes through runs()).
-   * Drawn around the origin at a nominal 120-unit size; returns its half-extents.
-   *   plain  a bracketed label, spaced out:  [ NIGHT CITY ]
-   *   plate  a chamfered label plate with a tab on its left edge
-   */
-  freeText(ctx, L, lines, env, p) {
-    if (L.look === "title") return null;
-    const FS = 120, LH = 1.16, C = env.C, sp = FS * 0.07, col = parseColour(L.ink) || { white: CY.white, accent: C, ink: CY.black }[L.color] || CY.white;
-    ctx.font = `700 ${FS}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "miter";
-    const widthOf = (line) => line.reduce((sum, a) => sum + spacedW(ctx, a.t, sp) + sp, -sp), widths = lines.map(widthOf), bw = Math.max(...widths), bh = lines.length * FS * LH;
-    const text = (fillOf) => lines.forEach((line, li) => { let x = -widths[li] / 2; const y = -bh / 2 + li * FS * LH + FS * 0.92; for (const a of line) { ctx.fillStyle = fillOf(a); x += spaced(ctx, a.t, x, y, sp) + sp * 2; } });
-    const g = fast ? 0 : 6 * p.split;
-    if (L.look === "plate") {
-      const pad = FS * 0.36, x = -bw / 2 - pad, y = -bh / 2 - FS * 0.12, w = bw + pad * 2, h = bh + FS * 0.24, onInk = lum(col) < 0.25;   // a dark plate takes light lettering
-      const plate = (c) => { chamfer(ctx, x, y, w, h, FS * 0.34); ctx.fillStyle = c; ctx.fill(); ctx.fillRect(x - FS * 0.3, -FS * 0.07, FS * 0.22, FS * 0.14); };
-      echo(ctx, g, plate); plate(css(col));
-      text((a) => (onInk ? css(a.hi ? CY.white : C) : a.hi ? css(CY.white) : css(CY.black)));
-      return { hw: w / 2 + FS * 0.3, hh: h / 2 };
-    }
-    const arm = FS * 0.2, gap = FS * 0.3, bx = bw / 2 + gap, by = bh / 2;
-    const marks = (c) => { ctx.strokeStyle = c; ctx.lineWidth = FS * 0.075; ctx.lineCap = "butt"; ctx.beginPath(); for (const sx of [-1, 1]) { ctx.moveTo(sx * (bx - arm), -by); ctx.lineTo(sx * bx, -by); ctx.lineTo(sx * bx, by); ctx.lineTo(sx * (bx - arm), by); } ctx.stroke(); };
-    echo(ctx, g, (c) => { marks(c); text(() => c); });
-    marks(css(col)); text((a) => css(a.hi ? (String(css(col)) === String(css(C)) ? CY.white : C) : col));
-    return { hw: bx + FS * 0.04, hh: by + FS * 0.04 };
+  /** The plate under a text layer: chamfered, with a tab on its left edge and a colour echo. */
+  plate(ctx, x, y, w, h, colour, fs, p) {
+    const shape = (c) => { chamfer(ctx, x, y, w, h, fs * 0.34); ctx.fillStyle = c; ctx.fill(); ctx.fillRect(x - fs * 0.3, y + h / 2 - fs * 0.07, fs * 0.22, fs * 0.14); };
+    echo(ctx, fast ? 0 : 6 * p.split, shape); shape(colour);
   },
 
   wrap: (ctx, C, p, plates) => (plates ? ctx : neonContext(ctx, C, p)),   // the small cover parts are already ink on colour

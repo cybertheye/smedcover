@@ -833,9 +833,11 @@ function typeControls(L) {
     case "asset": return canTint(L.ref) && L.ref.kind !== "graphic" ? check("props.tint", L.tint, (v) => set("tint", v)) : null;
     case "text": return [
       cap("props.text"), el("textarea", { value: L.text, spellcheck: false, style: "height:72px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
-      el("div", { style: "margin-top:8px" }, select(["title", "plain", "plate"].map((k) => [k, `${t("props.look")} · ${t("look." + k)}`]), L.look, (v) => set("look", v))),
-      el("div", { style: "margin-top:8px" }, select(["white", "accent", "ink"].map((k) => [k, `${t("props.color")} · ${t("color." + k)}`]), L.color, (v) => set("color", v))),
-      inkControl(L, "ink", "props.inkCustom", { white: "#ffffff", accent: cat().color, ink: "#07070c" }[L.color]),
+      check("props.plateOn", L.plate, (v) => set("plate", v, true)),
+      el("div", { style: "margin-top:8px" }, select(["white", "accent", "ink", "custom"].map((k) => [k, `${t(L.plate ? "props.plateColor" : "props.color")} · ${t("color." + k)}`]), L.color,
+        (v) => { L.color = v; if (v === "custom") L.ink = L.ink || cat().color; else delete L.ink; touch({ cover: true, side: true }); })),
+      L.color === "custom" && el("div", { class: "ink" }, el("span", {}, t("props.inkCustom")),
+        el("input", { type: "color", value: L.ink || "#ffffff", oninput: (e) => { L.ink = e.target.value; touch({ cover: true }); } }), el("span", {})),
       fxControl(L),
     ];
   }

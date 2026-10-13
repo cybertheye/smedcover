@@ -20,7 +20,7 @@ export const FREE_TYPES = ["asset", "text"];
 /** Shapes the colour block and its dividing edge can take ("slant" is the template's own). */
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes", "arc"];
 /** The text effects a headline can be given (painted in textfx.js). Absent on a layer means "auto": the look decides. */
-export const TEXT_EFFECTS = ["auto", "cel", "cyber", "riso", "anime", "bluenote", "editorial", "dots", "stripes", "inner", "worn", "rows", "extrude", "arc", "taper", "wave"];
+export const TEXT_EFFECTS = ["auto", "cel", "plain", "cyber", "riso", "anime", "bluenote", "editorial", "dots", "stripes", "inner", "worn", "rows", "extrude", "arc", "taper", "wave"];
 /** Layers made of words. Each may carry `ink`, its own colour; the title also `hi`, for highlighted words. */
 export const LETTERED = ["title", "tag", "catname", "brand", "text"];
 export const isFree = (type) => FREE_TYPES.includes(type);
@@ -39,9 +39,9 @@ const PROPS = {
   catname: { showName: true, plate: true },
   frame: {},
   asset: { ref: null, tint: false },
-  text: { text: "", look: "title", color: "white" },
+  text: { text: "", plate: false, color: "white" },
 };
-const LOOKS = ["title", "plain", "plate"], COLORS = ["white", "accent", "ink"];
+const COLORS = ["white", "accent", "ink", "custom"];   // "custom" uses the layer's own `ink`
 
 const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(hi, Math.max(lo, Number(v))) : d);
 const uid = () => "l" + Math.random().toString(36).slice(2, 9);
@@ -95,7 +95,19 @@ function normalizeLayer(raw, catIds) {
       if (!r || !["graphic", "sticker", "user"].includes(r.kind) || typeof r.id !== "string") return null;
       L.ref = { kind: r.kind, id: r.id }; L.tint = raw.tint === true; break;
     }
-    case "text": L.text = typeof raw.text === "string" ? raw.text : ""; L.look = LOOKS.includes(raw.look) ? raw.look : "title"; L.color = COLORS.includes(raw.color) ? raw.color : "white"; break;
+    case "text": {
+      L.text = typeof raw.text === "string" ? raw.text : "";
+      L.plate = raw.plate === true || raw.look === "plate";
+      L.color = COLORS.includes(raw.color) ? raw.color : "white";
+      // Older files said how a text layer looked with `look`: "title", "plain" or "plate". A plate is
+      // now a setting of its own, and the lettering is the text effect — "plain" for the two that had none.
+      if (!L.fx && (raw.look === "plain" || raw.look === "plate")) L.fx = "plain";
+      // they also let a custom colour sit beside the three named ones; now it is the fourth choice
+      if (L.ink && raw.color !== "custom") L.color = "custom";
+      if (L.color === "custom" && !L.ink) L.color = "white";
+      if (L.color !== "custom") delete L.ink;
+      break;
+    }
   }
   return L;
 }

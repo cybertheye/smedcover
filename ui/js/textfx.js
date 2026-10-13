@@ -26,10 +26,11 @@ import { outline } from "./outlines.js";
 export const EFFECTS = {
   auto: { name: { zh: "自动（跟随风格）", en: "Automatic (follows the look)" }, kind: "passes" },
   cel: { name: { zh: "描边加投影", en: "Outline and shadow" }, kind: "passes" },
+  plain: { name: { zh: "纯文字", en: "Plain" }, kind: "passes" },
   cyber: { name: { zh: "切片错位", en: "Sliced" }, kind: "passes" },
   riso: { name: { zh: "双色叠印", en: "Overprint" }, kind: "passes" },
   anime: { name: { zh: "双层勾边", en: "Double keyline" }, kind: "passes" },
-  bluenote: { name: { zh: "纯色平排", en: "Plain" }, kind: "passes" },
+  bluenote: { name: { zh: "纯文字（不倾斜）", en: "Plain, upright" }, kind: "passes" },
   editorial: { name: { zh: "下划线强调", en: "Underlined highlight" }, kind: "passes" },
   dots: { name: { zh: "字内网点", en: "Halftone inside" }, kind: "mask" },
   stripes: { name: { zh: "字内条纹", en: "Stripes inside" }, kind: "mask" },
@@ -196,6 +197,7 @@ export function paintRuns(ctx, pass, o, id = "auto") {
   const fx = EFFECTS[id] ? id : "auto";
   if (fx === "auto") return look().runs ? look().runs(ctx, pass, o, lookValues()) : house(ctx, pass, o);
   if (fx === "cel") return house(ctx, pass, o);
+  if (fx === "plain") return pass((a, x) => { ctx.fillStyle = a.hi ? o.hiCss : o.fillCss; ctx.fillText(a.t, x, 0); });
   if (fx === "riso" && look().id !== "riso") {   // off the paper there is nothing to overprint on: the second colour simply sits behind
     const g = o.fs * 0.05 * Math.max(0.3, o.shadowAmt);
     pass((a, x) => { ctx.fillStyle = a.hi ? o.fillCss : o.hiCss; ctx.fillText(a.t, x + g, g * 0.8); });

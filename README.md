@@ -96,14 +96,26 @@ What each layer allows:
 | Colour block, channel graphic, brand row, title, corner tag, channel name | yes | yes | yes | no |
 | Stickers, images, text (free layers) | yes | yes | yes | yes |
 
+### Text layers
+
+Add one with **＋ Text** on the right. A text layer has three settings that do not depend on each other:
+
+| Setting | Decides |
+|---|---|
+| Plate | whether the text sits on a block of colour |
+| Colour | White, Channel colour, Ink, or Custom. With a plate this is the colour of the **plate**, and the lettering takes whichever colour reads against it |
+| Text effect | how the letters are drawn; see the next section |
+
+A layer set to *Channel colour* changes with the channel; a *Custom* colour stays as it is.
+
 ### Text effects
 
-The title and every text layer (in any of its three looks) can be given a text effect of their own instead of following the look. Select the layer and choose under *Text effect* in its properties:
+The title and every text layer (with or without a plate) can be given a text effect of their own instead of following the look. Select the layer and choose under *Text effect* in its properties:
 
 | Kind | Effects | Notes |
 |---|---|---|
 | Automatic | follows the look | The default: the current look's own lettering |
-| Layered | outline and shadow, sliced, overprint, double keyline, plain, underlined highlight | The letterings of the six looks, usable under any look |
+| Layered | outline and shadow, plain, sliced, overprint, double keyline, plain upright, underlined highlight | The looks' own letterings, usable under any look |
 | Masked | halftone inside, stripes inside, inner shadow, worn, row shift | Change what is inside the letters |
 | Outlined | extruded, arched, tapered, wave | Reshape the letters themselves |
 
@@ -118,7 +130,7 @@ Every layer made of words can be given its own colour. Select the layer and look
 | Layer | Colours you can set |
 |---|---|
 | Title | lettering colour, and highlight colour (for words in `*asterisks*`) |
-| Text layers | a custom colour, which replaces the White / Channel colour / Ink choice above it |
+| Text layers | under *Colour*: White, Channel colour, Ink, or *Custom…* and a swatch to pick one |
 | Corner tag, channel name, brand row | lettering colour |
 
 Without one a layer shows *Automatic*: the colour comes from the current look and the channel colour, and follows when you switch either. Once set, the colour stays as it is; *Back to automatic* clears it.
@@ -204,7 +216,7 @@ The cyberpunk look has eight sliders and a checkbox. Two of them sound alike: *S
 
 **Random placement** — the tears, the sweep line and the lens rings fall at random but then stay put, so the export matches the preview and every size agrees. *Shuffle the random placement*, under the sliders, rolls again — when a tear lands across the title, say.
 
-**Text layers** are drawn differently in this look too: *Headline* is slanted, sliced lettering in the channel colour with highlighted words black on a chamfered plate; *Plain* is a bracketed label such as `[ NIGHT CITY ]`; *Plate* is a chamfered label plate with a small tab on its left.
+**Text layers** are drawn differently in this look too: without a plate, slanted sliced lettering in the channel colour with highlighted words black on a chamfered plate; with one, a chamfered label plate with a small tab on its left.
 
 Most of the interface detail is painted on the *Corner brackets* layer, so hiding that layer removes it at once; the lock-on ring around the channel graphic travels with the graphic. The colour split and the signal tear are paused while you drag a layer and return when you let go, to keep dragging smooth. Cyberpunk is dark only, so the *Background* choice is hidden while it is selected.
 
