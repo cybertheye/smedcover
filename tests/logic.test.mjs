@@ -284,10 +284,23 @@ test("spec: anything unexpected is refused, never executed or guessed", () => {
   no({ ops: Array(SPEC_LIMITS.ops + 1).fill({ op: "shape", path: { circle: [0, 0, 9] }, fill: "main" }) }, /more than/);
   no({ ops: [{ op: "shape", path: { circle: [0, 0, 9] }, fill: "main", move: [1] }] }, /move/);
   // colours: palette names, hex in either length, and a few names models tend to use
-  const fills = ["Main", "black", "#FFF", "#12abEF", "purple"].map((fill) => normalizeSpec({ ops: [{ op: "shape", path: { circle: [0, 0, 9] }, fill }] }).spec.ops[0].fill);
+  const fills = ["Main", "black", "#FFF", "#12abEF", "purple"].map((fill) => normalizeSpec({ ops: [{ op: "shape", path: { circle: [0, 0, 9] }, fill }, { op: "shape", path: { circle: [0, 0, 5] }, fill: "main" }] }).spec.ops[0].fill);
   assert.deepEqual(fills, ["main", "ink", "#ffffff", "#12abef", "#8b5cf6"]);
   // extra keys on a valid op are simply dropped
   assert.equal("onload" in normalizeSpec({ ops: [{ op: "shape", path: { circle: [0, 0, 9] }, fill: "main", onload: "x" }] }).spec.ops[0], false);
+});
+
+test("spec: a sticker that never uses the main colour gets its dominant colour promoted", () => {
+  const circle = (fill, r = 9) => ({ op: "shape", path: { circle: [0, 0, r] }, fill });
+  const fills = (raw) => { const { spec } = normalizeSpec(raw); return [spec.color, ...spec.ops.map((o) => o.fill || o.color)]; };
+  // the sticker's own colour, when it is actually used
+  assert.deepEqual(fills({ color: "#3A86FF", ops: [circle("red"), circle("red"), circle("#3a86ff"), circle("white")] }), ["#3a86ff", "red", "red", "main", "white"]);
+  assert.deepEqual(fills({ color: "#3a86ff", ops: [circle("blue"), circle("red")] }), ["#3a86ff", "main", "red"]);   // palette name for the same colour
+  // otherwise the colour that fills the most shapes; thin lines weigh less; white and ink never count
+  assert.deepEqual(fills({ color: "#123456", ops: [circle("ink"), circle("white"), circle("green"), { op: "detail", pts: [[0, 0], [1, 1]], color: "red" }, { op: "detail", pts: [[0, 0], [1, 1]], color: "red" }] }), ["#06d6a0", "ink", "white", "main", "red", "red"]);
+  // already uses main, or has nothing but white and ink: left alone
+  assert.deepEqual(fills({ color: "#ff0000", ops: [circle("main"), circle("red")] }), ["#ff0000", "main", "red"]);
+  assert.deepEqual(fills({ color: "#ff0000", ops: [circle("white"), circle("ink")] }), ["#ff0000", "white", "ink"]);
 });
 
 test("spec: found inside a chatty or fenced reply", () => {

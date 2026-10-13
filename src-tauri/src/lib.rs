@@ -376,14 +376,19 @@ fn post_json(url: &str, headers: &[(String, String)], body: &str, proxy: &str) -
 
 /// Sends one request for an AI-generated asset. The web view builds the request (see `ui/js/ai.js`);
 /// sending it from here avoids the cross-origin limits a web view has.
-#[tauri::command(async)]
-fn ai_request(
+#[tauri::command]
+async fn ai_request(
     url: String,
     headers: Vec<(String, String)>,
     body: String,
     proxy: Option<String>,
 ) -> Res<AiReply> {
-    post_json(&url, &headers, &body, proxy.as_deref().unwrap_or(""))
+    // a reply can take minutes: wait for it on the blocking pool, not on a runtime worker
+    tauri::async_runtime::spawn_blocking(move || {
+        post_json(&url, &headers, &body, proxy.as_deref().unwrap_or(""))
+    })
+    .await
+    .map_err(err)?
 }
 
 /// In self-test mode, the URL of a stand-in AI endpoint to exercise `ai_request` against.

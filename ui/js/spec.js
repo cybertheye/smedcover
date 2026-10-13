@@ -99,6 +99,29 @@ function op(raw, i) {
   return out;
 }
 
+const paint = (o) => (o.op === "line" || o.op === "detail" ? "color" : "fill");
+const NEUTRAL = new Set(["white", "ink", "#ffffff", "#000000", PALETTE.white.toLowerCase(), PALETTE.ink.toLowerCase()]);
+/**
+ * A sticker must be able to follow the channel colour, so some part of it has to be painted
+ * "main". When a model used none, its dominant colour is promoted: the one given as the sticker's
+ * own colour if it is used, else the colour that fills the most shapes (white and ink never count).
+ */
+function withMain(spec, hasOwnColour) {
+  if (spec.ops.some((o) => o[paint(o)] === "main")) return spec;
+  const hex = (c) => (PALETTE[c] || c).toLowerCase(), weight = new Map();
+  for (const o of spec.ops) {
+    const c = o[paint(o)];
+    if (NEUTRAL.has(c) || NEUTRAL.has(hex(c))) continue;
+    weight.set(c, (weight.get(c) || 0) + (o.op === "shape" || o.op === "blob" ? 3 : 1));
+  }
+  if (!weight.size) return spec;                               // only white and ink: nothing to recolour
+  const own = hasOwnColour && [...weight.keys()].find((c) => hex(c) === spec.color);
+  const pick = own || [...weight.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  for (const o of spec.ops) if (o[paint(o)] === pick) o[paint(o)] = "main";
+  spec.color = hex(pick);
+  return spec;
+}
+
 /**
  * Checks a spec and returns a clean copy with every field present and every number in range.
  * Returns {spec} or {error}: anything unexpected is refused, never guessed at.
@@ -110,7 +133,8 @@ export function normalizeSpec(raw) {
     if (raw.ops.length > SPEC_LIMITS.ops) bad(`ops: more than ${SPEC_LIMITS.ops}`);
     const n = raw.name, text = (v) => (typeof v === "string" ? v.trim().slice(0, 40) : "");
     const zh = text(n && typeof n === "object" ? n.zh : n), en = text(n && typeof n === "object" ? n.en : n);
-    return { spec: { name: { zh: zh || en || "AI", en: en || zh || "AI" }, color: HEX.test(raw.color) ? raw.color.toLowerCase() : PALETTE.yellow, ops: raw.ops.map(op) } };
+    const spec = { name: { zh: zh || en || "AI", en: en || zh || "AI" }, color: HEX.test(raw.color) ? raw.color.toLowerCase() : PALETTE.yellow, ops: raw.ops.map(op) };
+    return { spec: withMain(spec, HEX.test(raw.color)) };
   } catch (e) {
     if (e instanceof SpecError) return { error: e.message };
     throw e;

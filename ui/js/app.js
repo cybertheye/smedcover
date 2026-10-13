@@ -215,7 +215,7 @@ function addLayer(L) {
   return L;
 }
 function addAsset(ref, at) {
-  const L = newLayer("asset", { ref, tint: false });
+  const L = newLayer("asset", { ref, tint: ref.kind === "user" && canTint(ref) });   // generated stickers follow the channel colour from the start
   if (at) { L.t.all.x = at.x; L.t.all.y = at.y; }
   if (ref.kind === "sticker") L.t.all.s = 0.3;
   addLayer(L);

@@ -250,7 +250,8 @@ colours.
 `normalizeSpec()` checks a reply item by item: operations must be on the list, numbers must be finite
 and are clamped to their range, colours must be a palette name or a hex value, and the number of
 operations, points and characters is capped. Anything unknown is refused rather than guessed at;
-extra fields are dropped. `parseSpec()` finds the JSON inside a reply that may carry a code fence or
+extra fields are dropped. If a model never used `"main"`, the colour it used most is promoted to the
+main colour, so an asset can always follow the channel colour. `parseSpec()` finds the JSON inside a reply that may carry a code fence or
 a polite sentence.
 
 A spec that passes is stored as `assets/<id>.json` next to uploaded images. It is one of *My assets*
@@ -338,6 +339,7 @@ used to write into another directory.
 status and body as they are — error replies included, so the interface can show the provider's own
 message. It is sent from Rust to get around the cross-origin limits of a web view.
 
+- The request waits for its reply on the blocking thread pool, off the interface thread and off the async runtime's workers.
 - Only `http://` and `https://` are accepted; the timeout is 180 seconds and at most 4 MB of a reply is read.
 - Proxy: the one given in the settings wins; otherwise `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` from the environment. **Addresses on this machine never go through the environment's proxy**, or a local model would be cut off by it.
 

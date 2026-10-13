@@ -118,7 +118,8 @@ Deleting a channel also deletes the layers that belonged only to it.
 At the top of the Assets tab, type what you need ("a ginger cat", "a trophy", "an umbrella") and click **Generate** to get a sticker.
 
 - The result is previewed twice: in its own colour, and following the current channel colour. If you like it, **Save to My assets** and use it like any other asset.
-- A generated sticker is the same kind of thing as a built-in one: sharp at any size, able to follow the channel colour, usable as a channel's graphic.
+- A generated sticker is the same kind of thing as a built-in one: sharp at any size and usable as a channel's graphic.
+- Once on the canvas it **follows the channel colour by default**, changing as you switch channels; untick *Use the channel colour* in the layer's properties to keep its own colour.
 - The style comes from a prompt preset in the app; you only describe the subject.
 - You first connect your own model service under *Setup → AI*, see below.
 - A model sometimes answers in a form the app cannot use; you are told it failed and can simply generate again. Weaker models fail more often and draw cruder shapes.
