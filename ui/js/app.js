@@ -1,8 +1,8 @@
 // SmedCover UI. Two modes: Edit (cover content, assets, style + the layer stack) and Setup (brand,
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
-import { virtualSize } from "./layout.js";
-import { drawCover, sizeKey, hexToRgb, hitAt, paintAccent, handles } from "./render.js";
+import { virtualSize , layoutValues, dragLayout, LAYOUT_LIMITS } from "./layout.js";
+import { layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, paintAccent, handles } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
@@ -303,6 +303,20 @@ function layerAt(e) {
   cv.addEventListener("pointerdown", (e) => {
     if (S.mode !== "edit") return;
     const done = (moved) => () => { cv.onpointermove = null; endLive(); if (moved()) renderSide(); };
+    // a handle of the layout itself (the diamonds): dragging it changes the template for every cover of this profile
+    const at0 = virtualPoint(e), lh = layoutHandles(cv, layer()).find((q) => Math.hypot(at0.x - q.x, at0.y - q.y) <= 13 * at0.k);
+    if (lh) {
+      const st = S.profile.style, tpl = st.template;
+      let moved = false;
+      cv.setPointerCapture(e.pointerId);
+      cv.onpointermove = (m) => {
+        const p = virtualPoint(m), [vw, vh] = cv._virtual;
+        st.layoutAdjust[tpl] = dragLayout(cv._layout, vw, vh, st.layoutAdjust[tpl] || {}, lh.id, p.x, p.y, cv._titleBox);
+        moved = true; touch({ profile: true });
+      };
+      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; if (moved && S.tab.edit === "style") renderPanel(); };
+      return;
+    }
     const g = grip(e);
     if (g && g.handle) {   // a handle of the selected layer: corners resize, sides stretch, the knob rotates
       const { L, hit, handle } = g, min = 6 * g.p.k;
@@ -584,6 +598,21 @@ function removeAsset(id) {
   touch({ panel: true, side: true });
 }
 
+/** The sliders that adjust the current template: how much the colour panel takes, how its edge leans, the title's box, and which half goes first. */
+function layoutBox() {
+  const st = S.profile.style, tpl = st.template, adj = st.layoutAdjust[tpl] || {}, cv = $("cv");
+  const now = cv._layout && cv._virtual ? layoutValues(cv._layout, cv._virtual[0], cv._virtual[1]) : { size: 0.3, slant: 0 };
+  const set = (k, v) => { st.layoutAdjust[tpl] = { ...(st.layoutAdjust[tpl] || {}), [k]: v }; touch({ profile: true }); };
+  const split = tpl === "split", changed = Object.keys(adj).length > 0;
+  return el("div", { class: "box" }, cap("style.layout"),
+    slider2(t(split ? "style.laySide" : "style.layBand"), LAYOUT_LIMITS.size[0], LAYOUT_LIMITS.size[1], 0.01, adj.size ?? now.size, (v) => set("size", v)),
+    slider2(t("style.laySlant"), LAYOUT_LIMITS.slant[0], LAYOUT_LIMITS.slant[1], 0.005, adj.slant ?? now.slant, (v) => set("slant", v)),
+    slider2(t("style.layTw"), LAYOUT_LIMITS.tw[0], 1, 0.01, adj.tw ?? 1, (v) => set("tw", v)),
+    slider2(t("style.layTh"), LAYOUT_LIMITS.th[0], 1, 0.01, adj.th ?? 1, (v) => set("th", v)),
+    el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: !!adj.flip, onchange: (e) => { set("flip", e.target.checked); renderPanel(); } }), el("span", {}, t(split ? "style.layFlipSplit" : "style.layFlipStack"))),
+    el("button", { class: "btn wide", style: "margin-top:10px", disabled: !changed, onclick: () => { delete st.layoutAdjust[tpl]; touch({ profile: true, panel: true }); } }, t("style.layReset")),
+    el("div", { class: "hint" }, t("style.layHint")));
+}
 function styleTab() {
   const st = S.profile.style, set = (k, v) => { st[k] = v; touch({ profile: true }); };
   const L = LOOKS[st.look] || LOOKS.cel, vals = lookParams(st.look, st.lookParams[st.look]);
@@ -601,6 +630,7 @@ function styleTab() {
       L.seeded && el("div", { class: "hint" }, t("style.shuffleHint")),
       L.params.length > 0 && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete st.lookParams[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))),
     el("div", {}, cap("style.template"), select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), st.template, (v) => set("template", v))),
+    layoutBox(),
     !L.oneTheme && el("div", {}, cap("style.theme"), select([["dark", t("theme.dark")], ["light", t("theme.light")]], st.theme, (v) => set("theme", v))),
     check("style.imageShadow", st.imageShadow, (v) => set("imageShadow", v)),
     el("div", { class: "box" }, cap("style.design"),

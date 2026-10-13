@@ -8,7 +8,7 @@
 // In the desktop app everything lives in the app data directory (through the Rust side); when the
 // page is opened in a plain browser it falls back to localStorage so the UI can still be developed.
 import { SIZE_PRESETS } from "./presets.js";
-import { TEMPLATES } from "./layout.js";
+import { TEMPLATES, LAYOUT_LIMITS } from "./layout.js";
 import { LOOK_IDS, lookParams } from "./style.js";
 import { normalizeLayers } from "./layers.js";
 
@@ -37,7 +37,7 @@ const bool = (v, d) => (typeof v === "boolean" ? v : d);
 const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(hi, Math.max(lo, Number(v))) : d);
 const color = (v) => (/^#[0-9a-f]{6}$/i.test(str(v)) ? v.toLowerCase() : "#fcee0a");
 
-export const DEFAULT_STYLE = { template: "stack", theme: "dark", imageShadow: true, look: "cel", lookParams: {}, lookSeed: 7 };
+export const DEFAULT_STYLE = { template: "stack", theme: "dark", imageShadow: true, look: "cel", lookParams: {}, lookSeed: 7, layoutAdjust: {} };
 
 const KINDS = ["graphic", "sticker", "user"];
 /** A category's graphic: a reference into the asset library, or none. Older shapes are upgraded. */
@@ -76,6 +76,14 @@ export function normalizeProfile(raw) {
   const style = { template: TEMPLATES.includes(st.template) ? st.template : "stack", theme: st.theme === "light" ? "light" : "dark", imageShadow: bool(st.imageShadow, true),
     look: LOOK_IDS.includes(st.look) ? st.look : "cel", lookParams: {},
     lookSeed: Number.isFinite(st.lookSeed) ? Math.abs(Math.round(st.lookSeed)) % 1000000 : 7 };   // places what a look scatters at random
+  // what the user changed about each template: only the settings that differ from the template's own
+  style.layoutAdjust = {};
+  for (const tpl of TEMPLATES) {
+    const raw = (st.layoutAdjust && st.layoutAdjust[tpl]) || {}, a = {};
+    for (const k of Object.keys(LAYOUT_LIMITS)) if (Number.isFinite(raw[k])) a[k] = Math.min(LAYOUT_LIMITS[k][1], Math.max(LAYOUT_LIMITS[k][0], raw[k]));
+    if (raw.flip === true) a.flip = true;
+    if (Object.keys(a).length) style.layoutAdjust[tpl] = a;
+  }
   // tuned values are kept per look, so switching away and back loses nothing
   for (const id of LOOK_IDS) { const v = lookParams(id, st.lookParams && st.lookParams[id]); if (Object.keys(v).length) style.lookParams[id] = v; }
   let sizes = (Array.isArray(p.sizes) ? p.sizes : []).map(normalizeSize);

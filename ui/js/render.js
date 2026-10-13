@@ -2,7 +2,7 @@
 // A pure function of its options — the app calls it for the canvas, the thumbnails, exports and
 // batch jobs alike.
 import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, brackets } from "./cel.js";
-import { virtualSize, layout } from "./layout.js";
+import { virtualSize, layout, adjustLayout } from "./layout.js";
 import { drawTitle, parseTitle } from "./title.js";
 import { drawPhoto } from "./photo.js";
 import { drawAsset } from "./assets.js";
@@ -49,8 +49,9 @@ function accentTag(ctx, str, x, y, fs, acc, ink = INK) {
   return { x: x - fs * 0.22, y, w: w + fs * 0.44 + 8, h: h + 8 };
 }
 
-function drawHeader(ctx, o, w, th, C, onAccentRight, rail) {
+function drawHeader(ctx, o, w, th, C, onAccentRight, rail, onAccent = false) {
   const { profile: P, catIndex: i } = o, cat = P.categories[i], total = P.categories.length, acc = rgb(C);
+  if (onAccent) th = { ...th, text: th.own || INK };   // the row sits on the colour panel: ink instead of the field's text colour
   const box = { x: 66, y: 64, w: 0, h: 52 };
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
   let x = 72;
@@ -61,12 +62,12 @@ function drawHeader(ctx, o, w, th, C, onAccentRight, rail) {
   if (cat.code) {
     ctx.font = `700 23px ${fonts.mono}, ${fonts.cn}`;
     const cw = ctx.measureText(cat.code).width + 26;
-    ctx.fillStyle = acc; ctx.fillRect(x, 72, cw, 34);
-    ctx.fillStyle = INK; ctx.fillText(cat.code, x + 13, 97);
+    ctx.fillStyle = onAccent ? INK : acc; ctx.fillRect(x, 72, cw, 34);
+    ctx.fillStyle = onAccent ? acc : INK; ctx.fillText(cat.code, x + 13, 97);
     x += cw + 18;
   }
   const unit = [P.brand.unit, total > 1 ? `${pad2(i + 1)} / ${pad2(total)}` : ""].filter(Boolean).join(" ");
-  if (unit) { ctx.fillStyle = onAccentRight ? th.text : rgb(C, 0.9); ctx.font = `600 21px ${fonts.mono}, ${fonts.cn}`; x += spaced(ctx, unit, x, 97, 3); }
+  if (unit) { ctx.fillStyle = onAccentRight || onAccent ? th.text : rgb(C, 0.9); ctx.font = `600 21px ${fonts.mono}, ${fonts.cn}`; x += spaced(ctx, unit, x, 97, 3); }
   box.w = Math.max(60, x - box.x + 8);
   if (!rail || total < 2) return box;
   if (onAccentRight) {   // the right end sits on the accent panel: an ink tag instead of the colour rail
@@ -282,11 +283,12 @@ const PAINT = {
     });
   },
   brand(ctx, L, tr, env) {
-    return placed(ctx, tr, (c) => drawHeader(styled(c, env.C, true), env.o, env.w, L.ink ? { ...env.th, text: L.ink } : env.th, env.C, env.G.template === "split", L.rail));
+    return placed(ctx, tr, (c) => drawHeader(styled(c, env.C, true), env.o, env.w, L.ink ? { ...env.th, text: L.ink, own: L.ink } : env.th, env.C, env.G.railOnAccent, L.rail, env.G.brandOnAccent));
   },
   title(ctx, L, tr, env) {
-    const { G, th } = env, top = env.hasBrand ? 150 : 84;
+    const { G, th } = env, top = G.titleTop ?? (env.hasBrand ? 150 : 84);
     const box = { x: G.title.x, y: top, w: G.title.w, h: G.title.h + (G.title.y - top) };
+    env.titleBox = box;
     return placed(ctx, tr, (c) => drawTitle(c, env.cover.title, box, IDENTITY, {
       font: look().titleFont ? look().titleFont(fonts) : fonts.cn, maxFs: 340, align: L.align, fill: L.ink || th.titleFill, ink: th.titleInk, hi: L.hi || env.acc, shadow: L.hi || env.acc, hiShadow: L.ink || th.titleFill,
       own: L.ink ? hexToRgb(L.ink) : undefined, ownHi: L.hi ? hexToRgb(L.hi) : undefined,   // for looks that paint the letters themselves
@@ -371,11 +373,12 @@ export function drawCover(cv, o) {
   const base = o.photo ? THEMES.dark : THEMES[P.style.theme] || THEMES.dark;
   const env = {
     o, w, h, cover, cat, C, acc: rgb(C), style: P.style, photo: o.photo || null, hiRes: cv.width > w,
-    G: L0.layout ? L0.layout(P.style.template, w, h) : layout(P.style.template, w, h),
+    G: adjustLayout(L0.layout ? L0.layout(P.style.template, w, h) : layout(P.style.template, w, h), w, h, (P.style.layoutAdjust || {})[P.style.template]),
     th: L0.theme ? L0.theme(base, C, lookValues()) : base,
     hasBrand: cover.layers.some((l) => l.type === "brand" && l.visible),
   };
   cv._virtual = [w, h];
+  cv._layout = env.G;   // for the editor's layout handles
   /** Paints layers [from, to) onto `c` (a context already scaled to the virtual canvas) and returns their hits. */
   const paintRange = (c, from, to) => {
     const hits = [];
@@ -422,7 +425,43 @@ export function drawCover(cv, o) {
   }
   if (L0.post && cover.layers[0].visible) { ctx.save(); L0.post(ctx, w, h, C, lookValues(), kx, cv._hits); ctx.restore(); }   // not over a transparent background
   setFast(false);
-  if (o.select) { const hit = cv._hits.find((x) => x.id === o.select); if (hit && hit.type !== "bg") drawSelection(ctx, hit, kx); }
+  cv._titleBox = env.titleBox || null;
+  if (o.select) {
+    const hit = cv._hits.find((x) => x.id === o.select);
+    if (hit && hit.type !== "bg") drawSelection(ctx, hit, kx);
+    drawLayoutHandles(ctx, cv, cover.layers.find((l) => l.id === o.select), kx, rgb(C));
+  }
+}
+
+/**
+ * The handles that adjust the layout itself, for the selected layer: on the colour block, the two
+ * ends and the middle of its dividing edge; on the title, the right and bottom sides of its box.
+ * Positions are in virtual units. The block's handles are offered only while the block sits where
+ * the template puts it — once moved or turned as a layer, its edge is no longer the template's.
+ */
+export function layoutHandles(cv, layer) {
+  const G = cv._layout;
+  if (!G || !layer) return [];
+  if (layer.type === "accent") {
+    const a = layer.t.all, moved = a.x || a.y || a.r || a.s !== 1 || a.kx !== 1 || a.ky !== 1 || Object.keys(layer.t.by).length;
+    if (moved) return [];
+    const [x0, y0, x1, y1] = G.edge.line;
+    return [{ id: "a", x: x0, y: y0 }, { id: "b", x: x1, y: y1 }, { id: "m", x: (x0 + x1) / 2, y: (y0 + y1) / 2 }];
+  }
+  const b = cv._titleBox;
+  if (layer.type === "title" && b) return [{ id: "tw", x: b.x + b.w, y: b.y + b.h / 2 }, { id: "th", x: b.x + b.w / 2, y: b.y + b.h }];
+  return [];
+}
+function drawLayoutHandles(ctx, cv, layer, k, colour) {
+  const hs = layoutHandles(cv, layer), u = 1 / k;
+  if (!hs.length) return;
+  ctx.save();
+  if (layer.type === "title") { const b = cv._titleBox; ctx.strokeStyle = colour; ctx.lineWidth = 2 * u; ctx.setLineDash([4 * u, 6 * u]); ctx.strokeRect(b.x, b.y, b.w, b.h); ctx.setLineDash([]); }
+  for (const hnd of hs) {   // diamonds, to tell them from a layer's own square handles
+    ctx.beginPath(); ctx.moveTo(hnd.x, hnd.y - 10 * u); ctx.lineTo(hnd.x + 10 * u, hnd.y); ctx.lineTo(hnd.x, hnd.y + 10 * u); ctx.lineTo(hnd.x - 10 * u, hnd.y); ctx.closePath();
+    ctx.fillStyle = colour; ctx.fill(); ctx.lineWidth = 2.5 * u; ctx.strokeStyle = INK; ctx.stroke();
+  }
+  ctx.restore();
 }
 
 /** Topmost hit (from cv._hits) containing the virtual point (x, y) for which accept(hit) is true. */

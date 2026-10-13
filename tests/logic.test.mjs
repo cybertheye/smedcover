@@ -593,3 +593,52 @@ test("looks that are about arrangement bring flat-edged layouts", async () => {
   assert.ok(blockLayout("stack", 1920, 1080, { band: 0.5 }).accent[0][1] < blockLayout("stack", 1920, 1080, { band: 0.2 }).accent[0][1]);
   assert.equal(LOOKS.riso.layout, undefined);                    // the others keep the profile's slanted layouts
 });
+
+test("templates can be adjusted, and their halves swapped", async () => {
+  const { layout, blockLayout, adjustLayout, layoutValues, dragLayout, LAYOUT_LIMITS } = await import("../ui/js/layout.js");
+  const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
+  for (const [w, h] of [[1920, 1080], [1200, 1200], [1080, 1920]]) for (const base of [(t) => layout(t, w, h), (t) => blockLayout(t, w, h, { band: 0.36, side: 0.38, strip: 0.15 })]) for (const t of ["stack", "split", "banner"]) {
+    const G = base(t), where = `${t} ${w}x${h}`;
+    // nothing asked for: the same geometry, plus the flags the renderer reads
+    const same = adjustLayout(G, w, h, {});
+    assert.deepEqual(same.accent, G.accent, where); assert.deepEqual(same.title, G.title, where);
+    assert.equal(same.railOnAccent, t === "split"); assert.equal(same.brandOnAccent, false); assert.equal(same.flipped, false);
+    assert.notEqual(same.accent, G.accent);                                    // a copy: the template is left alone
+    // size and slant come back as set, flipped or not
+    for (const flip of [false, true]) {
+      const g = adjustLayout(G, w, h, { size: 0.4, slant: 0.05, flip }), v = layoutValues(g, w, h);
+      assert.ok(near(v.size, 0.4) && near(v.slant, 0.05), `${where} flip=${flip}: ${JSON.stringify(v)}`);
+      assert.deepEqual(g.edge.line, [...g.accent[0], ...g.accent[1]], where);
+      for (const [x, y] of g.accent) assert.ok(x >= -1 && x <= w + 1 && y >= -1 && y <= h + 1, where);
+      assert.ok(g.title.w >= 200 && g.title.h >= 120 * 0.3 && g.title.x >= 0 && g.title.x + g.title.w <= w + 1, `${where} flip=${flip}: title ${JSON.stringify(g.title)}`);
+      assert.ok(g.art.x > 0 && g.art.x < w && g.cat.y > 0 && g.cat.y <= h && g.tag.y > 0 && g.tag.y < h, `${where} flip=${flip}`);
+      assert.equal(g.flipped, flip); assert.equal(g.brandOnAccent, flip);
+    }
+    // swapped: the panel really is on the other side, and the title clear of it
+    const f = adjustLayout(G, w, h, { flip: true });
+    if (t === "split") { assert.ok(f.accent[0][0] < w / 2 && f.accent[2][0] === 0, where); assert.ok(f.title.x > Math.max(f.accent[0][0], f.accent[1][0]), where); assert.equal(f.railOnAccent, false); }
+    else { assert.ok(f.accent[0][1] < h / 2 && f.accent[2][1] === 0, where); assert.ok(f.titleTop > Math.max(f.accent[0][1], f.accent[1][1]), where); assert.equal(f.title.y, f.titleTop); assert.equal(f.railOnAccent, true); }
+    // a smaller title box
+    const small = adjustLayout(G, w, h, { tw: 0.5, th: 0.5 });
+    assert.ok(near(small.title.w, G.title.w * 0.5, 1) && near(small.title.h, G.title.h * 0.5, 1), where);
+    // dragging: the middle moves the edge without changing its lean; an end changes the lean; both hold when flipped
+    for (const flip of [false, true]) {
+      const g = adjustLayout(G, w, h, { flip }), v0 = layoutValues(g, w, h), [x0, y0, x1, y1] = g.edge.line, mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+      const moved = dragLayout(g, w, h, { flip }, "m", mx + 40, my + 40), ended = dragLayout(g, w, h, { flip }, "a", x0 + 30, y0 + 30);
+      assert.ok(near(moved.slant, v0.slant, 1e-6) && !near(moved.size, v0.size, 1e-4), `${where} flip=${flip}: middle`);
+      assert.ok(!near(ended.slant, v0.slant, 1e-4), `${where} flip=${flip}: end`);
+      const again = adjustLayout(G, w, h, moved), [, , , ] = again.edge.line;
+      const nm = t === "split" ? (again.edge.line[0] + again.edge.line[2]) / 2 - mx : (again.edge.line[1] + again.edge.line[3]) / 2 - my;
+      assert.ok(near(nm, 40, 0.01), `${where} flip=${flip}: the edge followed the pointer by ${nm}`);
+      assert.equal(moved.flip, flip || undefined || flip);
+    }
+    const far = dragLayout(same, w, h, {}, "m", -9999, -9999);
+    assert.ok(far.size <= LAYOUT_LIMITS.size[1] && far.size >= LAYOUT_LIMITS.size[0], where);   // kept within limits
+    const box = { x: 80, y: 150, w: 800, h: 400 };
+    assert.ok(near(dragLayout(same, w, h, {}, "tw", 80 + 400, 0, box).tw, 0.5)); assert.ok(near(dragLayout(same, w, h, { th: 0.8 }, "th", 0, 150 + 200, box).th, 0.4));
+  }
+  // what a profile keeps: only real settings, within limits, per template
+  const p = normalizeProfile({ style: { layoutAdjust: { stack: { size: 9, slant: "x", flip: true, junk: 1 }, split: {}, nope: { size: 0.3 } } } });
+  assert.deepEqual(p.style.layoutAdjust, { stack: { size: 0.8, flip: true } });
+  assert.deepEqual(normalizeProfile(null).style.layoutAdjust, {});
+});

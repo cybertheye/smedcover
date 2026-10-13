@@ -141,5 +141,105 @@ export function blockLayout(template, w, h, o) {
   };
 }
 
+/** What the user may change about a template: all optional, all as fractions so one setting suits every size. */
+export const LAYOUT_LIMITS = { size: [0.08, 0.8], slant: [-0.3, 0.3], tw: [0.3, 1], th: [0.3, 1] };
+/**
+ * A template's layout as the user has adjusted it.
+ *   size   how much of the canvas the colour panel takes: its height for "stack" and "banner",
+ *          its width for "split"
+ *   slant  how far the dividing edge leans, as a fraction of the canvas height (or width for "split");
+ *          0 is level
+ *   tw/th  the title's box, as fractions of the width and height the template gives it
+ *   flip   swaps the two halves: the panel goes on top (or on the left) and the title below (or right)
+ * `G` is the template's own layout (see layout()); a new object of the same shape is returned, with
+ *   railOnAccent   the right end of the brand row sits on the colour panel
+ *   brandOnAccent  the brand row as a whole sits on the colour panel
+ *   titleTop       where the title's box starts, when that is not just under the brand row
+ *   flipped        whether the halves are swapped
+ */
+export function adjustLayout(G, w, h, a = {}) {
+  const g = { ...G, accent: G.accent.map((p) => [...p]), edge: { ...G.edge }, title: { ...G.title }, tag: { ...G.tag }, cat: { ...G.cat }, art: { ...G.art } };
+  const split = g.template === "split", A = g.accent[0], B = g.accent[1];
+  g.railOnAccent = split; g.brandOnAccent = false; g.flipped = false;
+  if (a.size == null && a.slant == null) { /* the edge stays exactly where the template put it */ }
+  else if (split) {
+    const px0 = (A[0] + B[0]) / 2, sl0 = (A[0] - B[0]) / 2;
+    const px = a.size != null ? w * (1 - a.size) : px0, sl = a.slant != null ? (a.slant * w) / 2 : sl0, dx = px - px0;
+    A[0] = px + sl; B[0] = px - sl;
+    g.title.w = Math.max(200, g.title.w + dx - (sl - sl0));
+    g.cat.maxW = Math.max(120, g.cat.maxW + dx);
+    g.art.x += dx / 2; g.art.s = clamp(g.art.s * clamp((w - px) / Math.max(1, w - px0), 0.5, 1.7), 0.25, 1.3);
+  } else {
+    const mid0 = (A[1] + B[1]) / 2, sl0 = A[1] - B[1];
+    const mid = a.size != null ? h * (1 - a.size) : mid0, sl = a.slant != null ? a.slant * h : sl0, dy = mid - mid0, dl = mid + sl / 2 - A[1];
+    A[1] = mid + sl / 2; B[1] = mid - sl / 2;
+    g.title.h = Math.max(120, g.title.h + dy - Math.max(0, sl - sl0) / 2);
+    g.tag.y += dl; g.cat.y = Math.min(h - 40, g.cat.y + dy / 2 + (dl - dy) / 2); g.art.y += dy; g.toneFrom += dy;
+  }
+  g.edge.line = [A[0], A[1], B[0], B[1]];
+  if (a.tw != null) g.title.w *= clamp(a.tw, ...LAYOUT_LIMITS.tw);
+  if (a.th != null) g.title.h *= clamp(a.th, ...LAYOUT_LIMITS.th);
+  if (!a.flip) return g;
+
+  g.flipped = true; g.brandOnAccent = true; g.railOnAccent = !split;
+  if (split) {   // the panel on the left, the title to its right
+    const xa = w - A[0], xb = w - B[0], right = Math.max(xa, xb);
+    g.accent = [[xa, 0], [xb, h], [0, h], [0, 0]];
+    g.edge = { line: [xa, 0, xb, h], nx: 1, ny: 0 };
+    g.title.x = right + 80; g.title.w = Math.max(200, Math.min(g.title.w, w - right - 160));
+    g.tag.x = right + 84; g.cat.x = right + 84; g.cat.maxW = Math.max(120, w - right - 170);
+    g.art.x = w - g.art.x;
+    return g;
+  }
+  // the band on top, holding the brand row; the title below it
+  const ya = h - A[1], yb = h - B[1], bottom = Math.max(ya, yb), top = Math.min(ya, yb), banner = g.template === "banner";
+  g.accent = [[0, ya], [w, yb], [w, 0], [0, 0]];
+  g.edge = { line: [0, ya, w, yb], nx: 0, ny: 1 };
+  g.titleTop = bottom + 56;
+  const tagH = g.tag.fs * 1.34;
+  if (!banner && top > 300) {   // room for the channel name on the band, under the brand row
+    g.cat = { ...g.cat, y: top - 64, onAccent: true, inline: true };
+    g.tag.y = h - 76 - tagH;
+    g.title = { ...g.title, y: g.titleTop, h: Math.max(120, (h - g.titleTop - tagH - 150) * (a.th != null ? clamp(a.th, ...LAYOUT_LIMITS.th) : 1)) };
+  } else {                      // a shallow band: the channel name goes to the foot of the field
+    g.cat = { ...g.cat, y: h - 78, onAccent: false, inline: true };
+    g.tag.y = h - 78 - g.cat.fs - tagH - 36;
+    g.title = { ...g.title, y: g.titleTop, h: Math.max(120, (g.tag.y - g.titleTop - 50) * (a.th != null ? clamp(a.th, ...LAYOUT_LIMITS.th) : 1)) };
+  }
+  g.art.y = banner ? bottom + 10 : h - g.art.y;
+  g.toneFrom = 0;
+  return g;
+}
+
+/** The `size` and `slant` an adjusted layout `G` currently has (see adjustLayout), read back from its geometry. */
+export function layoutValues(G, w, h) {
+  const [A, B] = G.accent;
+  if (G.template === "split") {
+    const a = G.flipped ? w - A[0] : A[0], b = G.flipped ? w - B[0] : B[0];
+    return { size: (w - (a + b) / 2) / w, slant: (a - b) / w };
+  }
+  const a = G.flipped ? h - A[1] : A[1], b = G.flipped ? h - B[1] : B[1];
+  return { size: (h - (a + b) / 2) / h, slant: (a - b) / h };
+}
+/**
+ * The adjustment that results from dragging a layout handle to the virtual point (x, y).
+ *   "a" / "b"  an end of the dividing edge (changes its lean)     "m"  its middle (moves it)
+ *   "tw" / "th"  the right / bottom side of the title's box, `box` being that box as drawn
+ */
+export function dragLayout(G, w, h, adj, handle, x, y, box) {
+  const lim = (k, v) => clamp(v, ...LAYOUT_LIMITS[k]), out = { ...adj };
+  if (handle === "tw" || handle === "th") {
+    const k = handle, now = adj[k] ?? 1, have = k === "tw" ? box.w : box.h, want = k === "tw" ? x - box.x : y - box.y;
+    out[k] = lim(k, (now * want) / Math.max(1, have));
+    return out;
+  }
+  const split = G.template === "split", span = split ? w : h, v = layoutValues(G, w, h);
+  const at = split ? (G.flipped ? w - x : x) : G.flipped ? h - y : y;          // the pointer, in the unflipped template
+  let a = span * (1 - v.size) + (v.slant * span) / 2, b = a - v.slant * span;   // the two ends of the edge there
+  if (handle === "a") a = at; else if (handle === "b") b = at; else { const d = at - (a + b) / 2; a += d; b += d; }
+  out.size = lim("size", (span - (a + b) / 2) / span); out.slant = lim("slant", (a - b) / span);
+  return out;
+}
+
 /** Uniform scale that maps the virtual canvas onto `pixelWidth` real pixels. */
 export const pixelScale = (pixelWidth, virtualWidth) => pixelWidth / virtualWidth;
