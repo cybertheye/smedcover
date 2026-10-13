@@ -97,17 +97,18 @@ const persistSettings = () => later("settings", 400, () => writeJson("settings.j
 
 const snapshot = () => JSON.stringify({ p: S.profile, c: S.cover });
 function resetHistory() { S.hist = [snapshot()]; S.histIdx = 0; syncTop(); }
-function recordHistory() {
-  later("hist", 500, () => {
-    const snap = snapshot();
-    if (snap === S.hist[S.histIdx]) return;
-    S.hist = S.hist.slice(0, S.histIdx + 1);
-    S.hist.push(snap);
-    if (S.hist.length > 80) S.hist.splice(0, S.hist.length - 80);
-    S.histIdx = S.hist.length - 1;
-    syncTop();
-  });
+/** Adds the present state to the undo history, unless it is already its last entry. */
+function commitHistory() {
+  const snap = snapshot();
+  if (snap === S.hist[S.histIdx]) return;
+  S.hist = S.hist.slice(0, S.histIdx + 1);
+  S.hist.push(snap);
+  if (S.hist.length > 80) S.hist.splice(0, S.hist.length - 80);
+  S.histIdx = S.hist.length - 1;
+  syncTop();
 }
+/** Records history a moment after the last change, so a drag or a burst of typing is one step. */
+function recordHistory() { later("hist", 500, commitHistory); }
 async function timeTravel(step) {
   clearTimeout(timers.hist);
   const i = S.histIdx + step;
@@ -651,9 +652,11 @@ function brandTab() {
     { group: t("cat.groupStickers"), items: STICKERS.map((s) => ["sticker:" + s.id, s.name[lang]]) }];
   const card = (c, i) => {
     const lib = c.graphic.kind === "graphic" && GRAPHICS.find((g) => g.id === c.graphic.id);
-    return el("div", { class: "card", style: `--c:${c.color}` },
+    // working on a channel shows that channel on the canvas
+    const show = () => { if (S.cover.catId !== c.id) { S.cover.catId = c.id; document.documentElement.style.setProperty("--acc", c.color); touch({ cover: true, strip: true }); } };
+    return el("div", { class: "card", style: `--c:${c.color}`, onfocusin: show, onpointerdown: show, oninput: show },
       el("div", { class: "head" },
-        el("input", { type: "color", value: c.color, title: t("cat.color"), oninput: (e) => { c.color = e.target.value; e.target.closest(".card").style.setProperty("--c", c.color); touch({ profile: true }); } }),
+        el("input", { type: "color", value: c.color, title: t("cat.color"), oninput: (e) => { c.color = e.target.value; e.target.closest(".card").style.setProperty("--c", c.color); document.documentElement.style.setProperty("--acc", c.color); touch({ profile: true }); } }),
         textInput(c.name, (v) => { c.name = v; touch({ profile: true }); }, { placeholder: t("cat.name") })),
       el("div", { class: "two" },
         textInput(c.sub, (v) => { c.sub = v; touch({ profile: true }); }, { placeholder: t("cat.sub") }),
@@ -1071,6 +1074,51 @@ function setMode(mode) {
   $("body").classList.toggle("setup", mode === "setup");
   syncTop(); syncTabs(); renderPanel(); renderSide(); syncToolbar(); queueDraw();
 }
+/**
+ * SURPRISE ME: deals a new hand of everything about how the cover looks and is laid out — the look
+ * and its settings, the template and its proportions, the colour block's shape, text effects, the
+ * small switches on each layer, and where added items sit. What the cover *says* is left alone:
+ * the title and tag, the channel and its colour, the photo, and which layers exist.
+ * One step of undo brings the previous hand back.
+ */
+function surprise() {
+  const R = Math.random, pick = (a) => a[Math.floor(R() * a.length)], between = (a, b) => a + R() * (b - a), chance = (p) => R() < p;
+  const round = (v, step) => Math.round(v / step) * step, st = S.profile.style;
+  commitHistory();   // whatever was being edited becomes a step of its own, so each hand is exactly one undo
+  // the look, tuned somewhere in the middle of each slider's range (the extremes are rarely the best of a look)
+  st.look = pick(LOOK_IDS); st.lookSeed = Math.floor(R() * 1000000);
+  const tuned = {};
+  for (const d of LOOKS[st.look].params) tuned[d.key] = d.toggle ? (chance(0.7) ? 1 : 0) : d.key === "sweepAt" ? 0 : round(between(d.min + (d.max - d.min) * 0.12, d.min + (d.max - d.min) * 0.8), d.step);
+  if (Object.keys(tuned).length) st.lookParams[st.look] = tuned;
+  st.theme = chance(0.7) ? "dark" : "light";
+  // the template and its proportions
+  st.template = pick(["stack", "stack", "split", "split", "banner"]);
+  const adj = { size: round(st.template === "banner" ? between(0.12, 0.22) : between(0.24, 0.5), 0.01), slant: chance(0.35) ? 0 : round(between(-0.12, 0.12), 0.005) };
+  if (chance(0.3)) adj.flip = true;
+  st.layoutAdjust[st.template] = adj;
+  // every layer's own choices
+  const effects = Object.keys(EFFECTS).filter((id) => id !== "auto" && (native || EFFECTS[id].kind !== "outline"));
+  const dealFx = (L, auto) => { delete L.fx; delete L.fxAmt; if (!chance(auto)) { L.fx = pick(effects); if (EFFECTS[L.fx].kind !== "passes") L.fxAmt = round(between(0.6, 1.5), 0.05); } };
+  for (const L of S.cover.layers) {
+    switch (L.type) {
+      case "bg": L.grid = chance(0.75); break;
+      case "accent": L.shape = pick(ACCENT_SHAPES); break;
+      case "brand": L.rail = chance(0.8); break;
+      case "catname": L.plate = chance(0.75); break;
+      case "title": L.align = chance(0.75) ? "left" : "center"; L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.45); break;
+      case "text": L.plate = chance(0.4); if (L.color !== "custom") L.color = pick(["white", "accent", "ink"]); dealFx(L, 0.4); break;
+      case "asset": if (canTint(L.ref) && L.ref.kind !== "graphic") L.tint = chance(0.5); break;
+    }
+    if (isFree(L.type) && !L.locked) {   // added items shuffle about a little: nudged, turned, resized
+      const a = L.t.all;
+      a.x = clamp(a.x + between(-0.07, 0.07), 0.06, 0.94); a.y = clamp(a.y + between(-0.07, 0.07), 0.08, 0.92);
+      a.r = round(between(-12, 12), 1); a.s = clamp(a.s * between(0.8, 1.25), 0.05, 2.5);
+    }
+  }
+  touch({ profile: true, cover: true, panel: true, side: true, strip: true });
+  commitHistory();
+  toast(t("msg.surprise", LOOKS[st.look].name[getLang()], t("tpl." + st.template).split(/[：:]/)[0]));
+}
 function syncTop() {
   if (!S.profile) return;
   const b = (key, onclick, props = {}) => el("button", { class: "btn", onclick, ...props }, t(key));
@@ -1083,6 +1131,7 @@ function syncTop() {
     el("div", { class: "grp" }, el("span", {}, t("top.project")), b("top.open", projectActions.open), b("top.save", projectActions.save), b("top.reset", projectActions.reset)),
     el("div", { class: "grp" }, b("top.undo", () => timeTravel(-1), { disabled: S.histIdx <= 0 }), b("top.redo", () => timeTravel(1), { disabled: S.histIdx >= S.hist.length - 1 })),
     el("div", { class: "spacer" }),
+    el("button", { class: "btn solid", style: "padding:8px 22px;font-size:15px;margin-right:10px", title: t("top.surpriseHint"), onclick: surprise }, t("top.surprise")),
     el("button", { class: "btn solid", style: "padding:8px 22px;font-size:15px", onclick: exportDialog }, t("top.export")),
     el("select", { title: t("lang"), onchange: (e) => { S.settings.lang = e.target.value; setLang(e.target.value); persistSettings(); setMode(S.mode); buildStrip(); } },
       [["zh", "中文"], ["en", "English"]].map(([v, l]) => el("option", { value: v, selected: v === getLang() }, l))));

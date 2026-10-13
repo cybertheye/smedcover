@@ -28,7 +28,7 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
   - Setup: **Brand**, **Sizes & export**, **Fonts**, **AI**
 - **Centre** — the main canvas, and below it a thumbnail of every output size. Click one to show that size on the canvas.
 - **Right** (Edit only) — the layer list and the selected layer's properties.
-- **Top bar** — profile switcher, open and save project, undo and redo, export.
+- **Top bar** — profile switcher, open and save project, undo and redo, SURPRISE ME, export.
 
 ## Quick start
 
@@ -95,6 +95,21 @@ What each layer allows:
 | Corner brackets | no | yes | yes | no |
 | Colour block, channel graphic, brand row, title, corner tag, channel name | yes | yes | yes | no |
 | Stickers, images, text (free layers) | yes | yes | yes | yes |
+
+### SURPRISE ME: deal a new hand
+
+**SURPRISE ME**, beside *Export* in the top bar, draws at random everything about how the current cover is drawn and laid out:
+
+- the look, its sliders and its random placement
+- the template, how much the colour block takes, the slant of its edge, whether the halves are swapped, dark or light ground
+- the shape of the colour block, the grid
+- the title's alignment, outline, shadow and text effect
+- each text layer's plate, colour and text effect; whether a sticker follows the channel colour
+- stickers, images and text you added are nudged, turned and resized a little
+
+**Left alone**: the words of the title and tag, the current channel and every channel's colour, the background photo, which layers exist (none added, none removed), custom lettering colours, locked layers.
+
+Each deal is one step of undo, however fast you click. Deal again if you do not like it, or undo to the hand before.
 
 ### Text layers
 
@@ -243,7 +258,7 @@ Adjustments are stored as fractions of the picture, so they apply to every size;
 
 ## Setup
 
-- **Brand** — brand name, counter label, adding, removing and ordering channels; create, duplicate, delete, import and export profiles.
+- **Brand** — brand name, counter label, adding, removing and ordering channels; while you work on a channel (click any of its fields or change its colour) the canvas switches to that channel, so the change shows at once; create, duplicate, delete, import and export profiles.
 - **Sizes & export** — tick preset sizes or add a custom width × height. A size can be given your own name, shown under its thumbnail.
 - **Fonts** — Noto Sans SC, Bebas Neue and JetBrains Mono are bundled, so covers look the same on every platform. You can also use an installed font or import a font file.
 - **AI** — connect your own model service for generating assets.
