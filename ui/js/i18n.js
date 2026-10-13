@@ -206,7 +206,7 @@ const STR = {
   "msg.assetInUse": ["这个素材还在被使用，删除后对应的图层会变空。继续删除？", "This asset is still in use; layers using it will become empty. Delete anyway?"],
 
   "welcome.title": ["欢迎使用 SmedCover", "Welcome to SmedCover"],
-  "welcome.body": ["给你的频道起个名字，选一个起点。之后所有内容都可以在「配置」里改。", "Name your channel and pick a starting point. Everything can be changed later under Setup."],
+  "welcome.body": ["给你的品牌起个名字，选一个起点。之后所有内容都可以在「配置」里改。", "Name your brand and pick a starting point. Everything can be changed later under Setup."],
   "welcome.brand": ["品牌名", "Brand name"],
   "welcome.starter": ["从三个通用频道开始", "Start with three general channels"],
   "welcome.sample": ["载入完整示例（虚构品牌，五个频道）", "Load the full example (a made-up brand, five channels)"],

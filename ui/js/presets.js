@@ -24,7 +24,7 @@ export function sampleProfile(lang) {
 export function starterProfile(lang, brandName) {
   const zh = lang === "zh";
   return {
-    name: brandName || (zh ? "我的频道" : "My channel"),
+    name: brandName || (zh ? "我的品牌" : "My brand"),
     brand: { name: brandName || "MY CHANNEL", unit: "CHANNEL" },
     categories: [
       { id: "vlog", name: zh ? "日常" : "Vlog", sub: "DAILY VLOG", code: "VLOG", color: "#fcee0a", graphic: { kind: "graphic", id: "camera" } },
