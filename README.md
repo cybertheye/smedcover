@@ -153,6 +153,24 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 | **Cel** (default) | heavy ink lines, hard shadows, flat colour, screentone |
 | **Cyberpunk** | set in the interface of an optical implant starting up and scanning, after *Cyberpunk 2077*: solid chamfered panels with black lettering, slanted sliced headlines in the channel colour, a red and cyan colour split, signal tears, scanlines, lens rings and readouts; objects are dark hardware drawn in lines of light |
 
+| **Risograph** | cream paper, two or three spot inks, coarse halftone, misregistration, paper grain; objects are paper white and blue ink |
+| **90s animation** | a painted sky, cel colours a little grey and warm, a title with a double keyline, film grain, bloom, fade, dust and scratches |
+| **Record sleeve** | large flat blocks of colour, tight sans-serif headlines with no outline or shadow, photos in one colour and black; dark or light ground |
+| **Editorial** | a serif headline, thick-and-thin rules, a hairline border, a folio, a huge quiet issue number, black-and-white photos; dark or light ground |
+| **Bricks & pixels** | background and objects in coarse pixels, studs on the colour block, a game-title headline, lives, a stage number and a score |
+
+The sliders of each look:
+
+| Look | Sliders |
+|---|---|
+| Risograph | misregistration, halftone, paper grain |
+| 90s animation | film grain, bloom, fade, dust and scratches; *Shuffle the random placement* rearranges clouds and dust |
+| Record sleeve | photo duotone, rules and catalogue, paper grain |
+| Editorial | rules and folio, black-and-white photo, paper grain |
+| Bricks & pixels | pixel size, studs, game screen; *Shuffle the random placement* rearranges the stars |
+
+These five are first versions and will be refined one by one. Editorial's serif lettering uses fonts already on the computer (Songti SC on macOS, SimSun on Windows), so it differs from machine to machine.
+
 The cyberpunk look has eight sliders and a checkbox. Two of them sound alike: *Scanlines* are the fine horizontal lines covering the whole picture; the *Sweep line* is the single bright one.
 
 | Slider | What it controls | Turning it up |
@@ -294,7 +312,7 @@ are not public, so the plan is to export open formats that both can read.
 ### Other
 
 - [ ] AI generation: evaluate results with real models and tune the prompt accordingly; allow follow-up change requests on a result; keep the token in the system keychain.
-- [ ] More looks: 90s Japanese animation, mosaic and others.
+- [ ] Refine the five new looks one by one; give the record sleeve and editorial looks layouts of their own; bundle a serif font.
 - [ ] A low-resolution preview of the blurred photo for smoother dragging.
 - [ ] Redraw thumbnails only when needed, to cut the cost of many sizes.
 - [ ] Subset the bundled fonts to shrink the installer.

@@ -1036,7 +1036,7 @@ function syncTabs() {
   $("tabs").replaceChildren(...Object.keys(TABS[S.mode]).map((k) => el("button", { class: k === S.tab[S.mode] ? "on" : "", onclick: () => { S.tab[S.mode] = k; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, t("tab." + k))));
 }
 /** Makes the profile's look current, for anything drawn outside a cover (asset tiles, previews). */
-const useLook = () => setLook(S.profile.style.look, S.profile.style.lookParams[S.profile.style.look], S.profile.style.lookSeed);
+const useLook = () => setLook(S.profile.style.look, S.profile.style.lookParams[S.profile.style.look], S.profile.style.lookSeed, !!S.photo || S.profile.style.theme !== "light");
 function renderPanel() {
   if (!S.cover) return;
   useLook();

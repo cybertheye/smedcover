@@ -171,6 +171,7 @@ export function paintAccent(ctx, shape, G, C) {
   polygon(ctx, block); ctx.fillStyle = acc; ctx.fill();
   ctx.save(); polygon(ctx, block); ctx.clip();
   toneField(raw, bx - 60, by - 60, bx + bw + 60, by + bh + 60, 28, LA ? LA.tone(C) : rgb(mixc(C, BLK, 0.24)), (x, y) => (((y - by) / bh) * 1.15 - 0.4 + (x - bx) / (bw * 2.6)) * (LA ? LA.toneScale : 1));
+  if (LA && LA.decor) LA.decor(raw, { x: bx, y: by, w: bw, h: bh }, C, lookValues());
   if (shape === "stripes") {                                 // hazard band just inside the edge
     polygon(ctx, ext([A, B]).concat(ext([shift(A, 46), shift(B, 46)]).reverse())); ctx.clip();
     ctx.fillStyle = INK;
@@ -288,7 +289,7 @@ const PAINT = {
     const { G, th } = env, top = env.hasBrand ? 150 : 84;
     const box = { x: G.title.x, y: top, w: G.title.w, h: G.title.h + (G.title.y - top) };
     return placed(ctx, tr, (c) => drawTitle(c, env.cover.title, box, IDENTITY, {
-      font: fonts.cn, maxFs: 340, align: L.align, fill: L.ink || th.titleFill, ink: th.titleInk, hi: L.hi || env.acc, shadow: L.hi || env.acc, hiShadow: L.ink || th.titleFill,
+      font: look().titleFont ? look().titleFont(fonts) : fonts.cn, maxFs: 340, align: L.align, fill: L.ink || th.titleFill, ink: th.titleInk, hi: L.hi || env.acc, shadow: L.hi || env.acc, hiShadow: L.ink || th.titleFill,
       own: L.ink ? hexToRgb(L.ink) : undefined, ownHi: L.hi ? hexToRgb(L.hi) : undefined,   // for looks that paint the letters themselves
       stroke: clamp(L.stroke, 0, 2), shadowAmt: clamp(L.shadow, 0, 2), C: env.C,
     }));
@@ -367,7 +368,7 @@ export function drawCover(cv, o) {
   const ctx = cv.getContext("2d"), kx = cv.width / w, ky = cv.height / h;
   ctx.scale(kx, ky);
   const C = hexToRgb(cat.color);
-  const L0 = setLook(P.style.look, P.style.lookParams && P.style.lookParams[P.style.look], P.style.lookSeed);   // everything below is drawn under this look
+  const L0 = setLook(P.style.look, P.style.lookParams && P.style.lookParams[P.style.look], P.style.lookSeed, !!o.photo || P.style.theme !== "light");   // everything below is drawn under this look
   const base = o.photo ? THEMES.dark : THEMES[P.style.theme] || THEMES.dark;
   const env = {
     o, w, h, cover, cat, C, acc: rgb(C), style: P.style, photo: o.photo || null, hiRes: cv.width > w,
@@ -384,13 +385,15 @@ export function drawCover(cv, o) {
       if (!L.visible || !appliesTo(L, cat.id)) continue;
       const tr = resolve(L, w, h, key, cat.id);
       let hit;
-      if (L.o < 1) {   // paint the layer on its own, then blend it in as a whole
+      const coarse = L0.lowRes ? L0.lowRes(L.type, lookValues()) : 0;   // virtual units per pixel, for looks drawn in big pixels
+      if (L.o < 1 || coarse > 1) {   // paint the layer on its own, then lay it in as a whole
         scratch = scratch || document.createElement("canvas");
-        scratch.width = cv.width; scratch.height = cv.height;
+        scratch.width = coarse > 1 ? Math.max(1, Math.round(w / coarse)) : cv.width; scratch.height = coarse > 1 ? Math.max(1, Math.round(h / coarse)) : cv.height;
         const sx = scratch.getContext("2d");
-        sx.scale(kx, ky);
+        sx.scale(scratch.width / w, scratch.height / h);
         hit = PAINT[L.type](sx, L, tr, env);
-        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o; c.drawImage(scratch, 0, 0); c.restore();
+        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o; c.imageSmoothingEnabled = !(coarse > 1);
+        c.drawImage(scratch, 0, 0, cv.width, cv.height); c.restore();
       } else hit = PAINT[L.type](c, L, tr, env);
       c.globalAlpha = 1; c.setLineDash([]);
       if (hit) hits.push({ id: L.id, type: L.type, ...hit });

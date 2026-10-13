@@ -466,10 +466,11 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(lookParams("nope"), {});
   const p = normalizeProfile({ style: { look: "cyber", lookParams: { cyber: { glow: 0.5, bogus: 1 }, other: { x: 1 } } } });
   assert.equal(p.style.look, "cyber");
-  assert.deepEqual(p.style.lookParams, { cyber: { ...d, glow: 0.5 } });
+  assert.deepEqual(p.style.lookParams.cyber, { ...d, glow: 0.5 });
+  assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS.slice(0, 2), ["cel", "cyber"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "brick"]);
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && q.min <= q.def && q.def <= q.max); }
 });
 
@@ -550,4 +551,29 @@ test("lettering layers may carry their own colour", () => {
   assert.equal(duplicate(by("text")).ink, "#0000ff");
   assert.deepEqual(normalizeLayers(ls), ls);
   assert.deepEqual(LOOKS.cyber.params.map((q) => q.key).at(-1), "tearClear");            // the checkbox closes the list
+});
+
+test("looks: every look is complete enough to draw and to brief the AI", () => {
+  const calls = () => { const n = {}; return [n, new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 50 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : (...a) => { n[k] = (n[k] || 0) + 1; return {}; }), set: () => true })]; };
+  const env = { w: 1920, h: 1080, C: [252, 238, 10], cat: { code: "VLOG", name: "Vlog" }, photo: null, o: { catIndex: 0, size: { w: 1920, h: 1080 }, profile: { brand: { name: "B" }, categories: [{}, {}] } } };
+  const pass = (fn) => { fn({ t: "Ab", hi: false }, 0); fn({ t: "cd", hi: true }, 60); };
+  for (const id of LOOK_IDS.filter((k) => k !== "cel")) for (const onDark of [true, false]) {
+    const L = setLook(id, null, 3, onDark), p = lookValues();
+    assert.ok(L.prompt.length > 200 && L.solidPrompt.length > 200, id);
+    assert.ok(buildPrompt("x", "", { kind: "flat", style: id }).system.includes(L.prompt), id);
+    assert.equal(typeof L.theme({ field: "#000", text: "#fff" }, env.C, p).field, "string", id);
+    let [n, ctx] = calls(); L.runs(ctx, pass, { fs: 100, d: 6, strokeAmt: 1, shadowAmt: 1, C: env.C, unit: 1 }, p); assert.ok(n.fillText >= 2, `${id}: lettering`);
+    [n, ctx] = calls(); assert.equal(L.background(ctx, env, { grid: true }, p), true, id); assert.ok(n.fillRect >= 1, `${id}: background`);
+    [n, ctx] = calls(); L.frame(ctx, env, p);
+    [n, ctx] = calls(); L.post(ctx, 1920, 1080, env.C, p, 1, []);
+    assert.equal(typeof L.accent.fill(env.C), "string", id);
+    [n, ctx] = calls(); L.accent.edge(ctx, () => { n.run = (n.run || 0) + 1; }, 0, -1, env.C, p);
+    if (L.sticker) for (const k of ["shape", "blob", "stroke", "thin", "word"]) assert.equal(typeof L.sticker[k], "function", `${id}.${k}`);
+    if (L.sticker) { [n, ctx] = calls(); L.sticker.shape(ctx, (c) => c.rect(0, 0, 5, 5), "#ff3b4f", { shadow: true, lw: 7 }, p); assert.ok(n.fill >= 1, `${id}: sticker`); }
+    if (L.wrap) { const seen = []; const raw = { set fillStyle(v) { seen.push(v); }, get fillStyle() { return "x"; }, lineWidth: 1 }; L.wrap(raw, env.C, p, false).fillStyle = "#07070c"; assert.equal(seen.length, 1, `${id}: wrap`); }
+  }
+  // the looks drawn in big pixels say how coarse each kind of layer is
+  setLook("brick", { pixel: 8 });
+  assert.equal(LOOKS.brick.lowRes("graphic", lookValues()), 8); assert.equal(LOOKS.brick.lowRes("title", lookValues()), 4); assert.equal(LOOKS.brick.lowRes("brand", lookValues()), 0);
+  setLook("cel");
 });
