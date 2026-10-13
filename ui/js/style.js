@@ -157,6 +157,8 @@ const cyber = {
     { key: "tear", min: 0, max: 2, step: 0.05, def: 0.7, name: { zh: "信号撕裂", en: "Signal tear" } },
     { key: "scan", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "扫描线", en: "Scanlines" } },
     { key: "decor", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "界面装饰", en: "Interface detail" } },
+    { key: "sweep", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "扫描光带", en: "Sweep line" } },
+    { key: "sweepAt", min: 0, max: 1, step: 0.01, def: 0, name: { zh: "光带位置", en: "Sweep position" } },
     { key: "glow", min: 0, max: 2, step: 0.05, def: 0.35, name: { zh: "线条光晕", en: "Line glow" } },
     { key: "photo", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "照片染色", en: "Photo tint" } },
   ],
@@ -327,12 +329,13 @@ const cyber = {
       for (let a = 0; a < 1.2; a += 0.04) { const c = Math.cos(a + turn + 2.6), s = Math.sin(a + turn + 2.6); ctx.moveTo(cx + c * R * 1.015, cy + s * R * 1.015); ctx.lineTo(cx + c * R * 1.04, cy + s * R * 1.04); }
       ctx.stroke(); ctx.restore();
     }
-    if (d > 0.55) {   // the sweep: a line of light across the picture with the band it has just read above it
-      const y = h * (0.2 + rand(31) * 0.6), trail = ctx.createLinearGradient(0, y - 110, 0, y);
-      trail.addColorStop(0, css(CY.cyan, 0)); trail.addColorStop(1, css(CY.cyan, 0.16 * d));
+    if (p.sweep > 0) {   // the sweep: a line of light across the picture with the band it has just read above it.
+      // It has sliders of its own: how strong it is (0 hides it) and where it sits (0 leaves that to chance).
+      const y = h * (p.sweepAt > 0 ? p.sweepAt : 0.2 + rand(31) * 0.6), k = p.sweep / 0.7, trail = ctx.createLinearGradient(0, y - 110, 0, y);
+      trail.addColorStop(0, css(CY.cyan, 0)); trail.addColorStop(1, css(CY.cyan, Math.min(0.5, 0.11 * k)));
       ctx.fillStyle = trail; ctx.fillRect(0, y - 110, w, 110);
-      ctx.fillStyle = css(CY.cyan, 0.85); ctx.fillRect(0, y, w, 2);
-      ctx.fillStyle = css(CY.white, 0.9); ctx.fillRect(w * rand(32) * 0.7, y - 1, w * 0.12, 4);
+      ctx.fillStyle = css(CY.cyan, Math.min(1, 0.85 * k)); ctx.fillRect(0, y, w, 2);
+      ctx.fillStyle = css(CY.white, Math.min(1, 0.9 * k)); ctx.fillRect(w * rand(32) * 0.7, y - 1, w * 0.12, 4);
     }
   },
 
