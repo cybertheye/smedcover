@@ -53,7 +53,7 @@ ui/
   js/assets.js       asset library: graphics, stickers, uploads
   js/cel.js          cel-shading kit and the first five channel graphics
   js/graphics.js     fifteen more channel graphics
-  js/stickers.js     the fifty stickers
+  js/stickers.js     the sixty stickers
   js/store.js        data model, validation, persistence
   js/presets.js      starter profiles and size presets
   js/csv.js          CSV reader for batch export
@@ -166,7 +166,7 @@ size.
 - **Banner** reuses the stack structure with the strip squeezed thin.
 - **Split** is computed separately; its colour block is a slanted panel on the right.
 
-Convention: the **first two points of the colour block polygon are the dividing edge**. All eleven
+Convention: the **first two points of the colour block polygon are the dividing edge**. All twelve
 shapes of the colour block are generated from that edge.
 
 ## 6. Drawing (`render.js`)

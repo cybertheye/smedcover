@@ -110,8 +110,8 @@ Deleting a channel also deletes the layers that belonged only to it.
 
 - **My assets** — upload PNG, SVG, JPG or WebP; transparent PNGs look best.
 - **Channel graphics** — twenty cel-shaded graphics that follow the channel colour.
-- **Stickers** — a free pack of fifty; each can optionally follow the channel colour.
-- **Colour block & edge** — eleven shapes; click one to reshape the colour block layer.
+- **Stickers** — a free pack of sixty; each can optionally follow the channel colour.
+- **Colour block & edge** — twelve shapes; click one to reshape the colour block layer.
 
 ### Style and the default design
 

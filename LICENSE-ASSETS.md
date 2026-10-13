@@ -13,8 +13,8 @@ licence (CC BY 4.0; full text in `LICENSES/CC-BY-4.0.txt`).
 ## What counts as artwork · 哪些算素材
 
 - the twenty channel graphics — 20 个频道图形（`ui/js/cel.js`, `ui/js/graphics.js`）
-- the fifty stickers — 50 个贴纸（`ui/js/stickers.js`）
-- the eleven colour block and edge shapes — 11 种色块与分界线形状（`ui/js/render.js`）
+- the sixty stickers — 60 个贴纸（`ui/js/stickers.js`）
+- the twelve colour block and edge shapes — 12 种色块与分界线形状（`ui/js/render.js`）
 
 This covers the designs themselves and any image rendered from them. The source code that draws
 them remains under the AGPL like the rest of the program.

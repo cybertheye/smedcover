@@ -52,6 +52,7 @@ const STR = {
   "shape.scallop": ["扇贝", "Scallop"],
   "shape.double": ["双层色带", "Double band"],
   "shape.stripes": ["警示条纹", "Hazard stripes"],
+  "shape.arc": ["弧形", "Arc"],
   "props.shape": ["形状", "Shape"],
   "assets.hint": ["点一下加到画布上，放在当前选中图层的上方；也可以直接拖到画布上。", "Click to add to the canvas, just above the selected layer — or drag it onto the canvas."],
   "assets.remove": ["删除这个素材", "Delete this asset"],

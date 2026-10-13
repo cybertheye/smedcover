@@ -133,6 +133,7 @@ function edgePoints(shape, A, B, nx, ny) {
     case "torn": return sample(Math.max(40, Math.round(len / 18)), (u, i) => (noise(i * 1.7) - 0.5) * 30 + (noise(Math.floor(i / 5) * 0.31) - 0.5) * 26);
     case "chevron": { const d = 110 / len; return [at(0), at(0.5 - d), at(0.5, 74), at(0.5 + d), at(1)]; }
     case "scallop": { const n = Math.max(3, Math.round(len / 150)); return sample(n * 12, (u) => 34 * Math.abs(Math.sin(u * n * Math.PI)) - 10); }
+    case "arc": return sample(64, (u) => 70 * Math.sin(u * Math.PI));
     default: return [at(0), at(1)];
   }
 }

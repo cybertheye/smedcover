@@ -1,4 +1,4 @@
-// The free sticker pack: 50 cel-style stickers drawn in code (no image files), so they stay sharp
+// The free sticker pack: 60 cel-style stickers drawn in code (no image files), so they stay sharp
 // at any size and can follow the category colour.
 //
 // Every sticker draws inside a 200 x 200 box centred on the origin. `A` is its main colour
@@ -99,6 +99,11 @@ export const STICKERS = [
   S("tape", "胶带", "Tape", "badge", YELLOW, (c, A) => { shape(c, poly([[-96, -20], [-84, -8], [-96, 4], [-84, 16], [-94, 28], [94, 20], [84, 8], [96, -4], [84, -16], [94, -28]]), A, { lw: 5 }); thin(c, [[-50, -18], [-66, 22]], 4, "rgba(7,7,12,.25)"); thin(c, [[10, -22], [-6, 22]], 4, "rgba(7,7,12,.25)"); thin(c, [[66, -24], [50, 18]], 4, "rgba(7,7,12,.25)"); }),
   S("note", "便利贴", "Sticky note", "badge", YELLOW, (c, A) => { shape(c, poly([[-82, -82], [82, -82], [82, 46], [46, 82], [-82, 82]]), A); shape(c, poly([[82, 46], [46, 46], [46, 82]]), WHITE, { shadow: false }); }),
   S("pricetag", "价签", "Price tag", "badge", GREEN, (c, A) => { shape(c, poly([[-94, 0], [-42, -58], [94, -58], [94, 58], [-42, 58]]), A); shape(c, circle(-48, 0, 13), WHITE, { shadow: false, lw: 6 }); }),
+  S("pill", "胶囊标签", "Pill label", "badge", BLUE, (c, A) => shape(c, rrect(-96, -42, 192, 84, 42), A)),
+  S("shield", "盾牌徽章", "Shield", "badge", GREEN, (c, A) => {
+    const sh = (k) => curve((x) => { x.moveTo(0, -94 * k); x.lineTo(78 * k, -66 * k); x.lineTo(78 * k, 4 * k); x.bezierCurveTo(78 * k, 52 * k, 36 * k, 82 * k, 0, 96 * k); x.bezierCurveTo(-36 * k, 82 * k, -78 * k, 52 * k, -78 * k, 4 * k); x.lineTo(-78 * k, -66 * k); });
+    shape(c, sh(1), A); c.beginPath(); sh(0.8)(c); c.lineWidth = 5; c.strokeStyle = WHITE; c.stroke();
+  }),
 
   // ---- arrows & marks
   S("arrow", "箭头", "Arrow", "arrow", RED, (c, A) => shape(c, ARROW, A)),
@@ -109,6 +114,10 @@ export const STICKERS = [
   S("underline", "下划线", "Underline", "arrow", RED, (c, A) => { stroke(c, (x) => { x.moveTo(-92, -4); x.quadraticCurveTo(-10, -38, 92, -18); }, A, 14); stroke(c, (x) => { x.moveTo(-60, 34); x.quadraticCurveTo(10, 12, 70, 22); }, A, 10); }),
   S("check", "对勾", "Check", "arrow", GREEN, (c, A) => stroke(c, pathLine([[-70, 6], [-24, 52], [72, -52]]), A, 30)),
   S("cross", "叉", "Cross", "arrow", RED, (c, A) => { stroke(c, pathLine([[-60, -60], [60, 60]]), A, 30); stroke(c, pathLine([[60, -60], [-60, 60]]), A, 30); }),
+  S("arrow-up", "向上箭头", "Arrow up", "arrow", GREEN, (c, A) => { c.rotate(-Math.PI / 2); shape(c, ARROW, A, { shadow: false }); }),
+  S("arrow-turn", "转折箭头", "Turn arrow", "arrow", RED, (c, A) => shape(c, poly([[-90, 30], [6, 30], [6, -30], [-30, -30], [28, -96], [86, -30], [50, -30], [50, 74], [-90, 74]]), A)),
+  S("focus", "取景框", "Focus frame", "arrow", YELLOW, (c, A) => stroke(c, (x) => { for (const sx of [-1, 1]) for (const sy of [-1, 1]) { x.moveTo(sx * 88, sy * 26); x.lineTo(sx * 88, sy * 64); x.lineTo(sx * 48, sy * 64); } }, A, 12)),
+  S("cursor", "鼠标指针", "Cursor", "arrow", WHITE, (c, A) => shape(c, poly([[-52, -92], [-52, 62], [-14, 28], [14, 90], [44, 76], [16, 16], [64, 16]]), A)),
 
   // ---- symbols
   S("star", "星星", "Star", "symbol", YELLOW, (c, A) => shape(c, star(5, 96, 42), A)),
@@ -131,6 +140,15 @@ export const STICKERS = [
     shape(c, rrect(-90, 52, 180, 26, 6), WHITE, { shadow: false });
     for (const x of [-98, 0, 98]) shape(c, circle(x, x ? -48 : -80, 12), RED, { shadow: false, lw: 5 });
   }),
+  S("gem", "钻石", "Gem", "symbol", BLUE, (c, A) => {
+    shape(c, poly([[-58, -72], [58, -72], [96, -22], [0, 92], [-96, -22]]), A);
+    thin(c, [[-96, -22], [96, -22]], 5); thin(c, [[-58, -72], [-32, -22], [0, 92]], 5); thin(c, [[58, -72], [32, -22], [0, 92]], 5); thin(c, [[-32, -22], [0, -72], [32, -22]], 5);
+  }),
+  S("bell", "铃铛", "Bell", "symbol", YELLOW, (c, A) => {
+    shape(c, circle(0, 74, 17), WHITE); shape(c, circle(0, -86, 12), A, { lw: 6 });
+    blob(c, [circle(0, -26, 54), poly([[-54, -26], [54, -26], [74, 48], [-74, 48]]), rrect(-88, 36, 176, 24, 10)], A);
+    thin(c, [[-62, 36], [62, 36]], 5);
+  }),
 
   // ---- word stickers
   S("w-new", "NEW 新", "NEW", "word", RED, (c, A) => { shape(c, BURST, A); word(c, "NEW", 74, WHITE); }),
@@ -143,6 +161,8 @@ export const STICKERS = [
   S("w-wow", "WOW 惊叹", "WOW", "word", ORANGE, (c, A) => { shape(c, BOOM, A); word(c, "WOW", 66, WHITE); }),
   S("w-must", "必看", "Must-see (必看)", "word", RED, (c, A) => { shape(c, SEAL, A); word(c, "必看", 78, WHITE); }),
   S("w-tips", "干货", "Solid tips (干货)", "word", YELLOW, (c, A) => { c.rotate(-0.06); shape(c, PLATE, A); word(c, "干货", 76, WHITE); }),
+  S("w-sale", "SALE 促销", "SALE", "word", RED, (c, A) => { c.rotate(-0.08); shape(c, poly([[-96, 0], [-44, -54], [96, -54], [96, 54], [-44, 54]]), A); shape(c, circle(-52, 0, 11), WHITE, { shadow: false, lw: 5 }); word(c, "SALE", 72, WHITE, 26); }),
+  S("w-howto", "教程", "Tutorial (教程)", "word", BLUE, (c, A) => { shape(c, RIBBON, A); word(c, "教程", 48, WHITE); }),
 
   // ---- everyday objects
   S("play", "播放键", "Play button", "object", RED, (c, A) => { shape(c, rrect(-94, -66, 188, 132, 34), A); shape(c, poly([[-22, -36], [42, 0], [-22, 36]]), WHITE, { shadow: false, lw: 6 }); }),

@@ -106,7 +106,7 @@ test("normalizeLayers keeps every bound layer once, the background at the bottom
   assert.equal(new Set(ls.map((l) => l.id)).size, ls.length);        // the clashing id was replaced
   assert.deepEqual(normalizeLayers(null).map((l) => l.id), BOUND_TYPES);
   assert.deepEqual(defaultLayers().map((l) => l.id), BOUND_TYPES);
-  assert.equal(ACCENT_SHAPES.length, 11);                             // the default plus ten more
+  assert.equal(ACCENT_SHAPES.length, 12);                             // the default plus eleven more
   assert.equal(normalizeLayers([{ type: "accent", shape: "wave" }]).find((l) => l.id === "accent").shape, "wave");
   assert.equal(normalizeLayers([{ type: "accent", shape: "bogus" }]).find((l) => l.id === "accent").shape, "slant");
 });
@@ -163,11 +163,11 @@ test("layer order: insert above the selection, the background never moves", () =
   assert.equal(isPickable(s), true); s.locked = true; assert.equal(isPickable(s), false);
 });
 
-test("the sticker pack has 50 uniquely named stickers in known groups", async () => {
+test("the sticker pack has 60 uniquely named stickers in known groups", async () => {
   globalThis.document = globalThis.document || { createElement: () => ({ getContext: () => ({}) }) };
   const { STICKERS, STICKER_GROUPS } = await import("../ui/js/stickers.js");
-  assert.equal(STICKERS.length, 50);
-  assert.equal(new Set(STICKERS.map((s) => s.id)).size, 50);
+  assert.equal(STICKERS.length, 60);
+  assert.equal(new Set(STICKERS.map((s) => s.id)).size, 60);
   const groups = new Set(STICKER_GROUPS.map((g) => g.id));
   for (const s of STICKERS) { assert.ok(groups.has(s.group), s.id); assert.ok(s.name.zh && s.name.en && /^#[0-9a-f]{6}$/i.test(s.color), s.id); }
 });
