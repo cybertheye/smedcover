@@ -238,7 +238,8 @@ nothing in it is ever executed.
 ```
 
 - Same coordinate system as the built-in stickers: a 200×200 box centred on the origin.
-- Five operations — `shape`, `blob`, `line`, `detail`, `text` — map directly onto the five painters in `stickers.js`; paths are polygon, circle, rounded rectangle, star or curve.
+- Five operations — `shape`, `blob`, `line`, `detail`, `text` — map directly onto the five painters in `stickers.js`; paths are polygon, circle, ellipse, rounded rectangle, star or curve, and a line may also be an arc.
+- Any operation may carry `mirror`, which paints it a second time reflected left-to-right. The geometry is reflected, not the canvas, so shadows still fall to the lower right; a mirrored `blob` merges both halves into one silhouette.
 - The colour `"main"` stands for the main colour, replaced by the channel colour when tinted.
 
 **The style therefore does not depend on the model behaving: the interpreter guarantees it.** Heavy
@@ -273,8 +274,10 @@ The OpenAI style deliberately sends no sampling or length parameters: models dis
 accept, and one too many gets the request rejected. `readReply()` reads replies, error messages and
 the "cut off" signal of both styles.
 
-The preset `SYSTEM_PROMPT` describes the style, the coordinate system, the colour rules and the data
-format above, with a few examples. The examples are themselves valid specs and the unit tests
+The preset prompt comes from `systemPrompt(style)`: the style, the coordinate system, the colour
+rules, the data format above, step-by-step guidance on designing a sticker, and six examples. Only
+the *Style* section is taken from `STYLE_NOTES[style]`; the rest is style-neutral, so a new style
+only adds one entry. The examples are themselves valid specs and the unit tests
 validate each one, so the prompt and the interpreter cannot drift apart.
 
 ## 8. Interaction (`app.js`)
@@ -340,7 +343,7 @@ status and body as they are — error replies included, so the interface can sho
 message. It is sent from Rust to get around the cross-origin limits of a web view.
 
 - The request waits for its reply on the blocking thread pool, off the interface thread and off the async runtime's workers.
-- Only `http://` and `https://` are accepted; the timeout is 180 seconds and at most 4 MB of a reply is read.
+- Only `http://` and `https://` are accepted and at most 4 MB of a reply is read. The timeout comes from the settings, 300 seconds by default.
 - Proxy: the one given in the settings wins; otherwise `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` from the environment. **Addresses on this machine never go through the environment's proxy**, or a local model would be cut off by it.
 
 ### 9.4 Other commands

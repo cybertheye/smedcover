@@ -422,13 +422,14 @@ function assetsTab() {
   ];
 }
 // ---------- AI-generated assets
-const AI = { target: "", busy: false, error: "", result: null, test: "" };
+const AI = { target: "", busy: false, error: "", result: null, test: "", job: 0, since: 0 };
 /** Sends one prompt to the configured endpoint and returns {text, truncated}. Throws with the provider's message. */
 async function aiCall(cfg, system, user) {
   const req = buildRequest(cfg, system, user), body = JSON.stringify(req.body);
   const reply = native
-    ? await invoke("ai_request", { url: req.url, headers: Object.entries(req.headers), body, proxy: cfg.proxy || null })
-    : await fetch(req.url, { method: "POST", headers: req.headers, body }).then(async (r) => ({ status: r.status, text: await r.text() }));
+    ? await invoke("ai_request", { url: req.url, headers: Object.entries(req.headers), body, proxy: cfg.proxy || null, timeout: cfg.timeout })
+        .catch((e) => { throw new Error(/timed out/i.test(String(e)) ? t("ai.timedOut", cfg.timeout) : String(e)); })
+    : await fetch(req.url, { method: "POST", headers: req.headers, body, signal: AbortSignal.timeout(cfg.timeout * 1000) }).then(async (r) => ({ status: r.status, text: await r.text() }));
   const out = readReply(cfg.style, reply.status, reply.text);
   if (out.error) throw new Error(out.error);
   return out;
@@ -444,12 +445,20 @@ const onAssetsTab = () => S.mode === "edit" && S.tab.edit === "assets";
 async function generateAsset() {
   const target = AI.target.trim();
   if (!target || AI.busy) return;
-  Object.assign(AI, { busy: true, error: "", result: null });
+  const job = ++AI.job;
+  Object.assign(AI, { busy: true, error: "", result: null, since: Date.now() });
   renderPanel();
-  try { AI.result = await requestSpec(S.ai, target); } catch (e) { AI.error = String(e && e.message ? e.message : e); }
-  AI.busy = false;
+  const tick = setInterval(() => { const b = document.getElementById("ai-go"); if (b && AI.busy) b.textContent = aiBusyText(); }, 1000);
+  let result = null, error = "";
+  try { result = await requestSpec(S.ai, target); } catch (e) { error = String(e && e.message ? e.message : e); }
+  clearInterval(tick);
+  if (job !== AI.job) return;                       // cancelled meanwhile: the late answer is dropped
+  Object.assign(AI, { busy: false, result, error });
   if (onAssetsTab()) renderPanel();
 }
+/** Stops waiting for the reply. The request itself cannot be recalled, so the provider may still bill it. */
+function cancelGenerate() { AI.job++; Object.assign(AI, { busy: false, error: "", result: null }); renderPanel(); }
+const aiBusyText = () => t("ai.busy", Math.max(0, Math.round((Date.now() - AI.since) / 1000)));
 async function keepGenerated() {
   const spec = AI.result;
   if (!spec) return;
@@ -473,7 +482,8 @@ function aiSection() {
   const r = AI.result;
   return el("div", { class: "box" }, cap("ai.title"),
     textInput(AI.target, (v) => { AI.target = v; }, { placeholder: t("ai.targetPh"), maxLength: 300, disabled: AI.busy, onkeydown: (e) => { if (e.key === "Enter") generateAsset(); } }),
-    el("button", { class: "btn solid wide", style: "margin-top:10px", disabled: AI.busy, onclick: generateAsset }, t(AI.busy ? "ai.busy" : r ? "ai.again" : "ai.generate")),
+    el("button", { id: "ai-go", class: "btn solid wide", style: "margin-top:10px", disabled: AI.busy, onclick: generateAsset }, AI.busy ? aiBusyText() : t(r ? "ai.again" : "ai.generate")),
+    AI.busy && el("button", { class: "btn wide", style: "margin-top:8px", onclick: cancelGenerate }, t("ai.cancel")),
     AI.error && el("div", { class: "hint err" }, t("msg.failed", AI.error)),
     r && [
       el("div", { class: "tiles", style: "grid-template-columns:1fr 1fr;margin-top:12px" }, specPreview(r, null), specPreview(r, cat().color)),
@@ -512,6 +522,8 @@ function aiTab() {
       el("div", {}, cap("ai.auth"), select([["key", t("ai.auth.key")], ["bearer", t("ai.auth.bearer")]], c.auth, (v) => set("auth", v))),
       el("div", {}, cap("ai.maxTokens"), el("input", { type: "number", min: 512, max: 64000, step: 256, value: c.maxTokens, onchange: (e) => set("maxTokens", e.target.value, true) })),
     ],
+    el("div", {}, cap("ai.timeout"), el("input", { type: "number", min: 30, max: 1800, step: 30, value: c.timeout, onchange: (e) => set("timeout", e.target.value, true) }),
+      el("div", { class: "hint" }, t("ai.timeoutHint"))),
     field("ai.proxy", "proxy", { placeholder: "http://127.0.0.1:7890" }),
     el("div", {}, cap("ai.notes"), el("textarea", { value: c.notes, spellcheck: false, style: "height:84px;font-size:14px", placeholder: t("ai.notesPh"), oninput: (e) => set("notes", e.target.value) })),
     testBtn,

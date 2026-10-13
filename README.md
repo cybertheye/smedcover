@@ -122,6 +122,7 @@ At the top of the Assets tab, type what you need ("a ginger cat", "a trophy", "a
 - Once on the canvas it **follows the channel colour by default**, changing as you switch channels; untick *Use the channel colour* in the layer's properties to keep its own colour.
 - The style comes from a prompt preset in the app; you only describe the subject.
 - You first connect your own model service under *Setup → AI*, see below.
+- While generating, the button shows the seconds waited and you can **Stop waiting** at any time. That only stops waiting: the request has been sent and your provider may still bill it.
 - A model sometimes answers in a form the app cannot use; you are told it failed and can simply generate again. Weaker models fail more often and draw cruder shapes.
 
 ### Style and the default design
@@ -148,6 +149,7 @@ SmedCover ships no model and no account. You need a service that speaks one of t
 | MODEL | The model name, as given by your provider |
 | Authentication (Anthropic only) | `x-api-key` for an official API key; `Authorization: Bearer` for a token issued by a gateway |
 | Output limit (Anthropic only) | The required `max_tokens` parameter, 4096 by default. Raise it if you are told the reply was cut off |
+| Timeout (seconds) | The longest to wait for a reply: 300 by default, 30 to 1800. Models that reason before answering are slow; raise it if you get a timeout |
 | Proxy (optional) | e.g. `http://127.0.0.1:7890`; `socks5://` works too. When empty, the proxy in the system environment variables is used; addresses on this machine never go through a proxy |
 | Additional requirements (optional) | Appended to the preset style prompt for every generation |
 

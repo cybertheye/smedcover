@@ -11,16 +11,19 @@
 // Colours are "main" (the sticker's own colour, or the channel colour when tinted), a palette
 // name (white, ink, red, yellow, orange, blue, green, pink) or "#rrggbb".
 //
-// Operations — each may also carry move: [dx, dy] and rotate: radians —
+// Operations — each may also carry move: [dx, dy], turn: degrees, and mirror: true, which repeats
+// the operation reflected left-to-right (a blob merges both halves into one silhouette) —
 //   { op: "shape",  path, fill, shadow?: true, lw?: 7 }      closed shape: shadow, fill, ink outline
 //   { op: "blob",   paths: [path, …], fill }                 overlapping shapes merged into one silhouette
-//   { op: "line",   pts | curve, color, lw?: 30 }            thick inked stroke
-//   { op: "detail", pts | curve, color?: "ink", lw?: 6 }     thin line for inner detail
+//   { op: "line",   pts | curve | arc, color, lw?: 30 }      thick inked stroke
+//   { op: "detail", pts | curve | arc, color?: "ink", lw?: 6 }   thin line for inner detail
 //   { op: "text",   text, size, fill, x?: 0, y?: 0 }         heavy outlined lettering, centred
 // Paths —
 //   { poly: [[x, y], …] }   { circle: [x, y, r] }   { rrect: [x, y, w, h, r] }
+//   { ellipse: [x, y, rx, ry, tiltDegrees?] }
 //   { star: [points, outerR, innerR, rotation?] }
 //   { curve: [["M", x, y], ["L", x, y], ["Q", cx, cy, x, y], ["C", c1x, c1y, c2x, c2y, x, y], …] }
+// An open line may also be { arc: [x, y, r, fromDegrees, toDegrees] } (0 = right, 90 = down).
 import { KIT, PALETTE } from "./stickers.js";
 
 export const SPEC_LIMITS = { ops: 40, points: 120, paths: 10, text: 10, coord: 160 };
@@ -65,15 +68,21 @@ function path(v, what) {
     return a.map((x) => coord(x, `${what}.${key}`));
   };
   if (v.circle) { const [x, y, r] = nums("circle", 3); return { circle: [x, y, lim(Math.abs(r), 2, 140)] }; }
+  if (v.ellipse) { const [x, y, rx, ry, tilt = 0] = nums("ellipse", 4, 1); return { ellipse: [x, y, lim(Math.abs(rx), 2, 140), lim(Math.abs(ry), 2, 140), lim(tilt, -360, 360)] }; }
   if (v.rrect) { const [x, y, w, h, r] = nums("rrect", 5); const W = lim(Math.abs(w), 4, 280), H = lim(Math.abs(h), 4, 280); return { rrect: [x, y, W, H, lim(Math.abs(r), 0, Math.min(W, H) / 2)] }; }
   if (v.star) { const [n, R, r, rot = -Math.PI / 2] = nums("star", 3, 1); return { star: [Math.round(lim(n, 3, 40)), lim(Math.abs(R), 6, 140), lim(Math.abs(r), 3, 140), rot] }; }
   return bad(`${what}: unknown path`);
 }
-/** An open line: {pts} or {curve}. */
+/** An open line: {pts}, {curve} or {arc}. */
 function line(v, what, min = 2) {
   if (v.pts) return { pts: points(v.pts, what + ".pts", min) };
   if (v.curve) return { curve: segments(v.curve, what + ".curve") };
-  return bad(`${what}: needs pts or curve`);
+  if (v.arc) {
+    if (!Array.isArray(v.arc) || v.arc.length !== 5) return bad(`${what}.arc: needs 5 numbers`);
+    const [x, y, r, a0, a1] = v.arc.map((n) => (fin(n) ? n : bad(`${what}.arc: not a number`)));
+    return { arc: [coord(x), coord(y), lim(Math.abs(r), 2, 140), lim(a0, -720, 720), lim(a1, -720, 720)] };
+  }
+  return bad(`${what}: needs pts, curve or arc`);
 }
 function op(raw, i) {
   const what = `ops[${i}]`;
@@ -95,7 +104,9 @@ function op(raw, i) {
     default: return bad(`${what}: unknown op ${JSON.stringify(raw.op)}`);
   }
   if (raw.move !== undefined) { if (!Array.isArray(raw.move) || raw.move.length !== 2) return bad(`${what}.move: needs [dx, dy]`); out.move = [coord(raw.move[0], what + ".move"), coord(raw.move[1], what + ".move")]; }
-  if (raw.rotate !== undefined) { if (!fin(raw.rotate)) return bad(`${what}.rotate: not a number`); out.rotate = lim(raw.rotate, -7, 7); }
+  if (raw.rotate !== undefined) { if (!fin(raw.rotate)) return bad(`${what}.rotate: not a number`); out.rotate = lim(raw.rotate, -7, 7); }   // radians (older specs)
+  if (raw.turn !== undefined) { if (!fin(raw.turn)) return bad(`${what}.turn: not a number`); out.turn = lim(raw.turn, -360, 360); }
+  if (raw.mirror === true) out.mirror = true;
   return out;
 }
 
@@ -161,29 +172,69 @@ const trace = (segs) => (c) => {
     else c.bezierCurveTo(s[1], s[2], s[3], s[4], s[5], s[6]);
   }
 };
+const RAD = Math.PI / 180;
+const ellipse = (x, y, rx, ry, tilt = 0) => (c) => {
+  const t = tilt * RAD;
+  c.moveTo(x + rx * Math.cos(t), y + rx * Math.sin(t)); c.ellipse(x, y, rx, ry, t, 0, Math.PI * 2); c.closePath();
+};
 function builder(p) {
   if (p.poly) return KIT.poly(p.poly);
   if (p.circle) return KIT.circle(...p.circle);
+  if (p.ellipse) return ellipse(...p.ellipse);
   if (p.rrect) return KIT.rrect(...p.rrect);
   if (p.star) return KIT.star(...p.star);
   return KIT.curve(trace(p.curve));
 }
-const open = (o) => (o.pts ? KIT.pathLine(o.pts) : trace(o.curve));
+const open = (o) => (o.pts ? KIT.pathLine(o.pts) : o.arc ? (c) => c.arc(o.arc[0], o.arc[1], o.arc[2], o.arc[3] * RAD, o.arc[4] * RAD, o.arc[4] < o.arc[3]) : trace(o.curve));
+
+// ---------- mirroring: the same operation reflected across the vertical centre line (x -> -x).
+// The geometry is reflected rather than the canvas, so shadows still fall to the lower right.
+const flipSeg = (s) => [s[0], ...s.slice(1).map((n, i) => (i % 2 ? n : -n))];
+function flipPath(p) {
+  if (p.poly) return { poly: p.poly.map(([x, y]) => [-x, y]) };
+  if (p.circle) return { circle: [-p.circle[0], p.circle[1], p.circle[2]] };
+  if (p.ellipse) return { ellipse: [-p.ellipse[0], p.ellipse[1], p.ellipse[2], p.ellipse[3], -(p.ellipse[4] || 0)] };
+  if (p.rrect) return { rrect: [-(p.rrect[0] + p.rrect[2]), p.rrect[1], p.rrect[2], p.rrect[3], p.rrect[4]] };
+  if (p.star) return { star: [p.star[0], p.star[1], p.star[2], Math.PI - p.star[3]] };
+  return { curve: p.curve.map(flipSeg) };
+}
+function flipOp(o) {
+  const f = { ...o };
+  if (o.path) f.path = flipPath(o.path);
+  if (o.paths) f.paths = o.paths.map(flipPath);
+  if (o.pts) f.pts = o.pts.map(([x, y]) => [-x, y]);
+  if (o.curve) f.curve = o.curve.map(flipSeg);
+  if (o.arc) f.arc = [-o.arc[0], o.arc[1], o.arc[2], 180 - o.arc[3], 180 - o.arc[4]];
+  if (o.op === "text") f.x = -o.x;
+  if (o.move) f.move = [-o.move[0], o.move[1]];
+  if (o.turn) f.turn = -o.turn;
+  if (o.rotate) f.rotate = -o.rotate;
+  return f;
+}
 
 /** Draws a normalised spec centred on the origin in its 200-unit box. `tint` overrides its main colour. */
 export function drawSpec(ctx, spec, tint) {
   const main = tint || spec.color, col = (v) => (v === "main" ? main : PALETTE[v] || v);
   ctx.save();
-  for (const o of spec.ops) {
+  const placed = (o, fn) => {
     ctx.save();
     if (o.move) ctx.translate(o.move[0], o.move[1]);
-    if (o.rotate) ctx.rotate(o.rotate);
+    if (o.rotate || o.turn) ctx.rotate((o.rotate || 0) + (o.turn || 0) * RAD);
+    fn(o);
+    ctx.restore();
+  };
+  const one = (o) => {
     if (o.op === "shape") KIT.shape(ctx, builder(o.path), col(o.fill), { shadow: o.shadow, lw: o.lw });
-    else if (o.op === "blob") KIT.blob(ctx, o.paths.map(builder), col(o.fill));
     else if (o.op === "line") KIT.stroke(ctx, open(o), col(o.color), o.lw);
     else if (o.op === "detail") { ctx.beginPath(); open(o)(ctx); ctx.lineWidth = o.lw; ctx.strokeStyle = col(o.color); ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke(); }
     else KIT.word(ctx, o.text, o.size, col(o.fill), o.x, o.y);
-    ctx.restore();
+  };
+  for (const o of spec.ops) {
+    // a mirrored blob is still one silhouette: both halves go into the same merge
+    const blob = (b) => KIT.blob(ctx, b.paths.map(builder), col(b.fill));
+    if (o.op === "blob" && o.mirror && !(o.move || o.turn || o.rotate)) blob({ ...o, paths: [...o.paths, ...o.paths.map(flipPath)] });
+    else if (o.op === "blob") { placed(o, blob); if (o.mirror) placed(flipOp(o), blob); }
+    else { placed(o, one); if (o.mirror) placed(flipOp(o), one); }
   }
   ctx.restore();
 }

@@ -303,6 +303,39 @@ test("spec: a sticker that never uses the main colour gets its dominant colour p
   assert.deepEqual(fills({ color: "#ff0000", ops: [circle("white"), circle("ink")] }), ["#ff0000", "white", "ink"]);
 });
 
+test("spec: ellipses, arcs, turning and mirroring", () => {
+  const { spec, error } = normalizeSpec({ ops: [
+    { op: "shape", path: { ellipse: [-30, 10, 20, 999] }, fill: "main", mirror: true, turn: 720 },
+    { op: "shape", path: { ellipse: [0, 0, 20, 10, 30] }, fill: "white" },
+    { op: "detail", arc: [-8, 0, 8, 10, 170], mirror: "yes" },
+    { op: "blob", paths: [{ circle: [-40, 0, 20] }], fill: "main", mirror: true },
+  ] });
+  assert.equal(error, undefined);
+  assert.deepEqual(spec.ops[0], { op: "shape", path: { ellipse: [-30, 10, 20, 140, 0] }, fill: "main", shadow: true, lw: 7, turn: 360, mirror: true });
+  assert.deepEqual(spec.ops[1].path, { ellipse: [0, 0, 20, 10, 30] });
+  assert.deepEqual(spec.ops[2], { op: "detail", arc: [-8, 0, 8, 10, 170], color: "ink", lw: 6 });   // mirror must be exactly true
+  assert.deepEqual(normalizeSpec(spec).spec, spec);
+  assert.match(normalizeSpec({ ops: [{ op: "line", arc: [0, 0, 5], color: "main" }] }).error, /arc/);
+  assert.match(normalizeSpec({ ops: [{ op: "shape", path: { ellipse: [0, 0, 5] }, fill: "main" }] }).error, /ellipse/);
+
+  // what reaches the canvas: a mirrored shape is painted on both sides, reflected in geometry
+  const seen = [];
+  const ctx = new Proxy({}, { get: (t, k) => (...a) => { seen.push([k, ...a]); return {}; }, set: () => true });
+  drawSpec(ctx, normalizeSpec({ ops: [{ op: "shape", path: { circle: [-30, 5, 10] }, fill: "main", shadow: false, mirror: true }] }).spec, null);
+  assert.deepEqual(seen.filter((c) => c[0] === "arc").map((c) => c.slice(1, 4)), [[-30, 5, 10], [30, 5, 10]]);
+  seen.length = 0;
+  drawSpec(ctx, normalizeSpec({ ops: [{ op: "detail", arc: [-8, 0, 8, 10, 170], mirror: true, move: [5, 0], turn: 90 }] }).spec, null);
+  assert.deepEqual(seen.filter((c) => c[0] === "translate").map((c) => c.slice(1)), [[5, 0], [-5, 0]]);
+  const rot = seen.filter((c) => c[0] === "rotate").map((c) => c[1]);
+  assert.ok(Math.abs(rot[0] - Math.PI / 2) < 1e-9 && Math.abs(rot[1] + Math.PI / 2) < 1e-9);
+  const arcs = seen.filter((c) => c[0] === "arc");
+  assert.deepEqual([arcs[1][1], arcs[1][6]], [8, true]);                 // reflected centre, drawn the other way round
+  // a mirrored blob is one merged silhouette: both halves in every pass
+  seen.length = 0;
+  drawSpec(ctx, normalizeSpec({ ops: [{ op: "blob", paths: [{ circle: [-40, 0, 20] }], fill: "main", mirror: true }] }).spec, null);
+  assert.deepEqual(seen.filter((c) => c[0] === "arc").map((c) => c[1]), [-40, 40, -40, 40, -40, 40]);
+});
+
 test("spec: found inside a chatty or fenced reply", () => {
   const json = JSON.stringify(EXAMPLES[0].spec);
   assert.equal(parseSpec(json).spec.name.en, "Heart");
@@ -312,7 +345,8 @@ test("spec: found inside a chatty or fenced reply", () => {
 });
 
 test("ai: settings are normalised and endpoints are joined for both styles", () => {
-  assert.deepEqual(normalizeAi(null), { style: "openai", baseUrl: "", token: "", model: "", auth: "key", maxTokens: 4096, proxy: "", notes: "" });
+  assert.deepEqual(normalizeAi(null), { style: "openai", baseUrl: "", token: "", model: "", auth: "key", maxTokens: 4096, timeout: 300, proxy: "", notes: "" });
+  assert.deepEqual([5, 99999, "x", 120].map((timeout) => normalizeAi({ timeout }).timeout), [30, 1800, 300, 120]);
   assert.equal(normalizeAi({ style: "x", maxTokens: 9e9 }).maxTokens, 64000);
   assert.equal(aiReady(normalizeAi({ baseUrl: "https://a.b/v1", model: "m" })), true);
   assert.equal(aiReady(normalizeAi({ baseUrl: "a.b/v1", model: "m" })), false);
@@ -357,7 +391,8 @@ test("ai: replies and errors are read for each API style", () => {
 test("ai: the prompt carries the style, the format and the user's notes", () => {
   const p = buildPrompt("  一只猫  ");
   assert.equal(p.user, "Request: 一只猫");
-  for (const word of ["flat colour", "ink outline", "-100 to 100", '"op":"shape"', '"op":"blob"', '"op":"line"', '"op":"detail"', '"op":"text"', "exactly one JSON object", "never write code"]) assert.ok(p.system.includes(word), word);
+  for (const word of ["flat colour", "ink outline", "-100 to 100", '"op":"shape"', '"op":"blob"', '"op":"line"', '"op":"detail"', '"op":"text"', "exactly one JSON object", "never write code", '"mirror": true', '"ellipse"', '"arc"', '"turn"', "do NOT draw outlines", "How to design a sticker", "Request: a cat"]) assert.ok(p.system.includes(word), word);
   assert.ok(!p.system.includes("Additional requirements"));
   assert.ok(buildPrompt("x", "always add a smile").system.endsWith("always add a smile"));
+  assert.equal(buildPrompt("x", "", "no-such-style").system, p.system);   // unknown styles fall back to the house style
 });

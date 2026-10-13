@@ -294,8 +294,9 @@ async fn list_system_fonts() -> Vec<String> {
 
 // ---------------------------------------------------------------- AI request
 
-/// Longest an AI request may take, and the most of a reply that is read.
-const AI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+/// How long an AI request may take unless the caller says otherwise, and the most of a reply
+/// that is read. Models that reason before answering can need several minutes.
+const AI_TIMEOUT_SECS: u64 = 300;
 const AI_MAX_REPLY: u64 = 4 * 1024 * 1024;
 
 /// What came back from an AI endpoint: the status and body are handed to the web view as they
@@ -348,11 +349,18 @@ fn proxy_for(url: &str, given: &str) -> Option<String> {
 }
 
 /// POSTs a JSON body to an http(s) URL with the given headers, optionally through a proxy.
-fn post_json(url: &str, headers: &[(String, String)], body: &str, proxy: &str) -> Res<AiReply> {
+fn post_json(
+    url: &str,
+    headers: &[(String, String)],
+    body: &str,
+    proxy: &str,
+    timeout_secs: u64,
+) -> Res<AiReply> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err(format!("invalid URL: {url}"));
     }
-    let mut builder = ureq::AgentBuilder::new().timeout(AI_TIMEOUT);
+    let timeout = std::time::Duration::from_secs(timeout_secs.clamp(5, 1800));
+    let mut builder = ureq::AgentBuilder::new().timeout(timeout);
     if let Some(p) = proxy_for(url, proxy) {
         builder = builder.proxy(ureq::Proxy::new(&p).map_err(|e| format!("proxy {p}: {e}"))?);
     }
@@ -382,10 +390,17 @@ async fn ai_request(
     headers: Vec<(String, String)>,
     body: String,
     proxy: Option<String>,
+    timeout: Option<u64>,
 ) -> Res<AiReply> {
     // a reply can take minutes: wait for it on the blocking pool, not on a runtime worker
     tauri::async_runtime::spawn_blocking(move || {
-        post_json(&url, &headers, &body, proxy.as_deref().unwrap_or(""))
+        post_json(
+            &url,
+            &headers,
+            &body,
+            proxy.as_deref().unwrap_or(""),
+            timeout.unwrap_or(AI_TIMEOUT_SECS),
+        )
     })
     .await
     .map_err(err)?
@@ -588,7 +603,7 @@ mod tests {
             ("content-type".to_string(), "application/json".to_string()),
             ("authorization".to_string(), "Bearer sk-test".to_string()),
         ];
-        let reply = post_json(&url, &headers, r#"{"model":"m"}"#, "").unwrap();
+        let reply = post_json(&url, &headers, r#"{"model":"m"}"#, "", 20).unwrap();
         assert_eq!(reply.status, 200);
         assert_eq!(reply.text, r#"{"choices":[{"message":{"content":"hi"}}]}"#);
         let seen = server.join().unwrap().to_ascii_lowercase();
@@ -600,7 +615,7 @@ mod tests {
     #[test]
     fn post_json_passes_error_replies_through() {
         let (url, server) = serve_once("401 Unauthorized", r#"{"error":{"message":"bad key"}}"#);
-        let reply = post_json(&url, &[], "{}", "").unwrap();
+        let reply = post_json(&url, &[], "{}", "", 20).unwrap();
         assert_eq!(reply.status, 401);
         assert_eq!(reply.text, r#"{"error":{"message":"bad key"}}"#);
         server.join().unwrap();
@@ -617,10 +632,22 @@ mod tests {
             "https://api.anthropic.com/v1/messages",
         ] {
             let headers = vec![("content-type".to_string(), "application/json".to_string())];
-            let reply = post_json(url, &headers, "{}", "").unwrap();
+            let reply = post_json(url, &headers, "{}", "", 20).unwrap();
             assert_eq!(reply.status, 401, "{url}: {}", reply.text);
             assert!(reply.text.contains("error"), "{url}: {}", reply.text);
         }
+    }
+
+    #[test]
+    fn post_json_gives_up_after_the_timeout() {
+        // a server that accepts the connection and never answers
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/slow", listener.local_addr().unwrap());
+        let started = std::time::Instant::now();
+        let error = post_json(&url, &[], "{}", "", 5).unwrap_err();
+        assert!(error.to_lowercase().contains("timed out"), "{error}");
+        assert!(started.elapsed().as_secs() >= 4 && started.elapsed().as_secs() < 15);
+        drop(listener);
     }
 
     #[test]
@@ -647,20 +674,22 @@ mod tests {
             proxy_for("http://localhost/x", " http://127.0.0.1:7890 "),
             Some("http://127.0.0.1:7890".to_string())
         );
-        assert!(post_json("https://example.com", &[], "{}", "nonsense://x")
-            .unwrap_err()
-            .starts_with("proxy"));
+        assert!(
+            post_json("https://example.com", &[], "{}", "nonsense://x", 20)
+                .unwrap_err()
+                .starts_with("proxy")
+        );
     }
 
     #[test]
     fn post_json_refuses_other_schemes_and_reports_unreachable_hosts() {
-        assert!(post_json("file:///etc/passwd", &[], "{}", "").is_err());
-        assert!(post_json("ftp://example.com", &[], "{}", "").is_err());
+        assert!(post_json("file:///etc/passwd", &[], "{}", "", 20).is_err());
+        assert!(post_json("ftp://example.com", &[], "{}", "", 20).is_err());
         // a port nothing listens on
         let free = std::net::TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
             .unwrap();
-        assert!(post_json(&format!("http://{free}/x"), &[], "{}", "").is_err());
+        assert!(post_json(&format!("http://{free}/x"), &[], "{}", "", 20).is_err());
     }
 }
