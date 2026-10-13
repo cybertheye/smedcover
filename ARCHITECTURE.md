@@ -385,7 +385,21 @@ when needed.
 - For the selected layer the handles are checked first: corners resize, sides stretch, the top knob rotates. Handle size is computed in screen pixels, so handles look the same at any zoom.
 - Corner brackets are never hit; the background can be dragged only when it holds a photo.
 
-### 9.3 Undo
+### 9.3 Redrawing one layer while dragging
+
+While a layer is moved, resized or rotated, the others do not change. So when a drag starts,
+`drawCover()` paints everything **under** the dragged layer into one image and everything **over** it
+into another, and each frame then does three things: blit the first, repaint the dragged layer, blit
+the second. The cache lives in the `o.live` object the interface passes in and is dropped when the
+drag ends. Dragging on the canvas, the wheel and the placement sliders all go this way.
+
+Measured in the engine the app uses (1900 px wide): a full redraw takes about 18 ms in the cel look
+and 44 ms in cyberpunk; dragging a layer takes 5–11 ms in either.
+
+A look's costly whole-picture effects (the colour split, so far) are left out of drag frames, under
+`setFast()`, and return in the frame after the drag.
+
+### 9.4 Undo
 
 After each change (debounced by half a second) the profile and cover are serialised into one string
 snapshot, pushed only if it differs from the last, up to 80 steps. Undo parses a snapshot back and
@@ -466,6 +480,7 @@ as the header issue above.
 
 ## 14. Trade-offs and known limits
 
+- **Layers are cached only while dragging.** Typing a title or moving a look slider still redraws everything, about 44 ms each time in cyberpunk.
 - **Drawing runs on the interface thread.** Painting a 4× cover briefly stalls the window. Conversion and writing are already on a worker thread.
 - **No bundler.** Modules are loaded directly by the web view: simple, but nothing is minified or tree-shaken. At the current size start-up time is negligible.
 - **Undo keeps full snapshots.** Simple and robust; it would need to become incremental if the data grows.

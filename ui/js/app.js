@@ -161,14 +161,18 @@ async function applyProfile() {
 }
 
 // ---------- drawing: the main canvas every frame, the thumbnails a little later
-function paint(cv, size, pixelW, cover = S.cover, index = catIndex(), select = null) {
-  drawCover(cv, { profile: S.profile, catIndex: index, size, pixelW, cover, photo: S.photo, select });
+function paint(cv, size, pixelW, cover = S.cover, index = catIndex(), select = null, live = null) {
+  drawCover(cv, { profile: S.profile, catIndex: index, size, pixelW, cover, photo: S.photo, select, live });
 }
+// While a layer is dragged on the canvas, the rest of the cover is painted once and reused (see drawCover).
+let LIVE = null;
+const goLive = (id) => { if (!LIVE || LIVE.id !== id) LIVE = { id }; };
+const endLive = () => { if (LIVE) { LIVE = null; queueDraw(); } };
 function drawMain() {
   const stage = $("stage"), cv = $("cv"), size = selSize(), [vw, vh] = virtualSize(size.w, size.h);
   const k = Math.max(0.05, Math.min((stage.clientWidth - 36) / vw, (stage.clientHeight - 36) / vh));
   cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
-  paint(cv, size, Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null);
+  paint(cv, size, Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null);
   const clear = !layer("bg").visible;
   stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
 }
@@ -298,12 +302,13 @@ function layerAt(e) {
   });
   cv.addEventListener("pointerdown", (e) => {
     if (S.mode !== "edit") return;
-    const done = (moved) => () => { cv.onpointermove = null; if (moved()) renderSide(); };
+    const done = (moved) => () => { cv.onpointermove = null; endLive(); if (moved()) renderSide(); };
     const g = grip(e);
     if (g && g.handle) {   // a handle of the selected layer: corners resize, sides stretch, the knob rotates
       const { L, hit, handle } = g, min = 6 * g.p.k;
       let moved = false, prev = { ang: Math.atan2(g.p.y - hit.cy, g.p.x - hit.cx), dist: Math.max(min, Math.hypot(g.lx, g.ly)), lx: Math.max(min, Math.abs(g.lx)), ly: Math.max(min, Math.abs(g.ly)) };
       cv.setPointerCapture(e.pointerId);
+      goLive(L.id);
       cv.onpointermove = (m) => {
         const q = grip(m);
         if (!q) return;
@@ -324,6 +329,7 @@ function layerAt(e) {
     if (L.locked || (L.type === "bg" && !S.photo)) return;
     let last = virtualPoint(e), moved = false;
     cv.setPointerCapture(e.pointerId);
+    goLive(L.id);
     cv.onpointermove = (m) => { const p = virtualPoint(m); moved = true; edit(L, { ddx: p.x - last.x, ddy: p.y - last.y }); last = p; };
     cv.onpointerup = cv.onpointercancel = done(() => moved);
   });
@@ -333,6 +339,7 @@ function layerAt(e) {
     const L = layerAt(e);
     if (!L || L.locked || FIXED.includes(L.type) || (L.type === "bg" && !S.photo)) return;
     selectLayer(L.id);
+    goLive(L.id); later("live", 300, endLive);
     edit(L, e.altKey ? { rot: e.deltaY > 0 ? 2 : -2 } : { scale: Math.exp(-e.deltaY * 0.0015) });
     later("side", 250, renderSide);
   }, { passive: false });
@@ -583,12 +590,12 @@ function styleTab() {
   const tune = (k, v) => { st.lookParams[st.look] = { ...vals, ...st.lookParams[st.look], [k]: v }; touch({ profile: true }); };
   return [
     el("div", { class: "box" }, cap("style.look"),
-      select(LOOK_IDS.map((k) => [k, LOOKS[k].name[getLang()]]), st.look, (v) => { st.look = v; touch({ profile: true, panel: true, strip: true }); }),
+      select(LOOK_IDS.map((k) => [k, LOOKS[k].name[getLang()]]), st.look, (v) => { st.look = v; touch({ profile: true, panel: true, side: true, strip: true }); }),
       el("div", { class: "hint" }, t("style.lookHint")),
       L.params.map((d) => slider2(d.name[getLang()], d.min, d.max, d.step, vals[d.key], (v) => tune(d.key, v))),
       L.params.length > 0 && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete st.lookParams[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))),
     el("div", {}, cap("style.template"), select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), st.template, (v) => set("template", v))),
-    el("div", {}, cap("style.theme"), select([["dark", t("theme.dark")], ["light", t("theme.light")]], st.theme, (v) => set("theme", v))),
+    !L.oneTheme && el("div", {}, cap("style.theme"), select([["dark", t("theme.dark")], ["light", t("theme.light")]], st.theme, (v) => set("theme", v))),
     check("style.imageShadow", st.imageShadow, (v) => set("imageShadow", v)),
     el("div", { class: "box" }, cap("style.design"),
       el("button", { class: "btn wide", onclick: () => { S.profile.design.layers = JSON.parse(JSON.stringify(S.cover.layers)); touch({ profile: true }); toast(t("style.designSaved")); } }, t("style.saveDesign")),
@@ -723,8 +730,9 @@ function placementControls(L) {
   if (L.type === "bg" && !S.photo) return null;
   const f = frame(), all = S.settings.scope === "all", free = isFree(L.type), noRot = L.type === "bg";
   const b = { dx: 0, dy: 0, s: 1, r: 0, kx: 1, ky: 1, ...L.t.by[writeKey(L, f.key, f.catId)] };
-  const setAll = (k, v) => { L.t.all[k] = v; touch({ cover: true }); };
-  const setBy = (k, v) => { L.t.by[writeKey(L, f.key, f.catId)] = { ...b, ...L.t.by[writeKey(L, f.key, f.catId)], [k]: v }; touch({ cover: true }); };
+  const hold = () => { goLive(L.id); later("live", 300, endLive); };   // a slider being dragged moves one layer, like a drag on the canvas
+  const setAll = (k, v) => { hold(); L.t.all[k] = v; touch({ cover: true }); };
+  const setBy = (k, v) => { hold(); L.t.by[writeKey(L, f.key, f.catId)] = { ...b, ...L.t.by[writeKey(L, f.key, f.catId)], [k]: v }; touch({ cover: true }); };
   const lo = free ? 0 : -1, hi = free ? 1 : 1;
   return [
     all ? [
@@ -747,7 +755,7 @@ function typeControls(L) {
   const set = (k, v, side = false) => { L[k] = v; touch({ cover: true, side }); };
   switch (L.type) {
     case "bg": return [
-      select([["dark", t("theme.dark")], ["light", t("theme.light")]], S.profile.style.theme, (v) => { S.profile.style.theme = v; touch({ profile: true }); }),
+      !LOOKS[S.profile.style.look].oneTheme && select([["dark", t("theme.dark")], ["light", t("theme.light")]], S.profile.style.theme, (v) => { S.profile.style.theme = v; touch({ profile: true }); }),
       check("props.grid", L.grid, (v) => set("grid", v)),
       S.photo && [slider("props.blur", 0, 80, 1, L.blur, px, (v) => set("blur", v)), slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => set("dim", v))],
     ];
@@ -790,7 +798,7 @@ function renderSide() {
         el("button", { class: "btn", title: t("layers.down"), disabled: i <= 1, onclick: () => shiftLayer(-1) }, "▼"))),
     L ? el("div", { class: "box" }, el("label", { class: "cap" }, `${t("props.title")} · ${layerName(L)}`),
       typeControls(L), placementControls(L),
-      L.type !== "bg" && slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { L.o = v; touch({ cover: true }); }),
+      L.type !== "bg" && slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { goLive(L.id); later("live", 300, endLive); L.o = v; touch({ cover: true }); }),
       free && catsControl(L))
       : el("div", { class: "hint" }, t("layers.none")));
   side.scrollTop = y;

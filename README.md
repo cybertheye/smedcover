@@ -145,10 +145,12 @@ The cyberpunk look has five sliders:
 | Slider | What it controls | Turning it up |
 |---|---|---|
 | Neon glow | how far every neon line and letter glows | brighter and hazier, like a foggy night; 0 gives clean thin lines |
-| Colour split | how far apart the cyan and magenta copies of the title sit | more glitch; 0 gives clean letters |
+| Colour split | red and cyan pulled apart across the whole picture, with a further split on the title | more glitch; 0 gives a clean picture |
 | Scanlines | the dark horizontal lines across the picture | more old monitor; 0 is the sharpest picture |
 | Haze | the pools of coloured light in the corners and the dark vignette | more atmosphere; 0 is close to plain black |
 | Photo tint | how far a background photo is washed from violet to the channel colour | a darker, more stylised photo; 0 keeps its own colours |
+
+The colour split is paused while you drag a layer and returns when you let go, to keep dragging smooth. Cyberpunk is dark only, so the *Background* choice is hidden while it is selected.
 
 Each look's values are saved separately in the profile, so switching away and back loses nothing. When generating assets with AI, the style section of the prompt follows the current look.
 

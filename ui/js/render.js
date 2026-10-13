@@ -7,7 +7,7 @@ import { drawTitle, parseTitle } from "./title.js";
 import { drawPhoto } from "./photo.js";
 import { drawAsset } from "./assets.js";
 import { resolve, appliesTo } from "./layers.js";
-import { setLook, look, lookValues, styled } from "./style.js";
+import { setLook, setFast, look, lookValues, styled } from "./style.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
 export const hexToRgb = (hex) => {
@@ -347,6 +347,8 @@ let scratch = null;
  *   o.cover    {title, tag, layers}
  *   o.photo    decoded background Image or null
  *   o.select   id of the layer to outline (editor only)
+ *   o.live     {id} while that layer is being dragged: the rest of the cover is cached in this
+ *              object between frames (editor only; drop the object when the drag ends)
  * Leaves cv._hits behind: one entry per drawn layer, bottom first, for pointer hit-testing.
  */
 export function drawCover(cv, o) {
@@ -366,23 +368,52 @@ export function drawCover(cv, o) {
     hasBrand: cover.layers.some((l) => l.type === "brand" && l.visible),
   };
   cv._virtual = [w, h];
-  cv._hits = [];
-  for (const L of cover.layers) {
-    if (!L.visible || !appliesTo(L, cat.id)) continue;
-    const tr = resolve(L, w, h, key, cat.id);
-    let hit;
-    if (L.o < 1) {   // paint the layer on its own, then blend it in as a whole
-      scratch = scratch || document.createElement("canvas");
-      scratch.width = cv.width; scratch.height = cv.height;
-      const sx = scratch.getContext("2d");
-      sx.scale(kx, ky);
-      hit = PAINT[L.type](sx, L, tr, env);
-      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = L.o; ctx.drawImage(scratch, 0, 0); ctx.restore();
-    } else hit = PAINT[L.type](ctx, L, tr, env);
-    ctx.globalAlpha = 1; ctx.setLineDash([]);
-    if (hit) cv._hits.push({ id: L.id, type: L.type, ...hit });
+  /** Paints layers [from, to) onto `c` (a context already scaled to the virtual canvas) and returns their hits. */
+  const paintRange = (c, from, to) => {
+    const hits = [];
+    for (let i = from; i < to; i++) {
+      const L = cover.layers[i];
+      if (!L.visible || !appliesTo(L, cat.id)) continue;
+      const tr = resolve(L, w, h, key, cat.id);
+      let hit;
+      if (L.o < 1) {   // paint the layer on its own, then blend it in as a whole
+        scratch = scratch || document.createElement("canvas");
+        scratch.width = cv.width; scratch.height = cv.height;
+        const sx = scratch.getContext("2d");
+        sx.scale(kx, ky);
+        hit = PAINT[L.type](sx, L, tr, env);
+        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o; c.drawImage(scratch, 0, 0); c.restore();
+      } else hit = PAINT[L.type](c, L, tr, env);
+      c.globalAlpha = 1; c.setLineDash([]);
+      if (hit) hits.push({ id: L.id, type: L.type, ...hit });
+    }
+    return hits;
+  };
+  const n = cover.layers.length, at = o.live ? cover.layers.findIndex((l) => l.id === o.live.id) : -1;
+  setFast(at >= 0);
+  if (at < 0) cv._hits = paintRange(ctx, 0, n);
+  else {
+    // One layer is being dragged: everything under it and everything over it is painted once into
+    // two images kept in o.live, and each frame only blits those and repaints the moving layer.
+    const live = o.live, stamp = `${cv.width}x${cv.height}|${at}|${n}`;
+    if (live.stamp !== stamp) {
+      live.stamp = stamp;
+      for (const [name, from, to] of [["under", 0, at], ["over", at + 1, n]]) {
+        const img = live[name] || (live[name] = document.createElement("canvas"));
+        img.width = cv.width; img.height = cv.height;
+        const c = img.getContext("2d");
+        c.scale(kx, ky);
+        live[name + "Hits"] = paintRange(c, from, to);
+      }
+    }
+    const blit = (img) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0); ctx.restore(); };
+    blit(live.under);
+    const mine = paintRange(ctx, at, at + 1);
+    blit(live.over);
+    cv._hits = [...live.underHits, ...mine, ...live.overHits];
   }
-  if (L0.post && cover.layers[0].visible) { ctx.save(); L0.post(ctx, w, h, C, lookValues()); ctx.restore(); }   // not over a transparent background
+  if (L0.post && cover.layers[0].visible) { ctx.save(); L0.post(ctx, w, h, C, lookValues(), kx); ctx.restore(); }   // not over a transparent background
+  setFast(false);
   if (o.select) { const hit = cv._hits.find((x) => x.id === o.select); if (hit && hit.type !== "bg") drawSelection(ctx, hit, kx); }
 }
 

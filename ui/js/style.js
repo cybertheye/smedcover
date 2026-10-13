@@ -128,9 +128,11 @@ function neonContext(ctx, C, p, plates) {
   });
 }
 
+const SPLIT = [];              // two work canvases for the colour split, reused between frames
 const cyber = {
   id: "cyber",
   name: { zh: "赛博朋克", en: "Cyberpunk" },
+  oneTheme: true,              // always dark: the light / dark choice does not apply
   params: [
     { key: "glow", min: 0, max: 2, step: 0.05, def: 1, name: { zh: "霓虹光晕", en: "Neon glow" } },
     { key: "split", min: 0, max: 2, step: 0.05, def: 1, name: { zh: "色彩错位", en: "Colour split" } },
@@ -192,13 +194,8 @@ const cyber = {
   },
 
   runs(ctx, pass, o, p) {
-    const fs = o.fs, g = fs * 0.022 * p.split, C = o.C, colourOf = (a) => (a.hi ? C : o.second || CY.second);
+    const fs = o.fs, g = fs * 0.03 * p.split, C = o.C, colourOf = (a) => (a.hi ? C : o.second || CY.second);
     ctx.lineJoin = "round";
-    if (g > 0) {   // the colour split: the same letters printed slightly apart in two neons
-      ctx.save(); ctx.globalCompositeOperation = "lighter";
-      pass((a, x) => { ctx.fillStyle = css(CY.third, 0.75); ctx.fillText(a.t, x - g, 0); ctx.fillStyle = css(CY.second, 0.75); ctx.fillText(a.t, x + g, g * 0.35); });
-      ctx.restore();
-    }
     // the glow, then the letter itself: plain words are pale with a coloured rim, highlighted words are solid neon.
     // The glow is layered strokes, widest and faintest first: canvas shadow blur differs between web views.
     const rim = fs * 0.05 * Math.max(0.4, o.strokeAmt);
@@ -207,6 +204,9 @@ const cyber = {
       pass((a, x) => { ctx.strokeStyle = css(colourOf(a), alpha * Math.min(1.6, p.glow)); ctx.lineWidth = rim * (1 + (k - 1) * p.glow); ctx.strokeText(a.t, x, 0); });
     }
     pass((a, x) => { ctx.strokeStyle = css(colourOf(a)); ctx.lineWidth = rim; ctx.strokeText(a.t, x, 0); });
+    if (g > 0 && !fast) {   // the colour split: the same letters printed apart in two neons, showing as fringes either side
+      pass((a, x) => { ctx.fillStyle = css(CY.third, 0.9); ctx.fillText(a.t, x - g, 0); ctx.fillStyle = css(a.hi ? CY.second : C, 0.9); ctx.fillText(a.t, x + g, g * 0.3); });
+    }
     pass((a, x) => { ctx.fillStyle = a.hi ? css(mix(C, CY.white, 0.3)) : css(CY.white); ctx.fillText(a.t, x, 0); });
   },
 
@@ -249,7 +249,28 @@ const cyber = {
 
   image(ctx, C, unit, p) { ctx.shadowColor = css(C, 0.9); ctx.shadowBlur = 26 * unit * p.glow; ctx.shadowOffsetX = ctx.shadowOffsetY = 0; },
 
-  post(ctx, w, h, C, p) {
+  post(ctx, w, h, C, p, unit = 1) {
+    // The colour split over the whole picture: red pulled one way, green and blue the other.
+    // It costs several whole-canvas copies, so it is left out of the frames of a drag (see setFast).
+    const sh = Math.round(1.7 * p.split * unit), cv = ctx.canvas;
+    if (sh >= 1 && !fast && cv && typeof document !== "undefined") {
+      const W = cv.width, H = cv.height;
+      const part = (i, tint) => {   // the picture with only some of its colour channels left
+        const c = SPLIT[i] || (SPLIT[i] = document.createElement("canvas"));
+        if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+        const x = c.getContext("2d");
+        x.globalCompositeOperation = "copy"; x.drawImage(cv, 0, 0);
+        x.globalCompositeOperation = "multiply"; x.fillStyle = tint; x.fillRect(0, 0, W, H);
+        return c;
+      };
+      const red = part(0, "#ff0000"), rest = part(1, "#00ffff");
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = "copy"; ctx.drawImage(red, sh, 0);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.drawImage(red, 0, 0, 1, H, 0, 0, sh, H);                 // the strips the shift leaves uncovered
+      ctx.drawImage(rest, -sh, 0); ctx.drawImage(rest, W - 1, 0, 1, H, W - sh, 0, sh, H);
+      ctx.restore();
+    }
     if (p.scan > 0) {
       ctx.fillStyle = css([0, 0, 0], 0.34 * p.scan);
       for (let y = 0; y < h; y += 6) ctx.fillRect(0, y, w, 2.4);
@@ -273,7 +294,12 @@ const cyber = {
 export const LOOKS = { cel, cyber };
 export const LOOK_IDS = Object.keys(LOOKS);
 
-let current = cel, values = {};
+let current = cel, values = {}, fast = false;
+/**
+ * Fast mode leaves out effects that cost whole-canvas work. drawCover() turns it on for the frames
+ * of a drag, so a moving layer stays smooth; the full picture returns when the drag ends.
+ */
+export function setFast(on) { fast = !!on; }
 /** Default parameter values of a look, overridden by `given` where that holds a number in range. */
 export function lookParams(id, given) {
   const out = {};
