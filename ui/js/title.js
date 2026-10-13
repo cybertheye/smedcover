@@ -54,3 +54,49 @@ export function drawTitle(ctx, title, box, adj, st) {
   return { x: x0, y: y0, w: blockW, h: lines.length * fs * LH };
 }
 export { INK };
+
+/**
+ * Sets the title vertically, as Chinese books do: each typed line is a column, read top to bottom,
+ * the first column on the right. CJK characters stand upright one under another; a run of Latin
+ * letters or digits lies on its side, as it does in a vertical line. The size is the largest at
+ * which the longest column fits the height and all columns fit the width.
+ * st: { font, weight, fill, hi, maxFs }. Returns the box it occupies, or null when there is nothing to draw.
+ */
+export function drawTitleVertical(ctx, title, box, st) {
+  const lines = parseTitle(title);
+  if (!lines.length) return null;
+  const GAP = 1.06, PITCH = 1.32, weight = st.weight || 900;
+  ctx.save();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = `${weight} 100px ${st.font}`;
+  // a column is a list of units: one upright character, or a sideways run; each has a height at size 100
+  const sideways = /[\x21-\x7e]/;
+  const columns = lines.map((line) => {
+    const units = [];
+    for (const a of line) for (const ch of a.t) {
+      const last = units[units.length - 1];
+      if (ch === " " || ch === "　") units.push({ gap: true, h: 34 });
+      else if (sideways.test(ch)) { if (last && last.run !== undefined && last.hi === a.hi) last.run += ch; else units.push({ run: ch, hi: a.hi }); }
+      else units.push({ ch, hi: a.hi, h: 100 * GAP });
+    }
+    for (const u of units) if (u.run !== undefined) u.h = ctx.measureText(u.run).width + 12;
+    return { units, h: units.reduce((s, u) => s + u.h, 0) };
+  });
+  const tallest = Math.max(...columns.map((c) => c.h));
+  const fs = Math.max(8, Math.floor(Math.min(st.maxFs, (100 * box.h) / tallest, box.w / (columns.length * PITCH))));
+  const k = fs / 100, pitch = fs * PITCH, blockW = columns.length * pitch - (pitch - fs);
+  ctx.font = `${weight} ${fs}px ${st.font}`;
+  columns.forEach((col, i) => {
+    const cx = box.x + blockW - fs / 2 - i * pitch;   // the first column is the rightmost
+    let y = box.y;
+    for (const u of col.units) {
+      const h = u.h * k;
+      ctx.fillStyle = u.hi ? st.hi : st.fill;
+      if (u.ch) ctx.fillText(u.ch, cx, y + h / 2);
+      else if (u.run !== undefined) { ctx.save(); ctx.translate(cx, y + h / 2); ctx.rotate(Math.PI / 2); ctx.fillText(u.run, 0, fs * 0.04); ctx.restore(); }
+      y += h;
+    }
+  });
+  ctx.restore();
+  return { x: box.x, y: box.y, w: blockW, h: tallest * k };
+}

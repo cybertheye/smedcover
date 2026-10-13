@@ -20,6 +20,8 @@
 //   subject(ctx, half, env, p)   painted around the channel graphic, in its own space
 //   seeded                       true when the look scatters things at random (the user can shuffle them)
 //   titleFont(fonts)             the font stack of the title, when the look sets its own
+//   faces(fonts)                 font stacks to use in place of the profile's for the whole cover: { cn?, en?, mono? }
+//   titleSet(ctx, title, box, L, env, p)  sets the title itself (returns its box), or returns null to decline
 //   layout(template, w, h)       the geometry of a cover, for looks that are about arrangement (see layout.js)
 //   image(ctx, C, unit, p)       prepares the context for an uploaded image (its shadow or glow)
 //   post(ctx, w, h, C, p, unit, hits)  painted over the finished cover (scanlines, vignette); `unit` is
@@ -33,6 +35,7 @@
 
 import { fonts, spaced, spacedW, brackets, toneField } from "./cel.js";
 import { blockLayout } from "./layout.js";
+import { drawTitleVertical } from "./title.js";
 
 const INK = "#07070c";
 const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
@@ -753,7 +756,7 @@ const bluenote = {
 
 // ====================================================================== editorial: the pages of a magazine
 const ED = { paper: [246, 243, 236], ink: [20, 20, 20], night: [18, 18, 18] };
-const SERIF = `"Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", "SimSun", Georgia, "Times New Roman", serif`;
+// the serif face is one of the profile's fonts (see fonts.serif in cel.js)
 const edInk = () => (dark ? ED.paper : ED.ink), edGround = () => (dark ? ED.night : ED.paper);
 const editorial = {
   id: "editorial",
@@ -763,7 +766,8 @@ const editorial = {
     { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白照片", en: "Black-and-white photo" } },
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "纸张颗粒", en: "Paper grain" } },
   ],
-  titleFont: () => SERIF,
+  titleFont: (f) => f.serif,
+  faces: (f) => ({ cn: f.serif }),         // channel name and the like in the serif too; the small capitals stay sans
   /** A page: a shallow tinted foot, a narrower side column, a slim strip. */
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.27, side: 0.36, strip: 0.14 }),
   /** The corner tag: a kicker — small spaced capitals in the channel colour under a short rule. */
@@ -782,7 +786,7 @@ const editorial = {
     if (env.photo) { env.drawPhoto(p.mono); wash(ctx, w, h, "multiply", ED.paper, 0.5 * p.mono); return true; }
     if (L.grid) {   // the issue number, very large and very quiet, where a picture would otherwise go
       const fs = Math.min(w, h) * 0.78;
-      ctx.save(); ctx.font = `italic 700 ${fs}px ${SERIF}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(C, dark ? 0.22 : 0.2);
+      ctx.save(); ctx.font = `italic 700 ${fs}px ${fonts.serif}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(C, dark ? 0.22 : 0.2);
       ctx.fillText(pad2(env.o.catIndex + 1), w - 60, h * 0.5 + fs * 0.36); ctx.restore();
     }
     return true;
@@ -810,7 +814,7 @@ const editorial = {
     const { w, h } = env, ink = edInk(), i = env.o.catIndex, a = 0.85 * p.rules;
     ctx.strokeStyle = css(ink, a); ctx.lineWidth = 1.5; ctx.strokeRect(34, 34, w - 68, h - 68);
     ctx.fillStyle = css(ink, a); ctx.fillRect(72, 128, w - 144, 3); ctx.fillRect(72, 135, w - 144, 1);
-    ctx.font = `italic 400 22px ${SERIF}`; ctx.textBaseline = "alphabetic"; ctx.textAlign = "center";
+    ctx.font = `italic 400 22px ${fonts.serif}`; ctx.textBaseline = "alphabetic"; ctx.textAlign = "center";
     ctx.fillText(`— ${pad2(i + 1)} —`, w / 2, h - 50);
     if (p.rules > 0.5) { ctx.fillStyle = css(ink, 0.28 * p.rules); ctx.fillRect(Math.round(w * 0.64), 170, 1, h - 340); }
   },
@@ -824,7 +828,132 @@ const editorial = {
 - "white" is the paper, "dark" near-black, and "main" a single spot of colour — one part only.`,
 };
 
-export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial };
+// ====================================================================== a page from a Song-dynasty woodblock book
+const SONG = { paper: [236, 224, 196], ink: [30, 25, 21], red: [176, 38, 32] };
+const worn = (c) => mix(mix(c, grey(c), 0.3), SONG.paper, 0.22);   // a colour as a water-based print would hold it
+const NUMERALS = ["〇", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+const numeral = (n) => (n <= 10 ? NUMERALS[n] : n < 20 ? "十" + NUMERALS[n - 10] : String(n));
+const songke = {
+  id: "songke",
+  name: { zh: "宋版刻本", en: "Woodblock book" },
+  oneTheme: true,
+  seeded: true,
+  params: [
+    { key: "rules", min: 0, max: 1, step: 0.05, def: 0.8, name: { zh: "界栏", en: "Column rules" } },
+    { key: "aged", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "做旧", en: "Age" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "纸张颗粒", en: "Paper grain" } },
+    { key: "vertical", toggle: true, min: 0, max: 1, step: 1, def: 1, name: { zh: "标题竖排", en: "Set the title vertically" } },
+  ],
+  titleFont: (f) => f.serif,
+  faces: (f) => ({ cn: f.serif, en: f.serif }),   // everything on the page is cut in the one face
+  /** Level bands: a page has no slanted panels. */
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.25, side: 0.32, strip: 0.14 }),
+  theme: (base) => ({ ...base, field: css(SONG.paper), text: css(SONG.ink), dim: css(SONG.ink, 0.6), titleFill: css(SONG.ink), titleInk: css(SONG.paper), grid: () => "rgba(0,0,0,0)" }),
+  background(ctx, env, L, p) {
+    const { w, h } = env;
+    ctx.fillStyle = css(SONG.paper); ctx.fillRect(0, 0, w, h);
+    if (env.photo) {   // as a rubbing would show it: grey, pressed into the paper
+      env.drawPhoto(1); wash(ctx, w, h, "multiply", SONG.paper, 1); wash(ctx, w, h, "screen", [60, 48, 36], 0.35);
+    }
+    if (L.grid && p.rules > 0) {   // the ruled columns of the block, right to left
+      const pitch = Math.max(90, Math.round(Math.min(w, h) / 9));
+      ctx.fillStyle = css(SONG.ink, 0.3 * p.rules);
+      for (let x = w - 64 - pitch; x > 64; x -= pitch) ctx.fillRect(x, 58, 1.5, h - 116);
+    }
+    return true;
+  },
+  accent: {
+    fill: (C) => css(mix(SONG.paper, worn(C), 0.78)), tone: () => "rgba(0,0,0,0)", toneScale: 0,
+    edge(ctx, run, nx, ny) { ctx.lineCap = "butt"; ctx.strokeStyle = css(SONG.ink); ctx.lineWidth = 5; run(0, 0); ctx.lineWidth = 1.5; run(nx * 10, ny * 10); },   // a thick-and-thin border, as round the block
+  },
+  /**
+   * The title, set as a book sets it: in columns, top to bottom, the first column on the right.
+   * Each typed line is a column. Returns the box it takes, or null to leave it to the usual setting.
+   */
+  titleSet(ctx, title, box, L, env, p) {
+    if (!p.vertical) return null;
+    // Columns want height, where a line wants width: the title takes the field down to the colour
+    // band (or the foot of the page), and stands clear of the seal, which keeps its corner.
+    const G = env.G, split = G.template === "split", foot = split || G.flipped ? env.h - 110 : Math.min(G.accent[0][1], G.accent[1][1]) - 36;
+    let x = box.x, w = box.w;
+    if (env.cover.tag && !G.flipped) {
+      const f = G.tag.fs * 0.82;
+      ctx.save(); ctx.font = `900 ${f}px ${fonts.serif}`; const seal = spacedW(ctx, env.cover.tag, 4) + f * 0.9 + 44; ctx.restore();
+      x += seal; w = Math.max(200, w - seal);
+    }
+    return drawTitleVertical(ctx, title, { x, y: box.y, w, h: Math.max(160, foot - box.y) }, { font: fonts.serif, fill: L.ink || css(SONG.ink), hi: L.hi || css(SONG.red), maxFs: 300, weight: 900 });
+  },
+  /** Horizontal lettering (the title when not vertical, text layers): plain ink, highlighted words in vermilion. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? o.hi || SONG.red : o.fill || SONG.ink); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => (plates
+    ? mapped(ctx, { fill: { ink: SONG.ink, light: SONG.paper, colour: worn }, stroke: { ink: SONG.ink, light: SONG.paper } })
+    : mapped(ctx, { fill: { ink: SONG.ink, light: SONG.paper, mid: mix(SONG.paper, SONG.ink, 0.16), dark: mix(SONG.paper, SONG.ink, 0.86), colour: worn }, stroke: { ink: SONG.ink, light: SONG.paper }, line: 0.8 })),
+  sticker: painters({ line: SONG.ink, lineScale: 0.8, shadow: null, tone: (fill) => { const c = parseColour(fill); return !c ? fill : role(c) === "ink" ? css(SONG.ink, c[3]) : role(c) === "colour" ? css(worn(c), c[3]) : css(SONG.paper, c[3]); } }),
+  /** The corner tag: a seal, cut in relief and pressed in vermilion — a little worn at the edges. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.82;
+    ctx.font = `900 ${f}px ${fonts.serif}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 4) + f * 0.9, h = f * 1.5, top = y + (fs * 1.34 - h);
+    ctx.fillStyle = css(SONG.red); ctx.fillRect(x, top, w, h);
+    ctx.fillStyle = css(SONG.paper);
+    for (let k = 0; k < 16; k++) { const side = k % 4, t = rand(k * 2.3 + 60), s = 2 + rand(k * 3.1 + 61) * 5; ctx.fillRect(side < 2 ? x + t * w : side === 2 ? x - 1 : x + w - s + 1, side === 0 ? top - 1 : side === 1 ? top + h - s + 1 : top + t * h, side < 2 ? s * 2 : s, side < 2 ? s : s * 2); }
+    ctx.strokeStyle = css(SONG.paper); ctx.lineWidth = 2.5; ctx.strokeRect(x + 7, top + 7, w - 14, h - 14);
+    ctx.fillStyle = ink || css(SONG.paper); spaced(ctx, str, x + f * 0.45, top + h * 0.5 + f * 0.36, 4);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The plate under a text layer: a ruled label, as pasted on a book's cover. */
+  plate(ctx, x, y, w, h, colour) {
+    ctx.fillStyle = colour; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = css(SONG.ink); ctx.lineWidth = 5; ctx.strokeRect(x, y, w, h); ctx.lineWidth = 1.5; ctx.strokeRect(x + 9, y + 9, w - 18, h - 18);
+  },
+  /**
+   * The frame layer: the border of the block (a thick rule with a thin one inside it), and at the
+   * right edge the block's centre column, with its fishtails, the book's name and the leaf number.
+   */
+  frame(ctx, env, p) {
+    const { w, h } = env, ink = css(SONG.ink);
+    ctx.strokeStyle = ink; ctx.lineWidth = 7; ctx.strokeRect(34, 34, w - 68, h - 68);
+    ctx.lineWidth = 1.5; ctx.strokeRect(46, 46, w - 92, h - 92);
+    if (p.rules <= 0.3) return;
+    const cw = 56, x0 = w - 46 - cw, tail = (y, dir) => { ctx.fillStyle = ink; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + cw, y); ctx.lineTo(x0 + cw, y + dir * 46); ctx.lineTo(x0 + cw / 2, y + dir * 24); ctx.lineTo(x0, y + dir * 46); ctx.closePath(); ctx.fill(); };
+    ctx.fillStyle = css(SONG.paper); ctx.fillRect(x0, 46, cw, h - 92);
+    ctx.fillStyle = ink; ctx.fillRect(x0, 46, 1.5, h - 92);
+    tail(h * 0.2, 1); tail(h * 0.8, -1);
+    ctx.fillRect(x0, h * 0.2 - 6, cw, 3); ctx.fillRect(x0, h * 0.8 + 3, cw, 3);
+    const P = env.o.profile, name = [...(P.brand.name || "")].slice(0, 12);
+    ctx.font = `700 24px ${fonts.serif}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = ink;
+    const room = h * 0.6 - 150, step = Math.min(30, room / Math.max(1, name.length));
+    name.forEach((ch, k) => ctx.fillText(ch, x0 + cw / 2, h * 0.2 + 76 + k * step));
+    ctx.font = `700 22px ${fonts.serif}`;
+    [...numeral(env.o.catIndex + 1)].forEach((ch, k) => ctx.fillText(ch, x0 + cw / 2, h * 0.8 - 96 + k * 26));
+  },
+  post(ctx, w, h, C, p, unit = 1) {
+    if (p.aged > 0) {   // foxing: a few faint brown blooms, and the sheet gone darker toward its edges
+      for (let k = 0; k < Math.round(9 * p.aged); k++) {
+        const x = rand(k * 4.1 + 70) * w, y = rand(k * 5.3 + 71) * h, r = (40 + rand(k * 6.7 + 72) * 170), g = ctx.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, css([120, 82, 40], 0.16 * p.aged)); g.addColorStop(1, css([120, 82, 40], 0));
+        ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      }
+      const v = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.4, w / 2, h / 2, Math.hypot(w, h) * 0.6);
+      v.addColorStop(0, css([110, 80, 44], 0)); v.addColorStop(1, css([110, 80, 44], 0.34 * p.aged));
+      ctx.fillStyle = v; ctx.fillRect(0, 0, w, h);
+    }
+    grain(ctx, p.grain * 0.85, unit, true);
+  },
+  prompt: `Woodcut illustrations from an old Chinese printed book — cut in a block, printed in black — that read at a glance:
+- drawn in LINE: confident black contours and a few short hatching or pattern lines ("detail") describe the form; filled black areas are few and deliberate (hair, a roof, a shadow);
+- flat and frontal or in simple three-quarter view, with the plain, slightly stiff charm of a carved block; no realism, no perspective, no gradients;
+- the paper is the main colour of every sticker: use "white" for bodies, "ink" for solids and lines, and the main colour only for one small printed accent (a seal, a sash, a flower);
+- the app adds the black outline: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Objects as a woodblock illustration would show them: a few boxes and cylinders in plain, slightly formal proportions; no realism, no fine detail.
+- the renderer prints faces as paper and black with a black line: do NOT try to draw shading or outlines yourself;
+- "white" is the paper, "dark" is solid black ink, and "main" a muted printed colour — use it for one part only.`,
+};
+
+export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke };
 export const LOOK_IDS = Object.keys(LOOKS);
 
 let current = cel, values = {};

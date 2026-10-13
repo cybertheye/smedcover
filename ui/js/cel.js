@@ -10,6 +10,8 @@ export const fonts = {
   cn: '"Noto Sans SC", sans-serif',
   en: '"Bebas Neue", sans-serif',
   mono: '"JetBrains Mono", monospace',
+  // no serif face is bundled: this is what the common systems ship, CJK first
+  serif: '"Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", "SimSun", Georgia, "Times New Roman", serif',
 };
 // cover: graphics drop their HUD notes so they can sit across two backgrounds.
 // labels / stamp: optional texts some graphics can carry (set per category).

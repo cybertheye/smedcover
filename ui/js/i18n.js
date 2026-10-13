@@ -191,6 +191,9 @@ const STR = {
 
   "font.body": ["标题与中文", "Titles and body"],
   "font.display": ["英文与数字", "Display (Latin, digits)"],
+  "font.serif": ["衬线字体", "Serif"],
+  "font.serifAuto": ["自动 · 系统自带的宋体", "Automatic · the system's serif"],
+  "font.serifHint": ["「编辑设计」和「宋版刻本」两种风格的标题用它。应用没有内置衬线字体：自动时用系统自带的（macOS 是宋体-简，Windows 是宋体），所以不同电脑上字形会不同。要统一，就在这里选一款，或导入一个字体文件。楷体、仿宋也可以选。", "Used for titles in the Editorial and Woodblock book looks. No serif is bundled: on Automatic the system's own is used (Songti SC on macOS, SimSun on Windows), so the lettering differs between computers. To make it the same everywhere, pick a font here or import a font file. Kai and Fangsong faces work too."],
   "font.bundled": ["内置", "Built-in"],
   "font.import": ["导入字体文件…", "Import font file…"],
   "font.imported": ["已导入", "Imported"],

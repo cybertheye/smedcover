@@ -28,7 +28,7 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
   - Setup: **Brand**, **Sizes & export**, **Fonts**, **AI**
 - **Centre** — the main canvas, and below it a thumbnail of every output size. Click one to show that size on the canvas.
 - **Right** (Edit only) — the layer list and the selected layer's properties.
-- **Top bar** — profile switcher, open and save project, undo and redo, SURPRISE ME, export.
+- **Top bar** — profile switcher, open and save project, undo and redo, SURPRISE ME, export. Those last two buttons dress to match the look of the current cover.
 
 ## Quick start
 
@@ -199,6 +199,7 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 | **90s animation** | a painted sky, cel colours a little grey and warm, a title with a double keyline, film grain, bloom, fade, dust and scratches |
 | **Record sleeve** | large flat blocks of colour, tight sans-serif headlines with no outline or shadow, photos in one colour and black; flat layouts of its own; dark or light ground |
 | **Editorial** | a serif headline, thick-and-thin rules, a hairline border, a folio, a huge quiet issue number, black-and-white photos; flat layouts of its own; dark or light ground |
+| **Woodblock book** | a leaf from an old Chinese book: paper ground, a serif title set in vertical columns, the corner tag as a vermilion seal, a thick-and-thin border, ruled columns, a centre column with fishtails at the right edge; objects like woodcuts; flat layouts of its own |
 
 The sliders of each look:
 
@@ -208,12 +209,15 @@ The sliders of each look:
 | 90s animation | film grain, bloom, fade, dust and scratches; *Shuffle the random placement* rearranges clouds and dust |
 | Record sleeve | photo duotone, rules and catalogue, paper grain |
 | Editorial | rules and folio, black-and-white photo, paper grain |
+| Woodblock book | column rules, age, paper grain, and a *Set the title vertically* checkbox; *Shuffle the random placement* rearranges the foxing |
 
 **Layouts of their own** — the record sleeve and editorial looks do not use slanted panels. They read the three *Template* choices their own way: Stack is a level band, Split an upright side panel, Banner a slim strip, each in its own proportions. Switching to another look brings the usual layouts back.
 
 *Photo duotone* and *Black-and-white photo* only do something when there is a background photo.
 
-These four are first versions and will be refined one by one. Editorial's serif lettering uses fonts already on the computer (Songti SC on macOS, SimSun on Windows), so it differs from machine to machine.
+**The vertical title of the woodblock look** — each typed line is a column, read top to bottom, the first line on the right. CJK characters stand upright; a run of Latin letters or digits lies on its side, as is usual in vertical setting. A vertical title takes the full height of the page and stands clear of the seal in the lower left. Text effects do not apply to a vertical title; untick *Set the title vertically* for a horizontal one, and they apply again.
+
+These five are first versions and will be refined one by one. The serif lettering of Editorial and Woodblock book uses fonts already on the computer by default (Songti SC on macOS, SimSun on Windows), so it differs from machine to machine. To make it the same everywhere, or to use a Kai or Fangsong face, choose one under *Setup → Fonts → Serif*.
 
 The cyberpunk look has eight sliders and a checkbox. Two of them sound alike: *Scanlines* are the fine horizontal lines covering the whole picture; the *Sweep line* is the single bright one.
 
@@ -260,7 +264,7 @@ Adjustments are stored as fractions of the picture, so they apply to every size;
 
 - **Brand** — brand name, counter label, adding, removing and ordering channels; while you work on a channel (click any of its fields or change its colour) the canvas switches to that channel, so the change shows at once; create, duplicate, delete, import and export profiles.
 - **Sizes & export** — tick preset sizes or add a custom width × height. A size can be given your own name, shown under its thumbnail.
-- **Fonts** — Noto Sans SC, Bebas Neue and JetBrains Mono are bundled, so covers look the same on every platform. You can also use an installed font or import a font file.
+- **Fonts** — three choices. *Titles and body* and *Display* come bundled (Noto Sans SC and Bebas Neue, plus the monospaced JetBrains Mono), so covers look the same on every platform. *Serif* is not bundled: by default it is the system's own serif, used by the Editorial and Woodblock book looks. All three can be set to an installed font or an imported font file.
 - **AI** — connect your own model service for generating assets.
 
 ### Setting up AI
@@ -370,7 +374,7 @@ are not public, so the plan is to export open formats that both can read.
 ### Other
 
 - [ ] AI generation: evaluate results with real models and tune the prompt accordingly; allow follow-up change requests on a result; keep the token in the system keychain.
-- [ ] Refine the four new looks one by one; bundle a serif font.
+- [ ] Refine the five new looks one by one; bundle a serif font.
 - [ ] A low-resolution preview of the blurred photo for smoother dragging.
 - [ ] Redraw thumbnails only when needed, to cut the cost of many sizes.
 - [ ] Subset the bundled fonts to shrink the installer.

@@ -470,7 +470,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && q.min <= q.def && q.def <= q.max); }
 });
@@ -704,4 +704,40 @@ test("text layers: a plate switch, one colour choice, and older layers carried o
   assert.equal(one({ color: "purple" }).color, "white");
   // settled: normalising again changes nothing
   for (const raw of [{ look: "plate", color: "accent", ink: "#112233" }, { plate: true, color: "custom", ink: "#445566", fx: "wave", fxAmt: 0.5 }, {}]) { const L = one(raw); assert.deepEqual(one(L), L); }
+});
+
+test("vertical titles: columns from the right, sideways Latin, sized to fit", async () => {
+  const { drawTitleVertical } = await import("../ui/js/title.js");
+  const made = () => { const calls = []; let depth = 0, turned = false; const ctx = new Proxy({ font: "" }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...s].length * 55 }) : (...a) => { if (k === "save") depth++; if (k === "restore") { depth--; if (depth === 1) turned = false; } if (k === "rotate") turned = true; if (k === "fillText") calls.push({ t: a[0], x: a[1], y: a[2], turned, fill: t.fillStyle }); return {}; }), set: (t, k, v) => { t[k] = v; return true; } }); return [ctx, calls]; };
+  const box = { x: 100, y: 200, w: 900, h: 600 }, st = { font: "serif", fill: "ink", hi: "red", maxFs: 300 };
+  const [ctx, calls] = made();
+  const r = drawTitleVertical(ctx, "霓虹城市\n*夜跑* VLOG", box, st);
+  const first = calls.filter((c) => "霓虹城市".includes(c.t)), second = calls.filter((c) => "夜跑".includes(c.t));
+  assert.equal(first.length, 4); assert.equal(second.length, 2);
+  assert.ok(first.every((c) => c.x === first[0].x) && second.every((c) => c.x === second[0].x));   // each line is one column
+  assert.ok(second[0].x < first[0].x);                                                          // the first column is on the right
+  assert.deepEqual(first.map((c) => c.y).slice().sort((a, b) => a - b), first.map((c) => c.y));  // and reads downward
+  assert.ok(first.every((c) => c.fill === "ink" && !c.turned) && second.every((c) => c.fill === "red"));
+  const latin = calls.find((c) => c.t === "VLOG");
+  assert.ok(latin && latin.turned);                                                             // a Latin run lies on its side, as one piece
+  assert.ok(r.x === box.x && r.y === box.y && r.w <= box.w + 1 && r.h <= box.h + 1, JSON.stringify(r));
+  // a long column is made to fit the height; many columns, the width
+  const tall = drawTitleVertical(made()[0], "一二三四五六七八九十一二三四五六七八九十", box, st), wide = drawTitleVertical(made()[0], Array(12).fill("字").join("\n"), box, st);
+  assert.ok(tall.h <= box.h + 1 && wide.w <= box.w + 1);
+  assert.equal(drawTitleVertical(made()[0], "  ", box, st), null);
+  // the woodblock look sets its title this way unless told otherwise
+  setLook("songke"); assert.equal(lookValues().vertical, 1);
+  const env = (tag) => ({ h: 1080, cover: { tag }, G: LOOKS.songke.layout("stack", 1920, 1080) });
+  const [c2, k2] = made(); const set = LOOKS.songke.titleSet(c2, "夜跑", box, {}, env(""), lookValues());
+  assert.ok(set && k2.length === 2);
+  assert.ok(set.h > 0 && set.y + set.h <= env("").G.accent[0][1], "the columns stop above the band");
+  const [c3, k3] = made(); LOOKS.songke.titleSet(c3, "夜跑", box, {}, env("EP.07"), lookValues());
+  assert.ok(k3[0].x > k2[0].x, "with a seal in the corner, the title stands clear of it");
+  assert.equal(LOOKS.songke.titleSet(made()[0], "夜跑", box, {}, env(""), { ...lookValues(), vertical: 0 }), null);
+  // the whole page in the serif, and the shared font table put back afterwards
+  const { fonts } = await import("../ui/js/cel.js");
+  assert.deepEqual(LOOKS.songke.faces(fonts), { cn: fonts.serif, en: fonts.serif });
+  setLook("cel");
+  // a profile keeps its serif choice
+  assert.equal(normalizeProfile({ fonts: { serif: "Kaiti SC" } }).fonts.serif, "Kaiti SC"); assert.equal(normalizeProfile(null).fonts.serif, "");
 });

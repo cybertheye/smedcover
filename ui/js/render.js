@@ -290,7 +290,8 @@ const PAINT = {
     const { G, th } = env, top = G.titleTop ?? (env.hasBrand ? 150 : 84);
     const box = { x: G.title.x, y: top, w: G.title.w, h: G.title.h + (G.title.y - top) };
     env.titleBox = box;
-    return placed(ctx, tr, (c) => drawTitle(c, env.cover.title, box, IDENTITY, {
+    const own = look().titleSet;   // a look may set the title itself (vertically, say); null from it means "the usual way"
+    return placed(ctx, tr, (c) => (own && own(c, env.cover.title, box, L, env, lookValues())) || drawTitle(c, env.cover.title, box, IDENTITY, {
       font: look().titleFont ? look().titleFont(fonts) : fonts.cn, maxFs: 340, align: L.align, fill: L.ink || th.titleFill, ink: th.titleInk, hi: L.hi || env.acc, shadow: L.hi || env.acc, hiShadow: L.ink || th.titleFill,
       own: L.ink ? hexToRgb(L.ink) : undefined, ownHi: L.hi ? hexToRgb(L.hi) : undefined,   // for looks that paint the letters themselves
       stroke: clamp(L.stroke, 0, 2), shadowAmt: clamp(L.shadow, 0, 2), C: env.C, fx: L.fx, fxAmt: L.fxAmt,
@@ -363,6 +364,13 @@ let scratch = null;
  * Leaves cv._hits behind: one entry per drawn layer, bottom first, for pointer hit-testing.
  */
 export function drawCover(cv, o) {
+  // A look may set the whole cover in faces of its own. The font table is shared, so it is put
+  // back however the drawing ends.
+  const L = setLook(o.profile.style.look), swap = L.faces ? L.faces(fonts) : null, keep = swap ? { ...fonts } : null;
+  if (swap) Object.assign(fonts, swap);
+  try { paintCover(cv, o); } finally { if (keep) Object.assign(fonts, keep); }
+}
+function paintCover(cv, o) {
   const { profile: P, cover } = o, cat = P.categories[o.catIndex];
   const [w, h] = virtualSize(o.size.w, o.size.h), key = sizeKey(o.size);
   cv.width = Math.max(1, Math.round(o.pixelW));

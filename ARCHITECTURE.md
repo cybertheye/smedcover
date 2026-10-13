@@ -296,6 +296,8 @@ A look is a set of **hooks**. Each is optional, and what a look leaves out is dr
 | `subject` | whatever is painted around the channel graphic and travels with it (a lock-on ring, say) |
 | `seeded` | marks a look that places some things at random |
 | `layout` | the geometry of a cover, for looks that are about arrangement; the result has the shape `layout()` in `layout.js` returns, and usually comes from `blockLayout()`, which gives level bands and upright panels |
+| `titleSet` | lets the look set the title itself (vertically, say); returning nothing means the usual way |
+| `faces` | faces to use for the whole cover. The font table is shared, so `drawCover()` puts it back when it is done |
 | `titleFont` | the title's font stack, for looks with typographic opinions (editorial's serif) |
 | `oneTheme` | marks a look with a single ground, so the interface hides the light / dark choice |
 | `image` | the shadow or glow of an uploaded image |

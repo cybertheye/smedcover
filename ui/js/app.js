@@ -139,10 +139,12 @@ function touch({ profile = false, cover = false, panel = false, side = false, st
 
 // ---------- fonts and the profile
 const quoted = (name) => `"${String(name).replace(/["\\]/g, "")}"`;
+const SERIF_STACK = fonts.serif;   // what the common systems ship, used after the profile's own choice
 async function applyFonts() {
   const f = S.profile.fonts;
   fonts.cn = [f.body, "Noto Sans SC"].filter(Boolean).map(quoted).join(",") + ",sans-serif";
   fonts.en = [f.display, "Bebas Neue"].filter(Boolean).map(quoted).join(",") + ",sans-serif";
+  fonts.serif = (f.serif ? quoted(f.serif) + "," : "") + SERIF_STACK;
   await Promise.all([`900 40px ${fonts.cn}`, `700 40px ${fonts.en}`, `600 20px ${fonts.mono}`].map((spec) => document.fonts.load(spec, "封面Aa01").catch(() => null)));
 }
 async function registerFont(family, dataUrl) {
@@ -175,6 +177,7 @@ function drawMain() {
   const stage = $("stage"), cv = $("cv"), size = selSize(), [vw, vh] = virtualSize(size.w, size.h);
   const k = Math.max(0.05, Math.min((stage.clientWidth - 36) / vw, (stage.clientHeight - 36) / vh));
   cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
+  document.documentElement.dataset.look = S.profile.style.look;   // the two main buttons dress to match the cover (see index.html)
   paint(cv, size, Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null);
   const clear = !layer("bg").visible;
   stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
@@ -728,6 +731,8 @@ function fontsTab() {
   return [
     el("div", {}, cap("font.body"), select(options("Noto Sans SC"), S.profile.fonts.body, (v) => setFont("body", v))),
     el("div", {}, cap("font.display"), select(options("Bebas Neue"), S.profile.fonts.display, (v) => setFont("display", v))),
+    el("div", {}, cap("font.serif"), select([["", t("font.serifAuto")], ...options("").slice(1)], S.profile.fonts.serif, (v) => setFont("serif", v)),
+      el("div", { class: "hint" }, t("font.serifHint"))),
     el("button", { class: "btn wide", onclick: importFont }, t("font.import")),
   ];
 }
@@ -1131,8 +1136,8 @@ function syncTop() {
     el("div", { class: "grp" }, el("span", {}, t("top.project")), b("top.open", projectActions.open), b("top.save", projectActions.save), b("top.reset", projectActions.reset)),
     el("div", { class: "grp" }, b("top.undo", () => timeTravel(-1), { disabled: S.histIdx <= 0 }), b("top.redo", () => timeTravel(1), { disabled: S.histIdx >= S.hist.length - 1 })),
     el("div", { class: "spacer" }),
-    el("button", { class: "btn solid", style: "padding:8px 22px;font-size:15px;margin-right:10px", title: t("top.surpriseHint"), onclick: surprise }, t("top.surprise")),
-    el("button", { class: "btn solid", style: "padding:8px 22px;font-size:15px", onclick: exportDialog }, t("top.export")),
+    el("button", { class: "btn solid cta", style: "margin-right:10px", title: t("top.surpriseHint"), onclick: surprise }, t("top.surprise")),
+    el("button", { class: "btn solid cta", onclick: exportDialog }, t("top.export")),
     el("select", { title: t("lang"), onchange: (e) => { S.settings.lang = e.target.value; setLang(e.target.value); persistSettings(); setMode(S.mode); buildStrip(); } },
       [["zh", "中文"], ["en", "English"]].map(([v, l]) => el("option", { value: v, selected: v === getLang() }, l))));
   document.body.dataset.drop = t("msg.dropHere");

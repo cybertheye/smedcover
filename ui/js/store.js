@@ -96,7 +96,7 @@ export function normalizeProfile(raw) {
     name: str(p.name) || str(p.brand && p.brand.name) || "Profile",
     brand: { name: str(p.brand && p.brand.name), unit: str(p.brand && p.brand.unit, "CHANNEL") },
     categories, style,
-    fonts: { body: str(p.fonts && p.fonts.body), display: str(p.fonts && p.fonts.display) },
+    fonts: { body: str(p.fonts && p.fonts.body), display: str(p.fonts && p.fonts.display), serif: str(p.fonts && p.fonts.serif) },
     sizes,
     design: { layers: normalizeLayers(p.design && p.design.layers, categories.map((x) => x.id)) },
   };
