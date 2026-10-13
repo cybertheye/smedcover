@@ -100,7 +100,7 @@ export function normalizeCover(raw, profile) {
   };
 }
 
-export const DEFAULT_SETTINGS = { lang: "", profileId: "", scale: 2, format: "png", quality: 92, nameTemplate: "{n}-{category}_{title}_{size}", scope: "all" };
+export const DEFAULT_SETTINGS = { lang: "", profileId: "", scale: 2, format: "png", quality: 92, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "all" };
 export function normalizeSettings(raw) {
   const s = raw && typeof raw === "object" ? raw : {};
   return {
@@ -156,7 +156,7 @@ export function exportName(template, { index, cat, title, size, scale, ext }) {
   const clean = (s) => String(s).replace(/\\n|[\n\r]+/g, " ").replace(/[*\\/:?"<>|]+/g, "").replace(/\s+/g, " ").trim();
   const base = String(template || DEFAULT_SETTINGS.nameTemplate)
     .replace(/\{n\}/g, String(index + 1).padStart(2, "0"))
-    .replace(/\{category\}/g, clean(cat.name) || "cover")
+    .replace(/\{(channel|category)\}/g, clean(cat.name) || "cover")
     .replace(/\{code\}/g, clean(cat.code))
     .replace(/\{title\}/g, clean(title).slice(0, 32) || "untitled")
     .replace(/\{size\}/g, `${size.w}x${size.h}`)

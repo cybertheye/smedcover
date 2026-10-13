@@ -752,7 +752,7 @@ async function batchFromCsv() {
 }
 function csvTemplate() {
   const zh = getLang() === "zh", c = S.profile.categories;
-  const lines = [zh ? "类目,标题,角标" : "category,title,tag", `${c[0].name},"${zh ? "第一行\\n*第二行*" : "First line\\n*second line*"}",EP.01`, `${(c[1] || c[0]).name},${zh ? "另一个标题" : "Another title"},`];
+  const lines = [zh ? "频道,标题,角标" : "channel,title,tag", `${c[0].name},"${zh ? "第一行\\n*第二行*" : "First line\\n*second line*"}",EP.01`, `${(c[1] || c[0]).name},${zh ? "另一个标题" : "Another title"},`];
   saveText("smedcover-batch.csv", "\uFEFF" + lines.join("\n") + "\n");
 }
 async function saveText(name, text) {

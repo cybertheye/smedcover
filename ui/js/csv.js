@@ -25,7 +25,7 @@ export function parseCsv(text) {
 }
 
 const HEADERS = {
-  category: ["category", "类目", "分类", "channel"],
+  category: ["channel", "频道", "category", "类目", "分类"],
   title: ["title", "标题"],
   tag: ["tag", "角标", "标签"],
 };

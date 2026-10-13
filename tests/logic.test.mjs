@@ -53,6 +53,8 @@ test("parseCsv handles quotes, embedded commas and line breaks", () => {
 test("csvToJobs reads with and without a header row", () => {
   assert.deepEqual(csvToJobs("类目,标题,角标\n日常,一台相机,EP.01\n教程,,x\n"), [{ category: "日常", title: "一台相机", tag: "EP.01" }]);
   assert.deepEqual(csvToJobs("Title,Category\nHello,Vlog"), [{ category: "Vlog", title: "Hello", tag: "" }]);
+  assert.deepEqual(csvToJobs("频道,标题\n日常,你好"), [{ category: "日常", title: "你好", tag: "" }]);
+  assert.deepEqual(csvToJobs("channel,title\nVlog,Hi"), [{ category: "Vlog", title: "Hi", tag: "" }]);
   assert.deepEqual(csvToJobs("Vlog,Hello,T1"), [{ category: "Vlog", title: "Hello", tag: "T1" }]);
 });
 
@@ -85,7 +87,7 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.notEqual(c.layers, p.design.layers);                       // a copy, not the same array
   const own = normalizeCover({ layers: [{ type: "title", align: "left" }] }, p);
   assert.equal(own.layers.find((l) => l.id === "title").align, "left");
-  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{category}_{title}_{size}", scope: "size" });
+  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size" });
 });
 
 test("usedUserAssets finds uploads referenced by categories and layers", () => {
