@@ -87,7 +87,7 @@ hand-edited files cannot crash the app.
       "graphic": { "kind": "graphic", "id": "camera", "labels": [], "stamp": "" } }
   ],
   "style": { "template": "stack", "theme": "dark", "imageShadow": true,
-             "look": "cel", "lookParams": { "cyber": { "glow": 1.2 } } },
+             "look": "cel", "lookParams": { "cyber": { "glow": 1.2 } }, "lookSeed": 7 },
   "fonts": { "body": "", "display": "" },
   "sizes": [ { "w": 1920, "h": 1080, "label": "16:9", "name": "", "on": true } ],
   "design": { "layers": [ … ] }         // the default design: the layers a new cover starts with
@@ -238,6 +238,9 @@ A look is a set of **hooks**. Each is optional, and what a look leaves out is dr
 | `sticker` | the five painters of flat stickers: `shape`, `blob`, `stroke`, `thin`, `word` |
 | `tag` | the corner tag |
 | `frame` | the frame layer, and any interface detail the look wants along the edges |
+| `freeText` | free text layers in their plain and plate looks |
+| `subject` | whatever is painted around the channel graphic and travels with it (a lock-on ring, say) |
+| `seeded` | marks a look that places some things at random |
 | `image` | the shadow or glow of an uploaded image |
 | `post` | an overlay painted over the finished cover, such as scanlines and a vignette |
 | `params` | tunable numbers, shown as sliders in the Style tab |
@@ -278,6 +281,11 @@ Three levels, from light to deep:
 
 To add a slider, add an entry to the look's `params` and read the value in a hook; the interface and
 saving are automatic.
+
+**Random, but holding still** — what a look places at random (the tears, the sweep line) takes its
+values from `rand(k)`, which depends on `style.lookSeed` in the profile. While the seed stays the
+same, every frame, every size, the preview and the export put things in the same relative places;
+*Shuffle the random placement* simply picks another seed.
 
 ## 8. AI-generated assets (`ai.js`, `spec.js`)
 

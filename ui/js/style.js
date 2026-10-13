@@ -16,6 +16,9 @@
 //   sticker                      painters for flat stickers: { shape, blob, stroke, thin, word }
 //   tag(ctx, str, x, y, fs, C, p) paints the corner tag and returns its box
 //   frame(ctx, env, p)           paints the frame layer (corner brackets and any interface detail)
+//   freeText(ctx, L, lines, env, p)  paints a free text layer; returns its half-extents, or null to decline
+//   subject(ctx, half, env, p)   painted around the channel graphic, in its own space
+//   seeded                       true when the look scatters things at random (the user can shuffle them)
 //   image(ctx, C, unit, p)       prepares the context for an uploaded image (its shadow or glow)
 //   post(ctx, w, h, C, p)        painted over the finished cover (scanlines, vignette)
 //   params                       tunable numbers shown as sliders: [{ key, min, max, step, def, name: {zh, en} }]
@@ -54,6 +57,7 @@ export function role(c) {
 }
 
 let fast = false;             // see setFast()
+let seed = 7;                 // see setLook(): places the things a look scatters at random
 
 // ---------- the house look: everything is drawn by the code's own defaults
 const cel = {
@@ -97,6 +101,8 @@ function chamfer(ctx, x, y, w, h, cut) {
   ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + h - cut); ctx.lineTo(x + w - cut, y + h); ctx.lineTo(x, y + h); ctx.closePath();
 }
 const noise = (n) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+/** A number in 0…1 that depends on `k` and on the profile's seed: the same until the seed is changed. */
+const rand = (k) => noise(k + (seed % 9973) * 0.6180339);
 
 /**
  * A context that draws the house style's objects as dark hardware: neutral faces become dark
@@ -145,6 +151,7 @@ const cyber = {
   id: "cyber",
   name: { zh: "赛博朋克", en: "Cyberpunk" },
   oneTheme: true,              // always dark: the light / dark choice does not apply
+  seeded: true,                // scatters things at random: the Style tab offers to shuffle them
   params: [
     { key: "split", min: 0, max: 2, step: 0.05, def: 1, name: { zh: "色彩错位", en: "Colour split" } },
     { key: "tear", min: 0, max: 2, step: 0.05, def: 0.7, name: { zh: "信号撕裂", en: "Signal tear" } },
@@ -168,12 +175,10 @@ const cyber = {
       }
       return true;
     }
-    if (L.grid) {   // a measured sheet: hairlines, and a registration cross wherever four big squares meet
-      ctx.strokeStyle = css(CY.white, 0.045); ctx.lineWidth = 2; ctx.beginPath();
-      for (let x = 20; x < w; x += 60) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
-      for (let y = 20; y < h; y += 60) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
-      ctx.stroke();
-      ctx.strokeStyle = css(C, 0.55); ctx.lineWidth = 2; ctx.beginPath();
+    if (L.grid) {   // a measured sheet: a field of dots, and a registration cross wherever four big squares meet
+      ctx.fillStyle = css(C, 0.34);
+      for (let x = 20; x < w; x += 60) for (let y = 20; y < h; y += 60) ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+      ctx.strokeStyle = css(C, 0.6); ctx.lineWidth = 2; ctx.beginPath();
       for (let x = 200; x < w; x += 240) for (let y = 200; y < h; y += 240) { ctx.moveTo(x - 9, y); ctx.lineTo(x + 9, y); ctx.moveTo(x, y - 9); ctx.lineTo(x, y + 9); }
       ctx.stroke();
     }
@@ -201,18 +206,58 @@ const cyber = {
     },
   },
 
-  /** Lettering: white with a black keyline and a colour echo; highlighted words are black on a chamfered plate. */
+  /**
+   * Lettering in the manner of the game's logotype: slanted, in the channel colour, with a black
+   * keyline and a colour echo, and cut into three bands that sit slightly out of line.
+   * Highlighted words are black on a chamfered plate.
+   */
   runs(ctx, pass, o, p) {
-    const fs = o.fs, C = o.C, g = fast ? 0 : fs * 0.03 * p.split * Math.max(0.3, o.shadowAmt);
+    const fs = o.fs, C = o.C || CY.white, ink = o.fill || C, plateCol = o.fill && o.fill !== C ? o.fill : C;
+    const g = fast ? 0 : fs * 0.03 * p.split * Math.max(0.3, o.shadowAmt), slip = fs * 0.03 * Math.min(1.5, p.split);
     ctx.lineJoin = "miter"; ctx.miterLimit = 3;
-    pass((a, x) => {
-      if (!a.hi) return;
-      const w = ctx.measureText(a.t).width, bx = x - fs * 0.07, by = -fs * 0.88, bw = w + fs * 0.14, bh = fs * 1.06, plate = (col) => { chamfer(ctx, bx, by, bw, bh, fs * 0.2); ctx.fillStyle = col; ctx.fill(); };
-      echo(ctx, g * 1.3, plate); plate(css(o.second || C));
-    });
-    echo(ctx, g, (col) => pass((a, x) => { if (a.hi) return; ctx.fillStyle = col; ctx.fillText(a.t, x, 0); }));
-    if (o.strokeAmt > 0) pass((a, x) => { if (a.hi) return; ctx.strokeStyle = css(CY.black); ctx.lineWidth = fs * 0.07 * o.strokeAmt; ctx.strokeText(a.t, x, 0); });
-    pass((a, x) => { ctx.fillStyle = a.hi ? css(CY.black) : css(CY.white); ctx.fillText(a.t, x, 0); });
+    ctx.transform(1, 0, -0.1, 1, 0, 0);   // a harder slant than the house style's
+    const all = () => {
+      pass((a, x) => {
+        if (!a.hi) return;
+        const w = ctx.measureText(a.t).width, bx = x - fs * 0.07, by = -fs * 0.88, bw = w + fs * 0.14, bh = fs * 1.06, plate = (col) => { chamfer(ctx, bx, by, bw, bh, fs * 0.2); ctx.fillStyle = col; ctx.fill(); };
+        echo(ctx, g * 1.3, plate); plate(css(plateCol));
+      });
+      echo(ctx, g, (col) => pass((a, x) => { if (a.hi) return; ctx.fillStyle = col; ctx.fillText(a.t, x, 0); }));
+      if (o.strokeAmt > 0) pass((a, x) => { if (a.hi) return; ctx.strokeStyle = css(CY.black); ctx.lineWidth = fs * 0.07 * o.strokeAmt; ctx.strokeText(a.t, x, 0); });
+      pass((a, x) => { ctx.fillStyle = a.hi ? css(CY.black) : css(ink); ctx.fillText(a.t, x, 0); });
+    };
+    // three bands, top to bottom, each nudged sideways, with a hairline of nothing between them
+    for (const [y0, y1, dx] of [[-1.3, -0.6, slip], [-0.6, -0.27, 0], [-0.27, 0.5, -slip * 0.8]]) {
+      ctx.save(); ctx.beginPath(); ctx.rect(-1e5, y0 * fs, 2e5, (y1 - y0) * fs - fs * 0.014); ctx.clip();
+      ctx.translate(dx, 0); all(); ctx.restore();
+    }
+  },
+
+  /**
+   * A free text layer in its "plain" and "plate" looks (the "title" look goes through runs()).
+   * Drawn around the origin at a nominal 120-unit size; returns its half-extents.
+   *   plain  a bracketed label, spaced out:  [ NIGHT CITY ]
+   *   plate  a chamfered label plate with a tab on its left edge
+   */
+  freeText(ctx, L, lines, env, p) {
+    if (L.look === "title") return null;
+    const FS = 120, LH = 1.16, C = env.C, sp = FS * 0.07, col = { white: CY.white, accent: C, ink: CY.black }[L.color] || CY.white;
+    ctx.font = `700 ${FS}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "miter";
+    const widthOf = (line) => line.reduce((sum, a) => sum + spacedW(ctx, a.t, sp) + sp, -sp), widths = lines.map(widthOf), bw = Math.max(...widths), bh = lines.length * FS * LH;
+    const text = (fillOf) => lines.forEach((line, li) => { let x = -widths[li] / 2; const y = -bh / 2 + li * FS * LH + FS * 0.92; for (const a of line) { ctx.fillStyle = fillOf(a); x += spaced(ctx, a.t, x, y, sp) + sp * 2; } });
+    const g = fast ? 0 : 6 * p.split;
+    if (L.look === "plate") {
+      const pad = FS * 0.36, x = -bw / 2 - pad, y = -bh / 2 - FS * 0.12, w = bw + pad * 2, h = bh + FS * 0.24, onInk = L.color === "ink";
+      const plate = (c) => { chamfer(ctx, x, y, w, h, FS * 0.34); ctx.fillStyle = c; ctx.fill(); ctx.fillRect(x - FS * 0.3, -FS * 0.07, FS * 0.22, FS * 0.14); };
+      echo(ctx, g, plate); plate(css(col));
+      text((a) => (onInk ? css(a.hi ? CY.white : C) : a.hi ? css(CY.white) : css(CY.black)));
+      return { hw: w / 2 + FS * 0.3, hh: h / 2 };
+    }
+    const arm = FS * 0.2, gap = FS * 0.3, bx = bw / 2 + gap, by = bh / 2;
+    const marks = (c) => { ctx.strokeStyle = c; ctx.lineWidth = FS * 0.075; ctx.lineCap = "butt"; ctx.beginPath(); for (const sx of [-1, 1]) { ctx.moveTo(sx * (bx - arm), -by); ctx.lineTo(sx * bx, -by); ctx.lineTo(sx * bx, by); ctx.lineTo(sx * (bx - arm), by); } ctx.stroke(); };
+    echo(ctx, g, (c) => { marks(c); text(() => c); });
+    marks(css(col)); text((a) => css(a.hi ? (L.color === "accent" ? CY.white : C) : col));
+    return { hw: bx + FS * 0.04, hh: by + FS * 0.04 };
   },
 
   wrap: (ctx, C, p, plates) => (plates ? ctx : neonContext(ctx, C, p)),   // the small cover parts are already ink on colour
@@ -227,26 +272,43 @@ const cyber = {
     return { x: x - 8, y: y - 4, w: w + 16, h: h + 8 };
   },
 
-  /** The frame layer: corner brackets plus the small print of an interface — a status line, ticks, a stripe, a code. */
+  /**
+   * The frame layer: the view through an optical implant that has just started up and is scanning.
+   * Corner brackets, the rings of a lens, a sweep line, a start-up log up the right edge, a ruler
+   * up the left, and along the bottom a status line, a signal meter, a row of chevrons and a code.
+   * Everything hugs the edges, and `decor` brings the parts in one by one.
+   */
   frame(ctx, env, p) {
     const { w, h, C } = env, d = p.decor;
     brackets(ctx, 30, 30, w - 30, h - 30, 44, css(CY.white), 3);
     if (d <= 0) return;
-    const P = env.o.profile, i = env.o.catIndex, total = P.categories.length;
+    const P = env.o.profile, i = env.o.catIndex, total = P.categories.length, code = (env.cat.code || "CH").toUpperCase();
     ctx.save();
     ctx.globalCompositeOperation = "difference";   // readable on the dark field and on the colour panel alike
     ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#ffffff";
     ctx.font = `600 15px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-    const line = [`// ${(env.cat.code || "CH").toUpperCase()}`, `${pad2(i + 1)}/${pad2(total)}`, `${env.o.size.w}×${env.o.size.h}`, "SIGNAL OK"].join("   ");
-    spaced(ctx, line, 92, h - 40, 2);
+    spaced(ctx, [`// ${code}`, `${pad2(i + 1)}/${pad2(total)}`, `${env.o.size.w}×${env.o.size.h}`].join("   "), 92, h - 40, 2);
+    if (d > 0.2) {   // a signal meter after the status line: ten cells, some lit
+      const lit = 5 + Math.floor(rand(11) * 5);
+      for (let k = 0; k < 10; k++) { if (k < lit) ctx.fillRect(420 + k * 13, h - 53, 9, 14); else ctx.strokeRect(421 + k * 13, h - 52, 7, 12); }
+    }
     if (d > 0.3) {   // ruler ticks up the left edge
       ctx.lineWidth = 2; ctx.beginPath();
       for (let k = 0, y = h * 0.3; y < h * 0.7; y += 14, k++) { ctx.moveTo(40, y); ctx.lineTo(40 + (k % 5 ? 8 : 18), y); }
       ctx.stroke();
     }
+    if (d > 0.35) {   // the start-up log, set on its side up the right edge
+      ctx.save(); ctx.translate(w - 44, h * 0.72); ctx.rotate(-Math.PI / 2);
+      ctx.font = `600 13px ${fonts.mono}, ${fonts.cn}`;
+      spaced(ctx, `OPTICS MK.${2 + Math.floor(rand(3) * 6)} // BOOT ${pad2(Math.floor(rand(4) * 99))}.${pad2(Math.floor(rand(5) * 99))}   CALIBRATION OK   SYNC ${70 + Math.floor(rand(6) * 29)}%   SCANNING`, 0, 0, 2);
+      ctx.restore();
+    }
     if (d > 0.5) {   // a code block in the lower right: bars of uneven width
       let x = w - 92;
       for (let k = 0; k < 26; k++) { const bw = 2 + Math.floor(noise(k * 3.1 + i) * 3) * 2; x -= bw + 3; ctx.fillRect(x, h - 62, bw, 24); }
+    }
+    if (d > 0.6) {   // a row of chevrons, as on a warning strip
+      for (let k = 0; k < 9; k++) { const x = w - 92 - 250 - k * 17; ctx.beginPath(); ctx.moveTo(x, h - 38); ctx.lineTo(x + 8, h - 50); ctx.lineTo(x + 14, h - 50); ctx.lineTo(x + 6, h - 38); ctx.closePath(); ctx.fill(); }
     }
     ctx.restore();
     if (d > 0.4) {   // a short hazard stripe under the upper right bracket
@@ -257,6 +319,47 @@ const cyber = {
       for (let x = x0 - sh; x < x0 + sw; x += 22) { ctx.beginPath(); ctx.moveTo(x, y0 + sh); ctx.lineTo(x + sh, y0); ctx.lineTo(x + sh + 10, y0); ctx.lineTo(x + 10, y0 + sh); ctx.closePath(); ctx.fill(); }
       ctx.restore();
     }
+    if (d > 0.45) {   // the lens: two rings about the centre, broken into arcs, the outer one graduated
+      const cx = w / 2, cy = h / 2, R = Math.hypot(w, h) * 0.33, turn = rand(21) * Math.PI * 2;
+      ctx.save(); ctx.strokeStyle = css(CY.cyan, 0.3 * d); ctx.lineWidth = 2;
+      for (const [r, arcs] of [[R, [[0.1, 0.9], [1.2, 2.3], [2.6, 3.4], [3.9, 5.7]]], [R * 0.93, [[0.5, 1.6], [3.2, 4.6]]]]) for (const [a0, a1] of arcs) { ctx.beginPath(); ctx.arc(cx, cy, r, a0 + turn, a1 + turn); ctx.stroke(); }
+      ctx.beginPath();
+      for (let a = 0; a < 1.2; a += 0.04) { const c = Math.cos(a + turn + 2.6), s = Math.sin(a + turn + 2.6); ctx.moveTo(cx + c * R * 1.015, cy + s * R * 1.015); ctx.lineTo(cx + c * R * 1.04, cy + s * R * 1.04); }
+      ctx.stroke(); ctx.restore();
+    }
+    if (d > 0.55) {   // the sweep: a line of light across the picture with the band it has just read above it
+      const y = h * (0.2 + rand(31) * 0.6), trail = ctx.createLinearGradient(0, y - 110, 0, y);
+      trail.addColorStop(0, css(CY.cyan, 0)); trail.addColorStop(1, css(CY.cyan, 0.16 * d));
+      ctx.fillStyle = trail; ctx.fillRect(0, y - 110, w, 110);
+      ctx.fillStyle = css(CY.cyan, 0.85); ctx.fillRect(0, y, w, 2);
+      ctx.fillStyle = css(CY.white, 0.9); ctx.fillRect(w * rand(32) * 0.7, y - 1, w * 0.12, 4);
+    }
+  },
+
+  /**
+   * Around the channel graphic: the scanner has locked on. A graduated ring, and a callout with
+   * what it has read. Drawn in the graphic's own space (`half` are its half-extents), so it moves
+   * and scales with the graphic.
+   */
+  subject(ctx, half, env, p) {
+    if (p.decor <= 0.3) return;
+    const r = Math.max(half.hw, half.hh) * 1.06, C = env.C, turn = rand(41) * 6;
+    ctx.save(); ctx.lineCap = "butt";
+    ctx.strokeStyle = css(CY.cyan, 0.85); ctx.lineWidth = 4;
+    for (const [a0, a1] of [[0.2, 1.3], [1.9, 2.9], [3.5, 4.4], [5.0, 5.9]]) { ctx.beginPath(); ctx.arc(0, 0, r, a0 + turn, a1 + turn); ctx.stroke(); }
+    ctx.lineWidth = 3; ctx.beginPath();
+    for (let a = 0; a < 1.0; a += 0.07) { const c = Math.cos(a + turn + 1.35), s = Math.sin(a + turn + 1.35); ctx.moveTo(c * r * 1.03, s * r * 1.03); ctx.lineTo(c * r * 1.09, s * r * 1.09); }
+    ctx.stroke();
+    // the callout: a leader from the ring up and out to a label
+    const ax = r * 0.72, ay = -r * 0.72, bx = ax + 60, by = ay - 60, total = env.o.profile.categories.length;
+    ctx.strokeStyle = css(CY.white, 0.95); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.lineTo(bx + 46, by); ctx.stroke();
+    ctx.font = `700 34px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const label = `[ ${(env.cat.code || "TARGET").toUpperCase()} ]`, lw = ctx.measureText(label).width + 28;
+    ctx.fillStyle = css(CY.black, 0.82); ctx.fillRect(bx + 52, by - 34, lw, 76);
+    ctx.fillStyle = css(CY.white); ctx.fillText(label, bx + 66, by - 2);
+    ctx.font = `600 22px ${fonts.mono}, ${fonts.cn}`; ctx.fillStyle = css(CY.cyan);
+    ctx.fillText(`ID ${pad2(env.o.catIndex + 1)}/${pad2(total)}  ${82 + Math.floor(rand(42) * 17)}%`, bx + 66, by + 28);
+    ctx.restore();
   },
 
   sticker: {
@@ -315,11 +418,11 @@ const cyber = {
       if (sh > 0) ctx.drawImage(red, 0, 0, 1, H, 0, 0, sh, H);     // the strips the shift leaves uncovered
       ctx.drawImage(rest, -sh, 0);
       if (sh > 0) ctx.drawImage(rest, W - 1, 0, 1, H, W - sh, 0, sh, H);
-      // torn bands: the same two images again, inside a thin strip, pushed sideways; placed by a
-      // fixed pattern so they do not jump about from one frame to the next
+      // torn bands: the same two images again, inside a thin strip, pushed sideways. Where they fall
+      // is random but tied to the profile's seed, so they hold still until the user shuffles them.
       const bands = Math.round(5 * Math.min(1.6, p.tear));
       for (let k = 0; k < bands; k++) {
-        const y = Math.round(noise(k * 7.3 + 1) * H), bh = Math.round((5 + noise(k * 3.7 + 2) * 17) * unit), dx = Math.round((noise(k * 5.1 + 3) - 0.5) * 2 * 38 * unit * p.tear);
+        const y = Math.round(rand(k * 7.3 + 1) * H), bh = Math.round((5 + rand(k * 3.7 + 2) * 17) * unit), dx = Math.round((rand(k * 5.1 + 3) - 0.5) * 2 * 38 * unit * p.tear);
         ctx.save(); ctx.beginPath(); ctx.rect(0, y, W, bh); ctx.clip();
         ctx.globalCompositeOperation = "copy"; ctx.drawImage(red, sh * 2 + dx, 0);
         ctx.globalCompositeOperation = "lighter"; ctx.drawImage(rest, -sh * 2 + dx, 0);
@@ -363,7 +466,7 @@ export function lookParams(id, given) {
   return out;
 }
 /** Makes a look current. `given` are the profile's own parameter values for it. */
-export function setLook(id, given) { current = LOOKS[id] || cel; values = lookParams(current.id, given); return current; }
+export function setLook(id, given, s = 7) { current = LOOKS[id] || cel; values = lookParams(current.id, given); seed = Number.isFinite(s) ? s : 7; return current; }
 export const look = () => current;
 export const lookValues = () => values;
 /** The context graphics and the small cover parts should draw on under the current look. */

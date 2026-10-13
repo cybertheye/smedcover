@@ -220,6 +220,7 @@ function centred(ctx, cx, cy, tr, s, fn) {
 // free text: nominal 120-unit type, centred on the origin
 function drawFreeText(ctx, L, env) {
   const raw = ctx;
+  if (look().freeText) { const done = look().freeText(raw, L, parseTitle(L.text), env, lookValues()); if (done) return done; }
   ctx = styled(raw, env.C, true);
   const lines = parseTitle(L.text);
   if (!lines.length) return null;
@@ -241,7 +242,7 @@ function drawFreeText(ctx, L, env) {
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
     if (L.look === "title" && look().runs) {
       const m = raw.getTransform ? raw.getTransform() : null;
-      look().runs(raw, pass, { fs: FS, d, strokeAmt: 1, shadowAmt: 1, C: env.C, second: L.color === "accent" ? env.C : null, unit: m ? Math.hypot(m.a, m.b) : 1 }, lookValues());
+      look().runs(raw, pass, { fs: FS, d, strokeAmt: 1, shadowAmt: 1, C: env.C, fill: { white: [240, 246, 250], accent: env.C, ink: [5, 5, 8] }[L.color], unit: m ? Math.hypot(m.a, m.b) : 1 }, lookValues());
       raw.restore();
       return;
     }
@@ -272,8 +273,11 @@ const PAINT = {
   graphic(ctx, L, tr, env) {
     const g = env.cat.graphic;
     if (!g || g.kind === "none") return null;
-    return centred(ctx, env.G.art.x + tr.dx, env.G.art.y + tr.dy, tr, env.G.art.s * tr.s, () =>
-      drawAsset(ctx, g, env.C, { tint: true, labels: g.labels, stamp: g.stamp, shadow: env.style.imageShadow }));
+    return centred(ctx, env.G.art.x + tr.dx, env.G.art.y + tr.dy, tr, env.G.art.s * tr.s, () => {
+      const half = drawAsset(ctx, g, env.C, { tint: true, labels: g.labels, stamp: g.stamp, shadow: env.style.imageShadow });
+      if (half && look().subject) look().subject(ctx, half, env, lookValues());
+      return half;
+    });
   },
   brand(ctx, L, tr, env) {
     return placed(ctx, tr, (c) => drawHeader(styled(c, env.C, true), env.o, env.w, env.th, env.C, env.G.template === "split", L.rail));
@@ -360,7 +364,7 @@ export function drawCover(cv, o) {
   const ctx = cv.getContext("2d"), kx = cv.width / w, ky = cv.height / h;
   ctx.scale(kx, ky);
   const C = hexToRgb(cat.color);
-  const L0 = setLook(P.style.look, P.style.lookParams && P.style.lookParams[P.style.look]);   // everything below is drawn under this look
+  const L0 = setLook(P.style.look, P.style.lookParams && P.style.lookParams[P.style.look], P.style.lookSeed);   // everything below is drawn under this look
   const base = o.photo ? THEMES.dark : THEMES[P.style.theme] || THEMES.dark;
   const env = {
     o, w, h, cover, cat, C, acc: rgb(C), style: P.style, photo: o.photo || null, hiRes: cv.width > w,

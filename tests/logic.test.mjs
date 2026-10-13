@@ -468,6 +468,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.equal(p.style.look, "cyber");
   assert.deepEqual(p.style.lookParams, { cyber: { ...d, glow: 0.5 } });
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
+  assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
   assert.deepEqual(LOOK_IDS.slice(0, 2), ["cel", "cyber"]);
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && q.min <= q.def && q.def <= q.max); }
 });
@@ -494,10 +495,28 @@ test("looks: the house look changes nothing, the cyberpunk look re-maps what is 
   assert.ok(log.some((e) => e[0] === "fill=" && /240,246,250/.test(e[1])));                  // ink lettering on an object turns pale
   assert.equal(styled(ctx, [252, 238, 10], true), ctx);                                      // the small cover parts stay ink on colour
   // the hooks a look may bring are all functions (or absent)
-  for (const k of ["theme", "background", "runs", "wrap", "tag", "frame", "image", "post"]) assert.equal(typeof LOOKS.cyber[k], "function", k);
+  for (const k of ["theme", "background", "runs", "wrap", "tag", "frame", "freeText", "subject", "image", "post"]) assert.equal(typeof LOOKS.cyber[k], "function", k);
+  assert.equal(LOOKS.cyber.seeded, true);
   for (const k of ["shape", "blob", "stroke", "thin", "word"]) assert.equal(typeof LOOKS.cyber.sticker[k], "function", k);
   assert.equal(LOOKS.cyber.oneTheme, true); assert.equal(LOOKS.cel.oneTheme, undefined);
   setLook("cel");
+});
+
+test("looks: what a look scatters at random follows the seed and holds still", () => {
+  // the tear bands are the rectangles clipped in post(); record where they fall
+  const bands = (seed) => {
+    const ys = [];
+    const cv = { width: 800, height: 450 };
+    const ctx = new Proxy({ canvas: cv }, { get: (t, k) => (k in t ? t[k] : k === "createRadialGradient" ? () => ({ addColorStop() {} }) : (...a) => { if (k === "rect") ys.push(a[1]); return {}; }), set: () => true });
+    globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => new Proxy({}, { get: () => () => ({}), set: () => true }) }) };
+    try { setLook("cyber", { tear: 1, split: 1 }, seed); LOOKS.cyber.post(ctx, 800, 450, [252, 238, 10], lookValues(), 1); } finally { delete globalThis.document; setLook("cel"); }
+    return ys;
+  };
+  const a = bands(11), again = bands(11), b = bands(987654);
+  assert.ok(a.length >= 3);
+  assert.deepEqual(a, again);                                    // same seed: same places, so the export matches the preview
+  assert.notDeepEqual(a, b);                                     // a new seed moves them
+  for (const y of [...a, ...b]) assert.ok(y >= 0 && y <= 450);
 });
 
 test("looks: the AI prompts take their style section from the look", () => {

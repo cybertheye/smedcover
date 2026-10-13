@@ -37,7 +37,7 @@ const bool = (v, d) => (typeof v === "boolean" ? v : d);
 const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(hi, Math.max(lo, Number(v))) : d);
 const color = (v) => (/^#[0-9a-f]{6}$/i.test(str(v)) ? v.toLowerCase() : "#fcee0a");
 
-export const DEFAULT_STYLE = { template: "stack", theme: "dark", imageShadow: true, look: "cel", lookParams: {} };
+export const DEFAULT_STYLE = { template: "stack", theme: "dark", imageShadow: true, look: "cel", lookParams: {}, lookSeed: 7 };
 
 const KINDS = ["graphic", "sticker", "user"];
 /** A category's graphic: a reference into the asset library, or none. Older shapes are upgraded. */
@@ -74,7 +74,8 @@ export function normalizeProfile(raw) {
   if (!categories.length) categories.push({ id: uid(), name: "Category", sub: "", code: "", color: "#fcee0a", graphic: { kind: "graphic", id: "camera", labels: [], stamp: "" } });
   const st = p.style && typeof p.style === "object" ? p.style : {};
   const style = { template: TEMPLATES.includes(st.template) ? st.template : "stack", theme: st.theme === "light" ? "light" : "dark", imageShadow: bool(st.imageShadow, true),
-    look: LOOK_IDS.includes(st.look) ? st.look : "cel", lookParams: {} };
+    look: LOOK_IDS.includes(st.look) ? st.look : "cel", lookParams: {},
+    lookSeed: Number.isFinite(st.lookSeed) ? Math.abs(Math.round(st.lookSeed)) % 1000000 : 7 };   // places what a look scatters at random
   // tuned values are kept per look, so switching away and back loses nothing
   for (const id of LOOK_IDS) { const v = lookParams(id, st.lookParams && st.lookParams[id]); if (Object.keys(v).length) style.lookParams[id] = v; }
   let sizes = (Array.isArray(p.sizes) ? p.sizes : []).map(normalizeSize);

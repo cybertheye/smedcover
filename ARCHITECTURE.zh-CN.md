@@ -84,7 +84,7 @@ tests/               不依赖 DOM 的模块的单元测试
       "graphic": { "kind": "graphic", "id": "camera", "labels": [], "stamp": "" } }
   ],
   "style": { "template": "stack", "theme": "dark", "imageShadow": true,
-             "look": "cel", "lookParams": { "cyber": { "glow": 1.2 } } },
+             "look": "cel", "lookParams": { "cyber": { "glow": 1.2 } }, "lookSeed": 7 },
   "fonts": { "body": "", "display": "" },
   "sizes": [ { "w": 1920, "h": 1080, "label": "16:9", "name": "", "on": true } ],
   "design": { "layers": [ … ] }         // 默认设计：新封面的起始图层
@@ -208,6 +208,9 @@ macOS 的网页视图不支持画布滤镜，所以高斯模糊用脚本实现�
 | `sticker` | 平面贴纸的五个画法函数：`shape`、`blob`、`stroke`、`thin`、`word` |
 | `tag` | 角标 |
 | `frame` | 四角线图层，以及该风格想放在画面边缘的界面装饰 |
+| `freeText` | 自由文字图层的"纯文字"和"底牌"样式 |
+| `subject` | 画在频道图形周围、随图形移动缩放的东西（如扫描锁定环） |
+| `seeded` | 标记该风格有随机摆放的元素 |
 | `image` | 上传图片的投影或光晕 |
 | `post` | 整张封面画完之后的叠加层，如扫描线和暗角 |
 | `params` | 可调参数，在样式栏里显示为滑块 |
@@ -241,6 +244,9 @@ macOS 的网页视图不支持画布滤镜，所以高斯模糊用脚本实现�
 3. **钩子**：改某个钩子的画法，比如 `background` 里的网格和巨型代号，`frame` 里的界面装饰，`post` 里的错位、撕裂和扫描线，`runs` 里文字的层次。
 
 加一个滑块：在风格的 `params` 里加一项，然后在钩子里读取对应的值即可，界面和保存都是自动的。
+
+**随机但不乱跳**：风格里需要随机的东西（撕裂带、扫描线的位置）用 `rand(k)` 取值，它由档案里的 `style.lookSeed` 决定。
+种子不变，每一帧、每个尺寸、预览和导出都落在同样的相对位置；界面上的「换一组随机位置」只是换一个种子。
 
 ## 8. AI 生成素材（`ai.js`、`spec.js`）
 

@@ -138,20 +138,24 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 | Look | What you get |
 |---|---|
 | **Cel** (default) | heavy ink lines, hard shadows, flat colour, screentone |
-| **Cyberpunk** | hard-edged interface and signage design: solid chamfered panels with black lettering, a red and cyan colour split, signal tears, scanlines, small readouts and hazard stripes; objects are dark hardware drawn in lines of light |
+| **Cyberpunk** | set in the interface of an optical implant starting up and scanning, after *Cyberpunk 2077*: solid chamfered panels with black lettering, slanted sliced headlines in the channel colour, a red and cyan colour split, signal tears, scanlines, lens rings and readouts; objects are dark hardware drawn in lines of light |
 
 The cyberpunk look has six sliders:
 
 | Slider | What it controls | Turning it up |
 |---|---|---|
 | Colour split | red and cyan pulled apart across the whole picture; the red and cyan "echo" behind the title, stickers and the tag follows it | more glitch; 0 gives a clean picture with no echo |
-| Signal tear | a few horizontal bands pushed sideways | more bands, pushed further; 0 gives none. The bands sit in fixed places and may cross the title: turn it down if it hurts reading |
+| Signal tear | a few horizontal bands pushed sideways | more bands, pushed further; 0 gives none |
 | Scanlines | the dark horizontal lines across the picture | more old monitor; 0 is the sharpest picture |
-| Interface detail | the huge channel code in the background, the status line, the ruler, the code block, the hazard stripe | more of them appear in turn; 0 leaves only the corner brackets |
+| Interface detail | the interface of an optical implant starting up and scanning: lens rings, a sweep line, a start-up log up the right edge, a ruler up the left, a status line, signal meter, code block and hazard stripe along the bottom, a lock-on ring and readout around the channel graphic, the huge channel code in the background | more of them appear in turn; 0 leaves only the corner brackets |
 | Line glow | how far the lines of channel graphics and solids glow | brighter and softer; 0 gives clean thin lines |
 | Photo tint | how far a background photo is pushed toward the channel colour and into the dark | a darker, more stylised photo; 0 keeps its own colours |
 
-The interface detail is painted on the *Corner brackets* layer, so hiding that layer removes all of it at once. The colour split and the signal tear are paused while you drag a layer and return when you let go, to keep dragging smooth. Cyberpunk is dark only, so the *Background* choice is hidden while it is selected.
+**Random placement** — the tears, the sweep line and the lens rings fall at random but then stay put, so the export matches the preview and every size agrees. *Shuffle the random placement*, under the sliders, rolls again — when a tear lands across the title, say.
+
+**Text layers** are drawn differently in this look too: *Headline* is slanted, sliced lettering in the channel colour with highlighted words black on a chamfered plate; *Plain* is a bracketed label such as `[ NIGHT CITY ]`; *Plate* is a chamfered label plate with a small tab on its left.
+
+Most of the interface detail is painted on the *Corner brackets* layer, so hiding that layer removes it at once; the lock-on ring around the channel graphic travels with the graphic. The colour split and the signal tear are paused while you drag a layer and return when you let go, to keep dragging smooth. Cyberpunk is dark only, so the *Background* choice is hidden while it is selected.
 
 Each look's values are saved separately in the profile, so switching away and back loses nothing. When generating assets with AI, the style section of the prompt follows the current look.
 

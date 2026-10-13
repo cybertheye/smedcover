@@ -593,6 +593,8 @@ function styleTab() {
       select(LOOK_IDS.map((k) => [k, LOOKS[k].name[getLang()]]), st.look, (v) => { st.look = v; touch({ profile: true, panel: true, side: true, strip: true }); }),
       el("div", { class: "hint" }, t("style.lookHint")),
       L.params.map((d) => slider2(d.name[getLang()], d.min, d.max, d.step, vals[d.key], (v) => tune(d.key, v))),
+      L.seeded && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { st.lookSeed = Math.floor(Math.random() * 1000000); touch({ profile: true }); } }, t("style.shuffle")),
+      L.seeded && el("div", { class: "hint" }, t("style.shuffleHint")),
       L.params.length > 0 && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete st.lookParams[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))),
     el("div", {}, cap("style.template"), select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), st.template, (v) => set("template", v))),
     !L.oneTheme && el("div", {}, cap("style.theme"), select([["dark", t("theme.dark")], ["light", t("theme.light")]], st.theme, (v) => set("theme", v))),
@@ -1020,7 +1022,7 @@ function syncTabs() {
   $("tabs").replaceChildren(...Object.keys(TABS[S.mode]).map((k) => el("button", { class: k === S.tab[S.mode] ? "on" : "", onclick: () => { S.tab[S.mode] = k; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, t("tab." + k))));
 }
 /** Makes the profile's look current, for anything drawn outside a cover (asset tiles, previews). */
-const useLook = () => setLook(S.profile.style.look, S.profile.style.lookParams[S.profile.style.look]);
+const useLook = () => setLook(S.profile.style.look, S.profile.style.lookParams[S.profile.style.look], S.profile.style.lookSeed);
 function renderPanel() {
   if (!S.cover) return;
   useLook();
