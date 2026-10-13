@@ -20,7 +20,9 @@
 //   subject(ctx, half, env, p)   painted around the channel graphic, in its own space
 //   seeded                       true when the look scatters things at random (the user can shuffle them)
 //   image(ctx, C, unit, p)       prepares the context for an uploaded image (its shadow or glow)
-//   post(ctx, w, h, C, p)        painted over the finished cover (scanlines, vignette)
+//   post(ctx, w, h, C, p, unit, hits)  painted over the finished cover (scanlines, vignette); `unit` is
+//                                canvas pixels per virtual unit, `hits` where each layer ended up
+//   params                       … an entry with toggle: true is shown as a checkbox (0 or 1)
 //   params                       tunable numbers shown as sliders: [{ key, min, max, step, def, name: {zh, en} }]
 //   prompt / solidPrompt         the "Style" section of the AI prompts for this look (see ai.js)
 //
@@ -147,6 +149,7 @@ function neonContext(ctx, C, p) {
 }
 
 const SPLIT = [];              // two work canvases for the colour split, reused between frames
+const LETTERING = ["title", "text", "tag", "catname", "brand"];   // the layers that are words
 const cyber = {
   id: "cyber",
   name: { zh: "赛博朋克", en: "Cyberpunk" },
@@ -155,6 +158,7 @@ const cyber = {
   params: [
     { key: "split", min: 0, max: 2, step: 0.05, def: 1, name: { zh: "色彩错位", en: "Colour split" } },
     { key: "tear", min: 0, max: 2, step: 0.05, def: 0.7, name: { zh: "信号撕裂", en: "Signal tear" } },
+    { key: "tearClear", toggle: true, min: 0, max: 1, step: 1, def: 1, name: { zh: "撕裂避开文字", en: "Keep tears off lettering" } },
     { key: "scan", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "扫描线", en: "Scanlines" } },
     { key: "decor", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "界面装饰", en: "Interface detail" } },
     { key: "sweep", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "扫描光带", en: "Sweep line" } },
@@ -399,7 +403,7 @@ const cyber = {
   /** An uploaded image gets a hard cyan echo where the house style has an ink shadow. */
   image(ctx, C, unit, p) { ctx.shadowColor = css(CY.cyan); ctx.shadowBlur = 0; ctx.shadowOffsetX = -10 * unit * p.split; ctx.shadowOffsetY = 5 * unit * p.split; },
 
-  post(ctx, w, h, C, p, unit = 1) {
+  post(ctx, w, h, C, p, unit = 1, hits = []) {
     // The colour split and the signal tear, over the whole picture: red pulled one way, green and
     // blue the other, and a few horizontal bands knocked sideways. They cost several whole-canvas
     // copies, so they are left out of the frames of a drag (see setFast).
@@ -424,8 +428,15 @@ const cyber = {
       // torn bands: the same two images again, inside a thin strip, pushed sideways. Where they fall
       // is random but tied to the profile's seed, so they hold still until the user shuffles them.
       const bands = Math.round(5 * Math.min(1.6, p.tear));
+      // rows taken up by lettering, in canvas pixels: a tear through them makes them hard to read
+      const kept = p.tearClear ? hits.filter((t) => LETTERING.includes(t.type)).map((t) => { const a = (t.r || 0) * Math.PI / 180, half = Math.abs(t.hw * Math.sin(a)) + Math.abs(t.hh * Math.cos(a)) + 10; return [(t.cy - half) * unit, (t.cy + half) * unit]; }) : [];
+      const clear = (y, bh) => kept.every(([a, b]) => y + bh < a || y > b);
       for (let k = 0; k < bands; k++) {
-        const y = Math.round(rand(k * 7.3 + 1) * H), bh = Math.round((5 + rand(k * 3.7 + 2) * 17) * unit), dx = Math.round((rand(k * 5.1 + 3) - 0.5) * 2 * 38 * unit * p.tear);
+        const bh = Math.round((5 + rand(k * 3.7 + 2) * 17) * unit), dx = Math.round((rand(k * 5.1 + 3) - 0.5) * 2 * 38 * unit * p.tear);
+        let y = Math.round(rand(k * 7.3 + 1) * H);
+        // a band that lands on lettering is thrown again, a fixed number of times, then given up
+        for (let again = 1; again <= 16 && !clear(y, bh); again++) y = Math.round(rand(k * 7.3 + 1 + again * 13.7) * H);
+        if (!clear(y, bh)) continue;
         ctx.save(); ctx.beginPath(); ctx.rect(0, y, W, bh); ctx.clip();
         ctx.globalCompositeOperation = "copy"; ctx.drawImage(red, sh * 2 + dx, 0);
         ctx.globalCompositeOperation = "lighter"; ctx.drawImage(rest, -sh * 2 + dx, 0);

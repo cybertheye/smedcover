@@ -140,12 +140,13 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 | **Cel** (default) | heavy ink lines, hard shadows, flat colour, screentone |
 | **Cyberpunk** | set in the interface of an optical implant starting up and scanning, after *Cyberpunk 2077*: solid chamfered panels with black lettering, slanted sliced headlines in the channel colour, a red and cyan colour split, signal tears, scanlines, lens rings and readouts; objects are dark hardware drawn in lines of light |
 
-The cyberpunk look has eight sliders. Two of them sound alike: *Scanlines* are the fine horizontal lines covering the whole picture; the *Sweep line* is the single bright one.
+The cyberpunk look has eight sliders and a checkbox. Two of them sound alike: *Scanlines* are the fine horizontal lines covering the whole picture; the *Sweep line* is the single bright one.
 
 | Slider | What it controls | Turning it up |
 |---|---|---|
 | Colour split | red and cyan pulled apart across the whole picture; the red and cyan "echo" behind the title, stickers and the tag follows it | more glitch; 0 gives a clean picture with no echo |
 | Signal tear | a few horizontal bands pushed sideways | more bands, pushed further; 0 gives none |
+| Keep tears off lettering (checkbox) | no tear lands on the rows of the title, text layers, the tag, the channel name or the brand row | on by default; untick to let tears cross lettering |
 | Scanlines | the dark horizontal lines across the picture | more old monitor; 0 is the sharpest picture |
 | Interface detail | the interface of an optical implant starting up and scanning: lens rings, a sweep line, a start-up log up the right edge, a ruler up the left, a status line, signal meter, code block and hazard stripe along the bottom, a lock-on ring and readout around the channel graphic, the huge channel code in the background | more of them appear in turn; 0 leaves only the corner brackets |
 | Sweep line | the single bright line across the picture and the band of light above it | brighter; **0 hides it** |

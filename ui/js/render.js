@@ -417,7 +417,7 @@ export function drawCover(cv, o) {
     blit(live.over);
     cv._hits = [...live.underHits, ...mine, ...live.overHits];
   }
-  if (L0.post && cover.layers[0].visible) { ctx.save(); L0.post(ctx, w, h, C, lookValues(), kx); ctx.restore(); }   // not over a transparent background
+  if (L0.post && cover.layers[0].visible) { ctx.save(); L0.post(ctx, w, h, C, lookValues(), kx, cv._hits); ctx.restore(); }   // not over a transparent background
   setFast(false);
   if (o.select) { const hit = cv._hits.find((x) => x.id === o.select); if (hit && hit.type !== "bg") drawSelection(ctx, hit, kx); }
 }

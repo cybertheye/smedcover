@@ -504,12 +504,12 @@ test("looks: the house look changes nothing, the cyberpunk look re-maps what is 
 
 test("looks: what a look scatters at random follows the seed and holds still", () => {
   // the tear bands are the rectangles clipped in post(); record where they fall
-  const bands = (seed) => {
+  const bands = (seed, extra = {}, hits = []) => {
     const ys = [];
     const cv = { width: 800, height: 450 };
     const ctx = new Proxy({ canvas: cv }, { get: (t, k) => (k in t ? t[k] : k === "createRadialGradient" ? () => ({ addColorStop() {} }) : (...a) => { if (k === "rect") ys.push(a[1]); return {}; }), set: () => true });
     globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => new Proxy({}, { get: () => () => ({}), set: () => true }) }) };
-    try { setLook("cyber", { tear: 1, split: 1 }, seed); LOOKS.cyber.post(ctx, 800, 450, [252, 238, 10], lookValues(), 1); } finally { delete globalThis.document; setLook("cel"); }
+    try { setLook("cyber", { tear: 1.6, split: 1, ...extra }, seed); LOOKS.cyber.post(ctx, 800, 450, [252, 238, 10], lookValues(), 1, hits); } finally { delete globalThis.document; setLook("cel"); }
     return ys;
   };
   const a = bands(11), again = bands(11), b = bands(987654);
@@ -517,6 +517,15 @@ test("looks: what a look scatters at random follows the seed and holds still", (
   assert.deepEqual(a, again);                                    // same seed: same places, so the export matches the preview
   assert.notDeepEqual(a, b);                                     // a new seed moves them
   for (const y of [...a, ...b]) assert.ok(y >= 0 && y <= 450);
+  // lettering keeps its rows clear: a title across the middle, a rotated text layer lower down
+  const words = [{ type: "title", cx: 400, cy: 200, hw: 300, hh: 70, r: 0 }, { type: "text", cx: 400, cy: 380, hw: 100, hh: 10, r: 90 }, { type: "graphic", cx: 600, cy: 60, hw: 60, hh: 60, r: 0 }];
+  for (const seed of [1, 2, 3, 44, 555, 6666, 77777]) {
+    const free = bands(seed, { tearClear: 0 }, words), kept = bands(seed, { tearClear: 1 }, words);
+    assert.ok(free.some((y) => y >= 120), `seed ${seed}: nothing to avoid`);   // without the option some do cross
+    for (const y of kept) assert.ok(y < 120, `seed ${seed}: a tear at ${y} crosses lettering`);   // rows 120–280 and 270–450 are taken, so only the top is free
+    assert.ok(kept.length <= free.length);
+  }
+  assert.equal(lookParams("cyber").tearClear, 1);                // on by default
 });
 
 test("looks: the AI prompts take their style section from the look", () => {
