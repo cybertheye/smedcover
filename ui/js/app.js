@@ -15,6 +15,8 @@ import {
 } from "./store.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
+import { EFFECTS } from "./textfx.js";
+import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams } from "./style.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage } from "./ai.js";
 
@@ -787,6 +789,18 @@ function placementControls(L) {
     el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { resetPlacement(L, S.settings.scope, f.key, f.catId); touch({ cover: true, side: true }); } }, `${t("props.reset")} · ${t("scope." + S.settings.scope)}`),
   ];
 }
+/** The text effect of a headline layer, and how strong it is. */
+function fxControl(L) {
+  const set = (k, v, side) => { if (v === undefined) delete L[k]; else L[k] = v; touch({ cover: true, side }); };
+  const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline") };
+  const groups = ["passes", "mask", "outline"].map((kind) => ({ group: kinds[kind], items: Object.entries(EFFECTS).filter(([, e]) => e.kind === kind).map(([id, e]) => [id, e.name[getLang()]]) }));
+  const fx = L.fx || "auto", kind = EFFECTS[fx].kind;
+  return [
+    el("div", { style: "margin-top:10px" }, cap("props.fx"), select(groups, fx, (v) => set("fx", v === "auto" ? undefined : v, true))),
+    fx !== "auto" && kind !== "passes" && slider("props.fxAmt", 0, 2, 0.05, L.fxAmt ?? 1, times, (v) => set("fxAmt", v === 1 ? undefined : v, false)),
+    kind === "outline" && !native && el("div", { class: "hint" }, t("fx.needsApp")),
+  ];
+}
 /**
  * A colour for a layer's lettering: a swatch to pick one, and a button back to "automatic", where
  * the layer takes whatever the current look gives it. `shown` is the swatch's colour while automatic.
@@ -812,6 +826,7 @@ function typeControls(L) {
       slider("props.stroke", 0, 2, 0.05, L.stroke, times, (v) => set("stroke", v)),
       slider("props.shadow", 0, 2, 0.05, L.shadow, times, (v) => set("shadow", v)),
       inkControl(L, "ink", "props.ink", "#ffffff"), inkControl(L, "hi", "props.inkHi", cat().color),
+      fxControl(L),
       el("div", { class: "hint" }, t("props.boundHint")),
     ];
     case "tag": return [inkControl(L, "ink", "props.ink", "#07070c"), el("div", { class: "hint" }, t("props.boundHint"))];
@@ -823,6 +838,7 @@ function typeControls(L) {
       el("div", { style: "margin-top:8px" }, select(["title", "plain", "plate"].map((k) => [k, `${t("props.look")} · ${t("look." + k)}`]), L.look, (v) => set("look", v))),
       el("div", { style: "margin-top:8px" }, select(["white", "accent", "ink"].map((k) => [k, `${t("props.color")} · ${t("color." + k)}`]), L.color, (v) => set("color", v))),
       inkControl(L, "ink", "props.inkCustom", { white: "#ffffff", accent: cat().color, ink: "#07070c" }[L.color]),
+      L.look === "title" && fxControl(L),
     ];
   }
   return null;
@@ -856,6 +872,15 @@ function renderSide() {
 function renderFull(size, cover, index) {
   const cv = document.createElement("canvas");
   paint(cv, size, size.w * S.settings.scale, cover, index);
+  return cv;
+}
+/**
+ * renderFull() for an export: effects that reshape letters need the letters' outlines, which are
+ * fetched in the background. If drawing the cover asked for any, wait for them and draw it again.
+ */
+async function renderReady(size, cover, index) {
+  let cv = renderFull(size, cover, index);
+  for (let round = 0; round < 3 && outlinesPending(); round++) { await outlinesSettled(); cv = renderFull(size, cover, index); }
   return cv;
 }
 const nameFor = (size, cover, index) => exportName(S.settings.nameTemplate, { index, cat: S.profile.categories[index], title: cover.title, size, scale: S.settings.scale, ext: EXT[S.settings.format] });
@@ -906,7 +931,7 @@ async function runExport(jobs, save) {
       const name = nameFor(job.size, job.cover, job.index);
       prog.set(done, name);
       await nextPaint();
-      const cv = renderFull(job.size, job.cover, job.index);
+      const cv = await renderReady(job.size, job.cover, job.index);
       const task = (native ? toPng(cv).then((bytes) => { cv.width = cv.height = 0; return save(bytes, name); }) : browserSaveCanvas(cv, name))
         .then(() => { done++; prog.set(done); }, (e) => { failed = failed || e; })
         .finally(() => pending.delete(task));
@@ -1120,6 +1145,7 @@ addEventListener("keydown", (e) => {
 });
 
 // ---------- start
+onOutlines(() => queueDraw());   // an outline that was sent for has arrived: draw again, this time with it
 async function start() {
   S.settings = normalizeSettings(await readJson("settings.json").catch(() => null));
   setLang(S.settings.lang || detectLang());
@@ -1187,6 +1213,18 @@ async function selfTest(dir) {
       report.looks.push({ id, photo: withPhoto, path: await invoke("write_image", framed(await toPng(cv), { dir, name })) });
     }
     S.profile.style.look = "cel"; S.photo = plain;
+    // every text effect once, in the house look: the ones that reshape letters need outlines from the native side
+    report.effects = [];
+    const titleLayer = layer("title"), keep = S.cover.title;
+    S.cover.title = "文字效果 *FX*\nText *effects*";
+    for (const id of Object.keys(EFFECTS).filter((k) => k !== "auto")) {
+      titleLayer.fx = id;
+      const cv = await renderReady(S.profile.sizes[0], S.cover, catIndex());
+      report.effects.push({ id, kind: EFFECTS[id].kind, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `fx-${id}.png` })) });
+    }
+    delete titleLayer.fx; S.cover.title = keep;
+    report.outline = await invoke("text_outline", { text: "A夜", families: ["Bebas Neue", "Noto Sans SC"], weight: 900 }).then((o) => ({ missing: o.missing, glyphs: o.glyphs.length, contours: o.glyphs.map((g) => g.c.length) }), (e) => ({ error: String(e) }));
+    if (!report.outline.glyphs || report.outline.missing) report.errors.push("outline: the native side could not trace bundled fonts");
     if (report.ai && !report.ai.every((r) => r.stored && r.drawn)) report.errors.push("ai: a generated asset was not stored or drawn");
     report.ok = !report.errors.length;
   } catch (e) { report.errors.push(String(e && e.message ? e.message : e)); }

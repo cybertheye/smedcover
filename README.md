@@ -96,6 +96,21 @@ What each layer allows:
 | Colour block, channel graphic, brand row, title, corner tag, channel name | yes | yes | yes | no |
 | Stickers, images, text (free layers) | yes | yes | yes | yes |
 
+### Text effects
+
+The title, and text layers in the *Headline* look, can be given a text effect of their own instead of following the look. Select the layer and choose under *Text effect* in its properties:
+
+| Kind | Effects | Notes |
+|---|---|---|
+| Automatic | follows the look | The default: the current look's own lettering |
+| Layered | outline and shadow, sliced, overprint, double keyline, plain, underlined highlight | The letterings of the six looks, usable under any look |
+| Masked | halftone inside, stripes inside, inner shadow, worn, row shift | Change what is inside the letters |
+| Outlined | extruded, arched, tapered, wave | Reshape the letters themselves |
+
+Masked and outlined effects have a *Strength* slider. The existing *Outline* and *Shadow* sliders still act on most effects.
+
+Outlined effects read the font file to get each letter's outline: the first time a piece of text is used it shows as ordinary lettering for an instant and then changes; an export waits for the outlines before drawing. Bundled fonts, installed fonts and fonts you imported are supported.
+
 ### Lettering colours
 
 Every layer made of words can be given its own colour. Select the layer and look in its properties:
@@ -194,6 +209,21 @@ The cyberpunk look has eight sliders and a checkbox. Two of them sound alike: *S
 Most of the interface detail is painted on the *Corner brackets* layer, so hiding that layer removes it at once; the lock-on ring around the channel graphic travels with the graphic. The colour split and the signal tear are paused while you drag a layer and return when you let go, to keep dragging smooth. Cyberpunk is dark only, so the *Background* choice is hidden while it is selected.
 
 Each look's values are saved separately in the profile, so switching away and back loses nothing. When generating assets with AI, the style section of the prompt follows the current look.
+
+### Adjusting the template
+
+With a template chosen under *Style*, *Adjust the template* below it changes it:
+
+| Control | What it does |
+|---|---|
+| Band height (*Panel width* for Split) | how much of the picture the colour block takes |
+| Edge slant | how far the dividing edge leans; 0 is level or upright |
+| Title box width, height | the room the title may use; its size is fitted automatically |
+| Swap | the band on top and the title below; or the panel on the left and the title on the right |
+
+Or drag on the canvas: with *Colour block & edge* selected, the dividing edge has a diamond at each end and in the middle — the ends change its lean, the middle moves it; with *Title* selected, the dashed box has a diamond on its right and bottom sides.
+
+Adjustments are stored as fractions of the picture, so they apply to every size; each of the three templates keeps its own, in the profile. After a swap the brand row sits on the colour block and turns to ink. If the colour block layer itself has been moved or turned, the diamonds on the edge are hidden; reset that layer's placement to get them back.
 
 ### Style and the default design
 

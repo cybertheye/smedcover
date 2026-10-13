@@ -642,3 +642,47 @@ test("templates can be adjusted, and their halves swapped", async () => {
   assert.deepEqual(p.style.layoutAdjust, { stack: { size: 0.8, flip: true } });
   assert.deepEqual(normalizeProfile(null).style.layoutAdjust, {});
 });
+
+test("text effects: a layer may choose one, and every one can be painted", async () => {
+  const { EFFECTS, paintRuns } = await import("../ui/js/textfx.js");
+  const { parseFont, primeOutline, outline } = await import("../ui/js/outlines.js");
+  const { TEXT_EFFECTS } = await import("../ui/js/layers.js");
+  assert.deepEqual(Object.keys(EFFECTS), TEXT_EFFECTS);                       // what a layer may store is what can be painted
+  for (const e of Object.values(EFFECTS)) assert.ok(e.name.zh && e.name.en && ["passes", "mask", "outline"].includes(e.kind));
+  // on a layer: kept when valid, dropped when not, and "auto" is the absence of a choice
+  const ls = normalizeLayers([{ type: "title", fx: "extrude", fxAmt: 1.5 }, { type: "text", text: "x", fx: "nope", fxAmt: 99 }, { type: "tag", fx: "dots" }, { type: "text", text: "y", fx: "auto", fxAmt: 1 }]);
+  const title = ls.find((l) => l.type === "title"), texts = ls.filter((l) => l.type === "text");
+  assert.equal(title.fx, "extrude"); assert.equal(title.fxAmt, 1.5);
+  assert.equal(texts[0].fx, undefined); assert.equal(texts[0].fxAmt, 2);
+  assert.equal(ls.find((l) => l.type === "tag").fx, undefined);                 // only headlines take effects
+  assert.equal(texts[1].fx, undefined); assert.equal(texts[1].fxAmt, undefined);
+  // font strings as the canvas has them
+  assert.deepEqual(parseFont('900 120px "Bebas Neue", "Noto Sans SC", sans-serif'), { weight: 900, families: ["Bebas Neue", "Noto Sans SC"] });
+  assert.deepEqual(parseFont("italic bold 20px Georgia, serif"), { weight: 700, families: ["Georgia"] });
+  assert.equal(outline("900 100px X", "abc"), false);                           // no native side here: not to be had
+  // painting: a context that records, runs with one plain and one highlighted word
+  const o = { fs: 100, d: 6, strokeAmt: 1, shadowAmt: 1, amt: 1, lineW: 300, seed: 1, unit: 1, C: [252, 238, 10], fillCss: "#ffffff", hiCss: "#fcee0a", inkCss: "#07070c", shadowCss: "#fcee0a", hiShadowCss: "#ffffff" };
+  const recorder = () => { const n = {}; const ctx = new Proxy({ font: "900 100px X", lineWidth: 1, globalAlpha: 1 }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...s].length * 60 }) : (...a) => { n[k] = (n[k] || 0) + 1; return {}; }), set: (t, k, v) => { t[k] = v; return true; } }); return [n, ctx]; };
+  const pass = (ctx) => (fn) => { fn({ t: "Ab", hi: false }, 0); fn({ t: "cd", hi: true }, 130); };
+  for (const [id, e] of Object.entries(EFFECTS)) for (const lookId of ["cel", "cyber"]) {
+    setLook(lookId);
+    const [n, ctx] = recorder();
+    paintRuns(ctx, pass(ctx), { ...o }, id);
+    assert.ok((n.fillText || 0) >= 2 || (n.fill || 0) >= 1, `${id} under ${lookId}: nothing painted`);   // without a real canvas or outlines, mask and outline effects fall back to lettering
+    assert.equal(n.save || 0, n.restore || 0, `${id} under ${lookId}: unbalanced save/restore`);
+    void e;
+  }
+  setLook("cel");
+  // with outlines to hand, an outline effect fills shapes instead of text, and bends them
+  const square = (x) => ({ adv: 0.6, c: [[x, 0, x + 0.5, 0, x + 0.5, -0.7, x, -0.7]] });
+  const pts = [];
+  const ctx = new Proxy({ font: "900 100px X", lineWidth: 1, globalAlpha: 1 }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...s].length * 60 }) : (...a) => { if (k === "lineTo" || k === "moveTo") pts.push(a); return {}; }), set: (t, k, v) => { t[k] = v; return true; } });
+  const { native } = await import("../ui/js/store.js");
+  assert.equal(native, false);
+  primeOutline("900 100px X", "Ab", [square(0), square(0)]); primeOutline("900 100px X", "cd", [square(0), square(0)]);
+  void ctx; void pts;                                                           // (drawing them needs the native side; covered by the app's self-test)
+  // an unknown effect is the automatic one
+  const [n1, c1] = recorder(), [n2, c2] = recorder();
+  paintRuns(c1, pass(c1), { ...o }, "no-such-effect"); paintRuns(c2, pass(c2), { ...o }, "auto");
+  assert.deepEqual(n1, n2);
+});

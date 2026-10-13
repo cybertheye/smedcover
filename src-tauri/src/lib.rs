@@ -6,12 +6,15 @@
 //! * exporting covers: the web view sends PNG bytes in a raw, framed request body (no base64),
 //!   which are converted to PNG, JPEG or WebP and written here, off the main thread;
 //! * listing the fonts installed on the system;
+//! * tracing lettering: the outlines of a text's glyphs, for effects that reshape the letters;
 //! * sending the request for an AI-generated asset, so it is not subject to the web view's
 //!   cross-origin rules.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Cursor, ErrorKind, Read};
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use image::{codecs::jpeg::JpegEncoder, ImageFormat, RgbImage};
 use serde::{Deserialize, Serialize};
@@ -292,6 +295,199 @@ async fn list_system_fonts() -> Vec<String> {
     names
 }
 
+// ---------------------------------------------------------------- glyph outlines
+
+/// One glyph of a traced text: how far the pen moves on (in ems), and its outline as closed
+/// polylines `[x0, y0, x1, y1, …]` in ems with y pointing down, curves already flattened.
+#[derive(Serialize, Debug, PartialEq)]
+struct Glyph {
+    adv: f32,
+    c: Vec<Vec<f32>>,
+}
+
+/// A traced text. `missing` is set when some character had no glyph in any of the fonts.
+#[derive(Serialize, Debug)]
+struct Outline {
+    glyphs: Vec<Glyph>,
+    missing: bool,
+}
+
+/// Collects a glyph's outline as polylines, scaled to ems and flipped to y-down.
+struct Flatten {
+    k: f32,
+    done: Vec<Vec<f32>>,
+    cur: Vec<f32>,
+    at: (f32, f32),
+}
+
+impl Flatten {
+    fn push(&mut self, x: f32, y: f32) {
+        self.cur.push((x * self.k * 1e4).round() / 1e4);
+        self.cur.push((-y * self.k * 1e4).round() / 1e4);
+        self.at = (x, y);
+    }
+    fn finish(&mut self) {
+        if self.cur.len() >= 6 {
+            self.done.push(std::mem::take(&mut self.cur));
+        } else {
+            self.cur.clear();
+        }
+    }
+}
+
+impl ttf_parser::OutlineBuilder for Flatten {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.finish();
+        self.push(x, y);
+    }
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.push(x, y);
+    }
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        let (x0, y0) = self.at;
+        for i in 1..=6 {
+            let t = i as f32 / 6.0;
+            let u = 1.0 - t;
+            self.push(
+                u * u * x0 + 2.0 * u * t * x1 + t * t * x,
+                u * u * y0 + 2.0 * u * t * y1 + t * t * y,
+            );
+        }
+    }
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        let (x0, y0) = self.at;
+        for i in 1..=8 {
+            let t = i as f32 / 8.0;
+            let u = 1.0 - t;
+            self.push(
+                u * u * u * x0 + 3.0 * u * u * t * x1 + 3.0 * u * t * t * x2 + t * t * t * x,
+                u * u * u * y0 + 3.0 * u * u * t * y1 + 3.0 * u * t * t * y2 + t * t * t * y,
+            );
+        }
+    }
+    fn close(&mut self) {
+        self.finish();
+    }
+}
+
+/// Traces `text` with the first of `fonts` (font file bytes and face index) that has each
+/// character, at `weight` where a font is variable. No shaping: one glyph per character, laid
+/// side by side — which is all headline lettering needs.
+fn trace(text: &str, fonts: &[Arc<(Vec<u8>, u32)>], weight: f32) -> Outline {
+    let faces: Vec<ttf_parser::Face> = fonts
+        .iter()
+        .filter_map(|f| ttf_parser::Face::parse(&f.0, f.1).ok())
+        .map(|mut face| {
+            if face.is_variable() {
+                face.set_variation(ttf_parser::Tag::from_bytes(b"wght"), weight);
+            }
+            face
+        })
+        .collect();
+    let mut glyphs = Vec::new();
+    let mut missing = false;
+    for ch in text.chars() {
+        let found = faces
+            .iter()
+            .find_map(|face| face.glyph_index(ch).map(|id| (face, id)));
+        match found {
+            Some((face, id)) => {
+                let k = 1.0 / f32::from(face.units_per_em());
+                let mut flat = Flatten {
+                    k,
+                    done: Vec::new(),
+                    cur: Vec::new(),
+                    at: (0.0, 0.0),
+                };
+                face.outline_glyph(id, &mut flat);
+                flat.finish();
+                let adv = f32::from(face.glyph_hor_advance(id).unwrap_or(0)) * k;
+                glyphs.push(Glyph { adv, c: flat.done });
+            }
+            None => {
+                missing = missing || !ch.is_whitespace();
+                glyphs.push(Glyph {
+                    adv: 0.3,
+                    c: Vec::new(),
+                });
+            }
+        }
+    }
+    Outline { glyphs, missing }
+}
+
+/// Font files already found (or found to be absent), by lower-cased family name.
+static FONT_FILES: OnceLock<Mutex<HashMap<String, Option<Arc<(Vec<u8>, u32)>>>>> = OnceLock::new();
+/// The fonts installed on the system, scanned once.
+static SYSTEM_FONTS: OnceLock<fontdb::Database> = OnceLock::new();
+/// The fonts shipped with the interface, by family name.
+const BUNDLED_FONTS: [(&str, &str); 3] = [
+    ("noto sans sc", "fonts/NotoSansSC.ttf"),
+    ("bebas neue", "fonts/BebasNeue-Regular.ttf"),
+    ("jetbrains mono", "fonts/JetBrainsMono.ttf"),
+];
+
+/// The bytes of a font the user imported: it is stored as a data URL in the app data directory.
+fn imported_font(app: &AppHandle, family: &str) -> Option<Vec<u8>> {
+    use base64::Engine;
+    let text = store_read(&data_root(app).ok()?, &format!("fonts/{family}.font")).ok()??;
+    let b64 = text.split_once("base64,")?.1;
+    base64::engine::general_purpose::STANDARD
+        .decode(b64.trim())
+        .ok()
+}
+
+/// Finds the file behind a family name: a bundled font, one the user imported, or a system font.
+fn font_file(app: &AppHandle, family: &str) -> Option<Arc<(Vec<u8>, u32)>> {
+    let key = family.trim().to_lowercase();
+    let files = FONT_FILES.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(known) = files.lock().ok()?.get(&key) {
+        return known.clone();
+    }
+    let bundled = BUNDLED_FONTS
+        .iter()
+        .find(|(name, _)| *name == key)
+        .and_then(|(_, path)| app.asset_resolver().get((*path).to_string()))
+        .map(|asset| (asset.bytes.to_vec(), 0));
+    let found = bundled
+        .or_else(|| imported_font(app, family.trim()).map(|bytes| (bytes, 0)))
+        .or_else(|| {
+            let db = SYSTEM_FONTS.get_or_init(|| {
+                let mut db = fontdb::Database::new();
+                db.load_system_fonts();
+                db
+            });
+            let id = db.query(&fontdb::Query {
+                families: &[fontdb::Family::Name(family.trim())],
+                weight: fontdb::Weight::BLACK,
+                ..fontdb::Query::default()
+            })?;
+            db.with_face_data(id, |data, index| (data.to_vec(), index))
+        })
+        .map(Arc::new);
+    files.lock().ok()?.insert(key, found.clone());
+    found
+}
+
+/// The outlines of `text` set in the first of `families` that has each character.
+#[tauri::command]
+async fn text_outline(
+    app: AppHandle,
+    text: String,
+    families: Vec<String>,
+    weight: f32,
+) -> Res<Outline> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let fonts: Vec<_> = families.iter().filter_map(|f| font_file(&app, f)).collect();
+        if fonts.is_empty() {
+            return Err("no usable font".to_string());
+        }
+        Ok(trace(&text, &fonts, weight.clamp(1.0, 1000.0)))
+    })
+    .await
+    .map_err(err)?
+}
+
 // ---------------------------------------------------------------- AI request
 
 /// How long an AI request may take unless the caller says otherwise, and the most of a reply
@@ -428,6 +624,7 @@ pub fn run() {
             save_text,
             list_system_fonts,
             ai_request,
+            text_outline,
             selftest_dir,
             selftest_ai,
             selftest_done
@@ -691,5 +888,75 @@ mod tests {
             .local_addr()
             .unwrap();
         assert!(post_json(&format!("http://{free}/x"), &[], "{}", "", 20).is_err());
+    }
+
+    fn bundled(name: &str) -> Arc<(Vec<u8>, u32)> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../ui/fonts")
+            .join(name);
+        Arc::new((fs::read(path).unwrap(), 0))
+    }
+
+    #[test]
+    fn trace_gives_closed_outlines_in_ems() {
+        let out = trace("Ab 1", &[bundled("BebasNeue-Regular.ttf")], 400.0);
+        assert!(!out.missing);
+        assert_eq!(out.glyphs.len(), 4);
+        assert!(out.glyphs[2].c.is_empty() && out.glyphs[2].adv > 0.05); // the space: no outline, some advance
+        for g in [&out.glyphs[0], &out.glyphs[1], &out.glyphs[3]] {
+            assert!(g.adv > 0.2 && g.adv < 1.2, "advance {}", g.adv);
+            assert!(!g.c.is_empty());
+            for contour in &g.c {
+                assert!(contour.len() >= 6 && contour.len() % 2 == 0);
+                for (i, v) in contour.iter().enumerate() {
+                    // within the em box, and above the baseline (y points down, so negative) for capitals
+                    assert!(v.is_finite() && *v > -1.5 && *v < 1.5, "coordinate {v}");
+                    if i % 2 == 1 {
+                        assert!(*v <= 0.05, "a capital dips below the baseline: {v}");
+                    }
+                }
+            }
+        }
+        assert_eq!(out.glyphs[0].c.len(), 2); // "A": the outside and the counter
+    }
+
+    #[test]
+    fn trace_falls_back_between_fonts_and_follows_the_weight() {
+        let fonts = [bundled("BebasNeue-Regular.ttf"), bundled("NotoSansSC.ttf")];
+        let out = trace("A夜", &fonts, 900.0);
+        assert!(!out.missing);
+        assert!(!out.glyphs[1].c.is_empty()); // the CJK glyph came from the second font
+        assert!((out.glyphs[1].adv - 1.0).abs() < 0.05); // full width
+                                                         // a variable font is heavier at 900 than at 100: its strokes reach further
+        let reach = |weight: f32| {
+            let g = &trace("夜", &fonts[1..], weight).glyphs[0];
+            let xs: Vec<f32> =
+                g.c.iter()
+                    .flat_map(|c| c.iter().step_by(2).copied())
+                    .collect();
+            let area: f32 =
+                g.c.iter()
+                    .map(|c| {
+                        let n = c.len() / 2;
+                        (0..n)
+                            .map(|i| {
+                                let j = (i + 1) % n;
+                                c[2 * i] * c[2 * j + 1] - c[2 * j] * c[2 * i + 1]
+                            })
+                            .sum::<f32>()
+                            / 2.0
+                    })
+                    .sum();
+            (xs.len(), area.abs())
+        };
+        assert!(
+            reach(900.0).1 > reach(100.0).1 * 1.5,
+            "{:?} vs {:?}",
+            reach(900.0),
+            reach(100.0)
+        );
+        // a character no font has
+        let none = trace("A\u{10FFFF}", &fonts[..1], 400.0);
+        assert!(none.missing && none.glyphs.len() == 2);
     }
 }

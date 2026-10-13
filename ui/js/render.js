@@ -8,6 +8,7 @@ import { drawPhoto } from "./photo.js";
 import { drawAsset } from "./assets.js";
 import { resolve, appliesTo } from "./layers.js";
 import { setLook, setFast, look, lookValues, styled } from "./style.js";
+import { paintRuns } from "./textfx.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
 export const hexToRgb = (hex) => {
@@ -200,7 +201,7 @@ let probe = null;
  * running fn on a throw-away context, so the result does not depend on any earlier frame.
  */
 function placed(ctx, tr, fn, known) {
-  probe = probe || document.createElement("canvas").getContext("2d");
+  if (!probe) { probe = document.createElement("canvas").getContext("2d"); probe.canvas._probe = true; }   // marked, so costly effects skip it
   const box = known || fn(probe);
   if (!box) return null;
   const px = box.x + box.w / 2, py = box.y + box.h / 2;
@@ -243,15 +244,15 @@ function drawFreeText(ctx, L, env) {
     ctx.translate(-widths[li] / 2, -bh / 2 + li * FS * LH + FS * (plate ? 0.94 : 0.9));
     if (!plate) ctx.transform(1, 0, -0.08, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
-    if (L.look === "title" && look().runs) {
-      const m = raw.getTransform ? raw.getTransform() : null;
-      look().runs(raw, pass, { fs: FS, d, strokeAmt: 1, shadowAmt: 1, C: env.C, fill: L.ink ? hexToRgb(L.ink) : { white: [240, 246, 250], accent: env.C, ink: [5, 5, 8] }[L.color], unit: m ? Math.hypot(m.a, m.b) : 1 }, lookValues());
+    if (L.look === "title") {   // a headline: painted by the layer's text effect, like the title
+      const m = raw.getTransform ? raw.getTransform() : null, light = L.color === "accent" ? "#ffffff" : env.acc;
+      paintRuns(raw, pass, {
+        fs: FS, d, strokeAmt: 1, shadowAmt: 1, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3,
+        fillCss: fill, hiCss: light, inkCss: L.color === "ink" ? "#ffffff" : INK, shadowCss: light, hiShadowCss: "#ffffff",
+        C: env.C, fill: L.ink ? hexToRgb(L.ink) : { white: [240, 246, 250], accent: env.C, ink: [5, 5, 8] }[L.color], unit: m ? Math.hypot(m.a, m.b) : 1,
+      }, L.fx);
       raw.restore();
       return;
-    }
-    if (L.look === "title") {
-      pass((a, cx) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? "#ffffff" : L.color === "accent" ? "#ffffff" : env.acc; ctx.lineWidth = FS * 0.04; ctx.strokeText(a.t, cx + d, d); ctx.fillText(a.t, cx + d, d); });
-      pass((a, cx) => { ctx.strokeStyle = L.color === "ink" ? "#ffffff" : INK; ctx.lineWidth = FS * 0.075; ctx.strokeText(a.t, cx, 0); });
     }
     pass((a, cx) => { ctx.fillStyle = a.hi && !plate ? (L.color === "accent" ? "#ffffff" : env.acc) : textFill; ctx.fillText(a.t, cx, 0); });
     ctx.restore();
@@ -292,7 +293,7 @@ const PAINT = {
     return placed(ctx, tr, (c) => drawTitle(c, env.cover.title, box, IDENTITY, {
       font: look().titleFont ? look().titleFont(fonts) : fonts.cn, maxFs: 340, align: L.align, fill: L.ink || th.titleFill, ink: th.titleInk, hi: L.hi || env.acc, shadow: L.hi || env.acc, hiShadow: L.ink || th.titleFill,
       own: L.ink ? hexToRgb(L.ink) : undefined, ownHi: L.hi ? hexToRgb(L.hi) : undefined,   // for looks that paint the letters themselves
-      stroke: clamp(L.stroke, 0, 2), shadowAmt: clamp(L.shadow, 0, 2), C: env.C,
+      stroke: clamp(L.stroke, 0, 2), shadowAmt: clamp(L.shadow, 0, 2), C: env.C, fx: L.fx, fxAmt: L.fxAmt,
     }));
   },
   tag(ctx, L, tr, env) {

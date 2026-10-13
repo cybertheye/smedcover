@@ -49,6 +49,8 @@ ui/
   js/layers.js       layer model: placement across sizes, ordering, channels (pure)
   js/layout.js       geometry for any aspect ratio and template (pure)
   js/title.js        title parsing and fitting
+  js/textfx.js       text effects: layered, masked and outlined
+  js/outlines.js     cache of glyph outlines (fetched from the Rust side)
   js/photo.js        background photo and the cached gaussian blur
   js/assets.js       asset library: graphics, stickers, uploads
   js/cel.js          cel-shading kit and the first five channel graphics
@@ -169,7 +171,25 @@ the real pixel size. `virtualSize(w, h)` gives it: 16:9 is 1920×1080, 4:3 is 16
 This lets type sizes, line weights and gaps be written as fixed numbers that keep their proportions
 from 900×383 up to 8K. Drawing then needs one overall scale on the canvas.
 
-### 5.2 Templates
+### 5.2 Adjusting and swapping
+
+A template's layout is not used directly: it first goes through `adjustLayout()`, which takes the
+adjustments kept in the profile — how much the colour block takes (`size`), how far the dividing
+edge leans (`slant`), the title box as fractions of what the template gives it (`tw`, `th`), and
+whether the halves are swapped (`flip`). All are fractions of the picture, so one setting suits
+every size. It serves both families of template, slanted and level, because it only reads and
+rewrites the geometry of a finished layout and does not care how that layout was computed.
+
+A swap is more than a mirror image: with the band on top, the brand row lands on it, the title's
+box moves below it, and the channel name and tag are rearranged. The layout it returns therefore
+carries a few flags (`brandOnAccent`, `railOnAccent`, `titleTop`, `flipped`) that drawing uses to
+change colours and positions.
+
+The diamond handles on the canvas get their positions from `layoutHandles()`; while one is dragged,
+`dragLayout()` turns the pointer position back into an adjustment. A swapped layout is first
+converted to unswapped coordinates, so the handles follow the pointer either way.
+
+### 5.3 Templates
 
 `layout(template, w, h)` returns all the geometry of a cover: the colour block polygon, the dividing
 edge, the title box, the corner tag position, the channel name position, and the graphic's centre and
@@ -210,7 +230,34 @@ highlighted runs. The type size is the largest at which the longest line fits th
 fit the height. Outline and shadow are several passes: the offset shadow, the ink outline, then the
 fill.
 
-### 6.2 Background photo and blur (`photo.js`)
+### 6.2 Text effects (`textfx.js`, `outlines.js`)
+
+The title, and text layers in the headline look, paint their letters through `paintRuns()`. The
+effect is a property of the layer (`fx`); unset means "auto", which leaves it to the current look.
+There are three kinds, differing in what they can change:
+
+| Kind | How | What it can change |
+|---|---|---|
+| Layered | the same line painted several times in different colours and places | what is around the letters: outlines, shadows, echoes. Each look's own lettering is of this kind and can also be chosen by name |
+| Masked | the letters are first painted alone on a spare canvas, which is worked on and then laid down | what is inside the letters: halftone, stripes, wear, an inner shadow, rows cut apart |
+| Outlined | each letter's outline is fetched as points, which are moved before they are filled | the letterforms: arched, tapered, waved, or extruded with real depth |
+
+**Where outlines come from** — a web view cannot read the outlines in a font file, so the Rust side
+supplies them. The `text_outline` command parses the font with `ttf-parser`, flattens curves to
+polylines and returns each glyph's outline and advance in units of one em. Fonts are found by name:
+bundled fonts (read from the app's own assets), fonts the user imported, then installed fonts.
+Variable fonts are traced at the weight asked for, and a character missing from the first font is
+taken from the next.
+
+**Asynchrony and drawing** — fetching takes a moment and drawing cannot wait. `outline()` answers at
+once from a cache; the first time it returns nothing, sends for the outline, and the effect falls
+back to ordinary lettering. When the outline arrives the interface is told to redraw. For an export,
+`renderReady()` waits for every request and draws again, so the exported image has the effect.
+
+**Extrusion** really sweeps every edge of the outline back into a wall: walls are split into lit and
+shaded by the way they face, each group is filled as one shape, then the back face and the front.
+
+### 6.3 Background photo and blur (`photo.js`)
 
 Canvas filters are not available in the macOS web view, so the gaussian blur is done in script:
 **three box blurs approximate one gaussian blur**, each box blur using a sliding window so its cost
@@ -220,7 +267,7 @@ The blur is applied to a reduced working copy of the photo and cached by photo a
 that, moving or scaling the photo, or editing any other layer, costs a single image draw. Exports
 recompute it from a higher-resolution copy.
 
-### 6.3 Assets
+### 6.4 Assets
 
 - **Channel graphics** and **stickers** are all drawn in code — there are no image files — so they are sharp at any size and can take the channel colour. `cel.js` provides a cel-shading kit (flat tones, ink lines, pseudo-3D boxes and prisms); `graphics.js` adds more through `registerGraphics()`.
 - **Uploads** are stored as data URLs in the app data directory and cached once decoded.
@@ -469,7 +516,11 @@ canvas ──toBlob (async)──▶ PNG bytes ──binary frame──▶ Rust 
 File names pass through `safe_name()`, which keeps only the last path component, so a name cannot be
 used to write into another directory.
 
-### 10.3 AI requests
+### 10.3 Glyph outlines
+
+`text_outline`: see 6.2. A font file, once found by name, is cached, and installed fonts are scanned once.
+
+### 10.4 AI requests
 
 `ai_request` sends the request the interface built (URL, headers, JSON body) and hands back the
 status and body as they are — error replies included, so the interface can show the provider's own
@@ -479,7 +530,7 @@ message. It is sent from Rust to get around the cross-origin limits of a web vie
 - Only `http://` and `https://` are accepted and at most 4 MB of a reply is read. The timeout comes from the settings, 300 seconds by default.
 - Proxy: the one given in the settings wins; otherwise `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` from the environment. **Addresses on this machine never go through the environment's proxy**, or a local model would be cut off by it.
 
-### 10.4 Other commands
+### 10.5 Other commands
 
 `pick_folder`, `save_text` (profiles, projects, the CSV template) and `list_system_fonts` (which
 enumerates installed fonts with fontdb).

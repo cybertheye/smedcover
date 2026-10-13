@@ -1,7 +1,7 @@
 // Title typesetting. One typed line is one line on the cover: text is never wrapped; instead the
 // size is the largest at which the longest line fits the width and all lines fit the height.
 import { INK } from "./cel.js";
-import { look, lookValues } from "./style.js";
+import { paintRuns } from "./textfx.js";
 
 /** "a\n*b* c" -> [[{t:"a",hi:false}], [{t:"b",hi:true},{t:" c",hi:false}]]. Literal "\n" also breaks. */
 export function parseTitle(title) {
@@ -15,7 +15,8 @@ export function parseTitle(title) {
 
 /**
  * Draws the title into box {x,y,w,h}. `adj` is the manual {dx,dy,s}; `st` the style:
- * { font, fill, hi, ink, shadow, hiShadow, align, stroke, shadowAmt, maxFs }.
+ * { font, fill, hi, ink, shadow, hiShadow, align, stroke, shadowAmt, maxFs, fx, fxAmt } — fx being
+ * the text effect (see textfx.js).
  * Returns the box it occupies (for hit-testing), or null when there is nothing to draw.
  */
 export function drawTitle(ctx, title, box, adj, st) {
@@ -41,15 +42,12 @@ export function drawTitle(ctx, title, box, adj, st) {
     ctx.translate(x0 + fs * 0.04 + (st.align === "center" ? (blockW - lw) / 2 : 0), y0 + li * fs * LH + fs * 0.92);
     ctx.transform(1, 0, -0.08, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
-    if (look().runs) {   // the look paints the letters its own way
-      const m = ctx.getTransform ? ctx.getTransform() : null;
-      look().runs(ctx, pass, { fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, C: st.C, fill: st.own, hi: st.ownHi, unit: m ? Math.hypot(m.a, m.b) : 1 }, lookValues());
-      ctx.restore();
-      return;
-    }
-    if (d > 0) pass((a, cx) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? st.hiShadow : st.shadow; ctx.lineWidth = fs * 0.04; ctx.strokeText(a.t, cx + d, d); ctx.fillText(a.t, cx + d, d); });
-    if (st.stroke > 0) pass((a, cx) => { ctx.strokeStyle = st.ink; ctx.lineWidth = fs * 0.075 * st.stroke; ctx.strokeText(a.t, cx, 0); });
-    pass((a, cx) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? st.hi : st.fill; ctx.lineWidth = fs * 0.018; ctx.strokeText(a.t, cx, 0); ctx.fillText(a.t, cx, 0); });
+    const m = ctx.getTransform ? ctx.getTransform() : null;
+    paintRuns(ctx, pass, {
+      fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: st.fxAmt ?? 1, lineW: lw, seed: li * 17.3 + 1,
+      fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow,
+      C: st.C, fill: st.own, hi: st.ownHi, unit: m ? Math.hypot(m.a, m.b) : 1,
+    }, st.fx);
     ctx.restore();
   });
   ctx.restore();
