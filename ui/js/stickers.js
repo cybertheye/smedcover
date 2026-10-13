@@ -199,6 +199,10 @@ export const STICKERS = [
   }),
 ];
 
+/** The house painters and path builders, for stickers described as data (see spec.js). */
+export const KIT = { shape, blob, stroke, thin, word, poly, star, circle, rrect, curve, pathLine };
+export const PALETTE = { white: WHITE, ink: INK, red: RED, yellow: YELLOW, orange: ORANGE, blue: BLUE, green: GREEN, pink: PINK };
+
 const BY_ID = new Map(STICKERS.map((s) => [s.id, s]));
 export const stickerById = (id) => BY_ID.get(id);
 /** Draws a sticker centred on the origin in its 200-unit box. `tint` overrides the default colour. */

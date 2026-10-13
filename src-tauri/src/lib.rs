@@ -5,14 +5,16 @@
 //! * a small sandboxed store under the app data directory (profiles, settings, session, fonts);
 //! * exporting covers: the web view sends PNG bytes in a raw, framed request body (no base64),
 //!   which are converted to PNG, JPEG or WebP and written here, off the main thread;
-//! * listing the fonts installed on the system.
+//! * listing the fonts installed on the system;
+//! * sending the request for an AI-generated asset, so it is not subject to the web view's
+//!   cross-origin rules.
 
 use std::fs;
-use std::io::{Cursor, ErrorKind};
+use std::io::{Cursor, ErrorKind, Read};
 use std::path::{Component, Path, PathBuf};
 
 use image::{codecs::jpeg::JpegEncoder, ImageFormat, RgbImage};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -290,6 +292,107 @@ async fn list_system_fonts() -> Vec<String> {
     names
 }
 
+// ---------------------------------------------------------------- AI request
+
+/// Longest an AI request may take, and the most of a reply that is read.
+const AI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+const AI_MAX_REPLY: u64 = 4 * 1024 * 1024;
+
+/// What came back from an AI endpoint: the status and body are handed to the web view as they
+/// are, error replies included, so it can show the provider's own message.
+#[derive(Serialize, Debug)]
+struct AiReply {
+    status: u16,
+    text: String,
+}
+
+fn read_capped(response: ureq::Response) -> Res<String> {
+    let mut text = String::new();
+    response
+        .into_reader()
+        .take(AI_MAX_REPLY)
+        .read_to_string(&mut text)
+        .map_err(err)?;
+    Ok(text)
+}
+
+/// Whether a URL points at this machine (a local model server), which no proxy should sit in front of.
+fn is_local(url: &str) -> bool {
+    let rest = url.split("://").nth(1).unwrap_or("");
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or("");
+    let host = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => host.split(':').next().unwrap_or(""),
+    };
+    host.eq_ignore_ascii_case("localhost") || host == "::1" || host.starts_with("127.")
+}
+
+/// The proxy to use for `url`: the one given, else — for hosts that are not this machine — the
+/// one in the usual environment variables.
+fn proxy_for(url: &str, given: &str) -> Option<String> {
+    if !given.trim().is_empty() {
+        return Some(given.trim().to_string());
+    }
+    if is_local(url) {
+        return None;
+    }
+    let names: &[&str] = if url.starts_with("https://") {
+        &["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"]
+    } else {
+        &["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"]
+    };
+    names
+        .iter()
+        .find_map(|n| std::env::var(n).ok().filter(|v| !v.trim().is_empty()))
+}
+
+/// POSTs a JSON body to an http(s) URL with the given headers, optionally through a proxy.
+fn post_json(url: &str, headers: &[(String, String)], body: &str, proxy: &str) -> Res<AiReply> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(format!("invalid URL: {url}"));
+    }
+    let mut builder = ureq::AgentBuilder::new().timeout(AI_TIMEOUT);
+    if let Some(p) = proxy_for(url, proxy) {
+        builder = builder.proxy(ureq::Proxy::new(&p).map_err(|e| format!("proxy {p}: {e}"))?);
+    }
+    let agent = builder.build();
+    let mut request = agent.post(url);
+    for (name, value) in headers {
+        request = request.set(name, value);
+    }
+    match request.send_string(body) {
+        Ok(response) => Ok(AiReply {
+            status: response.status(),
+            text: read_capped(response)?,
+        }),
+        Err(ureq::Error::Status(status, response)) => Ok(AiReply {
+            status,
+            text: read_capped(response).unwrap_or_default(),
+        }),
+        Err(e) => Err(err(e)),
+    }
+}
+
+/// Sends one request for an AI-generated asset. The web view builds the request (see `ui/js/ai.js`);
+/// sending it from here avoids the cross-origin limits a web view has.
+#[tauri::command(async)]
+fn ai_request(
+    url: String,
+    headers: Vec<(String, String)>,
+    body: String,
+    proxy: Option<String>,
+) -> Res<AiReply> {
+    post_json(&url, &headers, &body, proxy.as_deref().unwrap_or(""))
+}
+
+/// In self-test mode, the URL of a stand-in AI endpoint to exercise `ai_request` against.
+#[tauri::command]
+fn selftest_ai() -> Option<String> {
+    selftest_root()?;
+    std::env::var("SMEDCOVER_SELFTEST_AI").ok()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -304,7 +407,9 @@ pub fn run() {
             write_image,
             save_text,
             list_system_fonts,
+            ai_request,
             selftest_dir,
+            selftest_ai,
             selftest_done
         ])
         .run(tauri::generate_context!())
@@ -430,5 +535,127 @@ mod tests {
             .unwrap()
             .to_rgba8();
         assert_eq!(back, img);
+    }
+
+    /// A one-shot HTTP server on a free local port that answers with `status` and `body`, and
+    /// hands back the request it received.
+    fn serve_once(
+        status: &'static str,
+        body: &'static str,
+    ) -> (String, std::thread::JoinHandle<String>) {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!(
+            "http://{}/v1/chat/completions",
+            listener.local_addr().unwrap()
+        );
+        let handle = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream);
+            let (mut head, mut length) = (String::new(), 0usize);
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+                if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = v.trim().parse().unwrap();
+                }
+                head.push_str(&line);
+            }
+            let mut sent = vec![0u8; length];
+            reader.read_exact(&mut sent).unwrap();
+            let reply = format!(
+                "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            reader.get_mut().write_all(reply.as_bytes()).unwrap();
+            format!("{head}\n{}", String::from_utf8(sent).unwrap())
+        });
+        (url, handle)
+    }
+
+    #[test]
+    fn post_json_sends_headers_and_body_and_returns_the_reply() {
+        let (url, server) = serve_once("200 OK", r#"{"choices":[{"message":{"content":"hi"}}]}"#);
+        let headers = vec![
+            ("content-type".to_string(), "application/json".to_string()),
+            ("authorization".to_string(), "Bearer sk-test".to_string()),
+        ];
+        let reply = post_json(&url, &headers, r#"{"model":"m"}"#, "").unwrap();
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.text, r#"{"choices":[{"message":{"content":"hi"}}]}"#);
+        let seen = server.join().unwrap().to_ascii_lowercase();
+        assert!(seen.starts_with("post /v1/chat/completions"));
+        assert!(seen.contains("authorization: bearer sk-test"));
+        assert!(seen.ends_with(r#"{"model":"m"}"#));
+    }
+
+    #[test]
+    fn post_json_passes_error_replies_through() {
+        let (url, server) = serve_once("401 Unauthorized", r#"{"error":{"message":"bad key"}}"#);
+        let reply = post_json(&url, &[], "{}", "").unwrap();
+        assert_eq!(reply.status, 401);
+        assert_eq!(reply.text, r#"{"error":{"message":"bad key"}}"#);
+        server.join().unwrap();
+    }
+
+    /// Needs the network, so it only runs on request: `cargo test -- --ignored`.
+    /// Without a key both providers must answer 401 with a JSON error, which shows that TLS,
+    /// any proxy from the environment and the pass-through of error replies all work.
+    #[test]
+    #[ignore]
+    fn live_endpoints_answer_unauthenticated_requests_with_401() {
+        for url in [
+            "https://api.openai.com/v1/chat/completions",
+            "https://api.anthropic.com/v1/messages",
+        ] {
+            let headers = vec![("content-type".to_string(), "application/json".to_string())];
+            let reply = post_json(url, &headers, "{}", "").unwrap();
+            assert_eq!(reply.status, 401, "{url}: {}", reply.text);
+            assert!(reply.text.contains("error"), "{url}: {}", reply.text);
+        }
+    }
+
+    #[test]
+    fn local_hosts_never_go_through_the_environment_proxy() {
+        for url in [
+            "http://localhost:11434/v1",
+            "http://127.0.0.1/x",
+            "https://LOCALHOST",
+            "http://[::1]:8080/v1",
+            "http://user@127.0.0.1:1/x",
+        ] {
+            assert!(is_local(url), "{url}");
+            assert_eq!(proxy_for(url, ""), None, "{url}");
+        }
+        for url in [
+            "https://api.openai.com/v1",
+            "https://localhost.example.com",
+            "http://10.0.0.2:8000",
+        ] {
+            assert!(!is_local(url), "{url}");
+        }
+        // a proxy given explicitly always wins, and a bad one is an error rather than ignored
+        assert_eq!(
+            proxy_for("http://localhost/x", " http://127.0.0.1:7890 "),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+        assert!(post_json("https://example.com", &[], "{}", "nonsense://x")
+            .unwrap_err()
+            .starts_with("proxy"));
+    }
+
+    #[test]
+    fn post_json_refuses_other_schemes_and_reports_unreachable_hosts() {
+        assert!(post_json("file:///etc/passwd", &[], "{}", "").is_err());
+        assert!(post_json("ftp://example.com", &[], "{}", "").is_err());
+        // a port nothing listens on
+        let free = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        assert!(post_json(&format!("http://{free}/x"), &[], "{}", "").is_err());
     }
 }

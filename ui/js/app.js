@@ -7,12 +7,15 @@ import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { ratioText } from "./store.js";
-import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
+import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
 import { ACCENT_SHAPES, newLayer, isFree, isPickable, appliesTo, stepIndex, adjust, resetPlacement, writeKey, insertAbove, moveLayer, duplicate } from "./layers.js";
 import {
   native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
 } from "./store.js";
+
+import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
+import { AI_STYLES, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt } from "./ai.js";
 
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
@@ -86,6 +89,7 @@ const timers = {};
 const later = (key, ms, fn) => { clearTimeout(timers[key]); timers[key] = setTimeout(fn, ms); };
 const persistProfile = () => later("profile", 400, () => saveProfile(S.profile).catch(fail));
 const persistCover = () => later("cover", 400, () => writeJson("session.json", S.cover).catch(fail));
+const persistAi = () => later("ai", 400, () => writeJson("ai.json", S.ai).catch(fail));
 const persistSettings = () => later("settings", 400, () => writeJson("settings.json", S.settings).catch(fail));
 
 const snapshot = () => JSON.stringify({ p: S.profile, c: S.cover });
@@ -408,6 +412,7 @@ function assetsTab() {
   return [
     el("button", { class: "btn solid wide", onclick: uploadAssets }, t("assets.upload")),
     el("div", { class: "hint", style: "margin:-6px 0 0" }, t("assets.hint")),
+    aiSection(),
     el("div", {}, cap("assets.mine", ` · ${mine.length}`), mine.length
       ? el("div", { class: "tiles" }, mine.map((a) => tile({ kind: "user", id: a.id }, () => removeAsset(a.id))))
       : el("div", { class: "hint", style: "margin:0" }, t("assets.mineEmpty"))),
@@ -416,6 +421,105 @@ function assetsTab() {
     STICKER_GROUPS.map((g) => el("div", {}, el("label", { class: "cap" }, g.name[lang]), el("div", { class: "tiles" }, STICKERS.filter((s) => s.group === g.id).map((s) => tile({ kind: "sticker", id: s.id }))))),
   ];
 }
+// ---------- AI-generated assets
+const AI = { target: "", busy: false, error: "", result: null, test: "" };
+/** Sends one prompt to the configured endpoint and returns {text, truncated}. Throws with the provider's message. */
+async function aiCall(cfg, system, user) {
+  const req = buildRequest(cfg, system, user), body = JSON.stringify(req.body);
+  const reply = native
+    ? await invoke("ai_request", { url: req.url, headers: Object.entries(req.headers), body, proxy: cfg.proxy || null })
+    : await fetch(req.url, { method: "POST", headers: req.headers, body }).then(async (r) => ({ status: r.status, text: await r.text() }));
+  const out = readReply(cfg.style, reply.status, reply.text);
+  if (out.error) throw new Error(out.error);
+  return out;
+}
+/** Asks the model for a sticker of `target` and returns the validated spec. */
+async function requestSpec(cfg, target) {
+  const { system, user } = buildPrompt(target, cfg.notes);
+  const out = await aiCall(cfg, system, user), r = parseSpec(out.text);
+  if (r.error) throw new Error(out.truncated ? t("ai.truncated") : t("ai.badSpec", r.error));
+  return r.spec;
+}
+const onAssetsTab = () => S.mode === "edit" && S.tab.edit === "assets";
+async function generateAsset() {
+  const target = AI.target.trim();
+  if (!target || AI.busy) return;
+  Object.assign(AI, { busy: true, error: "", result: null });
+  renderPanel();
+  try { AI.result = await requestSpec(S.ai, target); } catch (e) { AI.error = String(e && e.message ? e.message : e); }
+  AI.busy = false;
+  if (onAssetsTab()) renderPanel();
+}
+async function keepGenerated() {
+  const spec = AI.result;
+  if (!spec) return;
+  const a = putSpecAsset("a" + uid(), spec.name[getLang()], spec);
+  await saveAssetRecord(a).catch(fail);
+  AI.result = null;
+  toast(t("ai.saved", a.name));
+  renderPanel();
+}
+function specPreview(spec, tint) {
+  const cv = el("canvas", { width: 220, height: 220 }), x = cv.getContext("2d");
+  x.translate(110, 110); x.scale(0.95, 0.95);
+  drawSpec(x, spec, tint);
+  return el("div", { class: "tile", style: "cursor:default" }, cv);
+}
+function aiSection() {
+  if (!aiReady(S.ai)) {
+    return el("div", { class: "box" }, cap("ai.title"), el("div", { class: "hint", style: "margin:0 0 10px" }, t("ai.needSetup")),
+      el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; setMode("setup"); } }, t("ai.goSetup")));
+  }
+  const r = AI.result;
+  return el("div", { class: "box" }, cap("ai.title"),
+    textInput(AI.target, (v) => { AI.target = v; }, { placeholder: t("ai.targetPh"), maxLength: 300, disabled: AI.busy, onkeydown: (e) => { if (e.key === "Enter") generateAsset(); } }),
+    el("button", { class: "btn solid wide", style: "margin-top:10px", disabled: AI.busy, onclick: generateAsset }, t(AI.busy ? "ai.busy" : r ? "ai.again" : "ai.generate")),
+    AI.error && el("div", { class: "hint err" }, t("msg.failed", AI.error)),
+    r && [
+      el("div", { class: "tiles", style: "grid-template-columns:1fr 1fr;margin-top:12px" }, specPreview(r, null), specPreview(r, cat().color)),
+      el("div", { class: "hint" }, t("ai.previewHint", r.name[getLang()])),
+      el("div", { class: "row" },
+        el("button", { class: "btn solid", onclick: keepGenerated }, t("ai.keep")),
+        el("button", { class: "btn", onclick: () => { AI.result = null; renderPanel(); } }, t("ai.discard"))),
+    ],
+    el("div", { class: "hint" }, t("ai.hint", S.ai.model)));
+}
+function aiTab() {
+  const c = S.ai, ph = AI_PLACEHOLDER[c.style];
+  const where = () => (aiReady(S.ai) ? t("ai.endpoint", endpoint(S.ai)) : "");
+  const ep = el("div", { class: "hint", style: "margin-top:-10px;word-break:break-all" }, where());
+  const testBtn = el("button", { class: "btn wide", disabled: !aiReady(c), onclick: () => test() }, t("ai.test"));
+  const set = (k, v, redraw = false) => {
+    S.ai = normalizeAi({ ...S.ai, [k]: v }); AI.test = ""; persistAi();
+    if (redraw) return renderPanel();
+    ep.textContent = where(); testBtn.disabled = !aiReady(S.ai);       // typing must not rebuild the form
+  };
+  const field = (key, k, props = {}) => el("div", {}, cap(key), textInput(c[k], (v) => set(k, v), props));
+  const test = async () => {
+    AI.test = t("ai.testing"); renderPanel();
+    try { const out = await aiCall(S.ai, "Reply with the single word OK.", "ping"); AI.test = t("ai.testOk", out.text.trim().slice(0, 60)); }
+    catch (e) { AI.test = t("msg.failed", String(e && e.message ? e.message : e)); }
+    if (S.mode === "setup" && S.tab.setup === "ai") renderPanel();
+  };
+  return [
+    el("div", { class: "hint", style: "margin:0" }, t("ai.intro")),
+    el("div", {}, cap("ai.style"), select(AI_STYLES.map((k) => [k, t("ai.style." + k)]), c.style, (v) => set("style", v, true))),
+    field("ai.baseUrl", "baseUrl", { placeholder: ph.baseUrl }),
+    ep,
+    field("ai.token", "token", { type: "password", placeholder: t("ai.tokenPh"), autocomplete: "off" }),
+    field("ai.model", "model", { placeholder: t("ai.modelPh") }),
+    c.style === "anthropic" && [
+      el("div", {}, cap("ai.auth"), select([["key", t("ai.auth.key")], ["bearer", t("ai.auth.bearer")]], c.auth, (v) => set("auth", v))),
+      el("div", {}, cap("ai.maxTokens"), el("input", { type: "number", min: 512, max: 64000, step: 256, value: c.maxTokens, onchange: (e) => set("maxTokens", e.target.value, true) })),
+    ],
+    field("ai.proxy", "proxy", { placeholder: "http://127.0.0.1:7890" }),
+    el("div", {}, cap("ai.notes"), el("textarea", { value: c.notes, spellcheck: false, style: "height:84px;font-size:14px", placeholder: t("ai.notesPh"), oninput: (e) => set("notes", e.target.value) })),
+    testBtn,
+    AI.test && el("div", { class: "hint", style: "margin-top:-8px;word-break:break-word" }, AI.test),
+    el("div", { class: "hint" }, t("ai.privacy")),
+  ];
+}
+
 /** Stores an image in the library (memory + disk). Returns its id, or null if unreadable. */
 async function adoptAsset(name, src, id = assetIdFor(src)) {
   if (userAssets.has(id)) return id;
@@ -618,7 +722,7 @@ function typeControls(L) {
     case "tag": return el("div", { class: "hint", style: "margin:0" }, t("props.boundHint"));
     case "catname": return [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v))];
     case "graphic": return el("div", { class: "hint", style: "margin:0" }, t("props.graphicHint"));
-    case "asset": return canTint(L.ref) && L.ref.kind === "sticker" ? check("props.tint", L.tint, (v) => set("tint", v)) : null;
+    case "asset": return canTint(L.ref) && L.ref.kind !== "graphic" ? check("props.tint", L.tint, (v) => set("tint", v)) : null;
     case "text": return [
       cap("props.text"), el("textarea", { value: L.text, spellcheck: false, style: "height:72px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
       el("div", { style: "margin-top:8px" }, select(["title", "plain", "plate"].map((k) => [k, `${t("props.look")} · ${t("look." + k)}`]), L.look, (v) => set("look", v))),
@@ -774,9 +878,13 @@ function exportDialog() {
 }
 
 // ---------- profiles and projects (uploaded assets travel inside the exported files)
-const embedAssets = (ids) => ids.map((id) => userAssets.get(id)).filter(Boolean).map(({ id, name, src }) => ({ id, name, src }));
+const embedAssets = (ids) => ids.map((id) => userAssets.get(id)).filter(Boolean).map(({ id, name, src, spec }) => (spec ? { id, name, spec } : { id, name, src }));
 async function adoptEmbedded(list) {
-  for (const a of Array.isArray(list) ? list : []) if (a && typeof a.id === "string" && typeof a.src === "string") await adoptAsset(a.name, a.src, a.id);
+  for (const a of Array.isArray(list) ? list : []) {
+    if (!a || typeof a.id !== "string") continue;
+    if (typeof a.src === "string") await adoptAsset(a.name, a.src, a.id);
+    else if (a.spec && !userAssets.has(a.id)) { const r = normalizeSpec(a.spec); if (r.spec) await saveAssetRecord(putSpecAsset(a.id, a.name, r.spec)).catch(fail); }
+  }
 }
 async function switchProfile(id) {
   S.profile = S.profiles.find((p) => p.id === id) || S.profiles[0];
@@ -859,7 +967,7 @@ function syncTop() {
       [["zh", "中文"], ["en", "English"]].map(([v, l]) => el("option", { value: v, selected: v === getLang() }, l))));
   document.body.dataset.drop = t("msg.dropHere");
 }
-const TABS = { edit: { cover: coverTab, style: styleTab, assets: assetsTab }, setup: { brand: brandTab, sizes: sizesTab, fonts: fontsTab } };
+const TABS = { edit: { cover: coverTab, style: styleTab, assets: assetsTab }, setup: { brand: brandTab, sizes: sizesTab, fonts: fontsTab, ai: aiTab } };
 function syncTabs() {
   $("tabs").replaceChildren(...Object.keys(TABS[S.mode]).map((k) => el("button", { class: k === S.tab[S.mode] ? "on" : "", onclick: () => { S.tab[S.mode] = k; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, t("tab." + k))));
 }
@@ -919,7 +1027,10 @@ async function start() {
   for (const name of await files.list("fonts").catch(() => [])) {
     if (name.endsWith(".font")) { const src = await files.read("fonts/" + name).catch(() => null); if (src) await registerFont(name.slice(0, -5), src); }
   }
-  for (const a of await loadAssetRecords().catch(() => [])) await putUserAsset(a.id, a.name, a.src);
+  for (const a of await loadAssetRecords().catch(() => [])) {
+    if (a.spec) { const r = normalizeSpec(a.spec); if (r.spec) putSpecAsset(a.id, a.name, r.spec); } else await putUserAsset(a.id, a.name, a.src);
+  }
+  S.ai = normalizeAi(await readJson("ai.json").catch(() => null));
   if (native) S.systemFonts = await invoke("list_system_fonts").catch(() => []);
   S.profiles = await loadProfiles().catch(() => []);
   const selftest = native ? await invoke("selftest_dir").catch(() => null) : null;
@@ -938,6 +1049,21 @@ async function start() {
 async function selfTest(dir) {
   const report = { ok: false, files: [], errors: [] };
   try {
+    const aiUrl = await invoke("selftest_ai").catch(() => null);
+    if (aiUrl) {   // both API styles against a stand-in endpoint: request, reply, validation, storage, drawing
+      report.ai = [];
+      for (const style of AI_STYLES) {
+        const cfg = normalizeAi({ style, baseUrl: aiUrl + (style === "openai" ? "/v1" : ""), token: "selftest-token", model: "selftest-model" });
+        const spec = await requestSpec(cfg, "a star");
+        const a = putSpecAsset("a" + uid(), spec.name.en, spec);
+        await saveAssetRecord(a);
+        addAsset({ kind: "user", id: a.id });
+        const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
+        report.ai.push({ style, name: a.name, ops: spec.ops.length, stored: !!(await readJson(`assets/${a.id}.json`))?.spec, drawn: cv._hits.some((h) => h.id === S.layerId) });
+      }
+      try { await aiCall(normalizeAi({ style: "openai", baseUrl: aiUrl + "/fail", model: "m" }), "s", "u"); report.errors.push("ai: an error reply was not reported"); }
+      catch (e) { report.aiError = String(e.message); }
+    }
     S.cover.title = "Self test\n*binary* export"; S.cover.tag = "EP.01";
     for (const format of ["png", "jpeg", "webp"]) {
       S.settings.format = format;
@@ -947,6 +1073,7 @@ async function selfTest(dir) {
       report[format + "_ms"] = Math.round(performance.now() - t0);
       if (n !== jobs.length) report.errors.push(`${format}: ${n}/${jobs.length} — ${$("toast").textContent}`);
     }
+    if (report.ai && !report.ai.every((r) => r.stored && r.drawn)) report.errors.push("ai: a generated asset was not stored or drawn");
     report.ok = !report.errors.length;
   } catch (e) { report.errors.push(String(e && e.message ? e.message : e)); }
   await invoke("selftest_done", { report: JSON.stringify(report, null, 2) }).catch(() => null);

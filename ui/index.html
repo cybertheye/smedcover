@@ -51,11 +51,12 @@
   .scroll::-webkit-scrollbar-thumb{background:#55556e;border:2px solid var(--panel)}
 
   label.cap,.cap{display:block;font:600 11px var(--mono);letter-spacing:.12em;opacity:.6;margin-bottom:8px;text-transform:uppercase}
-  input[type=text],input[type=number],textarea,select{width:100%;background:var(--panel);border:2px solid var(--line);padding:9px;border-radius:0}
+  input[type=text],input[type=password],input[type=number],textarea,select{width:100%;background:var(--panel);border:2px solid var(--line);padding:9px;border-radius:0}
   textarea{height:100px;resize:vertical;font-size:16px}
   input:focus,textarea:focus,select:focus{outline:none;border-color:#fff}
   .hint{font-size:12px;opacity:.5;line-height:1.7;margin-top:6px}
   .box{border:2px solid var(--line);padding:12px}
+  .hint.err{color:#ff7a88;opacity:1;word-break:break-word}
   .chips{display:flex;flex-wrap:wrap;gap:6px}
   .chips button{border:2px solid var(--c,#fff);background:transparent;color:var(--c,#fff);padding:8px 12px;cursor:pointer;font-weight:600;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .chips button.on{background:var(--c,#fff);color:var(--ink)}

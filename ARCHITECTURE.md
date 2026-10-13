@@ -9,7 +9,7 @@ For people who want to read or change the code. For how to use the app, see [REA
 SmedCover is a Tauri 2 app in two halves:
 
 - **The interface (`ui/`)** runs in the system web view and does all interaction and **all drawing**. Plain ES modules: no bundler, no framework, no runtime dependencies.
-- **The Rust shell (`src-tauri/`)** only touches files: it reads and writes app data, converts and saves images, shows system dialogs and lists system fonts.
+- **The Rust shell (`src-tauri/`)** only touches files and the network: it reads and writes app data, converts and saves images, shows system dialogs, lists system fonts and sends the AI request for a generated asset.
 
 ```mermaid
 flowchart LR
@@ -53,7 +53,9 @@ ui/
   js/assets.js       asset library: graphics, stickers, uploads
   js/cel.js          cel-shading kit and the first five channel graphics
   js/graphics.js     fifteen more channel graphics
-  js/stickers.js     the sixty stickers
+  js/stickers.js     the sixty stickers, and the shared painters
+  js/spec.js         stickers described as data: validation and interpreter (AI-generated assets)
+  js/ai.js           AI generation: settings, requests for both API styles, the preset prompt (pure)
   js/store.js        data model, validation, persistence
   js/presets.js      starter profiles and size presets
   js/csv.js          CSV reader for batch export
@@ -99,7 +101,8 @@ hand-edited files cannot crash the app.
 name pattern, adjustment scope.
 
 Other files: `assets/<id>.json` (uploaded assets, as data URLs), `fonts/<name>.font` (imported
-fonts), `session-photo` (the current background photo).
+fonts), `session-photo` (the current background photo), `ai.json` (AI connection settings including the token; never exported with
+profiles or projects).
 
 A **project file** bundles the cover, its profile and the uploads it uses into one JSON, so it opens
 unchanged on another computer.
@@ -213,9 +216,69 @@ recompute it from a higher-resolution copy.
 - **Uploads** are stored as data URLs in the app data directory and cached once decoded.
 - `drawAsset()` is the single entry point and returns the asset's half-extents for hit-testing.
 
-## 7. Interaction (`app.js`)
+## 7. AI-generated assets (`ai.js`, `spec.js`)
 
-### 7.1 State and refresh
+### 7.1 Why the model returns data, not code
+
+The built-in stickers are code, so the obvious idea is to have the model return drawing code too.
+That was not done, for safety: the code would run in the web view, which can call commands that read
+and write app data, save files and make network requests. Running code written by a remote model,
+and steered by user input, would hand it all of that.
+
+So the model returns a **sticker spec**: a JSON object listing drawing operations. It keeps every
+benefit of the code form — drawn live, sharp at any size, able to follow the channel colour — while
+nothing in it is ever executed.
+
+```jsonc
+{ "name": { "zh": "爱心", "en": "Heart" }, "color": "#ff3b4f",
+  "ops": [
+    { "op": "shape", "path": { "curve": [["M",0,82], ["C",-118,8,-74,-96,0,-36], ["C",74,-96,118,8,0,82]] }, "fill": "main" },
+    { "op": "detail", "pts": [[-46,-34], [-56,-14]], "color": "white", "lw": 9 }
+  ] }
+```
+
+- Same coordinate system as the built-in stickers: a 200×200 box centred on the origin.
+- Five operations — `shape`, `blob`, `line`, `detail`, `text` — map directly onto the five painters in `stickers.js`; paths are polygon, circle, rounded rectangle, star or curve.
+- The colour `"main"` stands for the main colour, replaced by the channel colour when tinted.
+
+**The style therefore does not depend on the model behaving: the interpreter guarantees it.** Heavy
+ink lines, hard shadows and flat fills are added by the painters; the model only decides shapes and
+colours.
+
+### 7.2 Validation
+
+`normalizeSpec()` checks a reply item by item: operations must be on the list, numbers must be finite
+and are clamped to their range, colours must be a palette name or a hex value, and the number of
+operations, points and characters is capped. Anything unknown is refused rather than guessed at;
+extra fields are dropped. `parseSpec()` finds the JSON inside a reply that may carry a code fence or
+a polite sentence.
+
+A spec that passes is stored as `assets/<id>.json` next to uploaded images. It is one of *My assets*
+and travels with exported profiles and projects.
+
+### 7.3 Requests and the prompt
+
+`buildRequest()` produces the request for each API style:
+
+| | OpenAI style | Anthropic style |
+|---|---|---|
+| URL | `{BASE_URL}/chat/completions` | `{BASE_URL}/v1/messages` |
+| Authentication | `Authorization: Bearer` | `x-api-key`, or `Authorization: Bearer` |
+| Other headers | none | `anthropic-version` |
+| System prompt | a `system` message | the top-level `system` field |
+| Length parameter | not sent | `max_tokens` (required) |
+
+The OpenAI style deliberately sends no sampling or length parameters: models disagree on which they
+accept, and one too many gets the request rejected. `readReply()` reads replies, error messages and
+the "cut off" signal of both styles.
+
+The preset `SYSTEM_PROMPT` describes the style, the coordinate system, the colour rules and the data
+format above, with a few examples. The examples are themselves valid specs and the unit tests
+validate each one, so the prompt and the interpreter cannot drift apart.
+
+## 8. Interaction (`app.js`)
+
+### 8.1 State and refresh
 
 All state is in one object `S`: the current profile, cover, settings, mode, selected size and layer,
 and the undo history.
@@ -228,28 +291,28 @@ repeatedly.
 There is no framework: each column is built with a small element helper, `el()`, and rebuilt whole
 when needed.
 
-### 7.2 Working on the canvas
+### 8.2 Working on the canvas
 
 - The pointer position is converted to virtual coordinates and tested against `canvas._hits`, top first. The point is rotated back into each layer's own frame, so rotated layers are hit accurately.
 - For the selected layer the handles are checked first: corners resize, sides stretch, the top knob rotates. Handle size is computed in screen pixels, so handles look the same at any zoom.
 - Corner brackets are never hit; the background can be dragged only when it holds a photo.
 
-### 7.3 Undo
+### 8.3 Undo
 
 After each change (debounced by half a second) the profile and cover are serialised into one string
 snapshot, pushed only if it differs from the last, up to 80 steps. Undo parses a snapshot back and
 validates it again. Simple, at the cost of a full copy per step — fine at the current data size.
 
-## 8. The Rust side (`src-tauri/src/lib.rs`)
+## 9. The Rust side (`src-tauri/src/lib.rs`)
 
-### 8.1 Sandboxed store
+### 9.1 Sandboxed store
 
 `app_read`, `app_write`, `app_list` and `app_delete` take relative paths only. `resolve()` joins them
 to the app data directory and refuses absolute paths and `..`, so the interface cannot reach files
 outside it. Writes go to a temporary file that is then renamed, so quitting mid-write never leaves
 half a file.
 
-### 8.2 Export pipeline
+### 9.2 Export pipeline
 
 ```
 canvas ──toBlob (async)──▶ PNG bytes ──binary frame──▶ Rust worker thread ──▶ PNG / JPEG / WebP file
@@ -269,12 +332,21 @@ canvas ──toBlob (async)──▶ PNG bytes ──binary frame──▶ Rust 
 File names pass through `safe_name()`, which keeps only the last path component, so a name cannot be
 used to write into another directory.
 
-### 8.3 Other commands
+### 9.3 AI requests
+
+`ai_request` sends the request the interface built (URL, headers, JSON body) and hands back the
+status and body as they are — error replies included, so the interface can show the provider's own
+message. It is sent from Rust to get around the cross-origin limits of a web view.
+
+- Only `http://` and `https://` are accepted; the timeout is 180 seconds and at most 4 MB of a reply is read.
+- Proxy: the one given in the settings wins; otherwise `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` from the environment. **Addresses on this machine never go through the environment's proxy**, or a local model would be cut off by it.
+
+### 9.4 Other commands
 
 `pick_folder`, `save_text` (profiles, projects, the CSV template) and `list_system_fonts` (which
 enumerates installed fonts with fontdb).
 
-## 9. Browser fallback
+## 10. Browser fallback
 
 The `files` object in `store.js` has two implementations: with Tauri it calls the commands above;
 without it, it falls back to `localStorage`, and exports become browser downloads. So the interface
@@ -284,25 +356,26 @@ can be developed from a static server:
 python3 -m http.server -d ui 4599
 ```
 
-## 10. Fonts
+## 11. Fonts
 
 The three bundled fonts are loaded with `@font-face` and render the same on every platform. Imported
 fonts are stored as data URLs under `fonts/` and registered with `FontFace` at start-up. The first
 frame waits for the fonts, otherwise the title would be fitted using the wrong glyph widths.
 
-## 11. Tests
+## 12. Tests
 
 | Level | Command | Covers |
 |---|---|---|
-| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation, file name pattern, size and naming of the asset packs, both languages present for every string |
-| Rust unit tests | `cd src-tauri && cargo test` | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling |
+| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation, file name pattern, size and naming of the asset packs, validating and drawing sticker specs, requests and replies in both API styles, both languages present for every string |
+| Rust unit tests | `cd src-tauri && cargo test` | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling, requests against a local stand-in server, proxy rules |
 | End-to-end self-test | `SMEDCOVER_SELFTEST=<folder> <executable>` | the full export path between the real web view and Rust |
 
 In self-test mode the app keeps its data in the given folder, exports a few covers in all three
-formats, writes `report.json` and quits. It catches problems that only show up in the real app, such
+formats, writes `report.json` and quits. With `SMEDCOVER_SELFTEST_AI=<stand-in server URL>` it also
+generates one asset in each API style and draws it on a cover. It catches problems that only show up in the real app, such
 as the header issue above.
 
-## 12. Trade-offs and known limits
+## 13. Trade-offs and known limits
 
 - **Drawing runs on the interface thread.** Painting a 4× cover briefly stalls the window. Conversion and writing are already on a worker thread.
 - **No bundler.** Modules are loaded directly by the web view: simple, but nothing is minified or tree-shaken. At the current size start-up time is negligible.
@@ -311,7 +384,7 @@ as the header issue above.
 - **Bundled fonts are not subset.** They account for most of the installer.
 - **Only run on macOS so far.** The Windows and Linux build configuration is written but not verified.
 
-## 13. Where to start for common changes
+## 14. Where to start for common changes
 
 | To… | Change |
 |---|---|
@@ -321,4 +394,5 @@ as the header issue above.
 | add a template | `TEMPLATES` and `layout()` in `layout.js`, a name in `i18n.js` |
 | add a property to a layer | `PROPS` and `normalizeLayer()` in `layers.js`, `PAINT` in `render.js`, `typeControls()` in `app.js` |
 | add an export format | `encode()` in `lib.rs`, `EXT` and the format picker in `app.js` |
+| add a drawing operation for AI assets | validation and `drawSpec()` in `spec.js`, the prompt and examples in `ai.js` |
 | add an interface string | `i18n.js`, in both languages; a test checks that both are present |

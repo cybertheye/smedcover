@@ -23,6 +23,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 fontdb = "0.23"
+ureq = { version = "2", features = ["socks-proxy"] }
 
 # Dependencies are optimised even in development builds: the image codecs are far too slow otherwise.
 [profile.dev.package."*"]

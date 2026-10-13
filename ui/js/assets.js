@@ -1,12 +1,14 @@
-// The asset library: built-in category graphics, the free sticker pack, and the user's own uploads.
+// The asset library: built-in category graphics, the free sticker pack, and the user's own assets
+// (uploaded images, and stickers generated as data — see spec.js).
 // An asset is referenced as {kind: "graphic" | "sticker" | "user", id}.
 import { GRAPHICS, drawGraphic, graphicRadius, rgb, INK } from "./cel.js";
 import { STICKERS, STICKER_GROUPS, stickerById, drawSticker } from "./stickers.js";
+import { drawSpec } from "./spec.js";
 import "./graphics.js";   // registers the extra category graphics
 
 export { GRAPHICS, STICKERS, STICKER_GROUPS };
 
-/** Uploaded assets: id -> {id, name, src (data URL), img (decoded Image)}. */
+/** The user's assets: id -> {id, name, src (data URL), img (decoded Image)} or {id, name, spec}. */
 export const userAssets = new Map();
 const decode = (src) => new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; });
 
@@ -16,6 +18,12 @@ export async function putUserAsset(id, name, src) {
   const img = await decode(src);
   if (!img) return null;
   const entry = { id, name: String(name || "asset").slice(0, 80), src, img };
+  userAssets.set(id, entry);
+  return entry;
+}
+/** Adds (or replaces) a generated sticker in memory. `spec` must already be normalised. */
+export function putSpecAsset(id, name, spec) {
+  const entry = { id, name: String(name || "AI").slice(0, 80), spec };
   userAssets.set(id, entry);
   return entry;
 }
@@ -39,7 +47,7 @@ export function assetName(ref, lang) {
   return userAssets.get(ref.id)?.name || "?";
 }
 /** Whether an asset can take on the category colour. */
-export const canTint = (ref) => !!ref && ref.kind !== "user";
+export const canTint = (ref) => !!ref && (ref.kind !== "user" || !!userAssets.get(ref.id)?.spec);
 
 /**
  * Draws an asset centred on the origin so that it roughly fills a 600 x 600 box.
@@ -61,6 +69,10 @@ export function drawAsset(ctx, ref, color, opts = {}) {
     return { hw: 300, hh: 300 };
   }
   const a = userAssets.get(ref.id);
+  if (a && a.spec) {
+    ctx.save(); ctx.scale(3, 3); drawSpec(ctx, a.spec, opts.tint ? rgb(color) : null); ctx.restore();
+    return { hw: 300, hh: 300 };
+  }
   if (!a || !a.img.naturalWidth) return null;
   const k = 600 / Math.max(a.img.naturalWidth, a.img.naturalHeight), w = a.img.naturalWidth * k, h = a.img.naturalHeight * k;
   ctx.save();

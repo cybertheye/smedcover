@@ -46,5 +46,8 @@ on its own — as an asset pack, for instance — or used in another product.
   内置字体采用 SIL Open Font License，见 `ui/fonts/`。
 - Images, fonts and text you add yourself remain yours.
   你自己添加的图片、字体和文字仍归你所有。
+- Assets you generate with your own AI service are not part of the built-in artwork; this project
+  claims no rights in them.
+  你用自己的 AI 服务生成的素材不属于内置素材，本项目不对它们主张任何权利。
 
 Copyright © 2026 cybertheye.

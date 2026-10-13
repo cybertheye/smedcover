@@ -129,17 +129,18 @@ export async function loadProfiles() {
 }
 export const saveProfile = (p) => writeJson(`profiles/${p.id}.json`, p);
 
-/** Uploaded assets as stored: [{id, name, src}]. */
+/** The user's assets as stored: [{id, name, src}] for images, [{id, name, spec}] for generated stickers. */
 export async function loadAssetRecords() {
   const out = [];
   for (const name of await files.list("assets")) {
     if (!name.endsWith(".json")) continue;
     const raw = await readJson("assets/" + name);
     if (raw && typeof raw.id === "string" && typeof raw.src === "string") out.push({ id: raw.id, name: str(raw.name, "asset"), src: raw.src });
+    else if (raw && typeof raw.id === "string" && raw.spec && typeof raw.spec === "object") out.push({ id: raw.id, name: str(raw.name, "AI"), spec: raw.spec });
   }
   return out;
 }
-export const saveAssetRecord = (a) => files.write(`assets/${a.id}.json`, JSON.stringify({ id: a.id, name: a.name, src: a.src }));
+export const saveAssetRecord = (a) => files.write(`assets/${a.id}.json`, JSON.stringify(a.spec ? { id: a.id, name: a.name, spec: a.spec } : { id: a.id, name: a.name, src: a.src }));
 export const deleteAssetRecord = (id) => files.remove(`assets/${id}.json`);
 
 /** Ids of the uploaded assets a profile and/or cover refer to (so they can travel with an export). */

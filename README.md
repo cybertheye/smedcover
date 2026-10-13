@@ -25,7 +25,7 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
 
 - **Left** — the tabs of the current mode.
   - Edit: **Cover**, **Style**, **Assets**
-  - Setup: **Brand**, **Sizes & export**, **Fonts**
+  - Setup: **Brand**, **Sizes & export**, **Fonts**, **AI**
 - **Centre** — the main canvas, and below it a thumbnail of every output size. Click one to show that size on the canvas.
 - **Right** (Edit only) — the layer list and the selected layer's properties.
 - **Top bar** — profile switcher, open and save project, undo and redo, export.
@@ -113,6 +113,16 @@ Deleting a channel also deletes the layers that belonged only to it.
 - **Stickers** — a free pack of sixty; each can optionally follow the channel colour.
 - **Colour block & edge** — twelve shapes; click one to reshape the colour block layer.
 
+### Generating assets with AI
+
+At the top of the Assets tab, type what you need ("a ginger cat", "a trophy", "an umbrella") and click **Generate** to get a sticker.
+
+- The result is previewed twice: in its own colour, and following the current channel colour. If you like it, **Save to My assets** and use it like any other asset.
+- A generated sticker is the same kind of thing as a built-in one: sharp at any size, able to follow the channel colour, usable as a channel's graphic.
+- The style comes from a prompt preset in the app; you only describe the subject.
+- You first connect your own model service under *Setup → AI*, see below.
+- A model sometimes answers in a form the app cannot use; you are told it failed and can simply generate again. Weaker models fail more often and draw cruder shapes.
+
 ### Style and the default design
 
 - Three templates — Stack, Split, Banner — on a dark or light background.
@@ -123,6 +133,30 @@ Deleting a channel also deletes the layers that belonged only to it.
 - **Brand** — brand name, counter label, adding, removing and ordering channels; create, duplicate, delete, import and export profiles.
 - **Sizes & export** — tick preset sizes or add a custom width × height. A size can be given your own name, shown under its thumbnail.
 - **Fonts** — Noto Sans SC, Bebas Neue and JetBrains Mono are bundled, so covers look the same on every platform. You can also use an installed font or import a font file.
+- **AI** — connect your own model service for generating assets.
+
+### Setting up AI
+
+SmedCover ships no model and no account. You need a service that speaks one of the two API styles below: an official API, a third-party gateway or a local model.
+
+| Field | Notes |
+|---|---|
+| API style | **OpenAI** (`/chat/completions`) or **Anthropic** (`/v1/messages`) |
+| BASE_URL | The service address. OpenAI style usually ends in `/v1`, e.g. `https://api.openai.com/v1`; for Anthropic style the host is enough, e.g. `https://api.anthropic.com`. The full request address is shown under the field |
+| AUTH_TOKEN | API key or token. Leave empty for a local model that needs none |
+| MODEL | The model name, as given by your provider |
+| Authentication (Anthropic only) | `x-api-key` for an official API key; `Authorization: Bearer` for a token issued by a gateway |
+| Output limit (Anthropic only) | The required `max_tokens` parameter, 4096 by default. Raise it if you are told the reply was cut off |
+| Proxy (optional) | e.g. `http://127.0.0.1:7890`; `socks5://` works too. When empty, the proxy in the system environment variables is used; addresses on this machine never go through a proxy |
+| Additional requirements (optional) | Appended to the preset style prompt for every generation |
+
+Click **Test connection** to check it works.
+
+Privacy and cost:
+
+- The token is stored in plain text in the app data directory on this computer (`ai.json`) and is never written into profile or project files.
+- When generating, your description and the preset prompt are sent to the address you entered; the app makes no other network requests.
+- Usage is billed by your provider.
 
 ## Export
 
@@ -206,6 +240,7 @@ are not public, so the plan is to export open formats that both can read.
 
 ### Other
 
+- [ ] AI generation: evaluate results with real models and tune the prompt accordingly; allow follow-up change requests on a result; keep the token in the system keychain.
 - [ ] A low-resolution preview of the blurred photo for smoother dragging.
 - [ ] Redraw thumbnails only when needed, to cut the cost of many sizes.
 - [ ] Subset the bundled fonts to shrink the installer.

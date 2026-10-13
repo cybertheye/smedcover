@@ -239,3 +239,112 @@ test("moving a layer up or down steps over layers of other categories", () => {
   assert.equal(stepIndex(ls, a.id, -1, "a"), -1);     // nothing goes below the background
   assert.equal(stepIndex(ls, "bg", 1, "a"), -1);
 });
+
+// ---------- AI-generated assets
+import { normalizeSpec, parseSpec, drawSpec, SPEC_LIMITS } from "../ui/js/spec.js";
+import { normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, EXAMPLES, SYSTEM_PROMPT } from "../ui/js/ai.js";
+
+/** A canvas context that accepts anything and counts what was called. */
+function fakeCtx() {
+  const calls = {};
+  return new Proxy({ calls }, { get: (t, k) => (k in t ? t[k] : (...a) => { calls[k] = (calls[k] || 0) + 1; return { width: a.length }; }), set: () => true });
+}
+
+test("spec: the prompt's own examples are valid and can be drawn", () => {
+  for (const e of EXAMPLES) {
+    const { spec, error } = normalizeSpec(e.spec);
+    assert.equal(error, undefined, `${e.ask}: ${error}`);
+    assert.deepEqual(normalizeSpec(spec).spec, spec);                 // normalising is stable
+    const ctx = fakeCtx(); drawSpec(ctx, spec, null);
+    assert.ok(ctx.calls.fill > 0, e.ask);
+    assert.equal(ctx.calls.save, ctx.calls.restore, e.ask);           // the context is left as it was found
+    assert.ok(SYSTEM_PROMPT.includes(JSON.stringify(e.spec)));
+  }
+});
+
+test("spec: defaults are filled in and numbers are kept in range", () => {
+  const { spec } = normalizeSpec({ name: "Dot", ops: [{ op: "shape", path: { circle: [0, 0, 9999] }, fill: "main", lw: 99 }, { op: "text", text: " Hi ", fill: "white", size: 5000, rotate: 100 }] });
+  assert.deepEqual(spec.name, { zh: "Dot", en: "Dot" });
+  assert.match(spec.color, /^#[0-9a-f]{6}$/);
+  assert.deepEqual(spec.ops[0], { op: "shape", path: { circle: [0, 0, 140] }, fill: "main", shadow: true, lw: 14 });
+  assert.deepEqual(spec.ops[1], { op: "text", text: "Hi", size: 220, fill: "white", x: 0, y: 0, rotate: 7 });
+  assert.equal(normalizeSpec({ ops: [{ op: "shape", path: { rrect: [0, 0, 40, 20, 99] }, fill: "red" }] }).spec.ops[0].path.rrect[4], 10);
+});
+
+test("spec: anything unexpected is refused, never executed or guessed", () => {
+  const no = (raw, re) => { const r = normalizeSpec(raw); assert.equal(r.spec, undefined); assert.match(r.error, re); };
+  no(null, /not an object/); no([], /not an object/); no({ ops: [] }, /ops/);
+  no({ ops: [{ op: "eval", code: "alert(1)" }] }, /unknown op/);
+  no({ ops: [{ op: "shape", path: { poly: [[0, 0], [1, 1]] }, fill: "main" }] }, /points/);
+  no({ ops: [{ op: "shape", path: { circle: [0, 0, "9"] }, fill: "main" }] }, /not a number/);
+  no({ ops: [{ op: "shape", path: { circle: [0, 0, 9] }, fill: "url(x)" }] }, /colour/);
+  no({ ops: [{ op: "shape", path: { curve: [["L", 0, 0], ["L", 1, 1]] }, fill: "main" }] }, /"M"/);
+  no({ ops: [{ op: "shape", path: { curve: [["M", 0, 0], ["Z"]] }, fill: "main" }] }, /bad segment/);
+  no({ ops: [{ op: "text", text: "x".repeat(SPEC_LIMITS.text + 1), fill: "main" }] }, /characters/);
+  no({ ops: Array(SPEC_LIMITS.ops + 1).fill({ op: "shape", path: { circle: [0, 0, 9] }, fill: "main" }) }, /more than/);
+  no({ ops: [{ op: "shape", path: { circle: [0, 0, 9] }, fill: "main", move: [1] }] }, /move/);
+  // colours: palette names, hex in either length, and a few names models tend to use
+  const fills = ["Main", "black", "#FFF", "#12abEF", "purple"].map((fill) => normalizeSpec({ ops: [{ op: "shape", path: { circle: [0, 0, 9] }, fill }] }).spec.ops[0].fill);
+  assert.deepEqual(fills, ["main", "ink", "#ffffff", "#12abef", "#8b5cf6"]);
+  // extra keys on a valid op are simply dropped
+  assert.equal("onload" in normalizeSpec({ ops: [{ op: "shape", path: { circle: [0, 0, 9] }, fill: "main", onload: "x" }] }).spec.ops[0], false);
+});
+
+test("spec: found inside a chatty or fenced reply", () => {
+  const json = JSON.stringify(EXAMPLES[0].spec);
+  assert.equal(parseSpec(json).spec.name.en, "Heart");
+  assert.equal(parseSpec("Here you go:\n```json\n" + json + "\n```\nEnjoy!").spec.name.en, "Heart");
+  assert.match(parseSpec("sorry, I cannot").error, /no JSON/);
+  assert.match(parseSpec("{ not json }").error, /not valid JSON/);
+});
+
+test("ai: settings are normalised and endpoints are joined for both styles", () => {
+  assert.deepEqual(normalizeAi(null), { style: "openai", baseUrl: "", token: "", model: "", auth: "key", maxTokens: 4096, proxy: "", notes: "" });
+  assert.equal(normalizeAi({ style: "x", maxTokens: 9e9 }).maxTokens, 64000);
+  assert.equal(aiReady(normalizeAi({ baseUrl: "https://a.b/v1", model: "m" })), true);
+  assert.equal(aiReady(normalizeAi({ baseUrl: "a.b/v1", model: "m" })), false);
+  assert.equal(aiReady(normalizeAi({ baseUrl: "https://a.b/v1" })), false);
+  const url = (style, baseUrl) => endpoint({ style, baseUrl });
+  assert.equal(url("openai", "https://api.openai.com/v1"), "https://api.openai.com/v1/chat/completions");
+  assert.equal(url("openai", "http://localhost:11434/v1/"), "http://localhost:11434/v1/chat/completions");
+  assert.equal(url("openai", "https://x.y/v1/chat/completions"), "https://x.y/v1/chat/completions");
+  assert.equal(url("anthropic", "https://api.anthropic.com"), "https://api.anthropic.com/v1/messages");
+  assert.equal(url("anthropic", "https://gw.example/anthropic/"), "https://gw.example/anthropic/v1/messages");
+  assert.equal(url("anthropic", "https://api.anthropic.com/v1"), "https://api.anthropic.com/v1/messages");
+  assert.equal(url("anthropic", "https://api.anthropic.com/v1/messages"), "https://api.anthropic.com/v1/messages");
+});
+
+test("ai: requests follow each API style", () => {
+  const o = buildRequest(normalizeAi({ style: "openai", baseUrl: "https://a/v1", token: "sk-1", model: "m1" }), "SYS", "USR");
+  assert.equal(o.headers.authorization, "Bearer sk-1");
+  assert.deepEqual(o.body, { model: "m1", messages: [{ role: "system", content: "SYS" }, { role: "user", content: "USR" }] });
+  const a = buildRequest(normalizeAi({ style: "anthropic", baseUrl: "https://a", token: "k", model: "m2", maxTokens: 2000 }), "SYS", "USR");
+  assert.equal(a.headers["x-api-key"], "k"); assert.equal(a.headers.authorization, undefined);
+  assert.equal(a.headers["anthropic-version"], "2023-06-01");
+  assert.deepEqual(a.body, { model: "m2", max_tokens: 2000, system: "SYS", messages: [{ role: "user", content: "USR" }] });
+  const b = buildRequest(normalizeAi({ style: "anthropic", baseUrl: "https://a", token: "t", model: "m", auth: "bearer" }), "S", "U");
+  assert.equal(b.headers.authorization, "Bearer t"); assert.equal(b.headers["x-api-key"], undefined);
+  const none = buildRequest(normalizeAi({ style: "openai", baseUrl: "http://localhost/v1", model: "m" }), "S", "U");
+  assert.equal(none.headers.authorization, undefined);               // local servers need no token
+});
+
+test("ai: replies and errors are read for each API style", () => {
+  assert.deepEqual(readReply("openai", 200, JSON.stringify({ choices: [{ message: { content: "hi" }, finish_reason: "stop" }] })), { text: "hi", truncated: false });
+  assert.deepEqual(readReply("openai", 200, JSON.stringify({ choices: [{ message: { content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] } }] })), { text: "ab", truncated: false });
+  assert.equal(readReply("openai", 200, JSON.stringify({ choices: [{ message: { content: "{" }, finish_reason: "length" }] })).truncated, true);
+  assert.deepEqual(readReply("anthropic", 200, JSON.stringify({ content: [{ type: "thinking", thinking: "…" }, { type: "text", text: "ok" }], stop_reason: "end_turn" })), { text: "ok", truncated: false });
+  assert.equal(readReply("anthropic", 200, JSON.stringify({ content: [{ type: "text", text: "{" }], stop_reason: "max_tokens" })).truncated, true);
+  assert.match(readReply("openai", 401, JSON.stringify({ error: { message: "bad key" } })).error, /HTTP 401: bad key/);
+  assert.match(readReply("anthropic", 404, JSON.stringify({ type: "error", error: { type: "not_found_error", message: "model: nope" } })).error, /HTTP 404: model: nope/);
+  assert.match(readReply("openai", 502, "<html>Bad gateway</html>").error, /HTTP 502: <html>/);
+  assert.match(readReply("openai", 200, "<html>").error, /did not return JSON/);
+  assert.match(readReply("openai", 200, JSON.stringify({ choices: [] })).error, /no text/);
+});
+
+test("ai: the prompt carries the style, the format and the user's notes", () => {
+  const p = buildPrompt("  一只猫  ");
+  assert.equal(p.user, "Request: 一只猫");
+  for (const word of ["flat colour", "ink outline", "-100 to 100", '"op":"shape"', '"op":"blob"', '"op":"line"', '"op":"detail"', '"op":"text"', "exactly one JSON object", "never write code"]) assert.ok(p.system.includes(word), word);
+  assert.ok(!p.system.includes("Additional requirements"));
+  assert.ok(buildPrompt("x", "always add a smile").system.endsWith("always add a smile"));
+});
