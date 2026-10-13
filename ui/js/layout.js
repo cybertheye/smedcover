@@ -103,5 +103,43 @@ function splitLayout(w, h, aspect) {
   };
 }
 
+/**
+ * A layout built from plain rectangles, for looks whose panels are not slanted. Same shape of
+ * result as layout(). `o` gives the proportions:
+ *   band   height of the colour band of "stack", as a fraction of the canvas height
+ *   side   width of the colour panel of "split", as a fraction of the canvas width
+ *   strip  height of the thin band of "banner"
+ *   top    true puts the band of "stack" at the top instead of the bottom
+ */
+export function blockLayout(template, w, h, o) {
+  const aspect = w / h, wide = clamp((aspect - 0.75) / (16 / 9 - 0.75));
+  if (template === "split") {
+    const px = w * (1 - o.side * lerp(0.86, 1, wide)), panel = w - px, name = lerp(84, 110, wide);
+    return {
+      template: "split",
+      accent: [[px, 0], [px, h], [w, h], [w, 0]],
+      edge: { line: [px, 0, px, h], nx: -1, ny: 0 },
+      title: { x: 80, y: 150, w: px - 160, h: Math.max(120, h - 150 - 400) },
+      tag: { x: 84, y: h - 392, fs: lerp(64, 100, wide) },
+      cat: { x: 84, y: h - 150, fs: name, maxW: px - 170, onAccent: false, inline: false },
+      art: { x: px + panel * 0.5, y: h * 0.5, s: clamp(Math.min(panel / 760, h / 1150), 0.35, 1.05) },
+      toneFrom: 0,
+    };
+  }
+  const banner = template === "banner";
+  const bandH = banner ? Math.max(150, h * o.strip) : h * o.band, el = h - bandH;
+  const name = banner ? 72 : clamp(bandH * 0.3, 64, 118), tagFs = banner ? 64 : lerp(72, 96, wide);
+  return {
+    template: banner ? "banner" : "stack",
+    accent: [[0, el], [w, el], [w, h], [0, h]],
+    edge: { line: [0, el, w, el], nx: 0, ny: -1 },
+    title: { x: 80, y: 150, w: w - 160, h: Math.max(120, el - 150 - tagFs * 1.34 - 70) },
+    tag: { x: 84, y: el - tagFs * 1.34 - 34, fs: tagFs },
+    cat: { x: 84, y: el + bandH * 0.5 + name * 0.36, fs: name, maxW: w * (banner ? 0.42 : 0.5), onAccent: true, inline: banner || bandH < 300 },
+    art: { x: w * lerp(0.7, 0.77, wide), y: banner ? el - 10 : el + bandH * 0.08, s: clamp(Math.min(w * 0.42, h * 0.5) / 640, 0.3, 1) * (banner ? 0.6 : 1) },
+    toneFrom: el,
+  };
+}
+
 /** Uniform scale that maps the virtual canvas onto `pixelWidth` real pixels. */
 export const pixelScale = (pixelWidth, virtualWidth) => pixelWidth / virtualWidth;

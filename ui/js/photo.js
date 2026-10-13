@@ -46,10 +46,35 @@ function blurred(im, b, hi) {
   return slot.cv;
 }
 
-/** Draws `im` behind everything on a w x h (virtual) canvas. adj = {dx,dy,s}; blur in px; dim 0..1. */
-export function drawPhoto(ctx, im, w, h, adj, blur, dim, hiRes) {
+const greys = {};   // the photo (or its blurred copy) without its colour: one slot for previews, one for export
+/** A grey copy of `src` (an image or canvas), computed once and kept until the photo or its blur changes. */
+function greyOf(src, im, key, hi) {
+  const cap = hi ? 2400 : 1100, sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height, f = Math.min(1, cap / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * f)), h = Math.max(1, Math.round(sh * f));
+  const slot = greys[hi ? "hi" : "lo"] || (greys[hi ? "hi" : "lo"] = { cv: document.createElement("canvas") });
+  if (slot.im !== im || slot.key !== key) {
+    const c = slot.cv;
+    c.width = w; c.height = h;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    x.imageSmoothingQuality = "high";
+    x.drawImage(src, 0, 0, w, h);
+    const id = x.getImageData(0, 0, w, h), d = id.data;
+    for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = (d[i] * 54 + d[i + 1] * 183 + d[i + 2] * 19) >> 8;
+    x.putImageData(id, 0, 0);
+    slot.im = im; slot.key = key;
+  }
+  return slot.cv;
+}
+
+/**
+ * Draws `im` behind everything on a w x h (virtual) canvas. adj = {dx,dy,s}; blur in px; dim 0..1;
+ * grey 0..1 takes that much of the colour out.
+ */
+export function drawPhoto(ctx, im, w, h, adj, blur, dim, hiRes, grey = 0) {
   const k = Math.max(w / im.naturalWidth, h / im.naturalHeight) * adj.s, iw = im.naturalWidth * k, ih = im.naturalHeight * k;
+  const src = blur > 0 ? blurred(im, blur, hiRes) : im, x = (w - iw) / 2 + adj.dx, y = (h - ih) / 2 + adj.dy;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(blur > 0 ? blurred(im, blur, hiRes) : im, (w - iw) / 2 + adj.dx, (h - ih) / 2 + adj.dy, iw, ih);
+  if (grey < 1) ctx.drawImage(src, x, y, iw, ih);
+  if (grey > 0) { ctx.save(); ctx.globalAlpha = Math.min(1, grey); ctx.drawImage(greyOf(src, im, `${blur}|${hiRes}`, hiRes), x, y, iw, ih); ctx.restore(); }
   if (dim > 0) { ctx.fillStyle = `rgba(7,7,12,${dim})`; ctx.fillRect(0, 0, w, h); }
 }

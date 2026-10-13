@@ -20,8 +20,7 @@
 //   subject(ctx, half, env, p)   painted around the channel graphic, in its own space
 //   seeded                       true when the look scatters things at random (the user can shuffle them)
 //   titleFont(fonts)             the font stack of the title, when the look sets its own
-//   lowRes(type, p)              how coarsely a layer of that type is drawn, in virtual units per pixel (0 = full)
-//   accent.decor(ctx, box, C, p) painted inside the colour block, over its fill
+//   layout(template, w, h)       the geometry of a cover, for looks that are about arrangement (see layout.js)
 //   image(ctx, C, unit, p)       prepares the context for an uploaded image (its shadow or glow)
 //   post(ctx, w, h, C, p, unit, hits)  painted over the finished cover (scanlines, vignette); `unit` is
 //                                canvas pixels per virtual unit, `hits` where each layer ended up
@@ -32,6 +31,7 @@
 // The current look is module state, set by drawCover() from the profile before anything is drawn.
 
 import { fonts, spaced, spacedW, brackets, toneField } from "./cel.js";
+import { blockLayout } from "./layout.js";
 
 const INK = "#07070c";
 const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
@@ -533,27 +533,32 @@ function painters(o) {
 const inkAs = (ink, tint) => (fill) => { const c = parseColour(fill); return !c ? fill : role(c) === "ink" ? css(ink, c[3]) : tint && role(c) === "colour" ? css(tint(c), c[3]) : fill; };
 
 const WORK = {};               // small canvases the looks reuse: film grain, a blurred copy for bloom
-/** Film or paper grain over the whole canvas: grey noise laid on in overlay, so it darkens and lightens evenly. */
-function grain(ctx, amount, unit) {
+/**
+ * Grain over the whole canvas. On dark pictures (film) grey noise is laid on in overlay, which
+ * darkens and lightens evenly; on light ones (paper) overlay barely shows, so there the noise is
+ * multiplied in as specks instead: pass paper = true.
+ */
+function grain(ctx, amount, unit, paper = false) {
   if (amount <= 0 || typeof document === "undefined" || !ctx.canvas) return;
-  let g = WORK.grain;
+  const key = paper ? "specks" : "grain";
+  let g = WORK[key];
   if (!g) {
-    g = WORK.grain = document.createElement("canvas"); g.width = g.height = 256;
+    g = WORK[key] = document.createElement("canvas"); g.width = g.height = 256;
     const x = g.getContext("2d"), d = x.createImageData(256, 256);
     let s = 12345;
-    for (let i = 0; i < d.data.length; i += 4) { s = (s * 1103515245 + 12345) & 0x7fffffff; d.data[i] = d.data[i + 1] = d.data[i + 2] = (s >> 16) & 255; d.data[i + 3] = 255; }
+    for (let i = 0; i < d.data.length; i += 4) {
+      s = (s * 1103515245 + 12345) & 0x7fffffff;
+      const v = (s >> 16) & 255;
+      d.data[i] = d.data[i + 1] = d.data[i + 2] = paper ? (v > 150 ? 255 : 120 + v * 0.7) : v;   // paper: mostly clean, some specks of varying depth
+      d.data[i + 3] = 255;
+    }
     x.putImageData(d, 0, 0);
   }
   const pat = ctx.createPattern(g, "repeat");
   if (pat.setTransform && typeof DOMMatrix !== "undefined") pat.setTransform(new DOMMatrix().scale(Math.max(1, unit * 1.3)));   // the grain keeps its size on big exports
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.globalCompositeOperation = "overlay"; ctx.globalAlpha = Math.min(1, amount); ctx.fillStyle = pat; ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.globalCompositeOperation = paper ? "multiply" : "overlay"; ctx.globalAlpha = Math.min(1, amount); ctx.fillStyle = pat; ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   ctx.restore();
-}
-/** Removes `amount` (0…1) of the colour from what is on the canvas so far. */
-function desaturate(ctx, w, h, amount) {
-  if (amount <= 0) return;
-  ctx.save(); ctx.globalCompositeOperation = "saturation"; ctx.globalAlpha = Math.min(1, amount); ctx.fillStyle = "#808080"; ctx.fillRect(0, 0, w, h); ctx.restore();
 }
 const wash = (ctx, w, h, mode, colour, alpha) => { if (alpha <= 0) return; ctx.save(); ctx.globalCompositeOperation = mode; ctx.fillStyle = css(colour, Math.min(1, alpha)); ctx.fillRect(0, 0, w, h); ctx.restore(); };
 const grey = (c) => { const l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; return [l, l, l]; };
@@ -575,7 +580,7 @@ const riso = {
     const { w, h, C } = env;
     ctx.fillStyle = css(RISO.paper); ctx.fillRect(0, 0, w, h);
     if (env.photo) {   // the photo as a one-ink print: grey, then the blue ink in its shadows, on paper
-      env.drawPhoto(); desaturate(ctx, w, h, 1);
+      env.drawPhoto(1);
       wash(ctx, w, h, "screen", RISO.blue, 1); wash(ctx, w, h, "multiply", RISO.paper, 1);
     } else if (L.grid && p.dots > 0) {   // a field of halftone in the channel ink, fading down the sheet
       toneField(ctx, -30, -30, w + 30, h * 0.62, 34, css(C, 0.8), (x, y) => (1 - y / (h * 0.62)) * 0.95 * p.dots - (x / w) * 0.35);
@@ -605,7 +610,7 @@ const riso = {
     [C, RISO.blue, RISO.pink].forEach((c, i) => { ctx.fillStyle = css(c); ctx.fillRect(w - 150 + i * 22, h - 54, 18, 18); });
     ctx.save(); ctx.globalCompositeOperation = "multiply"; ctx.fillStyle = css(RISO.pink); ctx.fillRect(w - 150 + 11, h - 54, 18, 18); ctx.restore();
   },
-  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.5, unit); },
+  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.85, unit, true); },
   prompt: `Risograph-printed stickers — a small press, two or three spot inks on paper — that read at a glance:
 - simple, slightly naive shapes with a strong silhouette; chunky and friendly; no realism, no perspective, no fine detail;
 - flat colour only; think in INKS: the main colour, a deep blue (use "ink") and a fluorescent pink ("pink"); "white" is bare paper;
@@ -714,12 +719,23 @@ const bluenote = {
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "纸张颗粒", en: "Paper grain" } },
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,   // a condensed grotesque for Latin, the heavy sans for CJK
+  /** Plain rectangles in generous proportions: a deep band, a wide side panel, a slim strip. */
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.36, side: 0.38, strip: 0.15 }),
+  /** The corner tag: a ruled box, nothing filled. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.8;
+    ctx.font = `700 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 4) + f * 0.9, h = f * 1.3;
+    ctx.strokeStyle = css(bnInk()); ctx.lineWidth = 4; ctx.strokeRect(x, y + (fs * 1.34 - h), w, h);
+    ctx.fillStyle = ink || css(bnInk()); spaced(ctx, str, x + f * 0.45, y + fs * 1.34 - h * 0.26, 4);
+    return { x: x - 4, y: y + (fs * 1.34 - h) - 4, w: w + 8, h: h + 8 };
+  },
   theme: (base) => ({ ...base, field: css(bnGround()), text: css(bnInk()), dim: css(bnInk(), 0.55), titleFill: css(bnInk()), titleInk: css(bnGround()), grid: () => "rgba(0,0,0,0)" }),
   background(ctx, env, L, p) {
     const { w, h, C } = env;
     ctx.fillStyle = css(bnGround()); ctx.fillRect(0, 0, w, h);
     if (env.photo) {   // one colour and black: the photograph as it was printed on a sleeve
-      env.drawPhoto(); desaturate(ctx, w, h, p.duo);
+      env.drawPhoto(p.duo);
       wash(ctx, w, h, "multiply", mix([255, 255, 255], C, 0.92), p.duo);
       wash(ctx, w, h, "screen", mix([0, 0, 0], C, 0.16), p.duo);
     }
@@ -745,7 +761,7 @@ const bluenote = {
     ctx.textAlign = "left"; ctx.font = `600 13px ${fonts.mono}, ${fonts.cn}`;
     ctx.strokeStyle = css(ink, 0.9 * p.rules); ctx.lineWidth = 2; ctx.strokeRect(72, h - 64, 78, 22); ctx.fillText("STEREO", 82, h - 48);
   },
-  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.45, unit); },
+  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * (dark ? 0.6 : 0.85), unit, !dark); },
   prompt: `Shapes cut from coloured paper for a 1950s jazz record sleeve — reduced, deliberate, modern:
 - as few shapes as possible, each a clean geometric or freely cut form; generous, confident proportions; no realism, no perspective, no detail;
 - flat colour only, and no outlines at all — the app draws none, so neighbouring shapes must differ in colour to be told apart;
@@ -768,11 +784,22 @@ const editorial = {
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "纸张颗粒", en: "Paper grain" } },
   ],
   titleFont: () => SERIF,
+  /** A page: a shallow tinted foot, a narrower side column, a slim strip. */
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.27, side: 0.36, strip: 0.14 }),
+  /** The corner tag: a kicker — small spaced capitals in the channel colour under a short rule. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.62;
+    ctx.font = `700 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 8), by = y + fs * 1.34;
+    ctx.fillStyle = css(edInk()); ctx.fillRect(x, by - f * 1.5, Math.min(w, f * 2.2), 5);
+    ctx.fillStyle = ink || css(C); spaced(ctx, str, x, by - f * 0.2, 8);
+    return { x: x - 4, y: by - f * 1.6, w: w + 8, h: f * 1.7 };
+  },
   theme: (base) => ({ ...base, field: css(edGround()), text: css(edInk()), dim: css(edInk(), 0.55), titleFill: css(edInk()), titleInk: css(edGround()), grid: () => "rgba(0,0,0,0)" }),
   background(ctx, env, L, p) {
     const { w, h, C } = env;
     ctx.fillStyle = css(edGround()); ctx.fillRect(0, 0, w, h);
-    if (env.photo) { env.drawPhoto(); desaturate(ctx, w, h, p.mono); wash(ctx, w, h, "multiply", ED.paper, 0.5 * p.mono); return true; }
+    if (env.photo) { env.drawPhoto(p.mono); wash(ctx, w, h, "multiply", ED.paper, 0.5 * p.mono); return true; }
     if (L.grid) {   // the issue number, very large and very quiet, where a picture would otherwise go
       const fs = Math.min(w, h) * 0.78;
       ctx.save(); ctx.font = `italic 700 ${fs}px ${SERIF}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(C, dark ? 0.22 : 0.2);
@@ -807,7 +834,7 @@ const editorial = {
     ctx.fillText(`— ${pad2(i + 1)} —`, w / 2, h - 50);
     if (p.rules > 0.5) { ctx.fillStyle = css(ink, 0.28 * p.rules); ctx.fillRect(Math.round(w * 0.64), 170, 1, h - 340); }
   },
-  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.4, unit); },
+  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * (dark ? 0.6 : 0.85), unit, !dark); },
   prompt: `Spot illustrations for a magazine page — an engraved, quietly witty line drawing — that read at a glance:
 - economical shapes with a clear silhouette, drawn as if with a pen: let thin lines ("detail") describe form, and keep filled areas few;
 - flat colour only: black ("ink"), the paper ("white") and ONE spot of the main colour on the part that carries the idea;
@@ -817,85 +844,7 @@ const editorial = {
 - "white" is the paper, "dark" near-black, and "main" a single spot of colour — one part only.`,
 };
 
-// ====================================================================== toy bricks and the screens of 8-bit games
-const BRK = { night: [26, 28, 44], black: [12, 12, 20], white: [244, 244, 244], gold: [255, 205, 56], red: [230, 57, 70] };
-const HEART = ["0110110", "1111111", "1111111", "0111110", "0011100", "0001000"];
-const brick = {
-  id: "brick",
-  name: { zh: "积木像素", en: "Bricks & pixels" },
-  oneTheme: true,
-  seeded: true,
-  params: [
-    { key: "pixel", min: 2, max: 14, step: 1, def: 6, name: { zh: "像素大小", en: "Pixel size" } },
-    { key: "studs", min: 0, max: 1, step: 0.05, def: 1, name: { zh: "积木凸点", en: "Studs" } },
-    { key: "hud", min: 0, max: 1, step: 0.05, def: 1, name: { zh: "游戏界面", en: "Game screen" } },
-  ],
-  /** How coarse each kind of layer is drawn, in virtual units per pixel (0 = at full resolution). */
-  lowRes: (type, p) => (["bg", "accent", "graphic", "asset"].includes(type) ? p.pixel : type === "title" ? Math.max(2, Math.round(p.pixel / 2)) : 0),
-  theme: (base, C) => ({ ...base, field: css(BRK.night), text: css(BRK.white), dim: css(BRK.white, 0.6), titleFill: css(BRK.white), titleInk: css(BRK.black), grid: () => css(C, 0.16) }),
-  background(ctx, env, L) {
-    const { w, h, C } = env;
-    if (env.photo) { env.drawPhoto(); return true; }
-    const bands = 7;   // a sky in flat steps, as few colours as a small palette allows
-    for (let k = 0; k < bands; k++) { ctx.fillStyle = css(mix(BRK.night, mix([92, 76, 168], C, 0.12), (k / (bands - 1)) * 0.8)); ctx.fillRect(0, (h * k) / bands, w, h / bands + 1); }
-    if (L.grid) for (let k = 0; k < 70; k++) { const s = rand(k + 0.3) > 0.8 ? 12 : 6; ctx.fillStyle = css(BRK.white, 0.35 + rand(k * 1.7) * 0.6); ctx.fillRect(Math.floor((rand(k * 3.1 + 1) * w) / 12) * 12, Math.floor((rand(k * 4.3 + 2) * h * 0.7) / 12) * 12, s, s); }
-    return true;
-  },
-  accent: {
-    fill: (C) => css(C), tone: () => "rgba(0,0,0,0)", toneScale: 0,
-    edge(ctx, run, nx, ny, C) { ctx.lineCap = "butt"; ctx.lineJoin = "miter"; ctx.strokeStyle = css(BRK.black); ctx.lineWidth = 14; run(0, 0); ctx.strokeStyle = css(mix(C, BRK.white, 0.5)); ctx.lineWidth = 8; run(-nx * 12, -ny * 12); },
-    /** Studs across the panel: a baseplate. Drawn inside the panel's own outline. */
-    decor(ctx, b, C, p) {
-      if (p.studs <= 0) return;
-      const pitch = 72, r = 22, lit = css(mix(C, BRK.white, 0.34)), shade = css(mix(C, BRK.black, 0.36), 0.9 * p.studs);
-      for (let y = b.y + pitch * 0.75; y < b.y + b.h + r; y += pitch) for (let x = b.x + pitch * 0.5; x < b.x + b.w + r; x += pitch) {
-        ctx.fillStyle = shade; ctx.beginPath(); ctx.arc(x + 6, y + 6, r, 0, Math.PI * 2); ctx.fill();
-        ctx.globalAlpha = p.studs; ctx.fillStyle = lit; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
-      }
-    },
-  },
-  /** A game's title screen: white letters, a heavy black outline, and a shadow that drops in steps. */
-  runs(ctx, pass, o) {
-    upright(ctx);
-    const fs = o.fs, C = o.hi || o.C || BRK.gold, step = fs * 0.028 * Math.max(0.3, o.shadowAmt);
-    ctx.lineJoin = "miter"; ctx.miterLimit = 2;
-    for (let k = 4; k >= 1; k--) pass((a, x) => { ctx.fillStyle = ctx.strokeStyle = css(BRK.black); ctx.lineWidth = fs * 0.12 * Math.max(0.4, o.strokeAmt); ctx.strokeText(a.t, x + step * k, step * k); ctx.fillText(a.t, x + step * k, step * k); });
-    pass((a, x) => { ctx.strokeStyle = css(BRK.black); ctx.lineWidth = fs * 0.12 * Math.max(0.4, o.strokeAmt); ctx.strokeText(a.t, x, 0); });
-    pass((a, x) => { ctx.fillStyle = a.hi ? css(mix(C, BRK.white, 0.15)) : css(o.fill || BRK.white); ctx.fillText(a.t, x, 0); });
-  },
-  /** The corner tag: a dialogue box. */
-  tag(ctx, str, x, y, fs, C, p, ink) {
-    ctx.font = `700 ${fs}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-    const w = spacedW(ctx, str, 3) + fs * 1.1, h = fs * 1.34;
-    ctx.fillStyle = css(BRK.white); ctx.fillRect(x - 6, y - 6, w + 12, h + 12);
-    ctx.fillStyle = css(BRK.black); ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = ink || css(BRK.white); spaced(ctx, str, x + fs * 0.55, y + h * 0.5 + fs * 0.4, 3);
-    return { x: x - 8, y: y - 8, w: w + 16, h: h + 16 };
-  },
-  /** The frame layer: the border of a game screen, lives, a stage number, a score and a prompt to begin. */
-  frame(ctx, env, p) {
-    const { w, h, C } = env, i = env.o.catIndex, total = env.o.profile.categories.length;
-    ctx.strokeStyle = css(BRK.black); ctx.lineWidth = 14; ctx.strokeRect(27, 27, w - 54, h - 54);
-    ctx.strokeStyle = css(BRK.white); ctx.lineWidth = 6; ctx.strokeRect(27, 27, w - 54, h - 54);
-    if (p.hud <= 0) return;
-    const u = 6;   // one pixel of the hearts
-    for (let n = 0; n < 3; n++) HEART.forEach((row, r) => [...row].forEach((bit, c) => { if (bit !== "1") return; ctx.fillStyle = n < 2 ? css(BRK.red) : css(BRK.white, 0.35); ctx.fillRect(w - 76 - (3 - n) * 8 * u + c * u, 126 + r * u, u, u); }));
-    const text = (str, x, y, align) => { ctx.font = `700 24px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = align; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(BRK.black); ctx.fillText(str, x + 3, y + 3); ctx.fillStyle = css(BRK.white); ctx.fillText(str, x, y); };
-    text(`STAGE ${pad2(i + 1)}-${pad2(total)}`, 72, h - 48, "left");
-    text(`SCORE ${String(1200 + Math.floor(rand(51) * 87) * 100).padStart(6, "0")}`, w - 72, h - 48, "right");
-    if (p.hud > 0.5) { ctx.save(); text("▶ PRESS START", w / 2, h - 48, "center"); ctx.restore(); }
-  },
-  prompt: `Sprites for an 8-bit game, or small builds of toy bricks — blocky and bright — that read at a glance:
-- build everything from rectangles and right angles on a coarse grid: use "rrect" with corner radius 0 and "poly" with horizontal and vertical edges; avoid curves, circles only for studs, wheels and eyes;
-- keep every coordinate a multiple of 10, so edges fall on the pixel grid; no realism, no perspective, no fine detail;
-- flat colour only, with a black outline that the app adds: do NOT draw outlines or shadows yourself;
-- 3 to 4 strong colours, like a small console palette: the main colour, white, black ("ink") and one accent.`,
-  solidPrompt: `Models built from toy bricks: everything is boxes with right angles, in proportions that are multiples of a brick; cylinders only for wheels, studs and round details; no realism, no fine detail.
-- the renderer shades the faces in three flat tones with a black outline, then draws the result as coarse pixels: do NOT try to draw shading or outlines yourself, and keep parts large — anything under 40 units disappears;
-- "white", "dark" and "main" are three brick colours; use "main" generously here, for whole sections of the build.`,
-};
-
-export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, brick };
+export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial };
 export const LOOK_IDS = Object.keys(LOOKS);
 
 let current = cel, values = {};

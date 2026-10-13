@@ -155,9 +155,8 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 
 | **Risograph** | cream paper, two or three spot inks, coarse halftone, misregistration, paper grain; objects are paper white and blue ink |
 | **90s animation** | a painted sky, cel colours a little grey and warm, a title with a double keyline, film grain, bloom, fade, dust and scratches |
-| **Record sleeve** | large flat blocks of colour, tight sans-serif headlines with no outline or shadow, photos in one colour and black; dark or light ground |
-| **Editorial** | a serif headline, thick-and-thin rules, a hairline border, a folio, a huge quiet issue number, black-and-white photos; dark or light ground |
-| **Bricks & pixels** | background and objects in coarse pixels, studs on the colour block, a game-title headline, lives, a stage number and a score |
+| **Record sleeve** | large flat blocks of colour, tight sans-serif headlines with no outline or shadow, photos in one colour and black; flat layouts of its own; dark or light ground |
+| **Editorial** | a serif headline, thick-and-thin rules, a hairline border, a folio, a huge quiet issue number, black-and-white photos; flat layouts of its own; dark or light ground |
 
 The sliders of each look:
 
@@ -167,9 +166,12 @@ The sliders of each look:
 | 90s animation | film grain, bloom, fade, dust and scratches; *Shuffle the random placement* rearranges clouds and dust |
 | Record sleeve | photo duotone, rules and catalogue, paper grain |
 | Editorial | rules and folio, black-and-white photo, paper grain |
-| Bricks & pixels | pixel size, studs, game screen; *Shuffle the random placement* rearranges the stars |
 
-These five are first versions and will be refined one by one. Editorial's serif lettering uses fonts already on the computer (Songti SC on macOS, SimSun on Windows), so it differs from machine to machine.
+**Layouts of their own** — the record sleeve and editorial looks do not use slanted panels. They read the three *Template* choices their own way: Stack is a level band, Split an upright side panel, Banner a slim strip, each in its own proportions. Switching to another look brings the usual layouts back.
+
+*Photo duotone* and *Black-and-white photo* only do something when there is a background photo.
+
+These four are first versions and will be refined one by one. Editorial's serif lettering uses fonts already on the computer (Songti SC on macOS, SimSun on Windows), so it differs from machine to machine.
 
 The cyberpunk look has eight sliders and a checkbox. Two of them sound alike: *Scanlines* are the fine horizontal lines covering the whole picture; the *Sweep line* is the single bright one.
 
@@ -312,7 +314,7 @@ are not public, so the plan is to export open formats that both can read.
 ### Other
 
 - [ ] AI generation: evaluate results with real models and tune the prompt accordingly; allow follow-up change requests on a result; keep the token in the system keychain.
-- [ ] Refine the five new looks one by one; give the record sleeve and editorial looks layouts of their own; bundle a serif font.
+- [ ] Refine the four new looks one by one; bundle a serif font.
 - [ ] A low-resolution preview of the blurred photo for smoother dragging.
 - [ ] Redraw thumbnails only when needed, to cut the cost of many sizes.
 - [ ] Subset the bundled fonts to shrink the installer.

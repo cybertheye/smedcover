@@ -248,8 +248,8 @@ A look is a set of **hooks**. Each is optional, and what a look leaves out is dr
 | `freeText` | free text layers in their plain and plate looks |
 | `subject` | whatever is painted around the channel graphic and travels with it (a lock-on ring, say) |
 | `seeded` | marks a look that places some things at random |
+| `layout` | the geometry of a cover, for looks that are about arrangement; the result has the shape `layout()` in `layout.js` returns, and usually comes from `blockLayout()`, which gives level bands and upright panels |
 | `titleFont` | the title's font stack, for looks with typographic opinions (editorial's serif) |
-| `lowRes` | how coarsely a kind of layer is drawn, for pixel looks: the layer is painted on a small canvas and enlarged without smoothing |
 | `oneTheme` | marks a look with a single ground, so the interface hides the light / dark choice |
 | `image` | the shadow or glow of an uploaded image |
 | `post` | an overlay painted over the finished cover, such as scanlines and a vignette |
@@ -287,7 +287,8 @@ Most new looks keep the construction and change the materials, so a few tools ar
 
 - `mapped(ctx, rules)` — a general stand-in context that swaps colours by the job they do (ink, light face, mid face, dark face, colour) and can scale every line width.
 - `painters(options)` — builds the five sticker painters from an outline colour, a line-width factor and a way of drawing the shadow.
-- `grain()`, `desaturate()`, `wash()` — grain, removing colour, laying a colour over everything; for paper and film and for treating photos.
+- `grain()`, `wash()` — grain, and laying a colour over everything; for paper and film and for tinting photos. Grain is multiplied in on paper and overlaid on film: overlay hardly shows on a light ground.
+- A photo loses its colour through the `grey` argument of `drawPhoto()`, which computes a grey copy pixel by pixel and caches it. The canvas "saturation" blend mode is not used: it is not dependable across web views.
 
 Looks with a light and a dark ground (record sleeve, editorial) learn which one is current from the fourth argument of `setLook()`.
 

@@ -1,7 +1,7 @@
 // Unit tests for the DOM-free logic. Run with: npm test
 import test from "node:test";
 import assert from "node:assert/strict";
-import { virtualSize, layout, TEMPLATES } from "../ui/js/layout.js";
+import { blockLayout, virtualSize, layout, TEMPLATES } from "../ui/js/layout.js";
 import { parseCsv, csvToJobs } from "../ui/js/csv.js";
 import { normalizeProfile, normalizeCover, normalizeSettings, exportName, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
 import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex } from "../ui/js/layers.js";
@@ -470,7 +470,8 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "brick"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial"]);
+  assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && q.min <= q.def && q.def <= q.max); }
 });
 
@@ -572,8 +573,23 @@ test("looks: every look is complete enough to draw and to brief the AI", () => {
     if (L.sticker) { [n, ctx] = calls(); L.sticker.shape(ctx, (c) => c.rect(0, 0, 5, 5), "#ff3b4f", { shadow: true, lw: 7 }, p); assert.ok(n.fill >= 1, `${id}: sticker`); }
     if (L.wrap) { const seen = []; const raw = { set fillStyle(v) { seen.push(v); }, get fillStyle() { return "x"; }, lineWidth: 1 }; L.wrap(raw, env.C, p, false).fillStyle = "#07070c"; assert.equal(seen.length, 1, `${id}: wrap`); }
   }
-  // the looks drawn in big pixels say how coarse each kind of layer is
-  setLook("brick", { pixel: 8 });
-  assert.equal(LOOKS.brick.lowRes("graphic", lookValues()), 8); assert.equal(LOOKS.brick.lowRes("title", lookValues()), 4); assert.equal(LOOKS.brick.lowRes("brand", lookValues()), 0);
   setLook("cel");
+});
+
+test("looks that are about arrangement bring flat-edged layouts", async () => {
+  const { blockLayout } = await import("../ui/js/layout.js");
+  for (const id of ["bluenote", "editorial"]) for (const [w, h] of [[1920, 1080], [1600, 1200], [1200, 1200], [1200, 1600], [1080, 1920], [2350, 1000]]) for (const t of ["stack", "split", "banner"]) {
+    const g = LOOKS[id].layout(t, w, h), where = `${id} ${t} ${w}x${h}`;
+    assert.equal(g.template, t, where);
+    const [a, b] = g.accent;
+    assert.ok(a[0] === b[0] || a[1] === b[1], `${where}: the dividing edge is not straight`);     // no slant
+    assert.deepEqual(g.edge.line, [a[0], a[1], b[0], b[1]], where);
+    for (const [x, y] of g.accent) assert.ok(x >= 0 && x <= w && y >= 0 && y <= h, where);
+    assert.ok(g.title.w > 200 && g.title.h >= 120 && g.title.x + g.title.w <= w, `${where}: title box ${JSON.stringify(g.title)}`);
+    assert.ok(g.title.y + g.title.h <= (t === "split" ? h : a[1]), `${where}: the title runs into the band`);
+    assert.ok(g.art.s >= 0.3 && g.art.s <= 1.05 && g.art.x > 0 && g.art.x < w && g.art.y > 0 && g.art.y < h, where);
+    assert.ok(g.cat.maxW > 100 && g.cat.y > 0 && g.cat.y < h && g.tag.y > 0 && g.tag.y < h, where);
+  }
+  assert.ok(blockLayout("stack", 1920, 1080, { band: 0.5 }).accent[0][1] < blockLayout("stack", 1920, 1080, { band: 0.2 }).accent[0][1]);
+  assert.equal(LOOKS.riso.layout, undefined);                    // the others keep the profile's slanted layouts
 });

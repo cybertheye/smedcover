@@ -586,7 +586,7 @@ function removeAsset(id) {
 
 function styleTab() {
   const st = S.profile.style, set = (k, v) => { st[k] = v; touch({ profile: true }); };
-  const L = LOOKS[st.look], vals = lookParams(st.look, st.lookParams[st.look]);
+  const L = LOOKS[st.look] || LOOKS.cel, vals = lookParams(st.look, st.lookParams[st.look]);
   const tune = (k, v) => { st.lookParams[st.look] = { ...vals, ...st.lookParams[st.look], [k]: v }; touch({ profile: true }); };
   return [
     el("div", { class: "box" }, cap("style.look"),
@@ -769,7 +769,7 @@ function typeControls(L) {
   const set = (k, v, side = false) => { L[k] = v; touch({ cover: true, side }); };
   switch (L.type) {
     case "bg": return [
-      !LOOKS[S.profile.style.look].oneTheme && select([["dark", t("theme.dark")], ["light", t("theme.light")]], S.profile.style.theme, (v) => { S.profile.style.theme = v; touch({ profile: true }); }),
+      !(LOOKS[S.profile.style.look] || LOOKS.cel).oneTheme && select([["dark", t("theme.dark")], ["light", t("theme.light")]], S.profile.style.theme, (v) => { S.profile.style.theme = v; touch({ profile: true }); }),
       check("props.grid", L.grid, (v) => set("grid", v)),
       S.photo && [slider("props.blur", 0, 80, 1, L.blur, px, (v) => set("blur", v)), slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => set("dim", v))],
     ];
@@ -1142,12 +1142,19 @@ async function selfTest(dir) {
     }
     // one cover in every other look, so each is exercised in the real web view
     S.settings.format = "png"; report.looks = [];
-    for (const id of LOOK_IDS.filter((k) => k !== "cel")) {
-      S.profile.style.look = id;
-      const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
-      report.looks.push({ id, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `look-${id}.png` })) });
+    const plain = S.photo, snap = document.createElement("canvas");   // a stand-in photograph: colours, light and dark, some detail
+    snap.width = 1200; snap.height = 800;
+    const sx = snap.getContext("2d"), sky = sx.createLinearGradient(0, 0, 1200, 800);
+    sky.addColorStop(0, "#f2b45a"); sky.addColorStop(0.5, "#d9486e"); sky.addColorStop(1, "#1f4fa8");
+    sx.fillStyle = sky; sx.fillRect(0, 0, 1200, 800);
+    for (let k = 0; k < 14; k++) { sx.fillStyle = ["#fff7d6", "#1b1b2a", "#2dd4a4"][k % 3]; sx.fillRect(40 + k * 82, 300 + ((k * 137) % 260), 56, 500); }
+    const shot = await loadImage(snap.toDataURL("image/jpeg", 0.9));
+    for (const id of LOOK_IDS.filter((k) => k !== "cel")) for (const withPhoto of [false, true]) {
+      S.profile.style.look = id; S.photo = withPhoto ? shot : plain;
+      const cv = renderFull(S.profile.sizes[0], S.cover, catIndex()), name = `look-${id}${withPhoto ? "-photo" : ""}.png`;
+      report.looks.push({ id, photo: withPhoto, path: await invoke("write_image", framed(await toPng(cv), { dir, name })) });
     }
-    S.profile.style.look = "cel";
+    S.profile.style.look = "cel"; S.photo = plain;
     if (report.ai && !report.ai.every((r) => r.stored && r.drawn)) report.errors.push("ai: a generated asset was not stored or drawn");
     report.ok = !report.errors.length;
   } catch (e) { report.errors.push(String(e && e.message ? e.message : e)); }
