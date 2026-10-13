@@ -1,7 +1,8 @@
 [package]
 name = "smedcover"
 version = "0.1.0"
-description = "Branded cover-image generator for video channels"
+description = "Branded cover-image generator for video creators"
+license = "AGPL-3.0-only"
 edition = "2021"
 
 [lib]

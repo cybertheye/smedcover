@@ -203,8 +203,16 @@ SMEDCOVER_SELFTEST=/一个空目录的绝对路径 src-tauri/target/release/bund
 - [ ] 缩略图按需重画，减少尺寸多时的开销。
 - [ ] 内置字体子集化，减小安装包。
 - [ ] 在 Windows 和 Linux 上实机验证，并跑通 GitHub Actions 构建。
-- [ ] 为项目选定开源许可证。
 
 ## 许可
 
-内置字体 Noto Sans SC、Bebas Neue、JetBrains Mono 采用 SIL Open Font License，许可文本在 `ui/fonts/`。项目自身的许可证尚未选定。
+| 对象 | 许可证 |
+|---|---|
+| 程序（全部源代码） | [GNU AGPL v3](LICENSE) |
+| 内置素材：频道图形、贴纸、色块形状 | [CC BY 4.0](LICENSE-ASSETS.md) |
+| 内置字体：Noto Sans SC、Bebas Neue、JetBrains Mono | SIL Open Font License，文本在 `ui/fonts/` |
+
+简单说：你可以使用、修改和再分发 SmedCover；但如果你分发修改后的版本，或让别人通过网络使用它，
+就必须以同样的许可证公开其源代码。内置素材可以在别处使用，但须署名。
+
+Copyright © 2026 The SmedCover authors.

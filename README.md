@@ -210,9 +210,17 @@ are not public, so the plan is to export open formats that both can read.
 - [ ] Redraw thumbnails only when needed, to cut the cost of many sizes.
 - [ ] Subset the bundled fonts to shrink the installer.
 - [ ] Try the app on Windows and Linux, and get the GitHub Actions build running.
-- [ ] Choose a licence for the project.
 
 ## Licences
 
-The bundled fonts Noto Sans SC, Bebas Neue and JetBrains Mono are under the SIL Open Font License;
-the licence texts are in `ui/fonts/`. The project itself does not have a licence yet.
+| What | Licence |
+|---|---|
+| The program (all source code) | [GNU AGPL v3](LICENSE) |
+| Built-in artwork: channel graphics, stickers, colour block shapes | [CC BY 4.0](LICENSE-ASSETS.md) |
+| Bundled fonts: Noto Sans SC, Bebas Neue, JetBrains Mono | SIL Open Font License, texts in `ui/fonts/` |
+
+In short: you may use, change and redistribute SmedCover, but if you distribute a modified version —
+or let people use one over a network — you must make its source available under the same licence.
+The built-in artwork may be reused elsewhere with credit.
+
+Copyright © 2026 The SmedCover authors.
