@@ -25,7 +25,8 @@
 //   post(ctx, w, h, C, p, unit, hits)  painted over the finished cover (scanlines, vignette); `unit` is
 //                                canvas pixels per virtual unit, `hits` where each layer ended up
 //   params                       … an entry with toggle: true is shown as a checkbox (0 or 1)
-//   params                       tunable numbers shown as sliders: [{ key, min, max, step, def, name: {zh, en} }]
+//   params                       tunable numbers shown as sliders: [{ key, min, max, step, def, name: {zh, en} }];
+//                                needsPhoto: true marks one that only acts on a background photo
 //   prompt / solidPrompt         the "Style" section of the AI prompts for this look (see ai.js)
 //
 // The current look is module state, set by drawCover() from the profile before anything is drawn.
@@ -166,7 +167,7 @@ const cyber = {
     { key: "sweep", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "扫描光带", en: "Sweep line" } },
     { key: "sweepAt", min: 0, max: 1, step: 0.01, def: 0, name: { zh: "光带位置", en: "Sweep position" } },
     { key: "glow", min: 0, max: 2, step: 0.05, def: 0.35, name: { zh: "线条光晕", en: "Line glow" } },
-    { key: "photo", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "照片染色", en: "Photo tint" } },
+    { key: "photo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "照片染色", en: "Photo tint" } },
     { key: "tearClear", toggle: true, min: 0, max: 1, step: 1, def: 1, name: { zh: "撕裂避开文字", en: "Keep tears off lettering" } },
   ],
   theme: (base, C) => ({ ...base, field: css(CY.deep), text: css(CY.white), dim: css(CY.white, 0.55), titleFill: css(CY.white), titleInk: css(CY.black), grid: () => css(C, 0.2) }),
@@ -714,7 +715,7 @@ const bluenote = {
   id: "bluenote",
   name: { zh: "蓝调唱片", en: "Record sleeve" },
   params: [
-    { key: "duo", min: 0, max: 1, step: 0.05, def: 0.9, name: { zh: "照片双色调", en: "Photo duotone" } },
+    { key: "duo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.9, name: { zh: "照片双色调", en: "Photo duotone" } },
     { key: "rules", min: 0, max: 1, step: 0.05, def: 1, name: { zh: "细线与编目", en: "Rules and catalogue" } },
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "纸张颗粒", en: "Paper grain" } },
   ],
@@ -780,7 +781,7 @@ const editorial = {
   name: { zh: "编辑设计", en: "Editorial" },
   params: [
     { key: "rules", min: 0, max: 1, step: 0.05, def: 1, name: { zh: "栏线与页眉", en: "Rules and folio" } },
-    { key: "mono", min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白照片", en: "Black-and-white photo" } },
+    { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白照片", en: "Black-and-white photo" } },
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "纸张颗粒", en: "Paper grain" } },
   ],
   titleFont: () => SERIF,

@@ -62,6 +62,7 @@ const STR = {
 
   "style.look": ["风格", "Look"],
   "style.lookHint": ["风格决定整张封面怎么画：背景、色块、文字、图形和贴纸一起换。内容和位置不变，随时可以切回来。", "The look decides how the whole cover is drawn: background, colour block, lettering, graphics and stickers change together. Content and placement stay as they are, and you can switch back at any time."],
+  "style.needsPhoto": ["先在「封面」里放一张背景照片", "Add a background photo in the Cover tab first"],
   "style.shuffle": ["换一组随机位置", "Shuffle the random placement"],
   "style.shuffleHint": ["撕裂带、扫描线等的位置是随机的，但会固定下来，预览和导出一致。不满意就再换一组。", "Tears, the sweep line and the like fall at random but then stay put, so the export matches the preview. Shuffle again if you do not like where they fell."],
   "style.lookReset": ["恢复这个风格的默认参数", "Restore this look's defaults"],
