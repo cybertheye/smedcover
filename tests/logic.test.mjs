@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { virtualSize, layout, TEMPLATES } from "../ui/js/layout.js";
 import { parseCsv, csvToJobs } from "../ui/js/csv.js";
 import { normalizeProfile, normalizeCover, normalizeSettings, exportName, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
-import { ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex } from "../ui/js/layers.js";
+import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex } from "../ui/js/layers.js";
 import { sampleProfile, starterProfile } from "../ui/js/presets.js";
 
 test("virtualSize keeps the five tuned canvases and normalises everything else", () => {
@@ -533,4 +533,21 @@ test("looks: the AI prompts take their style section from the look", () => {
   assert.ok(flat.includes("cyberpunk") && flat.includes('"op":"shape"'));
   assert.ok(solid.includes("cyberpunk") && solid.includes('"kind":"solid"'));
   assert.ok(!buildPrompt("x", "", { kind: "flat" }).system.includes("cyberpunk"));
+});
+
+test("lettering layers may carry their own colour", () => {
+  assert.deepEqual(LETTERED, ["title", "tag", "catname", "brand", "text"]);
+  const ls = normalizeLayers([
+    { type: "title", ink: "#FF00AA", hi: "#00ff00" }, { type: "tag", ink: "#123456", hi: "#00ff00" }, { type: "catname", ink: "red" }, { type: "brand", ink: "#abc" },
+    { type: "accent", ink: "#ff0000" }, { type: "text", text: "x", ink: "#0000FF" }, { type: "asset", ref: { kind: "sticker", id: "star" }, ink: "#ff0000" },
+  ]);
+  const by = (type) => ls.find((l) => l.type === type);
+  assert.equal(by("title").ink, "#ff00aa"); assert.equal(by("title").hi, "#00ff00");
+  assert.equal(by("tag").ink, "#123456"); assert.equal(by("tag").hi, undefined);       // only the title has highlighted words
+  assert.equal(by("catname").ink, undefined); assert.equal(by("brand").ink, undefined); // not six-digit hex: left automatic
+  assert.equal(by("accent").ink, undefined); assert.equal(by("asset").ink, undefined);   // not lettering
+  assert.equal(by("text").ink, "#0000ff");
+  assert.equal(duplicate(by("text")).ink, "#0000ff");
+  assert.deepEqual(normalizeLayers(ls), ls);
+  assert.deepEqual(LOOKS.cyber.params.map((q) => q.key).at(-1), "tearClear");            // the checkbox closes the list
 });

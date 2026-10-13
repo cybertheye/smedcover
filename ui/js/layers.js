@@ -19,6 +19,8 @@ export const BOUND_TYPES = ["bg", "accent", "graphic", "brand", "title", "tag", 
 export const FREE_TYPES = ["asset", "text"];
 /** Shapes the colour block and its dividing edge can take ("slant" is the template's own). */
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes", "arc"];
+/** Layers made of words. Each may carry `ink`, its own colour; the title also `hi`, for highlighted words. */
+export const LETTERED = ["title", "tag", "catname", "brand", "text"];
 export const isFree = (type) => FREE_TYPES.includes(type);
 /** Layers that can be grabbed on the canvas (the others are selected from the layer list only). */
 /** Whether a layer is part of the cover of category `catId`. */
@@ -68,6 +70,8 @@ function normalizeLayer(raw, catIds) {
   const L = { ...base, id: free ? (typeof raw.id === "string" && raw.id ? raw.id : base.id) : raw.type,
     visible: raw.visible !== false, locked: raw.locked === true, o: num(raw.o, 1, 0, 1), t: normalizeT(raw.t, free) };
   if (typeof raw.name === "string" && raw.name) L.name = raw.name.slice(0, 60);
+  // lettering may be given its own colour; without one it takes whatever the look gives it
+  if (LETTERED.includes(raw.type)) for (const k of raw.type === "title" ? ["ink", "hi"] : ["ink"]) if (typeof raw[k] === "string" && /^#[0-9a-f]{6}$/i.test(raw[k])) L[k] = raw[k].toLowerCase();
   if (free && Array.isArray(raw.cats)) {   // a layer whose categories are all gone goes with them
     const cats = [...new Set(raw.cats.filter((x) => typeof x === "string" && x && (!catIds || catIds.includes(x))))];
     if (!cats.length) return null;

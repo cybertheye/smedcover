@@ -755,6 +755,16 @@ function placementControls(L) {
     el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { resetPlacement(L, S.settings.scope, f.key, f.catId); touch({ cover: true, side: true }); } }, `${t("props.reset")} · ${t("scope." + S.settings.scope)}`),
   ];
 }
+/**
+ * A colour for a layer's lettering: a swatch to pick one, and a button back to "automatic", where
+ * the layer takes whatever the current look gives it. `shown` is the swatch's colour while automatic.
+ */
+function inkControl(L, key, labelKey, shown) {
+  const own = !!L[key];
+  return el("div", { class: "ink" }, el("span", {}, t(labelKey)),
+    el("input", { type: "color", value: L[key] || shown, oninput: (e) => { L[key] = e.target.value; touch({ cover: true }); later("side", 600, renderSide); } }),
+    el("button", { class: "btn", disabled: !own, title: t("props.inkAutoHint"), onclick: () => { delete L[key]; touch({ cover: true, side: true }); } }, t(own ? "props.inkAuto" : "props.inkIsAuto")));
+}
 function typeControls(L) {
   const set = (k, v, side = false) => { L[k] = v; touch({ cover: true, side }); };
   switch (L.type) {
@@ -764,21 +774,23 @@ function typeControls(L) {
       S.photo && [slider("props.blur", 0, 80, 1, L.blur, px, (v) => set("blur", v)), slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => set("dim", v))],
     ];
     case "accent": return el("div", { style: "margin-bottom:10px" }, select(ACCENT_SHAPES.map((k) => [k, `${t("props.shape")} · ${t("shape." + k)}`]), L.shape, (v) => set("shape", v, false)), null);
-    case "brand": return check("props.rail", L.rail, (v) => set("rail", v));
+    case "brand": return [check("props.rail", L.rail, (v) => set("rail", v)), inkControl(L, "ink", "props.ink", "#ffffff")];
     case "title": return [
       select([["left", `${t("props.align")} · ${t("align.left")}`], ["center", `${t("props.align")} · ${t("align.center")}`]], L.align, (v) => set("align", v)),
       slider("props.stroke", 0, 2, 0.05, L.stroke, times, (v) => set("stroke", v)),
       slider("props.shadow", 0, 2, 0.05, L.shadow, times, (v) => set("shadow", v)),
+      inkControl(L, "ink", "props.ink", "#ffffff"), inkControl(L, "hi", "props.inkHi", cat().color),
       el("div", { class: "hint" }, t("props.boundHint")),
     ];
-    case "tag": return el("div", { class: "hint", style: "margin:0" }, t("props.boundHint"));
-    case "catname": return [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v))];
+    case "tag": return [inkControl(L, "ink", "props.ink", "#07070c"), el("div", { class: "hint" }, t("props.boundHint"))];
+    case "catname": return [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v)), inkControl(L, "ink", "props.ink", "#07070c")];
     case "graphic": return el("div", { class: "hint", style: "margin:0" }, t("props.graphicHint"));
     case "asset": return canTint(L.ref) && L.ref.kind !== "graphic" ? check("props.tint", L.tint, (v) => set("tint", v)) : null;
     case "text": return [
       cap("props.text"), el("textarea", { value: L.text, spellcheck: false, style: "height:72px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
       el("div", { style: "margin-top:8px" }, select(["title", "plain", "plate"].map((k) => [k, `${t("props.look")} · ${t("look." + k)}`]), L.look, (v) => set("look", v))),
       el("div", { style: "margin-top:8px" }, select(["white", "accent", "ink"].map((k) => [k, `${t("props.color")} · ${t("color." + k)}`]), L.color, (v) => set("color", v))),
+      inkControl(L, "ink", "props.inkCustom", { white: "#ffffff", accent: cat().color, ink: "#07070c" }[L.color]),
     ];
   }
   return null;

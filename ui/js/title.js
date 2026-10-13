@@ -43,7 +43,7 @@ export function drawTitle(ctx, title, box, adj, st) {
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
     if (look().runs) {   // the look paints the letters its own way
       const m = ctx.getTransform ? ctx.getTransform() : null;
-      look().runs(ctx, pass, { fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, C: st.C, unit: m ? Math.hypot(m.a, m.b) : 1 }, lookValues());
+      look().runs(ctx, pass, { fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, C: st.C, fill: st.own, hi: st.ownHi, unit: m ? Math.hypot(m.a, m.b) : 1 }, lookValues());
       ctx.restore();
       return;
     }

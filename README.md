@@ -96,6 +96,19 @@ What each layer allows:
 | Colour block, channel graphic, brand row, title, corner tag, channel name | yes | yes | yes | no |
 | Stickers, images, text (free layers) | yes | yes | yes | yes |
 
+### Lettering colours
+
+Every layer made of words can be given its own colour. Select the layer and look in its properties:
+
+| Layer | Colours you can set |
+|---|---|
+| Title | lettering colour, and highlight colour (for words in `*asterisks*`) |
+| Text layers | a custom colour, which replaces the White / Channel colour / Ink choice above it |
+| Corner tag, channel name, brand row | lettering colour |
+
+Without one a layer shows *Automatic*: the colour comes from the current look and the channel colour, and follows when you switch either. Once set, the colour stays as it is; *Back to automatic* clears it.
+The plates themselves (behind the tag, behind the channel's sub-name) are not included: they still follow the channel colour.
+
 ### Items for some channels only
 
 Select a free layer and use **Channels** at the bottom of its properties:
@@ -146,13 +159,13 @@ The cyberpunk look has eight sliders and a checkbox. Two of them sound alike: *S
 |---|---|---|
 | Colour split | red and cyan pulled apart across the whole picture; the red and cyan "echo" behind the title, stickers and the tag follows it | more glitch; 0 gives a clean picture with no echo |
 | Signal tear | a few horizontal bands pushed sideways | more bands, pushed further; 0 gives none |
-| Keep tears off lettering (checkbox) | no tear lands on the rows of the title, text layers, the tag, the channel name or the brand row | on by default; untick to let tears cross lettering |
 | Scanlines | the dark horizontal lines across the picture | more old monitor; 0 is the sharpest picture |
 | Interface detail | the interface of an optical implant starting up and scanning: lens rings, a sweep line, a start-up log up the right edge, a ruler up the left, a status line, signal meter, code block and hazard stripe along the bottom, a lock-on ring and readout around the channel graphic, the huge channel code in the background | more of them appear in turn; 0 leaves only the corner brackets |
 | Sweep line | the single bright line across the picture and the band of light above it | brighter; **0 hides it** |
 | Sweep position | how far down the picture the sweep sits | lower; **0 leaves it to chance** |
 | Line glow | how far the lines of channel graphics and solids glow | brighter and softer; 0 gives clean thin lines |
 | Photo tint | how far a background photo is pushed toward the channel colour and into the dark | a darker, more stylised photo; 0 keeps its own colours |
+| Keep tears off lettering (checkbox, last) | no tear lands on the rows of the title, text layers, the tag, the channel name or the brand row | on by default; untick to let tears cross lettering |
 
 **Random placement** — the tears, the sweep line and the lens rings fall at random but then stay put, so the export matches the preview and every size agrees. *Shuffle the random placement*, under the sliders, rolls again — when a tear lands across the title, say.
 

@@ -145,7 +145,14 @@ angles add. `adjust()` is the single entry point for every edit: dragging, handl
 keys and sliders all express a change as a patch, which is written to `t.all` or `t.by` depending on
 the current scope.
 
-### 4.2 Channels a layer belongs to
+### 4.2 Lettering colours
+
+Layers made of words (`title`, `tag`, `catname`, `brand`, `text`) may carry `ink`, their own
+lettering colour; the title may also carry `hi`, the colour of its highlighted words. Without them
+the colour comes from the current look and the channel colour. Every look's lettering has to honour
+the two fields.
+
+### 4.3 Channels a layer belongs to
 
 A free layer may carry `cats`, an array of channel ids. Without it the layer belongs to every
 channel; with it, only to those listed. `appliesTo(layer, catId)` is the one place that decides, and

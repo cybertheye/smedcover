@@ -158,13 +158,13 @@ const cyber = {
   params: [
     { key: "split", min: 0, max: 2, step: 0.05, def: 1, name: { zh: "色彩错位", en: "Colour split" } },
     { key: "tear", min: 0, max: 2, step: 0.05, def: 0.7, name: { zh: "信号撕裂", en: "Signal tear" } },
-    { key: "tearClear", toggle: true, min: 0, max: 1, step: 1, def: 1, name: { zh: "撕裂避开文字", en: "Keep tears off lettering" } },
     { key: "scan", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "扫描线", en: "Scanlines" } },
     { key: "decor", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "界面装饰", en: "Interface detail" } },
     { key: "sweep", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "扫描光带", en: "Sweep line" } },
     { key: "sweepAt", min: 0, max: 1, step: 0.01, def: 0, name: { zh: "光带位置", en: "Sweep position" } },
     { key: "glow", min: 0, max: 2, step: 0.05, def: 0.35, name: { zh: "线条光晕", en: "Line glow" } },
     { key: "photo", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "照片染色", en: "Photo tint" } },
+    { key: "tearClear", toggle: true, min: 0, max: 1, step: 1, def: 1, name: { zh: "撕裂避开文字", en: "Keep tears off lettering" } },
   ],
   theme: (base, C) => ({ ...base, field: css(CY.deep), text: css(CY.white), dim: css(CY.white, 0.55), titleFill: css(CY.white), titleInk: css(CY.black), grid: () => css(C, 0.2) }),
 
@@ -218,7 +218,7 @@ const cyber = {
    * Highlighted words are black on a chamfered plate.
    */
   runs(ctx, pass, o, p) {
-    const fs = o.fs, C = o.C || CY.white, ink = o.fill || C, plateCol = o.fill && o.fill !== C ? o.fill : C;
+    const fs = o.fs, C = o.C || CY.white, ink = o.fill || C, plateCol = o.hi || (o.fill && o.fill !== C ? o.fill : C);
     const g = fast ? 0 : fs * 0.03 * p.split * Math.max(0.3, o.shadowAmt), slip = fs * 0.03 * Math.min(1.5, p.split);
     ctx.lineJoin = "miter"; ctx.miterLimit = 3;
     ctx.transform(1, 0, -0.1, 1, 0, 0);   // a harder slant than the house style's
@@ -247,13 +247,13 @@ const cyber = {
    */
   freeText(ctx, L, lines, env, p) {
     if (L.look === "title") return null;
-    const FS = 120, LH = 1.16, C = env.C, sp = FS * 0.07, col = { white: CY.white, accent: C, ink: CY.black }[L.color] || CY.white;
+    const FS = 120, LH = 1.16, C = env.C, sp = FS * 0.07, col = parseColour(L.ink) || { white: CY.white, accent: C, ink: CY.black }[L.color] || CY.white;
     ctx.font = `700 ${FS}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "miter";
     const widthOf = (line) => line.reduce((sum, a) => sum + spacedW(ctx, a.t, sp) + sp, -sp), widths = lines.map(widthOf), bw = Math.max(...widths), bh = lines.length * FS * LH;
     const text = (fillOf) => lines.forEach((line, li) => { let x = -widths[li] / 2; const y = -bh / 2 + li * FS * LH + FS * 0.92; for (const a of line) { ctx.fillStyle = fillOf(a); x += spaced(ctx, a.t, x, y, sp) + sp * 2; } });
     const g = fast ? 0 : 6 * p.split;
     if (L.look === "plate") {
-      const pad = FS * 0.36, x = -bw / 2 - pad, y = -bh / 2 - FS * 0.12, w = bw + pad * 2, h = bh + FS * 0.24, onInk = L.color === "ink";
+      const pad = FS * 0.36, x = -bw / 2 - pad, y = -bh / 2 - FS * 0.12, w = bw + pad * 2, h = bh + FS * 0.24, onInk = lum(col) < 0.25;   // a dark plate takes light lettering
       const plate = (c) => { chamfer(ctx, x, y, w, h, FS * 0.34); ctx.fillStyle = c; ctx.fill(); ctx.fillRect(x - FS * 0.3, -FS * 0.07, FS * 0.22, FS * 0.14); };
       echo(ctx, g, plate); plate(css(col));
       text((a) => (onInk ? css(a.hi ? CY.white : C) : a.hi ? css(CY.white) : css(CY.black)));
@@ -262,18 +262,18 @@ const cyber = {
     const arm = FS * 0.2, gap = FS * 0.3, bx = bw / 2 + gap, by = bh / 2;
     const marks = (c) => { ctx.strokeStyle = c; ctx.lineWidth = FS * 0.075; ctx.lineCap = "butt"; ctx.beginPath(); for (const sx of [-1, 1]) { ctx.moveTo(sx * (bx - arm), -by); ctx.lineTo(sx * bx, -by); ctx.lineTo(sx * bx, by); ctx.lineTo(sx * (bx - arm), by); } ctx.stroke(); };
     echo(ctx, g, (c) => { marks(c); text(() => c); });
-    marks(css(col)); text((a) => css(a.hi ? (L.color === "accent" ? CY.white : C) : col));
+    marks(css(col)); text((a) => css(a.hi ? (String(css(col)) === String(css(C)) ? CY.white : C) : col));
     return { hw: bx + FS * 0.04, hh: by + FS * 0.04 };
   },
 
   wrap: (ctx, C, p, plates) => (plates ? ctx : neonContext(ctx, C, p)),   // the small cover parts are already ink on colour
 
   /** The corner tag: a chamfered plate with a colour echo. Returns its box. */
-  tag(ctx, str, x, y, fs, C, p) {
+  tag(ctx, str, x, y, fs, C, p, ink) {
     ctx.font = `700 ${fs}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
     const w = spacedW(ctx, str, 3) + fs * 1.1, h = fs * 1.34, plate = (col) => { chamfer(ctx, x, y, w, h, fs * 0.42); ctx.fillStyle = col; ctx.fill(); };
     echo(ctx, fast ? 0 : 7 * p.split, plate); plate(css(C));
-    ctx.fillStyle = css(CY.black); spaced(ctx, str, x + fs * 0.5, y + h * 0.5 + fs * 0.4, 3);
+    ctx.fillStyle = ink || css(CY.black); spaced(ctx, str, x + fs * 0.5, y + h * 0.5 + fs * 0.4, 3);
     ctx.fillRect(x + fs * 0.18, y + h - fs * 0.2, w - fs * 0.9, Math.max(3, fs * 0.05));   // a rule under the lettering
     return { x: x - 8, y: y - 4, w: w + 16, h: h + 8 };
   },

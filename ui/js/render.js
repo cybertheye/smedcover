@@ -38,14 +38,14 @@ function grid(ctx, color, w, h) {
   ctx.stroke();
 }
 // accent plate with an offset white shadow; (x, y) = top-left
-function accentTag(ctx, str, x, y, fs, acc) {
+function accentTag(ctx, str, x, y, fs, acc, ink = INK) {
   ctx.font = `700 ${fs}px ${fonts.en}, ${fonts.cn}`;
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
   const w = spacedW(ctx, str, 3) + fs * 1.1, h = fs * 1.34;
   ctx.fillStyle = "#fff"; para(ctx, x + 8, y + 8, w, h, -fs * 0.22); ctx.fill();
   ctx.fillStyle = acc; para(ctx, x, y, w, h, -fs * 0.22); ctx.fill();
   ctx.lineWidth = 6; ctx.strokeStyle = INK; ctx.lineJoin = "miter"; ctx.stroke();
-  ctx.fillStyle = INK; spaced(ctx, str, x + fs * 0.55, y + h * 0.5 + fs * 0.4, 3);
+  ctx.fillStyle = ink; spaced(ctx, str, x + fs * 0.55, y + h * 0.5 + fs * 0.4, 3);
   return { x: x - fs * 0.22, y, w: w + fs * 0.44 + 8, h: h + 8 };
 }
 
@@ -99,7 +99,8 @@ function drawCategory(ctx, cat, G, C, show) {
     ctx.translate(x, c.y);
     ctx.transform(1, 0, -0.1, 1, 0, 0);
     const each = (fn) => { let cx = 0; for (const g of glyphs) { fn(g, cx); cx += ctx.measureText(g).width + 6; } };
-    if (c.onAccent) { ctx.fillStyle = ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.03; each((g, cx) => { ctx.strokeText(g, cx, 0); ctx.fillText(g, cx, 0); }); }
+    if (show.ink) { ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.09; if (!c.onAccent) each((g, cx) => ctx.strokeText(g, cx, 0)); ctx.fillStyle = ctx.strokeStyle = show.ink; ctx.lineWidth = fs * 0.02; each((g, cx) => { ctx.strokeText(g, cx, 0); ctx.fillText(g, cx, 0); }); }
+    else if (c.onAccent) { ctx.fillStyle = ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.03; each((g, cx) => { ctx.strokeText(g, cx, 0); ctx.fillText(g, cx, 0); }); }
     else {
       ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.09; each((g, cx) => ctx.strokeText(g, cx, 0));
       ctx.fillStyle = ctx.strokeStyle = acc; ctx.lineWidth = fs * 0.02; each((g, cx) => { ctx.strokeText(g, cx, 0); ctx.fillText(g, cx, 0); });
@@ -228,13 +229,14 @@ function drawFreeText(ctx, L, env) {
   ctx.font = plate ? `700 ${FS}px ${fonts.en}, ${fonts.cn}` : `900 ${FS}px ${fonts.cn}`;
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "round";
   const widths = lines.map((l) => l.reduce((s, a) => s + ctx.measureText(a.t).width, 0)), bw = Math.max(...widths), bh = lines.length * FS * LH;
-  const fill = { white: "#ffffff", accent: env.acc, ink: INK }[L.color], pad = plate ? FS * 0.32 : 0;
+  const fill = L.ink || { white: "#ffffff", accent: env.acc, ink: INK }[L.color], pad = plate ? FS * 0.32 : 0;
   if (plate) {
     ctx.fillStyle = INK; para(ctx, -bw / 2 - pad + 10, -bh / 2 - pad * 0.3 + 10, bw + pad * 2, bh + pad * 0.6, -FS * 0.14); ctx.fill();
     ctx.fillStyle = fill; para(ctx, -bw / 2 - pad, -bh / 2 - pad * 0.3, bw + pad * 2, bh + pad * 0.6, -FS * 0.14); ctx.fill();
     ctx.lineWidth = 7; ctx.strokeStyle = INK; ctx.stroke();
   }
-  const textFill = plate ? (L.color === "ink" ? env.acc : INK) : fill, d = FS * 0.062;
+  const dark = L.ink ? hexToRgb(L.ink).reduce((sum, v) => sum + v, 0) < 200 : L.color === "ink";   // a dark plate takes light lettering
+  const textFill = plate ? (dark ? env.acc : INK) : fill, d = FS * 0.062;
   lines.forEach((line, li) => {
     ctx.save();
     ctx.translate(-widths[li] / 2, -bh / 2 + li * FS * LH + FS * (plate ? 0.94 : 0.9));
@@ -242,7 +244,7 @@ function drawFreeText(ctx, L, env) {
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
     if (L.look === "title" && look().runs) {
       const m = raw.getTransform ? raw.getTransform() : null;
-      look().runs(raw, pass, { fs: FS, d, strokeAmt: 1, shadowAmt: 1, C: env.C, fill: { white: [240, 246, 250], accent: env.C, ink: [5, 5, 8] }[L.color], unit: m ? Math.hypot(m.a, m.b) : 1 }, lookValues());
+      look().runs(raw, pass, { fs: FS, d, strokeAmt: 1, shadowAmt: 1, C: env.C, fill: L.ink ? hexToRgb(L.ink) : { white: [240, 246, 250], accent: env.C, ink: [5, 5, 8] }[L.color], unit: m ? Math.hypot(m.a, m.b) : 1 }, lookValues());
       raw.restore();
       return;
     }
@@ -280,23 +282,24 @@ const PAINT = {
     });
   },
   brand(ctx, L, tr, env) {
-    return placed(ctx, tr, (c) => drawHeader(styled(c, env.C, true), env.o, env.w, env.th, env.C, env.G.template === "split", L.rail));
+    return placed(ctx, tr, (c) => drawHeader(styled(c, env.C, true), env.o, env.w, L.ink ? { ...env.th, text: L.ink } : env.th, env.C, env.G.template === "split", L.rail));
   },
   title(ctx, L, tr, env) {
     const { G, th } = env, top = env.hasBrand ? 150 : 84;
     const box = { x: G.title.x, y: top, w: G.title.w, h: G.title.h + (G.title.y - top) };
     return placed(ctx, tr, (c) => drawTitle(c, env.cover.title, box, IDENTITY, {
-      font: fonts.cn, maxFs: 340, align: L.align, fill: th.titleFill, ink: th.titleInk, hi: env.acc, shadow: env.acc, hiShadow: th.titleFill,
+      font: fonts.cn, maxFs: 340, align: L.align, fill: L.ink || th.titleFill, ink: th.titleInk, hi: L.hi || env.acc, shadow: L.hi || env.acc, hiShadow: L.ink || th.titleFill,
+      own: L.ink ? hexToRgb(L.ink) : undefined, ownHi: L.hi ? hexToRgb(L.hi) : undefined,   // for looks that paint the letters themselves
       stroke: clamp(L.stroke, 0, 2), shadowAmt: clamp(L.shadow, 0, 2), C: env.C,
     }));
   },
   tag(ctx, L, tr, env) {
     if (!env.cover.tag) return null;
-    if (look().tag) return placed(ctx, tr, (c) => look().tag(c, env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.C, lookValues()));
-    return placed(ctx, tr, (c) => accentTag(styled(c, env.C, true), env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.acc));
+    if (look().tag) return placed(ctx, tr, (c) => look().tag(c, env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.C, lookValues(), L.ink));
+    return placed(ctx, tr, (c) => accentTag(styled(c, env.C, true), env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.acc, L.ink || INK));
   },
   catname(ctx, L, tr, env) {
-    return placed(ctx, tr, (c) => drawCategory(styled(c, env.C, true), env.cat, env.G, env.C, { name: L.showName, plate: L.plate }));
+    return placed(ctx, tr, (c) => drawCategory(styled(c, env.C, true), env.cat, env.G, env.C, { name: L.showName, plate: L.plate, ink: L.ink }));
   },
   frame(ctx, L, tr, env) {
     if (look().frame) look().frame(ctx, env, lookValues());
