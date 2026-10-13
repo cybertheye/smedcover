@@ -8,7 +8,7 @@ import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { ratioText } from "./store.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isPickable, adjust, resetPlacement, writeKey, insertAbove, moveLayer, duplicate } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isPickable, appliesTo, stepIndex, adjust, resetPlacement, writeKey, insertAbove, moveLayer, duplicate } from "./layers.js";
 import {
   native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
@@ -232,8 +232,27 @@ function duplicateLayer() {
   touch({ cover: true, side: true });
 }
 function shiftLayer(dir) {
-  const i = S.cover.layers.findIndex((l) => l.id === S.layerId);
-  if (i > 0 && moveLayer(S.cover.layers, S.layerId, i + dir)) touch({ cover: true, side: true });
+  const to = stepIndex(S.cover.layers, S.layerId, dir, cat().id);
+  if (to > 0 && moveLayer(S.cover.layers, S.layerId, to)) touch({ cover: true, side: true });
+}
+/** Which categories a free layer belongs to: null = all of them, or a list of category ids. */
+function setCats(L, cats) {
+  if (cats) L.cats = cats; else delete L.cats;
+  if (!appliesTo(L, cat().id)) toast(t("props.catsGone"));
+  touch({ cover: true, side: true });
+}
+function catsControl(L) {
+  const all = !L.cats;
+  const chip = (label, on, color, fn) => el("button", { class: on ? "on" : "", style: color ? `--c:${color}` : "", onclick: fn }, label);
+  return el("div", { style: "margin-top:12px" }, cap("props.cats"),
+    el("div", { class: "chips small" },
+      chip(t("props.catsAll"), all, "", () => setCats(L, null)),
+      S.profile.categories.map((k) => chip(k.name || k.code || "—", !all && L.cats.includes(k.id), k.color, () => {
+        if (all) return setCats(L, [k.id]);
+        const next = L.cats.includes(k.id) ? L.cats.filter((x) => x !== k.id) : [...L.cats, k.id];
+        if (next.length) setCats(L, next);          // the last one stays: a layer always belongs somewhere
+      }))),
+    el("div", { class: "hint" }, t(all ? "props.catsHintAll" : "props.catsHint")));
 }
 
 // pointer on the main canvas: click selects the topmost layer under it, drag moves, wheel resizes
@@ -552,7 +571,8 @@ function layerRow(L) {
     icon(L.visible ? "◉" : "○", !L.visible, t("layers.show"), () => { L.visible = !L.visible; }),
     PINNED.includes(L.type) ? el("span", { class: "ic pin", title: t("layers.pinned." + L.type) }, "🔒")
       : icon(L.locked ? "▣" : "□", !L.locked, t("layers.lock"), () => { L.locked = !L.locked; }),
-    el("span", { class: "nm" }, layerName(L), isFree(L.type) && el("span", { class: "ty" }, L.type === "text" ? "T" : "+")));
+    el("span", { class: "nm" }, layerName(L), isFree(L.type) && el("span", { class: "ty" }, L.type === "text" ? "T" : "+"),
+      L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) })));
 }
 function placementControls(L) {
   if (FIXED.includes(L.type)) return el("div", { class: "hint", style: "margin:0" }, t("props.fixedHint"));
@@ -609,23 +629,25 @@ function typeControls(L) {
 }
 function renderSide() {
   if (!S.cover) return;
-  const side = $("side"), y = side.scrollTop, L = layer(), free = L && isFree(L.type);
+  if (layer() && !appliesTo(layer(), cat().id)) S.layerId = "bg";   // the selected layer is not on this category's cover
+  const side = $("side"), y = side.scrollTop, L = layer(), free = L && isFree(L.type), here = S.cover.layers.filter((l) => appliesTo(l, cat().id));
   // keep typing in the text box alive across rebuilds
   const typing = document.activeElement && side.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA";
   if (typing) return;
-  const i = L ? S.cover.layers.indexOf(L) : -1;
+  const i = L ? here.indexOf(L) : -1;
   side.replaceChildren(
     el("div", {}, cap("layers.title"),
-      el("div", { class: "layers" }, [...S.cover.layers].reverse().map(layerRow)),
+      el("div", { class: "layers" }, [...here].reverse().map(layerRow)),
       el("div", { class: "acts", style: "margin-top:10px;justify-content:flex-start" },
         el("button", { class: "btn", onclick: () => addLayer(newLayer("text", { text: t("layer.newText") })) }, t("layers.addText")),
         el("button", { class: "btn", disabled: !free, onclick: duplicateLayer }, t("layers.dup")),
         el("button", { class: "btn", disabled: !free, onclick: () => removeLayer() }, t("layers.del")),
-        el("button", { class: "btn", title: t("layers.up"), disabled: i < 1 || i >= S.cover.layers.length - 1, onclick: () => shiftLayer(1) }, "▲"),
+        el("button", { class: "btn", title: t("layers.up"), disabled: i < 1 || i >= here.length - 1, onclick: () => shiftLayer(1) }, "▲"),
         el("button", { class: "btn", title: t("layers.down"), disabled: i <= 1, onclick: () => shiftLayer(-1) }, "▼"))),
     L ? el("div", { class: "box" }, el("label", { class: "cap" }, `${t("props.title")} · ${layerName(L)}`),
       typeControls(L), placementControls(L),
-      L.type !== "bg" && slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { L.o = v; touch({ cover: true }); }))
+      L.type !== "bg" && slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { L.o = v; touch({ cover: true }); }),
+      free && catsControl(L))
       : el("div", { class: "hint" }, t("layers.none")));
   side.scrollTop = y;
 }

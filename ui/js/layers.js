@@ -11,6 +11,9 @@
 //          s is the overall size, kx / ky stretch it horizontally / vertically, r is degrees.
 //   t.by   optional per-size fine-tuning in virtual pixels, keyed by "1920x1080". The category
 //          graphic may also be tuned per category, keyed by "1920x1080@<category id>".
+//
+// A free layer may carry `cats`, a list of category ids: it then exists only on covers of those
+// categories. Without it the layer is on every category's cover.
 
 export const BOUND_TYPES = ["bg", "accent", "graphic", "brand", "title", "tag", "catname", "frame"];
 export const FREE_TYPES = ["asset", "text"];
@@ -18,6 +21,8 @@ export const FREE_TYPES = ["asset", "text"];
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes"];
 export const isFree = (type) => FREE_TYPES.includes(type);
 /** Layers that can be grabbed on the canvas (the others are selected from the layer list only). */
+/** Whether a layer is part of the cover of category `catId`. */
+export const appliesTo = (layer, catId) => !layer.cats || layer.cats.includes(catId);
 export const isPickable = (layer) => layer.visible && !layer.locked && layer.type !== "frame";
 
 const PROPS = {
@@ -57,12 +62,17 @@ function normalizeT(raw, free) {
   }
   return { all: { x: num(a.x, free ? 0.5 : 0, -3, 3), y: num(a.y, free ? 0.42 : 0, -3, 3), s: num(a.s, free ? 0.35 : 1, 0.02, 20), r: num(a.r, 0, -360, 360), kx: num(a.kx, 1, 0.05, 20), ky: num(a.ky, 1, 0.05, 20) }, by };
 }
-function normalizeLayer(raw) {
+function normalizeLayer(raw, catIds) {
   if (!raw || typeof raw !== "object" || !(raw.type in PROPS)) return null;
   const free = isFree(raw.type), base = newLayer(raw.type);
   const L = { ...base, id: free ? (typeof raw.id === "string" && raw.id ? raw.id : base.id) : raw.type,
     visible: raw.visible !== false, locked: raw.locked === true, o: num(raw.o, 1, 0, 1), t: normalizeT(raw.t, free) };
   if (typeof raw.name === "string" && raw.name) L.name = raw.name.slice(0, 60);
+  if (free && Array.isArray(raw.cats)) {   // a layer whose categories are all gone goes with them
+    const cats = [...new Set(raw.cats.filter((x) => typeof x === "string" && x && (!catIds || catIds.includes(x))))];
+    if (!cats.length) return null;
+    L.cats = cats;
+  }
   switch (raw.type) {
     case "bg": L.grid = raw.grid !== false; L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); break;
     case "accent": L.shape = ACCENT_SHAPES.includes(raw.shape) ? raw.shape : "slant"; break;
@@ -81,12 +91,13 @@ function normalizeLayer(raw) {
 /**
  * Repairs a layer list: drops unknown layers, guarantees each bound layer exists exactly once
  * (missing ones are put back in their default place), keeps the background at the bottom and
- * makes ids unique.
+ * makes ids unique. With `catIds` (the categories that exist), layers made for categories that
+ * were removed are dropped too.
  */
-export function normalizeLayers(raw) {
+export function normalizeLayers(raw, catIds) {
   const seen = new Set(), out = [];
   for (const r of Array.isArray(raw) ? raw : []) {
-    const L = normalizeLayer(r);
+    const L = normalizeLayer(r, catIds);
     if (!L) continue;
     if (seen.has(L.id)) { if (!isFree(L.type)) continue; L.id = uid(); }
     seen.add(L.id); out.push(L);
@@ -158,6 +169,16 @@ export function insertAbove(layers, aboveId, layer) {
   const i = layers.findIndex((l) => l.id === aboveId);
   layers.splice(i < 0 ? layers.length : i + 1, 0, layer);
   return layer;
+}
+/**
+ * Index to move layer `id` to so that it passes the next layer (dir 1 = up, -1 = down) that is
+ * part of category `catId`'s cover, stepping over the ones that are not; -1 when there is none.
+ */
+export function stepIndex(layers, id, dir, catId) {
+  const from = layers.findIndex((l) => l.id === id);
+  if (from < 1) return -1;
+  for (let i = from + dir; i >= 1 && i < layers.length; i += dir) if (appliesTo(layers[i], catId)) return i;
+  return -1;
 }
 /** Moves a layer to index `to`. The background never leaves the bottom and nothing goes below it. */
 export function moveLayer(layers, id, to) {

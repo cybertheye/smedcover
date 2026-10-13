@@ -6,7 +6,7 @@ import { virtualSize, layout } from "./layout.js";
 import { drawTitle, parseTitle } from "./title.js";
 import { drawPhoto } from "./photo.js";
 import { drawAsset } from "./assets.js";
-import { resolve } from "./layers.js";
+import { resolve, appliesTo } from "./layers.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
 export const hexToRgb = (hex) => {
@@ -351,7 +351,7 @@ export function drawCover(cv, o) {
   cv._virtual = [w, h];
   cv._hits = [];
   for (const L of cover.layers) {
-    if (!L.visible) continue;
+    if (!L.visible || !appliesTo(L, cat.id)) continue;
     const tr = resolve(L, w, h, key, cat.id);
     let hit;
     if (L.o < 1) {   // paint the layer on its own, then blend it in as a whole

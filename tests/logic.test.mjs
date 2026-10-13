@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { virtualSize, layout, TEMPLATES } from "../ui/js/layout.js";
 import { parseCsv, csvToJobs } from "../ui/js/csv.js";
 import { normalizeProfile, normalizeCover, normalizeSettings, exportName, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
-import { ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable } from "../ui/js/layers.js";
+import { ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex } from "../ui/js/layers.js";
 import { sampleProfile, starterProfile } from "../ui/js/presets.js";
 
 test("virtualSize keeps the five tuned canvases and normalises everything else", () => {
@@ -202,4 +202,38 @@ test("exportName fills the template and strips unsafe characters", () => {
   assert.equal(exportName("{n}-{category}_{title}_{size}", { index: 0, cat, title: "一台相机\n记录*真实*的一周", size: { w: 1920, h: 1080 }, scale: 2, ext: "png" }), "01-街拍日记_一台相机 记录真实的一周_1920x1080@2x.png");
   assert.equal(exportName("../{code}/{title}", { index: 2, cat, title: "a/b:c", size: { w: 1, h: 1 }, scale: 1, ext: "jpg" }), "..SHOTabc.jpg");
   assert.equal(exportName("", { index: 0, cat: { name: "", code: "" }, title: "", size: { w: 10, h: 20 }, scale: 1, ext: "webp" }), "01-cover_untitled_10x20.webp");
+});
+
+test("free layers can be kept to some categories", () => {
+  const only = newLayer("text", { text: "x", cats: ["a"] }), every = newLayer("text", { text: "y" });
+  assert.equal(appliesTo(only, "a"), true); assert.equal(appliesTo(only, "b"), false);
+  assert.equal(appliesTo(every, "b"), true);
+  // survives a round trip; bound layers never take the restriction
+  const ls = normalizeLayers([...defaultLayers().map((l) => (l.id === "title" ? { ...l, cats: ["a"] } : l)), only, every], ["a", "b"]);
+  assert.deepEqual(ls.find((l) => l.id === only.id).cats, ["a"]);
+  assert.equal(ls.find((l) => l.id === "title").cats, undefined);
+  assert.equal(ls.find((l) => l.id === every.id).cats, undefined);
+  assert.deepEqual(duplicate(ls.find((l) => l.id === only.id)).cats, ["a"]);
+  // removing its only category removes the layer; a layer shared with a surviving category stays
+  const both = newLayer("text", { text: "z", cats: ["a", "b"] });
+  const after = normalizeLayers([...ls, both], ["b"]);
+  assert.equal(after.some((l) => l.id === only.id), false);
+  assert.deepEqual(after.find((l) => l.id === both.id).cats, ["b"]);
+  assert.equal(after.some((l) => l.id === every.id), true);
+  // and the same through a cover when the profile loses the category
+  const p = normalizeProfile({ categories: [{ id: "a" }, { id: "b" }] });
+  const c = normalizeCover({ catId: "a", layers: [...defaultLayers(), only] }, p);
+  assert.equal(c.layers.some((l) => l.id === only.id), true);
+  p.categories.shift();
+  assert.equal(normalizeCover(c, p).layers.some((l) => l.id === only.id), false);
+});
+
+test("moving a layer up or down steps over layers of other categories", () => {
+  const a = newLayer("text", { cats: ["a"] }), b = newLayer("text", { cats: ["b"] }), c = newLayer("text");
+  const ls = [newLayer("bg"), a, b, c];
+  assert.equal(stepIndex(ls, a.id, 1, "a"), 3);       // passes b, which category a never sees
+  assert.equal(stepIndex(ls, c.id, -1, "a"), 1);
+  assert.equal(stepIndex(ls, c.id, 1, "a"), -1);      // already on top
+  assert.equal(stepIndex(ls, a.id, -1, "a"), -1);     // nothing goes below the background
+  assert.equal(stepIndex(ls, "bg", 1, "a"), -1);
 });

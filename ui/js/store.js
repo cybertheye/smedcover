@@ -85,7 +85,7 @@ export function normalizeProfile(raw) {
     categories, style,
     fonts: { body: str(p.fonts && p.fonts.body), display: str(p.fonts && p.fonts.display) },
     sizes,
-    design: { layers: normalizeLayers(p.design && p.design.layers) },
+    design: { layers: normalizeLayers(p.design && p.design.layers, categories.map((x) => x.id)) },
   };
 }
 
@@ -96,7 +96,7 @@ export function normalizeCover(raw, profile) {
   return {
     catId: ids.includes(c.catId) ? c.catId : ids[0],
     title: str(c.title), tag: str(c.tag),
-    layers: normalizeLayers(Array.isArray(c.layers) ? c.layers : JSON.parse(JSON.stringify(profile.design.layers))),
+    layers: normalizeLayers(Array.isArray(c.layers) ? c.layers : JSON.parse(JSON.stringify(profile.design.layers)), ids),
   };
 }
 
