@@ -199,11 +199,14 @@ const cyber = {
       pass((a, x) => { ctx.fillStyle = css(CY.third, 0.75); ctx.fillText(a.t, x - g, 0); ctx.fillStyle = css(CY.second, 0.75); ctx.fillText(a.t, x + g, g * 0.35); });
       ctx.restore();
     }
-    // the glow, then the letter itself: plain words are pale with a coloured rim, highlighted words are solid neon
-    ctx.save();
-    ctx.shadowBlur = fs * 0.22 * p.glow * o.unit;
-    pass((a, x) => { ctx.shadowColor = css(colourOf(a), 0.95); ctx.strokeStyle = css(colourOf(a)); ctx.lineWidth = fs * 0.05 * Math.max(0.4, o.strokeAmt); ctx.strokeText(a.t, x, 0); });
-    ctx.restore();
+    // the glow, then the letter itself: plain words are pale with a coloured rim, highlighted words are solid neon.
+    // The glow is layered strokes, widest and faintest first: canvas shadow blur differs between web views.
+    const rim = fs * 0.05 * Math.max(0.4, o.strokeAmt);
+    for (const [k, alpha] of [[7, 0.05], [5, 0.08], [3.4, 0.13], [2.1, 0.22]]) {
+      if (p.glow <= 0) break;
+      pass((a, x) => { ctx.strokeStyle = css(colourOf(a), alpha * Math.min(1.6, p.glow)); ctx.lineWidth = rim * (1 + (k - 1) * p.glow); ctx.strokeText(a.t, x, 0); });
+    }
+    pass((a, x) => { ctx.strokeStyle = css(colourOf(a)); ctx.lineWidth = rim; ctx.strokeText(a.t, x, 0); });
     pass((a, x) => { ctx.fillStyle = a.hi ? css(mix(C, CY.white, 0.3)) : css(CY.white); ctx.fillText(a.t, x, 0); });
   },
 

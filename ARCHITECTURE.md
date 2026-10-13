@@ -257,8 +257,10 @@ So the drawing code of the channel graphics and of AI-generated solids is unchan
 parts use the same stand-in in "plates" mode: a solid coloured plate becomes dark glass with a thin
 rim, and the ink lettering on it becomes pale, so it stays readable.
 
-The glow is made by stroking a line several times at different widths, not with canvas shadow blur,
-which is slow per line. Only the title uses real shadow blur, because it is only a few calls.
+The glow is made by stroking a line several times at different widths, not with canvas shadow blur.
+Shadow blur is slow per line, and web views disagree about its extent: the same value came out far
+blurrier in the app's web view than in Chrome. The title's glow is layered strokes too, so it looks
+the same everywhere.
 
 ### 7.2 Tuning the picture
 
@@ -458,7 +460,7 @@ frame waits for the fonts, otherwise the title would be fitted using the wrong g
 | End-to-end self-test | `SMEDCOVER_SELFTEST=<folder> <executable>` | the full export path between the real web view and Rust |
 
 In self-test mode the app keeps its data in the given folder, exports a few covers in all three
-formats, writes `report.json` and quits. With `SMEDCOVER_SELFTEST_AI=<stand-in server URL>` it also
+formats and one more in every other look, writes `report.json` and quits. With `SMEDCOVER_SELFTEST_AI=<stand-in server URL>` it also
 generates one asset in each API style and draws it on a cover. It catches problems that only show up in the real app, such
 as the header issue above.
 

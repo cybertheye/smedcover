@@ -1116,6 +1116,14 @@ async function selfTest(dir) {
       report[format + "_ms"] = Math.round(performance.now() - t0);
       if (n !== jobs.length) report.errors.push(`${format}: ${n}/${jobs.length} — ${$("toast").textContent}`);
     }
+    // one cover in every other look, so each is exercised in the real web view
+    S.settings.format = "png"; report.looks = [];
+    for (const id of LOOK_IDS.filter((k) => k !== "cel")) {
+      S.profile.style.look = id;
+      const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
+      report.looks.push({ id, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `look-${id}.png` })) });
+    }
+    S.profile.style.look = "cel";
     if (report.ai && !report.ai.every((r) => r.stored && r.drawn)) report.errors.push("ai: a generated asset was not stored or drawn");
     report.ok = !report.errors.length;
   } catch (e) { report.errors.push(String(e && e.message ? e.message : e)); }
