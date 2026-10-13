@@ -565,7 +565,7 @@ test("looks: every look is complete enough to draw and to brief the AI", () => {
     let [n, ctx] = calls(); L.runs(ctx, pass, { fs: 100, d: 6, strokeAmt: 1, shadowAmt: 1, C: env.C, unit: 1 }, p); assert.ok(n.fillText >= 2, `${id}: lettering`);
     [n, ctx] = calls(); assert.equal(L.background(ctx, env, { grid: true }, p), true, id); assert.ok(n.fillRect >= 1, `${id}: background`);
     [n, ctx] = calls(); L.frame(ctx, env, p);
-    [n, ctx] = calls(); L.post(ctx, 1920, 1080, env.C, p, 1, []);
+    if (L.post) { [n, ctx] = calls(); L.post(ctx, 1920, 1080, env.C, p, 1, []); }   // every hook is optional
     assert.equal(typeof L.accent.fill(env.C), "string", id);
     [n, ctx] = calls(); L.accent.edge(ctx, () => { n.run = (n.run || 0) + 1; }, 0, -1, env.C, p);
     if (L.sticker) for (const k of ["shape", "blob", "stroke", "thin", "word"]) assert.equal(typeof L.sticker[k], "function", `${id}.${k}`);
