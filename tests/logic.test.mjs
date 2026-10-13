@@ -443,3 +443,65 @@ test("ai: the prompt carries the style, the format and the user's notes", () => 
   assert.ok(buildPrompt("x", "always add a smile").system.endsWith("always add a smile"));
   assert.equal(buildPrompt("x", "", { style: "no-such-style" }).system, p.system);   // unknown styles fall back to the house style
 });
+
+// ---------- looks
+import { LOOKS, LOOK_IDS, parseColour, role, lookParams, setLook, look, lookValues, styled } from "../ui/js/style.js";
+
+test("looks: colours are read and classified by the job they do in the house style", () => {
+  assert.deepEqual(parseColour("#fff"), [255, 255, 255, 1]);
+  assert.deepEqual(parseColour("#07070C"), [7, 7, 12, 1]);
+  assert.deepEqual(parseColour("rgba(10, 20,30,.5)"), [10, 20, 30, 0.5]);
+  assert.equal(parseColour("url(#x)"), null); assert.equal(parseColour({}), null);
+  const r = (c) => role(parseColour(c));
+  assert.deepEqual(["#07070c", "#ffffff", "#cfd5e4", "#191926", "#3a3a4c", "#fcee0a", "#ff3b4f", "#00e5ff"].map(r), ["ink", "light", "mid", "dark", "dark", "colour", "colour", "colour"]);
+});
+
+test("looks: parameters default, clamp and are kept per look in a profile", () => {
+  assert.deepEqual(lookParams("cel"), {});
+  const d = lookParams("cyber");
+  assert.deepEqual(Object.keys(d), LOOKS.cyber.params.map((p) => p.key));
+  assert.equal(lookParams("cyber", { glow: 99, scan: "x" }).glow, 2);
+  assert.equal(lookParams("cyber", { glow: 99, scan: "x" }).scan, d.scan);
+  assert.deepEqual(lookParams("nope"), {});
+  const p = normalizeProfile({ style: { look: "cyber", lookParams: { cyber: { glow: 0.5, bogus: 1 }, other: { x: 1 } } } });
+  assert.equal(p.style.look, "cyber");
+  assert.deepEqual(p.style.lookParams, { cyber: { ...d, glow: 0.5 } });
+  assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
+  assert.deepEqual(LOOK_IDS.slice(0, 2), ["cel", "cyber"]);
+  for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && q.min <= q.def && q.def <= q.max); }
+});
+
+test("looks: the house look changes nothing, the cyberpunk look re-maps what is drawn", () => {
+  const log = [];
+  const ctx = { set fillStyle(v) { log.push(["fill=", v]); }, get fillStyle() { return "x"; }, set strokeStyle(v) { log.push(["stroke=", v]); }, get strokeStyle() { return "x"; },
+    lineWidth: 6, globalAlpha: 1, stroke: () => log.push(["stroke"]), fill: () => log.push(["fill"]), fillRect: () => log.push(["fillRect"]), strokeRect: () => log.push(["strokeRect"]),
+    fillText: () => log.push(["fillText"]), save() {}, restore() {} };
+  setLook("cel");
+  assert.equal(look().id, "cel"); assert.equal(styled(ctx, [252, 238, 10]), ctx);            // untouched
+  setLook("cyber", { glow: 1 });
+  assert.equal(lookValues().glow, 1);
+  const c = styled(ctx, [252, 238, 10]);
+  assert.notEqual(c, ctx);
+  c.fillStyle = "#ffffff"; assert.match(log.at(-1)[1], /^rgba\(22,27,58/);                   // a white face becomes dark glass
+  c.fillStyle = "#fcee0a"; assert.equal(log.at(-1)[1], "#fcee0a");                           // colour stays lit
+  log.length = 0; c.strokeStyle = "#07070c"; c.stroke();
+  assert.match(log[0][1], /^rgba\(252,238,10/);                                              // an ink line takes the channel colour…
+  assert.ok(log.filter((e) => e[0] === "stroke").length >= 3);                               // …and is drawn as a tube: halo, line, core
+  log.length = 0; c.strokeStyle = "#ff3b4f"; c.stroke();
+  assert.equal(log.filter((e) => e[0] === "stroke").length, 1);                              // a coloured line is left alone
+  // cover parts: a coloured plate turns to glass with a rim, ink lettering turns pale
+  const part = styled(ctx, [252, 238, 10], true);
+  log.length = 0; part.fillStyle = "#fcee0a"; part.fillRect(0, 0, 100, 34);
+  assert.deepEqual(log.filter((e) => e[0] === "fillRect" || e[0] === "strokeRect").map((e) => e[0]), ["fillRect", "strokeRect"]);
+  log.length = 0; part.fillRect(0, 0, 50, 12); assert.deepEqual(log.map((e) => e[0]), ["fillRect"]);   // thin bars stay lit
+  log.length = 0; part.fillStyle = "#07070c"; part.fillText("A", 0, 0);
+  assert.match(log.find((e) => e[0] === "fill=" && /236,250,255/.test(e[1]))[1], /rgba/);
+  setLook("cel");
+});
+
+test("looks: the AI prompts take their style section from the look", () => {
+  const flat = buildPrompt("x", "", { kind: "flat", style: "cyber" }).system, solid = buildPrompt("x", "", { kind: "solid", style: "cyber" }).system;
+  assert.ok(flat.includes("cyberpunk") && flat.includes('"op":"shape"'));
+  assert.ok(solid.includes("cyberpunk") && solid.includes('"kind":"solid"'));
+  assert.ok(!buildPrompt("x", "", { kind: "flat" }).system.includes("cyberpunk"));
+});

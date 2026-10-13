@@ -60,6 +60,9 @@ const STR = {
   "assets.added": ["已添加：{0}", "Added: {0}"],
   "assets.missing": ["（素材缺失）", "(missing asset)"],
 
+  "style.look": ["风格", "Look"],
+  "style.lookHint": ["风格决定整张封面怎么画：背景、色块、文字、图形和贴纸一起换。内容和位置不变，随时可以切回来。", "The look decides how the whole cover is drawn: background, colour block, lettering, graphics and stickers change together. Content and placement stay as they are, and you can switch back at any time."],
+  "style.lookReset": ["恢复这个风格的默认参数", "Restore this look's defaults"],
   "style.template": ["版式", "Template"],
   "tpl.stack": ["上下：标题在上，色条在下", "Stack: title above, colour strip below"],
   "tpl.split": ["左右：标题在左，色块在右", "Split: title left, colour panel right"],

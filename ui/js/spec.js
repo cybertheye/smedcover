@@ -25,6 +25,7 @@
 //   { curve: [["M", x, y], ["L", x, y], ["Q", cx, cy, x, y], ["C", c1x, c1y, c2x, c2y, x, y], …] }
 // An open line may also be { arc: [x, y, r, fromDegrees, toDegrees] } (0 = right, 90 = down).
 import { KIT, PALETTE } from "./stickers.js";
+import { look } from "./style.js";
 import { normalizeSolid, drawSolid } from "./solid.js";
 
 export const SPEC_LIMITS = { ops: 40, points: 120, paths: 10, text: 10, coord: 160 };
@@ -229,6 +230,7 @@ export function drawSpec(ctx, spec, tint) {
   const one = (o) => {
     if (o.op === "shape") KIT.shape(ctx, builder(o.path), col(o.fill), { shadow: o.shadow, lw: o.lw });
     else if (o.op === "line") KIT.stroke(ctx, open(o), col(o.color), o.lw);
+    else if (o.op === "detail" && look().sticker) look().sticker.thin(ctx, open(o), o.lw, col(o.color));
     else if (o.op === "detail") { ctx.beginPath(); open(o)(ctx); ctx.lineWidth = o.lw; ctx.strokeStyle = col(o.color); ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke(); }
     else KIT.word(ctx, o.text, o.size, col(o.fill), o.x, o.y);
   };

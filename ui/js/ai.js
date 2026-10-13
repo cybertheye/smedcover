@@ -5,6 +5,8 @@
 // run. That keeps a generated asset in the same form as the built-in ones — drawn live, sharp at
 // any size, able to follow the channel colour — without ever executing what a model wrote.
 
+import { LOOKS } from "./style.js";
+
 export const AI_STYLES = ["openai", "anthropic"];
 export const AI_DEFAULTS = { style: "openai", baseUrl: "", token: "", model: "", auth: "key", maxTokens: 4096, timeout: 300, proxy: "", notes: "", kind: "solid" };
 export const AI_PLACEHOLDER = {
@@ -169,7 +171,7 @@ export const STYLE_NOTES = {
 export const systemPrompt = (style = "cel") => `You design stickers for SmedCover, an app for making video cover images. You answer with a sticker described as DATA: one JSON object that the app draws with its own painters. You never write code, SVG or prose.
 
 # Style
-${STYLE_NOTES[style] || STYLE_NOTES.cel}
+${STYLE_NOTES[style] || (LOOKS[style] && LOOKS[style].prompt) || STYLE_NOTES.cel}
 
 # Canvas
 A 200 x 200 box centred on the origin: x runs right, y runs DOWN, both from -100 to 100. The sticker is centred and fills the box: about 180 units in its larger dimension. Keep every coordinate within -100…100.
@@ -302,7 +304,7 @@ export const SOLID_STYLE_NOTES = {
 export const solidPrompt = (style = "cel") => `You design small 3D objects for SmedCover, an app for making video cover images. You answer with an object described as DATA: one JSON object listing boxes and cylinders, which the app renders itself. You never write code, SVG or prose.
 
 # Style
-${SOLID_STYLE_NOTES[style] || SOLID_STYLE_NOTES.cel}
+${SOLID_STYLE_NOTES[style] || (LOOKS[style] && LOOKS[style].solidPrompt) || SOLID_STYLE_NOTES.cel}
 
 # Space
 x runs right, y runs DOWN (the top of the object has NEGATIVE y), z runs toward the viewer. Build the object around the origin, about 400 units across in its largest dimension. It is scaled and centred to fit automatically, so only the proportions matter.

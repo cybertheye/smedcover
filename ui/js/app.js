@@ -15,6 +15,7 @@ import {
 } from "./store.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
+import { LOOKS, LOOK_IDS, setLook, lookParams } from "./style.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage } from "./ai.js";
 
 const $ = (id) => document.getElementById(id);
@@ -349,6 +350,12 @@ function layerAt(e) {
 // ---------- small form helpers
 const cap = (key, extra = "") => el("label", { class: "cap" }, t(key) + extra);
 function textInput(value, oninput, props = {}) { return el("input", { type: "text", value, spellcheck: false, oninput: (e) => oninput(e.target.value), ...props }); }
+/** A slider with a ready-made label (looks name their own parameters). */
+function slider2(label, min, max, step, value, oninput) {
+  const out = el("output", {}, value.toFixed(2));
+  return el("div", { class: "sl", style: "grid-template-columns:84px 1fr 44px" }, el("span", {}, label),
+    el("input", { type: "range", min, max, step, value, oninput: (e) => { const v = Number(e.target.value); out.textContent = v.toFixed(2); oninput(v); } }), out);
+}
 function slider(labelKey, min, max, step, value, fmt, oninput) {
   const out = el("output", {}, fmt(value));
   return el("div", { class: "sl" }, el("span", {}, t(labelKey)),
@@ -442,7 +449,7 @@ async function aiCall(cfg, system, user) {
  * `onAttempt(n)` is told which attempt is running; `stillWanted()` lets the caller give up.
  */
 async function requestSpec(cfg, target, onAttempt = () => null, stillWanted = () => true) {
-  const { system, user } = buildPrompt(target, cfg.notes, { kind: cfg.kind });
+  const { system, user } = buildPrompt(target, cfg.notes, { kind: cfg.kind, style: S.profile.style.look });
   const turns = [{ role: "user", content: user }];
   for (let attempt = 1; ; attempt++) {
     onAttempt(attempt);
@@ -572,7 +579,14 @@ function removeAsset(id) {
 
 function styleTab() {
   const st = S.profile.style, set = (k, v) => { st[k] = v; touch({ profile: true }); };
+  const L = LOOKS[st.look], vals = lookParams(st.look, st.lookParams[st.look]);
+  const tune = (k, v) => { st.lookParams[st.look] = { ...vals, ...st.lookParams[st.look], [k]: v }; touch({ profile: true }); };
   return [
+    el("div", { class: "box" }, cap("style.look"),
+      select(LOOK_IDS.map((k) => [k, LOOKS[k].name[getLang()]]), st.look, (v) => { st.look = v; touch({ profile: true, panel: true, strip: true }); }),
+      el("div", { class: "hint" }, t("style.lookHint")),
+      L.params.map((d) => slider2(d.name[getLang()], d.min, d.max, d.step, vals[d.key], (v) => tune(d.key, v))),
+      L.params.length > 0 && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete st.lookParams[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))),
     el("div", {}, cap("style.template"), select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), st.template, (v) => set("template", v))),
     el("div", {}, cap("style.theme"), select([["dark", t("theme.dark")], ["light", t("theme.light")]], st.theme, (v) => set("theme", v))),
     check("style.imageShadow", st.imageShadow, (v) => set("imageShadow", v)),
@@ -997,8 +1011,11 @@ const TABS = { edit: { cover: coverTab, style: styleTab, assets: assetsTab }, se
 function syncTabs() {
   $("tabs").replaceChildren(...Object.keys(TABS[S.mode]).map((k) => el("button", { class: k === S.tab[S.mode] ? "on" : "", onclick: () => { S.tab[S.mode] = k; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, t("tab." + k))));
 }
+/** Makes the profile's look current, for anything drawn outside a cover (asset tiles, previews). */
+const useLook = () => setLook(S.profile.style.look, S.profile.style.lookParams[S.profile.style.look]);
 function renderPanel() {
   if (!S.cover) return;
+  useLook();
   const panel = $("panel"), y = panel.scrollTop;
   document.documentElement.style.setProperty("--acc", cat().color);
   panel.replaceChildren(...TABS[S.mode][S.tab[S.mode]]().flat(Infinity).filter(Boolean));

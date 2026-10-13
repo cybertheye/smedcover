@@ -4,6 +4,7 @@
 import { GRAPHICS, drawGraphic, graphicRadius, rgb, INK } from "./cel.js";
 import { STICKERS, STICKER_GROUPS, stickerById, drawSticker } from "./stickers.js";
 import { drawSpec } from "./spec.js";
+import { look, lookValues, styled } from "./style.js";
 import "./graphics.js";   // registers the extra category graphics
 
 export { GRAPHICS, STICKERS, STICKER_GROUPS };
@@ -46,6 +47,7 @@ export function assetName(ref, lang) {
   if (ref.kind === "sticker") return stickerById(ref.id)?.name[lang] || ref.id;
   return userAssets.get(ref.id)?.name || "?";
 }
+const specColour = (spec) => [1, 3, 5].map((i) => parseInt(spec.color.slice(i, i + 2), 16));
 /** Whether an asset can take on the category colour. */
 export const canTint = (ref) => !!ref && (ref.kind !== "user" || !!userAssets.get(ref.id)?.spec);
 
@@ -59,7 +61,7 @@ export function drawAsset(ctx, ref, color, opts = {}) {
   if (!ref) return null;
   if (ref.kind === "graphic") {
     if (!GRAPHICS.some((g) => g.id === ref.id)) return null;
-    drawGraphic(ctx, ref.id, 0, 0, 1, color, { labels: opts.labels, stamp: opts.stamp });
+    drawGraphic(styled(ctx, color), ref.id, 0, 0, 1, color, { labels: opts.labels, stamp: opts.stamp });
     const r = graphicRadius(ref.id, 1);
     return { hw: r, hh: r };
   }
@@ -70,7 +72,9 @@ export function drawAsset(ctx, ref, color, opts = {}) {
   }
   const a = userAssets.get(ref.id);
   if (a && a.spec) {
-    ctx.save(); ctx.scale(3, 3); drawSpec(ctx, a.spec, opts.tint ? rgb(color) : null); ctx.restore();
+    // a solid is drawn by the graphics' renderer, so it takes the look the same way they do
+    const c = a.spec.kind === "solid" ? styled(ctx, opts.tint ? color : specColour(a.spec)) : ctx;
+    c.save(); c.scale(3, 3); drawSpec(c, a.spec, opts.tint ? rgb(color) : null); c.restore();
     return { hw: 300, hh: 300 };
   }
   if (!a || !a.img.naturalWidth) return null;
@@ -78,7 +82,8 @@ export function drawAsset(ctx, ref, color, opts = {}) {
   ctx.save();
   if (opts.shadow) {   // canvas shadows ignore the transform, so the offset is given in device pixels
     const m = ctx.getTransform(), unit = Math.hypot(m.a, m.b);
-    ctx.shadowColor = INK; ctx.shadowBlur = 0; ctx.shadowOffsetX = ctx.shadowOffsetY = 14 * unit;
+    if (look().image) look().image(ctx, color, unit, lookValues());
+    else { ctx.shadowColor = INK; ctx.shadowBlur = 0; ctx.shadowOffsetX = ctx.shadowOffsetY = 14 * unit; }
   }
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(a.img, -w / 2, -h / 2, w, h);

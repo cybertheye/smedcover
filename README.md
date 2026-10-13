@@ -131,6 +131,27 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 - A model sometimes answers in a form the app cannot use. The app then tells the model what was wrong and **retries automatically, up to 3 times**; the button shows which attempt is running. Each retry is a new call and is billed separately. Connection errors, timeouts and cut-off replies are not retried.
 - 3D objects are made of boxes and cylinders only — no spheres or curved surfaces — so round things (animals, fruit) come out blocky. Weaker models fail more often and build cruder shapes.
 
+### Looks
+
+**Look**, at the top of *Edit → Style*, decides how the whole cover is drawn. Switching it changes the background, the colour block, the title and other lettering, the channel graphics, the stickers and AI-generated assets together; content, placement and layers stay as they are, and you can switch back at any time.
+
+| Look | What you get |
+|---|---|
+| **Cel** (default) | heavy ink lines, hard shadows, flat colour, screentone |
+| **Cyberpunk** | dark glass, neon outlines and glow, a colour split on lettering, scanlines, a grid running to a horizon |
+
+The cyberpunk look has five sliders:
+
+| Slider | What it controls | Turning it up |
+|---|---|---|
+| Neon glow | how far every neon line and letter glows | brighter and hazier, like a foggy night; 0 gives clean thin lines |
+| Colour split | how far apart the cyan and magenta copies of the title sit | more glitch; 0 gives clean letters |
+| Scanlines | the dark horizontal lines across the picture | more old monitor; 0 is the sharpest picture |
+| Haze | the pools of coloured light in the corners and the dark vignette | more atmosphere; 0 is close to plain black |
+| Photo tint | how far a background photo is washed from violet to the channel colour | a darker, more stylised photo; 0 keeps its own colours |
+
+Each look's values are saved separately in the profile, so switching away and back loses nothing. When generating assets with AI, the style section of the prompt follows the current look.
+
 ### Style and the default design
 
 - Three templates — Stack, Split, Banner — on a dark or light background.
@@ -250,6 +271,7 @@ are not public, so the plan is to export open formats that both can read.
 ### Other
 
 - [ ] AI generation: evaluate results with real models and tune the prompt accordingly; allow follow-up change requests on a result; keep the token in the system keychain.
+- [ ] More looks: 90s Japanese animation, mosaic and others.
 - [ ] A low-resolution preview of the blurred photo for smoother dragging.
 - [ ] Redraw thumbnails only when needed, to cut the cost of many sizes.
 - [ ] Subset the bundled fonts to shrink the installer.

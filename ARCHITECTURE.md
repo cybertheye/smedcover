@@ -54,6 +54,7 @@ ui/
   js/cel.js          cel-shading kit and the first five channel graphics
   js/graphics.js     fifteen more channel graphics
   js/stickers.js     the sixty stickers, and the shared painters
+  js/style.js        looks: a set of hooks per look, and the current look
   js/spec.js         stickers described as data: validation and interpreter (AI-generated assets)
   js/solid.js        3D objects described as data: validation, drawn with the channel graphics' renderer
   js/ai.js           AI generation: settings, requests for both API styles, the preset prompt (pure)
@@ -85,7 +86,8 @@ hand-edited files cannot crash the app.
     { "id": "vlog", "name": "Vlog", "sub": "DAILY VLOG", "code": "VLOG", "color": "#fcee0a",
       "graphic": { "kind": "graphic", "id": "camera", "labels": [], "stamp": "" } }
   ],
-  "style": { "template": "stack", "theme": "dark", "imageShadow": true },
+  "style": { "template": "stack", "theme": "dark", "imageShadow": true,
+             "look": "cel", "lookParams": { "cyber": { "glow": 1.2 } } },
   "fonts": { "body": "", "display": "" },
   "sizes": [ { "w": 1920, "h": 1080, "label": "16:9", "name": "", "on": true } ],
   "design": { "layers": [ … ] }         // the default design: the layers a new cover starts with
@@ -217,9 +219,61 @@ recompute it from a higher-resolution copy.
 - **Uploads** are stored as data URLs in the app data directory and cached once decoded.
 - `drawAsset()` is the single entry point and returns the asset's half-extents for hit-testing.
 
-## 7. AI-generated assets (`ai.js`, `spec.js`)
+## 7. Looks (`style.js`)
 
-### 7.1 Why the model returns data, not code
+The **content** of a cover — layers, placements, sticker and solid specs, the title text — carries no
+style information, so switching look is only a different way of drawing: every asset, AI-generated
+ones included, is redrawn and no data changes.
+
+A look is a set of **hooks**. Each is optional, and what a look leaves out is drawn the default
+(cel) way, so a new look can start as one hook and grow.
+
+| Hook | Responsible for |
+|---|---|
+| `theme` | colours of the field, the grid and plain text |
+| `background` | the background layer: field, grid, the photo and its tint |
+| `accent` | the colour block: fill, screentone, how the dividing edge is drawn |
+| `runs` | lettering made of runs — the title, and free text in the headline look |
+| `wrap` | returns a stand-in context that channel graphics, solids and the small cover parts (brand row, tag, channel name, brackets) draw on |
+| `sticker` | the five painters of flat stickers: `shape`, `blob`, `stroke`, `thin`, `word` |
+| `image` | the shadow or glow of an uploaded image |
+| `post` | an overlay painted over the finished cover, such as scanlines and a vignette |
+| `params` | tunable numbers, shown as sliders in the Style tab |
+| `prompt` / `solidPrompt` | the *Style* section of the AI prompts |
+
+The current look is module state in `style.js`, set by `drawCover()` from the profile before it
+draws; the interface also sets it before painting asset tiles.
+
+### 7.1 The stand-in context: a new look without touching the drawing code
+
+Each of the twenty channel graphics is dozens of lines of direct canvas calls. Rewriting them one by
+one for several looks is not realistic, so they draw on a stand-in: `wrap` returns a `Proxy` that
+forwards every canvas call and steps in at two points.
+
+- **When a colour is set**, it first works out the job that colour does in the cel style (ink, light face, mid face, dark face, colour) and substitutes the current look's colour for that job. Cyberpunk turns the three faces into three shades of dark glass and leaves colours alone.
+- **When a line is stroked**, an ink line is drawn as a neon tube instead: a wide faint halo, the coloured line, a thin pale core.
+
+So the drawing code of the channel graphics and of AI-generated solids is unchanged. The small cover
+parts use the same stand-in in "plates" mode: a solid coloured plate becomes dark glass with a thin
+rim, and the ink lettering on it becomes pale, so it stays readable.
+
+The glow is made by stroking a line several times at different widths, not with canvas shadow blur,
+which is slow per line. Only the title uses real shadow blur, because it is only a few calls.
+
+### 7.2 Tuning the picture
+
+Three levels, from light to deep:
+
+1. **Sliders** — a look's `params`, saved in the profile under `style.lookParams[look]`; no code.
+2. **Constants** — in `style.js`, `CY` is the cyberpunk palette (the deepest colour, three shades of glass, the second and third neons, the pale white); `tube()` sets the width and opacity of each layer of a neon tube.
+3. **Hooks** — change how a hook draws: the horizon and grid density in `background`, the scanline pitch in `post`, the layers of the lettering in `runs`.
+
+To add a slider, add an entry to the look's `params` and read the value in a hook; the interface and
+saving are automatic.
+
+## 8. AI-generated assets (`ai.js`, `spec.js`)
+
+### 8.1 Why the model returns data, not code
 
 The built-in stickers are code, so the obvious idea is to have the model return drawing code too.
 That was not done, for safety: the code would run in the web view, which can call commands that read
@@ -247,7 +301,7 @@ nothing in it is ever executed.
 ink lines, hard shadows and flat fills are added by the painters; the model only decides shapes and
 colours.
 
-### 7.2 Solid objects (`solid.js`)
+### 8.2 Solid objects (`solid.js`)
 
 There are two kinds of AI asset. Besides the flat sticker above there is the **solid**, the
 counterpart of the built-in channel graphics:
@@ -269,7 +323,7 @@ counterpart of the built-in channel graphics:
 The renderer sorts whole parts, not pixels, so parts that pass deep through each other can come out
 in the wrong order. The prompt therefore asks for parts that only touch or overlap slightly.
 
-### 7.3 Validation
+### 8.3 Validation
 
 `normalizeSpec()` checks a reply item by item: operations must be on the list, numbers must be finite
 and are clamped to their range, colours must be a palette name or a hex value, and the number of
@@ -281,7 +335,7 @@ a polite sentence.
 A spec that passes is stored as `assets/<id>.json` next to uploaded images. It is one of *My assets*
 and travels with exported profiles and projects.
 
-### 7.4 Requests and the prompt
+### 8.4 Requests and the prompt
 
 `buildRequest()` produces the request for each API style:
 
@@ -308,9 +362,9 @@ the *Style* section is taken from `STYLE_NOTES[style]`; the rest is style-neutra
 only adds one entry. The examples are themselves valid specs and the unit tests
 validate each one, so the prompt and the interpreter cannot drift apart.
 
-## 8. Interaction (`app.js`)
+## 9. Interaction (`app.js`)
 
-### 8.1 State and refresh
+### 9.1 State and refresh
 
 All state is in one object `S`: the current profile, cover, settings, mode, selected size and layer,
 and the undo history.
@@ -323,28 +377,28 @@ repeatedly.
 There is no framework: each column is built with a small element helper, `el()`, and rebuilt whole
 when needed.
 
-### 8.2 Working on the canvas
+### 9.2 Working on the canvas
 
 - The pointer position is converted to virtual coordinates and tested against `canvas._hits`, top first. The point is rotated back into each layer's own frame, so rotated layers are hit accurately.
 - For the selected layer the handles are checked first: corners resize, sides stretch, the top knob rotates. Handle size is computed in screen pixels, so handles look the same at any zoom.
 - Corner brackets are never hit; the background can be dragged only when it holds a photo.
 
-### 8.3 Undo
+### 9.3 Undo
 
 After each change (debounced by half a second) the profile and cover are serialised into one string
 snapshot, pushed only if it differs from the last, up to 80 steps. Undo parses a snapshot back and
 validates it again. Simple, at the cost of a full copy per step — fine at the current data size.
 
-## 9. The Rust side (`src-tauri/src/lib.rs`)
+## 10. The Rust side (`src-tauri/src/lib.rs`)
 
-### 9.1 Sandboxed store
+### 10.1 Sandboxed store
 
 `app_read`, `app_write`, `app_list` and `app_delete` take relative paths only. `resolve()` joins them
 to the app data directory and refuses absolute paths and `..`, so the interface cannot reach files
 outside it. Writes go to a temporary file that is then renamed, so quitting mid-write never leaves
 half a file.
 
-### 9.2 Export pipeline
+### 10.2 Export pipeline
 
 ```
 canvas ──toBlob (async)──▶ PNG bytes ──binary frame──▶ Rust worker thread ──▶ PNG / JPEG / WebP file
@@ -364,7 +418,7 @@ canvas ──toBlob (async)──▶ PNG bytes ──binary frame──▶ Rust 
 File names pass through `safe_name()`, which keeps only the last path component, so a name cannot be
 used to write into another directory.
 
-### 9.3 AI requests
+### 10.3 AI requests
 
 `ai_request` sends the request the interface built (URL, headers, JSON body) and hands back the
 status and body as they are — error replies included, so the interface can show the provider's own
@@ -374,12 +428,12 @@ message. It is sent from Rust to get around the cross-origin limits of a web vie
 - Only `http://` and `https://` are accepted and at most 4 MB of a reply is read. The timeout comes from the settings, 300 seconds by default.
 - Proxy: the one given in the settings wins; otherwise `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` from the environment. **Addresses on this machine never go through the environment's proxy**, or a local model would be cut off by it.
 
-### 9.4 Other commands
+### 10.4 Other commands
 
 `pick_folder`, `save_text` (profiles, projects, the CSV template) and `list_system_fonts` (which
 enumerates installed fonts with fontdb).
 
-## 10. Browser fallback
+## 11. Browser fallback
 
 The `files` object in `store.js` has two implementations: with Tauri it calls the commands above;
 without it, it falls back to `localStorage`, and exports become browser downloads. So the interface
@@ -389,17 +443,17 @@ can be developed from a static server:
 python3 -m http.server -d ui 4599
 ```
 
-## 11. Fonts
+## 12. Fonts
 
 The three bundled fonts are loaded with `@font-face` and render the same on every platform. Imported
 fonts are stored as data URLs under `fonts/` and registered with `FontFace` at start-up. The first
 frame waits for the fonts, otherwise the title would be fitted using the wrong glyph widths.
 
-## 12. Tests
+## 13. Tests
 
 | Level | Command | Covers |
 |---|---|---|
-| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation, file name pattern, size and naming of the asset packs, validating and drawing sticker and solid specs, requests and replies in both API styles, both languages present for every string |
+| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation, file name pattern, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, both languages present for every string |
 | Rust unit tests | `cd src-tauri && cargo test` | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling, requests against a local stand-in server, proxy rules |
 | End-to-end self-test | `SMEDCOVER_SELFTEST=<folder> <executable>` | the full export path between the real web view and Rust |
 
@@ -408,7 +462,7 @@ formats, writes `report.json` and quits. With `SMEDCOVER_SELFTEST_AI=<stand-in s
 generates one asset in each API style and draws it on a cover. It catches problems that only show up in the real app, such
 as the header issue above.
 
-## 13. Trade-offs and known limits
+## 14. Trade-offs and known limits
 
 - **Drawing runs on the interface thread.** Painting a 4× cover briefly stalls the window. Conversion and writing are already on a worker thread.
 - **No bundler.** Modules are loaded directly by the web view: simple, but nothing is minified or tree-shaken. At the current size start-up time is negligible.
@@ -417,7 +471,7 @@ as the header issue above.
 - **Bundled fonts are not subset.** They account for most of the installer.
 - **Only run on macOS so far.** The Windows and Linux build configuration is written but not verified.
 
-## 14. Where to start for common changes
+## 15. Where to start for common changes
 
 | To… | Change |
 |---|---|
@@ -429,4 +483,5 @@ as the header issue above.
 | add an export format | `encode()` in `lib.rs`, `EXT` and the format picker in `app.js` |
 | add a drawing operation for AI assets | validation and `drawSpec()` in `spec.js`, the prompt and examples in `ai.js` |
 | add a kind of part to solids | validation and `pieces()` in `solid.js`, `solidPrompt()` and its examples in `ai.js` |
+| add a look | an entry in `LOOKS` in `style.js`, starting with a hook or two |
 | add an interface string | `i18n.js`, in both languages; a test checks that both are present |

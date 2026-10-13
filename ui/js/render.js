@@ -7,6 +7,7 @@ import { drawTitle, parseTitle } from "./title.js";
 import { drawPhoto } from "./photo.js";
 import { drawAsset } from "./assets.js";
 import { resolve, appliesTo } from "./layers.js";
+import { setLook, look, lookValues, styled } from "./style.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
 export const hexToRgb = (hex) => {
@@ -137,8 +138,9 @@ function edgePoints(shape, A, B, nx, ny) {
     default: return [at(0), at(1)];
   }
 }
-function strokeEdge(ctx, pts, nx, ny, sharp, lw = 16) {
+function strokeEdge(ctx, pts, nx, ny, sharp, C, lw = 16) {
   const run = (ox, oy) => { ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p[0] + ox, p[1] + oy) : ctx.moveTo(p[0] + ox, p[1] + oy))); ctx.stroke(); };
+  if (look().accent) return look().accent.edge(ctx, run, nx, ny, C, lookValues());
   ctx.lineCap = "butt"; ctx.lineJoin = sharp ? "miter" : "round";
   ctx.strokeStyle = INK; ctx.lineWidth = lw; run(0, 0);
   ctx.strokeStyle = "#fff"; ctx.lineWidth = 4; run(nx * (lw / 2 + 16), ny * (lw / 2 + 16));
@@ -148,7 +150,9 @@ function strokeEdge(ctx, pts, nx, ny, sharp, lw = 16) {
  * It is an ordinary layer: moved or shrunk, its sides simply show.
  */
 export function paintAccent(ctx, shape, G, C) {
-  const acc = rgb(C), { nx, ny } = G.edge;
+  const LA = look().accent, raw = ctx;
+  const acc = LA ? LA.fill(C) : rgb(C), { nx, ny } = G.edge;
+  if (LA) ctx = styled(raw, C);               // the ink details of some shapes (stripes, bands) follow the look
   let [A, B] = [G.accent[0], G.accent[1]];
   const axis = ny ? 1 : 0;                                   // the coordinate the edge is slanted in
   if (shape === "flat") { const m = (A[axis] + B[axis]) / 2; A = [...A]; B = [...B]; A[axis] = B[axis] = m; }
@@ -166,7 +170,7 @@ export function paintAccent(ctx, shape, G, C) {
   ctx.beginPath(); ctx.rect(bx - (nx < 0 ? 100 : 0), by - (ny < 0 ? 100 : 0), bw + (nx ? 100 : 0), bh + (ny ? 100 : 0)); ctx.clip();
   polygon(ctx, block); ctx.fillStyle = acc; ctx.fill();
   ctx.save(); polygon(ctx, block); ctx.clip();
-  toneField(ctx, bx - 60, by - 60, bx + bw + 60, by + bh + 60, 28, rgb(mixc(C, BLK, 0.24)), (x, y) => ((y - by) / bh) * 1.15 - 0.4 + (x - bx) / (bw * 2.6));
+  toneField(raw, bx - 60, by - 60, bx + bw + 60, by + bh + 60, 28, LA ? LA.tone(C) : rgb(mixc(C, BLK, 0.24)), (x, y) => (((y - by) / bh) * 1.15 - 0.4 + (x - bx) / (bw * 2.6)) * (LA ? LA.toneScale : 1));
   if (shape === "stripes") {                                 // hazard band just inside the edge
     polygon(ctx, ext([A, B]).concat(ext([shift(A, 46), shift(B, 46)]).reverse())); ctx.clip();
     ctx.fillStyle = INK;
@@ -180,7 +184,7 @@ export function paintAccent(ctx, shape, G, C) {
     ctx.strokeStyle = INK; ctx.lineWidth = 8; ctx.lineJoin = "miter"; ctx.stroke();
     ctx.lineWidth = 10; ctx.beginPath(); edge.forEach((p, i) => (i ? ctx.lineTo(...p) : ctx.moveTo(...p))); ctx.stroke();
     ctx.strokeStyle = "#fff"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(band[0][0] + nx * 22, band[0][1] + ny * 22); ctx.lineTo(band[3][0] + nx * 22, band[3][1] + ny * 22); ctx.stroke();
-  } else strokeEdge(ctx, edge, nx, ny, ["zigzag", "steps", "chevron"].includes(shape));
+  } else strokeEdge(raw, edge, nx, ny, ["zigzag", "steps", "chevron"].includes(shape), C);
   ctx.restore();
   return { x: bx, y: by, w: bw, h: bh };
 }
@@ -216,6 +220,8 @@ function centred(ctx, cx, cy, tr, s, fn) {
 
 // free text: nominal 120-unit type, centred on the origin
 function drawFreeText(ctx, L, env) {
+  const raw = ctx;
+  ctx = styled(raw, env.C, true);
   const lines = parseTitle(L.text);
   if (!lines.length) return null;
   const FS = 120, LH = 1.16, plate = L.look === "plate";
@@ -234,6 +240,12 @@ function drawFreeText(ctx, L, env) {
     ctx.translate(-widths[li] / 2, -bh / 2 + li * FS * LH + FS * (plate ? 0.94 : 0.9));
     if (!plate) ctx.transform(1, 0, -0.08, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
+    if (L.look === "title" && look().runs) {
+      const m = raw.getTransform ? raw.getTransform() : null;
+      look().runs(raw, pass, { fs: FS, d, strokeAmt: 1, shadowAmt: 1, C: env.C, second: L.color === "accent" ? env.C : null, unit: m ? Math.hypot(m.a, m.b) : 1 }, lookValues());
+      raw.restore();
+      return;
+    }
     if (L.look === "title") {
       pass((a, cx) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? "#ffffff" : L.color === "accent" ? "#ffffff" : env.acc; ctx.lineWidth = FS * 0.04; ctx.strokeText(a.t, cx + d, d); ctx.fillText(a.t, cx + d, d); });
       pass((a, cx) => { ctx.strokeStyle = L.color === "ink" ? "#ffffff" : INK; ctx.lineWidth = FS * 0.075; ctx.strokeText(a.t, cx, 0); });
@@ -247,9 +259,11 @@ function drawFreeText(ctx, L, env) {
 const PAINT = {
   bg(ctx, L, tr, env) {
     const { w, h, th } = env;
+    const photo = () => drawPhoto(ctx, env.photo, w, h, { dx: tr.dx, dy: tr.dy, s: tr.s }, L.blur, L.dim, env.hiRes);
+    if (look().background && look().background(ctx, { ...env, drawPhoto: photo }, L, lookValues())) return { cx: w / 2, cy: h / 2, hw: w / 2, hh: h / 2, r: 0 };
     ctx.fillStyle = th.field; ctx.fillRect(0, 0, w, h);
     if (L.grid && !env.photo) grid(ctx, th.grid(env.C), w, h);
-    if (env.photo) drawPhoto(ctx, env.photo, w, h, { dx: tr.dx, dy: tr.dy, s: tr.s }, L.blur, L.dim, env.hiRes);
+    if (env.photo) photo();
     return { cx: w / 2, cy: h / 2, hw: w / 2, hh: h / 2, r: 0 };
   },
   accent(ctx, L, tr, env) {
@@ -263,25 +277,25 @@ const PAINT = {
       drawAsset(ctx, g, env.C, { tint: true, labels: g.labels, stamp: g.stamp, shadow: env.style.imageShadow }));
   },
   brand(ctx, L, tr, env) {
-    return placed(ctx, tr, (c) => drawHeader(c, env.o, env.w, env.th, env.C, env.G.template === "split", L.rail));
+    return placed(ctx, tr, (c) => drawHeader(styled(c, env.C, true), env.o, env.w, env.th, env.C, env.G.template === "split", L.rail));
   },
   title(ctx, L, tr, env) {
     const { G, th } = env, top = env.hasBrand ? 150 : 84;
     const box = { x: G.title.x, y: top, w: G.title.w, h: G.title.h + (G.title.y - top) };
     return placed(ctx, tr, (c) => drawTitle(c, env.cover.title, box, IDENTITY, {
       font: fonts.cn, maxFs: 340, align: L.align, fill: th.titleFill, ink: th.titleInk, hi: env.acc, shadow: env.acc, hiShadow: th.titleFill,
-      stroke: clamp(L.stroke, 0, 2), shadowAmt: clamp(L.shadow, 0, 2),
+      stroke: clamp(L.stroke, 0, 2), shadowAmt: clamp(L.shadow, 0, 2), C: env.C,
     }));
   },
   tag(ctx, L, tr, env) {
     if (!env.cover.tag) return null;
-    return placed(ctx, tr, (c) => accentTag(c, env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.acc));
+    return placed(ctx, tr, (c) => accentTag(styled(c, env.C, true), env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.acc));
   },
   catname(ctx, L, tr, env) {
-    return placed(ctx, tr, (c) => drawCategory(c, env.cat, env.G, env.C, { name: L.showName, plate: L.plate }));
+    return placed(ctx, tr, (c) => drawCategory(styled(c, env.C, true), env.cat, env.G, env.C, { name: L.showName, plate: L.plate }));
   },
   frame(ctx, L, tr, env) {
-    brackets(ctx, 30, 30, env.w - 30, env.h - 30, 44, env.th.text, 3);
+    brackets(styled(ctx, env.C, true), 30, 30, env.w - 30, env.h - 30, 44, env.th.text, 3);
     return null;
   },
   asset(ctx, L, tr, env) {
@@ -343,10 +357,12 @@ export function drawCover(cv, o) {
   const ctx = cv.getContext("2d"), kx = cv.width / w, ky = cv.height / h;
   ctx.scale(kx, ky);
   const C = hexToRgb(cat.color);
+  const L0 = setLook(P.style.look, P.style.lookParams && P.style.lookParams[P.style.look]);   // everything below is drawn under this look
+  const base = o.photo ? THEMES.dark : THEMES[P.style.theme] || THEMES.dark;
   const env = {
     o, w, h, cover, cat, C, acc: rgb(C), style: P.style, photo: o.photo || null, hiRes: cv.width > w,
     G: layout(P.style.template, w, h),
-    th: o.photo ? THEMES.dark : THEMES[P.style.theme] || THEMES.dark,
+    th: L0.theme ? L0.theme(base, C, lookValues()) : base,
     hasBrand: cover.layers.some((l) => l.type === "brand" && l.visible),
   };
   cv._virtual = [w, h];
@@ -366,6 +382,7 @@ export function drawCover(cv, o) {
     ctx.globalAlpha = 1; ctx.setLineDash([]);
     if (hit) cv._hits.push({ id: L.id, type: L.type, ...hit });
   }
+  if (L0.post && cover.layers[0].visible) { ctx.save(); L0.post(ctx, w, h, C, lookValues()); ctx.restore(); }   // not over a transparent background
   if (o.select) { const hit = cv._hits.find((x) => x.id === o.select); if (hit && hit.type !== "bg") drawSelection(ctx, hit, kx); }
 }
 

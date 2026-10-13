@@ -4,6 +4,7 @@
 // Every sticker draws inside a 200 x 200 box centred on the origin. `A` is its main colour
 // (the category colour when the layer is tinted, otherwise the sticker's own default).
 import { INK, fonts } from "./cel.js";
+import { look, lookValues } from "./style.js";
 
 const WHITE = "#ffffff", RED = "#ff3b4f", YELLOW = "#ffd60a", ORANGE = "#ff8a00", BLUE = "#3a86ff", GREEN = "#06d6a0", PINK = "#ff5fa2";
 const TAU = Math.PI * 2;
@@ -24,6 +25,7 @@ const curve = (fn) => (c) => { fn(c); c.closePath(); };
 // ---------- painters
 /** Filled shape with the house look: hard offset shadow, flat fill, heavy ink outline. */
 function shape(ctx, path, fill, { shadow = true, lw = 7 } = {}) {
+  if (look().sticker) return look().sticker.shape(ctx, path, fill, { shadow, lw }, lookValues());
   ctx.lineJoin = "round"; ctx.lineCap = "round";
   if (shadow) { ctx.save(); ctx.translate(7, 7); ctx.beginPath(); path(ctx); ctx.fillStyle = ctx.strokeStyle = INK; ctx.lineWidth = lw; ctx.fill(); ctx.stroke(); ctx.restore(); }
   ctx.beginPath(); path(ctx); ctx.fillStyle = fill; ctx.fill();
@@ -31,6 +33,7 @@ function shape(ctx, path, fill, { shadow = true, lw = 7 } = {}) {
 }
 /** Several overlapping shapes merged into one silhouette (outline first, then fills hide the seams). */
 function blob(ctx, paths, fill) {
+  if (look().sticker) return look().sticker.blob(ctx, paths, fill, lookValues());
   for (const pass of [0, 1, 2]) for (const p of paths) {
     ctx.save();
     if (pass === 0) ctx.translate(7, 7);
@@ -42,19 +45,23 @@ function blob(ctx, paths, fill) {
 }
 /** Thick inked stroke: an ink line with a coloured line on top. */
 function stroke(ctx, draw, color, lw = 30) {
+  if (look().sticker) return look().sticker.stroke(ctx, draw, color, lw, lookValues());
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   for (const [dx, col, w] of [[7, INK, lw + 14], [0, INK, lw + 14], [0, color, lw]]) {
     ctx.save(); ctx.translate(dx, dx); ctx.beginPath(); draw(ctx); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke(); ctx.restore();
   }
 }
 const pathLine = (pts) => (c) => pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
-function thin(ctx, pts, lw = 6, color = INK) { ctx.beginPath(); pathLine(pts)(ctx); ctx.lineWidth = lw; ctx.strokeStyle = color; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke(); }
+function thin(ctx, pts, lw = 6, color = INK) {
+  if (look().sticker) return look().sticker.thin(ctx, pathLine(pts), lw, color);
+  ctx.beginPath(); pathLine(pts)(ctx); ctx.lineWidth = lw; ctx.strokeStyle = color; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke(); }
 /** Heavy display lettering with an ink outline, centred on (x, y). */
 function word(ctx, str, size, fill, x = 0, y = 0) {
   const cjk = /[⺀-鿿]/.test(str);
   ctx.font = cjk ? `900 ${size}px ${fonts.cn}` : `700 ${size}px ${fonts.en}, ${fonts.cn}`;
   ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
   const yy = y + (cjk ? size * 0.02 : size * 0.06);
+  if (look().sticker) return look().sticker.word(ctx, str, x, yy, size, fill, lookValues());
   ctx.lineWidth = size * 0.2; ctx.strokeStyle = INK; ctx.strokeText(str, x, yy);
   ctx.fillStyle = fill; ctx.fillText(str, x, yy);
 }
