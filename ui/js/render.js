@@ -152,7 +152,6 @@ function strokeEdge(ctx, pts, nx, ny, sharp, C, lw = 16) {
 export function paintAccent(ctx, shape, G, C) {
   const LA = look().accent, raw = ctx;
   const acc = LA ? LA.fill(C) : rgb(C), { nx, ny } = G.edge;
-  if (LA) ctx = styled(raw, C);               // the ink details of some shapes (stripes, bands) follow the look
   let [A, B] = [G.accent[0], G.accent[1]];
   const axis = ny ? 1 : 0;                                   // the coordinate the edge is slanted in
   if (shape === "flat") { const m = (A[axis] + B[axis]) / 2; A = [...A]; B = [...B]; A[axis] = B[axis] = m; }
@@ -289,13 +288,15 @@ const PAINT = {
   },
   tag(ctx, L, tr, env) {
     if (!env.cover.tag) return null;
+    if (look().tag) return placed(ctx, tr, (c) => look().tag(c, env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.C, lookValues()));
     return placed(ctx, tr, (c) => accentTag(styled(c, env.C, true), env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.acc));
   },
   catname(ctx, L, tr, env) {
     return placed(ctx, tr, (c) => drawCategory(styled(c, env.C, true), env.cat, env.G, env.C, { name: L.showName, plate: L.plate }));
   },
   frame(ctx, L, tr, env) {
-    brackets(styled(ctx, env.C, true), 30, 30, env.w - 30, env.h - 30, 44, env.th.text, 3);
+    if (look().frame) look().frame(ctx, env, lookValues());
+    else brackets(styled(ctx, env.C, true), 30, 30, env.w - 30, env.h - 30, 44, env.th.text, 3);
     return null;
   },
   asset(ctx, L, tr, env) {

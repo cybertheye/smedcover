@@ -462,6 +462,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(d), LOOKS.cyber.params.map((p) => p.key));
   assert.equal(lookParams("cyber", { glow: 99, scan: "x" }).glow, 2);
   assert.equal(lookParams("cyber", { glow: 99, scan: "x" }).scan, d.scan);
+  assert.equal("haze" in lookParams("cyber", { haze: 1 }), false);                    // values for sliders a look no longer has are dropped
   assert.deepEqual(lookParams("nope"), {});
   const p = normalizeProfile({ style: { look: "cyber", lookParams: { cyber: { glow: 0.5, bogus: 1 }, other: { x: 1 } } } });
   assert.equal(p.style.look, "cyber");
@@ -482,20 +483,20 @@ test("looks: the house look changes nothing, the cyberpunk look re-maps what is 
   assert.equal(lookValues().glow, 1);
   const c = styled(ctx, [252, 238, 10]);
   assert.notEqual(c, ctx);
-  c.fillStyle = "#ffffff"; assert.match(log.at(-1)[1], /^rgba\(22,27,58/);                   // a white face becomes dark glass
+  c.fillStyle = "#ffffff"; assert.match(log.at(-1)[1], /^rgba\(30,32,46/);                   // a white face becomes dark glass
   c.fillStyle = "#fcee0a"; assert.equal(log.at(-1)[1], "#fcee0a");                           // colour stays lit
   log.length = 0; c.strokeStyle = "#07070c"; c.stroke();
-  assert.match(log[0][1], /^rgba\(252,238,10/);                                              // an ink line takes the channel colour…
-  assert.ok(log.filter((e) => e[0] === "stroke").length >= 3);                               // …and is drawn as a tube: halo, line, core
+  assert.match(log[0][1], /^rgba\(252,238,10/);                                              // an ink edge takes the channel colour…
+  assert.ok(log.filter((e) => e[0] === "stroke").length >= 3);                               // …and is drawn as a line of light: halo, line, core
   log.length = 0; c.strokeStyle = "#ff3b4f"; c.stroke();
   assert.equal(log.filter((e) => e[0] === "stroke").length, 1);                              // a coloured line is left alone
-  // cover parts: a coloured plate turns to glass with a rim, ink lettering turns pale
-  const part = styled(ctx, [252, 238, 10], true);
-  log.length = 0; part.fillStyle = "#fcee0a"; part.fillRect(0, 0, 100, 34);
-  assert.deepEqual(log.filter((e) => e[0] === "fillRect" || e[0] === "strokeRect").map((e) => e[0]), ["fillRect", "strokeRect"]);
-  log.length = 0; part.fillRect(0, 0, 50, 12); assert.deepEqual(log.map((e) => e[0]), ["fillRect"]);   // thin bars stay lit
-  log.length = 0; part.fillStyle = "#07070c"; part.fillText("A", 0, 0);
-  assert.match(log.find((e) => e[0] === "fill=" && /236,250,255/.test(e[1]))[1], /rgba/);
+  log.length = 0; c.fillStyle = "#07070c"; c.fillText("A", 0, 0);
+  assert.ok(log.some((e) => e[0] === "fill=" && /240,246,250/.test(e[1])));                  // ink lettering on an object turns pale
+  assert.equal(styled(ctx, [252, 238, 10], true), ctx);                                      // the small cover parts stay ink on colour
+  // the hooks a look may bring are all functions (or absent)
+  for (const k of ["theme", "background", "runs", "wrap", "tag", "frame", "image", "post"]) assert.equal(typeof LOOKS.cyber[k], "function", k);
+  for (const k of ["shape", "blob", "stroke", "thin", "word"]) assert.equal(typeof LOOKS.cyber.sticker[k], "function", k);
+  assert.equal(LOOKS.cyber.oneTheme, true); assert.equal(LOOKS.cel.oneTheme, undefined);
   setLook("cel");
 });
 

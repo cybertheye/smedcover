@@ -236,6 +236,8 @@ A look is a set of **hooks**. Each is optional, and what a look leaves out is dr
 | `runs` | lettering made of runs — the title, and free text in the headline look |
 | `wrap` | returns a stand-in context that channel graphics, solids and the small cover parts (brand row, tag, channel name, brackets) draw on |
 | `sticker` | the five painters of flat stickers: `shape`, `blob`, `stroke`, `thin`, `word` |
+| `tag` | the corner tag |
+| `frame` | the frame layer, and any interface detail the look wants along the edges |
 | `image` | the shadow or glow of an uploaded image |
 | `post` | an overlay painted over the finished cover, such as scanlines and a vignette |
 | `params` | tunable numbers, shown as sliders in the Style tab |
@@ -251,11 +253,15 @@ one for several looks is not realistic, so they draw on a stand-in: `wrap` retur
 forwards every canvas call and steps in at two points.
 
 - **When a colour is set**, it first works out the job that colour does in the cel style (ink, light face, mid face, dark face, colour) and substitutes the current look's colour for that job. Cyberpunk turns the three faces into three shades of dark glass and leaves colours alone.
-- **When a line is stroked**, an ink line is drawn as a neon tube instead: a wide faint halo, the coloured line, a thin pale core.
+- **When a line is stroked**, an ink line is drawn as a line of light instead: a wide faint halo, the coloured line, a thin pale core.
 
-So the drawing code of the channel graphics and of AI-generated solids is unchanged. The small cover
-parts use the same stand-in in "plates" mode: a solid coloured plate becomes dark glass with a thin
-rim, and the ink lettering on it becomes pale, so it stays readable.
+So the drawing code of the channel graphics and of AI-generated solids is unchanged.
+
+Cyberpunk leaves the small cover parts (brand row, channel name) alone: the look *is* solid panels
+with black lettering, which is what the cel style's ink on colour already gives. Its difference comes
+from elsewhere: the colour block is a solid panel, highlighted words in the title become black on a
+chamfered plate, every hard ink shadow of the cel style becomes a red and cyan "echo", and the whole
+picture finally gets a colour split and a signal tear.
 
 The glow is made by stroking a line several times at different widths, not with canvas shadow blur.
 Shadow blur is slow per line, and web views disagree about its extent: the same value came out far
@@ -267,8 +273,8 @@ the same everywhere.
 Three levels, from light to deep:
 
 1. **Sliders** — a look's `params`, saved in the profile under `style.lookParams[look]`; no code.
-2. **Constants** — in `style.js`, `CY` is the cyberpunk palette (the deepest colour, three shades of glass, the second and third neons, the pale white); `tube()` sets the width and opacity of each layer of a neon tube.
-3. **Hooks** — change how a hook draws: the horizon and grid density in `background`, the scanline pitch in `post`, the layers of the lettering in `runs`.
+2. **Constants** — in `style.js`, `CY` is the cyberpunk palette (field, black, three shades of glass, the red and cyan of the split, white); `echo()` sets the direction and distance of an echo; `tube()` the width and opacity of each layer of a line of light; `chamfer()` is the cut corner.
+3. **Hooks** — change how a hook draws: the grid and the giant code in `background`, the interface detail in `frame`, the split, tear and scanlines in `post`, the layers of the lettering in `runs`.
 
 To add a slider, add an entry to the look's `params` and read the value in a hook; the interface and
 saving are automatic.
