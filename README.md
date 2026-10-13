@@ -98,7 +98,7 @@ What each layer allows:
 
 ### Text effects
 
-The title, and text layers in the *Headline* look, can be given a text effect of their own instead of following the look. Select the layer and choose under *Text effect* in its properties:
+The title and every text layer (in any of its three looks) can be given a text effect of their own instead of following the look. Select the layer and choose under *Text effect* in its properties:
 
 | Kind | Effects | Notes |
 |---|---|---|
@@ -218,10 +218,9 @@ With a template chosen under *Style*, *Adjust the template* below it changes it:
 |---|---|
 | Band height (*Panel width* for Split) | how much of the picture the colour block takes |
 | Edge slant | how far the dividing edge leans; 0 is level or upright |
-| Title box width, height | the room the title may use; its size is fitted automatically |
 | Swap | the band on top and the title below; or the panel on the left and the title on the right |
 
-Or drag on the canvas: with *Colour block & edge* selected, the dividing edge has a diamond at each end and in the middle — the ends change its lean, the middle moves it; with *Title* selected, the dashed box has a diamond on its right and bottom sides.
+Or drag on the canvas: with *Colour block & edge* selected, the dividing edge has a diamond at each end and in the middle — the ends change its lean, the middle moves it; with *Title* selected, the dashed box has a diamond on its right and bottom sides: drag them to change the room the title may use, and its size is fitted automatically. That room is set on the canvas only.
 
 Adjustments are stored as fractions of the picture, so they apply to every size; each of the three templates keeps its own, in the profile. After a swap the brand row sits on the colour block and turns to ink. If the colour block layer itself has been moved or turned, the diamonds on the edge are hidden; reset that layer's placement to get them back.
 

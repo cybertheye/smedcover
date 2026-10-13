@@ -223,7 +223,8 @@ function centred(ctx, cx, cy, tr, s, fn) {
 // free text: nominal 120-unit type, centred on the origin
 function drawFreeText(ctx, L, env) {
   const raw = ctx;
-  if (look().freeText) { const done = look().freeText(raw, L, parseTitle(L.text), env, lookValues()); if (done) return done; }
+  // a look may draw plain and plate text its own way — unless the layer has asked for a text effect of its own
+  if (look().freeText && !L.fx) { const done = look().freeText(raw, L, parseTitle(L.text), env, lookValues()); if (done) return done; }
   ctx = styled(raw, env.C, true);
   const lines = parseTitle(L.text);
   if (!lines.length) return null;
@@ -244,12 +245,22 @@ function drawFreeText(ctx, L, env) {
     ctx.translate(-widths[li] / 2, -bh / 2 + li * FS * LH + FS * (plate ? 0.94 : 0.9));
     if (!plate) ctx.transform(1, 0, -0.08, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
+    const m = raw.getTransform ? raw.getTransform() : null, light = L.color === "accent" ? "#ffffff" : env.acc, unit = m ? Math.hypot(m.a, m.b) : 1;
     if (L.look === "title") {   // a headline: painted by the layer's text effect, like the title
-      const m = raw.getTransform ? raw.getTransform() : null, light = L.color === "accent" ? "#ffffff" : env.acc;
       paintRuns(raw, pass, {
         fs: FS, d, strokeAmt: 1, shadowAmt: 1, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3,
         fillCss: fill, hiCss: light, inkCss: L.color === "ink" ? "#ffffff" : INK, shadowCss: light, hiShadowCss: "#ffffff",
-        C: env.C, fill: L.ink ? hexToRgb(L.ink) : { white: [240, 246, 250], accent: env.C, ink: [5, 5, 8] }[L.color], unit: m ? Math.hypot(m.a, m.b) : 1,
+        C: env.C, fill: L.ink ? hexToRgb(L.ink) : { white: [240, 246, 250], accent: env.C, ink: [5, 5, 8] }[L.color], unit,
+      }, L.fx);
+      raw.restore();
+      return;
+    }
+    if (L.fx) {   // plain text, or the lettering on a plate, with an effect chosen for it: no keyline or drop shadow of its own
+      const onPlate = plate ? (dark ? env.C : [7, 7, 12]) : null;
+      paintRuns(raw, pass, {
+        fs: FS, d: 0, strokeAmt: 0, shadowAmt: 1, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 5,
+        fillCss: textFill, hiCss: plate ? textFill : light, inkCss: plate && !dark ? fill : INK, shadowCss: INK, hiShadowCss: INK,
+        C: env.C, fill: onPlate || (L.ink ? hexToRgb(L.ink) : { white: [240, 246, 250], accent: env.C, ink: [5, 5, 8] }[L.color]), unit,
       }, L.fx);
       raw.restore();
       return;

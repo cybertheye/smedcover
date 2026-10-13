@@ -609,8 +609,6 @@ function layoutBox() {
   return el("div", { class: "box" }, cap("style.layout"),
     slider2(t(split ? "style.laySide" : "style.layBand"), LAYOUT_LIMITS.size[0], LAYOUT_LIMITS.size[1], 0.01, adj.size ?? now.size, (v) => set("size", v)),
     slider2(t("style.laySlant"), LAYOUT_LIMITS.slant[0], LAYOUT_LIMITS.slant[1], 0.005, adj.slant ?? now.slant, (v) => set("slant", v)),
-    slider2(t("style.layTw"), LAYOUT_LIMITS.tw[0], 1, 0.01, adj.tw ?? 1, (v) => set("tw", v)),
-    slider2(t("style.layTh"), LAYOUT_LIMITS.th[0], 1, 0.01, adj.th ?? 1, (v) => set("th", v)),
     el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: !!adj.flip, onchange: (e) => { set("flip", e.target.checked); renderPanel(); } }), el("span", {}, t(split ? "style.layFlipSplit" : "style.layFlipStack"))),
     el("button", { class: "btn wide", style: "margin-top:10px", disabled: !changed, onclick: () => { delete st.layoutAdjust[tpl]; touch({ profile: true, panel: true }); } }, t("style.layReset")),
     el("div", { class: "hint" }, t("style.layHint")));
@@ -631,7 +629,7 @@ function styleTab() {
       L.seeded && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { st.lookSeed = Math.floor(Math.random() * 1000000); touch({ profile: true }); } }, t("style.shuffle")),
       L.seeded && el("div", { class: "hint" }, t("style.shuffleHint")),
       L.params.length > 0 && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete st.lookParams[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))),
-    el("div", {}, cap("style.template"), select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), st.template, (v) => set("template", v))),
+    el("div", {}, cap("style.template"), select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), st.template, (v) => { st.template = v; touch({ profile: true }); later("laybox", 60, renderPanel); })),   // the controls below belong to the template: rebuild them once it has been drawn
     layoutBox(),
     !L.oneTheme && el("div", {}, cap("style.theme"), select([["dark", t("theme.dark")], ["light", t("theme.light")]], st.theme, (v) => set("theme", v))),
     check("style.imageShadow", st.imageShadow, (v) => set("imageShadow", v)),
@@ -838,7 +836,7 @@ function typeControls(L) {
       el("div", { style: "margin-top:8px" }, select(["title", "plain", "plate"].map((k) => [k, `${t("props.look")} · ${t("look." + k)}`]), L.look, (v) => set("look", v))),
       el("div", { style: "margin-top:8px" }, select(["white", "accent", "ink"].map((k) => [k, `${t("props.color")} · ${t("color." + k)}`]), L.color, (v) => set("color", v))),
       inkControl(L, "ink", "props.inkCustom", { white: "#ffffff", accent: cat().color, ink: "#07070c" }[L.color]),
-      L.look === "title" && fxControl(L),
+      fxControl(L),
     ];
   }
   return null;
