@@ -81,6 +81,8 @@ const STR = {
   "layers.down": ["下移一层", "Send backward"],
   "layers.show": ["显示 / 隐藏", "Show / hide"],
   "layers.lock": ["锁定 / 解锁", "Lock / unlock"],
+  "layers.pinned.bg": ["固定层：始终在最底，不能删除或调整层级。放入照片后仍可拖动照片。", "Fixed layer: always at the bottom, cannot be deleted or re-ordered. A photo placed in it can still be dragged."],
+  "layers.pinned.frame": ["固定层：贴在画面四角，不能移动或删除；可以隐藏或调整层级。", "Fixed layer: pinned to the corners of the canvas, cannot be moved or deleted; it can be hidden or re-ordered."],
   "layers.none": ["点画布或列表里的图层来选中。", "Click a layer on the canvas or in the list."],
   "layer.bg": ["背景", "Background"],
   "layer.accent": ["色块与分界线", "Colour block & edge"],

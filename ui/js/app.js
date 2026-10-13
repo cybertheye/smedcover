@@ -17,6 +17,7 @@ import {
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
 const FIXED = ["frame"];                  // layers that follow the template and cannot be moved
+const PINNED = ["bg", "frame"];          // shown with a padlock in the layer list: always there, never placed by hand
 
 /** Tiny element builder: el("div", {class:"x", onclick}, child, "text"). */
 function el(tag, props = {}, ...kids) {
@@ -549,7 +550,8 @@ function layerRow(L) {
       if (moveLayer(S.cover.layers, id, from < to ? to : to + 1)) touch({ cover: true, side: true }); else renderSide();
     } },
     icon(L.visible ? "◉" : "○", !L.visible, t("layers.show"), () => { L.visible = !L.visible; }),
-    icon(L.locked ? "▣" : "□", !L.locked, t("layers.lock"), () => { L.locked = !L.locked; }),
+    PINNED.includes(L.type) ? el("span", { class: "ic pin", title: t("layers.pinned." + L.type) }, "🔒")
+      : icon(L.locked ? "▣" : "□", !L.locked, t("layers.lock"), () => { L.locked = !L.locked; }),
     el("span", { class: "nm" }, layerName(L), isFree(L.type) && el("span", { class: "ty" }, L.type === "text" ? "T" : "+")));
 }
 function placementControls(L) {
