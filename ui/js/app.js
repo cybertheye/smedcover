@@ -547,12 +547,13 @@ async function putPhoto(src, { original = "", mask = "", pid = "", save = true }
   if (save) savePhoto(id);
   return id;
 }
+/** Writes a picture's files; resolves when they are written (an upgrade waits for that before removing the old ones). */
 function savePhoto(pid) {
   const r = S.photos.get(pid);
-  if (!r) return;
-  files.write(`photos/${pid}`, r.src).catch(fail);
-  files.write(`photos/${pid}.original`, r.original || "").catch(fail);
-  files.write(`photos/${pid}.mask`, r.mask ? r.mask.src : "").catch(fail);
+  if (!r) return Promise.resolve();
+  return Promise.all([
+    files.write(`photos/${pid}`, r.src), files.write(`photos/${pid}.original`, r.original || ""), files.write(`photos/${pid}.mask`, r.mask ? r.mask.src : ""),
+  ]).catch(fail);
 }
 const pidsOf = (cover) => new Set(cover.layers.filter((l) => l.type === "photo" && l.pid).map((l) => l.pid));
 /** Reads the session's pictures for these ids, and drops the files of any others. */
@@ -1846,7 +1847,13 @@ async function start() {
   if (legacy) {
     const read = (f) => files.read(f).catch(() => "").then((v) => v || "");
     S.cover = await upgradeCover(S.cover, { src: legacy, original: await read("session-photo-original"), mask: await read("session-photo-mask") });
-    for (const f of ["session-photo", "session-photo-original", "session-photo-mask"]) files.remove(f).catch(() => null);
+    const main = S.cover.layers.find((l) => fillsCanvas(l));
+    // the old files go only once the new ones and the upgraded cover are on disk
+    if (main && S.photos.has(main.pid)) {
+      await savePhoto(main.pid);
+      await writeJson("session.json", S.cover).catch(fail);
+      for (const f of ["session-photo", "session-photo-original", "session-photo-mask"]) await files.remove(f).catch(() => null);
+    }
     touch({ cover: true });
   } else S.cover = await upgradeCover(S.cover, null);
   await applyProfile();
