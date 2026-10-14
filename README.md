@@ -61,6 +61,7 @@ With a background photo chosen, *Cut out the subject, in front of the title* is 
 - The subject becomes a *Subject* layer, placed just above the title, so it covers part of the title as on a magazine cover. Move it up or down in the layer list to decide what it stands in front of.
 - The subject is the background photo itself: it follows the photo's place and size, moves when you drag the photo, and gets the look's treatment of the photo (tint, duotone, black and white…). It stays sharp by default, which reads as depth when the background is blurred; *Follow the background's blur and dim* makes it match.
 - Its properties add an outline (width and colour) and a shadow.
+- *Undo the cut-out* removes the Subject layer and the mask.
 - A new photo needs a new cut-out; when an AI repaint is used and the cover has a Subject layer, the new photo is cut out again by itself.
 - The cut-out is kept in the session and in project files. A photo with no clear subject says so.
 
@@ -214,6 +215,8 @@ The title and every text layer (with or without a plate) can be given a text eff
 | Layered | outline and shadow, plain, sliced, overprint, double keyline, plain upright, underlined highlight | The looks' own letterings, usable under any look |
 | Masked | halftone inside, stripes inside, inner shadow, worn, row shift | Change what is inside the letters |
 | Outlined | extruded, arched, tapered, wave | Reshape the letters themselves |
+
+With *Tapered*, diamond handles appear at the corners of the lettering on the canvas: drag any of them to set the perspective freely (the whole block is reshaped to the new quad); *Reset the perspective* in the properties goes back to the default. Both the title and text layers have it.
 
 Masked and outlined effects have a *Strength* slider. The title's *Outline* and *Shadow* sliders can be moved only when the current effect draws an outline or a shadow: Plain, Plain upright and Underlined highlight have neither, Overprint only the shadow (how far its two colours sit apart); otherwise the slider is greyed out and says why.
 

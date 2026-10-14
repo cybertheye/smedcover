@@ -260,6 +260,10 @@ back to ordinary lettering. When the outline arrives the interface is told to re
 **Extrusion** really sweeps every edge of the outline back into a wall: walls are split into lit and
 shaded by the way they face, each group is filled as one shape, then the back face and the front.
 
+### 6.2.1 A perspective of one's own
+
+*Tapered* can carry the layer's own corners, `warp` (four `[dx, dy]` in block widths and heights). When the title or a text layer is painted, each line hands the effect where it sits in the block (`frame`: the line's origin, its slant, the block's rectangle); `perspective()` takes the outline points into the block's space, maps them with the projective map of `squareToQuad` onto the new quad and back, so several lines bend as one block. The block's transform and rectangle are kept in `cv._blocks`, from which the editor draws the corner handles (`warpHandles`) and, while one is dragged, takes the pointer back into the block's space with the inverse transform.
+
 ### 6.3 Background photo and blur (`photo.js`)
 
 Canvas filters are not available in the macOS web view, so the gaussian blur is done in script:
@@ -274,7 +278,9 @@ recompute it from a higher-resolution copy.
 
 `subject_mask` (`src-tauri/src/subject.rs`) hands the photo's bytes to Apple Vision's `VNGenerateForegroundInstanceMaskRequest` (macOS 14 on; the class is looked up at run time through objc2, so an older system reports that it needs macOS 14), takes `generateScaledMaskForImageForInstances` — a float mask the photo's size — and returns it as a PNG in which only the alpha matters. The interface draws the photo on a canvas and sends that as JPEG, so EXIF orientation is already applied and the mask matches the photo pixel for pixel.
 
-The mask is kept as `S.photoMask = {img, src, of}`, `of` being the photo it belongs to; a new photo clears it. The `subject` layer (`OPTIONAL_TYPES`: at most one per cover, removable) paints the background layer again — the same photo, in the same place (`env.bgTr`), with the same treatment by the look, unblurred and undimmed by default — and keeps it only where the mask is opaque (`destination-in`); the outline and shadow are the mask's silhouette, coloured and stamped around or below. It makes no hit, so clicks go through to the layers under it. While the background is dragged `goLive` adds the subject to the layers repainted each frame, so the two stay together.
+The mask is kept as `S.photoMask = {img, src, of}`, `of` being the photo it belongs to; a new photo clears it. The `subject` layer (`OPTIONAL_TYPES`: at most one per cover, removable) paints the background layer again — the same photo, in the same place (`env.bgTr`), with the same treatment by the look, unblurred and undimmed by default — and keeps it only where the mask is opaque (`destination-in`); the outline and shadow are the mask's silhouette, coloured and stamped around or below. It makes no hit, so clicks go through to the layers under it. While the background is dragged `goLive` adds the subject to the moving layers; meanwhile the subject only slides its last image by how far the photo has moved, and is painted properly when the drag ends. The silhouette for the outline and shadow is made once at the photo's scale (at most 1024 px) and kept on the mask object, so a frame only lays one image.
+
+The drag cache (`o.live`) cuts the layers into runs that move and runs that do not; each still run is painted once into an image, and each frame repaints only the moving runs.
 
 ### 6.5 Assets
 

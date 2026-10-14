@@ -8,7 +8,7 @@ import { drawPhoto, photoRect } from "./photo.js";
 import { drawAsset } from "./assets.js";
 import { resolve, appliesTo } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled } from "./style.js";
-import { paintRuns } from "./textfx.js";
+import { paintRuns, warpCorners } from "./textfx.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
 export const hexToRgb = (hex) => {
@@ -230,6 +230,8 @@ function drawFreeText(ctx, L, env) {
   ctx.font = plate ? `700 ${FS}px ${fonts.en}, ${fonts.cn}` : `900 ${FS}px ${fonts.cn}`;
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "round";
   const widths = lines.map((l) => l.reduce((s, a) => s + ctx.measureText(a.t).width, 0)), bw = Math.max(...widths), bh = lines.length * FS * LH;
+  const box = { x: -bw / 2, y: -bh / 2, w: bw, h: bh };
+  if (raw.getTransform) env.blocks[L.id] = { m: raw.getTransform(), box };   // where the block is, for the perspective's handles
   // the layer's colour: of the lettering, or of the plate when there is one
   const own = L.color === "custom" && L.ink ? hexToRgb(L.ink) : null;
   const tone = own || { white: [255, 255, 255], accent: env.C, ink: [7, 7, 12] }[L.color] || [255, 255, 255], fill = rgb(tone), pad = plate ? FS * 0.32 : 0;
@@ -248,10 +250,12 @@ function drawFreeText(ctx, L, env) {
   const light = onAccent ? "#ffffff" : env.acc, onPlate = dark ? env.C : [7, 7, 12], d = FS * 0.062;
   lines.forEach((line, li) => {
     ctx.save();
-    ctx.translate(-widths[li] / 2, -bh / 2 + li * FS * LH + FS * (plate ? 0.94 : 0.9));
+    const ox = -widths[li] / 2, oy = -bh / 2 + li * FS * LH + FS * (plate ? 0.94 : 0.9);
+    ctx.translate(ox, oy);
     if (!plate) ctx.transform(1, 0, -0.08, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
-    const m = raw.getTransform ? raw.getTransform() : null, unit = m ? Math.hypot(m.a, m.b) : 1, base = { fs: FS, shadowAmt: 1, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit };
+    const m = raw.getTransform ? raw.getTransform() : null, unit = m ? Math.hypot(m.a, m.b) : 1;
+    const base = { fs: FS, shadowAmt: 1, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit, frame: { ox, oy, c: plate ? 0 : -0.08, box }, warp: L.warp };
     paintRuns(raw, pass, plate
       ? { ...base, d: 0, strokeAmt: 0, fillCss: rgb(onPlate), hiCss: dark ? "#ffffff" : rgb(onPlate), inkCss: fill, shadowCss: INK, hiShadowCss: INK, fill: onPlate }
       : { ...base, d, strokeAmt: 1, fillCss: fill, hiCss: light, inkCss: dark ? "#ffffff" : INK, shadowCss: light, hiShadowCss: "#ffffff", fill: tone }, L.fx);
@@ -281,30 +285,36 @@ const PAINT = {
     const im = env.photo, m = env.o.mask;
     if (!im || !m || m.of !== im || typeof document === "undefined" || !ctx.getTransform) return null;
     const bg = env.cover.layers.find((l) => l.type === "bg"), bt = env.bgTr, M = ctx.getTransform(), W = ctx.canvas.width, H = ctx.canvas.height;
-    const r = photoRect(im, env.w, env.h, { dx: bt.dx, dy: bt.dy, s: bt.s }), mask = (c) => c.drawImage(m.img, r.x, r.y, r.iw, r.ih);
-    const sheet = (i) => { const c = SUBJECT[i] || (SUBJECT[i] = document.createElement("canvas")); if (c.width !== W || c.height !== H) { c.width = W; c.height = H; } const x = c.getContext("2d"); x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = "source-over"; x.globalAlpha = 1; x.clearRect(0, 0, W, H); x.setTransform(M); return x; };
-    const lay = (from, dx = 0, dy = 0, alpha = 1) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha *= alpha; ctx.drawImage(from.canvas, dx, dy); ctx.restore(); };
-    // the silhouette in one colour, for the outline and the shadow
-    if (L.outline > 0 || L.shadow > 0) {
-      const s = sheet(1), u = Math.hypot(M.a, M.b);
-      mask(s);
-      s.setTransform(1, 0, 0, 1, 0, 0); s.globalCompositeOperation = "source-in";
-      if (L.shadow > 0) {
-        s.fillStyle = "#07070c"; s.fillRect(0, 0, W, H);
-        const d = env.w * 0.012 * u;
-        for (let i = 1; i <= 4; i++) lay(s, d * i * 0.5, d * i * 0.6, L.shadow * 0.22);
-      }
-      if (L.outline > 0) {
-        s.fillStyle = L.ink || "#ffffff"; s.fillRect(0, 0, W, H);
-        const rad = L.outline * u, n = isFast() ? 8 : Math.min(36, 12 + Math.round(rad));
-        for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; lay(s, Math.cos(a) * rad, Math.sin(a) * rad); }
-      }
+    const r = photoRect(im, env.w, env.h, { dx: bt.dx, dy: bt.dy, s: bt.s });
+    const blit = (c, dx = 0, dy = 0) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(c, dx, dy); ctx.restore(); };
+    // While the photo is dragged the subject only slides with it: the image of the first frame is
+    // reused, moved by how far the photo has gone, and painted properly again when the drag ends.
+    const stamp = [W, H, bt.s, L.outline, L.shadow, L.ink, L.follow, bg.blur, bg.dim, look().id, env.style.theme, m.src && m.src.length, env.C.join()].join("|");
+    if (isFast() && SUBJECT.slide && SUBJECT.slide.stamp === stamp && SUBJECT.slide.mask === m) {
+      const k = SUBJECT.slide;
+      blit(k.img, (bt.dx - k.dx) * M.a, (bt.dy - k.dy) * M.d);
+      return null;
     }
-    // the background again, cut to the subject
-    const p = sheet(0);
-    PAINT.bg(p, { ...bg, blur: L.follow ? bg.blur : 0, dim: L.follow ? bg.dim : 0 }, bt, env);
-    p.globalCompositeOperation = "destination-in"; mask(p);
-    lay(p);
+    const out = sheet(0, W, H, M);
+    // shadow and outline: the silhouette, made once at the photo's scale (see silhouette()), laid around and under
+    const f = r.iw / im.naturalWidth;   // cover units per photo pixel
+    const lay = (sil, ox = 0, oy = 0, alpha = 1) => { out.save(); out.globalAlpha = alpha; out.drawImage(sil.c, r.x - sil.p * f + ox, r.y - sil.p * f + oy, sil.c.width * sil.k * f, sil.c.height * sil.k * f); out.restore(); };
+    if (L.shadow > 0) {
+      const sil = silhouette(m, 0, "#07070c"), d = env.w * 0.006;
+      for (let i = 1; i <= 4; i++) lay(sil, d * i, d * i * 1.2, L.shadow * 0.22);
+    }
+    if (L.outline > 0) lay(silhouette(m, L.outline / f, L.ink || "#ffffff"));
+    // the background again, cut to the subject, on top
+    const body = sheet(1, W, H, M);
+    PAINT.bg(body, { ...bg, blur: L.follow ? bg.blur : 0, dim: L.follow ? bg.dim : 0 }, bt, env);
+    body.globalCompositeOperation = "destination-in"; body.drawImage(m.img, r.x, r.y, r.iw, r.ih);
+    out.save(); out.setTransform(1, 0, 0, 1, 0, 0); out.drawImage(body.canvas, 0, 0); out.restore();
+    blit(out.canvas);
+    if (isFast()) {   // keep it for the frames to come (a copy: the work canvases are reused)
+      const keep = SUBJECT.slide && SUBJECT.slide.img.width === W && SUBJECT.slide.img.height === H ? SUBJECT.slide.img : Object.assign(document.createElement("canvas"), { width: W, height: H });
+      const kx = keep.getContext("2d"); kx.clearRect(0, 0, W, H); kx.drawImage(out.canvas, 0, 0);
+      SUBJECT.slide = { stamp, mask: m, img: keep, dx: bt.dx, dy: bt.dy };
+    } else SUBJECT.slide = null;
     return null;
   },
   accent(ctx, L, tr, env) {
@@ -332,6 +342,7 @@ const PAINT = {
       font: look().titleFont ? look().titleFont(fonts) : fonts.cn, maxFs: 340, align: "left", fill: L.ink || th.titleFill, ink: th.titleInk, hi: L.hi || env.acc, shadow: L.hi || env.acc, hiShadow: L.ink || th.titleFill,
       own: L.ink ? hexToRgb(L.ink) : undefined, ownHi: L.hi ? hexToRgb(L.hi) : undefined,   // for looks that paint the letters themselves
       stroke: clamp(L.stroke, 0, 2), shadowAmt: clamp(L.shadow, 0, 2), C: env.C, fx: L.fx, fxAmt: L.fxAmt,
+      warp: L.warp, onBlock: (m, block) => { env.blocks[L.id] = { m, box: block }; },
     }));
   },
   tag(ctx, L, tr, env) {
@@ -388,7 +399,36 @@ function drawSelection(ctx, hit, k, withHandles = true) {
 }
 
 let scratch = null;
-const SUBJECT = [];   // two work canvases for the subject layer
+const SUBJECT = { sheets: [], slide: null };   // the subject layer's work canvases, and its image while the photo is dragged
+/** Work canvas i of the subject layer, w × h, cleared, with the transform `m`. */
+function sheet(i, w, h, m) {
+  const c = SUBJECT.sheets[i] || (SUBJECT.sheets[i] = document.createElement("canvas"));
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  const x = c.getContext("2d");
+  x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = "source-over"; x.globalAlpha = 1; x.clearRect(0, 0, w, h);
+  x.setTransform(m);
+  return x;
+}
+/**
+ * The subject's silhouette, grown by `grow` photo pixels and filled with `colour`, at the photo's
+ * scale (at most 1024 px across): {c, p, k} — the canvas, its margin in photo pixels, and photo
+ * pixels per canvas pixel. Kept on the mask, one per size and colour, so a frame only lays it down.
+ */
+function silhouette(m, grow, colour) {
+  const key = `${grow.toFixed(1)}|${colour}`, cache = m.sil || (m.sil = new Map());
+  if (cache.has(key)) return cache.get(key);
+  const W = m.img.naturalWidth, H = m.img.naturalHeight, K = Math.min(1, 1024 / Math.max(W, H));
+  const g = grow * K, p = Math.ceil(g) + 2, c = document.createElement("canvas");
+  c.width = Math.ceil(W * K) + 2 * p; c.height = Math.ceil(H * K) + 2 * p;
+  const x = c.getContext("2d"), n = g > 0 ? Math.min(48, 16 + Math.round(g)) : 1;
+  for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; x.drawImage(m.img, p + Math.cos(a) * g, p + Math.sin(a) * g, W * K, H * K); }
+  if (g > 0) x.drawImage(m.img, p, p, W * K, H * K);
+  x.globalCompositeOperation = "source-in"; x.fillStyle = colour; x.fillRect(0, 0, c.width, c.height);
+  const sil = { c, p: p / K, k: 1 / K };
+  if (cache.size > 24) cache.clear();
+  cache.set(key, sil);
+  return sil;
+}
 /**
  * Paints a cover.
  *   cv         target canvas (resized here)
@@ -398,8 +438,8 @@ const SUBJECT = [];   // two work canvases for the subject layer
  *   o.cover    {title, tag, layers}
  *   o.photo    decoded background Image or null
  *   o.select   id of the layer to outline (editor only)
- *   o.live     {ids} while those layers are being dragged: the rest of the cover is cached in this
- *              object between frames (editor only; drop the object when the drag ends)
+ *   o.live     {ids} while those layers are being dragged: the layers that do not move are cached
+ *              in this object between frames (editor only; drop the object when the drag ends)
  *   o.picked   ids of the layers in a group selection, outlined without handles (editor only)
  *   o.mask     {img, of} the background photo's subject mask (alpha), for the subject layer; used
  *              only while `of` is the photo being drawn
@@ -423,6 +463,7 @@ function paintCover(cv, o) {
   const L0 = setLook(P.style.look, P.style.lookParams && P.style.lookParams[P.style.look], P.style.lookSeed, !!o.photo || P.style.theme !== "light");   // everything below is drawn under this look
   const base = o.photo ? THEMES.dark : THEMES[P.style.theme] || THEMES.dark;
   const env = {
+    blocks: {},   // id -> {m, box}: the transform and box of each lettered block painted (see cv._blocks)
     o, w, h, cover, cat, C, acc: rgb(C), style: P.style, photo: o.photo || null, hiRes: cv.width > w,
     G: adjustLayout(L0.layout ? L0.layout(P.style.template, w, h) : layout(P.style.template, w, h), w, h, (P.style.layoutAdjust || {})[P.style.template]),
     th: L0.theme ? L0.theme(base, C, lookValues()) : base,
@@ -458,33 +499,44 @@ function paintCover(cv, o) {
     return hits;
   };
   const n = cover.layers.length, moving = o.live ? (o.live.ids || [o.live.id]).map((id) => cover.layers.findIndex((l) => l.id === id)).filter((i) => i >= 0) : [];
-  const at = moving.length ? Math.min(...moving) : -1, top = moving.length ? Math.max(...moving) : -1;
-  setFast(at >= 0);
-  if (at < 0) cv._hits = paintRange(ctx, 0, n);
+  setFast(moving.length > 0);
+  if (!moving.length) cv._hits = paintRange(ctx, 0, n);
   else {
-    // Layers are being dragged: everything under the lowest of them and everything over the highest
-    // is painted once into two images kept in o.live, and each frame only blits those and repaints
-    // the layers from the lowest moving one to the highest.
-    const live = o.live, stamp = `${cv.width}x${cv.height}|${at}|${top}|${n}`;
+    // Layers are being dragged. The cover is cut into runs of layers that move and runs that do
+    // not; each still run is painted once into an image kept in o.live, and each frame only blits
+    // those and repaints the moving runs. (Dragging the photo moves the background and the subject
+    // above the title: the four layers between them stay one image.)
+    const live = o.live, still = new Set(moving), runs = [];
+    for (let i = 0; i < n; i++) {
+      const mv = still.has(i), last = runs[runs.length - 1];
+      if (last && last.moving === mv) last.to = i + 1; else runs.push({ from: i, to: i + 1, moving: mv });
+    }
+    const stamp = `${cv.width}x${cv.height}|${n}|${[...still].sort((a, b) => a - b).join(",")}`;
     if (live.stamp !== stamp) {
       live.stamp = stamp;
-      for (const [name, from, to] of [["under", 0, at], ["over", top + 1, n]]) {
-        const img = live[name] || (live[name] = document.createElement("canvas"));
+      live.runs = runs.map((r) => {
+        if (r.moving) return null;
+        const img = document.createElement("canvas");
         img.width = cv.width; img.height = cv.height;
         const c = img.getContext("2d");
         c.scale(kx, ky);
-        live[name + "Hits"] = paintRange(c, from, to);
-      }
+        return { img, hits: paintRange(c, r.from, r.to) };
+      });
     }
-    const blit = (img) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0); ctx.restore(); };
-    blit(live.under);
-    const mine = paintRange(ctx, at, top + 1);
-    blit(live.over);
-    cv._hits = [...live.underHits, ...mine, ...live.overHits];
+    const hits = [];
+    runs.forEach((r, i) => {
+      if (r.moving) { hits.push(...paintRange(ctx, r.from, r.to)); return; }
+      const kept = live.runs[i];
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(kept.img, 0, 0); ctx.restore();
+      hits.push(...kept.hits);
+    });
+    cv._hits = hits;
   }
   if (L0.post && cover.layers[0].visible) { ctx.save(); L0.post(ctx, w, h, C, lookValues(), kx, cv._hits); ctx.restore(); }   // not over a transparent background
   setFast(false);
   cv._titleBox = env.titleBox || null;
+  // where lettered blocks are, for the perspective's handles; a drag paints only some layers, so what is not repainted is kept
+  cv._blocks = { ...(o.live ? cv._blocks : null), ...env.blocks, k: kx };
   if (o.picked && o.picked.length > 1) {
     for (const hit of cv._hits) if (o.picked.includes(hit.id) && hit.type !== "bg") drawSelection(ctx, hit, kx, false);
   } else if (o.select) {
@@ -514,7 +566,24 @@ export function hitsIn(hits, m, accept = () => true) {
  * Positions are in virtual units. The block's handles are offered only while the block sits where
  * the template puts it — once moved or turned as a layer, its edge is no longer the template's.
  */
+/**
+ * The four corner handles of a lettered block in the perspective effect: [{id: "w0".."w3", x, y}]
+ * in virtual pixels, where the block's corners are now. Dragging one moves that corner (see app.js).
+ */
+export function warpHandles(cv, layer) {
+  const b = cv._blocks && cv._blocks[layer.id];
+  if (!b || !b.m) return [];
+  const { box } = b, k = cv._blocks.k || 1;
+  return warpCorners(layer.warp, layer.fxAmt ?? 1).map(([dx, dy], i) => {
+    const p = b.m.transformPoint({ x: box.x + ([0, 1, 1, 0][i] + dx) * box.w, y: box.y + ([0, 0, 1, 1][i] + dy) * box.h });
+    return { id: "w" + i, x: p.x / k, y: p.y / k };
+  });
+}
 export function layoutHandles(cv, layer) {
+  const warp = layer && (layer.type === "title" || layer.type === "text") && layer.fx === "taper" ? warpHandles(cv, layer) : [];
+  return [...warp, ...templateHandles(cv, layer)];
+}
+function templateHandles(cv, layer) {
   const G = cv._layout;
   if (!G || !layer) return [];
   if (layer.type === "accent") {

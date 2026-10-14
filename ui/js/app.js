@@ -15,7 +15,7 @@ import {
 } from "./store.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
-import { EFFECTS, effectUses } from "./textfx.js";
+import { EFFECTS, effectUses, warpCorners } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams } from "./style.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt } from "./repaint.js";
@@ -356,7 +356,22 @@ function layerAt(e) {
     if (S.mode !== "edit") return;
     const done = (moved) => () => { cv.onpointermove = null; endLive(); if (moved()) renderSide(); };
     // a handle of the layout itself (the diamonds): dragging it changes the template for every cover of this profile
-    const at0 = virtualPoint(e), lh = layoutHandles(cv, layer()).find((q) => Math.hypot(at0.x - q.x, at0.y - q.y) <= 13 * at0.k);
+    const at0 = virtualPoint(e), lh = !group().length && layoutHandles(cv, layer()).find((q) => Math.hypot(at0.x - q.x, at0.y - q.y) <= 13 * at0.k);
+    if (lh && lh.id[0] === "w") {   // a corner of the perspective: the lettering's block is reshaped
+      const L = layer(), b = cv._blocks[L.id], i = Number(lh.id.slice(1)), inv = b.m.inverse(), k = cv._blocks.k;
+      const corner = [[0, 0], [1, 0], [1, 1], [0, 1]][i], grab = inv.transformPoint({ x: at0.x * k, y: at0.y * k });
+      const start = warpCorners(L.warp, L.fxAmt ?? 1).map((p) => [...p]);
+      const off = [grab.x - (b.box.x + (corner[0] + start[i][0]) * b.box.w), grab.y - (b.box.y + (corner[1] + start[i][1]) * b.box.h)];   // keep where in the handle it was grabbed
+      cv.setPointerCapture(e.pointerId);
+      cv.onpointermove = (m) => {
+        const p = virtualPoint(m), q = inv.transformPoint({ x: p.x * k, y: p.y * k });
+        const w = start.map((c) => [...c]);
+        w[i] = [clamp((q.x - off[0] - b.box.x) / b.box.w - corner[0], -1.5, 1.5), clamp((q.y - off[1] - b.box.y) / b.box.h - corner[1], -1.5, 1.5)];
+        L.warp = w; touch({ cover: true });
+      };
+      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; renderSide(); };
+      return;
+    }
     if (lh) {
       const st = S.profile.style, tpl = st.template;
       let moved = false;
@@ -592,11 +607,21 @@ async function cutOut() {
   } finally { CUT.busy = false; if (onCoverTab()) renderPanel(); }
   return ok;
 }
+/** Takes the cut-out back: the subject layer goes, and the mask with it. */
+function uncut() {
+  const i = S.cover.layers.findIndex((l) => l.id === "subject");
+  if (i >= 0) S.cover.layers.splice(i, 1);
+  if (S.layerId === "subject") S.layerId = "bg";
+  setMask("");
+  touch({ cover: true, side: true, panel: true });
+  toast(t("cut.undone"));
+}
 function cutBox() {
   if (!canCut()) return el("div", { class: "hint" }, t("cut.onlyMac"));
   const has = !!(S.photoMask && layer("subject"));
   return el("div", { class: "cut" },
     el("button", { class: "btn wide", style: "margin-top:10px", disabled: CUT.busy, onclick: cutOut }, t(CUT.busy ? "cut.busy" : has ? "cut.again" : "cut.go")),
+    (has || S.photoMask) && el("button", { class: "btn wide", disabled: CUT.busy, onclick: uncut }, t("cut.undo")),
     CUT.error && el("div", { class: "hint err" }, CUT.error),
     el("div", { class: "hint" }, t(has ? "cut.done" : "cut.hint")));
 }
@@ -1222,7 +1247,9 @@ function fxControl(L, first = false) {
   const fx = L.fx || "auto", kind = EFFECTS[fx].kind;
   return [
     el("div", { style: first ? "" : "margin-top:10px" }, cap("props.fx"), select(groups, fx, (v) => set("fx", v === "auto" ? undefined : v, true))),
-    fx !== "auto" && kind !== "passes" && slider("props.fxAmt", 0, 2, 0.05, L.fxAmt ?? 1, times, (v) => set("fxAmt", v === 1 ? undefined : v, false)),
+    fx !== "auto" && kind !== "passes" && !(fx === "taper" && L.warp) && slider("props.fxAmt", 0, 2, 0.05, L.fxAmt ?? 1, times, (v) => set("fxAmt", v === 1 ? undefined : v, false)),
+    fx === "taper" && el("div", { class: "hint" }, t("fx.warpHint")),
+    fx === "taper" && L.warp && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("warp", undefined, true) }, t("fx.warpReset")),
     kind === "outline" && !native && el("div", { class: "hint" }, t("fx.needsApp")),
   ];
 }
@@ -1251,6 +1278,7 @@ function typeControls(L) {
       slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => set("shadow", v)),
       check("props.follow", L.follow, (v) => set("follow", v)),
       canCut() && el("button", { class: "btn wide", style: "margin-top:10px", disabled: CUT.busy, onclick: cutOut }, t(CUT.busy ? "cut.busy" : "cut.again")),
+      el("button", { class: "btn wide", style: "margin-top:8px", disabled: CUT.busy, onclick: uncut }, t("cut.undo")),
       el("div", { class: "hint" }, t("props.subjectHint")),
     ];
     case "accent": return el("div", { style: "margin-bottom:10px" }, select(ACCENT_SHAPES.map((k) => [k, `${t("props.shape")} · ${t("shape." + k)}`]), L.shape, (v) => set("shape", v, false)), null);
@@ -1782,6 +1810,10 @@ async function selfTest(dir) {
       const cv = await renderReady(S.profile.sizes[0], S.cover, catIndex());
       report.effects.push({ id, kind: EFFECTS[id].kind, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `fx-${id}.png` })) });
     }
+    // the perspective with corners of its own, dragged far: the lettering follows the quad
+    titleLayer.fx = "taper"; titleLayer.warp = [[0, 0], [-0.05, 0.35], [0.08, -0.1], [0.04, 0]];
+    report.effects.push({ id: "taper-own", path: await invoke("write_image", framed(await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex())), { dir, name: "fx-taper-own.png" })) });
+    delete titleLayer.warp;
     delete titleLayer.fx; S.cover.title = keep;
     report.outline = await invoke("text_outline", { text: "A夜", families: ["Bebas Neue", "Noto Sans SC"], weight: 900 }).then((o) => ({ missing: o.missing, glyphs: o.glyphs.length, contours: o.glyphs.map((g) => g.c.length) }), (e) => ({ error: String(e) }));
     if (!report.outline.glyphs || report.outline.missing) report.errors.push("outline: the native side could not trace bundled fonts");

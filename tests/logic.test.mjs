@@ -953,3 +953,19 @@ test("layers: the subject layer is optional, at most one, removable, and keeps i
   assert.ok(isRemovable("subject") && isRemovable("text") && !isRemovable("title") && !isRemovable("bg"));
   assert.deepEqual([newLayer("subject").outline, newLayer("subject").ink], [0, undefined]);
 });
+
+test("text effects: the perspective maps the block's corners where they were dragged", async () => {
+  const { squareToQuad, warpCorners } = await import("../ui/js/textfx.js");
+  const q = [[10, 20], [110, 0], [130, 90], [0, 70]], map = squareToQuad(q);
+  [[0, 0], [1, 0], [1, 1], [0, 1]].forEach(([u, v], i) => { const [x, y] = map(u, v); assert.ok(Math.abs(x - q[i][0]) < 1e-9 && Math.abs(y - q[i][1]) < 1e-9, `corner ${i}`); });
+  const flat = squareToQuad([[0, 0], [100, 0], [100, 50], [0, 50]]);
+  assert.deepEqual(flat(0.5, 0.5), [50, 25]);                                 // an unmoved block stays as it is
+  assert.deepEqual(warpCorners(null, 1)[0], [0, 0]);                          // without its own corners: the plain taper
+  assert.ok(warpCorners(null, 1)[1][1] > 0 && warpCorners(null, 1)[2][1] < 0);
+  const own = [[0, 0], [0.1, 0.2], [0, 0], [-0.1, 0]];
+  assert.equal(warpCorners(own), own);
+  const { normalizeLayers } = await import("../ui/js/layers.js");
+  const out = normalizeLayers([{ type: "title", fx: "taper", warp: [[0, 0], [9, -9], [0, "0.5"], [0, 0]] }, { type: "text", text: "x", warp: [[0, 0]] }]);
+  assert.deepEqual(out.find((l) => l.type === "title").warp, [[0, 0], [1.5, -1.5], [0, 0.5], [0, 0]]);   // held within reach
+  assert.equal(out.find((l) => l.type === "text").warp, undefined);                                     // not four corners: dropped
+});

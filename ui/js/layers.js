@@ -84,6 +84,9 @@ function normalizeLayer(raw, catIds) {
   if (raw.type === "title" || raw.type === "text") {
     if (TEXT_EFFECTS.includes(raw.fx) && raw.fx !== "auto") L.fx = raw.fx;
     if (raw.fxAmt !== undefined && num(raw.fxAmt, 1, 0, 2) !== 1) L.fxAmt = num(raw.fxAmt, 1, 0, 2);
+    // the perspective's own corners: four [dx, dy] in block widths and heights
+    if (Array.isArray(raw.warp) && raw.warp.length === 4 && raw.warp.every((p) => Array.isArray(p) && p.length === 2 && p.every((v) => Number.isFinite(Number(v)))))
+      L.warp = raw.warp.map((p) => p.map((v) => num(v, 0, -1.5, 1.5)));
   }
   // lettering may be set in a font of its own; without one it takes the look's
   if (LETTERED.includes(raw.type) && typeof raw.font === "string" && raw.font.trim()) L.font = raw.font.trim().replace(/["\\;{}<>]/g, "").slice(0, 80);

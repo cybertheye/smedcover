@@ -19,6 +19,11 @@
 //   C, fill, hi the channel colour and the layer's own colours as [r, g, b] (for the looks' letterings)
 //   lineW       width of the line                 unit       canvas pixels per unit
 //   seed        a number that differs from line to line, for effects that scatter things
+//   frame       where this line sits in its block, for effects that shape the whole block (the
+//               perspective): {ox, oy, c, box} — the line's origin and slant (x' = x + c·y) in the
+//               block's space, and the block {x, y, w, h} there
+//   warp        the layer's own perspective, if it has one: the block's four corners moved by
+//               [[dx, dy] × 4] (top left, top right, bottom right, bottom left), in block widths and heights
 import { LOOKS, look, lookValues, lookParams } from "./style.js";
 import { outline } from "./outlines.js";
 
@@ -159,6 +164,33 @@ const WARP = {
   taper: (o) => { const k = Math.min(0.75, 0.42 * o.amt), mid = -o.fs * 0.36; return ([x, y]) => { const s = 1 - (k * x) / Math.max(1, o.lineW); return [x, mid + (y - mid) * s]; }; },
   wave: (o) => { const lift = o.fs * 0.11 * o.amt, len = o.fs * 2.4; return ([x, y]) => [x, y + lift * Math.sin((x / len) * Math.PI * 2)]; },
 };
+/** The corners a block's perspective moves to, as fractions of its size: the layer's own, or the plain taper's. */
+export function warpCorners(warp, amt = 1) {
+  if (Array.isArray(warp) && warp.length === 4) return warp;
+  const k = Math.min(0.75, 0.42 * amt) * 0.4;   // about what the plain taper does to a single line
+  return [[0, 0], [0, k], [0, -k], [0, 0]];
+}
+/** The projective map of the unit square onto quad q (corners in the order top left, top right, bottom right, bottom left). */
+export function squareToQuad(q) {
+  const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = q;
+  const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3, dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+  let g = 0, h = 0;
+  const den = dx1 * dy2 - dx2 * dy1;
+  if ((dx3 || dy3) && Math.abs(den) > 1e-9) { g = (dx3 * dy2 - dx2 * dy3) / den; h = (dx1 * dy3 - dx3 * dy1) / den; }
+  const a = x1 - x0 + g * x1, b = x3 - x0 + h * x3, d = y1 - y0 + g * y1, e = y3 - y0 + h * y3;
+  return (u, v) => { const w = Math.max(0.05, g * u + h * v + 1); return [(a * u + b * v + x0) / w, (d * u + e * v + y0) / w]; };
+}
+/** The layer's own perspective as a point map in the line's space (see `frame` and `warp` above). */
+function perspective(o) {
+  const { ox, oy, c, box } = o.frame, W = Math.max(1, box.w), H = Math.max(1, box.h);
+  const map = squareToQuad(o.warp.map(([dx, dy], i) => [box.x + ([0, 1, 1, 0][i] + dx) * W, box.y + ([0, 0, 1, 1][i] + dy) * H]));
+  return ([x, y]) => {
+    const X = ox + x + c * y, Y = oy + y;                          // into the block's space
+    const [X2, Y2] = map((X - box.x) / W, (Y - box.y) / H);
+    const y2 = Y2 - oy;
+    return [X2 - ox - c * y2, y2];                                 // and back
+  };
+}
 function outlined(ctx, pass, o, id) {
   const runs = [];
   let ready = true;
@@ -182,7 +214,7 @@ function outlined(ctx, pass, o, id) {
       ctx.save(); ctx.translate(dx, dy); ctx.fillStyle = ctx.strokeStyle = base; ctx.lineWidth = 1; trace(ctx, shapes); ctx.fill(); ctx.stroke(); ctx.restore();   // the back face
     }
   }
-  const warp = WARP[id] ? WARP[id](o) : null;
+  const warp = id === "taper" && o.warp && o.frame ? perspective(o) : WARP[id] ? WARP[id](o) : null;
   for (const [a, shapes] of runs) {
     const bent = warp ? shapes.map((pts) => pts.map(warp)) : shapes;
     if (id !== "extrude" && o.d > 0) { ctx.save(); ctx.translate(o.d, o.d); ctx.fillStyle = a.hi ? o.hiShadowCss : o.shadowCss; trace(ctx, bent); ctx.fill(); ctx.restore(); }

@@ -35,11 +35,13 @@ export function drawTitle(ctx, title, box, adj, st) {
   const blockW = (widest * fs) / 100;
   const x0 = box.x + adj.dx + (st.align === "center" ? (box.w - blockW) / 2 : 0);
   const y0 = box.y + (box.h - lines.length * fs * LH) / 2 + adj.dy;
-  const d = fs * 0.062 * st.shadowAmt;
+  const d = fs * 0.062 * st.shadowAmt, block = { x: x0, y: y0, w: blockW, h: lines.length * fs * LH };
+  if (st.onBlock) st.onBlock(ctx.getTransform ? ctx.getTransform() : null, block);   // where the block is, for the perspective's handles
   lines.forEach((line, li) => {
     const lw = (widths[li] * fs) / 100;
     ctx.save();
-    ctx.translate(x0 + fs * 0.04 + (st.align === "center" ? (blockW - lw) / 2 : 0), y0 + li * fs * LH + fs * 0.92);
+    const ox = x0 + fs * 0.04 + (st.align === "center" ? (blockW - lw) / 2 : 0), oy = y0 + li * fs * LH + fs * 0.92;
+    ctx.translate(ox, oy);
     ctx.transform(1, 0, -0.08, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
     const m = ctx.getTransform ? ctx.getTransform() : null;
@@ -47,11 +49,12 @@ export function drawTitle(ctx, title, box, adj, st) {
       fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: st.fxAmt ?? 1, lineW: lw, seed: li * 17.3 + 1,
       fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow,
       C: st.C, fill: st.own, hi: st.ownHi, unit: m ? Math.hypot(m.a, m.b) : 1,
+      frame: { ox, oy, c: -0.08, box: block }, warp: st.warp,
     }, st.fx);
     ctx.restore();
   });
   ctx.restore();
-  return { x: x0, y: y0, w: blockW, h: lines.length * fs * LH };
+  return block;
 }
 export { INK };
 
