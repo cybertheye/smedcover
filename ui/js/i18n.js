@@ -287,6 +287,8 @@ const STR = {
   "gen.keep": ["添加到封面", "Add to the cover"],
   "gen.hint": ["使用 {0} · {1}，按当前尺寸（{2}）的比例生成。描述和参考图会发送给该服务，按它的价格计费，通常要等几十秒。", "Using {0} · {1}, in the shape of the current size ({2}). The description and any reference go to that service and are charged at its prices; it usually takes tens of seconds."],
   "cut.made": ["已抠出主体：新的照片图层「抠出的主体」在标题上面，原照片保留", "Cut out: a new photo layer, Cut-out subject, is above the title; the photo is kept"],
+  "props.linesNoPlate": ["描边：深色底时是墨黑，浅色底时是白色。投影：普通字用「强调词颜色」，强调词用「文字颜色」，所以改这两个颜色就能改投影。部分风格和文字效果有自己的配色。", "Outline: ink on a dark ground, white on a light one. Shadow: ordinary words take the highlight colour, highlighted words the lettering colour — change those two to change the shadow. Some looks and text effects use colours of their own."],
+  "props.linesOnPlate": ["有底牌时：描边用与文字颜色反差的颜色，浅色字配墨黑，深色字配白色。投影和没有底牌时一样：普通字用「强调词颜色」，强调词用「文字颜色」。部分风格和文字效果有自己的配色。", "On a plate the outline takes the colour that stands against the lettering: ink under light letters, white under dark ones. The shadow is as without a plate: ordinary words take the highlight colour, highlighted words the lettering colour. Some looks and text effects use colours of their own."],
   "props.textHint": ["一行就是一行；用 *星号* 包住的词显示为强调词颜色。", "One line here is one line on the cover; wrap words in *asterisks* for the highlight colour."],
   "props.lightUnderPhoto": ["画面上有铺满画布的照片：底色被盖住，文字按深色底排版。", "A photo fills the canvas: it covers the ground, and the lettering is set as on a dark one."],
   "cover.photoAdded": ["已添加照片图层", "Photo layer added"],

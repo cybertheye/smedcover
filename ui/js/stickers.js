@@ -1,6 +1,6 @@
 // The free sticker pack: 72 cel-style stickers drawn in code (no image files), so they stay sharp
-// at any size and can follow the category colour. Twelve of them are frames: empty outlines to put
-// round a photo, a word or a face.
+// at any size and can follow the category colour. Twelve of them are frames: thin geometric outlines
+// to put round a photo, a word or a face.
 //
 // Every sticker draws inside a 200 x 200 box centred on the origin. `A` is its main colour
 // (the category colour when the layer is tinted, otherwise the sticker's own default).
@@ -93,35 +93,28 @@ export const STICKER_GROUPS = [
   { id: "object", name: { zh: "日常物件", en: "Everyday objects" } },
 ];
 
-/** A frame: the outline `path` drawn as a thick inked line in colour A (the looks redraw it their way). */
-const frame = (path, lw = 14) => (c, A) => stroke(c, path, A, lw);
+/** A frame: the outline `path` as one thin line in colour A (the looks draw thin lines their way). */
+const frame = (path, lw = 4) => (c, A) => {
+  if (look().sticker) return look().sticker.thin(c, path, lw, A);
+  c.beginPath(); path(c); c.lineWidth = lw; c.strokeStyle = A; c.lineJoin = "miter"; c.lineCap = "butt"; c.stroke();
+};
+/** A regular polygon of n sides, radius R, its first corner at angle `rot`. */
+const ngon = (n, R, rot = -Math.PI / 2) => poly(Array.from({ length: n }, (_, i) => [Math.cos(rot + (i * TAU) / n) * R, Math.sin(rot + (i * TAU) / n) * R]));
 
 export const STICKERS = [
-  // ---- frames: empty outlines, to sit round something
-  S("f-double", "双线方框", "Double box", "frame", WHITE, (c, A) => { frame(poly([[-96, -70], [96, -70], [96, 70], [-96, 70]]))(c, A); thin(c, [[-78, -52], [78, -52], [78, 52], [-78, 52], [-78, -52]], 5, A); }),
-  S("f-circle", "圆环", "Ring", "frame", YELLOW, frame(circle(0, 0, 88), 16)),
-  S("f-diamond", "菱形框", "Diamond", "frame", RED, frame(poly([[0, -96], [96, 0], [0, 96], [-96, 0]]))),
-  S("f-hex", "六边形框", "Hexagon", "frame", BLUE, frame(poly([[-48, -84], [48, -84], [96, 0], [48, 84], [-48, 84], [-96, 0]]))),
-  S("f-bubble", "气泡框", "Bubble outline", "frame", WHITE, frame(BUBBLE, 12)),
-  S("f-burst", "爆炸框", "Burst outline", "frame", YELLOW, frame(star(16, 96, 78), 10)),
-  S("f-ticket", "票根框", "Ticket", "frame", GREEN, frame(curve((x) => {   // a ticket: the corners bitten out, a notch in each side
-    const w = 96, h = 62, r = 16, n = 14;
-    x.moveTo(-w + r, -h); x.lineTo(w - r, -h); x.arc(w, -h, r, Math.PI, Math.PI / 2, true); x.lineTo(w, -n); x.arc(w, 0, n, -Math.PI / 2, Math.PI / 2, true);
-    x.lineTo(w, h - r); x.arc(w, h, r, -Math.PI / 2, Math.PI, true); x.lineTo(-w + r, h); x.arc(-w, h, r, 0, -Math.PI / 2, true); x.lineTo(-w, n);
-    x.arc(-w, 0, n, Math.PI / 2, -Math.PI / 2, true); x.lineTo(-w, -h + r); x.arc(-w, -h, r, Math.PI / 2, 0, true);
-  }), 10)),
-  S("f-film", "胶片框", "Film frame", "frame", WHITE, (c, A) => {
-    frame(rrect(-98, -74, 196, 148, 6), 10)(c, A);
-    for (const y of [-60, 60]) for (let k = 0; k < 7; k++) { c.save(); c.translate(-78 + k * 26, y); shape(c, rrect(-6, -6, 12, 12, 2), A, { shadow: false, lw: 3 }); c.restore(); }
-    thin(c, [[-86, -46], [86, -46], [86, 46], [-86, 46], [-86, -46]], 5, A);
-  }),
-  S("f-polaroid", "拍立得框", "Instant photo", "frame", WHITE, (c, A) => { frame(poly([[-78, -96], [78, -96], [78, 96], [-78, 96]]), 10)(c, A); thin(c, [[-62, -80], [62, -80], [62, 44], [-62, 44], [-62, -80]], 5, A); }),
-  S("f-brackets", "方括号", "Brackets", "frame", YELLOW, (c, A) => stroke(c, (x) => { for (const s of [-1, 1]) { x.moveTo(s * 60, -86); x.lineTo(s * 92, -86); x.lineTo(s * 92, 86); x.lineTo(s * 60, 86); } }, A, 16)),
-  S("f-scribble", "手绘圈", "Scribble loop", "frame", RED, (c, A) => stroke(c, (x) => {   // drawn twice round, a little off, as by hand
-    x.moveTo(78, -30); x.bezierCurveTo(70, -86, -60, -92, -88, -24); x.bezierCurveTo(-110, 38, -20, 84, 50, 66); x.bezierCurveTo(104, 52, 106, -26, 40, -58);
-    x.bezierCurveTo(-10, -80, -84, -54, -82, 4);
-  }, A, 9)),
-  S("f-arch", "拱门框", "Arch", "frame", BLUE, frame(curve((x) => { x.moveTo(-70, 96); x.lineTo(-70, -26); x.arc(0, -26, 70, Math.PI, 0); x.lineTo(70, 96); }), 14)),
+  // ---- frames: thin geometric outlines, to sit round something
+  S("f-square", "正方形", "Square", "frame", ORANGE, frame(poly([[-84, -84], [84, -84], [84, 84], [-84, 84]]))),
+  S("f-rect", "长方形", "Rectangle", "frame", GREEN, frame(poly([[-96, -56], [96, -56], [96, 56], [-96, 56]]))),
+  S("f-circle", "圆形", "Circle", "frame", YELLOW, frame(circle(0, 0, 90))),
+  S("f-triangle", "三角形", "Triangle", "frame", RED, frame(ngon(3, 98, -Math.PI / 2), 4)),
+  S("f-diamond", "菱形", "Diamond", "frame", RED, frame(poly([[0, -96], [96, 0], [0, 96], [-96, 0]]))),
+  S("f-pentagon", "五边形", "Pentagon", "frame", BLUE, frame(ngon(5, 94))),
+  S("f-hex", "六边形", "Hexagon", "frame", BLUE, frame(ngon(6, 94, 0))),
+  S("f-octagon", "八边形", "Octagon", "frame", GREEN, frame(ngon(8, 92, Math.PI / 8))),
+  S("f-star", "五角星", "Star", "frame", YELLOW, frame(star(5, 96, 40))),
+  S("f-parallelogram", "平行四边形", "Parallelogram", "frame", PINK, frame(poly([[-62, -56], [96, -56], [62, 56], [-96, 56]]))),
+  S("f-trapezoid", "梯形", "Trapezoid", "frame", GREEN, frame(poly([[-54, -60], [54, -60], [96, 60], [-96, 60]]))),
+  S("f-semicircle", "半圆", "Semicircle", "frame", PINK, frame(curve((x) => { x.moveTo(-94, 44); x.arc(0, 44, 94, Math.PI, 0); }))),
 
   // ---- badges & bubbles: put a text layer on top
   S("burst", "爆炸星", "Starburst", "badge", YELLOW, (c, A) => shape(c, BURST, A)),
@@ -242,10 +235,12 @@ export const KIT = { shape, blob, stroke, thin, word, poly, star, circle, rrect,
 export const PALETTE = { white: WHITE, ink: INK, red: RED, yellow: YELLOW, orange: ORANGE, blue: BLUE, green: GREEN, pink: PINK };
 
 const BY_ID = new Map(STICKERS.map((s) => [s.id, s]));
-export const stickerById = (id) => BY_ID.get(id);
+/** Frames of the first set, which were heavy and not all geometric: a layer using one shows the nearest of these. */
+const RENAMED = { "f-double": "f-rect", "f-bubble": "f-rect", "f-ticket": "f-rect", "f-film": "f-rect", "f-polaroid": "f-square", "f-brackets": "f-square", "f-burst": "f-star", "f-scribble": "f-circle", "f-arch": "f-semicircle" };
+export const stickerById = (id) => BY_ID.get(id) || BY_ID.get(RENAMED[id]);
 /** Draws a sticker centred on the origin in its 200-unit box. `tint` overrides the default colour. */
 export function drawSticker(ctx, id, tint) {
-  const s = BY_ID.get(id);
+  const s = stickerById(id);
   if (!s) return;
   ctx.save();
   s.draw(ctx, tint || s.color);

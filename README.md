@@ -207,7 +207,7 @@ Add a text layer with **＋ Text** on the right. The title and text layers are t
 | Font | see the next section |
 | Text effect | how the letters are drawn; see [Text effects](#text-effects) |
 | Lettering colour, highlight colour | see [Lettering colours](#lettering-colours) |
-| Outline, Shadow | how thick and how far; the one the current text effect does not draw is greyed out |
+| Outline, Shadow | how thick and how far; the one the current text effect does not draw is greyed out. Their colours are automatic: the outline is ink on a dark ground and white on a light one, on a plate the colour that stands against the lettering; in the shadow ordinary words take the highlight colour and highlighted words the lettering colour. A note under the sliders says so |
 | Plate | sets the words on a block of colour; then *Plate colour*, the channel colour by default. On a plate, lettering colours left automatic take whichever reads against it |
 
 Text layers of earlier versions are carried over: white becomes automatic, ink and custom colours become the lettering colour, the channel colour still follows the channel; on a plate, the old colour becomes the plate's colour, without an outline or a shadow, as before.
@@ -271,7 +271,7 @@ Deleting a channel also deletes the layers that belonged only to it.
   - *＋ New folder* makes a folder and lets you name it; double-click a folder's name to rename it later. Drag an asset onto a folder to file it, onto *Unfiled* to take it out. ▾ / ▸ closes or opens a folder.
   - Deleting a folder takes two clicks on its ×; its assets are not deleted but go back to Unfiled. Folders are kept on this computer and do not travel with profile exports.
 - **Channel graphics** — twenty cel-shaded graphics that follow the channel colour.
-- **Stickers** — a free pack of 72; each can optionally follow the channel colour. The first group is twelve *Frames*: double box, ring, diamond, hexagon, bubble, burst, ticket, film, instant photo, brackets, scribble loop and arch — empty in the middle, to go round a photo, a word or a face, drawn the current look's way.
+- **Stickers** — a free pack of 72; each can optionally follow the channel colour. The first group is twelve *Frames*: square, rectangle, circle, triangle, diamond, pentagon, hexagon, octagon, star, parallelogram, trapezoid and semicircle — thin geometric outlines, empty in the middle, to go round a photo, a word or a face, their line drawn the current look's way.
 - **Colour block & edge** — twelve shapes; click one to reshape the colour block layer.
 
 ### Generating assets with AI

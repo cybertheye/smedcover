@@ -722,7 +722,7 @@ function addFolder() {
 function renameFolder(id) {
   const f = S.assetFolders.find((x) => x.id === id), name = $("panel").querySelector(`.folder[data-id="${CSS.escape(id)}"] .fname`);
   if (!f || !name) return;
-  const input = el("input", { class: "rename", value: f.name, maxLength: 40, spellcheck: false,
+  const input = el("input", { type: "text", class: "rename", value: f.name, maxLength: 40, spellcheck: false,
     onkeydown: (e) => { e.stopPropagation(); if (e.key === "Enter") input.blur(); if (e.key === "Escape") { input.value = f.name; input.blur(); } },
     onblur: () => { const v = input.value.trim(); if (v && v !== f.name) { f.name = v; persistFolders(); } renderPanel(); } });
   name.replaceWith(input); input.focus(); input.select();
@@ -1479,7 +1479,7 @@ function renameLayer(id) {
   const L = layer(id), row = $("side").querySelector(`.layer[data-id="${CSS.escape(id)}"]`);
   if (!L || !row) return;
   const auto = layerName({ ...L, name: "" }), was = layerName(L);
-  const input = el("input", { class: "rename", value: was, maxLength: 60, spellcheck: false,
+  const input = el("input", { type: "text", class: "rename", value: was, maxLength: 60, spellcheck: false,
     onclick: (e) => e.stopPropagation(), onpointerdown: (e) => e.stopPropagation(),
     onkeydown: (e) => { e.stopPropagation(); if (e.key === "Enter") input.blur(); if (e.key === "Escape") { input.value = was; input.blur(); } },
     onblur: () => {
@@ -1552,6 +1552,7 @@ function headlineControls(L, set) {
     inkControl(L, "ink", "props.ink", L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff"),
     inkControl(L, "hi", "props.inkHi", cat().color),
     ...titleLines(L, set),
+    el("div", { class: "hint", style: "margin-top:4px" }, t(L.plate ? "props.linesOnPlate" : "props.linesNoPlate")),
     check("props.plateOn", L.plate, (v) => set("plate", v, true)),
     L.plate && inkControl(L, "plateInk", "props.plateColor", cat().color),
     L.type === "title" && el("div", { class: "hint" }, t("props.boundHint")),
