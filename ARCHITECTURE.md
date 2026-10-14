@@ -58,6 +58,7 @@ ui/
   js/stickers.js     the sixty stickers, and the shared painters
   js/style.js        looks: a set of hooks per look, and the current look
   js/spec.js         stickers described as data: validation and interpreter (AI-generated assets)
+  js/repaint.js      photo repaint: the three image services' requests and replies, repaint prompts
   js/solid.js        3D objects described as data: validation, drawn with the channel graphics' renderer
   js/ai.js           AI generation: settings, requests for both API styles, the preset prompt (pure)
   js/store.js        data model, validation, persistence
@@ -448,6 +449,18 @@ the *Style* section is taken from `STYLE_NOTES[style]`; the rest is style-neutra
 only adds one entry. The examples are themselves valid specs and the unit tests
 validate each one, so the prompt and the interpreter cannot drift apart.
 
+### 8.5 Photo repaint (`repaint.js`)
+
+A repaint is one fixed step, not an agent: the photo and a style description go to an image model, a picture comes back. The three services each have their own interface; `buildImageRequest` builds each one's request and `readImageReply` finds the picture in each one's reply:
+
+| Service | Request | The photo goes in | The result is in |
+|---|---|---|---|
+| OpenAI | `POST {base}/images/edits`, Bearer | `images: [{image_url: data URL}]`, `size` in the photo's shape | `data[0].b64_json` |
+| Gemini | `POST {base}/models/{model}:generateContent`, `x-goog-api-key` | `inlineData` in `contents[0].parts` | `inlineData` in `candidates[0].content.parts` |
+| Seedream | `POST {base}/images/generations`, Bearer | `image: data URL`, `size: "WxH"`, `response_format: "b64_json"` | `data[0].b64_json`, or `url` (fetched by `fetch_image`) |
+
+`repaintPrompt` puts the prompt together: the style source (the current look's `repaint(colour)`, a bundled preset, or the user's words), then "this is a cover background: no text or border, keep the shape", then any extra words. Following a look also asks to keep the composition, so the background layer's placement still fits; presets and custom text decide composition themselves. A repaint always starts from the original, kept in `S.photoOriginal` (`session-photo-original` in the session, `photoOriginal` in project files).
+
 ## 9. Interaction (`app.js`)
 
 ### 9.1 State and refresh
@@ -529,8 +542,10 @@ status and body as they are — error replies included, so the interface can sho
 message. It is sent from Rust to get around the cross-origin limits of a web view.
 
 - The request waits for its reply on the blocking thread pool, off the interface thread and off the async runtime's workers.
-- Only `http://` and `https://` are accepted and at most 4 MB of a reply is read. The timeout comes from the settings, 300 seconds by default.
+- Only `http://` and `https://` are accepted and at most 4 MB of a reply is read; 64 MB of one carrying a picture (a photo repaint, `image: true`). The timeout comes from the settings, 300 seconds by default.
 - Proxy: the one given in the settings wins; otherwise `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` from the environment. **Addresses on this machine never go through the environment's proxy**, or a local model would be cut off by it.
+
+`fetch_image` covers a repaint whose service answers with a link instead of the picture: it downloads it, checks that it is a picture (by `content-type`, else by its first bytes) and hands it over in base64.
 
 ### 10.5 Other commands
 

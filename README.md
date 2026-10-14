@@ -51,6 +51,24 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
 - Choose a photo in the Cover tab, or drop one onto the window.
 - Click the background once to select it, then drag the photo to move it; scroll to resize it.
 - Select the Background layer on the right to set blur and dim.
+- Once a photo is chosen, a thumbnail and its size appear below.
+
+### Repainting the background photo with AI
+
+With a photo chosen, *AI repaint* below it has an image model paint the photo again in another style. Set up an image model first under *Setup → AI* (see [Setting up AI](#setting-up-ai)).
+
+The style comes from one of three places:
+
+| Source | What it does |
+|---|---|
+| Follow the current look | Repaints in the cover's look (each look has its own repaint description), with the channel colour as accent; keeps the photo's composition, so the subject stays where and as big as it was and its placement on the cover still fits |
+| Built-in · 8-bit pixel editorial | Distils the photo into a sparse, abstract 8-bit pixel piece: a small cluster of coarse pixel blocks on a wide paper field, or a few broad pixel planes edge to edge. Adapted from [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art) |
+| Custom | Describe the style yourself, or paste a whole style guide (such as a skill's `SKILL.md`) |
+
+- *Anything to add* is optional and goes after any source. Every source is followed by: no text or watermarks, no border, keep the photo's shape.
+- The result is shown beside the original first; *Use this* replaces the background photo, and *Back to the original* is there afterwards. A new repaint always starts from the original, so repaints do not pile up.
+- Both the repainted photo and the original are saved in project files.
+- Each repaint is charged at the service's prices and usually takes tens of seconds.
 
 ### Collage: work directly on the canvas
 
@@ -308,6 +326,20 @@ Privacy and cost:
 - When generating, your description, the preset prompt and any reference picture you attached are sent to the address you entered; the app makes no other network requests.
 - Usage is billed by your provider.
 
+#### Image model (photo repaint)
+
+The chat model above only writes text; repainting a photo needs an image model that takes a picture and returns one, set up separately further down the same page. The three services each have their own interface, and the app speaks each one's:
+
+| Service | Default address (used when BASE_URL is empty) | Model name |
+|---|---|---|
+| OpenAI (gpt-image) | `https://api.openai.com/v1`, request to `/images/edits` | e.g. `gpt-image-2` |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta`, request to `models/{model}:generateContent` | usually has `image` in its name; see Google AI Studio |
+| Volcengine Ark Seedream | `https://ark.cn-beijing.volces.com/api/v3`, request to `/images/generations`; BytePlus ModelArk: `https://ark.ap-southeast.bytepluses.com/api/v3` | the model ID or endpoint ID from the Ark console |
+
+- Token, model, timeout and proxy mean the same as above; the token is kept in `image-ai.json`.
+- The output size follows the photo's shape: about 2.5 megapixels on OpenAI's newer models (the older gpt-image-1 has three fixed sizes), about 4 megapixels on Seedream, and Gemini follows the photo sent.
+- When repainting, the photo (scaled to 1536 px on its longer side) and the style description are sent to the address you entered.
+
 ## Export
 
 - **Format** — PNG, JPEG (with quality) or WebP (lossless).
@@ -404,6 +436,7 @@ are not public, so the plan is to export open formats that both can read.
 | The program (all source code) | [GNU AGPL v3 or later](LICENSE) |
 | Built-in artwork: channel graphics, stickers, colour block shapes | [CC BY 4.0](LICENSE-ASSETS.md) |
 | Bundled fonts: Noto Sans SC, Bebas Neue, JetBrains Mono | SIL Open Font License, texts in `ui/fonts/` |
+| Built-in repaint style "8-bit pixel editorial" | adapted from [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art), AGPL v3 |
 
 In short: you may use, change and redistribute SmedCover, but if you distribute a modified version —
 or let people use one over a network — you must make its source available under the same licence.

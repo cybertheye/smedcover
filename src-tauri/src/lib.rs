@@ -519,6 +519,8 @@ async fn text_outline(
 /// that is read. Models that reason before answering can need several minutes.
 const AI_TIMEOUT_SECS: u64 = 300;
 const AI_MAX_REPLY: u64 = 4 * 1024 * 1024;
+/// A reply carrying a picture (a repainted photo, as base64) is allowed to be this big.
+const AI_MAX_IMAGE_REPLY: u64 = 64 * 1024 * 1024;
 
 /// What came back from an AI endpoint: the status and body are handed to the web view as they
 /// are, error replies included, so it can show the provider's own message.
@@ -528,14 +530,27 @@ struct AiReply {
     text: String,
 }
 
-fn read_capped(response: ureq::Response) -> Res<String> {
+fn read_capped(response: ureq::Response, cap: u64) -> Res<String> {
     let mut text = String::new();
     response
         .into_reader()
-        .take(AI_MAX_REPLY)
+        .take(cap)
         .read_to_string(&mut text)
         .map_err(err)?;
     Ok(text)
+}
+
+/// An agent for `url`: the timeout, and the proxy if one applies.
+fn agent_for(url: &str, proxy: &str, timeout_secs: u64) -> Res<ureq::Agent> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(format!("invalid URL: {url}"));
+    }
+    let timeout = std::time::Duration::from_secs(timeout_secs.clamp(5, 1800));
+    let mut builder = ureq::AgentBuilder::new().timeout(timeout);
+    if let Some(p) = proxy_for(url, proxy) {
+        builder = builder.proxy(ureq::Proxy::new(&p).map_err(|e| format!("proxy {p}: {e}"))?);
+    }
+    Ok(builder.build())
 }
 
 /// Whether a URL points at this machine (a local model server), which no proxy should sit in front of.
@@ -576,16 +591,9 @@ fn post_json(
     body: &str,
     proxy: &str,
     timeout_secs: u64,
+    cap: u64,
 ) -> Res<AiReply> {
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
-        return Err(format!("invalid URL: {url}"));
-    }
-    let timeout = std::time::Duration::from_secs(timeout_secs.clamp(5, 1800));
-    let mut builder = ureq::AgentBuilder::new().timeout(timeout);
-    if let Some(p) = proxy_for(url, proxy) {
-        builder = builder.proxy(ureq::Proxy::new(&p).map_err(|e| format!("proxy {p}: {e}"))?);
-    }
-    let agent = builder.build();
+    let agent = agent_for(url, proxy, timeout_secs)?;
     let mut request = agent.post(url);
     for (name, value) in headers {
         request = request.set(name, value);
@@ -593,18 +601,64 @@ fn post_json(
     match request.send_string(body) {
         Ok(response) => Ok(AiReply {
             status: response.status(),
-            text: read_capped(response)?,
+            text: read_capped(response, cap)?,
         }),
         Err(ureq::Error::Status(status, response)) => Ok(AiReply {
             status,
-            text: read_capped(response).unwrap_or_default(),
+            text: read_capped(response, AI_MAX_REPLY).unwrap_or_default(),
         }),
         Err(e) => Err(err(e)),
     }
 }
 
-/// Sends one request for an AI-generated asset. The web view builds the request (see `ui/js/ai.js`);
-/// sending it from here avoids the cross-origin limits a web view has.
+/// Downloads a picture an image model left at a link instead of sending it: `{mime, data}` with the
+/// bytes in base64. Only pictures are accepted, and no bigger than a reply with one inside may be.
+fn get_image(url: &str, proxy: &str, timeout_secs: u64) -> Res<FetchedImage> {
+    use base64::Engine;
+    let agent = agent_for(url, proxy, timeout_secs)?;
+    let response = agent.get(url).call().map_err(err)?;
+    let mime = response.content_type().to_ascii_lowercase();
+    let mut bytes = Vec::new();
+    response
+        .into_reader()
+        .take(AI_MAX_IMAGE_REPLY)
+        .read_to_end(&mut bytes)
+        .map_err(err)?;
+    let mime = if mime.starts_with("image/") {
+        mime
+    } else {
+        match image::guess_format(&bytes) {
+            Ok(ImageFormat::Png) => "image/png".into(),
+            Ok(ImageFormat::Jpeg) => "image/jpeg".into(),
+            Ok(ImageFormat::WebP) => "image/webp".into(),
+            _ => return Err("the link did not lead to a picture".into()),
+        }
+    };
+    Ok(FetchedImage {
+        mime,
+        data: base64::engine::general_purpose::STANDARD.encode(bytes),
+    })
+}
+
+#[derive(Serialize)]
+struct FetchedImage {
+    mime: String,
+    data: String,
+}
+
+/// See `get_image`.
+#[tauri::command]
+async fn fetch_image(url: String, proxy: Option<String>, timeout: Option<u64>) -> Res<FetchedImage> {
+    tauri::async_runtime::spawn_blocking(move || {
+        get_image(&url, proxy.as_deref().unwrap_or(""), timeout.unwrap_or(AI_TIMEOUT_SECS))
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Sends one request to an AI model: an asset to generate, or a photo to repaint. The web view builds
+/// the request (see `ui/js/ai.js` and `ui/js/repaint.js`); sending it from here avoids the
+/// cross-origin limits a web view has. `image` allows the much bigger reply a picture makes.
 #[tauri::command]
 async fn ai_request(
     url: String,
@@ -612,7 +666,9 @@ async fn ai_request(
     body: String,
     proxy: Option<String>,
     timeout: Option<u64>,
+    image: Option<bool>,
 ) -> Res<AiReply> {
+    let cap = if image.unwrap_or(false) { AI_MAX_IMAGE_REPLY } else { AI_MAX_REPLY };
     // a reply can take minutes: wait for it on the blocking pool, not on a runtime worker
     tauri::async_runtime::spawn_blocking(move || {
         post_json(
@@ -621,6 +677,7 @@ async fn ai_request(
             &body,
             proxy.as_deref().unwrap_or(""),
             timeout.unwrap_or(AI_TIMEOUT_SECS),
+            cap,
         )
     })
     .await
@@ -649,6 +706,7 @@ pub fn run() {
             save_text,
             list_system_fonts,
             ai_request,
+            fetch_image,
             text_outline,
             selftest_dir,
             selftest_ai,
@@ -825,7 +883,7 @@ mod tests {
             ("content-type".to_string(), "application/json".to_string()),
             ("authorization".to_string(), "Bearer sk-test".to_string()),
         ];
-        let reply = post_json(&url, &headers, r#"{"model":"m"}"#, "", 20).unwrap();
+        let reply = post_json(&url, &headers, r#"{"model":"m"}"#, "", 20, AI_MAX_REPLY).unwrap();
         assert_eq!(reply.status, 200);
         assert_eq!(reply.text, r#"{"choices":[{"message":{"content":"hi"}}]}"#);
         let seen = server.join().unwrap().to_ascii_lowercase();
@@ -835,9 +893,39 @@ mod tests {
     }
 
     #[test]
+    fn get_image_fetches_a_picture_and_refuses_anything_else() {
+        use std::io::{BufRead, BufReader, Write};
+        let pic = png(&RgbaImage::from_pixel(2, 2, Rgba([255, 0, 0, 255])));
+        for (kind, body, ok) in [("application/octet-stream", pic.clone(), true), ("text/html", b"<html></html>".to_vec(), false)] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/out.png", listener.local_addr().unwrap());
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                }
+                write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: {kind}\r\ncontent-length: {}\r\n\r\n", body.len()).unwrap();
+                stream.write_all(&body).unwrap();
+            });
+            let got = get_image(&url, "", 20);
+            server.join().unwrap();
+            assert_eq!(got.is_ok(), ok, "{kind}");
+            if let Ok(img) = got {
+                assert_eq!(img.mime, "image/png");   // told by the bytes when the header does not say
+                assert!(img.data.starts_with("iVBORw0KGgo"));
+            }
+        }
+    }
+
+    #[test]
     fn post_json_passes_error_replies_through() {
         let (url, server) = serve_once("401 Unauthorized", r#"{"error":{"message":"bad key"}}"#);
-        let reply = post_json(&url, &[], "{}", "", 20).unwrap();
+        let reply = post_json(&url, &[], "{}", "", 20, AI_MAX_REPLY).unwrap();
         assert_eq!(reply.status, 401);
         assert_eq!(reply.text, r#"{"error":{"message":"bad key"}}"#);
         server.join().unwrap();
@@ -854,7 +942,7 @@ mod tests {
             "https://api.anthropic.com/v1/messages",
         ] {
             let headers = vec![("content-type".to_string(), "application/json".to_string())];
-            let reply = post_json(url, &headers, "{}", "", 20).unwrap();
+            let reply = post_json(url, &headers, "{}", "", 20, AI_MAX_REPLY).unwrap();
             assert_eq!(reply.status, 401, "{url}: {}", reply.text);
             assert!(reply.text.contains("error"), "{url}: {}", reply.text);
         }
@@ -866,7 +954,7 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/slow", listener.local_addr().unwrap());
         let started = std::time::Instant::now();
-        let error = post_json(&url, &[], "{}", "", 5).unwrap_err();
+        let error = post_json(&url, &[], "{}", "", 5, AI_MAX_REPLY).unwrap_err();
         assert!(error.to_lowercase().contains("timed out"), "{error}");
         assert!(started.elapsed().as_secs() >= 4 && started.elapsed().as_secs() < 15);
         drop(listener);
@@ -897,7 +985,7 @@ mod tests {
             Some("http://127.0.0.1:7890".to_string())
         );
         assert!(
-            post_json("https://example.com", &[], "{}", "nonsense://x", 20)
+            post_json("https://example.com", &[], "{}", "nonsense://x", 20, AI_MAX_REPLY)
                 .unwrap_err()
                 .starts_with("proxy")
         );
@@ -905,14 +993,14 @@ mod tests {
 
     #[test]
     fn post_json_refuses_other_schemes_and_reports_unreachable_hosts() {
-        assert!(post_json("file:///etc/passwd", &[], "{}", "", 20).is_err());
-        assert!(post_json("ftp://example.com", &[], "{}", "", 20).is_err());
+        assert!(post_json("file:///etc/passwd", &[], "{}", "", 20, AI_MAX_REPLY).is_err());
+        assert!(post_json("ftp://example.com", &[], "{}", "", 20, AI_MAX_REPLY).is_err());
         // a port nothing listens on
         let free = std::net::TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
             .unwrap();
-        assert!(post_json(&format!("http://{free}/x"), &[], "{}", "", 20).is_err());
+        assert!(post_json(&format!("http://{free}/x"), &[], "{}", "", 20, AI_MAX_REPLY).is_err());
     }
 
     fn bundled(name: &str) -> Arc<(Vec<u8>, u32)> {

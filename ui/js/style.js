@@ -19,6 +19,7 @@
 //   plate(ctx, x, y, w, h, colour, fs, p)  paints the plate under a text layer
 //   subject(ctx, half, env, p)   painted around the channel graphic, in its own space
 //   seeded                       true when the look scatters things at random (the user can shuffle them)
+//   repaint(colour)              how a background photo is repainted in this look (see repaint.js), the channel colour as "#rrggbb"
 //   about: {zh, en}              what the look looks like and what it suits, shown under the look menu
 //   titleFont(fonts)             the font stack of the title, when the look sets its own
 //   faces(fonts)                 font stacks to use in place of the profile's for the whole cover: { cn?, en?, mono? }
@@ -72,6 +73,7 @@ let seed = 7;                 // see setLook(): places the things a look scatter
 // ---------- the house look: everything is drawn by the code's own defaults
 const cel = {
   id: "cel",
+  repaint: (c) => `a cel-animation background painting: every surface in flat colour with two or three hard-edged tones, crisp shadows, heavy dark ink outlines around shapes, screentone dots in the shade, simplified shapes and clean bright colours, with ${c} as the leading accent colour.`,
   about: { zh: "像动画赛璐珞片那样画：粗墨线、硬边投影、两三级明暗的平涂，暗部铺网点。频道主色铺成斜切的色块，标题是带墨线和偏移投影的粗字，素材像贴纸一样带白边。明快、有冲击力，远看也认得出——适合知识、测评、开箱、日常 vlog。", en: "Drawn like animation cels: heavy ink lines, hard-edged shadows, flat colour in two or three tones, screentone in the shade. The channel colour is a slanted block, the title heavy letters with an ink line and an offset shadow, stickers have white borders. Bright and punchy, readable from afar — for explainers, reviews, unboxings, everyday vlogs." },
   name: { zh: "赛璐珞", en: "Cel" },
   params: [],
@@ -161,6 +163,7 @@ const SPLIT = [];              // two work canvases for the colour split, reused
 const LETTERING = ["title", "text", "tag", "catname", "brand"];   // the layers that are words
 const cyber = {
   id: "cyber",
+  repaint: (c) => `a frame of cyberpunk concept art in the graphic language of Cyberpunk 2077: near-black shadows, hard neon light in ${c} with cyan and red edge light, sharp-edged graphic shapes, wet reflective surfaces, a little haze; bold and graphic rather than painterly, no visible interface or signage text.`,
   about: { zh: "《赛博朋克 2077》里义眼启动扫描的界面：近黑底、频道色的实色切角面板配黑字、斜体切片的标题，四角是取景框、镜头圆环和读数；红青色彩错位、信号撕裂、扫描线制造故障感，图形是用光线勾出的深色硬件。冷、硬、有速度感——适合科技、数码、游戏、夜景与城市。", en: "The interface of an optical implant starting up and scanning, after Cyberpunk 2077: near-black ground, solid chamfered panels in the channel colour with black lettering, slanted sliced headlines, viewfinder corners, lens rings and readouts; a red and cyan colour split, signal tears and scanlines for the glitch, objects as dark hardware drawn in lines of light. Cold, hard and fast — for tech, gadgets, games, night and city." },
   name: { zh: "赛博朋克", en: "Cyberpunk" },
   oneTheme: true,              // always dark: the light / dark choice does not apply
@@ -554,6 +557,7 @@ const upright = (ctx) => ctx.transform(1, 0, 0.08, 1, 0, 0);   // undoes the hou
 const RISO = { paper: [242, 234, 216], blue: [30, 60, 165], pink: [255, 72, 176] };
 const riso = {
   id: "riso",
+  repaint: (c) => `a risograph print: two or three flat spot inks (${c}, a deep blue and a fluorescent pink) on cream paper, tones made of coarse halftone dots, the inks slightly out of register, visible paper grain; no photographic tones or gradients.`,
   about: { zh: "孔版印刷（Risograph）：米色纸上两三种专色油墨叠印，叠色处变深，套色略有错位，粗网点加纸张颗粒；标题是两色错开的叠印字，图形是纸白加蓝色油墨。温暖、有手作和独立出版的味道——适合设计、阅读、生活方式、手作与小店。", en: "Risograph: two or three spot inks overprinted on cream paper, darker where they overlap, slightly out of register, coarse halftone and paper grain; the title is overprinted in two colours a little apart, objects are paper white and blue ink. Warm, handmade, small-press — for design, books, lifestyle, crafts, small shops." },
   name: { zh: "孔版印刷", en: "Risograph" },
   oneTheme: true,
@@ -613,6 +617,7 @@ const ANI = { line: [46, 36, 60], cream: [250, 244, 230], shade: [72, 62, 98], p
 const muted = (c) => mix(mix(c, grey(c), 0.2), ANI.cream, 0.08);   // paint, not light: a little greyer and warmer
 const anime = {
   id: "anime",
+  repaint: (c) => `a background painting from a hand-painted 1990s anime film: painted sky and clouds, gouache-like scenery, cel-flat colours slightly greyed and warm, soft bloom on the lights, light film grain, with ${c} as an accent.`,
   about: { zh: "九十年代手绘动画、再用胶片拍下来的样子：手绘天空背景，赛璐珞颜色略灰略暖，标题是双层勾边的字，叠上胶片颗粒、柔光、褪色和灰尘划痕。比默认的赛璐珞更旧、更柔、更怀旧——适合旅行、音乐、回忆、季节与日常。", en: "A hand-painted 90s cartoon as film would have caught it: a painted sky, cel colours a little grey and warm, a title with a double keyline, then film grain, bloom, fade, dust and scratches. Older, softer and more wistful than the default Cel — for travel, music, memories, seasons, everyday life." },
   name: { zh: "九十年代动画", en: "90s animation" },
   oneTheme: true,
@@ -700,6 +705,7 @@ let dark = true;               // whether the current cover is on a dark ground;
 const bnInk = () => (dark ? BN.paper : BN.ink), bnGround = () => (dark ? BN.night : BN.paper);
 const bluenote = {
   id: "bluenote",
+  repaint: (c) => `the photograph on a 1950s–60s jazz record sleeve: a high-contrast duotone in black and ${c}, deep shadows, coarse grain, large calm areas; still a photograph, with no drawn outlines.`,
   about: { zh: "五六十年代爵士唱片封套：大面积纯色块、紧凑的无衬线大字，没有描边、没有投影，照片处理成单色加黑，编目式的细线和小字；自带平直的版式，可选深色或浅色底。克制、有态度、靠排版取胜——适合音乐、访谈、人物、品牌故事。", en: "Jazz record sleeves of the 50s and 60s: large flat blocks of colour, tight sans-serif headlines with no outline or shadow, photos in one colour and black, catalogue rules and small print; flat layouts of its own, dark or light ground. Restrained, confident, carried by the type — for music, interviews, portraits, brand stories." },
   name: { zh: "蓝调唱片", en: "Record sleeve" },
   params: [
@@ -766,6 +772,7 @@ const ED = { paper: [246, 243, 236], ink: [20, 20, 20], night: [18, 18, 18] };
 const edInk = () => (dark ? ED.paper : ED.ink), edGround = () => (dark ? ED.night : ED.paper);
 const editorial = {
   id: "editorial",
+  repaint: (c) => `a black-and-white magazine photograph: fine grain, deep blacks, clean highlights, a calm and considered tone; still a photograph, not a drawing.`,
   about: { zh: "杂志内页的编辑设计：衬线标题、粗细双线、细线边框、页眉页码、巨大而安静的期号数字，照片转黑白；自带平直的版式，可选深色或浅色底。安静、讲究、有阅读感——适合深度内容、评论、读书、文化与系列栏目。", en: "The pages of a magazine: a serif headline, thick-and-thin rules, a hairline border, running head and folio, a huge quiet issue number, black-and-white photos; flat layouts of its own, dark or light ground. Quiet, considered, made to be read — for long-form, essays, books, culture, series." },
   name: { zh: "编辑设计", en: "Editorial" },
   params: [
@@ -842,6 +849,7 @@ const NUMERALS = ["〇", "一", "二", "三", "四", "五", "六", "七", "八",
 const numeral = (n) => (n <= 10 ? NUMERALS[n] : n < 20 ? "十" + NUMERALS[n - 10] : String(n));
 const songke = {
   id: "songke",
+  repaint: (c) => `a woodblock illustration from an old Chinese printed book: black ink lines cut with a knife, flat areas of ink, the ground left as warm paper colour, no shading or colour except perhaps a touch of vermilion; scenery simplified into lines and masses as in Song and Ming book illustrations.`,
   about: { zh: "一页宋版古籍：宣纸底色、竖排的宋体标题、朱砂印章样式的角标、粗细双线的版框和界栏，右侧是带鱼尾的版心，图形像木刻版画，可调做旧与纸张颗粒；自带平直的版式。古雅、沉静、有书卷气——适合历史、国学、读书、传统手艺与节气。", en: "A leaf from a Song-dynasty printed book: paper ground, a serif title set in vertical columns, the corner tag as a vermilion seal, a thick-and-thin border and ruled columns, a centre column with fishtails at the right edge, objects like woodcuts, adjustable age and grain; flat layouts of its own. Classical, calm, bookish — for history, classics, reading, traditional crafts, the seasons." },
   name: { zh: "宋版刻本", en: "Woodblock book" },
   oneTheme: true,

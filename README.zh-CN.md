@@ -49,6 +49,24 @@
 - 在「封面」里选择照片，或直接把照片拖进窗口。
 - 先点一下背景选中它，再拖动照片调整位置；滚轮缩放。
 - 在右栏选中「背景」图层，调节模糊和压暗。
+- 选好照片后，下面会显示缩略图和尺寸。
+
+### AI 重绘背景照片
+
+选了照片后，「背景照片」下方有「AI 重绘」，用图片模型把照片重画成另一种画风。需要先在「配置 → AI」里设置图片模型（见[配置 AI](#配置-ai)）。
+
+风格来源有三种：
+
+| 来源 | 说明 |
+|---|---|
+| 跟随当前风格 | 按当前封面风格重绘（每种风格各有一段重绘说明），并以频道主色为强调色；保持照片的构图，主体位置和大小不变，原来的摆放仍然合适 |
+| 内置 · 8-bit 像素编辑 | 把照片提炼成稀疏、抽象的 8-bit 像素画：大面积留白的纸面上一小簇粗像素块，或铺满画面的几块像素平面。改编自 [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art) |
+| 自定义 | 自己写画风，也可以整段粘贴一份风格说明（如某个 skill 的 `SKILL.md`） |
+
+- 「补充说明」可不填，会附加在任一来源后面。所有来源后面都会自动加上：不要文字和水印、不要边框、保持照片比例。
+- 重绘结果先和原图并排预览，点「用这张」才替换背景照片；之后随时可以「还原原图」。再次重绘总是从原图出发，不会越画越糊。
+- 重绘后的照片和原图都会存进工程文件。
+- 每次重绘按服务商价格计费，通常要等几十秒。
 
 ### 拼贴：在画布上直接操作
 
@@ -307,6 +325,20 @@ SmedCover 不自带模型，也不提供账号。你需要一个兼容下面任�
 - 生成时，你输入的描述、预设提示词，以及你附上的参考图片，会发送到你填写的地址；除此之外应用不联网。
 - 调用产生的费用由你的服务商收取。
 
+#### 图片模型（照片重绘）
+
+上面的对话模型只出文字；重绘照片要用能「看图出图」的图片模型，在同一页下方单独设置。三家服务的接口各不相同，应用按各自的格式发送：
+
+| 服务 | 默认地址（BASE_URL 留空即用它） | 模型名示例 |
+|---|---|---|
+| OpenAI（gpt-image） | `https://api.openai.com/v1`，请求 `/images/edits` | `gpt-image-2` |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta`，请求 `models/{模型}:generateContent` | 名字里通常带 `image`，以 Google AI Studio 为准 |
+| 火山方舟 Seedream | `https://ark.cn-beijing.volces.com/api/v3`，请求 `/images/generations`；海外 BytePlus 用 `https://ark.ap-southeast.bytepluses.com/api/v3` | 方舟控制台里的模型 ID 或推理接入点 ID |
+
+- 令牌、模型、超时、代理的含义同上，令牌保存在 `image-ai.json`。
+- 输出尺寸按照片比例自动选：OpenAI 新模型约 250 万像素（旧的 gpt-image-1 只有三档固定尺寸）；Seedream 约 400 万像素；Gemini 跟随传入的照片。
+- 重绘时，照片（缩到最长边 1536 像素）和风格说明会发送到你填写的地址。
+
 ## 导出
 
 - **格式**：PNG、JPEG（可调质量）、WebP（无损）。
@@ -399,6 +431,7 @@ SMEDCOVER_SELFTEST=/一个空目录的绝对路径 src-tauri/target/release/bund
 | 程序（全部源代码） | [GNU AGPL v3 或更高版本](LICENSE) |
 | 内置素材：频道图形、贴纸、色块形状 | [CC BY 4.0](LICENSE-ASSETS.md) |
 | 内置字体：Noto Sans SC、Bebas Neue、JetBrains Mono | SIL Open Font License，文本在 `ui/fonts/` |
+| 内置重绘风格「8-bit 像素编辑」 | 改编自 [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art)，AGPL v3 |
 
 简单说：你可以使用、修改和再分发 SmedCover；但如果你分发修改后的版本，或让别人通过网络使用它，
 就必须以同样的许可证公开其源代码。内置素材可以在别处使用，但须署名；用 SmedCover 制作的封面无需署名。

@@ -18,6 +18,7 @@ import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, effectUses } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams } from "./style.js";
+import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, REPAINT_PRESETS, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, repaintPrompt } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 
 const $ = (id) => document.getElementById(id);
@@ -46,6 +47,8 @@ const S = {
   settings: normalizeSettings(null),
   profiles: [], profile: null, cover: null,
   photo: null, photoSrc: "",             // decoded background Image + its data URL
+  photoOriginal: "",                     // the photo as it was before an AI repaint (data URL), or ""
+  imageAi: normalizeImageAi(null),       // the image model that repaints photos (image-ai.json)
   picked: [],                                       // a group selection: the ids of the layers in it (see group())
   importedFonts: [], systemFonts: [], latinFonts: new Set(["Bebas Neue", "JetBrains Mono"]),   // latinFonts: those that cannot set Chinese
   mode: "edit", tab: { edit: "cover", setup: "brand" },
@@ -94,6 +97,7 @@ const later = (key, ms, fn) => { clearTimeout(timers[key]); timers[key] = setTim
 const persistProfile = () => later("profile", 400, () => saveProfile(S.profile).catch(fail));
 const persistCover = () => later("cover", 400, () => writeJson("session.json", S.cover).catch(fail));
 const persistAi = () => later("ai", 400, () => writeJson("ai.json", S.ai).catch(fail));
+const persistImageAi = () => later("imageAi", 400, () => writeJson("image-ai.json", S.imageAi).catch(fail));
 const persistSettings = () => later("settings", 400, () => writeJson("settings.json", S.settings).catch(fail));
 
 const snapshot = () => JSON.stringify({ p: S.profile, c: S.cover });
@@ -486,14 +490,21 @@ function coverTab() {
       el("div", { class: "row", style: "margin-top:0" },
         el("button", { class: "btn", onclick: async () => { const f = await pickFile("image/*"); if (f) setPhoto(await readAs(f, "readAsDataURL")); } }, t("cover.pick")),
         el("button", { class: "btn", disabled: !S.photo, onclick: () => setPhoto("") }, t("cover.removePhoto"))),
-      el("div", { class: "hint" }, t("cover.photoHint"))),
+      S.photo && el("div", { class: "thumb" }, el("img", { src: S.photoSrc, alt: "" }),
+        el("span", {}, `${S.photo.naturalWidth} × ${S.photo.naturalHeight}`, S.photoOriginal && ` · ${t("rep.isRepainted")}`)),
+      el("div", { class: "hint" }, t("cover.photoHint")),
+      S.photo && repaintBox()),
   ];
 }
-async function setPhoto(src) {
+/** Sets the background photo. `original` is the photo it was repainted from, if it was. */
+async function setPhoto(src, original = "") {
   S.photoSrc = src || "";
   S.photo = src ? await loadImage(src) : null;
   if (src && !S.photo) { S.photoSrc = ""; toast(t("msg.badFile")); }
+  S.photoOriginal = S.photo ? original : "";
+  REP.result = null; REP.error = "";
   files.write("session-photo", S.photoSrc).catch(() => null);
+  files.write("session-photo-original", S.photoOriginal).catch(() => null);
   if (S.photo) S.layerId = "bg";
   touch({ panel: true, side: true });
 }
@@ -531,6 +542,109 @@ function assetsTab() {
   ];
 }
 // ---------- AI-generated assets
+// ---------- repainting the background photo with an image model (see repaint.js)
+const REP = { busy: false, job: 0, since: 0, error: "", result: null };   // result: {src, w, h} waiting to be used or dropped
+const onCoverTab = () => S.mode === "edit" && S.tab.edit === "cover";
+const repBusyText = () => t("rep.busy", Math.max(0, Math.round((Date.now() - REP.since) / 1000)));
+/** A copy of a picture no longer than `max` on its longer side, as JPEG: {mime, data, url, w, h}. */
+function shrink(im, max, q = 0.9) {
+  const W = im.naturalWidth || im.width, H = im.naturalHeight || im.height;   // an Image, or a canvas
+  const k = Math.min(1, max / Math.max(W, H)), cv = document.createElement("canvas");
+  cv.width = Math.max(1, Math.round(W * k)); cv.height = Math.max(1, Math.round(H * k));
+  const x = cv.getContext("2d");
+  x.fillStyle = "#ffffff"; x.fillRect(0, 0, cv.width, cv.height);   // JPEG has no transparency
+  x.imageSmoothingQuality = "high"; x.drawImage(im, 0, 0, cv.width, cv.height);
+  const url = cv.toDataURL("image/jpeg", q);
+  return { mime: "image/jpeg", data: url.slice(url.indexOf(",") + 1), url, w: cv.width, h: cv.height };
+}
+/** Sends a photo and a prompt to the image model and returns the new picture: {src, w, h}. */
+async function imageCall(cfg, prompt, pic) {
+  const req = buildImageRequest(cfg, prompt, pic, pic.w, pic.h), body = JSON.stringify(req.body);
+  const reply = native
+    ? await invoke("ai_request", { url: req.url, headers: Object.entries(req.headers), body, proxy: cfg.proxy || null, timeout: cfg.timeout, image: true })
+        .catch((e) => { throw new Error(/timed out/i.test(String(e)) ? t("ai.timedOut", cfg.timeout) : String(e)); })
+    : await fetch(req.url, { method: "POST", headers: req.headers, body, signal: AbortSignal.timeout(cfg.timeout * 1000) }).then(async (r) => ({ status: r.status, text: await r.text() }));
+  const out = readImageReply(cfg.provider, reply.status, reply.text);
+  if (out.error) throw new Error(out.error);
+  // some services leave the picture at a link instead of sending it
+  const img = out.image || (native
+    ? await invoke("fetch_image", { url: out.url, proxy: cfg.proxy || null, timeout: cfg.timeout })
+    : await fetch(out.url).then((r) => r.blob()).then(async (b) => { const u = await readAs(b, "readAsDataURL"); return { mime: b.type || "image/png", data: u.slice(u.indexOf(",") + 1) }; }));
+  const src = `data:${img.mime};base64,${img.data}`, im = await loadImage(src);
+  if (!im) throw new Error(t("rep.badImage"));
+  return { src, w: im.naturalWidth, h: im.naturalHeight };
+}
+/** Repaints the background photo — always from the original, so repaints do not pile up on each other. */
+async function repaintPhoto() {
+  const cfg = S.imageAi;
+  if (!S.photo || REP.busy) return;
+  if (cfg.source === "custom" && !cfg.custom.trim()) return toast(t("rep.needCustom"));
+  const job = ++REP.job, from = S.photoOriginal ? await loadImage(S.photoOriginal) : S.photo;
+  const prompt = repaintPrompt({ source: cfg.source, look: S.profile.style.look, color: cat().color, custom: cfg.custom, notes: cfg.notes });
+  Object.assign(REP, { busy: true, error: "", result: null, since: Date.now() });
+  renderPanel();
+  const tick = setInterval(() => { const b = document.getElementById("rep-go"); if (b && REP.busy) b.textContent = repBusyText(); }, 1000);
+  let result = null, error = "";
+  try { result = await imageCall(cfg, prompt, shrink(from || S.photo, 1536)); }
+  catch (e) { error = String(e && e.message ? e.message : e); }
+  clearInterval(tick);
+  if (job !== REP.job) return;                       // cancelled meanwhile
+  Object.assign(REP, { busy: false, result, error });
+  if (onCoverTab()) renderPanel();
+}
+function cancelRepaint() { REP.job++; Object.assign(REP, { busy: false, error: "", result: null }); renderPanel(); }
+async function useRepaint() {
+  const r = REP.result;
+  if (!r) return;
+  await setPhoto(r.src, S.photoOriginal || S.photoSrc);
+  toast(t("rep.used"));
+}
+function repaintBox() {
+  const c = S.imageAi, lang = getLang();
+  const set = (k, v, redraw = false) => { S.imageAi = normalizeImageAi({ ...S.imageAi, [k]: v }); persistImageAi(); if (redraw) renderPanel(); };
+  const head = el("label", { class: "cap", style: "margin-top:14px" }, t("rep.title"));
+  if (!imageReady(c)) {
+    return el("div", { class: "rep" }, head, el("div", { class: "hint", style: "margin:0 0 10px" }, t("rep.needSetup")),
+      el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; setMode("setup"); } }, t("rep.goSetup")));
+  }
+  const look = LOOKS[S.profile.style.look] || LOOKS.cel, r = REP.result;
+  const sources = [["look", t("rep.src.look", look.name[lang])], ...Object.entries(REPAINT_PRESETS).map(([id, p]) => [id, `${t("rep.src.preset")} · ${p.name[lang]}`]), ["custom", t("rep.src.custom")]];
+  return el("div", { class: "rep" }, head,
+    select(sources, c.source, (v) => set("source", v, true)),
+    c.source === "custom" && [
+      el("textarea", { value: c.custom, spellcheck: false, style: "height:140px;font-size:13px;margin-top:8px", placeholder: t("rep.customPh"), oninput: (e) => set("custom", e.target.value) }),
+      el("div", { class: "hint" }, t("rep.customHint"))],
+    el("div", { style: "margin-top:8px" }, textInput(c.notes, (v) => set("notes", v), { placeholder: t("rep.notesPh"), maxLength: 600, disabled: REP.busy })),
+    el("button", { id: "rep-go", class: "btn solid wide", style: "margin-top:10px", disabled: REP.busy, onclick: repaintPhoto }, REP.busy ? repBusyText() : t(r ? "rep.again" : "rep.go")),
+    REP.busy && el("button", { class: "btn wide", style: "margin-top:8px", onclick: cancelRepaint }, t("ai.cancel")),
+    REP.error && el("div", { class: "hint err" }, t("msg.failed", REP.error)),
+    r && [
+      el("div", { class: "compare" },
+        el("figure", {}, el("img", { src: S.photoOriginal || S.photoSrc, alt: "" }), el("figcaption", {}, t("rep.before"))),
+        el("figure", {}, el("img", { src: r.src, alt: "" }), el("figcaption", {}, `${t("rep.after")} · ${r.w} × ${r.h}`))),
+      el("div", { class: "row" },
+        el("button", { class: "btn solid", onclick: useRepaint }, t("rep.use")),
+        el("button", { class: "btn", onclick: () => { REP.result = null; renderPanel(); } }, t("ai.discard")))],
+    S.photoOriginal && el("button", { class: "btn wide", style: "margin-top:8px", disabled: REP.busy, onclick: () => setPhoto(S.photoOriginal) }, t("rep.restore")),
+    el("div", { class: "hint" }, t("rep.hint", t("img.provider." + c.provider), c.model)));
+}
+/** The image model's settings, in Setup → AI below the chat model's. */
+function imageAiBox() {
+  const c = S.imageAi, d = IMAGE_DEFAULTS[c.provider];
+  const ep = el("div", { class: "hint", style: "margin-top:-10px;word-break:break-all" }, t("ai.endpoint", imageEndpoint(c)));
+  const set = (k, v, redraw = false) => { S.imageAi = normalizeImageAi({ ...S.imageAi, [k]: v }); persistImageAi(); if (redraw) return renderPanel(); ep.textContent = t("ai.endpoint", imageEndpoint(S.imageAi)); };
+  const field = (key, k, props = {}) => el("div", {}, cap(key), textInput(c[k], (v) => set(k, v), props));
+  return el("div", { class: "box" }, cap("img.title"),
+    el("div", { class: "hint", style: "margin:0 0 12px" }, t("img.intro")),
+    el("div", {}, cap("img.provider"), select(IMAGE_PROVIDERS.map((k) => [k, t("img.provider." + k)]), c.provider, (v) => set("provider", v, true))),
+    field("ai.baseUrl", "baseUrl", { placeholder: d.baseUrl }), ep,
+    field("ai.token", "token", { type: "password", placeholder: t("ai.tokenPh"), autocomplete: "off" }),
+    field("ai.model", "model", { placeholder: t("img.modelPh", d.model) }),
+    el("div", { class: "hint", style: "margin-top:-10px" }, t("img.modelHint." + c.provider)),
+    el("div", {}, cap("ai.timeout"), el("input", { type: "number", min: 30, max: 1800, step: 30, value: c.timeout, onchange: (e) => set("timeout", e.target.value, true) })),
+    field("ai.proxy", "proxy", { placeholder: "http://127.0.0.1:7890" }),
+    el("div", { class: "hint" }, t("img.privacy")));
+}
 const AI = { target: "", busy: false, error: "", result: null, test: "", job: 0, since: 0, attempt: 1, image: null };   // image: {mime, data, url} of a reference picture
 const AI_RETRIES = 3;                      // extra attempts when a reply does not follow the format
 /** Sends one prompt to the configured endpoint and returns {text, truncated}. Throws with the provider's message. */
@@ -675,6 +789,7 @@ function aiTab() {
     testBtn,
     AI.test && el("div", { class: "hint", style: "margin-top:-8px;word-break:break-word" }, AI.test),
     el("div", { class: "hint" }, t("ai.privacy")),
+    imageAiBox(),
   ];
 }
 
@@ -1187,15 +1302,14 @@ const projectActions = {
       if (!raw || raw.kind !== "project") throw 0;
       await adoptEmbedded(raw.assets);
       S.cover = normalizeCover(raw.cover, S.profile);
-      S.photoSrc = typeof raw.photo === "string" && raw.photo.startsWith("data:image/") ? raw.photo : "";
-      S.photo = S.photoSrc ? await loadImage(S.photoSrc) : null;
-      files.write("session-photo", S.photoSrc).catch(() => null);
+      const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
+      await setPhoto(pic(raw.photo), pic(raw.photoOriginal));
       S.layerId = "title";
       touch({ cover: true, panel: true, side: true });
     } catch (e) { toast(t("msg.badFile")); }
   },
   save: () => saveText(`${(S.cover.title.split("\n")[0] || "cover").replace(/[*\\/:?"<>|]+/g, "").slice(0, 24) || "cover"}.smedcover.json`,
-    JSON.stringify({ app: "smedcover", kind: "project", version: 2, profileName: S.profile.name, cover: S.cover, photo: S.photoSrc || null, assets: embedAssets(usedUserAssets(null, S.cover)) })),
+    JSON.stringify({ app: "smedcover", kind: "project", version: 2, profileName: S.profile.name, cover: S.cover, photo: S.photoSrc || null, photoOriginal: S.photoOriginal || null, assets: embedAssets(usedUserAssets(null, S.cover)) })),
   reset() { S.cover = normalizeCover({ catId: S.cover.catId }, S.profile); S.layerId = "title"; setPhoto(""); touch({ cover: true, panel: true, side: true }); },
 };
 
@@ -1342,6 +1456,7 @@ async function start() {
     if (a.spec) { const r = normalizeSpec(a.spec); if (r.spec) putSpecAsset(a.id, a.name, r.spec); } else await putUserAsset(a.id, a.name, a.src);
   }
   S.ai = normalizeAi(await readJson("ai.json").catch(() => null));
+  S.imageAi = normalizeImageAi(await readJson("image-ai.json").catch(() => null));
   if (native) {
     const found = await invoke("list_system_fonts").catch(() => []);
     S.systemFonts = found.map((f) => f.name);
@@ -1356,6 +1471,7 @@ async function start() {
   if (!S.cover.title) S.cover.title = getLang() === "zh" ? "在这里写标题\n*一行*就是一行" : "Write your title\n*one line* each";
   S.photoSrc = (await files.read("session-photo").catch(() => "")) || "";
   S.photo = S.photoSrc ? await loadImage(S.photoSrc) : null;
+  S.photoOriginal = S.photo ? (await files.read("session-photo-original").catch(() => "")) || "" : "";
   await applyProfile();
   resetHistory();
   if (selftest) selfTest(selftest);
@@ -1387,6 +1503,14 @@ async function selfTest(dir) {
         const cfg = normalizeAi({ style, baseUrl: aiUrl + (style === "openai" ? "/v1" : ""), token: "selftest-token", model: "selftest-model" });
         const spec = await requestSpec(cfg, "", () => null, () => true, image);
         report.aiImage.push({ style, name: spec.name.en, bytes: image.data.length });
+      }
+      // repainting a photo through each image service's own form (one of them answering with a link)
+      report.repaint = [];
+      const photo = shrink(pic, 64);
+      for (const [provider, base, model] of [["openai", "/v1", "gpt-image-2"], ["gemini", "/v1beta", "m"], ["seedream", "/api/v3", "m"], ["seedream", "/api/v3", "url"]]) {
+        const cfg = normalizeImageAi({ provider, baseUrl: aiUrl + base, token: "selftest-token", model });
+        const out = await imageCall(cfg, repaintPrompt({ source: provider === "gemini" ? "pixel" : "look", look: "cyber" }), photo);
+        report.repaint.push({ provider, model, w: out.w, h: out.h });
       }
       try { await aiCall(normalizeAi({ style: "openai", baseUrl: aiUrl + "/fail", model: "m" }), "s", "u"); report.errors.push("ai: an error reply was not reported"); }
       catch (e) { report.aiError = String(e.message); }

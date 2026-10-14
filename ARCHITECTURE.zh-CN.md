@@ -58,6 +58,7 @@ ui/
   js/stickers.js     60 个贴纸，以及公用的画法函数
   js/style.js        风格：每种风格的一组钩子，以及当前风格
   js/spec.js         以数据描述的贴纸：校验与解释执行（AI 生成的素材）
+  js/repaint.js      照片重绘：三家图片服务的请求与回复、重绘提示词
   js/solid.js        以数据描述的立体图形：校验，并用频道图形的渲染器绘制
   js/ai.js           AI 生成：连接设置、两种接口风格的请求、预设提示词（纯函数）
   js/store.js        数据模型、校验、持久化
@@ -378,6 +379,18 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 其中只有"风格"一节取自 `STYLE_NOTES[style]`，其余部分与风格无关，以后增加新风格时只需添加一条。
 示例本身就是合法的描述，单元测试会逐个校验，避免提示词和解释器对不上。
 
+### 8.5 照片重绘（`repaint.js`）
+
+照片重绘是一次固定流程，不是 agent：照片加一段风格说明发给图片模型，换回一张图。三家服务的接口各不相同，`buildImageRequest` 按各自的格式组请求，`readImageReply` 按各自的格式取图：
+
+| 服务 | 请求 | 图片放在 | 结果在 |
+|---|---|---|---|
+| OpenAI | `POST {base}/images/edits`，Bearer | `images: [{image_url: data URL}]`，`size` 按照片比例 | `data[0].b64_json` |
+| Gemini | `POST {base}/models/{model}:generateContent`，`x-goog-api-key` | `contents[0].parts` 里的 `inlineData` | `candidates[0].content.parts[].inlineData` |
+| Seedream | `POST {base}/images/generations`，Bearer | `image: data URL`，`size: "WxH"`，`response_format: "b64_json"` | `data[0].b64_json`，或 `url`（再由 `fetch_image` 下载） |
+
+提示词由 `repaintPrompt` 组合：风格来源（当前风格的 `repaint(colour)`、内置预设、或用户的文字）＋「这是封面背景：不要文字和边框、保持比例」＋补充说明。跟随风格时还要求保持构图，这样背景图层原来的位置和缩放仍然合适；预设和自定义自己决定构图。重绘总是从原图出发，原图存在 `S.photoOriginal`（会话里是 `session-photo-original`，工程文件里是 `photoOriginal`）。
+
 ## 9. 交互（`app.js`）
 
 ### 9.1 状态与刷新
@@ -443,8 +456,10 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 这样界面可以显示服务商自己的错误信息。由 Rust 发送是为了绕开网页视图的跨域限制。
 
 - 请求在阻塞线程池里等待回复，不占用界面线程，也不占用异步运行时的工作线程。
-- 只接受 `http://` 和 `https://`，回复最多读取 4 MB。超时由设置决定，默认 300 秒。
+- 只接受 `http://` 和 `https://`，回复最多读取 4 MB；带图片的回复（照片重绘，`image: true`）最多 64 MB。超时由设置决定，默认 300 秒。
 - 代理：优先用设置里填写的；否则读环境变量 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`。**本机地址永不走环境变量里的代理**，否则本地模型会被代理拦住。
+
+`fetch_image` 用于照片重绘时服务只回了一个图片链接的情况：下载它，确认是图片（看 `content-type`，不对就看文件头），以 base64 交给界面。
 
 ### 10.5 其他命令
 

@@ -818,3 +818,48 @@ test("the title's outline and shadow are offered only where the text effect draw
     for (const id of LOOK_IDS) assert.ok(LOOKS[id].about && LOOKS[id].about.zh && LOOKS[id].about.en, id);   // every look says what it is
   } finally { setLook("cel"); }
 });
+
+test("repaint: each image service gets the photo in its own form, and its reply is read", async () => {
+  const R = await import("../ui/js/repaint.js");
+  const pic = { mime: "image/jpeg", data: "QUJD" };
+  const cfg = (provider, extra = {}) => R.normalizeImageAi({ provider, token: "k", model: "m", ...extra });
+  // addresses: the service's own when empty; a full path is taken as it is
+  assert.equal(R.imageEndpoint(cfg("openai")), "https://api.openai.com/v1/images/edits");
+  assert.equal(R.imageEndpoint(cfg("openai", { baseUrl: "https://relay.example/v1/" })), "https://relay.example/v1/images/edits");
+  assert.equal(R.imageEndpoint(cfg("gemini", { model: "gemini-x-image" })), "https://generativelanguage.googleapis.com/v1beta/models/gemini-x-image:generateContent");
+  assert.equal(R.imageEndpoint(cfg("seedream", { baseUrl: "https://ark.ap-southeast.bytepluses.com/api/v3" })), "https://ark.ap-southeast.bytepluses.com/api/v3/images/generations");
+  assert.ok(R.imageReady(cfg("openai")) && !R.imageReady(cfg("openai", { token: "" })) && !R.imageReady(cfg("gemini", { baseUrl: "ftp://x" })));
+  // request bodies
+  const o = R.buildImageRequest(cfg("openai", { model: "gpt-image-2" }), "P", pic, 1600, 900);
+  assert.deepEqual(o.body.images, [{ image_url: "data:image/jpeg;base64,QUJD" }]);
+  assert.equal(o.headers.authorization, "Bearer k");
+  const [W, H] = o.body.size.split("x").map(Number);
+  assert.ok(W % 16 === 0 && H % 16 === 0 && Math.abs(W / H - 16 / 9) < 0.02 && W <= 3840, o.body.size);   // the photo's shape
+  assert.equal(R.buildImageRequest(cfg("openai", { model: "gpt-image-1" }), "P", pic, 1600, 900).body.size, "1536x1024");   // older models: standard sizes only
+  const g = R.buildImageRequest(cfg("gemini"), "P", pic, 1600, 900);
+  assert.equal(g.headers["x-goog-api-key"], "k");
+  assert.deepEqual(g.body.contents[0].parts[0], { inlineData: { mimeType: "image/jpeg", data: "QUJD" } });
+  const s = R.buildImageRequest(cfg("seedream"), "P", pic, 900, 1600);
+  assert.equal(s.body.image, "data:image/jpeg;base64,QUJD");
+  assert.equal(s.body.response_format, "b64_json");
+  const [sw, sh] = s.body.size.split("x").map(Number);
+  assert.ok(sw * sh >= 2560 * 1440 && sw * sh <= 4624220 && sw < sh, s.body.size);   // inside every Seedream model's range
+  // replies
+  assert.deepEqual(R.readImageReply("openai", 200, '{"data":[{"b64_json":"iVBORw0K"}]}'), { image: { mime: "image/png", data: "iVBORw0K" } });
+  assert.deepEqual(R.readImageReply("seedream", 200, '{"data":[{"url":"https://x/y.png"}]}'), { url: "https://x/y.png" });
+  assert.deepEqual(R.readImageReply("gemini", 200, '{"candidates":[{"content":{"parts":[{"text":"hi"},{"inlineData":{"mimeType":"image/jpeg","data":"/9j/"}}]}}]}'), { image: { mime: "image/jpeg", data: "/9j/" } });
+  assert.match(R.readImageReply("gemini", 200, '{"candidates":[{"finishReason":"SAFETY","content":{"parts":[{"text":"cannot"}]}}]}').error, /SAFETY.*cannot/);
+  assert.match(R.readImageReply("openai", 400, '{"error":{"message":"bad size"}}').error, /^HTTP 400: bad size/);
+  assert.match(R.readImageReply("seedream", 502, "<html>gateway</html>").error, /^HTTP 502/);
+});
+
+test("repaint: the prompt follows the look, a preset or the user's own words, and always asks for a clean background", async () => {
+  const { repaintPrompt, REPAINT_PRESETS } = await import("../ui/js/repaint.js");
+  const look = repaintPrompt({ source: "look", look: "riso", color: "#ff3355", notes: "darker sky" });
+  assert.ok(look.includes("risograph") && look.includes("#ff3355") && look.includes("Keep the photograph's composition") && look.endsWith("Also: darker sky"));
+  for (const id of LOOK_IDS) assert.ok(repaintPrompt({ source: "look", look: id }).length > 200, id);   // every look can repaint
+  const pixel = repaintPrompt({ source: "pixel" });
+  assert.ok(pixel.startsWith(REPAINT_PRESETS.pixel.prompt) && !pixel.includes("Keep the photograph's composition"));   // a preset sets its own composition
+  const own = repaintPrompt({ source: "custom", custom: "  watercolour  " });
+  assert.ok(own.startsWith("watercolour\n\n") && own.includes("no text"));
+});
