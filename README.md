@@ -482,7 +482,7 @@ and quits, without touching your real data.
 SMEDCOVER_SELFTEST=/absolute/empty/folder src-tauri/target/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover
 ```
 
-`.github/workflows/build.yml` builds installers for macOS, Windows and Linux on GitHub Actions (it has not been run yet).
+`.github/workflows/build.yml` builds installers on GitHub Actions (it has not been run yet): macOS for Apple silicon and for Intel, separately (`.dmg`, `.app.tar.gz`), Windows x64 (`.exe`, `.msi`), Linux x64 (`.deb`, `.rpm`, `.AppImage`).
 
 ## To do
 

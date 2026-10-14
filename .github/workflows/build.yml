@@ -22,18 +22,28 @@ jobs:
       fail-fast: false # one platform failing should not cancel the others
       matrix:
         include:
-          - name: macOS (Apple silicon + Intel)
+          # Two separate macOS builds, each half the size of one universal app. Both are built on
+          # an Apple-silicon runner; the Intel one is cross-compiled.
+          - name: macOS (Apple silicon)
             os: macos-latest
-            args: --target universal-apple-darwin
-            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target aarch64-apple-darwin
+            rust-targets: aarch64-apple-darwin
+            artifact: macos-apple-silicon
+          - name: macOS (Intel)
+            os: macos-latest
+            args: --target x86_64-apple-darwin
+            rust-targets: x86_64-apple-darwin
+            artifact: macos-intel
           - name: Windows
             os: windows-latest
             args: ""
             rust-targets: ""
+            artifact: windows
           - name: Linux
             os: ubuntu-22.04
             args: ""
             rust-targets: ""
+            artifact: linux
 
     steps:
       - uses: actions/checkout@v4
@@ -82,7 +92,7 @@ jobs:
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
-          name: smedcover-${{ runner.os }}
+          name: smedcover-${{ matrix.artifact }}
           if-no-files-found: error
           path: |
             src-tauri/target/**/release/bundle/dmg/*.dmg

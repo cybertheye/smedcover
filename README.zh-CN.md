@@ -478,7 +478,7 @@ cd src-tauri && cargo test           # Rust 单元测试
 SMEDCOVER_SELFTEST=/一个空目录的绝对路径 src-tauri/target/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover
 ```
 
-`.github/workflows/build.yml` 可在 GitHub Actions 上构建 macOS、Windows、Linux 安装包（尚未实际运行过）。
+`.github/workflows/build.yml` 可在 GitHub Actions 上构建安装包（尚未实际运行过）：macOS 分 Apple 芯片和 Intel 两个版本（`.dmg`、`.app.tar.gz`），Windows x64（`.exe`、`.msi`），Linux x64（`.deb`、`.rpm`、`.AppImage`）。
 
 ## 待办
 
