@@ -358,10 +358,18 @@ export function buildPrompt(target, notes = "", { kind = "flat", style = "cel", 
   const what = String(target).trim().slice(0, 300);
   if (!image) return { system, user: `Request: ${what}` };
   // With a reference picture the subject comes from the picture; the style still comes from above.
-  const how = kind === "solid"
-    ? "Rebuild its main subject from boxes and cylinders: keep its overall proportions, the parts that make it recognisable and where they sit, and its main colours as tones."
-    : "Redraw its main subject as a sticker: keep its silhouette, its proportions, the parts that make it recognisable and its main colours.";
-  return { system, user: `Request: ${what || "the main subject of the attached picture"}\nA reference picture is attached. ${how} Do not copy its rendering — no photographic detail, texture, lighting or background: translate it into the style and the data format described above.` };
+  // The model is walked through it: find the subject, note what makes it that thing, then build it.
+  const which = what
+    ? `The user says which thing in the picture is wanted: "${what}". That is the subject.`
+    : "Decide what the picture is of: the one object it is about — usually the largest, most central, sharpest thing. If there are several, take the most prominent one only.";
+  const build = kind === "solid"
+    ? "Build that object as a solid: boxes and cylinders in its overall proportions, with the parts that make it recognisable where they sit on it, and its main colours as tones."
+    : "Draw that object as a flat sticker: its silhouette and proportions, the parts that make it recognisable, and its main colours.";
+  return { system, user: `A reference picture is attached. Work in three steps.
+1. Find the subject. ${which} Everything else is not part of it: the background, the surface it stands on, hands or people holding it, shadows, reflections, captions, logos and watermarks.
+2. Note what makes it recognisable: its outline, its proportions, its parts and where they are, its two or three main colours.
+3. ${build} The "name" you return is what the object is.
+Return the object alone, not the scene, and do not copy the picture's rendering — no photographic detail, texture or lighting: translate the object into the style and the data format described above.` };
 }
 
 /**

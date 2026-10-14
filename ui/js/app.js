@@ -6,7 +6,7 @@ import { layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, paintAccent, handle
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
-import { ratioText } from "./store.js";
+import { useFont, ratioText } from "./store.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
 import { ACCENT_SHAPES, newLayer, isFree, isPickable, appliesTo, stepIndex, adjust, resetPlacement, writeKey, insertAbove, moveLayer, duplicate } from "./layers.js";
 import {
@@ -46,7 +46,7 @@ const S = {
   settings: normalizeSettings(null),
   profiles: [], profile: null, cover: null,
   photo: null, photoSrc: "",             // decoded background Image + its data URL
-  importedFonts: [], systemFonts: [],
+  importedFonts: [], systemFonts: [], latinFonts: new Set(["Bebas Neue", "JetBrains Mono"]),   // latinFonts: those that cannot set Chinese
   mode: "edit", tab: { edit: "cover", setup: "brand" },
   sel: "",                               // size key shown on the main canvas
   layerId: "title",                      // selected layer
@@ -757,16 +757,24 @@ async function importFont() {
 const BUNDLED_FONTS = ["Noto Sans SC", "Bebas Neue", "JetBrains Mono"];
 /** The font of a lettering layer: the look's own, a bundled one, one added earlier, an installed one — or a file to add now. */
 function fontControl(L) {
-  const set = (v) => { if (v) L.font = v; else delete L.font; touch({ cover: true, side: true }); };
-  const options = [["", t("font.auto")], { group: t("font.bundled"), items: BUNDLED_FONTS.map((f) => [f, f]) },
-    { group: t("font.imported"), items: S.importedFonts.map((f) => [f, f]) },
-    { group: t("font.system"), items: S.systemFonts.map((f) => [f, f]) }, ["+", t("font.add")]];
-  if (L.font && ![...BUNDLED_FONTS, ...S.importedFonts, ...S.systemFonts].includes(L.font)) options.splice(1, 0, [L.font, `${L.font} · ${t("font.missing")}`]);   // set on another computer
+  const set = (v) => {
+    if (v) { L.font = v; S.settings.recentFonts = useFont(S.settings.recentFonts, v); persistSettings(); } else delete L.font;
+    touch({ cover: true, side: true });
+  };
+  const have = [...BUNDLED_FONTS, ...S.importedFonts, ...S.systemFonts];
+  const item = (f) => [f, S.latinFonts.has(f) ? `${f} · ${t("font.latin")}` : f];
+  // A recently used font is listed twice, so the menu shows it under "Recent" only when it is not the one in use.
+  const recent = S.settings.recentFonts.filter((f) => have.includes(f) && f !== L.font);
+  const options = [["", t("font.auto")], { group: t("font.recent"), items: recent.map((f) => ["~" + f, item(f)[1]]) },
+    { group: t("font.bundled"), items: BUNDLED_FONTS.map(item) },
+    { group: t("font.imported"), items: S.importedFonts.map(item) },
+    { group: t("font.system"), items: S.systemFonts.map(item) }, ["+", t("font.add")]];
+  if (L.font && !have.includes(L.font)) options.splice(1, 0, [L.font, `${L.font} · ${t("font.missing")}`]);   // set on another computer
   return el("div", { style: "margin-top:10px" }, cap("props.font"), select(options, L.font || "", async (v) => {
-    if (v !== "+") return set(v);
+    if (v !== "+") return set(v.replace(/^~/, ""));
     const family = await importFont();
     if (family) set(family); else renderSide();   // nothing chosen: put the menu back where it was
-  }));
+  }), L.font && S.latinFonts.has(L.font) && el("div", { class: "hint" }, t("font.latinHint")));
 }
 
 // ---------- right column: layers and the selected layer's properties
@@ -1234,7 +1242,11 @@ async function start() {
     if (a.spec) { const r = normalizeSpec(a.spec); if (r.spec) putSpecAsset(a.id, a.name, r.spec); } else await putUserAsset(a.id, a.name, a.src);
   }
   S.ai = normalizeAi(await readJson("ai.json").catch(() => null));
-  if (native) S.systemFonts = await invoke("list_system_fonts").catch(() => []);
+  if (native) {
+    const found = await invoke("list_system_fonts").catch(() => []);
+    S.systemFonts = found.map((f) => f.name);
+    for (const f of found) if (!f.cjk) S.latinFonts.add(f.name);
+  }
   S.profiles = await loadProfiles().catch(() => []);
   const selftest = native ? await invoke("selftest_dir").catch(() => null) : null;
   if (!S.profiles.length) await addProfile(selftest ? sampleProfile("en") : await welcome(), false);
@@ -1251,6 +1263,8 @@ async function start() {
 /** SMEDCOVER_SELFTEST mode: export real covers in every format through the normal path, report, quit. */
 async function selfTest(dir) {
   const report = { ok: false, files: [], errors: [] };
+  const cjk = (f) => S.systemFonts.includes(f) ? !S.latinFonts.has(f) : null;   // which installed fonts can set Chinese
+  report.fonts = { system: S.systemFonts.length, latin: [...S.latinFonts].filter((f) => S.systemFonts.includes(f)).length, cjk: Object.fromEntries(["PingFang SC", "Songti SC", "Helvetica", "Cochin", "BM Hanna Pro", "Menlo"].map((f) => [f, cjk(f)])) };
   try {
     const aiUrl = await invoke("selftest_ai").catch(() => null);
     if (aiUrl) {   // both API styles against a stand-in endpoint: request, reply, validation, storage, drawing

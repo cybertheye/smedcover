@@ -131,7 +131,10 @@ export function normalizeCover(raw, profile) {
   };
 }
 
-export const DEFAULT_SETTINGS = { lang: "", profileId: "", scale: 2, format: "png", quality: 92, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "all" };
+export const DEFAULT_SETTINGS = { lang: "", profileId: "", scale: 2, format: "png", quality: 92, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "all", recentFonts: [] };
+export const RECENT_FONTS = 6;
+/** Puts a font at the head of the recently used ones. */
+export const useFont = (recent, family) => [family, ...recent.filter((f) => f !== family)].slice(0, RECENT_FONTS);
 export function normalizeSettings(raw) {
   const s = raw && typeof raw === "object" ? raw : {};
   return {
@@ -142,6 +145,7 @@ export function normalizeSettings(raw) {
     quality: Math.round(num(s.quality, 92, 40, 100)),
     nameTemplate: str(s.nameTemplate) || DEFAULT_SETTINGS.nameTemplate,
     scope: s.scope === "size" ? "size" : "all",
+    recentFonts: [...new Set((Array.isArray(s.recentFonts) ? s.recentFonts : []).map((f) => str(f).replace(/["\\]/g, "").trim().slice(0, 80)).filter(Boolean))].slice(0, RECENT_FONTS),
   };
 }
 

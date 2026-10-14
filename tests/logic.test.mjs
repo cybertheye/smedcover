@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { blockLayout, virtualSize, layout, TEMPLATES } from "../ui/js/layout.js";
 import { parseCsv, csvToJobs } from "../ui/js/csv.js";
-import { normalizeProfile, normalizeCover, normalizeSettings, exportName, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
+import { useFont, normalizeProfile, normalizeCover, normalizeSettings, exportName, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
 import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex } from "../ui/js/layers.js";
 import { sampleProfile, starterProfile } from "../ui/js/presets.js";
 
@@ -87,7 +87,9 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.notEqual(c.layers, p.design.layers);                       // a copy, not the same array
   const own = normalizeCover({ layers: [{ type: "title", align: "left" }] }, p);
   assert.equal(own.layers.find((l) => l.id === "title").align, "left");
-  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size" });
+  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size", recentFonts: [] });
+  assert.deepEqual(normalizeSettings({ recentFonts: ["A", "A", "", 3, "B", "C", "D", "E", "F", "G"] }).recentFonts, ["A", "B", "C", "D", "E", "F"]);
+  assert.deepEqual(useFont(["A", "B", "C"], "B"), ["B", "A", "C"]);                 // the latest first, once
 });
 
 test("usedUserAssets finds uploads referenced by categories and layers", () => {
@@ -773,8 +775,8 @@ test("ai: a reference picture travels in the form each API style wants", async (
   const { withImage, buildPrompt: bp, buildRequest: br, normalizeAi: na } = await import("../ui/js/ai.js");
   const image = { mime: "image/jpeg", data: "QUJD" };
   const withPic = bp("just the cat", "", { kind: "flat", image: true }), noWords = bp("", "", { kind: "solid", image: true });
-  assert.ok(withPic.user.startsWith("Request: just the cat\n") && withPic.user.includes("reference picture is attached"));
-  assert.ok(noWords.user.startsWith("Request: the main subject of the attached picture") && noWords.user.includes("boxes and cylinders"));
+  assert.ok(withPic.user.includes('wanted: "just the cat"') && withPic.user.includes("flat sticker") && withPic.user.includes("Find the subject"));
+  assert.ok(noWords.user.includes("Decide what the picture is of") && noWords.user.includes("boxes and cylinders") && noWords.user.includes("not the scene"));
   assert.equal(bp("a cat").user, "Request: a cat");                                   // without a picture, as before
   assert.equal(withPic.system, bp("just the cat").system);                             // the style prompt is the same either way
   const o = br(na({ style: "openai", baseUrl: "https://a/v1", model: "m" }), "SYS", [{ role: "user", content: withImage("openai", "T", image) }]);

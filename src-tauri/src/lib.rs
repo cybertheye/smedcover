@@ -280,19 +280,44 @@ async fn save_text(app: AppHandle, name: String, text: String) -> Res<Option<Str
 
 // ---------------------------------------------------------------- fonts
 
-/// Family names of the fonts installed on this machine, sorted, without duplicates.
+/// A font family installed on this machine, and whether it can set Chinese.
+#[derive(Serialize)]
+struct FontInfo {
+    name: String,
+    cjk: bool,
+}
+
+/// The font families installed on this machine, sorted, without duplicates. A family counts as
+/// able to set Chinese when one of its faces has glyphs for a few everyday characters; a font
+/// without them leaves Chinese text to whatever the system falls back to.
 #[tauri::command]
-async fn list_system_fonts() -> Vec<String> {
-    let mut db = fontdb::Database::new();
-    db.load_system_fonts();
-    let mut names: Vec<String> = db
-        .faces()
-        .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
-        .filter(|name| !name.starts_with('.'))
-        .collect();
-    names.sort_by_key(|n| n.to_lowercase());
-    names.dedup();
-    names
+async fn list_system_fonts() -> Vec<FontInfo> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let mut db = fontdb::Database::new();
+        db.load_system_fonts();
+        let mut found: std::collections::BTreeMap<String, bool> = std::collections::BTreeMap::new();
+        for face in db.faces() {
+            let Some((name, _)) = face.families.first() else { continue };
+            if name.starts_with('.') {
+                continue;
+            }
+            let known = found.get(name).copied().unwrap_or(false);
+            let cjk = known
+                || db
+                    .with_face_data(face.id, |data, index| {
+                        ttf_parser::Face::parse(data, index)
+                            .map(|f| "的封面".chars().all(|c| f.glyph_index(c).is_some()))
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+            found.insert(name.clone(), cjk);
+        }
+        let mut fonts: Vec<FontInfo> = found.into_iter().map(|(name, cjk)| FontInfo { name, cjk }).collect();
+        fonts.sort_by_key(|f| f.name.to_lowercase());
+        fonts
+    })
+    .await
+    .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------- glyph outlines

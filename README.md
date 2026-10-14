@@ -128,9 +128,12 @@ A layer set to *Channel colour* changes with the channel; a *Custom* colour stay
 Every layer that carries words (title, corner tag, channel name, brand row, text layers) chooses its own font. Select the layer and look under *Font* in its properties:
 
 - **Default** — the bundled face, following the current look (a serif under Woodblock book, say). New layers start here.
+- **Recent** — the fonts used last, to reuse on other layers.
 - **Built-in** — Noto Sans SC, Bebas Neue, JetBrains Mono; the same on every platform.
 - **Imported** and **System fonts**.
 - The last entry, **＋ Add a font file…** — pick a font file: it is stored in the app and used on this layer at once, and from then on every layer finds it under *Imported*.
+
+A font marked *no Chinese* has no Chinese glyphs: choosing it changes Latin letters and digits only, and Chinese stays in the default face. To change the Chinese, pick a font without the mark (PingFang, Songti, Kaiti…). Imported fonts are not checked.
 
 Imported fonts live in this computer's app data and do not travel with profile or project files; opened elsewhere, a font that is not there shows as "not on this computer" and the default is used.
 
@@ -189,7 +192,7 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 | **Flat sticker** | Flat colour with a heavy outline, drawn like the built-in stickers | animals, characters, food, symbols |
 
 - The result is previewed twice: in its own colour, and following the current channel colour. If you like it, **Save to My assets** and use it like any other asset.
-- **Reference picture** — below the text box you can attach a picture, and the model draws its main subject; the text box may stay empty or add a word ("just the cat, not the background"). The picture is scaled down to 768 px on its longer side before it is sent. This needs a model that accepts image input; one that does not answers with an error, and the app says why.
+- **Reference picture** — below the text box you can attach a picture. The model first finds its main subject (ignoring the background, the table, the hand holding it, captions and watermarks), then draws that subject in the current look, solid or flat as chosen above. The text box can stay empty; write a word only to pick one thing out of several ("just the cup"). The picture is scaled down to 768 px on its longer side before it is sent. This needs a model that accepts image input; one that does not answers with an error, and the app says why.
 - A generated asset is the same kind of thing as a built-in one: sharp at any size and usable as a channel's graphic.
 - Once on the canvas it **follows the channel colour by default**, changing as you switch channels; untick *Use the channel colour* in the layer's properties to keep its own colour.
 - The style comes from a prompt preset in the app; you only describe the subject.
