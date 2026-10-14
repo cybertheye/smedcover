@@ -66,9 +66,10 @@ const layer = (id = S.layerId) => S.cover.layers.find((l) => l.id === id) || nul
 /** Geometry context of the size on the main canvas, as the layer maths wants it. */
 const frame = () => { const s = selSize(), [vw, vh] = virtualSize(s.w, s.h); return { vw, vh, key: sizeKey(s), catId: cat().id }; };
 function layerName(L) {
+  if (isFree(L.type) && L.name) return L.name;   // the user's own name for a layer they added
   if (L.type === "asset") return assetExists(L.ref) ? assetName(L.ref, getLang()) : t("assets.missing");
   if (L.type === "text") return L.text.split("\n")[0].replace(/\*/g, "").slice(0, 16) || t("layer.text");
-  if (L.type === "photo") return t(L.of ? "layer.photoCut" : L.fill ? "layer.photoFill" : "layer.photo");
+  if (L.type === "photo") return t(L.of || L.cut ? "layer.photoCut" : L.fill ? "layer.photoFill" : "layer.photo");
   return t("layer." + L.type);
 }
 
@@ -261,7 +262,7 @@ function removeGroup() {
   if (!gone.length) return;
   S.cover.layers = S.cover.layers.filter((L) => !gone.includes(L));
   S.picked = []; S.layerId = "bg";
-  touch({ cover: true, side: true });
+  touch({ cover: true, side: true, panel: onCoverTab() });   // the photos listed in the Cover tab follow
 }
 /** Applies a placement edit to a layer in the current scope, then redraws. */
 function edit(L, patch) { adjust(L, frame(), S.settings.scope, patch); touch({ cover: true }); }
@@ -285,23 +286,23 @@ function removeLayer(id = S.layerId) {
   const i = S.cover.layers.indexOf(L);
   S.cover.layers.splice(i, 1);
   S.layerId = S.cover.layers[Math.max(1, i - 1)].id;
-  touch({ cover: true, side: true });
+  touch({ cover: true, side: true, panel: onCoverTab() });
 }
 function duplicateLayer() {
   const L = layer(), c = L && duplicate(L);
   if (!c) return;
   insertAbove(S.cover.layers, L.id, c); S.layerId = c.id;
-  touch({ cover: true, side: true });
+  touch({ cover: true, side: true, panel: onCoverTab() });
 }
 function shiftLayer(dir) {
   const to = stepIndex(S.cover.layers, S.layerId, dir, cat().id);
-  if (to > 0 && moveLayer(S.cover.layers, S.layerId, to)) touch({ cover: true, side: true });
+  if (to > 0 && moveLayer(S.cover.layers, S.layerId, to)) touch({ cover: true, side: true, panel: onCoverTab() });
 }
 /** Which categories a free layer belongs to: null = all of them, or a list of category ids. */
 function setCats(L, cats) {
   if (cats) L.cats = cats; else delete L.cats;
   if (!appliesTo(L, cat().id)) toast(t("props.catsGone"));
-  touch({ cover: true, side: true });
+  touch({ cover: true, side: true, panel: onCoverTab() });
 }
 function catsControl(L) {
   const all = !L.cats;
@@ -584,8 +585,6 @@ async function loadPhotos(pids) {
 const mainPhoto = () => S.cover.layers.find((l) => fillsCanvas(l) && appliesTo(l, cat().id)) || null;
 /** The picture a photo layer shows: its own, or for a copy its original's. */
 const recordOf = (L) => { const base = L && (L.of ? layer(L.of) : L); return (base && S.photos.get(base.pid)) || null; };
-/** The copy of a photo that stands, cut out, in front of the title. */
-const frontOf = (L) => (L ? S.cover.layers.find((l) => l.type === "photo" && l.of === L.id && l.cut) || null : null);
 
 /**
  * Adds a picture (a data URL) as a photo layer and selects it. The first photo of a cover fills the
@@ -657,8 +656,7 @@ function shapeTile(shape) {
 function assetsTab() {
   const lang = getLang(), mine = [...userAssets.values()];
   return [
-    el("button", { class: "btn solid wide", onclick: uploadAssets }, t("assets.upload")),
-    el("div", { class: "hint", style: "margin:-6px 0 0" }, t("assets.hint")),
+    el("div", { class: "hint", style: "margin:0" }, t("assets.hint")),
     aiSection(),
     el("div", {}, cap("assets.mine", ` · ${mine.length}`), mine.length
       ? el("div", { class: "tiles" }, mine.map((a) => tile({ kind: "user", id: a.id }, () => removeAsset(a.id))))
@@ -703,35 +701,28 @@ async function ensureMask(pid, fresh = false) {
 /** A picture changed (a new one, a repaint): the layers cut from it get its new subject. */
 async function recut(pid) { if (S.cover.layers.some((l) => l.type === "photo" && l.cut && recordOf(l) === S.photos.get(pid))) await ensureMask(pid, true); }
 /**
- * Cuts the subject out of photo layer L and stands it in front of the title: a copy of the layer,
- * cut out, above the title (or above L, when L is higher), if there is none yet. L stays selected.
- * Returns whether it worked.
+ * Cuts the subject out of photo layer L into a new photo layer of its own: the same picture with
+ * its background removed, placed where L is, above the title (or above L, when L is higher). L is
+ * kept as it was; the new layer is selected and moves on its own from then on. Returns it, or null.
  */
-async function cutOut(L, fresh = false) {
-  if (!L || L.type !== "photo" || L.of || CUT.busy || !canCut()) return false;
-  if (!(await ensureMask(L.pid, fresh))) return false;
-  if (!frontOf(L)) {
-    const at = (id) => S.cover.layers.findIndex((l) => l.id === id);
-    insertAbove(S.cover.layers, at(L.id) > at("title") ? L.id : "title", newLayer("photo", { of: L.id, cut: true }));
-    toast(t("cut.made"));
-  }
+async function cutOut(L) {
+  if (!L || L.type !== "photo" || L.of || CUT.busy || !canCut()) return null;
+  if (!(await ensureMask(L.pid))) return null;
+  const c = newLayer("photo", { pid: L.pid, fill: L.fill, treat: L.treat, cut: true });
+  c.t = JSON.parse(JSON.stringify(L.t)); c.o = L.o;
+  if (L.cats) c.cats = [...L.cats];
+  const at = (id) => S.cover.layers.findIndex((l) => l.id === id);
+  insertAbove(S.cover.layers, at(L.id) > at("title") ? L.id : "title", c);
+  S.layerId = c.id; S.picked = [];
   touch({ cover: true, side: true, panel: true });
-  return true;
+  toast(t("cut.made"));
+  return c;
 }
-/** Takes L's cut-out back: the copies standing in front go. */
-function uncut(L) {
-  S.cover.layers = S.cover.layers.filter((l) => !(l.of === L.id && l.cut));
-  if (!layer()) S.layerId = L.id;
-  touch({ cover: true, side: true, panel: true });
-  toast(t("cut.undone"));
-}
-/** Photo layer L's subject in front of the title: cut it out, again, or take it back. */
+/** Photo layer L's subject, cut out into a new photo layer. */
 function cutBox(L) {
-  const has = !!frontOf(L);
   return el("div", { class: "cut" },
-    el("button", { class: "btn wide", disabled: CUT.busy, onclick: () => cutOut(L, has) }, t(CUT.busy ? "cut.busy" : has ? "cut.again" : "cut.go")),
-    has && el("button", { class: "btn wide", disabled: CUT.busy, onclick: () => uncut(L) }, t("cut.undo")),
-    el("div", { class: "hint" }, t(has ? "cut.done" : "cut.hint")));
+    el("button", { class: "btn wide", disabled: CUT.busy, onclick: () => cutOut(L) }, t(CUT.busy ? "cut.busy" : "cut.go")),
+    el("div", { class: "hint" }, t("cut.hint")));
 }
 
 // ---------- repainting a photo with an image model (see repaint.js)
@@ -1196,14 +1187,6 @@ async function adoptAsset(name, src, id = assetIdFor(src)) {
   await saveAssetRecord(a).catch(fail);
   return id;
 }
-async function uploadAssets() {
-  let bad = 0;
-  for (const f of await pickFiles("image/png,image/svg+xml,image/webp,image/jpeg", true)) {
-    if (!(await adoptAsset(f.name.replace(/\.[^.]+$/, ""), await readAs(f, "readAsDataURL")))) bad++;
-  }
-  if (bad) toast(t("msg.badFile"));
-  renderPanel();
-}
 function removeAsset(id) {
   const inUse = [...S.profiles.flatMap((p) => usedUserAssets(p, null)), ...usedUserAssets(null, S.cover)].includes(id);
   if (inUse && !confirm(t("msg.assetInUse"))) return;
@@ -1370,7 +1353,8 @@ let dragId = null;
 function layerRow(L) {
   const icon = (glyph, off, title, fn) => el("button", { class: "ic" + (off ? " off" : ""), title, onclick: (e) => { e.stopPropagation(); fn(); touch({ cover: true, side: true }); } }, glyph);
   const on = L.id === S.layerId || group().includes(L);
-  return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}`, draggable: L.type !== "bg", onclick: (e) => (e.shiftKey ? togglePick(L.id) : selectLayer(L.id)),
+  const free = isFree(L.type) || L.type === "subject";
+  return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}`, dataset: { id: L.id }, draggable: L.type !== "bg", onclick: (e) => (e.shiftKey ? togglePick(L.id) : selectLayer(L.id)),
     ondragstart: (e) => { dragId = L.id; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", L.id); },
     ondragend: () => { dragId = null; },
     ondragover: (e) => { if (dragId && dragId !== L.id) { e.preventDefault(); e.currentTarget.classList.add("over"); } },
@@ -1380,13 +1364,52 @@ function layerRow(L) {
       const id = dragId; dragId = null;
       if (!id) return;
       const from = S.cover.layers.findIndex((l) => l.id === id), to = S.cover.layers.indexOf(L);
-      if (moveLayer(S.cover.layers, id, from < to ? to : to + 1)) touch({ cover: true, side: true }); else renderSide();
+      if (moveLayer(S.cover.layers, id, from < to ? to : to + 1)) touch({ cover: true, side: true, panel: onCoverTab() }); else renderSide();
     } },
     icon(L.visible ? "◉" : "○", !L.visible, t("layers.show"), () => { L.visible = !L.visible; }),
     PINNED.includes(L.type) ? el("span", { class: "ic pin", title: t("layers.pinned." + L.type) }, "🔒")
       : icon(L.locked ? "▣" : "□", !L.locked, t("layers.lock"), () => { L.locked = !L.locked; }),
-    el("span", { class: "nm" }, layerName(L), isFree(L.type) && el("span", { class: "ty" }, L.type === "text" ? "T" : L.type === "photo" ? "▣" : "+"),
-      L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) })));
+    el("span", { class: "nm", title: free ? t("layers.rename") : null, onclick: free ? (e) => { if (e.shiftKey) return; e.stopPropagation(); selectLayer(L.id); renameLayer(L.id); } : null }, layerName(L),
+      L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) })),
+    el("span", { class: "kinds" }, layerKinds(L)));
+}
+/** A layer's icons: what it is (photo, text, vector or bitmap asset), then whose it is (the template's, or added by the user). */
+function layerKinds(L) {
+  const icon = (name, tip) => el("span", { class: "kind " + name, title: tip, innerHTML: ICONS[name] });
+  const free = isFree(L.type) || L.type === "subject";
+  let what = null;
+  if (L.type === "photo" || L.type === "subject") what = icon("photo", t("layers.kind.photo"));
+  else if (L.type === "text") what = icon("text", t("layers.kind.text"));
+  else if (L.type === "asset") {
+    const a = L.ref.kind === "user" && userAssets.get(L.ref.id), raster = a && !a.spec && !/^data:image\/svg/.test(a.src || "");
+    what = raster ? icon("photo", t("layers.kind.image")) : icon("svg", t("layers.kind.svg"));
+  }
+  return [what, free ? icon("user", t("layers.kind.user")) : icon("system", t("layers.kind.system"))];
+}
+/** 14-px line icons for the layer list, in the text colour. */
+const ICONS = Object.fromEntries(Object.entries({
+  system: '<circle cx="8" cy="8" r="2.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>',
+  user: '<circle cx="8" cy="5.2" r="2.7"/><path d="M2.6 14.5c.6-3 2.7-4.6 5.4-4.6s4.8 1.6 5.4 4.6"/>',
+  photo: '<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M1.5 11.5l4-4 3 3 2-2 4 4"/><circle cx="11" cy="5.8" r="1.1"/>',
+  text: '<path d="M3 3.5h10M8 3.5v10M6 13.5h4"/>',
+  svg: '<path d="M8 1.8l4.6 5.4L8 14.2 3.4 7.2z"/><path d="M8 1.8v6.4"/><circle cx="8" cy="9.2" r="1.1"/>',
+}).map(([k, d]) => [k, `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`]));
+/** Turns a layer's name in the list into a field: Enter or leaving it keeps the new name, Esc does not; an empty name goes back to the automatic one. */
+function renameLayer(id) {
+  const L = layer(id), row = $("side").querySelector(`.layer[data-id="${CSS.escape(id)}"]`);
+  if (!L || !row) return;
+  const auto = layerName({ ...L, name: "" }), was = layerName(L);
+  const input = el("input", { class: "rename", value: was, maxLength: 60, spellcheck: false,
+    onclick: (e) => e.stopPropagation(), onpointerdown: (e) => e.stopPropagation(),
+    onkeydown: (e) => { e.stopPropagation(); if (e.key === "Enter") input.blur(); if (e.key === "Escape") { input.value = was; input.blur(); } },
+    onblur: () => {
+      const v = input.value.trim();
+      if (v !== was) { if (v && v !== auto) L.name = v; else delete L.name; }
+      touch({ cover: true, side: true, panel: onCoverTab() });
+    } });
+  row.draggable = false;
+  row.querySelector(".nm").replaceWith(input);
+  input.focus(); input.select();
 }
 /** Where a layer is placed is set on the canvas (drag, the handles, the wheel); here it can be put back. */
 function placementControls(L) {
@@ -1510,7 +1533,7 @@ function renderSide() {
   if (layer() && !appliesTo(layer(), cat().id)) S.layerId = "bg";   // the selected layer is not on this category's cover
   const side = $("side"), y = side.scrollTop, L = layer(), free = L && isFree(L.type), here = S.cover.layers.filter((l) => appliesTo(l, cat().id));
   // keep typing in the text box alive across rebuilds
-  const typing = document.activeElement && side.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA";
+  const typing = document.activeElement && side.contains(document.activeElement) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename"));
   if (typing) return;
   const i = L ? here.indexOf(L) : -1, many = group();
   side.replaceChildren(
@@ -1961,9 +1984,9 @@ async function selfTest(dir) {
         const keep = JSON.stringify(S.cover), t0 = performance.now();
         S.cover.layers = S.cover.layers.filter((l) => l.type !== "photo");   // so the photo added is the cover's first, and fills it
         const main = await addPhoto(real), filled = !!main && main.fill && S.cover.layers.indexOf(main) === 1;
-        const ok = await cutOut(main), rec = recordOf(main), m = rec && rec.mask && rec.mask.img, front = frontOf(main);
+        const front = await cutOut(main), ok = !!front, rec = recordOf(main), m = rec && rec.mask && rec.mask.img;
         const at = (id) => S.cover.layers.findIndex((l) => l.id === id);
-        report.subject = { filled, stillSelected: S.layerId === main.id, ok, ms: Math.round(performance.now() - t0), photo: sizeOf(rec.img), mask: m ? sizeOf(m) : null, aboveTitle: !!front && at(front.id) === at("title") + 1, error: CUT.error };
+        report.subject = { filled, kept: S.cover.layers.includes(main) && !main.cut, own: !!front && !front.of && front.pid === main.pid && front.fill, selected: !!front && S.layerId === front.id, ok, ms: Math.round(performance.now() - t0), photo: sizeOf(rec.img), mask: m ? sizeOf(m) : null, aboveTitle: !!front && at(front.id) === at("title") + 1, error: CUT.error };
         if (ok) {
           front.outline = 8; front.shadow = 0.6; main.blur = 12;
           S.cover.title = "*Subject* in front\nof the title";

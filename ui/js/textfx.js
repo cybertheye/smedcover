@@ -242,7 +242,7 @@ export function paintRuns(ctx, pass, o, id = "auto") {
   if (fx === "cel") return house(ctx, pass, o);
   if (fx === "plain") return pass((a, x) => { ctx.fillStyle = a.hi ? o.hiCss : o.fillCss; ctx.fillText(a.t, x, 0); });
   if (fx === "riso" && look().id !== "riso") {   // off the paper there is nothing to overprint on: the second colour simply sits behind
-    const g = o.fs * 0.05 * Math.max(0.3, o.shadowAmt);
+    const g = o.fs * 0.05 * o.shadowAmt;
     pass((a, x) => { ctx.fillStyle = a.hi ? o.fillCss : o.hiCss; ctx.fillText(a.t, x + g, g * 0.8); });
     pass((a, x) => { ctx.fillStyle = a.hi ? o.hiCss : o.fillCss; ctx.fillText(a.t, x, 0); });
     return;

@@ -125,7 +125,10 @@ A cover is an array of layers, bottom first.
 | Free layers | `asset` `text` `photo` | Assets, text and photos added by the user; can be deleted and duplicated. |
 
 `normalizeLayers()` repairs a layer list: it drops unknown layers, puts back missing bound layers,
-keeps the background at the bottom and makes ids unique.
+keeps the background at the bottom and makes ids unique. A free layer may carry `name`, the name the
+user gave it in the layer list (`layerName()` prefers it; without one the name comes from the type and
+content). Every `.btn` in the interface dresses as the current look through `<html data-look>` (the
+`[data-look=…] .btn` rules in `index.html`).
 
 ### 4.1 Placement: one collage mapped to every size
 
@@ -278,9 +281,9 @@ shaded by the way they face, each group is filled as one shape, then the back fa
 
 A photo is a free layer of type `photo`. The layer keeps only the picture's id `pid`; the pictures are in the photo store `S.photos`: `pid → {src, img, original, mask}` (the picture, the one before an AI repaint, the subject mask). In the session each is a file in `photos/`; a project file (version 3) embeds them under `photos`. At start only the pictures the cover uses are read and other files are removed. Duplicating layers and undo never copy a picture.
 
-Two ways to place one: `fill` covers the canvas and is placed as the separate background photo used to be (`t.all.x/y` an offset around 0.5, `s` a scale on top of covering, no turning); otherwise like a print, nominally 1000 units on its longer side, at the free layer's place, scale, angle and stretch. With `of` naming another photo layer, the layer shows that layer's picture in that layer's place — the cut-out subject is such a copy of a photo, with `cut` on, put above the title (above the photo when the photo is higher).
+Two ways to place one: `fill` covers the canvas and is placed as the separate background photo used to be (`t.all.x/y` an offset around 0.5, `s` a scale on top of covering, no turning); otherwise like a print, nominally 1000 units on its longer side, at the free layer's place, scale, angle and stretch. With `of` naming another photo layer, the layer shows that layer's picture in that layer's place (an aligned copy); only cut-outs upgraded from earlier files (`upgradeCover`) use it now. *Cut out the subject* (`cutOut`) makes an independent photo layer: the same `pid`, `cut` on, the original's `t` and `fill` copied, put above the title (above the photo when the photo is higher), and from then on each moves on its own. As they share the picture record, an AI repaint of either changes both and cuts out again.
 
-Adding: `addPhoto()` is the one way in (an upload, a drop on the window, an AI picture added to the cover). While this channel has no photo filling the canvas, the new one gets `fill` and goes just above the Background layer; otherwise it goes above the selected layer like a print, where it was dropped if dropped on the canvas. *Cover → Add photos* lists this channel's photos (not the copies) in layer order, each with its own AI repaint (`REP.for` is the one open); the cut-out and *Remove the background* are in the photo layer's properties (`cutBox`, `photoControls`).
+Adding: `addPhoto()` is the one way in (an upload, a drop on the window, an AI picture added to the cover). While this channel has no photo filling the canvas, the new one gets `fill` and goes just above the Background layer; otherwise it goes above the selected layer like a print, where it was dropped if dropped on the canvas. *Cover → Add photos* lists this channel's photos (not the copies) in layer order (rebuilt when a layer is deleted, duplicated, re-ordered or given other channels), each with its own AI repaint (`REP.for` is the one open); the cut-out and *Remove the background* are in the photo layer's properties (`cutBox`, `photoControls`).
 
 Painting: the photo goes through the look's treatment of photos — the look's `background` hook is called with `env.photo` set to this picture and `drawPhoto` drawing it in its own frame — on the whole canvas (a look's washes must cover it), and then only the photo's rectangle is kept, or, with `cut`, only where the mask is opaque. A photo with no cut-out, outline or shadow is painted straight onto the canvas inside a rectangle clip, with no work canvas; the others are put together on work canvases. The outline and shadow come from the silhouette of the shape (the mask, or the photo's rectangle), made once at the photo's scale (at most 1024 px) and cached per shape, so a frame lays one image. A copy makes no hit: clicks go through to what is under it.
 

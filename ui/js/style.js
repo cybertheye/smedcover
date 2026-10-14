@@ -584,7 +584,7 @@ const riso = {
   },
   /** Two inks, one printed slightly off the other, darker where they overlap. */
   runs(ctx, pass, o, p) {
-    const fs = o.fs, C = o.hi || o.C || RISO.pink, main = o.fill || RISO.blue, g = fs * (0.035 * Math.max(0.3, o.shadowAmt) + 0.012 * p.shift);
+    const fs = o.fs, C = o.hi || o.C || RISO.pink, main = o.fill || RISO.blue, g = fs * o.shadowAmt * (0.035 + 0.012 * p.shift);   // the shadow slider is how far off the second ink is printed: 0 in register
     pass((a, x) => { ctx.fillStyle = css(a.hi ? main : C); ctx.fillText(a.t, x + g, g * 0.8); });
     ctx.save(); ctx.globalCompositeOperation = "multiply";
     pass((a, x) => { ctx.fillStyle = css(a.hi ? C : main); ctx.fillText(a.t, x, 0); });

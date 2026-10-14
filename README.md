@@ -28,7 +28,7 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
   - Setup: **Brand**, **Sizes & export**, **AI**
 - **Centre** — the main canvas, and below it a thumbnail of every output size. Click one to show that size on the canvas.
 - **Right** (Edit only) — the layer list and the selected layer's properties.
-- **Top bar** — profile switcher, open and save project, undo and redo, SURPRISE ME, export. Those last two buttons dress to match the look of the current cover.
+- **Top bar** — profile switcher, open and save project, undo and redo, SURPRISE ME (你看着办 in Chinese), export. Every button dresses to match the look of the current cover, those two the most.
 
 ## Quick start
 
@@ -57,20 +57,19 @@ Every photo is a *Photo* layer. Under *Add photos* in *Edit → Cover*:
 
 Below *Add photos* every photo on the cover is listed in layer order: a thumbnail, its size, and *AI repainted* on one that was. Click a thumbnail to select its layer; each photo has its own *AI repaint* below it.
 
-Each photo's properties: fill the canvas, another photo, blur, dim, the look's treatment of photos (tint, duotone, black and white…; on by default), remove the background, cut out the subject in front of the title, an outline (width and colour) and a shadow. With the background removed the outline and shadow follow the subject; otherwise the photo's edge, like a print.
+Each photo's properties: fill the canvas, another photo, blur, dim, the look's treatment of photos (tint, duotone, black and white…; on by default), remove the background, cut out the subject (into a new photo layer), an outline (width and colour) and a shadow. With the background removed the outline and shadow follow the subject; otherwise the photo's edge, like a print.
 
 The Background layer itself is only the ground: light or dark, and the grid. It always stays at the bottom. Light or dark is set in the Background layer's properties (not in the Style tab); while a photo fills the canvas it covers the ground, and the lettering is set as on a dark one.
 
-### Cutting out the subject, in front of the title (macOS 14 and later)
+### Cutting out the subject (macOS 14 and later)
 
-Select a photo: *Cut out the subject, in front of the title* is in its properties.
+Select a photo: *Cut out the subject into a new photo layer* is in its properties.
 
 - macOS's own recognition (the same "lift subject" the Photos app has) lifts the people, animals or objects out of the photo, on this computer — the photo is not uploaded — usually in a second or two.
-- The subject is a *Cut-out subject* copy of that photo: the same picture in the same place with its background removed, placed just above the title, so it covers part of the title as on a magazine cover. Move it up or down in the layer list to decide what it stands in front of.
-- It follows its photo: it moves and scales with it and gets the look's treatment too. Its blur, dim, outline and shadow are its own (select it in the layer list); it is sharp by default, which reads as depth when the background photo is blurred.
-- In the photo's properties, *Undo the cut-out* removes the copy; *Cut out again* recognises the subject anew.
-- Another photo, or a used AI repaint, is cut out again by itself.
-- *Remove the background* in the properties uses the same recognition: the photo itself keeps only its subject, as a sticker.
+- The subject goes into a new photo layer, *Cut-out subject*: the same picture with its background removed, lined up with the photo and placed just above the title, so it covers part of the title as on a magazine cover. The photo itself stays as it was.
+- The new layer is independent: move, scale and turn it, give it its own blur, dim, outline and shadow; move it up or down in the layer list to decide what it stands in front of. Delete the layer when you no longer want it. Cut out as often as you like: each time is a new layer.
+- It shares its picture with the photo: an AI repaint of either, once used, changes both and is cut out again; *Another photo* changes only the layer it is on.
+- *Remove the background* in the properties uses the same recognition: the layer itself keeps only its subject, without a new layer.
 - The cut-out is kept with the photo in the session and in project files. A photo with no clear subject says so.
 
 ### Generating a photo with AI
@@ -169,6 +168,8 @@ In *This size only*, the channel graphic's placement is remembered per channel.
 
 - The list on the right runs front to back, top to bottom. Drag a row to re-order, or use ▲ ▼.
 - The two icons on each row are show/hide and lock. Background and Corner brackets carry a 🔒: they are fixed layers.
+- At the end of each row: what the layer is (photo, text "T", vector asset as a pen nib, bitmap asset), then whose it is — a gear for a built-in layer (every cover has it; it cannot be deleted), a person for a layer you added.
+- Layers you added (photos, text, assets) are renamed by clicking their name: Enter or clicking elsewhere keeps it, Esc does not, an empty name goes back to the automatic one.
 - **＋ Text** adds a text layer; clicking an item in Assets adds it. New layers go directly above the selected one.
 - Position, size, stretch and rotation are set on the canvas with the mouse (see the table above); the properties panel has opacity and *Reset placement*.
 
@@ -266,7 +267,7 @@ Deleting a channel also deletes the layers that belonged only to it.
 
 ### Assets
 
-- **My assets** — upload PNG, SVG, JPG or WebP; transparent PNGs look best.
+- **My assets** — assets made with AI generation and kept. Photos are uploaded under *Cover → Add photos*.
 - **Channel graphics** — twenty cel-shaded graphics that follow the channel colour.
 - **Stickers** — a free pack of sixty; each can optionally follow the channel colour.
 - **Colour block & edge** — twelve shapes; click one to reshape the colour block layer.
