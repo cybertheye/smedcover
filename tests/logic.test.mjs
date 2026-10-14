@@ -940,3 +940,16 @@ test("repaint: the user's own styles are files of the same form, read leniently 
   assert.equal(freeId("水彩.md", []), "style");
   assert.equal(freeId("SKILL.md", ["skill"]), "skill-2");
 });
+
+test("layers: the subject layer is optional, at most one, removable, and keeps its settings", async () => {
+  const { normalizeLayers, isRemovable, newLayer } = await import("../ui/js/layers.js");
+  const base = normalizeLayers([]);
+  assert.ok(!base.some((l) => l.type === "subject"));                       // not part of a new cover
+  const raw = [...base.slice(0, 5), { type: "subject", outline: 99, shadow: 0.5, follow: true, ink: "#FF0000", t: {} }, { type: "subject" }, ...base.slice(5)];
+  const out = normalizeLayers(raw), subs = out.filter((l) => l.type === "subject");
+  assert.equal(subs.length, 1);                                              // a second one is dropped
+  assert.deepEqual([subs[0].id, subs[0].outline, subs[0].shadow, subs[0].follow, subs[0].ink], ["subject", 60, 0.5, true, "#ff0000"]);
+  assert.equal(out.indexOf(subs[0]), 5);                                     // where it was put
+  assert.ok(isRemovable("subject") && isRemovable("text") && !isRemovable("title") && !isRemovable("bg"));
+  assert.deepEqual([newLayer("subject").outline, newLayer("subject").ink], [0, undefined]);
+});

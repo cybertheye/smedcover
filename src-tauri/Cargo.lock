@@ -3037,6 +3037,8 @@ dependencies = [
  "base64 0.22.1",
  "fontdb",
  "image",
+ "objc2",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "tauri",

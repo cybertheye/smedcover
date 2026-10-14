@@ -17,6 +17,13 @@
 
 export const BOUND_TYPES = ["bg", "accent", "graphic", "brand", "title", "tag", "catname", "frame"];
 export const FREE_TYPES = ["asset", "text"];
+/**
+ * Layers a cover may have once at most, added and removed by the user: "subject", the background
+ * photo's subject cut out (see render.js), which sits above the title so it can cover it.
+ */
+export const OPTIONAL_TYPES = ["subject"];
+/** Layers the user can delete: the free ones and the optional ones. */
+export const isRemovable = (type) => FREE_TYPES.includes(type) || OPTIONAL_TYPES.includes(type);
 /** Shapes the colour block and its dividing edge can take ("slant" is the template's own). */
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes", "arc"];
 /** The text effects a headline can be given (painted in textfx.js). Absent on a layer means "auto": the look decides. */
@@ -40,6 +47,7 @@ const PROPS = {
   frame: {},
   asset: { ref: null, tint: false },
   text: { text: "", plate: false, color: "white" },
+  subject: { outline: 0, shadow: 0, follow: false },   // + `ink`, the outline's colour (white without one)
 };
 const COLORS = ["white", "accent", "ink", "custom"];   // "custom" uses the layer's own `ink`
 
@@ -92,6 +100,10 @@ function normalizeLayer(raw, catIds) {
     case "brand": L.rail = raw.rail !== false; break;
     case "title": L.stroke = num(raw.stroke, 1, 0, 2); L.shadow = num(raw.shadow, 1, 0, 2); break;
     case "catname": L.showName = raw.showName !== false; L.plate = raw.plate !== false; break;
+    case "subject":
+      L.outline = num(raw.outline, 0, 0, 60); L.shadow = num(raw.shadow, 0, 0, 1); L.follow = raw.follow === true;
+      if (typeof raw.ink === "string" && /^#[0-9a-f]{6}$/i.test(raw.ink)) L.ink = raw.ink.toLowerCase();
+      break;
     case "asset": {
       const r = raw.ref;
       if (!r || !["graphic", "sticker", "user"].includes(r.kind) || typeof r.id !== "string") return null;

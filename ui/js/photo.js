@@ -70,9 +70,14 @@ function greyOf(src, im, key, hi) {
  * Draws `im` behind everything on a w x h (virtual) canvas. adj = {dx,dy,s}; blur in px; dim 0..1;
  * grey 0..1 takes that much of the colour out.
  */
-export function drawPhoto(ctx, im, w, h, adj, blur, dim, hiRes, grey = 0) {
+/** Where the photo lands on a w × h cover: it fills the cover, then is scaled by adj.s and moved by adj.dx / dy. */
+export function photoRect(im, w, h, adj) {
   const k = Math.max(w / im.naturalWidth, h / im.naturalHeight) * adj.s, iw = im.naturalWidth * k, ih = im.naturalHeight * k;
-  const src = blur > 0 ? blurred(im, blur, hiRes) : im, x = (w - iw) / 2 + adj.dx, y = (h - ih) / 2 + adj.dy;
+  return { x: (w - iw) / 2 + adj.dx, y: (h - ih) / 2 + adj.dy, iw, ih };
+}
+export function drawPhoto(ctx, im, w, h, adj, blur, dim, hiRes, grey = 0) {
+  const { x, y, iw, ih } = photoRect(im, w, h, adj);
+  const src = blur > 0 ? blurred(im, blur, hiRes) : im;
   ctx.imageSmoothingQuality = "high";
   if (grey < 1) ctx.drawImage(src, x, y, iw, ih);
   if (grey > 0) { ctx.save(); ctx.globalAlpha = Math.min(1, grey); ctx.drawImage(greyOf(src, im, `${blur}|${hiRes}`, hiRes), x, y, iw, ih); ctx.restore(); }

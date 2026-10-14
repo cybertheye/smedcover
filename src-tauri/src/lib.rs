@@ -22,6 +22,8 @@ use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
+mod subject;
+
 /// Colour put behind transparent pixels when saving JPEG (the app's dark field colour).
 const MATTE: [u8; 3] = [10, 10, 18];
 
@@ -275,6 +277,16 @@ fn write_image(request: Request<'_>) -> Res<String> {
     let path = dir.join(safe_name(&meta.name)?);
     fs::write(&path, encode(png, &meta.format, meta.quality)?).map_err(err)?;
     Ok(path.display().to_string())
+}
+
+/// Cuts the subject out of a photo (raw image bytes in the body): its mask as PNG bytes, the
+/// photo's size, opaque where the subject is. See `subject.rs`; macOS 14 and later.
+#[tauri::command(async)]
+fn subject_mask(request: Request<'_>) -> Res<tauri::ipc::Response> {
+    match request.body() {
+        InvokeBody::Raw(body) => Ok(tauri::ipc::Response::new(subject::mask_png(body)?)),
+        _ => Err("expected a binary body".into()),
+    }
 }
 
 /// Asks where to save a text file (project, profile, CSV template) and writes it.
@@ -720,6 +732,16 @@ async fn ai_request(
     .map_err(err)?
 }
 
+/// In self-test mode, a real photo to cut the subject out of (SMEDCOVER_SELFTEST_PHOTO), as a data URL.
+#[tauri::command]
+fn selftest_photo() -> Option<String> {
+    use base64::Engine;
+    selftest_root()?;
+    let bytes = fs::read(std::env::var("SMEDCOVER_SELFTEST_PHOTO").ok()?).ok()?;
+    let mime = if bytes.starts_with(b"\x89PNG") { "image/png" } else { "image/jpeg" };
+    Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+}
+
 /// In self-test mode, the URL of a stand-in AI endpoint to exercise `ai_request` against.
 #[tauri::command]
 fn selftest_ai() -> Option<String> {
@@ -737,6 +759,8 @@ pub fn run() {
             app_list,
             app_delete,
             reveal_data_dir,
+            subject_mask,
+            selftest_photo,
             save_image,
             pick_folder,
             write_image,

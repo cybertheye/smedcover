@@ -8,7 +8,7 @@ import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont, ratioText } from "./store.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isPickable, appliesTo, stepIndex, adjust, resetPlacement, writeKey, insertAbove, moveLayer, duplicate } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isRemovable, isPickable, appliesTo, stepIndex, adjust, resetPlacement, writeKey, insertAbove, moveLayer, duplicate } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
@@ -23,7 +23,7 @@ import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, bu
 
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
-const FIXED = ["frame"];                  // layers that follow the template and cannot be moved
+const FIXED = ["frame", "subject"];       // layers that cannot be moved: the frame follows the template, the subject the photo
 const PINNED = ["bg", "frame"];          // shown with a padlock in the layer list: always there, never placed by hand
 
 /** Tiny element builder: el("div", {class:"x", onclick}, child, "text"). */
@@ -48,6 +48,7 @@ const S = {
   profiles: [], profile: null, cover: null,
   photo: null, photoSrc: "",             // decoded background Image + its data URL
   photoOriginal: "",                     // the photo as it was before an AI repaint (data URL), or ""
+  photoMask: null,                       // the photo's subject cut out: {img, src, of} — an alpha mask the photo's size, `of` the photo it belongs to
   imageAi: normalizeImageAi(null),       // the image model that repaints photos (image-ai.json)
   repaintStyles: [],                     // the built-in repaint styles: [{id, file, name}] (ui/repaint-styles/index.json)
   myStyles: [],                          // the user's own repaint styles, Markdown files in the app data folder repaint-styles/ (see userStyle)
@@ -171,11 +172,16 @@ async function applyProfile() {
 
 // ---------- drawing: the main canvas every frame, the thumbnails a little later
 function paint(cv, size, pixelW, cover = S.cover, index = catIndex(), select = null, live = null, extra = {}) {
-  drawCover(cv, { profile: S.profile, catIndex: index, size, pixelW, cover, photo: S.photo, select, live, ...extra });
+  drawCover(cv, { profile: S.profile, catIndex: index, size, pixelW, cover, photo: S.photo, mask: S.photoMask, select, live, ...extra });
 }
 // While a layer is dragged on the canvas, the rest of the cover is painted once and reused (see drawCover).
 let LIVE = null;
-const goLive = (ids) => { ids = [].concat(ids); const key = ids.join(" "); if (!LIVE || LIVE.key !== key) LIVE = { ids, key }; };
+const goLive = (ids) => {
+  ids = [].concat(ids);
+  if (ids.includes("bg") && layer("subject")) ids.push("subject");   // the subject is the photo again: it moves with it
+  const key = ids.join(" ");
+  if (!LIVE || LIVE.key !== key) LIVE = { ids, key };
+};
 const endLive = () => { if (LIVE) { LIVE = null; queueDraw(); } };
 function drawMain() {
   const stage = $("stage"), cv = $("cv"), size = selSize(), [vw, vh] = virtualSize(size.w, size.h);
@@ -274,7 +280,7 @@ function addAsset(ref, at) {
 }
 function removeLayer(id = S.layerId) {
   const L = layer(id);
-  if (!L || !isFree(L.type)) return;
+  if (!L || !isRemovable(L.type)) return;
   const i = S.cover.layers.indexOf(L);
   S.cover.layers.splice(i, 1);
   S.layerId = S.cover.layers[Math.max(1, i - 1)].id;
@@ -495,6 +501,7 @@ function coverTab() {
       S.photo && el("div", { class: "thumb" }, el("img", { src: S.photoSrc, alt: "" }),
         el("span", {}, `${S.photo.naturalWidth} × ${S.photo.naturalHeight}`, S.photoOriginal && ` · ${t("rep.isRepainted")}`)),
       el("div", { class: "hint" }, t("cover.photoHint")),
+      S.photo && cutBox(),
       S.photo && repaintBox()),
   ];
 }
@@ -505,6 +512,7 @@ async function setPhoto(src, original = "") {
   if (src && !S.photo) { S.photoSrc = ""; toast(t("msg.badFile")); }
   S.photoOriginal = S.photo ? original : "";
   REP.result = null; REP.error = "";
+  setMask("");   // a cut-out belongs to the photo it was made from
   files.write("session-photo", S.photoSrc).catch(() => null);
   files.write("session-photo-original", S.photoOriginal).catch(() => null);
   if (S.photo) S.layerId = "bg";
@@ -544,6 +552,55 @@ function assetsTab() {
   ];
 }
 // ---------- AI-generated assets
+// ---------- the photo's subject, cut out (Apple Vision, macOS 14+; see src-tauri/src/subject.rs)
+const CUT = { busy: false, error: "" };
+const canCut = () => native && /Mac/i.test(navigator.userAgent);
+/** Sets the subject mask of the current photo from a PNG data URL ("" for none), and keeps it for the session. */
+async function setMask(src) {
+  const img = src ? await loadImage(src) : null;
+  S.photoMask = img && S.photo ? { img, src, of: S.photo } : null;
+  files.write("session-photo-mask", S.photoMask ? src : "").catch(() => null);
+}
+/** The photo as JPEG bytes, upright, no bigger than `max` on its longer side. */
+async function photoBytes(im, max = 4096) {
+  const k = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight)), cv = document.createElement("canvas");
+  cv.width = Math.round(im.naturalWidth * k); cv.height = Math.round(im.naturalHeight * k);
+  const x = cv.getContext("2d");
+  x.fillStyle = "#ffffff"; x.fillRect(0, 0, cv.width, cv.height); x.drawImage(im, 0, 0, cv.width, cv.height);
+  return new Uint8Array(await (await new Promise((r) => cv.toBlob(r, "image/jpeg", 0.95))).arrayBuffer());
+}
+/**
+ * Cuts the subject out of the photo and puts the subject layer above the title (if the cover has
+ * none yet). Returns whether it worked.
+ */
+async function cutOut() {
+  if (!S.photo || CUT.busy || !canCut()) return false;
+  const photo = S.photo;
+  Object.assign(CUT, { busy: true, error: "" }); if (onCoverTab()) renderPanel();
+  let ok = false;
+  try {
+    const png = await invoke("subject_mask", await photoBytes(photo));
+    if (S.photo !== photo) return false;              // the photo changed meanwhile
+    const src = await readAs(new Blob([png], { type: "image/png" }), "readAsDataURL");
+    await setMask(src);
+    if (!layer("subject")) insertAbove(S.cover.layers, "title", newLayer("subject"));
+    S.layerId = "subject"; ok = true;
+    touch({ cover: true, side: true });
+  } catch (e) {
+    const m = String(e && e.message ? e.message : e);
+    CUT.error = /no subject/i.test(m) ? t("cut.none") : /^unsupported/i.test(m) ? t("cut.unsupported") : t("msg.failed", m);
+  } finally { CUT.busy = false; if (onCoverTab()) renderPanel(); }
+  return ok;
+}
+function cutBox() {
+  if (!canCut()) return el("div", { class: "hint" }, t("cut.onlyMac"));
+  const has = !!(S.photoMask && layer("subject"));
+  return el("div", { class: "cut" },
+    el("button", { class: "btn wide", style: "margin-top:10px", disabled: CUT.busy, onclick: cutOut }, t(CUT.busy ? "cut.busy" : has ? "cut.again" : "cut.go")),
+    CUT.error && el("div", { class: "hint err" }, CUT.error),
+    el("div", { class: "hint" }, t(has ? "cut.done" : "cut.hint")));
+}
+
 // ---------- repainting the background photo with an image model (see repaint.js)
 const REP = { busy: false, job: 0, since: 0, error: "", result: null, test: null, confirmDrop: null };   // test: the image model's connection check   // result: {src, w, h} waiting to be used or dropped
 const onCoverTab = () => S.mode === "edit" && S.tab.edit === "cover";
@@ -617,6 +674,7 @@ async function useRepaint() {
   if (!r) return;
   await setPhoto(r.src, S.photoOriginal || S.photoSrc);
   toast(t("rep.used"));
+  if (layer("subject")) cutOut();   // the subject layer shows the new photo's subject
 }
 /** The built-in style the repaint uses now, or null. */
 const builtIn = () => (S.imageAi.source.startsWith("preset:") ? S.repaintStyles.find((s) => "preset:" + s.id === S.imageAi.source) || null : null);
@@ -1119,6 +1177,7 @@ function layerRow(L) {
       L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) })));
 }
 function placementControls(L) {
+  if (L.type === "subject") return null;   // it goes where the photo goes
   if (FIXED.includes(L.type)) return el("div", { class: "hint", style: "margin:0" }, t("props.fixedHint"));
   if (L.type === "bg" && !S.photo) return null;
   const f = frame(), all = S.settings.scope === "all", free = isFree(L.type), noRot = L.type === "bg";
@@ -1185,6 +1244,15 @@ function typeControls(L) {
       check("props.grid", L.grid, (v) => set("grid", v)),
       S.photo && [slider("props.blur", 0, 80, 1, L.blur, px, (v) => set("blur", v)), slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => set("dim", v))],
     ];
+    case "subject": return [
+      !S.photoMask && el("div", { class: "hint err", style: "margin-top:0" }, t("cut.noMask")),
+      slider("props.outline", 0, 40, 1, L.outline, px, (v) => set("outline", v)),
+      inkControl(L, "ink", "props.outlineInk", "#ffffff"),
+      slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => set("shadow", v)),
+      check("props.follow", L.follow, (v) => set("follow", v)),
+      canCut() && el("button", { class: "btn wide", style: "margin-top:10px", disabled: CUT.busy, onclick: cutOut }, t(CUT.busy ? "cut.busy" : "cut.again")),
+      el("div", { class: "hint" }, t("props.subjectHint")),
+    ];
     case "accent": return el("div", { style: "margin-bottom:10px" }, select(ACCENT_SHAPES.map((k) => [k, `${t("props.shape")} · ${t("shape." + k)}`]), L.shape, (v) => set("shape", v, false)), null);
     case "brand": return [check("props.rail", L.rail, (v) => set("rail", v)), fontControl(L), inkControl(L, "ink", "props.ink", "#ffffff")];
     case "title": return [
@@ -1225,7 +1293,7 @@ function renderSide() {
       el("div", { class: "acts", style: "margin-top:10px;justify-content:flex-start" },
         el("button", { class: "btn", onclick: () => addLayer(newLayer("text", { text: t("layer.newText") })) }, t("layers.addText")),
         el("button", { class: "btn", disabled: !free || many.length > 0, onclick: duplicateLayer }, t("layers.dup")),
-        el("button", { class: "btn", disabled: many.length ? !many.some((x) => isFree(x.type)) : !free, onclick: () => (many.length ? removeGroup() : removeLayer()) }, t("layers.del")),
+        el("button", { class: "btn", disabled: many.length ? !many.some((x) => isFree(x.type)) : !(L && isRemovable(L.type)), onclick: () => (many.length ? removeGroup() : removeLayer()) }, t("layers.del")),
         el("button", { class: "btn", title: t("layers.up"), disabled: many.length > 0 || i < 1 || i >= here.length - 1, onclick: () => shiftLayer(1) }, "▲"),
         el("button", { class: "btn", title: t("layers.down"), disabled: many.length > 0 || i <= 1, onclick: () => shiftLayer(-1) }, "▼"))),
     many.length ? el("div", { class: "box" }, el("label", { class: "cap" }, t("props.group", many.length)),
@@ -1428,12 +1496,13 @@ const projectActions = {
       S.cover = normalizeCover(raw.cover, S.profile);
       const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
       await setPhoto(pic(raw.photo), pic(raw.photoOriginal));
+      await setMask(pic(raw.photoMask));
       S.layerId = "title";
       touch({ cover: true, panel: true, side: true });
     } catch (e) { toast(t("msg.badFile")); }
   },
   save: () => saveText(`${(S.cover.title.split("\n")[0] || "cover").replace(/[*\\/:?"<>|]+/g, "").slice(0, 24) || "cover"}.smedcover.json`,
-    JSON.stringify({ app: "smedcover", kind: "project", version: 2, profileName: S.profile.name, cover: S.cover, photo: S.photoSrc || null, photoOriginal: S.photoOriginal || null, assets: embedAssets(usedUserAssets(null, S.cover)) })),
+    JSON.stringify({ app: "smedcover", kind: "project", version: 2, profileName: S.profile.name, cover: S.cover, photo: S.photoSrc || null, photoOriginal: S.photoOriginal || null, photoMask: (S.photoMask && S.photoMask.src) || null, assets: embedAssets(usedUserAssets(null, S.cover)) })),
   reset() { S.cover = normalizeCover({ catId: S.cover.catId }, S.profile); S.layerId = "title"; setPhoto(""); touch({ cover: true, panel: true, side: true }); },
 };
 
@@ -1601,6 +1670,7 @@ async function start() {
   S.photoSrc = (await files.read("session-photo").catch(() => "")) || "";
   S.photo = S.photoSrc ? await loadImage(S.photoSrc) : null;
   S.photoOriginal = S.photo ? (await files.read("session-photo-original").catch(() => "")) || "" : "";
+  if (S.photo) await setMask((await files.read("session-photo-mask").catch(() => "")) || "");
   await applyProfile();
   resetHistory();
   if (selftest) selfTest(selftest);
@@ -1634,6 +1704,26 @@ async function selfTest(dir) {
         report.aiImage.push({ style, name: spec.name.en, bytes: image.data.length });
       }
       // repainting a photo through each image service's own form (one of them answering with a link)
+      // the subject cut-out on a real photo, when one is given (SMEDCOVER_SELFTEST_PHOTO)
+      const real = await invoke("selftest_photo").catch(() => null);
+      if (real) {
+        const keep = S.photoSrc, t0 = performance.now();
+        await setPhoto(real);
+        const ok = await cutOut(), m = S.photoMask && S.photoMask.img;
+        report.subject = { ok, ms: Math.round(performance.now() - t0), photo: [S.photo.naturalWidth, S.photo.naturalHeight], mask: m ? [m.naturalWidth, m.naturalHeight] : null, layerAboveTitle: S.cover.layers.findIndex((l) => l.id === "subject") === S.cover.layers.findIndex((l) => l.id === "title") + 1, error: CUT.error };
+        if (ok) {
+          const L = layer("subject"); L.outline = 8; L.shadow = 0.6;
+          S.cover.title = "*Subject* in front\nof the title";
+          for (const look of ["cel", "cyber"]) {
+            S.profile.style.look = look;
+            const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
+            report.subject[look] = await invoke("write_image", framed(await toPng(cv), { dir, name: `subject-${look}.png` }));
+          }
+          S.profile.style.look = "cel";
+          S.cover.layers = S.cover.layers.filter((l) => l.id !== "subject");
+        }
+        await setPhoto(keep);
+      }
       report.repaint = [];
       // a style of the user's own goes to a file and comes back the same
       await files.write("repaint-styles/selftest.md", writeStyle({ name: "自测 Self test", order: 5 }, "<!-- note -->\nPaint it."));

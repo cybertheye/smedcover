@@ -4,10 +4,10 @@
 import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, brackets } from "./cel.js";
 import { virtualSize, layout, adjustLayout } from "./layout.js";
 import { drawTitle, parseTitle } from "./title.js";
-import { drawPhoto } from "./photo.js";
+import { drawPhoto, photoRect } from "./photo.js";
 import { drawAsset } from "./assets.js";
 import { resolve, appliesTo } from "./layers.js";
-import { setLook, setFast, look, lookValues, styled } from "./style.js";
+import { setLook, setFast, isFast, look, lookValues, styled } from "./style.js";
 import { paintRuns } from "./textfx.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
@@ -270,6 +270,43 @@ const PAINT = {
     if (env.photo) photo();
     return { cx: w / 2, cy: h / 2, hw: w / 2, hh: h / 2, r: 0 };
   },
+  /**
+   * The background photo's subject, cut out and laid above the layers under it (the title, usually),
+   * so it can stand in front of the words. It is the background painted again — the same photo, the
+   * same place, the look's treatment — kept only where the subject's mask is opaque, with an
+   * optional outline and shadow made from the mask's silhouette. Sharp even when the background is
+   * blurred, unless `follow`. Nothing to grab on the canvas: clicks go through to what is under it.
+   */
+  subject(ctx, L, tr, env) {
+    const im = env.photo, m = env.o.mask;
+    if (!im || !m || m.of !== im || typeof document === "undefined" || !ctx.getTransform) return null;
+    const bg = env.cover.layers.find((l) => l.type === "bg"), bt = env.bgTr, M = ctx.getTransform(), W = ctx.canvas.width, H = ctx.canvas.height;
+    const r = photoRect(im, env.w, env.h, { dx: bt.dx, dy: bt.dy, s: bt.s }), mask = (c) => c.drawImage(m.img, r.x, r.y, r.iw, r.ih);
+    const sheet = (i) => { const c = SUBJECT[i] || (SUBJECT[i] = document.createElement("canvas")); if (c.width !== W || c.height !== H) { c.width = W; c.height = H; } const x = c.getContext("2d"); x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = "source-over"; x.globalAlpha = 1; x.clearRect(0, 0, W, H); x.setTransform(M); return x; };
+    const lay = (from, dx = 0, dy = 0, alpha = 1) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha *= alpha; ctx.drawImage(from.canvas, dx, dy); ctx.restore(); };
+    // the silhouette in one colour, for the outline and the shadow
+    if (L.outline > 0 || L.shadow > 0) {
+      const s = sheet(1), u = Math.hypot(M.a, M.b);
+      mask(s);
+      s.setTransform(1, 0, 0, 1, 0, 0); s.globalCompositeOperation = "source-in";
+      if (L.shadow > 0) {
+        s.fillStyle = "#07070c"; s.fillRect(0, 0, W, H);
+        const d = env.w * 0.012 * u;
+        for (let i = 1; i <= 4; i++) lay(s, d * i * 0.5, d * i * 0.6, L.shadow * 0.22);
+      }
+      if (L.outline > 0) {
+        s.fillStyle = L.ink || "#ffffff"; s.fillRect(0, 0, W, H);
+        const rad = L.outline * u, n = isFast() ? 8 : Math.min(36, 12 + Math.round(rad));
+        for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; lay(s, Math.cos(a) * rad, Math.sin(a) * rad); }
+      }
+    }
+    // the background again, cut to the subject
+    const p = sheet(0);
+    PAINT.bg(p, { ...bg, blur: L.follow ? bg.blur : 0, dim: L.follow ? bg.dim : 0 }, bt, env);
+    p.globalCompositeOperation = "destination-in"; mask(p);
+    lay(p);
+    return null;
+  },
   accent(ctx, L, tr, env) {
     const xs = env.G.accent.map((p) => p[0]), ys = env.G.accent.map((p) => p[1]), x = Math.min(...xs), y = Math.min(...ys);
     return placed(ctx, tr, (c) => paintAccent(c, L.shape, env.G, env.C), { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y });
@@ -351,6 +388,7 @@ function drawSelection(ctx, hit, k, withHandles = true) {
 }
 
 let scratch = null;
+const SUBJECT = [];   // two work canvases for the subject layer
 /**
  * Paints a cover.
  *   cv         target canvas (resized here)
@@ -363,6 +401,8 @@ let scratch = null;
  *   o.live     {ids} while those layers are being dragged: the rest of the cover is cached in this
  *              object between frames (editor only; drop the object when the drag ends)
  *   o.picked   ids of the layers in a group selection, outlined without handles (editor only)
+ *   o.mask     {img, of} the background photo's subject mask (alpha), for the subject layer; used
+ *              only while `of` is the photo being drawn
  * Leaves cv._hits behind: one entry per drawn layer, bottom first, for pointer hit-testing.
  */
 export function drawCover(cv, o) {
@@ -387,6 +427,7 @@ function paintCover(cv, o) {
     G: adjustLayout(L0.layout ? L0.layout(P.style.template, w, h) : layout(P.style.template, w, h), w, h, (P.style.layoutAdjust || {})[P.style.template]),
     th: L0.theme ? L0.theme(base, C, lookValues()) : base,
     hasBrand: cover.layers.some((l) => l.type === "brand" && l.visible),
+    bgTr: resolve(cover.layers.find((l) => l.type === "bg") || cover.layers[0], w, h, key, cat.id),   // where the photo is, for the subject layer
   };
   cv._virtual = [w, h];
   cv._layout = env.G;   // for the editor's layout handles

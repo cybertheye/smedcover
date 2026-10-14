@@ -58,6 +58,7 @@ ui/
   js/stickers.js     the sixty stickers, and the shared painters
   js/style.js        looks: a set of hooks per look, and the current look
   js/spec.js         stickers described as data: validation and interpreter (AI-generated assets)
+  (src-tauri/src/subject.rs: the photo's subject mask, from Vision)
   js/repaint.js      photo repaint: the three image services' requests and replies, repaint prompts, reading built-in styles
   repaint-styles/    built-in repaint styles, one `<id>.md` each (names and notes in a header), plus the generated list index.json
   js/solid.js        3D objects described as data: validation, drawn with the channel graphics' renderer
@@ -269,7 +270,13 @@ The blur is applied to a reduced working copy of the photo and cached by photo a
 that, moving or scaling the photo, or editing any other layer, costs a single image draw. Exports
 recompute it from a higher-resolution copy.
 
-### 6.4 Assets
+### 6.4 The subject layer (cut-out)
+
+`subject_mask` (`src-tauri/src/subject.rs`) hands the photo's bytes to Apple Vision's `VNGenerateForegroundInstanceMaskRequest` (macOS 14 on; the class is looked up at run time through objc2, so an older system reports that it needs macOS 14), takes `generateScaledMaskForImageForInstances` — a float mask the photo's size — and returns it as a PNG in which only the alpha matters. The interface draws the photo on a canvas and sends that as JPEG, so EXIF orientation is already applied and the mask matches the photo pixel for pixel.
+
+The mask is kept as `S.photoMask = {img, src, of}`, `of` being the photo it belongs to; a new photo clears it. The `subject` layer (`OPTIONAL_TYPES`: at most one per cover, removable) paints the background layer again — the same photo, in the same place (`env.bgTr`), with the same treatment by the look, unblurred and undimmed by default — and keeps it only where the mask is opaque (`destination-in`); the outline and shadow are the mask's silhouette, coloured and stamped around or below. It makes no hit, so clicks go through to the layers under it. While the background is dragged `goLive` adds the subject to the layers repainted each frame, so the two stay together.
+
+### 6.5 Assets
 
 - **Channel graphics** and **stickers** are all drawn in code — there are no image files — so they are sharp at any size and can take the channel colour. `cel.js` provides a cel-shading kit (flat tones, ink lines, pseudo-3D boxes and prisms); `graphics.js` adds more through `registerGraphics()`.
 - **Uploads** are stored as data URLs in the app data directory and cached once decoded.

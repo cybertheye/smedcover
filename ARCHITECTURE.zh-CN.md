@@ -58,6 +58,7 @@ ui/
   js/stickers.js     60 个贴纸，以及公用的画法函数
   js/style.js        风格：每种风格的一组钩子，以及当前风格
   js/spec.js         以数据描述的贴纸：校验与解释执行（AI 生成的素材）
+  （src-tauri/src/subject.rs：用 Vision 抠出照片主体的遮罩）
   js/repaint.js      照片重绘：三家图片服务的请求与回复、重绘提示词、内置风格的读取
   repaint-styles/    内置重绘风格，每个一个 `<id>.md`（开头是名称等信息），加上生成的清单 index.json
   js/solid.js        以数据描述的立体图形：校验，并用频道图形的渲染器绘制
@@ -225,7 +226,13 @@ macOS 的网页视图不支持画布滤镜，所以高斯模糊用脚本实现�
 
 模糊作用在照片的一份缩小副本上，并按"照片 + 模糊值"缓存。之后移动、缩放照片或编辑其他图层，都只是一次贴图。导出时用更高精度的副本重新计算。
 
-### 6.4 素材
+### 6.4 主体图层（抠图）
+
+`subject_mask`（`src-tauri/src/subject.rs`）把照片字节交给 Apple Vision 的 `VNGenerateForegroundInstanceMaskRequest`（macOS 14 起；通过 objc2 在运行时查找这个类，旧系统上报"需要 macOS 14"），取 `generateScaledMaskForImageForInstances` 得到与照片同尺寸的浮点遮罩，转成"只有透明度有意义"的 PNG 返回。界面先把照片画到画布上再编码成 JPEG 发送，所以照片的 EXIF 方向已经摆正，遮罩与照片像素一一对应。
+
+遮罩存为 `S.photoMask = {img, src, of}`，`of` 是它所属的照片；换照片即清空。`subject` 图层（`OPTIONAL_TYPES`，每张封面最多一个，可删除）在绘制时把背景层再画一遍——同一张照片、同一位置（`env.bgTr`）、同样的风格处理，默认不模糊不压暗——再用遮罩 `destination-in` 裁出主体；描边和投影由遮罩剪影着色后错位叠出。它不产生点击区域，点击会落到下面的图层。拖动背景时 `goLive` 把主体图层一并列入重画范围，保证两者对齐。
+
+### 6.5 素材
 
 - **频道图形**和**贴纸**全部是代码画的矢量图形，没有图片文件，因此任意放大都清晰，并能随频道主色着色。`cel.js` 提供一套赛璐珞风格的绘图工具（明暗分色、墨线、伪三维的方块和棱柱），`graphics.js` 通过 `registerGraphics()` 追加图形。
 - **用户上传**的图片以 data URL 存在应用数据目录，解码后缓存。

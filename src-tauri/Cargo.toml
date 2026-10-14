@@ -27,6 +27,11 @@ ureq = { version = "2", features = ["socks-proxy"] }
 ttf-parser = "0.25"
 base64 = "0.22"
 
+# The subject cut-out uses Apple's Vision framework, reached through the Objective-C runtime.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSString", "NSIndexSet"] }
+
 # Dependencies are optimised even in development builds: the image codecs are far too slow otherwise.
 [profile.dev.package."*"]
 opt-level = 3

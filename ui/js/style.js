@@ -978,6 +978,8 @@ let current = cel, values = {};
  * of a drag, so a moving layer stays smooth; the full picture returns when the drag ends.
  */
 export function setFast(on) { fast = !!on; }
+/** Whether a drag is in progress (costly finishing can be lighter meanwhile). */
+export const isFast = () => fast;
 /** Default parameter values of a look, overridden by `given` where that holds a number in range. */
 export function lookParams(id, given) {
   const out = {};

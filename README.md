@@ -53,6 +53,17 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
 - Select the Background layer on the right to set blur and dim.
 - Once a photo is chosen, a thumbnail and its size appear below.
 
+### Cutting out the subject, in front of the title (macOS 14 and later)
+
+With a background photo chosen, *Cut out the subject, in front of the title* is below it.
+
+- macOS's own recognition (the same "lift subject" the Photos app has) lifts the people, animals or objects out of the photo, on this computer — the photo is not uploaded — usually in a second or two.
+- The subject becomes a *Subject* layer, placed just above the title, so it covers part of the title as on a magazine cover. Move it up or down in the layer list to decide what it stands in front of.
+- The subject is the background photo itself: it follows the photo's place and size, moves when you drag the photo, and gets the look's treatment of the photo (tint, duotone, black and white…). It stays sharp by default, which reads as depth when the background is blurred; *Follow the background's blur and dim* makes it match.
+- Its properties add an outline (width and colour) and a shadow.
+- A new photo needs a new cut-out; when an AI repaint is used and the cover has a Subject layer, the new photo is cut out again by itself.
+- The cut-out is kept in the session and in project files. A photo with no clear subject says so.
+
 ### Repainting the background photo with AI
 
 With a photo chosen, *AI repaint* below it has an image model paint the photo again in another style. Set up an image model first under *Setup → AI* (see [Setting up AI](#setting-up-ai)).
