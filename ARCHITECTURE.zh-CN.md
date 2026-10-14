@@ -243,7 +243,13 @@ tests/               不依赖 DOM 的模块的单元测试
 
 旧数据：`upgradeCover` 把以前存在封面旁边的那一张照片（会话里的 `session-photo*`，第 2 版工程的 `photo*` 字段）变成背景照片图层，接过「背景」层原来的位置、模糊和压暗；以前的 `subject` 图层变成它的抠图副本。默认设计里不保留照片图层。
 
-### 6.4 抠图（`src-tauri/src/subject.rs`）
+### 6.4 抠图（`src-tauri/src/subject.rs`、`matting.rs`）
+
+两种方式，界面按设置 `cutEngine` 选（`cutEngine()`：Mac 默认 Vision，其他系统默认 BiRefNet 轻量），结果格式相同。
+
+**BiRefNet（`matting.rs`，所有系统）**：`ort` 用 `load-dynamic` 方式，运行库不编进应用。用户下载模型时（`cut_model_download`，进度通过事件 `cut-model-progress` 发给界面，`cut_model_cancel` 取消），先下载本平台的 ONNX Runtime 1.23.2 官方包（最后一个有 Intel Mac 版的版本，所以 `ort` 用 API 23），从 .tgz/.zip 里只取出那一个库文件，再下载模型（onnx-community 的 BiRefNet_lite / BiRefNet ONNX）；每个文件边下边算 SHA-256，大小和校验值都对上才放到位，都在数据目录 `models/` 下。抠图（`subject_mask_onnx`，模型 id 放在请求头 `x-model`）：第一次时 `ort::init_from` 加载运行库，模型会话按 id 缓存；照片缩放到 1024×1024、按 ImageNet 均值方差归一化，取最后一张输出图做 sigmoid，再放大回照片尺寸，同样转成"只有透明度有意义"的 PNG。界面送去的照片最长 2048 像素。
+
+**Apple Vision（`subject.rs`，macOS）**：
 
 `subject_mask` 把照片字节交给 Apple Vision 的 `VNGenerateForegroundInstanceMaskRequest`（macOS 14 起；通过 objc2 在运行时查找这个类，旧系统上报"需要 macOS 14"），取 `generateScaledMaskForImageForInstances` 得到与照片同尺寸的浮点遮罩，转成"只有透明度有意义"的 PNG 返回。界面先把照片画到画布上再编码成 JPEG 发送，所以 EXIF 方向已经摆正，遮罩与照片像素一一对应。遮罩存在照片记录上；图片换了（AI 重绘、还原原图）就清空，用到它的图层会自动重新抠。
 

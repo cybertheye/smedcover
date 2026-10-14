@@ -19,9 +19,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use image::{codecs::jpeg::JpegEncoder, ImageFormat, RgbImage};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::{InvokeBody, Request};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
+mod matting;
 mod subject;
 
 /// Colour put behind transparent pixels when saving JPEG (the app's dark field colour).
@@ -285,6 +286,72 @@ fn write_image(request: Request<'_>) -> Res<String> {
 fn subject_mask(request: Request<'_>) -> Res<tauri::ipc::Response> {
     match request.body() {
         InvokeBody::Raw(body) => Ok(tauri::ipc::Response::new(subject::mask_png(body)?)),
+        _ => Err("expected a binary body".into()),
+    }
+}
+
+// ---------------------------------------------------------------- the cut-out on any platform (BiRefNet, see matting.rs)
+
+/// A cut-out model: its id, its size, and whether it has been downloaded.
+#[derive(Serialize)]
+struct CutModel {
+    id: &'static str,
+    bytes: u64,
+    have: bool,
+}
+#[tauri::command]
+fn cut_models(app: AppHandle) -> Res<Vec<CutModel>> {
+    let data = data_root(&app)?;
+    Ok(matting::MODELS.iter().map(|m| CutModel { id: m.id, bytes: m.file.bytes, have: matting::have(&data, m) }).collect())
+}
+/// How a download is getting on, sent as the event `cut-model-progress`.
+#[derive(Clone, Serialize)]
+struct CutProgress {
+    id: String,
+    done: u64,
+    total: u64,
+}
+/// Downloads a cut-out model into the app data folder, telling the page how far it has got.
+/// The wait is per read, not for the whole file: a big model on a slow line takes long but is fine.
+#[tauri::command]
+async fn cut_model_download(app: AppHandle, id: String, proxy: Option<String>) -> Res<()> {
+    let m = matting::model(&id)?;
+    let data = data_root(&app)?;
+    let mut builder = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(30))
+        .timeout_read(std::time::Duration::from_secs(120));
+    if let Some(p) = proxy_for(m.file.url, proxy.as_deref().unwrap_or("")) {
+        builder = builder.proxy(ureq::Proxy::new(&p).map_err(|e| format!("proxy {p}: {e}"))?);
+    }
+    let agent = builder.build();
+    tauri::async_runtime::spawn_blocking(move || {
+        matting::download(&agent, &data, m, |done, total| {
+            let _ = app.emit("cut-model-progress", CutProgress { id: id.clone(), done, total });
+        })
+    })
+    .await
+    .map_err(err)?
+}
+#[tauri::command]
+fn cut_model_cancel() {
+    matting::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+#[tauri::command]
+fn cut_model_delete(app: AppHandle, id: String) -> Res<()> {
+    matting::remove(&data_root(&app)?, matting::model(&id)?)
+}
+/// Cuts the subject out of a photo (raw image bytes in the body) with the model named in the header
+/// `x-model`: its mask as PNG bytes, as `subject_mask` returns.
+#[tauri::command(async)]
+fn subject_mask_onnx(app: AppHandle, request: Request<'_>) -> Res<tauri::ipc::Response> {
+    let id = request.headers().get("x-model").and_then(|v| v.to_str().ok()).ok_or("no model given")?;
+    let m = matting::model(id)?;
+    let data = data_root(&app)?;
+    if !matting::have(&data, m) {
+        return Err("model not downloaded".into());
+    }
+    match request.body() {
+        InvokeBody::Raw(body) => Ok(tauri::ipc::Response::new(matting::mask_png(&data, m, body)?)),
         _ => Err("expected a binary body".into()),
     }
 }
@@ -742,6 +809,22 @@ fn selftest_photo() -> Option<String> {
     Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
 }
 
+/// In self-test mode, a folder that already holds downloaded cut-out models (SMEDCOVER_SELFTEST_MODELS,
+/// the `models` folder of a data folder), linked into the self-test's data folder. Whether there is one.
+#[tauri::command]
+fn selftest_models(app: AppHandle) -> Res<bool> {
+    selftest_root().ok_or("not in self-test mode")?;
+    let Some(from) = std::env::var_os("SMEDCOVER_SELFTEST_MODELS") else { return Ok(false) };
+    let to = data_root(&app)?.join("models");
+    if !to.exists() {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&from, &to).map_err(err)?;
+        #[cfg(not(unix))]
+        return Err("SMEDCOVER_SELFTEST_MODELS needs a Unix system".into());
+    }
+    Ok(true)
+}
+
 /// In self-test mode, the URL of a stand-in AI endpoint to exercise `ai_request` against.
 #[tauri::command]
 fn selftest_ai() -> Option<String> {
@@ -760,6 +843,12 @@ pub fn run() {
             app_delete,
             reveal_data_dir,
             subject_mask,
+            subject_mask_onnx,
+            cut_models,
+            cut_model_download,
+            cut_model_cancel,
+            cut_model_delete,
+            selftest_models,
             selftest_photo,
             save_image,
             pick_folder,

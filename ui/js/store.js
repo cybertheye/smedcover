@@ -14,7 +14,7 @@ import { normalizeLayers } from "./layers.js";
 
 const T = globalThis.__TAURI__;
 export const native = !!T;
-export const invoke = (cmd, args) => T.core.invoke(cmd, args);
+export const invoke = (cmd, args, options) => T.core.invoke(cmd, args, options);
 
 const LS = "smedcover:";
 export const files = native
@@ -145,6 +145,11 @@ export function normalizeSettings(raw) {
     quality: Math.round(num(s.quality, 92, 40, 100)),
     nameTemplate: str(s.nameTemplate) || DEFAULT_SETTINGS.nameTemplate,
     scope: s.scope === "size" ? "size" : "all",
+    // how a photo's subject is cut out: "vision" (macOS), "birefnet-lite" or "birefnet" (any system, a downloaded model); "" = the system's own choice
+    cutEngine: ["vision", "birefnet-lite", "birefnet"].includes(s.cutEngine) ? s.cutEngine : "",
+    cutProxy: str(s.cutProxy).trim().slice(0, 300),   // a proxy for downloading the models ("" = the environment's)
+    // the side columns' widths in px, as dragged (0 = the default): left and right while editing, left in Setup
+    columns: Object.fromEntries(["left", "right", "setup"].map((k) => [k, Math.round(num(s.columns && s.columns[k], 0, 0, 900))])),
     recentFonts: [...new Set((Array.isArray(s.recentFonts) ? s.recentFonts : []).map((f) => str(f).replace(/["\\]/g, "").trim().slice(0, 80)).filter(Boolean))].slice(0, RECENT_FONTS),
   };
 }

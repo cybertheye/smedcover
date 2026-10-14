@@ -36,8 +36,14 @@
   header select{background:var(--panel);border:2px solid var(--line);padding:6px 8px;max-width:180px}
 
   /* body: tools | canvas | layers. Side columns scroll on their own; the canvas always stays in view. */
-  .body{display:grid;grid-template-columns:372px minmax(0,1fr) 320px;min-height:0}
-  .body.setup{grid-template-columns:420px minmax(0,1fr)}
+  .body{display:grid;grid-template-columns:var(--lw,372px) minmax(0,1fr) var(--rw,320px);min-height:0}
+  .body.setup{grid-template-columns:var(--sw,420px) minmax(0,1fr)}
+  /* the side columns are as wide as their edge is dragged (see columns() in app.js) */
+  aside{position:relative}
+  .split{position:absolute;top:0;bottom:0;width:9px;cursor:col-resize;z-index:5;touch-action:none}
+  #left .split{right:-6px}
+  #right .split{left:-6px}
+  .split:hover,.split.on{background:linear-gradient(90deg,transparent 3px,var(--acc) 3px,var(--acc) 5px,transparent 5px)}
   .body.setup #right{display:none}
   aside{display:flex;flex-direction:column;min-height:0}
   #left{border-right:2px solid var(--line)}
@@ -63,9 +69,10 @@
   .peek{margin-top:8px;font-size:12px}.peek summary{cursor:pointer;opacity:.7}
   .peek pre{white-space:pre-wrap;max-height:220px;overflow:auto;margin:6px 0 0;padding:8px;border:1px solid var(--line2);font:12px/1.6 ui-monospace,monospace;opacity:.85}
   /* the selected layer's properties: group names on the left, lined up across groups; controls on the right */
-  .props{display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:12px;row-gap:14px;align-items:start}
+  .props{display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:12px;row-gap:14px;align-items:baseline}
   .psec{display:contents}
-  .psec-h{font-size:12px;font-weight:600;opacity:.55;padding-top:7px;white-space:nowrap;display:flex;align-items:center;gap:4px}
+  .psec-h{font-size:12px;font-weight:600;opacity:.55;white-space:nowrap;display:flex;align-items:baseline;gap:4px}
+  .psec-h.top{align-self:start;padding-top:12px}
   .psec-b{min-width:0}
   .psec-b>:first-child,.psec-b>.sl:first-child,.psec-b>.chk:first-child{margin-top:0}
   .psec-b .chk{margin:8px 0 0}
@@ -77,15 +84,15 @@
   .info:hover{opacity:1;color:var(--acc)}
   .sub{font-size:12px;opacity:.6;margin-bottom:6px;display:flex;align-items:center;gap:4px}
   .sws{display:flex;flex-wrap:wrap;gap:12px}
-  .sw{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px}
-  .sw .nm{opacity:.7}
+  .sw{display:flex;align-items:center;gap:7px;font-size:12px}
+  .sw .nm{opacity:.75;align-self:baseline}   /* the swatch row's baseline: the group's name lines up with these words */
   .sw .chip{position:relative;display:block;width:34px;height:28px}
   .sw input[type=color]{width:34px;height:28px;padding:1px;background:var(--panel);border:2px solid var(--line);cursor:pointer;display:block}
   .sw.auto .chip::after{content:attr(data-auto);position:absolute;left:-3px;bottom:-5px;font:600 9px var(--mono);background:var(--bg);border:1px solid var(--line2);padding:0 3px;pointer-events:none}
-  .sw .x{position:absolute;top:-7px;right:-7px;width:16px;height:16px;border-radius:50%;border:1px solid var(--line2);background:var(--bg);color:#fff;font-size:11px;line-height:1;padding:0;cursor:pointer;display:none}
-  .sw:hover .x{display:block}
-  .with-chip{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
-  .with-chip .sw{margin-top:0}
+  .sw .x{position:absolute;top:-7px;right:-7px;width:16px;height:16px;border-radius:50%;border:1px solid var(--line2);background:var(--bg);color:#fff;font-size:11px;line-height:1;padding:0;cursor:pointer}
+  .sw .x:hover{border-color:#fff;background:var(--line2)}
+  .cutmodel{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid var(--line);padding:10px;margin-top:8px}
+  .cutmodel b{font-size:13px}
   .mine-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
   .mine-head .cap{margin:0}
   .mine-head .btn{padding:4px 9px;font-size:12px}
@@ -199,7 +206,7 @@
   #modal .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .15s}
   #modal .count{font:600 15px var(--mono)}
   #modal h2{font:400 34px "Bebas Neue",var(--ui);letter-spacing:.06em;margin:0}
-  @media(max-width:1100px){html,body{overflow:auto}.app{height:auto}.body,.body.setup{grid-template-columns:1fr}aside{border:0!important}.scroll{overflow:visible}#stage{height:60vh}}
+  @media(max-width:1100px){html,body{overflow:auto}.app{height:auto}.body,.body.setup{grid-template-columns:1fr}aside{border:0!important}.split{display:none}.scroll{overflow:visible}#stage{height:60vh}}
 </style>
 </head>
 <body>

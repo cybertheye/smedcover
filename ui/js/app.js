@@ -52,6 +52,7 @@ const S = {
   repaintStyles: [],                     // the built-in repaint styles: [{id, file, name}] (ui/repaint-styles/index.json)
   myStyles: [],                          // the user's own repaint styles, Markdown files in the app data folder repaint-styles/ (see userStyle)
   assetFolders: [],                      // the folders "My assets" are filed in: [{id, name}] (asset-folders.json; each asset's `folder`)
+  cutModels: [],                         // the BiRefNet models and whether each is downloaded: [{id, bytes, have}] (cut_models)
   picked: [],                                       // a group selection: the ids of the layers in it (see group())
   importedFonts: [], systemFonts: [], latinFonts: new Set(["Bebas Neue", "JetBrains Mono"]),   // latinFonts: those that cannot set Chinese
   mode: "edit", tab: { edit: "cover", setup: "brand" },
@@ -739,7 +740,14 @@ async function dropFolder(id) {
 // ---------- AI-generated assets
 // ---------- a photo's subject, cut out (Apple Vision, macOS 14+; see src-tauri/src/subject.rs)
 const CUT = { busy: false, error: "" };
-const canCut = () => native && /Mac/i.test(navigator.userAgent);
+// Two ways: Apple Vision (macOS 14+, built in) and BiRefNet (any system, a model downloaded in Setup →
+// AI → Cut-out, run on this computer by ONNX Runtime; see src-tauri/src/matting.rs).
+const isMac = /Mac/i.test(navigator.userAgent);
+const canCut = () => native;
+/** The way of cutting out in use: the one chosen, else Vision on a Mac and the light BiRefNet elsewhere. */
+const cutEngine = () => { const e = S.settings.cutEngine; return e === "vision" ? (isMac ? "vision" : "birefnet-lite") : e || (isMac ? "vision" : "birefnet-lite"); };
+/** Whether the model a BiRefNet way needs is downloaded. */
+const cutReady = (engine = cutEngine()) => engine === "vision" || S.cutModels.some((m) => m.id === engine && m.have);
 /** The photo as JPEG bytes, upright, no bigger than `max` on its longer side. */
 async function photoBytes(im, max = 4096) {
   const [w, h] = sizeOf(im), k = Math.min(1, max / Math.max(w, h)), cv = document.createElement("canvas");
@@ -752,11 +760,14 @@ async function photoBytes(im, max = 4096) {
 async function ensureMask(pid, fresh = false) {
   const rec = S.photos.get(pid);
   if (!rec || !canCut()) return false;
+  const engine = cutEngine();
   if (rec.mask && !fresh) return true;
-  Object.assign(CUT, { busy: true, error: "" }); if (onCoverTab()) renderPanel(); renderSide();
+  if (!cutReady(engine)) { Object.assign(CUT, { error: t("cut.needModel", t("cutset.engine." + engine)), needModel: true }); renderSide(); return false; }
+  Object.assign(CUT, { busy: true, error: "", needModel: false }); if (onCoverTab()) renderPanel(); renderSide();
   const img = rec.img;
   try {
-    const png = await invoke("subject_mask", await photoBytes(img));
+    const png = engine === "vision" ? await invoke("subject_mask", await photoBytes(img))
+      : await invoke("subject_mask_onnx", await photoBytes(img, 2048), { headers: { "x-model": engine } });
     if (rec.img !== img) return false;   // the picture changed meanwhile
     const src = await readAs(new Blob([png], { type: "image/png" }), "readAsDataURL"), m = await loadImage(src);
     rec.mask = m ? { img: m, src } : null;
@@ -1203,7 +1214,55 @@ const testLine = (r) => r && el("div", { class: `hint ${r.ok === true ? "ok" : r
 /** Setup → AI: the text model (assets) and the image model (photo repaint), one pane at a time. */
 function aiTab() {
   const pane = S.aiPane || "text", tab = (k) => el("button", { class: "btn" + (pane === k ? " on" : ""), onclick: () => { S.aiPane = k; renderPanel(); } }, t("ai.pane." + k));
-  return [el("div", { class: "seg wide" }, tab("text"), tab("image")), ...(pane === "image" ? imageAiPane() : textAiPane())];
+  return [el("div", { class: "seg wide" }, tab("text"), tab("image"), tab("cut")), ...(pane === "image" ? imageAiPane() : pane === "cut" ? cutPane() : textAiPane())];
+}
+// ---------- Setup → AI → Cut-out: the way of cutting out, and the BiRefNet models
+const CUTDL = { id: "", done: 0, total: 0, error: "", confirmDrop: "" };   // the download running, if any
+const mb = (n) => Math.round(n / 1048576);
+if (native && globalThis.__TAURI__.event) globalThis.__TAURI__.event.listen("cut-model-progress", (e) => {
+  Object.assign(CUTDL, { done: e.payload.done, total: e.payload.total });
+  const bar = document.getElementById("cutdl-" + e.payload.id);
+  if (bar) bar.textContent = t("cutset.progress", Math.floor((100 * e.payload.done) / Math.max(1, e.payload.total)), mb(e.payload.done), mb(e.payload.total));
+});
+const onCutPane = () => S.mode === "setup" && S.tab.setup === "ai" && S.aiPane === "cut";
+async function refreshCutModels() { S.cutModels = native ? await invoke("cut_models").catch(() => []) : []; }
+async function downloadModel(id) {
+  if (CUTDL.id) return;
+  Object.assign(CUTDL, { id, done: 0, total: 0, error: "" }); renderPanel();
+  try { await invoke("cut_model_download", { id, proxy: S.settings.cutProxy || null }); }
+  catch (e) { const msg = String(e && e.message ? e.message : e); CUTDL.error = /cancelled/.test(msg) ? "" : t("msg.failed", msg); }
+  CUTDL.id = ""; await refreshCutModels();
+  if (S.cutModels.some((m) => m.id === id && m.have)) { CUT.needModel = false; CUT.error = ""; toast(t("cutset.done", t("cutset.engine." + id))); }
+  if (onCutPane()) renderPanel();
+}
+async function dropModel(id) {
+  if (CUTDL.confirmDrop !== id) { CUTDL.confirmDrop = id; return renderPanel(); }
+  CUTDL.confirmDrop = "";
+  await invoke("cut_model_delete", { id }).catch(fail);
+  await refreshCutModels(); renderPanel();
+}
+function cutPane() {
+  if (!native) return [el("div", { class: "hint", style: "margin:0" }, t("cutset.needsApp"))];
+  const engines = [isMac && "vision", "birefnet-lite", "birefnet"].filter(Boolean), now = cutEngine();
+  const setting = (k, v, redraw) => { S.settings[k] = v; persistSettings(); if (redraw) renderPanel(); };
+  const row = (m) => {
+    const busy = CUTDL.id === m.id;
+    return el("div", { class: "cutmodel" },
+      el("div", {}, el("b", {}, t("cutset.engine." + m.id)), el("div", { class: "hint", style: "margin:2px 0 0" }, busy ? el("span", { id: "cutdl-" + m.id }, t("cutset.starting")) : t(m.have ? "cutset.have" : "cutset.missing", mb(m.bytes)))),
+      busy ? el("button", { class: "btn", onclick: () => invoke("cut_model_cancel").catch(fail) }, t("cutset.cancel"))
+        : m.have ? el("button", { class: "btn", onclick: () => dropModel(m.id) }, t(CUTDL.confirmDrop === m.id ? "cutset.dropSure" : "cutset.drop"))
+        : el("button", { class: "btn", disabled: !!CUTDL.id, onclick: () => downloadModel(m.id) }, t("cutset.download")));
+  };
+  return [
+    el("div", { class: "hint", style: "margin:0" }, t("cutset.intro")),
+    el("div", {}, cap("cutset.way"), select(engines.map((k) => [k, t("cutset.engine." + k)]), now, (v) => setting("cutEngine", v, true)),
+      !cutReady(now) && el("div", { class: "hint err" }, t("cutset.wayMissing"))),
+    el("div", {}, cap("cutset.models"), S.cutModels.map(row), CUTDL.error && el("div", { class: "hint err" }, CUTDL.error),
+      el("div", { class: "hint" }, t("cutset.speed"))),
+    el("div", {}, cap("cutset.proxy"), textInput(S.settings.cutProxy, (v) => setting("cutProxy", v.trim()), { placeholder: "http://127.0.0.1:7890" }), el("div", { class: "hint" }, t("cutset.proxyHint"))),
+    el("button", { class: "btn wide", onclick: () => invoke("reveal_data_dir", { dir: "models" }).catch(fail) }, t("cutset.folder")),
+    el("div", { class: "hint" }, t("cutset.licence")),
+  ];
 }
 function textAiPane() {
   const c = S.ai, ph = AI_PLACEHOLDER[c.style];
@@ -1497,8 +1556,11 @@ function renameLayer(id) {
 // read it as a toast); only warnings are written out.
 /** An ⓘ that shows `text` on hover, and as a toast when clicked. */
 const info = (text) => el("span", { class: "info", title: text, onclick: () => toast(text, false) }, "ⓘ");
-/** One group of properties: its name (and an ⓘ with `tip`), then its controls. */
-const psec = (nameKey, kids, tip = "") => el("div", { class: "psec" }, el("div", { class: "psec-h" }, t(nameKey), tip && info(tip)), el("div", { class: "psec-b" }, kids));
+/**
+ * One group of properties: its name (and an ⓘ with `tip`), then its controls. The name sits on the
+ * baseline of the first control; `top` puts it at the top instead (a text box's baseline is its bottom).
+ */
+const psec = (nameKey, kids, tip = "", top = false) => el("div", { class: "psec" }, el("div", { class: "psec-h" + (top ? " top" : "") }, t(nameKey), tip && info(tip)), el("div", { class: "psec-b" }, kids));
 /** Put a layer back where it was placed by default. */
 function placementControls(L) {
   const f = frame();
@@ -1553,7 +1615,7 @@ function headlineControls(L, set) {
   return [
     psec("props.sec.text", [
       L.type === "text" && el("textarea", { value: L.text, spellcheck: false, style: "height:64px;margin-bottom:8px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
-      fontControl(L, true)], L.type === "text" ? t("props.textHint") : t("props.boundHint")),
+      fontControl(L, true)], L.type === "text" ? t("props.textHint") : t("props.boundHint"), L.type === "text"),
     psec("props.sec.effect", fx.kids, fx.tip),
     psec("props.sec.color", el("div", { class: "sws" },
       swatch(L, "ink", "props.sw.text", L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff"),
@@ -1574,8 +1636,9 @@ function photoControls(L, set) {
         ? el("div", { class: L.of ? "" : "row", style: "margin-top:0" },
             el("button", { class: "btn" + (L.of ? " wide" : ""), disabled: CUT.busy, onclick: () => cut(!L.cut) }, t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut")),
             !L.of && el("button", { class: "btn", disabled: CUT.busy, title: t("cut.go"), onclick: () => cutOut(L) }, t("cut.goShort")))
-        : el("div", { class: "hint", style: "margin:0" }, t("cut.onlyMac")),
-      CUT.error && el("div", { class: "hint err" }, CUT.error)], canCut() ? t("cut.tip") : ""),
+        : el("div", { class: "hint", style: "margin:0" }, t("cutset.needsApp")),
+      CUT.error && el("div", { class: "hint err" }, CUT.error),
+    CUT.needModel && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.tab.setup = "ai"; S.aiPane = "cut"; setMode("setup"); } }, t("cut.goModel"))], t("cut.tip", t("cutset.engine." + cutEngine()))),
     L.of
       ? psec("props.sec.place", el("div", { class: "hint", style: "margin:0" }, t("props.copyHint", base ? layerName(base) : "—")), t("props.copyMore"))
       : psec("props.sec.place", check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
@@ -1585,8 +1648,9 @@ function photoControls(L, set) {
       slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => { holdLive(L.id); set("dim", v); }),
       check("props.treat", L.treat, (v) => set("treat", v))]),
     psec("props.sec.lines", [
-      el("div", { class: "with-chip" }, slider("props.outline", 0, 40, 1, L.outline, px, (v) => { holdLive(L.id); set("outline", v); }), swatch(L, "ink", "", "#ffffff")),
-      slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => { holdLive(L.id); set("shadow", v); })], t("props.photoLinesTip")),
+      slider("props.outline", 0, 40, 1, L.outline, px, (v) => { holdLive(L.id); set("outline", v); }),
+      slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => { holdLive(L.id); set("shadow", v); }),
+      el("div", { class: "sws", style: "margin-top:10px" }, swatch(L, "ink", "props.sw.outline", "#ffffff"))], t("props.photoLinesTip")),
   ];
 }
 /**
@@ -1879,6 +1943,7 @@ const projectActions = {
 // ---------- chrome
 function setMode(mode) {
   S.mode = mode;
+  columns();   // the left column has a width of its own in Setup (and the handles' words follow the language)
   $("body").classList.toggle("setup", mode === "setup");
   syncTop(); syncTabs(); renderPanel(); renderSide(); syncToolbar(); queueDraw();
 }
@@ -1973,6 +2038,30 @@ function welcome() {
   });
 }
 
+// ---------- the side columns: their inner edges are dragged to make them wider or narrower
+const COLUMNS = { left: { min: 300, def: 372 }, right: { min: 260, def: 320 }, setup: { min: 340, def: 420 } };
+const CENTRE_MIN = 360;   // what the canvas keeps at the least
+/** Sets the columns' widths from the settings (0 = default), each kept between its least and what leaves the canvas room. */
+function columns() {
+  const b = $("body"), w = innerWidth, c = S.settings.columns;
+  const fit = (k, other) => Math.round(clamp(c[k] || COLUMNS[k].def, COLUMNS[k].min, Math.max(COLUMNS[k].min, w - CENTRE_MIN - other)));
+  const left = fit("left", c.right || COLUMNS.right.def), right = fit("right", left);
+  b.style.setProperty("--lw", left + "px"); b.style.setProperty("--rw", right + "px"); b.style.setProperty("--sw", fit("setup", 0) + "px");
+  for (const h of document.querySelectorAll(".split")) h.title = t("ui.split");
+}
+addEventListener("resize", () => S.profile && columns());
+for (const [side, id] of [["left", "left"], ["right", "right"]]) {
+  const handle = el("div", { class: "split" });
+  $(id).append(handle);
+  handle.addEventListener("dblclick", () => { S.settings.columns[S.mode === "setup" && side === "left" ? "setup" : side] = 0; persistSettings(); columns(); });
+  handle.addEventListener("pointerdown", (e) => {
+    e.preventDefault(); handle.setPointerCapture(e.pointerId); handle.classList.add("on");
+    const key = S.mode === "setup" && side === "left" ? "setup" : side, aside = $(id).getBoundingClientRect();
+    handle.onpointermove = (m) => { S.settings.columns[key] = Math.round(side === "left" ? m.clientX - aside.left : aside.right - m.clientX); columns(); };
+    handle.onpointerup = handle.onpointercancel = () => { handle.onpointermove = null; handle.classList.remove("on"); S.settings.columns[key] = Math.round($(id).getBoundingClientRect().width); persistSettings(); };
+  });
+}
+
 // ---------- window-level events
 let dragDepth = 0;
 const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
@@ -2030,6 +2119,8 @@ async function start() {
   S.repaintStyles = await loadStyles();
   S.myStyles = await loadMyStyles();
   if ((S.imageAi.source.startsWith("preset:") && !builtIn()) || (S.imageAi.source.startsWith("my:") && !myStyle())) S.imageAi.source = "look";   // a style that is no longer there
+  columns();
+  await refreshCutModels();
   if (native) {
     const found = await invoke("list_system_fonts").catch(() => []);
     S.systemFonts = found.map((f) => f.name);
@@ -2117,6 +2208,17 @@ async function selfTest(dir) {
           const up = await upgradeCover(old, { src: real, mask: rec.mask.src });
           const fill = up.layers.find((l) => l.type === "photo" && l.fill), copy = up.layers.find((l) => l.type === "photo" && l.of);
           report.upgrade = { fill: !!fill && fill.blur === 7 && up.layers.indexOf(fill) === 1, copy: !!copy && copy.of === fill.id && copy.cut && copy.outline === 5, subjectLeft: up.layers.some((l) => l.type === "subject") };
+        }
+        // the same photo cut out by BiRefNet, when a folder of downloaded models is given (SMEDCOVER_SELFTEST_MODELS)
+        if (await invoke("selftest_models").catch(() => false)) {
+          await refreshCutModels();
+          const was = S.settings.cutEngine; S.settings.cutEngine = "birefnet-lite";
+          S.cover = normalizeCover(JSON.parse(keep), S.profile);
+          S.cover.layers = S.cover.layers.filter((l) => l.type !== "photo");
+          const p = await addPhoto(real), t1 = performance.now(), cut = await cutOut(p), r = recordOf(p);
+          report.birefnet = { ok: !!cut, ms: Math.round(performance.now() - t1), mask: r && r.mask ? sizeOf(r.mask.img) : null, error: CUT.error };
+          if (cut) { cut.outline = 8; p.blur = 10; S.cover.title = "*BiRefNet* cut-out\nin front"; report.birefnet.path = await invoke("write_image", framed(await toPng(renderFull(S.profile.sizes[0], S.cover, catIndex())), { dir, name: "subject-birefnet.png" })); }
+          S.settings.cutEngine = was;
         }
         S.cover = normalizeCover(JSON.parse(keep), S.profile);
       }

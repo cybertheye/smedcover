@@ -26,6 +26,15 @@ fontdb = "0.23"
 ureq = { version = "2", features = ["socks-proxy"] }
 ttf-parser = "0.25"
 base64 = "0.22"
+# The cross-platform subject cut-out: BiRefNet (MIT) run by ONNX Runtime (MIT), through `ort`
+# (MIT/Apache-2.0). Neither is built in: the runtime library (Microsoft's own release) and the model
+# are downloaded when the user asks for them, checked against their SHA-256, and loaded from the app
+# data folder. Runtime 1.23.2 is the last with an Intel Mac build, hence API 23.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-23"] }
+sha2 = "=0.10.9"
+flate2 = "=1.1.9"
+tar = "=0.4.46"
+zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 
 # The subject cut-out uses Apple's Vision framework, reached through the Objective-C runtime.
 [target.'cfg(target_os = "macos")'.dependencies]

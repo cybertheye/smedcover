@@ -61,11 +61,17 @@ Each photo's properties, top to bottom: remove the background, cut out the subje
 
 The Background layer itself is only the ground: light or dark, and the grid. It always stays at the bottom. Light or dark is set in the Background layer's properties (not in the Style tab); while a photo fills the canvas it covers the ground, and the lettering is set as on a dark one.
 
-### Cutting out the subject (macOS 14 and later)
+### Cutting out the subject
 
-Select a photo: *Cut out the subject into a new photo layer* is in its properties.
+Select a photo: *Remove the background* and *Cut out subject* are in its *Cut-out* group. Cutting out is done on this computer — photos are not uploaded — in one of two ways, chosen under *Setup → AI → Cut-out*:
 
-- macOS's own recognition (the same "lift subject" the Photos app has) lifts the people, animals or objects out of the photo, on this computer — the photo is not uploaded — usually in a second or two.
+| Way | Systems | |
+|---|---|---|
+| Apple Vision | macOS 14 and later (the default on a Mac) | built in (the same "lift subject" the Photos app has), nothing to download, usually under a second |
+| BiRefNet light / full | Windows, Linux, macOS (light is the default elsewhere) | an open model (MIT), downloaded on the same page before its first use: the ONNX Runtime library (Microsoft's own release, MIT, about 10–80 MB, once) and the model (light about 224 MB, full about 973 MB with finer edges). It runs on the CPU: a few to a dozen seconds a photo |
+
+- A download shows its progress and can be cancelled; every file is checked against its SHA-256, and a broken or altered one is not kept. Models come from Hugging Face and the runtime from GitHub, through the proxy given there or else the environment's. *Open the models folder* shows the files; *Delete* (two clicks) removes one.
+- With BiRefNet chosen but not downloaded, cutting out says so and offers *Download the model*.
 - The subject goes into a new photo layer, *Cut-out subject*: the same picture with its background removed, lined up with the photo and placed just above the title, so it covers part of the title as on a magazine cover. The photo itself stays as it was.
 - The new layer is independent: move, scale and turn it, give it its own blur, dim, outline and shadow; move it up or down in the layer list to decide what it stands in front of. Delete the layer when you no longer want it. Cut out as often as you like: each time is a new layer.
 - It shares its picture with the photo: an AI repaint of either, once used, changes both and is cut out again.
@@ -173,7 +179,8 @@ In *This size only*, the channel graphic's placement is remembered per channel.
 - **＋ Text** adds a text layer; **＋ Colour** adds a colour layer: one block of colour, the canvas's size to begin with (in the channel colour), to shrink, stretch or turn into a ground, a band or a see-through wash. Clicking an item in Assets adds it. New layers go directly above the selected one.
 - Position, size, stretch and rotation are set on the canvas with the mouse (see the table above).
 - The properties come in groups: their names on the left (Text, Effect, Colour, Lines, Plate — or Cut-out, Place, Picture, Lines…), the controls on the right; after a rule at the bottom, the Layer group every layer has: opacity, *Reset placement*, channels. Explanations sit behind the ⓘ beside a group's name: hover it, or click it.
-- Colours are small swatches: one marked *auto* follows the look and the channel colour; once you pick a colour, the × on its corner (shown on hover) goes back to automatic.
+- Colours are small swatches: one marked *auto* follows the look and the channel colour; once you pick a colour, a × appears on its corner — click it to go back to automatic.
+- The left and right columns are resized by dragging their edge with the canvas (left at least 300 px, right at least 260 px, the canvas keeps 360 px); double-click an edge for the default width. Widths are remembered.
 - A vector asset (stickers, frames, channel graphics, AI assets) has *Colour*: its own colours, the channel colour, or a colour of your own.
 
 What each layer allows:
