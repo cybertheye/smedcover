@@ -109,7 +109,7 @@ hand-edited files cannot crash the app.
 name pattern, adjustment scope.
 
 Other files: `assets/<id>.json` (uploaded assets, as data URLs), `fonts/<name>.font` (imported
-fonts), `session-photo` (the current background photo), `ai.json` (AI connection settings including the token; never exported with
+fonts), `photos/<pid>` (the current cover's pictures, originals and masks; see 6.3), `ai.json` (AI connection settings including the token; never exported with
 profiles or projects).
 
 A **project file** bundles the cover, its profile and the uploads it uses into one JSON, so it opens
@@ -122,7 +122,7 @@ A cover is an array of layers, bottom first.
 | Kind | Types | Notes |
 |---|---|---|
 | Bound layers | `bg` `accent` `graphic` `brand` `title` `tag` `catname` `frame` | Exactly one of each on every cover. Their content comes from elsewhere (the title text, the channel's graphic, …). They cannot be deleted; the `id` is the type name. |
-| Free layers | `asset` `text` | Assets and text added by the user; can be deleted and duplicated. |
+| Free layers | `asset` `text` `photo` | Assets, text and photos added by the user; can be deleted and duplicated. |
 
 `normalizeLayers()` repairs a layer list: it drops unknown layers, puts back missing bound layers,
 keeps the background at the bottom and makes ids unique.
@@ -146,16 +146,26 @@ Every layer has a `t`:
 - **The channel graphic** can also be tuned per channel, under `"1920x1080@<channel id>"`, because graphics differ a lot in shape.
 
 `resolve()` combines the two into the final placement: positions add, scales and stretches multiply,
-angles add. `adjust()` is the single entry point for every edit: dragging, handles, the wheel, arrow
-keys and sliders all express a change as a patch, which is written to `t.all` or `t.by` depending on
+angles add. `adjust()` is the single entry point for every edit: dragging, handles, the wheel and arrow
+keys all express a change as a patch (the properties panel has no placement sliders, only *Reset placement*), which is written to `t.all` or `t.by` depending on
 the current scope.
 
-### 4.2 Lettering colours
+### 4.2 Lettering colours and headline layers
 
 Layers made of words (`title`, `tag`, `catname`, `brand`, `text`) may carry `ink`, their own
-lettering colour; the title may also carry `hi`, the colour of its highlighted words. Without them
-the colour comes from the current look and the channel colour. Every look's lettering has to honour
-the two fields.
+lettering colour. The title and text layers (`HEADLINES`) are one kind of thing: both may also carry
+`hi` (the highlighted words' colour), `stroke` and `shadow` (outline and shadow strengths), `plate`
+and `plateInk` (a plate and its colour), `fx`, `fxAmt` and `warp`; a text layer only adds `text`.
+Without a colour the look and the channel colour decide; on a plate, an unset lettering colour is the
+one that reads against the plate. `headline()` in `render.js` turns these rules into one set of
+colours shared by the title and text layers, from which every look's lettering takes its colours; on a
+plate it also hands the highlight as `hi` (RGB) to looks that colour letters themselves, so they do
+not paint in the channel colour on a plate of the channel colour.
+
+A text layer's earlier `color` (white, channel colour, ink, custom) is converted in
+`normalizeLayer()`: white becomes automatic; ink and custom become `ink`; the channel colour stays
+as `color: "accent"` until a colour (or automatic) is chosen; on a plate the old colour becomes
+`plateInk`, and without `stroke` / `shadow` fields both are 0, as before.
 
 ### 4.3 Channels a layer belongs to
 
@@ -235,7 +245,7 @@ fill.
 
 ### 6.2 Text effects (`textfx.js`, `outlines.js`)
 
-The title, and text layers in the headline look, paint their letters through `paintRuns()`. The
+The title and text layers paint their letters through `paintRuns()`. The
 effect is a property of the layer (`fx`); unset means "auto", which leaves it to the current look.
 There are three kinds, differing in what they can change:
 
@@ -268,11 +278,13 @@ shaded by the way they face, each group is filled as one shape, then the back fa
 
 A photo is a free layer of type `photo`. The layer keeps only the picture's id `pid`; the pictures are in the photo store `S.photos`: `pid → {src, img, original, mask}` (the picture, the one before an AI repaint, the subject mask). In the session each is a file in `photos/`; a project file (version 3) embeds them under `photos`. At start only the pictures the cover uses are read and other files are removed. Duplicating layers and undo never copy a picture.
 
-Two ways to place one: `fill` covers the canvas and is placed as the background photo used to be (`t.all.x/y` an offset around 0.5, `s` a scale on top of covering, no turning); otherwise like a print, nominally 1000 units on its longer side, at the free layer's place, scale, angle and stretch. With `of` naming another photo layer, the layer shows that layer's picture in that layer's place — the cut-out subject is such a copy of the background photo, with `cut` on.
+Two ways to place one: `fill` covers the canvas and is placed as the separate background photo used to be (`t.all.x/y` an offset around 0.5, `s` a scale on top of covering, no turning); otherwise like a print, nominally 1000 units on its longer side, at the free layer's place, scale, angle and stretch. With `of` naming another photo layer, the layer shows that layer's picture in that layer's place — the cut-out subject is such a copy of a photo, with `cut` on, put above the title (above the photo when the photo is higher).
+
+Adding: `addPhoto()` is the one way in (an upload, a drop on the window, an AI picture added to the cover). While this channel has no photo filling the canvas, the new one gets `fill` and goes just above the Background layer; otherwise it goes above the selected layer like a print, where it was dropped if dropped on the canvas. *Cover → Add photos* lists this channel's photos (not the copies) in layer order, each with its own AI repaint (`REP.for` is the one open); the cut-out and *Remove the background* are in the photo layer's properties (`cutBox`, `photoControls`).
 
 Painting: the photo goes through the look's treatment of photos — the look's `background` hook is called with `env.photo` set to this picture and `drawPhoto` drawing it in its own frame — on the whole canvas (a look's washes must cover it), and then only the photo's rectangle is kept, or, with `cut`, only where the mask is opaque. A photo with no cut-out, outline or shadow is painted straight onto the canvas inside a rectangle clip, with no work canvas; the others are put together on work canvases. The outline and shadow come from the silhouette of the shape (the mask, or the photo's rectangle), made once at the photo's scale (at most 1024 px) and cached per shape, so a frame lays one image. A copy makes no hit: clicks go through to what is under it.
 
-The Background layer paints only the ground: the look's ground (its `background` hook with `photo: null`) or the theme's colour, and the grid. When looks and themes ask whether there is a background photo, they mean the lowest visible photo filling the canvas on this channel (`env.photo`).
+The Background layer paints only the ground: the look's ground (its `background` hook with `photo: null`) or the theme's colour, and the grid. Light or dark (`style.theme`) is set in its properties; the Style tab no longer has it. When looks and themes ask whether there is a background photo, they mean the lowest visible photo filling the canvas on this channel (`env.photo`).
 
 Blur: canvas filters are not available in the macOS web view, so the gaussian blur is done in script — three box blurs approximate one gaussian, each a sliding window whose cost does not depend on the radius — on a reduced copy of the picture, cached by picture and amount (per picture).
 
@@ -309,7 +321,7 @@ A look is a set of **hooks**. Each is optional, and what a look leaves out is dr
 | `sticker` | the five painters of flat stickers: `shape`, `blob`, `stroke`, `thin`, `word` |
 | `tag` | the corner tag |
 | `frame` | the frame layer, and any interface detail the look wants along the edges |
-| `freeText` | free text layers in their plain and plate looks |
+| `plate` | the plate under the title or a text layer |
 | `subject` | whatever is painted around the channel graphic and travels with it (a lock-on ring, say) |
 | `seeded` | marks a look that places some things at random |
 | `layout` | the geometry of a cover, for looks that are about arrangement; the result has the shape `layout()` in `layout.js` returns, and usually comes from `blockLayout()`, which gives level bands and upright panels |
@@ -467,7 +479,7 @@ validate each one, so the prompt and the interpreter cannot drift apart.
 
 ### 8.5 Photo repaint (`repaint.js`)
 
-A repaint is one fixed step, not an agent: the photo and a style description go to an image model, a picture comes back. The three services each have their own interface; `buildImageRequest` builds each one's request and `readImageReply` finds the picture in each one's reply:
+A repaint, and an AI-generated photo, is one fixed step, not an agent: the photo and a style description (a repaint), or a description and an optional reference picture (a new photo), go to an image model, a picture comes back. With no `image`, `buildImageRequest` asks for a new picture: OpenAI at `/images/generations`, Gemini with text alone, Seedream without `image`; a new photo is asked for in the canvas's shape, and Gemini is also given the nearest aspect ratio in `generationConfig.imageConfig.aspectRatio` (`geminiRatio`). `generatePrompt` writes its prompt. The three services each have their own interface; `buildImageRequest` builds each one's request and `readImageReply` finds the picture in each one's reply:
 
 | Service | Request | The photo goes in | The result is in |
 |---|---|---|---|
@@ -477,7 +489,7 @@ A repaint is one fixed step, not an agent: the photo and a style description go 
 
 Built-in styles are Markdown files in `ui/repaint-styles/`: the file name is the id (what users' settings remember), a front-matter header between `---` lines gives the names, a description, the order and the source (`parseStyle` takes only the keys in `STYLE_KEYS` and reports any other), and the prompt follows. A bundled app cannot list a folder, so `scripts/repaint-styles.mjs` scans it before every build (`beforeBuildCommand`) and writes `index.json`; the interface reads the list at start and a style's file only when it is selected, opened or used (`styleText`, kept once read), with `<!-- -->` comments taken out.
 
-`repaintPrompt` puts the prompt together: the style source (the current look's `repaint(colour)`, a built-in style's file, or the user's words), then "this is a cover background: no text or border, keep the shape", then any extra words. Following a look also asks to keep the composition, so the background layer's placement still fits; presets and custom text decide composition themselves. When the service refuses an optional setting (size, watermark…) with a 400, `refusedParam` finds its name in the message and the request goes again without it, at most three times. The connection test (`imageCheck` / `readImageCheck`) makes no picture: OpenAI and Gemini are asked about the model with a GET, Seedream is sent an empty prompt and its refusal read; `ai_request` can send a GET for this. The user's own styles are Markdown files of the same form in the app data folder `repaint-styles/` (`userStyle` reads them leniently — no header or unknown keys are fine, and unknown keys are kept, so `writeStyle` loses nothing), read again when the window comes back to the front; `reveal_data_dir` opens that folder in the file manager. The `styles` / `custom` that `image-ai.json` held earlier are written out as files once at start (`legacyStyles`). A repaint always starts from the original, kept in `S.photoOriginal` (`session-photo-original` in the session, `photoOriginal` in project files).
+`repaintPrompt` puts the prompt together: the style source (the current look's `repaint(colour)`, a built-in style's file, or the user's words), then "this is a cover background: no text or border, keep the shape", then any extra words. Following a look also asks to keep the composition, so the background layer's placement still fits; presets and custom text decide composition themselves. When the service refuses an optional setting (size, watermark…) with a 400, `refusedParam` finds its name in the message and the request goes again without it, at most three times. The connection test (`imageCheck` / `readImageCheck`) makes no picture: OpenAI and Gemini are asked about the model with a GET, Seedream is sent an empty prompt and its refusal read; `ai_request` can send a GET for this. The user's own styles are Markdown files of the same form in the app data folder `repaint-styles/` (`userStyle` reads them leniently — no header or unknown keys are fine, and unknown keys are kept, so `writeStyle` loses nothing), read again when the window comes back to the front; `reveal_data_dir` opens that folder in the file manager. The `styles` / `custom` that `image-ai.json` held earlier are written out as files once at start (`legacyStyles`). A repaint always starts from the original, kept as the picture record's `original` (`photos/<pid>.original` in the session, `photos.<pid>.original` in project files).
 
 ## 9. Interaction (`app.js`)
 
@@ -498,7 +510,7 @@ when needed.
 
 - The pointer position is converted to virtual coordinates and tested against `canvas._hits`, top first. The point is rotated back into each layer's own frame, so rotated layers are hit accurately.
 - For the selected layer the handles are checked first: corners resize, sides stretch, the top knob rotates. Handle size is computed in screen pixels, so handles look the same at any zoom.
-- Corner brackets are never hit; the background can be dragged only when it holds a photo.
+- Corner brackets and the Background layer are never dragged; a selected photo filling the canvas is dragged from anywhere on the ground (the background, the colour block, anything locked).
 
 ### 9.3 Redrawing one layer while dragging
 
@@ -506,7 +518,7 @@ While a layer is moved, resized or rotated, the others do not change. So when a 
 `drawCover()` paints everything **under** the dragged layer into one image and everything **over** it
 into another, and each frame then does three things: blit the first, repaint the dragged layer, blit
 the second. The cache lives in the `o.live` object the interface passes in and is dropped when the
-drag ends. Dragging on the canvas, the wheel and the placement sliders all go this way.
+drag ends. Dragging on the canvas and the wheel go this way.
 
 Measured in the engine the app uses (1900 px wide): a full redraw takes about 18 ms in the cel look
 and 44 ms in cyberpunk; dragging a layer takes 5–11 ms in either.
@@ -618,7 +630,7 @@ as the header issue above.
 | add a sticker | `stickers.js` |
 | add a colour block shape | `ACCENT_SHAPES` in `layers.js`, `paintAccent()` and `edgePoints()` in `render.js`, a name in `i18n.js` |
 | add a template | `TEMPLATES` and `layout()` in `layout.js`, a name in `i18n.js` |
-| add a property to a layer | `PROPS` and `normalizeLayer()` in `layers.js`, `PAINT` in `render.js`, `typeControls()` in `app.js` |
+| add a property to a layer | `PROPS` and `normalizeLayer()` in `layers.js`, `PAINT` in `render.js`, `typeControls()` in `app.js` (`headlineControls()` for the title and text layers) |
 | add an export format | `encode()` in `lib.rs`, `EXT` and the format picker in `app.js` |
 | add a drawing operation for AI assets | validation and `drawSpec()` in `spec.js`, the prompt and examples in `ai.js` |
 | add a kind of part to solids | validation and `pieces()` in `solid.js`, `solidPrompt()` and its examples in `ai.js` |

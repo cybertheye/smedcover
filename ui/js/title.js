@@ -16,7 +16,8 @@ export function parseTitle(title) {
 /**
  * Draws the title into box {x,y,w,h}. `adj` is the manual {dx,dy,s}; `st` the style:
  * { font, fill, hi, ink, shadow, hiShadow, align, stroke, shadowAmt, maxFs, fx, fxAmt } — fx being
- * the text effect (see textfx.js).
+ * the text effect (see textfx.js) — and optionally `plate(x, y, w, h, fs)`, which paints a plate
+ * under the lines, and `skew`, the lines' slant (default -0.08).
  * Returns the box it occupies (for hit-testing), or null when there is nothing to draw.
  */
 export function drawTitle(ctx, title, box, adj, st) {
@@ -37,24 +38,26 @@ export function drawTitle(ctx, title, box, adj, st) {
   const y0 = box.y + (box.h - lines.length * fs * LH) / 2 + adj.dy;
   const d = fs * 0.062 * st.shadowAmt, block = { x: x0, y: y0, w: blockW, h: lines.length * fs * LH };
   if (st.onBlock) st.onBlock(ctx.getTransform ? ctx.getTransform() : null, block);   // where the block is, for the perspective's handles
+  const pad = st.plate ? fs * 0.32 : 0, skew = st.skew ?? -0.08;
+  if (st.plate) st.plate(block.x - pad, block.y - pad * 0.3, block.w + pad * 2, block.h + pad * 0.6, fs);
   lines.forEach((line, li) => {
     const lw = (widths[li] * fs) / 100;
     ctx.save();
     const ox = x0 + fs * 0.04 + (st.align === "center" ? (blockW - lw) / 2 : 0), oy = y0 + li * fs * LH + fs * 0.92;
     ctx.translate(ox, oy);
-    ctx.transform(1, 0, -0.08, 1, 0, 0);
+    if (skew) ctx.transform(1, 0, skew, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
     const m = ctx.getTransform ? ctx.getTransform() : null;
     paintRuns(ctx, pass, {
       fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: st.fxAmt ?? 1, lineW: lw, seed: li * 17.3 + 1,
       fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow,
       C: st.C, fill: st.own, hi: st.ownHi, unit: m ? Math.hypot(m.a, m.b) : 1,
-      frame: { ox, oy, c: -0.08, box: block }, warp: st.warp,
+      frame: { ox, oy, c: skew, box: block }, warp: st.warp,
     }, st.fx);
     ctx.restore();
   });
   ctx.restore();
-  return block;
+  return pad ? { x: block.x - pad, y: block.y - pad * 0.3, w: block.w + pad * 2, h: block.h + pad * 0.6 } : block;
 }
 export { INK };
 

@@ -547,10 +547,10 @@ test("lettering layers may carry their own colour", () => {
   ]);
   const by = (type) => ls.find((l) => l.type === type);
   assert.equal(by("title").ink, "#ff00aa"); assert.equal(by("title").hi, "#00ff00");
-  assert.equal(by("tag").ink, "#123456"); assert.equal(by("tag").hi, undefined);       // only the title has highlighted words
+  assert.equal(by("tag").ink, "#123456"); assert.equal(by("tag").hi, undefined);       // only headlines (title, text) have highlighted words
   assert.equal(by("catname").ink, undefined); assert.equal(by("brand").ink, undefined); // not six-digit hex: left automatic
   assert.equal(by("accent").ink, undefined); assert.equal(by("asset").ink, undefined);   // not lettering
-  assert.equal(by("text").ink, "#0000ff"); assert.equal(by("text").color, "custom");   // a text layer's own colour is its fourth colour choice
+  assert.equal(by("text").ink, "#0000ff"); assert.equal(by("text").color, undefined);  // a text layer's own colour, as the title's
   assert.equal(duplicate(by("text")).ink, "#0000ff");
   assert.deepEqual(normalizeLayers(ls), ls);
   assert.deepEqual(LOOKS.cyber.params.map((q) => q.key).at(-1), "tearClear");            // the checkbox closes the list
@@ -689,23 +689,39 @@ test("text effects: a layer may choose one, and every one can be painted", async
   assert.deepEqual(n1, n2);
 });
 
-test("text layers: a plate switch, one colour choice, and older layers carried over", () => {
+test("text layers are headlines like the title; older layers carried over", () => {
   const one = (raw) => normalizeLayers([{ type: "text", text: "x", ...raw }]).find((l) => l.type === "text");
-  const fresh = newLayer("text", { text: "x" });
-  assert.equal(fresh.plate, false); assert.equal(fresh.color, "white"); assert.equal(fresh.fx, undefined); assert.equal("look" in fresh, false);
+  const fresh = newLayer("text", { text: "x" }), title = newLayer("title");
+  assert.deepEqual([fresh.plate, fresh.stroke, fresh.shadow, fresh.fx, "color" in fresh, "look" in fresh], [false, 1, 1, undefined, false, false]);
+  assert.deepEqual([title.plate, title.stroke, title.shadow], [false, 1, 1]);
+  // both take the same colours: lettering, highlighted words, plate
+  for (const type of ["title", "text"]) {
+    const L = normalizeLayers([{ type, text: "x", ink: "#112233", hi: "#445566", plateInk: "#778899", plate: true, stroke: 0.5, shadow: 2 }]).find((l) => l.type === type);
+    assert.deepEqual([L.ink, L.hi, L.plateInk, L.plate, L.stroke, L.shadow], ["#112233", "#445566", "#778899", true, 0.5, 2], type);
+  }
   // the three old looks: a headline follows the look as before; plain text and plates keep plain lettering
   assert.deepEqual([one({ look: "title" }).plate, one({ look: "title" }).fx], [false, undefined]);
   assert.deepEqual([one({ look: "plain" }).plate, one({ look: "plain" }).fx], [false, "plain"]);
   assert.deepEqual([one({ look: "plate" }).plate, one({ look: "plate" }).fx], [true, "plain"]);
   assert.equal(one({ look: "plate", fx: "dots" }).fx, "dots");                 // an effect already chosen stays
   assert.equal("look" in one({ look: "plate" }), false);
-  // colour: a custom one beside a named one becomes "custom"; "custom" with nothing to show falls back
-  assert.deepEqual([one({ color: "accent", ink: "#112233" }).color, one({ color: "accent", ink: "#112233" }).ink], ["custom", "#112233"]);
-  assert.deepEqual([one({ color: "custom" }).color, one({ color: "custom" }).ink], ["white", undefined]);
-  assert.deepEqual([one({ color: "ink" }).color, one({ color: "ink" }).ink], ["ink", undefined]);
-  assert.equal(one({ color: "purple" }).color, "white");
+  // a plate of before had no outline or shadow
+  assert.deepEqual([one({ plate: true }).stroke, one({ plate: true }).shadow, one({}).stroke], [0, 0, 1]);
+  // the one colour of before: white is automatic, ink and custom are the lettering's own colour, the channel colour stays as such
+  const col = (raw) => { const L = one(raw); return [L.ink, L.plateInk, L.color]; };
+  assert.deepEqual(col({ color: "white" }), [undefined, undefined, undefined]);
+  assert.deepEqual(col({ color: "ink" }), ["#07070c", undefined, undefined]);
+  assert.deepEqual(col({ color: "custom", ink: "#112233" }), ["#112233", undefined, undefined]);
+  assert.deepEqual(col({ color: "accent", ink: "#112233" }), ["#112233", undefined, undefined]);   // a custom colour beside a named one won
+  assert.deepEqual(col({ color: "custom" }), [undefined, undefined, undefined]);
+  assert.deepEqual(col({ color: "accent" }), [undefined, undefined, "accent"]);
+  assert.deepEqual(col({ color: "purple" }), [undefined, undefined, undefined]);
+  // …on a plate it was the plate's colour
+  assert.deepEqual(col({ plate: true, color: "white" }), [undefined, "#ffffff", undefined]);
+  assert.deepEqual(col({ plate: true, color: "accent" }), [undefined, undefined, undefined]);
+  assert.deepEqual(col({ plate: true, color: "custom", ink: "#445566" }), [undefined, "#445566", undefined]);
   // settled: normalising again changes nothing
-  for (const raw of [{ look: "plate", color: "accent", ink: "#112233" }, { plate: true, color: "custom", ink: "#445566", fx: "wave", fxAmt: 0.5 }, {}]) { const L = one(raw); assert.deepEqual(one(L), L); }
+  for (const raw of [{ look: "plate", color: "accent", ink: "#112233" }, { plate: true, color: "custom", ink: "#445566", fx: "wave", fxAmt: 0.5 }, { color: "accent" }, { color: "ink" }, {}]) { const L = one(raw); assert.deepEqual(one(L), L); }
 });
 
 test("vertical titles: columns from the right, sideways Latin, sized to fit", async () => {
@@ -844,6 +860,22 @@ test("repaint: each image service gets the photo in its own form, and its reply 
   assert.equal(s.body.response_format, "b64_json");
   const [sw, sh] = s.body.size.split("x").map(Number);
   assert.ok(sw * sh >= 2560 * 1440 && sw * sh <= 4624220 && sw < sh, s.body.size);   // inside every Seedream model's range
+  assert.equal(g.body.generationConfig.imageConfig, undefined);   // a repaint keeps the photo's shape by itself
+  // a new picture: without a photo each service is asked to make one, in the shape wanted
+  const o2 = R.buildImageRequest(cfg("openai", { baseUrl: "https://relay.example/v1/images/edits" }), "P", null, 1280, 720);
+  assert.equal(o2.url, "https://relay.example/v1/images/generations");
+  assert.ok(!("images" in o2.body) && o2.body.prompt === "P" && /^\d+x\d+$/.test(o2.body.size));
+  const g2 = R.buildImageRequest(cfg("gemini"), "P", null, 1280, 720);
+  assert.deepEqual(g2.body.contents[0].parts, [{ text: "P" }]);
+  assert.equal(g2.body.generationConfig.imageConfig.aspectRatio, "16:9");
+  assert.equal(R.buildImageRequest(cfg("gemini"), "P", pic, 1080, 1920, { shape: true }).body.generationConfig.imageConfig.aspectRatio, "9:16");   // a reference, and the canvas's shape
+  const s2 = R.buildImageRequest(cfg("seedream"), "P", null, 1280, 720);
+  assert.ok(!("image" in s2.body) && s2.url.endsWith("/images/generations"));
+  assert.deepEqual(["1:1", "4:5", "21:9", "3:4"].map((r) => R.geminiRatio(...r.split(":").map(Number))), ["1:1", "4:5", "21:9", "3:4"]);
+  assert.deepEqual([R.geminiRatio(1000, 1480), R.geminiRatio(1000, 1380)], ["2:3", "3:4"]);
+  assert.match(R.generatePrompt({ text: "a lighthouse" }), /^Make a picture: a lighthouse\n\n.*no text/s);
+  assert.match(R.generatePrompt({ reference: true }), /attached reference image, keeping its subject/);
+  assert.match(R.generatePrompt({ text: "in winter", reference: true }), /attached reference image: in winter/);
   // replies
   assert.deepEqual(R.readImageReply("openai", 200, '{"data":[{"b64_json":"iVBORw0K"}]}'), { image: { mime: "image/png", data: "iVBORw0K" } });
   assert.deepEqual(R.readImageReply("seedream", 200, '{"data":[{"url":"https://x/y.png"}]}'), { url: "https://x/y.png" });

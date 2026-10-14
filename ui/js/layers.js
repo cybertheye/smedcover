@@ -30,9 +30,15 @@ export const fillsCanvas = (L) => L.type === "photo" && L.fill && !L.of;
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes", "arc"];
 /** The text effects a headline can be given (painted in textfx.js). Absent on a layer means "auto": the look decides. */
 export const TEXT_EFFECTS = ["auto", "cel", "plain", "cyber", "riso", "anime", "bluenote", "editorial", "dots", "stripes", "inner", "worn", "rows", "extrude", "arc", "taper", "wave"];
-/** Layers made of words. Each may carry `font`, a family name, and `ink`, its own colour; the title also `hi`, for highlighted words. */
+/**
+ * Layers made of words. Each may carry `font`, a family name, and `ink`, its own colour. The title
+ * and text layers are headlines alike: both also take `hi` (the highlighted words' colour), an
+ * outline and a shadow, a plate and its colour `plateInk`, and a text effect.
+ */
 export const LETTERED = ["title", "tag", "catname", "brand", "text"];
 export const isFree = (type) => FREE_TYPES.includes(type);
+/** The headline layers: the title, and text the user adds (which only differs in carrying its words). */
+export const HEADLINES = ["title", "text"];
 /** Layers that can be grabbed on the canvas (the others are selected from the layer list only). */
 /** Whether a layer is part of the cover of category `catId`. */
 export const appliesTo = (layer, catId) => !layer.cats || layer.cats.includes(catId);
@@ -43,12 +49,12 @@ const PROPS = {
   accent: { shape: "slant" },
   graphic: {},
   brand: { rail: true },
-  title: { stroke: 1, shadow: 1 },
+  title: { stroke: 1, shadow: 1, plate: false },
   tag: {},
   catname: { showName: true, plate: true },
   frame: {},
   asset: { ref: null, tint: false },
-  text: { text: "", plate: false, color: "white" },
+  text: { text: "", stroke: 1, shadow: 1, plate: false },
   subject: { outline: 0, shadow: 0, follow: false },   // legacy, see LEGACY_TYPES
   /**
    * A photo. `pid` names its picture in the photo store (the picture, its original before an AI
@@ -60,7 +66,7 @@ const PROPS = {
    */
   photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, outline: 0, shadow: 0 },
 };
-const COLORS = ["white", "accent", "ink", "custom"];   // "custom" uses the layer's own `ink`
+const OLD_COLORS = ["white", "accent", "ink", "custom"];   // how text layers were coloured before they were headlines (see normalizeLayer)
 
 const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(hi, Math.max(lo, Number(v))) : d);
 const uid = () => "l" + Math.random().toString(36).slice(2, 9);
@@ -102,7 +108,7 @@ function normalizeLayer(raw, catIds) {
   // lettering may be set in a font of its own; without one it takes the look's
   if (LETTERED.includes(raw.type) && typeof raw.font === "string" && raw.font.trim()) L.font = raw.font.trim().replace(/["\\;{}<>]/g, "").slice(0, 80);
   // lettering may be given its own colour; without one it takes whatever the look gives it
-  if (LETTERED.includes(raw.type)) for (const k of raw.type === "title" ? ["ink", "hi"] : ["ink"]) if (typeof raw[k] === "string" && /^#[0-9a-f]{6}$/i.test(raw[k])) L[k] = raw[k].toLowerCase();
+  if (LETTERED.includes(raw.type)) for (const k of HEADLINES.includes(raw.type) ? ["ink", "hi", "plateInk"] : ["ink"]) if (typeof raw[k] === "string" && /^#[0-9a-f]{6}$/i.test(raw[k])) L[k] = raw[k].toLowerCase();
   if (free && Array.isArray(raw.cats)) {   // a layer whose categories are all gone goes with them
     const cats = [...new Set(raw.cats.filter((x) => typeof x === "string" && x && (!catIds || catIds.includes(x))))];
     if (!cats.length) return null;
@@ -112,7 +118,7 @@ function normalizeLayer(raw, catIds) {
     case "bg": L.grid = raw.grid !== false; L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); break;
     case "accent": L.shape = ACCENT_SHAPES.includes(raw.shape) ? raw.shape : "slant"; break;
     case "brand": L.rail = raw.rail !== false; break;
-    case "title": L.stroke = num(raw.stroke, 1, 0, 2); L.shadow = num(raw.shadow, 1, 0, 2); break;
+    case "title": L.stroke = num(raw.stroke, 1, 0, 2); L.shadow = num(raw.shadow, 1, 0, 2); L.plate = raw.plate === true; break;
     case "catname": L.showName = raw.showName !== false; L.plate = raw.plate !== false; break;
     case "photo": {
       const id = (v) => (typeof v === "string" ? v.replace(/[^\w-]/g, "").slice(0, 40) : "");
@@ -134,14 +140,21 @@ function normalizeLayer(raw, catIds) {
     case "text": {
       L.text = typeof raw.text === "string" ? raw.text : "";
       L.plate = raw.plate === true || raw.look === "plate";
-      L.color = COLORS.includes(raw.color) ? raw.color : "white";
       // Older files said how a text layer looked with `look`: "title", "plain" or "plate". A plate is
       // now a setting of its own, and the lettering is the text effect — "plain" for the two that had none.
       if (!L.fx && (raw.look === "plain" || raw.look === "plate")) L.fx = "plain";
-      // they also let a custom colour sit beside the three named ones; now it is the fourth choice
-      if (L.ink && raw.color !== "custom") L.color = "custom";
-      if (L.color === "custom" && !L.ink) L.color = "white";
-      if (L.color !== "custom") delete L.ink;
+      // A plate had no outline or shadow then; a layer from before the sliders keeps it that way.
+      L.stroke = num(raw.stroke, L.plate ? 0 : 1, 0, 2); L.shadow = num(raw.shadow, L.plate ? 0 : 1, 0, 2);
+      // Before text layers were headlines they had one colour, `color`: white, the channel colour, ink,
+      // or "custom" (`ink`, which also won beside a named one) — the plate's colour when there was a
+      // plate. White is now "automatic"; the channel colour stays as color "accent" until a colour is chosen.
+      if (OLD_COLORS.includes(raw.color)) {
+        const hex = L.ink || { white: "#ffffff", ink: "#07070c" }[raw.color] || "";
+        delete L.ink;
+        if (L.plate) { if (hex) L.plateInk = L.plateInk || hex; }
+        else if (hex && hex !== "#ffffff") L.ink = hex;
+        else if (raw.color === "accent" && !hex) L.color = "accent";
+      }
       break;
     }
   }

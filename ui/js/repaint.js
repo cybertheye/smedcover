@@ -1,9 +1,11 @@
-// Repainting the background photo with an image model: the photo and a description of the wanted
-// style go out, a new picture comes back and takes the photo's place (the original is kept).
+// Pictures from an image model. A repaint: a photo and a description of the wanted style go out, a
+// new picture comes back and takes the photo's place (the original is kept). A new photo: words go
+// out, perhaps with a reference picture, and the picture that comes back becomes a photo layer.
 //
 // Three kinds of service are spoken to, each in its own form:
 //   openai    POST {base}/images/edits                       Authorization: Bearer
 //             {model, prompt, images: [{image_url: data URL}], size}      -> data[0].b64_json
+//             (without a picture: POST {base}/images/generations {model, prompt, size})
 //   gemini    POST {base}/models/{model}:generateContent      x-goog-api-key
 //             {contents: [{parts: [{text}, {inlineData}]}], generationConfig} -> candidates[0].content.parts[].inlineData
 //   seedream  POST {base}/images/generations                  Authorization: Bearer   (Volcengine Ark / BytePlus)
@@ -61,15 +63,15 @@ export function legacyStyles(raw) {
 }
 export const imageReady = (cfg) => (!cfg.baseUrl || /^https?:\/\//i.test(cfg.baseUrl)) && !!cfg.model && !!cfg.token;   // an empty address means the service's own
 
-/** The full URL of the request, tolerating a base that already includes the path. */
-export function imageEndpoint(cfg) {
+/** The full URL of the request, tolerating a base that already includes the path. `edit`: a picture goes with it. */
+export function imageEndpoint(cfg, edit = true) {
   const base = (cfg.baseUrl || IMAGE_DEFAULTS[cfg.provider].baseUrl).replace(/\/+$/, "");
   if (cfg.provider === "gemini") {
     if (/:generateContent$/.test(base)) return base;
     return `${/\/v1(beta)?$/.test(base) ? base : base + "/v1beta"}/models/${encodeURIComponent(cfg.model)}:generateContent`;
   }
   if (cfg.provider === "seedream") return /\/images\/generations$/.test(base) ? base : base + "/images/generations";
-  return /\/images\/edits$/.test(base) ? base : base + "/images/edits";
+  return base.replace(/\/images\/(edits|generations)$/, "") + (edit ? "/images/edits" : "/images/generations");
 }
 
 const round16 = (v) => Math.max(16, Math.round(v / 16) * 16);
@@ -94,20 +96,30 @@ export function repaintSize(cfg, w, h) {
   return null;
 }
 
-/** The HTTP request for one repaint: {url, headers, body}. `image` is {mime, data} with the data in base64. */
-export function buildImageRequest(cfg, prompt, image, w, h) {
-  const url = imageEndpoint(cfg), dataUrl = `data:${image.mime};base64,${image.data}`, size = repaintSize(cfg, w, h);
+/** The shapes a Gemini image model can be asked for. */
+const GEMINI_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+/** The Gemini shape nearest to w × h. */
+export function geminiRatio(w, h) {
+  const r = Math.log(w / Math.max(1, h)), of = (s) => { const [a, b] = s.split(":").map(Number); return Math.abs(Math.log(a / b) - r); };
+  return GEMINI_RATIOS.reduce((best, s) => (of(s) < of(best) ? s : best));
+}
+/**
+ * The HTTP request for one picture: {url, headers, body}. `image` is {mime, data} with the data in
+ * base64, or null to have a picture made from the words alone. w × h is the shape wanted; with
+ * `shape` a Gemini model is told it too (otherwise it follows the picture sent).
+ */
+export function buildImageRequest(cfg, prompt, image, w, h, { shape = false } = {}) {
+  const url = imageEndpoint(cfg, !!image), dataUrl = image && `data:${image.mime};base64,${image.data}`, size = repaintSize(cfg, w, h);
   if (cfg.provider === "gemini") {
-    return {
-      url, headers: { "content-type": "application/json", "x-goog-api-key": cfg.token },
-      body: { contents: [{ role: "user", parts: [{ inlineData: { mimeType: image.mime, data: image.data } }, { text: prompt }] }], generationConfig: { responseModalities: ["TEXT", "IMAGE"] } },
-    };
+    const parts = [...(image ? [{ inlineData: { mimeType: image.mime, data: image.data } }] : []), { text: prompt }];
+    const generationConfig = { responseModalities: ["TEXT", "IMAGE"], ...(shape || !image ? { imageConfig: { aspectRatio: geminiRatio(w, h) } } : {}) };
+    return { url, headers: { "content-type": "application/json", "x-goog-api-key": cfg.token }, body: { contents: [{ role: "user", parts }], generationConfig } };
   }
   const headers = { "content-type": "application/json", authorization: `Bearer ${cfg.token}` };
   if (cfg.provider === "seedream") {
-    return { url, headers, body: { model: cfg.model, prompt, image: dataUrl, size, response_format: "b64_json", watermark: false } };
+    return { url, headers, body: { model: cfg.model, prompt, ...(image ? { image: dataUrl } : {}), size, response_format: "b64_json", watermark: false } };
   }
-  return { url, headers, body: { model: cfg.model, prompt, images: [{ image_url: dataUrl }], size, n: 1 } };
+  return { url, headers, body: { model: cfg.model, prompt, ...(image ? { images: [{ image_url: dataUrl }] } : {}), size, n: 1 } };
 }
 
 // Settings that are only wishes: a model that does not take one says so, and the request goes again without it.
@@ -135,7 +147,7 @@ export function imageCheck(cfg, list = false) {
   }
   const auth = { authorization: `Bearer ${cfg.token}` };
   if (cfg.provider === "seedream") return { method: "POST", url: imageEndpoint(cfg), headers: { "content-type": "application/json", ...auth }, body: { model: cfg.model, prompt: "" } };
-  const root = base.replace(/\/images\/edits$/, "");
+  const root = base.replace(/\/images\/(edits|generations)$/, "");
   return { method: "GET", url: list ? `${root}/models` : `${root}/models/${encodeURIComponent(cfg.model)}`, headers: auth };
 }
 /**
@@ -309,6 +321,17 @@ export async function styleText(style) {
 const FOR_A_COVER = "The result becomes the background of a video cover, with a title and graphics laid over it: no text, letters, numbers, logos, signatures or watermarks, no frame or border, and one single image in the same aspect ratio as the photo.";
 /** Words that go with a look: keep the photo's arrangement, so its placement on the cover still holds. */
 const KEEP = "Keep the photograph's composition: the same framing, the main subject in the same place and at the same size, the horizon and the large shapes where they are. Change how it is rendered, not what is where; leave out small clutter and photographic noise.";
+
+/** Words that go with a new photo: what the picture is for. */
+const FOR_A_PHOTO = "The picture goes on a video cover, under a title and graphics: no text, letters, numbers, logos, signatures or watermarks unless the description asks for them, no frame or border, and one single image.";
+/** The prompt for a new photo: the user's words, and whether a reference picture goes with them. */
+export function generatePrompt({ text = "", reference = false } = {}) {
+  const ask = String(text).trim();
+  const body = reference
+    ? `Make a new picture from the attached reference image${ask ? `: ${ask}` : ", keeping its subject and its spirit."}`
+    : `Make a picture: ${ask}`;
+  return `${body}\n\n${FOR_A_PHOTO}`;
+}
 
 /**
  * The prompt for a repaint.

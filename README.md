@@ -48,30 +48,43 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
 
 ### Photos
 
-Every photo is a *Photo* layer, placed one of two ways:
+Every photo is a *Photo* layer. Under *Add photos* in *Edit → Cover*:
 
-- **Background photo** — fills the canvas, just above the Background layer. Choose it in the Cover tab or drop it onto the window. Click it once to select it, then drag on the cover to move it and scroll to resize it; once selected it drags even when you press on the colour block.
-- **Photo layers** — *＋ Add a photo layer* in the Cover tab puts a photo on the cover like a print: move, scale, turn and re-order it, as many as you like, for collage. *Fill the canvas* in its properties places it like the background photo instead.
+- **Upload photos** — several at once if you like. You can also drop photos onto the window; dropped on the canvas, a photo lands where you let go.
+- **AI generate** — has an image model make a photo; see [Generating a photo with AI](#generating-a-photo-with-ai).
 
-Each photo has blur, dim, the look's treatment of photos (tint, duotone, black and white…; on by default), remove the background, an outline (width and colour), a shadow, and another photo. With the background removed the outline and shadow follow the subject; otherwise the photo's edge, like a print.
+**A cover's first photo fills the canvas**, as its background, just above the Background layer. The ones after it sit on the cover like prints: move, scale, turn and re-order them, as many as you like, for collage. *Fill the canvas* in a photo's properties switches between the two. A photo filling the canvas is clicked once to select it, then dragged on the cover and scrolled to resize; once selected it drags even when you press on the colour block.
 
-The Background layer itself is only the ground: its colour, grid and light or dark. Once a background photo is chosen, a thumbnail and its size appear below.
+Below *Add photos* every photo on the cover is listed in layer order: a thumbnail, its size, and *AI repainted* on one that was. Click a thumbnail to select its layer; each photo has its own *AI repaint* below it.
+
+Each photo's properties: fill the canvas, another photo, blur, dim, the look's treatment of photos (tint, duotone, black and white…; on by default), remove the background, cut out the subject in front of the title, an outline (width and colour) and a shadow. With the background removed the outline and shadow follow the subject; otherwise the photo's edge, like a print.
+
+The Background layer itself is only the ground: light or dark, and the grid. It always stays at the bottom. Light or dark is set in the Background layer's properties (not in the Style tab); while a photo fills the canvas it covers the ground, and the lettering is set as on a dark one.
 
 ### Cutting out the subject, in front of the title (macOS 14 and later)
 
-With a background photo chosen, *Cut out the subject, in front of the title* is below it.
+Select a photo: *Cut out the subject, in front of the title* is in its properties.
 
 - macOS's own recognition (the same "lift subject" the Photos app has) lifts the people, animals or objects out of the photo, on this computer — the photo is not uploaded — usually in a second or two.
-- The subject is a *Cut-out subject* copy of the background photo: the same picture in the same place with its background removed, placed just above the title, so it covers part of the title as on a magazine cover. Move it up or down in the layer list to decide what it stands in front of.
-- It follows the background photo: it moves and scales with it and gets the look's treatment too. Its blur, dim, outline and shadow are its own; it is sharp by default, which reads as depth when the background photo is blurred.
-- *Undo the cut-out* removes the copy; *Cut out again* recognises the subject anew.
-- A new background photo, or a used AI repaint, is cut out again by itself.
-- Any photo layer can *Remove the background* in its properties, with the same recognition.
+- The subject is a *Cut-out subject* copy of that photo: the same picture in the same place with its background removed, placed just above the title, so it covers part of the title as on a magazine cover. Move it up or down in the layer list to decide what it stands in front of.
+- It follows its photo: it moves and scales with it and gets the look's treatment too. Its blur, dim, outline and shadow are its own (select it in the layer list); it is sharp by default, which reads as depth when the background photo is blurred.
+- In the photo's properties, *Undo the cut-out* removes the copy; *Cut out again* recognises the subject anew.
+- Another photo, or a used AI repaint, is cut out again by itself.
+- *Remove the background* in the properties uses the same recognition: the photo itself keeps only its subject, as a sticker.
 - The cut-out is kept with the photo in the session and in project files. A photo with no clear subject says so.
 
-### Repainting the background photo with AI
+### Generating a photo with AI
 
-With a photo chosen, *AI repaint* below it has an image model paint the photo again in another style. Set up an image model first under *Setup → AI* (see [Setting up AI](#setting-up-ai)).
+*AI generate* under *Add photos* has an image model make a photo. Set one up first under *Setup → AI → Image model* (see [Setting up AI](#setting-up-ai)).
+
+- Describe the photo you want; or *＋ Add a reference picture*, which goes along with the words — the words are then optional.
+- It is made in the shape of the size on the canvas. The result is shown first; *Add to the cover* makes it a photo layer (as an upload: a cover's first photo fills it); *Try again* makes another.
+- The app adds "no text or watermarks, no border" after the description, unless the description asks for text.
+- Each picture is charged at the service's prices and usually takes tens of seconds.
+
+### Repainting a photo with AI
+
+Each photo under *Add photos* has its own *AI repaint*: open it to have an image model paint that photo again in another style. Set up an image model first under *Setup → AI* (see [Setting up AI](#setting-up-ai)).
 
 The style comes from one of three places:
 
@@ -116,7 +129,7 @@ Repaint the attached photograph as a loose watercolour painting …
 4. **The list is written when building.** `npm run tauri build` / `tauri dev` scan the folder and write `index.json`; `npm run styles` does it by hand. `npm test` checks that the list matches the folder and that every file is well-formed.
 
 - *Anything to add* is optional and goes after any source. Every source is followed by: no text or watermarks, no border, keep the photo's shape.
-- The result is shown beside the original first; *Use this* replaces the background photo, and *Back to the original* is there afterwards. A new repaint always starts from the original, so repaints do not pile up.
+- The result is shown beside the original first; *Use this* replaces that photo (and its copies, such as the cut-out subject), and *Back to the original* is there afterwards. A new repaint always starts from the original, so repaints do not pile up.
 - Both the repainted photo and the original are saved in project files.
 - If the service answers that it does not take one of the optional settings sent (such as the size or the watermark), the app sends the request again without it.
 - Each repaint is charged at the service's prices and usually takes tens of seconds.
@@ -157,16 +170,16 @@ In *This size only*, the channel graphic's placement is remembered per channel.
 - The list on the right runs front to back, top to bottom. Drag a row to re-order, or use ▲ ▼.
 - The two icons on each row are show/hide and lock. Background and Corner brackets carry a 🔒: they are fixed layers.
 - **＋ Text** adds a text layer; clicking an item in Assets adds it. New layers go directly above the selected one.
-- The properties panel sets position, size, stretch, rotation and opacity precisely, and resets placement.
+- Position, size, stretch and rotation are set on the canvas with the mouse (see the table above); the properties panel has opacity and *Reset placement*.
 
 What each layer allows:
 
 | Layer | Move / resize | Hide | Re-order | Delete |
 |---|---|---|---|---|
-| Background | photo only | yes | no | no |
+| Background | no | yes | no | no |
 | Corner brackets | no | yes | yes | no |
 | Colour block, channel graphic, brand row, title, corner tag, channel name | yes | yes | yes | no |
-| Stickers, images, text (free layers) | yes | yes | yes | yes |
+| Stickers, images, photos, text (free layers) | yes | yes | yes | yes |
 
 ### SURPRISE ME: deal a new hand
 
@@ -176,24 +189,27 @@ What each layer allows:
 - the template, how much the colour block takes, the slant of its edge, whether the halves are swapped, dark or light ground
 - the shape of the colour block, the grid
 - the title's text effect, outline and shadow
-- each text layer's plate, colour and text effect; whether a sticker follows the channel colour
+- each text layer's plate, text effect, outline and shadow; whether a sticker follows the channel colour
 - stickers, images and text you added are nudged, turned and resized a little
 
 **Left alone**: the words of the title and tag, the current channel and every channel's colour, the photo layers' pictures, which layers exist (none added, none removed), custom lettering colours, locked layers.
 
 Each deal is one step of undo, however fast you click. Deal again if you do not like it, or undo to the hand before.
 
-### Text layers
+### Title and text layers
 
-Add one with **＋ Text** on the right. A text layer has three settings that do not depend on each other:
+Add a text layer with **＋ Text** on the right. The title and text layers are the same kind of thing with the same properties; a text layer only adds *Text*, its words (the title's are written in the Cover tab). Top to bottom:
 
-| Setting | Decides |
+| Property | Decides |
 |---|---|
-| Plate | whether the text sits on a block of colour |
-| Colour | White, Channel colour, Ink, or Custom. With a plate this is the colour of the **plate**, and the lettering takes whichever colour reads against it |
-| Text effect | how the letters are drawn; see the next section |
+| Text | text layers only. One line is one line; words in `*asterisks*` take the highlight colour |
+| Font | see the next section |
+| Text effect | how the letters are drawn; see [Text effects](#text-effects) |
+| Lettering colour, highlight colour | see [Lettering colours](#lettering-colours) |
+| Outline, Shadow | how thick and how far; the one the current text effect does not draw is greyed out |
+| Plate | sets the words on a block of colour; then *Plate colour*, the channel colour by default. On a plate, lettering colours left automatic take whichever reads against it |
 
-A layer set to *Channel colour* changes with the channel; a *Custom* colour stays as it is.
+Text layers of earlier versions are carried over: white becomes automatic, ink and custom colours become the lettering colour, the channel colour still follows the channel; on a plate, the old colour becomes the plate's colour, without an outline or a shadow, as before.
 
 ### Fonts
 
@@ -222,7 +238,7 @@ The title and every text layer (with or without a plate) can be given a text eff
 
 With *Tapered*, diamond handles appear at the corners of the lettering on the canvas: drag any of them to set the perspective freely (the whole block is reshaped to the new quad); *Reset the perspective* in the properties goes back to the default. Both the title and text layers have it.
 
-Masked and outlined effects have a *Strength* slider. The title's *Outline* and *Shadow* sliders can be moved only when the current effect draws an outline or a shadow: Plain, Plain upright and Underlined highlight have neither, Overprint only the shadow (how far its two colours sit apart); otherwise the slider is greyed out and says why.
+Masked and outlined effects have a *Strength* slider. The *Outline* and *Shadow* sliders of the title and text layers can be moved only when the current effect draws an outline or a shadow: Plain, Plain upright and Underlined highlight have neither, Overprint only the shadow (how far its two colours sit apart); otherwise the slider is greyed out and says why.
 
 Outlined effects read the font file to get each letter's outline: the first time a piece of text is used it shows as ordinary lettering for an instant and then changes; an export waits for the outlines before drawing. Bundled fonts, installed fonts and fonts you imported are supported.
 
@@ -232,8 +248,7 @@ Every layer made of words can be given its own colour. Select the layer and look
 
 | Layer | Colours you can set |
 |---|---|
-| Title | lettering colour, and highlight colour (for words in `*asterisks*`) |
-| Text layers | under *Colour*: White, Channel colour, Ink, or *Custom…* and a swatch to pick one |
+| Title, text layers | lettering colour, highlight colour (for words in `*asterisks*`), and on a plate the plate colour |
 | Corner tag, channel name, brand row | lettering colour |
 
 Without one a layer shows *Automatic*: the colour comes from the current look and the channel colour, and follows when you switch either. Once set, the colour stays as it is; *Back to automatic* clears it.
@@ -302,7 +317,7 @@ The sliders of each look:
 
 **Layouts of their own** — the record sleeve and editorial looks do not use slanted panels. They read the three *Template* choices their own way: Stack is a level band, Split an upright side panel, Banner a slim strip, each in its own proportions. Switching to another look brings the usual layouts back.
 
-*Photo duotone* and *Black-and-white photo* only do something when there is a background photo.
+*Photo duotone* and *Black-and-white photo* only do something when a photo fills the canvas.
 
 **The vertical title of the woodblock look** — each typed line is a column, read top to bottom, the first line on the right. CJK characters stand upright; a run of Latin letters or digits lies on its side, as is usual in vertical setting. A vertical title takes the full height of the page and stands clear of the seal in the lower left. Text effects do not apply to a vertical title; untick *Set the title vertically* for a horizontal one, and they apply again.
 
@@ -326,7 +341,7 @@ The cyberpunk look has eight sliders and a checkbox. Two of them sound alike: *S
 
 **Text layers** are drawn differently in this look too: without a plate, slanted sliced lettering in the channel colour with highlighted words black on a chamfered plate; with one, a chamfered label plate with a small tab on its left.
 
-Most of the interface detail is painted on the *Corner brackets* layer, so hiding that layer removes it at once; the lock-on ring around the channel graphic travels with the graphic. The colour split and the signal tear are paused while you drag a layer and return when you let go, to keep dragging smooth. Cyberpunk is dark only, so the *Background* choice is hidden while it is selected.
+Most of the interface detail is painted on the *Corner brackets* layer, so hiding that layer removes it at once; the lock-on ring around the channel graphic travels with the graphic. The colour split and the signal tear are paused while you drag a layer and return when you let go, to keep dragging smooth. Cyberpunk is dark only, so the light-or-dark choice in the Background layer's properties is hidden while it is selected.
 
 Each look's values are saved separately in the profile, so switching away and back loses nothing. When generating assets with AI, the style section of the prompt follows the current look.
 
@@ -379,20 +394,20 @@ Privacy and cost:
 - When generating, your description, the preset prompt and any reference picture you attached are sent to the address you entered; the app makes no other network requests.
 - Usage is billed by your provider.
 
-#### Image model (photo repaint)
+#### Image model (photo repaint, AI-generated photos)
 
-*Setup → AI* has two panes, *Text model (assets)* and *Image model (photo repaint)*; click one to see its settings. The text model only writes text; repainting a photo needs an image model that takes a picture and returns one. The three services each have their own interface, and the app speaks each one's:
+*Setup → AI* has two panes, *Text model (assets)* and *Image model (photo repaint)*; click one to see its settings. The text model only writes text; repainting and generating photos need an image model that returns pictures (and, for a repaint or a reference picture, takes one). The three services each have their own interface, and the app speaks each one's:
 
 | Service | Default address (used when BASE_URL is empty) | Model name |
 |---|---|---|
-| OpenAI (gpt-image) | `https://api.openai.com/v1`, request to `/images/edits` | e.g. `gpt-image-2` |
+| OpenAI (gpt-image) | `https://api.openai.com/v1`, request to `/images/edits` with a picture, `/images/generations` from words alone | e.g. `gpt-image-2` |
 | Google Gemini | `https://generativelanguage.googleapis.com/v1beta`, request to `models/{model}:generateContent` | usually has `image` in its name; see Google AI Studio |
 | Volcengine Ark Seedream | `https://ark.cn-beijing.volces.com/api/v3`, request to `/images/generations`; BytePlus ModelArk: `https://ark.ap-southeast.bytepluses.com/api/v3` | the model ID or endpoint ID from the Ark console |
 
 - Token, model, timeout and proxy mean the same as above; the token is kept in `image-ai.json`.
 - *Test connection* makes no picture and costs nothing: OpenAI and Gemini are asked about the model; Seedream is sent an empty prompt to see how it refuses (so only the key is confirmed; the model name is fully confirmed by the first repaint). Success shows in green, failure in red (the text model's test too).
-- The output size follows the photo's shape: about 2.5 megapixels on OpenAI's newer models (the older gpt-image-1 has three fixed sizes), about 4 megapixels on Seedream, and Gemini follows the photo sent.
-- When repainting, the photo (scaled to 1536 px on its longer side) and the style description are sent to the address you entered.
+- The output size follows the shape (a repaint the photo's, a new photo the canvas's): about 2.5 megapixels on OpenAI's newer models (the older gpt-image-1 has three fixed sizes), about 4 megapixels on Seedream; Gemini follows the photo sent when repainting and is asked for the nearest aspect ratio (such as 16:9) when generating.
+- When repainting, the photo (scaled to 1536 px on its longer side) and the style description are sent to the address you entered; when generating, the description and any reference picture (also 1536 px at most).
 
 ## Export
 

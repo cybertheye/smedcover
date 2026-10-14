@@ -220,45 +220,67 @@ function centred(ctx, cx, cy, tr, s, fn) {
   return half ? { cx, cy, hw: half.hw * s * tr.kx, hh: half.hh * s * tr.ky, r: tr.r } : null;
 }
 
-// free text: nominal 120-unit type, centred on the origin
+/** Whether a colour ([r, g, b]) is dark enough for white lettering. */
+const isDark = (c) => c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114 < 128;
+/**
+ * The colours of a headline layer — the title, or text the user added — from its own choices and
+ * the look: the lettering, the highlighted words, the keyline, the shadows, and the plate when it is
+ * on one (its own colour, else the channel colour). Unset colours follow the look; on a plate they
+ * are the ones that read against it. Also the strengths of the outline and the shadow.
+ */
+function headline(L, env) {
+  const { th } = env, plate = L.plate ? (L.plateInk ? hexToRgb(L.plateInk) : env.C) : null;
+  let fill, hi, ink, own, ownHi = L.hi ? hexToRgb(L.hi) : undefined;
+  if (plate) {   // looks that paint the letters themselves are given these colours too, or they would take the channel colour: the plate's own
+    const auto = isDark(plate) ? "#ffffff" : INK, other = auto === INK ? "#ffffff" : INK;
+    fill = L.ink || auto; ink = isDark(hexToRgb(fill)) ? "#ffffff" : INK; own = hexToRgb(fill);
+    if (L.hi) hi = L.hi; else if (L.plateInk) { hi = env.acc; ownHi = env.C; } else { hi = other; ownHi = hexToRgb(other); }
+  } else {
+    const accent = L.color === "accent" && !L.ink;   // a text layer of before, still in the channel colour
+    fill = L.ink || (accent ? env.acc : th.titleFill); hi = L.hi || (accent ? "#ffffff" : env.acc);
+    ink = th.titleInk; own = L.ink ? hexToRgb(L.ink) : accent ? env.C : undefined;
+  }
+  return {
+    fill, hi, ink, shadow: hi, hiShadow: fill, own, ownHi,
+    plate: plate && rgb(plate), stroke: clamp(L.stroke ?? 1, 0, 2), shadowAmt: clamp(L.shadow ?? 1, 0, 2),
+  };
+}
+/** The plate a headline sits on (x, y, w, h: its box; fs: the type size). A look may draw its own. */
+function drawPlate(raw, x, y, w, h, fill, fs, C) {
+  if (look().plate) return look().plate(raw, x, y, w, h, fill, fs, lookValues());
+  const ctx = styled(raw, C, true), k = fs / 120;
+  ctx.fillStyle = INK; para(ctx, x + 10 * k, y + 10 * k, w, h, -fs * 0.14); ctx.fill();
+  ctx.fillStyle = fill; para(ctx, x, y, w, h, -fs * 0.14); ctx.fill();
+  ctx.lineWidth = 7 * k; ctx.strokeStyle = INK; ctx.stroke();
+}
+/** The face of a headline: the look's title face, or the heavy sans. */
+const headFont = () => (look().titleFont ? look().titleFont(fonts) : fonts.cn);
+
+// free text: nominal 120-unit type, centred on the origin, set like the title
 function drawFreeText(ctx, L, env) {
   const raw = ctx;
   ctx = styled(raw, env.C, true);
   const lines = parseTitle(L.text);
   if (!lines.length) return null;
-  const FS = 120, LH = 1.16, plate = L.plate;
-  ctx.font = plate ? `700 ${FS}px ${fonts.en}, ${fonts.cn}` : `900 ${FS}px ${fonts.cn}`;
+  const FS = 120, LH = 1.16, st = headline(L, env);
+  ctx.font = `900 ${FS}px ${headFont()}`;
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "round";
   const widths = lines.map((l) => l.reduce((s, a) => s + ctx.measureText(a.t).width, 0)), bw = Math.max(...widths), bh = lines.length * FS * LH;
-  const box = { x: -bw / 2, y: -bh / 2, w: bw, h: bh };
+  const box = { x: -bw / 2, y: -bh / 2, w: bw, h: bh }, pad = st.plate ? FS * 0.32 : 0, skew = st.plate ? 0 : -0.08;
   if (raw.getTransform) env.blocks[L.id] = { m: raw.getTransform(), box };   // where the block is, for the perspective's handles
-  // the layer's colour: of the lettering, or of the plate when there is one
-  const own = L.color === "custom" && L.ink ? hexToRgb(L.ink) : null;
-  const tone = own || { white: [255, 255, 255], accent: env.C, ink: [7, 7, 12] }[L.color] || [255, 255, 255], fill = rgb(tone), pad = plate ? FS * 0.32 : 0;
-  const dark = tone[0] + tone[1] + tone[2] < 200, onAccent = !own && L.color === "accent";
-  if (plate) {
-    const x = -bw / 2 - pad, y = -bh / 2 - pad * 0.3, w = bw + pad * 2, h = bh + pad * 0.6;
-    if (look().plate) look().plate(raw, x, y, w, h, fill, FS, lookValues());
-    else {
-      ctx.fillStyle = INK; para(ctx, x + 10, y + 10, w, h, -FS * 0.14); ctx.fill();
-      ctx.fillStyle = fill; para(ctx, x, y, w, h, -FS * 0.14); ctx.fill();
-      ctx.lineWidth = 7; ctx.strokeStyle = INK; ctx.stroke();
-    }
-  }
-  // the lettering, by the layer's text effect. On a plate it takes the colour that reads against
-  // the plate and has no keyline or drop shadow of its own; off a plate it is a headline.
-  const light = onAccent ? "#ffffff" : env.acc, onPlate = dark ? env.C : [7, 7, 12], d = FS * 0.062;
+  if (st.plate) drawPlate(raw, -bw / 2 - pad, -bh / 2 - pad * 0.3, bw + pad * 2, bh + pad * 0.6, st.plate, FS, env.C);
   lines.forEach((line, li) => {
     ctx.save();
-    const ox = -widths[li] / 2, oy = -bh / 2 + li * FS * LH + FS * (plate ? 0.94 : 0.9);
+    const ox = -widths[li] / 2, oy = -bh / 2 + li * FS * LH + FS * (st.plate ? 0.94 : 0.9);
     ctx.translate(ox, oy);
-    if (!plate) ctx.transform(1, 0, -0.08, 1, 0, 0);
+    if (skew) ctx.transform(1, 0, skew, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
     const m = raw.getTransform ? raw.getTransform() : null, unit = m ? Math.hypot(m.a, m.b) : 1;
-    const base = { fs: FS, shadowAmt: 1, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit, frame: { ox, oy, c: plate ? 0 : -0.08, box }, warp: L.warp };
-    paintRuns(raw, pass, plate
-      ? { ...base, d: 0, strokeAmt: 0, fillCss: rgb(onPlate), hiCss: dark ? "#ffffff" : rgb(onPlate), inkCss: fill, shadowCss: INK, hiShadowCss: INK, fill: onPlate }
-      : { ...base, d, strokeAmt: 1, fillCss: fill, hiCss: light, inkCss: dark ? "#ffffff" : INK, shadowCss: light, hiShadowCss: "#ffffff", fill: tone }, L.fx);
+    paintRuns(raw, pass, {
+      fs: FS, d: FS * 0.062 * st.shadowAmt, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit,
+      fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow, fill: st.own, hi: st.ownHi,
+      frame: { ox, oy, c: skew, box }, warp: L.warp,
+    }, L.fx);
     raw.restore();
   });
   return { hw: bw / 2 + pad, hh: bh / 2 + pad * 0.3 };
@@ -361,14 +383,16 @@ const PAINT = {
     return placed(ctx, tr, (c) => drawHeader(styled(c, env.C, true), env.o, env.w, L.ink ? { ...env.th, text: L.ink, own: L.ink } : env.th, env.C, env.G.railOnAccent, L.rail, env.G.brandOnAccent));
   },
   title(ctx, L, tr, env) {
-    const { G, th } = env, top = G.titleTop ?? (env.hasBrand ? 150 : 84);
+    const { G } = env, top = G.titleTop ?? (env.hasBrand ? 150 : 84);
     const box = { x: G.title.x, y: top, w: G.title.w, h: G.title.h + (G.title.y - top) };
     env.titleBox = box;
     const own = look().titleSet;   // a look may set the title itself (vertically, say); null from it means "the usual way"
+    const st = headline(L, env);
     return placed(ctx, tr, (c) => (own && own(c, env.cover.title, box, L, env, lookValues())) || drawTitle(c, env.cover.title, box, IDENTITY, {
-      font: look().titleFont ? look().titleFont(fonts) : fonts.cn, maxFs: 340, align: "left", fill: L.ink || th.titleFill, ink: th.titleInk, hi: L.hi || env.acc, shadow: L.hi || env.acc, hiShadow: L.ink || th.titleFill,
-      own: L.ink ? hexToRgb(L.ink) : undefined, ownHi: L.hi ? hexToRgb(L.hi) : undefined,   // for looks that paint the letters themselves
-      stroke: clamp(L.stroke, 0, 2), shadowAmt: clamp(L.shadow, 0, 2), C: env.C, fx: L.fx, fxAmt: L.fxAmt,
+      font: headFont(), maxFs: 340, align: "left", fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
+      own: st.own, ownHi: st.ownHi,   // for looks that paint the letters themselves
+      stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt,
+      plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
       warp: L.warp, onBlock: (m, block) => { env.blocks[L.id] = { m, box: block }; },
     }));
   },
