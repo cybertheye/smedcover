@@ -10,8 +10,9 @@
 //             {model, prompt, image: data URL, size: "WxH", response_format: "b64_json"} -> data[0].b64_json or .url
 //
 // The style comes from one of three sources: the current look (each look has a `repaint`
-// description, see style.js), a preset bundled here (REPAINT_PRESETS), or one of the user's own
-// styles — a name and a description, kept in image-ai.json, which can start as a copy of a preset.
+// description, see style.js), a built-in style (a Markdown file in ui/repaint-styles/, see below),
+// or one of the user's own styles — a name and a description, kept in image-ai.json, which can
+// start as a copy of a built-in one.
 import { LOOKS } from "./style.js";
 
 export const IMAGE_PROVIDERS = ["openai", "gemini", "seedream"];
@@ -39,13 +40,15 @@ export function normalizeImageAi(raw) {
   if (typeof a.custom === "string" && a.custom.trim() && !styles.length) styles.push({ id: "custom", name: "自定义", prompt: a.custom.slice(0, 20000) });
   let source = typeof a.source === "string" ? a.source : "look";
   if (source === "custom") source = styles.length ? "my:" + styles[0].id : "look";
-  if (!(source === "look" || REPAINT_PRESETS[source] || (source.startsWith("my:") && styles.some((s) => "my:" + s.id === source)))) source = "look";
+  if (source === "pixel") source = "preset:8-bit-pixel-editorial";   // the built-in style's name before styles were files
+  // a built-in style is checked against the list once that has been read (see app.js)
+  if (!(source === "look" || /^preset:[a-z0-9-]+$/.test(source) || (source.startsWith("my:") && styles.some((s) => "my:" + s.id === source)))) source = "look";
   return {
     provider: IMAGE_PROVIDERS.includes(a.provider) ? a.provider : "openai",
     baseUrl: str(a.baseUrl, 400), token: str(a.token, 4000), model: str(a.model, 200),
     timeout: Number.isFinite(secs) && secs > 0 ? Math.min(1800, Math.max(30, secs)) : 300,
     proxy: str(a.proxy, 300),
-    source,                   // where the style comes from: "look", a preset id, or "my:<id>" for one of `styles`
+    source,                   // where the style comes from: "look", "preset:<id>" (a built-in style), or "my:<id>" (one of `styles`)
     styles,                   // the user's own styles (a description may be long, e.g. a pasted skill)
     notes: str(a.notes, 600), // a word added to any source
   };
@@ -182,26 +185,52 @@ export function readImageReply(provider, status, text) {
 
 // ---------- what to ask for
 
-/** Bundled style presets: id -> {name, prompt}. */
-export const REPAINT_PRESETS = {
-  // Adapted from "Abstract 8-bit Instagram Pixel Editorial" by TwentyfiveBTea
-  // (https://github.com/TwentyfiveBTea/8bit-pixel-art, AGPL-3.0): its "fuse" mode, condensed into a
-  // single instruction for an image model, and the 3:5 canvas replaced by the photo's own shape.
-  pixel: {
-    name: { zh: "8-bit 像素编辑", en: "8-bit pixel editorial" },
-    prompt: `Reinterpret the attached photo as one sparse, abstract 8-bit pixel editorial artwork. This is a distillation, not a pixel filter: the photo is information to analyse, not a surface to pixelate.
+// ---------- built-in styles: one Markdown file each in ui/repaint-styles/, named "中文名_English name.md"
+//
+// The file is the prompt; <!-- comments --> in it (credits, notes) are not sent. The list of files is
+// ui/repaint-styles/index.json, written by scripts/repaint-styles.mjs before every build, since a
+// bundled app cannot list a folder. A style's id comes from its English name and is what settings
+// remember, so renaming the English half makes it a different style.
 
-1. Read the photo first: the anchor subject or relationship that must stay recognisable; its one to three largest masses and their scale; one or two axes or gestures (a horizon, path, roofline, diagonal); its rhythm and asymmetry; its quiet, open side; its colour roles — one dominant, one dark structural, one light or neutral, one or two subject midtones, at most one small accent. If one subject clearly dominates, give it nearly all the detail and keep one to three cues that identify it. If none does, keep only the strongest spatial gesture or colour relationship; do not invent a focal object.
+/** A style's id from its English name: "8-bit pixel editorial" -> "8-bit-pixel-editorial". */
+export const styleId = (en) => en.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+/**
+ * The index entries for a folder's .md files: {styles: [{id, file, name: {zh, en}}], errors}.
+ * `read(file)` returns a file's text, to make sure none is empty. Sorted by English name.
+ */
+export function styleIndex(files, read = () => "x") {
+  const styles = [], errors = [], seen = new Map();
+  for (const file of files) {
+    const m = file.match(/^([^_]+)_(.+)\.md$/);
+    if (!m || !m[1].trim() || !m[2].trim()) { errors.push(`${file}: the name must be 中文名_English name.md`); continue; }
+    const name = { zh: m[1].trim(), en: m[2].trim() }, id = styleId(name.en);
+    if (!id) { errors.push(`${file}: the English name needs a letter or a digit`); continue; }
+    if (seen.has(id)) { errors.push(`${file}: the same id (${id}) as ${seen.get(id)}`); continue; }
+    if (!promptOf(read(file))) { errors.push(`${file}: no prompt in it`); continue; }
+    seen.set(id, file); styles.push({ id, file, name });
+  }
+  styles.sort((a, b) => a.name.en.localeCompare(b.name.en));
+  return { styles, errors };
+}
+/** The prompt in a style file: its text without <!-- comments -->, trimmed. */
+export const promptOf = (md) => String(md).replace(/<!--[\s\S]*?-->/g, "").replace(/\n{3,}/g, "\n\n").trim();
 
-2. Choose a boundary mode. For a clear, isolatable subject (the default): a soft-edged cluster of coarse pixel blocks on an even, matte, near-uniform paper field — warm ivory, off-white, cool white, pale grey or pale blue, whichever separates best from the subject while keeping the photo's temperature. The cluster covers roughly 8–18% of the picture, stays at least 6% from every edge, sits where the subject sits in the photo rather than centred by habit, and its perimeter breaks up in stepped erosion, gaps and a few dissolving blocks — never a clean rectangle, a sticker outline or a straight shared baseline. For a continuous scene (sea and sky, a panoramic landscape, a corridor) with nothing to isolate: carry three or four broad pixel planes to every edge, keeping the photo's main directions.
-
-3. Pixel marks: one primary family — flat coarse masses, stepped silhouettes, segmented bars or paths, stacked bands, irregular clusters of blocks, or simplified planes — and at most two supporting ones (short lines, isolated blocks, compact dots, one accent). Work as if on a logical grid of 32–64 pixels along the short edge, enlarged with hard nearest-neighbour edges: large crisp blocks, broad grouped values, contours partly lost. No one-pixel outlines, anti-aliasing, gradients, dithering, grain, regular grids, game interface or sprites.
-
-4. The paper field stays truly empty: no sky, ground, texture, shadows, vignette, particles, border or colour swatches. Keep the photo's colours and the order of its lights and darks; add no colour it does not have. Never keep foreground, middle ground and background as three readable layers.
-
-5. No photographic area, no pasted panel, no before/after or split layout, no invented objects.`,
-  },
-};
+const BASE = new URL("../repaint-styles/", import.meta.url);
+let listing = null;
+const texts = new Map();
+/** The built-in styles, read once: [{id, file, name}]. Empty if the list cannot be read. */
+export function loadStyles() {
+  return (listing ||= fetch(new URL("index.json", BASE)).then((r) => (r.ok ? r.json() : [])).catch(() => []).then((l) => (Array.isArray(l) ? l : [])));
+}
+/** A built-in style's prompt, read when it is first wanted and kept. */
+export async function styleText(style) {
+  if (!texts.has(style.id)) {
+    const r = await fetch(new URL(encodeURIComponent(style.file), BASE));
+    if (!r.ok) throw new Error(`${style.file}: HTTP ${r.status}`);
+    texts.set(style.id, promptOf(await r.text()));
+  }
+  return texts.get(style.id);
+}
 
 /** Words that go with every source: what the picture is for. */
 const FOR_A_COVER = "The result becomes the background of a video cover, with a title and graphics laid over it: no text, letters, numbers, logos, signatures or watermarks, no frame or border, and one single image in the same aspect ratio as the photo.";
@@ -210,13 +239,12 @@ const KEEP = "Keep the photograph's composition: the same framing, the main subj
 
 /**
  * The prompt for a repaint.
- *   source   "look" (the current look's description, in the channel colour), a preset id, or
- *            "custom" with the description in `custom` (one of the user's own styles)
+ *   source   "look" (the current look's description, in the channel colour), or "text" with the
+ *            description in `text` (a built-in style's file, or one of the user's own styles)
  */
-export function repaintPrompt({ source = "look", look = "cel", color = "#ffd60a", custom = "", notes = "" } = {}) {
+export function repaintPrompt({ source = "look", look = "cel", color = "#ffd60a", text = "", notes = "" } = {}) {
   let body;
-  if (source === "custom") body = custom.trim();
-  else if (REPAINT_PRESETS[source]) body = REPAINT_PRESETS[source].prompt;
+  if (source === "text") body = text.trim();
   else {
     const L = LOOKS[look] || LOOKS.cel, how = typeof L.repaint === "function" ? L.repaint(color) : L.repaint || LOOKS.cel.repaint(color);
     body = `Repaint the attached photograph as ${how}\n\n${KEEP}`;

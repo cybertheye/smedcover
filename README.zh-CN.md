@@ -60,10 +60,18 @@
 | 来源 | 说明 |
 |---|---|
 | 跟随当前风格 | 按当前封面风格重绘（每种风格各有一段重绘说明），并以频道主色为强调色；保持照片的构图，主体位置和大小不变，原来的摆放仍然合适 |
-| 内置 · 8-bit 像素编辑 | 把照片提炼成稀疏、抽象的 8-bit 像素画：大面积留白的纸面上一小簇粗像素块，或铺满画面的几块像素平面。改编自 [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art) |
+| 内置风格 | 随应用附带的风格，每个是 `ui/repaint-styles/` 下的一个 Markdown 文件（加法见下）。目前有「8-bit 像素编辑」：把照片提炼成稀疏、抽象的 8-bit 像素画：大面积留白的纸面上一小簇粗像素块，或铺满画面的几块像素平面。改编自 [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art) |
 | 我的风格 | 自己保存的风格，每个有名称和提示词，可以随时改名、改提示词、删除，改动自动保存。选「＋ 新建风格…」从空白开始；选中内置风格后点「复制为我的风格」，就能在副本上改名和改提示词。也可以整段粘贴一份风格说明（如某个 skill 的 `SKILL.md`） |
 
-- 内置风格的提示词可以点「查看这段提示词」展开。它写在程序代码 `ui/js/repaint.js` 的 `REPAINT_PRESETS` 里；不想改代码时，用「复制为我的风格」改副本即可。
+- 内置风格的提示词可以点「查看这段提示词」展开；想在应用里改，用「复制为我的风格」改副本。
+
+#### 添加或修改内置风格（从源码打包时）
+
+1. 在 `ui/repaint-styles/` 下新建一个 Markdown 文件，文件名是 `中文名_英文名.md`，如 `水彩_Watercolour.md`。中文名和英文名就是下拉菜单里显示的名字；中文名里不能有下划线。
+2. 文件内容就是发给图片模型的提示词，建议写英文。`<!-- -->` 注释里的内容不会发送，出处、署名、说明可以写在里面。
+3. 应用会在后面自动加上「不要文字和水印、不要边框、保持照片比例」和用户的补充说明；要保持原照片的构图，需要自己在提示词里写明。
+4. 打包时（`npm run tauri build` / `tauri dev`）会自动扫描这个文件夹，生成清单 `index.json`；也可以手动运行 `npm run styles`。`npm test` 会检查清单是否和文件夹一致，以及每个文件是否有内容。
+5. 风格的 ID 由英文名生成，并被记在用户设置里。改英文名就等于换了一个风格：之前选了它的人会退回「跟随当前风格」。
 - 「补充说明」可不填，会附加在任一来源后面。所有来源后面都会自动加上：不要文字和水印、不要边框、保持照片比例。
 - 重绘结果先和原图并排预览，点「用这张」才替换背景照片；之后随时可以「还原原图」。再次重绘总是从原图出发，不会越画越糊。
 - 重绘后的照片和原图都会存进工程文件。
@@ -434,7 +442,7 @@ SMEDCOVER_SELFTEST=/一个空目录的绝对路径 src-tauri/target/release/bund
 | 程序（全部源代码） | [GNU AGPL v3 或更高版本](LICENSE) |
 | 内置素材：频道图形、贴纸、色块形状 | [CC BY 4.0](LICENSE-ASSETS.md) |
 | 内置字体：Noto Sans SC、Bebas Neue、JetBrains Mono | SIL Open Font License，文本在 `ui/fonts/` |
-| 内置重绘风格「8-bit 像素编辑」 | 改编自 [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art)，AGPL v3 |
+| 内置重绘风格「8-bit 像素编辑」（`ui/repaint-styles/`） | 改编自 [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art)，AGPL v3 |
 
 简单说：你可以使用、修改和再分发 SmedCover；但如果你分发修改后的版本，或让别人通过网络使用它，
 就必须以同样的许可证公开其源代码。内置素材可以在别处使用，但须署名；用 SmedCover 制作的封面无需署名。

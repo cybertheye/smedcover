@@ -854,13 +854,12 @@ test("repaint: each image service gets the photo in its own form, and its reply 
 });
 
 test("repaint: the prompt follows the look, a preset or the user's own words, and always asks for a clean background", async () => {
-  const { repaintPrompt, REPAINT_PRESETS } = await import("../ui/js/repaint.js");
+  const { repaintPrompt } = await import("../ui/js/repaint.js");
   const look = repaintPrompt({ source: "look", look: "riso", color: "#ff3355", notes: "darker sky" });
   assert.ok(look.includes("risograph") && look.includes("#ff3355") && look.includes("Keep the photograph's composition") && look.endsWith("Also: darker sky"));
   for (const id of LOOK_IDS) assert.ok(repaintPrompt({ source: "look", look: id }).length > 200, id);   // every look can repaint
-  const pixel = repaintPrompt({ source: "pixel" });
-  assert.ok(pixel.startsWith(REPAINT_PRESETS.pixel.prompt) && !pixel.includes("Keep the photograph's composition"));   // a preset sets its own composition
-  const own = repaintPrompt({ source: "custom", custom: "  watercolour  " });
+  const own = repaintPrompt({ source: "text", text: "  watercolour  " });
+  assert.ok(!own.includes("Keep the photograph's composition"));   // a style of its own sets its own composition
   assert.ok(own.startsWith("watercolour\n\n") && own.includes("no text"));
 });
 
@@ -893,5 +892,24 @@ test("repaint: a refused optional setting is named, the connection check reads e
   assert.deepEqual(two.styles.map((s) => s.id), ["a", "b", "a_2"]);
   assert.equal(two.styles[1].name, "#2"); assert.equal(two.source, "my:b");
   assert.equal(R.normalizeImageAi({ source: "my:gone", styles: [] }).source, "look");
-  assert.equal(R.normalizeImageAi({ source: "pixel" }).source, "pixel");
+  assert.equal(R.normalizeImageAi({ source: "pixel" }).source, "preset:8-bit-pixel-editorial");   // the name before styles were files
+  assert.equal(R.normalizeImageAi({ source: "preset:watercolour" }).source, "preset:watercolour");
+  assert.equal(R.normalizeImageAi({ source: "preset:../x" }).source, "look");
+});
+
+test("repaint: built-in styles are Markdown files named 中文名_English name.md, listed in index.json", async () => {
+  const fs = await import("node:fs");
+  const { styleIndex, styleId, promptOf } = await import("../ui/js/repaint.js");
+  assert.equal(styleId("8-bit pixel editorial"), "8-bit-pixel-editorial");
+  assert.equal(styleId("Café  Noir!"), "cafe-noir");
+  assert.equal(promptOf("<!--\ncredit\n-->\n\nDraw it.\n<!-- note -->\n"), "Draw it.");
+  const { styles, errors } = styleIndex(["水彩_Watercolour.md", "无英文名.md", "_x.md", "空_Empty.md", "重复_watercolour!.md"], (f) => (f.startsWith("空") ? "<!-- only a comment -->" : "text"));
+  assert.deepEqual(styles, [{ id: "watercolour", file: "水彩_Watercolour.md", name: { zh: "水彩", en: "Watercolour" } }]);
+  assert.equal(errors.length, 4);   // no English half, no Chinese half, nothing but a comment, the same id twice
+  // every file in the folder is in the list, readable, and has a prompt
+  const dir = new URL("../ui/repaint-styles/", import.meta.url), list = JSON.parse(fs.readFileSync(new URL("index.json", dir), "utf8"));
+  assert.deepEqual(list.map((s) => s.file).sort(), fs.readdirSync(dir).filter((f) => f.endsWith(".md")).sort());
+  for (const s of list) assert.ok(promptOf(fs.readFileSync(new URL(s.file, dir), "utf8")).length > 100, s.file);
+  const pixel = promptOf(fs.readFileSync(new URL("8-bit 像素编辑_8-bit pixel editorial.md", dir), "utf8"));
+  assert.ok(pixel.startsWith("Reinterpret the attached photo") && !pixel.includes("TwentyfiveBTea"));   // the credit stays in the file
 });

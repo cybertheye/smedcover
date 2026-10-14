@@ -18,7 +18,7 @@ import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, effectUses } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams } from "./style.js";
-import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, REPAINT_PRESETS, MAX_STYLES, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt } from "./repaint.js";
+import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 
 const $ = (id) => document.getElementById(id);
@@ -49,6 +49,7 @@ const S = {
   photo: null, photoSrc: "",             // decoded background Image + its data URL
   photoOriginal: "",                     // the photo as it was before an AI repaint (data URL), or ""
   imageAi: normalizeImageAi(null),       // the image model that repaints photos (image-ai.json)
+  repaintStyles: [],                     // the built-in repaint styles: [{id, file, name}] (ui/repaint-styles/index.json)
   picked: [],                                       // a group selection: the ids of the layers in it (see group())
   importedFonts: [], systemFonts: [], latinFonts: new Set(["Bebas Neue", "JetBrains Mono"]),   // latinFonts: those that cannot set Chinese
   mode: "edit", tab: { edit: "cover", setup: "brand" },
@@ -592,10 +593,12 @@ async function imageCall(cfg, prompt, pic) {
 async function repaintPhoto() {
   const cfg = S.imageAi;
   if (!S.photo || REP.busy) return;
-  const mine = myStyle();
+  const mine = myStyle(), preset = builtIn();
   if (mine && !mine.prompt.trim()) return toast(t("rep.needCustom"));
+  let text = mine ? mine.prompt : "";
+  if (preset) { try { text = await styleText(preset); } catch (e) { REP.error = String(e.message); return renderPanel(); } }
   const job = ++REP.job, from = S.photoOriginal ? await loadImage(S.photoOriginal) : S.photo;
-  const prompt = repaintPrompt({ source: mine ? "custom" : cfg.source, look: S.profile.style.look, color: cat().color, custom: mine ? mine.prompt : "", notes: cfg.notes });
+  const prompt = repaintPrompt({ source: mine || preset ? "text" : "look", look: S.profile.style.look, color: cat().color, text, notes: cfg.notes });
   Object.assign(REP, { busy: true, error: "", result: null, since: Date.now() });
   renderPanel();
   const tick = setInterval(() => { const b = document.getElementById("rep-go"); if (b && REP.busy) b.textContent = repBusyText(); }, 1000);
@@ -614,6 +617,8 @@ async function useRepaint() {
   await setPhoto(r.src, S.photoOriginal || S.photoSrc);
   toast(t("rep.used"));
 }
+/** The built-in style the repaint uses now, or null. */
+const builtIn = () => (S.imageAi.source.startsWith("preset:") ? S.repaintStyles.find((s) => "preset:" + s.id === S.imageAi.source) || null : null);
 /** The user's own style the repaint uses now, or null. */
 const myStyle = () => (S.imageAi.source.startsWith("my:") ? S.imageAi.styles.find((s) => "my:" + s.id === S.imageAi.source) || null : null);
 /** Adds a style of the user's own (a copy of a preset, or empty) and selects it. */
@@ -636,15 +641,17 @@ function repaintBox() {
   }
   const look = LOOKS[S.profile.style.look] || LOOKS.cel, r = REP.result;
   const sources = [["look", t("rep.src.look", look.name[lang])],
-    { group: t("rep.src.preset"), items: Object.entries(REPAINT_PRESETS).map(([id, p]) => [id, p.name[lang]]) },
+    { group: t("rep.src.preset"), items: S.repaintStyles.map((s) => ["preset:" + s.id, s.name[lang]]) },
     { group: t("rep.src.mine"), items: c.styles.map((s) => ["my:" + s.id, s.name]) },
     ["+", t("rep.src.new")]];
-  const mine = myStyle(), preset = REPAINT_PRESETS[c.source];
+  const mine = myStyle(), preset = builtIn();
+  /** Fills a <pre> with a built-in style's prompt the first time it is opened. */
+  const peek = (e) => { const pre = e.currentTarget.querySelector("pre"); if (e.currentTarget.open && !pre.textContent) styleText(preset).then((x) => { pre.textContent = x; }, (err) => { pre.textContent = String(err.message); }); };
   return el("div", { class: "rep" }, head,
     select(sources, c.source, (v) => (v === "+" ? addStyle(t("rep.newName", c.styles.length + 1), "") : set("source", v, true))),
     preset && [
-      el("details", { class: "peek" }, el("summary", {}, t("rep.peek")), el("pre", {}, preset.prompt)),
-      el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => addStyle(preset.name[lang] + t("rep.copySuffix"), preset.prompt) }, t("rep.copy"))],
+      el("details", { class: "peek", ontoggle: peek }, el("summary", {}, t("rep.peek")), el("pre", {})),
+      el("button", { class: "btn wide", style: "margin-top:8px", onclick: async () => addStyle(preset.name[lang] + t("rep.copySuffix"), await styleText(preset).catch(() => "")) }, t("rep.copy"))],
     mine && [
       el("div", { style: "margin-top:8px" }, textInput(mine.name, (v) => edit("name", v), { placeholder: t("rep.namePh"), maxLength: 40, onchange: () => renderPanel() })),
       el("textarea", { value: mine.prompt, spellcheck: false, style: "height:160px;font-size:13px;margin-top:8px", placeholder: t("rep.customPh"), oninput: (e) => edit("prompt", e.target.value) }),
@@ -1516,6 +1523,8 @@ async function start() {
   }
   S.ai = normalizeAi(await readJson("ai.json").catch(() => null));
   S.imageAi = normalizeImageAi(await readJson("image-ai.json").catch(() => null));
+  S.repaintStyles = await loadStyles();
+  if (S.imageAi.source.startsWith("preset:") && !builtIn()) S.imageAi.source = "look";   // a built-in style that is no longer there
   if (native) {
     const found = await invoke("list_system_fonts").catch(() => []);
     S.systemFonts = found.map((f) => f.name);
@@ -1565,10 +1574,11 @@ async function selfTest(dir) {
       }
       // repainting a photo through each image service's own form (one of them answering with a link)
       report.repaint = [];
+      report.repaintStyles = await Promise.all(S.repaintStyles.map(async (st) => ({ id: st.id, chars: (await styleText(st)).length })));   // every built-in style can be read from the bundle
       const photo = shrink(pic, 64);
       for (const [provider, base, model] of [["openai", "/v1", "gpt-image-2"], ["gemini", "/v1beta", "m"], ["seedream", "/api/v3", "m"], ["seedream", "/api/v3", "url"]]) {
         const cfg = normalizeImageAi({ provider, baseUrl: aiUrl + base, token: "selftest-token", model });
-        const out = await imageCall(cfg, repaintPrompt({ source: provider === "gemini" ? "pixel" : "look", look: "cyber" }), photo);
+        const out = await imageCall(cfg, provider === "gemini" ? repaintPrompt({ source: "text", text: await styleText(S.repaintStyles[0]) }) : repaintPrompt({ source: "look", look: "cyber" }), photo);
         report.repaint.push({ provider, model, w: out.w, h: out.h });
       }
       // a model that refuses an optional setting: asked again without it

@@ -62,10 +62,18 @@ The style comes from one of three places:
 | Source | What it does |
 |---|---|
 | Follow the current look | Repaints in the cover's look (each look has its own repaint description), with the channel colour as accent; keeps the photo's composition, so the subject stays where and as big as it was and its placement on the cover still fits |
-| Built-in · 8-bit pixel editorial | Distils the photo into a sparse, abstract 8-bit pixel piece: a small cluster of coarse pixel blocks on a wide paper field, or a few broad pixel planes edge to edge. Adapted from [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art) |
+| Built-in styles | Styles that come with the app, one Markdown file each in `ui/repaint-styles/` (how to add one below). For now there is *8-bit pixel editorial*, which distils the photo into a sparse, abstract 8-bit pixel piece: a small cluster of coarse pixel blocks on a wide paper field, or a few broad pixel planes edge to edge. Adapted from [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art) |
 | My styles | Styles you keep, each with a name and a prompt, renamed, edited or deleted at any time and saved as you type. *＋ New style…* starts from nothing; with a built-in style selected, *Copy into my styles* gives you a copy to rename and edit. A whole style guide (such as a skill's `SKILL.md`) can be pasted in |
 
-- *See the prompt* unfolds a built-in style's prompt. It lives in the code, in `REPAINT_PRESETS` in `ui/js/repaint.js`; to change it without touching code, edit a copy made with *Copy into my styles*.
+- *See the prompt* unfolds a built-in style's prompt; to change one inside the app, edit a copy made with *Copy into my styles*.
+
+#### Adding or changing a built-in style (when building from source)
+
+1. Add a Markdown file to `ui/repaint-styles/` named `中文名_English name.md`, e.g. `水彩_Watercolour.md`. The two names are what the menu shows; the Chinese half cannot contain an underscore.
+2. The file's text is the prompt sent to the image model; English works best. Anything in `<!-- -->` comments is not sent, so credits and notes go there.
+3. The app adds "no text or watermarks, no border, keep the photo's shape" and the user's extra words after it; to keep the photo's composition, say so in the prompt.
+4. Building (`npm run tauri build` / `tauri dev`) scans the folder and writes the list, `index.json`; `npm run styles` does it by hand. `npm test` checks that the list matches the folder and that no file is empty.
+5. A style's id comes from its English name and is remembered in users' settings: renaming the English half makes it a different style, and whoever had chosen it falls back to *Follow the current look*.
 - *Anything to add* is optional and goes after any source. Every source is followed by: no text or watermarks, no border, keep the photo's shape.
 - The result is shown beside the original first; *Use this* replaces the background photo, and *Back to the original* is there afterwards. A new repaint always starts from the original, so repaints do not pile up.
 - Both the repainted photo and the original are saved in project files.
@@ -439,7 +447,7 @@ are not public, so the plan is to export open formats that both can read.
 | The program (all source code) | [GNU AGPL v3 or later](LICENSE) |
 | Built-in artwork: channel graphics, stickers, colour block shapes | [CC BY 4.0](LICENSE-ASSETS.md) |
 | Bundled fonts: Noto Sans SC, Bebas Neue, JetBrains Mono | SIL Open Font License, texts in `ui/fonts/` |
-| Built-in repaint style "8-bit pixel editorial" | adapted from [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art), AGPL v3 |
+| Built-in repaint style "8-bit pixel editorial" (`ui/repaint-styles/`) | adapted from [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art), AGPL v3 |
 
 In short: you may use, change and redistribute SmedCover, but if you distribute a modified version —
 or let people use one over a network — you must make its source available under the same licence.

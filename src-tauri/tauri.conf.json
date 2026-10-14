@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.cyven.smedcover",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "../ui",
+    "beforeBuildCommand": "npm run styles",
+    "beforeDevCommand": "npm run styles"
   },
   "app": {
     "withGlobalTauri": true,

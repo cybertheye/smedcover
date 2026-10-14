@@ -58,7 +58,8 @@ ui/
   js/stickers.js     the sixty stickers, and the shared painters
   js/style.js        looks: a set of hooks per look, and the current look
   js/spec.js         stickers described as data: validation and interpreter (AI-generated assets)
-  js/repaint.js      photo repaint: the three image services' requests and replies, repaint prompts
+  js/repaint.js      photo repaint: the three image services' requests and replies, repaint prompts, reading built-in styles
+  repaint-styles/    built-in repaint styles, one `中文名_English name.md` each, plus the generated list index.json
   js/solid.js        3D objects described as data: validation, drawn with the channel graphics' renderer
   js/ai.js           AI generation: settings, requests for both API styles, the preset prompt (pure)
   js/store.js        data model, validation, persistence
@@ -459,7 +460,9 @@ A repaint is one fixed step, not an agent: the photo and a style description go 
 | Gemini | `POST {base}/models/{model}:generateContent`, `x-goog-api-key` | `inlineData` in `contents[0].parts` | `inlineData` in `candidates[0].content.parts` |
 | Seedream | `POST {base}/images/generations`, Bearer | `image: data URL`, `size: "WxH"`, `response_format: "b64_json"` | `data[0].b64_json`, or `url` (fetched by `fetch_image`) |
 
-`repaintPrompt` puts the prompt together: the style source (the current look's `repaint(colour)`, a bundled preset, or the user's words), then "this is a cover background: no text or border, keep the shape", then any extra words. Following a look also asks to keep the composition, so the background layer's placement still fits; presets and custom text decide composition themselves. When the service refuses an optional setting (size, watermark…) with a 400, `refusedParam` finds its name in the message and the request goes again without it, at most three times. The connection test (`imageCheck` / `readImageCheck`) makes no picture: OpenAI and Gemini are asked about the model with a GET, Seedream is sent an empty prompt and its refusal read; `ai_request` can send a GET for this. The user's own styles are kept as `styles` in `image-ai.json`. A repaint always starts from the original, kept in `S.photoOriginal` (`session-photo-original` in the session, `photoOriginal` in project files).
+Built-in styles are Markdown files in `ui/repaint-styles/`; the file name gives the Chinese and English names, and the English one the id. A bundled app cannot list a folder, so `scripts/repaint-styles.mjs` scans it before every build (`beforeBuildCommand`) and writes `index.json`; the interface reads the list at start and a style's file only when it is selected, opened or used (`styleText`, kept once read), with `<!-- -->` comments taken out.
+
+`repaintPrompt` puts the prompt together: the style source (the current look's `repaint(colour)`, a built-in style's file, or the user's words), then "this is a cover background: no text or border, keep the shape", then any extra words. Following a look also asks to keep the composition, so the background layer's placement still fits; presets and custom text decide composition themselves. When the service refuses an optional setting (size, watermark…) with a 400, `refusedParam` finds its name in the message and the request goes again without it, at most three times. The connection test (`imageCheck` / `readImageCheck`) makes no picture: OpenAI and Gemini are asked about the model with a GET, Seedream is sent an empty prompt and its refusal read; `ai_request` can send a GET for this. The user's own styles are kept as `styles` in `image-ai.json`. A repaint always starts from the original, kept in `S.photoOriginal` (`session-photo-original` in the session, `photoOriginal` in project files).
 
 ## 9. Interaction (`app.js`)
 
