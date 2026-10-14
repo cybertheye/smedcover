@@ -1,5 +1,6 @@
-// The free sticker pack: 60 cel-style stickers drawn in code (no image files), so they stay sharp
-// at any size and can follow the category colour.
+// The free sticker pack: 72 cel-style stickers drawn in code (no image files), so they stay sharp
+// at any size and can follow the category colour. Twelve of them are frames: empty outlines to put
+// round a photo, a word or a face.
 //
 // Every sticker draws inside a 200 x 200 box centred on the origin. `A` is its main colour
 // (the category colour when the layer is tinted, otherwise the sticker's own default).
@@ -84,6 +85,7 @@ const FLAME = curve((c) => {
 const S = (id, zh, en, group, color, draw) => ({ id, name: { zh, en }, group, color, draw });
 
 export const STICKER_GROUPS = [
+  { id: "frame", name: { zh: "线框", en: "Frames" } },
   { id: "badge", name: { zh: "底牌与气泡", en: "Badges & bubbles" } },
   { id: "arrow", name: { zh: "箭头与标记", en: "Arrows & marks" } },
   { id: "symbol", name: { zh: "符号", en: "Symbols" } },
@@ -91,7 +93,36 @@ export const STICKER_GROUPS = [
   { id: "object", name: { zh: "日常物件", en: "Everyday objects" } },
 ];
 
+/** A frame: the outline `path` drawn as a thick inked line in colour A (the looks redraw it their way). */
+const frame = (path, lw = 14) => (c, A) => stroke(c, path, A, lw);
+
 export const STICKERS = [
+  // ---- frames: empty outlines, to sit round something
+  S("f-double", "双线方框", "Double box", "frame", WHITE, (c, A) => { frame(poly([[-96, -70], [96, -70], [96, 70], [-96, 70]]))(c, A); thin(c, [[-78, -52], [78, -52], [78, 52], [-78, 52], [-78, -52]], 5, A); }),
+  S("f-circle", "圆环", "Ring", "frame", YELLOW, frame(circle(0, 0, 88), 16)),
+  S("f-diamond", "菱形框", "Diamond", "frame", RED, frame(poly([[0, -96], [96, 0], [0, 96], [-96, 0]]))),
+  S("f-hex", "六边形框", "Hexagon", "frame", BLUE, frame(poly([[-48, -84], [48, -84], [96, 0], [48, 84], [-48, 84], [-96, 0]]))),
+  S("f-bubble", "气泡框", "Bubble outline", "frame", WHITE, frame(BUBBLE, 12)),
+  S("f-burst", "爆炸框", "Burst outline", "frame", YELLOW, frame(star(16, 96, 78), 10)),
+  S("f-ticket", "票根框", "Ticket", "frame", GREEN, frame(curve((x) => {   // a ticket: the corners bitten out, a notch in each side
+    const w = 96, h = 62, r = 16, n = 14;
+    x.moveTo(-w + r, -h); x.lineTo(w - r, -h); x.arc(w, -h, r, Math.PI, Math.PI / 2, true); x.lineTo(w, -n); x.arc(w, 0, n, -Math.PI / 2, Math.PI / 2, true);
+    x.lineTo(w, h - r); x.arc(w, h, r, -Math.PI / 2, Math.PI, true); x.lineTo(-w + r, h); x.arc(-w, h, r, 0, -Math.PI / 2, true); x.lineTo(-w, n);
+    x.arc(-w, 0, n, Math.PI / 2, -Math.PI / 2, true); x.lineTo(-w, -h + r); x.arc(-w, -h, r, Math.PI / 2, 0, true);
+  }), 10)),
+  S("f-film", "胶片框", "Film frame", "frame", WHITE, (c, A) => {
+    frame(rrect(-98, -74, 196, 148, 6), 10)(c, A);
+    for (const y of [-60, 60]) for (let k = 0; k < 7; k++) { c.save(); c.translate(-78 + k * 26, y); shape(c, rrect(-6, -6, 12, 12, 2), A, { shadow: false, lw: 3 }); c.restore(); }
+    thin(c, [[-86, -46], [86, -46], [86, 46], [-86, 46], [-86, -46]], 5, A);
+  }),
+  S("f-polaroid", "拍立得框", "Instant photo", "frame", WHITE, (c, A) => { frame(poly([[-78, -96], [78, -96], [78, 96], [-78, 96]]), 10)(c, A); thin(c, [[-62, -80], [62, -80], [62, 44], [-62, 44], [-62, -80]], 5, A); }),
+  S("f-brackets", "方括号", "Brackets", "frame", YELLOW, (c, A) => stroke(c, (x) => { for (const s of [-1, 1]) { x.moveTo(s * 60, -86); x.lineTo(s * 92, -86); x.lineTo(s * 92, 86); x.lineTo(s * 60, 86); } }, A, 16)),
+  S("f-scribble", "手绘圈", "Scribble loop", "frame", RED, (c, A) => stroke(c, (x) => {   // drawn twice round, a little off, as by hand
+    x.moveTo(78, -30); x.bezierCurveTo(70, -86, -60, -92, -88, -24); x.bezierCurveTo(-110, 38, -20, 84, 50, 66); x.bezierCurveTo(104, 52, 106, -26, 40, -58);
+    x.bezierCurveTo(-10, -80, -84, -54, -82, 4);
+  }, A, 9)),
+  S("f-arch", "拱门框", "Arch", "frame", BLUE, frame(curve((x) => { x.moveTo(-70, 96); x.lineTo(-70, -26); x.arc(0, -26, 70, Math.PI, 0); x.lineTo(70, 96); }), 14)),
+
   // ---- badges & bubbles: put a text layer on top
   S("burst", "爆炸星", "Starburst", "badge", YELLOW, (c, A) => shape(c, BURST, A)),
   S("boom", "尖角爆炸", "Boom", "badge", RED, (c, A) => { shape(c, BOOM, A); shape(c, star(9, 62, 34, -1.3), WHITE, { shadow: false, lw: 5 }); }),

@@ -29,13 +29,7 @@
   .btn.on{background:#fff;color:var(--ink);border-color:#fff}
   .btn.solid{background:#fff;color:var(--ink);border-color:#fff;box-shadow:4px 4px 0 var(--acc)}
   .btn.wide{width:100%;padding:11px}
-  /* The two main buttons (你看着办 / SURPRISE ME, Export) dress to match the cover's look: <html data-look="…"> is set as the cover is drawn. */
-  [data-look=cyber] .btn.cta{background:var(--acc);border-color:var(--acc);color:#050508;box-shadow:-4px 2px 0 #00f0ff,4px -2px 0 #ff003c;clip-path:polygon(-6px -6px,calc(100% + 6px) -6px,calc(100% + 6px) calc(100% - 12px),calc(100% - 12px) calc(100% + 6px),-6px calc(100% + 6px));font-family:"Bebas Neue",var(--ui);font-size:19px;letter-spacing:.1em;padding:5px 24px 4px}
-  [data-look=riso] .btn.cta{background:#f2ead8;border-color:#1e3ca5;color:#1e3ca5;box-shadow:5px 5px 0 #ff48b0}
-  [data-look=anime] .btn.cta{background:#faf4e6;border:3px solid #2e243c;color:#2e243c;border-radius:10px;box-shadow:0 0 0 3px #faf4e6,5px 6px 0 3px rgba(46,36,60,.5)}
-  [data-look=bluenote] .btn.cta{background:var(--acc);border-color:var(--acc);color:#121216;box-shadow:none;font-family:"Bebas Neue",var(--ui);font-size:20px;letter-spacing:.08em;padding:4px 24px 3px}
-  [data-look=editorial] .btn.cta{background:transparent;color:#f6f3ec;border:1px solid #f6f3ec;outline:3px double #f6f3ec;outline-offset:2px;box-shadow:none;font-family:"Songti SC","STSong","SimSun",Georgia,serif;font-weight:700}
-  [data-look=songke] .btn.cta{background:#b02620;border:2px solid #ece0c4;outline:2px solid #b02620;color:#ece0c4;box-shadow:none;font-family:"Songti SC","STSong","SimSun",Georgia,serif;font-weight:900;border-radius:2px}
+  .btn.cta{padding:8px 22px;font-size:15px;letter-spacing:.04em}
   .seg{display:flex}
   .seg .btn+.btn{border-left:0}
   .seg.big .btn{padding:8px 20px;font-size:15px}
@@ -68,6 +62,20 @@
   .seg.wide{margin-bottom:4px}.seg.wide .btn{flex:1}
   .peek{margin-top:8px;font-size:12px}.peek summary{cursor:pointer;opacity:.7}
   .peek pre{white-space:pre-wrap;max-height:220px;overflow:auto;margin:6px 0 0;padding:8px;border:1px solid var(--line2);font:12px/1.6 ui-monospace,monospace;opacity:.85}
+  .mine-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .mine-head .cap{margin:0}
+  .mine-head .btn{padding:4px 9px;font-size:12px}
+  .folder,.loose{border:1px solid var(--line);margin-top:8px}
+  .loose{border-color:transparent}
+  .folder .tiles,.loose .tiles{padding:8px}
+  .folder.over,.loose.over{outline:2px dashed var(--acc);outline-offset:2px}
+  .fhead{display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--panel);font-size:13px}
+  .fhead.plain{background:transparent;padding-left:2px;opacity:.75}
+  .fhead .caret{border:0;background:transparent;color:inherit;cursor:pointer;width:18px;padding:0;font-size:12px}
+  .fhead .fname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:text}
+  .fhead .rename{flex:1;font-size:13px;padding:2px 6px;min-width:0}
+  .fhead .fcount{font:600 11px var(--mono);opacity:.5}
+  .fhead .btn{padding:2px 8px;font-size:12px}
   .pitem{border:1.5px dashed var(--line2);padding:10px;margin-top:12px}
   .pitem .thumb{margin-top:0;cursor:pointer}
   .thumb{margin-top:10px;display:grid;gap:4px;font-size:12px;opacity:.85}

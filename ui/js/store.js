@@ -33,11 +33,10 @@ export const files = native
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 const str = (v, d = "") => (typeof v === "string" ? v : d);
-const bool = (v, d) => (typeof v === "boolean" ? v : d);
 const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(hi, Math.max(lo, Number(v))) : d);
 const color = (v) => (/^#[0-9a-f]{6}$/i.test(str(v)) ? v.toLowerCase() : "#fcee0a");
 
-export const DEFAULT_STYLE = { template: "stack", theme: "dark", imageShadow: true, look: "cel", lookParams: {}, lookSeed: 7, layoutAdjust: {} };
+export const DEFAULT_STYLE = { template: "stack", theme: "dark", look: "cel", lookParams: {}, lookSeed: 7, layoutAdjust: {} };
 
 const KINDS = ["graphic", "sticker", "user"];
 /** A category's graphic: a reference into the asset library, or none. Older shapes are upgraded. */
@@ -73,7 +72,7 @@ export function normalizeProfile(raw) {
   });
   if (!categories.length) categories.push({ id: uid(), name: "Category", sub: "", code: "", color: "#fcee0a", graphic: { kind: "graphic", id: "camera", labels: [], stamp: "" } });
   const st = p.style && typeof p.style === "object" ? p.style : {};
-  const style = { template: TEMPLATES.includes(st.template) ? st.template : "stack", theme: st.theme === "light" ? "light" : "dark", imageShadow: bool(st.imageShadow, true),
+  const style = { template: TEMPLATES.includes(st.template) ? st.template : "stack", theme: st.theme === "light" ? "light" : "dark",
     look: LOOK_IDS.includes(st.look) ? st.look : "cel", lookParams: {},
     lookSeed: Number.isFinite(st.lookSeed) ? Math.abs(Math.round(st.lookSeed)) % 1000000 : 7 };   // places what a look scatters at random
   // what the user changed about each template: only the settings that differ from the template's own
@@ -165,18 +164,31 @@ export async function loadProfiles() {
 }
 export const saveProfile = (p) => writeJson(`profiles/${p.id}.json`, p);
 
-/** The user's assets as stored: [{id, name, src}] for images, [{id, name, spec}] for generated stickers. */
+/**
+ * The user's assets as stored: [{id, name, src}] for images, [{id, name, spec}] for generated
+ * stickers; either may carry `folder`, the id of the folder it is filed in (see normalizeFolders).
+ */
 export async function loadAssetRecords() {
   const out = [];
   for (const name of await files.list("assets")) {
     if (!name.endsWith(".json")) continue;
     const raw = await readJson("assets/" + name);
-    if (raw && typeof raw.id === "string" && typeof raw.src === "string") out.push({ id: raw.id, name: str(raw.name, "asset"), src: raw.src });
-    else if (raw && typeof raw.id === "string" && raw.spec && typeof raw.spec === "object") out.push({ id: raw.id, name: str(raw.name, "AI"), spec: raw.spec });
+    const folder = raw && typeof raw.folder === "string" ? raw.folder.slice(0, 40) : "";
+    if (raw && typeof raw.id === "string" && typeof raw.src === "string") out.push({ id: raw.id, name: str(raw.name, "asset"), src: raw.src, folder });
+    else if (raw && typeof raw.id === "string" && raw.spec && typeof raw.spec === "object") out.push({ id: raw.id, name: str(raw.name, "AI"), spec: raw.spec, folder });
   }
   return out;
 }
-export const saveAssetRecord = (a) => files.write(`assets/${a.id}.json`, JSON.stringify(a.spec ? { id: a.id, name: a.name, spec: a.spec } : { id: a.id, name: a.name, src: a.src }));
+export const saveAssetRecord = (a) => files.write(`assets/${a.id}.json`, JSON.stringify({ id: a.id, name: a.name, ...(a.spec ? { spec: a.spec } : { src: a.src }), ...(a.folder ? { folder: a.folder } : {}) }));
+/** The folders "My assets" are filed in, as kept in asset-folders.json: [{id, name}], in order, ids unique. */
+export function normalizeFolders(raw) {
+  const out = [];
+  for (const f of Array.isArray(raw) ? raw : []) {
+    const id = f && typeof f.id === "string" ? f.id.replace(/[^\w-]/g, "").slice(0, 40) : "";
+    if (id && !out.some((o) => o.id === id)) out.push({ id, name: str(f.name, "").slice(0, 40) || id });
+  }
+  return out.slice(0, 200);
+}
 export const deleteAssetRecord = (id) => files.remove(`assets/${id}.json`);
 
 /** Ids of the uploaded assets a profile and/or cover refer to (so they can travel with an export). */

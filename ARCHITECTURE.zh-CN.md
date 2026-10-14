@@ -55,7 +55,7 @@ ui/
   js/assets.js       资产库：图形、贴纸、用户上传
   js/cel.js          赛璐珞绘图工具集和前 5 个频道图形
   js/graphics.js     另外 15 个频道图形
-  js/stickers.js     60 个贴纸，以及公用的画法函数
+  js/stickers.js     72 个贴纸（含 12 个线框），以及公用的画法函数
   js/style.js        风格：每种风格的一组钩子，以及当前风格
   js/spec.js         以数据描述的贴纸：校验与解释执行（AI 生成的素材）
   （src-tauri/src/subject.rs：用 Vision 抠出照片主体的遮罩）
@@ -88,7 +88,7 @@ tests/               不依赖 DOM 的模块的单元测试
     { "id": "vlog", "name": "日常", "sub": "DAILY VLOG", "code": "VLOG", "color": "#fcee0a",
       "graphic": { "kind": "graphic", "id": "camera", "labels": [], "stamp": "" } }
   ],
-  "style": { "template": "stack", "theme": "dark", "imageShadow": true,
+  "style": { "template": "stack", "theme": "dark",
              "look": "cel", "lookParams": { "cyber": { "glow": 1.2 } }, "lookSeed": 7 },
   "fonts": { "body": "", "display": "" },
   "sizes": [ { "w": 1920, "h": 1080, "label": "16:9", "name": "", "on": true } ],
@@ -104,7 +104,7 @@ tests/               不依赖 DOM 的模块的单元测试
 
 **设置**（`settings.json`）：语言、当前档案、清晰度倍数、格式、JPEG 质量、文件名规则、调整范围。
 
-其他文件：`assets/<id>.json`（用户上传的素材，内容为 data URL）、`fonts/<名称>.font`（导入的字体）、`photos/<pid>`（当前封面的照片、原图和遮罩，见 6.3）、`ai.json`（AI 连接设置，含令牌，不随档案或工程导出）。
+其他文件：`assets/<id>.json`（我的素材：图片为 data URL，AI 素材为描述；可带 `folder`，所在文件夹的 id）、`asset-folders.json`（我的素材的文件夹：`[{id, name}]`，`normalizeFolders` 校验；文件夹没了的素材视为未归类）、`fonts/<名称>.font`（导入的字体）、`photos/<pid>`（当前封面的照片、原图和遮罩，见 6.3）、`ai.json`（AI 连接设置，含令牌，不随档案或工程导出）。
 
 **工程文件**把封面、档案和用到的用户素材打包进同一个 JSON，因此可以在另一台电脑上原样打开。
 
@@ -117,7 +117,7 @@ tests/               不依赖 DOM 的模块的单元测试
 | 内置图层 | `bg` `accent` `graphic` `brand` `title` `tag` `catname` `frame` | 每张封面各有且仅有一个，内容来自别处（标题文字、频道的图形等），不能删除；`id` 就是类型名 |
 | 自由图层 | `asset` `text` `photo` | 用户添加的素材、文字和照片，可删除、可复制 |
 
-`normalizeLayers()` 负责修复图层列表：丢掉无法识别的层，补回缺失的内置图层，保证背景在最底，并让 `id` 唯一。自由图层可以带 `name`，即用户在图层列表里起的名字（`layerName()` 优先用它，没有时按类型和内容自动起名）。顶栏的「你看着办」和「导出」两个按钮按 `<html data-look>` 换上当前风格的样子（`index.html` 里的 `[data-look=…] .btn.cta` 规则），其余按钮保持默认样式。
+`normalizeLayers()` 负责修复图层列表：丢掉无法识别的层，补回缺失的内置图层，保证背景在最底，并让 `id` 唯一。自由图层可以带 `name`，即用户在图层列表里起的名字（`layerName()` 优先用它，没有时按类型和内容自动起名）。界面按钮不随封面风格变化。
 
 ### 4.1 位置：一处拼贴映射到所有尺寸
 

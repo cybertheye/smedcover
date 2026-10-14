@@ -383,7 +383,7 @@ const PAINT = {
     const g = env.cat.graphic;
     if (!g || g.kind === "none") return null;
     return centred(ctx, env.G.art.x + tr.dx, env.G.art.y + tr.dy, tr, env.G.art.s * tr.s, () => {
-      const half = drawAsset(ctx, g, env.C, { tint: true, labels: g.labels, stamp: g.stamp, shadow: env.style.imageShadow });
+      const half = drawAsset(ctx, g, env.C, { tint: true, labels: g.labels, stamp: g.stamp });
       if (half && look().subject) look().subject(ctx, half, env, lookValues());
       return half;
     });
@@ -419,7 +419,7 @@ const PAINT = {
     return null;
   },
   asset(ctx, L, tr, env) {
-    return centred(ctx, tr.cx, tr.cy, tr, tr.s, () => drawAsset(ctx, L.ref, env.C, { tint: L.tint, shadow: env.style.imageShadow }));
+    return centred(ctx, tr.cx, tr.cy, tr, tr.s, () => drawAsset(ctx, L.ref, env.C, { tint: L.tint }));
   },
   text(ctx, L, tr, env) {
     return centred(ctx, tr.cx, tr.cy, tr, tr.s, () => drawFreeText(ctx, L, env));

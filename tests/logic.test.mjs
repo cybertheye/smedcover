@@ -165,11 +165,12 @@ test("layer order: insert above the selection, the background never moves", () =
   assert.equal(isPickable(s), true); s.locked = true; assert.equal(isPickable(s), false);
 });
 
-test("the sticker pack has 60 uniquely named stickers in known groups", async () => {
+test("the sticker pack has 72 uniquely named stickers in known groups, twelve of them frames", async () => {
   globalThis.document = globalThis.document || { createElement: () => ({ getContext: () => ({}) }) };
   const { STICKERS, STICKER_GROUPS } = await import("../ui/js/stickers.js");
-  assert.equal(STICKERS.length, 60);
-  assert.equal(new Set(STICKERS.map((s) => s.id)).size, 60);
+  assert.equal(STICKERS.length, 72);
+  assert.equal(STICKERS.filter((x) => x.group === "frame").length, 12);
+  assert.equal(new Set(STICKERS.map((s) => s.id)).size, 72);
   const groups = new Set(STICKER_GROUPS.map((g) => g.id));
   for (const s of STICKERS) { assert.ok(groups.has(s.group), s.id); assert.ok(s.name.zh && s.name.en && /^#[0-9a-f]{6}$/i.test(s.color), s.id); }
 });
@@ -1019,4 +1020,11 @@ test("layers: photo layers keep their picture id, mode and treatment; a design k
   const { normalizeProfile } = await import("../ui/js/store.js");
   const p = normalizeProfile({ name: "x", design: { layers: [{ type: "photo", pid: "a", fill: true }, { type: "subject" }] } });
   assert.ok(!p.design.layers.some((l) => l.type === "photo" || l.type === "subject"));
+});
+
+test("asset folders: ids cleaned and unique, names kept short, anything else dropped", async () => {
+  const { normalizeFolders } = await import("../ui/js/store.js");
+  assert.deepEqual(normalizeFolders([{ id: "fa", name: "品牌" }, { id: "fa", name: "again" }, { id: "f b!", name: "" }, { name: "no id" }, null, "x"]), [{ id: "fa", name: "品牌" }, { id: "fb", name: "fb" }]);
+  assert.deepEqual(normalizeFolders(null), []);
+  assert.equal(normalizeFolders([{ id: "f1", name: "x".repeat(99) }])[0].name.length, 40);
 });

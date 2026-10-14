@@ -55,7 +55,7 @@ ui/
   js/assets.js       asset library: graphics, stickers, uploads
   js/cel.js          cel-shading kit and the first five channel graphics
   js/graphics.js     fifteen more channel graphics
-  js/stickers.js     the sixty stickers, and the shared painters
+  js/stickers.js     the 72 stickers (twelve of them frames), and the shared painters
   js/style.js        looks: a set of hooks per look, and the current look
   js/spec.js         stickers described as data: validation and interpreter (AI-generated assets)
   (src-tauri/src/subject.rs: the photo's subject mask, from Vision)
@@ -91,7 +91,7 @@ hand-edited files cannot crash the app.
     { "id": "vlog", "name": "Vlog", "sub": "DAILY VLOG", "code": "VLOG", "color": "#fcee0a",
       "graphic": { "kind": "graphic", "id": "camera", "labels": [], "stamp": "" } }
   ],
-  "style": { "template": "stack", "theme": "dark", "imageShadow": true,
+  "style": { "template": "stack", "theme": "dark",
              "look": "cel", "lookParams": { "cyber": { "glow": 1.2 } }, "lookSeed": 7 },
   "fonts": { "body": "", "display": "" },
   "sizes": [ { "w": 1920, "h": 1080, "label": "16:9", "name": "", "on": true } ],
@@ -108,7 +108,7 @@ hand-edited files cannot crash the app.
 **Settings** (`settings.json`): language, current profile, export scale, format, JPEG quality, file
 name pattern, adjustment scope.
 
-Other files: `assets/<id>.json` (uploaded assets, as data URLs), `fonts/<name>.font` (imported
+Other files: `assets/<id>.json` (My assets: images as data URLs, AI assets as specs; either may carry `folder`, the id of its folder), `asset-folders.json` (the folders of My assets, `[{id, name}]`, checked by `normalizeFolders`; an asset whose folder is gone counts as unfiled), `fonts/<name>.font` (imported
 fonts), `photos/<pid>` (the current cover's pictures, originals and masks; see 6.3), `ai.json` (AI connection settings including the token; never exported with
 profiles or projects).
 
@@ -127,8 +127,7 @@ A cover is an array of layers, bottom first.
 `normalizeLayers()` repairs a layer list: it drops unknown layers, puts back missing bound layers,
 keeps the background at the bottom and makes ids unique. A free layer may carry `name`, the name the
 user gave it in the layer list (`layerName()` prefers it; without one the name comes from the type and
-content). The two main buttons in the top bar (SURPRISE ME and Export) dress as the current look through
-`<html data-look>` (the `[data-look=…] .btn.cta` rules in `index.html`); all other buttons keep the default style.
+content). The interface's buttons do not follow the cover's look.
 
 ### 4.1 Placement: one collage mapped to every size
 

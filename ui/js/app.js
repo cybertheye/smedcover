@@ -11,7 +11,7 @@ import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAs
 import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
-  deleteAssetRecord, usedUserAssets, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
+  deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
 } from "./store.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
@@ -51,6 +51,7 @@ const S = {
   imageAi: normalizeImageAi(null),       // the image model that repaints photos (image-ai.json)
   repaintStyles: [],                     // the built-in repaint styles: [{id, file, name}] (ui/repaint-styles/index.json)
   myStyles: [],                          // the user's own repaint styles, Markdown files in the app data folder repaint-styles/ (see userStyle)
+  assetFolders: [],                      // the folders "My assets" are filed in: [{id, name}] (asset-folders.json; each asset's `folder`)
   picked: [],                                       // a group selection: the ids of the layers in it (see group())
   importedFonts: [], systemFonts: [], latinFonts: new Set(["Bebas Neue", "JetBrains Mono"]),   // latinFonts: those that cannot set Chinese
   mode: "edit", tab: { edit: "cover", setup: "brand" },
@@ -188,7 +189,6 @@ function drawMain() {
   const stage = $("stage"), cv = $("cv"), size = selSize(), [vw, vh] = virtualSize(size.w, size.h);
   const k = Math.max(0.05, Math.min((stage.clientWidth - 36) / vw, (stage.clientHeight - 36) / vh));
   cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
-  document.documentElement.dataset.look = S.profile.style.look;   // the two main buttons dress to match the cover (see index.html)
   paint(cv, size, Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
     S.mode === "edit" ? { picked: group().map((L) => L.id) } : {});
   const clear = !layer("bg").visible;
@@ -540,8 +540,10 @@ function photoItem(L) {
     el("div", { class: "thumb", title: t("cover.photoSelect"), onclick: () => selectLayer(L.id) },
       im ? el("img", { src: rec.src, alt: "" }) : el("div", { class: "hint err", style: "margin:0" }, t("props.photoMissing")),
       el("span", {}, layerName(L), im && ` · ${sizeOf(im)[0]} × ${sizeOf(im)[1]}`, rec && rec.original && ` · ${t("rep.isRepainted")}`)),
-    im && el("button", { class: "btn wide" + (open ? " on" : ""), style: "margin-top:6px", disabled: REP.busy && !open,
-      onclick: () => { REP.for = open ? "" : L.id; if (!REP.busy) Object.assign(REP, { result: null, error: "" }); renderPanel(); } }, t(open ? "rep.close" : "rep.title")),
+    el("div", { class: "row", style: "margin-top:6px" },
+      im && el("button", { class: "btn" + (open ? " on" : ""), disabled: REP.busy && !open,
+        onclick: () => { REP.for = open ? "" : L.id; if (!REP.busy) Object.assign(REP, { result: null, error: "" }); renderPanel(); } }, t(open ? "rep.close" : "rep.title")),
+      el("button", { class: "btn", disabled: REP.busy && open, onclick: () => { if (REP.for === L.id) REP.for = ""; removeLayer(L.id); renderPanel(); } }, t("cover.removePhoto"))),
     open && im && repaintBox(L));
 }
 /** Asks for photos and adds each as a layer (see addPhoto). */
@@ -643,7 +645,8 @@ function tile(ref, onRemove) {
   x.translate(66, 66); x.scale(0.19, 0.19);
   drawAsset(x, ref, hexToRgb(cat().color), { tint: ref.kind === "graphic" });
   return el("div", { class: "tile", title: assetName(ref, getLang()), draggable: true, onclick: () => addAsset(ref),
-    ondragstart: (e) => { e.dataTransfer.setData("application/x-smed-asset", JSON.stringify(ref)); e.dataTransfer.effectAllowed = "copy"; } },
+    ondragstart: (e) => { DRAGGED_ASSET = ref; e.dataTransfer.setData("application/x-smed-asset", JSON.stringify(ref)); e.dataTransfer.effectAllowed = "copyMove"; },
+    ondragend: () => { DRAGGED_ASSET = null; } },
     cv, onRemove && el("button", { class: "x", title: t("assets.remove"), onclick: (e) => { e.stopPropagation(); onRemove(); } }, "×"));
 }
 /** Tile for a colour-block shape: applies it to the colour-block layer instead of adding a layer. */
@@ -658,16 +661,81 @@ function shapeTile(shape) {
 function assetsTab() {
   const lang = getLang(), mine = [...userAssets.values()];
   return [
-    el("div", { class: "hint", style: "margin:0" }, t("assets.hint")),
     aiSection(),
-    el("div", {}, cap("assets.mine", ` · ${mine.length}`), mine.length
-      ? el("div", { class: "tiles" }, mine.map((a) => tile({ kind: "user", id: a.id }, () => removeAsset(a.id))))
-      : el("div", { class: "hint", style: "margin:0" }, t("assets.mineEmpty"))),
+    mineSection(mine),
     el("div", {}, cap("assets.graphics"), el("div", { class: "tiles" }, GRAPHICS.map((g) => tile({ kind: "graphic", id: g.id })))),
     el("div", {}, cap("assets.shapes"), el("div", { class: "tiles" }, ACCENT_SHAPES.map(shapeTile)), el("div", { class: "hint" }, t("assets.shapesHint"))),
     STICKER_GROUPS.map((g) => el("div", {}, el("label", { class: "cap" }, g.name[lang]), el("div", { class: "tiles" }, STICKERS.filter((s) => s.group === g.id).map((s) => tile({ kind: "sticker", id: s.id }))))),
   ];
 }
+// ---------- My assets, in folders
+// Each asset may carry `folder`, the id of a folder in S.assetFolders; one whose folder is gone is
+// simply unfiled. A tile is filed by dragging it onto a folder (or onto "Unfiled" to take it out).
+let DRAGGED_ASSET = null;                                  // the tile being dragged, while it is: {kind, id}
+const FOLDERS = { closed: new Set(), confirmDrop: "" };    // folders shown shut; the folder whose delete awaits a second click
+const persistFolders = () => writeJson("asset-folders.json", S.assetFolders).catch(fail);
+function mineSection(mine) {
+  const known = new Set(S.assetFolders.map((f) => f.id)), loose = mine.filter((a) => !known.has(a.folder));
+  const tiles = (list) => el("div", { class: "tiles" }, list.map((a) => tile({ kind: "user", id: a.id }, () => removeAsset(a.id))));
+  return el("div", {},
+    el("div", { class: "mine-head" }, cap("assets.mine", ` · ${mine.length}`), el("button", { class: "btn", onclick: addFolder }, t("assets.newFolder"))),
+    S.assetFolders.length > 0 && el("div", { class: "hint", style: "margin:0 0 8px" }, t("assets.folderHint")),
+    S.assetFolders.map((f) => folderBox(f, mine.filter((a) => a.folder === f.id), tiles)),
+    dropTarget(el("div", { class: "loose" },
+      S.assetFolders.length > 0 && el("div", { class: "fhead plain" }, el("span", { class: "fname" }, t("assets.loose")), el("span", { class: "fcount" }, String(loose.length))),
+      loose.length ? tiles(loose) : el("div", { class: "hint", style: "margin:0" }, t(mine.length ? "assets.looseEmpty" : "assets.mineEmpty"))), ""));
+}
+/** One folder: its head (open or shut, the name — double-click to rename —, how many, delete) and its tiles. */
+function folderBox(f, items, tiles) {
+  const open = !FOLDERS.closed.has(f.id), sure = FOLDERS.confirmDrop === f.id;
+  return dropTarget(el("div", { class: "folder", dataset: { id: f.id } },
+    el("div", { class: "fhead" },
+      el("button", { class: "caret", title: t(open ? "assets.folderShut" : "assets.folderOpen"), onclick: () => { if (open) FOLDERS.closed.add(f.id); else FOLDERS.closed.delete(f.id); renderPanel(); } }, open ? "▾" : "▸"),
+      el("span", { class: "fname", title: t("assets.folderRename"), ondblclick: () => renameFolder(f.id) }, f.name),
+      el("span", { class: "fcount" }, String(items.length)),
+      el("button", { class: "btn", title: t("assets.folderDrop"), onclick: () => dropFolder(f.id) }, sure ? t("assets.folderDropSure") : "×")),
+    open && (items.length ? tiles(items) : el("div", { class: "hint", style: "margin:0;padding:4px 10px 10px" }, t("assets.folderEmpty")))), f.id);
+}
+/** Lets a dragged asset of the user's be dropped on `node`, filing it in folder `folder` ("" = unfiled). */
+function dropTarget(node, folder) {
+  const mine = () => DRAGGED_ASSET && DRAGGED_ASSET.kind === "user";
+  node.addEventListener("dragover", (e) => { if (mine()) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; node.classList.add("over"); } });
+  node.addEventListener("dragleave", (e) => { if (!node.contains(e.relatedTarget)) node.classList.remove("over"); });
+  node.addEventListener("drop", (e) => {
+    if (!mine()) return;
+    e.preventDefault(); e.stopPropagation();
+    const a = userAssets.get(DRAGGED_ASSET.id);
+    DRAGGED_ASSET = null;
+    if (!a || (a.folder || "") === folder) return renderPanel();
+    if (folder) { a.folder = folder; FOLDERS.closed.delete(folder); } else delete a.folder;
+    saveAssetRecord(a).catch(fail);
+    renderPanel();
+  });
+  return node;
+}
+function addFolder() {
+  const f = { id: "f" + uid(), name: t("assets.folderName", S.assetFolders.length + 1) };
+  S.assetFolders.push(f); persistFolders(); renderPanel();
+  renameFolder(f.id);
+}
+/** Turns a folder's name into a field: Enter or leaving it keeps the name, Esc does not. */
+function renameFolder(id) {
+  const f = S.assetFolders.find((x) => x.id === id), name = $("panel").querySelector(`.folder[data-id="${CSS.escape(id)}"] .fname`);
+  if (!f || !name) return;
+  const input = el("input", { class: "rename", value: f.name, maxLength: 40, spellcheck: false,
+    onkeydown: (e) => { e.stopPropagation(); if (e.key === "Enter") input.blur(); if (e.key === "Escape") { input.value = f.name; input.blur(); } },
+    onblur: () => { const v = input.value.trim(); if (v && v !== f.name) { f.name = v; persistFolders(); } renderPanel(); } });
+  name.replaceWith(input); input.focus(); input.select();
+}
+/** Deletes a folder on the second click; its assets stay, unfiled. */
+async function dropFolder(id) {
+  if (FOLDERS.confirmDrop !== id) { FOLDERS.confirmDrop = id; return renderPanel(); }
+  FOLDERS.confirmDrop = "";
+  S.assetFolders = S.assetFolders.filter((f) => f.id !== id); persistFolders();
+  for (const a of userAssets.values()) if (a.folder === id) { delete a.folder; await saveAssetRecord(a).catch(fail); }
+  renderPanel();
+}
+
 // ---------- AI-generated assets
 // ---------- a photo's subject, cut out (Apple Vision, macOS 14+; see src-tauri/src/subject.rs)
 const CUT = { busy: false, error: "" };
@@ -1227,7 +1295,6 @@ function styleTab() {
       L.params.length > 0 && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete st.lookParams[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))),
     el("div", {}, cap("style.template"), select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), st.template, (v) => { st.template = v; touch({ profile: true }); later("laybox", 60, renderPanel); })),   // the controls below belong to the template: rebuild them once it has been drawn
     layoutBox(),
-    check("style.imageShadow", st.imageShadow, (v) => set("imageShadow", v)),
     el("div", { class: "box" }, cap("style.design"),
       el("button", { class: "btn wide", onclick: () => { S.profile.design.layers = JSON.parse(JSON.stringify(S.cover.layers.filter((l) => l.type !== "photo"))); touch({ profile: true }); toast(t("style.designSaved")); } }, t("style.saveDesign")),
       el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.cover.layers = keepPhotos(JSON.parse(JSON.stringify(S.profile.design.layers)), S.cover.layers); S.layerId = "title"; touch({ cover: true, side: true }); } }, t("style.loadDesign")),
@@ -1916,8 +1983,11 @@ async function start() {
     if (name.endsWith(".font")) { const src = await files.read("fonts/" + name).catch(() => null); if (src) await registerFont(name.slice(0, -5), src); }
   }
   for (const a of await loadAssetRecords().catch(() => [])) {
-    if (a.spec) { const r = normalizeSpec(a.spec); if (r.spec) putSpecAsset(a.id, a.name, r.spec); } else await putUserAsset(a.id, a.name, a.src);
+    let entry = null;
+    if (a.spec) { const r = normalizeSpec(a.spec); if (r.spec) entry = putSpecAsset(a.id, a.name, r.spec); } else entry = await putUserAsset(a.id, a.name, a.src);
+    if (entry && a.folder) entry.folder = a.folder;
   }
+  S.assetFolders = normalizeFolders(await readJson("asset-folders.json").catch(() => null));
   S.ai = normalizeAi(await readJson("ai.json").catch(() => null));
   const rawImageAi = await readJson("image-ai.json").catch(() => null);
   S.imageAi = normalizeImageAi(rawImageAi);

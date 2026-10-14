@@ -28,7 +28,7 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
   - Setup: **Brand**, **Sizes & export**, **AI**
 - **Centre** — the main canvas, and below it a thumbnail of every output size. Click one to show that size on the canvas.
 - **Right** (Edit only) — the layer list and the selected layer's properties.
-- **Top bar** — profile switcher, open and save project, undo and redo, SURPRISE ME (你看着办 in Chinese), export. Those last two buttons dress to match the look of the current cover.
+- **Top bar** — profile switcher, open and save project, undo and redo, SURPRISE ME (你看着办 in Chinese), export.
 
 ## Quick start
 
@@ -55,7 +55,7 @@ Every photo is a *Photo* layer. Under *Add photos* in *Edit → Cover*:
 
 **A cover's first photo fills the canvas**, as its background, just above the Background layer. The ones after it sit on the cover like prints: move, scale, turn and re-order them, as many as you like, for collage. *Fill the canvas* in a photo's properties switches between the two. A photo filling the canvas is clicked once to select it, then dragged on the cover and scrolled to resize; once selected it drags even when you press on the colour block.
 
-Below *Add photos* every photo on the cover is listed in layer order: a thumbnail, its size, and *AI repainted* on one that was. Click a thumbnail to select its layer; each photo has its own *AI repaint* below it.
+Below *Add photos* every photo on the cover is listed in layer order: a thumbnail, its size, and *AI repainted* on one that was. Click a thumbnail to select its layer; each photo has its own *AI repaint* and *Remove the photo* (deletes that photo layer) below it.
 
 Each photo's properties, top to bottom: remove the background, cut out the subject (into a new photo layer), fill the canvas, blur, dim, the look's treatment of photos (tint, duotone, black and white…; on by default), an outline (width and colour) and a shadow, then the opacity and *Reset placement* every layer has. To change the picture, delete the layer and upload another. With the background removed the outline and shadow follow the subject; otherwise the photo's edge, like a print.
 
@@ -268,8 +268,10 @@ Deleting a channel also deletes the layers that belonged only to it.
 ### Assets
 
 - **My assets** — assets made with AI generation and kept. Photos are uploaded under *Cover → Add photos*.
+  - *＋ New folder* makes a folder and lets you name it; double-click a folder's name to rename it later. Drag an asset onto a folder to file it, onto *Unfiled* to take it out. ▾ / ▸ closes or opens a folder.
+  - Deleting a folder takes two clicks on its ×; its assets are not deleted but go back to Unfiled. Folders are kept on this computer and do not travel with profile exports.
 - **Channel graphics** — twenty cel-shaded graphics that follow the channel colour.
-- **Stickers** — a free pack of sixty; each can optionally follow the channel colour.
+- **Stickers** — a free pack of 72; each can optionally follow the channel colour. The first group is twelve *Frames*: double box, ring, diamond, hexagon, bubble, burst, ticket, film, instant photo, brackets, scribble loop and arch — empty in the middle, to go round a photo, a word or a face, drawn the current look's way.
 - **Colour block & edge** — twelve shapes; click one to reshape the colour block layer.
 
 ### Generating assets with AI
