@@ -392,7 +392,7 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 内置风格是 `ui/repaint-styles/` 下的 Markdown 文件：文件名是 ID（用户设置记的就是它），开头 `---` 之间的 front matter 给出中英文名、说明、排序和出处（`parseStyle` 只认 `STYLE_KEYS` 里的几个键，写错即报错），其后是提示词。打包后的应用无法列出文件夹，所以 `scripts/repaint-styles.mjs` 在每次打包前（`beforeBuildCommand`）扫描文件夹写出 `index.json`；界面启动时读清单，选中某个风格、展开查看或重绘时才读它的文件（`styleText`，读过就缓存），`<!-- -->` 注释被去掉。
 
-提示词由 `repaintPrompt` 组合：风格来源（当前风格的 `repaint(colour)`、内置风格文件、或用户的文字）＋「这是封面背景：不要文字和边框、保持比例」＋补充说明。跟随风格时还要求保持构图，这样背景图层原来的位置和缩放仍然合适；预设和自定义自己决定构图。可选参数（尺寸、水印等）被服务以 400 拒绝时，`refusedParam` 从错误信息里认出参数名，去掉后重发，最多三次。连接测试（`imageCheck` / `readImageCheck`）不出图：OpenAI、Gemini 用 GET 查询模型，Seedream 发空提示词看拒绝理由；为此 `ai_request` 可以发 GET。风格来源里用户自己的风格存在 `image-ai.json` 的 `styles`。重绘总是从原图出发，原图存在 `S.photoOriginal`（会话里是 `session-photo-original`，工程文件里是 `photoOriginal`）。
+提示词由 `repaintPrompt` 组合：风格来源（当前风格的 `repaint(colour)`、内置风格文件、或用户的文字）＋「这是封面背景：不要文字和边框、保持比例」＋补充说明。跟随风格时还要求保持构图，这样背景图层原来的位置和缩放仍然合适；预设和自定义自己决定构图。可选参数（尺寸、水印等）被服务以 400 拒绝时，`refusedParam` 从错误信息里认出参数名，去掉后重发，最多三次。连接测试（`imageCheck` / `readImageCheck`）不出图：OpenAI、Gemini 用 GET 查询模型，Seedream 发空提示词看拒绝理由；为此 `ai_request` 可以发 GET。用户自己的风格是应用数据目录 `repaint-styles/` 下同样格式的 Markdown 文件（`userStyle` 宽松地读：没有开头信息、有未知键都行，未知键原样保留，`writeStyle` 写回时不丢），窗口回到前台时重新读取，`reveal_data_dir` 在文件管理器里打开这个文件夹；早先存在 `image-ai.json` 里的 `styles` / `custom` 会在启动时一次性写成文件（`legacyStyles`）。重绘总是从原图出发，原图存在 `S.photoOriginal`（会话里是 `session-photo-original`，工程文件里是 `photoOriginal`）。
 
 ## 9. 交互（`app.js`）
 
@@ -466,7 +466,7 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 ### 10.5 其他命令
 
-`pick_folder`、`save_text`（导出档案、工程、CSV 模板）、`list_system_fonts`（用 fontdb 枚举系统字体）。
+`pick_folder`、`save_text`（导出档案、工程、CSV 模板）、`list_system_fonts`（用 fontdb 枚举系统字体，并标出能否排中文）、`reveal_data_dir`（在文件管理器里打开数据目录下的某个文件夹，只限数据目录内）。
 
 ## 11. 浏览器回退
 

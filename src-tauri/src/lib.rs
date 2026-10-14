@@ -138,6 +138,23 @@ fn app_delete(app: AppHandle, path: String) -> Res<()> {
     store_delete(&data_root(&app)?, &path)
 }
 
+/// Shows a folder of the app's data (created if missing) in the system's file manager, for the
+/// user to put files in or edit them (the repaint styles). Only folders inside the data root.
+#[tauri::command]
+fn reveal_data_dir(app: AppHandle, dir: String) -> Res<()> {
+    let path = resolve(&data_root(&app)?, &dir)?;
+    fs::create_dir_all(&path).map_err(err)?;
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "windows") {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(opener).arg(&path).spawn().map_err(err)?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------- image export
 
 /// Re-encodes PNG bytes as `format` ("png" | "jpeg" | "webp"). JPEG is flattened onto
@@ -585,6 +602,7 @@ fn proxy_for(url: &str, given: &str) -> Option<String> {
 }
 
 /// POSTs a JSON body to an http(s) URL with the given headers, optionally through a proxy.
+#[cfg(test)]
 fn post_json(
     url: &str,
     headers: &[(String, String)],
@@ -718,6 +736,7 @@ pub fn run() {
             app_write,
             app_list,
             app_delete,
+            reveal_data_dir,
             save_image,
             pick_folder,
             write_image,

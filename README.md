@@ -63,9 +63,19 @@ The style comes from one of three places:
 |---|---|
 | Follow the current look | Repaints in the cover's look (each look has its own repaint description), with the channel colour as accent; keeps the photo's composition, so the subject stays where and as big as it was and its placement on the cover still fits |
 | Built-in styles | Styles that come with the app, one Markdown file each in `ui/repaint-styles/` (how to add one below); once selected, its description and source show below the menu. For now there is *8-bit pixel editorial*, which distils the photo into a sparse, abstract 8-bit pixel piece: a small cluster of coarse pixel blocks on a wide paper field, or a few broad pixel planes edge to edge. Adapted from [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art) |
-| My styles | Styles you keep, each with a name and a prompt, renamed, edited or deleted at any time and saved as you type. *＋ New style…* starts from nothing; with a built-in style selected, *Copy into my styles* gives you a copy to rename and edit. A whole style guide (such as a skill's `SKILL.md`) can be pasted in |
+| My styles | Your own styles: Markdown files of the same kind as the built-in ones, kept in the `repaint-styles/` folder of the app data directory (see below). Rename, edit or delete them in the panel; changes are written back to the file as you type |
 
 - *See the prompt* unfolds a built-in style's prompt; to change one inside the app, edit a copy made with *Copy into my styles*.
+
+#### My styles
+
+The last three entries of the style menu:
+
+- **＋ New style…** — an empty style; fill in its name and prompt below.
+- **⤓ Import a style file (.md)…** — a style file someone shared, or a skill's `SKILL.md`. A file that starts with `---` is kept word for word; one that does not gets a header named after the file.
+- **Open the styles folder** — shows the folder in Finder (or Explorer). Put files in it or edit them in any editor; the app reads it again when its window comes back to the front.
+
+The files have the same form as the built-in ones (the file name is the id, a header, then the prompt) but are read more leniently: a single `name:` is enough, and a file with no header or with other keys (such as a skill's `description:`) works too; `description` is shown as the style's description.
 
 #### Adding or changing a built-in style (when building from source)
 
@@ -392,7 +402,7 @@ Tutorials,Another title,
 
 ## Where your data lives
 
-Profiles, assets, settings and the current session are kept in the system's app data directory.
+Profiles, assets, settings, the current session and your own repaint styles (the `repaint-styles/` folder) are kept in the system's app data directory.
 Exports are written only where you choose.
 
 | System | Location |

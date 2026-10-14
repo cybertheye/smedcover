@@ -462,7 +462,7 @@ A repaint is one fixed step, not an agent: the photo and a style description go 
 
 Built-in styles are Markdown files in `ui/repaint-styles/`: the file name is the id (what users' settings remember), a front-matter header between `---` lines gives the names, a description, the order and the source (`parseStyle` takes only the keys in `STYLE_KEYS` and reports any other), and the prompt follows. A bundled app cannot list a folder, so `scripts/repaint-styles.mjs` scans it before every build (`beforeBuildCommand`) and writes `index.json`; the interface reads the list at start and a style's file only when it is selected, opened or used (`styleText`, kept once read), with `<!-- -->` comments taken out.
 
-`repaintPrompt` puts the prompt together: the style source (the current look's `repaint(colour)`, a built-in style's file, or the user's words), then "this is a cover background: no text or border, keep the shape", then any extra words. Following a look also asks to keep the composition, so the background layer's placement still fits; presets and custom text decide composition themselves. When the service refuses an optional setting (size, watermark…) with a 400, `refusedParam` finds its name in the message and the request goes again without it, at most three times. The connection test (`imageCheck` / `readImageCheck`) makes no picture: OpenAI and Gemini are asked about the model with a GET, Seedream is sent an empty prompt and its refusal read; `ai_request` can send a GET for this. The user's own styles are kept as `styles` in `image-ai.json`. A repaint always starts from the original, kept in `S.photoOriginal` (`session-photo-original` in the session, `photoOriginal` in project files).
+`repaintPrompt` puts the prompt together: the style source (the current look's `repaint(colour)`, a built-in style's file, or the user's words), then "this is a cover background: no text or border, keep the shape", then any extra words. Following a look also asks to keep the composition, so the background layer's placement still fits; presets and custom text decide composition themselves. When the service refuses an optional setting (size, watermark…) with a 400, `refusedParam` finds its name in the message and the request goes again without it, at most three times. The connection test (`imageCheck` / `readImageCheck`) makes no picture: OpenAI and Gemini are asked about the model with a GET, Seedream is sent an empty prompt and its refusal read; `ai_request` can send a GET for this. The user's own styles are Markdown files of the same form in the app data folder `repaint-styles/` (`userStyle` reads them leniently — no header or unknown keys are fine, and unknown keys are kept, so `writeStyle` loses nothing), read again when the window comes back to the front; `reveal_data_dir` opens that folder in the file manager. The `styles` / `custom` that `image-ai.json` held earlier are written out as files once at start (`legacyStyles`). A repaint always starts from the original, kept in `S.photoOriginal` (`session-photo-original` in the session, `photoOriginal` in project files).
 
 ## 9. Interaction (`app.js`)
 
@@ -552,8 +552,9 @@ message. It is sent from Rust to get around the cross-origin limits of a web vie
 
 ### 10.5 Other commands
 
-`pick_folder`, `save_text` (profiles, projects, the CSV template) and `list_system_fonts` (which
-enumerates installed fonts with fontdb).
+`pick_folder`, `save_text` (profiles, projects, the CSV template), `list_system_fonts` (which
+enumerates installed fonts with fontdb and says which can set Chinese) and `reveal_data_dir` (shows a
+folder of the data directory in the file manager — only inside the data directory).
 
 ## 11. Browser fallback
 

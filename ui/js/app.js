@@ -18,7 +18,7 @@ import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, effectUses } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams } from "./style.js";
-import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt } from "./repaint.js";
+import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 
 const $ = (id) => document.getElementById(id);
@@ -50,6 +50,7 @@ const S = {
   photoOriginal: "",                     // the photo as it was before an AI repaint (data URL), or ""
   imageAi: normalizeImageAi(null),       // the image model that repaints photos (image-ai.json)
   repaintStyles: [],                     // the built-in repaint styles: [{id, file, name}] (ui/repaint-styles/index.json)
+  myStyles: [],                          // the user's own repaint styles, Markdown files in the app data folder repaint-styles/ (see userStyle)
   picked: [],                                       // a group selection: the ids of the layers in it (see group())
   importedFonts: [], systemFonts: [], latinFonts: new Set(["Bebas Neue", "JetBrains Mono"]),   // latinFonts: those that cannot set Chinese
   mode: "edit", tab: { edit: "cover", setup: "brand" },
@@ -594,8 +595,8 @@ async function repaintPhoto() {
   const cfg = S.imageAi;
   if (!S.photo || REP.busy) return;
   const mine = myStyle(), preset = builtIn();
-  if (mine && !mine.prompt.trim()) return toast(t("rep.needCustom"));
-  let text = mine ? mine.prompt : "";
+  if (mine && !promptOf(mine.body)) return toast(t("rep.needCustom"));
+  let text = mine ? promptOf(mine.body) : "";
   if (preset) { try { text = await styleText(preset); } catch (e) { REP.error = String(e.message); return renderPanel(); } }
   const job = ++REP.job, from = S.photoOriginal ? await loadImage(S.photoOriginal) : S.photo;
   const prompt = repaintPrompt({ source: mine || preset ? "text" : "look", look: S.profile.style.look, color: cat().color, text, notes: cfg.notes });
@@ -620,20 +621,65 @@ async function useRepaint() {
 /** The built-in style the repaint uses now, or null. */
 const builtIn = () => (S.imageAi.source.startsWith("preset:") ? S.repaintStyles.find((s) => "preset:" + s.id === S.imageAi.source) || null : null);
 /** The user's own style the repaint uses now, or null. */
-const myStyle = () => (S.imageAi.source.startsWith("my:") ? S.imageAi.styles.find((s) => "my:" + s.id === S.imageAi.source) || null : null);
-/** Adds a style of the user's own (a copy of a preset, or empty) and selects it. */
-function addStyle(name, prompt) {
-  const c = S.imageAi;
-  if (c.styles.length >= MAX_STYLES) return toast(t("rep.tooMany", MAX_STYLES));
-  const id = Date.now().toString(36);
-  S.imageAi = normalizeImageAi({ ...c, styles: [...c.styles, { id, name, prompt }], source: "my:" + id });
-  persistImageAi(); renderPanel();
+const myStyle = () => (S.imageAi.source.startsWith("my:") ? S.myStyles.find((s) => "my:" + s.id === S.imageAi.source) || null : null);
+
+// The user's own styles are files: <app data>/repaint-styles/<id>.md, in the same form as the
+// built-in ones (a header, then the prompt). The app writes them as they are edited, and reads
+// the folder again whenever its window comes back to the front, so files added or changed in
+// another editor show up.
+const MY_DIR = "repaint-styles";
+async function loadMyStyles() {
+  const names = (await files.list(MY_DIR).catch(() => [])).filter((f) => /^[a-z0-9][a-z0-9-]*\.md$/.test(f)).slice(0, MAX_STYLES);
+  const out = [];
+  for (const f of names) { const text = await files.read(`${MY_DIR}/${f}`).catch(() => null); if (text != null) out.push(userStyle(f, text)); }
+  return out.sort((a, b) => a.order - b.order || a.name[getLang()].localeCompare(b.name[getLang()]));
+}
+/** Reads the folder again; redraws the panel if anything changed. */
+async function refreshMyStyles() {
+  const was = JSON.stringify(S.myStyles.map((s) => [s.id, s.meta, s.body]));
+  S.myStyles = await loadMyStyles();
+  if (JSON.stringify(S.myStyles.map((s) => [s.id, s.meta, s.body])) === was) return;
+  if (S.imageAi.source.startsWith("my:") && !myStyle()) { S.imageAi.source = "look"; persistImageAi(); }   // its file is gone
+  if (onCoverTab() && !(document.activeElement && document.activeElement.closest && document.activeElement.closest(".rep"))) renderPanel();
+}
+addEventListener("focus", () => { if (S.cover) refreshMyStyles(); });
+const saveMyStyle = (st) => later("style-" + st.id, 400, () => files.write(`${MY_DIR}/${st.file}`, writeStyle(st.meta, st.body)).catch(fail));
+/** Writes a new style file of the user's own and selects it. */
+async function addStyle(meta, body) {
+  if (S.myStyles.length >= MAX_STYLES) return toast(t("rep.tooMany", MAX_STYLES));
+  const id = freeId(Date.now().toString(36), S.myStyles.map((s) => s.id));
+  await files.write(`${MY_DIR}/${id}.md`, writeStyle(meta, body)).catch(fail);
+  S.myStyles = await loadMyStyles();
+  S.imageAi = normalizeImageAi({ ...S.imageAi, source: "my:" + id }); persistImageAi(); renderPanel();
+}
+/** Brings in a style file from elsewhere (one shared by someone, a skill's SKILL.md…), kept as it is. */
+async function importStyle() {
+  const f = await pickFile(".md,.markdown,.txt,text/markdown,text/plain");
+  if (!f) return renderPanel();
+  const text = await readAs(f, "readAsText");
+  const id = freeId(f.name, S.myStyles.map((s) => s.id)), st = userStyle(id + ".md", text);
+  if (!st.prompt) { toast(t("rep.importEmpty")); return renderPanel(); }
+  // a file without a header gets one, named after the file; one with a header is kept word for word
+  const out = /^\uFEFF?---\r?\n/.test(text) ? text : writeStyle({ name: f.name.replace(/\.[^.]+$/, "") }, text);
+  await files.write(`${MY_DIR}/${id}.md`, out).catch(fail);
+  S.myStyles = await loadMyStyles();
+  S.imageAi = normalizeImageAi({ ...S.imageAi, source: "my:" + id }); persistImageAi(); renderPanel();
+  toast(t("rep.imported", st.name[getLang()]));
+}
+/** Writes out the styles image-ai.json held before they were files, once. */
+async function migrateStyles(raw) {
+  const old = legacyStyles(raw);
+  if (!old.length) return;
+  const have = await files.list(MY_DIR).catch(() => []);
+  for (const s of old) if (!have.includes(s.id + ".md")) await files.write(`${MY_DIR}/${s.id}.md`, writeStyle({ name: s.name }, s.prompt)).catch(fail);
+  await writeJson("image-ai.json", S.imageAi).catch(fail);   // without them from now on
 }
 function repaintBox() {
   const c = S.imageAi, lang = getLang();
   const set = (k, v, redraw = false) => { S.imageAi = normalizeImageAi({ ...S.imageAi, [k]: v }); persistImageAi(); if (redraw) renderPanel(); };
-  /** Edits the selected style of the user's own, in place (typing must not rebuild the form). */
-  const edit = (k, v) => { const st = myStyle(); if (!st) return; st[k] = v; S.imageAi = normalizeImageAi(S.imageAi); persistImageAi(); };
+  /** Edits the selected style of the user's own and saves its file (typing must not rebuild the form). */
+  const rename = (v) => { const st = myStyle(); if (!st) return; delete st.meta["name.zh"]; delete st.meta["name.en"]; st.meta.name = v; st.name = { zh: v, en: v }; saveMyStyle(st); };
+  const rewrite = (v) => { const st = myStyle(); if (!st) return; st.body = v; st.prompt = promptOf(v); saveMyStyle(st); };
   const head = el("label", { class: "cap", style: "margin-top:14px" }, t("rep.title"));
   if (!imageReady(c)) {
     return el("div", { class: "rep" }, head, el("div", { class: "hint", style: "margin:0 0 10px" }, t("rep.needSetup")),
@@ -642,26 +688,36 @@ function repaintBox() {
   const look = LOOKS[S.profile.style.look] || LOOKS.cel, r = REP.result;
   const sources = [["look", t("rep.src.look", look.name[lang])],
     { group: t("rep.src.preset"), items: S.repaintStyles.map((s) => ["preset:" + s.id, s.name[lang]]) },
-    { group: t("rep.src.mine"), items: c.styles.map((s) => ["my:" + s.id, s.name]) },
-    ["+", t("rep.src.new")]];
+    { group: t("rep.src.mine"), items: S.myStyles.map((s) => ["my:" + s.id, s.name[lang]]) },
+    ["+new", t("rep.src.new")], ["+import", t("rep.src.import")], native && ["+folder", t("rep.src.folder")]].filter(Boolean);
+  const command = (v) => {
+    if (v === "+new") return addStyle({ name: t("rep.newName", S.myStyles.length + 1) }, "");
+    if (v === "+import") return importStyle();
+    if (v === "+folder") { invoke("reveal_data_dir", { dir: MY_DIR }).catch(fail); return renderPanel(); }   // the menu goes back to the style in use
+    set("source", v, true);
+  };
   const mine = myStyle(), preset = builtIn();
   /** Fills a <pre> with a built-in style's prompt the first time it is opened. */
   const peek = (e) => { const pre = e.currentTarget.querySelector("pre"); if (e.currentTarget.open && !pre.textContent) styleText(preset).then((x) => { pre.textContent = x; }, (err) => { pre.textContent = String(err.message); }); };
   return el("div", { class: "rep" }, head,
-    select(sources, c.source, (v) => (v === "+" ? addStyle(t("rep.newName", c.styles.length + 1), "") : set("source", v, true))),
+    select(sources, c.source, command),
     preset && [
       preset.about && el("div", { class: "about" }, preset.about[lang]),
       preset.credit && el("div", { class: "hint" }, t("rep.credit", preset.credit)),
       el("details", { class: "peek", ontoggle: peek }, el("summary", {}, t("rep.peek")), el("pre", {})),
-      el("button", { class: "btn wide", style: "margin-top:8px", onclick: async () => addStyle(preset.name[lang] + t("rep.copySuffix"), await styleText(preset).catch(() => "")) }, t("rep.copy"))],
+      el("button", { class: "btn wide", style: "margin-top:8px", onclick: async () => addStyle({ name: preset.name[lang] + t("rep.copySuffix"), ...(preset.credit ? { credit: preset.credit } : {}) }, await styleText(preset).catch(() => "")) }, t("rep.copy"))],
     mine && [
-      el("div", { style: "margin-top:8px" }, textInput(mine.name, (v) => edit("name", v), { placeholder: t("rep.namePh"), maxLength: 40, onchange: () => renderPanel() })),
-      el("textarea", { value: mine.prompt, spellcheck: false, style: "height:160px;font-size:13px;margin-top:8px", placeholder: t("rep.customPh"), oninput: (e) => edit("prompt", e.target.value) }),
-      el("div", { class: "hint" }, t("rep.customHint")),
-      el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => {
+      mine.about && el("div", { class: "about" }, mine.about[lang]),
+      mine.credit && el("div", { class: "hint" }, t("rep.credit", mine.credit)),
+      el("div", { style: "margin-top:8px" }, textInput(mine.name[lang], rename, { placeholder: t("rep.namePh"), maxLength: 60, onchange: () => renderPanel() })),
+      el("textarea", { value: mine.body, spellcheck: false, style: "height:160px;font-size:13px;margin-top:8px", placeholder: t("rep.customPh"), oninput: (e) => rewrite(e.target.value) }),
+      el("div", { class: "hint" }, t("rep.customHint", `repaint-styles/${mine.file}`)),
+      el("button", { class: "btn wide", style: "margin-top:8px", onclick: async () => {
         if (REP.confirmDrop !== mine.id) { REP.confirmDrop = mine.id; renderPanel(); return; }   // a second click confirms
-        REP.confirmDrop = null; S.imageAi = normalizeImageAi({ ...c, styles: c.styles.filter((s) => s !== mine), source: "look" }); persistImageAi(); renderPanel();
-      } }, t(REP.confirmDrop === mine.id ? "rep.dropSure" : "rep.drop", mine.name))],
+        REP.confirmDrop = null;
+        await files.remove(`${MY_DIR}/${mine.file}`).catch(fail);
+        S.myStyles = await loadMyStyles(); S.imageAi = normalizeImageAi({ ...c, source: "look" }); persistImageAi(); renderPanel();
+      } }, t(REP.confirmDrop === mine.id ? "rep.dropSure" : "rep.drop", mine.name[lang]))],
     el("div", { style: "margin-top:8px" }, textInput(c.notes, (v) => set("notes", v), { placeholder: t("rep.notesPh"), maxLength: 600, disabled: REP.busy })),
     el("button", { id: "rep-go", class: "btn solid wide", style: "margin-top:10px", disabled: REP.busy, onclick: repaintPhoto }, REP.busy ? repBusyText() : t(r ? "rep.again" : "rep.go")),
     REP.busy && el("button", { class: "btn wide", style: "margin-top:8px", onclick: cancelRepaint }, t("ai.cancel")),
@@ -1524,9 +1580,12 @@ async function start() {
     if (a.spec) { const r = normalizeSpec(a.spec); if (r.spec) putSpecAsset(a.id, a.name, r.spec); } else await putUserAsset(a.id, a.name, a.src);
   }
   S.ai = normalizeAi(await readJson("ai.json").catch(() => null));
-  S.imageAi = normalizeImageAi(await readJson("image-ai.json").catch(() => null));
+  const rawImageAi = await readJson("image-ai.json").catch(() => null);
+  S.imageAi = normalizeImageAi(rawImageAi);
+  await migrateStyles(rawImageAi);
   S.repaintStyles = await loadStyles();
-  if (S.imageAi.source.startsWith("preset:") && !builtIn()) S.imageAi.source = "look";   // a built-in style that is no longer there
+  S.myStyles = await loadMyStyles();
+  if ((S.imageAi.source.startsWith("preset:") && !builtIn()) || (S.imageAi.source.startsWith("my:") && !myStyle())) S.imageAi.source = "look";   // a style that is no longer there
   if (native) {
     const found = await invoke("list_system_fonts").catch(() => []);
     S.systemFonts = found.map((f) => f.name);
@@ -1576,6 +1635,11 @@ async function selfTest(dir) {
       }
       // repainting a photo through each image service's own form (one of them answering with a link)
       report.repaint = [];
+      // a style of the user's own goes to a file and comes back the same
+      await files.write("repaint-styles/selftest.md", writeStyle({ name: "自测 Self test", order: 5 }, "<!-- note -->\nPaint it."));
+      const own = (await loadMyStyles()).find((x) => x.id === "selftest");
+      report.myStyle = own ? { name: own.name.zh, prompt: own.prompt, order: own.order } : null;
+      await files.remove("repaint-styles/selftest.md");
       report.repaintStyles = await Promise.all(S.repaintStyles.map(async (st) => ({ id: st.id, chars: (await styleText(st)).length })));   // every built-in style can be read from the bundle
       const photo = shrink(pic, 64);
       for (const [provider, base, model] of [["openai", "/v1", "gpt-image-2"], ["gemini", "/v1beta", "m"], ["seedream", "/api/v3", "m"], ["seedream", "/api/v3", "url"]]) {

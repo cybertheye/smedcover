@@ -885,13 +885,13 @@ test("repaint: a refused optional setting is named, the connection check reads e
   assert.equal(R.readImageCheck(cfg("seedream"), 400, '{"error":{"message":"missing the `prompt` parameter"}}').key, "okSeedream");
   assert.equal(R.readImageCheck(cfg("seedream"), 404, '{"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint m does not exist"}}').key, "model");
   assert.equal(R.readImageCheck(cfg("seedream"), 401, '{"error":{"code":"AuthenticationError"}}').key, "auth");
-  // saved styles; the one custom text of before becomes the first
-  const old = R.normalizeImageAi({ source: "custom", custom: "watercolour" });
-  assert.equal(old.styles.length, 1); assert.equal(old.source, "my:" + old.styles[0].id); assert.equal(old.styles[0].prompt, "watercolour");
-  const two = R.normalizeImageAi({ source: "my:b", styles: [{ id: "a", name: "A", prompt: "x" }, { id: "b", name: "", prompt: "y" }, { id: "a", name: "dup", prompt: "z" }] });
-  assert.deepEqual(two.styles.map((s) => s.id), ["a", "b", "a_2"]);
-  assert.equal(two.styles[1].name, "#2"); assert.equal(two.source, "my:b");
-  assert.equal(R.normalizeImageAi({ source: "my:gone", styles: [] }).source, "look");
+  // the user's styles left image-ai.json for files; what it held is handed over once
+  assert.deepEqual(R.legacyStyles({ source: "custom", custom: "watercolour" }), [{ id: "custom", name: "自定义", prompt: "watercolour" }]);
+  assert.deepEqual(R.legacyStyles({ styles: [{ id: "MV7q", name: "A", prompt: "x" }, { id: "b", name: "", prompt: "y" }, { id: "mv7q", prompt: "dup" }] }), [{ id: "mv7q", name: "A", prompt: "x" }, { id: "b", name: "b", prompt: "y" }]);
+  assert.equal(R.normalizeImageAi({ source: "custom", custom: "watercolour" }).source, "my:custom");
+  assert.ok(!("styles" in R.normalizeImageAi({ styles: [{ id: "a", prompt: "x" }] })));
+  assert.equal(R.normalizeImageAi({ source: "my:mv7qzwb3" }).source, "my:mv7qzwb3");
+  assert.equal(R.normalizeImageAi({ source: "my:../x" }).source, "look");
   assert.equal(R.normalizeImageAi({ source: "pixel" }).source, "preset:pixel-editorial");                  // the 8-bit style's earlier names
   assert.equal(R.normalizeImageAi({ source: "preset:8-bit-pixel-editorial" }).source, "preset:pixel-editorial");
   assert.equal(R.normalizeImageAi({ source: "preset:watercolour" }).source, "preset:watercolour");
@@ -902,20 +902,41 @@ test("repaint: built-in styles are Markdown files with a header, named by their 
   const fs = await import("node:fs");
   const { styleIndex, parseStyle } = await import("../ui/js/repaint.js");
   const good = "---\nname.zh: 水彩\nname.en: Watercolour\n# a note\nabout.zh: 松动的水彩\norder: 5\n---\n\n<!-- credit -->\nPaint it in watercolour.\n";
-  assert.deepEqual(parseStyle(good), { meta: { "name.zh": "水彩", "name.en": "Watercolour", "about.zh": "松动的水彩", order: "5" }, prompt: "Paint it in watercolour.", errors: [] });
+  assert.deepEqual(parseStyle(good), { meta: { "name.zh": "水彩", "name.en": "Watercolour", "about.zh": "松动的水彩", order: "5" }, body: "<!-- credit -->\nPaint it in watercolour.\n", prompt: "Paint it in watercolour.", errors: [] });
   assert.equal(parseStyle("\uFEFF---\r\nname.zh: a\r\nname.en: b\r\n---\r\nX").prompt, "X");   // a BOM and Windows line ends
   assert.deepEqual(parseStyle("just a prompt").errors, ['no header: the file must start with a "---" line']);
-  assert.deepEqual(parseStyle("---\nname.zh: a\nnmae.en: b\n---\nX").errors, ["unknown key: nmae.en"]);   // a typo is caught
+  assert.deepEqual(parseStyle("---\nname.zh: a\nnmae.en: b\n---\nX").errors, ["unknown key: nmae.en"]);   // a typo is caught (and the key kept)
   const files = { "watercolour.md": good, "ink-wash.md": good.replace("order: 5", "order: 1").replace("Watercolour", "Ink wash"), "Bad Name.md": good,
     "no-names.md": "---\nname.zh: 只有中文\n---\nX", "empty.md": "---\nname.zh: 空\nname.en: Empty\n---\n<!-- only a comment -->", "late.md": "---\nname.zh: 后\nname.en: Late\n---\nX" };
   const { styles, errors } = styleIndex(Object.keys(files), (f) => files[f]);
   assert.deepEqual(styles.map((x) => x.id), ["ink-wash", "watercolour", "late"]);   // by order (default 100), then id
   assert.deepEqual(styles[1], { id: "watercolour", file: "watercolour.md", order: 5, name: { zh: "水彩", en: "Watercolour" }, about: { zh: "松动的水彩", en: "松动的水彩" } });
   assert.equal(errors.length, 3);   // a file name that is not an id, a missing English name, nothing but a comment
+  assert.deepEqual(styleIndex(["one.md"], () => "---\nname: 单名\n---\nX").styles[0].name, { zh: "单名", en: "单名" });   // one name serves both
   // every file in the folder is in the list, readable, and has a prompt
   const dir = new URL("../ui/repaint-styles/", import.meta.url), list = JSON.parse(fs.readFileSync(new URL("index.json", dir), "utf8"));
   assert.deepEqual(list.map((x) => x.file).sort(), fs.readdirSync(dir).filter((f) => f.endsWith(".md")).sort());
   const pixel = parseStyle(fs.readFileSync(new URL("pixel-editorial.md", dir), "utf8"));
   assert.deepEqual(pixel.errors, []);
   assert.ok(pixel.prompt.startsWith("Reinterpret the attached photo") && pixel.prompt.length === 2538 && !pixel.prompt.includes("TwentyfiveBTea"));   // unchanged; the credit stays in the header
+});
+
+test("repaint: the user's own styles are files of the same form, read leniently and written back whole", async () => {
+  const { userStyle, writeStyle, parseStyle, freeId } = await import("../ui/js/repaint.js");
+  // a file written by hand or brought in: no header, or a skill's own header, is fine
+  const bare = userStyle("ink.md", "Paint it in ink.\n");
+  assert.deepEqual([bare.id, bare.name, bare.prompt, bare.order], ["ink", { zh: "ink", en: "ink" }, "Paint it in ink.", 100]);
+  const skill = userStyle("pixel-art.md", "---\nname: pixel-art\ndescription: Make pixel art\nlicense: MIT\n---\n# Pixel art\nUse coarse blocks.");
+  assert.deepEqual([skill.name.en, skill.about.zh, skill.prompt], ["pixel-art", "Make pixel art", "# Pixel art\nUse coarse blocks."]);
+  // written back: the header keeps every key, known ones first, and the body keeps its comments
+  const text = writeStyle({ ...skill.meta, order: 3 }, "<!-- mine -->\nUse coarse blocks.");
+  assert.equal(text, "---\nname: pixel-art\ndescription: Make pixel art\norder: 3\nlicense: MIT\n---\n\n<!-- mine -->\nUse coarse blocks.\n");
+  const back = parseStyle(text);
+  assert.deepEqual([back.meta.license, back.prompt, back.body], ["MIT", "Use coarse blocks.", "<!-- mine -->\nUse coarse blocks.\n"]);
+  assert.equal(writeStyle({ name: "a\nb" }, "x").split("\n")[1], "name: a b");   // a name cannot break the header
+  // ids for files brought in
+  assert.equal(freeId("Pixel Art!.md", []), "pixel-art");
+  assert.equal(freeId("pixel-art.md", ["pixel-art", "pixel-art-2"]), "pixel-art-3");
+  assert.equal(freeId("水彩.md", []), "style");
+  assert.equal(freeId("SKILL.md", ["skill"]), "skill-2");
 });

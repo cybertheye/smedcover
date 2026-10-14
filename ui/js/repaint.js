@@ -10,9 +10,9 @@
 //             {model, prompt, image: data URL, size: "WxH", response_format: "b64_json"} -> data[0].b64_json or .url
 //
 // The style comes from one of three sources: the current look (each look has a `repaint`
-// description, see style.js), a built-in style (a Markdown file in ui/repaint-styles/, see below),
-// or one of the user's own styles — a name and a description, kept in image-ai.json, which can
-// start as a copy of a built-in one.
+// description, see style.js), a built-in style (a Markdown file in ui/repaint-styles/), or one of
+// the user's own styles — Markdown files of the same form in the app data folder repaint-styles/,
+// which the user can also add to or edit outside the app (see below).
 import { LOOKS } from "./style.js";
 
 export const IMAGE_PROVIDERS = ["openai", "gemini", "seedream"];
@@ -22,39 +22,43 @@ export const IMAGE_DEFAULTS = {
   seedream: { baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seedream-5-0-lite-260128" },
 };
 const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
-export const MAX_STYLES = 50;
-/** A user style: {id, name, prompt}. */
-const normalizeStyle = (s, i) => ({ id: str(s && s.id, 40).replace(/[^\w-]/g, "") || `s${i}`, name: str(s && s.name, 40) || `#${i + 1}`, prompt: s && typeof s.prompt === "string" ? s.prompt.slice(0, 20000) : "" });
+export const MAX_STYLES = 200;
+const ID = /^[a-z0-9][a-z0-9-]*$/;
 
 /** The image model settings, as stored in image-ai.json. */
 export function normalizeImageAi(raw) {
   const a = raw && typeof raw === "object" ? raw : {};
   const secs = Math.round(Number(a.timeout));
-  const styles = [], seen = new Set();
-  for (const s of Array.isArray(a.styles) ? a.styles.slice(0, MAX_STYLES) : []) {
-    const n = normalizeStyle(s, styles.length);
-    if (seen.has(n.id)) n.id += "_" + styles.length;
-    seen.add(n.id); styles.push(n);
-  }
-  // before there were saved styles, one custom description was kept as `custom`
-  if (typeof a.custom === "string" && a.custom.trim() && !styles.length) styles.push({ id: "custom", name: "自定义", prompt: a.custom.slice(0, 20000) });
   let source = typeof a.source === "string" ? a.source : "look";
-  if (source === "custom") source = styles.length ? "my:" + styles[0].id : "look";
+  if (source === "custom") source = "my:custom";   // the one custom description of before (see legacyStyles)
   // the 8-bit style's earlier names: before styles were files, and while their names were their ids
   if (source === "pixel" || source === "preset:8-bit-pixel-editorial") source = "preset:pixel-editorial";
   // a built-in style is checked against the list once that has been read (see app.js)
-  if (!(source === "look" || /^preset:[a-z0-9-]+$/.test(source) || (source.startsWith("my:") && styles.some((s) => "my:" + s.id === source)))) source = "look";
+  // whether a built-in or own style is still there is checked once the lists are read (see app.js)
+  if (!(source === "look" || /^(preset|my):[a-z0-9][a-z0-9-]*$/.test(source))) source = "look";
   return {
     provider: IMAGE_PROVIDERS.includes(a.provider) ? a.provider : "openai",
     baseUrl: str(a.baseUrl, 400), token: str(a.token, 4000), model: str(a.model, 200),
     timeout: Number.isFinite(secs) && secs > 0 ? Math.min(1800, Math.max(30, secs)) : 300,
     proxy: str(a.proxy, 300),
-    source,                   // where the style comes from: "look", "preset:<id>" (a built-in style), or "my:<id>" (one of `styles`)
-    styles,                   // the user's own styles (a description may be long, e.g. a pasted skill)
+    source,                   // where the style comes from: "look", "preset:<id>" (a built-in style), or "my:<id>" (one of the user's)
     notes: str(a.notes, 600), // a word added to any source
   };
 }
 /** Whether enough is filled in to send a request. */
+/**
+ * The user's styles as image-ai.json kept them before they were files: [{id, name, prompt}], to be
+ * written out once. Both earlier forms: a list `styles`, and before that one text `custom`.
+ */
+export function legacyStyles(raw) {
+  const a = raw && typeof raw === "object" ? raw : {}, out = [];
+  for (const s of Array.isArray(a.styles) ? a.styles : []) {
+    const id = String((s && s.id) || "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+/, "");
+    if (s && typeof s.prompt === "string" && ID.test(id) && !out.some((o) => o.id === id)) out.push({ id, name: str(s.name, 60) || id, prompt: s.prompt });
+  }
+  if (!out.length && typeof a.custom === "string" && a.custom.trim()) out.push({ id: "custom", name: "自定义", prompt: a.custom });
+  return out;
+}
 export const imageReady = (cfg) => (!cfg.baseUrl || /^https?:\/\//i.test(cfg.baseUrl)) && !!cfg.model && !!cfg.token;   // an empty address means the service's own
 
 /** The full URL of the request, tolerating a base that already includes the path. */
@@ -203,7 +207,7 @@ export function readImageReply(provider, status, text) {
 // the list, ui/repaint-styles/index.json, before every build, and the app reads a style's prompt
 // only when it is wanted.
 
-export const STYLE_KEYS = ["name.zh", "name.en", "about.zh", "about.en", "order", "credit"];
+export const STYLE_KEYS = ["name", "name.zh", "name.en", "about", "about.zh", "about.en", "description", "order", "credit"];
 /**
  * A style file split into its header and its prompt: {meta, prompt, errors}. The header is the
  * lines between a first line "---" and the next "---", each "key: value".
@@ -218,11 +222,44 @@ export function parseStyle(md) {
       if (!line.trim() || line.trim().startsWith("#")) continue;
       const kv = line.match(/^\s*([\w.]+)\s*:\s*(.*?)\s*$/);
       if (!kv) { errors.push(`not "key: value": ${line.trim()}`); continue; }
-      if (!STYLE_KEYS.includes(kv[1])) { errors.push(`unknown key: ${kv[1]}`); continue; }
-      meta[kv[1]] = kv[2];
+      if (!STYLE_KEYS.includes(kv[1])) errors.push(`unknown key: ${kv[1]}`);
+      meta[kv[1]] = kv[2];   // kept even when unknown, so a file rewritten by the app loses nothing
     }
   } else errors.push('no header: the file must start with a "---" line');
-  return { meta, prompt: promptOf(body), errors };
+  return { meta, body: body.replace(/^\n+/, ""), prompt: promptOf(body), errors };
+}
+/** A style file's text from its header fields and its body (the prompt, comments and all). */
+export function writeStyle(meta, body) {
+  const keys = [...STYLE_KEYS.filter((k) => k in meta), ...Object.keys(meta).filter((k) => !STYLE_KEYS.includes(k))];
+  const head = keys.map((k) => `${k}: ${String(meta[k]).replace(/[\r\n]+/g, " ").trim()}`).join("\n");
+  return `---\n${head}\n---\n\n${String(body).replace(/\r\n?/g, "\n").trim()}\n`;
+}
+/** The names and description from a header: name.zh / name.en, falling back on name (and about on description). */
+const namesOf = (meta, fallback) => {
+  const name = { zh: meta["name.zh"] || meta.name || meta["name.en"] || fallback, en: meta["name.en"] || meta.name || meta["name.zh"] || fallback };
+  const zh = meta["about.zh"] || meta.about || meta.description || meta["about.en"], en = meta["about.en"] || meta.about || meta.description || meta["about.zh"];
+  return { name, about: zh || en ? { zh, en } : null };
+};
+
+/**
+ * One of the user's style files, read leniently — it may have been written by hand or come from
+ * elsewhere (a skill's SKILL.md): no header, or unknown keys, are fine; the file name stands in for
+ * a missing name. {id, file, order, name, about?, credit?, meta, body, prompt}
+ */
+export function userStyle(file, text) {
+  const id = file.replace(/\.md$/, ""), { meta, body, prompt } = parseStyle(text), { name, about } = namesOf(meta, id);
+  const order = Number.isFinite(Number(meta.order)) && meta.order !== undefined && meta.order !== "" ? Number(meta.order) : 100;
+  const st = { id, file, order, name, meta, body, prompt };
+  if (about) st.about = about;
+  if (meta.credit) st.credit = meta.credit;
+  return st;
+}
+/** An id for a style file brought in from elsewhere, from its file name, unlike any in `taken`. */
+export function freeId(filename, taken) {
+  const base = String(filename).replace(/\.[^.]+$/, "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "style";
+  let id = ID.test(base) ? base : "style-" + base, n = 2;
+  while (taken.includes(id)) id = `${base}-${n++}`;
+  return id;
 }
 /** The prompt in a style file's body: its text without <!-- comments -->, trimmed. */
 export const promptOf = (md) => String(md).replace(/<!--[\s\S]*?-->/g, "").replace(/\n{3,}/g, "\n\n").trim();
@@ -238,12 +275,12 @@ export function styleIndex(files, read) {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) { errors.push(`${file}: the file name must be lower-case letters, digits and hyphens, e.g. watercolour.md`); continue; }
     const { meta, prompt, errors: bad } = parseStyle(read(file));
     for (const e of bad) errors.push(`${file}: ${e}`);
-    if (!meta["name.zh"] || !meta["name.en"]) { errors.push(`${file}: name.zh and name.en are required`); continue; }
+    if (!(meta["name.zh"] && meta["name.en"]) && !meta.name) { errors.push(`${file}: name.zh and name.en are required (or one name)`); continue; }
     if (!prompt) { errors.push(`${file}: no prompt after the header`); continue; }
     const order = meta.order === undefined ? 100 : Number(meta.order);
     if (!Number.isFinite(order)) { errors.push(`${file}: order must be a number`); continue; }
-    const style = { id, file, order, name: { zh: meta["name.zh"], en: meta["name.en"] } };
-    if (meta["about.zh"] || meta["about.en"]) style.about = { zh: meta["about.zh"] || meta["about.en"], en: meta["about.en"] || meta["about.zh"] };
+    const { name, about } = namesOf(meta, id), style = { id, file, order, name };
+    if (about) style.about = about;
     if (meta.credit) style.credit = meta.credit;
     styles.push(style);
   }
