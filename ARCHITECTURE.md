@@ -127,8 +127,8 @@ A cover is an array of layers, bottom first.
 `normalizeLayers()` repairs a layer list: it drops unknown layers, puts back missing bound layers,
 keeps the background at the bottom and makes ids unique. A free layer may carry `name`, the name the
 user gave it in the layer list (`layerName()` prefers it; without one the name comes from the type and
-content). Every `.btn` in the interface dresses as the current look through `<html data-look>` (the
-`[data-look=…] .btn` rules in `index.html`).
+content). The two main buttons in the top bar (SURPRISE ME and Export) dress as the current look through
+`<html data-look>` (the `[data-look=…] .btn.cta` rules in `index.html`); all other buttons keep the default style.
 
 ### 4.1 Placement: one collage mapped to every size
 

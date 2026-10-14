@@ -117,7 +117,7 @@ tests/               不依赖 DOM 的模块的单元测试
 | 内置图层 | `bg` `accent` `graphic` `brand` `title` `tag` `catname` `frame` | 每张封面各有且仅有一个，内容来自别处（标题文字、频道的图形等），不能删除；`id` 就是类型名 |
 | 自由图层 | `asset` `text` `photo` | 用户添加的素材、文字和照片，可删除、可复制 |
 
-`normalizeLayers()` 负责修复图层列表：丢掉无法识别的层，补回缺失的内置图层，保证背景在最底，并让 `id` 唯一。自由图层可以带 `name`，即用户在图层列表里起的名字（`layerName()` 优先用它，没有时按类型和内容自动起名）。界面上所有 `.btn` 按钮按 `<html data-look>` 换上当前风格的样子（`index.html` 里的 `[data-look=…] .btn` 规则）。
+`normalizeLayers()` 负责修复图层列表：丢掉无法识别的层，补回缺失的内置图层，保证背景在最底，并让 `id` 唯一。自由图层可以带 `name`，即用户在图层列表里起的名字（`layerName()` 优先用它，没有时按类型和内容自动起名）。顶栏的「你看着办」和「导出」两个按钮按 `<html data-look>` 换上当前风格的样子（`index.html` 里的 `[data-look=…] .btn.cta` 规则），其余按钮保持默认样式。
 
 ### 4.1 位置：一处拼贴映射到所有尺寸
 

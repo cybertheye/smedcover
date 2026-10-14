@@ -29,27 +29,7 @@
   .btn.on{background:#fff;color:var(--ink);border-color:#fff}
   .btn.solid{background:#fff;color:var(--ink);border-color:#fff;box-shadow:4px 4px 0 var(--acc)}
   .btn.wide{width:100%;padding:11px}
-  /* Every button dresses to match the cover's look: <html data-look="…"> is set as the cover is drawn.
-     The ordinary ones lightly (line, corners, the filled button), the two main ones (.cta) fully. */
-  [data-look=cyber] .btn{border-width:1px;border-color:rgba(0,240,255,.45);clip-path:polygon(0 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%);letter-spacing:.03em}
-  [data-look=cyber] .btn:hover:not(:disabled){border-color:#00f0ff}
-  [data-look=cyber] .btn.on,[data-look=cyber] .btn.solid{background:var(--acc);border-color:var(--acc);color:#050508;box-shadow:none}
-  [data-look=riso] .btn{border-color:#4d6bd6}
-  [data-look=riso] .btn:hover:not(:disabled){border-color:#ff48b0}
-  [data-look=riso] .btn.on,[data-look=riso] .btn.solid{background:#f2ead8;border-color:#1e3ca5;color:#1e3ca5}
-  [data-look=riso] .btn.solid{box-shadow:4px 4px 0 #ff48b0}
-  [data-look=anime] .btn{border-radius:8px;border-color:#7d7194}
-  [data-look=anime] .btn.on,[data-look=anime] .btn.solid{background:#faf4e6;border-color:#2e243c;color:#2e243c}
-  [data-look=anime] .btn.solid{box-shadow:3px 4px 0 rgba(250,244,230,.35)}
-  [data-look=bluenote] .btn{border-width:1px;border-color:rgba(255,255,255,.3);letter-spacing:.04em}
-  [data-look=bluenote] .btn.on,[data-look=bluenote] .btn.solid{background:var(--acc);border-color:var(--acc);color:#121216;box-shadow:none}
-  [data-look=editorial] .btn{border-width:1px;border-color:rgba(246,243,236,.4);font-family:"Songti SC","STSong","SimSun",Georgia,serif;font-weight:700}
-  [data-look=editorial] .btn.on,[data-look=editorial] .btn.solid{background:#f6f3ec;border-color:#f6f3ec;color:#121216;box-shadow:none}
-  [data-look=editorial] .btn.solid{outline:3px double #f6f3ec;outline-offset:2px}
-  [data-look=songke] .btn{border-width:1px;border-color:rgba(236,224,196,.4);border-radius:2px;font-family:"Songti SC","STSong","SimSun",Georgia,serif;font-weight:700}
-  [data-look=songke] .btn.on,[data-look=songke] .btn.solid{background:#b02620;border-color:#ece0c4;color:#ece0c4;box-shadow:none}
-  [data-look=songke] .btn.solid{outline:2px solid #b02620}
-  .btn.cta{padding:8px 22px;font-size:15px;letter-spacing:.04em}
+  /* The two main buttons (你看着办 / SURPRISE ME, Export) dress to match the cover's look: <html data-look="…"> is set as the cover is drawn. */
   [data-look=cyber] .btn.cta{background:var(--acc);border-color:var(--acc);color:#050508;box-shadow:-4px 2px 0 #00f0ff,4px -2px 0 #ff003c;clip-path:polygon(-6px -6px,calc(100% + 6px) -6px,calc(100% + 6px) calc(100% - 12px),calc(100% - 12px) calc(100% + 6px),-6px calc(100% + 6px));font-family:"Bebas Neue",var(--ui);font-size:19px;letter-spacing:.1em;padding:5px 24px 4px}
   [data-look=riso] .btn.cta{background:#f2ead8;border-color:#1e3ca5;color:#1e3ca5;box-shadow:5px 5px 0 #ff48b0}
   [data-look=anime] .btn.cta{background:#faf4e6;border:3px solid #2e243c;color:#2e243c;border-radius:10px;box-shadow:0 0 0 3px #faf4e6,5px 6px 0 3px rgba(46,36,60,.5)}

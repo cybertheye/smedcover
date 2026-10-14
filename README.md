@@ -28,7 +28,7 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
   - Setup: **Brand**, **Sizes & export**, **AI**
 - **Centre** — the main canvas, and below it a thumbnail of every output size. Click one to show that size on the canvas.
 - **Right** (Edit only) — the layer list and the selected layer's properties.
-- **Top bar** — profile switcher, open and save project, undo and redo, SURPRISE ME (你看着办 in Chinese), export. Every button dresses to match the look of the current cover, those two the most.
+- **Top bar** — profile switcher, open and save project, undo and redo, SURPRISE ME (你看着办 in Chinese), export. Those last two buttons dress to match the look of the current cover.
 
 ## Quick start
 
