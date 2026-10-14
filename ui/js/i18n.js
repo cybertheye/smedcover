@@ -277,6 +277,7 @@ const STR = {
   "rep.src.new": ["＋ 新建风格…", "＋ New style…"],
   "rep.newName": ["我的风格 {0}", "My style {0}"],
   "rep.namePh": ["风格名称", "Style name"],
+  "rep.credit": ["出处：{0}", "Source: {0}"],
   "rep.peek": ["查看这段提示词", "See the prompt"],
   "rep.copy": ["复制为我的风格（可改名、改提示词）", "Copy into my styles (to rename and edit)"],
   "rep.copySuffix": ["（副本）", " (copy)"],

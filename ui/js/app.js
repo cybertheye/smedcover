@@ -650,6 +650,8 @@ function repaintBox() {
   return el("div", { class: "rep" }, head,
     select(sources, c.source, (v) => (v === "+" ? addStyle(t("rep.newName", c.styles.length + 1), "") : set("source", v, true))),
     preset && [
+      preset.about && el("div", { class: "about" }, preset.about[lang]),
+      preset.credit && el("div", { class: "hint" }, t("rep.credit", preset.credit)),
       el("details", { class: "peek", ontoggle: peek }, el("summary", {}, t("rep.peek")), el("pre", {})),
       el("button", { class: "btn wide", style: "margin-top:8px", onclick: async () => addStyle(preset.name[lang] + t("rep.copySuffix"), await styleText(preset).catch(() => "")) }, t("rep.copy"))],
     mine && [

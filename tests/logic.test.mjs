@@ -892,24 +892,30 @@ test("repaint: a refused optional setting is named, the connection check reads e
   assert.deepEqual(two.styles.map((s) => s.id), ["a", "b", "a_2"]);
   assert.equal(two.styles[1].name, "#2"); assert.equal(two.source, "my:b");
   assert.equal(R.normalizeImageAi({ source: "my:gone", styles: [] }).source, "look");
-  assert.equal(R.normalizeImageAi({ source: "pixel" }).source, "preset:8-bit-pixel-editorial");   // the name before styles were files
+  assert.equal(R.normalizeImageAi({ source: "pixel" }).source, "preset:pixel-editorial");                  // the 8-bit style's earlier names
+  assert.equal(R.normalizeImageAi({ source: "preset:8-bit-pixel-editorial" }).source, "preset:pixel-editorial");
   assert.equal(R.normalizeImageAi({ source: "preset:watercolour" }).source, "preset:watercolour");
   assert.equal(R.normalizeImageAi({ source: "preset:../x" }).source, "look");
 });
 
-test("repaint: built-in styles are Markdown files named 中文名_English name.md, listed in index.json", async () => {
+test("repaint: built-in styles are Markdown files with a header, named by their id, listed in index.json", async () => {
   const fs = await import("node:fs");
-  const { styleIndex, styleId, promptOf } = await import("../ui/js/repaint.js");
-  assert.equal(styleId("8-bit pixel editorial"), "8-bit-pixel-editorial");
-  assert.equal(styleId("Café  Noir!"), "cafe-noir");
-  assert.equal(promptOf("<!--\ncredit\n-->\n\nDraw it.\n<!-- note -->\n"), "Draw it.");
-  const { styles, errors } = styleIndex(["水彩_Watercolour.md", "无英文名.md", "_x.md", "空_Empty.md", "重复_watercolour!.md"], (f) => (f.startsWith("空") ? "<!-- only a comment -->" : "text"));
-  assert.deepEqual(styles, [{ id: "watercolour", file: "水彩_Watercolour.md", name: { zh: "水彩", en: "Watercolour" } }]);
-  assert.equal(errors.length, 4);   // no English half, no Chinese half, nothing but a comment, the same id twice
+  const { styleIndex, parseStyle } = await import("../ui/js/repaint.js");
+  const good = "---\nname.zh: 水彩\nname.en: Watercolour\n# a note\nabout.zh: 松动的水彩\norder: 5\n---\n\n<!-- credit -->\nPaint it in watercolour.\n";
+  assert.deepEqual(parseStyle(good), { meta: { "name.zh": "水彩", "name.en": "Watercolour", "about.zh": "松动的水彩", order: "5" }, prompt: "Paint it in watercolour.", errors: [] });
+  assert.equal(parseStyle("\uFEFF---\r\nname.zh: a\r\nname.en: b\r\n---\r\nX").prompt, "X");   // a BOM and Windows line ends
+  assert.deepEqual(parseStyle("just a prompt").errors, ['no header: the file must start with a "---" line']);
+  assert.deepEqual(parseStyle("---\nname.zh: a\nnmae.en: b\n---\nX").errors, ["unknown key: nmae.en"]);   // a typo is caught
+  const files = { "watercolour.md": good, "ink-wash.md": good.replace("order: 5", "order: 1").replace("Watercolour", "Ink wash"), "Bad Name.md": good,
+    "no-names.md": "---\nname.zh: 只有中文\n---\nX", "empty.md": "---\nname.zh: 空\nname.en: Empty\n---\n<!-- only a comment -->", "late.md": "---\nname.zh: 后\nname.en: Late\n---\nX" };
+  const { styles, errors } = styleIndex(Object.keys(files), (f) => files[f]);
+  assert.deepEqual(styles.map((x) => x.id), ["ink-wash", "watercolour", "late"]);   // by order (default 100), then id
+  assert.deepEqual(styles[1], { id: "watercolour", file: "watercolour.md", order: 5, name: { zh: "水彩", en: "Watercolour" }, about: { zh: "松动的水彩", en: "松动的水彩" } });
+  assert.equal(errors.length, 3);   // a file name that is not an id, a missing English name, nothing but a comment
   // every file in the folder is in the list, readable, and has a prompt
   const dir = new URL("../ui/repaint-styles/", import.meta.url), list = JSON.parse(fs.readFileSync(new URL("index.json", dir), "utf8"));
-  assert.deepEqual(list.map((s) => s.file).sort(), fs.readdirSync(dir).filter((f) => f.endsWith(".md")).sort());
-  for (const s of list) assert.ok(promptOf(fs.readFileSync(new URL(s.file, dir), "utf8")).length > 100, s.file);
-  const pixel = promptOf(fs.readFileSync(new URL("8-bit 像素编辑_8-bit pixel editorial.md", dir), "utf8"));
-  assert.ok(pixel.startsWith("Reinterpret the attached photo") && !pixel.includes("TwentyfiveBTea"));   // the credit stays in the file
+  assert.deepEqual(list.map((x) => x.file).sort(), fs.readdirSync(dir).filter((f) => f.endsWith(".md")).sort());
+  const pixel = parseStyle(fs.readFileSync(new URL("pixel-editorial.md", dir), "utf8"));
+  assert.deepEqual(pixel.errors, []);
+  assert.ok(pixel.prompt.startsWith("Reinterpret the attached photo") && pixel.prompt.length === 2538 && !pixel.prompt.includes("TwentyfiveBTea"));   // unchanged; the credit stays in the header
 });

@@ -1,6 +1,6 @@
-// Writes ui/repaint-styles/index.json: the list of built-in repaint styles, read from the file names
-// in that folder ("中文名_English name.md"). Runs before every build (see tauri.conf.json); `npm test`
-// fails if the list and the folder disagree. Usage: node scripts/repaint-styles.mjs [--check]
+// Writes ui/repaint-styles/index.json: the list of built-in repaint styles, one per .md file in that
+// folder, with the names and notes from each file's header (see ui/js/repaint.js). Runs before every
+// build (see tauri.conf.json); `npm test` fails if the list and the folder disagree. Usage: node scripts/repaint-styles.mjs [--check]
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

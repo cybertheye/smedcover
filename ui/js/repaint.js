@@ -40,7 +40,8 @@ export function normalizeImageAi(raw) {
   if (typeof a.custom === "string" && a.custom.trim() && !styles.length) styles.push({ id: "custom", name: "自定义", prompt: a.custom.slice(0, 20000) });
   let source = typeof a.source === "string" ? a.source : "look";
   if (source === "custom") source = styles.length ? "my:" + styles[0].id : "look";
-  if (source === "pixel") source = "preset:8-bit-pixel-editorial";   // the built-in style's name before styles were files
+  // the 8-bit style's earlier names: before styles were files, and while their names were their ids
+  if (source === "pixel" || source === "preset:8-bit-pixel-editorial") source = "preset:pixel-editorial";
   // a built-in style is checked against the list once that has been read (see app.js)
   if (!(source === "look" || /^preset:[a-z0-9-]+$/.test(source) || (source.startsWith("my:") && styles.some((s) => "my:" + s.id === source)))) source = "look";
   return {
@@ -185,35 +186,70 @@ export function readImageReply(provider, status, text) {
 
 // ---------- what to ask for
 
-// ---------- built-in styles: one Markdown file each in ui/repaint-styles/, named "中文名_English name.md"
+// ---------- built-in styles: one Markdown file each in ui/repaint-styles/, named by its id
 //
-// The file is the prompt; <!-- comments --> in it (credits, notes) are not sent. The list of files is
-// ui/repaint-styles/index.json, written by scripts/repaint-styles.mjs before every build, since a
-// bundled app cannot list a folder. A style's id comes from its English name and is what settings
-// remember, so renaming the English half makes it a different style.
+//   pixel-editorial.md
+//   ---
+//   name.zh: 8-bit 像素编辑          required
+//   name.en: 8-bit pixel editorial   required
+//   about.zh: …   about.en: …        optional: shown under the menu
+//   order: 10                        optional: place in the menu, low first (default 100)
+//   credit: …                        optional: where it comes from, shown under the menu
+//   ---
+//   the prompt; <!-- comments --> in it are not sent
+//
+// The file name (lower-case letters, digits and hyphens) is the id that settings remember, so the
+// names can change freely. A bundled app cannot list a folder: scripts/repaint-styles.mjs writes
+// the list, ui/repaint-styles/index.json, before every build, and the app reads a style's prompt
+// only when it is wanted.
 
-/** A style's id from its English name: "8-bit pixel editorial" -> "8-bit-pixel-editorial". */
-export const styleId = (en) => en.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+export const STYLE_KEYS = ["name.zh", "name.en", "about.zh", "about.en", "order", "credit"];
 /**
- * The index entries for a folder's .md files: {styles: [{id, file, name: {zh, en}}], errors}.
- * `read(file)` returns a file's text, to make sure none is empty. Sorted by English name.
+ * A style file split into its header and its prompt: {meta, prompt, errors}. The header is the
+ * lines between a first line "---" and the next "---", each "key: value".
  */
-export function styleIndex(files, read = () => "x") {
-  const styles = [], errors = [], seen = new Map();
+export function parseStyle(md) {
+  const text = String(md).replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n"), meta = {}, errors = [];
+  let body = text;
+  const m = text.match(/^---\n([\s\S]*?)\n---[ \t]*(?:\n|$)/);
+  if (m) {
+    body = text.slice(m[0].length);
+    for (const line of m[1].split("\n")) {
+      if (!line.trim() || line.trim().startsWith("#")) continue;
+      const kv = line.match(/^\s*([\w.]+)\s*:\s*(.*?)\s*$/);
+      if (!kv) { errors.push(`not "key: value": ${line.trim()}`); continue; }
+      if (!STYLE_KEYS.includes(kv[1])) { errors.push(`unknown key: ${kv[1]}`); continue; }
+      meta[kv[1]] = kv[2];
+    }
+  } else errors.push('no header: the file must start with a "---" line');
+  return { meta, prompt: promptOf(body), errors };
+}
+/** The prompt in a style file's body: its text without <!-- comments -->, trimmed. */
+export const promptOf = (md) => String(md).replace(/<!--[\s\S]*?-->/g, "").replace(/\n{3,}/g, "\n\n").trim();
+
+/**
+ * The index entries for a folder's .md files: {styles: [{id, file, name, about?, credit?}], errors}.
+ * `read(file)` returns a file's text. In menu order: by `order`, then by id.
+ */
+export function styleIndex(files, read) {
+  const styles = [], errors = [];
   for (const file of files) {
-    const m = file.match(/^([^_]+)_(.+)\.md$/);
-    if (!m || !m[1].trim() || !m[2].trim()) { errors.push(`${file}: the name must be 中文名_English name.md`); continue; }
-    const name = { zh: m[1].trim(), en: m[2].trim() }, id = styleId(name.en);
-    if (!id) { errors.push(`${file}: the English name needs a letter or a digit`); continue; }
-    if (seen.has(id)) { errors.push(`${file}: the same id (${id}) as ${seen.get(id)}`); continue; }
-    if (!promptOf(read(file))) { errors.push(`${file}: no prompt in it`); continue; }
-    seen.set(id, file); styles.push({ id, file, name });
+    const id = file.replace(/\.md$/, "");
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) { errors.push(`${file}: the file name must be lower-case letters, digits and hyphens, e.g. watercolour.md`); continue; }
+    const { meta, prompt, errors: bad } = parseStyle(read(file));
+    for (const e of bad) errors.push(`${file}: ${e}`);
+    if (!meta["name.zh"] || !meta["name.en"]) { errors.push(`${file}: name.zh and name.en are required`); continue; }
+    if (!prompt) { errors.push(`${file}: no prompt after the header`); continue; }
+    const order = meta.order === undefined ? 100 : Number(meta.order);
+    if (!Number.isFinite(order)) { errors.push(`${file}: order must be a number`); continue; }
+    const style = { id, file, order, name: { zh: meta["name.zh"], en: meta["name.en"] } };
+    if (meta["about.zh"] || meta["about.en"]) style.about = { zh: meta["about.zh"] || meta["about.en"], en: meta["about.en"] || meta["about.zh"] };
+    if (meta.credit) style.credit = meta.credit;
+    styles.push(style);
   }
-  styles.sort((a, b) => a.name.en.localeCompare(b.name.en));
+  styles.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   return { styles, errors };
 }
-/** The prompt in a style file: its text without <!-- comments -->, trimmed. */
-export const promptOf = (md) => String(md).replace(/<!--[\s\S]*?-->/g, "").replace(/\n{3,}/g, "\n\n").trim();
 
 const BASE = new URL("../repaint-styles/", import.meta.url);
 let listing = null;
@@ -227,7 +263,7 @@ export async function styleText(style) {
   if (!texts.has(style.id)) {
     const r = await fetch(new URL(encodeURIComponent(style.file), BASE));
     if (!r.ok) throw new Error(`${style.file}: HTTP ${r.status}`);
-    texts.set(style.id, promptOf(await r.text()));
+    texts.set(style.id, parseStyle(await r.text()).prompt);
   }
   return texts.get(style.id);
 }
