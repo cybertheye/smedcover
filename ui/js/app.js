@@ -264,6 +264,8 @@ function removeGroup() {
   S.picked = []; S.layerId = "bg";
   touch({ cover: true, side: true, panel: onCoverTab() });   // the photos listed in the Cover tab follow
 }
+/** While a slider of one layer is dragged, only that layer is repainted (as in a drag on the canvas); the whole cover once it stops. */
+function holdLive(id) { goLive(id); later("live", 300, endLive); }
 /** Applies a placement edit to a layer in the current scope, then redraws. */
 function edit(L, patch) { adjust(L, frame(), S.settings.scope, patch); touch({ cover: true }); }
 function addLayer(L) {
@@ -1423,7 +1425,8 @@ function placementControls(L) {
  * A headline's outline and shadow sliders. Not every text effect draws them (the flat looks' plain
  * lettering has neither): a slider the effect would ignore is shown greyed, with the reason.
  */
-function titleLines(L, set) {
+function titleLines(L, set0) {
+  const set = (k, v) => { holdLive(L.id); set0(k, v); };
   const use = effectUses(L.fx), name = (EFFECTS[use.id] || LOOKS[use.id]).name[getLang()];
   const line = (k, key) => (use[k]
     ? slider(key, 0, 2, 0.05, L[k], times, (v) => set(k, v))
@@ -1452,7 +1455,7 @@ function inkControl(L, key, labelKey, shown) {
   // a text layer of before may still be in the channel colour (color "accent"): choosing a colour, or automatic, ends that
   const old = key === "ink" && L.color === "accent", own = !!L[key] || old;
   return el("div", { class: "ink" }, el("span", {}, t(labelKey)),
-    el("input", { type: "color", value: L[key] || (old ? cat().color : shown), oninput: (e) => { L[key] = e.target.value; if (key === "ink") delete L.color; touch({ cover: true }); later("side", 600, renderSide); } }),
+    el("input", { type: "color", value: L[key] || (old ? cat().color : shown), oninput: (e) => { holdLive(L.id); L[key] = e.target.value; if (key === "ink") delete L.color; touch({ cover: true }); later("side", 600, renderSide); } }),
     el("button", { class: "btn", disabled: !own, title: t("props.inkAutoHint"), onclick: () => { delete L[key]; if (key === "ink") delete L.color; touch({ cover: true, side: true }); } }, t(own ? "props.inkAuto" : "props.inkIsAuto")));
 }
 /**
@@ -1493,17 +1496,17 @@ function photoControls(L, set) {
     L.of ? el("div", { class: "hint", style: "margin-top:0" }, t("props.copyHint", base ? layerName(base) : "—"))
       : [check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
          el("button", { class: "btn wide", style: "margin-top:8px", onclick: replace }, t("props.replacePhoto"))],
-    slider("props.blur", 0, 80, 1, L.blur, px, (v) => set("blur", v)),
-    slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => set("dim", v)),
+    slider("props.blur", 0, 80, 1, L.blur, px, (v) => { holdLive(L.id); set("blur", v); }),
+    slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => { holdLive(L.id); set("dim", v); }),
     check("props.treat", L.treat, (v) => set("treat", v)),
     canCut()
       ? el("button", { class: "btn wide", style: "margin-top:10px", disabled: CUT.busy, onclick: () => cut(!L.cut) }, t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut"))
       : el("div", { class: "hint" }, t("cut.onlyMac")),
     !L.of && canCut() && cutBox(L),
     CUT.error && el("div", { class: "hint err" }, CUT.error),
-    slider("props.outline", 0, 40, 1, L.outline, px, (v) => set("outline", v)),
+    slider("props.outline", 0, 40, 1, L.outline, px, (v) => { holdLive(L.id); set("outline", v); }),
     inkControl(L, "ink", "props.outlineInk", "#ffffff"),
-    slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => set("shadow", v)),
+    slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => { holdLive(L.id); set("shadow", v); }),
     el("div", { class: "hint" }, t(L.of ? "props.copyMore" : L.fill ? "props.fillHint" : "props.printHint")),
   ];
 }
@@ -1552,7 +1555,7 @@ function renderSide() {
       el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => selectLayer("bg") }, t("props.groupEnd")))
     : L ? el("div", { class: "box" }, el("label", { class: "cap" }, `${t("props.title")} · ${layerName(L)}`),
       typeControls(L), placementControls(L),
-      L.type !== "bg" && slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { goLive(L.id); later("live", 300, endLive); L.o = v; touch({ cover: true }); }),
+      L.type !== "bg" && slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { holdLive(L.id); L.o = v; touch({ cover: true }); }),
       free && catsControl(L))
       : el("div", { class: "hint" }, t("layers.none")));
   side.scrollTop = y;

@@ -311,7 +311,7 @@ const PAINT = {
     if (L.cut && !mask) return null;                     // cut out, but not yet: nothing to show
     const [nw, nh] = sizeOf(im), { w, h } = env, M = ctx.getTransform ? ctx.getTransform() : null;
     // the frame: where the photo's rectangle is, in the frame's units
-    let frame, rect, hit;
+    let frame, rect, hit, F = M && new DOMMatrix(M);   // F: the frame's transform, to find where the photo lands on the canvas
     if (base.fill) {
       const a = base.t.all, b = base.t.by[env.key] || { dx: 0, dy: 0, s: 1 };
       rect = photoRect(im, w, h, { dx: (a.x - 0.5) * w + b.dx, dy: (a.y - 0.5) * h + b.dy, s: a.s * b.s });
@@ -321,6 +321,7 @@ const PAINT = {
       const bt = base === L ? tr : env.resolve(base), long = 1000 * bt.s, iw = nw >= nh ? long : (long * nw) / nh, ih = nw >= nh ? (long * nh) / nw : long;
       rect = { x: -iw / 2, y: -ih / 2, iw, ih };
       frame = (c) => { c.translate(bt.cx, bt.cy); c.rotate(bt.r * RAD); c.scale(bt.kx, bt.ky); };
+      if (F) F.translateSelf(bt.cx, bt.cy).rotateSelf(bt.r).scaleSelf(bt.kx, bt.ky);
       hit = { cx: bt.cx, cy: bt.cy, hw: (iw / 2) * bt.kx, hh: (ih / 2) * bt.ky, r: bt.r };
     }
     if (L.of) hit = null;   // a copy catches no clicks: they go through to what is under it
@@ -331,7 +332,7 @@ const PAINT = {
     const costly = L.cut || L.outline > 0 || L.shadow > 0;
     const stamp = [W, H, L.cut, L.outline, L.shadow, L.ink, L.blur, L.dim, L.treat, base.fill, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), base.fill ? base.t.all.s : `${tr.s}|${tr.r}|${tr.kx}|${tr.ky}`].join("|");
     const at = base.fill ? [rect.x, rect.y] : [hit.cx, hit.cy], keep = PHOTO.slides.get(L.id);
-    if (costly && isFast() && keep && keep.stamp === stamp) { blit(keep.img, (at[0] - keep.at[0]) * M.a, (at[1] - keep.at[1]) * M.d); return hit; }
+    if (costly && isFast() && keep && keep.stamp === stamp) { blit(keep.img, keep.bx + (at[0] - keep.at[0]) * M.a, keep.by + (at[1] - keep.at[1]) * M.d); return hit; }
     const inFrame = (c, fn) => { c.save(); frame(c); fn(c); c.restore(); };
     const treat = (c) => {   // the look paints on the whole canvas (its washes cover it); the photo itself goes in its frame
       const draw = (grey = 0) => inFrame(c, (x) => drawPhotoAt(x, im, rect.x, rect.y, rect.iw, rect.ih, L.blur, env.hiRes, grey));
@@ -344,24 +345,32 @@ const PAINT = {
       ctx.restore();
       return hit;
     }
-    const body = sheet(1, W, H, M);
+    // The work canvases cover only where the photo can reach — its rectangle, grown by the outline and
+    // the shadow — not the whole canvas: compositing a canvas costs every pixel of it.
+    const reach = (L.outline > 0 ? L.outline : 0) + (L.shadow > 0 ? w * 0.03 : 0) + 4, k = 1 / Math.max(0.05, Math.min(Math.abs(base.fill ? 1 : tr.kx), Math.abs(base.fill ? 1 : tr.ky)));
+    const corners = [[rect.x - reach * k, rect.y - reach * k], [rect.x + rect.iw + reach * k, rect.y - reach * k], [rect.x + rect.iw + reach * k, rect.y + rect.ih + reach * k], [rect.x - reach * k, rect.y + rect.ih + reach * k]].map(([x, y]) => F.transformPoint({ x, y }));
+    const bx = Math.max(0, Math.floor(Math.min(...corners.map((p) => p.x)))), by = Math.max(0, Math.floor(Math.min(...corners.map((p) => p.y))));
+    const bw = Math.min(W, Math.ceil(Math.max(...corners.map((p) => p.x)))) - bx, bh = Math.min(H, Math.ceil(Math.max(...corners.map((p) => p.y)))) - by;
+    if (bw <= 0 || bh <= 0) return hit;   // nothing of it on the canvas
+    const Mb = new DOMMatrix().translateSelf(-bx, -by).multiplySelf(M);
+    const body = sheet(1, bw, bh, Mb);
     treat(body);
     inFrame(body, (c) => {   // kept to the photo's rectangle, or to its subject
       c.globalCompositeOperation = "destination-in";
       if (mask) c.drawImage(mask, rect.x, rect.y, rect.iw, rect.ih); else { c.fillStyle = "#000"; c.fillRect(rect.x, rect.y, rect.iw, rect.ih); }
     });
-    if (!costly) { blit(body.canvas); return hit; }   // cut out, nothing more
+    if (!costly) { blit(body.canvas, bx, by); return hit; }   // cut out, nothing more
     // shadow and outline from the shape, made once at the photo's scale (see silhouette())
-    const out = sheet(0, W, H, M), f = rect.iw / nw, shape = mask || plainShape(rec, nw, nh);
+    const out = sheet(0, bw, bh, Mb), f = rect.iw / nw, shape = mask || plainShape(rec, nw, nh);
     const lay = (sil, ox = 0, oy = 0, alpha = 1) => inFrame(out, (o) => { o.globalAlpha = alpha; o.drawImage(sil.c, rect.x - sil.p * f + ox, rect.y - sil.p * f + oy, sil.c.width * sil.k * f, sil.c.height * sil.k * f); });
     if (L.shadow > 0) { const sil = silhouette(shape, 0, "#07070c"), d = w * 0.006 / Math.max(0.2, Math.abs(base.fill ? 1 : tr.kx)); for (let i = 1; i <= 4; i++) lay(sil, d * i, d * i * 1.2, L.shadow * 0.22); }
     if (L.outline > 0) lay(silhouette(shape, L.outline / f, L.ink || "#ffffff"));
     out.save(); out.setTransform(1, 0, 0, 1, 0, 0); out.drawImage(body.canvas, 0, 0); out.restore();
-    blit(out.canvas);
+    blit(out.canvas, bx, by);
     if (isFast()) {   // kept for the frames to come (a copy: the work canvases are reused)
-      const img = keep && keep.img.width === W && keep.img.height === H ? keep.img : Object.assign(document.createElement("canvas"), { width: W, height: H });
-      const k = img.getContext("2d"); k.clearRect(0, 0, W, H); k.drawImage(out.canvas, 0, 0);
-      PHOTO.slides.set(L.id, { stamp, img, at });
+      const img = keep && keep.img.width === bw && keep.img.height === bh ? keep.img : Object.assign(document.createElement("canvas"), { width: bw, height: bh });
+      const g = img.getContext("2d"); g.clearRect(0, 0, bw, bh); g.drawImage(out.canvas, 0, 0);
+      PHOTO.slides.set(L.id, { stamp, img, at, bx, by });
     } else PHOTO.slides.delete(L.id);
     return hit;
   },
@@ -476,10 +485,11 @@ function plainShape(rec, w, h) {
  */
 const SILS = new WeakMap();
 function silhouette(shape, grow, colour) {
-  const key = `${grow.toFixed(1)}|${colour}`, cache = SILS.get(shape) || new Map();
+  const max = isFast() ? 512 : 1024;   // while a slider or the layer is dragged, a coarser one is made (and kept) for each step
+  const key = `${grow.toFixed(1)}|${colour}|${max}`, cache = SILS.get(shape) || new Map();
   SILS.set(shape, cache);
   if (cache.has(key)) return cache.get(key);
-  const [W, H] = sizeOf(shape), K = Math.min(1, 1024 / Math.max(W, H));
+  const [W, H] = sizeOf(shape), K = Math.min(1, max / Math.max(W, H));
   const g = grow * K, p = Math.ceil(g) + 2, c = document.createElement("canvas");
   c.width = Math.ceil(W * K) + 2 * p; c.height = Math.ceil(H * K) + 2 * p;
   const x = c.getContext("2d"), n = g > 0 ? Math.min(48, 16 + Math.round(g)) : 1;
@@ -487,7 +497,7 @@ function silhouette(shape, grow, colour) {
   if (g > 0) x.drawImage(shape, p, p, W * K, H * K);
   x.globalCompositeOperation = "source-in"; x.fillStyle = colour; x.fillRect(0, 0, c.width, c.height);
   const sil = { c, p: p / K, k: 1 / K };
-  if (cache.size > 24) cache.clear();
+  if (cache.size > 48) cache.clear();
   cache.set(key, sil);
   return sil;
 }
