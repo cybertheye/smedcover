@@ -10,7 +10,8 @@
 //             {model, prompt, image: data URL, size: "WxH", response_format: "b64_json"} -> data[0].b64_json or .url
 //
 // The style comes from one of three sources: the current look (each look has a `repaint`
-// description, see style.js), a preset bundled here, or text the user writes or pastes.
+// description, see style.js), a preset bundled here (REPAINT_PRESETS), or one of the user's own
+// styles — a name and a description, kept in image-ai.json, which can start as a copy of a preset.
 import { LOOKS } from "./style.js";
 
 export const IMAGE_PROVIDERS = ["openai", "gemini", "seedream"];
@@ -19,21 +20,34 @@ export const IMAGE_DEFAULTS = {
   gemini: { baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-3.1-flash-image" },
   seedream: { baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seedream-5-0-lite-260128" },
 };
-export const REPAINT_SOURCES = ["look", "pixel", "custom"];
 const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+export const MAX_STYLES = 50;
+/** A user style: {id, name, prompt}. */
+const normalizeStyle = (s, i) => ({ id: str(s && s.id, 40).replace(/[^\w-]/g, "") || `s${i}`, name: str(s && s.name, 40) || `#${i + 1}`, prompt: s && typeof s.prompt === "string" ? s.prompt.slice(0, 20000) : "" });
 
 /** The image model settings, as stored in image-ai.json. */
 export function normalizeImageAi(raw) {
   const a = raw && typeof raw === "object" ? raw : {};
   const secs = Math.round(Number(a.timeout));
+  const styles = [], seen = new Set();
+  for (const s of Array.isArray(a.styles) ? a.styles.slice(0, MAX_STYLES) : []) {
+    const n = normalizeStyle(s, styles.length);
+    if (seen.has(n.id)) n.id += "_" + styles.length;
+    seen.add(n.id); styles.push(n);
+  }
+  // before there were saved styles, one custom description was kept as `custom`
+  if (typeof a.custom === "string" && a.custom.trim() && !styles.length) styles.push({ id: "custom", name: "自定义", prompt: a.custom.slice(0, 20000) });
+  let source = typeof a.source === "string" ? a.source : "look";
+  if (source === "custom") source = styles.length ? "my:" + styles[0].id : "look";
+  if (!(source === "look" || REPAINT_PRESETS[source] || (source.startsWith("my:") && styles.some((s) => "my:" + s.id === source)))) source = "look";
   return {
     provider: IMAGE_PROVIDERS.includes(a.provider) ? a.provider : "openai",
     baseUrl: str(a.baseUrl, 400), token: str(a.token, 4000), model: str(a.model, 200),
     timeout: Number.isFinite(secs) && secs > 0 ? Math.min(1800, Math.max(30, secs)) : 300,
     proxy: str(a.proxy, 300),
-    source: REPAINT_SOURCES.includes(a.source) ? a.source : "look",   // where the style comes from
-    custom: typeof a.custom === "string" ? a.custom.slice(0, 20000) : "",   // the user's own description (may be long, e.g. a pasted skill)
-    notes: str(a.notes, 600),                                                // a word added to any source
+    source,                   // where the style comes from: "look", a preset id, or "my:<id>" for one of `styles`
+    styles,                   // the user's own styles (a description may be long, e.g. a pasted skill)
+    notes: str(a.notes, 600), // a word added to any source
   };
 }
 /** Whether enough is filled in to send a request. */
@@ -83,9 +97,64 @@ export function buildImageRequest(cfg, prompt, image, w, h) {
   }
   const headers = { "content-type": "application/json", authorization: `Bearer ${cfg.token}` };
   if (cfg.provider === "seedream") {
-    return { url, headers, body: { model: cfg.model, prompt, image: dataUrl, size, sequential_image_generation: "disabled", response_format: "b64_json", watermark: false } };
+    return { url, headers, body: { model: cfg.model, prompt, image: dataUrl, size, response_format: "b64_json", watermark: false } };
   }
   return { url, headers, body: { model: cfg.model, prompt, images: [{ image_url: dataUrl }], size, n: 1 } };
+}
+
+// Settings that are only wishes: a model that does not take one says so, and the request goes again without it.
+const OPTIONAL = ["size", "response_format", "watermark", "n", "output_format", "sequential_image_generation", "generationConfig"];
+/** The optional setting a 400 reply objects to, if it names one that `body` has; else null. */
+export function refusedParam(status, text, body) {
+  if (status !== 400) return null;
+  const m = String(text).match(/param(?:eter)?s?:?\s*[`'"]([\w.]+)[`'"]/i) || String(text).match(/unknown (?:parameter|name|field)[^`'"\w]*[`'"]?([\w.]+)/i);
+  const key = m && m[1].split(".")[0];
+  return key && OPTIONAL.includes(key) && key in body ? key : null;
+}
+
+/**
+ * A request that checks the key and the model without making a picture (nothing is charged):
+ *   openai     GET {base}/models/{model} (and, if a compatible service has no such path, GET {base}/models)
+ *   gemini     GET {base}/models/{model}
+ *   seedream   a generation with an empty prompt, which is refused before anything is drawn: the
+ *              refusal says whether the key was accepted.
+ */
+export function imageCheck(cfg, list = false) {
+  const base = (cfg.baseUrl || IMAGE_DEFAULTS[cfg.provider].baseUrl).replace(/\/+$/, "");
+  if (cfg.provider === "gemini") {
+    const root = base.replace(/\/models\/.*$/, "");
+    return { method: "GET", url: `${/\/v1(beta)?$/.test(root) ? root : root + "/v1beta"}/models/${encodeURIComponent(cfg.model)}`, headers: { "x-goog-api-key": cfg.token } };
+  }
+  const auth = { authorization: `Bearer ${cfg.token}` };
+  if (cfg.provider === "seedream") return { method: "POST", url: imageEndpoint(cfg), headers: { "content-type": "application/json", ...auth }, body: { model: cfg.model, prompt: "" } };
+  const root = base.replace(/\/images\/edits$/, "");
+  return { method: "GET", url: list ? `${root}/models` : `${root}/models/${encodeURIComponent(cfg.model)}`, headers: auth };
+}
+/**
+ * What a check's reply means: {ok: true | false | null, key, detail}, `key` naming the message
+ * (img.check.*); ok null when it cannot be told. {again: true} asks for the model list next (openai).
+ */
+export function readImageCheck(cfg, status, text, list = false) {
+  let j = null;
+  try { j = JSON.parse(text); } catch (e) { /* not JSON */ }
+  const said = String((j && j.error && (j.error.message || j.error.code)) || (j && j.message) || text || "").slice(0, 240);
+  if (status === 401 || status === 403 || /api[_ ]?key|unauthori[sz]ed|authenticat|invalid.*key/i.test(said) && status >= 400 && status < 500 && !/prompt/i.test(said)) return { ok: false, key: "auth", detail: said };
+  if (cfg.provider === "seedream") {
+    if (status === 404 || /model|endpoint/i.test(said) && /not ?found|not exist|invalid|不存在/i.test(said)) return { ok: false, key: "model", detail: said };
+    if (status === 400 && /prompt/i.test(said)) return { ok: true, key: "okSeedream" };
+    if (status >= 200 && status < 300) return { ok: true, key: "ok" };
+    return { ok: false, key: "other", detail: `HTTP ${status}: ${said}` };
+  }
+  if (status >= 200 && status < 300) {
+    if (cfg.provider === "openai" && list) {
+      const ids = (j && Array.isArray(j.data) ? j.data : []).map((m) => m && m.id);
+      return ids.includes(cfg.model) ? { ok: true, key: "ok" } : { ok: false, key: "notListed" };
+    }
+    if (cfg.provider === "gemini" && j && Array.isArray(j.supportedGenerationMethods) && !j.supportedGenerationMethods.includes("generateContent")) return { ok: false, key: "model", detail: said };
+    return { ok: true, key: "ok" };
+  }
+  if (status === 404) return cfg.provider === "openai" && !list ? { again: true } : list ? { ok: null, key: "noList" } : { ok: false, key: "model", detail: said };
+  return { ok: false, key: "other", detail: `HTTP ${status}: ${said}` };
 }
 
 /** What came back: {image: {mime, data}}, {url} (a picture to download), or {error}. */
@@ -141,7 +210,8 @@ const KEEP = "Keep the photograph's composition: the same framing, the main subj
 
 /**
  * The prompt for a repaint.
- *   source   "look" (the current look's description, in the channel colour), a preset id, or "custom"
+ *   source   "look" (the current look's description, in the channel colour), a preset id, or
+ *            "custom" with the description in `custom` (one of the user's own styles)
  */
 export function repaintPrompt({ source = "look", look = "cel", color = "#ffd60a", custom = "", notes = "" } = {}) {
   let body;

@@ -593,12 +593,27 @@ fn post_json(
     timeout_secs: u64,
     cap: u64,
 ) -> Res<AiReply> {
+    send(url, "POST", headers, body, proxy, timeout_secs, cap)
+}
+
+/// Sends a request — a POST with a body, or a GET (`method` "GET", the body ignored) — and returns
+/// the status and the reply as they are, error replies included.
+fn send(
+    url: &str,
+    method: &str,
+    headers: &[(String, String)],
+    body: &str,
+    proxy: &str,
+    timeout_secs: u64,
+    cap: u64,
+) -> Res<AiReply> {
     let agent = agent_for(url, proxy, timeout_secs)?;
-    let mut request = agent.post(url);
+    let get = method.eq_ignore_ascii_case("GET");
+    let mut request = if get { agent.get(url) } else { agent.post(url) };
     for (name, value) in headers {
         request = request.set(name, value);
     }
-    match request.send_string(body) {
+    match if get { request.call() } else { request.send_string(body) } {
         Ok(response) => Ok(AiReply {
             status: response.status(),
             text: read_capped(response, cap)?,
@@ -658,7 +673,8 @@ async fn fetch_image(url: String, proxy: Option<String>, timeout: Option<u64>) -
 
 /// Sends one request to an AI model: an asset to generate, or a photo to repaint. The web view builds
 /// the request (see `ui/js/ai.js` and `ui/js/repaint.js`); sending it from here avoids the
-/// cross-origin limits a web view has. `image` allows the much bigger reply a picture makes.
+/// cross-origin limits a web view has. `image` allows the much bigger reply a picture makes; `method`
+/// "GET" asks without a body (checking a key and a model).
 #[tauri::command]
 async fn ai_request(
     url: String,
@@ -667,12 +683,14 @@ async fn ai_request(
     proxy: Option<String>,
     timeout: Option<u64>,
     image: Option<bool>,
+    method: Option<String>,
 ) -> Res<AiReply> {
     let cap = if image.unwrap_or(false) { AI_MAX_IMAGE_REPLY } else { AI_MAX_REPLY };
     // a reply can take minutes: wait for it on the blocking pool, not on a runtime worker
     tauri::async_runtime::spawn_blocking(move || {
-        post_json(
+        send(
             &url,
+            method.as_deref().unwrap_or("POST"),
             &headers,
             &body,
             proxy.as_deref().unwrap_or(""),
@@ -920,6 +938,16 @@ mod tests {
                 assert!(img.data.starts_with("iVBORw0KGgo"));
             }
         }
+    }
+
+    #[test]
+    fn send_can_ask_with_get() {
+        let (url, server) = serve_once("200 OK", r#"{"id":"gpt-image-2"}"#);
+        let reply = send(&url, "GET", &[("authorization".into(), "Bearer k".into())], "ignored", "", 20, AI_MAX_REPLY).unwrap();
+        assert_eq!(reply.text, r#"{"id":"gpt-image-2"}"#);
+        let seen = server.join().unwrap().to_ascii_lowercase();
+        assert!(seen.starts_with("get /v1/chat/completions"), "{seen}");
+        assert!(!seen.contains("ignored"));
     }
 
     #[test]

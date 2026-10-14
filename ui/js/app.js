@@ -18,7 +18,7 @@ import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, effectUses } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams } from "./style.js";
-import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, REPAINT_PRESETS, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, repaintPrompt } from "./repaint.js";
+import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, REPAINT_PRESETS, MAX_STYLES, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 
 const $ = (id) => document.getElementById(id);
@@ -543,7 +543,7 @@ function assetsTab() {
 }
 // ---------- AI-generated assets
 // ---------- repainting the background photo with an image model (see repaint.js)
-const REP = { busy: false, job: 0, since: 0, error: "", result: null };   // result: {src, w, h} waiting to be used or dropped
+const REP = { busy: false, job: 0, since: 0, error: "", result: null, test: null, confirmDrop: null };   // test: the image model's connection check   // result: {src, w, h} waiting to be used or dropped
 const onCoverTab = () => S.mode === "edit" && S.tab.edit === "cover";
 const repBusyText = () => t("rep.busy", Math.max(0, Math.round((Date.now() - REP.since) / 1000)));
 /** A copy of a picture no longer than `max` on its longer side, as JPEG: {mime, data, url, w, h}. */
@@ -558,12 +558,26 @@ function shrink(im, max, q = 0.9) {
   return { mime: "image/jpeg", data: url.slice(url.indexOf(",") + 1), url, w: cv.width, h: cv.height };
 }
 /** Sends a photo and a prompt to the image model and returns the new picture: {src, w, h}. */
-async function imageCall(cfg, prompt, pic) {
-  const req = buildImageRequest(cfg, prompt, pic, pic.w, pic.h), body = JSON.stringify(req.body);
-  const reply = native
-    ? await invoke("ai_request", { url: req.url, headers: Object.entries(req.headers), body, proxy: cfg.proxy || null, timeout: cfg.timeout, image: true })
+/** Sends one request to the image service: {status, text}. `method` "GET" sends no body. */
+async function imageSend(cfg, req, image = true) {
+  const body = req.body ? JSON.stringify(req.body) : "", method = req.method || "POST";
+  return native
+    ? await invoke("ai_request", { url: req.url, headers: Object.entries(req.headers), body, proxy: cfg.proxy || null, timeout: cfg.timeout, image, method })
         .catch((e) => { throw new Error(/timed out/i.test(String(e)) ? t("ai.timedOut", cfg.timeout) : String(e)); })
-    : await fetch(req.url, { method: "POST", headers: req.headers, body, signal: AbortSignal.timeout(cfg.timeout * 1000) }).then(async (r) => ({ status: r.status, text: await r.text() }));
+    : await fetch(req.url, { method, headers: req.headers, body: method === "GET" ? undefined : body, signal: AbortSignal.timeout(cfg.timeout * 1000) }).then(async (r) => ({ status: r.status, text: await r.text() }));
+}
+/** Checks the image service's key and model without making a picture: {ok, text}, ok being true, false or null (cannot tell). */
+async function checkImageAi(cfg) {
+  const ask = async (list) => { const a = await imageSend(cfg, imageCheck(cfg, list), false); return readImageCheck(cfg, a.status, a.text, list); };
+  let r = await ask(false);
+  if (r.again) r = await ask(true);
+  return { ok: r.ok, text: t("img.check." + r.key, cfg.model) + (r.detail ? ` (${r.detail})` : "") };
+}
+async function imageCall(cfg, prompt, pic) {
+  const req = buildImageRequest(cfg, prompt, pic, pic.w, pic.h);
+  let reply = await imageSend(cfg, req);
+  // a model that does not take one of the optional settings says so: ask again without it
+  for (let k = 0, key; k < 3 && (key = refusedParam(reply.status, reply.text, req.body)); k++) { delete req.body[key]; reply = await imageSend(cfg, req); }
   const out = readImageReply(cfg.provider, reply.status, reply.text);
   if (out.error) throw new Error(out.error);
   // some services leave the picture at a link instead of sending it
@@ -578,9 +592,10 @@ async function imageCall(cfg, prompt, pic) {
 async function repaintPhoto() {
   const cfg = S.imageAi;
   if (!S.photo || REP.busy) return;
-  if (cfg.source === "custom" && !cfg.custom.trim()) return toast(t("rep.needCustom"));
+  const mine = myStyle();
+  if (mine && !mine.prompt.trim()) return toast(t("rep.needCustom"));
   const job = ++REP.job, from = S.photoOriginal ? await loadImage(S.photoOriginal) : S.photo;
-  const prompt = repaintPrompt({ source: cfg.source, look: S.profile.style.look, color: cat().color, custom: cfg.custom, notes: cfg.notes });
+  const prompt = repaintPrompt({ source: mine ? "custom" : cfg.source, look: S.profile.style.look, color: cat().color, custom: mine ? mine.prompt : "", notes: cfg.notes });
   Object.assign(REP, { busy: true, error: "", result: null, since: Date.now() });
   renderPanel();
   const tick = setInterval(() => { const b = document.getElementById("rep-go"); if (b && REP.busy) b.textContent = repBusyText(); }, 1000);
@@ -599,21 +614,45 @@ async function useRepaint() {
   await setPhoto(r.src, S.photoOriginal || S.photoSrc);
   toast(t("rep.used"));
 }
+/** The user's own style the repaint uses now, or null. */
+const myStyle = () => (S.imageAi.source.startsWith("my:") ? S.imageAi.styles.find((s) => "my:" + s.id === S.imageAi.source) || null : null);
+/** Adds a style of the user's own (a copy of a preset, or empty) and selects it. */
+function addStyle(name, prompt) {
+  const c = S.imageAi;
+  if (c.styles.length >= MAX_STYLES) return toast(t("rep.tooMany", MAX_STYLES));
+  const id = Date.now().toString(36);
+  S.imageAi = normalizeImageAi({ ...c, styles: [...c.styles, { id, name, prompt }], source: "my:" + id });
+  persistImageAi(); renderPanel();
+}
 function repaintBox() {
   const c = S.imageAi, lang = getLang();
   const set = (k, v, redraw = false) => { S.imageAi = normalizeImageAi({ ...S.imageAi, [k]: v }); persistImageAi(); if (redraw) renderPanel(); };
+  /** Edits the selected style of the user's own, in place (typing must not rebuild the form). */
+  const edit = (k, v) => { const st = myStyle(); if (!st) return; st[k] = v; S.imageAi = normalizeImageAi(S.imageAi); persistImageAi(); };
   const head = el("label", { class: "cap", style: "margin-top:14px" }, t("rep.title"));
   if (!imageReady(c)) {
     return el("div", { class: "rep" }, head, el("div", { class: "hint", style: "margin:0 0 10px" }, t("rep.needSetup")),
       el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; setMode("setup"); } }, t("rep.goSetup")));
   }
   const look = LOOKS[S.profile.style.look] || LOOKS.cel, r = REP.result;
-  const sources = [["look", t("rep.src.look", look.name[lang])], ...Object.entries(REPAINT_PRESETS).map(([id, p]) => [id, `${t("rep.src.preset")} · ${p.name[lang]}`]), ["custom", t("rep.src.custom")]];
+  const sources = [["look", t("rep.src.look", look.name[lang])],
+    { group: t("rep.src.preset"), items: Object.entries(REPAINT_PRESETS).map(([id, p]) => [id, p.name[lang]]) },
+    { group: t("rep.src.mine"), items: c.styles.map((s) => ["my:" + s.id, s.name]) },
+    ["+", t("rep.src.new")]];
+  const mine = myStyle(), preset = REPAINT_PRESETS[c.source];
   return el("div", { class: "rep" }, head,
-    select(sources, c.source, (v) => set("source", v, true)),
-    c.source === "custom" && [
-      el("textarea", { value: c.custom, spellcheck: false, style: "height:140px;font-size:13px;margin-top:8px", placeholder: t("rep.customPh"), oninput: (e) => set("custom", e.target.value) }),
-      el("div", { class: "hint" }, t("rep.customHint"))],
+    select(sources, c.source, (v) => (v === "+" ? addStyle(t("rep.newName", c.styles.length + 1), "") : set("source", v, true))),
+    preset && [
+      el("details", { class: "peek" }, el("summary", {}, t("rep.peek")), el("pre", {}, preset.prompt)),
+      el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => addStyle(preset.name[lang] + t("rep.copySuffix"), preset.prompt) }, t("rep.copy"))],
+    mine && [
+      el("div", { style: "margin-top:8px" }, textInput(mine.name, (v) => edit("name", v), { placeholder: t("rep.namePh"), maxLength: 40, onchange: () => renderPanel() })),
+      el("textarea", { value: mine.prompt, spellcheck: false, style: "height:160px;font-size:13px;margin-top:8px", placeholder: t("rep.customPh"), oninput: (e) => edit("prompt", e.target.value) }),
+      el("div", { class: "hint" }, t("rep.customHint")),
+      el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => {
+        if (REP.confirmDrop !== mine.id) { REP.confirmDrop = mine.id; renderPanel(); return; }   // a second click confirms
+        REP.confirmDrop = null; S.imageAi = normalizeImageAi({ ...c, styles: c.styles.filter((s) => s !== mine), source: "look" }); persistImageAi(); renderPanel();
+      } }, t(REP.confirmDrop === mine.id ? "rep.dropSure" : "rep.drop", mine.name))],
     el("div", { style: "margin-top:8px" }, textInput(c.notes, (v) => set("notes", v), { placeholder: t("rep.notesPh"), maxLength: 600, disabled: REP.busy })),
     el("button", { id: "rep-go", class: "btn solid wide", style: "margin-top:10px", disabled: REP.busy, onclick: repaintPhoto }, REP.busy ? repBusyText() : t(r ? "rep.again" : "rep.go")),
     REP.busy && el("button", { class: "btn wide", style: "margin-top:8px", onclick: cancelRepaint }, t("ai.cancel")),
@@ -628,14 +667,24 @@ function repaintBox() {
     S.photoOriginal && el("button", { class: "btn wide", style: "margin-top:8px", disabled: REP.busy, onclick: () => setPhoto(S.photoOriginal) }, t("rep.restore")),
     el("div", { class: "hint" }, t("rep.hint", t("img.provider." + c.provider), c.model)));
 }
-/** The image model's settings, in Setup → AI below the chat model's. */
-function imageAiBox() {
+/** The image model's settings: Setup → AI → Image model. */
+function imageAiPane() {
   const c = S.imageAi, d = IMAGE_DEFAULTS[c.provider];
   const ep = el("div", { class: "hint", style: "margin-top:-10px;word-break:break-all" }, t("ai.endpoint", imageEndpoint(c)));
-  const set = (k, v, redraw = false) => { S.imageAi = normalizeImageAi({ ...S.imageAi, [k]: v }); persistImageAi(); if (redraw) return renderPanel(); ep.textContent = t("ai.endpoint", imageEndpoint(S.imageAi)); };
+  const testBtn = el("button", { class: "btn wide", disabled: !imageReady(c), onclick: () => test() }, t("ai.test"));
+  const set = (k, v, redraw = false) => {
+    S.imageAi = normalizeImageAi({ ...S.imageAi, [k]: v }); REP.test = null; persistImageAi();
+    if (redraw) return renderPanel();
+    ep.textContent = t("ai.endpoint", imageEndpoint(S.imageAi)); testBtn.disabled = !imageReady(S.imageAi);
+  };
+  const test = async () => {
+    REP.test = { ok: null, text: t("ai.testing") }; renderPanel();
+    try { REP.test = await checkImageAi(S.imageAi); } catch (e) { REP.test = { ok: false, text: t("msg.failed", String(e && e.message ? e.message : e)) }; }
+    if (S.mode === "setup" && S.tab.setup === "ai") renderPanel();
+  };
   const field = (key, k, props = {}) => el("div", {}, cap(key), textInput(c[k], (v) => set(k, v), props));
-  return el("div", { class: "box" }, cap("img.title"),
-    el("div", { class: "hint", style: "margin:0 0 12px" }, t("img.intro")),
+  return [
+    el("div", { class: "hint", style: "margin:0" }, t("img.intro")),
     el("div", {}, cap("img.provider"), select(IMAGE_PROVIDERS.map((k) => [k, t("img.provider." + k)]), c.provider, (v) => set("provider", v, true))),
     field("ai.baseUrl", "baseUrl", { placeholder: d.baseUrl }), ep,
     field("ai.token", "token", { type: "password", placeholder: t("ai.tokenPh"), autocomplete: "off" }),
@@ -643,7 +692,11 @@ function imageAiBox() {
     el("div", { class: "hint", style: "margin-top:-10px" }, t("img.modelHint." + c.provider)),
     el("div", {}, cap("ai.timeout"), el("input", { type: "number", min: 30, max: 1800, step: 30, value: c.timeout, onchange: (e) => set("timeout", e.target.value, true) })),
     field("ai.proxy", "proxy", { placeholder: "http://127.0.0.1:7890" }),
-    el("div", { class: "hint" }, t("img.privacy")));
+    testBtn,
+    testLine(REP.test),
+    el("div", { class: "hint" }, t("img.testHint")),
+    el("div", { class: "hint" }, t("img.privacy")),
+  ];
 }
 const AI = { target: "", busy: false, error: "", result: null, test: "", job: 0, since: 0, attempt: 1, image: null };   // image: {mime, data, url} of a reference picture
 const AI_RETRIES = 3;                      // extra attempts when a reply does not follow the format
@@ -754,7 +807,14 @@ function aiSection() {
     ],
     el("div", { class: "hint" }, t("ai.kindHint." + S.ai.kind) + " " + t("ai.hint", S.ai.model)));
 }
+/** A connection test's outcome, in green when it worked and red when it did not. */
+const testLine = (r) => r && el("div", { class: `hint ${r.ok === true ? "ok" : r.ok === false ? "err" : ""}`, style: "margin-top:-8px;word-break:break-word" }, r.text);
+/** Setup → AI: the text model (assets) and the image model (photo repaint), one pane at a time. */
 function aiTab() {
+  const pane = S.aiPane || "text", tab = (k) => el("button", { class: "btn" + (pane === k ? " on" : ""), onclick: () => { S.aiPane = k; renderPanel(); } }, t("ai.pane." + k));
+  return [el("div", { class: "seg wide" }, tab("text"), tab("image")), ...(pane === "image" ? imageAiPane() : textAiPane())];
+}
+function textAiPane() {
   const c = S.ai, ph = AI_PLACEHOLDER[c.style];
   const where = () => (aiReady(S.ai) ? t("ai.endpoint", endpoint(S.ai)) : "");
   const ep = el("div", { class: "hint", style: "margin-top:-10px;word-break:break-all" }, where());
@@ -766,9 +826,9 @@ function aiTab() {
   };
   const field = (key, k, props = {}) => el("div", {}, cap(key), textInput(c[k], (v) => set(k, v), props));
   const test = async () => {
-    AI.test = t("ai.testing"); renderPanel();
-    try { const out = await aiCall(S.ai, "Reply with the single word OK.", "ping"); AI.test = t("ai.testOk", out.text.trim().slice(0, 60)); }
-    catch (e) { AI.test = t("msg.failed", String(e && e.message ? e.message : e)); }
+    AI.test = { ok: null, text: t("ai.testing") }; renderPanel();
+    try { const out = await aiCall(S.ai, "Reply with the single word OK.", "ping"); AI.test = { ok: true, text: t("ai.testOk", out.text.trim().slice(0, 60)) }; }
+    catch (e) { AI.test = { ok: false, text: t("msg.failed", String(e && e.message ? e.message : e)) }; }
     if (S.mode === "setup" && S.tab.setup === "ai") renderPanel();
   };
   return [
@@ -787,9 +847,8 @@ function aiTab() {
     field("ai.proxy", "proxy", { placeholder: "http://127.0.0.1:7890" }),
     el("div", {}, cap("ai.notes"), el("textarea", { value: c.notes, spellcheck: false, style: "height:84px;font-size:14px", placeholder: t("ai.notesPh"), oninput: (e) => set("notes", e.target.value) })),
     testBtn,
-    AI.test && el("div", { class: "hint", style: "margin-top:-8px;word-break:break-word" }, AI.test),
+    testLine(AI.test),
     el("div", { class: "hint" }, t("ai.privacy")),
-    imageAiBox(),
   ];
 }
 
@@ -1511,6 +1570,15 @@ async function selfTest(dir) {
         const cfg = normalizeImageAi({ provider, baseUrl: aiUrl + base, token: "selftest-token", model });
         const out = await imageCall(cfg, repaintPrompt({ source: provider === "gemini" ? "pixel" : "look", look: "cyber" }), photo);
         report.repaint.push({ provider, model, w: out.w, h: out.h });
+      }
+      // a model that refuses an optional setting: asked again without it
+      const strict = await imageCall(normalizeImageAi({ provider: "seedream", baseUrl: aiUrl + "/api/v3", token: "t", model: "strict" }), "p", photo);
+      report.repaint.push({ provider: "seedream", model: "strict", w: strict.w, h: strict.h });
+      // the connection check of each service, which makes no picture
+      report.imageCheck = [];
+      for (const [provider, base] of [["openai", "/v1"], ["gemini", "/v1beta"], ["seedream", "/api/v3"]]) {
+        const r = await checkImageAi(normalizeImageAi({ provider, baseUrl: aiUrl + base, token: "t", model: "m" }));
+        report.imageCheck.push({ provider, ok: r.ok, text: r.text });
       }
       try { await aiCall(normalizeAi({ style: "openai", baseUrl: aiUrl + "/fail", model: "m" }), "s", "u"); report.errors.push("ai: an error reply was not reported"); }
       catch (e) { report.aiError = String(e.message); }

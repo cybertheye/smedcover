@@ -389,7 +389,7 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 | Gemini | `POST {base}/models/{model}:generateContent`，`x-goog-api-key` | `contents[0].parts` 里的 `inlineData` | `candidates[0].content.parts[].inlineData` |
 | Seedream | `POST {base}/images/generations`，Bearer | `image: data URL`，`size: "WxH"`，`response_format: "b64_json"` | `data[0].b64_json`，或 `url`（再由 `fetch_image` 下载） |
 
-提示词由 `repaintPrompt` 组合：风格来源（当前风格的 `repaint(colour)`、内置预设、或用户的文字）＋「这是封面背景：不要文字和边框、保持比例」＋补充说明。跟随风格时还要求保持构图，这样背景图层原来的位置和缩放仍然合适；预设和自定义自己决定构图。重绘总是从原图出发，原图存在 `S.photoOriginal`（会话里是 `session-photo-original`，工程文件里是 `photoOriginal`）。
+提示词由 `repaintPrompt` 组合：风格来源（当前风格的 `repaint(colour)`、内置预设、或用户的文字）＋「这是封面背景：不要文字和边框、保持比例」＋补充说明。跟随风格时还要求保持构图，这样背景图层原来的位置和缩放仍然合适；预设和自定义自己决定构图。可选参数（尺寸、水印等）被服务以 400 拒绝时，`refusedParam` 从错误信息里认出参数名，去掉后重发，最多三次。连接测试（`imageCheck` / `readImageCheck`）不出图：OpenAI、Gemini 用 GET 查询模型，Seedream 发空提示词看拒绝理由；为此 `ai_request` 可以发 GET。风格来源里用户自己的风格存在 `image-ai.json` 的 `styles`。重绘总是从原图出发，原图存在 `S.photoOriginal`（会话里是 `session-photo-original`，工程文件里是 `photoOriginal`）。
 
 ## 9. 交互（`app.js`）
 

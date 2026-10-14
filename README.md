@@ -63,11 +63,13 @@ The style comes from one of three places:
 |---|---|
 | Follow the current look | Repaints in the cover's look (each look has its own repaint description), with the channel colour as accent; keeps the photo's composition, so the subject stays where and as big as it was and its placement on the cover still fits |
 | Built-in · 8-bit pixel editorial | Distils the photo into a sparse, abstract 8-bit pixel piece: a small cluster of coarse pixel blocks on a wide paper field, or a few broad pixel planes edge to edge. Adapted from [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art) |
-| Custom | Describe the style yourself, or paste a whole style guide (such as a skill's `SKILL.md`) |
+| My styles | Styles you keep, each with a name and a prompt, renamed, edited or deleted at any time and saved as you type. *＋ New style…* starts from nothing; with a built-in style selected, *Copy into my styles* gives you a copy to rename and edit. A whole style guide (such as a skill's `SKILL.md`) can be pasted in |
 
+- *See the prompt* unfolds a built-in style's prompt. It lives in the code, in `REPAINT_PRESETS` in `ui/js/repaint.js`; to change it without touching code, edit a copy made with *Copy into my styles*.
 - *Anything to add* is optional and goes after any source. Every source is followed by: no text or watermarks, no border, keep the photo's shape.
 - The result is shown beside the original first; *Use this* replaces the background photo, and *Back to the original* is there afterwards. A new repaint always starts from the original, so repaints do not pile up.
 - Both the repainted photo and the original are saved in project files.
+- If the service answers that it does not take one of the optional settings sent (such as the size or the watermark), the app sends the request again without it.
 - Each repaint is charged at the service's prices and usually takes tens of seconds.
 
 ### Collage: work directly on the canvas
@@ -328,7 +330,7 @@ Privacy and cost:
 
 #### Image model (photo repaint)
 
-The chat model above only writes text; repainting a photo needs an image model that takes a picture and returns one, set up separately further down the same page. The three services each have their own interface, and the app speaks each one's:
+*Setup → AI* has two panes, *Text model (assets)* and *Image model (photo repaint)*; click one to see its settings. The text model only writes text; repainting a photo needs an image model that takes a picture and returns one. The three services each have their own interface, and the app speaks each one's:
 
 | Service | Default address (used when BASE_URL is empty) | Model name |
 |---|---|---|
@@ -337,6 +339,7 @@ The chat model above only writes text; repainting a photo needs an image model t
 | Volcengine Ark Seedream | `https://ark.cn-beijing.volces.com/api/v3`, request to `/images/generations`; BytePlus ModelArk: `https://ark.ap-southeast.bytepluses.com/api/v3` | the model ID or endpoint ID from the Ark console |
 
 - Token, model, timeout and proxy mean the same as above; the token is kept in `image-ai.json`.
+- *Test connection* makes no picture and costs nothing: OpenAI and Gemini are asked about the model; Seedream is sent an empty prompt to see how it refuses (so only the key is confirmed; the model name is fully confirmed by the first repaint). Success shows in green, failure in red (the text model's test too).
 - The output size follows the photo's shape: about 2.5 megapixels on OpenAI's newer models (the older gpt-image-1 has three fixed sizes), about 4 megapixels on Seedream, and Gemini follows the photo sent.
 - When repainting, the photo (scaled to 1536 px on its longer side) and the style description are sent to the address you entered.
 

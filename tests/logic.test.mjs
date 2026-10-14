@@ -863,3 +863,35 @@ test("repaint: the prompt follows the look, a preset or the user's own words, an
   const own = repaintPrompt({ source: "custom", custom: "  watercolour  " });
   assert.ok(own.startsWith("watercolour\n\n") && own.includes("no text"));
 });
+
+test("repaint: a refused optional setting is named, the connection check reads each service's answer, styles are kept", async () => {
+  const R = await import("../ui/js/repaint.js");
+  const body = { model: "m", prompt: "p", size: "1x1", watermark: false, sequential_image_generation: "disabled" };
+  assert.equal(R.refusedParam(400, "The parameter `sequential_image_generation` specified in the request are not valid: the parameter `sequential_image_generation` is not supported by the current model. Request id: x", body), "sequential_image_generation");
+  assert.equal(R.refusedParam(400, '{"error":{"message":"Unknown parameter: \'size\'."}}', body), "size");
+  assert.equal(R.refusedParam(400, "The parameter `prompt` is required", body), null);       // not optional: nothing to drop
+  assert.equal(R.refusedParam(400, "The parameter `n` is not supported", body), null);        // not in this request
+  assert.equal(R.refusedParam(401, "The parameter `size` is invalid", body), null);
+  const cfg = (provider) => R.normalizeImageAi({ provider, token: "k", model: "m" });
+  assert.deepEqual(R.imageCheck(cfg("openai")), { method: "GET", url: "https://api.openai.com/v1/models/m", headers: { authorization: "Bearer k" } });
+  assert.equal(R.imageCheck(cfg("openai"), true).url, "https://api.openai.com/v1/models");
+  assert.equal(R.imageCheck(cfg("gemini")).url, "https://generativelanguage.googleapis.com/v1beta/models/m");
+  assert.equal(R.imageCheck(cfg("seedream")).body.prompt, "");
+  assert.equal(R.readImageCheck(cfg("openai"), 200, '{"id":"m"}').ok, true);
+  assert.deepEqual(R.readImageCheck(cfg("openai"), 404, "not found"), { again: true });
+  assert.equal(R.readImageCheck(cfg("openai"), 200, '{"data":[{"id":"x"}]}', true).key, "notListed");
+  assert.equal(R.readImageCheck(cfg("openai"), 401, '{"error":{"message":"Incorrect API key"}}').key, "auth");
+  assert.equal(R.readImageCheck(cfg("gemini"), 400, '{"error":{"message":"API key not valid. Please pass a valid API key."}}').key, "auth");
+  assert.equal(R.readImageCheck(cfg("gemini"), 404, '{"error":{"message":"models/m is not found"}}').key, "model");
+  assert.equal(R.readImageCheck(cfg("seedream"), 400, '{"error":{"message":"missing the `prompt` parameter"}}').key, "okSeedream");
+  assert.equal(R.readImageCheck(cfg("seedream"), 404, '{"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint m does not exist"}}').key, "model");
+  assert.equal(R.readImageCheck(cfg("seedream"), 401, '{"error":{"code":"AuthenticationError"}}').key, "auth");
+  // saved styles; the one custom text of before becomes the first
+  const old = R.normalizeImageAi({ source: "custom", custom: "watercolour" });
+  assert.equal(old.styles.length, 1); assert.equal(old.source, "my:" + old.styles[0].id); assert.equal(old.styles[0].prompt, "watercolour");
+  const two = R.normalizeImageAi({ source: "my:b", styles: [{ id: "a", name: "A", prompt: "x" }, { id: "b", name: "", prompt: "y" }, { id: "a", name: "dup", prompt: "z" }] });
+  assert.deepEqual(two.styles.map((s) => s.id), ["a", "b", "a_2"]);
+  assert.equal(two.styles[1].name, "#2"); assert.equal(two.source, "my:b");
+  assert.equal(R.normalizeImageAi({ source: "my:gone", styles: [] }).source, "look");
+  assert.equal(R.normalizeImageAi({ source: "pixel" }).source, "pixel");
+});
