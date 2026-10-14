@@ -960,14 +960,14 @@ function typeControls(L) {
     case "graphic": return el("div", { class: "hint", style: "margin:0" }, t("props.graphicHint"));
     case "asset": return canTint(L.ref) && L.ref.kind !== "graphic" ? check("props.tint", L.tint, (v) => set("tint", v)) : null;
     case "text": return [
-      cap("props.text"), el("textarea", { value: L.text, spellcheck: false, style: "height:72px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
+      fxControl(L, true),
+      el("div", { style: "margin-top:10px" }, cap("props.text")), el("textarea", { value: L.text, spellcheck: false, style: "height:72px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
       fontControl(L),
       check("props.plateOn", L.plate, (v) => set("plate", v, true)),
       el("div", { style: "margin-top:8px" }, select(["white", "accent", "ink", "custom"].map((k) => [k, `${t(L.plate ? "props.plateColor" : "props.color")} · ${t("color." + k)}`]), L.color,
         (v) => { L.color = v; if (v === "custom") L.ink = L.ink || cat().color; else delete L.ink; touch({ cover: true, side: true }); })),
       L.color === "custom" && el("div", { class: "ink" }, el("span", {}, t("props.inkCustom")),
         el("input", { type: "color", value: L.ink || "#ffffff", oninput: (e) => { L.ink = e.target.value; touch({ cover: true }); } }), el("span", {})),
-      fxControl(L),
     ];
   }
   return null;
