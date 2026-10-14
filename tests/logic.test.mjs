@@ -80,13 +80,13 @@ test("normalizeProfile repairs bad input and keeps good input", () => {
 
 test("normalizeCover starts from the profile's design and normalizeSettings clamps", () => {
   const p = normalizeProfile(sampleProfile("en"));
-  p.design.layers.find((l) => l.id === "title").align = "center";
+  p.design.layers.find((l) => l.id === "title").stroke = 1.5;
   const c = normalizeCover({ catId: "gone" }, p);
   assert.equal(c.catId, "shot");
-  assert.equal(c.layers.find((l) => l.id === "title").align, "center");
+  assert.equal(c.layers.find((l) => l.id === "title").stroke, 1.5);
   assert.notEqual(c.layers, p.design.layers);                       // a copy, not the same array
-  const own = normalizeCover({ layers: [{ type: "title", align: "left" }] }, p);
-  assert.equal(own.layers.find((l) => l.id === "title").align, "left");
+  const own = normalizeCover({ layers: [{ type: "title", stroke: 0.5 }] }, p);
+  assert.equal(own.layers.find((l) => l.id === "title").stroke, 0.5);
   assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size", recentFonts: [] });
   assert.deepEqual(normalizeSettings({ recentFonts: ["A", "A", "", 3, "B", "C", "D", "E", "F", "G"] }).recentFonts, ["A", "B", "C", "D", "E", "F"]);
   assert.deepEqual(useFont(["A", "B", "C"], "B"), ["B", "A", "C"]);                 // the latest first, once

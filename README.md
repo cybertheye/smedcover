@@ -106,7 +106,7 @@ What each layer allows:
 - the look, its sliders and its random placement
 - the template, how much the colour block takes, the slant of its edge, whether the halves are swapped, dark or light ground
 - the shape of the colour block, the grid
-- the title's alignment, outline, shadow and text effect
+- the title's text effect, outline and shadow
 - each text layer's plate, colour and text effect; whether a sticker follows the channel colour
 - stickers, images and text you added are nudged, turned and resized a little
 

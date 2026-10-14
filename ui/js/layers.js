@@ -34,7 +34,7 @@ const PROPS = {
   accent: { shape: "slant" },
   graphic: {},
   brand: { rail: true },
-  title: { align: "left", stroke: 1, shadow: 1 },
+  title: { stroke: 1, shadow: 1 },
   tag: {},
   catname: { showName: true, plate: true },
   frame: {},
@@ -90,7 +90,7 @@ function normalizeLayer(raw, catIds) {
     case "bg": L.grid = raw.grid !== false; L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); break;
     case "accent": L.shape = ACCENT_SHAPES.includes(raw.shape) ? raw.shape : "slant"; break;
     case "brand": L.rail = raw.rail !== false; break;
-    case "title": L.align = raw.align === "center" ? "center" : "left"; L.stroke = num(raw.stroke, 1, 0, 2); L.shadow = num(raw.shadow, 1, 0, 2); break;
+    case "title": L.stroke = num(raw.stroke, 1, 0, 2); L.shadow = num(raw.shadow, 1, 0, 2); break;
     case "catname": L.showName = raw.showName !== false; L.plate = raw.plate !== false; break;
     case "asset": {
       const r = raw.ref;

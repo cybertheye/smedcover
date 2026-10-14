@@ -168,7 +168,7 @@ function paint(cv, size, pixelW, cover = S.cover, index = catIndex(), select = n
   drawCover(cv, { profile: S.profile, catIndex: index, size, pixelW, cover, photo: S.photo, select, live, ...extra });
 }
 // While a layer is dragged on the canvas, the rest of the cover is painted once and reused (see drawCover).
-let LIVE = null, MARQUEE = null;   // MARQUEE: the selection rectangle being drawn, in virtual pixels
+let LIVE = null;
 const goLive = (ids) => { ids = [].concat(ids); const key = ids.join(" "); if (!LIVE || LIVE.key !== key) LIVE = { ids, key }; };
 const endLive = () => { if (LIVE) { LIVE = null; queueDraw(); } };
 function drawMain() {
@@ -177,7 +177,7 @@ function drawMain() {
   cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
   document.documentElement.dataset.look = S.profile.style.look;   // the two main buttons dress to match the cover (see index.html)
   paint(cv, size, Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
-    S.mode === "edit" ? { picked: group().map((L) => L.id), marquee: MARQUEE } : {});
+    S.mode === "edit" ? { picked: group().map((L) => L.id) } : {});
   const clear = !layer("bg").visible;
   stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
 }
@@ -395,22 +395,27 @@ function layerAt(e) {
     cv.onpointermove = (m) => { const p = virtualPoint(m); moved = true; edit(L, { ddx: p.x - last.x, ddy: p.y - last.y }); last = p; };
     cv.onpointerup = cv.onpointercancel = done(() => moved);
   });
+  // The selection rectangle is a box laid over the canvas, not drawn on it: the cover is not
+  // repainted while it is dragged (with a look's effects a repaint can take tens of milliseconds).
+  const band = document.body.appendChild(el("div", { id: "marquee", hidden: true }));
   /** Draws a selection rectangle; what lies wholly inside it is selected when the button is let go. Shift adds to the selection. */
   function marquee(e, under) {
-    const start = virtualPoint(e), keep = e.shiftKey ? pickedIds() : [];
+    const start = virtualPoint(e), keep = e.shiftKey ? pickedIds() : [], cx = e.clientX, cy = e.clientY, r = cv.getBoundingClientRect();
     const ok = (h) => { const L = layer(h.id); return h.type !== "bg" && L && isPickable(L) && !FIXED.includes(L.type); };
     let box = null;
     cv.setPointerCapture(e.pointerId);
     cv.onpointermove = (m) => {
       const p = virtualPoint(m);
       if (!box && Math.hypot(p.x - start.x, p.y - start.y) < 5 * p.k) return;   // a click is not a rectangle
-      box = { x0: start.x, y0: start.y, x1: p.x, y1: p.y }; MARQUEE = box; queueDraw();
+      box = { x0: start.x, y0: start.y, x1: p.x, y1: p.y };
+      const mx = clamp(m.clientX, r.left, r.right), my = clamp(m.clientY, r.top, r.bottom);
+      Object.assign(band.style, { left: Math.min(cx, mx) + "px", top: Math.min(cy, my) + "px", width: Math.abs(mx - cx) + "px", height: Math.abs(my - cy) + "px" });
+      band.hidden = false;
     };
     cv.onpointerup = cv.onpointercancel = () => {
-      cv.onpointermove = null; MARQUEE = null;
-      if (!box) { if (!e.shiftKey) selectLayer(under.id); return queueDraw(); }
+      cv.onpointermove = null; band.hidden = true;
+      if (!box) return e.shiftKey ? null : selectLayer(under.id);
       pickLayers([...new Set([...keep, ...hitsIn(cv._hits, box, ok).map((h) => h.id)])]);
-      queueDraw();
     };
   }
   /** Drags every movable member of the group together; a click without a drag selects just the one clicked. */
@@ -912,13 +917,13 @@ function titleLines(L, set) {
     : el("div", { class: "sl off", style: "grid-template-columns:84px 1fr", title: t("props.fxIgnores", name) }, el("span", {}, t(key)), el("span", { class: "why" }, t("props.fxIgnores", name))));
   return [line("stroke", "props.stroke"), line("shadow", "props.shadow")];
 }
-function fxControl(L) {
+function fxControl(L, first = false) {
   const set = (k, v, side) => { if (v === undefined) delete L[k]; else L[k] = v; touch({ cover: true, side }); };
   const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline") };
   const groups = ["passes", "mask", "outline"].map((kind) => ({ group: kinds[kind], items: Object.entries(EFFECTS).filter(([, e]) => e.kind === kind).map(([id, e]) => [id, e.name[getLang()]]) }));
   const fx = L.fx || "auto", kind = EFFECTS[fx].kind;
   return [
-    el("div", { style: "margin-top:10px" }, cap("props.fx"), select(groups, fx, (v) => set("fx", v === "auto" ? undefined : v, true))),
+    el("div", { style: first ? "" : "margin-top:10px" }, cap("props.fx"), select(groups, fx, (v) => set("fx", v === "auto" ? undefined : v, true))),
     fx !== "auto" && kind !== "passes" && slider("props.fxAmt", 0, 2, 0.05, L.fxAmt ?? 1, times, (v) => set("fxAmt", v === 1 ? undefined : v, false)),
     kind === "outline" && !native && el("div", { class: "hint" }, t("fx.needsApp")),
   ];
@@ -944,11 +949,10 @@ function typeControls(L) {
     case "accent": return el("div", { style: "margin-bottom:10px" }, select(ACCENT_SHAPES.map((k) => [k, `${t("props.shape")} · ${t("shape." + k)}`]), L.shape, (v) => set("shape", v, false)), null);
     case "brand": return [check("props.rail", L.rail, (v) => set("rail", v)), fontControl(L), inkControl(L, "ink", "props.ink", "#ffffff")];
     case "title": return [
-      select([["left", `${t("props.align")} · ${t("align.left")}`], ["center", `${t("props.align")} · ${t("align.center")}`]], L.align, (v) => set("align", v)),
+      fxControl(L, true),
       ...titleLines(L, set),
       fontControl(L),
       inkControl(L, "ink", "props.ink", "#ffffff"), inkControl(L, "hi", "props.inkHi", cat().color),
-      fxControl(L),
       el("div", { class: "hint" }, t("props.boundHint")),
     ];
     case "tag": return [fontControl(L), inkControl(L, "ink", "props.ink", "#07070c"), el("div", { class: "hint" }, t("props.boundHint"))];
@@ -1232,7 +1236,7 @@ function surprise() {
       case "accent": L.shape = pick(ACCENT_SHAPES); break;
       case "brand": L.rail = chance(0.8); break;
       case "catname": L.plate = chance(0.75); break;
-      case "title": L.align = chance(0.75) ? "left" : "center"; L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.45); break;
+      case "title": L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.45); break;
       case "text": L.plate = chance(0.4); if (L.color !== "custom") L.color = pick(["white", "accent", "ink"]); dealFx(L, 0.4); break;
       case "asset": if (canTint(L.ref) && L.ref.kind !== "graphic") L.tint = chance(0.5); break;
     }

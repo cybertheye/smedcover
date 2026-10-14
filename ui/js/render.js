@@ -292,7 +292,7 @@ const PAINT = {
     env.titleBox = box;
     const own = look().titleSet;   // a look may set the title itself (vertically, say); null from it means "the usual way"
     return placed(ctx, tr, (c) => (own && own(c, env.cover.title, box, L, env, lookValues())) || drawTitle(c, env.cover.title, box, IDENTITY, {
-      font: look().titleFont ? look().titleFont(fonts) : fonts.cn, maxFs: 340, align: L.align, fill: L.ink || th.titleFill, ink: th.titleInk, hi: L.hi || env.acc, shadow: L.hi || env.acc, hiShadow: L.ink || th.titleFill,
+      font: look().titleFont ? look().titleFont(fonts) : fonts.cn, maxFs: 340, align: "left", fill: L.ink || th.titleFill, ink: th.titleInk, hi: L.hi || env.acc, shadow: L.hi || env.acc, hiShadow: L.ink || th.titleFill,
       own: L.ink ? hexToRgb(L.ink) : undefined, ownHi: L.hi ? hexToRgb(L.hi) : undefined,   // for looks that paint the letters themselves
       stroke: clamp(L.stroke, 0, 2), shadowAmt: clamp(L.shadow, 0, 2), C: env.C, fx: L.fx, fxAmt: L.fxAmt,
     }));
@@ -363,7 +363,6 @@ let scratch = null;
  *   o.live     {ids} while those layers are being dragged: the rest of the cover is cached in this
  *              object between frames (editor only; drop the object when the drag ends)
  *   o.picked   ids of the layers in a group selection, outlined without handles (editor only)
- *   o.marquee  {x0, y0, x1, y1} a selection rectangle being drawn, in virtual pixels (editor only)
  * Leaves cv._hits behind: one entry per drawn layer, bottom first, for pointer hit-testing.
  */
 export function drawCover(cv, o) {
@@ -451,14 +450,6 @@ function paintCover(cv, o) {
     const hit = cv._hits.find((x) => x.id === o.select);
     if (hit && hit.type !== "bg") drawSelection(ctx, hit, kx);
     drawLayoutHandles(ctx, cv, cover.layers.find((l) => l.id === o.select), kx, rgb(C));
-  }
-  if (o.marquee) {
-    const m = o.marquee, u = 1 / kx, x = Math.min(m.x0, m.x1), y = Math.min(m.y0, m.y1), mw = Math.abs(m.x1 - m.x0), mh = Math.abs(m.y1 - m.y0);
-    ctx.save();
-    ctx.fillStyle = "rgba(255,255,255,.08)"; ctx.fillRect(x, y, mw, mh);
-    ctx.lineWidth = 3 * u; ctx.strokeStyle = "rgba(7,7,12,.85)"; ctx.strokeRect(x, y, mw, mh);
-    ctx.lineWidth = 1.5 * u; ctx.strokeStyle = "#ffffff"; ctx.setLineDash([6 * u, 5 * u]); ctx.strokeRect(x, y, mw, mh);
-    ctx.restore();
   }
 }
 
