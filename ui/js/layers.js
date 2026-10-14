@@ -16,14 +16,16 @@
 // categories. Without it the layer is on every category's cover.
 
 export const BOUND_TYPES = ["bg", "accent", "graphic", "brand", "title", "tag", "catname", "frame"];
-export const FREE_TYPES = ["asset", "text"];
+export const FREE_TYPES = ["asset", "text", "photo"];
 /**
- * Layers a cover may have once at most, added and removed by the user: "subject", the background
- * photo's subject cut out (see render.js), which sits above the title so it can cover it.
+ * Layers of earlier files that are read only to be turned into something else: "subject", the
+ * background photo's subject cut out, is now a photo layer (see upgradeCover in app.js).
  */
-export const OPTIONAL_TYPES = ["subject"];
-/** Layers the user can delete: the free ones and the optional ones. */
-export const isRemovable = (type) => FREE_TYPES.includes(type) || OPTIONAL_TYPES.includes(type);
+export const LEGACY_TYPES = ["subject"];
+/** Layers the user can delete: the free ones. */
+export const isRemovable = (type) => FREE_TYPES.includes(type) || LEGACY_TYPES.includes(type);
+/** Whether a layer is a photo that fills the canvas (the cover's background photo, or another). */
+export const fillsCanvas = (L) => L.type === "photo" && L.fill && !L.of;
 /** Shapes the colour block and its dividing edge can take ("slant" is the template's own). */
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes", "arc"];
 /** The text effects a headline can be given (painted in textfx.js). Absent on a layer means "auto": the look decides. */
@@ -47,7 +49,16 @@ const PROPS = {
   frame: {},
   asset: { ref: null, tint: false },
   text: { text: "", plate: false, color: "white" },
-  subject: { outline: 0, shadow: 0, follow: false },   // + `ink`, the outline's colour (white without one)
+  subject: { outline: 0, shadow: 0, follow: false },   // legacy, see LEGACY_TYPES
+  /**
+   * A photo. `pid` names its picture in the photo store (the picture, its original before an AI
+   * repaint, its subject mask), so layers share pictures and the cover stays small. `fill`: it
+   * covers the canvas, placed like a background (moved and scaled, not turned), instead of sitting
+   * on it like a print. `of`: a layer id — this layer shows that layer's photo, in that layer's
+   * place (an aligned copy, as the subject cut out in front of the title is). `treat`: the look's
+   * treatment of photos applies. `cut`: only the subject is kept (the mask). + `ink`, the outline's colour.
+   */
+  photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, outline: 0, shadow: 0 },
 };
 const COLORS = ["white", "accent", "ink", "custom"];   // "custom" uses the layer's own `ink`
 
@@ -59,7 +70,7 @@ export function newLayer(type, extra = {}) {
   const free = isFree(type);
   return {
     id: free ? uid() : type, type, visible: true, locked: false, o: 1,
-    t: { all: free ? { x: 0.5, y: 0.42, s: 0.35, r: 0, kx: 1, ky: 1 } : { x: 0, y: 0, s: 1, r: 0, kx: 1, ky: 1 }, by: {} },
+    t: { all: free ? { x: 0.5, y: type === "photo" ? 0.5 : 0.42, s: type === "photo" ? (extra.fill ? 1 : 0.6) : 0.35, r: 0, kx: 1, ky: 1 } : { x: 0, y: 0, s: 1, r: 0, kx: 1, ky: 1 }, by: {} },
     ...PROPS[type], ...extra,
   };
 }
@@ -103,6 +114,14 @@ function normalizeLayer(raw, catIds) {
     case "brand": L.rail = raw.rail !== false; break;
     case "title": L.stroke = num(raw.stroke, 1, 0, 2); L.shadow = num(raw.shadow, 1, 0, 2); break;
     case "catname": L.showName = raw.showName !== false; L.plate = raw.plate !== false; break;
+    case "photo": {
+      const id = (v) => (typeof v === "string" ? v.replace(/[^\w-]/g, "").slice(0, 40) : "");
+      L.pid = id(raw.pid); L.of = id(raw.of); L.fill = raw.fill === true; L.treat = raw.treat !== false; L.cut = raw.cut === true;
+      L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); L.outline = num(raw.outline, 0, 0, 60); L.shadow = num(raw.shadow, 0, 0, 1);
+      if (!L.pid && !L.of) return null;   // nothing to show
+      if (typeof raw.ink === "string" && /^#[0-9a-f]{6}$/i.test(raw.ink)) L.ink = raw.ink.toLowerCase();
+      break;
+    }
     case "subject":
       L.outline = num(raw.outline, 0, 0, 60); L.shadow = num(raw.shadow, 0, 0, 1); L.follow = raw.follow === true;
       if (typeof raw.ink === "string" && /^#[0-9a-f]{6}$/i.test(raw.ink)) L.ink = raw.ink.toLowerCase();

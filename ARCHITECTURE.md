@@ -264,23 +264,25 @@ shaded by the way they face, each group is filled as one shape, then the back fa
 
 *Tapered* can carry the layer's own corners, `warp` (four `[dx, dy]` in block widths and heights). When the title or a text layer is painted, each line hands the effect where it sits in the block (`frame`: the line's origin, its slant, the block's rectangle); `perspective()` takes the outline points into the block's space, maps them with the projective map of `squareToQuad` onto the new quad and back, so several lines bend as one block. The block's transform and rectangle are kept in `cv._blocks`, from which the editor draws the corner handles (`warpHandles`) and, while one is dragged, takes the pointer back into the block's space with the inverse transform.
 
-### 6.3 Background photo and blur (`photo.js`)
+### 6.3 Photo layers and blur (`photo.js`, `PAINT.photo` in `render.js`)
 
-Canvas filters are not available in the macOS web view, so the gaussian blur is done in script:
-**three box blurs approximate one gaussian blur**, each box blur using a sliding window so its cost
-does not depend on the radius.
+A photo is a free layer of type `photo`. The layer keeps only the picture's id `pid`; the pictures are in the photo store `S.photos`: `pid → {src, img, original, mask}` (the picture, the one before an AI repaint, the subject mask). In the session each is a file in `photos/`; a project file (version 3) embeds them under `photos`. At start only the pictures the cover uses are read and other files are removed. Duplicating layers and undo never copy a picture.
 
-The blur is applied to a reduced working copy of the photo and cached by photo and blur amount. After
-that, moving or scaling the photo, or editing any other layer, costs a single image draw. Exports
-recompute it from a higher-resolution copy.
+Two ways to place one: `fill` covers the canvas and is placed as the background photo used to be (`t.all.x/y` an offset around 0.5, `s` a scale on top of covering, no turning); otherwise like a print, nominally 1000 units on its longer side, at the free layer's place, scale, angle and stretch. With `of` naming another photo layer, the layer shows that layer's picture in that layer's place — the cut-out subject is such a copy of the background photo, with `cut` on.
 
-### 6.4 The subject layer (cut-out)
+Painting: the photo goes through the look's treatment of photos — the look's `background` hook is called with `env.photo` set to this picture and `drawPhoto` drawing it in its own frame — on the whole canvas (a look's washes must cover it), and then only the photo's rectangle is kept, or, with `cut`, only where the mask is opaque. A photo with no cut-out, outline or shadow is painted straight onto the canvas inside a rectangle clip, with no work canvas; the others are put together on work canvases. The outline and shadow come from the silhouette of the shape (the mask, or the photo's rectangle), made once at the photo's scale (at most 1024 px) and cached per shape, so a frame lays one image. A copy makes no hit: clicks go through to what is under it.
 
-`subject_mask` (`src-tauri/src/subject.rs`) hands the photo's bytes to Apple Vision's `VNGenerateForegroundInstanceMaskRequest` (macOS 14 on; the class is looked up at run time through objc2, so an older system reports that it needs macOS 14), takes `generateScaledMaskForImageForInstances` — a float mask the photo's size — and returns it as a PNG in which only the alpha matters. The interface draws the photo on a canvas and sends that as JPEG, so EXIF orientation is already applied and the mask matches the photo pixel for pixel.
+The Background layer paints only the ground: the look's ground (its `background` hook with `photo: null`) or the theme's colour, and the grid. When looks and themes ask whether there is a background photo, they mean the lowest visible photo filling the canvas on this channel (`env.photo`).
 
-The mask is kept as `S.photoMask = {img, src, of}`, `of` being the photo it belongs to; a new photo clears it. The `subject` layer (`OPTIONAL_TYPES`: at most one per cover, removable) paints the background layer again — the same photo, in the same place (`env.bgTr`), with the same treatment by the look, unblurred and undimmed by default — and keeps it only where the mask is opaque (`destination-in`); the outline and shadow are the mask's silhouette, coloured and stamped around or below. It makes no hit, so clicks go through to the layers under it. While the background is dragged `goLive` adds the subject to the moving layers; meanwhile the subject only slides its last image by how far the photo has moved, and is painted properly when the drag ends. The silhouette for the outline and shadow is made once at the photo's scale (at most 1024 px) and kept on the mask object, so a frame only lays one image.
+Blur: canvas filters are not available in the macOS web view, so the gaussian blur is done in script — three box blurs approximate one gaussian, each a sliding window whose cost does not depend on the radius — on a reduced copy of the picture, cached by picture and amount (per picture).
 
-The drag cache (`o.live`) cuts the layers into runs that move and runs that do not; each still run is painted once into an image, and each frame repaints only the moving runs.
+Earlier data: `upgradeCover` turns the one photo kept beside the cover (the session's `session-photo*`, a version 2 project's `photo*` fields) into a background photo layer taking over the Background layer's place, blur and dim, and an earlier `subject` layer into its cut-out copy. A default design keeps no photo layers.
+
+### 6.4 The cut-out (`src-tauri/src/subject.rs`)
+
+`subject_mask` hands the photo's bytes to Apple Vision's `VNGenerateForegroundInstanceMaskRequest` (macOS 14 on; the class is looked up at run time through objc2, so an older system reports that it needs macOS 14), takes `generateScaledMaskForImageForInstances` — a float mask the photo's size — and returns it as a PNG in which only the alpha matters. The interface draws the photo on a canvas and sends that as JPEG, so EXIF orientation is already applied and the mask matches the photo pixel for pixel. The mask lives on the picture's record; when the picture changes (another photo, an AI repaint) it is cleared and the layers that use it are cut out again.
+
+The drag cache (`o.live`) cuts the layers into runs that move and runs that do not; each still run is painted once into an image, and each frame repaints only the moving runs. A dragged photo takes its copies with it; a photo with a cut-out, outline or shadow only slides its last image while it moves, and is painted properly when the drag ends.
 
 ### 6.5 Assets
 

@@ -969,3 +969,22 @@ test("text effects: the perspective maps the block's corners where they were dra
   assert.deepEqual(out.find((l) => l.type === "title").warp, [[0, 0], [1.5, -1.5], [0, 0.5], [0, 0]]);   // held within reach
   assert.equal(out.find((l) => l.type === "text").warp, undefined);                                     // not four corners: dropped
 });
+
+test("layers: photo layers keep their picture id, mode and treatment; a design keeps none", async () => {
+  const { normalizeLayers, newLayer, fillsCanvas, isFree } = await import("../ui/js/layers.js");
+  const out = normalizeLayers([
+    { type: "photo", pid: "pAB12", fill: true, blur: 200, dim: 0.5, treat: false, t: { all: { x: 0.6, y: 0.5, s: 1.2 } } },
+    { type: "photo", of: "lx1", cut: true, outline: 7, ink: "#00FF00" },
+    { type: "photo", pid: "../../etc", fill: false },
+    { type: "photo" },                                                              // no picture: dropped
+  ]).filter((l) => l.type === "photo");
+  assert.equal(out.length, 3);
+  assert.deepEqual([out[0].pid, out[0].fill, out[0].blur, out[0].dim, out[0].treat, out[0].t.all.x], ["pAB12", true, 80, 0.5, false, 0.6]);
+  assert.deepEqual([out[1].of, out[1].cut, out[1].outline, out[1].ink, out[1].treat], ["lx1", true, 7, "#00ff00", true]);
+  assert.equal(out[2].pid, "etc");                                               // only an id's own characters
+  assert.ok(fillsCanvas(out[0]) && !fillsCanvas(out[1]) && !fillsCanvas(out[2]) && isFree("photo"));
+  assert.deepEqual([newLayer("photo", { pid: "a", fill: true }).t.all.s, newLayer("photo", { pid: "a" }).t.all.s], [1, 0.6]);
+  const { normalizeProfile } = await import("../ui/js/store.js");
+  const p = normalizeProfile({ name: "x", design: { layers: [{ type: "photo", pid: "a", fill: true }, { type: "subject" }] } });
+  assert.ok(!p.design.layers.some((l) => l.type === "photo" || l.type === "subject"));
+});

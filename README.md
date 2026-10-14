@@ -16,7 +16,7 @@ How it works inside: [ARCHITECTURE.md](ARCHITECTURE.md).
 | **Profile** | Everything about one brand: its name, channels, output sizes, template and a default design. You can keep several. |
 | **Channel** | One content line within the brand, with its own name, colour and graphic. A cover takes its colour and graphic from its channel. |
 | **Cover** | The one you are editing: its channel, title, corner tag and its own stack of layers. |
-| **Layer** | Each part of a cover. Built-in layers (background, colour block, title, …) are on every cover; free layers are the stickers, images and text you add. |
+| **Layer** | Each part of a cover. Built-in layers (background, colour block, title, …) are on every cover; free layers are the stickers, images, photos and text you add. |
 | **Project** | The current cover saved to a file together with its profile and the assets it uses, so it can be reopened as it was. |
 
 ## The window
@@ -46,24 +46,28 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
 - Words wrapped in `*asterisks*` take the channel colour.
 - The corner tag is an optional short label such as `EP.03`.
 
-### Background photo
+### Photos
 
-- Choose a photo in the Cover tab, or drop one onto the window.
-- Click the background once to select it, then drag the photo to move it; scroll to resize it.
-- Select the Background layer on the right to set blur and dim.
-- Once a photo is chosen, a thumbnail and its size appear below.
+Every photo is a *Photo* layer, placed one of two ways:
+
+- **Background photo** — fills the canvas, just above the Background layer. Choose it in the Cover tab or drop it onto the window. Click it once to select it, then drag on the cover to move it and scroll to resize it; once selected it drags even when you press on the colour block.
+- **Photo layers** — *＋ Add a photo layer* in the Cover tab puts a photo on the cover like a print: move, scale, turn and re-order it, as many as you like, for collage. *Fill the canvas* in its properties places it like the background photo instead.
+
+Each photo has blur, dim, the look's treatment of photos (tint, duotone, black and white…; on by default), remove the background, an outline (width and colour), a shadow, and another photo. With the background removed the outline and shadow follow the subject; otherwise the photo's edge, like a print.
+
+The Background layer itself is only the ground: its colour, grid and light or dark. Once a background photo is chosen, a thumbnail and its size appear below.
 
 ### Cutting out the subject, in front of the title (macOS 14 and later)
 
 With a background photo chosen, *Cut out the subject, in front of the title* is below it.
 
 - macOS's own recognition (the same "lift subject" the Photos app has) lifts the people, animals or objects out of the photo, on this computer — the photo is not uploaded — usually in a second or two.
-- The subject becomes a *Subject* layer, placed just above the title, so it covers part of the title as on a magazine cover. Move it up or down in the layer list to decide what it stands in front of.
-- The subject is the background photo itself: it follows the photo's place and size, moves when you drag the photo, and gets the look's treatment of the photo (tint, duotone, black and white…). It stays sharp by default, which reads as depth when the background is blurred; *Follow the background's blur and dim* makes it match.
-- Its properties add an outline (width and colour) and a shadow.
-- *Undo the cut-out* removes the Subject layer and the mask.
-- A new photo needs a new cut-out; when an AI repaint is used and the cover has a Subject layer, the new photo is cut out again by itself.
-- The cut-out is kept in the session and in project files. A photo with no clear subject says so.
+- The subject is a *Cut-out subject* copy of the background photo: the same picture in the same place with its background removed, placed just above the title, so it covers part of the title as on a magazine cover. Move it up or down in the layer list to decide what it stands in front of.
+- It follows the background photo: it moves and scales with it and gets the look's treatment too. Its blur, dim, outline and shadow are its own; it is sharp by default, which reads as depth when the background photo is blurred.
+- *Undo the cut-out* removes the copy; *Cut out again* recognises the subject anew.
+- A new background photo, or a used AI repaint, is cut out again by itself.
+- Any photo layer can *Remove the background* in its properties, with the same recognition.
+- The cut-out is kept with the photo in the session and in project files. A photo with no clear subject says so.
 
 ### Repainting the background photo with AI
 
@@ -175,7 +179,7 @@ What each layer allows:
 - each text layer's plate, colour and text effect; whether a sticker follows the channel colour
 - stickers, images and text you added are nudged, turned and resized a little
 
-**Left alone**: the words of the title and tag, the current channel and every channel's colour, the background photo, which layers exist (none added, none removed), custom lettering colours, locked layers.
+**Left alone**: the words of the title and tag, the current channel and every channel's colour, the photo layers' pictures, which layers exist (none added, none removed), custom lettering colours, locked layers.
 
 Each deal is one step of undo, however fast you click. Deal again if you do not like it, or undo to the hand before.
 

@@ -1,4 +1,5 @@
-// Background photo: fitted to cover the canvas, then moved / scaled by the user.
+// Photos: a photo layer fills the canvas (fitted to cover it, then moved / scaled by the user) or
+// sits on it like a print, at its own place, size and angle (see render.js).
 // The gaussian blur is applied to the photo itself, once, on a small working copy, and cached;
 // after that moving or scaling the photo, or editing anything else, costs a single drawImage.
 // (Canvas filters are not available in WebKit web views, hence the JS blur.)
@@ -24,13 +25,16 @@ export function gaussBlur(d, w, h, sigma) {
   for (let i = 0; i < d.length; i += 4) { d[i] = a[i]; d[i + 1] = a[i + 1]; d[i + 2] = a[i + 2]; }
 }
 
-const cache = {};   // one slot for previews, one for hi-res export
+/** A picture's size, whether it is an image or a canvas. */
+export const sizeOf = (im) => [im.naturalWidth || im.width, im.naturalHeight || im.height];
+const cache = new WeakMap();   // per picture: one slot for previews, one for hi-res export
+const slotOf = (store, im, hi) => { const s = store.get(im) || {}; store.set(im, s); return s[hi ? "hi" : "lo"] || (s[hi ? "hi" : "lo"] = { cv: document.createElement("canvas") }); };
 function blurred(im, b, hi) {
-  const cap = hi ? 2400 : 1100, long = Math.max(im.naturalWidth, im.naturalHeight), base = Math.min(1, cap / long);
+  const [iw, ih] = sizeOf(im), cap = hi ? 2400 : 1100, long = Math.max(iw, ih), base = Math.min(1, cap / long);
   const sigma = (b * long * base) / 1920;      // b = radius in px on a 1920-wide rendering of the photo
   const f = Math.max(1, sigma / 1.5);          // the stronger the blur, the smaller the copy it is computed on
-  const w = Math.max(8, Math.round((im.naturalWidth * base) / f)), h = Math.max(8, Math.round((im.naturalHeight * base) / f));
-  const slot = cache[hi ? "hi" : "lo"] || (cache[hi ? "hi" : "lo"] = { cv: document.createElement("canvas") });
+  const w = Math.max(8, Math.round((iw * base) / f)), h = Math.max(8, Math.round((ih * base) / f));
+  const slot = slotOf(cache, im, hi);
   const key = `${b}|${w}|${h}`;
   if (slot.im !== im || slot.key !== key) {
     const c = slot.cv;
@@ -46,12 +50,12 @@ function blurred(im, b, hi) {
   return slot.cv;
 }
 
-const greys = {};   // the photo (or its blurred copy) without its colour: one slot for previews, one for export
+const greys = new WeakMap();   // the photo (or its blurred copy) without its colour, per picture: one slot for previews, one for export
 /** A grey copy of `src` (an image or canvas), computed once and kept until the photo or its blur changes. */
 function greyOf(src, im, key, hi) {
   const cap = hi ? 2400 : 1100, sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height, f = Math.min(1, cap / Math.max(sw, sh));
   const w = Math.max(1, Math.round(sw * f)), h = Math.max(1, Math.round(sh * f));
-  const slot = greys[hi ? "hi" : "lo"] || (greys[hi ? "hi" : "lo"] = { cv: document.createElement("canvas") });
+  const slot = slotOf(greys, im, hi);
   if (slot.im !== im || slot.key !== key) {
     const c = slot.cv;
     c.width = w; c.height = h;
@@ -66,20 +70,24 @@ function greyOf(src, im, key, hi) {
   return slot.cv;
 }
 
-/**
- * Draws `im` behind everything on a w x h (virtual) canvas. adj = {dx,dy,s}; blur in px; dim 0..1;
- * grey 0..1 takes that much of the colour out.
- */
 /** Where the photo lands on a w × h cover: it fills the cover, then is scaled by adj.s and moved by adj.dx / dy. */
 export function photoRect(im, w, h, adj) {
-  const k = Math.max(w / im.naturalWidth, h / im.naturalHeight) * adj.s, iw = im.naturalWidth * k, ih = im.naturalHeight * k;
+  const [nw, nh] = sizeOf(im), k = Math.max(w / nw, h / nh) * adj.s, iw = nw * k, ih = nh * k;
   return { x: (w - iw) / 2 + adj.dx, y: (h - ih) / 2 + adj.dy, iw, ih };
 }
+/**
+ * Draws `im` to fill a w × h (virtual) canvas. adj = {dx,dy,s}; blur in px; dim 0..1 darkens the
+ * whole canvas; grey 0..1 takes that much of the colour out.
+ */
 export function drawPhoto(ctx, im, w, h, adj, blur, dim, hiRes, grey = 0) {
   const { x, y, iw, ih } = photoRect(im, w, h, adj);
+  drawPhotoAt(ctx, im, x, y, iw, ih, blur, hiRes, grey);
+  if (dim > 0) { ctx.fillStyle = `rgba(7,7,12,${dim})`; ctx.fillRect(0, 0, w, h); }
+}
+/** Draws `im` into the rectangle x, y, w × h, blurred by `blur` px and with `grey` of its colour taken out. */
+export function drawPhotoAt(ctx, im, x, y, iw, ih, blur, hiRes, grey = 0) {
   const src = blur > 0 ? blurred(im, blur, hiRes) : im;
   ctx.imageSmoothingQuality = "high";
   if (grey < 1) ctx.drawImage(src, x, y, iw, ih);
   if (grey > 0) { ctx.save(); ctx.globalAlpha = Math.min(1, grey); ctx.drawImage(greyOf(src, im, `${blur}|${hiRes}`, hiRes), x, y, iw, ih); ctx.restore(); }
-  if (dim > 0) { ctx.fillStyle = `rgba(7,7,12,${dim})`; ctx.fillRect(0, 0, w, h); }
 }

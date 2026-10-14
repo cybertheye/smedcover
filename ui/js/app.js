@@ -8,7 +8,7 @@ import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont, ratioText } from "./store.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isRemovable, isPickable, appliesTo, stepIndex, adjust, resetPlacement, writeKey, insertAbove, moveLayer, duplicate } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, writeKey, insertAbove, moveLayer, duplicate } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
@@ -18,12 +18,13 @@ import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, effectUses, warpCorners } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams } from "./style.js";
+import { sizeOf } from "./photo.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
-const FIXED = ["frame", "subject"];       // layers that cannot be moved: the frame follows the template, the subject the photo
+const FIXED = ["frame"];                  // layers that cannot be moved: the frame follows the template
 const PINNED = ["bg", "frame"];          // shown with a padlock in the layer list: always there, never placed by hand
 
 /** Tiny element builder: el("div", {class:"x", onclick}, child, "text"). */
@@ -46,9 +47,7 @@ function el(tag, props = {}, ...kids) {
 const S = {
   settings: normalizeSettings(null),
   profiles: [], profile: null, cover: null,
-  photo: null, photoSrc: "",             // decoded background Image + its data URL
-  photoOriginal: "",                     // the photo as it was before an AI repaint (data URL), or ""
-  photoMask: null,                       // the photo's subject cut out: {img, src, of} — an alpha mask the photo's size, `of` the photo it belongs to
+  photos: new Map(),                     // the photo store: pid -> {src, img, original, mask: {img, src} | null} (see putPhoto)
   imageAi: normalizeImageAi(null),       // the image model that repaints photos (image-ai.json)
   repaintStyles: [],                     // the built-in repaint styles: [{id, file, name}] (ui/repaint-styles/index.json)
   myStyles: [],                          // the user's own repaint styles, Markdown files in the app data folder repaint-styles/ (see userStyle)
@@ -69,6 +68,7 @@ const frame = () => { const s = selSize(), [vw, vh] = virtualSize(s.w, s.h); ret
 function layerName(L) {
   if (L.type === "asset") return assetExists(L.ref) ? assetName(L.ref, getLang()) : t("assets.missing");
   if (L.type === "text") return L.text.split("\n")[0].replace(/\*/g, "").slice(0, 16) || t("layer.text");
+  if (L.type === "photo") return t(L.of ? "layer.photoCut" : L.fill ? "layer.photoFill" : "layer.photo");
   return t("layer." + L.type);
 }
 
@@ -172,13 +172,13 @@ async function applyProfile() {
 
 // ---------- drawing: the main canvas every frame, the thumbnails a little later
 function paint(cv, size, pixelW, cover = S.cover, index = catIndex(), select = null, live = null, extra = {}) {
-  drawCover(cv, { profile: S.profile, catIndex: index, size, pixelW, cover, photo: S.photo, mask: S.photoMask, select, live, ...extra });
+  drawCover(cv, { profile: S.profile, catIndex: index, size, pixelW, cover, photos: S.photos, select, live, ...extra });
 }
 // While a layer is dragged on the canvas, the rest of the cover is painted once and reused (see drawCover).
 let LIVE = null;
 const goLive = (ids) => {
   ids = [].concat(ids);
-  if (ids.includes("bg") && layer("subject")) ids.push("subject");   // the subject is the photo again: it moves with it
+  for (const L of S.cover.layers) if (L.of && ids.includes(L.of)) ids.push(L.id);   // a photo's copies move with it
   const key = ids.join(" ");
   if (!LIVE || LIVE.key !== key) LIVE = { ids, key };
 };
@@ -281,6 +281,7 @@ function addAsset(ref, at) {
 function removeLayer(id = S.layerId) {
   const L = layer(id);
   if (!L || !isRemovable(L.type)) return;
+  if (L.type === "photo") S.cover.layers = S.cover.layers.filter((l) => l.of !== L.id);   // its copies show nothing without it
   const i = S.cover.layers.indexOf(L);
   S.cover.layers.splice(i, 1);
   S.layerId = S.cover.layers[Math.max(1, i - 1)].id;
@@ -339,7 +340,7 @@ function layerAt(e) {
   /** The pointer in the selected layer's own rotated frame, plus the handle under it (if any). */
   function grip(e) {
     const L = layer(), hit = cv._hits && cv._hits.find((h) => h.id === S.layerId);
-    if (group().length || !L || !hit || L.locked || L.type === "bg" || FIXED.includes(L.type)) return null;
+    if (group().length || !L || !hit || hit.fill || L.locked || L.type === "bg" || FIXED.includes(L.type)) return null;
     const p = virtualPoint(e), a = (-hit.r * Math.PI) / 180, dx = p.x - hit.cx, dy = p.y - hit.cy;
     const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
     const handle = handles(hit, p.k).find((h) => Math.hypot(lx - h.lx, ly - h.ly) <= 11 * p.k);
@@ -350,7 +351,7 @@ function layerAt(e) {
     const g = grip(e);
     if (g && g.handle) { cv.style.cursor = CURSOR[g.handle]; return; }
     const L = layerAt(e);
-    cv.style.cursor = !L || L.type === "bg" ? (S.photo ? "move" : "default") : "grab";
+    cv.style.cursor = !L || L.type === "bg" ? "default" : fillsCanvas(L) ? "move" : "grab";
   });
   cv.addEventListener("pointerdown", (e) => {
     if (S.mode !== "edit") return;
@@ -404,18 +405,20 @@ function layerAt(e) {
       cv.onpointerup = cv.onpointercancel = done(() => moved);
       return;
     }
-    const L = layerAt(e);
+    let L = layerAt(e);
     if (!L) return;
-    const many = group();
+    const many = group(), sel = layer();
     if (e.shiftKey && L.type !== "bg") return togglePick(L.id);   // shift-click: into the selection, or out of it
+    // a selected photo that fills the canvas is dragged from anywhere on the ground, even where the colour block lies over it
+    if (!e.shiftKey && !many.length && sel && fillsCanvas(sel) && !sel.locked && (L === sel || L.type === "bg" || L.type === "accent" || L.locked)) L = sel;
     // On the ground — the background, the colour block, anything locked — a drag draws a rectangle
     // round what to select, and a click selects what was clicked. Ground moves only once it is the
     // selected layer (the photo, or the colour block); something locked never does.
-    const ground = L.type === "bg" || L.type === "accent" || L.locked;
-    if (ground && (S.layerId !== L.id || many.length || e.shiftKey || L.locked || (L.type === "bg" && !S.photo))) return marquee(e, L);
+    const ground = L.type === "bg" || L.type === "accent" || L.locked || fillsCanvas(L);
+    if (ground && (L !== sel || many.length || e.shiftKey || L.locked || L.type === "bg")) return marquee(e, L);
     if (many.some((x) => x.id === L.id)) return dragGroup(e, many, L);
     selectLayer(L.id);
-    if (L.locked || (L.type === "bg" && !S.photo)) return;
+    if (L.locked || L.type === "bg") return;
     let last = virtualPoint(e), moved = false;
     cv.setPointerCapture(e.pointerId);
     goLive(L.id);
@@ -458,7 +461,7 @@ function layerAt(e) {
     if (S.mode !== "edit") return;
     e.preventDefault();
     const L = layerAt(e);
-    if (!L || L.locked || FIXED.includes(L.type) || (L.type === "bg" && !S.photo)) return;
+    if (!L || L.locked || FIXED.includes(L.type) || L.type === "bg") return;
     selectLayer(L.id);
     goLive(L.id); later("live", 300, endLive);
     edit(L, e.altKey ? { rot: e.deltaY > 0 ? 2 : -2 } : { scale: Math.exp(-e.deltaY * 0.0015) });
@@ -509,29 +512,117 @@ function coverTab() {
       el("textarea", { value: c.title, spellcheck: false, oninput: (e) => { c.title = e.target.value; touch({ cover: true }); } }),
       el("div", { class: "hint" }, t("cover.titleHint"))),
     el("div", {}, cap("cover.tag"), textInput(c.tag, (v) => { c.tag = v; touch({ cover: true }); }, { placeholder: t("cover.tagPh") })),
-    el("div", { class: "box" }, cap("cover.photo"),
-      el("div", { class: "row", style: "margin-top:0" },
-        el("button", { class: "btn", onclick: async () => { const f = await pickFile("image/*"); if (f) setPhoto(await readAs(f, "readAsDataURL")); } }, t("cover.pick")),
-        el("button", { class: "btn", disabled: !S.photo, onclick: () => setPhoto("") }, t("cover.removePhoto"))),
-      S.photo && el("div", { class: "thumb" }, el("img", { src: S.photoSrc, alt: "" }),
-        el("span", {}, `${S.photo.naturalWidth} × ${S.photo.naturalHeight}`, S.photoOriginal && ` · ${t("rep.isRepainted")}`)),
-      el("div", { class: "hint" }, t("cover.photoHint")),
-      S.photo && cutBox(),
-      S.photo && repaintBox()),
+    photoBox(),
   ];
 }
-/** Sets the background photo. `original` is the photo it was repainted from, if it was. */
-async function setPhoto(src, original = "") {
-  S.photoSrc = src || "";
-  S.photo = src ? await loadImage(src) : null;
-  if (src && !S.photo) { S.photoSrc = ""; toast(t("msg.badFile")); }
-  S.photoOriginal = S.photo ? original : "";
-  REP.result = null; REP.error = "";
-  setMask("");   // a cut-out belongs to the photo it was made from
-  files.write("session-photo", S.photoSrc).catch(() => null);
-  files.write("session-photo-original", S.photoOriginal).catch(() => null);
-  if (S.photo) S.layerId = "bg";
-  touch({ panel: true, side: true });
+/** Cover → photos: the background photo (with its cut-out and repaint) and photos added as layers. */
+function photoBox() {
+  const main = mainPhoto(), rec = recordOf(main), im = rec && rec.img;
+  return el("div", { class: "box" }, cap("cover.photo"),
+    el("div", { class: "row", style: "margin-top:0" },
+      el("button", { class: "btn", onclick: async () => { const f = await pickFile("image/*"); if (f) setBackground(await readAs(f, "readAsDataURL")); } }, t(main ? "cover.replace" : "cover.pick")),
+      el("button", { class: "btn", disabled: !main, onclick: () => setBackground("") }, t("cover.removePhoto"))),
+    im && el("div", { class: "thumb" }, el("img", { src: rec.src, alt: "" }),
+      el("span", {}, `${sizeOf(im)[0]} × ${sizeOf(im)[1]}`, rec.original && ` · ${t("rep.isRepainted")}`)),
+    el("div", { class: "hint" }, t("cover.photoHint")),
+    im && cutBox(),
+    im && repaintBox(),
+    el("button", { class: "btn wide", style: "margin-top:14px", onclick: addPhotoLayer }, t("cover.addPhoto")),
+    el("div", { class: "hint" }, t("cover.addPhotoHint")));
+}
+
+// ---------- the photo store: pictures for photo layers, kept apart from the layers so a cover stays small
+/**
+ * Adds a picture to the store and returns its id (null if it cannot be read). A record is
+ * {src, img, original, mask}: the picture (data URL, decoded), the one it was repainted from, and
+ * its subject mask ({img, src}, alpha). In the session each is a file in photos/.
+ */
+async function putPhoto(src, { original = "", mask = "", pid = "", save = true } = {}) {
+  const img = src ? await loadImage(src) : null;
+  if (!img) return null;
+  const id = pid || "p" + uid(), rec = { src, img, original, mask: null };
+  const m = mask ? await loadImage(mask) : null;
+  if (m) rec.mask = { img: m, src: mask };
+  S.photos.set(id, rec);
+  if (save) savePhoto(id);
+  return id;
+}
+function savePhoto(pid) {
+  const r = S.photos.get(pid);
+  if (!r) return;
+  files.write(`photos/${pid}`, r.src).catch(fail);
+  files.write(`photos/${pid}.original`, r.original || "").catch(fail);
+  files.write(`photos/${pid}.mask`, r.mask ? r.mask.src : "").catch(fail);
+}
+const pidsOf = (cover) => new Set(cover.layers.filter((l) => l.type === "photo" && l.pid).map((l) => l.pid));
+/** Reads the session's pictures for these ids, and drops the files of any others. */
+async function loadPhotos(pids) {
+  for (const pid of pids) {
+    if (S.photos.has(pid)) continue;
+    const read = (ext) => files.read(`photos/${pid}${ext}`).catch(() => "");
+    await putPhoto((await read("")) || "", { original: (await read(".original")) || "", mask: (await read(".mask")) || "", pid, save: false });
+  }
+  for (const f of await files.list("photos").catch(() => [])) if (!pids.has(f.replace(/\.(original|mask)$/, ""))) files.remove(`photos/${f}`).catch(() => null);
+}
+/** The cover's background photo: the lowest photo layer that fills the canvas, on this channel. */
+const mainPhoto = () => S.cover.layers.find((l) => fillsCanvas(l) && appliesTo(l, cat().id)) || null;
+/** The picture a photo layer shows: its own, or for a copy its original's. */
+const recordOf = (L) => { const base = L && (L.of ? layer(L.of) : L); return (base && S.photos.get(base.pid)) || null; };
+/** The copy of a photo that stands, cut out, in front of the title. */
+const frontOf = (L) => (L ? S.cover.layers.find((l) => l.type === "photo" && l.of === L.id && l.cut) || null : null);
+
+/** Sets the background photo from a data URL ("" removes it, with its copies). */
+async function setBackground(src) {
+  const main = mainPhoto();
+  REP.result = null; REP.error = ""; CUT.error = "";
+  if (!src) {
+    if (main) { S.cover.layers = S.cover.layers.filter((l) => l !== main && l.of !== main.id); S.layerId = "bg"; }
+    return touch({ cover: true, panel: true, side: true });
+  }
+  const pid = await putPhoto(src);
+  if (!pid) return toast(t("msg.badFile"));
+  let L = main;
+  if (L) L.pid = pid;
+  else { L = newLayer("photo", { pid, fill: true }); insertAbove(S.cover.layers, "bg", L); }
+  S.layerId = L.id;
+  touch({ cover: true, panel: true, side: true });
+  if (frontOf(L) || S.cover.layers.some((l) => l.of === L.id && l.cut)) recut(pid);   // its cut-out copies need the new photo's subject
+}
+/** Adds a photo as a layer of its own, on the canvas like a print. */
+async function addPhotoLayer() {
+  const f = await pickFile("image/*");
+  if (!f) return;
+  const pid = await putPhoto(await readAs(f, "readAsDataURL"));
+  if (!pid) return toast(t("msg.badFile"));
+  addLayer(newLayer("photo", { pid }));
+  toast(t("cover.photoAdded"));
+}
+/**
+ * Turns a cover of an earlier version into this one: the background photo kept beside the cover
+ * (`legacy` {src, original, mask}) becomes a photo layer filling the canvas, taking the background
+ * layer's place, blur and dim; a subject layer becomes that photo's cut-out copy.
+ */
+async function upgradeCover(cover, legacy) {
+  const bg = cover.layers.find((l) => l.id === "bg");
+  let main = cover.layers.find((l) => fillsCanvas(l));
+  if (!main && legacy && legacy.src) {
+    const pid = await putPhoto(legacy.src, { original: legacy.original || "", mask: legacy.mask || "" });
+    if (pid) {
+      main = newLayer("photo", { pid, fill: true, blur: bg.blur || 0, dim: bg.dim || 0 });
+      main.t = { all: { ...bg.t.all, x: 0.5 + bg.t.all.x, y: 0.5 + bg.t.all.y }, by: JSON.parse(JSON.stringify(bg.t.by)) };
+      cover.layers.splice(cover.layers.indexOf(bg) + 1, 0, main);
+    }
+  }
+  if (bg) { bg.blur = 0; bg.dim = 0; bg.t = { all: { x: 0, y: 0, s: 1, r: 0, kx: 1, ky: 1 }, by: {} }; }
+  cover.layers = cover.layers.flatMap((l) => {
+    if (l.type !== "subject") return [l];
+    if (!main) return [];
+    const c = newLayer("photo", { of: main.id, cut: true, outline: l.outline || 0, shadow: l.shadow || 0, blur: l.follow ? main.blur : 0, dim: l.follow ? main.dim : 0 });
+    if (l.ink) c.ink = l.ink;
+    c.visible = l.visible; c.o = l.o;
+    return [c];
+  });
+  return cover;
 }
 
 function tile(ref, onRemove) {
@@ -567,61 +658,68 @@ function assetsTab() {
   ];
 }
 // ---------- AI-generated assets
-// ---------- the photo's subject, cut out (Apple Vision, macOS 14+; see src-tauri/src/subject.rs)
+// ---------- a photo's subject, cut out (Apple Vision, macOS 14+; see src-tauri/src/subject.rs)
 const CUT = { busy: false, error: "" };
 const canCut = () => native && /Mac/i.test(navigator.userAgent);
-/** Sets the subject mask of the current photo from a PNG data URL ("" for none), and keeps it for the session. */
-async function setMask(src) {
-  const img = src ? await loadImage(src) : null;
-  S.photoMask = img && S.photo ? { img, src, of: S.photo } : null;
-  files.write("session-photo-mask", S.photoMask ? src : "").catch(() => null);
-}
 /** The photo as JPEG bytes, upright, no bigger than `max` on its longer side. */
 async function photoBytes(im, max = 4096) {
-  const k = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight)), cv = document.createElement("canvas");
-  cv.width = Math.round(im.naturalWidth * k); cv.height = Math.round(im.naturalHeight * k);
+  const [w, h] = sizeOf(im), k = Math.min(1, max / Math.max(w, h)), cv = document.createElement("canvas");
+  cv.width = Math.round(w * k); cv.height = Math.round(h * k);
   const x = cv.getContext("2d");
   x.fillStyle = "#ffffff"; x.fillRect(0, 0, cv.width, cv.height); x.drawImage(im, 0, 0, cv.width, cv.height);
   return new Uint8Array(await (await new Promise((r) => cv.toBlob(r, "image/jpeg", 0.95))).arrayBuffer());
 }
-/**
- * Cuts the subject out of the photo and puts the subject layer above the title (if the cover has
- * none yet). Returns whether it worked.
- */
-async function cutOut() {
-  if (!S.photo || CUT.busy || !canCut()) return false;
-  const photo = S.photo;
-  Object.assign(CUT, { busy: true, error: "" }); if (onCoverTab()) renderPanel();
-  let ok = false;
+/** Makes the subject mask of a picture in the store (again, with `fresh`). Returns whether there is one; why not goes to CUT.error. */
+async function ensureMask(pid, fresh = false) {
+  const rec = S.photos.get(pid);
+  if (!rec || !canCut()) return false;
+  if (rec.mask && !fresh) return true;
+  Object.assign(CUT, { busy: true, error: "" }); if (onCoverTab()) renderPanel(); renderSide();
+  const img = rec.img;
   try {
-    const png = await invoke("subject_mask", await photoBytes(photo));
-    if (S.photo !== photo) return false;              // the photo changed meanwhile
-    const src = await readAs(new Blob([png], { type: "image/png" }), "readAsDataURL");
-    await setMask(src);
-    if (!layer("subject")) insertAbove(S.cover.layers, "title", newLayer("subject"));
-    S.layerId = "subject"; ok = true;
-    touch({ cover: true, side: true });
+    const png = await invoke("subject_mask", await photoBytes(img));
+    if (rec.img !== img) return false;   // the picture changed meanwhile
+    const src = await readAs(new Blob([png], { type: "image/png" }), "readAsDataURL"), m = await loadImage(src);
+    rec.mask = m ? { img: m, src } : null;
+    savePhoto(pid);
+    return !!rec.mask;
   } catch (e) {
-    const m = String(e && e.message ? e.message : e);
-    CUT.error = /no subject/i.test(m) ? t("cut.none") : /^unsupported/i.test(m) ? t("cut.unsupported") : t("msg.failed", m);
-  } finally { CUT.busy = false; if (onCoverTab()) renderPanel(); }
-  return ok;
+    const msg = String(e && e.message ? e.message : e);
+    CUT.error = /no subject/i.test(msg) ? t("cut.none") : /^unsupported/i.test(msg) ? t("cut.unsupported") : t("msg.failed", msg);
+    return false;
+  } finally { CUT.busy = false; touch({ cover: true, side: true }); if (onCoverTab()) renderPanel(); }
 }
-/** Takes the cut-out back: the subject layer goes, and the mask with it. */
+/** A picture changed (a new one, a repaint): the layers cut from it get its new subject. */
+async function recut(pid) { if (S.cover.layers.some((l) => l.type === "photo" && l.cut && recordOf(l) === S.photos.get(pid))) await ensureMask(pid, true); }
+/**
+ * Cuts the background photo's subject out and stands it in front of the title: a copy of the
+ * photo layer, cut out, above the title (if there is none yet). Returns whether it worked.
+ */
+async function cutOut(fresh = false) {
+  const main = mainPhoto();
+  if (!main || CUT.busy || !canCut()) return false;
+  if (!(await ensureMask(main.pid, fresh))) return false;
+  let c = frontOf(main);
+  if (!c) { c = newLayer("photo", { of: main.id, cut: true }); insertAbove(S.cover.layers, "title", c); }
+  S.layerId = c.id;
+  touch({ cover: true, side: true, panel: true });
+  return true;
+}
+/** Takes the cut-out back: the copies standing in front go. */
 function uncut() {
-  const i = S.cover.layers.findIndex((l) => l.id === "subject");
-  if (i >= 0) S.cover.layers.splice(i, 1);
-  if (S.layerId === "subject") S.layerId = "bg";
-  setMask("");
+  const main = mainPhoto();
+  if (!main) return;
+  S.cover.layers = S.cover.layers.filter((l) => !(l.of === main.id && l.cut));
+  if (!layer()) S.layerId = main.id;
   touch({ cover: true, side: true, panel: true });
   toast(t("cut.undone"));
 }
 function cutBox() {
   if (!canCut()) return el("div", { class: "hint" }, t("cut.onlyMac"));
-  const has = !!(S.photoMask && layer("subject"));
+  const has = !!frontOf(mainPhoto());
   return el("div", { class: "cut" },
-    el("button", { class: "btn wide", style: "margin-top:10px", disabled: CUT.busy, onclick: cutOut }, t(CUT.busy ? "cut.busy" : has ? "cut.again" : "cut.go")),
-    (has || S.photoMask) && el("button", { class: "btn wide", disabled: CUT.busy, onclick: uncut }, t("cut.undo")),
+    el("button", { class: "btn wide", style: "margin-top:10px", disabled: CUT.busy, onclick: () => cutOut(has) }, t(CUT.busy ? "cut.busy" : has ? "cut.again" : "cut.go")),
+    has && el("button", { class: "btn wide", disabled: CUT.busy, onclick: uncut }, t("cut.undo")),
     CUT.error && el("div", { class: "hint err" }, CUT.error),
     el("div", { class: "hint" }, t(has ? "cut.done" : "cut.hint")));
 }
@@ -675,18 +773,19 @@ async function imageCall(cfg, prompt, pic) {
 /** Repaints the background photo — always from the original, so repaints do not pile up on each other. */
 async function repaintPhoto() {
   const cfg = S.imageAi;
-  if (!S.photo || REP.busy) return;
+  const rec = recordOf(mainPhoto());
+  if (!rec || REP.busy) return;
   const mine = myStyle(), preset = builtIn();
   if (mine && !promptOf(mine.body)) return toast(t("rep.needCustom"));
   let text = mine ? promptOf(mine.body) : "";
   if (preset) { try { text = await styleText(preset); } catch (e) { REP.error = String(e.message); return renderPanel(); } }
-  const job = ++REP.job, from = S.photoOriginal ? await loadImage(S.photoOriginal) : S.photo;
+  const job = ++REP.job, from = rec.original ? await loadImage(rec.original) : rec.img;
   const prompt = repaintPrompt({ source: mine || preset ? "text" : "look", look: S.profile.style.look, color: cat().color, text, notes: cfg.notes });
   Object.assign(REP, { busy: true, error: "", result: null, since: Date.now() });
   renderPanel();
   const tick = setInterval(() => { const b = document.getElementById("rep-go"); if (b && REP.busy) b.textContent = repBusyText(); }, 1000);
   let result = null, error = "";
-  try { result = await imageCall(cfg, prompt, shrink(from || S.photo, 1536)); }
+  try { result = await imageCall(cfg, prompt, shrink(from || rec.img, 1536)); }
   catch (e) { error = String(e && e.message ? e.message : e); }
   clearInterval(tick);
   if (job !== REP.job) return;                       // cancelled meanwhile
@@ -694,12 +793,25 @@ async function repaintPhoto() {
   if (onCoverTab()) renderPanel();
 }
 function cancelRepaint() { REP.job++; Object.assign(REP, { busy: false, error: "", result: null }); renderPanel(); }
+/**
+ * Puts another picture into a photo's record — a repaint, or back to the original — so every layer
+ * showing it changes; its subject is cut out again for the layers that are cut.
+ */
+async function swapPicture(L, src, repainted) {
+  const rec = recordOf(L), pid = L && (L.of ? layer(L.of) : L).pid, img = src ? await loadImage(src) : null;
+  if (!rec || !img) return;
+  if (repainted) rec.original = rec.original || rec.src; else rec.original = "";
+  Object.assign(rec, { src, img, mask: null });
+  REP.result = null;
+  savePhoto(pid);
+  touch({ cover: true, panel: true, side: true });
+  recut(pid);
+}
 async function useRepaint() {
   const r = REP.result;
   if (!r) return;
-  await setPhoto(r.src, S.photoOriginal || S.photoSrc);
+  await swapPicture(mainPhoto(), r.src, true);
   toast(t("rep.used"));
-  if (layer("subject")) cutOut();   // the subject layer shows the new photo's subject
 }
 /** The built-in style the repaint uses now, or null. */
 const builtIn = () => (S.imageAi.source.startsWith("preset:") ? S.repaintStyles.find((s) => "preset:" + s.id === S.imageAi.source) || null : null);
@@ -807,12 +919,12 @@ function repaintBox() {
     REP.error && el("div", { class: "hint err" }, t("msg.failed", REP.error)),
     r && [
       el("div", { class: "compare" },
-        el("figure", {}, el("img", { src: S.photoOriginal || S.photoSrc, alt: "" }), el("figcaption", {}, t("rep.before"))),
+        el("figure", {}, el("img", { src: recordOf(mainPhoto()).original || recordOf(mainPhoto()).src, alt: "" }), el("figcaption", {}, t("rep.before"))),
         el("figure", {}, el("img", { src: r.src, alt: "" }), el("figcaption", {}, `${t("rep.after")} · ${r.w} × ${r.h}`))),
       el("div", { class: "row" },
         el("button", { class: "btn solid", onclick: useRepaint }, t("rep.use")),
         el("button", { class: "btn", onclick: () => { REP.result = null; renderPanel(); } }, t("ai.discard")))],
-    S.photoOriginal && el("button", { class: "btn wide", style: "margin-top:8px", disabled: REP.busy, onclick: () => setPhoto(S.photoOriginal) }, t("rep.restore")),
+    recordOf(mainPhoto()).original && el("button", { class: "btn wide", style: "margin-top:8px", disabled: REP.busy, onclick: () => swapPicture(mainPhoto(), recordOf(mainPhoto()).original, false) }, t("rep.restore")),
     el("div", { class: "hint" }, t("rep.hint", t("img.provider." + c.provider), c.model)));
 }
 /** The image model's settings: Setup → AI → Image model. */
@@ -1048,7 +1160,7 @@ function styleTab() {
       el("div", { class: "hint" }, t("style.lookHint")),
       L.params.map((d) => (d.toggle
         ? el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: vals[d.key] > 0, onchange: (e) => tune(d.key, e.target.checked ? 1 : 0) }), el("span", {}, d.name[getLang()]))
-        : d.needsPhoto && !S.photo
+        : d.needsPhoto && !recordOf(mainPhoto())
           ? el("div", { class: "sl off", style: "grid-template-columns:84px 1fr", title: t("style.needsPhoto") }, el("span", {}, d.name[getLang()]), el("span", { class: "why" }, t("style.needsPhoto")))   // nothing for it to act on yet
           : slider2(d.name[getLang()], d.min, d.max, d.step, vals[d.key], (v) => tune(d.key, v)))),
       L.seeded && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { st.lookSeed = Math.floor(Math.random() * 1000000); touch({ profile: true }); } }, t("style.shuffle")),
@@ -1059,8 +1171,8 @@ function styleTab() {
     !L.oneTheme && el("div", {}, cap("style.theme"), select([["dark", t("theme.dark")], ["light", t("theme.light")]], st.theme, (v) => set("theme", v))),
     check("style.imageShadow", st.imageShadow, (v) => set("imageShadow", v)),
     el("div", { class: "box" }, cap("style.design"),
-      el("button", { class: "btn wide", onclick: () => { S.profile.design.layers = JSON.parse(JSON.stringify(S.cover.layers)); touch({ profile: true }); toast(t("style.designSaved")); } }, t("style.saveDesign")),
-      el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.cover.layers = JSON.parse(JSON.stringify(S.profile.design.layers)); S.layerId = "title"; touch({ cover: true, side: true }); } }, t("style.loadDesign")),
+      el("button", { class: "btn wide", onclick: () => { S.profile.design.layers = JSON.parse(JSON.stringify(S.cover.layers.filter((l) => l.type !== "photo"))); touch({ profile: true }); toast(t("style.designSaved")); } }, t("style.saveDesign")),
+      el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.cover.layers = keepPhotos(JSON.parse(JSON.stringify(S.profile.design.layers)), S.cover.layers); S.layerId = "title"; touch({ cover: true, side: true }); } }, t("style.loadDesign")),
       el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { for (const L of S.cover.layers) if (!isFree(L.type)) resetPlacement(L, "all"); touch({ cover: true, side: true }); } }, t("style.resetAll")),
       el("div", { class: "hint" }, t("style.designHint"))),
   ];
@@ -1198,19 +1310,19 @@ function layerRow(L) {
     icon(L.visible ? "◉" : "○", !L.visible, t("layers.show"), () => { L.visible = !L.visible; }),
     PINNED.includes(L.type) ? el("span", { class: "ic pin", title: t("layers.pinned." + L.type) }, "🔒")
       : icon(L.locked ? "▣" : "□", !L.locked, t("layers.lock"), () => { L.locked = !L.locked; }),
-    el("span", { class: "nm" }, layerName(L), isFree(L.type) && el("span", { class: "ty" }, L.type === "text" ? "T" : "+"),
+    el("span", { class: "nm" }, layerName(L), isFree(L.type) && el("span", { class: "ty" }, L.type === "text" ? "T" : L.type === "photo" ? "▣" : "+"),
       L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) })));
 }
 function placementControls(L) {
-  if (L.type === "subject") return null;   // it goes where the photo goes
+  if (L.type === "photo" && L.of) return null;   // a copy goes where its original goes
   if (FIXED.includes(L.type)) return el("div", { class: "hint", style: "margin:0" }, t("props.fixedHint"));
-  if (L.type === "bg" && !S.photo) return null;
-  const f = frame(), all = S.settings.scope === "all", free = isFree(L.type), noRot = L.type === "bg";
+  if (L.type === "bg") return null;
+  const f = frame(), all = S.settings.scope === "all", fills = fillsCanvas(L), free = isFree(L.type) && !fills, noRot = fills;   // a photo filling the canvas is placed like a background: moved and scaled
   const b = { dx: 0, dy: 0, s: 1, r: 0, kx: 1, ky: 1, ...L.t.by[writeKey(L, f.key, f.catId)] };
   const hold = () => { goLive(L.id); later("live", 300, endLive); };   // a slider being dragged moves one layer, like a drag on the canvas
   const setAll = (k, v) => { hold(); L.t.all[k] = v; touch({ cover: true }); };
   const setBy = (k, v) => { hold(); L.t.by[writeKey(L, f.key, f.catId)] = { ...b, ...L.t.by[writeKey(L, f.key, f.catId)], [k]: v }; touch({ cover: true }); };
-  const lo = free ? 0 : -1, hi = free ? 1 : 1;
+  const lo = free ? 0 : fills ? -0.5 : -1, hi = free ? 1 : fills ? 1.5 : 1;
   return [
     all ? [
       slider("props.x", lo, hi, 0.002, L.t.all.x, pct, (v) => setAll("x", v)),
@@ -1263,24 +1375,45 @@ function inkControl(L, key, labelKey, shown) {
     el("input", { type: "color", value: L[key] || shown, oninput: (e) => { L[key] = e.target.value; touch({ cover: true }); later("side", 600, renderSide); } }),
     el("button", { class: "btn", disabled: !own, title: t("props.inkAutoHint"), onclick: () => { delete L[key]; touch({ cover: true, side: true }); } }, t(own ? "props.inkAuto" : "props.inkIsAuto")));
 }
+/** The properties of a photo layer. */
+function photoControls(L, set) {
+  const base = L.of ? layer(L.of) : L, rec = recordOf(L), pid = base && base.pid;
+  const replace = async () => {
+    const f = await pickFile("image/*");
+    if (!f) return;
+    const id = await putPhoto(await readAs(f, "readAsDataURL"));
+    if (!id) return toast(t("msg.badFile"));
+    L.pid = id; touch({ cover: true, side: true, panel: true });
+    if (S.cover.layers.some((l) => l.cut && (l === L || l.of === L.id))) ensureMask(id);
+  };
+  const cut = async (on) => { if (on && !(await ensureMask(pid))) return renderSide(); set("cut", on, true); };
+  return [
+    !rec && el("div", { class: "hint err", style: "margin-top:0" }, t("props.photoMissing")),
+    L.of ? el("div", { class: "hint", style: "margin-top:0" }, t("props.copyHint", base ? layerName(base) : "—"))
+      : [check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
+         el("button", { class: "btn wide", style: "margin-top:8px", onclick: replace }, t("props.replacePhoto"))],
+    slider("props.blur", 0, 80, 1, L.blur, px, (v) => set("blur", v)),
+    slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => set("dim", v)),
+    check("props.treat", L.treat, (v) => set("treat", v)),
+    canCut()
+      ? el("button", { class: "btn wide", style: "margin-top:10px", disabled: CUT.busy, onclick: () => cut(!L.cut) }, t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut"))
+      : el("div", { class: "hint" }, t("cut.onlyMac")),
+    L.cut && CUT.error && el("div", { class: "hint err" }, CUT.error),
+    slider("props.outline", 0, 40, 1, L.outline, px, (v) => set("outline", v)),
+    inkControl(L, "ink", "props.outlineInk", "#ffffff"),
+    slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => set("shadow", v)),
+    el("div", { class: "hint" }, t(L.of ? "props.copyMore" : L.fill ? "props.fillHint" : "props.printHint")),
+  ];
+}
 function typeControls(L) {
   const set = (k, v, side = false) => { L[k] = v; touch({ cover: true, side }); };
   switch (L.type) {
     case "bg": return [
       !(LOOKS[S.profile.style.look] || LOOKS.cel).oneTheme && select([["dark", t("theme.dark")], ["light", t("theme.light")]], S.profile.style.theme, (v) => { S.profile.style.theme = v; touch({ profile: true }); }),
       check("props.grid", L.grid, (v) => set("grid", v)),
-      S.photo && [slider("props.blur", 0, 80, 1, L.blur, px, (v) => set("blur", v)), slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => set("dim", v))],
+      el("div", { class: "hint" }, t("props.bgHint")),
     ];
-    case "subject": return [
-      !S.photoMask && el("div", { class: "hint err", style: "margin-top:0" }, t("cut.noMask")),
-      slider("props.outline", 0, 40, 1, L.outline, px, (v) => set("outline", v)),
-      inkControl(L, "ink", "props.outlineInk", "#ffffff"),
-      slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => set("shadow", v)),
-      check("props.follow", L.follow, (v) => set("follow", v)),
-      canCut() && el("button", { class: "btn wide", style: "margin-top:10px", disabled: CUT.busy, onclick: cutOut }, t(CUT.busy ? "cut.busy" : "cut.again")),
-      el("button", { class: "btn wide", style: "margin-top:8px", disabled: CUT.busy, onclick: uncut }, t("cut.undo")),
-      el("div", { class: "hint" }, t("props.subjectHint")),
-    ];
+    case "photo": return photoControls(L, set);
     case "accent": return el("div", { style: "margin-bottom:10px" }, select(ACCENT_SHAPES.map((k) => [k, `${t("props.shape")} · ${t("shape." + k)}`]), L.shape, (v) => set("shape", v, false)), null);
     case "brand": return [check("props.rail", L.rail, (v) => set("rail", v)), fontControl(L), inkControl(L, "ink", "props.ink", "#ffffff")];
     case "title": return [
@@ -1513,6 +1646,17 @@ const profileActions = {
   export: () => saveText(`${S.profile.name || "profile"}.smedprofile.json`,
     JSON.stringify({ app: "smedcover", kind: "profile", version: 2, profile: S.profile, assets: embedAssets(usedUserAssets(S.profile, null)) }, null, 2)),
 };
+/** A new layer list with the photo layers of `old` put back, each above the layer it was above (or the background). */
+function keepPhotos(layers, old) {
+  old.forEach((L, i) => { if (L.type !== "photo") return; const below = old[i - 1]; insertAbove(layers, below && layers.some((l) => l.id === below.id) ? below.id : "bg", L); });
+  return layers;
+}
+/** The pictures a cover's photo layers show, for a project file: {pid: {src, original, mask}}. */
+function embedPhotos(cover) {
+  const out = {};
+  for (const pid of pidsOf(cover)) { const r = S.photos.get(pid); if (r) out[pid] = { src: r.src, original: r.original || null, mask: r.mask ? r.mask.src : null }; }
+  return out;
+}
 const projectActions = {
   async open() {
     const f = await pickFile(".json,application/json");
@@ -1521,17 +1665,19 @@ const projectActions = {
       const raw = JSON.parse(await readAs(f, "readAsText"));
       if (!raw || raw.kind !== "project") throw 0;
       await adoptEmbedded(raw.assets);
-      S.cover = normalizeCover(raw.cover, S.profile);
       const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
-      await setPhoto(pic(raw.photo), pic(raw.photoOriginal));
-      await setMask(pic(raw.photoMask));
+      const cover = normalizeCover(raw.cover, S.profile);
+      for (const [pid, p] of Object.entries(raw.photos && typeof raw.photos === "object" ? raw.photos : {})) {
+        if (/^[\w-]{1,40}$/.test(pid) && p && pic(p.src)) await putPhoto(pic(p.src), { original: pic(p.original), mask: pic(p.mask), pid });
+      }
+      S.cover = await upgradeCover(cover, { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
       S.layerId = "title";
       touch({ cover: true, panel: true, side: true });
     } catch (e) { toast(t("msg.badFile")); }
   },
   save: () => saveText(`${(S.cover.title.split("\n")[0] || "cover").replace(/[*\\/:?"<>|]+/g, "").slice(0, 24) || "cover"}.smedcover.json`,
-    JSON.stringify({ app: "smedcover", kind: "project", version: 2, profileName: S.profile.name, cover: S.cover, photo: S.photoSrc || null, photoOriginal: S.photoOriginal || null, photoMask: (S.photoMask && S.photoMask.src) || null, assets: embedAssets(usedUserAssets(null, S.cover)) })),
-  reset() { S.cover = normalizeCover({ catId: S.cover.catId }, S.profile); S.layerId = "title"; setPhoto(""); touch({ cover: true, panel: true, side: true }); },
+    JSON.stringify({ app: "smedcover", kind: "project", version: 3, profileName: S.profile.name, cover: S.cover, photos: embedPhotos(S.cover), assets: embedAssets(usedUserAssets(null, S.cover)) })),
+  reset() { S.cover = normalizeCover({ catId: S.cover.catId }, S.profile); S.layerId = "title"; touch({ cover: true, panel: true, side: true }); },
 };
 
 // ---------- chrome
@@ -1608,7 +1754,7 @@ function syncTabs() {
   $("tabs").replaceChildren(...Object.keys(TABS[S.mode]).map((k) => el("button", { class: k === S.tab[S.mode] ? "on" : "", onclick: () => { S.tab[S.mode] = k; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, t("tab." + k))));
 }
 /** Makes the profile's look current, for anything drawn outside a cover (asset tiles, previews). */
-const useLook = () => setLook(S.profile.style.look, S.profile.style.lookParams[S.profile.style.look], S.profile.style.lookSeed, !!S.photo || S.profile.style.theme !== "light");
+const useLook = () => setLook(S.profile.style.look, S.profile.style.lookParams[S.profile.style.look], S.profile.style.lookSeed, !!recordOf(mainPhoto()) || S.profile.style.theme !== "light");
 function renderPanel() {
   if (!S.cover) return;
   useLook();
@@ -1641,7 +1787,7 @@ addEventListener("drop", async (e) => {
   if (!hasFiles(e)) return;
   e.preventDefault(); dragDepth = 0; document.body.classList.remove("drop");
   const f = [...e.dataTransfer.files].find((x) => x.type.startsWith("image/"));
-  if (f) setPhoto(await readAs(f, "readAsDataURL"));
+  if (f) setBackground(await readAs(f, "readAsDataURL"));
 });
 addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
@@ -1695,10 +1841,14 @@ async function start() {
   S.settings.profileId = S.profile.id; persistSettings();
   S.cover = normalizeCover(await readJson("session.json").catch(() => null), S.profile);
   if (!S.cover.title) S.cover.title = getLang() === "zh" ? "在这里写标题\n*一行*就是一行" : "Write your title\n*one line* each";
-  S.photoSrc = (await files.read("session-photo").catch(() => "")) || "";
-  S.photo = S.photoSrc ? await loadImage(S.photoSrc) : null;
-  S.photoOriginal = S.photo ? (await files.read("session-photo-original").catch(() => "")) || "" : "";
-  if (S.photo) await setMask((await files.read("session-photo-mask").catch(() => "")) || "");
+  await loadPhotos(pidsOf(S.cover));
+  const legacy = (await files.read("session-photo").catch(() => "")) || "";   // before photos were layers the session kept one
+  if (legacy) {
+    const read = (f) => files.read(f).catch(() => "").then((v) => v || "");
+    S.cover = await upgradeCover(S.cover, { src: legacy, original: await read("session-photo-original"), mask: await read("session-photo-mask") });
+    for (const f of ["session-photo", "session-photo-original", "session-photo-mask"]) files.remove(f).catch(() => null);
+    touch({ cover: true });
+  } else S.cover = await upgradeCover(S.cover, null);
   await applyProfile();
   resetHistory();
   if (selftest) selfTest(selftest);
@@ -1735,22 +1885,32 @@ async function selfTest(dir) {
       // the subject cut-out on a real photo, when one is given (SMEDCOVER_SELFTEST_PHOTO)
       const real = await invoke("selftest_photo").catch(() => null);
       if (real) {
-        const keep = S.photoSrc, t0 = performance.now();
-        await setPhoto(real);
-        const ok = await cutOut(), m = S.photoMask && S.photoMask.img;
-        report.subject = { ok, ms: Math.round(performance.now() - t0), photo: [S.photo.naturalWidth, S.photo.naturalHeight], mask: m ? [m.naturalWidth, m.naturalHeight] : null, layerAboveTitle: S.cover.layers.findIndex((l) => l.id === "subject") === S.cover.layers.findIndex((l) => l.id === "title") + 1, error: CUT.error };
+        const keep = JSON.stringify(S.cover), t0 = performance.now();
+        await setBackground(real);
+        const ok = await cutOut(), main = mainPhoto(), rec = recordOf(main), m = rec && rec.mask && rec.mask.img, front = frontOf(main);
+        const at = (id) => S.cover.layers.findIndex((l) => l.id === id);
+        report.subject = { ok, ms: Math.round(performance.now() - t0), photo: sizeOf(rec.img), mask: m ? sizeOf(m) : null, aboveTitle: !!front && at(front.id) === at("title") + 1, error: CUT.error };
         if (ok) {
-          const L = layer("subject"); L.outline = 8; L.shadow = 0.6;
+          front.outline = 8; front.shadow = 0.6; main.blur = 12;
           S.cover.title = "*Subject* in front\nof the title";
+          // a second photo, as a print: turned, outlined, and one more with its background removed
+          const print = newLayer("photo", { pid: main.pid, outline: 10, shadow: 0.7 }); print.t.all = { ...print.t.all, x: 0.78, y: 0.3, s: 0.32, r: -8 };
+          const sticker = newLayer("photo", { pid: main.pid, cut: true, outline: 6 }); sticker.t.all = { ...sticker.t.all, x: 0.86, y: 0.72, s: 0.4, r: 6 };
+          S.cover.layers.splice(at("frame"), 0, print, sticker);
           for (const look of ["cel", "cyber"]) {
             S.profile.style.look = look;
             const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
             report.subject[look] = await invoke("write_image", framed(await toPng(cv), { dir, name: `subject-${look}.png` }));
           }
           S.profile.style.look = "cel";
-          S.cover.layers = S.cover.layers.filter((l) => l.id !== "subject");
+          // an earlier cover with its photo kept beside it, and a subject layer: read as photo layers
+          const old = normalizeCover({ catId: S.cover.catId, layers: [...JSON.parse(JSON.stringify(normalizeCover({}, S.profile).layers)), { type: "subject", outline: 5 }] }, S.profile);
+          old.layers.find((l) => l.id === "bg").blur = 7;
+          const up = await upgradeCover(old, { src: real, mask: rec.mask.src });
+          const fill = up.layers.find((l) => l.type === "photo" && l.fill), copy = up.layers.find((l) => l.type === "photo" && l.of);
+          report.upgrade = { fill: !!fill && fill.blur === 7 && up.layers.indexOf(fill) === 1, copy: !!copy && copy.of === fill.id && copy.cut && copy.outline === 5, subjectLeft: up.layers.some((l) => l.type === "subject") };
         }
-        await setPhoto(keep);
+        S.cover = normalizeCover(JSON.parse(keep), S.profile);
       }
       report.repaint = [];
       // a style of the user's own goes to a file and comes back the same
@@ -1788,19 +1948,20 @@ async function selfTest(dir) {
     }
     // one cover in every other look, so each is exercised in the real web view
     S.settings.format = "png"; report.looks = [];
-    const plain = S.photo, snap = document.createElement("canvas");   // a stand-in photograph: colours, light and dark, some detail
+    const keepLayers = JSON.stringify(S.cover.layers), snap = document.createElement("canvas");   // a stand-in photograph: colours, light and dark, some detail
     snap.width = 1200; snap.height = 800;
     const sx = snap.getContext("2d"), sky = sx.createLinearGradient(0, 0, 1200, 800);
     sky.addColorStop(0, "#f2b45a"); sky.addColorStop(0.5, "#d9486e"); sky.addColorStop(1, "#1f4fa8");
     sx.fillStyle = sky; sx.fillRect(0, 0, 1200, 800);
     for (let k = 0; k < 14; k++) { sx.fillStyle = ["#fff7d6", "#1b1b2a", "#2dd4a4"][k % 3]; sx.fillRect(40 + k * 82, 300 + ((k * 137) % 260), 56, 500); }
-    const shot = await loadImage(snap.toDataURL("image/jpeg", 0.9));
+    const shot = await putPhoto(snap.toDataURL("image/jpeg", 0.9));
+    const plain = S.cover.layers.filter((l) => !fillsCanvas(l)), withShot = [plain[0], newLayer("photo", { pid: shot, fill: true }), ...plain.slice(1)];
     for (const id of LOOK_IDS.filter((k) => k !== "cel")) for (const withPhoto of [false, true]) {
-      S.profile.style.look = id; S.photo = withPhoto ? shot : plain;
+      S.profile.style.look = id; S.cover.layers = withPhoto ? withShot : plain;
       const cv = renderFull(S.profile.sizes[0], S.cover, catIndex()), name = `look-${id}${withPhoto ? "-photo" : ""}.png`;
       report.looks.push({ id, photo: withPhoto, path: await invoke("write_image", framed(await toPng(cv), { dir, name })) });
     }
-    S.profile.style.look = "cel"; S.photo = plain;
+    S.profile.style.look = "cel"; S.cover.layers = JSON.parse(keepLayers);
     // every text effect once, in the house look: the ones that reshape letters need outlines from the native side
     report.effects = [];
     const titleLayer = layer("title"), keep = S.cover.title;

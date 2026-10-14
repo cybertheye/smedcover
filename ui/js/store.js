@@ -98,7 +98,8 @@ export function normalizeProfile(raw) {
     brand: { name: str(p.brand && p.brand.name), unit: str(p.brand && p.brand.unit, "CHANNEL") },
     categories, style,
     sizes,
-    design: { layers: carryFonts(normalizeLayers(p.design && p.design.layers, categories.map((x) => x.id)), oldFonts, style.look) },
+    // a design keeps no photos: their pictures live with the cover
+    design: { layers: carryFonts(normalizeLayers(p.design && p.design.layers, categories.map((x) => x.id)), oldFonts, style.look).filter((l) => l.type !== "photo" && l.type !== "subject") },
     ...(oldFonts ? { oldFonts } : {}),   // kept until the open cover has been given them too (see the app), then dropped
   };
 }
