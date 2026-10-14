@@ -90,16 +90,34 @@ export function normalizeProfile(raw) {
   if (!sizes.length) sizes = SIZE_PRESETS.filter((s) => s.on).map(({ w, h, label }) => ({ w, h, label }));
   const keys = new Set();
   sizes = sizes.filter((s) => !keys.has(s.w + "x" + s.h) && keys.add(s.w + "x" + s.h));
+  const of = p.oldFonts || p.fonts || {}, oldFonts = [of.body, of.display, of.serif].some((v) => typeof v === "string" && v.trim()) ? { body: str(of.body), display: str(of.display), serif: str(of.serif) } : null;
   return {
     version: 2,
     id: str(p.id) || uid(),
     name: str(p.name) || str(p.brand && p.brand.name) || "Profile",
     brand: { name: str(p.brand && p.brand.name), unit: str(p.brand && p.brand.unit, "CHANNEL") },
     categories, style,
-    fonts: { body: str(p.fonts && p.fonts.body), display: str(p.fonts && p.fonts.display), serif: str(p.fonts && p.fonts.serif) },
     sizes,
-    design: { layers: normalizeLayers(p.design && p.design.layers, categories.map((x) => x.id)) },
+    design: { layers: carryFonts(normalizeLayers(p.design && p.design.layers, categories.map((x) => x.id)), oldFonts, style.look) },
+    ...(oldFonts ? { oldFonts } : {}),   // kept until the open cover has been given them too (see the app), then dropped
   };
+}
+
+/**
+ * Profiles used to choose fonts for the whole brand (`fonts.body`, `.display`, `.serif`). Fonts now
+ * belong to layers. This gives the layers of an older profile the fonts it had chosen, where a
+ * layer has none of its own: the body font to the title, channel name and text layers, the display
+ * font to the tag and brand row, and the serif to the title when the look in use was a serif one.
+ */
+export function carryFonts(layers, old, lookId) {
+  if (!old) return layers;
+  const serifLook = ["editorial", "songke"].includes(lookId);
+  for (const L of layers) {
+    if (L.font) continue;
+    const f = L.type === "title" ? (serifLook && old.serif) || old.body : ["catname", "text"].includes(L.type) ? old.body : ["tag", "brand"].includes(L.type) ? old.display : "";
+    if (f) L.font = f;
+  }
+  return layers;
 }
 
 /** A cover with every field present. New covers start from the profile's default layer stack. */

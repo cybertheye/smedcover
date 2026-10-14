@@ -10,7 +10,7 @@ import { ratioText } from "./store.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
 import { ACCENT_SHAPES, newLayer, isFree, isPickable, appliesTo, stepIndex, adjust, resetPlacement, writeKey, insertAbove, moveLayer, duplicate } from "./layers.js";
 import {
-  native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
+  carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
 } from "./store.js";
 
@@ -139,12 +139,8 @@ function touch({ profile = false, cover = false, panel = false, side = false, st
 
 // ---------- fonts and the profile
 const quoted = (name) => `"${String(name).replace(/["\\]/g, "")}"`;
-const SERIF_STACK = fonts.serif;   // what the common systems ship, used after the profile's own choice
+/** Loads the bundled faces, so the first cover is fitted with the right letter widths. */
 async function applyFonts() {
-  const f = S.profile.fonts;
-  fonts.cn = [f.body, "Noto Sans SC"].filter(Boolean).map(quoted).join(",") + ",sans-serif";
-  fonts.en = [f.display, "Bebas Neue"].filter(Boolean).map(quoted).join(",") + ",sans-serif";
-  fonts.serif = (f.serif ? quoted(f.serif) + "," : "") + SERIF_STACK;
   await Promise.all([`900 40px ${fonts.cn}`, `700 40px ${fonts.en}`, `600 20px ${fonts.mono}`].map((spec) => document.fonts.load(spec, "封面Aa01").catch(() => null)));
 }
 async function registerFont(family, dataUrl) {
@@ -159,6 +155,7 @@ async function registerFont(family, dataUrl) {
 /** Everything that has to happen when S.profile / S.cover are replaced or restored. */
 async function applyProfile() {
   S.cover = normalizeCover(S.cover, S.profile);
+  if (S.profile.oldFonts) { carryFonts(S.cover.layers, S.profile.oldFonts, S.profile.style.look); delete S.profile.oldFonts; persistProfile(); persistCover(); }   // an older profile's brand-wide fonts, moved onto the layers
   if (!S.profile.sizes.some((s) => sizeKey(s) === S.sel)) S.sel = sizeKey(S.profile.sizes[0]);
   if (!layer()) S.layerId = "title";
   await applyFonts();
@@ -723,28 +720,30 @@ function sizesTab() {
     el("div", {}, cap("exp.name"), textInput(se.nameTemplate, (v) => setting("nameTemplate", v)), el("div", { class: "hint" }, t("exp.nameHint"))),
   ];
 }
-function fontsTab() {
-  const options = (bundled) => [["", `${t("font.bundled")} · ${bundled}`],
-    { group: t("font.imported"), items: S.importedFonts.map((f) => [f, f]) },
-    { group: t("font.system"), items: S.systemFonts.map((f) => [f, f]) }];
-  const setFont = async (k, v) => { S.profile.fonts[k] = v; await applyFonts(); touch({ profile: true }); };
-  return [
-    el("div", {}, cap("font.body"), select(options("Noto Sans SC"), S.profile.fonts.body, (v) => setFont("body", v))),
-    el("div", {}, cap("font.display"), select(options("Bebas Neue"), S.profile.fonts.display, (v) => setFont("display", v))),
-    el("div", {}, cap("font.serif"), select([["", t("font.serifAuto")], ...options("").slice(1)], S.profile.fonts.serif, (v) => setFont("serif", v)),
-      el("div", { class: "hint" }, t("font.serifHint"))),
-    el("button", { class: "btn wide", onclick: importFont }, t("font.import")),
-  ];
-}
+/** Adds a font file to the app: every layer can use it from then on. Returns its family name, or null. */
 async function importFont() {
   const f = await pickFile(".ttf,.otf,.woff,.woff2");
-  if (!f) return;
+  if (!f) return null;
   const family = f.name.replace(/\.[^.]+$/, "").replace(/[^\w\u4e00-\u9fff -]+/g, " ").trim() || "Imported font";
   const src = await readAs(f, "readAsDataURL");
-  if (!(await registerFont(family, src))) return toast(t("msg.badFile"));
+  if (!(await registerFont(family, src))) { toast(t("msg.badFile")); return null; }
   await files.write(`fonts/${family}.font`, src).catch(fail);
   toast(t("msg.fontAdded", family));
-  renderPanel();
+  return family;
+}
+const BUNDLED_FONTS = ["Noto Sans SC", "Bebas Neue", "JetBrains Mono"];
+/** The font of a lettering layer: the look's own, a bundled one, one added earlier, an installed one — or a file to add now. */
+function fontControl(L) {
+  const set = (v) => { if (v) L.font = v; else delete L.font; touch({ cover: true, side: true }); };
+  const options = [["", t("font.auto")], { group: t("font.bundled"), items: BUNDLED_FONTS.map((f) => [f, f]) },
+    { group: t("font.imported"), items: S.importedFonts.map((f) => [f, f]) },
+    { group: t("font.system"), items: S.systemFonts.map((f) => [f, f]) }, ["+", t("font.add")]];
+  if (L.font && ![...BUNDLED_FONTS, ...S.importedFonts, ...S.systemFonts].includes(L.font)) options.splice(1, 0, [L.font, `${L.font} · ${t("font.missing")}`]);   // set on another computer
+  return el("div", { style: "margin-top:10px" }, cap("props.font"), select(options, L.font || "", async (v) => {
+    if (v !== "+") return set(v);
+    const family = await importFont();
+    if (family) set(family); else renderSide();   // nothing chosen: put the menu back where it was
+  }));
 }
 
 // ---------- right column: layers and the selected layer's properties
@@ -826,21 +825,23 @@ function typeControls(L) {
       S.photo && [slider("props.blur", 0, 80, 1, L.blur, px, (v) => set("blur", v)), slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => set("dim", v))],
     ];
     case "accent": return el("div", { style: "margin-bottom:10px" }, select(ACCENT_SHAPES.map((k) => [k, `${t("props.shape")} · ${t("shape." + k)}`]), L.shape, (v) => set("shape", v, false)), null);
-    case "brand": return [check("props.rail", L.rail, (v) => set("rail", v)), inkControl(L, "ink", "props.ink", "#ffffff")];
+    case "brand": return [check("props.rail", L.rail, (v) => set("rail", v)), fontControl(L), inkControl(L, "ink", "props.ink", "#ffffff")];
     case "title": return [
       select([["left", `${t("props.align")} · ${t("align.left")}`], ["center", `${t("props.align")} · ${t("align.center")}`]], L.align, (v) => set("align", v)),
       slider("props.stroke", 0, 2, 0.05, L.stroke, times, (v) => set("stroke", v)),
       slider("props.shadow", 0, 2, 0.05, L.shadow, times, (v) => set("shadow", v)),
+      fontControl(L),
       inkControl(L, "ink", "props.ink", "#ffffff"), inkControl(L, "hi", "props.inkHi", cat().color),
       fxControl(L),
       el("div", { class: "hint" }, t("props.boundHint")),
     ];
-    case "tag": return [inkControl(L, "ink", "props.ink", "#07070c"), el("div", { class: "hint" }, t("props.boundHint"))];
-    case "catname": return [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v)), inkControl(L, "ink", "props.ink", "#07070c")];
+    case "tag": return [fontControl(L), inkControl(L, "ink", "props.ink", "#07070c"), el("div", { class: "hint" }, t("props.boundHint"))];
+    case "catname": return [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v)), fontControl(L), inkControl(L, "ink", "props.ink", "#07070c")];
     case "graphic": return el("div", { class: "hint", style: "margin:0" }, t("props.graphicHint"));
     case "asset": return canTint(L.ref) && L.ref.kind !== "graphic" ? check("props.tint", L.tint, (v) => set("tint", v)) : null;
     case "text": return [
       cap("props.text"), el("textarea", { value: L.text, spellcheck: false, style: "height:72px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
+      fontControl(L),
       check("props.plateOn", L.plate, (v) => set("plate", v, true)),
       el("div", { style: "margin-top:8px" }, select(["white", "accent", "ink", "custom"].map((k) => [k, `${t(L.plate ? "props.plateColor" : "props.color")} · ${t("color." + k)}`]), L.color,
         (v) => { L.color = v; if (v === "custom") L.ink = L.ink || cat().color; else delete L.ink; touch({ cover: true, side: true }); })),
@@ -1142,7 +1143,7 @@ function syncTop() {
       [["zh", "中文"], ["en", "English"]].map(([v, l]) => el("option", { value: v, selected: v === getLang() }, l))));
   document.body.dataset.drop = t("msg.dropHere");
 }
-const TABS = { edit: { cover: coverTab, style: styleTab, assets: assetsTab }, setup: { brand: brandTab, sizes: sizesTab, fonts: fontsTab, ai: aiTab } };
+const TABS = { edit: { cover: coverTab, style: styleTab, assets: assetsTab }, setup: { brand: brandTab, sizes: sizesTab, ai: aiTab } };
 function syncTabs() {
   $("tabs").replaceChildren(...Object.keys(TABS[S.mode]).map((k) => el("button", { class: k === S.tab[S.mode] ? "on" : "", onclick: () => { S.tab[S.mode] = k; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, t("tab." + k))));
 }

@@ -21,7 +21,7 @@ export const FREE_TYPES = ["asset", "text"];
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes", "arc"];
 /** The text effects a headline can be given (painted in textfx.js). Absent on a layer means "auto": the look decides. */
 export const TEXT_EFFECTS = ["auto", "cel", "plain", "cyber", "riso", "anime", "bluenote", "editorial", "dots", "stripes", "inner", "worn", "rows", "extrude", "arc", "taper", "wave"];
-/** Layers made of words. Each may carry `ink`, its own colour; the title also `hi`, for highlighted words. */
+/** Layers made of words. Each may carry `font`, a family name, and `ink`, its own colour; the title also `hi`, for highlighted words. */
 export const LETTERED = ["title", "tag", "catname", "brand", "text"];
 export const isFree = (type) => FREE_TYPES.includes(type);
 /** Layers that can be grabbed on the canvas (the others are selected from the layer list only). */
@@ -77,6 +77,8 @@ function normalizeLayer(raw, catIds) {
     if (TEXT_EFFECTS.includes(raw.fx) && raw.fx !== "auto") L.fx = raw.fx;
     if (raw.fxAmt !== undefined && num(raw.fxAmt, 1, 0, 2) !== 1) L.fxAmt = num(raw.fxAmt, 1, 0, 2);
   }
+  // lettering may be set in a font of its own; without one it takes the look's
+  if (LETTERED.includes(raw.type) && typeof raw.font === "string" && raw.font.trim()) L.font = raw.font.trim().replace(/["\\;{}<>]/g, "").slice(0, 80);
   // lettering may be given its own colour; without one it takes whatever the look gives it
   if (LETTERED.includes(raw.type)) for (const k of raw.type === "title" ? ["ink", "hi"] : ["ink"]) if (typeof raw[k] === "string" && /^#[0-9a-f]{6}$/i.test(raw[k])) L[k] = raw[k].toLowerCase();
   if (free && Array.isArray(raw.cats)) {   // a layer whose categories are all gone goes with them

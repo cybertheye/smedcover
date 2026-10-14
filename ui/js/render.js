@@ -395,7 +395,11 @@ function paintCover(cv, o) {
       const L = cover.layers[i];
       if (!L.visible || !appliesTo(L, cat.id)) continue;
       const tr = resolve(L, w, h, key, cat.id);
+      // a layer set in a font of its own: that font goes first in every face while the layer is painted
+      const faces = L.font ? { ...fonts } : null;
+      if (faces) for (const k of ["cn", "en", "serif"]) fonts[k] = `"${L.font}", ${faces[k]}`;
       let hit;
+      try {
       if (L.o < 1) {   // paint the layer on its own, then blend it in as a whole
         scratch = scratch || document.createElement("canvas");
         scratch.width = cv.width; scratch.height = cv.height;
@@ -404,6 +408,7 @@ function paintCover(cv, o) {
         hit = PAINT[L.type](sx, L, tr, env);
         c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o; c.drawImage(scratch, 0, 0); c.restore();
       } else hit = PAINT[L.type](c, L, tr, env);
+      } finally { if (faces) Object.assign(fonts, faces); }
       c.globalAlpha = 1; c.setLineDash([]);
       if (hit) hits.push({ id: L.id, type: L.type, ...hit });
     }

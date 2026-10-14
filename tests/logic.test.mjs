@@ -738,6 +738,33 @@ test("vertical titles: columns from the right, sideways Latin, sized to fit", as
   const { fonts } = await import("../ui/js/cel.js");
   assert.deepEqual(LOOKS.songke.faces(fonts), { cn: fonts.serif, en: fonts.serif });
   setLook("cel");
-  // a profile keeps its serif choice
-  assert.equal(normalizeProfile({ fonts: { serif: "Kaiti SC" } }).fonts.serif, "Kaiti SC"); assert.equal(normalizeProfile(null).fonts.serif, "");
+
+});
+
+test("fonts belong to lettering layers; what older profiles chose is carried onto them", async () => {
+  const { carryFonts } = await import("../ui/js/store.js");
+  const ls = normalizeLayers([{ type: "title", font: '  Kaiti SC  ' }, { type: "tag", font: 'Bad"; } <x>' }, { type: "accent", font: "X" }, { type: "text", text: "a", font: "" }, { type: "text", text: "b", font: "Bebas Neue" }]);
+  const by = (t) => ls.filter((l) => l.type === t);
+  assert.equal(by("title")[0].font, "Kaiti SC");
+  assert.equal(by("tag")[0].font, "Bad  x");                              // nothing that could break out of a font string
+  assert.equal(by("accent")[0].font, undefined);                           // not lettering
+  assert.deepEqual(by("text").map((l) => l.font), [undefined, "Bebas Neue"]);
+  assert.equal(duplicate(by("text")[1]).font, "Bebas Neue");
+  assert.equal(newLayer("text").font, undefined);                          // a new layer starts in the bundled face
+  // an older profile: its fonts go to the layers that have none, and are then gone from the profile
+  const old = normalizeProfile({ fonts: { body: "A Body", display: "A Display", serif: "A Serif" }, design: { layers: [{ type: "title" }, { type: "tag", font: "Own" }, { type: "text", text: "t" }] } });
+  const d = (t) => old.design.layers.find((l) => l.type === t).font;
+  assert.deepEqual([d("title"), d("catname"), d("text"), d("tag"), d("brand"), d("accent")], ["A Body", "A Body", "A Body", "Own", "A Display", undefined]);
+  assert.equal("fonts" in old, false); assert.deepEqual(old.oldFonts, { body: "A Body", display: "A Display", serif: "A Serif" });
+  // the serif went to the title only where a serif look was in use
+  assert.equal(normalizeProfile({ style: { look: "songke" }, fonts: { body: "A Body", serif: "A Serif" } }).design.layers.find((l) => l.type === "title").font, "A Serif");
+  assert.equal(normalizeProfile({ style: { look: "songke" }, fonts: { serif: "A Serif" } }).design.layers.find((l) => l.type === "catname").font, undefined);
+  // a profile with nothing chosen carries nothing
+  const plain = normalizeProfile({ fonts: { body: "", display: "" } });
+  assert.equal("oldFonts" in plain, false); assert.ok(plain.design.layers.every((l) => !l.font));
+  // the open cover gets the same treatment, once
+  const cover = normalizeCover({ layers: [{ type: "title" }, { type: "text", text: "x", font: "Mine" }] }, old);
+  carryFonts(cover.layers, old.oldFonts, "cel");
+  assert.equal(cover.layers.find((l) => l.type === "title").font, "A Body"); assert.equal(cover.layers.find((l) => l.type === "text").font, "Mine");
+  assert.equal(carryFonts([{ type: "title" }], null, "cel")[0].font, undefined);
 });
