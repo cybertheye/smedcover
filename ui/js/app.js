@@ -18,7 +18,7 @@ import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams } from "./style.js";
-import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage } from "./ai.js";
+import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
@@ -453,7 +453,7 @@ function assetsTab() {
   ];
 }
 // ---------- AI-generated assets
-const AI = { target: "", busy: false, error: "", result: null, test: "", job: 0, since: 0, attempt: 1 };
+const AI = { target: "", busy: false, error: "", result: null, test: "", job: 0, since: 0, attempt: 1, image: null };   // image: {mime, data, url} of a reference picture
 const AI_RETRIES = 3;                      // extra attempts when a reply does not follow the format
 /** Sends one prompt to the configured endpoint and returns {text, truncated}. Throws with the provider's message. */
 async function aiCall(cfg, system, user) {
@@ -472,9 +472,9 @@ async function aiCall(cfg, system, user) {
  * and cut-off replies are not retried, since asking again would not help.
  * `onAttempt(n)` is told which attempt is running; `stillWanted()` lets the caller give up.
  */
-async function requestSpec(cfg, target, onAttempt = () => null, stillWanted = () => true) {
-  const { system, user } = buildPrompt(target, cfg.notes, { kind: cfg.kind, style: S.profile.style.look });
-  const turns = [{ role: "user", content: user }];
+async function requestSpec(cfg, target, onAttempt = () => null, stillWanted = () => true, image = null) {
+  const { system, user } = buildPrompt(target, cfg.notes, { kind: cfg.kind, style: S.profile.style.look, image: !!image });
+  const turns = [{ role: "user", content: image ? withImage(cfg.style, user, image) : user }];
   for (let attempt = 1; ; attempt++) {
     onAttempt(attempt);
     const out = await aiCall(cfg, system, turns), r = parseSpec(out.text);
@@ -486,14 +486,15 @@ async function requestSpec(cfg, target, onAttempt = () => null, stillWanted = ()
 }
 const onAssetsTab = () => S.mode === "edit" && S.tab.edit === "assets";
 async function generateAsset() {
-  const target = AI.target.trim();
-  if (!target || AI.busy) return;
+  const target = AI.target.trim(), image = AI.image;
+  if ((!target && !image) || AI.busy) return;   // a picture alone is enough to go on
   const job = ++AI.job;
   Object.assign(AI, { busy: true, error: "", result: null, since: Date.now(), attempt: 1 });
   renderPanel();
   const tick = setInterval(() => { const b = document.getElementById("ai-go"); if (b && AI.busy) b.textContent = aiBusyText(); }, 1000);
   let result = null, error = "";
-  try { result = await requestSpec(S.ai, target, (n) => { if (job === AI.job) AI.attempt = n; }, () => job === AI.job); } catch (e) { error = String(e && e.message ? e.message : e); }
+  try { result = await requestSpec(S.ai, target, (n) => { if (job === AI.job) AI.attempt = n; }, () => job === AI.job, image); }
+  catch (e) { error = String(e && e.message ? e.message : e); if (image && /^HTTP 4\d\d/.test(error)) error += " " + t("ai.noVision"); }
   clearInterval(tick);
   if (job !== AI.job) return;                       // cancelled meanwhile: the late answer is dropped
   Object.assign(AI, { busy: false, result, error });
@@ -511,6 +512,24 @@ async function keepGenerated() {
   toast(t("ai.saved", a.name));
   renderPanel();
 }
+/**
+ * Takes a picture as the reference for the next generation. It is scaled down to at most 768 px
+ * and stored as JPEG: enough for a model to see what the thing is, and a fraction of the upload.
+ */
+async function pickReference() {
+  const f = await pickFile("image/png,image/jpeg,image/webp");
+  if (!f) return;
+  const im = await loadImage(await readAs(f, "readAsDataURL"));
+  if (!im) return toast(t("msg.badFile"));
+  const k = Math.min(1, 768 / Math.max(im.naturalWidth, im.naturalHeight)), cv = document.createElement("canvas");
+  cv.width = Math.max(1, Math.round(im.naturalWidth * k)); cv.height = Math.max(1, Math.round(im.naturalHeight * k));
+  const x = cv.getContext("2d");
+  x.fillStyle = "#ffffff"; x.fillRect(0, 0, cv.width, cv.height);   // JPEG has no transparency: a cut-out goes on white
+  x.imageSmoothingQuality = "high"; x.drawImage(im, 0, 0, cv.width, cv.height);
+  const url = cv.toDataURL("image/jpeg", 0.85);
+  AI.image = { mime: "image/jpeg", data: url.slice(url.indexOf(",") + 1), url };
+  renderPanel();
+}
 function specPreview(spec, tint) {
   const cv = el("canvas", { width: 220, height: 220 }), x = cv.getContext("2d");
   x.translate(110, 110); x.scale(0.95, 0.95);
@@ -526,7 +545,11 @@ function aiSection() {
   const setKind = (k) => { S.ai = normalizeAi({ ...S.ai, kind: k }); persistAi(); renderPanel(); };
   return el("div", { class: "box" }, cap("ai.title"),
     el("div", { class: "seg", style: "margin-bottom:10px" }, AI_KINDS.map((k) => el("button", { class: "btn" + (S.ai.kind === k ? " on" : ""), style: "flex:1", disabled: AI.busy, title: t("ai.kindHint." + k), onclick: () => setKind(k) }, t("ai.kind." + k)))),
-    textInput(AI.target, (v) => { AI.target = v; }, { placeholder: t("ai.targetPh"), maxLength: 300, disabled: AI.busy, onkeydown: (e) => { if (e.key === "Enter") generateAsset(); } }),
+    textInput(AI.target, (v) => { AI.target = v; }, { placeholder: t(AI.image ? "ai.targetPhImage" : "ai.targetPh"), maxLength: 300, disabled: AI.busy, onkeydown: (e) => { if (e.key === "Enter") generateAsset(); } }),
+    AI.image
+      ? el("div", { class: "ref" }, el("img", { src: AI.image.url, alt: "" }), el("span", {}, t("ai.refOn")),
+          el("button", { class: "btn", disabled: AI.busy, onclick: () => { AI.image = null; renderPanel(); } }, t("ai.refRemove")))
+      : el("button", { class: "btn wide", style: "margin-top:8px", disabled: AI.busy, onclick: pickReference }, t("ai.refAdd")),
     el("button", { id: "ai-go", class: "btn solid wide", style: "margin-top:10px", disabled: AI.busy, onclick: generateAsset }, AI.busy ? aiBusyText() : t(r ? "ai.again" : "ai.generate")),
     AI.busy && el("button", { class: "btn wide", style: "margin-top:8px", onclick: cancelGenerate }, t("ai.cancel")),
     AI.error && el("div", { class: "hint err" }, t("msg.failed", AI.error)),
@@ -1240,6 +1263,16 @@ async function selfTest(dir) {
         addAsset({ kind: "user", id: a.id });
         const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
         report.ai.push({ style, name: a.name, kind: spec.kind || "flat", pieces: (spec.ops || spec.parts).length, stored: !!(await readJson(`assets/${a.id}.json`))?.spec, drawn: cv._hits.some((h) => h.id === S.layerId) });
+      }
+      // the same again with a reference picture attached (a small generated one)
+      const pic = document.createElement("canvas"); pic.width = pic.height = 64;
+      const px = pic.getContext("2d"); px.fillStyle = "#3a86ff"; px.fillRect(0, 0, 64, 64); px.fillStyle = "#ffd60a"; px.beginPath(); px.arc(32, 32, 20, 0, 7); px.fill();
+      const url = pic.toDataURL("image/jpeg", 0.8), image = { mime: "image/jpeg", data: url.slice(url.indexOf(",") + 1) };
+      report.aiImage = [];
+      for (const style of AI_STYLES) {
+        const cfg = normalizeAi({ style, baseUrl: aiUrl + (style === "openai" ? "/v1" : ""), token: "selftest-token", model: "selftest-model" });
+        const spec = await requestSpec(cfg, "", () => null, () => true, image);
+        report.aiImage.push({ style, name: spec.name.en, bytes: image.data.length });
       }
       try { await aiCall(normalizeAi({ style: "openai", baseUrl: aiUrl + "/fail", model: "m" }), "s", "u"); report.errors.push("ai: an error reply was not reported"); }
       catch (e) { report.aiError = String(e.message); }

@@ -25,7 +25,7 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
 
 - **Left** — the tabs of the current mode.
   - Edit: **Cover**, **Style**, **Assets**
-  - Setup: **Brand**, **Sizes & export**, **Fonts**, **AI**
+  - Setup: **Brand**, **Sizes & export**, **AI**
 - **Centre** — the main canvas, and below it a thumbnail of every output size. Click one to show that size on the canvas.
 - **Right** (Edit only) — the layer list and the selected layer's properties.
 - **Top bar** — profile switcher, open and save project, undo and redo, SURPRISE ME, export. Those last two buttons dress to match the look of the current cover.
@@ -123,6 +123,17 @@ Add one with **＋ Text** on the right. A text layer has three settings that do 
 
 A layer set to *Channel colour* changes with the channel; a *Custom* colour stays as it is.
 
+### Fonts
+
+Every layer that carries words (title, corner tag, channel name, brand row, text layers) chooses its own font. Select the layer and look under *Font* in its properties:
+
+- **Default** — the bundled face, following the current look (a serif under Woodblock book, say). New layers start here.
+- **Built-in** — Noto Sans SC, Bebas Neue, JetBrains Mono; the same on every platform.
+- **Imported** and **System fonts**.
+- The last entry, **＋ Add a font file…** — pick a font file: it is stored in the app and used on this layer at once, and from then on every layer finds it under *Imported*.
+
+Imported fonts live in this computer's app data and do not travel with profile or project files; opened elsewhere, a font that is not there shows as "not on this computer" and the default is used.
+
 ### Text effects
 
 The title and every text layer (with or without a plate) can be given a text effect of their own instead of following the look. Select the layer and choose under *Text effect* in its properties:
@@ -178,6 +189,7 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 | **Flat sticker** | Flat colour with a heavy outline, drawn like the built-in stickers | animals, characters, food, symbols |
 
 - The result is previewed twice: in its own colour, and following the current channel colour. If you like it, **Save to My assets** and use it like any other asset.
+- **Reference picture** — below the text box you can attach a picture, and the model draws its main subject; the text box may stay empty or add a word ("just the cat, not the background"). The picture is scaled down to 768 px on its longer side before it is sent. This needs a model that accepts image input; one that does not answers with an error, and the app says why.
 - A generated asset is the same kind of thing as a built-in one: sharp at any size and usable as a channel's graphic.
 - Once on the canvas it **follows the channel colour by default**, changing as you switch channels; untick *Use the channel colour* in the layer's properties to keep its own colour.
 - The style comes from a prompt preset in the app; you only describe the subject.
@@ -217,7 +229,7 @@ The sliders of each look:
 
 **The vertical title of the woodblock look** — each typed line is a column, read top to bottom, the first line on the right. CJK characters stand upright; a run of Latin letters or digits lies on its side, as is usual in vertical setting. A vertical title takes the full height of the page and stands clear of the seal in the lower left. Text effects do not apply to a vertical title; untick *Set the title vertically* for a horizontal one, and they apply again.
 
-These five are first versions and will be refined one by one. The serif lettering of Editorial and Woodblock book uses fonts already on the computer by default (Songti SC on macOS, SimSun on Windows), so it differs from machine to machine. To make it the same everywhere, or to use a Kai or Fangsong face, choose one under *Setup → Fonts → Serif*.
+These five are first versions and will be refined one by one. The serif lettering of Editorial and Woodblock book uses fonts already on the computer by default (Songti SC on macOS, SimSun on Windows), so it differs from machine to machine. For a Kai or Fangsong face, or any other, select the title layer and choose under *Font* in its properties.
 
 The cyberpunk look has eight sliders and a checkbox. Two of them sound alike: *Scanlines* are the fine horizontal lines covering the whole picture; the *Sweep line* is the single bright one.
 
@@ -264,7 +276,6 @@ Adjustments are stored as fractions of the picture, so they apply to every size;
 
 - **Brand** — brand name, counter label, adding, removing and ordering channels; while you work on a channel (click any of its fields or change its colour) the canvas switches to that channel, so the change shows at once; create, duplicate, delete, import and export profiles.
 - **Sizes & export** — tick preset sizes or add a custom width × height. A size can be given your own name, shown under its thumbnail.
-- **Fonts** — three choices. *Titles and body* and *Display* come bundled (Noto Sans SC and Bebas Neue, plus the monospaced JetBrains Mono), so covers look the same on every platform. *Serif* is not bundled: by default it is the system's own serif, used by the Editorial and Woodblock book looks. All three can be set to an installed font or an imported font file.
 - **AI** — connect your own model service for generating assets.
 
 ### Setting up AI
@@ -288,7 +299,7 @@ Click **Test connection** to check it works.
 Privacy and cost:
 
 - The token is stored in plain text in the app data directory on this computer (`ai.json`) and is never written into profile or project files.
-- When generating, your description and the preset prompt are sent to the address you entered; the app makes no other network requests.
+- When generating, your description, the preset prompt and any reference picture you attached are sent to the address you entered; the app makes no other network requests.
 - Usage is billed by your provider.
 
 ## Export

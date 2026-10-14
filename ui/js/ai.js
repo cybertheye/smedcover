@@ -352,10 +352,28 @@ export const AI_KINDS = ["solid", "flat"];
  * The two halves of a request: the preset prompt (plus the user's standing notes) and the subject.
  * kind "solid" asks for a 3D object, "flat" for a sticker.
  */
-export function buildPrompt(target, notes = "", { kind = "flat", style = "cel" } = {}) {
+export function buildPrompt(target, notes = "", { kind = "flat", style = "cel", image = false } = {}) {
   const preset = kind === "solid" ? solidPrompt(style) : systemPrompt(style);
   const system = notes ? `${preset}\n\n# Additional requirements from the user\n${notes}` : preset;
-  return { system, user: `Request: ${String(target).trim().slice(0, 300)}` };
+  const what = String(target).trim().slice(0, 300);
+  if (!image) return { system, user: `Request: ${what}` };
+  // With a reference picture the subject comes from the picture; the style still comes from above.
+  const how = kind === "solid"
+    ? "Rebuild its main subject from boxes and cylinders: keep its overall proportions, the parts that make it recognisable and where they sit, and its main colours as tones."
+    : "Redraw its main subject as a sticker: keep its silhouette, its proportions, the parts that make it recognisable and its main colours.";
+  return { system, user: `Request: ${what || "the main subject of the attached picture"}\nA reference picture is attached. ${how} Do not copy its rendering — no photographic detail, texture, lighting or background: translate it into the style and the data format described above.` };
+}
+
+/**
+ * The content of a user turn that carries a picture, in the form each API style wants it.
+ * `image` is { mime, data } with the data in base64.
+ *   OpenAI style     [{type: "text"}, {type: "image_url", image_url: {url: "data:…;base64,…"}}]
+ *   Anthropic style  [{type: "image", source: {type: "base64", media_type, data}}, {type: "text"}]
+ * Either way the model has to be one that accepts pictures; a text-only model answers with an error.
+ */
+export function withImage(style, text, image) {
+  if (style === "anthropic") return [{ type: "image", source: { type: "base64", media_type: image.mime, data: image.data } }, { type: "text", text }];
+  return [{ type: "text", text }, { type: "image_url", image_url: { url: `data:${image.mime};base64,${image.data}` } }];
 }
 
 /** What to tell the model when its reply could not be used, so the next attempt can correct it. */

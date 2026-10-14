@@ -768,3 +768,18 @@ test("fonts belong to lettering layers; what older profiles chose is carried ont
   assert.equal(cover.layers.find((l) => l.type === "title").font, "A Body"); assert.equal(cover.layers.find((l) => l.type === "text").font, "Mine");
   assert.equal(carryFonts([{ type: "title" }], null, "cel")[0].font, undefined);
 });
+
+test("ai: a reference picture travels in the form each API style wants", async () => {
+  const { withImage, buildPrompt: bp, buildRequest: br, normalizeAi: na } = await import("../ui/js/ai.js");
+  const image = { mime: "image/jpeg", data: "QUJD" };
+  const withPic = bp("just the cat", "", { kind: "flat", image: true }), noWords = bp("", "", { kind: "solid", image: true });
+  assert.ok(withPic.user.startsWith("Request: just the cat\n") && withPic.user.includes("reference picture is attached"));
+  assert.ok(noWords.user.startsWith("Request: the main subject of the attached picture") && noWords.user.includes("boxes and cylinders"));
+  assert.equal(bp("a cat").user, "Request: a cat");                                   // without a picture, as before
+  assert.equal(withPic.system, bp("just the cat").system);                             // the style prompt is the same either way
+  const o = br(na({ style: "openai", baseUrl: "https://a/v1", model: "m" }), "SYS", [{ role: "user", content: withImage("openai", "T", image) }]);
+  assert.deepEqual(o.body.messages[1].content, [{ type: "text", text: "T" }, { type: "image_url", image_url: { url: "data:image/jpeg;base64,QUJD" } }]);
+  const a = br(na({ style: "anthropic", baseUrl: "https://a", model: "m" }), "SYS", [{ role: "user", content: withImage("anthropic", "T", image) }]);
+  assert.deepEqual(a.body.messages[0].content, [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: "QUJD" } }, { type: "text", text: "T" }]);
+  assert.equal(a.body.system, "SYS");
+});
