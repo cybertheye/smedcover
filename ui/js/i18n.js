@@ -35,7 +35,7 @@ const STR = {
   "cover.photo": ["背景照片", "Background photo"],
   "cover.pick": ["选择照片…", "Choose photo…"],
   "cover.removePhoto": ["移除照片", "Remove"],
-  "cover.photoHint": ["也可以把照片直接拖进窗口。模糊、压暗在右侧选中「背景」图层后调节。", "You can also drop a photo onto the window. Blur and dim are on the Background layer, on the right."],
+  "cover.photoHint": ["也可以把照片直接拖进窗口。模糊、压暗、描边等在右侧选中「背景照片」图层后调节。", "You can also drop a photo onto the window. Blur, dim, outline and the rest are on the Background photo layer, on the right."],
   "cover.how": ["点选图层后拖动移动；拖四角缩放、拖四边拉伸、拖顶部圆点旋转。滚轮也可缩放，方向键微调，Delete 删除素材。在背景或色块上拖出方框可多选（完整框住的元素），Shift+点击 加减。", "Click a layer, drag to move; drag a corner to resize, a side to stretch, the top knob to rotate. Scroll also resizes, arrow keys nudge, Delete removes an added item. Drag a box on the background or the colour block to select what lies wholly inside it; Shift-click adds or removes one."],
 
   "assets.upload": ["上传素材…", "Upload assets…"],
