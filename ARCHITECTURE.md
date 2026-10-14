@@ -122,7 +122,7 @@ A cover is an array of layers, bottom first.
 | Kind | Types | Notes |
 |---|---|---|
 | Bound layers | `bg` `accent` `graphic` `brand` `title` `tag` `catname` `frame` | Exactly one of each on every cover. Their content comes from elsewhere (the title text, the channel's graphic, …). They cannot be deleted; the `id` is the type name. |
-| Free layers | `asset` `text` `photo` | Assets, text and photos added by the user; can be deleted and duplicated. |
+| Free layers | `asset` `text` `photo` `solid` | Assets, text, photos and blocks of colour added by the user; can be deleted and duplicated. An asset may carry `ink` (a vector asset's colour of the user's, over its own and the channel's); a block carries `color` and is the canvas's size at scale 1. |
 
 `normalizeLayers()` repairs a layer list: it drops unknown layers, puts back missing bound layers,
 keeps the background at the bottom and makes ids unique. A free layer may carry `name`, the name the
@@ -506,7 +506,9 @@ history. Saving, redrawing and history are debounced, so a long drag does not wr
 repeatedly.
 
 There is no framework: each column is built with a small element helper, `el()`, and rebuilt whole
-when needed.
+when needed. The properties panel is a two-column grid (`.props`): `psec()` makes one group (its name
+left, with an ⓘ from `info()`; its controls right), `layerSection()` the Layer group every layer has,
+and `swatch()` a small colour swatch (optionally automatic).
 
 ### 9.2 Working on the canvas
 

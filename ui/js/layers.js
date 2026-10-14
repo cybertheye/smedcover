@@ -16,7 +16,7 @@
 // categories. Without it the layer is on every category's cover.
 
 export const BOUND_TYPES = ["bg", "accent", "graphic", "brand", "title", "tag", "catname", "frame"];
-export const FREE_TYPES = ["asset", "text", "photo"];
+export const FREE_TYPES = ["asset", "text", "photo", "solid"];
 /**
  * Layers of earlier files that are read only to be turned into something else: "subject", the
  * background photo's subject cut out, is now a photo layer (see upgradeCover in app.js).
@@ -53,7 +53,9 @@ const PROPS = {
   tag: {},
   catname: { showName: true, plate: true },
   frame: {},
-  asset: { ref: null, tint: false },
+  asset: { ref: null, tint: false },   // + `ink`: a colour of the user's for a vector asset, over its own and the channel's
+  /** A block of one colour, the canvas's size at scale 1 (so it can be a ground, or moved and shrunk into a band). */
+  solid: { color: "#ffd60a" },
   text: { text: "", stroke: 1, shadow: 1, plate: false },
   subject: { outline: 0, shadow: 0, follow: false },   // legacy, see LEGACY_TYPES
   /**
@@ -76,7 +78,7 @@ export function newLayer(type, extra = {}) {
   const free = isFree(type);
   return {
     id: free ? uid() : type, type, visible: true, locked: false, o: 1,
-    t: { all: free ? { x: 0.5, y: type === "photo" ? 0.5 : 0.42, s: type === "photo" ? (extra.fill ? 1 : 0.6) : 0.35, r: 0, kx: 1, ky: 1 } : { x: 0, y: 0, s: 1, r: 0, kx: 1, ky: 1 }, by: {} },
+    t: { all: free ? { x: 0.5, y: type === "photo" || type === "solid" ? 0.5 : 0.42, s: type === "solid" ? 1 : type === "photo" ? (extra.fill ? 1 : 0.6) : 0.35, r: 0, kx: 1, ky: 1 } : { x: 0, y: 0, s: 1, r: 0, kx: 1, ky: 1 }, by: {} },
     ...PROPS[type], ...extra,
   };
 }
@@ -135,8 +137,11 @@ function normalizeLayer(raw, catIds) {
     case "asset": {
       const r = raw.ref;
       if (!r || !["graphic", "sticker", "user"].includes(r.kind) || typeof r.id !== "string") return null;
-      L.ref = { kind: r.kind, id: r.id }; L.tint = raw.tint === true; break;
+      L.ref = { kind: r.kind, id: r.id }; L.tint = raw.tint === true;
+      if (typeof raw.ink === "string" && /^#[0-9a-f]{6}$/i.test(raw.ink)) L.ink = raw.ink.toLowerCase();
+      break;
     }
+    case "solid": L.color = typeof raw.color === "string" && /^#[0-9a-f]{6}$/i.test(raw.color) ? raw.color.toLowerCase() : "#ffd60a"; break;
     case "text": {
       L.text = typeof raw.text === "string" ? raw.text : "";
       L.plate = raw.plate === true || raw.look === "plate";

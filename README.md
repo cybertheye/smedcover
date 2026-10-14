@@ -168,10 +168,13 @@ In *This size only*, the channel graphic's placement is remembered per channel.
 
 - The list on the right runs front to back, top to bottom. Drag a row to re-order, or use ▲ ▼.
 - The two icons on each row are show/hide and lock. Background and Corner brackets carry a 🔒: they are fixed layers.
-- At the end of each row: what the layer is (photo, text "T", vector asset as a pen nib, bitmap asset), then whose it is — a gear for a built-in layer (every cover has it; it cannot be deleted), a person for a layer you added.
+- At the end of each row: what the layer is (photo, text "T", colour as a filled square, vector asset as a pen nib, bitmap asset), then whose it is — a gear for a built-in layer (every cover has it; it cannot be deleted), a person for a layer you added.
 - Layers you added (photos, text, assets) are renamed by double-clicking their name (a single click selects, as anywhere on the row): Enter or clicking elsewhere keeps it, Esc does not, an empty name goes back to the automatic one.
-- **＋ Text** adds a text layer; clicking an item in Assets adds it. New layers go directly above the selected one.
-- Position, size, stretch and rotation are set on the canvas with the mouse (see the table above); the properties panel has opacity and *Reset placement*.
+- **＋ Text** adds a text layer; **＋ Colour** adds a colour layer: one block of colour, the canvas's size to begin with (in the channel colour), to shrink, stretch or turn into a ground, a band or a see-through wash. Clicking an item in Assets adds it. New layers go directly above the selected one.
+- Position, size, stretch and rotation are set on the canvas with the mouse (see the table above).
+- The properties come in groups: their names on the left (Text, Effect, Colour, Lines, Plate — or Cut-out, Place, Picture, Lines…), the controls on the right; after a rule at the bottom, the Layer group every layer has: opacity, *Reset placement*, channels. Explanations sit behind the ⓘ beside a group's name: hover it, or click it.
+- Colours are small swatches: one marked *auto* follows the look and the channel colour; once you pick a colour, the × on its corner (shown on hover) goes back to automatic.
+- A vector asset (stickers, frames, channel graphics, AI assets) has *Colour*: its own colours, the channel colour, or a colour of your own.
 
 What each layer allows:
 
@@ -180,7 +183,7 @@ What each layer allows:
 | Background | no | yes | no | no |
 | Corner brackets | no | yes | yes | no |
 | Colour block, channel graphic, brand row, title, corner tag, channel name | yes | yes | yes | no |
-| Stickers, images, photos, text (free layers) | yes | yes | yes | yes |
+| Stickers, images, photos, text, colour (free layers) | yes | yes | yes | yes |
 
 ### SURPRISE ME: deal a new hand
 
@@ -271,7 +274,7 @@ Deleting a channel also deletes the layers that belonged only to it.
   - *＋ New folder* makes a folder and lets you name it; double-click a folder's name to rename it later. Drag an asset onto a folder to file it, onto *Unfiled* to take it out. ▾ / ▸ closes or opens a folder.
   - Deleting a folder takes two clicks on its ×; its assets are not deleted but go back to Unfiled. Folders are kept on this computer and do not travel with profile exports.
 - **Channel graphics** — twenty cel-shaded graphics that follow the channel colour.
-- **Stickers** — a free pack of 72; each can optionally follow the channel colour. The first group is twelve *Frames*: square, rectangle, circle, triangle, diamond, pentagon, hexagon, octagon, star, parallelogram, trapezoid and semicircle — thin geometric outlines, empty in the middle, to go round a photo, a word or a face, their line drawn the current look's way.
+- **Stickers** — a free pack of 72; each in its own colours, the channel colour or one of your own. The first group is twelve *Frames*: square, rectangle, circle, triangle, diamond, pentagon, hexagon, octagon, star, parallelogram, trapezoid and semicircle — thin geometric outlines, empty in the middle, to go round a photo, a word or a face, their line drawn the current look's way.
 - **Colour block & edge** — twelve shapes; click one to reshape the colour block layer.
 
 ### Generating assets with AI

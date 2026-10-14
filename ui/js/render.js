@@ -419,7 +419,13 @@ const PAINT = {
     return null;
   },
   asset(ctx, L, tr, env) {
-    return centred(ctx, tr.cx, tr.cy, tr, tr.s, () => drawAsset(ctx, L.ref, env.C, { tint: L.tint }));
+    // a colour of the user's takes the channel colour's place
+    return centred(ctx, tr.cx, tr.cy, tr, tr.s, () => drawAsset(ctx, L.ref, L.ink ? hexToRgb(L.ink) : env.C, { tint: L.tint || !!L.ink }));
+  },
+  /** One colour, the canvas's size at scale 1 (free layers are scaled against a 1080-high canvas). */
+  solid(ctx, L, tr, env) {
+    const u = Math.min(env.w, env.h) / 1080, w = env.w / u, h = env.h / u;
+    return centred(ctx, tr.cx, tr.cy, tr, tr.s, () => { ctx.fillStyle = L.color; ctx.fillRect(-w / 2, -h / 2, w, h); return { hw: w / 2, hh: h / 2 }; });
   },
   text(ctx, L, tr, env) {
     return centred(ctx, tr.cx, tr.cy, tr, tr.s, () => drawFreeText(ctx, L, env));

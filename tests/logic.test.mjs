@@ -550,7 +550,8 @@ test("lettering layers may carry their own colour", () => {
   assert.equal(by("title").ink, "#ff00aa"); assert.equal(by("title").hi, "#00ff00");
   assert.equal(by("tag").ink, "#123456"); assert.equal(by("tag").hi, undefined);       // only headlines (title, text) have highlighted words
   assert.equal(by("catname").ink, undefined); assert.equal(by("brand").ink, undefined); // not six-digit hex: left automatic
-  assert.equal(by("accent").ink, undefined); assert.equal(by("asset").ink, undefined);   // not lettering
+  assert.equal(by("accent").ink, undefined);                                          // not lettering
+  assert.equal(by("asset").ink, "#ff0000");                                           // a vector asset's colour of the user's
   assert.equal(by("text").ink, "#0000ff"); assert.equal(by("text").color, undefined);  // a text layer's own colour, as the title's
   assert.equal(duplicate(by("text")).ink, "#0000ff");
   assert.deepEqual(normalizeLayers(ls), ls);
@@ -1027,4 +1028,16 @@ test("asset folders: ids cleaned and unique, names kept short, anything else dro
   assert.deepEqual(normalizeFolders([{ id: "fa", name: "品牌" }, { id: "fa", name: "again" }, { id: "f b!", name: "" }, { name: "no id" }, null, "x"]), [{ id: "fa", name: "品牌" }, { id: "fb", name: "fb" }]);
   assert.deepEqual(normalizeFolders(null), []);
   assert.equal(normalizeFolders([{ id: "f1", name: "x".repeat(99) }])[0].name.length, 40);
+});
+
+test("solid colour layers: the canvas's size at scale 1, one colour, free like any added layer", async () => {
+  const { isFree, isRemovable } = await import("../ui/js/layers.js");
+  const L = newLayer("solid", { color: "#123456" });
+  assert.deepEqual([L.t.all.x, L.t.all.y, L.t.all.s], [0.5, 0.5, 1]);
+  assert.ok(isFree("solid") && isRemovable("solid"));
+  const one = (raw) => normalizeLayers([{ type: "solid", ...raw }]).find((l) => l.type === "solid");
+  assert.equal(one({ color: "#ABCDEF" }).color, "#abcdef");
+  assert.equal(one({ color: "red" }).color, "#ffd60a");
+  assert.deepEqual(one(L), L);
+  assert.equal(resolve(L, 1920, 1080, "1920x1080").s, 1);   // drawn as 1920/1 x 1080/1 units: the whole canvas
 });
