@@ -331,13 +331,14 @@ export function handles(hit, u) {
     { id: "rot", lx: 0, ly: -hh - 34 * u },
   ];
 }
-function drawSelection(ctx, hit, k) {
+function drawSelection(ctx, hit, k, withHandles = true) {
   const u = 1 / k, hs = handles(hit, u), hw = hit.hw + 6 * u, hh = hit.hh + 6 * u;
   ctx.save();
   ctx.translate(hit.cx, hit.cy); ctx.rotate(hit.r * RAD);
   ctx.lineWidth = 4 * u; ctx.strokeStyle = "rgba(7,7,12,.9)"; ctx.setLineDash([]); ctx.strokeRect(-hw, -hh, hw * 2, hh * 2);
   ctx.lineWidth = 2 * u; ctx.strokeStyle = "#ffffff"; ctx.setLineDash([10 * u, 7 * u]); ctx.strokeRect(-hw, -hh, hw * 2, hh * 2);
   ctx.setLineDash([]);
+  if (!withHandles) return ctx.restore();
   ctx.beginPath(); ctx.moveTo(0, -hh); ctx.lineTo(0, -hh - 34 * u); ctx.stroke();
   for (const h of hs) {
     ctx.fillStyle = "#ffffff"; ctx.strokeStyle = INK; ctx.lineWidth = 2 * u;
@@ -359,8 +360,10 @@ let scratch = null;
  *   o.cover    {title, tag, layers}
  *   o.photo    decoded background Image or null
  *   o.select   id of the layer to outline (editor only)
- *   o.live     {id} while that layer is being dragged: the rest of the cover is cached in this
+ *   o.live     {ids} while those layers are being dragged: the rest of the cover is cached in this
  *              object between frames (editor only; drop the object when the drag ends)
+ *   o.picked   ids of the layers in a group selection, outlined without handles (editor only)
+ *   o.marquee  {x0, y0, x1, y1} a selection rectangle being drawn, in virtual pixels (editor only)
  * Leaves cv._hits behind: one entry per drawn layer, bottom first, for pointer hit-testing.
  */
 export function drawCover(cv, o) {
@@ -414,16 +417,18 @@ function paintCover(cv, o) {
     }
     return hits;
   };
-  const n = cover.layers.length, at = o.live ? cover.layers.findIndex((l) => l.id === o.live.id) : -1;
+  const n = cover.layers.length, moving = o.live ? (o.live.ids || [o.live.id]).map((id) => cover.layers.findIndex((l) => l.id === id)).filter((i) => i >= 0) : [];
+  const at = moving.length ? Math.min(...moving) : -1, top = moving.length ? Math.max(...moving) : -1;
   setFast(at >= 0);
   if (at < 0) cv._hits = paintRange(ctx, 0, n);
   else {
-    // One layer is being dragged: everything under it and everything over it is painted once into
-    // two images kept in o.live, and each frame only blits those and repaints the moving layer.
-    const live = o.live, stamp = `${cv.width}x${cv.height}|${at}|${n}`;
+    // Layers are being dragged: everything under the lowest of them and everything over the highest
+    // is painted once into two images kept in o.live, and each frame only blits those and repaints
+    // the layers from the lowest moving one to the highest.
+    const live = o.live, stamp = `${cv.width}x${cv.height}|${at}|${top}|${n}`;
     if (live.stamp !== stamp) {
       live.stamp = stamp;
-      for (const [name, from, to] of [["under", 0, at], ["over", at + 1, n]]) {
+      for (const [name, from, to] of [["under", 0, at], ["over", top + 1, n]]) {
         const img = live[name] || (live[name] = document.createElement("canvas"));
         img.width = cv.width; img.height = cv.height;
         const c = img.getContext("2d");
@@ -433,18 +438,42 @@ function paintCover(cv, o) {
     }
     const blit = (img) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0); ctx.restore(); };
     blit(live.under);
-    const mine = paintRange(ctx, at, at + 1);
+    const mine = paintRange(ctx, at, top + 1);
     blit(live.over);
     cv._hits = [...live.underHits, ...mine, ...live.overHits];
   }
   if (L0.post && cover.layers[0].visible) { ctx.save(); L0.post(ctx, w, h, C, lookValues(), kx, cv._hits); ctx.restore(); }   // not over a transparent background
   setFast(false);
   cv._titleBox = env.titleBox || null;
-  if (o.select) {
+  if (o.picked && o.picked.length > 1) {
+    for (const hit of cv._hits) if (o.picked.includes(hit.id) && hit.type !== "bg") drawSelection(ctx, hit, kx, false);
+  } else if (o.select) {
     const hit = cv._hits.find((x) => x.id === o.select);
     if (hit && hit.type !== "bg") drawSelection(ctx, hit, kx);
     drawLayoutHandles(ctx, cv, cover.layers.find((l) => l.id === o.select), kx, rgb(C));
   }
+  if (o.marquee) {
+    const m = o.marquee, u = 1 / kx, x = Math.min(m.x0, m.x1), y = Math.min(m.y0, m.y1), mw = Math.abs(m.x1 - m.x0), mh = Math.abs(m.y1 - m.y0);
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,.08)"; ctx.fillRect(x, y, mw, mh);
+    ctx.lineWidth = 3 * u; ctx.strokeStyle = "rgba(7,7,12,.85)"; ctx.strokeRect(x, y, mw, mh);
+    ctx.lineWidth = 1.5 * u; ctx.strokeStyle = "#ffffff"; ctx.setLineDash([6 * u, 5 * u]); ctx.strokeRect(x, y, mw, mh);
+    ctx.restore();
+  }
+}
+
+/**
+ * The hits whose (turned) boxes lie wholly inside the rectangle {x0, y0, x1, y1}, bottom first, among
+ * those `accept` lets through. Wholly, not partly: on a cover the big layers (title, colour block,
+ * graphic) reach nearly everywhere, and a rectangle round two stickers would always catch them too.
+ */
+export function hitsIn(hits, m, accept = () => true) {
+  const x0 = Math.min(m.x0, m.x1), x1 = Math.max(m.x0, m.x1), y0 = Math.min(m.y0, m.y1), y1 = Math.max(m.y0, m.y1);
+  return hits.filter((h) => {
+    if (!accept(h)) return false;
+    const a = (h.r || 0) * RAD, ex = Math.abs(h.hw * Math.cos(a)) + Math.abs(h.hh * Math.sin(a)), ey = Math.abs(h.hw * Math.sin(a)) + Math.abs(h.hh * Math.cos(a));
+    return h.cx - ex >= x0 && h.cx + ex <= x1 && h.cy - ey >= y0 && h.cy + ey <= y1;
+  });
 }
 
 /**

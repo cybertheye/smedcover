@@ -192,6 +192,17 @@ function outlined(ctx, pass, o, id) {
   }
 }
 
+// Which effects draw the title's outline and shadow (its two sliders): the plain letterings of the
+// flat looks have neither, the overprint only an offset second colour, everything built on the
+// house lettering both. A look id stands for its own lettering, which "auto" uses.
+const BOTH = { stroke: true, shadow: true }, NONE = { stroke: false, shadow: false };
+const USES = { cel: BOTH, plain: NONE, cyber: BOTH, riso: { stroke: false, shadow: true }, anime: BOTH, bluenote: NONE, editorial: NONE, songke: NONE };
+/** { id, stroke, shadow } for effect `id` under the current look; id is the effect actually painted. */
+export function effectUses(id = "auto") {
+  const fx = EFFECTS[id] && id !== "auto" ? id : look().runs ? look().id : "cel";
+  return { id: fx, ...(USES[fx] || BOTH) };
+}
+
 /** Paints the current line with effect `id`. See the top of the file for `pass` and `o`. */
 export function paintRuns(ctx, pass, o, id = "auto") {
   const fx = EFFECTS[id] ? id : "auto";

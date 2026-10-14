@@ -2,7 +2,7 @@
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
 import { virtualSize , layoutValues, dragLayout, LAYOUT_LIMITS } from "./layout.js";
-import { layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, paintAccent, handles } from "./render.js";
+import { layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
@@ -15,7 +15,7 @@ import {
 } from "./store.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
-import { EFFECTS } from "./textfx.js";
+import { EFFECTS, effectUses } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams } from "./style.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
@@ -46,6 +46,7 @@ const S = {
   settings: normalizeSettings(null),
   profiles: [], profile: null, cover: null,
   photo: null, photoSrc: "",             // decoded background Image + its data URL
+  picked: [],                                       // a group selection: the ids of the layers in it (see group())
   importedFonts: [], systemFonts: [], latinFonts: new Set(["Bebas Neue", "JetBrains Mono"]),   // latinFonts: those that cannot set Chinese
   mode: "edit", tab: { edit: "cover", setup: "brand" },
   sel: "",                               // size key shown on the main canvas
@@ -163,19 +164,20 @@ async function applyProfile() {
 }
 
 // ---------- drawing: the main canvas every frame, the thumbnails a little later
-function paint(cv, size, pixelW, cover = S.cover, index = catIndex(), select = null, live = null) {
-  drawCover(cv, { profile: S.profile, catIndex: index, size, pixelW, cover, photo: S.photo, select, live });
+function paint(cv, size, pixelW, cover = S.cover, index = catIndex(), select = null, live = null, extra = {}) {
+  drawCover(cv, { profile: S.profile, catIndex: index, size, pixelW, cover, photo: S.photo, select, live, ...extra });
 }
 // While a layer is dragged on the canvas, the rest of the cover is painted once and reused (see drawCover).
-let LIVE = null;
-const goLive = (id) => { if (!LIVE || LIVE.id !== id) LIVE = { id }; };
+let LIVE = null, MARQUEE = null;   // MARQUEE: the selection rectangle being drawn, in virtual pixels
+const goLive = (ids) => { ids = [].concat(ids); const key = ids.join(" "); if (!LIVE || LIVE.key !== key) LIVE = { ids, key }; };
 const endLive = () => { if (LIVE) { LIVE = null; queueDraw(); } };
 function drawMain() {
   const stage = $("stage"), cv = $("cv"), size = selSize(), [vw, vh] = virtualSize(size.w, size.h);
   const k = Math.max(0.05, Math.min((stage.clientWidth - 36) / vw, (stage.clientHeight - 36) / vh));
   cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
   document.documentElement.dataset.look = S.profile.style.look;   // the two main buttons dress to match the cover (see index.html)
-  paint(cv, size, Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null);
+  paint(cv, size, Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
+    S.mode === "edit" ? { picked: group().map((L) => L.id), marquee: MARQUEE } : {});
   const clear = !layer("bg").visible;
   stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
 }
@@ -213,7 +215,42 @@ function syncToolbar() {
 }
 
 // ---------- editing layers
-function selectLayer(id) { if (S.layerId === id) return; S.layerId = id; renderSide(); queueDraw(); }
+function selectLayer(id) { if (S.layerId === id && !group().length) return; S.picked = []; S.layerId = id; renderSide(); queueDraw(); }
+/**
+ * The layers of the group selection on this channel's cover, or [] when there is none. A group holds
+ * while the selected layer is one of its members: selecting anything else by any route ends it.
+ */
+function group() {
+  if (S.picked.length < 2 || !S.picked.includes(S.layerId)) return [];
+  const list = S.picked.map((id) => layer(id)).filter((L) => L && appliesTo(L, cat().id));
+  return list.length > 1 ? list : [];
+}
+/** What is selected now, as a list of ids: the group, or the one selected layer (the background counts as nothing). */
+const pickedIds = () => (group().length ? group().map((L) => L.id) : S.layerId && S.layerId !== "bg" ? [S.layerId] : []);
+/** Selects these layers together; one is an ordinary selection, none selects the background. The last is the topmost. */
+function pickLayers(ids) {
+  if (ids.length < 2) return selectLayer(ids[0] || "bg");
+  S.picked = ids; S.layerId = ids[ids.length - 1];
+  renderSide(); queueDraw();
+}
+/** Adds a layer to the selection, or takes it out (shift-click). */
+function togglePick(id) {
+  const L = layer(id);
+  if (!L || L.type === "bg" || FIXED.includes(L.type)) return;
+  const now = pickedIds();
+  pickLayers(now.includes(id) ? now.filter((x) => x !== id) : [...now, id]);
+}
+/** The members of a group that can be moved. */
+const movers = (list) => list.filter((L) => !L.locked && !FIXED.includes(L.type));
+/** Applies the same placement edit to several layers, then redraws once. */
+function editAll(list, patch) { for (const L of list) adjust(L, frame(), S.settings.scope, patch); touch({ cover: true }); }
+function removeGroup() {
+  const gone = group().filter((L) => isFree(L.type));
+  if (!gone.length) return;
+  S.cover.layers = S.cover.layers.filter((L) => !gone.includes(L));
+  S.picked = []; S.layerId = "bg";
+  touch({ cover: true, side: true });
+}
 /** Applies a placement edit to a layer in the current scope, then redraws. */
 function edit(L, patch) { adjust(L, frame(), S.settings.scope, patch); touch({ cover: true }); }
 function addLayer(L) {
@@ -290,7 +327,7 @@ function layerAt(e) {
   /** The pointer in the selected layer's own rotated frame, plus the handle under it (if any). */
   function grip(e) {
     const L = layer(), hit = cv._hits && cv._hits.find((h) => h.id === S.layerId);
-    if (!L || !hit || L.locked || L.type === "bg" || FIXED.includes(L.type)) return null;
+    if (group().length || !L || !hit || L.locked || L.type === "bg" || FIXED.includes(L.type)) return null;
     const p = virtualPoint(e), a = (-hit.r * Math.PI) / 180, dx = p.x - hit.cx, dy = p.y - hit.cy;
     const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
     const handle = handles(hit, p.k).find((h) => Math.hypot(lx - h.lx, ly - h.ly) <= 11 * p.k);
@@ -342,6 +379,14 @@ function layerAt(e) {
     }
     const L = layerAt(e);
     if (!L) return;
+    const many = group();
+    if (e.shiftKey && L.type !== "bg") return togglePick(L.id);   // shift-click: into the selection, or out of it
+    // On the ground — the background, the colour block, anything locked — a drag draws a rectangle
+    // round what to select, and a click selects what was clicked. Ground moves only once it is the
+    // selected layer (the photo, or the colour block); something locked never does.
+    const ground = L.type === "bg" || L.type === "accent" || L.locked;
+    if (ground && (S.layerId !== L.id || many.length || e.shiftKey || L.locked || (L.type === "bg" && !S.photo))) return marquee(e, L);
+    if (many.some((x) => x.id === L.id)) return dragGroup(e, many, L);
     selectLayer(L.id);
     if (L.locked || (L.type === "bg" && !S.photo)) return;
     let last = virtualPoint(e), moved = false;
@@ -350,6 +395,33 @@ function layerAt(e) {
     cv.onpointermove = (m) => { const p = virtualPoint(m); moved = true; edit(L, { ddx: p.x - last.x, ddy: p.y - last.y }); last = p; };
     cv.onpointerup = cv.onpointercancel = done(() => moved);
   });
+  /** Draws a selection rectangle; what lies wholly inside it is selected when the button is let go. Shift adds to the selection. */
+  function marquee(e, under) {
+    const start = virtualPoint(e), keep = e.shiftKey ? pickedIds() : [];
+    const ok = (h) => { const L = layer(h.id); return h.type !== "bg" && L && isPickable(L) && !FIXED.includes(L.type); };
+    let box = null;
+    cv.setPointerCapture(e.pointerId);
+    cv.onpointermove = (m) => {
+      const p = virtualPoint(m);
+      if (!box && Math.hypot(p.x - start.x, p.y - start.y) < 5 * p.k) return;   // a click is not a rectangle
+      box = { x0: start.x, y0: start.y, x1: p.x, y1: p.y }; MARQUEE = box; queueDraw();
+    };
+    cv.onpointerup = cv.onpointercancel = () => {
+      cv.onpointermove = null; MARQUEE = null;
+      if (!box) { if (!e.shiftKey) selectLayer(under.id); return queueDraw(); }
+      pickLayers([...new Set([...keep, ...hitsIn(cv._hits, box, ok).map((h) => h.id)])]);
+      queueDraw();
+    };
+  }
+  /** Drags every movable member of the group together; a click without a drag selects just the one clicked. */
+  function dragGroup(e, many, L) {
+    const list = movers(many);
+    let last = virtualPoint(e), moved = false;
+    cv.setPointerCapture(e.pointerId);
+    if (list.length) goLive(list.map((x) => x.id));
+    cv.onpointermove = (m) => { if (!list.length) return; const p = virtualPoint(m); moved = true; editAll(list, { ddx: p.x - last.x, ddy: p.y - last.y }); last = p; };
+    cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; endLive(); if (moved) renderSide(); else selectLayer(L.id); };
+  }
   cv.addEventListener("wheel", (e) => {
     if (S.mode !== "edit") return;
     e.preventDefault();
@@ -360,6 +432,7 @@ function layerAt(e) {
     edit(L, e.altKey ? { rot: e.deltaY > 0 ? 2 : -2 } : { scale: Math.exp(-e.deltaY * 0.0015) });
     later("side", 250, renderSide);
   }, { passive: false });
+  $("stage").addEventListener("pointerdown", (e) => { if (e.target === $("stage") && S.mode === "edit" && S.cover) selectLayer("bg"); });
   // assets dragged from the library land where they are dropped
   cv.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("application/x-smed-asset")) e.preventDefault(); });
   cv.addEventListener("drop", (e) => {
@@ -644,6 +717,7 @@ function styleTab() {
   return [
     el("div", { class: "box" }, cap("style.look"),
       select(LOOK_IDS.map((k) => [k, LOOKS[k].name[getLang()]]), st.look, (v) => { st.look = v; touch({ profile: true, panel: true, side: true, strip: true }); }),
+      L.about && el("div", { class: "about" }, L.about[getLang()]),
       el("div", { class: "hint" }, t("style.lookHint")),
       L.params.map((d) => (d.toggle
         ? el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: vals[d.key] > 0, onchange: (e) => tune(d.key, e.target.checked ? 1 : 0) }), el("span", {}, d.name[getLang()]))
@@ -781,7 +855,8 @@ function fontControl(L) {
 let dragId = null;
 function layerRow(L) {
   const icon = (glyph, off, title, fn) => el("button", { class: "ic" + (off ? " off" : ""), title, onclick: (e) => { e.stopPropagation(); fn(); touch({ cover: true, side: true }); } }, glyph);
-  return el("div", { class: `layer${L.id === S.layerId ? " on" : ""}${L.visible ? "" : " hidden"}`, draggable: L.type !== "bg", onclick: () => selectLayer(L.id),
+  const on = L.id === S.layerId || group().includes(L);
+  return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}`, draggable: L.type !== "bg", onclick: (e) => (e.shiftKey ? togglePick(L.id) : selectLayer(L.id)),
     ondragstart: (e) => { dragId = L.id; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", L.id); },
     ondragend: () => { dragId = null; },
     ondragover: (e) => { if (dragId && dragId !== L.id) { e.preventDefault(); e.currentTarget.classList.add("over"); } },
@@ -826,6 +901,17 @@ function placementControls(L) {
   ];
 }
 /** The text effect of a headline layer, and how strong it is. */
+/**
+ * The title's outline and shadow sliders. Not every text effect draws them (the flat looks' plain
+ * lettering has neither): a slider the effect would ignore is shown greyed, with the reason.
+ */
+function titleLines(L, set) {
+  const use = effectUses(L.fx), name = (EFFECTS[use.id] || LOOKS[use.id]).name[getLang()];
+  const line = (k, key) => (use[k]
+    ? slider(key, 0, 2, 0.05, L[k], times, (v) => set(k, v))
+    : el("div", { class: "sl off", style: "grid-template-columns:84px 1fr", title: t("props.fxIgnores", name) }, el("span", {}, t(key)), el("span", { class: "why" }, t("props.fxIgnores", name))));
+  return [line("stroke", "props.stroke"), line("shadow", "props.shadow")];
+}
 function fxControl(L) {
   const set = (k, v, side) => { if (v === undefined) delete L[k]; else L[k] = v; touch({ cover: true, side }); };
   const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline") };
@@ -859,8 +945,7 @@ function typeControls(L) {
     case "brand": return [check("props.rail", L.rail, (v) => set("rail", v)), fontControl(L), inkControl(L, "ink", "props.ink", "#ffffff")];
     case "title": return [
       select([["left", `${t("props.align")} · ${t("align.left")}`], ["center", `${t("props.align")} · ${t("align.center")}`]], L.align, (v) => set("align", v)),
-      slider("props.stroke", 0, 2, 0.05, L.stroke, times, (v) => set("stroke", v)),
-      slider("props.shadow", 0, 2, 0.05, L.shadow, times, (v) => set("shadow", v)),
+      ...titleLines(L, set),
       fontControl(L),
       inkControl(L, "ink", "props.ink", "#ffffff"), inkControl(L, "hi", "props.inkHi", cat().color),
       fxControl(L),
@@ -890,17 +975,22 @@ function renderSide() {
   // keep typing in the text box alive across rebuilds
   const typing = document.activeElement && side.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA";
   if (typing) return;
-  const i = L ? here.indexOf(L) : -1;
+  const i = L ? here.indexOf(L) : -1, many = group();
   side.replaceChildren(
     el("div", {}, cap("layers.title"),
       el("div", { class: "layers" }, [...here].reverse().map(layerRow)),
       el("div", { class: "acts", style: "margin-top:10px;justify-content:flex-start" },
         el("button", { class: "btn", onclick: () => addLayer(newLayer("text", { text: t("layer.newText") })) }, t("layers.addText")),
-        el("button", { class: "btn", disabled: !free, onclick: duplicateLayer }, t("layers.dup")),
-        el("button", { class: "btn", disabled: !free, onclick: () => removeLayer() }, t("layers.del")),
-        el("button", { class: "btn", title: t("layers.up"), disabled: i < 1 || i >= here.length - 1, onclick: () => shiftLayer(1) }, "▲"),
-        el("button", { class: "btn", title: t("layers.down"), disabled: i <= 1, onclick: () => shiftLayer(-1) }, "▼"))),
-    L ? el("div", { class: "box" }, el("label", { class: "cap" }, `${t("props.title")} · ${layerName(L)}`),
+        el("button", { class: "btn", disabled: !free || many.length > 0, onclick: duplicateLayer }, t("layers.dup")),
+        el("button", { class: "btn", disabled: many.length ? !many.some((x) => isFree(x.type)) : !free, onclick: () => (many.length ? removeGroup() : removeLayer()) }, t("layers.del")),
+        el("button", { class: "btn", title: t("layers.up"), disabled: many.length > 0 || i < 1 || i >= here.length - 1, onclick: () => shiftLayer(1) }, "▲"),
+        el("button", { class: "btn", title: t("layers.down"), disabled: many.length > 0 || i <= 1, onclick: () => shiftLayer(-1) }, "▼"))),
+    many.length ? el("div", { class: "box" }, el("label", { class: "cap" }, t("props.group", many.length)),
+      el("div", { class: "hint", style: "margin-top:0" }, many.map(layerName).join(" · ")),
+      many.some((x) => x.locked) && el("div", { class: "hint" }, t("props.groupLocked")),
+      el("div", { class: "hint" }, t("props.groupHint")),
+      el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => selectLayer("bg") }, t("props.groupEnd")))
+    : L ? el("div", { class: "box" }, el("label", { class: "cap" }, `${t("props.title")} · ${layerName(L)}`),
       typeControls(L), placementControls(L),
       L.type !== "bg" && slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { goLive(L.id); later("live", 300, endLive); L.o = v; touch({ cover: true }); }),
       free && catsControl(L))
@@ -1222,8 +1312,14 @@ addEventListener("keydown", (e) => {
   if (mod && key === "z") { e.preventDefault(); return timeTravel(e.shiftKey ? 1 : -1); }
   if (S.mode !== "edit") return;
   const L = layer();
-  if (mod && key === "d") { e.preventDefault(); return duplicateLayer(); }
+  if (mod && key === "d") { e.preventDefault(); return group().length ? null : duplicateLayer(); }
   if (key === "escape") return selectLayer("bg");
+  const many = group(), step0 = e.shiftKey ? 10 : 1, nudge = { arrowleft: [-step0, 0], arrowright: [step0, 0], arrowup: [0, -step0], arrowdown: [0, step0] }[key];
+  if (many.length) {   // a group: delete and the arrows act on all of it
+    if (key === "delete" || key === "backspace") { e.preventDefault(); return removeGroup(); }
+    if (nudge) { e.preventDefault(); editAll(movers(many), { ddx: nudge[0], ddy: nudge[1] }); }
+    return;
+  }
   if (!L) return;
   if (key === "delete" || key === "backspace") { e.preventDefault(); return removeLayer(); }
   const step = e.shiftKey ? 10 : 1, move = { arrowleft: [-step, 0], arrowright: [step, 0], arrowup: [0, -step], arrowdown: [0, step] }[key];

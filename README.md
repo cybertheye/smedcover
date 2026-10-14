@@ -13,7 +13,7 @@ How it works inside: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 | Term | Meaning |
 |---|---|
-| **Profile** | Everything about one brand: its name, channels, output sizes, fonts, template and a default design. You can keep several. |
+| **Profile** | Everything about one brand: its name, channels, output sizes, template and a default design. You can keep several. |
 | **Channel** | One content line within the brand, with its own name, colour and graphic. A cover takes its colour and graphic from its channel. |
 | **Cover** | The one you are editing: its channel, title, corner tag and its own stack of layers. |
 | **Layer** | Each part of a cover. Built-in layers (background, colour block, title, …) are on every cover; free layers are the stickers, images and text you add. |
@@ -49,7 +49,7 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
 ### Background photo
 
 - Choose a photo in the Cover tab, or drop one onto the window.
-- Drag the photo to move it, scroll to resize it.
+- Click the background once to select it, then drag the photo to move it; scroll to resize it.
 - Select the Background layer on the right to set blur and dim.
 
 ### Collage: work directly on the canvas
@@ -61,10 +61,13 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
 | Drag a corner | Resize |
 | Drag a side | Stretch horizontally or vertically |
 | Drag the top knob | Rotate |
+| Drag a box on the background, the colour block or a locked layer | Select several: what lies wholly inside is selected; with Shift, added |
+| Shift + click | Add an item to the selection, or take it out |
+| Drag any item of a selection | Move them together; arrow keys nudge them together, Delete removes the ones you added |
 | Scroll | Resize; with Alt, rotate |
 | Arrow keys | Nudge by 1; with Shift, by 10 |
 | Delete | Remove the selected free layer |
-| Esc | Deselect |
+| Esc, or a click outside the canvas | Deselect |
 | Cmd/Ctrl + D | Duplicate the selected free layer |
 | Cmd/Ctrl + Z, with Shift to redo | Undo / redo |
 | Cmd/Ctrl + S | Save the project |
@@ -148,7 +151,7 @@ The title and every text layer (with or without a plate) can be given a text eff
 | Masked | halftone inside, stripes inside, inner shadow, worn, row shift | Change what is inside the letters |
 | Outlined | extruded, arched, tapered, wave | Reshape the letters themselves |
 
-Masked and outlined effects have a *Strength* slider. The existing *Outline* and *Shadow* sliders still act on most effects.
+Masked and outlined effects have a *Strength* slider. The title's *Outline* and *Shadow* sliders can be moved only when the current effect draws an outline or a shadow: Plain, Plain upright and Underlined highlight have neither, Overprint only the shadow (how far its two colours sit apart); otherwise the slider is greyed out and says why.
 
 Outlined effects read the font file to get each letter's outline: the first time a piece of text is used it shows as ordinary lettering for an instant and then changes; an export waits for the outlines before drawing. Bundled fonts, installed fonts and fonts you imported are supported.
 
@@ -203,7 +206,7 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 
 ### Looks
 
-**Look**, at the top of *Edit → Style*, decides how the whole cover is drawn. Switching it changes the background, the colour block, the title and other lettering, the channel graphics, the stickers and AI-generated assets together; content, placement and layers stay as they are, and you can switch back at any time.
+**Look**, at the top of *Edit → Style*, decides how the whole cover is drawn. Switching it changes the background, the colour block, the title and other lettering, the channel graphics, the stickers and AI-generated assets together; content, placement and layers stay as they are, and you can switch back at any time. Under the menu, a note on the current look says what it looks like, what is particular to it and what it suits.
 
 | Look | What you get |
 |---|---|

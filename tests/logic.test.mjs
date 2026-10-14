@@ -785,3 +785,36 @@ test("ai: a reference picture travels in the form each API style wants", async (
   assert.deepEqual(a.body.messages[0].content, [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: "QUJD" } }, { type: "text", text: "T" }]);
   assert.equal(a.body.system, "SYS");
 });
+
+test("a selection rectangle takes every layer whose turned box lies wholly inside it", async () => {
+  const { hitsIn } = await import("../ui/js/render.js");
+  const hits = [
+    { id: "bg", type: "bg", cx: 400, cy: 225, hw: 400, hh: 225, r: 0 },
+    { id: "a", type: "asset", cx: 100, cy: 100, hw: 20, hh: 20, r: 0 },
+    { id: "b", type: "asset", cx: 300, cy: 100, hw: 50, hh: 5, r: 90 },   // turned upright: reaches y 50…150
+    { id: "c", type: "text", cx: 600, cy: 400, hw: 30, hh: 10, r: 0 },
+  ];
+  const ids = (m) => hitsIn(hits, m, (h) => h.type !== "bg").map((h) => h.id);
+  assert.deepEqual(ids({ x0: 70, y0: 40, x1: 310, y1: 160 }), ["a", "b"]);  // drawn either way round
+  assert.deepEqual(ids({ x1: 70, y1: 40, x0: 310, y0: 160 }), ["a", "b"]);
+  assert.deepEqual(ids({ x0: 70, y0: 40, x1: 310, y1: 140 }), ["a"]);        // b turned upright reaches y 150: only partly inside
+  assert.deepEqual(ids({ x0: 90, y0: 90, x1: 110, y1: 110 }), []);           // inside a, not round it
+  assert.deepEqual(ids({ x0: 0, y0: 0, x1: 800, y1: 450 }), ["a", "b", "c"]);
+});
+
+test("the title's outline and shadow are offered only where the text effect draws them", async () => {
+  const { effectUses } = await import("../ui/js/textfx.js");
+  try {
+    setLook("cel");
+    assert.deepEqual(effectUses(), { id: "cel", stroke: true, shadow: true });
+    assert.deepEqual(effectUses("bluenote"), { id: "bluenote", stroke: false, shadow: false });
+    assert.deepEqual(effectUses("riso"), { id: "riso", stroke: false, shadow: true });
+    assert.equal(effectUses("worn").stroke, true);                            // mask effects keep the house keyline
+    setLook("editorial");
+    assert.deepEqual(effectUses("auto"), { id: "editorial", stroke: false, shadow: false });
+    assert.equal(effectUses("cel").stroke, true);
+    setLook("songke");
+    assert.equal(effectUses().shadow, false);
+    for (const id of LOOK_IDS) assert.ok(LOOKS[id].about && LOOKS[id].about.zh && LOOKS[id].about.en, id);   // every look says what it is
+  } finally { setLook("cel"); }
+});
