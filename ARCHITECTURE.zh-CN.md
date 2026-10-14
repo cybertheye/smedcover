@@ -245,7 +245,7 @@ tests/               不依赖 DOM 的模块的单元测试
 
 ### 6.4 抠图（`src-tauri/src/subject.rs`）
 
-`subject_mask` 把照片字节交给 Apple Vision 的 `VNGenerateForegroundInstanceMaskRequest`（macOS 14 起；通过 objc2 在运行时查找这个类，旧系统上报"需要 macOS 14"），取 `generateScaledMaskForImageForInstances` 得到与照片同尺寸的浮点遮罩，转成"只有透明度有意义"的 PNG 返回。界面先把照片画到画布上再编码成 JPEG 发送，所以 EXIF 方向已经摆正，遮罩与照片像素一一对应。遮罩存在照片记录上；照片换了（换图、AI 重绘）就清空，用到它的图层会自动重新抠。
+`subject_mask` 把照片字节交给 Apple Vision 的 `VNGenerateForegroundInstanceMaskRequest`（macOS 14 起；通过 objc2 在运行时查找这个类，旧系统上报"需要 macOS 14"），取 `generateScaledMaskForImageForInstances` 得到与照片同尺寸的浮点遮罩，转成"只有透明度有意义"的 PNG 返回。界面先把照片画到画布上再编码成 JPEG 发送，所以 EXIF 方向已经摆正，遮罩与照片像素一一对应。遮罩存在照片记录上；图片换了（AI 重绘、还原原图）就清空，用到它的图层会自动重新抠。
 
 拖动时的缓存（`o.live`）按"动的图层"和"不动的图层"把图层分成若干段，每段不动的图层只画一次成图，每帧只重画会动的段。拖动一张照片时，它的副本一起列为会动的；有抠图、描边或投影的照片在拖动期间只平移上一帧的图像，松手后再精确重画。
 

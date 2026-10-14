@@ -722,9 +722,7 @@ async function cutOut(L) {
 }
 /** Photo layer L's subject, cut out into a new photo layer. */
 function cutBox(L) {
-  return el("div", { class: "cut" },
-    el("button", { class: "btn wide", disabled: CUT.busy, onclick: () => cutOut(L) }, t(CUT.busy ? "cut.busy" : "cut.go")),
-    el("div", { class: "hint" }, t("cut.hint")));
+  return el("button", { class: "btn wide", style: "margin-top:8px", disabled: CUT.busy, onclick: () => cutOut(L) }, t(CUT.busy ? "cut.busy" : "cut.go"));
 }
 
 // ---------- repainting a photo with an image model (see repaint.js)
@@ -1371,7 +1369,7 @@ function layerRow(L) {
     icon(L.visible ? "◉" : "○", !L.visible, t("layers.show"), () => { L.visible = !L.visible; }),
     PINNED.includes(L.type) ? el("span", { class: "ic pin", title: t("layers.pinned." + L.type) }, "🔒")
       : icon(L.locked ? "▣" : "□", !L.locked, t("layers.lock"), () => { L.locked = !L.locked; }),
-    el("span", { class: "nm", title: free ? t("layers.rename") : null, onclick: free ? (e) => { if (e.shiftKey) return; e.stopPropagation(); selectLayer(L.id); renameLayer(L.id); } : null }, layerName(L),
+    el("span", { class: "nm", title: free ? t("layers.rename") : null, onclick: free ? (e) => nameClick(e, L) : null }, layerName(L),
       L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) })),
     el("span", { class: "kinds" }, layerKinds(L)));
 }
@@ -1396,6 +1394,19 @@ const ICONS = Object.fromEntries(Object.entries({
   text: '<path d="M3 3.5h10M8 3.5v10M6 13.5h4"/>',
   svg: '<path d="M8 1.8l4.6 5.4L8 14.2 3.4 7.2z"/><path d="M8 1.8v6.4"/><circle cx="8" cy="9.2" r="1.1"/>',
 }).map(([k, d]) => [k, `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`]));
+/**
+ * A click on a name selects the layer like a click anywhere on its row; a second one soon after, on
+ * the same name, renames it. Counted here rather than with dblclick: the first click rebuilds the
+ * list, and a dblclick does not survive its target being replaced.
+ */
+let lastNameClick = { id: "", at: 0 };
+function nameClick(e, L) {
+  const now = Date.now(), second = !e.shiftKey && lastNameClick.id === L.id && now - lastNameClick.at < 450;
+  lastNameClick = second ? { id: "", at: 0 } : { id: L.id, at: now };
+  if (!second) return;   // the row selects it
+  e.stopPropagation();
+  renameLayer(L.id);
+}
 /** Turns a layer's name in the list into a field: Enter or leaving it keeps the new name, Esc does not; an empty name goes back to the automatic one. */
 function renameLayer(id) {
   const L = layer(id), row = $("side").querySelector(`.layer[data-id="${CSS.escape(id)}"]`);
@@ -1482,28 +1493,19 @@ function headlineControls(L, set) {
 /** The properties of a photo layer. */
 function photoControls(L, set) {
   const base = L.of ? layer(L.of) : L, rec = recordOf(L), pid = base && base.pid;
-  const replace = async () => {
-    const f = await pickFile("image/*");
-    if (!f) return;
-    const id = await putPhoto(await readAs(f, "readAsDataURL"));
-    if (!id) return toast(t("msg.badFile"));
-    L.pid = id; touch({ cover: true, side: true, panel: true });
-    if (S.cover.layers.some((l) => l.cut && (l === L || l.of === L.id))) ensureMask(id);
-  };
   const cut = async (on) => { if (on && !(await ensureMask(pid))) return renderSide(); set("cut", on, true); };
   return [
     !rec && el("div", { class: "hint err", style: "margin-top:0" }, t("props.photoMissing")),
-    L.of ? el("div", { class: "hint", style: "margin-top:0" }, t("props.copyHint", base ? layerName(base) : "—"))
-      : [check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
-         el("button", { class: "btn wide", style: "margin-top:8px", onclick: replace }, t("props.replacePhoto"))],
+    canCut()
+      ? [el("button", { class: "btn wide", disabled: CUT.busy, onclick: () => cut(!L.cut) }, t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut")),
+         !L.of && cutBox(L)]
+      : el("div", { class: "hint", style: "margin-top:0" }, t("cut.onlyMac")),
+    CUT.error && el("div", { class: "hint err" }, CUT.error),
+    L.of ? el("div", { class: "hint" }, t("props.copyHint", base ? layerName(base) : "—"))
+      : el("div", { style: "margin-top:10px" }, check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); })),
     slider("props.blur", 0, 80, 1, L.blur, px, (v) => { holdLive(L.id); set("blur", v); }),
     slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => { holdLive(L.id); set("dim", v); }),
     check("props.treat", L.treat, (v) => set("treat", v)),
-    canCut()
-      ? el("button", { class: "btn wide", style: "margin-top:10px", disabled: CUT.busy, onclick: () => cut(!L.cut) }, t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut"))
-      : el("div", { class: "hint" }, t("cut.onlyMac")),
-    !L.of && canCut() && cutBox(L),
-    CUT.error && el("div", { class: "hint err" }, CUT.error),
     slider("props.outline", 0, 40, 1, L.outline, px, (v) => { holdLive(L.id); set("outline", v); }),
     inkControl(L, "ink", "props.outlineInk", "#ffffff"),
     slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => { holdLive(L.id); set("shadow", v); }),
@@ -1554,8 +1556,9 @@ function renderSide() {
       el("div", { class: "hint" }, t("props.groupHint")),
       el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => selectLayer("bg") }, t("props.groupEnd")))
     : L ? el("div", { class: "box" }, el("label", { class: "cap" }, `${t("props.title")} · ${layerName(L)}`),
-      typeControls(L), placementControls(L),
+      typeControls(L),
       L.type !== "bg" && slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { holdLive(L.id); L.o = v; touch({ cover: true }); }),
+      placementControls(L),
       free && catsControl(L))
       : el("div", { class: "hint" }, t("layers.none")));
   side.scrollTop = y;
