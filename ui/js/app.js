@@ -964,7 +964,7 @@ function shapeTile(shape) {
 }
 /** Assets: two panes — vector assets (made in code or by AI, shared by every profile) and the bitmap library. */
 function assetsTab() {
-  const pane = S.assetPane === "bitmap" ? "bitmap" : "vector", tab = (k) => el("button", { class: pane === k ? "on" : "", onclick: () => { S.assetPane = k; renderPanel(); $("panel").scrollTop = 0; } }, t("assets.pane." + k));
+  const pane = S.assetPane === "bitmap" ? "bitmap" : "vector", tab = (k) => el("button", { class: pane === k ? "on" : "", onclick: () => { S.assetPane = k; renderPanel(); $("panel").scrollTop = 0; } }, el("span", {}, t("assets.pane." + k)));   // the label dims, not the bars
   return [el("div", { class: "subtabs" }, tab("vector"), tab("bitmap")), ...(pane === "bitmap" ? bitmapPane() : vectorPane())];
 }
 function vectorPane() {

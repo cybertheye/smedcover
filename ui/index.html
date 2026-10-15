@@ -66,12 +66,15 @@
   .hint.ok{color:#3ddc84;opacity:1}
   .hint.err{opacity:1}
   .seg.wide{margin-bottom:4px}.seg.wide .btn{flex:1}
-  /* a pane switch (Assets): | Vector assets | Bitmaps | — the chosen one white between bars in the channel colour, the other dim */
-  .subtabs{display:flex;margin:2px 0 8px}
-  .subtabs button{position:relative;border:0;border-left:2px solid var(--line2);border-right:2px solid var(--line2);background:none;color:#fff;font-family:inherit;font-weight:700;font-size:14px;letter-spacing:.04em;line-height:1;padding:3px 14px;cursor:pointer;opacity:.4}
-  .subtabs button+button{margin-left:-2px}   /* one bar between two */
-  .subtabs button:hover{opacity:.7}
-  .subtabs button.on{opacity:1;border-color:var(--acc);z-index:1}
+  /* a pane switch (Assets): | Vector assets | Bitmaps | as a control the panel's width — each pane a segment between
+     upright bars; the chosen one white, raised a little, its bars in the channel colour; the other dim */
+  .subtabs{display:flex;margin:2px 0 8px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--panel)}
+  .subtabs button{flex:1;position:relative;border:0;border-left:3px solid var(--line2);border-right:3px solid var(--line2);background:none;color:#fff;font-family:inherit;font-weight:700;font-size:14px;letter-spacing:.06em;padding:11px 0;cursor:pointer}
+  .subtabs button span{opacity:.4}
+  .subtabs button+button{margin-left:-3px}   /* one bar between two */
+  .subtabs button:hover span{opacity:.75}
+  .subtabs button.on{border-color:var(--acc);background:#1d1d2c;z-index:1}
+  .subtabs button.on span{opacity:1}
   .peek{margin-top:8px;font-size:12px}.peek summary{cursor:pointer;opacity:.7}
   .peek pre{white-space:pre-wrap;max-height:220px;overflow:auto;margin:6px 0 0;padding:8px;border:1px solid var(--line2);font:12px/1.6 ui-monospace,monospace;opacity:.85}
   /* the selected layer's properties: group names on the left, lined up across groups; controls on the right */
