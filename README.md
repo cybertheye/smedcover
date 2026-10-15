@@ -294,7 +294,7 @@ The Assets tab has two panes at the top: **Vector assets** and **Bitmaps**. Both
   - *＋ New folder* makes a folder and lets you name it; double-click a folder's name to rename it later. Drag an asset onto a folder to file it, onto *Unfiled* to take it out. ▾ / ▸ closes or opens a folder.
   - Deleting a folder takes two clicks on its ×; its assets are not deleted but go back to Unfiled. Folders are kept on this computer and do not travel with profile exports.
 - **Channel graphics** — twenty cel-shaded graphics that follow the channel colour.
-- **Stickers** — a free pack of 72; each in its own colours, the channel colour or one of your own. The first group is twelve *Frames*: square, rectangle, circle, triangle, diamond, pentagon, hexagon, octagon, star, parallelogram, trapezoid and semicircle — thin geometric outlines, empty in the middle, to go round a photo, a word or a face, their line drawn the current look's way.
+- **Stickers** — a free pack of 72; each in its own colours, the channel colour or one of your own. The first group is twelve *Frames*: square, rectangle, circle, triangle, rounded rectangle, pentagon, hexagon, octagon, star, parallelogram, trapezoid and semicircle — thin geometric outlines, empty in the middle, to go round a photo, a word or a face, their line drawn the current look's way.
 - **Colour block & edge** — twelve shapes; click one to reshape the colour block layer.
 
 **Bitmaps**

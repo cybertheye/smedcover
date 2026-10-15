@@ -107,7 +107,7 @@ export const STICKERS = [
   S("f-rect", "长方形", "Rectangle", "frame", GREEN, frame(poly([[-96, -56], [96, -56], [96, 56], [-96, 56]]))),
   S("f-circle", "圆形", "Circle", "frame", YELLOW, frame(circle(0, 0, 90))),
   S("f-triangle", "三角形", "Triangle", "frame", RED, frame(ngon(3, 98, -Math.PI / 2), 4)),
-  S("f-diamond", "菱形", "Diamond", "frame", RED, frame(poly([[0, -96], [96, 0], [0, 96], [-96, 0]]))),
+  S("f-roundrect", "圆角矩形", "Rounded rectangle", "frame", RED, frame(rrect(-92, -64, 184, 128, 30))),
   S("f-pentagon", "五边形", "Pentagon", "frame", BLUE, frame(ngon(5, 94))),
   S("f-hex", "六边形", "Hexagon", "frame", BLUE, frame(ngon(6, 94, 0))),
   S("f-octagon", "八边形", "Octagon", "frame", GREEN, frame(ngon(8, 92, Math.PI / 8))),
@@ -236,7 +236,7 @@ export const PALETTE = { white: WHITE, ink: INK, red: RED, yellow: YELLOW, orang
 
 const BY_ID = new Map(STICKERS.map((s) => [s.id, s]));
 /** Frames of the first set, which were heavy and not all geometric: a layer using one shows the nearest of these. */
-const RENAMED = { "f-double": "f-rect", "f-bubble": "f-rect", "f-ticket": "f-rect", "f-film": "f-rect", "f-polaroid": "f-square", "f-brackets": "f-square", "f-burst": "f-star", "f-scribble": "f-circle", "f-arch": "f-semicircle" };
+const RENAMED = { "f-double": "f-rect", "f-bubble": "f-rect", "f-ticket": "f-rect", "f-film": "f-rect", "f-polaroid": "f-square", "f-brackets": "f-square", "f-burst": "f-star", "f-scribble": "f-circle", "f-arch": "f-semicircle", "f-diamond": "f-roundrect" };
 export const stickerById = (id) => BY_ID.get(id) || BY_ID.get(RENAMED[id]);
 /** Draws a sticker centred on the origin in its 200-unit box. `tint` overrides the default colour. */
 export function drawSticker(ctx, id, tint) {
