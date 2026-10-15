@@ -127,6 +127,9 @@
   .compare{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
   .compare figure{margin:0;display:grid;gap:4px;font-size:12px;opacity:.9}
   .compare img{width:100%;aspect-ratio:4/3;object-fit:contain;background:#000;border:2px solid var(--line2)}
+  .compare.one{grid-template-columns:1fr}
+  .cpv{width:100%;display:grid;place-items:center;background:#000;border:2px solid var(--line2);font-size:12px;opacity:.95}
+  .cpv canvas{width:100%;height:100%;display:block}
   .ref{display:grid;grid-template-columns:56px 1fr auto;gap:10px;align-items:center;margin-top:8px;font-size:12px;opacity:.9}
   .ref img{width:56px;height:56px;object-fit:cover;border:2px solid var(--line2)}
   .ref .btn{padding:4px 9px;font-size:12px}
@@ -168,6 +171,7 @@
   .tile canvas{width:100%;height:100%;display:block;pointer-events:none}
   .tile .x{position:absolute;top:-8px;right:-8px;width:22px;height:22px;border:2px solid #fff;background:var(--ink);color:#fff;font-size:12px;line-height:1;cursor:pointer;padding:0;display:none}
   .tile:hover .x{display:block}
+  .ptile .x{top:4px;right:4px}   /* the tile clips what sticks out */
 
   /* canvas column */
   #center{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;min-width:0}
@@ -177,7 +181,14 @@
   #toolbar .name{font:600 13px var(--mono);letter-spacing:.06em;font-variant-numeric:tabular-nums;width:26ch;flex:none;overflow:hidden;text-overflow:ellipsis}
   #toolbar .help{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;opacity:.6;cursor:help;flex:none}
   #toolbar .help:hover{opacity:1}
-  #stage{min-height:0;min-width:0;display:grid;place-items:center;padding:18px;overflow:hidden;background:#06060b}
+  #stage{min-height:0;min-width:0;display:grid;place-items:center;padding:18px;overflow:hidden;background:#06060b;position:relative}
+  #stage.focus #cv{outline:2px dashed var(--acc);outline-offset:4px}
+  #focustag{position:absolute;top:8px;left:50%;transform:translateX(-50%);max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--acc);color:var(--ink);font:700 11px var(--mono);letter-spacing:.06em;padding:3px 10px;pointer-events:none}
+  #focustag.off{background:#555;color:#fff}
+  .lhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .focusbtn{border:1px solid var(--line2);background:transparent;color:inherit;font:700 10px var(--mono);letter-spacing:.08em;padding:3px 8px;cursor:pointer;opacity:.75}
+  .focusbtn:hover{opacity:1}
+  .focusbtn.on{background:var(--acc);border-color:var(--acc);color:var(--ink);opacity:1}
   #stage canvas{display:block;touch-action:none;box-shadow:0 0 0 2px var(--line2)}
   #stage.alpha canvas{background:repeating-conic-gradient(#3a3a48 0% 25%,#24242e 0% 50%) 0 0/20px 20px}
   #strip{display:flex;gap:14px;padding:12px 18px 8px;border-top:2px solid var(--line);overflow-x:scroll;overflow-y:hidden;align-items:flex-end;min-width:0}

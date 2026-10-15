@@ -139,7 +139,7 @@ Repaint the attached photograph as a loose watercolour painting …
 
 - *Anything to add* is optional and goes after any source. Every source is followed by: no text or watermarks, no border, keep the photo's shape.
 - While it runs you can close *AI repaint* and carry on; its button says *Repainting…*. When it is done you are told, the button reads *AI repaint · result ready*, and opening it shows the result, which stays until the next repaint.
-- The result is shown beside the original first; *Use this* replaces that photo (and its copies, such as the cut-out subject), and *Back to the original* is there afterwards. A new repaint always starts from the original, so repaints do not pile up.
+- The result is shown first, as a preview; *Use this* replaces that photo (and its copies, such as the cut-out subject), and *Back to the original* is there afterwards. A new repaint always starts from the original, so repaints do not pile up.
 - Both the repainted photo and the original are saved in project files.
 - If the service answers that it does not take one of the optional settings sent (such as the size or the watermark), the app sends the request again without it.
 - Each repaint is charged at the service's prices and usually takes tens of seconds.
@@ -183,6 +183,7 @@ In *This size only*, the channel graphic's placement is remembered per channel.
 - Layers you added (photos, text, assets) are renamed by double-clicking their name (a single click selects, as anywhere on the row): Enter or clicking elsewhere keeps it, Esc does not, an empty name goes back to the automatic one.
 - **＋ Text** adds a text layer; **＋ Colour** adds a colour layer: one block of colour, the canvas's size to begin with (in the channel colour), to shrink, stretch or turn into a ground, a band or a see-through wash. Clicking an item in Assets adds it. New layers go directly above the selected one.
 - Position, size, stretch and rotation are set on the canvas with the mouse (see the table above).
+- **FOCUS** — the switch at the top right of the layer list (shortcut F, Esc to leave). While on, dragging and scrolling on the canvas (Option to turn) act on the selected layer whatever is under the pointer, and nothing else is picked or moved; choose another layer in the list. The canvas gets a dashed frame and a tag naming the layer; a layer that cannot be moved (a fixed built-in or a locked one) is tagged so. With several layers selected, a drag moves them together.
 - The properties come in groups: their names on the left (Text, Effect, Colour, Lines, Plate — or Cut-out, Place, Picture, Lines…), the controls on the right; after a rule at the bottom, the Layer group every layer has: opacity and *Reset placement* (a cut-out has none; its *Line up with the photo again* is in its Place group). Explanations sit behind the ⓘ beside a group's name: hover it, or click it.
 - Colours take a row each, as checkboxes do: the swatch, its name, then *Automatic* (following the look and the channel colour); once you pick a colour it reads *Back to automatic* — click it to return.
 - The left and right columns are resized by dragging their edge with the canvas (left at least 300 px, right at least 260 px, the canvas keeps 360 px); double-click an edge for the default width. Widths are remembered.
@@ -279,7 +280,7 @@ Each channel of each profile has a cover of its own: its title, tag, photos, tex
 - Covers are saved as you go; there is nothing to save by hand. Undo starts afresh when you switch channel or profile.
 - What a profile's channels share is the profile itself: its look, output sizes, brand and default design.
 - Assets, vector and bitmap, are shared by every profile; see [Assets](#assets) below.
-- **Copy from another profile or channel** — the button under the channels in *Cover*. Pick a profile and a channel, and everything but the built-in layers on that cover (photos, text, assets, colour layers, cut-outs and their links included) is copied into this cover with its settings. Each item goes above the built-in layer it was above there, so what is in front of what stays as it was; what this cover has stays, and the copy can be undone.
+- **Copy from another channel** — the button under the channels in *Cover*. Pick a profile and a channel (the whole cover is shown below, at the size on the canvas), and everything but the built-in layers on that cover (photos, text, assets, colour layers, cut-outs and their links included) is copied into this cover with its settings. Each item goes above the built-in layer it was above there, so what is in front of what stays as it was; what this cover has stays, and the copy can be undone.
 
 Earlier versions kept one cover, whose layers could be kept to some channels. The first start after updating splits that cover among the current profile's channels: each layer goes to the channels it was on, and the title and tag are copied to every channel; the old file is kept as `session.migrated.json`. Photos uploaded before all appear under *Assets → Bitmaps*.
 

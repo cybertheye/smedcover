@@ -383,6 +383,7 @@ function layerAt(e) {
     if (e.buttons || S.mode !== "edit") return;
     const g = grip(e);
     if (g && g.handle) { cv.style.cursor = CURSOR[g.handle]; return; }
+    if (S.focus) { cv.style.cursor = focusTargets().length ? "move" : "not-allowed"; return; }
     const L = layerAt(e);
     cv.style.cursor = !L || L.type === "bg" ? "default" : fillsCanvas(L) ? "move" : "grab";
   });
@@ -438,6 +439,7 @@ function layerAt(e) {
       cv.onpointerup = cv.onpointercancel = done(() => moved);
       return;
     }
+    if (S.focus) return focusDrag(e);
     let L = layerAt(e);
     if (!L) return;
     const many = group(), sel = layer();
@@ -481,6 +483,20 @@ function layerAt(e) {
       pickLayers([...new Set([...keep, ...hitsIn(cv._hits, box, ok).map((h) => h.id)])]);
     };
   }
+  /** FOCUS: a drag anywhere on the canvas moves the selected layer (or group) and nothing else; a click selects nothing. */
+  function focusDrag(e) {
+    const list = focusTargets();
+    if (!list.length) return;
+    let last = virtualPoint(e), moved = false;
+    cv.setPointerCapture(e.pointerId);
+    goLive(list.map((x) => x.id));
+    cv.onpointermove = (m) => {
+      const p = virtualPoint(m), d = { ddx: p.x - last.x, ddy: p.y - last.y };
+      moved = true; last = p;
+      if (group().length) editAll(list, d); else edit(list[0], d);
+    };
+    cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; endLive(); if (moved) renderSide(); };
+  }
   /** Drags every movable member of the group together; a click without a drag selects just the one clicked. */
   function dragGroup(e, many, L) {
     const list = movers(many);
@@ -493,14 +509,15 @@ function layerAt(e) {
   cv.addEventListener("wheel", (e) => {
     if (S.mode !== "edit") return;
     e.preventDefault();
-    const L = layerAt(e);
+    if (S.focus && group().length) return;   // a group is moved, not scaled
+    const L = S.focus ? focusTargets()[0] : layerAt(e);
     if (!L || L.locked || FIXED.includes(L.type) || L.type === "bg") return;
     selectLayer(L.id);
     goLive(L.id); later("live", 300, endLive);
     edit(L, e.altKey ? { rot: e.deltaY > 0 ? 2 : -2 } : { scale: Math.exp(-e.deltaY * 0.0015) });
     later("side", 250, renderSide);
   }, { passive: false });
-  $("stage").addEventListener("pointerdown", (e) => { if (e.target === $("stage") && S.mode === "edit" && S.cover) selectLayer("bg"); });
+  $("stage").addEventListener("pointerdown", (e) => { if (e.target === $("stage") && S.mode === "edit" && S.cover && !S.focus) selectLayer("bg"); });
   // assets dragged from the library land where they are dropped
   cv.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("application/x-smed-asset") || e.dataTransfer.types.includes("application/x-smed-photo")) e.preventDefault(); });
   cv.addEventListener("drop", (e) => {
@@ -696,7 +713,7 @@ function copyDialog() {
   const pick = (k, v) => { COPY[k] = v; COPY.src = null; copyDialog(); };
   if (!COPY.src && COPY.cat) {   // read the chosen cover, then show what it has
     const job = ++COPY.job;
-    coverOf(p, COPY.cat).then((c) => { if (job === COPY.job && !$("modal").hidden) { COPY.src = c; copyDialog(); } });
+    coverOf(p, COPY.cat).then(async (c) => { await loadPhotos(pidsOf(c)); if (job === COPY.job && !$("modal").hidden) { COPY.src = c; copyDialog(); } });
   }
   const free = COPY.src ? COPY.src.layers.filter((l) => isFree(l.type)) : [];
   const kinds = [["photo", "layers.kind.photo"], ["text", "layers.kind.text"], ["asset", "layers.kind.svg"], ["solid", "layers.kind.solid"]]
@@ -708,10 +725,23 @@ function copyDialog() {
     el("div", { style: "margin-top:12px" }, cap("copy.channel"),
       cats.length ? el("div", { class: "chips" }, cats.map((k) => el("button", { class: k.id === COPY.cat ? "on" : "", style: `--c:${k.color}`, onclick: () => pick("cat", k.id) }, k.name || k.code || "—")))
         : el("div", { class: "hint", style: "margin:0" }, t("copy.noChannel"))),
-    el("div", { class: "hint", style: "margin:12px 0 0" }, !COPY.cat ? "" : !COPY.src ? t("copy.reading") : free.length ? t("copy.count", free.length, kinds) : t("copy.none")),
+    COPY.cat && copyPreview(p),
+    el("div", { class: "hint", style: "margin:0" }, !COPY.cat ? "" : !COPY.src ? t("copy.reading") : free.length ? t("copy.count", free.length, kinds) : t("copy.none")),
     el("button", { class: "btn solid wide", disabled: !free.length, onclick: () => copyInto(p, COPY.src) }, t("copy.go")),
     el("button", { class: "btn wide", onclick: closeModal }, t("exp.cancel"))));
   m.hidden = false;
+}
+/** The cover chosen to copy from, whole, in its own profile's look, at the size on the canvas. */
+function copyPreview(p) {
+  const size = selSize(), [vw, vh] = virtualSize(size.w, size.h), src = COPY.src;
+  const box = el("div", { class: "cpv", style: `aspect-ratio:${vw} / ${vh}` }, !src && el("span", {}, t("copy.reading")));
+  if (src) {
+    const cv = box.appendChild(el("canvas", {})), index = Math.max(0, p.categories.findIndex((c) => c.id === src.catId));
+    const draw = () => drawCover(cv, { profile: p, catIndex: index, size, pixelW: Math.min(vw, 480 * (window.devicePixelRatio || 1)), cover: src, photos: S.photos });
+    draw();
+    if (outlinesPending()) outlinesSettled().then(() => { if (COPY.src === src && cv.isConnected) draw(); });   // lettering effects that wait for outlines
+  }
+  return el("div", {}, box, el("div", { class: "hint", style: "margin:4px 0 0" }, `${size.label || ratioText(size.w, size.h)} · ${size.w} × ${size.h}`));
 }
 /** Copies the free layers of cover src (of profile p) into the cover on the canvas, as one undo step. */
 async function copyInto(p, src) {
@@ -1266,8 +1296,7 @@ function repaintBox(P) {
     REP.busy && el("button", { class: "btn wide", style: "margin-top:8px", onclick: cancelRepaint }, t("ai.cancel")),
     ours && REP.error && el("div", { class: "hint err" }, t("msg.failed", REP.error)),
     r && [
-      el("div", { class: "compare" },
-        el("figure", {}, el("img", { src: rec.original || rec.src, alt: "" }), el("figcaption", {}, t("rep.before"))),
+      el("div", { class: "compare one" },
         el("figure", {}, el("img", { src: r.src, alt: "" }), el("figcaption", {}, `${t("rep.after")} · ${r.w} × ${r.h}`))),
       el("div", { class: "row" },
         el("button", { class: "btn solid", onclick: useRepaint }, t("rep.use")),
@@ -2012,6 +2041,24 @@ function layerSection(L) {
       !fixed && !copy && placementControls(L),   // a cut-out's (back over its photo) is with its placement
       ], fixed ? t("props.fixedHint") : "")];
 }
+/** What FOCUS acts on: the selected group's movable layers, or the selected layer if it can be moved. */
+function focusTargets() {
+  const many = group(), L = layer();
+  if (many.length) return movers(many);
+  return L && !L.locked && L.type !== "bg" && !FIXED.includes(L.type) ? [L] : [];
+}
+/** Turns FOCUS on or off. */
+function setFocus(on) { S.focus = on; renderSide(); }
+/** The canvas's FOCUS frame and tag: which layer the canvas is acting on. */
+function syncFocus() {
+  const stage = $("stage"), tag = $("focustag") || stage.appendChild(el("div", { id: "focustag" })), on = S.focus && S.mode === "edit";
+  stage.classList.toggle("focus", on);
+  tag.hidden = !on;
+  if (!on) return;
+  const many = group(), L = layer(), free = focusTargets().length > 0;
+  tag.textContent = t(free ? "focus.tag" : "focus.tagFixed", many.length ? t("props.group", many.length) : L ? layerName(L) : "—");
+  tag.classList.toggle("off", !free);
+}
 function renderSide() {
   if (!S.cover) return;
   if (layer() && !appliesTo(layer(), cat().id)) S.layerId = "bg";   // the selected layer is not on this category's cover
@@ -2021,7 +2068,8 @@ function renderSide() {
   if (typing) return;
   const i = L ? here.indexOf(L) : -1, many = group();
   side.replaceChildren(
-    el("div", {}, cap("layers.title"),
+    el("div", {}, el("div", { class: "lhead" }, cap("layers.title"),
+        el("button", { class: "focusbtn" + (S.focus ? " on" : ""), title: t("focus.tip"), onclick: () => setFocus(!S.focus) }, t("focus.label"))),
       el("div", { class: "layers" }, [...here].reverse().map(layerRow)),
       el("div", { class: "acts", style: "margin-top:10px;justify-content:flex-start" },
         el("button", { class: "btn", onclick: () => addLayer(newLayer("text", { text: t("layer.newText") })) }, t("layers.addText")),
@@ -2041,6 +2089,7 @@ function renderSide() {
   side.scrollTop = y;
   // the selected layer's photo, in Cover → Add photos, is framed in the channel colour (without rebuilding that panel)
   for (const item of document.querySelectorAll("#panel .pitem")) item.classList.toggle("on", item.dataset.id === S.layerId);
+  syncFocus();
 }
 
 // ---------- export
@@ -2407,7 +2456,8 @@ addEventListener("keydown", (e) => {
   if (S.mode !== "edit") return;
   const L = layer();
   if (mod && key === "d") { e.preventDefault(); return group().length ? null : duplicateLayer(); }
-  if (key === "escape") return selectLayer("bg");
+  if (key === "escape") return S.focus ? setFocus(false) : selectLayer("bg");
+  if (key === "f" && !mod && !e.altKey) { e.preventDefault(); return setFocus(!S.focus); }
   const many = group(), step0 = e.shiftKey ? 10 : 1, nudge = { arrowleft: [-step0, 0], arrowright: [step0, 0], arrowup: [0, -step0], arrowdown: [0, step0] }[key];
   if (many.length) {   // a group: delete and the arrows act on all of it
     if (key === "delete" || key === "backspace") { e.preventDefault(); return removeGroup(); }
