@@ -290,7 +290,7 @@ A switch at the top of the Assets tab, | Vector assets | Bitmaps | (the chosen o
 
 **Vector assets**
 
-- **My assets** — assets made with AI generation and kept, whichever profile and channel they were made on.
+- **My vector assets** — assets made with *Generate vector assets with AI* and kept, whichever profile and channel they were made on.
   - *＋ New folder* makes a folder and lets you name it; double-click a folder's name to rename it later. Drag an asset onto a folder to file it, onto *Unfiled* to take it out. ▾ / ▸ closes or opens a folder.
   - Deleting a folder takes two clicks on its ×; its assets are not deleted but go back to Unfiled. Folders are kept on this computer and do not travel with profile exports.
 - **Channel graphics** — twenty cel-shaded graphics that follow the channel colour.
@@ -314,7 +314,7 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 | **3D object** (default) | An object built from boxes and cylinders, drawn like the built-in channel graphics: three tones, screentone, ink lines, a ground shadow | devices, machines, vehicles, buildings |
 | **Flat sticker** | Flat colour with a heavy outline, drawn like the built-in stickers | animals, characters, food, symbols |
 
-- The result is previewed twice: in its own colour, and following the current channel colour. If you like it, **Save to My assets** and use it like any other asset.
+- The result is previewed twice: in its own colour, and following the current channel colour. If you like it, **Save to My vector assets** and use it like any other asset.
 - **Reference picture** — below the text box you can attach a picture. The model first finds its main subject (ignoring the background, the table, the hand holding it, captions and watermarks), then draws that subject in the current look, solid or flat as chosen above. The text box can stay empty; write a word only to pick one thing out of several ("just the cup"). The picture is scaled down to 768 px on its longer side before it is sent. This needs a model that accepts image input; one that does not answers with an error, and the app says why.
 - A generated asset is the same kind of thing as a built-in one: sharp at any size and usable as a channel's graphic.
 - Once on the canvas it **follows the channel colour by default**, changing when the channel's colour is changed; untick *Use the channel colour* in the layer's properties to keep its own colour.

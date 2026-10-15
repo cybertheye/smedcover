@@ -460,7 +460,7 @@ extra fields are dropped. If a model never used `"main"`, the colour it used mos
 main colour, so an asset can always follow the channel colour. `parseSpec()` finds the JSON inside a reply that may carry a code fence or
 a polite sentence.
 
-A spec that passes is stored as `assets/<id>.json` next to uploaded images. It is one of *My assets*
+A spec that passes is stored as `assets/<id>.json` next to uploaded images. It is one of *My vector assets*
 and travels with exported profiles and projects.
 
 ### 8.4 Requests and the prompt
