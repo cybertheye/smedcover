@@ -4,13 +4,15 @@
 import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, brackets } from "./cel.js";
 import { virtualSize, layout, adjustLayout } from "./layout.js";
 import { drawTitle, parseTitle } from "./title.js";
-import { photoRect, drawPhotoAt, sizeOf, gaussBlur } from "./photo.js";
+import { photoRect, drawPhotoAt, sizeOf, gaussBlur, gaussBlurRGBA } from "./photo.js";
 import { drawAsset } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled } from "./style.js";
 import { paintRuns, warpCorners } from "./textfx.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
+/** For checks of speed: while `on`, the time each layer took to paint is added up in `ms` (by id), and still runs repainted are counted. */
+export const TIMING = { on: false, ms: {}, rebuilt: 0 };
 export const hexToRgb = (hex) => {
   const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
   const n = m ? parseInt(m[1], 16) : 0xfcee0a;
@@ -354,7 +356,7 @@ const PAINT = {
     const W = ctx.canvas.width, H = ctx.canvas.height;
     // While a photo is dragged, a costly one (cut out, outlined, shadowed) only slides its last image.
     const costly = L.cut || L.outline > 0 || L.shadow > 0;
-    const stamp = [W, H, L.cut, L.feather, L.outline, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? base.t.all.s : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`].join("|");
+    const stamp = [W, H, L.cut, L.feather, L.spread, L.outline, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? base.t.all.s : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`].join("|");
     const at = fills ? [rect.x, rect.y] : [bt.cx, bt.cy], keep = PHOTO.slides.get(L.id);
     if (costly && isFast() && keep && keep.stamp === stamp) { blit(keep.img, keep.bx + (at[0] - keep.at[0]) * M.a, keep.by + (at[1] - keep.at[1]) * M.d); return hit; }
     const inFrame = (c, fn) => { c.save(); frame(c); fn(c); c.restore(); };
@@ -371,7 +373,8 @@ const PAINT = {
     }
     // The work canvases cover only where the photo can reach — its rectangle, grown by the outline and
     // the shadow — not the whole canvas: compositing a canvas costs every pixel of it.
-    const reach = (L.outline > 0 ? L.outline : 0) + (L.shadow > 0 ? w * 0.03 : 0) + 4, k = 1 / Math.max(0.05, Math.min(Math.abs(fills ? 1 : bt.kx), Math.abs(fills ? 1 : bt.ky)));
+    const spread = L.cut && L.spread > 0 ? (L.spread * Math.max(rect.iw, rect.ih)) / 1920 : 0;   // the outward soft edge, in the frame's units
+    const reach = (L.outline > 0 ? L.outline : 0) + (L.shadow > 0 ? w * 0.03 : 0) + spread * 3 + 4, k = 1 / Math.max(0.05, Math.min(Math.abs(fills ? 1 : bt.kx), Math.abs(fills ? 1 : bt.ky)));
     const corners = [[rect.x - reach * k, rect.y - reach * k], [rect.x + rect.iw + reach * k, rect.y - reach * k], [rect.x + rect.iw + reach * k, rect.y + rect.ih + reach * k], [rect.x - reach * k, rect.y + rect.ih + reach * k]].map(([x, y]) => F.transformPoint({ x, y }));
     const bx = Math.max(0, Math.floor(Math.min(...corners.map((p) => p.x)))), by = Math.max(0, Math.floor(Math.min(...corners.map((p) => p.y))));
     const bw = Math.min(W, Math.ceil(Math.max(...corners.map((p) => p.x)))) - bx, bh = Math.min(H, Math.ceil(Math.max(...corners.map((p) => p.y)))) - by;
@@ -383,6 +386,7 @@ const PAINT = {
       c.globalCompositeOperation = "destination-in";
       if (mask) c.drawImage(L.feather > 0 ? feathered(mask, L.feather) : mask, rect.x, rect.y, rect.iw, rect.ih); else { c.fillStyle = "#000"; c.fillRect(rect.x, rect.y, rect.iw, rect.ih); }
     });
+    if (spread) haloBehind(body, bw, bh, spread * Math.hypot(F.a, F.b));
     if (!costly) { blit(body.canvas, bx, by); return hit; }   // cut out, nothing more
     // shadow and outline from the shape, made once at the photo's scale (see silhouette())
     const out = sheet(0, bw, bh, Mb), f = rect.iw / nw, shape = mask || plainShape(rec, nw, nh);
@@ -521,6 +525,22 @@ function feathered(m, px) {
   slot.set(key, c);
   return c;
 }
+/**
+ * The outward soft edge of a cut-out: a blurred copy of what is on work canvas `c` (w × h device px),
+ * drawn behind it — the subject's own colours fading outward, none of the background. Blurred on a copy
+ * made smaller the stronger the blur (a blur needs no more detail), so it costs little at any strength.
+ */
+function haloBehind(c, w, h, sigma) {
+  const f = Math.max(1, sigma / 2), sw = Math.max(1, Math.round(w / f)), sh = Math.max(1, Math.round(h / f));
+  const small = PHOTO.halo || (PHOTO.halo = document.createElement("canvas"));
+  if (small.width !== sw || small.height !== sh) { small.width = sw; small.height = sh; }
+  const x = small.getContext("2d", { willReadFrequently: true });
+  x.clearRect(0, 0, sw, sh); x.drawImage(c.canvas, 0, 0, sw, sh);
+  const id = x.getImageData(0, 0, sw, sh);
+  gaussBlurRGBA(id.data, sw, sh, sigma / f);
+  x.putImageData(id, 0, 0);
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = "destination-over"; c.drawImage(small, 0, 0, w, h); c.restore();
+}
 const MASK_BOXES = new WeakMap();
 /** The box round what is opaque in a mask, as fractions of its size ({x0, y0, x1, y1}), or null. Kept per mask. */
 function maskBox(m) {
@@ -622,6 +642,7 @@ function paintCover(cv, o) {
       const faces = L.font ? { ...fonts } : null;
       if (faces) for (const k of ["cn", "en", "serif"]) fonts[k] = `"${L.font}", ${faces[k]}`;
       let hit;
+      const t0 = TIMING.on ? performance.now() : 0;
       try {
       if (L.o < 1) {   // paint the layer on its own, then blend it in as a whole
         scratch = scratch || document.createElement("canvas");
@@ -631,7 +652,7 @@ function paintCover(cv, o) {
         hit = PAINT[L.type](sx, L, tr, env);
         c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o; c.drawImage(scratch, 0, 0); c.restore();
       } else hit = PAINT[L.type](c, L, tr, env);
-      } finally { if (faces) Object.assign(fonts, faces); }
+      } finally { if (faces) Object.assign(fonts, faces); if (TIMING.on) TIMING.ms[L.id] = (TIMING.ms[L.id] || 0) + performance.now() - t0; }
       c.globalAlpha = 1; c.setLineDash([]);
       if (hit) hits.push({ id: L.id, type: L.type, ...hit });
     }
@@ -652,7 +673,7 @@ function paintCover(cv, o) {
     }
     const stamp = `${cv.width}x${cv.height}|${n}|${[...still].sort((a, b) => a - b).join(",")}`;
     if (live.stamp !== stamp) {
-      live.stamp = stamp;
+      live.stamp = stamp; if (TIMING.on) TIMING.rebuilt++;
       live.runs = runs.map((r) => {
         if (r.moving) return null;
         const img = document.createElement("canvas");

@@ -625,13 +625,16 @@ formats and one more in every other look, writes `report.json` and quits. With `
 generates one asset in each API style and draws it on a cover. It catches problems that only show up in the real app, such
 as the header issue above.
 
+
+With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times dragging instead: it reads the cover in the data folder (a copy of real app data can be put there), and at a Retina screen's pixel ratio drags each text and photo layer across the canvas with pointer events, reporting the frame times, the first frames of each drag, how often the still runs were rebuilt, and the layers that cost most per frame (`TIMING` in `render.js`, off otherwise).
+
 ## 14. Trade-offs and known limits
 
 - **Layers are cached only while dragging.** Typing a title or moving a look slider still redraws everything, about 44 ms each time in cyberpunk.
 - **Drawing runs on the interface thread.** Painting a 4× cover briefly stalls the window. Conversion and writing are already on a worker thread.
 - **No bundler.** Modules are loaded directly by the web view: simple, but nothing is minified or tree-shaken. At the current size start-up time is negligible.
 - **Undo keeps full snapshots.** Simple and robust; it would need to become incremental if the data grows.
-- **All thumbnails are redrawn every time.** With many sizes this is the main cost.
+- **All thumbnails are redrawn every time.** With many sizes this is the main cost. So as not to hold the window up they are drawn one per turn of the event loop, a new round stopping one under way, and never during a drag (`LIVE`) — on a heavy cover a drag that paused would let them in, and the next frame of the drag would wait for them, frame after frame, a few hundred milliseconds each.
 - **Bundled fonts are not subset.** They account for most of the installer.
 - **Only run on macOS so far.** The Windows and Linux build configuration is written but not verified.
 

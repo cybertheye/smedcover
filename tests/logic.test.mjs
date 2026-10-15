@@ -1043,3 +1043,15 @@ test("solid colour layers: the canvas's size at scale 1, one colour, free like a
   assert.deepEqual(one(L), L);
   assert.equal(resolve(L, 1920, 1080, "1920x1080").s, 1);   // drawn as 1920/1 x 1080/1 units: the whole canvas
 });
+
+test("the outward soft edge: a blur of colour and alpha together, with no dark fringe", async () => {
+  const { gaussBlurRGBA } = await import("../ui/js/photo.js");
+  const w = 21, h = 21, d = new Uint8ClampedArray(w * h * 4);
+  for (let y = 8; y <= 12; y++) for (let x = 8; x <= 12; x++) d.set([220, 40, 30, 255], (y * w + x) * 4);   // a red square on nothing
+  gaussBlurRGBA(d, w, h, 2);
+  const at = (x, y) => [...d.slice((y * w + x) * 4, (y * w + x) * 4 + 4)];
+  const edge = at(15, 10), far = at(0, 0), mid = at(10, 10);
+  assert.ok(edge[3] > 0 && edge[3] < mid[3], "it fades outward");
+  assert.ok(Math.abs(edge[0] - 220) <= 2 && Math.abs(edge[1] - 40) <= 2, "in the square's own colour, not darkened by the transparent black around it");
+  assert.equal(far[3], 0);
+});

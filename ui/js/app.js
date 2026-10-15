@@ -2,7 +2,7 @@
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
 import { virtualSize , layoutValues, dragLayout, LAYOUT_LIMITS } from "./layout.js";
-import { layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles } from "./render.js";
+import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
@@ -197,11 +197,26 @@ function drawMain() {
   const clear = !layer("bg").visible;
   stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
 }
+/**
+ * Redraws the size thumbnails under the canvas, one per turn of the event loop, so the window keeps
+ * answering between them (on a heavy cover each is a whole cover). Never while something is dragged:
+ * a drag that paused long enough for them would be held up by them, and they by it, frame after frame.
+ * A new round, or a drag, stops one that is under way.
+ */
+let thumbsRound = 0;
 function drawThumbs() {
-  for (const size of S.profile.sizes) { const cv = $("th-" + sizeKey(size)); if (cv) paint(cv, size, virtualSize(size.w, size.h)[0] * 0.2); }
+  if (LIVE) return later("thumbs", 300, drawThumbs);   // after the drag
+  const round = ++thumbsRound, sizes = [...S.profile.sizes];
+  const next = () => {
+    if (round !== thumbsRound || LIVE || !sizes.length) return;
+    const size = sizes.shift(), cv = $("th-" + sizeKey(size));
+    if (cv) paint(cv, size, virtualSize(size.w, size.h)[0] * 0.2);
+    setTimeout(next, 0);
+  };
+  next();
 }
 let drawQueued = false;
-function flushDraw() { if (!drawQueued) return; drawQueued = false; drawMain(); later("thumbs", 140, drawThumbs); }
+function flushDraw() { if (!drawQueued) return; drawQueued = false; drawMain(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); }
 /** Redraws at most once per frame, however many input events arrive. */
 function queueDraw() {
   if (drawQueued) return;
@@ -1797,6 +1812,7 @@ function photoControls(L, set) {
             !L.of && el("button", { class: "btn", disabled: CUT.busy, title: t(linked.length ? "cut.againTip" : "cut.go"), onclick: () => cutOut(L) }, t(linked.length ? "cut.again" : "cut.goShort")))
         : el("div", { class: "hint", style: "margin:0" }, t("cutset.needsApp")),
       L.cut && slider("props.feather", 0, 40, 1, L.feather, px, (v) => { holdLive(L.id); set("feather", v); }),
+      L.cut && slider("props.spread", 0, 40, 1, L.spread, px, (v) => { holdLive(L.id); set("spread", v); }),
       CUT.error && el("div", { class: "hint err" }, CUT.error),
     CUT.needModel && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.tab.setup = "ai"; S.aiPane = "cut"; setMode("setup"); } }, t("cut.goModel"))], t("cut.tip", t("cutset.engine." + cutEngine()))),
     L.of
@@ -2316,6 +2332,7 @@ async function start() {
 }
 /** SMEDCOVER_SELFTEST mode: export real covers in every format through the normal path, report, quit. */
 async function selfTest(dir) {
+  if (await invoke("selftest_drag").catch(() => false)) return dragTest();
   const report = { ok: false, files: [], errors: [] };
   const cjk = (f) => S.systemFonts.includes(f) ? !S.latinFonts.has(f) : null;   // which installed fonts can set Chinese
   report.fonts = { system: S.systemFonts.length, latin: [...S.latinFonts].filter((f) => S.systemFonts.includes(f)).length, cjk: Object.fromEntries(["PingFang SC", "Songti SC", "Helvetica", "Cochin", "BM Hanna Pro", "Menlo"].map((f) => [f, cjk(f)])) };
@@ -2472,6 +2489,38 @@ async function selfTest(dir) {
     if (report.ai && !report.ai.every((r) => r.stored && r.drawn)) report.errors.push("ai: a generated asset was not stored or drawn");
     report.ok = !report.errors.length;
   } catch (e) { report.errors.push(String(e && e.message ? e.message : e)); }
+  await invoke("selftest_done", { report: JSON.stringify(report, null, 2) }).catch(() => null);
+}
+/**
+ * SMEDCOVER_SELFTEST_DRAG: drags each text and photo layer of the cover in the data folder across the
+ * canvas with pointer events, as a hand would, and reports how long the frames took.
+ */
+async function dragTest() {
+  Object.defineProperty(window, "devicePixelRatio", { get: () => 2 });   // as on a Retina screen, whatever screen the test window opens on
+  const cv = $("cv"), report = { dpr: devicePixelRatio, canvas: [cv.width, cv.height], look: S.profile.style.look, layers: [] };
+  cv.setPointerCapture = () => {}; cv.releasePointerCapture = () => {};
+  const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
+  await new Promise((r) => setTimeout(r, 1500));
+  for (const L of S.cover.layers.filter((l) => (l.type === "text" || l.type === "photo" || l.type === "title") && l.visible && appliesTo(l, cat().id))) {
+    queueDraw(); await frame(); await frame();
+    const h = cv._hits.find((x) => x.id === L.id);
+    if (!h) continue;
+    const b = cv.getBoundingClientRect(), k = b.width / cv._virtual[0];
+    let x = b.left + h.cx * k, y = b.top + h.cy * k;
+    if (L.fill) { selectLayer(L.id); await frame(); }
+    cv.dispatchEvent(new PointerEvent("pointerdown", { clientX: x, clientY: y, buttons: 1, button: 0, pointerId: 1, bubbles: true }));
+    const times = []; let last = performance.now();
+    Object.assign(TIMING, { on: true, ms: {}, rebuilt: 0 });
+    for (let i = 0; i < 40; i++) {
+      x += 3; if (cv.onpointermove) cv.onpointermove(new PointerEvent("pointermove", { clientX: x, clientY: y, buttons: 1 }));
+      await frame(); const now = performance.now(); times.push(Math.round(now - last)); last = now;
+    }
+    if (cv.onpointerup) cv.onpointerup(new PointerEvent("pointerup", { clientX: x, clientY: y }));
+    await new Promise((r) => setTimeout(r, 700));
+    TIMING.on = false;
+    const s = [...times].sort((a, b) => a - b), top = Object.entries(TIMING.ms).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([id, ms]) => `${layerName(layer(id) || { type: id })}:${Math.round(ms / 40)}ms/frame`);
+    report.layers.push({ name: layerName(L), type: L.type, selected: S.layerId === L.id, median: s[20], worst: s[39], over33: times.filter((t) => t > 33).length, first: times.slice(0, 3), stillRebuilt: TIMING.rebuilt, costliest: top });
+  }
   await invoke("selftest_done", { report: JSON.stringify(report, null, 2) }).catch(() => null);
 }
 // test hook: lets automated checks drive the app without the UI

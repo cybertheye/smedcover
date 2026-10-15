@@ -25,6 +25,33 @@ export function gaussBlur(d, w, h, sigma) {
   for (let i = 0; i < d.length; i += 4) { d[i] = a[i]; d[i + 1] = a[i + 1]; d[i + 2] = a[i + 2]; }
 }
 
+/**
+ * Gaussian blur of RGBA bytes with their alpha, in place: colour is weighted by alpha while blurring
+ * (premultiplied), so transparent pixels lend no colour and edges fade out in the colours next to them.
+ */
+export function gaussBlurRGBA(d, w, h, sigma) {
+  const r = Math.max(1, Math.round(Math.sqrt(sigma * sigma * 4 + 1) / 2 - 0.5)), inv = 1 / (2 * r + 1);
+  const a = new Float32Array(d.length), b = new Float32Array(d.length);
+  for (let i = 0; i < d.length; i += 4) { const k = d[i + 3] / 255; a[i] = d[i] * k; a[i + 1] = d[i + 1] * k; a[i + 2] = d[i + 2] * k; a[i + 3] = d[i + 3]; }
+  const pass = (src, dst, len, cnt, step, stride) => {   // one axis, all four channels, edges clear
+    for (let l = 0; l < cnt; l++) for (let c = 0; c < 4; c++) {
+      const o = l * stride + c;
+      let acc = 0;
+      for (let k = 0; k <= r && k < len; k++) acc += src[o + k * step];
+      for (let p = 0, i = o; p < len; p++, i += step) {
+        dst[i] = acc * inv;
+        if (p + r + 1 < len) acc += src[i + (r + 1) * step];
+        if (p - r >= 0) acc -= src[i - r * step];
+      }
+    }
+  };
+  for (let k = 0; k < 3; k++) { pass(a, b, w, h, 4, w * 4); pass(b, a, h, w, w * 4, 4); }
+  for (let i = 0; i < d.length; i += 4) {
+    const al = a[i + 3], k = al > 0.01 ? 255 / al : 0;
+    d[i] = Math.min(255, a[i] * k); d[i + 1] = Math.min(255, a[i + 1] * k); d[i + 2] = Math.min(255, a[i + 2] * k); d[i + 3] = al;
+  }
+}
+
 /** A picture's size, whether it is an image or a canvas. */
 export const sizeOf = (im) => [im.naturalWidth || im.width, im.naturalHeight || im.height];
 const cache = new WeakMap();   // per picture: one slot for previews, one for hi-res export

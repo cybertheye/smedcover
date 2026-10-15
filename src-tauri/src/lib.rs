@@ -825,6 +825,13 @@ fn selftest_models(app: AppHandle) -> Res<bool> {
     Ok(true)
 }
 
+/// In self-test mode, whether to time dragging each layer of the cover in the data folder instead
+/// (SMEDCOVER_SELFTEST_DRAG): a check of how smooth dragging is on a real cover.
+#[tauri::command]
+fn selftest_drag() -> bool {
+    selftest_root().is_some() && std::env::var_os("SMEDCOVER_SELFTEST_DRAG").is_some()
+}
+
 /// In self-test mode, the URL of a stand-in AI endpoint to exercise `ai_request` against.
 #[tauri::command]
 fn selftest_ai() -> Option<String> {
@@ -849,6 +856,7 @@ pub fn run() {
             cut_model_cancel,
             cut_model_delete,
             selftest_models,
+            selftest_drag,
             selftest_photo,
             save_image,
             pick_folder,
