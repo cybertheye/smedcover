@@ -1650,7 +1650,10 @@ function layoutBox() {
   const now = cv._layout && cv._virtual ? layoutValues(cv._layout, cv._virtual[0], cv._virtual[1]) : { size: 0.3, slant: 0 };
   const set = (k, v) => { st.layoutAdjust[tpl] = { ...(st.layoutAdjust[tpl] || {}), [k]: v }; touch({ profile: true }); };
   const split = tpl === "split", changed = Object.keys(adj).length > 0;
-  return el("div", { class: "box" }, cap("style.layout"),
+  // the template and its adjustments, one box (as the look and the default design have)
+  return el("div", { class: "box" }, cap("style.template"),
+    select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), st.template, (v) => { st.template = v; touch({ profile: true }); later("laybox", 60, renderPanel); }),   // the adjustments' sliders follow the template chosen
+    el("div", { style: "margin-top:14px" }, cap("style.layout")),
     slider2(t(split ? "style.laySide" : "style.layBand"), LAYOUT_LIMITS.size[0], LAYOUT_LIMITS.size[1], 0.01, adj.size ?? now.size, (v) => set("size", v)),
     slider2(t("style.laySlant"), LAYOUT_LIMITS.slant[0], LAYOUT_LIMITS.slant[1], 0.005, adj.slant ?? now.slant, (v) => set("slant", v)),
     slider2(t("style.layTitleW"), LAYOUT_LIMITS.tw[0], LAYOUT_LIMITS.tw[1], 0.01, adj.tw ?? 1, (v) => set("tw", v)),
@@ -1676,7 +1679,6 @@ function styleTab() {
       L.seeded && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { st.lookSeed = Math.floor(Math.random() * 1000000); touch({ profile: true }); } }, t("style.shuffle")),
       L.seeded && el("div", { class: "hint" }, t("style.shuffleHint")),
       L.params.length > 0 && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete st.lookParams[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))),
-    el("div", {}, cap("style.template"), select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), st.template, (v) => { st.template = v; touch({ profile: true }); later("laybox", 60, renderPanel); })),   // the controls below belong to the template: rebuild them once it has been drawn
     layoutBox(),
     el("div", { class: "box" }, cap("style.design"),
       el("button", { class: "btn wide", onclick: () => { S.profile.design.layers = JSON.parse(JSON.stringify(S.cover.layers.filter((l) => l.type !== "photo"))); touch({ profile: true }); toast(t("style.designSaved")); } }, t("style.saveDesign")),
