@@ -52,7 +52,7 @@ Every photo is a *Photo* layer. Under *Add photos* in *Edit → Cover*:
 
 - **Upload photos** — several at once if you like. You can also drop photos onto the window; dropped on the canvas, a photo lands where you let go.
 - **AI generate** — has an image model make a photo; see [Generating a photo with AI](#generating-a-photo-with-ai).
-- **From Bitmaps** — every photo you uploaded, had made or repainted stays under *Assets → Bitmaps*; click one or drag it onto the canvas to use it again. See [Assets](#assets).
+- **From assets** — choose one from Bitmaps. Every photo you uploaded, had made or repainted stays under *Assets → Bitmaps*, where you can also click one or drag it onto the canvas. See [Assets](#assets).
 
 **A cover's first photo fills the canvas**, as its background, just above the Background layer. The ones after it sit on the cover like prints: move, scale, turn and re-order them, as many as you like, for collage. *Fill the canvas* in a photo's properties switches between the two. A photo filling the canvas is clicked once to select it, then dragged on the cover and scrolled to resize; once selected it drags even when you press on the colour block.
 
@@ -299,7 +299,7 @@ The Assets tab has two panes at the top: **Vector assets** and **Bitmaps**. Both
 
 **Bitmaps**
 
-Every photo you upload, every picture AI makes and every AI repaint is kept here by itself, its source marked on the thumbnail (Upload / AI made / AI repaint); opening a project file adds the photos in it too.
+At the top are the same *Upload photos* and *AI generate* as in *Cover → Add photos*: an uploaded photo, and an AI one you *Add to the cover*, go on the current cover and stay here too. Every photo you upload, every picture AI makes and every AI repaint is kept here by itself, its source marked on the thumbnail (Upload / AI made / AI repaint); opening a project file adds the photos in it too.
 
 - Click one to add it to the current cover as a photo layer; drag it onto the canvas to put it where you let go. Added, it is listed under *Cover → Add photos* like any other photo.
 - The × on a thumbnail's corner (on hover) takes it out of Bitmaps; covers already using it keep it.

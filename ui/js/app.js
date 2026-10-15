@@ -582,10 +582,7 @@ function photoBox() {
   const here = S.cover.layers.filter((l) => l.type === "photo" && appliesTo(l, cat().id));
   const list = here.filter((l) => !l.of).flatMap((l) => [l, ...here.filter((x) => x.of === l.id)]);   // each photo, then its cut-out
   return el("div", { class: "box" }, cap("cover.photos"),
-    el("div", { class: "row", style: "margin-top:0" },
-      el("button", { class: "btn", onclick: uploadPhotos }, t("cover.upload")),
-      el("button", { class: "btn" + (GEN.open ? " on" : ""), onclick: () => { GEN.open = !GEN.open; renderPanel(); } }, t("gen.open"))),
-    GEN.open && genBox(),
+    photoAdders(true),
     el("div", { class: "hint" }, t("cover.photoHint")),
     list.map(photoItem));
 }
@@ -609,6 +606,27 @@ function photoItem(L) {
         onclick: () => { REP.for = open ? "" : L.id; renderPanel(); } }, t(label)),   // a result waits for its photo until the next repaint
       el("button", { class: "btn", disabled: passive || (REP.busy && mine), title: locked, onclick: () => replacePhoto(L) }, t("cover.replacePhoto"))),
     open && im && !passive && repaintBox(L));
+}
+/**
+ * The ways in of a photo — upload, AI generate and (in Cover → Add photos) from the bitmaps — and the
+ * AI generation box when it is open. The same in Cover and in Assets → Bitmaps.
+ */
+function photoAdders(fromLibrary) {
+  return [
+    el("div", { class: "row", style: "margin-top:0" },
+      el("button", { class: "btn", onclick: uploadPhotos }, t("cover.upload")),
+      el("button", { class: "btn" + (GEN.open ? " on" : ""), onclick: () => { GEN.open = !GEN.open; renderPanel(); } }, t("gen.open")),
+      fromLibrary && el("button", { class: "btn", title: t("lib.importHint"), onclick: libraryDialog }, t("lib.import"))),
+    GEN.open && genBox()];
+}
+/** Cover → Add photos → From assets: a picture of the bitmaps, chosen, goes on the cover. */
+function libraryDialog() {
+  const m = $("modal");
+  m.replaceChildren(el("div", { class: "dlg", dataset: { kind: "library" } }, el("h2", {}, t("lib.importTitle")),
+    el("div", { class: "hint", style: "margin:0;font-size:13px;opacity:.8" }, t("lib.importHint")),
+    libraryTiles((pid) => { closeModal(); placePhoto(pid); }, () => { const d = $("modal").querySelector(".dlg"); if (!$("modal").hidden && d && d.dataset.kind === "library") libraryDialog(); }),
+    el("button", { class: "btn wide", onclick: closeModal }, t("exp.cancel"))));
+  m.hidden = false;
 }
 /** Asks for photos and adds each as a layer (see addPhoto). */
 async function uploadPhotos() {
@@ -1326,7 +1344,7 @@ async function generatePhoto() {
   clearInterval(tick);
   if (job !== GEN.job) return;                       // cancelled meanwhile
   Object.assign(GEN, { busy: false, result, error });
-  if (onCoverTab()) renderPanel();
+  if (onCoverTab() || onBitmapPane()) renderPanel();
 }
 function cancelGeneratePhoto() { GEN.job++; Object.assign(GEN, { busy: false, error: "", result: null }); renderPanel(); }
 /** Takes a picture as the reference for the next one made: sent along, at most 1536 px on its longer side. */
@@ -2561,7 +2579,7 @@ function keepPicture(pid, name, kind) {
   if (!pid || S.library.some((e) => e.pid === pid)) return;
   S.library.unshift({ pid, name: String(name || "").slice(0, 60), kind, at: Date.now() });
   persistLibrary();
-  if (S.mode === "edit" && S.tab.edit === "assets" && S.assetPane === "bitmap") renderPanel();
+  if (onBitmapPane()) renderPanel();
 }
 /** The first time the library is opened: the pictures already there (uploaded before it existed) go in it. */
 async function libraryFromFiles() {
@@ -2577,25 +2595,34 @@ function dropPicture(pid) {
 const LIB = { tried: new Set() };   // pictures the bitmap pane has tried to read
 /** Assets → Bitmaps: the library's pictures, to click or drag onto the cover. */
 function bitmapPane() {
+  return [
+    photoAdders(false),
+    el("div", { class: "hint" }, t("lib.hint")),
+    libraryTiles((pid) => placePhoto(pid), () => { if (onBitmapPane()) renderPanel(); }, true)];
+}
+const onBitmapPane = () => S.mode === "edit" && S.tab.edit === "assets" && S.assetPane === "bitmap";
+/**
+ * The library's pictures as tiles, newest first: a click hands the picture to `pick`; they can be dragged
+ * onto the canvas, and with `removable` taken out of the library. Pictures not read yet are read, then
+ * `redraw` is called.
+ */
+function libraryTiles(pick, redraw, removable = false) {
   const todo = S.library.filter((e) => !S.photos.has(e.pid) && !LIB.tried.has(e.pid));
   if (todo.length) {
     for (const e of todo) LIB.tried.add(e.pid);
     loadPhotos(todo.map((e) => e.pid)).then((missing) => {
       if (missing.length) { S.library = S.library.filter((e) => !missing.includes(e.pid)); persistLibrary(); }   // their files are gone
-      if (S.mode === "edit" && S.tab.edit === "assets" && S.assetPane === "bitmap") renderPanel();
+      redraw();
     });
   }
-  const shown = S.library.filter((e) => S.photos.has(e.pid));
-  return [
-    el("div", { class: "hint", style: "margin:0" }, t("lib.hint")),
-    shown.length ? el("div", { class: "tiles" }, shown.map((e) => {
-      const rec = S.photos.get(e.pid), name = e.name || t("lib.kind." + e.kind);
-      return el("div", { class: "tile ptile", title: `${name} · ${t("lib.kind." + e.kind)}`, draggable: true, onclick: () => placePhoto(e.pid),
-        ondragstart: (ev) => { ev.dataTransfer.setData("application/x-smed-photo", e.pid); ev.dataTransfer.effectAllowed = "copy"; } },
-        el("img", { src: rec.src, alt: "", draggable: false }), el("span", { class: "kind" }, t("lib.kind." + e.kind)),
-        el("button", { class: "x", title: t("lib.remove"), onclick: (ev) => { ev.stopPropagation(); dropPicture(e.pid); } }, "×"));
-    })) : el("div", { class: "hint" }, t(todo.length ? "lib.loading" : "lib.empty")),
-  ];
+  const shown = S.library.filter((e) => S.photos.has(e.pid)), waiting = S.library.some((e) => !S.photos.has(e.pid));
+  return shown.length ? el("div", { class: "tiles" }, shown.map((e) => {
+    const rec = S.photos.get(e.pid), name = e.name || t("lib.kind." + e.kind);
+    return el("div", { class: "tile ptile", title: `${name} · ${t("lib.kind." + e.kind)}`, draggable: true, onclick: () => pick(e.pid),
+      ondragstart: (ev) => { ev.dataTransfer.setData("application/x-smed-photo", e.pid); ev.dataTransfer.effectAllowed = "copy"; } },
+      el("img", { src: rec.src, alt: "", draggable: false }), el("span", { class: "kind" }, t("lib.kind." + e.kind)),
+      removable && el("button", { class: "x", title: t("lib.remove"), onclick: (ev) => { ev.stopPropagation(); dropPicture(e.pid); } }, "×"));
+  })) : el("div", { class: "hint" }, t(waiting ? "lib.loading" : "lib.empty"));
 }
 
 /** SMEDCOVER_SELFTEST mode: export real covers in every format through the normal path, report, quit. */
