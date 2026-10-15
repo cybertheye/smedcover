@@ -55,9 +55,9 @@ Every photo is a *Photo* layer. Under *Add photos* in *Edit → Cover*:
 
 **A cover's first photo fills the canvas**, as its background, just above the Background layer. The ones after it sit on the cover like prints: move, scale, turn and re-order them, as many as you like, for collage. *Fill the canvas* in a photo's properties switches between the two. A photo filling the canvas is clicked once to select it, then dragged on the cover and scrolled to resize; once selected it drags even when you press on the colour block.
 
-Below *Add photos* every photo on the cover is listed in layer order: a thumbnail, its size, and *AI repainted* on one that was. Click a thumbnail to select its layer; each photo has its own *AI repaint* and *Remove the photo* (deletes that photo layer) below it.
+Below *Add photos* every photo on the cover is listed in layer order: a thumbnail, its size, and *AI repainted* on one that was; a cut-out is listed under its photo, its thumbnail without the background. Click a thumbnail to select its layer; the × on its corner (on hover) deletes the photo. Each photo has *AI repaint* and *Another photo*: another photo changes only the picture — placement, blur, dim, outline, name and the rest are kept — and a linked cut-out is cut out of the new picture again, its own settings kept. A cut-out cannot be replaced or repainted by itself (it shows its photo's picture).
 
-Each photo's properties, top to bottom: remove the background, cut out the subject (into a new photo layer), fill the canvas, blur, dim, the look's treatment of photos (tint, duotone, black and white…; on by default), an outline (width and colour) and a shadow, then the opacity and *Reset placement* every layer has. To change the picture, delete the layer and upload another. With the background removed the outline and shadow follow the subject; otherwise the photo's edge, like a print.
+Each photo's properties, top to bottom: remove the background, cut out the subject (into a new photo layer), fill the canvas, blur, dim, the look's treatment of photos (tint, duotone, black and white…; on by default), an outline (width and colour) and a shadow, then the opacity and *Reset placement* every layer has. To change the picture, use *Another photo* under it in *Add photos*. With the background removed the outline and shadow follow the subject; otherwise the photo's edge, like a print.
 
 The Background layer itself is only the ground: light or dark, and the grid. It always stays at the bottom. Light or dark is set in the Background layer's properties (not in the Style tab); while a photo fills the canvas it covers the ground, and the lettering is set as on a dark one.
 
@@ -73,8 +73,10 @@ Select a photo: *Remove the background* and *Cut out subject* are in its *Cut-ou
 - A download shows its progress and can be cancelled; every file is checked against its SHA-256, and a broken or altered one is not kept. Models come from Hugging Face and the runtime from GitHub, through the proxy given there or else the environment's. *Open the models folder* shows the files; *Delete* (two clicks) removes one.
 - With BiRefNet chosen but not downloaded, cutting out says so and offers *Download the model*.
 - The subject goes into a new photo layer, *Cut-out subject*: the same picture with its background removed, lined up with the photo and placed just above the title, so it covers part of the title as on a magazine cover. The photo itself stays as it was.
-- The new layer is independent: move, scale and turn it, give it its own blur, dim, outline and shadow; move it up or down in the layer list to decide what it stands in front of. Delete the layer when you no longer want it. Cut out as often as you like: each time is a new layer.
-- It shares its picture with the photo: an AI repaint of either, once used, changes both and is cut out again.
+- **Linked**: the cut-out is linked to its photo. The photo leads (active), the cut-out follows (passive); in the layer list both carry a chain and a leading / following mark in the same colour. They move and scale together — drag, scale or turn either and both go — while blur, dim, outline, shadow and opacity are each their own. Move the cut-out up or down in the layer list to decide what it stands in front of.
+- Clicking the chain asks whether to end the link; then both are photo layers of their own, where they are. Putting the cut-out's background back ends the link too: it becomes a whole photo again, which can be cut out in turn (and linked anew).
+- Deleting the cut-out leaves the photo; deleting the photo deletes its cut-out too. A photo has one linked cut-out: once it has one, the button reads *Cut out again* (to find the subject anew, after changing the way of cutting out, say).
+- The cut-out shows its photo's picture: after an AI repaint of the photo is used, or the photo is replaced, it is cut out again by itself.
 - *Remove the background* in the properties uses the same recognition: the layer itself keeps only its subject, without a new layer.
 - The cut-out is kept with the photo in the session and in project files. A photo with no clear subject says so.
 
@@ -174,7 +176,7 @@ In *This size only*, the channel graphic's placement is remembered per channel.
 
 - The list on the right runs front to back, top to bottom. Drag a row to re-order, or use ▲ ▼.
 - The two icons on each row are show/hide and lock. Background and Corner brackets carry a 🔒: they are fixed layers.
-- At the end of each row: what the layer is (photo, text "T", colour as a filled square, vector asset as a pen nib, bitmap asset), then whose it is — a gear for a built-in layer (every cover has it; it cannot be deleted), a person for a layer you added.
+- At the end of each row: what the layer is (photo, text "T", colour as a filled square, vector asset as a pen nib, bitmap asset); a linked photo also has a chain and a leading (solid dot) / following (dashed ring) mark, one colour per pair — click the chain to end the link; then whose it is — a gear for a built-in layer (every cover has it; it cannot be deleted), a person for a layer you added.
 - Layers you added (photos, text, assets) are renamed by double-clicking their name (a single click selects, as anywhere on the row): Enter or clicking elsewhere keeps it, Esc does not, an empty name goes back to the automatic one.
 - **＋ Text** adds a text layer; **＋ Colour** adds a colour layer: one block of colour, the canvas's size to begin with (in the channel colour), to shrink, stretch or turn into a ground, a band or a see-through wash. Clicking an item in Assets adds it. New layers go directly above the selected one.
 - Position, size, stretch and rotation are set on the canvas with the mouse (see the table above).

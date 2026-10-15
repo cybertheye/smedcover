@@ -62,8 +62,9 @@ const PROPS = {
    * A photo. `pid` names its picture in the photo store (the picture, its original before an AI
    * repaint, its subject mask), so layers share pictures and the cover stays small. `fill`: it
    * covers the canvas, placed like a background (moved and scaled, not turned), instead of sitting
-   * on it like a print. `of`: a layer id — this layer shows that layer's photo, in that layer's
-   * place (an aligned copy, as the subject cut out in front of the title is). `treat`: the look's
+   * on it like a print. `of`: a layer id — this layer is *linked* to that photo layer: a passive
+   * layer, the subject cut out of that (active) photo, showing its picture in its place, moved and
+   * scaled with it; its own blur, dim, outline and shadow. Every photo without `of` is active. `treat`: the look's
    * treatment of photos applies. `cut`: only the subject is kept (the mask). + `ink`, the outline's colour.
    */
   photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, outline: 0, shadow: 0 },

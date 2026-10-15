@@ -108,7 +108,14 @@
   .fhead .fcount{font:600 11px var(--mono);opacity:.5}
   .fhead .btn{padding:2px 8px;font-size:12px}
   .pitem{border:1.5px dashed var(--line2);padding:10px;margin-top:12px}
-  .pitem .thumb{margin-top:0;cursor:pointer}
+  .pitem .thumb{margin-top:0;cursor:pointer;position:relative}
+  .pitem[style*="--link"]{border-color:var(--link)}
+  .pitem.passive{margin-left:18px;border-style:dotted}
+  .pitem .thumb .del{position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;border:1px solid var(--line2);background:var(--bg);color:#fff;font-size:15px;line-height:1;padding:0;cursor:pointer;display:none}
+  .pitem .thumb:hover .del{display:block}
+  .pitem .thumb .del:hover{background:#c0392b;border-color:#c0392b}
+  .pitem .thumb .chain{display:inline-block;width:14px;height:14px;vertical-align:-2px;margin-right:4px;color:var(--link)}
+  .pitem .thumb .chain svg{width:14px;height:14px}
   .thumb{margin-top:10px;display:grid;gap:4px;font-size:12px;opacity:.85}
   .thumb img{width:100%;max-height:180px;object-fit:contain;background:#000;border:2px solid var(--line2)}
   .rep{border-top:1px dashed var(--line2);margin-top:14px}
@@ -193,6 +200,9 @@
   .layer .kind{display:grid;place-items:center;width:16px;height:16px;opacity:.5;cursor:help}
   .layer .kind.system,.layer .kind.user{opacity:.8}
   .layer .kind.user{color:var(--acc)}
+  .layer .kind.chain,.layer .kind.role{opacity:1}
+  .layer .kind.chain{cursor:pointer}
+  .layer .kind.chain:hover{filter:brightness(1.4)}
   .layer .nm[title]{cursor:text}
   .layer .rename{font-size:13px;padding:2px 6px;min-width:0;width:100%}
 

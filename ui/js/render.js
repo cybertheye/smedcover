@@ -301,7 +301,8 @@ const PAINT = {
    * it, else a rectangle at the layer's place, size and angle — through the look's treatment of
    * photos (the same as a background photo gets: tint, duotone, black and white…), then kept to its
    * rectangle, or to its subject when it is cut out; an outline and a shadow come from that shape.
-   * A copy (`of`) shows another layer's photo in that layer's place.
+   * A linked cut-out (`of`, see layers.js) shows another layer's photo in that layer's place. A
+   * cut-out is caught where its subject is — the box round its mask — rather than the whole photo.
    */
   photo(ctx, L, tr, env) {
     const base = L.of ? env.cover.layers.find((l) => l.id === L.of && l.type === "photo" && !l.of) : L;
@@ -311,27 +312,38 @@ const PAINT = {
     if (L.cut && !mask) return null;                     // cut out, but not yet: nothing to show
     const [nw, nh] = sizeOf(im), { w, h } = env, M = ctx.getTransform ? ctx.getTransform() : null;
     // the frame: where the photo's rectangle is, in the frame's units
-    let frame, rect, hit, F = M && new DOMMatrix(M);   // F: the frame's transform, to find where the photo lands on the canvas
+    let frame, rect, hit, bt = null, F = M && new DOMMatrix(M);   // F: the frame's transform, to find where the photo lands on the canvas
     if (base.fill) {
       const a = base.t.all, b = base.t.by[env.key] || { dx: 0, dy: 0, s: 1 };
       rect = photoRect(im, w, h, { dx: (a.x - 0.5) * w + b.dx, dy: (a.y - 0.5) * h + b.dy, s: a.s * b.s });
       frame = () => null;
       hit = { cx: rect.x + rect.iw / 2, cy: rect.y + rect.ih / 2, hw: rect.iw / 2, hh: rect.ih / 2, r: 0, fill: true };
     } else {
-      const bt = base === L ? tr : env.resolve(base), long = 1000 * bt.s, iw = nw >= nh ? long : (long * nw) / nh, ih = nw >= nh ? (long * nh) / nw : long;
+      bt = base === L ? tr : env.resolve(base);
+      const long = 1000 * bt.s, iw = nw >= nh ? long : (long * nw) / nh, ih = nw >= nh ? (long * nh) / nw : long;
       rect = { x: -iw / 2, y: -ih / 2, iw, ih };
       frame = (c) => { c.translate(bt.cx, bt.cy); c.rotate(bt.r * RAD); c.scale(bt.kx, bt.ky); };
       if (F) F.translateSelf(bt.cx, bt.cy).rotateSelf(bt.r).scaleSelf(bt.kx, bt.ky);
       hit = { cx: bt.cx, cy: bt.cy, hw: (iw / 2) * bt.kx, hh: (ih / 2) * bt.ky, r: bt.r };
     }
-    if (L.of) hit = null;   // a copy catches no clicks: they go through to what is under it
+    // A cut-out is caught on its subject. A photo filling the canvas, itself cut, keeps the ground's way of
+    // being caught; a cut-out following one shows a frame but no handles (it is moved and scaled as that photo).
+    const mb = mask && !(base.fill && !L.of) && maskBox(mask);
+    if (mb) {
+      const lx = rect.x + ((mb.x0 + mb.x1) / 2) * rect.iw, ly = rect.y + ((mb.y0 + mb.y1) / 2) * rect.ih, hw = ((mb.x1 - mb.x0) / 2) * rect.iw, hh = ((mb.y1 - mb.y0) / 2) * rect.ih;
+      if (base.fill) hit = { cx: lx, cy: ly, hw, hh, r: 0, frameOnly: true };
+      else {
+        const a = bt.r * RAD, x = lx * bt.kx, y = ly * bt.ky;
+        hit = { cx: bt.cx + x * Math.cos(a) - y * Math.sin(a), cy: bt.cy + x * Math.sin(a) + y * Math.cos(a), hw: hw * Math.abs(bt.kx), hh: hh * Math.abs(bt.ky), r: bt.r };
+      }
+    }
     if (!M) return hit;
     const blit = (c, dx = 0, dy = 0) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(c, dx, dy); ctx.restore(); };
     const W = ctx.canvas.width, H = ctx.canvas.height;
     // While a photo is dragged, a costly one (cut out, outlined, shadowed) only slides its last image.
     const costly = L.cut || L.outline > 0 || L.shadow > 0;
-    const stamp = [W, H, L.cut, L.outline, L.shadow, L.ink, L.blur, L.dim, L.treat, base.fill, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), base.fill ? base.t.all.s : `${tr.s}|${tr.r}|${tr.kx}|${tr.ky}`].join("|");
-    const at = base.fill ? [rect.x, rect.y] : [hit.cx, hit.cy], keep = PHOTO.slides.get(L.id);
+    const stamp = [W, H, L.cut, L.outline, L.shadow, L.ink, L.blur, L.dim, L.treat, base.fill, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), base.fill ? base.t.all.s : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`].join("|");
+    const at = base.fill ? [rect.x, rect.y] : [bt.cx, bt.cy], keep = PHOTO.slides.get(L.id);
     if (costly && isFast() && keep && keep.stamp === stamp) { blit(keep.img, keep.bx + (at[0] - keep.at[0]) * M.a, keep.by + (at[1] - keep.at[1]) * M.d); return hit; }
     const inFrame = (c, fn) => { c.save(); frame(c); fn(c); c.restore(); };
     const treat = (c) => {   // the look paints on the whole canvas (its washes cover it); the photo itself goes in its frame
@@ -474,6 +486,20 @@ function sheet(i, w, h, m) {
   x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = "source-over"; x.globalAlpha = 1; x.clearRect(0, 0, w, h);
   x.setTransform(m);
   return x;
+}
+const MASK_BOXES = new WeakMap();
+/** The box round what is opaque in a mask, as fractions of its size ({x0, y0, x1, y1}), or null. Kept per mask. */
+function maskBox(m) {
+  if (MASK_BOXES.has(m)) return MASK_BOXES.get(m);
+  const [W, H] = sizeOf(m), k = Math.min(1, 256 / Math.max(W, H)), w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
+  const c = Object.assign(document.createElement("canvas"), { width: w, height: h }), x = c.getContext("2d", { willReadFrequently: true });
+  x.drawImage(m, 0, 0, w, h);
+  const d = x.getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let i = 0; i < w; i++) if (d[(y * w + i) * 4 + 3] > 64) { if (i < x0) x0 = i; if (i > x1) x1 = i; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  const box = x1 < 0 ? null : { x0: x0 / w, y0: y0 / h, x1: (x1 + 1) / w, y1: (y1 + 1) / h };
+  MASK_BOXES.set(m, box);
+  return box;
 }
 /** An opaque rectangle the size of a photo, for the outline of one that is not cut out. Kept on its record. */
 function plainShape(rec, w, h) {
@@ -620,7 +646,7 @@ function paintCover(cv, o) {
     for (const hit of cv._hits) if (o.picked.includes(hit.id) && hit.type !== "bg" && !hit.fill) drawSelection(ctx, hit, kx, false);
   } else if (o.select) {
     const hit = cv._hits.find((x) => x.id === o.select);
-    if (hit && hit.type !== "bg" && !hit.fill) drawSelection(ctx, hit, kx);   // a photo that fills the canvas has no frame to show
+    if (hit && hit.type !== "bg" && !hit.fill) drawSelection(ctx, hit, kx, !hit.frameOnly);   // a photo that fills the canvas has no frame to show
     drawLayoutHandles(ctx, cv, cover.layers.find((l) => l.id === o.select), kx, rgb(C));
   }
 }

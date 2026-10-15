@@ -123,6 +123,7 @@ function commitHistory() {
 function recordHistory() { later("hist", 500, commitHistory); }
 async function timeTravel(step) {
   clearTimeout(timers.hist);
+  commitHistory();   // a change still waiting to be recorded is a step of its own: undo goes back to before it
   const i = S.histIdx + step;
   if (i < 0 || i >= S.hist.length) return;
   S.histIdx = i;
@@ -181,7 +182,7 @@ function paint(cv, size, pixelW, cover = S.cover, index = catIndex(), select = n
 // While a layer is dragged on the canvas, the rest of the cover is painted once and reused (see drawCover).
 let LIVE = null;
 const goLive = (ids) => {
-  ids = [].concat(ids);
+  ids = [...new Set([].concat(ids).map((id) => (layer(id) ? owner(layer(id)).id : id)))];   // a linked cut-out moves with its photo
   for (const L of S.cover.layers) if (L.of && ids.includes(L.of)) ids.push(L.id);   // a photo's copies move with it
   const key = ids.join(" ");
   if (!LIVE || LIVE.key !== key) LIVE = { ids, key };
@@ -258,18 +259,18 @@ function togglePick(id) {
 /** The members of a group that can be moved. */
 const movers = (list) => list.filter((L) => !L.locked && !FIXED.includes(L.type));
 /** Applies the same placement edit to several layers, then redraws once. */
-function editAll(list, patch) { for (const L of list) adjust(L, frame(), S.settings.scope, patch); touch({ cover: true }); }
+function editAll(list, patch) { for (const L of new Set(list.map(owner))) adjust(L, frame(), S.settings.scope, patch); touch({ cover: true }); }
 function removeGroup() {
   const gone = group().filter((L) => isFree(L.type));
   if (!gone.length) return;
-  S.cover.layers = S.cover.layers.filter((L) => !gone.includes(L));
+  S.cover.layers = S.cover.layers.filter((L) => !gone.includes(L) && !(L.of && gone.some((g) => g.id === L.of)));   // a photo's linked cut-out goes with it
   S.picked = []; S.layerId = "bg";
   touch({ cover: true, side: true, panel: onCoverTab() });   // the photos listed in the Cover tab follow
 }
 /** While a slider of one layer is dragged, only that layer is repainted (as in a drag on the canvas); the whole cover once it stops. */
 function holdLive(id) { goLive(id); later("live", 300, endLive); }
-/** Applies a placement edit to a layer in the current scope, then redraws. */
-function edit(L, patch) { adjust(L, frame(), S.settings.scope, patch); touch({ cover: true }); }
+/** Applies a placement edit to a layer in the current scope (to a linked cut-out's photo, which it follows), then redraws. */
+function edit(L, patch) { adjust(owner(L), frame(), S.settings.scope, patch); touch({ cover: true }); }
 function addLayer(L) {
   insertAbove(S.cover.layers, S.layerId === "bg" ? "bg" : S.layerId, L);
   S.layerId = L.id;
@@ -286,14 +287,14 @@ function addAsset(ref, at) {
 function removeLayer(id = S.layerId) {
   const L = layer(id);
   if (!L || !isRemovable(L.type)) return;
-  if (L.type === "photo") S.cover.layers = S.cover.layers.filter((l) => l.of !== L.id);   // its copies show nothing without it
+  if (L.type === "photo") S.cover.layers = S.cover.layers.filter((l) => l.of !== L.id);   // a photo's linked cut-out goes with it (not the other way round)
   const i = S.cover.layers.indexOf(L);
   S.cover.layers.splice(i, 1);
   S.layerId = S.cover.layers[Math.max(1, i - 1)].id;
   touch({ cover: true, side: true, panel: onCoverTab() });
 }
 function duplicateLayer() {
-  const L = layer(), c = L && duplicate(L);
+  const L = layer(), c = L && !(L.type === "photo" && L.of) && duplicate(L);   // a linked cut-out is not copied: cut out the photo again
   if (!c) return;
   insertAbove(S.cover.layers, L.id, c); S.layerId = c.id;
   touch({ cover: true, side: true, panel: onCoverTab() });
@@ -304,7 +305,7 @@ function shiftLayer(dir) {
 }
 /** Which categories a free layer belongs to: null = all of them, or a list of category ids. */
 function setCats(L, cats) {
-  if (cats) L.cats = cats; else delete L.cats;
+  for (const x of [L, ...passivesOf(L)]) { if (cats) x.cats = [...cats]; else delete x.cats; }   // a linked cut-out is on the covers its photo is on
   if (!appliesTo(L, cat().id)) toast(t("props.catsGone"));
   touch({ cover: true, side: true, panel: onCoverTab() });
 }
@@ -344,7 +345,7 @@ function layerAt(e) {
   /** The pointer in the selected layer's own rotated frame, plus the handle under it (if any). */
   function grip(e) {
     const L = layer(), hit = cv._hits && cv._hits.find((h) => h.id === S.layerId);
-    if (group().length || !L || !hit || hit.fill || L.locked || L.type === "bg" || FIXED.includes(L.type)) return null;
+    if (group().length || !L || !hit || hit.fill || hit.frameOnly || L.locked || L.type === "bg" || FIXED.includes(L.type)) return null;
     const p = virtualPoint(e), a = (-hit.r * Math.PI) / 180, dx = p.x - hit.cx, dy = p.y - hit.cy;
     const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
     const handle = handles(hit, p.k).find((h) => Math.hypot(lx - h.lx, ly - h.ly) <= 11 * p.k);
@@ -525,7 +526,8 @@ function coverTab() {
  * layer's properties.
  */
 function photoBox() {
-  const list = S.cover.layers.filter((l) => l.type === "photo" && !l.of && appliesTo(l, cat().id));
+  const here = S.cover.layers.filter((l) => l.type === "photo" && appliesTo(l, cat().id));
+  const list = here.filter((l) => !l.of).flatMap((l) => [l, ...here.filter((x) => x.of === l.id)]);   // each photo, then its cut-out
   return el("div", { class: "box" }, cap("cover.photos"),
     el("div", { class: "row", style: "margin-top:0" },
       el("button", { class: "btn", onclick: uploadPhotos }, t("cover.upload")),
@@ -534,18 +536,25 @@ function photoBox() {
     el("div", { class: "hint" }, t("cover.photoHint")),
     list.map(photoItem));
 }
-/** One photo of the cover: its thumbnail (a click selects its layer) and its AI repaint. */
+/**
+ * One photo of the cover: its thumbnail (a click selects its layer, the x that shows on it deletes
+ * it), its AI repaint and another picture. A linked cut-out shows its photo's picture without its
+ * background, and has neither: it follows its photo.
+ */
 function photoItem(L) {
-  const rec = recordOf(L), im = rec && rec.img, open = REP.for === L.id;
-  return el("div", { class: "pitem" },
+  const rec = recordOf(L), im = rec && rec.img, open = REP.for === L.id, passive = !!L.of, tied = passive || passivesOf(L).length > 0;
+  const locked = passive ? t("link.passiveLocked", layerName(owner(L))) : null;
+  return el("div", { class: "pitem" + (passive ? " passive" : ""), style: tied ? `--link:${linkColour(L)}` : null },
     el("div", { class: "thumb", title: t("cover.photoSelect"), onclick: () => selectLayer(L.id) },
-      im ? el("img", { src: rec.src, alt: "" }) : el("div", { class: "hint err", style: "margin:0" }, t("props.photoMissing")),
-      el("span", {}, layerName(L), im && ` · ${sizeOf(im)[0]} × ${sizeOf(im)[1]}`, rec && rec.original && ` · ${t("rep.isRepainted")}`)),
+      im ? el("img", { src: L.cut && rec.mask ? cutThumb(rec) : rec.src, alt: "" }) : el("div", { class: "hint err", style: "margin:0" }, t("props.photoMissing")),
+      el("button", { class: "del", title: t(passivesOf(L).length ? "cover.removeLinked" : "cover.removePhoto"), onclick: (e) => { e.stopPropagation(); if (REP.for === L.id) REP.for = ""; removeLayer(L.id); renderPanel(); } }, "×"),
+      el("span", {}, tied && el("span", { class: "chain", innerHTML: ICONS.chain }), layerName(L), im && ` · ${sizeOf(im)[0]} × ${sizeOf(im)[1]}`, rec && rec.original && ` · ${t("rep.isRepainted")}`,
+        passive && ` · ${t("link.follows", layerName(owner(L)))}`)),
     el("div", { class: "row", style: "margin-top:6px" },
-      im && el("button", { class: "btn" + (open ? " on" : ""), disabled: REP.busy && !open,
+      el("button", { class: "btn" + (open ? " on" : ""), disabled: passive || !im || (REP.busy && !open), title: locked,
         onclick: () => { REP.for = open ? "" : L.id; if (!REP.busy) Object.assign(REP, { result: null, error: "" }); renderPanel(); } }, t(open ? "rep.close" : "rep.title")),
-      el("button", { class: "btn", disabled: REP.busy && open, onclick: () => { if (REP.for === L.id) REP.for = ""; removeLayer(L.id); renderPanel(); } }, t("cover.removePhoto"))),
-    open && im && repaintBox(L));
+      el("button", { class: "btn", disabled: passive || (REP.busy && open), title: locked, onclick: () => replacePhoto(L) }, t("cover.replacePhoto"))),
+    open && im && !passive && repaintBox(L));
 }
 /** Asks for photos and adds each as a layer (see addPhoto). */
 async function uploadPhotos() {
@@ -590,6 +599,73 @@ async function loadPhotos(pids) {
 const mainPhoto = () => S.cover.layers.find((l) => fillsCanvas(l) && appliesTo(l, cat().id)) || null;
 /** The picture a photo layer shows: its own, or for a copy its original's. */
 const recordOf = (L) => { const base = L && (L.of ? layer(L.of) : L); return (base && S.photos.get(base.pid)) || null; };
+
+// ---------- linked photos
+// Cutting out a photo's subject makes a passive layer linked to it (`of`): the subject, in the photo's
+// place, moved and scaled with it (an edit of either changes the photo's placement); its blur, dim,
+// outline and shadow its own. Every other photo is active; an active photo has at most one passive.
+// Deleting the passive leaves the photo; deleting the photo takes the passive with it. A passive whose
+// background is put back, or whose link is ended, becomes a photo of its own, where it is.
+/** The layer whose placement a layer uses: a linked cut-out's photo, else the layer itself. */
+const owner = (L) => (L && L.type === "photo" && L.of && layer(L.of)) || L;
+/** The linked cut-outs of photo layer L. */
+const passivesOf = (L) => (L && L.type === "photo" && !L.of ? S.cover.layers.filter((l) => l.type === "photo" && l.of === L.id) : []);
+const LINK_COLOURS = ["#ff5fa2", "#3a86ff", "#06d6a0", "#ffd60a", "#ff8a00", "#a855f7"];
+/** The colour that marks a link, the same on both of its layers. */
+function linkColour(L) {
+  const linked = S.cover.layers.filter((l) => l.type === "photo" && !l.of && passivesOf(l).length);
+  return LINK_COLOURS[Math.max(0, linked.indexOf(owner(L))) % LINK_COLOURS.length];
+}
+/** Ends a link: cut-out P becomes a photo of its own where it is now (the same picture, placement and channels). */
+function unlink(P) {
+  const A = layer(P.of);
+  if (A) { P.pid = A.pid; P.t = JSON.parse(JSON.stringify(A.t)); P.fill = A.fill; if (A.cats) P.cats = [...A.cats]; else delete P.cats; }
+  P.of = "";
+}
+/** Asks before ending the link of photo L (either end of it). */
+function askUnlink(L) {
+  const pass = L.of ? [L] : passivesOf(L), A = owner(L);
+  if (!pass.length) return;
+  const m = $("modal");
+  m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("link.askTitle")),
+    el("div", { class: "hint", style: "margin:0;font-size:13px;opacity:.8" }, t("link.askBody", pass.map(layerName).join(" · "), layerName(A))),
+    el("button", { class: "btn solid wide", onclick: () => { for (const P of pass) unlink(P); closeModal(); touch({ cover: true, side: true, panel: onCoverTab() }); toast(t("link.done")); } }, t("link.unlink")),
+    el("button", { class: "btn wide", onclick: closeModal }, t("link.keep"))));
+  m.hidden = false;
+}
+/** Drops linked cut-outs whose photo is gone, or is itself a cut-out (a link is one step). */
+function pruneLinks(cover) {
+  const actives = new Set(cover.layers.filter((l) => l.type === "photo" && !l.of).map((l) => l.id));
+  cover.layers = cover.layers.filter((l) => !(l.type === "photo" && l.of && !actives.has(l.of)));
+  return cover;
+}
+/** A picture with its background removed, small, for the photo list. Kept per mask. */
+const CUT_THUMBS = new WeakMap();
+function cutThumb(rec) {
+  if (!CUT_THUMBS.has(rec.mask)) {
+    const [w, h] = sizeOf(rec.img), k = Math.min(1, 480 / Math.max(w, h)), c = el("canvas", { width: Math.round(w * k), height: Math.round(h * k) }), x = c.getContext("2d");
+    x.drawImage(rec.img, 0, 0, c.width, c.height); x.globalCompositeOperation = "destination-in"; x.drawImage(rec.mask.img, 0, 0, c.width, c.height);
+    CUT_THUMBS.set(rec.mask, c.toDataURL("image/png"));
+  }
+  return CUT_THUMBS.get(rec.mask);
+}
+/**
+ * Puts another picture into photo layer L, keeping everything else about it (placement, effects,
+ * name). A linked cut-out shows the new picture too — it is the same layer, with its own settings —
+ * and is cut out of it again. Not for a cut-out itself: it shows its photo's picture.
+ */
+async function replacePhoto(L) {
+  if (!L || L.type !== "photo" || L.of) return;
+  const f = await pickFile("image/*");
+  if (!f) return;
+  const pid = await putPhoto(await readAs(f, "readAsDataURL"));
+  if (!pid) return toast(t("msg.badFile"));
+  L.pid = pid;
+  if (REP.for === L.id) Object.assign(REP, { result: null, error: "" });
+  touch({ cover: true, side: true, panel: true });
+  toast(t("cover.replaced"));
+  if ((L.cut || passivesOf(L).some((p) => p.cut)) && canCut()) await ensureMask(pid);
+}
 
 /**
  * Adds a picture (a data URL) as a photo layer and selects it. The first photo of a cover fills the
@@ -637,7 +713,13 @@ async function upgradeCover(cover, legacy) {
     c.visible = l.visible; c.o = l.o;
     return [c];
   });
-  return cover;
+  // a cut-out made before links, still where its photo is, is linked to it
+  for (const l of cover.layers) {
+    if (l.type !== "photo" || !l.cut || l.of || !l.pid) continue;
+    const b = cover.layers.find((x) => x !== l && x.type === "photo" && !x.of && !x.cut && x.pid === l.pid && x.fill === l.fill && JSON.stringify(x.t) === JSON.stringify(l.t) && !cover.layers.some((y) => y.of === x.id));
+    if (b) l.of = b.id;
+  }
+  return pruneLinks(cover);
 }
 
 function tile(ref, onRemove) {
@@ -782,15 +864,16 @@ async function ensureMask(pid, fresh = false) {
 /** A picture changed (a new one, a repaint): the layers cut from it get its new subject. */
 async function recut(pid) { if (S.cover.layers.some((l) => l.type === "photo" && l.cut && recordOf(l) === S.photos.get(pid))) await ensureMask(pid, true); }
 /**
- * Cuts the subject out of photo layer L into a new photo layer of its own: the same picture with
- * its background removed, placed where L is, above the title (or above L, when L is higher). L is
- * kept as it was; the new layer is selected and moves on its own from then on. Returns it, or null.
+ * Cuts the subject out of photo layer L into a linked cut-out (see "linked photos"): above the title
+ * (or above L, when L is higher), selected. When L has one already, its subject is found again
+ * instead. Returns the cut-out, or null.
  */
 async function cutOut(L) {
   if (!L || L.type !== "photo" || L.of || CUT.busy || !canCut()) return null;
-  if (!(await ensureMask(L.pid))) return null;
-  const c = newLayer("photo", { pid: L.pid, fill: L.fill, treat: L.treat, cut: true });
-  c.t = JSON.parse(JSON.stringify(L.t)); c.o = L.o;
+  const had = passivesOf(L)[0];
+  if (!(await ensureMask(L.pid, !!had))) return null;
+  if (had) { touch({ cover: true, side: true, panel: true }); toast(t("cut.redone")); return had; }
+  const c = newLayer("photo", { of: L.id, cut: true });
   if (L.cats) c.cats = [...L.cats];
   const at = (id) => S.cover.layers.findIndex((l) => l.id === id);
   insertAbove(S.cover.layers, at(L.id) > at("title") ? L.id : "title", c);
@@ -1508,7 +1591,13 @@ function layerKinds(L) {
     const a = L.ref.kind === "user" && userAssets.get(L.ref.id), raster = a && !a.spec && !/^data:image\/svg/.test(a.src || "");
     what = raster ? icon("photo", t("layers.kind.image")) : icon("svg", t("layers.kind.svg"));
   }
-  return [what, free ? icon("user", t("layers.kind.user")) : icon("system", t("layers.kind.system"))];
+  const link = [];
+  if (L.type === "photo" && (L.of || passivesOf(L).length)) {   // a linked photo: the chain (a click offers to end the link) and which end it is
+    const passive = !!L.of, colour = linkColour(L), other = passive ? layerName(owner(L)) : passivesOf(L).map(layerName).join(" · ");
+    link.push(el("span", { class: "kind chain", style: `color:${colour}`, title: t("link.chainTip", other), innerHTML: ICONS.chain, onclick: (e) => { e.stopPropagation(); askUnlink(L); } }),
+      el("span", { class: "kind role", style: `color:${colour}`, title: t(passive ? "link.passiveTip" : "link.activeTip", other), innerHTML: ICONS[passive ? "passive" : "active"] }));
+  }
+  return [what, ...link, free ? icon("user", t("layers.kind.user")) : icon("system", t("layers.kind.system"))];
 }
 /** 14-px line icons for the layer list, in the text colour. */
 const ICONS = Object.fromEntries(Object.entries({
@@ -1517,6 +1606,9 @@ const ICONS = Object.fromEntries(Object.entries({
   photo: '<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M1.5 11.5l4-4 3 3 2-2 4 4"/><circle cx="11" cy="5.8" r="1.1"/>',
   text: '<path d="M3 3.5h10M8 3.5v10M6 13.5h4"/>',
   solid: '<rect x="2.5" y="2.5" width="11" height="11" rx="1" fill="currentColor" fill-opacity=".45"/>',
+  chain: '<path d="M6.6 9.4l2.8-2.8"/><path d="M7.4 4.4l1.2-1.2a2.7 2.7 0 0 1 3.8 3.8l-1.2 1.2"/><path d="M8.6 11.6l-1.2 1.2a2.7 2.7 0 0 1-3.8-3.8l1.2-1.2"/>',
+  active: '<circle cx="8" cy="8" r="5.6"/><circle cx="8" cy="8" r="2.4" fill="currentColor"/>',
+  passive: '<circle cx="8" cy="8" r="5.6" stroke-dasharray="2.2 1.8"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/>',
   svg: '<path d="M8 1.8l4.6 5.4L8 14.2 3.4 7.2z"/><path d="M8 1.8v6.4"/><circle cx="8" cy="9.2" r="1.1"/>',
 }).map(([k, d]) => [k, `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`]));
 /**
@@ -1627,21 +1719,27 @@ function headlineControls(L, set) {
 }
 /** The properties of a photo layer. */
 function photoControls(L, set) {
-  const base = L.of ? layer(L.of) : L, rec = recordOf(L), pid = base && base.pid;
-  const cut = async (on) => { if (on && !(await ensureMask(pid))) return renderSide(); set("cut", on, true); };
+  const base = L.of ? layer(L.of) : L, rec = recordOf(L), pid = base && base.pid, linked = passivesOf(L);
+  const cut = async (on) => {
+    if (L.of && !on) { unlink(L); L.cut = false; touch({ cover: true, side: true, panel: onCoverTab() }); return toast(t("link.restored")); }   // a whole photo again, of its own
+    if (on && !(await ensureMask(pid))) return renderSide();
+    L.cut = on; touch({ cover: true, side: true, panel: onCoverTab() });
+  };
+  const unlinkBtn = (L.of || linked.length > 0) && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => askUnlink(L) }, t("link.unlink"));
   return [
     !rec && el("div", { class: "hint err", style: "margin:0 0 10px" }, t("props.photoMissing")),
     psec("props.sec.cut", [
       canCut()
         ? el("div", { class: L.of ? "" : "row", style: "margin-top:0" },
             el("button", { class: "btn" + (L.of ? " wide" : ""), disabled: CUT.busy, onclick: () => cut(!L.cut) }, t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut")),
-            !L.of && el("button", { class: "btn", disabled: CUT.busy, title: t("cut.go"), onclick: () => cutOut(L) }, t("cut.goShort")))
+            !L.of && el("button", { class: "btn", disabled: CUT.busy, title: t(linked.length ? "cut.againTip" : "cut.go"), onclick: () => cutOut(L) }, t(linked.length ? "cut.again" : "cut.goShort")))
         : el("div", { class: "hint", style: "margin:0" }, t("cutset.needsApp")),
       CUT.error && el("div", { class: "hint err" }, CUT.error),
     CUT.needModel && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.tab.setup = "ai"; S.aiPane = "cut"; setMode("setup"); } }, t("cut.goModel"))], t("cut.tip", t("cutset.engine." + cutEngine()))),
     L.of
-      ? psec("props.sec.place", el("div", { class: "hint", style: "margin:0" }, t("props.copyHint", base ? layerName(base) : "—")), t("props.copyMore"))
-      : psec("props.sec.place", check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
+      ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")), unlinkBtn], t("link.passiveMore"))
+      : psec("props.sec.place", [check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
+          linked.length > 0 && el("div", { class: "hint" }, t("link.leads", linked.map(layerName).join(" · "))), unlinkBtn],
           t(L.fill ? "props.fillHint" : "props.printHint")),
     psec("props.sec.picture", [
       slider("props.blur", 0, 80, 1, L.blur, px, (v) => { holdLive(L.id); set("blur", v); }),
@@ -1699,7 +1797,7 @@ function layerSection(L) {
     psec("props.sec.layer", [
       slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { holdLive(L.id); L.o = v; touch({ cover: true }); }),
       !fixed && !copy && placementControls(L),
-      isFree(L.type) && catsControl(L)], fixed ? t("props.fixedHint") : "")];
+      isFree(L.type) && !copy && catsControl(L)], fixed ? t("props.fixedHint") : "")];
 }
 function renderSide() {
   if (!S.cover) return;
@@ -1715,7 +1813,7 @@ function renderSide() {
       el("div", { class: "acts", style: "margin-top:10px;justify-content:flex-start" },
         el("button", { class: "btn", onclick: () => addLayer(newLayer("text", { text: t("layer.newText") })) }, t("layers.addText")),
         el("button", { class: "btn", onclick: () => addLayer(newLayer("solid", { color: cat().color })) }, t("layers.addSolid")),
-        el("button", { class: "btn", disabled: !free || many.length > 0, onclick: duplicateLayer }, t("layers.dup")),
+        el("button", { class: "btn", disabled: !free || many.length > 0 || !!(L.type === "photo" && L.of), onclick: duplicateLayer }, t("layers.dup")),
         el("button", { class: "btn", disabled: many.length ? !many.some((x) => isFree(x.type)) : !(L && isRemovable(L.type)), onclick: () => (many.length ? removeGroup() : removeLayer()) }, t("layers.del")),
         el("button", { class: "btn", title: t("layers.up"), disabled: many.length > 0 || i < 1 || i >= here.length - 1, onclick: () => shiftLayer(1) }, "▲"),
         el("button", { class: "btn", title: t("layers.down"), disabled: many.length > 0 || i <= 1, onclick: () => shiftLayer(-1) }, "▼"))),
@@ -2188,7 +2286,7 @@ async function selfTest(dir) {
         const main = await addPhoto(real), filled = !!main && main.fill && S.cover.layers.indexOf(main) === 1;
         const front = await cutOut(main), ok = !!front, rec = recordOf(main), m = rec && rec.mask && rec.mask.img;
         const at = (id) => S.cover.layers.findIndex((l) => l.id === id);
-        report.subject = { filled, kept: S.cover.layers.includes(main) && !main.cut, own: !!front && !front.of && front.pid === main.pid && front.fill, selected: !!front && S.layerId === front.id, ok, ms: Math.round(performance.now() - t0), photo: sizeOf(rec.img), mask: m ? sizeOf(m) : null, aboveTitle: !!front && at(front.id) === at("title") + 1, error: CUT.error };
+        report.subject = { filled, kept: S.cover.layers.includes(main) && !main.cut, linked: !!front && front.of === main.id, selected: !!front && S.layerId === front.id, ok, ms: Math.round(performance.now() - t0), photo: sizeOf(rec.img), mask: m ? sizeOf(m) : null, aboveTitle: !!front && at(front.id) === at("title") + 1, error: CUT.error };
         if (ok) {
           front.outline = 8; front.shadow = 0.6; main.blur = 12;
           S.cover.title = "*Subject* in front\nof the title";
