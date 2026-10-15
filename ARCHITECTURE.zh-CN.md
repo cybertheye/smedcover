@@ -112,7 +112,7 @@ tests/               不依赖 DOM 的模块的单元测试
 
 **档案文件**（`.smedprofile.json`，第 3 版）：`{app, kind: "profile", version, profile, assets, fonts}`，完整备份另有 `covers`（`{频道 id: 封面}`）、`photos`（`{pid: {src, original, mask}}`）和 `channel`（导出时所在频道）。`exportProfile()` 写，`profileActions.import()` 读：总是新档案（新 id，频道 id 不变），封面经 `channelCover()` 校验后写进 `covers/<新 id>/`，照片进照片库和位图素材。
 
-**工程文件**（`.smedcover.json`，第 4 版）：`{app, kind: "project", version, profileName, profile, catId, cover, photos, assets, fonts}`。打开时（`projectActions.open()`）：本机有同 id 的档案，切到它和 `catId` 频道；没有则 `askProjectProfile()` 询问作为新档案导入还是套用到当前档案；第 3 版及以前没有 `profile`，放进画布上的频道。替换前先 `commitHistory()`，所以能撤销。
+**工程文件**（`.smedcover.json`，第 4 版；界面入口——顶栏「工程」和 Cmd+S——暂时去掉，`projectActions` 的代码保留）：`{app, kind: "project", version, profileName, profile, catId, cover, photos, assets, fonts}`。打开时（`projectActions.open()`）：本机有同 id 的档案，切到它和 `catId` 频道；没有则 `askProjectProfile()` 询问作为新档案导入还是套用到当前档案；第 3 版及以前没有 `profile`，放进画布上的频道。替换前先 `commitHistory()`，所以能撤销。
 
 两种文件都带用到的用户素材（`embedAssets`）和导入字体（`embedFonts`：图层 `font` 指向的、在 `S.importedFonts` 里的；`adoptFonts` 装上本机还没有的，写进 `fonts/`）。
 

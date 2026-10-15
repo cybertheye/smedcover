@@ -17,7 +17,6 @@ How it works inside: [ARCHITECTURE.md](ARCHITECTURE.md).
 | **Channel** | One content line within the brand, with its own name, colour and graphic. A cover takes its colour and graphic from its channel. |
 | **Cover** | Each channel of each profile has one: its title, corner tag and its own stack of layers. Switching channel or profile shows that one; none affects another, and each is saved as you go. |
 | **Layer** | Each part of a cover. Built-in layers (background, colour block, title, …) are on every cover; free layers are the stickers, images, photos and text you add. |
-| **Project** | The current cover saved to a file with its profile, channel, photos, assets and imported fonts, so it can be reopened as it was — on another computer too. |
 
 ## The window
 
@@ -28,7 +27,7 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
   - Setup: **Brand**, **Sizes & export**, **AI**
 - **Centre** — the main canvas, and below it a thumbnail of every output size. Click one to show that size on the canvas.
 - **Right** (Edit only) — the layer list and the selected layer's properties.
-- **Top bar** — profile switcher, open and save project, undo and redo, SURPRISE ME (你看着办 in Chinese), export.
+- **Top bar** — profile switcher, undo and redo, SURPRISE ME (你看着办 in Chinese), export.
 
 ## Quick start
 
@@ -80,7 +79,7 @@ Select a photo: *Remove the background* and *Cut out subject* are in its *Cut-ou
 - Deleting the cut-out leaves the photo; deleting the photo deletes its cut-out too. A photo has one linked cut-out: once it has one, the button reads *Cut out again* (to find the subject anew, after changing the way of cutting out, say).
 - The cut-out shows its photo's picture: after an AI repaint of the photo is used, or the photo is replaced, it is cut out again by itself.
 - *Remove the background* in the properties uses the same recognition: the layer itself keeps only its subject, without a new layer.
-- The cut-out is kept with the photo in the cover and in project files. A photo with no clear subject says so.
+- The cut-out is kept with the photo in the cover, and travels with a whole-profile export. A photo with no clear subject says so.
 
 ### Generating a photo with AI
 
@@ -140,7 +139,7 @@ Repaint the attached photograph as a loose watercolour painting …
 - *Anything to add* is optional and goes after any source. Every source is followed by: no text or watermarks, no border, keep the photo's shape.
 - While it runs you can close *AI repaint* and carry on; its button says *Repainting…*. When it is done you are told, the button reads *AI repaint · result ready*, and opening it shows the result, which stays until the next repaint.
 - The result is shown first, as a preview; *Use this* replaces that photo (and its copies, such as the cut-out subject), and *Back to the original* is there afterwards. A new repaint always starts from the original, so repaints do not pile up.
-- Both the repainted photo and the original are saved in project files.
+- Both the repainted photo and the original are kept on this computer (both are in Bitmaps), and travel with a whole-profile export.
 - If the service answers that it does not take one of the optional settings sent (such as the size or the watermark), the app sends the request again without it.
 - Each repaint is charged at the service's prices and usually takes tens of seconds.
 
@@ -162,7 +161,6 @@ Repaint the attached photograph as a loose watercolour painting …
 | Esc, or a click outside the canvas | Deselect |
 | Cmd/Ctrl + D | Duplicate the selected free layer |
 | Cmd/Ctrl + Z, with Shift to redo | Undo / redo |
-| Cmd/Ctrl + S | Save the project |
 
 Every layer except Background and Corner brackets can be moved, resized, stretched and rotated.
 
@@ -240,7 +238,7 @@ Every layer that carries words (title, corner tag, channel name, brand row, text
 
 A font marked *no Chinese* has no Chinese glyphs: choosing it changes Latin letters and digits only, and Chinese stays in the default face. To change the Chinese, pick a font without the mark (PingFang, Songti, Kaiti…). Imported fonts are not checked.
 
-Imported fonts live in this computer's app data. Exporting a profile or saving a project packs the imported fonts it uses into the file, and importing or opening it elsewhere installs them; a font that did not come along shows as "not on this computer" and the default is used.
+Imported fonts live in this computer's app data. Exporting a profile packs the imported fonts it uses into the file, and importing it elsewhere installs them; a font that did not come along shows as "not on this computer" and the default is used.
 
 ### Text effects
 
@@ -299,7 +297,7 @@ A switch at the top of the Assets tab, | Vector assets | Bitmaps | (the chosen o
 
 **Bitmaps**
 
-At the top, in *Add bitmaps*, are *Upload photos* and *AI generate*: photos uploaded here are only kept in Bitmaps, not put on the cover (several at once if you like); AI generate works as in *Cover → Add photos* — the picture is kept here when made, and goes on the cover only with *Add to the cover*. Every photo you upload, every picture AI makes and every AI repaint is kept here by itself, its source marked on the thumbnail (Upload / AI made / AI repaint); opening a project file adds the photos in it too.
+At the top, in *Add bitmaps*, are *Upload photos* and *AI generate*: photos uploaded here are only kept in Bitmaps, not put on the cover (several at once if you like); AI generate works as in *Cover → Add photos* — the picture is kept here when made, and goes on the cover only with *Add to the cover*. Every photo you upload, every picture AI makes and every AI repaint is kept here by itself, its source marked on the thumbnail (Upload / AI made / AI repaint); importing a whole profile adds the photos in it too.
 
 - Click one to add it to the current cover as a photo layer; drag it onto the canvas to put it where you let go. Added, it is listed under *Cover → Add photos* like any other photo.
 - The × on a thumbnail's corner (on hover) takes it out of Bitmaps; covers already using it keep it.
@@ -425,7 +423,7 @@ Click **Test connection** to check it works.
 
 Privacy and cost:
 
-- The token is stored in plain text in the app data directory on this computer (`ai.json`) and is never written into profile or project files.
+- The token is stored in plain text in the app data directory on this computer (`ai.json`) and is never written into profile files.
 - When generating, your description, the preset prompt and any reference picture you attached are sent to the address you entered; the app makes no other network requests.
 - Usage is billed by your provider.
 
@@ -479,16 +477,11 @@ Exports are written only where you choose.
 | Windows | `%APPDATA%\com.cyven.smedcover\` |
 | Linux | `~/.local/share/com.cyven.smedcover/` |
 
-To move to another computer or share with someone there are two kinds of file:
+To move to another computer or share with someone, export the profile (*Setup → Profile → Export profile*):
 
-- **Profile** (*Setup → Profile → Export profile*):
-  - *With each channel's cover and its photos* unticked: the brand settings only (channels, sizes, look, default design, and the assets and imported fonts they use) — to share as a template.
-  - Ticked: a whole backup of the profile, every channel's cover and the photos on them included — to move to another computer; it can be large.
-  - Importing always adds a new profile; a whole backup brings back every channel's cover, on the channel it was exported from.
-- **Project** (*Project → Save* in the top bar, Cmd/Ctrl + S): the current cover with its profile, channel, photos, assets and imported fonts. Opening one:
-  - with its profile on this computer: back in that profile, on that channel, in place of the cover there (undo brings it back);
-  - without: you are asked whether to *import it as a new profile and open it as it was* or *put it into the current profile* (on the same channel if this profile has it, else on the channel on the canvas);
-  - a project file of an earlier version has no profile, and opens on the channel on the canvas as before.
+- *With each channel's cover and its photos* unticked: the brand settings only (channels, sizes, look, default design, and the assets and imported fonts they use) — to share as a template.
+- Ticked: a whole backup of the profile, every channel's cover and the photos on them included — to move to another computer; it can be large.
+- Importing always adds a new profile; a whole backup brings back every channel's cover, on the channel it was exported from.
 
 ## Run and build from source
 
@@ -516,7 +509,7 @@ SMEDCOVER_SELFTEST=/absolute/empty/folder src-tauri/target/release/bundle/macos/
 
 ## To do
 
-### Project files for Illustrator / Affinity
+### Layered files for Illustrator / Affinity
 
 Goal: once a cover is made in SmedCover, take it — with its layers — into your own workflow for
 masks, text effects and heavier image work. The native formats of those apps (`.ai`, `.afdesign`)

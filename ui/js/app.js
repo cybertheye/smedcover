@@ -2495,7 +2495,7 @@ function syncTop() {
     el("div", { class: "seg big" }, mode("edit"), mode("setup")),
     el("div", { class: "grp" }, el("span", {}, t("top.profile")),
       el("select", { onchange: (e) => switchProfile(e.target.value) }, S.profiles.map((p) => el("option", { value: p.id, selected: p.id === S.profile.id }, p.name)))),
-    el("div", { class: "grp" }, el("span", {}, t("top.project")), b("top.open", projectActions.open), b("top.save", projectActions.save), b("top.reset", projectActions.reset)),
+    // project files (projectActions: open, save, reset) have no place in the top bar for now; the code stays
     el("div", { class: "grp" }, b("top.undo", () => timeTravel(-1), { disabled: S.histIdx <= 0 }), b("top.redo", () => timeTravel(1), { disabled: S.histIdx >= S.hist.length - 1 })),
     el("div", { class: "spacer" }),
     el("button", { class: "btn solid cta", style: "margin-right:10px", title: t("top.surpriseHint"), onclick: surprise }, t("top.surprise")),
@@ -2573,7 +2573,6 @@ addEventListener("drop", async (e) => {
 addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
-  if (mod && key === "s") { e.preventDefault(); return projectActions.save(); }
   if (typing || !S.cover) return;
   if (mod && key === "z") { e.preventDefault(); return timeTravel(e.shiftKey ? 1 : -1); }
   if (S.mode !== "edit") return;
