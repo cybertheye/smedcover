@@ -325,7 +325,7 @@ function addLayer(L) {
   return L;
 }
 function addAsset(ref, at) {
-  const L = newLayer("asset", { ref, tint: ref.kind === "user" && canTint(ref) });   // generated stickers follow the channel colour from the start
+  const L = newLayer("asset", { ref, tint: canTint(ref) });   // a vector asset follows the channel colour from the start, as its tile shows
   if (at) { L.t.all.x = at.x; L.t.all.y = at.y; }
   if (ref.kind === "sticker") L.t.all.s = 0.3;
   addLayer(L);
@@ -946,7 +946,8 @@ function tile(ref, onRemove) {
   const cv = el("canvas", { width: 132, height: 132 });
   const x = cv.getContext("2d");
   x.translate(66, 66); x.scale(0.19, 0.19);
-  drawAsset(x, ref, hexToRgb(cat().color), { tint: ref.kind === "graphic" });
+  useLook();   // as on this profile's covers (another profile's preview may have drawn last)
+  drawAsset(x, ref, hexToRgb(cat().color), { tint: ref.kind === "graphic" || canTint(ref) });
   return el("div", { class: "tile", title: assetName(ref, getLang()), draggable: true, onclick: () => addAsset(ref),
     ondragstart: (e) => { DRAGGED_ASSET = ref; e.dataTransfer.setData("application/x-smed-asset", JSON.stringify(ref)); e.dataTransfer.effectAllowed = "copyMove"; },
     ondragend: () => { DRAGGED_ASSET = null; } },
@@ -963,8 +964,8 @@ function shapeTile(shape) {
 }
 /** Assets: two panes — vector assets (made in code or by AI, shared by every profile) and the bitmap library. */
 function assetsTab() {
-  const pane = S.assetPane === "bitmap" ? "bitmap" : "vector", tab = (k) => el("button", { class: "btn" + (pane === k ? " on" : ""), onclick: () => { S.assetPane = k; renderPanel(); $("panel").scrollTop = 0; } }, t("assets.pane." + k));
-  return [el("div", { class: "seg wide" }, tab("vector"), tab("bitmap")), ...(pane === "bitmap" ? bitmapPane() : vectorPane())];
+  const pane = S.assetPane === "bitmap" ? "bitmap" : "vector", tab = (k) => el("button", { class: pane === k ? "on" : "", onclick: () => { S.assetPane = k; renderPanel(); $("panel").scrollTop = 0; } }, t("assets.pane." + k));
+  return [el("div", { class: "subtabs" }, tab("vector"), tab("bitmap")), ...(pane === "bitmap" ? bitmapPane() : vectorPane())];
 }
 function vectorPane() {
   const lang = getLang(), mine = [...userAssets.values()];
@@ -2609,9 +2610,10 @@ const LIB = { tried: new Set() };   // pictures the bitmap pane has tried to rea
 /** Assets → Bitmaps: the library's pictures, to click or drag onto the cover. */
 function bitmapPane() {
   return [
-    photoAdders(false),
-    el("div", { class: "hint" }, t("lib.hint")),
-    libraryTiles((pid) => placePhoto(pid), () => { if (onBitmapPane()) renderPanel(); }, true)];
+    el("div", { class: "box" }, cap("lib.add"), photoAdders(false)),
+    el("div", {}, cap("lib.all", ` · ${S.library.length}`),
+      el("div", { class: "hint", style: "margin:0 0 10px" }, t("lib.hint")),
+      libraryTiles((pid) => placePhoto(pid), () => { if (onBitmapPane()) renderPanel(); }, true))];
 }
 const onBitmapPane = () => S.mode === "edit" && S.tab.edit === "assets" && S.assetPane === "bitmap";
 /**

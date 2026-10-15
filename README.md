@@ -286,7 +286,7 @@ Earlier versions kept one cover, whose layers could be kept to some channels. Th
 
 ### Assets
 
-The Assets tab has two panes at the top: **Vector assets** and **Bitmaps**. Both are shared by every profile and every channel.
+A switch at the top of the Assets tab picks one of two panes: **Vector assets** and **Bitmaps**. Both are shared by every profile and every channel. Vector assets are shown in the current look and the channel colour, and once on the canvas they follow the channel colour by default too (the layer's properties can give one its own colours or one of yours).
 
 **Vector assets**
 
@@ -294,12 +294,12 @@ The Assets tab has two panes at the top: **Vector assets** and **Bitmaps**. Both
   - *＋ New folder* makes a folder and lets you name it; double-click a folder's name to rename it later. Drag an asset onto a folder to file it, onto *Unfiled* to take it out. ▾ / ▸ closes or opens a folder.
   - Deleting a folder takes two clicks on its ×; its assets are not deleted but go back to Unfiled. Folders are kept on this computer and do not travel with profile exports.
 - **Channel graphics** — twenty cel-shaded graphics that follow the channel colour.
-- **Stickers** — a free pack of 72; each in its own colours, the channel colour or one of your own. The first group is twelve *Frames*: square, rectangle, circle, triangle, rounded rectangle, pentagon, hexagon, octagon, star, parallelogram, trapezoid and semicircle — thin geometric outlines, empty in the middle, to go round a photo, a word or a face, their line drawn the current look's way.
+- **Stickers** — a free pack of 72, in the channel colour by default, or in their own colours or one of yours. The first group is twelve *Frames*: square, rectangle, circle, triangle, rounded rectangle, pentagon, hexagon, octagon, star, parallelogram, trapezoid and semicircle — thin geometric outlines, empty in the middle, to go round a photo, a word or a face, their line drawn the current look's way.
 - **Colour block & edge** — twelve shapes; click one to reshape the colour block layer.
 
 **Bitmaps**
 
-At the top are *Upload photos* and *AI generate*: photos uploaded here are only kept in Bitmaps, not put on the cover (several at once if you like); AI generate works as in *Cover → Add photos* — the picture is kept here when made, and goes on the cover only with *Add to the cover*. Every photo you upload, every picture AI makes and every AI repaint is kept here by itself, its source marked on the thumbnail (Upload / AI made / AI repaint); opening a project file adds the photos in it too.
+At the top, in *Add bitmaps*, are *Upload photos* and *AI generate*: photos uploaded here are only kept in Bitmaps, not put on the cover (several at once if you like); AI generate works as in *Cover → Add photos* — the picture is kept here when made, and goes on the cover only with *Add to the cover*. Every photo you upload, every picture AI makes and every AI repaint is kept here by itself, its source marked on the thumbnail (Upload / AI made / AI repaint); opening a project file adds the photos in it too.
 
 - Click one to add it to the current cover as a photo layer; drag it onto the canvas to put it where you let go. Added, it is listed under *Cover → Add photos* like any other photo.
 - The × on a thumbnail's corner (on hover) takes it out of Bitmaps; covers already using it keep it.
