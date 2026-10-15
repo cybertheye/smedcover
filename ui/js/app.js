@@ -269,8 +269,33 @@ function removeGroup() {
 }
 /** While a slider of one layer is dragged, only that layer is repainted (as in a drag on the canvas); the whole cover once it stops. */
 function holdLive(id) { goLive(id); later("live", 300, endLive); }
-/** Applies a placement edit to a layer in the current scope (to a linked cut-out's photo, which it follows), then redraws. */
-function edit(L, patch) { adjust(owner(L), frame(), S.settings.scope, patch); touch({ cover: true }); }
+/**
+ * Applies a placement edit to a layer in the current scope, then redraws. A linked cut-out's moves are
+ * its photo's (the two move together); its size, angle and stretch are its own, changed about its subject.
+ */
+function edit(L, patch) {
+  const A = owner(L);
+  if (A === L) adjust(L, frame(), S.settings.scope, patch);
+  else {
+    const { ddx, ddy, ...own } = patch;
+    if (ddx || ddy) adjust(A, frame(), S.settings.scope, { ddx, ddy });
+    if (Object.keys(own).length) { adjust(L, frame(), S.settings.scope, own); aboutSubject(L, own); }
+  }
+  touch({ cover: true });
+}
+/**
+ * Keeps a cut-out's subject where it is while the cut-out is scaled or turned: the centre of its frame
+ * (the hit's px, py) is moved round the subject's (the hit's centre) by the same amount.
+ */
+function aboutSubject(L, { scale, rot }) {
+  const h = $("cv")._hits && $("cv")._hits.find((x) => x.id === L.id);
+  if (!h || h.px == null || (!scale && !rot)) return;
+  let vx = h.px - h.cx, vy = h.py - h.cy;
+  if (scale) { vx *= scale; vy *= scale; }
+  if (rot) { const a = (rot * Math.PI) / 180, c = Math.cos(a), n = Math.sin(a); [vx, vy] = [vx * c - vy * n, vx * n + vy * c]; }
+  adjust(L, frame(), S.settings.scope, { ddx: h.cx + vx - h.px, ddy: h.cy + vy - h.py });
+  h.px = h.cx + vx; h.py = h.cy + vy;   // until the cover is drawn again
+}
 function addLayer(L) {
   insertAbove(S.cover.layers, S.layerId === "bg" ? "bg" : S.layerId, L);
   S.layerId = L.id;
@@ -345,7 +370,7 @@ function layerAt(e) {
   /** The pointer in the selected layer's own rotated frame, plus the handle under it (if any). */
   function grip(e) {
     const L = layer(), hit = cv._hits && cv._hits.find((h) => h.id === S.layerId);
-    if (group().length || !L || !hit || hit.fill || hit.frameOnly || L.locked || L.type === "bg" || FIXED.includes(L.type)) return null;
+    if (group().length || !L || !hit || hit.fill || L.locked || L.type === "bg" || FIXED.includes(L.type)) return null;
     const p = virtualPoint(e), a = (-hit.r * Math.PI) / 180, dx = p.x - hit.cx, dy = p.y - hit.cy;
     const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
     const handle = handles(hit, p.k).find((h) => Math.hypot(lx - h.lx, ly - h.ly) <= 11 * p.k);
@@ -616,11 +641,29 @@ function linkColour(L) {
   const linked = S.cover.layers.filter((l) => l.type === "photo" && !l.of && passivesOf(l).length);
   return LINK_COLOURS[Math.max(0, linked.indexOf(owner(L))) % LINK_COLOURS.length];
 }
-/** Ends a link: cut-out P becomes a photo of its own where it is now (the same picture, placement and channels). */
+/**
+ * A cut-out's placement that puts it exactly over photo A: no offset of its own, A's size (and for a
+ * print A's angle and stretch), size by size.
+ */
+function alignedT(A) {
+  const one = (e, all) => ({ ...(A.fill ? { s: e.s, r: 0, kx: 1, ky: 1 } : e), ...(all ? { x: 0, y: 0 } : { dx: 0, dy: 0 }) });
+  return { all: one(A.t.all, true), by: Object.fromEntries(Object.entries(A.t.by).map(([k, e]) => [k, one(e, false)])) };
+}
+/** Ends a link: cut-out P becomes a photo of its own where it is now (the same picture and channels). */
 function unlink(P) {
   const A = layer(P.of);
-  if (A) { P.pid = A.pid; P.t = JSON.parse(JSON.stringify(A.t)); P.fill = A.fill; if (A.cats) P.cats = [...A.cats]; else delete P.cats; }
-  P.of = "";
+  if (A) {
+    const h = $("cv")._hits && $("cv")._hits.find((x) => x.id === P.id), [vw, vh] = $("cv")._virtual || [1920, 1080];
+    if (JSON.stringify(P.t) === JSON.stringify(alignedT(A)) || !h || h.px == null) { P.t = JSON.parse(JSON.stringify(A.t)); P.fill = A.fill; }   // still over its photo: placed as the photo is
+    else {   // moved off it, or resized: a print where it is, at the size it is
+      const a = P.t.all;
+      P.t = { all: { x: h.px / vw, y: h.py / vh, s: Math.max(h.pw, h.ph) / ((1000 * Math.min(vw, vh)) / 1080), r: h.r, kx: a.kx, ky: a.ky }, by: {} };
+      P.fill = false;
+    }
+    P.pid = A.pid;
+    if (A.cats) P.cats = [...A.cats]; else delete P.cats;
+  }
+  P.of = ""; delete P.own;
 }
 /** Asks before ending the link of photo L (either end of it). */
 function askUnlink(L) {
@@ -633,10 +676,14 @@ function askUnlink(L) {
     el("button", { class: "btn wide", onclick: closeModal }, t("link.keep"))));
   m.hidden = false;
 }
-/** Drops linked cut-outs whose photo is gone, or is itself a cut-out (a link is one step). */
-function pruneLinks(cover) {
-  const actives = new Set(cover.layers.filter((l) => l.type === "photo" && !l.of).map((l) => l.id));
+/**
+ * Drops linked cut-outs whose photo is gone, or is itself a cut-out (a link is one step), and gives the
+ * cut-outs of earlier files — which took their photo's size as well as its place — a placement of their own, aligned.
+ */
+function settleLinks(cover) {
+  const actives = new Map(cover.layers.filter((l) => l.type === "photo" && !l.of).map((l) => [l.id, l]));
   cover.layers = cover.layers.filter((l) => !(l.type === "photo" && l.of && !actives.has(l.of)));
+  for (const l of cover.layers) if (l.type === "photo" && l.of && !l.own) { l.t = alignedT(actives.get(l.of)); l.own = true; }
   return cover;
 }
 /** A picture with its background removed, small, for the photo list. Kept per mask. */
@@ -719,7 +766,7 @@ async function upgradeCover(cover, legacy) {
     const b = cover.layers.find((x) => x !== l && x.type === "photo" && !x.of && !x.cut && x.pid === l.pid && x.fill === l.fill && JSON.stringify(x.t) === JSON.stringify(l.t) && !cover.layers.some((y) => y.of === x.id));
     if (b) l.of = b.id;
   }
-  return pruneLinks(cover);
+  return settleLinks(cover);
 }
 
 function tile(ref, onRemove) {
@@ -873,7 +920,8 @@ async function cutOut(L) {
   const had = passivesOf(L)[0];
   if (!(await ensureMask(L.pid, !!had))) return null;
   if (had) { touch({ cover: true, side: true, panel: true }); toast(t("cut.redone")); return had; }
-  const c = newLayer("photo", { of: L.id, cut: true });
+  const c = newLayer("photo", { of: L.id, cut: true, own: true });
+  c.t = alignedT(L);
   if (L.cats) c.cats = [...L.cats];
   const at = (id) => S.cover.layers.findIndex((l) => l.id === id);
   insertAbove(S.cover.layers, at(L.id) > at("title") ? L.id : "title", c);
@@ -1410,6 +1458,8 @@ function layoutBox() {
   return el("div", { class: "box" }, cap("style.layout"),
     slider2(t(split ? "style.laySide" : "style.layBand"), LAYOUT_LIMITS.size[0], LAYOUT_LIMITS.size[1], 0.01, adj.size ?? now.size, (v) => set("size", v)),
     slider2(t("style.laySlant"), LAYOUT_LIMITS.slant[0], LAYOUT_LIMITS.slant[1], 0.005, adj.slant ?? now.slant, (v) => set("slant", v)),
+    slider2(t("style.layTitleW"), LAYOUT_LIMITS.tw[0], LAYOUT_LIMITS.tw[1], 0.01, adj.tw ?? 1, (v) => set("tw", v)),
+    slider2(t("style.layTitleH"), LAYOUT_LIMITS.th[0], LAYOUT_LIMITS.th[1], 0.01, adj.th ?? 1, (v) => set("th", v)),
     el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: !!adj.flip, onchange: (e) => { set("flip", e.target.checked); renderPanel(); } }), el("span", {}, t(split ? "style.layFlipSplit" : "style.layFlipStack"))),
     el("button", { class: "btn wide", style: "margin-top:10px", disabled: !changed, onclick: () => { delete st.layoutAdjust[tpl]; touch({ profile: true, panel: true }); } }, t("style.layReset")),
     el("div", { class: "hint" }, t("style.layHint")));
@@ -1601,7 +1651,7 @@ function layerKinds(L) {
 }
 /** 14-px line icons for the layer list, in the text colour. */
 const ICONS = Object.fromEntries(Object.entries({
-  system: '<path d="M15.06 6.57 L15.06 9.43 L13.20 9.01 L12.40 10.96 L14.00 11.98 L11.98 14.00 L10.96 12.40 L9.01 13.20 L9.43 15.06 L6.57 15.06 L6.99 13.20 L5.04 12.40 L4.02 14.00 L2.00 11.98 L3.60 10.96 L2.80 9.01 L0.94 9.43 L0.94 6.57 L2.80 6.99 L3.60 5.04 L2.00 4.02 L4.02 2.00 L5.04 3.60 L6.99 2.80 L6.57 0.94 L9.43 0.94 L9.01 2.80 L10.96 3.60 L11.98 2.00 L14.00 4.02 L12.40 5.04 L13.20 6.99Z"/><circle cx="8" cy="8" r="2.2"/>',
+  system: '<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M1.5 6h13"/><rect x="4" y="8.4" width="3.4" height="2.6" fill="currentColor"/><path d="M9.6 8.9h3M9.6 11h2"/>',
   user: '<circle cx="8" cy="5.2" r="2.7"/><path d="M2.6 14.5c.6-3 2.7-4.6 5.4-4.6s4.8 1.6 5.4 4.6"/>',
   photo: '<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M1.5 11.5l4-4 3 3 2-2 4 4"/><circle cx="11" cy="5.8" r="1.1"/>',
   text: '<path d="M3 3.5h10M8 3.5v10M6 13.5h4"/>',
@@ -1661,8 +1711,8 @@ function showTip(at, text) {
 }
 /**
  * One group of properties: its name (and an ⓘ with `tip`), then its controls. The name is centred on
- * the group's first row; `at` "top" puts it level with the top of a text box, "sw" with the first row
- * of swatches (which may wrap onto a second).
+ * the group's first row; `at` "top" puts it level with the top of a text box, "first" with the first
+ * line of a paragraph.
  */
 const psec = (nameKey, kids, tip = "", at = "") => el("div", { class: "psec" }, el("div", { class: "psec-h" + (at ? " " + at : "") }, t(nameKey), tip && info(tip)), el("div", { class: "psec-b" }, kids));
 /** Put a layer back where it was placed by default. */
@@ -1671,19 +1721,19 @@ function placementControls(L) {
   return el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { resetPlacement(L, S.settings.scope, f.key, f.catId); touch({ cover: true, side: true }); } }, `${t("props.reset")} · ${t("scope." + S.settings.scope)}`);
 }
 /**
- * A colour of a layer, as a small swatch with its name: click to choose. With `auto` the layer may
- * also have none, and then takes what the look gives it — the swatch shows `shown` and an "auto"
- * mark, and once a colour is chosen a × goes back to automatic.
+ * A colour of a layer, a row of its own as a checkbox is: the swatch (click to choose), its name, and —
+ * with `auto`, where the layer may also have none and take what the look gives it — "automatic" while it
+ * has none, or a link back to automatic once it has one. `shown` is the swatch's colour while automatic.
  */
 function swatch(L, key, labelKey, shown, auto = true) {
   // a text layer of before may still be in the channel colour (color "accent"): choosing a colour, or automatic, ends that
   const old = key === "ink" && L.color === "accent", own = !!L[key] || old;
   const put = (v) => { holdLive(L.id); if (v) L[key] = v; else delete L[key]; if (key === "ink") delete L.color; touch({ cover: true }); };
-  return el("div", { class: "sw" + (own || !auto ? "" : " auto"), title: (labelKey ? t(labelKey) : "") + (own || !auto ? "" : " · " + t("props.inkIsAuto")) },
-    el("span", { class: "chip", dataset: { auto: t("props.autoMark") } },
-      el("input", { type: "color", value: L[key] || (old ? cat().color : shown), oninput: (e) => { put(e.target.value); later("side", 600, renderSide); } }),
-      auto && own && el("button", { class: "x", title: t("props.inkAuto"), onclick: () => { put(""); renderSide(); } }, "×")),
-    labelKey && el("span", { class: "nm" }, t(labelKey)));
+  return el("div", { class: "sw" },
+    el("input", { type: "color", title: labelKey ? t(labelKey) : null, value: L[key] || (old ? cat().color : shown), oninput: (e) => { put(e.target.value); later("side", 600, renderSide); } }),
+    labelKey && el("span", { class: "nm" }, t(labelKey)),
+    auto && (own ? el("button", { class: "linkbtn", title: t("props.inkAutoHint"), onclick: () => { put(""); renderSide(); } }, t("props.inkAuto"))
+      : el("span", { class: "auto", title: t("props.inkAutoHint") }, t("props.inkIsAuto"))));
 }
 /**
  * A headline's outline and shadow sliders. Not every text effect draws them (the flat looks' plain
@@ -1721,10 +1771,10 @@ function headlineControls(L, set) {
       L.type === "text" && el("textarea", { value: L.text, spellcheck: false, style: "height:64px;margin-bottom:8px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
       fontControl(L, true)], L.type === "text" ? t("props.textHint") : t("props.boundHint"), L.type === "text" ? "top" : ""),
     psec("props.sec.effect", fx.kids, fx.tip),
-    psec("props.sec.color", el("div", { class: "sws" },
+    psec("props.sec.color", [
       swatch(L, "ink", "props.sw.text", L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff"),
       swatch(L, "hi", "props.sw.hi", cat().color),
-      L.plate && swatch(L, "plateInk", "props.sw.plate", cat().color)), t("props.inkAutoHint"), "sw"),
+      L.plate && swatch(L, "plateInk", "props.sw.plate", cat().color)], t("props.inkAutoHint")),
     psec("props.sec.lines", titleLines(L, set), t(L.plate ? "props.linesOnPlate" : "props.linesNoPlate")),
     psec("props.sec.plate", check("props.plateAdd", L.plate, (v) => set("plate", v, true))),
   ];
@@ -1746,10 +1796,11 @@ function photoControls(L, set) {
             el("button", { class: "btn" + (L.of ? " wide" : ""), disabled: CUT.busy, onclick: () => cut(!L.cut) }, t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut")),
             !L.of && el("button", { class: "btn", disabled: CUT.busy, title: t(linked.length ? "cut.againTip" : "cut.go"), onclick: () => cutOut(L) }, t(linked.length ? "cut.again" : "cut.goShort")))
         : el("div", { class: "hint", style: "margin:0" }, t("cutset.needsApp")),
+      L.cut && slider("props.feather", 0, 40, 1, L.feather, px, (v) => { holdLive(L.id); set("feather", v); }),
       CUT.error && el("div", { class: "hint err" }, CUT.error),
     CUT.needModel && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.tab.setup = "ai"; S.aiPane = "cut"; setMode("setup"); } }, t("cut.goModel"))], t("cut.tip", t("cutset.engine." + cutEngine()))),
     L.of
-      ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")), unlinkBtn], t("link.passiveMore"))
+      ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")), unlinkBtn], t("link.passiveMore"), "first")
       : psec("props.sec.place", [check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
           linked.length > 0 && el("div", { class: "hint" }, t("link.leads", linked.map(layerName).join(" · "))), unlinkBtn],
           t(L.fill ? "props.fillHint" : "props.printHint")),
@@ -1760,7 +1811,7 @@ function photoControls(L, set) {
     psec("props.sec.lines", [
       slider("props.outline", 0, 40, 1, L.outline, px, (v) => { holdLive(L.id); set("outline", v); }),
       slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => { holdLive(L.id); set("shadow", v); }),
-      el("div", { class: "sws", style: "margin-top:10px" }, swatch(L, "ink", "props.sw.outline", "#ffffff"))], t("props.photoLinesTip")),
+      swatch(L, "ink", "props.sw.outline", "#ffffff")], t("props.photoLinesTip")),
   ];
 }
 /**
@@ -1776,12 +1827,12 @@ function assetColour(L) {
   };
   return psec("props.sec.color", [
     select([!graphic && ["own", t("props.assetOwn")], ["channel", t("props.assetChannel")], ["custom", t("props.assetCustom")]].filter(Boolean), mode, choose),
-    mode === "custom" && el("div", { class: "sws", style: "margin-top:8px" }, swatch(L, "ink", "", cat().color, false))]);
+    mode === "custom" && swatch(L, "ink", "props.sw.color", cat().color, false)]);
 }
 function typeControls(L) {
   const set = (k, v, side = false) => { L[k] = v; touch({ cover: true, side }); };
   const font = () => psec("props.sec.text", fontControl(L, true), L.type === "brand" ? "" : t("props.boundHint"));
-  const ink = (shown) => psec("props.sec.color", el("div", { class: "sws" }, swatch(L, "ink", "props.sw.text", shown)), t("props.inkAutoHint"));
+  const ink = (shown) => psec("props.sec.color", swatch(L, "ink", "props.sw.text", shown), t("props.inkAutoHint"));
   switch (L.type) {
     case "bg": {
       const oneTheme = (LOOKS[S.profile.style.look] || LOOKS.cel).oneTheme, covered = S.profile.style.theme === "light" && recordOf(mainPhoto());
@@ -1797,7 +1848,7 @@ function typeControls(L) {
     case "catname": return [psec("props.sec.show", [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v))]), font(), ink("#07070c")];
     case "graphic": return el("div", { class: "hint", style: "margin:0;grid-column:1/-1" }, t("props.graphicHint"));
     case "asset": return canTint(L.ref) ? assetColour(L) : null;
-    case "solid": return psec("props.sec.color", el("div", { class: "sws" }, swatch(L, "color", "", cat().color, false)));
+    case "solid": return psec("props.sec.color", swatch(L, "color", "props.sw.color", cat().color, false));
   }
   return null;
 }
@@ -1808,7 +1859,7 @@ function layerSection(L) {
   return [el("div", { class: "psep" }),
     psec("props.sec.layer", [
       slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { holdLive(L.id); L.o = v; touch({ cover: true }); }),
-      !fixed && !copy && placementControls(L),
+      !fixed && (copy ? el("button", { class: "btn wide", title: t("link.realignTip"), onclick: () => { L.t = alignedT(owner(L)); touch({ cover: true, side: true }); } }, t("link.realign")) : placementControls(L)),
       isFree(L.type) && !copy && catsControl(L)], fixed ? t("props.fixedHint") : "")];
 }
 function renderSide() {

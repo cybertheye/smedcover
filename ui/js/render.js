@@ -4,7 +4,7 @@
 import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, brackets } from "./cel.js";
 import { virtualSize, layout, adjustLayout } from "./layout.js";
 import { drawTitle, parseTitle } from "./title.js";
-import { photoRect, drawPhotoAt, sizeOf } from "./photo.js";
+import { photoRect, drawPhotoAt, sizeOf, gaussBlur } from "./photo.js";
 import { drawAsset } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled } from "./style.js";
@@ -313,37 +313,49 @@ const PAINT = {
     const [nw, nh] = sizeOf(im), { w, h } = env, M = ctx.getTransform ? ctx.getTransform() : null;
     // the frame: where the photo's rectangle is, in the frame's units
     let frame, rect, hit, bt = null, F = M && new DOMMatrix(M);   // F: the frame's transform, to find where the photo lands on the canvas
-    if (base.fill) {
+    const fills = base.fill && !L.of;   // placed as a background: covers the canvas, moved and scaled, not turned
+    if (fills) {
       const a = base.t.all, b = base.t.by[env.key] || { dx: 0, dy: 0, s: 1 };
       rect = photoRect(im, w, h, { dx: (a.x - 0.5) * w + b.dx, dy: (a.y - 0.5) * h + b.dy, s: a.s * b.s });
       frame = () => null;
       hit = { cx: rect.x + rect.iw / 2, cy: rect.y + rect.ih / 2, hw: rect.iw / 2, hh: rect.ih / 2, r: 0, fill: true };
     } else {
-      bt = base === L ? tr : env.resolve(base);
-      const long = 1000 * bt.s, iw = nw >= nh ? long : (long * nw) / nh, ih = nw >= nh ? (long * nh) / nw : long;
+      let iw, ih;
+      if (L.of) {
+        // A linked cut-out sits where its photo is — the centre of that photo's rectangle, plus an offset of
+        // its own (x, y of its placement, fractions of the canvas) — at a size, angle and stretch of its own.
+        // Its size is counted as its photo's is: against the canvas it covers for one that fills it, else as a print.
+        const a = L.t.all, b = L.t.by[env.key] || IDENTITY_BY, ba = base.t.all, bb = base.t.by[env.key] || IDENTITY_BY;
+        const o = base.fill ? { cx: w / 2 + (ba.x - 0.5) * w + bb.dx, cy: h / 2 + (ba.y - 0.5) * h + bb.dy } : env.resolve(base);
+        bt = { cx: o.cx + a.x * w + b.dx, cy: o.cy + a.y * h + b.dy, s: a.s * b.s, r: a.r + b.r, kx: a.kx * b.kx, ky: a.ky * b.ky };
+        if (base.fill) { const k0 = Math.max(w / nw, h / nh) * bt.s; iw = nw * k0; ih = nh * k0; }
+        else { const long = 1000 * bt.s * (Math.min(w, h) / 1080); iw = nw >= nh ? long : (long * nw) / nh; ih = nw >= nh ? (long * nh) / nw : long; }
+      } else {
+        bt = tr;
+        const long = 1000 * bt.s; iw = nw >= nh ? long : (long * nw) / nh; ih = nw >= nh ? (long * nh) / nw : long;
+      }
       rect = { x: -iw / 2, y: -ih / 2, iw, ih };
       frame = (c) => { c.translate(bt.cx, bt.cy); c.rotate(bt.r * RAD); c.scale(bt.kx, bt.ky); };
       if (F) F.translateSelf(bt.cx, bt.cy).rotateSelf(bt.r).scaleSelf(bt.kx, bt.ky);
       hit = { cx: bt.cx, cy: bt.cy, hw: (iw / 2) * bt.kx, hh: (ih / 2) * bt.ky, r: bt.r };
     }
-    // A cut-out is caught on its subject. A photo filling the canvas, itself cut, keeps the ground's way of
-    // being caught; a cut-out following one shows a frame but no handles (it is moved and scaled as that photo).
-    const mb = mask && !(base.fill && !L.of) && maskBox(mask);
+    // A cut-out is caught on its subject (the box round its mask). A photo filling the canvas, itself cut,
+    // keeps the ground's way of being caught. `px`, `py`: the centre of the photo's own frame, which the
+    // editor needs to turn and scale a cut-out about its subject.
+    const mb = mask && !fills && maskBox(mask);
     if (mb) {
       const lx = rect.x + ((mb.x0 + mb.x1) / 2) * rect.iw, ly = rect.y + ((mb.y0 + mb.y1) / 2) * rect.ih, hw = ((mb.x1 - mb.x0) / 2) * rect.iw, hh = ((mb.y1 - mb.y0) / 2) * rect.ih;
-      if (base.fill) hit = { cx: lx, cy: ly, hw, hh, r: 0, frameOnly: true };
-      else {
-        const a = bt.r * RAD, x = lx * bt.kx, y = ly * bt.ky;
-        hit = { cx: bt.cx + x * Math.cos(a) - y * Math.sin(a), cy: bt.cy + x * Math.sin(a) + y * Math.cos(a), hw: hw * Math.abs(bt.kx), hh: hh * Math.abs(bt.ky), r: bt.r };
-      }
+      const a = bt.r * RAD, x = lx * bt.kx, y = ly * bt.ky;
+      hit = { cx: bt.cx + x * Math.cos(a) - y * Math.sin(a), cy: bt.cy + x * Math.sin(a) + y * Math.cos(a), hw: hw * Math.abs(bt.kx), hh: hh * Math.abs(bt.ky), r: bt.r };
     }
+    if (bt) Object.assign(hit, { px: bt.cx, py: bt.cy, pw: rect.iw, ph: rect.ih });   // the frame: its centre and size
     if (!M) return hit;
     const blit = (c, dx = 0, dy = 0) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(c, dx, dy); ctx.restore(); };
     const W = ctx.canvas.width, H = ctx.canvas.height;
     // While a photo is dragged, a costly one (cut out, outlined, shadowed) only slides its last image.
     const costly = L.cut || L.outline > 0 || L.shadow > 0;
-    const stamp = [W, H, L.cut, L.outline, L.shadow, L.ink, L.blur, L.dim, L.treat, base.fill, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), base.fill ? base.t.all.s : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`].join("|");
-    const at = base.fill ? [rect.x, rect.y] : [bt.cx, bt.cy], keep = PHOTO.slides.get(L.id);
+    const stamp = [W, H, L.cut, L.feather, L.outline, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? base.t.all.s : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`].join("|");
+    const at = fills ? [rect.x, rect.y] : [bt.cx, bt.cy], keep = PHOTO.slides.get(L.id);
     if (costly && isFast() && keep && keep.stamp === stamp) { blit(keep.img, keep.bx + (at[0] - keep.at[0]) * M.a, keep.by + (at[1] - keep.at[1]) * M.d); return hit; }
     const inFrame = (c, fn) => { c.save(); frame(c); fn(c); c.restore(); };
     const treat = (c) => {   // the look paints on the whole canvas (its washes cover it); the photo itself goes in its frame
@@ -359,7 +371,7 @@ const PAINT = {
     }
     // The work canvases cover only where the photo can reach — its rectangle, grown by the outline and
     // the shadow — not the whole canvas: compositing a canvas costs every pixel of it.
-    const reach = (L.outline > 0 ? L.outline : 0) + (L.shadow > 0 ? w * 0.03 : 0) + 4, k = 1 / Math.max(0.05, Math.min(Math.abs(base.fill ? 1 : tr.kx), Math.abs(base.fill ? 1 : tr.ky)));
+    const reach = (L.outline > 0 ? L.outline : 0) + (L.shadow > 0 ? w * 0.03 : 0) + 4, k = 1 / Math.max(0.05, Math.min(Math.abs(fills ? 1 : bt.kx), Math.abs(fills ? 1 : bt.ky)));
     const corners = [[rect.x - reach * k, rect.y - reach * k], [rect.x + rect.iw + reach * k, rect.y - reach * k], [rect.x + rect.iw + reach * k, rect.y + rect.ih + reach * k], [rect.x - reach * k, rect.y + rect.ih + reach * k]].map(([x, y]) => F.transformPoint({ x, y }));
     const bx = Math.max(0, Math.floor(Math.min(...corners.map((p) => p.x)))), by = Math.max(0, Math.floor(Math.min(...corners.map((p) => p.y))));
     const bw = Math.min(W, Math.ceil(Math.max(...corners.map((p) => p.x)))) - bx, bh = Math.min(H, Math.ceil(Math.max(...corners.map((p) => p.y)))) - by;
@@ -369,13 +381,13 @@ const PAINT = {
     treat(body);
     inFrame(body, (c) => {   // kept to the photo's rectangle, or to its subject
       c.globalCompositeOperation = "destination-in";
-      if (mask) c.drawImage(mask, rect.x, rect.y, rect.iw, rect.ih); else { c.fillStyle = "#000"; c.fillRect(rect.x, rect.y, rect.iw, rect.ih); }
+      if (mask) c.drawImage(L.feather > 0 ? feathered(mask, L.feather) : mask, rect.x, rect.y, rect.iw, rect.ih); else { c.fillStyle = "#000"; c.fillRect(rect.x, rect.y, rect.iw, rect.ih); }
     });
     if (!costly) { blit(body.canvas, bx, by); return hit; }   // cut out, nothing more
     // shadow and outline from the shape, made once at the photo's scale (see silhouette())
     const out = sheet(0, bw, bh, Mb), f = rect.iw / nw, shape = mask || plainShape(rec, nw, nh);
     const lay = (sil, ox = 0, oy = 0, alpha = 1) => inFrame(out, (o) => { o.globalAlpha = alpha; o.drawImage(sil.c, rect.x - sil.p * f + ox, rect.y - sil.p * f + oy, sil.c.width * sil.k * f, sil.c.height * sil.k * f); });
-    if (L.shadow > 0) { const sil = silhouette(shape, 0, "#07070c"), d = w * 0.006 / Math.max(0.2, Math.abs(base.fill ? 1 : tr.kx)); for (let i = 1; i <= 4; i++) lay(sil, d * i, d * i * 1.2, L.shadow * 0.22); }
+    if (L.shadow > 0) { const sil = silhouette(shape, 0, "#07070c"), d = w * 0.006 / Math.max(0.2, Math.abs(fills ? 1 : bt.kx)); for (let i = 1; i <= 4; i++) lay(sil, d * i, d * i * 1.2, L.shadow * 0.22); }
     if (L.outline > 0) lay(silhouette(shape, L.outline / f, L.ink || "#ffffff"));
     out.save(); out.setTransform(1, 0, 0, 1, 0, 0); out.drawImage(body.canvas, 0, 0); out.restore();
     blit(out.canvas, bx, by);
@@ -486,6 +498,28 @@ function sheet(i, w, h, m) {
   x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = "source-over"; x.globalAlpha = 1; x.clearRect(0, 0, w, h);
   x.setTransform(m);
   return x;
+}
+const IDENTITY_BY = { dx: 0, dy: 0, s: 1, r: 0, kx: 1, ky: 1 };
+const FEATHERS = new WeakMap();
+/**
+ * A mask with its edge softened inward by `px` (px on a 1920-wide rendering of the photo, as a photo's
+ * blur): its alpha blurred, then only what was inside kept, so the edge fades into the subject and none of
+ * the background comes back. Made on a copy of at most 1024 px (512 while something is dragged), kept per mask.
+ */
+function feathered(m, px) {
+  const cap = isFast() ? 512 : 1024, key = `${px}|${cap}`, slot = FEATHERS.get(m) || new Map();
+  FEATHERS.set(m, slot);
+  if (slot.has(key)) return slot.get(key);
+  const [W, H] = sizeOf(m), k = Math.min(1, cap / Math.max(W, H)), w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
+  const c = Object.assign(document.createElement("canvas"), { width: w, height: h }), x = c.getContext("2d", { willReadFrequently: true });
+  x.fillStyle = "#000"; x.fillRect(0, 0, w, h); x.drawImage(m, 0, 0, w, h);   // white where the subject is: the alpha as grey
+  const id = x.getImageData(0, 0, w, h), d = id.data;
+  gaussBlur(d, w, h, Math.max(0.5, (px * Math.max(w, h)) / 1920));
+  for (let i = 0; i < d.length; i += 4) { d[i + 3] = Math.max(0, Math.min(255, (d[i] - 127.5) * 2)); d[i] = d[i + 1] = d[i + 2] = 255; }
+  x.putImageData(id, 0, 0);
+  if (slot.size > 12) slot.clear();
+  slot.set(key, c);
+  return c;
 }
 const MASK_BOXES = new WeakMap();
 /** The box round what is opaque in a mask, as fractions of its size ({x0, y0, x1, y1}), or null. Kept per mask. */
@@ -646,7 +680,7 @@ function paintCover(cv, o) {
     for (const hit of cv._hits) if (o.picked.includes(hit.id) && hit.type !== "bg" && !hit.fill) drawSelection(ctx, hit, kx, false);
   } else if (o.select) {
     const hit = cv._hits.find((x) => x.id === o.select);
-    if (hit && hit.type !== "bg" && !hit.fill) drawSelection(ctx, hit, kx, !hit.frameOnly);   // a photo that fills the canvas has no frame to show
+    if (hit && hit.type !== "bg" && !hit.fill) drawSelection(ctx, hit, kx);   // a photo that fills the canvas has no frame to show
     drawLayoutHandles(ctx, cv, cover.layers.find((l) => l.id === o.select), kx, rgb(C));
   }
 }
@@ -667,7 +701,7 @@ export function hitsIn(hits, m, accept = () => true) {
 
 /**
  * The handles that adjust the layout itself, for the selected layer: on the colour block, the two
- * ends and the middle of its dividing edge; on the title, the right and bottom sides of its box.
+ * ends and the middle of its dividing edge. (The title's box is set with sliders in the Style tab.)
  * Positions are in virtual units. The block's handles are offered only while the block sits where
  * the template puts it — once moved or turned as a layer, its edge is no longer the template's.
  */
@@ -697,15 +731,12 @@ function templateHandles(cv, layer) {
     const [x0, y0, x1, y1] = G.edge.line;
     return [{ id: "a", x: x0, y: y0 }, { id: "b", x: x1, y: y1 }, { id: "m", x: (x0 + x1) / 2, y: (y0 + y1) / 2 }];
   }
-  const b = cv._titleBox;
-  if (layer.type === "title" && b) return [{ id: "tw", x: b.x + b.w, y: b.y + b.h / 2 }, { id: "th", x: b.x + b.w / 2, y: b.y + b.h }];
-  return [];
+  return [];   // the title's box is set in Style → Adjust the layout, not on the canvas
 }
 function drawLayoutHandles(ctx, cv, layer, k, colour) {
   const hs = layoutHandles(cv, layer), u = 1 / k;
   if (!hs.length) return;
   ctx.save();
-  if (layer.type === "title") { const b = cv._titleBox; ctx.strokeStyle = colour; ctx.lineWidth = 2 * u; ctx.setLineDash([4 * u, 6 * u]); ctx.strokeRect(b.x, b.y, b.w, b.h); ctx.setLineDash([]); }
   for (const hnd of hs) {   // diamonds, to tell them from a layer's own square handles
     ctx.beginPath(); ctx.moveTo(hnd.x, hnd.y - 10 * u); ctx.lineTo(hnd.x + 10 * u, hnd.y); ctx.lineTo(hnd.x, hnd.y + 10 * u); ctx.lineTo(hnd.x - 10 * u, hnd.y); ctx.closePath();
     ctx.fillStyle = colour; ctx.fill(); ctx.lineWidth = 2.5 * u; ctx.strokeStyle = INK; ctx.stroke();

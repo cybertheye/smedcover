@@ -73,7 +73,8 @@ Select a photo: *Remove the background* and *Cut out subject* are in its *Cut-ou
 - A download shows its progress and can be cancelled; every file is checked against its SHA-256, and a broken or altered one is not kept. Models come from Hugging Face and the runtime from GitHub, through the proxy given there or else the environment's. *Open the models folder* shows the files; *Delete* (two clicks) removes one.
 - With BiRefNet chosen but not downloaded, cutting out says so and offers *Download the model*.
 - The subject goes into a new photo layer, *Cut-out subject*: the same picture with its background removed, lined up with the photo and placed just above the title, so it covers part of the title as on a magazine cover. The photo itself stays as it was.
-- **Linked**: the cut-out is linked to its photo. The photo leads (active), the cut-out follows (passive); in the layer list both carry a chain and a leading / following mark in the same colour. They move and scale together — drag, scale or turn either and both go — while blur, dim, outline, shadow and opacity are each their own. Move the cut-out up or down in the layer list to decide what it stands in front of.
+- **Linked**: the cut-out is linked to its photo. The photo leads (active), the cut-out follows (passive); in the layer list both carry a chain and a leading / following mark in the same colour. Only their place is shared: drag either and both move; size, angle and stretch, and blur, dim, outline, shadow and opacity, are each their own. The cut-out scales and turns about its subject, so the subject stays put; *Line up with the photo again* puts it back exactly over its photo. Move the cut-out up or down in the layer list to decide what it stands in front of.
+- **Soft edge**: a layer with its background removed, or a cut-out, has a *Soft edge* slider in its *Cut-out* group: the subject's edge fades inward (none of the background comes back).
 - Clicking the chain asks whether to end the link; then both are photo layers of their own, where they are. Putting the cut-out's background back ends the link too: it becomes a whole photo again, which can be cut out in turn (and linked anew).
 - Deleting the cut-out leaves the photo; deleting the photo deletes its cut-out too. A photo has one linked cut-out: once it has one, the button reads *Cut out again* (to find the subject anew, after changing the way of cutting out, say).
 - The cut-out shows its photo's picture: after an AI repaint of the photo is used, or the photo is replaced, it is cut out again by itself.
@@ -176,12 +177,12 @@ In *This size only*, the channel graphic's placement is remembered per channel.
 
 - The list on the right runs front to back, top to bottom. Drag a row to re-order, or use ▲ ▼.
 - The two icons on each row are show/hide and lock. Background and Corner brackets carry a 🔒: they are fixed layers.
-- At the end of each row: what the layer is (photo, text "T", colour as a filled square, vector asset as a pen nib, bitmap asset); a linked photo also has a chain and a leading (solid dot) / following (dashed ring) mark, one colour per pair — click the chain to end the link; then whose it is — a gear for a built-in layer (every cover has it; it cannot be deleted), a person for a layer you added.
+- At the end of each row: what the layer is (photo, text "T", colour as a filled square, vector asset as a pen nib, bitmap asset); a linked photo also has a chain and a leading (solid dot) / following (dashed ring) mark, one colour per pair — click the chain to end the link; then whose it is — a small cover template for a built-in layer (every cover has it; it cannot be deleted, but can be hidden), a person for a layer you added.
 - Layers you added (photos, text, assets) are renamed by double-clicking their name (a single click selects, as anywhere on the row): Enter or clicking elsewhere keeps it, Esc does not, an empty name goes back to the automatic one.
 - **＋ Text** adds a text layer; **＋ Colour** adds a colour layer: one block of colour, the canvas's size to begin with (in the channel colour), to shrink, stretch or turn into a ground, a band or a see-through wash. Clicking an item in Assets adds it. New layers go directly above the selected one.
 - Position, size, stretch and rotation are set on the canvas with the mouse (see the table above).
 - The properties come in groups: their names on the left (Text, Effect, Colour, Lines, Plate — or Cut-out, Place, Picture, Lines…), the controls on the right; after a rule at the bottom, the Layer group every layer has: opacity, *Reset placement*, channels. Explanations sit behind the ⓘ beside a group's name: hover it, or click it.
-- Colours are small swatches: one marked *auto* follows the look and the channel colour; once you pick a colour, a × appears on its corner — click it to go back to automatic.
+- Colours take a row each, as checkboxes do: the swatch, its name, then *Automatic* (following the look and the channel colour); once you pick a colour it reads *Back to automatic* — click it to return.
 - The left and right columns are resized by dragging their edge with the canvas (left at least 300 px, right at least 260 px, the canvas keeps 360 px); double-click an edge for the default width. Widths are remembered.
 - A vector asset (stickers, frames, channel graphics, AI assets) has *Colour*: its own colours, the channel colour, or a colour of your own.
 
@@ -368,9 +369,10 @@ With a template chosen under *Style*, *Adjust the template* below it changes it:
 |---|---|
 | Band height (*Panel width* for Split) | how much of the picture the colour block takes |
 | Edge slant | how far the dividing edge leans; 0 is level or upright |
+| Title box width, height | the room the title has (30–100% of what the template gives it); its size is fitted so every line just fits, so a narrower or lower box makes smaller letters |
 | Swap | the band on top and the title below; or the panel on the left and the title on the right |
 
-Or drag on the canvas: with *Colour block & edge* selected, the dividing edge has a diamond at each end and in the middle — the ends change its lean, the middle moves it; with *Title* selected, the dashed box has a diamond on its right and bottom sides: drag them to change the room the title may use, and its size is fitted automatically. That room is set on the canvas only.
+Or drag on the canvas: with *Colour block & edge* selected, the dividing edge has a diamond at each end and in the middle — the ends change its lean, the middle moves it. The title box is set with the sliders above only.
 
 Adjustments are stored as fractions of the picture, so they apply to every size; each of the three templates keeps its own, in the profile. After a swap the brand row sits on the colour block and turns to ink. If the colour block layer itself has been moved or turned, the diamonds on the edge are hidden; reset that layer's placement to get them back.
 
