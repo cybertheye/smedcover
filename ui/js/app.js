@@ -1798,7 +1798,7 @@ function layerRow(L) {
       L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) })),
     el("span", { class: "kinds" }, layerKinds(L)));
 }
-/** A layer's icons: what it is (photo, text, vector or bitmap asset), then whose it is (the template's, or added by the user). */
+/** A layer's icons: a linked photo's chain and leading / following mark, what it is (photo, text, vector or bitmap asset), then whose it is (the template's, or added by the user). */
 function layerKinds(L) {
   const icon = (name, tip) => el("span", { class: "kind " + name, title: tip, innerHTML: ICONS[name] });
   const free = isFree(L.type) || L.type === "subject";
@@ -1817,7 +1817,7 @@ function layerKinds(L) {
       el("span", { class: "kind role", style: `color:${colour}`, title: t(passive ? "link.passiveTip" : "link.activeTip", other), innerHTML: ICONS[passive ? "passive" : "active"],
         onclick: (e) => { e.stopPropagation(); const to = passive ? owner(L) : passivesOf(L)[0]; if (to && to !== L) goToLayer(to.id); } }));
   }
-  return [what, ...link, free ? icon("user", t("layers.kind.user")) : icon("system", t("layers.kind.system"))];
+  return [...link, what, free ? icon("user", t("layers.kind.user")) : icon("system", t("layers.kind.system"))];   // a link's marks first, then what the layer is
 }
 /** Selects layer id and brings its row into view (it may be far up or down the list). */
 function goToLayer(id) {
