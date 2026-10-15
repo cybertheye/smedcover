@@ -386,6 +386,8 @@ Most new looks keep the construction and change the materials, so a few tools ar
 
 Looks with a light and a dark ground (record sleeve, editorial) learn which one is current from the fourth argument of `setLook()`.
 
+**Vivid Ghibli** builds its picture from flat layers: five bands of sky; cumulus made of rows of circles, the whole laid in the cool shade first and then every circle again, nudged up and left, in warm white — which leaves a hard-edged crescent of shade at the lower right of every puff — and a darker flat base (`cumulus()`); far and near hills each laid twice, the lit colour above and the same ridge a little lower in its own colour, so a lit crest shows (`gbHills()`). The horizon is the colour block's edge (`env.G.edge`, when the block is below): the hills stand on it and the clouds behind them, so the block becomes the meadow in front; with the block above or at the side the horizon is the foot of the picture. The channel colour is made vivid by `vivid()` (hue kept, greys left alone). A photo is laid over itself once more in soft light (contrast and colour), then a block of pure red in the "saturation" blend mode at about a third opacity (hue and lightness kept, saturation pushed up, greys untouched), then a warm orange in soft light. The "saturation" mode is undependable for taking colour out, as said above; for pushing it up, as here, it was tested in the app's web view and works.
+
 ### 7.3 Tuning the picture
 
 Three levels, from light to deep:

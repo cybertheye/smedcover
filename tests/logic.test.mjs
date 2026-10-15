@@ -476,7 +476,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "ghibli"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && q.min <= q.def && q.def <= q.max); }
 });
@@ -580,6 +580,25 @@ test("looks: every look is complete enough to draw and to brief the AI", () => {
     if (L.sticker) { [n, ctx] = calls(); L.sticker.shape(ctx, (c) => c.rect(0, 0, 5, 5), "#ff3b4f", { shadow: true, lw: 7 }, p); assert.ok(n.fill >= 1, `${id}: sticker`); }
     if (L.wrap) { const seen = []; const raw = { set fillStyle(v) { seen.push(v); }, get fillStyle() { return "x"; }, lineWidth: 1 }; L.wrap(raw, env.C, p, false).fillStyle = "#07070c"; assert.equal(seen.length, 1, `${id}: wrap`); }
   }
+  setLook("cel");
+});
+
+test("the vivid Ghibli look: channel colours made vivid, greys kept, the hills standing on the colour field's edge", () => {
+  const G = LOOKS.ghibli, rgbOf = (v) => parseColour(v).slice(0, 3), satOf = ([r, g, b]) => (Math.max(r, g, b) - Math.min(r, g, b)) / Math.max(r, g, b);
+  assert.deepEqual(rgbOf(G.accent.fill([128, 128, 128])), [128, 128, 128]);                 // a grey stays grey
+  const dull = [170, 130, 100], made = rgbOf(G.accent.fill(dull));
+  assert.ok(satOf(made) > satOf(dull) + 0.15, "more saturated");
+  assert.ok(made[0] > made[1] && made[1] > made[2], "the same hue: still an orange");
+  // the hills stand on the top edge of the field (stack: the field is below, its edge slanted)
+  const pts = [];
+  const ctx = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "lineTo" ? (x, y) => pts.push([x, y]) : () => ({})), set: () => true });
+  const edge = (x) => 700 - (100 * x) / 1920;
+  setLook("ghibli", { hills: 0.6, clouds: 0 }, 5);
+  G.background(ctx, { w: 1920, h: 1080, photo: null, G: { edge: { line: [0, 700, 1920, 600], nx: 0, ny: -1 } } }, { grid: true }, lookValues());
+  const ridge = pts.filter(([, y]) => y < 1080);
+  assert.ok(ridge.length > 100);
+  for (const [x, y] of ridge) assert.ok(y < edge(Math.min(1920, x)) + 1, `a hill below the edge at x ${x}`);
+  assert.ok(ridge.some(([x, y]) => y < edge(x) - 60), "and they rise well above it");
   setLook("cel");
 });
 

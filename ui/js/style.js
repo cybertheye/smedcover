@@ -969,7 +969,233 @@ const songke = {
 - "white" is the paper, "dark" is solid black ink, and "main" a muted printed colour — use it for one part only.`,
 };
 
-export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke };
+// ====================================================================== a sunlit animated summer, set as a flat poster
+// The summer of the hand-painted animated features — a deep cobalt sky, towering cumulus, lush hills,
+// warm light and cool blue shade — redrawn with the means of hard-edged graphic design: the sky in flat
+// bands, clouds and hills as crisp geometric planes, light shown by one lit and one shaded flat tone
+// with a hard edge between them, never by a gradient. Lines are a deep indigo, never black; whites are
+// warm. Saturated, but each colour is a clean plane.
+const GB = {
+  navy: [22, 34, 96],              // every line, and the solid shadows
+  cream: [255, 250, 236],          // sunlit white
+  butter: [255, 220, 132],         // the lower part of sunlit lettering, out of the light
+  sky: [[16, 62, 184], [22, 96, 214], [42, 136, 236], [98, 182, 248], [178, 224, 252]],   // cobalt to haze, top to horizon
+  cloud: [255, 253, 246], cloudShade: [192, 210, 246], cloudBase: [148, 176, 232],
+  far: [44, 112, 184], farLit: [118, 176, 228], near: [26, 146, 82], crest: [148, 210, 66], tree: [16, 108, 66], leaf: [64, 168, 72],
+  lit: [255, 247, 228], shade: [168, 196, 240], deep: [50, 66, 146],   // the faces of objects: warm in the sun, cool out of it
+};
+const TAU = Math.PI * 2;
+/**
+ * A colour as summer light shows it: the saturation pushed most of the way up, the hue kept, the
+ * lightness kept within the range where it still reads as a colour. Greys stay grey.
+ */
+function vivid(c, k = 0.45) {
+  const r = c[0] / 255, g = c[1] / 255, b = c[2] / 255, hi = Math.max(r, g, b), lo = Math.min(r, g, b), l = (hi + lo) / 2, d = hi - lo;
+  if (d < 0.04) return [c[0], c[1], c[2]];
+  const s = (l > 0.5 ? d / (2 - hi - lo) : d / (hi + lo)) * (1 - k) + k, L = clamp(l, 0.3, 0.66);
+  const hue = ((hi === r ? ((g - b) / d) % 6 : hi === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60 + 360) % 360;
+  const q = (1 - Math.abs(2 * L - 1)) * s, x = q * (1 - Math.abs(((hue / 60) % 2) - 1)), m = L - q / 2;
+  const [R, G, B] = hue < 60 ? [q, x, 0] : hue < 120 ? [x, q, 0] : hue < 180 ? [0, q, x] : hue < 240 ? [0, x, q] : hue < 300 ? [x, 0, q] : [q, 0, x];
+  return [(R + m) * 255, (G + m) * 255, (B + m) * 255];
+}
+/** A rectangle with round corners, as a path (added to the current one). */
+function rounded(ctx, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+/**
+ * A cumulus in flat planes, its flat base centred on (x, y): rows of puffs that narrow upward to a
+ * tower (`rows` of them; `s` sets the size, about 2.4·s wide). The whole cloud is laid in its cool
+ * shade, then each puff again, moved up and left toward the sun, in warm white — which leaves a
+ * hard-edged crescent of shade on the lower right of every puff — and a flat darker base. `k` and the
+ * seed place the puffs, so no two clouds are the same.
+ */
+function cumulus(ctx, x, y, s, k, rows = 5) {
+  const puffs = [], plan = [[5, 0.2, 1.9, 0.27], [4, 0.52, 1.32, 0.33], [3, 0.9, 0.86, 0.34], [2, 1.28, 0.46, 0.3], [1, 1.58, 0, 0.27]];
+  plan.slice(0, rows).forEach(([n, py, span, r0], j) => {
+    for (let i = 0; i < n; i++) {
+      const u = n === 1 ? 0 : i / (n - 1) - 0.5, jig = rand(k + j * 7.1 + i * 1.3) - 0.5;
+      puffs.push([x + (u * span + jig * 0.2 + (j ? (rand(k + j * 3.7) - 0.5) * 0.24 : 0)) * s, y - py * s, (r0 + rand(k * 2.3 + j * 5.9 + i) * 0.11) * s]);
+    }
+  });
+  const body = (dx = 0, dy = 0, kr = 1) => { ctx.beginPath(); for (const [px, py, r] of puffs) { const q = r * kr; ctx.moveTo(px + dx * r + q, py + dy * r); ctx.arc(px + dx * r, py + dy * r, q, 0, TAU); } };
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x - 4 * s, y - 4 * s, 8 * s, 4 * s); ctx.clip();   // the flat base
+  body(); ctx.fillStyle = css(GB.cloudShade); ctx.fill();
+  body(); ctx.clip();
+  body(-0.17, -0.21, 0.93); ctx.fillStyle = css(GB.cloud); ctx.fill();
+  ctx.fillStyle = css(GB.cloudBase); ctx.fillRect(x - 4 * s, y - 0.13 * s, 8 * s, 0.13 * s);
+  ctx.restore();
+}
+/**
+ * Two ranges of hills standing on the horizon `at(x)`: a far one in blue haze, and a near one in deep
+ * green with a sunlit crest — the same hill laid twice, the lit green showing as a band along its top.
+ * On the near hill, a few round trees lit the clouds' way. `amt` raises them.
+ */
+function gbHills(ctx, w, h, amt, at) {
+  const u = Math.min(w, h), wave = (f1, f2, ph) => (x) => 0.62 * Math.sin((x / w) * TAU * f1 + ph) + 0.38 * Math.sin((x / w) * TAU * f2 + ph * 1.7);
+  const lay = (fy, colour, dy = 0) => { ctx.beginPath(); ctx.moveTo(0, h); for (let x = 0; x <= w + 12; x += 12) ctx.lineTo(x, fy(x) + dy); ctx.lineTo(w, h); ctx.closePath(); ctx.fillStyle = css(colour); ctx.fill(); };
+  const lift = u * (0.05 + 0.13 * amt), wf = wave(1.3, 3.1, rand(51) * 6), wn = wave(0.55, 1.6, rand(52) * 6);
+  const far = (x) => at(x) - lift - u * 0.06 * wf(x), near = (x) => at(x) - lift * 0.45 - u * 0.035 * wn(x);
+  lay(far, GB.farLit); lay(far, GB.far, u * 0.01);
+  lay(near, GB.crest); lay(near, GB.near, u * 0.016);
+  if (amt < 0.3) return;
+  const r = Math.min(w, h) * 0.024;
+  for (let i = 0; i < 4; i++) {
+    const tx = w * (0.08 + i * 0.27 + rand(i * 2.9 + 53) * 0.16), ty = near(tx) + u * 0.012, cr = r * (0.8 + rand(i * 3.3 + 54) * 0.5);
+    ctx.fillStyle = css(GB.navy); ctx.fillRect(tx - cr * 0.12, ty - cr * 1.2, cr * 0.24, cr * 1.3);
+    ctx.save(); ctx.beginPath(); ctx.arc(tx, ty - cr * 1.6, cr, 0, TAU); ctx.fillStyle = css(GB.tree); ctx.fill(); ctx.clip();
+    ctx.beginPath(); ctx.arc(tx - cr * 0.22, ty - cr * 1.82, cr * 0.9, 0, TAU); ctx.fillStyle = css(GB.leaf); ctx.fill(); ctx.restore();
+  }
+}
+/** A few gulls high up: two short arcs each, in cream. */
+function gulls(ctx, w, h, n) {
+  ctx.save(); ctx.strokeStyle = css(GB.cream); ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (let i = 0; i < n; i++) {
+    const x = w * (0.42 + rand(i * 3.1 + 81) * 0.5), y = h * (0.1 + rand(i * 4.7 + 82) * 0.26), s = Math.min(w, h) * (0.009 + rand(i * 5.3 + 83) * 0.008);
+    ctx.lineWidth = s * 0.34;
+    ctx.beginPath(); ctx.moveTo(x - s, y - s * 0.05); ctx.quadraticCurveTo(x - s * 0.5, y - s * 0.66, x, y); ctx.quadraticCurveTo(x + s * 0.5, y - s * 0.66, x + s, y - s * 0.05); ctx.stroke();
+  }
+  ctx.restore();
+}
+const ghibli = {
+  id: "ghibli",
+  repaint: (c) => `a background painting from a hand-painted Japanese animated feature, pushed to the bold colour of a travel poster: a deep cobalt summer sky with towering sunlit cumulus clouds that have crisp edges and cool blue undersides, lush saturated greens, warm golden light and clear cool shadows; every surface simplified into flat, clean areas of gouache-like colour with crisp edges; bright, clear and full of summer air, with ${c} as an accent colour.`,
+  about: { zh: "吉卜力式的夏天——钴蓝的天、高耸的积云、浓绿的山野、暖阳和冷蓝的阴影——用硬朗的平面设计重新画一遍：天空是分层的平涂色带，云和山是硬边的几何形，光影只用一亮一暗两块平涂、中间一道硬边，不用渐变；线条是深靛蓝而不是黑，白色是暖白。标题是上白下暖黄的字，配深靛蓝勾边和实心立体投影；四周可加一圈明信片式的米白边框，照片可调得更鲜艳、更暖。饱和、明亮、有阳光的味道——适合旅行、生活、美食、户外、季节与治愈系内容。", en: "The summer of the hand-painted animated films — a deep cobalt sky, towering cumulus, lush hills, warm sun and cool blue shade — redrawn with hard-edged graphic design: the sky in flat bands, clouds and hills as crisp geometric planes, light told by one lit and one shaded flat tone with a hard edge between them, never a gradient; lines in deep indigo rather than black, whites warm. The title is white over warm yellow with an indigo keyline and a solid block shadow; a cream postcard border can frame it all, and photos can be made more vivid and warm. Saturated, bright and sunny — for travel, everyday life, food, the outdoors, the seasons and feel-good content." },
+  name: { zh: "高饱和吉卜力", en: "Vivid Ghibli" },
+  oneTheme: true,              // always the summer sky: the light / dark choice does not apply
+  seeded: true,                // clouds, hills, trees and gulls are placed at random: the Style tab offers to shuffle them
+  params: [
+    { key: "clouds", min: 0, max: 1, step: 0.05, def: 0.75, name: { zh: "积云", en: "Cumulus" } },
+    { key: "hills", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "山野", en: "Hills" } },
+    { key: "border", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "明信片边框", en: "Postcard border" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "纸张颗粒", en: "Paper grain" } },
+    { key: "vivid", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "照片鲜艳度", en: "Photo vividness" } },
+  ],
+  theme: (base) => ({ ...base, field: css(GB.sky[0]), text: css(GB.cream), dim: css(GB.cream, 0.72), titleFill: css(GB.cream), titleInk: css(GB.navy), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The summer sky in five flat bands, narrowing toward the horizon; on it, with the background's
+   * decoration on, a towering cumulus and smaller ones, gulls, and the hills. A photo is laid over the
+   * sky and made more vivid: once more over itself in soft light (contrast and colour, as a photograph
+   * has them), its saturation pushed up, and the whole warmed as by late sun.
+   */
+  background(ctx, env, L, p) {
+    const { w, h } = env;
+    // the horizon: the top edge of the colour field when the field is the ground (it is the meadow in
+    // front of the hills), else the foot of the picture
+    const E = env.G && env.G.edge, line = E && E.ny < 0 && E.line;
+    const at = line ? (x) => line[1] + ((line[3] - line[1]) * (x - line[0])) / (line[2] - line[0] || 1) : () => h;
+    const top = line ? Math.min(line[1], line[3]) : h * 0.9;
+    [0, 0.42, 0.66, 0.82, 0.93].forEach((f, i) => { ctx.fillStyle = css(GB.sky[i]); ctx.fillRect(0, top * f, w, h - top * f); });
+    if (env.photo) {
+      env.drawPhoto();
+      if (p.vivid > 0) {
+        ctx.save();
+        ctx.globalCompositeOperation = "soft-light"; ctx.globalAlpha = 0.55 * p.vivid; env.drawPhoto();
+        ctx.globalCompositeOperation = "saturation"; ctx.globalAlpha = 0.32 * p.vivid; ctx.fillStyle = "#ff0000"; ctx.fillRect(0, 0, w, h);
+        ctx.globalCompositeOperation = "soft-light"; ctx.globalAlpha = 0.4 * p.vivid; ctx.fillStyle = css([255, 190, 104]); ctx.fillRect(0, 0, w, h);
+        ctx.restore();
+      }
+      return true;
+    }
+    if (!L.grid) return true;
+    const u = Math.min(w, h), c = p.clouds, base = (x) => at(x) - u * (p.hills > 0 ? 0.06 + 0.1 * p.hills : 0.01);   // clouds stand behind the hills
+    if (c > 0) {
+      const x1 = w * (0.6 + rand(61) * 0.26), x2 = w * (0.06 + rand(63) * 0.24), x3 = w * (0.3 + rand(65) * 0.3);
+      // the tower, as tall as the sky lets it be without reaching the brand row (it stands ~1.85·s high)
+      const s1 = Math.min(u * (0.13 + 0.1 * c), (base(x1) - top * 0.2) / 1.85), s2 = Math.min(u * (0.07 + 0.05 * c), (base(x2) - top * 0.3) / 1.1);
+      if (s1 > u * 0.04) cumulus(ctx, x1, base(x1), s1, 62, 5);
+      if (c > 0.3 && s2 > u * 0.03) cumulus(ctx, x2, base(x2), s2, 64, 3);
+      if (c > 0.55) cumulus(ctx, x3, top * (0.36 + rand(66) * 0.16), u * 0.045 * (0.6 + c), 67, 2);   // a small one, high up
+      gulls(ctx, w, h, Math.round(2 + c * 3));
+    }
+    if (p.hills > 0) gbHills(ctx, w, h, p.hills, at);
+    return true;
+  },
+  accent: {
+    fill: (C) => css(vivid(C)),
+    tone: () => "rgba(0,0,0,0)", toneScale: 0,     // flat: no screentone
+    /** The edge of a sunlit field: a band of the colour in full light just inside it, and an indigo line on it. */
+    edge(ctx, run, nx, ny, C) {
+      ctx.lineCap = "butt"; ctx.lineJoin = "round";
+      ctx.strokeStyle = css(mix(vivid(C), GB.cream, 0.5)); ctx.lineWidth = 24; run(-nx * 12, -ny * 12);
+      ctx.strokeStyle = css(GB.navy); ctx.lineWidth = 9; run(0, 0);
+    },
+  },
+  /**
+   * Upright lettering lit from above: warm white letters (highlighted words in the channel colour, made
+   * vivid) whose lower part is in a warmer, deeper tone with a hard edge between, an indigo keyline, and
+   * a solid indigo block below and to the right — the letters stepped down, not a soft shadow.
+   */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, line = fs * 0.085 * o.strokeAmt, depth = fs * 0.075 * o.shadowAmt;
+    const face = o.fill || GB.cream, hiFace = o.hi || vivid(o.C || GB.leaf);
+    const lower = (c) => (c === GB.cream ? GB.butter : mix(c, GB.navy, 0.22));
+    ctx.lineJoin = "round";
+    if (depth > 0) {
+      const steps = fast ? 3 : Math.max(2, Math.min(10, Math.round(depth / (fs * 0.009))));
+      ctx.fillStyle = ctx.strokeStyle = css(GB.navy); ctx.lineWidth = line;
+      for (let i = steps; i >= 1; i--) { const d = (depth * i) / steps; pass((a, x) => { if (line > 0) ctx.strokeText(a.t, x + d, d); ctx.fillText(a.t, x + d, d); }); }
+    }
+    if (line > 0) { ctx.strokeStyle = css(GB.navy); ctx.lineWidth = line; pass((a, x) => ctx.strokeText(a.t, x, 0)); }
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? hiFace : face); ctx.fillText(a.t, x, 0); });
+    ctx.save(); ctx.beginPath(); ctx.rect(-1e5, -fs * 0.3, 2e5, fs); ctx.clip();
+    pass((a, x) => { ctx.fillStyle = css(lower(a.hi ? hiFace : face)); ctx.fillText(a.t, x, 0); });
+    ctx.restore();
+  },
+  /** The plate under a text layer: a rounded card with an indigo line and a hard indigo shadow. */
+  plate(ctx, x, y, w, h, colour, fs) {
+    const r = Math.min(h / 2, fs * 0.3), d = fs * 0.08;
+    ctx.beginPath(); rounded(ctx, x + d, y + d, w, h, r); ctx.fillStyle = css(GB.navy); ctx.fill();
+    ctx.beginPath(); rounded(ctx, x, y, w, h, r); ctx.fillStyle = colour; ctx.fill();
+    ctx.lineWidth = fs * 0.05; ctx.strokeStyle = css(GB.navy); ctx.stroke();
+  },
+  // objects are lit as in the sky above them: warm cream in the sun, a cool blue in shade, indigo lines;
+  // the small cover parts keep their construction and take the indigo and cream
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates
+    ? { fill: { ink: GB.navy, light: GB.cream, colour: vivid }, stroke: { ink: GB.navy, light: GB.cream } }
+    : { fill: { ink: GB.navy, light: GB.lit, mid: GB.shade, dark: GB.deep, colour: vivid }, stroke: { ink: GB.navy, light: GB.cream, colour: vivid }, line: 0.9 }),
+  sticker: painters({ line: GB.navy, lineScale: 0.8,
+    tone: (fill) => { const c = parseColour(fill); if (!c) return fill; const r = role(c); return css(r === "ink" ? GB.navy : r === "colour" ? vivid(c) : r === "light" ? GB.cream : c, c[3]); },
+    shadow(ctx, draw) { ctx.save(); ctx.translate(6, 7); draw(css(GB.navy, 0.55)); ctx.restore(); } }),
+  /**
+   * The corner tag: a cream pill, as the sign of a country bus stop, with an indigo line, a hard shadow,
+   * and a dot of the channel colour before the lettering — it reads on the sky and on the field alike.
+   */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    ctx.font = `700 ${fs}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + fs * 1.75, h = fs * 1.34, pill = (dx) => { ctx.beginPath(); rounded(ctx, x + dx, y + dx, w, h, h / 2); };
+    pill(6); ctx.fillStyle = css(GB.navy); ctx.fill();
+    pill(0); ctx.fillStyle = css(GB.cream); ctx.fill(); ctx.lineWidth = 4.5; ctx.strokeStyle = css(GB.navy); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x + h * 0.52, y + h / 2, fs * 0.17, 0, TAU); ctx.fillStyle = css(vivid(C)); ctx.fill(); ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = ink || css(GB.navy); spaced(ctx, str, x + h * 0.52 + fs * 0.42, y + h * 0.5 + fs * 0.36, 3);
+    return { x: x - 6, y: y - 6, w: w + 18, h: h + 18 };
+  },
+  /** The frame layer: a cream postcard border with round inner corners and an indigo hairline round the picture. */
+  frame(ctx, env, p) {
+    const { w, h } = env, b = 40 * p.border;
+    if (b < 1) return;
+    const r = 12 + b * 0.8;
+    ctx.beginPath(); ctx.rect(0, 0, w, h); rounded(ctx, b, b, w - 2 * b, h - 2 * b, r);
+    ctx.fillStyle = css(GB.cream); ctx.fill("evenodd");
+    ctx.beginPath(); rounded(ctx, b, b, w - 2 * b, h - 2 * b, r); ctx.lineWidth = 3; ctx.strokeStyle = css(GB.navy); ctx.stroke();
+  },
+  /** An uploaded image gets a hard indigo shadow, as stickers do. */
+  image(ctx, C, unit) { ctx.shadowColor = css(GB.navy, 0.55); ctx.shadowBlur = 0; ctx.shadowOffsetX = 8 * unit; ctx.shadowOffsetY = 10 * unit; },
+  /** Paper: the faint tooth of a poster or a gouache sheet. */
+  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.55, unit); },
+  prompt: `Stickers for a sunlit hand-painted animated film, redrawn as a bold flat poster — friendly, rounded, full of summer light — that read at a glance:
+- soft, plump shapes with a clear silhouette (clouds, leaves, fruit, small creatures, everyday things of the countryside); simple and charming; no realism, no perspective, no fine detail;
+- flat, saturated colour only — never gradients or textures; the light comes from the upper left: give a form one flat lit patch (a lighter tint, with "shadow": false) and one flat shaded patch (a cooler, deeper tint), with crisp edges between them;
+- every shape automatically gets a deep indigo outline and a hard offset shadow: do NOT draw outlines or shadows yourself;
+- 2 to 4 colours per sticker: the main colour with "white" (a warm cream), "green" or "blue" as partners; "ink" comes out deep indigo — for small details only.`,
+  solidPrompt: `Props and buildings from a sunlit animated film set in the countryside — a cottage, a bicycle, a bus stop, a kettle — built as simple models from a few boxes and cylinders with soft, friendly proportions; no realism, no fine detail.
+- the renderer paints faces in the sun warm cream, faces in shade a cool sky blue, and every edge deep indigo: do NOT try to draw shading or outlines yourself;
+- "white" is warm cream, "dark" a deep indigo, and "main" the channel colour made more vivid — use it for one to three parts (a roof, a door, a body).`,
+};
+
+export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, ghibli };
 export const LOOK_IDS = Object.keys(LOOKS);
 
 let current = cel, values = {};

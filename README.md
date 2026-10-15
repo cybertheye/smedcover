@@ -247,7 +247,7 @@ The title and every text layer (with or without a plate) can be given a text eff
 | Kind | Effects | Notes |
 |---|---|---|
 | Automatic | follows the look | The default: the current look's own lettering |
-| Layered | outline and shadow, plain, sliced, overprint, double keyline, plain upright, underlined highlight | The looks' own letterings, usable under any look |
+| Layered | outline and shadow, plain, sliced, overprint, double keyline, plain upright, underlined highlight, sunlit block | The looks' own letterings, usable under any look |
 | Masked | halftone inside, stripes inside, inner shadow, worn, row shift | Change what is inside the letters |
 | Outlined | extruded, arched, tapered, wave | Reshape the letters themselves |
 
@@ -330,12 +330,12 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 |---|---|
 | **Cel** (default) | heavy ink lines, hard shadows, flat colour, screentone |
 | **Cyberpunk** | set in the interface of an optical implant starting up and scanning, after *Cyberpunk 2077*: solid chamfered panels with black lettering, slanted sliced headlines in the channel colour, a red and cyan colour split, signal tears, scanlines, lens rings and readouts; objects are dark hardware drawn in lines of light |
-
 | **Risograph** | cream paper, two or three spot inks, coarse halftone, misregistration, paper grain; objects are paper white and blue ink |
 | **90s animation** | a painted sky, cel colours a little grey and warm, a title with a double keyline, film grain, bloom, fade, dust and scratches |
 | **Record sleeve** | large flat blocks of colour, tight sans-serif headlines with no outline or shadow, photos in one colour and black; flat layouts of its own; dark or light ground |
 | **Editorial** | a serif headline, thick-and-thin rules, a hairline border, a folio, a huge quiet issue number, black-and-white photos; flat layouts of its own; dark or light ground |
 | **Woodblock book** | a leaf from an old Chinese book: paper ground, a serif title set in vertical columns, the corner tag as a vermilion seal, a thick-and-thin border, ruled columns, a centre column with fishtails at the right edge; objects like woodcuts; flat layouts of its own |
+| **Vivid Ghibli** | the summer of the hand-painted animated films drawn with hard-edged graphic design: a cobalt sky in flat bands; cumulus, far mountains, green hills with a lit crest and little trees as crisp geometric shapes, standing on the edge of the colour block (which becomes the meadow in front); light told by one lit and one shaded flat tone with a hard edge, never a gradient; lines in deep indigo, whites warm. The title is white over warm yellow with an indigo keyline and a solid block shadow; the corner tag is a cream pill; a cream postcard border is optional; photos are made more vivid and warmer |
 
 The sliders of each look:
 
@@ -346,14 +346,15 @@ The sliders of each look:
 | Record sleeve | photo duotone, rules and catalogue, paper grain |
 | Editorial | rules and folio, black-and-white photo, paper grain |
 | Woodblock book | column rules, age, paper grain, and a *Set the title vertically* checkbox; *Shuffle the random placement* rearranges the foxing |
+| Vivid Ghibli | cumulus, hills, postcard border, paper grain, photo vividness; *Shuffle the random placement* rearranges clouds, hills, trees and gulls |
 
 **Layouts of their own** — the record sleeve and editorial looks do not use slanted panels. They read the three *Template* choices their own way: Stack is a level band, Split an upright side panel, Banner a slim strip, each in its own proportions. Switching to another look brings the usual layouts back.
 
-*Photo duotone* and *Black-and-white photo* only do something when a photo fills the canvas.
+*Photo duotone*, *Black-and-white photo* and *Photo vividness* only do something when a photo fills the canvas.
 
 **The vertical title of the woodblock look** — each typed line is a column, read top to bottom, the first line on the right. CJK characters stand upright; a run of Latin letters or digits lies on its side, as is usual in vertical setting. A vertical title takes the full height of the page and stands clear of the seal in the lower left. Text effects do not apply to a vertical title; untick *Set the title vertically* for a horizontal one, and they apply again.
 
-These five are first versions and will be refined one by one. The serif lettering of Editorial and Woodblock book uses fonts already on the computer by default (Songti SC on macOS, SimSun on Windows), so it differs from machine to machine. For a Kai or Fangsong face, or any other, select the title layer and choose under *Font* in its properties.
+Risograph and the looks after it are first versions and will be refined one by one. The serif lettering of Editorial and Woodblock book uses fonts already on the computer by default (Songti SC on macOS, SimSun on Windows), so it differs from machine to machine. For a Kai or Fangsong face, or any other, select the title layer and choose under *Font* in its properties.
 
 The cyberpunk look has eight sliders and a checkbox. Two of them sound alike: *Scanlines* are the fine horizontal lines covering the whole picture; the *Sweep line* is the single bright one.
 
