@@ -272,6 +272,36 @@ export function moveLayer(layers, id, to) {
   layers.splice(target, 0, layers.splice(from, 1)[0]);
   return true;
 }
+/**
+ * Copies the free layers of `from` (another cover's layers) into the list `into`, settings and all,
+ * each under a new id (a cut-out's link goes to its photo's copy). Each copy goes above the built-in
+ * layer it was above there, over the free layers already on it there, in the order they had; one above
+ * a built-in layer this list has not, at the top. Returns the new list and the copies, bottom first.
+ */
+export function copyFreeLayers(into, from) {
+  const ids = new Set(into.map((l) => l.id)), renamed = new Map(), groups = [];
+  let anchor = into.length ? into[0].id : "";
+  for (const l of from) {
+    if (!isFree(l.type)) { anchor = l.id; continue; }
+    const c = JSON.parse(JSON.stringify(l));
+    do c.id = uid(); while (ids.has(c.id));
+    ids.add(c.id); renamed.set(l.id, c.id);
+    const g = groups.at(-1);
+    if (g && g.anchor === anchor) g.copies.push(c); else groups.push({ anchor, copies: [c] });
+  }
+  const copies = groups.flatMap((g) => g.copies);
+  for (const c of copies) if (c.of) c.of = renamed.get(c.of) || "";
+  const at = (id) => {   // above the built-in layer and the free layers already over it
+    let i = into.findIndex((l) => l.id === id);
+    if (i < 0) return into.length;
+    for (i++; i < into.length && isFree(into[i].type); i++);
+    return i;
+  };
+  const out = [...into];
+  groups.map((g, n) => ({ ...g, i: at(g.anchor), n })).sort((a, b) => b.i - a.i || b.n - a.n)
+    .forEach((g) => out.splice(g.i, 0, ...g.copies));
+  return { layers: out, copies };
+}
 /** Copy of a free layer, nudged so it is visibly a new one. */
 export function duplicate(layer) {
   if (!isFree(layer.type)) return null;

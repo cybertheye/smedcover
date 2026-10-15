@@ -8,7 +8,7 @@ import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont, ratioText } from "./store.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
@@ -547,7 +547,8 @@ function coverTab() {
   return [
     el("div", {}, cap("cover.category"), el("div", { class: "chips" }, S.profile.categories.map((k) =>
       el("button", { class: k.id === c.catId ? "on" : "", style: `--c:${k.color}`, onclick: () => switchChannel(k.id) }, k.name || k.code || "—"))),
-      el("div", { class: "hint" }, t("cover.channelHint"))),
+      el("div", { class: "hint" }, t("cover.channelHint")),
+      el("button", { class: "btn", style: "margin-top:8px", onclick: copyDialog }, t("copy.open"))),
     el("div", {}, cap("cover.title"),
       el("textarea", { value: c.title, spellcheck: false, oninput: (e) => { c.title = e.target.value; touch({ cover: true }); } }),
       el("div", { class: "hint" }, t("cover.titleHint"))),
@@ -578,6 +579,7 @@ function photoBox() {
  */
 function photoItem(L) {
   const rec = recordOf(L), im = rec && rec.img, open = REP.for === L.id, passive = !!L.of, tied = passive || passivesOf(L).length > 0;
+  const mine = REP.of === L.id, label = open ? "rep.close" : mine && REP.busy ? "rep.running" : mine && REP.result ? "rep.ready" : "rep.title";
   const locked = passive ? t("link.passiveLocked", layerName(owner(L))) : null;
   return el("div", { class: "pitem" + (passive ? " passive" : "") + (L.id === S.layerId ? " on" : ""), dataset: { id: L.id }, style: tied ? `--link:${linkColour(L)}` : null },
     el("div", { class: "thumb", title: t("cover.photoSelect"), onclick: () => selectLayer(L.id) },
@@ -586,9 +588,9 @@ function photoItem(L) {
       el("span", {}, tied && el("span", { class: "chain", innerHTML: ICONS.chain }), layerName(L), im && ` · ${sizeOf(im)[0]} × ${sizeOf(im)[1]}`, rec && rec.original && ` · ${t("rep.isRepainted")}`,
         passive && ` · ${t("link.follows", layerName(owner(L)))}`)),
     el("div", { class: "row", style: "margin-top:6px" },
-      el("button", { class: "btn" + (open ? " on" : ""), disabled: passive || !im || (REP.busy && !open), title: locked,
-        onclick: () => { REP.for = open ? "" : L.id; if (!REP.busy) Object.assign(REP, { result: null, error: "" }); renderPanel(); } }, t(open ? "rep.close" : "rep.title")),
-      el("button", { class: "btn", disabled: passive || (REP.busy && open), title: locked, onclick: () => replacePhoto(L) }, t("cover.replacePhoto"))),
+      el("button", { class: "btn" + (open || (mine && (REP.busy || REP.result)) ? " on" : ""), disabled: passive || !im || (REP.busy && !mine), title: locked,
+        onclick: () => { REP.for = open ? "" : L.id; renderPanel(); } }, t(label)),   // a result waits for its photo until the next repaint
+      el("button", { class: "btn", disabled: passive || (REP.busy && mine), title: locked, onclick: () => replacePhoto(L) }, t("cover.replacePhoto"))),
     open && im && !passive && repaintBox(L));
 }
 /** Asks for photos and adds each as a layer (see addPhoto). */
@@ -680,6 +682,51 @@ async function switchChannel(catId) {
   persistCover(); resetHistory();
   touch({ panel: true, side: true, strip: true });
 }
+/** Channel catId's cover of profile p as it is now: the one in memory for the current profile, else as stored (or new). */
+async function coverOf(p, catId) {
+  if (p.id === S.profile.id && S.covers[catId]) return S.covers[catId];
+  return channelCover(await readJson(coverPath(p.id, catId)).catch(() => null), p, catId);
+}
+// Cover → Copy from another profile or channel: its free layers, settings and all, into this cover
+const COPY = { profile: "", cat: "", src: null, job: 0 };
+function copyDialog() {
+  if (!S.profiles.some((p) => p.id === COPY.profile)) COPY.profile = S.profile.id;
+  const p = S.profiles.find((x) => x.id === COPY.profile), cats = p.categories.filter((c) => !(p.id === S.profile.id && c.id === S.cover.catId));
+  if (!cats.some((c) => c.id === COPY.cat)) { COPY.cat = cats.length ? cats[0].id : ""; COPY.src = null; }
+  const pick = (k, v) => { COPY[k] = v; COPY.src = null; copyDialog(); };
+  if (!COPY.src && COPY.cat) {   // read the chosen cover, then show what it has
+    const job = ++COPY.job;
+    coverOf(p, COPY.cat).then((c) => { if (job === COPY.job && !$("modal").hidden) { COPY.src = c; copyDialog(); } });
+  }
+  const free = COPY.src ? COPY.src.layers.filter((l) => isFree(l.type)) : [];
+  const kinds = [["photo", "layers.kind.photo"], ["text", "layers.kind.text"], ["asset", "layers.kind.svg"], ["solid", "layers.kind.solid"]]
+    .map(([type, key]) => [t(key), free.filter((l) => l.type === type).length]).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(" · ");
+  const m = $("modal");
+  m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("copy.title")),
+    el("div", { class: "hint", style: "margin:0 0 12px;font-size:13px;opacity:.8" }, t("copy.hint")),
+    cap("copy.profile"), select(S.profiles.map((x) => [x.id, x.name || "—"]), COPY.profile, (v) => pick("profile", v)),
+    el("div", { style: "margin-top:12px" }, cap("copy.channel"),
+      cats.length ? el("div", { class: "chips" }, cats.map((k) => el("button", { class: k.id === COPY.cat ? "on" : "", style: `--c:${k.color}`, onclick: () => pick("cat", k.id) }, k.name || k.code || "—")))
+        : el("div", { class: "hint", style: "margin:0" }, t("copy.noChannel"))),
+    el("div", { class: "hint", style: "margin:12px 0 0" }, !COPY.cat ? "" : !COPY.src ? t("copy.reading") : free.length ? t("copy.count", free.length, kinds) : t("copy.none")),
+    el("button", { class: "btn solid wide", disabled: !free.length, onclick: () => copyInto(p, COPY.src) }, t("copy.go")),
+    el("button", { class: "btn wide", onclick: closeModal }, t("exp.cancel"))));
+  m.hidden = false;
+}
+/** Copies the free layers of cover src (of profile p) into the cover on the canvas, as one undo step. */
+async function copyInto(p, src) {
+  await loadPhotos(pidsOf(src));
+  clearTimeout(timers.hist); commitHistory();
+  const { layers, copies } = copyFreeLayers(S.cover.layers, src.layers);
+  if (!copies.length) return;
+  setCover(channelCover({ ...S.cover, layers }, S.profile, S.cover.catId));   // checked as a cover read is
+  const top = copies.at(-1).id;
+  S.layerId = layer(top) ? top : "title"; S.picked = [];
+  closeModal();
+  const k = p.categories.find((c) => c.id === src.catId);
+  toast(t("copy.done", copies.length, (p.id === S.profile.id ? "" : (p.name || "—") + " · ") + (k ? k.name || k.code : "—")));
+  touch({ cover: true, panel: true, side: true });
+}
 /** The cover's background photo: the lowest photo layer that fills the canvas, on this channel. */
 const mainPhoto = () => S.cover.layers.find((l) => fillsCanvas(l) && appliesTo(l, cat().id)) || null;
 /** The picture a photo layer shows: its own, or for a copy its original's. */
@@ -769,7 +816,7 @@ async function replacePhoto(L) {
   if (!pid) return toast(t("msg.badFile"));
   keepPicture(pid, f.name.replace(/\.[^.]+$/, ""), "upload");
   L.pid = pid;
-  if (REP.for === L.id) Object.assign(REP, { result: null, error: "" });
+  if (REP.of === L.id && !REP.busy) Object.assign(REP, { of: "", result: null, error: "" });
   touch({ cover: true, side: true, panel: true });
   toast(t("cover.replaced"));
   if ((L.cut || passivesOf(L).some((p) => p.cut)) && canCut()) await ensureMask(pid);
@@ -1005,7 +1052,8 @@ async function cutOut(L) {
 
 // ---------- repainting a photo with an image model (see repaint.js)
 // for: the photo layer whose repaint is open; result: {src, w, h} waiting to be used or dropped; test: the image model's connection check
-const REP = { for: "", busy: false, job: 0, since: 0, error: "", result: null, test: null, confirmDrop: null };
+// for: the photo layer whose repaint is open; of: the one the running repaint, or its result or error, belongs to
+const REP = { for: "", of: "", busy: false, job: 0, since: 0, error: "", result: null, test: null, confirmDrop: null };
 const onCoverTab = () => S.mode === "edit" && S.tab.edit === "cover";
 const repBusyText = () => t("rep.busy", Math.max(0, Math.round((Date.now() - REP.since) / 1000)));
 /** A copy of a picture no longer than `max` on its longer side, as JPEG: {mime, data, url, w, h}. */
@@ -1066,25 +1114,25 @@ async function repaintPhoto() {
   if (mine && !promptOf(mine.body)) return toast(t("rep.needCustom"));
   let text = mine ? promptOf(mine.body) : "";
   if (preset) { try { text = await styleText(preset); } catch (e) { REP.error = String(e.message); return renderPanel(); } }
-  const job = ++REP.job, from = rec.original ? await loadImage(rec.original) : rec.img;
+  const P = repTarget(), job = ++REP.job, from = rec.original ? await loadImage(rec.original) : rec.img;
   const prompt = repaintPrompt({ source: mine || preset ? "text" : "look", look: S.profile.style.look, color: cat().color, text, notes: cfg.notes });
-  Object.assign(REP, { busy: true, error: "", result: null, since: Date.now() });
+  Object.assign(REP, { of: P.id, busy: true, error: "", result: null, since: Date.now() });
   renderPanel();
   const tick = setInterval(() => { const b = document.getElementById("rep-go"); if (b && REP.busy) b.textContent = repBusyText(); }, 1000);
   let result = null, error = "";
   try {
     result = await imageCall(cfg, prompt, shrink(from || rec.img, 1536));
     result.pid = await putPhoto(result.src, { original: rec.original || rec.src });   // a picture of its own, which remembers the one it was painted from
-    const L = repTarget();
-    keepPicture(result.pid, t("lib.repaintOf", L ? layerName(L) : ""), "repaint");
+    keepPicture(result.pid, t("lib.repaintOf", layer(P.id) ? layerName(P) : ""), "repaint");
   }
   catch (e) { error = String(e && e.message ? e.message : e); }
   clearInterval(tick);
   if (job !== REP.job) return;                       // cancelled meanwhile
   Object.assign(REP, { busy: false, result, error });
+  if (REP.for !== P.id && layer(P.id)) toast(t(error ? "rep.failedToast" : "rep.readyToast", layerName(P)));   // closed meanwhile: it waits under the photo's AI repaint
   if (onCoverTab()) renderPanel();
 }
-function cancelRepaint() { REP.job++; Object.assign(REP, { busy: false, error: "", result: null }); renderPanel(); }
+function cancelRepaint() { REP.job++; Object.assign(REP, { of: "", busy: false, error: "", result: null }); renderPanel(); }
 /**
  * Puts another picture into a photo's record — a repaint, or back to the original — so every layer
  * showing it changes; its subject is cut out again for the layers that are cut.
@@ -1180,7 +1228,7 @@ function repaintBox(P) {
     return el("div", { class: "rep" }, el("div", { class: "hint", style: "margin:0 0 10px" }, t("rep.needSetup")),
       el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; setMode("setup"); } }, t("rep.goSetup")));
   }
-  const look = LOOKS[S.profile.style.look] || LOOKS.cel, r = REP.result;
+  const look = LOOKS[S.profile.style.look] || LOOKS.cel, ours = REP.of === P.id, r = ours ? REP.result : null;
   const sources = [["look", t("rep.src.look", look.name[lang])],
     { group: t("rep.src.preset"), items: S.repaintStyles.map((s) => ["preset:" + s.id, s.name[lang]]) },
     { group: t("rep.src.mine"), items: S.myStyles.map((s) => ["my:" + s.id, s.name[lang]]) },
@@ -1216,7 +1264,7 @@ function repaintBox(P) {
     el("div", { style: "margin-top:8px" }, textInput(c.notes, (v) => set("notes", v), { placeholder: t("rep.notesPh"), maxLength: 600, disabled: REP.busy })),
     el("button", { id: "rep-go", class: "btn solid wide", style: "margin-top:10px", disabled: REP.busy, onclick: repaintPhoto }, REP.busy ? repBusyText() : t(r ? "rep.again" : "rep.go")),
     REP.busy && el("button", { class: "btn wide", style: "margin-top:8px", onclick: cancelRepaint }, t("ai.cancel")),
-    REP.error && el("div", { class: "hint err" }, t("msg.failed", REP.error)),
+    ours && REP.error && el("div", { class: "hint err" }, t("msg.failed", REP.error)),
     r && [
       el("div", { class: "compare" },
         el("figure", {}, el("img", { src: rec.original || rec.src, alt: "" }), el("figcaption", {}, t("rep.before"))),
@@ -1737,13 +1785,20 @@ function layerKinds(L) {
   if (L.type === "photo" && (L.of || passivesOf(L).length)) {   // a linked photo: the chain (a click offers to end the link) and which end it is
     const passive = !!L.of, colour = linkColour(L), other = passive ? layerName(owner(L)) : passivesOf(L).map(layerName).join(" · ");
     link.push(el("span", { class: "kind chain", style: `color:${colour}`, title: t("link.chainTip", other), innerHTML: ICONS.chain, onclick: (e) => { e.stopPropagation(); askUnlink(L); } }),
-      el("span", { class: "kind role", style: `color:${colour}`, title: t(passive ? "link.passiveTip" : "link.activeTip", other), innerHTML: ICONS[passive ? "passive" : "active"] }));
+      el("span", { class: "kind role", style: `color:${colour}`, title: t(passive ? "link.passiveTip" : "link.activeTip", other), innerHTML: ICONS[passive ? "passive" : "active"],
+        onclick: (e) => { e.stopPropagation(); const to = passive ? owner(L) : passivesOf(L)[0]; if (to && to !== L) goToLayer(to.id); } }));
   }
   return [what, ...link, free ? icon("user", t("layers.kind.user")) : icon("system", t("layers.kind.system"))];
 }
+/** Selects layer id and brings its row into view (it may be far up or down the list). */
+function goToLayer(id) {
+  selectLayer(id);
+  const row = document.querySelector(`#side .layer[data-id="${CSS.escape(id)}"]`);
+  if (row) { row.scrollIntoView({ block: "nearest" }); row.classList.add("flash"); setTimeout(() => row.classList.remove("flash"), 700); }
+}
 /** 14-px line icons for the layer list, in the text colour. */
 const ICONS = Object.fromEntries(Object.entries({
-  system: '<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M1.5 6h13"/><rect x="4" y="8.4" width="3.4" height="2.6" fill="currentColor"/><path d="M9.6 8.9h3M9.6 11h2"/>',
+  system: '<path d="M2 3.5h6.4M11.6 3.5H14M2 8h1.4M6.6 8H14M2 12.5h7.4M12.6 12.5H14"/><circle cx="10" cy="3.5" r="1.6"/><circle cx="5" cy="8" r="1.6"/><circle cx="11" cy="12.5" r="1.6"/>',
   user: '<circle cx="8" cy="5.2" r="2.7"/><path d="M2.6 14.5c.6-3 2.7-4.6 5.4-4.6s4.8 1.6 5.4 4.6"/>',
   photo: '<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M1.5 11.5l4-4 3 3 2-2 4 4"/><circle cx="11" cy="5.8" r="1.1"/>',
   text: '<path d="M3 3.5h10M8 3.5v10M6 13.5h4"/>',
@@ -1893,7 +1948,9 @@ function photoControls(L, set) {
       CUT.error && el("div", { class: "hint err" }, CUT.error),
     CUT.needModel && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.tab.setup = "ai"; S.aiPane = "cut"; setMode("setup"); } }, t("cut.goModel"))], t("cut.tip", t("cutset.engine." + cutEngine()))),
     L.of
-      ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")), unlinkBtn], t("link.passiveMore"), "first")
+      ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")),
+          base && el("button", { class: "btn wide", style: "margin-top:8px", title: t("link.realignTip"), onclick: () => { L.t = alignedT(base); touch({ cover: true, side: true }); } }, t("link.realign")),
+          unlinkBtn], t("link.passiveMore"), "first")
       : psec("props.sec.place", [check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
           linked.length > 0 && el("div", { class: "hint" }, t("link.leads", linked.map(layerName).join(" · "))), unlinkBtn],
           t(L.fill ? "props.fillHint" : "props.printHint")),
@@ -1945,14 +2002,14 @@ function typeControls(L) {
   }
   return null;
 }
-/** What every layer has, after a rule: opacity, putting the placement back, and for added layers the channels. */
+/** What every layer has, after a rule: opacity, and putting the placement back. */
 function layerSection(L) {
   if (L.type === "bg") return null;
   const fixed = FIXED.includes(L.type), copy = L.type === "photo" && L.of;
   return [el("div", { class: "psep" }),
     psec("props.sec.layer", [
       slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { holdLive(L.id); L.o = v; touch({ cover: true }); }),
-      !fixed && (copy ? el("button", { class: "btn wide", title: t("link.realignTip"), onclick: () => { L.t = alignedT(owner(L)); touch({ cover: true, side: true }); } }, t("link.realign")) : placementControls(L)),
+      !fixed && !copy && placementControls(L),   // a cut-out's (back over its photo) is with its placement
       ], fixed ? t("props.fixedHint") : "")];
 }
 function renderSide() {

@@ -212,7 +212,10 @@
   .layer .kind.system,.layer .kind.user{opacity:.8}
   .layer .kind.user{color:var(--acc)}
   .layer .kind.chain,.layer .kind.role{opacity:1}
-  .layer .kind.chain{cursor:pointer}
+  .layer .kind.chain,.layer .kind.role{cursor:pointer}
+  .layer .kind.role:hover{filter:brightness(1.4)}
+  .layer.flash{animation:flash .7s ease-out}
+  @keyframes flash{from{box-shadow:0 0 0 2px var(--acc)}to{box-shadow:0 0 0 2px transparent}}
   .layer .kind.chain:hover{filter:brightness(1.4)}
   .layer .nm[title]{cursor:text}
   .layer .rename{font-size:13px;padding:2px 6px;min-width:0;width:100%}

@@ -1045,6 +1045,27 @@ test("solid colour layers: the canvas's size at scale 1, one colour, free like a
   assert.equal(resolve(L, 1920, 1080, "1920x1080").s, 1);   // drawn as 1920/1 x 1080/1 units: the whole canvas
 });
 
+test("copying another cover's free layers: new ids, links kept, each above the built-in layer it was above", async () => {
+  const { copyFreeLayers } = await import("../ui/js/layers.js");
+  const into = normalizeLayers([{ type: "bg" }, { type: "photo", id: "mine", pid: "p0" }, { type: "accent" }, { type: "title" }, { type: "text", id: "t0", text: "here" }]);
+  const from = normalizeLayers([{ type: "bg" }, { type: "photo", id: "a", pid: "p1", fill: true, blur: 4 }, { type: "accent" }, { type: "title" },
+    { type: "photo", id: "b", of: "a", cut: true, own: true, feather: 6 }, { type: "text", id: "c", text: "hi", ink: "#ff0000" }, { type: "tag" }, { type: "asset", id: "d", ref: { kind: "sticker", id: "star" } }]);
+  const { layers, copies } = copyFreeLayers(into, from);
+  assert.equal(copies.length, 4);
+  assert.ok(copies.every((c) => !into.some((l) => l.id === c.id) && !["a", "b", "c", "d"].includes(c.id)), "new ids");
+  const [a, b, c, d] = copies;
+  assert.equal(b.of, a.id, "the cut-out follows the copy of its photo");
+  assert.deepEqual([a.blur, a.fill, b.feather, c.ink, c.text], [4, true, 6, "#ff0000", "hi"], "settings kept");
+  const order = layers.map((l) => (copies.includes(l) ? "copy:" + from.find((f) => f.type === l.type && (l.type !== "photo" || !!f.of === !!l.of)).id : l.id));
+  const pos = (id) => order.indexOf(id);
+  assert.ok(pos("bg") < pos("mine") && pos("mine") < pos("copy:a") && pos("copy:a") < pos("accent"), "the photo: above the background, over this cover's own photo");
+  assert.ok(pos("title") < pos("copy:b") && pos("copy:b") < pos("copy:c") && pos("copy:c") < pos("tag"), "the cut-out and text: above the title, in their order");
+  assert.ok(pos("frame") < pos("t0") && pos("t0") < pos("copy:d"), "the sticker: above the frame, over this cover's text there");
+  assert.equal(layers.length, into.length + 4);
+  assert.deepEqual(into.map((l) => l.id), normalizeLayers([{ type: "bg" }, { type: "photo", id: "mine", pid: "p0" }, { type: "accent" }, { type: "title" }, { type: "text", id: "t0", text: "here" }]).map((l) => l.id), "the list given is left as it was");
+  assert.equal(copyFreeLayers(into, defaultLayers()).copies.length, 0);
+});
+
 test("the soft-edge blur of one channel: spreads a step symmetrically, keeps a constant, clamps at the edges", async () => {
   const { blurChannel } = await import("../ui/js/photo.js");
   const w = 41, h = 9, a = new Float32Array(w * h);
