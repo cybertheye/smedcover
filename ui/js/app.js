@@ -609,12 +609,13 @@ function photoItem(L) {
 }
 /**
  * The ways in of a photo — upload, AI generate and (in Cover → Add photos) from the bitmaps — and the
- * AI generation box when it is open. The same in Cover and in Assets → Bitmaps.
+ * AI generation box when it is open. In Cover an upload goes on the cover; in Assets → Bitmaps
+ * (`fromLibrary` false) only into the library.
  */
 function photoAdders(fromLibrary) {
   return [
     el("div", { class: "row", style: "margin-top:0" },
-      el("button", { class: "btn", onclick: uploadPhotos }, t("cover.upload")),
+      el("button", { class: "btn", title: fromLibrary ? null : t("lib.uploadTip"), onclick: fromLibrary ? uploadPhotos : stockPhotos }, t("cover.upload")),
       el("button", { class: "btn" + (GEN.open ? " on" : ""), onclick: () => { GEN.open = !GEN.open; renderPanel(); } }, t("gen.open")),
       fromLibrary && el("button", { class: "btn", title: t("lib.importHint"), onclick: libraryDialog }, t("lib.import"))),
     GEN.open && genBox()];
@@ -627,6 +628,16 @@ function libraryDialog() {
     libraryTiles((pid) => { closeModal(); placePhoto(pid); }, () => { const d = $("modal").querySelector(".dlg"); if (!$("modal").hidden && d && d.dataset.kind === "library") libraryDialog(); }),
     el("button", { class: "btn wide", onclick: closeModal }, t("exp.cancel"))));
   m.hidden = false;
+}
+/** Asks for photos and keeps them in the bitmap library only (Assets → Bitmaps). */
+async function stockPhotos() {
+  let n = 0;
+  for (const f of await pickFiles("image/*", true)) {
+    const pid = await putPhoto(await readAs(f, "readAsDataURL"));
+    if (!pid) { toast(t("msg.badFile")); continue; }
+    keepPicture(pid, f.name.replace(/\.[^.]+$/, ""), "upload"); n++;
+  }
+  if (n) toast(t("lib.stocked", n));
 }
 /** Asks for photos and adds each as a layer (see addPhoto). */
 async function uploadPhotos() {

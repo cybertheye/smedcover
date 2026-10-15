@@ -299,7 +299,7 @@ The Assets tab has two panes at the top: **Vector assets** and **Bitmaps**. Both
 
 **Bitmaps**
 
-At the top are the same *Upload photos* and *AI generate* as in *Cover → Add photos*: an uploaded photo, and an AI one you *Add to the cover*, go on the current cover and stay here too. Every photo you upload, every picture AI makes and every AI repaint is kept here by itself, its source marked on the thumbnail (Upload / AI made / AI repaint); opening a project file adds the photos in it too.
+At the top are *Upload photos* and *AI generate*: photos uploaded here are only kept in Bitmaps, not put on the cover (several at once if you like); AI generate works as in *Cover → Add photos* — the picture is kept here when made, and goes on the cover only with *Add to the cover*. Every photo you upload, every picture AI makes and every AI repaint is kept here by itself, its source marked on the thumbnail (Upload / AI made / AI repaint); opening a project file adds the photos in it too.
 
 - Click one to add it to the current cover as a photo layer; drag it onto the canvas to put it where you let go. Added, it is listed under *Cover → Add photos* like any other photo.
 - The × on a thumbnail's corner (on hover) takes it out of Bitmaps; covers already using it keep it.

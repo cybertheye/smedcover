@@ -54,6 +54,8 @@ const STR = {
   "lib.hint": ["上传过的照片、AI 生成的图片、AI 重绘的照片都自动保存在这里，所有档案和频道共用。点一下或拖到画布上，就作为照片图层加进当前封面。", "Photos you uploaded, pictures made by AI and AI repaints are kept here by themselves, shared by every profile and channel. Click one or drag it onto the canvas to add it to the cover as a photo layer."],
   "lib.empty": ["还没有位图素材：上传、AI 生成或 AI 重绘照片后，会自动保存在这里。", "No bitmaps yet: photos you upload, generate or repaint are kept here."],
   "lib.import": ["资产导入", "From assets"],
+  "lib.uploadTip": ["只存进位图素材，不放到封面上", "Kept in Bitmaps only, not put on the cover"],
+  "lib.stocked": ["已存进位图素材：{0} 张", "Kept in Bitmaps: {0}"],
   "lib.importTitle": ["从位图素材添加", "Add from Bitmaps"],
   "lib.importHint": ["点一张，作为照片图层加进当前封面。上传过、AI 生成过、AI 重绘过的照片都在这里（资产 → 位图素材）。", "Click one to add it to this cover as a photo layer. Every photo uploaded, made by AI or repainted is here (Assets → Bitmaps)."],
   "lib.loading": ["正在读取…", "Reading…"],
