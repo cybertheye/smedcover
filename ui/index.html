@@ -66,11 +66,12 @@
   .hint.ok{color:#3ddc84;opacity:1}
   .hint.err{opacity:1}
   .seg.wide{margin-bottom:4px}.seg.wide .btn{flex:1}
-  /* a pane switch (Assets): a track with the chosen pane raised in it — neither a tab of the panel nor an action button */
-  .subtabs{display:flex;gap:3px;padding:3px;background:#06060b;border:1px solid var(--line);border-radius:999px;margin-bottom:6px}
-  .subtabs button{flex:1;border:0;border-radius:999px;background:transparent;color:inherit;font-family:inherit;font-weight:700;font-size:13px;letter-spacing:.04em;padding:8px 0;cursor:pointer;opacity:.55}
-  .subtabs button:hover{opacity:.85}
-  .subtabs button.on{background:var(--line2);opacity:1;box-shadow:inset 0 -2px 0 var(--acc)}
+  /* a pane switch (Assets): | Vector assets | Bitmaps | — the chosen one white between bars in the channel colour, the other dim */
+  .subtabs{display:flex;margin:2px 0 8px}
+  .subtabs button{position:relative;border:0;border-left:2px solid var(--line2);border-right:2px solid var(--line2);background:none;color:#fff;font-family:inherit;font-weight:700;font-size:14px;letter-spacing:.04em;line-height:1;padding:3px 14px;cursor:pointer;opacity:.4}
+  .subtabs button+button{margin-left:-2px}   /* one bar between two */
+  .subtabs button:hover{opacity:.7}
+  .subtabs button.on{opacity:1;border-color:var(--acc);z-index:1}
   .peek{margin-top:8px;font-size:12px}.peek summary{cursor:pointer;opacity:.7}
   .peek pre{white-space:pre-wrap;max-height:220px;overflow:auto;margin:6px 0 0;padding:8px;border:1px solid var(--line2);font:12px/1.6 ui-monospace,monospace;opacity:.85}
   /* the selected layer's properties: group names on the left, lined up across groups; controls on the right */

@@ -286,7 +286,7 @@ Earlier versions kept one cover, whose layers could be kept to some channels. Th
 
 ### Assets
 
-A switch at the top of the Assets tab picks one of two panes: **Vector assets** and **Bitmaps**. Both are shared by every profile and every channel. Vector assets are shown in the current look and the channel colour, and once on the canvas they follow the channel colour by default too (the layer's properties can give one its own colours or one of yours).
+A switch at the top of the Assets tab, | Vector assets | Bitmaps | (the chosen one in white between bars in the channel colour), picks one of two panes: **Vector assets** and **Bitmaps**. Both are shared by every profile and every channel. Vector assets are shown in the current look and the channel colour, and once on the canvas they follow the channel colour by default too (the layer's properties can give one its own colours or one of yours).
 
 **Vector assets**
 
