@@ -47,6 +47,8 @@ function el(tag, props = {}, ...kids) {
 const S = {
   settings: normalizeSettings(null),
   profiles: [], profile: null, cover: null,
+  covers: {},                            // the current profile's covers, one per channel: {channelId: cover} (S.cover is the one shown)
+  library: [],                           // the bitmap library: [{pid, name, kind, at}], every picture uploaded, made or repainted (photo-library.json)
   photos: new Map(),                     // the photo store: pid -> {src, img, original, mask: {img, src} | null} (see putPhoto)
   imageAi: normalizeImageAi(null),       // the image model that repaints photos (image-ai.json)
   repaintStyles: [],                     // the built-in repaint styles: [{id, file, name}] (ui/repaint-styles/index.json)
@@ -102,7 +104,12 @@ const loadImage = (src) => new Promise((res) => { const im = new Image(); im.onl
 const timers = {};
 const later = (key, ms, fn) => { clearTimeout(timers[key]); timers[key] = setTimeout(fn, ms); };
 const persistProfile = () => later("profile", 400, () => saveProfile(S.profile).catch(fail));
-const persistCover = () => later("cover", 400, () => writeJson("session.json", S.cover).catch(fail));
+/** Where a cover is kept: one file for each channel of each profile. */
+const coverPath = (profileId, catId) => `covers/${profileId}/${catId}.json`;
+/** Saves the cover on the canvas, to its own file (the one it is, even if another is shown by the time it is written). */
+const persistCover = () => { const c = S.cover, id = S.profile.id; later(`cover:${id}:${c.catId}`, 400, () => writeJson(coverPath(id, c.catId), c).catch(fail)); };
+/** Makes `c` the cover on the canvas, and the one kept for its channel. */
+const setCover = (c) => { S.cover = c; S.covers[c.catId] = c; return c; };
 const persistAi = () => later("ai", 400, () => writeJson("ai.json", S.ai).catch(fail));
 const persistImageAi = () => later("imageAi", 400, () => writeJson("image-ai.json", S.imageAi).catch(fail));
 const persistSettings = () => later("settings", 400, () => writeJson("settings.json", S.settings).catch(fail));
@@ -131,7 +138,7 @@ async function timeTravel(step) {
   const profile = normalizeProfile(p);
   S.profiles[S.profiles.findIndex((x) => x.id === S.profile.id)] = profile;
   S.profile = profile;
-  S.cover = normalizeCover(c, profile);
+  setCover(normalizeCover(c, profile));
   await applyProfile();
   persistProfile(); persistCover();
 }
@@ -167,7 +174,7 @@ async function registerFont(family, dataUrl) {
 }
 /** Everything that has to happen when S.profile / S.cover are replaced or restored. */
 async function applyProfile() {
-  S.cover = normalizeCover(S.cover, S.profile);
+  setCover(normalizeCover(S.cover, S.profile));
   if (S.profile.oldFonts) { carryFonts(S.cover.layers, S.profile.oldFonts, S.profile.style.look); delete S.profile.oldFonts; persistProfile(); persistCover(); }   // an older profile's brand-wide fonts, moved onto the layers
   if (!S.profile.sizes.some((s) => sizeKey(s) === S.sel)) S.sel = sizeKey(S.profile.sizes[0]);
   if (!layer()) S.layerId = "title";
@@ -343,25 +350,6 @@ function shiftLayer(dir) {
   const to = stepIndex(S.cover.layers, S.layerId, dir, cat().id);
   if (to > 0 && moveLayer(S.cover.layers, S.layerId, to)) touch({ cover: true, side: true, panel: onCoverTab() });
 }
-/** Which categories a free layer belongs to: null = all of them, or a list of category ids. */
-function setCats(L, cats) {
-  for (const x of [L, ...passivesOf(L)]) { if (cats) x.cats = [...cats]; else delete x.cats; }   // a linked cut-out is on the covers its photo is on
-  if (!appliesTo(L, cat().id)) toast(t("props.catsGone"));
-  touch({ cover: true, side: true, panel: onCoverTab() });
-}
-function catsControl(L) {
-  const all = !L.cats;
-  const chip = (label, on, color, fn) => el("button", { class: on ? "on" : "", style: color ? `--c:${color}` : "", onclick: fn }, label);
-  return el("div", { style: "margin-top:12px" }, el("div", { class: "sub" }, t("props.cats"), info(t(all ? "props.catsHintAll" : "props.catsHint"))),
-    el("div", { class: "chips small" },
-      chip(t("props.catsAll"), all, "", () => setCats(L, null)),
-      S.profile.categories.map((k) => chip(k.name || k.code || "—", !all && L.cats.includes(k.id), k.color, () => {
-        if (all) return setCats(L, [k.id]);
-        const next = L.cats.includes(k.id) ? L.cats.filter((x) => x !== k.id) : [...L.cats, k.id];
-        if (next.length) setCats(L, next);          // the last one stays: a layer always belongs somewhere
-      }))));
-}
-
 // pointer on the main canvas: click selects the topmost layer under it, drag moves, wheel resizes
 function virtualPoint(e) {
   const cv = $("cv"), b = cv.getBoundingClientRect(), k = cv._virtual[0] / b.width;
@@ -514,8 +502,14 @@ function layerAt(e) {
   }, { passive: false });
   $("stage").addEventListener("pointerdown", (e) => { if (e.target === $("stage") && S.mode === "edit" && S.cover) selectLayer("bg"); });
   // assets dragged from the library land where they are dropped
-  cv.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("application/x-smed-asset")) e.preventDefault(); });
+  cv.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("application/x-smed-asset") || e.dataTransfer.types.includes("application/x-smed-photo")) e.preventDefault(); });
   cv.addEventListener("drop", (e) => {
+    const pid = e.dataTransfer.getData("application/x-smed-photo");
+    if (pid) {   // a picture from the bitmap library: a photo layer, where it is dropped
+      e.preventDefault(); e.stopPropagation();
+      const p = virtualPoint(e), [vw, vh] = cv._virtual;
+      return placePhoto(pid, { x: clamp(p.x / vw, 0, 1), y: clamp(p.y / vh, 0, 1) });
+    }
     const raw = e.dataTransfer.getData("application/x-smed-asset");
     if (!raw) return;
     e.preventDefault(); e.stopPropagation();
@@ -552,7 +546,8 @@ function coverTab() {
   const c = S.cover;
   return [
     el("div", {}, cap("cover.category"), el("div", { class: "chips" }, S.profile.categories.map((k) =>
-      el("button", { class: k.id === c.catId ? "on" : "", style: `--c:${k.color}`, onclick: () => { c.catId = k.id; touch({ cover: true, panel: true, side: true }); } }, k.name || k.code || "—")))),
+      el("button", { class: k.id === c.catId ? "on" : "", style: `--c:${k.color}`, onclick: () => switchChannel(k.id) }, k.name || k.code || "—"))),
+      el("div", { class: "hint" }, t("cover.channelHint"))),
     el("div", {}, cap("cover.title"),
       el("textarea", { value: c.title, spellcheck: false, oninput: (e) => { c.title = e.target.value; touch({ cover: true }); } }),
       el("div", { class: "hint" }, t("cover.titleHint"))),
@@ -598,7 +593,7 @@ function photoItem(L) {
 }
 /** Asks for photos and adds each as a layer (see addPhoto). */
 async function uploadPhotos() {
-  for (const f of await pickFiles("image/*", true)) await addPhoto(await readAs(f, "readAsDataURL"));
+  for (const f of await pickFiles("image/*", true)) await addPhoto(await readAs(f, "readAsDataURL"), null, f.name.replace(/\.[^.]+$/, ""));
 }
 
 // ---------- the photo store: pictures for photo layers, kept apart from the layers so a cover stays small
@@ -626,14 +621,64 @@ function savePhoto(pid) {
   ]).catch(fail);
 }
 const pidsOf = (cover) => new Set(cover.layers.filter((l) => l.type === "photo" && l.pid).map((l) => l.pid));
-/** Reads the session's pictures for these ids, and drops the files of any others. */
+/** Reads these pictures from their files, those not read yet. Returns the ids that could not be read. */
 async function loadPhotos(pids) {
+  const missing = [];
   for (const pid of pids) {
     if (S.photos.has(pid)) continue;
     const read = (ext) => files.read(`photos/${pid}${ext}`).catch(() => "");
-    await putPhoto((await read("")) || "", { original: (await read(".original")) || "", mask: (await read(".mask")) || "", pid, save: false });
+    if (!(await putPhoto((await read("")) || "", { original: (await read(".original")) || "", mask: (await read(".mask")) || "", pid, save: false }))) missing.push(pid);
   }
-  for (const f of await files.list("photos").catch(() => [])) if (!pids.has(f.replace(/\.(original|mask)$/, ""))) files.remove(`photos/${f}`).catch(() => null);
+  return missing;
+}
+/** Removes the picture files that no cover of any profile shows and the bitmap library does not keep. */
+async function prunePhotos() {
+  const keep = new Set(S.library.map((e) => e.pid));
+  for (const c of Object.values(S.covers)) for (const pid of pidsOf(c)) keep.add(pid);
+  for (const p of S.profiles) for (const f of await files.list("covers/" + p.id).catch(() => [])) {
+    const c = await readJson(`covers/${p.id}/${f}`).catch(() => null);
+    for (const l of (c && Array.isArray(c.layers) && c.layers) || []) if (l && typeof l.pid === "string") keep.add(l.pid);
+  }
+  for (const f of await files.list("photos").catch(() => [])) if (!keep.has(f.replace(/\.(original|mask)$/, ""))) files.remove(`photos/${f}`).catch(() => null);
+}
+
+// ---------- covers: one for each channel of each profile
+// Each channel of each profile has a cover of its own — title, tag and layers — in covers/<profile>/<channel>.json.
+// A profile's covers are read when it becomes current (S.covers); a channel without one starts from the
+// profile's design. What a profile shares among its channels is the profile's: style, sizes, brand.
+const defaultTitle = () => (getLang() === "zh" ? "在这里写标题\n*一行*就是一行" : "Write your title\n*one line* each");
+/**
+ * Channel catId's cover from what was stored (null: a new one, from the profile's design), keeping only
+ * the layers that are on that channel (before channels had covers of their own, a layer could be kept to some).
+ */
+function channelCover(raw, profile, catId) {
+  const c = normalizeCover({ ...(raw || {}), catId }, profile);
+  c.layers = c.layers.filter((l) => appliesTo(l, catId));
+  for (const l of c.layers) delete l.cats;
+  if (!raw) c.title = defaultTitle();
+  return settleLinks(c);
+}
+/** This profile's cover of channel catId: the one read or made already, or a new one. */
+const coverFor = (catId) => S.covers[catId] || (S.covers[catId] = channelCover(null, S.profile, catId));
+/** Reads the covers a profile's channels have. */
+async function loadCovers(profile) {
+  const out = {};
+  for (const c of profile.categories) { const raw = await readJson(coverPath(profile.id, c.id)).catch(() => null); if (raw) out[c.id] = channelCover(raw, profile, c.id); }
+  return out;
+}
+/** The channel a profile shows: the one it was last on, else its first. */
+const channelOf = (profile) => { const want = S.settings.channels[profile.id]; return profile.categories.some((c) => c.id === want) ? want : profile.categories[0].id; };
+/** Shows channel catId's own cover; the one left is kept as it was. */
+async function switchChannel(catId) {
+  if (!S.profile.categories.some((c) => c.id === catId) || S.cover.catId === catId) return;
+  clearTimeout(timers.hist); commitHistory();
+  setCover(coverFor(catId));
+  S.settings.channels[S.profile.id] = catId; persistSettings();
+  await loadPhotos(pidsOf(S.cover));
+  S.layerId = "title"; S.picked = []; REP.for = "";
+  document.documentElement.style.setProperty("--acc", cat().color);
+  persistCover(); resetHistory();
+  touch({ panel: true, side: true, strip: true });
 }
 /** The cover's background photo: the lowest photo layer that fills the canvas, on this channel. */
 const mainPhoto = () => S.cover.layers.find((l) => fillsCanvas(l) && appliesTo(l, cat().id)) || null;
@@ -722,6 +767,7 @@ async function replacePhoto(L) {
   if (!f) return;
   const pid = await putPhoto(await readAs(f, "readAsDataURL"));
   if (!pid) return toast(t("msg.badFile"));
+  keepPicture(pid, f.name.replace(/\.[^.]+$/, ""), "upload");
   L.pid = pid;
   if (REP.for === L.id) Object.assign(REP, { result: null, error: "" });
   touch({ cover: true, side: true, panel: true });
@@ -734,9 +780,15 @@ async function replacePhoto(L) {
  * canvas, as its background, just above the ground; the ones after it sit on the cover like prints,
  * above the selected layer — at `at` ({x, y}, fractions of the canvas) when given. Returns the layer.
  */
-async function addPhoto(src, at = null) {
+async function addPhoto(src, at = null, name = "") {
   const pid = await putPhoto(src);
   if (!pid) { toast(t("msg.badFile")); return null; }
+  keepPicture(pid, name, "upload");
+  return placePhoto(pid, at);
+}
+/** Puts a picture of the photo store on the cover as a photo layer, by addPhoto's rules (from the bitmap library, too). */
+async function placePhoto(pid, at = null) {
+  if (!S.photos.has(pid) && (await loadPhotos([pid])).length) { toast(t("msg.badFile")); return null; }
   if (!mainPhoto()) {
     const L = insertAbove(S.cover.layers, "bg", newLayer("photo", { pid, fill: true }));
     S.layerId = L.id; S.picked = [];
@@ -803,7 +855,12 @@ function shapeTile(shape) {
   return el("div", { class: "tile", title: t("shape." + shape), style: L.shape === shape ? "border-color:var(--acc)" : "",
     onclick: () => { L.shape = shape; L.visible = true; S.layerId = "accent"; touch({ cover: true, panel: true, side: true }); } }, cv);
 }
+/** Assets: two panes — vector assets (made in code or by AI, shared by every profile) and the bitmap library. */
 function assetsTab() {
+  const pane = S.assetPane === "bitmap" ? "bitmap" : "vector", tab = (k) => el("button", { class: "btn" + (pane === k ? " on" : ""), onclick: () => { S.assetPane = k; renderPanel(); $("panel").scrollTop = 0; } }, t("assets.pane." + k));
+  return [el("div", { class: "seg wide" }, tab("vector"), tab("bitmap")), ...(pane === "bitmap" ? bitmapPane() : vectorPane())];
+}
+function vectorPane() {
   const lang = getLang(), mine = [...userAssets.values()];
   return [
     aiSection(),
@@ -1015,7 +1072,12 @@ async function repaintPhoto() {
   renderPanel();
   const tick = setInterval(() => { const b = document.getElementById("rep-go"); if (b && REP.busy) b.textContent = repBusyText(); }, 1000);
   let result = null, error = "";
-  try { result = await imageCall(cfg, prompt, shrink(from || rec.img, 1536)); }
+  try {
+    result = await imageCall(cfg, prompt, shrink(from || rec.img, 1536));
+    result.pid = await putPhoto(result.src, { original: rec.original || rec.src });   // a picture of its own, which remembers the one it was painted from
+    const L = repTarget();
+    keepPicture(result.pid, t("lib.repaintOf", L ? layerName(L) : ""), "repaint");
+  }
   catch (e) { error = String(e && e.message ? e.message : e); }
   clearInterval(tick);
   if (job !== REP.job) return;                       // cancelled meanwhile
@@ -1027,21 +1089,29 @@ function cancelRepaint() { REP.job++; Object.assign(REP, { busy: false, error: "
  * Puts another picture into a photo's record — a repaint, or back to the original — so every layer
  * showing it changes; its subject is cut out again for the layers that are cut.
  */
-async function swapPicture(L, src, repainted) {
-  const rec = recordOf(L), pid = L && (L.of ? layer(L.of) : L).pid, img = src ? await loadImage(src) : null;
-  if (!rec || !img) return;
-  if (repainted) rec.original = rec.original || rec.src; else rec.original = "";
-  Object.assign(rec, { src, img, mask: null });
-  REP.result = null;
-  savePhoto(pid);
+/**
+ * Shows another picture of the store in photo layer L (and its linked cut-out): a repaint, or the one it
+ * was painted from. The pictures themselves are not changed — another cover, or the library, may show them.
+ */
+async function usePicture(L, pid) {
+  const A = L && owner(L);
+  if (!A || !pid) return;
+  A.pid = pid; REP.result = null;
   touch({ cover: true, panel: true, side: true });
   recut(pid);
 }
 async function useRepaint() {
   const r = REP.result;
   if (!r) return;
-  await swapPicture(repTarget(), r.src, true);
+  await usePicture(repTarget(), r.pid || (await putPhoto(r.src, { original: recordOf(repTarget()).src })));
   toast(t("rep.used"));
+}
+/** Back to the picture a repaint was painted from: the one in the store with that picture, else a new one. */
+async function restoreOriginal(L) {
+  const rec = recordOf(L);
+  if (!rec || !rec.original) return;
+  const known = [...S.photos.entries()].find(([, r]) => r.src === rec.original && !r.original);
+  await usePicture(L, known ? known[0] : await putPhoto(rec.original));
 }
 /** The built-in style the repaint uses now, or null. */
 const builtIn = () => (S.imageAi.source.startsWith("preset:") ? S.repaintStyles.find((s) => "preset:" + s.id === S.imageAi.source) || null : null);
@@ -1154,7 +1224,7 @@ function repaintBox(P) {
       el("div", { class: "row" },
         el("button", { class: "btn solid", onclick: useRepaint }, t("rep.use")),
         el("button", { class: "btn", onclick: () => { REP.result = null; renderPanel(); } }, t("ai.discard")))],
-    rec.original && el("button", { class: "btn wide", style: "margin-top:8px", disabled: REP.busy, onclick: () => swapPicture(P, rec.original, false) }, t("rep.restore")),
+    rec.original && el("button", { class: "btn wide", style: "margin-top:8px", disabled: REP.busy, onclick: () => restoreOriginal(P) }, t("rep.restore")),
     el("div", { class: "hint" }, t("rep.hint", t("img.provider." + c.provider), c.model)));
 }
 // ---------- a photo made by the image model, from words and perhaps a reference picture
@@ -1170,7 +1240,11 @@ async function generatePhoto() {
   renderPanel();
   const tick = setInterval(() => { const b = document.getElementById("gen-go"); if (b && GEN.busy) b.textContent = genBusyText(); }, 1000);
   let result = null, error = "";
-  try { result = await imageCall(S.imageAi, generatePrompt({ text, reference: !!ref }), ref, { w: size.w, h: size.h }); }
+  try {
+    result = await imageCall(S.imageAi, generatePrompt({ text, reference: !!ref }), ref, { w: size.w, h: size.h });
+    result.pid = await putPhoto(result.src);   // kept in the bitmap library whether or not it is added to the cover
+    keepPicture(result.pid, text || t("lib.kind.ai"), "ai");
+  }
   catch (e) { error = String(e && e.message ? e.message : e); }
   clearInterval(tick);
   if (job !== GEN.job) return;                       // cancelled meanwhile
@@ -1190,7 +1264,7 @@ async function keepGeneratedPhoto() {
   const r = GEN.result;
   if (!r) return;
   GEN.result = null;
-  if (!(await addPhoto(r.src))) renderPanel();
+  if (!(await (r.pid ? placePhoto(r.pid) : addPhoto(r.src)))) renderPanel();
 }
 /** Cover → Photos → AI generate. */
 function genBox() {
@@ -1517,7 +1591,7 @@ function brandTab() {
   const card = (c, i) => {
     const lib = c.graphic.kind === "graphic" && GRAPHICS.find((g) => g.id === c.graphic.id);
     // working on a channel shows that channel on the canvas
-    const show = () => { if (S.cover.catId !== c.id) { S.cover.catId = c.id; document.documentElement.style.setProperty("--acc", c.color); touch({ cover: true, strip: true }); } };
+    const show = () => { if (S.cover.catId !== c.id) switchChannel(c.id); };
     return el("div", { class: "card", style: `--c:${c.color}`, onfocusin: show, onpointerdown: show, oninput: show },
       el("div", { class: "head" },
         el("input", { type: "color", value: c.color, title: t("cat.color"), oninput: (e) => { c.color = e.target.value; e.target.closest(".card").style.setProperty("--c", c.color); document.documentElement.style.setProperty("--acc", c.color); touch({ profile: true }); } }),
@@ -1537,8 +1611,11 @@ function brandTab() {
         el("button", { class: "btn", disabled: i === P.categories.length - 1, onclick: () => { P.categories.splice(i + 1, 0, P.categories.splice(i, 1)[0]); struct(); } }, t("cat.down")),
         el("button", { class: "btn", onclick: () => {
           if (P.categories.length < 2) return toast(t("msg.lastCategory"));
-          P.categories.splice(i, 1);
-          S.cover = normalizeCover(S.cover, P); struct();
+          const [gone] = P.categories.splice(i, 1);
+          delete S.covers[gone.id]; files.remove(coverPath(P.id, gone.id)).catch(() => null);   // its cover goes with it
+          if (S.cover.catId === gone.id) { S.settings.channels[P.id] = P.categories[0].id; persistSettings(); setCover(coverFor(P.categories[0].id)); loadPhotos(pidsOf(S.cover)).then(() => queueDraw()); }
+          else setCover(normalizeCover(S.cover, P));
+          struct();
         } }, t("cat.remove"))));
   };
   const act = (key) => el("button", { class: "btn", onclick: profileActions[key] }, t("prof." + key));
@@ -1876,7 +1953,7 @@ function layerSection(L) {
     psec("props.sec.layer", [
       slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { holdLive(L.id); L.o = v; touch({ cover: true }); }),
       !fixed && (copy ? el("button", { class: "btn wide", title: t("link.realignTip"), onclick: () => { L.t = alignedT(owner(L)); touch({ cover: true, side: true }); } }, t("link.realign")) : placementControls(L)),
-      isFree(L.type) && !copy && catsControl(L)], fixed ? t("props.fixedHint") : "")];
+      ], fixed ? t("props.fixedHint") : "")];
 }
 function renderSide() {
   if (!S.cover) return;
@@ -2011,8 +2088,9 @@ async function batchFromCsv() {
     const key = norm(r.category);
     let index = S.profile.categories.findIndex((c, i) => key && (norm(c.name) === key || norm(c.code) === key || String(i + 1) === key || String(i + 1).padStart(2, "0") === key));
     if (index < 0) { index = catIndex(); if (key) unknown++; }
-    return { index, cover: { ...S.cover, catId: S.profile.categories[index].id, title: r.title, tag: r.tag } };
+    return { index, cover: { ...coverFor(S.profile.categories[index].id), title: r.title, tag: r.tag } };   // that channel's own cover, with the row's words
   });
+  for (const j of jobs) await loadPhotos(pidsOf(j.cover));
   await exportMany(jobs);
   if (unknown) setTimeout(() => toast(t("msg.batchUnknown", unknown)), 3600);
 }
@@ -2048,10 +2126,16 @@ async function adoptEmbedded(list) {
     else if (a.spec && !userAssets.has(a.id)) { const r = normalizeSpec(a.spec); if (r.spec) await saveAssetRecord(putSpecAsset(a.id, a.name, r.spec)).catch(fail); }
   }
 }
+/** Shows another profile, on the channel it was last on, with its own covers as they were left. */
 async function switchProfile(id) {
   S.profile = S.profiles.find((p) => p.id === id) || S.profiles[0];
-  S.settings.profileId = S.profile.id; persistSettings();
-  S.cover = normalizeCover({ catId: S.cover && S.cover.catId, title: S.cover && S.cover.title, tag: S.cover && S.cover.tag }, S.profile);   // the new profile's own design
+  S.settings.profileId = S.profile.id;
+  S.covers = await loadCovers(S.profile);
+  const catId = channelOf(S.profile);
+  S.settings.channels[S.profile.id] = catId; persistSettings();
+  setCover(coverFor(catId));
+  await loadPhotos(pidsOf(S.cover));
+  S.layerId = "title"; S.picked = []; REP.for = "";
   await applyProfile(); resetHistory(); persistCover();
 }
 async function addProfile(raw, activate = true) {
@@ -2070,6 +2154,7 @@ const profileActions = {
     const gone = S.profile;
     S.profiles = S.profiles.filter((p) => p !== gone);
     await deleteProfile(gone).catch(fail);
+    for (const f of await files.list("covers/" + gone.id).catch(() => [])) await files.remove(`covers/${gone.id}/${f}`).catch(() => null);   // its covers go with it
     await switchProfile(S.profiles[0].id);
   },
   async import() {
@@ -2107,16 +2192,17 @@ const projectActions = {
       const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
       const cover = normalizeCover(raw.cover, S.profile);
       for (const [pid, p] of Object.entries(raw.photos && typeof raw.photos === "object" ? raw.photos : {})) {
-        if (/^[\w-]{1,40}$/.test(pid) && p && pic(p.src)) await putPhoto(pic(p.src), { original: pic(p.original), mask: pic(p.mask), pid });
+        if (/^[\w-]{1,40}$/.test(pid) && p && pic(p.src) && (await putPhoto(pic(p.src), { original: pic(p.original), mask: pic(p.mask), pid }))) keepPicture(pid, t("lib.fromProject"), "upload");
       }
-      S.cover = await upgradeCover(cover, { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
+      const opened = await upgradeCover(cover, { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
+      setCover(channelCover(opened, S.profile, S.cover.catId));   // into the channel on the canvas
       S.layerId = "title";
       touch({ cover: true, panel: true, side: true });
     } catch (e) { toast(t("msg.badFile")); }
   },
   save: () => saveText(`${(S.cover.title.split("\n")[0] || "cover").replace(/[*\\/:?"<>|]+/g, "").slice(0, 24) || "cover"}.smedcover.json`,
     JSON.stringify({ app: "smedcover", kind: "project", version: 3, profileName: S.profile.name, cover: S.cover, photos: embedPhotos(S.cover), assets: embedAssets(usedUserAssets(null, S.cover)) })),
-  reset() { S.cover = normalizeCover({ catId: S.cover.catId }, S.profile); S.layerId = "title"; touch({ cover: true, panel: true, side: true }); },
+  reset() { setCover(channelCover(null, S.profile, S.cover.catId)); S.layerId = "title"; touch({ cover: true, panel: true, side: true }); },
 };
 
 // ---------- chrome
@@ -2253,7 +2339,7 @@ addEventListener("drop", async (e) => {
   // dropped photos become photo layers: the first of a cover fills it; the others land where they were dropped
   const cv = $("cv"), b = cv.getBoundingClientRect(), over = S.mode === "edit" && e.clientX >= b.left && e.clientX <= b.right && e.clientY >= b.top && e.clientY <= b.bottom;
   const at = over ? { x: clamp((e.clientX - b.left) / b.width, 0, 1), y: clamp((e.clientY - b.top) / b.height, 0, 1) } : null;
-  for (const f of [...e.dataTransfer.files].filter((x) => x.type.startsWith("image/"))) await addPhoto(await readAs(f, "readAsDataURL"), at);
+  for (const f of [...e.dataTransfer.files].filter((x) => x.type.startsWith("image/"))) await addPhoto(await readAs(f, "readAsDataURL"), at, f.name.replace(/\.[^.]+$/, ""));
 });
 addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
@@ -2310,26 +2396,101 @@ async function start() {
   if (!S.profiles.length) await addProfile(selftest ? sampleProfile("en") : await welcome(), false);
   S.profile = S.profiles.find((p) => p.id === S.settings.profileId) || S.profiles[0];
   S.settings.profileId = S.profile.id; persistSettings();
-  S.cover = normalizeCover(await readJson("session.json").catch(() => null), S.profile);
-  if (!S.cover.title) S.cover.title = getLang() === "zh" ? "在这里写标题\n*一行*就是一行" : "Write your title\n*one line* each";
+  S.library = normalizeLibrary(await readJson("photo-library.json").catch(() => null));
+  if (!(await readJson("photo-library.json").catch(() => null))) await libraryFromFiles();
+  S.covers = await loadCovers(S.profile);
+  await migrateSession();
+  const catId = channelOf(S.profile);
+  S.settings.channels[S.profile.id] = catId; persistSettings();
+  setCover(coverFor(catId));
   await loadPhotos(pidsOf(S.cover));
-  const legacy = (await files.read("session-photo").catch(() => "")) || "";   // before photos were layers the session kept one
-  if (legacy) {
-    const read = (f) => files.read(f).catch(() => "").then((v) => v || "");
-    S.cover = await upgradeCover(S.cover, { src: legacy, original: await read("session-photo-original"), mask: await read("session-photo-mask") });
-    const main = S.cover.layers.find((l) => fillsCanvas(l));
-    // the old files go only once the new ones and the upgraded cover are on disk
-    if (main && S.photos.has(main.pid)) {
-      await savePhoto(main.pid);
-      await writeJson("session.json", S.cover).catch(fail);
-      for (const f of ["session-photo", "session-photo-original", "session-photo-mask"]) await files.remove(f).catch(() => null);
-    }
-    touch({ cover: true });
-  } else S.cover = await upgradeCover(S.cover, null);
+  persistCover();
+  prunePhotos();
   await applyProfile();
   resetHistory();
   if (selftest) selfTest(selftest);
 }
+/**
+ * Before each channel had a cover of its own the app kept one cover (session.json) for every channel of
+ * whichever profile was current — and before that, its photo beside it (session-photo). That cover
+ * becomes the current profile's channels' covers, each with the layers that were on it; the old file is
+ * kept as session.migrated.json.
+ */
+async function migrateSession() {
+  const raw = await readJson("session.json").catch(() => null);
+  if (!raw || Object.keys(S.covers).length) return;
+  let old = normalizeCover(raw, S.profile);
+  if (!old.title) old.title = defaultTitle();
+  await loadPhotos(pidsOf(old));
+  const photo = (await files.read("session-photo").catch(() => "")) || "";
+  if (photo) {
+    const read = (f) => files.read(f).catch(() => "").then((v) => v || "");
+    old = await upgradeCover(old, { src: photo, original: await read("session-photo-original"), mask: await read("session-photo-mask") });
+    for (const pid of pidsOf(old)) await savePhoto(pid);
+  } else old = await upgradeCover(old, null);
+  for (const c of S.profile.categories) {
+    const cover = channelCover(JSON.parse(JSON.stringify(old)), S.profile, c.id);
+    S.covers[c.id] = cover;
+    await writeJson(coverPath(S.profile.id, c.id), cover).catch(fail);
+  }
+  S.settings.channels[S.profile.id] = old.catId;
+  await files.write("session.migrated.json", JSON.stringify(raw)).catch(fail);
+  await files.remove("session.json").catch(() => null);
+  for (const f of ["session-photo", "session-photo-original", "session-photo-mask"]) await files.remove(f).catch(() => null);
+}
+
+// ---------- the bitmap library: every picture uploaded, made by AI or repainted, kept for use again
+// photo-library.json lists them, newest first: [{pid, name, kind: "upload" | "ai" | "repaint", at}]; the
+// pictures are in the photo store's files. Shared by every profile and channel.
+const LIBRARY_KINDS = ["upload", "ai", "repaint"];
+function normalizeLibrary(raw) {
+  const seen = new Set();
+  return (Array.isArray(raw) ? raw : []).filter((e) => e && typeof e.pid === "string" && /^[\w-]{1,40}$/.test(e.pid) && !seen.has(e.pid) && seen.add(e.pid))
+    .map((e) => ({ pid: e.pid, name: typeof e.name === "string" ? e.name.slice(0, 60) : "", kind: LIBRARY_KINDS.includes(e.kind) ? e.kind : "upload", at: Number(e.at) || 0 }));
+}
+const persistLibrary = () => later("library", 400, () => writeJson("photo-library.json", S.library).catch(fail));
+/** Adds a picture of the photo store to the library (once). */
+function keepPicture(pid, name, kind) {
+  if (!pid || S.library.some((e) => e.pid === pid)) return;
+  S.library.unshift({ pid, name: String(name || "").slice(0, 60), kind, at: Date.now() });
+  persistLibrary();
+  if (S.mode === "edit" && S.tab.edit === "assets" && S.assetPane === "bitmap") renderPanel();
+}
+/** The first time the library is opened: the pictures already there (uploaded before it existed) go in it. */
+async function libraryFromFiles() {
+  const pids = [...new Set((await files.list("photos").catch(() => [])).map((f) => f.replace(/\.(original|mask)$/, "")))];
+  S.library = pids.map((pid) => ({ pid, name: "", kind: "upload", at: 0 }));
+  persistLibrary();
+}
+/** Takes a picture out of the library; covers that use it keep it. */
+function dropPicture(pid) {
+  S.library = S.library.filter((e) => e.pid !== pid); persistLibrary();
+  toast(t("lib.removed")); renderPanel();
+}
+const LIB = { tried: new Set() };   // pictures the bitmap pane has tried to read
+/** Assets → Bitmaps: the library's pictures, to click or drag onto the cover. */
+function bitmapPane() {
+  const todo = S.library.filter((e) => !S.photos.has(e.pid) && !LIB.tried.has(e.pid));
+  if (todo.length) {
+    for (const e of todo) LIB.tried.add(e.pid);
+    loadPhotos(todo.map((e) => e.pid)).then((missing) => {
+      if (missing.length) { S.library = S.library.filter((e) => !missing.includes(e.pid)); persistLibrary(); }   // their files are gone
+      if (S.mode === "edit" && S.tab.edit === "assets" && S.assetPane === "bitmap") renderPanel();
+    });
+  }
+  const shown = S.library.filter((e) => S.photos.has(e.pid));
+  return [
+    el("div", { class: "hint", style: "margin:0" }, t("lib.hint")),
+    shown.length ? el("div", { class: "tiles" }, shown.map((e) => {
+      const rec = S.photos.get(e.pid), name = e.name || t("lib.kind." + e.kind);
+      return el("div", { class: "tile ptile", title: `${name} · ${t("lib.kind." + e.kind)}`, draggable: true, onclick: () => placePhoto(e.pid),
+        ondragstart: (ev) => { ev.dataTransfer.setData("application/x-smed-photo", e.pid); ev.dataTransfer.effectAllowed = "copy"; } },
+        el("img", { src: rec.src, alt: "", draggable: false }), el("span", { class: "kind" }, t("lib.kind." + e.kind)),
+        el("button", { class: "x", title: t("lib.remove"), onclick: (ev) => { ev.stopPropagation(); dropPicture(e.pid); } }, "×"));
+    })) : el("div", { class: "hint" }, t(todo.length ? "lib.loading" : "lib.empty")),
+  ];
+}
+
 /** SMEDCOVER_SELFTEST mode: export real covers in every format through the normal path, report, quit. */
 async function selfTest(dir) {
   if (await invoke("selftest_drag").catch(() => false)) return dragTest().catch((e) => invoke("selftest_done", { report: JSON.stringify({ error: String((e && e.stack) || e) }) }));
@@ -2393,14 +2554,14 @@ async function selfTest(dir) {
         if (await invoke("selftest_models").catch(() => false)) {
           await refreshCutModels();
           const was = S.settings.cutEngine; S.settings.cutEngine = "birefnet-lite";
-          S.cover = normalizeCover(JSON.parse(keep), S.profile);
+          setCover(normalizeCover(JSON.parse(keep), S.profile));
           S.cover.layers = S.cover.layers.filter((l) => l.type !== "photo");
           const p = await addPhoto(real), t1 = performance.now(), cut = await cutOut(p), r = recordOf(p);
           report.birefnet = { ok: !!cut, ms: Math.round(performance.now() - t1), mask: r && r.mask ? sizeOf(r.mask.img) : null, error: CUT.error };
           if (cut) { cut.outline = 8; p.blur = 10; S.cover.title = "*BiRefNet* cut-out\nin front"; report.birefnet.path = await invoke("write_image", framed(await toPng(renderFull(S.profile.sizes[0], S.cover, catIndex())), { dir, name: "subject-birefnet.png" })); }
           S.settings.cutEngine = was;
         }
-        S.cover = normalizeCover(JSON.parse(keep), S.profile);
+        setCover(normalizeCover(JSON.parse(keep), S.profile));
       }
       report.repaint = [];
       // a style of the user's own goes to a file and comes back the same
@@ -2432,6 +2593,22 @@ async function selfTest(dir) {
       }
       try { await aiCall(normalizeAi({ style: "openai", baseUrl: aiUrl + "/fail", model: "m" }), "s", "u"); report.errors.push("ai: an error reply was not reported"); }
       catch (e) { report.aiError = String(e.message); }
+    }
+    // each channel's cover is its own: what is set on one stays there, and comes back when it is shown again
+    {
+      const [a, b] = S.profile.categories.map((c) => c.id), home = S.cover.catId;
+      if (b) {
+        await switchChannel(a); S.cover.title = "Channel A"; S.cover.tag = "A"; S.cover.layers.push(newLayer("text", { text: "only on A" }));
+        await switchChannel(b); const fresh = S.cover.title !== "Channel A" && !S.cover.layers.some((l) => l.text === "only on A");
+        S.cover.title = "Channel B";
+        await switchChannel(a); const kept = S.cover.title === "Channel A" && S.cover.tag === "A" && S.cover.layers.some((l) => l.text === "only on A");
+        await new Promise((r) => setTimeout(r, 600));   // the debounced writes
+        const onDisk = (await readJson(coverPath(S.profile.id, b)))?.title === "Channel B";
+        report.channels = { fresh, kept, onDisk };
+        if (!(fresh && kept && onDisk)) report.errors.push("covers: channels are not independent");
+        S.cover.layers = S.cover.layers.filter((l) => l.text !== "only on A");
+        await switchChannel(home);
+      }
     }
     S.cover.title = "Self test\n*binary* export"; S.cover.tag = "EP.01";
     for (const format of ["png", "jpeg", "webp"]) {

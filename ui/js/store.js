@@ -148,6 +148,8 @@ export function normalizeSettings(raw) {
     // how a photo's subject is cut out: "vision" (macOS), "birefnet-lite" or "birefnet" (any system, a downloaded model); "" = the system's own choice
     cutEngine: ["vision", "birefnet-lite", "birefnet"].includes(s.cutEngine) ? s.cutEngine : "",
     cutProxy: str(s.cutProxy).trim().slice(0, 300),   // a proxy for downloading the models ("" = the environment's)
+    // the channel each profile was last on: {profileId: channelId} (each channel of each profile has a cover of its own)
+    channels: Object.fromEntries(Object.entries(s.channels && typeof s.channels === "object" ? s.channels : {}).filter(([k, v]) => typeof v === "string" && /^[\w-]{1,60}$/.test(k)).slice(0, 200)),
     // the side columns' widths in px, as dragged (0 = the default): left and right while editing, left in Setup
     columns: Object.fromEntries(["left", "right", "setup"].map((k) => [k, Math.round(num(s.columns && s.columns[k], 0, 0, 900))])),
     recentFonts: [...new Set((Array.isArray(s.recentFonts) ? s.recentFonts : []).map((f) => str(f).replace(/["\\]/g, "").trim().slice(0, 80)).filter(Boolean))].slice(0, RECENT_FONTS),

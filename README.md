@@ -15,7 +15,7 @@ How it works inside: [ARCHITECTURE.md](ARCHITECTURE.md).
 |---|---|
 | **Profile** | Everything about one brand: its name, channels, output sizes, template and a default design. You can keep several. |
 | **Channel** | One content line within the brand, with its own name, colour and graphic. A cover takes its colour and graphic from its channel. |
-| **Cover** | The one you are editing: its channel, title, corner tag and its own stack of layers. |
+| **Cover** | Each channel of each profile has one: its title, corner tag and its own stack of layers. Switching channel or profile shows that one; none affects another, and each is saved as you go. |
 | **Layer** | Each part of a cover. Built-in layers (background, colour block, title, …) are on every cover; free layers are the stickers, images, photos and text you add. |
 | **Project** | The current cover saved to a file together with its profile and the assets it uses, so it can be reopened as it was. |
 
@@ -52,6 +52,7 @@ Every photo is a *Photo* layer. Under *Add photos* in *Edit → Cover*:
 
 - **Upload photos** — several at once if you like. You can also drop photos onto the window; dropped on the canvas, a photo lands where you let go.
 - **AI generate** — has an image model make a photo; see [Generating a photo with AI](#generating-a-photo-with-ai).
+- **From Bitmaps** — every photo you uploaded, had made or repainted stays under *Assets → Bitmaps*; click one or drag it onto the canvas to use it again. See [Assets](#assets).
 
 **A cover's first photo fills the canvas**, as its background, just above the Background layer. The ones after it sit on the cover like prints: move, scale, turn and re-order them, as many as you like, for collage. *Fill the canvas* in a photo's properties switches between the two. A photo filling the canvas is clicked once to select it, then dragged on the cover and scrolled to resize; once selected it drags even when you press on the colour block.
 
@@ -79,7 +80,7 @@ Select a photo: *Remove the background* and *Cut out subject* are in its *Cut-ou
 - Deleting the cut-out leaves the photo; deleting the photo deletes its cut-out too. A photo has one linked cut-out: once it has one, the button reads *Cut out again* (to find the subject anew, after changing the way of cutting out, say).
 - The cut-out shows its photo's picture: after an AI repaint of the photo is used, or the photo is replaced, it is cut out again by itself.
 - *Remove the background* in the properties uses the same recognition: the layer itself keeps only its subject, without a new layer.
-- The cut-out is kept with the photo in the session and in project files. A photo with no clear subject says so.
+- The cut-out is kept with the photo in the cover and in project files. A photo with no clear subject says so.
 
 ### Generating a photo with AI
 
@@ -181,7 +182,7 @@ In *This size only*, the channel graphic's placement is remembered per channel.
 - Layers you added (photos, text, assets) are renamed by double-clicking their name (a single click selects, as anywhere on the row): Enter or clicking elsewhere keeps it, Esc does not, an empty name goes back to the automatic one.
 - **＋ Text** adds a text layer; **＋ Colour** adds a colour layer: one block of colour, the canvas's size to begin with (in the channel colour), to shrink, stretch or turn into a ground, a band or a see-through wash. Clicking an item in Assets adds it. New layers go directly above the selected one.
 - Position, size, stretch and rotation are set on the canvas with the mouse (see the table above).
-- The properties come in groups: their names on the left (Text, Effect, Colour, Lines, Plate — or Cut-out, Place, Picture, Lines…), the controls on the right; after a rule at the bottom, the Layer group every layer has: opacity, *Reset placement*, channels. Explanations sit behind the ⓘ beside a group's name: hover it, or click it.
+- The properties come in groups: their names on the left (Text, Effect, Colour, Lines, Plate — or Cut-out, Place, Picture, Lines…), the controls on the right; after a rule at the bottom, the Layer group every layer has: opacity and *Reset placement* (*Line up with the photo again* on a cut-out). Explanations sit behind the ⓘ beside a group's name: hover it, or click it.
 - Colours take a row each, as checkboxes do: the swatch, its name, then *Automatic* (following the look and the channel colour); once you pick a colour it reads *Back to automatic* — click it to return.
 - The left and right columns are resized by dragging their edge with the canvas (left at least 300 px, right at least 260 px, the canvas keeps 360 px); double-click an edge for the default width. Widths are remembered.
 - A vector asset (stickers, frames, channel graphics, AI assets) has *Colour*: its own colours, the channel colour, or a colour of your own.
@@ -265,27 +266,41 @@ Every layer made of words can be given its own colour. Select the layer and look
 | Title, text layers | lettering colour, highlight colour (for words in `*asterisks*`), and on a plate the plate colour |
 | Corner tag, channel name, brand row | lettering colour |
 
-Without one a layer shows *Automatic*: the colour comes from the current look and the channel colour, and follows when you switch either. Once set, the colour stays as it is; *Back to automatic* clears it.
+Without one a layer shows *Automatic*: the colour comes from the current look and the channel colour, and follows when either changes. Once set, the colour stays as it is; *Back to automatic* clears it.
 The plates themselves (behind the tag, behind the channel's sub-name) are not included: they still follow the channel colour.
 
-### Items for some channels only
+### Profiles and channels are independent
 
-Select a free layer and use **Channels** at the bottom of its properties:
+Each channel of each profile has a cover of its own: its title, tag, photos, text and every layer belong to it alone. What you change on channel A never shows up on channel B, and what you change in profile A never shows up in profile B.
 
-- **All channels** (default) — the layer is on every channel's cover.
-- Click a channel — the layer is only on that channel's covers. You can pick several.
+- Click a channel under *Cover* to show that channel's cover. A channel opened for the first time starts a new cover: the profile's default design and a default title.
+- Switch to another profile and back, and you are on the channel you left, its cover as it was.
+- Covers are saved as you go; there is nothing to save by hand. Undo starts afresh when you switch channel or profile.
+- What a profile's channels share is the profile itself: its look, output sizes, brand and default design.
+- Assets, vector and bitmap, are shared by every profile; see [Assets](#assets) below.
 
-A restricted layer shows a small dot in the list. On other channels it is neither shown nor exported.
-Deleting a channel also deletes the layers that belonged only to it.
+Earlier versions kept one cover, whose layers could be kept to some channels. The first start after updating splits that cover among the current profile's channels: each layer goes to the channels it was on, and the title and tag are copied to every channel; the old file is kept as `session.migrated.json`. Photos uploaded before all appear under *Assets → Bitmaps*.
 
 ### Assets
 
-- **My assets** — assets made with AI generation and kept. Photos are uploaded under *Cover → Add photos*.
+The Assets tab has two panes at the top: **Vector assets** and **Bitmaps**. Both are shared by every profile and every channel.
+
+**Vector assets**
+
+- **My assets** — assets made with AI generation and kept, whichever profile and channel they were made on.
   - *＋ New folder* makes a folder and lets you name it; double-click a folder's name to rename it later. Drag an asset onto a folder to file it, onto *Unfiled* to take it out. ▾ / ▸ closes or opens a folder.
   - Deleting a folder takes two clicks on its ×; its assets are not deleted but go back to Unfiled. Folders are kept on this computer and do not travel with profile exports.
 - **Channel graphics** — twenty cel-shaded graphics that follow the channel colour.
 - **Stickers** — a free pack of 72; each in its own colours, the channel colour or one of your own. The first group is twelve *Frames*: square, rectangle, circle, triangle, diamond, pentagon, hexagon, octagon, star, parallelogram, trapezoid and semicircle — thin geometric outlines, empty in the middle, to go round a photo, a word or a face, their line drawn the current look's way.
 - **Colour block & edge** — twelve shapes; click one to reshape the colour block layer.
+
+**Bitmaps**
+
+Every photo you upload, every picture AI makes and every AI repaint is kept here by itself, its source marked on the thumbnail (Upload / AI made / AI repaint); opening a project file adds the photos in it too.
+
+- Click one to add it to the current cover as a photo layer; drag it onto the canvas to put it where you let go. Added, it is listed under *Cover → Add photos* like any other photo.
+- The × on a thumbnail's corner (on hover) takes it out of Bitmaps; covers already using it keep it.
+- An AI repaint never changes the photo it started from: the result is a new picture, and the original stays in Bitmaps.
 
 ### Generating assets with AI
 
@@ -299,7 +314,7 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 - The result is previewed twice: in its own colour, and following the current channel colour. If you like it, **Save to My assets** and use it like any other asset.
 - **Reference picture** — below the text box you can attach a picture. The model first finds its main subject (ignoring the background, the table, the hand holding it, captions and watermarks), then draws that subject in the current look, solid or flat as chosen above. The text box can stay empty; write a word only to pick one thing out of several ("just the cup"). The picture is scaled down to 768 px on its longer side before it is sent. This needs a model that accepts image input; one that does not answers with an error, and the app says why.
 - A generated asset is the same kind of thing as a built-in one: sharp at any size and usable as a channel's graphic.
-- Once on the canvas it **follows the channel colour by default**, changing as you switch channels; untick *Use the channel colour* in the layer's properties to keep its own colour.
+- Once on the canvas it **follows the channel colour by default**, changing when the channel's colour is changed; untick *Use the channel colour* in the layer's properties to keep its own colour.
 - The style comes from a prompt preset in the app; you only describe the subject.
 - You first connect your own model service under *Setup → AI*, see below.
 - While generating, the button shows the seconds waited and you can **Stop waiting** at any time. That only stops waiting: the request has been sent and your provider may still bill it.
@@ -452,7 +467,7 @@ Tutorials,Another title,
 
 ## Where your data lives
 
-Profiles, assets, settings, the current session and your own repaint styles (the `repaint-styles/` folder) are kept in the system's app data directory.
+Profiles, each channel's cover, assets, settings and your own repaint styles (the `repaint-styles/` folder) are kept in the system's app data directory.
 Exports are written only where you choose.
 
 | System | Location |
