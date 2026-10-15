@@ -37,7 +37,7 @@ export const EFFECTS = {
   anime: { name: { zh: "双层勾边", en: "Double keyline" }, kind: "passes" },
   bluenote: { name: { zh: "纯文字（不倾斜）", en: "Plain, upright" }, kind: "passes" },
   editorial: { name: { zh: "下划线强调", en: "Underlined highlight" }, kind: "passes" },
-  ghibli: { name: { zh: "暖白立体", en: "Sunlit block" }, kind: "passes" },
+  vivid: { name: { zh: "暖白立体", en: "Sunlit block" }, kind: "passes" },
   dots: { name: { zh: "字内网点", en: "Halftone inside" }, kind: "mask" },
   stripes: { name: { zh: "字内条纹", en: "Stripes inside" }, kind: "mask" },
   inner: { name: { zh: "内阴影", en: "Inner shadow" }, kind: "mask" },
@@ -229,7 +229,7 @@ function outlined(ctx, pass, o, id) {
 // flat looks have neither, the overprint only an offset second colour, everything built on the
 // house lettering both. A look id stands for its own lettering, which "auto" uses.
 const BOTH = { stroke: true, shadow: true }, NONE = { stroke: false, shadow: false };
-const USES = { cel: BOTH, plain: NONE, cyber: BOTH, riso: { stroke: false, shadow: true }, anime: BOTH, bluenote: NONE, editorial: NONE, songke: NONE, ghibli: BOTH };
+const USES = { cel: BOTH, plain: NONE, cyber: BOTH, riso: { stroke: false, shadow: true }, anime: BOTH, bluenote: NONE, editorial: NONE, songke: NONE, vivid: BOTH, bluetone: { stroke: false, shadow: true }, redstreet: NONE };
 /** { id, stroke, shadow } for effect `id` under the current look; id is the effect actually painted. */
 export function effectUses(id = "auto") {
   const fx = EFFECTS[id] && id !== "auto" ? id : look().runs ? look().id : "cel";

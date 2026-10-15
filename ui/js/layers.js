@@ -29,7 +29,7 @@ export const fillsCanvas = (L) => L.type === "photo" && L.fill && !L.of;
 /** Shapes the colour block and its dividing edge can take ("slant" is the template's own). */
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes", "arc"];
 /** The text effects a headline can be given (painted in textfx.js). Absent on a layer means "auto": the look decides. */
-export const TEXT_EFFECTS = ["auto", "cel", "plain", "cyber", "riso", "anime", "bluenote", "editorial", "ghibli", "dots", "stripes", "inner", "worn", "rows", "extrude", "arc", "taper", "wave"];
+export const TEXT_EFFECTS = ["auto", "cel", "plain", "cyber", "riso", "anime", "bluenote", "editorial", "vivid", "dots", "stripes", "inner", "worn", "rows", "extrude", "arc", "taper", "wave"];
 /**
  * Layers made of words. Each may carry `font`, a family name, and `ink`, its own colour. The title
  * and text layers are headlines alike: both also take `hi` (the highlighted words' colour), an
@@ -105,7 +105,8 @@ function normalizeLayer(raw, catIds) {
   if (typeof raw.name === "string" && raw.name) L.name = raw.name.slice(0, 60);
   // a headline may be given a text effect of its own, and a strength for it
   if (raw.type === "title" || raw.type === "text") {
-    if (TEXT_EFFECTS.includes(raw.fx) && raw.fx !== "auto") L.fx = raw.fx;
+    const fx = raw.fx === "ghibli" ? "vivid" : raw.fx;   // the vivid look's lettering had another name for a day
+    if (TEXT_EFFECTS.includes(fx) && fx !== "auto") L.fx = fx;
     if (raw.fxAmt !== undefined && num(raw.fxAmt, 1, 0, 2) !== 1) L.fxAmt = num(raw.fxAmt, 1, 0, 2);
     // the perspective's own corners: four [dx, dy] in block widths and heights
     if (Array.isArray(raw.warp) && raw.warp.length === 4 && raw.warp.every((p) => Array.isArray(p) && p.length === 2 && p.every((v) => Number.isFinite(Number(v)))))

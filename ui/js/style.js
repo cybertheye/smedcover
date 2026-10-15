@@ -969,27 +969,31 @@ const songke = {
 - "white" is the paper, "dark" is solid black ink, and "main" a muted printed colour — use it for one part only.`,
 };
 
-// ====================================================================== a sunlit animated summer, set as a flat poster
-// The summer of the hand-painted animated features — a deep cobalt sky, towering cumulus, lush hills,
-// warm light and cool blue shade — redrawn with the means of hard-edged graphic design: the sky in flat
-// bands, clouds and hills as crisp geometric planes, light shown by one lit and one shaded flat tone
-// with a hard edge between them, never by a gradient. Lines are a deep indigo, never black; whites are
-// warm. Saturated, but each colour is a clean plane.
-const GB = {
-  navy: [22, 34, 96],              // every line, and the solid shadows
-  cream: [255, 250, 236],          // sunlit white
-  butter: [255, 220, 132],         // the lower part of sunlit lettering, out of the light
-  sky: [[16, 62, 184], [22, 96, 214], [42, 136, 236], [98, 182, 248], [178, 224, 252]],   // cobalt to haze, top to horizon
-  cloud: [255, 253, 246], cloudShade: [192, 210, 246], cloudBase: [148, 176, 232],
-  far: [44, 112, 184], farLit: [118, 176, 228], near: [26, 146, 82], crest: [148, 210, 66], tree: [16, 108, 66], leaf: [64, 168, 72],
-  lit: [255, 247, 228], shade: [168, 196, 240], deep: [50, 66, 146],   // the faces of objects: warm in the sun, cool out of it
+// ====================================================================== vivid illustration: a city in the clouds, in flat paint
+// A saturated animated illustration: one flat, strong azure sky; towering cumulus built of lobe upon
+// lobe, each lit from above in hard-edged planes — white, a pale tint, a periwinkle shade — with a fine
+// indigo line along the lower edge of every lobe; coral-red towers with brass pipes, a skyline of
+// signboards and lanterns, strings of pennants. Everything in flat colour with crisp edges and fine
+// lines, never a gradient. Whites are clean, lines indigo, never black.
+const VV = {
+  navy: [22, 34, 96],              // the title's keyline and solid shadow, the plates' lines
+  line: [50, 70, 166],             // the fine line of the illustration
+  cream: [255, 250, 236],          // sunlit white of lettering and plates
+  butter: [255, 220, 132],         // the lower part of sunlit lettering
+  sky: [20, 106, 214],
+  white: [255, 255, 255], pale: [214, 226, 252], shade: [152, 184, 240],   // a cloud, from the sun into shade
+  red: [246, 96, 96], redLit: [255, 150, 140], redShade: [214, 54, 74],
+  gold: [234, 176, 66], goldLit: [255, 222, 130], goldShade: [186, 120, 42],
+  lit: [255, 247, 228], deep: [50, 66, 146],                               // the faces of objects: warm in the sun, cool out of it
 };
+const TOWN = [[252, 240, 220], [246, 96, 96], [70, 140, 226], [36, 64, 160], [250, 176, 172], [244, 246, 252], [234, 176, 66]];
+const PENNANTS = [[246, 96, 96], [255, 250, 236], [70, 140, 226], [234, 176, 66], [250, 176, 172]];
 const TAU = Math.PI * 2;
 /**
  * A colour as summer light shows it: the saturation pushed most of the way up, the hue kept, the
  * lightness kept within the range where it still reads as a colour. Greys stay grey.
  */
-function vivid(c, k = 0.45) {
+function boost(c, k = 0.45) {
   const r = c[0] / 255, g = c[1] / 255, b = c[2] / 255, hi = Math.max(r, g, b), lo = Math.min(r, g, b), l = (hi + lo) / 2, d = hi - lo;
   if (d < 0.04) return [c[0], c[1], c[2]];
   const s = (l > 0.5 ? d / (2 - hi - lo) : d / (hi + lo)) * (1 - k) + k, L = clamp(l, 0.3, 0.66);
@@ -1003,90 +1007,149 @@ function rounded(ctx, x, y, w, h, r) {
   r = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
 }
+/** A closed polygon of points [[x, y], …], as the current path. */
+const shapeOf = (ctx, pts) => { ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); };
 /**
- * A cumulus in flat planes, its flat base centred on (x, y): rows of puffs that narrow upward to a
- * tower (`rows` of them; `s` sets the size, about 2.4·s wide). The whole cloud is laid in its cool
- * shade, then each puff again, moved up and left toward the sun, in warm white — which leaves a
- * hard-edged crescent of shade on the lower right of every puff — and a flat darker base. `k` and the
- * seed place the puffs, so no two clouds are the same.
+ * A billowing cumulus, painted as the animated films paint it but flat. Its body is rows of round lobes
+ * narrowing toward the top. The light comes from the upper left, and is laid on the whole cloud at
+ * once: the body in periwinkle shade, then every lobe again, moved toward the light, in a pale tint,
+ * and again, further, in white — so neighbouring lobes merge into broad lit masses, and a crescent of
+ * shade is left on the lower right of each. An indigo line runs round the cloud, along its flat base,
+ * and in short strokes where some lobes meet the shade. (x, y): the middle of its flat base; s: its
+ * half-width there; tall: its height in half-widths; k (with the seed) places the lobes.
  */
-function cumulus(ctx, x, y, s, k, rows = 5) {
-  const puffs = [], plan = [[5, 0.2, 1.9, 0.27], [4, 0.52, 1.32, 0.33], [3, 0.9, 0.86, 0.34], [2, 1.28, 0.46, 0.3], [1, 1.58, 0, 0.27]];
-  plan.slice(0, rows).forEach(([n, py, span, r0], j) => {
+function billow(ctx, x, y, s, tall, k) {
+  const lobes = [], rows = Math.max(2, Math.round(1.6 + tall * 1.7));
+  for (let j = 0; j < rows; j++) {
+    const t = rows === 1 ? 0 : j / (rows - 1), half = s * (1 - 0.62 * t) * (0.88 + rand(k + j * 1.9) * 0.24), cy = y - tall * s * (0.14 + 0.72 * t);
+    const n = Math.max(1, Math.round(1.6 + 3.4 * (1 - t))), r0 = s * (0.26 + 0.1 * (1 - t));
     for (let i = 0; i < n; i++) {
-      const u = n === 1 ? 0 : i / (n - 1) - 0.5, jig = rand(k + j * 7.1 + i * 1.3) - 0.5;
-      puffs.push([x + (u * span + jig * 0.2 + (j ? (rand(k + j * 3.7) - 0.5) * 0.24 : 0)) * s, y - py * s, (r0 + rand(k * 2.3 + j * 5.9 + i) * 0.11) * s]);
+      const u = n === 1 ? 0 : (i / (n - 1)) * 2 - 1;
+      lobes.push([x + u * half * 0.78 + (rand(k + j * 7.3 + i * 2.1) - 0.5) * s * 0.24, cy + (rand(k + j * 3.1 + i * 5.7) - 0.5) * s * 0.18, r0 * (0.66 + rand(k + j * 4.3 + i) * 0.66)]);
     }
-  });
-  const body = (dx = 0, dy = 0, kr = 1) => { ctx.beginPath(); for (const [px, py, r] of puffs) { const q = r * kr; ctx.moveTo(px + dx * r + q, py + dy * r); ctx.arc(px + dx * r, py + dy * r, q, 0, TAU); } };
+  }
+  // small lobes along the sides and the top, so the edge is broken into many bumps
+  const big = lobes.length;
+  for (let i = 0; i < 24; i++) {
+    const [cx, cy, r] = lobes[Math.floor(rand(k + i * 9.7 + 50) * big)], a = -Math.PI * (rand(k + i * 2.9 + 51) * 1.0);
+    lobes.push([cx + Math.cos(a) * r * 0.84, cy + Math.sin(a) * r * 0.84, r * (0.2 + rand(k + i * 4.1 + 52) * 0.16)]);
+  }
+  const lw = Math.max(1.5, s * 0.01);
+  const body = (dx, dy, kr, grow = 0) => { ctx.beginPath(); for (const [cx, cy, r] of lobes) { const q = r * kr + grow; ctx.moveTo(cx + dx * r + q, cy + dy * r); ctx.arc(cx + dx * r, cy + dy * r, q, 0, TAU); } };
   ctx.save();
-  ctx.beginPath(); ctx.rect(x - 4 * s, y - 4 * s, 8 * s, 4 * s); ctx.clip();   // the flat base
-  body(); ctx.fillStyle = css(GB.cloudShade); ctx.fill();
-  body(); ctx.clip();
-  body(-0.17, -0.21, 0.93); ctx.fillStyle = css(GB.cloud); ctx.fill();
-  ctx.fillStyle = css(GB.cloudBase); ctx.fillRect(x - 4 * s, y - 0.13 * s, 8 * s, 0.13 * s);
+  ctx.beginPath(); ctx.rect(x - 4 * s, y - 8 * s, 8 * s, 8 * s); ctx.clip();   // the flat base
+  body(0, 0, 1, lw); ctx.fillStyle = css(VV.line); ctx.fill();                  // the outline, under everything
+  body(0, 0, 1); ctx.fillStyle = css(VV.shade); ctx.fill(); ctx.clip();
+  body(-0.07, -0.13, 0.96); ctx.fillStyle = css(VV.pale); ctx.fill();
+  body(-0.17, -0.29, 0.86); ctx.fillStyle = css(VV.white); ctx.fill();
+  ctx.strokeStyle = css(VV.line); ctx.lineWidth = lw * 0.85; ctx.lineCap = "round";
+  lobes.forEach(([cx, cy, r], i) => {   // short strokes where some lobes turn from the light into shade
+    if (rand(k + i * 3.3 + 70) < 0.5) return;
+    const a0 = Math.PI * (0.02 + rand(k + i * 1.7 + 71) * 0.2);
+    ctx.beginPath(); ctx.arc(cx - r * 0.07, cy - r * 0.13, r * 0.96, a0, a0 + Math.PI * (0.3 + rand(k + i * 2.3 + 72) * 0.25)); ctx.stroke();
+  });
+  ctx.fillStyle = css(VV.shade); ctx.fillRect(x - 4 * s, y - s * 0.1, 8 * s, s * 0.1);   // the flat underside, in shade
+  ctx.fillStyle = css(VV.line); ctx.fillRect(x - 4 * s, y - lw * 1.5, 8 * s, lw * 1.5);
   ctx.restore();
 }
 /**
- * Two ranges of hills standing on the horizon `at(x)`: a far one in blue haze, and a near one in deep
- * green with a sunlit crest — the same hill laid twice, the lit green showing as a band along its top.
- * On the near hill, a few round trees lit the clouds' way. `amt` raises them.
+ * A coral-red tower of the sky city, standing on the horizon at x: a cylinder in hard planes (a lit
+ * strip, the body, the shaded side), ringed with bands, two of them brass; a drum and a dome on top
+ * with a mast; a brass pipe climbing one side and turning into it. Fine indigo lines throughout.
  */
-function gbHills(ctx, w, h, amt, at) {
-  const u = Math.min(w, h), wave = (f1, f2, ph) => (x) => 0.62 * Math.sin((x / w) * TAU * f1 + ph) + 0.38 * Math.sin((x / w) * TAU * f2 + ph * 1.7);
-  const lay = (fy, colour, dy = 0) => { ctx.beginPath(); ctx.moveTo(0, h); for (let x = 0; x <= w + 12; x += 12) ctx.lineTo(x, fy(x) + dy); ctx.lineTo(w, h); ctx.closePath(); ctx.fillStyle = css(colour); ctx.fill(); };
-  const lift = u * (0.05 + 0.13 * amt), wf = wave(1.3, 3.1, rand(51) * 6), wn = wave(0.55, 1.6, rand(52) * 6);
-  const far = (x) => at(x) - lift - u * 0.06 * wf(x), near = (x) => at(x) - lift * 0.45 - u * 0.035 * wn(x);
-  lay(far, GB.farLit); lay(far, GB.far, u * 0.01);
-  lay(near, GB.crest); lay(near, GB.near, u * 0.016);
-  if (amt < 0.3) return;
-  const r = Math.min(w, h) * 0.024;
-  for (let i = 0; i < 4; i++) {
-    const tx = w * (0.08 + i * 0.27 + rand(i * 2.9 + 53) * 0.16), ty = near(tx) + u * 0.012, cr = r * (0.8 + rand(i * 3.3 + 54) * 0.5);
-    ctx.fillStyle = css(GB.navy); ctx.fillRect(tx - cr * 0.12, ty - cr * 1.2, cr * 0.24, cr * 1.3);
-    ctx.save(); ctx.beginPath(); ctx.arc(tx, ty - cr * 1.6, cr, 0, TAU); ctx.fillStyle = css(GB.tree); ctx.fill(); ctx.clip();
-    ctx.beginPath(); ctx.arc(tx - cr * 0.22, ty - cr * 1.82, cr * 0.9, 0, TAU); ctx.fillStyle = css(GB.leaf); ctx.fill(); ctx.restore();
+function skyTower(ctx, x, base, tw, th) {
+  const top = base - th, l = x - tw / 2, lw = Math.max(1.6, tw * 0.025), line = css(VV.line);
+  const band = (y0, y1, c, cl, cs) => { ctx.fillStyle = css(c); ctx.fillRect(l, y0, tw, y1 - y0); ctx.fillStyle = css(cl); ctx.fillRect(l + tw * 0.1, y0, tw * 0.14, y1 - y0); ctx.fillStyle = css(cs); ctx.fillRect(x + tw * 0.2, y0, tw * 0.3, y1 - y0); };
+  band(top, base, VV.red, VV.redLit, VV.redShade);
+  ctx.strokeStyle = line; ctx.lineWidth = lw;
+  for (let i = 1; i < 8; i++) {
+    const y = top + (th * i) / 8;
+    if (i === 3 || i === 6) { band(y - tw * 0.05, y + tw * 0.05, VV.gold, VV.goldLit, VV.goldShade); ctx.strokeRect(l, y - tw * 0.05, tw, tw * 0.1); }
+    else { ctx.beginPath(); ctx.moveTo(l, y); ctx.lineTo(l + tw, y); ctx.stroke(); }
+  }
+  ctx.strokeRect(l, top, tw, th);
+  // the drum, the dome, the mast
+  const dw = tw * 1.18, dh = tw * 0.22, dl = x - dw / 2;
+  ctx.fillStyle = css(VV.redShade); ctx.fillRect(dl, top - dh, dw, dh); ctx.fillStyle = css(VV.red); ctx.fillRect(dl, top - dh, dw * 0.6, dh); ctx.strokeRect(dl, top - dh, dw, dh);
+  ctx.beginPath(); ctx.arc(x, top - dh, tw * 0.42, Math.PI, 0); ctx.closePath(); ctx.fillStyle = css(VV.gold); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, top - dh, tw * 0.42, Math.PI, Math.PI * 1.45); ctx.lineTo(x, top - dh); ctx.closePath(); ctx.fillStyle = css(VV.goldLit); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x, top - dh - tw * 0.42); ctx.lineTo(x, top - dh - tw * 0.95); ctx.stroke();
+  // the pipe: up the right side, turning into the tower twice
+  const pw = tw * 0.16, px = x + tw / 2 + tw * 0.14, pipe = (rx, ry, rw, rh) => { ctx.fillStyle = css(VV.gold); ctx.fillRect(rx, ry, rw, rh); ctx.fillStyle = css(VV.goldLit); ctx.fillRect(rx + (rw > rh ? 0 : rw * 0.2), ry + (rw > rh ? rh * 0.2 : 0), rw > rh ? rw : rw * 0.25, rw > rh ? rh * 0.25 : rh); ctx.strokeRect(rx, ry, rw, rh); };
+  pipe(px, top + th * 0.2, pw, th * 0.8);
+  for (const f of [0.2, 0.62]) pipe(x + tw / 2 - lw, top + th * f, px - (x + tw / 2) + pw, pw);
+}
+/**
+ * The sky city's street on the horizon `at(x)`: a row of houses of uneven width and height, each a
+ * flat colour with a shaded side and windows, some with a tall signboard or a red lantern; fine
+ * indigo lines. Their feet go below the horizon, behind the colour field.
+ */
+function skyline(ctx, w, h, amt, at) {
+  const u = Math.min(w, h), most = u * (0.05 + 0.12 * amt), line = css(VV.line), lw = Math.max(1.4, u * 0.0016);
+  ctx.lineWidth = lw; ctx.strokeStyle = line; ctx.lineJoin = "miter";
+  for (let x = -u * 0.02, i = 0; x < w + u * 0.02; i++) {
+    const bw = u * (0.045 + rand(i * 2.7 + 91) * 0.07), bh = most * (0.32 + rand(i * 3.9 + 92) * 0.68), c = TOWN[Math.floor(rand(i * 5.1 + 93) * TOWN.length)];
+    const x0 = x, x1 = x + bw, top = Math.min(at(x0), at(x1)) - bh, foot = (xx) => at(xx) + u * 0.06;
+    shapeOf(ctx, [[x0, foot(x0)], [x0, top], [x1, top], [x1, foot(x1)]]); ctx.fillStyle = css(c); ctx.fill();
+    ctx.fillStyle = css(mix(c, VV.navy, 0.24)); ctx.fillRect(x0 + bw * 0.7, top, bw * 0.3, Math.max(at(x0), at(x1)) - top + u * 0.06);
+    shapeOf(ctx, [[x0, foot(x0)], [x0, top], [x1, top], [x1, foot(x1)]]); ctx.stroke();
+    ctx.fillStyle = line; ctx.fillRect(x0 - bw * 0.06, top - lw * 2, bw * 1.12, lw * 3);   // the eave
+    const ws = bw * 0.14, win = lum(c) > 0.6 ? css(VV.deep) : css(VV.cream);
+    for (let r = 0; top + bw * 0.22 + r * ws * 2.2 < at(x0) - ws; r++) for (let q = 0; q < 3; q++) if (rand(i * 9 + r * 3 + q) > 0.3) { ctx.fillStyle = win; ctx.fillRect(x0 + bw * (0.12 + q * 0.2), top + bw * 0.22 + r * ws * 2.2, ws, ws * 1.3); }
+    if (rand(i * 4.4 + 95) > 0.45) {   // a tall signboard: a colour, a border and three strokes of lettering
+      const sw = bw * 0.22, sh = Math.min(bh * 0.8, sw * 4.2), sx = x0 + (rand(i * 6.1 + 96) > 0.5 ? -sw * 0.4 : bw - sw * 0.6), sy = top + bh * 0.08, red = rand(i * 7.7 + 97) > 0.4;
+      ctx.fillStyle = css(red ? VV.red : VV.cream); ctx.fillRect(sx, sy, sw, sh); ctx.strokeRect(sx, sy, sw, sh);
+      ctx.fillStyle = css(red ? VV.cream : VV.red); for (let q = 0; q < 3; q++) ctx.fillRect(sx + sw * 0.28, sy + sh * (0.12 + q * 0.28), sw * 0.44, sh * 0.16);
+    }
+    if (rand(i * 8.3 + 98) > 0.55) {   // a lantern under the eave
+      const lr = bw * 0.1, lx = x0 + bw * (0.2 + rand(i * 2.2 + 99) * 0.6), ly = top + lr * 2.4;
+      ctx.beginPath(); ctx.ellipse(lx, ly, lr, lr * 1.25, 0, 0, TAU); ctx.fillStyle = css(VV.red); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = css(VV.cream); ctx.fillRect(lx - lr, ly - lr * 0.15, lr * 2, lr * 0.3);
+    }
+    x += bw * (0.86 + rand(i * 1.3 + 94) * 0.28);
   }
 }
-/** A few gulls high up: two short arcs each, in cream. */
-function gulls(ctx, w, h, n) {
-  ctx.save(); ctx.strokeStyle = css(GB.cream); ctx.lineCap = "round"; ctx.lineJoin = "round";
-  for (let i = 0; i < n; i++) {
-    const x = w * (0.42 + rand(i * 3.1 + 81) * 0.5), y = h * (0.1 + rand(i * 4.7 + 82) * 0.26), s = Math.min(w, h) * (0.009 + rand(i * 5.3 + 83) * 0.008);
-    ctx.lineWidth = s * 0.34;
-    ctx.beginPath(); ctx.moveTo(x - s, y - s * 0.05); ctx.quadraticCurveTo(x - s * 0.5, y - s * 0.66, x, y); ctx.quadraticCurveTo(x + s * 0.5, y - s * 0.66, x + s, y - s * 0.05); ctx.stroke();
+/** Strings of pennants across the sky: a sagging line, small flags hanging from it in the city's colours. */
+function pennants(ctx, w, top, n) {
+  const line = css(VV.line), step = Math.max(26, w / 60);
+  for (let s = 0; s < n; s++) {
+    const y0 = top * (0.2 + 0.22 * s + rand(s * 7 + 101) * 0.1), y1 = y0 + (rand(s * 5 + 102) - 0.5) * top * 0.2, sag = top * (0.07 + rand(s * 3 + 103) * 0.05);
+    const at = (t) => [-20 + (w + 40) * t, (1 - t) * (1 - t) * y0 + 2 * (1 - t) * t * ((y0 + y1) / 2 + sag * 2) + t * t * y1];
+    ctx.beginPath(); for (let t = 0; t <= 1.0001; t += 0.02) { const [x, y] = at(t); t ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.strokeStyle = line; ctx.lineWidth = 1.8; ctx.stroke();
+    const count = Math.ceil((w + 40) / step);
+    for (let i = 0; i < count; i++) {
+      const [ax, ay] = at(i / count), [bx, by] = at((i + 0.7) / count), c = PENNANTS[(i + s * 2) % PENNANTS.length];
+      shapeOf(ctx, [[ax, ay], [bx, by], [(ax + bx) / 2, (ay + by) / 2 + step * 0.95]]); ctx.fillStyle = css(c); ctx.fill(); ctx.lineWidth = 1.4; ctx.stroke();
+    }
   }
-  ctx.restore();
 }
-const ghibli = {
-  id: "ghibli",
-  repaint: (c) => `a background painting from a hand-painted Japanese animated feature, pushed to the bold colour of a travel poster: a deep cobalt summer sky with towering sunlit cumulus clouds that have crisp edges and cool blue undersides, lush saturated greens, warm golden light and clear cool shadows; every surface simplified into flat, clean areas of gouache-like colour with crisp edges; bright, clear and full of summer air, with ${c} as an accent colour.`,
-  about: { zh: "吉卜力式的夏天——钴蓝的天、高耸的积云、浓绿的山野、暖阳和冷蓝的阴影——用硬朗的平面设计重新画一遍：天空是分层的平涂色带，云和山是硬边的几何形，光影只用一亮一暗两块平涂、中间一道硬边，不用渐变；线条是深靛蓝而不是黑，白色是暖白。标题是上白下暖黄的字，配深靛蓝勾边和实心立体投影；四周可加一圈明信片式的米白边框，照片可调得更鲜艳、更暖。饱和、明亮、有阳光的味道——适合旅行、生活、美食、户外、季节与治愈系内容。", en: "The summer of the hand-painted animated films — a deep cobalt sky, towering cumulus, lush hills, warm sun and cool blue shade — redrawn with hard-edged graphic design: the sky in flat bands, clouds and hills as crisp geometric planes, light told by one lit and one shaded flat tone with a hard edge between them, never a gradient; lines in deep indigo rather than black, whites warm. The title is white over warm yellow with an indigo keyline and a solid block shadow; a cream postcard border can frame it all, and photos can be made more vivid and warm. Saturated, bright and sunny — for travel, everyday life, food, the outdoors, the seasons and feel-good content." },
-  name: { zh: "高饱和吉卜力", en: "Vivid Ghibli" },
-  oneTheme: true,              // always the summer sky: the light / dark choice does not apply
-  seeded: true,                // clouds, hills, trees and gulls are placed at random: the Style tab offers to shuffle them
+const vivid = {
+  id: "vivid",
+  repaint: (c) => `a saturated animated-film illustration of a city in the clouds, pushed to the bold colour of a travel poster: one flat, strong azure sky, towering billowing cumulus clouds painted in hard-edged planes of white, pale blue and periwinkle with fine indigo lines along each lobe, coral-red towers with brass pipes, signboards, lanterns and strings of pennants; every surface in flat, clean colour with crisp edges and fine lines, no gradients; bright and clear, with ${c} as an accent colour.`,
+  about: { zh: "高饱和的动画插画：一整块浓烈的天蓝天空，层层翻涌的巨大积云——每一团都是白、淡蓝、长春花蓝三块硬边平涂，再用细细的靛蓝线勾出轮廓；远处是珊瑚红的高塔和黄铜管道、挂着招牌和灯笼的街景，天上拉着成串的三角彩旗。全部是硬边平涂加细线，不用渐变。标题上白下暖黄，配深靛蓝勾边和实心立体投影；可加米白明信片边框，照片调得更鲜艳、更暖。饱和、明亮、细节丰富——适合旅行、城市漫步、生活、美食、节日与治愈系内容。", en: "A saturated animated illustration: one strong azure sky, huge billowing cumulus — every lobe in three hard-edged planes of white, pale blue and periwinkle, outlined in fine indigo — coral-red towers with brass pipes, a skyline of signboards and lanterns, strings of pennants across the sky. Flat colour and fine lines throughout, never a gradient. The title is white over warm yellow with an indigo keyline and a solid block shadow; a cream postcard border is optional, and photos are made more vivid and warmer. Saturated, bright and full of detail — for travel, city walks, everyday life, food, festivals and feel-good content." },
+  name: { zh: "高饱和插画", en: "Vivid illustration" },
+  oneTheme: true,              // always the azure sky: the light / dark choice does not apply
+  seeded: true,                // clouds, towers, houses and pennants are placed at random: the Style tab offers to shuffle them
   params: [
-    { key: "clouds", min: 0, max: 1, step: 0.05, def: 0.75, name: { zh: "积云", en: "Cumulus" } },
-    { key: "hills", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "山野", en: "Hills" } },
+    { key: "clouds", min: 0, max: 1, step: 0.05, def: 0.8, name: { zh: "积云", en: "Cumulus" } },
+    { key: "town", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "街景与高塔", en: "Town and towers" } },
+    { key: "flags", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "彩旗", en: "Pennants" } },
     { key: "border", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "明信片边框", en: "Postcard border" } },
-    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "纸张颗粒", en: "Paper grain" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "纸张颗粒", en: "Paper grain" } },
     { key: "vivid", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "照片鲜艳度", en: "Photo vividness" } },
   ],
-  theme: (base) => ({ ...base, field: css(GB.sky[0]), text: css(GB.cream), dim: css(GB.cream, 0.72), titleFill: css(GB.cream), titleInk: css(GB.navy), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(VV.sky), text: css(VV.cream), dim: css(VV.cream, 0.72), titleFill: css(VV.cream), titleInk: css(VV.navy), grid: () => "rgba(0,0,0,0)" }),
   /**
-   * The summer sky in five flat bands, narrowing toward the horizon; on it, with the background's
-   * decoration on, a towering cumulus and smaller ones, gulls, and the hills. A photo is laid over the
-   * sky and made more vivid: once more over itself in soft light (contrast and colour, as a photograph
-   * has them), its saturation pushed up, and the whole warmed as by late sun.
+   * One flat azure sky. With the background's decoration on, from the back: a tower or two of the sky
+   * city, clouds massed round their feet and on both sides, the street on the horizon, and pennants.
+   * The horizon is the top edge of the colour field when the field is below (it becomes the ground in
+   * front), else the foot of the picture. A photo is laid over the sky and made more vivid: once more
+   * over itself in soft light, its saturation pushed up, and the whole warmed as by late sun.
    */
   background(ctx, env, L, p) {
     const { w, h } = env;
-    // the horizon: the top edge of the colour field when the field is the ground (it is the meadow in
-    // front of the hills), else the foot of the picture
-    const E = env.G && env.G.edge, line = E && E.ny < 0 && E.line;
-    const at = line ? (x) => line[1] + ((line[3] - line[1]) * (x - line[0])) / (line[2] - line[0] || 1) : () => h;
-    const top = line ? Math.min(line[1], line[3]) : h * 0.9;
-    [0, 0.42, 0.66, 0.82, 0.93].forEach((f, i) => { ctx.fillStyle = css(GB.sky[i]); ctx.fillRect(0, top * f, w, h - top * f); });
+    ctx.fillStyle = css(VV.sky); ctx.fillRect(0, 0, w, h);
     if (env.photo) {
       env.drawPhoto();
       if (p.vivid > 0) {
@@ -1099,27 +1162,35 @@ const ghibli = {
       return true;
     }
     if (!L.grid) return true;
-    const u = Math.min(w, h), c = p.clouds, base = (x) => at(x) - u * (p.hills > 0 ? 0.06 + 0.1 * p.hills : 0.01);   // clouds stand behind the hills
-    if (c > 0) {
-      const x1 = w * (0.6 + rand(61) * 0.26), x2 = w * (0.06 + rand(63) * 0.24), x3 = w * (0.3 + rand(65) * 0.3);
-      // the tower, as tall as the sky lets it be without reaching the brand row (it stands ~1.85·s high)
-      const s1 = Math.min(u * (0.13 + 0.1 * c), (base(x1) - top * 0.2) / 1.85), s2 = Math.min(u * (0.07 + 0.05 * c), (base(x2) - top * 0.3) / 1.1);
-      if (s1 > u * 0.04) cumulus(ctx, x1, base(x1), s1, 62, 5);
-      if (c > 0.3 && s2 > u * 0.03) cumulus(ctx, x2, base(x2), s2, 64, 3);
-      if (c > 0.55) cumulus(ctx, x3, top * (0.36 + rand(66) * 0.16), u * 0.045 * (0.6 + c), 67, 2);   // a small one, high up
-      gulls(ctx, w, h, Math.round(2 + c * 3));
+    const E = env.G && env.G.edge, line = E && E.ny < 0 && E.line;
+    const at = line ? (x) => line[1] + ((line[3] - line[1]) * (x - line[0])) / (line[2] - line[0] || 1) : () => h;
+    const top = line ? Math.min(line[1], line[3]) : h * 0.9, u = Math.min(w, h), c = p.clouds, t = p.town;
+    const street = t > 0 ? u * (0.03 + 0.07 * t) : 0, ground = (x) => at(x) - street;   // where clouds stand: behind the houses
+    const room = (x) => ground(x) - Math.max(top * 0.24, 150);                             // how tall a cloud may be there: clear of the brand row
+    const mass = (fx, k, size, tall) => { const x = w * fx, s = Math.min(u * size, room(x) / (0.86 * tall + 0.62)); if (s > u * 0.03) billow(ctx, x, ground(x), s, tall, k); };
+    if (c > 0.55) mass(0.36 + rand(131) * 0.24, 132, 0.06 + 0.03 * c, 0.9);              // a small one, far off
+    if (t > 0.45) {   // the towers, behind the nearer clouds
+      const tx = w * (0.58 + rand(141) * 0.12), tw = u * (0.05 + 0.02 * t), th = Math.max(u * 0.1, at(tx) - top * (0.3 - 0.12 * t));
+      skyTower(ctx, tx, at(tx), tw, th);
+      if (t > 0.75) { const sx = tx + w * (rand(142) > 0.5 ? 0.1 : -0.1), sw = tw * 0.7; skyTower(ctx, sx, at(sx), sw, th * 0.62); }
     }
-    if (p.hills > 0) gbHills(ctx, w, h, p.hills, at);
+    if (c > 0) {
+      mass(0.06 + rand(151) * 0.2, 152, 0.17 + 0.17 * c, 1.5 + rand(153) * 0.4);          // a great mass on one side…
+      mass(0.72 + rand(154) * 0.2, 155, 0.15 + 0.16 * c, 1.7 + rand(156) * 0.5);          // …and on the other
+      if (t > 0.45) mass(0.61 + rand(141) * 0.12, 157, 0.1 + 0.07 * c, 0.85);             // clouds round the tower's foot
+    }
+    if (t > 0) skyline(ctx, w, h, t, at);
+    if (p.flags > 0) pennants(ctx, w, top, p.flags > 0.6 ? 2 : 1);
     return true;
   },
   accent: {
-    fill: (C) => css(vivid(C)),
+    fill: (C) => css(boost(C)),
     tone: () => "rgba(0,0,0,0)", toneScale: 0,     // flat: no screentone
     /** The edge of a sunlit field: a band of the colour in full light just inside it, and an indigo line on it. */
     edge(ctx, run, nx, ny, C) {
       ctx.lineCap = "butt"; ctx.lineJoin = "round";
-      ctx.strokeStyle = css(mix(vivid(C), GB.cream, 0.5)); ctx.lineWidth = 24; run(-nx * 12, -ny * 12);
-      ctx.strokeStyle = css(GB.navy); ctx.lineWidth = 9; run(0, 0);
+      ctx.strokeStyle = css(mix(boost(C), VV.cream, 0.5)); ctx.lineWidth = 24; run(-nx * 12, -ny * 12);
+      ctx.strokeStyle = css(VV.navy); ctx.lineWidth = 9; run(0, 0);
     },
   },
   /**
@@ -1130,15 +1201,15 @@ const ghibli = {
   runs(ctx, pass, o) {
     upright(ctx);
     const fs = o.fs, line = fs * 0.085 * o.strokeAmt, depth = fs * 0.075 * o.shadowAmt;
-    const face = o.fill || GB.cream, hiFace = o.hi || vivid(o.C || GB.leaf);
-    const lower = (c) => (c === GB.cream ? GB.butter : mix(c, GB.navy, 0.22));
+    const face = o.fill || VV.cream, hiFace = o.hi || boost(o.C || VV.red);
+    const lower = (c) => (c === VV.cream ? VV.butter : mix(c, VV.navy, 0.22));
     ctx.lineJoin = "round";
     if (depth > 0) {
       const steps = fast ? 3 : Math.max(2, Math.min(10, Math.round(depth / (fs * 0.009))));
-      ctx.fillStyle = ctx.strokeStyle = css(GB.navy); ctx.lineWidth = line;
+      ctx.fillStyle = ctx.strokeStyle = css(VV.navy); ctx.lineWidth = line;
       for (let i = steps; i >= 1; i--) { const d = (depth * i) / steps; pass((a, x) => { if (line > 0) ctx.strokeText(a.t, x + d, d); ctx.fillText(a.t, x + d, d); }); }
     }
-    if (line > 0) { ctx.strokeStyle = css(GB.navy); ctx.lineWidth = line; pass((a, x) => ctx.strokeText(a.t, x, 0)); }
+    if (line > 0) { ctx.strokeStyle = css(VV.navy); ctx.lineWidth = line; pass((a, x) => ctx.strokeText(a.t, x, 0)); }
     pass((a, x) => { ctx.fillStyle = css(a.hi ? hiFace : face); ctx.fillText(a.t, x, 0); });
     ctx.save(); ctx.beginPath(); ctx.rect(-1e5, -fs * 0.3, 2e5, fs); ctx.clip();
     pass((a, x) => { ctx.fillStyle = css(lower(a.hi ? hiFace : face)); ctx.fillText(a.t, x, 0); });
@@ -1147,18 +1218,18 @@ const ghibli = {
   /** The plate under a text layer: a rounded card with an indigo line and a hard indigo shadow. */
   plate(ctx, x, y, w, h, colour, fs) {
     const r = Math.min(h / 2, fs * 0.3), d = fs * 0.08;
-    ctx.beginPath(); rounded(ctx, x + d, y + d, w, h, r); ctx.fillStyle = css(GB.navy); ctx.fill();
+    ctx.beginPath(); rounded(ctx, x + d, y + d, w, h, r); ctx.fillStyle = css(VV.navy); ctx.fill();
     ctx.beginPath(); rounded(ctx, x, y, w, h, r); ctx.fillStyle = colour; ctx.fill();
-    ctx.lineWidth = fs * 0.05; ctx.strokeStyle = css(GB.navy); ctx.stroke();
+    ctx.lineWidth = fs * 0.05; ctx.strokeStyle = css(VV.navy); ctx.stroke();
   },
-  // objects are lit as in the sky above them: warm cream in the sun, a cool blue in shade, indigo lines;
+  // objects are lit as the clouds are: warm cream in the sun, periwinkle in shade, indigo lines;
   // the small cover parts keep their construction and take the indigo and cream
   wrap: (ctx, C, p, plates) => mapped(ctx, plates
-    ? { fill: { ink: GB.navy, light: GB.cream, colour: vivid }, stroke: { ink: GB.navy, light: GB.cream } }
-    : { fill: { ink: GB.navy, light: GB.lit, mid: GB.shade, dark: GB.deep, colour: vivid }, stroke: { ink: GB.navy, light: GB.cream, colour: vivid }, line: 0.9 }),
-  sticker: painters({ line: GB.navy, lineScale: 0.8,
-    tone: (fill) => { const c = parseColour(fill); if (!c) return fill; const r = role(c); return css(r === "ink" ? GB.navy : r === "colour" ? vivid(c) : r === "light" ? GB.cream : c, c[3]); },
-    shadow(ctx, draw) { ctx.save(); ctx.translate(6, 7); draw(css(GB.navy, 0.55)); ctx.restore(); } }),
+    ? { fill: { ink: VV.navy, light: VV.cream, colour: boost }, stroke: { ink: VV.navy, light: VV.cream } }
+    : { fill: { ink: VV.navy, light: VV.lit, mid: VV.shade, dark: VV.deep, colour: boost }, stroke: { ink: VV.navy, light: VV.cream, colour: boost }, line: 0.9 }),
+  sticker: painters({ line: VV.navy, lineScale: 0.8,
+    tone: (fill) => { const c = parseColour(fill); if (!c) return fill; const r = role(c); return css(r === "ink" ? VV.navy : r === "colour" ? boost(c) : r === "light" ? VV.cream : c, c[3]); },
+    shadow(ctx, draw) { ctx.save(); ctx.translate(6, 7); draw(css(VV.navy, 0.55)); ctx.restore(); } }),
   /**
    * The corner tag: a cream pill, as the sign of a country bus stop, with an indigo line, a hard shadow,
    * and a dot of the channel colour before the lettering — it reads on the sky and on the field alike.
@@ -1166,10 +1237,10 @@ const ghibli = {
   tag(ctx, str, x, y, fs, C, p, ink) {
     ctx.font = `700 ${fs}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
     const w = spacedW(ctx, str, 3) + fs * 1.75, h = fs * 1.34, pill = (dx) => { ctx.beginPath(); rounded(ctx, x + dx, y + dx, w, h, h / 2); };
-    pill(6); ctx.fillStyle = css(GB.navy); ctx.fill();
-    pill(0); ctx.fillStyle = css(GB.cream); ctx.fill(); ctx.lineWidth = 4.5; ctx.strokeStyle = css(GB.navy); ctx.stroke();
-    ctx.beginPath(); ctx.arc(x + h * 0.52, y + h / 2, fs * 0.17, 0, TAU); ctx.fillStyle = css(vivid(C)); ctx.fill(); ctx.lineWidth = 3; ctx.stroke();
-    ctx.fillStyle = ink || css(GB.navy); spaced(ctx, str, x + h * 0.52 + fs * 0.42, y + h * 0.5 + fs * 0.36, 3);
+    pill(6); ctx.fillStyle = css(VV.navy); ctx.fill();
+    pill(0); ctx.fillStyle = css(VV.cream); ctx.fill(); ctx.lineWidth = 4.5; ctx.strokeStyle = css(VV.navy); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x + h * 0.52, y + h / 2, fs * 0.17, 0, TAU); ctx.fillStyle = css(boost(C)); ctx.fill(); ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = ink || css(VV.navy); spaced(ctx, str, x + h * 0.52 + fs * 0.42, y + h * 0.5 + fs * 0.36, 3);
     return { x: x - 6, y: y - 6, w: w + 18, h: h + 18 };
   },
   /** The frame layer: a cream postcard border with round inner corners and an indigo hairline round the picture. */
@@ -1178,24 +1249,323 @@ const ghibli = {
     if (b < 1) return;
     const r = 12 + b * 0.8;
     ctx.beginPath(); ctx.rect(0, 0, w, h); rounded(ctx, b, b, w - 2 * b, h - 2 * b, r);
-    ctx.fillStyle = css(GB.cream); ctx.fill("evenodd");
-    ctx.beginPath(); rounded(ctx, b, b, w - 2 * b, h - 2 * b, r); ctx.lineWidth = 3; ctx.strokeStyle = css(GB.navy); ctx.stroke();
+    ctx.fillStyle = css(VV.cream); ctx.fill("evenodd");
+    ctx.beginPath(); rounded(ctx, b, b, w - 2 * b, h - 2 * b, r); ctx.lineWidth = 3; ctx.strokeStyle = css(VV.navy); ctx.stroke();
   },
   /** An uploaded image gets a hard indigo shadow, as stickers do. */
-  image(ctx, C, unit) { ctx.shadowColor = css(GB.navy, 0.55); ctx.shadowBlur = 0; ctx.shadowOffsetX = 8 * unit; ctx.shadowOffsetY = 10 * unit; },
+  image(ctx, C, unit) { ctx.shadowColor = css(VV.navy, 0.55); ctx.shadowBlur = 0; ctx.shadowOffsetX = 8 * unit; ctx.shadowOffsetY = 10 * unit; },
   /** Paper: the faint tooth of a poster or a gouache sheet. */
   post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.55, unit); },
-  prompt: `Stickers for a sunlit hand-painted animated film, redrawn as a bold flat poster — friendly, rounded, full of summer light — that read at a glance:
-- soft, plump shapes with a clear silhouette (clouds, leaves, fruit, small creatures, everyday things of the countryside); simple and charming; no realism, no perspective, no fine detail;
-- flat, saturated colour only — never gradients or textures; the light comes from the upper left: give a form one flat lit patch (a lighter tint, with "shadow": false) and one flat shaded patch (a cooler, deeper tint), with crisp edges between them;
+  prompt: `Stickers for a saturated animated-film illustration of a sunny city in the clouds, drawn as a bold flat poster — friendly, clear and full of detail — that read at a glance:
+- clean, characterful shapes with a clear silhouette (lanterns, signboards, pennants, clouds, fruit, small creatures, everyday things); simple and charming; no realism, no perspective, no fine texture;
+- flat, saturated colour only — never gradients; the light comes from above: give a form one flat lit patch (a lighter tint, with "shadow": false) and one flat shaded patch (a cooler, deeper tint), with crisp edges between them;
 - every shape automatically gets a deep indigo outline and a hard offset shadow: do NOT draw outlines or shadows yourself;
-- 2 to 4 colours per sticker: the main colour with "white" (a warm cream), "green" or "blue" as partners; "ink" comes out deep indigo — for small details only.`,
-  solidPrompt: `Props and buildings from a sunlit animated film set in the countryside — a cottage, a bicycle, a bus stop, a kettle — built as simple models from a few boxes and cylinders with soft, friendly proportions; no realism, no fine detail.
-- the renderer paints faces in the sun warm cream, faces in shade a cool sky blue, and every edge deep indigo: do NOT try to draw shading or outlines yourself;
+- 2 to 4 colours per sticker: the main colour with "white" (a warm cream), "red" (coral), "yellow" (brass) or "blue" (azure) as partners; "ink" comes out deep indigo — for small details only.`,
+  solidPrompt: `Props and buildings from a saturated animated film set in a sunny city in the clouds — a tower, a kiosk, a lantern, a tram, a kettle — built as simple models from a few boxes and cylinders with friendly proportions; no realism, no fine detail.
+- the renderer paints faces in the sun warm cream, faces in shade a periwinkle blue, and every edge deep indigo: do NOT try to draw shading or outlines yourself;
 - "white" is warm cream, "dark" a deep indigo, and "main" the channel colour made more vivid — use it for one to three parts (a roof, a door, a body).`,
 };
 
-export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, ghibli };
+// ====================================================================== blue retro: halftone, glitch and collage in electric blue
+// The blue of a cyanotype and of a photocopier's toner, with black and off-white: photographs as coarse
+// halftone in one blue, a sprayed grain thinning across the sheet, thin technical drawing (concentric
+// rings, a crosshair, crop marks, a barcode), small monospaced data, star marks, a sliced glitch. On an
+// electric blue ground (dark) or on off-white paper printed in blue (light).
+const BT = { klein: [28, 44, 226], azure: [70, 146, 238], ice: [172, 208, 255], navy: [8, 12, 46], cream: [238, 234, 222] };
+const btInk = () => (dark ? BT.cream : BT.klein), btGround = () => (dark ? BT.klein : BT.cream), btDeep = () => (dark ? BT.navy : BT.klein);
+/**
+ * A field of fine dots, dense near (fx, fy) and thinning out from it — the grain of an airbrush or a
+ * spray can — drawn once per size, seed and colour and kept.
+ */
+function stipple(ctx, w, h, colour, amt, fx, fy) {
+  if (amt <= 0 || typeof document === "undefined" || !ctx.canvas) return;
+  const key = [Math.round(w), Math.round(h), colour.join(), Math.round(amt * 20), seed, Math.round(fx), Math.round(fy)].join("|");
+  const kept = WORK.stipple || (WORK.stipple = new Map());
+  let c = kept.get(key);
+  if (!c) {
+    c = document.createElement("canvas"); c.width = Math.round(w); c.height = Math.round(h);
+    const x = c.getContext("2d"); x.fillStyle = css(colour);
+    let s = ((seed + 1) * 7919) >>> 0;
+    const next = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296, R = Math.hypot(w, h) * 0.8, n = Math.round(((w * h) / 20) * amt);
+    for (let i = 0; i < n; i++) { const px = next() * w, py = next() * h, d = Math.hypot(px - fx, py - fy) / R; if (next() < Math.pow(Math.max(0, 1 - d), 2.4)) x.fillRect(px, py, 2.2, 2.2); }
+    kept.set(key, c);
+    if (kept.size > 8) kept.delete(kept.keys().next().value);
+  }
+  ctx.drawImage(c, 0, 0, w, h);
+}
+/** A halftone screen laid over what is there: dots of `colour` on a diagonal grid, multiplied in. */
+function dotScreen(ctx, w, h, colour, alpha, pitch = 9) {
+  if (alpha <= 0 || typeof document === "undefined" || !ctx.canvas) return;
+  const key = `${colour.join()}|${pitch}`;
+  let c = WORK.dots;
+  if (!c || c._key !== key) {
+    c = WORK.dots = document.createElement("canvas"); c.width = c.height = pitch * 2; c._key = key;
+    const x = c.getContext("2d"); x.fillStyle = css(colour);
+    for (const [px, py] of [[0.5, 0.5], [1.5, 1.5]]) { x.beginPath(); x.arc(px * pitch, py * pitch, pitch * 0.36, 0, TAU); x.fill(); }
+  }
+  ctx.save(); ctx.globalAlpha = Math.min(1, alpha); ctx.globalCompositeOperation = "multiply"; ctx.fillStyle = ctx.createPattern(c, "repeat"); ctx.fillRect(0, 0, w, h); ctx.restore();
+}
+/** A star mark: four points with hollow sides (a sparkle), or five. */
+function starMark(ctx, x, y, r, points, colour) {
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i++) { const a = -Math.PI / 2 + (i * Math.PI) / points, q = i % 2 ? r * (points === 4 ? 0.2 : 0.45) : r; ctx.lineTo(x + Math.cos(a) * q, y + Math.sin(a) * q); }
+  ctx.closePath(); ctx.fillStyle = css(colour); ctx.fill();
+}
+/** The technical drawing over the ground: concentric rings about a point, a crosshair through it, graduations, small figures. */
+function rings(ctx, w, h, a, ink) {
+  const cx = w * (0.58 + rand(111) * 0.24), cy = h * (0.38 + rand(112) * 0.24), R = Math.min(w, h) * 0.5;
+  ctx.save(); ctx.strokeStyle = css(ink, 0.5 * a); ctx.fillStyle = css(ink, 0.8 * a); ctx.lineWidth = 1.5;
+  for (const k of [0.22, 0.42, 0.64, 0.88, 1.16]) { ctx.beginPath(); ctx.arc(cx, cy, R * k, 0, TAU); ctx.stroke(); }
+  ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
+  ctx.beginPath(); for (let d = 0; d < 360; d += 5) { const t = (d * Math.PI) / 180, q = d % 30 ? 8 : 18; ctx.moveTo(cx + Math.cos(t) * R * 0.88, cy + Math.sin(t) * R * 0.88); ctx.lineTo(cx + Math.cos(t) * (R * 0.88 + q), cy + Math.sin(t) * (R * 0.88 + q)); } ctx.stroke();
+  ctx.lineWidth = 2.4; ctx.strokeStyle = css(ink, 0.9 * a);
+  ctx.beginPath(); ctx.arc(cx, cy, 13, 0, TAU); ctx.moveTo(cx - 28, cy); ctx.lineTo(cx + 28, cy); ctx.moveTo(cx, cy - 28); ctx.lineTo(cx, cy + 28); ctx.stroke();
+  ctx.font = `600 13px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  [0, 90, 180, 270].forEach((d, i) => { const t = (d * Math.PI) / 180; ctx.fillText(String(d).padStart(3, "0"), cx + Math.cos(t) * R * 0.64 + 6, cy + Math.sin(t) * R * 0.64 - 6); });
+  ctx.restore();
+}
+/** Sliced glitch: a few thin bands of the finished picture moved sideways, clear of the lettering. */
+function slices(ctx, amt, unit, hits, k0) {
+  const cv = ctx.canvas;
+  if (amt <= 0 || fast || !cv || typeof document === "undefined") return;
+  const W = cv.width, H = cv.height, kept = hits.filter((t) => LETTERING.includes(t.type)).map((t) => { const a = ((t.r || 0) * Math.PI) / 180, half = Math.abs(t.hw * Math.sin(a)) + Math.abs(t.hh * Math.cos(a)) + 10; return [(t.cy - half) * unit, (t.cy + half) * unit]; });
+  const clear = (y, bh) => kept.every(([a, b]) => y + bh < a || y > b), band = WORK.band || (WORK.band = document.createElement("canvas"));
+  for (let k = 0; k < Math.round(5 * amt); k++) {
+    const bh = Math.round((6 + rand(k * 3.7 + k0) * 26) * unit), dx = Math.round((rand(k * 5.1 + k0 + 1) - 0.5) * 2 * 46 * unit * amt);
+    let y = Math.round(rand(k * 7.3 + k0 + 2) * H);
+    for (let again = 1; again <= 12 && !clear(y, bh); again++) y = Math.round(rand(k * 7.3 + k0 + 2 + again * 13.7) * H);
+    if (!clear(y, bh) || bh < 1) continue;
+    if (band.width !== W || band.height !== bh) { band.width = W; band.height = bh; }
+    const b = band.getContext("2d"); b.globalCompositeOperation = "copy"; b.drawImage(cv, 0, y, W, bh, 0, 0, W, bh);
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(band, dx, y); ctx.restore();
+  }
+}
+const bluetone = {
+  id: "bluetone",
+  repaint: (c) => `a retro blue poster made from a photograph: the photo as a coarse halftone print in one electric cobalt blue with black and off-white, high contrast, sprayed grain, a few sliced glitch offsets, thin technical lines; the look of a cyanotype or a photocopied zine; still the same picture, no text.`,
+  about: { zh: "蓝调复古的做旧海报：电光蓝、黑和米白三色，照片变成单一蓝色的粗网点印刷，喷枪颗粒从画面一角弥漫开，细线画的同心圆、准星、裁切标记和条形码，等宽的小字和编号，星形符号，几道故障切片；标题用衬线字，带一层错位的影子和一道横向切开的错位。可选电光蓝底或米白纸底。冷静、疏离、有亚文化和科幻感——适合音乐、电影、科技、情绪向和实验性内容。", en: "A worn retro poster in blue: electric blue, black and off-white; photos as coarse halftone in a single blue; sprayed grain spreading from a corner; thin technical drawing — concentric rings, a crosshair, crop marks, a barcode — with small monospaced data and star marks, and a few sliced glitches. The title is a serif with a misregistered shadow and one horizontal slice knocked sideways. An electric blue ground or off-white paper. Cool, distant, subcultural and a little sci-fi — for music, film, tech, mood pieces and experiments." },
+  name: { zh: "蓝调复古", en: "Blue retro" },
+  seeded: true,
+  params: [
+    { key: "dots", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "网点与喷砂", en: "Halftone and spray" } },
+    { key: "glitch", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "故障切片", en: "Glitch slices" } },
+    { key: "lines", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "技术线条", en: "Technical lines" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "颗粒", en: "Grain" } },
+    { key: "duo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.9, name: { zh: "照片单色", en: "Photo in blue" } },
+  ],
+  titleFont: (f) => f.serif,
+  theme: (base) => ({ ...base, field: css(btGround()), text: css(btInk()), dim: css(btInk(), 0.6), titleFill: css(btInk()), titleInk: css(btDeep()), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The ground (electric blue, or paper), sprayed from below with the deep blue, with the technical
+   * drawing and a few star marks over it. A photo goes into one blue: grey, multiplied into the blue,
+   * its blacks lifted to navy, and a halftone screen laid over it.
+   */
+  background(ctx, env, L, p) {
+    const { w, h } = env;
+    ctx.fillStyle = css(btGround()); ctx.fillRect(0, 0, w, h);
+    if (env.photo) {
+      env.drawPhoto(p.duo);
+      wash(ctx, w, h, "multiply", mix([255, 255, 255], dark ? BT.azure : BT.klein, 0.92), p.duo);
+      wash(ctx, w, h, "screen", mix([0, 0, 0], [16, 22, 92], 1), p.duo * 0.8);
+      dotScreen(ctx, w, h, BT.navy, 0.45 * p.dots);
+      return true;
+    }
+    if (!L.grid) return true;
+    stipple(ctx, w, h, btDeep(), p.dots, w * (0.2 + rand(121) * 0.6), h * 1.08);
+    if (p.lines > 0) rings(ctx, w, h, p.lines, btInk());
+    for (let i = 0; i < 3; i++) starMark(ctx, w * (0.08 + rand(i * 3.3 + 125) * 0.84), h * (0.12 + rand(i * 4.1 + 126) * 0.5), 14 + rand(i * 5.9 + 127) * 26, 4, dark ? BT.cream : BT.klein);
+    starMark(ctx, w * (0.15 + rand(128) * 0.7), h * (0.2 + rand(129) * 0.45), 30 + rand(130) * 30, 5, dark ? BT.ice : BT.azure);
+    return true;
+  },
+  accent: {
+    fill: () => css(btDeep()),
+    tone: () => css(dark ? BT.klein : BT.azure), toneScale: 0.95,    // a halftone across the block
+    /** An off-white hairline on the edge, a dashed one beside it: the edge of a printed panel. */
+    edge(ctx, run, nx, ny) {
+      ctx.lineCap = "butt"; ctx.lineJoin = "miter";
+      ctx.strokeStyle = css(BT.cream); ctx.lineWidth = 3; run(0, 0);
+      ctx.setLineDash([16, 10]); ctx.lineWidth = 2; run(nx * 14, ny * 14); ctx.setLineDash([]);
+    },
+  },
+  /**
+   * Upright lettering with a misregistered shadow — the same letters in a second blue, a little to the
+   * right and below — and one horizontal slice through the line knocked sideways, as by a glitch.
+   */
+  runs(ctx, pass, o, p) {
+    upright(ctx);
+    const fs = o.fs, ink = o.fill || btInk(), hi = o.hi || (dark ? BT.ice : BT.navy), echoCol = dark ? BT.navy : BT.azure;
+    const d = fs * 0.05 * o.shadowAmt, g = fast ? 0 : fs * 0.08 * (p.glitch ?? 0.5);
+    const paint = (dx) => {
+      if (d > 0) pass((a, x) => { ctx.fillStyle = css(echoCol); ctx.fillText(a.t, x + dx + d, d * 0.6); });
+      pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x + dx, 0); });
+    };
+    if (!g) return paint(0);
+    const y0 = -fs * 0.6, y1 = -fs * 0.46;
+    ctx.save(); ctx.beginPath(); ctx.rect(-1e5, -1e5, 2e5, 1e5 + y0); ctx.rect(-1e5, y1, 2e5, 1e5); ctx.clip(); paint(0); ctx.restore();
+    ctx.save(); ctx.beginPath(); ctx.rect(-1e5, y0, 2e5, y1 - y0); ctx.clip(); paint(g); ctx.restore();
+  },
+  /** The plate under a text layer: a flat panel with a hairline frame printed a little off it. */
+  plate(ctx, x, y, w, h, colour, fs) {
+    ctx.fillStyle = colour; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = css(btInk()); ctx.lineWidth = Math.max(1.5, fs * 0.02); ctx.strokeRect(x + fs * 0.08, y + fs * 0.08, w, h);
+  },
+  // objects are printed in the blues; the small cover parts keep their construction, in off-white
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates
+    ? { fill: { ink: BT.cream }, stroke: { ink: BT.cream } }
+    : { fill: { ink: BT.navy, light: BT.cream, mid: BT.ice, dark: BT.klein, colour: (c) => (lum(c) > 0.55 ? BT.ice : BT.azure) }, stroke: { ink: BT.navy, light: BT.cream }, line: 0.7 }),
+  sticker: painters({ line: BT.navy, lineScale: 0.45, join: "miter",
+    tone: (fill) => { const c = parseColour(fill); if (!c) return fill; const r = role(c); return css(r === "ink" ? BT.navy : r === "light" ? BT.cream : r === "colour" ? (lum(c) > 0.55 ? BT.ice : BT.azure) : c, c[3]); },
+    shadow(ctx, draw) { ctx.save(); ctx.translate(-5, 4); draw(css(dark ? BT.navy : BT.azure, 0.9)); ctx.restore(); } }),
+  /** The corner tag: an off-white label with a hairline, three square bullets and monospaced lettering. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.72;
+    ctx.font = `600 ${f}px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const sq = f * 0.42, step = sq * 1.5, tw = spacedW(ctx, str, 4), w = f * 0.9 + step * 3 + f * 0.3 + tw, h = f * 1.7, top = y + (fs * 1.34 - h);
+    ctx.fillStyle = css(BT.cream); ctx.fillRect(x, top, w, h);
+    ctx.strokeStyle = css(BT.navy); ctx.lineWidth = 2; ctx.strokeRect(x, top, w, h);
+    ctx.fillStyle = css(BT.navy); for (let i = 0; i < 3; i++) ctx.fillRect(x + f * 0.45 + i * step, top + h / 2 - sq / 2, sq, sq);
+    ctx.fillStyle = ink || css(BT.navy); spaced(ctx, str, x + f * 0.45 + step * 3 + f * 0.3, top + h * 0.5 + f * 0.36, 4);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The frame layer: crop marks in the corners, a line of data at the foot, a barcode, the archive's name up the right edge. */
+  frame(ctx, env, p) {
+    const a = p.lines;
+    if (a <= 0) return;
+    const { w, h } = env, ink = btInk(), P = env.o.profile, i = env.o.catIndex, total = P.categories.length, code = (env.cat.code || "CH").toUpperCase();
+    ctx.save(); ctx.strokeStyle = css(ink, 0.9 * a); ctx.fillStyle = css(ink, 0.9 * a); ctx.lineWidth = 1.6;
+    for (const [x, y, sx, sy] of [[30, 30, 1, 1], [w - 30, 30, -1, 1], [30, h - 30, 1, -1], [w - 30, h - 30, -1, -1]]) { ctx.beginPath(); ctx.moveTo(x, y + sy * 32); ctx.lineTo(x, y); ctx.lineTo(x + sx * 32, y); ctx.stroke(); }
+    ctx.font = `600 14px ${fonts.mono}, ${fonts.cn}`; ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+    spaced(ctx, `${env.o.size.w}×${env.o.size.h}  //  ${code}  //  ${pad2(i + 1)}.${pad2(total)}`, 72, h - 44, 2);
+    let x = w - 72;
+    for (let k = 0; k < 30; k++) { const bw = 1.5 + Math.floor(noise(k * 2.9 + i) * 3) * 1.5; x -= bw + 2.5; ctx.fillRect(x, h - 76, bw, 26); }
+    ctx.font = `600 11px ${fonts.mono}, ${fonts.cn}`;
+    spaced(ctx, `4 ${String(7210 + i * 37).padStart(6, "0")} ${pad2(total)}`, x, h - 38, 2);   // the figures under the bars, from their left end
+    ctx.save(); ctx.translate(w - 44, h * 0.62); ctx.rotate(-Math.PI / 2); ctx.textAlign = "left"; ctx.font = `600 13px ${fonts.mono}, ${fonts.cn}`;
+    spaced(ctx, `${(P.brand.name || "ARCHIVE").toUpperCase()} ARCHIVE — NO.${pad2(i + 1)} — OBSERVATION SERIES`, 0, 0, 3);
+    ctx.restore(); ctx.restore();
+  },
+  image(ctx, C, unit) { ctx.shadowColor = css(dark ? BT.navy : BT.azure, 0.9); ctx.shadowBlur = 0; ctx.shadowOffsetX = -7 * unit; ctx.shadowOffsetY = 5 * unit; },
+  post(ctx, w, h, C, p, unit = 1, hits = []) {
+    slices(ctx, p.glitch, unit, hits, 160);
+    grain(ctx, p.grain * (dark ? 0.85 : 0.9), unit, !dark);
+  },
+  prompt: `Stickers for a retro blue zine — cut from a cyanotype or a photocopy, printed in one electric blue with black and off-white — that read at a glance:
+- graphic, slightly cold shapes with a strong silhouette: stars, sparkles, planets, an astronaut's helmet, eyes, hands, flowers, arrows, technical symbols; no realism, no perspective, no fine texture;
+- flat colour only, and only the blues: the main colour, "blue", "white" (off-white paper) and "ink" (near-black navy); the app turns any other colour into a blue;
+- the app adds a thin navy outline and a misregistered blue shadow: do NOT draw outlines or shadows yourself;
+- pattern inside a shape is welcome as a few "detail" lines (rings, grids, crosshairs).`,
+  solidPrompt: `Objects as a retro sci-fi zine would show them: a few boxes and cylinders in clean, technical proportions — a radio, a camera, a satellite, a monitor; no realism, no fine detail.
+- the renderer prints faces in off-white, pale blue and electric blue with a thin navy line: do NOT try to draw shading or outlines yourself;
+- "white" is off-white, "dark" is electric blue, and "main" comes out a lighter blue — use it for screens, lenses and lit parts.`,
+};
+
+// ====================================================================== red street: music posters and street fashion in red, black and white
+// A red ground, heavy condensed black lettering set tight and big, photographs in black and white or in
+// red, a giant word in a deeper red cropped by the edge, small editorial print in the margins, a black
+// panel, and film grain over all. Loud, rhythmic, with attitude.
+const RS = { red: [232, 56, 36], deep: [186, 26, 20], black: [18, 12, 12], cream: [246, 238, 226], yellow: [255, 198, 26] };
+const redstreet = {
+  id: "redstreet",
+  repaint: (c) => `a street-fashion and music poster photograph in red: high contrast, the colours pushed into reds and blacks with warm off-white highlights, a little motion blur and coarse film grain, a stage-light feel; still a photograph, no text.`,
+  about: { zh: "红色潮流：街头文化 × 音乐现场 × 时尚大片。大面积朱红底，紧凑的黑色压缩粗体大字（英文用窄体），照片转成黑白或红调，画面一侧压着一个被裁切的深红巨字，页边是细小的编辑式小字和一条黑线，黑色色块，整张叠上胶片颗粒和暗角；自带平直的版式。冲击、有节奏、有态度——适合音乐、潮流服饰、街头品牌、活动海报与人物专访。", en: "Red street: street culture × live music × fashion shoot. A vermilion ground, heavy condensed black lettering set tight and big, photos in black and white or in red, a giant word in deeper red cropped by the edge, small editorial print in the margins with a black rule, a black panel, film grain and a vignette over all; flat layouts of its own. Loud, rhythmic, with attitude — for music, streetwear, street brands, event posters and interviews." },
+  name: { zh: "红色潮流", en: "Red street" },
+  oneTheme: true,
+  params: [
+    { key: "giant", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "巨字", en: "Giant word" } },
+    { key: "micro", min: 0, max: 1, step: 0.05, def: 0.8, name: { zh: "小字排版", en: "Small print" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "胶片颗粒", en: "Film grain" } },
+    { key: "duo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.75, name: { zh: "照片红调", en: "Photo in red" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,   // the condensed face for Latin, the heavy sans for CJK
+  /**
+   * Flat bands and panels, as a poster grid has them. In the stacked layout the title takes the whole
+   * red field down to the black panel — the lettering is the picture — and the tag moves onto the
+   * panel, above the channel's name.
+   */
+  layout(template, w, h) {
+    const g = blockLayout(template, w, h, { band: 0.34, side: 0.36, strip: 0.13 });
+    if (g.template !== "stack") return g;
+    const el = g.accent[0][1], tagH = g.tag.fs * 1.34;
+    g.title = { ...g.title, h: Math.max(120, el - g.title.y - 44) };
+    g.tag = { ...g.tag, y: el + 30 };
+    g.cat = { ...g.cat, y: Math.min(h - 70, el + 30 + tagH + 22 + g.cat.fs * 0.82), inline: true };
+    return g;
+  },
+  theme: (base) => ({ ...base, field: css(RS.red), text: css(RS.black), dim: css(RS.black, 0.6), titleFill: css(RS.black), titleInk: css(RS.cream), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The red ground, and on it the channel's code in a deeper red, enormous, running off the right and
+   * the foot. A photo goes into black and white, its contrast raised, and then into red: the whites
+   * stay warm off-white, the greys turn red, the blacks a deep oxblood.
+   */
+  background(ctx, env, L, p) {
+    const { w, h } = env;
+    ctx.fillStyle = css(RS.red); ctx.fillRect(0, 0, w, h);
+    if (env.photo) {
+      env.drawPhoto(1);
+      ctx.save(); ctx.globalCompositeOperation = "soft-light"; ctx.globalAlpha = 0.7; env.drawPhoto(1); ctx.restore();
+      wash(ctx, w, h, "multiply", mix([255, 246, 236], [255, 70, 44], p.duo), 1);
+      wash(ctx, w, h, "screen", mix([10, 8, 8], [74, 10, 8], p.duo), 1);
+      return true;
+    }
+    if (!L.grid || p.giant <= 0) return true;
+    const str = (env.cat.code || env.cat.name || "").toUpperCase().slice(0, 6);
+    if (!str) return true;
+    const fs = h * (0.95 + 0.45 * p.giant);
+    ctx.save(); ctx.font = `700 ${fs}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = css(RS.deep, 0.3 + 0.6 * p.giant); ctx.fillText(str, w + fs * 0.06, h + fs * 0.1);
+    ctx.restore();
+    return true;
+  },
+  accent: { fill: () => css(RS.black), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },   // a black panel, nothing more
+  /** Upright, heavy, tight, no outline and no shadow: black, highlighted words in warm white. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? o.hi || RS.cream : o.fill || RS.black); ctx.fillText(a.t, x, 0); });
+  },
+  plate(ctx, x, y, w, h, colour) { ctx.fillStyle = colour; ctx.fillRect(x, y, w, h); },
+  // objects in red, black and warm white with one yellow; the small cover parts read on red and on the black panel
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates
+    ? { fill: { ink: RS.cream, colour: RS.yellow }, stroke: { ink: RS.cream } }
+    : { fill: { ink: RS.black, light: RS.cream, mid: [242, 162, 142], dark: RS.black, colour: RS.yellow }, stroke: { ink: RS.black, light: RS.cream, colour: RS.yellow }, line: 0.8 }),
+  sticker: painters({ line: null, tone: inkAs(RS.black), shadow(ctx, draw) { ctx.save(); ctx.translate(6, 7); draw(css(RS.black)); ctx.restore(); } }),
+  /** The corner tag: a warm-white slab with black condensed lettering — it reads on the red and on the black panel. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    ctx.font = `700 ${fs}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 2) + fs * 0.7, h = fs * 1.2, top = y + fs * 0.07;
+    ctx.fillStyle = css(RS.cream); ctx.fillRect(x, top, w, h);
+    ctx.fillStyle = ink || css(RS.black); spaced(ctx, str, x + fs * 0.35, top + h * 0.5 + fs * 0.36, 2);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The frame layer: no brackets — small print, flush right up top, and a line of it up the left edge. */
+  frame(ctx, env, p) {
+    const a = p.micro;
+    if (a <= 0) return;
+    const { w, h } = env, P = env.o.profile, i = env.o.catIndex, total = P.categories.length;
+    ctx.save(); ctx.fillStyle = css(RS.black, a); ctx.font = `700 15px ${fonts.mono}, ${fonts.cn}`; ctx.textBaseline = "alphabetic"; ctx.textAlign = "right";
+    [`VOL.${pad2(i + 1)}`, (env.cat.name || env.cat.code || "").toUpperCase(), `${pad2(i + 1)} / ${pad2(total)}`].forEach((t, k) => ctx.fillText(t, w - 64, 160 + k * 21));
+    ctx.fillRect(w - 64 - 120, 160 + 3 * 21 - 8, 120, 3);
+    ctx.translate(48, h * 0.62); ctx.rotate(-Math.PI / 2); ctx.textAlign = "left"; ctx.font = `700 14px ${fonts.mono}, ${fonts.cn}`;
+    spaced(ctx, `${(P.brand.name || "").toUpperCase()} ✱ ${(env.cat.code || "").toUpperCase()} ✱ ${env.o.size.w}×${env.o.size.h}`, 0, 0, 3);
+    ctx.restore();
+  },
+  image(ctx, C, unit) { ctx.shadowColor = css(RS.black); ctx.shadowBlur = 0; ctx.shadowOffsetX = 9 * unit; ctx.shadowOffsetY = 9 * unit; },
+  /** Film grain, and the corners gone a little darker, as under a stage light. */
+  post(ctx, w, h, C, p, unit = 1) {
+    grain(ctx, p.grain, unit);
+    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.45, w / 2, h / 2, Math.hypot(w, h) * 0.62);
+    g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, css([70, 8, 6], 0.38));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  },
+  prompt: `Stickers for a red street-culture and music poster — bold, graphic and a little rough, as if cut from a flyer — that read at a glance:
+- strong, simple shapes with attitude: arrows, asterisks, stars, lightning, hands, records, speakers, crowns, eyes, flames; chunky and graphic; no realism, no perspective, no fine detail;
+- flat colour only: black ("ink"), warm white ("white"), and the main colour; one small spot of "yellow" is welcome;
+- the app adds a hard black offset shadow and no outline: do NOT draw outlines or shadows yourself; neighbouring shapes must differ in colour.`,
+  solidPrompt: `Objects from a music and street-fashion poster: a few boxes and cylinders, boldly proportioned — a speaker, a turntable, a microphone, a sneaker box, a boombox; no realism, no fine detail.
+- the renderer paints faces in warm white, a pale red and black: do NOT try to draw shading or outlines yourself;
+- "white" is warm white, "dark" is black, and "main" comes out yellow — use it for one small part that should shout.`,
+};
+
+export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, bluetone, redstreet };
 export const LOOK_IDS = Object.keys(LOOKS);
 
 let current = cel, values = {};

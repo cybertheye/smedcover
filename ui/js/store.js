@@ -73,7 +73,7 @@ export function normalizeProfile(raw) {
   if (!categories.length) categories.push({ id: uid(), name: "Category", sub: "", code: "", color: "#fcee0a", graphic: { kind: "graphic", id: "camera", labels: [], stamp: "" } });
   const st = p.style && typeof p.style === "object" ? p.style : {};
   const style = { template: TEMPLATES.includes(st.template) ? st.template : "stack", theme: st.theme === "light" ? "light" : "dark",
-    look: LOOK_IDS.includes(st.look) ? st.look : "cel", lookParams: {},
+    look: LOOK_IDS.includes(st.look) ? st.look : st.look === "ghibli" ? "vivid" : "cel", lookParams: {},   // "ghibli": the vivid look's first name
     lookSeed: Number.isFinite(st.lookSeed) ? Math.abs(Math.round(st.lookSeed)) % 1000000 : 7 };   // places what a look scatters at random
   // what the user changed about each template: only the settings that differ from the template's own
   style.layoutAdjust = {};

@@ -335,7 +335,9 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 | **Record sleeve** | large flat blocks of colour, tight sans-serif headlines with no outline or shadow, photos in one colour and black; flat layouts of its own; dark or light ground |
 | **Editorial** | a serif headline, thick-and-thin rules, a hairline border, a folio, a huge quiet issue number, black-and-white photos; flat layouts of its own; dark or light ground |
 | **Woodblock book** | a leaf from an old Chinese book: paper ground, a serif title set in vertical columns, the corner tag as a vermilion seal, a thick-and-thin border, ruled columns, a centre column with fishtails at the right edge; objects like woodcuts; flat layouts of its own |
-| **Vivid Ghibli** | the summer of the hand-painted animated films drawn with hard-edged graphic design: a cobalt sky in flat bands; cumulus, far mountains, green hills with a lit crest and little trees as crisp geometric shapes, standing on the edge of the colour block (which becomes the meadow in front); light told by one lit and one shaded flat tone with a hard edge, never a gradient; lines in deep indigo, whites warm. The title is white over warm yellow with an indigo keyline and a solid block shadow; the corner tag is a cream pill; a cream postcard border is optional; photos are made more vivid and warmer |
+| **Vivid illustration** | a saturated animated illustration: one strong azure sky; huge billowing cumulus in three hard-edged planes (white, pale blue, periwinkle) outlined in fine indigo; coral-red towers with brass pipes and a skyline of signboards and lanterns standing on the colour block's edge (which becomes the ground in front); strings of pennants. The title is white over warm yellow with an indigo keyline and a solid block shadow; the corner tag is a cream pill; a cream postcard border is optional; photos are made more vivid and warmer |
+| **Blue retro** | a worn poster in electric blue, black and off-white: photos as coarse halftone in one blue, sprayed grain, thin technical drawing (concentric rings, a crosshair, crop marks, a barcode, monospaced data), star marks and a few sliced glitches; a serif title with a misregistered shadow and one slice knocked sideways; a halftone across the colour block; an electric blue ground or off-white paper |
+| **Red street** | street culture × live music × fashion shoot: a vermilion ground, a black panel, heavy black lettering filling the poster (a condensed face for Latin), photos in black and white or in red, a giant word in deeper red cropped by the edge, small editorial print, film grain and a vignette; flat layouts of its own — stacked, the title takes the whole red field and the tag moves onto the black panel |
 
 The sliders of each look:
 
@@ -346,11 +348,13 @@ The sliders of each look:
 | Record sleeve | photo duotone, rules and catalogue, paper grain |
 | Editorial | rules and folio, black-and-white photo, paper grain |
 | Woodblock book | column rules, age, paper grain, and a *Set the title vertically* checkbox; *Shuffle the random placement* rearranges the foxing |
-| Vivid Ghibli | cumulus, hills, postcard border, paper grain, photo vividness; *Shuffle the random placement* rearranges clouds, hills, trees and gulls |
+| Vivid illustration | cumulus, town and towers, pennants, postcard border, paper grain, photo vividness; *Shuffle the random placement* rearranges clouds, towers, houses and pennants |
+| Blue retro | halftone and spray, glitch slices, technical lines, grain, photo in blue; *Shuffle the random placement* rearranges the rings, stars and spray |
+| Red street | giant word, small print, film grain, photo in red |
 
-**Layouts of their own** — the record sleeve and editorial looks do not use slanted panels. They read the three *Template* choices their own way: Stack is a level band, Split an upright side panel, Banner a slim strip, each in its own proportions. Switching to another look brings the usual layouts back.
+**Layouts of their own** — the record sleeve, editorial and red street looks do not use slanted panels. They read the three *Template* choices their own way: Stack is a level band, Split an upright side panel, Banner a slim strip, each in its own proportions. Switching to another look brings the usual layouts back.
 
-*Photo duotone*, *Black-and-white photo* and *Photo vividness* only do something when a photo fills the canvas.
+*Photo duotone*, *Black-and-white photo*, *Photo vividness*, *Photo in blue* and *Photo in red* only do something when a photo fills the canvas.
 
 **The vertical title of the woodblock look** — each typed line is a column, read top to bottom, the first line on the right. CJK characters stand upright; a run of Latin letters or digits lies on its side, as is usual in vertical setting. A vertical title takes the full height of the page and stands clear of the seal in the lower left. Text effects do not apply to a vertical title; untick *Set the title vertically* for a horizontal one, and they apply again.
 
