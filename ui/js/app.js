@@ -614,10 +614,10 @@ function photoItem(L) {
  */
 function photoAdders(fromLibrary) {
   return [
-    el("div", { class: "row", style: "margin-top:0" },
+    el("div", { class: "row" + (fromLibrary ? " row3" : ""), style: "margin-top:0" },   // in Cover: from assets, upload, AI generate — one line
+      fromLibrary && el("button", { class: "btn", title: t("lib.importHint"), onclick: libraryDialog }, t("lib.import")),
       el("button", { class: "btn", title: fromLibrary ? null : t("lib.uploadTip"), onclick: fromLibrary ? uploadPhotos : stockPhotos }, t("cover.upload")),
-      el("button", { class: "btn" + (GEN.open ? " on" : ""), onclick: () => { GEN.open = !GEN.open; renderPanel(); } }, t("gen.open")),
-      fromLibrary && el("button", { class: "btn", title: t("lib.importHint"), onclick: libraryDialog }, t("lib.import"))),
+      el("button", { class: "btn" + (GEN.open ? " on" : ""), onclick: () => { GEN.open = !GEN.open; renderPanel(); } }, t("gen.open"))),
     GEN.open && genBox()];
 }
 /** Cover → Add photos → From assets: a picture of the bitmaps, chosen, goes on the cover. */

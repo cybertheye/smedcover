@@ -154,6 +154,8 @@
   .sl .why{font-size:12px;line-height:1.4}
   .sl output{font:600 12px var(--mono);text-align:right;opacity:.8}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+  .row.row3{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .row.row3 .btn{padding-inline:4px;overflow:hidden;text-overflow:ellipsis}
   .row3{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end}
   .ink{display:grid;grid-template-columns:1fr 44px auto;align-items:center;gap:8px;margin-top:10px;font-size:13px}
   .ink input[type=color]{width:44px;height:32px;padding:2px;background:var(--panel);border:2px solid var(--line);cursor:pointer}
