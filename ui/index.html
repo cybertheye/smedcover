@@ -69,25 +69,32 @@
   .peek{margin-top:8px;font-size:12px}.peek summary{cursor:pointer;opacity:.7}
   .peek pre{white-space:pre-wrap;max-height:220px;overflow:auto;margin:6px 0 0;padding:8px;border:1px solid var(--line2);font:12px/1.6 ui-monospace,monospace;opacity:.85}
   /* the selected layer's properties: group names on the left, lined up across groups; controls on the right */
-  .props{display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:12px;row-gap:14px;align-items:baseline}
-  .psec{display:contents}
-  .psec-h{font-size:12px;font-weight:600;opacity:.55;white-space:nowrap;display:flex;align-items:baseline;gap:4px}
-  .psec-h.top{align-self:start;padding-top:12px}
-  .psec-b{min-width:0}
-  .psec-b>:first-child,.psec-b>.sl:first-child,.psec-b>.chk:first-child{margin-top:0}
-  .psec-b .chk{margin:8px 0 0}
-  .psec-b .sl{grid-template-columns:54px 1fr 40px;gap:6px}
-  .psec-b .sl>span:first-child{white-space:nowrap}
-  .psec-b .sl.off{grid-template-columns:54px 1fr}
+  /* The selected layer's properties: one grid for all of its groups, four columns — the group's name,
+     a control's own label, the control, its value — so sliders, values and checkboxes line up from
+     group to group. A group and its body take no box of their own (display:contents): their children
+     are the grid's items. A slider's three parts take columns 2–4; anything else spans 2–4. */
+  .props{display:grid;grid-template-columns:max-content max-content minmax(0,1fr) max-content;column-gap:10px;row-gap:12px;align-items:center}
+  .psec,.psec-b{display:contents}
+  .psec-h{grid-column:1;font-size:12px;font-weight:600;opacity:.55;white-space:nowrap;display:flex;align-items:center;gap:4px}
+  .psec-h.top{align-self:start;padding-top:10px}
+  .psec-h.sw{align-self:start;padding-top:4px}
+  .psec-b>*{grid-column:2/-1;min-width:0;margin:0!important}
+  .psec-b>.sl{display:contents}
+  .psec-b>.sl>:nth-child(1){grid-column:2;white-space:nowrap;font-size:13px}
+  .psec-b>.sl>:nth-child(2){grid-column:3;width:100%;margin:0}
+  .psec-b>.sl>:nth-child(3){grid-column:4;font:600 12px var(--mono);text-align:right;opacity:.8;min-width:3.6em}
+  .psec-b>.sl.off>:nth-child(2){grid-column:3/-1;font-size:12px;line-height:1.4}
+  .psec-b>.sl.off>*{opacity:.5}
+  .psec-b>.chk{display:flex}
   .psep{grid-column:1/-1;border-top:1px solid var(--line);margin:2px 0}
   .info{display:inline-grid;place-items:center;width:15px;height:15px;font-size:12px;opacity:.7;cursor:help;font-weight:400}
   .info:hover{opacity:1;color:var(--acc)}
   .sub{font-size:12px;opacity:.6;margin-bottom:6px;display:flex;align-items:center;gap:4px}
-  .sws{display:flex;flex-wrap:wrap;gap:12px}
-  .sw{display:flex;align-items:center;gap:7px;font-size:12px}
+  .sws{display:flex;flex-wrap:wrap;gap:8px 12px}
+  .sw{display:flex;align-items:center;gap:5px;font-size:12px}
   .sw .nm{opacity:.75;align-self:baseline}   /* the swatch row's baseline: the group's name lines up with these words */
-  .sw .chip{position:relative;display:block;width:34px;height:28px}
-  .sw input[type=color]{width:34px;height:28px;padding:1px;background:var(--panel);border:2px solid var(--line);cursor:pointer;display:block}
+  .sw .chip{position:relative;display:block;width:28px;height:24px}
+  .sw input[type=color]{width:28px;height:24px;padding:1px;background:var(--panel);border:2px solid var(--line);cursor:pointer;display:block}
   .sw.auto .chip::after{content:attr(data-auto);position:absolute;left:-3px;bottom:-5px;font:600 9px var(--mono);background:var(--bg);border:1px solid var(--line2);padding:0 3px;pointer-events:none}
   .sw .x{position:absolute;top:-7px;right:-7px;width:16px;height:16px;border-radius:50%;border:1px solid var(--line2);background:var(--bg);color:#fff;font-size:11px;line-height:1;padding:0;cursor:pointer}
   .sw .x:hover{border-color:#fff;background:var(--line2)}
@@ -111,6 +118,7 @@
   .pitem .thumb{margin-top:0;cursor:pointer;position:relative}
   .pitem[style*="--link"]{border-color:var(--link)}
   .pitem.passive{margin-left:18px;border-style:dotted}
+  .pitem.on{border-color:var(--acc)!important}
   .pitem .thumb .del{position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;border:1px solid var(--line2);background:var(--bg);color:#fff;font-size:15px;line-height:1;padding:0;cursor:pointer;display:none}
   .pitem .thumb:hover .del{display:block}
   .pitem .thumb .del:hover{background:#c0392b;border-color:#c0392b}
@@ -163,9 +171,12 @@
 
   /* canvas column */
   #center{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;min-width:0}
-  #toolbar{display:flex;align-items:center;gap:14px;padding:10px 18px;border-bottom:2px solid var(--line);flex-wrap:wrap}
-  #toolbar .name{font:600 13px var(--mono);letter-spacing:.06em}
-  #toolbar .hint{margin:0}
+  /* one line whatever the size is called: the name has a slot of its own (cut short, in full on hover),
+     the help is behind an ⓘ — so nothing after it moves, and the canvas below keeps its height */
+  #toolbar{display:flex;align-items:center;gap:14px;padding:0 18px;height:52px;border-bottom:2px solid var(--line);flex-wrap:nowrap;white-space:nowrap;overflow:hidden}
+  #toolbar .name{font:600 13px var(--mono);letter-spacing:.06em;font-variant-numeric:tabular-nums;width:26ch;flex:none;overflow:hidden;text-overflow:ellipsis}
+  #toolbar .help{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;opacity:.6;cursor:help;flex:none}
+  #toolbar .help:hover{opacity:1}
   #stage{min-height:0;min-width:0;display:grid;place-items:center;padding:18px;overflow:hidden;background:#06060b}
   #stage canvas{display:block;touch-action:none;box-shadow:0 0 0 2px var(--line2)}
   #stage.alpha canvas{background:repeating-conic-gradient(#3a3a48 0% 25%,#24242e 0% 50%) 0 0/20px 20px}
@@ -206,6 +217,7 @@
   .layer .nm[title]{cursor:text}
   .layer .rename{font-size:13px;padding:2px 6px;min-width:0;width:100%}
 
+  #tip{position:fixed;z-index:60;background:var(--panel);border:1px solid var(--line2);box-shadow:0 8px 24px rgba(0,0,0,.45);padding:10px 12px;font-size:12.5px;line-height:1.7;color:#fff;white-space:normal}
   #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#fff;color:var(--ink);padding:12px 22px;font-weight:600;box-shadow:6px 6px 0 var(--acc);opacity:0;pointer-events:none;transition:opacity .2s;z-index:50;max-width:80vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #toast.on{opacity:1}
   body.drop::after{content:attr(data-drop);position:fixed;inset:12px;border:3px dashed var(--acc);background:rgba(10,10,18,.82);display:grid;place-items:center;font-size:28px;letter-spacing:.2em;z-index:45;pointer-events:none}

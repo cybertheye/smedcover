@@ -512,8 +512,11 @@ history. Saving, redrawing and history are debounced, so a long drag does not wr
 repeatedly.
 
 There is no framework: each column is built with a small element helper, `el()`, and rebuilt whole
-when needed. The properties panel is a two-column grid (`.props`): `psec()` makes one group (its name
-left, with an ⓘ from `info()`; its controls right), `layerSection()` the Layer group every layer has,
+when needed. The properties panel is one four-column grid (`.props`: the group's name | a control's own label |
+the control | its value) shared by all groups, so sliders, values and checkboxes line up from group to
+group; groups and their bodies take no box (`display:contents`), their children are the grid's items (a
+slider's three parts in columns 2–4, any other control across 2–4). `psec()` makes one group (its name
+centred on the group's first row, with an ⓘ from `info()` whose click opens a bubble, `showTip`), `layerSection()` the Layer group every layer has,
 and `swatch()` a small colour swatch (optionally automatic).
 
 ### 9.2 Working on the canvas

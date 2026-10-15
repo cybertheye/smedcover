@@ -225,9 +225,9 @@ function selectSize(key) {
 }
 function syncToolbar() {
   const scope = (v) => el("button", { class: "btn" + (S.settings.scope === v ? " on" : ""), onclick: () => { S.settings.scope = v; persistSettings(); syncToolbar(); renderSide(); } }, t("scope." + v));
-  $("toolbar").replaceChildren(...[el("span", { class: "name" }, sizeLabel(selSize())),
+  $("toolbar").replaceChildren(...[el("span", { class: "name", title: sizeLabel(selSize()) }, sizeLabel(selSize())),
     S.mode === "edit" && el("div", { class: "grp" }, el("span", {}, t("props.scope")), el("div", { class: "seg" }, scope("all"), scope("size"))),
-    S.mode === "edit" && el("span", { class: "hint" }, t("cover.how"))].filter(Boolean));
+    S.mode === "edit" && el("span", { class: "help", title: t("cover.how"), onclick: (e) => showTip(e.currentTarget, t("cover.how")) }, el("span", { class: "info" }, "ⓘ"), t("cover.howShort"))].filter(Boolean));
 }
 
 // ---------- editing layers
@@ -544,7 +544,7 @@ function photoBox() {
 function photoItem(L) {
   const rec = recordOf(L), im = rec && rec.img, open = REP.for === L.id, passive = !!L.of, tied = passive || passivesOf(L).length > 0;
   const locked = passive ? t("link.passiveLocked", layerName(owner(L))) : null;
-  return el("div", { class: "pitem" + (passive ? " passive" : ""), style: tied ? `--link:${linkColour(L)}` : null },
+  return el("div", { class: "pitem" + (passive ? " passive" : "") + (L.id === S.layerId ? " on" : ""), dataset: { id: L.id }, style: tied ? `--link:${linkColour(L)}` : null },
     el("div", { class: "thumb", title: t("cover.photoSelect"), onclick: () => selectLayer(L.id) },
       im ? el("img", { src: L.cut && rec.mask ? cutThumb(rec) : rec.src, alt: "" }) : el("div", { class: "hint err", style: "margin:0" }, t("props.photoMissing")),
       el("button", { class: "del", title: t(passivesOf(L).length ? "cover.removeLinked" : "cover.removePhoto"), onclick: (e) => { e.stopPropagation(); if (REP.for === L.id) REP.for = ""; removeLayer(L.id); renderPanel(); } }, "×"),
@@ -1646,13 +1646,25 @@ function renameLayer(id) {
 // Laid out as a two-column grid: a short name on the left for each group of settings, its controls on
 // the right; the names line up whatever their length. Explanations sit behind an ⓘ (hover, or click to
 // read it as a toast); only warnings are written out.
-/** An ⓘ that shows `text` on hover, and as a toast when clicked. */
-const info = (text) => el("span", { class: "info", title: text, onclick: () => toast(text, false) }, "ⓘ");
+/** An ⓘ that shows `text` on hover, and in a bubble beside it when clicked. */
+const info = (text) => el("span", { class: "info", title: text, onclick: (e) => { e.stopPropagation(); showTip(e.currentTarget, text); } }, "ⓘ");
+/** A bubble with `text` by element `at` (wrapped, unlike a toast); the next click anywhere closes it. */
+function showTip(at, text) {
+  const tip = $("tip") || document.body.appendChild(el("div", { id: "tip", hidden: true }));
+  tip.textContent = text; tip.hidden = false;
+  const r = at.getBoundingClientRect(), w = Math.min(320, innerWidth - 24);
+  tip.style.width = w + "px";
+  tip.style.left = clamp(r.left - 12, 12, innerWidth - w - 12) + "px";
+  const below = r.bottom + 8, h = tip.offsetHeight;
+  tip.style.top = (below + h > innerHeight - 12 ? Math.max(12, r.top - h - 8) : below) + "px";
+  setTimeout(() => addEventListener("pointerdown", () => { tip.hidden = true; }, { once: true }), 0);
+}
 /**
- * One group of properties: its name (and an ⓘ with `tip`), then its controls. The name sits on the
- * baseline of the first control; `top` puts it at the top instead (a text box's baseline is its bottom).
+ * One group of properties: its name (and an ⓘ with `tip`), then its controls. The name is centred on
+ * the group's first row; `at` "top" puts it level with the top of a text box, "sw" with the first row
+ * of swatches (which may wrap onto a second).
  */
-const psec = (nameKey, kids, tip = "", top = false) => el("div", { class: "psec" }, el("div", { class: "psec-h" + (top ? " top" : "") }, t(nameKey), tip && info(tip)), el("div", { class: "psec-b" }, kids));
+const psec = (nameKey, kids, tip = "", at = "") => el("div", { class: "psec" }, el("div", { class: "psec-h" + (at ? " " + at : "") }, t(nameKey), tip && info(tip)), el("div", { class: "psec-b" }, kids));
 /** Put a layer back where it was placed by default. */
 function placementControls(L) {
   const f = frame();
@@ -1707,12 +1719,12 @@ function headlineControls(L, set) {
   return [
     psec("props.sec.text", [
       L.type === "text" && el("textarea", { value: L.text, spellcheck: false, style: "height:64px;margin-bottom:8px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
-      fontControl(L, true)], L.type === "text" ? t("props.textHint") : t("props.boundHint"), L.type === "text"),
+      fontControl(L, true)], L.type === "text" ? t("props.textHint") : t("props.boundHint"), L.type === "text" ? "top" : ""),
     psec("props.sec.effect", fx.kids, fx.tip),
     psec("props.sec.color", el("div", { class: "sws" },
       swatch(L, "ink", "props.sw.text", L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff"),
       swatch(L, "hi", "props.sw.hi", cat().color),
-      L.plate && swatch(L, "plateInk", "props.sw.plate", cat().color)), t("props.inkAutoHint")),
+      L.plate && swatch(L, "plateInk", "props.sw.plate", cat().color)), t("props.inkAutoHint"), "sw"),
     psec("props.sec.lines", titleLines(L, set), t(L.plate ? "props.linesOnPlate" : "props.linesNoPlate")),
     psec("props.sec.plate", check("props.plateAdd", L.plate, (v) => set("plate", v, true))),
   ];
@@ -1744,7 +1756,7 @@ function photoControls(L, set) {
     psec("props.sec.picture", [
       slider("props.blur", 0, 80, 1, L.blur, px, (v) => { holdLive(L.id); set("blur", v); }),
       slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => { holdLive(L.id); set("dim", v); }),
-      check("props.treat", L.treat, (v) => set("treat", v))]),
+      check("props.treat", L.treat, (v) => set("treat", v))], t("props.treatTip")),
     psec("props.sec.lines", [
       slider("props.outline", 0, 40, 1, L.outline, px, (v) => { holdLive(L.id); set("outline", v); }),
       slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => { holdLive(L.id); set("shadow", v); }),
@@ -1826,6 +1838,8 @@ function renderSide() {
       el("div", { class: "props" }, typeControls(L), layerSection(L)))
       : el("div", { class: "hint" }, t("layers.none")));
   side.scrollTop = y;
+  // the selected layer's photo, in Cover → Add photos, is framed in the channel colour (without rebuilding that panel)
+  for (const item of document.querySelectorAll("#panel .pitem")) item.classList.toggle("on", item.dataset.id === S.layerId);
 }
 
 // ---------- export

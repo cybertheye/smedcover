@@ -33,6 +33,7 @@ const STR = {
   "cover.tag": ["角标（可选）", "Corner tag (optional)"],
   "cover.tagPh": ["如 EP.03 / VLOG", "e.g. EP.03 / VLOG"],
   "cover.photoHint": ["也可以把照片拖进窗口（拖到画布上就放在松手的位置）。封面的第一张照片铺满画布作为背景，之后的照片像相片一样放在画面上。点缩略图选中它的图层，鼠标移到缩略图上，右上角的 × 删除照片。模糊、压暗、抠图、描边等在右侧属性里调。", "You can also drop photos onto the window (onto the canvas: where you let go). A cover's first photo fills the canvas as its background; the ones after it sit on the cover like prints. Click a thumbnail to select its layer; the × on its corner (on hover) deletes the photo. Blur, dim, cut-out, outline and the rest are in its properties on the right."],
+  "cover.howShort": ["画布操作", "Canvas controls"],
   "cover.how": ["点选图层后拖动移动；拖四角缩放、拖四边拉伸、拖顶部圆点旋转。滚轮也可缩放，方向键微调，Delete 删除素材。在背景或色块上拖出方框可多选（完整框住的元素），Shift+点击 加减。", "Click a layer, drag to move; drag a corner to resize, a side to stretch, the top knob to rotate. Scroll also resizes, arrow keys nudge, Delete removes an added item. Drag a box on the background or the colour block to select what lies wholly inside it; Shift-click adds or removes one."],
 
   "assets.mine": ["我的素材", "My assets"],
@@ -363,7 +364,8 @@ const STR = {
   "props.bgHint": ["这一层是画面的底：深浅和网格，始终在最下面。照片是它上面的照片图层。", "This layer is the ground: light or dark, and the grid. It always stays at the bottom; photos are photo layers above it."],
   "props.photoMissing": ["这张照片的图片不在了（可能来自别的电脑）：删除这个图层，重新上传。", "This photo's picture is missing (it may come from another computer): delete the layer and upload it again."],
   "props.fill": ["铺满画布（作为背景）", "Fill the canvas (as a background)"],
-  "props.treat": ["跟随风格处理照片（染色、双色调、黑白等）", "The look's treatment of photos (tint, duotone, black and white…)"],
+  "props.treatTip": ["「跟随风格处理照片」：按当前风格给照片染色、做双色调或黑白等，和封面统一；取消勾选则保留照片原样。", "The look's photo treatment: the current look tints the photo, makes it duotone or black and white and so on, to match the cover; untick it to keep the photo as it is."],
+  "props.treat": ["跟随风格处理照片", "The look's photo treatment"],
   "props.cut": ["去除背景", "Remove the background"],
   "props.uncut": ["恢复背景", "Put the background back"],
   "props.fillHint": ["铺满画布的照片像背景一样拖动和缩放；先点一下选中它，再拖。", "A photo filling the canvas moves and scales like a background: click it first, then drag."],

@@ -165,7 +165,7 @@ Every layer except Background and Corner brackets can be moved, resized, stretch
 
 ### One collage, every size
 
-*Applies to* in the toolbar decides where your change lands:
+The toolbar above the canvas is always one line: the current size (in a slot of its own, so nothing after it moves when you switch sizes), then *Applies to*, and at the right *ⓘ Canvas controls*, how the mouse and keys work. *Applies to* decides where your change lands:
 
 - **All sizes** (default) — placement is stored relative to the canvas, so one adjustment maps to every size.
 - **This size only** — fine-tunes just the size on screen.
