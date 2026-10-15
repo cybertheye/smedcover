@@ -4,7 +4,7 @@
 import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, brackets } from "./cel.js";
 import { virtualSize, layout, adjustLayout } from "./layout.js";
 import { drawTitle, parseTitle } from "./title.js";
-import { photoRect, drawPhotoAt, sizeOf, gaussBlur, gaussBlurRGBA } from "./photo.js";
+import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled } from "./style.js";
@@ -504,48 +504,112 @@ function sheet(i, w, h, m) {
   return x;
 }
 const IDENTITY_BY = { dx: 0, dy: 0, s: 1, r: 0, kx: 1, ky: 1 };
-const FEATHERS = new WeakMap();
+const FEATHERS = new WeakMap(), ALPHAS = new WeakMap();
+/**
+ * A mask's alpha, read back from it once (at most 1024 px on its longer side): {w, h, a, box}, a in 0–1,
+ * box [x0, y0, x1, y1] the part where there is any.
+ */
+function alphaOf(m) {
+  let A = ALPHAS.get(m);
+  if (A) return A;
+  const t0 = performance.now(), [W, H] = sizeOf(m), k = Math.min(1, 1024 / Math.max(W, H)), w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
+  const x = Object.assign(document.createElement("canvas"), { width: w, height: h }).getContext("2d", { willReadFrequently: true });
+  x.drawImage(m, 0, 0, w, h);
+  const d = x.getImageData(0, 0, w, h).data, a = new Float32Array(w * h), box = [w, h, 0, 0];
+  for (let i = 0; i < a.length; i++) {
+    if (!(a[i] = d[i * 4 + 3] / 255)) continue;
+    const px = i % w, py = (i - px) / w;
+    if (px < box[0]) box[0] = px;
+    if (px >= box[2]) box[2] = px + 1;
+    if (py < box[1]) box[1] = py;
+    box[3] = py + 1;
+  }
+  ALPHAS.set(m, (A = { w, h, a, box }));
+  pxTime("soften in: read the mask (once)", t0);
+  return A;
+}
+/**
+ * Part of alpha `A` made smaller, `fx` times across and `fy` down: the w × h pixels from (x0, y0) of that
+ * smaller copy, each the average of the pixels it covers.
+ */
+function shrinkAlpha(A, fx, fy, x0, y0, w, h) {
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const ya = Math.min(A.h - 1, Math.floor((y0 + y) * fy)), yb = Math.min(A.h, Math.max(ya + 1, Math.floor((y0 + y + 1) * fy)));
+    for (let x = 0; x < w; x++) {
+      const xa = Math.min(A.w - 1, Math.floor((x0 + x) * fx)), xb = Math.min(A.w, Math.max(xa + 1, Math.floor((x0 + x + 1) * fx)));
+      let s = 0;
+      for (let j = ya; j < yb; j++) for (let i = xa, o = j * A.w; i < xb; i++) s += A.a[o + i];
+      out[y * w + x] = s / ((yb - ya) * (xb - xa));
+    }
+  }
+  return out;
+}
 /**
  * A mask with its edge softened inward by `px` (px on a 1920-wide rendering of the photo, as a photo's
  * blur): its alpha blurred, then only what was inside kept, so the edge fades into the subject and none of
- * the background comes back. Made on a copy of at most 1024 px (512 while something is dragged), kept per mask.
+ * the background comes back. The alpha is read from the mask once, and only the part around the subject is
+ * worked on. The softer the edge, the smaller the copy it is worked out on (a soft edge has no detail to
+ * keep): small enough that the blur there is six pixels wide each way, which three box blurs make exactly —
+ * or, while a slider or the layer is dragged, one pixel, a coarser edge that costs a fraction (unless the
+ * finished one is already there). Kept per mask and amount.
  */
 function feathered(m, px) {
-  const cap = isFast() ? 512 : 1024, key = `${px}|${cap}`, slot = FEATHERS.get(m) || new Map();
+  const slot = FEATHERS.get(m) || new Map(), fast = isFast();
   FEATHERS.set(m, slot);
-  if (slot.has(key)) return slot.get(key);
-  const [W, H] = sizeOf(m), k = Math.min(1, cap / Math.max(W, H)), w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
-  const c = Object.assign(document.createElement("canvas"), { width: w, height: h }), x = c.getContext("2d", { willReadFrequently: true });
-  x.fillStyle = "#000"; x.fillRect(0, 0, w, h); x.drawImage(m, 0, 0, w, h);   // white where the subject is: the alpha as grey
-  const id = x.getImageData(0, 0, w, h), d = id.data;
-  gaussBlur(d, w, h, Math.max(0.5, (px * Math.max(w, h)) / 1920));
-  for (let i = 0; i < d.length; i += 4) { d[i + 3] = Math.max(0, Math.min(255, (d[i] - 127.5) * 2)); d[i] = d[i + 1] = d[i + 2] = 255; }
-  x.putImageData(id, 0, 0);
-  if (slot.size > 12) slot.clear();
-  slot.set(key, c);
+  if (slot.has(px)) return slot.get(px);
+  if (fast && slot.has(px + "~")) return slot.get(px + "~");
+  const t0 = performance.now(), A = alphaOf(m), sigma = Math.max(0.5, (px * Math.max(A.w, A.h)) / 1920);
+  const f = Math.max(1, sigma / (fast ? Math.SQRT2 : Math.sqrt(42))), w = Math.max(1, Math.round(A.w / f)), h = Math.max(1, Math.round(A.h / f));
+  const c = Object.assign(document.createElement("canvas"), { width: w, height: h });
+  if (A.box[2] > A.box[0]) {
+    const pad = Math.ceil(3 * sigma) + 2, [bx0, by0, bx1, by1] = A.box;   // past this, the blur reaches nothing
+    const x0 = Math.max(0, Math.floor((bx0 - pad) / f)), y0 = Math.max(0, Math.floor((by0 - pad) / f));
+    const sw = Math.min(w, Math.ceil((bx1 + pad) / f)) - x0, sh = Math.min(h, Math.ceil((by1 + pad) / f)) - y0;
+    const a = shrinkAlpha(A, A.w / w, A.h / h, x0, y0, sw, sh);
+    blurChannel(a, sw, sh, sigma / f);
+    const x = c.getContext("2d"), id = x.createImageData(sw, sh), d = id.data;
+    for (let i = 0; i < a.length; i++) { d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = 255; d[i * 4 + 3] = Math.max(0, Math.min(255, (a[i] - 0.5) * 510)); }
+    x.putImageData(id, x0, y0);
+  }
+  if (slot.size > 24) slot.clear();
+  slot.set(fast ? px + "~" : px, c);
+  pxTime("soften in: worked out (script)", t0);
   return c;
 }
 /**
  * The outward soft edge of a cut-out: a blurred copy of what is on work canvas `c` (w × h device px),
- * drawn behind it — the subject's own colours fading outward, none of the background. Blurred on a copy
- * made smaller the stronger the blur (a blur needs no more detail), so it costs little at any strength.
+ * drawn behind it — the subject's own colours fading outward, none of the background. Blurred on the GPU:
+ * the picture is made smaller (by up to half), then halved again and again (each halving averages its
+ * pixels), then made larger again the same steps back (each smoothing), so nothing is read back and no pixel
+ * is touched in script. How much smaller in all sets how wide the blur: about 2.3 × `sigma`; the first step
+ * takes what is left over from the halvings, so the width follows the slider smoothly.
  */
 function haloBehind(c, w, h, sigma) {
-  const f = Math.max(1, sigma / 2), sw = Math.max(1, Math.round(w / f)), sh = Math.max(1, Math.round(h / f));
-  const small = PHOTO.halo || (PHOTO.halo = document.createElement("canvas"));
-  if (small.width !== sw || small.height !== sh) { small.width = sw; small.height = sh; }
-  const x = small.getContext("2d", { willReadFrequently: true });
-  x.clearRect(0, 0, sw, sh); x.drawImage(c.canvas, 0, 0, sw, sh);
-  const id = x.getImageData(0, 0, sw, sh);
-  gaussBlurRGBA(id.data, sw, sh, sigma / f);
-  x.putImageData(id, 0, 0);
-  c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = "destination-over"; c.drawImage(small, 0, 0, w, h); c.restore();
+  const t0 = performance.now(), F = Math.max(2, sigma * 2.3), n = Math.min(10, Math.floor(Math.log2(F))), first = F / 2 ** n;
+  const steps = (first > 1.05 ? [first] : []).concat(Array(n).fill(2)), mips = PHOTO.mips || (PHOTO.mips = []), sizes = [];
+  let src = c.canvas, sw = w, sh = h, k = 1;
+  steps.forEach((s, i) => {
+    k *= s;
+    const nw = Math.max(1, Math.round(w / k)), nh = Math.max(1, Math.round(h / k)), m = mips[i] || (mips[i] = document.createElement("canvas"));
+    if (m.width !== nw || m.height !== nh) { m.width = nw; m.height = nh; }
+    const x = m.getContext("2d");
+    x.clearRect(0, 0, nw, nh); x.drawImage(src, 0, 0, sw, sh, 0, 0, nw, nh);
+    sizes.push([nw, nh]); src = m; sw = nw; sh = nh;
+  });
+  for (let i = steps.length - 2; i >= 0; i--) {   // back up, a step at a time, into the larger canvases
+    const m = mips[i], [nw, nh] = sizes[i], x = m.getContext("2d");
+    x.clearRect(0, 0, nw, nh); x.drawImage(src, 0, 0, sw, sh, 0, 0, nw, nh);
+    src = m; sw = nw; sh = nh;
+  }
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = "destination-over"; c.drawImage(src, 0, 0, sw, sh, 0, 0, w, h); c.restore();
+  pxTime("soften out (GPU)", t0);
 }
 const MASK_BOXES = new WeakMap();
 /** The box round what is opaque in a mask, as fractions of its size ({x0, y0, x1, y1}), or null. Kept per mask. */
 function maskBox(m) {
   if (MASK_BOXES.has(m)) return MASK_BOXES.get(m);
-  const [W, H] = sizeOf(m), k = Math.min(1, 256 / Math.max(W, H)), w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
+  const t0 = performance.now(), [W, H] = sizeOf(m), k = Math.min(1, 256 / Math.max(W, H)), w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
   const c = Object.assign(document.createElement("canvas"), { width: w, height: h }), x = c.getContext("2d", { willReadFrequently: true });
   x.drawImage(m, 0, 0, w, h);
   const d = x.getImageData(0, 0, w, h).data;
@@ -553,6 +617,7 @@ function maskBox(m) {
   for (let y = 0; y < h; y++) for (let i = 0; i < w; i++) if (d[(y * w + i) * 4 + 3] > 64) { if (i < x0) x0 = i; if (i > x1) x1 = i; if (y < y0) y0 = y; if (y > y1) y1 = y; }
   const box = x1 < 0 ? null : { x0: x0 / w, y0: y0 / h, x1: (x1 + 1) / w, y1: (y1 + 1) / h };
   MASK_BOXES.set(m, box);
+  pxTime("mask box", t0);
   return box;
 }
 /** An opaque rectangle the size of a photo, for the outline of one that is not cut out. Kept on its record. */
@@ -575,7 +640,7 @@ function silhouette(shape, grow, colour) {
   const key = `${grow.toFixed(1)}|${colour}|${max}`, cache = SILS.get(shape) || new Map();
   SILS.set(shape, cache);
   if (cache.has(key)) return cache.get(key);
-  const [W, H] = sizeOf(shape), K = Math.min(1, max / Math.max(W, H));
+  const t0 = performance.now(), [W, H] = sizeOf(shape), K = Math.min(1, max / Math.max(W, H));
   const g = grow * K, p = Math.ceil(g) + 2, c = document.createElement("canvas");
   c.width = Math.ceil(W * K) + 2 * p; c.height = Math.ceil(H * K) + 2 * p;
   const x = c.getContext("2d"), n = g > 0 ? Math.min(48, 16 + Math.round(g)) : 1;
@@ -585,6 +650,7 @@ function silhouette(shape, grow, colour) {
   const sil = { c, p: p / K, k: 1 / K };
   if (cache.size > 48) cache.clear();
   cache.set(key, sil);
+  pxTime("silhouette (canvas, not script)", t0);
   return sil;
 }
 /**

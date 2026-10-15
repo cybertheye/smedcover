@@ -4,6 +4,10 @@
 // after that moving or scaling the photo, or editing anything else, costs a single drawImage.
 // (Canvas filters are not available in WebKit web views, hence the JS blur.)
 
+/** For checks of speed: while `on`, time spent computing pixels in script (blurs, masks…) is added up in `ms` by kind. */
+export const PIXELS = { on: false, ms: {} };
+export const pxTime = (name, t0) => { if (PIXELS.on) PIXELS.ms[name] = (PIXELS.ms[name] || 0) + performance.now() - t0; };
+
 /** Gaussian blur approximated by three box blurs, in place on RGBA bytes (alpha untouched). */
 export function gaussBlur(d, w, h, sigma) {
   const r = Math.max(1, Math.round(Math.sqrt(sigma * sigma * 4 + 1) / 2 - 0.5)), inv = 1 / (2 * r + 1);
@@ -26,30 +30,29 @@ export function gaussBlur(d, w, h, sigma) {
 }
 
 /**
- * Gaussian blur of RGBA bytes with their alpha, in place: colour is weighted by alpha while blurring
- * (premultiplied), so transparent pixels lend no colour and edges fade out in the colours next to them.
+ * Gaussian blur (three box blurs) of one channel of floats, in place, edges clamped. Both passes walk
+ * memory in order: the vertical one keeps a running sum per column and goes row by row.
  */
-export function gaussBlurRGBA(d, w, h, sigma) {
+export function blurChannel(a, w, h, sigma) {
   const r = Math.max(1, Math.round(Math.sqrt(sigma * sigma * 4 + 1) / 2 - 0.5)), inv = 1 / (2 * r + 1);
-  const a = new Float32Array(d.length), b = new Float32Array(d.length);
-  for (let i = 0; i < d.length; i += 4) { const k = d[i + 3] / 255; a[i] = d[i] * k; a[i + 1] = d[i + 1] * k; a[i + 2] = d[i + 2] * k; a[i + 3] = d[i + 3]; }
-  const pass = (src, dst, len, cnt, step, stride) => {   // one axis, all four channels, edges clear
-    for (let l = 0; l < cnt; l++) for (let c = 0; c < 4; c++) {
-      const o = l * stride + c;
-      let acc = 0;
-      for (let k = 0; k <= r && k < len; k++) acc += src[o + k * step];
-      for (let p = 0, i = o; p < len; p++, i += step) {
-        dst[i] = acc * inv;
-        if (p + r + 1 < len) acc += src[i + (r + 1) * step];
-        if (p - r >= 0) acc -= src[i - r * step];
-      }
+  const b = new Float32Array(a.length), acc = new Float32Array(w);
+  const across = (src, dst) => {
+    for (let y = 0; y < h; y++) {
+      const o = y * w;
+      let q = src[o] * (r + 1);
+      for (let k = 1; k <= r; k++) q += src[o + Math.min(k, w - 1)];
+      for (let x = 0; x < w; x++) { dst[o + x] = q * inv; q += src[o + Math.min(x + r + 1, w - 1)] - src[o + Math.max(x - r, 0)]; }
     }
   };
-  for (let k = 0; k < 3; k++) { pass(a, b, w, h, 4, w * 4); pass(b, a, h, w, w * 4, 4); }
-  for (let i = 0; i < d.length; i += 4) {
-    const al = a[i + 3], k = al > 0.01 ? 255 / al : 0;
-    d[i] = Math.min(255, a[i] * k); d[i + 1] = Math.min(255, a[i + 1] * k); d[i + 2] = Math.min(255, a[i + 2] * k); d[i + 3] = al;
-  }
+  const down = (src, dst) => {
+    for (let x = 0; x < w; x++) acc[x] = src[x] * (r + 1);
+    for (let k = 1; k <= r; k++) { const o = Math.min(k, h - 1) * w; for (let x = 0; x < w; x++) acc[x] += src[o + x]; }
+    for (let y = 0; y < h; y++) {
+      const o = y * w, add = Math.min(y + r + 1, h - 1) * w, sub = Math.max(y - r, 0) * w;
+      for (let x = 0; x < w; x++) { dst[o + x] = acc[x] * inv; acc[x] += src[add + x] - src[sub + x]; }
+    }
+  };
+  for (let k = 0; k < 3; k++) { across(a, b); down(b, a); }
 }
 
 /** A picture's size, whether it is an image or a canvas. */
@@ -64,7 +67,7 @@ function blurred(im, b, hi) {
   const slot = slotOf(cache, im, hi);
   const key = `${b}|${w}|${h}`;
   if (slot.im !== im || slot.key !== key) {
-    const c = slot.cv;
+    const t0 = performance.now(), c = slot.cv;
     c.width = w; c.height = h;
     const x = c.getContext("2d", { willReadFrequently: true });
     x.imageSmoothingQuality = "high";
@@ -73,6 +76,7 @@ function blurred(im, b, hi) {
     gaussBlur(id.data, w, h, sigma / f);
     x.putImageData(id, 0, 0);
     slot.im = im; slot.key = key;
+    pxTime("photo blur", t0);
   }
   return slot.cv;
 }
@@ -84,7 +88,7 @@ function greyOf(src, im, key, hi) {
   const w = Math.max(1, Math.round(sw * f)), h = Math.max(1, Math.round(sh * f));
   const slot = slotOf(greys, im, hi);
   if (slot.im !== im || slot.key !== key) {
-    const c = slot.cv;
+    const t0 = performance.now(), c = slot.cv;
     c.width = w; c.height = h;
     const x = c.getContext("2d", { willReadFrequently: true });
     x.imageSmoothingQuality = "high";
@@ -93,6 +97,7 @@ function greyOf(src, im, key, hi) {
     for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = (d[i] * 54 + d[i + 1] * 183 + d[i + 2] * 19) >> 8;
     x.putImageData(id, 0, 0);
     slot.im = im; slot.key = key;
+    pxTime("grey copy", t0);
   }
   return slot.cv;
 }

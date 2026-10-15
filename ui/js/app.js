@@ -18,7 +18,7 @@ import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, effectUses, warpCorners } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams } from "./style.js";
-import { sizeOf } from "./photo.js";
+import { sizeOf, PIXELS } from "./photo.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 
@@ -2332,7 +2332,7 @@ async function start() {
 }
 /** SMEDCOVER_SELFTEST mode: export real covers in every format through the normal path, report, quit. */
 async function selfTest(dir) {
-  if (await invoke("selftest_drag").catch(() => false)) return dragTest();
+  if (await invoke("selftest_drag").catch(() => false)) return dragTest().catch((e) => invoke("selftest_done", { report: JSON.stringify({ error: String((e && e.stack) || e) }) }));
   const report = { ok: false, files: [], errors: [] };
   const cjk = (f) => S.systemFonts.includes(f) ? !S.latinFonts.has(f) : null;   // which installed fonts can set Chinese
   report.fonts = { system: S.systemFonts.length, latin: [...S.latinFonts].filter((f) => S.systemFonts.includes(f)).length, cjk: Object.fromEntries(["PingFang SC", "Songti SC", "Helvetica", "Cochin", "BM Hanna Pro", "Menlo"].map((f) => [f, cjk(f)])) };
@@ -2372,9 +2372,9 @@ async function selfTest(dir) {
         if (ok) {
           front.outline = 8; front.shadow = 0.6; main.blur = 12;
           S.cover.title = "*Subject* in front\nof the title";
-          // a second photo, as a print: turned, outlined, and one more with its background removed
+          // a second photo, as a print: turned, outlined, and one more with its background removed and soft edges
           const print = newLayer("photo", { pid: main.pid, outline: 10, shadow: 0.7 }); print.t.all = { ...print.t.all, x: 0.78, y: 0.3, s: 0.32, r: -8 };
-          const sticker = newLayer("photo", { pid: main.pid, cut: true, outline: 6 }); sticker.t.all = { ...sticker.t.all, x: 0.86, y: 0.72, s: 0.4, r: 6 };
+          const sticker = newLayer("photo", { pid: main.pid, cut: true, outline: 6, feather: 6, spread: 14 }); sticker.t.all = { ...sticker.t.all, x: 0.86, y: 0.72, s: 0.4, r: 6 };
           S.cover.layers.splice(at("frame"), 0, print, sticker);
           for (const look of ["cel", "cyber"]) {
             S.profile.style.look = look;
@@ -2492,15 +2492,38 @@ async function selfTest(dir) {
   await invoke("selftest_done", { report: JSON.stringify(report, null, 2) }).catch(() => null);
 }
 /**
- * SMEDCOVER_SELFTEST_DRAG: drags each text and photo layer of the cover in the data folder across the
- * canvas with pointer events, as a hand would, and reports how long the frames took.
+ * SMEDCOVER_SELFTEST_DRAG: measures how smooth editing is on the cover in the data folder, at a Retina
+ * screen's pixel ratio, as a hand would work: a whole redraw (first, and again with everything cached),
+ * dragging each text and photo layer with pointer events, the size thumbnails, and dragging the sliders of
+ * the photos that cost most. Each part is split into time spent by layer and time spent computing pixels
+ * in script (blurs, masks — what a faster language could speed up) as against drawing on canvases.
  */
 async function dragTest() {
   Object.defineProperty(window, "devicePixelRatio", { get: () => 2 });   // as on a Retina screen, whatever screen the test window opens on
-  const cv = $("cv"), report = { dpr: devicePixelRatio, canvas: [cv.width, cv.height], look: S.profile.style.look, layers: [] };
+  const cv = $("cv"), report = { dpr: devicePixelRatio, look: S.profile.style.look, layers: S.cover.layers.length };
   cv.setPointerCapture = () => {}; cv.releasePointerCapture = () => {};
-  const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
+  // the next frame — or a second, as a window that is covered gets no frames and the test would wait for ever
+  const frame = () => new Promise((r) => { requestAnimationFrame(() => r()); setTimeout(r, 1000); });
+  const flush = () => cv.getContext("2d").getImageData(0, 0, 1, 1);   // wait for the drawing to be done, not only queued
+  const name = (id) => layerName(layer(id) || { type: id });
+  const begin = () => { Object.assign(TIMING, { on: true, ms: {}, rebuilt: 0 }); Object.assign(PIXELS, { on: true, ms: {} }); };
+  const end = (n = 1) => {
+    TIMING.on = PIXELS.on = false;
+    const r = (o) => Object.fromEntries(Object.entries(o).filter(([, ms]) => ms / n >= 0.5).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, ms]) => [k, Math.round(ms / n)]));
+    return { byLayer: r(Object.fromEntries(Object.entries(TIMING.ms).map(([id, ms]) => [name(id), ms]))), pixelsInScript: r(PIXELS.ms) };
+  };
+  // 1. a whole redraw: the first (nothing cached yet), then again
+  begin(); let t0 = performance.now(); drawMain(); flush();
+  report.redrawFirst = { ms: Math.round(performance.now() - t0), canvas: [cv.width, cv.height], ...end() };
+  begin(); t0 = performance.now(); for (let i = 0; i < 3; i++) { drawMain(); flush(); }
+  report.redrawCached = { ms: Math.round((performance.now() - t0) / 3), ...end(3) };
+  // 2. the size thumbnails, all of them, as after an edit
+  begin(); t0 = performance.now();
+  for (const size of S.profile.sizes) { const th = $("th-" + sizeKey(size)); if (th) { paint(th, size, virtualSize(size.w, size.h)[0] * 0.2); th.getContext("2d").getImageData(0, 0, 1, 1); } }
+  report.thumbnails = { sizes: S.profile.sizes.length, ms: Math.round(performance.now() - t0), ...end() };
   await new Promise((r) => setTimeout(r, 1500));
+  // 3. dragging each layer: the first frame (the still layers painted once) and the frames after it
+  report.drags = [];
   for (const L of S.cover.layers.filter((l) => (l.type === "text" || l.type === "photo" || l.type === "title") && l.visible && appliesTo(l, cat().id))) {
     queueDraw(); await frame(); await frame();
     const h = cv._hits.find((x) => x.id === L.id);
@@ -2509,17 +2532,34 @@ async function dragTest() {
     let x = b.left + h.cx * k, y = b.top + h.cy * k;
     if (L.fill) { selectLayer(L.id); await frame(); }
     cv.dispatchEvent(new PointerEvent("pointerdown", { clientX: x, clientY: y, buttons: 1, button: 0, pointerId: 1, bubbles: true }));
-    const times = []; let last = performance.now();
-    Object.assign(TIMING, { on: true, ms: {}, rebuilt: 0 });
+    const times = []; let last = performance.now(), firstFrame = null;
+    begin();
     for (let i = 0; i < 40; i++) {
       x += 3; if (cv.onpointermove) cv.onpointermove(new PointerEvent("pointermove", { clientX: x, clientY: y, buttons: 1 }));
       await frame(); const now = performance.now(); times.push(Math.round(now - last)); last = now;
+      if (i === 0) { firstFrame = end(); begin(); }
     }
+    const rest = end(39);
     if (cv.onpointerup) cv.onpointerup(new PointerEvent("pointerup", { clientX: x, clientY: y }));
-    await new Promise((r) => setTimeout(r, 700));
-    TIMING.on = false;
-    const s = [...times].sort((a, b) => a - b), top = Object.entries(TIMING.ms).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([id, ms]) => `${layerName(layer(id) || { type: id })}:${Math.round(ms / 40)}ms/frame`);
-    report.layers.push({ name: layerName(L), type: L.type, selected: S.layerId === L.id, median: s[20], worst: s[39], over33: times.filter((t) => t > 33).length, first: times.slice(0, 3), stillRebuilt: TIMING.rebuilt, costliest: top });
+    await new Promise((r) => setTimeout(r, 900));
+    const s = [...times].sort((a, b) => a - b);
+    report.drags.push({ layer: name(L.id), first: times.slice(0, 3), median: s[20], firstFrame, perFrameAfter: rest });
+  }
+  // 4. the sliders of the photos that cost most to paint: each step repaints that photo
+  report.sliders = [];
+  for (const L of S.cover.layers.filter((l) => l.type === "photo" && l.visible && appliesTo(l, cat().id) && (l.cut || l.outline > 0 || l.shadow > 0))) {
+    for (const key of ["dim", ...(L.cut ? ["feather", "spread"] : []), ...(L.outline > 0 ? ["outline"] : [])]) {
+      const was = L[key], times = [];
+      begin();
+      for (let i = 1; i <= 12; i++) {
+        holdLive(L.id); L[key] = key === "dim" ? 0.01 * i : Math.max(0, was + (i % 2 ? 1 : -1) * Math.ceil(i / 2));
+        touch({ cover: true }); const t = performance.now(); await frame(); times.push(performance.now() - t);
+      }
+      const parts = end(12);
+      L[key] = was; touch({ cover: true }); await new Promise((r) => setTimeout(r, 500));
+      times.sort((a, b) => a - b);
+      report.sliders.push({ layer: name(L.id), slider: key, median: Math.round(times[6]), worst: Math.round(times[11]), ...parts });
+    }
   }
   await invoke("selftest_done", { report: JSON.stringify(report, null, 2) }).catch(() => null);
 }
