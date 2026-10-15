@@ -2264,6 +2264,29 @@ async function adoptEmbedded(list) {
     else if (a.spec && !userAssets.has(a.id)) { const r = normalizeSpec(a.spec); if (r.spec) await saveAssetRecord(putSpecAsset(a.id, a.name, r.spec)).catch(fail); }
   }
 }
+/** The imported fonts that lettering layers in `layerLists` use, for an export: [{name, src}]. */
+async function embedFonts(layerLists) {
+  const names = new Set(layerLists.flat().map((L) => L.font).filter((f) => f && S.importedFonts.includes(f)));
+  const out = [];
+  for (const name of names) { const src = await files.read(`fonts/${name}.font`).catch(() => null); if (src) out.push({ name, src }); }
+  return out;
+}
+/** Adds the fonts a file brought that this computer does not have yet. */
+async function adoptFonts(list) {
+  for (const f of Array.isArray(list) ? list : []) {
+    if (!f || typeof f.name !== "string" || typeof f.src !== "string" || !/^data:[\w/+.-]*;base64,/.test(f.src)) continue;
+    const name = f.name.replace(/[^\w\u4e00-\u9fff -]+/g, " ").trim().slice(0, 80);
+    if (!name || S.importedFonts.includes(name)) continue;
+    if (await registerFont(name, f.src)) await files.write(`fonts/${name}.font`, f.src).catch(fail);
+  }
+}
+/** Puts the pictures a file brought into the photo store (keeping their ids) and the bitmap library. */
+async function adoptPhotos(photos, nameKey) {
+  const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
+  for (const [pid, p] of Object.entries(photos && typeof photos === "object" ? photos : {})) {
+    if (/^[\w-]{1,40}$/.test(pid) && p && pic(p.src) && (await putPhoto(pic(p.src), { original: pic(p.original), mask: pic(p.mask), pid }))) keepPicture(pid, t(nameKey), "upload");
+  }
+}
 /** Shows another profile, on the channel it was last on, with its own covers as they were left. */
 async function switchProfile(id) {
   S.profile = S.profiles.find((p) => p.id === id) || S.profiles[0];
@@ -2295,6 +2318,7 @@ const profileActions = {
     for (const f of await files.list("covers/" + gone.id).catch(() => [])) await files.remove(`covers/${gone.id}/${f}`).catch(() => null);   // its covers go with it
     await switchProfile(S.profiles[0].id);
   },
+  /** A profile file: a new profile (its own id), with the covers of its channels if the file has them. */
   async import() {
     const f = await pickFile(".json,application/json");
     if (!f) return;
@@ -2302,44 +2326,111 @@ const profileActions = {
       const raw = JSON.parse(await readAs(f, "readAsText"));
       if (!raw || typeof raw !== "object") throw 0;
       await adoptEmbedded(raw.assets);
-      await addProfile(raw.profile || raw);
+      await adoptFonts(raw.fonts);
+      const p = await addProfile(raw.profile || raw, false), covers = raw.covers && typeof raw.covers === "object" ? raw.covers : null;
+      if (covers) {   // version 3 with covers: a whole profile, moved or backed up
+        await adoptPhotos(raw.photos, "lib.fromProfile");
+        for (const c of p.categories) if (covers[c.id] && typeof covers[c.id] === "object") await writeJson(coverPath(p.id, c.id), await upgradeCover(channelCover(covers[c.id], p, c.id), null)).catch(fail);
+        if (p.categories.some((c) => c.id === raw.channel)) S.settings.channels[p.id] = raw.channel;
+      }
+      await switchProfile(p.id);
+      toast(t(covers ? "prof.importedAll" : "prof.imported", p.name));
     } catch (e) { toast(t("msg.badFile")); }
   },
-  export: () => saveText(`${S.profile.name || "profile"}.smedprofile.json`,
-    JSON.stringify({ app: "smedcover", kind: "profile", version: 2, profile: S.profile, assets: embedAssets(usedUserAssets(S.profile, null)) }, null, 2)),
+  export: () => profileExportDialog(),
 };
+const PROF = { withCovers: false };
+/** Exporting a profile: its settings to share as a template, or with every channel's cover to move it whole. */
+function profileExportDialog() {
+  const m = $("modal");
+  m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("prof.exportTitle")),
+    el("label", { class: "chk", style: "margin:0" }, el("input", { type: "checkbox", checked: PROF.withCovers, onchange: (e) => { PROF.withCovers = e.target.checked; } }), el("span", {}, t("prof.withCovers"))),
+    el("div", { class: "hint", style: "margin:0;font-size:13px;opacity:.8" }, t("prof.withCoversHint")),
+    el("button", { class: "btn solid wide", onclick: () => { closeModal(); exportProfile(PROF.withCovers); } }, t("prof.exportGo")),
+    el("button", { class: "btn wide", onclick: closeModal }, t("exp.cancel"))));
+  m.hidden = false;
+}
+/**
+ * Writes the profile file. Always: the profile, the vector assets and imported fonts it uses. With
+ * covers (version 3): every channel's cover kept so far, the pictures they show, and the channel it is on.
+ */
+async function exportProfile(withCovers) {
+  const covers = withCovers ? Object.fromEntries(Object.entries(S.covers).filter(([id]) => S.profile.categories.some((c) => c.id === id))) : null;
+  const list = covers ? Object.values(covers) : [];
+  const ids = new Set([...usedUserAssets(S.profile, null), ...list.flatMap((c) => usedUserAssets(null, c))]);
+  const file = { app: "smedcover", kind: "profile", version: 3, profile: S.profile, assets: embedAssets([...ids]),
+    fonts: await embedFonts([S.profile.design.layers, ...list.map((c) => c.layers)]),
+    ...(covers ? { covers, channel: S.cover.catId, photos: embedPhotos(list) } : {}) };
+  saveText(`${S.profile.name || "profile"}${covers ? ".all" : ""}.smedprofile.json`, JSON.stringify(file, null, covers ? 0 : 2));
+}
 /** A new layer list with the photo layers of `old` put back, each above the layer it was above (or the background). */
 function keepPhotos(layers, old) {
   old.forEach((L, i) => { if (L.type !== "photo") return; const below = old[i - 1]; insertAbove(layers, below && layers.some((l) => l.id === below.id) ? below.id : "bg", L); });
   return layers;
 }
-/** The pictures a cover's photo layers show, for a project file: {pid: {src, original, mask}}. */
-function embedPhotos(cover) {
+/** Asks how to open a project whose profile this computer does not have: "new", "current", or null (not at all). */
+function askProjectProfile(name) {
+  return new Promise((done) => {
+    const m = $("modal"), pick = (v) => () => { closeModal(); done(v); };
+    m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("proj.askTitle")),
+      el("div", { class: "hint", style: "margin:0;font-size:13px;opacity:.8" }, t("proj.askBody", name)),
+      el("button", { class: "btn solid wide", onclick: pick("new") }, t("proj.asNew", name)),
+      el("button", { class: "btn wide", onclick: pick("current") }, t("proj.asCurrent", S.profile.name)),
+      el("button", { class: "btn wide", onclick: pick(null) }, t("exp.cancel"))));
+    m.hidden = false;
+  });
+}
+/** The pictures the photo layers of `covers` show, for a file: {pid: {src, original, mask}}. */
+function embedPhotos(covers) {
   const out = {};
-  for (const pid of pidsOf(cover)) { const r = S.photos.get(pid); if (r) out[pid] = { src: r.src, original: r.original || null, mask: r.mask ? r.mask.src : null }; }
+  for (const pid of new Set(covers.flatMap((c) => [...pidsOf(c)]))) { const r = S.photos.get(pid); if (r) out[pid] = { src: r.src, original: r.original || null, mask: r.mask ? r.mask.src : null }; }
   return out;
 }
 const projectActions = {
+  /**
+   * A project file opens into its own profile and channel: the profile here with its id, else — asked —
+   * as a new profile, or into the current one (on its channel if this profile has it). Files before
+   * version 4 have no profile: they open into the channel on the canvas. Undo brings back the cover it replaced.
+   */
   async open() {
     const f = await pickFile(".json,application/json");
     if (!f) return;
+    let raw;
+    try { raw = JSON.parse(await readAs(f, "readAsText")); if (!raw || raw.kind !== "project" || !raw.cover) throw 0; } catch (e) { return toast(t("msg.badFile")); }
     try {
-      const raw = JSON.parse(await readAs(f, "readAsText"));
-      if (!raw || raw.kind !== "project") throw 0;
-      await adoptEmbedded(raw.assets);
-      const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
-      const cover = normalizeCover(raw.cover, S.profile);
-      for (const [pid, p] of Object.entries(raw.photos && typeof raw.photos === "object" ? raw.photos : {})) {
-        if (/^[\w-]{1,40}$/.test(pid) && p && pic(p.src) && (await putPhoto(pic(p.src), { original: pic(p.original), mask: pic(p.mask), pid }))) keepPicture(pid, t("lib.fromProject"), "upload");
+      let profile = S.profile, catId = S.cover.catId;
+      const theirs = raw.profile && typeof raw.profile === "object" ? raw.profile : null;
+      const here = theirs && S.profiles.find((p) => p.id === theirs.id);
+      if (here) profile = here;
+      else if (theirs) {
+        const how = await askProjectProfile(theirs.name || raw.profileName || "—");
+        if (!how) return;
+        if (how === "new") { await adoptFonts(raw.fonts); profile = await addProfile(theirs, false); }
       }
-      const opened = await upgradeCover(cover, { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
-      setCover(channelCover(opened, S.profile, S.cover.catId));   // into the channel on the canvas
-      S.layerId = "title";
-      touch({ cover: true, panel: true, side: true });
-    } catch (e) { toast(t("msg.badFile")); }
+      if (profile.categories.some((c) => c.id === raw.catId)) catId = raw.catId;
+      else if (profile !== S.profile) catId = channelOf(profile);
+      await adoptEmbedded(raw.assets);
+      await adoptFonts(raw.fonts);
+      await adoptPhotos(raw.photos, "lib.fromProject");
+      if (profile !== S.profile) await switchProfile(profile.id);
+      if (catId !== S.cover.catId) await switchChannel(catId);
+      clearTimeout(timers.hist); commitHistory();
+      const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
+      const opened = await upgradeCover(normalizeCover(raw.cover, S.profile), { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
+      setCover(channelCover(opened, S.profile, catId));
+      await loadPhotos(pidsOf(S.cover));
+      S.layerId = "title"; S.picked = [];
+      touch({ cover: true, panel: true, side: true, strip: true });
+      toast(t("proj.opened", S.profile.name, cat().name || cat().code || "—"));
+    } catch (e) { fail(e); }
   },
-  save: () => saveText(`${(S.cover.title.split("\n")[0] || "cover").replace(/[*\\/:?"<>|]+/g, "").slice(0, 24) || "cover"}.smedcover.json`,
-    JSON.stringify({ app: "smedcover", kind: "project", version: 3, profileName: S.profile.name, cover: S.cover, photos: embedPhotos(S.cover), assets: embedAssets(usedUserAssets(null, S.cover)) })),
+  /** Version 4: the cover with its profile and channel, the pictures, vector assets and imported fonts it uses. */
+  async save() {
+    const fonts = await embedFonts([S.cover.layers, S.profile.design.layers]);
+    saveText(`${(S.cover.title.split("\n")[0] || "cover").replace(/[*\\/:?"<>|]+/g, "").slice(0, 24) || "cover"}.smedcover.json`,
+      JSON.stringify({ app: "smedcover", kind: "project", version: 4, profileName: S.profile.name, profile: S.profile, catId: S.cover.catId, cover: S.cover,
+        photos: embedPhotos([S.cover]), assets: embedAssets(usedUserAssets(S.profile, S.cover)), fonts }));
+  },
   reset() { setCover(channelCover(null, S.profile, S.cover.catId)); S.layerId = "title"; touch({ cover: true, panel: true, side: true }); },
 };
 

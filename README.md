@@ -17,7 +17,7 @@ How it works inside: [ARCHITECTURE.md](ARCHITECTURE.md).
 | **Channel** | One content line within the brand, with its own name, colour and graphic. A cover takes its colour and graphic from its channel. |
 | **Cover** | Each channel of each profile has one: its title, corner tag and its own stack of layers. Switching channel or profile shows that one; none affects another, and each is saved as you go. |
 | **Layer** | Each part of a cover. Built-in layers (background, colour block, title, …) are on every cover; free layers are the stickers, images, photos and text you add. |
-| **Project** | The current cover saved to a file together with its profile and the assets it uses, so it can be reopened as it was. |
+| **Project** | The current cover saved to a file with its profile, channel, photos, assets and imported fonts, so it can be reopened as it was — on another computer too. |
 
 ## The window
 
@@ -240,7 +240,7 @@ Every layer that carries words (title, corner tag, channel name, brand row, text
 
 A font marked *no Chinese* has no Chinese glyphs: choosing it changes Latin letters and digits only, and Chinese stays in the default face. To change the Chinese, pick a font without the mark (PingFang, Songti, Kaiti…). Imported fonts are not checked.
 
-Imported fonts live in this computer's app data and do not travel with profile or project files; opened elsewhere, a font that is not there shows as "not on this computer" and the default is used.
+Imported fonts live in this computer's app data. Exporting a profile or saving a project packs the imported fonts it uses into the file, and importing or opening it elsewhere installs them; a font that did not come along shows as "not on this computer" and the default is used.
 
 ### Text effects
 
@@ -479,8 +479,16 @@ Exports are written only where you choose.
 | Windows | `%APPDATA%\com.cyven.smedcover\` |
 | Linux | `~/.local/share/com.cyven.smedcover/` |
 
-To move to another computer or share with someone: export the profile (JSON; uploaded assets travel
-with it) or save a project file.
+To move to another computer or share with someone there are two kinds of file:
+
+- **Profile** (*Setup → Profile → Export profile*):
+  - *With each channel's cover and its photos* unticked: the brand settings only (channels, sizes, look, default design, and the assets and imported fonts they use) — to share as a template.
+  - Ticked: a whole backup of the profile, every channel's cover and the photos on them included — to move to another computer; it can be large.
+  - Importing always adds a new profile; a whole backup brings back every channel's cover, on the channel it was exported from.
+- **Project** (*Project → Save* in the top bar, Cmd/Ctrl + S): the current cover with its profile, channel, photos, assets and imported fonts. Opening one:
+  - with its profile on this computer: back in that profile, on that channel, in place of the cover there (undo brings it back);
+  - without: you are asked whether to *import it as a new profile and open it as it was* or *put it into the current profile* (on the same channel if this profile has it, else on the channel on the canvas);
+  - a project file of an earlier version has no profile, and opens on the channel on the canvas as before.
 
 ## Run and build from source
 
@@ -523,6 +531,18 @@ are not public, so the plan is to export open formats that both can read.
   - Layers become groups; title, corner tag, text layers, colour block and corner brackets are vector, the photo and cel graphics are embedded images.
   - Text either stays editable (the same font must be installed) or keeps its exact look (converted to shapes).
 - [ ] Check the results in Illustrator and Affinity: layer names, grouping, transparency, text.
+
+### Custom looks (after more built-in looks are added to Style)
+
+Goal: users make looks of their own and import looks others made, and the Style tab shows their sliders as it does now (the list of sliders is data already).
+
+- [ ] **Look presets** (first, small): a JSON file — which built-in look, its slider values, its seed, and optionally its colours (paper, inks); exported, imported, shared, with that look's sliders in the panel. Variations of the existing looks only.
+- [ ] **Declarative look files** (later, large): the ways of drawing the built-in looks share, taken apart into building blocks — ground (flat, gradient, halftone field, grid, noise), photo treatment (tint, duotone, black and white), title (fill, outline, offset shadow, two inks off register, glow), the stickers' outline and shadow, corner marks, finishing (grain, scan lines, vignette), the repaint and AI asset prompts — which a look file puts together as data, declaring its own sliders and binding them to the blocks' settings; the panel builds the sliders.
+  - No code is run, so a file from someone else is safe to import; it is checked as AI assets are.
+  - Try it on one or two built-in looks first (Risograph, Editorial) to see whether the format is enough, then move the others one by one.
+  - A look editor could start from "save as" on an existing look; AI could write a look file from a sentence.
+- Not planned: script plugins (a look as JavaScript) — that would run strangers' code in an app that can read and write files.
+- Open: whether an imported look may name fonts, and whether the font files travel with it; whether the editor lives in Setup or in Style.
 
 ### Other
 

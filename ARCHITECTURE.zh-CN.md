@@ -110,7 +110,11 @@ tests/               不依赖 DOM 的模块的单元测试
 
 其他文件：`assets/<id>.json`（我的素材：图片为 data URL，AI 素材为描述；可带 `folder`，所在文件夹的 id）、`asset-folders.json`（我的素材的文件夹：`[{id, name}]`，`normalizeFolders` 校验；文件夹没了的素材视为未归类）、`fonts/<名称>.font`（导入的字体）、`photos/<pid>`（照片、原图和遮罩，见 6.3）、`photo-library.json`（位图素材：`[{pid, name, kind, at}]`，`kind` 是 `upload`、`ai` 或 `repaint`，最新的在前，`normalizeLibrary` 校验）、`ai.json`（AI 连接设置，含令牌，不随档案或工程导出）。
 
-**工程文件**把封面、档案和用到的用户素材打包进同一个 JSON，因此可以在另一台电脑上原样打开。
+**档案文件**（`.smedprofile.json`，第 3 版）：`{app, kind: "profile", version, profile, assets, fonts}`，完整备份另有 `covers`（`{频道 id: 封面}`）、`photos`（`{pid: {src, original, mask}}`）和 `channel`（导出时所在频道）。`exportProfile()` 写，`profileActions.import()` 读：总是新档案（新 id，频道 id 不变），封面经 `channelCover()` 校验后写进 `covers/<新 id>/`，照片进照片库和位图素材。
+
+**工程文件**（`.smedcover.json`，第 4 版）：`{app, kind: "project", version, profileName, profile, catId, cover, photos, assets, fonts}`。打开时（`projectActions.open()`）：本机有同 id 的档案，切到它和 `catId` 频道；没有则 `askProjectProfile()` 询问作为新档案导入还是套用到当前档案；第 3 版及以前没有 `profile`，放进画布上的频道。替换前先 `commitHistory()`，所以能撤销。
+
+两种文件都带用到的用户素材（`embedAssets`）和导入字体（`embedFonts`：图层 `font` 指向的、在 `S.importedFonts` 里的；`adoptFonts` 装上本机还没有的，写进 `fonts/`）。
 
 ## 4. 图层模型（`layers.js`）
 
