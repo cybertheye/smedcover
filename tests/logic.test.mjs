@@ -476,7 +476,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
@@ -616,7 +616,7 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
 
 test("the poster looks: many settings each, their own grounds, flat layouts (all but the collage, on the slanted ones), and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
-  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon"]) {
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart"]) {
     const L = LOOKS[id];
     assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
     assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
@@ -686,6 +686,24 @@ test("the yellow poster and the neon pop: the yellow can give way to the channel
   const a = LOOKS.neon.theme({}, [40, 120, 220], lookValues()).titleFill;
   setLook("neon", { shift: 0.5 }, 3, true);
   assert.notEqual(LOOKS.neon.theme({}, [40, 120, 220], lookValues()).titleFill, a, "turning the hue changes the palette");
+  setLook("cel");
+});
+
+test("the court, velvet, rave, chrome and net-art looks: their grounds, the team colour, the typed number", () => {
+  setLook("court", null, 3, false);
+  assert.equal(LOOKS.court.theme({}, [40, 120, 220], lookValues()).field, "rgba(236,234,228,1)");   // a worn white wall
+  assert.equal(lookParams("court", { jersey: " 1234 " }).jersey, "123");
+  setLook("velvet", null, 3, false);
+  assert.equal(LOOKS.velvet.theme({}, [40, 120, 220], lookValues()).field, "rgba(98,112,218,1)");   // periwinkle
+  setLook("rave", null, 3, true);
+  assert.ok(LOOKS.rave.oneTheme, "the rave is a night look only");
+  for (const onDark of [true, false]) {   // the chrome and net-art lettering stays just off the house ink, so the small parts' ink can be swapped on its own
+    setLook("chrome", null, 3, onDark);
+    const t = parseColour(LOOKS.chrome.theme({}, [40, 120, 220], lookValues()).text);
+    assert.notEqual(role(t), "ink", `chrome on ${onDark ? "black" : "grey"}`);
+  }
+  setLook("netart", null, 3, false);
+  assert.equal(LOOKS.netart.accent.fill([40, 120, 220]), "rgba(192,192,192,1)");   // a silver system panel
   setLook("cel");
 });
 

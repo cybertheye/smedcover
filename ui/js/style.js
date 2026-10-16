@@ -4014,7 +4014,892 @@ const neon = {
 - "white" is the pale highlight, "dark" the night, and "main" the channel colour.`,
 };
 
-export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant, collage, yellow, pitch, dots, neon };
+// ====================================================================== shared by the looks below
+/** Where the channel graphic stands on the cover, as placeShape takes it: its silhouette's middle and solid height (a move of the layer itself not counted). */
+function artPlace(env, S) {
+  const A = env.G && env.G.art, b = S.box;
+  return A ? { cx: A.x + ((b.x0 + b.x1) / 2) * A.s, cy: A.y + ((b.y0 + b.y1) / 2) * A.s, size: (b.y1 - b.y0) * A.s } : null;
+}
+/**
+ * On a work canvas holding a silhouette, gives it volume: copies of the shape moved down and right
+ * darken all of it but its upper-left rim, copies moved up and left lighten all but its lower-right
+ * one — so the light comes from the upper left. `d`: the step, in units; `a`: how strongly.
+ */
+function bevel(x, S, cx, cy, size, d, light, shade, a) {
+  if (a <= 0) return;
+  x.save(); x.globalCompositeOperation = "source-atop";
+  for (let i = 1; i <= 3; i++) {
+    x.globalAlpha = a * 0.28; placeShape(x, S, shade, cx + d * i, cy + d * i, size);
+    x.globalAlpha = a * 0.2; placeShape(x, S, light, cx - d * i, cy - d * i, size);
+  }
+  x.restore();
+}
+/** A gradient along a line whose hues cycle like a soap film, starting at hue `turn` (0–1). */
+function iridescent(ctx, x0, y0, x1, y1, turn, alpha = 1) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  for (let i = 0; i <= 8; i++) g.addColorStop(i / 8, css(mix(rainbow(turn + i * 0.13), [255, 255, 255], 0.12), alpha));
+  return g;
+}
+/** A glass bubble: clear in the middle, tinted toward the rim, an iridescent edge, a highlight arc and a glint. */
+function glassBubble(ctx, x, y, r, tint, a = 1) {
+  ctx.save(); ctx.globalAlpha = a;
+  const g = ctx.createRadialGradient(x, y, r * 0.5, x, y, r);
+  g.addColorStop(0, css(tint, 0.03)); g.addColorStop(0.85, css(tint, 0.2)); g.addColorStop(1, "rgba(255,255,255,0.5)");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+  ctx.lineWidth = Math.max(1, r * 0.035); ctx.strokeStyle = iridescent(ctx, x - r, y - r, x + r, y + r, rand(x * 0.01 + y * 0.013), 0.75); ctx.stroke();
+  ctx.lineCap = "round"; ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = Math.max(1.5, r * 0.07);
+  ctx.beginPath(); ctx.arc(x, y, r * 0.72, Math.PI * 1.08, Math.PI * 1.42); ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.beginPath(); ctx.arc(x - r * 0.28, y - r * 0.44, Math.max(1, r * 0.06), 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+// ====================================================================== court: the basketball poster
+// Basketball posters and team prints: a varsity number in the team colour, halftone and outlined; the
+// ball with its seams; a half court in isometric plan with its stand and net; a hoop in dotted line;
+// spray paint dripping; the figure leaving speed trails; the print distressed, the wall behind it worn.
+const BB = { orange: [236, 106, 34], seam: [40, 22, 14], royal: [38, 82, 178], navy: [14, 26, 64], paper: [236, 234, 228], ink: [24, 24, 28], white: [248, 246, 240], wood: [222, 170, 104] };
+const bbGround = () => (dark ? BB.navy : BB.paper), bbInk = () => (dark ? BB.white : BB.ink);
+/** The team colour: the channel's, made vivid; royal blue (gold on the navy ground) where it would be lost against the ball or the ground. */
+const bbTeam = (C) => { const c = boost(C, 0.5); return near(c, BB.orange, 120) || near(c, bbGround(), 120) ? (dark ? [250, 196, 40] : BB.royal) : c; };
+/** A basketball: the leather lit from the upper left, halftone in its shade, its eight seams, a shadow under it. */
+function basketball(ctx, x, y, r, rot, half) {
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.22)"; ctx.beginPath(); ctx.ellipse(x + r * 0.15, y + r * 1.04, r * 0.8, r * 0.13, 0, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fillStyle = css(BB.orange); ctx.fill();
+  ctx.save(); ctx.clip();
+  const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r * 1.05);
+  g.addColorStop(0, "rgba(255,226,186,0.4)"); g.addColorStop(0.6, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(70,24,0,0.4)");
+  ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  if (half > 0) { ctx.beginPath(); ctx.arc(x + r * 0.55, y + r * 0.55, r, 0, TAU); ctx.clip(); dotScreen(ctx, x + r * 2, y + r * 2, BB.seam, Math.max(5, Math.round(r * 0.08)), 0.45 * half); }
+  ctx.restore();
+  ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.clip();
+  ctx.translate(x, y); ctx.rotate(rot); ctx.strokeStyle = css(BB.seam); ctx.lineWidth = Math.max(2, r * 0.045); ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.moveTo(0, -r); ctx.lineTo(0, r); ctx.stroke();
+  for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * r * 1.32, 0, r * 0.96, 0, TAU); ctx.stroke(); }   // the two curved seams
+  ctx.restore();
+  ctx.strokeStyle = css(BB.seam); ctx.lineWidth = Math.max(2, r * 0.045); ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+/**
+ * A half court in isometric plan, its baseline at the back, running toward the viewer and cropped by
+ * the floor: the lines come in over the first half of `amt`, the key and the circles fill in over the
+ * second, and the stand with its backboard, rim and net rises with it.
+ */
+function courtPlan(ctx, env, amt, team) {
+  const F = openField(env), fh = F.y1 - F.y0, s = fh * 0.05, ox = F.x1 - s * 7, oy = F.y1 - s * 8.6, la = Math.min(1, amt * 2), fa = clamp(amt * 2 - 1);
+  const P = (X, Y, Z = 0) => [ox + (X - Y) * 0.866 * s, oy + (X + Y) * 0.5 * s - Z * s];
+  const path = (pts, close) => { ctx.beginPath(); pts.forEach(([X, Y, Z], i) => { const [x, y] = P(X, Y, Z); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); if (close) ctx.closePath(); };
+  const arc = (cx, cy, r, a0, a1, z = 0) => { const out = []; for (let i = 0; i <= 40; i++) { const t = a0 + ((a1 - a0) * i) / 40; out.push([cx + Math.cos(t) * r, cy + Math.sin(t) * r, z]); } return out; };
+  const line = dark ? BB.white : BB.orange, fill2 = dark ? BB.orange : BB.navy;
+  ctx.save(); ctx.lineJoin = "round"; ctx.lineCap = "round";
+  if (fa > 0) {
+    ctx.globalAlpha = fa;
+    path([[-2.45, 0], [2.45, 0], [2.45, 5.8], [-2.45, 5.8]], true); ctx.fillStyle = css(team); ctx.fill();
+    path(arc(0, 5.8, 1.8, 0, Math.PI), true); ctx.fillStyle = css(fill2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.globalAlpha = la; ctx.strokeStyle = css(line); ctx.lineWidth = Math.max(2, s * 0.09);
+  path([[-7.5, 0], [7.5, 0], [7.5, 14], [-7.5, 14]], true); ctx.stroke();
+  path([[-2.45, 0], [-2.45, 5.8], [2.45, 5.8], [2.45, 0]]); ctx.stroke();
+  path(arc(0, 5.8, 1.8, 0, TAU)); ctx.stroke();
+  const a3 = Math.acos(6.6 / 6.75);
+  path([[-6.6, 0], ...arc(0, 1.575, 6.75, Math.PI - a3, a3), [6.6, 0]]);   // the three-point line: straight in the corners, then the arc
+  ctx.stroke();
+  path(arc(0, 14, 1.8, Math.PI, TAU)); ctx.stroke();
+  if (fa > 0) {   // the stand: a post behind the baseline, an arm, the backboard, the rim and the net
+    ctx.globalAlpha = fa; ctx.strokeStyle = css(bbInk()); ctx.lineWidth = Math.max(3, s * 0.16);
+    path([[0, -1.2, 0], [0, -1.2, 3.5], [0, 0.95, 3.5]]); ctx.stroke();
+    path([[-0.9, 1.2, 2.9], [0.9, 1.2, 2.9], [0.9, 1.2, 3.95], [-0.9, 1.2, 3.95]], true); ctx.fillStyle = css(BB.white); ctx.fill(); ctx.lineWidth = Math.max(2, s * 0.07); ctx.stroke();
+    path([[-0.29, 1.2, 3.05], [0.29, 1.2, 3.05], [0.29, 1.2, 3.5], [-0.29, 1.2, 3.5]], true); ctx.stroke();
+    ctx.strokeStyle = css(BB.orange); ctx.lineWidth = Math.max(2, s * 0.08); path(arc(0, 1.575, 0.23, 0, TAU, 3.05)); ctx.stroke();
+    ctx.strokeStyle = css(bbInk(), 0.7); ctx.lineWidth = Math.max(1, s * 0.035);
+    for (let i = 0; i < 10; i++) { const t0 = (i / 10) * TAU, t1 = t0 + TAU / 10; path([[Math.cos(t0) * 0.23, 1.575 + Math.sin(t0) * 0.23, 3.05], [Math.cos(t1) * 0.15, 1.575 + Math.sin(t1) * 0.15, 2.6]]); ctx.stroke(); path([[Math.cos(t1) * 0.23, 1.575 + Math.sin(t1) * 0.23, 3.05], [Math.cos(t0) * 0.15, 1.575 + Math.sin(t0) * 0.15, 2.6]]); ctx.stroke(); }
+    const [bx, by] = P(-3.5, 9, 0.35);   // a ball on the floor, in the key's light
+    basketball(ctx, bx, by, s * 0.38, 0.4, 0);
+  }
+  ctx.restore();
+}
+/** A hoop seen straight on, hanging from the top of the field, drawn in dotted line like a coarse halftone print. */
+function hoopFront(ctx, env, amt) {
+  const F = openField(env), fw = F.x1 - F.x0, W = fw * (0.14 + 0.16 * amt), x = F.x0 + fw * 0.82, top = F.y0 + 14, lw = Math.max(3, W * 0.03), ink = bbInk();
+  ctx.save(); ctx.globalAlpha = Math.min(1, amt * 3); ctx.strokeStyle = css(ink); ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.lineWidth = lw * 1.6; ctx.strokeRect(x - W / 2, top, W, W * 0.6);
+  ctx.lineWidth = lw; ctx.strokeRect(x - W * 0.16, top + W * 0.3, W * 0.32, W * 0.24);
+  const ry = top + W * 0.6, rw = W * 0.26, nh = W * 0.42, bw = W * 0.16;
+  ctx.fillStyle = css(ink); ctx.fillRect(x - W * 0.05, top + W * 0.54, W * 0.1, W * 0.07);
+  ctx.strokeStyle = css(BB.orange); ctx.lineWidth = lw * 1.3; ctx.beginPath(); ctx.ellipse(x, ry, rw, W * 0.045, 0, 0, TAU); ctx.stroke();
+  ctx.strokeStyle = css(ink); ctx.lineWidth = lw * 0.75; ctx.setLineDash([lw * 0.4, lw * 0.9]);
+  for (let i = 0; i <= 8; i++) {   // the net: two sets of strands crossing into diamonds as it narrows
+    const t = i / 8, xa = x - rw + 2 * rw * t;
+    for (const d of [-1, 1]) { const xb = x - bw + 2 * bw * clamp(t + d * 0.25); ctx.beginPath(); ctx.moveTo(xa, ry + W * 0.03); ctx.lineTo(xb, ry + nh); ctx.stroke(); }
+  }
+  for (let k = 1; k <= 3; k++) { const yy = ry + (nh * k) / 3.4, half = rw - (rw - bw) * (k / 3.4); ctx.beginPath(); ctx.moveTo(x - half, yy); ctx.lineTo(x + half, yy); ctx.stroke(); }
+  ctx.restore();
+}
+/**
+ * Where the varsity number and the ball go: beside the title where there is room; else toward the
+ * field's far side, the number lower so it shows under the title, and the ball just below the title's
+ * last line (`below`), where it is not hidden.
+ */
+function bbSpot(ctx, env) {
+  const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, T = titleArea(ctx, env), room = T ? F.x1 - (T.x + T.w) : fw;
+  if (room > fw * 0.3) return { F, cx: T ? (T.x + T.w + F.x1) / 2 : F.x0 + fw * 0.7, cy: F.y0 + fh * 0.48, room, below: null };
+  return { F, cx: F.x0 + fw * 0.72, cy: F.y0 + fh * 0.58, room: fw * 0.45, below: T.y + T.h };
+}
+const court = {
+  id: "court",
+  repaint: (c) => `a basketball poster made from the photograph: a bold two-colour team print in ${c} and basketball orange, halftone dots, the subject in high contrast, a distressed screen-print texture on a worn white wall; still the same picture, no text.`,
+  about: { zh: "篮球海报：校队球衣式的大号数字（团队色、网点填充、白边加橙色外描边），一颗带缝线和网点阴影的篮球坐在数字中间；可加等距视角的半场平面图（篮架、篮筐、球网一起立起来）、点线画的正面篮筐、喷漆滴流、频道图形带出的速度残影；丝网印刷的斑驳和旧墙面质感。团队色来自频道色。米白墙底或深海军蓝底；自带平直的版式，色块是木地板。", en: "Basketball poster: a varsity number in the team colour — halftone fill, a white gap and an orange outline — with the ball, seams and halftone shading, sitting in it; a half court in isometric plan with its stand, rim and net rising, a hoop in dotted line, spray paint dripping, speed trails behind the channel graphic; the distress of a screen print and a worn wall. The team colour is the channel's. A worn white wall or deep navy; flat layouts of its own, the colour block a hardwood floor." },
+  name: { zh: "篮球海报", en: "Basketball poster" },
+  seeded: true,
+  params: [
+    { key: "number", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "球衣号码", en: "Jersey number" } },
+    { key: "jersey", text: true, max: 3, def: "", name: { zh: "号码内容", en: "The number" }, placeholder: { zh: "留空：用频道序号", en: "Empty: the channel's place" } },
+    { key: "ball", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "篮球", en: "Ball" } },
+    { key: "court", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "半场平面", en: "Half court" } },
+    { key: "hoop", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "正面篮筐", en: "Hoop" } },
+    { key: "spray", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "喷漆滴流", en: "Spray drips" } },
+    { key: "motion", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "速度残影", en: "Speed trails" } },
+    { key: "halftone", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "网点", en: "Halftone" } },
+    { key: "distress", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "丝网斑驳", en: "Screen-print wear" } },
+    { key: "wall", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "旧墙面", en: "Worn wall" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "颗粒", en: "Grain" } },
+    { key: "duo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.85, name: { zh: "照片双色", en: "Photo in two colours" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.18, side: 0.3, strip: 0.11 }),
+  theme: (base) => ({ ...base, field: css(bbGround()), text: css(bbInk()), dim: css(bbInk(), 0.6), titleFill: css(bbInk()), titleInk: css(bbGround()), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The ground; the half court; the dotted hoop; speed trails behind the channel graphic; then the
+   * varsity number with the spray and the ball on it. A photo becomes a two-colour print (navy, the team
+   * colour, white) through a halftone.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, u = Math.min(w, h), team = bbTeam(C);
+    ctx.fillStyle = css(bbGround()); ctx.fillRect(0, 0, w, h);
+    if (env.photo) {
+      env.drawPhoto(p.duo);
+      mapTones(ctx, toneTable([[0, mix(BB.navy, team, 0.2)], [0.55, team], [1, BB.white]], 0.15), p.duo * 0.85);
+      dotScreen(ctx, w, h, BB.navy, 8, 0.35 * p.halftone);
+      return true;
+    }
+    if (!L.grid) return true;
+    if (p.court > 0) courtPlan(ctx, env, p.court, team);
+    if (p.hoop > 0) hoopFront(ctx, env, p.hoop);
+    const S = canPaint(ctx) && graphicShape(env), A = S && artPlace(env, S);
+    if (A && p.motion > 0) {   // the figure has just passed: soft copies trailing back, and speed lines
+      for (let i = 5; i >= 1; i--) blurred(ctx, A.size * 0.02, css(team, (0.5 * p.motion) / Math.sqrt(i)), () => placeShape(ctx, S, [0, 0, 0], A.cx - i * A.size * 0.1 * (0.4 + p.motion), A.cy, A.size));
+      ctx.save(); ctx.strokeStyle = css(team, 0.75); ctx.lineCap = "round";
+      for (let k = 0; k < Math.round(4 + 8 * p.motion); k++) { const y = A.cy + (rand(k * 2.9 + 1500) - 0.5) * A.size * 0.8, x1 = A.cx - A.size * (0.35 + rand(k * 3.3 + 1501) * 0.2), len = A.size * (0.3 + rand(k * 4.1 + 1502) * 0.7) * p.motion; ctx.lineWidth = 2 + rand(k + 1503) * 4; ctx.beginPath(); ctx.moveTo(x1 - len, y); ctx.lineTo(x1, y); ctx.stroke(); }
+      ctx.restore();
+    }
+    const at = bbSpot(ctx, env), fh = at.F.y1 - at.F.y0;
+    if (p.number > 0 && canPaint(ctx)) {   // the varsity number: team colour through a halftone, a white gap, an orange outline
+      const str = [...((p.jersey || pad2(env.o.catIndex + 1)).toUpperCase())].filter((c) => c.trim()).slice(0, 3).join("") || "0", x = workLike(ctx, "bb");
+      x.font = `900 100px ${fonts.en}, ${fonts.cn}`; const fs = Math.min(fh * (0.5 + 0.45 * p.number), (at.room * 0.9 * 100) / Math.max(1, x.measureText(str).width));
+      x.font = `900 ${fs}px ${fonts.en}, ${fonts.cn}`; x.textAlign = "center"; x.textBaseline = "middle"; x.lineJoin = "round";
+      x.fillStyle = css(team); x.fillText(str, at.cx, at.cy);
+      if (p.halftone > 0) dotScreen(x, w, h, [0, 0, 0], Math.max(6, Math.round(fs * 0.035)), 0.75 * p.halftone, "destination-out");
+      x.globalCompositeOperation = "destination-over";
+      x.strokeStyle = css(BB.white); x.lineWidth = fs * 0.07; x.strokeText(str, at.cx, at.cy);
+      x.strokeStyle = css(BB.orange); x.lineWidth = fs * 0.13; x.strokeText(str, at.cx, at.cy);
+      layDown(ctx, x, Math.min(1, p.number * 4));
+    }
+    // under a long title the ball goes just below its last line, left of the channel graphic
+    const br = u * (0.05 + 0.14 * p.ball), G = env.G && env.G.art, gl = G ? G.x - 300 * G.s : at.F.x1;
+    const bx = at.below ? clamp(gl - br * 1.15, at.F.x0 + (at.F.x1 - at.F.x0) * 0.3, at.cx) : at.cx + (p.number > 0 ? br * 0.25 : 0);
+    const by = at.below ? clamp(at.below + br * 0.75, at.cy, at.F.y1 - br * 1.15) : at.cy + (p.number > 0 ? br * 0.1 : 0);
+    if (p.spray > 0 && p.ball > 0) {   // spray paint round the ball, and drips running down from it
+      ctx.save(); ctx.fillStyle = css(team, 0.85);
+      for (let k = 0, n = Math.round(500 * p.spray); k < n; k++) { const a = rand(k * 1.3 + 1510) * TAU, d = br * (0.95 + rand(k * 2.1 + 1511) ** 2 * 0.7 * (0.4 + p.spray)); ctx.beginPath(); ctx.arc(bx + Math.cos(a) * d, by + Math.sin(a) * d, 0.8 + rand(k * 3.7 + 1512) * 2.2, 0, TAU); ctx.fill(); }
+      for (let k = 0, n = Math.round(3 + 5 * p.spray); k < n; k++) {
+        const off = (rand(k * 4.3 + 1513) - 0.5) * br * 1.6, top = by + Math.sqrt(Math.max(0, br * br - off * off)) * 0.6, len = br * (0.3 + rand(k * 5.9 + 1514) * 1.8) * p.spray, dw = br * (0.07 + rand(k * 6.7 + 1515) * 0.09);
+        ctx.beginPath(); rounded(ctx, bx + off - dw / 2, top, dw, len, dw / 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(bx + off, top + len, dw * 0.75, 0, TAU); ctx.fill();
+      }
+      ctx.restore();
+    }
+    if (p.ball > 0) basketball(ctx, bx, by, br, -0.5 + rand(1520) * 0.6, p.halftone);
+    return true;
+  },
+  accent: { fill: () => css(BB.wood), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.strokeStyle = css(BB.white); ctx.lineWidth = 7; run(0, 0); } },   // the hardwood floor and its boundary line
+  /** Heavy condensed capitals with a second colour set off a little behind them, as on a jersey (the shadow slider); highlighted words in ball orange. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, team = bbTeam(o.C || BB.royal), d = fs * 0.05 * Math.min(2, o.shadowAmt);
+    if (d > 0) pass((a, x) => { ctx.fillStyle = css(a.hi ? BB.seam : team); ctx.fillText(a.t, x + d, d); });
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? o.hi || BB.orange : o.fill || bbInk()); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => (plates ? ctx : mapped(ctx, { fill: { ink: BB.ink, light: BB.white }, stroke: { ink: BB.ink, light: BB.white }, line: 0.8 })),
+  sticker: painters({ line: BB.ink, lineScale: 0.7, shadow(ctx, draw) { ctx.save(); ctx.translate(5, 7); draw("rgba(0,0,0,0.25)"); ctx.restore(); } }),
+  /** The corner tag: a chenille varsity patch — team colour, a white keyline and an orange border. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.72, team = bbTeam(C);
+    ctx.font = `900 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + f * 1.3, h = f * 1.55, top = y + (fs * 1.34 - h);
+    ctx.beginPath(); rounded(ctx, x, top, w, h, h * 0.3); ctx.fillStyle = css(BB.orange); ctx.fill();
+    ctx.beginPath(); rounded(ctx, x + 5, top + 5, w - 10, h - 10, h * 0.24); ctx.fillStyle = css(BB.white); ctx.fill();
+    ctx.beginPath(); rounded(ctx, x + 9, top + 9, w - 18, h - 18, h * 0.2); ctx.fillStyle = css(team); ctx.fill();
+    ctx.fillStyle = ink || css(lum(team) > 0.6 ? BB.ink : BB.white); spaced(ctx, str, x + f * 0.65, top + h * 0.5 + f * 0.36, 3);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The frame layer: a row of stars across the top, as on a championship shirt. */
+  frame(ctx, env) {
+    const { w } = env;
+    for (let i = 0; i < 5; i++) starMark(ctx, w / 2 + (i - 2) * 34, 50, 9, 5, bbInk());
+  },
+  image(ctx, C, unit) { ctx.shadowColor = "rgba(0,0,0,0.3)"; ctx.shadowBlur = 0; ctx.shadowOffsetX = 6 * unit; ctx.shadowOffsetY = 8 * unit; },
+  /** The print worn through (paper or navy showing in specks), the wall behind it scuffed and creased, grain. */
+  post(ctx, w, h, C, p, unit = 1) {
+    wear(ctx, w, h, bbGround(), p.distress * 0.9, dark ? "darken" : "lighten");
+    if (p.wall > 0) { crumple(ctx, w, h, p.wall * 0.7); wear(ctx, w, h, dark ? [70, 80, 110] : [150, 148, 144], p.wall * 0.45, dark ? "lighten" : "multiply"); }
+    grain(ctx, p.grain * 0.7, unit, !dark);
+  },
+  prompt: `Stickers for a basketball team print — bold, sporty, graphic — that read at a glance:
+- one clear object per sticker (a ball, a sneaker, a jersey, a hoop, a trophy, a whistle, a player in silhouette, a star), simple and punchy; no realism, no perspective, no fine detail;
+- flat colour only: the main colour (the team colour) with "white", "ink" and orange ("yellow" comes out gold) as partners;
+- the app adds a dark outline and a hard offset shadow: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Objects from basketball, built as simple models from a few boxes and cylinders — a hoop and backboard, a bench, a scoreboard, a ball rack, a locker; no realism, no fine detail.
+- the renderer paints faces in flat tones with a dark line: do NOT try to draw shading or outlines yourself;
+- "white" is white, "dark" near-black, and "main" the team colour — use it for one to three parts.`,
+};
+
+// ====================================================================== velvet: the flocked 3D illustration
+// Soft, flocked 3D illustration in a few strong colours: periwinkle sky, acid-green hills and velvet,
+// red and pink; figures and objects with plush volume, lit from the upper left, fuzzy at the edge,
+// sometimes checked; soft cast shadows; heavy grain like a velvety print; stars on a night gradient.
+const VL = { peri: [98, 112, 218], night: [12, 16, 52], green: [118, 186, 40], moss: [36, 92, 28], red: [226, 30, 40], pink: [246, 156, 196], cream: [244, 240, 252], ink: [16, 16, 24] };
+const vlGround = () => (dark ? VL.night : VL.peri);
+/** The object's colour: the channel's, made vivid; acid green where it would sink into the periwinkle. */
+const vlBody = (C) => { const c = boost(C, 0.6); return near(c, VL.peri, 120) || near(c, VL.night, 90) ? VL.green : c; };
+/** Where the figure stands: on the hills, toward the field's far side. */
+function vlPlace(env, p) {
+  const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, size = fh * (0.55 + 0.55 * p.figure);
+  return { F, cx: F.x0 + fw * 0.74, cy: F.y1 - size * 0.52, size };   // big, behind the title's end and above the graphic, so it shows round them
+}
+const velvet = {
+  id: "velvet",
+  repaint: (c) => `a soft flocked 3D illustration made from the photograph: plush velvety surfaces, rounded volumes lit from the upper left, a periwinkle-blue sky and acid-green hills, ${c} as the object colour, red and pink accents, soft cast shadows, heavy fine grain; whimsical, fashion-editorial; no text.`,
+  about: { zh: "绒感插画：像植绒一样毛茸茸的立体插画——长春花蓝的天空、荧光绿的绒面山丘，频道图形变成一个有体积、左上受光、边缘发毛的绒面物件（颜色来自频道色，可铺上模糊的格纹），脚下一团柔和的投影；可加暮色渐变、星星、柔光，整张覆着厚厚的细颗粒。俏皮、时髦、有手感——适合时尚、生活方式、潮玩、节日和女性向内容。可选长春花蓝底或夜空底；自带平直的版式，色块是一片绿色绒面草地。", en: "Velvet: soft flocked 3D illustration — a periwinkle sky, acid-green velvet hills, the channel graphic as a plush object with volume, lit from the upper left and fuzzy at the edge (in the channel colour, a blurred check on it if you like), a soft shadow under it; a dusk gradient, stars and a glow if you like, and heavy fine grain over everything. Playful, fashionable, tactile — for fashion, lifestyle, designer toys, festive and feminine content. A periwinkle or a night ground; flat layouts of its own, the colour block a green velvet lawn." },
+  name: { zh: "绒感插画", en: "Velvet illustration" },
+  seeded: true,
+  params: [
+    { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "绒面物件", en: "Plush figure" } },
+    { key: "volume", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "立体感", en: "Volume" } },
+    { key: "fuzz", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "绒毛边", en: "Fuzzy edge" } },
+    { key: "check", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "格纹", en: "Check" } },
+    { key: "hills", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "绒面山丘", en: "Velvet hills" } },
+    { key: "shadow", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "投影", en: "Shadow" } },
+    { key: "dusk", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "暮色渐变", en: "Dusk gradient" } },
+    { key: "stars", min: 0, max: 1, step: 0.05, def: 0.15, name: { zh: "星星", en: "Stars" } },
+    { key: "bloom", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "柔光", en: "Glow" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "绒面颗粒", en: "Velvet grain" } },
+    { key: "vignette", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "暗角", en: "Vignette" } },
+    { key: "tone", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.85, name: { zh: "照片绒色", en: "Photo in velvet colours" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.17, side: 0.3, strip: 0.1 }),
+  theme: (base) => ({ ...base, field: css(vlGround()), text: css(VL.cream), dim: css(VL.cream, 0.65), titleFill: css(VL.cream), titleInk: css(vlGround()), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The sky (deeper toward the top at dusk), stars, velvet hills rising from the floor, then the plush
+   * figure: its fuzzy halo, its soft cast shadow, and the body on a work canvas — the colour, a blurred
+   * check, the light from the upper left (bevel) and a soft highlight. A photo is mapped by lightness onto
+   * the velvet palette.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, u = Math.min(w, h), ground = vlGround(), body = vlBody(C);
+    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (p.dusk > 0) { const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, css(dark ? [4, 6, 22] : VL.night, 0.85 * p.dusk)); g.addColorStop(0.65, css(dark ? VL.night : VL.peri, 0)); g.addColorStop(1, css(dark ? VL.peri : [170, 180, 250], 0.5 * p.dusk)); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); }
+    if (env.photo) {
+      env.drawPhoto();
+      mapTones(ctx, toneTable([[0, VL.night], [0.32, VL.peri], [0.6, VL.green], [0.82, VL.pink], [1, VL.cream]], 0.3), p.tone);
+      return true;
+    }
+    if (!L.grid) return true;
+    const at = vlPlace(env, p), F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0;
+    for (let k = 0, n = p.stars * 16; k < Math.ceil(n); k++) { ctx.save(); ctx.globalAlpha = clamp(n - k); sparkle(ctx, F.x0 + rand(k * 2.7 + 1600) * fw, F.y0 + rand(k * 3.9 + 1601) * fh * 0.55, 4 + rand(k * 5.1 + 1602) * 10, VL.cream, 1); ctx.restore(); }
+    if (p.hills > 0) {   // two or three soft hills, the far ones bluer, each lit along its crest and fuzzy at the edge
+      for (let k = 0; k < 3; k++) {
+        const r = clamp(p.hills * 3 - k * 0.8);
+        if (r <= 0) continue;
+        const depth = (2 - k) / 2, top = F.y1 - fh * (0.12 + 0.3 * p.hills) * (0.55 + 0.45 * depth) * r, x0 = F.x0 - fw * 0.1 + rand(k + 1610) * fw * 0.5, x1 = x0 + fw * (0.7 + rand(k + 1611) * 0.6);
+        const col = mix(VL.green, ground, 0.45 * depth), path = () => { ctx.beginPath(); ctx.moveTo(x0, F.y1 + 10); ctx.bezierCurveTo(x0 + (x1 - x0) * 0.2, top, x0 + (x1 - x0) * 0.7, top, x1, F.y1 + 10); ctx.closePath(); };
+        blurred(ctx, u * 0.008, css(col, 0.9), () => { path(); ctx.fill(); });
+        const g = ctx.createLinearGradient(0, top, 0, F.y1); g.addColorStop(0, css(mix(col, VL.cream, 0.18))); g.addColorStop(0.5, css(col)); g.addColorStop(1, css(mix(col, VL.moss, 0.6)));
+        path(); ctx.fillStyle = g; ctx.fill();
+      }
+    }
+    const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
+    if (S) {
+      const { cx, cy, size } = at;
+      if (p.shadow > 0) blurred(ctx, size * 0.05, css(mix(VL.night, ground, 0.3), 0.55 * p.shadow), () => { ctx.beginPath(); ctx.ellipse(cx + size * 0.18 * p.shadow, cy + size * 0.48, size * (0.32 + 0.25 * p.shadow), size * 0.07, 0, 0, TAU); ctx.fill(); });
+      if (p.fuzz > 0) blurred(ctx, size * 0.025 * (0.4 + p.fuzz), css(body, 0.85 * p.fuzz), () => placeShape(ctx, S, [0, 0, 0], cx, cy, size * 1.01));
+      const x = workLike(ctx, "velvet");
+      placeShape(x, S, body, cx, cy, size);
+      if (p.check > 0) {   // a soft check in a deeper tone of the body, kept to the figure
+        x.save(); x.globalCompositeOperation = "source-atop"; x.globalAlpha = Math.min(1, 0.95 * p.check); x.fillStyle = css(mix(body, VL.ink, 0.62));
+        const c = size * 0.11; x.translate(cx, cy); x.rotate(0.2);
+        for (let i = -6; i <= 6; i++) for (let j = -6; j <= 6; j++) if ((i + j) % 2 === 0) x.fillRect(i * c, j * c, c, c);
+        x.restore();
+      }
+      bevel(x, S, cx, cy, size, size * 0.012, mix(body, VL.cream, 0.7), mix(body, VL.night, 0.7), p.volume);
+      if (p.volume > 0) { x.save(); x.globalCompositeOperation = "source-atop"; const hl = x.createRadialGradient(cx - size * 0.15, cy - size * 0.22, 0, cx - size * 0.15, cy - size * 0.22, size * 0.45); hl.addColorStop(0, css(VL.cream, 0.4 * p.volume)); hl.addColorStop(1, css(VL.cream, 0)); x.fillStyle = hl; x.fillRect(0, 0, w, h); x.restore(); }
+      layDown(ctx, x);
+    }
+    avGlow(ctx, p.bloom * 0.6);
+    return true;
+  },
+  accent: { fill: () => css(VL.green), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },   // a green velvet lawn
+  /** Cream letters standing up off the page on a soft shadow (the shadow slider); highlighted words in the object colour. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, s = Math.min(2, o.shadowAmt), k = o.unit || 1, hi = o.hi || vlBody(o.C || VL.red), ink = o.fill || VL.cream;
+    if (s > 0 && !fast) { ctx.save(); ctx.shadowColor = css(VL.night, 0.55); ctx.shadowBlur = fs * 0.1 * s * k; ctx.shadowOffsetX = fs * 0.025 * s * k; ctx.shadowOffsetY = fs * 0.06 * s * k; pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x, 0); }); ctx.restore(); }
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => (plates ? ctx : mapped(ctx, { fill: { ink: VL.ink, light: VL.cream, mid: mix(VL.peri, VL.cream, 0.5), dark: VL.moss, colour: (c) => boost(c, 0.5) }, stroke: { ink: VL.ink, light: VL.cream }, line: 0.6 })),
+  sticker: painters({ line: null, tone: inkAs(VL.ink, (c) => boost(c, 0.5)), shadow(ctx, draw) { ctx.save(); ctx.translate(5, 9); draw(css(VL.night, 0.35)); ctx.restore(); } }),
+  /** The corner tag: a plush red pill with cream letters. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.66;
+    ctx.font = `700 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + f * 1.3, h = f * 1.5, top = y + (fs * 1.34 - h);
+    ctx.save(); ctx.shadowColor = css(VL.night, 0.45); ctx.shadowBlur = 10; ctx.shadowOffsetY = 5;
+    ctx.beginPath(); rounded(ctx, x, top, w, h, h / 2); ctx.fillStyle = css(VL.red); ctx.fill(); ctx.restore();
+    ctx.fillStyle = ink || css(VL.cream); spaced(ctx, str, x + f * 0.65, top + h * 0.5 + f * 0.36, 3);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  frame() {},
+  image(ctx, C, unit) { ctx.shadowColor = css(VL.night, 0.4); ctx.shadowBlur = 18 * unit; ctx.shadowOffsetX = 4 * unit; ctx.shadowOffsetY = 10 * unit; },
+  /** Grain like velvet pile, twice over, and a soft vignette. */
+  post(ctx, w, h, C, p, unit = 1) {
+    grain(ctx, p.grain * 0.75, unit);
+    if (p.grain > 0.5) grain(ctx, (p.grain - 0.5) * 0.8, unit * 0.6);
+    vignette(ctx, w, h, VL.night, 0.7 * p.vignette, 0.4);
+  },
+  prompt: `Stickers for a soft flocked 3D illustration — plush, playful and fashionable — that read at a glance:
+- one rounded, characterful object per sticker (a handbag, a shoe, a gift box, a flower, sunglasses, a heart, a little creature), chunky and soft; no realism, no fine detail;
+- flat colour only in strong, sweet colours: the main colour, acid green ("yellow" comes out green), red, pink ("white" is cream); "ink" for small dark details;
+- the app adds a soft shadow and no outline: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Plush objects, built as simple soft models from a few boxes and cylinders — a handbag, a gift box, a shoe, a stool, a lamp; rounded and chunky, no realism, no fine detail.
+- the renderer paints faces in soft velvety tones: do NOT try to draw shading or outlines yourself;
+- "white" is cream, "dark" a deep moss green, and "main" the channel colour made vivid — use it for one to three parts.`,
+};
+
+// ====================================================================== rave: the psychedelic party poster
+// Club and festival posters: a dark violet night; liquid shapes of iridescent chrome; a figure in a
+// holographic sheen with an eclipse halo behind; nebulae and stars; a neon perspective grid; an arch
+// lined with plus marks; glass bubbles; orbits; a red-and-cyan fringe.
+const RV = { night: [12, 6, 24], pink: [255, 40, 160], cyan: [40, 230, 255], violet: [140, 60, 255], white: [255, 250, 255] };
+/** Where the figure stands: toward the open field's far side, as tall as the slider says. */
+function rvPlace(env, p) {
+  const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, size = fh * (0.45 + 0.5 * p.figure);
+  return { F, cx: F.x0 + fw * 0.66, cy: F.y0 + fh * 0.52, size };
+}
+/** A liquid blob: a smooth closed form of wandering radius, its iridescent sheen, a glow behind it, glossy highlights. */
+function liquidBlob(ctx, cx, cy, R, k, a) {
+  const pts = [];
+  for (let i = 0; i < 9; i++) { const t = (i / 9) * TAU, r = R * (0.6 + 0.55 * rand(k + i * 1.7)); pts.push([cx + Math.cos(t) * r * 1.25, cy + Math.sin(t) * r * 0.85]); }
+  const path = () => { ctx.beginPath(); for (let i = 0; i <= pts.length; i++) { const p0 = pts[i % pts.length], p1 = pts[(i + 1) % pts.length], m = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2]; i ? ctx.quadraticCurveTo(p0[0], p0[1], m[0], m[1]) : ctx.moveTo(m[0], m[1]); } ctx.closePath(); };
+  ctx.save(); ctx.globalAlpha = a;
+  blurred(ctx, R * 0.25, css(rainbow(rand(k + 30)), 0.55), () => { path(); ctx.fill(); });
+  path(); ctx.fillStyle = iridescent(ctx, cx - R * 1.3, cy - R, cx + R * 1.3, cy + R, rand(k + 31)); ctx.fill();
+  ctx.save(); path(); ctx.clip();
+  const sh = ctx.createLinearGradient(cx, cy - R, cx, cy + R); sh.addColorStop(0, "rgba(255,255,255,0.35)"); sh.addColorStop(0.5, "rgba(0,0,0,0)"); sh.addColorStop(1, "rgba(10,0,30,0.45)"); ctx.fillStyle = sh; ctx.fillRect(cx - R * 2, cy - R * 2, R * 4, R * 4);
+  ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.lineCap = "round";
+  for (let i = 0; i < 3; i++) { ctx.lineWidth = R * (0.03 + 0.03 * rand(k + i + 40)); ctx.beginPath(); ctx.arc(cx - R * 0.2, cy - R * 0.1, R * (0.45 + i * 0.22), Math.PI * (1.05 + rand(k + i + 41) * 0.2), Math.PI * (1.35 + rand(k + i + 42) * 0.3)); ctx.stroke(); }
+  ctx.restore(); ctx.restore();
+}
+const rave = {
+  id: "rave",
+  repaint: (c) => `a psychedelic club-night poster made from the photograph: a dark violet night, iridescent holographic chrome and liquid neon colour (${c}, hot pink, cyan, violet), glowing light, nebula clouds and stars, glossy and surreal; still the same picture, no text.`,
+  about: { zh: "迷幻派对：夜店和音乐节海报的味道——深紫的夜，流动的镭射液态金属，频道图形变成一层全息彩光的身影，身后一轮日食光环；可加星云与星星、合成波霓虹网格地面、带十字标记的拱门、玻璃泡泡、环绕的光轨和红青色差。迷幻、发光、超现实——适合音乐、派对、电子、潮流、夜生活和科幻内容。只有暗夜底；自带平直的版式。", en: "Rave: club-night and festival posters — a deep violet night, flowing liquid iridescent chrome, the channel graphic as a figure in a holographic sheen with an eclipse halo behind; nebulae and stars, a neon synthwave grid floor, an arch lined with plus marks, glass bubbles, orbits and a red-and-cyan fringe if you like. Psychedelic, glowing, surreal — for music, parties, electronic, fashion, nightlife and sci-fi. Night ground only; flat layouts of its own." },
+  name: { zh: "迷幻派对", en: "Psychedelic rave" },
+  oneTheme: true,
+  seeded: true,
+  params: [
+    { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "全息身影", en: "Holographic figure" } },
+    { key: "liquid", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "液态镭射", en: "Liquid chrome" } },
+    { key: "halo", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "日食光环", en: "Eclipse halo" } },
+    { key: "nebula", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "星云", en: "Nebula" } },
+    { key: "grid", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "霓虹网格", en: "Neon grid" } },
+    { key: "arch", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "拱门", en: "Arch" } },
+    { key: "bubbles", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "玻璃泡泡", en: "Bubbles" } },
+    { key: "rings", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "光轨", en: "Orbits" } },
+    { key: "fringe", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "色差", en: "Colour fringe" } },
+    { key: "bloom", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "辉光", en: "Glow" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "颗粒", en: "Grain" } },
+    { key: "neon", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.85, name: { zh: "照片霓虹热感", en: "Photo in neon heat" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
+  theme: (base) => ({ ...base, field: css(RV.night), text: css(RV.white), dim: css(RV.white, 0.6), titleFill: css(RV.white), titleInk: css(RV.night), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The night; nebulae and stars; the grid floor; the arch with its plus marks; the eclipse halo; liquid
+   * blobs; the holographic figure; orbits and bubbles; then the fringe and the glow over all of it. A
+   * photo is mapped by lightness onto neon heat colours (violet, magenta, orange, a pale cyan white).
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, u = Math.min(w, h), at = rvPlace(env, p), F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0, spot = boost(C, 0.7);
+    ctx.fillStyle = css(RV.night); ctx.fillRect(0, 0, w, h);
+    const after = () => { rgbFringe(ctx, u * 0.006 * p.fringe); if (p.bloom > 0 && !fast && canPaint(ctx)) { const soft = softCopy(snap(ctx, "rvGlow"), 16, "rvSoft"), cv = ctx.canvas; inPixels(ctx, () => { ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.6 * p.bloom; ctx.imageSmoothingEnabled = true; ctx.drawImage(soft, 0, 0, cv.width, cv.height); }); } };
+    if (env.photo) {
+      env.drawPhoto();
+      mapTones(ctx, toneTable([[0, RV.night], [0.3, [90, 20, 150]], [0.55, RV.pink], [0.78, [255, 160, 50]], [1, [210, 255, 250]]], 0.1), p.neon);
+      if (L.fill) after();
+      return true;
+    }
+    if (!L.grid) return true;
+    if (p.nebula > 0) {
+      ctx.save(); ctx.globalCompositeOperation = "screen";
+      for (let k = 0; k < 5; k++) { const x = rand(k * 3.1 + 1700) * w, y = rand(k * 4.3 + 1701) * h, r = u * (0.3 + rand(k * 5.7 + 1702) * 0.5), c = [RV.violet, RV.pink, [30, 120, 255], spot, [40, 200, 200]][k], g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, css(c, 0.32 * p.nebula)); g.addColorStop(1, css(c, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); }
+      ctx.restore();
+      for (let k = 0, n = Math.round(160 * p.nebula); k < n; k++) { ctx.fillStyle = css(RV.white, 0.3 + 0.7 * rand(k * 2.3 + 1703)); ctx.beginPath(); ctx.arc(rand(k * 3.1 + 1704) * w, rand(k * 4.7 + 1705) * h, 0.6 + rand(k * 5.9 + 1706) ** 3 * 2.4, 0, TAU); ctx.fill(); }
+    }
+    if (p.grid > 0) {   // a neon floor running to a vanishing point on the horizon
+      const hz = F.y0 + fh * (0.66 - 0.12 * p.grid), vx = at.cx, a = Math.min(1, p.grid * 2.5);
+      ctx.save(); ctx.strokeStyle = css(RV.pink, 0.85 * a); ctx.lineWidth = 2; ctx.shadowColor = css(RV.pink); ctx.shadowBlur = 10;
+      for (let i = -14; i <= 14; i++) { ctx.beginPath(); ctx.moveTo(vx, hz); ctx.lineTo(vx + i * fw * 0.16, F.y1 + fh * 0.4); ctx.stroke(); }
+      for (let j = 1; j <= 12; j++) { const t = (j / 12) ** 2.2, y = hz + (F.y1 - hz) * t; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+      ctx.restore();
+      const g = ctx.createLinearGradient(0, hz - fh * 0.2, 0, hz); g.addColorStop(0, css(RV.pink, 0)); g.addColorStop(1, css(RV.pink, 0.35 * a)); ctx.fillStyle = g; ctx.fillRect(0, hz - fh * 0.2, w, fh * 0.2);
+    }
+    if (p.arch > 0) {   // an arch round the figure, plus marks down both sides of it
+      const aw = at.size * (0.9 + 0.3 * p.arch), ah = Math.min(fh * 0.92, at.size * 1.35), ax = at.cx - aw / 2, ay = F.y0 + (fh - ah) / 2, a = Math.min(1, p.arch * 3);
+      ctx.save(); ctx.globalAlpha = a; ctx.strokeStyle = css(RV.violet); ctx.lineWidth = 4; ctx.shadowColor = css(RV.violet); ctx.shadowBlur = 14;
+      ctx.beginPath(); ctx.moveTo(ax, ay + ah); ctx.lineTo(ax, ay + aw / 2); ctx.arc(ax + aw / 2, ay + aw / 2, aw / 2, Math.PI, 0); ctx.lineTo(ax + aw, ay + ah); ctx.stroke();
+      ctx.shadowBlur = 0; ctx.strokeStyle = css(RV.pink); ctx.lineWidth = 2.5;
+      for (let y = ay + aw / 2; y < ay + ah; y += 34) for (const x of [ax - 28, ax + aw + 28]) { ctx.beginPath(); ctx.moveTo(x - 7, y); ctx.lineTo(x + 7, y); ctx.moveTo(x, y - 7); ctx.lineTo(x, y + 7); ctx.stroke(); }
+      ctx.restore();
+    }
+    if (p.halo > 0) {   // an eclipse behind the head: a glowing rim, a black disc
+      const r = at.size * (0.2 + 0.18 * p.halo), hx = at.cx, hy = at.cy - at.size * 0.22;
+      blurred(ctx, r * 0.25, css(mix(RV.white, spot, 0.3), Math.min(1, p.halo * 2)), () => { ctx.beginPath(); ctx.arc(hx, hy, r * 1.04, 0, TAU); ctx.fill(); });
+      ctx.fillStyle = css([4, 2, 10]); ctx.beginPath(); ctx.arc(hx, hy, r, 0, TAU); ctx.fill();
+    }
+    for (let k = 0, n = p.liquid * 4; k < Math.ceil(n); k++) liquidBlob(ctx, F.x0 + fw * (0.35 + rand(k * 3.3 + 1710) * 0.6), F.y0 + fh * (0.15 + rand(k * 4.1 + 1711) * 0.7), u * (0.08 + 0.1 * rand(k * 5.3 + 1712)) * (0.6 + 0.6 * p.liquid), k * 13.7 + 1713, clamp(n - k));
+    const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
+    if (S) {
+      const { cx, cy, size } = at, x = workLike(ctx, "rave");
+      blurred(ctx, size * 0.05, css(RV.cyan, 0.45), () => placeShape(ctx, S, [0, 0, 0], cx, cy, size));
+      placeShape(x, S, [255, 255, 255], cx, cy, size);
+      x.globalCompositeOperation = "source-in"; x.fillStyle = iridescent(x, cx - size * 0.5, cy - size * 0.5, cx + size * 0.5, cy + size * 0.5, rand(1720)); x.fillRect(0, 0, w, h);
+      bevel(x, S, cx, cy, size, size * 0.01, RV.white, [30, 0, 60], 0.9);
+      layDown(ctx, x);
+    }
+    for (let k = 0, n = p.rings * 3; k < Math.ceil(n); k++) {
+      ctx.save(); ctx.globalAlpha = clamp(n - k) * 0.8; ctx.translate(at.cx, at.cy + at.size * 0.05); ctx.rotate(-0.35 + k * 0.28); ctx.strokeStyle = css(k === 1 ? spot : RV.white); ctx.lineWidth = 2; ctx.setLineDash(k === 2 ? [6, 9] : []);
+      ctx.beginPath(); ctx.ellipse(0, 0, at.size * (0.55 + k * 0.12), at.size * (0.13 + k * 0.03), 0, 0, TAU); ctx.stroke(); ctx.restore();
+    }
+    for (let k = 0, n = p.bubbles * 8; k < Math.ceil(n); k++) glassBubble(ctx, F.x0 + fw * (0.3 + rand(k * 2.9 + 1730) * 0.68), F.y0 + fh * (0.08 + rand(k * 3.7 + 1731) * 0.84), u * (0.025 + rand(k * 4.9 + 1732) ** 2 * 0.08), mix(RV.cyan, spot, 0.4), clamp(n - k));
+    after();
+    return true;
+  },
+  accent: { fill: () => css([24, 12, 44]), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run, nx, ny, C) { ctx.lineCap = "butt"; ctx.strokeStyle = css(boost(C || RV.pink, 0.7)); ctx.lineWidth = 4; run(0, 0); } },
+  /** White capitals in a neon glow of the channel colour (the shadow slider); highlighted words in a holographic sheen. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, k = o.unit || 1, spot = boost(o.C || RV.pink, 0.7), glow = Math.min(2, o.shadowAmt), ink = o.fill || RV.white;
+    const fillOf = (a, x) => (a.hi ? (o.hi ? css(o.hi) : iridescent(ctx, x, -fs, x + ctx.measureText(a.t).width, 0, 0.8)) : css(ink));
+    if (glow > 0 && !fast) { ctx.save(); ctx.shadowColor = css(spot, 0.9); ctx.shadowBlur = fs * 0.18 * glow * k; pass((a, x) => { ctx.fillStyle = fillOf(a, x); ctx.fillText(a.t, x, 0); }); ctx.restore(); }
+    pass((a, x) => { ctx.fillStyle = fillOf(a, x); ctx.fillText(a.t, x, 0); });
+  },
+  // on the dark block the small parts' ink turns white
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates ? { fill: { ink: RV.white }, stroke: { ink: RV.white } } : { fill: { ink: [30, 10, 50], light: RV.white, mid: [180, 140, 255], dark: [60, 20, 100] }, stroke: { ink: RV.white, light: RV.white }, line: 0.5 }),
+  sticker: painters({ line: null, shadow(ctx, draw, fill) { ctx.save(); ctx.globalAlpha = 0.7; ctx.shadowColor = fill; ctx.shadowBlur = 20; draw(fill); ctx.restore(); } }),
+  /** The corner tag: a neon outline pill, white lettering. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.62, spot = boost(C, 0.7);
+    ctx.font = `700 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + f * 1.3, h = f * 1.55, top = y + (fs * 1.34 - h);
+    ctx.save(); ctx.shadowColor = css(spot); ctx.shadowBlur = 12; ctx.strokeStyle = css(spot); ctx.lineWidth = 3; ctx.beginPath(); rounded(ctx, x, top, w, h, h / 2); ctx.stroke(); ctx.restore();
+    ctx.fillStyle = ink || css(RV.white); spaced(ctx, str, x + f * 0.65, top + h * 0.5 + f * 0.36, 3);
+    return { x: x - 6, y: top - 6, w: w + 12, h: h + 12 };
+  },
+  /** The frame layer: plus marks in the four corners. */
+  frame(ctx, env) {
+    const { w, h } = env;
+    ctx.save(); ctx.strokeStyle = css(RV.white, 0.7); ctx.lineWidth = 2;
+    for (const [x, y] of [[40, 40], [w - 40, 40], [40, h - 40], [w - 40, h - 40]]) { ctx.beginPath(); ctx.moveTo(x - 9, y); ctx.lineTo(x + 9, y); ctx.moveTo(x, y - 9); ctx.lineTo(x, y + 9); ctx.stroke(); }
+    ctx.restore();
+  },
+  image(ctx, C, unit) { ctx.shadowColor = css(boost(C, 0.7), 0.7); ctx.shadowBlur = 24 * unit; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; },
+  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.6, unit); },
+  prompt: `Glowing stickers for a psychedelic club-night poster — bold, shiny and surreal — that read at a glance:
+- one clear, iconic object per sticker (a planet, a record, a disco ball, a butterfly, an eye, a flower, a lightning bolt, a crystal), simple; no realism, no fine detail;
+- flat colour only in neon: the main colour, hot pink ("red"), cyan ("blue"), violet, with "white" for highlights;
+- the app adds a soft neon glow and no outline: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Objects for a club night, built as simple models from a few boxes and cylinders — a speaker stack, a DJ deck, a light tower, a podium; no realism, no fine detail.
+- the renderer paints faces in deep violet and pale neon tones: do NOT try to draw shading or outlines yourself;
+- "white" is white, "dark" a deep violet, and "main" a pale lavender.`,
+};
+
+// ====================================================================== chrome: liquid metal on black, the Y2K cyber poster
+// Black (or a cool grey) with a monochrome photograph; the figure turned to liquid chrome, melting into
+// drips; a holographic rainbow streak across it; a wireframe sphere and grid; RGB glitch slices; glass
+// bubbles; HUD boxes, brackets and status lines; outlined stencil letters; creased paper, grain.
+const CR = { black: [10, 10, 12], grey: [208, 208, 206], white: [238, 238, 236], ink: [34, 34, 38] };
+const crGround = () => (dark ? CR.black : CR.grey), crInk = () => (dark ? CR.white : CR.ink);   // the grey ground's ink is just off the house ink, so the small parts' ink can be swapped alone
+/**
+ * A chrome gradient between (x0, y0) and (x1, y1): bands of sky, horizon and ground as polished metal
+ * reflects them — each light band falling off softly, then cut hard by the next dark one, as a horizon is.
+ */
+function chromeFill(ctx, x0, y0, x1, y1) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  [[0, [252, 253, 255]], [0.2, [168, 176, 192]], [0.215, [16, 18, 26]], [0.36, [92, 98, 114]], [0.375, [236, 240, 250]], [0.52, [130, 136, 152]], [0.535, [10, 12, 18]], [0.7, [70, 74, 88]], [0.715, [214, 220, 232]], [0.86, [120, 126, 140]], [0.875, [26, 28, 36]], [1, [84, 88, 100]]].forEach(([t, c]) => g.addColorStop(t, css(c)));
+  return g;
+}
+/** Where the chrome figure stands. */
+function crPlace(env, p) {
+  const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, size = fh * (0.45 + 0.5 * p.figure);
+  return { F, cx: F.x0 + fw * 0.64, cy: F.y0 + fh * 0.5, size };
+}
+const chrome = {
+  id: "chrome",
+  repaint: (c) => `a dark Y2K cyber poster made from the photograph: black-and-white with liquid chrome reflections, a holographic rainbow streak, glitch slices and fine scan lines, creased paper and grain, with one accent of ${c}; still the same picture, no text.`,
+  about: { zh: "液态铬：黑底上的 Y2K 赛博海报——频道图形变成一尊液态金属，往下熔成一滴滴铬液，一道全息彩虹光横扫过去；身后线框球体和网格，几条 RGB 故障切片，玻璃泡泡，HUD 式的界面框、角标和状态小字，描边的镂空大字；皱纸和颗粒。冷、锐利、未来感——适合科技、AI、电子音乐、潮流、游戏和观点类内容。可选黑底或冷灰底；自带平直的版式。", en: "Liquid chrome: the dark Y2K cyber poster — the channel graphic as a figure of liquid metal melting into drips, a holographic rainbow streak across it; a wireframe sphere and grid behind, RGB glitch slices, glass bubbles, HUD frames, brackets and status lines, outlined stencil letters; creased paper and grain. Cold, sharp, futuristic — for tech, AI, electronic music, fashion, games and opinion. A black or a cool grey ground; flat layouts of its own." },
+  name: { zh: "液态铬", en: "Liquid chrome" },
+  seeded: true,
+  params: [
+    { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "铬身影", en: "Chrome figure" } },
+    { key: "drips", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "熔滴", en: "Drips" } },
+    { key: "holo", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "全息彩光", en: "Holographic streak" } },
+    { key: "wire", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "线框", en: "Wireframe" } },
+    { key: "glitch", min: 0, max: 1, step: 0.05, def: 0.15, name: { zh: "故障切片", en: "Glitch slices" } },
+    { key: "hud", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "界面框", en: "HUD frames" } },
+    { key: "bubbles", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "玻璃泡泡", en: "Bubbles" } },
+    { key: "echo", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "描边大字", en: "Outlined letters" } },
+    { key: "paper", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "皱纸", en: "Creased paper" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "颗粒", en: "Grain" } },
+    { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白照片", en: "Black-and-white photo" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
+  theme: (base) => ({ ...base, field: css(crGround()), text: css(crInk()), dim: css(crInk(), 0.6), titleFill: css(crInk()), titleInk: css(crGround()), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The ground; outlined letters; the wireframe; the chrome figure with its drips (on a work canvas:
+   * the chrome bands, then the bevel); the holographic streak; bubbles; glitch slices over all of it.
+   * A photo goes black and white with more contrast, and is sliced too when it fills the canvas.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, u = Math.min(w, h), at = crPlace(env, p), F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0, ink = crInk();
+    ctx.fillStyle = css(crGround()); ctx.fillRect(0, 0, w, h);
+    const slices = () => {
+      if (p.glitch <= 0 || !canPaint(ctx)) return;
+      const src = snap(ctx, "crSnap"), m = ctx.getTransform(), k = m.a;
+      for (let i = 0, n = Math.round(2 + 8 * p.glitch); i < n; i++) {
+        const y = F.y0 + fh * rand(i * 2.7 + 1800), bh = u * (0.006 + rand(i * 3.3 + 1801) * 0.03), dx = (rand(i * 4.1 + 1802) - 0.5) * u * 0.12 * p.glitch;
+        inPixels(ctx, () => ctx.drawImage(src, 0, m.f + y * k, src.width, bh * k, dx * k, m.f + y * k, src.width, bh * k));
+        if (rand(i * 5.3 + 1803) > 0.55) { ctx.fillStyle = css([[255, 40, 80], [40, 220, 255], [80, 255, 120], boost(C, 0.7)][i % 4], 0.85); ctx.fillRect(F.x0 + fw * rand(i * 6.1 + 1804), y, fw * (0.05 + rand(i + 1805) * 0.2), bh * 0.6); }
+      }
+    };
+    if (env.photo) {
+      env.drawPhoto(p.mono);
+      mapTones(ctx, toneTable([[0, [0, 0, 0]], [0.45, [110, 110, 112]], [1, [248, 248, 248]]], 0.1), p.mono * 0.6);
+      if (L.fill) slices();
+      return true;
+    }
+    if (!L.grid) return true;
+    if (p.echo > 0) {   // the channel's code, huge, outlined, stood on end down the far side, twice
+      const str = (env.cat.code || env.cat.name || "").toUpperCase().slice(0, 8);
+      if (str) {
+        ctx.save(); ctx.font = `900 ${fh * 0.16}px ${fonts.en}, ${fonts.cn}`; ctx.textBaseline = "alphabetic"; ctx.textAlign = "left"; ctx.strokeStyle = css(ink, 0.55 * Math.min(1, p.echo * 2)); ctx.lineWidth = 2;
+        for (let i = 0; i < 2; i++) { ctx.save(); ctx.translate(F.x1 - fh * (0.05 + i * 0.13), F.y0 + 20); ctx.rotate(Math.PI / 2); if (i === 0 || p.echo > 0.5) ctx.strokeText(str, 0, 0); ctx.restore(); }
+        ctx.restore();
+      }
+    }
+    if (p.wire > 0) {   // a wireframe sphere behind the figure, and a square of grid
+      const r = at.size * (0.35 + 0.2 * p.wire), sx = at.cx - at.size * 0.3, sy = at.cy - at.size * 0.15, a = Math.min(1, p.wire * 2.5);
+      ctx.save(); ctx.strokeStyle = css(ink, 0.45 * a); ctx.lineWidth = 1.2;
+      for (let i = 1; i < 8; i++) { const t = -Math.PI / 2 + (i * Math.PI) / 8; ctx.beginPath(); ctx.ellipse(sx, sy + Math.sin(t) * r, Math.cos(t) * r, Math.cos(t) * r * 0.22, 0, 0, TAU); ctx.stroke(); }
+      for (let i = 0; i < 8; i++) { ctx.beginPath(); ctx.ellipse(sx, sy, Math.abs(Math.cos((i * Math.PI) / 8)) * r, r, 0, 0, TAU); ctx.stroke(); }
+      const gx = at.cx + at.size * 0.2, gy = F.y0 + fh * 0.12, gs = at.size * 0.5 * p.wire;
+      for (let i = 0; i <= 10; i++) { ctx.beginPath(); ctx.moveTo(gx + (gs * i) / 10, gy); ctx.lineTo(gx + (gs * i) / 10, gy + gs); ctx.moveTo(gx, gy + (gs * i) / 10); ctx.lineTo(gx + gs, gy + (gs * i) / 10); ctx.stroke(); }
+      ctx.restore();
+    }
+    const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
+    if (S) {
+      const { cx, cy, size } = at, x = workLike(ctx, "chrome");
+      if (dark) blurred(ctx, size * 0.06, "rgba(220,230,255,0.18)", () => placeShape(ctx, S, [0, 0, 0], cx, cy, size));
+      placeShape(x, S, [255, 255, 255], cx, cy, size);
+      if (p.drips > 0) {   // drips from the lowest edge of the shape, read off a coarse grid of it
+        const cell = size / 40, x0 = cx - size, y0 = cy - size * 0.6, cols = 80, rows = 50, cov = shapeCells(S, cx, cy, size, x0, y0, cols, rows, cell);
+        for (let k = 0, n = Math.round(4 + 14 * p.drips); k < n; k++) {
+          const i = Math.floor(rand(k * 2.3 + 1810) * cols);
+          let j = rows - 1; while (j >= 0 && cov[j * cols + i] < 160) j--;
+          if (j < 0) continue;
+          const dx = x0 + (i + 0.5) * cell, dy = y0 + (j + 0.4) * cell, len = size * (0.05 + rand(k * 3.7 + 1811) * 0.35) * p.drips, dw = cell * (0.8 + rand(k * 4.3 + 1812) * 1.2);
+          x.beginPath(); rounded(x, dx - dw / 2, dy - cell, dw, len + cell, dw / 2); x.fillStyle = "#fff"; x.fill();
+          x.beginPath(); x.arc(dx, dy + len, dw * 0.7, 0, TAU); x.fill();
+        }
+      }
+      x.globalCompositeOperation = "source-in"; x.fillStyle = chromeFill(x, cx - size * 0.25, cy - size * 0.55, cx + size * 0.15, cy + size * 0.75); x.fillRect(0, 0, w, h);
+      bevel(x, S, cx, cy, size, size * 0.008, [255, 255, 255], [0, 0, 0], 0.35);
+      x.save(); x.globalCompositeOperation = "source-atop"; x.strokeStyle = "rgba(255,255,255,0.85)"; x.lineCap = "round";   // two specular streaks
+      for (const [o, lw] of [[-0.18, 0.035], [0.12, 0.018]]) { x.lineWidth = size * lw; x.beginPath(); x.moveTo(cx - size * 0.6, cy + size * (o - 0.25)); x.quadraticCurveTo(cx, cy + size * (o + 0.05), cx + size * 0.6, cy + size * (o - 0.3)); x.stroke(); }
+      x.restore();
+      if (p.holo > 0) {   // a rainbow streak smeared across the head
+        x.save(); x.globalCompositeOperation = "source-atop"; x.globalAlpha = 0.75 * p.holo;
+        x.fillStyle = iridescent(x, cx - size * 0.5, 0, cx + size * 0.5, 0, 0.9); x.fillRect(cx - size, cy - size * 0.3, size * 2, size * 0.12 * (0.5 + p.holo)); x.restore();
+      }
+      layDown(ctx, x);
+      if (p.holo > 0) {   // and its glow trailing off the figure
+        const y = cy - size * 0.3 + size * 0.06 * (0.5 + p.holo);
+        ctx.save(); ctx.globalCompositeOperation = dark ? "screen" : "multiply"; ctx.globalAlpha = 0.6 * p.holo;
+        ctx.fillStyle = iridescent(ctx, cx - size * 1.1, 0, cx + size * 0.4, 0, 0.3); ctx.beginPath(); ctx.ellipse(cx - size * 0.35, y, size * 0.75, size * 0.035 * (0.6 + p.holo), 0, 0, TAU); ctx.fill(); ctx.restore();
+      }
+    }
+    for (let k = 0, n = p.bubbles * 6; k < Math.ceil(n); k++) glassBubble(ctx, F.x0 + fw * (0.3 + rand(k * 2.9 + 1820) * 0.68), F.y0 + fh * (0.1 + rand(k * 3.7 + 1821) * 0.8), u * (0.03 + rand(k * 4.9 + 1822) ** 2 * 0.09), dark ? [200, 210, 230] : [120, 130, 150], clamp(n - k));
+    slices();
+    return true;
+  },
+  accent: { fill: () => css(dark ? [20, 20, 24] : [24, 24, 28]), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.strokeStyle = css(CR.white, 0.6); ctx.lineWidth = 1.5; run(0, 0); } },
+  /** Capitals in polished chrome (on the grey ground, dark steel), a soft dark shadow under them (the shadow slider); highlighted words in a holographic sheen. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, k = o.unit || 1, glow = Math.min(2, o.shadowAmt);
+    // type chrome keeps to the light half of the bands (no near-black stripe to break a letter on the black ground); on the grey ground, dark steel
+    const g = ctx.createLinearGradient(0, -fs * 0.9, 0, fs * 0.1), stops = dark ? [[0, [255, 255, 255]], [0.42, [196, 204, 218]], [0.5, [128, 134, 150]], [0.6, [238, 242, 250]], [1, [168, 174, 190]]] : [[0, [86, 88, 96]], [0.45, [40, 40, 46]], [0.55, [110, 112, 120]], [1, [52, 54, 60]]];
+    stops.forEach(([t, c]) => g.addColorStop(t, css(c)));
+    const body = o.fill ? css(o.fill) : g;
+    const fillOf = (a, x) => (a.hi ? (o.hi ? css(o.hi) : iridescent(ctx, x, -fs, x + ctx.measureText(a.t).width, 0, 0.1)) : body);
+    if (glow > 0 && !fast) { ctx.save(); ctx.shadowColor = dark ? "rgba(0,0,0,0.75)" : "rgba(0,0,0,0.35)"; ctx.shadowBlur = fs * 0.12 * glow * k; pass((a, x) => { ctx.fillStyle = fillOf(a, x); ctx.fillText(a.t, x, 0); }); ctx.restore(); }
+    pass((a, x) => { ctx.fillStyle = fillOf(a, x); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates ? { fill: { ink: CR.white }, stroke: { ink: CR.white } } : { fill: { ink: [16, 16, 18], light: CR.white, mid: [150, 152, 158], dark: [50, 52, 58], colour: (c) => grey(c) }, stroke: { ink: CR.white, light: CR.white }, line: 0.5 }),
+  sticker: painters({ line: null, shadow: null, tone: (fill) => { const c = parseColour(fill); return !c ? fill : role(c) === "colour" ? css(grey(c), c[3]) : fill; } }),
+  /** The corner tag: monospaced capitals between HUD brackets. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.52, col = css(crInk());
+    ctx.font = `600 ${f}px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + f * 2, h = f * 2, top = y + (fs * 1.34 - h), t = f * 0.5;
+    ctx.strokeStyle = col; ctx.lineWidth = 2;
+    for (const [cx, cy, sx, sy] of [[x, top, 1, 1], [x + w, top, -1, 1], [x, top + h, 1, -1], [x + w, top + h, -1, -1]]) { ctx.beginPath(); ctx.moveTo(cx, cy + sy * t); ctx.lineTo(cx, cy); ctx.lineTo(cx + sx * t, cy); ctx.stroke(); }
+    ctx.fillStyle = ink || col; spaced(ctx, str, x + f, top + h * 0.5 + f * 0.36, 3);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The frame layer: a dashed border, brackets round the figure, a status box with small print, a barcode. */
+  frame(ctx, env, p) {
+    const a = p.hud;
+    if (a <= 0) return;
+    const { w, h } = env, at = crPlace(env, p), ink = crInk(), u = Math.min(w, h), i = env.o.catIndex;
+    ctx.save(); ctx.strokeStyle = css(ink, 0.5 * a); ctx.fillStyle = css(ink, 0.8 * a); ctx.lineWidth = 1.5;
+    ctx.setLineDash([10, 8]); ctx.strokeRect(24, 24, w - 48, h - 48); ctx.setLineDash([]);
+    const bw = at.size * 0.62, bh = at.size * 0.62, t = u * 0.025;
+    for (const [cx, cy, sx, sy] of [[at.cx - bw, at.cy - bh, 1, 1], [at.cx + bw, at.cy - bh, -1, 1], [at.cx - bw, at.cy + bh, 1, -1], [at.cx + bw, at.cy + bh, -1, -1]]) { ctx.beginPath(); ctx.moveTo(cx, cy + sy * t); ctx.lineTo(cx, cy); ctx.lineTo(cx + sx * t, cy); ctx.stroke(); }
+    if (a > 0.3) {
+      const bx = w - 72 - u * 0.24, by = 92;
+      ctx.globalAlpha = Math.min(1, (a - 0.3) * 3); ctx.beginPath(); rounded(ctx, bx, by, u * 0.24, u * 0.1, 10); ctx.stroke();
+      ctx.font = `600 13px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.fillText(`STATUS: ${pad2(i + 1)}`, bx + 14, by + 26);
+      greeked(ctx, bx + 14, by + 38, u * 0.24 - 28, 3, 10, css(ink, 0.5 * a), 1830 + i);
+      ctx.fillStyle = css(ink, 0.8 * a); for (let at2 = 72, k = 0; at2 < 72 + u * 0.12; k++) { const bw2 = 1 + Math.floor(rand(k * 1.7 + 1831) * 3); ctx.fillRect(at2, h - 74, bw2, 26); at2 += bw2 + 1 + Math.floor(rand(k * 2.3 + 1832) * 3); }
+    }
+    ctx.restore();
+  },
+  image(ctx, C, unit) { ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 20 * unit; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 8 * unit; },
+  post(ctx, w, h, C, p, unit = 1) { crumple(ctx, w, h, p.paper * 0.8); grain(ctx, p.grain * 0.7, unit); },
+  prompt: `Shiny objects for a dark Y2K cyber poster — sleek, liquid and futuristic — that read at a glance:
+- one clear object per sticker (a heart, a star, a butterfly, a rose, a cross, a lightning bolt, a pair of wings, a cube), smooth and simple; no realism, no fine detail;
+- flat colour only in greys: "white", light greys, "ink" for dark parts, the main colour (it comes out grey) — the app renders them as chrome;
+- the app draws no outline and no shadow: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Objects as a Y2K cyber poster would show them: a few boxes and cylinders, sleek and exact — a phone, a speaker, a server tower, a camera; no realism, no fine detail.
+- the renderer paints faces in greys and white: do NOT try to draw shading or outlines yourself;
+- "white" is white, "dark" near-black, and "main" a mid grey.`,
+};
+
+// ====================================================================== net art: the glitch poster of an old operating system
+// Net art and glitch posters: dialog windows of an old operating system piling up, pixel-sorted streaks,
+// datamoshed blocks, rows of garbled characters, the grey checkerboard of transparency, test-pattern
+// colour bars, arrow cursors; the figure dithered into black pixels; selected words in a navy box.
+const NA = { white: [246, 246, 244], black: [10, 10, 12], silver: [192, 192, 192], navy: [0, 0, 128], blue: [16, 132, 208], light: [255, 255, 255], shade: [128, 128, 128], deep: [64, 64, 64], ink: [26, 26, 30] };
+const naGround = () => (dark ? NA.black : NA.white), naInk = () => (dark ? NA.white : NA.ink);
+const ASCII = "x√ÛH8EC#%&@$*+=<>/\\|{}[]~^ÆØ¥§¶01¿ßµ";
+/** A dialog window of an old operating system: bevelled grey body, a navy title bar with a close box, then by `kind` a warning, a progress bar or a checkerboard picture, greeked lines and a button. */
+function osWindow(ctx, x, y, w, h, kind, k, a = 1) {
+  ctx.save(); ctx.globalAlpha = a;
+  ctx.fillStyle = css(NA.silver); ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = css(NA.light); ctx.fillRect(x, y, w, 2); ctx.fillRect(x, y, 2, h);
+  ctx.fillStyle = css(NA.deep); ctx.fillRect(x, y + h - 2, w, 2); ctx.fillRect(x + w - 2, y, 2, h);
+  const tb = 24, g = ctx.createLinearGradient(x, 0, x + w, 0); g.addColorStop(0, css(NA.navy)); g.addColorStop(1, css(NA.blue));
+  ctx.fillStyle = g; ctx.fillRect(x + 4, y + 4, w - 8, tb);
+  greeked(ctx, x + 12, y + 12, w * 0.45, 1, 10, css(NA.light, 0.9), k);
+  const cb = tb - 6, cx = x + w - 8 - cb, cy = y + 7;
+  ctx.fillStyle = css(NA.silver); ctx.fillRect(cx, cy, cb, cb); ctx.strokeStyle = css(NA.ink); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(cx + 4, cy + 4); ctx.lineTo(cx + cb - 4, cy + cb - 4); ctx.moveTo(cx + cb - 4, cy + 4); ctx.lineTo(cx + 4, cy + cb - 4); ctx.stroke();
+  const bx = x + 14, by = y + tb + 16, bw = w - 28;
+  if (kind === 0) {   // a warning: a yellow triangle with a mark, some lines, an OK button
+    ctx.fillStyle = "#ffd400"; ctx.beginPath(); ctx.moveTo(bx + 18, by); ctx.lineTo(bx + 36, by + 32); ctx.lineTo(bx, by + 32); ctx.closePath(); ctx.fill(); ctx.strokeStyle = css(NA.ink); ctx.stroke();
+    ctx.fillStyle = css(NA.ink); ctx.fillRect(bx + 16.5, by + 10, 3, 12); ctx.fillRect(bx + 16.5, by + 25, 3, 3);
+    greeked(ctx, bx + 50, by + 4, bw - 50, 2, 12, css(NA.ink, 0.8), k + 1);
+  } else if (kind === 1) {   // a progress bar filling with blocks
+    greeked(ctx, bx, by, bw, 1, 12, css(NA.ink, 0.8), k + 2);
+    const py = by + 22; ctx.fillStyle = css(NA.light); ctx.fillRect(bx, py, bw, 20); ctx.strokeStyle = css(NA.shade); ctx.strokeRect(bx, py, bw, 20);
+    ctx.fillStyle = css(NA.navy); for (let i = 0, n = Math.floor(((bw - 6) / 14) * (0.3 + 0.6 * rand(k + 3))); i < n; i++) ctx.fillRect(bx + 3 + i * 14, py + 3, 11, 14);
+  } else {   // a picture that has not loaded: the checkerboard of transparency
+    const ph = h - tb - 64;
+    for (let i = 0; i * 10 < bw; i++) for (let j = 0; j * 10 < ph; j++) { ctx.fillStyle = (i + j) % 2 ? "#d8d8d8" : "#ffffff"; ctx.fillRect(bx + i * 10, by + j * 10, Math.min(10, bw - i * 10), Math.min(10, ph - j * 10)); }
+  }
+  const okw = 64, okx = x + w / 2 - okw / 2, oky = y + h - 34;   // the button
+  ctx.fillStyle = css(NA.silver); ctx.fillRect(okx, oky, okw, 22); ctx.fillStyle = css(NA.light); ctx.fillRect(okx, oky, okw, 2); ctx.fillRect(okx, oky, 2, 22);
+  ctx.fillStyle = css(NA.deep); ctx.fillRect(okx, oky + 20, okw, 2); ctx.fillRect(okx + okw - 2, oky, 2, 22);
+  ctx.fillStyle = css(NA.ink); ctx.fillRect(okx + 22, oky + 9, 20, 3);
+  ctx.restore();
+}
+/** An arrow cursor, white with a black edge. */
+function cursorArrow(ctx, x, y, s) {
+  ctx.beginPath(); [[0, 0], [0, 17], [4, 13], [7, 20], [10, 19], [7, 12], [12, 12]].forEach(([a, b], i) => (i ? ctx.lineTo(x + a * s, y + b * s) : ctx.moveTo(x + a * s, y + b * s))); ctx.closePath();
+  ctx.fillStyle = "#fff"; ctx.fill(); ctx.strokeStyle = "#000"; ctx.lineWidth = Math.max(1, s * 0.9); ctx.stroke();
+}
+/** A 4 × 4 ordered-dither threshold (0–1) for cell (i, j). */
+const bayer = (i, j) => [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5][(j % 4) * 4 + (i % 4)] / 16 + 1 / 32;
+/** Where the dithered figure stands. */
+function naPlace(env, p) {
+  const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, size = fh * (0.45 + 0.5 * p.figure);
+  return { F, cx: F.x0 + fw * 0.66, cy: F.y0 + fh * 0.52, size };
+}
+const netart = {
+  id: "netart",
+  repaint: (c) => `a glitch net-art poster made from the photograph: pixel sorting, datamosh blocks, dithered one-bit areas, old operating-system dialog windows and a checkerboard of transparency, with ${c} as an accent; raw, digital and chaotic; no readable text.`,
+  about: { zh: "故障网络：网络艺术和故障海报——老式操作系统的对话框一层层叠上来（警告、进度条、加载不出的图），像素排序拉出的长条、数据错位的方块、一行行乱码字符、透明背景的灰白棋盘格、测试图的彩条、鼠标箭头；频道图形抖动成黑色像素点阵；标题里强调的词像被选中一样，反白在藏青色的选框里。数字、粗粝、有点失控——适合科技、互联网文化、游戏、实验音乐和观点类内容。可选白底或黑底；自带平直的版式，色块是一块银灰色的系统面板。", en: "Net art: net-art and glitch posters — dialog windows of an old operating system piling up (a warning, a progress bar, a picture that will not load), pixel-sorted streaks, datamoshed blocks, rows of garbled characters, the grey checkerboard of transparency, test-pattern colour bars, arrow cursors; the channel graphic dithered into black pixels; highlighted words selected, white in a navy box. Digital, raw, slightly out of control — for tech, internet culture, games, experimental music and opinion. White or black ground; flat layouts of its own, the colour block a silver system panel." },
+  name: { zh: "故障网络", en: "Glitch net art" },
+  seeded: true,
+  params: [
+    { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "点阵身影", en: "Dithered figure" } },
+    { key: "windows", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "系统窗口", en: "Dialog windows" } },
+    { key: "sort", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "像素排序", en: "Pixel sorting" } },
+    { key: "mosh", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "数据错位", en: "Datamosh" } },
+    { key: "ascii", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "乱码字符", en: "Garbled characters" } },
+    { key: "checker", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "透明棋盘格", en: "Transparency checks" } },
+    { key: "bars", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "测试彩条", en: "Colour bars" } },
+    { key: "cursor", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "鼠标箭头", en: "Cursors" } },
+    { key: "shift", min: 0, max: 1, step: 0.05, def: 0.15, name: { zh: "扫描错行", en: "Scan shift" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "颗粒", en: "Grain" } },
+    { key: "dither", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "照片抖动点阵", en: "Photo dithered" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
+  theme: (base) => ({ ...base, field: css(naGround()), text: css(naInk()), dim: css(naInk(), 0.6), titleFill: css(naInk()), titleInk: css(naGround()), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The ground; colour bars, checker patches, ASCII rows; the dithered figure; dialog windows; then,
+   * working on what is there, pixel sorting, datamosh and scan shift; cursors last. A photo filling the
+   * canvas is dithered (Photo dithered) and goes through the same sorting, moshing and shifting.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, u = Math.min(w, h), at = naPlace(env, p), F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0, spot = boost(C, 0.7), ink = naInk();
+    ctx.fillStyle = css(naGround()); ctx.fillRect(0, 0, w, h);
+    const damage = (box) => {
+      if (!canPaint(ctx)) return;
+      const m = ctx.getTransform(), k = m.a;
+      if (p.sort > 0) {   // a one-pixel column stretched into a streak to the right, row band by row band
+        const src = snap(ctx, "naSort");
+        for (let i = 0, n = Math.round(80 * p.sort); i < n; i++) {
+          const y = box.y0 + (box.y1 - box.y0) * rand(i * 1.9 + 1900), bh = 2 + rand(i * 2.7 + 1901) * 12, x0 = box.x0 + (box.x1 - box.x0) * rand(i * 3.3 + 1902), len = fw * (0.05 + rand(i * 4.1 + 1903) * 0.4) * p.sort;
+          inPixels(ctx, () => ctx.drawImage(src, Math.floor(m.e + x0 * k), Math.floor(m.f + y * k), 1, Math.max(1, Math.round(bh * k)), m.e + x0 * k, m.f + y * k, len * k, Math.max(1, Math.round(bh * k))));
+        }
+      }
+      if (p.mosh > 0) {   // blocks of the picture copied a few cells off, some tinted, some flat colour
+        const src = snap(ctx, "naMosh"), cell = u * 0.035;
+        for (let i = 0, n = Math.round(18 * p.mosh); i < n; i++) {
+          const bw = cell * (1 + Math.floor(rand(i * 2.1 + 1910) * 3)), bh = cell * (1 + Math.floor(rand(i * 2.9 + 1911) * 2)), sx = box.x0 + (box.x1 - box.x0 - bw) * rand(i * 3.7 + 1912), sy = box.y0 + (box.y1 - box.y0 - bh) * rand(i * 4.3 + 1913);
+          const dx = sx + Math.round((rand(i * 5.1 + 1914) - 0.5) * 6) * cell, dy = sy + Math.round((rand(i * 5.9 + 1915) - 0.5) * 2) * cell, kind = rand(i * 6.7 + 1916);
+          if (kind < 0.2) { ctx.fillStyle = css([spot, [255, 40, 160], [40, 200, 255], [250, 210, 40]][i % 4], 0.9); ctx.fillRect(dx, dy, bw, bh); }
+          else { inPixels(ctx, () => ctx.drawImage(src, m.e + sx * k, m.f + sy * k, bw * k, bh * k, m.e + dx * k, m.f + dy * k, bw * k, bh * k)); if (kind < 0.45) { ctx.save(); ctx.globalCompositeOperation = "multiply"; ctx.fillStyle = css(mix([255, 255, 255], kind < 0.3 ? spot : [60, 80, 255], 0.7)); ctx.fillRect(dx, dy, bw, bh); ctx.restore(); } }
+        }
+      }
+      if (p.shift > 0) {   // whole bands of the picture slid sideways
+        const src = snap(ctx, "naShift");
+        for (let i = 0, n = Math.round(2 + 6 * p.shift); i < n; i++) { const y = h * rand(i * 2.3 + 1920), bh = u * (0.004 + rand(i * 3.1 + 1921) * 0.03), dx = (rand(i * 3.9 + 1922) - 0.5) * u * 0.15 * p.shift; inPixels(ctx, () => ctx.drawImage(src, 0, m.f + y * k, src.width, bh * k, dx * k, m.f + y * k, src.width, bh * k)); }
+      }
+    };
+    const dither = (x0, y0, cols, rows, cell, level, a) => {   // black square pixels where the level beats the ordered threshold
+      ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = css(ink); ctx.beginPath();
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) if (level(i, j) > bayer(i, j)) ctx.rect(x0 + i * cell, y0 + j * cell, cell + 0.4, cell + 0.4);
+      ctx.fill(); ctx.restore();
+    };
+    if (env.photo) {
+      env.drawPhoto();
+      if (!L.fill) return true;
+      if (p.dither > 0 && canPaint(ctx)) {
+        const cell = Math.max(3, u * 0.006), cols = Math.ceil(w / cell), rows = Math.ceil(h / cell), px = sampled(ctx, 0, 0, cols, rows, cell, "naPhoto");
+        ctx.save(); ctx.globalAlpha = p.dither; ctx.fillStyle = css(naGround()); ctx.fillRect(0, 0, w, h); ctx.restore();
+        dither(0, 0, cols, rows, cell, (i, j) => { const q = (j * cols + i) * 4, l = (px[q] * 54 + px[q + 1] * 183 + px[q + 2] * 19) / 65280; return dark ? l : 1 - l; }, p.dither);
+      }
+      damage({ x0: 0, y0: 0, x1: w, y1: h });
+      return true;
+    }
+    if (!L.grid) return true;
+    if (p.bars > 0) {   // test-pattern colour bars, widening
+      const bars = [[235, 235, 235], [235, 235, 16], [16, 235, 235], [16, 235, 16], [235, 16, 235], [235, 16, 16], [16, 16, 235]], bw = fw * 0.04 * (0.5 + p.bars), bx = F.x0 + fw * 0.08, by = F.y0 + fh * 0.62, bh = fh * 0.3;
+      ctx.save(); ctx.globalAlpha = Math.min(1, p.bars * 3); bars.forEach((c, i) => { ctx.fillStyle = css(c); ctx.fillRect(bx + i * bw, by, bw, bh * (0.7 + 0.3 * (i % 2))); }); ctx.restore();
+    }
+    for (let k = 0, n = p.checker * 5; k < Math.ceil(n); k++) {
+      const cw = u * (0.06 + rand(k * 2.7 + 1930) * 0.14), ch = cw * (0.5 + rand(k * 3.3 + 1931)), x = F.x0 + fw * (0.25 + rand(k * 4.1 + 1932) * 0.7), y = F.y0 + fh * rand(k * 4.9 + 1933) * 0.85, c = 10;
+      ctx.save(); ctx.globalAlpha = clamp(n - k);
+      for (let i = 0; i * c < cw; i++) for (let j = 0; j * c < ch; j++) { ctx.fillStyle = (i + j) % 2 ? (dark ? "#3a3a3a" : "#cfcfcf") : (dark ? "#1c1c1c" : "#ffffff"); ctx.fillRect(x + i * c, y + j * c, Math.min(c, cw - i * c), Math.min(c, ch - j * c)); }
+      ctx.restore();
+    }
+    if (p.ascii > 0) {   // rows of garbled characters, a few runs of them in colour
+      ctx.save(); ctx.font = `600 16px ${fonts.mono}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      const x0 = F.x0 + fw * 0.52, y0 = F.y0 + fh * 0.06, rows = Math.round(16 * p.ascii), cols = Math.floor((F.x1 - x0 - 30) / 10);
+      for (let j = 0; j < rows; j++) { let s = ""; for (let i = 0; i < cols * (0.4 + 0.6 * rand(j * 1.3 + 1940)); i++) s += ASCII[Math.floor(rand(j * 31 + i * 1.7 + 1941) * ASCII.length)]; ctx.fillStyle = rand(j * 2.9 + 1942) > 0.8 ? css(rand(j + 1943) > 0.5 ? spot : NA.blue) : css(ink, 0.75); ctx.fillText(s, x0, y0 + j * 19); }
+      ctx.restore();
+    }
+    const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
+    if (S) {   // the figure dithered into black pixels, lit from the upper left
+      const { cx, cy, size } = at, cell = Math.max(3, size * 0.012), x0 = cx - size * 0.75, y0 = cy - size * 0.6, cols = Math.ceil((size * 1.5) / cell), rows = Math.ceil((size * 1.2) / cell), cov = shapeCells(S, cx, cy, size, x0, y0, cols, rows, cell);
+      dither(x0, y0, cols, rows, cell, (i, j) => (cov[j * cols + i] / 255) * (0.25 + 0.75 * clamp((i / cols + j / rows) * 0.8)), 1);
+    }
+    for (let k = 0, n = p.windows * 6; k < Math.ceil(n); k++) {   // dialog windows cascading down toward the figure
+      const ww = u * (0.26 + rand(k * 2.3 + 1950) * 0.1), wh = ww * (0.42 + rand(k * 3.1 + 1951) * 0.2), x = at.cx - at.size * 0.2 + k * 34 - ww * 0.5 + (rand(k * 3.9 + 1952) - 0.5) * fw * 0.25, y = F.y0 + fh * 0.08 + k * 30 + rand(k * 4.7 + 1953) * fh * 0.2;
+      osWindow(ctx, clamp(x, F.x0 + 10, F.x1 - ww - 10), clamp(y, F.y0 + 10, F.y1 - wh - 10), ww, wh, k % 3, k * 17 + 1954, clamp(n - k));
+    }
+    damage({ x0: F.x0, y0: F.y0, x1: F.x1, y1: F.y1 });
+    for (let k = 0, n = p.cursor * 6; k < Math.ceil(n); k++) { ctx.save(); ctx.globalAlpha = clamp(n - k); cursorArrow(ctx, F.x0 + fw * (0.3 + rand(k * 2.9 + 1960) * 0.65), F.y0 + fh * (0.1 + rand(k * 3.7 + 1961) * 0.8), 1.6 + rand(k + 1962) * 1.2); ctx.restore(); }
+    return true;
+  },
+  accent: { fill: () => css(NA.silver), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run, nx, ny) { ctx.lineCap = "butt"; ctx.strokeStyle = css(NA.light); ctx.lineWidth = 3; run(nx * 2, ny * 2); ctx.strokeStyle = css(NA.deep); ctx.lineWidth = 3; run(-nx * 2, -ny * 2); } },   // a bevelled system panel
+  /** Plain capitals with a cyan and a magenta copy split off them (the shadow slider); highlighted words selected: white in a navy box. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, d = fs * 0.025 * Math.min(2, o.shadowAmt), ink = o.fill || naInk();
+    pass((a, x) => { if (a.hi) { ctx.fillStyle = css(o.hi || NA.navy); ctx.fillRect(x - fs * 0.03, -fs * 0.88, ctx.measureText(a.t).width + fs * 0.06, fs * 1.04); } });
+    if (d > 0) { ctx.save(); ctx.globalAlpha = 0.85; ctx.globalCompositeOperation = dark ? "screen" : "multiply"; for (const [s, c] of [[-1, [0, 220, 255]], [1, [255, 0, 170]]]) pass((a, x) => { if (!a.hi) { ctx.fillStyle = css(c); ctx.fillText(a.t, x + s * d, 0); } }); ctx.restore(); }
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? NA.light : ink); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => (plates ? ctx : mapped(ctx, { fill: { ink: NA.ink, light: NA.light, mid: NA.silver, dark: NA.deep }, stroke: { ink: NA.ink, light: NA.light }, line: 0.6 })),
+  sticker: painters({ line: NA.ink, lineScale: 0.5, join: "miter", shadow(ctx, draw) { ctx.save(); ctx.translate(4, 4); draw("rgba(0,0,0,0.6)"); ctx.restore(); } }),
+  /** The corner tag: a bevelled system button. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.56;
+    ctx.font = `700 ${f}px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 2) + f * 1.6, h = f * 1.8, top = y + (fs * 1.34 - h);
+    ctx.fillStyle = css(NA.silver); ctx.fillRect(x, top, w, h);
+    ctx.fillStyle = css(NA.light); ctx.fillRect(x, top, w, 3); ctx.fillRect(x, top, 3, h);
+    ctx.fillStyle = css(NA.deep); ctx.fillRect(x, top + h - 3, w, 3); ctx.fillRect(x + w - 3, top, 3, h);
+    ctx.fillStyle = ink || css(NA.ink); spaced(ctx, str, x + f * 0.8, top + h * 0.5 + f * 0.36, 2);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The frame layer: a small loading bar in the top corner, with the windows. */
+  frame(ctx, env, p) {
+    if (p.windows <= 0) return;
+    const { w } = env, x = w - 72 - 200, y = 50;
+    ctx.save(); ctx.globalAlpha = Math.min(1, p.windows * 3);
+    ctx.fillStyle = css(NA.light); ctx.fillRect(x, y, 200, 16); ctx.strokeStyle = css(NA.shade); ctx.lineWidth = 1.5; ctx.strokeRect(x, y, 200, 16);
+    ctx.fillStyle = css(NA.navy); for (let i = 0; i < 9; i++) ctx.fillRect(x + 3 + i * 13, y + 3, 10, 10);
+    ctx.restore();
+  },
+  image(ctx, C, unit) { ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 0; ctx.shadowOffsetX = 5 * unit; ctx.shadowOffsetY = 5 * unit; },
+  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.6, unit, !dark); },
+  prompt: `Icons for a glitch net-art poster — the graphics of an old computer, bold and pixel-crisp — that read at a glance:
+- one clear object per sticker (a folder, a floppy disk, an hourglass, a warning sign, a globe, a mouse, a trash can, an envelope, a smiley), drawn flat and chunky like an old desktop icon; no realism, no fine detail;
+- flat colour only: "white", "ink", silver greys, navy ("blue"), and the main colour as one accent;
+- the app adds a black edge and a hard offset shadow: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Old computer things, built as simple models from a few boxes and cylinders — a beige computer and monitor, a keyboard, a floppy drive, a modem; no realism, no fine detail.
+- the renderer paints faces in silver greys with a dark line: do NOT try to draw shading or outlines yourself;
+- "white" is white, "dark" a dark grey, and "main" the channel colour — use it for one part only.`,
+};
+
+export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant, collage, yellow, pitch, dots, neon, court, velvet, rave, chrome, netart };
 export const LOOK_IDS = Object.keys(LOOKS);
 
 let current = cel, values = {};
