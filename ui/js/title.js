@@ -13,6 +13,22 @@ export function parseTitle(title) {
     .map((l) => l.split("*").map((t, k) => ({ t, hi: k % 2 === 1 })).filter((a) => a.t));
 }
 
+const LH = 1.16;   // line height, in sizes
+/** The lines' widths at size 100, and the size at which they fill `box` (times `s`). Leaves ctx's font at size 100. */
+function fitLines(ctx, lines, box, font, maxFs, s = 1) {
+  ctx.font = `900 100px ${font}`;
+  const widths = lines.map((l) => l.reduce((sum, a) => sum + ctx.measureText(a.t).width, 0)), widest = Math.max(...widths);
+  return { widths, widest, fs: Math.max(8, Math.floor(Math.min(maxFs, (100 * box.w) / (widest * 1.04), box.h / (lines.length * LH)) * s)) };
+}
+/** The block drawTitle would fill in `box`, left-aligned and unadjusted, without drawing it: {x, y, w, h}, or null. */
+export function titleBlock(ctx, title, box, font, maxFs = 340) {
+  const lines = parseTitle(title);
+  if (!lines.length) return null;
+  ctx.save(); const { widest, fs } = fitLines(ctx, lines, box, font, maxFs); ctx.restore();
+  const h = lines.length * fs * LH;
+  return { x: box.x, y: box.y + (box.h - h) / 2, w: (widest * fs) / 100, h };
+}
+
 /**
  * Draws the title into box {x,y,w,h}. `adj` is the manual {dx,dy,s}; `st` the style:
  * { font, fill, hi, ink, shadow, hiShadow, align, stroke, shadowAmt, maxFs, fx, fxAmt } — fx being
@@ -23,15 +39,11 @@ export function parseTitle(title) {
 export function drawTitle(ctx, title, box, adj, st) {
   const lines = parseTitle(title);
   if (!lines.length) return null;
-  const LH = 1.16;
   ctx.save();
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   ctx.lineJoin = "round";
-  ctx.font = `900 100px ${st.font}`;
-  const widths = lines.map((l) => l.reduce((s, a) => s + ctx.measureText(a.t).width, 0));
-  const widest = Math.max(...widths);
-  const fs = Math.max(8, Math.floor(Math.min(st.maxFs, (100 * box.w) / (widest * 1.04), box.h / (lines.length * LH)) * adj.s));
+  const { widths, widest, fs } = fitLines(ctx, lines, box, st.font, st.maxFs, adj.s);
   ctx.font = `900 ${fs}px ${st.font}`;
   const blockW = (widest * fs) / 100;
   const x0 = box.x + adj.dx + (st.align === "center" ? (box.w - blockW) / 2 : 0);
@@ -61,21 +73,13 @@ export function drawTitle(ctx, title, box, adj, st) {
 }
 export { INK };
 
+const GAP = 1.06, PITCH = 1.32;   // a character's height and a column's pitch, in sizes
 /**
- * Sets the title vertically, as Chinese books do: each typed line is a column, read top to bottom,
- * the first column on the right. CJK characters stand upright one under another; a run of Latin
- * letters or digits lies on its side, as it does in a vertical line. The size is the largest at
- * which the longest column fits the height and all columns fit the width.
- * st: { font, weight, fill, hi, maxFs }. Returns the box it occupies, or null when there is nothing to draw.
+ * The columns of a vertical title as units (one upright character, a sideways run, a gap), each with
+ * its height at size 100, and the size at which they fill `box`. Leaves ctx's font at size 100.
  */
-export function drawTitleVertical(ctx, title, box, st) {
-  const lines = parseTitle(title);
-  if (!lines.length) return null;
-  const GAP = 1.06, PITCH = 1.32, weight = st.weight || 900;
-  ctx.save();
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.font = `${weight} 100px ${st.font}`;
-  // a column is a list of units: one upright character, or a sideways run; each has a height at size 100
+function fitColumns(ctx, lines, box, font, weight, maxFs) {
+  ctx.font = `${weight} 100px ${font}`;
   const sideways = /[\x21-\x7e]/;
   const columns = lines.map((line) => {
     const units = [];
@@ -89,7 +93,30 @@ export function drawTitleVertical(ctx, title, box, st) {
     return { units, h: units.reduce((s, u) => s + u.h, 0) };
   });
   const tallest = Math.max(...columns.map((c) => c.h));
-  const fs = Math.max(8, Math.floor(Math.min(st.maxFs, (100 * box.h) / tallest, box.w / (columns.length * PITCH))));
+  return { columns, tallest, fs: Math.max(8, Math.floor(Math.min(maxFs, (100 * box.h) / tallest, box.w / (columns.length * PITCH)))) };
+}
+/** The block drawTitleVertical would fill in `box`, without drawing it: {x, y, w, h}, or null. */
+export function titleBlockVertical(ctx, title, box, font, weight = 900, maxFs = 300) {
+  const lines = parseTitle(title);
+  if (!lines.length) return null;
+  ctx.save(); const { columns, tallest, fs } = fitColumns(ctx, lines, box, font, weight, maxFs); ctx.restore();
+  const pitch = fs * PITCH;
+  return { x: box.x, y: box.y, w: columns.length * pitch - (pitch - fs), h: (tallest * fs) / 100 };
+}
+/**
+ * Sets the title vertically, as Chinese books do: each typed line is a column, read top to bottom,
+ * the first column on the right. CJK characters stand upright one under another; a run of Latin
+ * letters or digits lies on its side, as it does in a vertical line. The size is the largest at
+ * which the longest column fits the height and all columns fit the width.
+ * st: { font, weight, fill, hi, maxFs }. Returns the box it occupies, or null when there is nothing to draw.
+ */
+export function drawTitleVertical(ctx, title, box, st) {
+  const lines = parseTitle(title);
+  if (!lines.length) return null;
+  const weight = st.weight || 900;
+  ctx.save();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const { columns, tallest, fs } = fitColumns(ctx, lines, box, st.font, weight, st.maxFs);
   const k = fs / 100, pitch = fs * PITCH, blockW = columns.length * pitch - (pitch - fs);
   ctx.font = `${weight} ${fs}px ${st.font}`;
   columns.forEach((col, i) => {

@@ -1672,7 +1672,10 @@ function styleTab() {
       select(LOOK_IDS.map((k) => [k, LOOKS[k].name[getLang()]]), st.look, (v) => { st.look = v; touch({ profile: true, panel: true, side: true, strip: true }); }),
       L.about && el("div", { class: "about" }, L.about[getLang()]),
       el("div", { class: "hint" }, t("style.lookHint")),
-      L.params.map((d) => (d.toggle
+      L.params.map((d) => (d.text
+        ? el("div", { class: "sl", style: "grid-template-columns:84px 1fr" }, el("span", {}, d.name[getLang()]),
+            textInput(vals[d.key], (v) => tune(d.key, v), { maxLength: d.max, placeholder: d.placeholder ? d.placeholder[getLang()] : "" }))
+        : d.toggle
         ? el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: vals[d.key] > 0, onchange: (e) => tune(d.key, e.target.checked ? 1 : 0) }), el("span", {}, d.name[getLang()]))
         : d.needsPhoto && !recordOf(mainPhoto())
           ? el("div", { class: "sl off", style: "grid-template-columns:84px 1fr", title: t("style.needsPhoto") }, el("span", {}, d.name[getLang()]), el("span", { class: "why" }, t("style.needsPhoto")))   // nothing for it to act on yet
@@ -2476,7 +2479,7 @@ function surprise() {
   // the look, tuned somewhere in the middle of each slider's range (the extremes are rarely the best of a look)
   st.look = pick(LOOK_IDS); st.lookSeed = Math.floor(R() * 1000000);
   const tuned = {};
-  for (const d of LOOKS[st.look].params) tuned[d.key] = d.toggle ? (chance(0.7) ? 1 : 0) : d.key === "sweepAt" ? 0 : round(between(d.min + (d.max - d.min) * 0.12, d.min + (d.max - d.min) * 0.8), d.step);
+  for (const d of LOOKS[st.look].params) tuned[d.key] = d.text ? (st.lookParams[st.look] || {})[d.key] ?? d.def : d.toggle ? (chance(0.7) ? 1 : 0) : d.key === "sweepAt" ? 0 : round(between(d.min + (d.max - d.min) * 0.12, d.min + (d.max - d.min) * 0.8), d.step);   // words typed in are kept
   if (Object.keys(tuned).length) st.lookParams[st.look] = tuned;
   st.theme = chance(0.7) ? "dark" : "light";
   // the template and its proportions
@@ -2894,6 +2897,15 @@ async function selfTest(dir) {
       const cv = renderFull(S.profile.sizes[0], S.cover, catIndex()), name = `look-${id}${withPhoto ? "-photo" : ""}.png`;
       report.looks.push({ id, photo: withPhoto, path: await invoke("write_image", framed(await toPng(cv), { dir, name })) });
     }
+    // and each look with every setting at its far end, so every effect is drawn in the real web view
+    const keepParams = JSON.stringify(S.profile.style.lookParams);
+    for (const id of LOOK_IDS.filter((k) => LOOKS[k].params.length)) for (const withPhoto of [false, true]) {
+      S.profile.style.look = id; S.cover.layers = withPhoto ? withShot : plain;
+      S.profile.style.lookParams[id] = Object.fromEntries(LOOKS[id].params.map((d) => [d.key, d.text ? "AB" : d.max]));
+      const cv = renderFull(S.profile.sizes[0], S.cover, catIndex()), name = `look-${id}-full${withPhoto ? "-photo" : ""}.png`;
+      report.looks.push({ id, full: true, photo: withPhoto, path: await invoke("write_image", framed(await toPng(cv), { dir, name })) });
+    }
+    S.profile.style.lookParams = JSON.parse(keepParams);
     S.profile.style.look = "cel"; S.cover.layers = JSON.parse(keepLayers);
     // every text effect once, in the house look: the ones that reshape letters need outlines from the native side
     report.effects = [];

@@ -476,9 +476,10 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "bluetone", "redstreet", "negative", "cinema", "cyano", "monofilm", "typo"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
-  for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && q.min <= q.def && q.def <= q.max); }
+  assert.deepEqual(["bluetone", "redstreet", "ghibli"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid"]);   // retired looks: the nearest one left
+  for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
 });
 
 test("looks: the house look changes nothing, the cyberpunk look re-maps what is drawn", () => {
@@ -613,30 +614,6 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
   setLook("cel");
 });
 
-test("the blue retro and red street looks: their own grounds, the channel colour on the small parts", () => {
-  setLook("bluetone", null, 3, true);
-  assert.match(LOOKS.bluetone.theme({}, [255, 0, 0], lookValues()).field, /^rgba\(28,44,226/);   // electric blue on dark
-  setLook("bluetone", null, 3, false);
-  assert.match(LOOKS.bluetone.theme({}, [255, 0, 0], lookValues()).field, /^rgba\(238,234,222/); // paper on light
-  const seen = []; const raw = { set fillStyle(v) { seen.push(v); }, get fillStyle() { return "x"; }, lineWidth: 1 };
-  LOOKS.bluetone.wrap(raw, [255, 0, 0], lookValues(), false).fillStyle = "#ff3b4f";
-  assert.match(seen[0], /^rgba\(70,146,238/);                                                  // a colour on an object comes out blue
-  assert.deepEqual(LOOKS.bluetone.params.map((d) => d.key), ["lines", "grain", "duo"]);          // no halftone, no glitch
-  assert.equal(LOOKS.bluetone.name.zh, "蓝色复古");
-  const fills = (fn) => { const got = []; const c = new Proxy({ canvas: null }, { get: (t, k) => (k === "measureText" ? () => ({ width: 10 }) : k in t ? t[k] : () => ({})), set: (t, k, v) => { if (k === "fillStyle") got.push(v); t[k] = v; return true; } }); fn(c); return got; };
-  assert.ok(fills((c) => LOOKS.bluetone.tag(c, "EP.01", 0, 0, 40, [255, 140, 0], lookValues())).includes("rgba(255,140,0,1)"), "the tag's squares in the channel colour");
-  setLook("redstreet");
-  assert.match(LOOKS.redstreet.theme({}, [0, 0, 255], lookValues()).field, /^rgba\(232,56,36/);
-  assert.equal(LOOKS.redstreet.accent.fill([0, 0, 255]), "rgba(18,12,12,1)");                   // the panel is black
-  assert.equal(LOOKS.redstreet.layout("stack", 1920, 1080).template, "stack");
-  assert.equal(fills((c) => LOOKS.redstreet.tag(c, "EP.01", 0, 0, 40, [40, 120, 255], lookValues()))[0], "rgba(40,120,255,1)");   // the tag: the channel colour…
-  assert.equal(fills((c) => LOOKS.redstreet.tag(c, "EP.01", 0, 0, 40, [226, 60, 40], lookValues()))[0], "rgba(255,198,26,1)");   // …or yellow, when that is a red
-  const plate = []; const raw2 = { set fillStyle(v) { plate.push(v); }, get fillStyle() { return "x"; }, lineWidth: 1 };
-  LOOKS.redstreet.wrap(raw2, [40, 120, 255], lookValues(), true).fillStyle = "#2878ff";
-  assert.match(plate[0], /^rgba\(40,120,255/);                                                  // the channel's name keeps its colour
-  setLook("cel");
-});
-
 test("the five poster looks: many settings each, their own grounds, flat layouts, and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
   for (const id of ["negative", "cinema", "cyano", "monofilm", "typo"]) {
@@ -658,6 +635,43 @@ test("the five poster looks: many settings each, their own grounds, flat layouts
   const dusk = parseColour(LOOKS.cinema.theme({}, [230, 140, 40], lookValues()).field);
   assert.ok(dusk[0] > dusk[2] && (0.2126 * dusk[0] + 0.7152 * dusk[1] + 0.0722 * dusk[2]) / 255 < 0.3, "the cinema ground: a dark, muted version of the channel colour");
   setLook("cel");
+});
+
+test("the first five looks have many settings now, and paint without a canvas", () => {
+  const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (str) => ({ width: String(str).length * 50 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
+  const want = { riso: ["pitch", "shapes", "speckle", "streaks", "ghost"], anime: ["clouds", "dusk", "rays", "flare", "leak", "vignette"], bluenote: ["vinyl", "ring", "edges", "fade", "halftone"], editorial: ["numeral", "text", "quote", "gutter", "spot"], songke: ["text", "notes", "seals", "wear", "stain", "worm"] };
+  for (const [id, keys] of Object.entries(want)) {
+    const L = LOOKS[id], have = L.params.map((d) => d.key);
+    assert.ok(L.params.length >= 8, `${id}: ${L.params.length} settings`);
+    for (const k of keys) assert.ok(have.includes(k), `${id} has ${k}`);
+    for (const onDark of [true, false]) {
+      setLook(id, Object.fromEntries(keys.map((k) => [k, 1])), 3, onDark);   // everything at full
+      const G = (L.layout || LOOKS.bluenote.layout)("stack", 1920, 1080);
+      const env = { w: 1920, h: 1080, C: [40, 120, 220], photo: null, hasBrand: true, cat: { code: "AB", name: "x" }, cover: { title: "夏日出逃\n去*海边*", tag: "EP.07", layers: [{ type: "title", visible: true }] },
+        o: { profile: { brand: { name: "B" }, categories: [{}] }, catIndex: 0, size: { w: 1920, h: 1080 } }, G };
+      assert.equal(L.background(proxy(), env, { grid: true }, lookValues()), true);
+      L.post(proxy(), 1920, 1080, [40, 120, 220], lookValues(), 1, []);
+    }
+  }
+  setLook("cel");
+});
+
+test("a look's typed setting: the experimental type's giant letters, trimmed to three, the channel code when empty", () => {
+  assert.equal(lookParams("typo", { letters: "  Hello " }).letters, "Hel");
+  assert.equal(lookParams("typo", { letters: 42 }).letters, "");
+  assert.equal(lookParams("typo", {}).letters, "");
+  assert.equal(lookParams("typo", { letters: "排版设计" }).letters, "排版设");
+});
+
+test("the title's block can be measured before it is drawn, as drawTitle and drawTitleVertical will set it", async () => {
+  const { titleBlock, titleBlockVertical } = await import("../ui/js/title.js");
+  const ctx = { font: "", save() {}, restore() {}, measureText: (str) => ({ width: String(str).length * 50 }) };
+  const b = titleBlock(ctx, "ab\n*cde*", { x: 80, y: 150, w: 1000, h: 400 }, "serif");   // widest 150 at size 100: the height decides, 172
+  assert.deepEqual([b.x, Math.round(b.w), Math.round(b.h)], [80, 258, 399]);
+  assert.ok(Math.abs(b.y - (150 + (400 - 2 * 172 * 1.16) / 2)) < 1e-9);
+  assert.equal(titleBlock(ctx, "", { x: 0, y: 0, w: 100, h: 100 }, "serif"), null);
+  const v = titleBlockVertical(ctx, "一二三\n四五", { x: 300, y: 150, w: 800, h: 700 }, "serif");   // the tallest column: 3 × 106 at size 100; the size: 220
+  assert.deepEqual([v.x, v.y, Math.round(v.w), Math.round(v.h)], [300, 150, Math.round(2 * 220 * 1.32 - (220 * 1.32 - 220)), Math.round(3 * 106 * 2.2)]);
 });
 
 test("looks that are about arrangement bring flat-edged layouts", async () => {

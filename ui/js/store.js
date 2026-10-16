@@ -37,6 +37,8 @@ const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !==
 const color = (v) => (/^#[0-9a-f]{6}$/i.test(str(v)) ? v.toLowerCase() : "#fcee0a");
 
 export const DEFAULT_STYLE = { template: "stack", theme: "dark", look: "cel", lookParams: {}, lookSeed: 7, layoutAdjust: {} };
+/** Looks that are gone, and what a profile that used one gets instead: its first name, or the nearest look left. */
+const RETIRED = { ghibli: "vivid", bluetone: "cyano", redstreet: "negative" };
 
 const KINDS = ["graphic", "sticker", "user"];
 /** A category's graphic: a reference into the asset library, or none. Older shapes are upgraded. */
@@ -73,7 +75,7 @@ export function normalizeProfile(raw) {
   if (!categories.length) categories.push({ id: uid(), name: "Category", sub: "", code: "", color: "#fcee0a", graphic: { kind: "graphic", id: "camera", labels: [], stamp: "" } });
   const st = p.style && typeof p.style === "object" ? p.style : {};
   const style = { template: TEMPLATES.includes(st.template) ? st.template : "stack", theme: st.theme === "light" ? "light" : "dark",
-    look: LOOK_IDS.includes(st.look) ? st.look : st.look === "ghibli" ? "vivid" : "cel", lookParams: {},   // "ghibli": the vivid look's first name
+    look: LOOK_IDS.includes(st.look) ? st.look : RETIRED[st.look] || "cel", lookParams: {},
     lookSeed: Number.isFinite(st.lookSeed) ? Math.abs(Math.round(st.lookSeed)) % 1000000 : 7 };   // places what a look scatters at random
   // what the user changed about each template: only the settings that differ from the template's own
   style.layoutAdjust = {};

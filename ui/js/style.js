@@ -37,7 +37,7 @@
 
 import { fonts, spaced, spacedW, brackets, toneField } from "./cel.js";
 import { blockLayout } from "./layout.js";
-import { drawTitleVertical } from "./title.js";
+import { drawTitleVertical, titleBlock, titleBlockVertical } from "./title.js";
 
 const INK = "#07070c";
 const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
@@ -554,16 +554,54 @@ const grey = (c) => { const l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; r
 const upright = (ctx) => ctx.transform(1, 0, 0.08, 1, 0, 0);   // undoes the house style's slant on lettering
 
 // ====================================================================== risograph: two spot inks on paper
+/**
+ * The big flat forms a riso poster overprints in its inks, multiplied, so they go darker where they
+ * cross: a pink disc off the field's top corner, a stack of slanted bars in blue, a half disc in the
+ * channel's ink at the field's edge, a pink ring. They come in one after another as `amt` rises, each
+ * growing and deepening over its own stretch of the slider; they keep to the open field.
+ */
+function risoShapes(ctx, env, amt) {
+  if (amt <= 0) return;
+  const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), C = env.C, at = (a, b) => clamp((amt - a) / (b - a)), ink = (r) => 0.9 * Math.min(1, r * 3);   // the ink comes in early in each stretch, the form grows through it
+  ctx.save(); ctx.globalCompositeOperation = "multiply";
+  let r = at(0, 0.35);
+  if (r > 0) { ctx.fillStyle = css(RISO.pink, ink(r)); ctx.beginPath(); ctx.arc(F.x0 + fw * (0.8 + rand(501) * 0.08), F.y0 + fh * (0.1 + rand(502) * 0.1), u * (0.24 + 0.16 * r), 0, TAU); ctx.fill(); }
+  r = at(0.25, 0.6);
+  if (r > 0) {
+    const x0 = F.x0 + fw * (0.6 + rand(503) * 0.06), y0 = F.y0 + fh * 0.36, bw = u * 0.05, gap = u * 0.035, len = fh * (0.25 + 0.3 * r);
+    ctx.fillStyle = css(RISO.blue, ink(r));
+    for (let i = 0; i < 5; i++) { const x = x0 + i * (bw + gap); shapeOf(ctx, [[x, y0], [x + bw, y0], [x + bw - len * 0.4, y0 + len], [x - len * 0.4, y0 + len]]); ctx.fill(); }
+  }
+  r = at(0.5, 0.82);
+  if (r > 0) { const R = u * (0.18 + 0.12 * r), cx = F.x0 + fw * (0.42 + rand(504) * 0.1); ctx.fillStyle = css(C, ink(r)); ctx.beginPath(); ctx.arc(cx, F.y1, R, Math.PI, 0); ctx.closePath(); ctx.fill(); }
+  r = at(0.75, 1);
+  if (r > 0) { ctx.strokeStyle = css(RISO.pink, ink(r)); ctx.lineWidth = u * 0.03; ctx.beginPath(); ctx.arc(F.x0 + fw * (0.93 - rand(505) * 0.05), F.y0 + fh * 0.62, u * (0.08 + 0.06 * r), 0, TAU); ctx.stroke(); }
+  ctx.restore();
+}
+/** A faint second impression of the whole print, (dx, dy) units further on, laid with "darken" so bare paper stays bare. */
+function ghosted(ctx, dx, dy, alpha) {
+  if (alpha <= 0 || !canPaint(ctx)) return;
+  const m = ctx.getTransform(), x = workLike(ctx, "ghost");
+  x.setTransform(1, 0, 0, 1, 0, 0); x.drawImage(ctx.canvas, 0, 0);
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "darken"; ctx.globalAlpha = Math.min(1, alpha);
+  ctx.drawImage(x.canvas, dx * m.a, dy * m.d); ctx.restore();
+}
 const RISO = { paper: [242, 234, 216], blue: [30, 60, 165], pink: [255, 72, 176] };
 const riso = {
   id: "riso",
   repaint: (c) => `a risograph print: two or three flat spot inks (${c}, a deep blue and a fluorescent pink) on cream paper, tones made of coarse halftone dots, the inks slightly out of register, visible paper grain; no photographic tones or gradients.`,
-  about: { zh: "孔版印刷（Risograph）：米色纸上两三种专色油墨叠印，叠色处变深，套色略有错位，粗网点加纸张颗粒；标题是两色错开的叠印字，图形是纸白加蓝色油墨。温暖、有手作和独立出版的味道——适合设计、阅读、生活方式、手作与小店。", en: "Risograph: two or three spot inks overprinted on cream paper, darker where they overlap, slightly out of register, coarse halftone and paper grain; the title is overprinted in two colours a little apart, objects are paper white and blue ink. Warm, handmade, small-press — for design, books, lifestyle, crafts, small shops." },
+  about: { zh: "孔版印刷（Risograph）：米色纸上两三种专色油墨叠印，叠色处变深，套色略有错位，粗网点加纸张颗粒；可以叠印几块大色块图形，也可以加上孔版机自己的痕迹——墨色不匀、滚筒条痕、重影；标题是两色错开的叠印字，图形是纸白加蓝色油墨。温暖、有手作和独立出版的味道——适合设计、阅读、生活方式、手作与小店。", en: "Risograph: two or three spot inks overprinted on cream paper, darker where they overlap, slightly out of register, coarse halftone and paper grain; big overprinted shapes if you like, and the machine's own marks — patchy ink, roller streaks, ghosting; the title is overprinted in two colours a little apart, objects are paper white and blue ink. Warm, handmade, small-press — for design, books, lifestyle, crafts, small shops." },
   name: { zh: "孔版印刷", en: "Risograph" },
   oneTheme: true,
+  seeded: true,
   params: [
     { key: "shift", min: 0, max: 2, step: 0.05, def: 1, name: { zh: "套色错位", en: "Misregistration" } },
     { key: "dots", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "网点", en: "Halftone" } },
+    { key: "pitch", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "网点粗细", en: "Halftone size" } },
+    { key: "shapes", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "叠印图形", en: "Overprinted shapes" } },
+    { key: "speckle", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "墨色不匀", en: "Patchy ink" } },
+    { key: "streaks", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "滚筒条痕", en: "Roller streaks" } },
+    { key: "ghost", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "重影", en: "Ghosting" } },
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "纸张颗粒", en: "Paper grain" } },
   ],
   theme: (base) => ({ ...base, field: css(RISO.paper), text: css(RISO.blue), dim: css(RISO.blue, 0.6), titleFill: css(RISO.blue), titleInk: css(RISO.paper), grid: () => css(RISO.blue, 0.1) }),
@@ -573,9 +611,10 @@ const riso = {
     if (env.photo) {   // the photo as a one-ink print: grey, then the blue ink in its shadows, on paper
       env.drawPhoto(1);
       wash(ctx, w, h, "screen", RISO.blue, 1); wash(ctx, w, h, "multiply", RISO.paper, 1);
-    } else if (L.grid && p.dots > 0) {   // a field of halftone in the channel ink, fading down the sheet
-      toneField(ctx, -30, -30, w + 30, h * 0.62, 34, css(C, 0.8), (x, y) => (1 - y / (h * 0.62)) * 0.95 * p.dots - (x / w) * 0.35);
+    } else if (L.grid && p.dots > 0) {   // a field of halftone in the channel ink, fading down the sheet; the size slider sets its pitch
+      toneField(ctx, -30, -30, w + 30, h * 0.62, Math.round(18 + 40 * p.pitch), css(C, 0.8), (x, y) => (1 - y / (h * 0.62)) * 0.95 * p.dots - (x / w) * 0.35);
     }
+    if (L.grid || L.fill) risoShapes(ctx, env, p.shapes);   // on the ground, or over a photo filling the canvas (not on a print)
     return true;
   },
   accent: {
@@ -601,7 +640,21 @@ const riso = {
     [C, RISO.blue, RISO.pink].forEach((c, i) => { ctx.fillStyle = css(c); ctx.fillRect(w - 150 + i * 22, h - 54, 18, 18); });
     ctx.save(); ctx.globalCompositeOperation = "multiply"; ctx.fillStyle = css(RISO.pink); ctx.fillRect(w - 150 + 11, h - 54, 18, 18); ctx.restore();
   },
-  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.85, unit, true); },
+  /**
+   * What the machine does to a print: a faint second impression a drum's turn further down (ghosting),
+   * lighter bands across the sheet where the drum ran short of ink, ink that took unevenly — blotches
+   * and specks of bare paper in the solids — and the paper's own grain.
+   */
+  post(ctx, w, h, C, p, unit = 1) {
+    if (p.ghost > 0) ghosted(ctx, w * 0.012, h * 0.16, p.ghost * 0.24);
+    if (p.streaks > 0) {
+      ctx.save(); ctx.globalCompositeOperation = "lighten";
+      for (let k = 0; k < 7; k++) softBand(ctx, 0, w, rand(k * 3.3 + 520) * h, h * (0.012 + rand(k * 4.1 + 521) * 0.05), RISO.paper, (0.35 + 0.55 * rand(k * 5.9 + 522)) * p.streaks, k * 9.1 + 523);
+      ctx.restore();
+    }
+    wear(ctx, w, h, RISO.paper, p.speckle * 0.95);
+    grain(ctx, p.grain * 0.85, unit, true);
+  },
   prompt: `Risograph-printed stickers — a small press, two or three spot inks on paper — that read at a glance:
 - simple, slightly naive shapes with a strong silhouette; chunky and friendly; no realism, no perspective, no fine detail;
 - flat colour only; think in INKS: the main colour, a deep blue (use "ink") and a fluorescent pink ("pink"); "white" is bare paper;
@@ -650,34 +703,94 @@ function filmDust(ctx, w, h, d) {
   }
   ctx.restore();
 }
+/**
+ * Beams of light slanting down through the sky from above its top edge — the "angel's ladder" of
+ * painted backgrounds: long pale wedges, screened on, fading as they fall. Warmer at dusk.
+ */
+function godRays(ctx, w, h, amt, dusk = 0) {
+  if (amt <= 0) return;
+  const ox = w * (0.6 + rand(621) * 0.25), oy = -h * 0.35, len = Math.hypot(w, h) * 1.2, c = mix([255, 248, 226], [255, 206, 150], dusk);
+  ctx.save(); ctx.globalCompositeOperation = "screen";
+  for (let k = 0; k < 9; k++) {
+    const a = Math.PI * (0.52 + 0.3 * ((k + rand(k * 2.3 + 622) * 0.8) / 9)), half = 0.012 + rand(k * 3.7 + 623) * 0.03, s = (0.35 + 0.65 * rand(k * 4.9 + 624)) * amt;
+    const g = ctx.createLinearGradient(ox, oy, ox + Math.cos(a) * len, oy + Math.sin(a) * len);
+    g.addColorStop(0.2, css(c, 0.5 * s)); g.addColorStop(0.75, css(c, 0.12 * s)); g.addColorStop(1, css(c, 0));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(ox, oy);
+    ctx.lineTo(ox + Math.cos(a - half) * len, oy + Math.sin(a - half) * len); ctx.lineTo(ox + Math.cos(a + half) * len, oy + Math.sin(a + half) * len); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+/**
+ * A lens flare as the animators drew it: a hot source near the top with a star of thin streaks and a
+ * flat horizontal one, then a line of ghosts through the middle of the frame — rings with a brighter
+ * rim, flat hexagons, a small hard dot — each in its own tint. Screened on; `amt` sets their strength.
+ */
+function lensFlare(ctx, w, h, amt) {
+  const sx = w * (0.7 + rand(611) * 0.2), sy = h * (0.08 + rand(612) * 0.14), u = Math.min(w, h), vx = w / 2 - sx, vy = h / 2 - sy;
+  ctx.save(); ctx.globalCompositeOperation = "screen";
+  const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, u * 0.36);
+  glow.addColorStop(0, css([255, 250, 232], 0.95 * amt)); glow.addColorStop(0.12, css([255, 228, 180], 0.55 * amt)); glow.addColorStop(1, css([255, 200, 150], 0));
+  ctx.fillStyle = glow; ctx.fillRect(sx - u * 0.36, sy - u * 0.36, u * 0.72, u * 0.72);
+  ctx.strokeStyle = css([255, 244, 220], 0.5 * amt); ctx.lineCap = "round";
+  for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI + rand(613) * 0.5, r = u * (0.08 + rand(k * 2.1 + 614) * 0.14); ctx.lineWidth = 1.5 + rand(k + 615) * 1.5; ctx.beginPath(); ctx.moveTo(sx - Math.cos(a) * r, sy - Math.sin(a) * r); ctx.lineTo(sx + Math.cos(a) * r, sy + Math.sin(a) * r); ctx.stroke(); }
+  ctx.save(); ctx.translate(sx, sy); ctx.scale(1, 0.035);   // the flat streak
+  const st = ctx.createRadialGradient(0, 0, 0, 0, 0, w * 0.45); st.addColorStop(0, css([200, 226, 255], 0.7 * amt)); st.addColorStop(1, css([200, 226, 255], 0));
+  ctx.fillStyle = st; ctx.beginPath(); ctx.arc(0, 0, w * 0.45, 0, TAU); ctx.fill(); ctx.restore();
+  for (const [t, r, c, kind] of [[0.45, 0.035, [255, 255, 255], "dot"], [0.75, 0.07, [150, 210, 255], "ring"], [1.05, 0.05, [255, 190, 120], "hex"], [1.35, 0.12, [190, 255, 200], "ring"], [1.6, 0.08, [220, 170, 255], "hex"], [1.9, 0.18, [255, 210, 160], "ring"]]) {
+    const x = sx + vx * t, y = sy + vy * t, R = u * r;
+    if (kind === "ring") {
+      const g = ctx.createRadialGradient(x, y, R * 0.55, x, y, R);
+      g.addColorStop(0, css(c, 0.07 * amt)); g.addColorStop(0.85, css(c, 0.4 * amt)); g.addColorStop(1, css(c, 0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.fill();
+    } else if (kind === "hex") {
+      ctx.fillStyle = css(c, 0.28 * amt); ctx.beginPath();
+      for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU + 0.3; ctx.lineTo(x + Math.cos(a) * R, y + Math.sin(a) * R); }
+      ctx.closePath(); ctx.fill();
+    } else { ctx.fillStyle = css(c, 0.5 * amt); ctx.beginPath(); ctx.arc(x, y, R * 0.3, 0, TAU); ctx.fill(); }
+  }
+  ctx.restore();
+}
 const anime = {
   id: "anime",
   repaint: (c) => `a background painting from a hand-painted 1990s anime film: painted sky and clouds, gouache-like scenery, cel-flat colours slightly greyed and warm, soft bloom on the lights, light film grain, with ${c} as an accent.`,
-  about: { zh: "九十年代手绘动画、再用胶片拍下来的样子：手绘天空背景，赛璐珞颜色略灰略暖，标题是双层勾边的字，叠上胶片颗粒、柔光、褪色和灰尘划痕。比默认的赛璐珞更旧、更柔、更怀旧——适合旅行、音乐、回忆、季节与日常。", en: "A hand-painted 90s cartoon as film would have caught it: a painted sky, cel colours a little grey and warm, a title with a double keyline, then film grain, bloom, fade, dust and scratches. Older, softer and more wistful than the default Cel — for travel, music, memories, seasons, everyday life." },
+  about: { zh: "九十年代手绘动画、再用胶片拍下来的样子：手绘天空背景（云量可调，可以转成晚霞，有穿过云层的天使光），赛璐珞颜色略灰略暖，标题是双层勾边的字，叠上手绘式的镜头光斑、漏光、胶片颗粒、柔光、褪色、灰尘划痕和暗角。比默认的赛璐珞更旧、更柔、更怀旧——适合旅行、音乐、回忆、季节与日常。", en: "A hand-painted 90s cartoon as film would have caught it: a painted sky (as cloudy as you like, or at dusk, with beams of light through it), cel colours a little grey and warm, a title with a double keyline, then a hand-drawn lens flare, a light leak, film grain, bloom, fade, dust and scratches and a vignette. Older, softer and more wistful than the default Cel — for travel, music, memories, seasons, everyday life." },
   name: { zh: "九十年代动画", en: "90s animation" },
   oneTheme: true,
   seeded: true,
   params: [
-    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "胶片颗粒", en: "Film grain" } },
+    { key: "clouds", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "云量", en: "Clouds" } },
+    { key: "dusk", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "晚霞", en: "Dusk" } },
+    { key: "rays", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "天使光", en: "Light rays" } },
+    { key: "flare", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "镜头光斑", en: "Lens flare" } },
+    { key: "leak", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "漏光", en: "Light leak" } },
     { key: "bloom", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "柔光", en: "Bloom" } },
     { key: "fade", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "褪色", en: "Fade" } },
     { key: "dust", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "灰尘划痕", en: "Dust and scratches" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "胶片颗粒", en: "Film grain" } },
+    { key: "vignette", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "暗角", en: "Vignette" } },
   ],
   theme: (base) => ({ ...base, field: css([40, 44, 86]), text: css(ANI.cream), dim: css(ANI.cream, 0.6), titleFill: css(ANI.cream), titleInk: css(ANI.line), grid: () => "rgba(0,0,0,0)" }),
-  background(ctx, env, L) {
-    const { w, h, C } = env;
-    if (env.photo) { env.drawPhoto(); wash(ctx, w, h, "multiply", [255, 238, 216], 0.5); return true; }
-    // a painted sky: deep above, hazy toward the horizon, with a few soft banks of cloud
+  /**
+   * A painted sky — deep above, hazy toward the horizon; with Dusk, violet above and rose and amber
+   * below — with soft banks of cloud (more of them, one by one, as Clouds rises; lit from below at
+   * dusk) and beams of light slanting down through it. A photo filling the canvas gets the beams too.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, d = p.dusk;
+    if (env.photo) { env.drawPhoto(); wash(ctx, w, h, "multiply", [255, 238, 216], 0.5); if (L.fill) godRays(ctx, w, h, p.rays, d); return true; }
     const sky = ctx.createLinearGradient(0, 0, 0, h);
-    sky.addColorStop(0, css(mix([34, 46, 108], C, 0.06))); sky.addColorStop(0.55, css(mix([92, 132, 184], C, 0.08))); sky.addColorStop(1, css(mix([244, 208, 172], C, 0.14)));
+    sky.addColorStop(0, css(mix(mix([34, 46, 108], [58, 40, 104], d), C, 0.06))); sky.addColorStop(0.55, css(mix(mix([92, 132, 184], [206, 122, 146], d), C, 0.08))); sky.addColorStop(1, css(mix(mix([244, 208, 172], [255, 172, 96], d), C, 0.14)));
     ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
-    if (L.grid) for (let k = 0; k < 7; k++) {
-      const cx = rand(k * 3 + 1) * w, cy = h * (0.18 + rand(k * 3 + 2) * 0.5), rx = w * (0.1 + rand(k * 3 + 3) * 0.16), ry = rx * 0.3;
+    if (!L.grid) return true;
+    const lit = mix(ANI.cream, [255, 196, 170], d), n = p.clouds * 13;
+    for (let k = 0; k < Math.ceil(n); k++) {
+      const a = clamp(n - k), cx = rand(k * 3 + 1) * w, cy = h * (0.18 + rand(k * 3 + 2) * 0.5), rx = w * (0.1 + rand(k * 3 + 3) * 0.16), ry = rx * 0.3;
       ctx.save(); ctx.translate(cx, cy); ctx.scale(1, ry / rx);
-      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
-      g.addColorStop(0, css(ANI.cream, 0.55)); g.addColorStop(0.6, css(ANI.cream, 0.22)); g.addColorStop(1, css(ANI.cream, 0));
+      const g = ctx.createRadialGradient(0, rx * 0.25 * d, 0, 0, 0, rx);
+      g.addColorStop(0, css(lit, 0.55 * a)); g.addColorStop(0.6, css(lit, 0.22 * a)); g.addColorStop(1, css(lit, 0));
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, rx, 0, Math.PI * 2); ctx.fill(); ctx.restore();
     }
+    godRays(ctx, w, h, p.rays, d);
     return true;
   },
   accent: {
@@ -715,11 +828,18 @@ const anime = {
     }
     wash(ctx, w, h, "screen", [44, 30, 56], 0.55 * p.fade);          // blacks lifted, as on an old print
     wash(ctx, w, h, "multiply", [255, 238, 214], 0.75 * p.fade);     // and the whole thing gone warm
+    if (p.leak > 0) {   // light that got into the camera: a red-orange glow from one side, burning to yellow at its heart
+      const left = rand(640) > 0.5, x = left ? w * 0.02 : w * 0.98, y = h * (0.25 + rand(641) * 0.5), R = Math.max(w, h) * (0.3 + 0.35 * p.leak);
+      const g = ctx.createRadialGradient(x, y, 0, x, y, R);
+      g.addColorStop(0, css([255, 236, 170], 0.95 * p.leak)); g.addColorStop(0.22, css([255, 132, 52], 0.78 * p.leak)); g.addColorStop(0.6, css([214, 44, 56], 0.34 * p.leak)); g.addColorStop(1, css([200, 40, 60], 0));
+      const e = ctx.createLinearGradient(left ? 0 : w, 0, left ? w * 0.4 : w * 0.6, 0);   // and burnt in along that edge
+      e.addColorStop(0, css([255, 96, 40], 0.75 * p.leak)); e.addColorStop(0.45, css([230, 60, 50], 0.25 * p.leak)); e.addColorStop(1, css([230, 60, 50], 0));
+      ctx.save(); ctx.globalCompositeOperation = "screen"; ctx.fillStyle = e; ctx.fillRect(0, 0, w, h); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); ctx.restore();
+    }
+    if (p.flare > 0) lensFlare(ctx, w, h, p.flare);
     if (p.dust > 0) filmDust(ctx, w, h, p.dust);
     grain(ctx, p.grain * 0.7, unit);
-    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.45, w / 2, h / 2, Math.hypot(w, h) * 0.62);
-    g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, css([20, 12, 30], 0.42));
-    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    vignette(ctx, w, h, [20, 12, 30], 0.84 * p.vignette, 0.45);
   },
   prompt: `Hand-painted animation cels of the 1990s — a prop or character drawn for television — that read at a glance:
 - clean, confident shapes with a strong silhouette and slightly soft, rounded corners; appealing, simple proportions; no realism, no fine detail;
@@ -735,15 +855,46 @@ const anime = {
 const BN = { paper: [238, 232, 218], ink: [18, 18, 22], night: [16, 18, 24] };
 let dark = true;               // whether the current cover is on a dark ground; see setLook()
 const bnInk = () => (dark ? BN.paper : BN.ink), bnGround = () => (dark ? BN.night : BN.paper);
+/**
+ * The record itself, sliding out of the sleeve from the open field's far edge (`amt`: how far, 0 to
+ * well out): black vinyl with its grooves catching the light in two opposite wedges, a label in the
+ * channel colour with a few lines of small print, the spindle hole.
+ */
+function record(ctx, env, amt) {
+  const { C } = env, F = openField(env), R = Math.min((F.y1 - F.y0) * 0.46, (F.x1 - F.x0) * 0.4), cx = F.x1 + R * 1.02 - R * 1.3 * amt, cy = (F.y0 + F.y1) / 2;
+  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.fillStyle = css(dark ? [6, 6, 8] : [20, 20, 22]); ctx.fill();
+  ctx.clip();
+  ctx.lineWidth = 1;
+  for (let r = R * 0.36; r < R * 0.97; r += R / 46) { ctx.strokeStyle = `rgba(255,255,255,${0.025 + 0.03 * rand(r)})`; ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke(); }
+  for (const a of [-0.9, Math.PI - 0.9]) {   // the sheen: two wedges of light across the grooves
+    const g = ctx.createRadialGradient(cx, cy, R * 0.34, cx, cy, R);
+    g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(0.5, "rgba(255,255,255,0.12)"); g.addColorStop(1, "rgba(255,255,255,0.03)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a - 0.22, a + 0.22); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  ctx.strokeStyle = "rgba(255,255,255,0.14)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, R - 1, 0, TAU); ctx.stroke();
+  const lr = R * 0.33;
+  ctx.fillStyle = css(C); ctx.beginPath(); ctx.arc(cx, cy, lr, 0, TAU); ctx.fill();
+  ctx.strokeStyle = css(BN.ink, 0.35); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, lr * 0.86, 0, TAU); ctx.stroke();
+  greeked(ctx, cx - lr * 0.5, cy - lr * 0.52, lr * 1.0, 2, lr * 0.11, css(BN.ink, 0.75), 641, "center");
+  greeked(ctx, cx - lr * 0.62, cy + lr * 0.28, lr * 1.24, 3, lr * 0.08, css(BN.ink, 0.6), 642, "center");
+  ctx.fillStyle = css(bnGround()); ctx.beginPath(); ctx.arc(cx, cy, Math.max(3, R * 0.022), 0, TAU); ctx.fill();
+}
 const bluenote = {
   id: "bluenote",
   repaint: (c) => `the photograph on a 1950s–60s jazz record sleeve: a high-contrast duotone in black and ${c}, deep shadows, coarse grain, large calm areas; still a photograph, with no drawn outlines.`,
-  about: { zh: "五六十年代爵士唱片封套：大面积纯色块、紧凑的无衬线大字，没有描边、没有投影，照片处理成单色加黑，编目式的细线和小字；自带平直的版式，可选深色或浅色底。克制、有态度、靠排版取胜——适合音乐、访谈、人物、品牌故事。", en: "Jazz record sleeves of the 50s and 60s: large flat blocks of colour, tight sans-serif headlines with no outline or shadow, photos in one colour and black, catalogue rules and small print; flat layouts of its own, dark or light ground. Restrained, confident, carried by the type — for music, interviews, portraits, brand stories." },
+  about: { zh: "五六十年代爵士唱片封套：大面积纯色块、紧凑的无衬线大字，没有描边、没有投影，照片处理成单色加黑并带粗网点，编目式的细线和小字；可以让黑胶唱片从封套里滑出来，再加上唱片磨出的圆痕、边角磨损和日晒褪色；自带平直的版式，可选深色或浅色底。克制、有态度、靠排版取胜——适合音乐、访谈、人物、品牌故事。", en: "Jazz record sleeves of the 50s and 60s: large flat blocks of colour, tight sans-serif headlines with no outline or shadow, photos in one colour and black through a coarse screen, catalogue rules and small print; the record can slide out of the sleeve, and the sleeve can show its years — ring wear, worn edges, sun fade; flat layouts of its own, dark or light ground. Restrained, confident, carried by the type — for music, interviews, portraits, brand stories." },
   name: { zh: "蓝调唱片", en: "Record sleeve" },
+  seeded: true,
   params: [
-    { key: "duo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.9, name: { zh: "照片双色调", en: "Photo duotone" } },
+    { key: "vinyl", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "唱片露出", en: "Record sliding out" } },
     { key: "rules", min: 0, max: 1, step: 0.05, def: 1, name: { zh: "细线与编目", en: "Rules and catalogue" } },
+    { key: "ring", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "圆痕磨损", en: "Ring wear" } },
+    { key: "edges", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "边角磨损", en: "Worn edges" } },
+    { key: "fade", min: 0, max: 1, step: 0.05, def: 0.1, name: { zh: "日晒褪色", en: "Sun fade" } },
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "纸张颗粒", en: "Paper grain" } },
+    { key: "duo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.9, name: { zh: "照片双色调", en: "Photo duotone" } },
+    { key: "halftone", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "照片网点", en: "Photo halftone" } },
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,   // a condensed grotesque for Latin, the heavy sans for CJK
   /** Plain rectangles in generous proportions: a deep band, a wide side panel, a slim strip. */
@@ -761,11 +912,14 @@ const bluenote = {
   background(ctx, env, L, p) {
     const { w, h, C } = env;
     ctx.fillStyle = css(bnGround()); ctx.fillRect(0, 0, w, h);
-    if (env.photo) {   // one colour and black: the photograph as it was printed on a sleeve
+    if (env.photo) {   // one colour and black: the photograph as it was printed on a sleeve, through a coarse screen
       env.drawPhoto(p.duo);
       wash(ctx, w, h, "multiply", mix([255, 255, 255], C, 0.92), p.duo);
       wash(ctx, w, h, "screen", mix([0, 0, 0], C, 0.16), p.duo);
+      dotScreen(ctx, w, h, [255, 255, 255], 7, 0.45 * p.halftone, "soft-light");
+      dotScreen(ctx, w, h, mix(BN.ink, C, 0.2), 7, 0.3 * p.halftone);
     }
+    if ((L.grid || L.fill) && p.vinyl > 0) record(ctx, env, p.vinyl);
     return true;
   },
   accent: { fill: (C) => css(C), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },   // a plain block of colour, nothing more
@@ -788,7 +942,34 @@ const bluenote = {
     ctx.textAlign = "left"; ctx.font = `600 13px ${fonts.mono}, ${fonts.cn}`;
     ctx.strokeStyle = css(ink, 0.9 * p.rules); ctx.lineWidth = 2; ctx.strokeRect(72, h - 64, 78, 22); ctx.fillText("STEREO", 82, h - 48);
   },
-  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * (dark ? 0.6 : 0.85), unit, !dark); },
+  /**
+   * A sleeve that has lived on a shelf: the sun has lifted its blacks and taken its colour; the record
+   * inside has rubbed a ring through the print; its edges and corners are scuffed. On the dark sleeve
+   * the wear shows pale (the board under the ink), on the light one as grime.
+   */
+  post(ctx, w, h, C, p, unit = 1) {
+    if (p.fade > 0) {
+      wash(ctx, w, h, "screen", [64, 58, 50], 0.6 * p.fade);          // the blacks lifted
+      wash(ctx, w, h, "multiply", [255, 240, 214], 0.6 * p.fade);     // gone yellow
+      wash(ctx, w, h, "soft-light", [150, 146, 138], 0.5 * p.fade);   // and flatter
+    }
+    const scuff = dark ? mix(BN.paper, BN.night, 0.3) : [176, 164, 142], mode = dark ? "lighten" : "multiply", u = Math.min(w, h);
+    if (p.ring > 0) wear(ctx, w, h, scuff, Math.min(1, p.ring * 1.2), mode, (x) => {
+      const cx = w / 2 + (rand(631) - 0.5) * w * 0.08, cy = h / 2 + (rand(632) - 0.5) * h * 0.06, R = u * 0.47;
+      x.strokeStyle = "#fff";
+      for (const [lw, a] of [[u * 0.07, 0.35], [u * 0.045, 0.5], [u * 0.02, 0.8]]) { x.globalAlpha = a; x.lineWidth = lw; x.beginPath(); x.arc(cx, cy, R, 0, TAU); x.stroke(); }
+      x.globalAlpha = 0.18; x.fillStyle = "#fff"; x.beginPath(); x.arc(cx, cy, R, 0, TAU); x.fill(); x.globalAlpha = 1;   // a faint rub over the whole round
+    }, 0.32);
+    if (p.edges > 0) wear(ctx, w, h, scuff, Math.min(1, p.edges * 1.3), mode, (x) => {
+      const e = u * 0.06;
+      for (const [x0, y0, x1, y1, rx, ry, rw, rh] of [[0, 0, 0, e, 0, 0, w, e], [0, h, 0, h - e, 0, h - e, w, e], [0, 0, e, 0, 0, 0, e, h], [w, 0, w - e, 0, w - e, 0, e, h]]) {
+        const g = x.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, "rgba(255,255,255,0.95)"); g.addColorStop(1, "rgba(255,255,255,0)");
+        x.fillStyle = g; x.fillRect(rx, ry, rw, rh);
+      }
+      for (const [cx, cy] of [[0, 0], [w, 0], [0, h], [w, h]]) { const g = x.createRadialGradient(cx, cy, 0, cx, cy, u * 0.16); g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(1, "rgba(255,255,255,0)"); x.fillStyle = g; x.fillRect(cx - u * 0.16, cy - u * 0.16, u * 0.32, u * 0.32); }
+    }, 0.22);
+    grain(ctx, p.grain * (dark ? 0.6 : 0.85), unit, !dark);
+  },
   prompt: `Shapes cut from coloured paper for a 1950s jazz record sleeve — reduced, deliberate, modern:
 - as few shapes as possible, each a clean geometric or freely cut form; generous, confident proportions; no realism, no perspective, no detail;
 - flat colour only, and no outlines at all — the app draws none, so neighbouring shapes must differ in colour to be told apart;
@@ -802,15 +983,50 @@ const bluenote = {
 const ED = { paper: [246, 243, 236], ink: [20, 20, 20], night: [18, 18, 18] };
 // the serif face is one of the profile's fonts (see fonts.serif in cel.js)
 const edInk = () => (dark ? ED.paper : ED.ink), edGround = () => (dark ? ED.night : ED.paper);
+/**
+ * The page's text, where the column rule leaves room on the right: a large opening quotation mark in
+ * the channel colour (growing and deepening with Quotation mark) and, under it, two narrow columns of
+ * body text set as greeked lines, filling in paragraph by paragraph, top to bottom, as Body columns
+ * rises. Nothing where the room is too narrow.
+ */
+function edColumns(ctx, env, p) {
+  const { w, C } = env, F = openField(env), T = titleArea(ctx, env), x0 = Math.max(F.x0 + 40, Math.round(w * 0.64) + 30, T ? T.x + T.w + 60 : 0), x1 = F.x1 - 72, y0 = Math.max(F.y0, 0) + 172, y1 = Math.min(F.y1 - 44, graphicTop(env, x0, x1));
+  if (x1 - x0 < 220 || y1 - y0 < 160) return;
+  let top = y0;
+  if (p.quote > 0) {
+    const fs = 90 + 130 * p.quote;
+    ctx.save(); ctx.font = `700 ${fs}px ${fonts.serif}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(C, 0.3 + 0.7 * p.quote);
+    ctx.fillText("\u201C", x0 - fs * 0.06, y0 + fs * 0.62); ctx.restore();
+    top = y0 + 30 + 60 * p.quote;
+  }
+  if (p.text <= 0) return;
+  const lh = 15, gap = 26, cw = (x1 - x0 - gap) / 2, rows = Math.floor((y1 - top) / lh), ink = css(edInk(), dark ? 0.34 : 0.42);
+  let left = Math.round(p.text * rows * 2);
+  for (let c = 0; c < 2 && left > 0; c++) {
+    let y = top, k = 0;
+    while (left > 0 && y + lh <= y1) {
+      const len = 3 + Math.floor(rand(c * 17 + k * 3.1 + 650) * 5), n = Math.min(len, left, Math.floor((y1 - y) / lh));
+      if (n <= 0) break;
+      greeked(ctx, x0 + c * (cw + gap), y, cw, n, lh, ink, 651 + c * 40 + k * 7);
+      left -= n; y += (n + 0.8) * lh; k++;
+    }
+  }
+}
 const editorial = {
   id: "editorial",
   repaint: (c) => `a black-and-white magazine photograph: fine grain, deep blacks, clean highlights, a calm and considered tone; still a photograph, not a drawing.`,
-  about: { zh: "杂志内页的编辑设计：衬线标题、粗细双线、细线边框、页眉页码、巨大而安静的期号数字，照片转黑白；自带平直的版式，可选深色或浅色底。安静、讲究、有阅读感——适合深度内容、评论、读书、文化与系列栏目。", en: "The pages of a magazine: a serif headline, thick-and-thin rules, a hairline border, running head and folio, a huge quiet issue number, black-and-white photos; flat layouts of its own, dark or light ground. Quiet, considered, made to be read — for long-form, essays, books, culture, series." },
+  about: { zh: "杂志内页的编辑设计：衬线标题、粗细双线、细线边框、页眉页码、巨大而安静的期号数字，频道色的大引号和两栏正文，装订线阴影；照片转黑白或印成频道色的专色；自带平直的版式，可选深色或浅色底。安静、讲究、有阅读感——适合深度内容、评论、读书、文化与系列栏目。", en: "The pages of a magazine: a serif headline, thick-and-thin rules, a hairline border, running head and folio, a huge quiet issue number, a large quotation mark and two columns of body text, a gutter shadow; photos in black and white or in the channel colour as a spot ink; flat layouts of its own, dark or light ground. Quiet, considered, made to be read — for long-form, essays, books, culture, series." },
   name: { zh: "编辑设计", en: "Editorial" },
+  seeded: true,
   params: [
     { key: "rules", min: 0, max: 1, step: 0.05, def: 1, name: { zh: "栏线与页眉", en: "Rules and folio" } },
-    { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白照片", en: "Black-and-white photo" } },
+    { key: "numeral", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "期号大字", en: "Issue number" } },
+    { key: "text", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "正文栏", en: "Body columns" } },
+    { key: "quote", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "引号", en: "Quotation mark" } },
+    { key: "gutter", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "装订阴影", en: "Gutter shadow" } },
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "纸张颗粒", en: "Paper grain" } },
+    { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白照片", en: "Black-and-white photo" } },
+    { key: "spot", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0, name: { zh: "照片专色", en: "Photo in spot colour" } },
   ],
   titleFont: (f) => f.serif,
   faces: (f) => ({ cn: f.serif }),         // channel name and the like in the serif too; the small capitals stay sans
@@ -829,12 +1045,18 @@ const editorial = {
   background(ctx, env, L, p) {
     const { w, h, C } = env;
     ctx.fillStyle = css(edGround()); ctx.fillRect(0, 0, w, h);
-    if (env.photo) { env.drawPhoto(p.mono); wash(ctx, w, h, "multiply", ED.paper, 0.5 * p.mono); return true; }
-    if (L.grid) {   // the issue number, very large and very quiet, where a picture would otherwise go
+    if (env.photo) {   // black and white, or a duotone in black and the channel's colour as a spot ink: the mid-tones and lights take the ink
+      env.drawPhoto(p.mono); wash(ctx, w, h, "multiply", ED.paper, 0.5 * p.mono);
+      if (p.spot > 0) { wash(ctx, w, h, "multiply", mix([255, 255, 255], C, 0.85), p.spot); wash(ctx, w, h, "screen", mix([0, 0, 0], C, 0.22), p.spot); }
+      return true;
+    }
+    if (!L.grid) return true;
+    if (p.numeral > 0) {   // the issue number, very large and very quiet, where a picture would otherwise go
       const fs = Math.min(w, h) * 0.78;
-      ctx.save(); ctx.font = `italic 700 ${fs}px ${fonts.serif}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(C, dark ? 0.22 : 0.2);
+      ctx.save(); ctx.font = `italic 700 ${fs}px ${fonts.serif}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(C, (dark ? 0.44 : 0.4) * p.numeral);
       ctx.fillText(pad2(env.o.catIndex + 1), w - 60, h * 0.5 + fs * 0.36); ctx.restore();
     }
+    edColumns(ctx, env, p);
     return true;
   },
   accent: {
@@ -864,7 +1086,19 @@ const editorial = {
     ctx.fillText(`— ${pad2(i + 1)} —`, w / 2, h - 50);
     if (p.rules > 0.5) { ctx.fillStyle = css(ink, 0.28 * p.rules); ctx.fillRect(Math.round(w * 0.64), 170, 1, h - 340); }
   },
-  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * (dark ? 0.6 : 0.85), unit, !dark); },
+  /** The paper's grain, and, with Gutter shadow, the page as it lies in an open magazine: shaded into the binding on the left, a little light on its curve. */
+  post(ctx, w, h, C, p, unit = 1) {
+    if (p.gutter > 0) {
+      const gw = w * 0.16, g = ctx.createLinearGradient(0, 0, gw, 0);
+      g.addColorStop(0, css([0, 0, 0], 0.55 * p.gutter)); g.addColorStop(0.18, css([0, 0, 0], 0.24 * p.gutter)); g.addColorStop(0.6, css([0, 0, 0], 0.05 * p.gutter)); g.addColorStop(1, css([0, 0, 0], 0));
+      ctx.save(); ctx.globalCompositeOperation = "multiply"; ctx.fillStyle = g; ctx.fillRect(0, 0, gw, h);
+      const l = ctx.createLinearGradient(gw * 0.3, 0, gw * 1.3, 0); l.addColorStop(0, "rgba(255,255,255,0)"); l.addColorStop(0.5, `rgba(255,255,255,${0.14 * p.gutter})`); l.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.globalCompositeOperation = "screen"; ctx.fillStyle = l; ctx.fillRect(gw * 0.3, 0, gw, h);
+      const r = ctx.createLinearGradient(w, 0, w - w * 0.05, 0); r.addColorStop(0, css([0, 0, 0], 0.18 * p.gutter)); r.addColorStop(1, css([0, 0, 0], 0));   // the page's outer edge, turning away
+      ctx.globalCompositeOperation = "multiply"; ctx.fillStyle = r; ctx.fillRect(w * 0.95, 0, w * 0.05, h); ctx.restore();
+    }
+    grain(ctx, p.grain * (dark ? 0.6 : 0.85), unit, !dark);
+  },
   prompt: `Spot illustrations for a magazine page — an engraved, quietly witty line drawing — that read at a glance:
 - economical shapes with a clear silhouette, drawn as if with a pen: let thin lines ("detail") describe form, and keep filled areas few;
 - flat colour only: black ("ink"), the paper ("white") and ONE spot of the main colour on the part that carries the idea;
@@ -879,16 +1113,194 @@ const SONG = { paper: [236, 224, 196], ink: [30, 25, 21], red: [176, 38, 32] };
 const worn = (c) => mix(mix(c, grey(c), 0.3), SONG.paper, 0.22);   // a colour as a water-based print would hold it
 const NUMERALS = ["〇", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
 const numeral = (n) => (n <= 10 ? NUMERALS[n] : n < 20 ? "十" + NUMERALS[n - 10] : String(n));
+/**
+ * Where the vertical title stands: the layout's box, beside the seal in the corner (which keeps it),
+ * and down to the colour band or the foot of the page — columns want height, where a line wants width.
+ */
+function songBox(ctx, env, box) {
+  const G = env.G, split = G.template === "split", foot = split || G.flipped ? env.h - 110 : Math.min(G.accent[0][1], G.accent[1][1]) - 36;
+  let x = box.x, w = box.w;
+  if (env.cover.tag && !G.flipped) {
+    const f = G.tag.fs * 0.82;
+    ctx.save(); ctx.font = `900 ${f}px ${fonts.serif}`; const seal = spacedW(ctx, env.cover.tag, 4) + f * 0.9 + 44; ctx.restore();
+    x += seal; w = Math.max(200, w - seal);
+  }
+  return { x, y: box.y, w, h: Math.max(160, foot - box.y) };
+}
+/**
+ * A made-up character `s` units across, centred at (x, y), built as a Song face builds one: thin
+ * horizontals, heavier verticals, a dot or a falling stroke, in two parts side by side, two parts one
+ * above the other, or one part whole. Not a real character — it only has to read as text at a glance.
+ */
+function fauxGlyph(ctx, x, y, s, k, t = Math.max(1.2, s * 0.085)) {
+  const l = x - s / 2, top = y - s / 2, th = t * 0.72, tv = t * 1.3;
+  const H = (x0, y0, len) => ctx.fillRect(l + x0 * s, top + y0 * s - th / 2, len * s, th);
+  const V = (x0, y0, len) => ctx.fillRect(l + x0 * s - tv / 2, top + y0 * s, tv, len * s);
+  const slant = (x0, y0, len, a) => { ctx.save(); ctx.translate(l + x0 * s, top + y0 * s); ctx.rotate(a); ctx.fillRect(0, -th * 0.7, len * s, th * 1.4); ctx.restore(); };
+  const part = (x0, y0, w, h, q) => {
+    if (rand(q + 0.6) > 0.55) { V(x0, y0 + h * 0.08, h * 0.84); V(x0 + w, y0 + h * 0.08, h * 0.84); H(x0, y0 + h * 0.08, w); H(x0, y0 + h * 0.92, w); }   // a box
+    const n = 1 + Math.floor(rand(q) * 3);
+    for (let i = 0; i < n; i++) { const a = rand(q + i * 1.9 + 0.1) * 0.15; H(x0 + w * a, y0 + h * (0.18 + (0.64 * (i + 0.5)) / n), w * (1 - a - rand(q + i * 2.3 + 0.2) * 0.2)); }
+    if (rand(q + 0.3) > 0.25) V(x0 + w * (0.3 + rand(q + 0.4) * 0.4), y0, h);
+    if (rand(q + 0.5) > 0.55) ctx.fillRect(l + (x0 + w * 0.5) * s - tv * 0.6, top + (y0 + h * 0.02) * s, tv * 1.2, tv * 1.4);   // a dot
+  };
+  const kind = rand(k);
+  if (kind < 0.45) { part(0.04, 0.06, 0.26, 0.88, k + 1.1); part(0.42, 0.04, 0.54, 0.92, k + 2.2); }   // side by side
+  else if (kind < 0.8) { part(0.1, 0.02, 0.8, 0.42, k + 3.3); part(0.04, 0.5, 0.92, 0.48, k + 4.4); }   // one above the other
+  else { part(0.08, 0.04, 0.84, 0.66, k + 5.5); slant(0.48, 0.66, 0.42, 2.4); slant(0.5, 0.66, 0.44, 0.7); }   // whole, with falling strokes at the foot
+}
+/**
+ * The page's own text, in the ruled columns the title leaves free: runs of large characters, one to a
+ * column, broken by commentary in two small lines side by side, as the old books set their notes;
+ * filled right to left and top to bottom as Text rises, the last character coming in faintly. Vermilion
+ * marks (Vermilion marks): a small circle beside some of the large characters, a line down the side of
+ * some runs, and comments in tiny characters along the rules — these last whether there is text or not.
+ */
+function songText(ctx, env, p, pitch) {
+  if (p.text <= 0 && p.notes <= 0) return;
+  const { w, h } = env, F = openField(env), T = titleLayer(env), base = titleBase(env);
+  const A = !T || !base ? null : p.vertical ? titleBlockVertical(ctx, env.cover.title, songBox(ctx, env, base), T.font ? `"${T.font}", ${fonts.serif}` : fonts.serif, 900, 300) : titleArea(ctx, env);
+  const y0 = env.hasBrand ? 112 : 74, y1 = Math.min(h - 70, F.y1 - 24), big = pitch * 0.44, small = pitch * 0.22;
+  // the free stretches of each column, right to left: not under the title, nor behind the channel graphic
+  const cols = [];
+  for (let r = w - 64 - pitch; r - pitch > 60; r -= pitch) {
+    const cx = r - pitch / 2, spans = [[y0, y1]];
+    const cut = (a, b) => { for (let i = spans.length - 1; i >= 0; i--) { const [s0, s1] = spans[i]; if (b <= s0 || a >= s1) continue; spans.splice(i, 1, ...[[s0, a], [b, s1]].filter(([u, v]) => v - u > big * 1.5)); } };
+    if (A && cx + pitch / 2 > A.x - 16 && cx - pitch / 2 < A.x + A.w + 16) cut(A.y - 30, A.y + A.h + 30);
+    const top = graphicTop(env, cx - pitch / 2, cx + pitch / 2);
+    if (top < y1) cut(top, Infinity);
+    cols.push({ cx, spans });
+  }
+  const ink = css(SONG.ink, 0.82), red = css(SONG.red, 0.9);
+  // the text: every cell is a large character or a pair of small ones; `left` of them are shown
+  const cells = [];
+  cols.forEach((c, ci) => c.spans.forEach(([s0, s1], si) => {
+    let y = s0, k = ci * 131 + si * 17, run = 0, notes = false;
+    while (true) {
+      if (run <= 0) { notes = !notes && rand(k * 1.7 + 660) > 0.45; run = notes ? 4 + Math.floor(rand(k + 661) * 9) : 3 + Math.floor(rand(k + 662) * 7); k += 3.1; }
+      const step = notes ? small * 1.18 : big * 1.16;
+      if (y + step > s1) break;
+      cells.push({ x: c.cx, y: y + step / 2, notes, k: k * 7.3 + y });
+      y += step; run--;
+    }
+  }));
+  let left = p.text * cells.length;
+  ctx.save();
+  for (const cell of cells) {
+    if (left <= 0) break;
+    ctx.globalAlpha = Math.min(1, left); left -= 1;
+    ctx.fillStyle = ink;
+    if (cell.notes) { fauxGlyph(ctx, cell.x + small * 0.6, cell.y, small, cell.k); fauxGlyph(ctx, cell.x - small * 0.6, cell.y, small, cell.k + 41); }
+    else {
+      fauxGlyph(ctx, cell.x, cell.y, big, cell.k);
+      if (rand(cell.k + 663) < p.notes * 0.45) { ctx.strokeStyle = red; ctx.lineWidth = Math.max(1.5, big * 0.06); ctx.beginPath(); ctx.arc(cell.x + big * 0.66, cell.y + big * 0.32, big * 0.11, 0, TAU); ctx.stroke(); }
+    }
+  }
+  ctx.restore();
+  if (p.notes <= 0) return;
+  // comments in tiny vermilion characters down the rules, and a line beside a passage
+  ctx.save(); ctx.fillStyle = red;
+  cols.forEach((c, ci) => {
+    if (rand(ci * 5.9 + 664) > 0.55 || !c.spans.length) return;
+    const [s0, s1] = c.spans[0], n = Math.floor(p.notes * (4 + rand(ci + 665) * 10)), tiny = pitch * 0.13, x = c.cx + pitch / 2 - tiny * 0.7;
+    for (let i = 0; i < n && s0 + (i + 1) * tiny * 1.25 < s1; i++) fauxGlyph(ctx, x, s0 + tiny + i * tiny * 1.25, tiny, ci * 37 + i * 3.3, Math.max(1, tiny * 0.11));
+    if (rand(ci * 3.7 + 666) < p.notes) ctx.fillRect(c.cx - pitch / 2 + 5, s0 + (s1 - s0) * 0.2, 2.2, (s1 - s0) * 0.18 * (0.4 + p.notes));
+  });
+  ctx.restore();
+}
+/**
+ * Collectors' seals pressed on the leaf over the years, in vermilion: a square one cut in intaglio (the
+ * characters left white), a square one in relief (red characters in a red frame), a round one. They come
+ * in one by one as `amt` rises, each over its own stretch, a little faded; painted together, then laid
+ * on in multiply, as ink on paper.
+ */
+function songSeals(ctx, env, amt) {
+  if (amt <= 0 || !canPaint(ctx)) return;
+  const { w, h } = env, F = openField(env), x = workLike(ctx, "seals"), red = css(SONG.red), at = (a, b) => clamp((amt - a) / (b - a));
+  const grid = (cx, cy, s, k, t) => { for (let i = 0; i < 4; i++) fauxGlyph(x, cx + (i % 2 ? -1 : 1) * s * 0.23, cy + (i < 2 ? -1 : 1) * s * 0.23, s * 0.4, k + i * 9.7, t); };
+  const seals = [
+    { kind: "white", s: 92, cx: w - 102 - 70, cy: 150 + rand(671) * 60, r: at(0, 0.4) },
+    { kind: "red", s: 78, cx: 64 + 60 + rand(672) * 40, cy: (F.y0 + F.y1) * 0.5 - 40 + rand(673) * 60, r: at(0.3, 0.7) },
+    { kind: "round", s: 70, cx: w * (0.56 + rand(674) * 0.1), cy: F.y1 - 70 - rand(675) * 60, r: at(0.6, 1) },
+  ];
+  for (const [i, q] of seals.entries()) {
+    if (q.r <= 0) continue;
+    x.save(); x.globalAlpha = 0.85 * Math.min(1, q.r * 2); x.translate(q.cx, q.cy); x.rotate((rand(676 + i) - 0.5) * 0.08);
+    const s = q.s * (0.8 + 0.2 * q.r);
+    if (q.kind === "white") {
+      x.fillStyle = red; x.fillRect(-s / 2, -s / 2, s, s);
+      x.globalCompositeOperation = "destination-out"; x.fillStyle = "#000"; grid(0, 0, s, 680 + i * 50, s * 0.06);
+    } else if (q.kind === "red") {
+      x.strokeStyle = red; x.lineWidth = s * 0.07; x.strokeRect(-s / 2 + s * 0.035, -s / 2 + s * 0.035, s * 0.93, s * 0.93);
+      x.fillStyle = red; grid(0, 0, s * 0.92, 690 + i * 50, s * 0.05);
+    } else {
+      x.strokeStyle = red; x.lineWidth = s * 0.07; x.beginPath(); x.ellipse(0, 0, s * 0.42, s * 0.5, 0, 0, TAU); x.stroke();
+      x.fillStyle = red; fauxGlyph(x, 0, -s * 0.17, s * 0.34, 700 + i, s * 0.05); fauxGlyph(x, 0, s * 0.19, s * 0.34, 710 + i, s * 0.05);
+    }
+    x.restore();
+  }
+  layDown(ctx, x, 1, "multiply");
+}
+/**
+ * Water stains: a pale brown wash in an uneven round, darker at its tide line, with a fainter ring inside
+ * where it dried twice. Up to three, each coming in over its own stretch of `amt`. Multiplied in.
+ */
+function waterStains(ctx, w, h, amt) {
+  const u = Math.min(w, h);
+  ctx.save(); ctx.globalCompositeOperation = "multiply"; ctx.lineJoin = "round";
+  for (const [k, a0, a1] of [[0, 0, 0.5], [1, 0.3, 0.8], [2, 0.6, 1]]) {
+    const r = clamp((amt - a0) / (a1 - a0));
+    if (r <= 0) continue;
+    const corner = rand(k * 3.1 + 720), cx = corner < 0.5 ? w * (0.1 + rand(k + 721) * 0.8) : (rand(k + 722) > 0.5 ? w * 0.08 : w * 0.92), cy = corner < 0.5 ? (rand(k + 723) > 0.5 ? h * 0.12 : h * 0.88) : h * (0.2 + rand(k + 724) * 0.6);
+    const R = u * (0.13 + rand(k * 2.3 + 725) * 0.14) * (0.75 + 0.25 * r), f = [rand(k + 726) * TAU, rand(k + 727) * TAU, rand(k + 728) * TAU];
+    const edge = (q) => { ctx.beginPath(); for (let i = 0; i <= 64; i++) { const t = (i / 64) * TAU, rr = R * q * (1 + 0.16 * Math.sin(3 * t + f[0]) + 0.09 * Math.sin(7 * t + f[1]) + 0.04 * Math.sin(15 * t + f[2])); ctx.lineTo(cx + Math.cos(t) * rr, cy + Math.sin(t) * rr * 0.86); } ctx.closePath(); };
+    edge(1); ctx.fillStyle = css([196, 150, 92], 0.16 * r); ctx.fill();
+    ctx.strokeStyle = css([150, 104, 52], 0.12 * r); ctx.lineWidth = 9; ctx.stroke();
+    ctx.strokeStyle = css([132, 88, 40], 0.4 * r); ctx.lineWidth = 2.2; ctx.stroke();
+    edge(0.78); ctx.strokeStyle = css([150, 104, 52], 0.2 * r); ctx.lineWidth = 1.6; ctx.stroke();
+  }
+  ctx.restore();
+}
+/**
+ * Wormholes: small ragged holes through the leaf, dark where the page beneath shows, ringed with
+ * brown, some joined into a short tunnel. More of them, one by one, as `amt` rises.
+ */
+function wormholes(ctx, w, h, amt) {
+  const n = amt * 18;
+  ctx.save();
+  for (let k = 0; k < Math.ceil(n); k++) {
+    const a = clamp(n - k), edgeward = rand(k * 2.9 + 730) < 0.6;   // most near the foot and the fore-edge, where the worms come in
+    let x = edgeward ? w * (rand(k + 731) > 0.5 ? 0.03 + rand(k + 732) * 0.12 : 0.85 + rand(k + 733) * 0.12) : rand(k + 734) * w, y = edgeward ? h * (0.6 + rand(k + 735) * 0.38) : rand(k + 736) * h;
+    let dir = rand(k * 3.3 + 737) * TAU;
+    const len = rand(k + 738) < 0.4 ? 3 + Math.floor(rand(k + 739) * 7) : 1;
+    for (let j = 0; j < len; j++) {
+      const r = 3 + rand(k * 7 + j * 1.9 + 740) * 6;
+      ctx.beginPath();
+      for (let i = 0; i < 9; i++) { const t = (i / 9) * TAU, rr = r * (0.7 + 0.5 * rand(k * 11 + j * 3 + i * 1.3 + 741)); ctx.lineTo(x + Math.cos(t) * rr, y + Math.sin(t) * rr); }
+      ctx.closePath();
+      ctx.strokeStyle = css([150, 108, 60], 0.45 * a); ctx.lineWidth = 2.6; ctx.stroke();
+      ctx.fillStyle = css([52, 38, 26], 0.92 * a); ctx.fill();
+      dir += (rand(k * 5 + j + 742) - 0.5) * 1.4; x += Math.cos(dir) * r * 1.5; y += Math.sin(dir) * r * 1.5;
+    }
+  }
+  ctx.restore();
+}
 const songke = {
   id: "songke",
   repaint: (c) => `a woodblock illustration from an old Chinese printed book: black ink lines cut with a knife, flat areas of ink, the ground left as warm paper colour, no shading or colour except perhaps a touch of vermilion; scenery simplified into lines and masses as in Song and Ming book illustrations.`,
-  about: { zh: "一页宋版古籍：宣纸底色、竖排的宋体标题、朱砂印章样式的角标、粗细双线的版框和界栏，右侧是带鱼尾的版心，图形像木刻版画，可调做旧与纸张颗粒；自带平直的版式。古雅、沉静、有书卷气——适合历史、国学、读书、传统手艺与节气。", en: "A leaf from a Song-dynasty printed book: paper ground, a serif title set in vertical columns, the corner tag as a vermilion seal, a thick-and-thin border and ruled columns, a centre column with fishtails at the right edge, objects like woodcuts, adjustable age and grain; flat layouts of its own. Classical, calm, bookish — for history, classics, reading, traditional crafts, the seasons." },
+  about: { zh: "一页宋版古籍：宣纸底色、竖排的宋体标题、朱砂印章样式的角标、粗细双线的版框和界栏，右侧是带鱼尾的版心；界栏里可以排上正文大字和双行小注，加朱笔圈点、旁批和历代藏书印；岁月痕迹有刷印不匀、水渍、虫蛀和霉斑；图形像木刻版画；自带平直的版式。古雅、沉静、有书卷气——适合历史、国学、读书、传统手艺与节气。", en: "A leaf from a Song-dynasty printed book: paper ground, a serif title set in vertical columns, the corner tag as a vermilion seal, a thick-and-thin border and ruled columns, a centre column with fishtails at the right edge; the columns can hold the page's text, large characters and double lines of small notes, with vermilion marks and collectors' seals; the years show as uneven printing, water stains, wormholes and foxing; objects like woodcuts; flat layouts of its own. Classical, calm, bookish — for history, classics, reading, traditional crafts, the seasons." },
   name: { zh: "宋版刻本", en: "Woodblock book" },
   oneTheme: true,
   seeded: true,
   params: [
     { key: "rules", min: 0, max: 1, step: 0.05, def: 0.8, name: { zh: "界栏", en: "Column rules" } },
+    { key: "text", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "正文与小注", en: "Text and notes" } },
+    { key: "notes", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "朱批圈点", en: "Vermilion marks" } },
+    { key: "seals", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "藏书印", en: "Collectors' seals" } },
+    { key: "wear", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "刷印不匀", en: "Uneven printing" } },
     { key: "aged", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "做旧", en: "Age" } },
+    { key: "stain", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "水渍", en: "Water stains" } },
+    { key: "worm", min: 0, max: 1, step: 0.05, def: 0.1, name: { zh: "虫蛀", en: "Wormholes" } },
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "纸张颗粒", en: "Paper grain" } },
     { key: "vertical", toggle: true, min: 0, max: 1, step: 1, def: 1, name: { zh: "标题竖排", en: "Set the title vertically" } },
   ],
@@ -903,11 +1315,12 @@ const songke = {
     if (env.photo) {   // as a rubbing would show it: grey, pressed into the paper
       env.drawPhoto(1); wash(ctx, w, h, "multiply", SONG.paper, 1); wash(ctx, w, h, "screen", [60, 48, 36], 0.35);
     }
+    const pitch = Math.max(90, Math.round(Math.min(w, h) / 9));
     if (L.grid && p.rules > 0) {   // the ruled columns of the block, right to left, printing darker as the slider goes up
-      const pitch = Math.max(90, Math.round(Math.min(w, h) / 9));
       ctx.fillStyle = css(SONG.ink, 0.6 * Math.pow(p.rules, 0.7));
       for (let x = w - 64 - pitch; x > 64; x -= pitch) ctx.fillRect(x, 58, 1 + p.rules, h - 116);
     }
+    if (L.grid || L.fill) { songText(ctx, env, p, pitch); songSeals(ctx, env, p.seals); }
     return true;
   },
   accent: {
@@ -922,14 +1335,7 @@ const songke = {
     if (!p.vertical) return null;
     // Columns want height, where a line wants width: the title takes the field down to the colour
     // band (or the foot of the page), and stands clear of the seal, which keeps its corner.
-    const G = env.G, split = G.template === "split", foot = split || G.flipped ? env.h - 110 : Math.min(G.accent[0][1], G.accent[1][1]) - 36;
-    let x = box.x, w = box.w;
-    if (env.cover.tag && !G.flipped) {
-      const f = G.tag.fs * 0.82;
-      ctx.save(); ctx.font = `900 ${f}px ${fonts.serif}`; const seal = spacedW(ctx, env.cover.tag, 4) + f * 0.9 + 44; ctx.restore();
-      x += seal; w = Math.max(200, w - seal);
-    }
-    return drawTitleVertical(ctx, title, { x, y: box.y, w, h: Math.max(160, foot - box.y) }, { font: fonts.serif, fill: L.ink || css(SONG.ink), hi: L.hi || css(SONG.red), maxFs: 300, weight: 900 });
+    return drawTitleVertical(ctx, title, songBox(ctx, env, box), { font: fonts.serif, fill: L.ink || css(SONG.ink), hi: L.hi || css(SONG.red), maxFs: 300, weight: 900 });
   },
   /** Horizontal lettering (the title when not vertical, text layers): plain ink, highlighted words in vermilion. */
   runs(ctx, pass, o) {
@@ -980,7 +1386,11 @@ const songke = {
     [...numeral(env.o.catIndex + 1)].forEach((ch, k) => ctx.fillText(ch, x0 + cw / 2, h * 0.8 - 96 + k * 26));
     ctx.restore();
   },
+  /** Ink that took unevenly, water stains with their tide lines, wormholes, foxing and a darkened edge, the paper's grain. */
   post(ctx, w, h, C, p, unit = 1) {
+    wear(ctx, w, h, SONG.paper, p.wear * 0.9);
+    if (p.stain > 0) waterStains(ctx, w, h, p.stain);
+    if (p.worm > 0) wormholes(ctx, w, h, p.worm);
     if (p.aged > 0) {   // foxing: a few faint brown blooms, and the sheet gone darker toward its edges
       for (let k = 0; k < Math.round(9 * p.aged); k++) {
         const x = rand(k * 4.1 + 70) * w, y = rand(k * 5.3 + 71) * h, r = (40 + rand(k * 6.7 + 72) * 170), g = ctx.createRadialGradient(x, y, 0, x, y, r);
@@ -1316,251 +1726,41 @@ const vivid = {
 - "white" is warm cream, "dark" a deep indigo, and "main" the channel colour made more vivid — use it for one to three parts (a roof, a door, a body).`,
 };
 
-// ====================================================================== blue retro: technical drawing and collage in electric blue
-// The blue of a cyanotype and of a photocopier's toner, with black and off-white: photographs in one
-// blue, thin technical drawing (concentric rings, a crosshair, crop marks, a barcode), small monospaced
-// data, star marks; the channel colour as a second ink, on a few small parts only. On an electric blue
-// ground (dark) or on off-white paper printed in blue (light).
-const BT = { klein: [28, 44, 226], azure: [70, 146, 238], ice: [172, 208, 255], navy: [8, 12, 46], cream: [238, 234, 222] };
-const btInk = () => (dark ? BT.cream : BT.klein), btGround = () => (dark ? BT.klein : BT.cream), btDeep = () => (dark ? BT.navy : BT.klein);
+// ====================================================================== shared by the poster looks below
+/** Whether two colours are within `d` of each other (straight-line distance in RGB). */
 const near = (a, b, d) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < d;
-/** The channel colour as the second ink, unless it would vanish into the ground: then a blue that shows. */
-const btSpot = (C) => (near(C, btGround(), 80) ? (dark ? BT.ice : BT.azure) : C);
 /** A star mark: four points with hollow sides (a sparkle), or five. */
 function starMark(ctx, x, y, r, points, colour) {
   ctx.beginPath();
   for (let i = 0; i < points * 2; i++) { const a = -Math.PI / 2 + (i * Math.PI) / points, q = i % 2 ? r * (points === 4 ? 0.2 : 0.45) : r; ctx.lineTo(x + Math.cos(a) * q, y + Math.sin(a) * q); }
   ctx.closePath(); ctx.fillStyle = css(colour); ctx.fill();
 }
-/** The technical drawing over the ground: concentric rings about a point, a crosshair through it, graduations, small figures. */
-function rings(ctx, w, h, a, ink) {
-  const cx = w * (0.58 + rand(111) * 0.24), cy = h * (0.38 + rand(112) * 0.24), R = Math.min(w, h) * 0.5;
-  ctx.save(); ctx.strokeStyle = css(ink, 0.5 * a); ctx.fillStyle = css(ink, 0.8 * a); ctx.lineWidth = 1.5;
-  for (const k of [0.22, 0.42, 0.64, 0.88, 1.16]) { ctx.beginPath(); ctx.arc(cx, cy, R * k, 0, TAU); ctx.stroke(); }
-  ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
-  ctx.beginPath(); for (let d = 0; d < 360; d += 5) { const t = (d * Math.PI) / 180, q = d % 30 ? 8 : 18; ctx.moveTo(cx + Math.cos(t) * R * 0.88, cy + Math.sin(t) * R * 0.88); ctx.lineTo(cx + Math.cos(t) * (R * 0.88 + q), cy + Math.sin(t) * (R * 0.88 + q)); } ctx.stroke();
-  ctx.lineWidth = 2.4; ctx.strokeStyle = css(ink, 0.9 * a);
-  ctx.beginPath(); ctx.arc(cx, cy, 13, 0, TAU); ctx.moveTo(cx - 28, cy); ctx.lineTo(cx + 28, cy); ctx.moveTo(cx, cy - 28); ctx.lineTo(cx, cy + 28); ctx.stroke();
-  ctx.font = `600 13px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-  [0, 90, 180, 270].forEach((d, i) => { const t = (d * Math.PI) / 180; ctx.fillText(String(d).padStart(3, "0"), cx + Math.cos(t) * R * 0.64 + 6, cy + Math.sin(t) * R * 0.64 - 6); });
-  ctx.restore();
-}
-const bluetone = {
-  id: "bluetone",
-  repaint: (c) => `a retro blue poster made from a photograph: the photo printed in one electric cobalt blue with black and off-white, high contrast, fine grain, thin technical lines; the look of a cyanotype or a blue-printed zine; still the same picture, no text.`,
-  about: { zh: "蓝色的复古海报：电光蓝、黑和米白三色，照片印成单一的蓝色，细线画的同心圆、准星、裁切标记和条形码，等宽的小字和编号，星形符号；频道主色像第二种油墨，只用在角标的小方块、一颗星和频道名上。标题用衬线字，带一层错位的影子。可选电光蓝底或米白纸底。冷静、疏离、有亚文化和科幻感——适合音乐、电影、科技、情绪向和实验性内容。", en: "A retro poster in blue: electric blue, black and off-white; photos printed in a single blue; thin technical drawing — concentric rings, a crosshair, crop marks, a barcode — with small monospaced data and star marks; the channel colour as a second ink, on the tag's squares, one star and the channel's name only. The title is a serif with a misregistered shadow. An electric blue ground or off-white paper. Cool, distant, subcultural and a little sci-fi — for music, film, tech, mood pieces and experiments." },
-  name: { zh: "蓝色复古", en: "Blue retro" },
-  seeded: true,
-  params: [
-    { key: "lines", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "技术线条", en: "Technical lines" } },
-    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "颗粒", en: "Grain" } },
-    { key: "duo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.9, name: { zh: "照片单色", en: "Photo in blue" } },
-  ],
-  titleFont: (f) => f.serif,
-  theme: (base) => ({ ...base, field: css(btGround()), text: css(btInk()), dim: css(btInk(), 0.6), titleFill: css(btInk()), titleInk: css(btDeep()), grid: () => "rgba(0,0,0,0)" }),
-  /**
-   * The ground (electric blue, or paper), with the technical drawing and a few star marks over it —
-   * the largest star in the channel colour. A photo goes into one blue: grey, multiplied into the
-   * blue, its blacks lifted to navy.
-   */
-  background(ctx, env, L, p) {
-    const { w, h } = env;
-    ctx.fillStyle = css(btGround()); ctx.fillRect(0, 0, w, h);
-    if (env.photo) {
-      env.drawPhoto(p.duo);
-      wash(ctx, w, h, "multiply", mix([255, 255, 255], dark ? BT.azure : BT.klein, 0.92), p.duo);
-      wash(ctx, w, h, "screen", mix([0, 0, 0], [16, 22, 92], 1), p.duo * 0.8);
-      return true;
-    }
-    if (!L.grid) return true;
-    if (p.lines > 0) rings(ctx, w, h, p.lines, btInk());
-    for (let i = 0; i < 3; i++) starMark(ctx, w * (0.08 + rand(i * 3.3 + 125) * 0.84), h * (0.12 + rand(i * 4.1 + 126) * 0.5), 14 + rand(i * 5.9 + 127) * 26, 4, dark ? BT.cream : BT.klein);
-    starMark(ctx, w * (0.15 + rand(128) * 0.7), h * (0.2 + rand(129) * 0.45), 30 + rand(130) * 30, 5, btSpot(env.C));
-    return true;
-  },
-  accent: {
-    fill: () => css(btDeep()),
-    tone: () => "rgba(0,0,0,0)", toneScale: 0,                       // flat: no halftone
-    /** An off-white hairline on the edge, a dashed one beside it: the edge of a printed panel. */
-    edge(ctx, run, nx, ny) {
-      ctx.lineCap = "butt"; ctx.lineJoin = "miter";
-      ctx.strokeStyle = css(BT.cream); ctx.lineWidth = 3; run(0, 0);
-      ctx.setLineDash([16, 10]); ctx.lineWidth = 2; run(nx * 14, ny * 14); ctx.setLineDash([]);
-    },
-  },
-  /** Upright lettering with a misregistered shadow: the same letters in a second blue, a little to the right and below. */
-  runs(ctx, pass, o) {
-    upright(ctx);
-    const fs = o.fs, ink = o.fill || btInk(), hi = o.hi || (dark ? BT.ice : BT.navy), echoCol = dark ? BT.navy : BT.azure, d = fs * 0.05 * o.shadowAmt;
-    if (d > 0) pass((a, x) => { ctx.fillStyle = css(echoCol); ctx.fillText(a.t, x + d, d * 0.6); });
-    pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x, 0); });
-  },
-  /** The plate under a text layer: a flat panel with a hairline frame printed a little off it. */
-  plate(ctx, x, y, w, h, colour, fs) {
-    ctx.fillStyle = colour; ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = css(btInk()); ctx.lineWidth = Math.max(1.5, fs * 0.02); ctx.strokeRect(x + fs * 0.08, y + fs * 0.08, w, h);
-  },
-  // objects are printed in the blues; the small cover parts keep their construction, in off-white
-  wrap: (ctx, C, p, plates) => mapped(ctx, plates
-    ? { fill: { ink: BT.cream }, stroke: { ink: BT.cream } }
-    : { fill: { ink: BT.navy, light: BT.cream, mid: BT.ice, dark: BT.klein, colour: (c) => (lum(c) > 0.55 ? BT.ice : BT.azure) }, stroke: { ink: BT.navy, light: BT.cream }, line: 0.7 }),
-  sticker: painters({ line: BT.navy, lineScale: 0.45, join: "miter",
-    tone: (fill) => { const c = parseColour(fill); if (!c) return fill; const r = role(c); return css(r === "ink" ? BT.navy : r === "light" ? BT.cream : r === "colour" ? (lum(c) > 0.55 ? BT.ice : BT.azure) : c, c[3]); },
-    shadow(ctx, draw) { ctx.save(); ctx.translate(-5, 4); draw(css(dark ? BT.navy : BT.azure, 0.9)); ctx.restore(); } }),
-  /** The corner tag: an off-white label with a hairline, three square bullets in the channel colour and monospaced lettering. */
-  tag(ctx, str, x, y, fs, C, p, ink) {
-    const f = fs * 0.72;
-    ctx.font = `600 ${f}px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-    const sq = f * 0.42, step = sq * 1.5, tw = spacedW(ctx, str, 4), w = f * 0.9 + step * 3 + f * 0.3 + tw, h = f * 1.7, top = y + (fs * 1.34 - h);
-    ctx.fillStyle = css(BT.cream); ctx.fillRect(x, top, w, h);
-    ctx.strokeStyle = css(BT.navy); ctx.lineWidth = 2; ctx.strokeRect(x, top, w, h);
-    for (let i = 0; i < 3; i++) { ctx.fillStyle = css(btSpot(C)); ctx.fillRect(x + f * 0.45 + i * step, top + h / 2 - sq / 2, sq, sq); ctx.lineWidth = 1.2; ctx.strokeRect(x + f * 0.45 + i * step, top + h / 2 - sq / 2, sq, sq); }
-    ctx.fillStyle = ink || css(BT.navy); spaced(ctx, str, x + f * 0.45 + step * 3 + f * 0.3, top + h * 0.5 + f * 0.36, 4);
-    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
-  },
-  /** The frame layer: crop marks in the corners, a line of data at the foot, a barcode, the archive's name up the right edge. */
-  frame(ctx, env, p) {
-    const a = p.lines;
-    if (a <= 0) return;
-    const { w, h } = env, ink = btInk(), P = env.o.profile, i = env.o.catIndex, total = P.categories.length, code = (env.cat.code || "CH").toUpperCase();
-    ctx.save(); ctx.strokeStyle = css(ink, 0.9 * a); ctx.fillStyle = css(ink, 0.9 * a); ctx.lineWidth = 1.6;
-    for (const [x, y, sx, sy] of [[30, 30, 1, 1], [w - 30, 30, -1, 1], [30, h - 30, 1, -1], [w - 30, h - 30, -1, -1]]) { ctx.beginPath(); ctx.moveTo(x, y + sy * 32); ctx.lineTo(x, y); ctx.lineTo(x + sx * 32, y); ctx.stroke(); }
-    ctx.font = `600 14px ${fonts.mono}, ${fonts.cn}`; ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
-    spaced(ctx, `${env.o.size.w}×${env.o.size.h}  //  ${code}  //  ${pad2(i + 1)}.${pad2(total)}`, 72, h - 44, 2);
-    let x = w - 72;
-    for (let k = 0; k < 30; k++) { const bw = 1.5 + Math.floor(noise(k * 2.9 + i) * 3) * 1.5; x -= bw + 2.5; ctx.fillRect(x, h - 76, bw, 26); }
-    ctx.font = `600 11px ${fonts.mono}, ${fonts.cn}`;
-    spaced(ctx, `4 ${String(7210 + i * 37).padStart(6, "0")} ${pad2(total)}`, x, h - 38, 2);   // the figures under the bars, from their left end
-    ctx.save(); ctx.translate(w - 44, h * 0.62); ctx.rotate(-Math.PI / 2); ctx.textAlign = "left"; ctx.font = `600 13px ${fonts.mono}, ${fonts.cn}`;
-    spaced(ctx, `${(P.brand.name || "ARCHIVE").toUpperCase()} ARCHIVE — NO.${pad2(i + 1)} — OBSERVATION SERIES`, 0, 0, 3);
-    ctx.restore(); ctx.restore();
-  },
-  image(ctx, C, unit) { ctx.shadowColor = css(dark ? BT.navy : BT.azure, 0.9); ctx.shadowBlur = 0; ctx.shadowOffsetX = -7 * unit; ctx.shadowOffsetY = 5 * unit; },
-  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * (dark ? 0.85 : 0.9), unit, !dark); },
-  prompt: `Stickers for a retro blue zine — cut from a cyanotype or a photocopy, printed in one electric blue with black and off-white — that read at a glance:
-- graphic, slightly cold shapes with a strong silhouette: stars, sparkles, planets, an astronaut's helmet, eyes, hands, flowers, arrows, technical symbols; no realism, no perspective, no fine texture;
-- flat colour only, and only the blues: the main colour, "blue", "white" (off-white paper) and "ink" (near-black navy); the app turns any other colour into a blue;
-- the app adds a thin navy outline and a misregistered blue shadow: do NOT draw outlines or shadows yourself;
-- pattern inside a shape is welcome as a few "detail" lines (rings, grids, crosshairs).`,
-  solidPrompt: `Objects as a retro sci-fi zine would show them: a few boxes and cylinders in clean, technical proportions — a radio, a camera, a satellite, a monitor; no realism, no fine detail.
-- the renderer prints faces in off-white, pale blue and electric blue with a thin navy line: do NOT try to draw shading or outlines yourself;
-- "white" is off-white, "dark" is electric blue, and "main" comes out a lighter blue — use it for screens, lenses and lit parts.`,
-};
-
-// ====================================================================== red street: music posters and street fashion in red, black and white
-// A red ground, heavy condensed black lettering set tight and big, photographs in black and white or in
-// red, a giant word in a deeper red cropped by the edge, small editorial print in the margins, a black
-// panel, and film grain over all. Loud, rhythmic, with attitude.
-const RS = { red: [232, 56, 36], deep: [186, 26, 20], black: [18, 12, 12], cream: [246, 238, 226], yellow: [255, 198, 26] };
 /**
- * The channel colour where this look shows it (the tag, the channel's name and plate, the colour in
- * the channel graphic and other objects), unless it would be lost on the red ground — a red, an
- * orange, a deep pink — when it becomes the look's yellow.
+ * The box the title will fill, set the usual way in the layout's place (for a look's background to
+ * keep clear of it), or null when it is hidden or empty. A move of the title layer is not counted.
  */
-const rsSpot = (c) => (near(c, RS.red, 110) || near(c, RS.deep, 90) ? RS.yellow : c);
-const redstreet = {
-  id: "redstreet",
-  repaint: (c) => `a street-fashion and music poster photograph in red: high contrast, the colours pushed into reds and blacks with warm off-white highlights, a little motion blur and coarse film grain, a stage-light feel; still a photograph, no text.`,
-  about: { zh: "红色潮流：街头文化 × 音乐现场 × 时尚大片。大面积朱红底，紧凑的黑色压缩粗体大字（英文用窄体），照片转成黑白或红调，画面一侧压着一个被裁切的深红巨字，页边是细小的编辑式小字和一条黑线，黑色色块，角标和频道名用频道主色（频道色本身是红色系时换成黄色，免得和红底混在一起），整张叠上胶片颗粒和暗角；自带平直的版式。冲击、有节奏、有态度——适合音乐、潮流服饰、街头品牌、活动海报与人物专访。", en: "Red street: street culture × live music × fashion shoot. A vermilion ground, heavy condensed black lettering set tight and big, photos in black and white or in red, a giant word in deeper red cropped by the edge, small editorial print in the margins with a black rule, a black panel, the tag and the channel's name in the channel colour (yellow when that is a red, so it is not lost on the ground), film grain and a vignette over all; flat layouts of its own. Loud, rhythmic, with attitude — for music, streetwear, street brands, event posters and interviews." },
-  name: { zh: "红色潮流", en: "Red street" },
-  oneTheme: true,
-  params: [
-    { key: "giant", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "巨字", en: "Giant word" } },
-    { key: "micro", min: 0, max: 1, step: 0.05, def: 0.8, name: { zh: "小字排版", en: "Small print" } },
-    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "胶片颗粒", en: "Film grain" } },
-    { key: "duo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.75, name: { zh: "照片红调", en: "Photo in red" } },
-  ],
-  titleFont: (f) => `${f.en}, ${f.cn}`,   // the condensed face for Latin, the heavy sans for CJK
-  /**
-   * Flat bands and panels, as a poster grid has them. In the stacked layout the title takes the whole
-   * red field down to the black panel — the lettering is the picture — and the tag moves onto the
-   * panel, above the channel's name.
-   */
-  layout(template, w, h) {
-    const g = blockLayout(template, w, h, { band: 0.34, side: 0.36, strip: 0.13 });
-    if (g.template !== "stack") return g;
-    const el = g.accent[0][1], tagH = g.tag.fs * 1.34;
-    g.title = { ...g.title, h: Math.max(120, el - g.title.y - 44) };
-    g.tag = { ...g.tag, y: el + 30 };
-    g.cat = { ...g.cat, y: Math.min(h - 70, el + 30 + tagH + 22 + g.cat.fs * 0.82), inline: true };
-    return g;
-  },
-  theme: (base) => ({ ...base, field: css(RS.red), text: css(RS.black), dim: css(RS.black, 0.6), titleFill: css(RS.black), titleInk: css(RS.cream), grid: () => "rgba(0,0,0,0)" }),
-  /**
-   * The red ground, and on it the channel's code in a deeper red, enormous, running off the right and
-   * the foot. A photo goes into black and white, its contrast raised, and then into red: the whites
-   * stay warm off-white, the greys turn red, the blacks a deep oxblood.
-   */
-  background(ctx, env, L, p) {
-    const { w, h } = env;
-    ctx.fillStyle = css(RS.red); ctx.fillRect(0, 0, w, h);
-    if (env.photo) {
-      env.drawPhoto(1);
-      ctx.save(); ctx.globalCompositeOperation = "soft-light"; ctx.globalAlpha = 0.7; env.drawPhoto(1); ctx.restore();
-      wash(ctx, w, h, "multiply", mix([255, 246, 236], [255, 70, 44], p.duo), 1);
-      wash(ctx, w, h, "screen", mix([10, 8, 8], [74, 10, 8], p.duo), 1);
-      return true;
-    }
-    if (!L.grid || p.giant <= 0) return true;
-    const str = (env.cat.code || env.cat.name || "").toUpperCase().slice(0, 6);
-    if (!str) return true;
-    const fs = h * (0.95 + 0.45 * p.giant);
-    ctx.save(); ctx.font = `700 ${fs}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic";
-    ctx.fillStyle = css(RS.deep, 0.3 + 0.6 * p.giant); ctx.fillText(str, w + fs * 0.06, h + fs * 0.1);
-    ctx.restore();
-    return true;
-  },
-  accent: { fill: () => css(RS.black), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },   // a black panel, nothing more
-  /** Upright, heavy, tight, no outline and no shadow: black, highlighted words in warm white. */
-  runs(ctx, pass, o) {
-    upright(ctx);
-    pass((a, x) => { ctx.fillStyle = css(a.hi ? o.hi || RS.cream : o.fill || RS.black); ctx.fillText(a.t, x, 0); });
-  },
-  plate(ctx, x, y, w, h, colour) { ctx.fillStyle = colour; ctx.fillRect(x, y, w, h); },
-  // objects in red, black and warm white with the channel colour (yellow when the channel's is a red);
-  // the small cover parts read on red and on the black panel
-  wrap: (ctx, C, p, plates) => mapped(ctx, plates
-    ? { fill: { ink: RS.cream, colour: rsSpot }, stroke: { ink: RS.cream } }
-    : { fill: { ink: RS.black, light: RS.cream, mid: [242, 162, 142], dark: RS.black, colour: rsSpot }, stroke: { ink: RS.black, light: RS.cream, colour: rsSpot }, line: 0.8 }),
-  sticker: painters({ line: null, tone: inkAs(RS.black), shadow(ctx, draw) { ctx.save(); ctx.translate(6, 7); draw(css(RS.black)); ctx.restore(); } }),
-  /** The corner tag: a slab of the channel colour (see rsSpot) with condensed lettering, black or warm white, whichever reads. */
-  tag(ctx, str, x, y, fs, C, p, ink) {
-    ctx.font = `700 ${fs}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-    const w = spacedW(ctx, str, 2) + fs * 0.7, h = fs * 1.2, top = y + fs * 0.07, slab = rsSpot(C);
-    ctx.fillStyle = css(slab); ctx.fillRect(x, top, w, h);
-    ctx.fillStyle = ink || css(lum(slab) > 0.42 ? RS.black : RS.cream); spaced(ctx, str, x + fs * 0.35, top + h * 0.5 + fs * 0.36, 2);
-    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
-  },
-  /** The frame layer: no brackets — small print, flush right up top, and a line of it up the left edge. */
-  frame(ctx, env, p) {
-    const a = p.micro;
-    if (a <= 0) return;
-    const { w, h } = env, P = env.o.profile, i = env.o.catIndex, total = P.categories.length;
-    ctx.save(); ctx.fillStyle = css(RS.black, a); ctx.font = `700 15px ${fonts.mono}, ${fonts.cn}`; ctx.textBaseline = "alphabetic"; ctx.textAlign = "right";
-    [`VOL.${pad2(i + 1)}`, (env.cat.name || env.cat.code || "").toUpperCase(), `${pad2(i + 1)} / ${pad2(total)}`].forEach((t, k) => ctx.fillText(t, w - 64, 160 + k * 21));
-    ctx.fillRect(w - 64 - 120, 160 + 3 * 21 - 8, 120, 3);
-    ctx.translate(48, h * 0.62); ctx.rotate(-Math.PI / 2); ctx.textAlign = "left"; ctx.font = `700 14px ${fonts.mono}, ${fonts.cn}`;
-    spaced(ctx, `${(P.brand.name || "").toUpperCase()} ✱ ${(env.cat.code || "").toUpperCase()} ✱ ${env.o.size.w}×${env.o.size.h}`, 0, 0, 3);
-    ctx.restore();
-  },
-  image(ctx, C, unit) { ctx.shadowColor = css(RS.black); ctx.shadowBlur = 0; ctx.shadowOffsetX = 9 * unit; ctx.shadowOffsetY = 9 * unit; },
-  /** Film grain, and the corners gone a little darker, as under a stage light. */
-  post(ctx, w, h, C, p, unit = 1) {
-    grain(ctx, p.grain, unit);
-    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.45, w / 2, h / 2, Math.hypot(w, h) * 0.62);
-    g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, css([70, 8, 6], 0.38));
-    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
-  },
-  prompt: `Stickers for a red street-culture and music poster — bold, graphic and a little rough, as if cut from a flyer — that read at a glance:
-- strong, simple shapes with attitude: arrows, asterisks, stars, lightning, hands, records, speakers, crowns, eyes, flames; chunky and graphic; no realism, no perspective, no fine detail;
-- flat colour only: black ("ink"), warm white ("white"), and the main colour; one small spot of "yellow" is welcome;
-- the app adds a hard black offset shadow and no outline: do NOT draw outlines or shadows yourself; neighbouring shapes must differ in colour.`,
-  solidPrompt: `Objects from a music and street-fashion poster: a few boxes and cylinders, boldly proportioned — a speaker, a turntable, a microphone, a sneaker box, a boombox; no realism, no fine detail.
-- the renderer paints faces in warm white, a pale red and black: do NOT try to draw shading or outlines yourself;
-- "white" is warm white, "dark" is black, and "main" comes out in the channel colour (yellow when that is a red) — use it for one small part that should shout.`,
-};
-
-// ====================================================================== shared by the poster looks below
+function titleArea(ctx, env) {
+  const T = titleLayer(env), box = titleBase(env);
+  if (!T || !box || typeof ctx.measureText !== "function") return null;
+  const face = current.titleFont ? current.titleFont(fonts) : fonts.cn;
+  return titleBlock(ctx, env.cover.title, box, T.font ? `"${T.font}", ${face}` : face);
+}
+/** The title layer, when it shows. */
+const titleLayer = (env) => (env.cover && env.cover.layers.find((l) => l.type === "title" && l.visible)) || null;
+/** The box the layout gives the title, as render.js hands it to the title's painter. */
+function titleBase(env) {
+  const G = env.G;
+  if (!G) return null;
+  const top = G.titleTop ?? (env.hasBrand ? 150 : 84);
+  return { x: G.title.x, y: top, w: G.title.w, h: G.title.h + (G.title.y - top) };
+}
+/** The top of the channel graphic, as the layout places it, when it stands under the span x0–x1 (else Infinity), less a margin. */
+function graphicTop(env, x0, x1) {
+  const A = env.G && env.G.art, on = env.graphic && env.cover && env.cover.layers.some((l) => l.type === "graphic" && l.visible);
+  if (!A || !on) return Infinity;
+  const half = 310 * A.s;
+  return A.x + half > x0 && A.x - half < x1 ? A.y - half - 24 : Infinity;
+}
 const canPaint = (ctx) => typeof document !== "undefined" && !!ctx.canvas && typeof ctx.getTransform === "function";
 /**
  * A work canvas the size of ctx's, cleared, drawing with ctx's transform: for painting something whole
@@ -1708,6 +1908,61 @@ function greeked(ctx, x, y, width, lines, lh, colour, k, align = "left") {
     let at = align === "center" ? x + (width - used) / 2 : align === "right" ? x + width - used : x;
     for (const ww of words) { ctx.fillRect(at, y + i * lh, ww, Math.max(1, lh * 0.36)); at += ww + lh * 0.45; }
   }
+}
+/**
+ * Wear, white on clear, the canvas's size in units: soft blotches where the ink lay thin, and fine
+ * specks in clusters, as the paper's tooth catches them. Kept per size and seed. See wear().
+ */
+function wornTexture(w, h) {
+  const kept = WORK.worn || (WORK.worn = new Map()), key = `${w | 0}|${h | 0}|${seed}`;
+  if (kept.has(key)) return kept.get(key);
+  const c = document.createElement("canvas"); c.width = Math.ceil(w); c.height = Math.ceil(h);
+  const x = c.getContext("2d"), u = Math.min(w, h), area = (w * h) / (1920 * 1080);
+  for (let i = 0; i < 90; i++) {
+    const cx = rand(i * 2.9 + 700) * w, cy = rand(i * 3.7 + 701) * h, r = u * (0.015 + rand(i * 4.3 + 702) ** 2 * 0.12), g = x.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, `rgba(255,255,255,${0.2 + rand(i * 5.1 + 703) * 0.4})`); g.addColorStop(1, "rgba(255,255,255,0)");
+    x.fillStyle = g; x.fillRect(cx - r, cy - r, r * 2, r * 2);
+  }
+  x.fillStyle = "#fff";
+  for (let i = 0, n = Math.round(4200 * area); i < n; i++) {
+    const loose = rand(i * 0.53 + 717) < 0.3, cl = Math.floor(rand(i * 0.71 + 710) * 260), d = u * 0.05 * Math.sqrt(rand(i * 1.3 + 713)), a = rand(i * 1.9 + 714) * TAU;
+    const px = loose ? rand(i * 2.1 + 718) * w : rand(cl * 2.3 + 711) * w + Math.cos(a) * d, py = loose ? rand(i * 2.6 + 719) * h : rand(cl * 3.1 + 712) * h + Math.sin(a) * d, r = 0.5 + rand(i * 2.7 + 715) ** 3 * 2.6;
+    x.globalAlpha = 0.45 + rand(i * 3.3 + 716) * 0.55; x.beginPath(); x.arc(px, py, r, 0, TAU); x.fill();
+  }
+  x.globalAlpha = 1;
+  kept.set(key, c);
+  if (kept.size > 2) kept.delete(kept.keys().next().value);
+  return c;
+}
+/**
+ * Lays the wear (see wornTexture) on in `colour`: in the paper's colour with "lighten" it is where the
+ * ink did not take or has rubbed off (paper stays paper); with "multiply", grime. `mask`, if given,
+ * paints in white where it may show (a ring, the edges), and how strongly; `base` adds an even rub
+ * under the specks there, so the worn shape reads as a whole.
+ */
+function wear(ctx, w, h, colour, alpha, mode = "lighten", mask = null, base = 0) {
+  if (alpha <= 0 || !canPaint(ctx)) return;
+  const x = workLike(ctx, "wear");
+  x.drawImage(wornTexture(w, h), 0, 0, w, h);
+  if (base > 0) { x.globalAlpha = base; x.fillStyle = "#fff"; x.fillRect(0, 0, w, h); x.globalAlpha = 1; }
+  if (mask) {   // painted on a canvas of its own: a cut made shape by shape would keep only the last
+    const m = workLike(ctx, "wearMask");
+    mask(m);
+    x.save(); x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = "destination-in"; x.drawImage(m.canvas, 0, 0); x.restore();
+  }
+  x.globalCompositeOperation = "source-in"; x.fillStyle = css(colour); x.fillRect(0, 0, w, h);
+  layDown(ctx, x, alpha, mode);
+}
+/**
+ * A band across the sheet about the line `y`, soft at its two sides (stacked rectangles, narrower
+ * toward the middle) and, along it, stronger and weaker by turns: `colour` at `alpha` at most.
+ */
+function softBand(ctx, x0, x1, y, half, colour, alpha, k) {
+  const g = ctx.createLinearGradient(x0, 0, x1, 0);
+  for (let i = 0; i <= 6; i++) g.addColorStop(i / 6, css(colour, alpha * (0.15 + 0.85 * rand(k + i * 1.7))));
+  ctx.save(); ctx.fillStyle = g; ctx.globalAlpha = 0.3;
+  for (const q of [1, 0.72, 0.46, 0.22]) ctx.fillRect(x0, y - half * q, x1 - x0, half * q * 2);
+  ctx.restore();
 }
 
 // ====================================================================== negative space: the red and black film poster
@@ -2315,6 +2570,7 @@ const typo = {
     { key: "burst", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "放射细线", en: "Burst of lines" } },
     { key: "brush", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "干笔刷痕", en: "Dry brush" } },
     { key: "giant", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "巨型字母", en: "Giant letters" } },
+    { key: "letters", text: true, max: 3, def: "", name: { zh: "字母内容", en: "Their letters" }, placeholder: { zh: "留空：用频道代号", en: "Empty: the channel's code" } },
     { key: "grid", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "细线网格", en: "Hairline grid" } },
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.15, name: { zh: "纸张颗粒", en: "Paper grain" } },
     { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白高反差", en: "Hard black and white" } },
@@ -2333,7 +2589,7 @@ const typo = {
     }
     if (!L.grid) return true;
     if (p.giant > 0) {   // the channel's code, a letter or three, huge, each cut along a slant and the halves pulled apart
-      const word = [...((env.cat.code || env.cat.name || "A").toUpperCase())].filter((c) => c.trim()).slice(0, 3), fs = (F.y1 - F.y0) * (0.5 + 0.35 * p.giant);
+      const word = [...((p.letters || env.cat.code || env.cat.name || "A").toUpperCase())].filter((c) => c.trim()).slice(0, 3), fs = (F.y1 - F.y0) * (0.5 + 0.35 * p.giant);
       ctx.save(); ctx.font = `400 ${fs}px ${fonts.serif}`; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(mix(ground, ink, 0.12 + 0.75 * p.giant));
       word.forEach((ch, i) => {
         const cx = F.x0 + (F.x1 - F.x0) * (0.5 + 0.42 * ((i + 0.5) / word.length)) - (F.x1 - F.x0) * 0.2, cy = F.y0 + (F.y1 - F.y0) * (0.62 + (i % 2) * 0.26), a = 0.5 + rand(i + 360) * 0.6, gap = fs * 0.05 * p.giant;
@@ -2457,7 +2713,7 @@ const typo = {
 - "white" is the paper, "dark" is black, and "main" is the channel colour — one part only.`,
 };
 
-export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, bluetone, redstreet, negative, cinema, cyano, monofilm, typo };
+export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo };
 export const LOOK_IDS = Object.keys(LOOKS);
 
 let current = cel, values = {};
@@ -2471,7 +2727,10 @@ export const isFast = () => fast;
 /** Default parameter values of a look, overridden by `given` where that holds a number in range. */
 export function lookParams(id, given) {
   const out = {};
-  for (const d of (LOOKS[id] || cel).params) { const v = given && given[d.key]; out[d.key] = Number.isFinite(v) ? clamp(v, d.min, d.max) : d.def; }
+  for (const d of (LOOKS[id] || cel).params) {
+    const v = given && given[d.key];
+    out[d.key] = d.text ? (typeof v === "string" ? [...v.trim()].slice(0, d.max).join("") : d.def) : Number.isFinite(v) ? clamp(v, d.min, d.max) : d.def;
+  }
   return out;
 }
 /** Makes a look current. `given` are the profile's own parameter values for it. */
