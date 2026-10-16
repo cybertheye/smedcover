@@ -476,7 +476,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
@@ -614,17 +614,17 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
   setLook("cel");
 });
 
-test("the poster looks: many settings each, their own grounds, flat layouts, and painting without a canvas does no harm", () => {
+test("the poster looks: many settings each, their own grounds, flat layouts (all but the collage, on the slanted ones), and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
-  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant"]) {
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon"]) {
     const L = LOOKS[id];
     assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
     assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
     for (const onDark of [true, false]) {
       setLook(id, null, 3, onDark);
       assert.match(L.theme({}, [40, 120, 220], lookValues()).field, /^rgba\(/);
-      assert.equal(L.layout("stack", 1920, 1080).template, "stack");
-      const env = { w: 1920, h: 1080, C: [40, 120, 220], photo: null, cat: { code: "AB", name: "x" }, o: { profile: { brand: { name: "B" }, categories: [{}] }, catIndex: 0, size: { w: 1920, h: 1080 } }, G: L.layout("stack", 1920, 1080) };
+      if (id !== "collage") assert.equal(L.layout("stack", 1920, 1080).template, "stack");
+      const env = { w: 1920, h: 1080, C: [40, 120, 220], photo: null, cat: { code: "AB", name: "x" }, o: { profile: { brand: { name: "B" }, categories: [{}] }, catIndex: 0, size: { w: 1920, h: 1080 } }, G: (L.layout || LOOKS.bluenote.layout)("stack", 1920, 1080) };
       assert.equal(L.background(proxy(), env, { grid: true }, lookValues()), true);   // no canvas, no graphic: the parts that need one are left out
       L.post(proxy(), 1920, 1080, [40, 120, 220], lookValues(), 1, []);
     }
@@ -659,6 +659,33 @@ test("the first five looks have many settings now, and paint without a canvas", 
       L.post(proxy(), 1920, 1080, [40, 120, 220], lookValues(), 1, []);
     }
   }
+  setLook("cel");
+});
+
+test("recolouring by lightness: a tone table runs through its stops, and hard tones step between them", async () => {
+  const { toneTable: _t } = await import("../ui/js/style.js").then((m) => ({ toneTable: m.__test && m.__test.toneTable }));
+  assert.ok(_t, "toneTable is exported for testing");
+  const lut = _t([[0, [0, 0, 0]], [0.5, [255, 0, 0]], [1, [255, 255, 255]]]);
+  assert.deepEqual([...lut.slice(0, 3)], [0, 0, 0]);
+  assert.deepEqual([...lut.slice(255 * 3)], [255, 255, 255]);
+  assert.ok(Math.abs(lut[64 * 3] - 128) <= 2 && lut[64 * 3 + 1] === 0, "a quarter of the way up: half way from the black stop to the red one");
+  const hard = _t([[0, [0, 0, 0]], [1, [200, 200, 200]]], 1);
+  assert.equal(hard[100 * 3], 0); assert.equal(hard[160 * 3], 200);   // fully hard: each step goes to the nearer stop
+});
+
+test("the yellow poster and the neon pop: the yellow can give way to the channel colour; the neon palette turns round the wheel", () => {
+  setLook("yellow", null, 3, false);
+  assert.equal(LOOKS.yellow.theme({}, [40, 120, 220], lookValues()).field, "rgba(255,206,0,1)");
+  setLook("yellow", { chan: 1 }, 3, false);
+  const blue = parseColour(LOOKS.yellow.theme({}, [40, 120, 220], lookValues()).field);
+  assert.ok(blue[2] > blue[0] + 100, "the channel colour, made vivid, in place of the yellow");
+  const hi = (C) => { const out = []; LOOKS.yellow.runs({ set fillStyle(v) { out.push(v); }, get fillStyle() { return ""; }, fillText() {}, transform() {} }, (fn) => fn({ t: "x", hi: true }, 0), { fs: 100, C, shadowAmt: 0 }); return out[0]; };
+  setLook("yellow", { chan: 1 }, 3, false);
+  assert.equal(hi([252, 238, 10]), "rgba(230,0,126,1)", "a yellow channel on its own yellow ground: the highlight goes magenta, never the ground's colour");
+  setLook("neon", null, 3, true);
+  const a = LOOKS.neon.theme({}, [40, 120, 220], lookValues()).titleFill;
+  setLook("neon", { shift: 0.5 }, 3, true);
+  assert.notEqual(LOOKS.neon.theme({}, [40, 120, 220], lookValues()).titleFill, a, "turning the hue changes the palette");
   setLook("cel");
 });
 

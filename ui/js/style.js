@@ -3145,7 +3145,876 @@ const avant = {
 - "white" is white, "dark" near-black, and "main" a mid grey.`,
 };
 
-export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant };
+// ====================================================================== shared by the looks below: reading and recolouring pixels
+/** A colour turned round the colour wheel by `deg` degrees, its saturation and lightness kept. */
+function hueTurn(c, deg) {
+  const r = c[0] / 255, g = c[1] / 255, b = c[2] / 255, hi = Math.max(r, g, b), lo = Math.min(r, g, b), l = (hi + lo) / 2, d = hi - lo;
+  if (d < 0.01) return [c[0], c[1], c[2]];
+  const s = l > 0.5 ? d / (2 - hi - lo) : d / (hi + lo), hue = ((((hi === r ? ((g - b) / d) % 6 : hi === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60 + deg) % 360) + 360) % 360;
+  const q = (1 - Math.abs(2 * l - 1)) * s, x = q * (1 - Math.abs(((hue / 60) % 2) - 1)), m = l - q / 2;
+  const [R, G, B] = hue < 60 ? [q, x, 0] : hue < 120 ? [x, q, 0] : hue < 180 ? [0, q, x] : hue < 240 ? [0, x, q] : hue < 300 ? [x, 0, q] : [q, 0, x];
+  return [(R + m) * 255, (G + m) * 255, (B + m) * 255];
+}
+/**
+ * A table for mapTones(): 256 steps of lightness onto colour stops [[at, [r, g, b]], …] (at from 0 to 1).
+ * `hard` (0–1) pulls each step toward the nearer of its two stops, so the tones posterize.
+ */
+function toneTable(stops, hard = 0) {
+  const lut = new Uint8ClampedArray(768);
+  for (let l = 0; l < 256; l++) {
+    const t = l / 255;
+    let k = 0;
+    while (k < stops.length - 2 && t > stops[k + 1][0]) k++;
+    const [t0, c0] = stops[k], [t1, c1] = stops[k + 1], f = clamp((t - t0) / (t1 - t0 || 1)), s = f + ((f < 0.5 ? 0 : 1) - f) * hard;
+    for (let q = 0; q < 3; q++) lut[l * 3 + q] = c0[q] + (c1[q] - c0[q]) * s;
+  }
+  return lut;
+}
+/**
+ * A gradient map: every pixel of what the canvas holds, by its lightness, onto `lut` (see toneTable),
+ * mixed in by `amt`; alpha kept; laid back within ctx's clip only.
+ */
+function mapTones(ctx, lut, amt) {
+  if (amt <= 0 || !canPaint(ctx)) return;
+  const x = workLike(ctx, "tones"); x.setTransform(1, 0, 0, 1, 0, 0); x.drawImage(ctx.canvas, 0, 0);
+  const img = x.getImageData(0, 0, x.canvas.width, x.canvas.height), d = img.data, a = Math.min(1, amt), b = 1 - a;
+  for (let i = 0; i < d.length; i += 4) {
+    const j = ((d[i] * 54 + d[i + 1] * 183 + d[i + 2] * 19) >> 8) * 3;
+    d[i] = d[i] * b + lut[j] * a; d[i + 1] = d[i + 1] * b + lut[j + 1] * a; d[i + 2] = d[i + 2] * b + lut[j + 2] * a;
+  }
+  x.putImageData(img, 0, 0);
+  inPixels(ctx, () => ctx.drawImage(x.canvas, 0, 0));
+}
+/**
+ * What the canvas holds over the cells of a grid — cols × rows cells `cell` units square from (x0, y0),
+ * in the canvas's units — averaged down to one RGBA pixel a cell (in two steps, so it does not alias).
+ */
+function sampled(ctx, x0, y0, cols, rows, cell, slot) {
+  const src = snap(ctx, slot + "Snap"), m = ctx.getTransform(), k = m.a;
+  const mid = WORK[slot + "Mid"] || (WORK[slot + "Mid"] = document.createElement("canvas")), t = WORK[slot] || (WORK[slot] = document.createElement("canvas"));
+  if (mid.width !== cols * 4 || mid.height !== rows * 4) { mid.width = cols * 4; mid.height = rows * 4; }
+  if (t.width !== cols || t.height !== rows) { t.width = cols; t.height = rows; }
+  const a = mid.getContext("2d"), b = t.getContext("2d", { willReadFrequently: true });
+  for (const c of [a, b]) { c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high"; c.globalCompositeOperation = "copy"; }
+  a.drawImage(src, m.e + x0 * k, m.f + y0 * k, cols * cell * k, rows * cell * k, 0, 0, cols * 4, rows * 4);
+  b.drawImage(mid, 0, 0, cols, rows);
+  return b.getImageData(0, 0, cols, rows).data;
+}
+/** The channel graphic's silhouette (see graphicShape) placed as placeShape would, read over the same kind of grid: one coverage value (0–255) a cell. */
+function shapeCells(S, cx, cy, size, x0, y0, cols, rows, cell) {
+  const t = WORK.cells || (WORK.cells = document.createElement("canvas"));
+  if (t.width !== cols * 3 || t.height !== rows * 3) { t.width = cols * 3; t.height = rows * 3; }
+  const x = t.getContext("2d", { willReadFrequently: true });
+  x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, t.width, t.height);
+  x.setTransform(3 / cell, 0, 0, 3 / cell, (-x0 * 3) / cell, (-y0 * 3) / cell);
+  placeShape(x, S, [255, 255, 255], cx, cy, size);
+  const d = x.getImageData(0, 0, t.width, t.height).data, out = new Uint8Array(cols * rows);
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    let s = 0;
+    for (let v = 0; v < 3; v++) for (let u = 0; u < 3; u++) s += d[((j * 3 + v) * t.width + i * 3 + u) * 4 + 3];
+    out[j * cols + i] = s / 9;
+  }
+  return out;
+}
+
+// ====================================================================== collage: paper, scissors, glue
+// The mixed-media collage poster: a black-and-white figure cut from a magazine, a big disc of colour
+// behind it, pieces of coloured paper torn by hand, strips of newsprint, patches of halftone, a
+// starburst, a scribble in marker, tape, a ticket and a barcode; every piece lifts a little off the
+// sheet. Loud, layered, handmade.
+const CL = { paper: [238, 232, 218], night: [26, 24, 28], ink: [20, 20, 22], white: [250, 248, 242], red: [226, 52, 42], mustard: [244, 180, 30], teal: [32, 150, 142], pink: [244, 130, 172] };
+const clGround = () => (dark ? CL.night : CL.paper), clInk = () => (dark ? CL.white : CL.ink);
+/** The paper colours a piece is cut from: the channel colour first, then the collage's own. */
+const clColours = (C) => [C, CL.red, CL.mustard, CL.ink, CL.teal, CL.pink, CL.white];
+/**
+ * A piece of paper torn by hand, w × h, centred on (cx, cy) and turned by `a`: every edge wanders a
+ * little; a margin of bare white fibre shows where it was torn; it casts a soft shadow (`lift`).
+ * `inside(ctx)`, if given, paints on the piece in its own frame (newsprint, say).
+ */
+function tornPiece(ctx, cx, cy, w, h, a, colour, k, lift, inside) {
+  const n = 9, jag = Math.min(w, h) * 0.07, pts = [];
+  const side = (x0, y0, x1, y1, s) => { for (let i = 0; i < n; i++) { const t = i / n, o = (rand(k + s * 17.3 + i * 2.1) - 0.5) * jag; pts.push([x0 + (x1 - x0) * t + (y1 !== y0 ? o : 0), y0 + (y1 - y0) * t + (x1 !== x0 ? o : 0)]); } };
+  side(-w / 2, -h / 2, w / 2, -h / 2, 1); side(w / 2, -h / 2, w / 2, h / 2, 2); side(w / 2, h / 2, -w / 2, h / 2, 3); side(-w / 2, h / 2, -w / 2, -h / 2, 4);
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
+  shapeOf(ctx, pts);
+  if (lift > 0) { ctx.shadowColor = `rgba(0,0,0,${0.32 * lift})`; ctx.shadowBlur = 6 + 12 * lift; ctx.shadowOffsetX = 3 * lift; ctx.shadowOffsetY = 6 * lift; }
+  ctx.strokeStyle = css(CL.white); ctx.lineWidth = Math.max(3, Math.min(w, h) * 0.035); ctx.lineJoin = "round"; ctx.stroke();
+  ctx.shadowColor = "rgba(0,0,0,0)"; ctx.fillStyle = css(colour); ctx.fill();
+  if (inside) { ctx.save(); ctx.clip(); inside(ctx); ctx.restore(); }
+  ctx.restore();
+}
+/** A starburst: a spiky star, its points of uneven length. */
+function starburst(ctx, cx, cy, R, n, colour, k) {
+  ctx.beginPath();
+  for (let i = 0; i < n * 2; i++) { const t = (i / (n * 2)) * TAU + rand(k) * 0.4, r = i % 2 ? R * (0.42 + rand(k + i * 1.3) * 0.12) : R * (0.78 + rand(k + i * 2.7) * 0.28); ctx.lineTo(cx + Math.cos(t) * r, cy + Math.sin(t) * r); }
+  ctx.closePath(); ctx.fillStyle = css(colour); ctx.fill();
+}
+/** Where the collage gathers: round the channel graphic if it stands in the open field, else toward the field's far side. */
+function clCentre(env) {
+  const F = openField(env), fw = F.x1 - F.x0, A = env.G && env.G.art;
+  return { F, cx: A && A.x > F.x0 + fw * 0.25 && A.x < F.x1 ? A.x : F.x0 + fw * 0.68, cy: A && A.y > F.y0 && A.y < F.y1 ? A.y : (F.y0 + F.y1) * 0.55 };
+}
+/**
+ * The pieces of the collage, behind the title and the graphic: the disc, strips of newsprint, torn
+ * paper, halftone patches, the starburst and the scribble — each coming in over its own slider, and
+ * "more" meaning more pieces, one by one.
+ */
+function clPieces(ctx, env, p, onPhoto) {
+  const { w, h, C } = env, u = Math.min(w, h), { F, cx, cy } = clCentre(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, cols = clColours(C);
+  if (p.disc > 0) {   // the big disc of colour behind the figure; over a photo it tints what it covers
+    ctx.save(); if (onPhoto) ctx.globalCompositeOperation = "multiply";
+    ctx.fillStyle = css(onPhoto ? mix([255, 255, 255], C, 0.85) : C, Math.min(1, p.disc * 3));
+    ctx.beginPath(); ctx.arc(cx + fw * 0.02, cy - fh * 0.06, fh * (0.22 + 0.3 * p.disc), 0, TAU); ctx.fill(); ctx.restore();
+  }
+  if (p.burst > 0) starburst(ctx, cx - fw * 0.16, cy - fh * 0.28, fh * (0.08 + 0.2 * p.burst), 11, mix(CL.mustard, [255, 120, 30], 0.35), 960);
+  for (let k = 0, n = p.strips * 6; k < Math.ceil(n); k++) {   // strips of newsprint, torn across
+    const a = clamp(n - k), sw = fw * (0.3 + rand(k * 2.3 + 961) * 0.4), sh = u * (0.035 + rand(k * 3.1 + 962) * 0.04);
+    ctx.save(); ctx.globalAlpha = a;
+    tornPiece(ctx, F.x0 + fw * (0.25 + rand(k * 4.7 + 963) * 0.6), F.y0 + fh * (0.12 + rand(k * 5.3 + 964) * 0.78), sw, sh, (rand(k * 6.1 + 965) - 0.5) * 0.5, k % 3 === 2 ? CL.mustard : CL.white, k * 7 + 966, p.lift,
+      (x) => greeked(x, -sw / 2 + sh * 0.25, -sh / 2 + sh * 0.2, sw - sh * 0.5, 3, sh * 0.24, css(CL.ink, 0.55), k * 11 + 967));
+    ctx.restore();
+  }
+  for (let k = 0, n = p.torn * 10; k < Math.ceil(n); k++) {   // torn pieces of coloured paper, round the figure
+    const a = clamp(n - k), r = rand(k * 1.9 + 970), pw = u * (0.07 + r * 0.17), ph = pw * (0.55 + rand(k * 2.9 + 971) * 0.9);
+    const ang = rand(k * 3.7 + 972) * TAU, d = fh * (0.18 + rand(k * 4.3 + 973) * 0.36);
+    ctx.save(); ctx.globalAlpha = a;
+    tornPiece(ctx, clamp(cx + Math.cos(ang) * d * 1.4, F.x0 + pw * 0.3, F.x1 - pw * 0.3), clamp(cy + Math.sin(ang) * d, F.y0 + ph * 0.3, F.y1), pw, ph, (rand(k * 5.9 + 974) - 0.5) * 1.2, cols[k % cols.length], k * 9 + 975, p.lift);
+    ctx.restore();
+  }
+  for (let k = 0, n = p.halftone * 5; k < Math.ceil(n); k++) {   // patches of a coarse halftone: discs and slabs
+    const a = clamp(n - k), r = u * (0.05 + rand(k * 2.1 + 980) * 0.09), x = F.x0 + fw * (0.15 + rand(k * 3.3 + 981) * 0.8), y = F.y0 + fh * (0.1 + rand(k * 4.1 + 982) * 0.8);
+    ctx.save(); ctx.beginPath(); k % 2 ? ctx.rect(x - r, y - r * 0.6, r * 2, r * 1.2) : ctx.arc(x, y, r, 0, TAU); ctx.clip();
+    dotScreen(ctx, w, h, k % 3 === 1 ? CL.red : dark ? CL.white : CL.ink, 9 + (k % 3) * 3, 0.85 * a, "source-over"); ctx.restore();
+  }
+  if (p.scribble > 0) {   // a loop of marker, drawn further the higher the slider
+    const sx = cx - fw * 0.05, sy = cy + fh * 0.12, R = fh * 0.16, ph = rand(990) * TAU, len = 40 * p.scribble;
+    ctx.save(); ctx.strokeStyle = css(dark ? CL.white : CL.ink, 0.85); ctx.lineWidth = Math.max(2.5, u * 0.004); ctx.lineCap = ctx.lineJoin = "round"; ctx.beginPath();
+    for (let t = 0; t <= len; t += 0.08) { const x = sx + R * (Math.sin(t * 0.9 + ph) * 1.6 + Math.sin(t * 5.3) * 0.32), y = sy + R * (Math.cos(t * 1.27 + ph) * 0.7 + Math.cos(t * 5.1) * 0.3); t ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.stroke(); ctx.restore();
+  }
+}
+/** A barcode: bars of uneven width, a line of digits under them. */
+function barcode(ctx, x, y, w, h, colour, k) {
+  ctx.fillStyle = css(colour);
+  for (let at = x, i = 0; at < x + w; i++) { const bw = 1 + Math.floor(rand(k + i * 1.7) * 4), gap = 1 + Math.floor(rand(k + i * 2.3) * 3); if (at + bw > x + w) break; ctx.fillRect(at, y, bw, h * 0.78); at += bw + gap; }
+  ctx.font = `600 ${Math.round(h * 0.17)}px ${fonts.mono}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  ctx.fillText(String(Math.floor(rand(k + 99) * 9e12)).padStart(13, "4"), x, y + h);
+}
+const collage = {
+  id: "collage",
+  repaint: (c) => `a mixed-media paper collage made from the photograph: the subject cut out in black and white like a magazine clipping, set on torn pieces of coloured paper (${c}, vermilion, mustard, teal), a big disc of colour behind, halftone dots, strips of newsprint, tape; tactile and handmade; no text.`,
+  about: { zh: "拼贴艺术：剪报式的混合媒介拼贴——黑白人物像从杂志上剪下来，身后一个大色圆（频道色），四周是手撕的彩色纸片、一条条旧报纸、粗网点色块、爆炸星、马克笔涂鸦，再用胶带、票根和条形码钉住；每一片纸都微微翘起、投下影子，标题贴在一条条纸签上。热闹、有手作感、有态度——适合设计、潮流、艺术、观点、生活方式和年轻向内容。可选米白纸底或黑纸底。", en: "Collage: mixed media as a scrapbook would have it — a black-and-white figure cut from a magazine, a big disc of the channel colour behind, pieces of coloured paper torn by hand, strips of old newsprint, patches of coarse halftone, a starburst, a scribble in marker, held down with tape, a ticket stub and a barcode; every piece lifts a little and casts a shadow, and the title is pasted on paper labels. Loud, handmade, opinionated — for design, fashion, art, opinion, lifestyle and youth content. Cream or black paper." },
+  name: { zh: "拼贴艺术", en: "Collage" },
+  seeded: true,
+  params: [
+    { key: "disc", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "大色圆", en: "Disc of colour" } },
+    { key: "torn", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "撕纸碎片", en: "Torn paper" } },
+    { key: "strips", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "旧报纸条", en: "Newsprint strips" } },
+    { key: "halftone", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "网点色块", en: "Halftone patches" } },
+    { key: "burst", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "爆炸星", en: "Starburst" } },
+    { key: "scribble", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "马克笔涂鸦", en: "Marker scribble" } },
+    { key: "lift", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "纸片立体感", en: "Paper lift" } },
+    { key: "tape", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "胶带", en: "Tape" } },
+    { key: "labels", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "票根与条码", en: "Ticket and barcode" } },
+    { key: "paper", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "纸张质感", en: "Paper texture" } },
+    { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白照片", en: "Black-and-white photo" } },
+    { key: "slices", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "照片撕条", en: "Photo torn in strips" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  theme: (base) => ({ ...base, field: css(clGround()), text: css(clInk()), dim: css(clInk(), 0.6), titleFill: css(clInk()), titleInk: css(clGround()), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The sheet and the pieces pasted on it (see clPieces). A photo goes black and white; one filling the
+   * canvas is torn into horizontal strips, each set back a little off, with white fibre along the tears,
+   * and the pieces go on over it.
+   */
+  background(ctx, env, L, p) {
+    const { w, h } = env, u = Math.min(w, h);
+    ctx.fillStyle = css(clGround()); ctx.fillRect(0, 0, w, h);
+    if (env.photo) {
+      env.drawPhoto(p.mono);
+      if (!L.fill) return true;
+      if (p.slices > 0 && canPaint(ctx)) {
+        const src = snap(ctx, "clSnap"), m = ctx.getTransform(), n = Math.round(3 + 6 * p.slices), edges = [0];
+        for (let i = 1; i < n; i++) edges.push(h * ((i + (rand(i * 2.7 + 1000) - 0.5) * 0.6) / n));
+        edges.push(h);
+        ctx.fillStyle = css(clGround()); ctx.fillRect(0, 0, w, h);
+        for (let i = 0; i < n; i++) {
+          const y0 = edges[i], y1 = edges[i + 1], dx = (rand(i * 3.9 + 1001) - 0.5) * u * 0.1 * p.slices, top = [], bot = [];
+          for (let x = -20; x <= w + 20; x += 24) { top.push([x, y0 + (i ? (rand(i * 31 + x * 0.07) - 0.5) * 7 : -10)]); bot.push([x, y1 + (i < n - 1 ? (rand((i + 1) * 31 + x * 0.07) - 0.5) * 7 : 10)]); }
+          ctx.save(); shapeOf(ctx, [...top, ...bot.reverse()]); ctx.clip();
+          inPixels(ctx, () => ctx.drawImage(src, dx * m.a, 0));
+          ctx.restore();
+          if (i) { ctx.strokeStyle = css(CL.white, 0.9); ctx.lineWidth = 3 + 3 * p.slices; ctx.beginPath(); top.forEach(([x, y], q) => (q ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke(); }
+        }
+      }
+      clPieces(ctx, env, { ...p, torn: p.torn * 0.6, strips: p.strips * 0.5 }, true);
+      return true;
+    }
+    if (!L.grid) return true;
+    clPieces(ctx, env, p, false);
+    return true;
+  },
+  accent: { fill: (C) => css(C), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.lineJoin = "round"; ctx.strokeStyle = css(CL.white); ctx.lineWidth = 9; run(0, 0); } },   // a cut piece of paper with its white edge
+  /**
+   * Heavy condensed capitals pasted on paper labels (the shadow slider): each run on a strip of cream
+   * paper, a little askew, lifting off the sheet; highlighted words on a strip of the channel colour.
+   */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, C = o.C || CL.red, hi = o.hi || C, label = Math.min(1, o.shadowAmt), ink = o.fill || (label > 0.3 ? CL.ink : clInk());
+    if (label > 0) pass((a, x) => {
+      const tw = ctx.measureText(a.t).width, t = (rand(o.seed + x * 0.013) - 0.5) * 0.07, col = a.hi ? hi : CL.white;
+      ctx.save(); ctx.globalAlpha = label; ctx.translate(x + tw / 2, -fs * 0.36); ctx.rotate(t);
+      ctx.shadowColor = "rgba(0,0,0,0.3)"; ctx.shadowBlur = fs * 0.06; ctx.shadowOffsetX = fs * 0.02; ctx.shadowOffsetY = fs * 0.04;
+      ctx.fillStyle = css(col); ctx.fillRect(-tw / 2 - fs * 0.1, -fs * 0.58, tw + fs * 0.2, fs * 1.08); ctx.restore();
+    });
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? (label > 0.3 ? (lum(hi) > 0.55 ? CL.ink : CL.white) : hi) : ink); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => (plates ? ctx : mapped(ctx, { fill: { ink: CL.ink, light: CL.white }, stroke: { ink: CL.ink, light: CL.white }, line: 0.8 })),
+  sticker: painters({ line: CL.white, lineScale: 1.2, shadow(ctx, draw) { ctx.save(); ctx.translate(4, 7); draw("rgba(0,0,0,0.28)"); ctx.restore(); } }),   // cut out with a white margin, lifting off the sheet
+  /** The corner tag: a black ticket with notches cut in its ends. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.68;
+    ctx.font = `700 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + f * 1.6, h = f * 1.5, top = y + (fs * 1.34 - h);
+    ctx.save(); ctx.translate(x + w / 2, top + h / 2); ctx.rotate(-0.03);
+    ctx.fillStyle = css(CL.ink); ctx.fillRect(-w / 2, -h / 2, w, h);
+    ctx.fillStyle = css(clGround()); for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc((s * w) / 2, 0, h * 0.16, 0, TAU); ctx.fill(); }
+    ctx.fillStyle = ink || css(CL.white); spaced(ctx, str, -w / 2 + f * 0.8, f * 0.36, 3); ctx.restore();
+    return { x: x - 6, y: top - 6, w: w + 12, h: h + 12 };
+  },
+  /** The frame layer: tape holding the sheet down, a ticket stub and a barcode pasted on. */
+  frame(ctx, env, p) {
+    const { w, h, C } = env, u = Math.min(w, h), { F } = clCentre(env);
+    for (let k = 0, n = p.tape * 4; k < Math.ceil(n); k++) {   // tape: translucent, its ends torn
+      const spots = [[F.x1 - u * 0.14, F.y0 + u * 0.08, 0.6], [F.x0 + u * 0.1, F.y1 - u * 0.12, -0.5], [F.x1 - u * 0.08, F.y1 - u * 0.2, -0.75], [w * 0.5, F.y0 + u * 0.04, 0.08]];
+      const [tx, ty, a] = spots[k], tw = u * 0.2, th = u * 0.055;
+      ctx.save(); ctx.globalAlpha = clamp(n - k); ctx.translate(tx, ty); ctx.rotate(a);
+      const pts = []; for (let i = 0; i <= 6; i++) pts.push([-tw / 2 + (rand(k * 13 + i) - 0.5) * 6, -th / 2 + (th * i) / 6]);
+      for (let i = 6; i >= 0; i--) pts.push([tw / 2 + (rand(k * 17 + i) - 0.5) * 6, -th / 2 + (th * i) / 6]);
+      shapeOf(ctx, pts); ctx.fillStyle = "rgba(240,232,206,0.62)"; ctx.fill(); ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 1; ctx.stroke(); ctx.restore();
+    }
+    if (p.labels <= 0) return;
+    const a = Math.min(1, p.labels * 2), P = env.o.profile, i = env.o.catIndex;
+    ctx.save(); ctx.globalAlpha = a; ctx.translate(F.x1 - u * 0.2, F.y1 - u * 0.1); ctx.rotate(-0.06);   // the barcode on a white label
+    ctx.fillStyle = css(CL.white); ctx.fillRect(-10, -10, u * 0.16 + 20, u * 0.06 + 22);
+    barcode(ctx, 0, 0, u * 0.16, u * 0.06, CL.ink, 1010 + i); ctx.restore();
+    if (p.labels > 0.4) {   // and the ticket stub
+      ctx.save(); ctx.globalAlpha = Math.min(1, (p.labels - 0.4) * 3); ctx.translate(F.x1 - u * 0.5, F.y0 + u * 0.11); ctx.rotate(0.05);   // clear of the brand line
+      ctx.fillStyle = css(mix(C, CL.white, 0.15)); ctx.fillRect(0, 0, u * 0.17, u * 0.07);
+      ctx.fillStyle = css(lum(C) > 0.55 ? CL.ink : CL.white); ctx.font = `700 ${u * 0.022}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      ctx.fillText(`ADMIT ONE · No.${pad2(i + 1)}`, u * 0.012, u * 0.03); ctx.font = `600 ${u * 0.012}px ${fonts.mono}`; ctx.fillText((P.brand.name || "").toUpperCase().slice(0, 24), u * 0.012, u * 0.055);
+      ctx.setLineDash([3, 4]); ctx.strokeStyle = ctx.fillStyle; ctx.beginPath(); ctx.moveTo(u * 0.135, 4); ctx.lineTo(u * 0.135, u * 0.07 - 4); ctx.stroke(); ctx.setLineDash([]);
+      ctx.restore();
+    }
+  },
+  image(ctx, C, unit) { ctx.shadowColor = "rgba(0,0,0,0.3)"; ctx.shadowBlur = 10 * unit; ctx.shadowOffsetX = 4 * unit; ctx.shadowOffsetY = 7 * unit; },
+  /** The sheet itself: crumpled a little, its grain, and wear. */
+  post(ctx, w, h, C, p, unit = 1) {
+    crumple(ctx, w, h, p.paper * 0.8);
+    grain(ctx, 0.2 + p.paper * 0.5, unit, !dark);
+  },
+  prompt: `Cut-outs for a mixed-media paper collage — bold, playful and a little rough — that read at a glance:
+- one clear, characterful object per sticker (a hand, an eye, lips, a flower, a star, a camera, a cassette, a coffee cup), simple and graphic; no realism, no perspective, no fine detail;
+- flat colour only: the main colour with "ink", "white", "red" or "yellow" as partners; patterns in stripes or dots are welcome;
+- the app cuts every sticker out with a white margin and a soft shadow: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Objects as cut-outs for a paper collage: a few boxes and cylinders, bold and simple — a radio, a camera, a suitcase, a lamp; no realism, no fine detail.
+- the renderer paints faces in flat tones with a dark line: do NOT try to draw shading or outlines yourself;
+- "white" is white, "dark" near-black, and "main" the channel colour — use it for one to three parts.`,
+};
+
+// ====================================================================== yellow: the festival poster in one bright yellow
+// Theatre and film-festival posters set on a single saturated yellow: huge letters with the picture
+// showing inside them, a black silhouette cut against the yellow (where it crosses the letters it turns
+// yellow), a beam of light, crossing stripes, a flock of small shapes flying off; tight black type and
+// small print. One colour, black and white.
+const YL = { yellow: [255, 206, 0], ink: [16, 16, 16], text: [30, 28, 26], white: [255, 255, 255], magenta: [230, 0, 126] };   // text: a near-black that is not the house ink, so the small parts' ink can be swapped on its own
+const ylGround = (C) => (values.chan ? boost(C, 0.55) : YL.yellow);
+/** The one accent: the channel colour, or magenta where that would vanish into the ground. */
+const ylAccent = (C) => { const g = ylGround(C); return !near(C, g, 120) ? C : near(YL.magenta, g, 120) ? YL.yellow : YL.magenta; };
+/**
+ * The room the letters and the silhouette stand in: right of the title, down to the floor, when there
+ * is a fair width of it; else under the title; the field's far half when the title is hidden.
+ */
+function ylRoom(ctx, env) {
+  const F = openField(env), fw = F.x1 - F.x0, T = titleArea(ctx, env), right = T ? T.x + T.w + 30 : F.x0 + fw * 0.45;
+  if (F.x1 - fw * 0.03 - right >= fw * 0.22) return { x0: right, x1: F.x1 - fw * 0.03, y0: F.y0 + 24, y1: F.y1 };
+  return { x0: F.x0 + fw * 0.3, x1: F.x1 - fw * 0.03, y0: Math.min(T.y + T.h + 20, F.y1 - (F.y1 - F.y0) * 0.25), y1: F.y1 };
+}
+/** The giant letters' arrangement: the typed word or the channel's code, in a block of rows filling the region `R`. */
+function ylWord(ctx, env, p, R) {
+  const word = [...((p.word || env.cat.code || env.cat.name || "A").toUpperCase())].filter((c) => c.trim()).slice(0, 8), n = word.length;
+  const cols = n <= 1 ? 1 : n <= 4 ? 2 : 3, rows = Math.ceil(n / cols), rw = R.x1 - R.x0, rh = R.y1 - R.y0;
+  const face = (s) => (p.serif ? `700 ${s}px ${fonts.serif}` : `900 ${s}px ${fonts.en}, ${fonts.cn}`);
+  ctx.save(); ctx.font = face(100); const cw = Math.max(...word.map((c) => ctx.measureText(c).width)) / 100; ctx.restore();
+  const fs = Math.min((rh * (0.55 + 0.45 * p.giant)) / (rows * 0.86), (rw * 0.98) / (cols * cw * 1.02));
+  const bw = cols * cw * fs * 1.02, bh = rows * fs * 0.86;
+  return { word, cols, cw, fs, bw, bh, x0: R.x0 + (rw - bw) / 2, y0: R.y0 + (rh - bh) * 0.5, font: face(fs) };
+}
+/** Paints the giant letters (see ylWord) in `colour`. */
+function ylLetters(x, W, colour) {
+  x.font = W.font; x.textAlign = "center"; x.textBaseline = "alphabetic"; x.fillStyle = css(colour);
+  W.word.forEach((ch, i) => x.fillText(ch, W.x0 + ((i % W.cols) + 0.5) * W.cw * W.fs * 1.02, W.y0 + (Math.floor(i / W.cols) + 1) * W.fs * 0.86 - W.fs * 0.06));
+}
+const yellow = {
+  id: "yellow",
+  repaint: (c) => `a festival poster made from the photograph: the subject in hard black and white set on one flat, saturated yellow, clean and graphic, a little paper grain; still the same picture, no text.`,
+  about: { zh: "明黄海报：戏剧节和电影节常用的一整版明黄——巨大的白色字母里透出画面（有照片时是照片），一个黑色剪影立在标题旁的空处，穿过字母的部分反成黄色；可加一道光束、交叉的条纹、从剪影里飞散出去的小形状；紧凑的黑色标题和小字信息。只有黄、黑、白和一个点缀色。醒目、自信、一眼认出——适合活动、展演、电影、讲座、课程和品牌宣传。可以用频道色代替黄色。", en: "Yellow: the one bright yellow of theatre and film-festival posters — huge letters with the picture showing inside them (the photo, or the silhouette), a black silhouette standing on the yellow and turning yellow where it crosses the letters; a beam of light, crossing stripes and small shapes flying off if you like; tight black type and small print. Yellow, black, white and one accent. Loud, confident, recognisable at once — for events, shows, films, talks, courses and brand campaigns. The channel colour can take the yellow's place." },
+  name: { zh: "明黄海报", en: "Yellow poster" },
+  oneTheme: true,
+  seeded: true,
+  params: [
+    { key: "giant", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "巨型字母", en: "Giant letters" } },
+    { key: "word", text: true, max: 8, def: "", name: { zh: "字母内容", en: "Their letters" }, placeholder: { zh: "留空：用频道代号", en: "Empty: the channel's code" } },
+    { key: "figure", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "黑色剪影", en: "Black silhouette" } },
+    { key: "flock", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "飞散小形", en: "Flock" } },
+    { key: "beam", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "光束", en: "Beam of light" } },
+    { key: "stripes", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "交叉条纹", en: "Crossing stripes" } },
+    { key: "credits", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "小字信息", en: "Small print" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "纸张颗粒", en: "Paper grain" } },
+    { key: "serif", toggle: true, min: 0, max: 1, step: 1, def: 0, name: { zh: "衬线字母", en: "Serif letters" } },
+    { key: "chan", toggle: true, min: 0, max: 1, step: 1, def: 0, name: { zh: "用频道色代替黄色", en: "The channel colour in place of the yellow" } },
+    { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白照片", en: "Black-and-white photo" } },
+    { key: "inside", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.85, name: { zh: "照片装进字母", en: "Photo inside the letters" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.16, side: 0.28, strip: 0.1 }),
+  theme: (base, C) => ({ ...base, field: css(ylGround(C)), text: css(YL.text), dim: css(YL.text, 0.6), titleFill: css(YL.text), titleInk: css(ylGround(C)), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The yellow, then (behind) crossing stripes and a beam, the black silhouette, the giant letters in
+   * white — the silhouette turning yellow inside them — and the flock. A photo goes black and white;
+   * one filling the canvas can show only inside the letters: the yellow is laid over it with the
+   * letters cut out.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, ground = ylGround(C), u = Math.min(w, h), F0 = openField(env), R = canPaint(ctx) ? ylRoom(ctx, env) : null;
+    // the letters are white, so they may stand behind the black title: they take the field's far side; the black silhouette keeps to the room
+    const W = p.giant > 0 && R ? ylWord(ctx, env, p, { x0: F0.x0 + (F0.x1 - F0.x0) * 0.42, x1: F0.x1 - (F0.x1 - F0.x0) * 0.04, y0: F0.y0 + 24, y1: F0.y1 }) : null;
+    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (env.photo) {
+      env.drawPhoto(p.mono);
+      if (L.fill && W && p.inside > 0) { const x = workLike(ctx, "yl"); x.fillStyle = css(ground); x.fillRect(0, 0, w, h); x.globalCompositeOperation = "destination-out"; ylLetters(x, W, [0, 0, 0]); layDown(ctx, x, p.inside); }
+      return true;
+    }
+    if (!L.grid) return true;
+    const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, S = p.figure > 0 && R && graphicShape(env), b = S && S.box, aspect = b ? (b.x1 - b.x0) / Math.max(1, b.y1 - b.y0) : 1;
+    // the silhouette stands on the floor in the room, as tall as the slider says and the room allows
+    const size = R ? Math.min((R.y1 - R.y0) * (0.5 + 0.5 * p.figure), ((R.x1 - R.x0) * 0.85) / aspect) : fh * 0.5, fx = R ? R.x0 + (R.x1 - R.x0) * 0.42 : F.x0 + fw * 0.62, fy = F.y1 - size * 0.5;
+    if (p.stripes > 0) {   // crossing stripes, pair by pair, one in the accent
+      const n = p.stripes * 6, sx = W ? W.x0 + W.bw / 2 : F.x0 + fw * 0.6, sw = u * 0.022;
+      for (let k = 0; k < Math.ceil(n); k++) {
+        const off = (k - 2.5) * u * 0.07, col = k === 2 ? ylAccent(C) : YL.white;
+        ctx.strokeStyle = css(col, clamp(n - k)); ctx.lineWidth = sw;
+        ctx.beginPath(); ctx.moveTo(sx + off - fh * 0.35, F.y0 - 20); ctx.lineTo(sx - off + fh * 0.35, F.y1 + 20); ctx.stroke();
+      }
+    }
+    if (p.beam > 0) {   // a beam from the figure's head out to the left, spreading over the floor
+      const g = ctx.createLinearGradient(fx, 0, F.x0, 0); g.addColorStop(0, css(YL.white, 0.85 * p.beam)); g.addColorStop(1, css(YL.white, 0.25 * p.beam));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(fx, fy - size * 0.3); ctx.lineTo(F.x0 - 20, F.y1 - fh * (0.15 + 0.45 * p.beam)); ctx.lineTo(F.x0 - 20, F.y1); ctx.lineTo(fx, F.y1); ctx.closePath(); ctx.fill();
+    }
+    if (S) placeShape(ctx, S, YL.ink, fx, fy, size);
+    if (W) {
+      const x = workLike(ctx, "yl");
+      ylLetters(x, W, YL.white);
+      if (S) { x.globalCompositeOperation = "source-atop"; placeShape(x, S, ground, fx, fy, size); }   // the figure, reversed inside the letters
+      layDown(ctx, x, Math.min(1, p.giant * 5));
+    }
+    if (S && p.flock > 0) {   // small copies flying off the figure, up and away, one by one
+      for (let k = 0, n = p.flock * 16; k < Math.ceil(n); k++) {
+        const t = (k + 1) / 17, ang = -1.2 + rand(k * 2.1 + 1100) * 0.9, d = size * (0.35 + t * 0.9), s = u * (0.025 + rand(k * 3.3 + 1101) * 0.025);
+        ctx.save(); ctx.globalAlpha = clamp(n - k); placeShape(ctx, S, YL.ink, fx + Math.cos(ang) * d, fy - size * 0.3 + Math.sin(ang) * d, s, (rand(k * 4.7 + 1102) - 0.5) * 1.2); ctx.restore();
+      }
+    }
+    return true;
+  },
+  accent: { fill: () => css(YL.white), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },   // a white band: the small parts' ink reads on it as on the yellow
+  /** Tight black capitals, flat and upright; highlighted words in the accent colour. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? o.hi || ylAccent(o.C || YL.magenta) : o.fill || YL.text); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => (plates ? ctx : mapped(ctx, { fill: { ink: YL.ink, light: YL.white, mid: mix(YL.white, YL.ink, 0.25), dark: YL.ink, colour: () => ylAccent(C) }, stroke: { ink: YL.ink, light: YL.white }, line: 0.6 })),
+  sticker: painters({ line: null, shadow: null, tone: inkAs(YL.ink) }),
+  /** The corner tag: a black slab, the lettering in the ground's yellow. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    ctx.font = `700 ${fs * 0.86}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + fs * 0.7, h = fs * 1.16, top = y + fs * 0.1;
+    ctx.fillStyle = css(YL.ink); ctx.fillRect(x, top, w, h);
+    ctx.fillStyle = ink || css(ylGround(C)); spaced(ctx, str, x + fs * 0.35, top + h * 0.5 + fs * 0.31, 3);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The frame layer: a block of small print in the top corner, and a row of sponsors' marks along the foot. */
+  frame(ctx, env, p) {
+    const a = p.credits;
+    if (a <= 0) return;
+    const { w, h } = env, P = env.o.profile, i = env.o.catIndex, F = openField(env);
+    ctx.save(); ctx.fillStyle = css(YL.ink, 0.85 * a); ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+    ctx.font = `700 15px ${fonts.en}, ${fonts.cn}`; ctx.fillText(`${(P.brand.name || "").toUpperCase()}  ·  No.${pad2(i + 1)}`, w - 340, 70);
+    greeked(ctx, w - 340, 86, 260, 4, 11, css(YL.ink, 0.6 * a), 1110 + i);
+    if (a > 0.4) for (let k = 0; k < 6; k++) { ctx.fillStyle = css(YL.ink, 0.5 * Math.min(1, (a - 0.4) * 3)); ctx.beginPath(); rounded(ctx, w - 72 - (k + 1) * 64, F.y1 - 44, 48, 22, 5); ctx.fill(); }
+    ctx.restore();
+  },
+  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.8, unit, true); },
+  prompt: `Silhouettes for a one-colour festival poster on bright yellow — bold, witty, instantly read:
+- one strong black silhouette per sticker (a hat, a moustache, a hand, a saxophone, a bird, a figure walking, a film camera), with at most one clever detail; no realism, no perspective, no detail;
+- flat colour only: "ink" for the silhouette, "white" for small light parts, and the main colour as a single small accent;
+- the app draws no outline and no shadow: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Objects as a yellow festival poster would show them: a few boxes and cylinders, bold and plain — a film camera, a lamp, a chair, a megaphone; no realism, no fine detail.
+- the renderer paints faces in black, white and grey: do NOT try to draw shading or outlines yourself;
+- "white" is white, "dark" black, and "main" the accent colour — one part only.`,
+};
+
+// ====================================================================== pitch: the football poster
+// World Cup and club posters, from Munich '72 to today: a mown pitch in stripes, its white lines seen
+// from above at an angle, the net bulging, the bowl of a stadium full of people, floodlights, the
+// classic black-and-white ball with halftone shading, a crowd in silhouette; posterized colour on
+// photographs. Green with white lines, or canary yellow with green ones.
+const PT = { green: [0, 124, 62], deep: [20, 100, 52], yellow: [252, 214, 0], white: [244, 246, 236], ink: [10, 34, 20], lime: [150, 206, 64] };
+const ptGround = () => (dark ? PT.deep : PT.yellow), ptLine = () => (dark ? PT.white : PT.green);
+const ptHi = (C) => (near(C, ptGround(), 120) || (!dark && near(C, PT.green, 90)) ? (dark ? PT.yellow : [0, 52, 150]) : C);   // where the channel colour would not show: yellow on the grass, a deep blue on the yellow
+/** The markings of a pitch (105 × 68), seen from above, huge, turned and cropped: lines come in, then (past half the slider) the extras — dashes and arcs. */
+function pitchLines(ctx, env, amt) {
+  const F = openField(env), u = Math.min(env.w, env.h), s = u * 0.026, a = Math.min(1, amt * 2), more = clamp(amt * 2 - 1);
+  ctx.save(); ctx.translate(F.x0 + (F.x1 - F.x0) * 0.6, (F.y0 + F.y1) * 0.55); ctx.rotate(-0.42 + rand(1200) * 0.2); ctx.scale(s, s * 0.7);
+  ctx.strokeStyle = css(ptLine(), 0.9 * a); ctx.fillStyle = css(ptLine(), 0.9 * a); ctx.lineWidth = 0.42;
+  ctx.strokeRect(-52.5, -34, 105, 68);
+  ctx.beginPath(); ctx.moveTo(0, -34); ctx.lineTo(0, 34); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, 9.15, 0, TAU); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, 0.5, 0, TAU); ctx.fill();
+  for (const s2 of [-1, 1]) {
+    ctx.strokeRect(s2 > 0 ? 36 : -52.5, -20.15, 16.5, 40.3); ctx.strokeRect(s2 > 0 ? 47 : -52.5, -9.15, 5.5, 18.3);
+    ctx.beginPath(); ctx.arc(s2 * 41.5, 0, 0.45, 0, TAU); ctx.fill();
+    if (more > 0) { ctx.save(); ctx.globalAlpha = more; ctx.beginPath(); ctx.arc(s2 * 41.5, 0, 9.15, s2 > 0 ? Math.PI - 0.93 : -0.93, s2 > 0 ? Math.PI + 0.93 : 0.93); ctx.stroke(); ctx.restore(); }
+  }
+  if (more > 0) { ctx.save(); ctx.globalAlpha = more; ctx.setLineDash([2.4, 1.8]); ctx.beginPath(); ctx.moveTo(-60, 40); ctx.lineTo(60, -40); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-60, -45); ctx.lineTo(-10, 45); ctx.stroke(); ctx.restore(); }
+  ctx.restore();
+}
+/** The net, bulging away from where the ball struck it: a mesh of lines over the field, pushed out round that point. */
+function goalNet(ctx, env, amt, bx, by) {
+  const F = openField(env), u = Math.min(env.w, env.h), cell = u * 0.075, R2 = (u * 0.4) ** 2, push = u * 0.12 * amt;
+  const at = (x, y) => { const dx = x - bx, dy = y - by, f = push * Math.exp(-(dx * dx + dy * dy) / R2), d = Math.hypot(dx, dy) || 1; return [x + (dx / d) * f, y + (dy / d) * f * 0.6 + f * 0.3]; };
+  ctx.save(); ctx.strokeStyle = css(ptLine(), 0.55 * Math.min(1, amt * 2)); ctx.lineWidth = Math.max(1.5, u * 0.0025);
+  for (let x = F.x0; x <= F.x1 + cell; x += cell) { ctx.beginPath(); for (let y = F.y0 - cell; y <= F.y1 + cell; y += cell / 4) { const [px, py] = at(x, y); y === F.y0 - cell ? ctx.moveTo(px, py) : ctx.lineTo(px, py); } ctx.stroke(); }
+  for (let y = F.y0; y <= F.y1 + cell; y += cell) { ctx.beginPath(); for (let x = F.x0 - cell; x <= F.x1 + cell; x += cell / 4) { const [px, py] = at(x, y); x === F.x0 - cell ? ctx.moveTo(px, py) : ctx.lineTo(px, py); } ctx.stroke(); }
+  ctx.restore();
+}
+/** The bowl of a stadium seen from above at a slant: stands ribbed with stairways and stippled with people, round a dark oval of pitch; it widens with `amt`. */
+function stadiumBowl(ctx, env, amt) {
+  const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, cx = F.x0 + fw * 0.6, cy = F.y0 + fh * 0.78, R = fw * (0.2 + 0.26 * amt), r = R * 0.62, k = 0.36, a = Math.min(1, amt * 3);
+  // in tones a step off the ground, so the lettering over it still reads
+  const stand = dark ? mix(PT.deep, PT.lime, 0.28) : mix(PT.yellow, PT.white, 0.45), pitch = dark ? mix(PT.deep, [0, 0, 0], 0.3) : mix(PT.yellow, PT.green, 0.22);
+  ctx.save(); ctx.globalAlpha = a;
+  ctx.fillStyle = css(stand); ctx.beginPath(); ctx.ellipse(cx, cy, R, R * k, 0, 0, TAU); ctx.fill();
+  ctx.strokeStyle = css(mix(stand, PT.ink, 0.35)); ctx.lineWidth = 2;
+  for (let i = 0; i < 72; i++) { const t = (i / 72) * TAU; ctx.beginPath(); ctx.moveTo(cx + Math.cos(t) * r, cy + Math.sin(t) * r * k); ctx.lineTo(cx + Math.cos(t) * R, cy + Math.sin(t) * R * k); ctx.stroke(); }
+  ctx.fillStyle = css(mix(stand, PT.ink, 0.55), 0.8);   // the people: specks in the stands, thicker toward the front
+  for (let i = 0; i < 900; i++) { const t = rand(i * 1.3 + 1210) * TAU, q = Math.sqrt(rand(i * 2.1 + 1211)), rr = r + (R - r) * q; ctx.fillRect(cx + Math.cos(t) * rr, cy + Math.sin(t) * rr * k, 2.2, 2.2); }
+  ctx.fillStyle = css(pitch); ctx.beginPath(); ctx.ellipse(cx, cy, r, r * k, 0, 0, TAU); ctx.fill();
+  ctx.save(); ctx.beginPath(); ctx.ellipse(cx, cy, r, r * k, 0, 0, TAU); ctx.clip();   // the shadow of the stand falling across the pitch
+  ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.beginPath(); ctx.ellipse(cx - r * 0.25, cy - r * k * 0.2, r * 0.95, r * k * 0.95, 0, 0, TAU); ctx.fill(); ctx.restore();
+  ctx.restore();
+}
+/** The classic ball: a black pentagon at its heart and five round it, seams, shading to one side in halftone, a shadow on the grass. */
+function football(ctx, x, y, r, rot, half) {
+  ctx.save(); ctx.fillStyle = "rgba(0,0,0,0.28)"; ctx.beginPath(); ctx.ellipse(x + r * 0.2, y + r * 1.02, r * 0.9, r * 0.16, 0, 0, TAU); ctx.fill(); ctx.restore();
+  ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fillStyle = css(PT.white); ctx.fill(); ctx.clip();
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.fillStyle = css(PT.ink); ctx.strokeStyle = css(PT.ink); ctx.lineWidth = r * 0.03;
+  const pent = (R, a) => { ctx.beginPath(); for (let i = 0; i < 5; i++) { const t = a + (i * TAU) / 5; ctx.lineTo(Math.cos(t) * R, Math.sin(t) * R); } ctx.closePath(); ctx.fill(); };
+  pent(r * 0.3, -Math.PI / 2);
+  for (let i = 0; i < 5; i++) {
+    const t = -Math.PI / 2 + (i * TAU) / 5, t2 = t + TAU / 10;
+    ctx.beginPath(); ctx.moveTo(Math.cos(t) * r * 0.3, Math.sin(t) * r * 0.3); ctx.lineTo(Math.cos(t) * r * 0.62, Math.sin(t) * r * 0.62); ctx.stroke();
+    ctx.save(); ctx.translate(Math.cos(t2) * r * 0.86, Math.sin(t2) * r * 0.86); ctx.rotate(t2); ctx.scale(0.5, 1); pent(r * 0.32, Math.PI); ctx.restore();
+  }
+  ctx.restore();
+  const g = ctx.createRadialGradient(x - r * 0.4, y - r * 0.45, r * 0.2, x, y, r * 1.05);
+  g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, `rgba(0,0,0,${0.18 + 0.2 * half})`); ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  if (half > 0) { ctx.beginPath(); ctx.arc(x + r * 0.55, y + r * 0.55, r * 1.05, 0, TAU); ctx.clip(); dotScreen(ctx, x + r * 2, y + r * 2, PT.ink, 7, 0.55 * half); }
+  ctx.restore();
+  ctx.strokeStyle = css(PT.ink, 0.8); ctx.lineWidth = Math.max(1.5, r * 0.02); ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke();
+}
+const pitch = {
+  id: "pitch",
+  repaint: (c) => `a retro football poster made from the photograph, in the manner of the 1972 Munich Olympics posters: the picture posterized into a few flat tones of green, yellow, violet and blue, a little screen-print texture; still the same picture, no text.`,
+  about: { zh: "绿茵球场：从 1972 年慕尼黑奥运会到今天的世界杯和俱乐部海报——修剪成条纹的草坪，俯视转了个角度的白色球场线，被射门撞得鼓起的球网，坐满人的看台，球场灯光，黑白经典足球带网点阴影，前景的人群剪影；照片可以做成七十年代的分色效果。绿底白线，或浅色时的金丝雀黄底配绿线。热血、有节奏、一眼是足球——适合体育、赛事、球评、健身、团队和校园活动。", en: "Pitch: football posters from Munich '72 to today's World Cup and club posters — a pitch mown in stripes, its white lines seen from above at an angle, the net bulging where a shot struck it, the bowl of a full stadium, floodlights, the classic black-and-white ball shaded in halftone, a crowd in silhouette in front; photos can be posterized the seventies way. Green with white lines, or canary yellow with green ones. Rousing, rhythmic, plainly football — for sport, matches, commentary, fitness, teams and school events." },
+  name: { zh: "绿茵球场", en: "Pitch" },
+  seeded: true,
+  params: [
+    { key: "mow", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "草坪条纹", en: "Mown stripes" } },
+    { key: "lines", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "球场线", en: "Pitch lines" } },
+    { key: "net", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "球网", en: "Goal net" } },
+    { key: "stadium", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "看台", en: "Stadium bowl" } },
+    { key: "lights", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "球场灯光", en: "Floodlights" } },
+    { key: "ball", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "足球", en: "Ball" } },
+    { key: "crowd", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "人群剪影", en: "Crowd" } },
+    { key: "halftone", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "网点", en: "Halftone" } },
+    { key: "info", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "赛事信息", en: "Match details" } },
+    { key: "paper", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "皱纸", en: "Crumpled paper" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "颗粒", en: "Grain" } },
+    { key: "poster", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.8, name: { zh: "照片分色", en: "Photo posterized" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.2, side: 0.3, strip: 0.11 }),
+  theme: (base) => ({ ...base, field: css(ptGround()), text: css(ptLine()), dim: css(ptLine(), 0.6), titleFill: css(ptLine()), titleInk: css(ptGround()), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The grass in mown stripes, the stadium, the pitch's lines, the net, the floodlights, the ball and
+   * the crowd, in that order. A photo is posterized into the seventies' few flat tones; one filling the
+   * canvas still gets the stripes, the lines and the lights over it.
+   */
+  background(ctx, env, L, p) {
+    const { w, h } = env, u = Math.min(w, h), F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0;
+    ctx.fillStyle = css(ptGround()); ctx.fillRect(0, 0, w, h);
+    const mow = () => {
+      if (p.mow <= 0) return;
+      ctx.save(); ctx.translate(w / 2, h / 2); ctx.rotate(-0.5); ctx.fillStyle = css(dark ? [0, 0, 0] : [190, 120, 0], 0.16 * p.mow);
+      for (let x = -2 * w; x < 2 * w; x += u * 0.18) ctx.fillRect(x, -2 * h, u * 0.09, 4 * h);
+      ctx.restore();
+    };
+    const lights = () => {
+      if (p.lights <= 0) return;
+      ctx.save(); ctx.globalCompositeOperation = "screen";
+      for (const s of [0, 1]) {
+        const lx = s ? F.x1 - fw * 0.06 : F.x0 + fw * 0.06, ly = F.y0 - fh * 0.06, tx = F.x0 + fw * (s ? 0.35 : 0.75), g = ctx.createLinearGradient(lx, ly, tx, F.y1);
+        g.addColorStop(0, css([255, 255, 240], 0.55 * p.lights)); g.addColorStop(1, css([255, 255, 240], 0));
+        ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(tx - fw * 0.18, F.y1); ctx.lineTo(tx + fw * 0.18, F.y1); ctx.closePath(); ctx.fill();   // from lamps just above the top edge
+      }
+      ctx.restore();
+    };
+    if (env.photo) {
+      env.drawPhoto();
+      mapTones(ctx, toneTable([[0, [12, 44, 30]], [0.3, [70, 64, 150]], [0.55, [30, 140, 70]], [0.8, [236, 212, 40]], [1, [246, 244, 222]]], 0.85), p.poster);
+      if (L.fill) { mow(); pitchLines(ctx, env, p.lines); lights(); }
+      return true;
+    }
+    if (!L.grid) return true;
+    mow();
+    if (p.stadium > 0) stadiumBowl(ctx, env, p.stadium);
+    if (p.lines > 0) pitchLines(ctx, env, p.lines);
+    // the ball (and where it struck the net): just past the title's end, if there is room there
+    const T = canPaint(ctx) ? titleArea(ctx, env) : null, br = u * (0.05 + 0.13 * p.ball), bx = clamp(T ? T.x + T.w + br * 1.15 : F.x0 + fw * 0.66, F.x0 + br, F.x1 - br * 1.2), by = F.y0 + fh * 0.36;
+    if (p.net > 0) goalNet(ctx, env, p.net, bx, by);
+    lights();
+    if (p.halftone > 0) dotScreen(ctx, w, h, dark ? [0, 0, 0] : [150, 110, 0], 10, 0.22 * p.halftone);
+    if (p.ball > 0) football(ctx, bx, by, br, rand(1201) * TAU, p.halftone);
+    for (let k = 0, n = p.crowd * 22; k < Math.ceil(n); k++) {   // the crowd: heads and shoulders along the floor, some arms up
+      const a = clamp(n - k), x = F.x0 + fw * (0.3 + (0.7 * (k + 0.5)) / 22) + (rand(k * 2.3 + 1220) - 0.5) * fw * 0.02, s = u * (0.05 + rand(k * 3.7 + 1221) * 0.035), y = F.y1 - s * (0.6 + rand(k * 1.9 + 1222) * 0.5);   // clear of the tag in the corner
+      ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = css(dark ? [6, 30, 16] : PT.ink);
+      ctx.beginPath(); ctx.arc(x, y - s * 0.55, s * 0.32, 0, TAU); ctx.fill();
+      ctx.beginPath(); rounded(ctx, x - s * 0.6, y - s * 0.22, s * 1.2, s * 1.4, s * 0.4); ctx.fill();
+      if (rand(k * 5.1 + 1223) > 0.55) { ctx.lineWidth = s * 0.22; ctx.lineCap = "round"; ctx.strokeStyle = ctx.fillStyle; ctx.beginPath(); ctx.moveTo(x + s * 0.4, y - s * 0.1); ctx.lineTo(x + s * 0.75, y - s * 1.1); ctx.stroke(); }
+      ctx.restore();
+    }
+    return true;
+  },
+  accent: { fill: () => css(dark ? mix(PT.deep, PT.ink, 0.45) : PT.green), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.strokeStyle = css(PT.white); ctx.lineWidth = 6; run(0, 0); } },   // the touchline
+  /** Bold condensed capitals, flat; highlighted words in the channel colour (or yellow, or green, where that would not show). */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? o.hi || ptHi(o.C || PT.yellow) : o.fill || ptLine()); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => (plates ? ctx : mapped(ctx, { fill: { ink: PT.ink, light: PT.white }, stroke: { ink: PT.ink, light: PT.white }, line: 0.7 })),
+  sticker: painters({ line: PT.ink, lineScale: 0.6, shadow(ctx, draw) { ctx.save(); ctx.translate(5, 7); draw("rgba(0,0,0,0.25)"); ctx.restore(); } }),
+  /** The corner tag: a scoreboard — a black slab with the lettering in lit yellow. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.7;
+    ctx.font = `700 ${f}px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + f * 1.2, h = f * 1.6, top = y + (fs * 1.34 - h);
+    ctx.beginPath(); rounded(ctx, x, top, w, h, f * 0.25); ctx.fillStyle = css(PT.ink); ctx.fill();
+    ctx.fillStyle = ink || css(PT.yellow); spaced(ctx, str, x + f * 0.6, top + h * 0.5 + f * 0.36, 3);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The frame layer: the match's details in the top corner, and a key along the foot, as on a match-day poster. */
+  frame(ctx, env, p) {
+    const a = p.info;
+    if (a <= 0) return;
+    const { w } = env, P = env.o.profile, i = env.o.catIndex, total = P.categories.length, F = openField(env), col = ptLine();
+    ctx.save(); ctx.fillStyle = css(col, 0.9 * a); ctx.textBaseline = "alphabetic"; ctx.textAlign = "right";
+    ctx.font = `700 20px ${fonts.en}, ${fonts.cn}`; ctx.fillText(`MATCHDAY ${pad2(i + 1)}`, w - 72, 70);
+    ctx.font = `600 13px ${fonts.mono}, ${fonts.cn}`; ctx.fillText(`${(P.brand.name || "").toUpperCase()} · ${pad2(i + 1)}/${pad2(total)} · 90'`, w - 72, 92);
+    if (a > 0.4) {
+      ctx.globalAlpha = Math.min(1, (a - 0.4) * 3); ctx.textAlign = "left"; ctx.font = `600 12px ${fonts.mono}, ${fonts.cn}`; const y = F.y1 - 26;
+      ctx.fillRect(72, y - 18, 180, 1.5); ctx.fillText("KEY", 72, y - 24);
+      ctx.beginPath(); ctx.arc(78, y, 4, 0, TAU); ctx.fill(); ctx.fillText("PLAYERS", 90, y + 4);
+      ctx.fillRect(170, y - 1, 16, 2); ctx.fillText("PASS", 192, y + 4);
+    }
+    ctx.restore();
+  },
+  image(ctx, C, unit) { ctx.shadowColor = "rgba(0,0,0,0.3)"; ctx.shadowBlur = 12 * unit; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 6 * unit; },
+  post(ctx, w, h, C, p, unit = 1) { crumple(ctx, w, h, p.paper * 0.9); grain(ctx, p.grain * 0.7, unit, !dark); },
+  prompt: `Stickers for a retro football poster — bold, sporty and simple — that read at a glance:
+- one clear object per sticker (a ball, a boot, a whistle, a trophy, a goal, a scarf, a player in silhouette, a flag), graphic and a little stylised; no realism, no perspective, no fine detail;
+- flat colour only: the main colour with "white", "ink" (deep green-black) and "yellow" as partners;
+- the app adds a dark outline and a soft shadow: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Objects from football, built as simple models from a few boxes and cylinders — a goal, a trophy, a stand, a scoreboard, a corner flag; no realism, no fine detail.
+- the renderer paints faces in flat tones with a dark line: do NOT try to draw shading or outlines yourself;
+- "white" is white, "dark" deep green-black, and "main" the channel colour — use it for one to three parts.`,
+};
+
+// ====================================================================== dot matrix: pictures made of points of light
+// Everything made of dots of light on black, as an LED wall or a point cloud: the figure (or the photo)
+// read into a grid of dots sized by their brightness, a rolling surface of dots in depth, rainbow colour
+// breaking through at the lower edges, dots smeared sideways in motion, a red-and-cyan fringe, a glow,
+// columns of digits, scattered stars.
+const DM = { black: [4, 4, 6], white: [245, 245, 238] };
+/** A rainbow colour at hue `t` (0–1). */
+const rainbow = (t) => hueTurn([255, 30, 30], (((t % 1) + 1) % 1) * 360);
+/** The size of a grid cell, in units: the Dot spacing slider. */
+const dmCell = (p) => 9 + 22 * p.pitch;
+/**
+ * Draws one grid of dots: `level(i, j)` (0–1) sizes each cell's dot; its colour is `colour(i, j)` or
+ * white, with rainbow breaking in toward the bottom of the picture (Rainbow), and the dot smeared
+ * sideways (Smear). Batched by colour, so thousands of dots stay quick.
+ */
+function dotGrid(ctx, env, p, x0, y0, cols, rows, cell, level, colour) {
+  const { h } = env, rx = 1 + p.smear * 4, batch = new Map();
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const v = level(i, j);
+    if (v < 0.06) continue;
+    const x = x0 + (i + 0.5) * cell, y = y0 + (j + 0.5) * cell, r = cell * 0.36 * Math.sqrt(v);   // even at full, the dots stand apart
+    let c = colour ? colour(i, j) : DM.white;
+    const rb = p.rainbow > 0 ? clamp(p.rainbow * 1.8 - (1 - y / h) * 1.4 + (noise(i * 0.31 + j * 0.17) - 0.5) * 0.6) : 0;
+    if (rb > 0) c = mix(c, rainbow(x / env.w * 1.4 + noise(j * 0.11) * 0.5), rb);
+    const key = c.map((q) => Math.round(q / 24) * 24).join();
+    (batch.get(key) || batch.set(key, []).get(key)).push(x, y, r);
+  }
+  for (const [key, list] of batch) {
+    ctx.fillStyle = `rgb(${key})`; ctx.beginPath();
+    for (let q = 0; q < list.length; q += 3) { const [x, y, r] = [list[q], list[q + 1], list[q + 2]]; ctx.moveTo(x + r * rx, y); ctx.ellipse(x, y, r * rx, r, 0, 0, TAU); }
+    ctx.fill();
+  }
+}
+/** Red and cyan copies of the picture, a little apart, lightened in: the fringe of a misaligned screen. */
+function rgbFringe(ctx, d) {
+  if (d <= 0 || !canPaint(ctx)) return;
+  const src = snap(ctx, "fringe"), k = ctx.getTransform().a;
+  for (const [s, col] of [[-1, [255, 40, 60]], [1, [40, 220, 255]]]) {
+    const x = workLike(ctx, "fringe" + s); x.setTransform(1, 0, 0, 1, 0, 0); x.drawImage(src, 0, 0);
+    x.globalCompositeOperation = "multiply"; x.fillStyle = css(col); x.fillRect(0, 0, x.canvas.width, x.canvas.height);
+    inPixels(ctx, () => { ctx.globalCompositeOperation = "lighten"; ctx.drawImage(x.canvas, s * d * k, 0); });
+  }
+}
+const dots = {
+  id: "dots",
+  repaint: (c) => `the photograph rebuilt as a point cloud of light on black: the subject made of thousands of glowing white dots sized by brightness, streaks of rainbow colour and a little horizontal motion smear, deep black everywhere else, with ${c} as an accent; no text.`,
+  about: { zh: "点阵光影：一切都由黑底上的光点组成，像 LED 屏或三维点云——频道图形（有照片时是照片）被读成一格一格的光点，越亮的地方点越大；身后一片起伏的点阵曲面伸向远处，下沿透出彩虹色，光点可以横向拖成光痕，加上红青色彩错位、辉光、一列列数字和零星的星点。冷、未来感、带一点迷幻——适合科技、音乐、电子、夜景、AI 和数据类内容。", en: "Dot matrix: everything made of points of light on black, as an LED wall or a point cloud — the channel graphic (or the photo) read into a grid of dots, larger where it is brighter; a rolling surface of dots running into the distance behind, rainbow colour breaking through at the lower edges, dots smeared into streaks of motion, a red-and-cyan fringe, a glow, columns of digits and scattered stars. Cool, futuristic, a little psychedelic — for tech, music, electronic, night scenes, AI and data." },
+  name: { zh: "点阵光影", en: "Dot matrix" },
+  oneTheme: true,
+  seeded: true,
+  params: [
+    { key: "figure", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "点阵身影", en: "Figure in dots" } },
+    { key: "pitch", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "点距", en: "Dot spacing" } },
+    { key: "wave", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "点阵曲面", en: "Surface of dots" } },
+    { key: "rainbow", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "彩虹色散", en: "Rainbow" } },
+    { key: "smear", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "横向拖影", en: "Motion smear" } },
+    { key: "rgb", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "色彩错位", en: "Colour fringe" } },
+    { key: "glow", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "辉光", en: "Glow" } },
+    { key: "columns", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "数字列", en: "Columns of digits" } },
+    { key: "stars", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "星点", en: "Stars" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "颗粒", en: "Grain" } },
+    { key: "colour", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "保留照片色彩", en: "Photo's own colours" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
+  theme: (base) => ({ ...base, field: css(DM.black), text: css(DM.white), dim: css(DM.white, 0.55), titleFill: css(DM.white), titleInk: css(DM.black), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * Black; stars and columns of digits; the surface of dots; the figure (or the photo filling the canvas)
+   * read into a grid of dots; then the fringe and the glow over what is there. A print photo is only
+   * set on black.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, u = Math.min(w, h), F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, cell = dmCell(p);
+    if (env.photo) {
+      ctx.fillStyle = css(DM.black); ctx.fillRect(0, 0, w, h); env.drawPhoto();
+      if (!L.fill || !canPaint(ctx)) return true;
+      const cols = Math.ceil(w / cell), rows = Math.ceil(h / cell), px = sampled(ctx, 0, 0, cols, rows, cell, "dmPhoto");
+      ctx.fillStyle = css(DM.black); ctx.fillRect(0, 0, w, h);
+      dotGrid(ctx, env, p, 0, 0, cols, rows, cell, (i, j) => { const q = (j * cols + i) * 4; return ((px[q] * 54 + px[q + 1] * 183 + px[q + 2] * 19) >> 8) / 255; },
+        (i, j) => { const q = (j * cols + i) * 4, c = [px[q], px[q + 1], px[q + 2]], l = Math.max(...c) || 1; return mix(DM.white, c.map((v) => (v * 255) / l), p.colour); });
+    } else {
+      ctx.fillStyle = css(DM.black); ctx.fillRect(0, 0, w, h);
+      if (!L.grid) return true;
+      for (let k = 0, n = p.stars * 120; k < Math.ceil(n); k++) { ctx.fillStyle = css(DM.white, (0.3 + 0.7 * rand(k * 2.3 + 1300)) * clamp(n - k)); ctx.beginPath(); ctx.arc(rand(k * 3.1 + 1301) * w, rand(k * 4.7 + 1302) * h, 0.8 + rand(k * 5.9 + 1303) * 2, 0, TAU); ctx.fill(); }
+      if (p.columns > 0) {   // columns of digits running down, fading as they go
+        ctx.save(); ctx.font = `600 14px ${fonts.mono}`; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+        for (let k = 0, n = p.columns * 16; k < Math.ceil(n); k++) {
+          const x = F.x0 + fw * rand(k * 2.9 + 1310), y0 = F.y0 + fh * rand(k * 3.7 + 1311) * 0.5, len = 10 + Math.floor(rand(k * 4.3 + 1312) * 26);
+          for (let q = 0; q < len; q++) { ctx.fillStyle = css(DM.white, 0.75 * (1 - q / len) * clamp(n - k)); ctx.fillText(String(Math.floor(rand(k * 31 + q * 1.7) * 10)), x, y0 + q * 17); }
+        }
+        ctx.restore();
+      }
+      if (p.wave > 0) {   // a surface of dots rolling away into the distance, rows closer together toward the horizon
+        const top = F.y0 + fh * 0.42, rows = 30, ph = rand(1320) * TAU;
+        ctx.save(); ctx.globalAlpha = Math.min(1, p.wave * 2);
+        for (let j = 0; j < rows; j++) {
+          const t = j / (rows - 1), y = top + (F.y1 + fh * 0.15 - top) * t * t, step = cell * (0.5 + 1.5 * t), amp = fh * 0.14 * (0.25 + t) * p.wave, r = cell * 0.14 * (0.4 + t);
+          const n = Math.ceil(w / step) + 1;
+          for (let i = 0; i < n; i++) {
+            const x = i * step + ((j % 2) * step) / 2, yy = y - amp * (Math.sin((x / w) * 5 + ph + j * 0.35) * 0.6 + Math.sin((x / w) * 11 - j * 0.2) * 0.4);
+            const rb = p.rainbow > 0 ? clamp(p.rainbow * 1.6 - (1 - t) * 1.2) : 0, c = rb > 0 ? mix(DM.white, rainbow(x / w * 1.2 + t * 0.3), rb) : DM.white;
+            ctx.fillStyle = css(c, 0.5 + 0.5 * t); ctx.beginPath(); ctx.ellipse(x, yy, r * (1 + p.smear * 6), r, 0, 0, TAU); ctx.fill();
+          }
+        }
+        ctx.restore();
+      }
+      const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
+      if (S) {   // the figure, read into the grid
+        const size = fh * (0.5 + 0.55 * p.figure), cx = F.x0 + fw * 0.66, cy = F.y1 - size * 0.46, x0 = cx - size, y0 = cy - size * 0.6, cols = Math.ceil((size * 2) / cell), rows = Math.ceil((size * 1.25) / cell);
+        const cov = shapeCells(S, cx, cy, size, x0, y0, cols, rows, cell);
+        // lit from the upper left, and uneven, as a cloud of points is
+        dotGrid(ctx, env, p, x0, y0, cols, rows, cell, (i, j) => (cov[j * cols + i] / 255) * (0.35 + 0.45 * (1 - (i / cols + j / rows) / 2) + 0.3 * noise(i * 0.37 + j * 0.61 + 7)), (i, j) => mix(DM.white, C, 0.15 * noise(i * 0.7 + j * 1.3)));
+      }
+    }
+    rgbFringe(ctx, u * 0.008 * p.rgb);
+    if (p.glow > 0 && !fast && canPaint(ctx)) { const soft = softCopy(snap(ctx, "dmGlow"), 16, "dmSoft"), cv = ctx.canvas; inPixels(ctx, () => { ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.55 * p.glow; ctx.imageSmoothingEnabled = true; ctx.drawImage(soft, 0, 0, cv.width, cv.height); }); }
+    return true;
+  },
+  accent: { fill: () => css([12, 12, 16]), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "round"; ctx.strokeStyle = css(DM.white, 0.8); ctx.lineWidth = 4; ctx.setLineDash([0.1, 12]); run(0, 0); ctx.setLineDash([]); } },   // a row of dots along the edge
+  /** White capitals, a glow of the channel colour round them (the shadow slider); highlighted words in the channel colour. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, C = o.C || DM.white, hi = o.hi || C, glow = Math.min(2, o.shadowAmt);
+    if (glow > 0 && !fast) { ctx.save(); ctx.shadowColor = css(C, 0.6); ctx.shadowBlur = fs * 0.18 * glow; pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : o.fill || DM.white); ctx.fillText(a.t, x, 0); }); ctx.restore(); }
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : o.fill || DM.white); ctx.fillText(a.t, x, 0); });
+  },
+  // the small parts' ink turns white, as everything on black must; objects in greys and white
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates ? { fill: { ink: DM.white }, stroke: { ink: DM.white } } : { fill: { ink: [30, 30, 36], light: DM.white, mid: [150, 150, 156], dark: [40, 40, 48] }, stroke: { ink: DM.white, light: DM.white }, line: 0.5 }),
+  sticker: painters({ line: null, shadow(ctx, draw, fill) { ctx.save(); ctx.globalAlpha = 0.6; ctx.shadowColor = fill; ctx.shadowBlur = 18; draw(fill); ctx.restore(); } }),
+  /** The corner tag: monospaced capitals between brackets of dots. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.55;
+    ctx.font = `600 ${f}px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + f * 2, h = f * 1.9, top = y + (fs * 1.34 - h);
+    ctx.fillStyle = css(DM.white, 0.9);
+    for (let q = 0; q <= 4; q++) for (const sx of [x, x + w]) { ctx.beginPath(); ctx.arc(sx, top + (h * q) / 4, 2.2, 0, TAU); ctx.fill(); }
+    ctx.fillStyle = ink || css(C); spaced(ctx, str, x + f, top + h * 0.5 + f * 0.36, 3);
+    return { x: x - 6, y: top - 6, w: w + 12, h: h + 12 };
+  },
+  /** The frame layer: a line of small spaced capitals at the foot, as the prints carry. */
+  frame(ctx, env) {
+    const { w, h } = env, P = env.o.profile;
+    ctx.save(); ctx.fillStyle = css(DM.white, 0.55); ctx.font = `500 13px ${fonts.en}, ${fonts.cn}`; ctx.textBaseline = "alphabetic";
+    spacedCentre(ctx, `© ${(P.brand.name || "STUDIO").toUpperCase()}  ALL RIGHTS RESERVED`, w / 2, h - 30, 4); ctx.restore();
+  },
+  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.6, unit); },
+  prompt: `Glowing shapes for a dot-matrix poster of light on black — bold, simple and luminous — that read at a glance:
+- one clear silhouette per sticker (a figure, a hand, a star, a planet, a speaker, a cube, a wave), simple; no realism, no perspective, no detail;
+- flat colour only: "white" for the bright parts, the main colour for a glow, "ink" only for small dark gaps;
+- the app adds a soft glow round each shape: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Objects as a point cloud of light would show them: a few boxes and cylinders, clean and geometric — a speaker, a screen, a cube, a tower; no realism, no fine detail.
+- the renderer paints faces in greys and white: do NOT try to draw shading or outlines yourself;
+- "white" is white, "dark" near-black, and "main" a light grey.`,
+};
+
+// ====================================================================== neon: noir pop illustration in three neon tones
+// The neon pop portrait: everything reduced to a few flat tones mapped from dark to light onto a neon
+// palette (the channel colour, its hot complement, a deep night), black shadows, a rim of hot light
+// round the figure, a light behind it, a diagonal plane of colour, bars down the side, halftone in the
+// shadows, grain like a print.
+const NEON = { deep: [10, 8, 26], white: [255, 244, 250] };
+/** The palette from the channel colour, turned round the wheel by Hue shift: deep, low, mid (the channel's), hot (its complement), pale. */
+function neonSet(C) {
+  const mid = hueTurn(boost(C, 0.75), values.shift * 360), hot = boost(hueTurn(mid, 135), 0.8);
+  return { deep: NEON.deep, low: mix(NEON.deep, mid, 0.42), mid, hot, pale: mix(hot, NEON.white, 0.7) };
+}
+const neonStops = (N) => [[0, N.deep], [0.3, N.low], [0.56, N.mid], [0.8, N.hot], [1, N.pale]];
+const neonGround = (N) => (dark ? mix(N.deep, N.mid, 0.08) : N.hot);
+const neonText = (N) => (dark ? N.pale : [26, 22, 54]);   // on the hot ground a night tone just off the house ink, so the small parts' ink can be swapped on its own
+const neon = {
+  id: "neon",
+  repaint: (c) => `a neon noir pop illustration made from the photograph: the subject reduced to three or four flat tones — deep night shadows, ${c}, a hot complementary neon and a pale highlight — hard rim light, black shadows, halftone and print grain; still the same picture, no text.`,
+  about: { zh: "霓虹波普：霓虹色的黑色电影式插画——画面按明暗映射成几层平涂的霓虹色（深夜的暗部、频道色、它的互补热色、亮部），深黑阴影，人物（频道图形或照片）带一圈热色轮廓光，身后一团背光，一块斜切的色面，侧边的竖条，阴影里的网点和印刷颗粒；色相可以整体轮转。浓烈、复古未来、有态度——适合音乐、潮流、游戏、夜生活、悬疑和人物内容。可选暗夜底或热色底。", en: "Neon: the neon noir pop illustration — the picture mapped from dark to light onto a few flat neon tones (night-dark shadows, the channel colour, its hot complement, a pale highlight), black shadows, a rim of hot light round the figure (the channel graphic, or the photo), a light behind it, a diagonal plane of colour, bars down the side, halftone in the shadows and print grain; the whole palette can be turned round the colour wheel. Intense, retro-futurist, with attitude — for music, fashion, games, nightlife, mystery and portraits. A night-dark or a hot ground." },
+  name: { zh: "霓虹波普", en: "Neon pop" },
+  seeded: true,
+  params: [
+    { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "人物剪影", en: "Figure" } },
+    { key: "rim", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "轮廓光", en: "Rim light" } },
+    { key: "glow", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "背光", en: "Backlight" } },
+    { key: "split", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "斜切色面", en: "Diagonal plane" } },
+    { key: "bars", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "侧边竖条", en: "Side bars" } },
+    { key: "shift", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "色相轮转", en: "Hue shift" } },
+    { key: "halftone", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "阴影网点", en: "Halftone shadows" } },
+    { key: "bloom", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "辉光", en: "Bloom" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "印刷颗粒", en: "Print grain" } },
+    { key: "vignette", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "暗角", en: "Vignette" } },
+    { key: "map", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "照片霓虹化", en: "Photo in neon" } },
+    { key: "posterize", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "色阶硬度", en: "Hard tones" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.16, side: 0.28, strip: 0.1 }),
+  theme: (base, C) => { const N = neonSet(C); return { ...base, field: css(neonGround(N)), text: css(neonText(N)), dim: css(neonText(N), 0.6), titleFill: css(neonText(N)), titleInk: css(neonGround(N)), grid: () => "rgba(0,0,0,0)" }; },
+  /**
+   * The ground, the diagonal plane, the backlight, the bars, then the figure: a rim of hot light a little
+   * off it, and its body lit from that side down into the night. A photo is mapped onto the palette
+   * (Photo in neon), its tones as hard as Hard tones says; then the bloom and the halftone.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, N = neonSet(C), ground = neonGround(N), F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0;
+    const size = fh * (0.55 + 0.5 * p.figure), cx = F.x0 + fw * 0.64, cy = F.y1 - size * 0.46;
+    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    const after = () => {
+      if (p.bloom > 0 && !fast && canPaint(ctx)) { const soft = softCopy(snap(ctx, "neonGlow"), 18, "neonSoft"), cv = ctx.canvas; inPixels(ctx, () => { ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.7 * p.bloom; ctx.imageSmoothingEnabled = true; ctx.drawImage(soft, 0, 0, cv.width, cv.height); }); }
+      if (p.halftone > 0) dotScreen(ctx, w, h, N.deep, 8, 0.45 * p.halftone);
+    };
+    if (env.photo) {
+      env.drawPhoto();
+      mapTones(ctx, toneTable(neonStops(N), p.posterize), p.map);
+      if (L.fill) after();
+      return true;
+    }
+    if (!L.grid) return true;
+    if (p.split > 0) {   // a plane of the other tone, cut on a diagonal, sweeping in from the right
+      const x0 = F.x1 - fw * (0.15 + 0.6 * p.split);
+      ctx.fillStyle = css(dark ? mix(N.low, N.mid, 0.4) : mix(N.hot, N.mid, 0.55)); ctx.beginPath(); ctx.moveTo(x0 + fh * 0.35, F.y0 - 10); ctx.lineTo(w + 10, F.y0 - 10); ctx.lineTo(w + 10, F.y1 + 10); ctx.lineTo(x0 - fh * 0.2, F.y1 + 10); ctx.closePath(); ctx.fill();
+    }
+    if (p.glow > 0) { const g = ctx.createRadialGradient(cx, cy - size * 0.2, 0, cx, cy - size * 0.2, size * 0.9); g.addColorStop(0, css(dark ? N.hot : N.pale, 0.85 * p.glow)); g.addColorStop(1, css(dark ? N.hot : N.pale, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); }
+    for (let k = 0, n = p.bars * 6; k < Math.ceil(n); k++) { ctx.fillStyle = css(dark ? N.hot : N.deep, clamp(n - k)); ctx.fillRect(F.x0 + 20 + k * 34, F.y0 + fh * (0.1 + rand(k * 2.3 + 1400) * 0.2), 10 + (k % 3) * 8, fh); }
+    const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
+    if (S) {
+      if (p.rim > 0) { const d = size * 0.018 * (0.5 + p.rim); blurred(ctx, size * 0.04 * p.rim, css(N.hot, 0.9 * p.rim), () => placeShape(ctx, S, [0, 0, 0], cx + d, cy - d, size)); ctx.save(); ctx.globalAlpha = Math.min(1, p.rim * 2); placeShape(ctx, S, N.pale, cx + d, cy - d * 0.7, size); ctx.restore(); }
+      const x = workLike(ctx, "neon");
+      placeShape(x, S, [255, 255, 255], cx, cy, size);
+      x.globalCompositeOperation = "source-in";
+      const g = x.createLinearGradient(cx + size * 0.45, cy - size * 0.5, cx - size * 0.35, cy + size * 0.4);
+      g.addColorStop(0, css(N.mid)); g.addColorStop(0.42, css(N.low)); g.addColorStop(1, css(N.deep));
+      x.fillStyle = g; x.fillRect(0, 0, w, h);
+      layDown(ctx, x);
+    }
+    after();
+    return true;
+  },
+  accent: { fill: (C) => { const N = neonSet(C); return css(dark ? mix(N.deep, N.mid, 0.22) : N.deep); }, tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run, nx, ny, C) { ctx.lineCap = "butt"; ctx.strokeStyle = css(neonSet(C || NEON.white).hot); ctx.lineWidth = 4; run(0, 0); } },
+  /** Pale capitals glowing in the hot tone (the shadow slider), or on the hot ground night-dark ones; highlighted words in the hot tone, or a deep tone of the channel's. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, N = neonSet(o.C || NEON.white), hi = o.hi || (dark ? N.hot : mix(N.mid, N.deep, 0.45)), ink = o.fill || neonText(N), glow = Math.min(2, o.shadowAmt);   // on the hot ground, a deep tone of the channel's colour
+    if (glow > 0 && !fast) { ctx.save(); ctx.shadowColor = css(dark ? N.hot : N.deep, 0.9); ctx.shadowBlur = fs * 0.2 * glow; pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x, 0); }); ctx.restore(); }
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x, 0); });
+  },
+  // the small parts' ink (on the dark block) turns pale; objects go into the palette
+  wrap: (ctx, C, p, plates) => { const N = neonSet(C); return mapped(ctx, plates ? { fill: { ink: N.pale }, stroke: { ink: N.pale } } : { fill: { ink: N.deep, light: N.pale, mid: N.mid, dark: N.low, colour: () => N.hot }, stroke: { ink: N.deep, light: N.pale, colour: () => N.hot }, line: 0.6 }); },
+  sticker: painters({ line: NEON.deep, lineScale: 0.5, shadow(ctx, draw) { ctx.save(); ctx.translate(5, 7); draw(css(NEON.deep, 0.5)); ctx.restore(); } }),
+  /** The corner tag: a slab of the hot tone with deep lettering (reversed on the hot ground). */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const N = neonSet(C), slab = dark ? N.hot : N.deep, f = fs * 0.72;
+    ctx.font = `700 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + f * 1.2, h = f * 1.5, top = y + (fs * 1.34 - h);
+    ctx.fillStyle = css(slab); ctx.fillRect(x, top, w, h);
+    ctx.fillStyle = ink || css(dark ? N.deep : N.hot); spaced(ctx, str, x + f * 0.6, top + h * 0.5 + f * 0.36, 3);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  frame() {},
+  image(ctx, C, unit) { ctx.shadowColor = css(neonSet(C).hot, 0.6); ctx.shadowBlur = 24 * unit; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; },
+  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.8, unit); vignette(ctx, w, h, NEON.deep, 0.85 * p.vignette, 0.4); },
+  prompt: `Stickers for a neon noir pop illustration — bold, moody and graphic — that read at a glance:
+- one strong silhouette per sticker (a face in profile, sunglasses, a hand with a cigarette, a cat, a microphone, a skull, a rose), with hard light and black shadow shapes; no realism, no fine detail;
+- flat colour only: "ink" for deep shadow, the main colour for the mid tone, "white" for highlights, and one hot accent ("red" or "pink");
+- the app adds a dark outline and a soft offset shadow: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Objects as a neon noir illustration would show them: a few boxes and cylinders, sleek and dramatic — a jukebox, a neon sign, a phone booth, a speaker; no realism, no fine detail.
+- the renderer paints faces in a deep night tone, the channel colour and a hot neon: do NOT try to draw shading or outlines yourself;
+- "white" is the pale highlight, "dark" the night, and "main" the channel colour.`,
+};
+
+export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant, collage, yellow, pitch, dots, neon };
 export const LOOK_IDS = Object.keys(LOOKS);
 
 let current = cel, values = {};
@@ -3172,3 +4041,5 @@ export const lookValues = () => values;
 /** The context graphics and the small cover parts should draw on under the current look. */
 export const styled = (ctx, C, plates = false) => (current.wrap ? current.wrap(ctx, C, values, plates) : ctx);
 export { INK, css };
+/** Internals the tests reach for. */
+export const __test = { toneTable, hueTurn };
