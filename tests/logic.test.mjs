@@ -656,11 +656,12 @@ test("the first five looks have many settings now, and paint without a canvas", 
   setLook("cel");
 });
 
-test("a look's typed setting: the experimental type's giant letters, trimmed to three, the channel code when empty", () => {
-  assert.equal(lookParams("typo", { letters: "  Hello " }).letters, "Hel");
+test("a look's typed setting: the experimental type's giant letters, trimmed and cut to eight, the channel code when empty", () => {
+  assert.equal(lookParams("typo", { letters: "  Hello " }).letters, "Hello");
+  assert.equal(lookParams("typo", { letters: "TYPOGRAPHY" }).letters, "TYPOGRAP");
   assert.equal(lookParams("typo", { letters: 42 }).letters, "");
   assert.equal(lookParams("typo", {}).letters, "");
-  assert.equal(lookParams("typo", { letters: "排版设计" }).letters, "排版设");
+  assert.equal(lookParams("typo", { letters: "实验字体排版设计练习" }).letters, "实验字体排版设计");
 });
 
 test("the title's block can be measured before it is drawn, as drawTitle and drawTitleVertical will set it", async () => {

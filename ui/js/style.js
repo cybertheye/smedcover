@@ -2570,7 +2570,7 @@ const typo = {
     { key: "burst", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "放射细线", en: "Burst of lines" } },
     { key: "brush", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "干笔刷痕", en: "Dry brush" } },
     { key: "giant", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "巨型字母", en: "Giant letters" } },
-    { key: "letters", text: true, max: 3, def: "", name: { zh: "字母内容", en: "Their letters" }, placeholder: { zh: "留空：用频道代号", en: "Empty: the channel's code" } },
+    { key: "letters", text: true, max: 8, def: "", name: { zh: "字母内容", en: "Their letters" }, placeholder: { zh: "留空：用频道代号", en: "Empty: the channel's code" } },
     { key: "grid", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "细线网格", en: "Hairline grid" } },
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.15, name: { zh: "纸张颗粒", en: "Paper grain" } },
     { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白高反差", en: "Hard black and white" } },
@@ -2588,11 +2588,17 @@ const typo = {
       return true;
     }
     if (!L.grid) return true;
-    if (p.giant > 0) {   // the channel's code, a letter or three, huge, each cut along a slant and the halves pulled apart
-      const word = [...((p.letters || env.cat.code || env.cat.name || "A").toUpperCase())].filter((c) => c.trim()).slice(0, 3), fs = (F.y1 - F.y0) * (0.5 + 0.35 * p.giant);
-      ctx.save(); ctx.font = `400 ${fs}px ${fonts.serif}`; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(mix(ground, ink, 0.12 + 0.75 * p.giant));
+    if (p.giant > 0) {   // the letters typed in, or the channel's code: huge, each cut along a slant and the halves pulled apart
+      // up to three stand in two staggered rows, as they always did; a longer word runs in one line, stepping a
+      // little down, spread wider and set no larger than lets it fit, so it still reads left to right
+      const word = [...((p.letters || env.cat.code || env.cat.name || "A").toUpperCase())].filter((c) => c.trim()).slice(0, 8), n = word.length, line = n > 3, more = clamp((n - 3) / 5);
+      const fw = F.x1 - F.x0, fh = F.y1 - F.y0, span = 0.42 + 0.26 * more;
+      ctx.save(); ctx.font = `400 100px ${fonts.serif}`;
+      const wide = word.reduce((sum, ch) => sum + ctx.measureText(ch).width, 0) / 100;   // the word's width at size 1
+      const fs = Math.min(fh * (0.5 + 0.35 * p.giant), line ? (fw * span * 1.15) / Math.max(0.1, wide) : Infinity);
+      ctx.font = `400 ${fs}px ${fonts.serif}`; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(mix(ground, ink, 0.12 + 0.75 * p.giant));
       word.forEach((ch, i) => {
-        const cx = F.x0 + (F.x1 - F.x0) * (0.5 + 0.42 * ((i + 0.5) / word.length)) - (F.x1 - F.x0) * 0.2, cy = F.y0 + (F.y1 - F.y0) * (0.62 + (i % 2) * 0.26), a = 0.5 + rand(i + 360) * 0.6, gap = fs * 0.05 * p.giant;
+        const cx = F.x0 + fw * (0.3 - 0.06 * more + span * ((i + 0.5) / n)), cy = F.y0 + fh * (line ? 0.6 + (0.2 * i) / (n - 1) : 0.62 + (i % 2) * 0.26), a = 0.5 + rand(i + 360) * 0.6, gap = fs * 0.05 * p.giant;
         for (const side of [-1, 1]) {   // the halves either side of the cut, moved apart along it
           ctx.save(); ctx.beginPath(); const nx = Math.cos(a), ny = Math.sin(a), R = fs * 2;
           ctx.moveTo(cx - nx * R, cy - ny * R); ctx.lineTo(cx + nx * R, cy + ny * R); ctx.lineTo(cx + nx * R - side * ny * R, cy + ny * R + side * nx * R); ctx.lineTo(cx - nx * R - side * ny * R, cy - ny * R + side * nx * R); ctx.closePath(); ctx.clip();
