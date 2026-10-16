@@ -476,7 +476,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "gilded", "verse", "glass", "jelly", "skies", "spectrum"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
@@ -616,7 +616,7 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
 
 test("the poster looks: many settings each, their own grounds, flat layouts (all but the collage, on the slanted ones), and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
-  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart"]) {
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "gilded", "verse", "glass", "jelly", "skies", "spectrum"]) {
     const L = LOOKS[id];
     assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
     assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
@@ -704,6 +704,28 @@ test("the court, velvet, rave, chrome and net-art looks: their grounds, the team
   }
   setLook("netart", null, 3, false);
   assert.equal(LOOKS.netart.accent.fill([40, 120, 220]), "rgba(192,192,192,1)");   // a silver system panel
+  setLook("cel");
+});
+
+test("the gilded, comic-verse, glass, jelly, anime-sky and spectral looks: many layers each, their grounds and colours", () => {
+  for (const id of ["gilded", "verse", "glass", "jelly", "skies", "spectrum"]) {
+    const L = LOOKS[id];
+    assert.ok(L.params.length >= 11, `${id}: ${L.params.length} settings`);
+    assert.ok(L.seeded && typeof L.layout === "function", `${id}: seeded, with flat layouts of its own`);
+  }
+  setLook("gilded", null, 3, false);
+  assert.equal(LOOKS.gilded.theme({}, [40, 120, 220], lookValues()).field, "rgba(184,204,202,1)");   // a grey-teal room
+  assert.equal(LOOKS.gilded.accent.fill([40, 120, 220]), "rgba(214,166,70,1)");                     // a plate of gold
+  setLook("verse", null, 3, false);
+  assert.equal(LOOKS.verse.accent.fill([248, 244, 246]), "rgba(255,40,150,1)", "a channel colour lost on the paper gives way to magenta");
+  assert.notEqual(LOOKS.verse.accent.fill([40, 120, 220]), "rgba(255,40,150,1)", "any other is kept, made vivid");
+  for (const onDark of [true, false]) {   // the anime sky's lettering is white by day and at dusk
+    setLook("skies", null, 3, onDark);
+    assert.equal(LOOKS.skies.theme({}, [40, 120, 220], lookValues()).titleFill, "rgba(255,255,255,1)");
+  }
+  setLook("spectrum", null, 3, true);
+  assert.equal(LOOKS.spectrum.theme({}, [40, 120, 220], lookValues()).field, "rgba(14,14,14,1)");   // black paper
+  assert.ok(LOOKS.glass.params.every((d) => !d.needsPhoto), "the glass bends a photo with the same sliders");
   setLook("cel");
 });
 
