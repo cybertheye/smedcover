@@ -2021,9 +2021,9 @@ function photoControls(L, set) {
       check("props.treat", L.treat, (v) => set("treat", v))], t("props.treatTip")),
     psec("props.sec.lines", [
       slider("props.outline", 0, 40, 1, L.outline, px, (v) => { holdLive(L.id); set("outline", v); }),
-      check("props.torn", L.torn, (v) => { L.torn = v; if (v && !(L.outline > 0)) L.outline = 16; touch({ cover: true, side: true }); }),   // with no outline yet, one to see the tear on
       slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => { holdLive(L.id); set("shadow", v); }),
-      swatch(L, "ink", "props.sw.outline", "#ffffff")], t("props.photoLinesTip")),
+      swatch(L, "ink", "props.sw.outline", "#ffffff"),
+      check("props.torn", L.torn, (v) => { L.torn = v; if (v && !(L.outline > 0)) L.outline = 16; touch({ cover: true, side: true }); })], t("props.photoLinesTip")),   // with no outline yet, one to see the tear on
   ];
 }
 /**
