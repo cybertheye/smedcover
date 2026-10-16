@@ -476,7 +476,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
@@ -614,9 +614,9 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
   setLook("cel");
 });
 
-test("the five poster looks: many settings each, their own grounds, flat layouts, and painting without a canvas does no harm", () => {
+test("the poster looks: many settings each, their own grounds, flat layouts, and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
-  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo"]) {
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant"]) {
     const L = LOOKS[id];
     assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
     assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
@@ -631,6 +631,12 @@ test("the five poster looks: many settings each, their own grounds, flat layouts
   }
   setLook("negative", { chan: 1 }, 7, false);   // the light ground is the red one
   assert.equal(LOOKS.negative.theme({}, [40, 120, 220], lookValues()).field, "rgba(40,120,220,1)");   // the channel colour in place of the red
+  setLook("toon", null, 3, true);
+  const night = parseColour(LOOKS.toon.theme({}, [252, 238, 10], lookValues()).field);
+  assert.ok(night[2] > night[0] && (0.2126 * night[0] + 0.7152 * night[1] + 0.0722 * night[2]) / 255 < 0.15, "the animated poster's deep ground: a night blue, whatever the channel colour");
+  setLook("toon", null, 3, false);
+  const day = parseColour(LOOKS.toon.theme({}, [40, 120, 220], lookValues()).field);
+  assert.ok(day[2] > day[0] + 80, "its bright ground: the channel colour, made more vivid");
   setLook("cinema", null, 3, true);
   const dusk = parseColour(LOOKS.cinema.theme({}, [230, 140, 40], lookValues()).field);
   assert.ok(dusk[0] > dusk[2] && (0.2126 * dusk[0] + 0.7152 * dusk[1] + 0.0722 * dusk[2]) / 255 < 0.3, "the cinema ground: a dark, muted version of the channel colour");

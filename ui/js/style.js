@@ -2719,7 +2719,433 @@ const typo = {
 - "white" is the paper, "dark" is black, and "main" is the channel colour — one part only.`,
 };
 
-export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo };
+// ====================================================================== animated film poster: the fan-made alternative poster
+// The posters people draw for the animated films they love: one strong flat colour; the hero's
+// silhouette made huge and filled with a sunset, a sun disc in it with a small figure standing there
+// (a silhouette inside the silhouette); a sunburst behind; a beam from a lamp; a procession of the
+// same figure, smaller and smaller; a winding road with a tiny traveller; stars; the speckle of a
+// screen print and a white printer's margin. Warm, playful, a whole story in one picture.
+const TOON = { ink: [24, 20, 44], night: [12, 12, 30], cream: [252, 243, 224], sun: [255, 214, 92], amber: [250, 146, 56], coral: [228, 68, 62] };
+const toonGround = (C) => (dark ? mix([14, 20, 56], boost(C, 0.5), 0.07) : boost(C, 0.55));   // deep: a night sky with a touch of the channel's hue
+/** Lettering on the ground: ink on a light ground, cream on a deep one. */
+const toonText = (C) => (lum(toonGround(C)) > 0.55 ? TOON.ink : TOON.cream);
+/** The floor the figure stands on (the colour block): the ground, deeper. */
+const toonFloor = (C) => mix(toonGround(C), dark ? [0, 0, 0] : TOON.ink, dark ? 0.45 : 0.32);
+/** A silhouette's flat colour: a deep tone of the ground, so it reads dark against the sun. */
+const toonFigure = (C) => mix(toonGround(C), dark ? [2, 2, 8] : TOON.ink, dark ? 0.6 : 0.72);
+/** Small light things on the ground (stars, the road): cream, or on a pale ground a deep tone that shows. */
+const toonLight = (C) => (lum(toonGround(C)) > 0.62 ? mix(toonGround(C), TOON.ink, 0.55) : TOON.cream);
+/**
+ * The picture's centre: a big sun hanging in the open sky at the field's far side, above where the
+ * channel graphic stands (and the title's end), so both read; the giant silhouette stands on the floor
+ * in front of its lower half.
+ */
+function toonPlace(env, p) {
+  const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, R = Math.min(fh * (0.16 + 0.26 * p.sun), fw * 0.22), size = fh * (0.4 + 0.55 * p.giant);
+  const cx = F.x1 - Math.max(R * 1.15, fw * 0.17), cy = F.y0 + fh * 0.42;
+  return { F, cx, cy, R, gx: cx - R * 0.15, gy: F.y1 - size * 0.48, size };
+}
+/** The sun: a disc rising from the floor, a halo round it, cream going to amber and coral down it (Sunset), cut by bands of the ground in its lower half (Stripes). */
+function toonSun(ctx, env, at, p) {
+  if (p.sun <= 0) return;
+  const { C } = env, { cx, cy, R } = at, ground = toonGround(C), a = Math.min(1, p.sun * 4);
+  const halo = ctx.createRadialGradient(cx, cy, R * 0.9, cx, cy, R * 1.9);
+  halo.addColorStop(0, css(TOON.sun, (dark ? 0.45 : 0.3) * a)); halo.addColorStop(1, css(TOON.sun, 0));
+  ctx.fillStyle = halo; ctx.fillRect(cx - R * 2, cy - R * 2, R * 4, R * 4);
+  const g = ctx.createLinearGradient(0, cy - R, 0, cy + R);
+  g.addColorStop(0, css(mix(TOON.cream, TOON.sun, 0.4 * p.sunset), a)); g.addColorStop(0.45, css(mix(TOON.cream, TOON.amber, p.sunset), a)); g.addColorStop(0.85, css(mix(TOON.cream, TOON.coral, p.sunset), a));
+  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.fillStyle = g; ctx.fill(); ctx.clip();
+  if (p.stripes > 0) { ctx.fillStyle = css(ground); for (let i = 0; i < 6; i++) { const t = (i + 1) / 6, y = cy - R * 0.05 + R * 0.85 * t, th = R * 0.075 * t * p.stripes * 1.6; ctx.fillRect(cx - R, y - th / 2, R * 2, th); } }
+  ctx.restore();
+}
+/** A sunburst behind the figure: wedges of a lighter tone fanning out from it, fading with distance. */
+function toonBurst(ctx, env, at, amt) {
+  if (amt <= 0) return;
+  const { w, h, C } = env, ox = at.cx, oy = at.cy, R = Math.hypot(w, h), n = 28, turn = rand(802) * TAU;
+  const lit = mix(toonGround(C), dark ? TOON.cream : [255, 255, 255], 0.55), g = ctx.createRadialGradient(ox, oy, 0, ox, oy, R * 0.7);
+  g.addColorStop(0, css(lit, 0.42 * amt)); g.addColorStop(0.5, css(lit, 0.2 * amt)); g.addColorStop(1, css(lit, 0.05 * amt));
+  ctx.fillStyle = g; ctx.beginPath();
+  for (let i = 0; i < n; i += 2) { const a0 = turn + (i / n) * TAU, a1 = turn + ((i + 1) / n) * TAU; ctx.moveTo(ox, oy); ctx.lineTo(ox + Math.cos(a0) * R, oy + Math.sin(a0) * R); ctx.lineTo(ox + Math.cos(a1) * R, oy + Math.sin(a1) * R); ctx.closePath(); }
+  ctx.fill();
+}
+/** Stars over the upper field, more and more of them, one by one: dots of different sizes and a few four-pointed sparkles. */
+function toonStars(ctx, env, amt) {
+  if (amt <= 0) return;
+  const F = openField(env), n = amt * 48, col = toonLight(env.C);
+  for (let k = 0; k < Math.ceil(n); k++) {
+    const a = clamp(n - k), x = F.x0 + rand(k * 2.7 + 810) * (F.x1 - F.x0), y = F.y0 + rand(k * 3.1 + 811) ** 1.5 * (F.y1 - F.y0) * 0.78, big = rand(k * 4.3 + 812);
+    if (big > 0.86) { ctx.save(); ctx.globalAlpha = a; starMark(ctx, x, y, 7 + (big - 0.86) * 90, 4, col); ctx.restore(); }
+    else { ctx.fillStyle = css(col, (0.4 + 0.55 * big) * a); ctx.beginPath(); ctx.arc(x, y, 1.1 + big * 2.4, 0, TAU); ctx.fill(); }
+  }
+}
+/** A street lamp hanging in from above, its beam falling on the figure: a long wedge of light, brighter near the lamp. */
+function toonBeam(ctx, env, at, amt) {
+  if (amt <= 0) return;
+  const { C } = env, F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0, side = rand(820) > 0.5 ? -1 : 1;
+  const lx = at.cx + side * Math.min(fw * 0.26, at.R * 1.4), ly = F.y0 + fh * 0.1, spread = fh * (0.16 + 0.12 * amt);
+  const lit = dark ? TOON.cream : mix(toonGround(C), [255, 255, 255], 0.7), g = ctx.createLinearGradient(lx, ly, at.cx, F.y1);
+  g.addColorStop(0, css(lit, 0.85 * amt)); g.addColorStop(1, css(lit, 0.32 * amt));
+  ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(lx - 9, ly + 6); ctx.lineTo(lx + 9, ly + 6); ctx.lineTo(at.cx + spread, F.y1); ctx.lineTo(at.cx - spread, F.y1); ctx.closePath(); ctx.fill();
+  const iron = css(dark ? [34, 32, 56] : mix(toonGround(C), TOON.ink, 0.9), Math.min(1, amt * 3));   // the lamp: an arm from above, a shade, the bulb
+  ctx.strokeStyle = iron; ctx.lineWidth = 6; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(lx - side * 70, F.y0 - 20); ctx.quadraticCurveTo(lx - side * 70, ly - 30, lx, ly - 22); ctx.stroke();
+  ctx.fillStyle = iron; ctx.beginPath(); ctx.moveTo(lx - 22, ly + 4); ctx.lineTo(lx - 10, ly - 22); ctx.lineTo(lx + 10, ly - 22); ctx.lineTo(lx + 22, ly + 4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = css(TOON.cream, Math.min(1, amt * 3)); ctx.beginPath(); ctx.arc(lx, ly + 5, 7, 0, TAU); ctx.fill();
+}
+/** A road winding down the field, drawn further the higher `amt` goes, a tiny traveller (the graphic) at its end. */
+function toonRoad(ctx, env, at, amt, S) {
+  if (amt <= 0) return;
+  const F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0, x0 = F.x0 + fw * 0.47, ph = rand(830) * TAU, col = toonLight(env.C), u = Math.min(env.w, env.h);
+  const at_ = (t) => [x0 + Math.sin(t * 19 + ph) * fw * (0.012 + 0.075 * t), F.y0 + fh * (0.06 + 0.94 * t)];
+  ctx.strokeStyle = css(col); ctx.lineWidth = 7; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.beginPath();
+  let end = at_(0);
+  for (let t = 0; t <= amt + 1e-9; t += 0.004) { end = at_(Math.min(t, amt)); t ? ctx.lineTo(...end) : ctx.moveTo(...end); }
+  ctx.stroke();
+  if (S) placeShape(ctx, S, col, end[0], end[1] - u * 0.026, u * 0.05);
+}
+/** The figure again, standing on the floor in a procession toward the giant one, each further one smaller; they come in one by one. */
+function toonParade(ctx, env, at, amt, S) {
+  if (amt <= 0 || !S) return;
+  const n = amt * 7, col = dark ? mix(toonGround(env.C), TOON.cream, 0.4) : toonFigure(env.C);   // on the night ground a lit tone, or they would vanish
+  let x = at.cx - at.R * 0.9, s = (at.F.y1 - at.F.y0) * 0.24;
+  for (let k = 0; k < Math.ceil(n); k++) {
+    const a = clamp(n - k);
+    x -= s * 0.62; if (x < at.F.x0 + s * 0.3) break;
+    ctx.save(); ctx.globalAlpha = a; placeShape(ctx, S, col, x, at.F.y1 - s * 0.5, s); ctx.restore();
+    x -= s * 0.32; s *= 0.8;
+  }
+}
+const toon = {
+  id: "toon",
+  repaint: (c) => `a fan-made alternative poster for an animated film, made from the photograph: one strong flat colour (${c}), the subject reduced to bold flat shapes and a clean silhouette, a warm sunset glow, simple graphic light, a little screen-print speckle; playful and warm; still the same picture, no text.`,
+  about: { zh: "动画电影的另类海报：一整块浓烈的颜色（从频道色来），天边一轮带复古条纹的大夕阳，频道图形站在它下方，还可以在太阳前立起一个巨大的同形剪影；放射光芒、路灯投下的光柱、一列越来越小的同一个身影、一条蜿蜒的小路和路上的小旅人、星空；丝网印刷的斑驳和海报的白边。温暖、童趣、一张图讲一个故事——适合动画、亲子、旅行、成长、治愈和节日内容。可选亮色底或深色底；自带平直的版式。", en: "The alternative poster for an animated film: one strong colour (from the channel's), a big striped setting sun hanging over where the channel graphic stands, and if you like its huge silhouette in front of the sun; a sunburst, a lamp's beam, a procession of the same figure growing smaller, a winding road with a tiny traveller, stars; the speckle of a screen print and a white margin. Warm, playful, a story in one picture — for animation, family, travel, growing up, feel-good and festive content. A bright or a deep ground; flat layouts of its own." },
+  name: { zh: "动画海报", en: "Animated film poster" },
+  seeded: true,
+  params: [
+    { key: "sun", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "夕阳", en: "Setting sun" } },
+    { key: "sunset", min: 0, max: 1, step: 0.05, def: 0.8, name: { zh: "夕阳渐变", en: "Sunset colours" } },
+    { key: "stripes", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "日落条纹", en: "Sun stripes" } },
+    { key: "burst", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "放射光芒", en: "Sunburst" } },
+    { key: "giant", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "巨型剪影", en: "Giant silhouette" } },
+    { key: "beam", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "路灯光柱", en: "Lamp beam" } },
+    { key: "parade", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "列队身影", en: "Procession" } },
+    { key: "road", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "蜿蜒小路", en: "Winding road" } },
+    { key: "stars", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "星星", en: "Stars" } },
+    { key: "distress", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "丝网斑驳", en: "Screen-print wear" } },
+    { key: "border", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "海报白边", en: "White margin" } },
+    { key: "credits", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "演职员小字", en: "Credits" } },
+    { key: "duo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.8, name: { zh: "照片单色", en: "Photo in one colour" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.2, side: 0.3, strip: 0.11 }),
+  theme: (base, C) => ({ ...base, field: css(toonGround(C)), text: css(toonText(C)), dim: css(toonText(C), 0.6), titleFill: css(toonText(C)), titleInk: css(toonGround(C)), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The ground; a sunburst and stars; the setting sun behind where the channel graphic stands; the
+   * giant silhouette against it; a lamp's beam, a winding road, a procession. A photo goes into the
+   * ground's colour; one filling the canvas still gets the stars, the sun and the beam.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, ground = toonGround(C), at = toonPlace(env, p);
+    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (env.photo) {
+      env.drawPhoto(p.duo);
+      wash(ctx, w, h, "multiply", mix([255, 255, 255], ground, 0.9), p.duo);
+      wash(ctx, w, h, "screen", mix([0, 0, 0], ground, 0.3), p.duo);
+      if (L.fill) { toonStars(ctx, env, p.stars); toonSun(ctx, env, at, p); toonBeam(ctx, env, at, p.beam); }
+      return true;
+    }
+    if (!L.grid) return true;
+    const S = canPaint(ctx) && graphicShape(env);
+    toonBurst(ctx, env, at, p.burst);
+    toonStars(ctx, env, p.stars);
+    toonSun(ctx, env, at, p);
+    if (S && p.giant > 0) placeShape(ctx, S, toonFigure(C), at.gx, at.gy, at.size);   // the hero, huge and dark against the sun
+    toonBeam(ctx, env, at, p.beam);
+    toonRoad(ctx, env, at, p.road, S);
+    toonParade(ctx, env, at, p.parade, S);
+    return true;
+  },
+  accent: { fill: (C) => css(toonFloor(C)), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },
+  /** Bold condensed capitals, flat, with a shadow a little off in a deeper tone of the ground, as a print's second colour; highlighted words in sun yellow or coral. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, C = o.C || TOON.coral, ground = toonGround(C), hi = o.hi || (lum(ground) > 0.55 ? TOON.coral : TOON.sun), d = fs * 0.045 * Math.min(2, o.shadowAmt);
+    if (d > 0) pass((a, x) => { ctx.fillStyle = css(mix(ground, TOON.ink, 0.55)); ctx.fillText(a.t, x + d, d); });
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : o.fill || toonText(C)); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates
+    ? { fill: { ink: toonText(C) }, stroke: { ink: toonText(C) } }
+    : { fill: { ink: TOON.ink, light: TOON.cream, mid: mix(toonGround(C), TOON.cream, 0.5), dark: mix(toonGround(C), TOON.ink, 0.7), colour: (c) => boost(c, 0.4) }, stroke: { ink: TOON.ink, light: TOON.cream }, line: 0.6 }),
+  sticker: painters({ line: null, tone: inkAs(TOON.ink, (c) => boost(c, 0.4)), shadow(ctx, draw) { ctx.save(); ctx.translate(6, 8); draw(css(TOON.ink, 0.35)); ctx.restore(); } }),
+  /** The corner tag: a rounded ticket — ink with cream letters on a pale ground, sun yellow with ink letters on a deep one. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.66, pale = lum(toonGround(C)) > 0.55;
+    ctx.font = `700 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + f * 1.3, h = f * 1.5, top = y + (fs * 1.34 - h);
+    ctx.beginPath(); rounded(ctx, x, top, w, h, h / 2); ctx.fillStyle = css(pale ? TOON.ink : TOON.sun); ctx.fill();
+    ctx.fillStyle = ink || css(pale ? TOON.cream : TOON.ink); spaced(ctx, str, x + f * 0.65, top + h * 0.5 + f * 0.36, 3);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The frame layer: "presents" over the top in small capitals, and the billing block at the foot. */
+  frame(ctx, env, p) {
+    const a = p.credits;
+    if (a <= 0) return;
+    const { w, h, C } = env, P = env.o.profile, col = css(toonText(C), 0.85 * a);
+    ctx.save(); ctx.fillStyle = col; ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+    ctx.font = `700 16px ${fonts.en}, ${fonts.cn}`;
+    if (P.brand.name) spacedCentre(ctx, `${P.brand.name.toUpperCase()} PRESENTS`, w / 2, 44, 4);
+    const bw = Math.min(w * 0.42, 700);
+    greeked(ctx, (w - bw) / 2, h - 70, bw, 3, 8, css(toonText(C), 0.55 * a), 840 + env.o.catIndex, "center");
+    ctx.restore();
+  },
+  image(ctx, C, unit) { ctx.shadowColor = css(TOON.ink, 0.4); ctx.shadowBlur = 0; ctx.shadowOffsetX = 7 * unit; ctx.shadowOffsetY = 9 * unit; },
+  /** The speckle and blotches of a screen print, paper grain, and the white margin the printer leaves. */
+  post(ctx, w, h, C, p, unit = 1) {
+    wear(ctx, w, h, mix(toonGround(C), TOON.cream, 0.55), p.distress * 0.85);
+    grain(ctx, 0.25 + p.distress * 0.35, unit, !dark && lum(toonGround(C)) > 0.5);
+    const b = 54 * p.border;
+    if (b >= 1) { ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.rect(b, b, w - 2 * b, h - 2 * b); ctx.fillStyle = css([250, 247, 240]); ctx.fill("evenodd"); }
+  },
+  prompt: `Stickers for a fan-made poster of an animated film — bold, warm and playful — that read at a glance:
+- one clear, characterful silhouette per sticker (a hero, an animal, a lamp, a balloon, a house, a little vehicle), simple and charming; no realism, no perspective, no fine detail;
+- flat colour only: the main colour, "ink" for silhouettes and dark parts, "white" for a light; at most one small warm accent ("yellow" or "red");
+- the app adds a soft offset shadow and no outline: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Props from an animated film, built as simple models from a few boxes and cylinders with friendly, slightly exaggerated proportions — a lamp post, a little house, a toy car, a suitcase; no realism, no fine detail.
+- the renderer paints faces in flat tones with a dark line: do NOT try to draw shading or outlines yourself;
+- "white" is cream, "dark" a deep ink, and "main" the channel colour made more vivid — use it for one to three parts.`,
+};
+
+// ====================================================================== avant-garde image: today's design-studio poster
+// The posters design studios and fashion labels post today: a black-and-white photograph (or the
+// channel graphic as a figure) worked on as a designer works on it in the computer — a smear of motion,
+// a glow, the picture out of focus with one sharp frame of focus, a patch gone to pixels, a panel of
+// fluted glass, a band where colour comes through; hairline grid lines with small markers and
+// interface labels; a big tight grotesque; the channel colour as the only accent.
+const AV = { paper: [226, 226, 223], night: [11, 11, 13], ink: [14, 14, 16], white: [238, 238, 234] };
+const avGround = () => (dark ? AV.night : AV.paper), avInk = () => (dark ? AV.white : AV.ink);
+/** A copy of what ctx's canvas holds now (a work canvas per slot). */
+function snap(ctx, slot) { const x = workLike(ctx, slot); x.setTransform(1, 0, 0, 1, 0, 0); x.drawImage(ctx.canvas, 0, 0); return x.canvas; }
+/** Runs draw() with ctx in canvas pixels (the clip, if any, stays). */
+function inPixels(ctx, draw) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); draw(); ctx.restore(); }
+/** A soft copy of `src`: drawn down small in two steps (so it does not shimmer) and kept; `f` how many times smaller. */
+function softCopy(src, f, slot) {
+  const mid = WORK[slot + "m"] || (WORK[slot + "m"] = document.createElement("canvas")), small = WORK[slot] || (WORK[slot] = document.createElement("canvas"));
+  const mw = Math.max(4, Math.round(src.width / 3)), mh = Math.max(4, Math.round(src.height / 3)), sw = Math.max(2, Math.round(src.width / f)), sh = Math.max(2, Math.round(src.height / f));
+  if (mid.width !== mw || mid.height !== mh) { mid.width = mw; mid.height = mh; }
+  if (small.width !== sw || small.height !== sh) { small.width = sw; small.height = sh; }
+  const m = mid.getContext("2d"), s = small.getContext("2d");
+  m.imageSmoothingEnabled = s.imageSmoothingEnabled = true; m.imageSmoothingQuality = s.imageSmoothingQuality = "high";
+  m.globalCompositeOperation = s.globalCompositeOperation = "copy"; m.drawImage(src, 0, 0, mw, mh); s.drawImage(mid, 0, 0, sw, sh);
+  return small;
+}
+/** The figure without a photo: the channel graphic, large, standing in the open field, soft at its edge; a mid grey on either ground, so the lettering over it still reads. */
+function avFigure(ctx, env, p) {
+  const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, size = fh * (0.55 + 0.5 * p.figure), box = { cx: F.x0 + fw * 0.62, cy: F.y1 - size * 0.46, size };
+  const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
+  if (S) {
+    const col = dark ? [128, 128, 126] : [112, 112, 114];
+    blurred(ctx, size * 0.035, css(col, 0.55), () => placeShape(ctx, S, [0, 0, 0], box.cx, box.cy, size * 1.02));
+    ctx.save(); ctx.globalAlpha = 0.92; placeShape(ctx, S, col, box.cx, box.cy, size); ctx.restore();
+  }
+  return box;
+}
+/** Motion: the picture smeared sideways, a few fainter and fainter copies trailing to one side. */
+function avSmear(ctx, u, amt) {
+  if (amt <= 0 || !canPaint(ctx)) return;
+  const src = snap(ctx, "avSnap"), k = ctx.getTransform().a, n = fast ? 3 : 7;
+  inPixels(ctx, () => { for (let i = n; i >= 1; i--) { ctx.globalAlpha = 0.26 * amt * (1 - i / (n + 1)); ctx.drawImage(src, -i * u * 0.022 * amt * k, 0); } });
+}
+/** A glow: a soft copy of the picture screened over it on the dark ground (light spills from the bright figure), lightened in on the light one (a haze). */
+function avGlow(ctx, amt) {
+  if (amt <= 0 || !canPaint(ctx) || fast) return;
+  const soft = softCopy(snap(ctx, "avSnap"), 24, "avGlow"), cv = ctx.canvas;
+  inPixels(ctx, () => { ctx.globalCompositeOperation = dark ? "screen" : "lighten"; ctx.globalAlpha = (dark ? 0.85 : 0.6) * amt; ctx.imageSmoothingEnabled = true; ctx.drawImage(soft, 0, 0, cv.width, cv.height); });
+}
+/**
+ * Out of focus, with a frame of focus: the picture drawn soft over itself, then a rectangle round the
+ * figure's head drawn sharp again, with a hairline round it and ticks at its corners. The frame grows
+ * with its slider; without blur there is nothing for it to show, so it waits for blur.
+ */
+function avFocus(ctx, env, box, blur, focus, sharp) {
+  if (blur <= 0 || !sharp) return;
+  const cv = ctx.canvas, soft = softCopy(sharp, 10 + 26 * blur, "avBlur"), m = ctx.getTransform(), k = m.a, u = Math.min(env.w, env.h);
+  inPixels(ctx, () => { ctx.globalAlpha = Math.min(1, blur * 1.6); ctx.imageSmoothingEnabled = true; ctx.drawImage(soft, 0, 0, cv.width, cv.height); });
+  if (focus <= 0) return;
+  const fw = u * (0.16 + 0.26 * focus), fh = fw * 0.66, x = clamp(box.cx - fw * 0.55, 0, env.w - fw), y = clamp(box.cy - box.size * 0.3 - fh / 2, 0, env.h - fh), a = Math.min(1, focus * 3);
+  inPixels(ctx, () => { ctx.globalAlpha = a; ctx.drawImage(sharp, m.e + x * k, m.f + y * k, fw * k, fh * k, m.e + x * k, m.f + y * k, fw * k, fh * k); });
+  ctx.save(); ctx.strokeStyle = css(avInk(), 0.75 * a); ctx.lineWidth = 1.2; ctx.strokeRect(x, y, fw, fh);
+  ctx.lineWidth = 2.4; const t = 16;
+  for (const [cx, cy, sx, sy] of [[x, y, 1, 1], [x + fw, y, -1, 1], [x, y + fh, 1, -1], [x + fw, y + fh, -1, -1]]) { ctx.beginPath(); ctx.moveTo(cx - sx * 6, cy + sy * t); ctx.lineTo(cx - sx * 6, cy - sy * 6); ctx.lineTo(cx + sx * t, cy - sy * 6); ctx.stroke(); }
+  ctx.restore();
+}
+/**
+ * A patch of the picture gone to large pixels — taken from `src`, the picture before the blur, so the
+ * cells keep its contrast, each a step lighter or darker — its edge stepped, a few cells knocked out
+ * of place, set where the title leaves room; it grows with `amt`.
+ */
+function avMosaic(ctx, env, box, u, amt, src) {
+  if (amt <= 0 || !src) return;
+  const m = ctx.getTransform(), k = m.a, cell = u * 0.034, F = openField(env), T = titleArea(ctx, env);
+  const W = ctx.canvas.width / k, H = ctx.canvas.height / k, fw = F.x1 - F.x0;
+  let rw = u * (0.08 + 0.34 * amt), rh = rw * 0.8, cx = box.cx + box.size * 0.05, cy = box.cy - box.size * 0.15;
+  // where it shows: beside the title if there is room, else under it (as large as the room allows), else over the figure
+  const side = T ? F.x1 - 40 - (T.x + T.w + 40) : 0, under = T ? F.y1 - 24 - (T.y + T.h + 24) : 0;
+  // (held in by the room one way, it still grows the other, so more is more)
+  if (T && side >= u * 0.12) { rw = Math.min(rw, side); cx = (T.x + T.w + 40 + F.x1 - 40) / 2; cy = (F.y0 + F.y1) * 0.45; }
+  else if (T && under >= u * 0.08) { rh = Math.min(rh, under); cx = F.x0 + fw * 0.3; cy = T.y + T.h + 24 + rh / 2; }   // left of the band and the figure
+  const rx = clamp(cx - rw / 2, 0, W - rw), ry = clamp(cy - rh / 2, 0, H - rh), nx = Math.max(1, Math.round(rw / cell)), ny = Math.max(1, Math.round(rh / cell));
+  const t = WORK.avCells || (WORK.avCells = document.createElement("canvas"));
+  if (t.width !== nx || t.height !== ny) { t.width = nx; t.height = ny; }
+  const x = t.getContext("2d"); x.imageSmoothingEnabled = true; x.globalCompositeOperation = "copy";
+  x.drawImage(src, m.e + rx * k, m.f + ry * k, nx * cell * k, ny * cell * k, 0, 0, nx, ny);   // each cell the average of what is under it
+  inPixels(ctx, () => {
+    ctx.imageSmoothingEnabled = false;
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      const dx = (i + 0.5) / nx - 0.5, dy = (j + 0.5) / ny - 0.5;
+      if (dx * dx * 4 + dy * dy * 4 > 0.7 + 0.45 * rand(i * 7.1 + j * 3.3 + 850)) continue;   // a stepped, ragged edge
+      const off = rand(i * 2.9 + j * 5.7 + 851) > 0.9 ? Math.round((rand(i + j * 9 + 852) - 0.5) * 4) : 0;   // a few cells out of place
+      const X = m.e + (rx + i * cell) * k, Y = m.f + (ry + j * cell) * k, D = Math.ceil(cell * k), q = rand(i * 4.1 + j * 6.7 + 853);
+      ctx.drawImage(t, clamp(i + off, 0, nx - 1), j, 1, 1, X, Y, D, D);
+      ctx.fillStyle = q > 0.5 ? `rgba(255,255,255,${(q - 0.5) * 0.22})` : `rgba(0,0,0,${(0.5 - q) * 0.22})`; ctx.fillRect(X, Y, D, D);   // each a step lighter or darker, so the cells read even where the picture is flat
+    }
+  });
+}
+/**
+ * Fluted glass: the picture seen through a panel of narrow vertical flutes, each one squeezing a wider
+ * slice of what is behind it into its own width, shaded at one edge and lit at the other. The panel
+ * stands over the figure and widens with `amt` until it covers the whole picture.
+ */
+function avGlass(ctx, env, box, amt) {
+  if (amt <= 0 || !canPaint(ctx)) return;
+  const { w, h } = env, u = Math.min(w, h), src = snap(ctx, "avSnap"), m = ctx.getTransform(), k = m.a, pitch = u * 0.04;
+  const half = (w * (0.1 + 0.95 * amt)) / 2, x0 = Math.max(0, Math.floor((box.cx - half) / pitch) * pitch), x1 = Math.min(w, Math.ceil((box.cx + half) / pitch) * pitch);
+  inPixels(ctx, () => {
+    for (let x = x0; x < x1; x += pitch) {
+      const sw = pitch * 1.9, sx = clamp(x + pitch / 2 - sw / 2, 0, w - sw), X = m.e + x * k, P = pitch * k;
+      ctx.drawImage(src, m.e + sx * k, 0, sw * k, src.height, X, 0, P, src.height);
+      const g = ctx.createLinearGradient(X, 0, X + P, 0);
+      g.addColorStop(0, "rgba(0,0,0,0.26)"); g.addColorStop(0.22, "rgba(255,255,255,0.08)"); g.addColorStop(0.55, "rgba(255,255,255,0)"); g.addColorStop(0.86, "rgba(255,255,255,0.2)"); g.addColorStop(1, "rgba(0,0,0,0.12)");
+      ctx.fillStyle = g; ctx.fillRect(X, 0, P, src.height);
+    }
+  });
+  ctx.fillStyle = css(avInk(), 0.35); ctx.fillRect(x0, 0, 1, h); ctx.fillRect(x1 - 1, 0, 1, h);
+}
+/**
+ * A vertical band, a clear window onto the picture as it was before the blur and the glass (`sharp`),
+ * its tones mapped onto the channel colour (dark to a deep shade of it, light to the colour itself);
+ * hairlines at its edges. It widens with `amt`.
+ */
+function avBand(ctx, env, box, amt, sharp) {
+  if (amt <= 0) return;
+  const { w, h, C } = env, bw = w * 0.2 * Math.pow(amt, 0.8), x = clamp(box.cx - box.size * 0.12 - bw / 2, 0, w - bw);
+  ctx.save(); ctx.beginPath(); ctx.rect(x, 0, bw, h); ctx.clip();
+  if (sharp) inPixels(ctx, () => ctx.drawImage(sharp, 0, 0));
+  ctx.globalCompositeOperation = "multiply"; ctx.fillStyle = css(C); ctx.fillRect(x, 0, bw, h);
+  ctx.globalCompositeOperation = "screen"; ctx.fillStyle = css(mix([0, 0, 0], C, 0.18)); ctx.fillRect(x, 0, bw, h);
+  ctx.restore();
+  ctx.fillStyle = css(avInk(), 0.7); ctx.fillRect(x - 1, 0, 1.5, h); ctx.fillRect(x + bw, 0, 1.5, h);
+}
+const avant = {
+  id: "avant",
+  repaint: (c) => `a contemporary fashion and design-studio poster made from the photograph: black and white, soft and slightly out of focus, a little motion blur, fine grain, clean studio light, with one small accent of ${c}; still the same picture, no text.`,
+  about: { zh: "先锋影像：今天的设计工作室和时装品牌常发的海报。黑白照片（没有照片时，频道图形化成一个柔焦的身影），像设计师在电脑里那样加工：动态拖影、辉光、焦外虚化里留一个清晰的对焦框、一块变成大像素的马赛克、一片条纹玻璃、一条透出频道色的色带；细线网格、圆点标记和界面式的小字；紧凑的大号无衬线标题；频道色是唯一的点缀。冷静、锐利、有数码时代的质感——适合设计、时尚、科技、人物、观点和品牌内容。可选浅灰底或黑底；自带平直的版式。", en: "Avant-garde image: the posters design studios and fashion labels post today. A black-and-white photograph (or, without one, the channel graphic as a soft figure) worked on as a designer would in the computer: a smear of motion, a glow, out of focus with one sharp frame of focus, a patch gone to large pixels, a panel of fluted glass, a band where the channel colour comes through; hairline grid lines, dot markers and interface-like labels; a big tight grotesque; the channel colour the only accent. Cool, sharp, digital — for design, fashion, tech, portraits, opinion and brand content. A light grey or a black ground; flat layouts of its own." },
+  name: { zh: "先锋影像", en: "Avant-garde image" },
+  seeded: true,
+  params: [
+    { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "身影", en: "Figure" } },
+    { key: "smear", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "动态拖影", en: "Motion smear" } },
+    { key: "glow", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "辉光", en: "Glow" } },
+    { key: "blur", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "焦外虚化", en: "Out of focus" } },
+    { key: "focus", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "对焦框", en: "Frame of focus" } },
+    { key: "mosaic", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "像素马赛克", en: "Pixel mosaic" } },
+    { key: "glass", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "条纹玻璃", en: "Fluted glass" } },
+    { key: "band", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "色带", en: "Colour band" } },
+    { key: "fade", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "渐隐", en: "Fade out" } },
+    { key: "grid", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "网格与标注", en: "Grid and labels" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "颗粒", en: "Grain" } },
+    { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白照片", en: "Black-and-white photo" } },
+  ],
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.17, side: 0.3, strip: 0.1 }),
+  theme: (base) => ({ ...base, field: css(avGround()), text: css(avInk()), dim: css(avInk(), 0.55), titleFill: css(avInk()), titleInk: css(avGround()), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The ground (a studio backdrop, lighter in the middle) and the figure, or the photo in black and
+   * white; then, in order, the motion smear, the glow, the blur with its frame of focus, the fluted
+   * glass, the mosaic, the colour band (a clear window onto the picture before the blur and the glass)
+   * and the fade — each working on what is there so far, so the lettering and everything above stays
+   * sharp. A print photo is only turned black and white.
+   */
+  background(ctx, env, L, p) {
+    const { w, h } = env, u = Math.min(w, h), ground = avGround();
+    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    let box;
+    if (env.photo) {
+      env.drawPhoto(p.mono);
+      if (!L.fill) return true;
+      box = { cx: w * 0.55, cy: h * 0.5, size: h * 0.9 };
+    } else {
+      if (!L.grid) return true;
+      const g = ctx.createRadialGradient(w * 0.6, h * 0.42, 0, w * 0.6, h * 0.42, Math.hypot(w, h) * 0.6);
+      g.addColorStop(0, css(dark ? [44, 44, 48] : [244, 244, 242])); g.addColorStop(1, css(ground));
+      ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+      box = avFigure(ctx, env, p);
+    }
+    avSmear(ctx, u, p.smear);
+    avGlow(ctx, p.glow);
+    const sharp = canPaint(ctx) && (p.blur > 0 || p.band > 0 || p.mosaic > 0) ? snap(ctx, "avSharp") : null;   // the picture before the blur and the glass: the frame of focus, the mosaic and the band show it
+    avFocus(ctx, env, box, p.blur, p.focus, sharp);
+    avGlass(ctx, env, box, p.glass);
+    avMosaic(ctx, env, box, u, p.mosaic, sharp);   // over the glass, so its cells stay square
+    avBand(ctx, env, box, p.band, sharp);
+    if (p.fade > 0) { const f = ctx.createLinearGradient(0, h * 0.45, 0, h); f.addColorStop(0, css(ground, 0)); f.addColorStop(1, css(ground, Math.min(1, p.fade * 1.1))); ctx.fillStyle = f; ctx.fillRect(0, 0, w, h); }
+    return true;
+  },
+  accent: { fill: () => css(dark ? [26, 26, 30] : [206, 206, 203]), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.strokeStyle = css(avInk(), 0.45); ctx.lineWidth = 1.5; run(0, 0); } },
+  /** A big grotesque, upright and flat; highlighted words in the channel colour. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? o.hi || o.C || avInk() : o.fill || avInk()); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates
+    ? { fill: { ink: avInk() }, stroke: { ink: avInk() } }
+    : { fill: { ink: AV.ink, light: AV.white, mid: [170, 170, 168], dark: [48, 48, 50], colour: (c) => grey(c) }, stroke: { ink: AV.ink, light: AV.white, colour: (c) => grey(c) }, line: 0.45 }),
+  sticker: painters({ line: null, shadow: null, tone: (fill) => { const c = parseColour(fill); return !c ? fill : role(c) === "colour" ? css(grey(c), c[3]) : fill; } }),
+  /** The corner tag: monospaced capitals in a hairline box, a small square of the channel colour before them. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.5;
+    ctx.font = `600 ${f}px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + f * 2.6, h = f * 2, top = y + (fs * 1.34 - h);
+    ctx.strokeStyle = css(avInk(), 0.8); ctx.lineWidth = 1.5; ctx.strokeRect(x, top, w, h);
+    ctx.fillStyle = css(C); ctx.fillRect(x + f * 0.6, top + h / 2 - f * 0.3, f * 0.6, f * 0.6);
+    ctx.fillStyle = ink || css(avInk()); spaced(ctx, str, x + f * 1.7, top + h * 0.5 + f * 0.36, 3);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The frame layer: hairlines down and across, dot markers where they meet, interface labels along the foot, a few lines of small print. */
+  frame(ctx, env, p) {
+    const a = p.grid;
+    if (a <= 0) return;
+    const { w, h } = env, ink = avInk(), P = env.o.profile, i = env.o.catIndex, total = P.categories.length, xs = [64, w * 0.36, w * 0.64, w - 64], ys = [h * 0.58, h - 76];
+    ctx.save(); ctx.fillStyle = css(ink, 0.28 * a);
+    for (const x of xs) ctx.fillRect(Math.round(x), 0, 1, h);
+    for (const y of ys) ctx.fillRect(0, Math.round(y), w, 1);
+    ctx.fillStyle = css(ink, 0.85 * a);
+    for (const x of xs) for (const y of ys) { ctx.beginPath(); ctx.arc(x, y, 3.5, 0, TAU); ctx.fill(); }
+    ctx.font = `600 13px ${fonts.mono}, ${fonts.cn}`; ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+    [(P.brand.name || "STUDIO").toUpperCase(), `VOL.${pad2(i + 1)}`, `# ${(env.cat.code || env.cat.name || "").toUpperCase()}`, `${pad2(i + 1)} / ${pad2(total)}`].forEach((t, k) => ctx.fillText(t, xs[k] + (k === 3 ? -ctx.measureText(t).width - 10 : 10), h - 48));
+    greeked(ctx, xs[2] + 10, ys[0] + 14, w * 0.22, 4, 9, css(ink, 0.45 * a), 860 + i);
+    ctx.restore();
+  },
+  image(ctx, C, unit) { ctx.shadowColor = "rgba(0,0,0,0.35)"; ctx.shadowBlur = 20 * unit; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 8 * unit; },
+  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * (dark ? 0.75 : 0.6), unit); },
+  prompt: `Graphic elements for a contemporary design-studio poster — precise, reduced, a little technical — that read at a glance:
+- one clean shape per sticker (an arrow, a cross, a circle, a hand, a pair of glasses, a figure in profile, a cursor), simple and exact; no realism, no perspective, no detail;
+- flat colour only: "ink" and "white", with the main colour as a single small accent (it is the only colour on the poster);
+- the app draws no outline and no shadow: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Objects as a product shot for a design studio would show them: a few boxes and cylinders, exact and minimal — a speaker, a lamp, a camera, a chair; no realism, no fine detail.
+- the renderer paints faces in greys with a hairline: do NOT try to draw shading or outlines yourself;
+- "white" is white, "dark" near-black, and "main" a mid grey.`,
+};
+
+export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant };
 export const LOOK_IDS = Object.keys(LOOKS);
 
 let current = cel, values = {};
