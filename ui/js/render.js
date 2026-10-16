@@ -355,8 +355,8 @@ const PAINT = {
     const blit = (c, dx = 0, dy = 0) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(c, dx, dy); ctx.restore(); };
     const W = ctx.canvas.width, H = ctx.canvas.height;
     // While a photo is dragged, a costly one (cut out, outlined, shadowed) only slides its last image.
-    const costly = L.cut || L.outline > 0 || L.shadow > 0;
-    const stamp = [W, H, L.cut, L.feather, L.spread, L.outline, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? base.t.all.s : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`].join("|");
+    const costly = L.cut || L.outline > 0 || L.shadow > 0, torn = L.torn && L.outline > 0;
+    const stamp = [W, H, L.cut, L.feather, L.spread, L.outline, torn, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? base.t.all.s : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`].join("|");
     const at = fills ? [rect.x, rect.y] : [bt.cx, bt.cy], keep = PHOTO.slides.get(L.id);
     if (costly && isFast() && keep && keep.stamp === stamp) { blit(keep.img, keep.bx + (at[0] - keep.at[0]) * M.a, keep.by + (at[1] - keep.at[1]) * M.d); return hit; }
     const inFrame = (c, fn) => { c.save(); frame(c); fn(c); c.restore(); };
@@ -374,7 +374,7 @@ const PAINT = {
     // The work canvases cover only where the photo can reach — its rectangle, grown by the outline and
     // the shadow — not the whole canvas: compositing a canvas costs every pixel of it.
     const spread = L.cut && L.spread > 0 ? (L.spread * Math.max(rect.iw, rect.ih)) / 1920 : 0;   // the outward soft edge, in the frame's units
-    const reach = (L.outline > 0 ? L.outline : 0) + (L.shadow > 0 ? w * 0.03 : 0) + spread * 3 + 4, k = 1 / Math.max(0.05, Math.min(Math.abs(fills ? 1 : bt.kx), Math.abs(fills ? 1 : bt.ky)));
+    const reach = (L.outline > 0 ? L.outline : 0) + (torn ? L.outline * 0.25 + 18 : 0) + (L.shadow > 0 ? w * 0.03 : 0) + spread * 3 + 4, k = 1 / Math.max(0.05, Math.min(Math.abs(fills ? 1 : bt.kx), Math.abs(fills ? 1 : bt.ky)));
     const corners = [[rect.x - reach * k, rect.y - reach * k], [rect.x + rect.iw + reach * k, rect.y - reach * k], [rect.x + rect.iw + reach * k, rect.y + rect.ih + reach * k], [rect.x - reach * k, rect.y + rect.ih + reach * k]].map(([x, y]) => F.transformPoint({ x, y }));
     const bx = Math.max(0, Math.floor(Math.min(...corners.map((p) => p.x)))), by = Math.max(0, Math.floor(Math.min(...corners.map((p) => p.y))));
     const bw = Math.min(W, Math.ceil(Math.max(...corners.map((p) => p.x)))) - bx, bh = Math.min(H, Math.ceil(Math.max(...corners.map((p) => p.y)))) - by;
@@ -391,8 +391,9 @@ const PAINT = {
     // shadow and outline from the shape, made once at the photo's scale (see silhouette())
     const out = sheet(0, bw, bh, Mb), f = rect.iw / nw, shape = mask || plainShape(rec, nw, nh);
     const lay = (sil, ox = 0, oy = 0, alpha = 1) => inFrame(out, (o) => { o.globalAlpha = alpha; o.drawImage(sil.c, rect.x - sil.p * f + ox, rect.y - sil.p * f + oy, sil.c.width * sil.k * f, sil.c.height * sil.k * f); });
-    if (L.shadow > 0) { const sil = silhouette(shape, 0, "#07070c"), d = w * 0.006 / Math.max(0.2, Math.abs(fills ? 1 : bt.kx)); for (let i = 1; i <= 4; i++) lay(sil, d * i, d * i * 1.2, L.shadow * 0.22); }
-    if (L.outline > 0) lay(silhouette(shape, L.outline / f, L.ink || "#ffffff"));
+    const tear = torn && ((colour, bare) => tornSheet(shape, L.outline / f, colour, 1 / f, seedOf(L.id), bare));   // 1 / f: photo px per cover px
+    if (L.shadow > 0) { const sil = torn ? tear("#07070c", true) : silhouette(shape, 0, "#07070c"), d = w * 0.006 / Math.max(0.2, Math.abs(fills ? 1 : bt.kx)); for (let i = 1; i <= 4; i++) lay(sil, d * i, d * i * 1.2, L.shadow * 0.22); }
+    if (L.outline > 0) lay(torn ? tear(L.ink || "#ffffff", false) : silhouette(shape, L.outline / f, L.ink || "#ffffff"));
     out.save(); out.setTransform(1, 0, 0, 1, 0, 0); out.drawImage(body.canvas, 0, 0); out.restore();
     blit(out.canvas, bx, by);
     if (isFast()) {   // kept for the frames to come (a copy: the work canvases are reused)
@@ -652,6 +653,99 @@ function silhouette(shape, grow, colour) {
   cache.set(key, sil);
   pxTime("silhouette (canvas, not script)", t0);
   return sil;
+}
+/** A number from a layer's id, so each photo tears its own way and keeps it. */
+const seedOf = (id) => { let h = 7; for (const ch of String(id)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0; return (h >>> 0) % 100003; };
+/** Value noise, 0–1: smooth between random values at the whole numbers of a grid. */
+function hashed(x, y, s) { let h = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(s, 1274126177) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function vnoise(x, y, s) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hashed(xi, yi, s), b = hashed(xi + 1, yi, s), c = hashed(xi, yi + 1, s), d = hashed(xi + 1, yi + 1, s);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+/** Fractal noise, about −1…1: `n` octaves of value noise, each twice as fine and half as strong. */
+function fbm(x, y, s, n) { let sum = 0, amp = 1, norm = 0; for (let i = 0; i < n; i++) { sum += (vnoise(x, y, s + i * 17) - 0.5) * amp; norm += amp * 0.5; amp *= 0.5; x *= 2.03; y *= 2.03; } return sum / norm; }
+/**
+ * The squared distance from each pixel to the nearest one that is inside (a w × h grid, 0 inside),
+ * exactly: Felzenszwalb and Huttenlocher's transform, down the columns and then along the rows.
+ */
+function distanceField(inside, w, h) {
+  const BIG = 1e20, D = new Float64Array(w * h), n = Math.max(w, h), f = new Float64Array(n), d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
+  const pass = (len) => {
+    let k = 0; v[0] = 0; z[0] = -Infinity; z[1] = Infinity;
+    for (let q = 1; q < len; q++) {
+      let s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      while (s <= z[k]) { k--; s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+      k++; v[k] = q; z[k] = s; z[k + 1] = Infinity;
+    }
+    k = 0;
+    for (let q = 0; q < len; q++) { while (z[k + 1] < q) k++; d[q] = (q - v[k]) * (q - v[k]) + f[v[k]]; }
+  };
+  for (let x = 0; x < w; x++) { for (let y = 0; y < h; y++) f[y] = inside[y * w + x] ? 0 : BIG; pass(h); for (let y = 0; y < h; y++) D[y * w + x] = d[y]; }
+  for (let y = 0; y < h; y++) { for (let x = 0; x < w; x++) f[x] = D[y * w + x]; pass(w); for (let x = 0; x < w; x++) D[y * w + x] = d[x]; }
+  return D;
+}
+/**
+ * Torn paper: `shape` (a mask, or a photo's plain rectangle) mounted on a sheet of `colour` whose edge,
+ * about `grow` photo pixels out, has been torn by hand. The tear wanders in and out at every scale,
+ * as a coastline does — slow bites, smaller jags along them, and teeth; the rim just inside it is
+ * lighter, the paper's core showing where the surface came away, with a faint line where it lifted;
+ * loose fibres stand out past it; the sheet has a faint tooth; and it throws a soft shadow a little
+ * down and to the right. The tear's grain is set in cover pixels (`perCover`: photo px per cover px),
+ * so it is as fine on a large photo as on a small one; how far it wanders follows `grow`: never nearer
+ * the shape than about a third of it, nor further out than about a sixth more. `seed` makes each layer tear its own way. `bare`: the torn
+ * shape alone, flat in `colour` (for a cast shadow). Answers as silhouette() does, and is kept likewise.
+ */
+const TORN = new WeakMap();
+function tornSheet(shape, grow, colour, perCover, seed, bare) {
+  const max = isFast() ? 512 : 1024, key = `${grow.toFixed(1)}|${colour}|${max}|${perCover.toFixed(4)}|${seed}|${bare ? 1 : 0}`, cache = TORN.get(shape) || new Map();
+  TORN.set(shape, cache);
+  if (cache.has(key)) return cache.get(key);
+  const t0 = performance.now(), [W, H] = sizeOf(shape), K = Math.min(1, max / Math.max(W, H));
+  const g = grow * K, u = K / perCover, p = Math.ceil(g * 1.22 + 16 * u) + 4;   // the border and one cover pixel in this canvas's pixels; its margin
+  const cw = Math.ceil(W * K) + 2 * p, ch = Math.ceil(H * K) + 2 * p;
+  const c = Object.assign(document.createElement("canvas"), { width: cw, height: ch }), x = c.getContext("2d", { willReadFrequently: true });
+  x.drawImage(shape, p, p, W * K, H * K);
+  const A = x.getImageData(0, 0, cw, ch).data, inside = new Uint8Array(cw * ch);
+  for (let i = 0; i < inside.length; i++) inside[i] = A[i * 4 + 3] > 127 ? 1 : 0;
+  const D = distanceField(inside, cw, ch);
+  const [r0, g0, b0] = [1, 3, 5].map((i) => parseInt(colour.slice(i, i + 2), 16)), core = [r0 + (255 - r0) * 0.86, g0 + (255 - g0) * 0.86, b0 + (255 - b0) * 0.86];
+  const out = x.createImageData(cw, ch), o = out.data, far = g * 1.15 + 3 * u + 1, rim = 1.8 * u + g * 0.1, fringe = 1.8 * u + g * 0.05;
+  const big = 1 / Math.max(40, 110 * u), mid = 1 / (22 * u), fine = 1 / (4.5 * u), fibre = 1 / (1.2 * u), tooth = 1 / (1.6 * u);
+  for (let y = 0, i = 0; y < ch; y++) for (let X = 0; X < cw; X++, i++) {
+    const d2 = D[i];
+    if (d2 > (far + fringe) * (far + fringe)) continue;
+    let a = 1, r = r0, gg = g0, b = b0;
+    if (d2 > 0) {
+      const d = Math.sqrt(d2);
+      // where the tear runs here: slow bites (a share of the border), jags along them, and teeth (in cover pixels)
+      const R = clamp(g * (0.72 + 0.4 * fbm(X * big, y * big, seed, 3)) + (0.13 * g + 1.5 * u) * fbm(X * mid, y * mid, seed + 50, 2) + 1.5 * u * (vnoise(X * fine, y * fine, seed + 90) * 2 - 1), g * 0.3 + 0.6 * u, far - 1);
+      if (d > R + fringe) continue;
+      if (d > R - 0.5) {   // the edge itself, smoothed over a pixel, and the loose fibres past it
+        const edge = Math.max(0, R + 0.5 - d), f = Math.pow(Math.max(0, 1 - (d - R) / fringe), 1.6) * (vnoise(X * fibre, y * fibre, seed + 130) > 0.45 ? 0.85 : 0.25);
+        a = Math.max(Math.min(1, edge), f);
+      }
+      if (!bare) {
+        const rw = rim * (0.25 + 1.5 * vnoise(X * mid * 0.6, y * mid * 0.6, seed + 210));   // the tear runs slantwise through the sheet: a band of its core, wider and narrower
+        if (d > R - rw) [r, gg, b] = core;                                    // the torn rim: the core of the paper
+        else if (d > R - rw - 0.9 * u) { r *= 0.86; gg *= 0.86; b *= 0.86; } // where the surface lifted from it
+        else { const k = 1 - 0.035 * vnoise(X * tooth, y * tooth, seed + 170) - 0.02 * vnoise(X * tooth * 0.2, y * tooth * 0.2, seed + 190); r *= k; gg *= k; b *= k; }   // the sheet's tooth
+      }
+    }
+    o[i * 4] = r; o[i * 4 + 1] = gg; o[i * 4 + 2] = b; o[i * 4 + 3] = a * 255;
+  }
+  x.putImageData(out, 0, 0);
+  if (!bare) {   // the soft shadow it throws, under it
+    const s = Object.assign(document.createElement("canvas"), { width: cw, height: ch }), y = s.getContext("2d");
+    y.shadowColor = "rgba(20,14,10,0.34)"; y.shadowBlur = 5 * u; y.shadowOffsetX = 1.2 * u; y.shadowOffsetY = 2.2 * u;
+    y.drawImage(c, 0, 0);
+    x.clearRect(0, 0, cw, ch); x.drawImage(s, 0, 0);
+  }
+  const sheet = { c, p: p / K, k: 1 / K };
+  if (cache.size > 24) cache.clear();
+  cache.set(key, sheet);
+  pxTime("torn paper (script)", t0);
+  return sheet;
 }
 /**
  * Paints a cover.

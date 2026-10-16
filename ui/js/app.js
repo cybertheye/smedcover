@@ -2021,6 +2021,7 @@ function photoControls(L, set) {
       check("props.treat", L.treat, (v) => set("treat", v))], t("props.treatTip")),
     psec("props.sec.lines", [
       slider("props.outline", 0, 40, 1, L.outline, px, (v) => { holdLive(L.id); set("outline", v); }),
+      check("props.torn", L.torn, (v) => { L.torn = v; if (v && !(L.outline > 0)) L.outline = 16; touch({ cover: true, side: true }); }),   // with no outline yet, one to see the tear on
       slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => { holdLive(L.id); set("shadow", v); }),
       swatch(L, "ink", "props.sw.outline", "#ffffff")], t("props.photoLinesTip")),
   ];
@@ -2081,6 +2082,25 @@ function focusTargets() {
 }
 /** Turns FOCUS on or off. */
 function setFocus(on) { S.focus = on; renderSide(); }
+/** The template's own layers on the cover on the canvas (the ones marked as the system's). */
+const layoutLayers = () => S.cover.layers.filter((l) => !isFree(l.type) && l.type !== "subject" && appliesTo(l, cat().id));
+let LAYOUT_HID = null;   // { cover, ids }: the template's layers that were showing when "Hide layout" hid them
+/**
+ * Hide layout / Show layout: hides every one of the template's layers at once, leaving what the user
+ * added; showing them again brings back the ones that were showing (one hidden before stays hidden).
+ */
+function toggleLayout() {
+  const sys = layoutLayers(), mine = LAYOUT_HID && LAYOUT_HID.cover === S.cover ? LAYOUT_HID.ids : [];
+  if (sys.every((l) => !l.visible)) {
+    const back = mine.length ? mine : sys.map((l) => l.id);
+    for (const l of sys) if (back.includes(l.id)) l.visible = true;
+    LAYOUT_HID = null;
+  } else {
+    LAYOUT_HID = { cover: S.cover, ids: [...new Set([...mine, ...sys.filter((l) => l.visible).map((l) => l.id)])] };
+    for (const l of sys) l.visible = false;
+  }
+  touch({ cover: true, side: true });
+}
 /** The canvas's FOCUS frame and tag: which layer the canvas is acting on. */
 function syncFocus() {
   const stage = $("stage"), tag = $("focustag") || stage.appendChild(el("div", { id: "focustag" })), on = S.focus && S.mode === "edit";
@@ -2101,7 +2121,8 @@ function renderSide() {
   const i = L ? here.indexOf(L) : -1, many = group();
   side.replaceChildren(
     el("div", {}, el("div", { class: "lhead" }, cap("layers.title"),
-        el("button", { class: "focusbtn" + (S.focus ? " on" : ""), title: t("focus.tip"), onclick: () => setFocus(!S.focus) }, t("focus.label"))),
+        el("div", { class: "lbtns" }, (() => { const off = layoutLayers().every((l) => !l.visible); return el("button", { class: "focusbtn" + (off ? " on" : ""), title: t("layout.tip"), onclick: toggleLayout }, t(off ? "layout.show" : "layout.hide")); })(),
+          el("button", { class: "focusbtn" + (S.focus ? " on" : ""), title: t("focus.tip"), onclick: () => setFocus(!S.focus) }, t("focus.label")))),
       el("div", { class: "layers" }, [...here].reverse().map(layerRow)),
       el("div", { class: "acts", style: "margin-top:10px;justify-content:flex-start" },
         el("button", { class: "btn", onclick: () => addLayer(newLayer("text", { text: t("layer.newText") })) }, t("layers.addText")),

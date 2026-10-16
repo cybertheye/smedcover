@@ -583,7 +583,7 @@ test("looks: every look is complete enough to draw and to brief the AI", () => {
   setLook("cel");
 });
 
-test("the vivid illustration look: channel colours made vivid, greys kept, the street standing on the colour field's edge", () => {
+test("the summer illustration look: channel colours made vivid, greys kept, the street standing on the colour field's edge", () => {
   const V = LOOKS.vivid, rgbOf = (v) => parseColour(v).slice(0, 3), satOf = ([r, g, b]) => (Math.max(r, g, b) - Math.min(r, g, b)) / Math.max(r, g, b);
   assert.deepEqual(rgbOf(V.accent.fill([128, 128, 128])), [128, 128, 128]);                 // a grey stays grey
   const dull = [170, 130, 100], made = rgbOf(V.accent.fill(dull));
@@ -593,17 +593,27 @@ test("the vivid illustration look: channel colours made vivid, greys kept, the s
   const pts = [];
   const ctx = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "lineTo" || k === "moveTo" ? (x, y) => pts.push([x, y]) : () => ({})), set: () => true });
   const edge = (x) => 700 - (100 * x) / 1920;
-  setLook("vivid", { town: 0.4, clouds: 0, flags: 0 }, 5);
-  V.background(ctx, { w: 1920, h: 1080, photo: null, G: { edge: { line: [0, 700, 1920, 600], nx: 0, ny: -1 } } }, { grid: true }, lookValues());
+  const G = { edge: { line: [0, 700, 1920, 600], nx: 0, ny: -1 } };
+  setLook("vivid", { town: 0.3, clouds: 0, flags: 0 }, 5);   // the street, risen in full, and no tower yet
+  V.background(ctx, { w: 1920, h: 1080, photo: null, G }, { grid: true }, lookValues());
   assert.ok(pts.length > 40);
   for (const [x, y] of pts) assert.ok(y < edge(x) + 1080 * 0.06 + 1, `a house below the field's edge at x ${x}`);
   assert.ok(pts.some(([x, y]) => y < edge(x) - 40), "they rise above it");
   assert.ok(pts.some(([x, y]) => y > edge(x) + 20), "and their feet are behind the field");
+  // every slider brings its part in by degrees: the street rises, clouds are added one after another
+  const highest = (town) => { pts.length = 0; setLook("vivid", { town, clouds: 0, flags: 0 }, 5); V.background(ctx, { w: 1920, h: 1080, photo: null, G }, { grid: true }, lookValues()); return Math.max(...pts.map(([x, y]) => edge(x) - y)); };
+  const rise = [0.05, 0.15, 0.25, 0.3, 0.5].map(highest);
+  for (let i = 1; i < rise.length; i++) assert.ok(rise[i] > rise[i - 1], `the street higher at each step: ${rise.join(", ")}`);
+  let arcs = 0;
+  const counting = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "arc" ? () => arcs++ : () => ({})), set: () => true });
+  const clouds = [0.1, 0.3, 0.5, 0.7, 0.85, 1].map((c) => { arcs = 0; setLook("vivid", { town: 0, clouds: c, flags: 0 }, 5); V.background(counting, { w: 1920, h: 1080, photo: null, G }, { grid: true }, lookValues()); return arcs; });
+  for (let i = 1; i < clouds.length; i++) assert.ok(clouds[i] > clouds[i - 1], `more clouds at each step: ${clouds.join(", ")}`);
+  assert.equal(V.name.zh, "夏日插画");
   assert.equal(normalizeProfile({ style: { look: "ghibli" } }).style.look, "vivid");   // its first name
   setLook("cel");
 });
 
-test("the blue retro and red street looks: their own colours, whatever the channel", () => {
+test("the blue retro and red street looks: their own grounds, the channel colour on the small parts", () => {
   setLook("bluetone", null, 3, true);
   assert.match(LOOKS.bluetone.theme({}, [255, 0, 0], lookValues()).field, /^rgba\(28,44,226/);   // electric blue on dark
   setLook("bluetone", null, 3, false);
@@ -611,10 +621,19 @@ test("the blue retro and red street looks: their own colours, whatever the chann
   const seen = []; const raw = { set fillStyle(v) { seen.push(v); }, get fillStyle() { return "x"; }, lineWidth: 1 };
   LOOKS.bluetone.wrap(raw, [255, 0, 0], lookValues(), false).fillStyle = "#ff3b4f";
   assert.match(seen[0], /^rgba\(70,146,238/);                                                  // a colour on an object comes out blue
+  assert.deepEqual(LOOKS.bluetone.params.map((d) => d.key), ["lines", "grain", "duo"]);          // no halftone, no glitch
+  assert.equal(LOOKS.bluetone.name.zh, "蓝色复古");
+  const fills = (fn) => { const got = []; const c = new Proxy({ canvas: null }, { get: (t, k) => (k === "measureText" ? () => ({ width: 10 }) : k in t ? t[k] : () => ({})), set: (t, k, v) => { if (k === "fillStyle") got.push(v); t[k] = v; return true; } }); fn(c); return got; };
+  assert.ok(fills((c) => LOOKS.bluetone.tag(c, "EP.01", 0, 0, 40, [255, 140, 0], lookValues())).includes("rgba(255,140,0,1)"), "the tag's squares in the channel colour");
   setLook("redstreet");
   assert.match(LOOKS.redstreet.theme({}, [0, 0, 255], lookValues()).field, /^rgba\(232,56,36/);
   assert.equal(LOOKS.redstreet.accent.fill([0, 0, 255]), "rgba(18,12,12,1)");                   // the panel is black
   assert.equal(LOOKS.redstreet.layout("stack", 1920, 1080).template, "stack");
+  assert.equal(fills((c) => LOOKS.redstreet.tag(c, "EP.01", 0, 0, 40, [40, 120, 255], lookValues()))[0], "rgba(40,120,255,1)");   // the tag: the channel colour…
+  assert.equal(fills((c) => LOOKS.redstreet.tag(c, "EP.01", 0, 0, 40, [226, 60, 40], lookValues()))[0], "rgba(255,198,26,1)");   // …or yellow, when that is a red
+  const plate = []; const raw2 = { set fillStyle(v) { plate.push(v); }, get fillStyle() { return "x"; }, lineWidth: 1 };
+  LOOKS.redstreet.wrap(raw2, [40, 120, 255], lookValues(), true).fillStyle = "#2878ff";
+  assert.match(plate[0], /^rgba\(40,120,255/);                                                  // the channel's name keeps its colour
   setLook("cel");
 });
 

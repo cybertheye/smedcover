@@ -68,9 +68,10 @@ const PROPS = {
    * as are its blur, dim, outline and shadow. `own` marks a cut-out placed so (those of earlier files
    * followed their photo's size too, and are set up as aligned when read). Every photo without `of` is
    * active. `feather`, `spread`: how far the edge of a cut-out fades inward, and outward. `treat`: the look's
-   * treatment of photos applies. `cut`: only the subject is kept (the mask). + `ink`, the outline's colour.
+   * treatment of photos applies. `cut`: only the subject is kept (the mask). `torn`: the outline is a margin
+   * of torn paper. + `ink`, the outline's colour.
    */
-  photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, feather: 0, spread: 0, outline: 0, shadow: 0 },
+  photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, feather: 0, spread: 0, outline: 0, torn: false, shadow: 0 },
 };
 const OLD_COLORS = ["white", "accent", "ink", "custom"];   // how text layers were coloured before they were headlines (see normalizeLayer)
 
@@ -130,7 +131,7 @@ function normalizeLayer(raw, catIds) {
     case "photo": {
       const id = (v) => (typeof v === "string" ? v.replace(/[^\w-]/g, "").slice(0, 40) : "");
       L.pid = id(raw.pid); L.of = id(raw.of); L.fill = raw.fill === true; L.treat = raw.treat !== false; L.cut = raw.cut === true;
-      L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); L.outline = num(raw.outline, 0, 0, 60); L.shadow = num(raw.shadow, 0, 0, 1);
+      L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); L.outline = num(raw.outline, 0, 0, 60); L.torn = raw.torn === true; L.shadow = num(raw.shadow, 0, 0, 1);
       L.feather = num(raw.feather, 0, 0, 60); L.spread = num(raw.spread, 0, 0, 60);
       if (L.of && raw.own === true) L.own = true;
       if (!L.pid && !L.of) return null;   // nothing to show
