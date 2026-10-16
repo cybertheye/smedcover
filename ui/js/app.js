@@ -3044,6 +3044,24 @@ async function dragTest() {
       report.sliders.push({ layer: name(L.id), slider: key, median: Math.round(times[6]), worst: Math.round(times[11]), ...parts });
     }
   }
+  // 5. the look's own sliders: a whole redraw with each one at 0 (what that part costs to paint), then
+  // each stepped as a drag steps it — a profile change, then the next frame
+  const st = S.profile.style, own = (LOOKS[st.look] || LOOKS.cel).params.filter((d) => !d.text), kept = st.lookParams[st.look];
+  if (own.length) {
+    const redraw = (vals) => { st.lookParams[st.look] = vals; const ts = []; for (let i = 0; i < 3; i++) { const t = performance.now(); drawMain(); flush(); ts.push(performance.now() - t); } return ts.sort((a, b) => a - b)[1]; };
+    const all = redraw({ ...kept });
+    report.look = { look: st.look, redraw: Math.round(all), allAtZero: Math.round(redraw(Object.fromEntries(own.map((d) => [d.key, 0])))), savedAtZero: {} };
+    for (const d of own) report.look.savedAtZero[d.key] = Math.round(all - redraw({ ...kept, [d.key]: 0 }));
+    report.look.stepping = {};
+    for (const d of own.filter((q) => !q.needsPhoto)) {
+      const times = [];
+      for (let i = 1; i <= 7; i++) { st.lookParams[st.look] = { ...kept, [d.key]: clamp(d.def + (i % 2 ? 0.05 : -0.05), d.min, d.max) }; touch({ profile: true }); const t = performance.now(); await frame(); if (i > 1) times.push(performance.now() - t); }
+      times.sort((a, b) => a - b);
+      report.look.stepping[d.key] = Math.round(times[3]);
+    }
+    if (kept) st.lookParams[st.look] = kept; else delete st.lookParams[st.look];
+    touch({ profile: true });
+  }
   await invoke("selftest_done", { report: JSON.stringify(report, null, 2) }).catch(() => null);
 }
 // test hook: lets automated checks drive the app without the UI

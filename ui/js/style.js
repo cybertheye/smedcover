@@ -4986,6 +4986,27 @@ function along(stops, t) {
   return mix(c0, c1, clamp((t - t0) / (t1 - t0 || 1)));
 }
 /**
+ * A layer of a look painted once and kept: a canvas the size of ctx's, painted by paint(x) with ctx's
+ * transform, and reused while `key` (all the painting depends on) stays the same — so a slider that does
+ * not touch it costs one copy. One is kept per canvas size and slot (the main canvas, each thumbnail);
+ * an export's large canvas gets none (null: paint straight onto it).
+ */
+function keptLayer(ctx, slot, key, paint) {
+  const cv = ctx.canvas, m = ctx.getTransform();
+  if (cv.width * cv.height > 6e6) return null;
+  const kept = WORK[slot] || (WORK[slot] = new Map()), size = `${cv.width}x${cv.height}`, full = `${[m.a, m.b, m.c, m.d, m.e, m.f].map((v) => +v.toFixed(4)).join()}|${key}`;
+  let e = kept.get(size);
+  if (e && e.key === full) return e.c;
+  if (!e) {
+    e = { c: document.createElement("canvas"), key: null }; e.c.width = cv.width; e.c.height = cv.height;
+    kept.set(size, e); if (kept.size > 8) kept.delete(kept.keys().next().value);
+  }
+  const x = e.c.getContext("2d");
+  x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = "source-over"; x.clearRect(0, 0, cv.width, cv.height); x.setTransform(m);
+  paint(x); e.key = full;
+  return e.c;
+}
+/**
  * The picture seen through patterned glass. A field of smooth bumps (value noise in two octaves, a
  * little taller than wide, fixed to the cover so it does not move with the resolution) bends the light:
  * each pixel is read from a little way down the slope it sits on. Slopes turned to a light at the upper
@@ -5887,19 +5908,36 @@ function cumulus(ctx, x, base, s, tall, k) {
     const t = j / (rows - 1), half = s * (1 - 0.6 * t) * (0.85 + rand(k + j * 1.9) * 0.3), cy = base - tall * s * (0.1 + 0.8 * t), n = Math.max(3, Math.round(3 + 5 * (1 - t))), r0 = s * (0.2 + 0.1 * (1 - t));
     for (let i = 0; i < n; i++) { const v = (i / (n - 1)) * 2 - 1; lobes.push([x + v * half * 0.82 + (rand(k + j * 7.3 + i * 2.1) - 0.5) * s * 0.2, cy + (rand(k + j * 3.1 + i * 5.7) - 0.5) * s * 0.24, r0 * (0.75 + rand(k + j * 4.3 + i) * 0.5)]); }
   }
-  for (let i = 0, big = lobes.length; i < 56; i++) { const [cx, cy, r] = lobes[Math.floor(rand(k + i * 9.7 + 50) * big)], a = -Math.PI * (0.05 + rand(k + i * 2.9 + 51) * 0.9); lobes.push([cx + Math.cos(a) * r * 0.78, cy + Math.sin(a) * r * 0.78, r * (0.22 + rand(k + i * 4.1 + 52) * 0.22)]); }   // small bumps along the top and sides
-  const top = base - tall * s;
-  ctx.save(); ctx.beginPath(); ctx.rect(x - 4 * s, base - 8 * s, 8 * s, 8 * s); ctx.clip();
+  const big = lobes.length;
+  for (let i = 0; i < 56; i++) { const [cx, cy, r] = lobes[Math.floor(rand(k + i * 9.7 + 50) * big)], a = -Math.PI * (0.05 + rand(k + i * 2.9 + 51) * 0.9); lobes.push([cx + Math.cos(a) * r * 0.78, cy + Math.sin(a) * r * 0.78, r * (0.22 + rand(k + i * 4.1 + 52) * 0.22)]); }   // small bumps along the top and sides
+  const top = base - tall * s, bx0 = x - 1.8 * s, bx1 = x + 1.8 * s, by0 = base - tall * s * 1.35;   // the box the cloud stays in
+  ctx.save(); ctx.beginPath(); ctx.rect(x - 4 * s, base - 8 * s, 8 * s, 8 * s); ctx.clip();   // the flat base
   ctx.beginPath(); for (const [cx, cy, r] of lobes) { ctx.moveTo(cx + r, cy); ctx.arc(cx, cy, r, 0, TAU); }
-  ctx.fillStyle = css(shade); ctx.fill(); ctx.clip();
-  const g = ctx.createLinearGradient(0, base - tall * s * 0.45, 0, base); g.addColorStop(0, css(deep, 0)); g.addColorStop(1, css(deep, 0.9)); ctx.fillStyle = g; ctx.fillRect(x - 4 * s, base - 8 * s, 8 * s, 8 * s);
-  for (const [cx, cy, r] of lobes) {
-    const hf = clamp((base - cy) / Math.max(1, base - top)), lx = cx - r * 0.22, ly = cy - r * 0.32, gg = ctx.createRadialGradient(lx - r * 0.15, ly - r * 0.2, r * 0.05, lx, ly, r * 0.92), la = 0.55 + 0.45 * hf;
-    gg.addColorStop(0, css(lit, la)); gg.addColorStop(0.8, css(lit, la * 0.82)); gg.addColorStop(1, css(lit, 0));   // broad and flat: the lit lobes run together into masses
-    ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(lx, ly, r * 0.92, 0, TAU); ctx.fill();
+  ctx.fillStyle = css(shade); ctx.fill(); ctx.clip();   // the body in shade, its outline crisp
+  // The light and shade inside the body are soft all through, so they are painted at a third of the size
+  // and laid on enlarged within the crisp outline: a ninth of the pixels to fill.
+  const small = canPaint(ctx) && (WORK.skCloud || (WORK.skCloud = document.createElement("canvas"))), m = small && ctx.getTransform();
+  let b = ctx;
+  if (small) {
+    const sw = Math.ceil(ctx.canvas.width / 3), sh = Math.ceil(ctx.canvas.height / 3);
+    if (small.width !== sw || small.height !== sh) { small.width = sw; small.height = sh; }
+    b = small.getContext("2d"); b.setTransform(1, 0, 0, 1, 0, 0); b.clearRect(0, 0, sw, sh); b.setTransform(m.a / 3, m.b / 3, m.c / 3, m.d / 3, m.e / 3, m.f / 3);
   }
-  const dg = ctx.createLinearGradient(x - s * 0.6, top, x + s, base); dg.addColorStop(0.4, css(deep, 0)); dg.addColorStop(1, css(deep, 0.5));   // the side away from the sun in shade
-  ctx.fillStyle = dg; ctx.fillRect(x - 4 * s, base - 8 * s, 8 * s, 8 * s);
+  const g = b.createLinearGradient(0, base - tall * s * 0.45, 0, base); g.addColorStop(0, css(deep, 0)); g.addColorStop(1, css(deep, 0.9)); b.fillStyle = g; b.fillRect(bx0, by0, bx1 - bx0, base - by0);   // the base sunk in deeper blue
+  b.fillStyle = css(lit, 0.85); b.beginPath();   // the small bumps along the edge, lit all together
+  for (let i = big; i < lobes.length; i++) { const [cx, cy, r] = lobes[i], lr = r * 0.78; b.moveTo(cx - r * 0.2 + lr, cy - r * 0.28); b.arc(cx - r * 0.2, cy - r * 0.28, lr, 0, TAU); }
+  b.fill();
+  for (const [cx, cy, r] of lobes.slice(0, big)) {   // the big lobes, each in a soft light of its own
+    const hf = clamp((base - cy) / Math.max(1, base - top)), lx = cx - r * 0.22, ly = cy - r * 0.32, gg = b.createRadialGradient(lx - r * 0.15, ly - r * 0.2, r * 0.05, lx, ly, r * 0.92), la = 0.55 + 0.45 * hf;
+    gg.addColorStop(0, css(lit, la)); gg.addColorStop(0.8, css(lit, la * 0.82)); gg.addColorStop(1, css(lit, 0));   // broad and flat: the lit lobes run together into masses
+    b.fillStyle = gg; b.beginPath(); b.arc(lx, ly, r * 0.92, 0, TAU); b.fill();
+  }
+  const dg = b.createLinearGradient(x - s * 0.6, top, x + s, base); dg.addColorStop(0.4, css(deep, 0)); dg.addColorStop(1, css(deep, 0.5));   // the side away from the sun in shade
+  b.fillStyle = dg; b.fillRect(bx0, by0, bx1 - bx0, base - by0);
+  if (small) {
+    const X0 = Math.max(0, Math.floor((m.e + bx0 * m.a) / 3)), Y0 = Math.max(0, Math.floor((m.f + by0 * m.d) / 3)), X1 = Math.min(small.width, Math.ceil((m.e + bx1 * m.a) / 3)), Y1 = Math.min(small.height, Math.ceil((m.f + base * m.d) / 3));
+    if (X1 > X0 && Y1 > Y0) inPixels(ctx, () => { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; ctx.drawImage(small, X0, Y0, X1 - X0, Y1 - Y0, X0 * 3, Y0 * 3, (X1 - X0) * 3, (Y1 - Y0) * 3); });
+  }
   ctx.restore();
 }
 /**
@@ -5921,9 +5959,16 @@ function fleece(ctx, F, horizon, amt, k0) {
       }
     }
   }
-  const path = (e) => { ctx.beginPath(); for (let i = 0; i < e.length; i += 4) { ctx.moveTo(e[i] + e[i + 2], e[i + 1]); ctx.ellipse(e[i], e[i + 1], e[i + 2], e[i + 3], 0, 0, TAU); } };   // one path: overlapping puffs do not darken
-  blurred(ctx, s0 * 0.1, css(shade, 0.8), () => { path(under); ctx.fill(); });
-  blurred(ctx, s0 * 0.05, css(lit, 0.95), () => { path(over); ctx.fill(); });
+  // one path each, so overlapping puffs do not darken; painted at a third of the size and laid on enlarged, which softens their edges as a blur would, for far less
+  const small = canPaint(ctx) && (WORK.skFleece || (WORK.skFleece = document.createElement("canvas"))), m = small && ctx.getTransform(), W = small && ctx.canvas.width, H = small && ctx.canvas.height;
+  let x = ctx;
+  if (small) {
+    const sw = Math.ceil(W / 3), sh = Math.ceil(H / 3);
+    if (small.width !== sw || small.height !== sh) { small.width = sw; small.height = sh; }
+    x = small.getContext("2d"); x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, sw, sh); x.setTransform(m.a / 3, m.b / 3, m.c / 3, m.d / 3, m.e / 3, m.f / 3);
+  }
+  for (const [e, style] of [[under, css(shade, 0.8)], [over, css(lit, 0.95)]]) { x.beginPath(); for (let i = 0; i < e.length; i += 4) { x.moveTo(e[i] + e[i + 2], e[i + 1]); x.ellipse(e[i], e[i + 1], e[i + 2], e[i + 3], 0, 0, TAU); } x.fillStyle = style; x.fill(); }
+  if (small) inPixels(ctx, () => { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; ctx.drawImage(small, 0, 0, W, H); });
 }
 /**
  * The town in two rows of buildings, the far one hazier: flat faces with a shaded side, rows of windows
@@ -6035,7 +6080,7 @@ const skies = {
   background(ctx, env, L, p) {
     const { w, h } = env, u = Math.min(w, h), F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, sky = skSky();
     const townTop = F.y1 - fh * 0.36 * p.town, horizon = townTop + fh * (0.03 - 0.16 * p.sea);
-    const haze = (a) => { if (a <= 0) return; const g = ctx.createLinearGradient(0, horizon - fh * 0.35, 0, horizon + 4); g.addColorStop(0, css(sky[2], 0)); g.addColorStop(1, css(mix(sky[2], [255, 255, 255], 0.4), 0.75 * a)); ctx.fillStyle = g; ctx.fillRect(0, horizon - fh * 0.35, w, fh * 0.35 + 4); };
+    const haze = (x, a) => { if (a <= 0) return; const g = x.createLinearGradient(0, horizon - fh * 0.35, 0, horizon + 4); g.addColorStop(0, css(sky[2], 0)); g.addColorStop(1, css(mix(sky[2], [255, 255, 255], 0.4), 0.75 * a)); x.fillStyle = g; x.fillRect(0, horizon - fh * 0.35, w, fh * 0.35 + 4); };
     if (env.photo) {
       env.drawPhoto();
       if (p.vivid > 0) {
@@ -6049,26 +6094,42 @@ const skies = {
       if (L.fill) { godRays(ctx, w, h, p.sun * 0.6, dark ? 1 : 0); if (p.sun > 0) lensFlare(ctx, w, h, p.sun * 0.5); }
       return true;
     }
-    const g = ctx.createLinearGradient(0, F.y0, 0, Math.max(F.y0 + 10, horizon)); g.addColorStop(0, css(sky[0])); g.addColorStop(0.55, css(sky[1])); g.addColorStop(1, css(sky[2]));
-    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    // the sky and all that is in it, painted once and kept until one of its sliders changes (see keptLayer):
+    // the sea, the town, the pole and the leaves in front of it are cheap to paint over it again
+    const rays = (x, amt) => {   // the sun's rays: soft beams, so painted at a quarter of the size and laid on enlarged
+      if (amt <= 0) return;
+      if (!canPaint(x)) { godRays(x, w, h, amt, dark ? 1 : 0); return; }
+      const small = WORK.skRays || (WORK.skRays = document.createElement("canvas")), m = x.getTransform(), W = x.canvas.width, H = x.canvas.height, sw = Math.ceil(W / 4), sh = Math.ceil(H / 4);
+      if (small.width !== sw || small.height !== sh) { small.width = sw; small.height = sh; }
+      const r = small.getContext("2d"); r.setTransform(1, 0, 0, 1, 0, 0); r.clearRect(0, 0, sw, sh); r.setTransform(m.a / 4, m.b / 4, m.c / 4, m.d / 4, m.e / 4, m.f / 4);
+      godRays(r, w, h, amt, dark ? 1 : 0);
+      inPixels(x, () => { x.globalCompositeOperation = "screen"; x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high"; x.drawImage(small, 0, 0, W, H); });
+    };
+    const paintSky = (x) => {
+      const g = x.createLinearGradient(0, F.y0, 0, Math.max(F.y0 + 10, horizon)); g.addColorStop(0, css(sky[0])); g.addColorStop(0.55, css(sky[1])); g.addColorStop(1, css(sky[2]));
+      x.fillStyle = g; x.fillRect(0, 0, w, h);
+      if (!L.grid) return;
+      rays(x, p.sun * 0.55);
+      if (p.fleece > 0) fleece(x, F, horizon, p.fleece, 2500);
+      for (let k = 0, n = p.contrail * 2; k < Math.ceil(n); k++) {   // a plane's trail, fading out behind it
+        const y0 = F.y0 + fh * (0.12 + rand(k * 2.3 + 2510) * 0.3), x1 = F.x0 + fw * (0.45 + rand(k * 3.1 + 2511) * 0.45), y1 = y0 - fh * (0.04 + rand(k * 3.7 + 2512) * 0.12), x0 = F.x0 - 20, a = clamp(n - k);
+        const tr = x.createLinearGradient(x0, y0, x1, y1); tr.addColorStop(0, css(SK.white, 0)); tr.addColorStop(1, css(SK.white, 0.85 * a));
+        x.save(); x.lineCap = "round"; x.strokeStyle = tr;
+        x.lineWidth = u * 0.022; x.globalAlpha = 0.35; x.beginPath(); x.moveTo(x0, y0 + 6); x.quadraticCurveTo((x0 + x1) / 2, (y0 + y1) / 2 + fh * 0.02, x1, y1); x.stroke();
+        x.lineWidth = u * 0.006; x.globalAlpha = 1; x.beginPath(); x.moveTo(x0, y0); x.quadraticCurveTo((x0 + x1) / 2, (y0 + y1) / 2 + fh * 0.02, x1, y1); x.stroke();
+        x.fillStyle = css(SK.white, a); x.beginPath(); x.arc(x1, y1, u * 0.003, 0, TAU); x.fill(); x.restore();
+      }
+      const ramp = (v, a, b) => clamp((v - a) / (b - a)), room = Math.max(u * 0.1, horizon - F.y0 - fh * 0.08), c = p.cumulus;
+      const mass = (fx, k, size, tall, grow) => { if (grow <= 0) return; const s = Math.min(u * size * (0.15 + 0.85 * grow), room / (tall * 1.05)); if (s > u * 0.02) cumulus(x, F.x0 + fw * fx, horizon, s, tall, k); };
+      mass(0.5 + rand(2520) * 0.1, 2521, 0.14, 1.1, ramp(c, 0.55, 0.95));      // far off, small
+      mass(0.88 + rand(2522) * 0.08, 2523, 0.16, 1.3, ramp(c, 0.7, 1));
+      mass(0.15 + rand(2524) * 0.12, 2525, 0.24, 1.5, ramp(c, 0.3, 0.85));
+      mass(0.68 + rand(2526) * 0.1, 2527, 0.32, 1.9, ramp(c, 0, 0.7));        // the great tower, first
+      haze(x, p.haze);
+    };
+    const kept = canPaint(ctx) && keptLayer(ctx, "skSky", [dark, seed, L.grid ? 1 : 0, w, h, F.x0, F.y0, F.x1, F.y1, horizon.toFixed(2), p.sun, p.fleece, p.contrail, p.cumulus, p.haze].join("|"), paintSky);
+    if (kept) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(kept, 0, 0); ctx.restore(); } else paintSky(ctx);
     if (!L.grid) return true;
-    godRays(ctx, w, h, p.sun * 0.55, dark ? 1 : 0);
-    if (p.fleece > 0) fleece(ctx, F, horizon, p.fleece, 2500);
-    for (let k = 0, n = p.contrail * 2; k < Math.ceil(n); k++) {   // a plane's trail, fading out behind it
-      const y0 = F.y0 + fh * (0.12 + rand(k * 2.3 + 2510) * 0.3), x1 = F.x0 + fw * (0.45 + rand(k * 3.1 + 2511) * 0.45), y1 = y0 - fh * (0.04 + rand(k * 3.7 + 2512) * 0.12), x0 = F.x0 - 20, a = clamp(n - k);
-      const tr = ctx.createLinearGradient(x0, y0, x1, y1); tr.addColorStop(0, css(SK.white, 0)); tr.addColorStop(1, css(SK.white, 0.85 * a));
-      ctx.save(); ctx.lineCap = "round"; ctx.strokeStyle = tr;
-      ctx.lineWidth = u * 0.022; ctx.globalAlpha = 0.35; ctx.beginPath(); ctx.moveTo(x0, y0 + 6); ctx.quadraticCurveTo((x0 + x1) / 2, (y0 + y1) / 2 + fh * 0.02, x1, y1); ctx.stroke();
-      ctx.lineWidth = u * 0.006; ctx.globalAlpha = 1; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo((x0 + x1) / 2, (y0 + y1) / 2 + fh * 0.02, x1, y1); ctx.stroke();
-      ctx.fillStyle = css(SK.white, a); ctx.beginPath(); ctx.arc(x1, y1, u * 0.003, 0, TAU); ctx.fill(); ctx.restore();
-    }
-    const ramp = (v, a, b) => clamp((v - a) / (b - a)), room = Math.max(u * 0.1, horizon - F.y0 - fh * 0.08), c = p.cumulus;
-    const mass = (fx, k, size, tall, grow) => { if (grow <= 0) return; const s = Math.min(u * size * (0.15 + 0.85 * grow), room / (tall * 1.05)); if (s > u * 0.02) cumulus(ctx, F.x0 + fw * fx, horizon, s, tall, k); };
-    mass(0.5 + rand(2520) * 0.1, 2521, 0.14, 1.1, ramp(c, 0.55, 0.95));      // far off, small
-    mass(0.88 + rand(2522) * 0.08, 2523, 0.16, 1.3, ramp(c, 0.7, 1));
-    mass(0.15 + rand(2524) * 0.12, 2525, 0.24, 1.5, ramp(c, 0.3, 0.85));
-    mass(0.68 + rand(2526) * 0.1, 2527, 0.32, 1.9, ramp(c, 0, 0.7));        // the great tower, first
-    haze(p.haze);
     if (p.sea > 0) {   // the sea from the horizon down behind the town, a sun-glitter path on it
       const sg = ctx.createLinearGradient(0, horizon, 0, F.y1); sg.addColorStop(0, css(dark ? [120, 96, 150] : [92, 158, 214])); sg.addColorStop(1, css(dark ? [34, 30, 76] : [18, 84, 166]));
       ctx.save(); ctx.globalAlpha = Math.min(1, p.sea * 4); ctx.fillStyle = sg; ctx.fillRect(0, horizon, w, F.y1 - horizon + 8);
