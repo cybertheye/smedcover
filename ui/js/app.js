@@ -2,7 +2,7 @@
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
 import { virtualSize , layoutValues, dragLayout, LAYOUT_LIMITS } from "./layout.js";
-import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles } from "./render.js";
+import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles, showsFrame } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
@@ -373,7 +373,7 @@ function layerAt(e) {
   /** The pointer in the selected layer's own rotated frame, plus the handle under it (if any). */
   function grip(e) {
     const L = layer(), hit = cv._hits && cv._hits.find((h) => h.id === S.layerId);
-    if (group().length || !L || !hit || hit.fill || L.locked || L.type === "bg" || FIXED.includes(L.type)) return null;
+    if (group().length || !L || !hit || !showsFrame(hit) || L.locked || L.type === "bg" || FIXED.includes(L.type)) return null;
     const p = virtualPoint(e), a = (-hit.r * Math.PI) / 180, dx = p.x - hit.cx, dy = p.y - hit.cy;
     const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
     const handle = handles(hit, p.k).find((h) => Math.hypot(lx - h.lx, ly - h.ly) <= 11 * p.k);

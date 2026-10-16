@@ -1154,3 +1154,16 @@ test("the soft-edge blur of one channel: spreads a step symmetrically, keeps a c
   assert.ok(row(4)[17] > row(4)[19] && row(4)[19] > row(4)[21], "it falls across the step");
   assert.deepEqual(row(0).map((v) => v.toFixed(4)), row(8).map((v) => v.toFixed(4)), "rows alike stay alike (the vertical pass keeps them)");
 });
+
+test("a photo filling the canvas shows its frame, corners only, once it no longer covers the canvas", async () => {
+  const { showsFrame, handles } = await import("../ui/js/render.js");
+  const ids = (hit) => handles(hit, 1).map((h) => h.id).sort().join(" ");
+  assert.equal(showsFrame({ type: "bg", cx: 960, cy: 540, hw: 960, hh: 540, r: 0 }), false);
+  assert.equal(showsFrame({ type: "photo", cx: 960, cy: 540, hw: 960, hh: 540, r: 0, fill: true, covers: true }), false);   // its frame is off the canvas
+  const small = { type: "photo", cx: 1500, cy: 200, hw: 280, hh: 160, r: 0, fill: true, covers: false };   // scrolled smaller and moved aside
+  assert.equal(showsFrame(small), true);
+  assert.equal(ids(small), "ne nw se sw", "scaled only: no sides to stretch, no knob to turn");
+  const print = { type: "photo", cx: 960, cy: 540, hw: 300, hh: 170, r: 0 };
+  assert.equal(showsFrame(print), true);
+  assert.equal(ids(print), "e n ne nw rot s se sw w");
+});

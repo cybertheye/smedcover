@@ -320,7 +320,9 @@ const PAINT = {
       const a = base.t.all, b = base.t.by[env.key] || { dx: 0, dy: 0, s: 1 };
       rect = photoRect(im, w, h, { dx: (a.x - 0.5) * w + b.dx, dy: (a.y - 0.5) * h + b.dy, s: a.s * b.s });
       frame = () => null;
-      hit = { cx: rect.x + rect.iw / 2, cy: rect.y + rect.ih / 2, hw: rect.iw / 2, hh: rect.ih / 2, r: 0, fill: true };
+      // `covers`: it still covers the whole canvas (scaled down or moved aside, it no longer does, and shows a frame)
+      hit = { cx: rect.x + rect.iw / 2, cy: rect.y + rect.ih / 2, hw: rect.iw / 2, hh: rect.ih / 2, r: 0, fill: true,
+        covers: rect.x <= 0.5 && rect.y <= 0.5 && rect.x + rect.iw >= w - 0.5 && rect.y + rect.ih >= h - 0.5 };
     } else {
       let iw, ih;
       if (L.of) {
@@ -356,7 +358,7 @@ const PAINT = {
     const W = ctx.canvas.width, H = ctx.canvas.height;
     // While a photo is dragged, a costly one (cut out, outlined, shadowed) only slides its last image.
     const costly = L.cut || L.outline > 0 || L.shadow > 0, torn = L.torn && L.outline > 0;
-    const stamp = [W, H, L.cut, L.feather, L.spread, L.outline, torn, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? base.t.all.s : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`].join("|");
+    const stamp = [W, H, L.cut, L.feather, L.spread, L.outline, torn, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? rect.iw.toFixed(1) : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`].join("|");
     const at = fills ? [rect.x, rect.y] : [bt.cx, bt.cy], keep = PHOTO.slides.get(L.id);
     if (costly && isFast() && keep && keep.stamp === stamp) { blit(keep.img, keep.bx + (at[0] - keep.at[0]) * M.a, keep.by + (at[1] - keep.at[1]) * M.d); return hit; }
     const inFrame = (c, fn) => { c.save(); frame(c); fn(c); c.restore(); };
@@ -468,12 +470,15 @@ const PAINT = {
  */
 export function handles(hit, u) {
   const hw = hit.hw + 6 * u, hh = hit.hh + 6 * u;
-  return [
-    { id: "nw", lx: -hw, ly: -hh }, { id: "ne", lx: hw, ly: -hh }, { id: "se", lx: hw, ly: hh }, { id: "sw", lx: -hw, ly: hh },
+  const corners = [{ id: "nw", lx: -hw, ly: -hh }, { id: "ne", lx: hw, ly: -hh }, { id: "se", lx: hw, ly: hh }, { id: "sw", lx: -hw, ly: hh }];
+  if (hit.fill) return corners;   // a photo placed to fill the canvas is scaled, never stretched or turned
+  return [...corners,
     { id: "n", lx: 0, ly: -hh }, { id: "e", lx: hw, ly: 0 }, { id: "s", lx: 0, ly: hh }, { id: "w", lx: -hw, ly: 0 },
     { id: "rot", lx: 0, ly: -hh - 34 * u },
   ];
 }
+/** Whether a hit shows a frame when selected: not the ground, nor a photo that still covers the whole canvas (its frame is off it). */
+export const showsFrame = (hit) => hit.type !== "bg" && !(hit.fill && hit.covers);
 function drawSelection(ctx, hit, k, withHandles = true) {
   const u = 1 / k, hs = handles(hit, u), hw = hit.hw + 6 * u, hh = hit.hh + 6 * u;
   ctx.save();
@@ -482,7 +487,7 @@ function drawSelection(ctx, hit, k, withHandles = true) {
   ctx.lineWidth = 2 * u; ctx.strokeStyle = "#ffffff"; ctx.setLineDash([10 * u, 7 * u]); ctx.strokeRect(-hw, -hh, hw * 2, hh * 2);
   ctx.setLineDash([]);
   if (!withHandles) return ctx.restore();
-  ctx.beginPath(); ctx.moveTo(0, -hh); ctx.lineTo(0, -hh - 34 * u); ctx.stroke();
+  if (!hit.fill) { ctx.beginPath(); ctx.moveTo(0, -hh); ctx.lineTo(0, -hh - 34 * u); ctx.stroke(); }   // the turning knob's stem
   for (const h of hs) {
     ctx.fillStyle = "#ffffff"; ctx.strokeStyle = INK; ctx.lineWidth = 2 * u;
     ctx.beginPath();
@@ -860,10 +865,10 @@ function paintCover(cv, o) {
   // where lettered blocks are, for the perspective's handles; a drag paints only some layers, so what is not repainted is kept
   cv._blocks = { ...(o.live ? cv._blocks : null), ...env.blocks, k: kx };
   if (o.picked && o.picked.length > 1) {
-    for (const hit of cv._hits) if (o.picked.includes(hit.id) && hit.type !== "bg" && !hit.fill) drawSelection(ctx, hit, kx, false);
+    for (const hit of cv._hits) if (o.picked.includes(hit.id) && showsFrame(hit)) drawSelection(ctx, hit, kx, false);
   } else if (o.select) {
     const hit = cv._hits.find((x) => x.id === o.select);
-    if (hit && hit.type !== "bg" && !hit.fill) drawSelection(ctx, hit, kx);   // a photo that fills the canvas has no frame to show
+    if (hit && showsFrame(hit)) drawSelection(ctx, hit, kx);
     drawLayoutHandles(ctx, cv, cover.layers.find((l) => l.id === o.select), kx, rgb(C));
   }
 }
