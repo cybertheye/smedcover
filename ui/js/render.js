@@ -362,7 +362,7 @@ const PAINT = {
     const inFrame = (c, fn) => { c.save(); frame(c); fn(c); c.restore(); };
     const treat = (c) => {   // the look paints on the whole canvas (its washes cover it); the photo itself goes in its frame
       const draw = (grey = 0) => inFrame(c, (x) => drawPhotoAt(x, im, rect.x, rect.y, rect.iw, rect.ih, L.blur, env.hiRes, grey));
-      if (!(L.treat && look().background && look().background(c, { ...env, photo: im, drawPhoto: draw }, { grid: false, blur: L.blur, dim: 0 }, lookValues()))) draw();
+      if (!(L.treat && look().background && look().background(c, { ...env, photo: im, drawPhoto: draw }, { grid: false, blur: L.blur, dim: 0, fill: fills }, lookValues()))) draw();
       inFrame(c, (x) => { if (L.dim > 0) { x.fillStyle = `rgba(7,7,12,${L.dim})`; x.fillRect(rect.x, rect.y, rect.iw, rect.ih); } });
     };
     if (!costly && !mask) {   // a plain photo: straight onto the canvas, clipped to its rectangle (no work canvas)
@@ -788,6 +788,8 @@ function paintCover(cv, o) {
     th: L0.theme ? L0.theme(base, C, lookValues()) : base,
     hasBrand: cover.layers.some((l) => l.type === "brand" && l.visible),
     resolve: (l) => resolve(l, w, h, key, cat.id),   // where another layer is (a photo's copy follows its original)
+    // the channel graphic, for a look that uses its shape (a giant silhouette, a glowing photogram): draw(ctx) paints it about 0, 0 at scale 1
+    graphic: cat.graphic && cat.graphic.kind !== "none" ? { ref: cat.graphic, draw: (c) => drawAsset(c, cat.graphic, C, { tint: true, labels: cat.graphic.labels, stamp: cat.graphic.stamp }) } : null,
   };
   cv._virtual = [w, h];
   cv._layout = env.G;   // for the editor's layout handles

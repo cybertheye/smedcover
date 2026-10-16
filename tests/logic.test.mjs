@@ -476,7 +476,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "bluetone", "redstreet"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "bluetone", "redstreet", "negative", "cinema", "cyano", "monofilm", "typo"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && q.min <= q.def && q.def <= q.max); }
 });
@@ -634,6 +634,29 @@ test("the blue retro and red street looks: their own grounds, the channel colour
   const plate = []; const raw2 = { set fillStyle(v) { plate.push(v); }, get fillStyle() { return "x"; }, lineWidth: 1 };
   LOOKS.redstreet.wrap(raw2, [40, 120, 255], lookValues(), true).fillStyle = "#2878ff";
   assert.match(plate[0], /^rgba\(40,120,255/);                                                  // the channel's name keeps its colour
+  setLook("cel");
+});
+
+test("the five poster looks: many settings each, their own grounds, flat layouts, and painting without a canvas does no harm", () => {
+  const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo"]) {
+    const L = LOOKS[id];
+    assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
+    assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
+    for (const onDark of [true, false]) {
+      setLook(id, null, 3, onDark);
+      assert.match(L.theme({}, [40, 120, 220], lookValues()).field, /^rgba\(/);
+      assert.equal(L.layout("stack", 1920, 1080).template, "stack");
+      const env = { w: 1920, h: 1080, C: [40, 120, 220], photo: null, cat: { code: "AB", name: "x" }, o: { profile: { brand: { name: "B" }, categories: [{}] }, catIndex: 0, size: { w: 1920, h: 1080 } }, G: L.layout("stack", 1920, 1080) };
+      assert.equal(L.background(proxy(), env, { grid: true }, lookValues()), true);   // no canvas, no graphic: the parts that need one are left out
+      L.post(proxy(), 1920, 1080, [40, 120, 220], lookValues(), 1, []);
+    }
+  }
+  setLook("negative", { chan: 1 }, 7, false);   // the light ground is the red one
+  assert.equal(LOOKS.negative.theme({}, [40, 120, 220], lookValues()).field, "rgba(40,120,220,1)");   // the channel colour in place of the red
+  setLook("cinema", null, 3, true);
+  const dusk = parseColour(LOOKS.cinema.theme({}, [230, 140, 40], lookValues()).field);
+  assert.ok(dusk[0] > dusk[2] && (0.2126 * dusk[0] + 0.7152 * dusk[1] + 0.0722 * dusk[2]) / 255 < 0.3, "the cinema ground: a dark, muted version of the channel colour");
   setLook("cel");
 });
 

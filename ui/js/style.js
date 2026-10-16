@@ -1560,7 +1560,904 @@ const redstreet = {
 - "white" is warm white, "dark" is black, and "main" comes out in the channel colour (yellow when that is a red) — use it for one small part that should shout.`,
 };
 
-export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, bluetone, redstreet };
+// ====================================================================== shared by the poster looks below
+const canPaint = (ctx) => typeof document !== "undefined" && !!ctx.canvas && typeof ctx.getTransform === "function";
+/**
+ * A work canvas the size of ctx's, cleared, drawing with ctx's transform: for painting something whole
+ * and then laying it down at once — with an alpha or a mode, or after cutting into it. One per `slot`.
+ */
+function workLike(ctx, slot) {
+  const cv = ctx.canvas, s = WORK[slot] || (WORK[slot] = document.createElement("canvas"));
+  if (s.width !== cv.width || s.height !== cv.height) { s.width = cv.width; s.height = cv.height; }
+  const x = s.getContext("2d");
+  x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = "source-over"; x.shadowColor = "rgba(0,0,0,0)"; x.shadowBlur = 0;
+  x.clearRect(0, 0, s.width, s.height); x.setTransform(ctx.getTransform());
+  x.font = ctx.font; x.textAlign = ctx.textAlign; x.textBaseline = ctx.textBaseline;   // lettering painted on it matches what was measured
+  return x;
+}
+/** Lays a work canvas (see workLike) down on ctx, pixel for pixel. */
+function layDown(ctx, x, alpha = 1, mode = "source-over") { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = Math.min(1, alpha); ctx.globalCompositeOperation = mode; ctx.drawImage(x.canvas, 0, 0); ctx.restore(); }
+/**
+ * Paints draw() as a soft blur of `colour`, `r` units across: a shadow cast from far off the canvas,
+ * since a filter cannot be relied on. What draw() paints itself lands off the canvas.
+ */
+function blurred(ctx, r, colour, draw) {
+  const m = ctx.getTransform(), D = 30000;
+  ctx.save(); ctx.shadowColor = colour; ctx.shadowBlur = Math.max(0.1, r * Math.hypot(m.a, m.b)); ctx.shadowOffsetX = D * m.a; ctx.shadowOffsetY = D * m.b;
+  ctx.translate(-D, 0); draw(); ctx.restore();
+}
+/**
+ * The channel graphic as a flat silhouette: opaque white where it is solid, its soft ground shadow and
+ * half-clear parts left out, on a canvas 1200 px square covering ±330 units; `box`: its solid part, in
+ * units. Kept per look and graphic (a look's line work changes the outline a little).
+ */
+function graphicShape(env) {
+  const g = env && env.graphic;
+  if (!g || typeof document === "undefined") return null;
+  const kept = WORK.shapes || (WORK.shapes = new Map()), key = current.id + "|" + JSON.stringify(g.ref);
+  if (kept.has(key)) return kept.get(key);
+  const n = 1200, R = 330, c = document.createElement("canvas"); c.width = c.height = n;
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.translate(n / 2, n / 2); x.scale(n / (2 * R), n / (2 * R));
+  if (!g.draw(x)) return null;   // not ready (an image still loading): try again next time
+  x.setTransform(1, 0, 0, 1, 0, 0);
+  const d = x.getImageData(0, 0, n, n), A = d.data;
+  let x0 = n, y0 = n, x1 = -1, y1 = -1;
+  for (let i = 0, q = 0; i < A.length; i += 4, q++) {
+    const a = A[i + 3], v = a > 200 ? 255 : a > 150 ? (a - 150) * 5 : 0;
+    A[i] = A[i + 1] = A[i + 2] = 255; A[i + 3] = v;
+    if (v) { const px = q % n, py = (q / n) | 0; if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py; }
+  }
+  if (x1 < 0) return null;
+  x.putImageData(d, 0, 0);
+  const k = (2 * R) / n, shape = { c, R, box: { x0: x0 * k - R, y0: y0 * k - R, x1: (x1 + 1) * k - R, y1: (y1 + 1) * k - R }, tints: new Map() };
+  kept.set(key, shape);
+  if (kept.size > 8) kept.delete(kept.keys().next().value);
+  return shape;
+}
+/** The silhouette in one colour (kept, a few per shape). */
+function tintedShape(shape, colour) {
+  const key = colour.map((v) => Math.round(v)).join();
+  let t = shape.tints.get(key);
+  if (!t) {
+    t = document.createElement("canvas"); t.width = t.height = shape.c.width;
+    const x = t.getContext("2d"); x.drawImage(shape.c, 0, 0); x.globalCompositeOperation = "source-in"; x.fillStyle = css(colour); x.fillRect(0, 0, t.width, t.height);
+    shape.tints.set(key, t);
+    if (shape.tints.size > 4) shape.tints.delete(shape.tints.keys().next().value);
+  }
+  return t;
+}
+/** Paints the silhouette in `colour`, its solid part `size` units tall with its middle at (cx, cy), turned by `rot` radians. */
+function placeShape(ctx, shape, colour, cx, cy, size, rot = 0) {
+  const b = shape.box, k = size / Math.max(1, b.y1 - b.y0);
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot); ctx.scale(k, k); ctx.translate(-(b.x0 + b.x1) / 2, -(b.y0 + b.y1) / 2);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(tintedShape(shape, colour), -shape.R, -shape.R, 2 * shape.R, 2 * shape.R);
+  ctx.restore();
+}
+/** The part of the canvas the colour block leaves open — where a look puts its picture — and the block's side. */
+function openField(env) {
+  const { w, h } = env, E = env.G && env.G.edge;
+  if (!E) return { x0: 0, y0: 0, x1: w, y1: h, side: "none" };
+  const [ax, ay, bx, by] = E.line;
+  if (E.ny < -0.5) return { x0: 0, y0: 0, x1: w, y1: Math.max(ay, by), side: "below" };
+  if (E.ny > 0.5) return { x0: 0, y0: Math.min(ay, by), x1: w, y1: h, side: "above" };
+  if (E.nx < -0.5) return { x0: 0, y0: 0, x1: Math.max(ax, bx), y1: h, side: "right" };
+  return { x0: Math.min(ax, bx), y0: 0, x1: w, y1: h, side: "left" };
+}
+/** A halftone screen over what is there: dots of `colour` on a 45° lattice, `pitch` units apart, laid in `mode`. */
+function dotScreen(ctx, w, h, colour, pitch, alpha, mode = "multiply") {
+  if (alpha <= 0 || !canPaint(ctx)) return;
+  const key = `dots|${colour.join()}|${pitch}`;
+  let c = WORK[key];
+  if (!c) {
+    c = WORK[key] = document.createElement("canvas"); c.width = c.height = pitch * 2;
+    const x = c.getContext("2d"); x.fillStyle = css(colour);
+    for (const [px, py] of [[0.5, 0.5], [1.5, 1.5]]) { x.beginPath(); x.arc(px * pitch, py * pitch, pitch * 0.34, 0, TAU); x.fill(); }
+  }
+  ctx.save(); ctx.globalAlpha = Math.min(1, alpha); ctx.globalCompositeOperation = mode; ctx.fillStyle = ctx.createPattern(c, "repeat"); ctx.fillRect(0, 0, w, h); ctx.restore();
+}
+/**
+ * Crumpled paper: facets a shade lighter or darker and a few creases, as a grey field (128 is "no
+ * change") to lay over the picture in soft light. Made at half size, kept per size and seed.
+ */
+function crumpled(w, h) {
+  const kept = WORK.crumple || (WORK.crumple = new Map()), key = `${w | 0}|${h | 0}|${seed}`;
+  if (kept.has(key)) return kept.get(key);
+  const c = document.createElement("canvas"); c.width = Math.ceil(w / 2); c.height = Math.ceil(h / 2);
+  const x = c.getContext("2d"), u = Math.min(w, h);
+  x.scale(0.5, 0.5); x.fillStyle = "rgb(128,128,128)"; x.fillRect(0, 0, w, h);
+  for (let i = 0; i < 160; i++) {   // facets: overlapping triangles, a little lighter or darker
+    const cx = rand(i * 3.1 + 400) * w, cy = rand(i * 4.7 + 401) * h, r = u * (0.08 + rand(i * 5.3 + 402) * 0.35);
+    x.fillStyle = rand(i * 1.9 + 403) > 0.5 ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)";
+    x.beginPath(); for (let j = 0; j < 3; j++) { const a = rand(i * 7 + j * 2.3 + 404) * TAU; x.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } x.fill();
+  }
+  x.lineCap = "round";
+  for (let i = 0; i < 18; i++) {     // creases: a sharp light ridge with a soft dark valley beside it
+    const a = rand(i * 2.7 + 420) * Math.PI, cx = rand(i * 3.9 + 421) * w, cy = rand(i * 5.1 + 422) * h, len = u * (0.3 + rand(i * 6.3 + 423) * 0.9);
+    const dx = Math.cos(a) * len / 2, dy = Math.sin(a) * len / 2, mid = (rand(i * 8.1 + 424) - 0.5) * u * 0.08;
+    const line = (off, colour, lw) => { x.strokeStyle = colour; x.lineWidth = lw; x.beginPath(); x.moveTo(cx - dx - dy * off, cy - dy + dx * off); x.quadraticCurveTo(cx - dy * (off + mid / len), cy + dx * (off + mid / len), cx + dx - dy * off, cy + dy + dx * off); x.stroke(); };
+    line(0.006, "rgba(0,0,0,0.16)", 7); line(0, "rgba(255,255,255,0.32)", 1.6);
+  }
+  kept.set(key, c);
+  if (kept.size > 2) kept.delete(kept.keys().next().value);
+  return c;
+}
+/** Lays crumpled paper (see crumpled) over the picture. */
+function crumple(ctx, w, h, amt) {
+  if (amt <= 0 || !canPaint(ctx)) return;
+  ctx.save(); ctx.globalCompositeOperation = "soft-light"; ctx.globalAlpha = Math.min(1, amt); ctx.imageSmoothingEnabled = true; ctx.drawImage(crumpled(w, h), 0, 0, w, h); ctx.restore();
+}
+/** A soft dark ring round the edge of the picture. */
+function vignette(ctx, w, h, colour, alpha, inner = 0.42) {
+  if (alpha <= 0) return;
+  const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * inner, w / 2, h / 2, Math.hypot(w, h) * 0.62);
+  g.addColorStop(0, css(colour, 0)); g.addColorStop(1, css(colour, Math.min(1, alpha)));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+}
+/**
+ * Greeked text: lines of thin bars the length of words, for the dense small print of a poster without
+ * inventing words. (x, y): the first line's top; `lines` of `lh` pitch, `width` wide, aligned `align`.
+ */
+function greeked(ctx, x, y, width, lines, lh, colour, k, align = "left") {
+  ctx.fillStyle = colour;
+  for (let i = 0; i < lines; i++) {
+    const words = [];
+    let used = 0;
+    for (let j = 0; used < width * (i === lines - 1 ? 0.55 : 0.97); j++) { const ww = lh * (0.9 + rand(k + i * 13.1 + j * 1.7) * 3.2); if (used + ww > width) break; words.push(ww); used += ww + lh * 0.45; }
+    let at = align === "center" ? x + (width - used) / 2 : align === "right" ? x + width - used : x;
+    for (const ww of words) { ctx.fillRect(at, y + i * lh, ww, Math.max(1, lh * 0.36)); at += ww + lh * 0.45; }
+  }
+}
+
+// ====================================================================== negative space: the red and black film poster
+// Saul Bass and the Polish poster school, by way of today's minimal film posters: red, black and an
+// off-white; one huge silhouette carrying the idea, cut against the ground so that the shapes between
+// read as much as the shapes; a small, exact title; a few lines of credits. Flat, hard-edged, a little
+// rough, as a screen print is.
+const NEG = { red: [212, 30, 36], black: [16, 13, 13], cream: [242, 233, 214] };
+const negSpot = (C) => (values.chan ? C : NEG.red);                       // the one colour: red, or the channel's
+const negGround = (C) => (dark ? NEG.black : negSpot(C)), negInk = (C) => (dark ? negSpot(C) : NEG.black);
+/** Where the giant silhouette stands: on the open field's floor, toward its far side, behind the channel graphic like its huge shadow, cropped by the floor and the edge. */
+function negPlace(env, p) {
+  const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, size = fh * (0.45 + 1.05 * p.giant);
+  return { F, cx: F.x0 + fw * (0.66 + rand(181) * 0.1), cy: F.y1 - size * 0.36, size, rot: (rand(182) - 0.5) * 0.24 };
+}
+const negative = {
+  id: "negative",
+  repaint: (c) => `a minimalist film poster made from a photograph: hard black-and-white with crushed blacks and clean whites, printed over a flat vermilion red, high contrast, a little screen-print roughness; the subject read as a bold silhouette; still the same picture, no text.`,
+  about: { zh: "红黑负形海报：索尔·巴斯和波兰海报学派的路子——红、黑、米白三色，一个巨大的剪影承载全部意思（用的是频道图形的轮廓，被画面边缘裁切），剪影和底色互相咬合，空出来的形和画出来的形一样有分量；可加一块反色的负形分割、聚光光束、牵引的细线；标题小而精确，底部几行演职员小字，丝网印刷的粗糙质感。可选红底黑形或黑底红形，也可以用频道色代替红色。冷峻、有隐喻、一眼就懂——适合电影、书评、社会议题、悬疑与观点类内容。", en: "A red-and-black negative-space poster, after Saul Bass and the Polish poster school: red, black and off-white; one huge silhouette carries the idea (the channel graphic's outline, cropped by the edge), cut against the ground so the shapes between read as much as the shapes; optionally a reversed split, a spotlight beam, taut threads; a small exact title, a few lines of credits, the roughness of a screen print. Black on red or red on black, and the channel colour can stand in for the red. Stark, metaphorical, read at a glance — for film, books, social issues, mysteries, opinion." },
+  name: { zh: "负形海报", en: "Negative space" },
+  seeded: true,
+  params: [
+    { key: "giant", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "巨型剪影", en: "Giant silhouette" } },
+    { key: "cut", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "负形分割", en: "Reversed split" } },
+    { key: "beam", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "聚光光束", en: "Spotlight beam" } },
+    { key: "threads", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "牵引细线", en: "Taut threads" } },
+    { key: "print", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "丝网质感", en: "Screen-print texture" } },
+    { key: "credits", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "演职员小字", en: "Credits" } },
+    { key: "duo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.85, name: { zh: "照片红黑", en: "Photo in red and black" } },
+    { key: "chan", toggle: true, min: 0, max: 1, step: 1, def: 0, name: { zh: "用频道色代替红色", en: "Channel colour for the red" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.26, side: 0.34, strip: 0.12 }),
+  theme: (base, C) => ({ ...base, field: css(negGround(C)), text: css(NEG.cream), dim: css(NEG.cream, 0.6), titleFill: css(NEG.cream), titleInk: css(NEG.black), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The ground; the giant silhouette in a deeper shade of the ground (tone on tone, so the channel
+   * graphic in front of it stays the thing that is read); a region of the other colour cut in along a
+   * slanted edge (the reversed split), in which the silhouette turns into the ground's colour — a
+   * negative, sharp where it crosses; a beam of light from above; threads drawn taut to it. A photo
+   * goes hard black and white, printed over the red.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, ground = negGround(C), ink = negInk(C), spot = negSpot(C);
+    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (env.photo) {
+      env.drawPhoto(p.duo);
+      if (p.duo > 0) {
+        ctx.save(); ctx.globalCompositeOperation = "soft-light"; ctx.globalAlpha = p.duo; env.drawPhoto(1); env.drawPhoto(1); ctx.restore();   // contrast, twice
+        wash(ctx, w, h, "multiply", mix([255, 255, 255], spot, 0.9), p.duo);
+        wash(ctx, w, h, "screen", NEG.black, p.duo * 0.6);
+      }
+      return true;
+    }
+    if (!L.grid) return true;
+    const S = graphicShape(env), at = negPlace(env, p), F = at.F;
+    // the reversed split: its leaning edge sweeps in from the far side as the slider goes up, across the
+    // silhouette (through its middle at 0.5), so that more and more of the figure reads in reverse
+    let split = null;
+    if (p.cut > 0) {
+      const x0 = Math.min(w + h * 0.2, at.cx + at.size * 0.55 * (1 - 2 * p.cut)), lean = h * 0.12 * (rand(183) > 0.5 ? 1 : -1);
+      split = [[x0 + lean, 0], [w, 0], [w, h], [x0 - lean, h]];
+      shapeOf(ctx, split); ctx.fillStyle = css(ink); ctx.fill();
+    }
+    if (p.beam > 0) {   // a cone of light from above, onto the silhouette, with a few brighter rays in it
+      const bx = at.cx, spread = w * (0.12 + 0.2 * p.beam), g = ctx.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0, css(NEG.cream, 0.42 * p.beam)); g.addColorStop(1, css(NEG.cream, 0));
+      ctx.save(); ctx.globalCompositeOperation = "screen"; ctx.fillStyle = g;
+      shapeOf(ctx, [[bx - w * 0.02, 0], [bx + w * 0.02, 0], [bx + spread, h], [bx - spread, h]]); ctx.fill();
+      for (let i = 0; i < 7; i++) { const t = (i + 0.5) / 7 - 0.5, wdt = w * 0.004 * (1 + rand(i + 190) * 2); shapeOf(ctx, [[bx + t * w * 0.04 - wdt, 0], [bx + t * w * 0.04 + wdt, 0], [bx + t * spread * 2 + wdt * 4, h], [bx + t * spread * 2 - wdt * 4, h]]); ctx.fill(); }
+      ctx.restore();
+    }
+    if (S && p.giant > 0) {
+      const draw = (colour) => placeShape(ctx, S, colour, at.cx, at.cy, at.size, at.rot), shade = dark ? mix(NEG.black, spot, 0.32) : mix(spot, NEG.black, 0.3);
+      if (split) { ctx.save(); ctx.beginPath(); ctx.rect(0, 0, w, h); split.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.clip("evenodd"); draw(shade); ctx.restore(); ctx.save(); shapeOf(ctx, split); ctx.clip(); draw(ground); ctx.restore(); }
+      else draw(shade);
+    }
+    if (p.threads > 0) {   // threads pulled taut from the edges to the silhouette
+      const n = Math.round(2 + 6 * p.threads), tx = at.cx, ty = at.cy - at.size * 0.15;
+      ctx.strokeStyle = css(dark ? spot : NEG.cream, 0.5 + 0.5 * p.threads); ctx.lineWidth = 2;
+      for (let i = 0; i < n; i++) {
+        const side = i % 4, t = rand(i * 2.9 + 195), ex = side === 0 ? t * w : side === 1 ? w : side === 2 ? t * w : 0, ey = side === 0 ? 0 : side === 1 ? t * h : side === 2 ? h : t * h;
+        ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(tx + (rand(i * 3.7 + 196) - 0.5) * at.size * 0.3, ty + (rand(i * 4.3 + 197) - 0.5) * at.size * 0.3); ctx.stroke();
+      }
+    }
+    return true;
+  },
+  accent: { fill: (C) => css(dark ? negSpot(C) : NEG.black), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },   // a flat block of the other colour
+  /**
+   * Upright and flat: warm off-white letters. Highlighted words are set reversed out of a bar of the
+   * other colour (red on black, black on red), so they read on the ground, the block and the silhouette alike.
+   */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, bar = o.hi || (dark ? negSpot(o.C || NEG.red) : NEG.black);
+    pass((a, x) => { if (a.hi) { ctx.fillStyle = css(bar); ctx.fillRect(x - fs * 0.04, -fs * 0.86, ctx.measureText(a.t).width + fs * 0.08, fs * 1.02); } });
+    pass((a, x) => { ctx.fillStyle = css(o.fill || NEG.cream); ctx.fillText(a.t, x, 0); });
+  },
+  // objects as cut paper: black, off-white and the one colour; the small parts read on the ground and on the block
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates
+    ? { fill: { ink: NEG.cream }, stroke: { ink: NEG.cream } }
+    : { fill: { ink: NEG.black, light: NEG.cream, mid: mix(NEG.cream, NEG.black, 0.3), dark: NEG.black, colour: () => negSpot(C) }, stroke: { ink: NEG.black, light: NEG.cream, colour: () => negSpot(C) }, line: 0.5 }),
+  sticker: painters({ line: null, shadow: null, tone: inkAs(NEG.black) }),
+  /** The corner tag: a slab of the channel colour (off-white when that would vanish into the ground), condensed lettering. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    ctx.font = `700 ${fs}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + fs * 0.7, h = fs * 1.18, top = y + fs * 0.08, slab = near(C, negGround(C), 90) || near(C, dark ? negSpot(C) : NEG.black, 90) ? NEG.cream : C;
+    ctx.fillStyle = css(slab); ctx.fillRect(x, top, w, h);
+    ctx.fillStyle = ink || css(lum(slab) > 0.45 ? NEG.black : NEG.cream); spaced(ctx, str, x + fs * 0.35, top + h * 0.5 + fs * 0.36, 3);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The frame layer: a line of billing at the top, and the credits block at the foot — real names where there are some, the rest greeked. */
+  frame(ctx, env, p) {
+    const a = p.credits;
+    if (a <= 0) return;
+    const { w, h } = env, P = env.o.profile, brand = (P.brand.name || "").toUpperCase(), name = (env.cat.name || env.cat.code || "").toUpperCase(), col = css(NEG.cream, 0.85 * a);
+    ctx.save(); ctx.fillStyle = col; ctx.textBaseline = "alphabetic"; ctx.textAlign = "center";
+    ctx.font = `700 20px ${fonts.en}, ${fonts.cn}`; spacedCentre(ctx, `${brand} ${brand ? "PRESENTS" : ""}`.trim(), w / 2, 64, 6);
+    const bw = Math.min(w * 0.5, 820), bx = (w - bw) / 2;
+    ctx.font = `700 18px ${fonts.en}, ${fonts.cn}`; spacedCentre(ctx, `${name}  ·  ${pad2(env.o.catIndex + 1)}`, w / 2, h - 96, 4);
+    greeked(ctx, bx, h - 84, bw, 3, 9, css(NEG.cream, 0.6 * a), 210 + env.o.catIndex, "center");
+    ctx.restore();
+  },
+  image(ctx, C, unit) { ctx.shadowColor = "rgba(0,0,0,0)"; },
+  /** A screen print: the paper's specks, ink a little uneven, and the grain of the paper under it. */
+  post(ctx, w, h, C, p, unit = 1) {
+    if (p.print <= 0) return;
+    ctx.save(); ctx.globalCompositeOperation = "soft-light";
+    for (let i = 0; i < 26; i++) {
+      const x = rand(i * 3.3 + 230) * w, y = rand(i * 4.1 + 231) * h, r = Math.min(w, h) * (0.12 + rand(i * 5.9 + 232) * 0.3), g = ctx.createRadialGradient(x, y, 0, x, y, r), c = rand(i + 233) > 0.5 ? 255 : 0;
+      g.addColorStop(0, `rgba(${c},${c},${c},${0.22 * p.print})`); g.addColorStop(1, `rgba(${c},${c},${c},0)`);
+      ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    ctx.restore();
+    grain(ctx, p.print * 0.8, unit, true);
+    grain(ctx, p.print * 0.35, unit);
+  },
+  prompt: `Stickers for a minimalist film poster in the manner of Saul Bass — shapes cut from paper with scissors — that read at a glance:
+- one bold silhouette per sticker, with a strong, simple outline and a clever negative shape inside it where it helps (a keyhole, a face in profile, a hand); no realism, no perspective, no detail inside the silhouette;
+- flat colour only: black ("ink"), off-white ("white") and the main colour; never more than three;
+- the app draws no outline and no shadow: neighbouring shapes must differ in colour to be told apart.`,
+  solidPrompt: `Objects as a minimalist film poster would show them: a few boxes and cylinders cut flat as silhouettes, boldly proportioned; no realism, no fine detail.
+- the renderer paints faces in black, off-white and the one colour: do NOT try to draw shading or outlines yourself;
+- "white" is off-white, "dark" is black, and "main" is the poster's red — use it for one part.`,
+};
+/** Spaced lettering centred on x (spaced() sets from the left). */
+function spacedCentre(ctx, str, x, y, gap) { const align = ctx.textAlign; ctx.textAlign = "left"; spaced(ctx, str, x - spacedW(ctx, str, gap) / 2, y, gap); ctx.textAlign = align; }
+
+// ====================================================================== minimal film poster: a silhouette with a story in it
+// The fan-made minimal movie poster: one muted colour from the channel's (ochre, dusk violet, slate,
+// teal), a dark silhouette standing in it with a soft light behind, a landscape fading back in layers,
+// crumpled or worn paper, a vignette, a thin spaced title and a credits block at the foot. A photo can
+// go inside the silhouette, as a double exposure.
+const CINE = { night: [12, 12, 15], paper: [226, 214, 190], cream: [236, 228, 210], soot: [18, 15, 14] };
+const cineMute = (C) => mix(C, grey(C), 0.45);
+const cineGround = (C) => (dark ? mix(cineMute(C), CINE.night, 0.72) : mix(cineMute(C), CINE.paper, 0.3));
+const cineShade = (C) => (dark ? [6, 6, 8] : mix(cineGround(C), CINE.soot, 0.86));        // the silhouette
+const cineText = () => (dark ? CINE.cream : CINE.soot);
+/** Where the silhouette stands: on the open field's floor, a little left of the middle (clear of the channel graphic), cropped by that floor. */
+function cinePlace(env, p) {
+  const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, size = fh * (0.32 + 0.6 * p.giant);
+  return { F, cx: F.x0 + fw * 0.44, cy: F.y1 - size * 0.42, size };
+}
+/** The ground without the silhouette: the colour, the light behind where the figure stands, the landscape in layers. */
+function cineGroundPaint(ctx, env, p, at) {
+  const { w, h, C } = env, ground = cineGround(C), u = Math.min(w, h), F = at.F;
+  ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+  const top = ctx.createLinearGradient(0, 0, 0, h);   // a little deeper at the top, as a dusk sky
+  top.addColorStop(0, css(mix(ground, CINE.night, dark ? 0.45 : 0.22))); top.addColorStop(0.6, css(ground, 0));
+  ctx.fillStyle = top; ctx.fillRect(0, 0, w, h);
+  if (p.glow > 0) {   // a soft light behind the head of the figure: a wide halo and a brighter core
+    const gx = at.cx, gy = at.cy - at.size * 0.2, lit = mix(ground, CINE.cream, dark ? 0.68 : 0.75);
+    for (const [r, a] of [[at.size * 1.5, 0.55], [at.size * 0.7, 0.9]]) {
+      const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, r);
+      g.addColorStop(0, css(lit, a * p.glow)); g.addColorStop(1, css(lit, 0));
+      ctx.fillStyle = g; ctx.fillRect(gx - r, gy - r, r * 2, r * 2);
+    }
+  }
+  if (p.horizon > 0) {   // three ridges fading back: the furthest nearly the sky, the nearest nearly the figure
+    const floor = F.y1;
+    for (let k = 0; k < 3; k++) {
+      const depth = (3 - k) / 3, base = floor - u * (0.05 + 0.13 * depth) * (0.4 + 0.6 * p.horizon), amp = u * (0.02 + 0.05 * depth) * p.horizon;
+      const col = mix(ground, cineShade(C), 0.22 + 0.24 * k);
+      ctx.beginPath(); ctx.moveTo(0, h);
+      for (let x = 0; x <= w + 20; x += 20) { const t = x / w; ctx.lineTo(x, base - amp * (Math.sin(t * (3 + k) + rand(k + 240) * 6) * 0.6 + Math.sin(t * (9 + k * 3) + rand(k + 241) * 6) * 0.25 + (noise(k * 50 + Math.floor(x / 40)) - 0.5) * 0.3)); }
+      ctx.lineTo(w, h); ctx.closePath(); ctx.fillStyle = css(col); ctx.fill();
+    }
+  }
+}
+const cinema = {
+  id: "cinema",
+  repaint: (c) => `a minimalist movie poster made from a photograph: muted, moody colour (a dusky version of ${c}), soft light from behind the subject, the subject reading as a dark silhouette, worn paper texture, a gentle vignette, cinematic and quiet; still the same picture, no text.`,
+  about: { zh: "极简电影海报：从频道色里取一个沉静的颜色（赭石、暮紫、灰蓝、墨绿），一个深色剪影（频道图形的轮廓）站在画面里，身后一团柔光，远处的山峦一层层淡出去，皱纸纹理、暗角和褪色，细而疏朗的衬线标题，底部一块演职员表；有照片时可以把照片装进剪影，做成双重曝光。安静、有故事感、电影感强——适合影评、书评、人物故事、纪录片与情绪向内容。", en: "The minimal movie poster: a quiet colour drawn from the channel's (ochre, dusk violet, slate, deep green), a dark silhouette (the channel graphic's outline) standing in it with a soft light behind, ridges fading back in layers, crumpled paper, a vignette and fade, a thin spaced serif title and a credits block at the foot; with a photo, the photo can go inside the silhouette as a double exposure. Quiet, story-led, cinematic — for film and book reviews, portraits, documentaries, mood pieces." },
+  name: { zh: "极简电影", en: "Minimal film poster" },
+  seeded: true,
+  params: [
+    { key: "giant", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "剪影", en: "Silhouette" } },
+    { key: "glow", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "背光", en: "Backlight" } },
+    { key: "horizon", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "远山层次", en: "Receding ridges" } },
+    { key: "paper", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "皱纸纹理", en: "Crumpled paper" } },
+    { key: "fade", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "褪色", en: "Fade" } },
+    { key: "vignette", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "暗角", en: "Vignette" } },
+    { key: "credits", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "演职员表", en: "Credits" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "颗粒", en: "Grain" } },
+    { key: "inside", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.8, name: { zh: "照片装进剪影", en: "Photo inside the silhouette" } },
+    { key: "duo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "照片调色", en: "Photo toning" } },
+  ],
+  titleFont: (f) => f.serif,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.2, side: 0.3, strip: 0.11 }),
+  theme: (base, C) => ({ ...base, field: css(cineGround(C)), text: css(cineText()), dim: css(cineText(), 0.6), titleFill: css(cineText()), titleInk: css(cineGround(C)), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The ground, its light and ridges, and the silhouette. A photo is toned toward the ground's colour;
+   * one that fills the canvas can show only inside the silhouette: the ground is painted again over
+   * it, with the silhouette cut out of it.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, at = cinePlace(env, p);
+    if (env.photo) {
+      ctx.fillStyle = css(cineGround(C)); ctx.fillRect(0, 0, w, h);
+      env.drawPhoto(p.duo * 0.6);
+      wash(ctx, w, h, "soft-light", mix(cineMute(C), CINE.cream, 0.2), p.duo * 0.7);
+      wash(ctx, w, h, "multiply", mix([255, 255, 255], cineMute(C), 0.5), p.duo * 0.55);
+      const S = L.fill && p.inside > 0 && p.giant > 0 && canPaint(ctx) && graphicShape(env);
+      if (S) {
+        const x = workLike(ctx, "cine");
+        cineGroundPaint(x, env, p, at);
+        x.globalCompositeOperation = "destination-out"; placeShape(x, S, [0, 0, 0], at.cx, at.cy, at.size);
+        layDown(ctx, x, p.inside);
+      }
+      return true;
+    }
+    cineGroundPaint(ctx, env, p, at);
+    if (!L.grid) return true;
+    const S = p.giant > 0 && graphicShape(env);
+    if (S) placeShape(ctx, S, cineShade(C), at.cx, at.cy, at.size);
+    return true;
+  },
+  accent: {
+    fill: (C) => css(mix(cineGround(C), cineShade(C), dark ? 0.55 : 0.4)), tone: () => "rgba(0,0,0,0)", toneScale: 0,
+    edge(ctx, run, nx, ny) { ctx.lineCap = "butt"; ctx.strokeStyle = css(cineText(), 0.35); ctx.lineWidth = 1.5; run(nx * 10, ny * 10); },   // a hairline, a little off the edge
+  },
+  /** A serif, upright; a soft shadow under it, or on the light ground a halo of light (the shadow slider); highlighted words in the channel colour, muted. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, hi = o.hi || mix(cineMute(o.C || CINE.cream), dark ? CINE.cream : CINE.soot, dark ? 0.35 : 0.4);
+    // on the dark ground a soft shadow under the letters; on the light one a halo of light behind them, so they read over the silhouette
+    if (o.shadowAmt > 0) { ctx.save(); ctx.shadowColor = dark ? css(CINE.night, 0.55 * Math.min(1, o.shadowAmt)) : css(CINE.cream, 0.9 * Math.min(1, o.shadowAmt)); ctx.shadowBlur = fs * (dark ? 0.12 : 0.2); ctx.shadowOffsetY = 0; pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : o.fill || cineText()); ctx.fillText(a.t, x, 0); }); if (!dark) pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : o.fill || cineText()); ctx.fillText(a.t, x, 0); }); ctx.restore(); }
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : o.fill || cineText()); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates
+    ? { fill: { ink: cineText() }, stroke: { ink: cineText() } }
+    : { fill: { ink: cineShade(C), light: mix(cineGround(C), CINE.cream, 0.6), mid: mix(cineGround(C), CINE.cream, 0.25), dark: cineShade(C), colour: (c) => mix(cineMute(c), cineGround(C), 0.25) }, stroke: { ink: cineShade(C), light: CINE.cream }, line: 0.5 }),
+  sticker: painters({ line: null, shadow: null, tone: (fill) => { const c = parseColour(fill); return !c ? fill : role(c) === "ink" ? css(CINE.soot, c[3]) : role(c) === "colour" ? css(cineMute(c), c[3]) : fill; } }),
+  /** The corner tag: spaced small capitals between two hairlines, the channel colour in a short bar before them. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.56;
+    ctx.font = `700 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const tw = spacedW(ctx, str, 9), w = tw + f * 1.6, by = y + fs * 1.2, col = css(cineText(), 0.85);
+    ctx.fillStyle = col; ctx.fillRect(x, by - f * 1.55, w, 1.5); ctx.fillRect(x, by + f * 0.35, w, 1.5);
+    ctx.fillStyle = css(mix(C, cineText(), 0.15)); ctx.fillRect(x, by - f * 0.78, f * 0.9, f * 0.3);
+    ctx.fillStyle = ink || col; spaced(ctx, str, x + f * 1.6, by - f * 0.12, 9);
+    return { x: x - 4, y: by - f * 1.7, w: w + 8, h: f * 2.3 };
+  },
+  /** The frame layer: names spaced across the top, and the credits block — the channel's name, then greeked billing — at the foot. */
+  frame(ctx, env, p) {
+    const a = p.credits;
+    if (a <= 0) return;
+    const { w, h } = env, P = env.o.profile, col = css(cineText(), 0.8 * a);
+    ctx.save(); ctx.fillStyle = col; ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+    ctx.font = `400 19px ${fonts.serif}`;
+    const brand = P.brand.name || "", name = env.cat.name || env.cat.code || "";
+    if (brand) spacedCentre(ctx, brand.toUpperCase(), w * 0.3, 70, 5);
+    if (name) spacedCentre(ctx, name.toUpperCase(), w * 0.7, 70, 5);
+    const bw = Math.min(w * 0.46, 760);
+    greeked(ctx, (w - bw) / 2, h - 82, bw, 4, 8, css(cineText(), 0.5 * a), 250 + env.o.catIndex, "center");
+    ctx.font = `400 15px ${fonts.serif}`; spacedCentre(ctx, `— ${pad2(env.o.catIndex + 1)} —`, w / 2, h - 30, 4);
+    ctx.restore();
+  },
+  image(ctx, C, unit) { ctx.shadowColor = css(CINE.night, 0.45); ctx.shadowBlur = 18 * unit; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 6 * unit; },
+  /** Crumpled paper, the fade of an old print, a vignette, grain. */
+  post(ctx, w, h, C, p, unit = 1) {
+    crumple(ctx, w, h, p.paper * 0.9);
+    wash(ctx, w, h, "screen", [40, 34, 30], 0.5 * p.fade);
+    wash(ctx, w, h, "multiply", [250, 236, 214], 0.6 * p.fade);
+    vignette(ctx, w, h, CINE.night, 0.75 * p.vignette, 0.32);
+    grain(ctx, p.grain * 0.7, unit, !dark);
+  },
+  prompt: `Stickers for a minimalist movie poster — quiet, reduced and a little melancholic — that read at a glance:
+- one clear silhouette per sticker (a figure, a profile, a hand, a house, a tree, an object), simple and elegant, with at most one small inner shape that tells a story; no realism, no perspective, no detail;
+- flat colour only, muted: the main colour (it comes out dusky), "ink" for the silhouette and "white" for a light; two or three colours in all;
+- the app draws no outline and no shadow: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Objects as a minimal movie poster would show them: a few boxes and cylinders, plainly proportioned and a little lonely; no realism, no fine detail.
+- the renderer paints faces in muted tones of the poster's colour with a near-black: do NOT try to draw shading or outlines yourself;
+- "white" is the light, "dark" is near-black, and "main" a muted version of the channel colour.`,
+};
+
+// ====================================================================== cyanotype: photograms glowing on Prussian blue
+// The cyanotype and the blue-printed zine: Prussian blue, unevenly brushed on; things laid on the sheet
+// and left white where the light could not reach them, glowing at the edges; soft airbrushed shapes;
+// a coarse halftone; sparkles; hairline frames with small numbers. The channel colour is the second
+// ink (the highlighted words, the tag). Deep blue ground (dark) or off-white paper printed in blue (light).
+const CYA = { prussian: [20, 54, 132], deep: [9, 24, 74], ink: [6, 14, 46], white: [236, 244, 255], pale: [150, 194, 246], paper: [236, 230, 214] };
+const cyaGround = () => (dark ? CYA.prussian : CYA.paper), cyaInk = () => (dark ? CYA.white : CYA.prussian);
+/** A four-pointed sparkle with a glow round it. */
+function sparkle(ctx, x, y, r, colour, glow) {
+  if (glow > 0) blurred(ctx, r * 0.6 * glow, css(colour, 0.9), () => starMark(ctx, x, y, r, 4, colour));
+  starMark(ctx, x, y, r, 4, colour);
+}
+const cyano = {
+  id: "cyano",
+  repaint: (c) => `a cyanotype print made from a photograph: Prussian blue and white only, the lights glowing white with soft edges like a photogram, uneven brushed-on blue with darker streaks at the edges, a coarse halftone in places, paper texture; still the same picture, no text.`,
+  about: { zh: "蓝晒光影：氰版蓝晒和蓝色油印小志的样子——普鲁士蓝刷得深浅不匀，频道图形像实物压在感光纸上留下的白影，边缘发光；喷枪喷出的柔和形状、粗网点、闪烁的星光、细线框和小编号；频道主色作为第二种油墨，用在强调词和角标上。可选深蓝底或米白纸底（纸上印蓝）。梦幻、安静、有手作感——适合科学、宇宙、自然、诗意与情绪向内容。", en: "Cyanotype: the cyanotype print and the blue-printed zine — Prussian blue brushed on unevenly; the channel graphic left white as if laid on the paper in the sun, glowing at its edges; soft airbrushed shapes, a coarse halftone, sparkles, hairline frames and small numbers; the channel colour as a second ink for highlighted words and the tag. Deep blue, or off-white paper printed in blue. Dreamy, quiet, handmade — for science, space, nature, poetry and mood pieces." },
+  name: { zh: "蓝晒光影", en: "Cyanotype" },
+  seeded: true,
+  params: [
+    { key: "glow", min: 0, max: 1, step: 0.05, def: 0.75, name: { zh: "发光白影", en: "Glowing photogram" } },
+    { key: "spray", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "喷枪柔雾", en: "Airbrush" } },
+    { key: "stain", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "刷涂不匀", en: "Uneven brushing" } },
+    { key: "halftone", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "粗网点", en: "Coarse halftone" } },
+    { key: "stars", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "星光", en: "Sparkles" } },
+    { key: "lines", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "细线与编号", en: "Hairlines and numbers" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "颗粒", en: "Grain" } },
+    { key: "duo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.9, name: { zh: "照片蓝晒", en: "Photo as cyanotype" } },
+  ],
+  titleFont: (f) => f.serif,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.24, side: 0.33, strip: 0.12 }),
+  theme: (base) => ({ ...base, field: css(cyaGround()), text: css(cyaInk()), dim: css(cyaInk(), 0.6), titleFill: css(cyaInk()), titleInk: css(cyaGround()), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The blue (or the paper), brushed unevenly; soft airbrushed shapes; the channel graphic left white
+   * and glowing; sparkles. A photo becomes a cyanotype: grey, its darks into Prussian blue, its lights
+   * left white, and the halftone over it.
+   */
+  background(ctx, env, L, p) {
+    const { w, h } = env, u = Math.min(w, h), ground = cyaGround();
+    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (env.photo) {
+      env.drawPhoto(p.duo);
+      wash(ctx, w, h, "multiply", mix([255, 255, 255], CYA.prussian, 0.9), p.duo);
+      wash(ctx, w, h, "screen", CYA.deep, p.duo * 0.5);
+      if (dark) wash(ctx, w, h, "soft-light", CYA.white, p.duo * 0.25);
+      dotScreen(ctx, w, h, CYA.ink, 8, 0.5 * p.halftone);
+      return true;
+    }
+    if (!L.grid) return true;
+    if (p.stain > 0) {   // brushed on unevenly: darker blotches, and streaks along the edges where the brush turned
+      const deep = dark ? CYA.deep : CYA.prussian;
+      for (let i = 0; i < 14; i++) {
+        const x = rand(i * 3.7 + 260) * w, y = rand(i * 4.3 + 261) * h, r = u * (0.15 + rand(i * 5.1 + 262) * 0.35), g = ctx.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, css(deep, (dark ? 0.5 : 0.12) * p.stain)); g.addColorStop(1, css(deep, 0));
+        ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      }
+      ctx.save(); ctx.lineCap = "round";
+      for (let i = 0; i < 40; i++) {   // brush strokes in from the edges
+        const side = i % 4, t = rand(i * 2.1 + 270), len = u * (0.1 + rand(i * 3.3 + 271) * 0.3), lw = u * (0.004 + rand(i * 4.4 + 272) * 0.02);
+        const [x0, y0, dx, dy] = side === 0 ? [t * w, -10, 0.15, 1] : side === 1 ? [w + 10, t * h, -1, 0.1] : side === 2 ? [t * w, h + 10, -0.1, -1] : [-10, t * h, 1, -0.15];
+        ctx.strokeStyle = css(deep, (dark ? 0.6 : 0.3) * p.stain * (0.4 + rand(i + 273) * 0.6)); ctx.lineWidth = lw;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + dx * len, y0 + dy * len); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    if (p.spray > 0 && canPaint(ctx)) {   // airbrushed shapes: soft-edged blobs of a lighter blue, with a fringe of spray
+      const pale = dark ? CYA.pale : mix(CYA.pale, CYA.prussian, 0.25), n = Math.round(2 + 4 * p.spray);
+      for (let i = 0; i < n; i++) {
+        const x = rand(i * 6.1 + 280) * w, y = rand(i * 7.3 + 281) * h, r = u * (0.06 + rand(i * 8.9 + 282) * 0.14) * (0.6 + 0.6 * p.spray);
+        blurred(ctx, r * 0.5, css(pale, 0.75 * p.spray), () => { ctx.beginPath(); ctx.ellipse(x, y, r, r * (0.6 + rand(i + 283) * 0.6), rand(i + 284) * 3, 0, TAU); ctx.fillStyle = "#fff"; ctx.fill(); });
+        ctx.fillStyle = css(pale, 0.55 * p.spray);
+        for (let j = 0; j < 160 * p.spray; j++) { const a = rand(i * 31 + j * 0.37 + 285) * TAU, d = r * (0.9 + Math.pow(rand(i * 17 + j * 0.53 + 286), 2) * 0.9); ctx.fillRect(x + Math.cos(a) * d, y + Math.sin(a) * d * 0.9, 2, 2); }
+      }
+    }
+    const S = p.glow > 0 && canPaint(ctx) && graphicShape(env);
+    if (S) {   // the photogram: the graphic's shape left white, glowing at its edges; larger and turned a little, toward the open side
+      // the photogram: the graphic's shape left light, a glow round it, a sharper core; a ghost behind the lettering, as faint as the slider says
+      const F = openField(env), size = (F.y1 - F.y0) * (0.5 + 0.3 * p.glow), cx = F.x0 + (F.x1 - F.x0) * 0.62, cy = (F.y0 + F.y1) / 2, rot = (rand(290) - 0.5) * 0.5;
+      const light = dark ? CYA.white : CYA.prussian, x = workLike(ctx, "cyano");
+      blurred(x, size * 0.06, css(dark ? CYA.pale : CYA.prussian, 0.8), () => placeShape(x, S, [0, 0, 0], cx, cy, size, rot));
+      blurred(x, size * 0.015, css(light, 0.9), () => placeShape(x, S, [0, 0, 0], cx, cy, size, rot));
+      x.globalAlpha = 0.85; placeShape(x, S, dark ? mix(CYA.white, CYA.pale, 0.35) : mix(CYA.prussian, CYA.paper, 0.3), cx, cy, size, rot);
+      layDown(ctx, x, (dark ? 0.35 : 0.22) + (dark ? 0.45 : 0.35) * p.glow);
+    }
+    if (p.stars > 0) {
+      const col = dark ? CYA.white : CYA.prussian, n = Math.round(1 + 6 * p.stars);
+      for (let i = 0; i < n; i++) sparkle(ctx, w * (0.06 + rand(i * 3.3 + 300) * 0.88), h * (0.08 + rand(i * 4.1 + 301) * 0.8), u * (0.012 + rand(i * 5.9 + 302) * 0.03) * (0.6 + 0.6 * p.stars), col, dark ? 1 : 0.4);
+    }
+    return true;
+  },
+  accent: {
+    fill: () => css(dark ? CYA.deep : CYA.prussian),
+    tone: () => css(dark ? CYA.prussian : CYA.pale, Math.min(1, 1.4 * values.halftone)), toneScale: 0.7,   // the halftone slider reaches the block too
+    edge(ctx, run, nx, ny) { ctx.lineCap = "butt"; ctx.setLineDash([3, 7]); ctx.strokeStyle = css(dark ? CYA.white : CYA.prussian, 0.7); ctx.lineWidth = 2; run(nx * 12, ny * 12); ctx.setLineDash([]); },
+  },
+  /** A serif in the light: on the blue it glows (the shadow slider sets how much); highlighted words in the channel colour. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, ink = o.fill || cyaInk(), hi = o.hi || o.C || CYA.pale, glow = Math.min(2, o.shadowAmt);
+    if (glow > 0) { ctx.save(); ctx.shadowColor = css(dark ? CYA.pale : CYA.prussian, dark ? 0.85 : 0.3); ctx.shadowBlur = fs * 0.16 * glow; pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x, 0); }); ctx.restore(); }
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates
+    ? { fill: { ink: cyaInk() }, stroke: { ink: cyaInk() } }
+    : { fill: { ink: CYA.ink, light: CYA.white, mid: CYA.pale, dark: CYA.deep, colour: (c) => (lum(c) > 0.55 ? CYA.pale : mix(CYA.prussian, CYA.pale, 0.3)) }, stroke: { ink: CYA.ink, light: CYA.white }, line: 0.6 }),
+  sticker: painters({ line: null, tone: (fill) => { const c = parseColour(fill); if (!c) return fill; const r = role(c); return css(r === "ink" ? CYA.ink : r === "light" ? CYA.white : r === "colour" ? (lum(c) > 0.55 ? CYA.pale : mix(CYA.prussian, CYA.pale, 0.3)) : c, c[3]); },
+    shadow(ctx, draw) { ctx.save(); ctx.shadowColor = css(CYA.white, 0.7); ctx.shadowBlur = 16; draw(css(CYA.white, 0.25)); ctx.restore(); } }),
+  /** The corner tag: a hairline box with the lettering, a filled square of the channel colour before it. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.66;
+    ctx.font = `600 ${f}px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const tw = spacedW(ctx, str, 4), sq = f * 0.62, w = f * 0.6 + sq + f * 0.5 + tw + f * 0.6, h = f * 1.6, top = y + (fs * 1.34 - h), line = css(cyaInk(), 0.9);
+    ctx.strokeStyle = line; ctx.lineWidth = 2; ctx.strokeRect(x, top, w, h);
+    ctx.fillStyle = css(C); ctx.fillRect(x + f * 0.6, top + (h - sq) / 2, sq, sq);
+    ctx.fillStyle = ink || line; spaced(ctx, str, x + f * 0.6 + sq + f * 0.5, top + h * 0.5 + f * 0.36, 4);
+    for (const [cx, cy] of [[x, top], [x + w, top], [x, top + h], [x + w, top + h]]) ctx.fillRect(cx - 3, cy - 3, 6, 6);   // the corner points of a frame being measured
+    return { x: x - 6, y: top - 6, w: w + 12, h: h + 12 };
+  },
+  /** The frame layer: a hairline border with measured corners, a dashed box of small print, the number of the plate. */
+  frame(ctx, env, p) {
+    const a = p.lines;
+    if (a <= 0) return;
+    const { w, h } = env, col = css(cyaInk(), 0.75 * a), i = env.o.catIndex;
+    ctx.save(); ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.2;
+    ctx.strokeRect(28, 28, w - 56, h - 56);
+    for (const [x, y] of [[28, 28], [w - 28, 28], [28, h - 28], [w - 28, h - 28]]) { ctx.beginPath(); ctx.arc(x, y, 5, 0, TAU); ctx.stroke(); }
+    ctx.font = `italic 400 40px ${fonts.serif}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillText(pad2(i + 1), w - 60, 92);
+    if (a > 0.3) {
+      const bw = Math.min(300, w * 0.2), bx = w - 60 - bw, by = h - 170;
+      ctx.setLineDash([4, 5]); ctx.strokeRect(bx, by, bw, 96); ctx.setLineDash([]);
+      for (const [x, y] of [[bx, by], [bx + bw, by], [bx, by + 96], [bx + bw, by + 96]]) ctx.fillRect(x - 2.5, y - 2.5, 5, 5);
+      greeked(ctx, bx + 14, by + 16, bw - 28, 5, 13, css(cyaInk(), 0.55 * a), 310 + i);
+    }
+    ctx.font = `600 13px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left";
+    spaced(ctx, `PLATE ${pad2(i + 1)} / ${(env.cat.code || "").toUpperCase()} / ${(env.o.profile.brand.name || "").toUpperCase()}`, 60, h - 44, 3);
+    ctx.restore();
+  },
+  image(ctx, C, unit) { ctx.shadowColor = css(dark ? CYA.white : CYA.prussian, dark ? 0.6 : 0.35); ctx.shadowBlur = 20 * unit; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; },
+  /** The halftone over all (lightly), and grain. */
+  post(ctx, w, h, C, p, unit = 1) {
+    dotScreen(ctx, w, h, dark ? CYA.deep : CYA.prussian, 7, 0.22 * p.halftone, dark ? "multiply" : "multiply");
+    grain(ctx, p.grain * 0.8, unit, !dark);
+  },
+  prompt: `Stickers for a cyanotype zine — objects laid on light-sensitive paper, left white where they shaded it — that read at a glance:
+- one clear, recognisable silhouette per sticker (a leaf, a flower, a hand, a shell, a planet, an astronaut, a bird, a key); a few inner lines are welcome as "detail"; no realism, no perspective;
+- flat colour only: "white" for the object, "blue" and the main colour as accents, "ink" for a few details; the app turns colours into blues;
+- the app adds a soft white glow and no outline: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Objects as a blueprint or a cyanotype plate would show them: a few boxes and cylinders, cleanly proportioned — a telescope, a lamp, a camera, a jar; no realism, no fine detail.
+- the renderer prints faces in white, pale blue and Prussian blue: do NOT try to draw shading or outlines yourself;
+- "white" is white, "dark" is Prussian blue, and "main" comes out a pale blue.`,
+};
+
+// ====================================================================== monochrome film: a black-and-white editorial
+// Grainy black-and-white film stills laid out as a magazine would: haze and out-of-focus light, a figure
+// caught in motion, fragments of the picture cut out and set back a little off (one or two in the
+// channel colour, the only colour there is), a sheet folded in four, dust, columns of small print, a
+// serif title that seems to drift out of focus.
+const MF = { black: [12, 12, 12], night: [22, 22, 22], paper: [226, 224, 220], white: [240, 238, 234], grey: [130, 130, 128] };
+const mfGround = () => (dark ? MF.night : MF.paper), mfInk = () => (dark ? MF.white : MF.black);
+const monofilm = {
+  id: "monofilm",
+  repaint: (c) => `a grainy black-and-white film still made from the photograph: deep blacks, soft silver highlights, a little motion blur, heavy film grain, a dreamy cinematic haze; still the same picture, no colour, no text.`,
+  about: { zh: "黑白胶片：粗颗粒的黑白电影剧照排成一本杂志——光雾和失焦的光斑，频道图形化成一道带动态残影的灰色身影，照片被裁下几块错开拼回去（其中一两块染成频道色，那是画面里唯一的颜色），纸张对折的折痕，灰尘，成栏的小字，衬线标题带一层失焦的柔光。可选黑底或灰白纸底。安静、文艺、有胶片的呼吸感——适合人物、音乐、电影、时尚、随笔与回忆。", en: "Monochrome film: grainy black-and-white stills laid out as a magazine — haze and out-of-focus light, the channel graphic as a grey figure trailing a motion blur, the photo cut into fragments set back a little off (one or two in the channel colour, the only colour there is), a sheet folded in four, dust, columns of small print, a serif title with a soft blur round it. Black or pale paper. Quiet, literary, breathing like film — for portraits, music, film, fashion, essays and memories." },
+  name: { zh: "黑白胶片", en: "Monochrome film" },
+  seeded: true,
+  params: [
+    { key: "haze", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "光雾与光斑", en: "Haze and light" } },
+    { key: "ghost", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "动态残影", en: "Motion ghost" } },
+    { key: "fold", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "对折折痕", en: "Folds" } },
+    { key: "type", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "编辑小字", en: "Small print" } },
+    { key: "dust", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "灰尘划痕", en: "Dust and scratches" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "胶片颗粒", en: "Film grain" } },
+    { key: "collage", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "照片拼贴", en: "Photo collage" } },
+    { key: "motion", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "照片动态模糊", en: "Photo motion blur" } },
+    { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白照片", en: "Black-and-white photo" } },
+  ],
+  titleFont: (f) => f.serif,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.22, side: 0.32, strip: 0.11 }),
+  theme: (base) => ({ ...base, field: css(mfGround()), text: css(mfInk()), dim: css(mfInk(), 0.55), titleFill: css(mfInk()), titleInk: css(mfGround()), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The ground with its haze and out-of-focus lights, and the channel graphic as a soft grey figure in
+   * motion. A photo goes black and white, smeared sideways (the motion blur), and a few pieces of it are
+   * cut out and set back a little off, one tinted with the channel colour.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, u = Math.min(w, h), ground = mfGround();
+    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (env.photo) {
+      env.drawPhoto(p.mono);
+      if (p.motion > 0) {   // the same picture again, slid sideways and faint: a hand-held, moving shot
+        ctx.save(); const n = fast ? 2 : 6;
+        for (let i = 1; i <= n; i++) { ctx.globalAlpha = (0.32 * p.motion) / Math.sqrt(i); ctx.translate((u * 0.012 * p.motion * (i % 2 ? 1 : -0.6)), 0); env.drawPhoto(p.mono); }
+        ctx.restore();
+      }
+      wash(ctx, w, h, "soft-light", [120, 120, 120], 0.4 * p.mono);
+      if (L.fill && p.collage > 0) {   // pieces cut out and set back off true
+        const n = Math.round(1 + 3 * p.collage), T = env.G && env.G.title, clear = (x, y, a, b) => !T || x > T.x + T.w * 0.75 || x + a < T.x || y > T.y + T.h || y + b < T.y;
+        for (let i = 0; i < n; i++) {
+          const rw = w * (0.12 + rand(i * 3.1 + 320) * 0.16), rh = rw * (0.62 + rand(i * 4.7 + 321) * 0.5);
+          let rx = 0, ry = 0, ok = false;
+          for (let t = 0; t < 10 && !ok; t++) { rx = w * (0.08 + rand(i * 5.3 + t * 11.3 + 322) * 0.84) - rw / 2; ry = h * (0.1 + rand(i * 6.1 + t * 13.7 + 323) * 0.8) - rh / 2; ok = clear(rx, ry, rw, rh); }   // clear of the title
+          if (!ok) continue;
+          const dx = (rand(i * 7.7 + 324) - 0.5) * u * 0.12 * p.collage, dy = (rand(i * 8.3 + 325) - 0.5) * u * 0.08 * p.collage;
+          ctx.save(); ctx.beginPath(); ctx.rect(rx + dx, ry + dy, rw, rh); ctx.clip();
+          ctx.translate(dx * 0.4, dy * 0.4); ctx.fillStyle = css(ground); ctx.fillRect(rx - dx, ry - dy, rw + Math.abs(dx) * 2, rh + Math.abs(dy) * 2);
+          env.drawPhoto(1);
+          if (i % 3 === 0) { ctx.globalCompositeOperation = "multiply"; ctx.fillStyle = css(mix([255, 255, 255], C, 0.95)); ctx.fillRect(-w, -h, w * 3, h * 3); }   // the one in colour
+          ctx.restore();
+          ctx.strokeStyle = css(mfInk(), 0.5); ctx.lineWidth = 1.5; ctx.strokeRect(rx + dx, ry + dy, rw, rh);
+        }
+      }
+      return true;
+    }
+    if (!L.grid) return true;
+    if (p.haze > 0) {   // a wash of light from one side, and round out-of-focus lights
+      const lx = w * (0.25 + rand(330) * 0.5), ly = h * (0.2 + rand(331) * 0.3), lit = dark ? [190, 190, 186] : [255, 255, 255];
+      const g = ctx.createRadialGradient(lx, ly, 0, lx, ly, u * 0.9);
+      g.addColorStop(0, css(lit, (dark ? 0.32 : 0.55) * p.haze)); g.addColorStop(1, css(lit, 0));
+      ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < Math.round(3 + 9 * p.haze); i++) {
+        const x = rand(i * 2.3 + 335) * w, y = rand(i * 3.9 + 336) * h, r = u * (0.02 + rand(i * 5.7 + 337) * 0.07), b = ctx.createRadialGradient(x, y, r * 0.6, x, y, r);
+        b.addColorStop(0, css(lit, (dark ? 0.14 : 0.3) * p.haze)); b.addColorStop(0.9, css(lit, (dark ? 0.18 : 0.35) * p.haze)); b.addColorStop(1, css(lit, 0));
+        ctx.fillStyle = b; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+      }
+    }
+    const S = p.ghost > 0 && canPaint(ctx) && graphicShape(env);
+    if (S) {   // the figure in motion: soft grey copies trailing behind, and the figure itself only a little sharper
+      const F = openField(env), size = (F.y1 - F.y0) * (0.5 + 0.35 * p.ghost), cx = F.x0 + (F.x1 - F.x0) * 0.68, cy = F.y1 - size * 0.45;
+      const fig = dark ? [96, 96, 94] : [70, 70, 68], trail = u * 0.035 * p.ghost, n = fast ? 3 : 8;
+      for (let i = n; i >= 1; i--) blurred(ctx, size * 0.03 + trail * 0.2, css(fig, (0.5 * p.ghost) / Math.sqrt(i)), () => placeShape(ctx, S, [0, 0, 0], cx - trail * i, cy, size));
+      blurred(ctx, size * 0.012, css(fig, 0.9), () => placeShape(ctx, S, [0, 0, 0], cx, cy, size));
+    }
+    return true;
+  },
+  accent: { fill: () => css(dark ? MF.black : [28, 28, 28]), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.strokeStyle = css(MF.white, 0.55); ctx.lineWidth = 1.5; run(0, 0); } },
+  /** A serif seen through a lens: a soft, out-of-focus copy round it (the shadow slider), then the letters; highlighted words in the channel colour. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, ink = o.fill || mfInk(), hi = o.hi || o.C || MF.white, soft = Math.min(2, o.shadowAmt);
+    if (soft > 0 && !fast) { ctx.save(); ctx.shadowColor = css(ink, 0.65); ctx.shadowBlur = fs * 0.14 * soft; ctx.globalAlpha = 0.6; pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x + fs * 0.02 * soft, 0); }); ctx.restore(); }
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates
+    ? { fill: { ink: mfInk() }, stroke: { ink: mfInk() } }
+    : { fill: { ink: MF.black, light: MF.white, mid: [176, 176, 172], dark: [52, 52, 50], colour: (c) => grey(c) }, stroke: { ink: MF.black, light: MF.white, colour: (c) => grey(c) }, line: 0.5 }),
+  sticker: painters({ line: null, shadow: null, tone: (fill) => { const c = parseColour(fill); return !c ? fill : css(grey(c), c[3]); } }),
+  /** The corner tag: a block of the channel colour — the only colour on the page — with white lettering. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.7;
+    ctx.font = `700 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 4) + f * 1.1, h = f * 1.45, top = y + (fs * 1.34 - h);
+    ctx.fillStyle = css(C); ctx.fillRect(x, top, w, h);
+    ctx.fillStyle = ink || css(lum(C) > 0.6 ? MF.black : MF.white); spaced(ctx, str, x + f * 0.55, top + h * 0.5 + f * 0.36, 4);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The frame layer: a date and a name in the top corners, columns of small print, a short quotation rule. */
+  frame(ctx, env, p) {
+    const a = p.type;
+    if (a <= 0) return;
+    const { w, h } = env, i = env.o.catIndex, col = css(mfInk(), 0.8 * a), P = env.o.profile;
+    ctx.save(); ctx.fillStyle = col; ctx.textBaseline = "alphabetic";
+    ctx.font = `600 15px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.fillText(`VOL.${pad2(i + 1)}`, 60, 62);
+    ctx.textAlign = "right"; ctx.fillText((P.brand.name || "").toUpperCase(), w - 60, 62);
+    const cw = Math.min(240, w * 0.15);
+    greeked(ctx, w - 60 - cw, h * 0.42, cw, 7, 12, css(mfInk(), 0.5 * a), 340 + i, "right");
+    if (a > 0.4) greeked(ctx, w - 60 - cw, h * 0.42 + 110, cw * 0.8, 4, 12, css(mfInk(), 0.4 * a), 350 + i, "right");
+    ctx.font = `italic 400 22px ${fonts.serif}`; ctx.textAlign = "right"; ctx.fillText((env.cat.name || "").slice(0, 24), w - 60, h * 0.42 - 26);
+    ctx.restore();
+  },
+  image(ctx, C, unit) { ctx.shadowColor = "rgba(0,0,0,0.4)"; ctx.shadowBlur = 14 * unit; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 5 * unit; },
+  /** The sheet folded in four, dust, grain and a faint darkening at the edges. */
+  post(ctx, w, h, C, p, unit = 1) {
+    if (p.fold > 0) {
+      for (const [vertical, at] of [[true, w / 2], [false, h / 2]]) {   // each fold: shade on one side, a light ridge on the other
+        const s = 60, g = vertical ? ctx.createLinearGradient(at - s, 0, at + s, 0) : ctx.createLinearGradient(0, at - s, 0, at + s);
+        g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(0.48, `rgba(0,0,0,${0.28 * p.fold})`); g.addColorStop(0.5, `rgba(255,255,255,${0.32 * p.fold})`); g.addColorStop(0.56, `rgba(255,255,255,${0.08 * p.fold})`); g.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.save(); ctx.globalCompositeOperation = "soft-light"; ctx.fillStyle = g; vertical ? ctx.fillRect(at - s, 0, s * 2, h) : ctx.fillRect(0, at - s, w, s * 2); ctx.restore();
+        ctx.fillStyle = `rgba(255,255,255,${0.18 * p.fold})`; vertical ? ctx.fillRect(at, 0, 1, h) : ctx.fillRect(0, at, w, 1);
+      }
+    }
+    if (p.dust > 0) filmDust(ctx, w, h, p.dust * 0.8);
+    grain(ctx, p.grain, unit);
+    vignette(ctx, w, h, [0, 0, 0], dark ? 0.45 : 0.18, 0.4);
+  },
+  prompt: `Cut-outs for a black-and-white film magazine — reduced, elegant shapes like figures cut from a photograph — that read at a glance:
+- one clear silhouette per sticker (a figure walking, a face in profile, a hand, a flower, a chair, a camera), simple and graceful; no realism, no perspective, no detail;
+- flat colour only, and only greys: "ink", "white" and the main colour (it comes out as a grey);
+- the app draws no outline and no shadow: neighbouring shapes must differ in tone to be told apart.`,
+  solidPrompt: `Objects as a black-and-white still would show them: a few boxes and cylinders, plainly and elegantly proportioned — a camera, a lamp, a radio, a suitcase; no realism, no fine detail.
+- the renderer paints faces in greys with a thin line: do NOT try to draw shading or outlines yourself;
+- "white" is the light grey, "dark" is near-black, and "main" a middle grey.`,
+};
+
+// ====================================================================== experimental type: the poster made of lettering
+// Swiss and experimental typographic posters: a white sheet and black type, the type itself the
+// picture — cut along a slant and knocked out of line, echoed in fading layers, dissolving into dots;
+// a burst of hairlines, dry-brush strokes behind, giant letters cut across, a hairline grid with small
+// markers. One colour only, the channel's, on the block.
+const TY = { paper: [244, 243, 240], ink: [14, 14, 14], night: [14, 14, 14] };
+const tyGround = () => (dark ? TY.night : TY.paper), tyInk = () => (dark ? TY.paper : TY.ink);
+const typo = {
+  id: "typo",
+  repaint: (c) => `a high-contrast black-and-white photograph for a Swiss typographic poster: crisp, graphic, deep blacks and clean whites, little mid-tone, generous empty space; still the same picture, no colour, no text.`,
+  about: { zh: "实验字体：瑞士和实验派的文字海报——白纸黑字，文字本身就是画面：沿斜线切开错位、一层层向上叠出残影、从一侧消散成粒子；放射的细线、干笔刷痕、被斜线切开的巨型字母、带小圆点标记的细线网格；整张只有一种颜色，就是频道色的色块。可选白底黑字或黑底白字。理性、锋利、有设计感——适合设计、展览、讲座、音乐节、科技与观点类内容。", en: "Experimental type: Swiss and experimental typographic posters — black type on a white sheet, the type itself the picture: cut along a slant and knocked out of line, echoed in fading layers, dissolving into dots at one end; a burst of hairlines, dry-brush strokes, giant letters cut across, a hairline grid with small markers; one colour only, the channel's, on the block. Black on white or white on black. Rational, sharp, designed — for design, exhibitions, talks, festivals, tech and opinion." },
+  name: { zh: "实验字体", en: "Experimental type" },
+  seeded: true,
+  params: [
+    { key: "slice", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "标题切割错位", en: "Title cut and shifted" } },
+    { key: "echo", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "标题层叠残影", en: "Title echoes" } },
+    { key: "scatter", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "标题粒子消散", en: "Title dissolving" } },
+    { key: "burst", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "放射细线", en: "Burst of lines" } },
+    { key: "brush", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "干笔刷痕", en: "Dry brush" } },
+    { key: "giant", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "巨型字母", en: "Giant letters" } },
+    { key: "grid", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "细线网格", en: "Hairline grid" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.15, name: { zh: "纸张颗粒", en: "Paper grain" } },
+    { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白高反差", en: "Hard black and white" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.18, side: 0.28, strip: 0.1 }),
+  theme: (base) => ({ ...base, field: css(tyGround()), text: css(tyInk()), dim: css(tyInk(), 0.55), titleFill: css(tyInk()), titleInk: css(tyGround()), grid: () => "rgba(0,0,0,0)" }),
+  /** The sheet, a burst of hairlines, dry-brush strokes, giant letters cut across. A photo goes hard black and white. */
+  background(ctx, env, L, p) {
+    const { w, h } = env, u = Math.min(w, h), ground = tyGround(), ink = tyInk(), F = openField(env);
+    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (env.photo) {
+      env.drawPhoto(p.mono);
+      if (p.mono > 0) { ctx.save(); ctx.globalCompositeOperation = "soft-light"; ctx.globalAlpha = p.mono; env.drawPhoto(1); env.drawPhoto(1); ctx.restore(); }
+      return true;
+    }
+    if (!L.grid) return true;
+    if (p.giant > 0) {   // the channel's code, a letter or three, huge, each cut along a slant and the halves pulled apart
+      const word = [...((env.cat.code || env.cat.name || "A").toUpperCase())].filter((c) => c.trim()).slice(0, 3), fs = (F.y1 - F.y0) * (0.5 + 0.35 * p.giant);
+      ctx.save(); ctx.font = `400 ${fs}px ${fonts.serif}`; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(mix(ground, ink, 0.12 + 0.75 * p.giant));
+      word.forEach((ch, i) => {
+        const cx = F.x0 + (F.x1 - F.x0) * (0.5 + 0.42 * ((i + 0.5) / word.length)) - (F.x1 - F.x0) * 0.2, cy = F.y0 + (F.y1 - F.y0) * (0.62 + (i % 2) * 0.26), a = 0.5 + rand(i + 360) * 0.6, gap = fs * 0.05 * p.giant;
+        for (const side of [-1, 1]) {   // the halves either side of the cut, moved apart along it
+          ctx.save(); ctx.beginPath(); const nx = Math.cos(a), ny = Math.sin(a), R = fs * 2;
+          ctx.moveTo(cx - nx * R, cy - ny * R); ctx.lineTo(cx + nx * R, cy + ny * R); ctx.lineTo(cx + nx * R - side * ny * R, cy + ny * R + side * nx * R); ctx.lineTo(cx - nx * R - side * ny * R, cy - ny * R + side * nx * R); ctx.closePath(); ctx.clip();
+          ctx.fillText(ch, cx + side * nx * gap, cy + fs * 0.34 + side * ny * gap); ctx.restore();
+        }
+        ctx.strokeStyle = css(ink, 0.6); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(cx - Math.cos(a) * fs * 0.6, cy - Math.sin(a) * fs * 0.6); ctx.lineTo(cx + Math.cos(a) * fs * 0.6, cy + Math.sin(a) * fs * 0.6); ctx.stroke();
+      });
+      ctx.restore();
+    }
+    if (p.burst > 0) {   // tapering hairlines from a point, of every length
+      const bx = F.x0 + (F.x1 - F.x0) * 0.62, by = F.y0 + (F.y1 - F.y0) * 0.55, n = Math.round(40 + 260 * p.burst), R = Math.hypot(w, h);
+      ctx.fillStyle = css(ink, 0.9);
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * TAU + (rand(i * 1.3 + 370) - 0.5) * 0.04, r0 = u * (0.03 + Math.pow(rand(i * 2.9 + 371), 2) * 0.35), r1 = r0 + R * (0.1 + rand(i * 4.1 + 372) * 0.9) * (0.4 + 0.6 * p.burst), wd = 0.4 + rand(i * 5.3 + 373) * 2.6;
+        const c = Math.cos(a), s = Math.sin(a);
+        ctx.beginPath(); ctx.moveTo(bx + c * r0, by + s * r0); ctx.lineTo(bx + c * r1 - s * wd, by + s * r1 + c * wd); ctx.lineTo(bx + c * r1 + s * wd, by + s * r1 - c * wd); ctx.closePath(); ctx.fill();
+      }
+    }
+    if (p.brush > 0) {   // dry-brush strokes across the field: many thin bristle lines, ragged at both ends
+      const n = Math.round(2 + 6 * p.brush), col = mix(ground, ink, 0.55);
+      for (let k = 0; k < n; k++) {
+        const y = F.y0 + (F.y1 - F.y0) * (0.12 + (k + rand(k + 380) * 0.6) / (n + 0.6) * 0.8), x0 = F.x0 + (F.x1 - F.x0) * (0.02 + rand(k * 2.3 + 381) * 0.2), x1 = F.x1 - (F.x1 - F.x0) * (0.02 + rand(k * 3.1 + 382) * 0.25), bh = u * (0.03 + rand(k * 4.7 + 383) * 0.04), tilt = (rand(k * 5.9 + 384) - 0.5) * bh * 1.5;
+        for (let j = 0; j < 46; j++) {
+          const t = j / 45, yy = y + (t - 0.5) * bh, s0 = x0 + rand(k * 31 + j * 0.7 + 385) * (x1 - x0) * 0.08, s1 = x1 - rand(k * 37 + j * 0.9 + 386) * (x1 - x0) * 0.1;
+          ctx.strokeStyle = css(col, (0.15 + rand(k * 41 + j * 1.1 + 387) * 0.6) * p.brush); ctx.lineWidth = 0.6 + rand(k * 43 + j * 1.3 + 388) * 2.4;
+          ctx.beginPath(); ctx.moveTo(s0, yy); ctx.bezierCurveTo(s0 + (s1 - s0) * 0.33, yy + tilt, s0 + (s1 - s0) * 0.66, yy - tilt * 0.6, s1, yy + tilt * 0.3); ctx.stroke();
+        }
+      }
+    }
+    return true;
+  },
+  accent: { fill: (C) => css(C), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },   // the one colour, flat
+  /**
+   * The title as the picture: echoes stacked above it, fading (the echo slider); the letters cut along
+   * slanted lines and each band knocked sideways (the cut slider); and the end of the line dissolving
+   * into dots (the dissolve slider) — the letters painted on a work canvas, eaten away cell by cell
+   * toward the end, each cell thrown out as a dot.
+   */
+  runs(ctx, pass, o, p) {
+    upright(ctx);
+    const fs = o.fs, ink = o.fill || tyInk(), hi = o.hi || o.C || ink;
+    let right = 0;
+    pass((a, x) => { right = Math.max(right, x + ctx.measureText(a.t).width); });
+    const paint = (c, dx, dy, alpha = 1) => pass((a, x) => { c.globalAlpha = alpha; c.fillStyle = css(a.hi ? hi : ink); c.fillText(a.t, x + dx, dy); });
+    const cuts = p.slice > 0 ? Math.round(1 + 3 * p.slice) : 0, slope = -0.06, L0 = -fs, L1 = right + fs;
+    const lines = Array.from({ length: cuts }, (_, k) => -fs * 0.82 + fs * 0.86 * ((k + 0.5 + (rand(k * 3.7 + 390) - 0.5) * 0.5) / cuts));
+    const letters = (c) => {
+      if (p.echo > 0) for (let i = Math.round(1 + 4 * p.echo); i >= 1; i--) paint(c, 0, -i * fs * 0.11 * (0.5 + p.echo), (0.32 * p.echo) / i);
+      if (!cuts) return paint(c, 0, 0);
+      for (let k = 0; k <= cuts; k++) {   // band k lies between cut k-1 and cut k
+        const top = k ? lines[k - 1] : -fs * 3, bot = k < cuts ? lines[k] : fs * 3, shift = (k % 2 ? 1 : -1) * fs * (0.03 + 0.09 * p.slice) * (0.6 + rand(k * 5.1 + 391) * 0.8);
+        c.save(); c.beginPath(); c.moveTo(L0, top + slope * L0); c.lineTo(L1, top + slope * L1); c.lineTo(L1, bot + slope * L1); c.lineTo(L0, bot + slope * L0); c.closePath(); c.clip();
+        paint(c, shift, 0); c.restore();
+      }
+    };
+    if (!(p.scatter > 0) || fast || !canPaint(ctx)) { letters(ctx); ctx.globalAlpha = 1; return; }
+    const x = workLike(ctx, "typo");
+    letters(x); x.globalAlpha = 1;
+    const m = ctx.getTransform(), corners = [[-fs * 0.2, -fs * 1.6], [right + fs * 0.3, -fs * 1.6], [-fs * 0.2, fs * 0.45], [right + fs * 0.3, fs * 0.45]].map(([a, b]) => [m.a * a + m.c * b + m.e, m.b * a + m.d * b + m.f]);
+    const X0 = Math.max(0, Math.floor(Math.min(...corners.map((q) => q[0])))), Y0 = Math.max(0, Math.floor(Math.min(...corners.map((q) => q[1]))));
+    const X1 = Math.min(x.canvas.width, Math.ceil(Math.max(...corners.map((q) => q[0])))), Y1 = Math.min(x.canvas.height, Math.ceil(Math.max(...corners.map((q) => q[1]))));
+    if (X1 - X0 > 4 && Y1 - Y0 > 4) {
+      const W = X1 - X0, H = Y1 - Y0, img = x.getImageData(X0, Y0, W, H).data, k = Math.hypot(m.a, m.b), cell = Math.max(3, Math.round(fs * 0.03 * k)), start = 1 - 0.8 * p.scatter, dots = [];
+      x.save(); x.setTransform(1, 0, 0, 1, 0, 0);
+      for (let gy = 0; gy < H; gy += cell) for (let gx = 0; gx < W; gx += cell) {
+        const i = ((gy + (cell >> 1)) * W + gx + (cell >> 1)) * 4;
+        if (i >= img.length || img[i + 3] < 110) continue;
+        const t = gx / W, f = clamp((t - start) / (1 - start + 1e-6));
+        const r = rand(gx * 0.173 + gy * 7.31 + 400);
+        if (r >= f * f * 1.1) continue;
+        x.clearRect(X0 + gx, Y0 + gy, cell, cell);
+        const thrown = rand(gx * 0.31 + gy * 3.7 + 401);
+        dots.push([X0 + gx + cell / 2 + thrown * f * W * 0.18, Y0 + gy + cell / 2 + (rand(gx * 0.57 + gy * 1.9 + 402) - 0.5) * f * H * 0.9, cell * (0.18 + rand(gx + gy * 0.3 + 403) * 0.32), `rgba(${img[i]},${img[i + 1]},${img[i + 2]},${img[i + 3] / 255})`]);
+      }
+      for (const [dx, dy, r, col] of dots) { x.fillStyle = col; x.beginPath(); x.arc(dx, dy, r, 0, TAU); x.fill(); }
+      x.restore();
+    }
+    layDown(ctx, x);
+  },
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates
+    ? { fill: { ink: tyInk() }, stroke: { ink: tyInk() } }
+    : { fill: { ink: tyInk(), light: tyGround(), mid: mix(tyGround(), tyInk(), 0.2), dark: tyInk(), colour: () => C }, stroke: { ink: tyInk(), light: tyGround() }, line: 0.45 }),
+  sticker: painters({ line: null, shadow: null, tone: (fill) => inkAs(tyInk())(fill) }),
+  /** The corner tag: lettering reversed out of a black bar. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.72;
+    ctx.font = `700 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + f * 0.8, h = f * 1.2, top = y + (fs * 1.34 - h);
+    ctx.fillStyle = css(tyInk()); ctx.fillRect(x, top, w, h);
+    ctx.fillStyle = ink || css(tyGround()); spaced(ctx, str, x + f * 0.4, top + h * 0.5 + f * 0.36, 3);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The frame layer: a hairline grid — a long rule across, a few verticals, small circles where they cross, a cross mark, small figures. */
+  frame(ctx, env, p) {
+    const a = p.grid;
+    if (a <= 0) return;
+    const { w, h } = env, ink = tyInk(), i = env.o.catIndex, F = openField(env);
+    ctx.save(); ctx.strokeStyle = css(ink, 0.75 * a); ctx.fillStyle = css(ink, 0.85 * a); ctx.lineWidth = 1;
+    const ys = [F.y0 + (F.y1 - F.y0) * 0.36], xs = [0.18, 0.47, 0.83].map((t) => F.x0 + (F.x1 - F.x0) * t);
+    if (a > 0.5) ys.push(F.y0 + (F.y1 - F.y0) * 0.78);
+    for (const y of ys) { ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(w - 40, y); ctx.stroke(); }
+    xs.forEach((x, k) => { ctx.beginPath(); ctx.moveTo(x, 40 + k * 30); ctx.lineTo(x, h - 40); ctx.stroke(); for (const y of ys) { ctx.beginPath(); ctx.arc(x, y, 4 + 3 * a, 0, TAU); (k + i) % 2 ? ctx.fill() : ctx.stroke(); } });
+    ctx.lineWidth = 3; const cx = xs[1], cy = 64; ctx.beginPath(); ctx.moveTo(cx - 9, cy - 9); ctx.lineTo(cx + 9, cy + 9); ctx.moveTo(cx + 9, cy - 9); ctx.lineTo(cx - 9, cy + 9); ctx.stroke();
+    ctx.font = `600 14px ${fonts.mono}, ${fonts.cn}`; ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+    spaced(ctx, `${pad2(i + 1)}.${pad2(env.o.profile.categories.length)}`, xs[0] + 10, ys[0] - 10, 3);
+    ctx.textAlign = "right"; ctx.fillText((env.cat.code || "").toUpperCase(), xs[2] - 10, ys[0] - 10);
+    ctx.save(); ctx.translate(xs[2] + 22, h * 0.6); ctx.rotate(-Math.PI / 2); ctx.textAlign = "left"; spaced(ctx, (env.o.profile.brand.name || "").toUpperCase(), 0, 0, 4); ctx.restore();
+    ctx.restore();
+  },
+  image(ctx, C, unit) { ctx.shadowColor = "rgba(0,0,0,0)"; },
+  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.8, unit, !dark); },
+  prompt: `Stickers for a Swiss typographic poster — strict, graphic and economical — that read at a glance:
+- simple geometric or typographic shapes: arrows, circles, crosses, brackets, a single bold letter or numeral, an asterisk, a hand pointing; no realism, no perspective, no detail;
+- flat colour only: black ("ink"), white ("white") and at most a small part in the main colour;
+- the app draws no outline and no shadow: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Objects as a Swiss poster would show them: a few boxes and cylinders in exact, rational proportions — a speaker, a chair, a lamp, a book; no realism, no fine detail.
+- the renderer paints faces white, grey and black with a hairline: do NOT try to draw shading or outlines yourself;
+- "white" is the paper, "dark" is black, and "main" is the channel colour — one part only.`,
+};
+
+export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, bluetone, redstreet, negative, cinema, cyano, monofilm, typo };
 export const LOOK_IDS = Object.keys(LOOKS);
 
 let current = cel, values = {};

@@ -229,7 +229,7 @@ function outlined(ctx, pass, o, id) {
 // flat looks have neither, the overprint only an offset second colour, everything built on the
 // house lettering both. A look id stands for its own lettering, which "auto" uses.
 const BOTH = { stroke: true, shadow: true }, NONE = { stroke: false, shadow: false };
-const USES = { cel: BOTH, plain: NONE, cyber: BOTH, riso: { stroke: false, shadow: true }, anime: BOTH, bluenote: NONE, editorial: NONE, songke: NONE, vivid: BOTH, bluetone: { stroke: false, shadow: true }, redstreet: NONE };
+const USES = { cel: BOTH, plain: NONE, cyber: BOTH, riso: { stroke: false, shadow: true }, anime: BOTH, bluenote: NONE, editorial: NONE, songke: NONE, vivid: BOTH, bluetone: { stroke: false, shadow: true }, redstreet: NONE, negative: NONE, cinema: { stroke: false, shadow: true }, cyano: { stroke: false, shadow: true }, monofilm: { stroke: false, shadow: true }, typo: NONE };
 /** { id, stroke, shadow } for effect `id` under the current look; id is the effect actually painted. */
 export function effectUses(id = "auto") {
   const fx = EFFECTS[id] && id !== "auto" ? id : look().runs ? look().id : "cel";
