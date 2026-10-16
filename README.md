@@ -16,7 +16,7 @@ How it works inside: [ARCHITECTURE.md](ARCHITECTURE.md).
 | **Profile** | Everything about one brand: its name, channels, output sizes, template and a default design. You can keep several. |
 | **Channel** | One content line within the brand, with its own name, colour and graphic. A cover takes its colour and graphic from its channel. |
 | **Cover** | Each channel of each profile has one: its title, corner tag and its own stack of layers. Switching channel or profile shows that one; none affects another, and each is saved as you go. |
-| **Layer** | Each part of a cover. Built-in layers (background, colour block, title, …) are on every cover; free layers are the stickers, images, photos and text you add. |
+| **Layer** | Each part of a cover. Layout layers (background, colour block, title, …) come with the layout and are on every cover; free layers are the stickers, images, photos and text you add. |
 
 ## The window
 
@@ -177,11 +177,11 @@ In *This size only*, the channel graphic's placement is remembered per channel.
 
 - The list on the right runs front to back, top to bottom. Drag a row to re-order, or use ▲ ▼.
 - The two icons on each row are show/hide and lock. Background and Corner brackets carry a 🔒: they are fixed layers.
-- At the end of each row: what the layer is (photo, text "T", colour as a filled square, vector asset as a pen nib, bitmap asset); a linked photo has a chain and a leading (solid dot) / following (dashed ring) mark before its photo icon, one colour per pair — click the chain to end the link, the leading / following mark to go to the other layer of the pair; then whose it is — a presets icon (three sliders) for a built-in layer (every cover has it; it cannot be deleted, but can be hidden), a person for a layer you added.
+- At the end of each row: what the layer is (photo, text "T", colour as a filled square, vector asset as a pen nib, bitmap asset); a linked photo has a chain and a leading (solid dot) / following (dashed ring) mark before its photo icon, one colour per pair — click the chain to end the link, the leading / following mark to go to the other layer of the pair; then whose it is — the layout icon (a page in panels) for a layout layer (it comes with the layout and every cover has it; it cannot be deleted, but can be hidden), a person for a layer you added.
 - Layers you added (photos, text, assets) are renamed by double-clicking their name (a single click selects, as anywhere on the row): Enter or clicking elsewhere keeps it, Esc does not, an empty name goes back to the automatic one.
 - **＋ Text** adds a text layer; **＋ Colour** adds a colour layer: one block of colour, the canvas's size to begin with (in the channel colour), to shrink, stretch or turn into a ground, a band or a see-through wash. Clicking an item in Assets adds it. New layers go directly above the selected one.
 - Position, size, stretch and rotation are set on the canvas with the mouse (see the table above).
-- **Hide layout** — the button left of FOCUS at the top of the layer list. It hides all the template's own layers at once (background, colour block, title, tag, channel name, brand row, channel graphic, frame), leaving the photos, text, assets and colour layers you added; it then reads *Show layout*, which brings back the ones that were showing (one you had hidden before stays hidden). It acts on this channel's cover and can be undone.
+- **Hide layout** — the button left of FOCUS at the top of the layer list. It hides all the layout layers at once (background, colour block, title, tag, channel name, brand row, channel graphic, frame), leaving the photos, text, assets and colour layers you added; it then reads *Show layout*, which brings back the ones that were showing (one you had hidden before stays hidden). It acts on this channel's cover and can be undone.
 - **FOCUS** — the switch at the top right of the layer list (shortcut F, Esc to leave). While on, dragging and scrolling on the canvas (Option to turn) act on the selected layer whatever is under the pointer, and nothing else is picked or moved; choose another layer in the list. The canvas gets a dashed frame and a tag naming the layer; a layer that cannot be moved (a fixed built-in or a locked one) is tagged so. With several layers selected, a drag moves them together.
 - The properties come in groups: their names on the left (Text, Effect, Colour, Lines, Plate — or Cut-out, Place, Picture, Lines…), the controls on the right; after a rule at the bottom, the Layer group every layer has: opacity and *Reset placement* (a cut-out has none; its *Line up with the photo again* is in its Place group). Explanations sit behind the ⓘ beside a group's name: hover it, or click it.
 - Colours take a row each, as checkboxes do: the swatch, its name, then *Automatic* (following the look and the channel colour); once you pick a colour it reads *Back to automatic* — click it to return.
@@ -279,7 +279,7 @@ Each channel of each profile has a cover of its own: its title, tag, photos, tex
 - Covers are saved as you go; there is nothing to save by hand. Undo starts afresh when you switch channel or profile.
 - What a profile's channels share is the profile itself: its look, output sizes, brand and default design.
 - Assets, vector and bitmap, are shared by every profile; see [Assets](#assets) below.
-- **Copy from another channel** — the button under the channels in *Cover*. Pick a profile and a channel (the whole cover is shown below, at the size on the canvas), and everything but the built-in layers on that cover (photos, text, assets, colour layers, cut-outs and their links included) is copied into this cover with its settings. Each item goes above the built-in layer it was above there, so what is in front of what stays as it was; what this cover has stays, and the copy can be undone.
+- **Copy from another channel** — the button under the channels in *Cover*. Pick a profile and a channel (the whole cover is shown below, at the size on the canvas), and everything but the layout layers on that cover (photos, text, assets, colour layers, cut-outs and their links included) is copied into this cover with its settings. Each item goes above the layout layer it was above there, so what is in front of what stays as it was; what this cover has stays, and the copy can be undone.
 
 Earlier versions kept one cover, whose layers could be kept to some channels. The first start after updating splits that cover among the current profile's channels: each layer goes to the channels it was on, and the title and tag are copied to every channel; the old file is kept as `session.migrated.json`. Photos uploaded before all appear under *Assets → Bitmaps*.
 
@@ -573,6 +573,19 @@ Goal: users make looks of their own and import looks others made, and the Style 
 - Not planned: script plugins (a look as JavaScript) — that would run strangers' code in an app that can read and write files.
 - Open: whether an imported look may name fonts, and whether the font files travel with it; whether the editor lives in Setup or in Style.
 
+### Open the looks' material effects to the user's own layers
+
+Goal: text, asset, photo and solid layers can each take the current look's effects (the riso's misregistration and patchy ink, the chrome's metal and drips, the net art's pixel sorting and dithering…), each at its own strength. Looks do not lend each other their effects: each offers only its own, in its own colours and settings.
+
+- [ ] Split each look's effects in two: **scene effects** (the hills, nebulae and courts in the background; the grain, vignette and creases of the finish) stay with the Style panel; **material effects** (working on a layer's pixels or outline) are opened to layers.
+- [ ] Each look declares its material effects, `elementFx`: a name, the layer types it suits, a stage (replacing the fill `fill` → laying texture `over` → working on pixels `filter` → outside the outline `behind`, run in that fixed order by the framework) and a painter.
+- [ ] Settings live on the layer, per look: `L.lookFx = { lookId: { effectKey: amount } }`; a render reads only the current look's, so another look's are kept but unused, and come back with that look.
+- [ ] Pipeline: the per-layer offscreen pass already used for opacity below 1, with the stages applied there before compositing; the offscreen canvas only the layer's box, degraded and cached while dragging.
+- [ ] Interface: a "Look effects · <look>" group of sliders in the layer's properties, 0 by default; one button to clear this look's effects; a note when other looks hold settings of their own.
+- [ ] In stages: first riso (texture), liquid chrome (fill) and glitch net art (pixels) on text and asset layers, then every look and the photo and solid layers.
+- Open questions: whether the layout layers (title, channel graphic, tag, channel name) get them too; whether the five lettering effects borrowed from other looks (Sliced, Overprint, Double keyline, Underlined highlight, Sunlit block) go back to their own looks; whether new layers start with every effect off or with suggested values; whether effects can differ per size (leaning no).
+- Note: this records look-specific settings in the cover's data, which changes the rule that a cover's content never mentions a look; effects the finish already lays over every layer (grain, say) are not offered again.
+
 ### Other
 
 - [ ] AI generation: evaluate results with real models and tune the prompt accordingly; allow follow-up change requests on a result; keep the token in the system keychain.
@@ -589,7 +602,7 @@ Goal: users make looks of their own and import looks others made, and the Style 
 | The program (all source code) | [GNU AGPL v3 or later](LICENSE) |
 | Built-in artwork: channel graphics, stickers, colour block shapes | [CC BY 4.0](LICENSE-ASSETS.md) |
 | Bundled fonts: Noto Sans SC, Bebas Neue, JetBrains Mono | SIL Open Font License, texts in `ui/fonts/` |
-| Built-in repaint style "8-bit pixel editorial" (`ui/repaint-styles/`) | adapted from [TwentyfiveBTea/8bit-pixel-art](https://github.com/TwentyfiveBTea/8bit-pixel-art), AGPL v3 |
+| Built-in repaint styles (`ui/repaint-styles/`) | each adapted from an open-licensed skill: the `credit` line of each file names its source, author and licence (MIT or AGPL v3) |
 
 In short: you may use, change and redistribute SmedCover, but if you distribute a modified version —
 or let people use one over a network — you must make its source available under the same licence.

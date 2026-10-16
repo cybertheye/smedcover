@@ -105,7 +105,7 @@ hand-edited files cannot crash the app.
 { "catId": "vlog", "title": "First line\n*second line*", "tag": "EP.01", "layers": [ … ] }
 ```
 
-`S.covers` holds the current profile's channel covers (keyed by channel id) and `S.cover` the one shown; both change only through `setCover()`. Switching profile reads the new one's covers (`loadCovers()`); switching channel (`switchChannel()`) commits the undo step first, then shows that channel's cover — made by `channelCover()` from the profile's design, with a default title, if it has none. Saving (`persistCover`) is debounced per profile and channel. The channel each profile was last on is kept in the settings' `channels` (`{profile id: channel id}`) and read by `channelOf()`. Deleting a profile deletes its `covers/<profile id>/`. *Copy from another channel* (`copyDialog`, `copyInto`) takes the source cover through `coverOf()` (the one in memory for the current profile, else the file, else a new one from the design), `copyPreview()` draws it whole with its own profile at the size on the canvas, and `layers.js`'s pure `copyFreeLayers(into, from)` copies its free layers: deep copies under new ids, a passive layer's `of` turned to its photo's copy; each copy goes above the nearest built-in layer below it in the source, over the free layers already there, in the order they had. The cover is then checked by `channelCover()` as one read is, and the whole is one undo step.
+`S.covers` holds the current profile's channel covers (keyed by channel id) and `S.cover` the one shown; both change only through `setCover()`. Switching profile reads the new one's covers (`loadCovers()`); switching channel (`switchChannel()`) commits the undo step first, then shows that channel's cover — made by `channelCover()` from the profile's design, with a default title, if it has none. Saving (`persistCover`) is debounced per profile and channel. The channel each profile was last on is kept in the settings' `channels` (`{profile id: channel id}`) and read by `channelOf()`. Deleting a profile deletes its `covers/<profile id>/`. *Copy from another channel* (`copyDialog`, `copyInto`) takes the source cover through `coverOf()` (the one in memory for the current profile, else the file, else a new one from the design), `copyPreview()` draws it whole with its own profile at the size on the canvas, and `layers.js`'s pure `copyFreeLayers(into, from)` copies its free layers: deep copies under new ids, a passive layer's `of` turned to its photo's copy; each copy goes above the nearest layout layer below it in the source, over the free layers already there, in the order they had. The cover is then checked by `channelCover()` as one read is, and the whole is one undo step.
 
 Earlier data: there used to be one cover, `session.json`, shared by every channel, whose layers could be kept to some channels with `cats`. While the current profile has no channel covers yet, `migrateSession()` splits it: one copy per channel, `channelCover()` keeping only the layers on that channel and dropping `cats`, the title and tag copied to each; the old file is renamed `session.migrated.json`, and `session-photo*` is first turned into a photo layer by `upgradeCover`, then deleted.
 
@@ -128,10 +128,10 @@ A cover is an array of layers, bottom first.
 
 | Kind | Types | Notes |
 |---|---|---|
-| Bound layers | `bg` `accent` `graphic` `brand` `title` `tag` `catname` `frame` | Exactly one of each on every cover. Their content comes from elsewhere (the title text, the channel's graphic, …). They cannot be deleted; the `id` is the type name. |
+| Layout layers (`bound` in the code) | `bg` `accent` `graphic` `brand` `title` `tag` `catname` `frame` | Exactly one of each on every cover. Their content comes from elsewhere (the title text, the channel's graphic, …). They cannot be deleted; the `id` is the type name. |
 | Free layers | `asset` `text` `photo` `solid` | Assets, text, photos and blocks of colour added by the user; can be deleted and duplicated. An asset may carry `ink` (a vector asset's colour of the user's, over its own and the channel's); a block carries `color` and is the canvas's size at scale 1. |
 
-`normalizeLayers()` repairs a layer list: it drops unknown layers, puts back missing bound layers,
+`normalizeLayers()` repairs a layer list: it drops unknown layers, puts back missing layout layers,
 keeps the background at the bottom and makes ids unique. A free layer may carry `name`, the name the
 user gave it in the layer list (`layerName()` prefers it; without one the name comes from the type and
 content). The interface's buttons do not follow the cover's look.
@@ -149,7 +149,7 @@ Every layer has a `t`:
 
 - **`t.all` applies to every size.** Position is stored as a **fraction of the canvas**, so one value lands in a consistent place from 16:9 to 9:16.
   - Free layers: `x`, `y` are the position of the centre.
-  - Bound layers: `x`, `y` are an **offset** from where the template puts the element; 0 by default.
+  - Layout layers: `x`, `y` are an **offset** from where the template puts the element; 0 by default.
   - `s` is the overall size, `kx` / `ky` stretch horizontally / vertically, `r` is degrees.
 - **`t.by` is per-size fine-tuning**, keyed by size (`"1920x1080"`), in virtual pixels, applied on top of `t.all`.
 - **The channel graphic** can also be tuned per channel, under `"1920x1080@<channel id>"`, because graphics differ a lot in shape.
@@ -578,7 +578,7 @@ and `swatch()` a small colour swatch (optionally automatic).
 ### 9.2 Working on the canvas
 
 - The pointer position is converted to virtual coordinates and tested against `canvas._hits`, top first. The point is rotated back into each layer's own frame, so rotated layers are hit accurately.
-- *Hide layout* (`toggleLayout()`) hides every one of the template's own layers on this channel's cover (`layoutLayers()`: the layers that are not free) and remembers, in memory and per cover object, which of them were showing (`LAYOUT_HID`); with all hidden the button reads *Show layout* and brings back just those, or all of them when there is no record (after a change of channel, say). It sets the layers' `visible`, so the eye icons agree and undo works.
+- *Hide layout* (`toggleLayout()`) hides every layout layer on this channel's cover (`layoutLayers()`: the layers that are not free) and remembers, in memory and per cover object, which of them were showing (`LAYOUT_HID`); with all hidden the button reads *Show layout* and brings back just those, or all of them when there is no record (after a change of channel, say). It sets the layers' `visible`, so the eye icons agree and undo works.
 - With FOCUS on (`S.focus`, not saved) nothing is hit-tested: the selected layer's handles work as ever, any other press and drag goes to `focusDrag()`, and the wheel acts only on `focusTargets()` (the movable members of the selected group, or the selected layer; fixed and locked ones do not count); a click beside the canvas no longer ends the selection. `syncFocus()`, run by `renderSide()`, keeps the canvas's dashed frame and tag up to date.
 - For the selected layer the handles are checked first: corners resize, sides stretch, the top knob rotates. A photo filling the canvas has a frame only once it no longer covers it (the hit's `covers`, see `showsFrame()`), and only the corners: it is never stretched or turned. Handle size is computed in screen pixels, so handles look the same at any zoom.
 - Corner brackets and the Background layer are never dragged; a selected photo filling the canvas is dragged from anywhere on the ground (the background, the colour block, anything locked).

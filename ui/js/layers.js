@@ -207,7 +207,7 @@ export const writeKey = (layer, key, catId) => (layer.type === "graphic" && catI
 /**
  * Final placement of a layer on a virtual canvas of vw x vh.
  * Free layers: {cx, cy} centre, s scale (1 = a 600-unit asset on a 1080-high canvas), r degrees.
- * Bound layers: {dx, dy} offset from the template position, s scale multiplier, r degrees.
+ * Layout layers: {dx, dy} offset from the template position, s scale multiplier, r degrees.
  * Both also carry kx / ky, the horizontal / vertical stretch.
  */
 export function resolve(layer, vw, vh, key, catId) {
@@ -278,7 +278,7 @@ export function moveLayer(layers, id, to) {
  * Copies the free layers of `from` (another cover's layers) into the list `into`, settings and all,
  * each under a new id (a cut-out's link goes to its photo's copy). Each copy goes above the built-in
  * layer it was above there, over the free layers already on it there, in the order they had; one above
- * a built-in layer this list has not, at the top. Returns the new list and the copies, bottom first.
+ * a layout layer this list has not, at the top. Returns the new list and the copies, bottom first.
  */
 export function copyFreeLayers(into, from) {
   const ids = new Set(into.map((l) => l.id)), renamed = new Map(), groups = [];
@@ -293,7 +293,7 @@ export function copyFreeLayers(into, from) {
   }
   const copies = groups.flatMap((g) => g.copies);
   for (const c of copies) if (c.of) c.of = renamed.get(c.of) || "";
-  const at = (id) => {   // above the built-in layer and the free layers already over it
+  const at = (id) => {   // above the layout layer and the free layers already over it
     let i = into.findIndex((l) => l.id === id);
     if (i < 0) return into.length;
     for (i++; i < into.length && isFree(into[i].type); i++);

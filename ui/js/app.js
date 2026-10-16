@@ -597,7 +597,7 @@ function photoItem(L) {
   const locked = passive ? t("link.passiveLocked", layerName(owner(L))) : null;
   return el("div", { class: "pitem" + (passive ? " passive" : "") + (L.id === S.layerId ? " on" : ""), dataset: { id: L.id }, style: tied ? `--link:${linkColour(L)}` : null },
     el("div", { class: "thumb", title: t("cover.photoSelect"), onclick: () => selectLayer(L.id) },
-      im ? el("img", { src: L.cut && rec.mask ? cutThumb(rec) : rec.src, alt: "" }) : el("div", { class: "hint err", style: "margin:0" }, t("props.photoMissing")),
+      im ? el("img", { src: L.cut && rec.mask ? cutThumb(rec) : thumbOf(rec), alt: "" }) : el("div", { class: "hint err", style: "margin:0" }, t("props.photoMissing")),
       el("button", { class: "del", title: t(passivesOf(L).length ? "cover.removeLinked" : "cover.removePhoto"), onclick: (e) => { e.stopPropagation(); if (REP.for === L.id) REP.for = ""; removeLayer(L.id); renderPanel(); } }, "×"),
       el("span", {}, tied && el("span", { class: "chain", innerHTML: ICONS.chain }), layerName(L), im && ` · ${sizeOf(im)[0]} × ${sizeOf(im)[1]}`, rec && rec.original && ` · ${t("rep.isRepainted")}`,
         passive && ` · ${t("link.follows", layerName(owner(L)))}`)),
@@ -669,15 +669,39 @@ function savePhoto(pid) {
   ]).catch(fail);
 }
 const pidsOf = (cover) => new Set(cover.layers.filter((l) => l.type === "photo" && l.pid).map((l) => l.pid));
-/** Reads these pictures from their files, those not read yet. Returns the ids that could not be read. */
-async function loadPhotos(pids) {
-  const missing = [];
-  for (const pid of pids) {
-    if (S.photos.has(pid)) continue;
+const READING = new Map();   // pid -> the reading of its files under way, so two callers share one
+/** Reads one picture's three files at once and puts it in the store; resolves true if it could be read. */
+function readPhoto(pid) {
+  if (S.photos.has(pid)) return Promise.resolve(true);
+  if (!READING.has(pid)) {
     const read = (ext) => files.read(`photos/${pid}${ext}`).catch(() => "");
-    if (!(await putPhoto((await read("")) || "", { original: (await read(".original")) || "", mask: (await read(".mask")) || "", pid, save: false }))) missing.push(pid);
+    READING.set(pid, Promise.all([read(""), read(".original"), read(".mask")])
+      .then(([src, original, mask]) => (S.photos.has(pid) ? pid : putPhoto(src || "", { original: original || "", mask: mask || "", pid, save: false })))
+      .then((id) => !!id).finally(() => READING.delete(pid)));
   }
+  return READING.get(pid);
+}
+/**
+ * Reads these pictures from their files, those not read yet, three at a time (a picture's files are a
+ * few megabytes of text each: read one after another, sixteen of them kept the library blank for
+ * seconds). `each(pid)` is called as each one comes in. Returns the ids that could not be read.
+ */
+async function loadPhotos(pids, each = null) {
+  const missing = [], todo = [...new Set(pids)].filter((pid) => !S.photos.has(pid));
+  let next = 0;
+  const worker = async () => { while (next < todo.length) { const pid = todo[next++]; if (await readPhoto(pid)) { if (each) each(pid); } else missing.push(pid); } };
+  await Promise.all(Array.from({ length: Math.min(3, todo.length) }, worker));
   return missing;
+}
+/** A small copy of a picture for a tile, made once and kept with it: a grid of full-size photos is slow to draw. */
+function thumbOf(rec) {
+  if (!rec.thumb) {
+    const w = rec.img.naturalWidth, h = rec.img.naturalHeight, k = Math.min(1, 320 / Math.max(w, h)), c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+    const x = c.getContext("2d"); x.imageSmoothingQuality = "high"; x.drawImage(rec.img, 0, 0, c.width, c.height);
+    rec.thumb = c.toDataURL("image/png");   // png: a picture may be transparent
+  }
+  return rec.thumb;
 }
 /** Removes the picture files that no cover of any profile shows and the bitmap library does not keep. */
 async function prunePhotos() {
@@ -1833,7 +1857,7 @@ function layerRow(L) {
       L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) })),
     el("span", { class: "kinds" }, layerKinds(L)));
 }
-/** A layer's icons: a linked photo's chain and leading / following mark, what it is (photo, text, vector or bitmap asset), then whose it is (the template's, or added by the user). */
+/** A layer's icons: a linked photo's chain and leading / following mark, what it is (photo, text, vector or bitmap asset), then whose it is (a layout layer, or added by the user). */
 function layerKinds(L) {
   const icon = (name, tip) => el("span", { class: "kind " + name, title: tip, innerHTML: ICONS[name] });
   const free = isFree(L.type) || L.type === "subject";
@@ -1852,7 +1876,7 @@ function layerKinds(L) {
       el("span", { class: "kind role", style: `color:${colour}`, title: t(passive ? "link.passiveTip" : "link.activeTip", other), innerHTML: ICONS[passive ? "passive" : "active"],
         onclick: (e) => { e.stopPropagation(); const to = passive ? owner(L) : passivesOf(L)[0]; if (to && to !== L) goToLayer(to.id); } }));
   }
-  return [...link, what, free ? icon("user", t("layers.kind.user")) : icon("system", t("layers.kind.system"))];   // a link's marks first, then what the layer is
+  return [...link, what, free ? icon("user", t("layers.kind.user")) : icon("layout", t("layers.kind.layout"))];   // a link's marks first, then what the layer is
 }
 /** Selects layer id and brings its row into view (it may be far up or down the list). */
 function goToLayer(id) {
@@ -1862,7 +1886,7 @@ function goToLayer(id) {
 }
 /** 14-px line icons for the layer list, in the text colour. */
 const ICONS = Object.fromEntries(Object.entries({
-  system: '<path d="M2 3.5h6.4M11.6 3.5H14M2 8h1.4M6.6 8H14M2 12.5h7.4M12.6 12.5H14"/><circle cx="10" cy="3.5" r="1.6"/><circle cx="5" cy="8" r="1.6"/><circle cx="11" cy="12.5" r="1.6"/>',
+  layout: '<rect x="2" y="2" width="12" height="12" rx="1.2"/><path d="M2 6.2h12M6.6 6.2V14"/>',   // a page laid out in panels: a layout layer
   user: '<circle cx="8" cy="5.2" r="2.7"/><path d="M2.6 14.5c.6-3 2.7-4.6 5.4-4.6s4.8 1.6 5.4 4.6"/>',
   photo: '<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M1.5 11.5l4-4 3 3 2-2 4 4"/><circle cx="11" cy="5.8" r="1.1"/>',
   text: '<path d="M3 3.5h10M8 3.5v10M6 13.5h4"/>',
@@ -2085,7 +2109,7 @@ function focusTargets() {
 }
 /** Turns FOCUS on or off. */
 function setFocus(on) { S.focus = on; renderSide(); }
-/** The template's own layers on the cover on the canvas (the ones marked as the system's). */
+/** The layout layers on the cover on the canvas (the ones the template brings, marked with the layout icon). */
 const layoutLayers = () => S.cover.layers.filter((l) => !isFree(l.type) && l.type !== "subject" && appliesTo(l, cat().id));
 let LAYOUT_HID = null;   // { cover, ids }: the template's layers that were showing when "Hide layout" hid them
 /**
@@ -2662,6 +2686,7 @@ async function start() {
   await applyProfile();
   resetHistory();
   if (selftest) selfTest(selftest);
+  else setTimeout(readLibrary, 1500);   // once the window is up: read the bitmap library in the background, ready for when it is opened
 }
 /**
  * Before each channel had a cover of its own the app kept one cover (session.json) for every channel of
@@ -2720,7 +2745,22 @@ function dropPicture(pid) {
   S.library = S.library.filter((e) => e.pid !== pid); persistLibrary();
   toast(t("lib.removed")); renderPanel();
 }
-const LIB = { tried: new Set() };   // pictures the bitmap pane has tried to read
+const LIB = { tried: new Set(), redraw: null, soon: 0 };   // pictures already asked for; how to redraw the view of the library open now
+/**
+ * Reads the library's pictures not read yet, the view of it that is open redrawn as they come in (at
+ * most every 150 ms), so the first ones show while the rest are still being read. Run once shortly
+ * after start-up too, so the library is usually ready before it is first opened.
+ */
+function readLibrary() {
+  const todo = S.library.filter((e) => !S.photos.has(e.pid) && !LIB.tried.has(e.pid));
+  if (!todo.length) return;
+  for (const e of todo) LIB.tried.add(e.pid);
+  const show = () => { if (!LIB.soon) LIB.soon = setTimeout(() => { LIB.soon = 0; if (LIB.redraw) LIB.redraw(); }, 150); };
+  loadPhotos(todo.map((e) => e.pid), show).then((missing) => {
+    if (missing.length) { S.library = S.library.filter((e) => !missing.includes(e.pid)); persistLibrary(); }   // their files are gone
+    show();
+  });
+}
 /** Assets → Bitmaps: the library's pictures, to click or drag onto the cover. */
 function bitmapPane() {
   return [
@@ -2736,20 +2776,14 @@ const onBitmapPane = () => S.mode === "edit" && S.tab.edit === "assets" && S.ass
  * `redraw` is called.
  */
 function libraryTiles(pick, redraw, removable = false) {
-  const todo = S.library.filter((e) => !S.photos.has(e.pid) && !LIB.tried.has(e.pid));
-  if (todo.length) {
-    for (const e of todo) LIB.tried.add(e.pid);
-    loadPhotos(todo.map((e) => e.pid)).then((missing) => {
-      if (missing.length) { S.library = S.library.filter((e) => !missing.includes(e.pid)); persistLibrary(); }   // their files are gone
-      redraw();
-    });
-  }
+  LIB.redraw = redraw;
+  readLibrary();
   const shown = S.library.filter((e) => S.photos.has(e.pid)), waiting = S.library.some((e) => !S.photos.has(e.pid));
   return shown.length ? el("div", { class: "tiles" }, shown.map((e) => {
     const rec = S.photos.get(e.pid), name = e.name || t("lib.kind." + e.kind);
     return el("div", { class: "tile ptile", title: `${name} · ${t("lib.kind." + e.kind)}`, draggable: true, onclick: () => pick(e.pid),
       ondragstart: (ev) => { ev.dataTransfer.setData("application/x-smed-photo", e.pid); ev.dataTransfer.effectAllowed = "copy"; } },
-      el("img", { src: rec.src, alt: "", draggable: false }), el("span", { class: "kind" }, t("lib.kind." + e.kind)),
+      el("img", { src: thumbOf(rec), alt: "", draggable: false }), el("span", { class: "kind" }, t("lib.kind." + e.kind)),
       removable && el("button", { class: "x", title: t("lib.remove"), onclick: (ev) => { ev.stopPropagation(); dropPicture(e.pid); } }, "×"));
   })) : el("div", { class: "hint" }, t(waiting ? "lib.loading" : "lib.empty"));
 }
