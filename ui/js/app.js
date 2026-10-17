@@ -2101,12 +2101,12 @@ function typeControls(L) {
   }
   return null;
 }
-/** The look last chosen to borrow effects from (kept while the panel is rebuilt). */
-const BORROW = { look: "" };
+/** The looks a layer borrows from, in the order they were added (by layer id; those with effects on are kept with the layer itself). */
+const BORROWED = new Map();
 /**
- * The look effects a layer carries (see layerEffects in style.js): the current look's, then any from
- * other looks — those already on the layer, and the look picked to borrow from. An effect's own
- * settings show under it once it is on.
+ * The look effects a layer carries (see layerEffects in style.js): the current look's, then the looks it
+ * borrows from — each its name, a button to remove it, and its sliders — and below them a menu of the
+ * looks it could still borrow from. An effect's own settings show under it once it is on.
  */
 function lookFxSection(L) {
   if (!FX_TYPES.includes(L.type)) return null;
@@ -2124,16 +2124,28 @@ function lookFxSection(L) {
     return [slider2(e.name[lang], 0, 1, 0.05, fx[id] || 0, (v) => { put(id, v); if ((v > 0) !== on) later("side", 400, renderSide); }),
       ...(on ? (e.sub || []).map((s) => slider2("· " + s.name[lang], 0, 1, 0.05, fx[`${id}:${s.key}`] ?? s.def, (v) => put(`${id}:${s.key}`, v))) : [])];
   });
-  const lent = [...new Set(Object.keys(fx).filter((k) => !k.includes(":")).map((k) => k.split(".")[0]))].filter((k) => k !== here && LOOKS[k]);
-  const others = LOOK_IDS.filter((k) => k !== here && !lent.includes(k) && effectsFor(k, L.type).length), pick = others.includes(BORROW.look) ? BORROW.look : "";
+  // the borrowed looks: those added here, in order, then any with effects on the layer not among them (from before, or brought from another look)
+  const lent = [...new Set(Object.keys(fx).filter((k) => !k.includes(":")).map((k) => k.split(".")[0]))];
+  const list = [...new Set([...(BORROWED.get(L.id) || []), ...lent])].filter((k) => k !== here && LOOKS[k] && effectsFor(k, L.type).length);
+  BORROWED.set(L.id, list);
+  const left = LOOK_IDS.filter((k) => k !== here && !list.includes(k) && effectsFor(k, L.type).length);
+  const remove = (look) => {
+    const o = { ...(L.lookFx || {}) };
+    for (const k of Object.keys(o)) if (k.startsWith(look + ".")) delete o[k];
+    if (Object.keys(o).length) L.lookFx = o; else delete L.lookFx;
+    BORROWED.set(L.id, list.filter((k) => k !== look));
+    touch({ cover: true, side: true });
+  };
+  const menu = el("select", { onchange: (e) => { BORROWED.set(L.id, [...list, e.target.value]); renderSide(); } },
+    el("option", { value: "", disabled: true, selected: true, hidden: true }, t("lookfx.borrow")),   // shown until a look is picked, not in the list
+    left.map((k) => el("option", { value: k }, name(k))));
   return [el("div", { class: "psep" }), psec("props.sec.lookFx", [
     el("div", { class: "fxh" }, t("lookfx.here", name(here))),
     effectsFor(here, L.type).length ? rows(here) : el("div", { class: "hint", style: "margin:0" }, t("lookfx.none", name(here))),
-    (lent.length > 0 || others.length > 0) && el("div", { class: "fxh" }, t("lookfx.others")),
-    lent.flatMap((k) => [el("div", { class: "fxs" }, name(k)), ...rows(k)]),
-    others.length > 0 && select([["", t("lookfx.borrow")], ...others.map((k) => [k, name(k)])], pick, (v) => { BORROW.look = v; renderSide(); }),
-    pick && rows(pick),
-    Object.keys(fx).length > 0 && el("button", { class: "btn wide", onclick: () => { delete L.lookFx; touch({ cover: true, side: true }); } }, t("lookfx.clear")),
+    (list.length > 0 || left.length > 0) && el("div", { class: "fxh" }, t("lookfx.others")),
+    list.flatMap((k) => [el("div", { class: "fxs" }, el("span", {}, name(k)), el("button", { class: "linkbtn", title: t("lookfx.removeHint", name(k)), onclick: () => remove(k) }, t("lookfx.remove"))), ...rows(k)]),
+    left.length > 0 && menu,
+    Object.keys(fx).length > 0 && el("button", { class: "btn wide", onclick: () => { delete L.lookFx; BORROWED.delete(L.id); touch({ cover: true, side: true }); } }, t("lookfx.clear")),
   ], t("lookfx.hint"))];
 }
 /** What every layer has, after a rule: opacity, and putting the placement back. */

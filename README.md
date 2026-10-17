@@ -263,9 +263,9 @@ Outlined effects read the font file to get each letter's outline: the first time
 A look's material effects can be put on a text or asset layer you added. With the layer selected, its properties have a *Look effects* group in two parts:
 
 - **This look**: the effects the current look opens to that kind of layer. Each is a slider; at 0 it is off. Some have settings of their own: the riso's *Halftone*, once on, shows *Halftone size* under it.
-- **Other looks**: pick a look in the menu to borrow its effects. Effects on the layer that are not the current look's are listed here under their own look.
+- **Borrow from other looks**: pick a look in the menu and its name and sliders are put in below, the menu moving down under them, so another can be borrowed. *Remove* after a look's name takes away every effect borrowed from it. Effects on the layer that are not the current look's are listed here too, under their own look.
 
-The effects stay with the layer: under another look they still apply, and move to *Other looks*. Each layer's random detail is its own, so every size, the preview and the export agree. *Surprise me* deals these layers new effects, but only ever from the look it drew, so a hand stays of one look. *Clear this layer's look effects* turns them all off.
+The effects stay with the layer: under another look they still apply, and move to *Borrow from other looks*. Each layer's random detail is its own, so every size, the preview and the export agree. *Surprise me* deals these layers new effects, but only ever from the look it drew, so a hand stays of one look. *Clear this layer's look effects* turns them all off.
 
 Three looks have effects so far; photo and solid layers and the other looks follow (see the to-do list below):
 
@@ -668,9 +668,9 @@ The general typesetting effects belong to no look and stay in the lettering menu
 **Implementation**
 
 - [x] Each look declares its material effects, `elementFx`: a name, the layer types it suits, a stage and a painter. The framework runs the stages in a fixed order: replacing the fill `fill` → laying texture `over` → working on pixels `filter` → outside the outline `behind`.
-- [x] Settings live on the layer and stay with it: `L.lookFx = { "fromLook.effect": amount, "fromLook.effect:sub": value }`. They apply under any look; the interface sorts them into *This look* and *Other looks* by the look they come from.
+- [x] Settings live on the layer and stay with it: `L.lookFx = { "fromLook.effect": amount, "fromLook.effect:sub": value }`. They apply under any look; the interface sorts them into *This look* and *Borrow from other looks* by the look they come from.
 - [x] Pipeline: the per-layer offscreen pass already used for opacity below 1, with the stages applied there before compositing. The offscreen canvas is only the layer's box; it is degraded while dragging, and its result cached by its settings. Randomness is seeded by the layer's id, so every size, the preview and the export agree.
-- [x] Interface: *This look* and *Other looks* groups of sliders in the layer's properties, 0 by default; one button to clear them.
+- [x] Interface: *This look* and *Borrow from other looks* groups of sliders in the layer's properties, 0 by default; a borrowed look can be removed on its own, and one button clears them all.
 - [ ] In stages:
   1. ~~The framework and the pilots: riso, liquid chrome and glitch net art, on text and asset layers.~~ Done.
   2. Every look, and the photo and solid layers.
