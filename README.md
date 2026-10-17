@@ -201,16 +201,16 @@ What each layer allows:
 
 ### SURPRISE ME: deal a new hand
 
-**SURPRISE ME**, beside *Export* in the top bar, draws at random everything about how the current cover is drawn and laid out:
+**SURPRISE ME**, beside *Export* in the top bar, draws at random everything about how the current cover is drawn, the layout left as it is:
 
 - the look, its sliders and its random placement; now and then the look's scene objects a little off where the layout puts them
-- the template, how much the colour block takes, the slant of its edge, whether the halves are swapped, dark or light ground
-- the shape of the colour block, the grid
+- dark or light ground, the shape of the colour block, the grid
 - the title's text effect, outline and shadow
 - each text layer's plate, text effect, outline and shadow; whether a sticker follows the channel colour
-- stickers, images and text you added are nudged, turned and resized a little
+- the look effects of the layers you added (text, stickers, images, photos, colours): one or two, mostly the drawn look's, now and then another look's
+- the layers you added get a new place, angle and size: anywhere on the canvas, but wholly on it at every size, not a pixel off; one too big to fit is set straighter, then smaller
 
-**Left alone**: the words of the title and tag, the current channel and every channel's colour, the photo layers' pictures, which layers exist (none added, none removed), custom lettering colours, locked layers.
+**Left alone**: the template, how much the colour block takes, the slant of its edge, whether the halves are swapped, and where the layout layers stand (title, colour block, channel graphic, tag, channel name, brand row, corner brackets); the words of the title and tag, the current channel and every channel's colour, the photo layers' pictures, which layers exist (none added, none removed), custom lettering colours, locked layers, a photo or a colour filling the canvas.
 
 Each deal is one step of undo, however fast you click. Deal again if you do not like it, or undo to the hand before.
 
@@ -267,7 +267,7 @@ Outlined effects read the font file to get each letter's outline: the first time
 A look's material effects can be put on a layer you added: text, asset, photo or solid. With the layer selected, its properties have a *Look effects* group in two parts:
 
 - **This look**: the effects the current look opens to that kind of layer. Each is a slider; at 0 it is off. Some have settings of their own: the riso's *Halftone*, once on, shows *Halftone size* under it.
-- **Borrow from other looks**: pick a look in the menu and its name and sliders are put in below, the menu moving down under them, so another can be borrowed. *Remove* after a look's name takes away every effect borrowed from it. Effects on the layer that are not the current look's are listed here too, under their own look.
+- **Borrow from other looks**: *Borrow from other looks…* opens a window showing each look with the effects it has, each in a dashed box; click the looks to borrow from (several at once) and confirm, and their names and sliders are put in below. Looks already borrowed come ticked; unticking one takes its effects off this layer. *Remove* after a look's name takes away every effect borrowed from it. Effects on the layer that are not the current look's are listed here too, under their own look.
 
 *Clear* after a look's name sets that look's effects back to 0 and keeps the group; a borrowed look also has *Remove*, which takes the group away. At the foot, *Clear all look effects* sets every effect back to 0 and keeps the borrowed looks; *Remove all look effects* removes every borrowed look and sets this look's effects back to 0. With nothing to clear, the buttons are greyed out.
 
@@ -319,11 +319,11 @@ Several layers in a row can be clipped to the same layer, and show within it tog
 
 ### Scene objects
 
-Some of the things a look paints in the background can be dragged where you want them: select the *Background* layer, and round handles show on them. Drag a handle to move its object; double-click it to put the object back.
+Some of the things a look paints in the background can be dragged where you want them: select the *Background* layer, and handles show on them (white rings edged in black, to read on any ground). Drag a handle to move its object; double-click it to put the object back. While dragged, only the ground is repainted, in draft; the full picture follows when you let go.
 
 - Positions are kept on this cover, per look: change the look and back, and they are where you left them; other covers are not touched.
 - What is kept is an offset from where the layout puts the object (in proportion to the canvas), so it follows when the template or the size changes. As with layers, whether all sizes or this one change follows the scope at the top.
-- The background's properties have a *Scene objects* group listing the current look's draggable objects, each with *Reset*, and *Reset them all* at the foot.
+- The background's properties have a *Scene objects* group listing the current look's draggable objects, each with *Reset*, and *Reset them all* at the foot. Click an object's name and the pointer jumps to its handle, which rings once; *Hide the handles* takes them off the canvas (and dragging with them), and is remembered.
 - Things that hang on another object go with it: the negative-space poster's beam and threads with its giant silhouette, the patterned glass's figure with its window, the spectral engraving's vortex and lines with its figure; they can still be dragged on their own too.
 - Some move one way only: the cyberpunk sweep up and down, the negative-space spotlight from side to side.
 - An object has a handle only when it is painted: one whose slider is at 0 shows none. Cel and Cyanotype have no draggable objects.
@@ -547,7 +547,7 @@ Adjustments are stored as fractions of the picture, so they apply to every size;
 
 ## Setup
 
-- **Brand** — brand name, counter label, adding, removing and ordering channels; while you work on a channel (click any of its fields or change its colour) the canvas switches to that channel, so the change shows at once; create, duplicate, delete, import and export profiles.
+- **Brand** — brand name, counter label, adding, removing and ordering channels; while you work on a channel (click any of its fields or change its colour) the canvas switches to that channel, so the change shows at once; a channel's graphic shows as a small picture and its name — click it for a window of pictures to pick from: the channel graphics, my vector assets and the stickers by group (or none); create, duplicate, delete, import and export profiles.
 - **Sizes & export** — tick preset sizes or add a custom width × height. A size can be given your own name, shown under its thumbnail.
 - **AI** — connect your own model service for generating assets.
 

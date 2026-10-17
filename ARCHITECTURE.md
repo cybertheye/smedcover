@@ -492,7 +492,7 @@ A look's **material** effects — those that depend only on one thing's own shap
 - **Painters**: they work in the offscreen canvas's pixels and touch only box `B` (an effect outside the outline may paint beyond it). `E.k` is canvas pixels per unit; `E.R(n)` random numbers seeded by the layer's id, so a layer looks the same in every size, the preview and the export; `E.C` the channel colour. Helpers: `region()` copies what the box holds, `shapeIn()` turns a shape one colour, `slideBands()` slides bands sideways. The painters the looks share sit before the `elementFx` lists: `flatFx` (the layer one colour or fill), `tonesFx` (lightness onto colour stops), `eachPixel` (pixel by pixel, mixed in by the strength), `onLayer` (a texture on the layer's own pixels only), `dotsFx` / `halftoneOf` (halftones), `knockWorn` (worn knock-outs), `glowBehind` / `ringsBehind` (glows and rings behind), `trail` (smears), `rePlate` (colour plates moved or scaled), `cutBands` (bands slid sideways), `cellsOf` (read in square cells), `dripsBehind` (drips), `bevelFx` (lit edges), `softened` (softening by drawing down and up). The patterned glass shares `glassPixels()` with the whole-picture glass, its pattern fixed to the cover's origin, so a part worked on alone still lines up. An effect that appears from nothing, a glow or a ring, climbs in opacity over the low strengths first (`Math.min(1, a * 2.5)`, say), so it does not appear whole at the first step.
 - **Speed**: a layer with effects is painted on a canvas held in memory (`willReadFrequently`), as are the effects' work canvases (`fxCanvas()`). In the app's web view a canvas lives on the graphics card by default, so reading pixels back, copying from it or drawing it onto itself each make a round trip; held in memory they are plain memory work, and only the box the effects reached (each says with `reach` how far past the layer's box it paints) is laid back. Drips read no pixels back: the layer is laid behind itself 1, 2, 4, 8… pixels lower, then cut into drops. A photo's effects are pixel work over the whole photo (a background photo on a Retina screen is millions of pixels), so `render.js` keeps their result in `FX_KEPT`, per layer and canvas size: while the layer (and the photo it copies), where it is, the picture and its mask, the canvas, the style and the channel colour stay the same, the kept result is laid down. About 16 million pixels are kept in all, the least recently used going first; a layer being dragged is not kept. The pixel loops (`tonesFx`, `eachPixel`) are written out, with no division per pixel. In the timing self-test, `FX_TIMING` records each effect's own time.
 - **Letterings turned post effects**: Three slices (cyberpunk), Second-ink overprint (riso), Two-tone outline (90s animation), Sunlit block (summer illustration) and Selected (glitch net art) are those looks' ways of setting a title, done on pixels: bands cut and slipped with a red and cyan echo, an offset second ink, two outlines, navy depth with a warmer lower part, a box with the layer turned white. They are added at the end of the `elementFx` lists, `for` all four layer types.
-- **Interface**: `lookFxSection()` in `app.js` shows *This look* and *Borrow from other looks*: the borrowed looks in the order they were added (`BORROWED`, kept in memory by layer id; a look with effects on is carried by the layer's own data). Each look's name has *Clear* (its effects back to 0, the group kept), a borrowed one also *Remove* (the group taken away), and under them a menu of the looks still to borrow from; at the foot *Clear all look effects* (the borrowed looks kept) and *Remove all look effects* (taken away), greyed out with nothing to clear. *Surprise me* deals layers effects only from the look it drew.
+- **Interface**: `lookFxSection()` in `app.js` shows *This look* and *Borrow from other looks*: the borrowed looks in the order they were added (`BORROWED`, kept in memory by layer id; a look with effects on is carried by the layer's own data). Each look's name has *Clear* (its effects back to 0, the group kept), a borrowed one also *Remove* (the group taken away), and under them *Borrow from other looks…*: `borrowDialog()` opens a window of the looks, each with its effects for this kind of layer in a dashed box, several to be ticked at once, those already borrowed ticked (unticking one takes its effects off); at the foot *Clear all look effects* (the borrowed looks kept) and *Remove all look effects* (taken away), greyed out with nothing to clear. *Surprise me* deals layers effects only from the look it drew.
 
 ### 7.5 Scene objects
 
@@ -636,7 +636,7 @@ and `swatch()` a small colour swatch (optionally automatic).
 - With FOCUS on (`S.focus`, not saved) nothing is hit-tested: the selected layer's handles work as ever, any other press and drag goes to `focusDrag()`, and the wheel acts only on `focusTargets()` (the movable members of the selected group, or the selected layer; fixed and locked ones do not count); a click beside the canvas no longer ends the selection. `syncFocus()`, run by `renderSide()`, keeps the canvas's dashed frame and tag up to date.
 - For the selected layer the handles are checked first: corners resize, sides stretch, the top knob rotates. A photo filling the canvas has a frame only once it no longer covers it (the hit's `covers`, see `showsFrame()`), and only the corners: it is never stretched or turned. Handle size is computed in screen pixels, so handles look the same at any zoom.
 - Corner brackets and the Background layer are never dragged; a selected photo filling the canvas is dragged from anywhere on the ground (the background, the colour block, anything locked).
-- With the background selected, a press on a scene object's handle (`sceneGrip()`) drags that object's offset on this cover (`moveScene()`, into `all` or `by` as the scope at the top says), the whole cover repainted in draft (`draftTouch()`: an object may be painted by more than the ground's layer — the cyberpunk sweep by the frame layer, the light leak in the finish); a double-click resets it (`resetScene()`). Hovering shows a move cursor and the object's name. The background's properties have a *Scene objects* group (`sceneSection()`).
+- With the background selected, a press on a scene object's handle (`sceneGrip()`) drags that object's offset on this cover (`moveScene()`, into `all` or `by` as the scope at the top says). While dragged, only the ground and the frame are repainted (`goLive(["bg", "frame"])` — the cyberpunk's sweep is in the frame layer; a light leak or lens flare, painted over everything, is repainted every frame anyway), the other layers kept as images, and in draft (`draftTouch()`): the ground is most of a look's work, and it is the one thing changing. A double-click resets it (`resetScene()`). Handles are white rings edged in black, not the channel colour, to read on any ground; *Hide the handles* (`S.settings.hideScene`) takes them off the canvas and stops them answering a drag. The background's properties have a *Scene objects* group (`sceneSection()`); clicking an object's name has `jumpToScene()` move the system pointer to its handle through Rust's `move_pointer`, and put a fading ring on the page over it (no repaint of the cover).
 
 ### 9.3 Redrawing one layer while dragging
 
@@ -661,6 +661,18 @@ The left panel's sliders — a look's own settings, the layout's proportions —
 After each change (debounced by half a second) the profile and cover are serialised into one string
 snapshot, pushed only if it differs from the last, up to 80 steps. Undo parses a snapshot back and
 validates it again. Simple, at the cost of a full copy per step — fine at the current data size.
+Once restored, `timeTravel()` writes that step's snapshot again from the state as restored: checking it
+fills fields in and orders keys anew, and without that the next commit would take the difference for a
+change and cut off the steps to redo (which is how *Redo* once stopped working).
+
+*Surprise me* (`surprise()`) deals only how the cover is drawn: the look and its sliders, dark or light
+ground, the colour block's shape, the grid, text effects, and the look effects of the user's layers
+(mostly from the drawn look, now and then from another); the template, its proportions and where the
+layout layers stand are left alone. `dealPlaces()` gives the user's layers a new place, angle and size:
+each size is drawn small once to learn every layer's box, then for the new angle and size the range the
+centre may take at each size (less a hair for outlines and shadows) is found, and a place drawn within
+what all sizes allow; when nothing is allowed the layer is set straighter, then smaller. Layers locked,
+filling the canvas, or cut-outs following their photo are left where they are.
 
 ## 10. The Rust side (`src-tauri/src/lib.rs`)
 
@@ -711,7 +723,9 @@ message. It is sent from Rust to get around the cross-origin limits of a web vie
 
 `pick_folder`, `save_text` (profiles, projects, the CSV template), `list_system_fonts` (which
 enumerates installed fonts with fontdb and says which can set Chinese) and `reveal_data_dir` (shows a
-folder of the data directory in the file manager — only inside the data directory).
+folder of the data directory in the file manager — only inside the data directory), `move_pointer`
+(takes the system pointer to a place in the window's content, in logical pixels: a scene object's
+"take me to its handle").
 
 ## 11. Browser fallback
 

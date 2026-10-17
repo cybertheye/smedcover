@@ -825,6 +825,13 @@ fn selftest_models(app: AppHandle) -> Res<bool> {
     Ok(true)
 }
 
+/// Moves the pointer to (x, y), logical pixels in the window's content: the editor shows where a
+/// scene object's handle is by taking the pointer there.
+#[tauri::command]
+fn move_pointer(window: tauri::Window, x: f64, y: f64) -> Result<(), String> {
+    window.set_cursor_position(tauri::LogicalPosition::new(x, y)).map_err(|e| e.to_string())
+}
+
 /// In self-test mode, whether to time dragging each layer of the cover in the data folder instead
 /// (SMEDCOVER_SELFTEST_DRAG): a check of how smooth dragging is on a real cover.
 #[tauri::command]
@@ -857,6 +864,7 @@ pub fn run() {
             cut_model_delete,
             selftest_models,
             selftest_drag,
+            move_pointer,
             selftest_photo,
             save_image,
             pick_folder,

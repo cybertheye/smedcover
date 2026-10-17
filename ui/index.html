@@ -103,6 +103,10 @@
   .fxs .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
   .fxs .linkbtn:disabled{opacity:.35;cursor:default;text-decoration:none}
   .fxs>.fxa{display:flex;gap:12px}
+  .psec-b>.fxs>span.jump{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+  .psec-b>.fxs>span.jump:hover{opacity:1}
+  .scene-ping{position:fixed;width:20px;height:20px;margin:-10px 0 0 -10px;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px #000;pointer-events:none;z-index:30;animation:scene-ping .9s ease-out forwards}
+  @keyframes scene-ping{from{transform:scale(1);opacity:1}to{transform:scale(3.2);opacity:0}}
   .info{display:inline-grid;place-items:center;width:15px;height:15px;font-size:12px;opacity:.7;cursor:help;font-weight:400}
   .info:hover{opacity:1;color:var(--acc)}
   .sub{font-size:12px;opacity:.6;margin-bottom:6px;display:flex;align-items:center;gap:4px}
@@ -182,6 +186,13 @@
   /* asset tiles */
   .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
   .tile{position:relative;aspect-ratio:1;border:2px solid var(--line);background:#1b1b2a;cursor:pointer;padding:0;display:grid;place-items:center}
+  .tile.on{border-color:var(--acc)}
+  .tile .none{font-size:12px;opacity:.7}
+  #modal .tiles{grid-template-columns:repeat(auto-fill,minmax(84px,1fr))}
+  .gpick{display:flex;align-items:center;gap:10px;width:100%;border:2px solid var(--line);background:#1b1b2a;color:inherit;font:inherit;padding:4px 10px 4px 4px;cursor:pointer;text-align:left}
+  .gpick:hover{border-color:#fff}
+  .gpick>span:not(.more){flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .gpick .more{font-size:12px;opacity:.6}
   .tile:hover{border-color:#fff}
   .ptile{padding:0;overflow:hidden}
   .ptile img{width:100%;aspect-ratio:1;object-fit:cover;display:block;pointer-events:none}
@@ -263,6 +274,14 @@
   #modal .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .15s}
   #modal .count{font:600 15px var(--mono)}
   #modal h2{font:400 34px "Bebas Neue",var(--ui);letter-spacing:.06em;margin:0}
+  #modal .dlg.wide{width:min(880px,94vw)}
+  .fxcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
+  .fxcard{text-align:left;border:2px dashed var(--line);background:transparent;color:inherit;font:inherit;padding:10px 12px;cursor:pointer;display:block}
+  .fxcard:hover{border-color:#fff}
+  .fxcard.on{border-color:var(--acc);background:rgba(255,255,255,.05)}
+  .fxcard b{display:block;margin-bottom:6px;font-size:14px}
+  .fxcard.on b::after{content:"  ✓";color:var(--acc)}
+  .fxcard ul{margin:0;padding-left:16px;font-size:12px;line-height:1.55;opacity:.75}
   @media(max-width:1100px){html,body{overflow:auto}.app{height:auto}.body,.body.setup{grid-template-columns:1fr}aside{border:0!important}.split{display:none}.scroll{overflow:visible}#stage{height:60vh}}
 </style>
 </head>

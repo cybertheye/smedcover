@@ -644,8 +644,10 @@ const riso = {
     if (env.photo) {   // the photo as a one-ink print: grey, then the blue ink in its shadows, on paper
       env.drawPhoto(1);
       wash(ctx, w, h, "screen", RISO.blue, 1); wash(ctx, w, h, "multiply", RISO.paper, 1);
-    } else if (L.grid && p.dots > 0) {   // a field of halftone in the channel ink, fading down the sheet; the size slider sets its pitch
-      toneField(ctx, -30, -30, w + 30, h * 0.62, Math.round(18 + 40 * p.pitch), css(C, 0.8), (x, y) => (1 - y / (h * 0.62)) * 0.95 * p.dots - (x / w) * 0.35);
+    } else if (L.grid && p.dots > 0) {   // a field of halftone in the channel ink, in the part the colour block leaves open: dense at its far side, fading toward the block; the size slider sets its pitch
+      const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, across = F.side === "left" || F.side === "right";
+      const t = F.side === "above" ? (x, y) => (F.y1 - y) / (fh * 0.62) : F.side === "right" ? (x) => (x - F.x0) / (fw * 0.62) : F.side === "left" ? (x) => (F.x1 - x) / (fw * 0.62) : (x, y) => (y - F.y0) / (fh * 0.62);
+      toneField(ctx, F.x0 - 30, F.y0 - 30, F.x1 + 30, F.y1 + 30, Math.round(18 + 40 * p.pitch), css(C, 0.8), (x, y) => (1 - t(x, y)) * 0.95 * p.dots - (across ? (y - F.y0) / fh : (x - F.x0) / fw) * 0.35);
     }
     if (L.grid || L.fill) risoShapes(ctx, env, p.shapes);   // on the ground, or over a photo filling the canvas (not on a print)
     return true;

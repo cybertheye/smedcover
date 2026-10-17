@@ -8,7 +8,7 @@ import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont, ratioText } from "./store.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, moveScene, resetScene, sceneOffsets } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, moveScene, resetScene, sceneOffsets, resolve as placeOf } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
@@ -140,6 +140,10 @@ async function timeTravel(step) {
   S.profile = profile;
   setCover(normalizeCover(c, profile));
   await applyProfile();
+  // the step as it now is: reading it back may write it a little differently (fields filled in, keys in
+  // another order), and the next commit would take that for a change and cut off the steps to redo
+  S.hist[i] = snapshot();
+  syncTop();
   persistProfile(); persistCover();
 }
 
@@ -210,7 +214,7 @@ function drawMain() {
   const k = Math.max(0.05, Math.min((stage.clientWidth - 36) / vw, (stage.clientHeight - 36) / vh));
   cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
   paint(cv, size, Math.min(vw * 1.5, vw * k * (drafting() ? 1 : window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
-    S.mode === "edit" ? { picked: group().map((L) => L.id) } : {});
+    S.mode === "edit" ? { picked: group().map((L) => L.id), sceneHandles: !S.settings.hideScene } : {});
   const clear = !layer("bg").visible;
   stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
 }
@@ -392,7 +396,7 @@ function layerAt(e) {
   /** The handle of a look's scene object under the pointer, with the ground selected (see sceneHandleAt), or null. */
   function sceneGrip(e) {
     const L = layer();
-    if (group().length || !L || L.type !== "bg" || !cv._virtual) return null;
+    if (group().length || !L || L.type !== "bg" || !cv._virtual || S.settings.hideScene) return null;
     const p = virtualPoint(e);
     return sceneHandleAt(cv, p.x, p.y, p.k);
   }
@@ -450,12 +454,17 @@ function layerAt(e) {
       const look = S.profile.style.look, f = frame(), [vw, vh] = cv._virtual;
       let last = at0, moved = false;
       cv.setPointerCapture(e.pointerId);
-      cv.onpointermove = (m) => {   // the whole cover in draft while dragged: an object may be painted by more than the ground's layer
+      // While dragged, only the ground and the frame (where the cyberpunk's sweep is) are repainted, the
+      // layers between kept as images (see o.live in render.js) — what a look paints over it all (a light
+      // leak, a lens flare) is painted every frame anyway — and in draft (see draftTouch): the ground is
+      // most of a look's work, and it is the one thing that changes here
+      goLive(["bg", "frame"]);
+      cv.onpointermove = (m) => {
         const p = virtualPoint(m);
         moveScene(S.cover, look, sh.key, S.settings.scope, f.key, (p.x - last.x) / vw, (p.y - last.y) / vh);
         last = p; moved = true; draftTouch({ cover: true });
       };
-      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; if (moved) renderSide(); };
+      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; endLive(); if (moved) renderSide(); };
       return;
     }
     const g = grip(e);
@@ -1756,13 +1765,28 @@ function styleTab() {
 }
 
 // ---------- left panel, Setup mode
+/** A small picture of graphic `ref` (null: none) in the channel colour `colour`, `px` across. */
+function graphicThumb(ref, colour, px) {
+  const cv = el("canvas", { width: px * 2, height: px * 2, style: `width:${px}px;height:${px}px` });
+  if (ref && assetExists(ref)) { const x = cv.getContext("2d"); x.translate(px, px); x.scale((px * 2) / 700, (px * 2) / 700); useLook(); drawAsset(x, ref, hexToRgb(colour), { tint: ref.kind === "graphic" || canTint(ref) }); }
+  return cv;
+}
+/** A channel's graphic, picked by its picture: channel graphics, my vector assets, the stickers by group, or none. */
+function graphicPicker(c, done) {
+  const lang = getLang(), m = $("modal"), cur = c.graphic.kind === "none" ? "none" : `${c.graphic.kind}:${c.graphic.id}`;
+  const pick = (ref, label) => el("div", { class: "tile" + ((ref ? `${ref.kind}:${ref.id}` : "none") === cur ? " on" : ""), title: label, onclick: () => { closeModal(); done(ref); } },
+    ref ? graphicThumb(ref, c.color, 66) : el("span", { class: "none" }, t("cat.none")));
+  const group = (title, refs) => (refs.length ? el("div", {}, el("label", { class: "cap" }, title), el("div", { class: "tiles" }, refs.map(([ref, label]) => pick(ref, label)))) : null);
+  m.replaceChildren(el("div", { class: "dlg wide" }, el("h2", {}, t("cat.pickTitle")),
+    el("div", { class: "tiles" }, pick(null, t("cat.none"))),
+    group(t("cat.groupGraphics"), GRAPHICS.map((g) => [{ kind: "graphic", id: g.id }, g.name[lang]])),
+    group(t("cat.groupMine"), [...userAssets.values()].map((a) => [{ kind: "user", id: a.id }, a.name])),
+    STICKER_GROUPS.map((g) => group(`${t("cat.groupStickers")} · ${g.name[lang]}`, STICKERS.filter((s) => s.group === g.id).map((s) => [{ kind: "sticker", id: s.id }, s.name[lang]]))),
+    el("div", { class: "acts" }, el("button", { class: "btn", onclick: closeModal }, t("lookfx.cancel")))));
+  m.hidden = false;
+}
 function brandTab() {
   const P = S.profile, lang = getLang(), struct = () => touch({ profile: true, cover: true, panel: true, side: true });
-  const refValue = (g) => (g.kind === "none" ? "none" : `${g.kind}:${g.id}`);
-  const options = [["none", t("cat.none")],
-    { group: t("cat.groupGraphics"), items: GRAPHICS.map((g) => ["graphic:" + g.id, g.name[lang]]) },
-    { group: t("cat.groupMine"), items: [...userAssets.values()].map((a) => ["user:" + a.id, a.name]) },
-    { group: t("cat.groupStickers"), items: STICKERS.map((s) => ["sticker:" + s.id, s.name[lang]]) }];
   const card = (c, i) => {
     const lib = c.graphic.kind === "graphic" && GRAPHICS.find((g) => g.id === c.graphic.id);
     // working on a channel shows that channel on the canvas
@@ -1774,11 +1798,8 @@ function brandTab() {
       el("div", { class: "two" },
         textInput(c.sub, (v) => { c.sub = v; touch({ profile: true }); }, { placeholder: t("cat.sub") }),
         textInput(c.code, (v) => { c.code = v; touch({ profile: true }); }, { placeholder: t("cat.code") })),
-      select(options, refValue(c.graphic), (v) => {
-        const [kind, ...rest] = v.split(":");
-        c.graphic = kind === "none" ? { kind: "none" } : { kind, id: rest.join(":"), labels: [], stamp: "" };
-        struct();
-      }),
+      el("button", { class: "gpick", title: t("cat.pickTip"), onclick: () => graphicPicker(c, (ref) => { c.graphic = ref ? { kind: ref.kind, id: ref.id, labels: [], stamp: "" } : { kind: "none" }; struct(); }) },
+        graphicThumb(c.graphic.kind === "none" ? null : c.graphic, c.color, 44), el("span", {}, c.graphic.kind === "none" ? t("cat.none") : assetExists(c.graphic) ? assetName(c.graphic, lang) : t("assets.missing")), el("span", { class: "more" }, t("cat.pick"))),
       lib && lib.labels && textInput((c.graphic.labels || []).join("，"), (v) => { c.graphic.labels = v.split(/[,，]/).map((x) => x.trim()).filter(Boolean).slice(0, 4); touch({ profile: true }); }, { placeholder: t("cat.labels") }),
       lib && lib.stamp && textInput(c.graphic.stamp || "", (v) => { c.graphic.stamp = v; touch({ profile: true }); }, { placeholder: t("cat.stamp") }),
       el("div", { class: "acts" },
@@ -2149,9 +2170,25 @@ function sceneSection(L) {
   const isMoved = (k) => !!off[k] && (Math.abs(off[k][0]) > 1e-4 || Math.abs(off[k][1]) > 1e-4);
   const reset = (k) => { resetScene(S.cover, look, k, scope, f.key); touch({ cover: true, side: true }); };
   return [el("div", { class: "psep" }), psec("props.sec.scene", [
-    ...Object.keys(scene).map((k) => el("div", { class: "fxs" }, el("span", {}, sceneName(k)), el("div", { class: "fxa" }, el("button", { class: "linkbtn", disabled: !isMoved(k), onclick: () => reset(k) }, t("scene.reset"))))),
+    check("scene.hide", S.settings.hideScene, (v) => { S.settings.hideScene = v; persistSettings(); queueDraw(); renderSide(); }),
+    ...Object.keys(scene).map((k) => el("div", { class: "fxs" },
+      el("span", { class: "jump", title: t("scene.jumpTip"), onclick: () => jumpToScene(k) }, sceneName(k)),
+      el("div", { class: "fxa" }, el("button", { class: "linkbtn", disabled: !isMoved(k), onclick: () => reset(k) }, t("scene.reset"))))),
     el("button", { class: "btn wide", disabled: !Object.keys(scene).some(isMoved), onclick: () => reset(null) }, t("scene.resetAll")),
   ], t("scene.hint"))];
+}
+/**
+ * Shows where scene object `key` is: takes the pointer to its handle (in the app) and rings it once. An
+ * object not painted (its slider at 0) has no place to show.
+ */
+function jumpToScene(key) {
+  const cv = $("cv"), q = (cv._scene || []).find((s) => s.key === key);
+  if (!q || !cv._virtual) return toast(t("scene.notShown", sceneName(key)));
+  const r = cv.getBoundingClientRect(), k = cv._virtual[0] / r.width, x = r.left + q.x / k, y = r.top + q.y / k;
+  if (native && !S.settings.hideScene) invoke("move_pointer", { x, y }).catch(() => null);
+  const ring = el("div", { class: "scene-ping", style: `left:${x}px;top:${y}px` });   // a ring on the page over the canvas: no redraw of the cover
+  document.body.append(ring);
+  setTimeout(() => ring.remove(), 1000);
 }
 /** The looks a layer borrows from, in the order they were added (by layer id; those with effects on are kept with the layer itself). */
 const BORROWED = new Map();
@@ -2194,18 +2231,79 @@ function lookFxSection(L) {
   const head = (look, borrowed) => el("div", { class: "fxs" }, borrowed ? el("span", {}, name(look)) : el("span", { class: "fxt" }, t("lookfx.here", name(look))), el("div", { class: "fxa" },
     borrowed && link(t("lookfx.remove"), t("lookfx.removeHint", name(look)), false, () => remove(look)),
     effectsFor(look, L.type).length > 0 && link(t("lookfx.clearOne"), t("lookfx.clearOneHint", name(look)), !has(look), () => { clear(look); touch({ cover: true, side: true }); })));
-  const menu = el("select", { onchange: (e) => { BORROWED.set(L.id, [...list, e.target.value]); renderSide(); } },
-    el("option", { value: "", disabled: true, selected: true, hidden: true }, t("lookfx.borrow")),   // shown until a look is picked, not in the list
-    left.map((k) => el("option", { value: k }, name(k))));
   return [el("div", { class: "psep" }), psec("props.sec.lookFx", [
     head(here, false),
     effectsFor(here, L.type).length ? rows(here) : el("div", { class: "hint", style: "margin:0" }, t("lookfx.none", name(here))),
     (list.length > 0 || left.length > 0) && el("div", { class: "fxh" }, t("lookfx.others")),
     list.flatMap((k) => [head(k, true), ...rows(k)]),
-    left.length > 0 && menu,
+    (list.length > 0 || left.length > 0) && el("button", { class: "btn wide", onclick: () => borrowDialog(L, here, list) }, t("lookfx.borrowBtn")),
     el("button", { class: "btn wide", title: t("lookfx.clearHint"), disabled: !any, onclick: () => { delete L.lookFx; touch({ cover: true, side: true }); } }, t("lookfx.clear")),
     el("button", { class: "btn wide", title: t("lookfx.removeAllHint"), disabled: !any && !list.length, onclick: () => { delete L.lookFx; BORROWED.delete(L.id); touch({ cover: true, side: true }); } }, t("lookfx.removeAll")),
   ], t("lookfx.hint"))];
+}
+/**
+ * The looks a layer may borrow effects from, to pick from: each look, with the effects it has for this kind
+ * of layer, in a dashed box; several at once. Those it borrows already come ticked — unticking one takes
+ * its effects off the layer.
+ */
+function borrowDialog(L, here, list) {
+  const lang = getLang(), pool = LOOK_IDS.filter((k) => k !== here && effectsFor(k, L.type).length), chosen = new Set(list), m = $("modal");
+  const ok = el("button", { class: "btn solid", onclick: () => {
+    const gone = list.filter((k) => !chosen.has(k));
+    if (gone.length && L.lookFx) {
+      const o = { ...L.lookFx };
+      for (const k of Object.keys(o)) if (gone.includes(k.split(".")[0])) delete o[k];
+      if (Object.keys(o).length) L.lookFx = o; else delete L.lookFx;
+    }
+    BORROWED.set(L.id, [...list.filter((k) => chosen.has(k)), ...pool.filter((k) => chosen.has(k) && !list.includes(k))]);   // the ones of before keep their place, the new ones after them
+    closeModal(); touch({ cover: true, side: true });
+  } });
+  const sync = () => { ok.textContent = t("lookfx.borrowOk", chosen.size); };
+  const card = (k) => {
+    const c = el("button", { class: "fxcard" + (chosen.has(k) ? " on" : ""), onclick: () => { if (chosen.has(k)) chosen.delete(k); else chosen.add(k); c.classList.toggle("on", chosen.has(k)); sync(); } },
+      el("b", {}, LOOKS[k].name[lang]),
+      el("ul", {}, effectsFor(k, L.type).map((e) => el("li", {}, e.name[lang] + (e.sub ? ` · ${e.sub.map((s) => s.name[lang]).join("、")}` : "")))));
+    return c;
+  };
+  m.replaceChildren(el("div", { class: "dlg wide" }, el("h2", {}, t("lookfx.others")), el("div", { class: "hint", style: "margin:0" }, t("lookfx.borrowHint")),
+    el("div", { class: "fxcards" }, pool.map(card)),
+    el("div", { class: "acts" }, el("button", { class: "btn", onclick: closeModal }, t("lookfx.cancel")), ok)));
+  sync(); m.hidden = false;
+}
+/**
+ * Surprise me's places for the user's own layers: each anywhere on the canvas, at a new angle and size,
+ * but wholly on it at every size — not a pixel off. A layer locked, filling the canvas (a background photo,
+ * a colour block as large as the canvas) or following its photo (a cut-out) is left where it is. Each
+ * layer's box at each size comes from a quick drawing; a layer too big for some size is set straighter,
+ * then smaller, until it fits.
+ */
+function dealPlaces(between, round) {
+  const fills = (L) => fillsCanvas(L) || (L.type === "solid" && L.t.all.s >= 0.98 && !L.t.all.r);
+  const movers = S.cover.layers.filter((L) => isFree(L.type) && L.visible && !L.locked && !L.of && !fills(L));
+  if (!movers.length) return;
+  const boxes = S.profile.sizes.filter((s) => s.on !== false).map((size) => {
+    const cv = document.createElement("canvas"), key = sizeKey(size);
+    drawCover(cv, { profile: S.profile, catIndex: catIndex(), size, pixelW: 240, cover: S.cover, photos: S.photos });
+    return { key, w: cv._virtual[0], h: cv._virtual[1], hits: cv._hits || [] };
+  });
+  for (const L of movers) {
+    const a = L.t.all, per = boxes.map((b) => ({ ...b, hit: b.hits.find((x) => x.id === L.id) })).filter((b) => b.hit);
+    if (!per.length) continue;
+    let s = clamp(a.s * between(0.8, 1.25), 0.05, 2.5), r = round(between(-12, 12), 1);
+    for (let tries = 0; tries < 40; tries++) {
+      // where the centre may go at each size, as fractions of the canvas, with this size and angle: the box
+      // upright (turned by the size's own extra angle too), less a hair for outlines and shadows
+      let lo = [-Infinity, -Infinity], hi = [Infinity, Infinity];
+      for (const p of per) {
+        const at = placeOf(L, p.w, p.h, p.key, cat().id), dx = at.cx - a.x * p.w, dy = at.cy - a.y * p.h, k = s / a.s;
+        const t = ((r + (at.r - a.r)) * Math.PI) / 180, hw = p.hit.hw * k, hh = p.hit.hh * k, m = Math.min(p.w, p.h) * 0.015;
+        const ex = Math.abs(hw * Math.cos(t)) + Math.abs(hh * Math.sin(t)) + m, ey = Math.abs(hw * Math.sin(t)) + Math.abs(hh * Math.cos(t)) + m;
+        lo = [Math.max(lo[0], (ex - dx) / p.w), Math.max(lo[1], (ey - dy) / p.h)]; hi = [Math.min(hi[0], (p.w - ex - dx) / p.w), Math.min(hi[1], (p.h - ey - dy) / p.h)];
+      }
+      if (lo[0] <= hi[0] && lo[1] <= hi[1]) { a.x = between(lo[0], hi[0]); a.y = between(lo[1], hi[1]); a.r = r; a.s = s; break; }
+      if (r) r = Math.abs(r) < 1 ? 0 : r / 2; else s *= 0.9;   // too big here: straighter first, then smaller
+    }
+  }
 }
 /** What every layer has, after a rule: opacity, and putting the placement back. */
 function layerSection(L) {
@@ -2636,12 +2734,8 @@ function surprise() {
   if (S.cover.scene) delete S.cover.scene[st.look];
   if (chance(0.4)) for (const key of Object.keys(LOOKS[st.look].scene || {})) moveScene(S.cover, st.look, key, "all", frame().key, round(between(-0.06, 0.06), 0.005), round(between(-0.05, 0.05), 0.005));
   st.theme = chance(0.7) ? "dark" : "light";
-  // the template and its proportions
-  st.template = pick(["stack", "stack", "split", "split", "banner"]);
-  const adj = { size: round(st.template === "banner" ? between(0.12, 0.22) : between(0.24, 0.5), 0.01), slant: chance(0.35) ? 0 : round(between(-0.12, 0.12), 0.005) };
-  if (chance(0.3)) adj.flip = true;
-  st.layoutAdjust[st.template] = adj;
-  // every layer's own choices
+  // the layout is left as it is — the template, its proportions, where the layout layers stand — and
+  // every layer's own choices are dealt
   const effects = Object.keys(EFFECTS).filter((id) => id !== "auto" && (native || EFFECTS[id].kind !== "outline"));
   const dealFx = (L, auto) => { delete L.fx; delete L.fxAmt; if (!chance(auto)) { L.fx = pick(effects); if (EFFECTS[L.fx].kind !== "passes") L.fxAmt = round(between(0.6, 1.5), 0.05); } };
   for (const L of S.cover.layers) {
@@ -2654,24 +2748,22 @@ function surprise() {
       case "text": L.plate = chance(0.35); L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.4); break;
       case "asset": if (canTint(L.ref) && L.ref.kind !== "graphic") L.tint = chance(0.5); break;
     }
-    if (FX_TYPES.includes(L.type)) {   // look effects, dealt only from the look just drawn, so the hand stays of one look
+    if (FX_TYPES.includes(L.type)) {   // look effects: one or two, mostly the look just drawn's, now and then another look's
       delete L.lookFx;
-      const own = effectsFor(st.look, L.type);
-      if (own.length && chance(0.45)) {
-        const fx = {};
-        for (const e of [...own].sort(() => R() - 0.5).slice(0, chance(0.4) ? 2 : 1)) {
-          fx[`${st.look}.${e.key}`] = round(between(0.35, 0.85), 0.05);
-          for (const s of e.sub || []) fx[`${st.look}.${e.key}:${s.key}`] = round(between(0.2, 0.8), 0.05);
+      if (chance(0.55)) {
+        const fx = {}, others = LOOK_IDS.filter((k) => k !== st.look && effectsFor(k, L.type).length);
+        for (let n = chance(0.4) ? 2 : 1; n > 0; n--) {
+          const from = effectsFor(st.look, L.type).length && chance(0.6) ? st.look : others.length ? pick(others) : null, list = from ? effectsFor(from, L.type).filter((e) => !(`${from}.${e.key}` in fx)) : [];
+          if (!list.length) continue;
+          const e = pick(list);
+          fx[`${from}.${e.key}`] = round(between(0.35, 0.85), 0.05);
+          for (const s of e.sub || []) fx[`${from}.${e.key}:${s.key}`] = round(between(0.2, 0.8), 0.05);
         }
-        L.lookFx = fx;
+        if (Object.keys(fx).length) L.lookFx = fx;
       }
     }
-    if (isFree(L.type) && L.type !== "solid" && !L.locked) {   // added items shuffle about a little: nudged, turned, resized (a block of colour stays put)
-      const a = L.t.all;
-      a.x = clamp(a.x + between(-0.07, 0.07), 0.06, 0.94); a.y = clamp(a.y + between(-0.07, 0.07), 0.08, 0.92);
-      a.r = round(between(-12, 12), 1); a.s = clamp(a.s * between(0.8, 1.25), 0.05, 2.5);
-    }
   }
+  dealPlaces(between, round);
   touch({ profile: true, cover: true, panel: true, side: true, strip: true });
   commitHistory();
   toast(t("msg.surprise", LOOKS[st.look].name[getLang()], t("tpl." + st.template).split(/[：:]/)[0]));
@@ -3223,6 +3315,30 @@ async function dragTest() {
     await new Promise((r) => setTimeout(r, 900));
     const s = [...times].sort((a, b) => a - b);
     report.drags.push({ layer: name(L.id), first: times.slice(0, 3), median: s[20], firstFrame, perFrameAfter: rest });
+  }
+  // 3b. dragging each look's first scene object, the ground selected (the ground and the frame repainted, in draft)
+  report.sceneDrags = [];
+  {
+    const keepLook = S.profile.style.look, keepScene = JSON.stringify(S.cover.scene || null), keepSel = S.layerId;
+    selectLayer("bg");
+    for (const look of LOOK_IDS.filter((id) => LOOKS[id].scene)) {
+      S.profile.style.look = look; queueDraw(); await frame(); await frame();
+      const q = (cv._scene || [])[0];
+      if (!q) { report.sceneDrags.push({ look, object: null }); continue; }
+      const b = cv.getBoundingClientRect(), k = b.width / cv._virtual[0];
+      let x = b.left + q.x * k; const y = b.top + q.y * k;
+      cv.dispatchEvent(new PointerEvent("pointerdown", { clientX: x, clientY: y, buttons: 1, button: 0, pointerId: 1, bubbles: true }));
+      const times = []; let last = performance.now();
+      for (let i = 0; i < 20; i++) {
+        x += 3; if (cv.onpointermove) cv.onpointermove(new PointerEvent("pointermove", { clientX: x, clientY: y, buttons: 1 }));
+        await frame(); const now = performance.now(); times.push(Math.round(now - last)); last = now;
+      }
+      if (cv.onpointerup) cv.onpointerup(new PointerEvent("pointerup", { clientX: x, clientY: y }));
+      const s = [...times].sort((a, b) => a - b);
+      report.sceneDrags.push({ look, object: q.key, first: times[0], median: s[10] });
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    S.profile.style.look = keepLook; S.cover.scene = JSON.parse(keepScene); if (!S.cover.scene) delete S.cover.scene; selectLayer(keepSel); queueDraw();
   }
   // 4. the sliders of the photos that cost most to paint: each step repaints that photo
   report.sliders = [];

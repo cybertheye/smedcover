@@ -958,7 +958,7 @@ function paintCover(cv, o) {
     const hit = cv._hits.find((x) => x.id === o.select);
     if (hit && showsFrame(hit)) drawSelection(ctx, hit, kx);
     drawLayoutHandles(ctx, cv, cover.layers.find((l) => l.id === o.select), kx, rgb(C));
-    if (o.select === "bg") drawSceneHandles(ctx, cv._scene, kx, rgb(C));
+    if (o.select === "bg" && o.sceneHandles !== false) drawSceneHandles(ctx, cv._scene, kx);
   }
 }
 
@@ -1021,20 +1021,25 @@ function drawLayoutHandles(ctx, cv, layer, k, colour) {
   ctx.restore();
 }
 
-/** The handles of the look's scene objects, with the ground selected: rings with a dot, to tell them from the others. */
-function drawSceneHandles(ctx, list, k, colour) {
+/**
+ * The handles of the look's scene objects, with the ground selected: a white ring and dot edged in black,
+ * which read on any ground (the channel colour would vanish on a ground of that colour).
+ */
+function drawSceneHandles(ctx, list, k) {
   if (!list || !list.length) return;
   const u = 1 / k;
   ctx.save();
   for (const s of list) {
-    ctx.beginPath(); ctx.arc(s.x, s.y, 11 * u, 0, Math.PI * 2); ctx.fillStyle = "rgba(7,7,12,0.55)"; ctx.fill();
-    ctx.lineWidth = 3 * u; ctx.strokeStyle = colour; ctx.stroke();
-    ctx.beginPath(); ctx.arc(s.x, s.y, 3.5 * u, 0, Math.PI * 2); ctx.fillStyle = colour; ctx.fill();
+    ctx.beginPath(); ctx.arc(s.x, s.y, 11 * u, 0, Math.PI * 2); ctx.fillStyle = "rgba(7,7,12,0.45)"; ctx.fill();
+    ctx.lineWidth = 6 * u; ctx.strokeStyle = "rgba(0,0,0,0.9)"; ctx.stroke();
+    ctx.lineWidth = 3 * u; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+    ctx.beginPath(); ctx.arc(s.x, s.y, 4 * u, 0, Math.PI * 2); ctx.fillStyle = "#ffffff"; ctx.fill();
+    ctx.lineWidth = 1.5 * u; ctx.strokeStyle = "#000000"; ctx.stroke();
   }
   ctx.restore();
 }
 /** The scene object's handle at virtual point (x, y) (k: canvas pixels per unit, for the handles' size on screen), or null. */
-export const sceneHandleAt = (cv, x, y, k) => (cv._scene || []).find((s) => Math.hypot(x - s.x, y - s.y) <= 14 * k) || null;
+export const sceneHandleAt = (cv, x, y, k) => (cv._scene || []).find((s) => Math.hypot(x - s.x, y - s.y) <= 14 * k) || null;   // (the editor asks only while they show)
 /** Topmost hit (from cv._hits) containing the virtual point (x, y) for which accept(hit) is true. */
 export function hitAt(hits, x, y, accept = () => true, margin = 12) {
   for (let i = hits.length - 1; i >= 0; i--) {
