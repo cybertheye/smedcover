@@ -20,7 +20,27 @@
 // a photo inside the title's letters, a colour inside a silhouette. The base can be any layer but the
 // ground.
 
-export const BOUND_TYPES = ["bg", "accent", "graphic", "brand", "title", "tag", "catname", "frame"];
+// the layout layers, bottom first: in the layer list, from the top, corner brackets, title, brand row,
+// tag, channel name, channel graphic, colour block, background
+export const BOUND_TYPES = ["bg", "accent", "graphic", "catname", "tag", "brand", "title", "frame"];
+/** Their order before (bottom first), which a design or cover the user never re-ordered still has: see reorderLayout. */
+const OLD_ORDER = ["bg", "accent", "graphic", "brand", "title", "tag", "catname", "frame"];
+/**
+ * Puts the layout layers of `layers` (in place) into BOUND_TYPES' order if they stand exactly in the old
+ * default order, each layer the user added going with the layout layer it lay directly above (so text
+ * that was over the title stays over it). Returns whether it did. (Run once per profile, see the app:
+ * someone may put them back in the old order on purpose later.)
+ */
+export function reorderLayout(layers) {
+  const bound = layers.filter((l) => BOUND_TYPES.includes(l.type));
+  if (bound.map((l) => l.type).join() !== OLD_ORDER.join()) return false;
+  const above = new Map(), lead = [];
+  let under = null;
+  for (const l of layers) { if (BOUND_TYPES.includes(l.type)) above.set((under = l.type), []); else (under ? above.get(under) : lead).push(l); }
+  const byType = Object.fromEntries(bound.map((l) => [l.type, l]));
+  layers.splice(0, layers.length, ...lead, ...BOUND_TYPES.flatMap((type) => [byType[type], ...above.get(type)]));
+  return true;
+}
 export const FREE_TYPES = ["asset", "text", "photo", "solid"];
 /**
  * Layers of earlier files that are read only to be turned into something else: "subject", the

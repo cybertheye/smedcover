@@ -8,7 +8,7 @@ import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont, ratioText } from "./store.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, moveScene, resetScene, sceneOffsets, resolve as placeOf } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
@@ -784,6 +784,12 @@ const coverFor = (catId) => S.covers[catId] || (S.covers[catId] = channelCover(n
 async function loadCovers(profile) {
   const out = {};
   for (const c of profile.categories) { const raw = await readJson(coverPath(profile.id, c.id)).catch(() => null); if (raw) out[c.id] = channelCover(raw, profile, c.id); }
+  if (profile.layerOrder !== 2) {   // the layout layers' default order changed: the design and covers still in the old one take the new, once
+    reorderLayout(profile.design.layers);
+    for (const [id, c] of Object.entries(out)) if (reorderLayout(c.layers)) await writeJson(coverPath(profile.id, id), c).catch(fail);
+    profile.layerOrder = 2;
+    await saveProfile(profile).catch(fail);
+  }
   return out;
 }
 /** The channel a profile shows: the one it was last on, else its first. */
@@ -2439,6 +2445,7 @@ function progress(total) {
   const state = { cancelled: false };
   const cancel = el("button", { class: "btn wide", onclick: () => { state.cancelled = true; cancel.disabled = true; } }, t("exp.cancel"));
   m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("exp.dialog")), count, bar, file, total > 1 && cancel));
+  m.dataset.sticky = "1";   // under way: only its own cancel stops it
   m.hidden = false;
   state.set = (done, name) => { count.textContent = t("msg.batch", Math.min(done + 1, total), total); bar.firstChild.style.width = (done / total) * 100 + "%"; if (name) file.textContent = name; };
   state.close = closeModal;
@@ -2514,7 +2521,17 @@ async function saveText(name, text) {
   if (!native) return browserSave(name, "data:text/plain;charset=utf-8," + encodeURIComponent(text));
   try { const p = await invoke("save_text", { name, text }); if (p) toast(t("msg.saved", p)); } catch (e) { fail(e); }
 }
-function closeModal() { const m = $("modal"); m.hidden = true; m.replaceChildren(); }
+function closeModal() { const m = $("modal"); m.hidden = true; m.replaceChildren(); m.onDismiss = null; delete m.dataset.sticky; }
+// A click on the dimmed page round a dialog dismisses it, as its cancel would (m.onDismiss, when a dialog
+// waits on an answer; else just closing it) — a press that began inside the dialog and ended outside does
+// not. A dialog that must be answered (the first-run welcome) or is under way (an export's progress) is
+// sticky and stays.
+{
+  const m = $("modal");
+  let fromBackdrop = false;
+  m.addEventListener("pointerdown", (e) => { fromBackdrop = e.target === m; });
+  m.addEventListener("click", (e) => { if (fromBackdrop && e.target === m && !m.dataset.sticky) (m.onDismiss || closeModal)(); });
+}
 function exportDialog() {
   const m = $("modal"), se = S.settings;
   m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("exp.dialog")),
@@ -2650,6 +2667,7 @@ function askProjectProfile(name) {
       el("button", { class: "btn solid wide", onclick: pick("new") }, t("proj.asNew", name)),
       el("button", { class: "btn wide", onclick: pick("current") }, t("proj.asCurrent", S.profile.name)),
       el("button", { class: "btn wide", onclick: pick(null) }, t("exp.cancel"))));
+    m.onDismiss = pick(null);   // a click outside is its cancel
     m.hidden = false;
   });
 }
@@ -2768,6 +2786,27 @@ function surprise() {
   commitHistory();
   toast(t("msg.surprise", LOOKS[st.look].name[getLang()], t("tpl." + st.template).split(/[：:]/)[0]));
 }
+/**
+ * Asks, then empties this channel's cover: every layer the user added goes, the layout layers return to
+ * the profile's default design (places, effects, colours), the scene objects to where the layout puts
+ * them; the title, the tag and the style stay. One step of undo.
+ */
+function clearDialog() {
+  const m = $("modal");
+  const go = () => {
+    closeModal(); clearTimeout(timers.hist); commitHistory();
+    const fresh = channelCover({ catId: S.cover.catId, title: S.cover.title, tag: S.cover.tag }, S.profile, S.cover.catId);
+    fresh.layers = fresh.layers.filter((l) => !isFree(l.type));   // the design's own added layers go too: empty is empty
+    setCover(fresh); S.layerId = "title"; S.picked = [];
+    touch({ cover: true, side: true, panel: onCoverTab() });
+    commitHistory(); toast(t("top.cleared"));
+  };
+  m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("top.clearTitle")),
+    el("div", { class: "hint", style: "margin:0;font-size:13px;opacity:.8" }, t("top.clearBody")),
+    el("button", { class: "btn solid wide", onclick: go }, t("top.clearGo")),
+    el("button", { class: "btn wide", onclick: closeModal }, t("exp.cancel"))));
+  m.hidden = false;
+}
 function syncTop() {
   if (!S.profile) return;
   const b = (key, onclick, props = {}) => el("button", { class: "btn", onclick, ...props }, t(key));
@@ -2778,7 +2817,8 @@ function syncTop() {
     el("div", { class: "grp" }, el("span", {}, t("top.profile")),
       el("select", { onchange: (e) => switchProfile(e.target.value) }, S.profiles.map((p) => el("option", { value: p.id, selected: p.id === S.profile.id }, p.name)))),
     // project files (projectActions: open, save, reset) have no place in the top bar for now; the code stays
-    el("div", { class: "grp" }, b("top.undo", () => timeTravel(-1), { disabled: S.histIdx <= 0 }), b("top.redo", () => timeTravel(1), { disabled: S.histIdx >= S.hist.length - 1 })),
+    el("div", { class: "grp" }, b("top.undo", () => timeTravel(-1), { disabled: S.histIdx <= 0 }), b("top.redo", () => timeTravel(1), { disabled: S.histIdx >= S.hist.length - 1 }),
+      b("top.clear", clearDialog, { title: t("top.clearTip") })),
     el("div", { class: "spacer" }),
     el("button", { class: "btn solid cta", style: "margin-right:10px", title: t("top.surpriseHint"), onclick: surprise }, t("top.surprise")),
     el("button", { class: "btn solid cta", onclick: exportDialog }, t("top.export")),
@@ -2809,6 +2849,7 @@ function welcome() {
       el("div", {}, cap("welcome.brand"), name),
       el("button", { class: "btn solid wide", onclick: () => go(false) }, t("welcome.starter")),
       el("button", { class: "btn wide", onclick: () => go(true) }, t("welcome.sample"))));
+    modal.dataset.sticky = "1";   // there is no profile yet: one of the two must be chosen
     modal.hidden = false;
     name.focus();
   });

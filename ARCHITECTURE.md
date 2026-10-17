@@ -129,13 +129,18 @@ A cover is an array of layers, bottom first.
 
 | Kind | Types | Notes |
 |---|---|---|
-| Layout layers (`bound` in the code) | `bg` `accent` `graphic` `brand` `title` `tag` `catname` `frame` | Exactly one of each on every cover. Their content comes from elsewhere (the title text, the channel's graphic, …). They cannot be deleted; the `id` is the type name. |
+| Layout layers (`bound` in the code) | `bg` `accent` `graphic` `catname` `tag` `brand` `title` `frame` (their default order, bottom first: `BOUND_TYPES`) | Exactly one of each on every cover. Their content comes from elsewhere (the title text, the channel's graphic, …). They cannot be deleted; the `id` is the type name. |
 | Free layers | `asset` `text` `photo` `solid` | Assets, text, photos and blocks of colour added by the user; can be deleted and duplicated. An asset may carry `ink` (a vector asset's colour of the user's, over its own and the channel's); a block carries `color` and is the canvas's size at scale 1. |
 
 `normalizeLayers()` repairs a layer list: it drops unknown layers, puts back missing layout layers,
 keeps the background at the bottom and makes ids unique. A free layer may carry `name`, the name the
 user gave it in the layer list (`layerName()` prefers it; without one the name comes from the type and
 content). The interface's buttons do not follow the cover's look.
+
+The default order changed once (it was `bg accent graphic brand title tag catname frame`):
+`reorderLayout()` puts a design or cover still in the old default order into the new one, each free layer
+going with the layout layer it lay directly above. The app does it once per profile, in `loadCovers()`
+(the profile then keeps `layerOrder: 2`), since someone may later put the old order back on purpose.
 
 **Clipping masks**: a free layer may carry `clip: true`, and then shows only within the shape of the
 layer below. The layer it is clipped to is its *base*: the first layer down not itself clipped
@@ -664,6 +669,15 @@ validates it again. Simple, at the cost of a full copy per step — fine at the 
 Once restored, `timeTravel()` writes that step's snapshot again from the state as restored: checking it
 fills fields in and orders keys anew, and without that the next commit would take the difference for a
 change and cut off the steps to redo (which is how *Redo* once stopped working).
+
+*Clear* (top bar, `clearDialog()`): asked first, then the channel's cover is built anew from the
+profile's default design with `channelCover()`, its free layers dropped, the title and tag words kept;
+history is committed before and after, so it is one step of undo.
+
+*Dialogs*: a click on the dimmed `#modal` (pressed and let go there — a press dragged out of the dialog
+does not count) cancels it: the dialog's own `m.onDismiss` if it waits on an answer (asking which profile
+a project opens with: as its *Cancel*), else just closing. A `data-sticky` one does not answer: the
+first-run welcome, an export's progress.
 
 *Surprise me* (`surprise()`) deals only how the cover is drawn: the look and its sliders, dark or light
 ground, the colour block's shape, the grid, text effects, and the look effects of the user's layers

@@ -27,7 +27,8 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
   - Setup: **Brand**, **Sizes & export**, **AI**
 - **Centre** — the main canvas, and below it a thumbnail of every output size. Click one to show that size on the canvas.
 - **Right** (Edit only) — the layer list and the selected layer's properties.
-- **Top bar** — profile switcher, undo and redo, SURPRISE ME (你看着办 in Chinese), export.
+- **Top bar** — profile switcher, undo and redo, clear, SURPRISE ME (你看着办 in Chinese), export. *Clear* asks first, then takes every layer you added off this channel's cover, puts the layout layers back to the default design's places, effects and colours, and the scene objects to theirs; the title and tag words and the style stay, and the photos are still in the bitmap assets. It is one step of undo.
+- **Dialogs** — a click on the dimmed page outside a dialog cancels it (a press inside dragged out does not). Two stay: the first-run welcome, where a starting point must be chosen, and an export's progress, which only its own *Cancel* stops.
 
 ## Quick start
 
@@ -175,7 +176,7 @@ In *This size only*, the channel graphic's placement is remembered per channel.
 
 ### Layers
 
-- The list on the right runs front to back, top to bottom. Drag a row to re-order, or use ▲ ▼.
+- The list on the right runs front to back, top to bottom. Drag a row to re-order, or use ▲ ▼. The layout layers stand by default, from the top: corner brackets, title, brand row, tag, channel name, channel graphic, colour block, background. An earlier profile or cover still in the old default order (never re-ordered by hand) is put into this one when opened, once; the layers you added go with the layout layer each lay directly above, so what was in front stays in front; one re-ordered by hand is left as it is.
 - The two icons on each row are show/hide and lock. Background and Corner brackets carry a 🔒: they are fixed layers.
 - At the end of each row: what the layer is (photo, text "T", colour as a filled square, vector asset as a pen nib, bitmap asset); a linked photo has a chain and a leading (solid dot) / following (dashed ring) mark before its photo icon, one colour per pair — click the chain to end the link, the leading / following mark to go to the other layer of the pair; then whose it is — the layout icon (a page in panels) for a layout layer (it comes with the layout and every cover has it; it cannot be deleted, but can be hidden), a person for a layer you added.
 - Layers you added (photos, text, assets) are renamed by double-clicking their name (a single click selects, as anywhere on the row): Enter or clicking elsewhere keeps it, Esc does not, an empty name goes back to the automatic one.

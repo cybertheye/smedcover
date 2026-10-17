@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { blockLayout, virtualSize, layout, TEMPLATES } from "../ui/js/layout.js";
 import { parseCsv, csvToJobs } from "../ui/js/csv.js";
 import { useFont, normalizeProfile, normalizeCover, normalizeSettings, exportName, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
-import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex, clipBase, clipEnd, normalizeScene, sceneOffsets, moveScene, resetScene } from "../ui/js/layers.js";
+import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex, clipBase, clipEnd, normalizeScene, sceneOffsets, moveScene, resetScene, reorderLayout } from "../ui/js/layers.js";
 import { sampleProfile, starterProfile } from "../ui/js/presets.js";
 
 test("virtualSize keeps the five tuned canvases and normalises everything else", () => {
@@ -1258,6 +1258,18 @@ test("plates under highlighted words: the title and text layers alike, with a co
   assert.equal(one((l) => l.type === "tag").hiPlate, undefined);                 // headlines only
 });
 
+test("the layout layers' default order, and a design or cover still in the old one put into it, added layers keeping their slots", () => {
+  assert.deepEqual(BOUND_TYPES, ["bg", "accent", "graphic", "catname", "tag", "brand", "title", "frame"]);   // in the list from the top: brackets, title, brand row, tag, channel name, graphic, block, ground
+  const L = (type, id = type) => ({ type, id });   // (the list from the top reads: brackets, title, brand row, tag, channel name, graphic, block, ground)
+  const old = [L("bg"), L("accent"), L("graphic"), L("brand"), L("title"), L("text", "w"), L("tag"), L("text", "x"), L("catname"), L("frame"), L("solid", "y")];
+  assert.equal(reorderLayout(old), true);
+  assert.deepEqual(old.map((l) => l.id), ["bg", "accent", "graphic", "catname", "tag", "x", "brand", "title", "w", "frame", "y"]);   // each added layer over the layout layer it was over
+  const mine = [L("bg"), L("accent"), L("title"), L("graphic"), L("brand"), L("tag"), L("catname"), L("frame")];   // re-ordered by hand: left alone
+  assert.equal(reorderLayout(mine), false);
+  assert.deepEqual(mine.map((l) => l.id), ["bg", "accent", "title", "graphic", "brand", "tag", "catname", "frame"]);
+  assert.equal(reorderLayout(old), false);                                                // once in the new order, nothing to do
+});
+
 test("clipping masks: a free layer clipped shows within the nearest unclipped layer below; never the ground", () => {
   const kept = normalizeLayers([{ type: "solid", id: "s", clip: true }, { type: "tag", clip: true }, { type: "solid", id: "u", clip: "yes" }]);
   assert.equal(kept.find((l) => l.id === "s").clip, true);
@@ -1314,7 +1326,7 @@ test("copying another cover's free layers: new ids, links kept, each above the b
   const { copyFreeLayers } = await import("../ui/js/layers.js");
   const into = normalizeLayers([{ type: "bg" }, { type: "photo", id: "mine", pid: "p0" }, { type: "accent" }, { type: "title" }, { type: "text", id: "t0", text: "here" }]);
   const from = normalizeLayers([{ type: "bg" }, { type: "photo", id: "a", pid: "p1", fill: true, blur: 4 }, { type: "accent" }, { type: "title" },
-    { type: "photo", id: "b", of: "a", cut: true, own: true, feather: 6 }, { type: "text", id: "c", text: "hi", ink: "#ff0000" }, { type: "tag" }, { type: "asset", id: "d", ref: { kind: "sticker", id: "star" } }]);
+    { type: "photo", id: "b", of: "a", cut: true, own: true, feather: 6 }, { type: "text", id: "c", text: "hi", ink: "#ff0000" }, { type: "frame" }, { type: "asset", id: "d", ref: { kind: "sticker", id: "star" } }]);
   const { layers, copies } = copyFreeLayers(into, from);
   assert.equal(copies.length, 4);
   assert.ok(copies.every((c) => !into.some((l) => l.id === c.id) && !["a", "b", "c", "d"].includes(c.id)), "new ids");
@@ -1324,7 +1336,7 @@ test("copying another cover's free layers: new ids, links kept, each above the b
   const order = layers.map((l) => (copies.includes(l) ? "copy:" + from.find((f) => f.type === l.type && (l.type !== "photo" || !!f.of === !!l.of)).id : l.id));
   const pos = (id) => order.indexOf(id);
   assert.ok(pos("bg") < pos("mine") && pos("mine") < pos("copy:a") && pos("copy:a") < pos("accent"), "the photo: above the background, over this cover's own photo");
-  assert.ok(pos("title") < pos("copy:b") && pos("copy:b") < pos("copy:c") && pos("copy:c") < pos("tag"), "the cut-out and text: above the title, in their order");
+  assert.ok(pos("title") < pos("copy:b") && pos("copy:b") < pos("copy:c") && pos("copy:c") < pos("frame"), "the cut-out and text: above the title (the top layout layer but the brackets), in their order");
   assert.ok(pos("frame") < pos("t0") && pos("t0") < pos("copy:d"), "the sticker: above the frame, over this cover's text there");
   assert.equal(layers.length, into.length + 4);
   assert.deepEqual(into.map((l) => l.id), normalizeLayers([{ type: "bg" }, { type: "photo", id: "mine", pid: "p0" }, { type: "accent" }, { type: "title" }, { type: "text", id: "t0", text: "here" }]).map((l) => l.id), "the list given is left as it was");
