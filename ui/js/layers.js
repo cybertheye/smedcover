@@ -14,6 +14,11 @@
 //
 // A free layer may carry `cats`, a list of category ids: it then exists only on covers of those
 // categories. Without it the layer is on every category's cover.
+//
+// A free layer may also be clipped (`clip: true`): it then shows only within the shape of the layer
+// below it — the nearest one not itself clipped, its *base* (see clipBase) — as a clipping mask does:
+// a photo inside the title's letters, a colour inside a silhouette. The base can be any layer but the
+// ground.
 
 export const BOUND_TYPES = ["bg", "accent", "graphic", "brand", "title", "tag", "catname", "frame"];
 export const FREE_TYPES = ["asset", "text", "photo", "solid"];
@@ -24,6 +29,74 @@ export const FREE_TYPES = ["asset", "text", "photo", "solid"];
 export const LEGACY_TYPES = ["subject"];
 /** Layers the user can delete: the free ones. */
 export const isRemovable = (type) => FREE_TYPES.includes(type) || LEGACY_TYPES.includes(type);
+/**
+ * The index of the layer that layer i is clipped to (see `clip` above), or -1 if it is not clipped, or
+ * clipped onto nothing but the ground (which covers everything, so the clip changes nothing).
+ */
+export function clipBase(layers, i) {
+  if (!layers[i] || !layers[i].clip) return -1;
+  let j = i - 1;
+  while (j >= 0 && layers[j].clip) j--;
+  return j >= 0 && layers[j].type !== "bg" ? j : -1;
+}
+/** The index of the last layer clipped onto layer i (i itself when none is). */
+export function clipEnd(layers, i) {
+  if (!layers[i] || layers[i].clip || layers[i].type === "bg") return i;
+  let k = i;
+  while (k + 1 < layers.length && layers[k + 1].clip) k++;
+  return k;
+}
+// ---------- the looks' scene objects, moved (see `scene` and spot() in style.js)
+// A cover keeps where the user dragged each look's scene objects, per look: cover.scene = { look: { key:
+// { all: [dx, dy], by: { "1920x1080": [dx, dy] } } } } — offsets from where the look's layout puts the
+// object, as fractions of the canvas (so they follow when the size or the layout changes), for all sizes
+// and per size, as a layer's placement is.
+const OFF = 1.5;   // how far an object may be moved, in canvas widths and heights
+const offset = (v) => (Array.isArray(v) && v.length === 2 && v.every((n) => Number.isFinite(Number(n))) ? v.map((n) => Math.max(-OFF, Math.min(OFF, Number(n)))) : null);
+const moved = (v) => !!v && (Math.abs(v[0]) > 1e-4 || Math.abs(v[1]) > 1e-4);
+/** A cover's scene offsets as stored, cleaned: unmoved objects and anything else dropped. */
+export function normalizeScene(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [look, objs] of Object.entries(raw).slice(0, 60)) {
+    if (!/^[a-z]+$/.test(look) || !objs || typeof objs !== "object") continue;
+    const o = {};
+    for (const [key, v] of Object.entries(objs).slice(0, 40)) {
+      if (!/^[a-zA-Z]+$/.test(key) || !v || typeof v !== "object") continue;
+      const all = offset(v.all), by = {};
+      if (v.by && typeof v.by === "object") for (const [k, b] of Object.entries(v.by).slice(0, 60)) { const q = offset(b); if (/^\d+x\d+$/.test(k) && moved(q)) by[k] = q; }
+      if (moved(all) || Object.keys(by).length) o[key] = { ...(moved(all) ? { all } : {}), ...(Object.keys(by).length ? { by } : {}) };
+    }
+    if (Object.keys(o).length) out[look] = o;
+  }
+  return out;
+}
+/** Where a look's scene objects are moved to on a cover at one size: { key: [dx, dy] } (fractions of the canvas). */
+export function sceneOffsets(cover, look, sizeKey) {
+  const objs = (cover && cover.scene && cover.scene[look]) || {}, out = {};
+  for (const [key, v] of Object.entries(objs)) {
+    const a = v.all || [0, 0], b = (v.by && v.by[sizeKey]) || [0, 0];
+    out[key] = [a[0] + b[0], a[1] + b[1]];
+  }
+  return out;
+}
+/** Moves a look's scene object by (dx, dy), fractions of the canvas: for every size (scope "all") or this one ("size"). */
+export function moveScene(cover, look, key, scope, sizeKey, dx, dy) {
+  const objs = ((cover.scene = cover.scene || {})[look] = cover.scene[look] || {}), v = (objs[key] = objs[key] || {});
+  if (scope === "size") { const by = (v.by = v.by || {}), b = by[sizeKey] || [0, 0]; by[sizeKey] = offset([b[0] + dx, b[1] + dy]); }
+  else { const a = v.all || [0, 0]; v.all = offset([a[0] + dx, a[1] + dy]); }
+  cover.scene = normalizeScene(cover.scene);
+}
+/** Puts a look's scene object (or all of them, key null) back where the layout puts it: for every size, or this one. */
+export function resetScene(cover, look, key, scope, sizeKey) {
+  const objs = cover.scene && cover.scene[look];
+  if (!objs) return;
+  for (const k of key ? [key] : Object.keys(objs)) {
+    if (!objs[k]) continue;
+    if (scope === "size") { if (objs[k].by) delete objs[k].by[sizeKey]; } else delete objs[k];
+  }
+  cover.scene = normalizeScene(cover.scene);
+}
 /** Whether a layer is a photo that fills the canvas (the cover's background photo, or another). */
 export const fillsCanvas = (L) => L.type === "photo" && L.fill && !L.of;
 /** Shapes the colour block and its dividing edge can take ("slant" is the template's own). */
@@ -140,6 +213,7 @@ function normalizeLayer(raw, catIds) {
     if (Object.keys(fx).length) L.lookFx = fx;
   }
   if (lettered && !Object.keys(L.lookFx || {}).some((k) => LETTERING_IDS.includes(k))) L.lookFx = { ...(L.lookFx || {}), [lettered]: 0.3 };
+  if (free && raw.clip === true) L.clip = true;   // shown only within the layer below (see clipBase)
   if (free && Array.isArray(raw.cats)) {   // a layer whose categories are all gone goes with them
     const cats = [...new Set(raw.cats.filter((x) => typeof x === "string" && x && (!catIds || catIds.includes(x))))];
     if (!cats.length) return null;

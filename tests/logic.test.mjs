@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { blockLayout, virtualSize, layout, TEMPLATES } from "../ui/js/layout.js";
 import { parseCsv, csvToJobs } from "../ui/js/csv.js";
 import { useFont, normalizeProfile, normalizeCover, normalizeSettings, exportName, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
-import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex } from "../ui/js/layers.js";
+import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex, clipBase, clipEnd, normalizeScene, sceneOffsets, moveScene, resetScene } from "../ui/js/layers.js";
 import { sampleProfile, starterProfile } from "../ui/js/presets.js";
 
 test("virtualSize keeps the five tuned canvases and normalises everything else", () => {
@@ -1257,6 +1257,46 @@ test("asset folders: ids cleaned and unique, names kept short, anything else dro
   assert.deepEqual(normalizeFolders([{ id: "fa", name: "品牌" }, { id: "fa", name: "again" }, { id: "f b!", name: "" }, { name: "no id" }, null, "x"]), [{ id: "fa", name: "品牌" }, { id: "fb", name: "fb" }]);
   assert.deepEqual(normalizeFolders(null), []);
   assert.equal(normalizeFolders([{ id: "f1", name: "x".repeat(99) }])[0].name.length, 40);
+});
+
+test("clipping masks: a free layer clipped shows within the nearest unclipped layer below; never the ground", () => {
+  const kept = normalizeLayers([{ type: "solid", id: "s", clip: true }, { type: "tag", clip: true }, { type: "solid", id: "u", clip: "yes" }]);
+  assert.equal(kept.find((l) => l.id === "s").clip, true);
+  assert.equal(kept.find((l) => l.type === "tag").clip, undefined);               // only the user's own layers are clipped
+  assert.equal(kept.find((l) => l.id === "u").clip, undefined);                   // and only by a real true
+  const ls = [{ type: "bg", id: "bg" }, { type: "title", id: "title" }, { type: "photo", id: "p", clip: true }, { type: "solid", id: "s", clip: true }, { type: "text", id: "t" }];
+  const at = (id) => ls.findIndex((l) => l.id === id), title = at("title");
+  assert.deepEqual([clipBase(ls, at("p")), clipBase(ls, at("s")), clipBase(ls, at("t"))], [title, title, -1]);   // two clipped onto the same base
+  assert.equal(clipEnd(ls, title), at("s"));
+  assert.equal(clipEnd(ls, at("t")), at("t"));                                    // nothing clipped onto it
+  const ground = [{ type: "bg", id: "bg" }, { type: "solid", id: "a", clip: true }];
+  assert.deepEqual([clipBase(ground, 1), clipEnd(ground, 0)], [-1, 0]);           // clipped onto the ground: no clip at all
+});
+
+test("scene objects: each look names its own; a cover keeps where they were dragged, per look, for all sizes and per size", () => {
+  for (const id of LOOK_IDS) {
+    const scene = LOOKS[id].scene;
+    if (id === "cel" || id === "cyano") { assert.equal(scene, undefined, id); continue; }   // nothing of theirs is worth dragging (see the to-do list)
+    assert.ok(scene && Object.keys(scene).length >= 1, `${id} has scene objects`);
+    for (const [k, n] of Object.entries(scene)) assert.ok(/^[a-zA-Z]+$/.test(k) && n.zh && n.en, `${id}.${k}`);
+  }
+  assert.ok(!LOOKS.cyber.params.some((d) => d.key === "sweepAt"), "the sweep's position slider is a drag now");
+  const c = {};
+  moveScene(c, "court", "ball", "all", "1920x1080", 0.1, -0.05);
+  moveScene(c, "court", "ball", "size", "1080x1920", 0.02, 0);
+  assert.deepEqual(sceneOffsets(c, "court", "1920x1080"), { ball: [0.1, -0.05] });
+  assert.deepEqual(sceneOffsets(c, "court", "1080x1920").ball.map((v) => +v.toFixed(3)), [0.12, -0.05]);   // the size's own on top of all sizes'
+  assert.deepEqual(sceneOffsets(c, "pitch", "1920x1080"), {});                   // another look's objects are where they were
+  resetScene(c, "court", "ball", "size", "1080x1920");
+  assert.deepEqual(c.scene, { court: { ball: { all: [0.1, -0.05] } } });
+  resetScene(c, "court", null, "all");
+  assert.deepEqual(c.scene, {});
+  // as stored: offsets kept within limits, unmoved objects and anything malformed dropped
+  assert.deepEqual(normalizeScene({ court: { ball: { all: [9, 0], by: { "1920x1080": [0, 0.2], bad: [1, 1] } }, hoop: { all: [0, 0] } }, BAD: { x: { all: [1, 1] } }, pitch: "no" }),
+    { court: { ball: { all: [1.5, 0], by: { "1920x1080": [0, 0.2] } } } });
+  const P = normalizeProfile({});
+  assert.equal("scene" in normalizeCover({ title: "x" }, P), false);
+  assert.deepEqual(normalizeCover({ title: "x", scene: { court: { ball: { all: [0.1, 0] } } } }, P).scene, { court: { ball: { all: [0.1, 0] } } });
 });
 
 test("solid colour layers: the canvas's size at scale 1, one colour, free like any added layer", async () => {

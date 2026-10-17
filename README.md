@@ -179,6 +179,8 @@ In *This size only*, the channel graphic's placement is remembered per channel.
 - The two icons on each row are show/hide and lock. Background and Corner brackets carry a 🔒: they are fixed layers.
 - At the end of each row: what the layer is (photo, text "T", colour as a filled square, vector asset as a pen nib, bitmap asset); a linked photo has a chain and a leading (solid dot) / following (dashed ring) mark before its photo icon, one colour per pair — click the chain to end the link, the leading / following mark to go to the other layer of the pair; then whose it is — the layout icon (a page in panels) for a layout layer (it comes with the layout and every cover has it; it cannot be deleted, but can be hidden), a person for a layer you added.
 - Layers you added (photos, text, assets) are renamed by double-clicking their name (a single click selects, as anywhere on the row): Enter or clicking elsewhere keeps it, Esc does not, an empty name goes back to the automatic one.
+- **Clipping masks**: a layer you added (photo, text, asset, colour) can be clipped to the layer below it — *Clip to the layer below* in the *Layer* group of its properties — and then shows only within that layer's shape: a photo inside the title's or a text layer's letters, a colour laid over a silhouette. See *Clipping masks* below.
+- **Scene objects**: with *Background* selected, the things a look paints in the background (the ball, the giant letters, the sun, the centre of the radiating lines…) show round handles to drag them by. See *Scene objects* below.
 - **＋ Text** adds a text layer; **＋ Colour** adds a colour layer: one block of colour, the canvas's size to begin with (in the channel colour), to shrink, stretch or turn into a ground, a band or a see-through wash. Clicking an item in Assets adds it. New layers go directly above the selected one.
 - Position, size, stretch and rotation are set on the canvas with the mouse (see the table above).
 - **Hide layout** — the button left of FOCUS at the top of the layer list. It hides all the layout layers at once (background, colour block, title, tag, channel name, brand row, channel graphic, frame), leaving the photos, text, assets and colour layers you added; it then reads *Show layout*, which brings back the ones that were showing (one you had hidden before stays hidden). It acts on this channel's cover and can be undone.
@@ -201,7 +203,7 @@ What each layer allows:
 
 **SURPRISE ME**, beside *Export* in the top bar, draws at random everything about how the current cover is drawn and laid out:
 
-- the look, its sliders and its random placement
+- the look, its sliders and its random placement; now and then the look's scene objects a little off where the layout puts them
 - the template, how much the colour block takes, the slant of its edge, whether the halves are swapped, dark or light ground
 - the shape of the colour block, the grid
 - the title's text effect, outline and shadow
@@ -307,6 +309,59 @@ All 30 looks have effects. Those marked [photo] are offered on photo layers only
 | Jelly machine | jelly, glow, depth of field, photo teal and orange [photo] |
 | Anime skies | photo clarity [photo] |
 | Spectral engraving | stipple (with its depth), line engraving, spectral streams, drips |
+
+### Clipping masks
+
+A layer you added (photo, text, asset, colour) can be clipped to the layer below it: select it and tick *Clip to the layer below* in the *Layer* group of its properties. It then shows only within the shape that layer paints, and is as see-through as it is:
+
+- put a photo above the title or a text layer and tick it, and the photo is inside the letters;
+- put a block of colour above a silhouette asset and tick it, and the silhouette takes the colour; move the colour to tint part of it only.
+
+Several layers in a row can be clipped to the same layer, and show within it together. The layer below is their *base*: hiding it hides what is clipped to it, and dragging the base or a layer clipped to it repaints the group as one. With only the background below, the tick changes nothing (the background covers the canvas). In the layer list a clipped layer is indented, with "↓" before its name, and hovering it says what it is clipped to.
+
+### Scene objects
+
+Some of the things a look paints in the background can be dragged where you want them: select the *Background* layer, and round handles show on them. Drag a handle to move its object; double-click it to put the object back.
+
+- Positions are kept on this cover, per look: change the look and back, and they are where you left them; other covers are not touched.
+- What is kept is an offset from where the layout puts the object (in proportion to the canvas), so it follows when the template or the size changes. As with layers, whether all sizes or this one change follows the scope at the top.
+- The background's properties have a *Scene objects* group listing the current look's draggable objects, each with *Reset*, and *Reset them all* at the foot.
+- Things that hang on another object go with it: the negative-space poster's beam and threads with its giant silhouette, the patterned glass's figure with its window, the spectral engraving's vortex and lines with its figure; they can still be dragged on their own too.
+- Some move one way only: the cyberpunk sweep up and down, the negative-space spotlight from side to side.
+- An object has a handle only when it is painted: one whose slider is at 0 shows none. Cel and Cyanotype have no draggable objects.
+
+Each look's draggable objects:
+
+| Look | Objects |
+|---|---|
+| Cyberpunk | sweep line |
+| Riso | overprinted shapes |
+| 90s animation | clouds, light rays, light leak, lens flare |
+| Record sleeve | the record |
+| Editorial | issue numeral, quotation mark |
+| Woodblock book | three collectors' seals (white square, red square, round) |
+| Summer illustration | cumulus, towers |
+| Negative space | giant silhouette, spotlight beam |
+| Minimal film poster | silhouette |
+| Monochrome film | haze |
+| Experimental type | giant letters, centre of the radiating lines |
+| Animated film poster | sun and sunburst, giant silhouette, street-lamp beam |
+| Avant-garde image | figure |
+| Collage | colour disc, starburst, marker scribble |
+| Yellow poster | giant letters, beam |
+| Pitch | ball |
+| Dot matrix | dot figure |
+| Neon pop | figure |
+| Basketball poster | jersey number, ball, half court, hoop |
+| Velvet illustration | plush figure |
+| Psychedelic rave | holographic figure, liquid chrome |
+| Liquid chrome | chrome figure, wireframe |
+| Glitch net art | dithered figure, dialog windows, colour bars, cursors |
+| Comic-verse | comic figure, centre of the focus lines, caption box, sound effect |
+| Patterned glass | window and its light, figure at the window, flowers |
+| Jelly machine | jelly figure, segment display |
+| Anime skies | sunlight, cumulonimbus, contrails, pole and wires, leaves |
+| Spectral engraving | stippled figure, vortex, vanishing point of the lines |
 
 ### Lettering colours
 
@@ -459,8 +514,7 @@ The cyberpunk look has eight sliders and a checkbox. Two of them sound alike: *S
 | Signal tear | a few horizontal bands pushed sideways | more bands, pushed further; 0 gives none |
 | Scanlines | the dark horizontal lines across the picture | more old monitor; 0 is the sharpest picture |
 | Interface detail | the interface of an optical implant starting up and scanning: lens rings, a sweep line, a start-up log up the right edge, a ruler up the left, a status line, signal meter, code block and hazard stripe along the bottom, a lock-on ring and readout around the channel graphic, the huge channel code in the background | more of them appear in turn; 0 leaves only the corner brackets |
-| Sweep line | the single bright line across the picture and the band of light above it | brighter; **0 hides it** |
-| Sweep position | how far down the picture the sweep sits | lower; **0 leaves it to chance** |
+| Sweep line | the single bright line across the picture and the band of light above it; it sits at a height left to chance, and can be dragged up or down on the canvas with the background selected (the *Sweep position* slider of before is a drag now) | brighter; **0 hides it** |
 | Line glow | how far the lines of channel graphics and solids glow | brighter and softer; 0 gives clean thin lines |
 | Photo tint | how far a background photo is pushed toward the channel colour and into the dark | a darker, more stylised photo; 0 keeps its own colours |
 | Keep tears off lettering (checkbox, last) | no tear lands on the rows of the title, text layers, the tag, the channel name or the brand row | on by default; untick to let tears cross lettering |
@@ -708,18 +762,18 @@ The general typesetting effects belong to no look and stay in the lettering menu
   1. ~~The framework and the pilots: riso, liquid chrome and glitch net art, on text and asset layers.~~ Done.
   2. ~~Every look, and the photo and solid layers.~~ Done.
   3. ~~The lettering effects brought home.~~ Done.
-  4. A general clipping mask.
-  5. Draggable scene objects (next item).
+  4. ~~A general clipping mask.~~ Done.
+  5. ~~Draggable scene objects (next item).~~ Done.
 - Note: this records look-specific settings in the cover's data, which changes the rule that a cover's content never mentions a look.
 
 ### Draggable scene objects in the background
 
 Goal: the scene objects marked ★ above — the ball, the giant letters, the centre of the radiating lines, the sun, the cumulus — can be dragged where you want them on the canvas.
 
-- [ ] Each look declares its draggable objects: a name, and the default position the layout gives it.
-- [ ] Positions live on the cover, per look, as offsets from the default position (in proportion to the canvas), so they follow when the layout or the size changes. As with the user's own layers, there is one position for all sizes and a per-size adjustment.
-- [ ] With the *Background* layer selected, small handles show on the draggable objects: drag to move, double-click to reset; *Surprise me* may shuffle them too.
-- [ ] Sliders a look has for a position today (the cyberpunk's *Band position*) become dragging.
+- [x] Each look declares its draggable objects (`scene`): their names; the default position is not declared apart, but is where the drawing puts each by the layout.
+- [x] Positions live on the cover, per look, as offsets from the default position (in proportion to the canvas), so they follow when the layout or the size changes. As with the user's own layers, there is one position for all sizes and a per-size adjustment.
+- [x] With the *Background* layer selected, small handles show on the draggable objects: drag to move, double-click to reset; *Surprise me* may shuffle them too.
+- [x] Sliders a look had for a position (the cyberpunk's *Sweep position*) became dragging.
 
 ### Other
 

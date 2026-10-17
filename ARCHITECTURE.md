@@ -102,7 +102,8 @@ hand-edited files cannot crash the app.
 **Cover** (`covers/<profile id>/<channel id>.json`, one for each channel of each profile)
 
 ```jsonc
-{ "catId": "vlog", "title": "First line\n*second line*", "tag": "EP.01", "layers": [ … ] }
+{ "catId": "vlog", "title": "First line\n*second line*", "tag": "EP.01", "layers": [ … ],
+  "scene": { "court": { "ball": { "all": [0.1, -0.05], "by": { "1080x1920": [0.02, 0] } } } } }   // optional: scene objects dragged (see 7.5)
 ```
 
 `S.covers` holds the current profile's channel covers (keyed by channel id) and `S.cover` the one shown; both change only through `setCover()`. Switching profile reads the new one's covers (`loadCovers()`); switching channel (`switchChannel()`) commits the undo step first, then shows that channel's cover — made by `channelCover()` from the profile's design, with a default title, if it has none. Saving (`persistCover`) is debounced per profile and channel. The channel each profile was last on is kept in the settings' `channels` (`{profile id: channel id}`) and read by `channelOf()`. Deleting a profile deletes its `covers/<profile id>/`. *Copy from another channel* (`copyDialog`, `copyInto`) takes the source cover through `coverOf()` (the one in memory for the current profile, else the file, else a new one from the design), `copyPreview()` draws it whole with its own profile at the size on the canvas, and `layers.js`'s pure `copyFreeLayers(into, from)` copies its free layers: deep copies under new ids, a passive layer's `of` turned to its photo's copy; each copy goes above the nearest layout layer below it in the source, over the free layers already there, in the order they had. The cover is then checked by `channelCover()` as one read is, and the whole is one undo step.
@@ -135,6 +136,11 @@ A cover is an array of layers, bottom first.
 keeps the background at the bottom and makes ids unique. A free layer may carry `name`, the name the
 user gave it in the layer list (`layerName()` prefers it; without one the name comes from the type and
 content). The interface's buttons do not follow the cover's look.
+
+**Clipping masks**: a free layer may carry `clip: true`, and then shows only within the shape of the
+layer below. The layer it is clipped to is its *base*: the first layer down not itself clipped
+(`clipBase()`), never the ground (which covers the canvas, so a clip onto it is none: -1);
+`clipEnd(layers, i)` gives the last layer clipped onto layer i. Several in a row may share a base.
 
 ### 4.1 Placement: one collage mapped to every size
 
@@ -243,6 +249,18 @@ Two helpers keep transforms consistent:
 
 **Opacity**: a layer below 1 is painted onto a scratch canvas and blended in as a whole, so
 overlapping strokes inside the layer do not show through each other.
+
+**Clipping groups**: when `paintRange()` reaches a base with layers clipped onto it (`clipEnd()` beyond
+itself), it paints the group on its own: the base on `clipGround` (with its own opacity and effects),
+each clipped layer on `clipOne` and laid onto `clipGround` with `source-atop`, then the group onto the
+canvas as one. A hidden base hides the whole group. A drag counts the group as moving together (see
+9.3), so the kept runs never cut one apart.
+
+**Scene objects**: before the ground is painted, `setScene()` hands the look this cover's offsets of its
+objects at this size (`sceneOffsets()`); after, `scenePlaced()` gives where each was painted, of which
+those the look declares in `scene` are kept in `canvas._scene` and drawn as round handles with the
+background selected (`drawSceneHandles()`; `sceneHandleAt()` finds one). A drag frame that does not
+repaint the ground keeps the last.
 
 **Preview and export share this code.** The main canvas is painted at the size of its display area,
 thumbnails smaller, exports at size × scale.
@@ -473,6 +491,16 @@ A look's **material** effects — those that depend only on one thing's own shap
 - **Letterings**: an effect of stage `letter` has no painter: it is a look's own lettering (Sliced, Overprint, Double keyline, Underlined highlight, Sunlit block, Selected), for text layers only, and stays out of the pixel stages (`layerEffects()` skips it). `letteringOf(L)` gives the one a layer has on (the strongest); the interface keeps it to one at a time. `letterOf()` in `render.js` turns the strength into how it is painted: where the layer's own lettering is that one already (the current look's, under *auto*), the strength takes it further from the foot, `o.letter` running from 1 to `LETTER_MAX` (1.8), which each look's `runs()` multiplies its slip, offset, keyline, underline or depth by; otherwise it first fades in across `LETTER_FADE` (0.3): the layer is painted a second time in its own lettering (`env.letterOff`) and the two are mixed in proportion (`destination-in`, then `lighter`), and then goes further the same way.
 - **Interface**: `lookFxSection()` in `app.js` shows *This look* and *Borrow from other looks*: the borrowed looks in the order they were added (`BORROWED`, kept in memory by layer id; a look with effects on is carried by the layer's own data). Each look's name has *Clear* (its effects back to 0, the group kept), a borrowed one also *Remove* (the group taken away), and under them a menu of the looks still to borrow from; at the foot *Clear all look effects* (the borrowed looks kept) and *Remove all look effects* (taken away), greyed out with nothing to clear. With a lettering on, the text effect menu of `fxControl()` is greyed out and says why. *Surprise me* deals layers effects only from the look it drew.
 
+### 7.5 Scene objects
+
+The things a look paints in the background that may be dragged are named in its `scene: { key: {zh, en} }`. Their default place is not declared apart: it is where the painter puts each by the layout. A painter asks where an object goes through `objAt(key, x, y, ctx, axis)`: (x, y) plus this cover's offset for it (kept as fractions of the canvas, turned into ctx's own frame, right however ctx is turned or scaled), noting where on the canvas it went for its handle; `axis` "x" or "y" keeps it to that direction (a band across the picture, a beam from its top). `shift(key, x, y, ctx)` is its translating form, moving what is painted next as a whole, for an object of many parts (the overprinted shapes, a bank of cloud, a cascade of windows).
+
+- **What hangs on what**: some objects are part of another and go with it: the negative-space poster moves the silhouette's place (`at`) first, and its beam, split and threads are reckoned from the moved place; the comic-verse focus lines and the animated poster's street lamp likewise. Their own offsets are added on top.
+- **Caches**: an object painted into a kept layer (the anime skies' sky, `keptLayer()`) needs `sceneKey()` in the cache key; and on a hit the painter does not run, so the object would not be noted: such objects are placed outside the cache, on the main canvas (`moveOf()`), and moved by the difference inside it. Parts painted small (the clouds' shading, the rays) take ctx's transform, so the move carries over.
+- **Handles on one spot**: two objects at one point (the comic figure and the centre of its focus lines, the jersey number and the ball) put one handle elsewhere (the figure's head, above the number) and take the difference back.
+- **Data**: `cover.scene = { look: { object: { all: [dx, dy], by: { size: [dx, dy] } } } }`, checked by `normalizeScene()` (offsets within ±1.5 canvases, unmoved ones dropped). Like look effects, a part of the cover's data that is about a look.
+- The cyberpunk's *Sweep position* slider is gone: the sweep's height is a drag now. *Surprise me* has a four-in-ten chance of moving each of the drawn look's objects a little (up to 6% of the canvas).
+
 ## 8. AI-generated assets (`ai.js`, `spec.js`)
 
 ### 8.1 Why the model returns data, not code
@@ -605,6 +633,7 @@ and `swatch()` a small colour swatch (optionally automatic).
 - With FOCUS on (`S.focus`, not saved) nothing is hit-tested: the selected layer's handles work as ever, any other press and drag goes to `focusDrag()`, and the wheel acts only on `focusTargets()` (the movable members of the selected group, or the selected layer; fixed and locked ones do not count); a click beside the canvas no longer ends the selection. `syncFocus()`, run by `renderSide()`, keeps the canvas's dashed frame and tag up to date.
 - For the selected layer the handles are checked first: corners resize, sides stretch, the top knob rotates. A photo filling the canvas has a frame only once it no longer covers it (the hit's `covers`, see `showsFrame()`), and only the corners: it is never stretched or turned. Handle size is computed in screen pixels, so handles look the same at any zoom.
 - Corner brackets and the Background layer are never dragged; a selected photo filling the canvas is dragged from anywhere on the ground (the background, the colour block, anything locked).
+- With the background selected, a press on a scene object's handle (`sceneGrip()`) drags that object's offset on this cover (`moveScene()`, into `all` or `by` as the scope at the top says), the whole cover repainted in draft (`draftTouch()`: an object may be painted by more than the ground's layer — the cyberpunk sweep by the frame layer, the light leak in the finish); a double-click resets it (`resetScene()`). Hovering shows a move cursor and the object's name. The background's properties have a *Scene objects* group (`sceneSection()`).
 
 ### 9.3 Redrawing one layer while dragging
 
@@ -612,7 +641,8 @@ While a layer is moved, resized or rotated, the others do not change. So when a 
 `drawCover()` paints everything **under** the dragged layer into one image and everything **over** it
 into another, and each frame then does three things: blit the first, repaint the dragged layer, blit
 the second. The cache lives in the `o.live` object the interface passes in and is dropped when the
-drag ends. Dragging on the canvas and the wheel go this way.
+drag ends. Dragging on the canvas and the wheel go this way. Dragging a base or a layer clipped onto
+it (see section 6) counts its whole clipping group as dragged, as the group is composited together.
 
 Measured in the engine the app uses (1900 px wide): a full redraw takes about 18 ms in the cel look
 and 44 ms in cyberpunk; dragging a layer takes 5–11 ms in either.

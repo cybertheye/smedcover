@@ -2,13 +2,13 @@
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
 import { virtualSize , layoutValues, dragLayout, LAYOUT_LIMITS } from "./layout.js";
-import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles, showsFrame } from "./render.js";
+import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles, showsFrame, sceneHandleAt } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont, ratioText } from "./store.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, moveScene, resetScene, sceneOffsets } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
@@ -389,13 +389,29 @@ function layerAt(e) {
     const handle = handles(hit, p.k).find((h) => Math.hypot(lx - h.lx, ly - h.ly) <= 11 * p.k);
     return { L, hit, p, lx, ly, handle: handle ? handle.id : null };
   }
+  /** The handle of a look's scene object under the pointer, with the ground selected (see sceneHandleAt), or null. */
+  function sceneGrip(e) {
+    const L = layer();
+    if (group().length || !L || L.type !== "bg" || !cv._virtual) return null;
+    const p = virtualPoint(e);
+    return sceneHandleAt(cv, p.x, p.y, p.k);
+  }
   cv.addEventListener("pointermove", (e) => {
     if (e.buttons || S.mode !== "edit") return;
+    const sh = sceneGrip(e);
+    cv.title = sh ? `${sceneName(sh.key)} · ${t("scene.dragTip")}` : "";
+    if (sh) { cv.style.cursor = "move"; return; }
     const g = grip(e);
     if (g && g.handle) { cv.style.cursor = CURSOR[g.handle]; return; }
     if (S.focus) { cv.style.cursor = focusTargets().length ? "move" : "not-allowed"; return; }
     const L = layerAt(e);
     cv.style.cursor = !L || L.type === "bg" ? "default" : fillsCanvas(L) ? "move" : "grab";
+  });
+  cv.addEventListener("dblclick", (e) => {   // a scene object's handle: back where the layout puts it
+    const sh = S.mode === "edit" && sceneGrip(e);
+    if (!sh) return;
+    resetScene(S.cover, S.profile.style.look, sh.key, S.settings.scope, frame().key);
+    touch({ cover: true, side: true });
   });
   cv.addEventListener("pointerdown", (e) => {
     if (S.mode !== "edit") return;
@@ -427,6 +443,19 @@ function layerAt(e) {
         moved = true; touch({ profile: true });
       };
       cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; if (moved && S.tab.edit === "style") renderPanel(); };
+      return;
+    }
+    const sh = sceneGrip(e);
+    if (sh) {   // a scene object of the look, with the ground selected: moved on this cover, for all sizes or this one
+      const look = S.profile.style.look, f = frame(), [vw, vh] = cv._virtual;
+      let last = at0, moved = false;
+      cv.setPointerCapture(e.pointerId);
+      cv.onpointermove = (m) => {   // the whole cover in draft while dragged: an object may be painted by more than the ground's layer
+        const p = virtualPoint(m);
+        moveScene(S.cover, look, sh.key, S.settings.scope, f.key, (p.x - last.x) / vw, (p.y - last.y) / vh);
+        last = p; moved = true; draftTouch({ cover: true });
+      };
+      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; if (moved) renderSide(); };
       return;
     }
     const g = grip(e);
@@ -1847,8 +1876,8 @@ let dragId = null;
 function layerRow(L) {
   const icon = (glyph, off, title, fn) => el("button", { class: "ic" + (off ? " off" : ""), title, onclick: (e) => { e.stopPropagation(); fn(); touch({ cover: true, side: true }); } }, glyph);
   const on = L.id === S.layerId || group().includes(L);
-  const free = isFree(L.type) || L.type === "subject";
-  return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}`, dataset: { id: L.id }, draggable: L.type !== "bg", onclick: (e) => (e.shiftKey ? togglePick(L.id) : selectLayer(L.id)),
+  const free = isFree(L.type) || L.type === "subject", base = clipBase(S.cover.layers, S.cover.layers.indexOf(L));
+  return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}${base >= 0 ? " clip" : ""}`, title: base >= 0 ? t("layers.clipped", layerName(S.cover.layers[base])) : null, dataset: { id: L.id }, draggable: L.type !== "bg", onclick: (e) => (e.shiftKey ? togglePick(L.id) : selectLayer(L.id)),
     ondragstart: (e) => { dragId = L.id; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", L.id); },
     ondragend: () => { dragId = null; },
     ondragover: (e) => { if (dragId && dragId !== L.id) { e.preventDefault(); e.currentTarget.classList.add("over"); } },
@@ -2111,6 +2140,24 @@ function typeControls(L) {
   }
   return null;
 }
+/** The name of the current look's scene object `key`. */
+const sceneName = (key) => { const s = (LOOKS[S.profile.style.look] || LOOKS.cel).scene; return (s && s[key] && s[key][getLang()]) || key; };
+/**
+ * With the ground selected: the current look's scene objects the user may drag on the canvas, each with a
+ * button putting it back where the layout puts it (on this cover; for all sizes or this one, as the
+ * toolbar's scope says), and one for them all.
+ */
+function sceneSection(L) {
+  const scene = L.type === "bg" && (LOOKS[S.profile.style.look] || LOOKS.cel).scene;
+  if (!scene) return null;
+  const look = S.profile.style.look, f = frame(), off = sceneOffsets(S.cover, look, f.key), scope = S.settings.scope;
+  const isMoved = (k) => !!off[k] && (Math.abs(off[k][0]) > 1e-4 || Math.abs(off[k][1]) > 1e-4);
+  const reset = (k) => { resetScene(S.cover, look, k, scope, f.key); touch({ cover: true, side: true }); };
+  return [el("div", { class: "psep" }), psec("props.sec.scene", [
+    ...Object.keys(scene).map((k) => el("div", { class: "fxs" }, el("span", {}, sceneName(k)), el("div", { class: "fxa" }, el("button", { class: "linkbtn", disabled: !isMoved(k), onclick: () => reset(k) }, t("scene.reset"))))),
+    el("button", { class: "btn wide", disabled: !Object.keys(scene).some(isMoved), onclick: () => reset(null) }, t("scene.resetAll")),
+  ], t("scene.hint"))];
+}
 /** The looks a layer borrows from, in the order they were added (by layer id; those with effects on are kept with the layer itself). */
 const BORROWED = new Map();
 /**
@@ -2173,8 +2220,19 @@ function layerSection(L) {
   return [el("div", { class: "psep" }),
     psec("props.sec.layer", [
       slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { holdLive(L.id); L.o = v; touch({ cover: true }); }),
+      isFree(L.type) && clipControl(L),
       !fixed && !copy && placementControls(L),   // a cut-out's (back over its photo) is with its placement
       ], fixed ? t("props.fixedHint") : "")];
+}
+/** A free layer's clipping mask: shown only within the shape of the layer below it (see clipBase in layers.js). */
+function clipControl(L) {
+  const list = S.cover.layers, i = list.indexOf(L);
+  let j = i - 1;
+  while (j >= 0 && list[j].clip) j--;   // the base it has, or would have
+  const base = j >= 0 && list[j].type !== "bg" ? list[j] : null;
+  return [el("label", { class: "chk" }, el("input", { type: "checkbox", checked: !!L.clip, disabled: !L.clip && !base,
+      onchange: (e) => { if (e.target.checked) L.clip = true; else delete L.clip; touch({ cover: true, side: true }); } }), t("props.clip")),
+    el("div", { class: "hint", style: "margin:2px 0 6px" }, base ? t(L.clip ? "props.clipOn" : "props.clipOff", layerName(base)) : t("props.clipNone"))];
 }
 /** What FOCUS acts on: the selected group's movable layers, or the selected layer if it can be moved. */
 function focusTargets() {
@@ -2239,7 +2297,7 @@ function renderSide() {
       el("div", { class: "hint" }, t("props.groupHint")),
       el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => selectLayer("bg") }, t("props.groupEnd")))
     : L ? el("div", { class: "box" }, el("label", { class: "cap" }, `${t("props.title")} · ${layerName(L)}`),
-      el("div", { class: "props" }, typeControls(L), lookFxSection(L), layerSection(L)))
+      el("div", { class: "props" }, typeControls(L), sceneSection(L), lookFxSection(L), layerSection(L)))
       : el("div", { class: "hint" }, t("layers.none")));
   side.scrollTop = y;
   // the selected layer's photo, in Cover → Add photos, is framed in the channel colour (without rebuilding that panel)
@@ -2578,8 +2636,11 @@ function surprise() {
   // the look, tuned somewhere in the middle of each slider's range (the extremes are rarely the best of a look)
   st.look = pick(LOOK_IDS); st.lookSeed = Math.floor(R() * 1000000);
   const tuned = {};
-  for (const d of LOOKS[st.look].params) tuned[d.key] = d.text ? (st.lookParams[st.look] || {})[d.key] ?? d.def : d.toggle ? (chance(0.7) ? 1 : 0) : d.key === "sweepAt" ? 0 : round(between(d.min + (d.max - d.min) * 0.12, d.min + (d.max - d.min) * 0.8), d.step);   // words typed in are kept
+  for (const d of LOOKS[st.look].params) tuned[d.key] = d.text ? (st.lookParams[st.look] || {})[d.key] ?? d.def : d.toggle ? (chance(0.7) ? 1 : 0) : round(between(d.min + (d.max - d.min) * 0.12, d.min + (d.max - d.min) * 0.8), d.step);   // words typed in are kept
   if (Object.keys(tuned).length) st.lookParams[st.look] = tuned;
+  // its scene objects: where the layout puts them, or now and then a little off it
+  if (S.cover.scene) delete S.cover.scene[st.look];
+  if (chance(0.4)) for (const key of Object.keys(LOOKS[st.look].scene || {})) moveScene(S.cover, st.look, key, "all", frame().key, round(between(-0.06, 0.06), 0.005), round(between(-0.05, 0.05), 0.005));
   st.theme = chance(0.7) ? "dark" : "light";
   // the template and its proportions
   st.template = pick(["stack", "stack", "split", "split", "banner"]);
@@ -3074,6 +3135,29 @@ async function selfTest(dir) {
       so.lookFx = { "velvet.check": 0.8, "court.varsity": 0.7 }; if (pr) pr.lookFx = { "cyano.duo": 1, "toon.burst": 0.5 };
       await shoot("borrowed", "velvet");
       S.profile.style.look = keepLook; S.cover.layers = S.cover.layers.filter((l) => !ours.includes(l));
+    }
+    // clipping masks: a solid clipped to the title (its letters in the solid's colour), and a print of the
+    // last picture taken in clipped to a text layer (the picture inside the letters)
+    {
+      const so = newLayer("solid", { color: "#ff3366", clip: true }), tx = newLayer("text", { text: "CLIP" }), pid = [...S.photos.keys()].at(-1), pr = pid ? newLayer("photo", { pid, clip: true }) : null;
+      so.t.all = { ...so.t.all, x: 0.35, y: 0.4, s: 0.5 }; tx.t.all = { ...tx.t.all, x: 0.7, y: 0.72, s: 1.4 };
+      if (pr) pr.t.all = { ...pr.t.all, x: 0.7, y: 0.72, s: 0.7 };
+      const ours = [so, tx, ...(pr ? [pr] : [])];
+      S.cover.layers.splice(S.cover.layers.findIndex((l) => l.type === "title") + 1, 0, so); S.cover.layers.push(tx, ...(pr ? [pr] : []));
+      const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
+      report.clip = { path: await invoke("write_image", framed(await toPng(cv), { dir, name: "clip.png" })), hits: ours.map((L) => !!cv._hits.find((h) => h.id === L.id)) };
+      S.cover.layers = S.cover.layers.filter((l) => !ours.includes(l));
+    }
+    // the looks' scene objects: the basketball poster's, each moved, the ground selected so their handles show
+    {
+      const keepLook = S.profile.style.look, keepScene = S.cover.scene, keepSel = S.layerId, keepParams = S.profile.style.lookParams.court;
+      S.profile.style.look = "court"; S.profile.style.lookParams.court = { ...(keepParams || {}), ball: 0.7, number: 0.6, court: 0.7, hoop: 0.7 };
+      for (const k of Object.keys(LOOKS.court.scene)) moveScene(S.cover, "court", k, "all", frame().key, -0.1, 0.08);
+      const cv = document.createElement("canvas");
+      drawCover(cv, { profile: S.profile, catIndex: catIndex(), size: S.profile.sizes[0], pixelW: 1600, cover: S.cover, photos: S.photos, select: "bg" });
+      report.scene = { path: await invoke("write_image", framed(await toPng(cv), { dir, name: "scene-court.png" })), handles: (cv._scene || []).map((q) => q.key).sort(), declared: Object.keys(LOOKS.court.scene).sort() };
+      S.profile.style.look = keepLook; S.profile.style.lookParams.court = keepParams; S.layerId = keepSel;
+      if (keepScene) S.cover.scene = keepScene; else delete S.cover.scene;
     }
     // the perspective with corners of its own, dragged far: the lettering follows the quad
     titleLayer.fx = "taper"; titleLayer.warp = [[0, 0], [-0.05, 0.35], [0.08, -0.1], [0.04, 0]];

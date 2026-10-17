@@ -6,8 +6,8 @@ import { virtualSize, layout, adjustLayout } from "./layout.js";
 import { drawTitle, parseTitle } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset } from "./assets.js";
-import { resolve, appliesTo, fillsCanvas } from "./layers.js";
-import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, letteringOf } from "./style.js";
+import { resolve, appliesTo, fillsCanvas, clipEnd, sceneOffsets } from "./layers.js";
+import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, letteringOf, setScene, scenePlaced } from "./style.js";
 import { paintRuns, warpCorners, EFFECTS } from "./textfx.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
@@ -505,6 +505,16 @@ function drawSelection(ctx, hit, k, withHandles = true) {
 }
 
 let scratch = null, fxScratch = null, fadeScratch = null;
+// a clipping group (see clipBase in layers.js) is painted on clipGround — the base, then each layer
+// clipped onto it painted on clipOne and laid on only where the base is — and then laid down as one
+let clipGround = null, clipOne = null;
+/** A canvas the size of cv, cleared, its context scaled to the virtual canvas. */
+function freshCanvas(c, cv, kx, ky) {
+  if (c.width !== cv.width || c.height !== cv.height) { c.width = cv.width; c.height = cv.height; }
+  const x = c.getContext("2d");
+  x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = "source-over"; x.clearRect(0, 0, c.width, c.height); x.scale(kx, ky);
+  return x;
+}
 // A text layer taking a look's lettering (see letteringOf in style.js), so the slider has no step:
 // - where the layer's own lettering is that one already (the look's own, under "auto"), the strength takes
 //   it further from the foot (o.letter from 1 to LETTER_MAX; each lettering says how far that takes its slip,
@@ -815,6 +825,7 @@ function paintCover(cv, o) {
   const main = cover.layers.find((l) => fillsCanvas(l) && l.visible && appliesTo(l, cat.id)), mainRec = main && o.photos && o.photos.get(main.pid);
   const photo = (mainRec && mainRec.img) || null;
   const L0 = setLook(P.style.look, P.style.lookParams && P.style.lookParams[P.style.look], P.style.lookSeed, !!photo || P.style.theme !== "light");   // everything below is drawn under this look
+  setScene(sceneOffsets(cover, L0.id, key), w, h, kx);   // where the user dragged its scene objects on this cover
   const base = photo ? THEMES.dark : THEMES[P.style.theme] || THEMES.dark;
   const env = {
     blocks: {},   // id -> {m, box}: the transform and box of each lettered block painted (see cv._blocks)
@@ -832,7 +843,22 @@ function paintCover(cv, o) {
   const paintRange = (c, from, to) => {
     const hits = [];
     for (let i = from; i < to; i++) {
-      const L = cover.layers[i];
+      const L = cover.layers[i], end = Math.min(to - 1, clipEnd(cover.layers, i));
+      if (end > i) {   // a clipping group: the base, and the layers clipped onto it shown only where it is
+        if (L.visible && appliesTo(L, cat.id)) {
+          const g = freshCanvas(clipGround = clipGround || document.createElement("canvas"), cv, kx, ky);
+          hits.push(...paintRange(g, i, i + 1));
+          for (let j = i + 1; j <= end; j++) {
+            const one = freshCanvas(clipOne = clipOne || document.createElement("canvas"), cv, kx, ky), got = paintRange(one, j, j + 1);
+            if (!got.length) continue;
+            hits.push(...got);
+            g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = "source-atop"; g.drawImage(clipOne, 0, 0); g.restore();
+          }
+          c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(clipGround, 0, 0); c.restore();
+        }   // a hidden base hides what is clipped onto it
+        i = end;
+        continue;
+      }
       if (!L.visible || !appliesTo(L, cat.id)) continue;
       const tr = resolve(L, w, h, key, cat.id);
       // a layer set in a font of its own: that font goes first in every face while the layer is painted
@@ -898,6 +924,13 @@ function paintCover(cv, o) {
     return hits;
   };
   const n = cover.layers.length, moving = o.live ? (o.live.ids || [o.live.id]).map((id) => cover.layers.findIndex((l) => l.id === id)).filter((i) => i >= 0) : [];
+  // a clipping group moves as one: dragging its base or a layer clipped onto it repaints them all
+  for (const i of [...moving]) {
+    let b = i;
+    while (b > 0 && cover.layers[b].clip) b--;
+    const e = clipEnd(cover.layers, b);   // b itself when nothing is clipped onto it, or it is the ground
+    if (e > b) for (let k = b; k <= e; k++) if (!moving.includes(k)) moving.push(k);
+  }
   setFast(moving.length > 0);
   if (!moving.length) cv._hits = paintRange(ctx, 0, n);
   else {
@@ -933,6 +966,9 @@ function paintCover(cv, o) {
   }
   if (L0.post && cover.layers[0].visible) { ctx.save(); L0.post(ctx, w, h, C, lookValues(), kx, cv._hits); ctx.restore(); }   // not over a transparent background
   setFast(false);
+  // where the look's scene objects were placed, for their handles: a drag that does not repaint the ground keeps the last
+  const placed = scenePlaced().filter((q) => L0.scene && L0.scene[q.key]);   // only what the look offers to drag
+  cv._scene = placed.length || !o.live ? placed : cv._scene || [];
   cv._titleBox = env.titleBox || null;
   // where lettered blocks are, for the perspective's handles; a drag paints only some layers, so what is not repainted is kept
   cv._blocks = { ...(o.live ? cv._blocks : null), ...env.blocks, k: kx };
@@ -942,6 +978,7 @@ function paintCover(cv, o) {
     const hit = cv._hits.find((x) => x.id === o.select);
     if (hit && showsFrame(hit)) drawSelection(ctx, hit, kx);
     drawLayoutHandles(ctx, cv, cover.layers.find((l) => l.id === o.select), kx, rgb(C));
+    if (o.select === "bg") drawSceneHandles(ctx, cv._scene, kx, rgb(C));
   }
 }
 
@@ -1004,6 +1041,20 @@ function drawLayoutHandles(ctx, cv, layer, k, colour) {
   ctx.restore();
 }
 
+/** The handles of the look's scene objects, with the ground selected: rings with a dot, to tell them from the others. */
+function drawSceneHandles(ctx, list, k, colour) {
+  if (!list || !list.length) return;
+  const u = 1 / k;
+  ctx.save();
+  for (const s of list) {
+    ctx.beginPath(); ctx.arc(s.x, s.y, 11 * u, 0, Math.PI * 2); ctx.fillStyle = "rgba(7,7,12,0.55)"; ctx.fill();
+    ctx.lineWidth = 3 * u; ctx.strokeStyle = colour; ctx.stroke();
+    ctx.beginPath(); ctx.arc(s.x, s.y, 3.5 * u, 0, Math.PI * 2); ctx.fillStyle = colour; ctx.fill();
+  }
+  ctx.restore();
+}
+/** The scene object's handle at virtual point (x, y) (k: canvas pixels per unit, for the handles' size on screen), or null. */
+export const sceneHandleAt = (cv, x, y, k) => (cv._scene || []).find((s) => Math.hypot(x - s.x, y - s.y) <= 14 * k) || null;
 /** Topmost hit (from cv._hits) containing the virtual point (x, y) for which accept(hit) is true. */
 export function hitAt(hits, x, y, accept = () => true, margin = 12) {
   for (let i = hits.length - 1; i >= 0; i--) {

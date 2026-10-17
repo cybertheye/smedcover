@@ -248,6 +248,8 @@
   @keyframes flash{from{box-shadow:0 0 0 2px var(--acc)}to{box-shadow:0 0 0 2px transparent}}
   .layer .kind.chain:hover{filter:brightness(1.4)}
   .layer .nm[title]{cursor:text}
+  .layer.clip{margin-left:16px}
+  .layer.clip .nm::before{content:"↓ ";color:var(--acc)}
   .layer .rename{font-size:13px;padding:2px 6px;min-width:0;width:100%}
 
   #tip{position:fixed;z-index:60;background:var(--panel);border:1px solid var(--line2);box-shadow:0 8px 24px rgba(0,0,0,.45);padding:10px 12px;font-size:12.5px;line-height:1.7;color:#fff;white-space:normal}

@@ -32,6 +32,9 @@
 //   params                       tunable numbers shown as sliders: [{ key, min, max, step, def, name: {zh, en} }];
 //                                needsPhoto: true marks one that only acts on a background photo
 //   prompt / solidPrompt         the "Style" section of the AI prompts for this look (see ai.js)
+//   scene: { key: {zh, en} }     the scene objects the user may drag on the canvas (the ball, the giant
+//                                letters, the centre of the radiating lines…): its painters place each
+//                                through objAt(key, x, y, ctx), which moves it by the cover's offset
 //
 // The current look is module state, set by drawCover() from the profile before anything is drawn.
 
@@ -68,6 +71,34 @@ export function role(c) {
 }
 
 let fast = false;             // see setFast()
+// ---------- scene objects the user may drag (see `scene` above, and sceneOffsets in layers.js)
+let sceneOff = {}, sceneW = 1920, sceneH = 1080, sceneK = 1, placed = [];
+/** The offsets of the current look's scene objects on the cover being drawn ({ key: [dx, dy] }, fractions of its w × h; k: canvas pixels per unit). */
+export function setScene(offsets, w, h, k) { sceneOff = offsets || {}; sceneW = w; sceneH = h; sceneK = k || 1; placed = []; }
+/** Where the scene objects were placed in the last drawing, for the editor's handles: [{ key, x, y }] in units. */
+export const scenePlaced = () => placed.slice();
+/**
+ * Where scene object `key` goes: (x, y), the place the layout gives it in ctx's own frame, moved by the
+ * cover's offset for it (a move on the canvas, turned into ctx's frame if that is turned or scaled). The
+ * place is noted for its handle. `axis` "x" or "y" keeps it to that direction (a band across the picture,
+ * a beam from its top). Returns [x, y] in ctx's frame.
+ */
+function objAt(key, x, y, ctx = null, axis = null) {
+  const o = sceneOff[key];
+  let dx = o && axis !== "y" ? o[0] * sceneW : 0, dy = o && axis !== "x" ? o[1] * sceneH : 0, vx = x + dx, vy = y + dy;
+  const m = ctx && typeof ctx.getTransform === "function" ? ctx.getTransform() : null;
+  if (m) {
+    const a = m.a / sceneK, b = m.b / sceneK, c = m.c / sceneK, d = m.d / sceneK, det = a * d - b * c || 1;
+    [dx, dy] = [(d * dx - c * dy) / det, (a * dy - b * dx) / det];
+    vx = a * (x + dx) + c * (y + dy) + m.e / sceneK; vy = b * (x + dx) + d * (y + dy) + m.f / sceneK;
+  }
+  if (!placed.some((q) => q.key === key)) placed.push({ key, x: vx, y: vy });
+  return [x + dx, y + dy];
+}
+/** Moves what ctx paints next by scene object `key`'s offset (a translate: call it within save / restore); (x, y), in ctx's frame, is where its handle goes unmoved. */
+function shift(key, x, y, ctx) { const [X, Y] = objAt(key, x, y, ctx); ctx.translate(X - x, Y - y); }
+/** The offsets as a string, for the caches of what scene objects are painted into. */
+const sceneKey = () => JSON.stringify(sceneOff);
 let seed = 7;                 // see setLook(): places the things a look scatters at random
 
 // ---------- the house look: everything is drawn by the code's own defaults
@@ -168,13 +199,13 @@ const cyber = {
   name: { zh: "赛博朋克", en: "Cyberpunk" },
   oneTheme: true,              // always dark: the light / dark choice does not apply
   seeded: true,                // scatters things at random: the Style tab offers to shuffle them
+  scene: { sweep: { zh: "扫描光带", en: "Sweep line" } },
   params: [
     { key: "split", min: 0, max: 2, step: 0.05, def: 1, name: { zh: "色彩错位", en: "Colour split" } },
     { key: "tear", min: 0, max: 2, step: 0.05, def: 0.7, name: { zh: "信号撕裂", en: "Signal tear" } },
     { key: "scan", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "扫描线", en: "Scanlines" } },
     { key: "decor", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "界面装饰", en: "Interface detail" } },
     { key: "sweep", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "扫描光带", en: "Sweep line" } },
-    { key: "sweepAt", min: 0, max: 1, step: 0.01, def: 0, name: { zh: "光带位置", en: "Sweep position" } },
     { key: "glow", min: 0, max: 2, step: 0.05, def: 0.35, name: { zh: "线条光晕", en: "Line glow" } },
     { key: "photo", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "照片染色", en: "Photo tint" } },
     { key: "tearClear", toggle: true, min: 0, max: 1, step: 1, def: 1, name: { zh: "撕裂避开文字", en: "Keep tears off lettering" } },
@@ -327,8 +358,8 @@ const cyber = {
       ctx.stroke(); ctx.restore();
     }
     if (p.sweep > 0) {   // the sweep: a line of light across the picture with the band it has just read above it.
-      // It has sliders of its own: how strong it is (0 hides it) and where it sits (0 leaves that to chance).
-      const y = h * (p.sweepAt > 0 ? p.sweepAt : 0.2 + rand(31) * 0.6), k = p.sweep / 0.7, trail = ctx.createLinearGradient(0, y - 110, 0, y);
+      // Where it sits is left to chance, unless it was dragged (a scene object); its slider is how strong it is (0 hides it).
+      const [, y] = objAt("sweep", w / 2, h * (0.2 + rand(31) * 0.6), ctx, "y"), k = p.sweep / 0.7, trail = ctx.createLinearGradient(0, y - 110, 0, y);
       trail.addColorStop(0, css(CY.cyan, 0)); trail.addColorStop(1, css(CY.cyan, Math.min(0.5, 0.11 * k)));
       ctx.fillStyle = trail; ctx.fillRect(0, y - 110, w, 110);
       ctx.fillStyle = css(CY.cyan, Math.min(1, 0.85 * k)); ctx.fillRect(0, y, w, 2);
@@ -565,6 +596,7 @@ function risoShapes(ctx, env, amt) {
   if (amt <= 0) return;
   const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), C = env.C, at = (a, b) => clamp((amt - a) / (b - a)), ink = (r) => 0.9 * Math.min(1, r * 3);   // the ink comes in early in each stretch, the form grows through it
   ctx.save(); ctx.globalCompositeOperation = "multiply";
+  shift("shapes", F.x0 + fw * 0.72, F.y0 + fh * 0.4, ctx);   // a scene object: they move as one
   let r = at(0, 0.35);
   if (r > 0) { ctx.fillStyle = css(RISO.pink, ink(r)); ctx.beginPath(); ctx.arc(F.x0 + fw * (0.8 + rand(501) * 0.08), F.y0 + fh * (0.1 + rand(502) * 0.1), u * (0.24 + 0.16 * r), 0, TAU); ctx.fill(); }
   r = at(0.25, 0.6);
@@ -595,6 +627,7 @@ const riso = {
   name: { zh: "孔版印刷", en: "Risograph" },
   oneTheme: true,
   seeded: true,
+  scene: { shapes: { zh: "叠印图形", en: "Overprinted shapes" } },
   params: [
     { key: "shift", min: 0, max: 2, step: 0.05, def: 1, name: { zh: "套色错位", en: "Misregistration" } },
     { key: "dots", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "网点", en: "Halftone" } },
@@ -708,9 +741,14 @@ function filmDust(ctx, w, h, d) {
  * Beams of light slanting down through the sky from above its top edge — the "angel's ladder" of
  * painted backgrounds: long pale wedges, screened on, fading as they fall. Warmer at dusk.
  */
-function godRays(ctx, w, h, amt, dusk = 0) {
+/** Where godRays' beams come in at the top (their source is far above it): for a look placing them as a scene object itself. */
+const raysAt = (w, h) => [w * (0.6 + rand(621) * 0.25), h * 0.06];
+function godRays(ctx, w, h, amt, dusk = 0, key = null, move = null) {
   if (amt <= 0) return;
-  const ox = w * (0.6 + rand(621) * 0.25), oy = -h * 0.35, len = Math.hypot(w, h) * 1.2, c = mix([255, 248, 226], [255, 206, 150], dusk);
+  let [ox] = raysAt(w, h), oy = -h * 0.35;
+  if (key) { const [mx, my] = objAt(key, ox, h * 0.06, ctx); oy += my - h * 0.06; ox = mx; }   // a scene object: its handle where the beams come in at the top
+  if (move) { ox += move[0]; oy += move[1]; }   // moved by a look that placed them itself (painting them elsewhere than on ctx)
+  const len = Math.hypot(w, h) * 1.2, c = mix([255, 248, 226], [255, 206, 150], dusk);
   ctx.save(); ctx.globalCompositeOperation = "screen";
   for (let k = 0; k < 9; k++) {
     const a = Math.PI * (0.52 + 0.3 * ((k + rand(k * 2.3 + 622) * 0.8) / 9)), half = 0.012 + rand(k * 3.7 + 623) * 0.03, s = (0.35 + 0.65 * rand(k * 4.9 + 624)) * amt;
@@ -726,8 +764,10 @@ function godRays(ctx, w, h, amt, dusk = 0) {
  * flat horizontal one, then a line of ghosts through the middle of the frame — rings with a brighter
  * rim, flat hexagons, a small hard dot — each in its own tint. Screened on; `amt` sets their strength.
  */
-function lensFlare(ctx, w, h, amt) {
-  const sx = w * (0.7 + rand(611) * 0.2), sy = h * (0.08 + rand(612) * 0.14), u = Math.min(w, h), vx = w / 2 - sx, vy = h / 2 - sy;
+function lensFlare(ctx, w, h, amt, key = null) {
+  let sx = w * (0.7 + rand(611) * 0.2), sy = h * (0.08 + rand(612) * 0.14);
+  if (key) [sx, sy] = objAt(key, sx, sy, ctx);   // a scene object: the ghosts still run through the middle
+  const u = Math.min(w, h), vx = w / 2 - sx, vy = h / 2 - sy;
   ctx.save(); ctx.globalCompositeOperation = "screen";
   const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, u * 0.36);
   glow.addColorStop(0, css([255, 250, 232], 0.95 * amt)); glow.addColorStop(0.12, css([255, 228, 180], 0.55 * amt)); glow.addColorStop(1, css([255, 200, 150], 0));
@@ -758,6 +798,7 @@ const anime = {
   name: { zh: "九十年代动画", en: "90s animation" },
   oneTheme: true,
   seeded: true,
+  scene: { clouds: { zh: "云", en: "Clouds" }, rays: { zh: "天使光", en: "Light rays" }, leak: { zh: "漏光", en: "Light leak" }, flare: { zh: "镜头光斑", en: "Lens flare" } },
   params: [
     { key: "clouds", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "云量", en: "Clouds" } },
     { key: "dusk", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "晚霞", en: "Dusk" } },
@@ -778,12 +819,13 @@ const anime = {
    */
   background(ctx, env, L, p) {
     const { w, h, C } = env, d = p.dusk;
-    if (env.photo) { env.drawPhoto(); wash(ctx, w, h, "multiply", [255, 238, 216], 0.5); if (L.fill) godRays(ctx, w, h, p.rays, d); return true; }
+    if (env.photo) { env.drawPhoto(); wash(ctx, w, h, "multiply", [255, 238, 216], 0.5); if (L.fill) godRays(ctx, w, h, p.rays, d, "rays"); return true; }
     const sky = ctx.createLinearGradient(0, 0, 0, h);
     sky.addColorStop(0, css(mix(mix([34, 46, 108], [58, 40, 104], d), C, 0.06))); sky.addColorStop(0.55, css(mix(mix([92, 132, 184], [206, 122, 146], d), C, 0.08))); sky.addColorStop(1, css(mix(mix([244, 208, 172], [255, 172, 96], d), C, 0.14)));
     ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
     if (!L.grid) return true;
     const lit = mix(ANI.cream, [255, 196, 170], d), n = p.clouds * 13;
+    ctx.save(); shift("clouds", w * 0.5, h * 0.43, ctx);   // a scene object: the clouds move as one
     for (let k = 0; k < Math.ceil(n); k++) {
       const a = clamp(n - k), cx = rand(k * 3 + 1) * w, cy = h * (0.18 + rand(k * 3 + 2) * 0.5), rx = w * (0.1 + rand(k * 3 + 3) * 0.16), ry = rx * 0.3;
       ctx.save(); ctx.translate(cx, cy); ctx.scale(1, ry / rx);
@@ -791,7 +833,8 @@ const anime = {
       g.addColorStop(0, css(lit, 0.55 * a)); g.addColorStop(0.6, css(lit, 0.22 * a)); g.addColorStop(1, css(lit, 0));
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, rx, 0, Math.PI * 2); ctx.fill(); ctx.restore();
     }
-    godRays(ctx, w, h, p.rays, d);
+    ctx.restore();
+    godRays(ctx, w, h, p.rays, d, "rays");
     return true;
   },
   accent: {
@@ -830,14 +873,14 @@ const anime = {
     wash(ctx, w, h, "screen", [44, 30, 56], 0.55 * p.fade);          // blacks lifted, as on an old print
     wash(ctx, w, h, "multiply", [255, 238, 214], 0.75 * p.fade);     // and the whole thing gone warm
     if (p.leak > 0) {   // light that got into the camera: a red-orange glow from one side, burning to yellow at its heart
-      const left = rand(640) > 0.5, x = left ? w * 0.02 : w * 0.98, y = h * (0.25 + rand(641) * 0.5), R = Math.max(w, h) * (0.3 + 0.35 * p.leak);
+      const left = rand(640) > 0.5, [x, y] = objAt("leak", left ? w * 0.02 : w * 0.98, h * (0.25 + rand(641) * 0.5), ctx), R = Math.max(w, h) * (0.3 + 0.35 * p.leak);
       const g = ctx.createRadialGradient(x, y, 0, x, y, R);
       g.addColorStop(0, css([255, 236, 170], 0.95 * p.leak)); g.addColorStop(0.22, css([255, 132, 52], 0.78 * p.leak)); g.addColorStop(0.6, css([214, 44, 56], 0.34 * p.leak)); g.addColorStop(1, css([200, 40, 60], 0));
       const e = ctx.createLinearGradient(left ? 0 : w, 0, left ? w * 0.4 : w * 0.6, 0);   // and burnt in along that edge
       e.addColorStop(0, css([255, 96, 40], 0.75 * p.leak)); e.addColorStop(0.45, css([230, 60, 50], 0.25 * p.leak)); e.addColorStop(1, css([230, 60, 50], 0));
       ctx.save(); ctx.globalCompositeOperation = "screen"; ctx.fillStyle = e; ctx.fillRect(0, 0, w, h); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); ctx.restore();
     }
-    if (p.flare > 0) lensFlare(ctx, w, h, p.flare);
+    if (p.flare > 0) lensFlare(ctx, w, h, p.flare, "flare");
     if (p.dust > 0) filmDust(ctx, w, h, p.dust);
     grain(ctx, p.grain * 0.7, unit);
     vignette(ctx, w, h, [20, 12, 30], 0.84 * p.vignette, 0.45);
@@ -862,7 +905,8 @@ const bnInk = () => (dark ? BN.paper : BN.ink), bnGround = () => (dark ? BN.nigh
  * channel colour with a few lines of small print, the spindle hole.
  */
 function record(ctx, env, amt) {
-  const { C } = env, F = openField(env), R = Math.min((F.y1 - F.y0) * 0.46, (F.x1 - F.x0) * 0.4), cx = F.x1 + R * 1.02 - R * 1.3 * amt, cy = (F.y0 + F.y1) / 2;
+  const { C } = env, F = openField(env), R = Math.min((F.y1 - F.y0) * 0.46, (F.x1 - F.x0) * 0.4), cx0 = F.x1 + R * 1.02 - R * 1.3 * amt, ax = Math.min(cx0, F.x1 - R * 0.2);
+  const [mx, cy] = objAt("record", ax, (F.y0 + F.y1) / 2, ctx), cx = cx0 + mx - ax;   // a scene object: its handle on the part that shows
   ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.fillStyle = css(dark ? [6, 6, 8] : [20, 20, 22]); ctx.fill();
   ctx.clip();
   ctx.lineWidth = 1;
@@ -887,6 +931,7 @@ const bluenote = {
   about: { zh: "五六十年代爵士唱片封套：大面积纯色块、紧凑的无衬线大字，没有描边、没有投影，照片处理成单色加黑并带粗网点，编目式的细线和小字；可以让黑胶唱片从封套里滑出来，再加上唱片磨出的圆痕、边角磨损和日晒褪色；自带平直的版式，可选深色或浅色底。克制、有态度、靠排版取胜——适合音乐、访谈、人物、品牌故事。", en: "Jazz record sleeves of the 50s and 60s: large flat blocks of colour, tight sans-serif headlines with no outline or shadow, photos in one colour and black through a coarse screen, catalogue rules and small print; the record can slide out of the sleeve, and the sleeve can show its years — ring wear, worn edges, sun fade; flat layouts of its own, dark or light ground. Restrained, confident, carried by the type — for music, interviews, portraits, brand stories." },
   name: { zh: "蓝调唱片", en: "Record sleeve" },
   seeded: true,
+  scene: { record: { zh: "唱片露出", en: "The record" } },
   params: [
     { key: "vinyl", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "唱片露出", en: "Record sliding out" } },
     { key: "rules", min: 0, max: 1, step: 0.05, def: 1, name: { zh: "细线与编目", en: "Rules and catalogue" } },
@@ -997,6 +1042,7 @@ function edColumns(ctx, env, p) {
   if (p.quote > 0) {
     const fs = 90 + 130 * p.quote;
     ctx.save(); ctx.font = `700 ${fs}px ${fonts.serif}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(C, 0.3 + 0.7 * p.quote);
+    shift("quote", x0 + fs * 0.18, y0 + fs * 0.3, ctx);   // a scene object
     ctx.fillText("\u201C", x0 - fs * 0.06, y0 + fs * 0.62); ctx.restore();
     top = y0 + 30 + 60 * p.quote;
   }
@@ -1019,6 +1065,7 @@ const editorial = {
   about: { zh: "杂志内页的编辑设计：衬线标题、粗细双线、细线边框、页眉页码、巨大而安静的期号数字，频道色的大引号和两栏正文，装订线阴影；照片转黑白或印成频道色的专色；自带平直的版式，可选深色或浅色底。安静、讲究、有阅读感——适合深度内容、评论、读书、文化与系列栏目。", en: "The pages of a magazine: a serif headline, thick-and-thin rules, a hairline border, running head and folio, a huge quiet issue number, a large quotation mark and two columns of body text, a gutter shadow; photos in black and white or in the channel colour as a spot ink; flat layouts of its own, dark or light ground. Quiet, considered, made to be read — for long-form, essays, books, culture, series." },
   name: { zh: "编辑设计", en: "Editorial" },
   seeded: true,
+  scene: { numeral: { zh: "期号大字", en: "Issue numeral" }, quote: { zh: "引号", en: "Quotation mark" } },
   params: [
     { key: "rules", min: 0, max: 1, step: 0.05, def: 1, name: { zh: "栏线与页眉", en: "Rules and folio" } },
     { key: "numeral", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "期号大字", en: "Issue number" } },
@@ -1055,6 +1102,7 @@ const editorial = {
     if (p.numeral > 0) {   // the issue number, very large and very quiet, where a picture would otherwise go
       const fs = Math.min(w, h) * 0.78;
       ctx.save(); ctx.font = `italic 700 ${fs}px ${fonts.serif}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(C, (dark ? 0.44 : 0.4) * p.numeral);
+      shift("numeral", w - 60 - fs * 0.5, h * 0.5, ctx);   // a scene object
       ctx.fillText(pad2(env.o.catIndex + 1), w - 60, h * 0.5 + fs * 0.36); ctx.restore();
     }
     edColumns(ctx, env, p);
@@ -1220,13 +1268,14 @@ function songSeals(ctx, env, amt) {
   const { w, h } = env, F = openField(env), x = workLike(ctx, "seals"), red = css(SONG.red), at = (a, b) => clamp((amt - a) / (b - a));
   const grid = (cx, cy, s, k, t) => { for (let i = 0; i < 4; i++) fauxGlyph(x, cx + (i % 2 ? -1 : 1) * s * 0.23, cy + (i < 2 ? -1 : 1) * s * 0.23, s * 0.4, k + i * 9.7, t); };
   const seals = [
-    { kind: "white", s: 92, cx: w - 102 - 70, cy: 150 + rand(671) * 60, r: at(0, 0.4) },
-    { kind: "red", s: 78, cx: 64 + 60 + rand(672) * 40, cy: (F.y0 + F.y1) * 0.5 - 40 + rand(673) * 60, r: at(0.3, 0.7) },
-    { kind: "round", s: 70, cx: w * (0.56 + rand(674) * 0.1), cy: F.y1 - 70 - rand(675) * 60, r: at(0.6, 1) },
+    { kind: "white", key: "sealWhite", s: 92, cx: w - 102 - 70, cy: 150 + rand(671) * 60, r: at(0, 0.4) },
+    { kind: "red", key: "sealRed", s: 78, cx: 64 + 60 + rand(672) * 40, cy: (F.y0 + F.y1) * 0.5 - 40 + rand(673) * 60, r: at(0.3, 0.7) },
+    { kind: "round", key: "sealRound", s: 70, cx: w * (0.56 + rand(674) * 0.1), cy: F.y1 - 70 - rand(675) * 60, r: at(0.6, 1) },
   ];
   for (const [i, q] of seals.entries()) {
     if (q.r <= 0) continue;
-    x.save(); x.globalAlpha = 0.85 * Math.min(1, q.r * 2); x.translate(q.cx, q.cy); x.rotate((rand(676 + i) - 0.5) * 0.08);
+    const [cx, cy] = objAt(q.key, q.cx, q.cy, ctx);   // each a scene object
+    x.save(); x.globalAlpha = 0.85 * Math.min(1, q.r * 2); x.translate(cx, cy); x.rotate((rand(676 + i) - 0.5) * 0.08);
     const s = q.s * (0.8 + 0.2 * q.r);
     if (q.kind === "white") {
       x.fillStyle = red; x.fillRect(-s / 2, -s / 2, s, s);
@@ -1293,6 +1342,7 @@ const songke = {
   name: { zh: "宋版刻本", en: "Woodblock book" },
   oneTheme: true,
   seeded: true,
+  scene: { sealWhite: { zh: "藏书印（白文方印）", en: "Seal (white, square)" }, sealRed: { zh: "藏书印（朱文方印）", en: "Seal (red, square)" }, sealRound: { zh: "藏书印（圆印）", en: "Seal (round)" } },
   params: [
     { key: "rules", min: 0, max: 1, step: 0.05, def: 0.8, name: { zh: "界栏", en: "Column rules" } },
     { key: "text", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "正文与小注", en: "Text and notes" } },
@@ -1585,6 +1635,7 @@ const vivid = {
   name: { zh: "夏日插画", en: "Summer illustration" },
   oneTheme: true,              // always the azure sky: the light / dark choice does not apply
   seeded: true,                // clouds, towers, houses and pennants are placed at random: the Style tab offers to shuffle them
+  scene: { cumulus: { zh: "积云", en: "Cumulus" }, towers: { zh: "高塔", en: "Towers" } },
   params: [
     { key: "clouds", min: 0, max: 1, step: 0.05, def: 0.8, name: { zh: "积云", en: "Cumulus" } },
     { key: "town", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "街景与高塔", en: "Town and towers" } },
@@ -1624,7 +1675,8 @@ const vivid = {
     const room = (x) => ground(x) - Math.max(top * 0.24, 150);        // how tall a cloud may be there: clear of the brand row
     // A cloud comes in small and grows to its full size (`grow`, 0–1) as the slider passes its stretch,
     // so turning the slider up adds clouds one after another, the great masses first.
-    const mass = (fx, k, size, tall, grow) => { if (grow <= 0) return; const x = w * fx, s = Math.min(u * size * (0.1 + 0.9 * grow), room(x) / (0.86 * tall + 0.62)); if (s > u * 0.025) billow(ctx, x, ground(x), s, tall, k); };
+    // The clouds move together as a scene object, the towers as another.
+    const mass = (fx, k, size, tall, grow) => { if (grow <= 0) return; const x = w * fx, s = Math.min(u * size * (0.1 + 0.9 * grow), room(x) / (0.86 * tall + 0.62)); if (s > u * 0.025) { ctx.save(); shift("cumulus", w * 0.5, top * 0.55, ctx); billow(ctx, x, ground(x), s, tall, k); ctx.restore(); } };
     // far off, behind the towers
     mass(0.36 + rand(131) * 0.24, 132, 0.1, 0.9, ramp(c, 0.25, 0.5));
     mass(0.26 + rand(133) * 0.1, 134, 0.16, 1.15, ramp(c, 0.4, 0.65));
@@ -1633,8 +1685,10 @@ const vivid = {
     // The towers rise from behind the horizon as the slider goes up: the first from 0.3, full at 0.7;
     // the second from 0.65, full at 1. Their feet are hidden by the colour field and the houses.
     const t1 = ramp(t, 0.3, 0.7), t2 = ramp(t, 0.65, 1), tx = w * (0.58 + rand(141) * 0.12), tw = u * (0.05 + 0.02 * t), th = Math.max(u * 0.1, at(tx) - top * (0.3 - 0.12 * t));
+    ctx.save(); if (t1 > 0) shift("towers", tx, at(tx) - th * 0.5, ctx);
     if (t2 > 0) { const sx = tx + w * (rand(142) > 0.5 ? 0.1 : -0.1), sw = tw * 0.7, sh = th * 0.62; skyTower(ctx, sx, at(sx) + (1 - t2) * (sh + sw * 1.6), sw, sh); }
     if (t1 > 0) skyTower(ctx, tx, at(tx) + (1 - t1) * (th + tw * 1.6), tw, th);
+    ctx.restore();
     // near, in front of the towers: a great mass on each side, then more toward the edges
     mass(0.06 + rand(151) * 0.2, 152, 0.34, 1.5 + rand(153) * 0.4, ramp(c, 0, 0.4));
     mass(0.72 + rand(154) * 0.2, 155, 0.31, 1.7 + rand(156) * 0.5, ramp(c, 0.08, 0.5));
@@ -1985,6 +2039,7 @@ const negative = {
   about: { zh: "红黑负形海报：索尔·巴斯和波兰海报学派的路子——红、黑、米白三色，一个巨大的剪影承载全部意思（用的是频道图形的轮廓，被画面边缘裁切），剪影和底色互相咬合，空出来的形和画出来的形一样有分量；可加一块反色的负形分割、聚光光束、牵引的细线；标题小而精确，底部几行演职员小字，丝网印刷的粗糙质感。可选红底黑形或黑底红形，也可以用频道色代替红色。冷峻、有隐喻、一眼就懂——适合电影、书评、社会议题、悬疑与观点类内容。", en: "A red-and-black negative-space poster, after Saul Bass and the Polish poster school: red, black and off-white; one huge silhouette carries the idea (the channel graphic's outline, cropped by the edge), cut against the ground so the shapes between read as much as the shapes; optionally a reversed split, a spotlight beam, taut threads; a small exact title, a few lines of credits, the roughness of a screen print. Black on red or red on black, and the channel colour can stand in for the red. Stark, metaphorical, read at a glance — for film, books, social issues, mysteries, opinion." },
   name: { zh: "负形海报", en: "Negative space" },
   seeded: true,
+  scene: { giant: { zh: "巨型剪影", en: "Giant silhouette" }, beam: { zh: "聚光光束", en: "Spotlight beam" } },
   params: [
     { key: "giant", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "巨型剪影", en: "Giant silhouette" } },
     { key: "cut", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "负形分割", en: "Reversed split" } },
@@ -2018,7 +2073,7 @@ const negative = {
       return true;
     }
     if (!L.grid) return true;
-    const S = graphicShape(env), at = negPlace(env, p), F = at.F;
+    const S = graphicShape(env), at0 = negPlace(env, p), F = at0.F, [gx, gy] = objAt("giant", at0.cx, at0.cy, ctx), at = { ...at0, cx: gx, cy: gy };   // a scene object, the split and threads following it
     // the reversed split: its leaning edge sweeps in from the far side as the slider goes up, across the
     // silhouette (through its middle at 0.5), so that more and more of the figure reads in reverse
     let split = null;
@@ -2028,7 +2083,7 @@ const negative = {
       shapeOf(ctx, split); ctx.fillStyle = css(ink); ctx.fill();
     }
     if (p.beam > 0) {   // a cone of light from above, onto the silhouette, with a few brighter rays in it
-      const bx = at.cx, spread = w * (0.12 + 0.2 * p.beam), g = ctx.createLinearGradient(0, 0, 0, h);
+      const [bx] = objAt("beam", at.cx, h * 0.1, ctx, "x"), spread = w * (0.12 + 0.2 * p.beam), g = ctx.createLinearGradient(0, 0, 0, h);   // a scene object, along the top
       g.addColorStop(0, css(NEG.cream, 0.42 * p.beam)); g.addColorStop(1, css(NEG.cream, 0));
       ctx.save(); ctx.globalCompositeOperation = "screen"; ctx.fillStyle = g;
       shapeOf(ctx, [[bx - w * 0.02, 0], [bx + w * 0.02, 0], [bx + spread, h], [bx - spread, h]]); ctx.fill();
@@ -2158,6 +2213,7 @@ const cinema = {
   about: { zh: "极简电影海报：从频道色里取一个沉静的颜色（赭石、暮紫、灰蓝、墨绿），一个深色剪影（频道图形的轮廓）站在画面里，身后一团柔光，远处的山峦一层层淡出去，皱纸纹理、暗角和褪色，细而疏朗的衬线标题，底部一块演职员表；有照片时可以把照片装进剪影，做成双重曝光。安静、有故事感、电影感强——适合影评、书评、人物故事、纪录片与情绪向内容。", en: "The minimal movie poster: a quiet colour drawn from the channel's (ochre, dusk violet, slate, deep green), a dark silhouette (the channel graphic's outline) standing in it with a soft light behind, ridges fading back in layers, crumpled paper, a vignette and fade, a thin spaced serif title and a credits block at the foot; with a photo, the photo can go inside the silhouette as a double exposure. Quiet, story-led, cinematic — for film and book reviews, portraits, documentaries, mood pieces." },
   name: { zh: "极简电影", en: "Minimal film poster" },
   seeded: true,
+  scene: { figure: { zh: "剪影", en: "Silhouette" } },
   params: [
     { key: "giant", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "剪影", en: "Silhouette" } },
     { key: "glow", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "背光", en: "Backlight" } },
@@ -2179,7 +2235,7 @@ const cinema = {
    * it, with the silhouette cut out of it.
    */
   background(ctx, env, L, p) {
-    const { w, h, C } = env, at = cinePlace(env, p);
+    const { w, h, C } = env, at0 = cinePlace(env, p), [sx, sy] = objAt("figure", at0.cx, at0.cy, ctx), at = { ...at0, cx: sx, cy: sy };   // the silhouette: a scene object
     if (env.photo) {
       ctx.fillStyle = css(cineGround(C)); ctx.fillRect(0, 0, w, h);
       env.drawPhoto(p.duo * 0.6);
@@ -2423,6 +2479,7 @@ const monofilm = {
   about: { zh: "黑白胶片：粗颗粒的黑白电影剧照排成一本杂志——光雾和失焦的光斑，频道图形化成一道带动态残影的灰色身影，照片被裁下几块错开拼回去（其中一两块染成频道色，那是画面里唯一的颜色），纸张对折的折痕，灰尘，成栏的小字，衬线标题带一层失焦的柔光。可选黑底或灰白纸底。安静、文艺、有胶片的呼吸感——适合人物、音乐、电影、时尚、随笔与回忆。", en: "Monochrome film: grainy black-and-white stills laid out as a magazine — haze and out-of-focus light, the channel graphic as a grey figure trailing a motion blur, the photo cut into fragments set back a little off (one or two in the channel colour, the only colour there is), a sheet folded in four, dust, columns of small print, a serif title with a soft blur round it. Black or pale paper. Quiet, literary, breathing like film — for portraits, music, film, fashion, essays and memories." },
   name: { zh: "黑白胶片", en: "Monochrome film" },
   seeded: true,
+  scene: { haze: { zh: "光雾", en: "Haze" } },
   params: [
     { key: "haze", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "光雾与光斑", en: "Haze and light" } },
     { key: "ghost", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "动态残影", en: "Motion ghost" } },
@@ -2473,7 +2530,7 @@ const monofilm = {
     }
     if (!L.grid) return true;
     if (p.haze > 0) {   // a wash of light from one side, and round out-of-focus lights
-      const lx = w * (0.25 + rand(330) * 0.5), ly = h * (0.2 + rand(331) * 0.3), lit = dark ? [190, 190, 186] : [255, 255, 255];
+      const [lx, ly] = objAt("haze", w * (0.25 + rand(330) * 0.5), h * (0.2 + rand(331) * 0.3), ctx), lit = dark ? [190, 190, 186] : [255, 255, 255];   // where the light comes from: a scene object
       const g = ctx.createRadialGradient(lx, ly, 0, lx, ly, u * 0.9);
       g.addColorStop(0, css(lit, (dark ? 0.32 : 0.55) * p.haze)); g.addColorStop(1, css(lit, 0));
       ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
@@ -2564,6 +2621,7 @@ const typo = {
   about: { zh: "实验字体：瑞士和实验派的文字海报——白纸黑字，文字本身就是画面：沿斜线切开错位、一层层向上叠出残影、从一侧消散成粒子；放射的细线、干笔刷痕、被斜线切开的巨型字母、带小圆点标记的细线网格；整张只有一种颜色，就是频道色的色块。可选白底黑字或黑底白字。理性、锋利、有设计感——适合设计、展览、讲座、音乐节、科技与观点类内容。", en: "Experimental type: Swiss and experimental typographic posters — black type on a white sheet, the type itself the picture: cut along a slant and knocked out of line, echoed in fading layers, dissolving into dots at one end; a burst of hairlines, dry-brush strokes, giant letters cut across, a hairline grid with small markers; one colour only, the channel's, on the block. Black on white or white on black. Rational, sharp, designed — for design, exhibitions, talks, festivals, tech and opinion." },
   name: { zh: "实验字体", en: "Experimental type" },
   seeded: true,
+  scene: { letters: { zh: "巨型字母", en: "Giant letters" }, burst: { zh: "放射细线中心", en: "Centre of the radiating lines" } },
   params: [
     { key: "slice", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "标题切割错位", en: "Title cut and shifted" } },
     { key: "echo", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "标题层叠残影", en: "Title echoes" } },
@@ -2595,6 +2653,7 @@ const typo = {
       const word = [...((p.letters || env.cat.code || env.cat.name || "A").toUpperCase())].filter((c) => c.trim()).slice(0, 8), n = word.length, line = n > 3, more = clamp((n - 3) / 5);
       const fw = F.x1 - F.x0, fh = F.y1 - F.y0, span = 0.42 + 0.26 * more;
       ctx.save(); ctx.font = `400 100px ${fonts.serif}`;
+      shift("letters", F.x0 + fw * (0.3 - 0.06 * more + span * 0.5), F.y0 + fh * 0.72, ctx);   // a scene object: the letters move as one
       const wide = word.reduce((sum, ch) => sum + ctx.measureText(ch).width, 0) / 100;   // the word's width at size 1
       const fs = Math.min(fh * (0.5 + 0.35 * p.giant), line ? (fw * span * 1.15) / Math.max(0.1, wide) : Infinity);
       ctx.font = `400 ${fs}px ${fonts.serif}`; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(mix(ground, ink, 0.12 + 0.75 * p.giant));
@@ -2610,7 +2669,7 @@ const typo = {
       ctx.restore();
     }
     if (p.burst > 0) {   // tapering hairlines from a point, of every length
-      const bx = F.x0 + (F.x1 - F.x0) * 0.62, by = F.y0 + (F.y1 - F.y0) * 0.55, n = Math.round(40 + 260 * p.burst), R = Math.hypot(w, h);
+      const [bx, by] = objAt("burst", F.x0 + (F.x1 - F.x0) * 0.62, F.y0 + (F.y1 - F.y0) * 0.55, ctx), n = Math.round(40 + 260 * p.burst), R = Math.hypot(w, h);   // their centre: a scene object
       ctx.fillStyle = css(ink, 0.9);
       for (let i = 0; i < n; i++) {
         const a = (i / n) * TAU + (rand(i * 1.3 + 370) - 0.5) * 0.04, r0 = u * (0.03 + Math.pow(rand(i * 2.9 + 371), 2) * 0.35), r1 = r0 + R * (0.1 + rand(i * 4.1 + 372) * 0.9) * (0.4 + 0.6 * p.burst), wd = 0.4 + rand(i * 5.3 + 373) * 2.6;
@@ -2783,7 +2842,7 @@ function toonStars(ctx, env, amt) {
 function toonBeam(ctx, env, at, amt) {
   if (amt <= 0) return;
   const { C } = env, F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0, side = rand(820) > 0.5 ? -1 : 1;
-  const lx = at.cx + side * Math.min(fw * 0.26, at.R * 1.4), ly = F.y0 + fh * 0.1, spread = fh * (0.16 + 0.12 * amt);
+  const [lx, ly] = objAt("lamp", at.cx + side * Math.min(fw * 0.26, at.R * 1.4), F.y0 + fh * 0.1, ctx), spread = fh * (0.16 + 0.12 * amt);   // the lamp: a scene object
   const lit = dark ? TOON.cream : mix(toonGround(C), [255, 255, 255], 0.7), g = ctx.createLinearGradient(lx, ly, at.cx, F.y1);
   g.addColorStop(0, css(lit, 0.85 * amt)); g.addColorStop(1, css(lit, 0.32 * amt));
   ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(lx - 9, ly + 6); ctx.lineTo(lx + 9, ly + 6); ctx.lineTo(at.cx + spread, F.y1); ctx.lineTo(at.cx - spread, F.y1); ctx.closePath(); ctx.fill();
@@ -2822,6 +2881,7 @@ const toon = {
   about: { zh: "动画电影的另类海报：一整块浓烈的颜色（从频道色来），天边一轮带复古条纹的大夕阳，频道图形站在它下方，还可以在太阳前立起一个巨大的同形剪影；放射光芒、路灯投下的光柱、一列越来越小的同一个身影、一条蜿蜒的小路和路上的小旅人、星空；丝网印刷的斑驳和海报的白边。温暖、童趣、一张图讲一个故事——适合动画、亲子、旅行、成长、治愈和节日内容。可选亮色底或深色底；自带平直的版式。", en: "The alternative poster for an animated film: one strong colour (from the channel's), a big striped setting sun hanging over where the channel graphic stands, and if you like its huge silhouette in front of the sun; a sunburst, a lamp's beam, a procession of the same figure growing smaller, a winding road with a tiny traveller, stars; the speckle of a screen print and a white margin. Warm, playful, a story in one picture — for animation, family, travel, growing up, feel-good and festive content. A bright or a deep ground; flat layouts of its own." },
   name: { zh: "动画海报", en: "Animated film poster" },
   seeded: true,
+  scene: { sun: { zh: "夕阳与光芒", en: "Sun and sunburst" }, giant: { zh: "巨型剪影", en: "Giant silhouette" }, lamp: { zh: "路灯光柱", en: "Street-lamp beam" } },
   params: [
     { key: "sun", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "夕阳", en: "Setting sun" } },
     { key: "sunset", min: 0, max: 1, step: 0.05, def: 0.8, name: { zh: "夕阳渐变", en: "Sunset colours" } },
@@ -2847,6 +2907,7 @@ const toon = {
    */
   background(ctx, env, L, p) {
     const { w, h, C } = env, ground = toonGround(C), at = toonPlace(env, p);
+    if (p.sun > 0 || p.burst > 0) [at.cx, at.cy] = objAt("sun", at.cx, at.cy, ctx);   // the sun and the rays from it: a scene object
     ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
     if (env.photo) {
       env.drawPhoto(p.duo);
@@ -2860,7 +2921,7 @@ const toon = {
     toonBurst(ctx, env, at, p.burst);
     toonStars(ctx, env, p.stars);
     toonSun(ctx, env, at, p);
-    if (S && p.giant > 0) placeShape(ctx, S, toonFigure(C), at.gx, at.gy, at.size);   // the hero, huge and dark against the sun
+    if (S && p.giant > 0) { const [gx, gy] = objAt("giant", at.gx, at.gy, ctx); placeShape(ctx, S, toonFigure(C), gx, gy, at.size); }   // the hero, huge and dark against the sun: a scene object
     toonBeam(ctx, env, at, p.beam);
     toonRoad(ctx, env, at, p.road, S);
     toonParade(ctx, env, at, p.parade, S);
@@ -2943,6 +3004,7 @@ function softCopy(src, f, slot) {
 function avFigure(ctx, env, p) {
   const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, size = fh * (0.55 + 0.5 * p.figure), box = { cx: F.x0 + fw * 0.62, cy: F.y1 - size * 0.46, size };
   const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
+  if (S) [box.cx, box.cy] = objAt("figure", box.cx, box.cy, ctx);   // a scene object: the focus frame, glass and band follow it
   if (S) {
     const col = dark ? [128, 128, 126] : [112, 112, 114];
     blurred(ctx, size * 0.035, css(col, 0.55), () => placeShape(ctx, S, [0, 0, 0], box.cx, box.cy, size * 1.02));
@@ -3052,6 +3114,7 @@ const avant = {
   about: { zh: "先锋影像：今天的设计工作室和时装品牌常发的海报。黑白照片（没有照片时，频道图形化成一个柔焦的身影），像设计师在电脑里那样加工：动态拖影、辉光、焦外虚化里留一个清晰的对焦框、一块变成大像素的马赛克、一片条纹玻璃、一条透出频道色的色带；细线网格、圆点标记和界面式的小字；紧凑的大号无衬线标题；频道色是唯一的点缀。冷静、锐利、有数码时代的质感——适合设计、时尚、科技、人物、观点和品牌内容。可选浅灰底或黑底；自带平直的版式。", en: "Avant-garde image: the posters design studios and fashion labels post today. A black-and-white photograph (or, without one, the channel graphic as a soft figure) worked on as a designer would in the computer: a smear of motion, a glow, out of focus with one sharp frame of focus, a patch gone to large pixels, a panel of fluted glass, a band where the channel colour comes through; hairline grid lines, dot markers and interface-like labels; a big tight grotesque; the channel colour the only accent. Cool, sharp, digital — for design, fashion, tech, portraits, opinion and brand content. A light grey or a black ground; flat layouts of its own." },
   name: { zh: "先锋影像", en: "Avant-garde image" },
   seeded: true,
+  scene: { figure: { zh: "身影", en: "Figure" } },
   params: [
     { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "身影", en: "Figure" } },
     { key: "smear", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "动态拖影", en: "Motion smear" } },
@@ -3265,9 +3328,10 @@ function clPieces(ctx, env, p, onPhoto) {
   if (p.disc > 0) {   // the big disc of colour behind the figure; over a photo it tints what it covers
     ctx.save(); if (onPhoto) ctx.globalCompositeOperation = "multiply";
     ctx.fillStyle = css(onPhoto ? mix([255, 255, 255], C, 0.85) : C, Math.min(1, p.disc * 3));
-    ctx.beginPath(); ctx.arc(cx + fw * 0.02, cy - fh * 0.06, fh * (0.22 + 0.3 * p.disc), 0, TAU); ctx.fill(); ctx.restore();
+    const [dx, dy] = objAt("disc", cx + fw * 0.02, cy - fh * 0.06, ctx);   // each of these three a scene object
+    ctx.beginPath(); ctx.arc(dx, dy, fh * (0.22 + 0.3 * p.disc), 0, TAU); ctx.fill(); ctx.restore();
   }
-  if (p.burst > 0) starburst(ctx, cx - fw * 0.16, cy - fh * 0.28, fh * (0.08 + 0.2 * p.burst), 11, mix(CL.mustard, [255, 120, 30], 0.35), 960);
+  if (p.burst > 0) { const [bx, by] = objAt("burst", cx - fw * 0.16, cy - fh * 0.28, ctx); starburst(ctx, bx, by, fh * (0.08 + 0.2 * p.burst), 11, mix(CL.mustard, [255, 120, 30], 0.35), 960); }
   for (let k = 0, n = p.strips * 6; k < Math.ceil(n); k++) {   // strips of newsprint, torn across
     const a = clamp(n - k), sw = fw * (0.3 + rand(k * 2.3 + 961) * 0.4), sh = u * (0.035 + rand(k * 3.1 + 962) * 0.04);
     ctx.save(); ctx.globalAlpha = a;
@@ -3288,7 +3352,7 @@ function clPieces(ctx, env, p, onPhoto) {
     dotScreen(ctx, w, h, k % 3 === 1 ? CL.red : dark ? CL.white : CL.ink, 9 + (k % 3) * 3, 0.85 * a, "source-over"); ctx.restore();
   }
   if (p.scribble > 0) {   // a loop of marker, drawn further the higher the slider
-    const sx = cx - fw * 0.05, sy = cy + fh * 0.12, R = fh * 0.16, ph = rand(990) * TAU, len = 40 * p.scribble;
+    const [sx, sy] = objAt("scribble", cx - fw * 0.05, cy + fh * 0.12, ctx), R = fh * 0.16, ph = rand(990) * TAU, len = 40 * p.scribble;
     ctx.save(); ctx.strokeStyle = css(dark ? CL.white : CL.ink, 0.85); ctx.lineWidth = Math.max(2.5, u * 0.004); ctx.lineCap = ctx.lineJoin = "round"; ctx.beginPath();
     for (let t = 0; t <= len; t += 0.08) { const x = sx + R * (Math.sin(t * 0.9 + ph) * 1.6 + Math.sin(t * 5.3) * 0.32), y = sy + R * (Math.cos(t * 1.27 + ph) * 0.7 + Math.cos(t * 5.1) * 0.3); t ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
     ctx.stroke(); ctx.restore();
@@ -3307,6 +3371,7 @@ const collage = {
   about: { zh: "拼贴艺术：剪报式的混合媒介拼贴——黑白人物像从杂志上剪下来，身后一个大色圆（频道色），四周是手撕的彩色纸片、一条条旧报纸、粗网点色块、爆炸星、马克笔涂鸦，再用胶带、票根和条形码钉住；每一片纸都微微翘起、投下影子，标题贴在一条条纸签上。热闹、有手作感、有态度——适合设计、潮流、艺术、观点、生活方式和年轻向内容。可选米白纸底或黑纸底。", en: "Collage: mixed media as a scrapbook would have it — a black-and-white figure cut from a magazine, a big disc of the channel colour behind, pieces of coloured paper torn by hand, strips of old newsprint, patches of coarse halftone, a starburst, a scribble in marker, held down with tape, a ticket stub and a barcode; every piece lifts a little and casts a shadow, and the title is pasted on paper labels. Loud, handmade, opinionated — for design, fashion, art, opinion, lifestyle and youth content. Cream or black paper." },
   name: { zh: "拼贴艺术", en: "Collage" },
   seeded: true,
+  scene: { disc: { zh: "大色圆", en: "Colour disc" }, burst: { zh: "爆炸星", en: "Starburst" }, scribble: { zh: "马克笔涂鸦", en: "Marker scribble" } },
   params: [
     { key: "disc", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "大色圆", en: "Disc of colour" } },
     { key: "torn", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "撕纸碎片", en: "Torn paper" } },
@@ -3464,6 +3529,7 @@ const yellow = {
   name: { zh: "明黄海报", en: "Yellow poster" },
   oneTheme: true,
   seeded: true,
+  scene: { letters: { zh: "巨型字母", en: "Giant letters" }, beam: { zh: "光束", en: "Beam" } },
   params: [
     { key: "giant", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "巨型字母", en: "Giant letters" } },
     { key: "word", text: true, max: 8, def: "", name: { zh: "字母内容", en: "Their letters" }, placeholder: { zh: "留空：用频道代号", en: "Empty: the channel's code" } },
@@ -3491,6 +3557,7 @@ const yellow = {
     const { w, h, C } = env, ground = ylGround(C), u = Math.min(w, h), F0 = openField(env), R = canPaint(ctx) ? ylRoom(ctx, env) : null;
     // the letters are white, so they may stand behind the black title: they take the field's far side; the black silhouette keeps to the room
     const W = p.giant > 0 && R ? ylWord(ctx, env, p, { x0: F0.x0 + (F0.x1 - F0.x0) * 0.42, x1: F0.x1 - (F0.x1 - F0.x0) * 0.04, y0: F0.y0 + 24, y1: F0.y1 }) : null;
+    if (W) { const mx = W.x0 + W.bw / 2, my = W.y0 + W.bh / 2, [X, Y] = objAt("letters", mx, my, ctx); W.x0 += X - mx; W.y0 += Y - my; }   // a scene object
     ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
     if (env.photo) {
       env.drawPhoto(p.mono);
@@ -3509,9 +3576,9 @@ const yellow = {
         ctx.beginPath(); ctx.moveTo(sx + off - fh * 0.35, F.y0 - 20); ctx.lineTo(sx - off + fh * 0.35, F.y1 + 20); ctx.stroke();
       }
     }
-    if (p.beam > 0) {   // a beam from the figure's head out to the left, spreading over the floor
-      const g = ctx.createLinearGradient(fx, 0, F.x0, 0); g.addColorStop(0, css(YL.white, 0.85 * p.beam)); g.addColorStop(1, css(YL.white, 0.25 * p.beam));
-      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(fx, fy - size * 0.3); ctx.lineTo(F.x0 - 20, F.y1 - fh * (0.15 + 0.45 * p.beam)); ctx.lineTo(F.x0 - 20, F.y1); ctx.lineTo(fx, F.y1); ctx.closePath(); ctx.fill();
+    if (p.beam > 0) {   // a beam from the figure's head out to the left, spreading over the floor; where it starts is a scene object
+      const [ox, oy] = objAt("beam", fx, fy - size * 0.3, ctx), g = ctx.createLinearGradient(ox, 0, F.x0, 0); g.addColorStop(0, css(YL.white, 0.85 * p.beam)); g.addColorStop(1, css(YL.white, 0.25 * p.beam));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(F.x0 - 20, F.y1 - fh * (0.15 + 0.45 * p.beam)); ctx.lineTo(F.x0 - 20, F.y1); ctx.lineTo(ox, F.y1); ctx.closePath(); ctx.fill();
     }
     if (S) placeShape(ctx, S, YL.ink, fx, fy, size);
     if (W) {
@@ -3640,6 +3707,7 @@ const pitch = {
   about: { zh: "绿茵球场：从 1972 年慕尼黑奥运会到今天的世界杯和俱乐部海报——修剪成条纹的草坪，俯视转了个角度的白色球场线，被射门撞得鼓起的球网，坐满人的看台，球场灯光，黑白经典足球带网点阴影，前景的人群剪影；照片可以做成七十年代的分色效果。绿底白线，或浅色时的金丝雀黄底配绿线。热血、有节奏、一眼是足球——适合体育、赛事、球评、健身、团队和校园活动。", en: "Pitch: football posters from Munich '72 to today's World Cup and club posters — a pitch mown in stripes, its white lines seen from above at an angle, the net bulging where a shot struck it, the bowl of a full stadium, floodlights, the classic black-and-white ball shaded in halftone, a crowd in silhouette in front; photos can be posterized the seventies way. Green with white lines, or canary yellow with green ones. Rousing, rhythmic, plainly football — for sport, matches, commentary, fitness, teams and school events." },
   name: { zh: "绿茵球场", en: "Pitch" },
   seeded: true,
+  scene: { ball: { zh: "足球", en: "Ball" } },
   params: [
     { key: "mow", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "草坪条纹", en: "Mown stripes" } },
     { key: "lines", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "球场线", en: "Pitch lines" } },
@@ -3692,7 +3760,8 @@ const pitch = {
     if (p.stadium > 0) stadiumBowl(ctx, env, p.stadium);
     if (p.lines > 0) pitchLines(ctx, env, p.lines);
     // the ball (and where it struck the net): just past the title's end, if there is room there
-    const T = canPaint(ctx) ? titleArea(ctx, env) : null, br = u * (0.05 + 0.13 * p.ball), bx = clamp(T ? T.x + T.w + br * 1.15 : F.x0 + fw * 0.66, F.x0 + br, F.x1 - br * 1.2), by = F.y0 + fh * 0.36;
+    const T = canPaint(ctx) ? titleArea(ctx, env) : null, br = u * (0.05 + 0.13 * p.ball), bx0 = clamp(T ? T.x + T.w + br * 1.15 : F.x0 + fw * 0.66, F.x0 + br, F.x1 - br * 1.2), by0 = F.y0 + fh * 0.36;
+    const [bx, by] = p.ball > 0 || p.net > 0 ? objAt("ball", bx0, by0, ctx) : [bx0, by0];   // a scene object, and the net where it struck with it
     if (p.net > 0) goalNet(ctx, env, p.net, bx, by);
     lights();
     if (p.halftone > 0) dotScreen(ctx, w, h, dark ? [0, 0, 0] : [150, 110, 0], 10, 0.22 * p.halftone);
@@ -3801,6 +3870,7 @@ const dots = {
   name: { zh: "点阵光影", en: "Dot matrix" },
   oneTheme: true,
   seeded: true,
+  scene: { figure: { zh: "点阵身影", en: "Dot figure" } },
   params: [
     { key: "figure", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "点阵身影", en: "Figure in dots" } },
     { key: "pitch", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "点距", en: "Dot spacing" } },
@@ -3858,8 +3928,8 @@ const dots = {
         ctx.restore();
       }
       const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
-      if (S) {   // the figure, read into the grid
-        const size = fh * (0.5 + 0.55 * p.figure), cx = F.x0 + fw * 0.66, cy = F.y1 - size * 0.46, x0 = cx - size, y0 = cy - size * 0.6, cols = Math.ceil((size * 2) / cell), rows = Math.ceil((size * 1.25) / cell);
+      if (S) {   // the figure, read into the grid: a scene object
+        const size = fh * (0.5 + 0.55 * p.figure), [cx, cy] = objAt("figure", F.x0 + fw * 0.66, F.y1 - size * 0.46, ctx), x0 = cx - size, y0 = cy - size * 0.6, cols = Math.ceil((size * 2) / cell), rows = Math.ceil((size * 1.25) / cell);
         const cov = shapeCells(S, cx, cy, size, x0, y0, cols, rows, cell);
         // lit from the upper left, and uneven, as a cloud of points is
         dotGrid(ctx, env, p, x0, y0, cols, rows, cell, (i, j) => (cov[j * cols + i] / 255) * (0.35 + 0.45 * (1 - (i / cols + j / rows) / 2) + 0.3 * noise(i * 0.37 + j * 0.61 + 7)), (i, j) => mix(DM.white, C, 0.15 * noise(i * 0.7 + j * 1.3)));
@@ -3926,6 +3996,7 @@ const neon = {
   about: { zh: "霓虹波普：霓虹色的黑色电影式插画——画面按明暗映射成几层平涂的霓虹色（深夜的暗部、频道色、它的互补热色、亮部），深黑阴影，人物（频道图形或照片）带一圈热色轮廓光，身后一团背光，一块斜切的色面，侧边的竖条，阴影里的网点和印刷颗粒；色相可以整体轮转。浓烈、复古未来、有态度——适合音乐、潮流、游戏、夜生活、悬疑和人物内容。可选暗夜底或热色底。", en: "Neon: the neon noir pop illustration — the picture mapped from dark to light onto a few flat neon tones (night-dark shadows, the channel colour, its hot complement, a pale highlight), black shadows, a rim of hot light round the figure (the channel graphic, or the photo), a light behind it, a diagonal plane of colour, bars down the side, halftone in the shadows and print grain; the whole palette can be turned round the colour wheel. Intense, retro-futurist, with attitude — for music, fashion, games, nightlife, mystery and portraits. A night-dark or a hot ground." },
   name: { zh: "霓虹波普", en: "Neon pop" },
   seeded: true,
+  scene: { figure: { zh: "人物剪影", en: "Figure" } },
   params: [
     { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "人物剪影", en: "Figure" } },
     { key: "rim", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "轮廓光", en: "Rim light" } },
@@ -3950,7 +4021,8 @@ const neon = {
    */
   background(ctx, env, L, p) {
     const { w, h, C } = env, N = neonSet(C), ground = neonGround(N), F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0;
-    const size = fh * (0.55 + 0.5 * p.figure), cx = F.x0 + fw * 0.64, cy = F.y1 - size * 0.46;
+    const size = fh * (0.55 + 0.5 * p.figure), at = [F.x0 + fw * 0.64, F.y1 - size * 0.46];
+    const [cx, cy] = !env.photo && L.grid && (p.figure > 0 || p.glow > 0) ? objAt("figure", at[0], at[1], ctx) : at;   // the figure and its glow: a scene object
     ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
     const after = () => {
       if (p.bloom > 0 && !fast && canPaint(ctx)) { const soft = softCopy(snap(ctx, "neonGlow"), 18, "neonSoft"), cv = ctx.canvas; inPixels(ctx, () => { ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.7 * p.bloom; ctx.imageSmoothingEnabled = true; ctx.drawImage(soft, 0, 0, cv.width, cv.height); }); }
@@ -4087,7 +4159,7 @@ function basketball(ctx, x, y, r, rot, half) {
  * second, and the stand with its backboard, rim and net rises with it.
  */
 function courtPlan(ctx, env, amt, team) {
-  const F = openField(env), fh = F.y1 - F.y0, s = fh * 0.05, ox = F.x1 - s * 7, oy = F.y1 - s * 8.6, la = Math.min(1, amt * 2), fa = clamp(amt * 2 - 1);
+  const F = openField(env), fh = F.y1 - F.y0, s = fh * 0.05, [ox, oy] = objAt("court", F.x1 - s * 7, F.y1 - s * 8.6, ctx), la = Math.min(1, amt * 2), fa = clamp(amt * 2 - 1);   // a scene object
   const P = (X, Y, Z = 0) => [ox + (X - Y) * 0.866 * s, oy + (X + Y) * 0.5 * s - Z * s];
   const path = (pts, close) => { ctx.beginPath(); pts.forEach(([X, Y, Z], i) => { const [x, y] = P(X, Y, Z); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); if (close) ctx.closePath(); };
   const arc = (cx, cy, r, a0, a1, z = 0) => { const out = []; for (let i = 0; i <= 40; i++) { const t = a0 + ((a1 - a0) * i) / 40; out.push([cx + Math.cos(t) * r, cy + Math.sin(t) * r, z]); } return out; };
@@ -4122,7 +4194,7 @@ function courtPlan(ctx, env, amt, team) {
 }
 /** A hoop seen straight on, hanging from the top of the field, drawn in dotted line like a coarse halftone print. */
 function hoopFront(ctx, env, amt) {
-  const F = openField(env), fw = F.x1 - F.x0, W = fw * (0.14 + 0.16 * amt), x = F.x0 + fw * 0.82, top = F.y0 + 14, lw = Math.max(3, W * 0.03), ink = bbInk();
+  const F = openField(env), fw = F.x1 - F.x0, W = fw * (0.14 + 0.16 * amt), [x, mid] = objAt("hoop", F.x0 + fw * 0.82, F.y0 + 14 + W * 0.45, ctx), top = mid - W * 0.45, lw = Math.max(3, W * 0.03), ink = bbInk();   // a scene object
   ctx.save(); ctx.globalAlpha = Math.min(1, amt * 3); ctx.strokeStyle = css(ink); ctx.lineCap = "round"; ctx.lineJoin = "round";
   ctx.lineWidth = lw * 1.6; ctx.strokeRect(x - W / 2, top, W, W * 0.6);
   ctx.lineWidth = lw; ctx.strokeRect(x - W * 0.16, top + W * 0.3, W * 0.32, W * 0.24);
@@ -4153,6 +4225,7 @@ const court = {
   about: { zh: "篮球海报：校队球衣式的大号数字（团队色、网点填充、白边加橙色外描边），一颗带缝线和网点阴影的篮球坐在数字中间；可加等距视角的半场平面图（篮架、篮筐、球网一起立起来）、点线画的正面篮筐、喷漆滴流、频道图形带出的速度残影；丝网印刷的斑驳和旧墙面质感。团队色来自频道色。米白墙底或深海军蓝底；自带平直的版式，色块是木地板。", en: "Basketball poster: a varsity number in the team colour — halftone fill, a white gap and an orange outline — with the ball, seams and halftone shading, sitting in it; a half court in isometric plan with its stand, rim and net rising, a hoop in dotted line, spray paint dripping, speed trails behind the channel graphic; the distress of a screen print and a worn wall. The team colour is the channel's. A worn white wall or deep navy; flat layouts of its own, the colour block a hardwood floor." },
   name: { zh: "篮球海报", en: "Basketball poster" },
   seeded: true,
+  scene: { number: { zh: "球衣号码", en: "Jersey number" }, ball: { zh: "篮球", en: "Ball" }, court: { zh: "半场平面", en: "Half court" }, hoop: { zh: "正面篮筐", en: "Hoop" } },
   params: [
     { key: "number", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "球衣号码", en: "Jersey number" } },
     { key: "jersey", text: true, max: 3, def: "", name: { zh: "号码内容", en: "The number" }, placeholder: { zh: "留空：用频道序号", en: "Empty: the channel's place" } },
@@ -4195,21 +4268,23 @@ const court = {
       ctx.restore();
     }
     const at = bbSpot(ctx, env), fh = at.F.y1 - at.F.y0;
-    if (p.number > 0 && canPaint(ctx)) {   // the varsity number: team colour through a halftone, a white gap, an orange outline
+    if (p.number > 0 && canPaint(ctx)) {   // the varsity number: team colour through a halftone, a white gap, an orange outline; a scene object
+      const [nx, ty] = objAt("number", at.cx, at.cy - fh * 0.2, ctx), ny = ty + fh * 0.2;   // its handle up from the ball's
       const str = [...((p.jersey || pad2(env.o.catIndex + 1)).toUpperCase())].filter((c) => c.trim()).slice(0, 3).join("") || "0", x = workLike(ctx, "bb");
       x.font = `900 100px ${fonts.en}, ${fonts.cn}`; const fs = Math.min(fh * (0.5 + 0.45 * p.number), (at.room * 0.9 * 100) / Math.max(1, x.measureText(str).width));
       x.font = `900 ${fs}px ${fonts.en}, ${fonts.cn}`; x.textAlign = "center"; x.textBaseline = "middle"; x.lineJoin = "round";
-      x.fillStyle = css(team); x.fillText(str, at.cx, at.cy);
+      x.fillStyle = css(team); x.fillText(str, nx, ny);
       if (p.halftone > 0) dotScreen(x, w, h, [0, 0, 0], Math.max(6, Math.round(fs * 0.035)), 0.75 * p.halftone, "destination-out");
       x.globalCompositeOperation = "destination-over";
-      x.strokeStyle = css(BB.white); x.lineWidth = fs * 0.07; x.strokeText(str, at.cx, at.cy);
-      x.strokeStyle = css(BB.orange); x.lineWidth = fs * 0.13; x.strokeText(str, at.cx, at.cy);
+      x.strokeStyle = css(BB.white); x.lineWidth = fs * 0.07; x.strokeText(str, nx, ny);
+      x.strokeStyle = css(BB.orange); x.lineWidth = fs * 0.13; x.strokeText(str, nx, ny);
       layDown(ctx, x, Math.min(1, p.number * 4));
     }
     // under a long title the ball goes just below its last line, left of the channel graphic
     const br = u * (0.05 + 0.14 * p.ball), G = env.G && env.G.art, gl = G ? G.x - 300 * G.s : at.F.x1;
-    const bx = at.below ? clamp(gl - br * 1.15, at.F.x0 + (at.F.x1 - at.F.x0) * 0.3, at.cx) : at.cx + (p.number > 0 ? br * 0.25 : 0);
-    const by = at.below ? clamp(at.below + br * 0.75, at.cy, at.F.y1 - br * 1.15) : at.cy + (p.number > 0 ? br * 0.1 : 0);
+    const bx0 = at.below ? clamp(gl - br * 1.15, at.F.x0 + (at.F.x1 - at.F.x0) * 0.3, at.cx) : at.cx + (p.number > 0 ? br * 0.25 : 0);
+    const by0 = at.below ? clamp(at.below + br * 0.75, at.cy, at.F.y1 - br * 1.15) : at.cy + (p.number > 0 ? br * 0.1 : 0);
+    const [bx, by] = p.ball > 0 ? objAt("ball", bx0, by0, ctx) : [bx0, by0];   // a scene object
     if (p.spray > 0 && p.ball > 0) {   // spray paint round the ball, and drips running down from it
       ctx.save(); ctx.fillStyle = css(team, 0.85);
       for (let k = 0, n = Math.round(500 * p.spray); k < n; k++) { const a = rand(k * 1.3 + 1510) * TAU, d = br * (0.95 + rand(k * 2.1 + 1511) ** 2 * 0.7 * (0.4 + p.spray)); ctx.beginPath(); ctx.arc(bx + Math.cos(a) * d, by + Math.sin(a) * d, 0.8 + rand(k * 3.7 + 1512) * 2.2, 0, TAU); ctx.fill(); }
@@ -4284,6 +4359,7 @@ const velvet = {
   about: { zh: "绒感插画：像植绒一样毛茸茸的立体插画——长春花蓝的天空、荧光绿的绒面山丘，频道图形变成一个有体积、左上受光、边缘发毛的绒面物件（颜色来自频道色，可铺上模糊的格纹），脚下一团柔和的投影；可加暮色渐变、星星、柔光，整张覆着厚厚的细颗粒。俏皮、时髦、有手感——适合时尚、生活方式、潮玩、节日和女性向内容。可选长春花蓝底或夜空底；自带平直的版式，色块是一片绿色绒面草地。", en: "Velvet: soft flocked 3D illustration — a periwinkle sky, acid-green velvet hills, the channel graphic as a plush object with volume, lit from the upper left and fuzzy at the edge (in the channel colour, a blurred check on it if you like), a soft shadow under it; a dusk gradient, stars and a glow if you like, and heavy fine grain over everything. Playful, fashionable, tactile — for fashion, lifestyle, designer toys, festive and feminine content. A periwinkle or a night ground; flat layouts of its own, the colour block a green velvet lawn." },
   name: { zh: "绒感插画", en: "Velvet illustration" },
   seeded: true,
+  scene: { figure: { zh: "绒面物件", en: "Plush figure" } },
   params: [
     { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "绒面物件", en: "Plush figure" } },
     { key: "volume", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "立体感", en: "Volume" } },
@@ -4332,7 +4408,7 @@ const velvet = {
     }
     const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
     if (S) {
-      const { cx, cy, size } = at;
+      const { size } = at, [cx, cy] = objAt("figure", at.cx, at.cy, ctx);   // a scene object
       if (p.shadow > 0) blurred(ctx, size * 0.05, css(mix(VL.night, ground, 0.3), 0.55 * p.shadow), () => { ctx.beginPath(); ctx.ellipse(cx + size * 0.18 * p.shadow, cy + size * 0.48, size * (0.32 + 0.25 * p.shadow), size * 0.07, 0, 0, TAU); ctx.fill(); });
       if (p.fuzz > 0) blurred(ctx, size * 0.025 * (0.4 + p.fuzz), css(body, 0.85 * p.fuzz), () => placeShape(ctx, S, [0, 0, 0], cx, cy, size * 1.01));
       const x = workLike(ctx, "velvet");
@@ -4418,6 +4494,7 @@ const rave = {
   name: { zh: "迷幻派对", en: "Psychedelic rave" },
   oneTheme: true,
   seeded: true,
+  scene: { figure: { zh: "全息身影", en: "Holographic figure" }, liquid: { zh: "液态镭射", en: "Liquid chrome" } },
   params: [
     { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "全息身影", en: "Holographic figure" } },
     { key: "liquid", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "液态镭射", en: "Liquid chrome" } },
@@ -4451,6 +4528,7 @@ const rave = {
       return true;
     }
     if (!L.grid) return true;
+    if (p.figure > 0 || p.arch > 0 || p.halo > 0 || p.rings > 0) [at.cx, at.cy] = objAt("figure", at.cx, at.cy, ctx);   // the figure, and the arch, eclipse, orbits and floor's vanishing point round it: a scene object
     if (p.nebula > 0) {
       ctx.save(); ctx.globalCompositeOperation = "screen";
       for (let k = 0; k < 5; k++) { const x = rand(k * 3.1 + 1700) * w, y = rand(k * 4.3 + 1701) * h, r = u * (0.3 + rand(k * 5.7 + 1702) * 0.5), c = [RV.violet, RV.pink, [30, 120, 255], spot, [40, 200, 200]][k], g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, css(c, 0.32 * p.nebula)); g.addColorStop(1, css(c, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); }
@@ -4478,7 +4556,9 @@ const rave = {
       blurred(ctx, r * 0.25, css(mix(RV.white, spot, 0.3), Math.min(1, p.halo * 2)), () => { ctx.beginPath(); ctx.arc(hx, hy, r * 1.04, 0, TAU); ctx.fill(); });
       ctx.fillStyle = css([4, 2, 10]); ctx.beginPath(); ctx.arc(hx, hy, r, 0, TAU); ctx.fill();
     }
+    ctx.save(); if (p.liquid > 0) shift("liquid", F.x0 + fw * 0.65, F.y0 + fh * 0.4, ctx);   // the blobs of liquid chrome move as one: a scene object
     for (let k = 0, n = p.liquid * 4; k < Math.ceil(n); k++) liquidBlob(ctx, F.x0 + fw * (0.35 + rand(k * 3.3 + 1710) * 0.6), F.y0 + fh * (0.15 + rand(k * 4.1 + 1711) * 0.7), u * (0.08 + 0.1 * rand(k * 5.3 + 1712)) * (0.6 + 0.6 * p.liquid), k * 13.7 + 1713, clamp(n - k));
+    ctx.restore();
     const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
     if (S) {
       const { cx, cy, size } = at, x = workLike(ctx, "rave");
@@ -4561,6 +4641,7 @@ const chrome = {
   about: { zh: "液态铬：黑底上的 Y2K 赛博海报——频道图形变成一尊液态金属，往下熔成一滴滴铬液，一道全息彩虹光横扫过去；身后线框球体和网格，几条 RGB 故障切片，玻璃泡泡，HUD 式的界面框、角标和状态小字，描边的镂空大字；皱纸和颗粒。冷、锐利、未来感——适合科技、AI、电子音乐、潮流、游戏和观点类内容。可选黑底或冷灰底；自带平直的版式。", en: "Liquid chrome: the dark Y2K cyber poster — the channel graphic as a figure of liquid metal melting into drips, a holographic rainbow streak across it; a wireframe sphere and grid behind, RGB glitch slices, glass bubbles, HUD frames, brackets and status lines, outlined stencil letters; creased paper and grain. Cold, sharp, futuristic — for tech, AI, electronic music, fashion, games and opinion. A black or a cool grey ground; flat layouts of its own." },
   name: { zh: "液态铬", en: "Liquid chrome" },
   seeded: true,
+  scene: { figure: { zh: "铬身影", en: "Chrome figure" }, wire: { zh: "线框", en: "Wireframe" } },
   params: [
     { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "铬身影", en: "Chrome figure" } },
     { key: "drips", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "熔滴", en: "Drips" } },
@@ -4612,6 +4693,7 @@ const chrome = {
     if (p.wire > 0) {   // a wireframe sphere behind the figure, and a square of grid
       const r = at.size * (0.35 + 0.2 * p.wire), sx = at.cx - at.size * 0.3, sy = at.cy - at.size * 0.15, a = Math.min(1, p.wire * 2.5);
       ctx.save(); ctx.strokeStyle = css(ink, 0.45 * a); ctx.lineWidth = 1.2;
+      shift("wire", sx, sy, ctx);   // the sphere and the square of grid: a scene object
       for (let i = 1; i < 8; i++) { const t = -Math.PI / 2 + (i * Math.PI) / 8; ctx.beginPath(); ctx.ellipse(sx, sy + Math.sin(t) * r, Math.cos(t) * r, Math.cos(t) * r * 0.22, 0, 0, TAU); ctx.stroke(); }
       for (let i = 0; i < 8; i++) { ctx.beginPath(); ctx.ellipse(sx, sy, Math.abs(Math.cos((i * Math.PI) / 8)) * r, r, 0, 0, TAU); ctx.stroke(); }
       const gx = at.cx + at.size * 0.2, gy = F.y0 + fh * 0.12, gs = at.size * 0.5 * p.wire;
@@ -4620,7 +4702,7 @@ const chrome = {
     }
     const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
     if (S) {
-      const { cx, cy, size } = at, x = workLike(ctx, "chrome");
+      const { size } = at, [cx, cy] = objAt("figure", at.cx, at.cy, ctx), x = workLike(ctx, "chrome");   // a scene object
       if (dark) blurred(ctx, size * 0.06, "rgba(220,230,255,0.18)", () => placeShape(ctx, S, [0, 0, 0], cx, cy, size));
       placeShape(x, S, [255, 255, 255], cx, cy, size);
       if (p.drips > 0) {   // drips from the lowest edge of the shape, read off a coarse grid of it
@@ -4764,6 +4846,7 @@ const netart = {
   about: { zh: "故障网络：网络艺术和故障海报——老式操作系统的对话框一层层叠上来（警告、进度条、加载不出的图），像素排序拉出的长条、数据错位的方块、一行行乱码字符、透明背景的灰白棋盘格、测试图的彩条、鼠标箭头；频道图形抖动成黑色像素点阵；标题里强调的词像被选中一样，反白在藏青色的选框里。数字、粗粝、有点失控——适合科技、互联网文化、游戏、实验音乐和观点类内容。可选白底或黑底；自带平直的版式，色块是一块银灰色的系统面板。", en: "Net art: net-art and glitch posters — dialog windows of an old operating system piling up (a warning, a progress bar, a picture that will not load), pixel-sorted streaks, datamoshed blocks, rows of garbled characters, the grey checkerboard of transparency, test-pattern colour bars, arrow cursors; the channel graphic dithered into black pixels; highlighted words selected, white in a navy box. Digital, raw, slightly out of control — for tech, internet culture, games, experimental music and opinion. White or black ground; flat layouts of its own, the colour block a silver system panel." },
   name: { zh: "故障网络", en: "Glitch net art" },
   seeded: true,
+  scene: { figure: { zh: "点阵身影", en: "Dithered figure" }, windows: { zh: "系统窗口", en: "Dialog windows" }, bars: { zh: "测试彩条", en: "Colour bars" }, cursors: { zh: "鼠标箭头", en: "Cursors" } },
   params: [
     { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "点阵身影", en: "Dithered figure" } },
     { key: "windows", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "系统窗口", en: "Dialog windows" } },
@@ -4831,7 +4914,8 @@ const netart = {
     if (!L.grid) return true;
     if (p.bars > 0) {   // test-pattern colour bars, widening
       const bars = [[235, 235, 235], [235, 235, 16], [16, 235, 235], [16, 235, 16], [235, 16, 235], [235, 16, 16], [16, 16, 235]], bw = fw * 0.04 * (0.5 + p.bars), bx = F.x0 + fw * 0.08, by = F.y0 + fh * 0.62, bh = fh * 0.3;
-      ctx.save(); ctx.globalAlpha = Math.min(1, p.bars * 3); bars.forEach((c, i) => { ctx.fillStyle = css(c); ctx.fillRect(bx + i * bw, by, bw, bh * (0.7 + 0.3 * (i % 2))); }); ctx.restore();
+      ctx.save(); shift("bars", bx + bw * 3.5, by + bh * 0.4, ctx);   // a scene object
+      ctx.save(); ctx.globalAlpha = Math.min(1, p.bars * 3); bars.forEach((c, i) => { ctx.fillStyle = css(c); ctx.fillRect(bx + i * bw, by, bw, bh * (0.7 + 0.3 * (i % 2))); }); ctx.restore(); ctx.restore();
     }
     for (let k = 0, n = p.checker * 5; k < Math.ceil(n); k++) {
       const cw = u * (0.06 + rand(k * 2.7 + 1930) * 0.14), ch = cw * (0.5 + rand(k * 3.3 + 1931)), x = F.x0 + fw * (0.25 + rand(k * 4.1 + 1932) * 0.7), y = F.y0 + fh * rand(k * 4.9 + 1933) * 0.85, c = 10;
@@ -4846,16 +4930,20 @@ const netart = {
       ctx.restore();
     }
     const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
-    if (S) {   // the figure dithered into black pixels, lit from the upper left
-      const { cx, cy, size } = at, cell = Math.max(3, size * 0.012), x0 = cx - size * 0.75, y0 = cy - size * 0.6, cols = Math.ceil((size * 1.5) / cell), rows = Math.ceil((size * 1.2) / cell), cov = shapeCells(S, cx, cy, size, x0, y0, cols, rows, cell);
+    if (S) {   // the figure dithered into black pixels, lit from the upper left: a scene object
+      const { size } = at, [cx, cy] = objAt("figure", at.cx, at.cy, ctx), cell = Math.max(3, size * 0.012), x0 = cx - size * 0.75, y0 = cy - size * 0.6, cols = Math.ceil((size * 1.5) / cell), rows = Math.ceil((size * 1.2) / cell), cov = shapeCells(S, cx, cy, size, x0, y0, cols, rows, cell);
       dither(x0, y0, cols, rows, cell, (i, j) => (cov[j * cols + i] / 255) * (0.25 + 0.75 * clamp((i / cols + j / rows) * 0.8)), 1);
     }
+    ctx.save(); if (p.windows > 0) shift("windows", at.cx - at.size * 0.2, F.y0 + fh * 0.2, ctx);   // the windows move as one: a scene object
     for (let k = 0, n = p.windows * 6; k < Math.ceil(n); k++) {   // dialog windows cascading down toward the figure
       const ww = u * (0.26 + rand(k * 2.3 + 1950) * 0.1), wh = ww * (0.42 + rand(k * 3.1 + 1951) * 0.2), x = at.cx - at.size * 0.2 + k * 34 - ww * 0.5 + (rand(k * 3.9 + 1952) - 0.5) * fw * 0.25, y = F.y0 + fh * 0.08 + k * 30 + rand(k * 4.7 + 1953) * fh * 0.2;
       osWindow(ctx, clamp(x, F.x0 + 10, F.x1 - ww - 10), clamp(y, F.y0 + 10, F.y1 - wh - 10), ww, wh, k % 3, k * 17 + 1954, clamp(n - k));
     }
+    ctx.restore();
     damage({ x0: F.x0, y0: F.y0, x1: F.x1, y1: F.y1 });
+    ctx.save(); if (p.cursor > 0) shift("cursors", F.x0 + fw * 0.62, F.y0 + fh * 0.5, ctx);   // the arrows move as one: a scene object
     for (let k = 0, n = p.cursor * 6; k < Math.ceil(n); k++) { ctx.save(); ctx.globalAlpha = clamp(n - k); cursorArrow(ctx, F.x0 + fw * (0.3 + rand(k * 2.9 + 1960) * 0.65), F.y0 + fh * (0.1 + rand(k * 3.7 + 1961) * 0.8), 1.6 + rand(k + 1962) * 1.2); ctx.restore(); }
+    ctx.restore();
     return true;
   },
   accent: { fill: () => css(NA.silver), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run, nx, ny) { ctx.lineCap = "butt"; ctx.strokeStyle = css(NA.light); ctx.lineWidth = 3; run(nx * 2, ny * 2); ctx.strokeStyle = css(NA.deep); ctx.lineWidth = 3; run(-nx * 2, -ny * 2); } },   // a bevelled system panel
@@ -5116,6 +5204,7 @@ const verse = {
   about: { zh: "漫画宇宙：把漫画印刷搬进动画电影的那种画面——平涂色块用网点和排线上阴影，粗墨线，套色故意错开；从街上仰望的楼群和亮着的窗，集中线，霓虹马克笔涂鸦，黄色旁白框和拟声字，空间撕裂般的品红、青色故障条。频道图形变成一个漫画上色的角色剪影。热闹、炫目、年轻——适合动画、游戏、潮流、音乐、青年文化和娱乐类内容。照片会被压成漫画配色、加上网点。可选纸白底或紫夜底；自带平直的版式，色块是带网点的频道色。", en: "Comic-verse: animated films that print like comic books — flat colour shaded with Ben-Day dots and hatching, a heavy ink line, the colour plates deliberately out of register; towers seen from the street with lit windows, focus lines, neon marker scribbles, a yellow caption box and a sound effect, the dimension glitching in bars of magenta and cyan. The channel graphic as a comic-coloured figure. Loud, dazzling, young — for animation, games, street fashion, music, youth culture and entertainment. A photo is pressed into comic colours with a halftone. A paper-white or violet-night ground; flat layouts of its own, the colour block the channel colour in halftone." },
   name: { zh: "漫画宇宙", en: "Comic-verse" },
   seeded: true,
+  scene: { figure: { zh: "漫画身影", en: "Comic figure" }, focus: { zh: "集中线中心", en: "Centre of the focus lines" }, caption: { zh: "旁白框", en: "Caption box" }, sfx: { zh: "拟声字", en: "Sound effect" } },
   params: [
     { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "漫画身影", en: "Comic figure" } },
     { key: "towers", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "仰视楼群", en: "Towers from below" } },
@@ -5169,13 +5258,14 @@ const verse = {
     if (p.speed > 0) {   // focus lines: thin wedges closing in on the figure from the edges
       const R = Math.hypot(fw, fh), r0 = at.size * 0.62;
       ctx.save(); ctx.fillStyle = css(vsInk(), dark ? 0.55 : 0.8); ctx.beginPath();
+      shift("focus", at.cx, at.cy, ctx);   // their centre: a scene object
       for (let i = 0, n = Math.round(20 + 150 * p.speed); i < n; i++) { const a = rand(i * 1.7 + 2320) * TAU, wd = 0.002 + rand(i * 2.3 + 2321) * 0.009, r1 = r0 * (1 + rand(i * 3.1 + 2322) * 0.8); ctx.moveTo(at.cx + Math.cos(a) * r1, at.cy + Math.sin(a) * r1); ctx.lineTo(at.cx + Math.cos(a - wd) * R, at.cy + Math.sin(a - wd) * R); ctx.lineTo(at.cx + Math.cos(a + wd) * R, at.cy + Math.sin(a + wd) * R); ctx.closePath(); }
       ctx.fill(); ctx.restore();
     }
     if (p.scribble > 0) scribbles(ctx, F, p.scribble, 2330);
     const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
     if (S) {
-      const { cx, cy, size } = at, body = vsBody(C), d = size * 0.1, x = workLike(ctx, "verse"), y = workLike(ctx, "verseShade"), o = size * 0.012;
+      const { size } = at, [cx, hy] = objAt("figure", at.cx, at.cy - size * 0.3, ctx), cy = hy + size * 0.3, body = vsBody(C), d = size * 0.1, x = workLike(ctx, "verse"), y = workLike(ctx, "verseShade"), o = size * 0.012;   // a scene object, its handle at the head
       for (let i = 0; i < 8; i++) { const a = (i / 8) * TAU; placeShape(x, S, VS.ink, cx + Math.cos(a) * o, cy + Math.sin(a) * o, size); }   // the ink line
       placeShape(x, S, body, cx, cy, size);
       // the shade: the shape less a copy moved toward the light, filled with dots and hatching
@@ -5198,6 +5288,7 @@ const verse = {
     if (p.caption > 0) {   // a yellow caption box with a few lines of narration
       const bw = u * (0.16 + 0.14 * p.caption), bh = bw * 0.42, bx = clamp(at.cx + at.size * 0.08, F.x0 + 20, F.x1 - bw - 20), by = clamp(at.cy - at.size * 0.62, F.y0 + 20, F.y1 - bh - 20);
       ctx.save(); ctx.globalAlpha = Math.min(1, p.caption * 4);
+      shift("caption", bx + bw / 2, by + bh / 2, ctx);   // a scene object
       ctx.fillStyle = css(VS.ink); ctx.fillRect(bx + 6, by + 6, bw, bh);
       ctx.fillStyle = css(VS.yellow); ctx.fillRect(bx, by, bw, bh); ctx.strokeStyle = css(VS.ink); ctx.lineWidth = 3; ctx.strokeRect(bx, by, bw, bh);
       greeked(ctx, bx + bw * 0.08, by + bh * 0.24, bw * 0.84, 3, bh * 0.2, css(VS.ink, 0.85), 2360);
@@ -5206,6 +5297,7 @@ const verse = {
     if (p.sfx > 0) {   // a sound effect: the channel's code (or POW) on a starburst
       const str = ((env.cat && env.cat.code) || "POW").toUpperCase().slice(0, 5) + "!", R = u * (0.07 + 0.09 * p.sfx), bx = clamp(at.cx - at.size * 0.55, F.x0 + R, F.x1 - R), by = clamp(at.cy + at.size * 0.3, F.y0 + R, F.y1 - R);
       ctx.save(); ctx.globalAlpha = Math.min(1, p.sfx * 4);
+      shift("sfx", bx, by, ctx);   // a scene object
       starburst(ctx, bx + R * 0.07, by + R * 0.09, R * 1.04, 12, VS.ink, 2350); starburst(ctx, bx, by, R, 12, VS.yellow, 2350);
       ctx.translate(bx, by); ctx.rotate(-0.18); ctx.font = `900 100px ${fonts.en}, ${fonts.cn}`;
       const fs = Math.min(R * 0.75, (R * 1.3 * 100) / Math.max(1, ctx.measureText(str).width));
@@ -5276,6 +5368,7 @@ const glass = {
   about: { zh: "压花玻璃：隔着一块起伏的压花玻璃看一幅油画——暖光里的房间、一扇窗、窗前站着的人影（频道图形）、花瓶里的花，先用松散的油画笔触画出来，再被玻璃扭曲、打碎成一片片波纹，凸起处闪着高光、凹处是暗纹；可以再蒙一层雾面，四角暗下去。朦胧、私密、有温度——适合情感、生活、居家、回忆、艺术和电台类内容。照片也会被画成笔触、透过压花玻璃看。可选银灰底或夜色底；自带平直的版式，色块是一块磨砂玻璃。", en: "Patterned glass: an oil painting seen through a pane of hammered glass — a room in warm light, a window, someone standing against it (the channel graphic), flowers in a vase, painted in loose strokes, then bent and broken up by the glass into ripples, glints on the bumps and dark lines in the hollows; frost and darkening corners if you like. Hazy, intimate, warm — for feelings, everyday life, home, memories, art and radio. A photo is painted over and seen through the glass too. A silver or a night ground; flat layouts of its own, the colour block a pane of frosted glass." },
   name: { zh: "压花玻璃", en: "Patterned glass" },
   seeded: true,
+  scene: { window: { zh: "窗与窗光", en: "Window and its light" }, figure: { zh: "窗前身影", en: "Figure at the window" }, flowers: { zh: "瓶花", en: "Flowers" } },
   params: [
     { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "窗前身影", en: "Figure at the window" } },
     { key: "window", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "窗光", en: "Window light" } },
@@ -5319,7 +5412,7 @@ const glass = {
     if (!L.grid) { pane(); return true; }
     const floor = F.y0 + fh * 0.8;
     { const g = ctx.createLinearGradient(0, floor, 0, F.y1); g.addColorStop(0, css(dark ? [70, 46, 30] : [156, 110, 72])); g.addColorStop(1, css(dark ? [34, 22, 14] : [104, 70, 44])); ctx.fillStyle = g; ctx.fillRect(F.x0, floor, fw, F.y1 - floor + 4); }
-    const { wx, wy, ww, wh } = at, wa = Math.min(1, p.window * 3);
+    const { ww, wh } = at, [mx, my] = p.window > 0 || p.warm > 0 ? objAt("window", at.wx + ww / 2, at.wy + wh * 0.3, ctx) : [at.wx + ww / 2, at.wy + wh * 0.3], wx = mx - ww / 2, wy = my - wh * 0.3, wa = Math.min(1, p.window * 3);   // the window and its light: a scene object
     if (p.warm > 0) {   // the window's glow on the wall round it, and the light it lays across the floor
       ctx.save(); ctx.globalCompositeOperation = "screen";
       const g = ctx.createRadialGradient(wx + ww / 2, wy + wh * 0.45, 0, wx + ww / 2, wy + wh * 0.45, Math.max(ww, wh) * 1.3); g.addColorStop(0, css(PG.warm, 0.55 * p.warm)); g.addColorStop(1, css(PG.warm, 0)); ctx.fillStyle = g; ctx.fillRect(F.x0, F.y0, fw, fh);
@@ -5339,7 +5432,7 @@ const glass = {
     }
     const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
     if (S) {   // someone standing against the window, dark against the light, soft at the edge
-      const size = wh * (0.5 + 0.45 * p.figure), cx = wx + ww * 0.55, cy = Math.min(floor + size * 0.05, wy + wh + size * 0.1) - size * 0.42, col = mix(PG.ink, dark ? [40, 30, 24] : [70, 56, 44], 0.4);
+      const size = wh * (0.5 + 0.45 * p.figure), [cx, hy] = objAt("figure", wx + ww * 0.55, Math.min(floor + size * 0.05, wy + wh + size * 0.1) - size * 0.72, ctx), cy = hy + size * 0.3, col = mix(PG.ink, dark ? [40, 30, 24] : [70, 56, 44], 0.4);
       ctx.save(); ctx.globalAlpha = Math.min(1, p.figure * 3);
       blurred(ctx, size * 0.03, css(col, 0.7), () => placeShape(ctx, S, [0, 0, 0], cx, cy, size * 1.02));
       placeShape(ctx, S, col, cx, cy, size);
@@ -5348,6 +5441,7 @@ const glass = {
     if (p.flowers > 0) {   // a white vase on the right, leaves, and blooms in the channel colour
       const vx = F.x0 + fw * 0.86, vy = floor - fh * 0.02, vh = fh * (0.16 + 0.08 * p.flowers), vw = vh * 0.42, bloom = pgBloom(C), n = 2 + p.flowers * 9;
       ctx.save(); ctx.globalAlpha = Math.min(1, p.flowers * 4);
+      shift("flowers", vx, vy - vh * 0.6, ctx);   // the vase and its flowers: a scene object
       ctx.beginPath(); ctx.moveTo(vx - vw * 0.3, vy - vh); ctx.bezierCurveTo(vx - vw * 0.2, vy - vh * 0.7, vx - vw * 0.75, vy - vh * 0.5, vx - vw * 0.45, vy); ctx.lineTo(vx + vw * 0.45, vy); ctx.bezierCurveTo(vx + vw * 0.75, vy - vh * 0.5, vx + vw * 0.2, vy - vh * 0.7, vx + vw * 0.3, vy - vh); ctx.closePath();
       const vg = ctx.createLinearGradient(vx - vw / 2, 0, vx + vw / 2, 0); vg.addColorStop(0, css(PG.vase)); vg.addColorStop(1, css(mix(PG.vase, PG.ink, 0.35))); ctx.fillStyle = vg; ctx.fill();
       for (let k = 0; k < Math.ceil(n); k++) {
@@ -5496,6 +5590,7 @@ const jelly = {
   about: { zh: "果冻机械：潮玩海报里那种透明发光的果冻生物，嵌在一台机器里——频道图形变成一只半透明、内有气泡、表面油亮的果冻（颜色来自频道色），身后是电路板的走线和芯片、音箱喇叭、盘绕的线缆、旋钮按键、橙色的七段数码屏和一栏栏极小的说明字；背景可以虚化，让果冻跳出来，辉光溢出。可爱、精密、科技感——适合科技、潮玩、音乐、电子、游戏和产品类内容。照片会调成青橙配色。可选钢灰底或深夜底；自带平直的版式。", en: "Jelly machine: the clear, glowing jelly creatures of designer-toy posters, set into a machine — the channel graphic as translucent jelly with bubbles inside and a glossy skin (in the channel colour), behind it a circuit board's traces and chips, speaker cones, coiled cables, knobs and buttons, an orange seven-segment display and columns of tiny print; the machinery out of focus if you like, so the jelly stands out, its glow spilling over. Cute, precise, technical — for tech, designer toys, music, electronics, games and products. A photo is graded teal and orange. A steel-grey or a night ground; flat layouts of its own." },
   name: { zh: "果冻机械", en: "Jelly machine" },
   seeded: true,
+  scene: { figure: { zh: "果冻身影", en: "Jelly figure" }, display: { zh: "数码屏", en: "Segment display" } },
   params: [
     { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "果冻身影", en: "Jelly figure" } },
     { key: "circuit", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "电路板", en: "Circuit board" } },
@@ -5569,6 +5664,7 @@ const jelly = {
     }
     const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
     if (S) {
+      ctx.save(); shift("figure", cx, cy - size * 0.3, ctx);   // a scene object (its work canvas takes the move with ctx's transform)
       if (p.glow > 0) blurred(ctx, size * 0.08, css(body, 0.65 * p.glow), () => placeShape(ctx, S, [0, 0, 0], cx, cy, size));
       const x = workLike(ctx, "jelly");
       placeShape(x, S, [255, 255, 255], cx, cy, size);
@@ -5585,6 +5681,7 @@ const jelly = {
       x.beginPath(); x.arc(cx - size * 0.06, cy - size * 0.34, size * 0.015, 0, TAU); x.fill();
       x.restore();
       layDown(ctx, x, 0.9);
+      ctx.restore();
     }
     for (let k = 0, n = p.blobs * 12; k < Math.ceil(n); k++) {   // round drops of jelly scattered round the figure
       const a = rand(k * 2.3 + 2470) * TAU, d = size * (0.48 + rand(k * 3.1 + 2471) * 0.32), x = cx + Math.cos(a) * d, y = cy + Math.sin(a) * d * 0.85, r = size * (0.025 + rand(k * 4.7 + 2472) * 0.045), c = [body, JL.lime, JL.cobalt][k % 3];
@@ -5597,6 +5694,7 @@ const jelly = {
     if (p.lcd > 0) {   // the display under the figure: the channel's number and four more digits, the unlit segments faint
       const bw = size * (0.5 + 0.45 * p.lcd), bh = bw * 0.24, bx = clamp(cx - bw / 2, P.x0 + 12, P.x1 - bw - 12), by = clamp(cy + size * 0.5, P.y0 + 12, P.y1 - bh - 12), str = `${pad2(env.o ? env.o.catIndex + 1 : 1)}-${String(Math.floor(rand(2480) * 9000 + 1000))}`;
       ctx.save(); ctx.globalAlpha = Math.min(1, p.lcd * 3);
+      shift("display", bx + bw / 2, by + bh / 2, ctx);   // a scene object
       ctx.beginPath(); rounded(ctx, bx, by, bw, bh, bh * 0.15); ctx.fillStyle = "#07090b"; ctx.fill(); ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.lineWidth = 2; ctx.stroke();
       const s = bh * 0.62, step = (bw - bh * 0.5) / str.length;
       if (!fast) { ctx.shadowColor = css(JL.amber, 0.9); ctx.shadowBlur = 10; }
@@ -5814,6 +5912,7 @@ const skies = {
   about: { zh: "动画晴空：当代动画电影里那种通透的天空和街景——深钴蓝渐变到地平线的淡青，高高堆起、受光面雪白的积雨云，一排排絮状的高积云，飞机拉出的长长尾迹；前景是电线杆和交错的电线，楼顶挤满水箱、空调外机和天线的街区，招牌灯箱，远处一片海；阳光与光斑、空气感、前景枝叶。浅色是盛夏白天，深色是黄昏到入夜，窗户和灯箱亮起来。明亮、清澈、怀念——适合旅行、城市、日常、青春、音乐和治愈系内容。照片会被调得更通透鲜艳。自带平直的版式。", en: "Anime skies: the clear skies and streets of today's anime films — deep cobalt down to a pale horizon, towering cumulus with snow-white sunlit tops, rows of fleecy altocumulus, a plane's long contrail; in front, a utility pole and its crossing wires, rooftops crowded with water tanks, air conditioners and aerials, lit signs, the sea in the distance; sun and flare, haze, leaves. The light theme is a summer day, the dark one dusk into night with the windows and signs lit. Bright, clear, nostalgic — for travel, cities, everyday life, youth, music and feel-good content. A photo is made clearer and more vivid. Flat layouts of its own." },
   name: { zh: "动画晴空", en: "Anime skies" },
   seeded: true,
+  scene: { sun: { zh: "阳光", en: "Sunlight" }, cumulus: { zh: "积雨云", en: "Cumulonimbus" }, contrail: { zh: "飞机云", en: "Contrails" }, pole: { zh: "电线杆", en: "Pole and wires" }, leaves: { zh: "前景枝叶", en: "Leaves" } },
   params: [
     { key: "cumulus", min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "积雨云", en: "Cumulus" } },
     { key: "fleece", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "絮状云", en: "Fleecy clouds" } },
@@ -5853,14 +5952,19 @@ const skies = {
       return true;
     }
     // the sky and all that is in it, painted once and kept until one of its sliders changes (see keptLayer):
-    // the sea, the town, the pole and the leaves in front of it are cheap to paint over it again
+    // the sea, the town, the pole and the leaves in front of it are cheap to paint over it again. The scene
+    // objects in it (the sun, the cumulus, the contrails) are placed here, on ctx, as a kept sky would not
+    // place them again; what is in the kept sky is moved by the difference
+    const moveOf = (key, x0, y0, on) => { if (!on || !L.grid) return [0, 0]; const [x1, y1] = objAt(key, x0, y0, ctx); return [x1 - x0, y1 - y0]; };
+    const sunMove = moveOf("sun", ...raysAt(w, h), p.sun > 0), roomC = Math.max(u * 0.1, horizon - F.y0 - fh * 0.08);
+    const cuMove = moveOf("cumulus", F.x0 + fw * 0.6, horizon - roomC * 0.45, p.cumulus > 0), coMove = moveOf("contrail", F.x0 + fw * 0.45, F.y0 + fh * 0.22, p.contrail > 0);
     const rays = (x, amt) => {   // the sun's rays: soft beams, so painted at a quarter of the size and laid on enlarged
       if (amt <= 0) return;
-      if (!canPaint(x)) { godRays(x, w, h, amt, dark ? 1 : 0); return; }
+      if (!canPaint(x)) { godRays(x, w, h, amt, dark ? 1 : 0, null, sunMove); return; }
       const small = WORK.skRays || (WORK.skRays = document.createElement("canvas")), m = x.getTransform(), W = x.canvas.width, H = x.canvas.height, sw = Math.ceil(W / 4), sh = Math.ceil(H / 4);
       if (small.width !== sw || small.height !== sh) { small.width = sw; small.height = sh; }
       const r = small.getContext("2d"); r.setTransform(1, 0, 0, 1, 0, 0); r.clearRect(0, 0, sw, sh); r.setTransform(m.a / 4, m.b / 4, m.c / 4, m.d / 4, m.e / 4, m.f / 4);
-      godRays(r, w, h, amt, dark ? 1 : 0);
+      godRays(r, w, h, amt, dark ? 1 : 0, null, sunMove);
       inPixels(x, () => { x.globalCompositeOperation = "screen"; x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high"; x.drawImage(small, 0, 0, W, H); });
     };
     const paintSky = (x) => {
@@ -5869,6 +5973,7 @@ const skies = {
       if (!L.grid) return;
       rays(x, p.sun * 0.55);
       if (p.fleece > 0) fleece(x, F, horizon, p.fleece, 2500);
+      x.save(); x.translate(coMove[0], coMove[1]);
       for (let k = 0, n = p.contrail * 2; k < Math.ceil(n); k++) {   // a plane's trail, fading out behind it
         const y0 = F.y0 + fh * (0.12 + rand(k * 2.3 + 2510) * 0.3), x1 = F.x0 + fw * (0.45 + rand(k * 3.1 + 2511) * 0.45), y1 = y0 - fh * (0.04 + rand(k * 3.7 + 2512) * 0.12), x0 = F.x0 - 20, a = clamp(n - k);
         const tr = x.createLinearGradient(x0, y0, x1, y1); tr.addColorStop(0, css(SK.white, 0)); tr.addColorStop(1, css(SK.white, 0.85 * a));
@@ -5877,15 +5982,18 @@ const skies = {
         x.lineWidth = u * 0.006; x.globalAlpha = 1; x.beginPath(); x.moveTo(x0, y0); x.quadraticCurveTo((x0 + x1) / 2, (y0 + y1) / 2 + fh * 0.02, x1, y1); x.stroke();
         x.fillStyle = css(SK.white, a); x.beginPath(); x.arc(x1, y1, u * 0.003, 0, TAU); x.fill(); x.restore();
       }
+      x.restore();
       const ramp = (v, a, b) => clamp((v - a) / (b - a)), room = Math.max(u * 0.1, horizon - F.y0 - fh * 0.08), c = p.cumulus;
       const mass = (fx, k, size, tall, grow) => { if (grow <= 0) return; const s = Math.min(u * size * (0.15 + 0.85 * grow), room / (tall * 1.05)); if (s > u * 0.02) cumulus(x, F.x0 + fw * fx, horizon, s, tall, k); };
+      x.save(); x.translate(cuMove[0], cuMove[1]);
       mass(0.5 + rand(2520) * 0.1, 2521, 0.14, 1.1, ramp(c, 0.55, 0.95));      // far off, small
       mass(0.88 + rand(2522) * 0.08, 2523, 0.16, 1.3, ramp(c, 0.7, 1));
       mass(0.15 + rand(2524) * 0.12, 2525, 0.24, 1.5, ramp(c, 0.3, 0.85));
       mass(0.68 + rand(2526) * 0.1, 2527, 0.32, 1.9, ramp(c, 0, 0.7));        // the great tower, first
+      x.restore();
       haze(x, p.haze);
     };
-    const kept = canPaint(ctx) && keptLayer(ctx, "skSky", [dark, seed, L.grid ? 1 : 0, w, h, F.x0, F.y0, F.x1, F.y1, horizon.toFixed(2), p.sun, p.fleece, p.contrail, p.cumulus, p.haze].join("|"), paintSky);
+    const kept = canPaint(ctx) && keptLayer(ctx, "skSky", [dark, seed, L.grid ? 1 : 0, w, h, F.x0, F.y0, F.x1, F.y1, horizon.toFixed(2), p.sun, p.fleece, p.contrail, p.cumulus, p.haze, sceneKey()].join("|"), paintSky);
     if (kept) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(kept, 0, 0); ctx.restore(); } else paintSky(ctx);
     if (!L.grid) return true;
     if (p.sea > 0) {   // the sea from the horizon down behind the town, a sun-glitter path on it
@@ -5896,9 +6004,11 @@ const skies = {
       ctx.restore();
     }
     if (p.town > 0) skTown(ctx, F, townTop, p.signs, 2540);
-    if (p.wires > 0) utilityPole(ctx, F, F.x0 + fw * 0.9, 1 + 11 * p.wires, 2560);
-    if (p.leaves > 0) {
+    if (p.wires > 0) { ctx.save(); shift("pole", F.x0 + fw * 0.9, F.y0 + fh * 0.35, ctx); utilityPole(ctx, F, F.x0 + fw * 0.9, 1 + 11 * p.wires, 2560); ctx.restore(); }   // a scene object
+    if (p.leaves > 0) {   // a scene object
+      ctx.save(); shift("leaves", F.x1 - u * 0.14, F.y0 + u * 0.12, ctx);
       foliage(ctx, F.x1, F.y0, u * 0.44 * Math.sqrt(0.1 + 0.9 * p.leaves), p.leaves, -1, 1, 2570);   // a branch in from the top corner, its area growing evenly
+      ctx.restore();
     }
     avGlow(ctx, p.haze * 0.3);
     return true;
@@ -5993,6 +6103,7 @@ const spectrum = {
   about: { zh: "光谱版画：黑白点刻版画里流出彩虹——频道图形用点刻刻成一幅老式铜版画，米白纸上墨色细密；从它身上流出一束束光谱色的细线，横着拉到画边、在拐角直角折上去，或者垂直滴流下来；可加同心的光谱漩涡、汇向地平线的彩色透视线、起伏的彩色波纹、一块块彩色横纹条、雕版横线的天空，以及米白卡纸和木边画框。安静又迷幻——适合艺术、设计、音乐、哲思、科技与自然类内容。照片会被刻成一行行粗细起伏的线刻版画。可选米白纸或黑纸；自带平直的版式。", en: "Spectral engraving: rainbows running out of a black-and-white stipple print — the channel graphic engraved in stipple like an old copperplate, fine ink on cream paper; out of it stream threads of the spectrum, drawn to the edge and turned up at a right angle, or dripping down; a concentric spectral vortex, coloured perspective lines running to the horizon, rolling rainbow waves, blocks of coloured lines, a sky of engraved lines, and a cream mat in a wooden frame if you like. Quiet yet psychedelic — for art, design, music, ideas, science and nature. A photo is engraved in level lines that swell with its shadows. Cream or black paper; flat layouts of its own." },
   name: { zh: "光谱版画", en: "Spectral engraving" },
   seeded: true,
+  scene: { figure: { zh: "点刻身影", en: "Stippled figure" }, vortex: { zh: "光谱漩涡", en: "Vortex" }, road: { zh: "透视光轨灭点", en: "Vanishing point of the lines" } },
   params: [
     { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "点刻身影", en: "Stippled figure" } },
     { key: "stipple", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "点刻浓淡", en: "Stipple depth" } },
@@ -6064,10 +6175,12 @@ const spectrum = {
       return true;
     }
     if (!L.grid) return true;
-    const at = spPlace(env, p), F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0, { cx, cy, size } = at;
+    const at = spPlace(env, p), F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0, { size } = at;
+    if (p.figure > 0) [at.cx, at.cy] = objAt("figure", at.cx, at.cy, ctx);   // a scene object: the vortex, the lines, threads and bars go with it
+    const { cx, cy } = at;
     engrave(F);
     if (p.vortex > 0) {   // rings of colour round a dark centre, the centre stippled out into the paper
-      const R = size * (0.45 + 0.4 * p.vortex), vx = cx, vy = cy - size * 0.32;
+      const R = size * (0.45 + 0.4 * p.vortex), [vx, vy] = objAt("vortex", cx, cy - size * 0.32, ctx);   // a scene object
       ctx.save(); ctx.lineCap = "round";
       for (let i = 0, n = Math.round(30 + 140 * p.vortex); i < n; i++) { const t = i / n, r = R * (0.36 + 0.64 * t), a0 = rand(i * 2.3 + 2650) * TAU, len = (0.4 + rand(i * 3.1 + 2651) * 1.5) * Math.PI; ctx.strokeStyle = css(spec(rand(i * 4.7 + 2652)), 0.9 * (1 - t * 0.6)); ctx.lineWidth = 0.8 + rand(i * 5.3 + 2653) * 2; ctx.beginPath(); ctx.arc(vx, vy, r, a0, a0 + len); ctx.stroke(); }
       ctx.fillStyle = css(ink); ctx.beginPath(); ctx.arc(vx, vy, R * 0.3, 0, TAU); ctx.fill();
@@ -6075,9 +6188,9 @@ const spectrum = {
       ctx.restore();
     }
     if (p.road > 0) {   // lines from the horizon at the figure's feet out to the foot of the field: the near side in colour, the far side in ink
-      const vy = Math.min(F.y1 - fh * 0.08, cy + size * 0.5), n = Math.round(30 + 150 * p.road);
+      const [rx, vy] = objAt("road", cx, Math.min(F.y1 - fh * 0.08, cy + size * 0.5), ctx), n = Math.round(30 + 150 * p.road);   // their vanishing point: a scene object
       ctx.save(); ctx.globalAlpha = Math.min(1, p.road * 3);
-      for (let i = 0; i < n; i++) { const t = i / n, xb = F.x0 - fw * 0.6 + fw * 2.2 * t, wd = 0.6 + rand(i * 2.1 + 2660) * 2.2; shapeOf(ctx, [[cx, vy], [xb - wd, F.y1 + 4], [xb + wd, F.y1 + 4]]); ctx.fillStyle = xb < cx ? css(spec(rand(i * 3.3 + 2661))) : css(ink, 0.7); ctx.fill(); }
+      for (let i = 0; i < n; i++) { const t = i / n, xb = F.x0 - fw * 0.6 + fw * 2.2 * t, wd = 0.6 + rand(i * 2.1 + 2660) * 2.2; shapeOf(ctx, [[rx, vy], [xb - wd, F.y1 + 4], [xb + wd, F.y1 + 4]]); ctx.fillStyle = xb < rx ? css(spec(rand(i * 3.3 + 2661))) : css(ink, 0.7); ctx.fill(); }
       ctx.fillStyle = css(ink, 0.6); ctx.fillRect(F.x0, vy - 0.6, fw, 1.2);
       ctx.restore();
     }

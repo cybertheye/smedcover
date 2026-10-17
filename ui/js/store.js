@@ -10,7 +10,7 @@
 import { SIZE_PRESETS } from "./presets.js";
 import { TEMPLATES, LAYOUT_LIMITS } from "./layout.js";
 import { LOOK_IDS, lookParams } from "./style.js";
-import { normalizeLayers } from "./layers.js";
+import { normalizeLayers, normalizeScene } from "./layers.js";
 
 const T = globalThis.__TAURI__;
 export const native = !!T;
@@ -125,11 +125,12 @@ export function carryFonts(layers, old, lookId) {
 /** A cover with every field present. New covers start from the profile's default layer stack. */
 export function normalizeCover(raw, profile) {
   const c = raw && typeof raw === "object" ? raw : {};
-  const ids = profile.categories.map((x) => x.id);
+  const ids = profile.categories.map((x) => x.id), scene = normalizeScene(c.scene);   // where the looks' scene objects were dragged
   return {
     catId: ids.includes(c.catId) ? c.catId : ids[0],
     title: str(c.title), tag: str(c.tag),
     layers: normalizeLayers(Array.isArray(c.layers) ? c.layers : JSON.parse(JSON.stringify(profile.design.layers)), ids),
+    ...(Object.keys(scene).length ? { scene } : {}),
   };
 }
 
