@@ -30,6 +30,12 @@ export const fillsCanvas = (L) => L.type === "photo" && L.fill && !L.of;
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes", "arc"];
 /** The text effects a headline can be given (painted in textfx.js). Absent on a layer means "auto": the look decides. */
 export const TEXT_EFFECTS = ["auto", "cel", "plain", "cyber", "riso", "anime", "bluenote", "editorial", "vivid", "dots", "stripes", "inner", "worn", "rows", "extrude", "arc", "taper", "wave"];
+// Five of those were looks' letterings, offered in the menu by name; they are their looks' effects now
+// (see letteringOf in style.js). A text layer that chose one takes it as that effect instead, at the
+// strength that paints it as it was (fully faded in, see letterOf in render.js); the title keeps the
+// name, and is painted as automatic.
+const LETTERINGS = { cyber: "cyber.sliced", riso: "riso.overprint", anime: "anime.keyline", editorial: "editorial.underline", vivid: "vivid.block" };
+const LETTERING_IDS = [...Object.values(LETTERINGS), "netart.selected"];
 /**
  * Layers made of words. Each may carry `font`, a family name, and `ink`, its own colour. The title
  * and text layers are headlines alike: both also take `hi` (the highlighted words' colour), an
@@ -106,11 +112,13 @@ function normalizeLayer(raw, catIds) {
   const L = { ...base, id: free ? (typeof raw.id === "string" && raw.id ? raw.id : base.id) : raw.type,
     visible: raw.visible !== false, locked: raw.locked === true, o: num(raw.o, 1, 0, 1), t: normalizeT(raw.t, free) };
   if (typeof raw.name === "string" && raw.name) L.name = raw.name.slice(0, 60);
+  let lettered = null;
   // a headline may be given a text effect of its own, and a strength for it
   if (raw.type === "title" || raw.type === "text") {
     const fx = raw.fx === "ghibli" ? "vivid" : raw.fx;   // the vivid look's lettering had another name for a day
-    if (TEXT_EFFECTS.includes(fx) && fx !== "auto") L.fx = fx;
-    if (raw.fxAmt !== undefined && num(raw.fxAmt, 1, 0, 2) !== 1) L.fxAmt = num(raw.fxAmt, 1, 0, 2);
+    if (raw.type === "text" && LETTERINGS[fx]) lettered = LETTERINGS[fx];
+    else if (TEXT_EFFECTS.includes(fx) && fx !== "auto") L.fx = fx;
+    if (!lettered && raw.fxAmt !== undefined && num(raw.fxAmt, 1, 0, 2) !== 1) L.fxAmt = num(raw.fxAmt, 1, 0, 2);
     // the perspective's own corners: four [dx, dy] in block widths and heights
     if (Array.isArray(raw.warp) && raw.warp.length === 4 && raw.warp.every((p) => Array.isArray(p) && p.length === 2 && p.every((v) => Number.isFinite(Number(v)))))
       L.warp = raw.warp.map((p) => p.map((v) => num(v, 0, -1.5, 1.5)));
@@ -131,6 +139,7 @@ function normalizeLayer(raw, catIds) {
     for (const k of Object.keys(fx)) if (k.includes(":") && !(k.split(":")[0] in fx)) delete fx[k];   // a setting of an effect that is off
     if (Object.keys(fx).length) L.lookFx = fx;
   }
+  if (lettered && !Object.keys(L.lookFx || {}).some((k) => LETTERING_IDS.includes(k))) L.lookFx = { ...(L.lookFx || {}), [lettered]: 0.3 };
   if (free && Array.isArray(raw.cats)) {   // a layer whose categories are all gone goes with them
     const cats = [...new Set(raw.cats.filter((x) => typeof x === "string" && x && (!catIds || catIds.includes(x))))];
     if (!cats.length) return null;

@@ -17,7 +17,7 @@ import {
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, effectUses, warpCorners } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
-import { LOOKS, LOOK_IDS, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
+import { LOOKS, LOOK_IDS, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING, isLettering, letteringOf } from "./style.js";
 import { sizeOf, PIXELS } from "./photo.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
@@ -1986,18 +1986,28 @@ function swatch(L, key, labelKey, shown, auto = true) {
  */
 function titleLines(L, set0) {
   const set = (k, v) => { holdLive(L.id); set0(k, v); };
-  const use = effectUses(L.fx), name = (EFFECTS[use.id] || LOOKS[use.id]).name[getLang()];
+  const lt = letteringOf(L), use = effectUses(L.fx, lt), name = lt ? letteringName(lt) : (EFFECTS[use.id] || LOOKS[use.id]).name[getLang()];
   const line = (k, key) => (use[k]
     ? slider(key, 0, 2, 0.05, L[k], times, (v) => set(k, v))
     : el("div", { class: "sl off", title: t("props.fxIgnores", name) }, el("span", {}, t(key)), el("span", { class: "why" }, t("props.fxIgnores", name))));
   return [line("stroke", "props.stroke"), line("shadow", "props.shadow")];
 }
-/** The text effect of a headline layer, how strong it is, and the perspective's own corners: {kids, tip}. */
+/** The name of a look lettering a layer takes ({ id }: see letteringOf). */
+const letteringName = (lt) => { const [look, key] = lt.id.split("."); return LOOKS[look].elementFx.find((e) => e.key === key).name[getLang()]; };
+/**
+ * The text effect of a headline layer, how strong it is, and the perspective's own corners: {kids, tip}.
+ * A text layer taking a look's lettering as a look effect is set in that instead: the menu is then off.
+ */
 function fxControl(L) {
   const set = (k, v, side) => { if (v === undefined) delete L[k]; else L[k] = v; touch({ cover: true, side }); };
   const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline") };
   const groups = ["passes", "mask", "outline"].map((kind) => ({ group: kinds[kind], items: Object.entries(EFFECTS).filter(([, e]) => e.kind === kind).map(([id, e]) => [id, e.name[getLang()]]) }));
-  const fx = L.fx || "auto", kind = EFFECTS[fx].kind;
+  const fx = EFFECTS[L.fx] ? L.fx : "auto", kind = EFFECTS[fx].kind, lt = letteringOf(L);   // an effect no longer in the menu (a look's lettering, now its effect) is shown as automatic
+  if (lt) {
+    const menu = select(groups, fx, () => {});
+    menu.disabled = true;
+    return { kids: [menu, el("div", { class: "hint", style: "margin:4px 0 0" }, t("fx.byLetter", letteringName(lt)))], tip: "" };
+  }
   return {
     kids: [
       select(groups, fx, (v) => set("fx", v === "auto" ? undefined : v, true)),
@@ -2105,8 +2115,9 @@ function typeControls(L) {
 const BORROWED = new Map();
 /**
  * The look effects a layer carries (see layerEffects in style.js): the current look's, then the looks it
- * borrows from — each its name, a button to remove it, and its sliders — and below them a menu of the
- * looks it could still borrow from. An effect's own settings show under it once it is on.
+ * borrows from — each its name, buttons to remove it (a borrowed one) and to clear it, and its sliders —
+ * and below them a menu of the looks it could still borrow from, then buttons to clear every effect and to
+ * remove them all. An effect's own settings show under it once it is on.
  */
 function lookFxSection(L) {
   if (!FX_TYPES.includes(L.type)) return null;
@@ -2114,6 +2125,7 @@ function lookFxSection(L) {
   const put = (id, v) => {
     holdLive(L.id);
     const o = { ...(L.lookFx || {}) };
+    if (v > 0 && isLettering(id)) for (const k of Object.keys(o)) if (k !== id && isLettering(k)) delete o[k];   // one lettering at a time
     if (id.includes(":") || v > 0) o[id] = v;
     else { delete o[id]; for (const k of Object.keys(o)) if (k.startsWith(id + ":")) delete o[k]; }
     if (Object.keys(o).some((k) => !k.includes(":"))) L.lookFx = o; else delete L.lookFx;
@@ -2129,23 +2141,29 @@ function lookFxSection(L) {
   const list = [...new Set([...(BORROWED.get(L.id) || []), ...lent])].filter((k) => k !== here && LOOKS[k] && effectsFor(k, L.type).length);
   BORROWED.set(L.id, list);
   const left = LOOK_IDS.filter((k) => k !== here && !list.includes(k) && effectsFor(k, L.type).length);
-  const remove = (look) => {
+  // clearing sets a look's effects back to 0 and keeps its group; removing a borrowed look takes the group away too
+  const clear = (look) => {
     const o = { ...(L.lookFx || {}) };
     for (const k of Object.keys(o)) if (k.startsWith(look + ".")) delete o[k];
     if (Object.keys(o).length) L.lookFx = o; else delete L.lookFx;
-    BORROWED.set(L.id, list.filter((k) => k !== look));
-    touch({ cover: true, side: true });
   };
+  const remove = (look) => { clear(look); BORROWED.set(L.id, list.filter((k) => k !== look)); touch({ cover: true, side: true }); };
+  const has = (look) => Object.keys(fx).some((k) => !k.includes(":") && k.startsWith(look + ".")), any = Object.keys(fx).some((k) => !k.includes(":"));
+  const link = (label, hint, off, onclick) => el("button", { class: "linkbtn", title: hint, disabled: off, onclick }, label);
+  const head = (look, borrowed) => el("div", { class: "fxs" }, borrowed ? el("span", {}, name(look)) : el("span", { class: "fxt" }, t("lookfx.here", name(look))), el("div", { class: "fxa" },
+    borrowed && link(t("lookfx.remove"), t("lookfx.removeHint", name(look)), false, () => remove(look)),
+    effectsFor(look, L.type).length > 0 && link(t("lookfx.clearOne"), t("lookfx.clearOneHint", name(look)), !has(look), () => { clear(look); touch({ cover: true, side: true }); })));
   const menu = el("select", { onchange: (e) => { BORROWED.set(L.id, [...list, e.target.value]); renderSide(); } },
     el("option", { value: "", disabled: true, selected: true, hidden: true }, t("lookfx.borrow")),   // shown until a look is picked, not in the list
     left.map((k) => el("option", { value: k }, name(k))));
   return [el("div", { class: "psep" }), psec("props.sec.lookFx", [
-    el("div", { class: "fxh" }, t("lookfx.here", name(here))),
+    head(here, false),
     effectsFor(here, L.type).length ? rows(here) : el("div", { class: "hint", style: "margin:0" }, t("lookfx.none", name(here))),
     (list.length > 0 || left.length > 0) && el("div", { class: "fxh" }, t("lookfx.others")),
-    list.flatMap((k) => [el("div", { class: "fxs" }, el("span", {}, name(k)), el("button", { class: "linkbtn", title: t("lookfx.removeHint", name(k)), onclick: () => remove(k) }, t("lookfx.remove"))), ...rows(k)]),
+    list.flatMap((k) => [head(k, true), ...rows(k)]),
     left.length > 0 && menu,
-    Object.keys(fx).length > 0 && el("button", { class: "btn wide", onclick: () => { delete L.lookFx; BORROWED.delete(L.id); touch({ cover: true, side: true }); } }, t("lookfx.clear")),
+    el("button", { class: "btn wide", title: t("lookfx.clearHint"), disabled: !any, onclick: () => { delete L.lookFx; touch({ cover: true, side: true }); } }, t("lookfx.clear")),
+    el("button", { class: "btn wide", title: t("lookfx.removeAllHint"), disabled: !any && !list.length, onclick: () => { delete L.lookFx; BORROWED.delete(L.id); touch({ cover: true, side: true }); } }, t("lookfx.removeAll")),
   ], t("lookfx.hint"))];
 }
 /** What every layer has, after a rule: opacity, and putting the placement back. */
@@ -3033,7 +3051,7 @@ async function selfTest(dir) {
     }
     // the looks' effects on the user's own layers: every look that has some, all of them at full on a
     // text layer, a sticker, a solid and a print of the last picture taken in; then, under a look
-    // of none, effects borrowed from three others
+    // of none, effects borrowed from other looks (a lettering among them, still fading in)
     report.layerFx = [];
     {
       const keepLook = S.profile.style.look, tx = newLayer("text", { text: "LAYER *效果*" }), sk = newLayer("asset", { ref: { kind: "sticker", id: "burst" }, tint: true });
@@ -3052,7 +3070,7 @@ async function selfTest(dir) {
         await shoot(id, id);
       }
       for (const L of ours) L.lookFx = {};
-      tx.lookFx = { "chrome.chrome": 1, "chrome.drips": 0.8, "riso.shift": 0.6 }; sk.lookFx = { "netart.dither": 0.7, "netart.sort": 0.8, "riso.dots": 0.6, "riso.dots:pitch": 1 };
+      tx.lookFx = { "chrome.chrome": 1, "chrome.drips": 0.8, "riso.shift": 0.6, "cyber.sliced": 0.15 };   // a borrowed lettering, still fading in sk.lookFx = { "netart.dither": 0.7, "netart.sort": 0.8, "riso.dots": 0.6, "riso.dots:pitch": 1 };
       so.lookFx = { "velvet.check": 0.8, "court.varsity": 0.7 }; if (pr) pr.lookFx = { "cyano.duo": 1, "toon.burst": 0.5 };
       await shoot("borrowed", "velvet");
       S.profile.style.look = keepLook; S.cover.layers = S.cover.layers.filter((l) => !ours.includes(l));

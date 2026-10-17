@@ -7,8 +7,8 @@ import { drawTitle, parseTitle } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas } from "./layers.js";
-import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects } from "./style.js";
-import { paintRuns, warpCorners } from "./textfx.js";
+import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, letteringOf } from "./style.js";
+import { paintRuns, warpCorners, EFFECTS } from "./textfx.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
 /** For checks of speed: while `on`, the time each layer took to paint is added up in `ms` (by id), and still runs repainted are counted. */
@@ -288,7 +288,7 @@ function drawFreeText(ctx, L, env) {
       fs: FS, d: FS * 0.062 * st.shadowAmt, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit,
       fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow, fill: st.own, hi: st.ownHi,
       frame: { ox, oy, c: skew, box }, warp: L.warp,
-    }, L.fx);
+    }, L.fx, env.letterOff ? null : letterOf(L));
     raw.restore();
   });
   return { hw: bw / 2 + pad, hh: bh / 2 + pad * 0.3 };
@@ -504,7 +504,23 @@ function drawSelection(ctx, hit, k, withHandles = true) {
   ctx.restore();
 }
 
-let scratch = null, fxScratch = null;
+let scratch = null, fxScratch = null, fadeScratch = null;
+// A text layer taking a look's lettering (see letteringOf in style.js), so the slider has no step:
+// - where the layer's own lettering is that one already (the look's own, under "auto"), the strength takes
+//   it further from the foot (o.letter from 1 to LETTER_MAX; each lettering says how far that takes its slip,
+//   offset, keyline, underline or depth — the thin ones, the underline and the fringe, up to three times);
+// - otherwise it first fades in over the layer's own lettering, across the first LETTER_FADE, and then
+//   goes further as above.
+const LETTER_FADE = 0.3, LETTER_MAX = 1.8;
+/** The look lettering a text layer takes, as painted: { look, amt: how far it goes (1: as the look's own), fade: how far it has come in }, or null. */
+function letterOf(L) {
+  const lt = L.type === "text" ? letteringOf(L) : null;
+  if (!lt) return null;
+  const own = look().id === lt.look && !(L.fx && L.fx !== "auto" && EFFECTS[L.fx]);
+  const on = own ? lt.amt : Math.max(0, (lt.amt - LETTER_FADE) / (1 - LETTER_FADE));
+  return { look: lt.look, amt: 1 + (LETTER_MAX - 1) * on, fade: own ? 1 : Math.min(1, lt.amt / LETTER_FADE) };
+}
+const fadeOf = (L) => { const lo = letterOf(L); return lo ? lo.fade : 1; };
 // A photo's look effects are pixel work over the whole photo — a background photo's is millions of pixels
 // — so their result is kept, per layer and canvas size, for as long as nothing it is drawn from changes:
 // the layer (and the photo it copies), where it is, the picture and its mask, the canvas, the style and the
@@ -826,7 +842,7 @@ function paintCover(cv, o) {
       const t0 = TIMING.on ? performance.now() : 0;
       try {
       const fx = layerEffects(L);
-      let fxKey = null, slot = null, kept = null;
+      let fxKey = null, slot = null, kept = null, fade = 1;
       if (fx.length && L.type === "photo") {
         const base = L.of ? cover.layers.find((l) => l.id === L.of) : L, rec = base && o.photos && o.photos.get(base.pid);
         slot = `${L.id}@${cv.width}x${cv.height}`;
@@ -839,15 +855,28 @@ function paintCover(cv, o) {
         FX_KEPT.delete(slot); FX_KEPT.set(slot, kept);   // the newest again
         c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o; c.drawImage(kept.img, kept.got.x0, kept.got.y0); c.restore();
         hit = kept.hit;
-      } else if (L.o < 1 || fx.length) {   // paint the layer on its own — its look effects added to it there — then blend it in as a whole
+      } else if (L.o < 1 || fx.length || (fade = fadeOf(L)) < 1) {   // paint the layer on its own — its look effects added to it there — then blend it in as a whole
         // a layer with effects gets a canvas held in memory: the effects read it back and copy from it, which
         // on a canvas kept on the graphics card means a round trip each time (see fxCanvas in style.js)
-        if (fx.length && !fxScratch) { fxScratch = document.createElement("canvas"); fxScratch.getContext("2d", { willReadFrequently: true }); }
-        const scr = fx.length ? fxScratch : (scratch = scratch || document.createElement("canvas"));
+        const mem = fx.length > 0 || fade < 1;
+        if (mem && !fxScratch) { fxScratch = document.createElement("canvas"); fxScratch.getContext("2d", { willReadFrequently: true }); }
+        const scr = mem ? fxScratch : (scratch = scratch || document.createElement("canvas"));
         if (scr.width !== cv.width || scr.height !== cv.height) { scr.width = cv.width; scr.height = cv.height; }
         const sx = scr.getContext("2d");
         sx.setTransform(1, 0, 0, 1, 0, 0); sx.globalAlpha = 1; sx.globalCompositeOperation = "source-over"; sx.clearRect(0, 0, cv.width, cv.height); sx.scale(kx, ky);
         hit = PAINT[L.type](sx, L, tr, env);
+        if (fade < 1) {   // the lettering coming in: the layer as it is without it, laid under by the rest (lettering × fade + own × (1 − fade))
+          if (!fadeScratch) { fadeScratch = document.createElement("canvas"); fadeScratch.getContext("2d", { willReadFrequently: true }); }
+          if (fadeScratch.width !== cv.width || fadeScratch.height !== cv.height) { fadeScratch.width = cv.width; fadeScratch.height = cv.height; }
+          const bx = fadeScratch.getContext("2d");
+          bx.setTransform(1, 0, 0, 1, 0, 0); bx.globalAlpha = 1; bx.globalCompositeOperation = "source-over"; bx.clearRect(0, 0, cv.width, cv.height); bx.scale(kx, ky);
+          env.letterOff = true;
+          try { PAINT[L.type](bx, L, tr, env); } finally { env.letterOff = false; }
+          sx.save(); sx.setTransform(1, 0, 0, 1, 0, 0);
+          sx.globalCompositeOperation = "destination-in"; sx.fillStyle = `rgba(0,0,0,${fade})`; sx.fillRect(0, 0, cv.width, cv.height);
+          sx.globalCompositeOperation = "lighter"; sx.globalAlpha = 1 - fade; sx.drawImage(fadeScratch, 0, 0);
+          sx.restore();
+        }
         // with effects, only the box the layer and its effects reached is laid down
         const got = hit && fx.length ? paintEffects(sx, pixelBox(hit, kx, ky, cv.width, cv.height), fx, L, kx, env.C) : null;
         c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o;

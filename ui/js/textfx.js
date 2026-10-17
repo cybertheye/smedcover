@@ -3,7 +3,9 @@
 //
 // Three kinds, by what they can change:
 //   passes    the same line of text painted several times in different colours and places — outlines,
-//             shadows, echoes. These are the looks' own letterings, each also offered by name.
+//             shadows, echoes. The looks' own letterings are of this kind: "auto" takes the current
+//             look's; a text layer may take another look's as a look effect (see letteringOf in
+//             style.js), which paintRuns is then given as `letter`.
 //   mask      the letters are first painted alone on a spare canvas, which is then worked on —
 //             filled with a pattern, worn away, shaded inside, cut into rows — and laid down.
 //   outline   the letters' outlines are fetched as points (see outlines.js), which can be moved
@@ -27,17 +29,16 @@
 import { LOOKS, look, lookValues, lookParams } from "./style.js";
 import { outline } from "./outlines.js";
 
-/** id -> { name: {zh, en}, kind }. The order is the order of the menu. */
+/**
+ * id -> { name: {zh, en}, kind }. The order is the order of the menu: the typesetting effects that belong
+ * to no look. (Sliced, Overprint, Double keyline, Underlined highlight and Sunlit block were once here too;
+ * they are their looks' effects now. A layer that still names one is painted as "auto".)
+ */
 export const EFFECTS = {
   auto: { name: { zh: "自动（跟随风格）", en: "Automatic (follows the look)" }, kind: "passes" },
   cel: { name: { zh: "描边加投影", en: "Outline and shadow" }, kind: "passes" },
   plain: { name: { zh: "纯文字", en: "Plain" }, kind: "passes" },
-  cyber: { name: { zh: "切片错位", en: "Sliced" }, kind: "passes" },
-  riso: { name: { zh: "双色叠印", en: "Overprint" }, kind: "passes" },
-  anime: { name: { zh: "双层勾边", en: "Double keyline" }, kind: "passes" },
   bluenote: { name: { zh: "纯文字（不倾斜）", en: "Plain, upright" }, kind: "passes" },
-  editorial: { name: { zh: "下划线强调", en: "Underlined highlight" }, kind: "passes" },
-  vivid: { name: { zh: "暖白立体", en: "Sunlit block" }, kind: "passes" },
   dots: { name: { zh: "字内网点", en: "Halftone inside" }, kind: "mask" },
   stripes: { name: { zh: "字内条纹", en: "Stripes inside" }, kind: "mask" },
   inner: { name: { zh: "内阴影", en: "Inner shadow" }, kind: "mask" },
@@ -230,24 +231,32 @@ function outlined(ctx, pass, o, id) {
 // house lettering both. A look id stands for its own lettering, which "auto" uses.
 const BOTH = { stroke: true, shadow: true }, NONE = { stroke: false, shadow: false };
 const USES = { cel: BOTH, plain: NONE, cyber: BOTH, riso: { stroke: false, shadow: true }, anime: BOTH, bluenote: NONE, editorial: NONE, songke: NONE, vivid: BOTH, negative: NONE, cinema: { stroke: false, shadow: true }, cyano: { stroke: false, shadow: true }, monofilm: { stroke: false, shadow: true }, typo: NONE, toon: { stroke: false, shadow: true }, avant: NONE, collage: { stroke: false, shadow: true }, yellow: NONE, pitch: NONE, dots: { stroke: false, shadow: true }, neon: { stroke: false, shadow: true }, court: { stroke: false, shadow: true }, velvet: { stroke: false, shadow: true }, rave: { stroke: false, shadow: true }, chrome: { stroke: false, shadow: true }, netart: { stroke: false, shadow: true }, verse: { stroke: false, shadow: true }, glass: { stroke: false, shadow: true }, jelly: { stroke: false, shadow: true }, skies: { stroke: false, shadow: true }, spectrum: { stroke: false, shadow: true } };
-/** { id, stroke, shadow } for effect `id` under the current look; id is the effect actually painted. */
-export function effectUses(id = "auto") {
-  const fx = EFFECTS[id] && id !== "auto" ? id : look().runs ? look().id : "cel";
+/** { id, stroke, shadow } for effect `id` (or a look's lettering `letter`) under the current look; id is the effect actually painted. */
+export function effectUses(id = "auto", letter = null) {
+  const fx = letter ? letter.look : EFFECTS[id] && id !== "auto" ? id : look().runs ? look().id : "cel";
   return { id: fx, ...(USES[fx] || BOTH) };
 }
 
-/** Paints the current line with effect `id`. See the top of the file for `pass` and `o`. */
-export function paintRuns(ctx, pass, o, id = "auto") {
+/**
+ * Paints the current line with effect `id`, or — when a text layer takes a look's lettering as a look
+ * effect — with `letter` { look, amt } instead, at that strength (o.letter). See the top of the file for
+ * `pass` and `o`.
+ */
+export function paintRuns(ctx, pass, o, id = "auto", letter = null) {
+  if (letter && LOOKS[letter.look] && LOOKS[letter.look].runs) {
+    const here = look().id === letter.look, lo = { ...o, letter: letter.amt };
+    if (letter.look === "riso" && !here) {   // off the paper there is nothing to overprint on: the second colour simply sits behind
+      const g = o.fs * 0.05 * o.shadowAmt * letter.amt;
+      pass((a, x) => { ctx.fillStyle = a.hi ? o.fillCss : o.hiCss; ctx.fillText(a.t, x + g, g * 0.8); });
+      pass((a, x) => { ctx.fillStyle = a.hi ? o.hiCss : o.fillCss; ctx.fillText(a.t, x, 0); });
+      return;
+    }
+    return LOOKS[letter.look].runs(ctx, pass, lo, here ? lookValues() : lookParams(letter.look));   // under its own look, at the look's settings; borrowed, at its defaults
+  }
   const fx = EFFECTS[id] ? id : "auto";
   if (fx === "auto") return look().runs ? look().runs(ctx, pass, o, lookValues()) : house(ctx, pass, o);
   if (fx === "cel") return house(ctx, pass, o);
   if (fx === "plain") return pass((a, x) => { ctx.fillStyle = a.hi ? o.hiCss : o.fillCss; ctx.fillText(a.t, x, 0); });
-  if (fx === "riso" && look().id !== "riso") {   // off the paper there is nothing to overprint on: the second colour simply sits behind
-    const g = o.fs * 0.05 * o.shadowAmt;
-    pass((a, x) => { ctx.fillStyle = a.hi ? o.fillCss : o.hiCss; ctx.fillText(a.t, x + g, g * 0.8); });
-    pass((a, x) => { ctx.fillStyle = a.hi ? o.hiCss : o.fillCss; ctx.fillText(a.t, x, 0); });
-    return;
-  }
   if (EFFECTS[fx].kind === "passes") return LOOKS[fx].runs(ctx, pass, o, lookParams(fx));   // another look's lettering, at its default settings
   return EFFECTS[fx].kind === "mask" ? masked(ctx, pass, o, fx) : outlined(ctx, pass, o, fx);
 }

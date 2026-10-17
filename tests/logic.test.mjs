@@ -451,7 +451,7 @@ test("ai: the prompt carries the style, the format and the user's notes", () => 
 });
 
 // ---------- looks
-import { LOOKS, LOOK_IDS, parseColour, role, lookParams, setLook, look, lookValues, styled, layerEffects, effectsFor, paintEffects, FX_STAGES, FX_TYPES } from "../ui/js/style.js";
+import { LOOKS, LOOK_IDS, parseColour, role, lookParams, setLook, look, lookValues, styled, layerEffects, effectsFor, paintEffects, FX_STAGES, FX_TYPES, isLettering, letteringOf } from "../ui/js/style.js";
 
 test("looks: colours are read and classified by the job they do in the house style", () => {
   assert.deepEqual(parseColour("#fff"), [255, 255, 255, 1]);
@@ -738,8 +738,18 @@ test("look effects on a layer: kept clean, carried by the layer whatever the loo
     const list = LOOKS[id].elementFx || [];
     assert.ok(list.length >= 1, `${id} has effects`);
     assert.equal(new Set(list.map((e) => e.key)).size, list.length, `${id}: keys unique`);
-    for (const e of list) assert.ok(FX_STAGES.includes(e.stage) && e.name.zh && e.name.en && /^[a-zA-Z]+$/.test(e.key) && e.for.length && e.for.every((t) => FX_TYPES.includes(t)) && typeof e.paint === "function", `${id}.${e.key}`);
+    for (const e of list) assert.ok(e.name.zh && e.name.en && /^[a-zA-Z]+$/.test(e.key) && e.for.length && e.for.every((t) => FX_TYPES.includes(t))
+      && (e.stage === "letter" ? e.for.join() === "text" && typeof LOOKS[id].runs === "function" : FX_STAGES.includes(e.stage) && typeof e.paint === "function"), `${id}.${e.key}`);
   }
+  // the looks' own letterings, for text layers: one at a time (the strongest), never in the pixel pass
+  const letters = ["cyber.sliced", "riso.overprint", "anime.keyline", "editorial.underline", "vivid.block", "netart.selected"];
+  assert.deepEqual(LOOK_IDS.flatMap((id) => LOOKS[id].elementFx.filter((e) => e.stage === "letter").map((e) => `${id}.${e.key}`)).sort(), [...letters].sort());
+  assert.ok(letters.every(isLettering) && !isLettering("riso.dots") && !isLettering("nope.x"));
+  const lettered = { type: "text", lookFx: { "cyber.sliced": 0.4, "riso.overprint": 0.7, "riso.dots": 1 } };
+  assert.deepEqual(letteringOf(lettered), { id: "riso.overprint", look: "riso", amt: 0.7 });
+  assert.deepEqual(layerEffects(lettered).map((e) => e.id), ["riso.dots"]);
+  assert.equal(letteringOf({ ...lettered, type: "asset" }), null);
+  assert.equal(letteringOf({ type: "text", lookFx: { "riso.dots": 1 } }), null);
   assert.ok(["riso", "chrome", "netart"].every((id) => LOOKS[id].elementFx.length >= 4), "the pilots");
   assert.deepEqual(FX_TYPES, ["text", "asset", "photo", "solid"]);
   assert.ok(effectsFor("cyber", "photo").some((e) => e.key === "tint") && !effectsFor("cyber", "text").some((e) => e.key === "tint"), "a photo's own effect is offered on photos only");
@@ -851,7 +861,9 @@ test("text effects: a layer may choose one, and every one can be painted", async
   const { EFFECTS, paintRuns } = await import("../ui/js/textfx.js");
   const { parseFont, primeOutline, outline } = await import("../ui/js/outlines.js");
   const { TEXT_EFFECTS } = await import("../ui/js/layers.js");
-  assert.deepEqual(Object.keys(EFFECTS), TEXT_EFFECTS);                       // what a layer may store is what can be painted
+  const retired = ["cyber", "riso", "anime", "editorial", "vivid"];              // the looks' letterings, their looks' effects now
+  assert.deepEqual(TEXT_EFFECTS.filter((id) => !retired.includes(id)), Object.keys(EFFECTS));   // what a layer may store is what can be painted, and the names of before
+  assert.ok(retired.every((id) => !(id in EFFECTS)), "the menu keeps only the typesetting effects");
   for (const e of Object.values(EFFECTS)) assert.ok(e.name.zh && e.name.en && ["passes", "mask", "outline"].includes(e.kind));
   // on a layer: kept when valid, dropped when not, and "auto" is the absence of a choice
   const ls = normalizeLayers([{ type: "title", fx: "extrude", fxAmt: 1.5 }, { type: "text", text: "x", fx: "nope", fxAmt: 99 }, { type: "tag", fx: "dots" }, { type: "text", text: "y", fx: "auto", fxAmt: 1 }]);
@@ -885,10 +897,26 @@ test("text effects: a layer may choose one, and every one can be painted", async
   assert.equal(native, false);
   primeOutline("900 100px X", "Ab", [square(0), square(0)]); primeOutline("900 100px X", "cd", [square(0), square(0)]);
   void ctx; void pts;                                                           // (drawing them needs the native side; covered by the app's self-test)
-  // an unknown effect is the automatic one
-  const [n1, c1] = recorder(), [n2, c2] = recorder();
-  paintRuns(c1, pass(c1), { ...o }, "no-such-effect"); paintRuns(c2, pass(c2), { ...o }, "auto");
-  assert.deepEqual(n1, n2);
+  // an unknown effect is the automatic one, and so is a lettering the menu no longer offers
+  for (const id of ["no-such-effect", ...retired]) {
+    const [n1, c1] = recorder(), [n2, c2] = recorder();
+    paintRuns(c1, pass(c1), { ...o }, id); paintRuns(c2, pass(c2), { ...o }, "auto");
+    assert.deepEqual(n1, n2, id);
+  }
+  // a look's lettering taken as a look effect: painted at any strength, under its own look and another
+  for (const look of ["cyber", "riso", "anime", "editorial", "vivid", "netart"]) for (const here of ["cel", look]) for (const amt of [1, 1.4, 1.8]) {
+    setLook(here);
+    const [n, ctx] = recorder();
+    paintRuns(ctx, pass(ctx), { ...o }, "extrude", { look, amt });
+    assert.ok((n.fillText || 0) >= 2, `${look} lettering under ${here} at ${amt}: nothing painted`);
+    assert.equal(n.save || 0, n.restore || 0, `${look} lettering under ${here}: unbalanced save/restore`);
+  }
+  setLook("cel");
+  // a text layer that chose one of those letterings takes it as its look effect; the title keeps the name
+  const [tl, tx, tx2] = normalizeLayers([{ type: "title", fx: "cyber" }, { type: "text", id: "a", text: "x", fx: "riso", fxAmt: 1.4 }, { type: "text", id: "b", text: "y", fx: "vivid", lookFx: { "netart.selected": 0.5 } }]).filter((l) => l.type === "title" || l.type === "text");
+  assert.equal(tl.fx, "cyber");
+  assert.deepEqual([tx.fx, tx.fxAmt, tx.lookFx], [undefined, undefined, { "riso.overprint": 0.3 }]);   // just fully faded in: as it was painted
+  assert.deepEqual([tx2.fx, tx2.lookFx], [undefined, { "netart.selected": 0.5 }]);   // one lettering at a time: the one it had stays
 });
 
 test("text layers are headlines like the title; older layers carried over", () => {
@@ -1026,7 +1054,8 @@ test("the title's outline and shadow are offered only where the text effect draw
     setLook("cel");
     assert.deepEqual(effectUses(), { id: "cel", stroke: true, shadow: true });
     assert.deepEqual(effectUses("bluenote"), { id: "bluenote", stroke: false, shadow: false });
-    assert.deepEqual(effectUses("riso"), { id: "riso", stroke: false, shadow: true });
+    assert.deepEqual(effectUses("riso"), { id: "cel", stroke: true, shadow: true });          // no longer in the menu: automatic
+    assert.deepEqual(effectUses("auto", { look: "riso", amt: 0.5 }), { id: "riso", stroke: false, shadow: true });   // the riso's lettering, taken as a look effect
     assert.equal(effectUses("worn").stroke, true);                            // mask effects keep the house keyline
     setLook("editorial");
     assert.deepEqual(effectUses("auto"), { id: "editorial", stroke: false, shadow: false });

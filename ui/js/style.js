@@ -231,8 +231,9 @@ const cyber = {
    * Highlighted words are black on a chamfered plate.
    */
   runs(ctx, pass, o, p) {
-    const fs = o.fs, C = o.C || CY.white, ink = o.fill || C, plateCol = o.hi || (o.fill && o.fill !== C ? o.fill : C);
-    const g = fast ? 0 : fs * 0.03 * p.split * Math.max(0.3, o.shadowAmt), slip = fs * 0.03 * Math.min(1.5, p.split);
+    // o.letter: how far the lettering goes when a layer takes it as a look effect (1: as the look's own; see letterOf in render.js)
+    const q = 1 + ((o.letter ?? 1) - 1) * 1.5, fs = o.fs, C = o.C || CY.white, ink = o.fill || C, plateCol = o.hi || (o.fill && o.fill !== C ? o.fill : C);
+    const g = (fast ? 0 : fs * 0.03 * p.split * Math.max(0.3, o.shadowAmt)) * q, slip = fs * 0.03 * Math.min(1.5, p.split) * q;
     ctx.lineJoin = "miter"; ctx.miterLimit = 3;
     ctx.transform(1, 0, -0.1, 1, 0, 0);   // a harder slant than the house style's
     const all = () => {
@@ -623,7 +624,7 @@ const riso = {
   },
   /** Two inks, one printed slightly off the other, darker where they overlap. */
   runs(ctx, pass, o, p) {
-    const fs = o.fs, C = o.hi || o.C || RISO.pink, main = o.fill || RISO.blue, g = fs * o.shadowAmt * (0.035 + 0.012 * p.shift);   // the shadow slider is how far off the second ink is printed: 0 in register
+    const fs = o.fs, C = o.hi || o.C || RISO.pink, main = o.fill || RISO.blue, g = fs * o.shadowAmt * (0.035 + 0.012 * p.shift) * (1 + ((o.letter ?? 1) - 1) * 1.5);   // the shadow slider is how far off the second ink is printed: 0 in register
     pass((a, x) => { ctx.fillStyle = css(a.hi ? main : C); ctx.fillText(a.t, x + g, g * 0.8); });
     ctx.save(); ctx.globalCompositeOperation = "multiply";
     pass((a, x) => { ctx.fillStyle = css(a.hi ? C : main); ctx.fillText(a.t, x, 0); });
@@ -799,7 +800,7 @@ const anime = {
   },
   /** A title-card logotype: pale letters, a dark keyline, a white one outside it, and a soft drop shadow. */
   runs(ctx, pass, o) {
-    const fs = o.fs, C = o.hi || o.C || ANI.cream, k = Math.max(0.4, o.strokeAmt), d = fs * 0.055 * o.shadowAmt;
+    const q = o.letter ?? 1, fs = o.fs, C = o.hi || o.C || ANI.cream, k = Math.max(0.4, o.strokeAmt) * q, d = fs * 0.055 * o.shadowAmt * q;
     ctx.lineJoin = "round";
     if (d > 0) pass((a, x) => { ctx.strokeStyle = css(ANI.line, 0.5); ctx.lineWidth = fs * 0.2 * k; ctx.strokeText(a.t, x + d, d); });
     pass((a, x) => { ctx.strokeStyle = css(ANI.cream); ctx.lineWidth = fs * 0.2 * k; ctx.strokeText(a.t, x, 0); });
@@ -1066,10 +1067,10 @@ const editorial = {
   /** A serif headline, upright and unadorned. Highlighted words take the channel colour and a rule beneath. */
   runs(ctx, pass, o) {
     upright(ctx);
-    const fs = o.fs, C = o.hi || o.C;
+    const q = 1 + ((o.letter ?? 1) - 1) * 2.5, fs = o.fs, C = o.hi || o.C;   // a layer's look effect thickens the underline up to three times
     pass((a, x) => {
       ctx.fillStyle = css(a.hi ? C : o.fill || edInk()); ctx.fillText(a.t, x, 0);
-      if (a.hi) ctx.fillRect(x, fs * 0.13, ctx.measureText(a.t).width, Math.max(2, fs * 0.035));
+      if (a.hi) ctx.fillRect(x, fs * 0.13, ctx.measureText(a.t).width, Math.max(2, fs * 0.035) * q);
     });
   },
   wrap: (ctx, C, p, plates) => (plates
@@ -1660,7 +1661,7 @@ const vivid = {
    */
   runs(ctx, pass, o) {
     upright(ctx);
-    const fs = o.fs, line = fs * 0.085 * o.strokeAmt, depth = fs * 0.075 * o.shadowAmt;
+    const q = o.letter ?? 1, fs = o.fs, line = fs * 0.085 * o.strokeAmt * q, depth = fs * 0.075 * o.shadowAmt * q;
     const face = o.fill || VV.cream, hiFace = o.hi || boost(o.C || VV.red);
     const lower = (c) => (c === VV.cream ? VV.butter : mix(c, VV.navy, 0.22));
     ctx.lineJoin = "round";
@@ -4861,7 +4862,7 @@ const netart = {
   /** Plain capitals with a cyan and a magenta copy split off them (the shadow slider); highlighted words selected: white in a navy box. */
   runs(ctx, pass, o) {
     upright(ctx);
-    const fs = o.fs, d = fs * 0.025 * Math.min(2, o.shadowAmt), ink = o.fill || naInk();
+    const fs = o.fs, d = fs * 0.025 * Math.min(2, o.shadowAmt) * (1 + ((o.letter ?? 1) - 1) * 2.5), ink = o.fill || naInk();   // the fringe, up to three times as a layer's look effect
     pass((a, x) => { if (a.hi) { ctx.fillStyle = css(o.hi || NA.navy); ctx.fillRect(x - fs * 0.03, -fs * 0.88, ctx.measureText(a.t).width + fs * 0.06, fs * 1.04); } });
     if (d > 0) { ctx.save(); ctx.globalAlpha = 0.85; ctx.globalCompositeOperation = dark ? "screen" : "multiply"; for (const [s, c] of [[-1, [0, 220, 255]], [1, [255, 0, 170]]]) pass((a, x) => { if (!a.hi) { ctx.fillStyle = css(c); ctx.fillText(a.t, x + s * d, 0); } }); ctx.restore(); }
     pass((a, x) => { ctx.fillStyle = css(a.hi ? NA.light : ink); ctx.fillText(a.t, x, 0); });
@@ -6160,6 +6161,11 @@ export const LOOK_IDS = Object.keys(LOOKS);
 
 /** The order every layer's effects are painted in. */
 export const FX_STAGES = ["fill", "over", "filter", "behind"];
+// A look's own lettering may be taken by a text layer too, as an effect of stage "letter" (no painter:
+// the layer's letters are then set in that lettering, see letteringOf, and letterOf in render.js). A
+// layer has one lettering at a time. Its strength takes the lettering past the look's own — the slip of
+// the slices, the second ink's offset, the keyline, the underline, the block's depth, up to 1.8 times —
+// having first faded it in over the layer's own lettering, where that is another.
 /** The layer types the effects are open to: the user's own. */
 export const FX_TYPES = ["text", "asset", "photo", "solid"];
 const FX_ALL = ["text", "asset", "photo", "solid"];
@@ -6172,12 +6178,24 @@ export function layerEffects(L) {
   for (const [id, amt] of Object.entries(all)) {
     if (id.includes(":") || !(amt > 0)) continue;
     const [look, key] = id.split("."), fx = ((LOOKS[look] && LOOKS[look].elementFx) || []).find((e) => e.key === key);
-    if (!fx || !fx.for.includes(L.type)) continue;
+    if (!fx || !fx.for.includes(L.type) || fx.stage === "letter") continue;
     const opt = {};
     for (const s of fx.sub || []) { const v = all[`${id}:${s.key}`]; opt[s.key] = Number.isFinite(v) ? clamp(v) : s.def; }
     out.push({ id, look, fx, amt: clamp(amt), opt });
   }
   return out.sort((a, b) => FX_STAGES.indexOf(a.fx.stage) - FX_STAGES.indexOf(b.fx.stage) || (a.id < b.id ? -1 : 1));
+}
+/** Whether look effect id ("look.key") is a lettering. */
+export const isLettering = (id) => { const [look, key] = String(id).split("."); return ((LOOKS[look] && LOOKS[look].elementFx) || []).some((e) => e.key === key && e.stage === "letter"); };
+/** The lettering a text layer takes from a look, { id, look, amt }, or null: the strongest on (the first, if two are as strong). */
+export function letteringOf(L) {
+  if (!L || L.type !== "text" || !L.lookFx) return null;
+  let best = null;
+  for (const [id, amt] of Object.entries(L.lookFx)) {
+    if (id.includes(":") || !(amt > 0) || !isLettering(id) || !LOOKS[id.split(".")[0]].runs) continue;
+    if (!best || amt > best.amt) best = { id, look: id.split(".")[0], amt: clamp(amt) };
+  }
+  return best;
 }
 /** Time spent in each layer effect (ms by id), with the drawing finished before and after each: for the timing self-test; off otherwise. */
 export const FX_TIMING = { on: false, ms: {} };
@@ -6352,7 +6370,7 @@ netart.elementFx = [
 ];
 
 // ---------- shared painters for the looks' layer effects (every one works in B, the layer's box, in canvas pixels)
-const FX_PHOTO = ["photo"];
+const FX_PHOTO = ["photo"], FX_TEXT = ["text"];
 /** A copy of src softened by drawing it down `f` times smaller in two steps (so it does not sparkle): laid on enlarged, it is blurred. */
 function softened(src, f, slot) {
   const g1 = Math.min(f, 4), mw = Math.max(1, Math.round(src.width / g1)), mh = Math.max(1, Math.round(src.height / g1)), sw = Math.max(1, Math.round(src.width / f)), sh = Math.max(1, Math.round(src.height / f));
@@ -7100,6 +7118,11 @@ spectrum.elementFx = [
       x.restore();
     } },
 ];
+// the looks' own letterings, which a text layer may take (stage "letter", see letteringOf): each is the
+// look's runs(), painted with o.letter, how far it goes
+for (const [look, key, zh, en] of [["cyber", "sliced", "切片错位", "Sliced"], ["riso", "overprint", "双色叠印", "Overprint"], ["anime", "keyline", "双层勾边", "Double keyline"],
+  ["editorial", "underline", "下划线强调", "Underlined highlight"], ["vivid", "block", "暖白立体", "Sunlit block"], ["netart", "selected", "选中框", "Selected"]])
+  LOOKS[look].elementFx.push({ key, name: { zh, en }, for: FX_TEXT, stage: "letter" });
 
 let current = cel, values = {};
 /**
