@@ -57,7 +57,7 @@ Every photo is a *Photo* layer. Under *Add photos* in *Edit → Cover*:
 
 Below *Add photos* every photo on the cover is listed in layer order: a thumbnail, its size, and *AI repainted* on one that was; a cut-out is listed under its photo, its thumbnail without the background. Click a thumbnail to select its layer; the × on its corner (on hover) deletes the photo. Each photo has *AI repaint* and *Another photo*: another photo changes only the picture — placement, blur, dim, outline, name and the rest are kept — and a linked cut-out is cut out of the new picture again, its own settings kept. A cut-out cannot be replaced or repainted by itself (it shows its photo's picture).
 
-Each photo's properties, top to bottom: remove the background, cut out the subject (into a new photo layer), fill the canvas, blur, dim, the look's treatment of photos (tint, duotone, black and white…; on by default), the outline's width, a shadow, the outline's colour and *Torn paper edge*, then the opacity and *Reset placement* every layer has. To change the picture, use *Another photo* under it in *Add photos*. With the background removed the outline and shadow follow the subject; otherwise the photo's edge, like a print. With *Torn paper edge* the outline becomes a margin of paper torn by hand: a ragged edge (slow bites, smaller jags, loose fibres), a band of the paper's white core along it (plainest on coloured paper), and a soft shadow under it; the wider the outline, the more the tear wanders, but it never reaches into the photo. Each photo tears its own way and keeps it. Ticking it with no outline yet gives one of 16.
+Each photo's properties, top to bottom: remove the background, cut out the subject (into a new photo layer), fill the canvas, blur, dim, the look's treatment of photos (tint, duotone, black and white…; on by default), the outline's width, a shadow, the outline's colour, *Torn paper edge* and the look effects (see *Look effects on your own layers*), then the opacity and *Reset placement* every layer has. To change the picture, use *Another photo* under it in *Add photos*. With the background removed the outline and shadow follow the subject; otherwise the photo's edge, like a print. With *Torn paper edge* the outline becomes a margin of paper torn by hand: a ragged edge (slow bites, smaller jags, loose fibres), a band of the paper's white core along it (plainest on coloured paper), and a soft shadow under it; the wider the outline, the more the tear wanders, but it never reaches into the photo. Each photo tears its own way and keeps it. Ticking it with no outline yet gives one of 16.
 
 The Background layer itself is only the ground: light or dark, and the grid. It always stays at the bottom. Light or dark is set in the Background layer's properties (not in the Style tab); while a photo fills the canvas it covers the ground, and the lettering is set as on a dark one.
 
@@ -260,20 +260,47 @@ Outlined effects read the font file to get each letter's outline: the first time
 
 ### Look effects on your own layers
 
-A look's material effects can be put on a text or asset layer you added. With the layer selected, its properties have a *Look effects* group in two parts:
+A look's material effects can be put on a layer you added: text, asset, photo or solid. With the layer selected, its properties have a *Look effects* group in two parts:
 
 - **This look**: the effects the current look opens to that kind of layer. Each is a slider; at 0 it is off. Some have settings of their own: the riso's *Halftone*, once on, shows *Halftone size* under it.
 - **Borrow from other looks**: pick a look in the menu and its name and sliders are put in below, the menu moving down under them, so another can be borrowed. *Remove* after a look's name takes away every effect borrowed from it. Effects on the layer that are not the current look's are listed here too, under their own look.
 
 The effects stay with the layer: under another look they still apply, and move to *Borrow from other looks*. Each layer's random detail is its own, so every size, the preview and the export agree. *Surprise me* deals these layers new effects, but only ever from the look it drew, so a hand stays of one look. *Clear this layer's look effects* turns them all off.
 
-Three looks have effects so far; photo and solid layers and the other looks follow (see the to-do list below):
+All 30 looks have effects. Those marked [photo] are offered on photo layers only; the rest suit text, asset, photo and solid layers alike. An effect that repaints the shape, such as a silhouette or chrome, follows the subject on a photo whose background was removed, and takes a plain photo as one block.
 
 | Look | Effects |
 |---|---|
+| Cel | screentone shade |
+| Cyberpunk | colour split, signal tear, line glow, photo tint [photo] |
 | Riso | misregistration, halftone (with its size), patchy ink, roller streaks, ghosting |
-| Liquid chrome | chrome, holographic streak, drips, glitch slices |
+| 90s animation | photo warmed [photo] |
+| Record sleeve | photo duotone [photo], photo halftone [photo] |
+| Editorial | black-and-white photo [photo], photo in spot colour [photo] |
+| Woodblock book | uneven printing, seal-red ink |
+| Summer illustration | photo vividness [photo] |
+| Negative space | red-and-black silhouette, screen-print texture, photo in red and black [photo] |
+| Minimal film poster | silhouette, back light, photo toning [photo] |
+| Cyanotype | glowing white figure, airbrush haze, coarse halftone, photo as cyanotype [photo] |
+| Monochrome film | motion ghost, black-and-white photo [photo], photo motion blur [photo], photo collage [photo] |
+| Experimental type | slice, echo, particle scatter, dry brush, hard black and white [photo] |
+| Animated film poster | silhouette, sunburst, screen-print wear, photo in one colour [photo] |
+| Avant-garde image | motion smear, glow, out of focus with a frame of focus, pixel mosaic, fluted glass, colour band, fade out, black-and-white photo [photo] |
+| Collage | paper lift, tape, halftone patch, black-and-white photo [photo], photo torn in strips [photo] |
+| Yellow poster | black silhouette, black-and-white photo [photo] |
+| Pitch | halftone, photo posterized [photo] |
+| Dot matrix | read into dots (with their spacing), rainbow, motion smear, colour split, glow |
+| Neon pop | neon gradient map, hard tones, rim light, back light, halftone shadow |
+| Basketball poster | varsity outline, halftone knock-out, spray drips, speed trails, screen-print wear, photo in two colours [photo] |
+| Velvet illustration | velvet, check, volume, fuzzy edge, soft shadow, photo in velvet colours [photo] |
+| Psychedelic rave | holographic sheen, eclipse halo, colour fringe, photo in neon heat [photo] |
+| Liquid chrome | chrome, holographic streak, drips, glitch slices, black-and-white photo [photo] |
 | Glitch net art | dither, pixel sorting, datamosh, scan shift |
+| Comic-verse | comic colouring, halftone, hatching, off-register, dimension glitch, photo as comic [photo] |
+| Patterned glass | patterned glass (with pattern size, glints and dark lines), brush strokes, frost |
+| Jelly machine | jelly, glow, depth of field, photo teal and orange [photo] |
+| Anime skies | photo clarity [photo] |
+| Spectral engraving | stipple (with its depth), line engraving, spectral streams, drips |
 
 ### Lettering colours
 
@@ -610,7 +637,7 @@ Goal: text, asset, photo and solid layers can each take a look's material effect
 - A layer's effects come in two groups: *This look* lists the current look's; *Other looks* lets you borrow from another look, kept apart, so a borrowed effect shows as borrowed.
 - *Surprise me* picks only from the current look, so the result stays of one look.
 - The lettering effects are brought home: Sliced, Overprint, Double keyline, Underlined highlight and Sunlit block go back to their own looks' effects (still borrowable under *Other looks*). The menu keeps only the general typesetting effects. A layer already using one of the five is drawn as *Automatic* under another look, its setting kept.
-- Pilots: riso, liquid chrome and glitch net art.
+- Pilots: riso, liquid chrome and glitch net art; then every look.
 
 **How effects are sorted**: three questions, in order.
 
@@ -622,7 +649,7 @@ Goal: text, asset, photo and solid layers can each take a look's material effect
 
 A last kind is **a relation between layers**: one layer's shape decides where another shows, as in the minimal film poster's *Photo inside the silhouette* or the yellow poster's *Photo inside the letters*. That is a mask, belonging to no look, and suits a *clipping mask* that every look can use.
 
-**Each look's material effects (first draft)**
+**Each look's material effects** (the [text] ones wait for stage 3)
 
 Stages: [fill] replaces the colour inside the outline; [over] lays texture inside it; [px] works on the pixels; [out] paints outside the outline; [text] is for text only.
 
@@ -673,7 +700,7 @@ The general typesetting effects belong to no look and stay in the lettering menu
 - [x] Interface: *This look* and *Borrow from other looks* groups of sliders in the layer's properties, 0 by default; a borrowed look can be removed on its own, and one button clears them all.
 - [ ] In stages:
   1. ~~The framework and the pilots: riso, liquid chrome and glitch net art, on text and asset layers.~~ Done.
-  2. Every look, and the photo and solid layers.
+  2. ~~Every look, and the photo and solid layers.~~ Done.
   3. The lettering effects brought home.
   4. A general clipping mask.
   5. Draggable scene objects (next item).

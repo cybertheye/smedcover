@@ -733,16 +733,17 @@ test("look effects on a layer: kept clean, carried by the layer whatever the loo
   assert.deepEqual(kinds.find((l) => l.type === "solid").lookFx, { "riso.dots": 1 }, "a solid may carry them already");
   assert.equal(kinds.find((l) => l.type === "title").lookFx, undefined, "the layout layers do not");
   assert.equal(normalizeLayers([{ type: "text", text: "x", lookFx: { "riso.dots": 0 } }]).find((l) => l.type === "text").lookFx, undefined);
-  // every pilot effect: a stage, both names, the user's own layers, a painter; keys unique within the look
-  for (const id of ["riso", "chrome", "netart"]) {
-    const list = LOOKS[id].elementFx;
-    assert.ok(list.length >= 4, id);
+  // every look's effects: a stage, both names, the user's own layers (a photo-only one for photos alone), a painter; keys unique within the look
+  for (const id of LOOK_IDS) {
+    const list = LOOKS[id].elementFx || [];
+    assert.ok(list.length >= 1, `${id} has effects`);
     assert.equal(new Set(list.map((e) => e.key)).size, list.length, `${id}: keys unique`);
-    for (const e of list) assert.ok(FX_STAGES.includes(e.stage) && e.name.zh && e.name.en && e.for.includes("text") && e.for.includes("asset") && typeof e.paint === "function", `${id}.${e.key}`);
+    for (const e of list) assert.ok(FX_STAGES.includes(e.stage) && e.name.zh && e.name.en && /^[a-zA-Z]+$/.test(e.key) && e.for.length && e.for.every((t) => FX_TYPES.includes(t)) && typeof e.paint === "function", `${id}.${e.key}`);
   }
-  assert.deepEqual(FX_TYPES, ["text", "asset"]);
-  assert.equal(effectsFor("riso", "photo").length, 0, "photos are not open yet");
-  assert.equal(effectsFor("velvet", "text").length, 0, "a look without effects of its own");
+  assert.ok(["riso", "chrome", "netart"].every((id) => LOOKS[id].elementFx.length >= 4), "the pilots");
+  assert.deepEqual(FX_TYPES, ["text", "asset", "photo", "solid"]);
+  assert.ok(effectsFor("cyber", "photo").some((e) => e.key === "tint") && !effectsFor("cyber", "text").some((e) => e.key === "tint"), "a photo's own effect is offered on photos only");
+  assert.equal(effectsFor("skies", "text").length, 0, "a look whose only effect is a photo's");
   // a layer's effects apply whatever look the cover is in, in stage order, only those that suit its type
   const L = { id: "l1", type: "text", lookFx: { "netart.sort": 0.5, "chrome.chrome": 1, "riso.dots": 0.4, "riso.dots:pitch": 0.9, "chrome.drips": 0.3, "gone.away": 1 } };
   for (const at of ["cel", "velvet", "riso"]) {
@@ -751,7 +752,9 @@ test("look effects on a layer: kept clean, carried by the layer whatever the loo
     assert.deepEqual(fx.map((e) => e.id), ["chrome.chrome", "riso.dots", "netart.sort", "chrome.drips"], `under ${at}: fill, over, filter, behind; an effect of no look left out`);
     assert.deepEqual(fx[1].opt, { pitch: 0.9 });
   }
-  assert.deepEqual(layerEffects({ ...L, type: "photo" }), [], "nor on a photo, yet");
+  assert.deepEqual(layerEffects({ ...L, type: "photo" }).map((e) => e.id), ["chrome.chrome", "riso.dots", "netart.sort", "chrome.drips"], "the same on a photo");
+  assert.deepEqual(layerEffects({ id: "l3", type: "text", lookFx: { "cyber.tint": 1 } }), [], "a photo's own effect on a text layer is left out");
+  assert.deepEqual(layerEffects({ id: "l3", type: "photo", lookFx: { "cyber.tint": 1 } }).map((e) => e.id), ["cyber.tint"]);
   assert.deepEqual(layerEffects({ id: "l2", type: "text" }), []);
   // without a canvas (the tests' stand-in) painting them does no harm
   paintEffects({ canvas: null }, { x0: 0, y0: 0, x1: 100, y1: 50, w: 100, h: 50 }, layerEffects(L), L, 1, [255, 0, 0]);

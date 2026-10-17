@@ -3032,24 +3032,30 @@ async function selfTest(dir) {
       S.cover.title = keepTitle; S.cover.layers = S.cover.layers.filter((l) => l !== tx && l !== tp); titleLayer.plate = false;
     }
     // the looks' effects on the user's own layers: every look that has some, all of them at full on a
-    // text layer and a sticker; then, under a look of none, effects borrowed from three others
+    // text layer, a sticker, a solid and (when the cover has a photo) a print of it; then, under a look
+    // of none, effects borrowed from three others
     report.layerFx = [];
     {
       const keepLook = S.profile.style.look, tx = newLayer("text", { text: "LAYER *效果*" }), sk = newLayer("asset", { ref: { kind: "sticker", id: "burst" }, tint: true });
-      tx.t.all = { ...tx.t.all, x: 0.64, y: 0.62, s: 0.9 }; sk.t.all = { ...sk.t.all, x: 0.86, y: 0.68, s: 0.45 };
-      S.cover.layers.push(tx, sk);
+      const so = newLayer("solid", { color: "#2a9df4" }), shot = S.cover.layers.find((l) => l.type === "photo" && l.pid), pr = shot ? newLayer("photo", { pid: shot.pid, outline: 6 }) : null;
+      tx.t.all = { ...tx.t.all, x: 0.64, y: 0.62, s: 0.9 }; sk.t.all = { ...sk.t.all, x: 0.86, y: 0.68, s: 0.45 }; so.t.all = { ...so.t.all, x: 0.5, y: 0.86, s: 0.2 };
+      if (pr) pr.t.all = { ...pr.t.all, x: 0.22, y: 0.3, s: 0.3, r: -4 };
+      const ours = [tx, sk, so, ...(pr ? [pr] : [])];
+      S.cover.layers.push(...ours);
       const shoot = async (name, look) => {
         S.profile.style.look = look;
         const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
-        report.layerFx.push({ name, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `layerfx-${name}.png` })), hits: [tx.id, sk.id].map((id) => !!cv._hits.find((h) => h.id === id)) });
+        report.layerFx.push({ name, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `layerfx-${name}.png` })), hits: ours.map((L) => !!cv._hits.find((h) => h.id === L.id)) });
       };
       for (const id of LOOK_IDS.filter((k) => (LOOKS[k].elementFx || []).length)) {
-        for (const L of [tx, sk]) L.lookFx = Object.fromEntries(effectsFor(id, L.type).map((e) => [`${id}.${e.key}`, 1]));
+        for (const L of ours) L.lookFx = Object.fromEntries(effectsFor(id, L.type).map((e) => [`${id}.${e.key}`, 1]));
         await shoot(id, id);
       }
+      for (const L of ours) L.lookFx = {};
       tx.lookFx = { "chrome.chrome": 1, "chrome.drips": 0.8, "riso.shift": 0.6 }; sk.lookFx = { "netart.dither": 0.7, "netart.sort": 0.8, "riso.dots": 0.6, "riso.dots:pitch": 1 };
+      so.lookFx = { "velvet.check": 0.8, "court.varsity": 0.7 }; if (pr) pr.lookFx = { "cyano.duo": 1, "toon.burst": 0.5 };
       await shoot("borrowed", "velvet");
-      S.profile.style.look = keepLook; S.cover.layers = S.cover.layers.filter((l) => l !== tx && l !== sk);
+      S.profile.style.look = keepLook; S.cover.layers = S.cover.layers.filter((l) => !ours.includes(l));
     }
     // the perspective with corners of its own, dragged far: the lettering follows the quad
     titleLayer.fx = "taper"; titleLayer.warp = [[0, 0], [-0.05, 0.35], [0.08, -0.1], [0.04, 0]];

@@ -4974,25 +4974,36 @@ function keptLayer(ctx, slot, key, paint) {
 function glassWarp(ctx, amp, cell, glint, shade, ox = 0, oy = 0) {
   if ((amp <= 0 && glint <= 0 && shade <= 0) || !canPaint(ctx)) return;
   const x = workLike(ctx, "glass"); x.setTransform(1, 0, 0, 1, 0, 0); x.drawImage(ctx.canvas, 0, 0);
-  const W = x.canvas.width, H = x.canvas.height, m = ctx.getTransform(), k = Math.hypot(m.a, m.b) || 1, cp = cell * k;
-  const step = Math.max(2, Math.round(cp / 8)), gw = Math.ceil(W / step) + 2, gh = Math.ceil(H / step) + 2, hgt = new Float32Array(gw * gh), sd = seed * 7.31;
+  const W = x.canvas.width, H = x.canvas.height, m = ctx.getTransform(), k = Math.hypot(m.a, m.b) || 1;
+  const src = x.getImageData(0, 0, W, H), out = x.createImageData(W, H);
+  glassPixels(src.data, out.data, W, H, k, m.e, m.f, amp, cell, glint, shade, ox, oy);
+  x.putImageData(out, 0, 0);
+  inPixels(ctx, () => ctx.drawImage(x.canvas, 0, 0));
+}
+/**
+ * glassWarp's work on pixels: `s` read, `d` written, both W × H; k pixels per unit; (e, f) the pixel
+ * offset of the cover's origin (so the pattern stays fixed to the cover when only part of it is worked
+ * on); the rest as glassWarp's.
+ */
+function glassPixels(s, d, W, H, k, e, f, amp, cell, glint, shade, ox, oy) {
+  const cp = cell * k, step = Math.max(2, Math.round(cp / 8)), gw = Math.ceil(W / step) + 2, gh = Math.ceil(H / step) + 2, hgt = new Float32Array(gw * gh), sd = seed * 7.31;
   const hash = (i, j) => noise(i * 12.9898 + j * 78.233 + sd);
   const vn = (X, Y) => {
-    const i = Math.floor(X), j = Math.floor(Y), fx = X - i, fy = Y - j, s = fx * fx * (3 - 2 * fx), t = fy * fy * (3 - 2 * fy);
-    const a = hash(i, j), b = hash(i + 1, j), c = hash(i, j + 1), d = hash(i + 1, j + 1);
-    return a + (b - a) * s + (c - a) * t + (a - b - c + d) * s * t;
+    const i = Math.floor(X), j = Math.floor(Y), fx = X - i, fy = Y - j, u = fx * fx * (3 - 2 * fx), t = fy * fy * (3 - 2 * fy);
+    const a = hash(i, j), b = hash(i + 1, j), c = hash(i, j + 1), q = hash(i + 1, j + 1);
+    return a + (b - a) * u + (c - a) * t + (a - b - c + q) * u * t;
   };
   const near1 = (X, Y) => {   // the squared distance to the nearest of the points scattered one to a cell: a dimple round each
     const i = Math.floor(X), j = Math.floor(Y);
     let best = 9;
-    for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { const dx = X - (i + a + 0.15 + 0.7 * hash(i + a, j + b)), dy = Y - (j + b + 0.15 + 0.7 * hash(i + a + 71.3, j + b - 19.7)), d = dx * dx + dy * dy; if (d < best) best = d; }
+    for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { const dx = X - (i + a + 0.15 + 0.7 * hash(i + a, j + b)), dy = Y - (j + b + 0.15 + 0.7 * hash(i + a + 71.3, j + b - 19.7)), q = dx * dx + dy * dy; if (q < best) best = q; }
     return best;
   };
   // hammered glass: a dimple per cell, each a little lens with a sharp seam where it meets the next, on a slow wobble
-  for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) { const X = (i * step - m.e - ox * k) / cp, Y = (j * step - m.f - oy * k) / (cp * 1.3); hgt[j * gw + i] = 0.9 * near1(X, Y) + 0.35 * vn(X * 0.6 + 31.7, Y * 0.6 + 9.1); }
-  const gx = new Float32Array(gw * gh), gy = new Float32Array(gw * gh), f = cp / (2 * step);   // slopes, as rise per bump width
-  for (let j = 1; j < gh - 1; j++) for (let i = 1; i < gw - 1; i++) { const q = j * gw + i; gx[q] = (hgt[q + 1] - hgt[q - 1]) * f; gy[q] = (hgt[q + gw] - hgt[q - gw]) * f; }
-  const src = x.getImageData(0, 0, W, H), s = src.data, out = x.createImageData(W, H), d = out.data, A = amp * k, st = fast ? 2 : 1, G = glint * 1.4, D = shade * 1.1, R = (glint + shade) * 0.08;
+  for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) { const X = (i * step - e - ox * k) / cp, Y = (j * step - f - oy * k) / (cp * 1.3); hgt[j * gw + i] = 0.9 * near1(X, Y) + 0.35 * vn(X * 0.6 + 31.7, Y * 0.6 + 9.1); }
+  const gx = new Float32Array(gw * gh), gy = new Float32Array(gw * gh), sl = cp / (2 * step);   // slopes, as rise per bump width
+  for (let j = 1; j < gh - 1; j++) for (let i = 1; i < gw - 1; i++) { const q = j * gw + i; gx[q] = (hgt[q + 1] - hgt[q - 1]) * sl; gy[q] = (hgt[q + gw] - hgt[q - gw]) * sl; }
+  const A = amp * k, st = fast ? 2 : 1, G = glint * 1.4, D = shade * 1.1, R = (glint + shade) * 0.08;
   for (let py = 0; py < H; py += st) {
     const fy = py / step, j0 = fy | 0, ty = fy - j0;
     for (let px = 0; px < W; px += st) {
@@ -5003,15 +5014,13 @@ function glassWarp(ctx, amp, cell, glint, shade, ox = 0, oy = 0) {
       X = X < 0 ? 0 : X >= W ? W - 1 : X; Y = Y < 0 ? 0 : Y >= H ? H - 1 : Y;
       const si = (Y * W + X) * 4, lit = sx * 0.55 + sy * 0.83;   // the slope turned toward the light
       let r = s[si], g = s[si + 1], b = s[si + 2];
-      let e = lit * R;   // every dimple in a little relief, then a glint on the rim facing the light, a dark line on the one away
-      if (lit > 0.3) e += (lit - 0.3) * G; else if (lit < -0.4) e -= (-lit - 0.4) * D;
-      if (e > 0) { e = Math.min(1, e); r += (255 - r) * e; g += (255 - g) * e; b += (255 - b) * e; }
-      else if (e < 0) { e = Math.min(0.85, -e); r *= 1 - e; g *= 1 - e; b *= 1 - e; }
-      for (let v = 0; v < st && py + v < H; v++) for (let u = 0; u < st && px + u < W; u++) { const di = ((py + v) * W + px + u) * 4; d[di] = r; d[di + 1] = g; d[di + 2] = b; d[di + 3] = s[si + 3]; }
+      let v = lit * R;   // every dimple in a little relief, then a glint on the rim facing the light, a dark line on the one away
+      if (lit > 0.3) v += (lit - 0.3) * G; else if (lit < -0.4) v -= (-lit - 0.4) * D;
+      if (v > 0) { v = Math.min(1, v); r += (255 - r) * v; g += (255 - g) * v; b += (255 - b) * v; }
+      else if (v < 0) { v = Math.min(0.85, -v); r *= 1 - v; g *= 1 - v; b *= 1 - v; }
+      for (let yy = 0; yy < st && py + yy < H; yy++) for (let xx = 0; xx < st && px + xx < W; xx++) { const di = ((py + yy) * W + px + xx) * 4; d[di] = r; d[di + 1] = g; d[di + 2] = b; d[di + 3] = s[si + 3]; }
     }
   }
-  x.putImageData(out, 0, 0);
-  inPixels(ctx, () => ctx.drawImage(x.canvas, 0, 0));
 }
 
 // ====================================================================== verse: the comic book come to life
@@ -6151,8 +6160,8 @@ export const LOOK_IDS = Object.keys(LOOKS);
 
 /** The order every layer's effects are painted in. */
 export const FX_STAGES = ["fill", "over", "filter", "behind"];
-/** The layer types the effects are open to so far. */
-export const FX_TYPES = ["text", "asset"];
+/** The layer types the effects are open to: the user's own. */
+export const FX_TYPES = ["text", "asset", "photo", "solid"];
 const FX_ALL = ["text", "asset", "photo", "solid"];
 /** The effects a look opens to a type of layer. */
 export const effectsFor = (look, type) => ((LOOKS[look] && LOOKS[look].elementFx) || []).filter((e) => e.for.includes(type) && FX_TYPES.includes(type));
@@ -6237,7 +6246,7 @@ riso.elementFx = [
     /** The pink plate printed a little one way and the blue the other, showing as fringes either side of the layer's own ink. */
     paint(x, B, a, E) {
       const d = (2 + 9 * a) * E.k, src = region(x, B, "fxA");
-      x.globalCompositeOperation = "destination-over"; x.globalAlpha = Math.min(1, a * 4) * 0.9;
+      x.globalCompositeOperation = "destination-over"; x.globalAlpha = Math.min(1, a * 2) * 0.9;
       x.drawImage(shapeIn(src, RISO.pink, "fxP"), B.x0 + d, B.y0 + d * 0.4); x.drawImage(shapeIn(src, RISO.blue, "fxQ"), B.x0 - d * 0.7, B.y0 - d * 0.3);
     } },
   { key: "dots", name: { zh: "网点", en: "Halftone" }, for: FX_ALL, stage: "over", sub: [{ key: "pitch", name: { zh: "网点粗细", en: "Halftone size" }, def: 0.4 }],
@@ -6291,30 +6300,8 @@ chrome.elementFx = [
       x.globalAlpha = 0.8 * a; x.fillRect(B.x0, y, B.w, bh);
     } },
   { key: "drips", name: { zh: "熔滴", en: "Drips" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ b: B.h * 0.65 + 14 * k }),
-    /**
-     * Drops running down from the layer's lowest edges, each in the colour the layer has there, with a
-     * highlight down it. Without reading a pixel back: the layer is smeared downward — the canvas laid
-     * behind itself 1, 2, 4, 8… pixels lower, so in a few steps every pixel below the layer's edge takes the
-     * colour of the edge above it — the smear cut down to the drops, and the drops laid behind the layer.
-     */
-    paint(x, B, a, E) {
-      const len = B.h * 0.6 * a + 10 * E.k, H = Math.ceil(B.h + len), src = region(x, B, "fxA"), c = fxCanvas("fxDrip", B.w, H);
-      const g = c.getContext("2d");
-      g.globalCompositeOperation = "source-over"; g.globalAlpha = 1; g.clearRect(0, 0, B.w, H); g.drawImage(src, 0, 0);
-      g.globalCompositeOperation = "destination-over";
-      for (let d = 1; d < len; d *= 2) g.drawImage(c, 0, d);
-      g.globalCompositeOperation = "destination-in"; g.fillStyle = "#fff"; g.beginPath();   // the drops: from inside the layer down past its edge, of uneven length, a round end
-      const n = 3 + 14 * a, hl = [];
-      for (let k = 0; k < Math.ceil(n); k++) {
-        const cx = B.w * E.R(k * 2.3 + 11), dw = Math.max(2, (3 + E.R(k * 3.7 + 12) * 7) * E.k) * (k < Math.floor(n) ? 1 : clamp(n - k)), top = B.h * (0.2 + 0.3 * E.R(k * 5.1 + 14)), bottom = B.h + len * (0.15 + 0.85 * E.R(k * 4.3 + 13)) - dw;
-        rounded(g, cx - dw / 2, top, dw, bottom - top, dw / 2); g.moveTo(cx + dw * 0.68, bottom); g.arc(cx, bottom, dw * 0.68, 0, TAU);
-        hl.push([cx - dw * 0.18, top, dw * 0.2, bottom - top]);
-      }
-      g.fill();
-      g.globalCompositeOperation = "source-atop"; g.fillStyle = "rgba(255,255,255,0.45)";   // a highlight down each
-      for (const [hx, ht, hw, hh] of hl) g.fillRect(hx, ht, hw, hh);
-      x.globalCompositeOperation = "destination-over"; x.drawImage(c, B.x0, B.y0);
-    } },
+    /** Drops running down from the layer's lowest edges, each in the colour the layer has there, with a highlight down it (see dripsBehind). */
+    paint(x, B, a, E) { dripsBehind(x, B, a, E, null, 1); } },
   { key: "glitch", name: { zh: "故障切片", en: "Glitch slices" }, for: FX_ALL, stage: "filter", reach: (B) => ({ l: B.w * 0.11, r: B.w * 0.11 }),
     /** Slices of the layer slid sideways, a few with a bar of red, cyan, green or the channel colour. */
     paint(x, B, a, E) { slideBands(x, B, a, E, 2, true); } },
@@ -6362,6 +6349,745 @@ netart.elementFx = [
   { key: "shift", name: { zh: "扫描错行", en: "Scan shift" }, for: FX_ALL, stage: "filter", reach: (B) => ({ l: B.w * 0.11, r: B.w * 0.11 }),
     /** Whole bands of the layer slid sideways. */
     paint(x, B, a, E) { slideBands(x, B, a, E, 1, false); } },
+];
+
+// ---------- shared painters for the looks' layer effects (every one works in B, the layer's box, in canvas pixels)
+const FX_PHOTO = ["photo"];
+/** A copy of src softened by drawing it down `f` times smaller in two steps (so it does not sparkle): laid on enlarged, it is blurred. */
+function softened(src, f, slot) {
+  const g1 = Math.min(f, 4), mw = Math.max(1, Math.round(src.width / g1)), mh = Math.max(1, Math.round(src.height / g1)), sw = Math.max(1, Math.round(src.width / f)), sh = Math.max(1, Math.round(src.height / f));
+  const mid = fxCanvas(slot + "m", mw, mh), small = fxCanvas(slot, sw, sh), m = mid.getContext("2d"), s = small.getContext("2d");
+  for (const g of [m, s]) { g.globalCompositeOperation = "copy"; g.globalAlpha = 1; g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high"; }
+  m.drawImage(src, 0, 0, mw, mh); s.drawImage(mid, 0, 0, sw, sh);
+  return small;
+}
+/** src with `pad` px of clear canvas all round it (kept per slot). */
+function padded(src, pad, slot) {
+  const c = fxCanvas(slot, src.width + 2 * pad, src.height + 2 * pad), g = c.getContext("2d");
+  g.globalCompositeOperation = "source-over"; g.globalAlpha = 1; g.clearRect(0, 0, c.width, c.height); g.drawImage(src, pad, pad);
+  return c;
+}
+/** A glow round the layer: its shape in `colour` (the layer itself without one) spread R px out, laid behind it at `alpha`, moved by (dx, dy). */
+function glowBehind(x, B, src, R, alpha, colour, dx = 0, dy = 0, mode = "destination-over") {
+  if (R < 1 || alpha <= 0) return;
+  const pad = Math.ceil(R * 1.6) + 2, c = padded(colour ? shapeIn(src, colour, "fxGs") : src, pad, "fxG"), soft = softened(c, Math.max(2, R / 2.2), "fxGb");
+  x.save(); x.globalCompositeOperation = mode; x.globalAlpha = Math.min(1, alpha); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high";
+  x.drawImage(soft, B.x0 - pad + dx, B.y0 - pad + dy, c.width, c.height);
+  x.restore();
+}
+/** Paints draw(g) on a canvas of B's size, keeps it to the layer's own pixels and lays it on in `mode`: a texture never outside the layer. */
+function onLayer(x, B, src, mode, alpha, draw) {
+  const c = fxCanvas("fxOn", B.w, B.h), g = c.getContext("2d");
+  g.globalCompositeOperation = "source-over"; g.globalAlpha = 1; g.clearRect(0, 0, B.w, B.h);
+  g.save(); draw(g); g.restore();
+  g.globalCompositeOperation = "destination-in"; g.drawImage(src, 0, 0);
+  x.save(); x.globalCompositeOperation = mode; x.globalAlpha = Math.min(1, alpha); x.drawImage(c, B.x0, B.y0); x.restore();
+}
+/** A fill of dots `p` px apart, radius r, on a lattice turned by `turn` degrees (tiles kept). */
+function dotFill(g, colour, p, r, turn = 45) {
+  p = Math.max(3, Math.round(p)); r = Math.max(0.4, Math.round(r * 10) / 10);
+  const key = `fxDotTile|${colour.map(Math.round).join()}|${p}|${r}`;
+  let t = WORK[key];
+  if (!t) { t = WORK[key] = document.createElement("canvas"); t.width = t.height = p; const c = t.getContext("2d"); c.fillStyle = css(colour); c.beginPath(); c.arc(p / 2, p / 2, r, 0, TAU); c.fill(); }
+  const pat = g.createPattern(t, "repeat");
+  if (pat && pat.setTransform && typeof DOMMatrix !== "undefined" && turn) pat.setTransform(new DOMMatrix().rotateSelf(turn));
+  return pat;
+}
+/** A gradient over B's size, clear toward its upper left and solid toward its lower right: the side turned from the light. */
+function shadeSide(g, w, h) { const gr = g.createLinearGradient(0, 0, w, h); gr.addColorStop(0, "rgba(0,0,0,0)"); gr.addColorStop(0.42, "rgba(0,0,0,0)"); gr.addColorStop(1, "rgba(0,0,0,1)"); return gr; }
+/** Every pixel of the layer in B through f(r, g, b, y, out) — y 0 at B's top, 1 at its foot — mixed in by a; alpha kept. */
+function eachPixel(x, B, a, f) {
+  const img = x.getImageData(B.x0, B.y0, B.w, B.h), d = img.data, b = 1 - a, o = [0, 0, 0];
+  for (let i = 0, n = d.length; i < n; i += 4) {
+    if (!d[i + 3]) continue;
+    f(d[i], d[i + 1], d[i + 2], Math.floor(i / 4 / B.w) / B.h, o);
+    d[i] = d[i] * b + o[0] * a; d[i + 1] = d[i + 1] * b + o[1] * a; d[i + 2] = d[i + 2] * b + o[2] * a;
+  }
+  x.putImageData(img, B.x0, B.y0);
+}
+/** A painter mapping the layer by lightness onto colour stops (see toneTable), stepping between them with `hard`. */
+const tonesFx = (stopsOf, hard = 0) => (x, B, a, E) => {
+  const lut = toneTable(stopsOf(E), hard);
+  eachPixel(x, B, a, (r, g, b, y, o) => { const j = ((r * 54 + g * 183 + b * 19) >> 8) * 3; o[0] = lut[j]; o[1] = lut[j + 1]; o[2] = lut[j + 2]; });
+};
+/** A painter turning the layer one flat colour or fill, its shape kept. */
+const flatFx = (fillOf) => (x, B, a, E) => {
+  x.beginPath(); x.rect(B.x0, B.y0, B.w, B.h); x.clip();
+  x.globalCompositeOperation = "source-atop"; x.globalAlpha = a; x.fillStyle = fillOf(x, B, E); x.fillRect(B.x0, B.y0, B.w, B.h);
+};
+/** Knocks the ground through the layer in worn patches: the wear texture at `zoom`, shifted by the layer's own random amount. */
+function knockWorn(x, B, a, E, zoom) {
+  const W = x.canvas.width, H = x.canvas.height, tex = wornTexture(W / E.k, H / E.k), ox = (E.R(91) - 0.5) * W * 0.3, oy = (E.R(92) - 0.5) * H * 0.3;
+  x.save(); x.beginPath(); x.rect(B.x0, B.y0, B.w, B.h); x.clip();
+  x.globalCompositeOperation = "destination-out"; x.globalAlpha = Math.min(1, a);
+  x.drawImage(tex, ox - (W * (zoom - 1)) / 2, oy - (H * (zoom - 1)) / 2, W * zoom, H * zoom);
+  x.restore();
+}
+/** A painter laying a halftone of colour(E) over the layer — dots `pitch(E)` px apart growing with the strength — in `mode`; with `shade`, on its shaded side only. */
+const dotsFx = ({ colour, pitch, size, mode = "multiply", shade = false, turn = 45 }) => (x, B, a, E) => {
+  const p = pitch(E), src = region(x, B, "fxA");
+  onLayer(x, B, src, mode, 1, (g) => {
+    g.fillStyle = dotFill(g, colour(E), p, size(p, a), turn); g.fillRect(0, 0, B.w, B.h);
+    if (shade) { g.globalCompositeOperation = "destination-in"; g.fillStyle = shadeSide(g, B.w, B.h); g.fillRect(0, 0, B.w, B.h); }
+  });
+};
+/** Copies of src trailing off (dx, dy) px apart, each fainter, laid in `mode` (behind the layer, or over it). */
+function trail(x, B, src, n, dx, dy, alpha, mode) {
+  x.save(); x.globalCompositeOperation = mode;
+  for (let i = n; i >= 1; i--) { x.globalAlpha = Math.min(1, alpha * (1 - i / (n + 1))); x.drawImage(src, B.x0 + dx * i, B.y0 + dy * i); }
+  x.restore();
+}
+/** The layer in one channel's worth of colour: src multiplied by `keep`, its shape kept (a canvas per slot). */
+function plateOf(src, keep, slot) {
+  const c = fxCanvas(slot, src.width, src.height), g = c.getContext("2d");
+  g.globalCompositeOperation = "copy"; g.drawImage(src, 0, 0); g.globalCompositeOperation = "multiply"; g.fillStyle = css(keep); g.fillRect(0, 0, c.width, c.height);
+  g.globalCompositeOperation = "destination-in"; g.drawImage(src, 0, 0);
+  return c;
+}
+/**
+ * The layer taken apart into plates and laid back added together, each moved: `plates` is
+ * [[colour kept, dx, dy, scale about the middle]…], covering red, green and blue between them.
+ */
+function rePlate(x, B, plates) {
+  const src = region(x, B, "fxA"), made = plates.map(([keep], i) => plateOf(src, keep, "fxPl" + i));
+  x.clearRect(B.x0, B.y0, B.w, B.h); x.save(); x.globalCompositeOperation = "lighter";
+  plates.forEach(([, dx, dy, s = 1], i) => { const w = B.w * s, h = B.h * s; x.drawImage(made[i], B.x0 + (B.w - w) / 2 + dx, B.y0 + (B.h - h) / 2 + dy, w, h); });
+  x.restore();
+}
+/** Clears B and lays src back cut in horizontal bands, band i moved by shift(i, n) px (n bands, `cuts` the band edges as fractions of B's height). */
+function cutBands(x, B, src, cuts, shift) {
+  x.clearRect(B.x0, B.y0, B.w, B.h);
+  for (let i = 0; i < cuts.length - 1; i++) { const y0 = Math.round(cuts[i] * B.h), y1 = Math.round(cuts[i + 1] * B.h); if (y1 > y0) x.drawImage(src, 0, y0, B.w, y1 - y0, B.x0 + shift(i), B.y0 + y0, B.w, y1 - y0); }
+}
+/** The layer read in square cells of `cs` px, one pixel a cell (averaged as it is drawn down): [data, cols, rows]. */
+function cellsOf(x, B, cs) {
+  const cols = Math.max(1, Math.ceil(B.w / cs)), rows = Math.max(1, Math.ceil(B.h / cs)), t = fxCanvas("fxCells", cols, rows), tg = t.getContext("2d");
+  tg.globalCompositeOperation = "copy"; tg.imageSmoothingEnabled = true; tg.imageSmoothingQuality = "high";
+  tg.drawImage(x.canvas, B.x0, B.y0, cols * cs, rows * cs, 0, 0, cols, rows);
+  return [tg.getImageData(0, 0, cols, rows).data, cols, rows];
+}
+const lumOf = (d, q) => (d[q] * 54 + d[q + 1] * 183 + d[q + 2] * 19) / 65280;
+/**
+ * Drops running down from the layer's lowest edges, in `colour` (or, without one, the colour of the edge
+ * above each), with a highlight down it — the layer smeared downward by laying the canvas behind itself
+ * 1, 2, 4, 8… px lower, cut down to drops of `width` (× the unit) and laid behind the layer.
+ */
+function dripsBehind(x, B, a, E, colour, width) {
+  const len = B.h * 0.6 * a + 10 * E.k, H = Math.ceil(B.h + len), src = region(x, B, "fxA"), c = fxCanvas("fxDrip", B.w, H), g = c.getContext("2d");
+  g.globalCompositeOperation = "source-over"; g.globalAlpha = 1; g.clearRect(0, 0, B.w, H); g.drawImage(colour ? shapeIn(src, colour, "fxDs") : src, 0, 0);
+  g.globalCompositeOperation = "destination-over";
+  for (let d = 1; d < len; d *= 2) g.drawImage(c, 0, d);
+  g.globalCompositeOperation = "destination-in"; g.fillStyle = "#fff"; g.beginPath();
+  const n = 3 + 14 * a, hl = [];
+  for (let k = 0; k < Math.ceil(n); k++) {
+    const cx = B.w * E.R(k * 2.3 + 11), dw = Math.max(2, (3 + E.R(k * 3.7 + 12) * 7) * E.k * width) * (k < Math.floor(n) ? 1 : clamp(n - k)), top = B.h * (0.2 + 0.3 * E.R(k * 5.1 + 14)), bottom = B.h + len * (0.15 + 0.85 * E.R(k * 4.3 + 13)) - dw;
+    rounded(g, cx - dw / 2, top, dw, bottom - top, dw / 2); g.moveTo(cx + dw * 0.68, bottom); g.arc(cx, bottom, dw * 0.68, 0, TAU);
+    hl.push([cx - dw * 0.18, top, dw * 0.2, bottom - top]);
+  }
+  g.fill();
+  g.globalCompositeOperation = "source-atop"; g.fillStyle = "rgba(255,255,255,0.45)";
+  for (const [hx, ht, hw, hh] of hl) g.fillRect(hx, ht, hw, hh);
+  x.save(); x.globalCompositeOperation = "destination-over"; x.drawImage(c, B.x0, B.y0); x.restore();
+}
+/** Rings of colour round the layer, behind it: [[colour, distance in px]…], the first nearest. */
+function ringsBehind(x, B, src, rings) {
+  x.save(); x.globalCompositeOperation = "destination-over";
+  rings.forEach(([colour, r], n) => { const s = shapeIn(src, colour, "fxRing" + n); for (let i = 0; i < 16; i++) { const t = (i / 16) * TAU; x.drawImage(s, B.x0 + Math.cos(t) * r, B.y0 + Math.sin(t) * r); } });
+  x.restore();
+}
+/** The layer's own colours pushed toward fewer steps (4 to a channel), mixed in by a: posterized by degrees. */
+const posterize = (x, B, a) => eachPixel(x, B, a, (r, g, b, y, o) => { o[0] = Math.round(r / 85) * 85; o[1] = Math.round(g / 85) * 85; o[2] = Math.round(b / 85) * 85; });
+/** A halftone of the layer itself: its own tone in dots of `ink` on `paper` (each colour, or null for none), `pitch` px apart. */
+function halftoneOf(x, B, a, pitch, ink, paper) {
+  const [d, cols, rows] = cellsOf(x, B, pitch);
+  x.save();
+  x.globalCompositeOperation = "source-atop"; x.globalAlpha = a;
+  if (paper) { x.fillStyle = css(paper); x.fillRect(B.x0, B.y0, B.w, B.h); }
+  x.fillStyle = css(ink); x.beginPath();
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) { const q = (j * cols + i) * 4; if (d[q + 3] < 60) continue; const r = pitch * 0.62 * Math.sqrt(1 - lumOf(d, q)); if (r < 0.3) continue; const cx = B.x0 + (i + 0.5) * pitch, cy = B.y0 + (j + 0.5) * pitch; x.moveTo(cx + r, cy); x.arc(cx, cy, r, 0, TAU); }
+  x.fill(); x.restore();
+}
+/** A painter lighting and shading the layer's own edges, as light from the upper left would: copies of its shape a step down-right darken, a step up-left lighten. */
+const bevelFx = (lightA, shadeA, step) => (x, B, a, E) => {
+  const src = region(x, B, "fxA"), d = Math.max(1, Math.min(B.w, B.h) * step), white = shapeIn(src, [255, 255, 255], "fxW"), black = shapeIn(src, [0, 0, 0], "fxK");
+  x.beginPath(); x.rect(B.x0, B.y0, B.w, B.h); x.clip(); x.globalCompositeOperation = "source-atop";
+  for (let i = 1; i <= 2; i++) { x.globalAlpha = a * shadeA; x.drawImage(black, B.x0 + d * i * 1.5, B.y0 + d * i * 1.5); x.globalAlpha = a * lightA; x.drawImage(white, B.x0 - d * i * 1.5, B.y0 - d * i * 1.5); }
+};
+
+// ---------- each look's effects
+cel.elementFx = [
+  { key: "tone", name: { zh: "网点阴影", en: "Screentone shade" }, for: FX_ALL, stage: "over",
+    /** Screentone dots of ink over the side turned from the light, as a cel's shading. */
+    paint: dotsFx({ colour: () => [7, 7, 12], pitch: (E) => 7 * E.k, size: (p, a) => p * (0.1 + 0.26 * a), shade: true }) },
+];
+cyber.elementFx = [
+  { key: "split", name: { zh: "色彩错位", en: "Colour split" }, for: FX_ALL, stage: "filter", reach: (B, k) => ({ l: 12 * k, r: 12 * k }),
+    /** Red and cyan pulled apart sideways, fringing the layer's edges. */
+    paint(x, B, a, E) { const d = (1.5 + 8 * a) * E.k; rePlate(x, B, [[[255, 0, 0], -d, 0], [[0, 255, 255], d, 0]]); } },
+  { key: "tear", name: { zh: "信号撕裂", en: "Signal tear" }, for: FX_ALL, stage: "filter", reach: (B) => ({ l: B.w * 0.2, r: B.w * 0.2 }),
+    /** A few thick bands of the layer torn sideways, a red line along the top of each, a cyan one along its foot. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA"), n = 1 + Math.round(4 * a), cuts = [0];
+      for (let i = 0; i < n; i++) cuts.push(clamp((i + 0.3 + E.R(i * 2.3 + 41) * 0.5) / n), clamp((i + 0.55 + E.R(i * 3.1 + 42) * 0.4) / n));
+      cuts.push(1); cuts.sort((p, q) => p - q);
+      const off = (i) => (i % 2 ? (E.R(i * 4.7 + 43) - 0.5) * B.w * 0.28 * (0.4 + a) : 0);
+      cutBands(x, B, src, cuts, off);
+      for (let i = 1; i < cuts.length - 1; i += 2) { const y0 = B.y0 + cuts[i] * B.h, y1 = B.y0 + cuts[i + 1] * B.h, dx = off(i); x.fillStyle = css(CY.red, 0.85); x.fillRect(B.x0 + dx, y0, B.w, Math.max(1, E.k)); x.fillStyle = css(CY.cyan, 0.85); x.fillRect(B.x0 + dx, y1 - Math.max(1, E.k), B.w, Math.max(1, E.k)); }
+    } },
+  { key: "glow", name: { zh: "线条光晕", en: "Line glow" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 60 * k, t: 60 * k, r: 60 * k, b: 60 * k }),
+    /** The neon halo of the channel colour round the layer: a tight bright one, a wide faint one. */
+    paint(x, B, a, E) { const src = region(x, B, "fxA"), c = boost(E.C, 0.8), col = sat(c) < 0.2 ? CY.cyan : c; glowBehind(x, B, src, (3 + 8 * a) * E.k, Math.min(1, a * 2.5), col); glowBehind(x, B, src, (8 + 26 * a) * E.k, 0.8 * a, col); } },
+  { key: "tint", name: { zh: "照片染色", en: "Photo tint" }, for: FX_PHOTO, stage: "filter",
+    /** The photo pressed into the night and neon of the city: black, the channel colour, a white highlight. */
+    paint: tonesFx((E) => [[0, CY.deep], [0.45, mix(boost(E.C, 0.8), CY.deep, 0.4)], [0.78, boost(E.C, 0.8)], [1, CY.white]]) },
+];
+anime.elementFx = [
+  { key: "warm", name: { zh: "照片暖调", en: "Photo warmed" }, for: FX_PHOTO, stage: "filter",
+    /** The photo as an old print of a painted cel: warmer, its blacks lifted. */
+    paint(x, B, a) { eachPixel(x, B, a, (r, g, b, y, o) => { o[0] = Math.min(255, r * 0.96 + 18); o[1] = g * 0.9 + 14; o[2] = b * 0.76 + 16; }); } },
+];
+bluenote.elementFx = [
+  { key: "duo", name: { zh: "照片双色调", en: "Photo duotone" }, for: FX_PHOTO, stage: "filter",
+    /** The photo in two inks: black and the channel colour, the paper for its lights. */
+    paint: tonesFx((E) => [[0, BN.ink], [0.62, boost(E.C, 0.4)], [1, BN.paper]], 0.1) },
+  { key: "halftone", name: { zh: "照片网点", en: "Photo halftone" }, for: FX_PHOTO, stage: "over",
+    /** The photo screened as a coarse sleeve print: its own tones in dots of ink on paper. */
+    paint(x, B, a, E) { halftoneOf(x, B, a, 6 * E.k, BN.ink, BN.paper); } },
+];
+editorial.elementFx = [
+  { key: "mono", name: { zh: "黑白照片", en: "Black-and-white photo" }, for: FX_PHOTO, stage: "filter",
+    /** A neutral, even black and white, as a magazine prints a portrait. */
+    paint: tonesFx(() => [[0, [16, 16, 16]], [0.5, [128, 127, 125]], [1, [244, 242, 238]]]) },
+  { key: "spot", name: { zh: "照片专色", en: "Photo in spot colour" }, for: FX_PHOTO, stage: "filter",
+    /** The photo in black and one spot colour, the channel's. */
+    paint: tonesFx((E) => [[0, ED.ink], [0.55, boost(E.C, 0.5)], [1, ED.paper]], 0.15) },
+];
+songke.elementFx = [
+  { key: "wear", name: { zh: "刷印不匀", en: "Uneven printing" }, for: FX_ALL, stage: "over",
+    /** Where the block took too little ink: patches and specks through which the paper shows. */
+    paint(x, B, a, E) { knockWorn(x, B, a, E, 1.6); } },
+  { key: "seal", name: { zh: "朱砂印色", en: "Seal-red ink" }, for: FX_ALL, stage: "fill",
+    /** The layer printed in the cinnabar of a seal, the ink a little worn. */
+    paint(x, B, a, E) { flatFx(() => css(SONG.red))(x, B, a, E); knockWorn(x, B, a * 0.55, E, 0.7); } },
+];
+vivid.elementFx = [
+  { key: "vivid", name: { zh: "照片鲜艳度", en: "Photo vividness" }, for: FX_PHOTO, stage: "filter",
+    /** The photo as summer light shows it: its colours pushed further from grey, and warmed. */
+    paint(x, B, a) { eachPixel(x, B, a, (r, g, b, y, o) => { const l = 0.3 * r + 0.59 * g + 0.11 * b; o[0] = clamp(l + (r - l) * 1.6 + 10, 0, 255); o[1] = clamp(l + (g - l) * 1.6 + 2, 0, 255); o[2] = clamp(l + (b - l) * 1.6 - 8, 0, 255); }); } },
+];
+negative.elementFx = [
+  { key: "silhouette", name: { zh: "红黑剪影", en: "Red-and-black silhouette" }, for: FX_ALL, stage: "fill",
+    /** The layer cut as one flat shape: black on the light ground, red on the dark. */
+    paint: flatFx(() => css(dark ? NEG.red : NEG.black)) },
+  { key: "print", name: { zh: "丝网质感", en: "Screen-print texture" }, for: FX_ALL, stage: "over",
+    /** The ink pulled through a screen: fine specks where it did not cover. */
+    paint(x, B, a, E) { knockWorn(x, B, a * 0.9, E, 0.8); } },
+  { key: "duo", name: { zh: "照片红黑", en: "Photo in red and black" }, for: FX_PHOTO, stage: "filter",
+    /** The photo in black, red and cream, stepping between them. */
+    paint: tonesFx(() => [[0, NEG.black], [0.5, NEG.red], [1, NEG.cream]], 0.4) },
+];
+cinema.elementFx = [
+  { key: "silhouette", name: { zh: "剪影", en: "Silhouette" }, for: FX_ALL, stage: "fill",
+    /** The layer as a dark silhouette against the light, a little lighter toward its foot. */
+    paint: flatFx((x, B) => { const g = x.createLinearGradient(0, B.y0, 0, B.y1); g.addColorStop(0, css(dark ? [30, 27, 26] : CINE.soot)); g.addColorStop(1, css(dark ? [72, 58, 48] : [54, 46, 40])); return g; }) },
+  { key: "glow", name: { zh: "背光", en: "Back light" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 70 * k, t: 90 * k, r: 70 * k, b: 60 * k }),
+    /** Light from behind the layer spilling round it, warm on the dark ground. */
+    paint(x, B, a, E) { const R = (10 + 30 * a) * E.k; glowBehind(x, B, region(x, B, "fxA"), R, 0.9 * Math.min(1, a * 2.5), dark ? [255, 214, 160] : [255, 240, 210], 0, -R * 0.3); } },
+  { key: "grade", name: { zh: "照片调色", en: "Photo toning" }, for: FX_PHOTO, stage: "filter",
+    /** The photo as a film still: cool shadows, warm, muted lights. */
+    paint: tonesFx(() => [[0, [18, 22, 28]], [0.4, [72, 74, 72]], [0.75, [196, 170, 132]], [1, [244, 232, 210]]]) },
+];
+cyano.elementFx = [
+  { key: "white", name: { zh: "发光白影", en: "Glowing white figure" }, for: FX_ALL, stage: "fill",
+    /** The layer as the white a cyanotype leaves where light was held off. */
+    paint: flatFx(() => css(CYA.white)) },
+  { key: "spray", name: { zh: "喷枪柔雾", en: "Airbrush haze" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 70 * k, t: 70 * k, r: 70 * k, b: 70 * k }),
+    /** A soft spray of white round the layer, a few droplets flung further. */
+    paint(x, B, a, E) {
+      const R = (8 + 26 * a) * E.k;
+      glowBehind(x, B, region(x, B, "fxA"), R, 0.85 * Math.min(1, a * 2.5), CYA.white);
+      x.save(); x.globalCompositeOperation = "destination-over"; x.fillStyle = css(CYA.white, 0.7);
+      for (let k = 0, n = Math.round(80 * a); k < n; k++) { const t = E.R(k * 1.7 + 51) * TAU, s = 0.5 + 0.55 * E.R(k * 2.9 + 52), px = B.x0 + B.w / 2 + Math.cos(t) * (B.w / 2 + R * s), py = B.y0 + B.h / 2 + Math.sin(t) * (B.h / 2 + R * s); x.beginPath(); x.arc(px, py, (0.6 + E.R(k + 53) * 1.6) * E.k, 0, TAU); x.fill(); }
+      x.restore();
+    } },
+  { key: "halftone", name: { zh: "粗网点", en: "Coarse halftone" }, for: FX_ALL, stage: "over",
+    /** Coarse white dots over the layer, as the screen of a cheap print. */
+    paint: dotsFx({ colour: () => CYA.white, pitch: (E) => 12 * E.k, size: (p, a) => p * (0.08 + 0.3 * a), mode: "screen" }) },
+  { key: "duo", name: { zh: "照片蓝晒", en: "Photo as cyanotype" }, for: FX_PHOTO, stage: "filter",
+    /** The photo printed as a cyanotype: Prussian blue to white. */
+    paint: tonesFx(() => [[0, CYA.ink], [0.45, CYA.prussian], [0.8, CYA.pale], [1, CYA.white]]) },
+];
+monofilm.elementFx = [
+  { key: "ghost", name: { zh: "动态残影", en: "Motion ghost" }, for: FX_ALL, stage: "filter", reach: (B) => ({ r: B.w * 0.25, t: B.h * 0.05 }),
+    /** Faint afterimages of the layer left behind as it moved, to its right. */
+    paint(x, B, a, E) { trail(x, B, region(x, B, "fxA"), 3, B.w * 0.025 * (0.5 + a), -B.h * 0.008, 0.18 + 0.4 * a, "destination-over"); } },
+  { key: "mono", name: { zh: "黑白照片", en: "Black-and-white photo" }, for: FX_PHOTO, stage: "filter",
+    /** A contrasty black and white, as on a fast film. */
+    paint: tonesFx(() => [[0, [8, 8, 8]], [0.35, [58, 58, 56]], [0.7, [188, 186, 182]], [1, [246, 244, 240]]]) },
+  { key: "motion", name: { zh: "照片动态模糊", en: "Photo motion blur" }, for: FX_PHOTO, stage: "filter", reach: (B) => ({ l: B.w * 0.06, r: B.w * 0.06 }),
+    /** The photo smeared sideways, as by a panning camera. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA"), n = 8, step = (B.w * 0.006 + 2 * E.k) * a, c = fxCanvas("fxMo", B.w, B.h), g = c.getContext("2d");
+      g.globalCompositeOperation = "source-over"; g.clearRect(0, 0, B.w, B.h);
+      for (let i = 0; i <= 2 * n; i++) { g.globalAlpha = 1 / (i + 1); g.drawImage(src, (i - n) * step, 0); }
+      x.save(); x.globalAlpha = Math.min(1, a * 1.4); x.drawImage(c, B.x0, B.y0); x.restore();
+    } },
+  { key: "collage", name: { zh: "照片拼贴", en: "Photo collage" }, for: FX_PHOTO, stage: "filter", reach: (B) => ({ l: B.w * 0.04, t: B.h * 0.06, r: B.w * 0.04, b: B.h * 0.06 }),
+    /** The photo cut into three prints, each a little off and turned, with a white border. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA");
+      x.clearRect(B.x0, B.y0, B.w, B.h);
+      for (let i = 0; i < 3; i++) {
+        const w = B.w / 3, cx = B.x0 + w * (i + 0.5), cy = B.y0 + B.h / 2, r = (E.R(i * 2.7 + 61) - 0.5) * 0.08 * a, dy = (E.R(i * 3.3 + 62) - 0.5) * B.h * 0.08 * a, bd = (2 + 8 * a) * E.k;
+        x.save(); x.translate(cx, cy + dy); x.rotate(r); x.fillStyle = css(MF.white); x.fillRect(-w / 2 + bd * 0.3 - bd, -B.h / 2 - bd, w - bd * 0.6 + bd * 2, B.h + bd * 2);
+        x.drawImage(src, w * i + bd * 0.3, 0, w - bd * 0.6, B.h, -w / 2 + bd * 0.3, -B.h / 2, w - bd * 0.6, B.h); x.restore();
+      }
+    } },
+];
+typo.elementFx = [
+  { key: "slice", name: { zh: "切割错位", en: "Slice" }, for: FX_ALL, stage: "filter", reach: (B) => ({ l: B.w * 0.12, r: B.w * 0.12 }),
+    /** The layer cut across into bands, every other one slid the other way. */
+    paint(x, B, a, E) {
+      const n = 2 + Math.round(4 * a), cuts = Array.from({ length: n + 1 }, (_, i) => (i === 0 ? 0 : i === n ? 1 : clamp((i + (E.R(i * 1.9 + 71) - 0.5) * 0.5) / n))), d = B.w * 0.05 * (0.3 + a);
+      cutBands(x, B, region(x, B, "fxA"), cuts, (i) => (i % 2 ? d : -d * 0.6));
+    } },
+  { key: "echo", name: { zh: "层叠残影", en: "Echo" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ r: 40 * k, b: 40 * k }),
+    /** Copies of the layer's shape stacked down and to the right behind it, each fainter. */
+    paint(x, B, a, E) { const s = shapeIn(region(x, B, "fxA"), dark ? [236, 234, 230] : TY.ink, "fxEc"), n = 2 + Math.round(3 * a), d = (3 + 4 * a) * E.k; trail(x, B, s, n, d, d, 0.55 + 0.3 * a, "destination-over"); } },
+  { key: "scatter", name: { zh: "粒子消散", en: "Particle scatter" }, for: FX_ALL, stage: "filter", reach: (B) => ({ t: B.h * 0.2, r: B.w * 0.4, b: B.h * 0.2 }),
+    /** The layer's right side breaking up into square particles drifting off to the right. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA"), cs = Math.max(3, Math.round(Math.min(B.w, B.h) * 0.06)), cols = Math.ceil(B.w / cs), rows = Math.ceil(B.h / cs), from = 1 - 0.75 * a;
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+        const u = i / cols, q = j * cols + i;
+        if (u < from || E.R(q * 1.3 + 81) > (u - from) / (1 - from + 1e-6) * 1.4) continue;
+        const sx = i * cs, sy = j * cs, f = (u - from) / (1 - from + 1e-6), s = cs * (1 - 0.5 * f * E.R(q * 2.1 + 82));
+        x.clearRect(B.x0 + sx, B.y0 + sy, cs, cs);
+        x.drawImage(src, sx, sy, cs, cs, B.x0 + sx + f * B.w * 0.35 * E.R(q * 2.9 + 83), B.y0 + sy + (E.R(q * 3.7 + 84) - 0.5) * cs * 4 * f, s, s);
+      }
+    } },
+  { key: "brush", name: { zh: "干笔刷痕", en: "Dry brush" }, for: FX_ALL, stage: "over",
+    /** Streaks where a dry brush skipped across the layer. */
+    paint(x, B, a, E) {
+      x.save(); x.beginPath(); x.rect(B.x0, B.y0, B.w, B.h); x.clip(); x.globalCompositeOperation = "destination-out"; x.lineCap = "round";
+      for (let k = 0, n = Math.round(10 + 60 * a); k < n; k++) { const y = B.y0 + B.h * E.R(k * 1.7 + 91), x0 = B.x0 + B.w * E.R(k * 2.3 + 92) * 0.8, len = B.w * (0.1 + E.R(k * 3.1 + 93) * 0.5); x.globalAlpha = 0.5 + 0.5 * E.R(k + 94); x.lineWidth = (0.6 + E.R(k * 4.1 + 95) * 1.8) * E.k; x.beginPath(); x.moveTo(x0, y); x.lineTo(x0 + len, y + (E.R(k * 5.3 + 96) - 0.5) * 3 * E.k); x.stroke(); }
+      x.restore();
+    } },
+  { key: "hard", name: { zh: "黑白高反差", en: "Hard black and white" }, for: FX_PHOTO, stage: "filter",
+    /** The photo in black and white, all but thresholded. */
+    paint: tonesFx(() => [[0, [0, 0, 0]], [0.5, [128, 128, 128]], [1, [255, 255, 255]]], 0.85) },
+];
+toon.elementFx = [
+  { key: "silhouette", name: { zh: "剪影", en: "Silhouette" }, for: FX_ALL, stage: "fill",
+    /** The layer as a silhouette in the poster's night ink. */
+    paint: flatFx(() => css(TOON.ink)) },
+  { key: "burst", name: { zh: "放射光芒", en: "Sunburst" }, for: FX_ALL, stage: "behind", reach: (B) => { const r = Math.hypot(B.w, B.h) * 0.6; return { l: r, t: r, r, b: r }; },
+    /** Rays of sunset colour fanning out behind the layer from its middle and fading at their tips, reaching further as it rises. */
+    paint(x, B, a, E) {
+      const cx = B.x0 + B.w / 2, cy = B.y0 + B.h / 2, d = Math.hypot(B.w, B.h) / 2, R = d * (1.05 + 0.55 * a), n = 18, t0 = E.R(101) * TAU, g = x.createRadialGradient(cx, cy, d * 0.5, cx, cy, R);
+      g.addColorStop(0, css(TOON.sun, 1)); g.addColorStop(0.55, css(TOON.sun, 0.75)); g.addColorStop(1, css(TOON.sun, 0));
+      x.save(); x.globalCompositeOperation = "destination-over"; x.globalAlpha = Math.min(1, a * 2.5) * 0.75; x.fillStyle = g; x.beginPath();
+      for (let i = 0; i < n; i++) { const t = t0 + (i / n) * TAU; x.moveTo(cx, cy); x.lineTo(cx + Math.cos(t) * R, cy + Math.sin(t) * R); x.lineTo(cx + Math.cos(t + TAU / n / 2) * R, cy + Math.sin(t + TAU / n / 2) * R); x.closePath(); }
+      x.fill(); x.restore();
+    } },
+  { key: "distress", name: { zh: "丝网斑驳", en: "Screen-print wear" }, for: FX_ALL, stage: "over",
+    /** Big worn blotches where the screen print has rubbed through. */
+    paint(x, B, a, E) { knockWorn(x, B, a * 1.05, E, 2.2); } },
+  { key: "duo", name: { zh: "照片单色", en: "Photo in one colour" }, for: FX_PHOTO, stage: "filter",
+    /** The photo in the poster's night ink, a sunset colour and cream. */
+    paint: tonesFx((E) => [[0, TOON.ink], [0.6, mix(TOON.amber, boost(E.C, 0.4), 0.3)], [1, TOON.cream]], 0.2) },
+];
+avant.elementFx = [
+  { key: "smear", name: { zh: "动态拖影", en: "Motion smear" }, for: FX_ALL, stage: "filter", reach: (B) => ({ l: B.w * 0.3 }),
+    /** Faint copies of the layer smeared off to the left. */
+    paint(x, B, a, E) { trail(x, B, region(x, B, "fxA"), 6, -B.w * 0.02 * (0.3 + a), 0, 0.12 + 0.3 * a, "source-over"); } },
+  { key: "glow", name: { zh: "辉光", en: "Glow" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 60 * k, t: 60 * k, r: 60 * k, b: 60 * k }),
+    /** The layer's own light spilling round it. */
+    paint(x, B, a, E) { glowBehind(x, B, region(x, B, "fxA"), (8 + 24 * a) * E.k, 0.95 * Math.min(1, a * 2.5), null); } },
+  { key: "blur", name: { zh: "焦外虚化与对焦框", en: "Out of focus with a frame of focus" }, for: FX_ALL, stage: "filter",
+    /** The layer out of focus but for a frame in its middle, kept sharp, with a hairline and ticks round it. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA"), pad = Math.ceil((4 + 10 * a) * E.k), soft = softened(padded(src, pad, "fxBp"), 3 + 10 * a, "fxBl");
+      x.save(); x.clearRect(B.x0, B.y0, B.w, B.h); x.globalAlpha = 1 - Math.min(1, a * 1.6); x.drawImage(src, B.x0, B.y0);
+      x.globalAlpha = Math.min(1, a * 1.6); x.imageSmoothingEnabled = true; x.drawImage(soft, B.x0 - pad, B.y0 - pad, B.w + 2 * pad, B.h + 2 * pad); x.restore();
+      const fw = B.w * 0.36, fh = B.h * 0.36, fx = B.x0 + (B.w - fw) / 2, fy = B.y0 + (B.h - fh) * 0.4, t = Math.min(fw, fh) * 0.18;
+      x.save(); x.globalAlpha = Math.min(1, a * 3); x.drawImage(src, fx - B.x0, fy - B.y0, fw, fh, fx, fy, fw, fh);
+      x.strokeStyle = css(avInk(), 0.75); x.lineWidth = Math.max(1, E.k * 0.8); x.strokeRect(fx, fy, fw, fh);
+      x.lineWidth = Math.max(1.5, E.k * 1.6);
+      for (const [cx, cy, sx, sy] of [[fx, fy, 1, 1], [fx + fw, fy, -1, 1], [fx, fy + fh, 1, -1], [fx + fw, fy + fh, -1, -1]]) { x.beginPath(); x.moveTo(cx - sx * 4, cy + sy * t); x.lineTo(cx - sx * 4, cy - sy * 4); x.lineTo(cx + sx * t, cy - sy * 4); x.stroke(); }
+      x.restore();
+    } },
+  { key: "mosaic", name: { zh: "像素马赛克", en: "Pixel mosaic" }, for: FX_ALL, stage: "filter",
+    /** The layer gone to square pixels, larger as it rises. */
+    paint(x, B, a, E) {
+      const cs = Math.max(1, (1 + 22 * a) * E.k), cols = Math.max(1, Math.round(B.w / cs)), rows = Math.max(1, Math.round(B.h / cs)), t = fxCanvas("fxMos", cols, rows), g = t.getContext("2d");
+      g.globalCompositeOperation = "copy"; g.imageSmoothingEnabled = true; g.drawImage(region(x, B, "fxA"), 0, 0, cols, rows);
+      x.save(); x.clearRect(B.x0, B.y0, B.w, B.h); x.imageSmoothingEnabled = false; x.drawImage(t, B.x0, B.y0, B.w, B.h); x.restore();
+    } },
+  { key: "glass", name: { zh: "条纹玻璃", en: "Fluted glass" }, for: FX_ALL, stage: "filter",
+    /** The layer seen through a panel of narrow vertical flutes, wider as it rises, each squeezing a wider slice into itself, shaded at one edge and lit at the other. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA"), p = Math.max(6, B.w * 0.035), half = (B.w * (0.15 + 0.9 * a)) / 2, cx = B.w / 2, i0 = Math.max(0, Math.floor((cx - half) / p)), i1 = Math.min(Math.ceil(B.w / p), Math.ceil((cx + half) / p));
+      for (let i = i0; i < i1; i++) {
+        const fx = i * p, sw = p * 1.9, sx = clamp(fx + p / 2 - sw / 2, 0, B.w - sw);
+        x.clearRect(B.x0 + fx, B.y0, p, B.h); x.drawImage(src, sx, 0, sw, B.h, B.x0 + fx, B.y0, p, B.h);
+        const g = x.createLinearGradient(B.x0 + fx, 0, B.x0 + fx + p, 0); g.addColorStop(0, "rgba(0,0,0,0.26)"); g.addColorStop(0.22, "rgba(255,255,255,0.08)"); g.addColorStop(0.55, "rgba(255,255,255,0)"); g.addColorStop(0.86, "rgba(255,255,255,0.2)"); g.addColorStop(1, "rgba(0,0,0,0.12)");
+        x.save(); x.globalCompositeOperation = "source-atop"; x.fillStyle = g; x.fillRect(B.x0 + fx, B.y0, p, B.h); x.restore();
+      }
+    } },
+  { key: "band", name: { zh: "色带", en: "Colour band" }, for: FX_ALL, stage: "filter",
+    /** A vertical band across the layer where it shows in the channel colour, wider as it rises. */
+    paint(x, B, a, E) {
+      const bw = B.w * 0.28 * Math.pow(a, 0.8), bx = B.x0 + B.w * 0.38 - bw / 2;
+      x.save(); x.beginPath(); x.rect(bx, B.y0, bw, B.h); x.clip(); x.globalCompositeOperation = "source-atop"; x.fillStyle = css(boost(E.C, 0.5), 0.75); x.fillRect(bx, B.y0, bw, B.h); x.restore();
+      x.save(); x.fillStyle = css(avInk(), 0.6); x.fillRect(bx - 1, B.y0, Math.max(1, E.k * 0.8), B.h); x.fillRect(bx + bw, B.y0, Math.max(1, E.k * 0.8), B.h); x.restore();
+    } },
+  { key: "fade", name: { zh: "渐隐", en: "Fade out" }, for: FX_ALL, stage: "over",
+    /** The layer fading away toward its foot. */
+    paint(x, B, a) { const g = x.createLinearGradient(0, B.y0 + B.h * (1 - 0.9 * a), 0, B.y1); g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, `rgba(0,0,0,${Math.min(1, a * 1.1)})`); x.globalCompositeOperation = "destination-out"; x.fillStyle = g; x.fillRect(B.x0, B.y0, B.w, B.h); } },
+  { key: "mono", name: { zh: "黑白照片", en: "Black-and-white photo" }, for: FX_PHOTO, stage: "filter",
+    /** A soft, low-contrast black and white, as a studio's fashion print. */
+    paint: tonesFx(() => [[0, [26, 26, 28]], [1, [236, 236, 232]]]) },
+];
+collage.elementFx = [
+  { key: "lift", name: { zh: "纸片立体感", en: "Paper lift" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 20 * k, t: 20 * k, r: 30 * k, b: 34 * k }),
+    /** The layer as a piece of paper cut out with a white margin, lifting off the page on a soft shadow. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA"), r = (3 + 8 * a) * E.k;
+      x.save(); x.globalAlpha = Math.min(1, a * 1.6); ringsBehind(x, B, src, [[CL.white, r * 0.5], [CL.white, r]]); x.restore();
+      glowBehind(x, B, src, (4 + 8 * a) * E.k + r, 0.55 * Math.min(1, a * 1.5), [0, 0, 0], (3 + 4 * a) * E.k, (5 + 6 * a) * E.k);
+    } },
+  { key: "tape", name: { zh: "胶带", en: "Tape" }, for: FX_ALL, stage: "over", reach: (B) => ({ l: B.w * 0.1, t: B.h * 0.15, r: B.w * 0.1, b: B.h * 0.15 }),
+    /** Strips of translucent tape across two corners, holding the layer down. */
+    paint(x, B, a, E) {
+      const w = Math.min(B.w, B.h) * (0.35 + 0.25 * a), h = w * 0.32;
+      x.save(); x.globalAlpha = Math.min(1, a * 3);
+      for (const [cx, cy, t] of [[B.x0 + B.w * 0.06, B.y0 + B.h * 0.04, -0.6], [B.x1 - B.w * 0.06, B.y1 - B.h * 0.04, -0.6]]) {
+        x.save(); x.translate(cx, cy); x.rotate(t + (E.R(cx) - 0.5) * 0.3); x.fillStyle = "rgba(240,232,206,0.62)"; x.fillRect(-w / 2, -h / 2, w, h);
+        x.fillStyle = "rgba(255,255,255,0.25)"; x.fillRect(-w / 2, -h / 2, w, h * 0.3);
+        x.fillStyle = "rgba(0,0,0,0.06)"; for (let i = 0; i < 8; i++) x.fillRect(-w / 2 + (i / 8) * w, -h / 2, 1, h); x.restore();
+      }
+      x.restore();
+    } },
+  { key: "halftone", name: { zh: "网点色块", en: "Halftone patch" }, for: FX_ALL, stage: "over",
+    /** A disc of halftone in a collage colour laid over part of the layer, larger as it rises. */
+    paint(x, B, a, E) {
+      const R = Math.max(B.w, B.h) * (0.18 + 0.4 * a), cx = B.w * (0.3 + 0.4 * E.R(111)), cy = B.h * (0.3 + 0.4 * E.R(112)), col = [CL.red, CL.teal, CL.mustard, CL.pink][Math.floor(E.R(113) * 4)];
+      onLayer(x, B, region(x, B, "fxA"), "multiply", 1, (g) => { g.beginPath(); g.arc(cx, cy, R, 0, TAU); g.clip(); g.fillStyle = dotFill(g, col, 9 * E.k, 9 * E.k * 0.36, 15); g.fillRect(0, 0, B.w, B.h); });
+    } },
+  { key: "mono", name: { zh: "黑白照片", en: "Black-and-white photo" }, for: FX_PHOTO, stage: "filter",
+    /** The photo as a black-and-white cutting from a magazine. */
+    paint: tonesFx(() => [[0, CL.ink], [0.55, [140, 138, 132]], [1, CL.white]], 0.1) },
+  { key: "strips", name: { zh: "照片撕条", en: "Photo torn in strips" }, for: FX_PHOTO, stage: "filter", reach: (B) => ({ l: B.w * 0.06, r: B.w * 0.06 }),
+    /** The photo torn across into strips, each slid a little, white paper showing along the torn edges. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA"), n = 4, cuts = Array.from({ length: n + 1 }, (_, i) => clamp((i + (i % n ? (E.R(i * 2.3 + 117) - 0.5) * 0.4 : 0)) / n)), d = B.w * 0.045 * a, gap = (1 + 7 * a) * E.k;
+      cutBands(x, B, src, cuts, (i) => (i % 2 ? d : -d * 0.5));
+      x.save(); x.fillStyle = css(CL.white);
+      for (let i = 1; i < n; i++) { const y = B.y0 + cuts[i] * B.h; x.beginPath(); x.moveTo(B.x0 - d, y - gap / 2); for (let t = 0; t <= 1.001; t += 0.02) x.lineTo(B.x0 - d + (B.w + 2 * d) * t, y - gap / 2 + (E.R(i * 31 + t * 50) - 0.5) * gap); for (let t = 1; t >= -0.001; t -= 0.02) x.lineTo(B.x0 - d + (B.w + 2 * d) * t, y + gap / 2 + (E.R(i * 37 + t * 50 + 7) - 0.5) * gap); x.closePath(); x.fill(); }
+      x.restore();
+    } },
+];
+yellow.elementFx = [
+  { key: "silhouette", name: { zh: "黑色剪影", en: "Black silhouette" }, for: FX_ALL, stage: "fill",
+    /** The layer as a flat black shape, as on a yellow poster. */
+    paint: flatFx(() => css(YL.ink)) },
+  { key: "mono", name: { zh: "黑白照片", en: "Black-and-white photo" }, for: FX_PHOTO, stage: "filter",
+    /** A hard black and white. */
+    paint: tonesFx(() => [[0, YL.ink], [1, YL.white]], 0.6) },
+];
+pitch.elementFx = [
+  { key: "halftone", name: { zh: "网点", en: "Halftone" }, for: FX_ALL, stage: "over",
+    /** Dots of the pitch's deep green over the layer. */
+    paint: dotsFx({ colour: () => PT.deep, pitch: (E) => 8 * E.k, size: (p, a) => p * (0.08 + 0.3 * a) }) },
+  { key: "poster", name: { zh: "照片分色", en: "Photo posterized" }, for: FX_PHOTO, stage: "filter",
+    /** The photo in four flat colours of the match poster: ink, green, yellow, white. */
+    paint: tonesFx(() => [[0, PT.ink], [0.4, PT.green], [0.75, PT.yellow], [1, PT.white]], 0.75) },
+];
+dots.elementFx = [
+  { key: "dots", name: { zh: "光点化", en: "Read into dots" }, for: FX_ALL, stage: "fill", sub: [{ key: "pitch", name: { zh: "点距", en: "Dot spacing" }, def: 0.4 }],
+    /** The layer read into a grid of round points of light in its own colours, larger where it is brighter. */
+    paint(x, B, a, E, o) {
+      const cs = Math.max(3, (5 + 14 * o.pitch) * E.k), [d, cols, rows] = cellsOf(x, B, cs);
+      x.save(); x.globalCompositeOperation = "destination-out"; x.globalAlpha = a; x.fillRect(B.x0, B.y0, B.w, B.h); x.restore();
+      x.save(); x.globalAlpha = a;
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+        const q = (j * cols + i) * 4, al = d[q + 3] / 255;
+        if (al < 0.25) continue;
+        const l = lumOf(d, q), r = cs * 0.42 * Math.sqrt(0.15 + 0.85 * l) * Math.min(1, al * 1.3);
+        x.fillStyle = `rgb(${Math.min(255, d[q] + 40)},${Math.min(255, d[q + 1] + 40)},${Math.min(255, d[q + 2] + 40)})`; x.beginPath(); x.arc(B.x0 + (i + 0.5) * cs, B.y0 + (j + 0.5) * cs, r, 0, TAU); x.fill();
+      }
+      x.restore();
+    } },
+  { key: "rainbow", name: { zh: "彩虹色散", en: "Rainbow" }, for: FX_ALL, stage: "over",
+    /** Rainbow colour breaking into the layer from its foot, rising as the strength does. */
+    paint(x, B, a, E) {
+      onLayer(x, B, region(x, B, "fxA"), "color", Math.min(1, a * 1.2), (g) => {
+        const h = g.createLinearGradient(0, 0, B.w, 0); for (let i = 0; i <= 6; i++) h.addColorStop(i / 6, css(rainbow(i / 6 + E.R(121))));
+        g.fillStyle = h; g.fillRect(0, 0, B.w, B.h);
+        const v = g.createLinearGradient(0, B.h * (1 - a), 0, B.h); v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,1)");
+        g.globalCompositeOperation = "destination-in"; g.fillStyle = v; g.fillRect(0, 0, B.w, B.h);
+      });
+    } },
+  { key: "smear", name: { zh: "横向拖影", en: "Motion smear" }, for: FX_ALL, stage: "filter", reach: (B) => ({ r: B.w * 0.35 }),
+    /** The layer's light drawn out into streaks to the right. */
+    paint(x, B, a, E) { const src = region(x, B, "fxA"); x.save(); x.globalCompositeOperation = "destination-over"; x.globalAlpha = 0.25 + 0.35 * a; x.drawImage(src, B.x0, B.y0, B.w * (1 + 0.35 * a), B.h); x.globalAlpha = 0.15 + 0.2 * a; x.drawImage(src, B.x0, B.y0, B.w * (1 + 0.7 * a), B.h); x.restore(); } },
+  { key: "rgb", name: { zh: "色彩错位", en: "Colour split" }, for: FX_ALL, stage: "filter", reach: (B, k) => ({ l: 8 * k, t: 4 * k, r: 8 * k, b: 4 * k }),
+    /** Red and cyan a little apart on a slant, as on a screen out of alignment. */
+    paint(x, B, a, E) { const d = (1 + 5 * a) * E.k; rePlate(x, B, [[[255, 0, 0], -d * 0.92, -d * 0.38], [[0, 255, 255], d * 0.92, d * 0.38]]); } },
+  { key: "glow", name: { zh: "辉光", en: "Glow" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 80 * k, t: 80 * k, r: 80 * k, b: 80 * k }),
+    /** A wide glow of the layer's own light, as of points on a dark screen. */
+    paint(x, B, a, E) { glowBehind(x, B, region(x, B, "fxA"), (12 + 34 * a) * E.k, Math.min(1, a * 2.5), null); } },
+];
+/** The neon pop palette from the channel colour, turned round the wheel only under that look itself (see neonSet). */
+const neonOf = (E) => { const mid = hueTurn(boost(E.C, 0.75), (current === neon ? values.shift || 0 : 0) * 360), hot = boost(hueTurn(mid, 135), 0.8); return { deep: NEON.deep, low: mix(NEON.deep, mid, 0.42), mid, hot, pale: mix(hot, NEON.white, 0.7) }; };
+neon.elementFx = [
+  { key: "map", name: { zh: "霓虹渐变映射", en: "Neon gradient map" }, for: FX_ALL, stage: "filter",
+    /** The layer mapped by lightness onto the neon tones: night, the channel colour, its hot complement, a pale highlight. */
+    paint: tonesFx((E) => neonStops(neonOf(E))) },
+  { key: "posterize", name: { zh: "色阶硬度", en: "Hard tones" }, for: FX_ALL, stage: "filter",
+    /** The layer's colours stepping into fewer, flatter tones. */
+    paint(x, B, a) { posterize(x, B, a); } },
+  { key: "rim", name: { zh: "轮廓光", en: "Rim light" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 20 * k, t: 20 * k }),
+    /** A hot rim of light along the layer's upper left edge, as of a lamp behind it. */
+    paint(x, B, a, E) { const src = region(x, B, "fxA"), N = neonOf(E), d = (2 + 6 * a) * E.k; x.save(); x.globalCompositeOperation = "destination-over"; x.globalAlpha = Math.min(1, a * 3); x.drawImage(shapeIn(src, N.pale, "fxRim"), B.x0 - d, B.y0 - d * 0.8); x.restore(); glowBehind(x, B, src, d * 2, 0.6 * a, N.hot, -d, -d * 0.8); } },
+  { key: "glow", name: { zh: "背光", en: "Back light" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 90 * k, t: 90 * k, r: 90 * k, b: 90 * k }),
+    /** A glow of the channel colour behind the layer. */
+    paint(x, B, a, E) { glowBehind(x, B, region(x, B, "fxA"), (12 + 36 * a) * E.k, 0.9 * Math.min(1, a * 2.5), neonOf(E).mid); } },
+  { key: "halftone", name: { zh: "阴影网点", en: "Halftone shadow" }, for: FX_ALL, stage: "over",
+    /** Dots of the night tone over the layer's shaded side. */
+    paint: dotsFx({ colour: (E) => neonOf(E).deep, pitch: (E) => 7 * E.k, size: (p, a) => p * (0.1 + 0.26 * a), shade: true }) },
+];
+court.elementFx = [
+  { key: "varsity", name: { zh: "校队描边", en: "Varsity outline" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 24 * k, t: 24 * k, r: 24 * k, b: 24 * k }),
+    /** A white gap round the layer, then an outline in ball orange, as a varsity number has. */
+    paint(x, B, a, E) { const r1 = (2 + 5 * a) * E.k, r2 = r1 + (3 + 9 * a) * E.k; x.save(); x.globalAlpha = Math.min(1, a * 1.6); ringsBehind(x, B, region(x, B, "fxA"), [[BB.white, r1 * 0.5], [BB.white, r1], [BB.orange, (r1 + r2) / 2], [BB.orange, r2]]); x.restore(); } },
+  { key: "knockout", name: { zh: "网点挖空", en: "Halftone knock-out" }, for: FX_ALL, stage: "over",
+    /** Holes of a halftone knocked out of the layer, growing as it rises. */
+    paint: dotsFx({ colour: () => [0, 0, 0], pitch: (E) => 9 * E.k, size: (p, a) => p * 0.42 * a, mode: "destination-out" }) },
+  { key: "spray", name: { zh: "喷漆滴流", en: "Spray drips" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 30 * k, t: 30 * k, r: 30 * k, b: B.h * 0.65 + 30 * k }),
+    /** Spray paint of the team colour round the layer, and drips running from it. */
+    paint(x, B, a, E) {
+      const team = bbTeam(E.C);
+      dripsBehind(x, B, a, E, team, 0.7);
+      x.save(); x.globalCompositeOperation = "destination-over"; x.fillStyle = css(team, 0.85);
+      for (let k = 0, n = Math.round(260 * a); k < n; k++) { const t = E.R(k * 1.3 + 131) * TAU, s = 0.9 + E.R(k * 2.1 + 132) ** 2 * 0.25, px = B.x0 + B.w / 2 + Math.cos(t) * B.w / 2 * s, py = B.y0 + B.h / 2 + Math.sin(t) * B.h / 2 * s; x.beginPath(); x.arc(px, py, (0.6 + E.R(k * 3.7 + 133) * 1.6) * E.k, 0, TAU); x.fill(); }
+      x.restore();
+    } },
+  { key: "trails", name: { zh: "速度残影", en: "Speed trails" }, for: FX_ALL, stage: "behind", reach: (B) => ({ l: B.w * 0.6 }),
+    /** The layer has just passed: copies of it in the team colour trailing back to the left, and speed lines. */
+    paint(x, B, a, E) {
+      const team = bbTeam(E.C), s = shapeIn(region(x, B, "fxA"), team, "fxTr");
+      trail(x, B, s, 5, -B.w * 0.07 * (0.4 + a), 0, 0.3 + 0.4 * a, "destination-over");
+      x.save(); x.globalCompositeOperation = "destination-over"; x.strokeStyle = css(team, 0.75); x.lineCap = "round";
+      for (let k = 0, n = Math.round(3 + 8 * a); k < n; k++) { const y = B.y0 + B.h * (0.15 + 0.7 * E.R(k * 2.9 + 141)), len = B.w * (0.2 + E.R(k * 4.1 + 142) * 0.4) * a; x.lineWidth = (1.5 + E.R(k + 143) * 3) * E.k; x.beginPath(); x.moveTo(B.x0 - len, y); x.lineTo(B.x0 + B.w * 0.2, y); x.stroke(); }
+      x.restore();
+    } },
+  { key: "distress", name: { zh: "丝网斑驳", en: "Screen-print wear" }, for: FX_ALL, stage: "over",
+    /** The print worn through in specks and patches. */
+    paint(x, B, a, E) { knockWorn(x, B, a * 0.95, E, 1.3); } },
+  { key: "duo", name: { zh: "照片双色", en: "Photo in two colours" }, for: FX_PHOTO, stage: "filter",
+    /** The photo as a two-colour team print: navy, the team colour, white. */
+    paint: tonesFx((E) => [[0, mix(BB.navy, bbTeam(E.C), 0.2)], [0.55, bbTeam(E.C)], [1, BB.white]], 0.15) },
+];
+velvet.elementFx = [
+  { key: "plush", name: { zh: "绒面", en: "Velvet" }, for: FX_ALL, stage: "fill",
+    /** The layer in plush: a soft sheen toward the light, its edges falling into shade, a fine pile. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA");
+      onLayer(x, B, src, "source-atop", a, (g) => {
+        const hl = g.createRadialGradient(B.w * 0.35, B.h * 0.3, 0, B.w * 0.35, B.h * 0.3, Math.max(B.w, B.h) * 0.7); hl.addColorStop(0, "rgba(255,255,255,0.4)"); hl.addColorStop(1, "rgba(255,255,255,0)");
+        g.fillStyle = hl; g.fillRect(0, 0, B.w, B.h);
+        const sd = g.createLinearGradient(0, 0, B.w, B.h); sd.addColorStop(0.5, "rgba(10,10,30,0)"); sd.addColorStop(1, "rgba(10,10,30,0.35)"); g.fillStyle = sd; g.fillRect(0, 0, B.w, B.h);
+        for (let k = 0, n = Math.round(B.w * B.h / (60 * E.k * E.k)); k < n; k++) { g.fillStyle = E.R(k * 0.7 + 151) > 0.5 ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.18)"; g.fillRect(B.w * E.R(k * 1.3 + 152), B.h * E.R(k * 1.9 + 153), E.k, E.k); }
+      });
+    } },
+  { key: "check", name: { zh: "格纹", en: "Check" }, for: FX_ALL, stage: "over",
+    /** A soft check in a deeper tone of the layer, as on plush fabric. */
+    paint(x, B, a, E) { const c = Math.max(B.w, B.h) * 0.09; onLayer(x, B, region(x, B, "fxA"), "multiply", Math.min(1, a * 0.95), (g) => { g.translate(B.w / 2, B.h / 2); g.rotate(0.2); g.fillStyle = "rgba(40,40,70,0.55)"; for (let i = -12; i <= 12; i++) for (let j = -12; j <= 12; j++) if ((i + j) % 2 === 0) g.fillRect(i * c, j * c, c, c); }); } },
+  { key: "volume", name: { zh: "立体感", en: "Volume" }, for: FX_ALL, stage: "over",
+    /** Volume from a light at the upper left: the layer's rim lit there and shaded across from it. */
+    paint: bevelFx(0.22, 0.3, 0.012) },
+  { key: "fuzz", name: { zh: "绒毛边", en: "Fuzzy edge" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 30 * k, t: 30 * k, r: 30 * k, b: 30 * k }),
+    /** A soft halo of the layer's own colour round it, as the pile of velvet catches the light. */
+    paint(x, B, a, E) { glowBehind(x, B, region(x, B, "fxA"), (3 + 16 * a) * E.k, 0.9 * Math.min(1, a * 2.5), null); } },
+  { key: "shadow", name: { zh: "柔和投影", en: "Soft shadow" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 20 * k, t: 10 * k, r: 50 * k, b: 70 * k }),
+    /** A soft shadow of the layer cast down and to the right. */
+    paint(x, B, a, E) { glowBehind(x, B, region(x, B, "fxA"), (6 + 16 * a) * E.k, 0.65 * Math.min(1, a * 1.5), VL.night, (2 + 8 * a) * E.k, (5 + 16 * a) * E.k); } },
+  { key: "tone", name: { zh: "照片绒色", en: "Photo in velvet colours" }, for: FX_PHOTO, stage: "filter",
+    /** The photo mapped onto the velvet palette: night, periwinkle, acid green, pink, cream. */
+    paint: tonesFx(() => [[0, VL.night], [0.32, VL.peri], [0.6, VL.green], [0.82, VL.pink], [1, VL.cream]], 0.3) },
+];
+rave.elementFx = [
+  { key: "holo", name: { zh: "全息镭射", en: "Holographic sheen" }, for: FX_ALL, stage: "fill",
+    /** The layer in a soap-film rainbow, a glossy arc across it. */
+    paint(x, B, a, E) {
+      flatFx((g) => iridescent(g, B.x0, B.y0, B.x1, B.y1, E.R(7)))(x, B, a, E);
+      x.save(); x.beginPath(); x.rect(B.x0, B.y0, B.w, B.h); x.clip(); x.globalCompositeOperation = "source-atop"; x.globalAlpha = 0.7 * a; x.strokeStyle = "#fff"; x.lineCap = "round"; x.lineWidth = Math.max(1, B.h * 0.035);
+      x.beginPath(); x.moveTo(B.x0 + B.w * 0.1, B.y0 + B.h * 0.3); x.quadraticCurveTo(B.x0 + B.w * 0.5, B.y0 + B.h * 0.12, B.x1 - B.w * 0.1, B.y0 + B.h * 0.32); x.stroke(); x.restore();
+    } },
+  { key: "halo", name: { zh: "日食光环", en: "Eclipse halo" }, for: FX_ALL, stage: "behind", reach: (B) => ({ l: B.w * 0.5, t: B.h * 0.5, r: B.w * 0.5, b: B.h * 0.5 }),
+    /** An oval ring of light hugging the layer, as round an eclipse, wider as it rises. */
+    paint(x, B, a, E) {
+      const s = (1.25 + 0.35 * a) / 0.9, rx = (B.w / 2) * s, ry = (B.h / 2) * s, g = x.createRadialGradient(0, 0, rx * 0.72, 0, 0, rx * 1.12);
+      g.addColorStop(0, css(RV.violet, 0)); g.addColorStop(0.35, css(RV.pink, 0.9)); g.addColorStop(0.45, css(RV.white, 1)); g.addColorStop(0.6, css(RV.cyan, 0.6)); g.addColorStop(1, css(RV.violet, 0));
+      x.save(); x.globalCompositeOperation = "destination-over"; x.globalAlpha = Math.min(1, a * 3); x.translate(B.x0 + B.w / 2, B.y0 + B.h / 2); x.scale(1, ry / rx);
+      x.fillStyle = g; x.fillRect(-rx * 1.15, -rx * 1.15, rx * 2.3, rx * 2.3); x.restore();
+    } },
+  { key: "fringe", name: { zh: "色差", en: "Colour fringe" }, for: FX_ALL, stage: "filter", reach: (B) => ({ l: B.w * 0.04, t: B.h * 0.04, r: B.w * 0.04, b: B.h * 0.04 }),
+    /** Red spread outward and blue drawn in about the layer's middle, as a cheap lens fringes. */
+    paint(x, B, a) { const s = 0.05 * a; rePlate(x, B, [[[255, 0, 0], 0, 0, 1 + s], [[0, 255, 0], 0, 0, 1], [[0, 0, 255], 0, 0, 1 - s]]); } },
+  { key: "neon", name: { zh: "照片霓虹热感", en: "Photo in neon heat" }, for: FX_PHOTO, stage: "filter",
+    /** The photo as a heat image of the club: night, violet, pink, orange, white. */
+    paint: tonesFx(() => [[0, RV.night], [0.3, RV.violet], [0.55, RV.pink], [0.78, [255, 170, 60]], [1, RV.white]]) },
+];
+chrome.elementFx.push(
+  { key: "mono", name: { zh: "黑白照片", en: "Black-and-white photo" }, for: FX_PHOTO, stage: "filter",
+    /** A hard silvery black and white. */
+    paint: tonesFx(() => [[0, [0, 0, 0]], [0.45, [110, 110, 112]], [1, [248, 248, 248]]], 0.1) },
+);
+verse.elementFx = [
+  { key: "comic", name: { zh: "漫画上色", en: "Comic colouring" }, for: FX_ALL, stage: "fill", reach: (B, k) => ({ l: 8 * k, t: 8 * k, r: 8 * k, b: 8 * k }),
+    /** The layer coloured as a comic: its colours flattened, an ink line round it, its shaded side in dots. */
+    paint(x, B, a, E) {
+      posterize(x, B, a);
+      const src = region(x, B, "fxA"), o = (1.5 + 3 * a) * E.k, d = Math.min(B.w, B.h) * 0.08;
+      const sh = fxCanvas("fxSh", B.w, B.h), g = sh.getContext("2d");
+      g.globalCompositeOperation = "copy"; g.drawImage(shapeIn(src, VS.ink, "fxShI"), 0, 0); g.globalCompositeOperation = "destination-out"; g.drawImage(src, -d, -d * 1.2);
+      g.globalCompositeOperation = "source-in"; g.fillStyle = dotFill(g, VS.ink, Math.max(4, 6 * E.k), Math.max(4, 6 * E.k) * 0.32); g.fillRect(0, 0, B.w, B.h);
+      x.save(); x.globalCompositeOperation = "source-atop"; x.globalAlpha = 0.85 * a; x.drawImage(sh, B.x0, B.y0); x.restore();
+      x.save(); x.globalAlpha = Math.min(1, a * 3); ringsBehind(x, B, src, [[VS.ink, o]]); x.restore();
+    } },
+  { key: "halftone", name: { zh: "网点", en: "Halftone" }, for: FX_ALL, stage: "over",
+    /** Ben-Day dots of ink over the layer's shaded side. */
+    paint: dotsFx({ colour: () => VS.ink, pitch: (E) => 6 * E.k, size: (p, a) => p * (0.1 + 0.25 * a), shade: true }) },
+  { key: "hatch", name: { zh: "排线", en: "Hatching" }, for: FX_ALL, stage: "over",
+    /** Diagonal hatching in ink over the layer's shaded side, closer as it rises. */
+    paint(x, B, a, E) {
+      onLayer(x, B, region(x, B, "fxA"), "multiply", Math.min(1, a * 1.4), (g) => {
+        g.strokeStyle = css(VS.ink); g.lineWidth = Math.max(1, E.k * 1.1); g.beginPath();
+        const step = Math.max(3, (9 - 4 * a) * E.k); for (let t = -B.h; t < B.w + B.h; t += step) { g.moveTo(t, B.h); g.lineTo(t + B.h, 0); }
+        g.stroke(); g.globalCompositeOperation = "destination-in"; g.fillStyle = shadeSide(g, B.w, B.h); g.fillRect(0, 0, B.w, B.h);
+      });
+    } },
+  { key: "offset", name: { zh: "套色错位", en: "Off-register" }, for: FX_ALL, stage: "filter", reach: (B, k) => ({ l: 12 * k, t: 6 * k, r: 12 * k, b: 6 * k }),
+    /** The red plate printed a little up and left, the blue a little down and right, the green in register. */
+    paint(x, B, a, E) { const d = (1 + 7 * a) * E.k; rePlate(x, B, [[[255, 0, 0], -d, -d * 0.35], [[0, 255, 0], 0, 0], [[0, 0, 255], d, d * 0.35]]); } },
+  { key: "glitch", name: { zh: "维度故障", en: "Dimension glitch" }, for: FX_ALL, stage: "filter", reach: (B) => ({ l: B.w * 0.1, r: B.w * 0.1 }),
+    /** Bars of the layer slipping sideways, tinted magenta and cyan, with scan lines through them. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA");
+      for (let i = 0, n = Math.round(1 + 6 * a); i < n; i++) {
+        const y = B.y0 + B.h * E.R(i * 2.1 + 161) * 0.9, bh = B.h * (0.04 + E.R(i * 2.9 + 162) * 0.14), bx = B.x0 + B.w * E.R(i * 3.7 + 163) * 0.6, bw = B.w * (0.2 + E.R(i * 4.3 + 164) * 0.5), dx = (E.R(i * 5.1 + 165) - 0.5) * B.w * 0.16 * (0.5 + a);
+        x.save(); x.beginPath(); x.rect(bx, y, bw, bh); x.clip(); x.clearRect(bx, y, bw, bh); x.drawImage(src, B.x0 + dx, B.y0);
+        x.globalCompositeOperation = "source-atop"; x.fillStyle = css(i % 2 ? VS.cyan : VS.magenta, 0.45); x.fillRect(bx, y, bw, bh);
+        x.fillStyle = css(VS.ink, 0.25); for (let yy = y; yy < y + bh; yy += 3 * E.k) x.fillRect(bx, yy, bw, Math.max(1, E.k * 0.7)); x.restore();
+      }
+    } },
+  { key: "photo", name: { zh: "照片漫画化", en: "Photo as comic" }, for: FX_PHOTO, stage: "filter",
+    /** The photo pressed into comic colours, then screened. */
+    paint(x, B, a, E) {
+      tonesFx(() => (dark ? [[0, VS.ink], [0.3, VS.violet], [0.55, VS.magenta], [0.8, [255, 176, 130]], [1, VS.white]] : [[0, VS.ink], [0.3, [74, 52, 150]], [0.56, [236, 74, 146]], [0.8, [255, 214, 196]], [1, VS.white]]), 0.55)(x, B, a, E);
+      dotsFx({ colour: () => VS.ink, pitch: (G) => 6 * G.k, size: (p, s) => p * 0.24 * s })(x, B, a, E);
+    } },
+];
+glass.elementFx = [
+  { key: "glass", name: { zh: "压花玻璃", en: "Patterned glass" }, for: FX_ALL, stage: "filter",
+    sub: [{ key: "scale", name: { zh: "纹理大小", en: "Pattern size" }, def: 0.4 }, { key: "glint", name: { zh: "玻璃高光", en: "Glints" }, def: 0.45 }, { key: "shade", name: { zh: "玻璃暗纹", en: "Dark lines" }, def: 0.4 }],
+    /** The layer seen through hammered glass (see glassWarp), the pattern fixed to the cover. */
+    paint(x, B, a, E, o) {
+      const img = x.getImageData(B.x0, B.y0, B.w, B.h), out = x.createImageData(B.w, B.h), unit = Math.min(x.canvas.width, x.canvas.height) / E.k;
+      glassPixels(img.data, out.data, B.w, B.h, E.k, -B.x0, -B.y0, unit * 0.085 * a, unit * (0.025 + 0.065 * o.scale), o.glint * Math.min(1, a * 2), o.shade * Math.min(1, a * 2), 0, 0);
+      x.putImageData(out, B.x0, B.y0);
+    } },
+  { key: "paint", name: { zh: "油画笔触", en: "Brush strokes" }, for: FX_ALL, stage: "filter",
+    /** The layer painted over in short strokes of its own colours, each across the change in lightness. */
+    paint(x, B, a, E) {
+      const c = Math.max(3, 12 * E.k), [d, cols, rows] = cellsOf(x, B, c);
+      x.save(); x.beginPath(); x.rect(B.x0, B.y0, B.w, B.h); x.clip(); x.globalCompositeOperation = "source-atop"; x.globalAlpha = Math.min(1, a * 0.9); x.lineCap = "round"; x.lineWidth = c * 0.9;
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+        const q = (j * cols + i) * 4;
+        if (d[q + 3] < 200) continue;
+        const L = (ii, jj) => lumOf(d, (Math.min(rows - 1, Math.max(0, jj)) * cols + Math.min(cols - 1, Math.max(0, ii))) * 4), gx = L(i + 1, j) - L(i - 1, j), gy = L(i, j + 1) - L(i, j - 1);
+        const cx = B.x0 + (i + 0.5 + (E.R(q * 1.7) - 0.5) * 0.8) * c, cy = B.y0 + (j + 0.5 + (E.R(q * 2.3) - 0.5) * 0.8) * c, t = (Math.hypot(gx, gy) > 0.03 ? Math.atan2(gy, gx) + Math.PI / 2 : 0.7) + (E.R(q * 3.1) - 0.5) * 0.5, len = c * (1.2 + E.R(q * 3.7) * 1.4), v = (E.R(q * 4.3) - 0.5) * 26;
+        x.strokeStyle = `rgb(${(d[q] + v) | 0},${(d[q + 1] + v) | 0},${(d[q + 2] + v) | 0})`; x.beginPath(); x.moveTo(cx - (Math.cos(t) * len) / 2, cy - (Math.sin(t) * len) / 2); x.lineTo(cx + (Math.cos(t) * len) / 2, cy + (Math.sin(t) * len) / 2); x.stroke();
+      }
+      x.restore();
+    } },
+  { key: "frost", name: { zh: "雾面", en: "Frost" }, for: FX_ALL, stage: "filter",
+    /** The layer behind frosted glass: softened, a milky haze over it. */
+    paint(x, B, a, E) { const src = region(x, B, "fxA"), soft = softened(src, 4 + 8 * a, "fxFr"); x.save(); x.globalCompositeOperation = "source-atop"; x.imageSmoothingEnabled = true; x.globalAlpha = Math.min(1, a * 0.9); x.drawImage(soft, B.x0, B.y0, B.w, B.h); x.globalAlpha = 0.35 * a; x.fillStyle = css(dark ? [90, 92, 86] : [244, 246, 240]); x.fillRect(B.x0, B.y0, B.w, B.h); x.restore(); } },
+];
+jelly.elementFx = [
+  { key: "jelly", name: { zh: "果冻", en: "Jelly" }, for: FX_ALL, stage: "fill",
+    /** The layer as clear jelly: lit from inside, its rim deeper, bubbles in it, a glossy highlight, a little see-through. */
+    paint(x, B, a, E) {
+      bevelFx(0.25, 0.28, 0.014)(x, B, a, E);
+      const s = Math.min(B.w, B.h);
+      onLayer(x, B, region(x, B, "fxA"), "source-atop", a, (g) => {
+        const hl = g.createRadialGradient(B.w * 0.45, B.h * 0.45, 0, B.w * 0.5, B.h * 0.5, Math.max(B.w, B.h) * 0.6); hl.addColorStop(0, "rgba(255,250,230,0.45)"); hl.addColorStop(1, "rgba(255,250,230,0)"); g.fillStyle = hl; g.fillRect(0, 0, B.w, B.h);
+        g.strokeStyle = "rgba(255,255,255,0.6)"; g.lineWidth = Math.max(1, s * 0.006);
+        for (let k = 0; k < 12; k++) { g.beginPath(); g.arc(B.w * E.R(k * 2.1 + 171), B.h * E.R(k * 2.9 + 172), s * (0.01 + E.R(k * 3.7 + 173) ** 2 * 0.05), 0, TAU); g.stroke(); }
+        g.fillStyle = "rgba(255,255,255,0.85)"; g.beginPath(); g.ellipse(B.w * 0.28, B.h * 0.24, s * 0.12, s * 0.05, -0.5, 0, TAU); g.fill();
+      });
+      x.save(); x.globalCompositeOperation = "destination-out"; x.globalAlpha = 0.12 * a; x.fillRect(B.x0, B.y0, B.w, B.h); x.restore();
+    } },
+  { key: "glow", name: { zh: "辉光", en: "Glow" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 100 * k, t: 100 * k, r: 100 * k, b: 100 * k }),
+    /** The jelly's glow, in its own colours, spilling round it. */
+    paint(x, B, a, E) { glowBehind(x, B, region(x, B, "fxA"), (14 + 40 * a) * E.k, 0.9 * Math.min(1, a * 2.5), null); } },
+  { key: "depth", name: { zh: "景深虚化", en: "Depth of field" }, for: FX_ALL, stage: "filter", reach: (B, k) => ({ l: 20 * k, t: 20 * k, r: 20 * k, b: 20 * k }),
+    /** The layer out of focus, as machinery behind the creature. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA"), pad = Math.ceil((3 + 10 * a) * E.k), soft = softened(padded(src, pad, "fxDp"), 2 + 9 * a, "fxDf");
+      x.save(); x.clearRect(B.x0, B.y0, B.w, B.h); x.globalAlpha = 1 - Math.min(1, a * 1.3); x.drawImage(src, B.x0, B.y0); x.globalAlpha = Math.min(1, a * 1.3); x.imageSmoothingEnabled = true; x.drawImage(soft, B.x0 - pad, B.y0 - pad, B.w + 2 * pad, B.h + 2 * pad); x.restore();
+    } },
+  { key: "tone", name: { zh: "照片青橙调", en: "Photo teal and orange" }, for: FX_PHOTO, stage: "filter",
+    /** The photo graded teal and orange. */
+    paint: tonesFx(() => [[0, [8, 18, 28]], [0.4, [34, 104, 132]], [0.7, [244, 132, 86]], [1, [252, 246, 228]]]) },
+];
+skies.elementFx = [
+  { key: "vivid", name: { zh: "照片通透", en: "Photo clarity" }, for: FX_PHOTO, stage: "filter",
+    /** The photo made clear and vivid as an anime sky: more colour and contrast, cobalt toward the top, the sun's warmth toward the foot. */
+    paint(x, B, a) { eachPixel(x, B, a, (r, g, b, y, o) => { const l = 0.3 * r + 0.59 * g + 0.11 * b, c = (v) => clamp(128 + (l + (v - l) * 1.45 - 128) * 1.12, 0, 255), top = Math.max(0, 0.5 - y) * 2, foot = Math.max(0, y - 0.5) * 2; o[0] = clamp(c(r) - 14 * top + 12 * foot, 0, 255); o[1] = clamp(c(g) - 2 * top + 4 * foot, 0, 255); o[2] = clamp(c(b) + 22 * top - 10 * foot, 0, 255); }); } },
+];
+spectrum.elementFx = [
+  { key: "stipple", name: { zh: "点刻", en: "Stipple" }, for: FX_ALL, stage: "fill", sub: [{ key: "depth", name: { zh: "浓淡", en: "Depth" }, def: 0.55 }],
+    /** The layer engraved in stipple: dots of ink, thick where it is dark. */
+    paint(x, B, a, E, o) {
+      const cs = Math.max(2, 2.6 * E.k), [d, cols, rows] = cellsOf(x, B, cs), ink = spInk();
+      x.save(); x.globalCompositeOperation = "destination-out"; x.globalAlpha = a; x.fillRect(B.x0, B.y0, B.w, B.h); x.restore();
+      x.save(); x.globalAlpha = a; x.fillStyle = css(ink); x.beginPath();
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) { const q = (j * cols + i) * 4; if (d[q + 3] < 100) continue; const tone = clamp((1 - lumOf(d, q)) * (0.45 + 0.9 * o.depth) + 0.05); if (E.R(j * cols + i + 0.5) > tone) continue; const px = B.x0 + (i + E.R(i * 1.3 + j * 2.1 + 181)) * cs, py = B.y0 + (j + E.R(i * 2.7 + j * 1.1 + 182)) * cs, r = cs * (0.26 + 0.22 * tone); x.moveTo(px + r, py); x.arc(px, py, r, 0, TAU); }
+      x.fill(); x.restore();
+    } },
+  { key: "lines", name: { zh: "线刻", en: "Line engraving" }, for: FX_ALL, stage: "fill",
+    /** The layer engraved in level lines of ink, swelling where it is dark. */
+    paint(x, B, a, E) {
+      const p = Math.max(3, 4.5 * E.k), [d, cols, rows] = cellsOf(x, B, p), ink = spInk();
+      x.save(); x.globalCompositeOperation = "destination-out"; x.globalAlpha = a; x.fillRect(B.x0, B.y0, B.w, B.h); x.restore();
+      x.save(); x.globalAlpha = a; x.fillStyle = css(ink); x.beginPath();
+      for (let j = 0; j < rows; j++) {
+        const y = B.y0 + (j + 0.5) * p, th = [];
+        for (let i = 0; i < cols; i++) { const q = (j * cols + i) * 4; th.push(d[q + 3] < 100 ? 0 : clamp((1 - lumOf(d, q)) * 1.1 - 0.04)); }
+        const at = (i, s) => y + (th[i] - 0.5) * p * 0.3 + s * th[i] * p * 0.48;
+        x.moveTo(B.x0, at(0, -1)); for (let i = 1; i < cols; i++) x.lineTo(B.x0 + i * p, at(i, -1)); for (let i = cols - 1; i >= 0; i--) x.lineTo(B.x0 + i * p, at(i, 1)); x.closePath();
+      }
+      x.fill(); x.restore();
+    } },
+  { key: "stream", name: { zh: "光谱流线", en: "Spectral streams" }, for: FX_ALL, stage: "behind", reach: (B) => ({ r: B.w * 1.5 }),
+    /** Threads of the spectrum streaming out of the layer to the right, close-packed, each its own colour and weight. */
+    paint(x, B, a, E) {
+      x.save(); x.globalCompositeOperation = "destination-over"; x.lineCap = "butt";
+      for (let i = 0, n = Math.round(10 + 80 * a); i < n; i++) { const y = B.y0 + B.h * (0.1 + 0.8 * (i + E.R(i * 1.3 + 191) * 0.6) / n), len = B.w * (0.3 + 1.2 * a) * (0.6 + 0.4 * E.R(i * 2.1 + 192)); x.strokeStyle = css(spec(E.R(i * 3.7 + 193))); x.lineWidth = (0.8 + E.R(i * 4.3 + 194) * 2.2) * E.k * 0.8; x.beginPath(); x.moveTo(B.x0 + B.w * 0.5, y); x.lineTo(B.x1 + len, y); x.stroke(); }
+      x.restore();
+    } },
+  { key: "drip", name: { zh: "垂直滴流", en: "Drips" }, for: FX_ALL, stage: "behind", reach: (B) => ({ b: B.h * 1.2 }),
+    /** Threads of the spectrum dripping down from the layer, in spectrum order across it. */
+    paint(x, B, a, E) {
+      x.save(); x.globalCompositeOperation = "destination-over"; x.lineCap = "butt";
+      for (let i = 0, n = Math.round(10 + 120 * a); i < n; i++) { const t = i / n, px = B.x0 + B.w * (0.08 + 0.84 * t), len = B.h * (0.25 + 0.95 * E.R(i * 2.7 + 201)) * (0.3 + 0.7 * a); x.strokeStyle = css(spec(t * 0.9 + E.R(i + 202) * 0.08)); x.lineWidth = (0.8 + E.R(i * 3.3 + 203) * 1.8) * E.k * 0.8; x.beginPath(); x.moveTo(px, B.y1 - B.h * 0.3); x.lineTo(px, B.y1 + len); x.stroke(); }
+      x.restore();
+    } },
 ];
 
 let current = cel, values = {};
