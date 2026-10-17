@@ -262,20 +262,19 @@ const cyber = {
    * Highlighted words are black on a chamfered plate.
    */
   runs(ctx, pass, o, p) {
-    // o.letter: how far the lettering goes when a layer takes it as a look effect (1: as the look's own; see letterOf in render.js)
-    const q = 1 + ((o.letter ?? 1) - 1) * 1.5, fs = o.fs, C = o.C || CY.white, ink = o.fill || C, plateCol = o.hi || (o.fill && o.fill !== C ? o.fill : C);
-    const g = (fast ? 0 : fs * 0.03 * p.split * Math.max(0.3, o.shadowAmt)) * q, slip = fs * 0.03 * Math.min(1.5, p.split) * q;
+    const fs = o.fs, C = o.C || CY.white, ink = o.fill || C, plateCol = o.hi || (o.fill && o.fill !== C ? o.fill : C);
+    const g = fast ? 0 : fs * 0.03 * p.split * Math.max(0.3, o.shadowAmt), slip = fs * 0.03 * Math.min(1.5, p.split);
     ctx.lineJoin = "miter"; ctx.miterLimit = 3;
     ctx.transform(1, 0, -0.1, 1, 0, 0);   // a harder slant than the house style's
     const all = () => {
-      pass((a, x) => {
+      if (!o.hiPlate) pass((a, x) => {   // the highlighted words on chamfered plates (unless the layer has plates of its own under them)
         if (!a.hi) return;
         const w = ctx.measureText(a.t).width, bx = x - fs * 0.07, by = -fs * 0.88, bw = w + fs * 0.14, bh = fs * 1.06, plate = (col) => { chamfer(ctx, bx, by, bw, bh, fs * 0.2); ctx.fillStyle = col; ctx.fill(); };
         echo(ctx, g * 1.3, plate); plate(css(plateCol));
       });
       echo(ctx, g, (col) => pass((a, x) => { if (a.hi) return; ctx.fillStyle = col; ctx.fillText(a.t, x, 0); }));
       if (o.strokeAmt > 0) pass((a, x) => { if (a.hi) return; ctx.strokeStyle = css(CY.black); ctx.lineWidth = fs * 0.07 * o.strokeAmt; ctx.strokeText(a.t, x, 0); });
-      pass((a, x) => { ctx.fillStyle = a.hi ? css(CY.black) : css(ink); ctx.fillText(a.t, x, 0); });
+      pass((a, x) => { ctx.fillStyle = a.hi ? css(o.hiPlate ? o.hi || CY.black : lum(plateCol) < 0.4 ? CY.white : CY.black) : css(ink); ctx.fillText(a.t, x, 0); });   // black on the plate, white on a dark one
     };
     // three bands, top to bottom, each nudged sideways, with a hairline of nothing between them
     for (const [y0, y1, dx] of [[-1.3, -0.6, slip], [-0.6, -0.27, 0], [-0.27, 0.5, -slip * 0.8]]) {
@@ -657,7 +656,7 @@ const riso = {
   },
   /** Two inks, one printed slightly off the other, darker where they overlap. */
   runs(ctx, pass, o, p) {
-    const fs = o.fs, C = o.hi || o.C || RISO.pink, main = o.fill || RISO.blue, g = fs * o.shadowAmt * (0.035 + 0.012 * p.shift) * (1 + ((o.letter ?? 1) - 1) * 1.5);   // the shadow slider is how far off the second ink is printed: 0 in register
+    const fs = o.fs, C = o.hi || o.C || RISO.pink, main = o.fill || RISO.blue, g = fs * o.shadowAmt * (0.035 + 0.012 * p.shift);   // the shadow slider is how far off the second ink is printed: 0 in register
     pass((a, x) => { ctx.fillStyle = css(a.hi ? main : C); ctx.fillText(a.t, x + g, g * 0.8); });
     ctx.save(); ctx.globalCompositeOperation = "multiply";
     pass((a, x) => { ctx.fillStyle = css(a.hi ? C : main); ctx.fillText(a.t, x, 0); });
@@ -843,7 +842,7 @@ const anime = {
   },
   /** A title-card logotype: pale letters, a dark keyline, a white one outside it, and a soft drop shadow. */
   runs(ctx, pass, o) {
-    const q = o.letter ?? 1, fs = o.fs, C = o.hi || o.C || ANI.cream, k = Math.max(0.4, o.strokeAmt) * q, d = fs * 0.055 * o.shadowAmt * q;
+    const fs = o.fs, C = o.hi || o.C || ANI.cream, k = Math.max(0.4, o.strokeAmt), d = fs * 0.055 * o.shadowAmt;
     ctx.lineJoin = "round";
     if (d > 0) pass((a, x) => { ctx.strokeStyle = css(ANI.line, 0.5); ctx.lineWidth = fs * 0.2 * k; ctx.strokeText(a.t, x + d, d); });
     pass((a, x) => { ctx.strokeStyle = css(ANI.cream); ctx.lineWidth = fs * 0.2 * k; ctx.strokeText(a.t, x, 0); });
@@ -1115,10 +1114,10 @@ const editorial = {
   /** A serif headline, upright and unadorned. Highlighted words take the channel colour and a rule beneath. */
   runs(ctx, pass, o) {
     upright(ctx);
-    const q = 1 + ((o.letter ?? 1) - 1) * 2.5, fs = o.fs, C = o.hi || o.C;   // a layer's look effect thickens the underline up to three times
+    const fs = o.fs, C = o.hi || o.C;
     pass((a, x) => {
       ctx.fillStyle = css(a.hi ? C : o.fill || edInk()); ctx.fillText(a.t, x, 0);
-      if (a.hi) ctx.fillRect(x, fs * 0.13, ctx.measureText(a.t).width, Math.max(2, fs * 0.035) * q);
+      if (a.hi) ctx.fillRect(x, fs * 0.13, ctx.measureText(a.t).width, Math.max(2, fs * 0.035));
     });
   },
   wrap: (ctx, C, p, plates) => (plates
@@ -1715,7 +1714,7 @@ const vivid = {
    */
   runs(ctx, pass, o) {
     upright(ctx);
-    const q = o.letter ?? 1, fs = o.fs, line = fs * 0.085 * o.strokeAmt * q, depth = fs * 0.075 * o.shadowAmt * q;
+    const fs = o.fs, line = fs * 0.085 * o.strokeAmt, depth = fs * 0.075 * o.shadowAmt;
     const face = o.fill || VV.cream, hiFace = o.hi || boost(o.C || VV.red);
     const lower = (c) => (c === VV.cream ? VV.butter : mix(c, VV.navy, 0.22));
     ctx.lineJoin = "round";
@@ -4950,10 +4949,10 @@ const netart = {
   /** Plain capitals with a cyan and a magenta copy split off them (the shadow slider); highlighted words selected: white in a navy box. */
   runs(ctx, pass, o) {
     upright(ctx);
-    const fs = o.fs, d = fs * 0.025 * Math.min(2, o.shadowAmt) * (1 + ((o.letter ?? 1) - 1) * 2.5), ink = o.fill || naInk();   // the fringe, up to three times as a layer's look effect
-    pass((a, x) => { if (a.hi) { ctx.fillStyle = css(o.hi || NA.navy); ctx.fillRect(x - fs * 0.03, -fs * 0.88, ctx.measureText(a.t).width + fs * 0.06, fs * 1.04); } });
+    const fs = o.fs, d = fs * 0.025 * Math.min(2, o.shadowAmt), ink = o.fill || naInk();
+    if (!o.hiPlate) pass((a, x) => { if (a.hi) { ctx.fillStyle = css(o.hi || NA.navy); ctx.fillRect(x - fs * 0.03, -fs * 0.88, ctx.measureText(a.t).width + fs * 0.06, fs * 1.04); } });   // a selection box (unless the layer has plates of its own under them)
     if (d > 0) { ctx.save(); ctx.globalAlpha = 0.85; ctx.globalCompositeOperation = dark ? "screen" : "multiply"; for (const [s, c] of [[-1, [0, 220, 255]], [1, [255, 0, 170]]]) pass((a, x) => { if (!a.hi) { ctx.fillStyle = css(c); ctx.fillText(a.t, x + s * d, 0); } }); ctx.restore(); }
-    pass((a, x) => { ctx.fillStyle = css(a.hi ? NA.light : ink); ctx.fillText(a.t, x, 0); });
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? (o.hiPlate ? o.hi || NA.light : NA.light) : ink); ctx.fillText(a.t, x, 0); });
   },
   wrap: (ctx, C, p, plates) => (plates ? ctx : mapped(ctx, { fill: { ink: NA.ink, light: NA.light, mid: NA.silver, dark: NA.deep }, stroke: { ink: NA.ink, light: NA.light }, line: 0.6 })),
   sticker: painters({ line: NA.ink, lineScale: 0.5, join: "miter", shadow(ctx, draw) { ctx.save(); ctx.translate(4, 4); draw("rgba(0,0,0,0.6)"); ctx.restore(); } }),
@@ -6274,11 +6273,6 @@ export const LOOK_IDS = Object.keys(LOOKS);
 
 /** The order every layer's effects are painted in. */
 export const FX_STAGES = ["fill", "over", "filter", "behind"];
-// A look's own lettering may be taken by a text layer too, as an effect of stage "letter" (no painter:
-// the layer's letters are then set in that lettering, see letteringOf, and letterOf in render.js). A
-// layer has one lettering at a time. Its strength takes the lettering past the look's own — the slip of
-// the slices, the second ink's offset, the keyline, the underline, the block's depth, up to 1.8 times —
-// having first faded it in over the layer's own lettering, where that is another.
 /** The layer types the effects are open to: the user's own. */
 export const FX_TYPES = ["text", "asset", "photo", "solid"];
 const FX_ALL = ["text", "asset", "photo", "solid"];
@@ -6291,24 +6285,12 @@ export function layerEffects(L) {
   for (const [id, amt] of Object.entries(all)) {
     if (id.includes(":") || !(amt > 0)) continue;
     const [look, key] = id.split("."), fx = ((LOOKS[look] && LOOKS[look].elementFx) || []).find((e) => e.key === key);
-    if (!fx || !fx.for.includes(L.type) || fx.stage === "letter") continue;
+    if (!fx || !fx.for.includes(L.type)) continue;
     const opt = {};
     for (const s of fx.sub || []) { const v = all[`${id}:${s.key}`]; opt[s.key] = Number.isFinite(v) ? clamp(v) : s.def; }
     out.push({ id, look, fx, amt: clamp(amt), opt });
   }
   return out.sort((a, b) => FX_STAGES.indexOf(a.fx.stage) - FX_STAGES.indexOf(b.fx.stage) || (a.id < b.id ? -1 : 1));
-}
-/** Whether look effect id ("look.key") is a lettering. */
-export const isLettering = (id) => { const [look, key] = String(id).split("."); return ((LOOKS[look] && LOOKS[look].elementFx) || []).some((e) => e.key === key && e.stage === "letter"); };
-/** The lettering a text layer takes from a look, { id, look, amt }, or null: the strongest on (the first, if two are as strong). */
-export function letteringOf(L) {
-  if (!L || L.type !== "text" || !L.lookFx) return null;
-  let best = null;
-  for (const [id, amt] of Object.entries(L.lookFx)) {
-    if (id.includes(":") || !(amt > 0) || !isLettering(id) || !LOOKS[id.split(".")[0]].runs) continue;
-    if (!best || amt > best.amt) best = { id, look: id.split(".")[0], amt: clamp(amt) };
-  }
-  return best;
 }
 /** Time spent in each layer effect (ms by id), with the drawing finished before and after each: for the timing self-test; off otherwise. */
 export const FX_TIMING = { on: false, ms: {} };
@@ -6483,7 +6465,7 @@ netart.elementFx = [
 ];
 
 // ---------- shared painters for the looks' layer effects (every one works in B, the layer's box, in canvas pixels)
-const FX_PHOTO = ["photo"], FX_TEXT = ["text"];
+const FX_PHOTO = ["photo"];
 /** A copy of src softened by drawing it down `f` times smaller in two steps (so it does not sparkle): laid on enlarged, it is blurred. */
 function softened(src, f, slot) {
   const g1 = Math.min(f, 4), mw = Math.max(1, Math.round(src.width / g1)), mh = Math.max(1, Math.round(src.height / g1)), sw = Math.max(1, Math.round(src.width / f)), sh = Math.max(1, Math.round(src.height / f));
@@ -7231,11 +7213,58 @@ spectrum.elementFx = [
       x.restore();
     } },
 ];
-// the looks' own letterings, which a text layer may take (stage "letter", see letteringOf): each is the
-// look's runs(), painted with o.letter, how far it goes
-for (const [look, key, zh, en] of [["cyber", "sliced", "切片错位", "Sliced"], ["riso", "overprint", "双色叠印", "Overprint"], ["anime", "keyline", "双层勾边", "Double keyline"],
-  ["editorial", "underline", "下划线强调", "Underlined highlight"], ["vivid", "block", "暖白立体", "Sunlit block"], ["netart", "selected", "选中框", "Selected"]])
-  LOOKS[look].elementFx.push({ key, name: { zh, en }, for: FX_TEXT, stage: "letter" });
+// What five looks' own letterings do, as effects worked on any layer's pixels once it is painted: so they
+// go with whatever text effect a text layer has, and on a sticker, a photo or a colour as well.
+cyber.elementFx.push({ key: "sliced", name: { zh: "三段切片", en: "Three slices" }, for: FX_ALL, stage: "filter", reach: (B) => ({ l: B.h * 0.16, r: B.h * 0.16, t: B.h * 0.03, b: B.h * 0.03 }),
+  /** The layer cut across in three bands — the top one slipped right, the bottom one left, a hairline of nothing between them — with a red and a cyan echo behind. */
+  paint(x, B, a) {
+    const src = region(x, B, "fxSlice"), slip = B.h * 0.08 * a, gap = B.h * 0.014 * a, d = B.h * 0.035 * a;
+    cutBands(x, B, src, [0, 0.4, 0.66, 1], (i) => [slip, 0, -slip * 0.8][i]);
+    if (gap > 0.3) for (const t of [0.4, 0.66]) x.clearRect(B.x0 - slip * 2, B.y0 + B.h * t - gap / 2, B.w + slip * 4, gap);
+    const W = x.canvas.width, x0 = Math.max(0, Math.floor(B.x0 - slip * 1.2 - 2)), x1 = Math.min(W, Math.ceil(B.x1 + slip * 1.2 + 2)), P = { x0, y0: B.y0, w: x1 - x0, h: B.h }, cut = region(x, P, "fxSliceCut");
+    x.save(); x.globalCompositeOperation = "destination-over"; x.globalAlpha = Math.min(1, a * 2.5);
+    for (const [dx, dy, col] of [[-d, d * 0.35, CY.cyan], [d, -d * 0.35, CY.red]]) x.drawImage(shapeIn(cut, col, "fxSliceEcho"), P.x0 + dx, P.y0 + dy);
+    x.restore();
+  } });
+riso.elementFx.push({ key: "overprint", name: { zh: "第二色叠印", en: "Second-ink overprint" }, for: FX_ALL, stage: "behind", reach: (B) => { const d = Math.min(B.w, B.h) * 0.09; return { r: d, b: d }; },
+  /** A second impression of the layer in the riso's pink, printed off to the lower right: behind it where it shows, and a little darker where the two inks overlap (only a little: it lies over nearly all of the layer). */
+  paint(x, B, a) {
+    const src = region(x, B, "fxOver"), d = Math.min(B.w, B.h) * 0.08 * a, ink = shapeIn(src, RISO.pink, "fxOverInk"), alpha = Math.min(1, a * 3) * 0.9;
+    onLayer(x, B, src, "multiply", alpha * 0.22, (g) => g.drawImage(ink, d, d * 0.8));
+    x.save(); x.globalCompositeOperation = "destination-over"; x.globalAlpha = alpha; x.drawImage(ink, B.x0 + d, B.y0 + d * 0.8); x.restore();
+  } });
+anime.elementFx.push({ key: "keyline", name: { zh: "双色描边", en: "Two-tone outline" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 16 * k, t: 16 * k, r: 24 * k, b: 24 * k }),
+  /** Two outlines round the layer, as on a cel title: a dark ink line at its edge and a broad cream one outside that, with a soft shadow to the lower right. */
+  paint(x, B, a, E) {
+    const src = region(x, B, "fxKey"), k = E.k, line = 4 * k * a, wide = line + 9 * k * a, d = 7 * k * a;
+    if (line < 0.3) return;
+    ringsBehind(x, B, src, [[ANI.line, line * 0.5], [ANI.line, line], ...[1, 2, 3].map((i) => [ANI.cream, line + ((wide - line) * i) / 3])]);
+    const sh = shapeIn(src, ANI.line, "fxKeyShadow");
+    x.save(); x.globalCompositeOperation = "destination-over"; x.globalAlpha = 0.5 * Math.min(1, a * 3);
+    for (let i = 0; i < 16; i++) { const t = (i / 16) * TAU; x.drawImage(sh, B.x0 + d + Math.cos(t) * wide, B.y0 + d + Math.sin(t) * wide); }
+    x.restore();
+  } });
+vivid.elementFx.push({ key: "block", name: { zh: "日光立体", en: "Sunlit block" }, for: FX_ALL, stage: "behind", reach: (B, k) => { const d = Math.min(B.h * 0.12, 40 * k) + 6 * k; return { l: 6 * k, t: 6 * k, r: d, b: d }; },
+  /** The layer stood up as a block: a solid navy depth down to the right and a navy outline, its lower part in warmer light, as summer lettering is. */
+  paint(x, B, a, E) {
+    const src = region(x, B, "fxBlock"), k = E.k, depth = Math.min(B.h * 0.12, 40 * k) * a, line = 4 * k * a;
+    onLayer(x, B, src, "multiply", 0.55 * a, (g) => { const gr = g.createLinearGradient(0, B.h * 0.5, 0, B.h * 0.6); gr.addColorStop(0, css(VV.butter, 0)); gr.addColorStop(1, css(VV.butter)); g.fillStyle = gr; g.fillRect(0, 0, B.w, B.h); });
+    if (line > 0.3) ringsBehind(x, B, src, [[VV.navy, line * 0.5], [VV.navy, line]]);
+    const s = shapeIn(src, VV.navy, "fxBlockDepth"), steps = Math.max(2, Math.min(14, Math.round(depth / (2 * k))));
+    x.save(); x.globalCompositeOperation = "destination-over";
+    if (depth > 0.3) for (let i = 1; i <= steps; i++) { const t = (depth * i) / steps; x.drawImage(s, B.x0 + t, B.y0 + t); }
+    x.restore();
+  } });
+netart.elementFx.push({ key: "selected", name: { zh: "反白选中", en: "Selected" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 8 * k, r: 8 * k, t: 6 * k, b: 6 * k }),
+  /** As if the layer were selected on an old screen: turned white on a navy box, with a little colour fringe at its edges. */
+  paint(x, B, a, E) {
+    const src = region(x, B, "fxSel"), k = E.k, pad = 6 * k * a, d = 2.5 * k * a;
+    x.save(); x.globalCompositeOperation = "source-atop"; x.globalAlpha = Math.min(1, a * 1.2); x.fillStyle = css(NA.light); x.fillRect(B.x0, B.y0, B.w, B.h); x.restore();
+    x.save(); x.globalCompositeOperation = "destination-over"; x.globalAlpha = Math.min(1, a * 2) * 0.85;
+    for (const [sd, c] of [[-1, [0, 220, 255]], [1, [255, 0, 170]]]) x.drawImage(shapeIn(src, c, "fxSelFringe"), B.x0 + sd * d, B.y0);
+    x.globalAlpha = Math.min(1, a * 1.6); x.fillStyle = css(NA.navy); x.fillRect(B.x0 - pad, B.y0 - pad * 0.6, B.w + pad * 2, B.h + pad * 1.2);
+    x.restore();
+  } });
 
 let current = cel, values = {};
 /**

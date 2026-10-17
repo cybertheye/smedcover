@@ -225,7 +225,7 @@ Add a text layer with **＋ Text** on the right. The title and text layers are t
 | Text effect | how the letters are drawn; see [Text effects](#text-effects) |
 | Lettering colour, highlight colour | see [Lettering colours](#lettering-colours) |
 | Outline, Shadow | how thick and how far; the one the current text effect does not draw is greyed out. Their colours are automatic: the outline is ink on a dark ground and white on a light one, on a plate the colour that stands against the lettering; in the shadow ordinary words take the highlight colour and highlighted words the lettering colour. A note under the sliders says so |
-| Plate | sets the words on a block of colour; then *Plate colour*, the channel colour by default. On a plate, lettering colours left automatic take whichever reads against it |
+| Plate | *On a plate* sets the words on a block of colour; then *Plate colour*, the channel colour by default. *Plates under highlighted words* puts a plate under each word marked with `*asterisks*` alone; then *Highlight plates' colour*, the channel colour by default (ink or white when the whole plate is that colour already). Both may be on together; the plates are drawn in the look's way. On a plate, lettering colours left automatic take whichever reads against it |
 
 Text layers of earlier versions are carried over: white becomes automatic, ink and custom colours become the lettering colour, the channel colour still follows the channel; on a plate, the old colour becomes the plate's colour, without an outline or a shadow, as before.
 
@@ -250,13 +250,13 @@ The title and every text layer (with or without a plate) can be given a text eff
 | Kind | Effects | Notes |
 |---|---|---|
 | Automatic | follows the look | The default: the current look's own lettering |
-| Layered | outline and shadow, plain, plain upright | General letterings |
+| Layered | outline and shadow, plain, plain upright, underlined highlight | General letterings; the underlined highlight underlines the highlighted words |
 | Masked | halftone inside, stripes inside, inner shadow, worn, row shift | Change what is inside the letters |
 | Outlined | extruded, arched, tapered, wave | Reshape the letters themselves |
 
 With *Tapered*, diamond handles appear at the corners of the lettering on the canvas: drag any of them to set the perspective freely (the whole block is reshaped to the new quad); *Reset the perspective* in the properties goes back to the default. Both the title and text layers have it.
 
-The menu holds only the typesetting effects that belong to no look. The looks' own letterings (Sliced, Overprint, Double keyline, Underlined highlight, Sunlit block, Selected) are in a text layer's *Look effects* (next section); the title takes the current look's under *Automatic*. A text layer that chose one of them here before is given the matching look effect when opened, and looks the same; a title's earlier choice is painted as *Automatic*, and kept.
+Sliced, Overprint, Double keyline and Sunlit block were here once; they are their looks' post effects now (Three slices, Second-ink overprint, Two-tone outline, Sunlit block), under *Look effects* (next section), and go with any text effect. A text layer that chose one of them here before is given the matching post effect when opened; a title's earlier choice is painted as *Automatic*, and kept.
 
 Masked and outlined effects have a *Strength* slider. The *Outline* and *Shadow* sliders of the title and text layers can be moved only when the current effect draws an outline or a shadow: Plain, Plain upright and some looks' letterings have neither; otherwise the slider is greyed out and says why.
 
@@ -269,24 +269,22 @@ A look's material effects can be put on a layer you added: text, asset, photo or
 - **This look**: the effects the current look opens to that kind of layer. Each is a slider; at 0 it is off. Some have settings of their own: the riso's *Halftone*, once on, shows *Halftone size* under it.
 - **Borrow from other looks**: pick a look in the menu and its name and sliders are put in below, the menu moving down under them, so another can be borrowed. *Remove* after a look's name takes away every effect borrowed from it. Effects on the layer that are not the current look's are listed here too, under their own look.
 
-**Letterings**: Sliced (cyberpunk), Overprint (riso), Double keyline (90s animation), Underlined highlight (editorial), Sunlit block (summer illustration) and Selected (glitch net art) are the looks' own letterings, for text layers only, one at a time (turning one on turns another off). While one is on, the text is set in it and the *Effect* menu is greyed out. Under its own look the text has that lettering already, and the slider takes it further — its slip, offset, keyline, underline or depth, up to 1.8 times; borrowed, it first fades in over the layer's own lettering between 0 and 0.3, then goes further the same way.
-
 *Clear* after a look's name sets that look's effects back to 0 and keeps the group; a borrowed look also has *Remove*, which takes the group away. At the foot, *Clear all look effects* sets every effect back to 0 and keeps the borrowed looks; *Remove all look effects* removes every borrowed look and sets this look's effects back to 0. With nothing to clear, the buttons are greyed out.
 
 The effects stay with the layer: under another look they still apply, and move to *Borrow from other looks*. Each layer's random detail is its own, so every size, the preview and the export agree. *Surprise me* deals these layers new effects, but only ever from the look it drew, so a hand stays of one look.
 
-All 30 looks have effects. Those marked [photo] are offered on photo layers only, those marked [lettering] on text layers only; the rest suit text, asset, photo and solid layers alike. An effect that repaints the shape, such as a silhouette or chrome, follows the subject on a photo whose background was removed, and takes a plain photo as one block.
+All 30 looks have effects. Those marked [photo] are offered on photo layers only; the rest suit text, asset, photo and solid layers alike. Look effects all work on a layer once it is painted, so on a text layer they go with any text effect. An effect that repaints the shape, such as a silhouette or chrome, follows the subject on a photo whose background was removed, and takes a plain photo as one block.
 
 | Look | Effects |
 |---|---|
 | Cel | screentone shade |
-| Cyberpunk | colour split, signal tear, line glow, photo tint [photo], sliced [lettering] |
-| Riso | misregistration, halftone (with its size), patchy ink, roller streaks, ghosting, overprint [lettering] |
-| 90s animation | photo warmed [photo], double keyline [lettering] |
+| Cyberpunk | colour split, signal tear, line glow, photo tint [photo], three slices (cut in three bands, slipped apart with hairlines between, a red and cyan echo behind) |
+| Riso | misregistration, halftone (with its size), patchy ink, roller streaks, ghosting, second-ink overprint (a pink second impression off to the lower right) |
+| 90s animation | photo warmed [photo], two-tone outline (an ink line at the edge, a cream one outside, a soft shadow) |
 | Record sleeve | photo duotone [photo], photo halftone [photo] |
-| Editorial | black-and-white photo [photo], photo in spot colour [photo], underlined highlight [lettering] |
+| Editorial | black-and-white photo [photo], photo in spot colour [photo] |
 | Woodblock book | uneven printing, seal-red ink |
-| Summer illustration | photo vividness [photo], sunlit block [lettering] |
+| Summer illustration | photo vividness [photo], sunlit block (navy depth and outline, the lower part warmer) |
 | Negative space | red-and-black silhouette, screen-print texture, photo in red and black [photo] |
 | Minimal film poster | silhouette, back light, photo toning [photo] |
 | Cyanotype | glowing white figure, airbrush haze, coarse halftone, photo as cyanotype [photo] |
@@ -303,7 +301,7 @@ All 30 looks have effects. Those marked [photo] are offered on photo layers only
 | Velvet illustration | velvet, check, volume, fuzzy edge, soft shadow, photo in velvet colours [photo] |
 | Psychedelic rave | holographic sheen, eclipse halo, colour fringe, photo in neon heat [photo] |
 | Liquid chrome | chrome, holographic streak, drips, glitch slices, black-and-white photo [photo] |
-| Glitch net art | dither, pixel sorting, datamosh, scan shift, selected [lettering] |
+| Glitch net art | dither, pixel sorting, datamosh, scan shift, selected (turned white on a navy box, with a colour fringe) |
 | Comic-verse | comic colouring, halftone, hatching, off-register, dimension glitch, photo as comic [photo] |
 | Patterned glass | patterned glass (with pattern size, glints and dark lines), brush strokes, frost |
 | Jelly machine | jelly, glow, depth of field, photo teal and orange [photo] |
@@ -696,7 +694,7 @@ Goal: text, asset, photo and solid layers can each take a look's material effect
 - Only the user's own layers; every effect off on a new layer; one set of effects per layer, not per size.
 - A layer's effects come in two groups: *This look* lists the current look's; *Other looks* lets you borrow from another look, kept apart, so a borrowed effect shows as borrowed.
 - *Surprise me* picks only from the current look, so the result stays of one look.
-- The lettering effects are brought home: Sliced, Overprint, Double keyline, Underlined highlight and Sunlit block go back to their own looks' effects (still borrowable under *Other looks*). The menu keeps only the general typesetting effects. A text layer already using one of the five is given the matching look effect (the effects stay with the layer); a title's is drawn as *Automatic*, its setting kept.
+- The lettering effects are brought home: Sliced, Overprint, Double keyline and Sunlit block become their looks' true post effects (Three slices, Second-ink overprint, Two-tone outline, Sunlit block), for any layer and with any text effect; the net art's Selected box likewise. The Underlined highlight has to know the highlighted words, so is lettering, and stays in the text effect menu. A text layer already using one of the four is given the matching post effect; a title's is drawn as *Automatic*, its setting kept.
 - Pilots: riso, liquid chrome and glitch net art; then every look.
 
 **How effects are sorted**: three questions, in order.

@@ -33,7 +33,8 @@ export function titleBlock(ctx, title, box, font, maxFs = 340) {
  * Draws the title into box {x,y,w,h}. `adj` is the manual {dx,dy,s}; `st` the style:
  * { font, fill, hi, ink, shadow, hiShadow, align, stroke, shadowAmt, maxFs, fx, fxAmt } — fx being
  * the text effect (see textfx.js) — and optionally `plate(x, y, w, h, fs)`, which paints a plate
- * under the lines, and `skew`, the lines' slant (default -0.08).
+ * under the lines, `hiPlate(x, y, w, h, fs)`, one under each highlighted word, and `skew`, the lines'
+ * slant (default -0.08).
  * Returns the box it occupies (for hit-testing), or null when there is nothing to draw.
  */
 export function drawTitle(ctx, title, box, adj, st) {
@@ -59,11 +60,12 @@ export function drawTitle(ctx, title, box, adj, st) {
     ctx.translate(ox, oy);
     if (skew) ctx.transform(1, 0, skew, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
+    if (st.hiPlate) pass((a, x) => { if (a.hi) st.hiPlate(x - fs * 0.08, -fs * 0.86, ctx.measureText(a.t).width + fs * 0.16, fs * 1.06, fs); });
     const m = ctx.getTransform ? ctx.getTransform() : null;
     paintRuns(ctx, pass, {
       fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: st.fxAmt ?? 1, lineW: lw, seed: li * 17.3 + 1,
       fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow,
-      C: st.C, fill: st.own, hi: st.ownHi, unit: m ? Math.hypot(m.a, m.b) : 1,
+      C: st.C, fill: st.own, hi: st.ownHi, hiPlate: !!st.hiPlated, unit: m ? Math.hypot(m.a, m.b) : 1,
       frame: { ox, oy, c: skew, box: block }, warp: st.warp,
     }, st.fx);
     ctx.restore();

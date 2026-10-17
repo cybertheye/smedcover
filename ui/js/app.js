@@ -17,7 +17,7 @@ import {
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, effectUses, warpCorners } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
-import { LOOKS, LOOK_IDS, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING, isLettering, letteringOf } from "./style.js";
+import { LOOKS, LOOK_IDS, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
 import { sizeOf, PIXELS } from "./photo.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
@@ -2015,27 +2015,20 @@ function swatch(L, key, labelKey, shown, auto = true) {
  */
 function titleLines(L, set0) {
   const set = (k, v) => { holdLive(L.id); set0(k, v); };
-  const lt = letteringOf(L), use = effectUses(L.fx, lt), name = lt ? letteringName(lt) : (EFFECTS[use.id] || LOOKS[use.id]).name[getLang()];
+  const use = effectUses(L.fx), name = (EFFECTS[use.id] || LOOKS[use.id]).name[getLang()];
   const line = (k, key) => (use[k]
     ? slider(key, 0, 2, 0.05, L[k], times, (v) => set(k, v))
     : el("div", { class: "sl off", title: t("props.fxIgnores", name) }, el("span", {}, t(key)), el("span", { class: "why" }, t("props.fxIgnores", name))));
   return [line("stroke", "props.stroke"), line("shadow", "props.shadow")];
 }
-/** The name of a look lettering a layer takes ({ id }: see letteringOf). */
-const letteringName = (lt) => { const [look, key] = lt.id.split("."); return LOOKS[look].elementFx.find((e) => e.key === key).name[getLang()]; };
 /**
  * The text effect of a headline layer, how strong it is, and the perspective's own corners: {kids, tip}.
- * A text layer taking a look's lettering as a look effect is set in that instead: the menu is then off.
  */
 function fxControl(L) {
   const set = (k, v, side) => { if (v === undefined) delete L[k]; else L[k] = v; touch({ cover: true, side }); };
   const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline") };
   const groups = ["passes", "mask", "outline"].map((kind) => ({ group: kinds[kind], items: Object.entries(EFFECTS).filter(([, e]) => e.kind === kind).map(([id, e]) => [id, e.name[getLang()]]) }));
-  const fx = EFFECTS[L.fx] ? L.fx : "auto", kind = EFFECTS[fx].kind, lt = letteringOf(L);   // an effect no longer in the menu (a look's lettering, now its effect) is shown as automatic
-  if (lt) {   // the menu, off, naming the lettering in its one line: nothing above the look effects grows as it comes on (the reason in the tip)
-    const why = t("fx.byLetter", letteringName(lt));
-    return { kids: [el("select", { disabled: true, title: why }, el("option", {}, t("fx.byLetterShort", letteringName(lt))))], tip: why };
-  }
+  const fx = EFFECTS[L.fx] ? L.fx : "auto", kind = EFFECTS[fx].kind;   // an effect no longer in the menu (a look's lettering of before) is shown as automatic
   return {
     kids: [
       select(groups, fx, (v) => set("fx", v === "auto" ? undefined : v, true)),
@@ -2045,6 +2038,8 @@ function fxControl(L) {
     tip: [fx === "taper" && t("fx.warpHint"), kind === "outline" && !native && t("fx.needsApp")].filter(Boolean).join(" "),
   };
 }
+/** White or ink, whichever reads on colour "#rrggbb". */
+const readsOn = (hex) => { const c = hexToRgb(hex); return c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114 < 128 ? "#ffffff" : "#07070c"; };
 /** The title and text layers alike: words, effect, colours, lines, plate. */
 function headlineControls(L, set) {
   const light = S.profile.style.theme === "light" && !recordOf(mainPhoto()) && !(LOOKS[S.profile.style.look] || LOOKS.cel).oneTheme;
@@ -2056,10 +2051,11 @@ function headlineControls(L, set) {
     psec("props.sec.effect", fx.kids, fx.tip),
     psec("props.sec.color", [
       swatch(L, "ink", "props.sw.text", L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff"),
-      swatch(L, "hi", "props.sw.hi", cat().color),
-      L.plate && swatch(L, "plateInk", "props.sw.plate", cat().color)], t("props.inkAutoHint")),
+      swatch(L, "hi", "props.sw.hi", L.hiPlate ? readsOn(L.hiPlateInk || cat().color) : cat().color),   // on plates of their own the words take what reads there
+      L.plate && swatch(L, "plateInk", "props.sw.plate", cat().color),
+      L.hiPlate && swatch(L, "hiPlateInk", "props.sw.hiPlate", cat().color)], t("props.inkAutoHint")),
     psec("props.sec.lines", titleLines(L, set), t(L.plate ? "props.linesOnPlate" : "props.linesNoPlate")),
-    psec("props.sec.plate", check("props.plateAdd", L.plate, (v) => set("plate", v, true))),
+    psec("props.sec.plate", [check("props.plateAdd", L.plate, (v) => set("plate", v, true)), check("props.hiPlateAdd", !!L.hiPlate, (v) => set("hiPlate", v || undefined, true))]),
   ];
 }
 /** The properties of a photo layer. */
@@ -2171,7 +2167,6 @@ function lookFxSection(L) {
   const put = (id, v) => {
     holdLive(L.id);
     const o = { ...(L.lookFx || {}) };
-    if (v > 0 && isLettering(id)) for (const k of Object.keys(o)) if (k !== id && isLettering(k)) delete o[k];   // one lettering at a time
     if (id.includes(":") || v > 0) o[id] = v;
     else { delete o[id]; for (const k of Object.keys(o)) if (k.startsWith(id + ":")) delete o[k]; }
     if (Object.keys(o).some((k) => !k.includes(":"))) L.lookFx = o; else delete L.lookFx;
@@ -3097,12 +3092,12 @@ async function selfTest(dir) {
       const cv = await renderReady(S.profile.sizes[0], S.cover, catIndex());
       report.effects.push({ id, kind: EFFECTS[id].kind, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `fx-${id}.png` })) });
     }
-    // the title and a text layer as headlines on plates, the text with its own colours and an outline
+    // the title and a text layer as headlines on plates, the text with its own colour, an outline and plates under its highlighted words
     {
       const keepTitle = S.cover.title;
       S.cover.title = "Plates *for* all\nheadlines";
       titleLayer.plate = true; titleLayer.fx = "plain";
-      const tx = newLayer("text", { text: "NEW *text*", plate: false, ink: "#ffd60a", hi: "#ff3355", stroke: 1.5 }); tx.t.all = { ...tx.t.all, x: 0.72, y: 0.82, s: 0.4 };
+      const tx = newLayer("text", { text: "NEW *text*", plate: false, ink: "#ffd60a", hiPlate: true, stroke: 1.5 }); tx.t.all = { ...tx.t.all, x: 0.72, y: 0.82, s: 0.4 };
       const tp = newLayer("text", { text: "ON A *PLATE*", plate: true, plateInk: "#ffffff" }); tp.t.all = { ...tp.t.all, x: 0.72, y: 0.62, s: 0.3, r: -4 };
       S.cover.layers.push(tx, tp);
       const cv = await renderReady(S.profile.sizes[0], S.cover, catIndex());
@@ -3111,7 +3106,7 @@ async function selfTest(dir) {
     }
     // the looks' effects on the user's own layers: every look that has some, all of them at full on a
     // text layer, a sticker, a solid and a print of the last picture taken in; then, under a look
-    // of none, effects borrowed from other looks (a lettering among them, still fading in)
+    // of none, effects borrowed from other looks
     report.layerFx = [];
     {
       const keepLook = S.profile.style.look, tx = newLayer("text", { text: "LAYER *效果*" }), sk = newLayer("asset", { ref: { kind: "sticker", id: "burst" }, tint: true });
@@ -3130,7 +3125,7 @@ async function selfTest(dir) {
         await shoot(id, id);
       }
       for (const L of ours) L.lookFx = {};
-      tx.lookFx = { "chrome.chrome": 1, "chrome.drips": 0.8, "riso.shift": 0.6, "cyber.sliced": 0.15 };   // a borrowed lettering, still fading in sk.lookFx = { "netart.dither": 0.7, "netart.sort": 0.8, "riso.dots": 0.6, "riso.dots:pitch": 1 };
+      tx.lookFx = { "chrome.chrome": 1, "chrome.drips": 0.8, "riso.shift": 0.6, "cyber.sliced": 0.5 }; sk.lookFx = { "netart.dither": 0.7, "netart.sort": 0.8, "riso.dots": 0.6, "riso.dots:pitch": 1 };
       so.lookFx = { "velvet.check": 0.8, "court.varsity": 0.7 }; if (pr) pr.lookFx = { "cyano.duo": 1, "toon.burst": 0.5 };
       await shoot("borrowed", "velvet");
       S.profile.style.look = keepLook; S.cover.layers = S.cover.layers.filter((l) => !ours.includes(l));

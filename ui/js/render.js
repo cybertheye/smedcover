@@ -7,8 +7,8 @@ import { drawTitle, parseTitle } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas, clipEnd, sceneOffsets } from "./layers.js";
-import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, letteringOf, setScene, scenePlaced } from "./style.js";
-import { paintRuns, warpCorners, EFFECTS } from "./textfx.js";
+import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced } from "./style.js";
+import { paintRuns, warpCorners } from "./textfx.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
 /** For checks of speed: while `on`, the time each layer took to paint is added up in `ms` (by id), and still runs repainted are counted. */
@@ -248,9 +248,16 @@ function headline(L, env) {
     fill = L.ink || (accent ? env.acc : th.titleFill); hi = L.hi || (accent ? "#ffffff" : env.acc);
     ink = th.titleInk; own = L.ink ? hexToRgb(L.ink) : accent ? env.C : undefined;
   }
+  // plates under the highlighted words: their own colour, else the channel colour (or, on a plate of that
+  // colour already, ink or white against it); the words on them in what reads there, unless chosen
+  let hiPlate = null;
+  if (L.hiPlate) {
+    hiPlate = L.hiPlateInk ? hexToRgb(L.hiPlateInk) : plate && plate.every((v, i) => Math.abs(v - env.C[i]) < 24) ? (isDark(plate) ? [255, 255, 255] : hexToRgb(INK)) : env.C;
+    if (!L.hi) { hi = isDark(hiPlate) ? "#ffffff" : INK; ownHi = hexToRgb(hi); }
+  }
   return {
     fill, hi, ink, shadow: hi, hiShadow: fill, own, ownHi,
-    plate: plate && rgb(plate), stroke: clamp(L.stroke ?? 1, 0, 2), shadowAmt: clamp(L.shadow ?? 1, 0, 2),
+    plate: plate && rgb(plate), hiPlate: hiPlate && rgb(hiPlate), stroke: clamp(L.stroke ?? 1, 0, 2), shadowAmt: clamp(L.shadow ?? 1, 0, 2),
   };
 }
 /** The plate a headline sits on (x, y, w, h: its box; fs: the type size). A look may draw its own. */
@@ -283,12 +290,13 @@ function drawFreeText(ctx, L, env) {
     ctx.translate(ox, oy);
     if (skew) ctx.transform(1, 0, skew, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
+    if (st.hiPlate) pass((a, x) => { if (a.hi) drawPlate(raw, x - FS * 0.08, -FS * 0.86, ctx.measureText(a.t).width + FS * 0.16, FS * 1.06, st.hiPlate, FS, env.C); });   // under the highlighted words
     const m = raw.getTransform ? raw.getTransform() : null, unit = m ? Math.hypot(m.a, m.b) : 1;
     paintRuns(raw, pass, {
       fs: FS, d: FS * 0.062 * st.shadowAmt, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit,
-      fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow, fill: st.own, hi: st.ownHi,
+      fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow, fill: st.own, hi: st.ownHi, hiPlate: !!st.hiPlate,
       frame: { ox, oy, c: skew, box }, warp: L.warp,
-    }, L.fx, env.letterOff ? null : letterOf(L));
+    }, L.fx);
     raw.restore();
   });
   return { hw: bw / 2 + pad, hh: bh / 2 + pad * 0.3 };
@@ -436,9 +444,10 @@ const PAINT = {
     const st = headline(L, env);
     return placed(ctx, tr, (c) => (own && own(c, env.cover.title, box, L, env, lookValues())) || drawTitle(c, env.cover.title, box, IDENTITY, {
       font: headFont(), maxFs: 340, align: "left", fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
-      own: st.own, ownHi: st.ownHi,   // for looks that paint the letters themselves
+      own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate,   // for looks that paint the letters themselves
       stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt,
       plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
+      hiPlate: st.hiPlate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.hiPlate, fs, env.C)),
       warp: L.warp, onBlock: (m, block) => { env.blocks[L.id] = { m, box: block }; },
     }));
   },
@@ -504,7 +513,7 @@ function drawSelection(ctx, hit, k, withHandles = true) {
   ctx.restore();
 }
 
-let scratch = null, fxScratch = null, fadeScratch = null;
+let scratch = null, fxScratch = null;
 // a clipping group (see clipBase in layers.js) is painted on clipGround — the base, then each layer
 // clipped onto it painted on clipOne and laid on only where the base is — and then laid down as one
 let clipGround = null, clipOne = null;
@@ -515,22 +524,6 @@ function freshCanvas(c, cv, kx, ky) {
   x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = "source-over"; x.clearRect(0, 0, c.width, c.height); x.scale(kx, ky);
   return x;
 }
-// A text layer taking a look's lettering (see letteringOf in style.js), so the slider has no step:
-// - where the layer's own lettering is that one already (the look's own, under "auto"), the strength takes
-//   it further from the foot (o.letter from 1 to LETTER_MAX; each lettering says how far that takes its slip,
-//   offset, keyline, underline or depth — the thin ones, the underline and the fringe, up to three times);
-// - otherwise it first fades in over the layer's own lettering, across the first LETTER_FADE, and then
-//   goes further as above.
-const LETTER_FADE = 0.3, LETTER_MAX = 1.8;
-/** The look lettering a text layer takes, as painted: { look, amt: how far it goes (1: as the look's own), fade: how far it has come in }, or null. */
-function letterOf(L) {
-  const lt = L.type === "text" ? letteringOf(L) : null;
-  if (!lt) return null;
-  const own = look().id === lt.look && !(L.fx && L.fx !== "auto" && EFFECTS[L.fx]);
-  const on = own ? lt.amt : Math.max(0, (lt.amt - LETTER_FADE) / (1 - LETTER_FADE));
-  return { look: lt.look, amt: 1 + (LETTER_MAX - 1) * on, fade: own ? 1 : Math.min(1, lt.amt / LETTER_FADE) };
-}
-const fadeOf = (L) => { const lo = letterOf(L); return lo ? lo.fade : 1; };
 // A photo's look effects are pixel work over the whole photo — a background photo's is millions of pixels
 // — so their result is kept, per layer and canvas size, for as long as nothing it is drawn from changes:
 // the layer (and the photo it copies), where it is, the picture and its mask, the canvas, the style and the
@@ -868,7 +861,7 @@ function paintCover(cv, o) {
       const t0 = TIMING.on ? performance.now() : 0;
       try {
       const fx = layerEffects(L);
-      let fxKey = null, slot = null, kept = null, fade = 1;
+      let fxKey = null, slot = null, kept = null;
       if (fx.length && L.type === "photo") {
         const base = L.of ? cover.layers.find((l) => l.id === L.of) : L, rec = base && o.photos && o.photos.get(base.pid);
         slot = `${L.id}@${cv.width}x${cv.height}`;
@@ -881,28 +874,15 @@ function paintCover(cv, o) {
         FX_KEPT.delete(slot); FX_KEPT.set(slot, kept);   // the newest again
         c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o; c.drawImage(kept.img, kept.got.x0, kept.got.y0); c.restore();
         hit = kept.hit;
-      } else if (L.o < 1 || fx.length || (fade = fadeOf(L)) < 1) {   // paint the layer on its own — its look effects added to it there — then blend it in as a whole
+      } else if (L.o < 1 || fx.length) {   // paint the layer on its own — its look effects added to it there — then blend it in as a whole
         // a layer with effects gets a canvas held in memory: the effects read it back and copy from it, which
         // on a canvas kept on the graphics card means a round trip each time (see fxCanvas in style.js)
-        const mem = fx.length > 0 || fade < 1;
-        if (mem && !fxScratch) { fxScratch = document.createElement("canvas"); fxScratch.getContext("2d", { willReadFrequently: true }); }
-        const scr = mem ? fxScratch : (scratch = scratch || document.createElement("canvas"));
+        if (fx.length && !fxScratch) { fxScratch = document.createElement("canvas"); fxScratch.getContext("2d", { willReadFrequently: true }); }
+        const scr = fx.length ? fxScratch : (scratch = scratch || document.createElement("canvas"));
         if (scr.width !== cv.width || scr.height !== cv.height) { scr.width = cv.width; scr.height = cv.height; }
         const sx = scr.getContext("2d");
         sx.setTransform(1, 0, 0, 1, 0, 0); sx.globalAlpha = 1; sx.globalCompositeOperation = "source-over"; sx.clearRect(0, 0, cv.width, cv.height); sx.scale(kx, ky);
         hit = PAINT[L.type](sx, L, tr, env);
-        if (fade < 1) {   // the lettering coming in: the layer as it is without it, laid under by the rest (lettering × fade + own × (1 − fade))
-          if (!fadeScratch) { fadeScratch = document.createElement("canvas"); fadeScratch.getContext("2d", { willReadFrequently: true }); }
-          if (fadeScratch.width !== cv.width || fadeScratch.height !== cv.height) { fadeScratch.width = cv.width; fadeScratch.height = cv.height; }
-          const bx = fadeScratch.getContext("2d");
-          bx.setTransform(1, 0, 0, 1, 0, 0); bx.globalAlpha = 1; bx.globalCompositeOperation = "source-over"; bx.clearRect(0, 0, cv.width, cv.height); bx.scale(kx, ky);
-          env.letterOff = true;
-          try { PAINT[L.type](bx, L, tr, env); } finally { env.letterOff = false; }
-          sx.save(); sx.setTransform(1, 0, 0, 1, 0, 0);
-          sx.globalCompositeOperation = "destination-in"; sx.fillStyle = `rgba(0,0,0,${fade})`; sx.fillRect(0, 0, cv.width, cv.height);
-          sx.globalCompositeOperation = "lighter"; sx.globalAlpha = 1 - fade; sx.drawImage(fadeScratch, 0, 0);
-          sx.restore();
-        }
         // with effects, only the box the layer and its effects reached is laid down
         const got = hit && fx.length ? paintEffects(sx, pixelBox(hit, kx, ky, cv.width, cv.height), fx, L, kx, env.C) : null;
         c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o;
