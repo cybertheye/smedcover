@@ -585,16 +585,93 @@ Goal: users make looks of their own and import looks others made, and the Style 
 
 ### Open the looks' material effects to the user's own layers
 
-Goal: text, asset, photo and solid layers can each take the current look's effects (the riso's misregistration and patchy ink, the chrome's metal and drips, the net art's pixel sorting and dithering…), each at its own strength. Looks do not lend each other their effects: each offers only its own, in its own colours and settings.
+Goal: text, asset, photo and solid layers can each take a look's material effects — the riso's misregistration and patchy ink, the chrome's metal and drips, the net art's pixel sorting and dither — each layer with its own strengths. The layout layers (title, channel graphic, tag, channel name) do not: their look is designed by the look as a whole.
 
-- [ ] Split each look's effects in two: **scene effects** (the hills, nebulae and courts in the background; the grain, vignette and creases of the finish) stay with the Style panel; **material effects** (working on a layer's pixels or outline) are opened to layers.
-- [ ] Each look declares its material effects, `elementFx`: a name, the layer types it suits, a stage (replacing the fill `fill` → laying texture `over` → working on pixels `filter` → outside the outline `behind`, run in that fixed order by the framework) and a painter.
-- [ ] Settings live on the layer, per look: `L.lookFx = { lookId: { effectKey: amount } }`; a render reads only the current look's, so another look's are kept but unused, and come back with that look.
-- [ ] Pipeline: the per-layer offscreen pass already used for opacity below 1, with the stages applied there before compositing; the offscreen canvas only the layer's box, degraded and cached while dragging.
-- [ ] Interface: a "Look effects · <look>" group of sliders in the layer's properties, 0 by default; one button to clear this look's effects; a note when other looks hold settings of their own.
-- [ ] In stages: first riso (texture), liquid chrome (fill) and glitch net art (pixels) on text and asset layers, then every look and the photo and solid layers.
-- Open questions: whether the layout layers (title, channel graphic, tag, channel name) get them too; whether the five lettering effects borrowed from other looks (Sliced, Overprint, Double keyline, Underlined highlight, Sunlit block) go back to their own looks; whether new layers start with every effect off or with suggested values; whether effects can differ per size (leaning no).
-- Note: this records look-specific settings in the cover's data, which changes the rule that a cover's content never mentions a look; effects the finish already lays over every layer (grain, say) are not offered again.
+**Decided**
+
+- Only the user's own layers; every effect off on a new layer; one set of effects per layer, not per size.
+- A layer's effects come in two groups: *This look* lists the current look's; *Other looks* lets you borrow from another look, kept apart, so a borrowed effect shows as borrowed.
+- *Surprise me* picks only from the current look, so the result stays of one look.
+- The lettering effects are brought home: Sliced, Overprint, Double keyline, Underlined highlight and Sunlit block go back to their own looks' effects (still borrowable under *Other looks*). The menu keeps only the general typesetting effects. A layer already using one of the five is drawn as *Automatic* under another look, its setting kept.
+- Pilots: riso, liquid chrome and glitch net art.
+
+**How effects are sorted**: three questions, in order.
+
+1. Does it **add something to the picture**? Something with content and a place of its own, belonging to no layer: the ball, the giant letters, the hills, the radiating lines. → a **scene object**; it stays in the background layer.
+2. Does it imitate **the medium the whole picture shares**? The same sheet, the same reel of film, the same lens, the same screen: paper grain, film grain, vignette, creases and folds, sun fading, dust and scratches, scan lines, light leaks, lens flare. → the **finish**; not opened to single layers. A real print never has film grain in one spot only; laid layer by layer it looks dirty, and doubles the whole-picture one.
+3. What remains changes **how one thing is drawn or printed**. It depends only on that thing's own shape and pixels, and moves and scales with it: misregistration, halftone, chrome, a fuzzy edge, pixel sorting, a silhouette, a glow, fluted glass, slicing. → a **material effect**, opened to layers.
+   - Some are laid over the whole picture today: the riso's ghost and patchy ink, the basketball poster's screen-print wear, the cyberpunk colour split. By this test they are material too.
+   - Once opened, the whole-picture one stays in the Style panel, and a layer's own is laid on that layer only.
+
+A last kind is **a relation between layers**: one layer's shape decides where another shows, as in the minimal film poster's *Photo inside the silhouette* or the yellow poster's *Photo inside the letters*. That is a mask, belonging to no look, and suits a *clipping mask* that every look can use.
+
+**Each look's material effects (first draft)**
+
+Stages: [fill] replaces the colour inside the outline; [over] lays texture inside it; [px] works on the pixels; [out] paints outside the outline; [text] is for text only.
+
+Layers: "photo" marks an effect for photo layers only; the others suit text, asset, photo and solid layers alike. A [fill] effect on a photo only makes sense on a cut-out.
+
+★ marks a scene object worth making draggable.
+
+| Look | Material effects (opened to layers) | Scene objects | Finish |
+|---|---|---|---|
+| Cel | screentone shade [over] | grid | — |
+| Cyberpunk | colour split [px], signal tear [px], line glow [out], photo tint [px, photo], Sliced [text] | interface decor, scan band ★ | scan lines |
+| Riso | misregistration [px], halftone (with its pitch) [over], patchy ink [over], roller streaks [over], ghost [px], Overprint [text] | overprinted shapes ★ | paper grain |
+| 90s animation | photo warmed [px, photo], Double keyline [text] | clouds ★, dusk, light rays ★ | bloom, fade, light leak ★, lens flare ★, dust and scratches, film grain, vignette |
+| Record sleeve | photo duotone [px, photo], photo halftone [px, photo] | the record showing ★, rules and catalogue numbers | ring wear, edge wear, sun fading, paper grain |
+| Editorial | black-and-white photo [px, photo], photo in spot colour [px, photo], Underlined highlight [text] | rules and running heads, issue numeral ★, text columns, quotation marks ★ | gutter shadow, paper grain |
+| Woodblock | uneven printing [over], seal-red ink [fill] | column rules, text and notes, red annotations, collector's seals ★ | wormholes, water stains, ageing, paper grain |
+| Summer illustration | photo vividness [px, photo], Sunlit block [text] | cumulus ★, town and towers ★, pennants | paper grain (frame: postcard border) |
+| Negative space | red-and-black silhouette [fill], screen-print texture [over], photo in red and black [px, photo] | giant silhouette ★, negative split, spotlight beam ★, threads, credits | — |
+| Minimal film poster | silhouette [fill], back light [out], photo toning [px, photo] | silhouette ★, layered hills, credits | creased paper, fade, vignette, grain |
+| Cyanotype | glowing white figure [fill], airbrush haze [out], coarse halftone [over], photo as cyanotype [px, photo] | starlight, rules and numbers | uneven brushing, grain |
+| Monochrome film | motion ghost [px], black-and-white photo [px, photo], photo motion blur [px, photo], photo collage [px, photo] | haze and flare ★, editorial small print | fold, dust and scratches, film grain |
+| Experimental type | slice [px], echo [out], particle scatter [px], dry brush [over], hard black and white [px, photo] | giant letters ★, radiating lines ★ (their centre), hairline grid | paper grain |
+| Animated film poster | silhouette [fill], sunburst [out], screen-print wear [over], photo in one colour [px, photo] | sun ★, sunset gradient, sunset stripes, sunburst ★, giant silhouette ★, street-lamp beam ★, procession, winding road, stars | white poster border (frame) |
+| Avant-garde image | motion smear [px], glow [out], out of focus with a frame of focus [px], pixel mosaic [px], fluted glass [px], colour band [px], fade out [over], black-and-white photo [px, photo] | figure ★, grid and labels | grain |
+| Collage | paper lift [out], tape [over], halftone patch [over], black-and-white photo [px, photo], photo torn in strips [px, photo] | colour disc ★, torn pieces, newsprint strips, starburst ★, marker scribble ★, ticket and barcode | paper texture |
+| Yellow poster | black silhouette [fill], black-and-white photo [px, photo] | giant letters ★, flock, beam ★, crossed stripes, small print | paper grain |
+| Pitch | halftone [over], photo posterized [px, photo] | mowing stripes, pitch lines, goal net, stands, floodlights, ball ★, crowd, match details | creased paper, grain |
+| Dot matrix | read into dots (with their pitch) [fill], rainbow [px], motion smear [px], colour split [px], glow [out] | dot figure ★, rolling surface of dots, digit columns, stars | grain |
+| Neon pop | neon gradient map [px], hard tones [px], rim light [out], back light [out], halftone shadow [over] | figure ★, diagonal plane, side bars | bloom, print grain, vignette |
+| Basketball poster | varsity outline [out], halftone knock-out [over], spray drips [out], speed trails [out], screen-print wear [over], photo in two colours [px, photo] | jersey number ★, ball ★, half court ★, hoop ★ | worn wall, grain |
+| Velvet illustration | velvet [fill], check [over], volume [over], fuzzy edge [out], soft shadow [out], photo in velvet colours [px, photo] | plush figure ★, velvet hills, dusk gradient, stars | glow, velvet grain, vignette |
+| Psychedelic rave | holographic sheen [fill], eclipse halo [out], colour fringe [px], photo in neon heat [px, photo] | holographic figure ★, liquid chrome ★, nebula, neon grid, arch, bubbles, orbits | bloom, grain |
+| Liquid chrome | chrome [fill], holographic streak [over], drips [out], glitch slices [px], black-and-white photo [px, photo] | chrome figure ★, wireframe ★, HUD frames, bubbles, outlined letters | creased paper, grain |
+| Glitch net art | dither [fill], pixel sorting [px], datamosh [px], scan shift [px], Selected [text] | dithered figure ★, dialog windows ★, garbled characters, transparency checks, colour bars ★, cursors ★ | grain |
+| Comic-verse | comic colouring [fill], halftone [over], hatching [over], off-register [px], dimension glitch [px], photo as comic [px, photo] | comic figure ★, towers from below, focus lines ★ (their centre), neon scribbles, caption box ★, sound effect ★ | grain |
+| Patterned glass | patterned glass (ripple, pattern size, glints, dark lines) [px], brush strokes [px], frost [px] | figure at the window ★, window light ★, warm light, flowers ★ | dark corners |
+| Jelly machine | jelly [fill], glow [out], depth of field [px], photo teal and orange [px, photo] | jelly figure ★, circuit board, speakers, cables, knobs and buttons, segment display ★, tiny print, jelly drops | grain |
+| Anime skies | photo clarity [px, photo] | cumulus ★, fleecy clouds, sunlight ★, contrails ★, pole and wires ★, town, signs, sea, leaves ★, haze | — |
+| Spectral engraving | stipple (with its depth) [fill], line engraving [fill], spectral streams [out], drips [out] | stippled figure ★, vortex ★, perspective lines ★ (their vanishing point), rainbow waves, colour blocks, engraved sky | paper (frame: mat and frame) |
+
+The general typesetting effects belong to no look and stay in the lettering menu: Automatic (follows the look), Outline and shadow, Plain, Plain upright, Halftone inside, Stripes inside, Inner shadow, Worn, Row shift, Extruded, Arched, Tapered, Wave.
+
+**Implementation**
+
+- [ ] Each look declares its material effects, `elementFx`: a name, the layer types it suits, a stage and a painter. The framework runs the stages in a fixed order: replacing the fill `fill` → laying texture `over` → working on pixels `filter` → outside the outline `behind`.
+- [ ] Settings live on the layer, kept per look of the cover: `L.lookFx = { coverLook: { "fromLook.effect": amount } }`.
+  - A borrowed effect is kept in the set of the look it was chosen under.
+  - A render reads only the current look's set; another look's is kept, and comes back with that look.
+- [ ] Pipeline: the per-layer offscreen pass already used for opacity below 1, with the stages applied there before compositing. The offscreen canvas is only the layer's box; it is degraded while dragging, and its result cached by its settings. Randomness is seeded by the layer's id, so every size, the preview and the export agree.
+- [ ] Interface: *This look's effects* and *Other looks* groups of sliders in the layer's properties, 0 by default; one button to clear them; a note when another look holds settings of its own.
+- [ ] In stages:
+  1. The framework and the pilots: riso, liquid chrome and glitch net art, on text and asset layers.
+  2. Every look, and the photo and solid layers.
+  3. The lettering effects brought home.
+  4. A general clipping mask.
+  5. Draggable scene objects (next item).
+- Note: this records look-specific settings in the cover's data, which changes the rule that a cover's content never mentions a look.
+
+### Draggable scene objects in the background
+
+Goal: the scene objects marked ★ above — the ball, the giant letters, the centre of the radiating lines, the sun, the cumulus — can be dragged where you want them on the canvas.
+
+- [ ] Each look declares its draggable objects: a name, and the default position the layout gives it.
+- [ ] Positions live on the cover, per look, as offsets from the default position (in proportion to the canvas), so they follow when the layout or the size changes. As with the user's own layers, there is one position for all sizes and a per-size adjustment.
+- [ ] With the *Background* layer selected, small handles show on the draggable objects: drag to move, double-click to reset; *Surprise me* may shuffle them too.
+- [ ] Sliders a look has for a position today (the cyberpunk's *Band position*) become dragging.
 
 ### Other
 
