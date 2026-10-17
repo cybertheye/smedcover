@@ -617,6 +617,9 @@ and 44 ms in cyberpunk; dragging a layer takes 5–11 ms in either.
 A look's costly whole-picture effects (the colour split, so far) are left out of drag frames, under
 `setFast()`, and return in the frame after the drag.
 
+
+The left panel's sliders — a look's own settings, the layout's proportions — are another matter: they may change every layer, so the rest of the cover cannot be kept. While one is dragged (`draftTouch()`), the main canvas is painted as a **draft**, at the screen's own pixels rather than the Retina ones (a quarter of them on a Retina screen), and the size thumbnails wait; the full picture is painted a quarter of a second after the last step. A layer's own sliders keep using `holdLive()` above. Measured in the app's engine: a step of the anime skies' *Cumulus* took 44 ms at full resolution and 23 ms as a draft, the other sliders 17–22 ms, about a frame.
+
 ### 9.4 Undo
 
 After each change (debounced by half a second) the profile and cover are serialised into one string

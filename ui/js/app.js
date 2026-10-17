@@ -188,6 +188,16 @@ function paint(cv, size, pixelW, cover = S.cover, index = catIndex(), select = n
 }
 // While a layer is dragged on the canvas, the rest of the cover is painted once and reused (see drawCover).
 let LIVE = null;
+/**
+ * While a slider of the left panel is dragged — a look's own setting, the layout's proportions — the
+ * cover is painted as a draft, at the screen's own pixels rather than the Retina ones (a quarter of the
+ * work), and the size thumbnails wait; the full picture comes back a moment after the last step. Such a
+ * setting can touch every layer, so the rest of the cover cannot be kept as a layer's own slider keeps it
+ * (see holdLive).
+ */
+const DRAFT = { until: 0 };
+const drafting = () => performance.now() < DRAFT.until;
+function draftTouch(opts) { DRAFT.until = performance.now() + 250; later("undraft", 270, queueDraw); touch(opts); }
 const goLive = (ids) => {
   ids = [...new Set([].concat(ids).map((id) => (layer(id) ? owner(layer(id)).id : id)))];   // a linked cut-out moves with its photo
   for (const L of S.cover.layers) if (L.of && ids.includes(L.of)) ids.push(L.id);   // a photo's copies move with it
@@ -199,7 +209,7 @@ function drawMain() {
   const stage = $("stage"), cv = $("cv"), size = selSize(), [vw, vh] = virtualSize(size.w, size.h);
   const k = Math.max(0.05, Math.min((stage.clientWidth - 36) / vw, (stage.clientHeight - 36) / vh));
   cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
-  paint(cv, size, Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
+  paint(cv, size, Math.min(vw * 1.5, vw * k * (drafting() ? 1 : window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
     S.mode === "edit" ? { picked: group().map((L) => L.id) } : {});
   const clear = !layer("bg").visible;
   stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
@@ -212,7 +222,7 @@ function drawMain() {
  */
 let thumbsRound = 0;
 function drawThumbs() {
-  if (LIVE) return later("thumbs", 300, drawThumbs);   // after the drag
+  if (LIVE || drafting()) return later("thumbs", 300, drawThumbs);   // after the drag
   const round = ++thumbsRound, sizes = [...S.profile.sizes];
   const next = () => {
     if (round !== thumbsRound || LIVE || !sizes.length) return;
@@ -1673,7 +1683,7 @@ function removeAsset(id) {
 function layoutBox() {
   const st = S.profile.style, tpl = st.template, adj = st.layoutAdjust[tpl] || {}, cv = $("cv");
   const now = cv._layout && cv._virtual ? layoutValues(cv._layout, cv._virtual[0], cv._virtual[1]) : { size: 0.3, slant: 0 };
-  const set = (k, v) => { st.layoutAdjust[tpl] = { ...(st.layoutAdjust[tpl] || {}), [k]: v }; touch({ profile: true }); };
+  const set = (k, v) => { st.layoutAdjust[tpl] = { ...(st.layoutAdjust[tpl] || {}), [k]: v }; draftTouch({ profile: true }); };
   const split = tpl === "split", changed = Object.keys(adj).length > 0;
   // the template and its adjustments, one box (as the look and the default design have)
   return el("div", { class: "box" }, cap("style.template"),
@@ -1690,7 +1700,7 @@ function layoutBox() {
 function styleTab() {
   const st = S.profile.style, set = (k, v) => { st[k] = v; touch({ profile: true }); };
   const L = LOOKS[st.look] || LOOKS.cel, vals = lookParams(st.look, st.lookParams[st.look]);
-  const tune = (k, v) => { st.lookParams[st.look] = { ...vals, ...st.lookParams[st.look], [k]: v }; touch({ profile: true }); };
+  const tune = (k, v) => { st.lookParams[st.look] = { ...vals, ...st.lookParams[st.look], [k]: v }; draftTouch({ profile: true }); };
   return [
     el("div", { class: "box" }, cap("style.look"),
       select(LOOK_IDS.map((k) => [k, LOOKS[k].name[getLang()]]), st.look, (v) => { st.look = v; touch({ profile: true, panel: true, side: true, strip: true }); }),
@@ -3125,9 +3135,15 @@ async function dragTest() {
     report.look = { look: st.look, redraw: Math.round(all), allAtZero: Math.round(redraw(Object.fromEntries(own.map((d) => [d.key, 0])))), savedAtZero: {} };
     for (const d of own) report.look.savedAtZero[d.key] = Math.round(all - redraw({ ...kept, [d.key]: 0 }));
     report.look.stepping = {};
+    { // the first slider stepped at the full resolution too, as before drafts: what a draft saves
+      const d = own.find((q) => !q.needsPhoto), times = [];
+      for (let i = 1; i <= 7; i++) { st.lookParams[st.look] = { ...kept, [d.key]: clamp(d.def + (i % 2 ? 0.05 : -0.05), d.min, d.max) }; DRAFT.until = 0; touch({ profile: true }); const t = performance.now(); await frame(); if (i > 1) times.push(performance.now() - t); }
+      times.sort((a, b) => a - b);
+      report.look.steppingFull = { [d.key]: Math.round(times[3]) };
+    }
     for (const d of own.filter((q) => !q.needsPhoto)) {
       const times = [];
-      for (let i = 1; i <= 7; i++) { st.lookParams[st.look] = { ...kept, [d.key]: clamp(d.def + (i % 2 ? 0.05 : -0.05), d.min, d.max) }; touch({ profile: true }); const t = performance.now(); await frame(); if (i > 1) times.push(performance.now() - t); }
+      for (let i = 1; i <= 7; i++) { st.lookParams[st.look] = { ...kept, [d.key]: clamp(d.def + (i % 2 ? 0.05 : -0.05), d.min, d.max) }; draftTouch({ profile: true }); const t = performance.now(); await frame(); if (i > 1) times.push(performance.now() - t); }
       times.sort((a, b) => a - b);
       report.look.stepping[d.key] = Math.round(times[3]);
     }
