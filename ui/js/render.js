@@ -505,6 +505,14 @@ function drawSelection(ctx, hit, k, withHandles = true) {
 }
 
 let scratch = null, fxScratch = null;
+// A photo's look effects are pixel work over the whole photo — a background photo's is millions of pixels
+// — so their result is kept, per layer and canvas size, for as long as nothing it is drawn from changes:
+// the layer (and the photo it copies), where it is, the picture and its mask, the canvas, the style and the
+// channel colour. Kept up to FX_KEPT_PX pixels in all (two background photos at a Retina 4K size); the
+// least recently used goes first.
+const FX_KEPT = new Map(), FX_KEPT_PX = 16e6, OBJ_IDS = new WeakMap();
+let objIds = 0;
+const objId = (o) => { if (!o) return 0; let n = OBJ_IDS.get(o); if (!n) OBJ_IDS.set(o, (n = ++objIds)); return n; };
 const PHOTO = { sheets: [], slides: new Map() };   // the photo layers' work canvases, and their images while a photo is dragged
 /** Work canvas i of the photo layers, w × h, cleared, with the transform `m`. */
 function sheet(i, w, h, m) {
@@ -818,7 +826,20 @@ function paintCover(cv, o) {
       const t0 = TIMING.on ? performance.now() : 0;
       try {
       const fx = layerEffects(L);
-      if (L.o < 1 || fx.length) {   // paint the layer on its own — its look effects added to it there — then blend it in as a whole
+      let fxKey = null, slot = null, kept = null;
+      if (fx.length && L.type === "photo") {
+        const base = L.of ? cover.layers.find((l) => l.id === L.of) : L, rec = base && o.photos && o.photos.get(base.pid);
+        slot = `${L.id}@${cv.width}x${cv.height}`;
+        fxKey = [kx, ky, key, isFast() ? 1 : 0, objId(rec && rec.img), objId(rec && rec.mask && rec.mask.img), C, main ? main.pid : "",
+          JSON.stringify(P.style), JSON.stringify(tr), JSON.stringify(L), L.of ? JSON.stringify(base) : ""].join("|");
+        kept = FX_KEPT.get(slot);
+        if (kept && kept.key !== fxKey) kept = null;
+      }
+      if (kept) {
+        FX_KEPT.delete(slot); FX_KEPT.set(slot, kept);   // the newest again
+        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o; c.drawImage(kept.img, kept.got.x0, kept.got.y0); c.restore();
+        hit = kept.hit;
+      } else if (L.o < 1 || fx.length) {   // paint the layer on its own — its look effects added to it there — then blend it in as a whole
         // a layer with effects gets a canvas held in memory: the effects read it back and copy from it, which
         // on a canvas kept on the graphics card means a round trip each time (see fxCanvas in style.js)
         if (fx.length && !fxScratch) { fxScratch = document.createElement("canvas"); fxScratch.getContext("2d", { willReadFrequently: true }); }
@@ -832,6 +853,14 @@ function paintCover(cv, o) {
         c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o;
         if (got && got.w > 0 && got.h > 0) c.drawImage(scr, got.x0, got.y0, got.w, got.h, got.x0, got.y0, got.w, got.h); else c.drawImage(scr, 0, 0);
         c.restore();
+        // not while the layer itself is dragged: every frame would make a copy only to be thrown away
+        if (fxKey && got && got.w > 0 && got.h > 0 && !(o.live && (o.live.ids || [o.live.id]).includes(L.id))) {
+          const img = document.createElement("canvas"); img.width = got.w; img.height = got.h;
+          img.getContext("2d").drawImage(scr, got.x0, got.y0, got.w, got.h, 0, 0, got.w, got.h);
+          FX_KEPT.delete(slot); FX_KEPT.set(slot, { key: fxKey, img, got, hit });
+          let px = 0; for (const k of FX_KEPT.values()) px += k.got.w * k.got.h;
+          for (const [s0, k] of FX_KEPT) { if (px <= FX_KEPT_PX || FX_KEPT.size <= 1) break; px -= k.got.w * k.got.h; FX_KEPT.delete(s0); }
+        }
       } else hit = PAINT[L.type](c, L, tr, env);
       } finally { if (faces) Object.assign(fonts, faces); if (TIMING.on) TIMING.ms[L.id] = (TIMING.ms[L.id] || 0) + performance.now() - t0; }
       c.globalAlpha = 1; c.setLineDash([]);

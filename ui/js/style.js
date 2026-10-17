@@ -6398,17 +6398,28 @@ function shadeSide(g, w, h) { const gr = g.createLinearGradient(0, 0, w, h); gr.
 /** Every pixel of the layer in B through f(r, g, b, y, out) — y 0 at B's top, 1 at its foot — mixed in by a; alpha kept. */
 function eachPixel(x, B, a, f) {
   const img = x.getImageData(B.x0, B.y0, B.w, B.h), d = img.data, b = 1 - a, o = [0, 0, 0];
-  for (let i = 0, n = d.length; i < n; i += 4) {
-    if (!d[i + 3]) continue;
-    f(d[i], d[i + 1], d[i + 2], Math.floor(i / 4 / B.w) / B.h, o);
-    d[i] = d[i] * b + o[0] * a; d[i + 1] = d[i + 1] * b + o[1] * a; d[i + 2] = d[i + 2] * b + o[2] * a;
+  for (let row = 0, i = 0; row < B.h; row++) {
+    const y = row / B.h;
+    for (let col = 0; col < B.w; col++, i += 4) {
+      if (!d[i + 3]) continue;
+      f(d[i], d[i + 1], d[i + 2], y, o);
+      d[i] = d[i] * b + o[0] * a; d[i + 1] = d[i + 1] * b + o[1] * a; d[i + 2] = d[i + 2] * b + o[2] * a;
+    }
   }
   x.putImageData(img, B.x0, B.y0);
 }
-/** A painter mapping the layer by lightness onto colour stops (see toneTable), stepping between them with `hard`. */
+/**
+ * A painter mapping the layer by lightness onto colour stops (see toneTable), stepping between them with
+ * `hard`. Written out rather than through eachPixel: on a background photo it is millions of pixels.
+ */
 const tonesFx = (stopsOf, hard = 0) => (x, B, a, E) => {
-  const lut = toneTable(stopsOf(E), hard);
-  eachPixel(x, B, a, (r, g, b, y, o) => { const j = ((r * 54 + g * 183 + b * 19) >> 8) * 3; o[0] = lut[j]; o[1] = lut[j + 1]; o[2] = lut[j + 2]; });
+  const lut = toneTable(stopsOf(E), hard), img = x.getImageData(B.x0, B.y0, B.w, B.h), d = img.data;
+  for (let i = 0, n = d.length; i < n; i += 4) {
+    if (!d[i + 3]) continue;
+    const r = d[i], g = d[i + 1], b = d[i + 2], j = ((r * 54 + g * 183 + b * 19) >> 8) * 3;
+    d[i] = r + (lut[j] - r) * a; d[i + 1] = g + (lut[j + 1] - g) * a; d[i + 2] = b + (lut[j + 2] - b) * a;
+  }
+  x.putImageData(img, B.x0, B.y0);
 };
 /** A painter turning the layer one flat colour or fill, its shape kept. */
 const flatFx = (fillOf) => (x, B, a, E) => {

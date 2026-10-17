@@ -3032,12 +3032,12 @@ async function selfTest(dir) {
       S.cover.title = keepTitle; S.cover.layers = S.cover.layers.filter((l) => l !== tx && l !== tp); titleLayer.plate = false;
     }
     // the looks' effects on the user's own layers: every look that has some, all of them at full on a
-    // text layer, a sticker, a solid and (when the cover has a photo) a print of it; then, under a look
+    // text layer, a sticker, a solid and a print of the last picture taken in; then, under a look
     // of none, effects borrowed from three others
     report.layerFx = [];
     {
       const keepLook = S.profile.style.look, tx = newLayer("text", { text: "LAYER *效果*" }), sk = newLayer("asset", { ref: { kind: "sticker", id: "burst" }, tint: true });
-      const so = newLayer("solid", { color: "#2a9df4" }), shot = S.cover.layers.find((l) => l.type === "photo" && l.pid), pr = shot ? newLayer("photo", { pid: shot.pid, outline: 6 }) : null;
+      const so = newLayer("solid", { color: "#2a9df4" }), pid = [...S.photos.keys()].at(-1), pr = pid ? newLayer("photo", { pid, outline: 6 }) : null;
       tx.t.all = { ...tx.t.all, x: 0.64, y: 0.62, s: 0.9 }; sk.t.all = { ...sk.t.all, x: 0.86, y: 0.68, s: 0.45 }; so.t.all = { ...so.t.all, x: 0.5, y: 0.86, s: 0.2 };
       if (pr) pr.t.all = { ...pr.t.all, x: 0.22, y: 0.3, s: 0.3, r: -4 };
       const ours = [tx, sk, so, ...(pr ? [pr] : [])];
