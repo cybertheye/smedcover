@@ -38,7 +38,7 @@ const color = (v) => (/^#[0-9a-f]{6}$/i.test(str(v)) ? v.toLowerCase() : "#fcee0
 
 export const DEFAULT_STYLE = { template: "stack", theme: "dark", look: "cel", lookParams: {}, lookSeed: 7, layoutAdjust: {} };
 /** Looks that are gone, and what a profile that used one gets instead: its first name, or the nearest look left. */
-const RETIRED = { ghibli: "vivid", bluetone: "cyano", redstreet: "negative" };
+const RETIRED = { ghibli: "vivid", bluetone: "cyano", redstreet: "negative", gilded: "glass" };
 
 const KINDS = ["graphic", "sticker", "user"];
 /** A category's graphic: a reference into the asset library, or none. Older shapes are upgraded. */

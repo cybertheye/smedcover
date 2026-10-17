@@ -4899,7 +4899,7 @@ const netart = {
 - "white" is white, "dark" a dark grey, and "main" the channel colour — use it for one part only.`,
 };
 
-// ====================================================================== shared by the looks below: paint, pencil and glass over a picture
+// ====================================================================== shared by the looks below: paint and glass over a picture
 /**
  * Paints the picture over in short brush strokes of its own colours: a coarse layer over all of `box`,
  * then a finer one only where the picture changes fast, so its edges keep their drawing. Each stroke
@@ -4931,42 +4931,6 @@ function brushwork(ctx, box, amt, cell, slot) {
   }
   ctx.restore();
 }
-/**
- * Loose pencil work over a painting: bundles of short parallel strokes scattered over `box`, mostly on
- * the diagonal, and a few long wandering hairlines. More of both, and darker, as `amt` rises.
- */
-function scratches(ctx, box, amt, colour, k0) {
-  if (amt <= 0) return;
-  const bw = box.x1 - box.x0, bh = box.y1 - box.y0, u = Math.min(bw, bh);
-  ctx.save(); ctx.lineCap = "round"; ctx.strokeStyle = css(colour);
-  for (let b = 0, n = Math.round(3 + 34 * amt); b < n; b++) {
-    const cx = box.x0 + rand(b * 2.3 + k0) * bw, cy = box.y0 + rand(b * 3.1 + k0 + 1) * bh, a = -1.1 + rand(b * 4.7 + k0 + 2) * 0.7, len = u * (0.025 + rand(b * 5.3 + k0 + 3) * 0.07);
-    const m = 3 + Math.floor(rand(b * 6.1 + k0 + 4) * 7), gap = 2.5 + rand(b * 6.9 + k0 + 5) * 4, ca = Math.cos(a), sa = Math.sin(a);
-    ctx.globalAlpha = Math.min(1, 0.25 + amt) * (0.35 + 0.5 * rand(b * 7.7 + k0 + 6)); ctx.lineWidth = 0.8 + rand(b * 8.3 + k0 + 7) * 1.4;
-    ctx.beginPath();
-    for (let i = 0; i < m; i++) { const off = (i - m / 2) * gap, l = len * (0.6 + rand(b * 9.1 + i * 1.3 + k0) * 0.4), x = cx - sa * off, y = cy + ca * off; ctx.moveTo(x - (ca * l) / 2, y - (sa * l) / 2); ctx.lineTo(x + (ca * l) / 2, y + (sa * l) / 2); }
-    ctx.stroke();
-  }
-  for (let k = 0, n = Math.round(1 + 9 * amt); k < n; k++) {
-    const x = box.x0 + rand(k * 3.3 + k0 + 40) * bw, y = box.y0 + rand(k * 4.1 + k0 + 41) * bh, a = rand(k * 5.7 + k0 + 42) * TAU, len = u * (0.15 + rand(k * 6.3 + k0 + 43) * 0.35), bend = (rand(k * 7.1 + k0 + 44) - 0.5) * 1.6;
-    ctx.globalAlpha = 0.3 + 0.4 * amt; ctx.lineWidth = 0.8 + rand(k + k0 + 45);
-    ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + Math.cos(a + bend) * len * 0.5, y + Math.sin(a + bend) * len * 0.5, x + Math.cos(a) * len, y + Math.sin(a) * len); ctx.stroke();
-  }
-  ctx.restore();
-}
-/** Specks of paint flicked on: round dots, mostly small, a few large with a short run below them. */
-function spatter(ctx, box, amt, colour, k0) {
-  if (amt <= 0) return;
-  const bw = box.x1 - box.x0, bh = box.y1 - box.y0;
-  ctx.save(); ctx.fillStyle = css(colour);
-  for (let k = 0, n = Math.round(160 * amt * amt + 30 * amt); k < n; k++) {
-    const x = box.x0 + rand(k * 2.9 + k0) * bw, y = box.y0 + rand(k * 3.7 + k0 + 1) * bh, r = 0.8 + rand(k * 4.3 + k0 + 2) ** 4 * 9;
-    ctx.globalAlpha = 0.45 + rand(k * 5.1 + k0 + 3) * 0.5;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
-    if (r > 5 && rand(k * 6.7 + k0 + 4) > 0.5) { ctx.beginPath(); rounded(ctx, x - r * 0.35, y, r * 0.7, r * (2 + rand(k + k0 + 5) * 5), r * 0.35); ctx.fill(); }
-  }
-  ctx.restore();
-}
 /** A repeating tile of dots on a 45° lattice, as a fill (kept per colour and pitch). */
 function dotPattern(ctx, colour, pitch) {
   const p = Math.max(2, Math.round(pitch)), key = `dotp|${colour.join()}|${p}`;
@@ -4977,13 +4941,6 @@ function dotPattern(ctx, colour, pitch) {
     for (const [a, b] of [[0.5, 0.5], [1.5, 1.5]]) { x.beginPath(); x.arc(a * p, b * p, p * 0.36, 0, TAU); x.fill(); }
   }
   return ctx.createPattern(c, "repeat");
-}
-/** A colour along stops [[at, [r, g, b]], …], at t (0–1). */
-function along(stops, t) {
-  let k = 0;
-  while (k < stops.length - 2 && t > stops[k + 1][0]) k++;
-  const [t0, c0] = stops[k], [t1, c1] = stops[k + 1];
-  return mix(c0, c1, clamp((t - t0) / (t1 - t0 || 1)));
 }
 /**
  * A layer of a look painted once and kept: a canvas the size of ctx's, painted by paint(x) with ctx's
@@ -5056,215 +5013,6 @@ function glassWarp(ctx, amp, cell, glint, shade, ox = 0, oy = 0) {
   x.putImageData(out, 0, 0);
   inPixels(ctx, () => ctx.drawImage(x.canvas, 0, 0));
 }
-
-// ====================================================================== gilded: the painted portrait in gold
-// Character portraits painted in the computer for an animated anthology: the face worked in visible
-// brush strokes and loose pencil lines over the soft lights of a room out of focus (hexagonal, as a lens
-// shows them); gold everywhere — a gorget of stacked bands at the neck, a circlet of wire hung with coins
-// and charms across the brow, strings of beads; specks of paint, heavy grain; a tall, thin title in gold.
-const GD = { teal: [184, 204, 202], night: [22, 20, 19], gold: [214, 166, 70], deep: [104, 70, 26], lit: [255, 238, 176], cream: [242, 234, 216], red: [176, 30, 38], ink: [40, 30, 24], umber: [58, 42, 30] };
-const gdGround = () => (dark ? GD.night : GD.teal), gdInk = () => (dark ? GD.cream : GD.ink);
-const GOLD = [[0, [255, 242, 190]], [0.16, [230, 186, 92]], [0.3, [140, 96, 36]], [0.42, [246, 214, 130]], [0.56, [196, 146, 58]], [0.7, [98, 64, 22]], [0.84, [226, 184, 96]], [1, [150, 104, 40]]];
-/** Polished gold between two points: bands of light and deep brown, as a curved gold surface throws back a room. */
-function goldFill(ctx, x0, y0, x1, y1) {
-  const g = ctx.createLinearGradient(x0, y0, x1, y1);
-  GOLD.forEach(([t, c]) => g.addColorStop(t, css(c)));
-  return g;
-}
-/** A round piece of gold lit from the upper left: a coin, a bead, a rivet. */
-function goldBall(ctx, x, y, r, pearl = false) {
-  const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.08, x, y, r);
-  g.addColorStop(0, css(pearl ? [255, 252, 244] : GD.lit)); g.addColorStop(0.55, css(pearl ? [214, 206, 196] : GD.gold)); g.addColorStop(1, css(pearl ? [120, 112, 106] : GD.deep));
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
-}
-/** Engraved scrollwork: small curls of a spiral and a half, on a loose staggered grid over a box, as one path to stroke. */
-function scrolls(ctx, x0, y0, x1, y1, s, k0) {
-  ctx.beginPath();
-  for (let y = y0, j = 0; y < y1; y += s * 2.4, j++) for (let x = x0 + (j % 2) * s * 1.2, i = 0; x < x1; x += s * 2.4, i++) {
-    const dir = rand(i * 3.1 + j * 7.7 + k0) > 0.5 ? 1 : -1, a0 = rand(i * 1.3 + j * 2.9 + k0) * TAU;
-    for (let t = 0; t <= 1.001; t += 0.05) { const a = a0 + dir * t * Math.PI * 3, r = s * 0.6 * (0.12 + 0.88 * t), px = x + Math.cos(a) * r, py = y + Math.sin(a) * r; t ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
-  }
-  ctx.stroke();
-}
-/** Where the gilded figure stands: toward the field's far side, its foot in the gorget. */
-function gdPlace(env, p) {
-  const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, size = fh * (0.42 + 0.4 * p.figure);
-  return { F, cx: F.x0 + fw * 0.68, cy: F.y0 + fh * 0.44, size };
-}
-/**
- * A gorget: bands of gold stacked round a neck, seen from the front — each a little wider than the one
- * above and curving down at the sides, light along its upper edge and dark along its lower one, a soft
- * shadow under it, riveted. `n` bands (fractional: the last comes in by degrees), drawn from the lowest
- * up so each laps over the one below; engraved scrolls on them with `fil`.
- */
-function gorget(ctx, cx, top, neck, bandH, n, fil, k0) {
-  const ramp = [[0, [255, 240, 186]], [0.15, [236, 196, 104]], [0.45, [178, 128, 50]], [0.72, [120, 82, 30]], [0.9, [70, 46, 18]], [1, [40, 26, 12]]];
-  for (let i = Math.ceil(n) - 1; i >= 0; i--) {
-    const a = clamp(n - i), half = neck * (1 + 0.36 * i), y = top + i * bandH * 0.86, sag = half * 0.28, path = () => { ctx.beginPath(); ctx.ellipse(cx, y, half, sag, 0, 0, Math.PI); ctx.ellipse(cx, y + bandH, half * 1.04, sag * 1.04, 0, Math.PI, 0, true); ctx.closePath(); };
-    ctx.save(); ctx.globalAlpha = a;
-    ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = bandH * 0.5; ctx.beginPath(); ctx.ellipse(cx, y + bandH * 1.15, half * 1.04, sag * 1.04, 0, 0.08 * Math.PI, 0.92 * Math.PI); ctx.stroke();   // its shadow on the band below
-    for (let s = 0; s < 10; s++) { const t = (s + 0.5) / 10; ctx.strokeStyle = css(along(ramp, t)); ctx.lineWidth = bandH / 10 + 1; ctx.beginPath(); ctx.ellipse(cx, y + t * bandH, half * (1 + 0.04 * t), sag * (1 + 0.04 * t), 0, 0, Math.PI); ctx.stroke(); }
-    path(); ctx.save(); ctx.clip();
-    const side = ctx.createLinearGradient(cx - half, 0, cx + half, 0);   // the bands turn away from us at the sides; a hot spot in front
-    side.addColorStop(0, "rgba(20,10,0,0.55)"); side.addColorStop(0.32, "rgba(255,240,200,0.18)"); side.addColorStop(0.45, "rgba(255,250,230,0.4)"); side.addColorStop(0.6, "rgba(0,0,0,0)"); side.addColorStop(1, "rgba(20,10,0,0.6)");
-    ctx.fillStyle = side; ctx.fillRect(cx - half * 1.1, y - sag, half * 2.2, bandH + sag * 2.2);
-    if (fil > 0) { ctx.strokeStyle = css([70, 44, 14], 0.6 * fil); ctx.lineWidth = Math.max(1, bandH * 0.04); scrolls(ctx, cx - half, y, cx + half, y + bandH + sag, bandH * 0.32, k0 + i * 13); }
-    ctx.restore();
-    for (let r = 0; r < 7; r++) { const th = Math.PI * (0.12 + (r / 6) * 0.76); goldBall(ctx, cx + Math.cos(th) * half * 1.02, y + bandH * 0.5 + Math.sin(th) * sag * 1.02, Math.max(2, bandH * 0.11)); }
-    ctx.restore();
-  }
-}
-/** A circlet: a wire across the brow, sagging a little, with charms on short links — coins, crescents and drops — and a larger coin at the middle. */
-function circlet(ctx, x0, x1, y, amt, size, k0) {
-  const n = Math.round(3 + 10 * amt), sag = (x1 - x0) * 0.05, at = (t) => [x0 + (x1 - x0) * t, y + Math.sin(t * Math.PI) * sag], lw = Math.max(2, size * 0.009);
-  ctx.save(); ctx.globalAlpha = Math.min(1, amt * 4); ctx.lineCap = "round";
-  ctx.beginPath(); for (let i = 0; i <= 30; i++) { const [x, yy] = at(i / 30); i ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy); }
-  ctx.strokeStyle = css(GD.deep); ctx.lineWidth = lw; ctx.stroke(); ctx.strokeStyle = css(GD.lit, 0.85); ctx.lineWidth = lw * 0.45; ctx.stroke();
-  for (let i = 0; i < n; i++) {
-    const t = (i + 0.5) / n, [x, yy] = at(t), mid = Math.abs(t - 0.5) < 0.5 / n, kind = mid ? 0 : Math.floor(rand(i * 2.7 + k0) * 3), r = size * (mid ? 0.06 : 0.024 + rand(i * 3.3 + k0) * 0.018), link = size * (0.015 + rand(i * 4.1 + k0) * 0.035), cy = yy + link + r;
-    ctx.strokeStyle = css(GD.deep); ctx.lineWidth = lw * 0.7; ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x, cy - r); ctx.stroke();
-    if (kind === 1) {   // a crescent: a coin with a bite taken out of it
-      ctx.save(); ctx.beginPath(); ctx.rect(x - r * 3, cy - r * 3, r * 6, r * 6); ctx.arc(x + r * 0.42, cy - r * 0.36, r * 0.78, 0, TAU, true); ctx.clip("evenodd"); goldBall(ctx, x, cy, r); ctx.restore();
-    } else if (kind === 2) {   // a drop
-      ctx.beginPath(); ctx.moveTo(x, cy - r * 1.3); ctx.bezierCurveTo(x + r * 1.1, cy - r * 0.2, x + r * 0.9, cy + r, x, cy + r); ctx.bezierCurveTo(x - r * 0.9, cy + r, x - r * 1.1, cy - r * 0.2, x, cy - r * 1.3);
-      const g = ctx.createLinearGradient(x - r, cy - r, x + r, cy + r); g.addColorStop(0, css(GD.lit)); g.addColorStop(0.5, css(GD.gold)); g.addColorStop(1, css(GD.deep)); ctx.fillStyle = g; ctx.fill();
-    } else {   // a coin: lit, a rim, a stamp in the middle
-      goldBall(ctx, x, cy, r); ctx.strokeStyle = css(GD.deep, 0.8); ctx.lineWidth = Math.max(1, r * 0.12); ctx.beginPath(); ctx.arc(x, cy, r * 0.72, 0, TAU); ctx.stroke();
-      ctx.fillStyle = css(GD.deep, 0.6); ctx.beginPath(); ctx.arc(x, cy, r * 0.22, 0, TAU); ctx.fill();
-    }
-  }
-  ctx.restore();
-}
-/** Strings of gold beads and pearls: strands hanging beside the face, longer as `amt` rises, and swags across the top of the field. */
-function beadStrings(ctx, at, amt, k0) {
-  const { F, cx, cy, size } = at, r = size * 0.014, fw = F.x1 - F.x0, fh = F.y1 - F.y0;
-  const string = (x0, y0, x1, y1, sag, rr, k) => { const n = Math.max(2, Math.floor((Math.hypot(x1 - x0, y1 - y0) + sag) / (rr * 2.15))); for (let i = 0; i <= n; i++) { const t = i / n; goldBall(ctx, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t + Math.sin(t * Math.PI) * sag, rr, (i + k) % 3 === 0); } };
-  ctx.save();
-  const hang = size * 0.8 * amt;
-  for (const s of [-1, 1]) for (let j = 0; j < 3; j++) { const x = cx + s * size * (0.42 + j * 0.055); if (hang * (1 - j * 0.2) > r * 3) string(x, cy - size * 0.24, x + s * size * 0.02, cy - size * 0.24 + hang * (1 - j * 0.2), 0, r * (1 - j * 0.12), j); }
-  for (let k = 0, n = amt * 4; k < Math.ceil(n); k++) {
-    ctx.globalAlpha = clamp(n - k);
-    const xa = F.x0 + fw * (0.05 + rand(k * 2.3 + k0) * 0.6), xb = xa + fw * (0.15 + rand(k * 3.1 + k0) * 0.3);
-    string(xa, F.y0 - 4, xb, F.y0 - 4, fh * (0.06 + rand(k * 4.7 + k0) * 0.14), r * 0.9, k);
-  }
-  ctx.restore();
-}
-const gilded = {
-  id: "gilded",
-  repaint: (c) => `a painterly digital character portrait made from the photograph, as concept art for an animated anthology: visible brush strokes and loose pencil scratches, warm skin over a cool teal room out of focus with hexagonal bokeh, ornate gold jewellery catching the light, a touch of red, heavy grain, with ${c} as an accent; still the same picture, no text.`,
-  about: { zh: "鎏金肖像：动画短片角色设定那种数字油画肖像——看得见的笔触和松散的铅笔排线，背后是焦外虚化的室内光和六边形光斑；金饰无处不在：脖子上一圈圈叠起来的金属颈甲、额前一条挂满金币和坠饰的细链、一串串金珠和珍珠，频道图形变成一尊錾刻花纹的金像；溅上的颜料斑点、厚重的颗粒，标题是细高的金色字。华丽、沉郁、有手绘感——适合人物、故事、历史、文化、时尚和艺术类内容。照片会被重新画成油画笔触。可选青灰底或深棕黑底；自带平直的版式，色块是一块抛光金板。", en: "Gilded portrait: the digitally painted portraits of an animated anthology's character design — visible brush strokes and loose pencil hatching over the soft lights of a room out of focus, with hexagonal bokeh; gold everywhere: a gorget of stacked bands at the neck, a circlet of wire hung with coins and charms across the brow, strings of gold beads and pearls, the channel graphic as an engraved gold figure; specks of paint, heavy grain, a tall thin title in gold. Ornate, brooding, hand-made — for people, stories, history, culture, fashion and art. A photo is painted over in brush strokes. A grey-teal or a deep umber ground; flat layouts of its own, the colour block a plate of polished gold." },
-  name: { zh: "鎏金肖像", en: "Gilded portrait" },
-  seeded: true,
-  params: [
-    { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "鎏金身影", en: "Gold figure" } },
-    { key: "collar", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "金属颈甲", en: "Gorget" } },
-    { key: "circlet", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "额链坠饰", en: "Circlet and charms" } },
-    { key: "beads", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "珠串", en: "Bead strings" } },
-    { key: "filigree", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "錾刻花纹", en: "Engraving" } },
-    { key: "bokeh", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "六边形光斑", en: "Hexagonal bokeh" } },
-    { key: "paint", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "油画笔触", en: "Brush strokes" } },
-    { key: "hatch", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "铅笔排线", en: "Pencil hatching" } },
-    { key: "spatter", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "颜料斑点", en: "Paint specks" } },
-    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "颗粒", en: "Grain" } },
-    { key: "vignette", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "暗角", en: "Vignette" } },
-    { key: "warm", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "照片暖调", en: "Photo warmed" } },
-  ],
-  titleFont: (f) => `${f.en}, ${f.cn}`,
-  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.16, side: 0.28, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(gdGround()), text: css(gdInk()), dim: css(gdInk(), 0.6), titleFill: css(gdInk()), titleInk: css(gdGround()), grid: () => "rgba(0,0,0,0)" }),
-  /**
-   * The room out of focus (broad soft masses of light and shade, then hexagonal bokeh); the gold figure
-   * (on a work canvas: the gold bands, the bevel, the engraving, a highlight) with the circlet across it
-   * and the gorget round its foot; bead strings; then brush strokes over all of it, pencil hatching and
-   * specks of paint. A photo is warmed and painted over the same way.
-   */
-  background(ctx, env, L, p) {
-    const { w, h } = env, u = Math.min(w, h), at = gdPlace(env, p), F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0, box = { x0: F.x0, y0: F.y0, x1: F.x1, y1: F.y1 };
-    ctx.fillStyle = css(gdGround()); ctx.fillRect(0, 0, w, h);
-    const pencil = (b) => { scratches(ctx, b, p.hatch, dark ? [8, 6, 4] : GD.ink, 2120); spatter(ctx, b, p.spatter, dark ? [6, 4, 2] : GD.umber, 2140); };
-    if (env.photo) {
-      env.drawPhoto();
-      mapTones(ctx, toneTable([[0, [26, 20, 18]], [0.3, [84, 66, 52]], [0.58, [170, 142, 110]], [0.8, [224, 204, 166]], [1, [252, 244, 224]]]), p.warm * 0.55);
-      if (L.fill) { const b = { x0: 0, y0: 0, x1: w, y1: h }; brushwork(ctx, b, p.paint, u * 0.012, "gdPaint"); pencil(b); }
-      return true;
-    }
-    if (!L.grid) return true;
-    const room = dark ? [[70, 58, 46], [28, 40, 42], [92, 70, 50]] : [[230, 238, 234], [146, 168, 170], [204, 194, 214]];
-    for (let k = 0; k < 6; k++) { const x = F.x0 + rand(k * 2.7 + 2100) * fw, y = F.y0 + rand(k * 3.1 + 2101) * fh, r = u * (0.25 + rand(k * 4.3 + 2102) * 0.35), g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, css(room[k % 3], 0.6)); g.addColorStop(1, css(room[k % 3], 0)); ctx.fillStyle = g; ctx.fillRect(x - r, y - r, 2 * r, 2 * r); }
-    if (p.bokeh > 0) {   // the lights of the room, out of focus through a six-bladed aperture: a bright rim, a softer middle
-      const tones = dark ? [[150, 206, 200], [196, 140, 214], [255, 196, 110], [120, 166, 190]] : [[255, 255, 252], [236, 222, 250], [255, 244, 222], [214, 246, 244]];
-      ctx.save(); ctx.globalCompositeOperation = dark ? "screen" : "source-over";
-      for (let k = 0, n = p.bokeh * 26; k < Math.ceil(n); k++) {
-        const x = F.x0 + rand(k * 2.1 + 2104) * fw, y = F.y0 + rand(k * 3.7 + 2105) * fh, r = u * (0.018 + rand(k * 4.3 + 2106) ** 2 * 0.075), c = tones[k % 4], a = clamp(n - k) * (0.45 + rand(k * 5.9 + 2107) * 0.45);
-        ctx.beginPath(); for (let i = 0; i < 6; i++) { const t = 0.3 + (i / 6) * TAU; ctx.lineTo(x + Math.cos(t) * r, y + Math.sin(t) * r); } ctx.closePath();
-        const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, css(c, a * 0.35)); g.addColorStop(0.8, css(c, a * 0.55)); g.addColorStop(1, css(c, a * 0.9));
-        ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = css(c, a); ctx.lineWidth = Math.max(1, r * 0.05); ctx.stroke();
-      }
-      ctx.restore();
-    }
-    brushwork(ctx, box, p.paint, u * 0.012, "gdPaint");   // the room is painted; the gold stays crisp, as the jewellery does in the portraits
-    const S = p.figure > 0 && canPaint(ctx) && graphicShape(env), { cx, cy, size } = at;
-    if (S) {
-      const x = workLike(ctx, "gilded"), o = Math.max(1.5, size * 0.006);
-      blurred(ctx, size * 0.04, css(GD.umber, dark ? 0.75 : 0.45), () => placeShape(ctx, S, [0, 0, 0], cx + size * 0.03, cy + size * 0.05, size));
-      for (let i = 0; i < 8; i++) { const a = (i / 8) * TAU; placeShape(ctx, S, [44, 28, 10], cx + Math.cos(a) * o, cy + Math.sin(a) * o, size); }   // a dark contour where the gold turns away
-      placeShape(x, S, [255, 255, 255], cx, cy, size);
-      x.globalCompositeOperation = "source-in"; x.fillStyle = goldFill(x, cx - size * 0.3, cy - size * 0.42, cx + size * 0.12, cy + size * 0.36); x.fillRect(0, 0, w, h);
-      x.globalCompositeOperation = "source-over";
-      bevel(x, S, cx, cy, size, size * 0.01, GD.lit, [50, 30, 8], 0.45);
-      x.save(); x.globalCompositeOperation = "source-atop";
-      if (p.filigree > 0) { x.strokeStyle = css([70, 44, 14], 0.7 * p.filigree); x.lineWidth = Math.max(1, size * 0.004); scrolls(x, cx - size * 0.7, cy - size * 0.6, cx + size * 0.7, cy + size * 0.6, size * 0.05, 2110); }
-      const hl = x.createRadialGradient(cx - size * 0.18, cy - size * 0.24, 0, cx - size * 0.18, cy - size * 0.24, size * 0.3); hl.addColorStop(0, "rgba(255,252,236,0.45)"); hl.addColorStop(1, "rgba(255,252,236,0)");
-      x.fillStyle = hl; x.fillRect(0, 0, w, h);
-      x.restore();
-      layDown(ctx, x);
-    }
-    if (p.circlet > 0) circlet(ctx, cx - size * 0.5, cx + size * 0.5, cy - size * 0.28, p.circlet, size, 2115);
-    if (p.collar > 0) { const bandH = size * 0.085; gorget(ctx, cx, cy + size * 0.36, size * 0.3, bandH, 1 + 5 * p.collar, p.filigree, 2117); }
-    if (p.beads > 0) beadStrings(ctx, at, p.beads, 2119);
-    pencil(box);
-    return true;
-  },
-  accent: { fill: () => css(GD.gold), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run, nx, ny) { ctx.lineCap = "butt"; ctx.strokeStyle = css(GD.deep); ctx.lineWidth = 6; run(0, 0); ctx.strokeStyle = css(GD.lit); ctx.lineWidth = 2; run(-nx * 6, -ny * 6); } },   // a plate of polished gold
-  /** Tall letters in polished gold (on the light ground, dark bronze), a soft shadow under them (the shadow slider); highlighted words in a deep red. */
-  runs(ctx, pass, o) {
-    upright(ctx);
-    const fs = o.fs, k = o.unit || 1, s = Math.min(2, o.shadowAmt), g = ctx.createLinearGradient(0, -fs * 0.85, 0, fs * 0.05);
-    (dark ? [[0, [255, 240, 190]], [0.45, [226, 182, 92]], [0.55, [150, 104, 40]], [1, [236, 196, 110]]] : [[0, [124, 88, 38]], [0.48, [80, 54, 22]], [0.56, [146, 104, 44]], [1, [66, 44, 18]]]).forEach(([t, c]) => g.addColorStop(t, css(c)));
-    const body = o.fill ? css(o.fill) : g, hi = css(o.hi || GD.red), paint = (a, x) => { ctx.fillStyle = a.hi ? hi : body; ctx.fillText(a.t, x, 0); };
-    if (s > 0 && !fast) { ctx.save(); ctx.shadowColor = dark ? "rgba(0,0,0,0.8)" : css(GD.umber, 0.45); ctx.shadowBlur = fs * 0.08 * s * k; ctx.shadowOffsetY = fs * 0.03 * s * k; pass(paint); ctx.restore(); }
-    pass(paint);
-  },
-  wrap: (ctx, C, p, plates) => mapped(ctx, plates ? { fill: { ink: GD.ink, light: GD.cream }, stroke: { ink: GD.ink, light: GD.cream } } : { fill: { ink: GD.ink, light: GD.cream, mid: [196, 186, 166], dark: GD.umber, colour: (c) => mix(c, GD.gold, 0.3) }, stroke: { ink: GD.ink, light: GD.cream }, line: 0.6 }),
-  sticker: painters({ line: GD.ink, lineScale: 0.45, tone: inkAs(GD.ink, (c) => mix(c, GD.gold, 0.3)), shadow(ctx, draw) { ctx.save(); ctx.translate(4, 7); draw(css(GD.umber, 0.35)); ctx.restore(); } }),
-  /** The corner tag: a small gold cartouche with an inner hairline. */
-  tag(ctx, str, x, y, fs, C, p, ink) {
-    const f = fs * 0.62;
-    ctx.font = `600 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-    const w = spacedW(ctx, str, 4) + f * 1.6, h = f * 1.5, top = y + (fs * 1.34 - h);
-    ctx.beginPath(); rounded(ctx, x, top, w, h, h * 0.18); ctx.fillStyle = goldFill(ctx, x, top, x + w * 0.3, top + h * 1.4); ctx.fill(); ctx.strokeStyle = css(GD.deep); ctx.lineWidth = 2; ctx.stroke();
-    ctx.beginPath(); rounded(ctx, x + 4, top + 4, w - 8, h - 8, h * 0.14); ctx.strokeStyle = css(GD.lit, 0.7); ctx.lineWidth = 1; ctx.stroke();
-    ctx.fillStyle = ink || css(GD.ink); spaced(ctx, str, x + f * 0.8, top + h * 0.5 + f * 0.36, 4);
-    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
-  },
-  /** The frame layer: a gold hairline round the picture and a line of small credit at its foot, as under a character study. */
-  frame(ctx, env) {
-    const { w, h } = env, P = env.o.profile;
-    ctx.save(); ctx.strokeStyle = css(GD.gold, 0.7); ctx.lineWidth = 1.5; ctx.strokeRect(30, 30, w - 60, h - 60);
-    ctx.font = `500 13px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(gdInk(), 0.6);
-    spacedCentre(ctx, `${(P.brand.name || "STUDIO").toUpperCase()} · CHARACTER STUDY ${pad2(env.o.catIndex + 1)}`, w / 2, h - 44, 2);
-    ctx.restore();
-  },
-  image(ctx, C, unit) { ctx.shadowColor = css(GD.umber, 0.45); ctx.shadowBlur = 18 * unit; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 8 * unit; },
-  post(ctx, w, h, C, p, unit = 1) { grain(ctx, p.grain * 0.8, unit); vignette(ctx, w, h, dark ? [0, 0, 0] : [36, 48, 48], 0.75 * p.vignette, 0.4); },
-  prompt: `Ornaments for a painted character portrait in gold — rich, ornate, a little ancient — that read at a glance:
-- one clear object per sticker (a coin, a crescent, a jewel, a crown, a mask, a key, a feather, a ring, a bell), with a strong silhouette; simple shapes, no realism, no fine detail;
-- flat colour only: gold ("yellow"), deep brown ("ink"), cream ("white"), one deep red, the main colour as an accent;
-- the app adds a thin dark line and a soft shadow: do NOT draw outlines or shadows yourself.`,
-  solidPrompt: `Treasures and armour, built as simple models from a few boxes and cylinders — a jewellery box, a chalice, a helmet, a reliquary, a lantern; no realism, no fine detail.
-- the renderer paints faces in gold, cream and deep brown: do NOT try to draw shading or outlines yourself;
-- "white" is cream, "dark" a deep umber, and "main" the channel colour warmed toward gold — use it for one to three parts.`,
-};
 
 // ====================================================================== verse: the comic book come to life
 // Animated films that print like comic books: flat colour shaded with Ben-Day dots and hatching, an ink
@@ -6386,7 +6134,7 @@ const spectrum = {
 - "white" is cream, "dark" a deep grey, and "main" a muted version of the channel colour.`,
 };
 
-export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant, collage, yellow, pitch, dots, neon, court, velvet, rave, chrome, netart, gilded, verse, glass, jelly, skies, spectrum };
+export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant, collage, yellow, pitch, dots, neon, court, velvet, rave, chrome, netart, verse, glass, jelly, skies, spectrum };
 export const LOOK_IDS = Object.keys(LOOKS);
 
 let current = cel, values = {};
