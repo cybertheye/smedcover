@@ -476,7 +476,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli", "gilded"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid", "glass"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
@@ -616,7 +616,7 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
 
 test("the poster looks: many settings each, their own grounds, flat layouts (all but the collage, on the slanted ones), and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
-  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum"]) {
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct"]) {
     const L = LOOKS[id];
     assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
     assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
@@ -723,6 +723,38 @@ test("the comic-verse, glass, jelly, anime-sky and spectral looks: many layers e
   setLook("spectrum", null, 3, true);
   assert.equal(LOOKS.spectrum.theme({}, [40, 120, 220], lookValues()).field, "rgba(14,14,14,1)");   // black paper
   assert.ok(LOOKS.glass.params.every((d) => !d.needsPhoto), "the glass bends a photo with the same sliders");
+  setLook("cel");
+});
+
+test("the city pop night and the constructivist poster: many layers each, their grounds, a red that turns to the channel colour by degrees; blocks and cel tones", async () => {
+  for (const id of ["citypop", "construct"]) {
+    const L = LOOKS[id];
+    assert.ok(L.params.length >= 12 && L.seeded && typeof L.layout === "function", `${id}: ${L.params.length} settings, seeded, flat layouts of its own`);
+    assert.ok(Object.keys(L.scene).length >= 4 && L.elementFx.length >= 3, `${id}: scene objects and effects`);
+  }
+  assert.ok(LOOKS.citypop.oneTheme, "the city pop is a night look only");
+  setLook("citypop", { dusk: 0 }, 3, true);
+  const night = parseColour(LOOKS.citypop.theme({}, [40, 120, 220], lookValues()).field);
+  setLook("citypop", { dusk: 1 }, 3, true);
+  const dusk = parseColour(LOOKS.citypop.theme({}, [40, 120, 220], lookValues()).field);
+  assert.ok(night[2] > night[0] * 2 && dusk[0] > night[0] + 40, "a navy night, warming to a violet dusk");
+  setLook("construct", null, 3, false);
+  assert.equal(LOOKS.construct.theme({}, [40, 120, 220], lookValues()).field, "rgba(232,223,202,1)");   // cream paper
+  assert.equal(LOOKS.construct.accent.fill([40, 120, 220]), "rgba(204,52,38,1)");   // the poster red
+  const red = (chan) => { setLook("construct", { chan }, 3, false); return parseColour(LOOKS.construct.accent.fill([40, 120, 220])); };
+  const [r0, r5, r1] = [0, 0.5, 1].map(red);
+  assert.ok(r0[2] < r5[2] && r5[2] < r1[2] && r0[0] > r5[0] && r5[0] > r1[0], "the red turns to the channel colour by degrees");
+  const { joinCells, celPixels } = (await import("../ui/js/style.js")).__test;
+  const ok = (i, j) => (i * 7 + j * 3) % 5 !== 0, cols = 23, rows = 17, seen = new Uint8Array(cols * rows);
+  for (const [i, j, w, h] of joinCells(cols, rows, ok, () => true, 4, 6, 1)) for (let b = 0; b < h; b++) for (let a = 0; a < w; a++) { assert.ok(ok(i + a, j + b)); seen[(j + b) * cols + i + a]++; }
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) assert.equal(seen[j * cols + i], ok(i, j) ? 1 : 0, "every allowed cell in one block, no other");
+  const ramp = (a) => { const d = new Uint8ClampedArray(256 * 4); for (let l = 0; l < 256; l++) d.set([l, l, l, l % 2 ? 255 : 128], l * 4); celPixels(d, a); return d; };
+  const cel = ramp(1), at = (l) => [...cel.slice(l * 4, l * 4 + 3)];
+  assert.ok(Math.abs(at(20)[1] - at(40)[1]) <= 1 && Math.abs(at(130)[1] - at(160)[1]) <= 1, "the lightness in flat steps");
+  assert.ok(at(220)[1] - at(130)[1] > 60 && at(130)[1] - at(40)[1] > 40, "and the steps far apart");
+  assert.ok(at(30)[2] > at(30)[0] + 30, "the shadows sunk toward a night teal");
+  assert.ok([...Array(256).keys()].every((l) => cel[l * 4 + 3] === (l % 2 ? 255 : 128)), "alpha kept");
+  assert.deepEqual([...ramp(0)].filter((_, i) => i % 4 === 1), [...Array(256).keys()], "at nothing, nothing changes");
   setLook("cel");
 });
 

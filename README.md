@@ -274,7 +274,7 @@ A look's material effects can be put on a layer you added: text, asset, photo or
 
 The effects stay with the layer: under another look they still apply, and move to *Borrow from other looks*. Each layer's random detail is its own, so every size, the preview and the export agree. *Surprise me* deals these layers new effects, but only ever from the look it drew, so a hand stays of one look.
 
-All 30 looks have effects. Those marked [photo] are offered on photo layers only; the rest suit text, asset, photo and solid layers alike. Look effects all work on a layer once it is painted, so on a text layer they go with any text effect. An effect that repaints the shape, such as a silhouette or chrome, follows the subject on a photo whose background was removed, and takes a plain photo as one block.
+All 32 looks have effects. Those marked [photo] are offered on photo layers only; the rest suit text, asset, photo and solid layers alike. Look effects all work on a layer once it is painted, so on a text layer they go with any text effect. An effect that repaints the shape, such as a silhouette or chrome, follows the subject on a photo whose background was removed, and takes a plain photo as one block.
 
 | Look | Effects |
 |---|---|
@@ -308,6 +308,8 @@ All 30 looks have effects. Those marked [photo] are offered on photo layers only
 | Jelly machine | jelly, glow, depth of field, photo teal and orange [photo] |
 | Anime skies | photo clarity [photo] |
 | Spectral engraving | stipple (with its depth), line engraving, spectral streams, drips |
+| City pop night | cel tones (lightness in four flat steps, the shadows sunk toward a night teal), neon glow, videotape (the red smeared right and the blue left, a band slid sideways, scanlines) |
+| Constructivist | built of blocks (with the block size: rectangles of grey, ink, paper and red, joined from the layer's own tones), grey plates, diagonal wedge |
 
 ### Clipping masks
 
@@ -361,6 +363,8 @@ Each look's draggable objects:
 | Jelly machine | jelly figure, segment display |
 | Anime skies | sunlight, cumulonimbus, contrails, pole and wires, leaves |
 | Spectral engraving | stippled figure, vortex, vanishing point of the lines |
+| City pop night | cel figure, neon sign, palms, night clouds |
+| Constructivist | machine, disc, centre of the rays, steel truss |
 
 ### Lettering colours
 
@@ -462,6 +466,8 @@ At the top of the Assets tab, pick a kind, type what you need ("a washing machin
 | **Patterned glass** | an oil painting seen through hammered glass: a room in warm light, a window, someone standing against it, flowers in the channel colour, painted in loose strokes, then bent by a pane of little lens-like dimples that catch glints and dark lines; frost and dark corners if you like; a serif title with a soft glow. A photo is seen through the same glass. Silver or night; flat layouts of its own, the colour block a pane of frosted glass |
 | **Jelly machine** | the clear jelly creatures of designer-toy posters set into a machine: the channel graphic as glossy translucent jelly with bubbles, a circuit board's traces and chips, speakers, cables, knobs, an amber seven-segment display, columns of tiny print and jelly drops; the machinery out of focus and the glow spilling over if you like. A photo is graded teal and orange. Steel grey or night; flat layouts of its own |
 | **Anime skies** | the painted skies and streets of today's anime films: cobalt down to a pale horizon, towering sunlit cumulus, rows of fleecy altocumulus, contrails, a utility pole and its wires, crowded rooftops with tanks, aerials and signs, the sea, sun rays, haze and leaves. Light is a summer day, dark is dusk with the windows lit. A photo is made clearer and more vivid. Flat layouts of its own |
+| **City pop night** | the city by night on the anime videotapes of the late 80s and early 90s: a navy night or a violet dusk, clouds painted as cels (each lobe with a lit crescent on top and a dark one beneath), three rows of towers with their windows lit and red lights on their tops, neon crowns and signboards, a neon sign by the road with a looping script word, palms, the lights doubled in black water in sliding strips, stars, laser lines; the channel graphic as a figure painted on a cel (its tones stepped, a hard shadow, a rim of neon in the channel colour); the tape's colour smear, scanlines and head-switching noise along the foot. The title is graded from cream to pink, with a hard pink step and a navy drop. A photo is painted in four flat cel tones. Night only; flat layouts of its own |
+| **Constructivist** | the Soviet avant-garde poster as illustrators take it up today: cream paper gone a little brown; the channel graphic built again as a machine out of rectangles of grey, ink, bare paper and one red, masts rising from its top (without a graphic, a ship in tiers); great diagonal wedges, a disc, rays from a vanishing point, a steel truss in perspective, bars and blocks, construction lines and dot grids, small type set as furniture, still water; the red can be turned by degrees to the channel colour. Upright condensed capitals over a copy printed a little off in red. A photo is pressed into a few greys, with the wedges and the disc printed over it. Cream or black paper; flat layouts of its own |
 | **Spectral engraving** | a black-and-white stipple print bleeding a rainbow: the channel graphic in stipple, dense where it turns from the light; threads of the spectrum streaming to the edge and turning up at a right angle, or dripping down; a spectral vortex, lines running to the horizon, rainbow waves, blocks of coloured lines, an engraved sky, a mat and a wooden frame; ink lettering on a stack of spectrum-coloured copies. A photo is engraved in level lines. Cream or black paper; flat layouts of its own |
 
 The sliders of each look:
@@ -496,10 +502,12 @@ The sliders of each look:
 | Jelly machine | jelly figure, circuit board, speakers (pair by pair), cables, knobs and buttons, segment display, tiny print, jelly drops, depth of field, glow, grain, photo teal and orange |
 | Anime skies | cumulus (mass by mass), fleecy clouds, sunlight, contrails, pole and wires (wire by wire), town, signs, sea, leaves, haze, photo clarity |
 | Spectral engraving | stippled figure, stipple depth, spectral streams, drips, vortex, perspective lines, rainbow waves, colour blocks, engraved sky, paper, mat and frame, photo engraved |
+| City pop night | cel figure, dusk, night clouds (more banks, one by one), stars, skyline (the towers rise), lit windows (more of them lit), neon (crowns, signboards, the sign), palms (up to three, each growing in turn), water (the waterline rises), laser lines, videotape, film grain, photo as cels |
+| Constructivist | machine, finer blocks, diagonal wedges (one after another, each growing out of its corner), disc (a black disc and a ring follow), rays (each new one in a gap), steel truss (a far one past half way), bars and blocks, construction lines, small type, water, old paper, channel colour for the red (by degrees), photo in greys |
 
-**Layouts of their own** — the record sleeve and editorial looks, and negative space, minimal film poster, cyanotype, monochrome film, experimental type, animated film poster, avant-garde image, yellow poster, pitch, dot matrix, neon pop, basketball poster, velvet illustration, psychedelic rave, liquid chrome, glitch net art, comic-verse, patterned glass, jelly machine, anime skies and spectral engraving, do not use slanted panels. They read the three *Template* choices their own way: Stack is a level band, Split an upright side panel, Banner a slim strip, each in its own proportions. Switching to another look brings the usual layouts back.
+**Layouts of their own** — the record sleeve and editorial looks, and negative space, minimal film poster, cyanotype, monochrome film, experimental type, animated film poster, avant-garde image, yellow poster, pitch, dot matrix, neon pop, basketball poster, velvet illustration, psychedelic rave, liquid chrome, glitch net art, comic-verse, patterned glass, jelly machine, anime skies, spectral engraving, city pop night and constructivist, do not use slanted panels. They read the three *Template* choices their own way: Stack is a level band, Split an upright side panel, Banner a slim strip, each in its own proportions. Switching to another look brings the usual layouts back.
 
-The sliders named for the photo (*Photo duotone*, *Photo halftone*, *Black-and-white photo*, *Photo in spot colour*, *Photo vividness*, *Photo in red and black*, *Photo toning*, *Photo as cyanotype*, *Photo motion blur*, *Photo torn in strips*, *Photo posterized*, *Photo in neon*, *Hard tones*, *Photo's own colours* and the like) and *Hard black and white* only do something when there is a photo; *Photo inside the silhouette*, *Photo inside the letters*, *Photo collage* and *Photo torn in strips* act only on a photo that fills the canvas, as does the dot matrix's reading of a photo into dots, and so do the avant-garde image's smear, glow, blur, mosaic, glass and band (without a photo they work on the figure the channel graphic becomes). The patterned glass bends any photo with the same sliders as its painting; the patterned glass's brush strokes and the spectral engraving's streams, engraved sky and colour blocks come onto a photo only when it fills the canvas.
+The sliders named for the photo (*Photo duotone*, *Photo halftone*, *Black-and-white photo*, *Photo in spot colour*, *Photo vividness*, *Photo in red and black*, *Photo toning*, *Photo as cyanotype*, *Photo motion blur*, *Photo torn in strips*, *Photo posterized*, *Photo in neon*, *Hard tones*, *Photo's own colours*, *Photo as cels*, *Photo in greys* and the like) and *Hard black and white* only do something when there is a photo; *Photo inside the silhouette*, *Photo inside the letters*, *Photo collage* and *Photo torn in strips* act only on a photo that fills the canvas, as does the dot matrix's reading of a photo into dots, and so do the avant-garde image's smear, glow, blur, mosaic, glass and band (without a photo they work on the figure the channel graphic becomes). The patterned glass bends any photo with the same sliders as its painting; the patterned glass's brush strokes and the spectral engraving's streams, engraved sky and colour blocks come onto a photo only when it fills the canvas.
 
 **The vertical title of the woodblock look** — each typed line is a column, read top to bottom, the first line on the right. CJK characters stand upright; a run of Latin letters or digits lies on its side, as is usual in vertical setting. A vertical title takes the full height of the page and stands clear of the seal in the lower left. Text effects do not apply to a vertical title; untick *Set the title vertically* for a horizontal one, and they apply again.
 
@@ -654,6 +662,8 @@ and quits, without touching your real data.
 SMEDCOVER_SELFTEST=/absolute/empty/folder src-tauri/target/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover
 ```
 
+To go through some looks only (the self-test makes several covers in each, so all of them take minutes), name them: `SMEDCOVER_SELFTEST_LOOKS=citypop,construct`.
+
 `.github/workflows/build.yml` builds installers on GitHub Actions (it has not been run yet): macOS for Apple silicon and for Intel, separately (`.dmg`, `.app.tar.gz`), Windows x64 (`.exe`, `.msi`), Linux x64 (`.deb`, `.rpm`, `.AppImage`).
 
 ## To do
@@ -747,6 +757,8 @@ Layers: "photo" marks an effect for photo layers only; the others suit text, ass
 | Patterned glass | patterned glass (ripple, pattern size, glints, dark lines) [px], brush strokes [px], frost [px] | figure at the window ★, window light ★, warm light, flowers ★ | dark corners |
 | Jelly machine | jelly [fill], glow [out], depth of field [px], photo teal and orange [px, photo] | jelly figure ★, circuit board, speakers, cables, knobs and buttons, segment display ★, tiny print, jelly drops | grain |
 | Anime skies | photo clarity [px, photo] | cumulus ★, fleecy clouds, sunlight ★, contrails ★, pole and wires ★, town, signs, sea, leaves ★, haze | — |
+| City pop night | cel tones [px], neon glow [out], videotape [px] | cel figure ★, night clouds ★, stars, skyline and lit windows, neon crowns and signboards, neon sign ★, palms ★, water, laser lines | videotape, film grain (frame: screen corners and the play display) |
+| Constructivist | built of blocks (with the block size) [fill], grey plates [px], diagonal wedge [out] | machine ★, diagonal wedges, disc ★, rays ★ (their centre), steel truss ★, bars and blocks, construction lines, small type, water | old paper (frame: a ruled border) |
 | Spectral engraving | stipple (with its depth) [fill], line engraving [fill], spectral streams [out], drips [out] | stippled figure ★, vortex ★, perspective lines ★ (their vanishing point), rainbow waves, colour blocks, engraved sky | paper (frame: mat and frame) |
 
 The general typesetting effects belong to no look and stay in the lettering menu: Automatic (follows the look), Outline and shadow, Plain, Plain upright, Halftone inside, Stripes inside, Inner shadow, Worn, Row shift, Extruded, Arched, Tapered, Wave.

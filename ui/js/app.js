@@ -3063,10 +3063,19 @@ function libraryTiles(pick, redraw, removable = false) {
   })) : el("div", { class: "hint" }, t(waiting ? "lib.loading" : "lib.empty"));
 }
 
+/** The looks the self-test goes through: those named in SMEDCOVER_SELFTEST_LOOKS (the new ones, say), or all of them. */
+async function testedLooks() {
+  const named = await invoke("selftest_looks").catch(() => null), want = named ? named.split(",").map((x) => x.trim()) : null;
+  return want ? LOOK_IDS.filter((k) => want.includes(k)) : LOOK_IDS;
+}
 /** SMEDCOVER_SELFTEST mode: export real covers in every format through the normal path, report, quit. */
 async function selfTest(dir) {
   if (await invoke("selftest_drag").catch(() => false)) return dragTest().catch((e) => invoke("selftest_done", { report: JSON.stringify({ error: String((e && e.stack) || e) }) }));
-  const report = { ok: false, files: [], errors: [] };
+  const report = { ok: false, files: [], errors: [] }, looks = await testedLooks();
+  report.lookIds = looks.length === LOOK_IDS.length ? "all" : looks;
+  // Each step is noted in selftest-progress.txt (in the data folder) as it starts, so a run that stalls
+  // (every process idle, the web view waiting on something that never returns) shows where.
+  const steps = [], step = (s) => { steps.push(`${Math.round(performance.now())} ${s}`); return files.write("selftest-progress.txt", steps.join("\n")).catch(() => null); };
   const cjk = (f) => S.systemFonts.includes(f) ? !S.latinFonts.has(f) : null;   // which installed fonts can set Chinese
   report.fonts = { system: S.systemFonts.length, latin: [...S.latinFonts].filter((f) => S.systemFonts.includes(f)).length, cjk: Object.fromEntries(["PingFang SC", "Songti SC", "Helvetica", "Cochin", "BM Hanna Pro", "Menlo"].map((f) => [f, cjk(f)])) };
   try {
@@ -3184,14 +3193,14 @@ async function selfTest(dir) {
     }
     S.cover.title = "Self test\n*binary* export"; S.cover.tag = "EP.01";
     for (const format of ["png", "jpeg", "webp"]) {
-      S.settings.format = format;
+      S.settings.format = format; await step(`export ${format}`);
       const t0 = performance.now();
       const jobs = S.profile.sizes.slice(0, 2).map((size) => ({ cover: S.cover, index: catIndex(), size }));
       const n = await runExport(jobs, async (bytes, name) => { report.files.push({ path: await invoke("write_image", framed(bytes, { dir, name })), pngBytes: bytes.length }); });
       report[format + "_ms"] = Math.round(performance.now() - t0);
       if (n !== jobs.length) report.errors.push(`${format}: ${n}/${jobs.length} — ${$("toast").textContent}`);
     }
-    // one cover in every other look, so each is exercised in the real web view
+    // one cover in every other look (or in each look named for the test), so each is exercised in the real web view
     S.settings.format = "png"; report.looks = [];
     const keepLayers = JSON.stringify(S.cover.layers), snap = document.createElement("canvas");   // a stand-in photograph: colours, light and dark, some detail
     snap.width = 1200; snap.height = 800;
@@ -3201,18 +3210,22 @@ async function selfTest(dir) {
     for (let k = 0; k < 14; k++) { sx.fillStyle = ["#fff7d6", "#1b1b2a", "#2dd4a4"][k % 3]; sx.fillRect(40 + k * 82, 300 + ((k * 137) % 260), 56, 500); }
     const shot = await putPhoto(snap.toDataURL("image/jpeg", 0.9));
     const plain = S.cover.layers.filter((l) => !fillsCanvas(l)), withShot = [plain[0], newLayer("photo", { pid: shot, fill: true }), ...plain.slice(1)];
-    for (const id of LOOK_IDS.filter((k) => k !== "cel")) for (const withPhoto of [false, true]) {
+    for (const id of looks.filter((k) => k !== "cel")) for (const withPhoto of [false, true]) {
       S.profile.style.look = id; S.cover.layers = withPhoto ? withShot : plain;
-      const cv = renderFull(S.profile.sizes[0], S.cover, catIndex()), name = `look-${id}${withPhoto ? "-photo" : ""}.png`;
-      report.looks.push({ id, photo: withPhoto, path: await invoke("write_image", framed(await toPng(cv), { dir, name })) });
+      const name = `look-${id}${withPhoto ? "-photo" : ""}.png`;
+      await step(`${name}: drawing`); const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
+      await step(`${name}: encoding`); const png = await toPng(cv);
+      await step(`${name}: writing`); report.looks.push({ id, photo: withPhoto, path: await invoke("write_image", framed(png, { dir, name })) });
     }
     // and each look with every setting at its far end, so every effect is drawn in the real web view
     const keepParams = JSON.stringify(S.profile.style.lookParams);
-    for (const id of LOOK_IDS.filter((k) => LOOKS[k].params.length)) for (const withPhoto of [false, true]) {
+    for (const id of looks.filter((k) => LOOKS[k].params.length)) for (const withPhoto of [false, true]) {
       S.profile.style.look = id; S.cover.layers = withPhoto ? withShot : plain;
       S.profile.style.lookParams[id] = Object.fromEntries(LOOKS[id].params.map((d) => [d.key, d.text ? "AB" : d.max]));
-      const cv = renderFull(S.profile.sizes[0], S.cover, catIndex()), name = `look-${id}-full${withPhoto ? "-photo" : ""}.png`;
-      report.looks.push({ id, full: true, photo: withPhoto, path: await invoke("write_image", framed(await toPng(cv), { dir, name })) });
+      const name = `look-${id}-full${withPhoto ? "-photo" : ""}.png`;
+      await step(`${name}: drawing`); const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
+      await step(`${name}: encoding`); const png = await toPng(cv);
+      await step(`${name}: writing`); report.looks.push({ id, full: true, photo: withPhoto, path: await invoke("write_image", framed(png, { dir, name })) });
     }
     S.profile.style.lookParams = JSON.parse(keepParams);
     S.profile.style.look = "cel"; S.cover.layers = JSON.parse(keepLayers);
@@ -3221,7 +3234,7 @@ async function selfTest(dir) {
     const titleLayer = layer("title"), keep = S.cover.title;
     S.cover.title = "文字效果 *FX*\nText *effects*";
     for (const id of Object.keys(EFFECTS).filter((k) => k !== "auto")) {
-      titleLayer.fx = id;
+      titleLayer.fx = id; await step(`fx-${id}`);
       const cv = await renderReady(S.profile.sizes[0], S.cover, catIndex());
       report.effects.push({ id, kind: EFFECTS[id].kind, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `fx-${id}.png` })) });
     }
@@ -3249,11 +3262,11 @@ async function selfTest(dir) {
       const ours = [tx, sk, so, ...(pr ? [pr] : [])];
       S.cover.layers.push(...ours);
       const shoot = async (name, look) => {
-        S.profile.style.look = look;
+        S.profile.style.look = look; await step(`layerfx-${name}`);
         const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
         report.layerFx.push({ name, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `layerfx-${name}.png` })), hits: ours.map((L) => !!cv._hits.find((h) => h.id === L.id)) });
       };
-      for (const id of LOOK_IDS.filter((k) => (LOOKS[k].elementFx || []).length)) {
+      for (const id of looks.filter((k) => (LOOKS[k].elementFx || []).length)) {
         for (const L of ours) L.lookFx = Object.fromEntries(effectsFor(id, L.type).map((e) => [`${id}.${e.key}`, 1]));
         await shoot(id, id);
       }
@@ -3275,15 +3288,18 @@ async function selfTest(dir) {
       report.clip = { path: await invoke("write_image", framed(await toPng(cv), { dir, name: "clip.png" })), hits: ours.map((L) => !!cv._hits.find((h) => h.id === L.id)) };
       S.cover.layers = S.cover.layers.filter((l) => !ours.includes(l));
     }
-    // the looks' scene objects: the basketball poster's, each moved, the ground selected so their handles show
-    {
-      const keepLook = S.profile.style.look, keepScene = S.cover.scene, keepSel = S.layerId, keepParams = S.profile.style.lookParams.court;
-      S.profile.style.look = "court"; S.profile.style.lookParams.court = { ...(keepParams || {}), ball: 0.7, number: 0.6, court: 0.7, hoop: 0.7 };
-      for (const k of Object.keys(LOOKS.court.scene)) moveScene(S.cover, "court", k, "all", frame().key, -0.1, 0.08);
+    // the looks' scene objects, each moved, the ground selected so their handles show: the basketball
+    // poster's, or those of each look named for the test (the sliders of the same name turned up, so they show)
+    report.scene = [];
+    for (const look of looks === LOOK_IDS ? ["court"] : looks.filter((k) => LOOKS[k].scene)) {
+      const keepLook = S.profile.style.look, keepScene = S.cover.scene, keepSel = S.layerId, keepParams = S.profile.style.lookParams[look], keys = Object.keys(LOOKS[look].scene);
+      S.profile.style.look = look; await step(`scene-${look}`);
+      S.profile.style.lookParams[look] = { ...(keepParams || {}), ...(look === "court" ? { ball: 0.7, number: 0.6, court: 0.7, hoop: 0.7 } : Object.fromEntries(LOOKS[look].params.filter((d) => keys.includes(d.key)).map((d) => [d.key, Math.max(d.def, 0.6)]))) };
+      for (const k of keys) moveScene(S.cover, look, k, "all", frame().key, -0.1, 0.08);
       const cv = document.createElement("canvas");
       drawCover(cv, { profile: S.profile, catIndex: catIndex(), size: S.profile.sizes[0], pixelW: 1600, cover: S.cover, photos: S.photos, select: "bg" });
-      report.scene = { path: await invoke("write_image", framed(await toPng(cv), { dir, name: "scene-court.png" })), handles: (cv._scene || []).map((q) => q.key).sort(), declared: Object.keys(LOOKS.court.scene).sort() };
-      S.profile.style.look = keepLook; S.profile.style.lookParams.court = keepParams; S.layerId = keepSel;
+      report.scene.push({ look, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `scene-${look}.png` })), handles: (cv._scene || []).map((q) => q.key).sort(), declared: keys.sort() });
+      S.profile.style.look = keepLook; S.profile.style.lookParams[look] = keepParams; S.layerId = keepSel;
       if (keepScene) S.cover.scene = keepScene; else delete S.cover.scene;
     }
     // the perspective with corners of its own, dragged far: the lettering follows the quad
@@ -3362,7 +3378,7 @@ async function dragTest() {
   {
     const keepLook = S.profile.style.look, keepScene = JSON.stringify(S.cover.scene || null), keepSel = S.layerId;
     selectLayer("bg");
-    for (const look of LOOK_IDS.filter((id) => LOOKS[id].scene)) {
+    for (const look of (await testedLooks()).filter((id) => LOOKS[id].scene)) {
       S.profile.style.look = look; queueDraw(); await frame(); await frame();
       const q = (cv._scene || [])[0];
       if (!q) { report.sceneDrags.push({ look, object: null }); continue; }

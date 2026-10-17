@@ -117,9 +117,34 @@ export function drawPhoto(ctx, im, w, h, adj, blur, dim, hiRes, grey = 0) {
   if (dim > 0) { ctx.fillStyle = `rgba(7,7,12,${dim})`; ctx.fillRect(0, 0, w, h); }
 }
 /** Draws `im` into the rectangle x, y, w × h, blurred by `blur` px and with `grey` of its colour taken out. */
-export function drawPhotoAt(ctx, im, x, y, iw, ih, blur, hiRes, grey = 0) {
-  const src = blur > 0 ? blurred(im, blur, hiRes) : im;
+export function drawPhotoAt(ctx, im, x, y, iw, ih, blur, hiRes, grey = 0, treat = null) {
+  let src = blur > 0 ? blurred(im, blur, hiRes) : im;
+  if (treat) src = treatedOf(src, im, `${blur}|${hiRes}|${treat.key}`, hiRes, treat.fn);
   ctx.imageSmoothingQuality = "high";
   if (grey < 1) ctx.drawImage(src, x, y, iw, ih);
-  if (grey > 0) { ctx.save(); ctx.globalAlpha = Math.min(1, grey); ctx.drawImage(greyOf(src, im, `${blur}|${hiRes}`, hiRes), x, y, iw, ih); ctx.restore(); }
+  if (grey > 0) { ctx.save(); ctx.globalAlpha = Math.min(1, grey); ctx.drawImage(greyOf(src, im, `${blur}|${hiRes}|${treat ? treat.key : ""}`, hiRes), x, y, iw, ih); ctx.restore(); }
+}
+const treated = new WeakMap();   // the photo (or its blurred copy) worked on by a look, per picture: one slot for previews, one for export
+/**
+ * A copy of `src` with its pixels worked on by fn(RGBA data) — a look recolouring the photo — computed once
+ * on a canvas in memory and kept until the photo, its blur or `key` changes: done once, where reading the
+ * whole canvas back from the graphics card would cost every redraw.
+ */
+function treatedOf(src, im, key, hi, fn) {
+  const cap = hi ? 2400 : 1100, sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height, f = Math.min(1, cap / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * f)), h = Math.max(1, Math.round(sh * f));
+  const slot = slotOf(treated, im, hi);
+  if (slot.im !== im || slot.key !== key) {
+    const t0 = performance.now(), c = slot.cv;
+    c.width = w; c.height = h;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    x.imageSmoothingQuality = "high";
+    x.drawImage(src, 0, 0, w, h);
+    const id = x.getImageData(0, 0, w, h);
+    fn(id.data);
+    x.putImageData(id, 0, 0);
+    slot.im = im; slot.key = key;
+    pxTime("photo worked by the look", t0);
+  }
+  return slot.cv;
 }

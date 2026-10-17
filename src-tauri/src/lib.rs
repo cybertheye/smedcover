@@ -839,6 +839,14 @@ fn selftest_drag() -> bool {
     selftest_root().is_some() && std::env::var_os("SMEDCOVER_SELFTEST_DRAG").is_some()
 }
 
+/// In self-test mode, the looks to go through, comma-separated (SMEDCOVER_SELFTEST_LOOKS), when only
+/// some are to be checked — the new ones, say; all of them otherwise.
+#[tauri::command]
+fn selftest_looks() -> Option<String> {
+    selftest_root()?;
+    std::env::var("SMEDCOVER_SELFTEST_LOOKS").ok().filter(|s| !s.trim().is_empty())
+}
+
 /// In self-test mode, the URL of a stand-in AI endpoint to exercise `ai_request` against.
 #[tauri::command]
 fn selftest_ai() -> Option<String> {
@@ -876,8 +884,32 @@ pub fn run() {
             text_outline,
             selftest_dir,
             selftest_ai,
+            selftest_looks,
             selftest_done
         ])
+        .setup(|app| {
+            // A self-test's window may open off screen — on another desktop, behind a full-screen app —
+            // and WebKit then stops drawing for it: a canvas read back (an export, a PNG) waits for good,
+            // every process idle. So in self-test mode the web view is told not to watch whether its window
+            // can be seen (the setting WebKit's own tests use), and keeps drawing unseen.
+            #[cfg(target_os = "macos")]
+            if selftest_root().is_some() {
+                use tauri::Manager;
+                for w in app.webview_windows().values() {
+                    let _ = w.with_webview(|wv| unsafe {
+                        let view = wv.inner() as *mut objc2::runtime::AnyObject;
+                        let sel = objc2::sel!(_setWindowOcclusionDetectionEnabled:);
+                        let can: bool = objc2::msg_send![view, respondsToSelector: sel];
+                        if can {
+                            let _: () = objc2::msg_send![view, _setWindowOcclusionDetectionEnabled: false];
+                        }
+                    });
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = app;
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running SmedCover");
 }

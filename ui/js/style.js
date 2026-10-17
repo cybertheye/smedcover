@@ -6258,7 +6258,750 @@ const spectrum = {
 - "white" is cream, "dark" a deep grey, and "main" a muted version of the channel colour.`,
 };
 
-export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant, collage, yellow, pitch, dots, neon, court, velvet, rave, chrome, netart, verse, glass, jelly, skies, spectrum };
+// ====================================================================== shared by the two looks below
+/**
+ * Water from the line y down to y1, across x0–x1: what is painted above the line mirrored into it, in thin
+ * strips each slid sideways a little (more toward the foot, where the ripples are nearer), dimmed toward
+ * `tint` (alpha a0 at the line, a1 at the foot). Needs a canvas; k0 places the ripples.
+ */
+function reflectBelow(ctx, x0, x1, y, y1, tint, a0, a1, k0) {
+  if (!canPaint(ctx) || y1 - y < 2) return;
+  const cv = ctx.canvas, m = ctx.getTransform(), k = Math.abs(m.d) || 1;
+  const X0 = Math.max(0, Math.floor(m.e + x0 * m.a)), X1 = Math.min(cv.width, Math.ceil(m.e + x1 * m.a)), Y = Math.round(m.f + y * m.d), Y1 = Math.min(cv.height, Math.round(m.f + y1 * m.d));
+  if (X1 <= X0 || Y1 <= Y || Y <= 0) return;
+  const top = Math.max(0, Y - (Y1 - Y)), src = WORK.reflect || (WORK.reflect = document.createElement("canvas"));   // only the band that is mirrored is copied
+  if (src.width !== X1 - X0 || src.height !== Y - top) { src.width = X1 - X0; src.height = Y - top; }
+  const sg = src.getContext("2d"); sg.globalCompositeOperation = "copy"; sg.drawImage(cv, X0, top, X1 - X0, Y - top, 0, 0, X1 - X0, Y - top);
+  ctx.fillStyle = css(tint); ctx.fillRect(x0, y, x1 - x0, y1 - y);   // under the strips, so where one slid aside the water shows, not what was there
+  inPixels(ctx, () => {
+    for (let yy = 0, row = 0; yy < Y1 - Y; row++) {
+      const t = yy / (Y1 - Y), sh = Math.max(1, Math.round((1.5 + 4 * t) * k)), from = Y - yy - sh - top;
+      if (from < 0) break;
+      ctx.drawImage(src, 0, from, X1 - X0, sh, X0 + (noise(row * 0.731 + k0) - 0.5) * (2 + 26 * t) * k, Y + yy, X1 - X0, sh);
+      yy += sh;
+    }
+  });
+  const g = ctx.createLinearGradient(0, y, 0, y1); g.addColorStop(0, css(tint, a0)); g.addColorStop(1, css(tint, a1));
+  ctx.fillStyle = g; ctx.fillRect(x0, y, x1 - x0, y1 - y);
+}
+/** Whether two boxes { x, y, w, h } overlap. */
+const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+/** The boxes a look's furniture should keep off: the title as it will be set, the corner tag, the channel graphic. */
+function keepClear(ctx, env) {
+  const out = [], T = canPaint(ctx) ? titleArea(ctx, env) : null, tg = env.G && env.G.tag;
+  if (T) out.push({ x: T.x - 30, y: T.y - 30, w: T.w + 60, h: T.h + 60 });
+  if (tg) out.push({ x: tg.x - 20, y: tg.y - 20, w: 420, h: tg.fs * 1.34 + 40 });
+  const A = env.G && env.G.art, on = env.graphic && env.cover && env.cover.layers.some((l) => l.type === "graphic" && l.visible);
+  if (A && on) { const r = 330 * A.s; out.push({ x: A.x - r, y: A.y - r, w: r * 2, h: r * 2 }); }
+  return out;
+}
+
+// ====================================================================== city pop: the night city of the OVA years
+// Late-80s and early-90s anime as the videotape kept it: a navy night, or a violet dusk, of cel-painted
+// clouds; towers of lit windows, red lights winking on their tops; neon tubes and a sign by the road;
+// palms; the lights doubled in black water; the figure painted as a cel, a hard shadow and a rim of neon;
+// laser lines; and the smear, scanlines and tracking noise of the tape.
+const CP = { line: [16, 14, 38], cream: [255, 244, 232], pink: [255, 64, 168], cyan: [70, 232, 255], green: [96, 255, 168], amber: [255, 190, 96], red: [255, 54, 64], warm: [255, 232, 180] };
+const CP_NEON = [CP.pink, CP.cyan, CP.green, CP.amber];
+/** The sky, top to horizon, at dusk d (0: deep night, 1: violet dusk). */
+const cpSky = (d) => [mix([6, 10, 36], [40, 28, 92], d), mix([24, 40, 116], [104, 68, 156], d), mix([66, 80, 170], [242, 140, 168], d)];
+/** A line of neon tube along the current path, `lw` thick: a wide soft glow, a narrower one, the tube, and its white-hot core. */
+function neonTube(ctx, colour, lw, a = 1) {
+  ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (const [k, al] of [[5, 0.14], [2.4, 0.4], [1, 1]]) { ctx.strokeStyle = css(colour, al * a); ctx.lineWidth = lw * k; ctx.stroke(); }
+  ctx.strokeStyle = css(mix(colour, [255, 255, 255], 0.7), a); ctx.lineWidth = lw * 0.4; ctx.stroke();
+  ctx.restore();
+}
+/**
+ * A bank of cloud as the cel painters did a night sky: ragged lobes strung along a line, each in the body
+ * tone with a crescent lit along its top (moonlight by night, the last of the sun at dusk) and a darker one
+ * along its foot, the lower lobes over the higher; thin wisps trailing off either end. Flat tones, hard
+ * edges. (cx, cy): its middle; len: its length; th: its thickness.
+ */
+function cpCloud(ctx, cx, cy, len, th, d, k) {
+  const body = mix([18, 26, 70], [94, 64, 142], d), lit = mix([74, 108, 206], [252, 160, 184], d), deep = mix([8, 12, 40], [60, 42, 106], d), m = 9 + Math.floor(rand(k) * 9), lobes = [];
+  for (let i = 0; i < m; i++) {
+    const t = i / (m - 1), r = th * (0.3 + rand(k + i * 2.3 + 1) * 0.6) * (0.4 + 0.6 * Math.sin(Math.PI * (0.08 + 0.84 * t)));
+    lobes.push([cx + len * (t - 0.5) + (rand(k + i * 3.1 + 2) - 0.5) * len * 0.08, cy + (rand(k + i * 4.7 + 3) - 0.5) * th * 0.5 - Math.sin(Math.PI * t) * th * 0.3, r]);
+  }
+  lobes.sort((a, b) => a[1] - b[1]);
+  ctx.save();
+  for (const s of [-1, 1]) for (let i = 0; i < 3; i++) {
+    const wx = cx + s * len * (0.42 + 0.1 * i + rand(k + i * 5.1 + s) * 0.08), wy = cy + th * (rand(k + i * 6.3 + s * 2) - 0.3) * 0.6, wr = len * (0.08 + rand(k + i * 7.7 + s) * 0.1);
+    ctx.fillStyle = css(i % 2 ? lit : body); ctx.beginPath(); ctx.ellipse(wx, wy, wr, th * 0.05 + 1, 0, 0, TAU); ctx.fill();
+  }
+  for (const [x, y, r] of lobes) {
+    const rx = r * 1.9;
+    ctx.save(); ctx.beginPath(); ctx.ellipse(x, y, rx, r, 0, 0, TAU); ctx.clip();
+    ctx.fillStyle = css(lit); ctx.fillRect(x - rx, y - r, rx * 2, r * 2);
+    ctx.fillStyle = css(body); ctx.beginPath(); ctx.ellipse(x + rx * 0.05, y + r * 0.3, rx, r, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = css(deep); ctx.beginPath(); ctx.ellipse(x + rx * 0.1, y + r * 1.3, rx * 1.05, r, 0, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+/** Stars: pinpricks thicker toward the top of the sky, a few bright ones with four points, fainter at dusk; `n` of them, the last coming in by degrees. */
+function cpStars(ctx, F, bottom, n, d, k0) {
+  const fw = F.x1 - F.x0, span = Math.max(1, bottom - F.y0), fade = 1 - 0.65 * d;
+  ctx.save(); ctx.fillStyle = css(CP.cream);
+  for (let i = 0; i < Math.ceil(n); i++) {
+    const x = F.x0 + fw * rand(i * 1.7 + k0), y = F.y0 + span * rand(i * 2.9 + k0 + 1) ** 1.7, big = rand(i * 3.3 + k0 + 2) ** 6;
+    ctx.globalAlpha = (0.35 + 0.65 * rand(i * 4.1 + k0 + 3)) * fade * clamp(n - i);
+    if (big > 0.5) starMark(ctx, x, y, 3 + big * 6, 4, CP.cream); else { ctx.beginPath(); ctx.arc(x, y, 0.7 + big * 2.6, 0, TAU); ctx.fill(); }
+  }
+  ctx.restore();
+}
+/**
+ * The city at night, its feet at `base` and its tallest reaching `top`: the glow it throws on the sky, a
+ * ridge of hills far off, then three rows of towers — the far row small and hazy, pricked with light; the
+ * middle row tall and gridded with windows; the near row low and dark. `lit` (0–1) of the windows are
+ * lit, warm white with a few pink or cyan; red lights on the tops; with `neon`, crowns banded in neon
+ * tube and signboards down the near faces, one after another.
+ */
+function cpCity(ctx, F, top, base, lit, neon, d, k0) {
+  const fw = F.x1 - F.x0, H = Math.max(10, base - top), u = Math.min(fw, F.y1 - F.y0), hz = cpSky(d)[2], glow = mix([150, 60, 170], [255, 150, 160], d);
+  const g = ctx.createLinearGradient(0, base - H * 1.2, 0, base); g.addColorStop(0, css(glow, 0)); g.addColorStop(1, css(glow, 0.45));
+  ctx.fillStyle = g; ctx.fillRect(F.x0, base - H * 1.2, fw, H * 1.2);
+  const ph = rand(k0) * TAU;
+  ctx.fillStyle = css(mix(mix([12, 16, 50], [56, 40, 104], d), hz, 0.25)); ctx.beginPath(); ctx.moveTo(F.x0 - 10, base + 2);
+  for (let x = F.x0 - 10; x <= F.x1 + 30; x += 24) { const t = (x - F.x0) / fw; ctx.lineTo(x, base - H * (0.3 + 0.13 * Math.sin(t * 5.1 + ph) + 0.06 * Math.sin(t * 13.3 + ph * 2) + 0.03 * Math.sin(t * 31 + ph))); }
+  ctx.lineTo(F.x1 + 30, base + 2); ctx.closePath(); ctx.fill();
+  const WARM = [CP.warm, CP.warm, CP.warm, CP.warm, CP.warm, CP.warm, [255, 246, 222], [255, 246, 222], [255, 210, 140], [255, 210, 140], [255, 150, 204], [150, 228, 255]];
+  const ROWS = [
+    { w: [0.018, 0.03], h: [0.22, 0.38], body: mix(mix([30, 36, 96], [86, 62, 136], d), hz, 0.45), pin: true, litK: 0.7 },
+    { w: [0.04, 0.06], h: [0.4, 0.6], body: mix([20, 26, 72], [52, 40, 100], d), litK: 1, crowns: true },
+    { w: [0.06, 0.08], h: [0.12, 0.3], body: mix([10, 12, 36], [28, 22, 58], d), litK: 0.6, signs: true },
+  ];
+  ROWS.forEach((R, ri) => {
+    const wins = new Map(), add = (c, x, y, w, h) => { const key = c.map(Math.round).join(); (wins.get(key) || wins.set(key, []).get(key)).push(x, y, w, h); }, reds = [], tubes = [];
+    for (let x = F.x0 - 14, i = 0; x < F.x1 + 14; i++) {
+      const kk = k0 + ri * 1000 + i * 7.3, bw = u * (R.w[0] + rand(kk) * R.w[1]), bh = H * (R.h[0] + rand(kk + 1) * R.h[1]), y0 = base - bh, kind = rand(kk + 2);
+      ctx.fillStyle = css(R.body); ctx.fillRect(x, y0, bw, bh + 4);
+      ctx.fillStyle = css(mix(R.body, glow, 0.18)); ctx.fillRect(x + bw * 0.74, y0, bw * 0.26, bh + 4);   // the side the city's glow catches
+      let roof = y0;
+      if (kind < 0.25) { ctx.fillStyle = css(R.body); ctx.fillRect(x + bw * 0.18, y0 - bh * 0.1, bw * 0.64, bh * 0.1 + 1); roof = y0 - bh * 0.1; }   // a setback
+      else if (kind < 0.4) { ctx.fillStyle = css(R.body); shapeOf(ctx, [[x, y0 + 1], [x + bw, y0 + 1], [x + bw, y0 - bw * 0.45]]); ctx.fill(); }   // a slanted crown
+      else if (kind < 0.55) { ctx.fillStyle = css(R.body); ctx.fillRect(x + bw * 0.48, y0 - bh * 0.22, Math.max(1.5, bw * 0.04), bh * 0.22); reds.push([x + bw * 0.5, y0 - bh * 0.22]); }   // a mast
+      if (!R.pin && rand(kk + 3) < 0.6) reds.push([x + bw * 0.08, roof - 2], [x + bw * 0.92, roof - 2]);
+      // the windows: a grid, the lit ones warm, a few pink or cyan; on the far row only the lit ones, as pinpricks
+      const ws = R.pin ? Math.max(1.4, bw * 0.08) : bw * 0.075, wh = R.pin ? ws : ws * 0.8, cols = Math.max(1, Math.floor((bw * 0.82) / (ws * 2))), gx = (bw * 0.82 - cols * ws * 2) / 2;
+      for (let r = 0, y = y0 + bw * 0.1; y < base - wh; r++, y += wh * (R.pin ? 2.6 : 2.2)) for (let q = 0; q < cols; q++) {
+        const on = rand(kk * 3.7 + r * 1.31 + q * 0.173) < lit * R.litK;
+        if (on) add(WARM[Math.floor(rand(kk + r * 2.9 + q * 5.3) * WARM.length)], x + bw * 0.09 + gx + q * ws * 2, y, ws, wh);
+        else if (!R.pin) add(mix(R.body, [70, 80, 140], 0.22), x + bw * 0.09 + gx + q * ws * 2, y, ws, wh);
+      }
+      if (R.crowns && rand(kk + 4) < neon * 0.6) tubes.push(["crown", x, roof, bw, CP_NEON[Math.floor(rand(kk + 5) * 4)]]);
+      if (R.signs && rand(kk + 6) < neon) tubes.push(["sign", x + (rand(kk + 7) > 0.5 ? bw * 0.06 : bw * 0.68), y0 + bh * 0.1, bw * 0.24, CP_NEON[Math.floor(rand(kk + 8) * 4)], Math.min(bh * 0.7, bw * 0.24 * (3 + rand(kk + 9) * 2)), CP_NEON[Math.floor(rand(kk + 10) * 4)]]);
+      x += bw * (0.86 + rand(kk + 11) * 0.22);
+    }
+    for (const [key, list] of wins) { ctx.fillStyle = `rgb(${key})`; ctx.beginPath(); for (let q = 0; q < list.length; q += 4) ctx.rect(list[q], list[q + 1], list[q + 2], list[q + 3]); ctx.fill(); }
+    for (const [x, y] of reds) { ctx.fillStyle = css(CP.red, 0.25); ctx.beginPath(); ctx.arc(x, y, 5, 0, TAU); ctx.fill(); ctx.fillStyle = css([255, 140, 140]); ctx.beginPath(); ctx.arc(x, y, 1.6, 0, TAU); ctx.fill(); }
+    for (const [kind, x, y, w, c, sh, c2] of tubes) {
+      if (kind === "crown") { ctx.beginPath(); ctx.moveTo(x + w * 0.06, y + w * 0.08); ctx.lineTo(x + w * 0.94, y + w * 0.08); ctx.moveTo(x + w * 0.06, y + w * 0.2); ctx.lineTo(x + w * 0.94, y + w * 0.2); neonTube(ctx, c, Math.max(1.2, w * 0.025)); continue; }
+      ctx.fillStyle = css([18, 10, 32]); ctx.fillRect(x, y, w, sh);
+      ctx.beginPath(); ctx.rect(x + 2, y + 2, w - 4, sh - 4); neonTube(ctx, c, Math.max(1, w * 0.04));
+      ctx.beginPath(); for (let q = 0, n = Math.max(2, Math.floor(sh / (w * 0.9))); q < n; q++) { const gy = y + w * 0.25 + q * w * 0.9, gw = w * 0.5; ctx.moveTo(x + w * 0.25, gy); ctx.lineTo(x + w * 0.25 + gw, gy); ctx.moveTo(x + w * 0.5, gy); ctx.lineTo(x + w * 0.5, gy + w * 0.5); }
+      neonTube(ctx, c2 === c ? CP.cream : c2, Math.max(0.8, w * 0.03));
+    }
+  });
+}
+/**
+ * A neon sign up on its pole, as a motel or a bar by the road has one: a rounded frame of tube in one
+ * colour with an arrow off its side, a word in looping script tube in another, a line of small letters
+ * under it. (x, y): its middle; s: its width; a: how strongly it shows.
+ */
+function cpSign(ctx, x, y, s, a, k) {
+  const h = s * 0.42, c1 = CP_NEON[1 + Math.floor(rand(k) * 3)], c2 = CP.pink, lw = Math.max(1.5, s * 0.012);
+  ctx.save(); ctx.globalAlpha = a;
+  ctx.fillStyle = css([14, 12, 30]); ctx.fillRect(x - s * 0.025, y + h * 0.5, s * 0.05, s * 1.6);
+  ctx.beginPath(); rounded(ctx, x - s / 2, y - h / 2, s, h, h * 0.18); ctx.fill();
+  ctx.beginPath(); rounded(ctx, x - s / 2 + lw * 2, y - h / 2 + lw * 2, s - lw * 4, h - lw * 4, h * 0.15);
+  ctx.moveTo(x + s / 2, y + h * 0.12); ctx.lineTo(x + s * 0.64, y + h * 0.12); ctx.moveTo(x + s * 0.64, y + h * 0.12); ctx.lineTo(x + s * 0.59, y + h * 0.02); ctx.moveTo(x + s * 0.64, y + h * 0.12); ctx.lineTo(x + s * 0.59, y + h * 0.22);
+  neonTube(ctx, c1, lw);
+  const sx = x - s * 0.36, sw = s * 0.72, base = y + h * 0.08, xh = h * 0.22, n = 5 + Math.floor(rand(k + 1) * 3), step = sw / n;   // the word: a row of looped letters joined up
+  ctx.beginPath(); ctx.moveTo(sx, base);
+  for (let i = 0; i < n; i++) {
+    const px = sx + i * step, nx = px + step, kind = Math.floor(rand(k + i * 2.3 + 2) * 3);
+    if (kind === 0) { ctx.bezierCurveTo(px + step * 0.9, base - xh * 1.4, px + step * 0.1, base - xh * 2.6, px + step * 0.55, base); ctx.quadraticCurveTo(px + step * 0.8, base + xh * 0.3, nx, base); }
+    else if (kind === 1) { ctx.quadraticCurveTo(px + step * 0.25, base - xh * 1.2, px + step * 0.5, base); ctx.quadraticCurveTo(px + step * 0.75, base - xh * 1.2, nx, base); }
+    else { ctx.bezierCurveTo(px + step * 0.9, base - xh * 0.6, px + step * 0.4, base - xh * 1.4, px + step * 0.3, base - xh * 0.4); ctx.quadraticCurveTo(px + step * 0.4, base + xh * 0.3, nx, base); }
+  }
+  ctx.quadraticCurveTo(sx + sw * 0.7, base + xh * 0.9, sx + sw * 0.08, base + xh * 0.6);   // and a swash back under it
+  neonTube(ctx, c2, lw * 1.3);
+  ctx.beginPath(); for (let i = 0; i < 7; i++) { const lx = x - s * 0.3 + i * s * 0.088; ctx.moveTo(lx, y + h * 0.3); ctx.lineTo(lx + s * 0.05, y + h * 0.3); }
+  neonTube(ctx, [120, 160, 255], lw * 0.7);
+  ctx.restore();
+}
+/**
+ * A palm: a trunk curving up from its foot (x, base), ringed, and a crown of fronds arching and drooping,
+ * each a long blade notched along its lower edge, dark, the side to the sky lit. s: its height; lean: the
+ * way it bends (−1 to 1).
+ */
+function cpPalm(ctx, x, base, s, lean, d, k) {
+  const dk = mix([8, 28, 32], [24, 22, 52], d), lt = mix([34, 100, 84], [86, 66, 124], d), tk = mix([20, 22, 40], [40, 30, 60], d);
+  const tx = x + lean * s * 0.22, ty = base - s, cx1 = x + lean * s * 0.02, cy1 = base - s * 0.5;
+  const P = (t) => [(1 - t) ** 2 * x + 2 * (1 - t) * t * cx1 + t * t * tx, (1 - t) ** 2 * base + 2 * (1 - t) * t * cy1 + t * t * ty], wd = (t) => s * (0.026 - 0.012 * t);
+  const Lf = [], Rt = [];
+  for (let i = 0; i <= 12; i++) { const t = i / 12, [px, py] = P(t), [qx, qy] = P(Math.min(1, t + 0.01)), dx = qx - px, dy = qy - py, n = Math.hypot(dx, dy) || 1, w = wd(t); Lf.push([px - (dy / n) * w, py + (dx / n) * w]); Rt.push([px + (dy / n) * w, py - (dx / n) * w]); }
+  ctx.fillStyle = css(tk); shapeOf(ctx, [...Lf, ...Rt.reverse()]); ctx.fill();
+  ctx.strokeStyle = css(mix(tk, lt, 0.45)); ctx.lineWidth = Math.max(1, s * 0.004); ctx.beginPath();
+  for (let i = 1; i < 32; i++) { const t = i / 32, [px, py] = P(t), w = wd(t); ctx.moveTo(px - w, py); ctx.lineTo(px + w * 0.6, py + w * 0.3); }
+  ctx.stroke();
+  for (let i = 0, n = 10; i < n; i++) {
+    const ang = Math.PI * (-1.12 + 1.24 * ((i + rand(k + i) * 0.6) / n)), len = s * (0.24 + rand(k + i * 2.1 + 1) * 0.14), droop = len * (0.3 + rand(k + i * 3.3 + 2) * 0.4), up = [], dn = [], sp = [];
+    for (let j = 0; j <= 14; j++) {
+      const t = j / 14, px = tx + Math.cos(ang) * len * t, py = ty + Math.sin(ang) * len * t + droop * t * t, ddx = Math.cos(ang) * len, ddy = Math.sin(ang) * len + 2 * droop * t, nn = Math.hypot(ddx, ddy) || 1;
+      let nx = -ddy / nn, ny = ddx / nn;
+      if (ny > 0) { nx = -nx; ny = -ny; }   // the side toward the sky
+      const w = len * 0.08 * Math.sin(Math.PI * Math.min(1, t * 1.1 + 0.02));
+      sp.push([px, py]); up.push([px + nx * w, py + ny * w]); dn.push([px - nx * w * (j % 2 ? 1.3 : 0.35), py - ny * w * (j % 2 ? 1.3 : 0.35)]);
+    }
+    ctx.fillStyle = css(dk); shapeOf(ctx, [...up, ...dn.reverse()]); ctx.fill();
+    ctx.fillStyle = css(lt); shapeOf(ctx, [...up, ...sp.reverse()]); ctx.fill();
+  }
+}
+/** The neon the figure is lit by: the channel colour, bright as a tube. */
+const cpRim = (C) => mix(boost(C, 0.7), [255, 255, 255], 0.22);
+/**
+ * The figure painted as a cel and set in the night: the channel graphic itself (or, while it cannot be
+ * drawn, its silhouette) with its tones stepped as cel paint, sunk into the night's blue; a crescent of hard
+ * shadow on the side away from the neon (its own shape moved toward the light leaves it) and a thin rim of
+ * the neon — the channel colour — along the lit side. Painted once on a canvas of its own at `k` canvas
+ * pixels to the unit, its middle at the middle, and kept while the graphic, the size, the colour and the
+ * scale stay the same, so moving it costs a copy. Returns { c, hw, hh } (its half size in units).
+ */
+function cpFigureImage(env, S, size, C, k) {
+  const b = S.box, kk = size / Math.max(1, b.y1 - b.y0), hw = ((b.x1 - b.x0) / 2) * kk + 8, hh = size / 2 + 8, lx = 0.8, ly = -0.6;
+  const key = [current.id, JSON.stringify(env.graphic && env.graphic.ref), size.toFixed(1), C.map(Math.round).join(), k.toFixed(4)].join("|"), kept = WORK.cpFigure;
+  if (kept && kept.key === key) return kept;
+  const W = Math.max(1, Math.ceil(2 * hw * k)), H = Math.max(1, Math.ceil(2 * hh * k)), make = (slot) => { const c = WORK[slot] || (WORK[slot] = document.createElement("canvas")); if (c.width !== W || c.height !== H) { c.width = W; c.height = H; } const x = c.getContext("2d", { willReadFrequently: true }); x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = "source-over"; x.clearRect(0, 0, W, H); x.setTransform(k, 0, 0, k, hw * k, hh * k); return x; };
+  const out = WORK.cpFigureCv = document.createElement("canvas"), x = make("cpFig");
+  x.save(); x.scale(kk, kk); x.translate(-(b.x0 + b.x1) / 2, -(b.y0 + b.y1) / 2);
+  const drawn = env.graphic && env.graphic.draw(x);
+  x.restore();
+  if (!drawn) placeShape(x, S, [54, 60, 128], 0, 0, size);
+  const img = x.getImageData(0, 0, W, H); celPixels(img.data, 1); x.putImageData(img, 0, 0);
+  inPixels(x, () => { x.globalCompositeOperation = "multiply"; x.fillStyle = css([150, 154, 226]); x.fillRect(0, 0, W, H); });
+  x.globalCompositeOperation = "destination-in"; placeShape(x, S, [255, 255, 255], 0, 0, size);
+  const edge = (colour, d, alpha) => {   // the shape less itself moved by d along the light: a crescent on one side
+    const r = make("cpRim");
+    placeShape(r, S, colour, 0, 0, size); r.globalCompositeOperation = "destination-out"; placeShape(r, S, [255, 255, 255], d * lx, d * ly, size);
+    inPixels(x, () => { x.globalCompositeOperation = "source-atop"; x.globalAlpha = alpha; x.drawImage(r.canvas, 0, 0); });
+  };
+  edge([12, 12, 44], size * 0.07, 0.6);
+  edge(cpRim(C), -size * 0.014, 1);
+  out.width = W; out.height = H; out.getContext("2d").drawImage(x.canvas, 0, 0);
+  const made = { c: out, hw, hh, key: drawn ? key : null };   // a graphic still loading is tried again next time
+  WORK.cpFigure = made;
+  return made;
+}
+/** Lays the figure (see cpFigureImage) with its middle at (cx, cy), at `a`. */
+function cpFigure(ctx, env, S, cx, cy, size, C, a) {
+  const m = ctx.getTransform(), f = cpFigureImage(env, S, size, C, Math.hypot(m.a, m.b) || 1);
+  ctx.save(); ctx.globalAlpha = a; ctx.imageSmoothingEnabled = true; ctx.drawImage(f.c, cx - f.hw, cy - f.hh, f.hw * 2, f.hh * 2); ctx.restore();
+}
+/** Laser lines across the field: thin beams of hot neon, some broken into runs, each at a height and tilt of its own; `n`, the last by degrees. */
+function cpLasers(ctx, F, n, k0) {
+  const fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh);
+  for (let i = 0; i < Math.ceil(n); i++) {
+    const y = F.y0 + fh * (0.12 + 0.8 * rand(i * 2.3 + k0)), tilt = (rand(i * 3.1 + k0 + 1) - 0.5) * fh * 0.05, c = i % 4 === 2 ? CP.cyan : CP.pink, lw = u * (0.0016 + rand(i * 4.7 + k0 + 2) * 0.003);
+    ctx.beginPath();
+    for (let x = F.x0 - 10 + fw * rand(i * 5.3 + k0 + 3) * 0.3, q = 0; x < F.x1 + 10; q++) {
+      const len = fw * (0.15 + rand(i * 7.1 + q * 1.9 + k0) * 0.6), gap = fw * rand(i * 8.3 + q * 2.7 + k0) * 0.12, x1 = Math.min(F.x1 + 10, x + len);
+      ctx.moveTo(x, y + (tilt * (x - F.x0)) / fw); ctx.lineTo(x1, y + (tilt * (x1 - F.x0)) / fw);
+      x = x1 + gap;
+    }
+    neonTube(ctx, c, lw, clamp(n - i));
+  }
+}
+/**
+ * The picture as a worn videotape plays it, by `a` (0–1): the colour smeared — a red copy laid on a little
+ * to the right, a blue one a little to the left, each only where it brightens —, scanlines, a band near the
+ * foot slid sideways with a spray of white noise along it (the tracking), and a pale line rolling through.
+ */
+function vhsTape(ctx, w, h, a, unit) {
+  if (a <= 0 || !canPaint(ctx)) return;
+  const cv = ctx.canvas, W = cv.width, H = cv.height, k = W / w;
+  if (!fast) for (const [col, dx] of [["#ff0000", (2 + 7 * a) * k], ["#0000ff", -(1 + 4 * a) * k]]) {
+    const x = workLike(ctx, "vhs"); x.setTransform(1, 0, 0, 1, 0, 0); x.drawImage(cv, 0, 0); x.globalCompositeOperation = "multiply"; x.fillStyle = col; x.fillRect(0, 0, W, H);
+    inPixels(ctx, () => { ctx.globalCompositeOperation = "lighten"; ctx.globalAlpha = Math.min(1, 0.4 + a); ctx.drawImage(x.canvas, dx, 0); });
+  }
+  const p = Math.max(2, Math.round(3 * k)), key = `vhsLines|${p}`;
+  let t = WORK[key];
+  if (!t) { t = WORK[key] = document.createElement("canvas"); t.width = 4; t.height = p; const g = t.getContext("2d"); g.fillStyle = "#000"; g.fillRect(0, 0, 4, Math.max(1, Math.round(p / 3))); }
+  inPixels(ctx, () => { ctx.globalAlpha = 0.3 * a; ctx.fillStyle = ctx.createPattern(t, "repeat"); ctx.fillRect(0, 0, W, H); });
+  const bh = Math.max(2, Math.round(H * (0.006 + 0.02 * a))), by = H - bh - Math.round(H * 0.006);   // the head-switching noise along the foot
+  if (by + bh < H) {
+    const band = WORK.vhsBand || (WORK.vhsBand = document.createElement("canvas"));
+    if (band.width !== W || band.height !== bh) { band.width = W; band.height = bh; }
+    const bg = band.getContext("2d"); bg.globalCompositeOperation = "copy"; bg.drawImage(cv, 0, by, W, bh, 0, 0, W, bh);
+    inPixels(ctx, () => {
+      ctx.drawImage(band, (4 + 30 * a) * k, by);
+      ctx.fillStyle = css([255, 255, 255], 0.55 * a);
+      for (let i = 0, n = Math.round(30 + 160 * a); i < n; i++) ctx.fillRect(rand(i * 1.7 + 682) * W, by + rand(i * 2.3 + 683) * bh, (2 + rand(i * 3.1 + 684) * 16) * k, Math.max(1, k));
+    });
+  }
+  const ry = H * rand(685), rg = ctx.createLinearGradient(0, ry - 24 * k, 0, ry + 24 * k);
+  rg.addColorStop(0, "rgba(255,255,255,0)"); rg.addColorStop(0.5, css([255, 255, 255], 0.07 * a)); rg.addColorStop(1, "rgba(255,255,255,0)");
+  inPixels(ctx, () => { ctx.fillStyle = rg; ctx.fillRect(0, ry - 24 * k, W, 48 * k); });
+}
+/** For each lightness 0–255, the stepped lightness of cel paint: four flat tones, the steps a little soft so their edges do not crawl. */
+const CEL_STEPS = (() => {
+  const out = new Float32Array(256), th = [0.2, 0.42, 0.68], lv = [0.07, 0.27, 0.53, 0.88];
+  for (let i = 0; i < 256; i++) { const t = i / 255; let v = lv[0]; th.forEach((s, j) => { const e = clamp((t - s + 0.025) / 0.05); v += (lv[j + 1] - lv[j]) * e * e * (3 - 2 * e); }); out[i] = v; }
+  return out;
+})();
+/** RGBA pixels painted as a cel, mixed in by a: the lightness stepped, the hue kept and made a little stronger, the shadows sunk toward a night teal, the lights warmed. */
+function celPixels(d, a) {
+  for (let i = 0, n = d.length; i < n; i += 4) {
+    if (!d[i + 3]) continue;
+    const r = d[i], g = d[i + 1], b = d[i + 2], l = (r * 54 + g * 183 + b * 19) >> 8, q = CEL_STEPS[l], s = Math.min(3, (q * 255 + 1) / (l + 1));
+    let R = r * s, G = g * s, B = b * s;
+    const m = (R + G + B) / 3, sh = clamp((0.5 - q) / 0.45) * 0.55, hi = clamp((q - 0.62) / 0.3) * 0.3;
+    R = m + (R - m) * 1.25; G = m + (G - m) * 1.25; B = m + (B - m) * 1.25;
+    R += (22 - R) * sh + (255 - R) * hi; G += (52 - G) * sh + (232 - G) * hi; B += (92 - B) * sh + (236 - B) * hi;
+    d[i] = r + (R - r) * a; d[i + 1] = g + (G - g) * a; d[i + 2] = b + (B - b) * a;
+  }
+}
+const citypop = {
+  id: "citypop",
+  repaint: (c) => `a night scene from a late-1980s anime OVA made from the photograph: hand-painted cel animation, a deep navy or violet night sky with cel-shaded clouds, city lights and neon signs, hard-edged two-tone shading with teal shadows, slightly faded VHS colour, with ${c} as an accent; still the same place, no text.`,
+  about: { zh: "都市夜曲：八九十年代 OVA 动画录像带里的城市夜色——深海军蓝的夜空（或暮紫的黄昏），赛璐珞手法画的云，一层层楼群亮着窗灯、楼顶闪着红色航空灯，霓虹灯管和路边的霓虹招牌，棕榈树，黑色水面里倒映的灯火；频道图形画成赛璐珞人物：硬边阴影加一道霓虹轮廓光；可加星空、激光线，以及录像带的色彩拖影、扫描线和跟踪噪点。复古、浪漫、城市流行乐的味道——适合音乐、夜生活、城市、情感、复古与动画内容。照片会被画成赛璐珞的几层平涂。只有夜色底。", en: "City pop night: the city by night on the anime videotapes of the late 80s and early 90s — a deep navy night (or a violet dusk), clouds painted as cels, rows of towers with their windows lit and red lights winking on their tops, neon tubes and a neon sign by the road, palms, the lights doubled in black water; the channel graphic as a figure painted on a cel, a hard shadow and a rim of neon; stars, laser lines, and the colour smear, scanlines and tracking noise of the tape if you like. Retro, romantic, city-pop — for music, nightlife, cities, feelings, retro and animation. A photo is painted in a few flat cel tones. Night ground only." },
+  name: { zh: "都市夜曲", en: "City pop night" },
+  oneTheme: true,
+  seeded: true,
+  scene: { figure: { zh: "赛璐珞人物", en: "Cel figure" }, sign: { zh: "霓虹招牌", en: "Neon sign" }, palms: { zh: "棕榈", en: "Palms" }, clouds: { zh: "夜云", en: "Night clouds" } },
+  params: [
+    { key: "figure", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "赛璐珞人物", en: "Cel figure" } },
+    { key: "dusk", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "暮色", en: "Dusk" } },
+    { key: "clouds", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "夜云", en: "Night clouds" } },
+    { key: "stars", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "星空", en: "Stars" } },
+    { key: "skyline", min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "楼群", en: "Skyline" } },
+    { key: "lights", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "窗灯", en: "Lit windows" } },
+    { key: "neon", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "霓虹灯牌", en: "Neon" } },
+    { key: "palms", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "棕榈", en: "Palms" } },
+    { key: "water", min: 0, max: 1, step: 0.05, def: 0.25, name: { zh: "水面倒影", en: "Water" } },
+    { key: "laser", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "激光线", en: "Laser lines" } },
+    { key: "vhs", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "录像带", en: "Videotape" } },
+    { key: "grain", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "胶片颗粒", en: "Film grain" } },
+    { key: "cel", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.85, name: { zh: "照片赛璐珞化", en: "Photo as cels" } },
+  ],
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
+  theme: (base, C, p) => ({ ...base, field: css(cpSky((p && p.dusk) || 0)[1]), text: css(CP.cream), dim: css(CP.cream, 0.6), titleFill: css(CP.cream), titleInk: css(CP.line), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The sky, its stars and clouds, the city (painted once and kept until one of their sliders changes);
+   * then the sign, the palms, the water mirroring all of it, the figure in front, the lasers. A photo is
+   * painted as cels; filling the canvas, it gets the lasers too.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), d = p.dusk, sky = cpSky(d);
+    if (env.photo) {
+      env.drawPhoto(0, p.cel > 0 ? { key: `cel|${p.cel}`, fn: (d) => celPixels(d, p.cel) } : null);   // the photo itself painted as cels (see drawPhotoAt), not the canvas read back
+      if (L.fill) cpLasers(ctx, { x0: 0, y0: 0, x1: w, y1: h }, p.laser * 8, 2700);
+      return true;
+    }
+    const water = F.y1 - fh * 0.32 * p.water, top = water - fh * (0.12 + 0.5 * p.skyline);
+    const cloudMove = L.grid && p.clouds > 0 ? objAt("clouds", F.x0 + fw * 0.5, F.y0 + fh * 0.3, ctx).map((v, i) => v - [F.x0 + fw * 0.5, F.y0 + fh * 0.3][i]) : [0, 0];   // a scene object: the clouds move as one
+    const paintSky = (x) => {
+      const g = x.createLinearGradient(0, F.y0, 0, water); g.addColorStop(0, css(sky[0])); g.addColorStop(0.55, css(sky[1])); g.addColorStop(1, css(sky[2]));
+      x.fillStyle = g; x.fillRect(0, 0, w, h);
+      if (!L.grid) return;
+      if (p.stars > 0) cpStars(x, F, water, p.stars * 360, d, 2710);
+      if (p.clouds > 0) {   // banks of cloud, the far (lower, smaller) ones first
+        const n = p.clouds * 10, banks = [];
+        for (let k = 0; k < Math.ceil(n); k++) { const a = clamp(n - k), t = rand(k * 2.3 + 2720) ** 1.3, s = 1 - 0.55 * t; banks.push([F.x0 + fw * rand(k * 3.1 + 2721), F.y0 + (water - F.y0) * (0.05 + 0.8 * t), fw * (0.2 + rand(k * 4.7 + 2722) * 0.35) * s * (0.4 + 0.6 * a), fh * (0.05 + rand(k * 5.3 + 2723) * 0.04) * s * (0.4 + 0.6 * a), 2724 + k * 31]); }
+        x.save(); x.translate(cloudMove[0], cloudMove[1]);
+        for (const [cx, cy, len, th, k] of banks.sort((a, b) => b[1] - a[1])) cpCloud(x, cx, cy, len, th, d, k);
+        x.restore();
+      }
+      if (p.skyline > 0) cpCity(x, F, top, water, p.lights, p.neon, d, 2760);
+    };
+    const kept = canPaint(ctx) && keptLayer(ctx, "cpSky", [seed, L.grid ? 1 : 0, w, h, F.x0, F.y0, F.x1, F.y1, d, p.stars, p.clouds, p.skyline, p.lights, p.neon, p.water, cloudMove.map((v) => v.toFixed(2)).join()].join("|"), paintSky);
+    if (kept) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(kept, 0, 0); ctx.restore(); } else paintSky(ctx);
+    if (!L.grid) return true;
+    if (p.neon > 0) { const [sx, sy] = objAt("sign", F.x0 + fw * 0.86, F.y0 + fh * 0.22, ctx); cpSign(ctx, sx, sy, u * (0.16 + 0.14 * p.neon), clamp(p.neon * 2.5), 2780); }   // a scene object
+    if (p.palms > 0) {   // a scene object: up to three palms, each growing in turn
+      const n = p.palms * 3, set = [[F.x0 + fw * 0.05, 1.05, 0.5], [F.x1 - fw * 0.05, 0.95, -0.6], [F.x0 + fw * 0.2, 0.62, 0.3]];
+      ctx.save(); shift("palms", F.x0 + fw * 0.05, F.y1 - fh * 0.5, ctx);
+      for (let k = 0; k < Math.ceil(n); k++) { const [px, s, lean] = set[k]; cpPalm(ctx, px, F.y1 + 6, fh * s * (0.3 + 0.7 * clamp(n - k)), lean, d, 2790 + k * 17); }
+      ctx.restore();
+    }
+    if (p.water > 0) {
+      reflectBelow(ctx, 0, w, water, F.y1 + 2, mix([6, 10, 34], [34, 24, 70], d), 0.3, 0.75, 2800);
+      ctx.save(); ctx.globalAlpha = Math.min(1, p.water * 3);   // glints across the water: the lights' reflections caught on the ripples
+      for (let i = 0, n = Math.round(10 + 60 * p.water); i < n; i++) { const y = water + (F.y1 - water) * rand(i * 2.1 + 2810) ** 1.4, x = F.x0 + fw * rand(i * 3.3 + 2811), l = u * (0.01 + rand(i * 4.1 + 2812) * 0.05); ctx.fillStyle = css(rand(i * 5.7 + 2813) < 0.7 ? CP.warm : CP_NEON[i % 4], 0.7); ctx.fillRect(x, y, l, 1.6); }
+      ctx.fillStyle = css(mix(sky[2], CP.cream, 0.4), 0.5); ctx.fillRect(F.x0, water, fw, 1.5);
+      ctx.restore();
+    }
+    const size = Math.min(fh, fw * 0.9) * (0.35 + 0.5 * p.figure), [cx, cy] = p.figure > 0 ? objAt("figure", F.x0 + fw * 0.6, F.y1 - size * 0.48, ctx) : [0, 0];   // a scene object
+    const S = p.figure > 0 && canPaint(ctx) && graphicShape(env);
+    if (S) {
+      const rim = cpRim(C), g = ctx.createRadialGradient(cx, cy - size * 0.2, 0, cx, cy - size * 0.2, size * 0.8);
+      g.addColorStop(0, css(mix(rim, [120, 60, 220], 0.5), 0.4 * Math.min(1, p.figure * 2))); g.addColorStop(1, css(rim, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+      cpFigure(ctx, env, S, cx, cy, size, C, Math.min(1, p.figure * 5));
+    }
+    if (p.laser > 0) cpLasers(ctx, F, p.laser * 8, 2700);
+    return true;
+  },
+  accent: { fill: (C) => css(mix([14, 14, 44], C, 0.12)), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; for (const [w, a] of [[16, 0.15], [7, 0.4], [3, 1]]) { ctx.strokeStyle = css(CP.pink, a); ctx.lineWidth = w; run(0, 0); } ctx.strokeStyle = css([255, 210, 236]); ctx.lineWidth = 1.2; run(0, 0); } },   // a neon tube along the block's edge
+  /** A title card of the tapes: letters graded from cream to pink, a dark outline (the outline slider), and under them a hard pink step and a deep navy drop (the shadow slider); highlighted words in the channel colour, made bright. */
+  runs(ctx, pass, o) {
+    const fs = o.fs, s = Math.min(2, o.shadowAmt), k = o.strokeAmt, hi = o.hi || mix(boost(o.C || CP.pink, 0.6), [255, 255, 255], 0.2);
+    ctx.lineJoin = "round";
+    if (s > 0) {
+      pass((a, x) => { ctx.fillStyle = css(CP.line); ctx.fillText(a.t, x + fs * 0.075 * s, fs * 0.075 * s); });
+      pass((a, x) => { ctx.fillStyle = css(a.hi ? CP.cyan : CP.pink); ctx.fillText(a.t, x + fs * 0.038 * s, fs * 0.038 * s); });
+    }
+    if (k > 0) pass((a, x) => { ctx.strokeStyle = css(CP.line); ctx.lineWidth = fs * 0.1 * k; ctx.strokeText(a.t, x, 0); });
+    let grad = null;
+    if (!o.fill) { grad = ctx.createLinearGradient(0, -fs * 0.72, 0, fs * 0.05); grad.addColorStop(0, css(CP.cream)); grad.addColorStop(0.55, css([255, 234, 238])); grad.addColorStop(1, css([255, 164, 208])); }
+    pass((a, x) => { ctx.fillStyle = a.hi ? css(hi) : grad || css(o.fill); ctx.fillText(a.t, x, 0); });
+  },
+  // the small parts' ink (the channel name on the dark block, the brand row) turns cream; objects go into the night's flat tones
+  wrap: (ctx, C, p, plates) => mapped(ctx, plates ? { fill: { ink: CP.cream }, stroke: { ink: CP.cream } } : { fill: { ink: CP.line, light: CP.cream, mid: [172, 180, 214], dark: [46, 52, 100], colour: (c) => mix(boost(c, 0.3), [60, 40, 120], 0.15) }, stroke: { ink: CP.line, light: CP.cream }, line: 0.8 }),
+  sticker: painters({ line: CP.line, lineScale: 0.7, tone: inkAs(CP.line, (c) => mix(boost(c, 0.3), [60, 40, 120], 0.15)), shadow(ctx, draw) { ctx.save(); ctx.translate(6, 7); draw(css(CP.line, 0.85)); ctx.restore(); } }),
+  /** The corner tag: cream capitals in a rounded frame of cyan neon tube. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.6;
+    ctx.font = `700 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + f * 1.4, h = f * 1.55, top = y + (fs * 1.34 - h);
+    ctx.beginPath(); rounded(ctx, x, top, w, h, h * 0.22); neonTube(ctx, CP.cyan, 3);
+    ctx.fillStyle = ink || css(CP.cream); spaced(ctx, str, x + f * 0.7, top + h * 0.5 + f * 0.36, 3);
+    return { x: x - 10, y: top - 10, w: w + 20, h: h + 20 };
+  },
+  /** The frame layer: the rounded corners of a television screen, and the tape's play display. */
+  frame(ctx, env) {
+    const { w, h } = env, r = 40, t = 1800 + Math.floor(rand(690) * 5200) + env.o.catIndex * 97;
+    ctx.fillStyle = "#000000";
+    for (const [x, y, sx, sy] of [[0, 0, 1, 1], [w, 0, -1, 1], [w, h, -1, -1], [0, h, 1, -1]]) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + sx * r, y); ctx.arcTo(x, y, x, y + sy * r, r); ctx.lineTo(x, y); ctx.fill(); }
+    ctx.font = `600 18px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(CP.cream, 0.8);
+    ctx.fillText(`▶ PLAY   SP ${Math.floor(t / 3600)}:${pad2(Math.floor(t / 60) % 60)}:${pad2(t % 60)}`, w - 64, h - 44);
+  },
+  image(ctx, C, unit) { ctx.shadowColor = css(CP.line, 0.75); ctx.shadowBlur = 0; ctx.shadowOffsetX = 6 * unit; ctx.shadowOffsetY = 6 * unit; },
+  post(ctx, w, h, C, p, unit = 1) { vhsTape(ctx, w, h, p.vhs, unit); grain(ctx, p.grain * 0.8, unit); vignette(ctx, w, h, [6, 4, 22], 0.5, 0.45); },
+  prompt: `Animation cels from a late-1980s anime about the city at night — romantic, a little wistful — that read at a glance:
+- one clear object per sticker (a cassette, a Walkman, a sports car, a payphone, a neon cocktail glass, a palm tree, a microphone, sunglasses, a vinyl record), with a strong silhouette; no realism, no fine detail;
+- flat cel paint in two tones: each shape one flat colour with one hard-edged shadow shape in a darker, bluer tone of it ("shadow": false); colours are night colours — navy, violet, teal — with one neon pink or cyan;
+- the app adds a dark navy line and a hard offset shadow: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Things from a city at night in a late-1980s anime, built as simple models from a few boxes and cylinders — a payphone, a jukebox, a vending machine, a sports car, a neon sign; no realism, no fine detail.
+- the renderer paints faces in flat cel tones with a dark navy line: do NOT try to draw shading or outlines yourself;
+- "white" is cream, "dark" a deep navy, and "main" the channel colour as night shows it — use it for one to three parts.`,
+};
+
+// ====================================================================== constructivist: the poster as a machine
+// The Soviet avant-garde as illustrators take it up today: cream paper gone a little brown; a machine (the
+// channel graphic) built again out of rectangles of grey, black, bare paper and one red; great diagonal
+// wedges, a disc, rays fanning from a vanishing point, a steel truss, bars and blocks, construction lines
+// and dot grids, small type set as furniture; the lower part doubled in still water. Flat, hard-edged.
+const CN = { paper: [232, 223, 202], light: [244, 238, 224], night: [26, 25, 24], ink: [24, 23, 23], red: [204, 52, 38], greys: [[208, 204, 194], [164, 162, 156], [120, 120, 118], [80, 80, 82]] };
+const cnGround = () => (dark ? CN.night : CN.paper), cnInk = () => (dark ? CN.paper : CN.ink);
+/** The greys a photo or a layer is pressed into, by lightness (see toneTable). */
+const CN_TONES = [[0, CN.ink], [0.3, CN.greys[3]], [0.5, CN.greys[2]], [0.68, CN.greys[1]], [0.84, CN.greys[0]], [1, CN.light]];
+/** RGBA pixels mapped by lightness through `lut` (see toneTable), mixed in by a; alpha kept. */
+function lutPixels(d, lut, a) {
+  for (let i = 0, n = d.length; i < n; i += 4) {
+    const j = ((d[i] * 54 + d[i + 1] * 183 + d[i + 2] * 19) >> 8) * 3;
+    d[i] += (lut[j] - d[i]) * a; d[i + 1] += (lut[j + 1] - d[i + 1]) * a; d[i + 2] += (lut[j + 2] - d[i + 2]) * a;
+  }
+}
+/** The one colour: the poster red, turned by degrees (the Channel colour slider) to the channel's, made strong enough to print. */
+const cnRed = (C, p = values) => mix(CN.red, boost(C || CN.red, 0.4), clamp((p && p.chan) || 0));
+/** Smooth value noise (0–1) over the plane, a cell to the unit: tones that stay put as the blocks are cut finer. */
+function cnNoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy), v = (i, j) => rand(i * 57.13 + j * 113.71 + 5000);
+  const a = v(xi, yi) + (v(xi + 1, yi) - v(xi, yi)) * sx, b = v(xi, yi + 1) + (v(xi + 1, yi + 1) - v(xi, yi + 1)) * sx;
+  return a + (b - a) * sy;
+}
+/**
+ * Cells joined into rectangles: every cell ok(i, j) allows, scanned row by row, starts a block that grows
+ * to the right and then down — to a width and height of its own, at most mw × mh cells — while the cells
+ * it takes are allowed, free and same(i, j, a, b) as its first. Returns [[i, j, w, h], …].
+ */
+function joinCells(cols, rows, ok, same, mw, mh, k0) {
+  const used = new Uint8Array(cols * rows), out = [];
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    if (used[j * cols + i] || !ok(i, j)) continue;
+    const tw = 1 + Math.floor(rand(i * 1.31 + j * 2.17 + k0) * mw), th = 1 + Math.floor(rand(i * 2.71 + j * 1.13 + k0 + 1) * mh), fits = (a, b) => a < cols && b < rows && !used[b * cols + a] && ok(a, b) && same(i, j, a, b);
+    let bw = 1, bh = 1;
+    while (bw < tw && fits(i + bw, j)) bw++;
+    grow: while (bh < th) { for (let q = 0; q < bw; q++) if (!fits(i + q, j + bh)) break grow; bh++; }
+    for (let b = 0; b < bh; b++) for (let q = 0; q < bw; q++) used[(j + b) * cols + i + q] = 1;
+    out.push([i, j, bw, bh]);
+  }
+  return out;
+}
+/**
+ * The machine, built of blocks: the shape — cov(i, j), how much of a cell it covers (0–255) — over a grid
+ * of `cell` units from (x0, y0), joined into rectangles, each one flat tone: greys by a smooth field and a
+ * light from the upper left, so neighbours agree; one in ten in ink, one in twelve bare paper, one in
+ * eighteen red; some with a hairline round them, a row of slots or a rivet. Masts with yards rise from
+ * the highest columns.
+ */
+function cnMachine(ctx, x0, y0, cols, rows, cell, cov, red, k0) {
+  const blocks = joinCells(cols, rows, (i, j) => cov(i, j) > 110, () => true, 4, 6, k0), W = cols * cell, H = rows * cell, ink = cnInk(), fills = new Map(), lines = [], slots = [], dots = [];
+  const put = (c, r) => { const key = c.map(Math.round).join(); (fills.get(key) || fills.set(key, []).get(key)).push(r); };
+  for (const [i, j, bw, bh] of blocks) {
+    const x = x0 + i * cell, y = y0 + j * cell, w = bw * cell, h = bh * cell, cx = x + w / 2, cy = y + h / 2, r = rand(i * 3.7 + j * 5.3 + k0 + 2);
+    const v = 0.55 * cnNoise((cx - x0) / (W * 0.16), (cy - y0) / (W * 0.16)) + 0.45 * (0.5 * (cx - x0) / W + 0.5 * (cy - y0) / H);
+    put(r < 0.055 ? red : r < 0.155 ? ink : r < 0.235 ? CN.light : CN.greys[Math.min(3, Math.floor(v * 4.4))], [x, y, w + 0.6, h + 0.6]);
+    if (rand(i * 6.1 + j * 2.9 + k0 + 3) < 0.3) lines.push([x, y, w, h]);
+    if (bw * bh >= 3 && rand(i * 4.3 + j * 7.1 + k0 + 4) < 0.28) slots.push([x, y, w, h]);
+    else if (rand(i * 8.9 + j * 3.3 + k0 + 5) < 0.08) dots.push([cx, cy, Math.min(w, h) * 0.28]);
+  }
+  for (const [key, list] of fills) { ctx.fillStyle = `rgb(${key})`; ctx.beginPath(); for (const [x, y, w, h] of list) ctx.rect(x, y, w, h); ctx.fill(); }
+  ctx.fillStyle = css(mix(CN.ink, CN.greys[3], 0.3)); ctx.beginPath();
+  for (const [x, y, w, h] of slots) { const n = Math.max(2, Math.round(w / (cell * 0.6))); for (let q = 0; q < n; q++) ctx.rect(x + (q + 0.25) * (w / n), y + h * 0.3, (w / n) * 0.5, Math.min(h * 0.25, cell * 0.3)); }
+  ctx.fill();
+  ctx.fillStyle = css(cnGround()); ctx.beginPath(); for (const [x, y, r] of dots) { ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, TAU); } ctx.fill();
+  ctx.strokeStyle = css(ink, 0.55); ctx.lineWidth = Math.max(0.8, cell * 0.05); ctx.beginPath(); for (const [x, y, w, h] of lines) ctx.rect(x, y, w, h); ctx.stroke();
+  const tops = [];
+  for (let i = 0; i < cols; i++) { let j = 0; while (j < rows && cov(i, j) <= 110) j++; if (j < rows) tops.push([i, j]); }
+  tops.sort((a, b) => a[1] - b[1]);
+  const masts = [];
+  for (const t of tops) { if (masts.length >= 3) break; if (masts.every((m) => Math.abs(m[0] - t[0]) > cols * 0.12)) masts.push(t); }
+  ctx.strokeStyle = css(ink); ctx.fillStyle = css(ink); ctx.lineCap = "butt";
+  for (const [i, j] of masts) {
+    const x = x0 + (i + 0.5) * cell, y = y0 + j * cell, mh = H * (0.1 + rand(i * 2.3 + k0 + 9) * 0.12);
+    ctx.lineWidth = Math.max(1, cell * 0.14); ctx.beginPath(); ctx.moveTo(x, y + 1); ctx.lineTo(x, y - mh);
+    for (const f of [0.4, 0.7]) { const yw = W * 0.035 * (1.3 - f); ctx.moveTo(x - yw, y - mh * f); ctx.lineTo(x + yw, y - mh * f); }
+    ctx.stroke(); ctx.fillRect(x - cell * 0.3, y - mh * 0.9, cell * 0.6, cell * 0.45);
+  }
+}
+/** Without a graphic, a ship seen side on, in tiers: the hull, decks stepping in, the bridge, a funnel, two turrets — as cov() for cnMachine over cols × rows. */
+const cnShip = (cols, rows) => (i, j) => {
+  const u = (i + 0.5) / cols, v = (j + 0.5) / rows;
+  const hull = v > 0.7 && v < 0.95 && Math.abs(u - 0.5) < 0.44 - (v - 0.7) * (u > 0.5 ? 0.9 : 0.3);
+  const tiers = (v > 0.55 && Math.abs(u - 0.46) < 0.26) || (v > 0.4 && Math.abs(u - 0.44) < 0.16) || (v > 0.26 && Math.abs(u - 0.43) < 0.08) || (v > 0.34 && Math.abs(u - 0.6) < 0.035);
+  const turrets = v > 0.6 && v < 0.7 && (Math.abs(u - 0.17) < 0.05 || Math.abs(u - 0.76) < 0.05);
+  return hull || tiers || turrets ? 255 : 0;
+};
+/** Rays fanning out from (vx, vy) past the edges: long thin wedges of grey, ink and red, set round by the golden angle so each new one falls in a gap; `n`, the last by degrees. */
+function cnRays(ctx, F, vx, vy, n, red, k0) {
+  const R = Math.hypot(F.x1 - F.x0, F.y1 - F.y0) * 1.5, cols = [CN.greys[0], cnInk(), CN.greys[1], red, CN.greys[2], CN.greys[0], cnInk()];
+  for (let i = 0; i < Math.ceil(n); i++) {
+    const a = TAU * ((i * 0.381966 + rand(k0)) % 1), half = (0.018 + rand(i * 2.3 + k0 + 1) * 0.05) * (0.3 + 0.7 * clamp(n - i));
+    ctx.fillStyle = css(cols[i % cols.length]); shapeOf(ctx, [[vx, vy], [vx + Math.cos(a - half) * R, vy + Math.sin(a - half) * R], [vx + Math.cos(a + half) * R, vy + Math.sin(a + half) * R]]); ctx.fill();
+  }
+}
+/**
+ * The great diagonal forms, in fractions of the field: a red wedge rising from a lower corner, a black band
+ * falling across, a grey corner, a thin red band climbing out, a pale wedge, a black one — `n` of them,
+ * each growing out of its corner by degrees; mirrored when `flip`.
+ */
+function cnWedges(ctx, F, n, red, flip) {
+  const fw = F.x1 - F.x0, fh = F.y1 - F.y0, X = (t) => (flip ? F.x1 - fw * t : F.x0 + fw * t), Y = (t) => F.y0 + fh * t, ink = cnInk();
+  const forms = [
+    [red, [-0.02, 1.02], [[-0.02, 1.02], [0.66, 1.02], [-0.02, 0.4]]],
+    [ink, [0.62, -0.02], [[0.56, -0.02], [0.68, -0.02], [0.2, 1.02], [0.08, 1.02]]],
+    [CN.greys[1], [1.02, -0.02], [[1.02, -0.02], [1.02, 0.5], [0.58, -0.02]]],
+    [red, [1.02, 0.18], [[0.3, 1.02], [0.37, 1.02], [1.02, 0.24], [1.02, 0.12]]],
+    [CN.greys[0], [-0.02, -0.02], [[-0.02, -0.02], [0.4, -0.02], [-0.02, 0.24]]],
+    [ink, [1.02, 1.02], [[0.8, 1.02], [1.02, 1.02], [1.02, 0.64]]],
+  ];
+  for (let i = 0; i < Math.min(forms.length, Math.ceil(n)); i++) {
+    const [c, [ax, ay], pts] = forms[i], s = 0.25 + 0.75 * clamp(n - i);
+    ctx.fillStyle = css(c); shapeOf(ctx, pts.map(([x, y]) => [X(ax + (x - ax) * s), Y(ay + (y - ay) * s)])); ctx.fill();
+  }
+}
+/**
+ * A steel truss in perspective, from its near end at xn (d0 deep) to its far end at xf (d1 deep), its middle
+ * on the line y: the chords top and bottom and the zigzag of struts between, each a flat bar in `col` with
+ * a lit edge.
+ */
+function cnTruss(ctx, xn, xf, y, d0, d1, col, lit) {
+  const L = Math.abs(xf - xn), X = (t) => xn + (xf - xn) * t, D = (t) => d0 + (d1 - d0) * t, ts = [0];
+  const bar = (ax, ay, bx, by, w) => {
+    const dx = bx - ax, dy = by - ay, n = Math.hypot(dx, dy) || 1, ox = ((-dy / n) * w) / 2, oy = ((dx / n) * w) / 2;
+    ctx.fillStyle = css(col); shapeOf(ctx, [[ax + ox, ay + oy], [bx + ox, by + oy], [bx - ox, by - oy], [ax - ox, ay - oy]]); ctx.fill();
+    ctx.strokeStyle = css(lit); ctx.lineWidth = Math.max(1, w * 0.25); ctx.beginPath(); ctx.moveTo(ax + ox, ay + oy); ctx.lineTo(bx + ox, by + oy); ctx.stroke();
+  };
+  for (let t = 0; t < 1;) { t = Math.min(1, t + (D(t) * 0.95) / Math.max(1, L)); ts.push(t); }
+  ts.forEach((t, q) => {
+    const x = X(t), w = D(t) * 0.07;
+    bar(x, y - D(t) / 2, x, y + D(t) / 2, w);
+    if (q) { const tp = ts[q - 1], xp = X(tp); if (q % 2) bar(xp, y - D(tp) / 2, x, y + D(t) / 2, w); else bar(xp, y + D(tp) / 2, x, y - D(t) / 2, w); }
+  });
+  bar(X(0), y - D(0) / 2, X(1), y - D(1) / 2, d0 * 0.1); bar(X(0), y + D(0) / 2, X(1), y + D(1) / 2, d0 * 0.1);
+}
+/** Bars and blocks set about the edges of the field: tall bars of ink and of red, squares of grey, stacks of short rules, a block of bare paper with a hairline round it — `n`, the last by degrees, kept off the boxes in `avoid`. */
+function cnBars(ctx, F, n, red, avoid, k0) {
+  const fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), ink = cnInk();
+  ctx.save();
+  for (let i = 0; i < Math.ceil(n); i++) {
+    const kind = i % 5, left = rand(i * 1.9 + k0) < 0.5, x = left ? F.x0 + fw * (0.02 + rand(i * 2.3 + k0 + 1) * 0.28) : F.x1 - fw * (0.04 + rand(i * 2.7 + k0 + 2) * 0.28), y = F.y0 + fh * (0.08 + rand(i * 3.1 + k0 + 3) * 0.8), r = rand(i * 4.3 + k0 + 4);
+    const box = kind === 0 || kind === 3 ? { x, y, w: u * (0.008 + r * 0.018), h: fh * (0.14 + rand(i * 5.1 + k0 + 5) * 0.32) } : kind === 1 ? { x, y, w: u * (0.04 + r * 0.07), h: u * (0.04 + r * 0.07) } : kind === 2 ? { x, y, w: u * (0.05 + r * 0.05), h: u * 0.06 } : { x, y, w: u * (0.08 + r * 0.08), h: u * (0.05 + r * 0.06) };
+    if (avoid.some((b) => overlaps(b, box))) continue;
+    ctx.globalAlpha = clamp(n - i);
+    if (kind === 0) { ctx.fillStyle = css(ink); ctx.fillRect(box.x, box.y, box.w, box.h); }
+    else if (kind === 3) { ctx.fillStyle = css(red); ctx.fillRect(box.x, box.y, box.w * 1.4, box.h * 0.8); }
+    else if (kind === 1) { ctx.fillStyle = css([CN.greys[2], ink, red, CN.greys[1]][Math.floor(r * 4)]); ctx.fillRect(box.x, box.y, box.w, box.h); }
+    else if (kind === 2) { ctx.fillStyle = css(ink); for (let q = 0; q < 4; q++) ctx.fillRect(box.x, box.y + q * box.h * 0.27, box.w * (q % 2 ? 0.7 : 1), box.h * 0.12); }
+    else { ctx.fillStyle = css(CN.light); ctx.fillRect(box.x, box.y, box.w, box.h); ctx.strokeStyle = css(ink); ctx.lineWidth = 1.2; ctx.strokeRect(box.x, box.y, box.w, box.h); }
+  }
+  ctx.restore();
+}
+/** Construction lines: long hairlines through the vanishing point (vx, vy), level ones, arcs about it, dot grids, crosshairs, a line of red — `n`, the last by degrees; the grids and crosshairs kept off `avoid`. */
+function cnLines(ctx, F, vx, vy, n, red, avoid, k0) {
+  const fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), R = Math.hypot(fw, fh), ink = cnInk();
+  ctx.save(); ctx.lineCap = "butt";
+  for (let i = 0; i < Math.ceil(n); i++) {
+    const kind = i % 6, r1 = rand(i * 2.1 + k0), r2 = rand(i * 3.7 + k0 + 1), x = F.x0 + fw * (0.05 + 0.9 * r1), y = F.y0 + fh * (0.08 + 0.84 * r2);
+    ctx.globalAlpha = clamp(n - i); ctx.strokeStyle = css(ink, 0.75); ctx.fillStyle = css(ink); ctx.lineWidth = 1.2;
+    if (kind === 0) { const a = r1 * Math.PI; ctx.beginPath(); ctx.moveTo(vx - Math.cos(a) * R, vy - Math.sin(a) * R); ctx.lineTo(vx + Math.cos(a) * R, vy + Math.sin(a) * R); ctx.stroke(); }
+    else if (kind === 1) { ctx.beginPath(); ctx.moveTo(F.x0, y); ctx.lineTo(F.x1, y); ctx.stroke(); }
+    else if (kind === 2) { const a0 = r2 * TAU; ctx.beginPath(); ctx.arc(vx, vy, u * (0.15 + r1 * 0.4), a0, a0 + Math.PI * (0.5 + r2)); ctx.stroke(); }
+    else if (kind === 3) { const s = u * 0.018, box = { x, y, w: s * 6, h: s * 4 }; if (avoid.some((b) => overlaps(b, box))) continue; ctx.beginPath(); for (let q = 0; q < 24; q++) { const dx = x + (q % 6) * s, dy = y + Math.floor(q / 6) * s; ctx.moveTo(dx + 1.8, dy); ctx.arc(dx, dy, 1.8, 0, TAU); } ctx.fill(); }
+    else if (kind === 4) { const s = u * 0.03, box = { x: x - s, y: y - s, w: s * 2, h: s * 2 }; if (avoid.some((b) => overlaps(b, box))) continue; ctx.beginPath(); ctx.moveTo(x - s, y); ctx.lineTo(x + s, y); ctx.moveTo(x, y - s); ctx.lineTo(x, y + s); ctx.moveTo(x + s * 0.45, y); ctx.arc(x, y, s * 0.45, 0, TAU); ctx.stroke(); }
+    else { ctx.strokeStyle = css(red); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x - fw * 0.3, y + fh * 0.3); ctx.lineTo(x + fw * 0.3, y - fh * 0.3); ctx.stroke(); }
+  }
+  ctx.restore();
+}
+/**
+ * Small type set as furniture, as these posters set it — greeked, not words: a block of lines, a short
+ * thick rule of red over a few lines, bullets of small squares with lines beside them, a column of lines
+ * turned on its side, a slab of ink with paper lines in it, an arrow. `n`, each kept off `avoid`.
+ */
+function cnMarks(ctx, F, n, red, avoid, k0) {
+  const fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), ink = cnInk(), lh = u * 0.016, at = [[0.05, 0.6], [0.44, 0.86], [0.84, 0.08], [0.9, 0.48], [0.3, 0.05], [0.6, 0.07]];
+  ctx.save();
+  for (let i = 0; i < Math.ceil(n); i++) {
+    const [fx, fy] = at[i % at.length], x = F.x0 + fw * (fx + (rand(i * 2.3 + k0) - 0.5) * 0.06), y = F.y0 + fh * (fy + (rand(i * 3.1 + k0 + 1) - 0.5) * 0.06), kind = i % 6, bw = u * 0.2;
+    const box = kind === 3 ? { x, y, w: lh * 4, h: bw } : { x, y, w: bw, h: lh * 6 };
+    if (avoid.some((b) => overlaps(b, box))) continue;
+    ctx.globalAlpha = clamp(n - i);
+    if (kind === 0) greeked(ctx, x, y, bw, 5, lh, css(ink, 0.85), 2900 + i * 13);
+    else if (kind === 1) { ctx.fillStyle = css(red); ctx.fillRect(x, y, bw * 0.35, lh * 0.9); greeked(ctx, x, y + lh * 2, bw * 0.8, 3, lh, css(ink, 0.85), 2910 + i * 13); }
+    else if (kind === 2) { for (let q = 0; q < 3; q++) { ctx.fillStyle = css(q === 0 ? red : ink); ctx.fillRect(x, y + q * lh * 1.8, lh * 0.8, lh * 0.8); greeked(ctx, x + lh * 1.8, y + q * lh * 1.8 + lh * 0.2, bw * 0.6, 1, lh, css(ink, 0.85), 2920 + i * 13 + q); } }
+    else if (kind === 3) { ctx.save(); ctx.translate(x, y + bw); ctx.rotate(-Math.PI / 2); greeked(ctx, 0, 0, bw, 3, lh, css(ink, 0.85), 2930 + i * 13); ctx.restore(); }
+    else if (kind === 4) { ctx.fillStyle = css(ink); ctx.fillRect(x, y, bw * 0.7, lh * 4.4); greeked(ctx, x + lh, y + lh, bw * 0.7 - lh * 2, 3, lh, css(cnGround()), 2940 + i * 13); }
+    else { ctx.fillStyle = css(ink); ctx.fillRect(x, y + lh * 1.2, bw * 0.5, lh * 0.7); shapeOf(ctx, [[x + bw * 0.5, y + lh * 0.2], [x + bw * 0.62, y + lh * 1.55], [x + bw * 0.5, y + lh * 2.9]]); ctx.fill(); }
+  }
+  ctx.restore();
+}
+const construct = {
+  id: "construct",
+  repaint: (c) => `a constructivist poster made from the photograph, in the manner of the Soviet avant-garde of the 1920s: the subject built of flat rectangles of grey, black and cream, bold diagonal wedges, a large red disc, radiating lines and thin construction lines on aged cream paper, ${c} as the one colour; still the same subject, no text.`,
+  about: { zh: "构成主义：二十年代苏联先锋派海报，经今天的插画师重新演绎——微微泛黄的米色旧纸上，频道图形被拆成一块块灰、黑、纸白和一点红的矩形，像机械一样重新拼装起来，顶上竖着桅杆；巨大的斜切楔形、一轮大圆、从灭点放射出去的光线、透视的钢桁架、竖条和色块、细细的构造线和点阵、当作版面装饰的小字；下方可以倒映在平静的水面里。平涂、硬边、只有黑白灰和一种颜色（默认红色，可以换成频道色）。有力量、有秩序、工业感强——适合科技、工业、建筑、历史、军事、城市、设计与观点类内容。照片会被压成几级灰阶。可选米色纸或黑底；自带平直的版式。", en: "Constructivist: the Soviet avant-garde poster of the 1920s as illustrators take it up today — on cream paper gone a little brown, the channel graphic broken into rectangles of grey, black, bare paper and a little red and built again like a machine, masts rising from its top; great diagonal wedges, a disc, rays fanning from a vanishing point, a steel truss in perspective, bars and blocks, hairline construction lines and dot grids, small type set as furniture; the lower part can be doubled in still water. Flat and hard-edged, in black, white, greys and one colour (red, or turned to the channel colour). Strong, ordered, industrial — for technology, industry, architecture, history, the military, cities, design and opinion. A photo is pressed into a few greys. Cream paper or black; flat layouts of its own." },
+  name: { zh: "构成主义", en: "Constructivist" },
+  seeded: true,
+  scene: { machine: { zh: "机械体", en: "Machine" }, circle: { zh: "大圆", en: "Disc" }, rays: { zh: "放射灭点", en: "Centre of the rays" }, truss: { zh: "钢桁架", en: "Steel truss" } },
+  params: [
+    { key: "machine", min: 0, max: 1, step: 0.05, def: 0.65, name: { zh: "机械体", en: "Machine" } },
+    { key: "fragment", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "块面碎度", en: "Finer blocks" } },
+    { key: "wedges", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "斜切楔形", en: "Diagonal wedges" } },
+    { key: "circle", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "大圆", en: "Disc" } },
+    { key: "rays", min: 0, max: 1, step: 0.05, def: 0.15, name: { zh: "放射线", en: "Rays" } },
+    { key: "truss", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "钢桁架", en: "Steel truss" } },
+    { key: "bars", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "竖条色块", en: "Bars and blocks" } },
+    { key: "lines", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "构造线", en: "Construction lines" } },
+    { key: "marks", min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "版面小字", en: "Small type" } },
+    { key: "water", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "水面倒影", en: "Water" } },
+    { key: "paper", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "旧纸", en: "Old paper" } },
+    { key: "chan", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "红色换成频道色", en: "Channel colour for the red" } },
+    { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.9, name: { zh: "照片灰阶", en: "Photo in greys" } },
+  ],
+  titleFont: (f) => `${f.en}, ${f.cn}`,
+  layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
+  theme: (base) => ({ ...base, field: css(cnGround()), text: css(cnInk()), dim: css(cnInk(), 0.6), titleFill: css(cnInk()), titleInk: css(cnGround()), grid: () => "rgba(0,0,0,0)" }),
+  /**
+   * The paper; rays from the vanishing point; the wedges; the disc; the trusses; the machine; the bars; the
+   * water mirroring all that; the construction lines and the small type over it. A photo is pressed into
+   * greys, and when it fills the canvas the wedges and the disc are printed over it, multiplied.
+   */
+  background(ctx, env, L, p) {
+    const { w, h, C } = env, F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), red = cnRed(C, p), flip = rand(3000) > 0.5;
+    const disc = (x) => {
+      if (p.circle <= 0) return;
+      const R = u * (0.08 + 0.26 * p.circle), [dx, dy] = objAt("circle", F.x0 + fw * 0.78, F.y0 + fh * 0.3, x), sd = -1, r2 = R * 0.42 * clamp((p.circle - 0.35) / 0.65), ring = clamp((p.circle - 0.55) / 0.45);   // a scene object
+      x.fillStyle = css(red); x.beginPath(); x.arc(dx, dy, R, 0, TAU); x.fill();
+      if (r2 > 0) { x.fillStyle = css(cnInk()); x.beginPath(); x.arc(dx + sd * R * 0.85, dy + R * 0.75, r2, 0, TAU); x.fill(); }
+      if (ring > 0) { const a0 = rand(3001) * TAU; x.strokeStyle = css(cnInk(), 0.8); x.lineWidth = 1.5; x.beginPath(); x.arc(dx, dy, R * 1.16, a0, a0 + TAU * 0.7 * ring); x.stroke(); }
+    };
+    if (env.photo) {
+      env.drawPhoto(0, p.mono > 0 ? { key: `cnGreys|${p.mono}`, fn: (d) => lutPixels(d, toneTable(CN_TONES, 0.75), p.mono) } : null);   // the photo itself pressed into greys
+      if (L.fill) { ctx.save(); ctx.globalCompositeOperation = "multiply"; cnWedges(ctx, { x0: 0, y0: 0, x1: w, y1: h }, p.wedges * 6, red, flip); disc(ctx); ctx.restore(); }
+      return true;
+    }
+    ctx.fillStyle = css(cnGround()); ctx.fillRect(0, 0, w, h);
+    if (!L.grid) return true;
+    let [vx, vy] = [F.x0 + fw * (flip ? 0.38 : 0.62), F.y0 + fh * 0.48];
+    if (p.rays > 0) { [vx, vy] = objAt("rays", vx, vy, ctx); cnRays(ctx, F, vx, vy, p.rays * 18, red, 3010); }   // a scene object
+    if (p.wedges > 0) cnWedges(ctx, F, p.wedges * 6, red, flip);
+    disc(ctx);
+    if (p.truss > 0) {   // a scene object: a far truss (once the slider is past half way) and a near one, each reaching further as it rises
+      const xn = F.x1 + fw * 0.05, sd = -1, y = F.y0 + fh * 0.2, back = clamp((p.truss - 0.4) / 0.6);
+      ctx.save(); shift("truss", xn + sd * fw * 0.1, y, ctx);
+      if (back > 0) cnTruss(ctx, xn, xn + sd * fw * (0.15 + 0.6 * back), y - fh * 0.08, fh * 0.1, fh * 0.04, CN.greys[0], CN.light);
+      cnTruss(ctx, xn, xn + sd * fw * (0.2 + 0.75 * p.truss), y, fh * 0.2, fh * 0.07, CN.greys[2], CN.greys[0]);
+      ctx.restore();
+    }
+    if (p.machine > 0) {   // a scene object
+      const size = Math.min(fh, fw * 0.9) * (0.35 + 0.6 * p.machine), [cx, cy] = objAt("machine", F.x0 + fw * 0.66, F.y1 - size * 0.5, ctx), cell = size * (0.07 - 0.055 * p.fragment);
+      const x0 = cx - size, y0 = cy - size * 0.62, cols = Math.ceil((size * 2) / cell), rows = Math.ceil((size * 1.24) / cell), S = canPaint(ctx) && graphicShape(env);
+      let cov = null;
+      if (S) { const c = shapeCells(S, cx, cy, size, x0, y0, cols, rows, cell); cov = (i, j) => c[j * cols + i]; }
+      else if (canPaint(ctx)) cov = cnShip(cols, rows);
+      if (cov) { ctx.save(); ctx.globalAlpha = Math.min(1, p.machine * 5); cnMachine(ctx, x0, y0, cols, rows, cell, cov, red, 3020); ctx.restore(); }
+    }
+    const avoid = keepClear(ctx, env);
+    if (p.bars > 0) cnBars(ctx, F, p.bars * 14, red, avoid, 3040);
+    if (p.water > 0) {
+      const wl = F.y1 - fh * 0.32 * p.water;
+      reflectBelow(ctx, 0, w, wl, F.y1 + 2, cnGround(), 0.35, 0.6, 3050);
+      ctx.save(); ctx.fillStyle = css(cnInk(), 0.35);   // ripples: level hairlines, closer toward the line
+      for (let i = 0, n = Math.round(6 + 30 * p.water); i < n; i++) { const y = wl + (F.y1 - wl) * rand(i * 2.3 + 3051) ** 1.5, x = F.x0 + fw * rand(i * 3.1 + 3052) * 0.8; ctx.fillRect(x, y, fw * (0.05 + rand(i * 4.7 + 3053) * 0.25), 1.2); }
+      ctx.fillStyle = css(cnInk(), 0.8); ctx.fillRect(F.x0, wl - 1, fw, 2);
+      ctx.restore();
+    }
+    if (p.lines > 0) cnLines(ctx, F, vx, vy, p.lines * 14, red, avoid, 3060);
+    if (p.marks > 0) cnMarks(ctx, F, p.marks * 7, red, avoid, 3070);
+    return true;
+  },
+  accent: { fill: (C) => css(cnRed(C)), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.strokeStyle = css(CN.ink); ctx.lineWidth = 12; run(0, 0); } },
+  /** Upright capitals in ink (paper on black), over a copy of them printed a little off in red (the shadow slider); highlighted words in red, their copy in ink. */
+  runs(ctx, pass, o) {
+    upright(ctx);
+    const fs = o.fs, s = Math.min(2, o.shadowAmt), ink = o.fill || cnInk(), red = cnRed(o.C), hi = o.hi || red;
+    if (s > 0) pass((a, x) => { ctx.fillStyle = css(a.hi ? cnInk() : red); ctx.fillText(a.t, x + fs * 0.035 * s, fs * 0.035 * s); });
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x, 0); });
+  },
+  wrap: (ctx, C, p, plates) => (plates ? ctx : mapped(ctx, { fill: { ink: CN.ink, light: CN.light, mid: CN.greys[1], dark: CN.greys[3], colour: (c) => (sat(c) > 0.3 ? cnRed(C, p) : grey(c)) }, stroke: { ink: CN.ink, light: CN.light }, line: 0.6 })),
+  sticker: painters({ line: CN.ink, lineScale: 0.45, join: "miter", tone: inkAs(CN.ink, (c) => mix(grey(c), c, 0.35)), shadow: null }),
+  /** The corner tag: paper capitals on a slab of ink, a bar of red at its head. */
+  tag(ctx, str, x, y, fs, C, p, ink) {
+    const f = fs * 0.62;
+    ctx.font = `700 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const w = spacedW(ctx, str, 3) + f * 2, h = f * 1.45, top = y + (fs * 1.34 - h);
+    ctx.fillStyle = css(cnInk()); ctx.fillRect(x, top, w, h);
+    ctx.fillStyle = css(cnRed(C)); ctx.fillRect(x, top, f * 0.55, h);
+    ctx.fillStyle = ink || css(cnGround()); spaced(ctx, str, x + f * 0.95, top + h * 0.5 + f * 0.36, 3);
+    return { x: x - 4, y: top - 4, w: w + 8, h: h + 8 };
+  },
+  /** The frame layer: a ruled border, a square of red at its corner. */
+  frame(ctx, env) {
+    const { w, h } = env, b = 26;
+    ctx.save(); ctx.strokeStyle = css(cnInk(), 0.85); ctx.lineWidth = 2.5; ctx.strokeRect(b, b, w - 2 * b, h - 2 * b);
+    ctx.fillStyle = css(cnRed(env.C)); ctx.fillRect(b - 7, b - 7, 22, 22); ctx.restore();
+  },
+  image(ctx) { ctx.shadowColor = "rgba(0,0,0,0)"; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; },
+  post(ctx, w, h, C, p, unit = 1) {
+    const a = p.paper;
+    if (a <= 0) return;
+    crumple(ctx, w, h, a * 0.45);
+    wear(ctx, w, h, dark ? [70, 62, 52] : [128, 98, 62], 0.4 * a, dark ? "lighten" : "multiply");
+    grain(ctx, a * 0.55, unit, !dark);
+    ctx.save(); ctx.globalCompositeOperation = "multiply"; vignette(ctx, w, h, dark ? [0, 0, 0] : [176, 140, 92], 0.45 * a, 0.5); ctx.restore();
+  },
+  prompt: `Emblems for a constructivist poster of the 1920s — bold, geometric, industrial — that read at a glance:
+- one clear object per sticker (a gear, a factory chimney, a ship, a megaphone, a tractor, a radio tower, a train, a hammer, a star), built from flat rectangles, triangles and circles; no realism, no fine detail;
+- flat colour only: "ink" (black), greys and "white" (cream paper), with the main colour as the one strong accent;
+- the app adds a thin ink line and no shadow: do NOT draw outlines or shadows yourself.`,
+  solidPrompt: `Industrial things as a constructivist would build them, from a few boxes and cylinders — a radio tower, a factory, a ship's bridge, a crane, a locomotive; no realism, no fine detail.
+- the renderer paints faces in greys, black and cream with a thin ink line: do NOT try to draw shading or outlines yourself;
+- "white" is cream paper, "dark" near-black, and "main" the poster's one colour (red, or the channel colour) — use it for one to three parts.`,
+};
+
+export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant, collage, yellow, pitch, dots, neon, court, velvet, rave, chrome, netart, verse, glass, jelly, skies, spectrum, citypop, construct };
 export const LOOK_IDS = Object.keys(LOOKS);
 
 // ====================================================================== effects for the user's own layers
@@ -7215,6 +7958,52 @@ spectrum.elementFx = [
       x.restore();
     } },
 ];
+citypop.elementFx = [
+  { key: "cel", name: { zh: "赛璐珞分色", en: "Cel tones" }, for: FX_ALL, stage: "filter",
+    /** The layer painted as a cel: its lightness stepped into four flat tones, its hue kept, the shadows sunk toward a night teal, the lights warmed. */
+    paint(x, B, a) { const img = x.getImageData(B.x0, B.y0, B.w, B.h); celPixels(img.data, a); x.putImageData(img, B.x0, B.y0); } },
+  { key: "neon", name: { zh: "霓虹辉光", en: "Neon glow" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ l: 80 * k, t: 80 * k, r: 80 * k, b: 80 * k }),
+    /** Neon light round the layer: a wide violet haze and a tight hot pink glow. */
+    paint(x, B, a, E) { const src = region(x, B, "fxA"); glowBehind(x, B, src, 32 * E.k * (0.4 + a), 0.75 * a, [120, 60, 255]); glowBehind(x, B, src, 9 * E.k * (0.5 + a), Math.min(1, a * 1.6), CP.pink); } },
+  { key: "vhs", name: { zh: "录像带", en: "Videotape" }, for: FX_ALL, stage: "filter", reach: (B, k) => ({ l: 16 * k, r: 40 * k }),
+    /** The layer as a worn tape plays it: its red smeared to the right and its blue to the left, a band slid sideways, scanlines across it. */
+    paint(x, B, a, E) {
+      const d = (2 + 8 * a) * E.k;
+      rePlate(x, B, [[[255, 0, 0], d, 0], [[0, 255, 0], 0, 0], [[0, 0, 255], -d * 0.6, 0]]);
+      const src = region(x, B, "fxA"), y = Math.round(B.h * (0.2 + 0.6 * E.R(5))), bh = Math.max(1, Math.round(B.h * (0.03 + 0.06 * a)));
+      if (y + bh <= B.h) { x.clearRect(B.x0, B.y0 + y, B.w, bh); x.drawImage(src, 0, y, B.w, bh, B.x0 + (6 + 22 * a) * E.k, B.y0 + y, B.w, bh); }
+      const p = Math.max(2, Math.round(3 * E.k));
+      onLayer(x, B, region(x, B, "fxA"), "multiply", 0.45 * a, (g) => { g.fillStyle = "rgb(40,40,80)"; for (let yy = 0; yy < B.h; yy += p) g.fillRect(0, yy, B.w, Math.max(1, p / 3)); });
+    } },
+];
+construct.elementFx = [
+  { key: "blocks", name: { zh: "块面构成", en: "Built of blocks" }, for: FX_ALL, stage: "fill", sub: [{ key: "size", name: { zh: "块面大小", en: "Block size" }, def: 0.2 }],
+    /** The layer built again of rectangles: read in cells, joined into blocks of one tone each — greys by its own lightness, red where it was strongly coloured — and a hairline round some. */
+    paint(x, B, a, E, o) {
+      const cs = Math.max(3, (5 + 22 * o.size) * E.k), [d, cols, rows] = cellsOf(x, B, cs), red = cnRed(E.C), tones = [CN.ink, CN.greys[3], CN.greys[2], CN.greys[1], CN.greys[0], CN.light];
+      const tone = (i, j) => { const q = (j * cols + i) * 4; return sat([d[q], d[q + 1], d[q + 2]]) > 0.35 && lumOf(d, q) > 0.2 ? 6 : Math.min(5, Math.floor(lumOf(d, q) * 6)); };
+      const blocks = joinCells(cols, rows, (i, j) => d[(j * cols + i) * 4 + 3] > 100, (i, j, p, q) => tone(i, j) === tone(p, q), 3, 4, E.seed % 97);
+      x.save(); x.globalCompositeOperation = "destination-out"; x.globalAlpha = a; x.fillRect(B.x0, B.y0, B.w, B.h); x.restore();
+      x.save(); x.globalAlpha = a;
+      for (const [i, j, bw, bh] of blocks) { const t = tone(i, j); x.fillStyle = css(t === 6 ? red : tones[t]); x.fillRect(B.x0 + i * cs, B.y0 + j * cs, bw * cs + 0.6, bh * cs + 0.6); }
+      x.strokeStyle = css(CN.ink, 0.5); x.lineWidth = Math.max(0.8, E.k * 0.8); x.beginPath();
+      for (const [i, j, bw, bh] of blocks) if (E.R(i * 1.7 + j * 2.9 + 3) < 0.25) x.rect(B.x0 + i * cs, B.y0 + j * cs, bw * cs, bh * cs);
+      x.stroke(); x.restore();
+    } },
+  { key: "greys", name: { zh: "灰阶分版", en: "Grey plates" }, for: FX_ALL, stage: "filter",
+    /** The layer pressed into a few flat greys between ink and cream paper. */
+    paint: tonesFx(() => CN_TONES, 0.75) },
+  { key: "wedge", name: { zh: "斜切色块", en: "Diagonal wedge" }, for: FX_ALL, stage: "behind", reach: (B) => ({ l: B.w * 0.6, r: B.w * 0.6, t: B.h * 0.6, b: B.h * 0.6 }),
+    /** A band of the poster red cut on a diagonal behind the layer, a bar of ink along its edge. */
+    paint(x, B, a, E) {
+      const cx = B.x0 + B.w / 2, cy = B.y0 + B.h / 2, len = Math.hypot(B.w, B.h) * (0.55 + 0.5 * a), th = Math.min(B.w, B.h) * (0.2 + 0.45 * a), ang = -0.6 + (E.R(7) - 0.5) * 0.3, ux = Math.cos(ang), uy = Math.sin(ang), nx = -uy, ny = ux;
+      const band = (o, t) => [[cx - ux * len + nx * o, cy - uy * len + ny * o], [cx + ux * len + nx * o, cy + uy * len + ny * o], [cx + ux * len + nx * (o + t), cy + uy * len + ny * (o + t)], [cx - ux * len + nx * (o + t), cy - uy * len + ny * (o + t)]];
+      x.save(); x.globalCompositeOperation = "destination-over"; x.globalAlpha = Math.min(1, a * 2);
+      x.fillStyle = css(cnRed(E.C)); shapeOf(x, band(-th / 2, th)); x.fill();
+      x.fillStyle = css(CN.ink); shapeOf(x, band(th / 2, th * 0.14)); x.fill();
+      x.restore();
+    } },
+];
 // What five looks' own letterings do, as effects worked on any layer's pixels once it is painted: so they
 // go with whatever text effect a text layer has, and on a sticker, a photo or a colour as well.
 cyber.elementFx.push({ key: "sliced", name: { zh: "三段切片", en: "Three slices" }, for: FX_ALL, stage: "filter", reach: (B) => ({ l: B.h * 0.16, r: B.h * 0.16, t: B.h * 0.03, b: B.h * 0.03 }),
@@ -7293,4 +8082,4 @@ export const lookValues = () => values;
 export const styled = (ctx, C, plates = false) => (current.wrap ? current.wrap(ctx, C, values, plates) : ctx);
 export { INK, css };
 /** Internals the tests reach for. */
-export const __test = { toneTable, hueTurn };
+export const __test = { toneTable, hueTurn, joinCells, celPixels };
