@@ -165,6 +165,7 @@ Layers made of words (`title`, `tag`, `catname`, `brand`, `text`) may carry `ink
 lettering colour. The title and text layers (`HEADLINES`) are one kind of thing: both may also carry
 `hi` (the highlighted words' colour), `stroke` and `shadow` (outline and shadow strengths), `plate`
 and `plateInk` (a plate and its colour), `fx`, `fxAmt` and `warp`; a text layer only adds `text`.
+The user's own layers (text, asset, photo, solid) may also carry `lookFx`, look effects (see 7.4).
 Without a colour the look and the channel colour decide; on a plate, an unset lettering colour is the
 one that reads against the plate. `headline()` in `render.js` turns these rules into one set of
 colours shared by the title and text layers, from which every look's lettering takes its colours; on a
@@ -458,6 +459,17 @@ values from `rand(k)`, which depends on `style.lookSeed` in the profile. While t
 same, every frame, every size, the preview and the export put things in the same relative places;
 *Shuffle the random placement* simply picks another seed.
 
+### 7.4 Look effects on a layer
+
+A look's **material** effects — those that depend only on one thing's own shape and pixels, and move and scale with it (see the to-do list in the README for how effects are sorted) — can be put on a layer the user added.
+
+- **Declared**: a look may have an `elementFx` list of `{ key, name, for, stage, sub?, paint(x, B, amt, E, opt) }`. `for` is the layer types it suits; `stage` its stage; `sub` its own settings (the halftone's size, say). Riso, liquid chrome and glitch net art have lists so far; `FX_TYPES` is the layer types opened so far, text and asset.
+- **Data**: kept on the layer, and staying with it: `L.lookFx = { "look.effect": amount, "look.effect:setting": value }`. It applies whatever look the cover has. `layers.js` keeps only keys of those two shapes, amounts within 0–1, and drops an effect at 0 with its settings.
+- **Pipeline**: in `render.js`'s `paintRange`, a layer with effects on (`layerEffects(L)`) is painted on its own on the offscreen canvas, as one below full opacity is. `paintEffects()` then adds the effects within its box — `pixelBox()`: its hit's turned rectangle bounded, in canvas pixels — stage by stage: the fill replaced `fill` → texture `over` → pixels worked on `filter` → outside the outline `behind`. The layer is then composited as a whole.
+- **Painters**: they work in the offscreen canvas's pixels and touch only box `B` (an effect outside the outline may paint beyond it). `E.k` is canvas pixels per unit; `E.R(n)` random numbers seeded by the layer's id, so a layer looks the same in every size, the preview and the export; `E.C` the channel colour. Helpers: `region()` copies what the box holds, `shapeIn()` turns a shape one colour, `slideBands()` slides bands sideways.
+- **Speed**: a layer with effects is painted on a canvas held in memory (`willReadFrequently`), as are the effects' work canvases (`fxCanvas()`). In the app's web view a canvas lives on the graphics card by default, so reading pixels back, copying from it or drawing it onto itself each make a round trip; held in memory they are plain memory work, and only the box the effects reached (each says with `reach` how far past the layer's box it paints) is laid back. Drips read no pixels back: the layer is laid behind itself 1, 2, 4, 8… pixels lower, then cut into drops. In the timing self-test, `FX_TIMING` records each effect's own time.
+- **Interface**: `lookFxSection()` in `app.js` shows *This look* and *Other looks*; *Surprise me* deals layers effects only from the look it drew.
+
 ## 8. AI-generated assets (`ai.js`, `spec.js`)
 
 ### 8.1 Why the model returns data, not code
@@ -692,7 +704,7 @@ generates one asset in each API style and draws it on a cover. It catches proble
 as the header issue above.
 
 
-With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads the cover in the data folder (a copy of real app data can be put there) and, at a Retina screen's pixel ratio, times a whole redraw (first, and again with everything cached), the size thumbnails, dragging each text and photo layer across the canvas with pointer events (the first frames of each drag, and the frames after), stepping the sliders of the photos that cost most (dim, the soft edges, outline), and the current look's own sliders (a whole redraw with each at 0, then each stepped as a drag steps it). Each part is split into the layers that cost most (`TIMING` in `render.js`) and the time spent computing pixels in script, such as blurs (`PIXELS` in `photo.js`); both are off otherwise. A frame is waited for at most a second, as a covered window gets none.
+With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads the cover in the data folder (a copy of real app data can be put there) and, at a Retina screen's pixel ratio, times a whole redraw (first, and again with everything cached), the size thumbnails, dragging each text and photo layer across the canvas with pointer events (the first frames of each drag, and the frames after), stepping the sliders of the photos that cost most (dim, the soft edges, outline), the current look's own sliders (a whole redraw with each at 0, then each stepped as a drag steps it), and, when the cover has look effects, each effect's own time. Each part is split into the layers that cost most (`TIMING` in `render.js`) and the time spent computing pixels in script, such as blurs (`PIXELS` in `photo.js`); both are off otherwise. A frame is waited for at most a second, as a covered window gets none.
 
 ## 14. Trade-offs and known limits
 

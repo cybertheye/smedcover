@@ -73,6 +73,8 @@ const PROPS = {
    */
   photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, feather: 0, spread: 0, outline: 0, torn: false, shadow: 0 },
 };
+/** The layers that may carry the looks' effects (see FX_TYPES in style.js for those the effects are open to so far). */
+const FX_LAYERS = ["text", "asset", "photo", "solid"];
 const OLD_COLORS = ["white", "accent", "ink", "custom"];   // how text layers were coloured before they were headlines (see normalizeLayer)
 
 const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(hi, Math.max(lo, Number(v))) : d);
@@ -117,6 +119,18 @@ function normalizeLayer(raw, catIds) {
   if (LETTERED.includes(raw.type) && typeof raw.font === "string" && raw.font.trim()) L.font = raw.font.trim().replace(/["\\;{}<>]/g, "").slice(0, 80);
   // lettering may be given its own colour; without one it takes whatever the look gives it
   if (LETTERED.includes(raw.type)) for (const k of HEADLINES.includes(raw.type) ? ["ink", "hi", "plateInk"] : ["ink"]) if (typeof raw[k] === "string" && /^#[0-9a-f]{6}$/i.test(raw[k])) L[k] = raw[k].toLowerCase();
+  // the looks' effects put on the layer (see layerEffects in style.js): "look.key" a strength 0–1 (0, or
+  // missing: off), "look.key:sub" one of its own settings 0–1; they stay with the layer whatever the look
+  if (FX_LAYERS.includes(raw.type) && raw.lookFx && typeof raw.lookFx === "object") {
+    const fx = {};
+    for (const [k, v] of Object.entries(raw.lookFx).slice(0, 80)) {
+      if (!/^[a-z]+\.[a-zA-Z]+(:[a-zA-Z]+)?$/.test(k) || v === null || v === "" || !Number.isFinite(Number(v))) continue;
+      const n = num(v, 0, 0, 1);
+      if (n > 0 || k.includes(":")) fx[k] = n;
+    }
+    for (const k of Object.keys(fx)) if (k.includes(":") && !(k.split(":")[0] in fx)) delete fx[k];   // a setting of an effect that is off
+    if (Object.keys(fx).length) L.lookFx = fx;
+  }
   if (free && Array.isArray(raw.cats)) {   // a layer whose categories are all gone goes with them
     const cats = [...new Set(raw.cats.filter((x) => typeof x === "string" && x && (!catIds || catIds.includes(x))))];
     if (!cats.length) return null;

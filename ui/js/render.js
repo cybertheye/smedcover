@@ -7,7 +7,7 @@ import { drawTitle, parseTitle } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas } from "./layers.js";
-import { setLook, setFast, isFast, look, lookValues, styled } from "./style.js";
+import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects } from "./style.js";
 import { paintRuns, warpCorners } from "./textfx.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
@@ -212,6 +212,12 @@ function placed(ctx, tr, fn, known) {
   fn(ctx);
   ctx.restore();
   return { cx: px + tr.dx, cy: py + tr.dy, hw: (box.w / 2) * tr.s * tr.kx, hh: (box.h / 2) * tr.s * tr.ky, r: tr.r };
+}
+/** The box a layer's hit (its turned rectangle, in units) covers, in canvas pixels, kept within the canvas: where its look effects work. */
+function pixelBox(hit, kx, ky, W, H) {
+  const a = (hit.r || 0) * RAD, c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a)), ex = hit.hw * c + hit.hh * s, ey = hit.hw * s + hit.hh * c;
+  const x0 = Math.max(0, Math.floor((hit.cx - ex) * kx)), y0 = Math.max(0, Math.floor((hit.cy - ey) * ky)), x1 = Math.min(W, Math.ceil((hit.cx + ex) * kx)), y1 = Math.min(H, Math.ceil((hit.cy + ey) * ky));
+  return { x0, y0, x1, y1, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
 }
 /** Same for things drawn around their own centre (assets, free text); fn returns half-extents. */
 function centred(ctx, cx, cy, tr, s, fn) {
@@ -498,7 +504,7 @@ function drawSelection(ctx, hit, k, withHandles = true) {
   ctx.restore();
 }
 
-let scratch = null;
+let scratch = null, fxScratch = null;
 const PHOTO = { sheets: [], slides: new Map() };   // the photo layers' work canvases, and their images while a photo is dragged
 /** Work canvas i of the photo layers, w × h, cleared, with the transform `m`. */
 function sheet(i, w, h, m) {
@@ -811,13 +817,21 @@ function paintCover(cv, o) {
       let hit;
       const t0 = TIMING.on ? performance.now() : 0;
       try {
-      if (L.o < 1) {   // paint the layer on its own, then blend it in as a whole
-        scratch = scratch || document.createElement("canvas");
-        scratch.width = cv.width; scratch.height = cv.height;
-        const sx = scratch.getContext("2d");
-        sx.scale(kx, ky);
+      const fx = layerEffects(L);
+      if (L.o < 1 || fx.length) {   // paint the layer on its own — its look effects added to it there — then blend it in as a whole
+        // a layer with effects gets a canvas held in memory: the effects read it back and copy from it, which
+        // on a canvas kept on the graphics card means a round trip each time (see fxCanvas in style.js)
+        if (fx.length && !fxScratch) { fxScratch = document.createElement("canvas"); fxScratch.getContext("2d", { willReadFrequently: true }); }
+        const scr = fx.length ? fxScratch : (scratch = scratch || document.createElement("canvas"));
+        if (scr.width !== cv.width || scr.height !== cv.height) { scr.width = cv.width; scr.height = cv.height; }
+        const sx = scr.getContext("2d");
+        sx.setTransform(1, 0, 0, 1, 0, 0); sx.globalAlpha = 1; sx.globalCompositeOperation = "source-over"; sx.clearRect(0, 0, cv.width, cv.height); sx.scale(kx, ky);
         hit = PAINT[L.type](sx, L, tr, env);
-        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o; c.drawImage(scratch, 0, 0); c.restore();
+        // with effects, only the box the layer and its effects reached is laid down
+        const got = hit && fx.length ? paintEffects(sx, pixelBox(hit, kx, ky, cv.width, cv.height), fx, L, kx, env.C) : null;
+        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o;
+        if (got && got.w > 0 && got.h > 0) c.drawImage(scr, got.x0, got.y0, got.w, got.h, got.x0, got.y0, got.w, got.h); else c.drawImage(scr, 0, 0);
+        c.restore();
       } else hit = PAINT[L.type](c, L, tr, env);
       } finally { if (faces) Object.assign(fonts, faces); if (TIMING.on) TIMING.ms[L.id] = (TIMING.ms[L.id] || 0) + performance.now() - t0; }
       c.globalAlpha = 1; c.setLineDash([]);

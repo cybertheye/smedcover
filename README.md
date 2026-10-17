@@ -258,6 +258,23 @@ Masked and outlined effects have a *Strength* slider. The *Outline* and *Shadow*
 
 Outlined effects read the font file to get each letter's outline: the first time a piece of text is used it shows as ordinary lettering for an instant and then changes; an export waits for the outlines before drawing. Bundled fonts, installed fonts and fonts you imported are supported.
 
+### Look effects on your own layers
+
+A look's material effects can be put on a text or asset layer you added. With the layer selected, its properties have a *Look effects* group in two parts:
+
+- **This look**: the effects the current look opens to that kind of layer. Each is a slider; at 0 it is off. Some have settings of their own: the riso's *Halftone*, once on, shows *Halftone size* under it.
+- **Other looks**: pick a look in the menu to borrow its effects. Effects on the layer that are not the current look's are listed here under their own look.
+
+The effects stay with the layer: under another look they still apply, and move to *Other looks*. Each layer's random detail is its own, so every size, the preview and the export agree. *Surprise me* deals these layers new effects, but only ever from the look it drew, so a hand stays of one look. *Clear this layer's look effects* turns them all off.
+
+Three looks have effects so far; photo and solid layers and the other looks follow (see the to-do list below):
+
+| Look | Effects |
+|---|---|
+| Riso | misregistration, halftone (with its size), patchy ink, roller streaks, ghosting |
+| Liquid chrome | chrome, holographic streak, drips, glitch slices |
+| Glitch net art | dither, pixel sorting, datamosh, scan shift |
+
 ### Lettering colours
 
 Every layer made of words can be given its own colour. Select the layer and look in its properties:
@@ -650,14 +667,12 @@ The general typesetting effects belong to no look and stay in the lettering menu
 
 **Implementation**
 
-- [ ] Each look declares its material effects, `elementFx`: a name, the layer types it suits, a stage and a painter. The framework runs the stages in a fixed order: replacing the fill `fill` → laying texture `over` → working on pixels `filter` → outside the outline `behind`.
-- [ ] Settings live on the layer, kept per look of the cover: `L.lookFx = { coverLook: { "fromLook.effect": amount } }`.
-  - A borrowed effect is kept in the set of the look it was chosen under.
-  - A render reads only the current look's set; another look's is kept, and comes back with that look.
-- [ ] Pipeline: the per-layer offscreen pass already used for opacity below 1, with the stages applied there before compositing. The offscreen canvas is only the layer's box; it is degraded while dragging, and its result cached by its settings. Randomness is seeded by the layer's id, so every size, the preview and the export agree.
-- [ ] Interface: *This look's effects* and *Other looks* groups of sliders in the layer's properties, 0 by default; one button to clear them; a note when another look holds settings of its own.
+- [x] Each look declares its material effects, `elementFx`: a name, the layer types it suits, a stage and a painter. The framework runs the stages in a fixed order: replacing the fill `fill` → laying texture `over` → working on pixels `filter` → outside the outline `behind`.
+- [x] Settings live on the layer and stay with it: `L.lookFx = { "fromLook.effect": amount, "fromLook.effect:sub": value }`. They apply under any look; the interface sorts them into *This look* and *Other looks* by the look they come from.
+- [x] Pipeline: the per-layer offscreen pass already used for opacity below 1, with the stages applied there before compositing. The offscreen canvas is only the layer's box; it is degraded while dragging, and its result cached by its settings. Randomness is seeded by the layer's id, so every size, the preview and the export agree.
+- [x] Interface: *This look* and *Other looks* groups of sliders in the layer's properties, 0 by default; one button to clear them.
 - [ ] In stages:
-  1. The framework and the pilots: riso, liquid chrome and glitch net art, on text and asset layers.
+  1. ~~The framework and the pilots: riso, liquid chrome and glitch net art, on text and asset layers.~~ Done.
   2. Every look, and the photo and solid layers.
   3. The lettering effects brought home.
   4. A general clipping mask.

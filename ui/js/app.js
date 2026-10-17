@@ -17,7 +17,7 @@ import {
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, effectUses, warpCorners } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
-import { LOOKS, LOOK_IDS, setLook, lookParams } from "./style.js";
+import { LOOKS, LOOK_IDS, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
 import { sizeOf, PIXELS } from "./photo.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
@@ -2091,6 +2091,41 @@ function typeControls(L) {
   }
   return null;
 }
+/** The look last chosen to borrow effects from (kept while the panel is rebuilt). */
+const BORROW = { look: "" };
+/**
+ * The look effects a layer carries (see layerEffects in style.js): the current look's, then any from
+ * other looks — those already on the layer, and the look picked to borrow from. An effect's own
+ * settings show under it once it is on.
+ */
+function lookFxSection(L) {
+  if (!FX_TYPES.includes(L.type)) return null;
+  const here = S.profile.style.look, lang = getLang(), fx = L.lookFx || {}, name = (id) => (LOOKS[id] || LOOKS.cel).name[lang];
+  const put = (id, v) => {
+    holdLive(L.id);
+    const o = { ...(L.lookFx || {}) };
+    if (id.includes(":") || v > 0) o[id] = v;
+    else { delete o[id]; for (const k of Object.keys(o)) if (k.startsWith(id + ":")) delete o[k]; }
+    if (Object.keys(o).some((k) => !k.includes(":"))) L.lookFx = o; else delete L.lookFx;
+    touch({ cover: true });
+  };
+  const rows = (look) => effectsFor(look, L.type).flatMap((e) => {
+    const id = `${look}.${e.key}`, on = fx[id] > 0;
+    return [slider2(e.name[lang], 0, 1, 0.05, fx[id] || 0, (v) => { put(id, v); if ((v > 0) !== on) later("side", 400, renderSide); }),
+      ...(on ? (e.sub || []).map((s) => slider2("· " + s.name[lang], 0, 1, 0.05, fx[`${id}:${s.key}`] ?? s.def, (v) => put(`${id}:${s.key}`, v))) : [])];
+  });
+  const lent = [...new Set(Object.keys(fx).filter((k) => !k.includes(":")).map((k) => k.split(".")[0]))].filter((k) => k !== here && LOOKS[k]);
+  const others = LOOK_IDS.filter((k) => k !== here && !lent.includes(k) && effectsFor(k, L.type).length), pick = others.includes(BORROW.look) ? BORROW.look : "";
+  return [el("div", { class: "psep" }), psec("props.sec.lookFx", [
+    el("div", { class: "fxh" }, t("lookfx.here", name(here))),
+    effectsFor(here, L.type).length ? rows(here) : el("div", { class: "hint", style: "margin:0" }, t("lookfx.none", name(here))),
+    (lent.length > 0 || others.length > 0) && el("div", { class: "fxh" }, t("lookfx.others")),
+    lent.flatMap((k) => [el("div", { class: "fxs" }, name(k)), ...rows(k)]),
+    others.length > 0 && select([["", t("lookfx.borrow")], ...others.map((k) => [k, name(k)])], pick, (v) => { BORROW.look = v; renderSide(); }),
+    pick && rows(pick),
+    Object.keys(fx).length > 0 && el("button", { class: "btn wide", onclick: () => { delete L.lookFx; touch({ cover: true, side: true }); } }, t("lookfx.clear")),
+  ], t("lookfx.hint"))];
+}
 /** What every layer has, after a rule: opacity, and putting the placement back. */
 function layerSection(L) {
   if (L.type === "bg") return null;
@@ -2164,7 +2199,7 @@ function renderSide() {
       el("div", { class: "hint" }, t("props.groupHint")),
       el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => selectLayer("bg") }, t("props.groupEnd")))
     : L ? el("div", { class: "box" }, el("label", { class: "cap" }, `${t("props.title")} · ${layerName(L)}`),
-      el("div", { class: "props" }, typeControls(L), layerSection(L)))
+      el("div", { class: "props" }, typeControls(L), lookFxSection(L), layerSection(L)))
       : el("div", { class: "hint" }, t("layers.none")));
   side.scrollTop = y;
   // the selected layer's photo, in Cover → Add photos, is framed in the channel colour (without rebuilding that panel)
@@ -2523,6 +2558,18 @@ function surprise() {
       case "title": L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.45); break;
       case "text": L.plate = chance(0.35); L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.4); break;
       case "asset": if (canTint(L.ref) && L.ref.kind !== "graphic") L.tint = chance(0.5); break;
+    }
+    if (FX_TYPES.includes(L.type)) {   // look effects, dealt only from the look just drawn, so the hand stays of one look
+      delete L.lookFx;
+      const own = effectsFor(st.look, L.type);
+      if (own.length && chance(0.45)) {
+        const fx = {};
+        for (const e of [...own].sort(() => R() - 0.5).slice(0, chance(0.4) ? 2 : 1)) {
+          fx[`${st.look}.${e.key}`] = round(between(0.35, 0.85), 0.05);
+          for (const s of e.sub || []) fx[`${st.look}.${e.key}:${s.key}`] = round(between(0.2, 0.8), 0.05);
+        }
+        L.lookFx = fx;
+      }
     }
     if (isFree(L.type) && L.type !== "solid" && !L.locked) {   // added items shuffle about a little: nudged, turned, resized (a block of colour stays put)
       const a = L.t.all;
@@ -2962,6 +3009,26 @@ async function selfTest(dir) {
       report.headlines = { path: await invoke("write_image", framed(await toPng(cv), { dir, name: "headlines.png" })), hits: ["title", tx.id, tp.id].map((id) => !!cv._hits.find((h) => h.id === id)) };
       S.cover.title = keepTitle; S.cover.layers = S.cover.layers.filter((l) => l !== tx && l !== tp); titleLayer.plate = false;
     }
+    // the looks' effects on the user's own layers: every look that has some, all of them at full on a
+    // text layer and a sticker; then, under a look of none, effects borrowed from three others
+    report.layerFx = [];
+    {
+      const keepLook = S.profile.style.look, tx = newLayer("text", { text: "LAYER *效果*" }), sk = newLayer("asset", { ref: { kind: "sticker", id: "burst" }, tint: true });
+      tx.t.all = { ...tx.t.all, x: 0.64, y: 0.62, s: 0.9 }; sk.t.all = { ...sk.t.all, x: 0.86, y: 0.68, s: 0.45 };
+      S.cover.layers.push(tx, sk);
+      const shoot = async (name, look) => {
+        S.profile.style.look = look;
+        const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
+        report.layerFx.push({ name, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `layerfx-${name}.png` })), hits: [tx.id, sk.id].map((id) => !!cv._hits.find((h) => h.id === id)) });
+      };
+      for (const id of LOOK_IDS.filter((k) => (LOOKS[k].elementFx || []).length)) {
+        for (const L of [tx, sk]) L.lookFx = Object.fromEntries(effectsFor(id, L.type).map((e) => [`${id}.${e.key}`, 1]));
+        await shoot(id, id);
+      }
+      tx.lookFx = { "chrome.chrome": 1, "chrome.drips": 0.8, "riso.shift": 0.6 }; sk.lookFx = { "netart.dither": 0.7, "netart.sort": 0.8, "riso.dots": 0.6, "riso.dots:pitch": 1 };
+      await shoot("borrowed", "velvet");
+      S.profile.style.look = keepLook; S.cover.layers = S.cover.layers.filter((l) => l !== tx && l !== sk);
+    }
     // the perspective with corners of its own, dragged far: the lettering follows the quad
     titleLayer.fx = "taper"; titleLayer.warp = [[0, 0], [-0.05, 0.35], [0.08, -0.1], [0.04, 0]];
     report.effects.push({ id: "taper-own", path: await invoke("write_image", framed(await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex())), { dir, name: "fx-taper-own.png" })) });
@@ -3000,6 +3067,11 @@ async function dragTest() {
   report.redrawFirst = { ms: Math.round(performance.now() - t0), canvas: [cv.width, cv.height], ...end() };
   begin(); t0 = performance.now(); for (let i = 0; i < 3; i++) { drawMain(); flush(); }
   report.redrawCached = { ms: Math.round((performance.now() - t0) / 3), ...end(3) };
+  // the same, each look effect timed on its own (the drawing finished before and after it, so slower overall)
+  if (S.cover.layers.some((l) => l.lookFx)) {
+    Object.assign(FX_TIMING, { on: true, ms: {} }); for (let i = 0; i < 3; i++) { drawMain(); flush(); } FX_TIMING.on = false;
+    report.lookFxEach = Object.fromEntries(Object.entries(FX_TIMING.ms).map(([id, ms]) => [id, Math.round(ms / 3)]));
+  }
   // 2. the size thumbnails, all of them, as after an edit
   begin(); t0 = performance.now();
   for (const size of S.profile.sizes) { const th = $("th-" + sizeKey(size)); if (th) { paint(th, size, virtualSize(size.w, size.h)[0] * 0.2); th.getContext("2d").getImageData(0, 0, 1, 1); } }

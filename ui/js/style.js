@@ -6137,6 +6137,233 @@ const spectrum = {
 export const LOOKS = { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant, collage, yellow, pitch, dots, neon, court, velvet, rave, chrome, netart, verse, glass, jelly, skies, spectrum };
 export const LOOK_IDS = Object.keys(LOOKS);
 
+// ====================================================================== effects for the user's own layers
+// A look's *material* effects — how one thing is drawn or printed, depending only on its own shape and
+// pixels — can be put on a single layer the user added. Each look lists its own as `elementFx`:
+//   { key, name: {zh, en}, for: [layer types], stage, sub?: [{ key, name, def }], paint(x, B, amt, E, opt) }
+// `stage` places it in the order every layer's effects are painted in: "fill" (the colour inside the
+// outline replaced) → "over" (texture laid inside it) → "filter" (the pixels worked on) → "behind"
+// (painted outside the outline). paint() works on the layer's own work canvas in canvas pixels, within
+// the layer's box B { x0, y0, x1, y1, w, h }; amt is 0–1 (0: off); E = { k: pixels per unit, R(n): the
+// layer's own random numbers, seed, C: the channel colour }; opt holds its sub-settings.
+// A layer keeps its effects itself, `L.lookFx = { "look.key": amount, "look.key:sub": value }`, whatever
+// look the cover is in: one borrowed from another look stays with the layer when the look changes.
+
+/** The order every layer's effects are painted in. */
+export const FX_STAGES = ["fill", "over", "filter", "behind"];
+/** The layer types the effects are open to so far. */
+export const FX_TYPES = ["text", "asset"];
+const FX_ALL = ["text", "asset", "photo", "solid"];
+/** The effects a look opens to a type of layer. */
+export const effectsFor = (look, type) => ((LOOKS[look] && LOOKS[look].elementFx) || []).filter((e) => e.for.includes(type) && FX_TYPES.includes(type));
+/** A layer's effects that are on and apply to it, in the order they are painted: [{ id, look, fx, amt, opt }]. */
+export function layerEffects(L) {
+  const all = L && L.lookFx, out = [];
+  if (!all || !FX_TYPES.includes(L.type)) return out;
+  for (const [id, amt] of Object.entries(all)) {
+    if (id.includes(":") || !(amt > 0)) continue;
+    const [look, key] = id.split("."), fx = ((LOOKS[look] && LOOKS[look].elementFx) || []).find((e) => e.key === key);
+    if (!fx || !fx.for.includes(L.type)) continue;
+    const opt = {};
+    for (const s of fx.sub || []) { const v = all[`${id}:${s.key}`]; opt[s.key] = Number.isFinite(v) ? clamp(v) : s.def; }
+    out.push({ id, look, fx, amt: clamp(amt), opt });
+  }
+  return out.sort((a, b) => FX_STAGES.indexOf(a.fx.stage) - FX_STAGES.indexOf(b.fx.stage) || (a.id < b.id ? -1 : 1));
+}
+/** Time spent in each layer effect (ms by id), with the drawing finished before and after each: for the timing self-test; off otherwise. */
+export const FX_TIMING = { on: false, ms: {} };
+/** A seed from a layer's id: the same layer gets the same scatter in every size, the preview and the export. */
+const idSeed = (id) => { let h = 7; for (const ch of String(id)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0; return (h >>> 0) % 100003; };
+/**
+ * Paints a layer's effects (see layerEffects) on the work canvas it was painted on, stage by stage,
+ * each within the layer's box B (canvas pixels). `k`: canvas pixels per unit; `C`: the channel colour.
+ * Returns the box the layer and its effects may have reached (each effect says how far past B it
+ * paints, `reach`), so only that need be laid down — or null when nothing was painted.
+ */
+export function paintEffects(x, B, list, L, k, C) {
+  if (!list.length || !canPaint(x) || B.w < 2 || B.h < 2) return null;
+  const seed = idSeed(L.id), E = { k, seed, C: C || [255, 200, 0], R: (n) => noise(n * 0.7071 + seed * 0.013) }, m = Math.max(B.w, B.h) * 0.12 + 24 * k;   // the layer's own shadows and outlines may stand a little outside its box
+  const out = { l: m, t: m, r: m, b: m };
+  const flush = () => x.getImageData(0, 0, 1, 1);
+  if (FX_TIMING.on) flush();
+  for (const e of list) {
+    const t0 = FX_TIMING.on ? performance.now() : 0;
+    x.save(); x.setTransform(1, 0, 0, 1, 0, 0);
+    try { e.fx.paint(x, B, e.amt, E, e.opt); } finally { x.restore(); }
+    if (FX_TIMING.on) { flush(); FX_TIMING.ms[e.id] = (FX_TIMING.ms[e.id] || 0) + performance.now() - t0; }
+    const g = e.fx.reach ? e.fx.reach(B, k) : null;
+    if (g) for (const s of ["l", "t", "r", "b"]) out[s] = Math.max(out[s], m + (g[s] || 0));
+  }
+  const W = x.canvas.width, H = x.canvas.height, x0 = Math.max(0, Math.floor(B.x0 - out.l)), y0 = Math.max(0, Math.floor(B.y0 - out.t)), x1 = Math.min(W, Math.ceil(B.x1 + out.r)), y1 = Math.min(H, Math.ceil(B.y1 + out.b));
+  return { x0, y0, w: x1 - x0, h: y1 - y0 };
+}
+/**
+ * A work canvas for the effects, kept per slot and sized w × h, held in memory rather than on the
+ * graphics card (as the layer's own canvas is, see render.js): copying from it, reading it back and
+ * drawing it onto itself then cost no round trip to the card — which in the app's web view is what
+ * made effects slow.
+ */
+function fxCanvas(slot, w, h) {
+  let c = WORK[slot];
+  if (!c) { c = WORK[slot] = document.createElement("canvas"); c.getContext("2d", { willReadFrequently: true }); }
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  return c;
+}
+/** A copy of what the work canvas x holds in box B (a canvas of B's size, kept per slot). */
+function region(x, B, slot) {
+  const c = fxCanvas(slot, B.w, B.h), g = c.getContext("2d");
+  g.globalCompositeOperation = "copy"; g.globalAlpha = 1; g.drawImage(x.canvas, B.x0, B.y0, B.w, B.h, 0, 0, B.w, B.h);
+  return c;
+}
+/** A canvas's shape in one colour (kept per slot). */
+function shapeIn(src, colour, slot) {
+  const c = fxCanvas(slot, src.width, src.height), g = c.getContext("2d");
+  g.globalCompositeOperation = "copy"; g.drawImage(src, 0, 0); g.globalCompositeOperation = "source-in"; g.fillStyle = css(colour); g.fillRect(0, 0, c.width, c.height);
+  return c;
+}
+/** Bands of the layer slid sideways (each first cleared, so it is not doubled); `bars` adds a thin bar of colour to some. */
+function slideBands(x, B, a, E, n0, bars) {
+  const src = region(x, B, "fxBands"), n = Math.round(n0 + 8 * a);
+  for (let i = 0; i < n; i++) {
+    const y = Math.round(B.y0 + B.h * E.R(i * 2.7 + 1)), bh = Math.max(1, Math.round(B.h * (0.015 + E.R(i * 3.3 + 2) * 0.09))), dx = Math.round((E.R(i * 4.1 + 3) - 0.5) * B.w * 0.16 * (0.3 + a));
+    if (y + bh > B.y1) continue;
+    x.clearRect(B.x0, y, B.w, bh); x.drawImage(src, 0, y - B.y0, B.w, bh, B.x0 + dx, y, B.w, bh);
+    if (bars && E.R(i * 5.3 + 4) > 0.5) { x.fillStyle = css([[255, 40, 80], [40, 220, 255], [80, 255, 120], boost(E.C, 0.7)][i % 4], 0.85); x.fillRect(B.x0 + B.w * E.R(i * 6.1 + 5) * 0.8, y, B.w * (0.05 + E.R(i + 6) * 0.2), Math.max(1, bh * 0.6)); }
+  }
+}
+
+riso.elementFx = [
+  { key: "shift", name: { zh: "套色错位", en: "Misregistration" }, for: FX_ALL, stage: "filter", reach: (B, k) => ({ l: 12 * k, t: 6 * k, r: 12 * k, b: 6 * k }),
+    /** The pink plate printed a little one way and the blue the other, showing as fringes either side of the layer's own ink. */
+    paint(x, B, a, E) {
+      const d = (2 + 9 * a) * E.k, src = region(x, B, "fxA");
+      x.globalCompositeOperation = "destination-over"; x.globalAlpha = Math.min(1, a * 4) * 0.9;
+      x.drawImage(shapeIn(src, RISO.pink, "fxP"), B.x0 + d, B.y0 + d * 0.4); x.drawImage(shapeIn(src, RISO.blue, "fxQ"), B.x0 - d * 0.7, B.y0 - d * 0.3);
+    } },
+  { key: "dots", name: { zh: "网点", en: "Halftone" }, for: FX_ALL, stage: "over", sub: [{ key: "pitch", name: { zh: "网点粗细", en: "Halftone size" }, def: 0.4 }],
+    /** The ink printed through a halftone screen at 45°: from solid, the dots shrink and the ground shows between them. */
+    paint(x, B, a, E, o) {
+      const p = Math.max(3, Math.round((5 + 13 * o.pitch) * E.k)), r = Math.round(p * (0.72 - 0.38 * a) * 10) / 10, key = `fxDots|${p}|${r}`;
+      let t = WORK[key];
+      if (!t) { t = WORK[key] = document.createElement("canvas"); t.width = t.height = p; const g = t.getContext("2d"); g.fillStyle = "#fff"; g.beginPath(); g.arc(p / 2, p / 2, r, 0, TAU); g.fill(); }
+      const pat = x.createPattern(t, "repeat");
+      if (pat && pat.setTransform && typeof DOMMatrix !== "undefined") pat.setTransform(new DOMMatrix().rotateSelf(45));
+      x.beginPath(); x.rect(B.x0, B.y0, B.w, B.h); x.clip(); x.globalCompositeOperation = "destination-in"; x.fillStyle = pat; x.fillRect(B.x0, B.y0, B.w, B.h);
+    } },
+  { key: "speckle", name: { zh: "墨色不匀", en: "Patchy ink" }, for: FX_ALL, stage: "over",
+    /** Where the ink did not take: soft patches and clustered specks through which the ground shows. */
+    paint(x, B, a, E) {
+      const W = x.canvas.width, H = x.canvas.height;
+      x.beginPath(); x.rect(B.x0, B.y0, B.w, B.h); x.clip(); x.globalCompositeOperation = "destination-out"; x.globalAlpha = Math.min(1, a * 0.95);
+      x.drawImage(wornTexture(W / E.k, H / E.k), 0, 0, W, H);
+    } },
+  { key: "streaks", name: { zh: "滚筒条痕", en: "Roller streaks" }, for: FX_ALL, stage: "over",
+    /** Pale bands across the layer where the drum ran short of ink. */
+    paint(x, B, a, E) {
+      x.beginPath(); x.rect(B.x0, B.y0, B.w, B.h); x.clip(); x.globalCompositeOperation = "destination-out";
+      for (let k = 0; k < 5; k++) softBand(x, B.x0, B.x1, B.y0 + E.R(k * 3.3 + 1) * B.h, B.h * (0.03 + E.R(k * 4.1 + 2) * 0.08), [0, 0, 0], (0.35 + 0.55 * E.R(k * 5.9 + 3)) * a, E.seed + k * 9.1);
+    } },
+  { key: "ghost", name: { zh: "重影", en: "Ghosting" }, for: FX_ALL, stage: "filter", reach: (B) => ({ r: B.w * 0.03, b: B.h * 0.4 }),
+    /** A faint second impression of the layer a drum's turn further down. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA");
+      x.globalAlpha = 0.08 + 0.3 * a; x.drawImage(src, B.x0 + B.w * 0.02, B.y0 + B.h * (0.12 + 0.25 * a));
+    } },
+];
+chrome.elementFx = [
+  { key: "chrome", name: { zh: "铬面", en: "Chrome" }, for: FX_ALL, stage: "fill",
+    /** The layer's colour replaced by polished metal — horizon bands, light along its upper-left rim and shade along the other, a specular streak. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA"), d = Math.max(1, Math.min(B.w, B.h) * 0.012);
+      x.beginPath(); x.rect(B.x0, B.y0, B.w, B.h); x.clip(); x.globalCompositeOperation = "source-atop";
+      x.globalAlpha = a; x.fillStyle = chromeFill(x, B.x0 + B.w * 0.35, B.y0 - B.h * 0.1, B.x0 + B.w * 0.6, B.y1 + B.h * 0.1); x.fillRect(B.x0, B.y0, B.w, B.h);
+      const white = shapeIn(src, [255, 255, 255], "fxW"), black = shapeIn(src, [0, 0, 0], "fxK");
+      for (let i = 1; i <= 2; i++) { x.globalAlpha = a * 0.36; x.drawImage(black, B.x0 + d * i * 1.5, B.y0 + d * i * 1.5); x.globalAlpha = a * 0.26; x.drawImage(white, B.x0 - d * i * 1.5, B.y0 - d * i * 1.5); }
+      x.globalAlpha = 0.8 * a; x.strokeStyle = "#fff"; x.lineCap = "round"; x.lineWidth = Math.max(1, B.h * 0.03);
+      x.beginPath(); x.moveTo(B.x0 + B.w * 0.08, B.y0 + B.h * 0.32); x.quadraticCurveTo(B.x0 + B.w * 0.5, B.y0 + B.h * 0.52, B.x1 - B.w * 0.08, B.y0 + B.h * 0.26); x.stroke();
+    } },
+  { key: "holo", name: { zh: "全息彩光", en: "Holographic streak" }, for: FX_ALL, stage: "over",
+    /** A rainbow streak smeared across the layer, a fainter, wider one about it. */
+    paint(x, B, a, E) {
+      const y = B.y0 + B.h * (0.25 + 0.3 * E.R(5)), bh = B.h * (0.06 + 0.16 * a), turn = E.R(6);
+      x.globalCompositeOperation = "source-atop";
+      x.globalAlpha = 0.3 * a; x.fillStyle = iridescent(x, B.x0, 0, B.x1, 0, turn); x.fillRect(B.x0, y - bh, B.w, bh * 3);
+      x.globalAlpha = 0.8 * a; x.fillRect(B.x0, y, B.w, bh);
+    } },
+  { key: "drips", name: { zh: "熔滴", en: "Drips" }, for: FX_ALL, stage: "behind", reach: (B, k) => ({ b: B.h * 0.65 + 14 * k }),
+    /**
+     * Drops running down from the layer's lowest edges, each in the colour the layer has there, with a
+     * highlight down it. Without reading a pixel back: the layer is smeared downward — the canvas laid
+     * behind itself 1, 2, 4, 8… pixels lower, so in a few steps every pixel below the layer's edge takes the
+     * colour of the edge above it — the smear cut down to the drops, and the drops laid behind the layer.
+     */
+    paint(x, B, a, E) {
+      const len = B.h * 0.6 * a + 10 * E.k, H = Math.ceil(B.h + len), src = region(x, B, "fxA"), c = fxCanvas("fxDrip", B.w, H);
+      const g = c.getContext("2d");
+      g.globalCompositeOperation = "source-over"; g.globalAlpha = 1; g.clearRect(0, 0, B.w, H); g.drawImage(src, 0, 0);
+      g.globalCompositeOperation = "destination-over";
+      for (let d = 1; d < len; d *= 2) g.drawImage(c, 0, d);
+      g.globalCompositeOperation = "destination-in"; g.fillStyle = "#fff"; g.beginPath();   // the drops: from inside the layer down past its edge, of uneven length, a round end
+      const n = 3 + 14 * a, hl = [];
+      for (let k = 0; k < Math.ceil(n); k++) {
+        const cx = B.w * E.R(k * 2.3 + 11), dw = Math.max(2, (3 + E.R(k * 3.7 + 12) * 7) * E.k) * (k < Math.floor(n) ? 1 : clamp(n - k)), top = B.h * (0.2 + 0.3 * E.R(k * 5.1 + 14)), bottom = B.h + len * (0.15 + 0.85 * E.R(k * 4.3 + 13)) - dw;
+        rounded(g, cx - dw / 2, top, dw, bottom - top, dw / 2); g.moveTo(cx + dw * 0.68, bottom); g.arc(cx, bottom, dw * 0.68, 0, TAU);
+        hl.push([cx - dw * 0.18, top, dw * 0.2, bottom - top]);
+      }
+      g.fill();
+      g.globalCompositeOperation = "source-atop"; g.fillStyle = "rgba(255,255,255,0.45)";   // a highlight down each
+      for (const [hx, ht, hw, hh] of hl) g.fillRect(hx, ht, hw, hh);
+      x.globalCompositeOperation = "destination-over"; x.drawImage(c, B.x0, B.y0);
+    } },
+  { key: "glitch", name: { zh: "故障切片", en: "Glitch slices" }, for: FX_ALL, stage: "filter", reach: (B) => ({ l: B.w * 0.11, r: B.w * 0.11 }),
+    /** Slices of the layer slid sideways, a few with a bar of red, cyan, green or the channel colour. */
+    paint(x, B, a, E) { slideBands(x, B, a, E, 2, true); } },
+];
+netart.elementFx = [
+  { key: "dither", name: { zh: "抖动点阵", en: "Dither" }, for: FX_ALL, stage: "fill",
+    /** The layer read in square cells and printed in one-bit pixels of ink by an ordered dither: the lighter, the fewer. */
+    paint(x, B, a, E) {
+      const cs = Math.max(2, Math.round((fast ? 4 : 2.6) * E.k)), cols = Math.ceil(B.w / cs), rows = Math.ceil(B.h / cs), ink = naInk();
+      const t = fxCanvas("fxCells", cols, rows), tg = t.getContext("2d");   // one pixel a cell, averaged as it is drawn down, so little is read back tg.globalCompositeOperation = "copy"; tg.imageSmoothingEnabled = true; tg.imageSmoothingQuality = "high";
+      tg.drawImage(x.canvas, B.x0, B.y0, cols * cs, rows * cs, 0, 0, cols, rows);
+      const img = tg.getImageData(0, 0, cols, rows).data;
+      x.globalCompositeOperation = "destination-out"; x.globalAlpha = a; x.fillRect(B.x0, B.y0, B.w, B.h);   // the layer fades out as its dither comes in
+      x.globalCompositeOperation = "source-over"; x.fillStyle = css(ink); x.beginPath();
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+        const q = (j * cols + i) * 4;
+        if (img[q + 3] < 100) continue;
+        const lum = (img[q] * 54 + img[q + 1] * 183 + img[q + 2] * 19) / 65280;   // (read back without its alpha multiplied in)
+        if ((dark ? lum : 1 - lum) * 0.85 + 0.12 > bayer(i, j)) x.rect(B.x0 + i * cs, B.y0 + j * cs, cs, cs);
+      }
+      x.fill();
+    } },
+  { key: "sort", name: { zh: "像素排序", en: "Pixel sorting" }, for: FX_ALL, stage: "filter", reach: (B) => ({ r: B.w * 0.5 }),
+    /** A one-pixel column of the layer stretched into a streak to the right, band after band. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA");
+      for (let i = 0, n = Math.round(6 + 60 * a); i < n; i++) {
+        const y = Math.floor(B.h * E.R(i * 1.9 + 21)), bh = Math.max(1, Math.round((2 + E.R(i * 2.7 + 22) * 10) * E.k)), sx = Math.floor(B.w * E.R(i * 3.3 + 23)), len = B.w * (0.05 + E.R(i * 4.1 + 24) * 0.45) * a;
+        x.drawImage(src, sx, y, 1, Math.min(bh, B.h - y), B.x0 + sx, B.y0 + y, len, Math.min(bh, B.h - y));
+      }
+    } },
+  { key: "mosh", name: { zh: "数据错位", en: "Datamosh" }, for: FX_ALL, stage: "filter", reach: (B) => { const c = Math.max(4, Math.min(B.w, B.h) * 0.12) * 1.5; return { l: c, t: c * 0.5, r: c, b: c * 0.5 }; },
+    /** Blocks of the layer copied a few cells off, some tinted, a few in flat colour. */
+    paint(x, B, a, E) {
+      const src = region(x, B, "fxA"), cell = Math.max(4, Math.min(B.w, B.h) * 0.12), spot = boost(E.C, 0.7);
+      for (let i = 0, n = Math.round(3 + 14 * a); i < n; i++) {
+        const bw = cell * (1 + Math.floor(E.R(i * 2.1 + 31) * 3)), bh = cell * (1 + Math.floor(E.R(i * 2.9 + 32) * 2)), sx = (B.w - bw) * E.R(i * 3.7 + 33), sy = (B.h - bh) * E.R(i * 4.3 + 34);
+        const dx = B.x0 + sx + Math.round((E.R(i * 5.1 + 35) - 0.5) * 6) * cell * 0.5, dy = B.y0 + sy + Math.round((E.R(i * 5.9 + 36) - 0.5) * 2) * cell * 0.5, kind = E.R(i * 6.7 + 37);
+        if (bw >= B.w || bh >= B.h) continue;
+        if (kind < 0.2) { x.globalCompositeOperation = "source-over"; x.fillStyle = css([spot, [255, 40, 160], [40, 200, 255], [250, 210, 40]][i % 4], 0.9); x.fillRect(dx, dy, bw, bh); continue; }
+        x.globalCompositeOperation = "source-over"; x.drawImage(src, sx, sy, bw, bh, dx, dy, bw, bh);
+        if (kind < 0.45) { x.globalCompositeOperation = "source-atop"; x.fillStyle = css(kind < 0.3 ? spot : [60, 80, 255], 0.45); x.fillRect(dx, dy, bw, bh); }
+      }
+    } },
+  { key: "shift", name: { zh: "扫描错行", en: "Scan shift" }, for: FX_ALL, stage: "filter", reach: (B) => ({ l: B.w * 0.11, r: B.w * 0.11 }),
+    /** Whole bands of the layer slid sideways. */
+    paint(x, B, a, E) { slideBands(x, B, a, E, 1, false); } },
+];
+
 let current = cel, values = {};
 /**
  * Fast mode leaves out effects that cost whole-canvas work. drawCover() turns it on for the frames

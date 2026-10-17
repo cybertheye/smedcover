@@ -451,7 +451,7 @@ test("ai: the prompt carries the style, the format and the user's notes", () => 
 });
 
 // ---------- looks
-import { LOOKS, LOOK_IDS, parseColour, role, lookParams, setLook, look, lookValues, styled } from "../ui/js/style.js";
+import { LOOKS, LOOK_IDS, parseColour, role, lookParams, setLook, look, lookValues, styled, layerEffects, effectsFor, paintEffects, FX_STAGES, FX_TYPES } from "../ui/js/style.js";
 
 test("looks: colours are read and classified by the job they do in the house style", () => {
   assert.deepEqual(parseColour("#fff"), [255, 255, 255, 1]);
@@ -723,6 +723,38 @@ test("the comic-verse, glass, jelly, anime-sky and spectral looks: many layers e
   setLook("spectrum", null, 3, true);
   assert.equal(LOOKS.spectrum.theme({}, [40, 120, 220], lookValues()).field, "rgba(14,14,14,1)");   // black paper
   assert.ok(LOOKS.glass.params.every((d) => !d.needsPhoto), "the glass bends a photo with the same sliders");
+  setLook("cel");
+});
+
+test("look effects on a layer: kept clean, carried by the layer whatever the look, painted stage by stage", () => {
+  const [tx] = normalizeLayers([{ type: "text", text: "x", lookFx: { "riso.dots": 0.5, "riso.dots:pitch": 0, "chrome.drips": 0, "chrome.drips:x": 1, "netart.sort": 7, "bad key": 1, "riso.shift": "0.3", "riso.ghost": null } }]).filter((l) => l.type === "text");
+  assert.deepEqual(tx.lookFx, { "riso.dots": 0.5, "riso.dots:pitch": 0, "netart.sort": 1, "riso.shift": 0.3 }, "an effect at 0 goes, with its own settings; a strength is kept within 0–1; a malformed key is dropped");
+  const kinds = normalizeLayers([{ type: "solid", color: "#ff0000", lookFx: { "riso.dots": 1 } }, { type: "title", lookFx: { "riso.dots": 1 } }]);
+  assert.deepEqual(kinds.find((l) => l.type === "solid").lookFx, { "riso.dots": 1 }, "a solid may carry them already");
+  assert.equal(kinds.find((l) => l.type === "title").lookFx, undefined, "the layout layers do not");
+  assert.equal(normalizeLayers([{ type: "text", text: "x", lookFx: { "riso.dots": 0 } }]).find((l) => l.type === "text").lookFx, undefined);
+  // every pilot effect: a stage, both names, the user's own layers, a painter; keys unique within the look
+  for (const id of ["riso", "chrome", "netart"]) {
+    const list = LOOKS[id].elementFx;
+    assert.ok(list.length >= 4, id);
+    assert.equal(new Set(list.map((e) => e.key)).size, list.length, `${id}: keys unique`);
+    for (const e of list) assert.ok(FX_STAGES.includes(e.stage) && e.name.zh && e.name.en && e.for.includes("text") && e.for.includes("asset") && typeof e.paint === "function", `${id}.${e.key}`);
+  }
+  assert.deepEqual(FX_TYPES, ["text", "asset"]);
+  assert.equal(effectsFor("riso", "photo").length, 0, "photos are not open yet");
+  assert.equal(effectsFor("velvet", "text").length, 0, "a look without effects of its own");
+  // a layer's effects apply whatever look the cover is in, in stage order, only those that suit its type
+  const L = { id: "l1", type: "text", lookFx: { "netart.sort": 0.5, "chrome.chrome": 1, "riso.dots": 0.4, "riso.dots:pitch": 0.9, "chrome.drips": 0.3, "gone.away": 1 } };
+  for (const at of ["cel", "velvet", "riso"]) {
+    setLook(at, null, 3, true);
+    const fx = layerEffects(L);
+    assert.deepEqual(fx.map((e) => e.id), ["chrome.chrome", "riso.dots", "netart.sort", "chrome.drips"], `under ${at}: fill, over, filter, behind; an effect of no look left out`);
+    assert.deepEqual(fx[1].opt, { pitch: 0.9 });
+  }
+  assert.deepEqual(layerEffects({ ...L, type: "photo" }), [], "nor on a photo, yet");
+  assert.deepEqual(layerEffects({ id: "l2", type: "text" }), []);
+  // without a canvas (the tests' stand-in) painting them does no harm
+  paintEffects({ canvas: null }, { x0: 0, y0: 0, x1: 100, y1: 50, w: 100, h: 50 }, layerEffects(L), L, 1, [255, 0, 0]);
   setLook("cel");
 });
 
