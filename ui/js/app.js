@@ -2032,10 +2032,9 @@ function fxControl(L) {
   const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline") };
   const groups = ["passes", "mask", "outline"].map((kind) => ({ group: kinds[kind], items: Object.entries(EFFECTS).filter(([, e]) => e.kind === kind).map(([id, e]) => [id, e.name[getLang()]]) }));
   const fx = EFFECTS[L.fx] ? L.fx : "auto", kind = EFFECTS[fx].kind, lt = letteringOf(L);   // an effect no longer in the menu (a look's lettering, now its effect) is shown as automatic
-  if (lt) {
-    const menu = select(groups, fx, () => {});
-    menu.disabled = true;
-    return { kids: [menu, el("div", { class: "hint", style: "margin:4px 0 0" }, t("fx.byLetter", letteringName(lt)))], tip: "" };
+  if (lt) {   // the menu, off, naming the lettering in its one line: nothing above the look effects grows as it comes on (the reason in the tip)
+    const why = t("fx.byLetter", letteringName(lt));
+    return { kids: [el("select", { disabled: true, title: why }, el("option", {}, t("fx.byLetterShort", letteringName(lt))))], tip: why };
   }
   return {
     kids: [

@@ -92,7 +92,7 @@
   .psec-b>.sl>:nth-child(1){grid-column:2;white-space:nowrap;font-size:13px}
   .psec-b>.sl>:nth-child(2){grid-column:3;width:100%;margin:0}
   .psec-b>.sl>:nth-child(3){grid-column:4;font:600 12px var(--mono);text-align:right;opacity:.8;min-width:3.6em}
-  .psec-b>.sl.off>:nth-child(2){grid-column:3/-1;font-size:12px;line-height:1.4}
+  .psec-b>.sl.off>:nth-child(2){grid-column:3/-1;font-size:12px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}   /* one line, as tall as a slider's row: the whole reason is in the tip */
   .psec-b>.sl.off>*{opacity:.5}
   .psec-b>.chk{display:flex}
   .psep{grid-column:1/-1;border-top:1px solid var(--line);margin:2px 0}

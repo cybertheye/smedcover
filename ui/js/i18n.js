@@ -450,6 +450,7 @@ const STR = {
   "props.uncut": ["恢复背景", "Put the background back"],
   "props.fillHint": ["铺满画布的照片像背景一样拖动和缩放；先点一下选中它，再拖。", "A photo filling the canvas moves and scales like a background: click it first, then drag."],
   "props.printHint": ["拖动移动，拖四角缩放，拖顶部圆点旋转。描边和投影在去除背景后沿着主体走，否则沿着照片边缘。", "Drag to move, a corner to scale, the top knob to turn. With the background removed the outline and shadow follow the subject, otherwise the photo's edge."],
+  "fx.byLetterShort": ["字形：{0}", "Lettering: {0}"],
   "fx.byLetter": ["文字现在用风格效果「{0}」的字形；把它拉到 0，这里的效果才起作用。", "The lettering is the look effect {0}; turn it to 0 for this menu to apply."],
   "fx.warpHint": ["在画布上拖动文字四角的菱形手柄，可以自由调整透视。", "Drag the diamond handles at the lettering's corners on the canvas to set the perspective freely."],
   "fx.warpReset": ["重置透视", "Reset the perspective"],
