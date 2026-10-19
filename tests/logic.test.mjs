@@ -476,7 +476,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli", "gilded"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid", "glass"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
@@ -616,7 +616,7 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
 
 test("the poster looks: many settings each, their own grounds, flat layouts (all but the collage, on the slanted ones), and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
-  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct"]) {
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco"]) {
     const L = LOOKS[id];
     assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
     assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
@@ -755,6 +755,45 @@ test("the city pop night and the constructivist poster: many layers each, their 
   assert.ok(at(30)[2] > at(30)[0] + 30, "the shadows sunk toward a night teal");
   assert.ok([...Array(256).keys()].every((l) => cel[l * 4 + 3] === (l % 2 ? 255 : 128)), "alpha kept");
   assert.deepEqual([...ramp(0)].filter((_, i) => i % 4 === 1), [...Array(256).keys()], "at nothing, nothing changes");
+  setLook("cel");
+});
+
+test("the dark deco: Gotham's night by default, a crimson sky and black and gold by degrees, the channel colour as floodlight; a photo painted into the night", async () => {
+  const L = LOOKS.deco;
+  assert.ok(L.params.length >= 12 && L.seeded && L.oneTheme && typeof L.layout === "function", `${L.params.length} settings, seeded, night only, flat layouts of its own`);
+  assert.ok(Object.keys(L.scene).length >= 5 && L.elementFx.length >= 4, "scene objects and effects");
+  assert.equal(L.layout("stack", 1920, 1080).cat.onAccent, false, "the channel name on the black base is set as on the field");
+  const field = (p) => { setLook("deco", p, 3, true); return parseColour(L.theme({}, [40, 120, 220], lookValues()).field); };
+  const [night, red, gilt] = [{}, { red: 1 }, { gilt: 1 }].map(field);
+  assert.ok(night[2] > night[0] * 3 && night[2] > 40, "an ultramarine night");
+  assert.ok(red[0] > red[2] * 2 && red[0] > night[0] + 40, "turned to Gotham's crimson sky");
+  assert.ok(gilt[0] >= gilt[2] && Math.max(...gilt) < 30, "or to black and gold");
+  const { dkPixels, dkSpot } = (await import("../ui/js/style.js")).__test;
+  const hue = (c) => Math.atan2(Math.sqrt(3) * (c[1] - c[2]), 2 * c[0] - c[1] - c[2]);
+  for (const c of [[214, 28, 42], [6, 214, 160], [255, 183, 3]]) assert.ok(Math.abs(hue(dkSpot(c)) - hue(c)) < 0.2, `the floodlight keeps the channel's hue: ${c}`);
+  const navy = dkSpot([20, 30, 120]);
+  assert.ok((0.2126 * navy[0] + 0.7152 * navy[1] + 0.0722 * navy[2]) / 255 > 0.3, "and a dark blue is made light enough to read as light on the night");
+  const px = (cols, f = (d) => dkPixels(d, 1, 0)) => { const d = new Uint8ClampedArray(cols.flat()); f(d); return [...Array(cols.length).keys()].map((i) => [...d.slice(i * 4, i * 4 + 4)]); };
+  const [black, grey, white, scarlet, amber] = px([[20, 20, 20, 255], [128, 128, 128, 200], [250, 250, 250, 255], [220, 30, 30, 255], [250, 180, 40, 255]]);
+  assert.ok(Math.max(...black.slice(0, 3)) < 14, "the shadows crushed to black");
+  assert.ok(grey[2] > grey[0] * 2 && grey[3] === 200, "a mid grey into the ultramarine, alpha kept");
+  assert.ok(white[0] > 200 && white[2] > 200, "the lights pale");
+  assert.ok(scarlet[0] > scarlet[2] * 2 && amber[0] > amber[2] * 2 && amber[1] > scarlet[1], "warm colours kept as crimson and gold, not turned blue");
+  assert.deepEqual(px([[90, 140, 60, 255]], (d) => dkPixels(d, 0, 0)), [[90, 140, 60, 255]], "at nothing, nothing changes");
+  const once = px([[128, 128, 128, 255]])[0], twice = px([once], (d) => dkPixels(d, 1, 0, true))[0];
+  assert.ok(once.slice(0, 3).every((v, i) => Math.abs(v - twice[i]) < 40), "read by value, a picture already in the night is not crushed again");
+  // the lettering: no black outline round it; the highlighted words glass of the channel's own hue, light enough to read as light on the night
+  const lumOf = (c) => (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255;
+  for (const C of [[251, 86, 7], [255, 183, 3], [58, 134, 255], [168, 85, 247], [6, 214, 160], [20, 30, 120]]) {
+    const fills = [], strokes = [];
+    const ctx = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...s].length * 40 }) : k === "createLinearGradient" ? () => ({ addColorStop() {} }) : () => {}), set: (t, k, v) => { if (k === "fillStyle" && typeof v === "string") fills.push(v); if (k === "strokeStyle") strokes.push(v); t[k] = v; return true; } });
+    setLook("deco", {}, 3, true);
+    L.runs(ctx, (fn) => { fn({ t: "Ab", hi: false }, 0); fn({ t: "cd", hi: true }, 80); }, { fs: 100, strokeAmt: 1, shadowAmt: 1, C, unit: 1 }, lookValues());
+    const glass = parseColour(fills.at(-1)).slice(0, 3);
+    if (C[2] !== 120) assert.ok(Math.abs(hue(glass) - hue(C)) < 0.25, `the glass keeps the channel's hue: ${C} -> ${glass.map(Math.round)}`);
+    assert.ok(lumOf(glass) > 0.3, `and is light: ${C} -> ${glass.map(Math.round)}`);
+    assert.ok(!strokes.some((v) => { const c = parseColour(v); return c && lumOf(c) < 0.1; }), "no black outline");
+  }
   setLook("cel");
 });
 
