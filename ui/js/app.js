@@ -2430,7 +2430,7 @@ function toggleLayout() {
 }
 /** The canvas's FOCUS frame and tag: which layer the canvas is acting on. */
 function syncFocus() {
-  const stage = $("stage"), tag = $("focustag") || stage.appendChild(el("div", { id: "focustag" })), on = S.focus && S.mode === "edit" && !V3.on;
+  const stage = $("stage"), tag = $("focustag") || stage.appendChild(el("div", { id: "focustag" })), on = !!S.focus && S.mode === "edit" && !V3.on;   // a boolean: toggle(…, undefined) would flip it
   stage.classList.toggle("focus", on);
   tag.hidden = !on;
   if (!on) return;
