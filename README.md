@@ -27,7 +27,7 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
   - Setup: **Brand**, **Sizes & export**, **AI**
 - **Centre** — the main canvas, and below it a thumbnail of every output size. Click one to show that size on the canvas.
 - **Right** (Edit only) — the layer list and the selected layer's properties.
-- **Top bar** — profile switcher, undo and redo, clear, SURPRISE ME (你看着办 in Chinese), export. *Clear* asks first, then takes every layer you added off this channel's cover, puts the layout layers back to the default design's places, effects and colours, and the scene objects to theirs; the title and tag words and the style stay, and the photos are still in the bitmap assets. It is one step of undo.
+- **Top bar** — profile switcher, undo and redo, clear, check, SURPRISE ME (你看着办 in Chinese), export. For *Check* see [The cover check](#the-cover-check). *Clear* asks first, then takes every layer you added off this channel's cover, puts the layout layers back to the default design's places, effects and colours, and the scene objects to theirs; the title and tag words and the style stay, and the photos are still in the bitmap assets. It is one step of undo.
 - **Dialogs** — a click on the dimmed page outside a dialog cancels it (a press inside dragged out does not). Two stay: the first-run welcome, where a starting point must be chosen, and an export's progress, which only its own *Cancel* stops.
 
 ## Quick start
@@ -608,6 +608,34 @@ Privacy and cost:
 - *Test connection* makes no picture and costs nothing: OpenAI and Gemini are asked about the model; Seedream is sent an empty prompt to see how it refuses (so only the key is confirmed; the model name is fully confirmed by the first repaint). Success shows in green, failure in red (the text model's test too).
 - The output size follows the shape (a repaint the photo's, a new photo the canvas's): about 2.5 megapixels on OpenAI's newer models (the older gpt-image-1 has three fixed sizes), about 4 megapixels on Seedream; Gemini follows the photo sent when repainting and is asked for the nearest aspect ratio (such as 16:9) when generating.
 - When repainting, the photo (scaled to 1536 px on its longer side) and the style description are sent to the address you entered; when generating, the description and any reference picture (also 1536 px at most).
+
+## The cover check
+
+*Check*, right of *Clear* in the top bar, checks this cover for the platforms you post to. The number on it counts problems (red) or suggestions (yellow); a green ✓ means all clear. It updates a moment after you stop editing.
+
+In it, choose where you post (Bilibili, YouTube, Douyin, RED, WeChat Channels, WeChat articles; any number), and whether the video is landscape or portrait; with RED, choose its cover ratio too. What each platform wants (checked on a phone's upload screen):
+
+| Platform | Covers |
+|---|---|
+| Bilibili | 16:9 and 4:3 |
+| YouTube | landscape video 16:9; portrait video 9:16 |
+| Douyin | 4:3 and 3:4 |
+| RED | one of 4:3, 3:4, 1:1 |
+| WeChat Channels | portrait video 3:4; landscape video 3:4 and 4:3 |
+| WeChat articles | 2.35:1 and 1:1 |
+
+What it checks:
+
+| Check | Standard | Fix |
+|---|---|---|
+| The title reads on a phone | the title's type size at the width the platform's feed shows the cover: 14px and up passes, 10–14px yellow, under 10px red | the title made bigger at that size; when it cannot grow enough, how many characters to cut the longest line to |
+| Title length | two lines at most, about 10 characters a line (a CJK character 1, a Latin letter ½) | none, a note |
+| The title against its background | WCAG large text, 3:1 at least; a busy background counts by its worst tenth, an outline counts | tried in turn: a heavier outline, a darker background photo, a plate, black or white letters |
+| Something to look at | the biggest picture (channel graphic, asset, cut-out, photo) takes at least 12% of the cover; not checked with a background photo that has no cut-out | made bigger at that size |
+| Nothing covered | the title, your words and cut-outs are not under the duration or play count Bilibili and YouTube put on a card's corners (positions estimated) | moved clear at that size |
+| Every size there | the profile has every ratio the platforms want | the size added |
+
+Every issue has *Show* (that size on the canvas, the layer selected); those that can be fixed have *Fix*, and there is *Fix all*. Each fix is one step of undo; placement and size change only at the size the issue is about, while the contrast fixes (outline, plate, letter colour, a darker photo) apply to every size. The feed widths and badge positions are estimates still to be measured; see [docs/cover-check.zh-CN.md](docs/cover-check.zh-CN.md) (in Chinese).
 
 ## Export
 

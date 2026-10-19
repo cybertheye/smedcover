@@ -87,7 +87,7 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.notEqual(c.layers, p.design.layers);                       // a copy, not the same array
   const own = normalizeCover({ layers: [{ type: "title", stroke: 0.5 }] }, p);
   assert.equal(own.layers.find((l) => l.id === "title").stroke, 0.5);
-  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size", hideScene: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [] });
+  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size", hideScene: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], check: { platforms: [], orient: "h", red: "3:4" } });
   assert.deepEqual(normalizeSettings({ channels: { p1: "c1", "bad key!": "c2", p2: 7 } }).channels, { p1: "c1" });
   assert.deepEqual(normalizeSettings({ columns: { left: 410.4, right: -5, setup: "x" } }).columns, { left: 410, right: 0, setup: 0 });
   assert.deepEqual([normalizeSettings({ cutEngine: "birefnet" }).cutEngine, normalizeSettings({ cutEngine: "magic" }).cutEngine], ["birefnet", ""]);
@@ -1499,4 +1499,48 @@ test("a layout part may be left out of a cover: hidden, never the ground, never 
   assert.equal(of("graphic").off, true); assert.equal(of("graphic").visible, false, "a part left out is hidden");
   assert.equal(of("bg").off, undefined, "the ground is never left out");
   assert.equal(of("text").off, undefined, "a layer of the user's is deleted, not left out");
+});
+
+test("the platforms' covers: the ratios each wants, by the video's orientation and RED's choice", async () => {
+  const { wanted, isRatio, PLATFORM_IDS } = await import("../ui/js/platforms.js");
+  const ratios = (o) => wanted({ orient: "h", red: "3:4", ...o }).map((w) => w.ratio);
+  assert.deepEqual(ratios({ platforms: ["bili"] }), ["16:9", "4:3"]);
+  assert.deepEqual(ratios({ platforms: ["youtube"] }), ["16:9"]);
+  assert.deepEqual(ratios({ platforms: ["youtube"], orient: "v" }), ["9:16"]);
+  assert.deepEqual(ratios({ platforms: ["douyin"] }), ["4:3", "3:4"]);
+  assert.deepEqual(ratios({ platforms: ["red"], red: "1:1" }), ["1:1"]);
+  assert.deepEqual(ratios({ platforms: ["channels"], orient: "v" }), ["3:4"]);
+  assert.deepEqual(ratios({ platforms: ["channels"] }), ["4:3", "3:4"]);
+  assert.deepEqual(ratios({ platforms: ["mp"] }), ["1:1", "2.35:1"]);
+  assert.deepEqual(ratios({ platforms: PLATFORM_IDS }), ["16:9", "4:3", "3:4", "1:1", "2.35:1"], "all six, a landscape video, RED at 3:4: five ratios");
+  assert.ok(isRatio(1600, 1200, "4:3") && isRatio(900, 383, "2.35:1") && !isRatio(1146, 717, "16:9"));
+});
+
+test("the cover check: type size in the feed, contrast, a picture big enough, the apps' badges, sizes missing", async () => {
+  const { checkCover, titleContrast, contrastRatio, luminance, lineUnits, moveOut, boxOf } = await import("../ui/js/check.js");
+  assert.equal(lineUnits("封面Ab"), 3);
+  assert.ok(Math.abs(contrastRatio(luminance(255, 255, 255), luminance(0, 0, 0)) - 21) < 1e-9);
+  // a title's pixels against what is behind them: white on white fails, white with a black outline on white reads
+  const px = (n, rgba) => { const a = new Uint8ClampedArray(n * 4); for (let i = 0; i < n; i++) a.set(rgba, i * 4); return a; };
+  assert.ok(titleContrast(px(100, [255, 255, 255, 255]), px(100, [240, 240, 240, 255])) < 1.2);
+  const outlined = px(100, [255, 255, 255, 255]); for (let i = 0; i < 40; i++) outlined.set([0, 0, 0, 255], i * 4);
+  assert.ok(titleContrast(outlined, px(100, [240, 240, 240, 255])) > 10);
+  assert.equal(titleContrast(px(100, [255, 255, 255, 0]), px(100, [0, 0, 0, 255])), null, "nothing solid: nothing to say");
+  const sizes = [{ key: "1920x1080", w: 1920, h: 1080, vw: 1920, vh: 1080 }];
+  const big = { cx: 700, cy: 350, hw: 600, hh: 210, r: 0 };   // two lines in 420 px: a type size of about 181, 16.5 px in a 175 px feed
+  const seen = (o) => ({ "1920x1080": { title: { id: "title", hit: big }, contrast: 6, pictures: [{ id: "graphic", hit: { cx: 1400, cy: 600, hw: 300, hh: 250, r: 0 } }], unknown: false, parts: [{ id: "title", hit: big }], ...o } });
+  const rules = (o, extra = {}) => checkCover({ title: "封面标题\n*第二行*", sizes, seen: seen(o), platforms: ["bili"], orient: "h", red: "3:4", ...extra }).map((i) => `${i.rule}:${i.level}`);
+  assert.deepEqual(rules({}), ["E1:red"], "B站 also wants 4:3, which this profile lacks; the 16:9 cover itself is fine");
+  // A1: 240 px of block for two lines is a type size of about 103; at 175 px of feed out of 1920, 9.4 px
+  assert.ok(rules({ title: { id: "title", hit: { cx: 600, cy: 300, hw: 500, hh: 120, r: 0 } } }).includes("A1:red"));
+  assert.ok(rules({ title: { id: "title", hit: { cx: 600, cy: 300, hw: 500, hh: 150, r: 0 } } }).includes("A1:yellow"));
+  assert.ok(rules({ contrast: 2.5 }).includes("B1:yellow") && rules({ contrast: 1.5 }).includes("B1:red"));
+  assert.ok(rules({ pictures: [{ id: "graphic", hit: { cx: 1400, cy: 600, hw: 150, hh: 120, r: 0 } }] }).includes("C1:yellow"));
+  assert.ok(!rules({ unknown: true, pictures: [] }).some((r) => r.startsWith("C1")), "a background photo's subject is not measured");
+  const corner = { parts: [{ id: "t1", hit: { cx: 1750, cy: 1000, hw: 150, hh: 60, r: 0 } }] };
+  assert.ok(rules(corner).includes("D1:red"), "words in B站's duration corner");
+  assert.ok(rules({}, { title: "这是一个非常非常长的封面标题哦" }).includes("A2:yellow"));
+  // moving out of a corner: the least way, still on the canvas
+  const mv = moveOut(boxOf({ cx: 1750, cy: 1000, hw: 150, hh: 60, r: 0 }), { x0: 1497.6, y0: 907.2, x1: 1920, y1: 1080 }, 1920, 1080);
+  assert.ok(mv && mv.dy < 0 && mv.dx === 0 && 1000 + mv.dy + 60 <= 907.2);
 });

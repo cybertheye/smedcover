@@ -19,6 +19,8 @@ import { EFFECTS, effectUses, warpCorners } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
 import { sizeOf, PIXELS } from "./photo.js";
+import { PLATFORMS, RED_RATIOS, wanted, isRatio } from "./platforms.js";
+import { checkCover, LIMITS as CHECK_LIMITS, boxOf, moveOut, titleContrast, titleLines as typedLines, lineUnits, luminance } from "./check.js";
 import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, labelRoom, drawStack } from "./stack3d.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
@@ -160,6 +162,7 @@ function touch({ profile = false, cover = false, panel = false, side = false, st
   if (side) renderSide();
   queueDraw();
   recordHistory();
+  checkSoon();
 }
 
 // ---------- fonts and the profile
@@ -184,7 +187,7 @@ async function applyProfile() {
   if (!S.profile.sizes.some((s) => sizeKey(s) === S.sel)) S.sel = sizeKey(S.profile.sizes[0]);
   if (!layer()) S.layerId = "title";
   await applyFonts();
-  syncTop(); syncTabs(); renderPanel(); renderSide(); buildStrip(); syncToolbar(); queueDraw();
+  syncTop(); syncTabs(); renderPanel(); renderSide(); buildStrip(); syncToolbar(); queueDraw(); checkSoon();
 }
 
 // ---------- drawing: the main canvas every frame, the thumbnails a little later
@@ -2668,6 +2671,190 @@ function tick3d() {
   V3.raf = requestAnimationFrame(() => { V3.raf = 0; if (draw3d()) tick3d(); });
 }
 
+// ---------- the cover check (体检, in the top bar right of Clear)
+// Each size the chosen platforms want is painted small and read back — where each layer lies, the title
+// alone and what is under it — and check.js says, rule by rule, what will not read, not stand out or be
+// covered there (docs/cover-check.zh-CN.md). Settings' `check` holds the platforms, whether the video is
+// landscape or portrait, and 小红书's ratio. A fix is one step of undo; placement is changed only at the
+// size the issue is about. The count on the button follows a moment after the last change.
+const CHECK = { issues: null, open: false, job: 0 };
+const CHECK_PX = 320;   // how wide each size is painted for the check
+const pause = () => new Promise((r) => setTimeout(r, 0));
+const sizeByKey = (key) => S.profile.sizes.find((s) => sizeKey(s) === key) || null;
+const frameOf = (size) => { const [vw, vh] = virtualSize(size.w, size.h); return { vw, vh, key: sizeKey(size), catId: cat().id }; };
+const shownHere = (L) => !!L && L.visible && !L.off && appliesTo(L, cat().id);
+/** What size `size` of the cover paints, for checkCover (see check.js); bg: the luminance behind the title, on average. `contrast` false: where things are only. */
+function seenOf(size, contrast0 = true) {
+  const [vw] = virtualSize(size.w, size.h), k = CHECK_PX / vw;
+  const paintOne = (extra) => {
+    const cv = document.createElement("canvas");
+    cv.getContext("2d", { willReadFrequently: true });
+    drawCover(cv, { profile: S.profile, catIndex: catIndex(), size, pixelW: CHECK_PX, cover: S.cover, photos: S.photos, ...extra });
+    return cv;
+  };
+  const cv = paintOne({}), hits = cv._hits || [], T = layer("title"), th = shownHere(T) ? hits.find((h) => h.id === "title") || null : null;
+  let contrast = null, bg = null;
+  if (th && contrast0) {   // the title alone, and what lies under it, over the title's box
+    const i = S.cover.layers.indexOf(T), a = paintOne({ only: i }), b = paintOne({ below: i }), box = boxOf(th);
+    const x0 = Math.max(0, Math.floor(box.x0 * k)), y0 = Math.max(0, Math.floor(box.y0 * k)), x1 = Math.min(a.width, Math.ceil(box.x1 * k)), y1 = Math.min(a.height, Math.ceil(box.y1 * k));
+    if (x1 > x0 && y1 > y0) {
+      const under = b.getContext("2d").getImageData(x0, y0, x1 - x0, y1 - y0).data;
+      contrast = titleContrast(a.getContext("2d").getImageData(x0, y0, x1 - x0, y1 - y0).data, under);
+      let sum = 0;
+      for (let j = 0; j < under.length; j += 4) sum += luminance(under[j], under[j + 1], under[j + 2]);
+      bg = sum / (under.length / 4);
+    }
+  }
+  const pictures = [], parts = th ? [{ id: "title", hit: th }] : [];
+  let unknown = false;
+  for (const h of hits) {
+    const L = layer(h.id);
+    if (!shownHere(L)) continue;
+    if (L.type === "photo" && L.fill && !L.cut) { if (!passivesOf(L).length) unknown = true; continue; }   // a background photo: its subject cannot be measured, unless cut out
+    if (["graphic", "asset", "photo", "subject"].includes(L.type)) pictures.push({ id: L.id, hit: h });
+    if (L.type === "text" || L.type === "subject" || (L.type === "photo" && (L.cut || L.of))) parts.push({ id: L.id, hit: h });
+  }
+  return { title: th && { id: "title", hit: th }, contrast, bg, pictures, unknown, parts };
+}
+/** Checks the cover for the platforms chosen: CHECK.issues, or null with none chosen. `slow`: a size per turn of the event loop, given up when something newer comes. */
+async function runCheck(slow = false) {
+  const c = S.settings.check, job = ++CHECK.job;
+  if (!S.cover || !c.platforms.length) return (CHECK.issues = null);
+  const seen = {};
+  for (const { ratio } of wanted(c)) {
+    const s = S.profile.sizes.find((x) => isRatio(x.w, x.h, ratio));
+    if (!s || seen[sizeKey(s)]) continue;
+    if (slow) { await pause(); if (job !== CHECK.job) return null; }
+    seen[sizeKey(s)] = seenOf(s);
+  }
+  const sizes = S.profile.sizes.map((s) => { const [vw, vh] = virtualSize(s.w, s.h); return { key: sizeKey(s), w: s.w, h: s.h, vw, vh }; });
+  return (CHECK.issues = checkCover({ title: shownHere(layer("title")) ? S.cover.title : "", sizes, seen, ...c }));
+}
+/** The count on the button, a moment after the last change: never while something is dragged. */
+function checkSoon() {
+  if (!S.settings.check.platforms.length) return;
+  later("check", 1500, async () => {
+    if (LIVE || drafting() || CHECK.open) return CHECK.open ? null : checkSoon();
+    if (await runCheck(true)) syncTop();
+  });
+}
+function checkButton() {
+  const list = CHECK.issues, red = list ? list.filter((i) => i.level === "red").length : 0, yellow = list ? list.length - red : 0;
+  const mark = !list ? "" : red ? String(red) : yellow ? String(yellow) : "✓";
+  return el("button", { class: "btn checkbtn", title: t("check.tip"), onclick: checkDialog }, t("check.open"), mark && el("i", { class: red ? "red" : yellow ? "yellow" : "ok" }, mark));
+}
+async function checkDialog() {
+  CHECK.open = true;
+  await runCheck();
+  renderCheck();
+  $("modal").hidden = false;
+}
+function closeCheck() { CHECK.open = false; closeModal(); syncTop(); }
+const platformName = (id) => { const p = PLATFORMS.find((x) => x.id === id); return p ? p.name[getLang()] : id; };
+const sizeName = (key) => { const s = sizeByKey(key); return s ? sizeCaption(s) : key; };
+/** An issue in words. */
+function issueText(i) {
+  const names = i.platforms.map(platformName).join("、"), pct = (v) => Math.round(v * 100);
+  switch (i.rule) {
+    case "A1": { const longest = Math.max(1, ...typedLines(S.cover.title).map(lineUnits)); return t("check.msg.A1", names, i.value.toFixed(1), Math.max(2, Math.floor((longest * i.value) / i.need))); }
+    case "A2": return t("check.msg.A2", i.what, Math.ceil(i.value));
+    case "B1": return t("check.msg.B1", i.value.toFixed(1));
+    case "C1": return t("check.msg.C1", layer(i.layer) ? layerName(layer(i.layer)) : "—", pct(i.value));
+    case "D1": return t("check.msg.D1", layer(i.layer) ? layerName(layer(i.layer)) : "—", pct(i.value), names, t("check.zone." + i.what));
+    case "E1": return t("check.msg.E1", names, i.ratio);
+  }
+  return i.rule;
+}
+function renderCheck() {
+  const c = S.settings.check, lang = getLang(), m = $("modal"), list = CHECK.issues || [];
+  const again = async () => { persistSettings(); await runCheck(); renderCheck(); syncTop(); };
+  const chip = (p) => el("button", { class: c.platforms.includes(p.id) ? "on" : "", onclick: () => { c.platforms = c.platforms.includes(p.id) ? c.platforms.filter((x) => x !== p.id) : [...c.platforms, p.id]; again(); } }, p.name[lang]);
+  const seg = (key, opts) => el("div", { class: "seg" }, opts.map(([v, label]) => el("button", { class: "btn" + (c[key] === v ? " on" : ""), onclick: () => { c[key] = v; again(); } }, label)));
+  const red = list.filter((i) => i.level === "red").length, fixable = list.filter((i) => FIXES[i.rule]);
+  const row = (i) => el("div", { class: "issue " + i.level }, el("span", { class: "dot" }),
+    el("div", {}, el("b", {}, issueText(i)), el("div", { class: "hint" }, [i.size && sizeName(i.size), t("check.why." + i.rule)].filter(Boolean).join(" · "))),
+    el("div", { class: "acts" }, (i.size || i.layer) && el("button", { class: "btn", onclick: () => locateIssue(i) }, t("check.locate")),
+      FIXES[i.rule] && el("button", { class: "btn solid", onclick: () => applyFixes([i]) }, t("check.fix"))));
+  m.replaceChildren(el("div", { class: "dlg wide check" },
+    el("h2", {}, t("check.title")),
+    el("div", { class: "hint", style: "margin:0" }, t("check.intro")),
+    el("div", {}, cap("check.platforms"), el("div", { class: "chips" }, PLATFORMS.map(chip))),
+    c.platforms.length > 0 && el("div", { class: "check-opts" }, el("div", {}, cap("check.orient"), seg("orient", [["h", t("check.orient.h")], ["v", t("check.orient.v")]])),
+      c.platforms.includes("red") && el("div", {}, cap("check.red"), seg("red", RED_RATIOS.map((r) => [r, r])))),
+    !c.platforms.length ? el("div", { class: "hint" }, t("check.pick"))
+      : el("div", {}, el("div", { class: "check-sum " + (red ? "red" : list.length ? "yellow" : "ok") }, list.length ? t("check.sum", red, list.length - red) : t("check.pass")),
+        el("div", { class: "issues" }, list.map(row))),
+    el("div", { class: "acts" }, fixable.length > 0 && el("button", { class: "btn", onclick: () => applyFixes(fixable) }, t("check.fixAll", fixable.length)),
+      el("button", { class: "btn solid", onclick: closeCheck }, t("check.close")))));
+  m.onDismiss = closeCheck;
+}
+/** Shows where an issue is: its size on the canvas, its layer selected. */
+function locateIssue(i) {
+  closeCheck();
+  if (i.size && sizeByKey(i.size)) selectSize(i.size);
+  if (i.layer && layer(i.layer) && shownHere(layer(i.layer))) goToLayer(i.layer);
+}
+/** Moves layer L back inside the canvas at `size` (it may have grown past an edge), by that size alone. */
+function keepInside(L, size, margin = 0.03) {
+  const f = frameOf(size), seen = seenOf(size, false), h = [...seen.pictures, ...seen.parts].find((x) => x.id === L.id);
+  if (!h) return;
+  const b = boxOf(h.hit), mx = f.vw * margin, my = f.vh * margin;
+  const dx = b.x0 < mx ? mx - b.x0 : b.x1 > f.vw - mx ? f.vw - mx - b.x1 : 0, dy = b.y0 < my ? my - b.y0 : b.y1 > f.vh - my ? f.vh - my - b.y1 : 0;
+  if (dx || dy) adjust(L, f, "size", { ddx: dx, ddy: dy });
+}
+/** Makes layer L at `size` `want` times bigger, at most as big as the canvas (less a margin) allows. False when it cannot grow. */
+function growAt(L, size, hit, want) {
+  const f = frameOf(size), b = boxOf(hit), room = Math.min((f.vw * 0.94) / (b.x1 - b.x0), (f.vh * 0.9) / (b.y1 - b.y0)), k = Math.min(room, want);
+  if (k <= 1.005) return false;
+  adjust(L, f, "size", { scale: k });
+  keepInside(L, size);
+  return true;
+}
+/** The fixes, by rule: each changes the cover and returns false when it could do nothing. */
+const FIXES = {
+  A1: (i) => { const size = sizeByKey(i.size), seen = size && seenOf(size, false); return !!(seen && seen.title) && growAt(layer("title"), size, seen.title.hit, (i.need / i.value) * 1.03); },
+  C1: (i) => { const size = sizeByKey(i.size), L = layer(i.layer), p = size && L && seenOf(size, false).pictures.find((x) => x.id === L.id); return !!p && growAt(L, size, p.hit, Math.sqrt(i.need / i.value) * 1.03); },
+  D1: (i) => {
+    const size = sizeByKey(i.size), L = layer(i.layer), p = size && L && seenOf(size, false).parts.find((x) => x.id === L.id);
+    if (!p) return false;
+    const f = frameOf(size), mv = moveOut(boxOf(p.hit), i.zone, f.vw, f.vh);
+    if (!mv) return false;
+    adjust(L, f, "size", { ddx: mv.dx, ddy: mv.dy });
+    return true;
+  },
+  // the title against what is behind it: a heavier outline, a darker photo, a plate, then black or white letters — each tried until it reads
+  B1: (i) => {
+    const size = sizeByKey(i.size), L = layer("title"), ok = () => { const c = seenOf(size).contrast; return c != null && c >= CHECK_LIMITS.contrast.ok; };
+    if (!size || !L) return false;
+    const P = mainPhoto(), steps = [
+      () => { if (!effectUses(L.fx).stroke || (L.stroke ?? 1) >= 1.6) return false; L.stroke = 1.6; return true; },
+      () => { if (!P || (P.dim || 0) >= 0.5) return false; P.dim = Math.min(0.5, (P.dim || 0) + 0.15); return true; },
+      () => { if (!P || (P.dim || 0) >= 0.5) return false; P.dim = Math.min(0.5, (P.dim || 0) + 0.15); return true; },
+      () => { if (L.plate) return false; L.plate = true; return true; },
+      () => { const bg = seenOf(size).bg, ink = bg != null && bg > 0.18 ? "#07070c" : "#ffffff"; if (L.ink === ink) return false; L.ink = ink; delete L.color; return true; },
+    ];
+    let did = false;
+    for (const step of steps) { if (!step()) continue; did = true; if (ok()) break; }
+    return did;
+  },
+  E1: (i) => {
+    const [w, h] = i.what, preset = SIZE_PRESETS.find((p) => p.w === w && p.h === h);
+    if (S.profile.sizes.some((s) => s.w === w && s.h === h)) return false;
+    S.profile.sizes.push({ w, h, label: preset ? preset.label : i.ratio, name: "" });
+    return true;
+  },
+};
+/** Applies the fixes of these issues as one step of undo, then checks again. */
+async function applyFixes(list) {
+  clearTimeout(timers.hist); commitHistory();
+  let done = 0;
+  for (const i of list) if (FIXES[i.rule] && FIXES[i.rule](i) !== false) done++;
+  touch({ cover: true, profile: true, side: true, strip: list.some((i) => i.rule === "E1") });
+  commitHistory();
+  toast(t(done ? "check.fixed" : "check.notFixed"));
+  await runCheck(); renderCheck(); syncTop();
+}
+
 // ---------- export
 function renderFull(size, cover, index) {
   const cv = document.createElement("canvas");
@@ -3085,7 +3272,7 @@ function syncTop() {
       el("select", { onchange: (e) => switchProfile(e.target.value) }, S.profiles.map((p) => el("option", { value: p.id, selected: p.id === S.profile.id }, p.name)))),
     // project files (projectActions: open, save, reset) have no place in the top bar for now; the code stays
     el("div", { class: "grp" }, b("top.undo", () => timeTravel(-1), { disabled: S.histIdx <= 0 }), b("top.redo", () => timeTravel(1), { disabled: S.histIdx >= S.hist.length - 1 }),
-      b("top.clear", clearDialog, { title: t("top.clearTip") })),
+      b("top.clear", clearDialog, { title: t("top.clearTip") }), checkButton()),
     el("div", { class: "spacer" }),
     el("button", { class: "btn solid cta", style: "margin-right:10px", title: t("top.surpriseHint"), onclick: surprise }, t("top.surprise")),
     el("button", { class: "btn solid cta", onclick: exportDialog }, t("top.export")),

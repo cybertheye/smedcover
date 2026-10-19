@@ -50,6 +50,8 @@ ui/
   js/layout.js       geometry for any aspect ratio and template (pure)
   js/title.js        title parsing and fitting
   js/stack3d.js      the layer panel's 3D view: the stack's projection, fitting, labels and drawing (pure maths but for the drawing)
+  js/platforms.js    the platforms covers are made for, as data: the ratios each wants, feed widths, what the apps lay over a cover
+  js/check.js        the cover check: its rules, pure (the editor paints and reads back, then fixes)
   js/textfx.js       text effects: layered, masked and outlined
   js/outlines.js     cache of glyph outlines (fetched from the Rust side)
   js/photo.js        background photo and the cached gaussian blur
@@ -684,6 +686,21 @@ A look's costly whole-picture effects (the colour split, so far) are left out of
 
 
 The left panel's sliders — a look's own settings, the layout's proportions — are another matter: they may change every layer, so the rest of the cover cannot be kept. While one is dragged (`draftTouch()`), the main canvas is painted as a **draft**, at the screen's own pixels rather than the Retina ones (a quarter of them on a Retina screen), and the size thumbnails wait; the full picture is painted a quarter of a second after the last step. A layer's own sliders keep using `holdLive()` above. Measured in the app's engine: a step of the anime skies' *Cumulus* took 44 ms at full resolution and 23 ms as a draft, the other sliders 17–22 ms, about a frame.
+
+### 9.3.1 The cover check
+
+*Check* in the top bar (`checkButton()`, `checkDialog()`): the settings' `check` holds the platforms
+chosen, the video's orientation and 小红书's ratio; `wanted()` in `platforms.js` turns them into the ratios
+wanted and how each platform shows them. For each, the first size of that ratio is painted small by
+`seenOf()` (320 px wide): whole, for every layer's hit; the title alone (`o.only`) and what is under it
+(`drawCover`'s `o.below`), read back over the title's box for `titleContrast()`. `checkCover()` in
+`check.js` then applies the rules: the title's type size in the feed (from its hit and line count, times
+the feed's width over the canvas's), its length, its contrast (WCAG large text, 3:1), the biggest picture's
+share, the parts under the apps' badges, and ratios missing. `FIXES` in `app.js` has a fix per rule; a fix
+re-measures as it goes (the contrast fix tries a heavier outline, a darker photo, a plate, black or white
+letters, until one reads), changes placement only at the size the issue is about (`adjust` in scope
+`size`, `keepInside()`), and the whole is one step of undo. The count on the button follows 1.5 s after
+the last `touch()` (`checkSoon()`), a size per turn of the event loop, never while dragging.
 
 ### 9.4 Undo
 

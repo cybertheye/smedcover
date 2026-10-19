@@ -800,6 +800,8 @@ function tornSheet(shape, grow, colour, perCover, seed, bare) {
  *   o.picked   ids of the layers in a group selection, outlined without handles (editor only)
  *   o.spot     ids of the layers kept bright, every other one dimmed (the editor's FOCUS); a clipping
  *              group is dimmed or not as a whole
+ *   o.below    index of a layer: only the layers under it are painted, and no look over them all (the
+ *              cover check reads what lies behind the title)
  *   o.only     index of the one layer to paint, on its own (the layer panel's 3D view): as if shown, in
  *              its base's shape when clipped onto one; the rest of the cover still sets the scene for it
  * Leaves cv._hits behind: one entry per drawn layer, bottom first, for pointer hit-testing.
@@ -910,6 +912,7 @@ function paintCover(cv, o) {
     }
     return hits;
   };
+  if (o.below != null) { cv._hits = paintRange(ctx, 0, Math.max(0, Math.min(cover.layers.length, o.below))); cv._scene = []; cv._blocks = { k: kx }; return; }
   if (o.only != null) {   // one layer on its own: no look painted over it all, no selection
     cv._hits = paintAlone(ctx, cover.layers, o.only, paintRange, kx, ky, cv);
     cv._scene = []; cv._blocks = { k: kx }; cv._titleBox = null;
