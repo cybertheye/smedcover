@@ -6,7 +6,7 @@ import { virtualSize, layout, adjustLayout } from "./layout.js";
 import { drawTitle, parseTitle } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset } from "./assets.js";
-import { resolve, appliesTo, fillsCanvas, clipEnd, sceneOffsets } from "./layers.js";
+import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced } from "./style.js";
 import { paintRuns, warpCorners } from "./textfx.js";
 
@@ -514,6 +514,7 @@ function drawSelection(ctx, hit, k, withHandles = true) {
 }
 
 let scratch = null, fxScratch = null;
+const SPOT_DIM = 0.3;   // FOCUS: the layers not worked on, this see-through (see o.spot)
 // a clipping group (see clipBase in layers.js) is painted on clipGround — the base, then each layer
 // clipped onto it painted on clipOne and laid on only where the base is — and then laid down as one
 let clipGround = null, clipOne = null;
@@ -797,6 +798,10 @@ function tornSheet(shape, grow, colour, perCover, seed, bare) {
  *   o.live     {ids} while those layers are being dragged: the layers that do not move are cached
  *              in this object between frames (editor only; drop the object when the drag ends)
  *   o.picked   ids of the layers in a group selection, outlined without handles (editor only)
+ *   o.spot     ids of the layers kept bright, every other one dimmed (the editor's FOCUS); a clipping
+ *              group is dimmed or not as a whole
+ *   o.only     index of the one layer to paint, on its own (the layer panel's 3D view): as if shown, in
+ *              its base's shape when clipped onto one; the rest of the cover still sets the scene for it
  * Leaves cv._hits behind: one entry per drawn layer, bottom first, for pointer hit-testing.
  */
 export function drawCover(cv, o) {
@@ -832,28 +837,30 @@ function paintCover(cv, o) {
   };
   cv._virtual = [w, h];
   cv._layout = env.G;   // for the editor's layout handles
-  /** Paints layers [from, to) onto `c` (a context already scaled to the virtual canvas) and returns their hits. */
-  const paintRange = (c, from, to) => {
+  // FOCUS: how see-through a layer not kept bright is painted
+  const dimmed = (from, to) => (o.spot && !cover.layers.slice(from, to + 1).some((l) => o.spot.includes(l.id)) ? SPOT_DIM : 1);
+  /** Paints layers [from, to) onto `c` (a context already scaled to the virtual canvas) and returns their hits. `whole`: inside a clipping group, which is dimmed as one. */
+  const paintRange = (c, from, to, whole = false) => {
     const hits = [];
     for (let i = from; i < to; i++) {
       const L = cover.layers[i], end = Math.min(to - 1, clipEnd(cover.layers, i));
       if (end > i) {   // a clipping group: the base, and the layers clipped onto it shown only where it is
         if (L.visible && appliesTo(L, cat.id)) {
           const g = freshCanvas(clipGround = clipGround || document.createElement("canvas"), cv, kx, ky);
-          hits.push(...paintRange(g, i, i + 1));
+          hits.push(...paintRange(g, i, i + 1, true));
           for (let j = i + 1; j <= end; j++) {
-            const one = freshCanvas(clipOne = clipOne || document.createElement("canvas"), cv, kx, ky), got = paintRange(one, j, j + 1);
+            const one = freshCanvas(clipOne = clipOne || document.createElement("canvas"), cv, kx, ky), got = paintRange(one, j, j + 1, true);
             if (!got.length) continue;
             hits.push(...got);
             g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = "source-atop"; g.drawImage(clipOne, 0, 0); g.restore();
           }
-          c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(clipGround, 0, 0); c.restore();
+          c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = whole ? 1 : dimmed(i, end); c.drawImage(clipGround, 0, 0); c.restore();
         }   // a hidden base hides what is clipped onto it
         i = end;
         continue;
       }
       if (!L.visible || !appliesTo(L, cat.id)) continue;
-      const tr = resolve(L, w, h, key, cat.id);
+      const tr = resolve(L, w, h, key, cat.id), dim = whole ? 1 : dimmed(i, i);
       // a layer set in a font of its own: that font goes first in every face while the layer is painted
       const faces = L.font ? { ...fonts } : null;
       if (faces) for (const k of ["cn", "en", "serif"]) fonts[k] = `"${L.font}", ${faces[k]}`;
@@ -872,9 +879,9 @@ function paintCover(cv, o) {
       }
       if (kept) {
         FX_KEPT.delete(slot); FX_KEPT.set(slot, kept);   // the newest again
-        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o; c.drawImage(kept.img, kept.got.x0, kept.got.y0); c.restore();
+        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o * dim; c.drawImage(kept.img, kept.got.x0, kept.got.y0); c.restore();
         hit = kept.hit;
-      } else if (L.o < 1 || fx.length) {   // paint the layer on its own — its look effects added to it there — then blend it in as a whole
+      } else if (L.o < 1 || dim < 1 || fx.length) {   // paint the layer on its own — its look effects added to it there — then blend it in as a whole
         // a layer with effects gets a canvas held in memory: the effects read it back and copy from it, which
         // on a canvas kept on the graphics card means a round trip each time (see fxCanvas in style.js)
         if (fx.length && !fxScratch) { fxScratch = document.createElement("canvas"); fxScratch.getContext("2d", { willReadFrequently: true }); }
@@ -885,7 +892,7 @@ function paintCover(cv, o) {
         hit = PAINT[L.type](sx, L, tr, env);
         // with effects, only the box the layer and its effects reached is laid down
         const got = hit && fx.length ? paintEffects(sx, pixelBox(hit, kx, ky, cv.width, cv.height), fx, L, kx, env.C) : null;
-        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o;
+        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o * dim;
         if (got && got.w > 0 && got.h > 0) c.drawImage(scr, got.x0, got.y0, got.w, got.h, got.x0, got.y0, got.w, got.h); else c.drawImage(scr, 0, 0);
         c.restore();
         // not while the layer itself is dragged: every frame would make a copy only to be thrown away
@@ -903,7 +910,12 @@ function paintCover(cv, o) {
     }
     return hits;
   };
-  const n = cover.layers.length, moving = o.live ? (o.live.ids || [o.live.id]).map((id) => cover.layers.findIndex((l) => l.id === id)).filter((i) => i >= 0) : [];
+  if (o.only != null) {   // one layer on its own: no look painted over it all, no selection
+    cv._hits = paintAlone(ctx, cover.layers, o.only, paintRange, kx, ky, cv);
+    cv._scene = []; cv._blocks = { k: kx }; cv._titleBox = null;
+    return;
+  }
+  const n = cover.layers.length, moving =o.live ? (o.live.ids || [o.live.id]).map((id) => cover.layers.findIndex((l) => l.id === id)).filter((i) => i >= 0) : [];
   // a clipping group moves as one: dragging its base or a layer clipped onto it repaints them all
   for (const i of [...moving]) {
     let b = i;
@@ -923,7 +935,7 @@ function paintCover(cv, o) {
       const mv = still.has(i), last = runs[runs.length - 1];
       if (last && last.moving === mv) last.to = i + 1; else runs.push({ from: i, to: i + 1, moving: mv });
     }
-    const stamp = `${cv.width}x${cv.height}|${n}|${[...still].sort((a, b) => a - b).join(",")}`;
+    const stamp = `${cv.width}x${cv.height}|${n}|${[...still].sort((a, b) => a - b).join(",")}|${o.spot ? o.spot.join(",") : ""}`;
     if (live.stamp !== stamp) {
       live.stamp = stamp; if (TIMING.on) TIMING.rebuilt++;
       live.runs = runs.map((r) => {
@@ -960,6 +972,25 @@ function paintCover(cv, o) {
     drawLayoutHandles(ctx, cv, cover.layers.find((l) => l.id === o.select), kx, rgb(C));
     if (o.select === "bg" && o.sceneHandles !== false) drawSceneHandles(ctx, cv._scene, kx);
   }
+}
+/**
+ * Paints layer i of `layers` alone onto `ctx` (see o.only) with the cover's paintRange, shown even when
+ * hidden; a layer clipped onto a base is kept to the base's shape, the base itself not painted. Returns
+ * its hits. The cover's scene (its main photo, its theme) was set up from what is really shown.
+ */
+function paintAlone(ctx, layers, i, paintRange, kx, ky, cv) {
+  const L = layers[i], b = clipBase(layers, i), B = b >= 0 ? layers[b] : null, shown = [L.visible, B && B.visible];
+  L.visible = true;
+  if (B) B.visible = true;
+  try {
+    if (!B) return paintRange(ctx, i, i + 1);
+    const g = freshCanvas(clipGround = clipGround || document.createElement("canvas"), cv, kx, ky);
+    paintRange(g, b, b + 1);
+    const one = freshCanvas(clipOne = clipOne || document.createElement("canvas"), cv, kx, ky), hits = paintRange(one, i, i + 1);
+    one.setTransform(1, 0, 0, 1, 0, 0); one.globalCompositeOperation = "destination-in"; one.drawImage(clipGround, 0, 0); one.globalCompositeOperation = "source-over";
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(clipOne, 0, 0); ctx.restore();
+    return hits;
+  } finally { L.visible = shown[0]; if (B) B.visible = shown[1]; }
 }
 
 /**

@@ -8,7 +8,7 @@ import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont, ratioText } from "./store.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
@@ -19,6 +19,7 @@ import { EFFECTS, effectUses, warpCorners } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
 import { sizeOf, PIXELS } from "./photo.js";
+import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, labelRoom, drawStack } from "./stack3d.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 
@@ -209,12 +210,36 @@ const goLive = (ids) => {
   if (!LIVE || LIVE.key !== key) LIVE = { ids, key };
 };
 const endLive = () => { if (LIVE) { LIVE = null; queueDraw(); } };
+/**
+ * The layer panel's 3D view (see the section "the layers in 3D"): the cover taken apart, its layers
+ * stacked as sheets. Only for looking, and not saved.
+ */
+const V3 = {
+  on: false,                              // shown, opening or closing
+  k: 0, from: 0, to: 0, t0: 0,            // how far apart (0: flat, the cover as on the canvas; 1: apart), eased from `from` to `to` since t0
+  yaw: VIEW.yaw, pitch: VIEW.pitch, spread: VIEW.spread, aim: null,   // the view; aim: the view it is easing back to (Reset view)
+  s: 0,                                   // the scale shown: eased towards the one that fits, and held while the view is dragged
+  z: new Map(),                           // layer id -> its place in the stack as shown, easing towards where it is now
+  sheets: new Map(),                      // layer id -> {cv, mask, key}: the layer painted on its own
+  stale: true,                            // the layers have changed since they were painted
+  hover: "", peek: "",                    // the sheet under the pointer; the layer whose row in the list it is on
+  drag: false, raf: 0, view: null, shown: [],   // the view and the sheets last drawn, to find what is under the pointer
+};
 function drawMain() {
+  if (V3.on) return paint3d();   // the canvas waits under the 3D view
+  paintFlat();
+}
+/**
+ * The cover's canvas, brought up to date first if the 3D view has kept it waiting: what is known of the
+ * cover as painted — where each layer is, the template's geometry — is read from it.
+ */
+const flatCanvas = () => { if (V3.on) paintFlat(); return $("cv"); };
+function paintFlat() {
   const stage = $("stage"), cv = $("cv"), size = selSize(), [vw, vh] = virtualSize(size.w, size.h);
   const k = Math.max(0.05, Math.min((stage.clientWidth - 36) / vw, (stage.clientHeight - 36) / vh));
   cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
   paint(cv, size, Math.min(vw * 1.5, vw * k * (drafting() ? 1 : window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
-    S.mode === "edit" ? { picked: group().map((L) => L.id), sceneHandles: !S.settings.hideScene } : {});
+    S.mode === "edit" ? { picked: group().map((L) => L.id), sceneHandles: !S.settings.hideScene, spot: S.focus ? spotIds() : null } : {});
   const clear = !layer("bg").visible;
   stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
 }
@@ -238,8 +263,9 @@ function drawThumbs() {
 }
 let drawQueued = false;
 function flushDraw() { if (!drawQueued) return; drawQueued = false; drawMain(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); }
-/** Redraws at most once per frame, however many input events arrive. */
-function queueDraw() {
+/** Redraws at most once per frame, however many input events arrive. `stale` false: only what is selected changed. */
+function queueDraw(stale = true) {
+  if (stale) V3.stale = true;
   if (drawQueued) return;
   drawQueued = true;
   requestAnimationFrame(flushDraw);
@@ -267,7 +293,7 @@ function syncToolbar() {
 }
 
 // ---------- editing layers
-function selectLayer(id) { if (S.layerId === id && !group().length) return; S.picked = []; S.layerId = id; renderSide(); queueDraw(); }
+function selectLayer(id) { if (S.layerId === id && !group().length) return; S.picked = []; S.layerId = id; renderSide(); queueDraw(false); }
 /**
  * The layers of the group selection on this channel's cover, or [] when there is none. A group holds
  * while the selected layer is one of its members: selecting anything else by any route ends it.
@@ -283,7 +309,7 @@ const pickedIds = () => (group().length ? group().map((L) => L.id) : S.layerId &
 function pickLayers(ids) {
   if (ids.length < 2) return selectLayer(ids[0] || "bg");
   S.picked = ids; S.layerId = ids[ids.length - 1];
-  renderSide(); queueDraw();
+  renderSide(); queueDraw(false);
 }
 /** Adds a layer to the selection, or takes it out (shift-click). */
 function togglePick(id) {
@@ -644,7 +670,7 @@ function photoItem(L) {
   const mine = REP.of === L.id, label = open ? "rep.close" : mine && REP.busy ? "rep.running" : mine && REP.result ? "rep.ready" : "rep.title";
   const locked = passive ? t("link.passiveLocked", layerName(owner(L))) : null;
   return el("div", { class: "pitem" + (passive ? " passive" : "") + (L.id === S.layerId ? " on" : ""), dataset: { id: L.id }, style: tied ? `--link:${linkColour(L)}` : null },
-    el("div", { class: "thumb", title: t("cover.photoSelect"), onclick: () => selectLayer(L.id) },
+    el("div", { class: "thumb", title: t("cover.photoSelect"), onclick: () => focusAllows(L.id) && selectLayer(L.id) },
       im ? el("img", { src: L.cut && rec.mask ? cutThumb(rec) : thumbOf(rec), alt: "" }) : el("div", { class: "hint err", style: "margin:0" }, t("props.photoMissing")),
       el("button", { class: "del", title: t(passivesOf(L).length ? "cover.removeLinked" : "cover.removePhoto"), onclick: (e) => { e.stopPropagation(); if (REP.for === L.id) REP.for = ""; removeLayer(L.id); renderPanel(); } }, "×"),
       el("span", {}, tied && el("span", { class: "chain", innerHTML: ICONS.chain }), layerName(L), im && ` · ${sizeOf(im)[0]} × ${sizeOf(im)[1]}`, rec && rec.original && ` · ${t("rep.isRepainted")}`,
@@ -897,7 +923,7 @@ function alignedT(A) {
 function unlink(P) {
   const A = layer(P.of);
   if (A) {
-    const h = $("cv")._hits && $("cv")._hits.find((x) => x.id === P.id), [vw, vh] = $("cv")._virtual || [1920, 1080];
+    const cv = flatCanvas(), h = cv._hits && cv._hits.find((x) => x.id === P.id), [vw, vh] = cv._virtual || [1920, 1080];
     if (JSON.stringify(P.t) === JSON.stringify(alignedT(A)) || !h || h.px == null) { P.t = JSON.parse(JSON.stringify(A.t)); P.fill = A.fill; }   // still over its photo: placed as the photo is
     else {   // moved off it, or resized: a print where it is, at the size it is
       const a = P.t.all;
@@ -1725,7 +1751,7 @@ function removeAsset(id) {
 
 /** The sliders that adjust the current template: how much the colour panel takes, how its edge leans, the title's box, and which half goes first. */
 function layoutBox() {
-  const st = S.profile.style, tpl = st.template, adj = st.layoutAdjust[tpl] || {}, cv = $("cv");
+  const st = S.profile.style, tpl = st.template, adj = st.layoutAdjust[tpl] || {}, cv = flatCanvas();
   const now = cv._layout && cv._virtual ? layoutValues(cv._layout, cv._virtual[0], cv._virtual[1]) : { size: 0.3, slant: 0 };
   const set = (k, v) => { st.layoutAdjust[tpl] = { ...(st.layoutAdjust[tpl] || {}), [k]: v }; draftTouch({ profile: true }); };
   const split = tpl === "split", changed = Object.keys(adj).length > 0;
@@ -1904,7 +1930,9 @@ function layerRow(L) {
   const icon = (glyph, off, title, fn) => el("button", { class: "ic" + (off ? " off" : ""), title, onclick: (e) => { e.stopPropagation(); fn(); touch({ cover: true, side: true }); } }, glyph);
   const on = L.id === S.layerId || group().includes(L);
   const free = isFree(L.type) || L.type === "subject", base = clipBase(S.cover.layers, S.cover.layers.indexOf(L));
-  return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}${base >= 0 ? " clip" : ""}`, title: base >= 0 ? t("layers.clipped", layerName(S.cover.layers[base])) : null, dataset: { id: L.id }, draggable: L.type !== "bg", onclick: (e) => (e.shiftKey ? togglePick(L.id) : selectLayer(L.id)),
+  const off = S.focus && S.mode === "edit" && !spotIds().includes(L.id);   // FOCUS is on another layer
+  return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}${base >= 0 ? " clip" : ""}${off ? " dim" : ""}`, title: off ? t("focus.locked") : base >= 0 ? t("layers.clipped", layerName(S.cover.layers[base])) : null, dataset: { id: L.id }, draggable: L.type !== "bg",
+    onclick: (e) => focusAllows(L.id) && (e.shiftKey ? togglePick(L.id) : selectLayer(L.id)),
     ondragstart: (e) => { dragId = L.id; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", L.id); },
     ondragend: () => { dragId = null; },
     ondragover: (e) => { if (dragId && dragId !== L.id) { e.preventDefault(); e.currentTarget.classList.add("over"); } },
@@ -1946,9 +1974,11 @@ function layerKinds(L) {
 }
 /** Selects layer id and brings its row into view (it may be far up or down the list). */
 function goToLayer(id) {
+  if (!focusAllows(id)) return false;
   selectLayer(id);
   const row = document.querySelector(`#side .layer[data-id="${CSS.escape(id)}"]`);
   if (row) { row.scrollIntoView({ block: "nearest" }); row.classList.add("flash"); setTimeout(() => row.classList.remove("flash"), 700); }
+  return true;
 }
 /** 14-px line icons for the layer list, in the text colour. */
 const ICONS = Object.fromEntries(Object.entries({
@@ -1961,6 +1991,7 @@ const ICONS = Object.fromEntries(Object.entries({
   active: '<circle cx="8" cy="8" r="5.6"/><circle cx="8" cy="8" r="2.4" fill="currentColor"/>',
   passive: '<circle cx="8" cy="8" r="5.6" stroke-dasharray="2.2 1.8"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/>',
   svg: '<path d="M8 1.8l4.6 5.4L8 14.2 3.4 7.2z"/><path d="M8 1.8v6.4"/><circle cx="8" cy="9.2" r="1.1"/>',
+  stack: '<path d="M8 1.8l6 3-6 3-6-3z"/><path d="M2 8.1l6 3 6-3"/><path d="M2 11.2l6 3 6-3"/>',   // sheets one over another: the 3D view
 }).map(([k, d]) => [k, `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`]));
 /**
  * A click on a name selects the layer like a click anywhere on its row; a second one soon after, on
@@ -1969,7 +2000,7 @@ const ICONS = Object.fromEntries(Object.entries({
  */
 let lastNameClick = { id: "", at: 0 };
 function nameClick(e, L) {
-  const now = Date.now(), second = !e.shiftKey && lastNameClick.id === L.id && now - lastNameClick.at < 450;
+  if (S.focus && !spotIds().includes(L.id)) return;   // the row says why  const now = Date.now(), second = !e.shiftKey && lastNameClick.id === L.id && now - lastNameClick.at < 450;
   lastNameClick = second ? { id: "", at: 0 } : { id: L.id, at: now };
   if (!second) return;   // the row selects it
   e.stopPropagation();
@@ -2188,6 +2219,7 @@ function sceneSection(L) {
  * object not painted (its slider at 0) has no place to show.
  */
 function jumpToScene(key) {
+  if (V3.on) close3d();   // its handle is on the flat canvas
   const cv = $("cv"), q = (cv._scene || []).find((s) => s.key === key);
   if (!q || !cv._virtual) return toast(t("scene.notShown", sceneName(key)));
   const r = cv.getBoundingClientRect(), k = cv._virtual[0] / r.width, x = r.left + q.x / k, y = r.top + q.y / k;
@@ -2339,7 +2371,23 @@ function focusTargets() {
   return L && !L.locked && L.type !== "bg" && !FIXED.includes(L.type) ? [L] : [];
 }
 /** Turns FOCUS on or off. */
-function setFocus(on) { S.focus = on; renderSide(); }
+function setFocus(on) { S.focus = on; renderSide(); queueDraw(false); }
+/** FOCUS: the layers it is on — the selected one, or the group — with a linked photo's other half: kept bright on the canvas, the only ones that can be selected. */
+function spotIds() {
+  const ids = new Set();
+  for (const L of group().length ? group() : layer() ? [layer()] : []) {
+    const o = owner(L);
+    ids.add(L.id); ids.add(o.id);
+    for (const p of passivesOf(o)) ids.add(p.id);
+  }
+  return [...ids];
+}
+/** Whether layer id may be selected now: with FOCUS on, only what it is on; anything else is refused, with a word on why. */
+function focusAllows(id) {
+  if (!S.focus || S.mode !== "edit" || spotIds().includes(id)) return true;
+  toast(t("focus.locked"));
+  return false;
+}
 /** The layout layers on the cover on the canvas (the ones the template brings, marked with the layout icon). */
 const layoutLayers = () => S.cover.layers.filter((l) => !isFree(l.type) && l.type !== "subject" && appliesTo(l, cat().id));
 let LAYOUT_HID = null;   // { cover, ids }: the template's layers that were showing when "Hide layout" hid them
@@ -2361,7 +2409,7 @@ function toggleLayout() {
 }
 /** The canvas's FOCUS frame and tag: which layer the canvas is acting on. */
 function syncFocus() {
-  const stage = $("stage"), tag = $("focustag") || stage.appendChild(el("div", { id: "focustag" })), on = S.focus && S.mode === "edit";
+  const stage = $("stage"), tag = $("focustag") || stage.appendChild(el("div", { id: "focustag" })), on = S.focus && S.mode === "edit" && !V3.on;
   stage.classList.toggle("focus", on);
   tag.hidden = !on;
   if (!on) return;
@@ -2379,7 +2427,8 @@ function renderSide() {
   const i = L ? here.indexOf(L) : -1, many = group();
   side.replaceChildren(
     el("div", {}, el("div", { class: "lhead" }, cap("layers.title"),
-        el("div", { class: "lbtns" }, (() => { const off = layoutLayers().every((l) => !l.visible); return el("button", { class: "focusbtn" + (off ? " on" : ""), title: t("layout.tip"), onclick: toggleLayout }, t(off ? "layout.show" : "layout.hide")); })(),
+        el("div", { class: "lbtns" }, el("button", { class: "focusbtn v3btn" + (V3.to ? " on" : ""), title: t("v3.tip"), onclick: () => set3d(!V3.to), innerHTML: `${ICONS.stack}<span>${t("v3.label")}</span>` }),
+          (() => { const off = layoutLayers().every((l) => !l.visible); return el("button", { class: "focusbtn" + (off ? " on" : ""), title: t("layout.tip"), onclick: toggleLayout }, t(off ? "layout.show" : "layout.hide")); })(),
           el("button", { class: "focusbtn" + (S.focus ? " on" : ""), title: t("focus.tip"), onclick: () => setFocus(!S.focus) }, t("focus.label")))),
       el("div", { class: "layers" }, [...here].reverse().map(layerRow)),
       el("div", { class: "acts", style: "margin-top:10px;justify-content:flex-start" },
@@ -2393,14 +2442,212 @@ function renderSide() {
       el("div", { class: "hint", style: "margin-top:0" }, many.map(layerName).join(" · ")),
       many.some((x) => x.locked) && el("div", { class: "hint" }, t("props.groupLocked")),
       el("div", { class: "hint" }, t("props.groupHint")),
-      el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => selectLayer("bg") }, t("props.groupEnd")))
+      el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => focusAllows("bg") && selectLayer("bg") }, t("props.groupEnd")))
     : L ? el("div", { class: "box" }, el("label", { class: "cap" }, `${t("props.title")} · ${layerName(L)}`),
       el("div", { class: "props" }, typeControls(L), sceneSection(L), lookFxSection(L), layerSection(L)))
       : el("div", { class: "hint" }, t("layers.none")));
   side.scrollTop = y;
   // the selected layer's photo, in Cover → Add photos, is framed in the channel colour (without rebuilding that panel)
   for (const item of document.querySelectorAll("#panel .pitem")) item.classList.toggle("on", item.dataset.id === S.layerId);
-  syncFocus();
+  syncFocus(); markRows();
+}
+
+// ---------- the layers in 3D
+// The 3D button over the layer list takes the cover apart: each layer painted on its own (o.only in
+// drawCover) is a sheet, and the sheets are stacked bottom to top and seen at an angle (stack3d.js), so
+// someone new to layers can see what each holds and which lies over which. It opens out of the flat
+// cover and folds back into it. A drag turns the view, the wheel spreads the sheets, a click selects a
+// layer (its settings show as ever), a double-click selects it and goes back to the flat canvas. Changes
+// made in the panel show at once; a sheet moved in the list slides to its new place.
+const OPEN_MS = 420, MASK_PX = 160;
+const ease = (p) => (p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2);
+const here3d = () => S.cover.layers.filter((l) => appliesTo(l, cat().id));
+/** Opens the 3D view out of the cover, or folds it back. */
+function set3d(on) {
+  if (on && !V3.on) {
+    stage3d();
+    Object.assign(V3, { on: true, stale: true, s: 0, aim: null });
+    V3.z.clear();
+    $("stage").classList.add("v3");
+    sync3dHud();
+  }
+  if (!V3.on) return;
+  Object.assign(V3, { from: V3.k, to: on ? 1 : 0, t0: performance.now(), hover: "", peek: "", drag: false });
+  $("stage").classList.toggle("v3open", on);
+  renderSide(); queueDraw(false); tick3d();
+}
+/** Takes the 3D view away at once (and the memory its sheets held); the canvas is painted first, so nothing flashes. */
+function close3d() {
+  Object.assign(V3, { on: false, k: 0, from: 0, to: 0, hover: "", peek: "", drag: false });
+  V3.sheets.clear(); V3.z.clear(); V3.shown = []; V3.view = null;
+  if (S.mode === "edit") drawMain();
+  $("stage").classList.remove("v3", "v3open");
+  markRows(); syncFocus();
+}
+/** The 3D view's canvas and its bar of controls, put in the stage once. */
+function stage3d() {
+  if ($("cv3d")) return;
+  const c = el("canvas", { id: "cv3d" }), stage = $("stage");
+  stage.append(c, el("div", { id: "v3hud" }));
+  const point = (e) => { const r = c.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  const under = (e) => (V3.view && V3.k > 0.99 ? sheetUnder(V3.view, V3.shown, ...point(e), solid) : null);
+  const hover = (e) => {
+    const sh = e && !V3.drag ? under(e) : null, id = sh ? sh.id : "";
+    c.style.cursor = V3.drag ? "grabbing" : id ? "pointer" : "grab";
+    if (id !== V3.hover) { V3.hover = id; markRows(); tick3d(); }
+  };
+  c.addEventListener("pointermove", (e) => { if (!e.buttons) hover(e); });
+  c.addEventListener("pointerleave", () => { if (!V3.drag) hover(null); });
+  c.addEventListener("pointerdown", (e) => {
+    if (V3.to !== 1 || e.button !== 0) return;
+    const x0 = e.clientX, y0 = e.clientY, yaw0 = V3.yaw, pitch0 = V3.pitch;
+    let moved = false;
+    c.setPointerCapture(e.pointerId);
+    c.onpointermove = (m) => {   // a drag turns the stack: across spins it, up and down tips it
+      if (!moved && Math.hypot(m.clientX - x0, m.clientY - y0) < 4) return;
+      if (!moved) { moved = true; V3.drag = true; V3.aim = null; hover(m); }
+      V3.yaw = clamp(yaw0 - (m.clientX - x0) * 0.3, ...LIMITS.yaw);
+      V3.pitch = clamp(pitch0 - (m.clientY - y0) * 0.3, ...LIMITS.pitch);
+      tick3d();
+    };
+    c.onpointerup = c.onpointercancel = (u) => {
+      c.onpointermove = c.onpointerup = c.onpointercancel = null; V3.drag = false;
+      if (!moved) { const sh = under(u); if (sh) goToLayer(sh.id); }
+      hover(u); tick3d();
+    };
+  });
+  c.addEventListener("dblclick", (e) => { const sh = under(e); if (sh && goToLayer(sh.id)) set3d(false); });
+  c.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    if (V3.to !== 1) return;
+    V3.aim = null;
+    V3.spread = clamp(V3.spread * Math.exp(-e.deltaY * 0.002), ...LIMITS.spread);
+    const r = $("v3hud").querySelector("input");
+    if (r) r.value = V3.spread;
+    tick3d();
+  }, { passive: false });
+  // the list and the stack point at each other: the pointer on a row lights its sheet and dims the rest
+  $("side").addEventListener("pointermove", (e) => { if (V3.on) peek3d((e.target.closest && e.target.closest(".layers .layer") || {}).dataset?.id || ""); });
+  $("side").addEventListener("pointerleave", () => peek3d(""));
+}
+function sync3dHud() {
+  $("v3hud").replaceChildren(
+    el("span", { class: "v3tip", title: t("v3.tip") }, t("v3.hint")),
+    el("label", { class: "v3sl" }, t("v3.spread"), el("input", { type: "range", min: LIMITS.spread[0], max: LIMITS.spread[1], step: 0.05, value: V3.spread,
+      oninput: (e) => { V3.aim = null; V3.spread = Number(e.target.value); tick3d(); } })),
+    el("button", { class: "focusbtn", onclick: () => { V3.aim = { ...VIEW }; tick3d(); } }, t("v3.reset")),
+    el("button", { class: "focusbtn on", onclick: () => set3d(false) }, t("v3.exit")));
+}
+function peek3d(id) { if (V3.on && V3.peek !== id) { V3.peek = id; tick3d(); } }
+/** The row of the sheet under the pointer is marked in the list. */
+function markRows() {
+  for (const row of document.querySelectorAll("#side .layers .layer")) row.classList.toggle("peek", V3.on && row.dataset.id === V3.hover);
+}
+/** Whether the layer of sheet `sh` has anything at (fx, fy) across the cover: its painted alpha, a cell either way of it. */
+function solid(sh, fx, fy) {
+  const m = (V3.sheets.get(sh.id) || {}).mask;
+  if (!m) return false;
+  const x = Math.floor(fx * m.w), y = Math.floor(fy * m.h);
+  for (let j = Math.max(0, y - 1); j <= Math.min(m.h - 1, y + 1); j++) for (let i = Math.max(0, x - 1); i <= Math.min(m.w - 1, x + 1); i++) if (m.a[j * m.w + i] > 12) return true;
+  return false;
+}
+let maskCanvas = null;
+/** A small copy of a sheet's alpha, read back once when it is painted, so finding what is under the pointer reads no pixels. */
+function maskOf(cv) {
+  const k = Math.min(1, MASK_PX / Math.max(cv.width, cv.height)), w = Math.max(1, Math.round(cv.width * k)), h = Math.max(1, Math.round(cv.height * k));
+  if (!maskCanvas) { maskCanvas = document.createElement("canvas"); maskCanvas.getContext("2d", { willReadFrequently: true }); }
+  maskCanvas.width = w; maskCanvas.height = h;
+  const x = maskCanvas.getContext("2d");
+  x.drawImage(cv, 0, 0, w, h);
+  const d = x.getImageData(0, 0, w, h).data, a = new Uint8Array(w * h);
+  for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3];
+  return { w, h, a };
+}
+/**
+ * drawMain() while the 3D view is up: paints again the layers that changed, each on its own — while one
+ * is being changed (see holdLive) just it, and what is clipped with it — then draws the stack.
+ */
+function paint3d() {
+  const c = $("cv3d"), stage = $("stage"), dpr = window.devicePixelRatio || 1, W = stage.clientWidth, H = stage.clientHeight;
+  if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+  const size = selSize(), [vw, vh] = virtualSize(size.w, size.h), list = here3d();
+  // a sheet is seen smaller than the canvas: about this many pixels across is plenty
+  const pw = Math.round(Math.min(vw * 1.5, (Math.max(W, H) * 0.6 * (drafting() ? 1 : Math.min(2, dpr)) * vw) / Math.max(vw, vh)));
+  const key = `${pw}|${sizeKey(size)}|${catIndex()}`;
+  for (const id of V3.sheets.keys()) if (!list.some((l) => l.id === id)) V3.sheets.delete(id);
+  if (V3.stale) {
+    let only = null;
+    if (LIVE) {   // the layers being changed, and every layer clipped together with one of them
+      only = new Set();
+      for (const id of LIVE.ids) {
+        const i = S.cover.layers.findIndex((l) => l.id === id);
+        if (i < 0) continue;
+        const b = clipBase(S.cover.layers, i), from = b >= 0 ? b : i;   // its group: the base it is clipped onto, or itself, and what is clipped onto that
+        only.add(id);
+        for (let j = from; j <= clipEnd(S.cover.layers, from); j++) only.add(S.cover.layers[j].id);
+      }
+    }
+    for (const L of list) {
+      const sh = V3.sheets.get(L.id) || { cv: document.createElement("canvas") };
+      if (only && !only.has(L.id) && sh.key === key) continue;
+      drawCover(sh.cv, { profile: S.profile, catIndex: catIndex(), size, pixelW: pw, cover: S.cover, photos: S.photos, only: S.cover.layers.indexOf(L) });
+      sh.mask = maskOf(sh.cv); sh.key = key;
+      V3.sheets.set(L.id, sh);
+    }
+    V3.stale = false;
+  }
+  draw3d();
+}
+/** Draws the stack as it stands now; true while something is still easing and wants another frame. */
+function draw3d() {
+  const c = $("cv3d");
+  if (!V3.on || !c || !S.cover) return false;
+  const now = performance.now(), p = Math.min(1, (now - V3.t0) / OPEN_MS), opening = p < 1;
+  V3.k = V3.from + (V3.to - V3.from) * ease(p);
+  if (!opening && V3.to === 0) { close3d(); return false; }
+  let more = opening;
+  if (V3.aim) {   // Reset view: back to where it opened
+    for (const q of ["yaw", "pitch", "spread"]) V3[q] += (V3.aim[q] - V3[q]) * 0.2;
+    if (["yaw", "pitch", "spread"].every((q) => Math.abs(V3.aim[q] - V3[q]) < 0.01)) { Object.assign(V3, V3.aim); V3.aim = null; }
+    else more = true;
+    const r = $("v3hud").querySelector("input");
+    if (r) r.value = V3.spread;
+  }
+  const stage = $("stage"), W = stage.clientWidth, H = stage.clientHeight, dpr = window.devicePixelRatio || 1, ctx = c.getContext("2d");
+  const size = selSize(), [vw, vh] = virtualSize(size.w, size.h), list = here3d(), k = V3.k, deco = k * k;
+  // each sheet's place eases towards where the layer is now, so one moved in the list is seen to move
+  list.forEach((L, i) => {
+    const z = V3.z.has(L.id) ? V3.z.get(L.id) : i, to = Math.abs(i - z) < 0.01 ? i : z + (i - z) * 0.22;
+    V3.z.set(L.id, to);
+    if (to !== i) more = true;
+  });
+  for (const id of V3.z.keys()) if (!list.some((l) => l.id === id)) V3.z.delete(id);
+  const gap = gapFor(list.length, vh, V3.spread) * k, picked = group().length ? group().map((L) => L.id) : [S.layerId];
+  // a layer is not seen when it is hidden, or clipped onto a base that is (see paintRange in render.js)
+  const baseOf = (L) => S.cover.layers[clipBase(S.cover.layers, S.cover.layers.indexOf(L))] || null;
+  const seen = (L) => L.visible && !(baseOf(L) && !baseOf(L).visible);
+  const label = (L) => layerName(L) + (!L.visible ? t("v3.hidden") : seen(L) ? "" : t("v3.baseHidden"));
+  const room = labelRoom(ctx, list.map(label)) * k, T = turn(V3.yaw * k, V3.pitch * k);
+  // flat (k = 0), the box is the canvas's own place in the stage, so the stack opens out of the cover and folds back into it
+  const V = fitView(T, vw, vh, 0, Math.max(0, list.length - 1) * gap, { x: 18, y: 18, w: Math.max(40, W - 36 - room), h: Math.max(40, H - 36 - 56 * k) });
+  if (!V3.s || opening) V3.s = V.s;
+  else if (V3.drag) V3.s = Math.min(V3.s, V.s);   // held while turned, so what is under the pointer stays under it
+  else if (Math.abs(V.s - V3.s) > V.s * 0.002) { V3.s += (V.s - V3.s) * 0.25; more = true; }
+  else V3.s = V.s;
+  V.s = V3.s;
+  V3.view = V;
+  V3.shown = list.map((L) => {
+    const sh = V3.sheets.get(L.id);
+    return { id: L.id, img: sh && sh.cv, z: V3.z.get(L.id) * gap, alpha: seen(L) ? 1 : 0.35 * deco, hidden: !seen(L), label: label(L),
+      dim: !!V3.peek && V3.peek !== L.id, mark: picked.includes(L.id) ? "sel" : L.id === V3.hover || L.id === V3.peek ? "hover" : "" };
+  });
+  drawStack(ctx, { dpr, W, H: H - 56 * k, V, sheets: V3.shown, deco, acc: cat().color, room });   // the labels clear of the bar at the foot
+  return more;
+}
+/** Draws the stack on the next frame, and on until it settles. */
+function tick3d() {
+  if (V3.raf || !V3.on) return;
+  V3.raf = requestAnimationFrame(() => { V3.raf = 0; if (draw3d()) tick3d(); });
 }
 
 // ---------- export
@@ -2728,6 +2975,7 @@ const projectActions = {
 // ---------- chrome
 function setMode(mode) {
   S.mode = mode;
+  if (mode !== "edit" && V3.on) close3d();   // the layer column is not there in Setup
   columns();   // the left column has a width of its own in Setup (and the handles' words follow the language)
   $("body").classList.toggle("setup", mode === "setup");
   syncTop(); syncTabs(); renderPanel(); renderSide(); syncToolbar(); queueDraw();
@@ -2901,7 +3149,7 @@ addEventListener("keydown", (e) => {
   if (S.mode !== "edit") return;
   const L = layer();
   if (mod && key === "d") { e.preventDefault(); return group().length ? null : duplicateLayer(); }
-  if (key === "escape") return S.focus ? setFocus(false) : selectLayer("bg");
+  if (key === "escape") return V3.to ? set3d(false) : S.focus ? setFocus(false) : selectLayer("bg");
   if (key === "f" && !mod && !e.altKey) { e.preventDefault(); return setFocus(!S.focus); }
   const many = group(), step0 = e.shiftKey ? 10 : 1, nudge = { arrowleft: [-step0, 0], arrowright: [step0, 0], arrowup: [0, -step0], arrowdown: [0, step0] }[key];
   if (many.length) {   // a group: delete and the arrows act on all of it

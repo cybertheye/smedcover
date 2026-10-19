@@ -1399,3 +1399,48 @@ test("a photo filling the canvas shows its frame, corners only, once it no longe
   assert.equal(showsFrame(print), true);
   assert.equal(ids(print), "e n ne nw rot s se sw w");
 });
+
+test("the 3D view of the layers: flat it is the canvas, apart every sheet fits and maps back", async () => {
+  const { VIEW, turn, gapFor, fitView, sheetAt, toSheet, corners, anchorOf, sheetUnder } = await import("../ui/js/stack3d.js");
+  const box = { x: 18, y: 18, w: 1000, h: 700 }, near = (a, b, tol = 1e-6) => assert.ok(Math.abs(a - b) <= tol, `${a} vs ${b}`);
+  // flat: every sheet on the one below, placed exactly as the canvas is in the stage (so the view opens out of the cover)
+  const flat = fitView(turn(0, 0), 1920, 1080, 0, 0, box), k = Math.min(1000 / 1920, 700 / 1080);
+  near(flat.s, k);
+  const m0 = sheetAt(flat, 0);
+  near(m0.a, k); near(m0.d, k); near(m0.b, 0); near(m0.c, 0);
+  near(m0.e, 18 + (1000 - 1920 * k) / 2); near(m0.f, 18 + (700 - 1080 * k) / 2);
+  // apart: the corners of the bottom and top sheets lie within the box, and points map back onto their sheet
+  const n = 12, gap = gapFor(n, 1080, 1), z1 = (n - 1) * gap, V = fitView(turn(VIEW.yaw, VIEW.pitch), 1920, 1080, 0, z1, box);
+  for (const z of [0, z1]) for (const p of corners(sheetAt(V, z), 1920, 1080)) {
+    assert.ok(p.x >= box.x - 1e-6 && p.x <= box.x + box.w + 1e-6 && p.y >= box.y - 1e-6 && p.y <= box.y + box.h + 1e-6, `${p.x}, ${p.y} outside`);
+  }
+  for (const [yaw, pitch, z] of [[-30, 58, 0], [45, 20, 500], [-80, 80, z1]]) {
+    const W = fitView(turn(yaw, pitch), 1080, 1920, 0, z1, box), m = sheetAt(W, z), q = toSheet(m, m.a * 300 + m.c * 1500 + m.e, m.b * 300 + m.d * 1500 + m.f);
+    near(q.x, 300, 1e-6); near(q.y, 1500, 1e-6);
+  }
+  assert.ok(sheetAt(V, z1).f < sheetAt(V, 0).f, "a higher sheet is higher on the screen");
+  // the labels' anchor: the same corner of every sheet, straight above each other
+  const a0 = anchorOf(sheetAt(V, 0), 1920, 1080), a1 = anchorOf(sheetAt(V, z1), 1920, 1080);
+  near(a0.x, a1.x);
+  assert.ok(a0.x >= Math.max(...corners(sheetAt(V, 0), 1920, 1080).map((p) => p.x)) - 1e-6);
+  // what is under the pointer: the front-most sheet that has something there, seen through where it has nothing
+  const sheets = [{ id: "bg", z: 0 }, { id: "sticker", z: gap }, { id: "title", z: 2 * gap }];
+  const m = sheetAt(V, gap), mid = { x: m.a * 960 + m.c * 540 + m.e, y: m.b * 960 + m.d * 540 + m.f };   // the middle of the sticker's sheet
+  // the background everywhere, the sticker in the middle, the title along the top
+  const paint = { bg: () => true, sticker: (fx, fy) => Math.abs(fx - 0.5) < 0.1 && Math.abs(fy - 0.5) < 0.1, title: (fx, fy) => fy < 0.2 };
+  const solid = (sh, fx, fy) => paint[sh.id](fx, fy), on = (z, x, y) => { const q = sheetAt(V, z); return [q.a * x + q.c * y + q.e, q.b * x + q.d * y + q.f]; };
+  assert.equal(sheetUnder(V, sheets, mid.x, mid.y, solid).id, "sticker", "the title's sheet is over it, but has nothing there");
+  assert.equal(sheetUnder(V, sheets, ...on(2 * gap, 960, 100), solid).id, "title");
+  assert.equal(sheetUnder(V, sheets, ...on(0, 100, 1000), solid).id, "bg");
+  assert.equal(sheetUnder(V, sheets, -500, -500, () => true), null);
+});
+
+test("the 3D view's labels move apart only as far as they must, and stay in bounds", async () => {
+  const { spreadLabels } = await import("../ui/js/stack3d.js");
+  assert.deepEqual(spreadLabels([100, 200, 300], 20, 0, 500), [100, 200, 300], "room enough: left where they are");
+  const ys = spreadLabels([300, 290, 305, 310], 20, 0, 500), sorted = [...ys].sort((a, b) => a - b);
+  for (let i = 1; i < sorted.length; i++) assert.ok(sorted[i] - sorted[i - 1] >= 20 - 1e-9, "no two overlap");
+  assert.ok(ys[1] < ys[0] && ys[0] < ys[2] && ys[2] < ys[3], "in the order they wanted");
+  const low = spreadLabels([495, 498, 499], 20, 0, 500);
+  assert.ok(Math.max(...low) <= 490 && Math.min(...low) >= 10, "pushed up off the bottom");
+});

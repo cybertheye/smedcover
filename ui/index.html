@@ -214,11 +214,25 @@
   #stage.focus #cv{outline:2px dashed var(--acc);outline-offset:4px}
   #focustag{position:absolute;top:8px;left:50%;transform:translateX(-50%);max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--acc);color:var(--ink);font:700 11px var(--mono);letter-spacing:.06em;padding:3px 10px;pointer-events:none}
   #focustag.off{background:#555;color:#fff}
-  .lhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .lhead{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
   .lbtns{display:flex;gap:6px}
   .focusbtn{border:1px solid var(--line2);background:transparent;color:inherit;font:700 10px var(--mono);letter-spacing:.08em;padding:3px 8px;cursor:pointer;opacity:.75}
   .focusbtn:hover{opacity:1}
   .focusbtn.on{background:var(--acc);border-color:var(--acc);color:var(--ink);opacity:1}
+  .focusbtn.v3btn{display:inline-flex;align-items:center;gap:4px}
+  .focusbtn.v3btn svg{width:12px;height:12px}
+  /* the layers in 3D: a canvas over the stage, the cover's own canvas waiting under it; a bar of controls at its foot */
+  #stage #cv3d{position:absolute;inset:0;width:100%;height:100%;display:none;box-shadow:none;background:none;cursor:grab}
+  #stage.v3 #cv3d{display:block}
+  #stage.v3 #cv{visibility:hidden}
+  #stage.v3 #focustag{display:none}
+  #v3hud{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:none;align-items:center;gap:10px;max-width:calc(100% - 24px);padding:6px 8px 6px 12px;background:rgba(20,20,31,.94);border:1px solid var(--line2);font-size:12px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s}
+  #stage.v3 #v3hud{display:flex}
+  #stage.v3open #v3hud{opacity:1;pointer-events:auto}
+  #v3hud .v3tip{opacity:.6;overflow:hidden;text-overflow:ellipsis;min-width:0;cursor:help}
+  #v3hud .v3sl{display:flex;align-items:center;gap:6px;flex:none;opacity:.85}
+  #v3hud .v3sl input{width:90px;accent-color:var(--acc)}
+  #v3hud .focusbtn{flex:none}
   #stage canvas{display:block;touch-action:none;box-shadow:0 0 0 2px var(--line2)}
   #stage.alpha canvas{background:repeating-conic-gradient(#3a3a48 0% 25%,#24242e 0% 50%) 0 0/20px 20px}
   #strip{display:flex;gap:14px;padding:12px 18px 8px;border-top:2px solid var(--line);overflow-x:scroll;overflow-y:hidden;align-items:flex-end;min-width:0}
@@ -240,8 +254,10 @@
   .layers{display:grid;gap:3px}
   .layer{display:grid;grid-template-columns:26px 26px 1fr auto;align-items:center;gap:4px;border:2px solid var(--line);background:var(--panel);padding:3px 6px 3px 3px;cursor:pointer;user-select:none}
   .layer.on{border-color:var(--acc)}
+  .layer.peek:not(.on){border-color:#9a9ab4}   /* its sheet is under the pointer in the 3D view */
   .layer.over{box-shadow:0 -3px 0 var(--acc)}
   .layer.hidden .nm{opacity:.35}
+  .layer.dim{opacity:.35;cursor:not-allowed}   /* FOCUS is on another layer: it cannot be selected */
   .layer .ic{border:0;background:transparent;width:26px;height:26px;cursor:pointer;font-size:14px;opacity:.85;padding:0}
   .layer .ic.off{opacity:.25}
   .layer .ic.pin{display:grid;place-items:center;font-size:12px;opacity:.9;cursor:help}
