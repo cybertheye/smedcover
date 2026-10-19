@@ -7700,11 +7700,12 @@ export const LOOK_IDS = Object.keys(LOOKS);
 
 /** The order every layer's effects are painted in. */
 export const FX_STAGES = ["fill", "over", "filter", "behind"];
-/** The layer types the effects are open to: the user's own. */
-export const FX_TYPES = ["text", "asset", "photo", "solid"];
+/** The layer types the effects are open to: the user's own, and the title, which takes what a text layer takes. */
+export const FX_TYPES = ["text", "asset", "photo", "solid", "title"];
 const FX_ALL = ["text", "asset", "photo", "solid"];
+const fxType = (type) => (type === "title" ? "text" : type);
 /** The effects a look opens to a type of layer. */
-export const effectsFor = (look, type) => ((LOOKS[look] && LOOKS[look].elementFx) || []).filter((e) => e.for.includes(type) && FX_TYPES.includes(type));
+export const effectsFor = (look, type) => ((LOOKS[look] && LOOKS[look].elementFx) || []).filter((e) => e.for.includes(fxType(type)) && FX_TYPES.includes(type));
 /** A layer's effects that are on and apply to it, in the order they are painted: [{ id, look, fx, amt, opt }]. */
 export function layerEffects(L) {
   const all = L && L.lookFx, out = [];
@@ -7712,7 +7713,7 @@ export function layerEffects(L) {
   for (const [id, amt] of Object.entries(all)) {
     if (id.includes(":") || !(amt > 0)) continue;
     const [look, key] = id.split("."), fx = ((LOOKS[look] && LOOKS[look].elementFx) || []).find((e) => e.key === key);
-    if (!fx || !fx.for.includes(L.type)) continue;
+    if (!fx || !fx.for.includes(fxType(L.type))) continue;
     const opt = {};
     for (const s of fx.sub || []) { const v = all[`${id}:${s.key}`]; opt[s.key] = Number.isFinite(v) ? clamp(v) : s.def; }
     out.push({ id, look, fx, amt: clamp(amt), opt });

@@ -45,6 +45,7 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
 - One line in the text box is one line on the cover. Text **never wraps**; longer or more lines mean smaller type.
 - Words wrapped in `*asterisks*` take the channel colour.
 - The corner tag is an optional short label such as `EP.03`.
+- The title can also be changed in the properties of the *Title* layer, under *Text*: it is the same words.
 
 ### Photos
 
@@ -218,11 +219,11 @@ Each deal is one step of undo, however fast you click. Deal again if you do not 
 
 ### Title and text layers
 
-Add a text layer with **＋ Text** on the right. The title and text layers are the same kind of thing with the same properties; a text layer only adds *Text*, its words (the title's are written in the Cover tab). Top to bottom:
+Add a text layer with **＋ Text** on the right. The title and text layers are the same kind of thing with the same properties, look effects and clipping masks included; the title's *Text* is the title in the Cover tab, so either can be changed. The title is still a layout layer: it cannot be deleted or duplicated, and its default place follows the layout. Top to bottom:
 
 | Property | Decides |
 |---|---|
-| Text | text layers only. One line is one line; words in `*asterisks*` take the highlight colour |
+| Text | One line is one line; words in `*asterisks*` take the highlight colour. The title's text is the title in the Cover tab |
 | Font | see the next section |
 | Text effect | how the letters are drawn; see [Text effects](#text-effects) |
 | Lettering colour, highlight colour | see [Lettering colours](#lettering-colours) |
@@ -266,7 +267,7 @@ Outlined effects read the font file to get each letter's outline: the first time
 
 ### Look effects on your own layers
 
-A look's material effects can be put on a layer you added: text, asset, photo or solid. With the layer selected, its properties have a *Look effects* group in two parts:
+A look's material effects can be put on a layer you added — text, asset, photo or solid — and on the title, which takes the same effects as text. With the layer selected, its properties have a *Look effects* group in two parts:
 
 - **This look**: the effects the current look opens to that kind of layer. Each is a slider; at 0 it is off. Some have settings of their own: the riso's *Halftone*, once on, shows *Halftone size* under it.
 - **Borrow from other looks**: *Borrow from other looks…* opens a window showing each look with the effects it has, each in a dashed box; click the looks to borrow from (several at once) and confirm, and their names and sliders are put in below. Looks already borrowed come ticked; unticking one takes its effects off this layer. *Remove* after a look's name takes away every effect borrowed from it. Effects on the layer that are not the current look's are listed here too, under their own look.
@@ -315,7 +316,7 @@ All 33 looks have effects. Those marked [photo] are offered on photo layers only
 
 ### Clipping masks
 
-A layer you added (photo, text, asset, colour) can be clipped to the layer below it: select it and tick *Clip to the layer below* in the *Layer* group of its properties. It then shows only within the shape that layer paints, and is as see-through as it is:
+A layer you added (photo, text, asset, colour), and the title, can be clipped to the layer below it: select it and tick *Clip to the layer below* in the *Layer* group of its properties. It then shows only within the shape that layer paints, and is as see-through as it is:
 
 - put a photo above the title or a text layer and tick it, and the photo is inside the letters;
 - put a block of colour above a silhouette asset and tick it, and the silhouette takes the colour; move the colour to tint part of it only.

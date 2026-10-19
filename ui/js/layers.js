@@ -174,7 +174,7 @@ const PROPS = {
   photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, feather: 0, spread: 0, outline: 0, torn: false, shadow: 0 },
 };
 /** The layers that may carry the looks' effects (see FX_TYPES in style.js for those the effects are open to so far). */
-const FX_LAYERS = ["text", "asset", "photo", "solid"];
+const FX_LAYERS = ["text", "asset", "photo", "solid", "title"];
 const OLD_COLORS = ["white", "accent", "ink", "custom"];   // how text layers were coloured before they were headlines (see normalizeLayer)
 
 const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(hi, Math.max(lo, Number(v))) : d);
@@ -235,7 +235,7 @@ function normalizeLayer(raw, catIds) {
     if (Object.keys(fx).length) L.lookFx = fx;
   }
   if (lettered && !(L.lookFx && L.lookFx[lettered])) L.lookFx = { ...(L.lookFx || {}), [lettered]: 0.6 };
-  if (free && raw.clip === true) L.clip = true;   // shown only within the layer below (see clipBase)
+  if ((free || raw.type === "title") && raw.clip === true) L.clip = true;   // shown only within the layer below (see clipBase); the title may be too
   if (free && Array.isArray(raw.cats)) {   // a layer whose categories are all gone goes with them
     const cats = [...new Set(raw.cats.filter((x) => typeof x === "string" && x && (!catIds || catIds.includes(x))))];
     if (!cats.length) return null;

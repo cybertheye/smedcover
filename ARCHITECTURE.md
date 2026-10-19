@@ -143,7 +143,11 @@ The default order changed once (it was `bg accent graphic brand title tag catnam
 going with the layout layer it lay directly above. The app does it once per profile, in `loadCovers()`
 (the profile then keeps `layerOrder: 2`), since someone may later put the old order back on purpose.
 
-**Clipping masks**: a free layer may carry `clip: true`, and then shows only within the shape of the
+**The title as lettering**: the title has what a text layer has. It may be clipped (below), and carry look
+effects (`FX_TYPES` includes it; `effectsFor` and `layerEffects` offer it what a text layer is offered); its
+properties edit `cover.title`, which the Cover tab edits too.
+
+**Clipping masks**: a free layer (and the title) may carry `clip: true`, and then shows only within the shape of the
 layer below. The layer it is clipped to is its *base*: the first layer down not itself clipped
 (`clipBase()`), never the ground (which covers the canvas, so a clip onto it is none: -1);
 `clipEnd(layers, i)` gives the last layer clipped onto layer i. Several in a row may share a base.

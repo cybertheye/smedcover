@@ -641,7 +641,7 @@ function coverTab() {
       el("div", { class: "hint" }, t("cover.channelHint")),
       el("button", { class: "btn", style: "margin-top:8px", onclick: copyDialog }, t("copy.open"))),
     el("div", {}, cap("cover.title"),
-      el("textarea", { value: c.title, spellcheck: false, oninput: (e) => { c.title = e.target.value; touch({ cover: true }); } }),
+      el("textarea", { value: c.title, spellcheck: false, oninput: (e) => { c.title = e.target.value; touch({ cover: true }); if (S.layerId === "title") later("side", 700, renderSide); } }),
       el("div", { class: "hint" }, t("cover.titleHint"))),
     el("div", {}, cap("cover.tag"), textInput(c.tag, (v) => { c.tag = v; touch({ cover: true }); }, { placeholder: t("cover.tagPh") })),
     photoBox(),
@@ -2105,7 +2105,9 @@ function headlineControls(L, set) {
   return [
     psec("props.sec.text", [
       L.type === "text" && el("textarea", { value: L.text, spellcheck: false, style: "height:64px;margin-bottom:8px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
-      fontControl(L, true)], L.type === "text" ? t("props.textHint") : t("props.boundHint"), L.type === "text" ? "top" : ""),
+      // the title's words are the cover's, also in Cover → Title, which follows
+      L.type === "title" && el("textarea", { value: S.cover.title, spellcheck: false, style: "height:64px;margin-bottom:8px", oninput: (e) => { S.cover.title = e.target.value; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); } }),
+      fontControl(L, true)], t("props.textHint"), "top"),
     psec("props.sec.effect", fx.kids, fx.tip),
     psec("props.sec.color", [
       swatch(L, "ink", "props.sw.text", L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff"),
@@ -2350,7 +2352,7 @@ function layerSection(L) {
   return [el("div", { class: "psep" }),
     psec("props.sec.layer", [
       slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { holdLive(L.id); L.o = v; touch({ cover: true }); }),
-      isFree(L.type) && clipControl(L),
+      (isFree(L.type) || L.type === "title") && clipControl(L),
       !fixed && !copy && placementControls(L),   // a cut-out's (back over its photo) is with its placement
       ], fixed ? t("props.fixedHint") : "")];
 }
@@ -3014,7 +3016,7 @@ function surprise() {
       case "text": L.plate = chance(0.35); L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.4); break;
       case "asset": if (canTint(L.ref) && L.ref.kind !== "graphic") L.tint = chance(0.5); break;
     }
-    if (FX_TYPES.includes(L.type)) {   // look effects: one or two, mostly the look just drawn's, now and then another look's
+    if (FX_TYPES.includes(L.type) && L.type !== "title") {   // look effects: one or two, mostly the look just drawn's, now and then another look's (the title keeps the user's)
       delete L.lookFx;
       if (chance(0.55)) {
         const fx = {}, others = LOOK_IDS.filter((k) => k !== st.look && effectsFor(k, L.type).length);

@@ -800,9 +800,10 @@ test("the dark deco: Gotham's night by default, a crimson sky and black and gold
 test("look effects on a layer: kept clean, carried by the layer whatever the look, painted stage by stage", () => {
   const [tx] = normalizeLayers([{ type: "text", text: "x", lookFx: { "riso.dots": 0.5, "riso.dots:pitch": 0, "chrome.drips": 0, "chrome.drips:x": 1, "netart.sort": 7, "bad key": 1, "riso.shift": "0.3", "riso.ghost": null } }]).filter((l) => l.type === "text");
   assert.deepEqual(tx.lookFx, { "riso.dots": 0.5, "riso.dots:pitch": 0, "netart.sort": 1, "riso.shift": 0.3 }, "an effect at 0 goes, with its own settings; a strength is kept within 0–1; a malformed key is dropped");
-  const kinds = normalizeLayers([{ type: "solid", color: "#ff0000", lookFx: { "riso.dots": 1 } }, { type: "title", lookFx: { "riso.dots": 1 } }]);
+  const kinds = normalizeLayers([{ type: "solid", color: "#ff0000", lookFx: { "riso.dots": 1 } }, { type: "title", lookFx: { "riso.dots": 1 } }, { type: "brand", lookFx: { "riso.dots": 1 } }]);
   assert.deepEqual(kinds.find((l) => l.type === "solid").lookFx, { "riso.dots": 1 }, "a solid may carry them already");
-  assert.equal(kinds.find((l) => l.type === "title").lookFx, undefined, "the layout layers do not");
+  assert.deepEqual(kinds.find((l) => l.type === "title").lookFx, { "riso.dots": 1 }, "the title too, as a text layer does");
+  assert.equal(kinds.find((l) => l.type === "brand").lookFx, undefined, "the other layout layers do not");
   assert.equal(normalizeLayers([{ type: "text", text: "x", lookFx: { "riso.dots": 0 } }]).find((l) => l.type === "text").lookFx, undefined);
   // every look's effects: a stage, both names, the user's own layers (a photo-only one for photos alone), a painter; keys unique within the look
   for (const id of LOOK_IDS) {
@@ -819,7 +820,7 @@ test("look effects on a layer: kept clean, carried by the layer whatever the loo
   }
   assert.ok(!LOOKS.editorial.elementFx.some((e) => e.key === "underline"));
   assert.ok(["riso", "chrome", "netart"].every((id) => LOOKS[id].elementFx.length >= 4), "the pilots");
-  assert.deepEqual(FX_TYPES, ["text", "asset", "photo", "solid"]);
+  assert.deepEqual(FX_TYPES, ["text", "asset", "photo", "solid", "title"]);
   assert.ok(effectsFor("cyber", "photo").some((e) => e.key === "tint") && !effectsFor("cyber", "text").some((e) => e.key === "tint"), "a photo's own effect is offered on photos only");
   assert.equal(effectsFor("skies", "text").length, 0, "a look whose only effect is a photo's");
   // a layer's effects apply whatever look the cover is in, in stage order, only those that suit its type
@@ -1482,4 +1483,12 @@ test("the 3D view's labels move apart only as far as they must, and stay in boun
   assert.ok(ys[1] < ys[0] && ys[0] < ys[2] && ys[2] < ys[3], "in the order they wanted");
   const low = spreadLabels([495, 498, 499], 20, 0, 500);
   assert.ok(Math.max(...low) <= 490 && Math.min(...low) >= 10, "pushed up off the bottom");
+});
+
+test("the title is lettered like a text layer: the same look effects, a clipping mask", async () => {
+  const { effectsFor: fxFor } = await import("../ui/js/style.js");
+  for (const id of LOOK_IDS) assert.deepEqual(fxFor(id, "title").map((e) => e.key), fxFor(id, "text").map((e) => e.key), `${id}: the title takes what text takes`);
+  const ls = normalizeLayers([{ type: "bg" }, { type: "accent" }, { type: "title", clip: true }, { type: "brand", clip: true }]);
+  assert.equal(ls.find((l) => l.type === "title").clip, true, "the title may be clipped onto the layer below");
+  assert.equal(ls.find((l) => l.type === "brand").clip, undefined, "the other layout layers may not");
 });
