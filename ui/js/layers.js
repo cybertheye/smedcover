@@ -15,6 +15,9 @@
 // A free layer may carry `cats`, a list of category ids: it then exists only on covers of those
 // categories. Without it the layer is on every category's cover.
 //
+// A layout layer may be left out of a cover (`off: true`, chosen in Cover → Layout parts): it is then
+// hidden, and the editor leaves it out of the layer list and of Hide layout; ticked again, it comes back
+// as it was. The ground is never left out.
 // A free layer may also be clipped (`clip: true`): it then shows only within the shape of the layer
 // below it — the nearest one not itself clipped, its *base* (see clipBase) — as a clipping mask does:
 // a photo inside the title's letters, a colour inside a silhouette. The base can be any layer but the
@@ -236,6 +239,7 @@ function normalizeLayer(raw, catIds) {
   }
   if (lettered && !(L.lookFx && L.lookFx[lettered])) L.lookFx = { ...(L.lookFx || {}), [lettered]: 0.6 };
   if ((free || raw.type === "title") && raw.clip === true) L.clip = true;   // shown only within the layer below (see clipBase); the title may be too
+  if (!free && raw.type !== "bg" && raw.off === true) { L.off = true; L.visible = false; }   // a layout layer this cover leaves out (see `off` above)
   if (free && Array.isArray(raw.cats)) {   // a layer whose categories are all gone goes with them
     const cats = [...new Set(raw.cats.filter((x) => typeof x === "string" && x && (!catIds || catIds.includes(x))))];
     if (!cats.length) return null;

@@ -143,6 +143,10 @@ The default order changed once (it was `bg accent graphic brand title tag catnam
 going with the layout layer it lay directly above. The app does it once per profile, in `loadCovers()`
 (the profile then keeps `layerOrder: 2`), since someone may later put the old order back on purpose.
 
+**Layout parts left out**: a layout layer but the ground may carry `off: true` (Cover → *Layout parts*,
+`partsBox()`): it is then hidden, and the editor leaves it out of the layer list, the 3D view and *Hide
+layout*; ticked again it is back as it was. *Clear* keeps it.
+
 **The title as lettering**: the title has what a text layer has. It may be clipped (below), and carry look
 effects (`FX_TYPES` includes it; `effectsFor` and `layerEffects` offer it what a text layer is offered); its
 properties edit `cover.title`, which the Cover tab edits too.

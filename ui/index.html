@@ -298,6 +298,12 @@
   .fxcard b{display:block;margin-bottom:6px;font-size:14px}
   .fxcard.on b::after{content:"  ✓";color:var(--acc)}
   .fxcard ul{margin:0;padding-left:16px;font-size:12px;line-height:1.55;opacity:.75}
+  /* Cover → Layout parts: the same cards, two to a row in the side column */
+  .fxcards.slim{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .fxcards.slim .fxcard{padding:8px 10px}
+  .fxcards.slim .fxcard b{margin-bottom:3px;font-size:13px}
+  .fxcards.slim .fxcard span{display:block;font-size:11.5px;line-height:1.45;opacity:.6}
+  .fxcards.slim .fxcard:not(.on){opacity:.55}
   @media(max-width:1100px){html,body{overflow:auto}.app{height:auto}.body,.body.setup{grid-template-columns:1fr}aside{border:0!important}.split{display:none}.scroll{overflow:visible}#stage{height:60vh}}
 </style>
 </head>

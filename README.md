@@ -47,6 +47,10 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
 - The corner tag is an optional short label such as `EP.03`.
 - The title can also be changed in the properties of the *Title* layer, under *Text*: it is the same words.
 
+### Layout parts
+
+*Layout parts* in the Cover tab lists what the layout brings — the title, the corner tag, the channel name, the channel graphic, the brand row, the colour block and its edge, the frame — a card each. Click a card to untick it and that part is left out of this cover, and no longer listed with the layers (*Hide layout* leaves it alone too); click again and it is back, its place, colours and effects as they were. Don't want the channel graphic? Untick it. It is this channel's cover only, it stays through *Clear*, and it can be undone. The background is always there, so it is not listed.
+
 ### Photos
 
 Every photo is a *Photo* layer. Under *Add photos* in *Edit → Cover*:

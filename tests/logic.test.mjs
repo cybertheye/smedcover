@@ -1492,3 +1492,11 @@ test("the title is lettered like a text layer: the same look effects, a clipping
   assert.equal(ls.find((l) => l.type === "title").clip, true, "the title may be clipped onto the layer below");
   assert.equal(ls.find((l) => l.type === "brand").clip, undefined, "the other layout layers may not");
 });
+
+test("a layout part may be left out of a cover: hidden, never the ground, never a layer of the user's", () => {
+  const ls = normalizeLayers([{ type: "graphic", off: true, visible: true }, { type: "bg", off: true }, { type: "text", text: "x", off: true }]);
+  const of = (type) => ls.find((l) => l.type === type);
+  assert.equal(of("graphic").off, true); assert.equal(of("graphic").visible, false, "a part left out is hidden");
+  assert.equal(of("bg").off, undefined, "the ground is never left out");
+  assert.equal(of("text").off, undefined, "a layer of the user's is deleted, not left out");
+});

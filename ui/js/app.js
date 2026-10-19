@@ -644,8 +644,24 @@ function coverTab() {
       el("textarea", { value: c.title, spellcheck: false, oninput: (e) => { c.title = e.target.value; touch({ cover: true }); if (S.layerId === "title") later("side", 700, renderSide); } }),
       el("div", { class: "hint" }, t("cover.titleHint"))),
     el("div", {}, cap("cover.tag"), textInput(c.tag, (v) => { c.tag = v; touch({ cover: true }); }, { placeholder: t("cover.tagPh") })),
+    partsBox(),
     photoBox(),
   ];
+}
+/**
+ * Cover → Layout parts: one card for each of the template's layers but the ground; one unticked is left
+ * out of this cover (`off`, see layers.js): hidden, gone from the layer list. Ticked again, it is back as it was.
+ */
+function partsBox() {
+  const list = S.cover.layers.filter((l) => !isFree(l.type) && l.type !== "subject" && l.type !== "bg").reverse();   // top first, as in the layer list
+  const flip = (L) => {
+    if (L.off) { delete L.off; L.visible = true; } else { L.off = true; L.visible = false; if (S.layerId === L.id) S.layerId = "bg"; }
+    touch({ cover: true, side: true, panel: true });
+  };
+  return el("div", {}, el("div", { class: "lhead" }, cap("cover.parts"), info(t("cover.partsTip"))),
+    el("div", { class: "fxcards slim" }, list.map((L) => el("button", { class: "fxcard" + (L.off ? "" : " on"), title: t(L.off ? "cover.partOff" : "cover.partOn"), onclick: () => flip(L) },
+      el("b", {}, layerName(L)), el("span", {}, t("cover.part." + L.type))))),
+    el("div", { class: "hint" }, t("cover.partsHint")));
 }
 /**
  * Cover → Photos: upload a photo or have one made by the image model, then every photo on this
@@ -2391,7 +2407,7 @@ function focusAllows(id) {
   return false;
 }
 /** The layout layers on the cover on the canvas (the ones the template brings, marked with the layout icon). */
-const layoutLayers = () => S.cover.layers.filter((l) => !isFree(l.type) && l.type !== "subject" && appliesTo(l, cat().id));
+const layoutLayers = () => S.cover.layers.filter((l) => !isFree(l.type) && l.type !== "subject" && !l.off && appliesTo(l, cat().id));
 let LAYOUT_HID = null;   // { cover, ids }: the template's layers that were showing when "Hide layout" hid them
 /**
  * Hide layout / Show layout: hides every one of the template's layers at once, leaving what the user
@@ -2421,8 +2437,8 @@ function syncFocus() {
 }
 function renderSide() {
   if (!S.cover) return;
-  if (layer() && !appliesTo(layer(), cat().id)) S.layerId = "bg";   // the selected layer is not on this category's cover
-  const side = $("side"), y = side.scrollTop, L = layer(), free = L && isFree(L.type), here = S.cover.layers.filter((l) => appliesTo(l, cat().id));
+  if (layer() && (!appliesTo(layer(), cat().id) || layer().off)) S.layerId = "bg";   // the selected layer is not on this category's cover, or left out of it
+  const side = $("side"), y = side.scrollTop, L = layer(), free = L && isFree(L.type), here = S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off);
   // keep typing in the text box alive across rebuilds
   const typing = document.activeElement && side.contains(document.activeElement) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename"));
   if (typing) return;
@@ -2463,7 +2479,7 @@ function renderSide() {
 // made in the panel show at once; a sheet moved in the list slides to its new place.
 const OPEN_MS = 420, MASK_PX = 160;
 const ease = (p) => (p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2);
-const here3d = () => S.cover.layers.filter((l) => appliesTo(l, cat().id));
+const here3d = () => S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off);
 /** Opens the 3D view out of the cover, or folds it back. */
 function set3d(on) {
   if (on && !V3.on) {
@@ -3047,6 +3063,7 @@ function clearDialog() {
     closeModal(); clearTimeout(timers.hist); commitHistory();
     const fresh = channelCover({ catId: S.cover.catId, title: S.cover.title, tag: S.cover.tag }, S.profile, S.cover.catId);
     fresh.layers = fresh.layers.filter((l) => !isFree(l.type));   // the design's own added layers go too: empty is empty
+    for (const l of fresh.layers) if (layer(l.id) && layer(l.id).off) { l.off = true; l.visible = false; }   // what this cover leaves out stays out
     setCover(fresh); S.layerId = "title"; S.picked = [];
     touch({ cover: true, side: true, panel: onCoverTab() });
     commitHistory(); toast(t("top.cleared"));
