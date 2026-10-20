@@ -34,18 +34,16 @@ export function starterProfile(lang, brandName) {
   };
 }
 
-/** Output sizes offered in the export tab. `on` marks the ones a new profile starts with. */
+/**
+ * Output sizes offered in Setup → Sizes: one for each ratio the platforms want (RATIOS in platforms.js,
+ * in its order), named after them as they are shown (sizeCaption in store.js). `on` marks the ones a
+ * new profile starts with. Sizes a profile has from the presets there were before are kept, as its own.
+ */
 export const SIZE_PRESETS = [
-  { w: 1920, h: 1080, label: "16:9", on: true },
-  { w: 1600, h: 1200, label: "4:3", on: true },
-  { w: 1200, h: 1200, label: "1:1", on: true },
-  { w: 1200, h: 1600, label: "3:4", on: true },
-  { w: 1080, h: 1920, label: "9:16", on: true },
-  { w: 1280, h: 720, label: "16:9 · YouTube" },
-  { w: 1146, h: 717, label: "16:10 · Bilibili" },
-  { w: 1242, h: 1660, label: "3:4 · 小红书 RED" },
-  { w: 1080, h: 1350, label: "4:5 · Instagram" },
-  { w: 1080, h: 1080, label: "1:1 · Instagram" },
-  { w: 1600, h: 900, label: "16:9 · X" },
-  { w: 900, h: 383, label: "2.35:1 · 公众号 WeChat" },
+  { w: 1920, h: 1080, on: true },   // B站, YouTube
+  { w: 1600, h: 1200, on: true },   // B站, 抖音, 视频号
+  { w: 1200, h: 1600, on: true },   // 抖音, 小红书, 视频号
+  { w: 1080, h: 1920, on: true },   // YouTube, a portrait video
+  { w: 1200, h: 1200, on: true },   // 公众号
+  { w: 900, h: 383, on: true },     // 公众号
 ];

@@ -6,7 +6,8 @@ import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, pai
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
-import { useFont, ratioText } from "./store.js";
+import { useFont } from "./store.js";
+import { platformsFor } from "./platforms.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
 import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout } from "./layers.js";
 import {
@@ -66,7 +67,8 @@ const S = {
 const cat = () => S.profile.categories.find((c) => c.id === S.cover.catId) || S.profile.categories[0];
 const catIndex = () => Math.max(0, S.profile.categories.indexOf(cat()));
 const selSize = () => S.profile.sizes.find((s) => sizeKey(s) === S.sel) || S.profile.sizes[0];
-const sizeLabel = (s) => `${sizeCaption(s)} · ${s.w}×${s.h}`;      // full form, with pixels
+const caption = (s) => sizeCaption(s, getLang());                   // what a size is called: its name, or the platforms it is for and its ratio
+const sizeLabel = (s) => `${caption(s)} · ${s.w}×${s.h}`;           // full form, with pixels
 const layer = (id = S.layerId) => S.cover.layers.find((l) => l.id === id) || null;
 /** Geometry context of the size on the main canvas, as the layer maths wants it. */
 const frame = () => { const s = selSize(), [vw, vh] = virtualSize(s.w, s.h); return { vw, vh, key: sizeKey(s), catId: cat().id }; };
@@ -310,7 +312,7 @@ $("strip").addEventListener("wheel", (e) => { if (Math.abs(e.deltaY) > Math.abs(
 function buildStrip() {
   $("strip").replaceChildren(...S.profile.sizes.map((size) => {
     const key = sizeKey(size);
-    return el("figure", { class: key === S.sel ? "on" : "", onclick: () => selectSize(key) }, el("canvas", { id: "th-" + key }), el("figcaption", { title: sizeLabel(size) }, sizeCaption(size)));
+    return el("figure", { class: key === S.sel ? "on" : "", onclick: () => selectSize(key) }, el("canvas", { id: "th-" + key }), el("figcaption", { title: sizeLabel(size) }, caption(size)));
   }));
 }
 function selectSize(key) {
@@ -320,7 +322,8 @@ function selectSize(key) {
 }
 function syncToolbar() {
   const scope = (v) => el("button", { class: "btn" + (S.settings.scope === v ? " on" : ""), onclick: () => { S.settings.scope = v; persistSettings(); syncToolbar(); renderSide(); } }, t("scope." + v));
-  $("toolbar").replaceChildren(...[el("span", { class: "name", title: sizeLabel(selSize()) }, sizeLabel(selSize())),
+  const size = selSize();   // what it is called over its pixels, in two lines: names after the platforms can be long
+  $("toolbar").replaceChildren(...[el("span", { class: "name", title: sizeLabel(size) }, el("b", {}, caption(size)), el("small", {}, `${size.w}×${size.h}`)),
     S.mode === "edit" && el("div", { class: "grp" }, el("span", {}, t("props.scope")), el("div", { class: "seg" }, scope("all"), scope("size"))),
     S.mode === "edit" && el("span", { class: "help", title: t("cover.how"), onclick: (e) => showTip(e.currentTarget, t("cover.how")) }, el("span", { class: "info" }, "ⓘ"), t("cover.howShort"))].filter(Boolean));
 }
@@ -933,7 +936,7 @@ function copyPreview(p) {
     draw();
     if (outlinesPending()) outlinesSettled().then(() => { if (COPY.src === src && cv.isConnected) draw(); });   // lettering effects that wait for outlines
   }
-  return el("div", {}, box, el("div", { class: "hint", style: "margin:4px 0 0" }, `${size.label || ratioText(size.w, size.h)} · ${size.w} × ${size.h}`));
+  return el("div", {}, box, el("div", { class: "hint", style: "margin:4px 0 0" }, sizeLabel(size)));
 }
 /** Copies the free layers of cover src (of profile p) into the cover on the canvas, as one undo step. */
 async function copyInto(p, src) {
@@ -1557,7 +1560,7 @@ function genBox() {
       el("div", { class: "row" },
         el("button", { class: "btn solid", onclick: keepGeneratedPhoto }, t("gen.keep")),
         el("button", { class: "btn", onclick: () => { GEN.result = null; renderPanel(); } }, t("ai.discard")))],
-    el("div", { class: "hint" }, t("gen.hint", t("img.provider." + c.provider), c.model, sizeCaption(size))));
+    el("div", { class: "hint" }, t("gen.hint", t("img.provider." + c.provider), c.model, caption(size))));
 }
 /** The image model's settings: Setup → AI → Image model. */
 function imageAiPane() {
@@ -1935,7 +1938,9 @@ function sizesTab() {
     syncToolbar(); touch({ profile: true, strip: true, panel: true });
   };
   const custom = P.sizes.filter((s) => !SIZE_PRESETS.some((p) => sizeKey(p) === sizeKey(s)));
-  const row = (s) => el("label", { class: "chk" }, el("input", { type: "checkbox", checked: has(s), onchange: (e) => toggle(s, e.target.checked) }), s.label || t("exp.custom"), el("span", {}, `${s.w}×${s.h}`));
+  const unnamed = (s) => caption({ ...s, name: "" });   // what a size is called without a name of the user's
+  const mine = (s) => !platformsFor(s.w, s.h).length && !s.label;   // a size of the user's own, for no platform
+  const row = (s) => el("label", { class: "chk" }, el("input", { type: "checkbox", checked: has(s), onchange: (e) => toggle(s, e.target.checked) }), mine(s) ? `${t("exp.custom")} · ${unnamed(s)}` : unnamed(s), el("span", {}, `${s.w}×${s.h}`));
   const cw = el("input", { type: "number", min: 64, max: 8192, placeholder: "W", value: 1280 }), chh = el("input", { type: "number", min: 64, max: 8192, placeholder: "H", value: 720 });
   const setting = (k, v, panel = false) => { se[k] = v; persistSettings(); if (panel) renderPanel(); };
   return [
@@ -1944,7 +1949,7 @@ function sizesTab() {
         el("button", { class: "btn", style: "padding:10px", onclick: () => toggle(normalizeSize({ w: cw.value, h: chh.value, label: "" }), true) }, t("exp.addSize")))),
     el("div", { class: "box" }, cap("exp.names"),
       P.sizes.map((s) => el("div", { class: "nm-row" }, el("span", {}, `${s.w}×${s.h}`),
-        textInput(s.name, (v) => { s.name = v.trim().slice(0, 40); persistProfile(); recordHistory(); later("strip", 250, () => { buildStrip(); syncToolbar(); queueDraw(); }); }, { placeholder: s.label || ratioText(s.w, s.h), maxLength: 40 }))),
+        textInput(s.name, (v) => { s.name = v.trim().slice(0, 40); persistProfile(); recordHistory(); later("strip", 250, () => { buildStrip(); syncToolbar(); queueDraw(); }); }, { placeholder: unnamed(s), maxLength: 40 }))),
       el("div", { class: "hint" }, t("exp.namesHint"))),
     el("div", {}, cap("exp.scale"), select([1, 2, 3, 4].map((n) => [String(n), `${n}x`]), String(se.scale), (v) => setting("scale", Number(v)))),
     el("div", {}, cap("exp.format"), select([["png", "PNG"], ["jpeg", "JPEG"], ["webp", "WebP"]], se.format, (v) => setting("format", v, true)),

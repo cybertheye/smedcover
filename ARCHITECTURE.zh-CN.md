@@ -50,7 +50,7 @@ ui/
   js/layout.js       任意宽高比和版式下的几何布局（纯函数）
   js/title.js        标题解析与字号适配
   js/stack3d.js      图层栏的 3D 视图：叠层的投影、适配、标签和绘制（除绘制外都是纯计算）
-  js/platforms.js    封面要发的平台，作为数据：各平台要的比例、信息流里的显示宽度、平台叠在封面上的东西
+  js/platforms.js    封面要发的平台，作为数据：各平台要的比例、信息流里的显示宽度、平台叠在封面上的东西；尺寸的名字（platformsFor）
   js/check.js        封面标准的规则，纯函数（测试用它检查版式；版式里的执行见 layout.js 的 meetStandards）
   js/textfx.js       文字效果：叠画、蒙版、轮廓三类
   js/outlines.js     字形轮廓的缓存（向 Rust 侧索取）
@@ -67,7 +67,7 @@ ui/
   js/solid.js        以数据描述的立体图形：校验，并用频道图形的渲染器绘制
   js/ai.js           AI 生成：连接设置、两种接口风格的请求、预设提示词（纯函数）
   js/store.js        数据模型、校验、持久化
-  js/presets.js      起步档案与尺寸预设
+  js/presets.js      起步档案与尺寸预设（平台要的每种比例一个）
   js/csv.js          批量导出用的 CSV 解析
   js/i18n.js         界面文字（中 / 英）
   fonts/             内置字体及许可

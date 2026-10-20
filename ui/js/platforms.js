@@ -1,6 +1,6 @@
 // The platforms covers are made for, as data: which covers each wants and how it shows them. The layouts
-// (meetStandards in layout.js) and the cover standards (check.js) read it; a platform that changes only
-// needs this file changed.
+// (meetStandards in layout.js), the cover standards (check.js) and the sizes' names (platformsFor) read it;
+// a platform that changes only needs this file changed.
 //
 // The ratios each platform wants were checked on a phone, uploading a video (2026-10-19). `feed` (how
 // wide the cover shows in the app's feed on a phone about 390 points wide, in CSS pixels) and `zones`
@@ -47,6 +47,20 @@ export const RED_RATIOS = ["3:4", "4:3", "1:1"];
 
 /** Whether a size of w × h pixels is of ratio `name`. */
 export const isRatio = (w, h, name) => Math.abs(w / h - RATIOS[name].w / RATIOS[name].h) < 0.01;
+/** The name of the ratio a size of w × h pixels is of ("16:9"), or null when it is none of RATIOS. */
+export const ratioOf = (w, h) => Object.keys(RATIOS).find((r) => isRatio(w, h, r)) || null;
+/**
+ * The platforms a cover of w × h pixels is for, by name in `lang` ("zh" | "en"), in the order of PLATFORMS:
+ * those that want its ratio for a landscape video, or for a portrait one when no landscape video wants it
+ * (9:16, YouTube's), 小红书 with its default ratio. Empty when no platform wants the ratio.
+ */
+export function platformsFor(w, h, lang = "zh") {
+  const r = ratioOf(w, h);
+  if (!r) return [];
+  const by = (orient) => PLATFORMS.filter((p) => p.covers({ orient, red: "3:4" }).some((c) => c.ratio === r));
+  const list = by("h").length ? by("h") : by("v");
+  return list.map((p) => p.name[lang] || p.name.zh);
+}
 /**
  * Every cover the chosen platforms want, by ratio: [{ ratio, uses: [{ platform, feed, zones }] }], in the
  * order of RATIOS. o: { platforms: [ids], orient, red }.

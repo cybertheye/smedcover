@@ -5,7 +5,8 @@ import { blockLayout, virtualSize, layout, TEMPLATES } from "../ui/js/layout.js"
 import { parseCsv, csvToJobs } from "../ui/js/csv.js";
 import { useFont, normalizeProfile, normalizeCover, normalizeSettings, exportName, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
 import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex, clipBase, clipEnd, normalizeScene, sceneOffsets, moveScene, resetScene, reorderLayout } from "../ui/js/layers.js";
-import { sampleProfile, starterProfile } from "../ui/js/presets.js";
+import { sampleProfile, starterProfile, SIZE_PRESETS } from "../ui/js/presets.js";
+import { platformsFor, RATIOS } from "../ui/js/platforms.js";
 
 test("virtualSize keeps the five tuned canvases and normalises everything else", () => {
   assert.deepEqual(virtualSize(1920, 1080), [1920, 1080]);
@@ -74,7 +75,8 @@ test("normalizeProfile repairs bad input and keeps good input", () => {
   assert.equal(sample.categories.length, 5);
   assert.deepEqual(sample.categories[3].graphic.labels, ["问题", "拆分", "尝试", "结论"]);
   assert.equal(normalizeProfile(sampleProfile("en")).categories[4].graphic.stamp, "DONE");
-  assert.equal(sample.sizes.length, 5);
+  assert.equal(sample.sizes.length, 6);   // one for each ratio the platforms want
+  assert.deepEqual(sample.sizes.map((z) => sizeCaption(z)), ["B站 / YouTube · 16:9", "B站 / 抖音 / 视频号 · 4:3", "抖音 / 小红书 / 视频号 · 3:4", "YouTube · 9:16", "公众号 · 1:1", "公众号 · 2.35:1"]);
   assert.equal(normalizeProfile(starterProfile("en", "ACME")).brand.name, "ACME");
 });
 
@@ -191,7 +193,7 @@ test("every interface string has both languages", async () => {
   for (const lang of ["zh", "en"]) { setLang(lang); for (const k of keys()) assert.ok(t(k).trim().length > 0, `${lang} ${k}`); }
 });
 
-test("size captions: custom name first, then ratio and use, never pixels", () => {
+test("size captions: custom name first, then the platforms the ratio is for and the ratio, never pixels", () => {
   assert.equal(ratioText(1920, 1080), "16:9");
   assert.equal(ratioText(1200, 1600), "3:4");
   assert.equal(ratioText(1200, 1200), "1:1");
@@ -199,8 +201,15 @@ test("size captions: custom name first, then ratio and use, never pixels", () =>
   assert.equal(ratioText(1146, 717), "1.6:1");
   assert.equal(ratioText(1000, 1257), "1:1.26");
   assert.equal(sizeCaption(normalizeSize({ w: 1280, h: 720, label: "16:9 · YouTube", name: "  主站封面 " })), "主站封面");
-  assert.equal(sizeCaption(normalizeSize({ w: 1280, h: 720, label: "16:9 · YouTube" })), "16:9 · YouTube");
+  assert.equal(sizeCaption(normalizeSize({ w: 1280, h: 720, label: "16:9 · YouTube" })), "B站 / YouTube · 16:9");   // a platform's ratio: named after the platforms
+  assert.equal(sizeCaption(normalizeSize({ w: 1440, h: 1080, label: "4:3" }), "en"), "Bilibili / Douyin / WeChat Channels · 4:3");
+  assert.equal(sizeCaption(normalizeSize({ w: 900, h: 900 })), "公众号 · 1:1");
+  assert.equal(sizeCaption(normalizeSize({ w: 1080, h: 1350, label: "4:5 · Instagram" })), "4:5 · Instagram");   // no platform's: what it came with
   assert.equal(sizeCaption(normalizeSize({ w: 1500, h: 500 })), "3:1");
+  assert.deepEqual(platformsFor(1080, 1920), ["YouTube"]);                                // the portrait video's ratio
+  assert.deepEqual(platformsFor(1200, 1600, "en"), ["Douyin", "RED", "WeChat Channels"]);
+  assert.deepEqual(platformsFor(1146, 717), []);
+  assert.deepEqual(SIZE_PRESETS.map((z) => ratioText(z.w, z.h)), Object.keys(RATIOS));     // one preset for each ratio a platform wants
   assert.equal(normalizeSize({ w: 100, h: 100, name: "x".repeat(99) }).name.length, 40);
   assert.equal(normalizeProfile({ sizes: [{ w: 800, h: 600, name: "Blog" }] }).sizes[0].name, "Blog");
 });

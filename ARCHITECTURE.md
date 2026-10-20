@@ -50,7 +50,7 @@ ui/
   js/layout.js       geometry for any aspect ratio and template (pure)
   js/title.js        title parsing and fitting
   js/stack3d.js      the layer panel's 3D view: the stack's projection, fitting, labels and drawing (pure maths but for the drawing)
-  js/platforms.js    the platforms covers are made for, as data: the ratios each wants, feed widths, what the apps lay over a cover
+  js/platforms.js    the platforms covers are made for, as data: the ratios each wants, feed widths, what the apps lay over a cover; the sizes' names (platformsFor)
   js/check.js        the cover standards' rules, pure (the tests hold the layouts to them; meetStandards in layout.js)
   js/textfx.js       text effects: layered, masked and outlined
   js/outlines.js     cache of glyph outlines (fetched from the Rust side)
@@ -67,7 +67,7 @@ ui/
   js/solid.js        3D objects described as data: validation, drawn with the channel graphics' renderer
   js/ai.js           AI generation: settings, requests for both API styles, the preset prompt (pure)
   js/store.js        data model, validation, persistence
-  js/presets.js      starter profiles and size presets
+  js/presets.js      starter profiles and size presets (one for each ratio a platform wants)
   js/csv.js          CSV reader for batch export
   js/i18n.js         interface strings (zh / en)
   fonts/             bundled fonts and their licences

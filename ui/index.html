@@ -207,7 +207,9 @@
   /* one line whatever the size is called: the name has a slot of its own (cut short, in full on hover),
      the help is behind an ⓘ — so nothing after it moves, and the canvas below keeps its height */
   #toolbar{display:flex;align-items:center;gap:14px;padding:0 18px;height:52px;border-bottom:2px solid var(--line);flex-wrap:nowrap;white-space:nowrap;overflow:hidden}
-  #toolbar .name{font:600 13px var(--mono);letter-spacing:.06em;font-variant-numeric:tabular-nums;width:26ch;flex:none;overflow:hidden;text-overflow:ellipsis}
+  #toolbar .name{font:600 13px var(--mono);letter-spacing:.04em;font-variant-numeric:tabular-nums;width:30ch;flex:none;display:grid;line-height:17px}
+  #toolbar .name>*{overflow:hidden;text-overflow:ellipsis}
+  #toolbar .name small{font-size:11px;opacity:.55}
   #toolbar .help{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;opacity:.6;cursor:help;flex:none}
   #toolbar .help:hover{opacity:1}
   #stage{min-height:0;min-width:0;display:grid;place-items:center;padding:18px;overflow:hidden;background:#06060b;position:relative}

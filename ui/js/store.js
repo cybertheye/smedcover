@@ -8,6 +8,7 @@
 // In the desktop app everything lives in the app data directory (through the Rust side); when the
 // page is opened in a plain browser it falls back to localStorage so the UI can still be developed.
 import { SIZE_PRESETS } from "./presets.js";
+import { platformsFor, ratioOf } from "./platforms.js";
 import { TEMPLATES, LAYOUT_LIMITS } from "./layout.js";
 import { LOOK_IDS, lookParams } from "./style.js";
 import { normalizeLayers, normalizeScene } from "./layers.js";
@@ -49,7 +50,7 @@ function normalizeGraphic(g) {
   if (KINDS.includes(g.kind) && str(g.id)) return { kind: g.kind, id: g.id, ...extra };
   return { kind: "none" };
 }
-/** An output size. `label` is the preset's own description ("16:9 · YouTube"); `name` is what the user calls it. */
+/** An output size. `label` is the description a preset of before gave it ("4:5 · Instagram"); `name` is what the user calls it. */
 export const normalizeSize = (s) => ({ w: Math.round(num(s && s.w, 1920, 64, 8192)), h: Math.round(num(s && s.h, 1080, 64, 8192)), label: str(s && s.label), name: str(s && s.name).trim().slice(0, 40) });
 
 /** Aspect ratio as text: "16:9" when it reduces to small numbers, otherwise relative to 1 ("2.35:1", "1:1.25"). */
@@ -59,8 +60,15 @@ export function ratioText(w, h) {
   const r = (x) => String(Math.round(x * 100) / 100);
   return w >= h ? `${r(w / h)}:1` : `1:${r(h / w)}`;
 }
-/** Short caption for a size: the user's name if any, else the preset's ratio and use, else just the ratio. No pixels. */
-export const sizeCaption = (s) => s.name || s.label || ratioText(s.w, s.h);
+/**
+ * Short caption for a size: the user's name if any, else the platforms its ratio is for and the ratio
+ * ("B站 / YouTube · 16:9", see platformsFor), else the description it came with, else just the ratio. No pixels.
+ */
+export function sizeCaption(s, lang = "zh") {
+  if (s.name) return s.name;
+  const on = platformsFor(s.w, s.h, lang);
+  return on.length ? `${on.join(" / ")} · ${ratioOf(s.w, s.h)}` : s.label || ratioText(s.w, s.h);
+}
 
 /** Fills in defaults and drops anything malformed, so files from disk (or other people) are safe to use. */
 export function normalizeProfile(raw) {
@@ -88,7 +96,7 @@ export function normalizeProfile(raw) {
   // tuned values are kept per look, so switching away and back loses nothing
   for (const id of LOOK_IDS) { const v = lookParams(id, st.lookParams && st.lookParams[id]); if (Object.keys(v).length) style.lookParams[id] = v; }
   let sizes = (Array.isArray(p.sizes) ? p.sizes : []).map(normalizeSize);
-  if (!sizes.length) sizes = SIZE_PRESETS.filter((s) => s.on).map(({ w, h, label }) => ({ w, h, label }));
+  if (!sizes.length) sizes = SIZE_PRESETS.filter((s) => s.on).map(({ w, h }) => ({ w, h, label: "", name: "" }));
   const keys = new Set();
   sizes = sizes.filter((s) => !keys.has(s.w + "x" + s.h) && keys.add(s.w + "x" + s.h));
   const of = p.oldFonts || p.fonts || {}, oldFonts = [of.body, of.display, of.serif].some((v) => typeof v === "string" && v.trim()) ? { body: str(of.body), display: str(of.display), serif: str(of.serif) } : null;
