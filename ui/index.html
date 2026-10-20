@@ -294,6 +294,17 @@
   #modal .count{font:600 15px var(--mono)}
   #modal h2{font:400 34px "Bebas Neue",var(--ui);letter-spacing:.06em;margin:0}
   #modal .dlg.wide{width:min(880px,94vw)}
+  .parts{display:grid;gap:3px}
+  .part{display:grid;grid-template-columns:12px 16px auto 1fr;align-items:center;gap:9px;border:2px solid var(--line);background:var(--panel);padding:6px 10px 6px 6px;margin:0;cursor:grab;user-select:none}
+  .part:hover{border-color:#9a9ab4}
+  .part .grip{opacity:.4;font-size:13px;line-height:1}
+  .part input{width:16px;height:16px;margin:0;accent-color:var(--acc);cursor:pointer}
+  .part b{font-size:13px;white-space:nowrap}
+  .part .d{font-size:12px;opacity:.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .part.off b{opacity:.4}
+  .part.dragging{opacity:.4}
+  .part.over-up{box-shadow:0 -3px 0 var(--acc)}
+  .part.over-down{box-shadow:0 3px 0 var(--acc)}
   .logo-row{display:flex;align-items:center;gap:10px;border:2px solid var(--line);background:#1b1b2a;padding:4px 6px 4px 4px}
   .logo-row>span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
   .logo-row .lthumb{width:44px;height:44px;flex:none;display:grid;place-items:center;background:repeating-conic-gradient(#2a2a3a 0 25%,#1b1b2a 0 50%) 0 0/12px 12px}

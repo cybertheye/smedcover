@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { blockLayout, virtualSize, layout, TEMPLATES } from "../ui/js/layout.js";
 import { parseCsv, csvToJobs } from "../ui/js/csv.js";
 import { useFont, normalizeProfile, normalizeCover, normalizeSettings, exportName, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
-import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex, clipBase, clipEnd, normalizeScene, sceneOffsets, moveScene, resetScene, reorderLayout } from "../ui/js/layers.js";
+import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex, clipBase, clipEnd, normalizeScene, sceneOffsets, moveScene, resetScene, reorderLayout, orderLayout, layoutOrder } from "../ui/js/layers.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "../ui/js/presets.js";
 import { platformsFor, RATIOS } from "../ui/js/platforms.js";
 
@@ -1364,6 +1364,15 @@ test("the layout layers' default order, and a design or cover still in the old o
   assert.equal(reorderLayout(mine), false);
   assert.deepEqual(mine.map((l) => l.id), ["bg", "accent", "title", "graphic", "brand", "logo", "tag", "catname", "frame"]);
   assert.equal(reorderLayout(old), false);                                                // once in the new order, nothing to do
+  // Cover → Layout parts puts them in any order, the added layers going with theirs
+  const order = ["bg", "accent", "graphic", "catname", "brand", "logo", "title", "tag", "frame"];
+  assert.equal(orderLayout(old, order), true);
+  assert.deepEqual(old.map((l) => l.id), ["bg", "accent", "graphic", "catname", "brand", "logo", "title", "w", "tag", "x", "frame", "y"]);
+  assert.deepEqual(layoutOrder(old), order);
+  assert.equal(orderLayout(old, order), false);                                           // already so
+  assert.equal(orderLayout(old, order.slice(1).concat("bg")), false);                     // the ground stays at the bottom
+  assert.equal(orderLayout(old, order.slice(0, -1)), false);                              // every layout layer, or nothing moves
+  assert.deepEqual(layoutOrder(old), order);
 });
 
 test("clipping masks: a free layer clipped shows within the nearest unclipped layer below; never the ground", () => {

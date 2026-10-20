@@ -155,6 +155,10 @@ layout*; ticked again it is back as it was. *Clear* keeps what the cover leaves 
 design leaves out `DEFAULT_OFF` (the channel name and graphic): `normalizeLayers()` puts those in left out
 when it puts back missing layout layers, which for a new profile is all of them; a profile's design and its
 covers still on the placeholder title were made to leave them out once (`lean: true`, in `loadCovers()`).
+The same rows put the layout layers in order: a row dropped on another calls `orderLayout(layers, types)`
+(bottom-first types, the ground first; each free layer going with the layout layer it lies directly above;
+`reorderLayout()` is it for the old default order) on the cover and on the profile's design, so the new
+order is the default from then on (new channels' covers, *Clear*); the covers other channels have keep theirs.
 
 **The brand logo**: `brand.logo` in the profile is the id of an asset of the user's (uploaded in Setup →
 Brand, so it travels with an exported profile: `usedUserAssets()` names it). The `logo` layer draws it at

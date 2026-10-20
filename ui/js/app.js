@@ -9,7 +9,7 @@ import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont } from "./store.js";
 import { platformsFor } from "./platforms.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, DEFAULT_OFF } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
@@ -685,18 +685,38 @@ function coverTab() {
   ];
 }
 /**
- * Cover → Layout parts: one card for each of the template's layers but the ground; one unticked is left
- * out of this cover (`off`, see layers.js): hidden, gone from the layer list. Ticked again, it is back as it was.
+ * Cover → Layout parts: a row for each of the template's layers but the ground, top first as in the layer
+ * list. One unticked is left out of this cover (`off`, see layers.js): hidden, gone from the layer list;
+ * ticked again, it is back as it was. A row dragged onto another takes its place in the stack: on this
+ * cover (the layer list shows it), and in the profile's design, so it is the default order from then on
+ * (new channels' covers, Clear).
  */
+let partDrag = null;   // the type of the row being dragged
 function partsBox() {
   const list = S.cover.layers.filter((l) => !isFree(l.type) && l.type !== "subject" && l.type !== "bg").reverse();   // top first, as in the layer list
   const flip = (L) => {
     if (L.off) { delete L.off; L.visible = true; } else { L.off = true; L.visible = false; if (S.layerId === L.id) S.layerId = "bg"; }
     touch({ cover: true, side: true, panel: true });
   };
+  const place = (type, onto) => {
+    const types = list.map((l) => l.type), from = types.indexOf(type), to = types.indexOf(onto);
+    if (from < 0 || to < 0 || from === to) return;
+    types.splice(to, 0, types.splice(from, 1)[0]);
+    const order = ["bg", ...types.reverse()];
+    orderLayout(S.cover.layers, order); orderLayout(S.profile.design.layers, order);
+    touch({ cover: true, profile: true, side: true, panel: true });
+  };
+  const row = (L, i) => el("label", { class: "part" + (L.off ? " off" : ""), draggable: true, title: t(L.off ? "cover.partOff" : "cover.partOn"),
+      ondragstart: (e) => { partDrag = L.type; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("application/x-smed-part", L.type); e.currentTarget.classList.add("dragging"); },   // not text: dropped in a text field it would type itself there
+      ondragend: (e) => { partDrag = null; e.currentTarget.classList.remove("dragging"); },
+      ondragover: (e) => { if (!partDrag || partDrag === L.type) return; e.preventDefault(); e.currentTarget.classList.add(list.findIndex((x) => x.type === partDrag) < i ? "over-down" : "over-up"); },
+      ondragleave: (e) => e.currentTarget.classList.remove("over-up", "over-down"),
+      ondrop: (e) => { e.preventDefault(); e.stopPropagation(); const type = partDrag; partDrag = null; if (type) place(type, L.type); } },
+    el("span", { class: "grip", "aria-hidden": "true" }, "⠿"),
+    el("input", { type: "checkbox", checked: !L.off, onchange: () => flip(L) }),
+    el("b", {}, layerName(L)), el("span", { class: "d" }, t("cover.part." + L.type)));
   return el("div", {}, el("div", { class: "lhead" }, cap("cover.parts"), info(t("cover.partsTip"))),
-    el("div", { class: "fxcards slim" }, list.map((L) => el("button", { class: "fxcard" + (L.off ? "" : " on"), title: t(L.off ? "cover.partOff" : "cover.partOn"), onclick: () => flip(L) },
-      el("b", {}, layerName(L)), el("span", {}, t("cover.part." + L.type))))),
+    el("div", { class: "parts" }, list.map(row)),
     el("div", { class: "hint" }, t("cover.partsHint")));
 }
 /**
