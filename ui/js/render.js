@@ -8,7 +8,7 @@ import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js"
 import { drawAsset, userAssets } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced } from "./style.js";
-import { paintRuns, warpCorners } from "./textfx.js";
+import { paintRuns, warpCorners, bentLine, bendExtent } from "./textfx.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
 /** For checks of speed: while `on`, the time each layer took to paint is added up in `ms` (by id), and still runs repainted are counted. */
@@ -303,6 +303,8 @@ function drawPlate(raw, x, y, w, h, fill, fs, C) {
 }
 /** The face of a headline: the look's title face, or the heavy sans. */
 const headFont = () => (look().titleFont ? look().titleFont(fonts) : fonts.cn);
+/** A headline layer's bend, as drawTitle and bentLine take it ({id, amt, own}), or null. */
+const bendOf = (L) => (L.bend ? { id: L.bend, amt: L.bendAmt ?? 1, own: L.bend === "taper" && !!L.warp } : null);
 /** The box the layout gives the title: from under the brand row (or the look's own top) to its foot. */
 function titleBoxOf(env) {
   const { G } = env, top = G.titleTop ?? (env.hasBrand ? 150 : 84);
@@ -321,7 +323,7 @@ function subtitlePlan(ctx, env, L0, hidden = false) {
   const own = L0.subtitleFit && L0.subtitleFit(ctx, title, env.cover.subtitle, box, env, lookValues());
   if (own) return own;
   const face = headFont();
-  return subtitleFit(ctx, title, env.cover.subtitle, box, T && T.font ? `"${T.font}", ${face}` : face, env.w, env.h);
+  return subtitleFit(ctx, title, env.cover.subtitle, box, T && T.font ? `"${T.font}", ${face}` : face, env.w, env.h, 340, T ? bendOf(T) : null);
 }
 
 // free text: nominal 120-unit type, centred on the origin, set like the title
@@ -334,25 +336,34 @@ function drawFreeText(ctx, L, env) {
   ctx.font = `900 ${FS}px ${headFont()}`;
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "round";
   const widths = lines.map((l) => l.reduce((s, a) => s + ctx.measureText(a.t).width, 0)), bw = Math.max(...widths), bh = lines.length * FS * LH;
-  const box = { x: -bw / 2, y: -bh / 2, w: bw, h: bh }, pad = st.plate ? FS * 0.32 : 0, skew = st.plate ? 0 : -0.08;
+  const box = { x: -bw / 2, y: -bh / 2, w: bw, h: bh }, pad = st.plate ? FS * 0.32 : 0, skew = st.plate ? 0 : -0.08, bend = bendOf(L);
+  // how far the lines reach once bent: the plate and the frame take it in (a perspective of its own is the user's to place)
+  const ext = bend && !bend.own ? widths.map((w) => bendExtent(bend.id, bend.amt, w, FS)) : null;
+  const hw = ext ? Math.max(...widths.map((w, i) => w / 2 + Math.max(ext[i].left, ext[i].right))) : bw / 2;
+  const up = ext ? Math.max(...ext.map((e, i) => e.up - i * FS * LH)) : 0, down = ext ? Math.max(...ext.map((e, i) => e.down - (ext.length - 1 - i) * FS * LH)) : 0;   // a wide line between may reach past the first or the last
   if (raw.getTransform) env.blocks[L.id] = { m: raw.getTransform(), box };   // where the block is, for the perspective's handles
-  if (st.plate) drawPlate(raw, -bw / 2 - pad, -bh / 2 - pad * 0.3, bw + pad * 2, bh + pad * 0.6, st.plate, FS, env.C);
+  if (st.plate) drawPlate(raw, -hw - pad, -bh / 2 - up - pad * 0.3, hw * 2 + pad * 2, bh + up + down + pad * 0.6, st.plate, FS, env.C);
   lines.forEach((line, li) => {
     ctx.save();
     const ox = -widths[li] / 2, oy = -bh / 2 + li * FS * LH + FS * (st.plate ? 0.94 : 0.9);
     ctx.translate(ox, oy);
     if (skew) ctx.transform(1, 0, skew, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
-    if (st.hiPlate) pass((a, x) => { if (a.hi) drawPlate(raw, x - FS * 0.08, -FS * 0.86, ctx.measureText(a.t).width + FS * 0.16, FS * 1.06, st.hiPlate, FS, env.C); });   // under the highlighted words
     const m = raw.getTransform ? raw.getTransform() : null, unit = m ? Math.hypot(m.a, m.b) : 1;
-    paintRuns(raw, pass, {
+    const o = {
       fs: FS, d: FS * 0.062 * st.shadowAmt, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit,
       fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow, fill: st.own, hi: st.ownHi, hiPlate: !!st.hiPlate,
       frame: { ox, oy, c: skew, box }, warp: L.warp,
-    }, L.fx);
+    };
+    const paint = (c, u) => {   // the line as it is, on c (the canvas, or the bent line's own)
+      if (st.hiPlate) pass((a, x) => { if (a.hi) drawPlate(c, x - FS * 0.08, -FS * 0.86, ctx.measureText(a.t).width + FS * 0.16, FS * 1.06, st.hiPlate, FS, env.C); });   // under the highlighted words
+      paintRuns(c, pass, u === unit ? o : { ...o, unit: u }, L.fx);
+    };
+    if (bend) bentLine(raw, { ...o, bend }, [JSON.stringify(line), raw.font, L.fx, st.hiPlate, JSON.stringify({ ...o, frame: null, warp: null, unit: null })].join("|"), paint);
+    else paint(raw, unit);
     raw.restore();
   });
-  return { hw: bw / 2 + pad, hh: bh / 2 + pad * 0.3 };
+  return { hw: hw + pad, hh: bh / 2 + Math.max(up, down) + pad * 0.3 };
 }
 
 const PAINT = {
@@ -505,8 +516,8 @@ const PAINT = {
       own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate,   // for looks that paint the letters themselves
       stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt,
       plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
-      hiPlate: st.hiPlate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.hiPlate, fs, env.C)),
-      warp: L.warp, onBlock: (m, block) => { env.blocks[L.id] = { m, box: block }; },
+      hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
+      warp: L.warp, bend: bendOf(L), key: st.hiPlate || "", onBlock: (m, block) => { env.blocks[L.id] = { m, box: block }; },
       reserve: env.sub && !env.sub.vertical ? env.sub.reserve : 0,   // the subtitle's line, under it
     }));
   },
@@ -521,8 +532,8 @@ const PAINT = {
       own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate,
       stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt,
       plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
-      hiPlate: st.hiPlate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.hiPlate, fs, env.C)),
-      warp: L.warp, onBlock: (m, block) => { env.blocks[L.id] = { m, box: block }; },
+      hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
+      warp: L.warp, bend: bendOf(L), key: st.hiPlate || "", onBlock: (m, block) => { env.blocks[L.id] = { m, box: block }; },
     }));
   },
   tag(ctx, L, tr, env) {
@@ -1182,13 +1193,13 @@ export function warpHandles(cv, layer) {
   const b = cv._blocks && cv._blocks[layer.id];
   if (!b || !b.m) return [];
   const { box } = b, k = cv._blocks.k || 1;
-  return warpCorners(layer.warp, layer.fxAmt ?? 1).map(([dx, dy], i) => {
+  return warpCorners(layer.warp, layer.bendAmt ?? 1).map(([dx, dy], i) => {
     const p = b.m.transformPoint({ x: box.x + ([0, 1, 1, 0][i] + dx) * box.w, y: box.y + ([0, 0, 1, 1][i] + dy) * box.h });
     return { id: "w" + i, x: p.x / k, y: p.y / k };
   });
 }
 export function layoutHandles(cv, layer) {
-  const warp = layer && ["title", "subtitle", "text"].includes(layer.type) && layer.fx === "taper" ? warpHandles(cv, layer) : [];
+  const warp = layer && ["title", "subtitle", "text"].includes(layer.type) && layer.bend === "taper" ? warpHandles(cv, layer) : [];
   return [...warp, ...templateHandles(cv, layer)];
 }
 function templateHandles(cv, layer) {

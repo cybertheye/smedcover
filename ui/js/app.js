@@ -16,7 +16,7 @@ import {
 } from "./store.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
-import { EFFECTS, effectUses, warpCorners } from "./textfx.js";
+import { EFFECTS, BENDS, effectUses, warpCorners, convexWarp } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
 import { sizeOf, PIXELS } from "./photo.js";
@@ -487,13 +487,14 @@ function layerAt(e) {
     if (lh && lh.id[0] === "w") {   // a corner of the perspective: the lettering's block is reshaped
       const L = layer(), b = cv._blocks[L.id], i = Number(lh.id.slice(1)), inv = b.m.inverse(), k = cv._blocks.k;
       const corner = [[0, 0], [1, 0], [1, 1], [0, 1]][i], grab = inv.transformPoint({ x: at0.x * k, y: at0.y * k });
-      const start = warpCorners(L.warp, L.fxAmt ?? 1).map((p) => [...p]);
+      const start = warpCorners(L.warp, L.bendAmt ?? 1).map((p) => [...p]);
       const off = [grab.x - (b.box.x + (corner[0] + start[i][0]) * b.box.w), grab.y - (b.box.y + (corner[1] + start[i][1]) * b.box.h)];   // keep where in the handle it was grabbed
       cv.setPointerCapture(e.pointerId);
       cv.onpointermove = (m) => {
         const p = virtualPoint(m), q = inv.transformPoint({ x: p.x * k, y: p.y * k });
         const w = start.map((c) => [...c]);
         w[i] = [clamp((q.x - off[0] - b.box.x) / b.box.w - corner[0], -1.5, 1.5), clamp((q.y - off[1] - b.box.y) / b.box.h - corner[1], -1.5, 1.5)];
+        if (!convexWarp(w) && convexWarp(start)) return;   // the corner stops where the block would fold over (one folded before is free to be unfolded)
         L.warp = w; touch({ cover: true });
       };
       cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; renderSide(); };
@@ -2224,7 +2225,8 @@ function titleLines(L, set0) {
   return [line("stroke", "props.stroke"), line("shadow", "props.shadow")];
 }
 /**
- * The text effect of a headline layer, how strong it is, and the perspective's own corners: {kids, tip}.
+ * The text effect of a headline layer and how strong it is; its bend, how far it goes, and the
+ * perspective's own corners: {kids, tip}. The bend goes with any effect.
  */
 function fxControl(L) {
   const set = (k, v, side) => { if (v === undefined) delete L[k]; else L[k] = v; touch({ cover: true, side }); };
@@ -2234,10 +2236,13 @@ function fxControl(L) {
   return {
     kids: [
       select(groups, fx, (v) => set("fx", v === "auto" ? undefined : v, true)),
-      fx !== "auto" && kind !== "passes" && !(fx === "taper" && L.warp) && slider("props.fxAmt", 0, 2, 0.05, L.fxAmt ?? 1, times, (v) => { holdLive(L.id); set("fxAmt", v === 1 ? undefined : v, false); }),
-      fx === "taper" && L.warp && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("warp", undefined, true) }, t("fx.warpReset")),
+      fx !== "auto" && kind !== "passes" && slider("props.fxAmt", 0, 2, 0.05, L.fxAmt ?? 1, times, (v) => { holdLive(L.id); set("fxAmt", v === 1 ? undefined : v, false); }),
+      el("div", { style: "margin-top:12px" }, cap("props.bend"),
+        select([["", t("bend.none")], ...Object.entries(BENDS).map(([id, b]) => [id, b.name[getLang()]])], L.bend || "", (v) => { if (v) L.bend = v; else { delete L.bend; delete L.bendAmt; } if (v !== "taper") delete L.warp; touch({ cover: true, side: true }); })),
+      L.bend && !(L.bend === "taper" && L.warp) && slider("props.bendAmt", 0, 2, 0.05, L.bendAmt ?? 1, times, (v) => { holdLive(L.id); set("bendAmt", v === 1 ? undefined : v, false); }),
+      L.bend === "taper" && L.warp && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("warp", undefined, true) }, t("fx.warpReset")),
     ],
-    tip: [fx === "taper" && t("fx.warpHint"), kind === "outline" && !native && t("fx.needsApp")].filter(Boolean).join(" "),
+    tip: [L.bend && t("fx.bendHint"), L.bend === "taper" && t("fx.warpHint"), kind === "outline" && !native && t("fx.needsApp")].filter(Boolean).join(" "),
   };
 }
 /** White or ink, whichever reads on colour "#rrggbb". */
@@ -3156,16 +3161,21 @@ function surprise() {
   // the layout is left as it is — the template, its proportions, where the layout layers stand — and
   // every layer's own choices are dealt
   const effects = Object.keys(EFFECTS).filter((id) => id !== "auto" && (native || EFFECTS[id].kind !== "outline"));
-  const dealFx = (L, auto) => { delete L.fx; delete L.fxAmt; if (!chance(auto)) { L.fx = pick(effects); if (EFFECTS[L.fx].kind !== "passes") L.fxAmt = round(between(0.6, 1.5), 0.05); } };
+  const bends = Object.keys(BENDS).filter((id) => id !== "taper");
+  const dealFx = (L, auto, bent = 0) => {
+    delete L.fx; delete L.fxAmt; delete L.bend; delete L.bendAmt; delete L.warp;
+    if (!chance(auto)) { L.fx = pick(effects); if (EFFECTS[L.fx].kind !== "passes") L.fxAmt = round(between(0.6, 1.5), 0.05); }
+    if (chance(bent)) { L.bend = pick(bends); L.bendAmt = round(between(0.5, 1.1), 0.05); }   // now and then bent, not far
+  };
   for (const L of S.cover.layers) {
     switch (L.type) {
       case "bg": L.grid = chance(0.75); break;
       case "accent": L.shape = pick(ACCENT_SHAPES); break;
       case "brand": L.rail = chance(0.8); break;
       case "catname": L.plate = chance(0.75); break;
-      case "title": L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.45); break;
+      case "title": L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.45, 0.2); break;
       case "subtitle": L.plate = chance(0.3); L.stroke = round(between(0.6, 1.2), 0.05); L.shadow = round(between(0.5, 1.2), 0.05); dealFx(L, 0.7); break;
-      case "text": L.plate = chance(0.35); L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.4); break;
+      case "text": L.plate = chance(0.35); L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.4, 0.2); break;
       case "asset": if (canTint(L.ref) && L.ref.kind !== "graphic") L.tint = chance(0.5); break;
     }
     if (FX_TYPES.includes(L.type) && L.type !== "title" && L.type !== "subtitle") {   // look effects: one or two, mostly the look just drawn's, now and then another look's (the title and subtitle keep the user's)
@@ -3708,11 +3718,30 @@ async function selfTest(dir) {
       S.profile.style.look = keepLook; S.profile.style.lookParams[look] = keepParams; S.layerId = keepSel;
       if (keepScene) S.cover.scene = keepScene; else delete S.cover.scene;
     }
+    // every bend, with the look's own lettering (automatic): the lettering is painted as it is and bent
+    report.bends = [];
+    delete titleLayer.fx;
+    for (const id of Object.keys(BENDS)) {
+      titleLayer.bend = id; await step(`bend-${id}`);
+      const cv = await renderReady(S.profile.sizes[0], S.cover, catIndex()), hit = cv._hits.find((h) => h.id === "title");
+      report.bends.push({ id, hit: !!hit, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `bend-${id}.png` })) });
+      if (!hit) report.errors.push(`bend ${id}: the title was not painted`);
+    }
+    // a bend over another look's lettering, over a masked effect, and over an extrusion (its outlines arrive after the first paint)
+    for (const [look, fx, id] of [["deco", null, "arc"], ["chrome", null, "circle"], [S.profile.style.look, "dots", "flag"], [S.profile.style.look, "extrude", "arc"]]) {
+      if (!LOOKS[look]) continue;
+      const keepLook = S.profile.style.look; S.profile.style.look = look;
+      if (fx) titleLayer.fx = fx; else delete titleLayer.fx;
+      titleLayer.bend = id; await step(`bend-${look}-${id}`);
+      report.bends.push({ id: `${look}-${fx || "auto"}-${id}`, path: await invoke("write_image", framed(await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex())), { dir, name: `bend-${look}-${fx || "auto"}-${id}.png` })) });
+      S.profile.style.look = keepLook;
+    }
+    delete titleLayer.fx;
     // the perspective with corners of its own, dragged far: the lettering follows the quad
-    titleLayer.fx = "taper"; titleLayer.warp = [[0, 0], [-0.05, 0.35], [0.08, -0.1], [0.04, 0]];
-    report.effects.push({ id: "taper-own", path: await invoke("write_image", framed(await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex())), { dir, name: "fx-taper-own.png" })) });
-    delete titleLayer.warp;
-    delete titleLayer.fx; S.cover.title = keep;
+    titleLayer.bend = "taper"; titleLayer.warp = [[0, 0], [-0.05, 0.35], [0.08, -0.1], [0.04, 0]];
+    report.bends.push({ id: "taper-own", path: await invoke("write_image", framed(await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex())), { dir, name: "bend-taper-own.png" })) });
+    delete titleLayer.warp; delete titleLayer.bend;
+    S.cover.title = keep;
     report.outline = await invoke("text_outline", { text: "A夜", families: ["Bebas Neue", "Noto Sans SC"], weight: 900 }).then((o) => ({ missing: o.missing, glyphs: o.glyphs.length, contours: o.glyphs.map((g) => g.c.length) }), (e) => ({ error: String(e) }));
     if (!report.outline.glyphs || report.outline.missing) report.errors.push("outline: the native side could not trace bundled fonts");
     // a font a canvas outside the page cannot reach (one the user installed, one macOS downloads): once

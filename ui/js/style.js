@@ -1830,7 +1830,8 @@ function titleArea(ctx, env) {
   const T = titleLayer(env), box = titleBase(env);
   if (!T || !box || typeof ctx.measureText !== "function") return null;
   const face = current.titleFont ? current.titleFont(fonts) : fonts.cn;
-  return withSub(titleBlock(ctx, env.cover.title, box, T.font ? `"${T.font}", ${face}` : face, 340, env.sub && !env.sub.vertical ? env.sub.reserve : 0), env);
+  const bend = T.bend ? { id: T.bend, amt: T.bendAmt ?? 1, own: T.bend === "taper" && !!T.warp } : null;
+  return withSub(titleBlock(ctx, env.cover.title, box, T.font ? `"${T.font}", ${face}` : face, 340, env.sub && !env.sub.vertical ? env.sub.reserve : 0, bend), env);
 }
 /** Block b and the block the subtitle's words fill (when there is one: see subtitlePlan in render.js) together. */
 function withSub(b, env) {
@@ -8832,6 +8833,8 @@ export function lookParams(id, given) {
 export function setLook(id, given, s = 7, onDark = true) { current = LOOKS[id] || cel; values = lookParams(current.id, given); seed = Number.isFinite(s) ? s : 7; dark = !!onDark; return current; }
 export const look = () => current;
 export const lookValues = () => values;
+/** What else decides how the current look paints, besides its values: the ground it is on and the profile's seed. */
+export const lookState = () => `${dark ? 1 : 0}|${seed}`;
 /** The context graphics and the small cover parts should draw on under the current look. */
 export const styled = (ctx, C, plates = false) => (current.wrap ? current.wrap(ctx, C, values, plates) : ctx);
 export { INK, css };

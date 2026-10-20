@@ -262,17 +262,19 @@ The title, the subtitle and every text layer (with or without a plate) can be gi
 | Automatic | follows the look | The default: the current look's own lettering |
 | Layered | outline and shadow, plain, plain upright, underlined highlight | General letterings; the underlined highlight underlines the highlighted words |
 | Masked | halftone inside, stripes inside, inner shadow, worn, row shift | Change what is inside the letters |
-| Outlined | extruded, arched, arc down, on a circle, arched top, bulge, pinch, fisheye, rise, tapered, wave, flag | Reshape the letters themselves |
+| Outlined | extruded | Real depth, from each letter's outline |
 
-With *Tapered*, diamond handles appear at the corners of the lettering on the canvas: drag any of them to set the perspective freely (the whole block is reshaped to the new quad); *Reset the perspective* in the properties goes back to the default. The title, subtitle and text layers all have it.
+Under it, **Bend** bends the lettering, whichever it is — the look's own (Automatic), any effect above, plates under highlighted words, the look effects of the next section laid over it: arched, arc down, on a circle, arched top, bulge, pinch, fisheye, rise, tapered, wave, flag, with *How far*. The line is painted as it would be and that picture is bent, so a dark deco title stays lit lamps and a chrome one chrome, arched; and it works in a plain browser too. The size follows the bent shape, so a bent title stays inside its box, clear of the brand row and the subtitle. Covers made before, whose title or text had one of these as its effect, open as *Outline and shadow*, bent the same way.
 
-The bends, line by line: *Arched* lifts the middle of the line and *Arc down* lowers it; *On a circle* lays the line round a circle below it, the letters fanning out; *Arched top* keeps the baseline straight while the tops arch up toward the middle; *Bulge* makes the letters taller toward the middle and *Pinch* shorter; *Fisheye* enlarges the middle as a lens would, easing off toward the ends, which stay about where they were; *Rise* climbs to the right with the upright strokes kept upright; *Wave* runs a wave along the line and *Flag* waves it like a flag on a pole at its start, more the further from the pole. *Strength* sets how far each goes.
+With *Tapered*, diamond handles appear at the corners of the lettering on the canvas: drag any of them to set the perspective freely (the whole block is reshaped to the new quad); *Reset the perspective* in the properties goes back to the default. The title, subtitle and text layers all have it; with corners of its own a tapered title is the size it was, for you to place.
+
+The bends, line by line: *Arched* lifts the middle of the line and *Arc down* lowers it; *On a circle* lays the line round a circle below it, the letters fanning out; *Arched top* keeps the baseline straight while the tops arch up toward the middle; *Bulge* makes the letters taller toward the middle and *Pinch* shorter; *Fisheye* enlarges the middle as a lens would, easing off toward the ends, which stay about where they were; *Rise* climbs to the right with the upright strokes kept upright; *Wave* runs a wave along the line and *Flag* waves it like a flag on a pole at its start, more the further from the pole. *How far* sets how far each goes.
 
 Sliced, Overprint, Double keyline and Sunlit block were here once; they are their looks' post effects now (Three slices, Second-ink overprint, Two-tone outline, Sunlit block), under *Look effects* (next section), and go with any text effect. A text layer that chose one of them here before is given the matching post effect when opened; a title's earlier choice is painted as *Automatic*, and kept.
 
-Masked and outlined effects have a *Strength* slider. The *Outline* and *Shadow* sliders of the title and text layers can be moved only when the current effect draws an outline or a shadow: Plain, Plain upright and some looks' letterings have neither; otherwise the slider is greyed out and says why.
+Masked effects and Extruded have a *Strength* slider. The *Outline* and *Shadow* sliders of the title and text layers can be moved only when the current effect draws an outline or a shadow: Plain, Plain upright and some looks' letterings have neither; otherwise the slider is greyed out and says why.
 
-Outlined effects read the font file to get each letter's outline: the first time a piece of text is used it shows as ordinary lettering for an instant and then changes; an export waits for the outlines before drawing. Bundled fonts, installed fonts and fonts you imported are supported.
+Extruded reads the font file to get each letter's outline: the first time a piece of text is used it shows as ordinary lettering for an instant and then changes; an export waits for the outlines before drawing. Bundled fonts, installed fonts and fonts you imported are supported.
 
 ### Look effects on your own layers
 
@@ -801,7 +803,7 @@ Layers: "photo" marks an effect for photo layers only; the others suit text, ass
 | Dark deco | gilded [px], silhouette with rim light [fill], gold sunburst [out], night grade [px, photo] | the great tower ★, moon ★, searchlights ★, skyline and lit windows, floodlight, fog, crimson sky, rain, airship ★, blade sign ★, stepped proscenium, silhouette ★ | halation, film grain (frame: gold corner pieces) |
 | Spectral engraving | stipple (with its depth) [fill], line engraving [fill], spectral streams [out], drips [out] | stippled figure ★, vortex ★, perspective lines ★ (their vanishing point), rainbow waves, colour blocks, engraved sky | paper (frame: mat and frame) |
 
-The general typesetting effects belong to no look and stay in the lettering menu: Automatic (follows the look), Outline and shadow, Plain, Plain upright, Halftone inside, Stripes inside, Inner shadow, Worn, Row shift, Extruded, Arched, Arc down, On a circle, Arched top, Bulge, Pinch, Fisheye, Rise, Tapered, Wave, Flag.
+The general typesetting effects belong to no look and stay in the lettering menu: Automatic (follows the look), Outline and shadow, Plain, Plain upright, Halftone inside, Stripes inside, Inner shadow, Worn, Row shift, Extruded; and the bends beside them: Arched, Arc down, On a circle, Arched top, Bulge, Pinch, Fisheye, Rise, Tapered, Wave, Flag.
 
 **Implementation**
 

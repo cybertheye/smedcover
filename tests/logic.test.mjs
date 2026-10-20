@@ -1722,8 +1722,8 @@ test("the subtitle: under the title, smaller, the title making room; giving way 
   assert.equal(normalizeProfile({ ...sampleProfile("en"), subbed: true }).subbed, true);
   assert.equal(normalizeProfile({ ...sampleProfile("en"), subbed: 1 }).subbed, undefined);
   // the layer: lettered like the title, on in a new design
-  const [sub] = normalizeLayers([{ type: "subtitle", fx: "bulge", fxAmt: 1.4, font: "Kaiti", ink: "#FF0000", hi: "#00ff00", plate: true }]).filter((l) => l.type === "subtitle");
-  assert.deepEqual([sub.fx, sub.fxAmt, sub.font, sub.ink, sub.hi, sub.plate], ["bulge", 1.4, "Kaiti", "#ff0000", "#00ff00", true]);
+  const [sub] = normalizeLayers([{ type: "subtitle", fx: "dots", fxAmt: 1.4, bend: "bulge", bendAmt: 1.3, font: "Kaiti", ink: "#FF0000", hi: "#00ff00", plate: true }]).filter((l) => l.type === "subtitle");
+  assert.deepEqual([sub.fx, sub.fxAmt, sub.bend, sub.bendAmt, sub.font, sub.ink, sub.hi, sub.plate], ["dots", 1.4, "bulge", 1.3, "Kaiti", "#ff0000", "#00ff00", true]);
   assert.ok(defaultLayers().find((l) => l.type === "subtitle").visible);
 });
 
@@ -1777,4 +1777,77 @@ test("a photo's outline may be dashed: a line of evenly spaced dashes round the 
   // on a photo layer: torn or dashed, not both
   const [a, b, c] = normalizeLayers([{ type: "photo", id: "a", pid: "p", dash: true }, { type: "photo", id: "b", pid: "p", dash: true, torn: true }, { type: "photo", id: "c", pid: "p", dash: "yes" }]).filter((l) => l.type === "photo");
   assert.deepEqual([a.dash, b.dash, b.torn, c.dash], [true, false, true, false]);
+});
+
+test("a bend goes with any lettering: painted as it is, then the picture bent, the size fitting what the bent lines reach", async () => {
+  const { BENDS, EFFECTS, WARP, meshWarp, bendExtent } = await import("../ui/js/textfx.js");
+  const { BEND_IDS } = await import("../ui/js/layers.js");
+  const { titleBlock, subtitleFit } = await import("../ui/js/title.js");
+  assert.deepEqual(Object.keys(BENDS), BEND_IDS);
+  assert.deepEqual(Object.keys(BENDS).sort(), Object.keys(WARP).sort());          // each a map
+  assert.ok(BEND_IDS.every((id) => !(id in EFFECTS)), "no bend is a lettering of its own any more");
+  // read from a file: a bend of before (an effect, in the house lettering) is that lettering bent
+  const [a, b, c, d] = normalizeLayers([
+    { type: "title", fx: "arc", fxAmt: 1.4 },
+    { type: "text", id: "t1", text: "x", fx: "taper", warp: [[0, 0], [0, 0.2], [0, -0.2], [0, 0]] },
+    { type: "text", id: "t2", text: "y", fx: "dots", fxAmt: 0.8, bend: "wave", bendAmt: 1, warp: [[0, 0], [0, 0.2], [0, -0.2], [0, 0]] },
+    { type: "subtitle", bend: "nope", bendAmt: 9 },
+  ]).filter((l) => ["title", "text", "subtitle"].includes(l.type));
+  assert.deepEqual([a.fx, a.fxAmt, a.bend, a.bendAmt], ["cel", undefined, "arc", 1.4]);
+  assert.deepEqual([b.fx, b.bend, b.warp.length], ["cel", "taper", 4]);                          // its own corners kept
+  assert.deepEqual([c.fx, c.fxAmt, c.bend, c.bendAmt, c.warp], ["dots", 0.8, "wave", undefined, undefined]);   // corners only for the perspective
+  assert.deepEqual([d.bend, d.bendAmt], [undefined, undefined]);
+  // the picture bent: as it was under no bend, moved under a move, and an edge half seen keeps its colour
+  const w = 40, h = 20, px = new Uint8ClampedArray(w * h * 4);
+  for (let y = 4; y < 16; y++) for (let x = 8; x < 32; x++) { const q = (y * w + x) * 4; px[q] = 255; px[q + 3] = x === 8 ? 128 : 255; }
+  const rect = { x: -5, y: -5, w: 20, h: 10 }, same = meshWarp({ data: px, width: w, height: h }, rect, 2, (p) => p, 8);
+  assert.deepEqual([same.width, same.height, same.rect], [w, h, rect]);
+  assert.ok(px.every((v, i) => v === same.data[i]), "no bend, the same picture");
+  const moved = meshWarp({ data: px, width: w, height: h }, rect, 2, ([x, y]) => [x + 3, y - 1], 8);
+  assert.deepEqual(moved.rect, { x: -2, y: -6, w: 20, h: 10 });
+  const half = meshWarp({ data: px, width: w, height: h }, rect, 2, ([x, y]) => [x * 1.3, y], 8);   // stretched: the edge sampled between pixels
+  for (let i = 0; i < half.data.length; i += 4) if (half.data[i + 3] > 0) assert.ok(half.data[i] === 255 && half.data[i + 1] === 0, "no dark fringe");
+  // how far a bend reaches past the line's box, and the title fitting it
+  const e = bendExtent("arc", 1, 600, 100);
+  assert.ok(e.up > 10 && e.down > 5 && e.left === 0 && e.right === 0);
+  assert.deepEqual(bendExtent("rise", 0, 600, 100), { up: 0, down: 0, left: 0, right: 0 });
+  const ctx = { font: "", save() {}, restore() {}, measureText: (str) => ({ width: String(str).length * 50 }) };
+  const box = { x: 100, y: 100, w: 1200, h: 400 }, title = "在这里写标题\n一行就是一行";
+  for (const id of BEND_IDS.filter((x) => x !== "taper")) {
+    const flat = titleBlock(ctx, title, box, "serif"), bent = titleBlock(ctx, title, box, "serif", 340, 0, { id, amt: 1.6 });
+    assert.ok(bent.fs <= flat.fs && bent.x >= box.x - 1e-9 && bent.y >= box.y - 1e-9 && bent.x + bent.w <= box.x + box.w + 1e-9 && bent.y + bent.h <= box.y + box.h + 1e-9, `${id}: the bent title leaves its box`);
+  }
+  const own = titleBlock(ctx, title, box, "serif", 340, 0, { id: "taper", amt: 1, own: true });
+  assert.equal(own.fs, titleBlock(ctx, title, box, "serif").fs);                    // a perspective of the layer's own: the user places it
+  // the subtitle under what the bent title reaches
+  const sb = subtitleFit(ctx, title, "副标题", box, "serif", 1920, 1080, 340, { id: "arc", amt: 1.6 }), tb = titleBlock(ctx, title, box, "serif", 340, sb.reserve, { id: "arc", amt: 1.6 });
+  assert.ok(sb.box.y >= tb.y + tb.h - 1e-9);
+  // a wide line over a short one: what the wide one's ends reach below counts, not only the last line's
+  const wide = titleBlock(ctx, "一二三四五六七八九十".repeat(4) + "\n短", box, "serif", 340, 0, { id: "circle", amt: 2 }), k = wide.fs / 100;
+  const e0 = bendExtent("circle", 2, 2000, 100), e1 = bendExtent("circle", 2, 50, 100);
+  assert.ok(e0.down - 116 > e1.down, "the case: the first line's ends hang past the last line");
+  assert.ok(Math.abs(wide.h / k - (2 * 116 + Math.max(e0.up, e1.up - 116) + Math.max(e0.down - 116, e1.down))) < 1e-6);
+});
+
+test("a bend keeps to the picture it is given: nothing thrown far past the line, a folded perspective not made huge", async () => {
+  const { meshWarp, bendMap, convexWarp } = await import("../ui/js/textfx.js");
+  // the picture as bentLine makes it: the line with room round it, all of it inked (a glow filling the room)
+  const shot = (o, k) => {
+    const P = o.fs * 0.75, rect = { x: -P, y: -o.fs * 1.25 - P, w: o.lineW + 2 * P, h: o.fs * 1.7 + 2 * P }, w = Math.ceil(rect.w * k), h = Math.ceil(rect.h * k), px = new Uint8ClampedArray(w * h * 4);
+    for (let i = 3; i < px.length; i += 4) px[i] = 255;
+    return { src: { data: px, width: w, height: h }, rect };
+  };
+  // a line as short as "I": past its ends a bend keeps the ends' shape rather than flipping or flinging the room round it
+  for (const id of ["arc", "arcLow", "shell", "bulge", "pinch", "taper", "circle"]) {
+    const o = { fs: 120, lineW: 36, amt: 2 }, { src, rect } = shot(o, 1), out = meshWarp(src, rect, 1, bendMap(id, o), 13);
+    assert.ok(out.height <= src.height * 2 && out.width <= src.width * 3, `${id}: ${out.width}×${out.height} from ${src.width}×${src.height}`);
+  }
+  // corners dragged until the block folds over: the result made coarser, never too large to make
+  const o = { fs: 150, lineW: 800, amt: 1, warp: [[0, 0], [0, 0], [0, 0], [0.9, -0.5]], frame: { ox: 0, oy: 0, c: 0, box: { x: 0, y: -138, w: 800, h: 176 } } };
+  const { src, rect } = shot(o, 0.5), out = meshWarp(src, rect, 0.5, bendMap("taper", o), 8);
+  assert.ok(out.width <= 8192 && out.height <= 8192 && out.width * out.height <= 24e6, `${out.width}×${out.height}`);
+  // and dragging a corner stops before it folds
+  assert.ok(convexWarp([[0, 0], [0, 0.4], [0, -0.4], [0, 0]]) && convexWarp([[0, 0], [-0.05, 0.35], [0.08, -0.1], [0.04, 0]]));
+  assert.ok(!convexWarp([[0, 0], [0, 0.48], [0, -0.48], [0, 0]]), "an edge shrunk to about a point");
+  assert.ok(!convexWarp(o.warp) && !convexWarp([[0, 1.5], [0, 0], [0, 0], [0, 0]]) && !convexWarp([[0, 0], [0, 0.5], [0, -0.5], [0, 0]]));
 });

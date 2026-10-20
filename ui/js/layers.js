@@ -141,7 +141,9 @@ export const fillsCanvas = (L) => L.type === "photo" && L.fill && !L.of;
 /** Shapes the colour block and its dividing edge can take ("slant" is the template's own). */
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes", "arc"];
 /** The text effects a headline can be given (painted in textfx.js). Absent on a layer means "auto": the look decides. */
-export const TEXT_EFFECTS = ["auto", "cel", "plain", "cyber", "riso", "anime", "bluenote", "editorial", "vivid", "dots", "stripes", "inner", "worn", "rows", "extrude", "arc", "arcLow", "circle", "shell", "bulge", "pinch", "fisheye", "rise", "taper", "wave", "flag"];
+export const TEXT_EFFECTS = ["auto", "cel", "plain", "cyber", "riso", "anime", "bluenote", "editorial", "vivid", "dots", "stripes", "inner", "worn", "rows", "extrude"];
+/** The bends a headline may be given whatever its lettering (`bend`, how far: `bendAmt`; see BENDS in textfx.js). */
+export const BEND_IDS = ["arc", "arcLow", "circle", "shell", "bulge", "pinch", "fisheye", "rise", "taper", "wave", "flag"];
 // Four of those were looks' letterings, offered in the menu by name; the menu no longer has them, and
 // their looks have post effects doing what they did (see elementFx in style.js). A text layer that
 // chose one takes that effect instead, at a middling strength; the title keeps the name, and is painted
@@ -232,13 +234,21 @@ function normalizeLayer(raw, catIds) {
   // a headline may be given a text effect of its own, and a strength for it
   if (HEADLINES.includes(raw.type)) {
     const fx = raw.fx === "ghibli" ? "vivid" : raw.fx;   // the vivid look's lettering had another name for a day
+    // a bend was once an effect of its own, painted in the house lettering: it is that lettering, bent
+    const was = BEND_IDS.includes(fx) && !BEND_IDS.includes(raw.bend);
+    const bend = was ? fx : raw.bend, bendAmt = was ? raw.fxAmt : raw.bendAmt;
     if (raw.type === "text" && LETTERINGS[fx]) lettered = LETTERINGS[fx];
     else if (raw.type === "text" && (!fx || fx === "auto") && raw.lookFx && Number(raw.lookFx["editorial.underline"]) > 0) L.fx = "editorial";
+    else if (was) L.fx = "cel";
     else if (TEXT_EFFECTS.includes(fx) && fx !== "auto") L.fx = fx;
-    if (!lettered && raw.fxAmt !== undefined && num(raw.fxAmt, 1, 0, 2) !== 1) L.fxAmt = num(raw.fxAmt, 1, 0, 2);
-    // the perspective's own corners: four [dx, dy] in block widths and heights
-    if (Array.isArray(raw.warp) && raw.warp.length === 4 && raw.warp.every((p) => Array.isArray(p) && p.length === 2 && p.every((v) => Number.isFinite(Number(v)))))
-      L.warp = raw.warp.map((p) => p.map((v) => num(v, 0, -1.5, 1.5)));
+    if (!lettered && !was && raw.fxAmt !== undefined && num(raw.fxAmt, 1, 0, 2) !== 1) L.fxAmt = num(raw.fxAmt, 1, 0, 2);
+    if (BEND_IDS.includes(bend)) {
+      L.bend = bend;
+      if (bendAmt !== undefined && num(bendAmt, 1, 0, 2) !== 1) L.bendAmt = num(bendAmt, 1, 0, 2);
+      // the perspective's own corners: four [dx, dy] in block widths and heights
+      if (bend === "taper" && Array.isArray(raw.warp) && raw.warp.length === 4 && raw.warp.every((p) => Array.isArray(p) && p.length === 2 && p.every((v) => Number.isFinite(Number(v)))))
+        L.warp = raw.warp.map((p) => p.map((v) => num(v, 0, -1.5, 1.5)));
+    }
   }
   // lettering may be set in a font of its own; without one it takes the look's
   if (LETTERED.includes(raw.type) && typeof raw.font === "string" && raw.font.trim()) L.font = raw.font.trim().replace(/["\\;{}<>]/g, "").slice(0, 80);

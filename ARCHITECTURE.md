@@ -356,7 +356,7 @@ There are three kinds, differing in what they can change:
 |---|---|---|
 | Layered | the same line painted several times in different colours and places | what is around the letters: outlines, shadows, echoes. Each look's own lettering (`runs()`) is of this kind |
 | Masked | the letters are first painted alone on a spare canvas, which is worked on and then laid down | what is inside the letters: halftone, stripes, wear, an inner shadow, rows cut apart |
-| Outlined | each letter's outline is fetched as points, which are moved before they are filled | the letterforms: bent (`WARP`), tapered, or extruded with real depth |
+| Outlined | each letter's outline is fetched as points, and filled as shapes | the letterforms: extruded with real depth |
 
 The menu, `EFFECTS`, holds the typesetting effects and the editorial look's Underlined highlight, which has to know the highlighted words and so can only be lettering. A look's lettering is what *auto* uses. Sliced, Overprint, Double keyline and Sunlit block were in the menu once; what they do is their looks' post effects now (see 7.4), for any layer: `layers.js` still knows the names (`TEXT_EFFECTS`), turns them into the matching post effect on a text layer (at 0.6), and keeps them on the title, painted as *auto*.
 
@@ -372,21 +372,42 @@ once from a cache; the first time it returns nothing, sends for the outline, and
 back to ordinary lettering. When the outline arrives the interface is told to redraw. For an export,
 `renderReady()` waits for every request and draws again, so the exported image has the effect.
 
-**The bends** (`WARP`) are each a map of a point of the line, made from the line's type size, width and
+**Bends** are apart from the lettering: a headline's `bend` (one of `BENDS`; `bendAmt`, how far) goes
+with any `fx`, the look's own lettering included. `drawTitle` (and the free text's painter) hands each line
+to `bentLine()` with a function that paints it as it would be: on a canvas of its own, in the line's space,
+with room round the line for what letterings throw round it (`P`, 0.75 of the type size), a little finer
+than the canvas below (coarser while something is dragged). `meshWarp()` bends that picture: the source
+cut into triangles about a ninth of the type size across, every pixel of the result read back through its
+triangle to the source and sampled between four pixels weighted by their opacity (so no dark fringe), each
+written once (so no seams), empty cells passed over. The result is kept (`BENT`, by everything that decides
+the line's look: its runs, font, effect and colours, the look and its settings, the ground it is on and
+the profile's seed, whether dragging, fonts loaded since) until 24 million pixels of them are, so moving or
+turning a bent title, or redrawing for another layer, only lays it down; a line painted while an outline
+effect's outlines were still on their way is not kept, so it is bent again when they arrive. The bends
+hold still past the ends of the line (what a glow or a shadow throws there keeps the ends' bend), and only
+cells with something in them decide how large the result is: a perspective dragged past its horizon gets
+a coarser picture, never one too large to make. Because the lettering is painted first and bent after, whatever it does
+bends with it — the looks' work canvases, glows, masks and the plates under highlighted words — and no
+outlines are needed. `bendExtent()` gives how far a bent line reaches past its box (the image of the box's
+edge); `fitLines()` sizes the title so the bent block fits its box, and `titleBlock()` reports that block
+(the subtitle goes under it; looks keep clear of it). A layer read with one of the bends as its `fx` (they
+were outline effects in the house lettering) is given `fx: "cel"` and that `bend`, so it looks as it did.
+
+The bends (`WARP`) are each a map of a point of the line, made from the line's type size, width and
 strength: *Arched* and *Arc down* move the middle up or down along a parabola, *On a circle* lays the line
 round a circle below it (the angle from x, the radius from y, so the letters fan out), *Arched top* scales
 only what is above the baseline, *Bulge* and *Pinch* scale the height about the letters' middle, more
 toward the middle of the line, *Fisheye* scales about the middle of the line within an ellipse a little wider than the line, easing
 off toward its rim (along every ray the points keep their order, so nothing folds over), *Rise* shears y by x, *Wave* and *Flag*
 move y along a sine, the flag's growing from its start and swelling the letters as it goes. Long straight
-edges get points along them first (`contours()`), so they bend.
+edges of the outlines are what the bend's picture is cut finely enough for.
 
 **Extrusion** really sweeps every edge of the outline back into a wall: walls are split into lit and
 shaded by the way they face, each group is filled as one shape, then the back face and the front.
 
 ### 6.2.1 A perspective of one's own
 
-*Tapered* can carry the layer's own corners, `warp` (four `[dx, dy]` in block widths and heights). When the title or a text layer is painted, each line hands the effect where it sits in the block (`frame`: the line's origin, its slant, the block's rectangle); `perspective()` takes the outline points into the block's space, maps them with the projective map of `squareToQuad` onto the new quad and back, so several lines bend as one block. The block's transform and rectangle are kept in `cv._blocks`, from which the editor draws the corner handles (`warpHandles`) and, while one is dragged, takes the pointer back into the block's space with the inverse transform.
+The *Tapered* bend can carry the layer's own corners, `warp` (four `[dx, dy]` in block widths and heights). When the title or a text layer is painted, each line hands the bend where it sits in the block (`frame`: the line's origin, its slant, the block's rectangle); `perspective()` (`bendMap()`) takes the points into the block's space, maps them with the projective map of `squareToQuad` onto the new quad and back, so several lines bend as one block. The block's transform and rectangle are kept in `cv._blocks`, from which the editor draws the corner handles (`warpHandles`) and, while one is dragged, takes the pointer back into the block's space with the inverse transform.
 
 ### 6.3 Photo layers and blur (`photo.js`, `PAINT.photo` in `render.js`)
 
