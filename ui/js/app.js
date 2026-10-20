@@ -2278,6 +2278,8 @@ const readsOn = (hex) => { const c = hexToRgb(hex); return c[0] * 0.299 + c[1] *
 function headlineControls(L, set) {
   const light = S.profile.style.theme === "light" && !recordOf(mainPhoto()) && !(LOOKS[S.profile.style.look] || LOOKS.cel).oneTheme;
   const fx = fxControl(L);
+  // the plates' and marks' own colour when left automatic: the channel colour, or on a plate of that colour ink or white
+  const markAuto = L.plate && (!L.plateInk || L.plateInk.toLowerCase() === cat().color.toLowerCase()) ? readsOn(cat().color) : cat().color;
   return [
     psec("props.sec.text", [
       L.type === "text" && el("textarea", { value: L.text, spellcheck: false, style: "height:64px;margin-bottom:8px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
@@ -2289,11 +2291,15 @@ function headlineControls(L, set) {
     psec("props.sec.effect", fx.kids, fx.tip),
     psec("props.sec.color", [
       swatch(L, "ink", "props.sw.text", L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff"),
-      swatch(L, "hi", "props.sw.hi", L.hiPlate ? readsOn(L.hiPlateInk || cat().color) : cat().color),   // on plates of their own the words take what reads there
+      // on plates of their own the words take what reads there; through a band or on a block set off, the lettering's colour
+      swatch(L, "hi", "props.sw.hi", L.hiPlate ? readsOn(L.hiPlateInk || markAuto) : L.hiMark && L.hiMark !== "circle" ? (L.ink || (L.plate ? readsOn(L.plateInk || cat().color) : light ? "#07070c" : "#ffffff")) : cat().color),
       L.plate && swatch(L, "plateInk", "props.sw.plate", cat().color),
-      L.hiPlate && swatch(L, "hiPlateInk", "props.sw.hiPlate", cat().color)], t("props.inkAutoHint")),
+      (L.hiPlate || L.hiMark) && swatch(L, "hiPlateInk", "props.sw.hiPlate", markAuto)], t("props.inkAutoHint")),
     psec("props.sec.lines", titleLines(L, set), t(L.plate ? "props.linesOnPlate" : "props.linesNoPlate")),
-    psec("props.sec.plate", [check("props.plateAdd", L.plate, (v) => set("plate", v, true)), check("props.hiPlateAdd", !!L.hiPlate, (v) => set("hiPlate", v || undefined, true))]),
+    psec("props.sec.plate", [check("props.plateAdd", L.plate, (v) => set("plate", v, true))]),
+    // how the highlighted words are marked, besides their colour: plates under them, or a mark of them
+    psec("props.sec.hi", [select([["", t("hi.none")], ["plate", t("hi.plate")], ["circle", t("hi.circle")], ["marker", t("hi.marker")], ["block", t("hi.block")]], L.hiPlate ? "plate" : L.hiMark || "",
+      (v) => { delete L.hiPlate; delete L.hiMark; if (v === "plate") L.hiPlate = true; else if (v) L.hiMark = v; touch({ cover: true, side: true }); })], t("hi.hint")),
   ];
 }
 /** The properties of a photo layer. */
@@ -3692,6 +3698,25 @@ async function selfTest(dir) {
       const cv = await renderReady(S.profile.sizes[0], S.cover, catIndex());
       report.headlines = { path: await invoke("write_image", framed(await toPng(cv), { dir, name: "headlines.png" })), hits: ["title", tx.id, tp.id].map((id) => !!cv._hits.find((h) => h.id === id)) };
       S.cover.title = keepTitle; S.cover.layers = S.cover.layers.filter((l) => l !== tx && l !== tp); titleLayer.plate = false;
+    }
+    // each way of marking the highlighted words, on the title (bent too, for the ring) and on a text layer, with Latin and punctuation set beside CJK
+    {
+      const keepTitle = S.cover.title;
+      S.cover.title = "「重磅」*2026* 为什么\n*AI* 无法取代审美？";
+      report.hiMarks = [];
+      for (const kind of ["plate", "circle", "marker", "block"]) {
+        delete titleLayer.fx; delete titleLayer.hiPlate; delete titleLayer.hiMark;
+        if (kind === "plate") titleLayer.hiPlate = true; else titleLayer.hiMark = kind;
+        if (kind === "circle") titleLayer.bend = "arc";
+        const tx = newLayer("text", { text: "标记*重点*", ...(kind === "plate" ? { hiPlate: true } : { hiMark: kind }) }); tx.t.all = { ...tx.t.all, x: 0.75, y: 0.8, s: 0.4 };
+        S.cover.layers.push(tx);
+        const cv = await renderReady(S.profile.sizes[0], S.cover, catIndex());
+        report.hiMarks.push({ kind, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `hi-${kind}.png` })), hits: ["title", tx.id].map((id) => !!cv._hits.find((h) => h.id === id)) });
+        S.cover.layers = S.cover.layers.filter((l) => l !== tx);
+        delete titleLayer.bend;
+      }
+      delete titleLayer.hiPlate; delete titleLayer.hiMark;
+      S.cover.title = keepTitle;
     }
     // the looks' effects on the user's own layers: every look that has some, all of them at full on a
     // text layer, a sticker, a solid and a print of the last picture taken in; then, under a look

@@ -20,7 +20,7 @@
 //   fillCss / hiCss / inkCss / shadowCss / hiShadowCss   the colours of plain words, highlighted words,
 //                                                 the keyline and the two shadows
 //   C, fill, hi the channel colour and the layer's own colours as [r, g, b] (for the looks' letterings)
-//   hiPlate     the layer has plates under its highlighted words: a lettering that boxes them itself does not
+//   hiPlate     the layer has plates (or a band, a block) under its highlighted words: a lettering that boxes them itself does not
 //   lineW       width of the line                 unit       canvas pixels per unit
 //   seed        a number that differs from line to line, for effects that scatter things
 //   frame       where this line sits in its block, for effects that shape the whole block (the
@@ -95,7 +95,8 @@ const whitish = (s) => { const h = /^#([0-9a-f]{6})$/i.exec(s || ""), c = h ? [0
  * Sticker lettering, as on variety shows' captions: the letters with a thin keyline (the Outline slider),
  * on a thick white rim that runs them into one cut-out — the small gaps inside and between them filled —
  * a dark line round that, and a hard shadow under it all (the Shadow slider). Strokes only, so it needs
- * no outlines and goes with any font.
+ * no outlines and goes with any font. `o.beneath`, when given, paints what lies under the highlighted
+ * words (plates, marks): on the rim, under the letters.
  */
 function sticker(ctx, pass, o) {
   const { fs } = o, pale = [o.fillCss, o.hiCss].some(whitish), e1 = fs * 0.035 * Math.max(o.strokeAmt, pale ? 0.5 : 0), e2 = e1 + fs * 0.12, e3 = e2 + fs * 0.035, d = o.d * 1.3;   // pale letters keep a keyline, or they would melt into the rim
@@ -104,6 +105,7 @@ function sticker(ctx, pass, o) {
   if (d > 0) ring(e3, (a) => (a.hi ? o.hiShadowCss : o.shadowCss), d);
   ring(e3, () => INK);
   ring(e2, () => "#ffffff");
+  if (o.beneath) { ctx.save(); o.beneath(); ctx.restore(); }   // the plates and marks under the highlighted words, on the rim rather than hidden by it
   if (e1 > 0) ring(e1, () => o.inkCss);
   pass((a, x) => { ctx.fillStyle = a.hi ? o.hiCss : o.fillCss; ctx.fillText(a.t, x, 0); });
   ctx.restore();

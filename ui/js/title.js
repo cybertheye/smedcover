@@ -227,7 +227,8 @@ export function subtitleFit(ctx, title, sub, box, font, w, h, maxFs = 340, bend 
  * subtitleFit): they fit the rest of the box, and the two are centred in it together. `bend` ({id, amt,
  * own}): each line is painted as it would be and then bent (bentLine in textfx.js), the size fitting what
  * the bent lines reach (see fitLines); `key` names what else decides how the lines look (the plates'
- * colours, say), for the bent lines kept. `hiPlate` is then given the context to paint on, sixth. A bend
+ * colours, say), for the bent lines kept. `hiPlate` is then given the context to paint on, sixth;
+ * `hiMark(x0, x1, fs, c, phase, seed)` marks each highlighted run otherwise, "under" the letters and "over" them. A bend
  * other than the perspective may be reshaped by its handles (`reshape`, see reshapeField in textfx.js):
  * the size stays what the bend alone gives, the box returned too (the layer is scaled and turned about its
  * centre, which must not move under a handle dragged); the plate and the box's `ink`, what is drawn, take in
@@ -277,8 +278,11 @@ export function drawTitle(ctx, title, box, adj, st) {
       frame: { ox, oy, c: skew, box: block }, warp: st.warp, reshape: rest ? st.reshape : undefined,
     };
     const paint = (c, unit) => {   // the line as it is, on c (the canvas, or the bent line's own)
-      if (st.hiPlate) for (const r of set.runs) if (r.hi) st.hiPlate(r.x0 - fs * 0.08, -fs * 0.86, r.x1 - r.x0 + fs * 0.16, fs * 1.06, fs, c);   // under each highlighted run, whole
-      paintRuns(c, pass, unit === o.unit ? o : { ...o, unit }, st.fx);
+      const marks = (phase) => { if (st.hiMark) set.runs.forEach((r, ri) => { if (r.hi) st.hiMark(r.x0, r.x1, fs, c, phase, li * 13 + ri); }); };
+      const beneath = () => { if (st.hiPlate) for (const r of set.runs) if (r.hi) st.hiPlate(r.x0 - fs * 0.08, -fs * 0.86, r.x1 - r.x0 + fs * 0.16, fs * 1.06, fs, c); marks("under"); };   // under each highlighted run, whole
+      const oo = unit === o.unit ? o : { ...o, unit };
+      if (st.fx === "sticker") paintRuns(c, pass, { ...oo, beneath }, st.fx); else { beneath(); paintRuns(c, pass, oo, st.fx); }   // a sticker lays them on its rim, which would hide them
+      marks("over");
     };
     if (st.bend) bentLine(ctx, { ...o, bend: st.bend }, [JSON.stringify(line), ctx.font, st.fx, st.key || "", JSON.stringify({ ...o, frame: null, warp: null, reshape: null, unit: null })].join("|"), paint);
     else paint(ctx, o.unit);

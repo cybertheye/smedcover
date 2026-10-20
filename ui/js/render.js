@@ -263,6 +263,8 @@ function centred(ctx, cx, cy, tr, s, fn) {
   return half ? { cx, cy, hw: half.hw * s * tr.kx, hh: half.hh * s * tr.ky, r: tr.r } : null;
 }
 
+/** [r, g, b] of a CSS colour as the themes and looks give them: "#rrggbb" or "rgb(r, g, b)". */
+const rgbOf = (s) => (/^#[0-9a-f]{6}$/i.test(s) ? hexToRgb(s) : (String(s).match(/[\d.]+/g) || [255, 255, 255]).slice(0, 3).map(Number));
 /** Whether a colour ([r, g, b]) is dark enough for white lettering. */
 const isDark = (c) => c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114 < 128;
 /**
@@ -285,15 +287,60 @@ function headline(L, env) {
   }
   // plates under the highlighted words: their own colour, else the channel colour (or, on a plate of that
   // colour already, ink or white against it); the words on them in what reads there, unless chosen
-  let hiPlate = null;
+  let hiPlate = null, hiMark = null, shade = null;
   if (L.hiPlate) {
     hiPlate = L.hiPlateInk ? hexToRgb(L.hiPlateInk) : plate && plate.every((v, i) => Math.abs(v - env.C[i]) < 24) ? (isDark(plate) ? [255, 255, 255] : hexToRgb(INK)) : env.C;
     if (!L.hi) { hi = isDark(hiPlate) ? "#ffffff" : INK; ownHi = hexToRgb(hi); }
+  } else if (L.hiMark) {   // another mark of them, in that colour too; through a band or on a block set off, partly on the ground, the words keep the lettering's colour
+    hiMark = { kind: L.hiMark, color: rgb(L.hiPlateInk ? hexToRgb(L.hiPlateInk) : plate && plate.every((v, i) => Math.abs(v - env.C[i]) < 24) ? (isDark(plate) ? [255, 255, 255] : hexToRgb(INK)) : env.C) };
+    if (L.hiMark !== "circle" && !L.hi) {   // the looks that letter the words themselves are told so too; the shadows stay as they were
+      const mark = rgbOf(hiMark.color), letters = own || rgbOf(fill), near = Math.hypot(mark[0] - letters[0], mark[1] - letters[1], mark[2] - letters[2]) < 90;
+      shade = hi; hi = near ? (isDark(mark) ? "#ffffff" : INK) : fill; ownHi = near ? hexToRgb(hi) : letters;   // on a mark of their own colour, the colour that reads on it
+    }
   }
   return {
-    fill, hi, ink, shadow: hi, hiShadow: fill, own, ownHi,
-    plate: plate && rgb(plate), hiPlate: hiPlate && rgb(hiPlate), stroke: clamp(L.stroke ?? 1, 0, 2), shadowAmt: clamp(L.shadow ?? 1, 0, 2),
+    fill, hi, ink, shadow: shade || hi, hiShadow: shade || fill, own, ownHi,
+    plate: plate && rgb(plate), hiPlate: hiPlate && rgb(hiPlate), hiMark, stroke: clamp(L.stroke ?? 1, 0, 2), shadowAmt: clamp(L.shadow ?? 1, 0, 2),
   };
+}
+/**
+ * A mark of a highlighted run, from x0 to x1 along its line (baseline at 0, type size fs), on c: `phase`
+ * "under" (before the letters) or "over" (after them); each kind draws in one. A ring drawn round the
+ * words by hand (over: a quick loop that overshoots where it began, wobbling a little), a marker's band
+ * through their lower half (under: a slightly slanted stroke with uneven edges), a block of colour set
+ * off down and right behind them (under). `seed` keeps each mark's wobble its own and the same every time.
+ */
+/** Whether a headline's highlighted words lie on something of their own (a band or a block): looks then leave out their own marks of them, as under plates. */
+const bandOrBlock = (st) => !!st.hiMark && st.hiMark.kind !== "circle";
+function drawMark(c, mark, x0, x1, fs, phase, seed) {
+  const R = (k) => { const v = Math.sin((seed + 1) * 127.1 + k * 311.7) * 43758.5453; return v - Math.floor(v); };
+  c.save();
+  c.fillStyle = c.strokeStyle = mark.color;
+  if (mark.kind === "circle" && phase === "over") {
+    const cx = (x0 + x1) / 2, cy = -fs * 0.37, rx = (x1 - x0) / 2 + fs * 0.24, ry = fs * 0.7, tilt = -0.05 + (R(1) - 0.5) * 0.04, from = -2.5 + R(2) * 0.3, turn = Math.PI * 2 + 0.55;
+    c.lineWidth = fs * 0.07; c.lineCap = c.lineJoin = "round";
+    c.beginPath();
+    for (let i = 0; i <= 96; i++) {
+      const t = i / 96, a = from + turn * t, grow = fs * (-0.04 + 0.1 * t + 0.025 * Math.sin(a * 2 + R(3) * 6));   // wider as it goes round, so the ends pass each other
+      const px = Math.cos(a) * (rx + grow), py = Math.sin(a) * (ry + grow);
+      c.lineTo(cx + px * Math.cos(tilt) - py * Math.sin(tilt), cy + px * Math.sin(tilt) + py * Math.cos(tilt));
+    }
+    c.stroke();
+  } else if (mark.kind === "marker" && phase === "under") {
+    const a = x0 - fs * 0.06, b = x1 + fs * 0.1, top = -fs * 0.46, foot = fs * 0.1, rise = fs * 0.04, n = Math.max(2, Math.ceil((b - a) / (fs * 0.25)));
+    const y = (x, edge, k) => edge - (rise * (x - a)) / Math.max(1, b - a) + (R(k) - 0.5) * fs * 0.03;
+    c.globalAlpha *= 0.9; c.beginPath();
+    c.moveTo(a + fs * 0.05, y(a, top, 10));
+    for (let i = 1; i <= n; i++) { const x = a + ((b - a) * i) / n; c.lineTo(x, y(x, top, 10 + i)); }
+    c.lineTo(b - fs * 0.04, y(b, foot, 40));                      // the end cut on a slant, as a chisel tip leaves it
+    for (let i = n - 1; i >= 0; i--) { const x = a + ((b - a) * i) / n; c.lineTo(x, y(x, foot, 41 + i)); }
+    c.closePath(); c.fill();
+  } else if (mark.kind === "block" && phase === "under") {
+    const d = fs * 0.1;
+    c.translate((x0 + x1) / 2 + d, -fs * 0.36 + d); c.rotate(-0.025);
+    c.fillRect(-(x1 - x0) / 2 - fs * 0.08, -fs * 0.54, x1 - x0 + fs * 0.16, fs * 1.08);
+  }
+  c.restore();
 }
 /** The plate a headline sits on (x, y, w, h: its box; fs: the type size). A look may draw its own. */
 function drawPlate(raw, x, y, w, h, fill, fs, C) {
@@ -359,14 +406,18 @@ function drawFreeText(ctx, L, env) {
     const m = raw.getTransform ? raw.getTransform() : null, unit = m ? Math.hypot(m.a, m.b) : 1;
     const o = {
       fs: FS, d: FS * 0.062 * st.shadowAmt, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit,
-      fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow, fill: st.own, hi: st.ownHi, hiPlate: !!st.hiPlate,
+      fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow, fill: st.own, hi: st.ownHi, hiPlate: !!st.hiPlate || bandOrBlock(st),
       frame: { ox, oy, c: skew, box }, warp: L.warp, reshape: rest ? L.reshape : undefined,
     };
     const paint = (c, u) => {   // the line as it is, on c (the canvas, or the bent line's own)
-      if (st.hiPlate) for (const r of set.runs) if (r.hi) drawPlate(c, r.x0 - FS * 0.08, -FS * 0.86, r.x1 - r.x0 + FS * 0.16, FS * 1.06, st.hiPlate, FS, env.C);   // under the highlighted words
-      paintRuns(c, pass, u === unit ? o : { ...o, unit: u }, L.fx);
+      // under the highlighted words: plates, or a mark (and some marks over them); a sticker lays them on its rim
+      const marks = (phase) => { if (st.hiMark) set.runs.forEach((r, ri) => { if (r.hi) drawMark(c, st.hiMark, r.x0, r.x1, FS, phase, li * 13 + ri); }); };
+      const beneath = () => { if (st.hiPlate) for (const r of set.runs) if (r.hi) drawPlate(c, r.x0 - FS * 0.08, -FS * 0.86, r.x1 - r.x0 + FS * 0.16, FS * 1.06, st.hiPlate, FS, env.C); marks("under"); };
+      const oo = u === unit ? o : { ...o, unit: u };
+      if (L.fx === "sticker") paintRuns(c, pass, { ...oo, beneath }, L.fx); else { beneath(); paintRuns(c, pass, oo, L.fx); }
+      marks("over");
     };
-    if (bend) bentLine(raw, { ...o, bend }, [JSON.stringify(line), raw.font, L.fx, st.hiPlate, JSON.stringify({ ...o, frame: null, warp: null, reshape: null, unit: null })].join("|"), paint);
+    if (bend) bentLine(raw, { ...o, bend }, [JSON.stringify(line), raw.font, L.fx, st.hiPlate, JSON.stringify(st.hiMark), JSON.stringify({ ...o, frame: null, warp: null, reshape: null, unit: null })].join("|"), paint);
     else paint(raw, unit);
     raw.restore();
   });
@@ -520,11 +571,12 @@ const PAINT = {
     const st = headline(L, env);
     return placed(ctx, tr, (c) => (own && own(c, env.cover.title, box, L, env, lookValues())) || drawTitle(c, env.cover.title, box, IDENTITY, {
       font: headFont(), maxFs: 340, align: "left", fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
-      own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate,   // for looks that paint the letters themselves
+      own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate || bandOrBlock(st),   // for looks that paint the letters themselves
       stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt,
       plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
       hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
-      warp: L.warp, reshape: L.reshape, bend: bendOf(L), key: st.hiPlate || "", onBlock: (m, block, rest) => { env.blocks[L.id] = { m, box: block, rest }; },
+      hiMark: st.hiMark && ((x0, x1, fs, on, phase, seed) => drawMark(on, st.hiMark, x0, x1, fs, phase, seed)),
+      warp: L.warp, reshape: L.reshape, bend: bendOf(L), key: [st.hiPlate || "", JSON.stringify(st.hiMark)].join(), onBlock: (m, block, rest) => { env.blocks[L.id] = { m, box: block, rest }; },
       reserve: env.sub && !env.sub.vertical ? env.sub.reserve : 0,   // the subtitle's line, under it
     }));
   },
@@ -536,11 +588,12 @@ const PAINT = {
     if (s.vertical) return placed(ctx, tr, (c) => drawTitleVertical(c, env.cover.subtitle, s.box, { font: s.face ? s.face(fonts) : headFont(), weight: s.weight || 700, fill: L.ink || s.fill || st.fill, hi: L.hi || s.hi || st.hi, maxFs: s.fs }));
     return placed(ctx, tr, (c) => drawTitle(c, env.cover.subtitle, s.box, IDENTITY, {
       font: headFont(), maxFs: s.fs, align: "left", fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
-      own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate,
+      own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate || bandOrBlock(st),
       stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt,
       plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
       hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
-      warp: L.warp, reshape: L.reshape, bend: bendOf(L), key: st.hiPlate || "", onBlock: (m, block, rest) => { env.blocks[L.id] = { m, box: block, rest }; },
+      hiMark: st.hiMark && ((x0, x1, fs, on, phase, seed) => drawMark(on, st.hiMark, x0, x1, fs, phase, seed)),
+      warp: L.warp, reshape: L.reshape, bend: bendOf(L), key: [st.hiPlate || "", JSON.stringify(st.hiMark)].join(), onBlock: (m, block, rest) => { env.blocks[L.id] = { m, box: block, rest }; },
     }));
   },
   tag(ctx, L, tr, env) {

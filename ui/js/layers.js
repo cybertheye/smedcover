@@ -154,9 +154,12 @@ const LETTERINGS = { cyber: "cyber.sliced", riso: "riso.overprint", anime: "anim
  * Layers made of words. Each may carry `font`, a family name, and `ink`, its own colour. The title
  * and text layers are headlines alike: both also take `hi` (the highlighted words' colour), an
  * outline and a shadow, a plate and its colour `plateInk`, plates under the highlighted words alone
- * (`hiPlate`) and their colour `hiPlateInk`, and a text effect.
+ * (`hiPlate`) or another mark of them (`hiMark`, one of HI_MARKS: a ring drawn round them by hand, a
+ * marker's band through them, a block of colour set off behind them) and its colour `hiPlateInk`, and a
+ * text effect.
  */
 export const LETTERED = ["title", "subtitle", "tag", "catname", "brand", "text"];
+export const HI_MARKS = ["circle", "marker", "block"];
 export const isFree = (type) => FREE_TYPES.includes(type);
 /** The headline layers: the title and the subtitle, and text the user adds (which only differs in carrying its words). */
 export const HEADLINES = ["title", "subtitle", "text"];
@@ -283,7 +286,7 @@ function normalizeLayer(raw, catIds) {
     case "bg": L.grid = raw.grid !== false; L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); break;
     case "accent": L.shape = ACCENT_SHAPES.includes(raw.shape) ? raw.shape : "slant"; break;
     case "brand": L.rail = raw.rail !== false; break;
-    case "title": case "subtitle": L.stroke = num(raw.stroke, 1, 0, 2); L.shadow = num(raw.shadow, 1, 0, 2); L.plate = raw.plate === true; if (raw.hiPlate === true) L.hiPlate = true; break;
+    case "title": case "subtitle": L.stroke = num(raw.stroke, 1, 0, 2); L.shadow = num(raw.shadow, 1, 0, 2); L.plate = raw.plate === true; if (raw.hiPlate === true) L.hiPlate = true; else if (HI_MARKS.includes(raw.hiMark)) L.hiMark = raw.hiMark; break;
     case "catname": L.showName = raw.showName !== false; L.plate = raw.plate !== false; break;
     case "photo": {
       const id = (v) => (typeof v === "string" ? v.replace(/[^\w-]/g, "").slice(0, 40) : "");
@@ -311,6 +314,7 @@ function normalizeLayer(raw, catIds) {
       L.text = typeof raw.text === "string" ? raw.text : "";
       L.plate = raw.plate === true || raw.look === "plate";
       if (raw.hiPlate === true) L.hiPlate = true;   // a plate under each highlighted word
+      else if (HI_MARKS.includes(raw.hiMark)) L.hiMark = raw.hiMark;   // or another mark of them
       // Older files said how a text layer looked with `look`: "title", "plain" or "plate". A plate is
       // now a setting of its own, and the lettering is the text effect — "plain" for the two that had none.
       if (!L.fx && (raw.look === "plain" || raw.look === "plate")) L.fx = "plain";

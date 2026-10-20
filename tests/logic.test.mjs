@@ -1829,6 +1829,20 @@ test("a bend goes with any lettering: painted as it is, then the picture bent, t
   assert.ok(Math.abs(wide.h / k - (2 * 116 + Math.max(e0.up, e1.up - 116) + Math.max(e0.down - 116, e1.down))) < 1e-6);
 });
 
+test("highlighted words may be marked as well as coloured: plates, or a ring, a marker's band, an offset block", async () => {
+  const { HI_MARKS } = await import("../ui/js/layers.js");
+  assert.deepEqual(HI_MARKS, ["circle", "marker", "block"]);
+  const [t, s, a, b, c] = normalizeLayers([
+    { type: "title", hiMark: "circle" },
+    { type: "subtitle", hiMark: "marker", hiPlateInk: "#FF0000" },
+    { type: "text", id: "a", text: "x", hiMark: "block" },
+    { type: "text", id: "b", text: "y", hiPlate: true, hiMark: "circle" },   // plates win: one mark at a time
+    { type: "text", id: "c", text: "z", hiMark: "glow" },
+  ]).filter((l) => ["title", "subtitle", "text"].includes(l.type));
+  assert.deepEqual([t.hiMark, s.hiMark, s.hiPlateInk, a.hiMark], ["circle", "marker", "#ff0000", "block"]);
+  assert.deepEqual([b.hiPlate, b.hiMark, c.hiMark], [true, undefined, undefined]);
+});
+
 test("a line set as a typesetter would: Latin beside CJK as tall, CJK punctuation squeezed (Kaiming style)", async () => {
   const { setLine, passOf, hasCJK, parseTitle } = await import("../ui/js/title.js");
   // a font at 100px: ideographs 100 wide, 82 up and 9 down; Latin 50 wide, capitals 70 up; the marks' ink as Noto Sans SC has it

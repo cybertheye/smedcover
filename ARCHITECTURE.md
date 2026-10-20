@@ -224,7 +224,10 @@ lettering colour. The title and text layers (`HEADLINES`) are one kind of thing:
 and `plateInk` (a plate and its colour), `hiPlate` and `hiPlateInk` (plates under the highlighted words
 alone, drawn in the look's way and coloured by `headline()`, the words on them then in what reads
 there; a look that boxes the highlighted words itself — cyberpunk, net art — is told so by `o.hiPlate`
-and does not), `fx`, `fxAmt` and `warp`; a text layer only adds `text`.
+and does not) — or instead `hiMark` (`HI_MARKS`: a ring drawn round them, a marker's band, an offset
+block; `drawMark()` in `render.js`, under the letters or over them as the kind is, seeded per run so it
+holds still; through a band or on a block the words keep the lettering's colour, and the looks are told
+by `o.hiPlate` as under plates), `fx`, `fxAmt`, `bend`, `bendAmt`, `warp` and `reshape`; a text layer only adds `text`.
 The user's own layers (text, asset, photo, solid) may also carry `lookFx`, look effects (see 7.4).
 Without a colour the look and the channel colour decide; on a plate, an unset lettering colour is the
 one that reads against the plate. `headline()` in `render.js` turns these rules into one set of
