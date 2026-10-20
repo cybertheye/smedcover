@@ -87,7 +87,7 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.notEqual(c.layers, p.design.layers);                       // a copy, not the same array
   const own = normalizeCover({ layers: [{ type: "title", stroke: 0.5 }] }, p);
   assert.equal(own.layers.find((l) => l.id === "title").stroke, 0.5);
-  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size", hideScene: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], check: { platforms: [], orient: "h", red: "3:4" } });
+  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size", hideScene: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [] });
   assert.deepEqual(normalizeSettings({ channels: { p1: "c1", "bad key!": "c2", p2: 7 } }).channels, { p1: "c1" });
   assert.deepEqual(normalizeSettings({ columns: { left: 410.4, right: -5, setup: "x" } }).columns, { left: 410, right: 0, setup: 0 });
   assert.deepEqual([normalizeSettings({ cutEngine: "birefnet" }).cutEngine, normalizeSettings({ cutEngine: "magic" }).cutEngine], ["birefnet", ""]);
@@ -1516,7 +1516,7 @@ test("the platforms' covers: the ratios each wants, by the video's orientation a
   assert.ok(isRatio(1600, 1200, "4:3") && isRatio(900, 383, "2.35:1") && !isRatio(1146, 717, "16:9"));
 });
 
-test("the cover check: type size in the feed, contrast, a picture big enough, the apps' badges, sizes missing", async () => {
+test("the cover standards: type size in the feed, contrast, a picture big enough, the apps' badges, sizes missing", async () => {
   const { checkCover, titleContrast, contrastRatio, luminance, lineUnits, moveOut, boxOf } = await import("../ui/js/check.js");
   assert.equal(lineUnits("封面Ab"), 3);
   assert.ok(Math.abs(contrastRatio(luminance(255, 255, 255), luminance(0, 0, 0)) - 21) < 1e-9);
@@ -1543,4 +1543,42 @@ test("the cover check: type size in the feed, contrast, a picture big enough, th
   // moving out of a corner: the least way, still on the canvas
   const mv = moveOut(boxOf({ cx: 1750, cy: 1000, hw: 150, hh: 60, r: 0 }), { x0: 1497.6, y0: 907.2, x1: 1920, y1: 1080 }, 1920, 1080);
   assert.ok(mv && mv.dy < 0 && mv.dx === 0 && 1000 + mv.dy + 60 <= 907.2);
+});
+
+test("every look's layout meets the cover standards: nothing under the apps' badges, a graphic to look at, room for a title that reads", async () => {
+  const { meetStandards, adjustLayout, feedOf, badged, ART_HALF } = await import("../ui/js/layout.js");
+  const { FOOT } = await import("../ui/js/platforms.js");
+  const { LIMITS } = await import("../ui/js/check.js");
+  for (const id of LOOK_IDS) for (const t of TEMPLATES) for (const [rw, rh] of [[1920, 1080], [1440, 1080], [1080, 1080], [1080, 1440], [1080, 1920], [900, 383]]) for (const flip of [false, true]) {
+    const [w, h] = virtualSize(rw, rh), base = LOOKS[id].layout ? LOOKS[id].layout(t, w, h) : layout(t, w, h);
+    const g = meetStandards(adjustLayout(base, w, h, { flip }), w, h, { flip }), where = `${id} ${t}${flip ? " flipped" : ""} ${rw}x${rh}`;
+    const foot = badged(w, h) ? FOOT * h : h, R = ART_HALF * g.art.s;
+    assert.ok(g.art.y - R >= -1 && g.art.x - R >= -1 && g.art.x + R <= w + 1, `${where}: the graphic leaves the canvas`);
+    // a colour block the user moved or tilted stays where they put it
+    if (!flip) for (const a of [{ size: 0.2 }, { slant: 0.05 }]) assert.deepEqual(meetStandards(adjustLayout(base, w, h, a), w, h, a).accent, adjustLayout(base, w, h, a).accent, `${where} ${JSON.stringify(a)}`);
+    const cat = { top: g.cat.y - g.cat.fs * 0.95, foot: g.cat.y + (g.cat.inline ? g.cat.fs * 0.17 : 80) }, tagFoot = g.tag.y + g.tag.fs * 1.34;
+    // D1: the words and the graphic above the badges (on a landscape cover), inside the canvas
+    assert.ok(cat.foot <= foot && tagFoot <= foot && g.art.y + R <= foot, `${where}: name ${cat.foot}, tag ${tagFoot}, graphic ${g.art.y + R} below ${foot}`);
+    assert.ok(g.title.y + g.title.h <= foot, `${where}: the title's box reaches ${g.title.y + g.title.h}`);
+    // the tag clear of the channel name, the title clear of the tag
+    if (g.tag.y < g.cat.y) assert.ok(tagFoot <= cat.top, `${where}: the tag runs into the channel name`);
+    if (g.tag.y > g.title.y) assert.ok(g.title.y + g.title.h <= g.tag.y, `${where}: the title runs into the tag`);
+    if (t === "split" || flip) continue;
+    // the channel name on the colour block that holds it
+    const [A, B] = g.accent, edge = (x) => A[1] + ((B[1] - A[1]) * (x - A[0])) / (B[0] - A[0]);
+    assert.ok(Math.max(edge(g.cat.x), edge(g.cat.x + Math.min(g.cat.maxW, w / 2))) <= cat.top, `${where}: the channel name is not on the block`);
+    if (t !== "stack") continue;
+    // C1: the graphic a big enough share of the canvas, clear of the title's box and of the channel name
+    assert.ok((2 * R) ** 2 >= LIMITS.picture * w * h, `${where}: the graphic takes ${((2 * R) ** 2 / (w * h)).toFixed(3)}`);
+    const art = { x0: g.art.x - R, y0: g.art.y - R, x1: g.art.x + R, y1: g.art.y + R };
+    const meets = (x0, y0, x1, y1) => x0 < art.x1 && x1 > art.x0 && y0 < art.y1 && y1 > art.y0;
+    assert.ok(!meets(g.title.x, g.title.y, g.title.x + g.title.w, g.title.y + g.title.h), `${where}: the graphic covers the title's box`);
+    assert.ok(!meets(g.cat.x, cat.top, g.cat.x + g.cat.maxW, cat.foot), `${where}: the graphic covers the channel name`);
+    // A1: two lines of title at the type size the narrowest feed needs
+    const feed = feedOf(w, h);
+    if (feed) assert.ok(g.title.h >= 2 * 1.16 * LIMITS.font.ok * (w / feed), `${where}: the title's box is ${Math.round(g.title.h)} high`);
+  }
+  assert.equal(feedOf(1920, 1080), 168); assert.equal(feedOf(1080, 1440), 128); assert.equal(feedOf(900, 383), 360);
+  assert.equal(feedOf(1080, 1350), null);                          // 4:5: no platform here wants it
+  assert.ok(badged(1920, 1080) && badged(1600, 1200) && !badged(1200, 1600) && !badged(2538, 1080));   // the article cover has no badges
 });

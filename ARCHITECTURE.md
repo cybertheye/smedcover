@@ -51,7 +51,7 @@ ui/
   js/title.js        title parsing and fitting
   js/stack3d.js      the layer panel's 3D view: the stack's projection, fitting, labels and drawing (pure maths but for the drawing)
   js/platforms.js    the platforms covers are made for, as data: the ratios each wants, feed widths, what the apps lay over a cover
-  js/check.js        the cover check: its rules, pure (the editor paints and reads back, then fixes)
+  js/check.js        the cover standards' rules, pure (the tests hold the layouts to them; meetStandards in layout.js)
   js/textfx.js       text effects: layered, masked and outlined
   js/outlines.js     cache of glyph outlines (fetched from the Rust side)
   js/photo.js        background photo and the cached gaussian blur
@@ -233,6 +233,19 @@ A swap is more than a mirror image: with the band on top, the brand row lands on
 box moves below it, and the channel name and tag are rearranged. The layout it returns therefore
 carries a few flags (`brandOnAccent`, `railOnAccent`, `titleTop`, `flipped`) that drawing uses to
 change colours and positions.
+
+Then `meetStandards()` holds the result to the cover standards (docs/cover-check.zh-CN.md), whatever the
+look; a colour block the user resized or tilted stays where they put it (so a drag of its handles is not
+undone on the next frame). On a cover the apps lay badges over (16:9, 4:3: `badged()`) nothing with words
+in it, nor the graphic, reaches them (`FOOT` in `platforms.js`, 84% down): the channel name puts its
+sub-name beside it and moves up, and a colour block too shallow to hold it there grows (taking the tag,
+the graphic and the title's foot up with it). The title's box keeps room for two lines at the type size
+the narrowest feed showing that ratio needs (`feedOf()`; 14 px in the feed), the block giving way while it
+still holds the name. On *Stack* with the block along the foot the graphic, the cover's picture until a photo comes, takes at least 12% of
+the canvas (`ART_HALF`, half the box a graphic is drawn in); on a landscape cover it first slides right, and
+what it would still cover gives way: the title's box (narrower, or on other covers shorter), the channel
+name's width. The tag stays clear of the name, the title of the tag. A test runs every look, template,
+ratio and swap through it.
 
 The diamond handles on the canvas get their positions from `layoutHandles()`; while one is dragged,
 `dragLayout()` turns the pointer position back into an adjustment. A swapped layout is first
@@ -686,21 +699,6 @@ A look's costly whole-picture effects (the colour split, so far) are left out of
 
 
 The left panel's sliders — a look's own settings, the layout's proportions — are another matter: they may change every layer, so the rest of the cover cannot be kept. While one is dragged (`draftTouch()`), the main canvas is painted as a **draft**, at the screen's own pixels rather than the Retina ones (a quarter of them on a Retina screen), and the size thumbnails wait; the full picture is painted a quarter of a second after the last step. A layer's own sliders keep using `holdLive()` above. Measured in the app's engine: a step of the anime skies' *Cumulus* took 44 ms at full resolution and 23 ms as a draft, the other sliders 17–22 ms, about a frame.
-
-### 9.3.1 The cover check
-
-*Check* in the top bar (`checkButton()`, `checkDialog()`): the settings' `check` holds the platforms
-chosen, the video's orientation and 小红书's ratio; `wanted()` in `platforms.js` turns them into the ratios
-wanted and how each platform shows them. For each, the first size of that ratio is painted small by
-`seenOf()` (320 px wide): whole, for every layer's hit; the title alone (`o.only`) and what is under it
-(`drawCover`'s `o.below`), read back over the title's box for `titleContrast()`. `checkCover()` in
-`check.js` then applies the rules: the title's type size in the feed (from its hit and line count, times
-the feed's width over the canvas's), its length, its contrast (WCAG large text, 3:1), the biggest picture's
-share, the parts under the apps' badges, and ratios missing. `FIXES` in `app.js` has a fix per rule; a fix
-re-measures as it goes (the contrast fix tries a heavier outline, a darker photo, a plate, black or white
-letters, until one reads), changes placement only at the size the issue is about (`adjust` in scope
-`size`, `keepInside()`), and the whole is one step of undo. The count on the button follows 1.5 s after
-the last `touch()` (`checkSoon()`), a size per turn of the event loop, never while dragging.
 
 ### 9.4 Undo
 

@@ -298,21 +298,6 @@
   .fxcard b{display:block;margin-bottom:6px;font-size:14px}
   .fxcard.on b::after{content:"  ✓";color:var(--acc)}
   .fxcard ul{margin:0;padding-left:16px;font-size:12px;line-height:1.55;opacity:.75}
-  /* the cover check: the count on its button, its dialog's issues */
-  .checkbtn i{font-style:normal;display:inline-block;min-width:18px;padding:0 5px;margin-left:6px;font:700 11px/18px var(--mono);text-align:center;border-radius:9px}
-  .checkbtn i.red{background:#ff4d5e;color:#fff}
-  .checkbtn i.yellow{background:var(--acc);color:var(--ink)}
-  .checkbtn i.ok{background:#3ddc84;color:var(--ink)}
-  .check-opts{display:flex;gap:24px;flex-wrap:wrap}
-  .check-sum{font-weight:700;margin:2px 0 10px}
-  .check-sum.red{color:#ff7a88}.check-sum.yellow{color:var(--acc)}.check-sum.ok{color:#3ddc84}
-  .issues{display:grid;gap:8px;max-height:46vh;overflow:auto}
-  .issue{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:12px;align-items:center;border:1px solid var(--line);padding:10px 12px}
-  .issue .dot{width:10px;height:10px;border-radius:50%}
-  .issue.red .dot{background:#ff4d5e}.issue.yellow .dot{background:var(--acc)}
-  .issue b{font-size:13.5px;font-weight:600;line-height:1.5}
-  .issue .hint{margin-top:3px}
-  .issue .acts .btn{padding:4px 9px;font-size:12px}
   /* Cover → Layout parts: the same cards, two to a row in the side column */
   .fxcards.slim{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   .fxcards.slim .fxcard{padding:8px 10px}

@@ -7,7 +7,6 @@
 //
 // In the desktop app everything lives in the app data directory (through the Rust side); when the
 // page is opened in a plain browser it falls back to localStorage so the UI can still be developed.
-import { PLATFORM_IDS, RED_RATIOS } from "./platforms.js";
 import { SIZE_PRESETS } from "./presets.js";
 import { TEMPLATES, LAYOUT_LIMITS } from "./layout.js";
 import { LOOK_IDS, lookParams } from "./style.js";
@@ -159,12 +158,6 @@ export function normalizeSettings(raw) {
     // the side columns' widths in px, as dragged (0 = the default): left and right while editing, left in Setup
     columns: Object.fromEntries(["left", "right", "setup"].map((k) => [k, Math.round(num(s.columns && s.columns[k], 0, 0, 900))])),
     recentFonts: [...new Set((Array.isArray(s.recentFonts) ? s.recentFonts : []).map((f) => str(f).replace(/["\\]/g, "").trim().slice(0, 80)).filter(Boolean))].slice(0, RECENT_FONTS),
-    // the cover check: the platforms covers are made for, whether the video is landscape or portrait, the ratio chosen for 小红书
-    check: {
-      platforms: [...new Set((Array.isArray(s.check && s.check.platforms) ? s.check.platforms : []).filter((p) => PLATFORM_IDS.includes(p)))],
-      orient: s.check && s.check.orient === "v" ? "v" : "h",
-      red: RED_RATIOS.includes(s.check && s.check.red) ? s.check.red : "3:4",
-    },
   };
 }
 

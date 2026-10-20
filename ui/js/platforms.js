@@ -1,5 +1,6 @@
-// The platforms covers are made for, as data: which covers each wants and how it shows them. The cover
-// check (check.js) reads it; a platform that changes only needs this file changed.
+// The platforms covers are made for, as data: which covers each wants and how it shows them. The layouts
+// (meetStandards in layout.js) and the cover standards (check.js) read it; a platform that changes only
+// needs this file changed.
 //
 // The ratios each platform wants were checked on a phone, uploading a video (2026-10-19). `feed` (how
 // wide the cover shows in the app's feed on a phone about 390 points wide, in CSS pixels) and `zones`
@@ -16,8 +17,10 @@ export const RATIOS = {
   "1:1": { w: 1, h: 1, px: [1080, 1080] },
   "2.35:1": { w: 2.35, h: 1, px: [900, 383] },
 };
+/** Where the badges the apps lay over a landscape cover's foot begin, as a share of its height: the words and the graphic stay above it (see meetStandards in layout.js). */
+export const FOOT = 0.84;
 // what the apps lay over a cover, estimated: the bottom corners of a video card
-const BILI_ZONES = [{ x0: 0.78, y0: 0.84, x1: 1, y1: 1, what: "duration" }, { x0: 0, y0: 0.84, x1: 0.5, y1: 1, what: "plays" }];
+const BILI_ZONES = [{ x0: 0.78, y0: FOOT, x1: 1, y1: 1, what: "duration" }, { x0: 0, y0: FOOT, x1: 0.5, y1: 1, what: "plays" }];
 const YT_ZONES = [{ x0: 0.82, y0: 0.85, x1: 1, y1: 1, what: "duration" }];
 
 /**

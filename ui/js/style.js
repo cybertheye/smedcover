@@ -40,6 +40,7 @@
 
 import { fonts, spaced, spacedW, brackets, toneField } from "./cel.js";
 import { blockLayout } from "./layout.js";
+import { FOOT } from "./platforms.js";
 import { drawTitleVertical, titleBlock, titleBlockVertical } from "./title.js";
 
 const INK = "#07070c";
@@ -1168,13 +1169,18 @@ const numeral = (n) => (n <= 10 ? NUMERALS[n] : n < 20 ? "十" + NUMERALS[n - 10
  * and down to the colour band or the foot of the page — columns want height, where a line wants width.
  */
 function songBox(ctx, env, box) {
-  const G = env.G, split = G.template === "split", foot = split || G.flipped ? env.h - 110 : Math.min(G.accent[0][1], G.accent[1][1]) - 36;
+  // the foot of the page, on a landscape cover above the badges the apps lay over it (see meetStandards in layout.js)
+  const G = env.G, split = G.template === "split", page = env.w / env.h > 1.25 ? Math.min(env.h - 110, (FOOT - 0.015) * env.h) : env.h - 110;
+  let foot = split || G.flipped ? page : Math.min(G.accent[0][1], G.accent[1][1]) - 36;
   let x = box.x, w = box.w;
   if (env.cover.tag && !G.flipped) {
     const f = G.tag.fs * 0.82;
     ctx.save(); ctx.font = `900 ${f}px ${fonts.serif}`; const seal = spacedW(ctx, env.cover.tag, 4) + f * 0.9 + 44; ctx.restore();
     x += seal; w = Math.max(200, w - seal);
   }
+  // the channel name under the columns, on the page rather than the band: they end above it
+  const c = G.cat, nameTop = c.y - c.fs * 0.95 - 30;
+  if (foot > nameTop && c.y > box.y && c.x < x + w && c.x + c.maxW > x) foot = nameTop;
   return { x, y: box.y, w, h: Math.max(160, foot - box.y) };
 }
 /**

@@ -1,6 +1,6 @@
-// The cover check: will the cover be read, seen and left uncovered on the platforms it is made for? Rule
-// by rule, as docs/cover-check.zh-CN.md sets them out. Pure: the editor (app.js) paints each size and
-// hands over what it found; it also turns the issues into words and fixes.
+// The cover standards: will the cover be read, seen and left uncovered on the platforms it is made for?
+// Rule by rule, as docs/cover-check.zh-CN.md sets them out. Pure. The layouts keep to them by
+// themselves (meetStandards in layout.js); the tests measure painted covers against them here.
 import { isRatio, wanted } from "./platforms.js";
 
 /** Where each rule draws its lines. Those not from a standard are starting values, to be tuned on real covers. */

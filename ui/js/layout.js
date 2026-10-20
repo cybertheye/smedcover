@@ -3,6 +3,9 @@
 // Everything is laid out in a "virtual" canvas whose short side is 1080–1200 units whatever the
 // real pixel size, so type and line weights keep their proportions from 900x383 up to 8K.
 
+import { FOOT, PLATFORM_IDS, RED_RATIOS, isRatio, wanted } from "./platforms.js";
+import { LIMITS } from "./check.js";
+
 const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
 const lerp = (a, b, t) => a + (b - a) * t;
 
@@ -239,6 +242,82 @@ export function dragLayout(G, w, h, adj, handle, x, y, box) {
   if (handle === "a") a = at; else if (handle === "b") b = at; else { const d = at - (a + b) / 2; a += d; b += d; }
   out.size = lim("size", (span - (a + b) / 2) / span); out.slant = lim("slant", (a - b) / span);
   return out;
+}
+
+/** The narrowest any app's feed shows a cover of w × h, in CSS pixels, whichever platforms and video it is for; null when no platform wants that ratio or reads it in its feed. */
+export function feedOf(w, h) {
+  let min = 0;
+  for (const orient of ["h", "v"]) for (const red of RED_RATIOS) for (const r of wanted({ platforms: PLATFORM_IDS, orient, red })) {
+    if (isRatio(w, h, r.ratio)) for (const u of r.uses) if (u.feed && (!min || u.feed < min)) min = u.feed;
+  }
+  return min || null;
+}
+/** Whether some app lays its badges over the foot of a cover of w × h (see the zones in platforms.js). */
+export function badged(w, h) {
+  for (const orient of ["h", "v"]) for (const r of wanted({ platforms: PLATFORM_IDS, orient, red: RED_RATIOS[0] })) {
+    if (isRatio(w, h, r.ratio) && r.uses.some((u) => u.zones && u.zones.length)) return true;
+  }
+  return false;
+}
+/** Half the side of the box a channel graphic is drawn in at scale 1 (see drawAsset in assets.js). */
+export const ART_HALF = 300;
+/**
+ * A layout held to the cover standards (docs/cover-check.zh-CN.md), whatever the look's template:
+ * a new object of the same shape. `adj` is what the user changed about the template (see adjustLayout):
+ * a colour block they moved or tilted stays where they put it.
+ *   D1  On a cover the apps lay badges over (16:9, 4:3; badged()) nothing with words in it, nor the
+ *       graphic, reaches down to them (FOOT, platforms.js): the channel name keeps its sub-name beside it
+ *       and moves up, the colour block it stands on growing to hold it when too shallow; on any cover
+ *       they stay a little off the bottom edge.
+ *   A1  The title's box holds two lines at the type size the narrowest feed showing this ratio needs
+ *       (LIMITS.font), the colour block giving way while it still holds the channel name.
+ *   C1  On "stack", the block along the foot, the graphic, the cover's picture until a photo comes, takes at least LIMITS.picture
+ *       of the canvas (a little more: a graphic does not fill its box); the title's box gives way to it,
+ *       narrower on a landscape cover, shorter on the others, and so does the channel name.
+ * And the tag stays clear of the channel name below it, the title of the tag.
+ */
+export function meetStandards(G, w, h, adj = {}) {
+  const g = { ...G, accent: G.accent.map((p) => [...p]), edge: { ...G.edge, line: [...G.edge.line] }, title: { ...G.title }, tag: { ...G.tag }, cat: { ...G.cat }, art: { ...G.art } };
+  const badges = badged(w, h), wide = w / h > 1.25, onBlock = g.template !== "split" && !g.flipped;   // the colour block along the foot, the channel name on it
+  const own = adj.size == null && adj.slant == null;   // the block where the template puts it, free to move
+  const foot = badges ? (FOOT - 0.015) * h : h * 0.97;
+  const feed = feedOf(w, h), need = feed ? 2 * 1.16 * LIMITS.font.ok * 1.04 * (w / feed) : 0;   // the title's box tall enough for two lines that read in the feed (A1)
+  const catTop = () => g.cat.y - g.cat.fs * 0.95, catFoot = () => g.cat.y + (g.cat.inline ? g.cat.fs * 0.17 : 80), R = () => ART_HALF * g.art.s, tagH = g.tag.fs * 1.34;
+  // the channel name above the foot, on a block that reaches up far enough to hold it
+  if (catFoot() > foot) { g.cat.inline = true; if (catFoot() > foot) g.cat.y = foot - g.cat.fs * 0.17; }
+  if (onBlock && own) {
+    const [x0, y0, x1, y1] = g.edge.line, edgeAt = (x) => y0 + ((y1 - y0) * (x - x0)) / (x1 - x0 || 1);
+    // the block moved down by d (up, d < 0), and what stands on it or above it with it
+    const shift = (d) => { g.accent[0][1] += d; g.accent[1][1] += d; g.edge.line[1] += d; g.edge.line[3] += d; g.toneFrom += d; g.tag.y += d; g.art.y += d; };
+    const d = Math.max(edgeAt(g.cat.x), edgeAt(g.cat.x + Math.min(g.cat.maxW, w / 2))) - (catTop() - g.cat.fs * 0.3);
+    if (d > 0) { shift(-d); g.title.h = Math.max(120, g.title.h - d); }   // the block grows upward
+    // the title's box tall enough for two lines that read in the feed: the block lowered as far as it can
+    const room = Math.min(...[g.cat.x, g.cat.x + Math.min(g.cat.maxW, w / 2)].map((x) => catTop() - g.cat.fs * 0.3 - edgeAt(x)));
+    const down = Math.min(need - g.title.h, room);
+    if (down > 0) { shift(down); g.title.h += down; }
+  }
+  // the tag above the foot and clear of the channel name (they share the left margin), the title clear of the tag
+  if (g.tag.y + tagH > foot) g.tag.y = foot - tagH;
+  if (g.tag.y < g.cat.y && g.tag.y + tagH > catTop() - 16) g.tag.y = catTop() - 16 - tagH;
+  if (g.tag.y > g.title.y && g.title.y + g.title.h > g.tag.y - 30) g.title.h = Math.max(120, g.tag.y - 30 - g.title.y);
+  // the graphic: big enough to look at, above the foot, inside the canvas
+  if (g.template === "stack" && onBlock) g.art.s = Math.max(g.art.s, Math.sqrt((LIMITS.picture + 0.015) * w * h) / (2 * ART_HALF));
+  if (g.art.y + R() > foot) g.art.y = foot - R();
+  if (g.art.y - R() < h * 0.02 && 2 * R() < foot - h * 0.02) g.art.y = h * 0.02 + R();
+  if (2 * R() < w * 0.96) g.art.x = clamp(g.art.x, R() + w * 0.02, w - R() - w * 0.02);
+  // on a landscape cover it first moves over to the right to leave the title its room; then what it
+  // would still cover gives way: the title's box, the channel name
+  const box = () => ({ x0: g.art.x - R(), y0: g.art.y - R(), x1: g.art.x + R(), y1: g.art.y + R() });
+  const meets = (x0, y0, x1, y1, a = box()) => x0 < a.x1 && x1 > a.x0 && y0 < a.y1 && y1 > a.y0;
+  const overTitle = () => meets(g.title.x, g.title.y, g.title.x + g.title.w, g.title.y + g.title.h);
+  if (wide && overTitle()) g.art.x = Math.max(g.art.x, w * 0.96 - R());
+  const art = box();
+  if (overTitle()) {
+    if (wide && art.x0 - 40 - g.title.x >= w * 0.4) g.title.w = art.x0 - 40 - g.title.x;
+    else if (art.y0 - 40 - g.title.y >= 120) g.title.h = art.y0 - 40 - g.title.y;
+  }
+  if (meets(g.cat.x, catTop(), g.cat.x + g.cat.maxW, catFoot())) g.cat.maxW = Math.max(120, Math.min(g.cat.maxW, art.x0 - 30 - g.cat.x));
+  return g;
 }
 
 /** Uniform scale that maps the virtual canvas onto `pixelWidth` real pixels. */
