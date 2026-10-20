@@ -28,11 +28,12 @@ const HEADERS = {
   category: ["channel", "频道", "category", "类目", "分类"],
   title: ["title", "标题"],
   tag: ["tag", "角标", "标签"],
+  subtitle: ["subtitle", "副标题"],
 };
 
 /**
- * Turns CSV text into cover jobs [{category, title, tag}]. A header row is optional; without one
- * the columns are category, title, tag. Rows without a title are skipped.
+ * Turns CSV text into cover jobs [{category, title, tag, subtitle}]. A header row is optional; without one
+ * the columns are category, title, tag, subtitle. Rows without a title are skipped.
  */
 export function csvToJobs(text) {
   const rows = parseCsv(text);
@@ -42,13 +43,14 @@ export function csvToJobs(text) {
   const col = {};
   for (const [key, names] of Object.entries(HEADERS)) col[key] = first.findIndex((c) => names.includes(c));
   const hasHeader = col.title >= 0;
-  if (!hasHeader) Object.assign(col, { category: 0, title: 1, tag: 2 });
+  if (!hasHeader) Object.assign(col, { category: 0, title: 1, tag: 2, subtitle: 3 });
   return rows
     .slice(hasHeader ? 1 : 0)
     .map((r) => ({
       category: (r[col.category] ?? "").trim(),
       title: (r[col.title] ?? "").trim(),
       tag: col.tag >= 0 ? (r[col.tag] ?? "").trim() : "",
+      subtitle: col.subtitle >= 0 ? (r[col.subtitle] ?? "").trim() : "",
     }))
     .filter((j) => j.title);
 }

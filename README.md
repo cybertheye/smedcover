@@ -27,7 +27,7 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
   - Setup: **Brand**, **Sizes & export**, **AI**
 - **Centre** — the main canvas, and below it a thumbnail of every output size. Click one to show that size on the canvas.
 - **Right** (Edit only) — the layer list and the selected layer's properties.
-- **Top bar** — profile switcher, undo and redo, clear, SURPRISE ME (你看着办 in Chinese), export. *Clear* asks first, then takes every layer you added off this channel's cover, puts the layout layers back to the default design's places, effects and colours, and the scene objects to theirs; the title and tag words and the style stay, and the photos are still in the bitmap assets. It is one step of undo.
+- **Top bar** — profile switcher, undo and redo, clear, SURPRISE ME (你看着办 in Chinese), export. *Clear* asks first, then takes every layer you added off this channel's cover, puts the layout layers back to the default design's places, effects and colours, and the scene objects to theirs; the title, subtitle and tag words and the style stay, and the photos are still in the bitmap assets. It is one step of undo.
 - **Dialogs** — a click on the dimmed page outside a dialog cancels it (a press inside dragged out does not). Two stay: the first-run welcome, where a starting point must be chosen, and an export's progress, which only its own *Cancel* stops.
 
 ## Quick start
@@ -44,12 +44,13 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
 
 - One line in the text box is one line on the cover. Text **never wraps**; longer or more lines mean smaller type.
 - Words wrapped in `*asterisks*` take the channel colour.
+- The **subtitle** is a smaller line under the title, lettered as the title is, typed under *Subtitle* (a new cover comes with a placeholder). It takes a line at the foot of the title's box: the title makes room for it and the two are centred there together, the subtitle about 0.4 of the title's size, and never as large as the title. Where it would set the title smaller than the feeds read well, the subtitle gets smaller first. Empty it, or untick it under *Layout parts*, to leave it out. In the woodblock look, with the title in columns, it is a column of its own left of the title's, a character lower.
 - The corner tag is an optional short label such as `EP.03`.
-- The title can also be changed in the properties of the *Title* layer, under *Text*: it is the same words.
+- The title can also be changed in the properties of the *Title* layer, under *Text*: it is the same words; so can the subtitle, in the *Subtitle* layer's.
 
 ### Layout parts
 
-*Layout parts* in the Cover tab lists what the layout brings, a row each, from the top down in the order they are stacked: the corner brackets, the title, the brand logo, the brand row, the corner tag, the channel name, the channel graphic, the colour block and its edge. Untick a row and that part is left out of this cover, and no longer listed with the layers (*Hide layout* leaves it alone too); tick it again and it is back, its place, colours and effects as they were. It is this channel's cover only, it stays through *Clear*, and it can be undone. A new cover leaves out the channel name and the channel graphic; tick them to bring them in (covers made before that and never touched, and the profile's default design, left them out once). The background is always there, at the bottom, so it is not listed.
+*Layout parts* in the Cover tab lists what the layout brings, a row each, from the top down in the order they are stacked: the corner brackets, the title, the subtitle, the brand logo, the brand row, the corner tag, the channel name, the channel graphic, the colour block and its edge. Untick a row and that part is left out of this cover, and no longer listed with the layers (*Hide layout* leaves it alone too); tick it again and it is back, its place, colours and effects as they were. It is this channel's cover only, it stays through *Clear*, and it can be undone. A new cover leaves out the channel name and the channel graphic; tick them to bring them in (covers made before that and never touched, and the profile's default design, left them out once). The background is always there, at the bottom, so it is not listed.
 
 Drag a row onto another to stack that part there: the layer list shows the new order at once, and it becomes the profile's default order too, which new channels' covers and *Clear* take from then on (the covers the other channels already have keep theirs). The layers you added go with the layout layer each lies directly above. It can be undone.
 
@@ -183,7 +184,7 @@ In *This size only*, the channel graphic's placement is remembered per channel.
 
 ### Layers
 
-- The list on the right runs front to back, top to bottom. Drag a row to re-order, or use ▲ ▼. The layout layers stand by default, from the top: corner brackets, title, brand logo, brand row, tag, channel name, channel graphic, colour block, background (*Layout parts* in the Cover tab changes this default order). An earlier profile or cover still in the old default order (never re-ordered by hand) is put into this one when opened, once; the layers you added go with the layout layer each lay directly above, so what was in front stays in front; one re-ordered by hand is left as it is.
+- The list on the right runs front to back, top to bottom. Drag a row to re-order, or use ▲ ▼. The layout layers stand by default, from the top: corner brackets, title, subtitle, brand logo, brand row, tag, channel name, channel graphic, colour block, background (*Layout parts* in the Cover tab changes this default order). An earlier profile or cover still in the old default order (never re-ordered by hand) is put into this one when opened, once; the layers you added go with the layout layer each lay directly above, so what was in front stays in front; one re-ordered by hand is left as it is.
 - The two icons on each row are show/hide and lock. Background and Corner brackets carry a 🔒: they are fixed layers.
 - At the end of each row: what the layer is (photo, text "T", colour as a filled square, vector asset as a pen nib, bitmap asset); a linked photo has a chain and a leading (solid dot) / following (dashed ring) mark before its photo icon, one colour per pair — click the chain to end the link, the leading / following mark to go to the other layer of the pair; then whose it is — the layout icon (a page in panels) for a layout layer (it comes with the layout and every cover has it; it cannot be deleted, but can be hidden), a person for a layer you added.
 - Layers you added (photos, text, assets) are renamed by double-clicking their name (a single click selects, as anywhere on the row): Enter or clicking elsewhere keeps it, Esc does not, an empty name goes back to the automatic one.
@@ -192,7 +193,7 @@ In *This size only*, the channel graphic's placement is remembered per channel.
 - **＋ Text** adds a text layer; **＋ Colour** adds a colour layer: one block of colour, the canvas's size to begin with (in the channel colour), to shrink, stretch or turn into a ground, a band or a see-through wash. Clicking an item in Assets adds it. New layers go directly above the selected one.
 - Position, size, stretch and rotation are set on the canvas with the mouse (see the table above).
 - **3D** — the first button at the top of the layer list (Esc to leave). It takes the cover apart where the canvas was: each layer becomes a sheet of its own, stacked from the bottom up and seen at an angle, each with its name beside it, so you can see what every layer holds and which lies over which. Drag to turn the view; scroll, or use *Spread*, to pull the sheets apart or together; *Reset view* puts the angle back. Click a sheet to select its layer (its settings show on the right as ever; the transparent parts of a sheet let the click through to the ones below), double-click to select it and go back to the flat canvas. Pointing at a row of the list lights its sheet and dims the rest; a hidden layer is a faint sheet with a dashed edge. It is only for looking: settings changed on the right show at once, and a layer moved in the list slides to its new place, but moving or resizing on the canvas waits until you leave 3D.
-- **Hide layout** — the button left of FOCUS at the top of the layer list. It hides all the layout layers at once (background, colour block, title, tag, channel name, brand row, brand logo, channel graphic, frame), leaving the photos, text, assets and colour layers you added; it then reads *Show layout*, which brings back the ones that were showing (one you had hidden before stays hidden). It acts on this channel's cover and can be undone.
+- **Hide layout** — the button left of FOCUS at the top of the layer list. It hides all the layout layers at once (background, colour block, title, subtitle, tag, channel name, brand row, brand logo, channel graphic, frame), leaving the photos, text, assets and colour layers you added; it then reads *Show layout*, which brings back the ones that were showing (one you had hidden before stays hidden). It acts on this channel's cover and can be undone.
 - **FOCUS** — the switch at the top right of the layer list (shortcut F, Esc to leave). While on, every other layer is dimmed on the canvas and greyed in the list, and none of them can be selected, on the canvas or in the list (a click says why); dragging and scrolling on the canvas (Option to turn) act on the selected layer whatever is under the pointer, and nothing else is moved. To work on another layer, turn FOCUS off first. The canvas gets a dashed frame and a tag naming the layer; a layer that cannot be moved (a fixed built-in or a locked one) is tagged so. With several layers selected, a drag moves them together.
 - The properties come in groups: their names on the left (Text, Effect, Colour, Lines, Plate — or Cut-out, Place, Picture, Lines…), the controls on the right; after a rule at the bottom, the Layer group every layer has: opacity and *Reset placement* (a cut-out has none; its *Line up with the photo again* is in its Place group). Explanations sit behind the ⓘ beside a group's name: hover it, or click it.
 - Colours take a row each, as checkboxes do: the swatch, its name, then *Automatic* (following the look and the channel colour); once you pick a colour it reads *Back to automatic* — click it to return.
@@ -219,17 +220,17 @@ What each layer allows:
 - the look effects of the layers you added (text, stickers, images, photos, colours): one or two, mostly the drawn look's, now and then another look's
 - the layers you added get a new place, angle and size: anywhere on the canvas, but wholly on it at every size, not a pixel off; one too big to fit is set straighter, then smaller
 
-**Left alone**: the template, how much the colour block takes, the slant of its edge, whether the halves are swapped, and where the layout layers stand (title, colour block, channel graphic, tag, channel name, brand row, corner brackets); the words of the title and tag, the current channel and every channel's colour, the photo layers' pictures, which layers exist (none added, none removed), custom lettering colours, locked layers, a photo or a colour filling the canvas.
+**Left alone**: the template, how much the colour block takes, the slant of its edge, whether the halves are swapped, and where the layout layers stand (title, colour block, channel graphic, tag, channel name, brand row, corner brackets); the words of the title, subtitle and tag, the current channel and every channel's colour, the photo layers' pictures, which layers exist (none added, none removed), custom lettering colours, locked layers, a photo or a colour filling the canvas.
 
 Each deal is one step of undo, however fast you click. Deal again if you do not like it, or undo to the hand before.
 
 ### Title and text layers
 
-Add a text layer with **＋ Text** on the right. The title and text layers are the same kind of thing with the same properties, look effects and clipping masks included; the title's *Text* is the title in the Cover tab, so either can be changed. The title is still a layout layer: it cannot be deleted or duplicated, and its default place follows the layout. Top to bottom:
+Add a text layer with **＋ Text** on the right. The title, the subtitle and text layers are the same kind of thing with the same properties, look effects included (and clipping masks, but for the subtitle); the title's *Text* is the title in the Cover tab, the subtitle's the subtitle, so either can be changed. The title and subtitle are still layout layers: it cannot be deleted or duplicated, and its default place follows the layout. Top to bottom:
 
 | Property | Decides |
 |---|---|
-| Text | One line is one line; words in `*asterisks*` take the highlight colour. The title's text is the title in the Cover tab |
+| Text | One line is one line; words in `*asterisks*` take the highlight colour. The title's and subtitle's text are the ones in the Cover tab |
 | Font | see the next section |
 | Text effect | how the letters are drawn; see [Text effects](#text-effects) |
 | Lettering colour, highlight colour | see [Lettering colours](#lettering-colours) |
@@ -240,7 +241,7 @@ Text layers of earlier versions are carried over: white becomes automatic, ink a
 
 ### Fonts
 
-Every layer that carries words (title, corner tag, channel name, brand row, text layers) chooses its own font. Select the layer and look under *Font* in its properties:
+Every layer that carries words (title, subtitle, corner tag, channel name, brand row, text layers) chooses its own font. Select the layer and look under *Font* in its properties:
 
 - **Default** — the bundled face, following the current look (a serif under Woodblock book, say). New layers start here.
 - **Recent** — the fonts used last, to reuse on other layers.
@@ -254,7 +255,7 @@ Imported fonts live in this computer's app data. Exporting a profile packs the i
 
 ### Text effects
 
-The title and every text layer (with or without a plate) can be given a text effect of their own instead of following the look. Select the layer and choose under *Text effect* in its properties:
+The title, the subtitle and every text layer (with or without a plate) can be given a text effect of their own instead of following the look. Select the layer and choose under *Text effect* in its properties:
 
 | Kind | Effects | Notes |
 |---|---|---|
@@ -263,7 +264,7 @@ The title and every text layer (with or without a plate) can be given a text eff
 | Masked | halftone inside, stripes inside, inner shadow, worn, row shift | Change what is inside the letters |
 | Outlined | extruded, arched, arc down, on a circle, arched top, bulge, pinch, fisheye, rise, tapered, wave, flag | Reshape the letters themselves |
 
-With *Tapered*, diamond handles appear at the corners of the lettering on the canvas: drag any of them to set the perspective freely (the whole block is reshaped to the new quad); *Reset the perspective* in the properties goes back to the default. Both the title and text layers have it.
+With *Tapered*, diamond handles appear at the corners of the lettering on the canvas: drag any of them to set the perspective freely (the whole block is reshaped to the new quad); *Reset the perspective* in the properties goes back to the default. The title, subtitle and text layers all have it.
 
 The bends, line by line: *Arched* lifts the middle of the line and *Arc down* lowers it; *On a circle* lays the line round a circle below it, the letters fanning out; *Arched top* keeps the baseline straight while the tops arch up toward the middle; *Bulge* makes the letters taller toward the middle and *Pinch* shorter; *Fisheye* enlarges the middle as a lens would, easing off toward the ends, which stay about where they were; *Rise* climbs to the right with the upright strokes kept upright; *Wave* runs a wave along the line and *Flag* waves it like a flag on a pole at its start, more the further from the pole. *Strength* sets how far each goes.
 
@@ -384,7 +385,7 @@ Every layer made of words can be given its own colour. Select the layer and look
 
 | Layer | Colours you can set |
 |---|---|
-| Title, text layers | lettering colour, highlight colour (for words in `*asterisks*`), and on a plate the plate colour |
+| Title, subtitle, text layers | lettering colour, highlight colour (for words in `*asterisks*`), and on a plate the plate colour |
 | Corner tag, channel name, brand row | lettering colour |
 
 Without one a layer shows *Automatic*: the colour comes from the current look and the channel colour, and follows when either changes. Once set, the colour stays as it is; *Back to automatic* clears it.
@@ -618,10 +619,10 @@ Privacy and cost:
 The layouts keep to a few rules, so a cover reads in the apps' feeds as it comes, in every look and size:
 
 - **Nothing under the badges.** On a landscape cover (16:9, 4:3) Bilibili and YouTube lay the duration and the play count over the bottom corners. The title, the corner tag, the channel name and the channel graphic stay above that strip: the channel name keeps its sub-name beside it, and a colour block too shallow to hold it there grows until it does.
-- **A title that reads.** The title's box leaves room for two lines at 14 px or more as the narrowest feed shows that ratio (Douyin's grid shows a 3:4 cover about 128 px wide, YouTube's side list a 16:9 one about 168 px). Keep a line to 6–8 characters: the longer it is, the smaller it is set.
+- **A title that reads.** The title's box leaves room for two lines at 14 px or more as the narrowest feed shows that ratio (Douyin's grid shows a 3:4 cover about 128 px wide, YouTube's side list a 16:9 one about 168 px). Keep a line to 6–8 characters: the longer it is, the smaller it is set. With a subtitle the box leaves room for its line too, and where there is not room for both the subtitle gets smaller first.
 - **Something to look at.** In the *Stack* template the channel graphic takes at least 12% of the cover, and the title and the channel name make room for it.
 - **Room for what is there.** A part left out under *Layout parts* gives its room to the others: without the channel name the colour block along the foot slims down (to 16% of the height, the tag on its edge still above the badges) and the title grows into the room; without the channel graphic the title keeps its whole box, and the *Split* template's panel narrows to a band down the side (13% of a portrait cover's width, 25% of a 16:9 one's), widening the title's column.
-- **Every part shown.** A new cover comes with the tag `EP.01`, so the corner tag shows from the start (covers made before that and never touched were given it once); type your own under *Cover → Corner tag*, or empty it to leave the tag out.
+- **Every part shown.** A new cover comes with the tag `EP.01`, so the corner tag shows from the start (covers made before that and never touched were given it once); type your own under *Cover → Corner tag*, or empty it to leave the tag out. So does the subtitle, with a placeholder (*Write your subtitle here*), given once too to the covers not yet touched.
 
 They hold for the template's own places: a layer you drag stays where you put it, and so does a colour block you resize or tilt under *Style → Layout*. With the channel graphic on, the *Split* template's title column is narrow at portrait sizes: there a line of more than 5 characters is set smaller than the feeds read well.
 
@@ -650,14 +651,15 @@ The covers each platform wants (checked on a phone):
 Import a CSV with one cover per row; every row is exported with the current layers in all selected sizes.
 
 ```csv
-channel,title,tag
-Vlog,"First line\n*second line*",EP.01
-Tutorials,Another title,
+channel,title,tag,subtitle
+Vlog,"First line\n*second line*",EP.01,A line to go with it
+Tutorials,Another title,,
 ```
 
 - The channel column may hold a name, a code or a number. Rows that match nothing use the current channel.
 - Use `\n` for a line break in a title.
-- The header row is optional; without it the columns are channel, title, tag.
+- The header row is optional; without it the columns are channel, title, tag, subtitle.
+- Each row has only its own subtitle: without the column, or with it empty, the cover has none.
 - A template can be downloaded from the app.
 
 ## Where your data lives

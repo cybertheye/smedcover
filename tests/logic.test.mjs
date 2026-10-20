@@ -52,11 +52,13 @@ test("parseCsv handles quotes, embedded commas and line breaks", () => {
 });
 
 test("csvToJobs reads with and without a header row", () => {
-  assert.deepEqual(csvToJobs("类目,标题,角标\n日常,一台相机,EP.01\n教程,,x\n"), [{ category: "日常", title: "一台相机", tag: "EP.01" }]);
-  assert.deepEqual(csvToJobs("Title,Category\nHello,Vlog"), [{ category: "Vlog", title: "Hello", tag: "" }]);
-  assert.deepEqual(csvToJobs("频道,标题\n日常,你好"), [{ category: "日常", title: "你好", tag: "" }]);
-  assert.deepEqual(csvToJobs("channel,title\nVlog,Hi"), [{ category: "Vlog", title: "Hi", tag: "" }]);
-  assert.deepEqual(csvToJobs("Vlog,Hello,T1"), [{ category: "Vlog", title: "Hello", tag: "T1" }]);
+  assert.deepEqual(csvToJobs("类目,标题,角标\n日常,一台相机,EP.01\n教程,,x\n"), [{ category: "日常", title: "一台相机", tag: "EP.01", subtitle: "" }]);
+  assert.deepEqual(csvToJobs("Title,Category\nHello,Vlog"), [{ category: "Vlog", title: "Hello", tag: "", subtitle: "" }]);
+  assert.deepEqual(csvToJobs("频道,标题\n日常,你好"), [{ category: "日常", title: "你好", tag: "", subtitle: "" }]);
+  assert.deepEqual(csvToJobs("channel,title\nVlog,Hi"), [{ category: "Vlog", title: "Hi", tag: "", subtitle: "" }]);
+  assert.deepEqual(csvToJobs("Vlog,Hello,T1"), [{ category: "Vlog", title: "Hello", tag: "T1", subtitle: "" }]);
+  assert.deepEqual(csvToJobs("Vlog,Hello,T1,Sub"), [{ category: "Vlog", title: "Hello", tag: "T1", subtitle: "Sub" }]);
+  assert.deepEqual(csvToJobs("频道,标题,副标题\n日常,你好,三分钟看懂"), [{ category: "日常", title: "你好", tag: "", subtitle: "三分钟看懂" }]);
 });
 
 test("normalizeProfile repairs bad input and keeps good input", () => {
@@ -566,7 +568,7 @@ test("looks: the AI prompts take their style section from the look", () => {
 });
 
 test("lettering layers may carry their own colour", () => {
-  assert.deepEqual(LETTERED, ["title", "tag", "catname", "brand", "text"]);
+  assert.deepEqual(LETTERED, ["title", "subtitle", "tag", "catname", "brand", "text"]);
   const ls = normalizeLayers([
     { type: "title", ink: "#FF00AA", hi: "#00ff00" }, { type: "tag", ink: "#123456", hi: "#00ff00" }, { type: "catname", ink: "red" }, { type: "brand", ink: "#abc" },
     { type: "accent", ink: "#ff0000" }, { type: "text", text: "x", ink: "#0000FF" }, { type: "asset", ref: { kind: "sticker", id: "star" }, ink: "#ff0000" },
@@ -841,7 +843,7 @@ test("look effects on a layer: kept clean, carried by the layer whatever the loo
   }
   assert.ok(!LOOKS.editorial.elementFx.some((e) => e.key === "underline"));
   assert.ok(["riso", "chrome", "netart"].every((id) => LOOKS[id].elementFx.length >= 4), "the pilots");
-  assert.deepEqual(FX_TYPES, ["text", "asset", "photo", "solid", "title"]);
+  assert.deepEqual(FX_TYPES, ["text", "asset", "photo", "solid", "title", "subtitle"]);
   assert.ok(effectsFor("cyber", "photo").some((e) => e.key === "tint") && !effectsFor("cyber", "text").some((e) => e.key === "tint"), "a photo's own effect is offered on photos only");
   assert.equal(effectsFor("skies", "text").length, 0, "a look whose only effect is a photo's");
   // a layer's effects apply whatever look the cover is in, in stage order, only those that suit its type
@@ -1352,22 +1354,23 @@ test("plates under highlighted words: the title and text layers alike, with a co
 });
 
 test("the layout layers' default order, and a design or cover still in the old one put into it, added layers keeping their slots", () => {
-  assert.deepEqual(BOUND_TYPES, ["bg", "accent", "graphic", "catname", "tag", "brand", "logo", "title", "frame"]);   // in the list from the top: brackets, title, brand logo, brand row, tag, channel name, graphic, block, ground
+  assert.deepEqual(BOUND_TYPES, ["bg", "accent", "graphic", "catname", "tag", "brand", "logo", "subtitle", "title", "frame"]);   // in the list from the top: brackets, title, subtitle, brand logo, brand row, tag, channel name, graphic, block, ground
   const L = (type, id = type) => ({ type, id });
-  // a file from before the logo gets it as it is read: above the brand row
-  assert.deepEqual(normalizeLayers([L("bg"), L("accent"), L("graphic"), L("brand"), L("title"), L("tag"), L("catname"), L("frame")]).map((l) => l.id), ["bg", "accent", "graphic", "brand", "logo", "title", "tag", "catname", "frame"]);
+  // a file from before the logo and the subtitle gets them as it is read: above the brand row, under the title
+  assert.deepEqual(normalizeLayers([L("bg"), L("accent"), L("graphic"), L("brand"), L("title"), L("tag"), L("catname"), L("frame")]).map((l) => l.id), ["bg", "accent", "graphic", "brand", "logo", "subtitle", "title", "tag", "catname", "frame"]);
   assert.equal(normalizeLayers([L("bg"), L("title")]).find((l) => l.type === "logo").off, undefined);   // put back as it was: on
-  const old = [L("bg"), L("accent"), L("graphic"), L("brand"), L("logo"), L("title"), L("text", "w"), L("tag"), L("text", "x"), L("catname"), L("frame"), L("solid", "y")];
+  assert.equal(normalizeLayers([L("bg"), L("title")]).find((l) => l.type === "subtitle").off, undefined);   // the subtitle too: on
+  const old = [L("bg"), L("accent"), L("graphic"), L("brand"), L("logo"), L("subtitle"), L("title"), L("text", "w"), L("tag"), L("text", "x"), L("catname"), L("frame"), L("solid", "y")];
   assert.equal(reorderLayout(old), true);
-  assert.deepEqual(old.map((l) => l.id), ["bg", "accent", "graphic", "catname", "tag", "x", "brand", "logo", "title", "w", "frame", "y"]);   // each added layer over the layout layer it was over
-  const mine = [L("bg"), L("accent"), L("title"), L("graphic"), L("brand"), L("logo"), L("tag"), L("catname"), L("frame")];   // re-ordered by hand: left alone
+  assert.deepEqual(old.map((l) => l.id), ["bg", "accent", "graphic", "catname", "tag", "x", "brand", "logo", "subtitle", "title", "w", "frame", "y"]);   // each added layer over the layout layer it was over
+  const mine = [L("bg"), L("accent"), L("title"), L("graphic"), L("brand"), L("logo"), L("subtitle"), L("tag"), L("catname"), L("frame")];   // re-ordered by hand: left alone
   assert.equal(reorderLayout(mine), false);
-  assert.deepEqual(mine.map((l) => l.id), ["bg", "accent", "title", "graphic", "brand", "logo", "tag", "catname", "frame"]);
+  assert.deepEqual(mine.map((l) => l.id), ["bg", "accent", "title", "graphic", "brand", "logo", "subtitle", "tag", "catname", "frame"]);
   assert.equal(reorderLayout(old), false);                                                // once in the new order, nothing to do
   // Cover → Layout parts puts them in any order, the added layers going with theirs
-  const order = ["bg", "accent", "graphic", "catname", "brand", "logo", "title", "tag", "frame"];
+  const order = ["bg", "accent", "graphic", "catname", "brand", "logo", "subtitle", "title", "tag", "frame"];
   assert.equal(orderLayout(old, order), true);
-  assert.deepEqual(old.map((l) => l.id), ["bg", "accent", "graphic", "catname", "brand", "logo", "title", "w", "tag", "x", "frame", "y"]);
+  assert.deepEqual(old.map((l) => l.id), ["bg", "accent", "graphic", "catname", "brand", "logo", "subtitle", "title", "w", "tag", "x", "frame", "y"]);
   assert.deepEqual(layoutOrder(old), order);
   assert.equal(orderLayout(old, order), false);                                           // already so
   assert.equal(orderLayout(old, order.slice(1).concat("bg")), false);                     // the ground stays at the bottom
@@ -1664,16 +1667,64 @@ test("the brand logo stands at the right end of the brand row, as large as LOGO 
   assert.equal(logoBox({ brand: { logo: "" } }, 1920), null);
   assert.equal(logoBox({ brand: { logo: "gone" } }, 1920), null);                   // its asset deleted: nothing, no error
   userAssets.delete("lg");
-  const cover = (offs) => ({ layers: ["catname", "graphic"].map((type) => ({ type, ...(offs.includes(type) ? { off: true } : {}) })) });
-  assert.deepEqual(partsOf(cover([]), { graphic: { kind: "graphic", id: "camera" } }), { catname: true, graphic: true });
-  assert.deepEqual(partsOf(cover(["catname", "graphic"]), { graphic: { kind: "graphic", id: "camera" } }), { catname: false, graphic: false });
-  assert.deepEqual(partsOf(cover([]), { graphic: { kind: "none" } }), { catname: true, graphic: false });   // a channel without a graphic
+  const cover = (offs, subtitle = "") => ({ subtitle, layers: ["catname", "graphic", "subtitle"].map((type) => ({ type, ...(offs.includes(type) ? { off: true } : {}) })) });
+  assert.deepEqual(partsOf(cover([], "A line"), { graphic: { kind: "graphic", id: "camera" } }), { catname: true, graphic: true, subtitle: true });
+  assert.deepEqual(partsOf(cover(["catname", "graphic", "subtitle"], "A line"), { graphic: { kind: "graphic", id: "camera" } }), { catname: false, graphic: false, subtitle: false });
+  assert.deepEqual(partsOf(cover([]), { graphic: { kind: "none" } }), { catname: true, graphic: false, subtitle: false });   // a channel without a graphic; a subtitle with no words
 });
 
 test("a profile remembers its untouched covers were given the default tag, so it happens once", () => {
   assert.equal(normalizeProfile({ ...sampleProfile("en"), tagged: true }).tagged, true);
   assert.equal(normalizeProfile(sampleProfile("en")).tagged, undefined);
   assert.equal(normalizeProfile({ ...sampleProfile("en"), tagged: "yes" }).tagged, undefined);
+});
+
+test("the subtitle: under the title, smaller, the title making room; giving way first when the title would no longer read", async () => {
+  const { titleBlock, subtitleFit } = await import("../ui/js/title.js");
+  const { SUB, subtitleSize, titleFloor, meetStandards, adjustLayout, feedOf } = await import("../ui/js/layout.js");
+  const ctx = { font: "", save() {}, restore() {}, measureText: (str) => ({ width: String(str).length * 50 }) };
+  const box = { x: 100, y: 100, w: 1400, h: 500 }, title = "在这里写标题\n*一行*就是一行";
+  const alone = titleBlock(ctx, title, box, "serif"), s = subtitleFit(ctx, title, "在这里写副标题", box, "serif", 1920, 1080);
+  const block = titleBlock(ctx, title, box, "serif", 340, s.reserve);
+  assert.ok(s.fs <= subtitleSize(alone.fs, 1920, 1080) + 1e-9 && s.fs >= 1080 * SUB.min - 1e-9 && s.fs < block.fs, "smaller than the title");
+  assert.ok(Math.abs(s.box.y - (block.y + block.h + s.fs * SUB.gap)) < 1e-9 && s.box.x === box.x && s.box.w === box.w, "a gap under the title's last line");
+  assert.ok(Math.abs((block.y - box.y) - (box.y + box.h - (s.box.y + s.box.h))) < 1, "the two centred in the box together");
+  assert.ok(block.fs <= alone.fs && block.fs >= Math.min(alone.fs, titleFloor(1920, 1080)) - 1, "the title smaller only as far as it still reads");
+  assert.equal(subtitleFit(ctx, title, "  ", box, "serif", 1920, 1080), null);   // no words: no subtitle
+  const only = subtitleFit(ctx, "", "副标题", box, "serif", 1920, 1080);             // no title: centred in its box
+  assert.ok(only.reserve === 0 && Math.abs(only.box.y + only.box.h / 2 - (box.y + box.h / 2)) < 1e-9);
+  // a box too low for both: the subtitle at its smallest, the title what is left
+  const low = { ...box, h: 260 }, t = subtitleFit(ctx, title, "副标题", low, "serif", 1920, 1080);
+  assert.ok(Math.abs(t.fs - 1080 * SUB.min) < 1e-9);
+  // never as large as the title, however small a long line sets it
+  const long = "这是一个特别特别特别特别特别特别长的一行标题", narrow = { x: 84, y: 150, w: 912, h: 600 }, n = subtitleFit(ctx, long, "副标题", narrow, "serif", 1080, 1920);
+  assert.ok(n.fs <= titleBlock(ctx, long, narrow, "serif", 340, n.reserve).fs * SUB.most + 1e-9, `subtitle ${n.fs}`);
+  // what its words fill: their own width, not the box's (looks keep clear of that)
+  assert.ok(Math.abs(s.ink.w - (7 * 50 * Math.floor(s.fs)) / 100) < 1e-9 && s.ink.w < s.box.w && s.ink.x === s.box.x);   // set at a whole size, as drawTitle sets it
+  // the woodblock look, title in columns: the subtitle a column left of the title's, set at the size it was planned at, smaller
+  const { titleBlockVertical } = await import("../ui/js/title.js");
+  const [sw, sh] = virtualSize(1200, 1600), env = { w: sw, h: sh, G: layout("stack", sw, sh), cover: { tag: "", layers: [{ type: "title", visible: true }] } };
+  const tb = { x: env.G.title.x, y: 150, w: env.G.title.w, h: env.G.title.h + env.G.title.y - 150 };
+  const v = LOOKS.songke.subtitleFit(ctx, "在这里写标题\n一行就是一行", "在这里写副标题", tb, env, { vertical: 1 }), vt = titleBlockVertical(ctx, "在这里写标题\n一行就是一行", v.titleBox, "serif", 900, 300);
+  assert.ok(v.vertical && Math.abs(titleBlockVertical(ctx, "在这里写副标题", v.box, "serif", 700, v.fs).fs - Math.floor(v.fs)) <= 1, "drawn at its planned size");
+  assert.ok(v.fs < vt.fs && v.ink.x + v.ink.w <= vt.x - v.fs * 0.5 && v.ink.x >= tb.x - 1, "left of the title's columns, inside the box");
+  assert.equal(LOOKS.songke.subtitleFit(ctx, "a", "b", tb, env, { vertical: 0 }), null);   // a horizontal title: the usual place
+  // the layouts leave the title's box room for two lines that read, and the subtitle under them, on a new cover
+  const parts = { catname: false, graphic: false, subtitle: true };
+  for (const id of LOOK_IDS) for (const tp of TEMPLATES) for (const [rw, rh] of [[1920, 1080], [1440, 1080], [1080, 1080], [1080, 1440], [1080, 1920], [900, 383]]) {
+    const [w, h] = virtualSize(rw, rh), base = LOOKS[id].layout ? LOOKS[id].layout(tp, w, h) : layout(tp, w, h), g = meetStandards(adjustLayout(base, w, h, {}), w, h, {}, parts), fsA = titleFloor(w, h);
+    if (feedOf(w, h)) assert.ok(g.title.h >= 2 * 1.16 * fsA + subtitleSize(fsA, w, h) * (1.16 + SUB.gap) - 0.5, `${id} ${tp} ${rw}x${rh}: the title's box is ${Math.round(g.title.h)} high`);
+  }
+  // the words are the cover's, a profile remembers its untouched covers were given the placeholder once
+  const P = normalizeProfile(sampleProfile("zh"));
+  assert.equal(normalizeCover({ subtitle: "三分钟看懂" }, P).subtitle, "三分钟看懂");
+  assert.equal(normalizeCover({}, P).subtitle, "");
+  assert.equal(normalizeProfile({ ...sampleProfile("en"), subbed: true }).subbed, true);
+  assert.equal(normalizeProfile({ ...sampleProfile("en"), subbed: 1 }).subbed, undefined);
+  // the layer: lettered like the title, on in a new design
+  const [sub] = normalizeLayers([{ type: "subtitle", fx: "bulge", fxAmt: 1.4, font: "Kaiti", ink: "#FF0000", hi: "#00ff00", plate: true }]).filter((l) => l.type === "subtitle");
+  assert.deepEqual([sub.fx, sub.fxAmt, sub.font, sub.ink, sub.hi, sub.plate], ["bulge", 1.4, "Kaiti", "#ff0000", "#00ff00", true]);
+  assert.ok(defaultLayers().find((l) => l.type === "subtitle").visible);
 });
 
 test("the text warps: each bends the line without tearing it, the way its name says", async () => {

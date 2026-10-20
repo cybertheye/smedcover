@@ -266,6 +266,16 @@ export const BAND_MIN = 0.16;
 /** How wide the colour panel of "split" is when there is no graphic on it, as a share of the canvas width: on a portrait cover, and on a 16:9 one. */
 export const SIDE_BARE = [0.13, 0.25];
 /**
+ * The subtitle under the title (see subtitleFit in title.js): its type size `share` of the title's, kept
+ * between `min` and `max` of the canvas's shorter side but never above `most` of the title's as it is set
+ * in the end; the gap above it, in its own sizes.
+ */
+export const SUB = { share: 0.4, min: 0.04, max: 0.068, gap: 0.3, most: 0.75 };   // most: never more than this share of the title as set
+/** The type size the title wants on a cover of w × h for its words to read in the narrowest feed showing it (A1), in units; 0 when no feed shows it. */
+export function titleFloor(w, h) { const feed = feedOf(w, h); return feed ? LIMITS.font.ok * 1.04 * (w / feed) : 0; }
+/** The subtitle's type size under a title set at `titleFs`, on a canvas of w × h. */
+export const subtitleSize = (titleFs, w, h) => { const m = Math.min(w, h); return Math.min(m * SUB.max, Math.max(m * SUB.min, titleFs * SUB.share)); };
+/**
  * A layout held to the cover standards (docs/cover-check.zh-CN.md), whatever the look's template:
  * a new object of the same shape. `adj` is what the user changed about the template (see adjustLayout):
  * a colour block they moved or tilted stays where they put it.
@@ -284,7 +294,8 @@ export const SIDE_BARE = [0.13, 0.25];
  * channel name the block along the foot slims down (to BAND_MIN, the tag on its edge still above the foot),
  * or the tag drops to the name's place at the foot of the column; without a graphic the title keeps its
  * whole box, and the panel of "split" narrows to a band down the side (SIDE_BARE), the title's column
- * taking the room.
+ * taking the room. `subtitle`: the cover has a subtitle, which takes a line of the title's box (see
+ * subtitleFit in title.js): A1 asks room for it too.
  */
 export function meetStandards(G, w, h, adj = {}, parts = {}) {
   const g = { ...G, accent: G.accent.map((p) => [...p]), edge: { ...G.edge, line: [...G.edge.line] }, title: { ...G.title }, tag: { ...G.tag }, cat: { ...G.cat }, art: { ...G.art } };
@@ -292,7 +303,8 @@ export function meetStandards(G, w, h, adj = {}, parts = {}) {
   const own = adj.size == null && adj.slant == null;   // the block where the template puts it, free to move
   const foot = badges ? (FOOT - 0.015) * h : h * 0.97;
   const named = parts.catname !== false, pictured = parts.graphic !== false;
-  const feed = feedOf(w, h), need = feed ? 2 * 1.16 * LIMITS.font.ok * 1.04 * (w / feed) : 0;   // the title's box tall enough for two lines that read in the feed (A1)
+  // the title's box tall enough for two lines that read in the feed (A1), and the subtitle under them
+  const fsA = titleFloor(w, h), need = fsA ? 2 * 1.16 * fsA + (parts.subtitle ? subtitleSize(fsA, w, h) * (1.16 + SUB.gap) : 0) : 0;
   let grown = 0;   // how much taller the title's box got from the block slimming down (see below)
   const catTop = () => g.cat.y - g.cat.fs * 0.95, catFoot = () => g.cat.y + (g.cat.inline ? g.cat.fs * 0.17 : 80), R = () => ART_HALF * g.art.s, tagH = g.tag.fs * 1.34;
   // the channel name above the foot, on a block that reaches up far enough to hold it

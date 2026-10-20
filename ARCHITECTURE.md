@@ -132,7 +132,7 @@ A cover is an array of layers, bottom first.
 
 | Kind | Types | Notes |
 |---|---|---|
-| Layout layers (`bound` in the code) | `bg` `accent` `graphic` `catname` `tag` `brand` `logo` `title` `frame` (their default order, bottom first: `BOUND_TYPES`) | Exactly one of each on every cover. Their content comes from elsewhere (the title text, the channel's graphic, …). They cannot be deleted; the `id` is the type name. |
+| Layout layers (`bound` in the code) | `bg` `accent` `graphic` `catname` `tag` `brand` `logo` `subtitle` `title` `frame` (their default order, bottom first: `BOUND_TYPES`) | Exactly one of each on every cover. Their content comes from elsewhere (the title text, the channel's graphic, …). They cannot be deleted; the `id` is the type name. |
 | Free layers | `asset` `text` `photo` `solid` | Assets, text, photos and blocks of colour added by the user; can be deleted and duplicated. An asset may carry `ink` (a vector asset's colour of the user's, over its own and the channel's); a block carries `color` and is the canvas's size at scale 1. |
 
 `normalizeLayers()` repairs a layer list: it drops unknown layers, puts back missing layout layers,
@@ -141,13 +141,14 @@ user gave it in the layer list (`layerName()` prefers it; without one the name c
 content). The interface's buttons do not follow the cover's look.
 
 The default order changed once (it was `bg accent graphic brand title tag catname frame`; files from before the
-brand logo get `logo` put in above `brand` as they are read, as any missing layout layer is put back after
-the nearest one before it):
+brand logo and the subtitle get `logo` and `subtitle` put in above `brand` as they are read, as any missing
+layout layer is put back after the nearest one before it):
 `reorderLayout()` puts a design or cover still in the old default order into the new one, each free layer
 going with the layout layer it lay directly above. The app does it once per profile, in `loadCovers()`
 (the profile then keeps `layerOrder: 2`), since someone may later put the old order back on purpose.
 In the same way a new cover comes with the tag `EP.01`, and the covers made before that and never touched
-(the placeholder title, no tag) are given it once (`tagged: true`), so a tag emptied later stays empty.
+(the placeholder title, no tag) are given it once (`tagged: true`), so a tag emptied later stays empty; and
+a placeholder subtitle (`subbed: true`).
 
 **Layout parts left out**: a layout layer but the ground may carry `off: true` (Cover → *Layout parts*,
 `partsBox()`): it is then hidden, and the editor leaves it out of the layer list, the 3D view and *Hide
@@ -167,6 +168,21 @@ the right end of the brand row (`logoBox()` in `render.js`: right-aligned `LOGO`
 left, and a look's own things in that corner move aside (`besideLogo()` in `style.js`; `env.logo` is the box,
 null when the layer is hidden or there is no logo). `brand.counter` (false by default) says whether the brand
 row shows the channel's number after `brand.unit`, and the number tag on a colour panel.
+
+**The subtitle**: its words are the cover's (`cover.subtitle`, beside `title` and `tag`); the `subtitle` layer
+is a headline like the title (`HEADLINES`: its effect, colours, outline and shadow, plate, font, look
+effects; no clipping mask). Before the layers are painted `subtitlePlan()` in `render.js` works out where it
+goes (`env.sub`, null when it is hidden, left out or empty), in the faces the title is set in:
+`subtitleFit()` in `title.js` sizes it from the title as it would be alone (`subtitleSize()` in `layout.js`:
+0.4 of it, kept between `SUB.min` and `SUB.max` of the shorter side), and the title keeps `reserve` free
+at the foot of its box (`drawTitle`'s and `titleBlock`'s `reserve`), the two centred together, the
+subtitle a gap under the last line. Where the reserve would set the title below what reads in the feed
+(`titleFloor()`), the subtitle is made smaller first, down to `SUB.min`; and it is never more than
+`SUB.most` of the title as finally set. `ink` is the block its words fill. A look that sets the title its
+own way may place it too (`subtitleFit` on the look): the woodblock look, with the title in columns, gives
+it a column left of the title's and hands the title a narrower box (`titleBox`). Looks' backgrounds keep
+clear of both (`titleArea()` in `style.js` takes the subtitle's `ink` in). A hidden subtitle is still placed
+(`env.subHidden`, the title making no room for it), so the 3D view can show it.
 
 **The title as lettering**: the title has what a text layer has. It may be clipped (below), and carry look
 effects (`FX_TYPES` includes it; `effectsFor` and `layerEffects` offer it what a text layer is offered); its
@@ -260,7 +276,7 @@ in it, nor the graphic, reaches them (`FOOT` in `platforms.js`, 84% down): the c
 sub-name beside it and moves up, and a colour block too shallow to hold it there grows (taking the tag,
 the graphic and the title's foot up with it). The title's box keeps room for two lines at the type size
 the narrowest feed showing that ratio needs (`feedOf()`; 14 px in the feed), the block giving way while it
-still holds the name. On *Stack* with the block along the foot the graphic, the cover's picture until a photo comes, takes at least 12% of
+still holds the name, and with a subtitle (`parts.subtitle`) room for its line too. On *Stack* with the block along the foot the graphic, the cover's picture until a photo comes, takes at least 12% of
 the canvas (`ART_HALF`, half the box a graphic is drawn in); on a landscape cover it first slides right, and
 what it would still cover gives way: the title's box (narrower, or on other covers shorter), the channel
 name's width. The tag stays clear of the name, the title of the tag. It is told which of the parts that
@@ -270,7 +286,8 @@ down as far as the tag on its edge stays above the foot and the block keeps `BAN
 or on *Split* (or a swapped *Stack*) the tag drops to the name's place, the title's box growing either way;
 with no graphic the title gives way to nothing, and *Split*'s panel narrows to `SIDE_BARE` of the width
 (13% on a portrait cover to 25% on a 16:9 one), the title's column taking the room. A test runs every look,
-template, ratio and swap through it, with every part and with the new cover's.
+template, ratio and swap through it, with every part and with the new cover's; another holds the new
+cover's title box, with its subtitle, to A1.
 
 The diamond handles on the canvas get their positions from `layoutHandles()`; while one is dragged,
 `dragLayout()` turns the pointer position back into an adjustment. A swapped layout is first
@@ -331,7 +348,7 @@ fill.
 
 ### 6.2 Text effects (`textfx.js`, `outlines.js`)
 
-The title and text layers paint their letters through `paintRuns()`. The
+The title, subtitle and text layers paint their letters through `paintRuns()`. The
 effect is a property of the layer (`fx`); unset means "auto", which leaves it to the current look.
 There are three kinds, differing in what they can change:
 

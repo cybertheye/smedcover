@@ -679,6 +679,8 @@ function coverTab() {
     el("div", {}, cap("cover.title"),
       el("textarea", { value: c.title, spellcheck: false, oninput: (e) => { c.title = e.target.value; touch({ cover: true }); if (S.layerId === "title") later("side", 700, renderSide); } }),
       el("div", { class: "hint" }, t("cover.titleHint"))),
+    el("div", {}, cap("cover.subtitle"), textInput(c.subtitle, (v) => { c.subtitle = v; touch({ cover: true }); if (S.layerId === "subtitle") later("side", 700, renderSide); }, { placeholder: t("cover.subtitlePh") }),
+      el("div", { class: "hint" }, t("cover.subtitleHint"))),
     el("div", {}, cap("cover.tag"), textInput(c.tag, (v) => { c.tag = v; touch({ cover: true }); }, { placeholder: t("cover.tagPh") })),
     partsBox(),
     photoBox(),
@@ -867,18 +869,20 @@ async function prunePhotos() {
 const defaultTitle = () => (getLang() === "zh" ? "在这里写标题\n*一行*就是一行" : "Write your title\n*one line* each");
 /** The tag a new cover comes with, so the layout shows every part from the start. */
 const DEFAULT_TAG = "EP.01";
+/** The subtitle a new cover comes with, likewise (in the language of the interface). */
+const defaultSubtitle = () => (getLang() === "zh" ? "在这里写副标题" : "Write your subtitle here");
 /** Whether a title is still one of the placeholders a new cover comes with (in either language). */
 const placeholderTitle = (title) => ["在这里写标题\n*一行*就是一行", "Write your title\n*one line* each"].includes(title);
 /**
  * Channel catId's cover from what was stored (null: a new one, from the profile's design, with the
- * placeholder title and the default tag), keeping only the layers that are on that channel (before
- * channels had covers of their own, a layer could be kept to some).
+ * placeholder title and subtitle and the default tag), keeping only the layers that are on that channel
+ * (before channels had covers of their own, a layer could be kept to some).
  */
 function channelCover(raw, profile, catId) {
   const c = normalizeCover({ ...(raw || {}), catId }, profile);
   c.layers = c.layers.filter((l) => appliesTo(l, catId));
   for (const l of c.layers) delete l.cats;
-  if (!raw) { c.title = defaultTitle(); c.tag = DEFAULT_TAG; }
+  if (!raw) { c.title = defaultTitle(); c.subtitle = defaultSubtitle(); c.tag = DEFAULT_TAG; }
   return settleLinks(c);
 }
 /** This profile's cover of channel catId: the one read or made already, or a new one. */
@@ -903,6 +907,11 @@ async function loadCovers(profile) {
     leave(profile.design.layers);
     for (const [id, c] of Object.entries(out)) if (placeholderTitle(c.title) && leave(c.layers)) await writeJson(coverPath(profile.id, id), c).catch(fail);
     profile.lean = true;
+    await saveProfile(profile).catch(fail);
+  }
+  if (!profile.subbed) {   // new covers come with a subtitle: those not yet touched (the placeholder title, no subtitle) take it too, once
+    for (const [id, c] of Object.entries(out)) if (!c.subtitle && placeholderTitle(c.title)) { c.subtitle = c.title.startsWith("Write") ? "Write your subtitle here" : "在这里写副标题"; await writeJson(coverPath(profile.id, id), c).catch(fail); }
+    profile.subbed = true;
     await saveProfile(profile).catch(fail);
   }
   return out;
@@ -2233,7 +2242,7 @@ function fxControl(L) {
 }
 /** White or ink, whichever reads on colour "#rrggbb". */
 const readsOn = (hex) => { const c = hexToRgb(hex); return c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114 < 128 ? "#ffffff" : "#07070c"; };
-/** The title and text layers alike: words, effect, colours, lines, plate. */
+/** The title, subtitle and text layers alike: words, effect, colours, lines, plate. */
 function headlineControls(L, set) {
   const light = S.profile.style.theme === "light" && !recordOf(mainPhoto()) && !(LOOKS[S.profile.style.look] || LOOKS.cel).oneTheme;
   const fx = fxControl(L);
@@ -2242,6 +2251,8 @@ function headlineControls(L, set) {
       L.type === "text" && el("textarea", { value: L.text, spellcheck: false, style: "height:64px;margin-bottom:8px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
       // the title's words are the cover's, also in Cover → Title, which follows
       L.type === "title" && el("textarea", { value: S.cover.title, spellcheck: false, style: "height:64px;margin-bottom:8px", oninput: (e) => { S.cover.title = e.target.value; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); } }),
+      // so are the subtitle's, in Cover → Subtitle
+      L.type === "subtitle" && el("div", { style: "margin-bottom:8px" }, textInput(S.cover.subtitle, (v) => { S.cover.subtitle = v; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); }, { placeholder: t("cover.subtitlePh") })),
       fontControl(L, true)], t("props.textHint"), "top"),
     psec("props.sec.effect", fx.kids, fx.tip),
     psec("props.sec.color", [
@@ -2325,7 +2336,7 @@ function typeControls(L) {
     case "accent": return psec("props.sec.shape", select(ACCENT_SHAPES.map((k) => [k, t("shape." + k)]), L.shape, (v) => set("shape", v, false)));
     case "brand": return [font(), ink("#ffffff"), psec("props.sec.show", check("props.rail", L.rail, (v) => set("rail", v)))];
     case "logo": return psec("props.sec.logo", logoControls(), t("props.logoHint"));
-    case "title": case "text": return headlineControls(L, set);
+    case "title": case "subtitle": case "text": return headlineControls(L, set);
     case "tag": return [font(), ink("#07070c")];
     case "catname": return [psec("props.sec.show", [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v))]), font(), ink("#07070c")];
     case "graphic": return el("div", { class: "hint", style: "margin:0;grid-column:1/-1" }, t("props.graphicHint"));
@@ -2895,7 +2906,7 @@ async function batchFromCsv() {
     const key = norm(r.category);
     let index = S.profile.categories.findIndex((c, i) => key && (norm(c.name) === key || norm(c.code) === key || String(i + 1) === key || String(i + 1).padStart(2, "0") === key));
     if (index < 0) { index = catIndex(); if (key) unknown++; }
-    return { index, cover: { ...coverFor(S.profile.categories[index].id), title: r.title, tag: r.tag } };   // that channel's own cover, with the row's words
+    return { index, cover: { ...coverFor(S.profile.categories[index].id), title: r.title, tag: r.tag, subtitle: r.subtitle } };   // that channel's own cover, with the row's words (no subtitle but the row's own)
   });
   for (const j of jobs) await loadPhotos(pidsOf(j.cover));
   await exportMany(jobs);
@@ -2903,7 +2914,7 @@ async function batchFromCsv() {
 }
 function csvTemplate() {
   const zh = getLang() === "zh", c = S.profile.categories;
-  const lines = [zh ? "频道,标题,角标" : "channel,title,tag", `${c[0].name},"${zh ? "第一行\\n*第二行*" : "First line\\n*second line*"}",EP.01`, `${(c[1] || c[0]).name},${zh ? "另一个标题" : "Another title"},`];
+  const lines = [zh ? "频道,标题,角标,副标题" : "channel,title,tag,subtitle", `${c[0].name},"${zh ? "第一行\\n*第二行*" : "First line\\n*second line*"}",EP.01,${zh ? "一句话补充标题" : "A line to go with it"}`, `${(c[1] || c[0]).name},${zh ? "另一个标题" : "Another title"},,`];
   saveText("smedcover-batch.csv", "\uFEFF" + lines.join("\n") + "\n");
 }
 async function saveText(name, text) {
@@ -3153,10 +3164,11 @@ function surprise() {
       case "brand": L.rail = chance(0.8); break;
       case "catname": L.plate = chance(0.75); break;
       case "title": L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.45); break;
+      case "subtitle": L.plate = chance(0.3); L.stroke = round(between(0.6, 1.2), 0.05); L.shadow = round(between(0.5, 1.2), 0.05); dealFx(L, 0.7); break;
       case "text": L.plate = chance(0.35); L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.4); break;
       case "asset": if (canTint(L.ref) && L.ref.kind !== "graphic") L.tint = chance(0.5); break;
     }
-    if (FX_TYPES.includes(L.type) && L.type !== "title") {   // look effects: one or two, mostly the look just drawn's, now and then another look's (the title keeps the user's)
+    if (FX_TYPES.includes(L.type) && L.type !== "title" && L.type !== "subtitle") {   // look effects: one or two, mostly the look just drawn's, now and then another look's (the title and subtitle keep the user's)
       delete L.lookFx;
       if (chance(0.55)) {
         const fx = {}, others = LOOK_IDS.filter((k) => k !== st.look && effectsFor(k, L.type).length);
@@ -3185,7 +3197,7 @@ function clearDialog() {
   const m = $("modal");
   const go = () => {
     closeModal(); clearTimeout(timers.hist); commitHistory();
-    const fresh = channelCover({ catId: S.cover.catId, title: S.cover.title, tag: S.cover.tag }, S.profile, S.cover.catId);
+    const fresh = channelCover({ catId: S.cover.catId, title: S.cover.title, subtitle: S.cover.subtitle, tag: S.cover.tag }, S.profile, S.cover.catId);
     fresh.layers = fresh.layers.filter((l) => !isFree(l.type));   // the design's own added layers go too: empty is empty
     for (const l of fresh.layers) {   // the parts this cover has, and those it leaves out, stay as they are
       const now = layer(l.id);

@@ -1,7 +1,7 @@
 // Data model and persistence.
 //
 //   profile  a brand: name, categories, style, fonts, output sizes, and its default layer stack
-//   cover    the cover being edited: category, title, tag, and its own working copy of the layers
+//   cover    the cover being edited: category, title, subtitle, tag, and its own working copy of the layers
 //   assets   pictures the user uploaded (shared by all profiles)
 //   settings app-level preferences: language, active profile, export options
 //
@@ -114,6 +114,7 @@ export function normalizeProfile(raw) {
     ...(p.layerOrder === 2 ? { layerOrder: 2 } : {}),   // its design and covers have been given the layout layers' new default order (see loadCovers in the app)
     ...(p.tagged === true ? { tagged: true } : {}),     // its covers not yet touched have been given the default tag, once (see loadCovers)
     ...(p.lean === true ? { lean: true } : {}),         // its design and its covers not yet touched have left out the channel name and graphic, once (see loadCovers)
+    ...(p.subbed === true ? { subbed: true } : {}),     // its covers not yet touched have been given the placeholder subtitle, once (see loadCovers)
   };
 }
 
@@ -140,7 +141,7 @@ export function normalizeCover(raw, profile) {
   const ids = profile.categories.map((x) => x.id), scene = normalizeScene(c.scene);   // where the looks' scene objects were dragged
   return {
     catId: ids.includes(c.catId) ? c.catId : ids[0],
-    title: str(c.title), tag: str(c.tag),
+    title: str(c.title), subtitle: str(c.subtitle), tag: str(c.tag),
     layers: normalizeLayers(Array.isArray(c.layers) ? c.layers : JSON.parse(JSON.stringify(profile.design.layers)), ids),
     ...(Object.keys(scene).length ? { scene } : {}),
   };

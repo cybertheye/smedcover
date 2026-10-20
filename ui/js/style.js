@@ -39,9 +39,9 @@
 // The current look is module state, set by drawCover() from the profile before anything is drawn.
 
 import { fonts, spaced, spacedW, brackets, toneField } from "./cel.js";
-import { blockLayout } from "./layout.js";
+import { blockLayout, subtitleSize, SUB } from "./layout.js";
 import { FOOT } from "./platforms.js";
-import { drawTitleVertical, titleBlock, titleBlockVertical } from "./title.js";
+import { drawTitleVertical, titleBlock, titleBlockVertical, parseTitle } from "./title.js";
 
 const INK = "#07070c";
 const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
@@ -194,7 +194,7 @@ function neonContext(ctx, C, p) {
 }
 
 const SPLIT = [];              // two work canvases for the colour split, reused between frames
-const LETTERING = ["title", "text", "tag", "catname", "brand"];   // the layers that are words
+const LETTERING = ["title", "subtitle", "text", "tag", "catname", "brand"];   // the layers that are words
 const cyber = {
   id: "cyber",
   repaint: (c) => `a frame of cyberpunk concept art in the graphic language of Cyberpunk 2077: near-black shadows, hard neon light in ${c} with cyan and red edge light, sharp-edged graphic shapes, wet reflective surfaces, a little haze; bold and graphic rather than painterly, no visible interface or signage text.`,
@@ -1217,7 +1217,7 @@ function fauxGlyph(ctx, x, y, s, k, t = Math.max(1.2, s * 0.085)) {
 function songText(ctx, env, p, pitch) {
   if (p.text <= 0 && p.notes <= 0) return;
   const { w, h } = env, F = openField(env), T = titleLayer(env), base = titleBase(env);
-  const A = !T || !base ? null : p.vertical ? titleBlockVertical(ctx, env.cover.title, songBox(ctx, env, base), T.font ? `"${T.font}", ${fonts.serif}` : fonts.serif, 900, 300) : titleArea(ctx, env);
+  const A = !T || !base ? null : p.vertical ? withSub(titleBlockVertical(ctx, env.cover.title, env.sub && env.sub.vertical ? env.sub.titleBox : songBox(ctx, env, base), T.font ? `"${T.font}", ${fonts.serif}` : fonts.serif, 900, 300), env) : titleArea(ctx, env);
   const y0 = env.hasBrand ? 112 : 74, y1 = Math.min(h - 70, F.y1 - 24), big = pitch * 0.44, small = pitch * 0.22;
   // the free stretches of each column, right to left: not under the title, nor behind the channel graphic
   const cols = [];
@@ -1395,8 +1395,29 @@ const songke = {
   titleSet(ctx, title, box, L, env, p) {
     if (!p.vertical) return null;
     // Columns want height, where a line wants width: the title takes the field down to the colour
-    // band (or the foot of the page), and stands clear of the seal, which keeps its corner.
-    return drawTitleVertical(ctx, title, songBox(ctx, env, box), { font: fonts.serif, fill: L.ink || css(SONG.ink), hi: L.hi || css(SONG.red), maxFs: 300, weight: 900 });
+    // band (or the foot of the page), and stands clear of the seal, which keeps its corner; left of
+    // it, the subtitle's column (see subtitleFit).
+    return drawTitleVertical(ctx, title, env.sub && env.sub.vertical ? env.sub.titleBox : songBox(ctx, env, box), { font: fonts.serif, fill: L.ink || css(SONG.ink), hi: L.hi || css(SONG.red), maxFs: 300, weight: 900 });
+  },
+  /**
+   * The subtitle, with the title in columns: in a column of its own (one per typed line), smaller, left
+   * of the title's, so read after it, beginning a character lower; the title's columns move over to
+   * make room. Null when the title is not vertical: the usual place, under it.
+   */
+  subtitleFit(ctx, title, sub, box, env, p) {
+    const lines = parseTitle(sub);
+    if (!p.vertical || !lines.length) return null;
+    const T = titleLayer(env), face = T && T.font ? `"${T.font}", ${fonts.serif}` : fonts.serif, B = songBox(ctx, env, box);
+    const full = titleBlockVertical(ctx, title, B, face, 900, 300);
+    let fs = subtitleSize(full ? full.fs : Infinity, env.w, env.h), block = null, titleBox = B;
+    // its columns as wide as they are set (each a pitch, less the last one's air), then the gap to the title's
+    const place = () => { const cols = lines.length * fs * 1.32 - fs * 0.32, room = cols + fs * 0.8; titleBox = { ...B, x: B.x + room, w: Math.max(120, B.w - room) }; block = titleBlockVertical(ctx, title, titleBox, face, 900, 300); return cols; };
+    let cols = place();
+    if (block && fs > block.fs * SUB.most) { fs = block.fs * SUB.most; cols = place(); }   // smaller than the title, always
+    const x = block ? block.x - fs * 0.8 - cols : B.x, down = block ? block.fs : 0;
+    // the box a pitch per column wide, as drawTitleVertical sizes columns to fit it
+    const sbox = { x, y: B.y + down, w: lines.length * fs * 1.32, h: Math.max(fs * 2, B.h - down) };
+    return { vertical: true, fs, titleBox, box: sbox, ink: titleBlockVertical(ctx, sub, sbox, face, 700, fs), face: (f) => f.serif, weight: 700, fill: css(SONG.ink), hi: css(SONG.red) };
   },
   /** Horizontal lettering (the title when not vertical, text layers): plain ink, highlighted words in vermilion. */
   runs(ctx, pass, o) {
@@ -1801,14 +1822,22 @@ function starMark(ctx, x, y, r, points, colour) {
   ctx.closePath(); ctx.fillStyle = css(colour); ctx.fill();
 }
 /**
- * The box the title will fill, set the usual way in the layout's place (for a look's background to
- * keep clear of it), or null when it is hidden or empty. A move of the title layer is not counted.
+ * The box the title will fill, set the usual way in the layout's place, and the subtitle's under it (for
+ * a look's background to keep clear of them), or null when the title is hidden or empty. A move of the
+ * title layer is not counted.
  */
 function titleArea(ctx, env) {
   const T = titleLayer(env), box = titleBase(env);
   if (!T || !box || typeof ctx.measureText !== "function") return null;
   const face = current.titleFont ? current.titleFont(fonts) : fonts.cn;
-  return titleBlock(ctx, env.cover.title, box, T.font ? `"${T.font}", ${face}` : face);
+  return withSub(titleBlock(ctx, env.cover.title, box, T.font ? `"${T.font}", ${face}` : face, 340, env.sub && !env.sub.vertical ? env.sub.reserve : 0), env);
+}
+/** Block b and the block the subtitle's words fill (when there is one: see subtitlePlan in render.js) together. */
+function withSub(b, env) {
+  const s = env.sub && (env.sub.ink || env.sub.box);
+  if (!b || !s) return b;
+  const x = Math.min(b.x, s.x), y = Math.min(b.y, s.y);
+  return { x, y, w: Math.max(b.x + b.w, s.x + s.w) - x, h: Math.max(b.y + b.h, s.y + s.h) - y };
 }
 /** The title layer, when it shows. */
 const titleLayer = (env) => (env.cover && env.cover.layers.find((l) => l.type === "title" && l.visible)) || null;
@@ -7703,10 +7732,10 @@ export const LOOK_IDS = Object.keys(LOOKS);
 
 /** The order every layer's effects are painted in. */
 export const FX_STAGES = ["fill", "over", "filter", "behind"];
-/** The layer types the effects are open to: the user's own, and the title, which takes what a text layer takes. */
-export const FX_TYPES = ["text", "asset", "photo", "solid", "title"];
+/** The layer types the effects are open to: the user's own, and the title and subtitle, which take what a text layer takes. */
+export const FX_TYPES = ["text", "asset", "photo", "solid", "title", "subtitle"];
 const FX_ALL = ["text", "asset", "photo", "solid"];
-const fxType = (type) => (type === "title" ? "text" : type);
+const fxType = (type) => (type === "title" || type === "subtitle" ? "text" : type);
 /** The effects a look opens to a type of layer. */
 export const effectsFor = (look, type) => ((LOOKS[look] && LOOKS[look].elementFx) || []).filter((e) => e.for.includes(fxType(type)) && FX_TYPES.includes(type));
 /** A layer's effects that are on and apply to it, in the order they are painted: [{ id, look, fx, amt, opt }]. */

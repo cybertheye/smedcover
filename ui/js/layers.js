@@ -24,16 +24,17 @@
 // a photo inside the title's letters, a colour inside a silhouette. The base can be any layer but the
 // ground.
 
-// the layout layers, bottom first: in the layer list, from the top, corner brackets, title, brand logo,
-// brand row, tag, channel name, channel graphic, colour block, background
-export const BOUND_TYPES = ["bg", "accent", "graphic", "catname", "tag", "brand", "logo", "title", "frame"];
+// the layout layers, bottom first: in the layer list, from the top, corner brackets, title, subtitle,
+// brand logo, brand row, tag, channel name, channel graphic, colour block, background
+export const BOUND_TYPES = ["bg", "accent", "graphic", "catname", "tag", "brand", "logo", "subtitle", "title", "frame"];
 /** The layout layers a new design leaves out of the cover (see `off` above): ticked in Cover → Layout parts, they come in. */
 export const DEFAULT_OFF = ["catname", "graphic"];
 /**
  * Their order before (bottom first), which a design or cover the user never re-ordered still has: see
- * reorderLayout. (Files from before the logo get it put in above the brand row as they are read.)
+ * reorderLayout. (Files from before the logo and the subtitle get them put in above the brand row as
+ * they are read.)
  */
-const OLD_ORDER = ["bg", "accent", "graphic", "brand", "logo", "title", "tag", "catname", "frame"];
+const OLD_ORDER = ["bg", "accent", "graphic", "brand", "logo", "subtitle", "title", "tag", "catname", "frame"];
 /** The layout layers' types in `layers`, bottom first. */
 export const layoutOrder = (layers) => layers.filter((l) => BOUND_TYPES.includes(l.type)).map((l) => l.type);
 /**
@@ -153,10 +154,10 @@ const LETTERINGS = { cyber: "cyber.sliced", riso: "riso.overprint", anime: "anim
  * outline and a shadow, a plate and its colour `plateInk`, plates under the highlighted words alone
  * (`hiPlate`) and their colour `hiPlateInk`, and a text effect.
  */
-export const LETTERED = ["title", "tag", "catname", "brand", "text"];
+export const LETTERED = ["title", "subtitle", "tag", "catname", "brand", "text"];
 export const isFree = (type) => FREE_TYPES.includes(type);
-/** The headline layers: the title, and text the user adds (which only differs in carrying its words). */
-export const HEADLINES = ["title", "text"];
+/** The headline layers: the title and the subtitle, and text the user adds (which only differs in carrying its words). */
+export const HEADLINES = ["title", "subtitle", "text"];
 /** Layers that can be grabbed on the canvas (the others are selected from the layer list only). */
 /** Whether a layer is part of the cover of category `catId`. */
 export const appliesTo = (layer, catId) => !layer.cats || layer.cats.includes(catId);
@@ -169,6 +170,7 @@ const PROPS = {
   brand: { rail: true },
   logo: {},   // the profile's brand logo (brand.logo), at the right end of the brand row
   title: { stroke: 1, shadow: 1, plate: false },
+  subtitle: { stroke: 1, shadow: 1, plate: false },   // the cover's subtitle (its words: cover.subtitle), under the title
   tag: {},
   catname: { showName: true, plate: true },
   frame: {},
@@ -193,7 +195,7 @@ const PROPS = {
   photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, feather: 0, spread: 0, outline: 0, torn: false, dash: false, shadow: 0 },
 };
 /** The layers that may carry the looks' effects (see FX_TYPES in style.js for those the effects are open to so far). */
-const FX_LAYERS = ["text", "asset", "photo", "solid", "title"];
+const FX_LAYERS = ["text", "asset", "photo", "solid", "title", "subtitle"];
 const OLD_COLORS = ["white", "accent", "ink", "custom"];   // how text layers were coloured before they were headlines (see normalizeLayer)
 
 const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(hi, Math.max(lo, Number(v))) : d);
@@ -228,7 +230,7 @@ function normalizeLayer(raw, catIds) {
   if (typeof raw.name === "string" && raw.name) L.name = raw.name.slice(0, 60);
   let lettered = null;
   // a headline may be given a text effect of its own, and a strength for it
-  if (raw.type === "title" || raw.type === "text") {
+  if (HEADLINES.includes(raw.type)) {
     const fx = raw.fx === "ghibli" ? "vivid" : raw.fx;   // the vivid look's lettering had another name for a day
     if (raw.type === "text" && LETTERINGS[fx]) lettered = LETTERINGS[fx];
     else if (raw.type === "text" && (!fx || fx === "auto") && raw.lookFx && Number(raw.lookFx["editorial.underline"]) > 0) L.fx = "editorial";
@@ -266,7 +268,7 @@ function normalizeLayer(raw, catIds) {
     case "bg": L.grid = raw.grid !== false; L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); break;
     case "accent": L.shape = ACCENT_SHAPES.includes(raw.shape) ? raw.shape : "slant"; break;
     case "brand": L.rail = raw.rail !== false; break;
-    case "title": L.stroke = num(raw.stroke, 1, 0, 2); L.shadow = num(raw.shadow, 1, 0, 2); L.plate = raw.plate === true; if (raw.hiPlate === true) L.hiPlate = true; break;
+    case "title": case "subtitle": L.stroke = num(raw.stroke, 1, 0, 2); L.shadow = num(raw.shadow, 1, 0, 2); L.plate = raw.plate === true; if (raw.hiPlate === true) L.hiPlate = true; break;
     case "catname": L.showName = raw.showName !== false; L.plate = raw.plate !== false; break;
     case "photo": {
       const id = (v) => (typeof v === "string" ? v.replace(/[^\w-]/g, "").slice(0, 40) : "");

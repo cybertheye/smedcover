@@ -3,7 +3,7 @@
 // batch jobs alike.
 import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, brackets } from "./cel.js";
 import { virtualSize, layout, adjustLayout, meetStandards } from "./layout.js";
-import { drawTitle, parseTitle } from "./title.js";
+import { drawTitle, drawTitleVertical, parseTitle, subtitleFit } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset, userAssets } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets } from "./layers.js";
@@ -303,6 +303,26 @@ function drawPlate(raw, x, y, w, h, fill, fs, C) {
 }
 /** The face of a headline: the look's title face, or the heavy sans. */
 const headFont = () => (look().titleFont ? look().titleFont(fonts) : fonts.cn);
+/** The box the layout gives the title: from under the brand row (or the look's own top) to its foot. */
+function titleBoxOf(env) {
+  const { G } = env, top = G.titleTop ?? (env.hasBrand ? 150 : 84);
+  return { x: G.title.x, y: top, w: G.title.w, h: G.title.h + (G.title.y - top) };
+}
+/**
+ * Where the subtitle goes (see subtitleFit in title.js), or null when it is hidden, left out, or has no
+ * words: in the title's box, under the title, which makes room for it; a look that sets the title its
+ * own way (vertically) may place it so too (its subtitleFit). Worked out before the layers are painted,
+ * so in the faces the title is set in (a layer's own font goes first only while it is painted).
+ */
+function subtitlePlan(ctx, env, L0, hidden = false) {
+  const S = env.cover.layers.find((l) => l.type === "subtitle" && (l.visible || (hidden && !l.off)));
+  if (!S || !parseTitle(env.cover.subtitle).length || typeof ctx.measureText !== "function") return null;
+  const T = env.cover.layers.find((l) => l.type === "title" && l.visible), title = T ? env.cover.title : "", box = titleBoxOf(env);
+  const own = L0.subtitleFit && L0.subtitleFit(ctx, title, env.cover.subtitle, box, env, lookValues());
+  if (own) return own;
+  const face = headFont();
+  return subtitleFit(ctx, title, env.cover.subtitle, box, T && T.font ? `"${T.font}", ${face}` : face, env.w, env.h);
+}
 
 // free text: nominal 120-unit type, centred on the origin, set like the title
 function drawFreeText(ctx, L, env) {
@@ -476,14 +496,29 @@ const PAINT = {
     return placed(ctx, tr, (c) => { c.save(); c.translate(b.x + b.w / 2, b.y + b.h / 2); c.scale(b.k, b.k); drawAsset(c, b.ref, env.C, {}); c.restore(); return b; }, b);
   },
   title(ctx, L, tr, env) {
-    const { G } = env, top = G.titleTop ?? (env.hasBrand ? 150 : 84);
-    const box = { x: G.title.x, y: top, w: G.title.w, h: G.title.h + (G.title.y - top) };
+    const box = titleBoxOf(env);
     env.titleBox = box;
     const own = look().titleSet;   // a look may set the title itself (vertically, say); null from it means "the usual way"
     const st = headline(L, env);
     return placed(ctx, tr, (c) => (own && own(c, env.cover.title, box, L, env, lookValues())) || drawTitle(c, env.cover.title, box, IDENTITY, {
       font: headFont(), maxFs: 340, align: "left", fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
       own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate,   // for looks that paint the letters themselves
+      stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt,
+      plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
+      hiPlate: st.hiPlate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.hiPlate, fs, env.C)),
+      warp: L.warp, onBlock: (m, block) => { env.blocks[L.id] = { m, box: block }; },
+      reserve: env.sub && !env.sub.vertical ? env.sub.reserve : 0,   // the subtitle's line, under it
+    }));
+  },
+  /** The subtitle: lettered as the title is, smaller, where subtitlePlan puts it. */
+  subtitle(ctx, L, tr, env) {
+    const s = env.sub || env.subHidden;
+    if (!s) return null;
+    const st = headline(L, env);
+    if (s.vertical) return placed(ctx, tr, (c) => drawTitleVertical(c, env.cover.subtitle, s.box, { font: s.face ? s.face(fonts) : headFont(), weight: s.weight || 700, fill: L.ink || s.fill || st.fill, hi: L.hi || s.hi || st.hi, maxFs: s.fs }));
+    return placed(ctx, tr, (c) => drawTitle(c, env.cover.subtitle, s.box, IDENTITY, {
+      font: headFont(), maxFs: s.fs, align: "left", fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
+      own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate,
       stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt,
       plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
       hiPlate: st.hiPlate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.hiPlate, fs, env.C)),
@@ -927,10 +962,10 @@ export function drawCover(cv, o) {
   if (swap) Object.assign(fonts, swap);
   try { paintCover(cv, o); } finally { if (keep) Object.assign(fonts, keep); }
 }
-/** Which of the layout's parts that take room a cover has (see meetStandards): those not left out of it, and a graphic only when its channel has one. */
+/** Which of the layout's parts that take room a cover has (see meetStandards): those not left out of it, a graphic only when its channel has one, a subtitle only with words. */
 export const partsOf = (cover, cat) => {
   const on = (type) => cover.layers.some((l) => l.type === type && !l.off);
-  return { catname: on("catname"), graphic: on("graphic") && !!cat.graphic && cat.graphic.kind !== "none" };
+  return { catname: on("catname"), graphic: on("graphic") && !!cat.graphic && cat.graphic.kind !== "none", subtitle: on("subtitle") && parseTitle(cover.subtitle).length > 0 };
 };
 function paintCover(cv, o) {
   const { profile: P, cover } = o, cat = P.categories[o.catIndex];
@@ -958,6 +993,9 @@ function paintCover(cv, o) {
     // the channel graphic, for a look that uses its shape (a giant silhouette, a glowing photogram): draw(ctx) paints it about 0, 0 at scale 1
     graphic: cat.graphic && cat.graphic.kind !== "none" ? { ref: cat.graphic, draw: (c) => drawAsset(c, cat.graphic, C, { tint: true, labels: cat.graphic.labels, stamp: cat.graphic.stamp }) } : null,
   };
+  env.sub = subtitlePlan(ctx, env, L0);
+  // where a hidden one would go, for when it is painted on its own (the 3D view); the title makes no room for it
+  env.subHidden = env.sub || subtitlePlan(ctx, env, L0, true);
   cv._virtual = [w, h];
   cv._layout = env.G;   // for the editor's layout handles
   // FOCUS: how see-through a layer not kept bright is painted
@@ -1150,7 +1188,7 @@ export function warpHandles(cv, layer) {
   });
 }
 export function layoutHandles(cv, layer) {
-  const warp = layer && (layer.type === "title" || layer.type === "text") && layer.fx === "taper" ? warpHandles(cv, layer) : [];
+  const warp = layer && ["title", "subtitle", "text"].includes(layer.type) && layer.fx === "taper" ? warpHandles(cv, layer) : [];
   return [...warp, ...templateHandles(cv, layer)];
 }
 function templateHandles(cv, layer) {
