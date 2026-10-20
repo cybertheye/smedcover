@@ -82,6 +82,13 @@ test("normalizeProfile repairs bad input and keeps good input", () => {
   assert.deepEqual(sample.brand, { name: "PIXEL HARBOR", unit: "SERIES", counter: false });
   assert.deepEqual(normalizeProfile({ brand: { name: "X", counter: true } }).brand, { name: "X", unit: "CHANNEL", counter: true });
   assert.equal(normalizeProfile({ brand: { counter: "yes" } }).brand.counter, false);
+  // a new design leaves out the channel name and graphic; a design read from a file keeps what it had
+  assert.deepEqual(sample.design.layers.filter((l) => l.off).map((l) => l.type), ["graphic", "catname"]);
+  assert.ok(sample.design.layers.filter((l) => l.off).every((l) => !l.visible));
+  const kept = normalizeProfile({ design: { layers: sample.design.layers.map((l) => (l.off ? { ...l, off: false, visible: true } : l)) } });
+  assert.equal(kept.design.layers.filter((l) => l.off).length, 0);
+  assert.equal(normalizeProfile({ lean: true }).lean, true);
+  assert.equal(normalizeProfile({ lean: 1 }).lean, undefined);
 });
 
 test("normalizeCover starts from the profile's design and normalizeSettings clamps", () => {
@@ -1594,6 +1601,41 @@ test("every look's layout meets the cover standards: nothing under the apps' bad
   assert.equal(feedOf(1920, 1080), 168); assert.equal(feedOf(1080, 1440), 128); assert.equal(feedOf(900, 383), 360);
   assert.equal(feedOf(1080, 1350), null);                          // 4:5: no platform here wants it
   assert.ok(badged(1920, 1080) && badged(1600, 1200) && !badged(1200, 1600) && !badged(2538, 1080));   // the article cover has no badges
+});
+
+test("a layout gives the room of the parts a cover leaves out to the others, still to the standards", async () => {
+  const { meetStandards, adjustLayout, badged, BAND_MIN, SIDE_BARE } = await import("../ui/js/layout.js");
+  const { FOOT } = await import("../ui/js/platforms.js");
+  const bare = { catname: false, graphic: false };   // a new cover: no channel name, no graphic
+  for (const parts of [bare, { catname: false, graphic: true }, { catname: true, graphic: false }])
+  for (const id of LOOK_IDS) for (const t of TEMPLATES) for (const [rw, rh] of [[1920, 1080], [1440, 1080], [1080, 1080], [1080, 1440], [1080, 1920], [900, 383]]) for (const flip of [false, true]) {
+    const [w, h] = virtualSize(rw, rh), base = LOOKS[id].layout ? LOOKS[id].layout(t, w, h) : layout(t, w, h), a = { flip }, where = `${id} ${t}${flip ? " flipped" : ""} ${rw}x${rh} ${JSON.stringify(parts)}`;
+    const full = meetStandards(adjustLayout(base, w, h, a), w, h, a), g = meetStandards(adjustLayout(base, w, h, a), w, h, a, parts);
+    const foot = badged(w, h) ? FOOT * h : h, tagFoot = g.tag.y + g.tag.fs * 1.34;
+    assert.ok(tagFoot <= foot && g.title.y + g.title.h <= foot, `${where}: tag ${tagFoot}, title ${g.title.y + g.title.h} below ${foot}`);
+    if (g.tag.y > g.title.y) assert.ok(g.title.y + g.title.h <= g.tag.y, `${where}: the title runs into the tag`);
+    // the title's box no smaller than with every part on; with the graphic still there it may come out
+    // narrower but taller, holding two lines of 6 characters no smaller
+    const box = `${where}: the title's box ${Math.round(g.title.w)}×${Math.round(g.title.h)}, with every part ${Math.round(full.title.w)}×${Math.round(full.title.h)}`, two = (G) => Math.min(G.title.w / 6, G.title.h / 2.32);
+    if (!parts.graphic) assert.ok(g.title.w >= full.title.w - 0.5 && g.title.h >= full.title.h - 0.5, box);
+    else assert.ok(two(g) >= two(full) - 0.5, box);
+    if (flip) continue;
+    if (t === "split" && parts.graphic) continue;
+    if (t === "split") {   // the panel narrowed to a band down the side
+      const mid = (g.accent[0][0] + g.accent[1][0]) / 2, side = SIDE_BARE[0] + (SIDE_BARE[1] - SIDE_BARE[0]) * Math.min(1, Math.max(0, (w / h - 0.75) / (16 / 9 - 0.75)));
+      assert.ok(mid >= Math.min(w * (1 - side), (full.accent[0][0] + full.accent[1][0]) / 2) - 1, `${where}: the panel begins at ${Math.round(mid)}`);
+      continue;
+    }
+    if (parts.catname) continue;
+    // the block along the foot no higher than the template's own, nor slimmer than BAND_MIN where that was not already
+    const low = (G) => Math.max(G.edge.line[1], G.edge.line[3]), own = adjustLayout(base, w, h, a);
+    assert.ok(low(g) >= low(own) - 0.5, `${where}: the block grew`);
+    assert.ok(h - low(g) >= Math.min(BAND_MIN * h, h - low(own)) - 1, `${where}: the block is ${Math.round(h - low(g))} high`);
+  }
+  // a block the user moved stays where they put it, parts or none
+  const [w, h] = virtualSize(1920, 1080), base = layout("stack", w, h);
+  assert.deepEqual(meetStandards(adjustLayout(base, w, h, { size: 0.3 }), w, h, { size: 0.3 }, bare).accent, adjustLayout(base, w, h, { size: 0.3 }).accent);
+  assert.deepEqual(meetStandards(adjustLayout(layout("split", w, h), w, h, { size: 0.4 }), w, h, { size: 0.4 }, bare).accent, adjustLayout(layout("split", w, h), w, h, { size: 0.4 }).accent);
 });
 
 test("a profile remembers its untouched covers were given the default tag, so it happens once", () => {

@@ -261,6 +261,10 @@ export function badged(w, h) {
 }
 /** Half the side of the box a channel graphic is drawn in at scale 1 (see drawAsset in assets.js). */
 export const ART_HALF = 300;
+/** How slim the colour block along the foot may get when there is no channel name on it, as a share of the canvas height. */
+export const BAND_MIN = 0.16;
+/** How wide the colour panel of "split" is when there is no graphic on it, as a share of the canvas width: on a portrait cover, and on a 16:9 one. */
+export const SIDE_BARE = [0.13, 0.25];
 /**
  * A layout held to the cover standards (docs/cover-check.zh-CN.md), whatever the look's template:
  * a new object of the same shape. `adj` is what the user changed about the template (see adjustLayout):
@@ -275,31 +279,54 @@ export const ART_HALF = 300;
  *       of the canvas (a little more: a graphic does not fill its box); the title's box gives way to it,
  *       narrower on a landscape cover, shorter on the others, and so does the channel name.
  * And the tag stays clear of the channel name below it, the title of the tag.
+ * `parts` says which of the parts that take room the cover has (Cover → Layout parts): `catname`, `graphic`
+ * (false: left out, or a channel with no graphic). The room of one left out goes to the others: without a
+ * channel name the block along the foot slims down (to BAND_MIN, the tag on its edge still above the foot),
+ * or the tag drops to the name's place at the foot of the column; without a graphic the title keeps its
+ * whole box, and the panel of "split" narrows to a band down the side (SIDE_BARE), the title's column
+ * taking the room.
  */
-export function meetStandards(G, w, h, adj = {}) {
+export function meetStandards(G, w, h, adj = {}, parts = {}) {
   const g = { ...G, accent: G.accent.map((p) => [...p]), edge: { ...G.edge, line: [...G.edge.line] }, title: { ...G.title }, tag: { ...G.tag }, cat: { ...G.cat }, art: { ...G.art } };
   const badges = badged(w, h), wide = w / h > 1.25, onBlock = g.template !== "split" && !g.flipped;   // the colour block along the foot, the channel name on it
   const own = adj.size == null && adj.slant == null;   // the block where the template puts it, free to move
   const foot = badges ? (FOOT - 0.015) * h : h * 0.97;
+  const named = parts.catname !== false, pictured = parts.graphic !== false;
   const feed = feedOf(w, h), need = feed ? 2 * 1.16 * LIMITS.font.ok * 1.04 * (w / feed) : 0;   // the title's box tall enough for two lines that read in the feed (A1)
+  let grown = 0;   // how much taller the title's box got from the block slimming down (see below)
   const catTop = () => g.cat.y - g.cat.fs * 0.95, catFoot = () => g.cat.y + (g.cat.inline ? g.cat.fs * 0.17 : 80), R = () => ART_HALF * g.art.s, tagH = g.tag.fs * 1.34;
   // the channel name above the foot, on a block that reaches up far enough to hold it
-  if (catFoot() > foot) { g.cat.inline = true; if (catFoot() > foot) g.cat.y = foot - g.cat.fs * 0.17; }
+  if (named && catFoot() > foot) { g.cat.inline = true; if (catFoot() > foot) g.cat.y = foot - g.cat.fs * 0.17; }
   if (onBlock && own) {
     const [x0, y0, x1, y1] = g.edge.line, edgeAt = (x) => y0 + ((y1 - y0) * (x - x0)) / (x1 - x0 || 1);
     // the block moved down by d (up, d < 0), and what stands on it or above it with it
     const shift = (d) => { g.accent[0][1] += d; g.accent[1][1] += d; g.edge.line[1] += d; g.edge.line[3] += d; g.toneFrom += d; g.tag.y += d; g.art.y += d; };
-    const d = Math.max(edgeAt(g.cat.x), edgeAt(g.cat.x + Math.min(g.cat.maxW, w / 2))) - (catTop() - g.cat.fs * 0.3);
-    if (d > 0) { shift(-d); g.title.h = Math.max(120, g.title.h - d); }   // the block grows upward
-    // the title's box tall enough for two lines that read in the feed: the block lowered as far as it can
-    const room = Math.min(...[g.cat.x, g.cat.x + Math.min(g.cat.maxW, w / 2)].map((x) => catTop() - g.cat.fs * 0.3 - edgeAt(x)));
-    const down = Math.min(need - g.title.h, room);
-    if (down > 0) { shift(down); g.title.h += down; }
+    if (named) {
+      const d = Math.max(edgeAt(g.cat.x), edgeAt(g.cat.x + Math.min(g.cat.maxW, w / 2))) - (catTop() - g.cat.fs * 0.3);
+      if (d > 0) { shift(-d); g.title.h = Math.max(120, g.title.h - d); }   // the block grows upward
+      // the title's box tall enough for two lines that read in the feed: the block lowered as far as it can
+      const room = Math.min(...[g.cat.x, g.cat.x + Math.min(g.cat.maxW, w / 2)].map((x) => catTop() - g.cat.fs * 0.3 - edgeAt(x)));
+      const down = Math.min(need - g.title.h, room);
+      if (down > 0) { shift(down); g.title.h += down; }
+    } else {   // nothing on the block but the tag at its edge: it slims down, the title's box taking the room
+      const down = Math.min(foot - (g.tag.y + tagH), h * (1 - BAND_MIN) - Math.max(y0, y1));
+      if (down > 0) { shift(down); g.title.h += down; grown = down; }
+    }
+  }
+  if (g.template === "split" && !g.flipped && own && !pictured) {   // nothing on the panel: it narrows, the title's column widens
+    const [A, B] = g.accent, side = lerp(SIDE_BARE[0], SIDE_BARE[1], clamp((w / h - 0.75) / (16 / 9 - 0.75))), dx = w * (1 - side) - (A[0] + B[0]) / 2;
+    if (dx > 0) { A[0] += dx; B[0] += dx; g.edge.line[0] += dx; g.edge.line[2] += dx; g.title.w += dx; g.cat.maxW += dx; g.art.x += dx; }
+  }
+  // without the channel name at the foot of the column under the tag, the tag takes its place, the title's box the room
+  if (!named && !onBlock && g.tag.y < g.cat.y) {
+    const drop = Math.min(foot, catFoot()) - g.tag.fs * 0.12 - (g.tag.y + tagH), clear = g.title.y + g.title.h <= g.tag.y;   // a little off it: some looks' tags reach below their box
+    if (drop > 0) { g.tag.y += drop; if (clear) g.title.h += drop; }
   }
   // the tag above the foot and clear of the channel name (they share the left margin), the title clear of the tag
   if (g.tag.y + tagH > foot) g.tag.y = foot - tagH;
-  if (g.tag.y < g.cat.y && g.tag.y + tagH > catTop() - 16) g.tag.y = catTop() - 16 - tagH;
+  if (named && g.tag.y < g.cat.y && g.tag.y + tagH > catTop() - 16) g.tag.y = catTop() - 16 - tagH;
   if (g.tag.y > g.title.y && g.title.y + g.title.h > g.tag.y - 30) g.title.h = Math.max(120, g.tag.y - 30 - g.title.y);
+  if (!pictured) return g;
   // the graphic: big enough to look at, above the foot, inside the canvas
   if (g.template === "stack" && onBlock) g.art.s = Math.max(g.art.s, Math.sqrt((LIMITS.picture + 0.015) * w * h) / (2 * ART_HALF));
   if (g.art.y + R() > foot) g.art.y = foot - R();
@@ -312,11 +339,12 @@ export function meetStandards(G, w, h, adj = {}) {
   const overTitle = () => meets(g.title.x, g.title.y, g.title.x + g.title.w, g.title.y + g.title.h);
   if (wide && overTitle()) g.art.x = Math.max(g.art.x, w * 0.96 - R());
   const art = box();
+  if (overTitle() && grown > 0) g.title.h = Math.max(g.title.h - grown, Math.min(g.title.h, need), art.y0 - 40 - g.title.y);   // the room the block gave goes back first (but what A1 asks), before the title narrows
   if (overTitle()) {
     if (wide && art.x0 - 40 - g.title.x >= w * 0.4) g.title.w = art.x0 - 40 - g.title.x;
     else if (art.y0 - 40 - g.title.y >= 120) g.title.h = art.y0 - 40 - g.title.y;
   }
-  if (meets(g.cat.x, catTop(), g.cat.x + g.cat.maxW, catFoot())) g.cat.maxW = Math.max(120, Math.min(g.cat.maxW, art.x0 - 30 - g.cat.x));
+  if (named && meets(g.cat.x, catTop(), g.cat.x + g.cat.maxW, catFoot())) g.cat.maxW = Math.max(120, Math.min(g.cat.maxW, art.x0 - 30 - g.cat.x));
   return g;
 }
 

@@ -149,7 +149,10 @@ In the same way a new cover comes with the tag `EP.01`, and the covers made befo
 
 **Layout parts left out**: a layout layer but the ground may carry `off: true` (Cover → *Layout parts*,
 `partsBox()`): it is then hidden, and the editor leaves it out of the layer list, the 3D view and *Hide
-layout*; ticked again it is back as it was. *Clear* keeps it.
+layout*; ticked again it is back as it was. *Clear* keeps what the cover leaves out and what it has. A new
+design leaves out `DEFAULT_OFF` (the channel name and graphic): `normalizeLayers()` puts those in left out
+when it puts back missing layout layers, which for a new profile is all of them; a profile's design and its
+covers still on the placeholder title were made to leave them out once (`lean: true`, in `loadCovers()`).
 
 **The brand row's number**: `brand.counter` in the profile (false by default) says whether the brand row
 shows the channel's number after `brand.unit`, and the number tag on a colour panel.
@@ -249,8 +252,14 @@ the narrowest feed showing that ratio needs (`feedOf()`; 14 px in the feed), the
 still holds the name. On *Stack* with the block along the foot the graphic, the cover's picture until a photo comes, takes at least 12% of
 the canvas (`ART_HALF`, half the box a graphic is drawn in); on a landscape cover it first slides right, and
 what it would still cover gives way: the title's box (narrower, or on other covers shorter), the channel
-name's width. The tag stays clear of the name, the title of the tag. A test runs every look, template,
-ratio and swap through it.
+name's width. The tag stays clear of the name, the title of the tag. It is told which of the parts that
+take room the cover has (`partsOf()` in `render.js`: not left out, and a graphic only for a channel that has
+one), and gives the room of one left out to the others: with no channel name the block along the foot slims
+down as far as the tag on its edge stays above the foot and the block keeps `BAND_MIN` (16%) of the height,
+or on *Split* (or a swapped *Stack*) the tag drops to the name's place, the title's box growing either way;
+with no graphic the title gives way to nothing, and *Split*'s panel narrows to `SIDE_BARE` of the width
+(13% on a portrait cover to 25% on a 16:9 one), the title's column taking the room. A test runs every look,
+template, ratio and swap through it, with every part and with the new cover's.
 
 The diamond handles on the canvas get their positions from `layoutHandles()`; while one is dragged,
 `dragLayout()` turns the pointer position back into an adjustment. A swapped layout is first

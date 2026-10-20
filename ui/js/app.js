@@ -9,7 +9,7 @@ import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont } from "./store.js";
 import { platformsFor } from "./platforms.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, DEFAULT_OFF } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
@@ -876,6 +876,13 @@ async function loadCovers(profile) {
   if (!profile.tagged) {   // new covers come with a tag: those made before and not yet touched (the placeholder title, no tag) take it too, once
     for (const [id, c] of Object.entries(out)) if (!c.tag && placeholderTitle(c.title)) { c.tag = DEFAULT_TAG; await writeJson(coverPath(profile.id, id), c).catch(fail); }
     profile.tagged = true;
+    await saveProfile(profile).catch(fail);
+  }
+  if (!profile.lean) {   // a new design leaves out the channel name and graphic (DEFAULT_OFF): the design, and the covers not yet touched (the placeholder title), leave them out too, once
+    const leave = (layers) => layers.filter((l) => DEFAULT_OFF.includes(l.type) && !l.off).map((l) => { l.off = true; l.visible = false; return l; }).length > 0;
+    leave(profile.design.layers);
+    for (const [id, c] of Object.entries(out)) if (placeholderTitle(c.title) && leave(c.layers)) await writeJson(coverPath(profile.id, id), c).catch(fail);
+    profile.lean = true;
     await saveProfile(profile).catch(fail);
   }
   return out;
@@ -3121,7 +3128,10 @@ function clearDialog() {
     closeModal(); clearTimeout(timers.hist); commitHistory();
     const fresh = channelCover({ catId: S.cover.catId, title: S.cover.title, tag: S.cover.tag }, S.profile, S.cover.catId);
     fresh.layers = fresh.layers.filter((l) => !isFree(l.type));   // the design's own added layers go too: empty is empty
-    for (const l of fresh.layers) if (layer(l.id) && layer(l.id).off) { l.off = true; l.visible = false; }   // what this cover leaves out stays out
+    for (const l of fresh.layers) {   // the parts this cover has, and those it leaves out, stay as they are
+      const now = layer(l.id);
+      if (now && now.off) { l.off = true; l.visible = false; } else if (now && l.off) { delete l.off; l.visible = true; }
+    }
     setCover(fresh); S.layerId = "title"; S.picked = [];
     touch({ cover: true, side: true, panel: onCoverTab() });
     commitHistory(); toast(t("top.cleared"));

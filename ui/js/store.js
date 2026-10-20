@@ -113,6 +113,7 @@ export function normalizeProfile(raw) {
     ...(oldFonts ? { oldFonts } : {}),   // kept until the open cover has been given them too (see the app), then dropped
     ...(p.layerOrder === 2 ? { layerOrder: 2 } : {}),   // its design and covers have been given the layout layers' new default order (see loadCovers in the app)
     ...(p.tagged === true ? { tagged: true } : {}),     // its covers not yet touched have been given the default tag, once (see loadCovers)
+    ...(p.lean === true ? { lean: true } : {}),         // its design and its covers not yet touched have left out the channel name and graphic, once (see loadCovers)
   };
 }
 

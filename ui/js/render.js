@@ -817,6 +817,11 @@ export function drawCover(cv, o) {
   if (swap) Object.assign(fonts, swap);
   try { paintCover(cv, o); } finally { if (keep) Object.assign(fonts, keep); }
 }
+/** Which of the layout's parts that take room a cover has (see meetStandards): those not left out of it, and a graphic only when its channel has one. */
+export const partsOf = (cover, cat) => {
+  const on = (type) => cover.layers.some((l) => l.type === type && !l.off);
+  return { catname: on("catname"), graphic: on("graphic") && !!cat.graphic && cat.graphic.kind !== "none" };
+};
 function paintCover(cv, o) {
   const { profile: P, cover } = o, cat = P.categories[o.catIndex];
   const [w, h] = virtualSize(o.size.w, o.size.h), key = sizeKey(o.size);
@@ -831,10 +836,11 @@ function paintCover(cv, o) {
   const L0 = setLook(P.style.look, P.style.lookParams && P.style.lookParams[P.style.look], P.style.lookSeed, !!photo || P.style.theme !== "light");   // everything below is drawn under this look
   setScene(sceneOffsets(cover, L0.id, key), w, h, kx);   // where the user dragged its scene objects on this cover
   const base = photo ? THEMES.dark : THEMES[P.style.theme] || THEMES.dark;
+  const G = meetStandards(adjustLayout(L0.layout ? L0.layout(P.style.template, w, h) : layout(P.style.template, w, h), w, h, (P.style.layoutAdjust || {})[P.style.template]), w, h, (P.style.layoutAdjust || {})[P.style.template], partsOf(cover, cat));
   const env = {
     blocks: {},   // id -> {m, box}: the transform and box of each lettered block painted (see cv._blocks)
     o, w, h, cover, cat, C, acc: rgb(C), style: P.style, photo, key, hiRes: cv.width > w,
-    G: meetStandards(adjustLayout(L0.layout ? L0.layout(P.style.template, w, h) : layout(P.style.template, w, h), w, h, (P.style.layoutAdjust || {})[P.style.template]), w, h, (P.style.layoutAdjust || {})[P.style.template]),
+    G,
     th: L0.theme ? L0.theme(base, C, lookValues()) : base,
     hasBrand: cover.layers.some((l) => l.type === "brand" && l.visible),
     resolve: (l) => resolve(l, w, h, key, cat.id),   // where another layer is (a photo's copy follows its original)

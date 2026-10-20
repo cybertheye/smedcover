@@ -17,7 +17,8 @@
 //
 // A layout layer may be left out of a cover (`off: true`, chosen in Cover → Layout parts): it is then
 // hidden, and the editor leaves it out of the layer list and of Hide layout; ticked again, it comes back
-// as it was. The ground is never left out.
+// as it was. The ground is never left out. A new design leaves out the channel name and graphic
+// (DEFAULT_OFF).
 // A free layer may also be clipped (`clip: true`): it then shows only within the shape of the layer
 // below it — the nearest one not itself clipped, its *base* (see clipBase) — as a clipping mask does:
 // a photo inside the title's letters, a colour inside a silhouette. The base can be any layer but the
@@ -26,6 +27,8 @@
 // the layout layers, bottom first: in the layer list, from the top, corner brackets, title, brand row,
 // tag, channel name, channel graphic, colour block, background
 export const BOUND_TYPES = ["bg", "accent", "graphic", "catname", "tag", "brand", "title", "frame"];
+/** The layout layers a new design leaves out of the cover (see `off` above): ticked in Cover → Layout parts, they come in. */
+export const DEFAULT_OFF = ["catname", "graphic"];
 /** Their order before (bottom first), which a design or cover the user never re-ordered still has: see reorderLayout. */
 const OLD_ORDER = ["bg", "accent", "graphic", "brand", "title", "tag", "catname", "frame"];
 /**
@@ -192,7 +195,8 @@ export function newLayer(type, extra = {}) {
     ...PROPS[type], ...extra,
   };
 }
-export const defaultLayers = () => BOUND_TYPES.map((type) => newLayer(type));
+/** A new design's layers: the layout layers, the channel name and graphic left out (DEFAULT_OFF). */
+export const defaultLayers = () => BOUND_TYPES.map((type) => newLayer(type, DEFAULT_OFF.includes(type) ? { off: true, visible: false } : {}));
 
 function normalizeT(raw, free) {
   const a = (raw && raw.all) || {}, by = {};
@@ -313,10 +317,10 @@ export function normalizeLayers(raw, catIds) {
   }
   BOUND_TYPES.forEach((type, i) => {
     if (seen.has(type)) return;
-    // insert after the nearest earlier bound layer that is present
+    // insert after the nearest earlier bound layer that is present; a new design leaves some out
     let at = 0;
     for (let j = i - 1; j >= 0; j--) { const k = out.findIndex((l) => l.id === BOUND_TYPES[j]); if (k >= 0) { at = k + 1; break; } }
-    out.splice(at, 0, newLayer(type));
+    out.splice(at, 0, newLayer(type, DEFAULT_OFF.includes(type) ? { off: true, visible: false } : {}));
   });
   const bg = out.findIndex((l) => l.id === "bg");
   if (bg > 0) out.unshift(out.splice(bg, 1)[0]);

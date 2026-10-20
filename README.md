@@ -49,7 +49,7 @@ Three columns, with two modes at the top: **Edit** and **Setup**.
 
 ### Layout parts
 
-*Layout parts* in the Cover tab lists what the layout brings — the title, the corner tag, the channel name, the channel graphic, the brand row, the colour block and its edge, the frame — a card each. Click a card to untick it and that part is left out of this cover, and no longer listed with the layers (*Hide layout* leaves it alone too); click again and it is back, its place, colours and effects as they were. Don't want the channel graphic? Untick it. It is this channel's cover only, it stays through *Clear*, and it can be undone. The background is always there, so it is not listed.
+*Layout parts* in the Cover tab lists what the layout brings — the title, the corner tag, the channel name, the channel graphic, the brand row, the colour block and its edge, the frame — a card each. Click a card to untick it and that part is left out of this cover, and no longer listed with the layers (*Hide layout* leaves it alone too); click again and it is back, its place, colours and effects as they were. It is this channel's cover only, it stays through *Clear*, and it can be undone. A new cover leaves out the channel name and the channel graphic; tick them to bring them in (covers made before that and never touched, and the profile's default design, left them out once). The background is always there, so it is not listed.
 
 ### Photos
 
@@ -616,9 +616,10 @@ The layouts keep to a few rules, so a cover reads in the apps' feeds as it comes
 - **Nothing under the badges.** On a landscape cover (16:9, 4:3) Bilibili and YouTube lay the duration and the play count over the bottom corners. The title, the corner tag, the channel name and the channel graphic stay above that strip: the channel name keeps its sub-name beside it, and a colour block too shallow to hold it there grows until it does.
 - **A title that reads.** The title's box leaves room for two lines at 14 px or more as the narrowest feed shows that ratio (Douyin's grid shows a 3:4 cover about 128 px wide, YouTube's side list a 16:9 one about 168 px). Keep a line to 6–8 characters: the longer it is, the smaller it is set.
 - **Something to look at.** In the *Stack* template the channel graphic takes at least 12% of the cover, and the title and the channel name make room for it.
+- **Room for what is there.** A part left out under *Layout parts* gives its room to the others: without the channel name the colour block along the foot slims down (to 16% of the height, the tag on its edge still above the badges) and the title grows into the room; without the channel graphic the title keeps its whole box, and the *Split* template's panel narrows to a band down the side (13% of a portrait cover's width, 25% of a 16:9 one's), widening the title's column.
 - **Every part shown.** A new cover comes with the tag `EP.01`, so the corner tag shows from the start (covers made before that and never touched were given it once); type your own under *Cover → Corner tag*, or empty it to leave the tag out.
 
-They hold for the template's own places: a layer you drag stays where you put it, and so does a colour block you resize or tilt under *Style → Layout*. The *Split* template's title column is narrow at portrait sizes: there a line of more than 5 characters is set smaller than the feeds read well.
+They hold for the template's own places: a layer you drag stays where you put it, and so does a colour block you resize or tilt under *Style → Layout*. With the channel graphic on, the *Split* template's title column is narrow at portrait sizes: there a line of more than 5 characters is set smaller than the feeds read well.
 
 The covers each platform wants (checked on a phone):
 
