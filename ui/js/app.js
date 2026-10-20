@@ -180,6 +180,39 @@ async function registerFont(family, dataUrl) {
     return true;
   } catch (e) { return false; }
 }
+/**
+ * WebKit sets a canvas that is not in the page (the effects' work canvases, an export, the title's
+ * measuring) only in the fonts that came with the system: one the user installed, or one macOS
+ * downloads on demand (楷体, 行楷…), falls back to the default there while the canvas on screen shows
+ * it. So a system font a layer is set in is tried on such a canvas, with characters it has, and one
+ * that is not there is read from its files (font_faces, font_data in lib.rs) and added to the page,
+ * where every canvas finds it. Per family: a promise of whether it was added.
+ */
+const SYS_FACES = new Map();
+let probe = null;
+/** Whether a canvas outside the page sets `text` in `family` (it measures otherwise than the fallbacks alone). */
+function reachable(family, text = "封面Aa01") {
+  const x = (probe = probe || document.createElement("canvas").getContext("2d"));
+  const width = (stack) => { x.font = `900 40px ${stack}`; return x.measureText(text).width; };
+  return ["monospace", "serif"].some((g) => width(`${quoted(family)}, ${g}`) !== width(g));
+}
+function ensureFont(family) {
+  if (!native || !S.systemFonts.includes(family) || BUNDLED_FONTS.includes(family) || S.importedFonts.includes(family)) return null;
+  if (!SYS_FACES.has(family)) SYS_FACES.set(family, invoke("font_faces", { family }).then(async ({ probe: text, weights }) => {
+    if (!text || reachable(family, text)) return false;
+    // every upright face at its own weight (a variable one over its range), so each weight of lettering
+    // finds the face it did with the system font; the name as it is (WebKit keeps quotes as part of it)
+    const faces = [];
+    for (let n = 0; n < weights.length; n++) faces.push(await new FontFace(family, await invoke("font_data", { family, n }), { weight: weights[n] }).load());
+    for (const f of faces) document.fonts.add(f);
+    queueDraw();
+    return true;
+  }).catch(() => false));
+  return SYS_FACES.get(family);
+}
+/** Sees that the system fonts the layers are set in are there for every canvas; resolves once they are. */
+const ensureFonts = (layers) => Promise.all([...new Set(layers.map((L) => L.font).filter(Boolean))].map(ensureFont).filter(Boolean));
+
 /** Everything that has to happen when S.profile / S.cover are replaced or restored. */
 async function applyProfile() {
   setCover(normalizeCover(S.cover, S.profile));
@@ -265,7 +298,7 @@ function drawThumbs() {
   next();
 }
 let drawQueued = false;
-function flushDraw() { if (!drawQueued) return; drawQueued = false; drawMain(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); }
+function flushDraw() { if (!drawQueued) return; drawQueued = false; ensureFonts(S.cover.layers); drawMain(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); }
 /** Redraws at most once per frame, however many input events arrive. `stale` false: only what is selected changed. */
 function queueDraw(stale = true) {
   if (stale) V3.stale = true;
@@ -2866,6 +2899,7 @@ function renderFull(size, cover, index) {
  * fetched in the background. If drawing the cover asked for any, wait for them and draw it again.
  */
 async function renderReady(size, cover, index) {
+  await ensureFonts(cover.layers);
   let cv = renderFull(size, cover, index);
   for (let round = 0; round < 3 && outlinesPending(); round++) { await outlinesSettled(); cv = renderFull(size, cover, index); }
   return cv;
@@ -3763,6 +3797,26 @@ async function selfTest(dir) {
     delete titleLayer.fx; S.cover.title = keep;
     report.outline = await invoke("text_outline", { text: "A夜", families: ["Bebas Neue", "Noto Sans SC"], weight: 900 }).then((o) => ({ missing: o.missing, glyphs: o.glyphs.length, contours: o.glyphs.map((g) => g.c.length) }), (e) => ({ error: String(e) }));
     if (!report.outline.glyphs || report.outline.missing) report.errors.push("outline: the native side could not trace bundled fonts");
+    // a font a canvas outside the page cannot reach (one the user installed, one macOS downloads): once
+    // ensured, it can — and the title painted with a look effect, on such a canvas, is set in it
+    const away = [];
+    for (const f of S.systemFonts.filter((f) => !BUNDLED_FONTS.includes(f) && !reachable(f))) {   // tried with the usual characters, then with ones each has
+      const info = await invoke("font_faces", { family: f }).catch(() => null);
+      if (info && info.probe && !reachable(f, info.probe)) away.push({ family: f, probe: info.probe, faces: info.weights.length });
+      if (away.length >= 3) break;
+    }
+    report.sysFonts = { away };
+    if (away.length) {
+      const { family: font, probe: text } = away[0];
+      await ensureFont(font);
+      report.sysFonts.reached = reachable(font, text);
+      if (!report.sysFonts.reached) report.errors.push(`fonts: ${font} is still out of reach of a canvas outside the page`);
+      const was = { font: titleLayer.font, lookFx: titleLayer.lookFx };
+      titleLayer.font = font; titleLayer.lookFx = { "riso.shift": 0.6 };
+      report.sysFonts.path = await invoke("write_image", framed(await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex())), { dir, name: "font-system-fx.png" }));
+      if (was.font) titleLayer.font = was.font; else delete titleLayer.font;
+      if (was.lookFx) titleLayer.lookFx = was.lookFx; else delete titleLayer.lookFx;
+    }
     if (report.ai && !report.ai.every((r) => r.stored && r.drawn)) report.errors.push("ai: a generated asset was not stored or drawn");
     report.ok = !report.errors.length;
   } catch (e) { report.errors.push(String(e && e.message ? e.message : e)); }
