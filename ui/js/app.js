@@ -1892,6 +1892,39 @@ function graphicPicker(c, done) {
     el("div", { class: "acts" }, el("button", { class: "btn", onclick: closeModal }, t("lookfx.cancel")))));
   m.hidden = false;
 }
+/**
+ * An SVG with a width and a height on it: one with only a viewBox (or nothing) has no size of its own, and
+ * the web view then may not draw it at all. Its viewBox's proportions, the long side 600; else a square.
+ */
+function sizedSvg(text) {
+  const tag = (/<svg\b[^>]*>/i.exec(text) || [])[0];
+  if (!tag || (/\swidth\s*=/i.test(tag) && /\sheight\s*=/i.test(tag))) return text;
+  const vb = /viewBox\s*=\s*["']\s*[-\d.eE]+[\s,]+[-\d.eE]+[\s,]+([\d.eE]+)[\s,]+([\d.eE]+)/i.exec(tag), vw = vb ? Number(vb[1]) : 1, vh = vb ? Number(vb[2]) : 1;
+  const k = 600 / Math.max(vw, vh) || 600, w = Math.round(vw * k) || 600, h = Math.round(vh * k) || 600;
+  return text.replace(tag, tag.replace(/\s(width|height)\s*=\s*("[^"]*"|'[^']*')/gi, "").replace(/<svg\b/i, `<svg width="${w}" height="${h}"`));
+}
+/** Uploads a picture as the profile's brand logo: kept with the user's assets (so it travels with an exported profile), shown on this cover. */
+async function uploadLogo() {
+  const f = await pickFile("image/png,image/jpeg,image/webp,image/svg+xml");
+  if (!f) return;
+  const svg = /svg/i.test(f.type) || /\.svg$/i.test(f.name);
+  const src = svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(sizedSvg(await readAs(f, "readAsText")))}` : await readAs(f, "readAsDataURL");
+  const id = await adoptAsset(f.name.replace(/\.[^.]+$/, "").slice(0, 60) || "logo", src);
+  if (!id) return toast(t("msg.badFile"));
+  S.profile.brand.logo = id;
+  const L = layer("logo");
+  if (L) { delete L.off; L.visible = true; }   // uploading one is wanting it on the cover
+  touch({ profile: true, cover: true, panel: true, side: true });
+}
+/** The brand logo: a picture of it and its name (or that there is none), and buttons to upload one or another, and to remove it. */
+function logoControls() {
+  const P = S.profile, a = P.brand.logo && userAssets.get(P.brand.logo);
+  return el("div", { class: "logo-row" },
+    el("div", { class: "lthumb" }, a && graphicThumb({ kind: "user", id: a.id }, cat().color, 44)),
+    el("span", {}, a ? a.name : t("brand.logoNone")),
+    el("button", { class: "btn", onclick: uploadLogo }, t(a ? "brand.logoSwap" : "brand.logoUp")),
+    a && el("button", { class: "btn", onclick: () => { P.brand.logo = ""; touch({ profile: true, panel: true, side: true }); } }, t("brand.logoDrop")));
+}
 function brandTab() {
   const P = S.profile, lang = getLang(), struct = () => touch({ profile: true, cover: true, panel: true, side: true });
   const card = (c, i) => {
@@ -1926,6 +1959,7 @@ function brandTab() {
     el("div", { class: "box" }, cap("prof.manage"), el("div", { class: "acts", style: "justify-content:flex-start" }, ["new", "duplicate", "delete", "import", "export"].map(act))),
     el("div", {}, cap("brand.profileName"), textInput(P.name, (v) => { P.name = v; touch({ profile: true }); later("top", 600, syncTop); })),
     el("div", {}, cap("brand.name"), textInput(P.brand.name, (v) => { P.brand.name = v; touch({ profile: true }); })),
+    el("div", {}, cap("brand.logo"), logoControls(), el("div", { class: "hint" }, t("brand.logoHint"))),
     el("div", {}, cap("brand.unit"),
       check("brand.counter", P.brand.counter, (v) => { P.brand.counter = v; touch({ profile: true, panel: true }); }),
       textInput(P.brand.unit, (v) => { P.brand.unit = v; touch({ profile: true }); }, { disabled: !P.brand.counter }),
@@ -2266,6 +2300,7 @@ function typeControls(L) {
     case "photo": return photoControls(L, set);
     case "accent": return psec("props.sec.shape", select(ACCENT_SHAPES.map((k) => [k, t("shape." + k)]), L.shape, (v) => set("shape", v, false)));
     case "brand": return [font(), ink("#ffffff"), psec("props.sec.show", check("props.rail", L.rail, (v) => set("rail", v)))];
+    case "logo": return psec("props.sec.logo", logoControls(), t("props.logoHint"));
     case "title": case "text": return headlineControls(L, set);
     case "tag": return [font(), ink("#07070c")];
     case "catname": return [psec("props.sec.show", [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v))]), font(), ink("#07070c")];

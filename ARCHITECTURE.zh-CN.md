@@ -126,15 +126,15 @@ tests/               不依赖 DOM 的模块的单元测试
 
 | 类别 | 类型 | 说明 |
 |---|---|---|
-| 版式图层（代码里叫 bound） | `bg` `accent` `graphic` `catname` `tag` `brand` `title` `frame`（自下而上的默认顺序，`BOUND_TYPES`） | 每张封面各有且仅有一个，内容来自别处（标题文字、频道的图形等），不能删除；`id` 就是类型名 |
+| 版式图层（代码里叫 bound） | `bg` `accent` `graphic` `catname` `tag` `brand` `logo` `title` `frame`（自下而上的默认顺序，`BOUND_TYPES`） | 每张封面各有且仅有一个，内容来自别处（标题文字、频道的图形等），不能删除；`id` 就是类型名 |
 | 自由图层 | `asset` `text` `photo` `solid` | 用户添加的素材、文字、照片和纯色块，可删除、可复制。素材可带 `ink`（矢量素材的自定义颜色，优先于原色和频道主色）；纯色块带 `color`，缩放为 1 时和画布一样大 |
 
-`normalizeLayers()` 负责修复图层列表：丢掉无法识别的层，补回缺失的版式图层，保证背景在最底，并让 `id` 唯一。默认顺序改过一次（以前是 `bg accent graphic brand title tag catname frame`）：`reorderLayout()` 把还是旧默认顺序的设计或封面换成新顺序，每个自由图层跟着原来紧挨在它下面的版式图层走；应用在 `loadCovers()` 里对每个档案只做一次（档案记 `layerOrder: 2`），因为以后有人可能特意摆回旧顺序。
+`normalizeLayers()` 负责修复图层列表：丢掉无法识别的层，补回缺失的版式图层，保证背景在最底，并让 `id` 唯一。默认顺序改过一次（以前是 `bg accent graphic brand title tag catname frame`；有品牌 Logo 之前的文件读进来时，`logo` 补在 `brand` 上面，和补回其他缺失的版式图层一样，放在它前一个现有的版式图层之后）：`reorderLayout()` 把还是旧默认顺序的设计或封面换成新顺序，每个自由图层跟着原来紧挨在它下面的版式图层走；应用在 `loadCovers()` 里对每个档案只做一次（档案记 `layerOrder: 2`），因为以后有人可能特意摆回旧顺序。
 同样，新封面自带角标 `EP.01`；之前建的、还没动过的封面（占位标题、没有角标）只补一次（档案记 `tagged: true`），所以之后清空的角标会一直是空的。
 
 **拿掉的版式元素**：除背景外的版式图层可以带 `off: true`（「封面 → 版式元素」，`partsBox()`）：它随之隐藏，编辑器不在图层列表、3D 视图和「隐藏版式」里列它；勾回来就和原来一样。「清空」保留封面拿掉的和留着的元素。新设计不显示 `DEFAULT_OFF`（频道名和频道图形）：`normalizeLayers()` 补回缺失的版式图层时把它们补成拿掉的，新档案的设计就是全部补出来的；已有档案的默认设计和还是占位标题的封面在 `loadCovers()` 里一次性拿掉它们（档案记 `lean: true`）。
 
-**品牌行的编号**：档案的 `brand.counter`（默认 false）决定品牌行要不要在 `brand.unit` 后面显示频道编号，以及色块上的编号牌。
+**品牌 Logo**：档案的 `brand.logo` 是一个用户素材的 id（在「配置 → 品牌」上传，所以导出档案时会带上：`usedUserAssets()` 包括它）。`logo` 图层把它画在品牌行右端（`render.js` 的 `logoBox()`：按 `LOGO` 的大小右对齐、在品牌行上垂直居中，离右边 72，或者风格的 `logoInset`）；品牌行的色条或编号牌排在它左边，风格自己放在这个角上的东西让到它左边（`style.js` 的 `besideLogo()`；`env.logo` 是它的框，图层隐藏或没有 Logo 时为 null）。`brand.counter`（默认 false）决定品牌行要不要在 `brand.unit` 后面显示频道编号，以及色块上的编号牌。
 
 **标题当文字用**：文字图层有的，标题都有。它可以剪切（见下），可以带风格效果（`FX_TYPES` 包括它；`effectsFor` 和 `layerEffects` 给它文字图层能用的效果）；它属性里的文字内容改的是 `cover.title`，和「封面」页是同一段字。
 

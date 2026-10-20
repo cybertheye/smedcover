@@ -132,7 +132,7 @@ A cover is an array of layers, bottom first.
 
 | Kind | Types | Notes |
 |---|---|---|
-| Layout layers (`bound` in the code) | `bg` `accent` `graphic` `catname` `tag` `brand` `title` `frame` (their default order, bottom first: `BOUND_TYPES`) | Exactly one of each on every cover. Their content comes from elsewhere (the title text, the channel's graphic, …). They cannot be deleted; the `id` is the type name. |
+| Layout layers (`bound` in the code) | `bg` `accent` `graphic` `catname` `tag` `brand` `logo` `title` `frame` (their default order, bottom first: `BOUND_TYPES`) | Exactly one of each on every cover. Their content comes from elsewhere (the title text, the channel's graphic, …). They cannot be deleted; the `id` is the type name. |
 | Free layers | `asset` `text` `photo` `solid` | Assets, text, photos and blocks of colour added by the user; can be deleted and duplicated. An asset may carry `ink` (a vector asset's colour of the user's, over its own and the channel's); a block carries `color` and is the canvas's size at scale 1. |
 
 `normalizeLayers()` repairs a layer list: it drops unknown layers, puts back missing layout layers,
@@ -140,7 +140,9 @@ keeps the background at the bottom and makes ids unique. A free layer may carry 
 user gave it in the layer list (`layerName()` prefers it; without one the name comes from the type and
 content). The interface's buttons do not follow the cover's look.
 
-The default order changed once (it was `bg accent graphic brand title tag catname frame`):
+The default order changed once (it was `bg accent graphic brand title tag catname frame`; files from before the
+brand logo get `logo` put in above `brand` as they are read, as any missing layout layer is put back after
+the nearest one before it):
 `reorderLayout()` puts a design or cover still in the old default order into the new one, each free layer
 going with the layout layer it lay directly above. The app does it once per profile, in `loadCovers()`
 (the profile then keeps `layerOrder: 2`), since someone may later put the old order back on purpose.
@@ -154,8 +156,13 @@ design leaves out `DEFAULT_OFF` (the channel name and graphic): `normalizeLayers
 when it puts back missing layout layers, which for a new profile is all of them; a profile's design and its
 covers still on the placeholder title were made to leave them out once (`lean: true`, in `loadCovers()`).
 
-**The brand row's number**: `brand.counter` in the profile (false by default) says whether the brand row
-shows the channel's number after `brand.unit`, and the number tag on a colour panel.
+**The brand logo**: `brand.logo` in the profile is the id of an asset of the user's (uploaded in Setup →
+Brand, so it travels with an exported profile: `usedUserAssets()` names it). The `logo` layer draws it at
+the right end of the brand row (`logoBox()` in `render.js`: right-aligned `LOGO`-sized, centred on the row,
+72 units in from the edge or a look's `logoInset`); the brand row's rail, or its number tag, stands to its
+left, and a look's own things in that corner move aside (`besideLogo()` in `style.js`; `env.logo` is the box,
+null when the layer is hidden or there is no logo). `brand.counter` (false by default) says whether the brand
+row shows the channel's number after `brand.unit`, and the number tag on a colour panel.
 
 **The title as lettering**: the title has what a text layer has. It may be clipped (below), and carry look
 effects (`FX_TYPES` includes it; `effectsFor` and `layerEffects` offer it what a text layer is offered); its

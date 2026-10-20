@@ -5,7 +5,7 @@ import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, br
 import { virtualSize, layout, adjustLayout, meetStandards } from "./layout.js";
 import { drawTitle, parseTitle } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
-import { drawAsset } from "./assets.js";
+import { drawAsset, userAssets } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced } from "./style.js";
 import { paintRuns, warpCorners } from "./textfx.js";
@@ -55,10 +55,12 @@ function accentTag(ctx, str, x, y, fs, acc, ink = INK) {
 /**
  * The brand row along the top: the brand name, the channel's code and, when the profile counts them
  * (brand.counter), its number ("unit 01 / 05"); at the right end the channels' colour rail (`rail`), or
- * on the colour panel the number in an ink tag.
+ * on the colour panel the number in an ink tag. `logo`: where the brand logo at the right end begins
+ * (see logoBox; 0, none), the rail standing to its left.
  */
-function drawHeader(ctx, o, w, th, C, onAccentRight, rail, onAccent = false) {
+function drawHeader(ctx, o, w, th, C, onAccentRight, rail, onAccent = false, logo = 0) {
   const { profile: P, catIndex: i } = o, cat = P.categories[i], total = P.categories.length, acc = rgb(C), counted = P.brand.counter;
+  const right = logo ? logo - 36 : w - 72;   // where the rail or the number's tag ends: left of the logo
   if (onAccent) th = { ...th, text: th.own || INK };   // the row sits on the colour panel: ink instead of the field's text colour
   const box = { x: 66, y: 64, w: 0, h: 52 };
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
@@ -83,18 +85,43 @@ function drawHeader(ctx, o, w, th, C, onAccentRight, rail, onAccent = false) {
     const s = `${pad2(i + 1)}/${pad2(total)}`;
     ctx.font = `700 44px ${fonts.en}`;
     const tw = spacedW(ctx, s, 4) + 48;
-    ctx.fillStyle = INK; para(ctx, w - 72 - tw, 60, tw, 58, -10); ctx.fill();
-    ctx.fillStyle = acc; spaced(ctx, s, w - 72 - tw + 24, 60 + 45, 4);
+    if (right - tw < x + 24) return box;   // no room left of the logo
+    ctx.fillStyle = INK; para(ctx, right - tw, 60, tw, 58, -10); ctx.fill();
+    ctx.fillStyle = acc; spaced(ctx, s, right - tw + 24, 60 + 45, 4);
     return box;
   }
-  const seg = Math.min(58, Math.max(18, 420 / total)), bar = seg - 8;
+  const seg = Math.min(58, Math.max(18, 420 / total), (right - x - 36) / total), bar = seg - 8;   // narrower when a logo leaves less room
+  if (seg < 14) return box;
   P.categories.forEach((c, j) => {
     ctx.fillStyle = rgb(hexToRgb(c.color), j === i ? 1 : 0.35);
-    ctx.fillRect(w - 72 - total * seg + 8 + j * seg, j === i ? 86 : 92, bar, j === i ? 12 : 6);
+    ctx.fillRect(right - total * seg + 8 + j * seg, j === i ? 86 : 92, bar, j === i ? 12 : 6);
   });
   return box;
 }
 
+/** The most room the brand logo takes at the right end of the brand row, in units: its height, and its width (a wide one; at most `share` of the canvas's). */
+export const LOGO = { h: 84, w: 340, share: 0.22, mid: 90 };
+/**
+ * Where the profile's brand logo goes on a canvas `w` units wide: its box, right-aligned `inset` from the
+ * right edge (where the brand row's rail ends; a look may want it further in, `logoInset`) and centred on
+ * the row, as large as LOGO lets it be; `k` scales the asset to it (drawn
+ * about its centre, see drawAsset) and `ref` is it. Null when the profile has none, or it is gone.
+ */
+export function logoBox(P, w, inset = 72) {
+  const a = P.brand.logo && userAssets.get(P.brand.logo);
+  if (!a) return null;
+  const iw = a.img ? a.img.naturalWidth : 600, ih = a.img ? a.img.naturalHeight : 600;
+  if (!iw || !ih) return null;
+  const n = 600 / Math.max(iw, ih), k = Math.min(LOGO.h / (ih * n), Math.min(LOGO.w, w * LOGO.share) / (iw * n)), bw = iw * n * k, bh = ih * n * k;
+  return { x: w - inset - bw, y: LOGO.mid - bh / 2, w: bw, h: bh, k, ref: { kind: "user", id: a.id } };
+}
+
+/** A logo box that would straddle the edge of the colour panel of "split" (one too narrow to hold it, see SIDE_BARE) moved left of the edge, onto the title's column. */
+export function offEdge(b, G) {
+  if (!b || G.template !== "split" || G.flipped) return b;
+  const [x0, y0, x1, y1] = G.edge.line, at = (y) => x0 + ((x1 - x0) * (y - y0)) / (y1 - y0 || 1), near = Math.min(at(b.y), at(b.y + b.h)), far = Math.max(at(b.y), at(b.y + b.h));
+  return b.x >= far + 16 ? b : { ...b, x: near - 30 - b.w };
+}
 function drawCategory(ctx, cat, G, C, show) {
   const acc = rgb(C), c = G.cat;
   let x = c.x, nameW = 0, fs = c.fs;
@@ -440,7 +467,13 @@ const PAINT = {
     });
   },
   brand(ctx, L, tr, env) {
-    return placed(ctx, tr, (c) => drawHeader(styled(c, env.C, true), env.o, env.w, L.ink ? { ...env.th, text: L.ink, own: L.ink } : env.th, env.C, env.G.railOnAccent, L.rail, env.G.brandOnAccent));
+    const logo = env.logo ? env.logo.x : 0;
+    return placed(ctx, tr, (c) => drawHeader(styled(c, env.C, true), env.o, env.w, L.ink ? { ...env.th, text: L.ink, own: L.ink } : env.th, env.C, env.G.railOnAccent, L.rail, env.G.brandOnAccent, logo));
+  },
+  logo(ctx, L, tr, env) {
+    const b = env.logo;
+    if (!b) return null;
+    return placed(ctx, tr, (c) => { c.save(); c.translate(b.x + b.w / 2, b.y + b.h / 2); c.scale(b.k, b.k); drawAsset(c, b.ref, env.C, {}); c.restore(); return b; }, b);
   },
   title(ctx, L, tr, env) {
     const { G } = env, top = G.titleTop ?? (env.hasBrand ? 150 : 84);
@@ -842,7 +875,8 @@ function paintCover(cv, o) {
     o, w, h, cover, cat, C, acc: rgb(C), style: P.style, photo, key, hiRes: cv.width > w,
     G,
     th: L0.theme ? L0.theme(base, C, lookValues()) : base,
-    hasBrand: cover.layers.some((l) => l.type === "brand" && l.visible),
+    hasBrand: cover.layers.some((l) => (l.type === "brand" || (l.type === "logo" && logoBox(P, w))) && l.visible),
+    logo: cover.layers.some((l) => l.type === "logo" && l.visible) ? offEdge(logoBox(P, w, L0.logoInset), G) : null,   // where the brand logo goes, when there is one (the brand row's rail makes way for it)
     resolve: (l) => resolve(l, w, h, key, cat.id),   // where another layer is (a photo's copy follows its original)
     // the channel graphic, for a look that uses its shape (a giant silhouette, a glowing photogram): draw(ctx) paints it about 0, 0 at scale 1
     graphic: cat.graphic && cat.graphic.kind !== "none" ? { ref: cat.graphic, draw: (c) => drawAsset(c, cat.graphic, C, { tint: true, labels: cat.graphic.labels, stamp: cat.graphic.stamp }) } : null,

@@ -104,8 +104,8 @@ export function normalizeProfile(raw) {
     version: 2,
     id: str(p.id) || uid(),
     name: str(p.name) || str(p.brand && p.brand.name) || "Profile",
-    // counter: the brand row shows the channel's number ("unit 01 / 05")
-    brand: { name: str(p.brand && p.brand.name), unit: str(p.brand && p.brand.unit, "CHANNEL"), counter: !!(p.brand && p.brand.counter === true) },
+    // counter: the brand row shows the channel's number ("unit 01 / 05"); logo: the id of the asset (of the user's) shown at its right end
+    brand: { name: str(p.brand && p.brand.name), unit: str(p.brand && p.brand.unit, "CHANNEL"), counter: !!(p.brand && p.brand.counter === true), logo: str(p.brand && p.brand.logo).replace(/[^\w-]/g, "").slice(0, 60) },
     categories, style,
     sizes,
     // a design keeps no photos: their pictures live with the cover
@@ -218,6 +218,7 @@ export const deleteAssetRecord = (id) => files.remove(`assets/${id}.json`);
 export function usedUserAssets(profile, cover) {
   const ids = new Set();
   for (const c of profile ? profile.categories : []) if (c.graphic.kind === "user") ids.add(c.graphic.id);
+  if (profile && profile.brand.logo) ids.add(profile.brand.logo);
   for (const L of [...(profile ? profile.design.layers : []), ...(cover ? cover.layers : [])]) if (L.type === "asset" && L.ref.kind === "user") ids.add(L.ref.id);
   return [...ids];
 }

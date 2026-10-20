@@ -24,13 +24,16 @@
 // a photo inside the title's letters, a colour inside a silhouette. The base can be any layer but the
 // ground.
 
-// the layout layers, bottom first: in the layer list, from the top, corner brackets, title, brand row,
-// tag, channel name, channel graphic, colour block, background
-export const BOUND_TYPES = ["bg", "accent", "graphic", "catname", "tag", "brand", "title", "frame"];
+// the layout layers, bottom first: in the layer list, from the top, corner brackets, title, brand logo,
+// brand row, tag, channel name, channel graphic, colour block, background
+export const BOUND_TYPES = ["bg", "accent", "graphic", "catname", "tag", "brand", "logo", "title", "frame"];
 /** The layout layers a new design leaves out of the cover (see `off` above): ticked in Cover → Layout parts, they come in. */
 export const DEFAULT_OFF = ["catname", "graphic"];
-/** Their order before (bottom first), which a design or cover the user never re-ordered still has: see reorderLayout. */
-const OLD_ORDER = ["bg", "accent", "graphic", "brand", "title", "tag", "catname", "frame"];
+/**
+ * Their order before (bottom first), which a design or cover the user never re-ordered still has: see
+ * reorderLayout. (Files from before the logo get it put in above the brand row as they are read.)
+ */
+const OLD_ORDER = ["bg", "accent", "graphic", "brand", "logo", "title", "tag", "catname", "frame"];
 /**
  * Puts the layout layers of `layers` (in place) into BOUND_TYPES' order if they stand exactly in the old
  * default order, each layer the user added going with the layout layer it lay directly above (so text
@@ -155,6 +158,7 @@ const PROPS = {
   accent: { shape: "slant" },
   graphic: {},
   brand: { rail: true },
+  logo: {},   // the profile's brand logo (brand.logo), at the right end of the brand row
   title: { stroke: 1, shadow: 1, plate: false },
   tag: {},
   catname: { showName: true, plate: true },

@@ -124,6 +124,8 @@ const CY = {
   white: [240, 246, 250],
 };
 const pad2 = (n) => String(n).padStart(2, "0");
+/** Where something a look puts in the top right corner ends (at x, from the right): left of the brand logo when there is one (env.logo, see logoBox in render.js). */
+const besideLogo = (env, x) => (env.logo ? Math.min(x, env.logo.x - 28) : x);
 /** A line of light: a faint halo, the coloured line, a pale core. `draw()` strokes the current path or text. */
 function tube(ctx, draw, colour, glow, core = true) {
   const w = ctx.lineWidth, a = ctx.globalAlpha;
@@ -1275,7 +1277,7 @@ function songSeals(ctx, env, amt) {
   const { w, h } = env, F = openField(env), x = workLike(ctx, "seals"), red = css(SONG.red), at = (a, b) => clamp((amt - a) / (b - a));
   const grid = (cx, cy, s, k, t) => { for (let i = 0; i < 4; i++) fauxGlyph(x, cx + (i % 2 ? -1 : 1) * s * 0.23, cy + (i < 2 ? -1 : 1) * s * 0.23, s * 0.4, k + i * 9.7, t); };
   const seals = [
-    { kind: "white", key: "sealWhite", s: 92, cx: w - 102 - 70, cy: 150 + rand(671) * 60, r: at(0, 0.4) },
+    { kind: "white", key: "sealWhite", s: 92, cx: w - 102 - 70, cy: (env.logo ? Math.max(150, env.logo.y + env.logo.h + 70) : 150) + rand(671) * 60, r: at(0, 0.4) },   // under the brand logo
     { kind: "red", key: "sealRed", s: 78, cx: 64 + 60 + rand(672) * 40, cy: (F.y0 + F.y1) * 0.5 - 40 + rand(673) * 60, r: at(0.3, 0.7) },
     { kind: "round", key: "sealRound", s: 70, cx: w * (0.56 + rand(674) * 0.1), cy: F.y1 - 70 - rand(675) * 60, r: at(0.6, 1) },
   ];
@@ -1348,6 +1350,7 @@ const songke = {
   about: { zh: "一页宋版古籍：宣纸底色、竖排的宋体标题、朱砂印章样式的角标、粗细双线的版框和界栏，右侧是带鱼尾的版心；界栏里可以排上正文大字和双行小注，加朱笔圈点、旁批和历代藏书印；岁月痕迹有刷印不匀、水渍、虫蛀和霉斑；图形像木刻版画；自带平直的版式。古雅、沉静、有书卷气——适合历史、国学、读书、传统手艺与节气。", en: "A leaf from a Song-dynasty printed book: paper ground, a serif title set in vertical columns, the corner tag as a vermilion seal, a thick-and-thin border and ruled columns, a centre column with fishtails at the right edge; the columns can hold the page's text, large characters and double lines of small notes, with vermilion marks and collectors' seals; the years show as uneven printing, water stains, wormholes and foxing; objects like woodcuts; flat layouts of its own. Classical, calm, bookish — for history, classics, reading, traditional crafts, the seasons." },
   name: { zh: "宋版刻本", en: "Woodblock book" },
   oneTheme: true,
+  logoInset: 128,   // the brand logo stands left of the centre column (see frame)
   seeded: true,
   scene: { sealWhite: { zh: "藏书印（白文方印）", en: "Seal (white, square)" }, sealRed: { zh: "藏书印（朱文方印）", en: "Seal (red, square)" }, sealRound: { zh: "藏书印（圆印）", en: "Seal (round)" } },
   params: [
@@ -2447,7 +2450,7 @@ const cyano = {
     ctx.save(); ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.2;
     ctx.strokeRect(28, 28, w - 56, h - 56);
     for (const [x, y] of [[28, 28], [w - 28, 28], [28, h - 28], [w - 28, h - 28]]) { ctx.beginPath(); ctx.arc(x, y, 5, 0, TAU); ctx.stroke(); }
-    ctx.font = `italic 400 40px ${fonts.serif}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillText(pad2(i + 1), w - 60, 92);
+    ctx.font = `italic 400 40px ${fonts.serif}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillText(pad2(i + 1), besideLogo(env, w - 60), 92);
     if (a > 0.3) {
       const bw = Math.min(300, w * 0.2), bx = w - 60 - bw, by = h - 170;
       ctx.setLineDash([4, 5]); ctx.strokeRect(bx, by, bw, 96); ctx.setLineDash([]);
@@ -2584,7 +2587,7 @@ const monofilm = {
     const { w, h } = env, i = env.o.catIndex, col = css(mfInk(), 0.8 * a), P = env.o.profile;
     ctx.save(); ctx.fillStyle = col; ctx.textBaseline = "alphabetic";
     ctx.font = `600 15px ${fonts.mono}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.fillText(`VOL.${pad2(i + 1)}`, 60, 62);
-    ctx.textAlign = "right"; ctx.fillText((P.brand.name || "").toUpperCase(), w - 60, 62);
+    ctx.textAlign = "right"; ctx.fillText((P.brand.name || "").toUpperCase(), besideLogo(env, w - 60), 62);
     const cw = Math.min(240, w * 0.15);
     greeked(ctx, w - 60 - cw, h * 0.42, cw, 7, 12, css(mfInk(), 0.5 * a), 340 + i, "right");
     if (a > 0.4) greeked(ctx, w - 60 - cw, h * 0.42 + 110, cw * 0.8, 4, 12, css(mfInk(), 0.4 * a), 350 + i, "right");
@@ -3460,7 +3463,7 @@ const collage = {
   frame(ctx, env, p) {
     const { w, h, C } = env, u = Math.min(w, h), { F } = clCentre(env);
     for (let k = 0, n = p.tape * 4; k < Math.ceil(n); k++) {   // tape: translucent, its ends torn
-      const spots = [[F.x1 - u * 0.14, F.y0 + u * 0.08, 0.6], [F.x0 + u * 0.1, F.y1 - u * 0.12, -0.5], [F.x1 - u * 0.08, F.y1 - u * 0.2, -0.75], [w * 0.5, F.y0 + u * 0.04, 0.08]];
+      const spots = [[besideLogo(env, F.x1 - u * 0.04) - u * 0.1, F.y0 + u * 0.08, 0.6], [F.x0 + u * 0.1, F.y1 - u * 0.12, -0.5], [F.x1 - u * 0.08, F.y1 - u * 0.2, -0.75], [w * 0.5, F.y0 + u * 0.04, 0.08]];
       const [tx, ty, a] = spots[k], tw = u * 0.2, th = u * 0.055;
       ctx.save(); ctx.globalAlpha = clamp(n - k); ctx.translate(tx, ty); ctx.rotate(a);
       const pts = []; for (let i = 0; i <= 6; i++) pts.push([-tw / 2 + (rand(k * 13 + i) - 0.5) * 6, -th / 2 + (th * i) / 6]);
@@ -3624,8 +3627,9 @@ const yellow = {
     if (a <= 0) return;
     const { w, h } = env, P = env.o.profile, i = env.o.catIndex, F = openField(env);
     ctx.save(); ctx.fillStyle = css(YL.ink, 0.85 * a); ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
-    ctx.font = `700 15px ${fonts.en}, ${fonts.cn}`; ctx.fillText(`${(P.brand.name || "").toUpperCase()}  ·  No.${pad2(i + 1)}`, w - 340, 70);
-    greeked(ctx, w - 340, 86, 260, 4, 11, css(YL.ink, 0.6 * a), 1110 + i);
+    const bx = besideLogo(env, w - 80) - 260;   // the block of small print
+    ctx.font = `700 15px ${fonts.en}, ${fonts.cn}`; ctx.fillText(`${(P.brand.name || "").toUpperCase()}  ·  No.${pad2(i + 1)}`, bx, 70);
+    greeked(ctx, bx, 86, 260, 4, 11, css(YL.ink, 0.6 * a), 1110 + i);
     if (a > 0.4) for (let k = 0; k < 6; k++) { ctx.fillStyle = css(YL.ink, 0.5 * Math.min(1, (a - 0.4) * 3)); ctx.beginPath(); rounded(ctx, w - 72 - (k + 1) * 64, F.y1 - 44, 48, 22, 5); ctx.fill(); }
     ctx.restore();
   },
@@ -3806,8 +3810,8 @@ const pitch = {
     if (a <= 0) return;
     const { w } = env, P = env.o.profile, i = env.o.catIndex, total = P.categories.length, F = openField(env), col = ptLine();
     ctx.save(); ctx.fillStyle = css(col, 0.9 * a); ctx.textBaseline = "alphabetic"; ctx.textAlign = "right";
-    ctx.font = `700 20px ${fonts.en}, ${fonts.cn}`; ctx.fillText(`MATCHDAY ${pad2(i + 1)}`, w - 72, 70);
-    ctx.font = `600 13px ${fonts.mono}, ${fonts.cn}`; ctx.fillText(`${(P.brand.name || "").toUpperCase()} · ${pad2(i + 1)}/${pad2(total)} · 90'`, w - 72, 92);
+    ctx.font = `700 20px ${fonts.en}, ${fonts.cn}`; ctx.fillText(`MATCHDAY ${pad2(i + 1)}`, besideLogo(env, w - 72), 70);
+    ctx.font = `600 13px ${fonts.mono}, ${fonts.cn}`; ctx.fillText(`${(P.brand.name || "").toUpperCase()} · ${pad2(i + 1)}/${pad2(total)} · 90'`, besideLogo(env, w - 72), 92);
     if (a > 0.4) {
       ctx.globalAlpha = Math.min(1, (a - 0.4) * 3); ctx.textAlign = "left"; ctx.font = `600 12px ${fonts.mono}, ${fonts.cn}`; const y = F.y1 - 26;
       ctx.fillRect(72, y - 18, 180, 1.5); ctx.fillText("KEY", 72, y - 24);

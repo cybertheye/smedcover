@@ -78,9 +78,9 @@ test("normalizeProfile repairs bad input and keeps good input", () => {
   assert.equal(sample.sizes.length, 6);   // one for each ratio the platforms want
   assert.deepEqual(sample.sizes.map((z) => sizeCaption(z)), ["B站 / YouTube · 16:9", "B站 / 抖音 / 视频号 · 4:3", "抖音 / 小红书 / 视频号 · 3:4", "YouTube · 9:16", "公众号 · 1:1", "公众号 · 2.35:1"]);
   assert.equal(normalizeProfile(starterProfile("en", "ACME")).brand.name, "ACME");
-  // the brand row shows no number until asked to
-  assert.deepEqual(sample.brand, { name: "PIXEL HARBOR", unit: "SERIES", counter: false });
-  assert.deepEqual(normalizeProfile({ brand: { name: "X", counter: true } }).brand, { name: "X", unit: "CHANNEL", counter: true });
+  // the brand row shows no number until asked to; a logo is the id of an asset of the user's
+  assert.deepEqual(sample.brand, { name: "PIXEL HARBOR", unit: "SERIES", counter: false, logo: "" });
+  assert.deepEqual(normalizeProfile({ brand: { name: "X", counter: true, logo: "u1a/../b" } }).brand, { name: "X", unit: "CHANNEL", counter: true, logo: "u1ab" });
   assert.equal(normalizeProfile({ brand: { counter: "yes" } }).brand.counter, false);
   // a new design leaves out the channel name and graphic; a design read from a file keeps what it had
   assert.deepEqual(sample.design.layers.filter((l) => l.off).map((l) => l.type), ["graphic", "catname"]);
@@ -89,6 +89,7 @@ test("normalizeProfile repairs bad input and keeps good input", () => {
   assert.equal(kept.design.layers.filter((l) => l.off).length, 0);
   assert.equal(normalizeProfile({ lean: true }).lean, true);
   assert.equal(normalizeProfile({ lean: 1 }).lean, undefined);
+  assert.deepEqual(usedUserAssets(normalizeProfile({ brand: { logo: "u9" } }), null), ["u9"]);
 });
 
 test("normalizeCover starts from the profile's design and normalizeSettings clamps", () => {
@@ -1351,14 +1352,17 @@ test("plates under highlighted words: the title and text layers alike, with a co
 });
 
 test("the layout layers' default order, and a design or cover still in the old one put into it, added layers keeping their slots", () => {
-  assert.deepEqual(BOUND_TYPES, ["bg", "accent", "graphic", "catname", "tag", "brand", "title", "frame"]);   // in the list from the top: brackets, title, brand row, tag, channel name, graphic, block, ground
-  const L = (type, id = type) => ({ type, id });   // (the list from the top reads: brackets, title, brand row, tag, channel name, graphic, block, ground)
-  const old = [L("bg"), L("accent"), L("graphic"), L("brand"), L("title"), L("text", "w"), L("tag"), L("text", "x"), L("catname"), L("frame"), L("solid", "y")];
+  assert.deepEqual(BOUND_TYPES, ["bg", "accent", "graphic", "catname", "tag", "brand", "logo", "title", "frame"]);   // in the list from the top: brackets, title, brand logo, brand row, tag, channel name, graphic, block, ground
+  const L = (type, id = type) => ({ type, id });
+  // a file from before the logo gets it as it is read: above the brand row
+  assert.deepEqual(normalizeLayers([L("bg"), L("accent"), L("graphic"), L("brand"), L("title"), L("tag"), L("catname"), L("frame")]).map((l) => l.id), ["bg", "accent", "graphic", "brand", "logo", "title", "tag", "catname", "frame"]);
+  assert.equal(normalizeLayers([L("bg"), L("title")]).find((l) => l.type === "logo").off, undefined);   // put back as it was: on
+  const old = [L("bg"), L("accent"), L("graphic"), L("brand"), L("logo"), L("title"), L("text", "w"), L("tag"), L("text", "x"), L("catname"), L("frame"), L("solid", "y")];
   assert.equal(reorderLayout(old), true);
-  assert.deepEqual(old.map((l) => l.id), ["bg", "accent", "graphic", "catname", "tag", "x", "brand", "title", "w", "frame", "y"]);   // each added layer over the layout layer it was over
-  const mine = [L("bg"), L("accent"), L("title"), L("graphic"), L("brand"), L("tag"), L("catname"), L("frame")];   // re-ordered by hand: left alone
+  assert.deepEqual(old.map((l) => l.id), ["bg", "accent", "graphic", "catname", "tag", "x", "brand", "logo", "title", "w", "frame", "y"]);   // each added layer over the layout layer it was over
+  const mine = [L("bg"), L("accent"), L("title"), L("graphic"), L("brand"), L("logo"), L("tag"), L("catname"), L("frame")];   // re-ordered by hand: left alone
   assert.equal(reorderLayout(mine), false);
-  assert.deepEqual(mine.map((l) => l.id), ["bg", "accent", "title", "graphic", "brand", "tag", "catname", "frame"]);
+  assert.deepEqual(mine.map((l) => l.id), ["bg", "accent", "title", "graphic", "brand", "logo", "tag", "catname", "frame"]);
   assert.equal(reorderLayout(old), false);                                                // once in the new order, nothing to do
 });
 
@@ -1636,6 +1640,25 @@ test("a layout gives the room of the parts a cover leaves out to the others, sti
   const [w, h] = virtualSize(1920, 1080), base = layout("stack", w, h);
   assert.deepEqual(meetStandards(adjustLayout(base, w, h, { size: 0.3 }), w, h, { size: 0.3 }, bare).accent, adjustLayout(base, w, h, { size: 0.3 }).accent);
   assert.deepEqual(meetStandards(adjustLayout(layout("split", w, h), w, h, { size: 0.4 }), w, h, { size: 0.4 }, bare).accent, adjustLayout(layout("split", w, h), w, h, { size: 0.4 }).accent);
+});
+
+test("the brand logo stands at the right end of the brand row, as large as LOGO lets it; and which parts that take room a cover has", async () => {
+  const { logoBox, LOGO, partsOf } = await import("../ui/js/render.js");
+  const { userAssets } = await import("../ui/js/assets.js");
+  userAssets.set("lg", { id: "lg", name: "lg", src: "data:image/png;base64,", img: { naturalWidth: 400, naturalHeight: 100 } });
+  const P = { brand: { logo: "lg" } }, b = logoBox(P, 1920);
+  assert.equal(Math.round(b.x + b.w), 1920 - 72);                                   // right-aligned with the rail's end
+  assert.equal(Math.round(b.h), LOGO.h); assert.equal(Math.round(b.y + b.h / 2), LOGO.mid);
+  assert.ok(logoBox(P, 1080).w <= 1080 * LOGO.share + 0.01);                       // a wide one kept to a share of a narrow canvas
+  const inset = logoBox(P, 1920, 128);
+  assert.equal(Math.round(inset.x + inset.w), 1920 - 128);                          // a look may want it further in
+  assert.equal(logoBox({ brand: { logo: "" } }, 1920), null);
+  assert.equal(logoBox({ brand: { logo: "gone" } }, 1920), null);                   // its asset deleted: nothing, no error
+  userAssets.delete("lg");
+  const cover = (offs) => ({ layers: ["catname", "graphic"].map((type) => ({ type, ...(offs.includes(type) ? { off: true } : {}) })) });
+  assert.deepEqual(partsOf(cover([]), { graphic: { kind: "graphic", id: "camera" } }), { catname: true, graphic: true });
+  assert.deepEqual(partsOf(cover(["catname", "graphic"]), { graphic: { kind: "graphic", id: "camera" } }), { catname: false, graphic: false });
+  assert.deepEqual(partsOf(cover([]), { graphic: { kind: "none" } }), { catname: true, graphic: false });   // a channel without a graphic
 });
 
 test("a profile remembers its untouched covers were given the default tag, so it happens once", () => {
