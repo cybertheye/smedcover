@@ -30,7 +30,9 @@ import { LOOKS, look, lookValues, lookState, lookParams, isFast } from "./style.
 import { outline } from "./outlines.js";
 
 /**
- * id -> { name: {zh, en}, kind }. The order is the order of the menu: the typesetting effects, and the
+ * id -> { name: {zh, en}, kind, menu? }: `kind` how it is painted, `menu` the group it is listed under when
+ * not its kind's (Extruded is drawn from outlines but looks like the layered letterings, a shadow grown
+ * into depth, so it is listed with them). The order is the order of the menu: the typesetting effects, and the
  * editorial look's Underlined highlight, which marks the highlighted words and so has to be lettering.
  * (Sliced, Overprint, Double keyline and Sunlit block were once here too; what they do is their looks'
  * post effects now, for any layer. A layer that still names one is painted as "auto".)
@@ -46,7 +48,7 @@ export const EFFECTS = {
   inner: { name: { zh: "内阴影", en: "Inner shadow" }, kind: "mask" },
   worn: { name: { zh: "磨损", en: "Worn" }, kind: "mask" },
   rows: { name: { zh: "逐行错位", en: "Row shift" }, kind: "mask" },
-  extrude: { name: { zh: "立体挤出", en: "Extruded" }, kind: "outline" },
+  extrude: { name: { zh: "立体挤出", en: "Extruded" }, kind: "outline", menu: "passes" },
 };
 /**
  * id -> { name }: the bends a headline may be given (its `bend`, how far: `bendAmt`), whatever its

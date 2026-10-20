@@ -260,9 +260,8 @@ The title, the subtitle and every text layer (with or without a plate) can be gi
 | Kind | Effects | Notes |
 |---|---|---|
 | Automatic | follows the look | The default: the current look's own lettering |
-| Layered | outline and shadow, plain, plain upright, underlined highlight | General letterings; the underlined highlight underlines the highlighted words |
+| Layered | outline and shadow, plain, plain upright, underlined highlight, extruded | General letterings; the underlined highlight underlines the highlighted words; extruded gives the letters real depth, from each letter's outline |
 | Masked | halftone inside, stripes inside, inner shadow, worn, row shift | Change what is inside the letters |
-| Outlined | extruded | Real depth, from each letter's outline |
 
 Under it, **Bend** bends the lettering, whichever it is — the look's own (Automatic), any effect above, plates under highlighted words, the look effects of the next section laid over it: arched, arc down, on a circle, arched top, bulge, pinch, fisheye, rise, tapered, wave, flag, with *How far*. The line is painted as it would be and that picture is bent, so a dark deco title stays lit lamps and a chrome one chrome, arched; and it works in a plain browser too. The size follows the bent shape, so a bent title stays inside its box, clear of the brand row and the subtitle. Covers made before, whose title or text had one of these as its effect, open as *Outline and shadow*, bent the same way.
 
