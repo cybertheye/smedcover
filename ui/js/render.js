@@ -52,8 +52,13 @@ function accentTag(ctx, str, x, y, fs, acc, ink = INK) {
   return { x: x - fs * 0.22, y, w: w + fs * 0.44 + 8, h: h + 8 };
 }
 
+/**
+ * The brand row along the top: the brand name, the channel's code and, when the profile counts them
+ * (brand.counter), its number ("unit 01 / 05"); at the right end the channels' colour rail (`rail`), or
+ * on the colour panel the number in an ink tag.
+ */
 function drawHeader(ctx, o, w, th, C, onAccentRight, rail, onAccent = false) {
-  const { profile: P, catIndex: i } = o, cat = P.categories[i], total = P.categories.length, acc = rgb(C);
+  const { profile: P, catIndex: i } = o, cat = P.categories[i], total = P.categories.length, acc = rgb(C), counted = P.brand.counter;
   if (onAccent) th = { ...th, text: th.own || INK };   // the row sits on the colour panel: ink instead of the field's text colour
   const box = { x: 66, y: 64, w: 0, h: 52 };
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
@@ -69,11 +74,12 @@ function drawHeader(ctx, o, w, th, C, onAccentRight, rail, onAccent = false) {
     ctx.fillStyle = onAccent ? acc : INK; ctx.fillText(cat.code, x + 13, 97);
     x += cw + 18;
   }
-  const unit = [P.brand.unit, total > 1 ? `${pad2(i + 1)} / ${pad2(total)}` : ""].filter(Boolean).join(" ");
+  const unit = counted ? [P.brand.unit, total > 1 ? `${pad2(i + 1)} / ${pad2(total)}` : ""].filter(Boolean).join(" ") : "";
   if (unit) { ctx.fillStyle = onAccentRight || onAccent ? th.text : rgb(C, 0.9); ctx.font = `600 21px ${fonts.mono}, ${fonts.cn}`; x += spaced(ctx, unit, x, 97, 3); }
   box.w = Math.max(60, x - box.x + 8);
   if (!rail || total < 2) return box;
-  if (onAccentRight) {   // the right end sits on the accent panel: an ink tag instead of the colour rail
+  if (onAccentRight) {   // the right end sits on the accent panel: an ink tag with the number instead of the colour rail
+    if (!counted) return box;
     const s = `${pad2(i + 1)}/${pad2(total)}`;
     ctx.font = `700 44px ${fonts.en}`;
     const tw = spacedW(ctx, s, 4) + 48;

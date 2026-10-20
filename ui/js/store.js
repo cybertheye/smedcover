@@ -104,7 +104,8 @@ export function normalizeProfile(raw) {
     version: 2,
     id: str(p.id) || uid(),
     name: str(p.name) || str(p.brand && p.brand.name) || "Profile",
-    brand: { name: str(p.brand && p.brand.name), unit: str(p.brand && p.brand.unit, "CHANNEL") },
+    // counter: the brand row shows the channel's number ("unit 01 / 05")
+    brand: { name: str(p.brand && p.brand.name), unit: str(p.brand && p.brand.unit, "CHANNEL"), counter: !!(p.brand && p.brand.counter === true) },
     categories, style,
     sizes,
     // a design keeps no photos: their pictures live with the cover

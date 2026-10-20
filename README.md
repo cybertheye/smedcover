@@ -566,7 +566,7 @@ Adjustments are stored as fractions of the picture, so they apply to every size;
 
 ## Setup
 
-- **Brand** — brand name, counter label, adding, removing and ordering channels; while you work on a channel (click any of its fields or change its colour) the canvas switches to that channel, so the change shows at once; a channel's graphic shows as a small picture and its name — click it for a window of pictures to pick from: the channel graphics, my vector assets and the stickers by group (or none); create, duplicate, delete, import and export profiles.
+- **Brand** — brand name; whether the brand row shows the channel's number (*Show the number in the brand row*, off by default) and its label (“SERIES 01 / 05”); adding, removing and ordering channels; while you work on a channel (click any of its fields or change its colour) the canvas switches to that channel, so the change shows at once; a channel's graphic shows as a small picture and its name — click it for a window of pictures to pick from: the channel graphics, my vector assets and the stickers by group (or none); create, duplicate, delete, import and export profiles.
 - **Sizes & export** — tick preset sizes or add a custom width × height. There is a preset for each ratio the platforms want, named after them: *Bilibili / YouTube · 16:9*, *Bilibili / Douyin / WeChat Channels · 4:3*, *Douyin / RED / WeChat Channels · 3:4*, *YouTube · 9:16*, *WeChat article · 1:1*, *WeChat article · 2.35:1*; a size of the same ratio, whatever its pixels, takes the same name, under its thumbnail, over the canvas and in the export dialog. A size can be given your own name instead.
 - **AI** — connect your own model service for generating assets.
 

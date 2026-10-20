@@ -217,7 +217,8 @@ const STR = {
 
   "brand.name": ["品牌名", "Brand name"],
   "brand.unit": ["编号前缀", "Counter label"],
-  "brand.unitHint": ["显示为「前缀 01 / 05」，留空则只显示编号。", "Shown as “LABEL 01 / 05”. Leave empty for just the numbers."],
+  "brand.counter": ["在品牌行显示编号", "Show the number in the brand row"],
+  "brand.unitHint": ["勾选后，品牌行显示「前缀 01 / 05」（第几个频道 / 共几个频道）；前缀留空则只显示编号。不勾选就不显示编号。", "Ticked, the brand row shows “LABEL 01 / 05” (which channel of how many); leave the label empty for just the numbers. Unticked, no number is shown."],
   "brand.profileName": ["档案名称", "Profile name"],
   "brand.categories": ["频道", "Channels"],
   "brand.add": ["＋ 添加频道", "＋ Add channel"],

@@ -151,6 +151,9 @@ In the same way a new cover comes with the tag `EP.01`, and the covers made befo
 `partsBox()`): it is then hidden, and the editor leaves it out of the layer list, the 3D view and *Hide
 layout*; ticked again it is back as it was. *Clear* keeps it.
 
+**The brand row's number**: `brand.counter` in the profile (false by default) says whether the brand row
+shows the channel's number after `brand.unit`, and the number tag on a colour panel.
+
 **The title as lettering**: the title has what a text layer has. It may be clipped (below), and carry look
 effects (`FX_TYPES` includes it; `effectsFor` and `layerEffects` offer it what a text layer is offered); its
 properties edit `cover.title`, which the Cover tab edits too.

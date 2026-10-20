@@ -1919,7 +1919,10 @@ function brandTab() {
     el("div", { class: "box" }, cap("prof.manage"), el("div", { class: "acts", style: "justify-content:flex-start" }, ["new", "duplicate", "delete", "import", "export"].map(act))),
     el("div", {}, cap("brand.profileName"), textInput(P.name, (v) => { P.name = v; touch({ profile: true }); later("top", 600, syncTop); })),
     el("div", {}, cap("brand.name"), textInput(P.brand.name, (v) => { P.brand.name = v; touch({ profile: true }); })),
-    el("div", {}, cap("brand.unit"), textInput(P.brand.unit, (v) => { P.brand.unit = v; touch({ profile: true }); }), el("div", { class: "hint" }, t("brand.unitHint"))),
+    el("div", {}, cap("brand.unit"),
+      check("brand.counter", P.brand.counter, (v) => { P.brand.counter = v; touch({ profile: true, panel: true }); }),
+      textInput(P.brand.unit, (v) => { P.brand.unit = v; touch({ profile: true }); }, { disabled: !P.brand.counter }),
+      el("div", { class: "hint" }, t("brand.unitHint"))),
     el("div", {}, cap("brand.categories"), el("div", { style: "display:grid;gap:10px" }, P.categories.map(card),
       el("button", { class: "btn wide", onclick: () => {
         const palette = ["#ffb703", "#fb5607", "#3a86ff", "#a855f7", "#06d6a0", "#ff5fa2"];

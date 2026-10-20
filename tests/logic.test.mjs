@@ -78,6 +78,10 @@ test("normalizeProfile repairs bad input and keeps good input", () => {
   assert.equal(sample.sizes.length, 6);   // one for each ratio the platforms want
   assert.deepEqual(sample.sizes.map((z) => sizeCaption(z)), ["B站 / YouTube · 16:9", "B站 / 抖音 / 视频号 · 4:3", "抖音 / 小红书 / 视频号 · 3:4", "YouTube · 9:16", "公众号 · 1:1", "公众号 · 2.35:1"]);
   assert.equal(normalizeProfile(starterProfile("en", "ACME")).brand.name, "ACME");
+  // the brand row shows no number until asked to
+  assert.deepEqual(sample.brand, { name: "PIXEL HARBOR", unit: "SERIES", counter: false });
+  assert.deepEqual(normalizeProfile({ brand: { name: "X", counter: true } }).brand, { name: "X", unit: "CHANNEL", counter: true });
+  assert.equal(normalizeProfile({ brand: { counter: "yes" } }).brand.counter, false);
 });
 
 test("normalizeCover starts from the profile's design and normalizeSettings clamps", () => {
