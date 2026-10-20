@@ -1829,6 +1829,21 @@ test("a bend goes with any lettering: painted as it is, then the picture bent, t
   assert.ok(Math.abs(wide.h / k - (2 * 116 + Math.max(e0.up, e1.up - 116) + Math.max(e0.down - 116, e1.down))) < 1e-6);
 });
 
+test("sticker lettering: a hard shadow, a dark line, a white rim and a keyline under the letters, strokes alone", async () => {
+  const { paintRuns, EFFECTS } = await import("../ui/js/textfx.js");
+  const { INK } = await import("../ui/js/style.js");
+  assert.equal(EFFECTS.sticker.kind, "passes");
+  const [L] = normalizeLayers([{ type: "text", id: "s", text: "x", fx: "sticker" }]).filter((l) => l.type === "text");
+  assert.equal(L.fx, "sticker");
+  const calls = [], ctx = { lineWidth: 1, save() {}, restore() {}, strokeText(t, x, y) { calls.push(["stroke", this.strokeStyle, this.lineWidth, x, y]); }, fillText(t, x, y) { calls.push(["fill", this.fillStyle, x, y]); } };
+  paintRuns(ctx, (fn) => fn({ t: "AB", hi: false }, 0), { fs: 100, d: 6, strokeAmt: 1, fillCss: "#fff", inkCss: "#000", shadowCss: "#fc0", hiCss: "#f00", hiShadowCss: "#a00" }, "sticker");
+  const strokes = calls.filter((c) => c[0] === "stroke");
+  assert.deepEqual(strokes.map((c) => c[1]), ["#fc0", INK, "#ffffff", "#000"]);                   // from the bottom up
+  assert.ok(strokes[0][2] === strokes[1][2] && strokes[1][2] > strokes[2][2] && strokes[2][2] > strokes[3][2]);
+  assert.ok(strokes[0][3] > 0 && strokes[0][4] > 0 && strokes.slice(1).every((c) => c[3] === 0 && c[4] === 0));   // only the shadow is moved
+  assert.deepEqual(calls.at(-1), ["fill", "#fff", 0, 0]);                                              // the letters on top
+});
+
 test("every bend can be reshaped by its handles: the edge under a handle goes where it was dragged, the rest smoothly", async () => {
   const { bendMap, bendRest, reshapeField, reshaped, WARP } = await import("../ui/js/textfx.js");
   const box = { x: 40, y: 20, w: 600, h: 120 };

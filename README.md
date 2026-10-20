@@ -260,7 +260,7 @@ The title, the subtitle and every text layer (with or without a plate) can be gi
 | Kind | Effects | Notes |
 |---|---|---|
 | Automatic | follows the look | The default: the current look's own lettering |
-| Layered | outline and shadow, plain, plain upright, underlined highlight, extruded | General letterings; the underlined highlight underlines the highlighted words; extruded gives the letters real depth, from each letter's outline |
+| Layered | sticker, outline and shadow, plain, plain upright, underlined highlight, extruded | General letterings. Sticker: the letters run together on a thick white rim with a dark line round it and a hard shadow under it, as on variety shows' captions (the *Outline* slider sets the keyline round the letters, *Shadow* the shadow). The underlined highlight underlines the highlighted words; extruded gives the letters real depth, from each letter's outline |
 | Masked | halftone inside, stripes inside, inner shadow, worn, row shift | Change what is inside the letters |
 
 Under it, **Bend** bends the lettering, whichever it is — the look's own (Automatic), any effect above, plates under highlighted words, the look effects of the next section laid over it: arched, arc down, on a circle, arched top, bulge, pinch, fisheye, rise, tapered, wave, flag, with *How far*. The line is painted as it would be and that picture is bent, so a dark deco title stays lit lamps and a chrome one chrome, arched; and it works in a plain browser too. The size follows the bent shape, so a bent title stays inside its box, clear of the brand row and the subtitle. Covers made before, whose title or text had one of these as its effect, open as *Outline and shadow*, bent the same way.
@@ -804,7 +804,7 @@ Layers: "photo" marks an effect for photo layers only; the others suit text, ass
 | Dark deco | gilded [px], silhouette with rim light [fill], gold sunburst [out], night grade [px, photo] | the great tower ★, moon ★, searchlights ★, skyline and lit windows, floodlight, fog, crimson sky, rain, airship ★, blade sign ★, stepped proscenium, silhouette ★ | halation, film grain (frame: gold corner pieces) |
 | Spectral engraving | stipple (with its depth) [fill], line engraving [fill], spectral streams [out], drips [out] | stippled figure ★, vortex ★, perspective lines ★ (their vanishing point), rainbow waves, colour blocks, engraved sky | paper (frame: mat and frame) |
 
-The general typesetting effects belong to no look and stay in the lettering menu: Automatic (follows the look), Outline and shadow, Plain, Plain upright, Halftone inside, Stripes inside, Inner shadow, Worn, Row shift, Extruded; and the bends beside them: Arched, Arc down, On a circle, Arched top, Bulge, Pinch, Fisheye, Rise, Tapered, Wave, Flag.
+The general typesetting effects belong to no look and stay in the lettering menu: Automatic (follows the look), Sticker, Outline and shadow, Plain, Plain upright, Halftone inside, Stripes inside, Inner shadow, Worn, Row shift, Extruded; and the bends beside them: Arched, Arc down, On a circle, Arched top, Bulge, Pinch, Fisheye, Rise, Tapered, Wave, Flag.
 
 **Implementation**
 

@@ -26,7 +26,7 @@
 //               block's space, and the block {x, y, w, h} there
 //   warp        the layer's own perspective, if it has one: the block's four corners moved by
 //               [[dx, dy] × 4] (top left, top right, bottom right, bottom left), in block widths and heights
-import { LOOKS, look, lookValues, lookState, lookParams, isFast } from "./style.js";
+import { LOOKS, look, lookValues, lookState, lookParams, isFast, INK } from "./style.js";
 import { outline } from "./outlines.js";
 
 /**
@@ -39,6 +39,7 @@ import { outline } from "./outlines.js";
  */
 export const EFFECTS = {
   auto: { name: { zh: "自动（跟随风格）", en: "Automatic (follows the look)" }, kind: "passes" },
+  sticker: { name: { zh: "贴纸字", en: "Sticker" }, kind: "passes" },
   cel: { name: { zh: "描边加投影", en: "Outline and shadow" }, kind: "passes" },
   plain: { name: { zh: "纯文字", en: "Plain" }, kind: "passes" },
   bluenote: { name: { zh: "纯文字（不倾斜）", en: "Plain, upright" }, kind: "passes" },
@@ -85,6 +86,25 @@ function house(ctx, pass, o, fillToo = true) {
   if (d > 0) pass((a, x) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? o.hiShadowCss : o.shadowCss; ctx.lineWidth = fs * 0.04; ctx.strokeText(a.t, x + d, d); ctx.fillText(a.t, x + d, d); });
   if (o.strokeAmt > 0) pass((a, x) => { ctx.strokeStyle = o.inkCss; ctx.lineWidth = fs * 0.075 * o.strokeAmt; ctx.strokeText(a.t, x, 0); });
   if (fillToo) pass((a, x) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? o.hiCss : o.fillCss; ctx.lineWidth = fs * 0.018; ctx.strokeText(a.t, x, 0); ctx.fillText(a.t, x, 0); });
+}
+/** Whether a CSS colour ("#rrggbb" or "rgb(…)") is near white. */
+const whitish = (s) => { const h = /^#([0-9a-f]{6})$/i.exec(s || ""), c = h ? [0, 2, 4].map((i) => parseInt(h[1].slice(i, i + 2), 16)) : (String(s).match(/[\d.]+/g) || []).slice(0, 3).map(Number); return c.length === 3 && c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114 > 215; };
+/**
+ * Sticker lettering, as on variety shows' captions: the letters with a thin keyline (the Outline slider),
+ * on a thick white rim that runs them into one cut-out — the small gaps inside and between them filled —
+ * a dark line round that, and a hard shadow under it all (the Shadow slider). Strokes only, so it needs
+ * no outlines and goes with any font.
+ */
+function sticker(ctx, pass, o) {
+  const { fs } = o, pale = [o.fillCss, o.hiCss].some(whitish), e1 = fs * 0.035 * Math.max(o.strokeAmt, pale ? 0.5 : 0), e2 = e1 + fs * 0.12, e3 = e2 + fs * 0.035, d = o.d * 1.3;   // pale letters keep a keyline, or they would melt into the rim
+  ctx.save(); ctx.lineJoin = "round"; ctx.lineCap = "round";
+  const ring = (half, css, at = 0) => pass((a, x) => { ctx.fillStyle = ctx.strokeStyle = css(a); ctx.lineWidth = half * 2; ctx.strokeText(a.t, x + at, at); ctx.fillText(a.t, x + at, at); });
+  if (d > 0) ring(e3, (a) => (a.hi ? o.hiShadowCss : o.shadowCss), d);
+  ring(e3, () => INK);
+  ring(e2, () => "#ffffff");
+  if (e1 > 0) ring(e1, () => o.inkCss);
+  pass((a, x) => { ctx.fillStyle = a.hi ? o.hiCss : o.fillCss; ctx.fillText(a.t, x, 0); });
+  ctx.restore();
 }
 
 // ---------- mask effects
@@ -476,7 +496,7 @@ if (typeof document !== "undefined" && document.fonts && document.fonts.addEvent
 // flat looks have neither, the overprint only an offset second colour, everything built on the
 // house lettering both. A look id stands for its own lettering, which "auto" uses.
 const BOTH = { stroke: true, shadow: true }, NONE = { stroke: false, shadow: false };
-const USES = { cel: BOTH, plain: NONE, cyber: BOTH, riso: { stroke: false, shadow: true }, anime: BOTH, bluenote: NONE, editorial: NONE, songke: NONE, vivid: BOTH, negative: NONE, cinema: { stroke: false, shadow: true }, cyano: { stroke: false, shadow: true }, monofilm: { stroke: false, shadow: true }, typo: NONE, toon: { stroke: false, shadow: true }, avant: NONE, collage: { stroke: false, shadow: true }, yellow: NONE, pitch: NONE, dots: { stroke: false, shadow: true }, neon: { stroke: false, shadow: true }, court: { stroke: false, shadow: true }, velvet: { stroke: false, shadow: true }, rave: { stroke: false, shadow: true }, chrome: { stroke: false, shadow: true }, netart: { stroke: false, shadow: true }, verse: { stroke: false, shadow: true }, glass: { stroke: false, shadow: true }, jelly: { stroke: false, shadow: true }, skies: { stroke: false, shadow: true }, spectrum: { stroke: false, shadow: true }, citypop: BOTH, construct: { stroke: false, shadow: true }, deco: BOTH };
+const USES = { cel: BOTH, sticker: BOTH, plain: NONE, cyber: BOTH, riso: { stroke: false, shadow: true }, anime: BOTH, bluenote: NONE, editorial: NONE, songke: NONE, vivid: BOTH, negative: NONE, cinema: { stroke: false, shadow: true }, cyano: { stroke: false, shadow: true }, monofilm: { stroke: false, shadow: true }, typo: NONE, toon: { stroke: false, shadow: true }, avant: NONE, collage: { stroke: false, shadow: true }, yellow: NONE, pitch: NONE, dots: { stroke: false, shadow: true }, neon: { stroke: false, shadow: true }, court: { stroke: false, shadow: true }, velvet: { stroke: false, shadow: true }, rave: { stroke: false, shadow: true }, chrome: { stroke: false, shadow: true }, netart: { stroke: false, shadow: true }, verse: { stroke: false, shadow: true }, glass: { stroke: false, shadow: true }, jelly: { stroke: false, shadow: true }, skies: { stroke: false, shadow: true }, spectrum: { stroke: false, shadow: true }, citypop: BOTH, construct: { stroke: false, shadow: true }, deco: BOTH };
 /** { id, stroke, shadow } for effect `id` under the current look; id is the effect actually painted. */
 export function effectUses(id = "auto") {
   const fx = EFFECTS[id] && id !== "auto" ? id : look().runs ? look().id : "cel";
@@ -488,6 +508,7 @@ export function paintRuns(ctx, pass, o, id = "auto") {
   const fx = EFFECTS[id] ? id : "auto";
   if (fx === "auto") return look().runs ? look().runs(ctx, pass, o, lookValues()) : house(ctx, pass, o);
   if (fx === "cel") return house(ctx, pass, o);
+  if (fx === "sticker") return sticker(ctx, pass, o);
   if (fx === "plain") return pass((a, x) => { ctx.fillStyle = a.hi ? o.hiCss : o.fillCss; ctx.fillText(a.t, x, 0); });
   if (EFFECTS[fx].kind === "passes") return LOOKS[fx].runs(ctx, pass, o, lookParams(fx));   // another look's lettering, at its default settings
   return EFFECTS[fx].kind === "mask" ? masked(ctx, pass, o, fx) : outlined(ctx, pass, o, fx);
