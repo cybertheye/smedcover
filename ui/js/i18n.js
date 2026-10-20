@@ -506,6 +506,8 @@ const STR = {
   "props.printHint": ["拖动移动，拖四角缩放，拖顶部圆点旋转。描边和投影在去除背景后沿着主体走，否则沿着照片边缘。", "Drag to move, a corner to scale, the top knob to turn. With the background removed the outline and shadow follow the subject, otherwise the photo's edge."],
   "fx.warpHint": ["在画布上拖动文字四角的菱形手柄，可以自由调整透视。", "Drag the diamond handles at the lettering's corners on the canvas to set the perspective freely."],
   "fx.warpReset": ["重置透视", "Reset the perspective"],
+  "fx.reshapeHint": ["画布上文字的上沿和下沿各有 4 个菱形手柄，拖动可以自由调整变形的形状；「变形程度」照样可调。", "Four diamond handles along the top of the lettering on the canvas and four along its bottom: drag them to reshape the bend freely; How far still applies."],
+  "fx.reshapeReset": ["重置变形", "Reset the shape"],
   "props.bend": ["变形", "Bend"],
   "bend.none": ["不变形", "None"],
   "props.bendAmt": ["变形程度", "How far"],

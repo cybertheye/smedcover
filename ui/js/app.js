@@ -452,8 +452,18 @@ function layerAt(e) {
     if (group().length || !L || !hit || !showsFrame(hit) || L.locked || L.type === "bg" || FIXED.includes(L.type)) return null;
     const p = virtualPoint(e), a = (-hit.r * Math.PI) / 180, dx = p.x - hit.cx, dy = p.y - hit.cy;
     const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
-    const handle = handles(hit, p.k).find((h) => Math.hypot(lx - h.lx, ly - h.ly) <= 11 * p.k);
-    return { L, hit, p, lx, ly, handle: handle ? handle.id : null };
+    const near = handles(hit, p.k).map((h) => ({ id: h.id, d: Math.hypot(lx - h.lx, ly - h.ly) })).filter((h) => h.d <= 11 * p.k).sort((a, b) => a.d - b.d)[0];
+    return { L, hit, p, lx, ly, handle: near ? near.id : null, d: near ? near.d : Infinity };
+  }
+  /**
+   * The diamond under the pointer (a handle of the layout, or of the selected lettering's bend), or null;
+   * where one lies by a square of the selection's frame, the nearer of the two is the one taken.
+   */
+  function diamond(e) {
+    if (group().length) return null;
+    const p = virtualPoint(e), g = grip(e);
+    const lh = layoutHandles(cv, layer()).map((q) => ({ ...q, d: Math.hypot(p.x - q.x, p.y - q.y) })).filter((q) => q.d <= 13 * p.k).sort((a, b) => a.d - b.d)[0];
+    return lh && !(g && g.handle && g.d < lh.d) ? lh : null;
   }
   /** The handle of a look's scene object under the pointer, with the ground selected (see sceneHandleAt), or null. */
   function sceneGrip(e) {
@@ -467,6 +477,7 @@ function layerAt(e) {
     const sh = sceneGrip(e);
     cv.title = sh ? `${sceneName(sh.key)} · ${t("scene.dragTip")}` : "";
     if (sh) { cv.style.cursor = "move"; return; }
+    if (diamond(e)) { cv.style.cursor = "pointer"; return; }
     const g = grip(e);
     if (g && g.handle) { cv.style.cursor = CURSOR[g.handle]; return; }
     if (S.focus) { cv.style.cursor = focusTargets().length ? "move" : "not-allowed"; return; }
@@ -483,7 +494,7 @@ function layerAt(e) {
     if (S.mode !== "edit") return;
     const done = (moved) => () => { cv.onpointermove = null; endLive(); if (moved()) renderSide(); };
     // a handle of the layout itself (the diamonds): dragging it changes the template for every cover of this profile
-    const at0 = virtualPoint(e), lh = !group().length && layoutHandles(cv, layer()).find((q) => Math.hypot(at0.x - q.x, at0.y - q.y) <= 13 * at0.k);
+    const at0 = virtualPoint(e), lh = diamond(e);
     if (lh && lh.id[0] === "w") {   // a corner of the perspective: the lettering's block is reshaped
       const L = layer(), b = cv._blocks[L.id], i = Number(lh.id.slice(1)), inv = b.m.inverse(), k = cv._blocks.k;
       const corner = [[0, 0], [1, 0], [1, 1], [0, 1]][i], grab = inv.transformPoint({ x: at0.x * k, y: at0.y * k });
@@ -497,7 +508,22 @@ function layerAt(e) {
         if (!convexWarp(w) && convexWarp(start)) return;   // the corner stops where the block would fold over (one folded before is free to be unfolded)
         L.warp = w; touch({ cover: true });
       };
-      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; renderSide(); };
+      goLive(L.id);   // the other layers kept as they are while it is dragged
+      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; endLive(); renderSide(); };
+      return;
+    }
+    if (lh && lh.id[0] === "e") {   // a handle of any other bend: the edge under it follows the pointer, the rest of the lettering smoothly with it
+      const L = layer(), b = cv._blocks[L.id], i = Number(lh.id.slice(1)), inv = b.m.inverse(), k = cv._blocks.k;
+      const start = L.reshape ? L.reshape.map((p) => [...p]) : Array.from({ length: 8 }, () => [0, 0]), grab = inv.transformPoint({ x: at0.x * k, y: at0.y * k });
+      const off = [grab.x - (b.rest[i][0] + start[i][0] * b.box.w), grab.y - (b.rest[i][1] + start[i][1] * b.box.h)];   // keep where in the handle it was grabbed
+      cv.setPointerCapture(e.pointerId);
+      cv.onpointermove = (m) => {
+        const p = virtualPoint(m), q = inv.transformPoint({ x: p.x * k, y: p.y * k }), d = start.map((c) => [...c]);
+        d[i] = [clamp((q.x - off[0] - b.rest[i][0]) / b.box.w, -1.5, 1.5), clamp((q.y - off[1] - b.rest[i][1]) / b.box.h, -1.5, 1.5)];
+        L.reshape = d; touch({ cover: true });
+      };
+      goLive(L.id);
+      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; endLive(); if (L.reshape && L.reshape.every((p) => !p[0] && !p[1])) { delete L.reshape; touch({ cover: true }); } renderSide(); };
       return;
     }
     if (lh) {
@@ -2238,11 +2264,12 @@ function fxControl(L) {
       select(groups, fx, (v) => set("fx", v === "auto" ? undefined : v, true)),
       fx !== "auto" && kind !== "passes" && slider("props.fxAmt", 0, 2, 0.05, L.fxAmt ?? 1, times, (v) => { holdLive(L.id); set("fxAmt", v === 1 ? undefined : v, false); }),
       el("div", { style: "margin-top:12px" }, cap("props.bend"),
-        select([["", t("bend.none")], ...Object.entries(BENDS).map(([id, b]) => [id, b.name[getLang()]])], L.bend || "", (v) => { if (v) L.bend = v; else { delete L.bend; delete L.bendAmt; } if (v !== "taper") delete L.warp; touch({ cover: true, side: true }); })),
+        select([["", t("bend.none")], ...Object.entries(BENDS).map(([id, b]) => [id, b.name[getLang()]])], L.bend || "", (v) => { if (v) L.bend = v; else { delete L.bend; delete L.bendAmt; } delete L.warp; delete L.reshape; touch({ cover: true, side: true }); })),
       L.bend && !(L.bend === "taper" && L.warp) && slider("props.bendAmt", 0, 2, 0.05, L.bendAmt ?? 1, times, (v) => { holdLive(L.id); set("bendAmt", v === 1 ? undefined : v, false); }),
       L.bend === "taper" && L.warp && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("warp", undefined, true) }, t("fx.warpReset")),
+      L.bend && L.bend !== "taper" && L.reshape && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("reshape", undefined, true) }, t("fx.reshapeReset")),
     ],
-    tip: [L.bend && t("fx.bendHint"), L.bend === "taper" && t("fx.warpHint"), kind === "outline" && !native && t("fx.needsApp")].filter(Boolean).join(" "),
+    tip: [L.bend && t("fx.bendHint"), L.bend && t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint"), kind === "outline" && !native && t("fx.needsApp")].filter(Boolean).join(" "),
   };
 }
 /** White or ink, whichever reads on colour "#rrggbb". */
@@ -3163,7 +3190,7 @@ function surprise() {
   const effects = Object.keys(EFFECTS).filter((id) => id !== "auto" && (native || EFFECTS[id].kind !== "outline"));
   const bends = Object.keys(BENDS).filter((id) => id !== "taper");
   const dealFx = (L, auto, bent = 0) => {
-    delete L.fx; delete L.fxAmt; delete L.bend; delete L.bendAmt; delete L.warp;
+    delete L.fx; delete L.fxAmt; delete L.bend; delete L.bendAmt; delete L.warp; delete L.reshape;
     if (!chance(auto)) { L.fx = pick(effects); if (EFFECTS[L.fx].kind !== "passes") L.fxAmt = round(between(0.6, 1.5), 0.05); }
     if (chance(bent)) { L.bend = pick(bends); L.bendAmt = round(between(0.5, 1.1), 0.05); }   // now and then bent, not far
   };
@@ -3740,7 +3767,15 @@ async function selfTest(dir) {
     // the perspective with corners of its own, dragged far: the lettering follows the quad
     titleLayer.bend = "taper"; titleLayer.warp = [[0, 0], [-0.05, 0.35], [0.08, -0.1], [0.04, 0]];
     report.bends.push({ id: "taper-own", path: await invoke("write_image", framed(await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex())), { dir, name: "bend-taper-own.png" })) });
-    delete titleLayer.warp; delete titleLayer.bend;
+    delete titleLayer.warp;
+    // any other bend reshaped by its handles: the top's right end raised, the bottom's middle pulled down
+    titleLayer.bend = "arc"; titleLayer.reshape = [[0, 0], [0, 0], [0.05, -0.25], [0.1, -0.4], [0, 0], [0, 0.2], [0, 0.2], [0.1, 0]];
+    {
+      const cv = await renderReady(S.profile.sizes[0], S.cover, catIndex()), hit = cv._hits.find((h) => h.id === "title");
+      report.bends.push({ id: "arc-reshaped", hit: !!hit, path: await invoke("write_image", framed(await toPng(cv), { dir, name: "bend-arc-reshaped.png" })) });
+      if (!hit) report.errors.push("bend arc reshaped: the title was not painted");
+    }
+    delete titleLayer.reshape; delete titleLayer.bend;
     S.cover.title = keep;
     report.outline = await invoke("text_outline", { text: "A夜", families: ["Bebas Neue", "Noto Sans SC"], weight: 900 }).then((o) => ({ missing: o.missing, glyphs: o.glyphs.length, contours: o.glyphs.map((g) => g.c.length) }), (e) => ({ error: String(e) }));
     if (!report.outline.glyphs || report.outline.missing) report.errors.push("outline: the native side could not trace bundled fonts");

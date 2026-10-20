@@ -1,7 +1,7 @@
 // Title typesetting. One typed line is one line on the cover: text is never wrapped; instead the
 // size is the largest at which the longest line fits the width and all lines fit the height.
 import { INK } from "./cel.js";
-import { paintRuns, bentLine, bendExtent } from "./textfx.js";
+import { paintRuns, bentLine, bendExtent, bendRest, reshaped } from "./textfx.js";
 import { SUB, subtitleSize, titleFloor } from "./layout.js";
 
 /** "a\n*b* c" -> [[{t:"a",hi:false}], [{t:"b",hi:true},{t:" c",hi:false}]]. Literal "\n" also breaks. */
@@ -87,7 +87,11 @@ export function subtitleFit(ctx, title, sub, box, font, w, h, maxFs = 340, bend 
  * subtitleFit): they fit the rest of the box, and the two are centred in it together. `bend` ({id, amt,
  * own}): each line is painted as it would be and then bent (bentLine in textfx.js), the size fitting what
  * the bent lines reach (see fitLines); `key` names what else decides how the lines look (the plates'
- * colours, say), for the bent lines kept. `hiPlate` is then given the context to paint on, sixth.
+ * colours, say), for the bent lines kept. `hiPlate` is then given the context to paint on, sixth. A bend
+ * other than the perspective may be reshaped by its handles (`reshape`, see reshapeField in textfx.js):
+ * the size stays what the bend alone gives, the box returned too (the layer is scaled and turned about its
+ * centre, which must not move under a handle dragged); the plate and the box's `ink`, what is drawn, take in
+ * where the handles went. `onBlock(m, block, rest)` is told where the block is and, bent, where its handles rest.
  * Returns the box it occupies (for hit-testing), or null when there is nothing to draw.
  */
 export function drawTitle(ctx, title, box, adj, st) {
@@ -106,13 +110,21 @@ export function drawTitle(ctx, title, box, adj, st) {
   const y0 = box.y + (box.h - free - fullH) / 2 + adj.dy + reach.up * k;
   const d = fs * 0.062 * st.shadowAmt, block = { x: x0, y: y0, w: blockW, h: textH };
   const reached = { x: x0 - reach.left * k, y: y0 - reach.up * k, w: fullW, h: fullH };
-  if (st.onBlock) st.onBlock(ctx.getTransform ? ctx.getTransform() : null, block);   // where the block is, for the perspective's handles
   const pad = st.plate ? fs * 0.32 : 0, skew = st.skew ?? -0.08;
-  if (st.plate) st.plate(reached.x - pad, reached.y - pad * 0.3, reached.w + pad * 2, reached.h + pad * 0.6, fs);
+  const lineAt = (li) => ({ ox: x0 + fs * 0.04 + (st.align === "center" ? (blockW - (widths[li] * fs) / 100) / 2 : 0), oy: y0 + li * fs * LH + fs * 0.92, lineW: (widths[li] * fs) / 100 });
+  const rest = st.bend && st.bend.id !== "taper" ? bendRest(st.bend, fs, skew, block, lineAt(0), lineAt(lines.length - 1)) : null;
+  let inked = reached;
+  if (rest && st.reshape) {   // the handles dragged out: the plate and the box drawn in take in where they went (the box placed by stays)
+    const pts = reshaped(rest, st.reshape, block), xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const ax = Math.min(reached.x, ...xs), ay = Math.min(reached.y, ...ys), bx = Math.max(reached.x + reached.w, ...xs), by = Math.max(reached.y + reached.h, ...ys);
+    inked = { x: ax, y: ay, w: bx - ax, h: by - ay };
+  }
+  if (st.onBlock) st.onBlock(ctx.getTransform ? ctx.getTransform() : null, block, rest);   // where the block is, for the bend's handles
+  if (st.plate) st.plate(inked.x - pad, inked.y - pad * 0.3, inked.w + pad * 2, inked.h + pad * 0.6, fs);
   lines.forEach((line, li) => {
     const lw = (widths[li] * fs) / 100;
     ctx.save();
-    const ox = x0 + fs * 0.04 + (st.align === "center" ? (blockW - lw) / 2 : 0), oy = y0 + li * fs * LH + fs * 0.92;
+    const { ox, oy } = lineAt(li);
     ctx.translate(ox, oy);
     if (skew) ctx.transform(1, 0, skew, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
@@ -121,18 +133,20 @@ export function drawTitle(ctx, title, box, adj, st) {
       fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: st.fxAmt ?? 1, lineW: lw, seed: li * 17.3 + 1,
       fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow,
       C: st.C, fill: st.own, hi: st.ownHi, hiPlate: !!st.hiPlated, unit: m ? Math.hypot(m.a, m.b) : 1,
-      frame: { ox, oy, c: skew, box: block }, warp: st.warp,
+      frame: { ox, oy, c: skew, box: block }, warp: st.warp, reshape: rest ? st.reshape : undefined,
     };
     const paint = (c, unit) => {   // the line as it is, on c (the canvas, or the bent line's own)
       if (st.hiPlate) pass((a, x) => { if (a.hi) st.hiPlate(x - fs * 0.08, -fs * 0.86, ctx.measureText(a.t).width + fs * 0.16, fs * 1.06, fs, c); });
       paintRuns(c, pass, unit === o.unit ? o : { ...o, unit }, st.fx);
     };
-    if (st.bend) bentLine(ctx, { ...o, bend: st.bend }, [JSON.stringify(line), ctx.font, st.fx, st.key || "", JSON.stringify({ ...o, frame: null, warp: null, unit: null })].join("|"), paint);
+    if (st.bend) bentLine(ctx, { ...o, bend: st.bend }, [JSON.stringify(line), ctx.font, st.fx, st.key || "", JSON.stringify({ ...o, frame: null, warp: null, reshape: null, unit: null })].join("|"), paint);
     else paint(ctx, o.unit);
     ctx.restore();
   });
   ctx.restore();
-  return pad ? { x: reached.x - pad, y: reached.y - pad * 0.3, w: reached.w + pad * 2, h: reached.h + pad * 0.6 } : reached;
+  const grown = (b) => (pad ? { x: b.x - pad, y: b.y - pad * 0.3, w: b.w + pad * 2, h: b.h + pad * 0.6 } : b), out = grown(reached);
+  if (inked !== reached) out.ink = grown(inked);
+  return out;
 }
 export { INK };
 

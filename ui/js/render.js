@@ -8,7 +8,7 @@ import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js"
 import { drawAsset, userAssets } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced } from "./style.js";
-import { paintRuns, warpCorners, bentLine, bendExtent } from "./textfx.js";
+import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped } from "./textfx.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
 /** For checks of speed: while `on`, the time each layer took to paint is added up in `ms` (by id), and still runs repainted are counted. */
@@ -244,7 +244,9 @@ function placed(ctx, tr, fn, known) {
   ctx.translate(px + tr.dx, py + tr.dy); ctx.rotate(tr.r * RAD); ctx.scale(tr.s * tr.kx, tr.s * tr.ky); ctx.translate(-px, -py);
   fn(ctx);
   ctx.restore();
-  return { cx: px + tr.dx, cy: py + tr.dy, hw: (box.w / 2) * tr.s * tr.kx, hh: (box.h / 2) * tr.s * tr.ky, r: tr.r };
+  // what is drawn may reach past the box it is placed by (`ink`: a bend reshaped by hand): the hit is that, carried along
+  const ink = box.ink || box, sx = tr.s * tr.kx, sy = tr.s * tr.ky, a = tr.r * RAD, ix = (ink.x + ink.w / 2 - px) * sx, iy = (ink.y + ink.h / 2 - py) * sy;
+  return { cx: px + tr.dx + ix * Math.cos(a) - iy * Math.sin(a), cy: py + tr.dy + ix * Math.sin(a) + iy * Math.cos(a), hw: (ink.w / 2) * sx, hh: (ink.h / 2) * sy, r: tr.r };
 }
 /** The box a layer's hit (its turned rectangle, in units) covers, in canvas pixels, kept within the canvas: where its look effects work. */
 function pixelBox(hit, kx, ky, W, H) {
@@ -339,13 +341,18 @@ function drawFreeText(ctx, L, env) {
   const box = { x: -bw / 2, y: -bh / 2, w: bw, h: bh }, pad = st.plate ? FS * 0.32 : 0, skew = st.plate ? 0 : -0.08, bend = bendOf(L);
   // how far the lines reach once bent: the plate and the frame take it in (a perspective of its own is the user's to place)
   const ext = bend && !bend.own ? widths.map((w) => bendExtent(bend.id, bend.amt, w, FS)) : null;
-  const hw = ext ? Math.max(...widths.map((w, i) => w / 2 + Math.max(ext[i].left, ext[i].right))) : bw / 2;
-  const up = ext ? Math.max(...ext.map((e, i) => e.up - i * FS * LH)) : 0, down = ext ? Math.max(...ext.map((e, i) => e.down - (ext.length - 1 - i) * FS * LH)) : 0;   // a wide line between may reach past the first or the last
-  if (raw.getTransform) env.blocks[L.id] = { m: raw.getTransform(), box };   // where the block is, for the perspective's handles
-  if (st.plate) drawPlate(raw, -hw - pad, -bh / 2 - up - pad * 0.3, hw * 2 + pad * 2, bh + up + down + pad * 0.6, st.plate, FS, env.C);
+  let hw = ext ? Math.max(...widths.map((w, i) => w / 2 + Math.max(ext[i].left, ext[i].right))) : bw / 2;
+  let up = ext ? Math.max(...ext.map((e, i) => e.up - i * FS * LH)) : 0, down = ext ? Math.max(...ext.map((e, i) => e.down - (ext.length - 1 - i) * FS * LH)) : 0;   // a wide line between may reach past the first or the last
+  const lineAt = (li) => ({ ox: -widths[li] / 2, oy: -bh / 2 + li * FS * LH + FS * (st.plate ? 0.94 : 0.9), lineW: widths[li] });
+  const rest = bend && bend.id !== "taper" ? bendRest(bend, FS, skew, box, lineAt(0), lineAt(lines.length - 1)) : null;
+  let left = -hw, right = hw;
+  if (rest && L.reshape) for (const [x, y] of reshaped(rest, L.reshape, box)) { left = Math.min(left, x); right = Math.max(right, x); up = Math.max(up, -bh / 2 - y); down = Math.max(down, y - bh / 2); }   // the handles dragged out
+  hw = Math.max(-left, right);   // the layer turns about its centre: its box stays round it
+  if (raw.getTransform) env.blocks[L.id] = { m: raw.getTransform(), box, rest };   // where the block is, for the bend's handles
+  if (st.plate) drawPlate(raw, left - pad, -bh / 2 - up - pad * 0.3, right - left + pad * 2, bh + up + down + pad * 0.6, st.plate, FS, env.C);   // the plate only where the lettering went
   lines.forEach((line, li) => {
     ctx.save();
-    const ox = -widths[li] / 2, oy = -bh / 2 + li * FS * LH + FS * (st.plate ? 0.94 : 0.9);
+    const { ox, oy } = lineAt(li);
     ctx.translate(ox, oy);
     if (skew) ctx.transform(1, 0, skew, 1, 0, 0);
     const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
@@ -353,13 +360,13 @@ function drawFreeText(ctx, L, env) {
     const o = {
       fs: FS, d: FS * 0.062 * st.shadowAmt, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit,
       fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow, fill: st.own, hi: st.ownHi, hiPlate: !!st.hiPlate,
-      frame: { ox, oy, c: skew, box }, warp: L.warp,
+      frame: { ox, oy, c: skew, box }, warp: L.warp, reshape: rest ? L.reshape : undefined,
     };
     const paint = (c, u) => {   // the line as it is, on c (the canvas, or the bent line's own)
       if (st.hiPlate) pass((a, x) => { if (a.hi) drawPlate(c, x - FS * 0.08, -FS * 0.86, ctx.measureText(a.t).width + FS * 0.16, FS * 1.06, st.hiPlate, FS, env.C); });   // under the highlighted words
       paintRuns(c, pass, u === unit ? o : { ...o, unit: u }, L.fx);
     };
-    if (bend) bentLine(raw, { ...o, bend }, [JSON.stringify(line), raw.font, L.fx, st.hiPlate, JSON.stringify({ ...o, frame: null, warp: null, unit: null })].join("|"), paint);
+    if (bend) bentLine(raw, { ...o, bend }, [JSON.stringify(line), raw.font, L.fx, st.hiPlate, JSON.stringify({ ...o, frame: null, warp: null, reshape: null, unit: null })].join("|"), paint);
     else paint(raw, unit);
     raw.restore();
   });
@@ -517,7 +524,7 @@ const PAINT = {
       stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt,
       plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
       hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
-      warp: L.warp, bend: bendOf(L), key: st.hiPlate || "", onBlock: (m, block) => { env.blocks[L.id] = { m, box: block }; },
+      warp: L.warp, reshape: L.reshape, bend: bendOf(L), key: st.hiPlate || "", onBlock: (m, block, rest) => { env.blocks[L.id] = { m, box: block, rest }; },
       reserve: env.sub && !env.sub.vertical ? env.sub.reserve : 0,   // the subtitle's line, under it
     }));
   },
@@ -533,7 +540,7 @@ const PAINT = {
       stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt,
       plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
       hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
-      warp: L.warp, bend: bendOf(L), key: st.hiPlate || "", onBlock: (m, block) => { env.blocks[L.id] = { m, box: block }; },
+      warp: L.warp, reshape: L.reshape, bend: bendOf(L), key: st.hiPlate || "", onBlock: (m, block, rest) => { env.blocks[L.id] = { m, box: block, rest }; },
     }));
   },
   tag(ctx, L, tr, env) {
@@ -1198,8 +1205,16 @@ export function warpHandles(cv, layer) {
     return { id: "w" + i, x: p.x / k, y: p.y / k };
   });
 }
+/** A bend's handles, but the perspective's (see warpHandles): 4 along the top of its lettering and 4 along its bottom, where the bend and the user's reshaping put them. */
+export function reshapeHandles(cv, layer) {
+  const b = cv._blocks && cv._blocks[layer.id];
+  if (!b || !b.m || !b.rest) return [];
+  const k = cv._blocks.k || 1;
+  return reshaped(b.rest, layer.reshape, b.box).map(([x, y], i) => { const p = b.m.transformPoint({ x, y }); return { id: "e" + i, x: p.x / k, y: p.y / k }; });
+}
 export function layoutHandles(cv, layer) {
-  const warp = layer && ["title", "subtitle", "text"].includes(layer.type) && layer.bend === "taper" ? warpHandles(cv, layer) : [];
+  const headline = layer && ["title", "subtitle", "text"].includes(layer.type) && layer.bend && !layer.locked;
+  const warp = !headline ? [] : layer.bend === "taper" ? warpHandles(cv, layer) : reshapeHandles(cv, layer);
   return [...warp, ...templateHandles(cv, layer)];
 }
 function templateHandles(cv, layer) {

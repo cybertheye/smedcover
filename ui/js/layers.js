@@ -245,9 +245,14 @@ function normalizeLayer(raw, catIds) {
     if (BEND_IDS.includes(bend)) {
       L.bend = bend;
       if (bendAmt !== undefined && num(bendAmt, 1, 0, 2) !== 1) L.bendAmt = num(bendAmt, 1, 0, 2);
-      // the perspective's own corners: four [dx, dy] in block widths and heights
-      if (bend === "taper" && Array.isArray(raw.warp) && raw.warp.length === 4 && raw.warp.every((p) => Array.isArray(p) && p.length === 2 && p.every((v) => Number.isFinite(Number(v)))))
-        L.warp = raw.warp.map((p) => p.map((v) => num(v, 0, -1.5, 1.5)));
+      // the perspective's own corners: four [dx, dy] in block widths and heights; any other bend's handles
+      // dragged: eight, along the top edge and then the bottom (see reshapeField in textfx.js)
+      const pairs = (a, n) => Array.isArray(a) && a.length === n && a.every((p) => Array.isArray(p) && p.length === 2 && p.every((v) => Number.isFinite(Number(v))));
+      if (bend === "taper" && pairs(raw.warp, 4)) L.warp = raw.warp.map((p) => p.map((v) => num(v, 0, -1.5, 1.5)));
+      if (bend !== "taper" && pairs(raw.reshape, 8)) {
+        const d = raw.reshape.map((p) => p.map((v) => num(v, 0, -1.5, 1.5)));
+        if (d.some((p) => p[0] || p[1])) L.reshape = d;
+      }
     }
   }
   // lettering may be set in a font of its own; without one it takes the look's

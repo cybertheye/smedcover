@@ -1829,6 +1829,39 @@ test("a bend goes with any lettering: painted as it is, then the picture bent, t
   assert.ok(Math.abs(wide.h / k - (2 * 116 + Math.max(e0.up, e1.up - 116) + Math.max(e0.down - 116, e1.down))) < 1e-6);
 });
 
+test("every bend can be reshaped by its handles: the edge under a handle goes where it was dragged, the rest smoothly", async () => {
+  const { bendMap, bendRest, reshapeField, reshaped, WARP } = await import("../ui/js/textfx.js");
+  const box = { x: 40, y: 20, w: 600, h: 120 };
+  // nothing dragged, nothing moved; one handle dragged: the edge there by as much, the other handles not at all
+  const none = reshapeField(Array.from({ length: 8 }, () => [0, 0]), box);
+  assert.deepEqual(none(300, 50), [0, 0]);
+  const d = Array.from({ length: 8 }, () => [0, 0]); d[1] = [0.05, -0.5];
+  const one = reshapeField(d, box);
+  const near = (a, b, e = 1e-9) => Math.abs(a[0] - b[0]) < e && Math.abs(a[1] - b[1]) < e;
+  assert.ok(near(one(box.x + box.w / 3, box.y), [30, -60]));
+  for (const i of [0, 2, 3]) assert.ok(near(one(box.x + (i * box.w) / 3, box.y), [0, 0]), `top handle ${i} stays`);
+  for (let i = 0; i < 4; i++) assert.ok(near(one(box.x + (i * box.w) / 3, box.y + box.h), [0, 0]), `bottom handle ${i} stays`);
+  assert.ok(near(one(box.x + box.w / 3, box.y + box.h / 2), [15, -30]));                    // between the edges, in proportion
+  assert.ok(Math.abs(one(box.x + box.w * 0.85, box.y)[1]) < 60 * 0.1, "the far end hardly stirs");
+  // a line of a block, slanted, bent and reshaped: its top-edge points land on the handles
+  const fs = 100, c = -0.08, line = { ox: box.x + 4, oy: box.y + 92, lineW: box.w - 8 }, bend = { id: "arc", amt: 1.2 };
+  const rest = bendRest(bend, fs, c, box, line, line), dd = Array.from({ length: 8 }, (_, i) => [0.02 * i, -0.1 * (i % 3)]), at = reshaped(rest, dd, box);
+  const map = bendMap("arc", { fs, amt: 1.2, lineW: line.lineW, frame: { ox: line.ox, oy: line.oy, c, box }, reshape: dd }), plain = WARP.arc({ fs, amt: 1.2, lineW: line.lineW });
+  for (let i = 0; i < 4; i++) {
+    const Y = box.y, y = Y - line.oy, x = box.x + (i * box.w) / 3 - line.ox - c * y, [x2, y2] = map([x, y]);
+    assert.ok(near([line.ox + x2 + c * y2, line.oy + y2], at[i], 1e-6), `top handle ${i}`);
+    const [px, py] = plain([x, y]);
+    assert.ok(near([line.ox + px + c * py, line.oy + py], rest[i], 1e-6), `rest ${i}`);
+  }
+  // the perspective keeps its four corners; a reshape is kept for any other bend, and only when something was dragged
+  const [a, b, e] = normalizeLayers([
+    { type: "text", id: "r1", text: "x", bend: "wave", reshape: dd },
+    { type: "text", id: "r2", text: "y", bend: "taper", reshape: dd },
+    { type: "text", id: "r3", text: "z", bend: "arc", reshape: Array.from({ length: 8 }, () => [0, 0]) },
+  ]).filter((l) => l.type === "text");
+  assert.deepEqual([a.reshape.length, b.reshape, e.reshape], [8, undefined, undefined]);
+});
+
 test("a bend keeps to the picture it is given: nothing thrown far past the line, a folded perspective not made huge", async () => {
   const { meshWarp, bendMap, convexWarp } = await import("../ui/js/textfx.js");
   // the picture as bentLine makes it: the line with room round it, all of it inked (a glow filling the room)

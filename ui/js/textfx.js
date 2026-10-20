@@ -300,8 +300,51 @@ function outlined(ctx, pass, o, id) {
  */
 export function bendMap(id, o) {
   if (id === "taper" && o.warp && o.frame) return perspective(o);
-  return WARP[id] ? WARP[id](o) : null;
+  const map = WARP[id] ? WARP[id](o) : null;
+  if (!map || id === "taper" || !o.reshape || !o.frame) return map;
+  // the user's reshaping on top: the offset of the block's handles, at where the point was before the bend
+  const { ox, oy, c, box } = o.frame, field = reshapeField(o.reshape, box);
+  return ([x, y]) => { const [x2, y2] = map([x, y]), [dX, dY] = field(ox + x + c * y, oy + y); return [x2 + dX - c * dY, y2 + dY]; };
 }
+/**
+ * The user's reshaping of a bend (`reshape`: 8 × [dx, dy], fractions of the block's size: how far each of
+ * its handles was dragged — 4 along the top edge, left to right, then 4 along the bottom) as the offset it
+ * gives a point (X, Y) of the block, in the block's space: along each edge a smooth curve through its four
+ * (Catmull-Rom, so a handle dragged moves the edge under it exactly and its neighbours' little), between
+ * the edges in proportion, and past them as at them.
+ */
+export function reshapeField(reshape, box) {
+  const W = Math.max(1, box.w), H = Math.max(1, box.h), D = reshape.map(([dx, dy]) => [dx * W, dy * H]);
+  const curve = (P, u) => {
+    const s = Math.min(2, Math.floor(u * 3)), t = u * 3 - s;
+    const at = (i) => (i < 0 ? [2 * P[0][0] - P[1][0], 2 * P[0][1] - P[1][1]] : i > 3 ? [2 * P[3][0] - P[2][0], 2 * P[3][1] - P[2][1]] : P[i]);
+    const a = at(s - 1), b = at(s), c = at(s + 1), d = at(s + 2);
+    return [0, 1].map((k) => 0.5 * (2 * b[k] + (c[k] - a[k]) * t + (2 * a[k] - 5 * b[k] + 4 * c[k] - d[k]) * t * t + (3 * b[k] - a[k] - 3 * c[k] + d[k]) * t * t * t));
+  };
+  const top = D.slice(0, 4), foot = D.slice(4, 8), unit = (v) => Math.max(0, Math.min(1, v));
+  return (X, Y) => { const u = unit((X - box.x) / W), v = unit((Y - box.y) / H), a = curve(top, u), b = curve(foot, u); return [a[0] + (b[0] - a[0]) * v, a[1] + (b[1] - a[1]) * v]; };
+}
+/**
+ * Where a bend's handles lie before the user drags any (`bend` {id, amt}; the lines set at `fs`, slanted by
+ * `c`, in `box`; `first` and `last` {ox, oy, lineW} the first line's and the last's): 4 along the block's
+ * top edge as the first line bends it, then 4 along its bottom as the last does; in the block's space.
+ * Past the ends of a line shorter than the block they keep level with its ends, rather than follow a
+ * curve on round into empty space.
+ */
+export function bendRest(bend, fs, c, box, first, last) {
+  const out = [];
+  for (const [row, ln] of [[0, first], [1, last]]) {
+    const map = WARP[bend.id] ? WARP[bend.id]({ fs, amt: bend.amt, lineW: ln.lineW }) : (p) => p;
+    for (let i = 0; i < 4; i++) {
+      const Y = box.y + row * box.h, y = Y - ln.oy, x = box.x + (i / 3) * box.w - ln.ox - c * y;   // into the line's space
+      const on = Math.max(0, Math.min(ln.lineW, x)), [x2, y2] = map([on, y]);
+      out.push([ln.ox + x2 + (x - on) + c * y2, ln.oy + y2]);
+    }
+  }
+  return out;
+}
+/** The handles of a reshaped bend where they are now: `rest` (bendRest) moved by `reshape`, in the block's space. */
+export const reshaped = (rest, reshape, box) => rest.map(([x, y], i) => { const [dx, dy] = (reshape && reshape[i]) || [0, 0]; return [x + dx * box.w, y + dy * box.h]; });
 /** How far a line `lineW` wide set at `fs` reaches past its own box once bent ({up, down, left, right}, in units, never below 0): the image of the box's edge. */
 export function bendExtent(id, amt, lineW, fs) {
   const map = WARP[id] && WARP[id]({ fs, amt, lineW });
@@ -402,7 +445,7 @@ export function bentLine(ctx, o, key, paint) {
   const fs = o.fs, P = fs * 0.75, rect = { x: -P, y: -fs * 1.25 - P, w: o.lineW + 2 * P, h: fs * 1.7 + 2 * P };
   // finer than the canvas below on screen, as fine on an export; coarser while something is dragged
   const k = Math.min(o.unit * (isFast() ? 0.6 : o.unit >= 1.6 ? 1 : 1.5), 4096 / rect.w, 4096 / rect.h);
-  const id = [key, look().id, JSON.stringify(lookValues()), lookState(), isFast() ? 1 : 0, o.bend.id, o.bend.amt, JSON.stringify(o.warp || null), o.frame ? [o.frame.ox, o.frame.oy, o.frame.c, o.frame.box.x, o.frame.box.y, o.frame.box.w, o.frame.box.h].map((v) => Math.round(v * 10)).join() : "", o.lineW.toFixed(1), fs, k.toFixed(3), FONTS_SEEN].join("|");
+  const id = [key, look().id, JSON.stringify(lookValues()), lookState(), isFast() ? 1 : 0, o.bend.id, o.bend.amt, JSON.stringify(o.warp || null), JSON.stringify(o.reshape || null), o.frame ? [o.frame.ox, o.frame.oy, o.frame.c, o.frame.box.x, o.frame.box.y, o.frame.box.w, o.frame.box.h].map((v) => Math.round(v * 10)).join() : "", o.lineW.toFixed(1), fs, k.toFixed(3), FONTS_SEEN].join("|");
   let got = BENT.get(id);
   if (got) { BENT.delete(id); BENT.set(id, got); }
   else {
