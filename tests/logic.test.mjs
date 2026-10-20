@@ -1675,3 +1675,21 @@ test("a profile remembers its untouched covers were given the default tag, so it
   assert.equal(normalizeProfile(sampleProfile("en")).tagged, undefined);
   assert.equal(normalizeProfile({ ...sampleProfile("en"), tagged: "yes" }).tagged, undefined);
 });
+
+test("a photo's outline may be dashed: a line of evenly spaced dashes round the shape, a little way out", async () => {
+  const { isolines } = await import("../ui/js/render.js");
+  const grid = (w, h, f) => { const F = new Float32Array(w * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) F[y * w + x] = f(x, y); return F; };
+  // a disc: one closed line, round, at its radius
+  const disc = isolines(grid(60, 60, (x, y) => Math.hypot(x - 30, y - 30) - 20), 60, 60);
+  assert.equal(disc.length, 1);
+  assert.ok(disc[0].every(([x, y]) => Math.abs(Math.hypot(x - 30, y - 30) - 20) < 0.1));
+  // two discs apart: two lines; a ring: its outer edge and its hole
+  assert.equal(isolines(grid(80, 40, (x, y) => Math.min(Math.hypot(x - 20, y - 20), Math.hypot(x - 60, y - 20)) - 10), 80, 40).length, 2);
+  assert.equal(isolines(grid(60, 60, (x, y) => Math.abs(Math.hypot(x - 30, y - 30) - 15) - 5), 60, 60).length, 2);
+  // a closed line goes round once, the inside always on the same side
+  const d = disc[0], area = d.reduce((s, p, i) => { const q = d[(i + 1) % d.length]; return s + p[0] * q[1] - q[0] * p[1]; }, 0) / 2;
+  assert.ok(Math.abs(Math.abs(area) - Math.PI * 400) < 10);
+  // on a photo layer: torn or dashed, not both
+  const [a, b, c] = normalizeLayers([{ type: "photo", id: "a", pid: "p", dash: true }, { type: "photo", id: "b", pid: "p", dash: true, torn: true }, { type: "photo", id: "c", pid: "p", dash: "yes" }]).filter((l) => l.type === "photo");
+  assert.deepEqual([a.dash, b.dash, b.torn, c.dash], [true, false, true, false]);
+});

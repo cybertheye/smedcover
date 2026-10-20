@@ -404,8 +404,8 @@ const PAINT = {
     const blit = (c, dx = 0, dy = 0) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(c, dx, dy); ctx.restore(); };
     const W = ctx.canvas.width, H = ctx.canvas.height;
     // While a photo is dragged, a costly one (cut out, outlined, shadowed) only slides its last image.
-    const costly = L.cut || L.outline > 0 || L.shadow > 0, torn = L.torn && L.outline > 0;
-    const stamp = [W, H, L.cut, L.feather, L.spread, L.outline, torn, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? rect.iw.toFixed(1) : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`].join("|");
+    const costly = L.cut || L.outline > 0 || L.shadow > 0, torn = L.torn && L.outline > 0, dashed = !torn && L.dash && L.outline > 0;
+    const stamp = [W, H, L.cut, L.feather, L.spread, L.outline, torn, dashed, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? rect.iw.toFixed(1) : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`].join("|");
     const at = fills ? [rect.x, rect.y] : [bt.cx, bt.cy], keep = PHOTO.slides.get(L.id);
     if (costly && isFast() && keep && keep.stamp === stamp) { blit(keep.img, keep.bx + (at[0] - keep.at[0]) * M.a, keep.by + (at[1] - keep.at[1]) * M.d); return hit; }
     const inFrame = (c, fn) => { c.save(); frame(c); fn(c); c.restore(); };
@@ -442,7 +442,7 @@ const PAINT = {
     const lay = (sil, ox = 0, oy = 0, alpha = 1) => inFrame(out, (o) => { o.globalAlpha = alpha; o.drawImage(sil.c, rect.x - sil.p * f + ox, rect.y - sil.p * f + oy, sil.c.width * sil.k * f, sil.c.height * sil.k * f); });
     const tear = torn && ((colour, bare) => tornSheet(shape, L.outline / f, colour, 1 / f, seedOf(L.id), bare));   // 1 / f: photo px per cover px
     if (L.shadow > 0) { const sil = torn ? tear("#07070c", true) : silhouette(shape, 0, "#07070c"), d = w * 0.006 / Math.max(0.2, Math.abs(fills ? 1 : bt.kx)); for (let i = 1; i <= 4; i++) lay(sil, d * i, d * i * 1.2, L.shadow * 0.22); }
-    if (L.outline > 0) lay(torn ? tear(L.ink || "#ffffff", false) : silhouette(shape, L.outline / f, L.ink || "#ffffff"));
+    if (L.outline > 0) lay(torn ? tear(L.ink || "#ffffff", false) : dashed ? dashedLine(shape, L.outline / f, L.ink || "#ffffff", 1 / f) : silhouette(shape, L.outline / f, L.ink || "#ffffff"));
     out.save(); out.setTransform(1, 0, 0, 1, 0, 0); out.drawImage(body.canvas, 0, 0); out.restore();
     blit(out.canvas, bx, by);
     if (isFast()) {   // kept for the frames to come (a copy: the work canvases are reused)
@@ -823,6 +823,83 @@ function tornSheet(shape, grow, colour, perCover, seed, bare) {
   if (cache.size > 24) cache.clear();
   cache.set(key, sheet);
   pxTime("torn paper (script)", t0);
+  return sheet;
+}
+/**
+ * The closed lines along which `F` (a w × h grid, below 0 inside) crosses 0: marching squares, each line
+ * a list of [x, y] in grid units, the inside always on the same side. Where two inside corners of a cell
+ * face each other across it, the cell's middle decides whether they are joined. The grid's edge must be
+ * outside.
+ */
+export function isolines(F, w, h) {
+  const next = new Map();   // a crossing (by the cell edge it is on) -> the crossing the line goes on to
+  const corner = (i) => F[i] < 0;
+  for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) {
+    const i = y * w + x, a = corner(i), b = corner(i + 1), c = corner(i + w + 1), d = corner(i + w);
+    if (a === b && b === c && c === d) continue;
+    // the cell's edges clockwise (top, right, bottom, left), each from one corner to the next; a crossing
+    // where the line goes in (outside to inside) or out
+    const edges = [[2 * i, a, b], [2 * (i + 1) + 1, b, c], [2 * (i + w), c, d], [2 * i + 1, d, a]];
+    const cross = edges.filter(([, p, q]) => p !== q).map(([k, , q]) => ({ k, into: q }));
+    const mid = F[i] + F[i + 1] + F[i + w + 1] + F[i + w] < 0;
+    cross.forEach((o, j) => {
+      if (o.into) return;
+      // going out: on to the crossing going in that ends the outside it leaves (the inside joined across
+      // the middle), or that begins the inside it leaves (the corners kept apart)
+      const n = cross.length, into = cross.length === 2 ? cross[1 - j] : mid ? cross[(j + 1) % n] : cross[(j + n - 1) % n];
+      next.set(o.k, into.k);
+    });
+  }
+  const at = (k) => {
+    const i = k >> 1, x = i % w, y = (i - x) / w, other = k & 1 ? i + w : i + 1, t = F[i] / (F[i] - F[other]);
+    return k & 1 ? [x, y + t] : [x + t, y];
+  };
+  const lines = [], seen = new Set();
+  for (const start of next.keys()) {
+    if (seen.has(start)) continue;
+    const pts = [];
+    for (let k = start; k !== undefined && !seen.has(k); k = next.get(k)) { seen.add(k); pts.push(at(k)); }
+    if (pts.length > 2) lines.push(pts);
+  }
+  return lines;
+}
+/**
+ * A dashed line round `shape` (a mask, or a photo's plain rectangle): line segments of `colour`, evenly
+ * spaced, along a line `grow` photo pixels out — the outer edge of the dashes where a plain outline's
+ * would be, a gap between them and the shape, like the line a sticker is cut along. Their weight and
+ * length follow `grow`, at least a cover pixel or two (`perCover`: photo px per cover px). Each closed
+ * line has a whole number of dashes. Answers as silhouette() does, and is kept likewise.
+ */
+const DASHED = new WeakMap();
+function dashedLine(shape, grow, colour, perCover) {
+  const max = isFast() ? 512 : 1024, key = `${grow.toFixed(1)}|${colour}|${max}|${perCover.toFixed(4)}`, cache = DASHED.get(shape) || new Map();
+  DASHED.set(shape, cache);
+  if (cache.has(key)) return cache.get(key);
+  const t0 = performance.now(), [W, H] = sizeOf(shape), K = Math.min(1, max / Math.max(W, H));
+  const g = grow * K, u = K / perCover, wt = Math.max(2 * u, g * 0.32), r = Math.max(g - wt / 2, wt / 2 + u);   // the dashes' weight; how far out their middle runs
+  const p = Math.ceil(r + wt) + 4, cw = Math.ceil(W * K) + 2 * p, ch = Math.ceil(H * K) + 2 * p;
+  const c = Object.assign(document.createElement("canvas"), { width: cw, height: ch }), x = c.getContext("2d", { willReadFrequently: true });
+  x.drawImage(shape, p, p, W * K, H * K);
+  const A = x.getImageData(0, 0, cw, ch).data, inside = new Uint8Array(cw * ch);
+  for (let i = 0; i < inside.length; i++) inside[i] = A[i * 4 + 3] > 127 ? 1 : 0;
+  const D = distanceField(inside, cw, ch), F = new Float32Array(cw * ch);
+  for (let i = 0; i < F.length; i++) F[i] = Math.sqrt(D[i]) - r;
+  x.clearRect(0, 0, cw, ch);
+  x.strokeStyle = colour; x.lineWidth = wt; x.lineCap = "butt"; x.lineJoin = "round";
+  const period = wt * 4.6 + 4 * u, on = 0.62;   // a dash and the gap after it
+  for (const raw of isolines(F, cw, ch)) {
+    const n0 = raw.length, pts = raw.map((q, i) => { const a = raw[(i + n0 - 1) % n0], b = raw[(i + 1) % n0]; return [(a[0] + 2 * q[0] + b[0]) / 4 + 0.5, (a[1] + 2 * q[1] + b[1]) / 4 + 0.5]; });   // smoothed, onto the pixels' centres
+    let len = 0;
+    for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; len += Math.hypot(b[0] - a[0], b[1] - a[1]); }
+    if (len < period * 2) continue;   // a speck or a pinhole: too small for dashes
+    const each = len / Math.round(len / period);
+    x.setLineDash([each * on, each * (1 - on)]);
+    x.beginPath(); pts.forEach(([X, Y], i) => (i ? x.lineTo(X, Y) : x.moveTo(X, Y))); x.closePath(); x.stroke();
+  }
+  const sheet = { c, p: p / K, k: 1 / K };
+  if (cache.size > 24) cache.clear();
+  cache.set(key, sheet);
+  pxTime("dashed outline (script)", t0);
   return sheet;
 }
 /**

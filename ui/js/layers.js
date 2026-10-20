@@ -188,9 +188,9 @@ const PROPS = {
    * followed their photo's size too, and are set up as aligned when read). Every photo without `of` is
    * active. `feather`, `spread`: how far the edge of a cut-out fades inward, and outward. `treat`: the look's
    * treatment of photos applies. `cut`: only the subject is kept (the mask). `torn`: the outline is a margin
-   * of torn paper. + `ink`, the outline's colour.
+   * of torn paper; `dash`: a dashed line a little way out (the one or the other). + `ink`, the outline's colour.
    */
-  photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, feather: 0, spread: 0, outline: 0, torn: false, shadow: 0 },
+  photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, feather: 0, spread: 0, outline: 0, torn: false, dash: false, shadow: 0 },
 };
 /** The layers that may carry the looks' effects (see FX_TYPES in style.js for those the effects are open to so far). */
 const FX_LAYERS = ["text", "asset", "photo", "solid", "title"];
@@ -271,7 +271,7 @@ function normalizeLayer(raw, catIds) {
     case "photo": {
       const id = (v) => (typeof v === "string" ? v.replace(/[^\w-]/g, "").slice(0, 40) : "");
       L.pid = id(raw.pid); L.of = id(raw.of); L.fill = raw.fill === true; L.treat = raw.treat !== false; L.cut = raw.cut === true;
-      L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); L.outline = num(raw.outline, 0, 0, 60); L.torn = raw.torn === true; L.shadow = num(raw.shadow, 0, 0, 1);
+      L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); L.outline = num(raw.outline, 0, 0, 60); L.torn = raw.torn === true; L.dash = !L.torn && raw.dash === true; L.shadow = num(raw.shadow, 0, 0, 1);
       L.feather = num(raw.feather, 0, 0, 60); L.spread = num(raw.spread, 0, 0, 60);
       if (L.of && raw.own === true) L.own = true;
       if (!L.pid && !L.of) return null;   // nothing to show

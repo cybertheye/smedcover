@@ -2289,7 +2289,10 @@ function photoControls(L, set) {
       slider("props.outline", 0, 40, 1, L.outline, px, (v) => { holdLive(L.id); set("outline", v); }),
       slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => { holdLive(L.id); set("shadow", v); }),
       swatch(L, "ink", "props.sw.outline", "#ffffff"),
-      check("props.torn", L.torn, (v) => { L.torn = v; if (v && !(L.outline > 0)) L.outline = 16; touch({ cover: true, side: true }); })], t("props.photoLinesTip")),   // with no outline yet, one to see the tear on
+      el("div", { style: "margin-top:12px" }, cap("props.edge"), el("div", { class: "seg wide" }, ["solid", "torn", "dash"].map((k) => {
+        const now = L.torn ? "torn" : L.dash ? "dash" : "solid";
+        return el("button", { class: "btn" + (now === k ? " on" : ""), onclick: () => { L.torn = k === "torn"; L.dash = k === "dash"; if (k !== "solid" && !(L.outline > 0)) L.outline = 16; touch({ cover: true, side: true, panel: true }); } }, t("props.edge." + k));   // with no outline yet, one to see it on
+      })))], t("props.photoLinesTip")),
   ];
 }
 /**
