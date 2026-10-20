@@ -47,8 +47,16 @@ export const EFFECTS = {
   rows: { name: { zh: "逐行错位", en: "Row shift" }, kind: "mask" },
   extrude: { name: { zh: "立体挤出", en: "Extruded" }, kind: "outline" },
   arc: { name: { zh: "拱形", en: "Arched" }, kind: "outline" },
+  arcLow: { name: { zh: "下弧", en: "Arc down" }, kind: "outline" },
+  circle: { name: { zh: "圆弧", en: "On a circle" }, kind: "outline" },
+  shell: { name: { zh: "上拱", en: "Arched top" }, kind: "outline" },
+  bulge: { name: { zh: "鼓起", en: "Bulge" }, kind: "outline" },
+  pinch: { name: { zh: "收腰", en: "Pinch" }, kind: "outline" },
+  fisheye: { name: { zh: "鱼眼", en: "Fisheye" }, kind: "outline" },
+  rise: { name: { zh: "上扬", en: "Rise" }, kind: "outline" },
   taper: { name: { zh: "透视收缩", en: "Tapered" }, kind: "outline" },
   wave: { name: { zh: "波浪", en: "Wave" }, kind: "outline" },
+  flag: { name: { zh: "旗帜", en: "Flag" }, kind: "outline" },
 };
 
 const noise = (n) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
@@ -162,10 +170,48 @@ function contours(ctx, a, at, o) {
   return out;
 }
 const trace = (ctx, shapes) => { ctx.beginPath(); for (const pts of shapes) { pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); } };
-const WARP = {
+/**
+ * The bends of the outline effects, each a map of a point of the line ([x, y]: x from 0 at its start to
+ * `lineW`, y up from the baseline, negative) made from `o`; `amt` is how far it goes. `mid` is about the
+ * middle of the letters' height, `u` where along the line x is (−1 at its start, 1 at its end).
+ */
+const mid = (o) => -o.fs * 0.36;
+const along = (o) => { const half = Math.max(1, o.lineW / 2); return (x) => (x - half) / half; };
+export const WARP = {
   arc: (o) => { const lift = o.fs * 0.32 * o.amt, half = Math.max(1, o.lineW / 2); return ([x, y]) => [x, y - lift * (1 - ((x - half) / half) ** 2) + lift * 0.45]; },
+  /** The arch the other way: the middle of the line dips. */
+  arcLow: (o) => { const lift = o.fs * 0.32 * o.amt, u = along(o); return ([x, y]) => [x, y + lift * (1 - u(x) ** 2) - lift * 0.45]; },
+  /** The line laid round a circle whose centre is below it: the letters fan out, wider at the top. */
+  circle: (o) => {
+    const span = Math.min(2.4, Math.max(0.05, 0.62 * o.amt)), half = Math.max(1, o.lineW / 2), R = Math.max(o.fs, o.lineW / span);
+    const lift = R * (1 - Math.cos(Math.min(Math.PI, half / R))) * 0.45;   // the ends drop: the whole a little up, so it stays about where it was
+    return ([x, y]) => { const a = (x - half) / R, r = R - y; return [half + r * Math.sin(a), R - r * Math.cos(a) - lift]; };
+  },
+  /** The baseline straight, the tops of the letters arching up toward the middle. */
+  shell: (o) => { const k = 0.45 * o.amt, u = along(o); return ([x, y]) => [x, y < 0 ? y * (1 + k * (1 - u(x) ** 2)) : y]; },
+  /** The letters taller toward the middle of the line, above and below. */
+  bulge: (o) => { const k = 0.38 * o.amt, u = along(o), m = mid(o); return ([x, y]) => [x, m + (y - m) * (1 + k * (1 - u(x) ** 2))]; },
+  /** The letters shorter toward the middle of the line. */
+  pinch: (o) => { const k = Math.min(0.7, 0.32 * o.amt), u = along(o), m = mid(o); return ([x, y]) => [x, m + (y - m) * (1 - k * (1 - u(x) ** 2))]; },
+  /**
+   * A lens over the middle of the line: what is under it larger, easing off toward its rim, which lies a
+   * little past the ends of the line and the letters' height, so the ends move out only a little and the
+   * letters near them are not squeezed thin. Along every ray from the middle the points keep their order
+   * (the stretch along it, 1 + k(1 − s)(1 − 5s) at s = r², is at least 1 − 0.8k), so nothing folds over.
+   */
+  fisheye: (o) => {
+    const k = Math.min(0.45, 0.4 * o.amt), half = Math.max(1, o.lineW / 2), rx = half * 1.15, m = mid(o), ry = o.fs * 1.1;
+    return ([x, y]) => { const dx = x - half, dy = y - m, s = (dx / rx) ** 2 + (dy / ry) ** 2; if (s >= 1) return [x, y]; const f = 1 + k * (1 - s) ** 2; return [half + dx * f, m + dy * f]; };
+  },
+  /** The line climbing to the right, its upright strokes kept upright. */
+  rise: (o) => { const half = Math.max(1, o.lineW / 2), slope = Math.min(0.3, (0.55 * o.fs * o.amt) / Math.max(o.fs, o.lineW)); return ([x, y]) => [x, y - slope * (x - half)]; },
   taper: (o) => { const k = Math.min(0.75, 0.42 * o.amt), mid = -o.fs * 0.36; return ([x, y]) => { const s = 1 - (k * x) / Math.max(1, o.lineW); return [x, mid + (y - mid) * s]; }; },
   wave: (o) => { const lift = o.fs * 0.11 * o.amt, len = o.fs * 2.4; return ([x, y]) => [x, y + lift * Math.sin((x / len) * Math.PI * 2)]; },
+  /** A flag on its pole at the start of the line: it waves more the further from the pole, swelling and narrowing as it goes. */
+  flag: (o) => {
+    const lift = o.fs * 0.14 * o.amt, len = o.fs * 3.2, m = mid(o), W = Math.max(1, o.lineW);
+    return ([x, y]) => { const ramp = 0.25 + 0.75 * Math.min(1, Math.max(0, x / W)), a = (x / len) * Math.PI * 2; return [x, m + (y - m) * (1 + 0.12 * o.amt * ramp * Math.cos(a)) + lift * ramp * Math.sin(a)]; };
+  },
 };
 /** The corners a block's perspective moves to, as fractions of its size: the layer's own, or the plain taper's. */
 export function warpCorners(warp, amt = 1) {

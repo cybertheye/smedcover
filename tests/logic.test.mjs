@@ -1676,6 +1676,40 @@ test("a profile remembers its untouched covers were given the default tag, so it
   assert.equal(normalizeProfile({ ...sampleProfile("en"), tagged: "yes" }).tagged, undefined);
 });
 
+test("the text warps: each bends the line without tearing it, the way its name says", async () => {
+  const { WARP } = await import("../ui/js/textfx.js");
+  const o = { fs: 100, amt: 1, lineW: 600 }, at = (id, p, oo = o) => WARP[id](oo)(p);
+  const line = []; for (let x = 0; x <= 600; x += 25) for (const y of [-90, -36, 0, 20]) line.push([x, y]);
+  for (const id of Object.keys(WARP)) {
+    for (const p of line) assert.ok(at(id, p).every(Number.isFinite), `${id}: ${p}`);
+    // nearby points stay nearby: nothing torn
+    for (const [x, y] of line) { const a = at(id, [x, y]), b = at(id, [x + 1, y]); assert.ok(Math.hypot(b[0] - a[0], b[1] - a[1]) < 4, `${id} tears at ${x}, ${y}`); }
+  }
+  const height = (id, x) => at(id, [x, 0])[1] - at(id, [x, -90])[1];       // how tall a letter stands at x
+  assert.ok(at("arcLow", [300, 0])[1] > at("arcLow", [0, 0])[1], "arc down: the middle lower");
+  assert.ok(at("arc", [300, 0])[1] < at("arc", [0, 0])[1], "arched: the middle higher");
+  assert.ok(height("bulge", 300) > height("bulge", 0) + 20, "bulge: taller in the middle");
+  assert.ok(height("pinch", 300) < height("pinch", 0) - 20, "pinch: shorter in the middle");
+  assert.ok(at("shell", [300, 0])[1] === 0 && at("shell", [0, 0])[1] === 0 && height("shell", 300) > height("shell", 0) + 20, "arched top: the baseline straight, the tops arching");
+  assert.ok(at("rise", [600, 0])[1] < at("rise", [0, 0])[1] - 20 && at("rise", [300, -90])[0] === 300, "rise: climbing, strokes upright");
+  const fan = (x) => { const top = at("circle", [x, -90]), foot = at("circle", [x, 0]); return Math.atan2(top[0] - foot[0], foot[1] - top[1]); };
+  assert.ok(fan(0) < -0.1 && fan(600) > 0.1 && Math.abs(fan(300)) < 1e-9, "on a circle: the letters fan out");
+  assert.ok(Math.hypot(...at("circle", [300, 0]).map((v, i) => v - [300, 0][i])) < 30, "on a circle: the middle stays about where it was");
+  assert.ok(height("fisheye", 300) > height("fisheye", 0) + 20 && Math.abs(at("fisheye", [0, 0])[0]) < 15, "fisheye: larger in the middle, the ends about where they were");
+  // nothing folds over, nor is squeezed thin: the map keeps its orientation and stretches everything by more than half
+  for (let x = 0; x <= 600; x += 3) for (let y = -100; y <= 30; y += 3) {
+    const f = WARP.fisheye(o), e = 0.5, p = f([x, y]), px = f([x + e, y]), py = f([x, y + e]);
+    assert.ok(((px[0] - p[0]) * (py[1] - p[1]) - (px[1] - p[1]) * (py[0] - p[0])) / (e * e) > 0, `fisheye folds at ${x}, ${y}`);
+    assert.ok((px[0] - p[0]) / e > 0.6, `fisheye squeezes at ${x}, ${y}`);
+  }
+  const swing = (id, from, to) => { let lo = Infinity, hi = -Infinity; for (let x = from; x <= to; x += 5) { const y = at(id, [x, -36])[1]; lo = Math.min(lo, y); hi = Math.max(hi, y); } return hi - lo; };
+  assert.ok(swing("flag", 360, 600) > swing("flag", 0, 240) * 1.5, "flag: waving more away from the pole");
+  // at no strength, the bends that scale with it leave the line as it is
+  for (const id of ["arc", "arcLow", "shell", "bulge", "pinch", "fisheye", "rise", "taper", "wave", "flag"]) for (const p of line) {
+    const q = at(id, p, { ...o, amt: 0 }); assert.ok(Math.abs(q[0] - p[0]) < 1e-9 && Math.abs(q[1] - p[1]) < 1e-9, `${id} at 0 moves ${p}`);
+  }
+});
+
 test("a photo's outline may be dashed: a line of evenly spaced dashes round the shape, a little way out", async () => {
   const { isolines } = await import("../ui/js/render.js");
   const grid = (w, h, f) => { const F = new Float32Array(w * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) F[y * w + x] = f(x, y); return F; };

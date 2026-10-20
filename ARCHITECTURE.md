@@ -339,7 +339,7 @@ There are three kinds, differing in what they can change:
 |---|---|---|
 | Layered | the same line painted several times in different colours and places | what is around the letters: outlines, shadows, echoes. Each look's own lettering (`runs()`) is of this kind |
 | Masked | the letters are first painted alone on a spare canvas, which is worked on and then laid down | what is inside the letters: halftone, stripes, wear, an inner shadow, rows cut apart |
-| Outlined | each letter's outline is fetched as points, which are moved before they are filled | the letterforms: arched, tapered, waved, or extruded with real depth |
+| Outlined | each letter's outline is fetched as points, which are moved before they are filled | the letterforms: bent (`WARP`), tapered, or extruded with real depth |
 
 The menu, `EFFECTS`, holds the typesetting effects and the editorial look's Underlined highlight, which has to know the highlighted words and so can only be lettering. A look's lettering is what *auto* uses. Sliced, Overprint, Double keyline and Sunlit block were in the menu once; what they do is their looks' post effects now (see 7.4), for any layer: `layers.js` still knows the names (`TEXT_EFFECTS`), turns them into the matching post effect on a text layer (at 0.6), and keeps them on the title, painted as *auto*.
 
@@ -354,6 +354,15 @@ taken from the next.
 once from a cache; the first time it returns nothing, sends for the outline, and the effect falls
 back to ordinary lettering. When the outline arrives the interface is told to redraw. For an export,
 `renderReady()` waits for every request and draws again, so the exported image has the effect.
+
+**The bends** (`WARP`) are each a map of a point of the line, made from the line's type size, width and
+strength: *Arched* and *Arc down* move the middle up or down along a parabola, *On a circle* lays the line
+round a circle below it (the angle from x, the radius from y, so the letters fan out), *Arched top* scales
+only what is above the baseline, *Bulge* and *Pinch* scale the height about the letters' middle, more
+toward the middle of the line, *Fisheye* scales about the middle of the line within an ellipse a little wider than the line, easing
+off toward its rim (along every ray the points keep their order, so nothing folds over), *Rise* shears y by x, *Wave* and *Flag*
+move y along a sine, the flag's growing from its start and swelling the letters as it goes. Long straight
+edges get points along them first (`contours()`), so they bend.
 
 **Extrusion** really sweeps every edge of the outline back into a wall: walls are split into lit and
 shaded by the way they face, each group is filled as one shape, then the back face and the front.
