@@ -3,7 +3,7 @@
 // batch jobs alike.
 import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, brackets } from "./cel.js";
 import { virtualSize, layout, adjustLayout, meetStandards } from "./layout.js";
-import { drawTitle, drawTitleVertical, parseTitle, subtitleFit } from "./title.js";
+import { drawTitle, drawTitleVertical, parseTitle, subtitleFit, setLine, passOf, hasCJK } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset, userAssets } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets } from "./layers.js";
@@ -337,7 +337,7 @@ function drawFreeText(ctx, L, env) {
   const FS = 120, LH = 1.16, st = headline(L, env);
   ctx.font = `900 ${FS}px ${headFont()}`;
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "round";
-  const widths = lines.map((l) => l.reduce((s, a) => s + ctx.measureText(a.t).width, 0)), bw = Math.max(...widths), bh = lines.length * FS * LH;
+  const mixed = hasCJK(lines), sets = lines.map((l) => setLine(ctx, l, mixed)), widths = sets.map((s) => s.width), bw = Math.max(...widths), bh = lines.length * FS * LH;
   const box = { x: -bw / 2, y: -bh / 2, w: bw, h: bh }, pad = st.plate ? FS * 0.32 : 0, skew = st.plate ? 0 : -0.08, bend = bendOf(L);
   // how far the lines reach once bent: the plate and the frame take it in (a perspective of its own is the user's to place)
   const ext = bend && !bend.own ? widths.map((w) => bendExtent(bend.id, bend.amt, w, FS)) : null;
@@ -355,7 +355,7 @@ function drawFreeText(ctx, L, env) {
     const { ox, oy } = lineAt(li);
     ctx.translate(ox, oy);
     if (skew) ctx.transform(1, 0, skew, 1, 0, 0);
-    const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
+    const set = sets[li], pass = passOf(set);
     const m = raw.getTransform ? raw.getTransform() : null, unit = m ? Math.hypot(m.a, m.b) : 1;
     const o = {
       fs: FS, d: FS * 0.062 * st.shadowAmt, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit,
@@ -363,7 +363,7 @@ function drawFreeText(ctx, L, env) {
       frame: { ox, oy, c: skew, box }, warp: L.warp, reshape: rest ? L.reshape : undefined,
     };
     const paint = (c, u) => {   // the line as it is, on c (the canvas, or the bent line's own)
-      if (st.hiPlate) pass((a, x) => { if (a.hi) drawPlate(c, x - FS * 0.08, -FS * 0.86, ctx.measureText(a.t).width + FS * 0.16, FS * 1.06, st.hiPlate, FS, env.C); });   // under the highlighted words
+      if (st.hiPlate) for (const r of set.runs) if (r.hi) drawPlate(c, r.x0 - FS * 0.08, -FS * 0.86, r.x1 - r.x0 + FS * 0.16, FS * 1.06, st.hiPlate, FS, env.C);   // under the highlighted words
       paintRuns(c, pass, u === unit ? o : { ...o, unit: u }, L.fx);
     };
     if (bend) bentLine(raw, { ...o, bend }, [JSON.stringify(line), raw.font, L.fx, st.hiPlate, JSON.stringify({ ...o, frame: null, warp: null, reshape: null, unit: null })].join("|"), paint);

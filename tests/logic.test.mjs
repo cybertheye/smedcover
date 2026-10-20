@@ -1829,6 +1829,56 @@ test("a bend goes with any lettering: painted as it is, then the picture bent, t
   assert.ok(Math.abs(wide.h / k - (2 * 116 + Math.max(e0.up, e1.up - 116) + Math.max(e0.down - 116, e1.down))) < 1e-6);
 });
 
+test("a line set as a typesetter would: Latin beside CJK as tall, CJK punctuation squeezed (Kaiming style)", async () => {
+  const { setLine, passOf, hasCJK, parseTitle } = await import("../ui/js/title.js");
+  // a font at 100px: ideographs 100 wide, 82 up and 9 down; Latin 50 wide, capitals 70 up; the marks' ink as Noto Sans SC has it
+  const INK = { "，": [17.7, 42.6], "。": [2.6, 36], "「": [63.5, 97.5], "」": [2.5, 36.5], "？": [3.2, 47.6], "！": [14.8, 35.2], "“": [59.4, 98.2], "”": [1.8, 40.6] };
+  const ctx = {
+    font: "900 100px Test", measureText(t) {
+      const one = [...t], width = one.reduce((s, ch) => s + (/[　-鿿＀-￯“”]/.test(ch) ? 100 : 50), 0);
+      if (one.length === 1 && INK[t]) return { width, actualBoundingBoxLeft: -INK[t][0], actualBoundingBoxRight: INK[t][1], actualBoundingBoxAscent: 30, actualBoundingBoxDescent: 10 };
+      return { width, actualBoundingBoxLeft: 0, actualBoundingBoxRight: width, actualBoundingBoxAscent: t === "H" ? 70 : 82, actualBoundingBoxDescent: t === "H" ? 0 : 9 };
+    },
+  };
+  const set = (title) => { const lines = parseTitle(title); return setLine(ctx, lines[0], hasCJK(lines)); };
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
+  // Latin beside CJK: capitals 0.86 of the ideographs' ink height, centred on them; the runs kept for what goes under them
+  const ai = set("*AI*国"), s = (0.86 * 91) / 70;
+  assert.deepEqual(ai.pieces.map((p) => p.t), ["AI", "国"]);
+  assert.ok(near(ai.pieces[0].s, s) && near(ai.pieces[0].dy, (s * 70 - 73) / 2) && near(ai.pieces[1].x, 100 * s) && near(ai.width, 100 * s + 100));
+  assert.deepEqual(ai.runs.map((r) => r.hi), [true, false]);
+  assert.equal(set("AI GO").pieces[0].s, 1, "no CJK in the title: Latin as it is");
+  // an opening mark first and a closing one last give up their blank
+  const quoted = set("「重磅」");
+  assert.ok(near(quoted.pieces[0].x, -(63.5 - 6)) && near(quoted.width, 400 - 57.5 - 57.5));
+  // two marks in a row: half an em between them goes; a sentence's end keeps its width within the line
+  const both = set("真的吗？！太");
+  const bang = both.pieces.find((p) => p.t.startsWith("！"));
+  assert.ok(bang && near(bang.x, 400 - 50), "？！ closer by half an em");
+  assert.ok(near(both.width, 600 - 50), "！ within the line: full width");
+  // a comma within the line is set half, keeping as much blank after it as before
+  const comma = set("秘密，都");
+  const du = comma.pieces.find((p) => p.t === "都");
+  assert.ok(near(du.x, 300 - (57.4 - 17.7)));
+  // what is drawn under a whole run (a plate, a mark) lies over its lettering, not the blank given up
+  const opened = set("*「重磅」*消息");
+  assert.ok(near(opened.runs[0].x0, 0) && near(opened.runs[0].x1, opened.pieces.find((p) => p.t === "消息").x), JSON.stringify(opened.runs));
+  const closed = set("*重磅，*消息"), xiao = closed.pieces.find((p) => p.t === "消息");
+  assert.ok(near(closed.runs[0].x1, xiao.x) && closed.pieces.every((p) => p.run === closed.runs[p.ri]));
+  const split = set("*AI时代*来了");   // a run cut where the script changes: its pieces share the run's extent, the first one marking it
+  assert.deepEqual(split.pieces.map((p) => [p.t, p.first]), [["AI", true], ["时代", false], ["来了", true]]);
+  assert.ok(split.pieces[0].run === split.pieces[1].run && near(split.runs[0].x0, 0) && near(split.runs[0].x1, split.pieces[2].x));
+  // full-width Latin is CJK-sized already; a keycap or an accented letter stays whole
+  assert.equal(set("ＡＩ国").pieces.length, 1);
+  assert.deepEqual(set("1\uFE0F\u20E3国").pieces.map((p) => p.t), ["1\uFE0F\u20E3", "国"]);
+  // pass hands the pieces over at their places
+  const seen = []; passOf(comma)((p, x) => seen.push([p.t, x]));
+  assert.deepEqual(seen.map((v) => v[0]), comma.pieces.map((p) => p.t));
+  // without real metrics (a test double), as the canvas sets it: one piece a run
+  const plain = setLine({ font: "x", measureText: (t) => ({ width: [...t].length * 50 }) }, parseTitle("「重磅」*AI*")[0], true);
+  assert.deepEqual([plain.pieces.length, plain.width], [2, 300]);
+});
+
 test("sticker lettering: a hard shadow, a dark line, a white rim and a keyline under the letters, strokes alone", async () => {
   const { paintRuns, EFFECTS } = await import("../ui/js/textfx.js");
   const { INK } = await import("../ui/js/style.js");

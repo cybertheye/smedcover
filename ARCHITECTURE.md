@@ -346,6 +346,32 @@ highlighted runs. The type size is the largest at which the longest line fits th
 fit the height. Outline and shadow are several passes: the offset shadow, the ink outline, then the
 fill.
 
+`setLine()` sets a line as a typesetter would set a CJK title, into pieces — the runs cut where the
+script changes or a squeeze moves what follows — each with its place, width, scale and drop. In a block
+with CJK in it, Latin letters, digits and ASCII signs are set larger, their capitals `LATIN_TO_HAN` (0.86)
+of the ideographs' ink height, and moved to be centred on them; both heights are read off the font with
+`measureText` (`metricsOf`, kept per font), so the factor is about 1.12 for Bebas Neue beside Noto Sans SC,
+1.05 for Noto's own Latin and 1.25 for Songti's. CJK punctuation is squeezed in the Kaiming style: a
+full-width mark is half ink and half blank, which half read from its ink (`markInk`); within a line 。？！
+keep their width and the others give up their blank side to half an em, keeping as much as they have on
+the ink side; at the line's start and end the outer blank goes; of two marks in a row at least half an
+em between them goes, from each blank as it has. Each piece keeps the blank it gave up (`lt`, `rt`), so
+the runs' extents (`runs`, and each piece's `run`) are where their lettering lies. Characters are taken as
+one reads them (`Intl.Segmenter`: an accented letter, a keycap stay whole); full-width Latin is
+CJK-sized already and left alone; the metrics are kept per font and per fonts loaded, so a font that
+arrives late is measured again. `fitLines`, `drawTitle` and the free text layers measure and draw through
+it, so the size fits the set line. `passOf()` is the `pass` handed to the lettering: a piece set larger
+or lower is drawn while `fillText`, `strokeText` and `measureText` are wrapped on the canvas prototypes
+to draw it in a font that much larger, that much lower (by the font's size, not a transform, so a
+gradient across the run or an outline's width stays as it is), so every lettering — the looks' work
+canvases and the bent lines' canvases included — sets it the same way without knowing; a lettering that
+draws after the pass (the deco look) uses `inPiece()`; the outline effects, which draw paths, take the
+piece's scale and drop themselves (`contours`). What marks a whole run — the plates under highlighted
+words, the cyberpunk and negative looks' boxes, the collage's paper strips, the rave, chrome and
+spectrum gradients — is drawn once a run (at its first piece, over `run`), not once a piece. Without real
+metrics (the tests' stand-in contexts) a line is set as the canvas sets it. Vertical titles are set as
+before.
+
 ### 6.2 Text effects (`textfx.js`, `outlines.js`)
 
 The title, subtitle and text layers paint their letters through `paintRuns()`. The

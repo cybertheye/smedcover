@@ -41,7 +41,7 @@
 import { fonts, spaced, spacedW, brackets, toneField } from "./cel.js";
 import { blockLayout, subtitleSize, SUB } from "./layout.js";
 import { FOOT } from "./platforms.js";
-import { drawTitleVertical, titleBlock, titleBlockVertical, parseTitle } from "./title.js";
+import { drawTitleVertical, titleBlock, titleBlockVertical, parseTitle, inPiece } from "./title.js";
 
 const INK = "#07070c";
 const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
@@ -271,8 +271,9 @@ const cyber = {
     ctx.transform(1, 0, -0.1, 1, 0, 0);   // a harder slant than the house style's
     const all = () => {
       if (!o.hiPlate) pass((a, x) => {   // the highlighted words on chamfered plates (unless the layer has plates of its own under them)
-        if (!a.hi) return;
-        const w = ctx.measureText(a.t).width, bx = x - fs * 0.07, by = -fs * 0.88, bw = w + fs * 0.14, bh = fs * 1.06, plate = (col) => { chamfer(ctx, bx, by, bw, bh, fs * 0.2); ctx.fillStyle = col; ctx.fill(); };
+        if (!a.hi || a.first === false) return;   // one plate a run, under all its pieces
+        const r = a.run || { x0: x, x1: x + ctx.measureText(a.t).width };
+        const bx = r.x0 - fs * 0.07, by = -fs * 0.88, bw = r.x1 - r.x0 + fs * 0.14, bh = fs * 1.06, plate = (col) => { chamfer(ctx, bx, by, bw, bh, fs * 0.2); ctx.fillStyle = col; ctx.fill(); };
         echo(ctx, g * 1.3, plate); plate(css(plateCol));
       });
       echo(ctx, g, (col) => pass((a, x) => { if (a.hi) return; ctx.fillStyle = col; ctx.fillText(a.t, x, 0); }));
@@ -2153,7 +2154,11 @@ const negative = {
   runs(ctx, pass, o) {
     upright(ctx);
     const fs = o.fs, bar = o.hi || (dark ? negSpot(o.C || NEG.red) : NEG.black);
-    pass((a, x) => { if (a.hi) { ctx.fillStyle = css(bar); ctx.fillRect(x - fs * 0.04, -fs * 0.86, ctx.measureText(a.t).width + fs * 0.08, fs * 1.02); } });
+    if (!o.hiPlate) pass((a, x) => {   // one bar a run (unless the layer marks them its own way)
+      if (!a.hi || a.first === false) return;
+      const r = a.run || { x0: x, x1: x + ctx.measureText(a.t).width };
+      ctx.fillStyle = css(bar); ctx.fillRect(r.x0 - fs * 0.04, -fs * 0.86, r.x1 - r.x0 + fs * 0.08, fs * 1.02);
+    });
     pass((a, x) => { ctx.fillStyle = css(o.fill || NEG.cream); ctx.fillText(a.t, x, 0); });
   },
   // objects as cut paper: black, off-white and the one colour; the small parts read on the ground and on the block
@@ -3469,8 +3474,9 @@ const collage = {
     upright(ctx);
     const fs = o.fs, C = o.C || CL.red, hi = o.hi || C, label = Math.min(1, o.shadowAmt), ink = o.fill || (label > 0.3 ? CL.ink : clInk());
     if (label > 0) pass((a, x) => {
-      const tw = ctx.measureText(a.t).width, t = (rand(o.seed + x * 0.013) - 0.5) * 0.07, col = a.hi ? hi : CL.white;
-      ctx.save(); ctx.globalAlpha = label; ctx.translate(x + tw / 2, -fs * 0.36); ctx.rotate(t);
+      if (a.first === false) return;   // one strip a run, under all its pieces
+      const r = a.run || { x0: x, x1: x + ctx.measureText(a.t).width }, tw = r.x1 - r.x0, t = (rand(o.seed + r.x0 * 0.013) - 0.5) * 0.07, col = a.hi ? hi : CL.white;
+      ctx.save(); ctx.globalAlpha = label; ctx.translate(r.x0 + tw / 2, -fs * 0.36); ctx.rotate(t);
       ctx.shadowColor = "rgba(0,0,0,0.3)"; ctx.shadowBlur = fs * 0.06; ctx.shadowOffsetX = fs * 0.02; ctx.shadowOffsetY = fs * 0.04;
       ctx.fillStyle = css(col); ctx.fillRect(-tw / 2 - fs * 0.1, -fs * 0.58, tw + fs * 0.2, fs * 1.08); ctx.restore();
     });
@@ -4622,7 +4628,7 @@ const rave = {
   runs(ctx, pass, o) {
     upright(ctx);
     const fs = o.fs, k = o.unit || 1, spot = boost(o.C || RV.pink, 0.7), glow = Math.min(2, o.shadowAmt), ink = o.fill || RV.white;
-    const fillOf = (a, x) => (a.hi ? (o.hi ? css(o.hi) : iridescent(ctx, x, -fs, x + ctx.measureText(a.t).width, 0, 0.8)) : css(ink));
+    const fillOf = (a, x) => (a.hi ? (o.hi ? css(o.hi) : iridescent(ctx, a.run ? a.run.x0 : x, -fs, a.run ? a.run.x1 : x + ctx.measureText(a.t).width, 0, 0.8)) : css(ink));   // across the whole run
     if (glow > 0 && !fast) { ctx.save(); ctx.shadowColor = css(spot, 0.9); ctx.shadowBlur = fs * 0.18 * glow * k; pass((a, x) => { ctx.fillStyle = fillOf(a, x); ctx.fillText(a.t, x, 0); }); ctx.restore(); }
     pass((a, x) => { ctx.fillStyle = fillOf(a, x); ctx.fillText(a.t, x, 0); });
   },
@@ -4786,7 +4792,7 @@ const chrome = {
     const g = ctx.createLinearGradient(0, -fs * 0.9, 0, fs * 0.1), stops = dark ? [[0, [255, 255, 255]], [0.42, [196, 204, 218]], [0.5, [128, 134, 150]], [0.6, [238, 242, 250]], [1, [168, 174, 190]]] : [[0, [86, 88, 96]], [0.45, [40, 40, 46]], [0.55, [110, 112, 120]], [1, [52, 54, 60]]];
     stops.forEach(([t, c]) => g.addColorStop(t, css(c)));
     const body = o.fill ? css(o.fill) : g;
-    const fillOf = (a, x) => (a.hi ? (o.hi ? css(o.hi) : iridescent(ctx, x, -fs, x + ctx.measureText(a.t).width, 0, 0.1)) : body);
+    const fillOf = (a, x) => (a.hi ? (o.hi ? css(o.hi) : iridescent(ctx, a.run ? a.run.x0 : x, -fs, a.run ? a.run.x1 : x + ctx.measureText(a.t).width, 0, 0.1)) : body);   // across the whole run
     if (glow > 0 && !fast) { ctx.save(); ctx.shadowColor = dark ? "rgba(0,0,0,0.75)" : "rgba(0,0,0,0.35)"; ctx.shadowBlur = fs * 0.12 * glow * k; pass((a, x) => { ctx.fillStyle = fillOf(a, x); ctx.fillText(a.t, x, 0); }); ctx.restore(); }
     pass((a, x) => { ctx.fillStyle = fillOf(a, x); ctx.fillText(a.t, x, 0); });
   },
@@ -6260,7 +6266,7 @@ const spectrum = {
     const fs = o.fs, s = Math.min(2, o.shadowAmt), ink = o.fill || spInk(), n = Math.round(3 + 4 * s);
     if (s > 0) for (let i = n; i >= 1; i--) { ctx.fillStyle = css(spec(i / n)); pass((a, x) => ctx.fillText(a.t, x + fs * 0.008 * i, fs * 0.014 * i)); }
     pass((a, x) => {
-      if (a.hi && !o.hi) { const wd = ctx.measureText(a.t).width, g = ctx.createLinearGradient(x, 0, x + wd, 0); for (let i = 0; i <= 6; i++) g.addColorStop(i / 6, css(spec(i / 7))); ctx.fillStyle = g; }
+      if (a.hi && !o.hi) { const r = a.run || { x0: x, x1: x + ctx.measureText(a.t).width }, g = ctx.createLinearGradient(r.x0, 0, r.x1, 0); for (let i = 0; i <= 6; i++) g.addColorStop(i / 6, css(spec(i / 7))); ctx.fillStyle = g; }   // across the whole run
       else ctx.fillStyle = css(a.hi ? o.hi : ink);
       ctx.fillText(a.t, x, 0);
     });
@@ -7617,12 +7623,13 @@ const deco = {
     const lit = (c) => lum(c) > 0.3, glass = o.hi ? (lit(o.hi) ? { body: o.hi, deep: mix(o.hi, DK.ink, 0.25), core: mix(o.hi, [255, 255, 255], 0.6), glow: o.hi } : { body: o.hi, deep: o.hi, core: o.hi, glow: null }) : dkGlass(o.C || DK.crimson);
     const bright = !o.fill || lit(o.fill);
     const lamp = !o.fill ? dkLamp(g) : bright ? { core: mix(o.fill, [255, 255, 255], 0.5), foot: mix(o.fill, [255, 255, 255], 0.3), rim: o.fill, deep: mix(o.fill, DK.ink, 0.3), glow: o.fill } : null;
-    // the tracking: every glyph set apart by a share of its own width, the line drawn that much smaller so it keeps its measure
-    const chars = [];
+    // the tracking: every glyph set apart by a share of its own width, the line drawn that much smaller so it keeps its measure;
+    // each piece of the line where the line was set (Latin beside CJK larger, punctuation squeezed: see setLine in title.js)
+    const chars = [], T = 1 + DK_TRACK;
     let cx = 0;
-    pass((a) => { for (const t of a.t) { const w = ctx.measureText(t).width; chars.push({ t, hi: a.hi, x: cx }); cx += w * (1 + DK_TRACK); } });
-    ctx.scale(1 / (1 + DK_TRACK), 1 / (1 + DK_TRACK));
-    const each = (fn, only) => { for (const c of chars) if (only === undefined || c.hi === only) fn(c, c.x); };
+    pass((a, at) => { cx = at * T; for (const t of a.t) { const w = ctx.measureText(t).width; chars.push({ t, hi: a.hi, x: cx, s: a.s, dy: (a.dy || 0) * T }); cx += w * T; } });
+    ctx.scale(1 / T, 1 / T);
+    const each = (fn, only) => { for (const c of chars) if (only === undefined || c.hi === only) inPiece(c, () => fn(c, c.x)); };
     const face = lamp ? (o.fill ? css(lamp.core) : dkFace(ctx, fs, g)) : css(o.fill);
     if (!canPaint(ctx)) { each((c, x) => { ctx.fillStyle = c.hi ? css(glass.body) : face; ctx.fillText(c.t, x, 0); }); return; }   // nothing to work on: the letters plain
     ctx.lineJoin = "miter"; ctx.miterLimit = 2.5;

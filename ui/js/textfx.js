@@ -10,9 +10,11 @@
 // A bend (BENDS: arched, on a circle, wave…) is apart from the lettering, and goes with any of them: the
 // line is painted as it would be, on a canvas of its own, and that picture is bent (bentLine, meshWarp).
 //
-// Every effect is painted through paintRuns(ctx, pass, o, id): `pass(fn)` calls fn(run, x) for
-// each run {t, hi} of the current line, the context being placed on that line's baseline, and `o`
-// carries sizes and colours:
+// Every effect is painted through paintRuns(ctx, pass, o, id): `pass(fn)` calls fn(piece, x) for
+// each piece {t, hi, …} of the current line as setLine (title.js) set it — a run, or part of one where
+// the script changes or punctuation is squeezed; one set larger is drawn and measured so while fn runs;
+// `piece.run` {x0, x1} is where its whole run lies and `piece.first` whether it is the run's first, for
+// what marks whole runs — the context being placed on that line's baseline, and `o` carries sizes and colours:
 //   fs          type size                         amt        the layer's "strength" for the effect (1 = normal)
 //   strokeAmt   outline weight (0 = none)         shadowAmt  shadow / depth
 //   fillCss / hiCss / inkCss / shadowCss / hiShadowCss   the colours of plain words, highlighted words,
@@ -182,13 +184,14 @@ function contours(ctx, a, at, o) {
   const glyphs = outline(ctx.font, a.t);
   if (!glyphs) return glyphs;
   const total = glyphs.reduce((s, g) => s + g.adv, 0), k = total > 0 ? ctx.measureText(a.t).width / (total * o.fs) : 1;   // fit the width the canvas gives the run
+  const sy = a.s || 1, dy = a.dy || 0;   // a piece of Latin set larger and lower beside CJK (see setLine in title.js); the width has it already
   const out = [], step = o.fs * 0.06;
   let pen = at;
   for (const g of glyphs) {
     for (const c of g.c) {
       const pts = [];
       for (let i = 0; i < c.length; i += 2) {
-        const x = pen + c[i] * o.fs * k, y = c[i + 1] * o.fs, j = (i + 2) % c.length, nx = pen + c[j] * o.fs * k, ny = c[j + 1] * o.fs;
+        const x = pen + c[i] * o.fs * k, y = c[i + 1] * o.fs * sy + dy, j = (i + 2) % c.length, nx = pen + c[j] * o.fs * k, ny = c[j + 1] * o.fs * sy + dy;
         pts.push([x, y]);
         const n = Math.min(24, Math.floor(Math.hypot(nx - x, ny - y) / step));   // long straight edges get points along them, so they can bend
         for (let s = 1; s < n; s++) pts.push([x + ((nx - x) * s) / n, y + ((ny - y) * s) / n]);

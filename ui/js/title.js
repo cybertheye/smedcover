@@ -14,17 +14,157 @@ export function parseTitle(title) {
     .map((l) => l.split("*").map((t, k) => ({ t, hi: k % 2 === 1 })).filter((a) => a.t));
 }
 
+// ---------- setting a line
+// Two things a typesetter would do to a CJK title that the canvas does not:
+// - Latin beside CJK made as tall. The title's font stack takes Latin from one font and CJK from
+//   another (Bebas Neue and Noto Sans SC, say), whose capitals stand at 0.7–0.8 of the ideographs'
+//   height, a size smaller to the eye. In a title with CJK in it, every run of Latin letters, digits and
+//   ASCII signs is set larger, its capitals LATIN_TO_HAN of the ideographs' ink height, and moved so the
+//   two are centred on each other: measured on the font itself, so a CJK font whose own Latin is already
+//   matched is hardly touched.
+// - CJK punctuation squeezed, as clreq has it in the Kaiming style (开明式), the tighter one a headline
+//   wants. A full-width mark is half ink and half blank: within a line the marks that end a sentence,
+//   。？！, keep their width, every other (，、；：, quotes, brackets) is set half; at the start of a line
+//   the blank before an opening mark goes, at the end the blank after a closing one; and of two marks in a
+//   row the blank between them is cut by half an em at least. Which half is blank is read from the
+//   glyph's ink, since fonts differ (in Simplified Chinese ones ？！ stand left, too). A shorter line can
+//   be set larger, too.
+// A line is set as pieces — runs cut where the script changes or a squeeze moves what follows — each
+// {t, hi, ri (its run), x, w, s (scale), dy (moved down), lt and rt (the blank given up at its start and
+// end), run ({x0, x1}: where its whole run's lettering lies, the given-up blank left out), first (the
+// first piece of its run)}; pass() hands them to the lettering in place of the runs, and a lettering that
+// marks whole runs (a plate, a strip, a gradient across them) does it at a run's first piece, over `run`.
+// (Vertical titles are set as they were: neither applies to a column.)
+const LATIN_TO_HAN = 0.86, CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const LATIN = /^[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{Nd}!-/:-@[-`{-~]/u;   // letters, digits, ASCII signs — not their full-width forms, which are CJK-sized already
+const WIDE = /^[　-〿＀-￯]/;
+const MARKS = "，。、；：？！「」『』（）《》〈〉【】〔〕〖〗“”‘’", FULL = "。？！";   // FULL: the marks that keep their width within a line
+const METRICS = new Map();
+let fontsSeen = 0;   // fonts that arrive later measure differently: what was measured before them is not kept
+if (typeof document !== "undefined" && document.fonts && document.fonts.addEventListener) document.fonts.addEventListener("loadingdone", () => { fontsSeen++; });
+/** What setting a line needs to know of ctx's font: {ok, em, s, dy, ink: char -> {l, r, w} | null}. Not ok without real metrics (a test double). */
+function metricsOf(ctx) {
+  const key = `${ctx.font}|${fontsSeen}|${typeof document !== "undefined" && document.fonts ? document.fonts.size : 0}`;
+  let m = METRICS.get(key);
+  if (m) return m;
+  const han = ctx.measureText("国"), cap = ctx.measureText("H");
+  m = { ok: Number.isFinite(han.actualBoundingBoxAscent) && Number.isFinite(cap.actualBoundingBoxAscent) && han.width > 0, em: han.width, s: 1, dy: 0, ink: new Map() };
+  if (m.ok) {
+    const hanUp = han.actualBoundingBoxAscent, hanDown = han.actualBoundingBoxDescent, capUp = cap.actualBoundingBoxAscent, capDown = cap.actualBoundingBoxDescent;
+    m.s = Math.min(1.3, Math.max(1, (LATIN_TO_HAN * (hanUp + hanDown)) / Math.max(1, capUp + capDown)));
+    m.dy = Math.min(0.1, Math.max(-0.1, (m.s * (capUp - capDown) - (hanUp - hanDown)) / 2 / m.em)) * m.em;   // centre on centre
+  }
+  if (METRICS.size > 64) METRICS.clear();
+  METRICS.set(key, m);
+  return m;
+}
+/** A full-width punctuation mark's ink, {l, r} from its start, and its advance w; null for anything else. */
+function markInk(ctx, m, ch) {
+  if (!m.ok || !MARKS.includes(ch)) return null;
+  if (!m.ink.has(ch)) {
+    const align = ctx.textAlign; ctx.textAlign = "left";   // the ink's sides are read from where the mark starts
+    const t = ctx.measureText(ch);
+    ctx.textAlign = align;
+    m.ink.set(ch, t.width > m.em * 0.9 ? { l: -t.actualBoundingBoxLeft, r: t.actualBoundingBoxRight, w: t.width } : null);
+  }
+  return m.ink.get(ch);
+}
+/** The characters of a string as one reads them (a letter with its accents, a keycap with its sign). */
+const graphemes = typeof Intl !== "undefined" && Intl.Segmenter ? ((seg) => (t) => Array.from(seg.segment(t), (g) => g.segment))(new Intl.Segmenter(undefined, { granularity: "grapheme" })) : (t) => [...t];
+export const hasCJK = (lines) => lines.some((l) => l.some((a) => CJK.test(a.t)));
+/**
+ * Sets one parsed line in ctx's font (see above): {pieces, width, runs: [{hi, x0, x1}]}, the runs' extents
+ * for what is drawn under whole runs. `mixed`: the block has CJK in it, so Latin is matched to it.
+ */
+export function setLine(ctx, line, mixed) {
+  const m = metricsOf(ctx);
+  const runs = line.map((a) => ({ hi: a.hi, x0: Infinity, x1: -Infinity }));
+  if (!m.ok) {   // as the canvas sets it
+    let x = 0;
+    const pieces = line.map((a, ri) => { const w = ctx.measureText(a.t).width, p = { t: a.t, hi: a.hi, ri, x, w, s: 1, dy: 0, lt: 0, rt: 0, run: runs[ri], first: true }; Object.assign(runs[ri], { x0: x, x1: x + w }); x += w; return p; });
+    return { pieces, width: x, runs: runs.filter((r) => r.x1 > r.x0) };
+  }
+  const chars = [];
+  line.forEach((a, ri) => { for (const ch of graphemes(a.t)) chars.push({ ch, hi: a.hi, ri, latin: mixed && LATIN.test(ch) && !WIDE.test(ch), kern: 0, lt: 0, rt: 0 }); });
+  chars.forEach((c, i) => { if (/^\s+$/.test(c.ch) && chars[i - 1]?.latin && chars[i + 1]?.latin) c.latin = true; });   // a space inside Latin goes with it
+  const ink = chars.map((c) => markInk(ctx, m, c.ch)), pad = m.em * 0.06, n = chars.length;
+  // the blank a mark may give up on its blank side: at an end of the line all of it; within the line, of a
+  // mark set half, up to half an em, keeping at least the blank on its ink side (so a comma stays with what
+  // it follows, not with what comes next)
+  const before = (i) => {
+    if (!ink[i] || ink[i].l <= m.em * 0.3 || (i > 0 && FULL.includes(chars[i].ch))) return 0;
+    return i === 0 ? ink[i].l - pad : Math.max(0, Math.min(m.em * 0.5, ink[i].l - Math.max(pad, ink[i].w - ink[i].r)));
+  };
+  const after = (i) => {
+    const blank = ink[i] ? ink[i].w - ink[i].r : 0;
+    if (blank <= m.em * 0.3 || (i < n - 1 && FULL.includes(chars[i].ch))) return 0;
+    return i === n - 1 ? blank - pad : Math.max(0, Math.min(m.em * 0.5, blank - Math.max(pad, ink[i].l)));
+  };
+  if (n) { chars[0].lt = before(0); chars[n - 1].rt = after(n - 1); }                                             // an opening mark first, a closing one last
+  for (let i = 1; i < n; i++) {
+    const a = after(i - 1), b = before(i);
+    let rt = a, lt = b;
+    if (ink[i - 1] && ink[i]) {   // two in a row: at least half an em between them goes, from each blank as it has
+      const right = ink[i - 1].w - ink[i - 1].r, left = ink[i].l, more = Math.max(0, Math.min(m.em * 0.5, right + left - m.em * 0.1) - a - b);
+      rt += more * (right / Math.max(1e-6, right + left)); lt += more * (left / Math.max(1e-6, right + left));
+    }
+    chars[i - 1].rt = rt; chars[i].lt = lt; chars[i].kern = -(rt + lt);
+  }
+  const pieces = [];
+  for (const c of chars) {
+    const p = pieces[pieces.length - 1];
+    if (p && p.ri === c.ri && p.latin === c.latin && !c.kern) { p.t += c.ch; p.rt = c.rt; }
+    else pieces.push({ t: c.ch, hi: c.hi, ri: c.ri, latin: c.latin, kern: c.kern, lt: c.lt, rt: c.rt, run: runs[c.ri], first: !pieces.some((q) => q.ri === c.ri) });
+  }
+  let x = n ? -chars[0].lt : 0;
+  for (const p of pieces) {
+    x += p.kern; p.x = x; p.s = p.latin ? m.s : 1; p.dy = p.latin ? m.dy : 0; p.w = ctx.measureText(p.t).width * p.s; x += p.w;
+    const r = runs[p.ri]; r.x0 = Math.min(r.x0, p.x + p.lt); r.x1 = Math.max(r.x1, p.x + p.w - p.rt);   // the lettering, less the blank given up
+  }
+  return { pieces, width: Math.max(0, x - (n ? chars[n - 1].rt : 0)), runs: runs.filter((r) => r.x1 > r.x0) };
+}
+/**
+ * The `pass` of a set line (see textfx.js): fn(piece, x) for each piece. While a piece set larger or lower
+ * is lettered, text drawn and measured on any canvas is so, so every lettering — the looks' work canvases
+ * and the bent lines' too — sets it as the line was set.
+ */
+export function passOf(set) {
+  return (fn) => { for (const p of set.pieces) inPiece(p, () => fn(p, p.x)); };
+}
+/** Runs `run` (and returns what it does) so text drawn and measured in it is as piece `p` ({s, dy}) is set: for a lettering that draws a piece's letters after the pass, or one by one. */
+export function inPiece(p, run) {
+  if ((p.s ?? 1) === 1 && !p.dy) return run();
+  return larger({ s: p.s ?? 1, dy: p.dy || 0 }, run);
+}
+const PROTOS = ["CanvasRenderingContext2D", "OffscreenCanvasRenderingContext2D"].map((n) => globalThis[n] && globalThis[n].prototype).filter(Boolean);
+/** The font `font` (a canvas font string) at `s` times its size. */
+const sized = (font, s) => font.replace(/(\d*\.?\d+)px/, (_, v) => `${+v * s}px`);
+/**
+ * Runs `run` with fillText, strokeText and measureText on every canvas set `s` times larger, `dy` lower:
+ * by the font's size, not by a transform, so what else is drawn in the line's space — a gradient across
+ * the run, an outline's width, a shadow's offset — stays where and as it was.
+ */
+function larger({ s, dy }, run) {
+  const kept = PROTOS.map((P) => [P, P.fillText, P.strokeText, P.measureText]);
+  for (const [P, fill, stroke, measure] of kept) {
+    P.fillText = function (t, x, y, ...r) { const f = this.font; this.font = sized(f, s); try { fill.call(this, t, x, y + dy, ...r); } finally { this.font = f; } };
+    P.strokeText = function (t, x, y, ...r) { const f = this.font; this.font = sized(f, s); try { stroke.call(this, t, x, y + dy, ...r); } finally { this.font = f; } };
+    P.measureText = function (t) { const f = this.font; this.font = sized(f, s); try { return measure.call(this, t); } finally { this.font = f; } };
+  }
+  try { return run(); } finally { for (const [P, fill, stroke, measure] of kept) { P.fillText = fill; P.strokeText = stroke; P.measureText = measure; } }
+}
+
 const LH = 1.16;   // line height, in sizes
 /**
  * The lines' widths at size 100, and the size at which they fill `box` (times `s`), bent by `bend` ({id,
  * amt, own}, or null) when they have one: then what the bent lines reach past their block counts too
  * (`reach` at size 100: up past the first line, down past the last — a wide line between may reach past
  * them — and left and right of the widest; none for a perspective of the layer's own, `own`, which is the
- * user's to place). Leaves ctx's font at size 100.
+ * user's to place). The lines are set as setLine sets them. Leaves ctx's font at size 100.
  */
 function fitLines(ctx, lines, box, font, maxFs, s = 1, bend = null) {
   ctx.font = `900 100px ${font}`;
-  const widths = lines.map((l) => l.reduce((sum, a) => sum + ctx.measureText(a.t).width, 0)), widest = Math.max(...widths);
+  const mixed = hasCJK(lines), widths = lines.map((l) => setLine(ctx, l, mixed).width), widest = Math.max(...widths);
   const reach = { up: 0, down: 0, left: 0, right: 0 };
   if (bend && !bend.own) {
     const ext = widths.map((w) => bendExtent(bend.id, bend.amt, w, 100)), n = ext.length;
@@ -121,13 +261,14 @@ export function drawTitle(ctx, title, box, adj, st) {
   }
   if (st.onBlock) st.onBlock(ctx.getTransform ? ctx.getTransform() : null, block, rest);   // where the block is, for the bend's handles
   if (st.plate) st.plate(inked.x - pad, inked.y - pad * 0.3, inked.w + pad * 2, inked.h + pad * 0.6, fs);
+  const mixed = hasCJK(lines);
   lines.forEach((line, li) => {
     const lw = (widths[li] * fs) / 100;
     ctx.save();
     const { ox, oy } = lineAt(li);
     ctx.translate(ox, oy);
     if (skew) ctx.transform(1, 0, skew, 1, 0, 0);
-    const pass = (fn) => { let cx = 0; for (const a of line) { fn(a, cx); cx += ctx.measureText(a.t).width; } };
+    const set = setLine(ctx, line, mixed), pass = passOf(set);
     const m = ctx.getTransform ? ctx.getTransform() : null;
     const o = {
       fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: st.fxAmt ?? 1, lineW: lw, seed: li * 17.3 + 1,
@@ -136,7 +277,7 @@ export function drawTitle(ctx, title, box, adj, st) {
       frame: { ox, oy, c: skew, box: block }, warp: st.warp, reshape: rest ? st.reshape : undefined,
     };
     const paint = (c, unit) => {   // the line as it is, on c (the canvas, or the bent line's own)
-      if (st.hiPlate) pass((a, x) => { if (a.hi) st.hiPlate(x - fs * 0.08, -fs * 0.86, ctx.measureText(a.t).width + fs * 0.16, fs * 1.06, fs, c); });
+      if (st.hiPlate) for (const r of set.runs) if (r.hi) st.hiPlate(r.x0 - fs * 0.08, -fs * 0.86, r.x1 - r.x0 + fs * 0.16, fs * 1.06, fs, c);   // under each highlighted run, whole
       paintRuns(c, pass, unit === o.unit ? o : { ...o, unit }, st.fx);
     };
     if (st.bend) bentLine(ctx, { ...o, bend: st.bend }, [JSON.stringify(line), ctx.font, st.fx, st.key || "", JSON.stringify({ ...o, frame: null, warp: null, reshape: null, unit: null })].join("|"), paint);
