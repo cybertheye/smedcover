@@ -842,15 +842,20 @@ async function prunePhotos() {
 // A profile's covers are read when it becomes current (S.covers); a channel without one starts from the
 // profile's design. What a profile shares among its channels is the profile's: style, sizes, brand.
 const defaultTitle = () => (getLang() === "zh" ? "在这里写标题\n*一行*就是一行" : "Write your title\n*one line* each");
+/** The tag a new cover comes with, so the layout shows every part from the start. */
+const DEFAULT_TAG = "EP.01";
+/** Whether a title is still one of the placeholders a new cover comes with (in either language). */
+const placeholderTitle = (title) => ["在这里写标题\n*一行*就是一行", "Write your title\n*one line* each"].includes(title);
 /**
- * Channel catId's cover from what was stored (null: a new one, from the profile's design), keeping only
- * the layers that are on that channel (before channels had covers of their own, a layer could be kept to some).
+ * Channel catId's cover from what was stored (null: a new one, from the profile's design, with the
+ * placeholder title and the default tag), keeping only the layers that are on that channel (before
+ * channels had covers of their own, a layer could be kept to some).
  */
 function channelCover(raw, profile, catId) {
   const c = normalizeCover({ ...(raw || {}), catId }, profile);
   c.layers = c.layers.filter((l) => appliesTo(l, catId));
   for (const l of c.layers) delete l.cats;
-  if (!raw) c.title = defaultTitle();
+  if (!raw) { c.title = defaultTitle(); c.tag = DEFAULT_TAG; }
   return settleLinks(c);
 }
 /** This profile's cover of channel catId: the one read or made already, or a new one. */
@@ -863,6 +868,11 @@ async function loadCovers(profile) {
     reorderLayout(profile.design.layers);
     for (const [id, c] of Object.entries(out)) if (reorderLayout(c.layers)) await writeJson(coverPath(profile.id, id), c).catch(fail);
     profile.layerOrder = 2;
+    await saveProfile(profile).catch(fail);
+  }
+  if (!profile.tagged) {   // new covers come with a tag: those made before and not yet touched (the placeholder title, no tag) take it too, once
+    for (const [id, c] of Object.entries(out)) if (!c.tag && placeholderTitle(c.title)) { c.tag = DEFAULT_TAG; await writeJson(coverPath(profile.id, id), c).catch(fail); }
+    profile.tagged = true;
     await saveProfile(profile).catch(fail);
   }
   return out;

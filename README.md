@@ -616,6 +616,7 @@ The layouts keep to a few rules, so a cover reads in the apps' feeds as it comes
 - **Nothing under the badges.** On a landscape cover (16:9, 4:3) Bilibili and YouTube lay the duration and the play count over the bottom corners. The title, the corner tag, the channel name and the channel graphic stay above that strip: the channel name keeps its sub-name beside it, and a colour block too shallow to hold it there grows until it does.
 - **A title that reads.** The title's box leaves room for two lines at 14 px or more as the narrowest feed shows that ratio (Douyin's grid shows a 3:4 cover about 128 px wide, YouTube's side list a 16:9 one about 168 px). Keep a line to 6–8 characters: the longer it is, the smaller it is set.
 - **Something to look at.** In the *Stack* template the channel graphic takes at least 12% of the cover, and the title and the channel name make room for it.
+- **Every part shown.** A new cover comes with the tag `EP.01`, so the corner tag shows from the start (covers made before that and never touched were given it once); type your own under *Cover → Corner tag*, or empty it to leave the tag out.
 
 They hold for the template's own places: a layer you drag stays where you put it, and so does a colour block you resize or tilt under *Style → Layout*. The *Split* template's title column is narrow at portrait sizes: there a line of more than 5 characters is set smaller than the feeds read well.
 

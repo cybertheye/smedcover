@@ -103,6 +103,7 @@ export function normalizeProfile(raw) {
     design: { layers: carryFonts(normalizeLayers(p.design && p.design.layers, categories.map((x) => x.id)), oldFonts, style.look).filter((l) => l.type !== "photo" && l.type !== "subject") },
     ...(oldFonts ? { oldFonts } : {}),   // kept until the open cover has been given them too (see the app), then dropped
     ...(p.layerOrder === 2 ? { layerOrder: 2 } : {}),   // its design and covers have been given the layout layers' new default order (see loadCovers in the app)
+    ...(p.tagged === true ? { tagged: true } : {}),     // its covers not yet touched have been given the default tag, once (see loadCovers)
   };
 }
 

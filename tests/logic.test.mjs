@@ -1582,3 +1582,9 @@ test("every look's layout meets the cover standards: nothing under the apps' bad
   assert.equal(feedOf(1080, 1350), null);                          // 4:5: no platform here wants it
   assert.ok(badged(1920, 1080) && badged(1600, 1200) && !badged(1200, 1600) && !badged(2538, 1080));   // the article cover has no badges
 });
+
+test("a profile remembers its untouched covers were given the default tag, so it happens once", () => {
+  assert.equal(normalizeProfile({ ...sampleProfile("en"), tagged: true }).tagged, true);
+  assert.equal(normalizeProfile(sampleProfile("en")).tagged, undefined);
+  assert.equal(normalizeProfile({ ...sampleProfile("en"), tagged: "yes" }).tagged, undefined);
+});

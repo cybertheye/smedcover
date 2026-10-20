@@ -144,6 +144,8 @@ The default order changed once (it was `bg accent graphic brand title tag catnam
 `reorderLayout()` puts a design or cover still in the old default order into the new one, each free layer
 going with the layout layer it lay directly above. The app does it once per profile, in `loadCovers()`
 (the profile then keeps `layerOrder: 2`), since someone may later put the old order back on purpose.
+In the same way a new cover comes with the tag `EP.01`, and the covers made before that and never touched
+(the placeholder title, no tag) are given it once (`tagged: true`), so a tag emptied later stays empty.
 
 **Layout parts left out**: a layout layer but the ground may carry `off: true` (Cover → *Layout parts*,
 `partsBox()`): it is then hidden, and the editor leaves it out of the layer list, the 3D view and *Hide
