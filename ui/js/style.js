@@ -7006,8 +7006,8 @@ const construct = {
 // painted on black paper, so the dark is the ground and only the light is laid on — an ultramarine night,
 // stepped towers lit by gold windows and floodlit from their setbacks, searchlights crossing, a moon
 // barred by cloud, lavender fog between the rows, an airship, a neon blade sign; the floodlight in the
-// channel's colour (the paintings' crimson); lettering as a theatre front's, lit champagne metal with an
-// inline, the highlighted words glass glowing in the channel's colour. Gilded, black and gold.
+// channel's colour (the paintings' crimson); lettering as a theatre front's lit letters, tungsten lamps
+// glowing warm, the highlighted words neon in the channel's colour. Gilded, black and gold.
 const DK = { ink: [7, 6, 16], base: [12, 10, 28], cream: [255, 242, 214], gold: [240, 186, 88], amber: [255, 200, 108], pale: [255, 232, 168], crimson: [214, 28, 42] };
 /** The night, top to horizon, at gilt g (0: Gotham's ultramarine, 1: black and gold), reddened by r toward Gotham's crimson sky. */
 const dkSky = (g, r = 0) => [mix(mix([3, 3, 14], [5, 4, 3], g), [12, 2, 6], r), mix(mix([12, 11, 54], [14, 11, 8], g), [70, 6, 18], r), mix(mix([34, 30, 128], [36, 26, 16], g), [178, 18, 34], r), mix(mix([86, 64, 188], [96, 62, 30], g), [246, 70, 52], r)];
@@ -7376,8 +7376,6 @@ function dkSmall(ctx, C) {
 }
 /** How far the deco capitals are set apart: a share of each glyph's own width. */
 const DK_TRACK = 0.09;
-/** A Chinese, Japanese or Korean character, or full-width punctuation. */
-const CJK = /[⺀-鿿가-힯豈-﫿＀-￯]/;
 /** [r, g, b] -> [hue (0–360), saturation, lightness]. */
 function dkHsl(c) {
   const r = c[0] / 255, g = c[1] / 255, b = c[2] / 255, hi = Math.max(r, g, b), lo = Math.min(r, g, b), l = (hi + lo) / 2, d = hi - lo;
@@ -7402,10 +7400,19 @@ function dkGlass(C) {
   while (L < 0.8 && lum(dkRgb(h, s, L)) < 0.36) L += 0.02;
   return { body: dkRgb(h, s, L), deep: dkRgb(h, s, L * 0.78), core: dkRgb(h, s, 0.86), glow: dkRgb(h, 1, Math.min(0.62, L + 0.04)) };
 }
-/** The metal of the deco capitals, top to foot of a letter `fs` high: moonlight across the top, ivory, champagne, and the floodlight warm at the foot; at gilt g, warmer gold all the way. */
-function dkMetal(ctx, fs, g) {
-  const gr = ctx.createLinearGradient(0, -fs * 0.8, 0, fs * 0.06);
-  for (const [t, c, gc] of [[0, [226, 226, 250], [255, 244, 214]], [0.3, [252, 246, 232], [252, 234, 190]], [0.62, [244, 222, 178], [238, 204, 138]], [0.86, [252, 208, 138], [246, 200, 122]], [1, [255, 230, 172], [255, 226, 160]]]) gr.addColorStop(t, css(mix(c, gc, g)));
+/**
+ * The light of the deco letters: a marquee's lamps, tungsten — a core near white, warmer toward the
+ * foot, an amber rim where the light meets the letter's edge, a deeper line at the very edge, the glow
+ * thrown round them. At gilt g, gold light.
+ */
+const dkLamp = (g) => ({
+  core: mix([255, 253, 246], [255, 246, 214], g), foot: mix([255, 236, 198], [255, 220, 150], g),
+  rim: mix([255, 190, 108], [238, 160, 52], g), deep: mix([186, 106, 40], [160, 96, 20], g), glow: mix([255, 206, 132], [255, 184, 70], g),
+});
+/** The face of a lamp-lit letter `fs` high, top to foot. */
+function dkFace(ctx, fs, g) {
+  const L = dkLamp(g), gr = ctx.createLinearGradient(0, -fs * 0.8, 0, fs * 0.06);
+  gr.addColorStop(0, css(L.core)); gr.addColorStop(0.55, css(L.core)); gr.addColorStop(1, css(L.foot));
   return gr;
 }
 /** Where a line of lettering `fs` high and `right` long lies on ctx's canvas, in whole pixels, with a little room round it: { x0, y0, w, h, k (pixels per unit) }, or null when it is off the canvas. */
@@ -7428,7 +7435,7 @@ function dkWork(ctx, slot, B) {
 const deco = {
   id: "deco",
   repaint: (c) => `an Art Deco night scene painted on black paper, in the style of the background paintings of 1990s animated noir: an ultramarine and violet night, stepped skyscrapers with setbacks and spires, lit gold windows, crossing searchlight beams, lavender fog, deep crimson and ${c} floodlight on the facades, crushed black shadows, airbrushed gradients, film grain; still the same place, no text.`,
-  about: { zh: "暗黑装饰：九十年代动画里哥谭市那种画在黑卡纸上的装饰艺术夜景——黑是底，只把光画上去：群青色的夜空，层层退台的摩天楼亮着金色窗灯、立柱被从退台下打上来的泛光照亮，探照灯在天上交叉，云条横过月亮，楼与楼之间浮着淡紫的夜雾；可加飞艇、竖排霓虹招牌、阶梯拱框和剪影人物。泛光、色块和高亮字用频道色（原画里的深红）；标题像剧院门脸上亮着的招牌字：字距拉开的香槟色金属大写字，笔画里刻一道内线，高亮字是从里面点亮的频道色玻璃。「鎏金」拉满变成黑金夜色。神秘、华丽、带点黑色电影的悬疑——适合城市、夜生活、悬疑推理、历史人文、电影解读、音乐与奢华品类。照片会被画成群青夜色，暖色保留为深红和金色。只有夜色底；自带平直的版式。", en: "Dark deco: the Art Deco city by night as the 90s animated series painted Gotham, on black paper — the dark is the ground and only the light is laid on: an ultramarine night, stepped skyscrapers with gold-lit windows and pilasters floodlit from their setbacks, searchlights crossing, bars of cloud across the moon, lavender fog between the rows; an airship, a neon blade sign, a stepped proscenium and a silhouette if you like. The floodlight, the colour block and the highlighted words take the channel colour (the paintings' crimson); the title is set as the lit lettering of a theatre front, spaced capitals of champagne metal with an inline, the highlighted words glass lit from within in the channel's colour. Turn up Gilt for black and gold. Mysterious, opulent, a little film noir — for cities, nightlife, mysteries, history, film, music and luxury. A photo is painted into the ultramarine night, its warm colours kept as crimson and gold. Night ground only; flat layouts of its own." },
+  about: { zh: "暗黑装饰：九十年代动画里哥谭市那种画在黑卡纸上的装饰艺术夜景——黑是底，只把光画上去：群青色的夜空，层层退台的摩天楼亮着金色窗灯、立柱被从退台下打上来的泛光照亮，探照灯在天上交叉，云条横过月亮，楼与楼之间浮着淡紫的夜雾；可加飞艇、竖排霓虹招牌、阶梯拱框和剪影人物。泛光、色块和高亮字用频道色（原画里的深红）；标题像剧院门脸上亮着的招牌字：字距拉开的大写字，每个字是一盏灯——中间钨丝白、边上透出琥珀色，外面一圈暖光，细细的暗边；高亮字是频道色的霓虹灯管。「鎏金」拉满变成黑金夜色。神秘、华丽、带点黑色电影的悬疑——适合城市、夜生活、悬疑推理、历史人文、电影解读、音乐与奢华品类。照片会被画成群青夜色，暖色保留为深红和金色。只有夜色底；自带平直的版式。", en: "Dark deco: the Art Deco city by night as the 90s animated series painted Gotham, on black paper — the dark is the ground and only the light is laid on: an ultramarine night, stepped skyscrapers with gold-lit windows and pilasters floodlit from their setbacks, searchlights crossing, bars of cloud across the moon, lavender fog between the rows; an airship, a neon blade sign, a stepped proscenium and a silhouette if you like. The floodlight, the colour block and the highlighted words take the channel colour (the paintings' crimson); the title is set as the lit letters of a theatre front, spaced capitals each a lamp — tungsten white at heart, amber at the rim, a warm glow round it, a fine dark keyline — the highlighted words neon tubes in the channel's colour. Turn up Gilt for black and gold. Mysterious, opulent, a little film noir — for cities, nightlife, mysteries, history, film, music and luxury. A photo is painted into the ultramarine night, its warm colours kept as crimson and gold. Night ground only; flat layouts of its own." },
   name: { zh: "暗黑装饰", en: "Dark deco" },
   oneTheme: true,
   seeded: true,
@@ -7556,13 +7563,12 @@ const deco = {
     },
   },
   /**
-   * Deco capitals as the lit lettering of a theatre front, set with air between them. Each letter a
-   * channel of pale champagne metal (with an inline running down its strokes, a Latin one), lit as the city lights
-   * it — moonlight cool across the top, the floodlight warm at the foot — in a fine bronze keyline
-   * (the outline slider); a shade of the night stepped down behind (the shadow slider), a soft dark
-   * round them so they stand off the sky, the halation of their light. The highlighted words are the
-   * same letters with their tube lit: glass in the channel's hue toned into the night, deep at the
-   * rim, white-hot down the middle, throwing its light round them.
+   * Deco capitals as the lit letters of a theatre front, set with air between them: each letter a
+   * lamp — tungsten white at its heart, an amber rim where the light meets its edge — in a fine dark
+   * keyline (the outline slider), throwing a warm glow round itself; a shade of the night stepped down
+   * behind (the shadow slider), a soft dark round them so they stand off the sky and the searchlights.
+   * The highlighted words are neon: glass in the channel's hue toned into the night, deep at the rim,
+   * white-hot down the middle, throwing its colour round them.
    */
   runs(ctx, pass, o, p) {
     upright(ctx);
@@ -7570,64 +7576,51 @@ const deco = {
     // a colour of the layer's own is kept: lit glass of it when it is light enough to be light, flat when it is dark (ink on a pale plate)
     const lit = (c) => lum(c) > 0.3, glass = o.hi ? (lit(o.hi) ? { body: o.hi, deep: mix(o.hi, DK.ink, 0.25), core: mix(o.hi, [255, 255, 255], 0.6), glow: o.hi } : { body: o.hi, deep: o.hi, core: o.hi, glow: null }) : dkGlass(o.C || DK.crimson);
     const bright = !o.fill || lit(o.fill);
+    const lamp = !o.fill ? dkLamp(g) : bright ? { core: mix(o.fill, [255, 255, 255], 0.5), foot: mix(o.fill, [255, 255, 255], 0.3), rim: o.fill, deep: mix(o.fill, DK.ink, 0.3), glow: o.fill } : null;
     // the tracking: every glyph set apart by a share of its own width, the line drawn that much smaller so it keeps its measure
     const chars = [];
     let cx = 0;
     pass((a) => { for (const t of a.t) { const w = ctx.measureText(t).width; chars.push({ t, hi: a.hi, x: cx }); cx += w * (1 + DK_TRACK); } });
     ctx.scale(1 / (1 + DK_TRACK), 1 / (1 + DK_TRACK));
     const each = (fn, only) => { for (const c of chars) if (only === undefined || c.hi === only) fn(c, c.x); };
-    const face = o.fill ? css(o.fill) : dkMetal(ctx, fs, g), cut = o.fill ? css(mix(o.fill, DK.ink, 0.45)) : css(mix([140, 96, 52], [116, 72, 30], g));
+    const face = lamp ? (o.fill ? css(lamp.core) : dkFace(ctx, fs, g)) : css(o.fill);
     if (!canPaint(ctx)) { each((c, x) => { ctx.fillStyle = c.hi ? css(glass.body) : face; ctx.fillText(c.t, x, 0); }); return; }   // nothing to work on: the letters plain
     ctx.lineJoin = "miter"; ctx.miterLimit = 2.5;
     const shade = mix(dkSky(g)[1], DK.ink, 0.55), B = fast ? null : dkBox(ctx, fs, cx);
     // the letters alone, white, on work canvases the size of the line: plain and highlighted apart
     const mask = (slot, hi) => { if (!B || !chars.some((c) => c.hi === hi)) return null; const M = dkWork(ctx, slot, B); M.fillStyle = "#fff"; each((c, x) => M.fillText(c.t, x, 0), hi); return M.canvas; };
     const Mp = mask("dkPlain", false), Mh = mask("dkHi", true);
-    /** Only the soft shadow of mask m: `col`, r units across, dy units down (the mask itself is laid off the canvas, its shadow thrown back onto the line). */
-    const glowOf = (m, col, r, dy = 0) => { if (m) inPixels(ctx, () => { const D = B.x0 + B.w + 20; ctx.shadowColor = col; ctx.shadowBlur = r * B.k; ctx.shadowOffsetX = D; ctx.shadowOffsetY = dy * B.k; ctx.drawImage(m, B.x0 - D, B.y0); }); };
+    /** Only the soft shadow of mask m: `col`, r units across, dy units down (the mask itself is laid off the canvas, its shadow thrown back onto the line); `light`: screened, so it brightens. */
+    const glowOf = (m, col, r, dy = 0, light = false) => { if (m) inPixels(ctx, () => { const D = B.x0 + B.w + 20; if (light) ctx.globalCompositeOperation = "screen"; ctx.shadowColor = col; ctx.shadowBlur = r * B.k; ctx.shadowOffsetX = D; ctx.shadowOffsetY = dy * B.k; ctx.drawImage(m, B.x0 - D, B.y0); }); };
     // a soft dark round the letters, the paper showing through, so they stand off whatever is behind
-    for (const m of [Mp, Mh]) glowOf(m, css(DK.ink, 0.5), fs * 0.14, fs * 0.03);
+    for (const m of [Mp, Mh]) glowOf(m, css(DK.ink, 0.5), fs * 0.09, fs * 0.02);
     if (s > 0) {   // the shade: the letters' depth stepped down behind them, in the night's darkest blue
       const d = fs * 0.045 * s, k0 = Math.hypot(ctx.getTransform().a, ctx.getTransform().b), n = Math.max(2, Math.min(10, Math.round((d * k0) / 1.5)));
       ctx.fillStyle = css(shade);
       for (let i = n; i >= 1; i--) each((c, x) => ctx.fillText(c.t, x + (d * i) / n * 0.6, (d * i) / n));
     }
-    // their light: a warm halation round the metal, the glass's own colour round the highlighted words
-    if (bright) glowOf(Mp, css(DK.amber, 0.1), fs * 0.22);
-    if (glass.glow) { glowOf(Mh, css(glass.glow, 0.3), fs * 0.42); glowOf(Mh, css(glass.glow, 0.38), fs * 0.12); }
-    if (k > 0) { ctx.strokeStyle = css(mix([168, 124, 66], [140, 96, 40], g)); ctx.lineWidth = fs * 0.036 * k; each((c, x) => ctx.strokeText(c.t, x, 0)); }   // the keyline: the metal's edge
+    // their light thrown round them, added to what is there rather than laid over it: the lamps' warm glow, the neon's own colour
+    if (lamp) { glowOf(Mp, css(lamp.glow, 0.42), fs * 0.55, 0, true); glowOf(Mp, css(lamp.glow, 0.6), fs * 0.11, 0, true); }
+    if (glass.glow) { glowOf(Mh, css(glass.glow, 0.42), fs * 0.42, 0, true); glowOf(Mh, css(glass.glow, 0.55), fs * 0.12, 0, true); }
+    if (k > 0) { ctx.strokeStyle = css(mix(DK.ink, [52, 30, 12], 0.5)); ctx.lineWidth = fs * 0.04 * k; each((c, x) => ctx.strokeText(c.t, x, 0)); }   // the keyline: the dark edge of the sign
     if (!B) { each((c, x) => { ctx.fillStyle = c.hi ? css(glass.body) : face; ctx.fillText(c.t, x, 0); }); return; }
-    each((c, x) => { ctx.fillStyle = face; ctx.fillText(c.t, x, 0); }, false);
-    // the inline: a band of darker metal following the letters' edge a little way in, cut into them alone
-    // (on a work canvas, so it stays inside them), its corners mitred. Latin capitals only: in a Chinese
-    // character it would run round every cluster of strokes and clog it, so those stay whole, polished metal.
-    const inl = chars.filter((c) => !c.hi && !CJK.test(c.t));
-    if (inl.length) {
-      const E = dkWork(ctx, "dkBand", B);
-      E.lineJoin = "miter"; E.miterLimit = 3;
-      E.fillStyle = o.fill ? face : dkMetal(E, fs, g); for (const c of inl) E.fillText(c.t, c.x, 0);
-      E.globalCompositeOperation = "source-atop";
-      E.strokeStyle = cut; E.lineWidth = fs * 0.058; for (const c of inl) E.strokeText(c.t, c.x, 0);
-      E.strokeStyle = E.fillStyle; E.lineWidth = fs * 0.04; for (const c of inl) E.strokeText(c.t, c.x, 0);
-      inPixels(ctx, () => ctx.drawImage(E.canvas, B.x0, B.y0));
-    }
-    // the moon catching the top edge of every stroke: a fine pale line along it (the letters less themselves moved down)
-    if (bright && Mp) {
-      const E = dkWork(ctx, "dkBand", B);
-      E.fillStyle = css(mix([250, 248, 255], [255, 246, 214], g), 0.9); each((c, x) => E.fillText(c.t, x, 0), false);
-      E.setTransform(1, 0, 0, 1, 0, 0); E.globalCompositeOperation = "destination-out"; E.drawImage(Mp, 0, Math.max(1, Math.round(fs * 0.014 * B.k)));
-      inPixels(ctx, () => ctx.drawImage(E.canvas, B.x0, B.y0));
-    }
-    // the glass: white-hot letters, their colour glowing in from the rim (the shadow of all that is not
-    // them, cast into them), a tighter deeper rim at the very edge
-    if (Mh) {
+    /**
+     * Letters lit from within: their face, and their colour glowing in from the rim — the shadow of all
+     * that is not them, cast into them — each of `rims` [blur in type sizes, colour, alpha], the last
+     * the tightest, at the very edge.
+     */
+    const litUp = (m, hi, fill, rims) => {
       const E = dkWork(ctx, "dkBand", B), N = dkWork(ctx, "dkMask", B), D = B.w + B.h + 50;
-      E.fillStyle = css(glass.core); each((c, x) => E.fillText(c.t, x, 0), true);
-      N.setTransform(1, 0, 0, 1, 0, 0); N.fillStyle = "#000"; N.fillRect(0, 0, B.w, B.h); N.globalCompositeOperation = "destination-out"; N.drawImage(Mh, 0, 0);
+      E.fillStyle = fill; each((c, x) => E.fillText(c.t, x, 0), hi);
+      N.setTransform(1, 0, 0, 1, 0, 0); N.fillStyle = "#000"; N.fillRect(0, 0, B.w, B.h); N.globalCompositeOperation = "destination-out"; N.drawImage(m, 0, 0);
       E.setTransform(1, 0, 0, 1, 0, 0); E.globalCompositeOperation = "source-atop"; E.shadowOffsetX = D;
-      for (const [r, col, al] of [[0.11, glass.body, 1], [0.055, glass.body, 1], [0.014, glass.deep, 1]]) { E.shadowColor = css(col, al); E.shadowBlur = r * fs * B.k; E.drawImage(N.canvas, -D, 0); }
+      for (const [r, col, al] of rims) { E.shadowColor = css(col, al); E.shadowBlur = r * fs * B.k; E.drawImage(N.canvas, -D, 0); }
       inPixels(ctx, () => ctx.drawImage(E.canvas, B.x0, B.y0));
-    }
+    };
+    // the lamps: tungsten white, the amber rim only a little way in, so the strokes of a Chinese character stay light
+    if (Mp) { if (lamp) litUp(Mp, false, face, [[0.07, lamp.rim, 0.75], [0.025, lamp.rim, 0.9], [0.008, lamp.deep, 0.9]]); else each((c, x) => { ctx.fillStyle = face; ctx.fillText(c.t, x, 0); }, false); }
+    // the neon: white-hot down the middle, the glass's colour deep at the rim
+    if (Mh) litUp(Mh, true, css(glass.core), [[0.11, glass.body, 1], [0.055, glass.body, 1], [0.014, glass.deep, 1]]);
   },
   // objects are lit as the city is: faces in the night's blues (gold when gilded), the colour turned to floodlight, fine dark lines; the small parts stay ink on the colour block
   wrap: (ctx, C, p, plates) => {
@@ -7636,7 +7629,7 @@ const deco = {
     return mapped(ctx, { fill: { ink: DK.ink, light: mix([206, 202, 255], DK.pale, g), mid: mix([108, 96, 206], [196, 140, 64], g), dark: mix([30, 26, 82], [52, 34, 16], g), colour: (c) => mix(dkSpot(c), [255, 255, 255], 0.08) }, stroke: { ink: DK.ink, light: DK.cream }, line: 0.6 });
   },
   sticker: painters({ line: DK.ink, lineScale: 0.55, tone: inkAs(DK.ink, (c) => dkSpot(c)), shadow(ctx, draw) { ctx.save(); ctx.translate(7, 9); draw(css(DK.ink, 0.8)); ctx.restore(); } }),
-  /** The corner tag: a theatre marquee — a black box ruled in gold, a row of lit bulbs along its top and foot, its capitals in the title's lit champagne metal. */
+  /** The corner tag: a theatre marquee — a black box ruled in gold, a row of lit bulbs along its top and foot, its capitals in the title's lamplight. */
   tag(ctx, str, x, y, fs, C, p, ink) {
     const f = fs * 0.64;
     ctx.font = `700 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
@@ -7651,7 +7644,7 @@ const deco = {
     const base = top + h * 0.5 + f * 0.36;
     ctx.save();
     if (!fast && canPaint(ctx)) { const m = ctx.getTransform(); ctx.shadowColor = css(DK.amber, 0.45); ctx.shadowBlur = f * 0.3 * Math.hypot(m.a, m.b); }
-    ctx.translate(0, base); ctx.fillStyle = ink || dkMetal(ctx, f, (p && p.gilt) || 0); spaced(ctx, str, x + f * 0.75, 0, 4);
+    ctx.translate(0, base); ctx.fillStyle = ink || dkFace(ctx, f, (p && p.gilt) || 0); spaced(ctx, str, x + f * 0.75, 0, 4);
     ctx.restore();
     return { x: x - 6, y: top - 6, w: w + 12, h: h + 12 };
   },
