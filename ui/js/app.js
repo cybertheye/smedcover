@@ -2134,7 +2134,8 @@ const ICONS = Object.fromEntries(Object.entries({
  */
 let lastNameClick = { id: "", at: 0 };
 function nameClick(e, L) {
-  if (S.focus && !spotIds().includes(L.id)) return;   // the row says why  const now = Date.now(), second = !e.shiftKey && lastNameClick.id === L.id && now - lastNameClick.at < 450;
+  if (S.focus && !spotIds().includes(L.id)) return;   // the row says why
+  const now = Date.now(), second = !e.shiftKey && lastNameClick.id === L.id && now - lastNameClick.at < 450;
   lastNameClick = second ? { id: "", at: 0 } : { id: L.id, at: now };
   if (!second) return;   // the row selects it
   e.stopPropagation();
