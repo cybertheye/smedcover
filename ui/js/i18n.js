@@ -266,7 +266,7 @@ const STR = {
 
   "exp.sizes": ["输出尺寸", "Output sizes"],
   "exp.names": ["尺寸名称", "Size names"],
-  "exp.namesHint": ["给尺寸起个自己的名字（如「B 站封面」），缩略图下方和导出时会显示它；留空则显示这个比例适用的平台和比例。", "Give a size your own name (e.g. “Bilibili cover”) and it is shown under its thumbnail and when exporting; leave empty to show the platforms its ratio is for, and the ratio."],
+  "exp.namesHint": ["给尺寸起个自己的名字（如「B 站封面」），画布上方和导出时会显示它（画布下方的缩略图只显示像素尺寸）；留空则显示这个比例适用的平台和比例。", "Give a size your own name (e.g. “Bilibili cover”) and it is shown over the canvas and when exporting (the thumbnails under the canvas show only the pixels); leave empty to show the platforms its ratio is for, and the ratio."],
   "exp.custom": ["自定义", "Custom"],
   "exp.addSize": ["添加", "Add"],
   "exp.scale": ["清晰度", "Resolution"],

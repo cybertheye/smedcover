@@ -312,7 +312,7 @@ $("strip").addEventListener("wheel", (e) => { if (Math.abs(e.deltaY) > Math.abs(
 function buildStrip() {
   $("strip").replaceChildren(...S.profile.sizes.map((size) => {
     const key = sizeKey(size);
-    return el("figure", { class: key === S.sel ? "on" : "", onclick: () => selectSize(key) }, el("canvas", { id: "th-" + key }), el("figcaption", { title: sizeLabel(size) }, caption(size)));
+    return el("figure", { class: key === S.sel ? "on" : "", onclick: () => selectSize(key) }, el("canvas", { id: "th-" + key }), el("figcaption", { title: sizeLabel(size) }, `${size.w}×${size.h}`));   // the pixels alone; what it is called shows on hover and over the canvas
   }));
 }
 function selectSize(key) {
