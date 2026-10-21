@@ -835,10 +835,12 @@ is clipped into it (unless it is clipped onto another), below only the subjects 
 each size is drawn small once to learn every layer's box, then for the new angle and size the range the
 centre may take at each size (less a hair for outlines and shadows) is found, and a place drawn within
 what all sizes allow; when nothing is allowed the layer is set straighter, then smaller. Layers locked,
-filling the canvas, or cut-outs following their photo are left where they are. While hands are dealt, a step
-waiting to be recorded (`recordHistory()`) waits too. The hands show in Surprise me's window as they come
-(`dealOpen()`, `dealShow()`: the drawing `seenNow()` made at the size shown, with the standards missed;
-`SURPRISE.pace`, 90 ms, the least between two, so they can be seen arriving); the one kept is marked
+filling the canvas, or cut-outs following their photo are left where they are. Before that, words the user moved or
+resized go back where the rules put them: the layout's lettered layers (`LETTERED`) to their placement in the
+profile's design (`channelCover(null, …)`), the user's text layers to a new one's size with no size of their own.
+While hands are dealt, a step waiting to be recorded (`recordHistory()`) waits too. The hands show in Surprise me's
+window as they come (`dealOpen()`, `dealShow()`: the drawing `seenNow()` made at the size shown, with the standards
+missed; `SURPRISE.pace`, 90 ms, the least between two, so they can be seen arriving); the one kept is marked
 (`dealKept()`), and `dealTake()` puts another in its place on the same step of undo while nothing has followed (a
 new history, `resetHistory()`, forgets the step). The window sits over the left column, so the canvas stays in
 view; `body.dealing` keeps the page from being worked on while hands are dealt onto the cover.

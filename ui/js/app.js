@@ -11,7 +11,7 @@ import { platformsFor, ratioOf } from "./platforms.js";
 import { boxOf, overlap, titleContrast, coverScore, pickHand } from "./check.js";
 import { tuneLook, recipeOf, baseRecipe, letterFor, coverContext, FAMILIES } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, LETTERED, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
@@ -3353,9 +3353,10 @@ function setMode(mode) {
  * One hand of Surprise me, dealt onto the cover and the profile's style as they are: the look and its
  * settings, the colour block's shape, text effects and bends, the small switches on each layer, look
  * effects, and where added items sit. What the cover *says* is left alone — the title and tag, the
- * channel and its colour, the photo, which layers exist — and so is the layout.
+ * channel and its colour, the photo, which layers exist — and so is the layout. `design`: the layers of the
+ * profile's design by id, where moved words go back to.
  */
-function dealHand() {
+function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l]))) {
   const R = Math.random, pick = (a) => a[Math.floor(R() * a.length)], between = (a, b) => a + R() * (b - a), chance = (p) => R() < p;
   const round = (v, step) => Math.round(v / step) * step, st = S.profile.style;
   // the look, its sliders tuned by its recipe (deal.js): about the values it was made with, its optional parts now and then
@@ -3369,8 +3370,19 @@ function dealHand() {
   if (S.cover.scene) delete S.cover.scene[st.look];
   if (chance(0.4)) for (const key of Object.keys(LOOKS[st.look].scene || {})) moveScene(S.cover, st.look, key, "all", frame().key, round(between(-0.06, 0.06), 0.005), round(between(-0.05, 0.05), 0.005));
   st.theme = chance(recipeOf(st.look, ctx).dark) ? "dark" : "light";
-  // the layout is left as it is — the template, its proportions, where the layout layers stand — and
-  // every layer's own choices are dealt; the letterings and bends as the look's recipe has them, the
+  // words the user moved or resized go back where the rules put them:
+  // the layout's — title, subtitle, tag, channel name, brand row — to where the profile's design has them, the
+  // user's own text layers to a new one's size, at no size of their own, to be placed afresh (dealPlaces)
+  {
+    const fresh = newLayer("text").t.all;
+    for (const L of S.cover.layers) {
+      if (L.locked || !L.visible || !LETTERED.includes(L.type)) continue;
+      if (L.type === "text") L.t = { all: { ...L.t.all, s: fresh.s, kx: fresh.kx, ky: fresh.ky }, by: {} };
+      else if (design.has(L.id)) L.t = copyOf(design.get(L.id).t);
+    }
+  }
+  // the layout is left as it is — the template, its proportions, where the layout layers stand (but for the
+  // words put back above) — and every layer's own choices are dealt; the letterings and bends as the look's recipe has them, the
   // subtitle after the title (it is lettered like it half the time)
   // the title over everything else, with what is clipped into it, so nothing dealt lies over it (one clipped onto another
   // layer stays) — but for the subjects cut out of photos that stood over it, which still do, as on a magazine cover
@@ -3446,6 +3458,7 @@ async function surprise(e) {
     clearTimeout(timers.hist); commitHistory();   // whatever was being edited becomes a step of its own, so each hand is exactly one undo
     SURPRISE.step = null;
     before = handNow();
+    const design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l]));
     const was = before.style.look, hands = [];
     const sizes = S.profile.sizes.filter((z) => z.on !== false), t0 = performance.now();
     // the title's contrast is measured at one size: the one shown, or the first of its ratio, which the standards read (else the first with a ratio)
@@ -3456,7 +3469,7 @@ async function surprise(e) {
     for (let i = 0; i < SURPRISE.hands && (i < 2 || performance.now() - t0 - shown_ < SURPRISE.ms); i++) {
       if (i) putHand(before);
       try {
-        dealHand();
+        dealHand(design);
         const { seen, measured, shots } = seenNow(sizes, here), { score, cost, issues } = coverScore({ title: S.cover.title, sizes: measured, seen });
         hands.push({ ...handNow(), score: score - (S.profile.style.look === was ? 1 : 0), cost, issues });
         // the hand shows before the next is dealt, and long enough after the last to be seen coming
