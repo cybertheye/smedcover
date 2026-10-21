@@ -229,6 +229,8 @@ It deals six hands at a time (fewer, at least two, when the looks are slow to dr
 
 Each deal is one step of undo, however fast you click. Deal again if you do not like it, or undo to the hand before.
 
+While it deals, a window over the left column shows each hand as it comes, drawn at the size shown, with its look and the standards it misses (*Small type*, *Low contrast*, *Small picture*, *Under badges*) or *Passes*; then the hand kept is marked and put on the canvas. Click another hand to take it instead (still one step of undo). Esc, *Done* or a click outside closes the window.
+
 **How Surprise me deals this look**, folded under the look's sliders in *Edit → Style*, shows the current look's recipe and lets you change it: its family (*Pop*, *Print*, *Light*; picking one sets the rest to that family's), how often it keeps its own lettering, which other letterings and which bends it may be given (click to switch each on or off), how often it is bent, how often it is on the dark ground (for a look with both grounds), and how often each of its optional parts comes in (its switches, and the sliders off by default). What you change is kept in the settings, for every profile; *Restore this look's recipe* puts the built-in one back.
 
 ### Title and text layers

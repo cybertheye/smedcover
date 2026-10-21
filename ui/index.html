@@ -289,6 +289,33 @@
   #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#fff;color:var(--ink);padding:12px 22px;font-weight:600;box-shadow:6px 6px 0 var(--acc);opacity:0;pointer-events:none;transition:opacity .2s;z-index:50;max-width:80vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #toast.on{opacity:1}
   body.drop::after{content:attr(data-drop);position:fixed;inset:12px;border:3px dashed var(--acc);background:rgba(10,10,18,.82);display:grid;place-items:center;font-size:28px;letter-spacing:.2em;z-index:45;pointer-events:none}
+  /* Surprise me's window: over the left column, the canvas left in view; the hands as they are dealt, the one kept marked */
+  #deal{position:fixed;z-index:35;background:var(--bg);border:3px solid #fff;box-shadow:8px 8px 0 var(--acc);padding:14px;display:grid;gap:10px;overflow:auto}
+  #deal[hidden]{display:none}
+  #deal .head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  #deal .head b{font-size:15px}
+  #deal .x{background:none;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:0 4px;opacity:.7}
+  #deal .x:hover{opacity:1}
+  #deal .hands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  #deal .hands.tall{grid-template-columns:repeat(3,minmax(0,1fr))}
+  #deal figure{margin:0;border:2px solid var(--line);background:var(--panel);min-width:0}
+  #deal figure.slot{aspect-ratio:var(--ar);background:repeating-linear-gradient(135deg,var(--panel) 0 8px,var(--line) 8px 9px);opacity:.6}
+  #deal figure.hand{cursor:pointer;animation:dealIn .25s ease-out}
+  #deal figure.hand:hover{border-color:var(--line2)}
+  #deal figure.kept{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc)}
+  #deal figure canvas{display:block;width:100%;height:auto}#deal figure .blank{display:block;width:100%;aspect-ratio:var(--ar)}
+  #deal figcaption{display:flex;justify-content:space-between;gap:6px;padding:4px 6px;font-size:11px;line-height:1.4}
+  #deal figcaption span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #deal figcaption .ok{color:#3ddc84}#deal figcaption .warn{color:var(--acc)}#deal figcaption .bad{color:#ff7a88}
+  #deal figcaption span:last-child{white-space:nowrap;flex:none}
+  #deal .hands.tall figcaption{flex-direction:column;gap:0}#deal .hands.tall figcaption span:last-child{white-space:normal}
+  #deal figure.kept figcaption{background:var(--acc);color:var(--ink)}
+  #deal figure.kept figcaption span{color:var(--ink)}
+  #deal .hint{margin:0}
+  body.dealing .app{pointer-events:none}   /* nothing else to be done to the cover while hands are dealt onto it */
+  body.dealing #deal figure{pointer-events:none}body.dealing #deal .acts button{pointer-events:none;opacity:.5}
+  @keyframes dealIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){#deal figure.hand{animation:none}}
   #modal{position:fixed;inset:0;background:rgba(5,5,10,.86);display:grid;place-items:center;z-index:40}
   #modal[hidden]{display:none}
   #modal .dlg{width:min(540px,92vw);max-height:88vh;overflow:auto;background:var(--bg);border:3px solid #fff;box-shadow:12px 12px 0 var(--acc);padding:26px;display:grid;gap:14px}

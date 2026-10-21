@@ -121,11 +121,12 @@ const persistImageAi = () => later("imageAi", 400, () => writeJson("image-ai.jso
 const persistSettings = () => later("settings", 400, () => writeJson("settings.json", S.settings).catch(fail));
 
 const snapshot = () => JSON.stringify({ p: S.profile, c: S.cover });
-function resetHistory() { S.hist = [snapshot()]; S.histIdx = 0; syncTop(); }
+function resetHistory() { S.hist = [snapshot()]; S.histIdx = 0; SURPRISE.step = null; dealClose(); syncTop(); }
 /** Adds the present state to the undo history, unless it is already its last entry. */
 function commitHistory() {
   const snap = snapshot();
   if (snap === S.hist[S.histIdx]) return;
+  if (SURPRISE.step && S.histIdx === SURPRISE.step.idx) { SURPRISE.step = null; dealClose(); }   // edited on: the hand Surprise me dealt is past taking back
   S.hist = S.hist.slice(0, S.histIdx + 1);
   S.hist.push(snap);
   if (S.hist.length > 80) S.hist.splice(0, S.hist.length - 80);
@@ -133,10 +134,11 @@ function commitHistory() {
   syncTop();
 }
 /** Records history a moment after the last change, so a drag or a burst of typing is one step. */
-function recordHistory() { later("hist", 500, commitHistory); }
+function recordHistory() { later("hist", 500, () => (SURPRISE.busy ? recordHistory() : commitHistory())); }   // not while Surprise me deals hands onto the cover
 async function timeTravel(step) {
   clearTimeout(timers.hist);
   commitHistory();   // a change still waiting to be recorded is a step of its own: undo goes back to before it
+  SURPRISE.step = null; dealClose();
   const i = S.histIdx + step;
   if (i < 0 || i >= S.hist.length) return;
   S.histIdx = i;
@@ -3410,77 +3412,157 @@ function dealHand() {
   dealPlaces(between, round);
 }
 /** How many hands Surprise me deals to choose from, and how long it may take over them (at least two are dealt). */
-const SURPRISE = { hands: 6, ms: 1500, busy: false, done: 0 };   // done: when the last run ended
+const SURPRISE = { hands: 6, ms: 1500, pace: 90, busy: false, done: 0, step: null };   // pace: the least time between hands shown, ms; done: when the last run ended; step: the step of undo it made ({idx}) while nothing has followed it
+const copyOf = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+/** The cover as Surprise me deals it — the style, the layers, the scene objects' places — copied. */
+const handNow = () => ({ style: copyOf(S.profile.style), layers: copyOf(S.cover.layers), scene: copyOf(S.cover.scene) });
+/**
+ * Hand h put back onto the objects there are — the style, each layer by its id — so whatever holds one
+ * (a panel, a cut-out under way) still holds the cover's.
+ */
+function putHand(h) {
+  const into = (o, v) => { for (const k of Object.keys(o)) if (!(k in v)) delete o[k]; Object.assign(o, copyOf(v)); };
+  into(S.profile.style, h.style);
+  const had = new Map(S.cover.layers.map((l) => [l.id, l]));
+  S.cover.layers = h.layers.map((v) => { const L = had.get(v.id); if (!L) return copyOf(v); into(L, v); return L; });
+  if (h.scene) S.cover.scene = copyOf(h.scene); else delete S.cover.scene;
+}
 /**
  * SURPRISE ME: deals a few hands (dealHand), measures each at every size (seenNow), scores it by the cover
  * standards — the title's type size in the feeds, its contrast, a picture big enough, nothing under the
  * apps' badges — and keeps one of the best (coverScore, pickHand in check.js); a hand in the look the cover
- * had is marked down a little. One step of undo brings the previous cover back.
+ * had is marked down a little. Each hand shows in Surprise me's window as it is dealt, and the one kept is
+ * marked there (another may be taken instead, see dealTake). One step of undo brings the previous cover back.
  */
 async function surprise(e) {
   if (SURPRISE.busy || (e && e.timeStamp < SURPRISE.done)) return;   // a click from while the last one held the window up
   SURPRISE.busy = true;
-  const copy = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
-  const take = () => ({ style: copy(S.profile.style), layers: copy(S.cover.layers), scene: copy(S.cover.scene) });
-  // a hand put back onto the objects there are — the style, each layer by its id — so whatever holds one
-  // (a panel, a cut-out under way) still holds the cover's
-  const into = (o, v) => { for (const k of Object.keys(o)) if (!(k in v)) delete o[k]; Object.assign(o, copy(v)); };
-  const put = (h) => {
-    into(S.profile.style, h.style);
-    const had = new Map(S.cover.layers.map((l) => [l.id, l]));
-    S.cover.layers = h.layers.map((v) => { const L = had.get(v.id); if (!L) return copy(v); into(L, v); return L; });
-    if (h.scene) S.cover.scene = copy(h.scene); else delete S.cover.scene;
-  };
+  document.body.classList.add("dealing");   // nothing else to be done to the cover while hands are dealt onto it
   let before = null;
   try {
     syncTop();
-    await nextPaint();   // the button shows it is at work before the window is held up
-    commitHistory();   // whatever was being edited becomes a step of its own, so each hand is exactly one undo
-    before = take();
+    dealOpen();
+    await nextPaint();   // the button and the window show it is at work before the window is held up
+    clearTimeout(timers.hist); commitHistory();   // whatever was being edited becomes a step of its own, so each hand is exactly one undo
+    SURPRISE.step = null;
+    before = handNow();
     const was = before.style.look, hands = [];
     const sizes = S.profile.sizes.filter((z) => z.on !== false), t0 = performance.now();
     // the title's contrast is measured at one size: the one shown, or the first of its ratio, which the standards read (else the first with a ratio)
     const ratioed = (z) => sizes.find((y) => ratioOf(y.w, y.h) && ratioOf(y.w, y.h) === ratioOf(z.w, z.h)), shown = selSize();
     const at = ratioed(shown) || sizes.find((z) => ratioOf(z.w, z.h)) || shown, here = sizeKey(at);
-    for (let i = 0; i < SURPRISE.hands && (i < 2 || performance.now() - t0 < SURPRISE.ms); i++) {
-      if (i) put(before);
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    let shownAt = 0, shown_ = 0;   // shown_: the time spent showing hands, not counted against dealing them
+    for (let i = 0; i < SURPRISE.hands && (i < 2 || performance.now() - t0 - shown_ < SURPRISE.ms); i++) {
+      if (i) putHand(before);
       try {
         dealHand();
-        const { seen, measured } = seenNow(sizes, here), { score, cost, issues } = coverScore({ title: S.cover.title, sizes: measured, seen });
-        hands.push({ ...take(), score: score - (S.profile.style.look === was ? 1 : 0), cost, issues });
+        const { seen, measured, shots } = seenNow(sizes, here), { score, cost, issues } = coverScore({ title: S.cover.title, sizes: measured, seen });
+        hands.push({ ...handNow(), score: score - (S.profile.style.look === was ? 1 : 0), cost, issues });
+        // the hand shows before the next is dealt, and long enough after the last to be seen coming
+        const since = performance.now() - shownAt, t1 = performance.now();
+        if (since < SURPRISE.pace) await wait(SURPRISE.pace - since);
+        dealShow(hands.length - 1, hands[hands.length - 1], shots[sizeKey(shown)] || shots[here]);
+        shownAt = performance.now(); await nextPaint(); shown_ += performance.now() - t1;
       } catch (e) { console.error(e); }   // a hand that cannot be drawn or measured is left out
     }
     const k = pickHand(hands, Math.random());
     if (k < 0) throw new Error("no hand could be dealt");
-    const kept = hands[k];
-    put(kept);
+    await wait(SURPRISE.pace * 2);   // a moment with every hand in view, then the one kept, on the canvas and marked
+    putHand(hands[k]);
     SURPRISE.last = { kept: k, ms: Math.round(performance.now() - t0), hands: hands.map((h) => ({ look: h.style.look, score: h.score, cost: h.cost, issues: h.issues.map((i) => `${i.rule}:${i.level}:${i.size}:${i.layer}`) })) };   // for the self-test
     touch({ profile: true, cover: true, panel: true, side: true, strip: true });
     commitHistory();
+    SURPRISE.step = { idx: S.histIdx };
+    dealKept(k);
     toast(t("msg.surprise", LOOKS[S.profile.style.look].name[getLang()], t("tpl." + S.profile.style.template).split(/[：:]/)[0]));
   } catch (err) {
-    if (before) { put(before); S.hist[S.histIdx] = snapshot(); touch({ panel: true, side: true }); }   // the cover as it was, and no step of undo for it
+    if (before) { putHand(before); S.hist[S.histIdx] = snapshot(); touch({ panel: true, side: true }); }   // the cover as it was, and no step of undo for it
+    dealClose();
     fail(err);
   } finally {
     await nextPaint();   // still at work until the hand kept is on the screen: clicks made before then are let go (see `done`)
-    SURPRISE.busy = false; SURPRISE.done = performance.now(); syncTop();
+    SURPRISE.busy = false; SURPRISE.done = performance.now();
+    document.body.classList.remove("dealing"); syncTop();
   }
 }
+// ---------- Surprise me's window, over the left column (the canvas stays in view): the hands as they are dealt,
+// the one kept marked, another to be taken instead with a click
+const DEAL = { hands: [], kept: -1 };   // kept: the hand on the canvas
+const DEAL_RULES = ["A1", "B1", "C1", "D1"];   // the standards a hand is marked for missing (see coverScore)
+/** Opens Surprise me's window (or empties it for a new run): a place for each hand to come. */
+function dealOpen() {
+  const box = $("deal") || document.body.appendChild(el("div", { id: "deal", role: "dialog", "aria-label": t("top.surprise") }));
+  const z = selSize(), r = $("left").getBoundingClientRect();
+  DEAL.hands = []; DEAL.kept = -1;
+  const top = Math.max(8, r.top + 8), w = Math.min(Math.max(280, r.width - 16), 460, innerWidth - 16);
+  Object.assign(box.style, { left: `${Math.max(8, Math.min(r.left + 8, innerWidth - w - 8))}px`, top: `${top}px`, width: `${w}px`, maxHeight: `${Math.max(240, Math.min(r.bottom - 8, innerHeight - 8) - top)}px` });
+  box.style.setProperty("--ar", `${z.w} / ${z.h}`);
+  box.replaceChildren(
+    el("div", { class: "head" }, el("b", { id: "deal-what" }, t("deal.dealing")), el("button", { class: "x", title: t("deal.close"), onclick: dealClose }, "×")),
+    el("div", { class: "hands" + (z.h > z.w ? " tall" : ""), id: "deal-hands" }, Array.from({ length: SURPRISE.hands }, () => el("figure", { class: "slot" }))),
+    el("div", { class: "hint", id: "deal-hint" }, t("deal.dealingHint")),
+    el("div", { class: "acts" }, el("button", { class: "btn solid deal-again", onclick: surprise }, t("deal.again")), el("button", { class: "btn", onclick: dealClose }, t("deal.done"))));
+  box.hidden = false;
+}
+/** Hand i, just dealt, in its place: its drawing at the size shown, its look, the standards it misses (red or yellow). */
+function dealShow(i, h, cv) {
+  const slot = $("deal-hands") && $("deal-hands").children[i];
+  if (!slot) return;
+  DEAL.hands[i] = h;
+  const missed = DEAL_RULES.filter((r) => h.issues.some((x) => x.rule === r)), red = h.issues.some((x) => x.level === "red");
+  const verdict = missed.length ? el("span", { class: red ? "bad" : "warn", title: missed.map((r) => t(`deal.ruleTip.${r}`)).join("\n") }, missed.map((r) => t(`deal.rule.${r}`)).join(" · ")) : el("span", { class: "ok" }, t("deal.clean"));
+  slot.replaceChildren(cv || el("div", { class: "blank" }), el("figcaption", {}, el("span", {}, LOOKS[h.style.look].name[getLang()]), verdict));
+  slot.className = "hand"; slot.onclick = () => dealTake(i);
+  $("deal-what").textContent = t("deal.dealt", i + 1);
+}
+/** The hands all dealt: the places left empty go, the one kept is marked. */
+function dealKept(k) {
+  const list = $("deal-hands");
+  if (!list) return;
+  for (const f of [...list.querySelectorAll("figure.slot")]) f.remove();
+  DEAL.kept = k; dealMark();
+}
+function dealMark() {
+  [...$("deal-hands").children].forEach((f, i) => f.classList.toggle("kept", i === DEAL.kept));
+  $("deal-what").textContent = t("deal.kept", DEAL.kept + 1, LOOKS[DEAL.hands[DEAL.kept].style.look].name[getLang()]);
+  $("deal-hint").textContent = t("deal.keptHint");
+}
+/**
+ * Takes hand i instead of the one kept, while nothing has followed the run: still one step of undo.
+ */
+function dealTake(i) {
+  if (SURPRISE.busy || i === DEAL.kept || !DEAL.hands[i]) return;
+  clearTimeout(timers.hist); commitHistory();   // an edit made since is a step of its own, and the hands are past taking
+  if (!SURPRISE.step || S.histIdx !== SURPRISE.step.idx) return dealClose();
+  putHand(DEAL.hands[i]); DEAL.kept = i;
+  touch({ profile: true, cover: true, panel: true, side: true, strip: true });
+  S.hist[S.histIdx] = snapshot();
+  dealMark();
+}
+/** Closes Surprise me's window. */
+function dealClose() { const box = $("deal"); if (box) box.hidden = true; }
+// a press anywhere but in the window (or on SURPRISE ME) closes it: the cover is being worked on again
+addEventListener("pointerdown", (e) => {
+  const box = $("deal");
+  if (box && !box.hidden && !SURPRISE.busy && !box.contains(e.target) && !(e.target.closest && e.target.closest(".deal-btn"))) dealClose();
+}, true);
 /**
  * The cover as it is now, measured for the standards (checkCover's `seen`), drawn small at each of `sizes`:
  * the title (its hit carries the type size set), the pictures, and what must stay clear of the apps'
  * badges (the title, the subtitle, the user's words, cut-outs). At the size keyed `here`, the title against
  * what is under it too: its pixels as the cover shows them with what lies over it see-through (where the
  * title alone, drawn once more, is solid), against the cover drawn with the title and every layer above it
- * see-through — still there for whatever makes room for them, at opacity 0. Returns { seen, measured }
- * (measured: the sizes as checkCover takes them).
+ * see-through — still there for whatever makes room for them, at opacity 0. Returns { seen, measured, shots }
+ * (measured: the sizes as checkCover takes them; shots: the drawing at each size, by its key).
  */
 function seenNow(sizes, here) {
-  const seen = {}, measured = [], byId = new Map(S.cover.layers.map((l) => [l.id, l])), at = S.cover.layers.findIndex((l) => l.type === "title");
+  const seen = {}, measured = [], shots = {}, byId = new Map(S.cover.layers.map((l) => [l.id, l])), at = S.cover.layers.findIndex((l) => l.type === "title");
   const main = mainPhoto(), cut = !!main && S.cover.layers.some((l) => l.of === main.id && l.cut && l.visible);
   const draw = (size, cover, extra = {}) => { const cv = el("canvas"); drawCover(cv, { profile: S.profile, catIndex: catIndex(), size, pixelW: 360, cover, photos: S.photos, ...extra }); return cv; };
   for (const size of sizes) {
     const cv = draw(size, S.cover), [vw, vh] = cv._virtual, k = cv.width / vw, key = sizeKey(size), hits = cv._hits || [], of = (h) => byId.get(h.id);
+    shots[key] = cv;
     measured.push({ key, w: size.w, h: size.h, vw, vh, on: true });
     const t0 = hits.find((h) => h.type === "title"), title = t0 ? { id: t0.id, hit: t0 } : null;
     let contrast = null;
@@ -3500,7 +3582,7 @@ function seenNow(sizes, here) {
       parts: hits.filter((h) => ["title", "subtitle", "text"].includes(h.type) || (h.type === "photo" && of(h) && of(h).cut)).map((h) => ({ id: h.id, hit: h })),
     };
   }
-  return { seen, measured };
+  return { seen, measured, shots };
 }
 /**
  * Asks, then empties this channel's cover: every layer the user added goes, the layout layers return to
@@ -3510,7 +3592,7 @@ function seenNow(sizes, here) {
 function clearDialog() {
   const m = $("modal");
   const go = () => {
-    closeModal(); clearTimeout(timers.hist); commitHistory();
+    closeModal(); clearTimeout(timers.hist); commitHistory(); SURPRISE.step = null;
     const fresh = channelCover({ catId: S.cover.catId, title: S.cover.title, subtitle: S.cover.subtitle, tag: S.cover.tag }, S.profile, S.cover.catId);
     fresh.layers = fresh.layers.filter((l) => !isFree(l.type));   // the design's own added layers go too: empty is empty
     for (const l of fresh.layers) {   // the parts this cover has, and those it leaves out, stay as they are
@@ -3540,7 +3622,7 @@ function syncTop() {
     el("div", { class: "grp" }, b("top.undo", () => timeTravel(-1), { disabled: S.histIdx <= 0 }), b("top.redo", () => timeTravel(1), { disabled: S.histIdx >= S.hist.length - 1 }),
       b("top.clear", clearDialog, { title: t("top.clearTip") })),
     el("div", { class: "spacer" }),
-    el("button", { class: "btn solid cta", style: "margin-right:10px", title: t("top.surpriseHint"), disabled: SURPRISE.busy, onclick: surprise }, t(SURPRISE.busy ? "top.surpriseBusy" : "top.surprise")),
+    el("button", { class: "btn solid cta deal-btn", style: "margin-right:10px", title: t("top.surpriseHint"), disabled: SURPRISE.busy, onclick: surprise }, t(SURPRISE.busy ? "top.surpriseBusy" : "top.surprise")),
     el("button", { class: "btn solid cta", onclick: exportDialog }, t("top.export")),
     el("select", { title: t("lang"), onchange: (e) => { S.settings.lang = e.target.value; setLang(e.target.value); persistSettings(); setMode(S.mode); buildStrip(); } },
       [["zh", "中文"], ["en", "English"]].map(([v, l]) => el("option", { value: v, selected: v === getLang() }, l))));
@@ -3608,6 +3690,7 @@ addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
 addEventListener("drop", async (e) => {
   if (!hasFiles(e)) return;
   e.preventDefault(); dragDepth = 0; document.body.classList.remove("drop");
+  if (SURPRISE.busy) return;   // hands are being dealt onto the cover
   // dropped photos become photo layers: the first of a cover fills it; the others land where they were dropped
   const cv = $("cv"), b = cv.getBoundingClientRect(), over = S.mode === "edit" && e.clientX >= b.left && e.clientX <= b.right && e.clientY >= b.top && e.clientY <= b.bottom;
   const at = over ? { x: clamp((e.clientX - b.left) / b.width, 0, 1), y: clamp((e.clientY - b.top) / b.height, 0, 1) } : null;
@@ -3616,7 +3699,8 @@ addEventListener("drop", async (e) => {
 addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
-  if (typing || !S.cover) return;
+  if (typing || !S.cover || SURPRISE.busy) return;
+  if (key === "escape" && $("deal") && !$("deal").hidden) return dealClose();
   if (mod && key === "z") { e.preventDefault(); return timeTravel(e.shiftKey ? 1 : -1); }
   if (S.mode !== "edit") return;
   const L = layer();
