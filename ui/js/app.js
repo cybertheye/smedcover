@@ -3298,6 +3298,14 @@ function dealHand() {
   // the layout is left as it is — the template, its proportions, where the layout layers stand — and
   // every layer's own choices are dealt; the letterings and bends as the look's recipe has them, the
   // subtitle after the title (it is lettered like it half the time)
+  // the title over everything else, with what is clipped into it, so nothing dealt lies over it (one clipped onto another
+  // layer stays) — but for the subjects cut out of photos that stood over it, which still do, as on a magazine cover
+  const list = S.cover.layers, ti = list.findIndex((l) => l.type === "title");
+  if (ti >= 0 && !list[ti].clip) {
+    const title = list.splice(ti, clipEnd(list, ti) - ti + 1), over = [];
+    for (let i = ti; i < list.length; ) if (list[i].type === "photo" && list[i].cut && !list[i].clip) over.push(...list.splice(i, clipEnd(list, i) - i + 1)); else i++;
+    list.push(...title, ...over);
+  }
   const can = (k) => native || EFFECTS[k].kind !== "outline";
   const dealFx = (L, got) => { delete L.fx; delete L.fxAmt; delete L.bend; delete L.bendAmt; delete L.warp; delete L.reshape; Object.assign(L, got); };
   const titled = letterFor(st.look, "title", R, can);

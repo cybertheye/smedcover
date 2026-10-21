@@ -221,6 +221,7 @@ What each layer allows:
 - each text layer's plate, text effect, outline and shadow; whether a sticker follows the channel colour
 - the look effects of the layers you added (text, stickers, images, photos, colours): one or two, mostly the drawn look's, now and then another look's
 - the layers you added get a new place, angle and size: anywhere on the canvas, but wholly on it at every size, not a pixel off, and your text layers above the bottom 14% (above the badges on a landscape cover); one too big to fit is set straighter, then smaller
+- the title goes to the top of the layers, over everything else (with whatever is clipped into it), so nothing dealt lies over it; only a subject cut out of a photo that stood over the title still does, as on a magazine cover
 
 **Left alone**: the template, how much the colour block takes, the slant of its edge, whether the halves are swapped, and where the layout layers stand (title, colour block, channel graphic, tag, channel name, brand row, corner brackets); the words of the title, subtitle and tag, the current channel and every channel's colour, the photo layers' pictures, which layers exist (none added, none removed), custom lettering colours, locked layers, a photo or a colour filling the canvas.
 
