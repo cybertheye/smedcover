@@ -1,12 +1,13 @@
 // Text effects: how the letters of a headline are painted. An effect belongs to a layer (the title,
 // or a text layer in its headline look); "auto" leaves the choice to the current look.
 //
-// Three kinds, by what they can change:
+// Four kinds, by what they can change:
 //   passes    the same line of text painted several times in different colours and places — outlines,
 //             shadows, echoes. The looks' own letterings are of this kind; "auto" takes the current look's.
 //   mask      the letters are first painted alone on a spare canvas, which is then worked on —
 //             filled with a pattern, worn away, shaded inside, cut into rows — and laid down.
 //   outline   the letters' outlines are fetched as points (see outlines.js) and given real depth.
+//   letters   each letter drawn on its own, in a face and on a scrap of paper of its own (ransom.js).
 // A bend (BENDS: arched, on a circle, wave…) is apart from the lettering, and goes with any of them: the
 // line is painted as it would be, on a canvas of its own, and that picture is bent (bentLine, meshWarp).
 //
@@ -23,6 +24,7 @@
 //   hiPlate     the layer has plates (or a band, a block) under its highlighted words: a lettering that boxes them itself does not
 //   lineW       width of the line                 unit       canvas pixels per unit
 //   seed        a number that differs from line to line, for effects that scatter things
+//   fxSeed      the layer's own seed (its id, and the number Reshuffle draws), for the ransom note
 //   frame       where this line sits in its block, for effects that shape the whole block (the
 //               perspective): {ox, oy, c, box} — the line's origin and slant (x' = x + c·y) in the
 //               block's space, and the block {x, y, w, h} there
@@ -30,6 +32,7 @@
 //               [[dx, dy] × 4] (top left, top right, bottom right, bottom left), in block widths and heights
 import { LOOKS, look, lookValues, lookState, lookParams, isFast, INK } from "./style.js";
 import { outline } from "./outlines.js";
+import { ransom, ransomEpoch } from "./ransom.js";
 
 /**
  * id -> { name: {zh, en}, kind, menu? }: `kind` how it is painted, `menu` the group it is listed under when
@@ -52,6 +55,7 @@ export const EFFECTS = {
   worn: { name: { zh: "磨损", en: "Worn" }, kind: "mask" },
   rows: { name: { zh: "逐行错位", en: "Row shift" }, kind: "mask" },
   extrude: { name: { zh: "立体挤出", en: "Extruded" }, kind: "outline", menu: "passes" },
+  ransom: { name: { zh: "剪报字", en: "Ransom note" }, kind: "letters" },
 };
 /**
  * id -> { name }: the bends a headline may be given (its `bend`, how far: `bendAmt`), whatever its
@@ -470,7 +474,7 @@ export function bentLine(ctx, o, key, paint) {
   const fs = o.fs, P = fs * 0.75, rect = { x: -P, y: -fs * 1.25 - P, w: o.lineW + 2 * P, h: fs * 1.7 + 2 * P };
   // finer than the canvas below on screen, as fine on an export; coarser while something is dragged
   const k = Math.min(o.unit * (isFast() ? 0.6 : o.unit >= 1.6 ? 1 : 1.5), 4096 / rect.w, 4096 / rect.h);
-  const id = [key, look().id, JSON.stringify(lookValues()), lookState(), isFast() ? 1 : 0, o.bend.id, o.bend.amt, JSON.stringify(o.warp || null), JSON.stringify(o.reshape || null), o.frame ? [o.frame.ox, o.frame.oy, o.frame.c, o.frame.box.x, o.frame.box.y, o.frame.box.w, o.frame.box.h].map((v) => Math.round(v * 10)).join() : "", o.lineW.toFixed(1), fs, k.toFixed(3), FONTS_SEEN].join("|");
+  const id = [key, look().id, JSON.stringify(lookValues()), lookState(), isFast() ? 1 : 0, o.bend.id, o.bend.amt, JSON.stringify(o.warp || null), JSON.stringify(o.reshape || null), o.frame ? [o.frame.ox, o.frame.oy, o.frame.c, o.frame.box.x, o.frame.box.y, o.frame.box.w, o.frame.box.h].map((v) => Math.round(v * 10)).join() : "", o.lineW.toFixed(1), fs, k.toFixed(3), FONTS_SEEN, ransomEpoch()].join("|");
   let got = BENT.get(id);
   if (got) { BENT.delete(id); BENT.set(id, got); }
   else {
@@ -501,7 +505,7 @@ if (typeof document !== "undefined" && document.fonts && document.fonts.addEvent
 // flat looks have neither, the overprint only an offset second colour, everything built on the
 // house lettering both. A look id stands for its own lettering, which "auto" uses.
 const BOTH = { stroke: true, shadow: true }, NONE = { stroke: false, shadow: false };
-const USES = { cel: BOTH, sticker: BOTH, plain: NONE, cyber: BOTH, riso: { stroke: false, shadow: true }, anime: BOTH, bluenote: NONE, editorial: NONE, songke: NONE, vivid: BOTH, negative: NONE, cinema: { stroke: false, shadow: true }, cyano: { stroke: false, shadow: true }, monofilm: { stroke: false, shadow: true }, typo: NONE, toon: { stroke: false, shadow: true }, avant: NONE, collage: { stroke: false, shadow: true }, yellow: NONE, pitch: NONE, dots: { stroke: false, shadow: true }, neon: { stroke: false, shadow: true }, court: { stroke: false, shadow: true }, velvet: { stroke: false, shadow: true }, rave: { stroke: false, shadow: true }, chrome: { stroke: false, shadow: true }, netart: { stroke: false, shadow: true }, verse: { stroke: false, shadow: true }, glass: { stroke: false, shadow: true }, jelly: { stroke: false, shadow: true }, skies: { stroke: false, shadow: true }, spectrum: { stroke: false, shadow: true }, citypop: BOTH, construct: { stroke: false, shadow: true }, deco: BOTH };
+const USES = { cel: BOTH, sticker: BOTH, plain: NONE, cyber: BOTH, riso: { stroke: false, shadow: true }, anime: BOTH, bluenote: NONE, editorial: NONE, songke: NONE, vivid: BOTH, negative: NONE, cinema: { stroke: false, shadow: true }, cyano: { stroke: false, shadow: true }, monofilm: { stroke: false, shadow: true }, typo: NONE, toon: { stroke: false, shadow: true }, avant: NONE, collage: { stroke: false, shadow: true }, yellow: NONE, pitch: NONE, dots: { stroke: false, shadow: true }, neon: { stroke: false, shadow: true }, court: { stroke: false, shadow: true }, velvet: { stroke: false, shadow: true }, rave: { stroke: false, shadow: true }, chrome: { stroke: false, shadow: true }, netart: { stroke: false, shadow: true }, verse: { stroke: false, shadow: true }, glass: { stroke: false, shadow: true }, jelly: { stroke: false, shadow: true }, skies: { stroke: false, shadow: true }, spectrum: { stroke: false, shadow: true }, citypop: BOTH, construct: { stroke: false, shadow: true }, deco: BOTH, ransom: BOTH };
 /** { id, stroke, shadow } for effect `id` under the current look; id is the effect actually painted. */
 export function effectUses(id = "auto") {
   const fx = EFFECTS[id] && id !== "auto" ? id : look().runs ? look().id : "cel";
@@ -515,6 +519,7 @@ export function paintRuns(ctx, pass, o, id = "auto") {
   if (fx === "cel") return house(ctx, pass, o);
   if (fx === "sticker") return sticker(ctx, pass, o);
   if (fx === "plain") return pass((a, x) => { ctx.fillStyle = a.hi ? o.hiCss : o.fillCss; ctx.fillText(a.t, x, 0); });
+  if (fx === "ransom") return real(ctx) ? ransom(ctx, pass, o) : house(ctx, pass, o);   // not letter by letter on a canvas only measured on
   if (EFFECTS[fx].kind === "passes") return LOOKS[fx].runs(ctx, pass, o, lookParams(fx));   // another look's lettering, at its default settings
   return EFFECTS[fx].kind === "mask" ? masked(ctx, pass, o, fx) : outlined(ctx, pass, o, fx);
 }

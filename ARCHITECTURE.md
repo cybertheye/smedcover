@@ -53,7 +53,8 @@ ui/
   js/platforms.js    the platforms covers are made for, as data: the ratios each wants, feed widths, what the apps lay over a cover; the sizes' names (platformsFor)
   js/check.js        the cover standards' rules, pure (the tests hold the layouts to them; meetStandards in layout.js; Surprise me scores its hands by them)
   js/deal.js         Surprise me's recipes: what suits each look when a hand is dealt (letterings, bends, sliders, ground), pure
-  js/textfx.js       text effects: layered, masked and outlined
+  js/textfx.js       text effects: layered, masked, outlined and letter by letter
+  js/ransom.js       the ransom note: each letter in a face, on a paper, at an angle of its own
   js/outlines.js     cache of glyph outlines (fetched from the Rust side)
   js/photo.js        background photo and the cached gaussian blur
   js/assets.js       asset library: graphics, stickers, uploads
@@ -387,13 +388,14 @@ before.
 
 The title, subtitle and text layers paint their letters through `paintRuns()`. The
 effect is a property of the layer (`fx`); unset means "auto", which leaves it to the current look.
-There are three kinds, differing in what they can change:
+There are four kinds, differing in what they can change:
 
 | Kind | How | What it can change |
 |---|---|---|
 | Layered | the same line painted several times in different colours and places | what is around the letters: outlines, shadows, echoes. Each look's own lettering (`runs()`) is of this kind |
 | Masked | the letters are first painted alone on a spare canvas, which is worked on and then laid down | what is inside the letters: halftone, stripes, wear, an inner shadow, rows cut apart |
 | Outlined | each letter's outline is fetched as points, and filled as shapes | the letterforms: extruded with real depth |
+| Letter by letter | each letter drawn on its own, in the place the line's font gives it | each letter's face, paper, ink and angle: the ransom note |
 
 The menu, `EFFECTS`, holds the typesetting effects and the editorial look's Underlined highlight, which has to know the highlighted words and so can only be lettering. Sticker (`sticker()`) is strokes alone — a shadow, a dark line, a white rim and a keyline, each a pass of thick round-joined strokes under the fill — so the rim runs the letters together and fills their small gaps without outlines. An effect may be listed under another group than its kind's (`menu`): Extruded, drawn from outlines, is listed with the layered letterings it looks like. A look's lettering is what *auto* uses. Sliced, Overprint, Double keyline and Sunlit block were in the menu once; what they do is their looks' post effects now (see 7.4), for any layer: `layers.js` still knows the names (`TEXT_EFFECTS`), turns them into the matching post effect on a text layer (at 0.6), and keeps them on the title, painted as *auto*.
 
@@ -441,6 +443,34 @@ edges of the outlines are what the bend's picture is cut finely enough for.
 
 **Extrusion** really sweeps every edge of the outline back into a wall: walls are split into lit and
 shaded by the way they face, each group is filled as one shape, then the back face and the front.
+
+**The ransom note** (`ransom.js`) takes the pieces of the line from `pass` and splits each into its
+letters' cells, the letter's advance in the line's font (a piece set larger, `s`, as setLine set it), shared
+out to the piece's width. `ransomPlan()`, pure, dresses each letter: its face from the pools by script, its
+kind (on a scrap of paper 70%, in the layer's own lettering 20%, hollow 10%), its paper (`papersFor()`: the
+channel colour, black, white, newsprint, kraft, the highlight's colour, a yellow — a neutral left out when
+the channel colour is it, a colour when one near it is there), an ink that reads on it (4.5 : 1), a turn, a
+lift, a size, and Latin letters a flip of case (`amt`, the layer's strength, scales the turn, the lift and the
+flips). The random numbers come from the layer's seed (`fxSeedOf()` in `render.js`: its id and its `fxSeed`, the
+number Reshuffle draws, kept by `normalizeLayer` for the ransom note only), the line's seed and the letter with how many times it came before,
+so a letter is dressed alike at every size; a letter that drew its neighbour's family draws again from the
+others (unless no other has the letter), one that drew its paper takes the next. A stretch of a script other
+than Latin, Greek, Cyrillic and CJK (joined, or right to left), from its first letter to its last, is one cell,
+set as the line sets it. The
+hero, one a line of three letters or more (in the highlighted words when there are some), is the letter whose
+name hashes highest, so typing moves it only when the new letter outdraws it. `ransom()` draws each letter as
+large as the line's capital (or 国) times its size, no wider than its cell (1.04 times, the hero 1.12),
+centred where the line's letters are: every scrap first and every letter after, so no scrap hides a letter
+beside it, the hero last of each. The plan is kept per line (`PLANS`, by its letters, seeds, strength and
+colours); a canvas only measured on (`placed()`'s probe) gets the house lettering instead. Faces: `RANSOM_FACES` lists the bundled fonts and the
+system fonts of macOS, Windows and Linux worth cutting from; `ransomFaces()` in `app.js` keeps those installed
+(`list_system_fonts`; in a plain browser, those a canvas reaches) and passes `useRansomFaces()` the ones a
+canvas outside the page cannot reach yet, at most `RANSOM_AWAY` (4) a script: `ensureFonts()` loads them
+(`ensureFont()`) when a layer has the ransom note, and `ransomArrived()` ends their wait. Until then a letter
+in one is drawn in the line's font, and `ransomEpoch()` in `bentLine()`'s key draws a bent line again when one
+arrives. Whether a face has a letter is measured (`has()`: set in the face, the letter measures otherwise than
+in the bundled reference alone, Noto Sans SC or JetBrains Mono); what was measured and planned is forgotten
+when fonts load or are added to the page (`document.fonts.size`).
 
 ### 6.2.1 A perspective of one's own
 

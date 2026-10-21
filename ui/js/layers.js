@@ -141,7 +141,7 @@ export const fillsCanvas = (L) => L.type === "photo" && L.fill && !L.of;
 /** Shapes the colour block and its dividing edge can take ("slant" is the template's own). */
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes", "arc"];
 /** The text effects a headline can be given (painted in textfx.js). Absent on a layer means "auto": the look decides. */
-export const TEXT_EFFECTS = ["auto", "sticker", "cel", "plain", "cyber", "riso", "anime", "bluenote", "editorial", "vivid", "dots", "stripes", "inner", "worn", "rows", "extrude"];
+export const TEXT_EFFECTS = ["auto", "sticker", "cel", "plain", "cyber", "riso", "anime", "bluenote", "editorial", "vivid", "dots", "stripes", "inner", "worn", "rows", "extrude", "ransom"];
 /** The bends a headline may be given whatever its lettering (`bend`, how far: `bendAmt`; see BENDS in textfx.js). */
 export const BEND_IDS = ["arc", "arcLow", "circle", "shell", "bulge", "pinch", "fisheye", "rise", "taper", "wave", "flag"];
 // Four of those were looks' letterings, offered in the menu by name; the menu no longer has them, and
@@ -245,6 +245,7 @@ function normalizeLayer(raw, catIds) {
     else if (was) L.fx = "cel";
     else if (TEXT_EFFECTS.includes(fx) && fx !== "auto") L.fx = fx;
     if (!lettered && !was && raw.fxAmt !== undefined && num(raw.fxAmt, 1, 0, 2) !== 1) L.fxAmt = num(raw.fxAmt, 1, 0, 2);
+    if (L.fx === "ransom" && Number.isInteger(raw.fxSeed) && raw.fxSeed > 0 && raw.fxSeed < 1e6) L.fxSeed = raw.fxSeed;   // the ransom note's letters, as Reshuffle last dealt them
     if (BEND_IDS.includes(bend)) {
       L.bend = bend;
       if (bendAmt !== undefined && num(bendAmt, 1, 0, 2) !== 1) L.bendAmt = num(bendAmt, 1, 0, 2);

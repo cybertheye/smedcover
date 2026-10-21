@@ -353,6 +353,8 @@ function drawPlate(raw, x, y, w, h, fill, fs, C) {
 }
 /** The face of a headline: the look's title face, or the heavy sans. */
 const headFont = () => (look().titleFont ? look().titleFont(fonts) : fonts.cn);
+/** A headline layer's own seed for the letterings that dress each letter (the ransom note): its id, and the number Reshuffle drew. */
+const fxSeedOf = (L) => `${L.id}:${L.fxSeed || 0}`;
 /** A headline layer's bend, as drawTitle and bentLine take it ({id, amt, own}), or null. */
 const bendOf = (L) => (L.bend ? { id: L.bend, amt: L.bendAmt ?? 1, own: L.bend === "taper" && !!L.warp } : null);
 /** The box the layout gives the title: from under the brand row (or the look's own top) to its foot. */
@@ -406,7 +408,7 @@ function drawFreeText(ctx, L, env) {
     const set = sets[li], pass = passOf(set);
     const m = raw.getTransform ? raw.getTransform() : null, unit = m ? Math.hypot(m.a, m.b) : 1;
     const o = {
-      fs: FS, d: FS * 0.062 * st.shadowAmt, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: L.fxAmt ?? 1, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit,
+      fs: FS, d: FS * 0.062 * st.shadowAmt, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: L.fxAmt ?? 1, fxSeed: fxSeedOf(L), lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit,
       fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow, fill: st.own, hi: st.ownHi, hiPlate: !!st.hiPlate || bandOrBlock(st),
       frame: { ox, oy, c: skew, box }, warp: L.warp, reshape: rest ? L.reshape : undefined,
     };
@@ -573,7 +575,7 @@ const PAINT = {
     return placed(ctx, tr, (c) => (own && own(c, env.cover.title, box, L, env, lookValues())) || drawTitle(c, env.cover.title, box, IDENTITY, {
       font: headFont(), maxFs: 340, align: "left", fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
       own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate || bandOrBlock(st),   // for looks that paint the letters themselves
-      stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt,
+      stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt, fxSeed: fxSeedOf(L),
       plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
       hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
       hiMark: st.hiMark && ((x0, x1, fs, on, phase, seed) => drawMark(on, st.hiMark, x0, x1, fs, phase, seed)),
@@ -590,7 +592,7 @@ const PAINT = {
     return placed(ctx, tr, (c) => drawTitle(c, env.cover.subtitle, s.box, IDENTITY, {
       font: headFont(), maxFs: s.fs, align: "left", fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
       own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate || bandOrBlock(st),
-      stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt,
+      stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt, fxSeed: fxSeedOf(L),
       plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
       hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
       hiMark: st.hiMark && ((x0, x1, fs, on, phase, seed) => drawMark(on, st.hiMark, x0, x1, fs, phase, seed)),

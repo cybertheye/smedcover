@@ -21,6 +21,7 @@ import {
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, BENDS, effectUses, warpCorners, convexWarp } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
+import { RANSOM_FACES, useRansomFaces, ransomPending, ransomArrived, ransomPools } from "./ransom.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
 import { sizeOf, PIXELS } from "./photo.js";
 import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, labelRoom, drawStack } from "./stack3d.js";
@@ -212,11 +213,31 @@ function ensureFont(family) {
     for (const f of faces) document.fonts.add(f);
     queueDraw();
     return true;
-  }).catch(() => false));
+  }).catch(() => false).then((added) => { if (ransomArrived(family)) queueDraw(); return added; }));   // there, or not to be had: the ransom note waits no more (see ransomFaces)
   return SYS_FACES.get(family);
 }
-/** Sees that the system fonts the layers are set in are there for every canvas; resolves once they are. */
-const ensureFonts = (layers) => Promise.all([...new Set(layers.map((L) => L.font).filter(Boolean))].map(ensureFont).filter(Boolean));
+/** Sees that the system fonts the layers are set in are there for every canvas (and the ransom note's faces, when a layer is lettered so); resolves once they are. */
+const ensureFonts = (layers) => Promise.all([...new Set([...layers.map((L) => L.font), ...(layers.some((L) => L.fx === "ransom") ? ransomPending() : [])].filter(Boolean))].map(ensureFont).filter(Boolean));
+/** How many system fonts of each script the ransom note loads from their files at most (see ransomFaces). */
+const RANSOM_AWAY = 4;
+/**
+ * The faces the ransom note cuts its letters from (ransom.js): the bundled fonts and the system fonts it
+ * knows that are installed (in a plain browser, those a canvas can set). Those a canvas outside the page
+ * does not reach (see ensureFont) are loaded from their files when a layer is lettered so: only the first
+ * few of each script, for a Chinese font is large.
+ */
+function ransomFaces() {
+  const here = new Set(BUNDLED_FONTS), away = [];
+  for (const script of ["latin", "cjk"]) {
+    let n = 0;
+    for (const [family] of RANSOM_FACES[script]) {
+      if (here.has(family) || (native ? !S.systemFonts.includes(family) : !reachable(family))) continue;
+      if (native && !reachable(family)) { if (n >= RANSOM_AWAY) continue; n++; away.push(family); }
+      here.add(family);
+    }
+  }
+  useRansomFaces((f) => here.has(f), away);
+}
 
 /** Everything that has to happen when S.profile / S.cover are replaced or restored. */
 async function applyProfile() {
@@ -2398,20 +2419,22 @@ function titleLines(L, set0) {
  */
 function fxControl(L) {
   const set = (k, v, side) => { if (v === undefined) delete L[k]; else L[k] = v; touch({ cover: true, side }); };
-  const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline") };
-  const groups = ["passes", "mask", "outline"].map((kind) => ({ group: kinds[kind], items: Object.entries(EFFECTS).filter(([, e]) => (e.menu || e.kind) === kind).map(([id, e]) => [id, e.name[getLang()]]) })).filter((g) => g.items.length);
+  const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline"), letters: t("fx.kind.letters") };
+  const groups = ["passes", "mask", "outline", "letters"].map((kind) => ({ group: kinds[kind], items: Object.entries(EFFECTS).filter(([, e]) => (e.menu || e.kind) === kind).map(([id, e]) => [id, e.name[getLang()]]) })).filter((g) => g.items.length);
   const fx = EFFECTS[L.fx] ? L.fx : "auto", kind = EFFECTS[fx].kind;   // an effect no longer in the menu (a look's lettering of before) is shown as automatic
   return {
     kids: [
       select(groups, fx, (v) => set("fx", v === "auto" ? undefined : v, true)),
       fx !== "auto" && kind !== "passes" && slider("props.fxAmt", 0, 2, 0.05, L.fxAmt ?? 1, times, (v) => { holdLive(L.id); set("fxAmt", v === 1 ? undefined : v, false); }),
+      // the ransom note's letters dealt again: another face, paper, ink and angle for each
+      fx === "ransom" && el("button", { class: "btn wide", style: "margin-top:8px", title: t("fx.reshuffleTip"), onclick: () => { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === L.fxSeed); set("fxSeed", n, false); } }, t("fx.reshuffle")),
       el("div", { style: "margin-top:12px" }, cap("props.bend"),
         select([["", t("bend.none")], ...Object.entries(BENDS).map(([id, b]) => [id, b.name[getLang()]])], L.bend || "", (v) => { if (v) L.bend = v; else { delete L.bend; delete L.bendAmt; } delete L.warp; delete L.reshape; touch({ cover: true, side: true }); })),
       L.bend && !(L.bend === "taper" && L.warp) && slider("props.bendAmt", 0, 2, 0.05, L.bendAmt ?? 1, times, (v) => { holdLive(L.id); set("bendAmt", v === 1 ? undefined : v, false); }),
       L.bend === "taper" && L.warp && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("warp", undefined, true) }, t("fx.warpReset")),
       L.bend && L.bend !== "taper" && L.reshape && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("reshape", undefined, true) }, t("fx.reshapeReset")),
     ],
-    tip: [L.bend && t("fx.bendHint"), L.bend && t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint"), kind === "outline" && !native && t("fx.needsApp")].filter(Boolean).join(" "),
+    tip: [fx === "ransom" && t("fx.ransomHint"), L.bend && t("fx.bendHint"), L.bend && t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint"), kind === "outline" && !native && t("fx.needsApp")].filter(Boolean).join(" "),
   };
 }
 /** White or ink, whichever reads on colour "#rrggbb". */
@@ -3398,7 +3421,7 @@ function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).
     list.push(...title, ...over);
   }
   const can = (k) => native || EFFECTS[k].kind !== "outline";
-  const dealFx = (L, got) => { delete L.fx; delete L.fxAmt; delete L.bend; delete L.bendAmt; delete L.warp; delete L.reshape; Object.assign(L, got); };
+  const dealFx = (L, got) => { delete L.fx; delete L.fxAmt; delete L.fxSeed; delete L.bend; delete L.bendAmt; delete L.warp; delete L.reshape; Object.assign(L, got); };
   const titled = letterFor(st.look, "title", R, can, null, ctx);
   for (const L of S.cover.layers) {
     switch (L.type) {
@@ -3786,6 +3809,7 @@ async function start() {
     S.systemFonts = found.map((f) => f.name);
     for (const f of found) if (!f.cjk) S.latinFonts.add(f.name);
   }
+  ransomFaces();
   S.profiles = await loadProfiles().catch(() => []);
   const selftest = native ? await invoke("selftest_dir").catch(() => null) : null;
   if (!S.profiles.length) await addProfile(selftest ? sampleProfile("en") : await welcome(), false);
@@ -4074,12 +4098,29 @@ async function selfTest(dir) {
     S.profile.style.look = "cel"; S.cover.layers = JSON.parse(keepLayers);
     // every text effect once, in the house look: the ones that reshape letters need outlines from the native side
     report.effects = [];
-    const titleLayer = layer("title"), keep = S.cover.title;
+    const titleLayer = layer("title"), keep = S.cover.title, ransomAway = ransomPending();   // the ransom note's faces still to be read from their files
+    let ransomMs = 0;
     S.cover.title = "文字效果 *FX*\nText *effects*";
     for (const id of Object.keys(EFFECTS).filter((k) => k !== "auto")) {
       titleLayer.fx = id; await step(`fx-${id}`);
-      const cv = await renderReady(S.profile.sizes[0], S.cover, catIndex());
+      const t0 = performance.now(), cv = await renderReady(S.profile.sizes[0], S.cover, catIndex());
+      if (id === "ransom") ransomMs = Math.round(performance.now() - t0);   // its faces read from their files first
       report.effects.push({ id, kind: EFFECTS[id].kind, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `fx-${id}.png` })) });
+    }
+    // the ransom note: the faces found here, those read from their files first, and Reshuffle dealing other letters
+    {
+      const fxTitle = S.cover.title;
+      titleLayer.fx = "ransom"; S.cover.title = "SPIDER *MAN*\npeter parker 你看着办";
+      await step("fx-ransom-letters");
+      const t0 = performance.now(), a = await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex())), ms = Math.round(performance.now() - t0);
+      titleLayer.fxSeed = 777;
+      const b = await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex()));
+      report.ransom = { pools: ransomPools(), away: ransomAway, still: ransomPending(), firstMs: ransomMs, ms, reshuffled: a.length !== b.length || a.some((v, i) => v !== b[i]),
+        paths: [await invoke("write_image", framed(a, { dir, name: "fx-ransom-letters.png" })), await invoke("write_image", framed(b, { dir, name: "fx-ransom-reshuffled.png" }))] };
+      if (!report.ransom.reshuffled) report.errors.push("ransom: Reshuffle drew the same letters");
+      report.ransom.unreached = ransomAway.filter((f) => !reachable(f));   // read from their files, every canvas has them now
+      if (report.ransom.still.length || report.ransom.unreached.length) report.errors.push(`ransom: faces not to be had: ${[...report.ransom.still, ...report.ransom.unreached].join(", ")}`);
+      delete titleLayer.fxSeed; S.cover.title = fxTitle;
     }
     // the title and a text layer as headlines on plates, the text with its own colour, an outline and plates under its highlighted words
     {
