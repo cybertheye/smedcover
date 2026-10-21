@@ -173,7 +173,26 @@ export function normalizeSettings(raw) {
     // the side columns' widths in px, as dragged (0 = the default): left and right while editing, left in Setup
     columns: Object.fromEntries(["left", "right", "setup"].map((k) => [k, Math.round(num(s.columns && s.columns[k], 0, 0, 900))])),
     recentFonts: [...new Set((Array.isArray(s.recentFonts) ? s.recentFonts : []).map((f) => str(f).replace(/["\\]/g, "").trim().slice(0, 80)).filter(Boolean))].slice(0, RECENT_FONTS),
+    recipes: normalizeRecipes(s.recipes),
   };
+}
+/**
+ * The user's own Surprise me recipes, by look (see baseRecipe in deal.js): only what was set — a family's
+ * name, chances between 0 and 1 (own, dark, bend, and each part's in `params`), weights between 0 and 10
+ * by name (fx, bends). Names the app does not know are left to deal.js, which passes them over.
+ */
+export function normalizeRecipes(raw) {
+  const out = {}, name = (k) => /^[a-zA-Z]{1,24}$/.test(k), chance = (v) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : null);
+  const table = (o, hi) => Object.fromEntries(Object.entries(o && typeof o === "object" ? o : {}).filter(([k, v]) => name(k) && Number.isFinite(v)).slice(0, 40).map(([k, v]) => [k, Math.min(hi, Math.max(0, v))]));
+  for (const [look, r] of Object.entries(raw && typeof raw === "object" ? raw : {}).slice(0, 80)) {
+    if (!name(look) || !r || typeof r !== "object") continue;
+    const m = {};
+    if (["pop", "print", "light"].includes(r.family)) m.family = r.family;
+    for (const k of ["own", "dark", "bend"]) if (chance(r[k]) != null) m[k] = chance(r[k]);
+    for (const [k, hi] of [["fx", 10], ["bends", 10], ["params", 1]]) if (r[k] && typeof r[k] === "object") m[k] = table(r[k], hi);
+    if (Object.keys(m).length) out[look] = m;
+  }
+  return out;
 }
 
 const parse = (text) => { try { return text ? JSON.parse(text) : null; } catch (e) { return null; } };

@@ -159,6 +159,8 @@
   .chips{display:flex;flex-wrap:wrap;gap:6px}
   .chips button{border:2px solid var(--c,#fff);background:transparent;color:var(--c,#fff);padding:8px 12px;cursor:pointer;font-weight:600;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .chips button.on{background:var(--c,#fff);color:var(--ink)}
+  .chips.small{gap:4px}.chips.small button{padding:4px 8px;font-size:12px;font-weight:500}
+  .recipe summary{cursor:pointer;margin:0;list-style:none}.recipe summary::-webkit-details-marker{display:none}.recipe summary::before{content:"▸ "}.recipe[open] summary::before{content:"▾ "}.recipe[open] summary{margin-bottom:8px}   /* Surprise me's recipe for the look, folded by default */
   .sl{display:grid;grid-template-columns:52px 1fr 52px;align-items:center;gap:8px;margin-top:10px;font-size:13px}
   .sl input{accent-color:var(--acc);width:100%}
   .sl.off{opacity:.5}

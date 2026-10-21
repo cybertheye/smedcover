@@ -215,7 +215,7 @@ What each layer allows:
 **SURPRISE ME**, beside *Export* in the top bar, draws at random everything about how the current cover is drawn, the layout left as it is:
 
 - the look, its sliders and its random placement: each slider near the value the look was made with, and the parts a look leaves out by default (an airship, a giant silhouette, a laser) only now and then, two at most; now and then the look's scene objects a little off where the layout puts them
-- dark or light ground, as the look suits it, and away from a channel colour near black or very bright (near white, a light yellow), which would sink into a ground like it; the shape of the colour block, the grid
+- dark or light ground, as the look suits it, and away from a channel colour near black or very bright (near white, a light yellow), which would sink into a ground like it, unless you set the dark ground's chance yourself; the shape of the colour block, the grid
 - the title's text effect, outline and shadow: mostly the look's own lettering (the dark deco's lit lamps nearly always), otherwise one that goes with it — outlines, stickers and depth for the cartoon looks, flat and worn type for the printed ones, little but their own for the glowing ones; bent only now and then, and only in the looks and ways that suit (a psychedelic wave, never a woodblock column); a long title (a line wider than 8 characters, or three lines) is bent less and less often given a sticker's rim or depth, so its type stays large, a short one bent a little more
 - the subtitle lettered like the title half the time, else mostly in the look's own
 - each text layer's plate, text effect, outline and shadow; whether a sticker follows the channel colour
@@ -228,6 +228,8 @@ What each layer allows:
 It deals six hands at a time (fewer, at least two, when the looks are slow to draw) and keeps one by the cover standards: each hand is drawn small at every size and scored on the title's type size in the platforms' feeds (A1), the title's contrast with what is behind it (B1, at the first size with the ratio of the one shown), a picture big enough (C1) and nothing that matters under the apps' badges (D1). A hand with a problem is never kept while another has none; of the best three, the better are likelier, so it is not always the same one. A hand in the look the cover already had is marked down a little, so the look usually changes. The button reads *Choosing…* meanwhile, usually about a second (longer with many sizes or slow looks).
 
 Each deal is one step of undo, however fast you click. Deal again if you do not like it, or undo to the hand before.
+
+**How Surprise me deals this look**, folded under the look's sliders in *Edit → Style*, shows the current look's recipe and lets you change it: its family (*Pop*, *Print*, *Light*; picking one sets the rest to that family's), how often it keeps its own lettering, which other letterings and which bends it may be given (click to switch each on or off), how often it is bent, how often it is on the dark ground (for a look with both grounds), and how often each of its optional parts comes in (its switches, and the sliders off by default). What you change is kept in the settings, for every profile; *Restore this look's recipe* puts the built-in one back.
 
 ### Title and text layers
 

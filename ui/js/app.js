@@ -9,12 +9,13 @@ import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont } from "./store.js";
 import { platformsFor, ratioOf } from "./platforms.js";
 import { boxOf, overlap, titleContrast, coverScore, pickHand } from "./check.js";
-import { tuneLook, recipeOf, letterFor, coverContext } from "./deal.js";
+import { tuneLook, recipeOf, baseRecipe, letterFor, coverContext, FAMILIES } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
 import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
+  normalizeRecipes,
 } from "./store.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
@@ -1916,6 +1917,38 @@ function lookArtRow() {
     ref && el("div", { class: "artback" }, el("button", { class: "linkbtn", onclick: () => set(null) }, t("style.artBack"))),
   ];
 }
+// ---------- Surprise me's recipe for the current look, seen and set by hand
+const RECIPE_UI = { open: false };   // whether the box is unfolded
+/**
+ * The current look's Surprise me recipe (deal.js), folded away under the look's sliders: its family (picking
+ * one sets the rest to the family's), how often it keeps its own lettering, which other letterings and bends it
+ * may be given, how often it is bent, how often on the dark ground, and how often each of its optional parts
+ * (switches, sliders off by default) comes in. What is changed is kept in the settings (S.settings.recipes), for every profile,
+ * over the table; Restore puts the table's back.
+ */
+function recipeBox() {
+  const look = S.profile.style.look, L = LOOKS[look] || LOOKS.cel, lang = getLang(), mine = () => S.settings.recipes[look] || {}, r = baseRecipe(look, mine());
+  const keep = (patch, redraw = false) => { S.settings.recipes = normalizeRecipes({ ...S.settings.recipes, [look]: { ...mine(), ...patch } }); persistSettings(); if (redraw) renderPanel(); };
+  const flip = (key, k, w) => { const cur = { ...r[key] }; if (cur[k] > 0) delete cur[k]; else cur[k] = w; keep({ [key]: cur }, true); };
+  const chips = (key, ids, names, base) => el("div", { class: "chips small" }, ids.map((k) => el("button", { class: r[key][k] > 0 ? "on" : "", onclick: () => flip(key, k, base[k] || 1) }, names[k].name[lang])));
+  const extras = L.params.filter((d) => !d.text && (d.toggle || d.def <= d.min)), family = FAMILIES[r.family];
+  const chance = (d) => r.params[d.key] ?? (d.toggle ? (d.def > d.min ? 0.75 : 0.3) : 0.35);
+  return el("details", { class: "box recipe", open: RECIPE_UI.open, ontoggle: (e) => (RECIPE_UI.open = e.target.open) },
+    el("summary", { class: "cap" }, t("recipe.title")),
+    el("div", { class: "hint", style: "margin:0 0 4px" }, t("recipe.hint")),
+    el("div", { class: "sl", style: "grid-template-columns:84px 1fr" }, el("span", {}, t("recipe.family")),
+      select(Object.keys(FAMILIES).map((k) => [k, t("recipe.family." + k)]), r.family, (v) => { const f = FAMILIES[v]; keep({ family: v, own: f.own, dark: undefined, fx: { ...f.fx }, bend: f.bend, bends: { ...f.bends } }, true); })),
+    slider2(t("recipe.own"), 0, 1, 0.05, r.own, (v) => keep({ own: v })),
+    el("div", { class: "cap", style: "margin:12px 0 6px" }, t("recipe.fx")),
+    chips("fx", Object.keys(EFFECTS).filter((k) => k !== "auto" && k !== look), EFFECTS, family.fx),
+    slider2(t("recipe.bend"), 0, 0.5, 0.05, r.bend, (v) => keep({ bend: v })),
+    el("div", { class: "cap", style: "margin:12px 0 6px" }, t("recipe.bends")),
+    chips("bends", Object.keys(BENDS).filter((k) => k !== "taper"), BENDS, family.bends),
+    !L.oneTheme && slider2(t("recipe.dark"), 0, 1, 0.05, r.dark, (v) => keep({ dark: v })),
+    extras.length > 0 && el("div", { class: "cap", style: "margin:12px 0 0" }, t("recipe.extras")),
+    extras.map((d) => slider2(d.name[lang], 0, 1, 0.05, chance(d), (v) => keep({ params: { ...(mine().params || {}), [d.key]: v } }))),
+    el("button", { class: "btn wide", style: "margin-top:12px", onclick: () => { delete S.settings.recipes[look]; persistSettings(); renderPanel(); } }, t("recipe.reset")));
+}
 function styleTab() {
   const st = S.profile.style, set = (k, v) => { st[k] = v; touch({ profile: true }); };
   const L = LOOKS[st.look] || LOOKS.cel, vals = lookParams(st.look, st.lookParams[st.look]);
@@ -1937,6 +1970,7 @@ function styleTab() {
       L.seeded && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { st.lookSeed = Math.floor(Math.random() * 1000000); touch({ profile: true }); } }, t("style.shuffle")),
       L.seeded && el("div", { class: "hint" }, t("style.shuffleHint")),
       L.params.length > 0 && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete st.lookParams[st.look]; if (st.lookArt) delete st.lookArt[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))),
+    recipeBox(),
     layoutBox(),
     el("div", { class: "box" }, cap("style.design"),
       el("button", { class: "btn wide", onclick: () => { S.profile.design.layers = JSON.parse(JSON.stringify(S.cover.layers.filter((l) => l.type !== "photo"))); touch({ profile: true }); toast(t("style.designSaved")); } }, t("style.saveDesign")),
@@ -3324,8 +3358,8 @@ function dealHand() {
   const round = (v, step) => Math.round(v / step) * step, st = S.profile.style;
   // the look, its sliders tuned by its recipe (deal.js): about the values it was made with, its optional parts now and then
   st.look = pick(LOOK_IDS); st.lookSeed = Math.floor(R() * 1000000);
-  // the title's length and the channel colour turn it (see recipeOf)
-  const ctx = coverContext(S.cover.title, hexToRgb(cat().color));
+  // the title's length, the channel colour and the user's own recipe for the look turn it (see recipeOf)
+  const ctx = { ...coverContext(S.cover.title, hexToRgb(cat().color)), mine: S.settings.recipes[st.look] };
   const tuned = tuneLook(st.look, R, ctx);
   for (const d of LOOKS[st.look].params) if (d.text) tuned[d.key] = (st.lookParams[st.look] || {})[d.key] ?? d.def;   // words typed in are kept
   if (Object.keys(tuned).length) st.lookParams[st.look] = tuned;
