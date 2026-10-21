@@ -8,8 +8,8 @@ import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont } from "./store.js";
 import { platformsFor, ratioOf } from "./platforms.js";
-import { boxOf, titleContrast, coverScore, pickHand } from "./check.js";
-import { tuneLook, recipeOf, letterFor } from "./deal.js";
+import { boxOf, overlap, titleContrast, coverScore, pickHand } from "./check.js";
+import { tuneLook, recipeOf, letterFor, coverContext } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
 import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF } from "./layers.js";
 import {
@@ -2606,10 +2606,13 @@ function borrowDialog(L, here, list) {
 /**
  * Surprise me's places for the user's own layers: each anywhere on the canvas, at a new angle and size,
  * but wholly on it at every size — not a pixel off — and words above the foot where the apps show their
- * counts (wordsFoot in layout.js). A layer locked, filling the canvas (a background photo,
- * a colour block as large as the canvas) or following its photo (a cut-out) is left where it is. Each
- * layer's box at each size comes from a quick drawing; a layer too big for some size is set straighter,
- * then smaller, until it fits.
+ * counts (wordsFoot in layout.js); and, of the places allowed, one that leaves the title and the subjects
+ * cut out of photos uncovered, or as little covered as a dozen tries find — a layer that would still cover
+ * more than a quarter of one is made a little smaller and placed again, down to about half its size. A photo
+ * takes its subject along (a cut-out over it is put back over it), and is placed before the rest. A layer locked, filling the canvas
+ * (a background photo, a colour block as large as the canvas) or following its photo (a cut-out) is left
+ * where it is. Each layer's box at each size comes from a quick drawing; a layer too big for some size is
+ * set straighter, then smaller, until it fits.
  */
 function dealPlaces(between, round) {
   const fills = (L) => fillsCanvas(L) || (L.type === "solid" && L.t.all.s >= 0.98 && !L.t.all.r);
@@ -2620,21 +2623,54 @@ function dealPlaces(between, round) {
     drawCover(cv, { profile: S.profile, catIndex: catIndex(), size, pixelW: 240, cover: S.cover, photos: S.photos });
     return { key, w: cv._virtual[0], h: cv._virtual[1], hits: cv._hits || [] };
   });
+  const cut = new Set(S.cover.layers.filter((l) => l.type === "photo" && l.cut).map((l) => l.id));
+  for (const b of boxes) b.keep = b.hits.filter((x) => x.type === "title" || cut.has(x.id)).map((x) => ({ id: x.id, ...boxOf(x) }));   // what is better left uncovered
+  // the subjects a layer takes with it: its own, a cut-out itself, and those of its linked cut-outs; such layers go first,
+  // so the rest keep clear of where they land
+  const carried = (L) => [L, ...passivesOf(L)].filter((l) => cut.has(l.id)).map((l) => l.id);
+  movers.sort((p, q) => carried(q).length - carried(p).length);
   for (const L of movers) {
-    const a = L.t.all, per = boxes.map((b) => ({ ...b, hit: b.hits.find((x) => x.id === L.id) })).filter((b) => b.hit);
+    // not what it carries; nothing, clipped into a layer below (it shows only where that one does)
+    const clipped = clipBase(S.cover.layers, S.cover.layers.indexOf(L)) >= 0;
+    const a = L.t.all, mine = carried(L), per = boxes.map((b) => ({ ...b, hit: b.hits.find((x) => x.id === L.id), keep: clipped ? [] : b.keep.filter((k) => !mine.includes(k.id)) })).filter((b) => b.hit);
     if (!per.length) continue;
-    let s = clamp(a.s * between(0.8, 1.25), 0.05, 2.5), r = round(between(-12, 12), 1);
+    const x0 = a.x, y0 = a.y, s0 = a.s, r0 = a.r, aligned = passivesOf(L).filter((P) => JSON.stringify(P.t) === JSON.stringify(alignedT(L)));
+    let s = clamp(a.s * between(0.8, 1.25), 0.05, 2.5), r = round(between(-12, 12), 1), smaller = 4;
     for (let tries = 0; tries < 40; tries++) {
       // where the centre may go at each size, as fractions of the canvas, with this size and angle: the box
       // upright (turned by the size's own extra angle too), less a hair for outlines and shadows
       let lo = [-Infinity, -Infinity], hi = [Infinity, Infinity];
+      const fit = [];   // at each size: the place's offset, the box's offset from it and half extents
       for (const p of per) {
         const at = placeOf(L, p.w, p.h, p.key, cat().id), dx = at.cx - a.x * p.w, dy = at.cy - a.y * p.h, k = s / a.s;
         const t = ((r + (at.r - a.r)) * Math.PI) / 180, hw = p.hit.hw * k, hh = p.hit.hh * k, m = Math.min(p.w, p.h) * 0.015;
         const ex = Math.abs(hw * Math.cos(t)) + Math.abs(hh * Math.sin(t)) + m, ey = Math.abs(hw * Math.sin(t)) + Math.abs(hh * Math.cos(t)) + m, foot = L.type === "text" ? wordsFoot(p.w, p.h) : p.h;
-        lo = [Math.max(lo[0], (ex - dx) / p.w), Math.max(lo[1], (ey - dy) / p.h)]; hi = [Math.min(hi[0], (p.w - ex - dx) / p.w), Math.min(hi[1], (foot - ey - dy) / p.h)];
+        // the box off the place's centre (a cut-out's is round its subject), turned and sized with it
+        const turn = ((r - a.r) * Math.PI) / 180, u = p.hit.cx - at.cx, v = p.hit.cy - at.cy, bx = (u * Math.cos(turn) - v * Math.sin(turn)) * k, by = (u * Math.sin(turn) + v * Math.cos(turn)) * k;
+        lo = [Math.max(lo[0], (ex - dx - bx) / p.w), Math.max(lo[1], (ey - dy - by) / p.h)]; hi = [Math.min(hi[0], (p.w - ex - dx - bx) / p.w), Math.min(hi[1], (foot - ey - dy - by) / p.h)];
+        fit.push({ p, dx, dy, bx, by, ex, ey });
       }
-      if (lo[0] <= hi[0] && lo[1] <= hi[1]) { a.x = between(lo[0], hi[0]); a.y = between(lo[1], hi[1]); a.r = r; a.s = s; break; }
+      if (lo[0] <= hi[0] && lo[1] <= hi[1]) {
+        // how much of the title and the cut-out subjects a centre at (x, y) would cover, the worst size
+        const covers = (x, y) => Math.max(0, ...fit.map(({ p, dx, dy, bx, by, ex, ey }) => { const cx = x * p.w + dx + bx, cy = y * p.h + dy + by, me = { x0: cx - ex, y0: cy - ey, x1: cx + ex, y1: cy + ey }; return Math.max(0, ...p.keep.map((k) => overlap(k, me))); }));
+        let best = null;
+        for (let n = 0; n < 12 && !(best && best.c === 0); n++) { const x = between(lo[0], hi[0]), y = between(lo[1], hi[1]), c = covers(x, y); if (!best || c < best.c) best = { x, y, c }; }
+        if (best.c > 0.25 && smaller-- > 0) { s *= 0.85; continue; }   // nowhere it leaves them mostly clear: a little smaller, and again (to about half)
+        a.x = best.x; a.y = best.y; a.r = r; a.s = s;
+        for (const P of aligned) P.t = alignedT(L);   // a cut-out that lay over it still does, at its new size and angle
+        // and the subjects it carries are where it put them: its own and those of the cut-outs over it turned and
+        // sized about its centre with it; a cut-out moved off it (its size and angle its own) only carried along
+        const k = s / s0, turn = ((r - r0) * Math.PI) / 180, cs = Math.cos(turn), sn = Math.sin(turn), follow = new Set([L.id, ...aligned.map((P) => P.id)]);
+        for (const { p, dx, dy } of fit) {
+          const ox = x0 * p.w + dx, oy = y0 * p.h + dy, nx = best.x * p.w + dx, ny = best.y * p.h + dy;
+          for (const kb of boxes.find((b) => b.key === p.key).keep) if (mine.includes(kb.id)) {
+            const f = follow.has(kb.id), u = (kb.x0 + kb.x1) / 2 - ox, v = (kb.y0 + kb.y1) / 2 - oy, hw = ((kb.x1 - kb.x0) / 2) * (f ? k : 1), hh = ((kb.y1 - kb.y0) / 2) * (f ? k : 1);
+            const cx = nx + (f ? (u * cs - v * sn) * k : u), cy = ny + (f ? (u * sn + v * cs) * k : v);
+            Object.assign(kb, { x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh });
+          }
+        }
+        break;
+      }
       if (r) r = Math.abs(r) < 1 ? 0 : r / 2; else s *= 0.9;   // too big here: straighter first, then smaller
     }
   }
@@ -3288,13 +3324,15 @@ function dealHand() {
   const round = (v, step) => Math.round(v / step) * step, st = S.profile.style;
   // the look, its sliders tuned by its recipe (deal.js): about the values it was made with, its optional parts now and then
   st.look = pick(LOOK_IDS); st.lookSeed = Math.floor(R() * 1000000);
-  const tuned = tuneLook(st.look, R);
+  // the title's length and the channel colour turn it (see recipeOf)
+  const ctx = coverContext(S.cover.title, hexToRgb(cat().color));
+  const tuned = tuneLook(st.look, R, ctx);
   for (const d of LOOKS[st.look].params) if (d.text) tuned[d.key] = (st.lookParams[st.look] || {})[d.key] ?? d.def;   // words typed in are kept
   if (Object.keys(tuned).length) st.lookParams[st.look] = tuned;
   // its scene objects: where the layout puts them, or now and then a little off it
   if (S.cover.scene) delete S.cover.scene[st.look];
   if (chance(0.4)) for (const key of Object.keys(LOOKS[st.look].scene || {})) moveScene(S.cover, st.look, key, "all", frame().key, round(between(-0.06, 0.06), 0.005), round(between(-0.05, 0.05), 0.005));
-  st.theme = chance(recipeOf(st.look).dark) ? "dark" : "light";
+  st.theme = chance(recipeOf(st.look, ctx).dark) ? "dark" : "light";
   // the layout is left as it is — the template, its proportions, where the layout layers stand — and
   // every layer's own choices are dealt; the letterings and bends as the look's recipe has them, the
   // subtitle after the title (it is lettered like it half the time)
@@ -3308,7 +3346,7 @@ function dealHand() {
   }
   const can = (k) => native || EFFECTS[k].kind !== "outline";
   const dealFx = (L, got) => { delete L.fx; delete L.fxAmt; delete L.bend; delete L.bendAmt; delete L.warp; delete L.reshape; Object.assign(L, got); };
-  const titled = letterFor(st.look, "title", R, can);
+  const titled = letterFor(st.look, "title", R, can, null, ctx);
   for (const L of S.cover.layers) {
     switch (L.type) {
       case "bg": L.grid = chance(0.75); break;
@@ -3316,8 +3354,8 @@ function dealHand() {
       case "brand": L.rail = chance(0.8); break;
       case "catname": L.plate = chance(0.75); break;
       case "title": L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, titled); break;
-      case "subtitle": L.plate = chance(0.3); L.stroke = round(between(0.6, 1.2), 0.05); L.shadow = round(between(0.5, 1.2), 0.05); dealFx(L, letterFor(st.look, "subtitle", R, can, titled)); break;
-      case "text": L.plate = chance(0.35); L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, letterFor(st.look, "text", R, can)); break;
+      case "subtitle": L.plate = chance(0.3); L.stroke = round(between(0.6, 1.2), 0.05); L.shadow = round(between(0.5, 1.2), 0.05); dealFx(L, letterFor(st.look, "subtitle", R, can, titled, ctx)); break;
+      case "text": L.plate = chance(0.35); L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, letterFor(st.look, "text", R, can, null, ctx)); break;
       case "asset": if (canTint(L.ref) && L.ref.kind !== "graphic") L.tint = chance(0.5); break;
     }
     if (FX_TYPES.includes(L.type) && L.type !== "title" && L.type !== "subtitle") {   // look effects: one or two, mostly the look just drawn's, now and then another look's (the title and subtitle keep the user's)
@@ -3990,6 +4028,36 @@ async function selfTest(dir) {
       }
       const k = JSON.parse(keep); S.profile.style = k.style; S.cover.layers = k.layers; if (k.scene) S.cover.scene = k.scene; else delete S.cover.scene;
       touch({ profile: true, cover: true, panel: true, side: true });
+    }
+    // Surprise me on a cover with a print of the real photo under the title, its subject cut out over the title, and
+    // the photo clipped into the title: the subject still over the title and over its photo, the picture still in the letters
+    {
+      const real = canCut() && (await invoke("selftest_photo").catch(() => null)), pid = real && (await putPhoto(real));
+      if (pid) {
+        await step("surprise with a cut-out");
+        const keep = JSON.stringify({ style: S.profile.style, layers: S.cover.layers, scene: S.cover.scene }), keepSel = S.layerId, at = (id) => S.cover.layers.findIndex((l) => l.id === id);
+        const ph = newLayer("photo", { pid });
+        ph.t.all = { ...ph.t.all, x: 0.7, y: 0.45, s: 0.6 };
+        S.cover.layers.splice(at("title"), 0, ph);
+        const front = await cutOut(ph), inside = newLayer("photo", { pid, clip: true });
+        S.cover.layers.splice(at("title") + 1, 0, inside);
+        report.surpriseCut = [];
+        for (let i = 0; i < 4; i++) {
+          // the last time with the cut-out moved off its photo and made smaller: its size its own from then on
+          const off = i === 3 && front && layer(front.id), ownS = off && (off.t.all = { ...off.t.all, x: -0.25, s: off.t.all.s * 0.8 }).s;
+          SURPRISE.last = null; await surprise(); await new Promise((r) => setTimeout(r, 0));
+          const P = layer(ph.id), F = front && layer(front.id), ti = at("title"), cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
+          const box = (id) => { const h = cv._hits.find((x) => x.id === id); return h && boxOf(h); }, subject = F && box(F.id);
+          const covered = subject ? Math.max(0, ...S.cover.layers.filter((l) => isFree(l.type) && l !== P && l !== F && l.id !== inside.id).map((l) => box(l.id)).filter(Boolean).map((b) => overlap(subject, b))) : null;
+          report.surpriseCut.push({ kept: !!SURPRISE.last, overTitle: !!F && at(F.id) > ti, onlyThoseOver: S.cover.layers.slice(ti + 1).every((l) => l.clip || (l.type === "photo" && l.cut)),
+            aligned: !!F && !!P && JSON.stringify(F.t) === JSON.stringify(alignedT(P)), ...(off ? { ownSize: F.t.all.s === ownS } : {}), covered: covered == null ? null : Math.round(covered * 100) / 100,
+            inLetters: at(inside.id) === ti + 1 && !!layer(inside.id).clip, scale: P && P.t.all.s,
+            path: await invoke("write_image", framed(await toPng(cv), { dir, name: `surprise-cut-${i + 1}.png` })) });
+        }
+        const k = JSON.parse(keep); S.profile.style = k.style; S.cover.layers = k.layers; if (k.scene) S.cover.scene = k.scene; else delete S.cover.scene;
+        S.layerId = keepSel;
+        touch({ profile: true, cover: true, panel: true, side: true });
+      }
     }
     // clipping masks: a solid clipped to the title (its letters in the solid's colour), and a print of the
     // last picture taken in clipped to a text layer (the picture inside the letters)

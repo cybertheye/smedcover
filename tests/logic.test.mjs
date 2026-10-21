@@ -1666,6 +1666,35 @@ test("Surprise me's recipes: every look has one, naming only letterings, bends a
   assert.equal(weighted({ a: 0, b: 2 }, R), "b");
 });
 
+test("Surprise me turns a recipe to the cover: a long title bent less and kept large, a channel colour kept off a ground like it", async () => {
+  const { coverContext, recipeOf } = await import("../ui/js/deal.js");
+  assert.deepEqual(coverContext("封面标题\n*第二行*", [252, 238, 10]).long, false);
+  assert.equal(coverContext("这是一个非常非常长的封面标题哦", null).long, true, "a line wider than 8 characters");
+  assert.equal(coverContext("一\n二\n三", null).long, true, "three lines");
+  assert.equal(coverContext("短题\nAI", null).short, true);
+  assert.ok(coverContext("x", [0, 0, 0]).lum < 0.01 && coverContext("x", [255, 255, 255]).lum > 0.99);
+  const plain = recipeOf("verse"), long = recipeOf("verse", { long: true }), short = recipeOf("verse", { short: true });
+  assert.ok(Math.abs(long.bend - plain.bend * 0.3) < 1e-9 && long.fx.sticker === plain.fx.sticker / 2 && long.fx.extrude === plain.fx.extrude / 2 && long.fx.cel === plain.fx.cel);
+  assert.ok(short.bend > plain.bend && short.bend <= 0.5);
+  assert.equal(recipeOf("deco", { short: true }).bend, 0, "never bent stays never bent");
+  assert.ok(recipeOf("neon", { lum: 0.01 }).dark < recipeOf("neon").dark && recipeOf("riso", { lum: 0.9 }).dark > recipeOf("riso").dark && recipeOf("riso", { lum: 0.3 }).dark === recipeOf("riso").dark);
+  assert.ok(recipeOf("verse").fx !== recipeOf("verse", { long: true }).fx && recipeOf("verse").fx.sticker === 2, "the table itself is left alone");
+  // the user's own recipe for a look wins over the table, what it leaves out still the table's
+  const { baseRecipe, letterFor } = await import("../ui/js/deal.js");
+  const mine = { own: 0, fx: { sticker: 1 }, params: { rain: 1 } }, b = baseRecipe("deco", mine);
+  assert.deepEqual([b.own, b.fx, b.params.rain, b.params.airship, b.family, b.bend], [0, { sticker: 1 }, 1, 0.25, "light", 0]);
+  const R = () => 0.5;
+  assert.equal(letterFor("deco", "title", R, () => true, null, { mine }).fx, "sticker", "never its own lettering, only what the user allowed");
+  assert.equal(recipeOf("deco", { mine, short: true }).bend, 0);
+  // a dark ground's chance the user set is theirs, whatever the channel colour; one pushed up is never pulled down
+  for (const lum of [0.01, 0.9]) for (const dark of [0, 1]) assert.equal(recipeOf("riso", { lum, mine: { dark } }).dark, dark);
+  for (const id of LOOK_IDS) assert.ok(recipeOf(id, { lum: 0.9 }).dark >= baseRecipe(id).dark, id);
+  // a family stored on its own brings that family's choices, not the table's for the look
+  const { FAMILIES } = await import("../ui/js/deal.js"), pop = baseRecipe("deco", { family: "pop" });
+  assert.deepEqual([pop.family, pop.dark, pop.own, pop.fx, pop.bend], ["pop", FAMILIES.pop.dark, FAMILIES.pop.own, FAMILIES.pop.fx, FAMILIES.pop.bend]);
+  assert.equal(pop.params.rain, baseRecipe("deco").params.rain);   // its parts' chances are still the look's
+});
+
 test("Surprise me's scoring: the standards' issues count against a cover, the room above their lines for it; one of the best few is kept", async () => {
   const { coverScore, pickHand } = await import("../ui/js/check.js");
   const sizes = [{ key: "1920x1080", w: 1920, h: 1080, vw: 1920, vh: 1080 }, { key: "1080x1440", w: 1080, h: 1440, vw: 1080, vh: 1440 }];

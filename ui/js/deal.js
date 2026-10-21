@@ -5,6 +5,7 @@
 // source, a function returning numbers in [0, 1).
 import { LOOKS } from "./style.js";
 import { EFFECTS, BENDS } from "./textfx.js";
+import { titleLines, lineUnits, luminance } from "./check.js";
 
 /**
  * The families of looks, and what goes with each:
@@ -61,10 +62,43 @@ export const RECIPES = {
   construct: { family: "print", own: 0.85, bend: 0.05, bends: { rise: 1 }, params: { water: 0.3, chan: 0.3 } },
   deco: { family: "light", own: 0.95, bend: 0, params: { red: 0.2, rain: 0.2, airship: 0.25, sign: 0.3, arch: 0.25, figure: 0.25, gilt: 0.15 }, tune: (p) => { if (p.rain > 0) p.fog = Math.max(p.fog, 0.45); } },   // rain comes with mist
 };
-/** A look's recipe with its family's choices filled in. */
-export function recipeOf(id) {
-  const r = RECIPES[id] || { family: "pop" }, f = FAMILIES[r.family] || FAMILIES.pop;
-  return { dark: r.dark ?? f.dark, own: r.own ?? f.own, fx: r.fx || f.fx, bend: r.bend ?? f.bend, bends: r.bends || f.bends, params: r.params || {}, tune: r.tune || null };
+/**
+ * What a cover brings to a hand: `long` (a line of its title longer than 8 characters' width, or three
+ * lines or more), `short` (no line longer than 4, two lines at most), `lum` (its channel colour's relative
+ * luminance, 0 to 1). `rgb`: the channel colour [r, g, b].
+ */
+export function coverContext(title, rgb) {
+  const lines = titleLines(title), longest = Math.max(0, ...lines.map(lineUnits));
+  return { long: longest > 8 || lines.length >= 3, short: lines.length > 0 && longest <= 4 && lines.length <= 2, lum: rgb ? luminance(rgb[0], rgb[1], rgb[2]) : null };
+}
+/**
+ * A look's recipe as the table has it, its family's choices filled in: { family, dark, own, fx, bend, bends,
+ * params, tune }. `mine`: what the user set for it in its place (see the Style tab; any of family, dark, own,
+ * bend, fx, bends, params), which wins.
+ */
+export function baseRecipe(id, mine = null) {
+  const r = RECIPES[id] || { family: "pop" }, m = mine || {}, family = FAMILIES[m.family] ? m.family : r.family, f = FAMILIES[family] || FAMILIES.pop;
+  const t = family === r.family ? r : {};   // another family than the table's: its choices, not the table's
+  return {
+    family, dark: m.dark ?? t.dark ?? f.dark, own: m.own ?? t.own ?? f.own, fx: { ...(m.fx || t.fx || f.fx) },
+    bend: m.bend ?? t.bend ?? f.bend, bends: { ...(m.bends || t.bends || f.bends) }, params: { ...(r.params || {}), ...(m.params || {}) }, tune: r.tune || null,
+  };
+}
+/**
+ * A look's recipe for a hand (see baseRecipe; `ctx.mine`, the user's own for it), turned to the cover (`ctx`,
+ * see coverContext): a long title is bent less and less often given a lettering that takes room round the
+ * letters (a sticker's rim, depth), so its type stays large; a short one is bent a little more often; a channel
+ * colour near black would sink into the dark ground and a very bright one (near white, or a light yellow) into the
+ * light one, so the other is likelier — unless the user set the dark ground's chance themselves.
+ */
+export function recipeOf(id, ctx = {}) {
+  const out = baseRecipe(id, ctx.mine);
+  if (ctx.long) { out.bend *= 0.3; for (const k of ["sticker", "extrude"]) if (out.fx[k]) out.fx[k] *= 0.5; }
+  else if (ctx.short) out.bend = Math.min(0.5, out.bend * 1.5);
+  if (ctx.lum == null || (ctx.mine && ctx.mine.dark != null)) return out;
+  if (ctx.lum < 0.05) out.dark *= 0.6;
+  else if (ctx.lum > 0.6) out.dark = Math.max(out.dark, Math.min(0.95, out.dark + (1 - out.dark) * 0.4));
+  return out;
 }
 /** One key of `weights` ({key: weight}), likelier as its weight is larger; null when none weighs anything. */
 export function weighted(weights, R) {
@@ -84,8 +118,8 @@ export const EXTRAS = 2;
  * to between 0.3 and 0.75 of their range; a checkbox is on as likely as the recipe says, else 3 in 4 when
  * it is on by default and 3 in 10 when not. Typed words are left to the caller. Returns { key: value }.
  */
-export function tuneLook(id, R) {
-  const L = LOOKS[id], r = recipeOf(id), out = {}, extras = [];
+export function tuneLook(id, R, ctx = {}) {
+  const L = LOOKS[id], r = recipeOf(id, ctx), out = {}, extras = [];
   for (const d of L.params) {
     if (d.text) continue;
     const o = r.params[d.key], span = d.max - d.min;
@@ -109,9 +143,10 @@ export function tuneLook(id, R) {
  * @param {() => number} R
  * @param {(fx: string) => boolean} [can] whether a lettering can be drawn here (outlines need the desktop app)
  * @param {{fx?: string, fxAmt?: number} | null} [title] what the title was dealt, for the subtitle
+ * @param {{long?: boolean, short?: boolean, lum?: number | null, mine?: object}} [ctx] what the cover brings (see coverContext), and the user's own recipe for the look
  */
-export function letterFor(id, role, R, can = () => true, title = null) {
-  const r = recipeOf(id), out = {}, fx = Object.fromEntries(Object.entries(r.fx).filter(([k]) => EFFECTS[k] && k !== "auto" && k !== id && can(k)));
+export function letterFor(id, role, R, can = () => true, title = null, ctx = {}) {
+  const r = recipeOf(id, ctx), out = {}, fx = Object.fromEntries(Object.entries(r.fx).filter(([k]) => EFFECTS[k] && k !== "auto" && k !== id && can(k)));
   const choose = () => { const k = weighted(fx, R); if (k) { out.fx = k; if (EFFECTS[k].kind !== "passes") out.fxAmt = Math.round((0.6 + R() * 0.9) * 20) / 20; } };
   if (role === "subtitle") {
     if (title && title.fx && R() < 0.5) { out.fx = title.fx; if (title.fxAmt != null) out.fxAmt = title.fxAmt; }
