@@ -14,7 +14,7 @@ import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAs
 import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
-  deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption,
+  deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
 } from "./store.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
@@ -314,7 +314,7 @@ $("strip").addEventListener("wheel", (e) => { if (Math.abs(e.deltaY) > Math.abs(
 function buildStrip() {
   $("strip").replaceChildren(...S.profile.sizes.map((size) => {
     const key = sizeKey(size);
-    return el("figure", { class: key === S.sel ? "on" : "", onclick: () => selectSize(key) }, el("canvas", { id: "th-" + key }), el("figcaption", { title: sizeLabel(size) }, `${size.w}×${size.h}`));   // the pixels alone; what it is called shows on hover and over the canvas
+    return el("figure", { class: key === S.sel ? "on" : "", onclick: () => selectSize(key) }, el("canvas", { id: "th-" + key }), el("figcaption", { title: sizeLabel(size) }, ratioText(size.w, size.h)));   // the ratio alone; what it is called and its pixels show on hover and over the canvas
   }));
 }
 function selectSize(key) {
