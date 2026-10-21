@@ -103,11 +103,14 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.notEqual(c.layers, p.design.layers);                       // a copy, not the same array
   const own = normalizeCover({ layers: [{ type: "title", stroke: 0.5 }] }, p);
   assert.equal(own.layers.find((l) => l.id === "title").stroke, 0.5);
-  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size", hideScene: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], recipes: {} });
+  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size", hideScene: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], recipes: {}, surprise: { locks: {}, recent: [], taste: {} } });
   assert.deepEqual(normalizeSettings({ channels: { p1: "c1", "bad key!": "c2", p2: 7 } }).channels, { p1: "c1" });
   assert.deepEqual(normalizeSettings({ columns: { left: 410.4, right: -5, setup: "x" } }).columns, { left: 410, right: 0, setup: 0 });
   assert.deepEqual([normalizeSettings({ cutEngine: "birefnet" }).cutEngine, normalizeSettings({ cutEngine: "magic" }).cutEngine], ["birefnet", ""]);
   assert.deepEqual(normalizeSettings({ recentFonts: ["A", "A", "", 3, "B", "C", "D", "E", "F", "G"] }).recentFonts, ["A", "B", "C", "D", "E", "F"]);
+  // what Surprise me keeps: only the locks it knows (set), the last four looks kept, counts as whole numbers within 0 and 999
+  assert.deepEqual(normalizeSettings({ surprise: { locks: { look: true, theme: false, colour: true, places: 1 }, recent: ["a", "b", "no!", 3, "c", "d", "e"], taste: { deco: { kept: 2.6, dropped: -1 }, cel: { kept: 0, dropped: 0 }, "x y": { kept: 1 }, neon: { kept: 5000, dropped: 2 } } } }).surprise,
+    { locks: { look: true }, recent: ["b", "c", "d", "e"], taste: { deco: { kept: 3, dropped: 0 }, neon: { kept: 999, dropped: 2 } } });
   // the user's own Surprise me recipes: chances kept within 0 and 1, weights within 0 and 10, what is not a name dropped
   assert.deepEqual(normalizeSettings({ recipes: { deco: { family: "pop", own: 1.4, bend: -1, fx: { sticker: 12, "bad key": 1, cel: "x" }, params: { rain: 0.5, fog: 3 } }, "no!": { own: 0.5 }, cel: {}, riso: { family: "nope" } } }).recipes,
     { deco: { family: "pop", own: 1, bend: 0, fx: { sticker: 10 }, params: { rain: 0.5, fog: 1 } } });
@@ -1696,6 +1699,15 @@ test("Surprise me turns a recipe to the cover: a long title bent less and kept l
   const { FAMILIES } = await import("../ui/js/deal.js"), pop = baseRecipe("deco", { family: "pop" });
   assert.deepEqual([pop.family, pop.dark, pop.own, pop.fx, pop.bend], ["pop", FAMILIES.pop.dark, FAMILIES.pop.own, FAMILIES.pop.fx, FAMILIES.pop.bend]);
   assert.equal(pop.params.rain, baseRecipe("deco").params.rain);   // its parts' chances are still the look's
+  // the look for a hand: never one of the last kept while others are left, the user's taste weighing in
+  const { pickLook, tasteWeight } = await import("../ui/js/deal.js");
+  assert.deepEqual([tasteWeight(), tasteWeight({ kept: 2 }), tasteWeight({ dropped: 1 }), tasteWeight({ kept: 20 }), tasteWeight({ dropped: 20 })], [1, 3, 0.5, 3, 0.25]);
+  let seed = 7;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648), ids = ["a", "b", "c", "d"], got = { a: 0, b: 0, c: 0, d: 0 };
+  for (let i = 0; i < 4000; i++) got[pickLook(ids, rand, { recent: ["a"], taste: { b: { kept: 2 }, c: { dropped: 1 } } })]++;
+  assert.equal(got.a, 0, "a look kept lately waits its turn");
+  assert.ok(Math.abs(got.b / got.c - 6) < 1 && Math.abs(got.b / got.d - 3) < 0.5, JSON.stringify(got));   // weights 3 : 0.5 : 1
+  assert.equal(pickLook(["a"], rand, { recent: ["a"] }), "a", "with every look recent, any may come");
 });
 
 test("Surprise me's scoring: the standards' issues count against a cover, the room above their lines for it; one of the best few is kept", async () => {

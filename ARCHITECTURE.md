@@ -117,7 +117,9 @@ Earlier data: there used to be one cover, `session.json`, shared by every channe
 
 **Settings** (`settings.json`): language, current profile, the channel each profile was last on
 (`channels`), export scale, format, JPEG quality, file name pattern, adjustment scope, and the user's own
-Surprise me recipes by look (`recipes`: only what was changed, checked by `normalizeRecipes`; see `deal.js`).
+Surprise me recipes by look (`recipes`: only what was changed, checked by `normalizeRecipes`; see `deal.js`),
+and what Surprise me keeps between runs (`surprise`: the parts to leave alone, `locks`; the looks of the last
+four hands dealt, `recent`; how often a hand in each look was kept or dropped, `taste`; see `normalizeSurprise`).
 
 Other files: `assets/<id>.json` (My assets: images as data URLs, AI assets as specs; either may carry `folder`, the id of its folder), `asset-folders.json` (the folders of My assets, `[{id, name}]`, checked by `normalizeFolders`; an asset whose folder is gone counts as unfiled), `fonts/<name>.font` (imported
 fonts), `photos/<pid>` (pictures, originals and masks; see 6.3), `photo-library.json` (Bitmaps: `[{pid, name, kind, at}]`, `kind` being `upload`, `ai` or `repaint`, newest first, checked by `normalizeLibrary`), `ai.json` (AI connection settings including the token; never exported with
@@ -835,14 +837,20 @@ is clipped into it (unless it is clipped onto another), below only the subjects 
 each size is drawn small once to learn every layer's box, then for the new angle and size the range the
 centre may take at each size (less a hair for outlines and shadows) is found, and a place drawn within
 what all sizes allow; when nothing is allowed the layer is set straighter, then smaller. Layers locked,
-filling the canvas, or cut-outs following their photo are left where they are. Before that, words the user moved or
-resized go back where the rules put them: the layout's lettered layers (`LETTERED`) to their placement in the
-profile's design (`channelCover(null, …)`), the user's text layers to a new one's size with no size of their own.
-While hands are dealt, a step waiting to be recorded (`recordHistory()`) waits too. The hands show in Surprise me's
-window as they come (`dealOpen()`, `dealShow()`: the drawing `seenNow()` made at the size shown, with the standards
-missed; `SURPRISE.pace`, 90 ms, the least between two, so they can be seen arriving); the one kept is marked
-(`dealKept()`), and `dealTake()` puts another in its place on the same step of undo while nothing has followed (a
-new history, `resetHistory()`, forgets the step). The window sits over the left column, so the canvas stays in
+filling the canvas, or cut-outs following their photo are left where they are. Before that, words the user
+moved or resized go back where the rules put them: the layout's lettered layers (`LETTERED`) to their
+placement in the profile's design (`channelCover(null, …)`), the user's text layers to a new one's size with
+no size of their own. The look is drawn by `pickLook()` (`deal.js`): none of the last four dealt
+(`settings.surprise.recent`), each as likely as `tasteWeight()` makes it from how often a hand in it was kept
+(`commitHistory()` on top of the step Surprise me made, `runExport()` from it) or dropped (`timeTravel()` back
+from it, `dealTake()` taking a hand in another look; taking one in the look back counts it back): (kept + 1) /
+(dropped + 1), within 0.25 and 3 (`learn()`; nothing is learnt for a run with the look held, and a new history,
+`resetHistory()`, forgets the step). While hands are dealt, a step waiting to be recorded (`recordHistory()`) waits too. `settings.surprise.locks`
+(`SURPRISE_LOCKS` in `store.js`) leaves the look and its sliders, the ground, the letterings or every place
+alone. The hands show in Surprise me's window as they come (`dealOpen()`, `dealShow()`: the drawing `seenNow()`
+made at the size shown, with the standards missed; `SURPRISE.pace`, 90 ms, the least between two, so they can
+be seen arriving); the one kept is marked (`dealKept()`), and `dealTake()` puts another in its place on the
+same step of undo while nothing has followed. The window sits over the left column, so the canvas stays in
 view; `body.dealing` keeps the page from being worked on while hands are dealt onto the cover.
 
 ## 10. The Rust side (`src-tauri/src/lib.rs`)

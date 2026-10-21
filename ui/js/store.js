@@ -174,7 +174,23 @@ export function normalizeSettings(raw) {
     columns: Object.fromEntries(["left", "right", "setup"].map((k) => [k, Math.round(num(s.columns && s.columns[k], 0, 0, 900))])),
     recentFonts: [...new Set((Array.isArray(s.recentFonts) ? s.recentFonts : []).map((f) => str(f).replace(/["\\]/g, "").trim().slice(0, 80)).filter(Boolean))].slice(0, RECENT_FONTS),
     recipes: normalizeRecipes(s.recipes),
+    surprise: normalizeSurprise(s.surprise),
   };
+}
+/** What Surprise me may be told to leave as it is: the look (and its sliders), the dark or light ground, the letterings, where things stand. */
+export const SURPRISE_LOCKS = ["look", "theme", "lettering", "places"];
+/**
+ * What Surprise me keeps between runs, on this computer: the parts it is to leave alone (`locks`, see
+ * SURPRISE_LOCKS), the looks of the last hands dealt (`recent`, newest last, four at most), and how often a
+ * hand in each look was kept or dropped (`taste`: {look: {kept, dropped}}, see tasteWeight in deal.js).
+ */
+export function normalizeSurprise(raw) {
+  const r = raw && typeof raw === "object" ? raw : {}, name = (k) => typeof k === "string" && /^[a-zA-Z]{1,24}$/.test(k);
+  const count = (v) => (Number.isFinite(v) ? Math.min(999, Math.max(0, Math.round(v))) : 0), locks = {}, taste = {};
+  for (const k of SURPRISE_LOCKS) if (r.locks && r.locks[k] === true) locks[k] = true;
+  for (const [k, v] of Object.entries(r.taste && typeof r.taste === "object" ? r.taste : {}).slice(0, 80))
+    if (name(k) && v && typeof v === "object" && (count(v.kept) || count(v.dropped))) taste[k] = { kept: count(v.kept), dropped: count(v.dropped) };
+  return { locks, recent: (Array.isArray(r.recent) ? r.recent : []).filter(name).slice(-4), taste };
 }
 /**
  * The user's own Surprise me recipes, by look (see baseRecipe in deal.js): only what was set — a family's

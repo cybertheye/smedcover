@@ -108,6 +108,19 @@ export function weighted(weights, R) {
   for (const [k, w] of list) { at -= w; if (at < 0) return k; }
   return list[list.length - 1][0];
 }
+/**
+ * How much likelier the user has made a look ({kept, dropped}: how often a hand in it was kept — edited on,
+ * exported — or undone at once, or another hand taken over it): (kept + 1) / (dropped + 1), within 0.25 and 3.
+ */
+export function tasteWeight(t) {
+  const kept = (t && t.kept) || 0, dropped = (t && t.dropped) || 0;
+  return Math.min(3, Math.max(0.25, (kept + 1) / (dropped + 1)));
+}
+/** The look for a hand: none of the `recent` ones (while any other is left), each as likely as the user's `taste` makes it (tasteWeight). */
+export function pickLook(ids, R, { recent = [], taste = {} } = {}) {
+  const fresh = ids.filter((k) => !recent.includes(k)), pool = fresh.length ? fresh : ids;
+  return weighted(Object.fromEntries(pool.map((k) => [k, tasteWeight(taste[k])])), R);
+}
 const snap = (v, d) => { const s = d.step || 0.05; return Math.min(d.max, Math.max(d.min, Math.round(v / s) * s)); };
 /** How many of a look's parts that are off by default one hand may bring in. */
 export const EXTRAS = 2;
