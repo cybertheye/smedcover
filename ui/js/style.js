@@ -5570,6 +5570,18 @@ function jlPlace(env, p) {
   const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, size = fh * (0.4 + 0.42 * p.figure);
   return { F, cx: F.x0 + fw * 0.64, cy: F.y0 + fh * 0.46, size };
 }
+/**
+ * The machine's panel, which the circuit, the tiny print and the knobs are laid on, as large as `board`
+ * says and whatever size the figure is. At 0.5 it is the field less a margin, its left edge where a figure
+ * of the slider's default size (0.55) would reach; toward 1 it grows to the whole field, toward 0 it
+ * shrinks about its middle to 0.4 of that.
+ */
+function jlPanel({ F, cx }, board = 0.5) {
+  const all = { x0: F.x0 + 24, y0: F.y0 + 24, x1: F.x1 - 24, y1: F.y1 - 24 }, usual = (F.y1 - F.y0) * (0.4 + 0.42 * 0.55), mid = { ...all, x0: Math.max(all.x0, cx - usual) };
+  if (board >= 0.5) { const t = (board - 0.5) * 2; return Object.fromEntries(Object.keys(all).map((k) => [k, mid[k] + (all[k] - mid[k]) * t])); }
+  const k = 0.4 + 1.2 * board, mx = (mid.x0 + mid.x1) / 2, my = (mid.y0 + mid.y1) / 2, hw = ((mid.x1 - mid.x0) / 2) * k, hh = ((mid.y1 - mid.y0) / 2) * k;
+  return { x0: mx - hw, y0: my - hh, x1: mx + hw, y1: my + hh };
+}
 /** A polyline moved `o` to its left, its corners mitred. */
 function offsetLine(pts, o) {
   const N = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [-dy / l, dx / l]; };
@@ -5661,6 +5673,7 @@ const jelly = {
   params: [
     { key: "figure", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "果冻身影", en: "Jelly figure" } },
     { key: "circuit", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "电路板", en: "Circuit board" } },
+    { key: "board", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "电路板大小", en: "Board size" } },
     { key: "speakers", min: 0, max: 1, step: 0.05, def: 0.4, name: { zh: "音箱喇叭", en: "Speakers" } },
     { key: "cables", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "线缆", en: "Cables" } },
     { key: "knobs", min: 0, max: 1, step: 0.05, def: 0.3, name: { zh: "旋钮按键", en: "Knobs and buttons" } },
@@ -5692,7 +5705,7 @@ const jelly = {
       return true;
     }
     if (!L.grid) return true;
-    const at = jlPlace(env, p), F = at.F, { cx, cy, size } = at, P = { x0: Math.max(F.x0 + 24, cx - size * 1.0), y0: F.y0 + 24, x1: F.x1 - 24, y1: F.y1 - 24 }, pw = P.x1 - P.x0, ph = P.y1 - P.y0;
+    const at = jlPlace(env, p), F = at.F, { cx, cy, size } = at, P = jlPanel(at, p.board), room = p.board < 0.5 ? jlPanel(at) : P, pw = P.x1 - P.x0, ph = P.y1 - P.y0;
     ctx.beginPath(); rounded(ctx, P.x0, P.y0, pw, ph, u * 0.025); ctx.fillStyle = css(dark ? JL.deep : [204, 216, 224]); ctx.fill(); ctx.strokeStyle = dark ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.18)"; ctx.lineWidth = 2; ctx.stroke();   // pale on the steel ground, so dark lettering over it still reads
     if (p.text > 0) {   // columns of tiny print down both sides of the panel, an amber heading over each
       ctx.save(); ctx.globalAlpha = Math.min(1, p.text * 3);
@@ -5701,14 +5714,15 @@ const jelly = {
       ctx.restore();
     }
     if (p.circuit > 0) circuit(ctx, P, p.circuit, dark ? JL.trace : [226, 118, 56], 2430);
+    // the speakers, cables and display are the jelly's: kept within the panel of the default size even when a smaller one is drawn
     if (p.speakers > 0) {   // pairs of speakers either side of the figure, the upper ones first
       const r = size * 0.15, n = p.speakers * 6;
-      for (let k = 0; k < Math.ceil(n); k++) { ctx.save(); ctx.globalAlpha = clamp(n - k); speaker(ctx, k % 2 ? Math.min(P.x1 - r * 1.15, cx + size * 0.62) : Math.max(P.x0 + r * 1.15, cx - size * 0.62), cy - size * 0.3 + (k >> 1) * r * 2.3, r); ctx.restore(); }
+      for (let k = 0; k < Math.ceil(n); k++) { ctx.save(); ctx.globalAlpha = clamp(n - k); speaker(ctx, k % 2 ? Math.min(room.x1 - r * 1.15, cx + size * 0.62) : Math.max(room.x0 + r * 1.15, cx - size * 0.62), cy - size * 0.3 + (k >> 1) * r * 2.3, r); ctx.restore(); }
     }
     if (p.cables > 0) {   // cables from under the figure, sagging out to the panel's edges
       const cols = [JL.lime, JL.cobalt, JL.coral, JL.cream, JL.lime], n = p.cables * 5;
       for (let k = 0; k < Math.ceil(n); k++) {
-        const s = k % 2 ? 1 : -1, x0 = cx + s * size * (0.05 + k * 0.04), y0 = cy + size * 0.3, x1 = s > 0 ? P.x1 + 10 : P.x0 - 10, y1 = cy + size * (0.1 + rand(k * 2.7 + 2440) * 0.5);
+        const s = k % 2 ? 1 : -1, x0 = cx + s * size * (0.05 + k * 0.04), y0 = cy + size * 0.3, x1 = s > 0 ? room.x1 + 10 : room.x0 - 10, y1 = cy + size * (0.1 + rand(k * 2.7 + 2440) * 0.5);
         ctx.save(); ctx.globalAlpha = clamp(n - k); cable(ctx, [x0, y0, x0 + s * size * 0.1, y0 + size * 0.6, x1 - s * size * 0.3, y1 + size * 0.5, x1, y1], u * (0.012 + rand(k + 2441) * 0.01), cols[k]); ctx.restore();
       }
     }
@@ -5759,7 +5773,7 @@ const jelly = {
       ctx.restore();
     }
     if (p.lcd > 0) {   // the display under the figure: the channel's number and four more digits, the unlit segments faint
-      const bw = size * (0.5 + 0.45 * p.lcd), bh = bw * 0.24, bx = clamp(cx - bw / 2, P.x0 + 12, P.x1 - bw - 12), by = clamp(cy + size * 0.5, P.y0 + 12, P.y1 - bh - 12), str = `${pad2(env.o ? env.o.catIndex + 1 : 1)}-${String(Math.floor(rand(2480) * 9000 + 1000))}`;
+      const bw = size * (0.5 + 0.45 * p.lcd), bh = bw * 0.24, bx = clamp(cx - bw / 2, room.x0 + 12, room.x1 - bw - 12), by = clamp(cy + size * 0.5, room.y0 + 12, room.y1 - bh - 12), str = `${pad2(env.o ? env.o.catIndex + 1 : 1)}-${String(Math.floor(rand(2480) * 9000 + 1000))}`;
       ctx.save(); ctx.globalAlpha = Math.min(1, p.lcd * 3);
       shift("display", bx + bw / 2, by + bh / 2, ctx);   // a scene object
       ctx.beginPath(); rounded(ctx, bx, by, bw, bh, bh * 0.15); ctx.fillStyle = "#07090b"; ctx.fill(); ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.lineWidth = 2; ctx.stroke();

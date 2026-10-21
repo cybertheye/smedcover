@@ -676,6 +676,25 @@ test("a look's figure drawn from a graphic: each such look names its slider, and
   assert.ok(usedUserAssets(p, null).includes("u9"), "an upload a figure is drawn from travels with the profile");
 });
 
+test("the jelly machine's panel and circuit stay as they are whatever size the jelly figure is", () => {
+  const rec = () => { const log = []; return [new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : (...a) => { log.push(k + a.map((v) => (typeof v === "number" ? v.toFixed(1) : "")).join()); return {}; }), set: () => true }), log]; };
+  const L = LOOKS.jelly, env = { w: 1920, h: 1080, C: [40, 120, 220], photo: null, cat: { code: "AB", name: "x" }, o: { profile: { brand: { name: "B" }, categories: [{}] }, catIndex: 0, size: { w: 1920, h: 1080 } }, G: L.layout("stack", 1920, 1080) };
+  const paint = (figure) => { setLook("jelly", { figure, speakers: 0, cables: 0, blobs: 0, lcd: 0 }, 3, true); const [ctx, log] = rec(); L.background(ctx, env, { grid: true }, lookValues()); return log; };
+  const small = paint(0.1), large = paint(1);
+  assert.ok(small.length > 100, "the panel, its print, circuit and knobs are drawn");
+  assert.deepEqual(large, small);
+  // its own slider sizes it: as it was at the default, larger and smaller either side
+  const board = (b) => { setLook("jelly", { board: b, speakers: 0, cables: 0, blobs: 0, lcd: 0 }, 3, true); const [ctx, log] = rec(); L.background(ctx, env, { grid: true }, lookValues()); return log; };
+  // at 0.5 the panel is where it always was: from where a jelly of the default size reaches (or the field's
+  // margin) to the field's other margins; at 1 the whole field less its margins (the panel is the first path drawn)
+  const panel = (log) => { const m = log.find((c) => c.startsWith("moveTo")).slice(6).split(",").map(Number), a = log.find((c) => c.startsWith("arcTo")).slice(5).split(",").map(Number); return { x0: m[0] - 1080 * 0.025, y0: m[1], x1: a[0], y1: a[3] }; };
+  const all = panel(board(1)), mid = panel(board(0.5)), fw = all.x1 - all.x0 + 48, fh = all.y1 - all.y0 + 48;
+  assert.ok(Math.abs(mid.x0 - Math.max(all.x0, all.x0 - 24 + fw * 0.64 - fh * (0.4 + 0.42 * 0.55))) < 0.2 && mid.x0 > all.x0 + 1, `${mid.x0} against ${all.x0}`);
+  assert.deepEqual([mid.y0, mid.x1, mid.y1], [all.y0, all.x1, all.y1]);
+  assert.notDeepEqual(board(0.1), board(0.5));
+  assert.notDeepEqual(board(0.9), board(0.5));
+});
+
 test("the first five looks have many settings now, and paint without a canvas", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (str) => ({ width: String(str).length * 50 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
   const want = { riso: ["pitch", "shapes", "speckle", "streaks", "ghost"], anime: ["clouds", "dusk", "rays", "flare", "leak", "vignette"], bluenote: ["vinyl", "ring", "edges", "fade", "halftone"], editorial: ["numeral", "text", "quote", "gutter", "spot"], songke: ["text", "notes", "seals", "wear", "stain", "worm"] };
