@@ -666,6 +666,16 @@ test("the poster looks: many settings each, their own grounds, flat layouts (all
   setLook("cel");
 });
 
+test("a look's figure drawn from a graphic: each such look names its slider, and a profile keeps the graphic put in its place", () => {
+  const arts = LOOK_IDS.filter((id) => LOOKS[id].art);
+  assert.deepEqual(arts.sort(), ["avant", "chrome", "cinema", "citypop", "construct", "cyano", "deco", "dots", "glass", "jelly", "monofilm", "negative", "neon", "netart", "rave", "spectrum", "toon", "velvet", "verse", "yellow"]);
+  for (const id of arts) { const d = LOOKS[id].params.find((q) => q.key === LOOKS[id].art); assert.ok(d && !d.text && !d.toggle && !d.needsPhoto, `${id}: the picker sits under a slider`); }
+  const p = normalizeProfile({ style: { lookArt: { jelly: { kind: "sticker", id: "star" }, citypop: { kind: "user", id: "u9", extra: 1 }, deco: { kind: "bogus", id: "x" }, cel: { kind: "graphic", id: "gear" }, nope: { kind: "graphic", id: "gear" }, toon: { kind: "graphic" } } } });
+  assert.deepEqual(p.style.lookArt, { jelly: { kind: "sticker", id: "star" }, citypop: { kind: "user", id: "u9" } });   // only looks with a figure, only real references
+  assert.deepEqual(normalizeProfile({}).style.lookArt, {});
+  assert.ok(usedUserAssets(p, null).includes("u9"), "an upload a figure is drawn from travels with the profile");
+});
+
 test("the first five looks have many settings now, and paint without a canvas", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (str) => ({ width: String(str).length * 50 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
   const want = { riso: ["pitch", "shapes", "speckle", "streaks", "ghost"], anime: ["clouds", "dusk", "rays", "flare", "leak", "vignette"], bluenote: ["vinyl", "ring", "edges", "fade", "halftone"], editorial: ["numeral", "text", "quote", "gutter", "spot"], songke: ["text", "notes", "seals", "wear", "stain", "worm"] };

@@ -1898,6 +1898,22 @@ function layoutBox() {
     el("button", { class: "btn wide", style: "margin-top:10px", disabled: !changed, onclick: () => { delete st.layoutAdjust[tpl]; touch({ profile: true, panel: true }); } }, t("style.layReset")),
     el("div", { class: "hint" }, t("style.layHint")));
 }
+/**
+ * Under the slider of the look's figure (see `art` in style.js): what the figure is drawn from — the
+ * channel's graphic, or a graphic picked or uploaded in its place for this look — and the way back.
+ */
+function lookArtRow() {
+  const look = S.profile.style.look, c = cat(), ref = (S.profile.style.lookArt || {})[look], own = !!ref && assetExists(ref), channel = c.graphic.kind === "none" ? null : c.graphic;
+  // the profile as it is when the pick is made (an undo while the picker is open puts another in its place)
+  const set = (r) => { const arts = (S.profile.style.lookArt = S.profile.style.lookArt || {}); if (r) arts[look] = { kind: r.kind, id: r.id }; else delete arts[look]; touch({ profile: true, panel: true }); };
+  const picker = () => graphicPicker(own ? ref : null, c.color, set, { title: t("style.artPick"), first: { label: t(channel ? "style.artChannel" : "style.artNone"), ref: channel, cap: t("style.artDefault") }, upload: true, hint: t("style.artHint"), subjects: true });
+  return [
+    el("div", { class: "sl", style: "grid-template-columns:84px 1fr" }, el("span", {}, t("style.art")),
+      el("button", { class: "gpick", style: "padding:2px 8px 2px 2px;font-size:13px;min-width:0", title: t("style.artTip"), onclick: picker },
+        graphicThumb(own ? ref : channel, c.color, 28), el("span", {}, own ? assetName(ref, getLang()) : t(channel ? "style.artChannel" : "style.artNone")), el("span", { class: "more" }, t("cat.pick")))),
+    ref && el("div", { class: "artback" }, el("button", { class: "linkbtn", onclick: () => set(null) }, t("style.artBack"))),
+  ];
+}
 function styleTab() {
   const st = S.profile.style, set = (k, v) => { st[k] = v; touch({ profile: true }); };
   const L = LOOKS[st.look] || LOOKS.cel, vals = lookParams(st.look, st.lookParams[st.look]);
@@ -1907,17 +1923,18 @@ function styleTab() {
       select(LOOK_IDS.map((k) => [k, LOOKS[k].name[getLang()]]), st.look, (v) => { st.look = v; touch({ profile: true, panel: true, side: true, strip: true }); }),
       L.about && el("div", { class: "about" }, L.about[getLang()]),
       el("div", { class: "hint" }, t("style.lookHint")),
-      L.params.map((d) => (d.text
+      L.params.map((d) => [d.text
         ? el("div", { class: "sl", style: "grid-template-columns:84px 1fr" }, el("span", {}, d.name[getLang()]),
             textInput(vals[d.key], (v) => tune(d.key, v), { maxLength: d.max, placeholder: d.placeholder ? d.placeholder[getLang()] : "" }))
         : d.toggle
         ? el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: vals[d.key] > 0, onchange: (e) => tune(d.key, e.target.checked ? 1 : 0) }), el("span", {}, d.name[getLang()]))
         : d.needsPhoto && !recordOf(mainPhoto())
           ? el("div", { class: "sl off", style: "grid-template-columns:84px 1fr", title: t("style.needsPhoto") }, el("span", {}, d.name[getLang()]), el("span", { class: "why" }, t("style.needsPhoto")))   // nothing for it to act on yet
-          : slider2(d.name[getLang()], d.min, d.max, d.step, vals[d.key], (v) => tune(d.key, v)))),
+          : slider2(d.name[getLang()], d.min, d.max, d.step, vals[d.key], (v) => tune(d.key, v)),
+        d.key === L.art && lookArtRow()]),
       L.seeded && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { st.lookSeed = Math.floor(Math.random() * 1000000); touch({ profile: true }); } }, t("style.shuffle")),
       L.seeded && el("div", { class: "hint" }, t("style.shuffleHint")),
-      L.params.length > 0 && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete st.lookParams[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))),
+      L.params.length > 0 && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete st.lookParams[st.look]; if (st.lookArt) delete st.lookArt[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))),
     layoutBox(),
     el("div", { class: "box" }, cap("style.design"),
       el("button", { class: "btn wide", onclick: () => { S.profile.design.layers = JSON.parse(JSON.stringify(S.cover.layers.filter((l) => l.type !== "photo"))); touch({ profile: true }); toast(t("style.designSaved")); } }, t("style.saveDesign")),
@@ -1934,19 +1951,101 @@ function graphicThumb(ref, colour, px) {
   if (ref && assetExists(ref)) { const x = cv.getContext("2d"); x.translate(px, px); x.scale((px * 2) / 700, (px * 2) / 700); useLook(); drawAsset(x, ref, hexToRgb(colour), { tint: ref.kind === "graphic" || canTint(ref) }); }
   return cv;
 }
-/** A channel's graphic, picked by its picture: channel graphics, my vector assets, the stickers by group, or none. */
-function graphicPicker(c, done) {
-  const lang = getLang(), m = $("modal"), cur = c.graphic.kind === "none" ? "none" : `${c.graphic.kind}:${c.graphic.id}`;
-  const pick = (ref, label) => el("div", { class: "tile" + ((ref ? `${ref.kind}:${ref.id}` : "none") === cur ? " on" : ""), title: label, onclick: () => { closeModal(); done(ref); } },
-    ref ? graphicThumb(ref, c.color, 66) : el("span", { class: "none" }, t("cat.none")));
+/**
+ * A graphic picked by its picture: channel graphics, my vector assets, the stickers by group, or the first
+ * tile (none, done(null)). `cur`: the one picked now (null: the first). opts: `title`; `first` {label, ref,
+ * cap}, the first tile (by default "No graphic"), showing `ref`'s picture under the caption `cap`; `upload`,
+ * a button to upload a picture (kept with my assets) and pick it, with `hint` under it; `subjects`, the
+ * photos' cut-out subjects (see subjectTiles).
+ */
+function graphicPicker(cur, colour, done, opts = {}) {
+  const lang = getLang(), m = $("modal"), on = cur ? `${cur.kind}:${cur.id}` : "none", first = opts.first || { label: t("cat.none") };
+  const pick = (ref, label, as = ref) => el("div", { class: "tile" + ((as ? `${as.kind}:${as.id}` : "none") === on ? " on" : ""), title: label, onclick: () => { closeModal(); done(as); } },
+    ref ? graphicThumb(ref, colour, 66) : el("span", { class: "none" }, label));
   const group = (title, refs) => (refs.length ? el("div", {}, el("label", { class: "cap" }, title), el("div", { class: "tiles" }, refs.map(([ref, label]) => pick(ref, label)))) : null);
-  m.replaceChildren(el("div", { class: "dlg wide" }, el("h2", {}, t("cat.pickTitle")),
-    el("div", { class: "tiles" }, pick(null, t("cat.none"))),
+  const upload = async () => {
+    const id = await adoptImage(await pickFile("image/png,image/webp,image/svg+xml,image/jpeg"));
+    if (id === undefined) return;
+    if (!id) return toast(t("msg.badFile"));
+    closeModal(); done({ kind: "user", id });
+  };
+  m.replaceChildren(el("div", { class: "dlg wide" }, el("h2", {}, opts.title || t("cat.pickTitle")),
+    first.cap && el("label", { class: "cap" }, first.cap),
+    el("div", { class: "tiles" }, pick(first.ref && assetExists(first.ref) ? first.ref : null, first.label, null)),
+    opts.upload && el("div", { style: "margin:10px 0 4px" }, el("button", { class: "btn", onclick: upload }, t("style.artUpload")), opts.hint && el("div", { class: "hint" }, opts.hint)),
+    opts.subjects && el("div", {}, el("label", { class: "cap" }, t("style.artSubjects")), el("div", { class: "hint", style: "margin:0 0 8px" }, t(canCut() ? "style.artSubjectsHint" : "style.artSubjectsHintCut")),
+      subjectTiles((ref) => { closeModal(); done(ref); })),
     group(t("cat.groupGraphics"), GRAPHICS.map((g) => [{ kind: "graphic", id: g.id }, g.name[lang]])),
     group(t("cat.groupMine"), [...userAssets.values()].map((a) => [{ kind: "user", id: a.id }, a.name])),
     STICKER_GROUPS.map((g) => group(`${t("cat.groupStickers")} · ${g.name[lang]}`, STICKERS.filter((s) => s.group === g.id).map((s) => [{ kind: "sticker", id: s.id }, s.name[lang]]))),
     el("div", { class: "acts" }, el("button", { class: "btn", onclick: closeModal }, t("lookfx.cancel")))));
   m.hidden = false;
+}
+/**
+ * The figure picker's cut-out subjects: the pictures of the bitmap library and of this cover whose subject
+ * is cut out, shown cut out; in the app the others too, marked, which are cut out when clicked. A click
+ * keeps the subject, cropped to it, with my assets and picks that. Filled again as the library's pictures
+ * come in.
+ */
+function subjectTiles(done) {
+  const box = el("div", {});
+  const fill = () => {
+    const pids = [...new Set([...S.library.map((e) => e.pid), ...pidsOf(S.cover)])].filter((pid) => S.photos.has(pid) && (S.photos.get(pid).mask || canCut()));
+    box.replaceChildren(pids.length
+      ? el("div", { class: "tiles" }, pids.map((pid) => {
+          const rec = S.photos.get(pid), cut = !!rec.mask;
+          return el("div", { class: "tile ptile", title: t(cut ? "style.artSubjectTip" : "style.artCutTip"), onclick: (e) => {
+              const badge = !rec.mask && !CUT.busy && e.currentTarget.querySelector(".kind");
+              if (badge) badge.textContent = t("cut.busy");   // until it is cut out, or not
+              pickSubject(pid, done, () => box.isConnected).then(() => box.isConnected && fill());
+            } },
+            el("img", { src: cut ? cutThumb(rec) : thumbOf(rec), alt: "", draggable: false, style: cut ? "object-fit:contain" : "" }), !cut && el("span", { class: "kind" }, t("style.artCut")));
+        }))
+      : el("div", { class: "hint", style: "margin:0" }, t(canCut() ? "style.artNoPhotos" : "style.artNoSubjects")));
+  };
+  LIB.redraw = fill; readLibrary(); fill();
+  return box;
+}
+/**
+ * Picks picture `pid`'s subject (cutting it out first when it is not yet): kept with my assets, done({kind:
+ * "user", id}). `open()`: whether the picker is still there; when a cut ends after it was closed (or another
+ * pick made), the mask is kept and nothing else happens.
+ */
+async function pickSubject(pid, done, open = () => true) {
+  const rec = S.photos.get(pid);
+  if (!rec) return;
+  if (!rec.mask) {
+    if (CUT.busy) return;   // one cut at a time; the subjects cut out already can still be picked meanwhile
+    toast(t("cut.busy"));
+    const ok = await ensureMask(pid);
+    if (!open()) return;
+    if (!ok) return toast(CUT.error || t("cut.none"));
+  }
+  const src = subjectPng(rec);
+  if (!src) return toast(t("cut.none"));
+  const named = S.library.find((e) => e.pid === pid), id = await adoptAsset((named && named.name) || t("style.artSubjectName"), src);
+  if (!open()) return;
+  if (!id) return toast(t("msg.badFile"));
+  done({ kind: "user", id });
+}
+/** A picture's subject alone (its mask applied), cropped to it, no longer than `max` on its longer side: a PNG data URL, or null when the mask holds nothing. */
+function subjectPng(rec, max = 1100) {
+  const [W, H] = sizeOf(rec.img), M = rec.mask.img, [mW, mH] = sizeOf(M);
+  // where the subject is, read off the mask at a small size
+  const k0 = Math.min(1, 256 / Math.max(mW, mH)), sw = Math.max(1, Math.round(mW * k0)), sh = Math.max(1, Math.round(mH * k0)), c = el("canvas", { width: sw, height: sh }), x = c.getContext("2d", { willReadFrequently: true });
+  x.drawImage(M, 0, 0, sw, sh);
+  const a = x.getImageData(0, 0, sw, sh).data;
+  let x0 = sw, y0 = sh, x1 = -1, y1 = -1;
+  for (let i = 3, q = 0; i < a.length; i += 4, q++) if (a[i] > 24) { const px = q % sw, py = (q / sw) | 0; if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py; }
+  if (x1 < 0) return null;
+  // that box, a cell wider each side, on the picture and on the mask
+  const bx = Math.max(0, ((x0 - 1) / sw) * W), by = Math.max(0, ((y0 - 1) / sh) * H), bw = Math.min(W, ((x1 + 2) / sw) * W) - bx, bh = Math.min(H, ((y1 + 2) / sh) * H) - by;
+  const k = Math.min(1, max / Math.max(bw, bh)), out = el("canvas", { width: Math.max(1, Math.round(bw * k)), height: Math.max(1, Math.round(bh * k)) }), o = out.getContext("2d");
+  o.imageSmoothingQuality = "high";
+  o.drawImage(rec.img, bx, by, bw, bh, 0, 0, out.width, out.height);
+  o.globalCompositeOperation = "destination-in";
+  o.drawImage(M, (bx / W) * mW, (by / H) * mH, (bw / W) * mW, (bh / H) * mH, 0, 0, out.width, out.height);
+  return out.toDataURL("image/png");
 }
 /**
  * An SVG with a width and a height on it: one with only a viewBox (or nothing) has no size of its own, and
@@ -1959,13 +2058,17 @@ function sizedSvg(text) {
   const k = 600 / Math.max(vw, vh) || 600, w = Math.round(vw * k) || 600, h = Math.round(vh * k) || 600;
   return text.replace(tag, tag.replace(/\s(width|height)\s*=\s*("[^"]*"|'[^']*')/gi, "").replace(/<svg\b/i, `<svg width="${w}" height="${h}"`));
 }
-/** Uploads a picture as the profile's brand logo: kept with the user's assets (so it travels with an exported profile), shown on this cover. */
-async function uploadLogo() {
-  const f = await pickFile("image/png,image/jpeg,image/webp,image/svg+xml");
-  if (!f) return;
+/** Keeps a picked image file with the user's assets (an SVG given a size): its id, null when it cannot be read, undefined when none was picked. */
+async function adoptImage(f, name = "asset") {
+  if (!f) return undefined;
   const svg = /svg/i.test(f.type) || /\.svg$/i.test(f.name);
   const src = svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(sizedSvg(await readAs(f, "readAsText")))}` : await readAs(f, "readAsDataURL");
-  const id = await adoptAsset(f.name.replace(/\.[^.]+$/, "").slice(0, 60) || "logo", src);
+  return adoptAsset(f.name.replace(/\.[^.]+$/, "").slice(0, 60) || name, src);
+}
+/** Uploads a picture as the profile's brand logo: kept with the user's assets (so it travels with an exported profile), shown on this cover. */
+async function uploadLogo() {
+  const id = await adoptImage(await pickFile("image/png,image/jpeg,image/webp,image/svg+xml"), "logo");
+  if (id === undefined) return;
   if (!id) return toast(t("msg.badFile"));
   S.profile.brand.logo = id;
   const L = layer("logo");
@@ -1994,7 +2097,7 @@ function brandTab() {
       el("div", { class: "two" },
         textInput(c.sub, (v) => { c.sub = v; touch({ profile: true }); }, { placeholder: t("cat.sub") }),
         textInput(c.code, (v) => { c.code = v; touch({ profile: true }); }, { placeholder: t("cat.code") })),
-      el("button", { class: "gpick", title: t("cat.pickTip"), onclick: () => graphicPicker(c, (ref) => { c.graphic = ref ? { kind: ref.kind, id: ref.id, labels: [], stamp: "" } : { kind: "none" }; struct(); }) },
+      el("button", { class: "gpick", title: t("cat.pickTip"), onclick: () => graphicPicker(c.graphic.kind === "none" ? null : c.graphic, c.color, (ref) => { c.graphic = ref ? { kind: ref.kind, id: ref.id, labels: [], stamp: "" } : { kind: "none" }; struct(); }) },
         graphicThumb(c.graphic.kind === "none" ? null : c.graphic, c.color, 44), el("span", {}, c.graphic.kind === "none" ? t("cat.none") : assetExists(c.graphic) ? assetName(c.graphic, lang) : t("assets.missing")), el("span", { class: "more" }, t("cat.pick"))),
       lib && lib.labels && textInput((c.graphic.labels || []).join("，"), (v) => { c.graphic.labels = v.split(/[,，]/).map((x) => x.trim()).filter(Boolean).slice(0, 4); touch({ profile: true }); }, { placeholder: t("cat.labels") }),
       lib && lib.stamp && textInput(c.graphic.stamp || "", (v) => { c.graphic.stamp = v; touch({ profile: true }); }, { placeholder: t("cat.stamp") }),
@@ -3743,6 +3846,42 @@ async function selfTest(dir) {
       so.lookFx = { "velvet.check": 0.8, "court.varsity": 0.7 }; if (pr) pr.lookFx = { "cyano.duo": 1, "toon.burst": 0.5 };
       await shoot("borrowed", "velvet");
       S.profile.style.look = keepLook; S.cover.layers = S.cover.layers.filter((l) => !ours.includes(l));
+    }
+    // each look's figure drawn from a sticker in the channel graphic's place (style.lookArt), with no photo
+    // filling the canvas: the picture must change
+    report.figureArt = [];
+    {
+      const st = S.profile.style, arts = (st.lookArt = st.lookArt || {}), keepLook = st.look, fills = S.cover.layers.filter(fillsCanvas), shown = fills.map((l) => l.visible);
+      const sig = (cv) => { const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data; let h = 0; for (let i = 0; i < d.length; i += 97) h = (h * 31 + d[i]) | 0; return h; };
+      fills.forEach((l) => (l.visible = false));
+      for (const id of looks.filter((k) => LOOKS[k].art)) {
+        const keepParams = st.lookParams[id], keepArt = arts[id];
+        st.look = id; st.lookParams[id] = { ...(keepParams || {}), [LOOKS[id].art]: 0.7 }; delete arts[id];
+        await step(`figure-${id}`);
+        const before = sig(renderFull(S.profile.sizes[0], S.cover, catIndex()));
+        arts[id] = { kind: "sticker", id: "burst" };
+        const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
+        report.figureArt.push({ look: id, changed: sig(cv) !== before, path: await invoke("write_image", framed(await toPng(cv), { dir, name: `figure-${id}.png` })) });
+        if (keepParams) st.lookParams[id] = keepParams; else delete st.lookParams[id];
+        if (keepArt) arts[id] = keepArt; else delete arts[id];
+      }
+      fills.forEach((l, i) => (l.visible = shown[i])); st.look = keepLook;
+      // a photo's cut-out subject as the jelly's figure (Figure from → Cut-out subjects), when a real photo is
+      // given (SMEDCOVER_SELFTEST_PHOTO): cut out on this computer, kept with my assets, the jelly made of it
+      const real = canCut() && (await invoke("selftest_photo").catch(() => null)), pid = real && (await putPhoto(real));
+      if (pid) {
+        await step("figure from a cut-out subject");
+        let got = null; await pickSubject(pid, (ref) => (got = ref));
+        const a = got && userAssets.get(got.id), keepArt = arts.jelly;
+        fills.forEach((l) => (l.visible = false)); st.look = "jelly"; delete arts.jelly;
+        const before = sig(renderFull(S.profile.sizes[0], S.cover, catIndex()));
+        if (got) arts.jelly = got;
+        const cv = renderFull(S.profile.sizes[0], S.cover, catIndex());
+        report.subjectFigure = { mask: !!S.photos.get(pid).mask, asset: !!a, size: a && a.img ? sizeOf(a.img) : null, photo: sizeOf(S.photos.get(pid).img), changed: sig(cv) !== before, error: CUT.error,
+          path: await invoke("write_image", framed(await toPng(cv), { dir, name: "subject-figure-jelly.png" })), subject: a ? await invoke("write_image", framed(new Uint8Array(await (await fetch(a.src)).arrayBuffer()), { dir, name: "subject-figure-asset.png" })).catch((e) => String(e)) : null };
+        if (keepArt) arts.jelly = keepArt; else delete arts.jelly;
+        fills.forEach((l, i) => (l.visible = shown[i])); st.look = keepLook;
+      }
     }
     // clipping masks: a solid clipped to the title (its letters in the solid's colour), and a print of the
     // last picture taken in clipped to a text layer (the picture inside the letters)

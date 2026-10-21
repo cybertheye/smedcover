@@ -10,7 +10,7 @@
 import { SIZE_PRESETS } from "./presets.js";
 import { platformsFor, ratioOf } from "./platforms.js";
 import { TEMPLATES, LAYOUT_LIMITS } from "./layout.js";
-import { LOOK_IDS, lookParams } from "./style.js";
+import { LOOKS, LOOK_IDS, lookParams } from "./style.js";
 import { normalizeLayers, normalizeScene } from "./layers.js";
 
 const T = globalThis.__TAURI__;
@@ -37,7 +37,7 @@ const str = (v, d = "") => (typeof v === "string" ? v : d);
 const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(hi, Math.max(lo, Number(v))) : d);
 const color = (v) => (/^#[0-9a-f]{6}$/i.test(str(v)) ? v.toLowerCase() : "#fcee0a");
 
-export const DEFAULT_STYLE = { template: "stack", theme: "dark", look: "cel", lookParams: {}, lookSeed: 7, layoutAdjust: {} };
+export const DEFAULT_STYLE = { template: "stack", theme: "dark", look: "cel", lookParams: {}, lookSeed: 7, layoutAdjust: {}, lookArt: {} };
 /** Looks that are gone, and what a profile that used one gets instead: its first name, or the nearest look left. */
 const RETIRED = { ghibli: "vivid", bluetone: "cyano", redstreet: "negative", gilded: "glass" };
 
@@ -95,6 +95,9 @@ export function normalizeProfile(raw) {
   }
   // tuned values are kept per look, so switching away and back loses nothing
   for (const id of LOOK_IDS) { const v = lookParams(id, st.lookParams && st.lookParams[id]); if (Object.keys(v).length) style.lookParams[id] = v; }
+  // the graphic each look's figure is drawn from in place of the channel graphic (see `art` in style.js), for the looks with one
+  style.lookArt = {};
+  for (const id of LOOK_IDS) { const r = st.lookArt && st.lookArt[id]; if (LOOKS[id].art && r && KINDS.includes(r.kind) && str(r.id)) style.lookArt[id] = { kind: r.kind, id: str(r.id).slice(0, 80) }; }
   let sizes = (Array.isArray(p.sizes) ? p.sizes : []).map(normalizeSize);
   if (!sizes.length) sizes = SIZE_PRESETS.filter((s) => s.on).map(({ w, h }) => ({ w, h, label: "", name: "" }));
   const keys = new Set();
@@ -220,6 +223,7 @@ export function usedUserAssets(profile, cover) {
   const ids = new Set();
   for (const c of profile ? profile.categories : []) if (c.graphic.kind === "user") ids.add(c.graphic.id);
   if (profile && profile.brand.logo) ids.add(profile.brand.logo);
+  for (const r of Object.values((profile && profile.style.lookArt) || {})) if (r.kind === "user") ids.add(r.id);
   for (const L of [...(profile ? profile.design.layers : []), ...(cover ? cover.layers : [])]) if (L.type === "asset" && L.ref.kind === "user") ids.add(L.ref.id);
   return [...ids];
 }

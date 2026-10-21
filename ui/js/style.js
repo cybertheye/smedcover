@@ -35,6 +35,9 @@
 //   scene: { key: {zh, en} }     the scene objects the user may drag on the canvas (the ball, the giant
 //                                letters, the centre of the radiating lines…): its painters place each
 //                                through objAt(key, x, y, ctx), which moves it by the cover's offset
+//   art                          the key of the slider whose figure is drawn from a graphic's shape (a giant
+//                                silhouette, a jelly): the channel graphic, or the one the user put in its
+//                                place for this look (style.lookArt), picked under that slider
 //
 // The current look is module state, set by drawCover() from the profile before anything is drawn.
 
@@ -1882,13 +1885,14 @@ function blurred(ctx, r, colour, draw) {
   ctx.save(); ctx.shadowColor = colour; ctx.shadowBlur = Math.max(0.1, r * Math.hypot(m.a, m.b)); ctx.shadowOffsetX = D * m.a; ctx.shadowOffsetY = D * m.b;
   ctx.translate(-D, 0); draw(); ctx.restore();
 }
+/** What a look's figure is drawn from: the graphic the user put in its place for this look, else the channel graphic (see `art`). */
+const figureOf = (env) => env && (env.figure || env.graphic);
 /**
- * The channel graphic as a flat silhouette: opaque white where it is solid, its soft ground shadow and
- * half-clear parts left out, on a canvas 1200 px square covering ±330 units; `box`: its solid part, in
- * units. Kept per look and graphic (a look's line work changes the outline a little).
+ * A graphic as a flat silhouette — the figure's (see figureOf), or `g`: opaque white where it is solid,
+ * its soft ground shadow and half-clear parts left out, on a canvas 1200 px square covering ±330 units;
+ * `box`: its solid part, in units. Kept per look and graphic (a look's line work changes the outline a little).
  */
-function graphicShape(env) {
-  const g = env && env.graphic;
+function graphicShape(env, g = figureOf(env)) {
   if (!g || typeof document === "undefined") return null;
   const kept = WORK.shapes || (WORK.shapes = new Map()), key = current.id + "|" + JSON.stringify(g.ref);
   if (kept.has(key)) return kept.get(key);
@@ -1904,7 +1908,7 @@ function graphicShape(env) {
     A[i] = A[i + 1] = A[i + 2] = 255; A[i + 3] = v;
     if (v) { const px = q % n, py = (q / n) | 0; if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py; }
   }
-  if (x1 < 0) return null;
+  if (x1 < 0) { kept.set(key, null); return null; }   // nothing solid in it (a faint picture): kept too, so it is not drawn again each time
   x.putImageData(d, 0, 0);
   const k = (2 * R) / n, shape = { c, R, box: { x0: x0 * k - R, y0: y0 * k - R, x1: (x1 + 1) * k - R, y1: (y1 + 1) * k - R }, tints: new Map() };
   kept.set(key, shape);
@@ -2076,6 +2080,7 @@ function negPlace(env, p) {
 }
 const negative = {
   id: "negative",
+  art: "giant",
   repaint: (c) => `a minimalist film poster made from a photograph: hard black-and-white with crushed blacks and clean whites, printed over a flat vermilion red, high contrast, a little screen-print roughness; the subject read as a bold silhouette; still the same picture, no text.`,
   about: { zh: "红黑负形海报：索尔·巴斯和波兰海报学派的路子——红、黑、米白三色，一个巨大的剪影承载全部意思（用的是频道图形的轮廓，被画面边缘裁切），剪影和底色互相咬合，空出来的形和画出来的形一样有分量；可加一块反色的负形分割、聚光光束、牵引的细线；标题小而精确，底部几行演职员小字，丝网印刷的粗糙质感。可选红底黑形或黑底红形，也可以用频道色代替红色。冷峻、有隐喻、一眼就懂——适合电影、书评、社会议题、悬疑与观点类内容。", en: "A red-and-black negative-space poster, after Saul Bass and the Polish poster school: red, black and off-white; one huge silhouette carries the idea (the channel graphic's outline, cropped by the edge), cut against the ground so the shapes between read as much as the shapes; optionally a reversed split, a spotlight beam, taut threads; a small exact title, a few lines of credits, the roughness of a screen print. Black on red or red on black, and the channel colour can stand in for the red. Stark, metaphorical, read at a glance — for film, books, social issues, mysteries, opinion." },
   name: { zh: "负形海报", en: "Negative space" },
@@ -2254,6 +2259,7 @@ function cineGroundPaint(ctx, env, p, at) {
 }
 const cinema = {
   id: "cinema",
+  art: "giant",
   repaint: (c) => `a minimalist movie poster made from a photograph: muted, moody colour (a dusky version of ${c}), soft light from behind the subject, the subject reading as a dark silhouette, worn paper texture, a gentle vignette, cinematic and quiet; still the same picture, no text.`,
   about: { zh: "极简电影海报：从频道色里取一个沉静的颜色（赭石、暮紫、灰蓝、墨绿），一个深色剪影（频道图形的轮廓）站在画面里，身后一团柔光，远处的山峦一层层淡出去，皱纸纹理、暗角和褪色，细而疏朗的衬线标题，底部一块演职员表；有照片时可以把照片装进剪影，做成双重曝光。安静、有故事感、电影感强——适合影评、书评、人物故事、纪录片与情绪向内容。", en: "The minimal movie poster: a quiet colour drawn from the channel's (ochre, dusk violet, slate, deep green), a dark silhouette (the channel graphic's outline) standing in it with a soft light behind, ridges fading back in layers, crumpled paper, a vignette and fade, a thin spaced serif title and a credits block at the foot; with a photo, the photo can go inside the silhouette as a double exposure. Quiet, story-led, cinematic — for film and book reviews, portraits, documentaries, mood pieces." },
   name: { zh: "极简电影", en: "Minimal film poster" },
@@ -2374,6 +2380,7 @@ function sparkle(ctx, x, y, r, colour, glow) {
 }
 const cyano = {
   id: "cyano",
+  art: "glow",
   repaint: (c) => `a cyanotype print made from a photograph: Prussian blue and white only, the lights glowing white with soft edges like a photogram, uneven brushed-on blue with darker streaks at the edges, a coarse halftone in places, paper texture; still the same picture, no text.`,
   about: { zh: "蓝晒光影：氰版蓝晒和蓝色油印小志的样子——普鲁士蓝刷得深浅不匀，频道图形像实物压在感光纸上留下的白影，边缘发光；喷枪喷出的柔和形状、粗网点、闪烁的星光、细线框和小编号；频道主色作为第二种油墨，用在强调词和角标上。可选深蓝底或米白纸底（纸上印蓝）。梦幻、安静、有手作感——适合科学、宇宙、自然、诗意与情绪向内容。", en: "Cyanotype: the cyanotype print and the blue-printed zine — Prussian blue brushed on unevenly; the channel graphic left white as if laid on the paper in the sun, glowing at its edges; soft airbrushed shapes, a coarse halftone, sparkles, hairline frames and small numbers; the channel colour as a second ink for highlighted words and the tag. Deep blue, or off-white paper printed in blue. Dreamy, quiet, handmade — for science, space, nature, poetry and mood pieces." },
   name: { zh: "蓝晒光影", en: "Cyanotype" },
@@ -2520,6 +2527,7 @@ const MF = { black: [12, 12, 12], night: [22, 22, 22], paper: [226, 224, 220], w
 const mfGround = () => (dark ? MF.night : MF.paper), mfInk = () => (dark ? MF.white : MF.black);
 const monofilm = {
   id: "monofilm",
+  art: "ghost",
   repaint: (c) => `a grainy black-and-white film still made from the photograph: deep blacks, soft silver highlights, a little motion blur, heavy film grain, a dreamy cinematic haze; still the same picture, no colour, no text.`,
   about: { zh: "黑白胶片：粗颗粒的黑白电影剧照排成一本杂志——光雾和失焦的光斑，频道图形化成一道带动态残影的灰色身影，照片被裁下几块错开拼回去（其中一两块染成频道色，那是画面里唯一的颜色），纸张对折的折痕，灰尘，成栏的小字，衬线标题带一层失焦的柔光。可选黑底或灰白纸底。安静、文艺、有胶片的呼吸感——适合人物、音乐、电影、时尚、随笔与回忆。", en: "Monochrome film: grainy black-and-white stills laid out as a magazine — haze and out-of-focus light, the channel graphic as a grey figure trailing a motion blur, the photo cut into fragments set back a little off (one or two in the channel colour, the only colour there is), a sheet folded in four, dust, columns of small print, a serif title with a soft blur round it. Black or pale paper. Quiet, literary, breathing like film — for portraits, music, film, fashion, essays and memories." },
   name: { zh: "黑白胶片", en: "Monochrome film" },
@@ -2922,6 +2930,7 @@ function toonParade(ctx, env, at, amt, S) {
 }
 const toon = {
   id: "toon",
+  art: "giant",
   repaint: (c) => `a fan-made alternative poster for an animated film, made from the photograph: one strong flat colour (${c}), the subject reduced to bold flat shapes and a clean silhouette, a warm sunset glow, simple graphic light, a little screen-print speckle; playful and warm; still the same picture, no text.`,
   about: { zh: "动画电影的另类海报：一整块浓烈的颜色（从频道色来），天边一轮带复古条纹的大夕阳，频道图形站在它下方，还可以在太阳前立起一个巨大的同形剪影；放射光芒、路灯投下的光柱、一列越来越小的同一个身影、一条蜿蜒的小路和路上的小旅人、星空；丝网印刷的斑驳和海报的白边。温暖、童趣、一张图讲一个故事——适合动画、亲子、旅行、成长、治愈和节日内容。可选亮色底或深色底；自带平直的版式。", en: "The alternative poster for an animated film: one strong colour (from the channel's), a big striped setting sun hanging over where the channel graphic stands, and if you like its huge silhouette in front of the sun; a sunburst, a lamp's beam, a procession of the same figure growing smaller, a winding road with a tiny traveller, stars; the speckle of a screen print and a white margin. Warm, playful, a story in one picture — for animation, family, travel, growing up, feel-good and festive content. A bright or a deep ground; flat layouts of its own." },
   name: { zh: "动画海报", en: "Animated film poster" },
@@ -3155,6 +3164,7 @@ function avBand(ctx, env, box, amt, sharp) {
 }
 const avant = {
   id: "avant",
+  art: "figure",
   repaint: (c) => `a contemporary fashion and design-studio poster made from the photograph: black and white, soft and slightly out of focus, a little motion blur, fine grain, clean studio light, with one small accent of ${c}; still the same picture, no text.`,
   about: { zh: "先锋影像：今天的设计工作室和时装品牌常发的海报。黑白照片（没有照片时，频道图形化成一个柔焦的身影），像设计师在电脑里那样加工：动态拖影、辉光、焦外虚化里留一个清晰的对焦框、一块变成大像素的马赛克、一片条纹玻璃、一条透出频道色的色带；细线网格、圆点标记和界面式的小字；紧凑的大号无衬线标题；频道色是唯一的点缀。冷静、锐利、有数码时代的质感——适合设计、时尚、科技、人物、观点和品牌内容。可选浅灰底或黑底；自带平直的版式。", en: "Avant-garde image: the posters design studios and fashion labels post today. A black-and-white photograph (or, without one, the channel graphic as a soft figure) worked on as a designer would in the computer: a smear of motion, a glow, out of focus with one sharp frame of focus, a patch gone to large pixels, a panel of fluted glass, a band where the channel colour comes through; hairline grid lines, dot markers and interface-like labels; a big tight grotesque; the channel colour the only accent. Cool, sharp, digital — for design, fashion, tech, portraits, opinion and brand content. A light grey or a black ground; flat layouts of its own." },
   name: { zh: "先锋影像", en: "Avant-garde image" },
@@ -3570,6 +3580,7 @@ function ylLetters(x, W, colour) {
 }
 const yellow = {
   id: "yellow",
+  art: "figure",
   repaint: (c) => `a festival poster made from the photograph: the subject in hard black and white set on one flat, saturated yellow, clean and graphic, a little paper grain; still the same picture, no text.`,
   about: { zh: "明黄海报：戏剧节和电影节常用的一整版明黄——巨大的白色字母里透出画面（有照片时是照片），一个黑色剪影立在标题旁的空处，穿过字母的部分反成黄色；可加一道光束、交叉的条纹、从剪影里飞散出去的小形状；紧凑的黑色标题和小字信息。只有黄、黑、白和一个点缀色。醒目、自信、一眼认出——适合活动、展演、电影、讲座、课程和品牌宣传。可以用频道色代替黄色。", en: "Yellow: the one bright yellow of theatre and film-festival posters — huge letters with the picture showing inside them (the photo, or the silhouette), a black silhouette standing on the yellow and turning yellow where it crosses the letters; a beam of light, crossing stripes and small shapes flying off if you like; tight black type and small print. Yellow, black, white and one accent. Loud, confident, recognisable at once — for events, shows, films, talks, courses and brand campaigns. The channel colour can take the yellow's place." },
   name: { zh: "明黄海报", en: "Yellow poster" },
@@ -3912,6 +3923,7 @@ function rgbFringe(ctx, d) {
 }
 const dots = {
   id: "dots",
+  art: "figure",
   repaint: (c) => `the photograph rebuilt as a point cloud of light on black: the subject made of thousands of glowing white dots sized by brightness, streaks of rainbow colour and a little horizontal motion smear, deep black everywhere else, with ${c} as an accent; no text.`,
   about: { zh: "点阵光影：一切都由黑底上的光点组成，像 LED 屏或三维点云——频道图形（有照片时是照片）被读成一格一格的光点，越亮的地方点越大；身后一片起伏的点阵曲面伸向远处，下沿透出彩虹色，光点可以横向拖成光痕，加上红青色彩错位、辉光、一列列数字和零星的星点。冷、未来感、带一点迷幻——适合科技、音乐、电子、夜景、AI 和数据类内容。", en: "Dot matrix: everything made of points of light on black, as an LED wall or a point cloud — the channel graphic (or the photo) read into a grid of dots, larger where it is brighter; a rolling surface of dots running into the distance behind, rainbow colour breaking through at the lower edges, dots smeared into streaks of motion, a red-and-cyan fringe, a glow, columns of digits and scattered stars. Cool, futuristic, a little psychedelic — for tech, music, electronic, night scenes, AI and data." },
   name: { zh: "点阵光影", en: "Dot matrix" },
@@ -4039,6 +4051,7 @@ const neonGround = (N) => (dark ? mix(N.deep, N.mid, 0.08) : N.hot);
 const neonText = (N) => (dark ? N.pale : [26, 22, 54]);   // on the hot ground a night tone just off the house ink, so the small parts' ink can be swapped on its own
 const neon = {
   id: "neon",
+  art: "figure",
   repaint: (c) => `a neon noir pop illustration made from the photograph: the subject reduced to three or four flat tones — deep night shadows, ${c}, a hot complementary neon and a pale highlight — hard rim light, black shadows, halftone and print grain; still the same picture, no text.`,
   about: { zh: "霓虹波普：霓虹色的黑色电影式插画——画面按明暗映射成几层平涂的霓虹色（深夜的暗部、频道色、它的互补热色、亮部），深黑阴影，人物（频道图形或照片）带一圈热色轮廓光，身后一团背光，一块斜切的色面，侧边的竖条，阴影里的网点和印刷颗粒；色相可以整体轮转。浓烈、复古未来、有态度——适合音乐、潮流、游戏、夜生活、悬疑和人物内容。可选暗夜底或热色底。", en: "Neon: the neon noir pop illustration — the picture mapped from dark to light onto a few flat neon tones (night-dark shadows, the channel colour, its hot complement, a pale highlight), black shadows, a rim of hot light round the figure (the channel graphic, or the photo), a light behind it, a diagonal plane of colour, bars down the side, halftone in the shadows and print grain; the whole palette can be turned round the colour wheel. Intense, retro-futurist, with attitude — for music, fashion, games, nightlife, mystery and portraits. A night-dark or a hot ground." },
   name: { zh: "霓虹波普", en: "Neon pop" },
@@ -4307,7 +4320,7 @@ const court = {
     if (!L.grid) return true;
     if (p.court > 0) courtPlan(ctx, env, p.court, team);
     if (p.hoop > 0) hoopFront(ctx, env, p.hoop);
-    const S = canPaint(ctx) && graphicShape(env), A = S && artPlace(env, S);
+    const S = canPaint(ctx) && graphicShape(env, env.graphic), A = S && artPlace(env, S);   // the channel graphic itself, where it stands
     if (A && p.motion > 0) {   // the figure has just passed: soft copies trailing back, and speed lines
       for (let i = 5; i >= 1; i--) blurred(ctx, A.size * 0.02, css(team, (0.5 * p.motion) / Math.sqrt(i)), () => placeShape(ctx, S, [0, 0, 0], A.cx - i * A.size * 0.1 * (0.4 + p.motion), A.cy, A.size));
       ctx.save(); ctx.strokeStyle = css(team, 0.75); ctx.lineCap = "round";
@@ -4402,6 +4415,7 @@ function vlPlace(env, p) {
 }
 const velvet = {
   id: "velvet",
+  art: "figure",
   repaint: (c) => `a soft flocked 3D illustration made from the photograph: plush velvety surfaces, rounded volumes lit from the upper left, a periwinkle-blue sky and acid-green hills, ${c} as the object colour, red and pink accents, soft cast shadows, heavy fine grain; whimsical, fashion-editorial; no text.`,
   about: { zh: "绒感插画：像植绒一样毛茸茸的立体插画——长春花蓝的天空、荧光绿的绒面山丘，频道图形变成一个有体积、左上受光、边缘发毛的绒面物件（颜色来自频道色，可铺上模糊的格纹），脚下一团柔和的投影；可加暮色渐变、星星、柔光，整张覆着厚厚的细颗粒。俏皮、时髦、有手感——适合时尚、生活方式、潮玩、节日和女性向内容。可选长春花蓝底或夜空底；自带平直的版式，色块是一片绿色绒面草地。", en: "Velvet: soft flocked 3D illustration — a periwinkle sky, acid-green velvet hills, the channel graphic as a plush object with volume, lit from the upper left and fuzzy at the edge (in the channel colour, a blurred check on it if you like), a soft shadow under it; a dusk gradient, stars and a glow if you like, and heavy fine grain over everything. Playful, fashionable, tactile — for fashion, lifestyle, designer toys, festive and feminine content. A periwinkle or a night ground; flat layouts of its own, the colour block a green velvet lawn." },
   name: { zh: "绒感插画", en: "Velvet illustration" },
@@ -4536,6 +4550,7 @@ function liquidBlob(ctx, cx, cy, R, k, a) {
 }
 const rave = {
   id: "rave",
+  art: "figure",
   repaint: (c) => `a psychedelic club-night poster made from the photograph: a dark violet night, iridescent holographic chrome and liquid neon colour (${c}, hot pink, cyan, violet), glowing light, nebula clouds and stars, glossy and surreal; still the same picture, no text.`,
   about: { zh: "迷幻派对：夜店和音乐节海报的味道——深紫的夜，流动的镭射液态金属，频道图形变成一层全息彩光的身影，身后一轮日食光环；可加星云与星星、合成波霓虹网格地面、带十字标记的拱门、玻璃泡泡、环绕的光轨和红青色差。迷幻、发光、超现实——适合音乐、派对、电子、潮流、夜生活和科幻内容。只有暗夜底；自带平直的版式。", en: "Rave: club-night and festival posters — a deep violet night, flowing liquid iridescent chrome, the channel graphic as a figure in a holographic sheen with an eclipse halo behind; nebulae and stars, a neon synthwave grid floor, an arch lined with plus marks, glass bubbles, orbits and a red-and-cyan fringe if you like. Psychedelic, glowing, surreal — for music, parties, electronic, fashion, nightlife and sci-fi. Night ground only; flat layouts of its own." },
   name: { zh: "迷幻派对", en: "Psychedelic rave" },
@@ -4684,6 +4699,7 @@ function crPlace(env, p) {
 }
 const chrome = {
   id: "chrome",
+  art: "figure",
   repaint: (c) => `a dark Y2K cyber poster made from the photograph: black-and-white with liquid chrome reflections, a holographic rainbow streak, glitch slices and fine scan lines, creased paper and grain, with one accent of ${c}; still the same picture, no text.`,
   about: { zh: "液态铬：黑底上的 Y2K 赛博海报——频道图形变成一尊液态金属，往下熔成一滴滴铬液，一道全息彩虹光横扫过去；身后线框球体和网格，几条 RGB 故障切片，玻璃泡泡，HUD 式的界面框、角标和状态小字，描边的镂空大字；皱纸和颗粒。冷、锐利、未来感——适合科技、AI、电子音乐、潮流、游戏和观点类内容。可选黑底或冷灰底；自带平直的版式。", en: "Liquid chrome: the dark Y2K cyber poster — the channel graphic as a figure of liquid metal melting into drips, a holographic rainbow streak across it; a wireframe sphere and grid behind, RGB glitch slices, glass bubbles, HUD frames, brackets and status lines, outlined stencil letters; creased paper and grain. Cold, sharp, futuristic — for tech, AI, electronic music, fashion, games and opinion. A black or a cool grey ground; flat layouts of its own." },
   name: { zh: "液态铬", en: "Liquid chrome" },
@@ -4889,6 +4905,7 @@ function naPlace(env, p) {
 }
 const netart = {
   id: "netart",
+  art: "figure",
   repaint: (c) => `a glitch net-art poster made from the photograph: pixel sorting, datamosh blocks, dithered one-bit areas, old operating-system dialog windows and a checkerboard of transparency, with ${c} as an accent; raw, digital and chaotic; no readable text.`,
   about: { zh: "故障网络：网络艺术和故障海报——老式操作系统的对话框一层层叠上来（警告、进度条、加载不出的图），像素排序拉出的长条、数据错位的方块、一行行乱码字符、透明背景的灰白棋盘格、测试图的彩条、鼠标箭头；频道图形抖动成黑色像素点阵；标题里强调的词像被选中一样，反白在藏青色的选框里。数字、粗粝、有点失控——适合科技、互联网文化、游戏、实验音乐和观点类内容。可选白底或黑底；自带平直的版式，色块是一块银灰色的系统面板。", en: "Net art: net-art and glitch posters — dialog windows of an old operating system piling up (a warning, a progress bar, a picture that will not load), pixel-sorted streaks, datamoshed blocks, rows of garbled characters, the grey checkerboard of transparency, test-pattern colour bars, arrow cursors; the channel graphic dithered into black pixels; highlighted words selected, white in a navy box. Digital, raw, slightly out of control — for tech, internet culture, games, experimental music and opinion. White or black ground; flat layouts of its own, the colour block a silver system panel." },
   name: { zh: "故障网络", en: "Glitch net art" },
@@ -5247,6 +5264,7 @@ function scribbles(ctx, F, amt, k0) {
 }
 const verse = {
   id: "verse",
+  art: "figure",
   repaint: (c) => `a frame of an animated film that looks printed like a comic book, made from the photograph: flat colour shaded with Ben-Day halftone dots and hatching lines, bold ink outlines, the colour plates slightly out of register with magenta and cyan fringes, neon magenta, violet and cyan light, with ${c} as an accent; still the same picture, no text.`,
   about: { zh: "漫画宇宙：把漫画印刷搬进动画电影的那种画面——平涂色块用网点和排线上阴影，粗墨线，套色故意错开；从街上仰望的楼群和亮着的窗，集中线，霓虹马克笔涂鸦，黄色旁白框和拟声字，空间撕裂般的品红、青色故障条。频道图形变成一个漫画上色的角色剪影。热闹、炫目、年轻——适合动画、游戏、潮流、音乐、青年文化和娱乐类内容。照片会被压成漫画配色、加上网点。可选纸白底或紫夜底；自带平直的版式，色块是带网点的频道色。", en: "Comic-verse: animated films that print like comic books — flat colour shaded with Ben-Day dots and hatching, a heavy ink line, the colour plates deliberately out of register; towers seen from the street with lit windows, focus lines, neon marker scribbles, a yellow caption box and a sound effect, the dimension glitching in bars of magenta and cyan. The channel graphic as a comic-coloured figure. Loud, dazzling, young — for animation, games, street fashion, music, youth culture and entertainment. A photo is pressed into comic colours with a halftone. A paper-white or violet-night ground; flat layouts of its own, the colour block the channel colour in halftone." },
   name: { zh: "漫画宇宙", en: "Comic-verse" },
@@ -5411,6 +5429,7 @@ function pgPlace(env, p) {
 }
 const glass = {
   id: "glass",
+  art: "figure",
   repaint: (c) => `the photograph as an oil painting seen through a pane of textured hammered glass: loose painterly brush strokes, the whole image warped into wavy ripples and fragments, glints on the bumps of the glass and dark lines in its hollows, warm interior light, with ${c} as an accent; no text.`,
   about: { zh: "压花玻璃：隔着一块起伏的压花玻璃看一幅油画——暖光里的房间、一扇窗、窗前站着的人影（频道图形）、花瓶里的花，先用松散的油画笔触画出来，再被玻璃扭曲、打碎成一片片波纹，凸起处闪着高光、凹处是暗纹；可以再蒙一层雾面，四角暗下去。朦胧、私密、有温度——适合情感、生活、居家、回忆、艺术和电台类内容。照片也会被画成笔触、透过压花玻璃看。可选银灰底或夜色底；自带平直的版式，色块是一块磨砂玻璃。", en: "Patterned glass: an oil painting seen through a pane of hammered glass — a room in warm light, a window, someone standing against it (the channel graphic), flowers in a vase, painted in loose strokes, then bent and broken up by the glass into ripples, glints on the bumps and dark lines in the hollows; frost and darkening corners if you like. Hazy, intimate, warm — for feelings, everyday life, home, memories, art and radio. A photo is painted over and seen through the glass too. A silver or a night ground; flat layouts of its own, the colour block a pane of frosted glass." },
   name: { zh: "压花玻璃", en: "Patterned glass" },
@@ -5633,6 +5652,7 @@ function segDigit(ctx, ch, x, y, s, on, off) {
 }
 const jelly = {
   id: "jelly",
+  art: "figure",
   repaint: (c) => `a glossy 3D designer-toy render made from the photograph: translucent jelly and clear plastic glowing from within in coral orange, lime green and cobalt blue, set into intricate retro electronics — circuit boards, speaker cones, cables, a seven-segment display — soft studio light and a shallow depth of field, with ${c} as an accent; no readable text.`,
   about: { zh: "果冻机械：潮玩海报里那种透明发光的果冻生物，嵌在一台机器里——频道图形变成一只半透明、内有气泡、表面油亮的果冻（颜色来自频道色），身后是电路板的走线和芯片、音箱喇叭、盘绕的线缆、旋钮按键、橙色的七段数码屏和一栏栏极小的说明字；背景可以虚化，让果冻跳出来，辉光溢出。可爱、精密、科技感——适合科技、潮玩、音乐、电子、游戏和产品类内容。照片会调成青橙配色。可选钢灰底或深夜底；自带平直的版式。", en: "Jelly machine: the clear, glowing jelly creatures of designer-toy posters, set into a machine — the channel graphic as translucent jelly with bubbles inside and a glossy skin (in the channel colour), behind it a circuit board's traces and chips, speaker cones, coiled cables, knobs and buttons, an orange seven-segment display and columns of tiny print; the machinery out of focus if you like, so the jelly stands out, its glow spilling over. Cute, precise, technical — for tech, designer toys, music, electronics, games and products. A photo is graded teal and orange. A steel-grey or a night ground; flat layouts of its own." },
   name: { zh: "果冻机械", en: "Jelly machine" },
@@ -6146,6 +6166,7 @@ function spectrumStream(ctx, x, y0, y1, xEnd, top, n, turn, k0) {
 }
 const spectrum = {
   id: "spectrum",
+  art: "figure",
   repaint: (c) => `a black-and-white stipple engraving made from the photograph, fine ink dots and lines on cream paper, with streams of thin rainbow-coloured lines flowing out of it like light spectra, minimal and surreal, with ${c} among the colours; no text.`,
   about: { zh: "光谱版画：黑白点刻版画里流出彩虹——频道图形用点刻刻成一幅老式铜版画，米白纸上墨色细密；从它身上流出一束束光谱色的细线，横着拉到画边、在拐角直角折上去，或者垂直滴流下来；可加同心的光谱漩涡、汇向地平线的彩色透视线、起伏的彩色波纹、一块块彩色横纹条、雕版横线的天空，以及米白卡纸和木边画框。安静又迷幻——适合艺术、设计、音乐、哲思、科技与自然类内容。照片会被刻成一行行粗细起伏的线刻版画。可选米白纸或黑纸；自带平直的版式。", en: "Spectral engraving: rainbows running out of a black-and-white stipple print — the channel graphic engraved in stipple like an old copperplate, fine ink on cream paper; out of it stream threads of the spectrum, drawn to the edge and turned up at a right angle, or dripping down; a concentric spectral vortex, coloured perspective lines running to the horizon, rolling rainbow waves, blocks of coloured lines, a sky of engraved lines, and a cream mat in a wooden frame if you like. Quiet yet psychedelic — for art, design, music, ideas, science and nature. A photo is engraved in level lines that swell with its shadows. Cream or black paper; flat layouts of its own." },
   name: { zh: "光谱版画", en: "Spectral engraving" },
@@ -6509,7 +6530,7 @@ function cpPalm(ctx, x, base, s, lean, d, k) {
 /** The neon the figure is lit by: the channel colour, bright as a tube. */
 const cpRim = (C) => mix(boost(C, 0.7), [255, 255, 255], 0.22);
 /**
- * The figure painted as a cel and set in the night: the channel graphic itself (or, while it cannot be
+ * The figure painted as a cel and set in the night: its graphic itself (see figureOf; or, while it cannot be
  * drawn, its silhouette) with its tones stepped as cel paint, sunk into the night's blue; a crescent of hard
  * shadow on the side away from the neon (its own shape moved toward the light leaves it) and a thin rim of
  * the neon — the channel colour — along the lit side. Painted once on a canvas of its own at `k` canvas
@@ -6518,12 +6539,12 @@ const cpRim = (C) => mix(boost(C, 0.7), [255, 255, 255], 0.22);
  */
 function cpFigureImage(env, S, size, C, k) {
   const b = S.box, kk = size / Math.max(1, b.y1 - b.y0), hw = ((b.x1 - b.x0) / 2) * kk + 8, hh = size / 2 + 8, lx = 0.8, ly = -0.6;
-  const key = [current.id, JSON.stringify(env.graphic && env.graphic.ref), size.toFixed(1), C.map(Math.round).join(), k.toFixed(4)].join("|"), kept = WORK.cpFigure;
+  const key = [current.id, JSON.stringify(figureOf(env) && figureOf(env).ref), size.toFixed(1), C.map(Math.round).join(), k.toFixed(4)].join("|"), kept = WORK.cpFigure;
   if (kept && kept.key === key) return kept;
   const W = Math.max(1, Math.ceil(2 * hw * k)), H = Math.max(1, Math.ceil(2 * hh * k)), make = (slot) => { const c = WORK[slot] || (WORK[slot] = document.createElement("canvas")); if (c.width !== W || c.height !== H) { c.width = W; c.height = H; } const x = c.getContext("2d", { willReadFrequently: true }); x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = "source-over"; x.clearRect(0, 0, W, H); x.setTransform(k, 0, 0, k, hw * k, hh * k); return x; };
   const out = WORK.cpFigureCv = document.createElement("canvas"), x = make("cpFig");
   x.save(); x.scale(kk, kk); x.translate(-(b.x0 + b.x1) / 2, -(b.y0 + b.y1) / 2);
-  const drawn = env.graphic && env.graphic.draw(x);
+  const drawn = figureOf(env) && figureOf(env).draw(x);
   x.restore();
   if (!drawn) placeShape(x, S, [54, 60, 128], 0, 0, size);
   const img = x.getImageData(0, 0, W, H); celPixels(img.data, 1); x.putImageData(img, 0, 0);
@@ -6611,6 +6632,7 @@ function celPixels(d, a) {
 }
 const citypop = {
   id: "citypop",
+  art: "figure",
   repaint: (c) => `a night scene from a late-1980s anime OVA made from the photograph: hand-painted cel animation, a deep navy or violet night sky with cel-shaded clouds, city lights and neon signs, hard-edged two-tone shading with teal shadows, slightly faded VHS colour, with ${c} as an accent; still the same place, no text.`,
   about: { zh: "都市夜曲：八九十年代 OVA 动画录像带里的城市夜色——深海军蓝的夜空（或暮紫的黄昏），赛璐珞手法画的云，一层层楼群亮着窗灯、楼顶闪着红色航空灯，霓虹灯管和路边的霓虹招牌，棕榈树，黑色水面里倒映的灯火；频道图形画成赛璐珞人物：硬边阴影加一道霓虹轮廓光；可加星空、激光线，以及录像带的色彩拖影、扫描线和跟踪噪点。复古、浪漫、城市流行乐的味道——适合音乐、夜生活、城市、情感、复古与动画内容。照片会被画成赛璐珞的几层平涂。只有夜色底。", en: "City pop night: the city by night on the anime videotapes of the late 80s and early 90s — a deep navy night (or a violet dusk), clouds painted as cels, rows of towers with their windows lit and red lights winking on their tops, neon tubes and a neon sign by the road, palms, the lights doubled in black water; the channel graphic as a figure painted on a cel, a hard shadow and a rim of neon; stars, laser lines, and the colour smear, scanlines and tracking noise of the tape if you like. Retro, romantic, city-pop — for music, nightlife, cities, feelings, retro and animation. A photo is painted in a few flat cel tones. Night ground only." },
   name: { zh: "都市夜曲", en: "City pop night" },
@@ -6926,6 +6948,7 @@ function cnMarks(ctx, F, n, red, avoid, k0) {
 }
 const construct = {
   id: "construct",
+  art: "machine",
   repaint: (c) => `a constructivist poster made from the photograph, in the manner of the Soviet avant-garde of the 1920s: the subject built of flat rectangles of grey, black and cream, bold diagonal wedges, a large red disc, radiating lines and thin construction lines on aged cream paper, ${c} as the one colour; still the same subject, no text.`,
   about: { zh: "构成主义：二十年代苏联先锋派海报，经今天的插画师重新演绎——微微泛黄的米色旧纸上，频道图形被拆成一块块灰、黑、纸白和一点红的矩形，像机械一样重新拼装起来，顶上竖着桅杆；巨大的斜切楔形、一轮大圆、从灭点放射出去的光线、透视的钢桁架、竖条和色块、细细的构造线和点阵、当作版面装饰的小字；下方可以倒映在平静的水面里。平涂、硬边、只有黑白灰和一种颜色（默认红色，可以换成频道色）。有力量、有秩序、工业感强——适合科技、工业、建筑、历史、军事、城市、设计与观点类内容。照片会被压成几级灰阶。可选米色纸或黑底；自带平直的版式。", en: "Constructivist: the Soviet avant-garde poster of the 1920s as illustrators take it up today — on cream paper gone a little brown, the channel graphic broken into rectangles of grey, black, bare paper and a little red and built again like a machine, masts rising from its top; great diagonal wedges, a disc, rays fanning from a vanishing point, a steel truss in perspective, bars and blocks, hairline construction lines and dot grids, small type set as furniture; the lower part can be doubled in still water. Flat and hard-edged, in black, white, greys and one colour (red, or turned to the channel colour). Strong, ordered, industrial — for technology, industry, architecture, history, the military, cities, design and opinion. A photo is pressed into a few greys. Cream paper or black; flat layouts of its own." },
   name: { zh: "构成主义", en: "Constructivist" },
@@ -7480,6 +7503,7 @@ function dkWork(ctx, slot, B) {
 }
 const deco = {
   id: "deco",
+  art: "figure",
   repaint: (c) => `an Art Deco night scene painted on black paper, in the style of the background paintings of 1990s animated noir: an ultramarine and violet night, stepped skyscrapers with setbacks and spires, lit gold windows, crossing searchlight beams, lavender fog, deep crimson and ${c} floodlight on the facades, crushed black shadows, airbrushed gradients, film grain; still the same place, no text.`,
   about: { zh: "暗黑装饰：九十年代动画里哥谭市那种画在黑卡纸上的装饰艺术夜景——黑是底，只把光画上去：群青色的夜空，层层退台的摩天楼亮着金色窗灯、立柱被从退台下打上来的泛光照亮，探照灯在天上交叉，云条横过月亮，楼与楼之间浮着淡紫的夜雾；可加飞艇、竖排霓虹招牌、阶梯拱框和剪影人物。泛光、色块和高亮字用频道色（原画里的深红）；标题像剧院门脸上亮着的招牌字：字距拉开的大写字，每个字是一盏灯——中间钨丝白、边上透出琥珀色，外面一圈暖光，细细的暗边；高亮字是频道色的霓虹灯管。「鎏金」拉满变成黑金夜色。神秘、华丽、带点黑色电影的悬疑——适合城市、夜生活、悬疑推理、历史人文、电影解读、音乐与奢华品类。照片会被画成群青夜色，暖色保留为深红和金色。只有夜色底；自带平直的版式。", en: "Dark deco: the Art Deco city by night as the 90s animated series painted Gotham, on black paper — the dark is the ground and only the light is laid on: an ultramarine night, stepped skyscrapers with gold-lit windows and pilasters floodlit from their setbacks, searchlights crossing, bars of cloud across the moon, lavender fog between the rows; an airship, a neon blade sign, a stepped proscenium and a silhouette if you like. The floodlight, the colour block and the highlighted words take the channel colour (the paintings' crimson); the title is set as the lit letters of a theatre front, spaced capitals each a lamp — tungsten white at heart, amber at the rim, a warm glow round it, a fine dark keyline — the highlighted words neon tubes in the channel's colour. Turn up Gilt for black and gold. Mysterious, opulent, a little film noir — for cities, nightlife, mysteries, history, film, music and luxury. A photo is painted into the ultramarine night, its warm colours kept as crimson and gold. Night ground only; flat layouts of its own." },
   name: { zh: "暗黑装饰", en: "Dark deco" },

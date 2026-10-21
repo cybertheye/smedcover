@@ -5,7 +5,7 @@ import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, br
 import { virtualSize, layout, adjustLayout, meetStandards } from "./layout.js";
 import { drawTitle, drawTitleVertical, parseTitle, subtitleFit, setLine, passOf, hasCJK } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
-import { drawAsset, userAssets } from "./assets.js";
+import { drawAsset, userAssets, assetExists } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced } from "./style.js";
 import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped } from "./textfx.js";
@@ -1038,6 +1038,11 @@ export const partsOf = (cover, cat) => {
   const on = (type) => cover.layers.some((l) => l.type === type && !l.off);
   return { catname: on("catname"), graphic: on("graphic") && !!cat.graphic && cat.graphic.kind !== "none", subtitle: on("subtitle") && parseTitle(cover.subtitle).length > 0 };
 };
+/** The graphic a look's figure is drawn from in the channel graphic's place, as env.graphic is given: null when there is none, or it has gone from the library. */
+function figureArt(style, look, C) {
+  const ref = style.lookArt && style.lookArt[look];
+  return ref && assetExists(ref) ? { ref, draw: (c) => drawAsset(c, ref, C, { tint: true }) } : null;
+}
 function paintCover(cv, o) {
   const { profile: P, cover } = o, cat = P.categories[o.catIndex];
   const [w, h] = virtualSize(o.size.w, o.size.h), key = sizeKey(o.size);
@@ -1063,6 +1068,8 @@ function paintCover(cv, o) {
     resolve: (l) => resolve(l, w, h, key, cat.id),   // where another layer is (a photo's copy follows its original)
     // the channel graphic, for a look that uses its shape (a giant silhouette, a glowing photogram): draw(ctx) paints it about 0, 0 at scale 1
     graphic: cat.graphic && cat.graphic.kind !== "none" ? { ref: cat.graphic, draw: (c) => drawAsset(c, cat.graphic, C, { tint: true, labels: cat.graphic.labels, stamp: cat.graphic.stamp }) } : null,
+    // the graphic the user put in the channel graphic's place for this look's figure (see `art` in style.js), when it is still in the library
+    figure: figureArt(P.style, L0.id, C),
   };
   env.sub = subtitlePlan(ctx, env, L0);
   // where a hidden one would go, for when it is painted on its own (the 3D view); the title makes no room for it
