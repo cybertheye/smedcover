@@ -447,12 +447,14 @@ shaded by the way they face, each group is filled as one shape, then the back fa
 **The ransom note** (`ransom.js`) takes the pieces of the line from `pass` and splits each into its
 letters' cells, the letter's advance in the line's font (a piece set larger, `s`, as setLine set it), shared
 out to the piece's width. `ransomPlan()`, pure, dresses each letter: its face from the pools by script, its
-kind (on a scrap of paper 70%, in the layer's own lettering 20%, hollow 10%), its paper (`papersFor()`: the
+kind (on a scrap of paper 62%, in the layer's own lettering 18%, hollow 8%, in depth 8%, from the photo 4%;
+a kind turned off, or a photo letter without a photo, is a scrap instead), its paper (`papersFor()`: the
 channel colour, black, white, newsprint, kraft, the highlight's colour, a yellow — a neutral left out when
 the channel colour is it, a colour when one near it is there), an ink that reads on it (4.5 : 1), a turn, a
 lift, a size, and Latin letters a flip of case (`amt`, the layer's strength, scales the turn, the lift and the
-flips). The random numbers come from the layer's seed (`fxSeedOf()` in `render.js`: its id and its `fxSeed`, the
-number Reshuffle draws, kept by `normalizeLayer` for the ransom note only), the line's seed and the letter with how many times it came before,
+flips). The random numbers come from the layer's seed (`o.ransom.salt`, from `ransomOf()` in `render.js`: its id
+and its `fxSeed`, the number Reshuffle draws), the line
+(`o.row`) and the letter with how many times it came before,
 so a letter is dressed alike at every size; a letter that drew its neighbour's family draws again from the
 others (unless no other has the letter), one that drew its paper takes the next. A stretch of a script other
 than Latin, Greek, Cyrillic and CJK (joined, or right to left), from its first letter to its last, is one cell,
@@ -471,6 +473,38 @@ in one is drawn in the line's font, and `ransomEpoch()` in `bentLine()`'s key dr
 arrives. Whether a face has a letter is measured (`has()`: set in the face, the letter measures otherwise than
 in the bundled reference alone, Noto Sans SC or JetBrains Mono); what was measured and planned is forgotten
 when fonts load or are added to the page (`document.fonts.size`).
+
+Besides the scrap (`tile`), the layer's own lettering (`bare`) and the hollow letter (`cut`), a letter may be
+`deep` — the letter laid back down and to the right as a stack of copies, one a device pixel or so apart,
+darker toward the back, its face in its paper's colour (no outlines needed, so it works in a browser too) —
+or `photo`, cut from the cover's photo (`ransomOf()` in `render.js` gives the background photo, else the
+lowest one shown): the letter drawn on a spare canvas at the canvas's resolution, the photo laid in with
+`source-in` from a part the letter's `tear` seed picks, on a white rim. A scrap may have a torn `edge` (sides
+picked by `tear` jagged in teeth of 0.035 of the type size, a larger jagged copy under it in the paper's
+lighter fibre colour) and `tape` across its top or a corner, drawn in a third pass after the letters.
+`o.ransom.off` (the layer's `ransomOff`) keeps `torn`, `tape`, `deep` or `photo` from coming by chance; a
+photo letter needs a photo either way.
+
+Letters dressed by hand are the layer's `letters` (`normalizeLetters()` in `layers.js`; kept, with `fxSeed`
+and `ransomOff`, under another effect too), by `letterKey()`: line, letter, how many times it came before in
+the line — the key its random name is made of, so an edit stays with its letter while words after it change
+(a line, or the same letter, put in before it passes the edit on to another letter). In `ransomPlan()` each
+of a letter's random values comes from a stream of its own (its name and the value's), so whatever is set
+changes nothing else of it but what follows from it (a kind's paper, a paper's ink, a hero's size and angle),
+and of the letters after it mostly the next one's face and paper, which keep clear of it (papers are told
+apart by colour). Over the dealt values go the edits: a face, kind, paper (the ink then drawn anew
+to read on it, unless set), ink, turn, lift, size, case, edge, tape; `hero` true makes the letters the line's
+only heroes, false keeps the random hero off a letter; `salt` gives the letter a name of its own (*Deal this
+one again*). `lock` is a snapshot the editor takes ({seed, face, paper, ink, hero}): the layer's seed of then,
+which the letter's name keeps, and what its neighbours decided, so locking changes nothing and Reshuffle
+leaves it as it was; the letter before it, which it cannot give way to, keeps clear of its face and paper. The edits are in the plan's cache key and, through `o`, in a bent line's. The editor
+(`letterControls()` and `letterEditor()` in `app.js`) shows the letters with `ransomLetters()`, which plans
+each line of the layer's words (`lineCells()` over `parseTitle()`, the cells drawing would make) with the
+papers and channel colour the layer was last drawn with on the editor's canvas (`ransomShown()`, recorded
+when `o.ransom.shown`); after every drawing `refreshLetters()` draws the strip and the controls again when
+what they show changed (not while a pointer is down in them or one of their inputs has the focus), so they
+follow words typed and colours changed. A letter in depth is stacked from at most 8 copies while something
+is dragged (`isFast()`); a letter cut from the photo is kept by photo (`PHOTO_LETTERS`, 48 a photo).
 
 ### 6.2.1 A perspective of one's own
 

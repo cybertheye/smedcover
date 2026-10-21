@@ -24,7 +24,8 @@
 //   hiPlate     the layer has plates (or a band, a block) under its highlighted words: a lettering that boxes them itself does not
 //   lineW       width of the line                 unit       canvas pixels per unit
 //   seed        a number that differs from line to line, for effects that scatter things
-//   fxSeed      the layer's own seed (its id, and the number Reshuffle draws), for the ransom note
+//   ransom      the layer's settings for the ransom note (ransom.js; see ransomOf in render.js)
+//   row         which line of its block this is
 //   frame       where this line sits in its block, for effects that shape the whole block (the
 //               perspective): {ox, oy, c, box} — the line's origin and slant (x' = x + c·y) in the
 //               block's space, and the block {x, y, w, h} there

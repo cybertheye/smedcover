@@ -21,7 +21,8 @@ import {
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, BENDS, effectUses, warpCorners, convexWarp } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
-import { RANSOM_FACES, useRansomFaces, ransomPending, ransomArrived, ransomPools } from "./ransom.js";
+import { RANSOM_FACES, useRansomFaces, ransomPending, ransomArrived, ransomPools, ransomLetters, ransomShown, papersFor, faceFont, faceHas, inksFor, cased, isCJK, EXTRAS } from "./ransom.js";
+import { parseTitle } from "./title.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
 import { sizeOf, PIXELS } from "./photo.js";
 import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, labelRoom, drawStack } from "./stack3d.js";
@@ -324,7 +325,11 @@ function drawThumbs() {
   next();
 }
 let drawQueued = false;
-function flushDraw() { if (!drawQueued) return; drawQueued = false; ensureFonts(S.cover.layers); drawMain(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); }
+function flushDraw() {
+  if (!drawQueued) return;
+  drawQueued = false; ensureFonts(S.cover.layers); drawMain(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs);
+  if ($("letters-box")) later("letters", 200, refreshLetters);   // the ransom note's letters as now drawn (words typed, colours changed)
+}
 /** Redraws at most once per frame, however many input events arrive. `stale` false: only what is selected changed. */
 function queueDraw(stale = true) {
   if (stale) V3.stale = true;
@@ -2437,6 +2442,119 @@ function fxControl(L) {
     tip: [fx === "ransom" && t("fx.ransomHint"), L.bend && t("fx.bendHint"), L.bend && t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint"), kind === "outline" && !native && t("fx.needsApp")].filter(Boolean).join(" "),
   };
 }
+/** The words a headline layer sets: the title's and the subtitle's are the cover's. */
+const wordsOf = (L) => (L.type === "title" ? S.cover.title : L.type === "subtitle" ? S.cover.subtitle : L.text || "");
+/** Whether the cover has a photo shown that the ransom note may cut letters from (see ransomOf in render.js). */
+const letterPhoto = () => S.cover.layers.some((l) => l.type === "photo" && !l.of && !l.cut && l.visible && appliesTo(l, cat().id) && recordOf(l)?.img);
+/** What the ransom note's letters in the panel show: when it is the same, they are not drawn again. */
+const lettersNow = (L) => JSON.stringify([wordsOf(L), L.letters, L.fxSeed, L.fxAmt, L.ransomOff, letterPhoto(), drawnWith(L).papers.map((p) => p.css), S.letterSel, getLang()]);
+let letterHeld = false;   // a pointer is down in the letters' controls (WebKit does not focus a slider dragged)
+addEventListener("pointerup", () => { letterHeld = false; }, true);
+addEventListener("pointercancel", () => { letterHeld = false; }, true);
+const letterBox = (L) => el("div", { id: "letters-box", class: "wide", "data-now": lettersNow(L), onpointerdown: () => { letterHeld = true; } }, letterControls(L));
+/**
+ * The ransom note's letters drawn anew in the panel, after the cover was: its words or colours may have
+ * changed while the panel stayed (it is not rebuilt while text is typed in it). Not while a control of
+ * theirs is in use, nor when nothing they show changed.
+ */
+function refreshLetters() {
+  const box = $("letters-box"), L = layer(), at = document.activeElement;
+  if (!box || !L || L.fx !== "ransom") return;
+  if (letterHeld || (at && box.contains(at) && /^(INPUT|SELECT)$/.test(at.tagName))) return later("letters", 400, refreshLetters);
+  if (box.dataset.now !== lettersNow(L)) box.replaceWith(letterBox(L));
+}
+/**
+ * The ransom note letter by letter (ransom.js): the extras the layer lets in; a strip of its letters as they
+ * are drawn, one row a line; and for the one picked (S.letterSel) its kind, face, paper, ink, size, angle,
+ * lift, case, whether it is the hero, its scrap's edge and tape, set in `letters` by its key; dealt again on
+ * its own, locked against Reshuffle (it keeps the layer's seed of now, and its face, paper, ink and whether it
+ * is the hero, which its neighbours decided), or given back to chance.
+ */
+function letterControls(L) {
+  const photo = letterPhoto(), rows = ransomLetters(parseTitle(wordsOf(L)), { id: L.id, salt: `${L.id}:${L.fxSeed || 0}`, edits: L.letters || null, off: L.ransomOff || null, photo }, L.fxAmt ?? 1, drawnWith(L));
+  const put = (key, patch, side = true) => {
+    const all = { ...(L.letters || {}) }, e = { ...(all[key] || {}), ...patch };
+    for (const k of Object.keys(e)) if (e[k] === undefined) delete e[k];
+    if (Object.keys(e).length) all[key] = e; else delete all[key];
+    if (Object.keys(all).length) L.letters = all; else delete L.letters;
+    touch({ cover: true, side });
+  };
+  const sel = S.letterSel && S.letterSel.id === L.id ? S.letterSel.key : null;
+  let picked = null;
+  // the strip: each letter as it is drawn (its face, paper, ink, kind and angle), a mark on those dressed by hand or locked
+  const strip = el("div", { id: "letters", class: "letters" }, rows.map(({ row, cells, plan }) => el("div", { class: "lrow" }, cells.map((c, i) => {
+    const p = plan[i];
+    if (!p) return el("span", { class: /^\s+$/.test(c.ch) ? "lgap" : "lmark" }, c.ch.trim());
+    if (p.key === sel) picked = { row, c, p };
+    return el("button", {
+      class: `lt k-${p.kind}` + (p.key === sel ? " on" : "") + (p.locked ? " locked" : p.edited ? " edited" : "") + (p.hero ? " hero" : ""),
+      style: `--p:${p.paper.css};--i:${p.ink};${p.face ? `font:${faceFont(p.face, 17)};` : ""}transform:rotate(${p.turn.toFixed(1)}deg)`,
+      title: [p.face ? p.face.family : "", t(`letters.kind.${p.kind}`), p.locked ? t("letters.locked") : ""].filter(Boolean).join(" · "),
+      onclick: () => { S.letterSel = p.key === sel ? null : { id: L.id, key: p.key }; renderSide(); },
+    }, p.ch);
+  }))));
+  const extras = el("div", { class: "chips small", style: "margin-bottom:10px" }, EXTRAS.map((k) => {
+    const on = !(L.ransomOff || []).includes(k);
+    return el("button", { class: on ? "on" : "", title: t(k === "photo" && !photo ? "letters.extra.photoNone" : `letters.extra.${k}Tip`), onclick: () => {
+      const off = new Set(L.ransomOff || []);
+      if (on) off.add(k); else off.delete(k);
+      if (off.size) L.ransomOff = EXTRAS.filter((x) => off.has(x)); else delete L.ransomOff;
+      touch({ cover: true, side: true });
+    } }, t(`letters.extra.${k}`));
+  }));
+  return [
+    cap("letters.extras"), extras,
+    strip,
+    picked ? letterEditor(L, picked, put, photo) : el("div", { class: "hint", style: "margin:6px 0 0" }, t("letters.pick")),
+    L.letters && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete L.letters; touch({ cover: true, side: true }); } }, t("letters.resetAll")),
+  ];
+}
+/** The controls of one letter of the ransom note: {row, c (its cell), p (how it is dressed now)}; `put(key, patch)` sets what was chosen. */
+function letterEditor(L, { row, c, p }, put, photo) {
+  const e = (L.letters && L.letters[p.key]) || {}, key = p.key, live = (patch) => { holdLive(L.id); put(key, patch, false); };
+  /** A value back to chance: what was set, and what a lock keeps of it. */
+  const loose = (field) => { const lock = e.lock && { ...e.lock }; if (lock) delete lock[field]; put(key, { [field]: undefined, ...(lock ? { lock } : {}) }); };
+  const settled = (row) => { row.querySelector("input").addEventListener("change", () => renderSide()); return row; };   // a slider let go: the strip and the controls show it
+  const pools = ransomPools(), faces = (isCJK(c.ch) ? pools.cjk : pools.latin).filter((f) => faceHas(f, c.ch));
+  const faceId = (f) => `${f.family}|${f.weight}|${f.italic ? 1 : 0}`;
+  // a colour of the letter's: by chance, one of `list`, or any
+  const colours = (field, list, now) => el("div", { class: "lcol" },
+    el("button", { class: "lsw auto" + (e[field] || (e.lock && e.lock[field]) ? "" : " on"), title: t("letters.random"), onclick: () => loose(field) }, "?"),
+    list.map((x) => el("button", { class: "lsw" + (e[field] && now === x.css ? " on" : ""), style: `background:${x.css}`, title: x.css, onclick: () => put(key, { [field]: x.css }) })),
+    el("input", { type: "color", value: now, oninput: (ev) => { live({ [field]: ev.target.value }); later("side", 600, renderSide); } }));
+  const shown = drawnWith(L), papered = ["tile", "cut", "deep"].includes(p.kind);
+  return el("div", { class: "ledit" },
+    el("div", { class: "lhead" }, el("b", {}, `「${p.ch}」`), el("span", {}, t("letters.line", row + 1))),
+    el("div", { class: "row", style: "margin-top:6px" },
+      el("button", { class: "btn", title: t("letters.oneTip"), onclick: () => { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === e.salt); put(key, { salt: n }); } }, t("letters.one")),
+      el("button", { class: "btn" + (p.locked ? " on" : ""), title: t("letters.lockTip"), onclick: () => put(key, { lock: p.locked ? undefined : { seed: L.fxSeed || 0, ...(p.face ? { face: { family: p.face.family, weight: p.face.weight, ...(p.face.italic ? { italic: true } : {}) } } : {}), paper: p.paper.css, ink: p.ink, hero: p.hero } }) }, t(p.locked ? "letters.unlock" : "letters.lock")),
+      el("button", { class: "btn", disabled: !L.letters || !L.letters[key], onclick: () => put(key, Object.fromEntries(Object.keys(e).map((k) => [k, undefined]))) }, t("letters.reset"))),
+    el("div", { class: "lgrid" },
+      el("span", {}, t("letters.kind")),
+      select([["", t("letters.random")], ...["tile", "bare", "cut", "deep", ...(photo ? ["photo"] : [])].map((k) => [k, t(`letters.kind.${k}`)])], e.kind || "", (v) => put(key, { kind: v || undefined })),
+      el("span", {}, t("letters.face")),
+      select([["", t("letters.randomNow", p.face ? p.face.family : "—")], ...faces.map((f) => [faceId(f), `${f.family} ${f.weight}${f.italic ? " italic" : ""}`])], e.face ? faceId({ italic: false, ...e.face }) : "", (v) => {
+        if (!v) return loose("face");
+        const [family, weight, italic] = v.split("|");
+        put(key, { face: { family, weight: Number(weight), ...(italic === "1" ? { italic: true } : {}) } });
+      }),
+      papered && el("span", {}, t(p.kind === "deep" ? "letters.front" : "letters.paper")), papered && colours("paper", shown.papers, p.paper.css),
+      p.kind === "tile" && el("span", {}, t("letters.ink")), p.kind === "tile" && colours("ink", inksFor(shown.C), p.ink)),
+    settled(slider("letters.size", 0.5, 1.6, 0.02, p.size, times, (v) => live({ size: v }))),
+    settled(slider("letters.turn", -45, 45, 1, p.turn, (v) => `${Math.round(v)}°`, (v) => live({ turn: v }))),
+    settled(slider("letters.lift", -0.5, 0.5, 0.01, p.lift, (v) => v.toFixed(2), (v) => live({ lift: v }))),
+    el("div", { class: "lgrid" },
+      !isCJK(c.ch) && cased(c.ch) && el("span", {}, t("letters.case")),
+      !isCJK(c.ch) && cased(c.ch) && select([["", t("letters.random")], ["typed", t("letters.case.typed")], ["upper", t("letters.case.upper")], ["lower", t("letters.case.lower")]], e.case || "", (v) => put(key, { case: v || undefined })),
+      p.kind === "tile" && el("span", {}, t("letters.edge")),
+      p.kind === "tile" && select([["", t("letters.random")], ["cut", t("letters.edge.cut")], ["torn", t("letters.edge.torn")]], e.edge || "", (v) => put(key, { edge: v || undefined })),
+      p.kind === "tile" && el("span", {}, t("letters.tape")),
+      p.kind === "tile" && select([["", t("letters.random")], ["0", t("letters.tape.0")], ["1", t("letters.tape.1")], ["2", t("letters.tape.2")]], e.tape == null ? "" : String(e.tape), (v) => put(key, { tape: v === "" ? undefined : Number(v) }))),
+    el("div", { class: "lgrid" }, el("span", {}, t("letters.hero")),
+      select([["", t(p.hero ? "letters.hero.chanceYes" : "letters.hero.chanceNo")], ["yes", t("letters.hero.yes")], ["no", t("letters.hero.no")]], e.hero === true ? "yes" : e.hero === false ? "no" : "", (v) => (v ? put(key, { hero: v === "yes" }) : loose("hero")))));
+}
+/** The papers and channel colour a layer's letters were last drawn with (see ransomShown), or those of the channel colour before they were drawn. */
+const drawnWith = (L) => ransomShown(L.id) || { papers: papersFor({ C: hexToRgb(cat().color) }), C: hexToRgb(cat().color) };
 /** White or ink, whichever reads on colour "#rrggbb". */
 const readsOn = (hex) => { const c = hexToRgb(hex); return c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114 < 128 ? "#ffffff" : "#07070c"; };
 /** The title, subtitle and text layers alike: words, effect, colours, lines, plate. */
@@ -2454,6 +2572,7 @@ function headlineControls(L, set) {
       L.type === "subtitle" && el("div", { style: "margin-bottom:8px" }, textInput(S.cover.subtitle, (v) => { S.cover.subtitle = v; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); }, { placeholder: t("cover.subtitlePh") })),
       fontControl(L, true)], t("props.textHint"), "top"),
     psec("props.sec.effect", fx.kids, fx.tip),
+    L.fx === "ransom" && psec("props.sec.letters", [letterBox(L)], t("letters.hint"), "wide"),
     psec("props.sec.color", [
       swatch(L, "ink", "props.sw.text", L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff"),
       // on plates of their own the words take what reads there; through a band or on a block set off, the lettering's colour
@@ -3421,7 +3540,7 @@ function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).
     list.push(...title, ...over);
   }
   const can = (k) => native || EFFECTS[k].kind !== "outline";
-  const dealFx = (L, got) => { delete L.fx; delete L.fxAmt; delete L.fxSeed; delete L.bend; delete L.bendAmt; delete L.warp; delete L.reshape; Object.assign(L, got); };
+  const dealFx = (L, got) => { delete L.fx; delete L.fxAmt; delete L.bend; delete L.bendAmt; delete L.warp; delete L.reshape; Object.assign(L, got); };
   const titled = letterFor(st.look, "title", R, can, null, ctx);
   for (const L of S.cover.layers) {
     switch (L.type) {
@@ -4115,12 +4234,19 @@ async function selfTest(dir) {
       const t0 = performance.now(), a = await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex())), ms = Math.round(performance.now() - t0);
       titleLayer.fxSeed = 777;
       const b = await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex()));
-      report.ransom = { pools: ransomPools(), away: ransomAway, still: ransomPending(), firstMs: ransomMs, ms, reshuffled: a.length !== b.length || a.some((v, i) => v !== b[i]),
+      const pools = ransomPools();
+      report.ransom = { pools: { latin: pools.latin.map((f) => f.family), cjk: pools.cjk.map((f) => f.family) }, away: ransomAway, still: ransomPending(), firstMs: ransomMs, ms, reshuffled: a.length !== b.length || a.some((v, i) => v !== b[i]),
         paths: [await invoke("write_image", framed(a, { dir, name: "fx-ransom-letters.png" })), await invoke("write_image", framed(b, { dir, name: "fx-ransom-reshuffled.png" }))] };
       if (!report.ransom.reshuffled) report.errors.push("ransom: Reshuffle drew the same letters");
       report.ransom.unreached = ransomAway.filter((f) => !reachable(f));   // read from their files, every canvas has them now
       if (report.ransom.still.length || report.ransom.unreached.length) report.errors.push(`ransom: faces not to be had: ${[...report.ransom.still, ...report.ransom.unreached].join(", ")}`);
-      delete titleLayer.fxSeed; S.cover.title = fxTitle;
+      // every kind, torn edges and tape, set by hand (letters cut from the photo, when the cover has one)
+      titleLayer.letters = { "0|S|1": { kind: "deep" }, "0|P|1": { kind: "photo" }, "0|I|1": { kind: "tile", edge: "torn", tape: 1 }, "0|D|1": { kind: "cut" }, "0|E|1": { kind: "tile", edge: "torn" }, "0|M|1": { kind: "photo" }, "1|你|1": { kind: "photo" }, "1|看|1": { kind: "tile", edge: "torn", tape: 2 }, "1|着|1": { kind: "deep" } };
+      const had = new Set(S.cover.layers.map((l) => l.id)), pic = await invoke("selftest_photo").catch(() => null);
+      if (pic && !letterPhoto()) await addPhoto(pic);
+      report.ransom.edited = { photo: letterPhoto(), path: await invoke("write_image", framed(await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex())), { dir, name: "fx-ransom-edited.png" })) };
+      S.cover.layers = S.cover.layers.filter((l) => had.has(l.id));   // the photo added goes again
+      delete titleLayer.letters; delete titleLayer.fxSeed; S.cover.title = fxTitle;
     }
     // the title and a text layer as headlines on plates, the text with its own colour, an outline and plates under its highlighted words
     {

@@ -96,6 +96,7 @@
   .psec-b>.sl.off>:nth-child(2){grid-column:3/-1;font-size:12px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}   /* one line, as tall as a slider's row: the whole reason is in the tip */
   .psec-b>.sl.off>*{opacity:.5}
   .psec-b>.chk{display:flex}
+  .psec-h.wide,.psec-b>.wide{grid-column:1/-1}   /* a group that needs the panel's width (the ransom note's letters): its name over it */
   .psep{grid-column:1/-1;border-top:1px solid var(--line);margin:2px 0}
   .psec-b>.fxh{font-size:12px;font-weight:600;opacity:.75}
   .psec-b>.fxs{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}
@@ -289,6 +290,26 @@
   #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#fff;color:var(--ink);padding:12px 22px;font-weight:600;box-shadow:6px 6px 0 var(--acc);opacity:0;pointer-events:none;transition:opacity .2s;z-index:50;max-width:80vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #toast.on{opacity:1}
   body.drop::after{content:attr(data-drop);position:fixed;inset:12px;border:3px dashed var(--acc);background:rgba(10,10,18,.82);display:grid;place-items:center;font-size:28px;letter-spacing:.2em;z-index:45;pointer-events:none}
+  /* the ransom note's letters, one by one: the strip (each letter as drawn) and the picked letter's controls */
+  .letters{display:grid;gap:6px;margin:4px 0 8px}
+  .lrow{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+  .lrow .lgap{width:8px}.lrow .lmark{opacity:.5;font-size:15px}
+  .lt{position:relative;min-width:26px;height:30px;padding:0 4px;border:2px solid transparent;background:none;color:#fff;font:700 17px var(--ui);line-height:1;cursor:pointer}
+  .lt.k-tile{background:var(--p);color:var(--i)}
+  .lt.k-cut{color:var(--p);-webkit-text-stroke:1px #07070c;paint-order:stroke fill}
+  .lt.k-deep{color:var(--p);text-shadow:1px 1px 0 #555,2px 2px 0 #333}
+  .lt.k-photo{background:linear-gradient(135deg,#e0a46a,#5d86b0);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lt.hero{font-size:21px}
+  .lt.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}
+  .lt.edited::after,.lt.locked::after{content:"";position:absolute;top:-4px;right:-4px;width:7px;height:7px;border-radius:50%;background:var(--acc)}
+  .lt.locked::after{border-radius:0;background:#fff}
+  .ledit{border-top:2px solid var(--line);margin-top:8px;padding-top:8px}.ledit .row{display:flex;flex-wrap:wrap;gap:6px}.ledit .row .btn{flex:1 1 auto}.ledit .sl{grid-template-columns:72px 1fr 52px}
+  .ledit .lhead{display:flex;justify-content:space-between;align-items:baseline}.ledit .lhead b{font-size:18px}
+  .lgrid{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px 10px;align-items:center;margin:10px 0}
+  .lcol{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+  .lsw{width:22px;height:22px;border:2px solid var(--line);padding:0;cursor:pointer}
+  .lsw.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}.lsw.auto{background:var(--panel);color:#fff;font-size:12px}
+  .lcol input[type=color]{width:30px;height:22px;padding:1px;background:var(--panel);border:2px solid var(--line);cursor:pointer}
   /* Surprise me's window: over the left column, the canvas left in view; the hands as they are dealt, the one kept marked */
   #deal{position:fixed;z-index:35;background:var(--bg);border:3px solid #fff;box-shadow:8px 8px 0 var(--acc);padding:14px;display:grid;gap:10px;overflow:auto}
   #deal[hidden]{display:none}

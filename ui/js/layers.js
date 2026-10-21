@@ -142,6 +142,42 @@ export const fillsCanvas = (L) => L.type === "photo" && L.fill && !L.of;
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes", "arc"];
 /** The text effects a headline can be given (painted in textfx.js). Absent on a layer means "auto": the look decides. */
 export const TEXT_EFFECTS = ["auto", "sticker", "cel", "plain", "cyber", "riso", "anime", "bluenote", "editorial", "vivid", "dots", "stripes", "inner", "worn", "rows", "extrude", "ransom"];
+/**
+ * The ransom note's extras a layer may turn off (torn edges, tape, letters in depth, letters cut from the
+ * photo), and the ways a letter may be drawn (on a scrap of paper, in the layer's own lettering, hollow, in
+ * depth, cut from the photo); see ransom.js.
+ */
+export const RANSOM_EXTRAS = ["torn", "tape", "deep", "photo"], LETTER_KINDS = ["tile", "bare", "cut", "deep", "photo"];
+/**
+ * The ransom note's letters dressed by hand, by key ("line|letter|how many times it came before"): each a
+ * face {family, weight, italic}, kind, paper and ink ("#rrggbb"), turn (degrees), lift and size, case, hero,
+ * edge, tape, its own seed (`salt`), and a lock: the layer's seed it was locked with and what it had then
+ * that its neighbours decided ({seed, face, paper, ink, hero}). Only what is valid; those with nothing left
+ * go, and at most 300 are kept. Null when none is.
+ */
+export function normalizeLetters(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out = {}, colour = (v) => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : undefined), int = (v, lo, hi) => (Number.isInteger(v) && v >= lo && v <= hi ? v : undefined);
+  const faceOf = (f) => { const family = f && typeof f.family === "string" ? f.family.replace(/["\\;{}<>]/g, "").trim().slice(0, 60) : ""; return family ? { family, weight: int(f.weight, 100, 900) ?? 700, ...(f.italic === true ? { italic: true } : {}) } : undefined; };
+  for (const [key, v] of Object.entries(raw)) {
+    if (Object.keys(out).length >= 300) break;
+    if (!/^\d{1,3}\|[^|]{1,16}\|\d{1,4}$/u.test(key) || !v || typeof v !== "object") continue;
+    const lock = v.lock && typeof v.lock === "object" && int(v.lock.seed, 0, 999999) !== undefined
+      ? Object.fromEntries(Object.entries({ seed: v.lock.seed, face: faceOf(v.lock.face), paper: colour(v.lock.paper), ink: colour(v.lock.ink), hero: typeof v.lock.hero === "boolean" ? v.lock.hero : undefined }).filter(([, x]) => x !== undefined))
+      : undefined;
+    const e = {
+      face: faceOf(v.face),
+      kind: LETTER_KINDS.includes(v.kind) ? v.kind : undefined, paper: colour(v.paper), ink: colour(v.ink),
+      turn: Number.isFinite(v.turn) ? num(v.turn, 0, -45, 45) : undefined, lift: Number.isFinite(v.lift) ? num(v.lift, 0, -0.5, 0.5) : undefined, size: Number.isFinite(v.size) ? num(v.size, 1, 0.5, 1.6) : undefined,
+      case: ["upper", "lower", "typed"].includes(v.case) ? v.case : undefined, hero: typeof v.hero === "boolean" ? v.hero : undefined,
+      edge: v.edge === "torn" || v.edge === "cut" ? v.edge : undefined, tape: [0, 1, 2].includes(v.tape) ? v.tape : undefined,
+      salt: int(v.salt, 1, 999999), lock,
+    };
+    for (const k of Object.keys(e)) if (e[k] === undefined) delete e[k];
+    if (Object.keys(e).length) out[key] = e;
+  }
+  return Object.keys(out).length ? out : null;
+}
 /** The bends a headline may be given whatever its lettering (`bend`, how far: `bendAmt`; see BENDS in textfx.js). */
 export const BEND_IDS = ["arc", "arcLow", "circle", "shell", "bulge", "pinch", "fisheye", "rise", "taper", "wave", "flag"];
 // Four of those were looks' letterings, offered in the menu by name; the menu no longer has them, and
@@ -245,7 +281,13 @@ function normalizeLayer(raw, catIds) {
     else if (was) L.fx = "cel";
     else if (TEXT_EFFECTS.includes(fx) && fx !== "auto") L.fx = fx;
     if (!lettered && !was && raw.fxAmt !== undefined && num(raw.fxAmt, 1, 0, 2) !== 1) L.fxAmt = num(raw.fxAmt, 1, 0, 2);
-    if (L.fx === "ransom" && Number.isInteger(raw.fxSeed) && raw.fxSeed > 0 && raw.fxSeed < 1e6) L.fxSeed = raw.fxSeed;   // the ransom note's letters, as Reshuffle last dealt them
+    // the ransom note's letters, as Reshuffle last dealt them, those dressed by hand, the extras turned off: kept
+    // under another effect too, so they are there again when the ransom note is
+    if (Number.isInteger(raw.fxSeed) && raw.fxSeed > 0 && raw.fxSeed < 1e6) L.fxSeed = raw.fxSeed;
+    const letters = normalizeLetters(raw.letters);
+    if (letters) L.letters = letters;
+    const off = Array.isArray(raw.ransomOff) ? RANSOM_EXTRAS.filter((k) => raw.ransomOff.includes(k)) : [];
+    if (off.length) L.ransomOff = off;
     if (BEND_IDS.includes(bend)) {
       L.bend = bend;
       if (bendAmt !== undefined && num(bendAmt, 1, 0, 2) !== 1) L.bendAmt = num(bendAmt, 1, 0, 2);

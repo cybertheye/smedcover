@@ -220,7 +220,7 @@ export function subtitleFit(ctx, title, sub, box, font, w, h, maxFs = 340, bend 
 
 /**
  * Draws the title into box {x,y,w,h}. `adj` is the manual {dx,dy,s}; `st` the style:
- * { font, fill, hi, ink, shadow, hiShadow, align, stroke, shadowAmt, maxFs, fx, fxAmt, fxSeed } — fx being
+ * { font, fill, hi, ink, shadow, hiShadow, align, stroke, shadowAmt, maxFs, fx, fxAmt, ransom } — fx being
  * the text effect (see textfx.js) — and optionally `plate(x, y, w, h, fs)`, which paints a plate
  * under the lines, `hiPlate(x, y, w, h, fs)`, one under each highlighted word, and `skew`, the lines'
  * slant (default -0.08), and `reserve`, a height kept free under the lines (for the subtitle, see
@@ -272,7 +272,7 @@ export function drawTitle(ctx, title, box, adj, st) {
     const set = setLine(ctx, line, mixed), pass = passOf(set);
     const m = ctx.getTransform ? ctx.getTransform() : null;
     const o = {
-      fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: st.fxAmt ?? 1, fxSeed: st.fxSeed, lineW: lw, seed: li * 17.3 + 1,
+      fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: st.fxAmt ?? 1, ransom: st.ransom, row: li, lineW: lw, seed: li * 17.3 + 1,
       fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow,
       C: st.C, fill: st.own, hi: st.ownHi, hiPlate: !!st.hiPlated, unit: m ? Math.hypot(m.a, m.b) : 1,
       frame: { ox, oy, c: skew, box: block }, warp: st.warp, reshape: rest ? st.reshape : undefined,

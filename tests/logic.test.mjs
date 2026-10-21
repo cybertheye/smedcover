@@ -1047,7 +1047,7 @@ test("the ransom note: each letter dressed its own way, the same wherever the li
   const pools = { latin: ["A", "B", "C", "D"].map(face), cjk: ["甲", "乙", "丙"].map(face) };
   const C = [214, 40, 57], papers = papersFor({ C, hiCss: "#fcee0a" });
   const cells = (text, hi = () => false) => [...text].map((ch, i) => ({ ch, hi: hi(i) }));
-  const plan = (text, more = {}) => ransomPlan(cells(text, more.hi), pools, { salt: "title:7", line: 1, papers, C, ...more });
+  const plan = (text, more = {}) => ransomPlan(cells(text, more.hi), pools, { salt: "title:7", row: 1, papers, C, ...more });
   // the channel colour and the highlight's among the papers, none two alike
   assert.ok(papers.some((p) => p.rgb.join() === C.join()) && papers.some((p) => p.css === "#fcee0a"));
   assert.ok(papers.every((p, i) => papers.every((q, j) => i === j || Math.hypot(p.rgb[0] - q.rgb[0], p.rgb[1] - q.rgb[1], p.rgb[2] - q.rgb[2]) >= 30)));
@@ -1062,17 +1062,18 @@ test("the ransom note: each letter dressed its own way, the same wherever the li
   for (let k = 1; k < dressed.length; k++) {
     const a = dressed[k - 1], b = dressed[k];
     assert.notEqual(a.face.family, b.face.family, `${text[a.i]}${text[b.i]}: one face`);
-    if (a.paper >= 0) assert.notEqual(a.paper, b.paper, `${text[a.i]}${text[b.i]}: one paper`);
+    if (["tile", "cut", "deep"].includes(a.kind) && ["tile", "cut", "deep"].includes(b.kind)) assert.notEqual(a.paper, b.paper, `${text[a.i]}${text[b.i]}: one paper`);
   }
   for (const d of dressed) {
     assert.ok(/[\p{Script=Han}]/u.test(text[d.i]) === pools.cjk.includes(d.face), text[d.i]);
-    if (d.kind === "tile") assert.ok(contrast(papers[d.paper].rgb, [0, 2, 4].map((k) => parseInt(d.ink.slice(1 + k, 3 + k), 16))) >= 4.5, `${text[d.i]} reads on its paper`);
-    if (d.kind === "cut") assert.ok(papers[d.paper].light, "a hollow letter on a light paper");
+    if (d.kind === "tile") assert.ok(contrast(d.paper.rgb, [0, 2, 4].map((k) => parseInt(d.ink.slice(1 + k, 3 + k), 16))) >= 4.5, `${text[d.i]} reads on its paper`);
+    if (d.kind === "cut") assert.ok(d.paper.light, "a hollow letter on a light paper");
+    assert.ok(d.kind !== "photo", "no photo letters without a photo");
     if (d.ch !== text[d.i]) assert.ok(/[a-z]/i.test(text[d.i]) && d.ch.toLowerCase() === text[d.i].toLowerCase(), "only Latin letters change case");
     assert.ok(Math.abs(d.turn) <= 9 && Math.abs(d.lift) <= 0.06);
   }
   assert.ok(dressed.some((d) => d.ch !== text[d.i]), "some letters change case");
-  assert.ok(new Set(dressed.map((d) => d.face.family)).size >= 5 && new Set(dressed.map((d) => d.kind)).size === 3);
+  assert.ok(new Set(dressed.map((d) => d.face.family)).size >= 5 && new Set(dressed.map((d) => d.kind)).size >= 3);
   // one hero a line, on the channel colour, among the highlighted letters when there are some
   assert.equal(dressed.filter((d) => d.hero).length, 1);
   const marked = plan("SPIDER MAN", { hi: (i) => i >= 7 }), hero = marked.findIndex((d) => d && d.hero);
@@ -1083,37 +1084,105 @@ test("the ransom note: each letter dressed its own way, the same wherever the li
   // a face without the letter gives way; another seed, other dress; a letter typed leaves those before it be
   const without = plan(text, { has: (f, ch) => !(f.family === "A" && /[sS]/.test(ch)) });
   assert.ok(without.every((d, i) => !d || !/[sS]/.test(text[i]) || d.face.family !== "A"));
-  assert.notDeepEqual(ransomPlan(cells(text), pools, { salt: "title:8", line: 1, papers, C }), p);
+  assert.notDeepEqual(ransomPlan(cells(text), pools, { salt: "title:8", row: 1, papers, C }), p);
   const typed = plan("SPIDER MANX"), before = plan("SPIDER MAN");
   assert.deepEqual(typed.slice(0, 10).map((d) => d && !d.hero && d), before.map((d, i) => d && !d.hero && !typed[i].hero && d), "the letters before stay as they were");
   // two weights of one family are still one face to a neighbour
   const weights = { latin: [face("A"), { ...face("A"), weight: 300 }, face("B"), { ...face("B"), weight: 300 }, face("C")], cjk: [face("甲"), { ...face("甲"), weight: 300 }, face("乙")] };
   for (const salt of ["a", "b", "c", "d", "e", "f", "g", "h"]) {
-    const w = ransomPlan(cells(text), weights, { salt, line: 2, papers, C }).filter(Boolean);
+    const w = ransomPlan(cells(text), weights, { salt, row: 2, papers, C }).filter(Boolean);
     for (let k = 1; k < w.length; k++) assert.notEqual(w[k - 1].face.family, w[k].face.family, `${salt}: neighbours in one family`);
   }
   // painted: every scrap and every letter, the canvas as it was; a piece in another script whole, as the line sets it
   const { ransom } = await import("../ui/js/ransom.js");
   const calls = [], rec = new Proxy({ font: "900 100px X", lineWidth: 1 }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (str) => ({ width: [...str].length * 60 }) : (...args) => { calls.push([k, ...args]); return {}; }), set: (t, k, v) => { t[k] = v; return true; } });
-  ransom(rec, (fn) => { fn({ t: "Ab", hi: false, w: 120 }, 0); fn({ t: "مرحبا", hi: false, w: 300 }, 130); fn({ t: "cd", hi: true, w: 120 }, 440); }, { fs: 100, d: 6, strokeAmt: 1, amt: 1, seed: 1, fxSeed: "title:0", C: [252, 238, 10], fillCss: "#ffffff", hiCss: "#fcee0a", inkCss: "#07070c", shadowCss: "#fcee0a", hiShadowCss: "#ffffff" });
+  ransom(rec, (fn) => { fn({ t: "Ab", hi: false, w: 120 }, 0); fn({ t: "مرحبا", hi: false, w: 300 }, 130); fn({ t: "cd", hi: true, w: 120 }, 440); }, { fs: 100, d: 6, strokeAmt: 1, amt: 1, row: 0, ransom: { id: "t", salt: "t:0", off: ["tape"] }, C: [252, 238, 10], fillCss: "#ffffff", hiCss: "#fcee0a", inkCss: "#07070c", shadowCss: "#fcee0a", hiShadowCss: "#ffffff" });
   const n = (k) => calls.filter((c) => c[0] === k).length, texts = calls.filter((c) => c[0] === "fillText").map((c) => c[1]);
   assert.equal(n("save"), n("restore"));
   for (const ch of "Abcd") assert.ok(texts.some((t) => t.toLowerCase() === ch.toLowerCase()), `${ch} painted`);
   assert.ok(texts.includes("مرحبا") && !texts.includes("م"), "Arabic set whole");
-  calls.length = 0;
-  ransom(rec, (fn) => { fn({ t: "SPIDER مرحبا بك ok", hi: false, w: 900 }, 0); fn({ t: "你看スーパー", hi: true, w: 360 }, 900); }, { fs: 100, d: 0, strokeAmt: 0, amt: 1, seed: 1, fxSeed: "title:0", C: [252, 238, 10], fillCss: "#ffffff", hiCss: "#fcee0a", inkCss: "#07070c", shadowCss: "#fcee0a", hiShadowCss: "#ffffff" });
-  const set = calls.filter((c) => c[0] === "fillText").map((c) => c[1]);
-  assert.ok(set.includes("مرحبا بك") && ["S", "P", "O", "K", "你", "看", "ス", "パ"].every((ch) => set.some((t) => t.toUpperCase() === ch)), "only the stretch of Arabic whole: " + set.join(" "));
   const lastFill = calls.map((c) => c[0]).lastIndexOf("fill"), firstText = calls.findIndex((c) => c[0] === "fillText" && /^[abcd]$/i.test(c[1]));
   assert.ok(lastFill < 0 || lastFill < firstText, "every scrap before any letter");
+  calls.length = 0;
+  ransom(rec, (fn) => { fn({ t: "SPIDER مرحبا بك ok", hi: false, w: 900 }, 0); fn({ t: "你看スーパー", hi: true, w: 360 }, 900); }, { fs: 100, d: 0, strokeAmt: 0, amt: 1, row: 0, ransom: { id: "t", salt: "t:0" }, C: [252, 238, 10], fillCss: "#ffffff", hiCss: "#fcee0a", inkCss: "#07070c", shadowCss: "#fcee0a", hiShadowCss: "#ffffff" });
+  const set = calls.filter((c) => c[0] === "fillText").map((c) => c[1]);
+  assert.ok(set.includes("مرحبا بك") && ["S", "P", "O", "K", "你", "看", "ス", "パ"].every((ch) => set.some((t) => t.toUpperCase() === ch)), "only the stretch of Arabic whole: " + set.join(" "));
+  // dressed by hand: what was set wins, the ink then reads on the paper chosen; a hero chosen is the only one
+  const { letterKey } = await import("../ui/js/ransom.js");
+  const S1 = letterKey(1, "S", 1), P1 = letterKey(1, "P", 1), D1 = letterKey(1, "D", 1);
+  const byHand = plan(text, { edits: { [S1]: { face: { family: "C", weight: 300 }, kind: "tile", paper: "#123456", turn: -30, size: 1.4, case: "lower" }, [P1]: { hero: true } } });
+  assert.deepEqual([byHand[0].face.family, byHand[0].face.weight, byHand[0].kind, byHand[0].paper.css, byHand[0].turn, byHand[0].size, byHand[0].ch, byHand[0].edited], ["C", 300, "tile", "#123456", -30, 1.4, "s", true]);
+  assert.ok(contrast([0x12, 0x34, 0x56], [0, 2, 4].map((k) => parseInt(byHand[0].ink.slice(1 + k, 3 + k), 16))) >= 4.5, "the ink reads on the paper chosen");
+  assert.deepEqual(byHand.filter((d) => d && d.hero).map((d) => d.key), [P1]);
+  assert.equal(byHand[1].size, 1.2);
+  // locked: Reshuffle deals the others anew, not it; dealt again on its own: it alone changes
+  const keep = (salt, edits) => ransomPlan(cells(text), pools, { salt, row: 1, papers, C, edits });
+  // locked as the editor locks it (the seed of now, and what its neighbours decided): nothing changes then, nor when Reshuffle deals the rest
+  const bare = (d) => d && { ...d, locked: false, edited: false }, at = [...text].indexOf("D"), open = keep("title:7", null), o7 = open[at];
+  const lockD = { [D1]: { lock: { seed: 7, face: { family: o7.face.family, weight: o7.face.weight }, paper: o7.paper.css, ink: o7.ink, hero: o7.hero } } };
+  const was = keep("title:7", lockD), now = keep("title:8", lockD);
+  assert.deepEqual(was.map(bare), open.map(bare), "locking changes nothing");
+  assert.deepEqual(bare(now[at]), bare(was[at]), "a locked letter keeps its dress");
+  assert.ok(now[at].locked && !was.some((d, i) => d && i !== at && d.locked));
+  for (let k = 0; k < 40; k++) {   // a locked hero too, whatever falls before it
+    const line = cells("SPIDER MAN"), o = ransomPlan(line, pools, { salt: `x:${k}`, row: 0, papers, C }), h = o.findIndex((d) => d && d.hero), d = o[h];
+    const lk = { [d.key]: { lock: { seed: k, face: { family: d.face.family, weight: d.face.weight }, paper: d.paper.css, ink: d.ink, hero: true } } };
+    assert.deepEqual(bare(ransomPlan(line, pools, { salt: `x:${k + 100}`, row: 0, papers, C, edits: lk })[h]), bare(d), `locked hero ${k}`);
+  }
+  // the letter before a locked one keeps clear of it, whatever Reshuffle deals it
+  for (let k = 0; k < 60; k++) {
+    const line = cells("SPIDERMAN"), o = ransomPlan(line, pools, { salt: `y:${k}`, row: 0, papers, C }), d = o[4];
+    const lk = { [d.key]: { lock: { seed: k, face: { family: d.face.family, weight: d.face.weight }, paper: d.paper.css, ink: d.ink, hero: d.hero } } };
+    const n = ransomPlan(line, pools, { salt: `y:${k + 500}`, row: 0, papers, C, edits: lk }), b = n[3];
+    assert.notEqual(b.face.family, n[4].face.family, `${k}: the face of the locked letter after it`);
+    if (["tile", "cut", "deep"].includes(b.kind) && ["tile", "cut", "deep"].includes(n[4].kind)) assert.notEqual(b.paper.css, n[4].paper.css, `${k}: its paper`);
+  }
+  // one value set by hand changes nothing else of the letter, and of the next letter only its face and paper
+  const fixed = ["kind", "turn", "lift", "size", "corners", "ch", "edge", "tape", "tear", "hero"], pick = (d, ks) => d && Object.fromEntries(ks.map((k) => [k, d[k]]));
+  for (const [i, patch] of [[0, { face: { family: "B", weight: 700 } }], [2, { paper: "#151515" }], [4, { hero: false }], [3, { kind: "deep" }]]) {
+    const k0 = letterKey(1, text[i], 1), base = plan(text), got = plan(text, { edits: { [k0]: patch } });
+    const same = Object.keys(patch).includes("hero") ? ["corners", "ch", "edge", "tape", "tear", "lift"] : fixed.filter((f) => !Object.keys(patch).includes(f));
+    assert.deepEqual(pick(got[i], same), pick(base[i], same), `${text[i]} ${JSON.stringify(patch)}: the letter's other values`);
+    assert.deepEqual(pick(got[i + 1], fixed), pick(base[i + 1], fixed), `${text[i]} ${JSON.stringify(patch)}: the next letter`);
+    if (patch.paper && ["tile", "cut", "deep"].includes(got[i + 1].kind)) assert.notEqual(got[i + 1].paper.css, "#151515", "the next letter keeps clear of a paper set by hand");
+  }
+  assert.notDeepEqual(now.slice(0, at).map(bare), was.slice(0, at).map(bare), "the others are dealt anew");
+  const again = keep("title:7", { [D1]: { salt: 5 } });
+  assert.notDeepEqual(bare(again[at]), bare(open[at]), "the letter dealt again changes");
+  assert.deepEqual(again.slice(0, at).map(bare), open.slice(0, at).map(bare), "and the letters before it do not");
+  // the extras: none of those turned off come by chance; letters from the photo only when there is one
+  const long = "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG 天地玄黄宇宙洪荒日月盈昃辰宿列张寒来暑往秋收冬藏";
+  const lots = (more) => ["a", "b", "c", "d", "e", "f"].flatMap((salt) => ransomPlan(cells(long), pools, { salt, row: 0, papers, C, ...more }).filter(Boolean));
+  const all = lots({ photo: true });
+  for (const k of ["deep", "photo"]) assert.ok(all.some((d) => d.kind === k), k);
+  assert.ok(all.some((d) => d.edge === "torn") && all.some((d) => d.tape === 1) && all.some((d) => d.tape === 2));
+  const none = lots({ photo: true, off: ["torn", "tape", "deep", "photo"] });
+  assert.ok(none.every((d) => !["deep", "photo"].includes(d.kind) && d.edge === "cut" && d.tape === 0), "turned off");
+  assert.ok(ransomPlan(cells("AB"), pools, { edits: { [letterKey(0, "A", 1)]: { kind: "photo" } } })[0].kind !== "photo", "no photo letter by hand without a photo");
+  // painted with every kind, torn edges and tape: the canvas as it was
+  calls.length = 0;
+  const every = Object.fromEntries(["tile", "bare", "cut", "deep", "photo"].map((k, i) => [letterKey(0, "ABCDE"[i], 1), { kind: k, edge: "torn", tape: 1 + (i % 2) }]));
+  ransom(rec, (fn) => fn({ t: "ABCDE", hi: false, w: 500 }, 0), { fs: 100, d: 6, strokeAmt: 1, amt: 1, row: 0, ransom: { id: "t", salt: "t:0", edits: every, photo: null }, C: [252, 238, 10], fillCss: "#ffffff", hiCss: "#fcee0a", inkCss: "#07070c", shadowCss: "#fcee0a", hiShadowCss: "#ffffff" });
+  assert.equal(n("save"), n("restore"));
+  for (const ch of "ABCDE") assert.ok(calls.some((c) => c[0] === "fillText" && c[1].toUpperCase() === ch), `${ch} painted`);
   // Surprise me deals its letters with it; a layer keeps them, and only for it
   let seed = 3;
   const R = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
   const got = Array.from({ length: 400 }, () => letterFor("collage", "title", R)).filter((x) => x.fx === "ransom");
   assert.ok(got.length > 20 && got.every((x) => Number.isInteger(x.fxSeed) && x.fxSeed > 0 && x.fxAmt > 0), "the collage deals the ransom note, with letters of its own");
   const [a, b] = normalizeLayers([{ type: "title", fx: "ransom", fxSeed: 42 }, { type: "text", id: "t", text: "x", fx: "plain", fxSeed: 42 }]).filter((l) => l.type === "title" || l.type === "text");
-  assert.deepEqual([a.fx, a.fxSeed, b.fxSeed], ["ransom", 42, undefined]);
+  assert.deepEqual([a.fx, a.fxSeed, b.fxSeed], ["ransom", 42, 42], "kept under another effect too, for when the ransom note comes back");
   assert.equal(normalizeLayers([{ type: "title", fx: "ransom", fxSeed: 1.5 }]).find((l) => l.type === "title").fxSeed, undefined);
+  // and the letters dressed by hand, the extras turned off: only what is valid (whatever the effect)
+  const [kept, other] = normalizeLayers([
+    { type: "title", fx: "ransom", ransomOff: ["tape", "nope", "photo"], letters: { "0|S|1": { kind: "deep", paper: "#FF0000", turn: 99, lock: { seed: 3, paper: "#ABCDEF", hero: false, face: { family: '""' } }, face: { family: 'Geo"rgia', weight: 750 }, junk: 1 }, "bad key": { kind: "tile" }, "1|你|2": { size: 3, hero: true, tape: 5 }, "2|a|1": { kind: "nope" }, "3|b|1": { lock: 4 } } },
+    { type: "text", id: "t2", text: "x", fx: "plain", letters: { "0|x|1": { kind: "tile" } }, ransomOff: ["tape"] },
+  ]).filter((l) => l.type === "title" || l.type === "text");
+  assert.deepEqual(kept.letters, { "0|S|1": { face: { family: "Georgia", weight: 750 }, kind: "deep", paper: "#ff0000", turn: 45, lock: { seed: 3, paper: "#abcdef", hero: false } }, "1|你|2": { size: 1.6, hero: true } });
+  assert.deepEqual(kept.ransomOff, ["tape", "photo"]);
+  assert.deepEqual([other.letters, other.ransomOff], [{ "0|x|1": { kind: "tile" } }, ["tape"]]);
+  const many = Object.fromEntries([...Array.from({ length: 400 }, (_, i) => [`bad${i}`, { kind: "tile" }]), ["0|q|1", { kind: "cut" }]]);
+  assert.deepEqual(normalizeLayers([{ type: "title", letters: many }]).find((l) => l.type === "title").letters, { "0|q|1": { kind: "cut" } }, "the invalid do not use up the room");
 });
 
 test("text layers are headlines like the title; older layers carried over", () => {
