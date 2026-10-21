@@ -214,9 +214,10 @@ What each layer allows:
 
 **SURPRISE ME**, beside *Export* in the top bar, draws at random everything about how the current cover is drawn, the layout left as it is:
 
-- the look, its sliders and its random placement; now and then the look's scene objects a little off where the layout puts them
-- dark or light ground, the shape of the colour block, the grid
-- the title's text effect, outline and shadow
+- the look, its sliders and its random placement: each slider near the value the look was made with, and the parts a look leaves out by default (an airship, a giant silhouette, a laser) only now and then, two at most; now and then the look's scene objects a little off where the layout puts them
+- dark or light ground, as the look suits it; the shape of the colour block, the grid
+- the title's text effect, outline and shadow: mostly the look's own lettering (the dark deco's lit lamps nearly always), otherwise one that goes with it — outlines, stickers and depth for the cartoon looks, flat and worn type for the printed ones, little but their own for the glowing ones; bent only now and then, and only in the looks and ways that suit (a psychedelic wave, never a woodblock column)
+- the subtitle lettered like the title half the time, else mostly in the look's own
 - each text layer's plate, text effect, outline and shadow; whether a sticker follows the channel colour
 - the look effects of the layers you added (text, stickers, images, photos, colours): one or two, mostly the drawn look's, now and then another look's
 - the layers you added get a new place, angle and size: anywhere on the canvas, but wholly on it at every size, not a pixel off; one too big to fit is set straighter, then smaller

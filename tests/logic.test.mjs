@@ -1610,6 +1610,62 @@ test("the cover standards: type size in the feed, contrast, a picture big enough
   assert.ok(mv && mv.dy < 0 && mv.dx === 0 && 1000 + mv.dy + 60 <= 907.2);
 });
 
+test("Surprise me's recipes: every look has one, naming only letterings, bends and sliders there are; sliders tuned about their defaults", async () => {
+  const { RECIPES, FAMILIES, EXTRAS, recipeOf, tuneLook, letterFor, weighted } = await import("../ui/js/deal.js");
+  const { EFFECTS, BENDS } = await import("../ui/js/textfx.js");
+  const seeded = (a) => () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };   // mulberry32
+  assert.deepEqual(Object.keys(RECIPES).sort(), [...LOOK_IDS].sort());
+  for (const [id, r] of Object.entries(RECIPES)) {
+    assert.ok(FAMILIES[r.family], id);
+    const q = recipeOf(id), keys = LOOKS[id].params.map((d) => d.key);
+    for (const k of Object.keys(q.fx)) assert.ok(EFFECTS[k] && k !== "auto", `${id}: lettering ${k}`);
+    for (const k of Object.keys(q.bends)) assert.ok(BENDS[k] && k !== "taper", `${id}: bend ${k}`);
+    for (const [k, v] of Object.entries(q.params)) {
+      const d = LOOKS[id].params.find((x) => x.key === k);
+      assert.ok(d && !d.text, `${id}: slider ${k}`);
+      assert.ok(typeof v === "number" && v >= 0 && v <= 1 && (d.toggle || d.def <= d.min), `${id}.${k}: the chance of a part that is off by default`);
+    }
+    for (const k of ["own", "bend", "dark"]) assert.ok(q[k] >= 0 && q[k] <= 1, `${id}: ${k} is a chance`);
+    assert.ok(Object.keys(q.params).every((k) => keys.includes(k)));
+  }
+  // tuned: within each slider, on its steps, about its default (a default at an end reached too); what is
+  // off by default mostly left off, a few such parts at most
+  const R = seeded(7), coupled = ["anime.rays", "citypop.stars", "deco.fog"];
+  for (const id of LOOK_IDS) {
+    const sums = {}, on = {}, N = 300, extra = LOOKS[id].params.filter((d) => !d.text && !d.toggle && d.def <= d.min);
+    for (let i = 0; i < N; i++) {
+      const p = tuneLook(id, R);
+      assert.ok(extra.filter((d) => p[d.key] > d.min).length <= EXTRAS, `${id}: no more than ${EXTRAS} of its optional parts`);
+      for (const d of LOOKS[id].params) {
+        if (d.text) { assert.ok(!(d.key in p), `${id}.${d.key}: typed words are the caller's`); continue; }
+        const v = p[d.key];
+        assert.ok(v >= d.min && v <= d.max && Math.abs(v / (d.step || 0.05) - Math.round(v / (d.step || 0.05))) < 1e-6, `${id}.${d.key} = ${v}`);
+        sums[d.key] = (sums[d.key] || 0) + v; on[d.key] = (on[d.key] || 0) + (v > d.min ? 1 : 0);
+      }
+    }
+    for (const d of LOOKS[id].params) {
+      if (d.text || d.toggle) continue;
+      const span = d.max - d.min, mean = sums[d.key] / N;
+      if (d.def > d.min && !coupled.includes(`${id}.${d.key}`)) assert.ok(Math.abs(mean - d.def) < span * 0.08, `${id}.${d.key}: ${mean.toFixed(2)} about ${d.def}`);
+      if (d.def <= d.min) assert.ok(on[d.key] / N < 0.6, `${id}.${d.key}: on in ${on[d.key]} of ${N}`);
+    }
+  }
+  // letterings: the look's own most of the time where it matters; nothing that cannot be drawn; the subtitle never bent
+  const share = (id, role, test, n = 2000) => { let k = 0; for (let i = 0; i < n; i++) if (test(letterFor(id, role, R, (f) => f !== "extrude"))) k++; return k / n; };
+  assert.ok(share("deco", "title", (o) => !o.fx) > 0.9 && share("deco", "title", (o) => o.bend) === 0, "the dark deco keeps its lit lamps, unbent");
+  assert.equal(share("songke", "title", (o) => o.bend), 0);
+  assert.ok(share("cel", "title", (o) => o.fx && o.fx !== "cel") > 0.45 && share("cel", "title", (o) => o.fx === "cel") === 0, "cel lends its title to the other letterings more (its own outline and shadow is not one)");
+  assert.equal(share("editorial", "title", (o) => o.fx === "editorial") + share("bluenote", "title", (o) => o.fx === "bluenote"), 0);
+  assert.equal(share("court", "title", (o) => o.fx === "extrude"), 0, "an outline lettering left out where outlines cannot be read");
+  assert.equal(share("rave", "subtitle", (o) => o.bend), 0);
+  assert.ok(share("riso", "title", (o) => o.fx && !["worn", "dots", "rows"].includes(o.fx)) === 0, "the risograph's own choice of letterings");
+  const t = { fx: "worn", fxAmt: 1.2 };
+  const same = (() => { let k = 0; for (let i = 0; i < 2000; i++) if (letterFor("cel", "subtitle", R, () => true, t).fx === "worn") k++; return k / 2000; })();
+  assert.ok(same > 0.4 && same < 0.65, `the subtitle lettered like the title about half the time (${same})`);
+  assert.equal(weighted({ a: 0, b: 0 }, R), null);
+  assert.equal(weighted({ a: 0, b: 2 }, R), "b");
+});
+
 test("Surprise me's scoring: the standards' issues count against a cover, the room above their lines for it; one of the best few is kept", async () => {
   const { coverScore, pickHand } = await import("../ui/js/check.js");
   const sizes = [{ key: "1920x1080", w: 1920, h: 1080, vw: 1920, vh: 1080 }, { key: "1080x1440", w: 1080, h: 1440, vw: 1080, vh: 1440 }];

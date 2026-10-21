@@ -9,6 +9,7 @@ import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont } from "./store.js";
 import { platformsFor, ratioOf } from "./platforms.js";
 import { boxOf, titleContrast, coverScore, pickHand } from "./check.js";
+import { tuneLook, recipeOf, letterFor } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
 import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF } from "./layers.js";
 import {
@@ -3284,33 +3285,30 @@ function setMode(mode) {
 function dealHand() {
   const R = Math.random, pick = (a) => a[Math.floor(R() * a.length)], between = (a, b) => a + R() * (b - a), chance = (p) => R() < p;
   const round = (v, step) => Math.round(v / step) * step, st = S.profile.style;
-  // the look, tuned somewhere in the middle of each slider's range (the extremes are rarely the best of a look)
+  // the look, its sliders tuned by its recipe (deal.js): about the values it was made with, its optional parts now and then
   st.look = pick(LOOK_IDS); st.lookSeed = Math.floor(R() * 1000000);
-  const tuned = {};
-  for (const d of LOOKS[st.look].params) tuned[d.key] = d.text ? (st.lookParams[st.look] || {})[d.key] ?? d.def : d.toggle ? (chance(0.7) ? 1 : 0) : round(between(d.min + (d.max - d.min) * 0.12, d.min + (d.max - d.min) * 0.8), d.step);   // words typed in are kept
+  const tuned = tuneLook(st.look, R);
+  for (const d of LOOKS[st.look].params) if (d.text) tuned[d.key] = (st.lookParams[st.look] || {})[d.key] ?? d.def;   // words typed in are kept
   if (Object.keys(tuned).length) st.lookParams[st.look] = tuned;
   // its scene objects: where the layout puts them, or now and then a little off it
   if (S.cover.scene) delete S.cover.scene[st.look];
   if (chance(0.4)) for (const key of Object.keys(LOOKS[st.look].scene || {})) moveScene(S.cover, st.look, key, "all", frame().key, round(between(-0.06, 0.06), 0.005), round(between(-0.05, 0.05), 0.005));
-  st.theme = chance(0.7) ? "dark" : "light";
+  st.theme = chance(recipeOf(st.look).dark) ? "dark" : "light";
   // the layout is left as it is — the template, its proportions, where the layout layers stand — and
-  // every layer's own choices are dealt
-  const effects = Object.keys(EFFECTS).filter((id) => id !== "auto" && (native || EFFECTS[id].kind !== "outline"));
-  const bends = Object.keys(BENDS).filter((id) => id !== "taper");
-  const dealFx = (L, auto, bent = 0) => {
-    delete L.fx; delete L.fxAmt; delete L.bend; delete L.bendAmt; delete L.warp; delete L.reshape;
-    if (!chance(auto)) { L.fx = pick(effects); if (EFFECTS[L.fx].kind !== "passes") L.fxAmt = round(between(0.6, 1.5), 0.05); }
-    if (chance(bent)) { L.bend = pick(bends); L.bendAmt = round(between(0.5, 1.1), 0.05); }   // now and then bent, not far
-  };
+  // every layer's own choices are dealt; the letterings and bends as the look's recipe has them, the
+  // subtitle after the title (it is lettered like it half the time)
+  const can = (k) => native || EFFECTS[k].kind !== "outline";
+  const dealFx = (L, got) => { delete L.fx; delete L.fxAmt; delete L.bend; delete L.bendAmt; delete L.warp; delete L.reshape; Object.assign(L, got); };
+  const titled = letterFor(st.look, "title", R, can);
   for (const L of S.cover.layers) {
     switch (L.type) {
       case "bg": L.grid = chance(0.75); break;
       case "accent": L.shape = pick(ACCENT_SHAPES); break;
       case "brand": L.rail = chance(0.8); break;
       case "catname": L.plate = chance(0.75); break;
-      case "title": L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.45, 0.2); break;
-      case "subtitle": L.plate = chance(0.3); L.stroke = round(between(0.6, 1.2), 0.05); L.shadow = round(between(0.5, 1.2), 0.05); dealFx(L, 0.7); break;
-      case "text": L.plate = chance(0.35); L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, 0.4, 0.2); break;
+      case "title": L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, titled); break;
+      case "subtitle": L.plate = chance(0.3); L.stroke = round(between(0.6, 1.2), 0.05); L.shadow = round(between(0.5, 1.2), 0.05); dealFx(L, letterFor(st.look, "subtitle", R, can, titled)); break;
+      case "text": L.plate = chance(0.35); L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, letterFor(st.look, "text", R, can)); break;
       case "asset": if (canTint(L.ref) && L.ref.kind !== "graphic") L.tint = chance(0.5); break;
     }
     if (FX_TYPES.includes(L.type) && L.type !== "title" && L.type !== "subtitle") {   // look effects: one or two, mostly the look just drawn's, now and then another look's (the title and subtitle keep the user's)
