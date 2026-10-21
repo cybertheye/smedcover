@@ -220,7 +220,7 @@ What each layer allows:
 - the subtitle lettered like the title half the time, else mostly in the look's own
 - each text layer's plate, text effect, outline and shadow; whether a sticker follows the channel colour
 - the look effects of the layers you added (text, stickers, images, photos, colours): one or two, mostly the drawn look's, now and then another look's
-- the layers you added get a new place, angle and size: anywhere on the canvas, but wholly on it at every size, not a pixel off; one too big to fit is set straighter, then smaller
+- the layers you added get a new place, angle and size: anywhere on the canvas, but wholly on it at every size, not a pixel off, and your text layers above the bottom 14% (above the badges on a landscape cover); one too big to fit is set straighter, then smaller
 
 **Left alone**: the template, how much the colour block takes, the slant of its edge, whether the halves are swapped, and where the layout layers stand (title, colour block, channel graphic, tag, channel name, brand row, corner brackets); the words of the title, subtitle and tag, the current channel and every channel's colour, the photo layers' pictures, which layers exist (none added, none removed), custom lettering colours, locked layers, a photo or a colour filling the canvas.
 
@@ -628,7 +628,7 @@ Privacy and cost:
 
 The layouts keep to a few rules, so a cover reads in the apps' feeds as it comes, in every look and size:
 
-- **Nothing under the badges.** On a landscape cover (16:9, 4:3) Bilibili and YouTube lay the duration and the play count over the bottom corners. The title, the corner tag, the channel name and the channel graphic stay above that strip: the channel name keeps its sub-name beside it, and a colour block too shallow to hold it there grows until it does.
+- **Nothing under the badges.** On a landscape cover (16:9, 4:3) Bilibili and YouTube lay the duration and the play count over the bottom corners. The title, the corner tag, the channel name and the channel graphic stay above that strip: the channel name keeps its sub-name beside it, and a colour block too shallow to hold it there grows until it does. On every other cover the words (the title, the corner tag, the channel name) keep out of the bottom 14%, where the apps show plays and views on their cards.
 - **A title that reads.** The title's box leaves room for two lines at 14 px or more as the narrowest feed shows that ratio (Douyin's grid shows a 3:4 cover about 128 px wide, YouTube's side list a 16:9 one about 168 px). Keep a line to 6–8 characters: the longer it is, the smaller it is set. With a subtitle the box leaves room for its line too, and where there is not room for both the subtitle gets smaller first.
 - **Something to look at.** In the *Stack* template the channel graphic takes at least 12% of the cover, and the title and the channel name make room for it.
 - **Room for what is there.** A part left out under *Layout parts* gives its room to the others: without the channel name the colour block along the foot slims down (to 16% of the height, the tag on its edge still above the badges) and the title grows into the room; without the channel graphic the title keeps its whole box, and the *Split* template's panel narrows to a band down the side (13% of a portrait cover's width, 25% of a 16:9 one's), widening the title's column.

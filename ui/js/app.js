@@ -1,7 +1,7 @@
 // SmedCover UI. Two modes: Edit (cover content, assets, style + the layer stack) and Setup (brand,
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
-import { virtualSize , layoutValues, dragLayout, LAYOUT_LIMITS } from "./layout.js";
+import { virtualSize , layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot } from "./layout.js";
 import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles, showsFrame, sceneHandleAt } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
@@ -2605,7 +2605,8 @@ function borrowDialog(L, here, list) {
 }
 /**
  * Surprise me's places for the user's own layers: each anywhere on the canvas, at a new angle and size,
- * but wholly on it at every size — not a pixel off. A layer locked, filling the canvas (a background photo,
+ * but wholly on it at every size — not a pixel off — and words above the foot where the apps show their
+ * counts (wordsFoot in layout.js). A layer locked, filling the canvas (a background photo,
  * a colour block as large as the canvas) or following its photo (a cut-out) is left where it is. Each
  * layer's box at each size comes from a quick drawing; a layer too big for some size is set straighter,
  * then smaller, until it fits.
@@ -2630,8 +2631,8 @@ function dealPlaces(between, round) {
       for (const p of per) {
         const at = placeOf(L, p.w, p.h, p.key, cat().id), dx = at.cx - a.x * p.w, dy = at.cy - a.y * p.h, k = s / a.s;
         const t = ((r + (at.r - a.r)) * Math.PI) / 180, hw = p.hit.hw * k, hh = p.hit.hh * k, m = Math.min(p.w, p.h) * 0.015;
-        const ex = Math.abs(hw * Math.cos(t)) + Math.abs(hh * Math.sin(t)) + m, ey = Math.abs(hw * Math.sin(t)) + Math.abs(hh * Math.cos(t)) + m;
-        lo = [Math.max(lo[0], (ex - dx) / p.w), Math.max(lo[1], (ey - dy) / p.h)]; hi = [Math.min(hi[0], (p.w - ex - dx) / p.w), Math.min(hi[1], (p.h - ey - dy) / p.h)];
+        const ex = Math.abs(hw * Math.cos(t)) + Math.abs(hh * Math.sin(t)) + m, ey = Math.abs(hw * Math.sin(t)) + Math.abs(hh * Math.cos(t)) + m, foot = L.type === "text" ? wordsFoot(p.w, p.h) : p.h;
+        lo = [Math.max(lo[0], (ex - dx) / p.w), Math.max(lo[1], (ey - dy) / p.h)]; hi = [Math.min(hi[0], (p.w - ex - dx) / p.w), Math.min(hi[1], (foot - ey - dy) / p.h)];
       }
       if (lo[0] <= hi[0] && lo[1] <= hi[1]) { a.x = between(lo[0], hi[0]); a.y = between(lo[1], hi[1]); a.r = r; a.s = s; break; }
       if (r) r = Math.abs(r) < 1 ? 0 : r / 2; else s *= 0.9;   // too big here: straighter first, then smaller

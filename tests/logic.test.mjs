@@ -1695,7 +1695,7 @@ test("Surprise me's scoring: the standards' issues count against a cover, the ro
 });
 
 test("every look's layout meets the cover standards: nothing under the apps' badges, a graphic to look at, room for a title that reads", async () => {
-  const { meetStandards, adjustLayout, feedOf, badged, ART_HALF } = await import("../ui/js/layout.js");
+  const { meetStandards, adjustLayout, feedOf, badged, wordsFoot, ART_HALF } = await import("../ui/js/layout.js");
   const { FOOT } = await import("../ui/js/platforms.js");
   const { LIMITS } = await import("../ui/js/check.js");
   for (const id of LOOK_IDS) for (const t of TEMPLATES) for (const [rw, rh] of [[1920, 1080], [1440, 1080], [1080, 1080], [1080, 1440], [1080, 1920], [900, 383]]) for (const flip of [false, true]) {
@@ -1708,7 +1708,13 @@ test("every look's layout meets the cover standards: nothing under the apps' bad
     const cat = { top: g.cat.y - g.cat.fs * 0.95, foot: g.cat.y + (g.cat.inline ? g.cat.fs * 0.17 : 80) }, tagFoot = g.tag.y + g.tag.fs * 1.34;
     // D1: the words and the graphic above the badges (on a landscape cover), inside the canvas
     assert.ok(cat.foot <= foot && tagFoot <= foot && g.art.y + R <= foot, `${where}: name ${cat.foot}, tag ${tagFoot}, graphic ${g.art.y + R} below ${foot}`);
-    assert.ok(g.title.y + g.title.h <= foot, `${where}: the title's box reaches ${g.title.y + g.title.h}`);
+    // the words out of the bottom 14% on every cover, where the apps show plays and views (above the badges on a landscape one)
+    assert.ok(cat.foot <= wordsFoot(w, h) + 0.5 && tagFoot <= wordsFoot(w, h) + 0.5 && wordsFoot(w, h) <= h * 0.86, `${where}: name ${cat.foot}, tag ${tagFoot} below ${wordsFoot(w, h)}`);
+    assert.ok(g.title.y + g.title.h <= wordsFoot(w, h) + 0.5, `${where}: the title's box reaches ${g.title.y + g.title.h}`);
+    // a cover without a tag: the title keeps the room the tag would take, still above the words' foot (shorter
+    // only where, now reaching the graphic, it stops 40 above it as the graphic asks)
+    const bare = meetStandards(adjustLayout(base, w, h, { flip }), w, h, { flip }, { tag: false }), bareArt = bare.art.y - ART_HALF * bare.art.s - 40;
+    assert.ok(bare.title.y + bare.title.h <= wordsFoot(w, h) + 0.5 && (bare.title.h >= g.title.h || Math.abs(bare.title.y + bare.title.h - bareArt) < 0.5), `${where}: without a tag, the title's box ${bare.title.h} (${g.title.h} with one)`);
     // the tag clear of the channel name, the title clear of the tag
     if (g.tag.y < g.cat.y) assert.ok(tagFoot <= cat.top, `${where}: the tag runs into the channel name`);
     if (g.tag.y > g.title.y) assert.ok(g.title.y + g.title.h <= g.tag.y, `${where}: the title runs into the tag`);
@@ -1780,10 +1786,10 @@ test("the brand logo stands at the right end of the brand row, as large as LOGO 
   assert.equal(logoBox({ brand: { logo: "" } }, 1920), null);
   assert.equal(logoBox({ brand: { logo: "gone" } }, 1920), null);                   // its asset deleted: nothing, no error
   userAssets.delete("lg");
-  const cover = (offs, subtitle = "") => ({ subtitle, layers: ["catname", "graphic", "subtitle"].map((type) => ({ type, ...(offs.includes(type) ? { off: true } : {}) })) });
-  assert.deepEqual(partsOf(cover([], "A line"), { graphic: { kind: "graphic", id: "camera" } }), { catname: true, graphic: true, subtitle: true });
-  assert.deepEqual(partsOf(cover(["catname", "graphic", "subtitle"], "A line"), { graphic: { kind: "graphic", id: "camera" } }), { catname: false, graphic: false, subtitle: false });
-  assert.deepEqual(partsOf(cover([]), { graphic: { kind: "none" } }), { catname: true, graphic: false, subtitle: false });   // a channel without a graphic; a subtitle with no words
+  const cover = (offs, subtitle = "", tag = "") => ({ subtitle, tag, layers: ["catname", "graphic", "subtitle", "tag"].map((type) => ({ type, ...(offs.includes(type) ? { off: true } : {}) })) });
+  assert.deepEqual(partsOf(cover([], "A line", "EP.1"), { graphic: { kind: "graphic", id: "camera" } }), { catname: true, graphic: true, subtitle: true, tag: true });
+  assert.deepEqual(partsOf(cover(["catname", "graphic", "subtitle", "tag"], "A line", "EP.1"), { graphic: { kind: "graphic", id: "camera" } }), { catname: false, graphic: false, subtitle: false, tag: false });
+  assert.deepEqual(partsOf(cover([]), { graphic: { kind: "none" } }), { catname: true, graphic: false, subtitle: false, tag: false });   // a channel without a graphic; a subtitle and a tag with no words
 });
 
 test("a profile remembers its untouched covers were given the default tag, so it happens once", () => {

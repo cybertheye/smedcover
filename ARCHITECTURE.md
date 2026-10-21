@@ -279,15 +279,18 @@ look; a colour block the user resized or tilted stays where they put it (so a dr
 undone on the next frame). On a cover the apps lay badges over (16:9, 4:3: `badged()`) nothing with words
 in it, nor the graphic, reaches them (`FOOT` in `platforms.js`, 84% down): the channel name puts its
 sub-name beside it and moves up, and a colour block too shallow to hold it there grows (taking the tag,
-the graphic and the title's foot up with it). The title's box keeps room for two lines at the type size
+the graphic and the title's foot up with it). On every cover the words keep out of the bottom 14%, where the
+apps show plays and views (`wordsFoot()`: the badges' line on a badged cover, else `WORDS_FOOT` in `platforms.js`,
+86% down): the channel name, the tag and the title's box stay above it. The title's box keeps room for two lines at the type size
 the narrowest feed showing that ratio needs (`feedOf()`; 14 px in the feed), the block giving way while it
 still holds the name, and with a subtitle (`parts.subtitle`) room for its line too. On *Stack* with the block along the foot the graphic, the cover's picture until a photo comes, takes at least 12% of
 the canvas (`ART_HALF`, half the box a graphic is drawn in); on a landscape cover it first slides right, and
 what it would still cover gives way: the title's box (narrower, or on other covers shorter), the channel
 name's width. The tag stays clear of the name, the title of the tag. It is told which of the parts that
-take room the cover has (`partsOf()` in `render.js`: not left out, and a graphic only for a channel that has
-one), and gives the room of one left out to the others: with no channel name the block along the foot slims
-down as far as the tag on its edge stays above the foot and the block keeps `BAND_MIN` (16%) of the height,
+take room the cover has (`partsOf()` in `render.js`: not left out, a graphic only for a channel that has
+one, a subtitle and a tag only with words), and gives the room of one left out to the others: with no tag the
+title gives way to none; with no channel name the block along the foot slims
+down as far as the tag on its edge (if there is one) stays above the words' foot and the block keeps `BAND_MIN` (16%) of the height,
 or on *Split* (or a swapped *Stack*) the tag drops to the name's place, the title's box growing either way;
 with no graphic the title gives way to nothing, and *Split*'s panel narrows to `SIDE_BARE` of the width
 (13% on a portrait cover to 25% on a 16:9 one), the title's column taking the room. A test runs every look,
@@ -826,7 +829,7 @@ first-run welcome, an export's progress.
 *Surprise me* (`surprise()`) deals a few hands (`dealHand()`: six, fewer when the looks are slow, at least two), measures each (`seenNow()`: every size drawn small for the hits — a title's hit carries the type size it set, `fs`, which `typeSize()` prefers to its height, so a bent title or one in columns is judged by its letters; at the size shown, or the first of its ratio, the title's pixels as the cover shows them with whatever lies over it at opacity 0 (its clipping group kept), where the title drawn alone is solid, against the cover drawn with the title and every layer above it at opacity 0, which still make room for them, for `titleContrast()`), scores it with `coverScore()` in `check.js` (the issues of `checkCover()` against every platform for each size, landscape and portrait videos alike, once each at their worst — a red one costs 10, a yellow 3, A2 and E1 left out — then up to 1 each for the room above the contrast and the A1 lines; a hand in the look the cover had loses 1) and keeps the one `pickHand()` draws: among the hands whose issues cost the least, of the best three within 2 of the best, 3 : 2 : 1. Hands go back onto the objects there are (the style, each layer by id), a hand that throws is left out, and if none can be dealt the cover is put back. Each hand is dealt by the look's recipe in `deal.js`: the looks fall into three families (`FAMILIES`: pop, print, light), each with the chance of the dark ground, of the title keeping the look's own lettering (`auto`), the other letterings that suit it by weight, and the chance and ways of a bend; `RECIPES` gives each look its family and what differs, the chance each part that is off by default comes on, and `tune()` for sliders that go together (rain brings mist in the dark deco). `tuneLook()` sets each slider within 0.3 of the range about its default, likeliest near it (off the very ends unless its default is there), and lets in at most `EXTRAS` (2) of the parts off by default; `letterFor()` deals a layer's lettering (the subtitle like the title half the time, never bent; an outline lettering only where outlines can be read; not the lettering named after the look, which is its own already). Each hand deals only how the cover is drawn: the look and its sliders, dark or light
 ground, the colour block's shape, the grid, text effects, and the look effects of the user's layers
 (mostly from the drawn look, now and then from another); the template, its proportions and where the
-layout layers stand are left alone. `dealPlaces()` gives the user's layers a new place, angle and size:
+layout layers stand are left alone. `dealPlaces()` gives the user's layers a new place, angle and size, a text layer above `wordsFoot()` (layout.js: the badges' line on a landscape cover, else the bottom 14%, `WORDS_FOOT` in platforms.js, which `meetStandards()` keeps the tag and the channel name above too):
 each size is drawn small once to learn every layer's box, then for the new angle and size the range the
 centre may take at each size (less a hair for outlines and shadows) is found, and a place drawn within
 what all sizes allow; when nothing is allowed the layer is set straighter, then smaller. Layers locked,

@@ -42,8 +42,7 @@
 // The current look is module state, set by drawCover() from the profile before anything is drawn.
 
 import { fonts, spaced, spacedW, brackets, toneField } from "./cel.js";
-import { blockLayout, subtitleSize, SUB } from "./layout.js";
-import { FOOT } from "./platforms.js";
+import { blockLayout, subtitleSize, SUB, wordsFoot } from "./layout.js";
 import { drawTitleVertical, titleBlock, titleBlockVertical, parseTitle, inPiece } from "./title.js";
 
 const INK = "#07070c";
@@ -1175,8 +1174,8 @@ const numeral = (n) => (n <= 10 ? NUMERALS[n] : n < 20 ? "十" + NUMERALS[n - 10
  * and down to the colour band or the foot of the page — columns want height, where a line wants width.
  */
 function songBox(ctx, env, box) {
-  // the foot of the page, on a landscape cover above the badges the apps lay over it (see meetStandards in layout.js)
-  const G = env.G, split = G.template === "split", page = env.w / env.h > 1.25 ? Math.min(env.h - 110, (FOOT - 0.015) * env.h) : env.h - 110;
+  // the foot of the page, above the counts and badges the apps lay over it (see wordsFoot in layout.js)
+  const G = env.G, split = G.template === "split", page = Math.min(env.h - 110, wordsFoot(env.w, env.h));
   let foot = split || G.flipped ? page : Math.min(G.accent[0][1], G.accent[1][1]) - 36;
   let x = box.x, w = box.w;
   if (env.cover.tag && !G.flipped) {

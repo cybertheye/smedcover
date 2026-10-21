@@ -3,7 +3,7 @@
 // Everything is laid out in a "virtual" canvas whose short side is 1080–1200 units whatever the
 // real pixel size, so type and line weights keep their proportions from 900x383 up to 8K.
 
-import { FOOT, PLATFORM_IDS, RED_RATIOS, isRatio, wanted } from "./platforms.js";
+import { FOOT, WORDS_FOOT, PLATFORM_IDS, RED_RATIOS, isRatio, wanted } from "./platforms.js";
 import { LIMITS } from "./check.js";
 
 const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
@@ -259,6 +259,8 @@ export function badged(w, h) {
   }
   return false;
 }
+/** How far down a cover of w × h words may go, in its units: above the apps' badges on a landscape cover, else above the bottom 14% (WORDS_FOOT), where the apps' counts lie. */
+export const wordsFoot = (w, h) => (badged(w, h) ? FOOT - 0.015 : WORDS_FOOT) * h;
 /** Half the side of the box a channel graphic is drawn in at scale 1 (see drawAsset in assets.js). */
 export const ART_HALF = 300;
 /** How slim the colour block along the foot may get when there is no channel name on it, as a share of the canvas height. */
@@ -288,7 +290,8 @@ export const subtitleSize = (titleFs, w, h) => { const m = Math.min(w, h); retur
  *   C1  On "stack", the block along the foot, the graphic, the cover's picture until a photo comes, takes at least LIMITS.picture
  *       of the canvas (a little more: a graphic does not fill its box); the title's box gives way to it,
  *       narrower on a landscape cover, shorter on the others, and so does the channel name.
- * And the tag stays clear of the channel name below it, the title of the tag.
+ * And the tag stays clear of the channel name below it, the title of the tag (when there is one: `tag` in
+ * `parts`), and the title's box above the words' foot (wordsFoot).
  * `parts` says which of the parts that take room the cover has (Cover → Layout parts): `catname`, `graphic`
  * (false: left out, or a channel with no graphic). The room of one left out goes to the others: without a
  * channel name the block along the foot slims down (to BAND_MIN, the tag on its edge still above the foot),
@@ -301,14 +304,14 @@ export function meetStandards(G, w, h, adj = {}, parts = {}) {
   const g = { ...G, accent: G.accent.map((p) => [...p]), edge: { ...G.edge, line: [...G.edge.line] }, title: { ...G.title }, tag: { ...G.tag }, cat: { ...G.cat }, art: { ...G.art } };
   const badges = badged(w, h), wide = w / h > 1.25, onBlock = g.template !== "split" && !g.flipped;   // the colour block along the foot, the channel name on it
   const own = adj.size == null && adj.slant == null;   // the block where the template puts it, free to move
-  const foot = badges ? (FOOT - 0.015) * h : h * 0.97;
+  const foot = badges ? (FOOT - 0.015) * h : h * 0.97, words = wordsFoot(w, h);   // where the graphic may reach down to; and the words
   const named = parts.catname !== false, pictured = parts.graphic !== false;
   // the title's box tall enough for two lines that read in the feed (A1), and the subtitle under them
   const fsA = titleFloor(w, h), need = fsA ? 2 * 1.16 * fsA + (parts.subtitle ? subtitleSize(fsA, w, h) * (1.16 + SUB.gap) : 0) : 0;
   let grown = 0;   // how much taller the title's box got from the block slimming down (see below)
   const catTop = () => g.cat.y - g.cat.fs * 0.95, catFoot = () => g.cat.y + (g.cat.inline ? g.cat.fs * 0.17 : 80), R = () => ART_HALF * g.art.s, tagH = g.tag.fs * 1.34;
-  // the channel name above the foot, on a block that reaches up far enough to hold it
-  if (named && catFoot() > foot) { g.cat.inline = true; if (catFoot() > foot) g.cat.y = foot - g.cat.fs * 0.17; }
+  // the channel name above the words' foot, on a block that reaches up far enough to hold it
+  if (named && catFoot() > words) { g.cat.inline = true; if (catFoot() > words) g.cat.y = words - g.cat.fs * 0.17; }
   if (onBlock && own) {
     const [x0, y0, x1, y1] = g.edge.line, edgeAt = (x) => y0 + ((y1 - y0) * (x - x0)) / (x1 - x0 || 1);
     // the block moved down by d (up, d < 0), and what stands on it or above it with it
@@ -320,8 +323,8 @@ export function meetStandards(G, w, h, adj = {}, parts = {}) {
       const room = Math.min(...[g.cat.x, g.cat.x + Math.min(g.cat.maxW, w / 2)].map((x) => catTop() - g.cat.fs * 0.3 - edgeAt(x)));
       const down = Math.min(need - g.title.h, room);
       if (down > 0) { shift(down); g.title.h += down; }
-    } else {   // nothing on the block but the tag at its edge: it slims down, the title's box taking the room
-      const down = Math.min(foot - (g.tag.y + tagH), h * (1 - BAND_MIN) - Math.max(y0, y1));
+    } else {   // nothing on the block but the tag at its edge (if any): it slims down, the title's box taking the room
+      const down = Math.min(parts.tag === false ? Infinity : words - (g.tag.y + tagH), h * (1 - BAND_MIN) - Math.max(y0, y1));
       if (down > 0) { shift(down); g.title.h += down; grown = down; }
     }
   }
@@ -331,13 +334,14 @@ export function meetStandards(G, w, h, adj = {}, parts = {}) {
   }
   // without the channel name at the foot of the column under the tag, the tag takes its place, the title's box the room
   if (!named && !onBlock && g.tag.y < g.cat.y) {
-    const drop = Math.min(foot, catFoot()) - g.tag.fs * 0.12 - (g.tag.y + tagH), clear = g.title.y + g.title.h <= g.tag.y;   // a little off it: some looks' tags reach below their box
+    const drop = Math.min(words, catFoot()) - g.tag.fs * 0.12 - (g.tag.y + tagH), clear = g.title.y + g.title.h <= g.tag.y;   // a little off it: some looks' tags reach below their box
     if (drop > 0) { g.tag.y += drop; if (clear) g.title.h += drop; }
   }
-  // the tag above the foot and clear of the channel name (they share the left margin), the title clear of the tag
-  if (g.tag.y + tagH > foot) g.tag.y = foot - tagH;
+  // the tag above the words' foot and clear of the channel name (they share the left margin), the title clear of the tag
+  if (g.tag.y + tagH > words) g.tag.y = words - tagH;
   if (named && g.tag.y < g.cat.y && g.tag.y + tagH > catTop() - 16) g.tag.y = catTop() - 16 - tagH;
-  if (g.tag.y > g.title.y && g.title.y + g.title.h > g.tag.y - 30) g.title.h = Math.max(120, g.tag.y - 30 - g.title.y);
+  if (parts.tag !== false && g.tag.y > g.title.y && g.title.y + g.title.h > g.tag.y - 30) g.title.h = Math.max(120, g.tag.y - 30 - g.title.y);
+  if (g.title.y + g.title.h > words) g.title.h = Math.max(120, words - g.title.y);   // and the title's words above their foot, tag or none
   if (!pictured) return g;
   // the graphic: big enough to look at, above the foot, inside the canvas
   if (g.template === "stack" && onBlock) g.art.s = Math.max(g.art.s, Math.sqrt((LIMITS.picture + 0.015) * w * h) / (2 * ART_HALF));

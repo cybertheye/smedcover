@@ -19,6 +19,8 @@ export const RATIOS = {
 };
 /** Where the badges the apps lay over a landscape cover's foot begin, as a share of its height: the words and the graphic stay above it (see meetStandards in layout.js). */
 export const FOOT = 0.84;
+/** On any cover, how far down words may go, as a share of its height: the apps show plays and views over the bottom 14% of their cards (see wordsFoot in layout.js). */
+export const WORDS_FOOT = 0.86;
 // what the apps lay over a cover, estimated: the bottom corners of a video card
 const BILI_ZONES = [{ x0: 0.78, y0: FOOT, x1: 1, y1: 1, what: "duration" }, { x0: 0, y0: FOOT, x1: 0.5, y1: 1, what: "plays" }];
 const YT_ZONES = [{ x0: 0.82, y0: 0.85, x1: 1, y1: 1, what: "duration" }];

@@ -1034,10 +1034,10 @@ export function drawCover(cv, o) {
   if (swap) Object.assign(fonts, swap);
   try { paintCover(cv, o); } finally { if (keep) Object.assign(fonts, keep); }
 }
-/** Which of the layout's parts that take room a cover has (see meetStandards): those not left out of it, a graphic only when its channel has one, a subtitle only with words. */
+/** Which of the layout's parts that take room a cover has (see meetStandards): those not left out of it, a graphic only when its channel has one, a subtitle and a tag only with words. */
 export const partsOf = (cover, cat) => {
   const on = (type) => cover.layers.some((l) => l.type === type && !l.off);
-  return { catname: on("catname"), graphic: on("graphic") && !!cat.graphic && cat.graphic.kind !== "none", subtitle: on("subtitle") && parseTitle(cover.subtitle).length > 0 };
+  return { catname: on("catname"), graphic: on("graphic") && !!cat.graphic && cat.graphic.kind !== "none", subtitle: on("subtitle") && parseTitle(cover.subtitle).length > 0, tag: on("tag") && !!cover.tag };
 };
 /** The graphic a look's figure is drawn from in the channel graphic's place, as env.graphic is given: null when there is none, or it has gone from the library. */
 function figureArt(style, look, C) {
