@@ -223,6 +223,8 @@ What each layer allows:
 
 **Left alone**: the template, how much the colour block takes, the slant of its edge, whether the halves are swapped, and where the layout layers stand (title, colour block, channel graphic, tag, channel name, brand row, corner brackets); the words of the title, subtitle and tag, the current channel and every channel's colour, the photo layers' pictures, which layers exist (none added, none removed), custom lettering colours, locked layers, a photo or a colour filling the canvas.
 
+It deals six hands at a time (fewer, at least two, when the looks are slow to draw) and keeps one by the cover standards: each hand is drawn small at every size and scored on the title's type size in the platforms' feeds (A1), the title's contrast with what is behind it (B1, at the first size with the ratio of the one shown), a picture big enough (C1) and nothing that matters under the apps' badges (D1). A hand with a problem is never kept while another has none; of the best three, the better are likelier, so it is not always the same one. A hand in the look the cover already had is marked down a little, so the look usually changes. The button reads *Choosing…* meanwhile, usually about a second (longer with many sizes or slow looks).
+
 Each deal is one step of undo, however fast you click. Deal again if you do not like it, or undo to the hand before.
 
 ### Title and text layers
@@ -288,7 +290,7 @@ A look's material effects can be put on a layer you added — text, asset, photo
 
 *Clear* after a look's name sets that look's effects back to 0 and keeps the group; a borrowed look also has *Remove*, which takes the group away. At the foot, *Clear all look effects* sets every effect back to 0 and keeps the borrowed looks; *Remove all look effects* removes every borrowed look and sets this look's effects back to 0. With nothing to clear, the buttons are greyed out.
 
-The effects stay with the layer: under another look they still apply, and move to *Borrow from other looks*. Each layer's random detail is its own, so every size, the preview and the export agree. *Surprise me* deals these layers new effects, but only ever from the look it drew, so a hand stays of one look.
+The effects stay with the layer: under another look they still apply, and move to *Borrow from other looks*. Each layer's random detail is its own, so every size, the preview and the export agree. *Surprise me* deals these layers new effects, mostly from the look it drew, now and then from another.
 
 All 33 looks have effects. Those marked [photo] are offered on photo layers only; the rest suit text, asset, photo and solid layers alike. Look effects all work on a layer once it is painted, so on a text layer they go with any text effect. An effect that repaints the shape, such as a silhouette or chrome, follows the subject on a photo whose background was removed, and takes a plain photo as one block.
 
@@ -750,7 +752,7 @@ Goal: text, asset, photo and solid layers can each take a look's material effect
 
 - Only the user's own layers; every effect off on a new layer; one set of effects per layer, not per size.
 - A layer's effects come in two groups: *This look* lists the current look's; *Other looks* lets you borrow from another look, kept apart, so a borrowed effect shows as borrowed.
-- *Surprise me* picks only from the current look, so the result stays of one look.
+- *Surprise me* picks mostly from the look it drew, now and then from another.
 - The lettering effects are brought home: Sliced, Overprint, Double keyline and Sunlit block become their looks' true post effects (Three slices, Second-ink overprint, Two-tone outline, Sunlit block), for any layer and with any text effect; the net art's Selected box likewise. The Underlined highlight has to know the highlighted words, so is lettering, and stays in the text effect menu. A text layer already using one of the four is given the matching post effect; a title's is drawn as *Automatic*, its setting kept.
 - Pilots: riso, liquid chrome and glitch net art; then every look.
 

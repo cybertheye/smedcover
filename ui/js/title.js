@@ -291,6 +291,7 @@ export function drawTitle(ctx, title, box, adj, st) {
   ctx.restore();
   const grown = (b) => (pad ? { x: b.x - pad, y: b.y - pad * 0.3, w: b.w + pad * 2, h: b.h + pad * 0.6 } : b), out = grown(reached);
   if (inked !== reached) out.ink = grown(inked);
+  out.fs = fs;   // the type size set (the cover standards read it off the hit: see placed in render.js)
   return out;
 }
 export { INK };
@@ -353,5 +354,5 @@ export function drawTitleVertical(ctx, title, box, st) {
     }
   });
   ctx.restore();
-  return { x: box.x, y: box.y, w: blockW, h: tallest * k };
+  return { x: box.x, y: box.y, w: blockW, h: tallest * k, fs };
 }

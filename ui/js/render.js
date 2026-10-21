@@ -227,7 +227,8 @@ export function paintAccent(ctx, shape, G, C) {
 }
 
 // ---------- layer painters. Each returns the box it covers for hit-testing:
-// {cx, cy, hw, hh, r} = centre, half-extents and rotation in virtual units (or null).
+// {cx, cy, hw, hh, r} = centre, half-extents and rotation in virtual units (or null); a lettering's also
+// `fs`, the type size it set, as large as it shows.
 
 let probe = null;
 /**
@@ -246,7 +247,7 @@ function placed(ctx, tr, fn, known) {
   ctx.restore();
   // what is drawn may reach past the box it is placed by (`ink`: a bend reshaped by hand): the hit is that, carried along
   const ink = box.ink || box, sx = tr.s * tr.kx, sy = tr.s * tr.ky, a = tr.r * RAD, ix = (ink.x + ink.w / 2 - px) * sx, iy = (ink.y + ink.h / 2 - py) * sy;
-  return { cx: px + tr.dx + ix * Math.cos(a) - iy * Math.sin(a), cy: py + tr.dy + ix * Math.sin(a) + iy * Math.cos(a), hw: (ink.w / 2) * sx, hh: (ink.h / 2) * sy, r: tr.r };
+  return { cx: px + tr.dx + ix * Math.cos(a) - iy * Math.sin(a), cy: py + tr.dy + ix * Math.sin(a) + iy * Math.cos(a), hw: (ink.w / 2) * sx, hh: (ink.h / 2) * sy, r: tr.r, ...(box.fs ? { fs: box.fs * sy } : {}) };   // fs: the type size a lettering set, as large as it shows
 }
 /** The box a layer's hit (its turned rectangle, in units) covers, in canvas pixels, kept within the canvas: where its look effects work. */
 function pixelBox(hit, kx, ky, W, H) {

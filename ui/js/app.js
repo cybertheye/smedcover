@@ -7,7 +7,8 @@ import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont } from "./store.js";
-import { platformsFor } from "./platforms.js";
+import { platformsFor, ratioOf } from "./platforms.js";
+import { boxOf, titleContrast, coverScore, pickHand } from "./check.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
 import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF } from "./layers.js";
 import {
@@ -3275,16 +3276,14 @@ function setMode(mode) {
   syncTop(); syncTabs(); renderPanel(); renderSide(); syncToolbar(); queueDraw();
 }
 /**
- * SURPRISE ME: deals a new hand of everything about how the cover looks and is laid out — the look
- * and its settings, the template and its proportions, the colour block's shape, text effects, the
- * small switches on each layer, and where added items sit. What the cover *says* is left alone:
- * the title and tag, the channel and its colour, the photo, and which layers exist.
- * One step of undo brings the previous hand back.
+ * One hand of Surprise me, dealt onto the cover and the profile's style as they are: the look and its
+ * settings, the colour block's shape, text effects and bends, the small switches on each layer, look
+ * effects, and where added items sit. What the cover *says* is left alone — the title and tag, the
+ * channel and its colour, the photo, which layers exist — and so is the layout.
  */
-function surprise() {
+function dealHand() {
   const R = Math.random, pick = (a) => a[Math.floor(R() * a.length)], between = (a, b) => a + R() * (b - a), chance = (p) => R() < p;
   const round = (v, step) => Math.round(v / step) * step, st = S.profile.style;
-  commitHistory();   // whatever was being edited becomes a step of its own, so each hand is exactly one undo
   // the look, tuned somewhere in the middle of each slider's range (the extremes are rarely the best of a look)
   st.look = pick(LOOK_IDS); st.lookSeed = Math.floor(R() * 1000000);
   const tuned = {};
@@ -3330,9 +3329,99 @@ function surprise() {
     }
   }
   dealPlaces(between, round);
-  touch({ profile: true, cover: true, panel: true, side: true, strip: true });
-  commitHistory();
-  toast(t("msg.surprise", LOOKS[st.look].name[getLang()], t("tpl." + st.template).split(/[：:]/)[0]));
+}
+/** How many hands Surprise me deals to choose from, and how long it may take over them (at least two are dealt). */
+const SURPRISE = { hands: 6, ms: 1500, busy: false, done: 0 };   // done: when the last run ended
+/**
+ * SURPRISE ME: deals a few hands (dealHand), measures each at every size (seenNow), scores it by the cover
+ * standards — the title's type size in the feeds, its contrast, a picture big enough, nothing under the
+ * apps' badges — and keeps one of the best (coverScore, pickHand in check.js); a hand in the look the cover
+ * had is marked down a little. One step of undo brings the previous cover back.
+ */
+async function surprise(e) {
+  if (SURPRISE.busy || (e && e.timeStamp < SURPRISE.done)) return;   // a click from while the last one held the window up
+  SURPRISE.busy = true;
+  const copy = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+  const take = () => ({ style: copy(S.profile.style), layers: copy(S.cover.layers), scene: copy(S.cover.scene) });
+  // a hand put back onto the objects there are — the style, each layer by its id — so whatever holds one
+  // (a panel, a cut-out under way) still holds the cover's
+  const into = (o, v) => { for (const k of Object.keys(o)) if (!(k in v)) delete o[k]; Object.assign(o, copy(v)); };
+  const put = (h) => {
+    into(S.profile.style, h.style);
+    const had = new Map(S.cover.layers.map((l) => [l.id, l]));
+    S.cover.layers = h.layers.map((v) => { const L = had.get(v.id); if (!L) return copy(v); into(L, v); return L; });
+    if (h.scene) S.cover.scene = copy(h.scene); else delete S.cover.scene;
+  };
+  let before = null;
+  try {
+    syncTop();
+    await nextPaint();   // the button shows it is at work before the window is held up
+    commitHistory();   // whatever was being edited becomes a step of its own, so each hand is exactly one undo
+    before = take();
+    const was = before.style.look, hands = [];
+    const sizes = S.profile.sizes.filter((z) => z.on !== false), t0 = performance.now();
+    // the title's contrast is measured at one size: the one shown, or the first of its ratio, which the standards read (else the first with a ratio)
+    const ratioed = (z) => sizes.find((y) => ratioOf(y.w, y.h) && ratioOf(y.w, y.h) === ratioOf(z.w, z.h)), shown = selSize();
+    const at = ratioed(shown) || sizes.find((z) => ratioOf(z.w, z.h)) || shown, here = sizeKey(at);
+    for (let i = 0; i < SURPRISE.hands && (i < 2 || performance.now() - t0 < SURPRISE.ms); i++) {
+      if (i) put(before);
+      try {
+        dealHand();
+        const { seen, measured } = seenNow(sizes, here), { score, cost, issues } = coverScore({ title: S.cover.title, sizes: measured, seen });
+        hands.push({ ...take(), score: score - (S.profile.style.look === was ? 1 : 0), cost, issues });
+      } catch (e) { console.error(e); }   // a hand that cannot be drawn or measured is left out
+    }
+    const k = pickHand(hands, Math.random());
+    if (k < 0) throw new Error("no hand could be dealt");
+    const kept = hands[k];
+    put(kept);
+    SURPRISE.last = { kept: k, ms: Math.round(performance.now() - t0), hands: hands.map((h) => ({ look: h.style.look, score: h.score, cost: h.cost, issues: h.issues.map((i) => `${i.rule}:${i.level}:${i.size}:${i.layer}`) })) };   // for the self-test
+    touch({ profile: true, cover: true, panel: true, side: true, strip: true });
+    commitHistory();
+    toast(t("msg.surprise", LOOKS[S.profile.style.look].name[getLang()], t("tpl." + S.profile.style.template).split(/[：:]/)[0]));
+  } catch (err) {
+    if (before) { put(before); S.hist[S.histIdx] = snapshot(); touch({ panel: true, side: true }); }   // the cover as it was, and no step of undo for it
+    fail(err);
+  } finally {
+    await nextPaint();   // still at work until the hand kept is on the screen: clicks made before then are let go (see `done`)
+    SURPRISE.busy = false; SURPRISE.done = performance.now(); syncTop();
+  }
+}
+/**
+ * The cover as it is now, measured for the standards (checkCover's `seen`), drawn small at each of `sizes`:
+ * the title (its hit carries the type size set), the pictures, and what must stay clear of the apps'
+ * badges (the title, the subtitle, the user's words, cut-outs). At the size keyed `here`, the title against
+ * what is under it too: its pixels as the cover shows them with what lies over it see-through (where the
+ * title alone, drawn once more, is solid), against the cover drawn with the title and every layer above it
+ * see-through — still there for whatever makes room for them, at opacity 0. Returns { seen, measured }
+ * (measured: the sizes as checkCover takes them).
+ */
+function seenNow(sizes, here) {
+  const seen = {}, measured = [], byId = new Map(S.cover.layers.map((l) => [l.id, l])), at = S.cover.layers.findIndex((l) => l.type === "title");
+  const main = mainPhoto(), cut = !!main && S.cover.layers.some((l) => l.of === main.id && l.cut && l.visible);
+  const draw = (size, cover, extra = {}) => { const cv = el("canvas"); drawCover(cv, { profile: S.profile, catIndex: catIndex(), size, pixelW: 360, cover, photos: S.photos, ...extra }); return cv; };
+  for (const size of sizes) {
+    const cv = draw(size, S.cover), [vw, vh] = cv._virtual, k = cv.width / vw, key = sizeKey(size), hits = cv._hits || [], of = (h) => byId.get(h.id);
+    measured.push({ key, w: size.w, h: size.h, vw, vh, on: true });
+    const t0 = hits.find((h) => h.type === "title"), title = t0 ? { id: t0.id, hit: t0 } : null;
+    let contrast = null;
+    if (t0 && key === here && at >= 0) {
+      const q = boxOf(t0), x0 = Math.max(0, Math.floor(q.x0 * k)), y0 = Math.max(0, Math.floor(q.y0 * k)), x1 = Math.min(cv.width, Math.ceil(q.x1 * k)), y1 = Math.min(cv.height, Math.ceil(q.y1 * k));
+      if (x1 - x0 > 2 && y1 - y0 > 2) {
+        const px = (c) => c.getContext("2d").getImageData(x0, y0, x1 - x0, y1 - y0).data;
+        const over = clipEnd(S.cover.layers, at), seeThrough = (from) => ({ ...S.cover, layers: S.cover.layers.map((l, i) => (i >= from ? { ...l, o: 0 } : l)) });
+        const text = px(draw(size, seeThrough(over + 1))), alone = px(draw(size, S.cover, { only: at }));
+        for (let i = 3; i < text.length; i += 4) text[i] = alone[i];   // the title's colours as the cover shows them (a picture clipped into it, the look's finish), where it is solid — not what lies over it
+        contrast = titleContrast(text, px(draw(size, seeThrough(at))));
+      }
+    }
+    seen[key] = {
+      title, contrast, unknown: !!main && !cut,
+      pictures: hits.filter((h) => ["graphic", "asset", "photo"].includes(h.type) && !(of(h) && fillsCanvas(of(h)))).map((h) => ({ id: h.id, hit: h })),
+      parts: hits.filter((h) => ["title", "subtitle", "text"].includes(h.type) || (h.type === "photo" && of(h) && of(h).cut)).map((h) => ({ id: h.id, hit: h })),
+    };
+  }
+  return { seen, measured };
 }
 /**
  * Asks, then empties this channel's cover: every layer the user added goes, the layout layers return to
@@ -3372,7 +3461,7 @@ function syncTop() {
     el("div", { class: "grp" }, b("top.undo", () => timeTravel(-1), { disabled: S.histIdx <= 0 }), b("top.redo", () => timeTravel(1), { disabled: S.histIdx >= S.hist.length - 1 }),
       b("top.clear", clearDialog, { title: t("top.clearTip") })),
     el("div", { class: "spacer" }),
-    el("button", { class: "btn solid cta", style: "margin-right:10px", title: t("top.surpriseHint"), onclick: surprise }, t("top.surprise")),
+    el("button", { class: "btn solid cta", style: "margin-right:10px", title: t("top.surpriseHint"), disabled: SURPRISE.busy, onclick: surprise }, t(SURPRISE.busy ? "top.surpriseBusy" : "top.surprise")),
     el("button", { class: "btn solid cta", onclick: exportDialog }, t("top.export")),
     el("select", { title: t("lang"), onchange: (e) => { S.settings.lang = e.target.value; setLang(e.target.value); persistSettings(); setMode(S.mode); buildStrip(); } },
       [["zh", "中文"], ["en", "English"]].map(([v, l]) => el("option", { value: v, selected: v === getLang() }, l))));
@@ -3883,6 +3972,18 @@ async function selfTest(dir) {
         fills.forEach((l, i) => (l.visible = shown[i])); st.look = keepLook;
       }
     }
+    // Surprise me: hands dealt, measured at every size and one kept, the cover put back after
+    report.surprise = [];
+    {
+      const keep = JSON.stringify({ style: S.profile.style, layers: S.cover.layers, scene: S.cover.scene });
+      for (let i = 0; i < 4; i++) {
+        await step(`surprise ${i + 1}`); SURPRISE.last = null; await surprise(); await new Promise((r) => setTimeout(r, 0));
+        const L = SURPRISE.last;
+        report.surprise.push(L ? { ms: L.ms, kept: L.hands[L.kept], scores: L.hands.map((h) => h.score) } : { error: "no hand kept" });
+      }
+      const k = JSON.parse(keep); S.profile.style = k.style; S.cover.layers = k.layers; if (k.scene) S.cover.scene = k.scene; else delete S.cover.scene;
+      touch({ profile: true, cover: true, panel: true, side: true });
+    }
     // clipping masks: a solid clipped to the title (its letters in the solid's colour), and a print of the
     // last picture taken in clipped to a text layer (the picture inside the letters)
     {
@@ -4094,5 +4195,5 @@ async function dragTest() {
   await invoke("selftest_done", { report: JSON.stringify(report, null, 2) }).catch(() => null);
 }
 // test hook: lets automated checks drive the app without the UI
-window.__smedcover = { S, drawCover, renderFull, nameFor, touch, addAsset, addLayer, newLayer, selectLayer, selectSize, setMode, layer };
+window.__smedcover = { S, drawCover, renderFull, nameFor, touch, addAsset, addLayer, newLayer, selectLayer, selectSize, setMode, layer, surprise, SURPRISE, seenNow };
 start().catch((e) => { console.error(e); fail(e); });

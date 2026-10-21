@@ -1610,6 +1610,34 @@ test("the cover standards: type size in the feed, contrast, a picture big enough
   assert.ok(mv && mv.dy < 0 && mv.dx === 0 && 1000 + mv.dy + 60 <= 907.2);
 });
 
+test("Surprise me's scoring: the standards' issues count against a cover, the room above their lines for it; one of the best few is kept", async () => {
+  const { coverScore, pickHand } = await import("../ui/js/check.js");
+  const sizes = [{ key: "1920x1080", w: 1920, h: 1080, vw: 1920, vh: 1080 }, { key: "1080x1440", w: 1080, h: 1440, vw: 1080, vh: 1440 }];
+  const big = { cx: 700, cy: 350, hw: 600, hh: 210, r: 0 }, part = (hit) => [{ id: "title", hit }];
+  const seen = (o = {}, p = {}) => ({ "1920x1080": { title: { id: "title", hit: big }, contrast: 6, pictures: [], unknown: true, parts: part(big), ...o }, "1080x1440": { title: { id: "title", hit: { cx: 540, cy: 500, hw: 480, hh: 260, r: 0 } }, contrast: null, pictures: [], unknown: true, parts: [], ...p } });
+  const score = (o, p, title = "封面标题\n*第二行*") => coverScore({ title, sizes, seen: seen(o, p) });
+  const fine = score();
+  assert.deepEqual(fine.issues, [], "no sizes asked for, and the words, are not the hand's doing (E1, A2)");
+  assert.ok(score({}, {}, "这是一个非常非常长的封面标题哦").issues.length === 0);
+  assert.ok(score({ contrast: 2.5 }).score <= fine.score - 3 && score({ contrast: 1.5 }).score <= fine.score - 10, "B1 yellow costs 3, red 10");
+  assert.ok(score({ contrast: 4 }).score < fine.score && score({ contrast: 9 }).score === score({ contrast: 7 }).score, "more contrast is better, up to 7:1");
+  const corner = { cx: 1750, cy: 1000, hw: 150, hh: 60, r: 0 };
+  assert.ok(score({ parts: [...part(big), { id: "t1", hit: corner }] }).issues.some((i) => i.rule === "D1" && i.level === "red"), "words under B站's duration");
+  assert.ok(score({}, { title: { id: "title", hit: { cx: 540, cy: 500, hw: 300, hh: 90, r: 0 } } }).issues.some((i) => i.rule === "A1"), "a portrait title too small for 抖音's feed");
+  const small = score({ title: { id: "title", hit: { cx: 600, cy: 300, hw: 500, hh: 150, r: 0 } } });   // 16:9 is in the feeds of landscape and portrait videos alike: one A1, not two
+  assert.equal(small.issues.filter((i) => i.rule === "A1" && i.size === "1920x1080").length, 1);
+  // keeping one: never one with a problem while one without is there, the best likeliest, not always it
+  const hands = (list) => list.map(([score, cost]) => ({ score, cost }));
+  const picks = Array.from({ length: 60 }, (_, i) => pickHand(hands([[0.5, 0], [-3, 3], [1.2, 0], [0.9, 0], [-10, 10], [1.1, 0], [-1.2, 3]]), i / 60));
+  assert.ok(picks.every((i) => [2, 5, 3].includes(i)) && picks.filter((i) => i === 2).length > picks.filter((i) => i === 5).length && new Set(picks).size === 3);
+  const flawed = Array.from({ length: 30 }, (_, i) => pickHand(hands([[0.27, 0], [-1, 3]]), i / 30));
+  assert.ok(flawed.every((i) => i === 0), "a yellow issue loses to a clean hand however much room the rest leaves");
+  assert.equal(pickHand(hands([[-10, 10], [-13, 13]]), 0.99), 0, "when every hand falls short, the least of them");
+  assert.equal(pickHand(hands([[NaN, 0], [0.4, 0]]), 0.1), 1, "a hand that could not be scored is not kept");
+  assert.equal(pickHand([], 0.5), -1);
+  assert.equal(score({ contrast: NaN }).score, score({ contrast: null }).score, "a contrast that could not be measured counts for nothing");
+});
+
 test("every look's layout meets the cover standards: nothing under the apps' badges, a graphic to look at, room for a title that reads", async () => {
   const { meetStandards, adjustLayout, feedOf, badged, ART_HALF } = await import("../ui/js/layout.js");
   const { FOOT } = await import("../ui/js/platforms.js");
