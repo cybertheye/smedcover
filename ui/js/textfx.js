@@ -6,7 +6,8 @@
 //             shadows, echoes. The looks' own letterings are of this kind; "auto" takes the current look's.
 //   mask      the letters are first painted alone on a spare canvas, which is then worked on —
 //             filled with a pattern, worn away, shaded inside, cut into rows — and laid down.
-//   outline   the letters' outlines are fetched as points (see outlines.js) and given real depth.
+//   outline   the letters' outlines are fetched as points (see outlines.js) and given real depth, or
+//             their edges reshaped — spikes, a torn edge, scissor cuts, drips, puffed up, eaten away (SHAPED).
 //   letters   each letter drawn on its own, in a face and on a scrap of paper of its own (ransom.js).
 // A bend (BENDS: arched, on a circle, wave…) is apart from the lettering, and goes with any of them: the
 // line is painted as it would be, on a canvas of its own, and that picture is bent (bentLine, meshWarp).
@@ -24,6 +25,7 @@
 //   hiPlate     the layer has plates (or a band, a block) under its highlighted words: a lettering that boxes them itself does not
 //   lineW       width of the line                 unit       canvas pixels per unit
 //   seed        a number that differs from line to line, for effects that scatter things
+//   fxSeed      the layer's own seed (Reshuffle deals another), for the reshaped edges (see SHAPED)
 //   ransom      the layer's settings for the ransom note (ransom.js; see ransomOf in render.js)
 //   row         which line of its block this is
 //   frame       where this line sits in its block, for effects that shape the whole block (the
@@ -33,10 +35,11 @@
 //               [[dx, dy] × 4] (top left, top right, bottom right, bottom left), in block widths and heights
 import { LOOKS, look, lookValues, lookState, lookParams, isFast, INK } from "./style.js";
 import { outline } from "./outlines.js";
-import { ransom, ransomEpoch } from "./ransom.js";
+import { ransom, ransomEpoch, hash, seeded } from "./ransom.js";
 
 /**
- * id -> { name: {zh, en}, kind, menu? }: `kind` how it is painted, `menu` the group it is listed under when
+ * id -> { name: {zh, en}, kind, menu?, seeded? }: `kind` how it is painted, `seeded` whether its letters are
+ * drawn by the layer's seed (fxSeed), which Reshuffle deals again, `menu` the group it is listed under when
  * not its kind's (Extruded is drawn from outlines but looks like the layered letterings, a shadow grown
  * into depth, so it is listed with them). The order is the order of the menu: the typesetting effects, and the
  * editorial look's Underlined highlight, which marks the highlighted words and so has to be lettering.
@@ -56,7 +59,13 @@ export const EFFECTS = {
   worn: { name: { zh: "磨损", en: "Worn" }, kind: "mask" },
   rows: { name: { zh: "逐行错位", en: "Row shift" }, kind: "mask" },
   extrude: { name: { zh: "立体挤出", en: "Extruded" }, kind: "outline", menu: "passes" },
-  ransom: { name: { zh: "剪报字", en: "Ransom note" }, kind: "letters" },
+  spiky: { name: { zh: "刺边", en: "Spiky" }, kind: "outline", seeded: true },
+  torn: { name: { zh: "撕边", en: "Torn edge" }, kind: "outline", seeded: true },
+  cut: { name: { zh: "手剪", en: "Scissor-cut" }, kind: "outline", seeded: true },
+  melt: { name: { zh: "融化", en: "Melting" }, kind: "outline", seeded: true },
+  puffy: { name: { zh: "膨胀", en: "Puffed up" }, kind: "outline" },
+  eroded: { name: { zh: "侵蚀", en: "Eaten away" }, kind: "outline", seeded: true },
+  ransom: { name: { zh: "剪报字", en: "Ransom note" }, kind: "letters", seeded: true },
 };
 /**
  * id -> { name }: the bends a headline may be given (its `bend`, how far: `bendAmt`), whatever its
@@ -186,15 +195,20 @@ function masked(ctx, pass, o, id) {
 }
 
 // ---------- outline effects
-/** The outline of a run, placed and sized: closed polylines of [x, y] in the line's own units. Null while it is on its way, false if not to be had. */
-function contours(ctx, a, at, o) {
+/**
+ * The outline of a run, placed and sized, letter by letter: [{ch, shapes, x0, x1}] — the letter, its closed
+ * polylines of [x, y] in the line's own units, and where it stands along the line. Null while it is on its way,
+ * false if not to be had.
+ */
+function glyphShapes(ctx, a, at, o) {
   const glyphs = outline(ctx.font, a.t);
   if (!glyphs) return glyphs;
   const total = glyphs.reduce((s, g) => s + g.adv, 0), k = total > 0 ? ctx.measureText(a.t).width / (total * o.fs) : 1;   // fit the width the canvas gives the run
   const sy = a.s || 1, dy = a.dy || 0;   // a piece of Latin set larger and lower beside CJK (see setLine in title.js); the width has it already
-  const out = [], step = o.fs * 0.06;
+  const out = [], step = o.fs * 0.06, chars = [...a.t];
   let pen = at;
-  for (const g of glyphs) {
+  for (const [gi, g] of glyphs.entries()) {
+    const shapes = [];
     for (const c of g.c) {
       const pts = [];
       for (let i = 0; i < c.length; i += 2) {
@@ -203,11 +217,17 @@ function contours(ctx, a, at, o) {
         const n = Math.min(24, Math.floor(Math.hypot(nx - x, ny - y) / step));   // long straight edges get points along them, so they can bend
         for (let s = 1; s < n; s++) pts.push([x + ((nx - x) * s) / n, y + ((ny - y) * s) / n]);
       }
-      out.push(pts);
+      shapes.push(pts);
     }
+    out.push({ ch: chars[gi] || "", shapes, x0: pen, x1: pen + g.adv * o.fs * k });
     pen += g.adv * o.fs * k;
   }
   return out;
+}
+/** The outline of a run as glyphShapes has it, all its letters' polylines together. */
+function contours(ctx, a, at, o) {
+  const g = glyphShapes(ctx, a, at, o);
+  return g ? g.flatMap((x) => x.shapes) : g;
 }
 const trace = (ctx, shapes) => { ctx.beginPath(); for (const pts of shapes) { pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); } };
 /**
@@ -292,12 +312,208 @@ function perspective(o) {
     return [X2 - ox - c * y2, y2];                                 // and back
   };
 }
+// ---------- reshaped edges
+/** The area of a closed polyline, signed: its sign tells which way round it runs. */
+export const areaOf = (pts) => { let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
+/**
+ * Points along a closed polyline: about `step` apart (step() for a gap of its own each time), the corners it
+ * turns (by more than 40°) kept where they are, each {x, y, nx, ny, s} — with the unit normal pointing away
+ * from the ink, and how far along it lies. `side` is the sign of the area of the glyph's outer outlines: away
+ * from the ink is outward round those, inward round the holes, which run the other way. The whole length is
+ * the array's `len`. Null for a polyline of fewer than three points.
+ */
+export function walk(pts, step, side) {
+  const n = pts.length;
+  if (n < 3) return null;
+  const turn = (i) => {
+    const a = pts[(i - 1 + n) % n], b = pts[i], c = pts[(i + 1) % n], ux = b[0] - a[0], uy = b[1] - a[1], vx = c[0] - b[0], vy = c[1] - b[1], lu = Math.hypot(ux, uy), lv = Math.hypot(vx, vy);
+    return lu && lv ? Math.acos(Math.max(-1, Math.min(1, (ux * vx + uy * vy) / (lu * lv)))) : 0;
+  };
+  let corners = [];
+  for (let i = 0; i < n; i++) if (turn(i) > 0.7) corners.push(i);
+  if (!corners.length) corners = [0];
+  const gap = typeof step === "function" ? step : () => step, out = [];
+  let s0 = 0;
+  for (let ci = 0; ci < corners.length; ci++) {   // corner to corner: the gaps evened out to end on the next one
+    const to = corners[(ci + 1) % corners.length], piece = [pts[corners[ci]]];
+    for (let i = (corners[ci] + 1) % n; ; i = (i + 1) % n) { piece.push(pts[i]); if (i === to) break; }
+    const cum = [0];
+    for (let i = 1; i < piece.length; i++) cum.push(cum[i - 1] + Math.hypot(piece[i][0] - piece[i - 1][0], piece[i][1] - piece[i - 1][1]));
+    const L = cum[cum.length - 1];
+    if (L <= 0) continue;
+    const gaps = [];
+    for (let t = 0; t < L; ) { const g = Math.max(1e-6, gap()); gaps.push(g); t += g; }
+    if (gaps.length > 1 && gaps.reduce((a, b) => a + b, 0) - L > gaps[gaps.length - 1] / 2) gaps.pop();   // the nearer of the two counts
+    const f = L / gaps.reduce((a, b) => a + b, 0);
+    let t = 0, j = 1;
+    for (const g of gaps) {
+      while (j < cum.length - 1 && cum[j] < t) j++;
+      const p = piece[j - 1], q = piece[j], u = cum[j] > cum[j - 1] ? (t - cum[j - 1]) / (cum[j] - cum[j - 1]) : 0;
+      out.push({ x: p[0] + (q[0] - p[0]) * u, y: p[1] + (q[1] - p[1]) * u, s: s0 + t });
+      t += g * f;
+    }
+    s0 += L;
+  }
+  if (out.length < 3) return null;
+  for (let i = 0; i < out.length; i++) {
+    const a = out[(i - 1 + out.length) % out.length], b = out[(i + 1) % out.length], tx = b.x - a.x, ty = b.y - a.y, l = Math.hypot(tx, ty) || 1;
+    out[i].nx = (side * ty) / l; out[i].ny = (-side * tx) / l;
+  }
+  out.len = s0;
+  return out;
+}
+/** Smooth noise round a loop `len` long, a bump about every `wave`, from R: a function of how far along, about −1 to 1. */
+function loopNoise(R, len, wave) {
+  const k = Math.max(3, Math.round(len / Math.max(1e-6, wave))), v = Array.from({ length: k }, () => R() * 2 - 1);
+  return (s) => { const u = ((((s / len) * k) % k) + k) % k, i = Math.floor(u), f = u - i, e = f * f * (3 - 2 * f); return v[i % k] * (1 - e) + v[(i + 1) % k] * e; };
+}
+const moved = (w, d) => w.map((p, i) => { const k = d(p, i); return [p.x + p.nx * k, p.y + p.ny * k]; });
+/**
+ * A letter's `side` (see walk) and `k`, how heavy its strokes are, 0.4 to 1: their mean width (twice the ink over
+ * the outline's length) against a bold Latin letter's. Spikes, tears, cuts, drips and puffing go by it, so the
+ * many thin strokes of a Chinese character, close together, are not run into one another.
+ */
+export function weighOf(shapes, fs) {
+  let big = 0, ink = 0, len = 0;
+  for (const pts of shapes) {
+    const A = areaOf(pts);
+    if (Math.abs(A) > Math.abs(big)) big = A;
+    ink += A;
+    for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; len += Math.hypot(q[0] - p[0], q[1] - p[1]); }
+  }
+  return { side: Math.sign(big) || 1, k: len > 0 ? Math.max(0.4, Math.min(1, (2 * Math.abs(ink)) / len / (0.13 * fs))) : 1 };
+}
+/** Whether a point is in a letter's ink (its outlines filled by the non-zero rule). */
+function inkTest(shapes) {
+  const boxes = shapes.map((pts) => pts.reduce((b, [x, y]) => [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)], [Infinity, Infinity, -Infinity, -Infinity]));
+  return (x, y) => {
+    let w = 0;
+    shapes.forEach((pts, si) => {
+      const b = boxes[si];
+      if (y < b[1] || y > b[3] || x > b[2]) return;   // its edges all miss the ray rightward from the point
+      for (let i = 0, n = pts.length; i < n; i++) {
+        const [x0, y0] = pts[i], [x1, y1] = pts[(i + 1) % n], side = (x1 - x0) * (y - y0) - (x - x0) * (y1 - y0);
+        if (y0 <= y) { if (y1 > y && side > 0) w++; } else if (y1 <= y && side < 0) w--;
+      }
+    });
+    return w !== 0;
+  };
+}
+/**
+ * The outline effects that reshape the edges of the letters: id -> { join, shape(g, R, o) }, shape taking a
+ * letter as glyphShapes gives it, with `side` and `k` (see weighOf), and giving its new polylines; R its own random numbers,
+ * drawn from the letter, which of its kind on the line it is, the line and the layer's fxSeed — the same every
+ * time the cover is drawn, others after Reshuffle. `o.amt` is how far it goes; `join` how the keyline meets at
+ * the corners. (Puffed up needs no new outline: see outlined.)
+ */
+export const SHAPED = {
+  /**
+   * Thorns along every edge, outward, of lengths and spacings of their own; shorter into the holes, and never
+   * more than about half the way to the next ink, so thorns from the two sides of a gap do not meet.
+   */
+  spiky: { join: "miter", shape: (g, R, o) => {
+    const fs = o.fs, inside = inkTest(g.shapes);
+    return g.shapes.map((pts) => {
+      const w = walk(pts, () => fs * (0.07 + R() * 0.08), g.side), hole = Math.sign(areaOf(pts)) !== g.side;
+      if (!w) return pts;
+      const out = [];
+      w.forEach((p, i) => {
+        const q = w[(i + 1) % w.length], l = Math.hypot(p.nx + q.nx, p.ny + q.ny) || 1, ux = (p.nx + q.nx) / l, uy = (p.ny + q.ny) / l, mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
+        let L = fs * 0.13 * o.amt * g.k * (0.25 + 0.75 * R() ** 0.7) * (hole ? 0.5 : 1);
+        if (R() < 0.18) L *= 0.25;   // now and then a short one
+        const reach = L / 0.45, by = Math.max(fs * 0.012, reach / 12);
+        for (let d = by; d <= reach; d += by) if (inside(mx + ux * d, my + uy * d)) { L = Math.min(L, d * 0.45); break; }
+        out.push([p.x, p.y]);
+        if (L > fs * 0.008) out.push([mx + ux * L, my + uy * L]);
+      });
+      return out;
+    });
+  } },
+  /** A torn paper edge: the line wanders in and out, in long waves and fine teeth. */
+  torn: { join: "round", shape: (g, R, o) => g.shapes.map((pts) => {
+    const fs = o.fs, w = walk(pts, fs * 0.016, g.side);
+    if (!w) return pts;
+    const low = loopNoise(R, w.len, fs * 0.14), A = fs * 0.035 * o.amt * g.k;
+    return moved(w, (p) => A * (0.65 * low(p.s) + 0.35 * (R() * 2 - 1)));
+  }) },
+  /** Cut out with scissors: curves become runs of straight cuts, a little off the line, the letter laid down a little askew. */
+  cut: { join: "miter", shape: (g, R, o) => {
+    const fs = o.fs, tilt = (R() - 0.5) * 0.18 * o.amt, lift = (R() - 0.5) * fs * 0.06 * o.amt, cx = (g.x0 + g.x1) / 2, cy = -fs * 0.36, c = Math.cos(tilt), sn = Math.sin(tilt);
+    return g.shapes.map((pts) => {
+      const w = walk(pts, () => fs * (0.08 + R() * 0.12), g.side);
+      return (w ? moved(w, () => (R() - 0.5) * fs * 0.035 * o.amt * g.k) : pts).map(([x, y]) => [cx + (x - cx) * c - (y - cy) * sn, cy + (x - cx) * sn + (y - cy) * c + lift]);
+    });
+  } },
+  /** Melting: the undersides sag, and run down in drips from the lowest of them. */
+  melt: { join: "round", shape: (g, R, o) => {
+    const fs = o.fs, a = o.amt, walks = g.shapes.map((pts) => walk(pts, fs * 0.012, g.side)), all = walks.filter(Boolean).flat();
+    if (!all.length) return g.shapes;
+    const foot = Math.max(...all.map((p) => p.y)), under = all.filter((p) => p.ny > 0.8), drips = [];
+    for (let k = Math.min(4, 1 + Math.floor(R() * (1 + 1.6 * a))); k > 0 && under.length; k--) {
+      let p = under[Math.floor(R() * under.length)];
+      for (let t = 0; t < 6 && R() < 0.7 && p.y < foot - fs * 0.12; t++) p = under[Math.floor(R() * under.length)];   // mostly from the lowest undersides
+      drips.push({ x: p.x, y: p.y, w: fs * (0.03 + 0.04 * R()) * g.k, L: fs * a * (0.1 + 0.4 * R() ** 1.4) });
+    }
+    return walks.map((w, i) => (!w ? g.shapes[i] : w.map((p) => {
+      if (p.ny <= 0.2) return [p.x, p.y];
+      let dy = fs * 0.018 * a * g.k * p.ny;   // the sag
+      for (const d of drips) { const u = (p.x - d.x) / d.w; if (Math.abs(u) < 1 && Math.abs(p.y - d.y) < fs * 0.07) dy += d.L * (1 - u * u) ** 2 * Math.min(1, (p.ny - 0.2) / 0.5); }
+      return [p.x, p.y + dy];
+    })));
+  } },
+  /** Eaten away: pits bitten into the edges here and there, and a fine grain all along them. */
+  eroded: { join: "round", shape: (g, R, o) => g.shapes.map((pts) => {
+    const fs = o.fs, w = walk(pts, fs * 0.01, g.side);
+    if (!w) return pts;
+    const pit = loopNoise(R, w.len, fs * 0.09);
+    return moved(w, (p) => -fs * 0.045 * o.amt * g.k * Math.max(0, (pit(p.s) - 0.1) / 0.9) ** 1.4 - fs * 0.004 * o.amt * R());
+  }) },
+};
+const SHAPES = new Map();   // reshaped runs, kept by what made them: a cover redrawn does not work them out again
+/**
+ * How far an effect's letters reach past the type, in type sizes at strength `amt`: {x (each side), up, down} —
+ * thorns, tears, cuts, drips, puffing — for the box a lettering is caught by and drawn into (its look effects too).
+ */
+export function effectReach(id, amt = 1) {
+  const a = Math.max(0, amt), all = (v) => ({ x: v * a, up: v * a, down: v * a });
+  return { spiky: all(0.13), torn: all(0.04), cut: all(0.08), puffy: all(0.042), melt: { x: 0.02 * a, up: 0, down: 0.55 * a } }[id] || { x: 0, up: 0, down: 0 };
+}
+/** A run's letters reshaped by SHAPED[id] (seen: how many of each letter the line has had before it). */
+function reshapeRun(glyphs, id, o, seen, key) {
+  const k = [key, id, o.fs, o.amt, o.fxSeed || 0, o.row || 0, JSON.stringify(seen)].join("|");
+  if (SHAPES.has(k)) { for (const g of glyphs) seen[g.ch] = (seen[g.ch] || 0) + 1; return SHAPES.get(k); }
+  const out = glyphs.flatMap((g) => {
+    const n = (seen[g.ch] = (seen[g.ch] || 0) + 1);
+    if (!g.shapes.length) return [];
+    return SHAPED[id].shape({ ...g, ...weighOf(g.shapes, o.fs) }, seeded(hash(`${o.fxSeed || 0}|${o.row || 0}|${g.ch}|${n}`)), o);
+  });
+  if (SHAPES.size > 120) SHAPES.delete(SHAPES.keys().next().value);
+  SHAPES.set(k, out);
+  return out;
+}
 function outlined(ctx, pass, o, id) {
-  const runs = [];
+  const runs = [], seen = {};
   let ready = true;
-  pass((a, at) => { const c = contours(ctx, a, at, o); if (!c) ready = false; if (c === null) stopgaps++; runs.push([a, c]); });
+  pass((a, at) => {
+    const g = glyphShapes(ctx, a, at, o);
+    if (!g) ready = false;
+    if (g === null) stopgaps++;
+    runs.push([a, g && (SHAPED[id] ? reshapeRun(g, id, o, seen, [ctx.font, a.t, at, a.s || 1, a.dy || 0, ctx.measureText(a.t).width.toFixed(2)].join("|")) : id === "puffy" ? g : g.flatMap((x) => x.shapes))]);
+  });
   if (!ready) return house(ctx, pass, o);          // not arrived yet, or not to be had: ordinary lettering meanwhile
   ctx.lineJoin = "round";
+  if (id === "puffy") {
+    // Puffed up: each letter grown all round by r (less for thin strokes close together, see weighOf), every
+    // corner rounded — its outline stroked that wide with round joins, under the fill; the shadows, then the
+    // keylines round the grown letters, then the letters, each over all of the one before
+    const key = o.strokeAmt > 0 ? o.fs * 0.075 * o.strokeAmt : 0, letters = runs.flatMap(([a, glyphs]) => glyphs.filter((g) => g.shapes.length).map((g) => [a, g.shapes, o.fs * 0.042 * o.amt * weighOf(g.shapes, o.fs).k]));
+    const each = (fn) => { for (const [a, shapes, r] of letters) { trace(ctx, shapes); fn(a, r); } };
+    if (o.d > 0) { ctx.save(); ctx.translate(o.d, o.d); each((a, r) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? o.hiShadowCss : o.shadowCss; ctx.lineWidth = 2 * r + key; ctx.fill(); ctx.stroke(); }); ctx.restore(); }
+    if (key) each((a, r) => { ctx.strokeStyle = o.inkCss; ctx.lineWidth = 2 * r + key; ctx.stroke(); });
+    each((a, r) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? o.hiCss : o.fillCss; ctx.lineWidth = 2 * r; ctx.stroke(); ctx.fill(); });
+    return;
+  }
+  if (SHAPED[id]) { ctx.lineJoin = SHAPED[id].join; ctx.miterLimit = 8; }
   if (id === "extrude") {
     // Real depth: every edge of the outline is swept back into a wall. Walls facing one way are
     // lit and those facing the other shaded, and each group is filled as one shape.

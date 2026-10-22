@@ -1,7 +1,7 @@
 // Title typesetting. One typed line is one line on the cover: text is never wrapped; instead the
 // size is the largest at which the longest line fits the width and all lines fit the height.
 import { INK } from "./cel.js";
-import { paintRuns, bentLine, bendExtent, bendRest, reshaped } from "./textfx.js";
+import { paintRuns, bentLine, bendExtent, bendRest, reshaped, effectReach } from "./textfx.js";
 import { SUB, subtitleSize, titleFloor } from "./layout.js";
 
 /** "a\n*b* c" -> [[{t:"a",hi:false}], [{t:"b",hi:true},{t:" c",hi:false}]]. Literal "\n" also breaks. */
@@ -220,7 +220,7 @@ export function subtitleFit(ctx, title, sub, box, font, w, h, maxFs = 340, bend 
 
 /**
  * Draws the title into box {x,y,w,h}. `adj` is the manual {dx,dy,s}; `st` the style:
- * { font, fill, hi, ink, shadow, hiShadow, align, stroke, shadowAmt, maxFs, fx, fxAmt, ransom } — fx being
+ * { font, fill, hi, ink, shadow, hiShadow, align, stroke, shadowAmt, maxFs, fx, fxAmt, fxSeed, ransom } — fx being
  * the text effect (see textfx.js) — and optionally `plate(x, y, w, h, fs)`, which paints a plate
  * under the lines, `hiPlate(x, y, w, h, fs)`, one under each highlighted word, and `skew`, the lines'
  * slant (default -0.08), and `reserve`, a height kept free under the lines (for the subtitle, see
@@ -260,6 +260,8 @@ export function drawTitle(ctx, title, box, adj, st) {
     const ax = Math.min(reached.x, ...xs), ay = Math.min(reached.y, ...ys), bx = Math.max(reached.x + reached.w, ...xs), by = Math.max(reached.y + reached.h, ...ys);
     inked = { x: ax, y: ay, w: bx - ax, h: by - ay };
   }
+  const fr = effectReach(st.fx, st.fxAmt ?? 1);
+  if (fr.x || fr.up || fr.down) inked = { x: inked.x - fr.x * fs, y: inked.y - fr.up * fs, w: inked.w + 2 * fr.x * fs, h: inked.h + (fr.up + fr.down) * fs };   // spikes, drips… past the type
   if (st.onBlock) st.onBlock(ctx.getTransform ? ctx.getTransform() : null, block, rest);   // where the block is, for the bend's handles
   if (st.plate) st.plate(inked.x - pad, inked.y - pad * 0.3, inked.w + pad * 2, inked.h + pad * 0.6, fs);
   const mixed = hasCJK(lines);
@@ -272,7 +274,7 @@ export function drawTitle(ctx, title, box, adj, st) {
     const set = setLine(ctx, line, mixed), pass = passOf(set);
     const m = ctx.getTransform ? ctx.getTransform() : null;
     const o = {
-      fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: st.fxAmt ?? 1, ransom: st.ransom, row: li, lineW: lw, seed: li * 17.3 + 1,
+      fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: st.fxAmt ?? 1, ransom: st.ransom, fxSeed: st.fxSeed || 0, row: li, lineW: lw, seed: li * 17.3 + 1,
       fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow,
       C: st.C, fill: st.own, hi: st.ownHi, hiPlate: !!st.hiPlated, unit: m ? Math.hypot(m.a, m.b) : 1,
       frame: { ox, oy, c: skew, box: block }, warp: st.warp, reshape: rest ? st.reshape : undefined,

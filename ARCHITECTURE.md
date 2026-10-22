@@ -255,7 +255,7 @@ there; a look that boxes the highlighted words itself — cyberpunk, net art —
 and does not) — or instead `hiMark` (`HI_MARKS`: a ring drawn round them, a marker's band, an offset
 block; `drawMark()` in `render.js`, under the letters or over them as the kind is, seeded per run so it
 holds still; through a band or on a block the words keep the lettering's colour, and the looks are told
-by `o.hiPlate` as under plates), `fx`, `fxAmt`, `bend`, `bendAmt`, `warp` and `reshape`; a text layer only adds `text`.
+by `o.hiPlate` as under plates), `fx`, `fxAmt`, `fxSeed` (the seed *Reshuffle* deals, for a `seeded` effect, see 6.2), `bend`, `bendAmt`, `warp` and `reshape`; a text layer only adds `text`.
 The user's own layers (text, asset, photo, solid) may also carry `lookFx`, look effects (see 7.4).
 Without a colour the look and the channel colour decide; on a plate, an unset lettering colour is the
 one that reads against the plate. `headline()` in `render.js` turns these rules into one set of
@@ -400,7 +400,7 @@ to draw it in a font that much larger, that much lower (by the font's size, not 
 gradient across the run or an outline's width stays as it is), so every lettering — the looks' work
 canvases and the bent lines' canvases included — sets it the same way without knowing; a lettering that
 draws after the pass (the deco look) uses `inPiece()`; the outline effects, which draw paths, take the
-piece's scale and drop themselves (`contours`). What marks a whole run — the plates under highlighted
+piece's scale and drop themselves (`glyphShapes`). What marks a whole run — the plates under highlighted
 words, the cyberpunk and negative looks' boxes, the collage's paper strips, the rave, chrome and
 spectrum gradients — is drawn once a run (at its first piece, over `run`), not once a piece. Without real
 metrics (the tests' stand-in contexts) a line is set as the canvas sets it. Vertical titles are set as
@@ -416,10 +416,10 @@ There are four kinds, differing in what they can change:
 |---|---|---|
 | Layered | the same line painted several times in different colours and places | what is around the letters: outlines, shadows, echoes. Each look's own lettering (`runs()`) is of this kind |
 | Masked | the letters are first painted alone on a spare canvas, which is worked on and then laid down | what is inside the letters: halftone, stripes, wear, an inner shadow, rows cut apart |
-| Outlined | each letter's outline is fetched as points, and filled as shapes | the letterforms: extruded with real depth |
+| Outlined | each letter's outline is fetched as points, and filled as shapes | the letterforms: extruded with real depth, or their edges reshaped (spiky, torn, scissor-cut, melting, puffed up, eaten away) |
 | Letter by letter | each letter drawn on its own, in the place the line's font gives it | each letter's face, paper, ink and angle: the ransom note |
 
-The menu, `EFFECTS`, holds the typesetting effects and the editorial look's Underlined highlight, which has to know the highlighted words and so can only be lettering. Sticker (`sticker()`) is strokes alone — a shadow, a dark line, a white rim and a keyline, each a pass of thick round-joined strokes under the fill — so the rim runs the letters together and fills their small gaps without outlines. An effect may be listed under another group than its kind's (`menu`): Extruded, drawn from outlines, is listed with the layered letterings it looks like. A look's lettering is what *auto* uses. Sliced, Overprint, Double keyline and Sunlit block were in the menu once; what they do is their looks' post effects now (see 7.4), for any layer: `layers.js` still knows the names (`TEXT_EFFECTS`), turns them into the matching post effect on a text layer (at 0.6), and keeps them on the title, painted as *auto*.
+The menu, `EFFECTS`, holds the typesetting effects and the editorial look's Underlined highlight, which has to know the highlighted words and so can only be lettering. Sticker (`sticker()`) is strokes alone — a shadow, a dark line, a white rim and a keyline, each a pass of thick round-joined strokes under the fill — so the rim runs the letters together and fills their small gaps without outlines. An effect may be listed under another group than its kind's (`menu`): Extruded, drawn from outlines, is listed with the layered letterings it looks like, so the Outlined group holds the reshaped edges. An effect marked `seeded` draws its letters from the layer's `fxSeed`, which *Reshuffle* (shown under the effect for every seeded one) deals again: the ransom note and the reshaped edges but Puffed up. A look's lettering is what *auto* uses. Sliced, Overprint, Double keyline and Sunlit block were in the menu once; what they do is their looks' post effects now (see 7.4), for any layer: `layers.js` still knows the names (`TEXT_EFFECTS`), turns them into the matching post effect on a text layer (at 0.6), and keeps them on the title, painted as *auto*.
 
 **Where outlines come from** — a web view cannot read the outlines in a font file, so the Rust side
 supplies them. The `text_outline` command parses the font with `ttf-parser`, flattens curves to
@@ -465,6 +465,40 @@ edges of the outlines are what the bend's picture is cut finely enough for.
 
 **Extrusion** really sweeps every edge of the outline back into a wall: walls are split into lit and
 shaded by the way they face, each group is filled as one shape, then the back face and the front.
+
+**Reshaped edges** (`SHAPED`: Spiky, Torn edge, Scissor-cut, Melting, Eaten away; and Puffed up) are outline
+effects too, so they need the desktop app as Extruded does and are ordinary lettering until the outlines
+come, and in a plain browser. `glyphShapes()` gives a run's outline letter by letter: each letter, its closed
+polylines and where it stands on the line (`contours()` is all of them together, for Extruded). A letter's
+`side` is the sign of the area (`areaOf()`) of its largest contour; a hole runs the other way. `weighOf()`
+gives the side and the letter's weight `k`, 0.4 to 1: its strokes' mean width (twice the ink over the
+outline's length) against a bold Latin letter's. Every effect goes by it — thorns, tears, cuts, drips, pits
+and puffing are smaller on a Chinese character's many thin strokes, close together, so they are not run into
+one another.
+`walk(pts, step, side)` resamples a contour at a spacing (or at a gap drawn anew each time, from a function),
+keeping the corners that turn by more than 40° where they are and evening the gaps out between them; each
+point carries how far along it lies and a unit normal pointing away from the ink, so outward round the outer
+contours and inward round the holes. `loopNoise()` is smooth noise that closes round a contour.
+`SHAPED[id].shape(g, R, o)` builds a letter's new polylines: Spiky puts a thorn between every two points,
+along their normals, at gaps and of lengths of their own (now and then a short one, half as long into the
+holes), none longer than 0.45 of the way to the next ink along it (`inkTest()`, the letter filled nonzero),
+so thorns from the two sides of a gap or a hole do not meet; Torn edge moves each point along its normal by long waves of noise and fine random teeth;
+Scissor-cut resamples at longer, uneven gaps, moves each point a little off the line, and turns and lifts
+the letter a little about its middle; Melting moves the points that face down further down (the sag), and
+a few drips, mostly from the lowest undersides, pull the points within their width down by their length;
+Eaten away pushes pits of noise into the ink, with a fine grain along the edge. `o.amt` (Strength) sets how
+far each goes. A letter's random numbers `R` come from the letter, which of its kind on the line it is, the
+line (`o.row`) and the layer's `fxSeed` (`o.fxSeed`, from `drawTitle()` and the free text's painter;
+`seeded(hash(…))` from `ransom.js`), so the same words come out the same in the preview, the export and at
+every size, and *Reshuffle* deals others. `reshapeRun()` keeps the reshaped runs (`SHAPES`, 120 at most) by
+what made them, so a cover redrawn does not work them out again. `outlined()` paints them as the other
+outline effects: the shadow, the keyline (mitred for Spiky and Scissor-cut, the effect's `join`, so the
+points stay sharp; round for the rest) and the fill, nonzero, so the holes stay holes. Puffed up (its `r` also by the letter's weight) needs no new
+outline: the outline is stroked `2r` wide with round joins under the fill, so the letters grow by `r` all
+round with every corner rounded, the keyline and the shadow round the grown letters. Surprise me deals them
+only in the desktop app (`can()`), from the pop family (Puffed up, Spiky, Melting) and the print family
+(Torn edge, Scissor-cut, Eaten away), and the collage's own recipe (Scissor-cut, Torn edge), each with a seed of its own
+(`letterFor()`).
 
 **The ransom note** (`ransom.js`) takes the pieces of the line from `pass` and splits each into its
 letters' cells, the letter's advance in the line's font (a piece set larger, `s`, as setLine set it), shared

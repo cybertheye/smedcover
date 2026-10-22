@@ -589,6 +589,8 @@ const STR = {
   "fx.warpHint": ["在画布上拖动文字四角的菱形手柄，可以自由调整透视。", "Drag the diamond handles at the lettering's corners on the canvas to set the perspective freely."],
   "fx.warpReset": ["重置透视", "Reset the perspective"],
   "fx.reshuffle": ["换一组", "Reshuffle"],
+  "fx.reshuffleEdgeTip": ["每个字重新抽一组刺、撕口、剪痕、滴落或咬痕；不点就一直是现在这样", "Deal each letter other spikes, tears, cuts, drips or bites; until then it stays as it is"],
+  "fx.shapedHint": ["这类效果从字体文件读出每个字的轮廓再改形状；同样的字每次画出来都一样，「换一组」换另一种。强度控制刺的长短、撕口和滴落的大小。", "These effects read each letter's outline from the font file and reshape it; the same words come out the same every time, Reshuffle deals others. Strength sets how long the spikes are, how big the tears and drips."],
   "letters.open": ["逐字调整…", "Letter by letter…"],
   "letters.openTip": ["打开一个窗口，逐个调整这个图层的字", "Open a window to dress this layer's letters one by one"],
   "letters.hint": ["点一个字可以单独调整它；锁定的字在「换一组」时保持不变。上面的开关决定随机时会不会出现撕边、胶带、立体字和照片字，手动选的不受影响。", "Pick a letter to dress it yourself; a locked letter stays as it is when you Reshuffle. The switches above say whether torn edges, tape, letters in depth and letters cut from the photo come up by chance; what you choose by hand is not affected."],

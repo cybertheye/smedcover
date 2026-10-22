@@ -2438,10 +2438,12 @@ function fxControl(L) {
   const fx = EFFECTS[L.fx] ? L.fx : "auto", kind = EFFECTS[fx].kind;   // an effect no longer in the menu (a look's lettering of before) is shown as automatic
   return {
     kids: [
-      select(groups, fx, (v) => set("fx", v === "auto" ? undefined : v, true)),
+      // a lettering dealt by a seed starts with one of the layer's own: two layers in it are not drawn alike
+      select(groups, fx, (v) => { if (EFFECTS[v] && EFFECTS[v].seeded && !L.fxSeed) L.fxSeed = 1 + Math.floor(Math.random() * 999998); set("fx", v === "auto" ? undefined : v, true); }),
       fx !== "auto" && kind !== "passes" && slider("props.fxAmt", 0, 2, 0.05, L.fxAmt ?? 1, times, (v) => { holdLive(L.id); set("fxAmt", v === 1 ? undefined : v, false); }),
-      // the ransom note's letters dealt again: another face, paper, ink and angle for each
-      fx === "ransom" && el("button", { class: "btn wide", style: "margin-top:8px", title: t("fx.reshuffleTip"), onclick: () => { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === L.fxSeed); set("fxSeed", n, false); } }, t("fx.reshuffle")),
+      // the ransom note's letters dealt again: another face, paper, ink and angle for each (a reshaped edge: other spikes,
+      // tears, cuts, drips, bites); and the ransom note's one by one, in a window of their own
+      EFFECTS[fx].seeded && el("button", { class: "btn wide", style: "margin-top:8px", title: t(fx === "ransom" ? "fx.reshuffleTip" : "fx.reshuffleEdgeTip"), onclick: () => { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === L.fxSeed); set("fxSeed", n, false); } }, t("fx.reshuffle")),
       fx === "ransom" && el("button", { class: "btn wide letters-btn", style: "margin-top:8px", title: t("letters.openTip"), onclick: () => lettersOpen(L) }, t("letters.open")),
       el("div", { style: "margin-top:12px" }, cap("props.bend"),
         select([["", t("bend.none")], ...Object.entries(BENDS).map(([id, b]) => [id, b.name[getLang()]])], L.bend || "", (v) => { if (v) L.bend = v; else { delete L.bend; delete L.bendAmt; } delete L.warp; delete L.reshape; touch({ cover: true, side: true }); })),
@@ -2449,7 +2451,7 @@ function fxControl(L) {
       L.bend === "taper" && L.warp && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("warp", undefined, true) }, t("fx.warpReset")),
       L.bend && L.bend !== "taper" && L.reshape && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("reshape", undefined, true) }, t("fx.reshapeReset")),
     ],
-    tip: [fx === "ransom" && t("fx.ransomHint"), L.bend && t("fx.bendHint"), L.bend && t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint"), kind === "outline" && !native && t("fx.needsApp")].filter(Boolean).join(" "),
+    tip: [fx === "ransom" && t("fx.ransomHint"), EFFECTS[fx].kind === "outline" && fx !== "extrude" && t("fx.shapedHint"), L.bend && t("fx.bendHint"), L.bend && t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint"), kind === "outline" && !native && t("fx.needsApp")].filter(Boolean).join(" "),
   };
 }
 /** The words a headline layer sets: the title's and the subtitle's are the cover's. */
@@ -4334,6 +4336,41 @@ async function selfTest(dir) {
       report.ransom.edited = { photo: letterPhoto(), path: await invoke("write_image", framed(await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex())), { dir, name: "fx-ransom-edited.png" })) };
       S.cover.layers = S.cover.layers.filter((l) => had.has(l.id));   // the photo added goes again
       delete titleLayer.letters; delete titleLayer.fxSeed; S.cover.title = fxTitle;
+    }
+    // the reshaped edges: the same letters every time the cover is drawn, others after Reshuffle; spikes in a bend too
+    {
+      const fxTitle = S.cover.title, draw = async () => toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex())), same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+      S.cover.title = "SPIKY *刺边*\nmelting 融化";
+      report.shaped = [];
+      for (const id of Object.keys(EFFECTS).filter((k) => EFFECTS[k].kind === "outline" && EFFECTS[k].seeded)) {
+        titleLayer.fx = id; delete titleLayer.fxSeed; await step(`shaped-${id}`);
+        const a = await draw(), again = await draw();
+        titleLayer.fxSeed = 4242;
+        const b = await draw(), got = { id, same: same(a, again), reshuffled: !same(a, b) };
+        got.path = await invoke("write_image", framed(b, { dir, name: `shaped-${id}.png` }));
+        report.shaped.push(got);
+        if (!got.same) report.errors.push(`${id}: drawn twice, not the same`);
+        if (!got.reshuffled) report.errors.push(`${id}: Reshuffle drew the same`);
+      }
+      Object.assign(titleLayer, { fx: "spiky", fxAmt: 1.8, bend: "arc" });
+      report.shaped.push({ id: "spiky-bent", path: await invoke("write_image", framed(await draw(), { dir, name: "shaped-spiky-bent.png" })) });
+      for (const k of ["fx", "fxAmt", "fxSeed", "bend"]) delete titleLayer[k];
+      S.cover.title = fxTitle;
+    }
+    // a layout layer copied, in a lettering and a place of its own; a photo cropped, with a torn edge and a shadow; a sticker cropped
+    {
+      const had = new Set(S.cover.layers.map((l) => l.id)), cp = duplicate(titleLayer), pic = await invoke("selftest_photo").catch(() => null);
+      Object.assign(cp, { fx: "puffy", ink: "#ff3366" }); cp.t.all.y += 0.38;
+      insertAbove(S.cover.layers, "title", cp);
+      const ph = pic ? newLayer("photo", { pid: await putPhoto(pic), crop: { x: 0.2, y: 0.1, w: 0.5, h: 0.6 }, outline: 12, torn: true, shadow: 0.5 }) : null;
+      if (ph) { ph.t.all = { ...ph.t.all, x: 0.78, y: 0.42, s: 0.55 }; S.cover.layers.push(ph); }
+      const sk = newLayer("asset", { ref: { kind: "sticker", id: "burst" }, tint: true, crop: { x: 0, y: 0, w: 0.5, h: 0.5 } });
+      sk.t.all = { ...sk.t.all, x: 0.2, y: 0.78, s: 0.45 }; S.cover.layers.push(sk);
+      await step("copies and crops");
+      const cv = await renderReady(S.profile.sizes[0], S.cover, catIndex()), ids = [cp.id, ph && ph.id, sk.id].filter(Boolean);
+      report.copies = { photo: !!ph, hits: ids.map((id) => !!cv._hits.find((h) => h.id === id)), path: await invoke("write_image", framed(await toPng(cv), { dir, name: "copy-crop.png" })) };
+      if (report.copies.hits.some((h) => !h)) report.errors.push("copies and crops: a layer not caught on the canvas");
+      S.cover.layers = S.cover.layers.filter((l) => had.has(l.id));
     }
     // the title and a text layer as headlines on plates, the text with its own colour, an outline and plates under its highlighted words
     {

@@ -2403,3 +2403,58 @@ test("a photo may be cropped: kept within the picture, dragged by its sides and 
   assert.ok(Math.abs(edge.w / edge.h - 2) < 1e-9 && Math.abs(edge.x + edge.w - 1) < 1e-9 && edge.y >= 0, "kept within the picture");
   assert.ok(near(fitCrop({ x: 0, y: 0, w: 1, h: 1 }, 1), { x: 0, y: 0, w: 1, h: 1 }) && near(fitCrop({ x: 0, y: 0, w: 1, h: 1 }, 0.75), { x: 0.125, y: 0, w: 0.75, h: 1 }), "from the whole picture: the largest of that shape");
 });
+
+test("reshaped edges: points along each outline, corners kept, normals away from the ink; each letter's edge its own, the same every time", async () => {
+  const { walk, areaOf, weighOf, SHAPED, EFFECTS, effectReach } = await import("../ui/js/textfx.js");
+  const { hash, seeded } = await import("../ui/js/ransom.js");
+  // a letter: a square 100 wide with a square hole, as fonts have them (the hole running the other way)
+  const outer = [[0, 0], [100, 0], [100, -100], [0, -100]], hole = [[30, -30], [30, -70], [70, -70], [70, -30]];
+  const side = Math.sign(areaOf(outer));
+  assert.equal(Math.sign(areaOf(hole)), -side);
+  const w = walk(outer, 10, side);
+  assert.ok(Math.abs(w.len - 400) < 1e-9 && w.length === 40);
+  for (const [x, y] of outer) assert.ok(w.some((p) => p.x === x && p.y === y), `corner ${x},${y} kept`);
+  const inside = (x, y) => x > 0 && x < 100 && y < 0 && y > -100;
+  assert.ok(w.every((p) => Math.abs(Math.hypot(p.nx, p.ny) - 1) < 1e-9 && !inside(p.x + p.nx * 5, p.y + p.ny * 5)), "outward round the outer edge");
+  const wh = walk(hole, 5, side);
+  assert.ok(wh.every((p) => { const x = p.x + p.nx * 3, y = p.y + p.ny * 3; return x > 30 && x < 70 && y < -30 && y > -70; }), "into the hole round a hole");
+  assert.equal(walk([[0, 0], [1, 1]], 1, 1), null);
+  // every reshaping effect: seeded, so the same letter comes out the same, another seed otherwise; numbers all
+  // a letter's weight: its strokes' mean width against a bold Latin letter's, 0.4 to 1
+  const weight = weighOf([outer, hole], 100);
+  assert.deepEqual(weight, { side, k: 1 });   // strokes 30 wide: heavy
+  const thin = [[0, 0], [100, 0], [100, -4], [0, -4]];
+  assert.equal(weighOf([thin], 100).k, 0.4);   // a hairline: as light as it goes
+  assert.equal(weighOf([thin.slice().reverse()], 100).side, -Math.sign(areaOf(thin)));
+  const g = { ch: "A", shapes: [outer, hole], x0: 0, x1: 100, ...weight }, o = { fs: 100, amt: 1, row: 0 };
+  const R = (n) => seeded(hash(`0|0|A|${n}`));
+  const flat = (shapes) => shapes.flat(2);
+  for (const id of Object.keys(SHAPED)) {
+    assert.ok(EFFECTS[id] && EFFECTS[id].kind === "outline" && EFFECTS[id].seeded, `${id} is an outline effect Reshuffle deals again`);
+    const a = SHAPED[id].shape(g, R(1), o), b = SHAPED[id].shape(g, R(1), o), c = SHAPED[id].shape(g, R(2), o);
+    assert.equal(a.length, 2, `${id}: an outline for each`);
+    assert.deepEqual(a, b, `${id}: the same every time`);
+    assert.notDeepEqual(a, c, `${id}: another for another seed`);
+    assert.ok(flat(a).every(Number.isFinite), `${id}: numbers`);
+    assert.ok(a.every((pts) => pts.length >= 3), `${id}: closed shapes`);
+    const none = SHAPED[id].shape(g, R(1), { ...o, amt: 0 });
+    if (id !== "cut") assert.ok(flat(none).every((v) => v >= -100 - 1e-6 && v <= 100 + 1e-6) && none[0].every(([x, y]) => x >= -1e-6 && x <= 100 + 1e-6 && y <= 1e-6 && y >= -100 - 1e-6), `${id}: at no strength, the letter as it was`);
+  }
+  const xs = (shapes) => shapes[0].map((p) => p[0]), ys = (shapes) => shapes[0].map((p) => p[1]);
+  const spiky = SHAPED.spiky.shape(g, R(1), o);
+  assert.ok(Math.min(...xs(spiky)) < -5 && Math.max(...xs(spiky)) > 105 && Math.min(...ys(spiky)) < -105, "spikes out of every side");
+  // into the hole, 40 across: never more than about half the way over it, so spikes from facing sides do not meet
+  assert.ok(spiky[1].every(([x, y]) => x >= 30 - 1e-6 && x <= 70 + 1e-6 && y <= -30 + 1e-6 && y >= -70 - 1e-6), "the hole's spikes stay in the hole");
+  assert.ok(spiky[1].every(([x, y]) => Math.min(x - 30, 70 - x, -30 - y, y + 70) <= 40 * 0.45 + 1e-6), "and short of its middle");
+  const eroded = SHAPED.eroded.shape(g, R(1), o);
+  assert.ok(eroded[0].every(([x, y]) => x >= -1e-6 && x <= 100 + 1e-6 && y <= 1e-6 && y >= -100 - 1e-6) && eroded[0].some(([x, y]) => inside(x, y)), "bitten into, never out");
+  const melt = SHAPED.melt.shape(g, R(1), o);
+  assert.ok(Math.max(...ys(melt)) > 10 && Math.min(...ys(melt)) >= -100 - 1e-6, "running down below its foot, the top as it was");
+  // how far past the type they reach, for the box the lettering is caught by: drips below only, none for the rest
+  assert.deepEqual(effectReach("eroded"), { x: 0, up: 0, down: 0 });
+  assert.deepEqual(effectReach("plain"), { x: 0, up: 0, down: 0 });
+  assert.ok(effectReach("melt", 2).down > effectReach("melt").down && effectReach("melt").up === 0 && effectReach("spiky").up > 0);
+  assert.ok(Math.max(...ys(melt)) <= effectReach("melt").down * 100 + 1e-6 && Math.max(...xs(spiky)) - 100 <= effectReach("spiky").x * 100 + 1e-6, "and no further");
+  const torn = SHAPED.torn.shape(g, R(1), o);
+  assert.ok(torn[0].some(([x, y]) => inside(x, y)) && torn[0].some(([x, y]) => !inside(x, y) && (x < -0.5 || x > 100.5 || y > 0.5 || y < -100.5)), "in and out");
+});

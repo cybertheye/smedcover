@@ -8,7 +8,8 @@ import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js"
 import { drawAsset, assetHalf, userAssets, assetExists } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced } from "./style.js";
-import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped } from "./textfx.js";
+import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped, effectReach } from "./textfx.js";
+import { ransomEpoch } from "./ransom.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
 /** For checks of speed: while `on`, the time each layer took to paint is added up in `ms` (by id), and still runs repainted are counted. */
@@ -419,7 +420,7 @@ function drawFreeText(ctx, L, env) {
     const set = sets[li], pass = passOf(set);
     const m = raw.getTransform ? raw.getTransform() : null, unit = m ? Math.hypot(m.a, m.b) : 1;
     const o = {
-      fs: FS, d: FS * 0.062 * st.shadowAmt, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: L.fxAmt ?? 1, ransom: ransomOf(L, env), row: li, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit,
+      fs: FS, d: FS * 0.062 * st.shadowAmt, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: L.fxAmt ?? 1, ransom: ransomOf(L, env), fxSeed: L.fxSeed || 0, row: li, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit,
       fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow, fill: st.own, hi: st.ownHi, hiPlate: !!st.hiPlate || bandOrBlock(st),
       frame: { ox, oy, c: skew, box }, warp: L.warp, reshape: rest ? L.reshape : undefined,
     };
@@ -435,7 +436,8 @@ function drawFreeText(ctx, L, env) {
     else paint(raw, unit);
     raw.restore();
   });
-  return { hw: hw + pad, hh: bh / 2 + Math.max(up, down) + pad * 0.3 };
+  const fr = effectReach(L.fx, L.fxAmt ?? 1);   // spikes, drips… past the type
+  return { hw: hw + pad + fr.x * FS, hh: bh / 2 + Math.max(up + fr.up * FS, down + fr.down * FS) + pad * 0.3 };
 }
 
 const PAINT = {
@@ -593,7 +595,7 @@ const PAINT = {
     return placed(ctx, tr, (c) => (own && own(c, env.cover.title, box, L, env, lookValues())) || drawTitle(c, env.cover.title, box, IDENTITY, {
       font: headFont(), maxFs: 340, align: "left", fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
       own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate || bandOrBlock(st),   // for looks that paint the letters themselves
-      stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt, ransom: ransomOf(L, env),
+      stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt, fxSeed: L.fxSeed, ransom: ransomOf(L, env),
       plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
       hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
       hiMark: st.hiMark && ((x0, x1, fs, on, phase, seed) => drawMark(on, st.hiMark, x0, x1, fs, phase, seed)),
@@ -610,7 +612,7 @@ const PAINT = {
     return placed(ctx, tr, (c) => drawTitle(c, env.cover.subtitle, s.box, IDENTITY, {
       font: headFont(), maxFs: s.fs, align: "left", fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
       own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate || bandOrBlock(st),
-      stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt, ransom: ransomOf(L, env),
+      stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt, fxSeed: L.fxSeed, ransom: ransomOf(L, env),
       plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
       hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
       hiMark: st.hiMark && ((x0, x1, fs, on, phase, seed) => drawMark(on, st.hiMark, x0, x1, fs, phase, seed)),

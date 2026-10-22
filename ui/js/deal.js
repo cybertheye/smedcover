@@ -81,9 +81,9 @@ export const RULES = {
  */
 export const FAMILIES = {
   // cartoon and illustration: bold letters with outlines, depth and a little bounce
-  pop: { dark: 0.45, own: 0.6, fx: { sticker: 3, cel: 3, extrude: 2, stripes: 1, rows: 1 }, bend: 0.25, bends: { arc: 3, wave: 2, rise: 2, bulge: 1, flag: 1, arcLow: 1, shell: 1 } },
+  pop: { dark: 0.45, own: 0.6, fx: { sticker: 3, cel: 3, extrude: 2, stripes: 1, rows: 1, puffy: 2, spiky: 1, melt: 1 }, bend: 0.25, bends: { arc: 3, wave: 2, rise: 2, bulge: 1, flag: 1, arcLow: 1, shell: 1 } },
   // printed matter, posters and film: flat type, the marks of printing, hardly ever bent
-  print: { dark: 0.4, own: 0.75, fx: { plain: 2, worn: 3, dots: 2, rows: 1, bluenote: 1, editorial: 1, ransom: 1 }, bend: 0.05, bends: { arc: 1, shell: 1 } },
+  print: { dark: 0.4, own: 0.75, fx: { plain: 2, worn: 3, dots: 2, rows: 1, bluenote: 1, editorial: 1, ransom: 1, torn: 1, cut: 1, eroded: 1 }, bend: 0.05, bends: { arc: 1, shell: 1 } },
   // light on the dark: neon, chrome, screens; their own glowing letters nearly always
   light: { dark: 0.85, own: 0.85, fx: { inner: 1, plain: 1 }, bend: 0.1, bends: { arc: 1, wave: 1 } },
 };
@@ -108,7 +108,7 @@ export const RECIPES = {
   typo: { family: "print", own: 0.9, bend: 0.1, bends: { rise: 1, shell: 1, flag: 1 } },
   toon: { family: "pop", own: 0.7, params: { giant: 0.3, beam: 0.3, parade: 0.3, road: 0.3, border: 0.4 } },
   avant: { family: "print", own: 0.85, bend: 0.05, params: { mosaic: 0.3 } },
-  collage: { family: "print", own: 0.6, fx: { ransom: 4, sticker: 2, worn: 2, rows: 2, dots: 1 }, bend: 0.15, bends: { rise: 1, flag: 1, arc: 1 } },   // its title on scraps of paper: the ransom note most of all
+  collage: { family: "print", own: 0.6, fx: { ransom: 4, sticker: 2, worn: 2, rows: 2, dots: 1, cut: 2, torn: 2 }, bend: 0.15, bends: { rise: 1, flag: 1, arc: 1 } },   // its title on scraps of paper: the ransom note most of all
   yellow: { family: "print", own: 0.85, bend: 0, params: { beam: 0.3, stripes: 0.35 } },
   pitch: { family: "pop", own: 0.7, fx: { cel: 2, extrude: 2, stripes: 2, worn: 1 }, params: { net: 0.35, stadium: 0.35, crowd: 0.35 } },
   dots: { family: "light", own: 0.9, params: { smear: 0.3 } },
@@ -226,7 +226,7 @@ export function tuneLook(id, R, ctx = {}) {
 export function letterFor(id, role, R, can = () => true, title = null, ctx = {}) {
   const r = recipeOf(id, ctx), out = {}, fx = Object.fromEntries(Object.entries(r.fx).filter(([k]) => EFFECTS[k] && k !== "auto" && k !== id && can(k))), w = RULES.letterings;
   const within = ([a, b]) => Math.round((a + R() * (b - a)) * 20) / 20;
-  const choose = () => { const k = weighted(fx, R); if (k) { out.fx = k; if (EFFECTS[k].kind !== "passes") out.fxAmt = within(w.fxAmt); if (k === "ransom") out.fxSeed = 1 + Math.floor(R() * 999998); } };
+  const choose = () => { const k = weighted(fx, R); if (k) { out.fx = k; if (EFFECTS[k].kind !== "passes") out.fxAmt = within(w.fxAmt); if (EFFECTS[k].seeded) out.fxSeed = 1 + Math.floor(R() * 999998); } };
   if (role === "subtitle") {
     if (title && title.fx && R() < w.subtitleLikeTitle) { out.fx = title.fx; if (title.fxAmt != null) out.fxAmt = title.fxAmt; }
     else if (R() >= Math.max(r.own, w.subtitleOwn)) choose();
