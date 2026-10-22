@@ -10,9 +10,9 @@
 // plain browser it falls back to localStorage so the UI can still be developed.
 import { SIZE_PRESETS } from "./presets.js";
 import { platformsFor, ratioOf } from "./platforms.js";
-import { TEMPLATES, LAYOUT_LIMITS } from "./layout.js";
+import { TEMPLATES, LAYOUT_LIMITS, ORIENTS } from "./layout.js";
 import { LOOKS, LOOK_IDS, lookParams } from "./style.js";
-import { normalizeLayers, normalizeScene, normalizeT, LAYOUT_PARTS, LAYOUT_RUNS, LETTERED, DEFAULT_OFF } from "./layers.js";
+import { normalizeLayers, normalizeScene, normalizeT, LAYOUT_PARTS } from "./layers.js";
 
 const T = globalThis.__TAURI__;
 /**
@@ -249,19 +249,28 @@ export function normalizeSettings(raw) {
     surprise: normalizeSurprise(s.surprise, layouts.map((l) => l.id)),
   };
 }
-/** How many layout presets are kept at most, and how long a name may be. */
-export const LAYOUTS = { most: 24, name: 40 };
+/** How many layout presets are kept at most, how long a name may be, and how many sizes of its own a preset may keep. */
+export const LAYOUTS = { most: 24, name: 40, custom: 12 };
+const SIZE_KEY = /^(\d{2,5})x(\d{2,5})$/;
+/** Size keys ("1080x1350") as a preset keeps them: each once, in the order given, `most` at most; `fits`, only of a size a profile may have (normalizeSize). */
+const sizeKeysOf = (raw, most, fits = false) => [...new Set((Array.isArray(raw) ? raw : []).filter((k) => {
+  const m = typeof k === "string" && SIZE_KEY.exec(k);
+  return !!m && (!fits || [m[1], m[2]].every((n) => Number(n) >= 64 && Number(n) <= 8192));
+}))].slice(0, most);
 /**
  * The user's layout presets, as kept in the settings for every profile (see takeLayout in layers.js): [{ id, name,
- * template, adjust, by?, parts: { part: { t, shown, vertical?, rules? } } }], LAYOUTS.most at most. An id is kept as it
- * is (Surprise me's chances name the presets by it: odds.groups.layout), one missing, taken or "keep" (the
- * option of none) made anew; a name trimmed and cut to length; a template unknown is Stack, its adjustments within
- * LAYOUT_LIMITS; the sizes drawn in a layout of their own (`by`, { size key: { template, adjust } }, kept as a profile
- * keeps them but by any size key, a preset being for every profile; left out when there is none); every part of
- * LAYOUT_PARTS there, its placement within range (per size by size keys only), one
- * missing where the template puts it and on the cover unless a new design leaves it out (DEFAULT_OFF); for a
- * lettered part, which way its words run (LAYOUT_RUNS) kept only when true (anything else, a number or a word, is
- * no way they run: left out, as putLayout reads it).
+ * template, adjust, orient?, by?, custom?, parts: { part: { t, shown, hide? } } }], LAYOUTS.most at most. An id is kept
+ * as it is (Surprise me's chances name the presets by it: odds.groups.layout), one missing, taken or "keep" (the option
+ * of none) made anew; a name trimmed and cut to length. The colour block: a template unknown is Stack, its adjustments
+ * within LAYOUT_LIMITS; each orientation's own (`orient`, { wide|square|tall: { template, adjust } }) and the sizes drawn
+ * in a layout of their own (`by`, { size key: … }) kept as a profile keeps its `layoutBy`, but by any size key, a preset
+ * being for every profile; either left out when there is none. The sizes of its own it was laid out at in its editor
+ * (`custom`, size keys a profile may have, LAYOUTS.custom at most). Each part of LAYOUT_PARTS it has an entry for, its
+ * placement within range (per size by size keys only), shown unless it says not; a part shown may name the sizes it
+ * is left out at (`hide`, size keys). A part it has no entry for is not made up: a preset made now carries all of them
+ * (see takeParts and newPreset in layers.js), and one made before the colour block was a part carries none for it,
+ * which it leaves as it is where it is put (putLayout), its move and whether it shows. What earlier presets held
+ * besides — which way a lettered part's words ran — is let go.
  */
 export function normalizeLayouts(raw) {
   const out = [], ids = new Set();
@@ -273,13 +282,16 @@ export function normalizeLayouts(raw) {
     ids.add(id);
     const parts = {};
     for (const type of LAYOUT_PARTS) {
-      const q = r.parts && typeof r.parts === "object" && r.parts[type] && typeof r.parts[type] === "object" ? r.parts[type] : null, t = normalizeT(q && q.t, false);
+      const q = r.parts && typeof r.parts === "object" && r.parts[type] && typeof r.parts[type] === "object" ? r.parts[type] : null;
+      if (!q) continue;   // not this preset's to place
+      const t = normalizeT(q.t, false);
       t.by = Object.fromEntries(Object.entries(t.by).filter(([k]) => /^\d{2,5}x\d{2,5}(@[\w-]{1,60})?$/.test(k)).slice(0, 80));
-      parts[type] = { t, shown: q ? q.shown !== false : !DEFAULT_OFF.includes(type) };
-      if (q && LETTERED.includes(type)) for (const k of LAYOUT_RUNS) if (q[k] === true) parts[type][k] = true;
+      const shown = q.shown !== false, hide = shown ? sizeKeysOf(q.hide, 80) : [];
+      parts[type] = shown ? { t, shown, ...(hide.length ? { hide } : {}) } : { t, shown };
     }
-    const by = normalizeLayoutBy(r.by, (k) => /^\d{2,5}x\d{2,5}$/.test(k));   // the sizes it draws in a layout of their own
-    out.push({ id, name: str(r.name).trim().slice(0, LAYOUTS.name), template: TEMPLATES.includes(r.template) ? r.template : "stack", adjust: normalizeAdjust(r.adjust), ...(by ? { by } : {}), parts });
+    const orient = normalizeLayoutBy(r.orient, (k) => ORIENTS.includes(k)), by = normalizeLayoutBy(r.by, (k) => SIZE_KEY.test(k)), custom = sizeKeysOf(r.custom, LAYOUTS.custom, true);
+    out.push({ id, name: str(r.name).trim().slice(0, LAYOUTS.name), template: TEMPLATES.includes(r.template) ? r.template : "stack", adjust: normalizeAdjust(r.adjust),
+      ...(orient ? { orient } : {}), ...(by ? { by } : {}), ...(custom.length ? { custom } : {}), parts });
   }
   return out;
 }

@@ -2122,16 +2122,21 @@ test("Surprise me deals a hand by the rules in deal.js: what is locked stays, th
   }
 });
 
-test("layout presets: kept clean in the settings, ids as they are; their chances by id beside the canvas's own, gone with the preset", async () => {
+test("layout presets: kept clean in the settings, ids as they are, only what a preset holds (which way words ran let go), its own sizes kept; their chances by id beside the canvas's own, gone with the preset", async () => {
   const { LAYOUTS, normalizeLayouts, normalizeSurprise } = await import("../ui/js/store.js");
   const { LAYOUT_PARTS } = await import("../ui/js/layers.js");
+  assert.deepEqual(LAYOUT_PARTS, ["title", "subtitle", "tag", "catname", "brand", "graphic", "accent"], "the colour block among them");
   const raw = [
     { id: "a1", name: "  Poster  ", template: "split", adjust: { size: 2, slant: -0.1, tw: 0.5, flip: true, nope: 3 },
-      parts: { title: { t: { all: { x: 0.1, y: 9, s: 0.5 }, by: { "1920x1080": { dx: 20 }, "1080x1920@vlog": { s: 2 }, "bad key": { dx: 5 } } }, shown: true, vertical: true, rules: { every: 2 } },
-        subtitle: { shown: false, vertical: "x".repeat(80) }, tag: { rules: { long: "y".repeat(500) } }, catname: { vertical: 1, rules: "true" }, graphic: { vertical: true } } },
+      orient: { tall: { template: "stack", adjust: { size: 0.3, flip: "yes" } }, sideways: { template: "split" }, wide: { template: "nope" } },
+      by: { "1080x1350": { template: "banner", adjust: {} }, "bad": { template: "split" } },
+      custom: ["1080x1350", "1080x1350", "12x9999", "30x30", "bad", 7, "4000x3000"],
+      parts: { title: { t: { all: { x: 0.1, y: 9, s: 0.5 }, by: { "1920x1080": { dx: 20 }, "1080x1920@vlog": { s: 2 }, "bad key": { dx: 5 } } }, shown: true, vertical: true, rules: true, hide: ["1080x1920", "1080x1920", "x", 3] },
+        subtitle: { shown: false, vertical: true, hide: ["1920x1080"] }, tag: { rules: { long: "y".repeat(500) } }, catname: { vertical: 1, rules: "true" }, graphic: { vertical: true },
+        accent: { t: { all: { x: 0.1 } }, hide: "1920x1080" } } },
     { id: "a1", name: "twin" },                                       // an id taken: a new one
     { id: "keep", template: "nope", adjust: { flip: "yes" } },        // "keep" is the canvas's own: a new one
-    { id: "bad id!", name: "n".repeat(90) },
+    { id: "bad id!", name: "n".repeat(90), custom: Array.from({ length: 30 }, (_, i) => `${1000 + i}x1000`) },
     null, 7,
   ];
   const got = normalizeLayouts(raw);
@@ -2141,15 +2146,31 @@ test("layout presets: kept clean in the settings, ids as they are; their chances
   assert.ok(b.id !== "a1" && c.id !== "keep" && d.id !== "bad id!" && new Set(got.map((p) => p.id)).size === 4, "ids unique, never the canvas's own");
   assert.deepEqual([c.template, c.adjust], ["stack", {}]);
   assert.equal(d.name.length, LAYOUTS.name);
-  for (const p of got) assert.deepEqual(Object.keys(p.parts), LAYOUT_PARTS, "every part there");
+  // the block per orientation and per size, as a profile keeps it; its own sizes, those a profile may have, each once
+  assert.deepEqual(a.orient, { tall: { template: "stack", adjust: { size: 0.3 } } });
+  assert.deepEqual(a.by, { "1080x1350": { template: "banner", adjust: {} } });
+  assert.deepEqual(a.custom, ["1080x1350", "4000x3000"]);
+  assert.equal(d.custom.length, LAYOUTS.custom);
+  assert.ok(!("orient" in b) && !("by" in b) && !("custom" in b), "none: left out");
+  assert.deepEqual(Object.keys(a.parts), LAYOUT_PARTS.filter((id) => id !== "brand"), "the parts it has an entry for, and none made up");
+  for (const p of [b, c, d]) assert.deepEqual(p.parts, {}, `${p.id}: no entry, no part`);
+  // a part: its place, whether it is shown, the sizes it is hidden at; nothing of which way its words ran
   assert.deepEqual(a.parts.title.t.all, { x: 0.1, y: 3, s: 0.5, r: 0, kx: 1, ky: 1 });
   assert.deepEqual(Object.keys(a.parts.title.t.by), ["1920x1080", "1080x1920@vlog"], "by size keys only");
-  assert.deepEqual([a.parts.title.shown, a.parts.title.vertical, "rules" in a.parts.title], [true, true, false], "which way the words run kept only when true");
-  assert.deepEqual([a.parts.subtitle.shown, "vertical" in a.parts.subtitle, "rules" in a.parts.tag], [false, false, false]);
-  assert.deepEqual([a.parts.catname, a.parts.graphic].map((q) => ["vertical" in q, "rules" in q]), [[false, false], [false, false]], "a number or a word is no way of running, nor has the graphic words");
-  assert.deepEqual([b.parts.catname.shown, b.parts.graphic.shown, b.parts.title.shown, b.parts.title.t], [false, false, true, { all: { x: 0, y: 0, s: 1, r: 0, kx: 1, ky: 1 }, by: {} }], "a part missing: where the template puts it, as a new design has it");
+  assert.deepEqual(Object.keys(a.parts.title).sort(), ["hide", "shown", "t"]);
+  assert.deepEqual([a.parts.title.shown, a.parts.title.hide], [true, ["1080x1920"]]);
+  assert.deepEqual(a.parts.subtitle, { t: { all: { x: 0, y: 0, s: 1, r: 0, kx: 1, ky: 1 }, by: {} }, shown: false }, "not shown: no sizes hidden at");
+  for (const p of got) for (const [id, q] of Object.entries(p.parts)) assert.ok(!("vertical" in q) && !("rules" in q), `${p.id} ${id}: which way its words run is not a preset's`);
+  assert.deepEqual([a.parts.accent.t.all.x, a.parts.accent.shown, "hide" in a.parts.accent], [0.1, true, false]);
+  assert.deepEqual([a.parts.catname.shown, a.parts.graphic.shown, a.parts.catname.t], [true, true, { all: { x: 0, y: 0, s: 1, r: 0, kx: 1, ky: 1 }, by: {} }], "an entry without `shown`: shown, where the template puts it");
   assert.equal(normalizeLayouts(Array.from({ length: 40 }, (_, i) => ({ id: "p" + i }))).length, LAYOUTS.most);
   assert.deepEqual(normalizeLayouts(JSON.parse(JSON.stringify(got))), got, "read back as written");
+  // an earlier preset: what it holds still, its words' way of running let go
+  const [old] = normalizeLayouts([{ id: "old", name: "Old", template: "banner", adjust: { size: 0.2 }, by: { "1920x1080": { template: "split", adjust: {} } },
+    parts: { title: { t: { all: { x: 0.05 } }, shown: true, vertical: true, rules: true }, tag: { shown: false, vertical: true } } }]);
+  assert.deepEqual([old.template, old.adjust, old.by, old.parts.title.t.all.x, old.parts.title.shown, old.parts.tag.shown], ["banner", { size: 0.2 }, { "1920x1080": { template: "split", adjust: {} } }, 0.05, true, false]);
+  assert.deepEqual(Object.keys(old).sort(), ["adjust", "by", "id", "name", "parts", "template"]);
+  assert.deepEqual(Object.keys(old.parts), ["title", "tag"], "the parts it never carried (the colour block among them) not made up: it leaves them as they are");
   // the settings: the presets, and the layout's chances only for those there are (a deleted one's let go)
   const s = normalizeSettings({ layouts: [{ id: "a1" }, { id: "b2" }], surprise: { odds: { groups: { layout: { keep: 0.2, a1: 0.5, gone: 0.3, "x y": 1 }, look: { deco: 1 } } } } });
   assert.deepEqual(s.layouts.map((p) => p.id), ["a1", "b2"]);
@@ -2189,52 +2210,57 @@ test("layout presets in Surprise me's chances: a group of the canvas's own and e
   assert.equal(pickLayout({ keep: 0, a1: 1 }, [], R), null, "a preset not there is not dealt");
 });
 
-test("Surprise me deals a layout preset exactly — the template, its adjustments, the parts' places, which are shown, which way their words run — and the rest as ever; the canvas's own as before", async () => {
+test("Surprise me deals a layout preset exactly — the colour block at each size, the parts' places, which are shown and where — and the rest as ever; the canvas's own as before", async () => {
   const { dealCover, oddsOf } = await import("../ui/js/deal.js");
-  const { takeLayout, putLayout, LAYOUT_PARTS } = await import("../ui/js/layers.js");
+  const { takeLayout, putLayout, presetLayout, LAYOUT_PARTS } = await import("../ui/js/layers.js");
   const { normalizeLayouts } = await import("../ui/js/store.js");
+  const { layoutOf } = await import("../ui/js/layout.js");
   const { LOOK_IDS } = await import("../ui/js/style.js");
   const rand = (seed) => () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
   const fresh = () => {
     const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p);
     const text = newLayer("text", { text: "hi", id: "hi" }); text.t.all.s = 1.7; c.layers.push(text);
     c.layers.find((l) => l.id === "title").t.all.s = 2.2;   // moved by hand
-    return { p, c, text, design: new Map(p.design.layers.map((l) => [l.id, l])) };
+    return { p, c, text, keys: p.sizes.map((z) => `${z.w}x${z.h}`), design: new Map(p.design.layers.map((l) => [l.id, l])) };
   };
-  // a preset unlike the sample: split, swapped, a wide band, the title up and smaller, the subtitle left out, the channel name in, the tag in columns
+  // a preset unlike the sample: swapped, a wide band, one tall size its own, the title up and smaller, the subtitle
+  // left out, the channel name in, the tag at two sizes only
   const make = (id, template, y) => {
-    const { p, c } = fresh(), by = (k) => c.layers.find((l) => l.id === k);
+    const { p, c, keys } = fresh(), by = (k) => c.layers.find((l) => l.id === k);
     p.style.template = template; p.style.layoutAdjust = { [template]: { size: 0.45, slant: 0.05, tw: 0.8, flip: true } };
+    p.style.layoutBy = { "1080x1920": { template: "stack", adjust: { size: 0.25 } } };
     by("title").t = { all: { x: 0.02, y, s: 0.8, r: -3, kx: 1, ky: 1 }, by: { "1080x1920": { dx: 0, dy: 40, s: 1.1, r: 0, kx: 1, ky: 1 } } };
     by("subtitle").off = true; by("subtitle").visible = false;
     delete by("catname").off; by("catname").visible = true; by("catname").t.all.y = 0.05;
-    by("tag").vertical = true;
+    by("tag").sizes = ["1920x1080", "1080x1920"];
     by("graphic").t.by["1920x1080@shot"] = { dx: 30, dy: 0, s: 1.2, r: 0, kx: 1, ky: 1 };
-    return normalizeLayouts([{ id, name: id, ...takeLayout(p.style, c.layers) }])[0];
+    return normalizeLayouts([{ id, name: id, ...takeLayout(p.style, c.layers, keys) }])[0];
   };
   const A = make("a1", "split", -0.1), B = make("b2", "banner", 0.08), layouts = [A, B];
-  const env = (design, R, more = {}) => ({ R, locks: {}, recipes: {}, rgb: [252, 191, 0], design, sizeKey: "1920x1080", layouts, ...more });
-  const shape = (p, c) => takeLayout(p.style, c.layers);
-  // one preset certain: every hand has exactly its structure, and the rest is dealt (looks differ, the text layer at a new one's size)
+  assert.deepEqual([A.by, A.parts.tag.hide, A.parts.subtitle.shown], [{ "1080x1920": { template: "stack", adjust: { size: 0.25 } } }, fresh().keys.filter((k) => k !== "1920x1080" && k !== "1080x1920"), false]);
+  const env = (design, R, more = {}) => ({ R, locks: {}, recipes: {}, rgb: [252, 191, 0], design, sizeKey: "1920x1080", sizes: fresh().keys, layouts, ...more });
+  const { id: _a, name: _n, ...structure } = A;
+  // one preset certain: every hand has exactly its structure, at every size, and the rest is dealt (looks differ, the text layer at a new one's size)
   const looks = new Set();
   for (let k = 0; k < 8; k++) {
-    const { p, c, text, design } = fresh(), R = rand(100 + k);
+    const { p, c, text, design, keys } = fresh(), R = rand(100 + k);
     p.style.layoutAdjust.split = { size: 0.2 };   // what the profile had for the template is the preset's now
     const got = dealCover(p.style, c, env(design, R, { odds: oddsOf({ groups: { layout: { a1: 1 } } }, layouts) }));
     assert.equal(got.layout, "a1");
-    assert.deepEqual(JSON.parse(JSON.stringify(shape(p, c))), JSON.parse(JSON.stringify({ template: A.template, adjust: A.adjust, parts: A.parts })), "the preset's structure, exactly");
-    assert.deepEqual([c.layers.find((l) => l.id === "subtitle").visible, c.layers.find((l) => l.id === "catname").visible], [false, true]);
+    assert.deepEqual(takeLayout(p.style, c.layers, keys), structure, "the preset's structure, exactly");
+    for (const key of keys) assert.deepEqual(layoutOf(p.style, key), presetLayout(A, key), key);
+    assert.deepEqual([c.layers.find((l) => l.id === "subtitle").visible, c.layers.find((l) => l.id === "catname").visible, c.layers.find((l) => l.id === "tag").sizes], [false, true, ["1920x1080", "1080x1920"]]);
     assert.ok(LOOK_IDS.includes(p.style.look));
     assert.deepEqual([text.t.all.s, c.layers.at(-1).id], [newLayer("text").t.all.s, "title"], "the rest as ever: the text layer at a new one's size, the title on top");
     looks.add(p.style.look);
   }
   assert.ok(looks.size > 3, "the looks still dealt: " + [...looks]);
-  // a way the preset's words do not run is taken off
+  // which way words run is the user's still: a preset neither sets it nor takes it off
   {
     const { p, c, design } = fresh();
     c.layers.find((l) => l.id === "title").vertical = true;
     dealCover(p.style, c, env(design, rand(5), { odds: oddsOf({ groups: { layout: { a1: 1 } } }, layouts) }));
-    assert.deepEqual([c.layers.find((l) => l.id === "title").vertical, c.layers.find((l) => l.id === "tag").vertical], [false, true]);
+    assert.deepEqual([c.layers.find((l) => l.id === "title").vertical, c.layers.find((l) => l.id === "tag").vertical], [true, false]);
   }
   // two at even chances: both dealt
   const seen = new Set();
@@ -2251,29 +2277,29 @@ test("Surprise me deals a layout preset exactly — the template, its adjustment
   }
   // where things stand locked: the canvas's layout stays, whatever the chances
   {
-    const { p, c, design } = fresh(), before = shape(p, c);
+    const { p, c, design, keys } = fresh(), before = takeLayout(p.style, c.layers, keys);
     dealCover(p.style, c, env(design, rand(9), { locks: { places: true }, odds: oddsOf({ groups: { layout: { a1: 1 } } }, layouts) }));
-    assert.deepEqual(shape(p, c), before);
+    assert.deepEqual(takeLayout(p.style, c.layers, keys), before);
   }
-  // a part locked stays as it is, dealt or put on by hand: its place, whether it shows, which way its words run; the
-  // template and the parts not locked are the preset's all the same
+  // a part locked stays as it is, dealt or put on by hand: its place, whether it shows and where; the block and the
+  // parts not locked are the preset's all the same
   for (const how of ["dealt", "applied"]) {
-    const { p, c, design } = fresh(), by = (k) => c.layers.find((l) => l.id === k), title = by("title"), sub = by("subtitle"), tag = by("tag");
-    title.t.all.x = 0.3; title.vertical = true; tag.rules = true;
+    const { p, c, design, keys } = fresh(), by = (k) => c.layers.find((l) => l.id === k), title = by("title"), sub = by("subtitle"), tag = by("tag");
+    title.t.all.x = 0.3; tag.sizes = ["1200x1200"];
     for (const L of [title, sub, tag]) L.locked = true;
-    const now = () => JSON.parse(JSON.stringify([title.t, sub.t, tag.t, sub.visible, !!sub.off, title.vertical, tag.vertical, tag.rules]));
+    const now = () => JSON.parse(JSON.stringify([title.t, sub.t, tag.t, sub.visible, !!sub.off, tag.sizes]));
     const kept = now();
     if (how === "dealt") dealCover(p.style, c, env(design, rand(3), { odds: oddsOf({ groups: { layout: { a1: 1 } } }, layouts) }));
-    else putLayout(p.style, c.layers, A);
+    else putLayout(p.style, c.layers, A, keys);
     assert.deepEqual(now(), kept, `${how}: the locked parts as they were`);
     assert.deepEqual([p.style.template, JSON.stringify(by("catname").t), by("catname").visible, by("brand").t], [A.template, JSON.stringify(A.parts.catname.t), true, A.parts.brand.t], `${how}: the rest as the preset has it`);
   }
   // put on a cover by hand, as Apply to canvas does, and taken off it again: the same preset
   {
-    const { p, c } = fresh();
-    putLayout(p.style, c.layers, B);
-    const back = takeLayout(p.style, c.layers);
-    assert.deepEqual([back.template, back.adjust, JSON.stringify(back.parts)], [B.template, B.adjust, JSON.stringify(B.parts)]);
+    const { p, c, keys } = fresh();
+    putLayout(p.style, c.layers, B, keys);
+    const { id: _b, name: _m, ...rest } = B;
+    assert.deepEqual(takeLayout(p.style, c.layers, keys), rest);
     assert.deepEqual(LAYOUT_PARTS.map((id) => !!c.layers.find((l) => l.id === id).off), LAYOUT_PARTS.map((id) => !B.parts[id].shown));
   }
 });
@@ -3291,36 +3317,268 @@ test("the scope's middle choice: an edit reaches every size facing this one's wa
   assert.deepEqual(["all", "orient", "size", "both", undefined].map((scope) => normalizeSettings({ scope }).scope), ["all", "orient", "size", "all", "all"]);
 });
 
-test("layout presets carry each size's own layout: taken from the profile, kept clean, put back on it (or none), dealt as they are", async () => {
-  const { takeLayout, putLayout } = await import("../ui/js/layers.js");
+test("a layout preset's colour block, per size: taken by orientation where a profile's sizes facing one way agree, else by size; a size it never saw drawn as those facing its way; a new one wide side by side, the rest stacked", async () => {
+  const { takeLayout, presetLayout, newBlock } = await import("../ui/js/layers.js");
   const { normalizeLayouts } = await import("../ui/js/store.js");
-  const { dealCover, oddsOf } = await import("../ui/js/deal.js");
-  const { setLayoutOf, layoutOf } = await import("../ui/js/layout.js");
-  const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p);
-  assert.equal("by" in takeLayout(p.style, c.layers), false, "a profile with none: a preset with none, as before");
-  setLayoutOf(p.style, ["1920x1080", "1600x1200"], { template: "split", adjust: { size: 0.35 } });
-  const taken = takeLayout(p.style, c.layers);
-  assert.deepEqual(taken.by, { "1920x1080": { template: "split", adjust: { size: 0.35 } }, "1600x1200": { template: "split", adjust: { size: 0.35 } } });
-  assert.notEqual(taken.by, p.style.layoutBy, "a copy");
-  const [kept] = normalizeLayouts([{ id: "w", ...taken, by: { ...taken.by, "bad": { template: "split" }, "1080x1920": { template: "nope" }, "1200x1200": { template: "banner", adjust: { th: 9 } } } }]);
-  assert.deepEqual(kept.by, { "1920x1080": { template: "split", adjust: { size: 0.35 } }, "1600x1200": { template: "split", adjust: { size: 0.35 } }, "1200x1200": { template: "banner", adjust: { th: 1 } } }, "size keys, templates there are, adjustments in range");
-  assert.deepEqual(normalizeLayouts(JSON.parse(JSON.stringify([kept]))), [kept], "read back as written");
-  assert.equal("by" in normalizeLayouts([{ id: "n", by: { x: 1 } }])[0], false);
-  // put on another profile: its sizes as the preset has them; a preset with none lays every size out alike again
+  const { setLayoutOf, layoutOf, layoutByOrient } = await import("../ui/js/layout.js");
+  const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p), keys = p.sizes.map((z) => `${z.w}x${z.h}`);
+  // laid out alike: the profile's own, no orientation's nor size's
+  const plain = takeLayout(p.style, c.layers, keys);
+  assert.deepEqual([plain.template, plain.adjust, "orient" in plain, "by" in plain], ["stack", {}, false, false]);
+  // wide side by side, the rest stacked: the wide sizes agree, so the wide ones have it as theirs
+  layoutByOrient(p.style, p.sizes);
+  const wide = takeLayout(p.style, c.layers, keys);
+  assert.deepEqual([wide.template, wide.orient, "by" in wide], ["stack", { wide: { template: "split", adjust: {} } }, false]);
+  // one tall size its own: the tall ones no longer agree, so the one drawn otherwise has its own
+  setLayoutOf(p.style, ["1080x1920"], { template: "stack", adjust: { flip: true, size: 0.3 } });
+  const one = takeLayout(p.style, c.layers, keys);
+  assert.deepEqual([one.orient, one.by], [{ wide: { template: "split", adjust: {} } }, { "1080x1920": { template: "stack", adjust: { flip: true, size: 0.3 } } }]);
+  for (const k of keys) assert.deepEqual(presetLayout(one, k), layoutOf(p.style, k), `${k}: drawn as the canvas draws it`);
+  assert.notEqual(one.by["1080x1920"].adjust, p.style.layoutBy["1080x1920"].adjust, "a copy");
+  // a size it never saw: as those facing its way, else the default
+  assert.deepEqual(["1280x720", "1080x1350", "1000x1000"].map((k) => presetLayout(one, k).template), ["split", "stack", "stack"]);
+  // a new preset: wide sizes side by side, square and tall ones stacked, each as its template comes
+  const made = normalizeLayouts([{ id: "n", ...newBlock() }])[0];
+  assert.deepEqual([made.template, made.orient, "by" in made], ["stack", { wide: { template: "split", adjust: {} } }, false]);
+  const want = { "1920x1080": "split", "1600x1200": "split", "900x383": "split", "1200x1200": "stack", "1200x1600": "stack", "1080x1920": "stack", "1080x1350": "stack", "1250x1000": "split" };
+  for (const [k, template] of Object.entries(want)) assert.deepEqual(presetLayout(made, k), { template, adjust: {} }, k);
+  assert.deepEqual(normalizeLayouts(JSON.parse(JSON.stringify([made, { ...one, id: "o" }]))), normalizeLayouts([made, { ...one, id: "o" }]), "read back as written");
+});
+
+test("a layout preset put on a profile: the block at the profile's sizes alone, each as the preset draws it; a part unticked left out, one hidden at some sizes kept to the others; an earlier preset as it was", async () => {
+  const { takeLayout, takeParts, putLayout, presetLayout, newBlock } = await import("../ui/js/layers.js");
+  const { normalizeLayouts } = await import("../ui/js/store.js");
+  const { layoutOf } = await import("../ui/js/layout.js");
+  const p = normalizeProfile(sampleProfile("en")), keys = p.sizes.map((z) => `${z.w}x${z.h}`);
+  // taken from a cover: a part counts as ticked where the cover has it — not left out, at that size —, its eye shut or not
+  const c = normalizeCover({}, p), at = (L, k) => L.find((l) => l.id === k);
+  at(c.layers, "subtitle").off = true; at(c.layers, "subtitle").visible = false;
+  at(c.layers, "title").visible = false;
+  at(c.layers, "tag").sizes = ["1920x1080", "1080x1920"];
+  at(c.layers, "brand").sizes = [];
+  at(c.layers, "title").t.by = { "1920x1080": { dx: 10, dy: 0, s: 1, r: 0, kx: 1, ky: 1 }, "4000x100": { dx: 9, dy: 0, s: 1, r: 0, kx: 1, ky: 1 } };
+  const taken = takeLayout(p.style, c.layers, keys);
+  assert.deepEqual(Object.fromEntries(Object.entries(taken.parts).map(([id, q]) => [id, [q.shown, q.hide || null]])),
+    { title: [true, null], subtitle: [false, null], tag: [true, keys.filter((k) => k !== "1920x1080" && k !== "1080x1920")], catname: [false, null], brand: [false, null], graphic: [false, null], accent: [true, null] });
+  assert.deepEqual(Object.keys(taken.parts.title.t.by), ["1920x1080"], "its places at the profile's sizes");
+  // the editor's: what the preset had at another profile's sizes is kept
+  const kept = takeParts(c.layers, ["1920x1080", "1080x1920"], { tag: { hide: ["1200x1600", "1920x1080"] } });
+  assert.deepEqual([kept.tag.hide, Object.keys(kept.title.t.by)], [["1200x1600"], ["1920x1080", "4000x100"]]);
+  // put on another cover, the profile laid out otherwise before
   const q = normalizeProfile(sampleProfile("en")), d = normalizeCover({}, q);
-  setLayoutOf(q.style, ["1080x1920"], { template: "banner", adjust: {} });
-  putLayout(q.style, d.layers, kept);
-  assert.deepEqual(["1920x1080", "1080x1920", "1200x1200"].map((k) => layoutOf(q.style, k).template), ["split", "stack", "banner"]);
-  putLayout(q.style, d.layers, normalizeLayouts([{ id: "old", template: "split" }])[0]);
-  assert.equal("layoutBy" in q.style, false);
-  assert.deepEqual(["1920x1080", "1080x1920"].map((k) => layoutOf(q.style, k).template), ["split", "split"]);
-  // Surprise me: a preset dealt brings its sizes' layouts; the canvas's own kept as it is
+  q.style.layoutBy = { "1080x1920": { template: "banner", adjust: {} } };
+  at(d.layers, "title").sizes = ["1080x1920"];
+  delete at(d.layers, "catname").off; at(d.layers, "catname").visible = true;
+  at(d.layers, "tag").visible = false;   // hidden by its eye
+  const preset = normalizeLayouts([{ id: "w", ...newBlock(), by: { "1080x1920": { template: "stack", adjust: { flip: true } }, "1080x1350": { template: "split", adjust: { size: 0.3 } } },
+    custom: ["1080x1350"], parts: { ...taken.parts, title: { ...taken.parts.title, t: { all: taken.parts.title.t.all, by: { "1080x1350": { dx: 5 }, "1080x1920": { dy: 7 } } } } } }])[0];
+  putLayout(q.style, d.layers, preset, keys);
+  for (const k of keys) assert.deepEqual(layoutOf(q.style, k), presetLayout(preset, k), k);
+  assert.deepEqual(Object.keys(q.style.layoutBy).sort(), ["1080x1920", "1600x1200", "1920x1080", "900x383"], "the profile's sizes drawn otherwise than the default, and no other");
+  assert.deepEqual(Object.keys(at(d.layers, "title").t.by), ["1080x1920"], "places at the profile's sizes alone");
+  assert.deepEqual([at(d.layers, "title").sizes, at(d.layers, "title").visible], [undefined, true], "ticked: shown at every size, as the preset has it");
+  assert.deepEqual([at(d.layers, "subtitle").off, at(d.layers, "catname").off, at(d.layers, "brand").off, at(d.layers, "accent").off], [true, true, true, undefined], "unticked: left out");
+  assert.deepEqual(at(d.layers, "tag").sizes, ["1920x1080", "1080x1920"], "hidden at some sizes: kept to the others");
+  assert.deepEqual([at(d.layers, "tag").visible, !!at(d.layers, "tag").off], [false, false], "hidden by its eye: there, and hidden still");
+  // an earlier preset, with no orientation's: every size of the profile drawn as it was saved
+  const [old] = normalizeLayouts([{ id: "old", template: "banner", adjust: { size: 0.2 }, by: { "1920x1080": { template: "split", adjust: {} }, "720x720": { template: "split", adjust: {} } }, parts: { title: { shown: true, vertical: true } } }]);
+  const was = at(d.layers, "title").vertical;
+  putLayout(q.style, d.layers, old, keys);
+  assert.deepEqual(keys.map((k) => layoutOf(q.style, k).template), keys.map((k) => (k === "1920x1080" ? "split" : "banner")));
+  assert.deepEqual([Object.keys(q.style.layoutBy), at(d.layers, "title").vertical], [["1920x1080"], was], "which way its words run left as it was");
+});
+
+test("a layout preset's colour block changed where the scope reaches: each size reached gets the change made to what it had; what comes to what it would follow anyway is let go", async () => {
+  const { setPresetLayout, presetLayout, newBlock } = await import("../ui/js/layers.js");
+  const { onSide } = await import("../ui/js/layout.js");
+  const bigger = (lay) => ({ template: lay.template, adjust: { ...lay.adjust, size: 0.4 } });
+  const p = newBlock();
+  // this size only: its own
+  setPresetLayout(p, "size", "1080x1920", (lay) => onSide(lay, "top"));
+  assert.deepEqual(p.by, { "1080x1920": { template: "stack", adjust: { flip: true } } });
+  assert.deepEqual(presetLayout(p, "1200x1600"), { template: "stack", adjust: {} }, "the other tall sizes as they were");
+  // its orientation: the orientation's own, and each size's own facing that way
+  setPresetLayout(p, "orient", "1200x1600", bigger);
+  assert.deepEqual([p.orient.tall, p.by["1080x1920"], presetLayout(p, "1200x1200")], [{ template: "stack", adjust: { size: 0.4 } }, { template: "stack", adjust: { flip: true, size: 0.4 } }, { template: "stack", adjust: {} }]);
+  // every size, moved to the right: the default, each orientation's, each size's; the wide ones' own now the default's, let go
+  setPresetLayout(p, "all", "1920x1080", (lay) => onSide(lay, "right"));
+  assert.deepEqual(p, { template: "split", adjust: {}, orient: { tall: { template: "split", adjust: { size: 0.4 } } } });
+  for (const k of ["1920x1080", "1200x1200", "1200x1600", "1080x1920", "1080x1350"]) assert.equal(presetLayout(p, k).template, "split", k);
+  // a size's own made what it follows anyway: let go
+  setPresetLayout(p, "size", "1080x1920", (lay) => onSide(lay, "bottom"));
+  setPresetLayout(p, "size", "1080x1920", (lay) => onSide(lay, "right"));
+  assert.equal("by" in p, false);
+});
+
+test("the layout editor's block changed where blocks do not lie alike: dragged across, each to the side across from its own; to a side beside, all there; made bigger or leaned, each by as much of its own block", async () => {
+  const { setPresetLayout, presetLayout, newBlock } = await import("../ui/js/layers.js");
+  const { sideOf, sideLike, scaleBlock, blockValues, LAYOUT_LIMITS } = await import("../ui/js/layout.js");
+  const near = (a, b) => Math.abs(a - b) < 1e-9, sides = (p) => ["1920x1080", "1200x1200", "1080x1920"].map((k) => sideOf(presetLayout(p, k)));
+  // a new preset, its wide panel dragged from the right to the left at every size: the stacked bands go to the top, not to the left
+  const a = newBlock();
+  assert.deepEqual(sides(a), ["right", "bottom", "bottom"]);
+  setPresetLayout(a, "all", "1920x1080", (lay) => sideLike(lay, "right", "left"));
+  assert.deepEqual(sides(a), ["left", "top", "top"], "mirrored, each the way it faces");
+  setPresetLayout(a, "all", "1080x1920", (lay) => sideLike(lay, "top", "bottom"));
+  assert.deepEqual(sides(a), ["right", "bottom", "bottom"], "and back, from a tall size");
+  // toward a side beside: every block there, a band or a panel
+  const b = newBlock();
+  setPresetLayout(b, "all", "1920x1080", (lay) => sideLike(lay, "right", "bottom"));
+  assert.deepEqual(sides(b), ["bottom", "bottom", "bottom"]);
+  setPresetLayout(b, "all", "1080x1920", (lay) => sideLike(lay, "bottom", "left"));
+  assert.deepEqual(sides(b), ["left", "left", "left"]);
+  // the sizes facing one way (what the editor opens on): the others as they were
+  const c = newBlock();
+  setPresetLayout(c, "orient", "1920x1080", (lay) => sideLike(lay, "right", "left"));
+  assert.deepEqual(sides(c), ["left", "bottom", "bottom"]);
+  // the wide panel's middle diamond dragged at every size, a third wider: the band a third deeper, in its own height
+  // (not the panel's share of the width put on it), its slant as it was; each layout told whose it is and which is drawn
+  const d = newBlock(), seen = [], from = blockValues(presetLayout(d, "1920x1080"), 1920, 1080), now = { size: (from.size * 4) / 3, slant: from.slant };
+  const own = (lay, where) => blockValues(lay, ...(where === "wide" ? [1920, 1080] : [1200, 1200]));
+  setPresetLayout(d, "all", "1920x1080", (lay, where, here) => {
+    seen.push([where, here]);
+    return here ? { template: lay.template, adjust: { ...lay.adjust, size: now.size } } : scaleBlock(lay, own(lay, where), from, now, false);
+  });
+  assert.deepEqual(seen, [["wide", true], [null, false]]);
+  const band = blockValues({ template: "stack", adjust: {} }, 1200, 1200);
+  assert.ok(near(d.orient.wide.adjust.size, now.size) && near(d.adjust.size, (band.size * 4) / 3), JSON.stringify(d));
+  assert.ok(!("slant" in d.adjust) && band.size < from.size, "the band shallower than the panel is wide, and made deeper by as much of itself");
+  // an end's diamond: the edge leaned by a tenth of the panel, the band's by a tenth of the band
+  const e = newBlock(), lean = { size: from.size, slant: from.slant + 0.1 * from.size };
+  setPresetLayout(e, "all", "1920x1080", (lay, where, here) => (here ? { template: lay.template, adjust: { ...lay.adjust, ...lean } } : scaleBlock(lay, own(lay, where), from, lean)));
+  assert.ok(near(e.adjust.size, band.size) && near(e.adjust.slant, band.slant + 0.1 * band.size), JSON.stringify(e.adjust));
+  // never past the limits
+  assert.deepEqual(scaleBlock({ template: "stack", adjust: { flip: true } }, { size: 0.5, slant: 0.2 }, { size: 0.2, slant: 0 }, { size: 0.5, slant: 0.2 }), { template: "stack", adjust: { flip: true, size: LAYOUT_LIMITS.size[1], slant: LAYOUT_LIMITS.slant[1] } });
+});
+
+test("a new layout preset has every part in it, shown at every size where the template puts it — the channel name and graphic too", async () => {
+  const { newPreset, putLayout, LAYOUT_PARTS } = await import("../ui/js/layers.js");
+  const { normalizeLayouts } = await import("../ui/js/store.js");
+  const made = normalizeLayouts([{ id: "n", name: "n", ...newPreset() }])[0];
+  assert.deepEqual(Object.keys(made.parts), LAYOUT_PARTS);
+  for (const id of LAYOUT_PARTS) assert.deepEqual(made.parts[id], { t: newLayer(id).t, shown: true }, id);
+  // put on a cover of a new design, which leaves the channel name and graphic out: they come in, the graphic on the block
+  const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p), keys = p.sizes.map((z) => `${z.w}x${z.h}`), by = (id) => c.layers.find((l) => l.id === id);
+  assert.deepEqual([by("catname").off, by("graphic").off], [true, true]);
+  putLayout(p.style, c.layers, made, keys);
+  for (const id of LAYOUT_PARTS) assert.deepEqual([!!by(id).off, by(id).visible, by(id).sizes, by(id).t], [false, true, undefined, newLayer(id).t], id);
+});
+
+test("a part hidden by its eye is still the layout's: with Hide layout on, Save as layout keeps the parts ticked, and the preset put back changes nothing", async () => {
+  const { takeLayout, putLayout, isLayout, LAYOUT_PARTS } = await import("../ui/js/layers.js");
+  const { normalizeLayouts } = await import("../ui/js/store.js");
+  const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p), keys = p.sizes.map((z) => `${z.w}x${z.h}`), by = (id) => c.layers.find((l) => l.id === id);
+  delete by("catname").off; by("catname").visible = true;
+  by("tag").sizes = ["1920x1080"];
+  for (const L of c.layers) if (isLayout(L) && !L.off) L.visible = false;   // Hide layout
+  const taken = takeLayout(p.style, c.layers, keys, c.catId);
+  assert.deepEqual(LAYOUT_PARTS.map((id) => taken.parts[id].shown), LAYOUT_PARTS.map((id) => id !== "graphic"), "ticked but the one left out");
+  assert.deepEqual(taken.parts.tag.hide, keys.filter((k) => k !== "1920x1080"));
+  const before = JSON.parse(JSON.stringify([p.style, c.layers]));
+  putLayout(p.style, c.layers, normalizeLayouts([{ id: "h", ...taken }])[0], keys);
+  assert.deepEqual(JSON.parse(JSON.stringify([p.style, c.layers])), before, "none left out, none shown, none moved: the room each takes the same");
+});
+
+test("an earlier layout preset leaves alone what it never carried: the colour block, moved or left out, stays so; the block's layout is the preset's", async () => {
+  const { putLayout } = await import("../ui/js/layers.js");
+  const { normalizeLayouts } = await import("../ui/js/store.js");
+  const [old] = normalizeLayouts([{ id: "old", template: "split", adjust: { size: 0.3 }, parts: { title: { shown: true, t: { all: { x: 0.05 } } }, catname: { shown: true }, graphic: { shown: false } } }]);
+  assert.deepEqual(Object.keys(old.parts), ["title", "catname", "graphic"]);
+  for (const out of [false, true]) {
+    const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p), keys = p.sizes.map((z) => `${z.w}x${z.h}`), by = (id) => c.layers.find((l) => l.id === id);
+    const block = by("accent");
+    block.t.all.y = 0.04; block.t.by["1080x1920"] = { dx: 0, dy: 20, s: 1, r: 0, kx: 1, ky: 1 };
+    if (out) { block.off = true; block.visible = false; }
+    const was = JSON.parse(JSON.stringify(block));
+    putLayout(p.style, c.layers, old, keys);
+    assert.deepEqual(JSON.parse(JSON.stringify(block)), was, out ? "left out, it stays out" : "moved, it stays where it was");
+    assert.deepEqual([p.style.template, p.style.layoutAdjust.split, by("title").t.all.x, by("catname").off, by("graphic").off], ["split", { size: 0.3 }, 0.05, undefined, true], "what it carries, as ever");
+  }
+});
+
+test("the colour block locked keeps its layout, dealt or applied: the template, its adjustments and each size's own stay; the parts not locked are the preset's", async () => {
+  const { dealCover, oddsOf } = await import("../ui/js/deal.js");
+  const { newPreset, putLayout } = await import("../ui/js/layers.js");
+  const { normalizeLayouts } = await import("../ui/js/store.js");
+  const { layoutOf } = await import("../ui/js/layout.js");
   const rand = (seed) => () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
-  for (const [odds, want] of [[{ groups: { layout: { w: 1 } } }, kept.by], [{ groups: { layout: { keep: 1 } } }, { "1080x1920": { template: "stack", adjust: {} } }]]) {
-    const r = normalizeProfile(sampleProfile("en")), e = normalizeCover({}, r);
-    setLayoutOf(r.style, ["1080x1920"], { template: "stack", adjust: {} });
-    dealCover(r.style, e, { R: rand(11), locks: {}, recipes: {}, rgb: [252, 191, 0], design: new Map(r.design.layers.map((l) => [l.id, l])), sizeKey: "1920x1080", layouts: [kept], odds: oddsOf(odds, [kept]) });
-    assert.deepEqual(r.style.layoutBy, want);
+  const fresh = newPreset(), preset = normalizeLayouts([{ id: "x", ...fresh, adjust: { size: 0.5 }, parts: { ...fresh.parts, title: { shown: true, t: { all: { x: 0.2 } } }, subtitle: { shown: false } } }])[0];
+  for (const how of ["dealt", "applied"]) for (const locked of [true, false]) {
+    const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p), keys = p.sizes.map((z) => `${z.w}x${z.h}`), by = (id) => c.layers.find((l) => l.id === id);
+    p.style.template = "stack"; p.style.layoutAdjust = { stack: { size: 0.3, slant: 0.02 } }; p.style.layoutBy = { "1080x1920": { template: "stack", adjust: { flip: true } } };
+    by("accent").locked = locked; by("accent").t.all.y = 0.05;
+    const block = () => JSON.parse(JSON.stringify([p.style.template, p.style.layoutAdjust, p.style.layoutBy, by("accent").t])), was = block();
+    if (how === "dealt") dealCover(p.style, c, { R: rand(4), locks: {}, recipes: {}, rgb: [252, 191, 0], design: new Map(p.design.layers.map((l) => [l.id, l])), sizeKey: "1920x1080", sizes: keys, layouts: [preset], odds: oddsOf({ groups: { layout: { x: 1 } } }, [preset]) });
+    else putLayout(p.style, c.layers, preset, keys);
+    if (locked) assert.deepEqual(block(), was, `${how}: the block as it was`);
+    else assert.deepEqual([layoutOf(p.style, "1920x1080").template, layoutOf(p.style, "1080x1920"), by("accent").t.all.y], ["split", { template: "stack", adjust: { size: 0.5 } }, 0], `${how}: the preset's block`);
+    assert.deepEqual([by("title").t.all.x, by("subtitle").off], [0.2, true], `${how}: the parts not locked, the preset's`);
+  }
+});
+
+test("a layout preset places the channel graphic for every channel: taken from a cover, the channel's own places become the size's; the editor's moves are the size's", async () => {
+  const { takeLayout, putLayout, plainPlaces, adjust: move } = await import("../ui/js/layers.js");
+  const { normalizeLayouts } = await import("../ui/js/store.js");
+  const e = (dx) => ({ dx, dy: 0, s: 1, r: 0, kx: 1, ky: 1 });
+  const p = normalizeProfile(sampleProfile("en")), keys = p.sizes.map((z) => `${z.w}x${z.h}`), c = normalizeCover({}, p), g = c.layers.find((l) => l.id === "graphic");
+  delete g.off; g.visible = true;
+  g.t.by = { "1920x1080@shot": e(30), "1080x1920": e(12), "1080x1920@film": e(-40), "1200x1200@shot": e(5), "1200x1200": e(9) };
+  const taken = takeLayout(p.style, c.layers, keys, c.catId);
+  assert.deepEqual(taken.parts.graphic.t.by, { "1080x1920": e(12), "1200x1200": e(5), "1920x1080": e(30) }, "this channel's as the size's, another's let go");
+  assert.deepEqual(plainPlaces({ all: {}, by: { "1920x1080": e(1) } }, "shot").by, { "1920x1080": e(1) }, "nothing of a channel's: as it is");
+  // put on another channel's cover, the graphic stands where it stood on this one
+  const preset = normalizeLayouts([{ id: "g", ...taken }])[0], d = normalizeCover({ catId: "film" }, p), h = d.layers.find((l) => l.id === "graphic");
+  putLayout(p.style, d.layers, preset, keys);
+  for (const k of keys) { const [w, hh] = virtualSize(...k.split("x").map(Number)); assert.deepEqual(resolve(h, w, hh, k, "film"), resolve(g, w, hh, k, "shot"), k); }
+  // the editor moves it with no channel: the size's own, for every channel
+  move(h, { vw: 1920, vh: 1080, key: "1920x1080", catId: null, group: [] }, "size", { ddx: 10 });
+  assert.deepEqual(Object.keys(h.t.by).filter((k) => k.includes("@")), []);
+});
+
+test("a colour block left out has no diamonds to drag", async () => {
+  const { layoutHandles } = await import("../ui/js/render.js");
+  const cv = { _layout: layout("stack", 1920, 1080) }, block = newLayer("accent");
+  assert.deepEqual(layoutHandles(cv, block).map((h) => h.id), ["a", "b", "m"]);
+  assert.deepEqual(layoutHandles(cv, { ...block, off: true }), []);
+});
+
+test("the colour block dragged toward a side: the way it went most, past a little; on that side as a band (Stack) or a panel (Split), swapped on top and on the left, its adjustments going with it", async () => {
+  const { SIDES, sideOf, onSide, sideToward, layout, adjustLayout } = await import("../ui/js/layout.js");
+  assert.deepEqual(SIDES, ["bottom", "top", "right", "left"]);
+  assert.deepEqual([sideToward(5, 3, 20), sideToward(-200, 40, 20), sideToward(150, -30, 20), sideToward(10, 90, 20), sideToward(-40, -300, 20)], [null, "left", "right", "bottom", "top"]);
+  const lays = [["stack", {}], ["stack", { flip: true }], ["split", {}], ["split", { flip: true }], ["banner", {}], ["banner", { flip: true }]].map(([template, adjust]) => ({ template, adjust }));
+  assert.deepEqual(lays.map(sideOf), ["bottom", "top", "right", "left", "bottom", "top"]);
+  const from = { template: "stack", adjust: { size: 0.3, slant: 0.05 } };
+  assert.deepEqual(SIDES.map((s) => onSide(from, s)), [from, { template: "stack", adjust: { size: 0.3, slant: 0.05, flip: true } }, { template: "split", adjust: { size: 0.3, slant: 0.05 } }, { template: "split", adjust: { size: 0.3, slant: 0.05, flip: true } }]);
+  assert.equal(onSide(from, "bottom"), from, "on that side already: as it is");
+  assert.deepEqual([onSide(lays[4], "top"), onSide(lays[5], "left"), onSide(lays[3], "bottom")], [{ template: "banner", adjust: { flip: true } }, { template: "split", adjust: { flip: true } }, { template: "stack", adjust: {} }], "a slim band stays slim along the top; a panel let go of its swap along the foot");
+  assert.equal(onSide(from, "middle"), from);
+  for (const lay of lays) for (const s of SIDES) assert.equal(sideOf(onSide(lay, s)), s, `${JSON.stringify(lay)} to ${s}`);
+  // and drawn there: the block's polygon against that side of the canvas
+  for (const s of SIDES) {
+    const lay = onSide({ template: "stack", adjust: {} }, s), g = adjustLayout(layout(lay.template, 1920, 1080), 1920, 1080, lay.adjust), xs = g.accent.map((q) => q[0]), ys = g.accent.map((q) => q[1]);
+    assert.ok({ bottom: Math.max(...ys) >= 1080, top: Math.min(...ys) <= 0 && Math.max(...ys) < 1080, right: Math.max(...xs) >= 1920 && Math.min(...xs) > 0, left: Math.min(...xs) <= 0 && Math.max(...xs) < 1920 }[s], s);
+  }
+});
+
+test("Surprise me deals a preset at the profile's sizes only: the block at each as the preset draws it, places and hiding there, nothing of the sizes the profile has not", async () => {
+  const { dealCover, oddsOf } = await import("../ui/js/deal.js");
+  const { presetLayout, newBlock } = await import("../ui/js/layers.js");
+  const { normalizeLayouts } = await import("../ui/js/store.js");
+  const { layoutOf } = await import("../ui/js/layout.js");
+  const rand = (seed) => () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const p = normalizeProfile({ ...sampleProfile("en"), sizes: [{ w: 1920, h: 1080 }, { w: 1080, h: 1920 }] }), keys = ["1920x1080", "1080x1920"];
+  const preset = normalizeLayouts([{ id: "x", ...newBlock(), custom: ["1080x1350", "1200x1200"], by: { "1080x1350": { template: "split", adjust: { flip: true } }, "1200x1200": { template: "split", adjust: {} } },
+    parts: { title: { shown: true, t: { all: { x: 0.02 }, by: { "1080x1350": { dx: 40 }, "1080x1920": { dy: 30 } } } }, subtitle: { shown: false }, tag: { shown: true, hide: ["1080x1920", "1080x1350"] } } }])[0];
+  for (let k = 0; k < 6; k++) {
+    const st = JSON.parse(JSON.stringify(p.style)), c = normalizeCover({ tag: "EP.01" }, p), by = (id) => c.layers.find((l) => l.id === id);
+    const got = dealCover(st, c, { R: rand(20 + k), locks: {}, recipes: {}, rgb: [252, 191, 0], design: new Map(p.design.layers.map((l) => [l.id, l])), sizeKey: "1920x1080", sizes: keys, layouts: [preset], odds: oddsOf({ groups: { layout: { x: 1 } } }, [preset]) });
+    assert.equal(got.layout, "x");
+    for (const key of keys) assert.deepEqual(layoutOf(st, key), presetLayout(preset, key), key);
+    assert.deepEqual([layoutOf(st, "1920x1080").template, layoutOf(st, "1080x1920").template], ["split", "stack"]);
+    assert.ok(Object.keys(st.layoutBy || {}).every((key) => keys.includes(key)), "no size the profile has not");
+    assert.deepEqual([Object.keys(by("title").t.by), by("title").t.all.x, by("subtitle").off, by("tag").sizes], [["1080x1920"], 0.02, true, ["1920x1080"]]);
+    assert.deepEqual(normalizeProfile({ ...p, style: st }).style.layoutBy, st.layoutBy, "kept by the profile as dealt");
   }
 });
 

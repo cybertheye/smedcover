@@ -127,6 +127,66 @@ export function layoutByOrient(style, sizes) {
   }
   if (Object.keys(by).length) style.layoutBy = by; else delete style.layoutBy;
 }
+/** The two layouts { template, adjust } the same: one template, and the same adjustments (in whatever order they were set). */
+export function sameLayout(a, b) {
+  const x = a.adjust || {}, y = b.adjust || {}, keys = Object.keys(x);
+  return a.template === b.template && keys.length === Object.keys(y).length && keys.every((k) => x[k] === y[k]);
+}
+
+// ---------- the colour block's side, as a layout preset's editor moves it (see layoutEditor in app.js)
+// Where the block lies is not a setting of its own: it is the template (Stack and Banner along the foot, Split down
+// the right) and whether the halves are swapped (`flip`: the band on top, the panel on the left). Dragged toward
+// another side, the block goes there, as one of those.
+/** The sides the colour block may lie on. */
+export const SIDES = ["bottom", "top", "right", "left"];
+/** The side the colour block of layout `lay` ({ template, adjust }) lies on. */
+export const sideOf = (lay) => (lay.template === "split" ? (lay.adjust && lay.adjust.flip ? "left" : "right") : lay.adjust && lay.adjust.flip ? "top" : "bottom");
+/**
+ * Layout `lay` with its colour block on `side`: along the top or the foot, a band (Stack; an old preset's slim band,
+ * Banner, stays slim); down the right or the left, a panel (Split); swapped (`flip`) on top and on the left. Its
+ * other adjustments go with it — how much it takes, how its edge leans, the title's box, as fractions of the picture
+ * (see adjustLayout) — so the block is the same one moved. `lay` itself when it lies there already.
+ */
+export function onSide(lay, side) {
+  if (!SIDES.includes(side) || sideOf(lay) === side) return lay;
+  const band = side === "top" || side === "bottom", adjust = { ...(lay.adjust || {}) };
+  if (side === "top" || side === "left") adjust.flip = true; else delete adjust.flip;
+  return { template: band ? (lay.template === "banner" ? "banner" : "stack") : "split", adjust };
+}
+/**
+ * The side a drag of the colour block by (dx, dy) leads toward — the way it went most, across or down — or null while
+ * it is still within `min` of where it began (so a press that wobbles moves nothing). In the canvas's units.
+ */
+export function sideToward(dx, dy, min) {
+  if (Math.hypot(dx, dy) < min) return null;
+  return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "bottom" : "top";
+}
+/** The side across the canvas from each side. */
+const ACROSS = { bottom: "top", top: "bottom", right: "left", left: "right" };
+/**
+ * Layout `lay` ({ template, adjust }) moved as another block was dragged from side `from` to side `to`, where one change
+ * reaches blocks that need not lie alike (every size: wide ones side by side, the others stacked). Toward the side
+ * across, a mirror: each goes to the side across from its own — a panel on the right to the left, a band along the
+ * foot to the top —, so what lay side by side still does, and what was stacked still is. Toward a side beside, a
+ * turn: each goes to that side, a band there or a panel. The block dragged goes where it was dragged either way.
+ */
+export const sideLike = (lay, from, to) => onSide(lay, to === ACROSS[from] ? ACROSS[sideOf(lay)] : to);
+/** The `size` and `slant` the colour block of layout `lay` has on a canvas of w × h (virtual units): its own, else as its template comes (see layoutValues). */
+export const blockValues = (lay, w, h) => layoutValues(adjustLayout(layout(lay.template, w, h), w, h, lay.adjust || {}), w, h);
+/**
+ * Layout `lay` with its colour block made bigger or smaller and leaned as another was by its diamonds (see dragLayout),
+ * as a share of each one's own: `own` ({ size, slant }, see blockValues), what `lay`'s block has; `was` and `now`, what
+ * the block dragged had and has. Each change is measured against the dragged block's size and made in the other's, so
+ * a panel made a third wider is a band made a third deeper, and an edge leaned by a tenth of its block leans the other
+ * by a tenth of its own — not a panel's share of the width put on a band's height. `lean` false (the edge moved by its
+ * middle): the slant left as it was. Within LAYOUT_LIMITS.
+ */
+export function scaleBlock(lay, own, was, now, lean = true) {
+  const k = own.size / Math.max(1e-6, was.size), adjust = { ...(lay.adjust || {}) };
+  adjust.size = clamp(own.size + (now.size - was.size) * k, ...LAYOUT_LIMITS.size);
+  if (lean) adjust.slant = clamp(own.slant + (now.slant - was.slant) * k, ...LAYOUT_LIMITS.slant);
+  return { template: lay.template, adjust };
+}
 
 /**
  * Layout for a virtual canvas of w x h. All values are in virtual units.

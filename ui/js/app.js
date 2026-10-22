@@ -1,7 +1,7 @@
 // SmedCover UI. Two modes: Edit (cover content, assets, style + the layer stack) and Setup (brand,
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
-import { virtualSize , layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot, ORIENTS, orientOf, orientOfKey, layoutOf, ownLayout, setLayoutOf, followLayout, layoutByOrient } from "./layout.js";
+import { virtualSize, layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot, ORIENTS, orientOf, orientOfKey, layoutOf, ownLayout, setLayoutOf, followLayout, layoutByOrient, sideOf, sideToward, sideLike, scaleBlock, sizeOfKey } from "./layout.js";
 import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles, showsFrame, sceneHandleAt, coverLayout, partsOf, coverAt } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
@@ -11,7 +11,7 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, rebalance, dropOption, partChance, ODD_OPTIONS } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, LETTERED, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf, LAYOUT_PARTS, takeLayout, putLayout, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf, LAYOUT_PARTS, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
@@ -404,12 +404,17 @@ function setScope(v) {
 }
 /** The scope's three choices, as one segmented control: the toolbar's, and the Style tab's template box's (the same setting). */
 const scopeSeg = () => el("div", { class: "seg" }, SCOPES.map((v) => el("button", { class: "btn" + (S.settings.scope === v ? " on" : ""), title: v === "orient" ? t("scope.orientTip", sameWay().map((z) => ratioText(z.w, z.h)).join(" · ")) : null, onclick: () => setScope(v) }, scopeName(v))));
+/**
+ * The toolbar above the canvas, one line: the size shown, the scope, how the canvas is worked. Under it, in a line of
+ * its own and quietly (a link, not a button: it is seldom wanted), Save as layout — the canvas's layout as a preset
+ * Surprise me may deal.
+ */
 function syncToolbar() {
-  const size = selSize();   // what it is called over its pixels, in two lines: names after the platforms can be long
+  const size = selSize(), edit = S.mode === "edit";   // what it is called over its pixels, in two lines: names after the platforms can be long
   $("toolbar").replaceChildren(...[el("span", { class: "name", title: sizeLabel(size) }, el("b", {}, caption(size)), el("small", {}, `${size.w}×${size.h}`)),
-    S.mode === "edit" && el("button", { class: "btn", title: t("layouts.saveTip"), onclick: saveLayoutDialog }, t("layouts.save")),   // the canvas's layout, as a preset Surprise me may deal
-    S.mode === "edit" && el("div", { class: "grp" }, el("span", {}, t("props.scope")), scopeSeg()),
-    S.mode === "edit" && el("span", { class: "help", title: t("cover.how"), onclick: (e) => showTip(e.currentTarget, t("cover.how")) }, el("span", { class: "info" }, "ⓘ"), t("cover.howShort"))].filter(Boolean));
+    edit && el("div", { class: "grp" }, el("span", {}, t("props.scope")), scopeSeg()),
+    edit && el("span", { class: "help", title: t("cover.how"), onclick: (e) => showTip(e.currentTarget, t("cover.how")) }, el("span", { class: "info" }, "ⓘ"), t("cover.howShort"))].filter(Boolean));
+  $("toolsub").replaceChildren(...(edit ? [el("button", { class: "quiet", title: t("layouts.saveTip"), onclick: saveLayoutDialog }, t("layouts.save"))] : []));
 }
 
 // ---------- editing layers
@@ -549,10 +554,11 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
   }
   /**
    * The diamond under the pointer (a handle of the layout, or of the selected lettering's bend), or null;
-   * where one lies by a square of the selection's frame, the nearer of the two is the one taken.
+   * where one lies by a square of the selection's frame, the nearer of the two is the one taken. A layer not shown at
+   * the size on the canvas has none (none is drawn for it: see coverAt in render.js).
    */
   function diamond(e) {
-    if (group().length) return null;
+    if (group().length || !layer() || !inSize(layer(), S.sel)) return null;
     const p = virtualPoint(e), g = grip(e);
     const lh = layoutHandles(cv, layer()).map((q) => ({ ...q, d: Math.hypot(p.x - q.x, p.y - q.y) })).filter((q) => q.d <= 13 * p.k).sort((a, b) => a.d - b.d)[0];
     return lh && !(g && g.handle && g.d < lh.d) ? lh : null;
@@ -1021,8 +1027,16 @@ function channelCover(raw, profile, catId) {
   if (!raw) { c.title = defaultTitle(); c.subtitle = defaultSubtitle(); c.tag = DEFAULT_TAG; }
   return settleLinks(c);
 }
-/** This profile's cover of channel catId: the one read or made already, or a new one. */
-const coverFor = (catId) => S.covers[catId] || (S.covers[catId] = channelCover(null, S.profile, catId));
+/**
+ * This profile's cover of channel catId: the one read or made already, or a new one. One read already has the sizes its
+ * layers show at kept to the profile's now (refitSizes), as reading it again would: a size added or removed while
+ * another channel was shown refits it here (see sizesTab), not before, so that change undone leaves it as it was.
+ */
+const coverFor = (catId) => {
+  const c = S.covers[catId];
+  if (c) { refitSizes(c.layers, sizeKeys()); return c; }
+  return (S.covers[catId] = channelCover(null, S.profile, catId));
+};
 /** Reads the covers a profile's channels have. */
 async function loadCovers(profile) {
   const out = {};
@@ -2025,10 +2039,11 @@ function removeAsset(id) {
 }
 
 /**
- * The template and its adjustments on style `st` — the profile's in the Style tab, a layout preset's in its editor: the
- * template, how much the colour panel takes, how its edge leans, the title's box, which half goes first, and the way
- * back to the template's own. `at` ({w, h, parts}): the size shown, in virtual units, and which parts that take room its
- * cover has (see partsOf in render.js), where the block's sliders start from (the layout as it would be drawn there).
+ * The template and its adjustments on style `st`, the profile's, in the Style tab (a layout preset's editor has none:
+ * its colour block is dragged, see layoutEditor): the template, how much the colour panel takes, how its edge leans,
+ * the title's box, which half goes first, and the way back to the template's own. `at` ({w, h, parts}): the size
+ * shown, in virtual units, and which parts that take room its cover has (see partsOf in render.js), where the block's
+ * sliders start from (the layout as it would be drawn there).
  * `to`: what they change — null, the style's own template and adjustments, which every size without a layout of its own
  * follows; else {key, keys}, the layout size `key` is drawn in, put on each size of `keys` as their own (see layoutOf
  * and setLayoutOf in layout.js; a template chosen there starts from the adjustments the style keeps for it).
@@ -2213,7 +2228,7 @@ function oddsDialog(fresh = true, at = "") {
     box.classList.add("ping");
   }
 }
-// ---------- layout presets: the canvas's structure kept, for Surprise me to deal by its chance (see takeLayout in layers.js)
+// ---------- layout presets: where a cover's parts stand, for Surprise me to deal by its chance (see takeLayout in layers.js)
 /** What a layout preset is called in the interface: its name, else "Layout n" by its place in the list. */
 const layoutName = (p, i) => p.name || t("layouts.defaultName", i + 1);
 /** A name for the next layout preset: "Layout n", the first n from the count on that no preset has. */
@@ -2222,16 +2237,24 @@ function nextLayoutName() {
   while (S.settings.layouts.some((p) => p.name === t("layouts.defaultName", n))) n++;
   return t("layouts.defaultName", n);
 }
-/** A new layout preset, `name`, from the canvas as it is: the template and its adjustments, the layout's parts where they stand at every size (takeLayout). Kept for every profile; returns it. */
-function addLayout(name) {
+/** An id for a new layout preset: none of the others', never the canvas's own ("keep"). */
+function newLayoutId() {
   let id;
   do id = uid(); while (id === "keep" || S.settings.layouts.some((p) => p.id === id));
-  const p = normalizeLayouts([{ ...takeLayout(S.profile.style, S.cover.layers), id, name }])[0];
+  return id;
+}
+/**
+ * A new layout preset, `name`, from the canvas as it is (takeLayout), at each of the profile's sizes: where the title,
+ * subtitle, tag, channel name, brand row, channel graphic (where this channel has it, for every channel) and colour
+ * block stand, which of them the cover has (and where), and the block's layout. Kept for every profile; returns it.
+ */
+function addLayout(name) {
+  const p = normalizeLayouts([{ ...takeLayout(S.profile.style, S.cover.layers, sizeKeys(), S.cover.catId), id: newLayoutId(), name }])[0];
   S.settings.layouts = [...S.settings.layouts, p]; persistSettings();
   return p;
 }
 /**
- * Above the canvas, Save as layout: asks for a name ("Layout n" to begin with), then keeps the canvas's layout as a new
+ * Under the toolbar, Save as layout: asks for a name ("Layout n" to begin with), then keeps the canvas's layout as a new
  * preset (addLayout); the word that says so leads on to its chances.
  */
 function saveLayoutDialog() {
@@ -2251,11 +2274,15 @@ function saveLayoutDialog() {
   m.hidden = false;
   input.focus(); input.select();
 }
-/** Puts layout preset `p` (the i-th) on the canvas: the profile's template and its adjustments, this cover's layout parts but those locked (putLayout); one step of undo. */
+/**
+ * Puts layout preset `p` (the i-th) on the canvas, at the profile's sizes (those of the preset's own pass by): the
+ * colour block's layout at each, for every cover of the profile (unless this cover's block is locked), and this cover's
+ * layout parts but those locked (putLayout); one step of undo.
+ */
 function applyLayout(p, i) {
   closeModal();
   clearTimeout(timers.hist); commitHistory();
-  putLayout(S.profile.style, S.cover.layers, p);
+  putLayout(S.profile.style, S.cover.layers, p, sizeKeys());
   S.picked = [];
   if (layer() && layer().off) S.layerId = "bg";   // the part selected is left out now
   touch({ profile: true, cover: true, panel: true, side: true, strip: true });
@@ -2271,7 +2298,11 @@ function deleteLayout(p, i, again) {
   S.settings.layouts = S.settings.layouts.filter((x) => x.id !== p.id);
   persistSettings(); again();
 }
-/** The layout presets in Surprise me's chances: each renamed where it is, edited (layoutEditor), put on the canvas or deleted; a new one from the canvas. `again()` shows the window anew. */
+/**
+ * The layout presets in Surprise me's chances: each renamed where it is, edited (layoutEditor), put on the canvas or
+ * deleted; a new one laid out in the editor from the start (wide sizes side by side, the others stacked, every part in
+ * it: see newPreset in layers.js), kept once saved there. `again()` shows the window anew.
+ */
 function layoutList(again) {
   const list = S.settings.layouts;
   const row = (p, i) => el("div", { class: "lay" },
@@ -2283,64 +2314,156 @@ function layoutList(again) {
     el("button", { class: "btn", onclick: () => deleteLayout(p, i, again) }, t("layouts.delete")));
   return el("div", {}, el("div", { class: "cap" }, t("layouts.list")),
     list.length ? el("div", { class: "lays-list" }, list.map(row)) : el("div", { class: "hint", style: "margin:0 0 8px" }, t("layouts.none")),
-    el("button", { class: "btn wide", style: "margin-top:8px", disabled: list.length >= LAYOUTS.most, title: t("layouts.newTip"), onclick: () => { addLayout(nextLayoutName()); again(); } }, t("layouts.new")));
+    el("button", { class: "btn wide", style: "margin-top:8px", disabled: list.length >= LAYOUTS.most, title: t("layouts.newTip"),
+      onclick: () => layoutEditor(normalizeLayouts([{ ...newPreset(), id: newLayoutId(), name: nextLayoutName() }])[0], list.length, true) }, t("layouts.new")));
 }
+/** A usual size facing each way, where the layout editor sees how big a block kept for that orientation is when it has no size facing so (see blockOf in layoutEditor). */
+const USUAL_SIZE = { wide: "1920x1080", square: "1200x1200", tall: "1080x1920" };
 /**
- * A layout preset's editor, a view of Surprise me's chances window: the cover of the channel on the canvas, drawn by
- * the cover's own painter with the preset put on it — on copies of the style and the layers, so nothing on the canvas
- * changes until the preset is put there — at one of the profile's sizes, picked above it. A part (the title, the
- * subtitle, the tag, the channel name, the brand row, the channel graphic) is dragged to move it, by a corner to
- * resize it (a side stretches it, the knob turns it), or the wheel resizes it (with Option, turns it), for every size
- * or the one shown; beside it, the preset's name, the template and its adjustments (as in the Style tab), which
- * parts the cover has, and which way a lettered part's words run. Save keeps it; Cancel, Escape or a click beside the
- * window leave it as it was (asked first when something was changed). Both go back to the chances.
+ * A layout preset's editor, a view of Surprise me's chances window, on a canvas of its own: not the cover being edited
+ * but the plainest there is — the cel look on its dark ground, no photos, none of the user's layers, neither the logo
+ * nor the corner brackets — with nothing on it but what a preset places (LAYOUT_PARTS): the title, subtitle and tag in
+ * words of the editor's own (layed.sample*), the profile's brand row, the channel's name and graphic (the channel on
+ * the canvas; a camera when it has no graphic, so there is something to place), and the colour block and its edge. It
+ * is drawn at one size at a time, picked above it from the profile's sizes and the preset's own (`custom`, added there
+ * by width and height), and each change lands where the scope beside them says: every size, those facing that size's
+ * way (what it opens on: the wide sizes and the others are laid out apart from the start), that size alone. A part is
+ * dragged to move it, by a corner to resize it (a side stretches it, the knob turns it), or the wheel resizes it (with
+ * Option, turns it); the channel graphic's places are the size's own, not the channel's, so the preset puts it there on
+ * every channel's cover. The colour block has no template to pick nor sliders: selected, its diamonds move its edge
+ * (the middle one: how much it takes) or lean it (an end; dragLayout in layout.js), and the block itself, dragged
+ * toward another side, goes there (sideToward in layout.js; setPresetLayout in layers.js lands either where the scope
+ * reaches). Where that reaches blocks that do not lie alike (wide sizes side by side, the others stacked), each takes the
+ * change as its own: dragged across, each goes to the side across from its own, dragged to a side beside, each goes
+ * there (sideLike); made bigger or leaned, each by as much of its own block (scaleBlock). Beside it: the preset's name;
+ * its parts, each ticked where the layout has it (unticked, it is left out where the preset is put, see putLayout), at
+ * the sizes the scope reaches — a part unticked at the size shown no longer selected, so no handle is left over where
+ * it is not —; and the part selected, put back where the template puts it. A part an earlier preset has no entry for
+ * (the colour block, before it was one) is shown where the template puts it, ticked, and is the preset's once saved.
+ * `fresh`: a new preset, in the list once saved. Save keeps it; Cancel, Escape or a click beside the window leave it as
+ * it was (asked first when something was changed). Both go back to the chances. Nothing here touches the cover.
  */
-function layoutEditor(p, i) {
-  const m = $("modal"), st = copyOf(S.profile.style), layers = copyOf(S.cover.layers);
-  for (const l of layers) delete l.locked;   // a lock is the cover's, not the preset's: here every part is the preset's, and moves
-  putLayout(st, layers, p);
-  const part = (id) => layers.find((l) => l.id === id);
-  const E = { sel: LAYOUT_PARTS.find((id) => part(id) && part(id).visible) || "title", key: S.sel, scope: "all", live: null, dirty: false };
-  const size = () => S.profile.sizes.find((z) => sizeKey(z) === E.key) || S.profile.sizes[0];
-  const geo = () => {
-    const z = size(), [vw, vh] = virtualSize(z.w, z.h), group = sameWay(sizeKey(z)).map((x) => { const [w, h] = virtualSize(x.w, x.h); return { key: sizeKey(x), vw: w, vh: h }; });
-    return { vw, vh, key: sizeKey(z), catId: cat().id, group };
+function layoutEditor(p, i, fresh = false) {
+  const m = $("modal"), c = cat(), none = new Map();
+  // the block, worked on as the preset keeps it (setPresetLayout); the parts, on layers of the editor's own
+  const E = { p: { template: p.template, adjust: { ...p.adjust }, ...(p.orient ? { orient: copyOf(p.orient) } : {}), ...(p.by ? { by: copyOf(p.by) } : {}) },
+    custom: [...(p.custom || [])], key: S.sel, scope: "orient", sel: "title", live: null, dirty: false, adding: false, addW: "", addH: "" };
+  // the sizes it is laid out at: the profile's, then its own (one the profile has too is the profile's)
+  const sizes = () => [...S.profile.sizes.map((z) => ({ ...z, key: sizeKey(z) })),
+    ...E.custom.filter((k) => !S.profile.sizes.some((z) => sizeKey(z) === k)).map((k) => { const [w, h] = k.split("x").map(Number); return { w, h, key: k, custom: true }; })];
+  const keys = () => sizes().map((z) => z.key);
+  const size = () => sizes().find((z) => z.key === E.key) || sizes()[0];
+  const layers = defaultLayers(), part = (id) => layers.find((l) => l.id === id);
+  // the sizes a part shows at, of these; and put to show at `at` (none: left out)
+  const shownHere = (L) => (L.off ? [] : keys().filter((k) => inSize(L, k)));
+  const showAt = (L, at) => { if (at.length) { delete L.off; L.visible = true; keepTo(L, at, keys()); } else { L.off = true; L.visible = false; } };
+  for (const L of layers) if (L.type !== "bg" && !LAYOUT_PARTS.includes(L.id)) { L.off = true; L.visible = false; }   // the logo, the corner brackets: no preset's
+  for (const id of LAYOUT_PARTS) {   // one it has no entry for as a new preset has it; the graphic's places this channel's, for every channel
+    const q = p.parts[id] || { t: newLayer(id).t, shown: true }, L = part(id);
+    L.t = id === "graphic" ? plainPlaces(copyOf(q.t), c.id) : copyOf(q.t);
+    showAt(L, q.shown ? keys().filter((k) => !(q.hide || []).includes(k)) : []);
+  }
+  // the part selected one at the size shown: else the first there is (the title when there is none)
+  const keepSel = () => { if (!shownHere(part(E.sel)).includes(size().key)) E.sel = LAYOUT_PARTS.find((id) => shownHere(part(id)).includes(size().key)) || "title"; };
+  keepSel();
+  // what it is drawn with: words of its own, the profile's brand, the channel's name and graphic; the cel look on its
+  // dark ground, the block as the preset has it at the size
+  const words = { catId: c.id, title: t("layed.sampleTitle"), subtitle: t("layed.sampleSub"), tag: t("layed.sampleTag") };
+  const channel = { ...c, name: c.name || t("layed.sampleChannel"), graphic: c.graphic && c.graphic.kind !== "none" ? c.graphic : { kind: "graphic", id: "camera", labels: [], stamp: "" } };
+  const profileAt = (key) => {
+    const lay = presetLayout(E.p, key);
+    return { ...S.profile, brand: { ...S.profile.brand, name: S.profile.brand.name || t("layed.sampleBrand"), logo: "" }, categories: S.profile.categories.map((x) => (x.id === c.id ? channel : x)),
+      style: { template: lay.template, layoutAdjust: { [lay.template]: { ...lay.adjust } }, theme: "dark", look: "cel", lookParams: {}, lookSeed: 7, lookArt: {} } };
   };
+  // the size shown as the layer maths wants it, its group the sizes here facing its way, and no channel (a move of the
+  // graphic is the size's, for every channel's cover); what a change reaches
+  const geo = () => {
+    const z = size(), [vw, vh] = virtualSize(z.w, z.h), group = sizes().filter((x) => orientOf(x.w, x.h) === orientOf(z.w, z.h)).map((x) => { const [w, h] = virtualSize(x.w, x.h); return { key: x.key, vw: w, vh: h }; });
+    return { vw, vh, key: z.key, catId: null, group };
+  };
+  const reach = () => (E.scope === "all" ? keys() : E.scope === "orient" ? geo().group.map((x) => x.key) : [size().key]);
   const cv = el("canvas"), stage = el("div", { class: "ls-stage" }, cv), side = el("div", { class: "ls-side" }), top = el("div", { class: "ls-top" });
   const name = el("input", { type: "text", value: p.name, placeholder: layoutName(p, i), maxLength: LAYOUTS.name, spellcheck: false, oninput: () => (E.dirty = true) });
-  // the cover as the preset has it, fitted to the room there is, at the screen's pixels
+  // fitted to the room there is, at the screen's pixels; painted as a cover is, so the block and its diamonds are those
+  // of this size (a part kept to other sizes left out of it, see coverAt in render.js)
   const draw = () => {
     if (!cv.isConnected) return;
     const z = size(), [vw, vh] = virtualSize(z.w, z.h), room = stage.getBoundingClientRect();
     const k = Math.max(0.05, Math.min((room.width - 16) / vw, (room.height - 16) / vh));
     cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
-    drawCover(cv, { profile: { ...S.profile, style: st }, catIndex: catIndex(), size: z, pixelW: Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), cover: { ...S.cover, layers }, photos: S.photos, select: E.sel, live: E.live });
-    if (!E.drawn) { E.drawn = true; build(); }   // the block's sliders start from the layout as now drawn
+    drawCover(cv, { profile: profileAt(z.key), catIndex: catIndex(), size: z, pixelW: Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), cover: { ...words, layers }, photos: none,
+      select: E.sel, live: E.live, handles: E.sel !== "accent" });
   };
   let queued = false;
   const redraw = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; draw(); }); };
-  // the pointer in the canvas's virtual units; the selected part's handle under it; the part under it (the selected
-  // one keeps the grab under anything at least as big, as on the canvas)
+  // the pointer in the canvas's virtual units; the selected part's handle under it (the block has none, but its
+  // diamonds); the part under it (the selected one keeps the grab under anything at least as big, as on the canvas —
+  // but the block, which holds most of what lies on it)
   const at = (e) => { const b = cv.getBoundingClientRect(), k = cv._virtual[0] / b.width; return { x: (e.clientX - b.left) * k, y: (e.clientY - b.top) * k, k }; };
-  const ok = (h) => LAYOUT_PARTS.includes(h.id) && !!part(h.id) && part(h.id).visible;
+  const ok = (h) => LAYOUT_PARTS.includes(h.id);
   const grip = (e) => {
-    const hit = cv._hits && cv._hits.find((h) => h.id === E.sel && ok(h));
+    const hit = E.sel !== "accent" && cv._hits && cv._hits.find((h) => h.id === E.sel);
     if (!hit || !showsFrame(hit)) return null;
     const q = at(e), a = (-hit.r * Math.PI) / 180, dx = q.x - hit.cx, dy = q.y - hit.cy, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
     const near = handles(hit, q.k).map((h) => ({ id: h.id, d: Math.hypot(lx - h.lx, ly - h.ly) })).filter((h) => h.d <= 11 * q.k).sort((a, b) => a.d - b.d)[0];
     return { hit, q, lx, ly, handle: near ? near.id : null };
   };
+  const diamond = (e) => {
+    if (E.sel !== "accent" || !cv._layout || !shownHere(part("accent")).includes(size().key)) return null;   // a block left out here has no edge
+    const q = at(e);
+    return layoutHandles(cv, part("accent")).map((h) => ({ ...h, d: Math.hypot(q.x - h.x, q.y - h.y) })).filter((h) => h.d <= 13 * q.k).sort((a, b) => a.d - b.d)[0] || null;
+  };
   const partAt = (e) => {
     if (!cv._hits) return null;
-    const q = at(e), top = hitAt(cv._hits, q.x, q.y, ok), sel = cv._hits.find((h) => h.id === E.sel && ok(h)), mine = sel && hitAt([sel], q.x, q.y), area = (h) => h.hw * h.hh;
+    const q = at(e), top = hitAt(cv._hits, q.x, q.y, ok), sel = E.sel !== "accent" && cv._hits.find((h) => h.id === E.sel && ok(h)), mine = sel && hitAt([sel], q.x, q.y), area = (h) => h.hw * h.hh;
     const hit = mine && (!top || top.id === mine.id || area(top) >= area(mine)) ? mine : top;
     return hit ? hit.id : null;
   };
   const edit = (patch) => { adjust(part(E.sel), geo(), E.scope, patch); E.dirty = true; redraw(); };
+  // the block changed where the scope says, from what it was as the drag began (so a drag led back leaves it as it was)
+  const reblock = (was, fn) => { E.p = copyOf(was); if (fn) { setPresetLayout(E.p, E.scope, size().key, fn); E.dirty = true; } redraw(); };
+  // how big and how leaning the block of a layout of preset `q` is (`where`: whose, see setPresetLayout), seen at a size
+  // drawn in it: a size's own at that size; an orientation's at the first size here facing that way, else a usual
+  // one; the default at the first size here that has no other, else the one shown — as it is drawn there, with the
+  // parts shown at that size (coverLayout, as draw paints it), not the template's alone, so a block resized at one size
+  // does not make another jump
+  const blockOf = (q, lay, where) => {
+    const ks = keys(), k = where && sizeOfKey(where) ? where : where ? ks.find((x) => orientOfKey(x) === where) || USUAL_SIZE[where]
+      : ks.find((x) => !(q.by && q.by[x]) && !(q.orient && q.orient[orientOfKey(x)])) || size().key;
+    return drawnBlock(lay, k);
+  };
+  // the block of layout `lay` as it is drawn at size `k`, with the parts shown there (meetStandards fits it to them)
+  const drawnBlock = (lay, k) => {
+    const [w, h] = virtualSize(...sizeOfKey(k));
+    return layoutValues(coverLayout(LOOKS.cel, lay, w, h, partsOf(coverAt({ ...words, layers }, k), channel)), w, h);
+  };
   const pick = (id) => { if (E.sel !== id) { E.sel = id; build(); } };
-  const end = () => { cv.onpointermove = null; E.live = null; redraw(); };
-  cv.addEventListener("pointermove", (e) => { if (e.buttons) return; const g = grip(e); cv.style.cursor = g && g.handle ? CURSOR[g.handle] : partAt(e) ? "grab" : "default"; });
+  const end = () => { cv.onpointermove = cv.onpointerup = cv.onpointercancel = null; E.live = null; build(); redraw(); };
+  cv.addEventListener("pointermove", (e) => {
+    if (e.buttons || !cv._hits) return;
+    const g = grip(e), id = partAt(e);
+    cv.style.cursor = diamond(e) ? "pointer" : g && g.handle ? CURSOR[g.handle] : id === "accent" && E.sel === "accent" ? "move" : id ? "grab" : "default";
+  });
   cv.addEventListener("pointerdown", (e) => {
+    if (!cv._hits) return;
+    const lh = diamond(e);
+    if (lh) {   // the block's edge: by its middle it moves (how much the block takes), by an end it leans, the other end staying
+      // the block drawn here gets what is dragged; any other the scope reaches, as much of its own (scaleBlock)
+      const was = copyOf(E.p), key = size().key, [vw, vh] = cv._virtual, from = layoutValues(cv._layout, vw, vh), lean = lh.id !== "m";
+      cv.setPointerCapture(e.pointerId);
+      cv.onpointermove = (mv) => {
+        const q = at(mv), a = dragLayout(cv._layout, vw, vh, presetLayout(E.p, key).adjust, lh.id, q.x, q.y, cv._titleBox);
+        const to = lean ? { size: a.size, slant: a.slant } : { size: a.size }, now = { size: a.size, slant: lean ? a.slant : from.slant };
+        if (Math.abs(now.size - from.size) < 0.002 && Math.abs(now.slant - from.slant) < 0.002) return reblock(was, null);   // led back to where it began: as it was, nothing pinned
+        reblock(was, (lay, where, here) => (here ? { template: lay.template, adjust: { ...lay.adjust, ...to } } : scaleBlock(lay, blockOf(was, lay, where), from, now, lean)));
+        // and every other size it reaches, from the block drawn there: sizes sharing a layout are drawn each its own
+        // (fitted to the parts each has) and one size kept for all of them would snap them to one; so each is given its
+        // own, a share of what it showed, and none jumps
+        for (const k of reach()) if (k !== key) { const lay = presetLayout(was, k); setPresetLayout(E.p, "size", k, () => scaleBlock(lay, drawnBlock(lay, k), from, now, lean)); }
+      };
+      cv.onpointerup = cv.onpointercancel = end;
+      return;
+    }
     const g = grip(e);
     if (g && g.handle) {   // the selected part's handle: corners resize, sides stretch, the knob turns
       const { hit, handle } = g, min = 6 * g.q.k, of = (q) => ({ ang: Math.atan2(q.q.y - hit.cy, q.q.x - hit.cx), dist: Math.max(min, Math.hypot(q.lx, q.ly)), lx: Math.max(min, Math.abs(q.lx)), ly: Math.max(min, Math.abs(q.ly)) });
@@ -2362,8 +2485,19 @@ function layoutEditor(p, i) {
     const id = partAt(e);
     if (!id) return;
     pick(id);
+    cv.setPointerCapture(e.pointerId);
+    if (id === "accent") {   // the block itself, toward another side: it goes there, and each the scope reaches alike (sideLike)
+      const was = copyOf(E.p), from = at(e), first = sideOf(presetLayout(E.p, size().key)), min = 0.12 * Math.min(...cv._virtual);
+      let now = first;
+      cv.onpointermove = (mv) => {
+        const q = at(mv), to = sideToward(q.x - from.x, q.y - from.y, min) || first;
+        if (to !== now) { now = to; reblock(was, to === first ? null : (lay) => sideLike(lay, first, to)); }
+      };
+      cv.onpointerup = cv.onpointercancel = end;
+      return redraw();
+    }
     let last = at(e);
-    cv.setPointerCapture(e.pointerId); E.live = { ids: [id], key: id };
+    E.live = { ids: [id], key: id };
     cv.onpointermove = (mv) => { const q = at(mv); edit({ ddx: q.x - last.x, ddy: q.y - last.y }); last = q; };
     cv.onpointerup = cv.onpointercancel = end;
     redraw();
@@ -2371,52 +2505,96 @@ function layoutEditor(p, i) {
   cv.addEventListener("wheel", (e) => {
     e.preventDefault();
     const id = partAt(e);
-    if (!id) return;
+    if (!id || id === "accent") return;   // the block is sized by its edge
     pick(id);
     if (!E.live || E.live.key !== id) E.live = { ids: [id], key: id };
     later("layedLive", 300, () => { E.live = null; redraw(); });
     edit(e.altKey ? { rot: e.deltaY > 0 ? 2 : -2 } : { scale: Math.exp(-e.deltaY * 0.0015) });
   }, { passive: false });
-  // above the canvas: the sizes, and what a change applies to; beside it, the template and the parts
+  // a size of the preset's own, added by its width and height (one there is already is picked), or let go of; a part
+  // shows at one added as at any size it is not hidden at
+  const addSize = (w, h) => {
+    if (![w, h].every((n) => Number.isInteger(n) && n >= 64 && n <= 8192)) return toast(t("layed.badSize"));
+    const key = `${w}x${h}`;
+    if (!keys().includes(key)) {
+      if (E.custom.length >= LAYOUTS.custom) return toast(t("layed.manySizes", LAYOUTS.custom));
+      const was = LAYOUT_PARTS.map((id) => [part(id), shownHere(part(id))]);
+      E.custom.push(key);
+      for (const [L, on] of was) if (on.length) showAt(L, [...on, key]);
+      E.dirty = true;
+    }
+    E.key = key; E.adding = false; E.addW = E.addH = ""; keepSel(); build(); redraw();
+  };
+  const dropSize = (key) => {
+    const was = LAYOUT_PARTS.map((id) => [part(id), shownHere(part(id))]);
+    E.custom = E.custom.filter((k) => k !== key);
+    for (const [L, on] of was) if (on.length) showAt(L, on.filter((k) => k !== key));
+    if (E.key === key) { E.key = keys()[0]; keepSel(); }
+    E.dirty = true; build(); redraw();
+  };
+  // a part ticked or not at the sizes the scope reaches; ticked, it is the one selected; unticked here, it is no longer
+  // (the block's diamonds and what is said of its side go with it)
+  const tick = (L, on) => {
+    const r = reach(), now = shownHere(L);
+    showAt(L, on ? keys().filter((k) => now.includes(k) || r.includes(k)) : now.filter((k) => !r.includes(k)));
+    if (on) E.sel = L.id; else keepSel();
+    E.dirty = true; build(); redraw();
+  };
+  // the size shown follows its orientation's block again, or the preset's; the part selected put back where the
+  // template puts it (the block: how much it takes and how it leans, its side kept), where the scope reaches
+  const follow = () => { const by = { ...E.p.by }; delete by[size().key]; if (Object.keys(by).length) E.p.by = by; else delete E.p.by; E.dirty = true; build(); redraw(); };
+  const reset = () => {
+    const g = geo();
+    resetPlacement(part(E.sel), E.scope, g.key, g.catId, g.group.map((x) => x.key));
+    if (E.sel === "accent") setPresetLayout(E.p, E.scope, g.key, (lay) => ({ template: lay.template, adjust: Object.fromEntries(Object.entries(lay.adjust).filter(([k]) => k !== "size" && k !== "slant")) }));
+    E.dirty = true; build(); redraw();
+  };
+  // above the canvas: the sizes (and one to add), and what a change reaches; beside it, the parts and the one selected
   const build = () => {
+    const z = size(), all = keys(), block = E.sel === "accent";
+    // what is typed kept while the side is built again (a part ticked, a size picked), until a size is added
+    const num = (k, hint) => el("input", { type: "number", class: "ls-num", min: 64, max: 8192, step: 1, placeholder: hint, value: E[k], oninput: (e) => (E[k] = e.target.value),
+      onkeydown: (e) => { if (e.key === "Enter") add(); if (e.key === "Escape") { e.stopPropagation(); E.adding = false; build(); } } });
+    const wIn = num("addW", "1080"), hIn = num("addH", "1350"), add = () => addSize(Number(wIn.value), Number(hIn.value));
     top.replaceChildren(
-      el("div", { class: "ls-sizes" }, S.profile.sizes.map((z) => el("button", { class: "btn" + (sizeKey(z) === E.key ? " on" : ""), title: sizeLabel(z), onclick: () => { E.key = sizeKey(z); E.drawn = false; redraw(); } }, ratioText(z.w, z.h)))),   // built again once drawn at that size, the block's sliders starting from its layout
-      el("div", { class: "grp" }, el("span", {}, t("props.scope")), el("div", { class: "seg" }, SCOPES.map((v) => el("button", { class: "btn" + (E.scope === v ? " on" : ""), onclick: () => { E.scope = v; build(); } }, scopeName(v, E.key))))));
-    // a part's row: the box says whether the cover has it; its name, clicked, selects it (one shown); a lettered part's
-    // words set in columns (竖排) and then ruled (界行线), as its properties set them on the canvas: the preset's own
-    const L = part(E.sel), run = (P, k, under = false) => el("label", { class: "chk run" + (under ? " under" : ""), title: t(`props.${k}Tip`) },
-      el("input", { type: "checkbox", checked: P[k] === true, onchange: (e) => { P[k] = e.target.checked; E.dirty = true; build(); redraw(); } }), t("props." + k));
+      el("div", { class: "ls-sizes" },
+        sizes().map((x) => el("span", { class: "ls-size" + (x.custom ? " custom" : "") },
+          el("button", { class: "btn" + (x.key === z.key ? " on" : ""), title: x.custom ? t("layed.customTip", `${x.w}×${x.h}`) : sizeLabel(x), onclick: () => { E.key = x.key; keepSel(); build(); redraw(); } }, ratioText(x.w, x.h)),
+          x.custom && el("button", { class: "drop", title: t("layed.dropSize"), onclick: () => dropSize(x.key) }, "×"))),
+        E.adding ? el("span", { class: "ls-add" }, wIn, "×", hIn, el("button", { class: "btn", onclick: add }, t("layed.addGo")), el("button", { class: "btn", onclick: () => { E.adding = false; build(); } }, t("layed.cancel")))
+          : el("button", { class: "btn ls-plus", title: t("layed.addTip"), onclick: () => { E.adding = true; build(); } }, t("layed.add"))),
+      el("div", { class: "grp" }, el("span", {}, t("props.scope")), el("div", { class: "seg" }, SCOPES.map((v) => el("button", { class: "btn" + (E.scope === v ? " on" : ""),
+        title: v === "orient" ? t("scope.orientTip", sizes().filter((x) => geo().group.some((g) => g.key === x.key)).map((x) => ratioText(x.w, x.h)).join(" · ")) : null, onclick: () => { E.scope = v; build(); } }, scopeName(v, z.key))))));
+    if (E.adding) wIn.focus();
+    // a part's row: ticked where the layout has it at this size, and said so when that is some sizes only; its name,
+    // clicked, selects it (one here)
     const row = (id) => {
-      const P = part(id), words = P && LETTERED.includes(P.type);
-      return P && [el("div", { class: "chk" + (id === E.sel ? " on" : "") }, el("input", { type: "checkbox", checked: !P.off, onchange: (e) => {
-        if (e.target.checked) { delete P.off; P.visible = true; } else { P.off = true; P.visible = false; }
-        E.dirty = true; build(); redraw();
-      } }), el("span", { onclick: () => { if (P.visible) { pick(id); redraw(); } } }, t("layer." + id)), words && run(P, "vertical")),
-        words && P.vertical === true && run(P, "rules", true)];
+      const P = part(id), on = shownHere(P), here = on.includes(z.key);
+      return el("div", { class: "chk" + (id === E.sel ? " on" : "") },
+        el("input", { type: "checkbox", checked: here, onchange: (e) => tick(P, e.target.checked) }),
+        el("span", { onclick: () => { if (here) { pick(id); redraw(); } } }, t("layer." + id)),
+        on.length > 0 && on.length < all.length && el("small", { class: "some", title: t("layed.someTip", sizes().filter((x) => on.includes(x.key)).map((x) => ratioText(x.w, x.h)).join(" · ")) }, t("layed.some")));
     };
-    // the template controls change the preset's own template, which every size follows but those it draws in a layout
-    // of their own (taken from the canvas, see takeLayout): the size shown says when it is one, and can follow again
-    const z = size(), [zw, zh] = virtualSize(z.w, z.h), own = ownLayout(st, E.key);
-    side.replaceChildren(
+    side.replaceChildren(...[
       el("div", {}, cap("layouts.name"), name),
-      el("div", {}, cap("style.template"),
-        own && el("div", { class: "layown" }, el("span", {}, t("style.ownAll", ratioText(z.w, z.h))),
-          el("button", { class: "linkbtn", title: t("style.followTip"), onclick: () => { followLayout(st, E.key); E.dirty = true; build(); redraw(); } }, t("style.follow"))),
-        templateControls(st, { w: zw, h: zh, parts: partsOf({ ...S.cover, layers }, cat()) }, (again) => { E.dirty = true; redraw(); if (again) later("layedSide", 60, build); })),
-      el("div", {}, cap("layed.parts"), el("div", { class: "parts" }, LAYOUT_PARTS.map(row))),
-      L && el("div", { class: "ls-picked" }, el("span", {}, t("layed.picked", t("layer." + E.sel))),
-        el("button", { class: "btn", title: t("layed.resetTip"), onclick: () => { const g = geo(); resetPlacement(L, E.scope, g.key, g.catId, g.group.map((x) => x.key)); E.dirty = true; redraw(); } }, t("layed.reset"))));
+      el("div", {}, cap("layed.parts"), el("div", { class: "parts" }, LAYOUT_PARTS.map(row)), el("div", { class: "hint", style: "margin:6px 0 0" }, t("layed.partsHint"))),
+      el("div", { class: "ls-picked" }, el("span", {}, t("layed.picked", t("layer." + E.sel))),
+        el("button", { class: "btn", title: t(block ? "layed.blockResetTip" : "layed.resetTip"), onclick: reset }, t(block ? "layed.blockReset" : "layed.reset"))),
+      block && el("div", { class: "ls-block" },
+        el("div", {}, t("layed.side", ratioText(z.w, z.h), t("layed.side." + sideOf(presetLayout(E.p, z.key))))),
+        E.p.by && E.p.by[z.key] && el("div", { class: "layown" }, el("span", {}, t("style.own")), el("button", { class: "linkbtn", title: t("layed.followTip"), onclick: follow }, t("style.follow"))),
+        el("div", { class: "hint", style: "margin:0" }, t("layed.blockHint")))].filter(Boolean));
   };
   const back = () => { LAYED.redraw = null; oddsDialog(false, "layouts"); };
   const cancel = () => { if (E.dirty && !confirm(t("layed.discard"))) return; back(); };
   const save = () => {
-    const kept = normalizeLayouts([{ ...takeLayout(st, layers), id: p.id, name: name.value }])[0];
-    S.settings.layouts = S.settings.layouts.map((x) => (x.id === p.id ? kept : x)); persistSettings();
+    const kept = normalizeLayouts([{ ...E.p, custom: E.custom, parts: takeParts(layers, keys(), p.parts, c.id), id: p.id, name: name.value }])[0];
+    S.settings.layouts = fresh ? [...S.settings.layouts, kept] : S.settings.layouts.map((x) => (x.id === p.id ? kept : x)); persistSettings();
     back();
   };
   build();
   m.replaceChildren(el("div", { class: "dlg odds layed" },
-    el("div", { class: "head" }, el("h2", {}, t("layed.title", layoutName(p, i))),
+    el("div", { class: "head" }, el("h2", {}, fresh ? t("layed.newTitle") : t("layed.title", layoutName(p, i))),
       el("div", { class: "acts" }, el("button", { class: "btn", onclick: cancel }, t("layed.cancel")), el("button", { class: "btn solid", onclick: save }, t("layed.save")))),
     el("div", { class: "hint", style: "margin:0" }, t("layed.hint")),
     el("div", { class: "ls-body" }, el("div", { class: "ls-main" }, top, stage), side)));
@@ -2650,9 +2828,10 @@ function sizesTab() {
     if (!on) { if (P.sizes.length < 2) return renderPanel(); P.sizes = P.sizes.filter((x) => sizeKey(x) !== sizeKey(s)); followLayout(P.style, sizeKey(s)); }   // its layout of its own goes with it
     if (!P.sizes.some((x) => sizeKey(x) === S.sel)) S.sel = sizeKey(P.sizes[0]);
     // the sizes a layer shows at (see `sizes` in layers.js) kept to those now, as they are when read again: on the design
-    // and on each channel's cover read so far (one not shown saved, as the one shown is)
+    // and the cover shown, both in this one step of undo; another channel's when it is next shown (coverFor), so undone
+    // before then, it is as it was, nothing of it written meanwhile
     refitSizes(P.design.layers, sizeKeys());
-    for (const c of new Set([S.cover, ...Object.values(S.covers)])) if (refitSizes(c.layers, sizeKeys()) && c !== S.cover) writeJson(coverPath(P.id, c.catId), c).catch(fail);
+    refitSizes(S.cover.layers, sizeKeys());
     syncToolbar(); touch({ profile: true, cover: true, strip: true, panel: true, side: true });
   };
   const custom = P.sizes.filter((s) => !SIZE_PRESETS.some((p) => sizeKey(p) === sizeKey(s)));
@@ -4372,7 +4551,7 @@ function setMode(mode) {
  */
 function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), not = []) {
   const R = Math.random, sv = S.settings.surprise, layouts = S.settings.layouts;
-  const { layout } = dealCover(S.profile.style, S.cover, { R, locks: sv.locks, odds: oddsOf(sv.odds, layouts), layouts, not, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, can: (k) => CAN.outlines || EFFECTS[k].kind !== "outline", canTint });
+  const { layout } = dealCover(S.profile.style, S.cover, { R, locks: sv.locks, odds: oddsOf(sv.odds, layouts), layouts, not, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, sizes: sizeKeys(), can: (k) => CAN.outlines || EFFECTS[k].kind !== "outline", canTint });
   if (!sv.locks.places) dealPlaces(R);
   return layout;
 }

@@ -1321,6 +1321,8 @@ function dashedLine(shape, grow, colour, perCover) {
  *   o.cover    {title, tag, layers}
  *   o.photos   the photo store: Map pid -> {img, mask: {img} | null, …} (see app.js)
  *   o.select   id of the layer to outline (editor only)
+ *   o.handles  false: the layer selected outlined without its square handles, with the layout's diamonds alone
+ *              (a layout preset's colour block, see layoutEditor in app.js)
  *   o.live     {ids} while those layers are being dragged: the layers that do not move are cached
  *              in this object between frames (editor only; drop the object when the drag ends)
  *   o.picked   ids of the layers in a group selection, outlined without handles (editor only)
@@ -1606,7 +1608,7 @@ function paintCover(cv, o) {
     for (const hit of cv._hits) if (o.picked.includes(hit.id) && showsFrame(hit)) drawSelection(ctx, hit, kx, false);
   } else if (o.select) {
     const hit = cv._hits.find((x) => x.id === o.select);
-    if (hit && showsFrame(hit)) drawSelection(ctx, hit, kx);
+    if (hit && showsFrame(hit)) drawSelection(ctx, hit, kx, o.handles !== false);
     drawLayoutHandles(ctx, cv, cover.layers.find((l) => l.id === o.select), kx, rgb(C));
     if (o.select === "bg" && o.sceneHandles !== false) drawSceneHandles(ctx, cv._scene, kx);
   }
@@ -1719,7 +1721,7 @@ export function layoutHandles(cv, layer) {
 }
 function templateHandles(cv, layer) {
   const G = cv._layout;
-  if (!G || !layer) return [];
+  if (!G || !layer || layer.off) return [];   // a block left out (at this size, see coverAt) has no edge to drag
   if (layer.type === "accent") {
     const a = layer.t.all, moved = a.x || a.y || a.r || a.s !== 1 || a.kx !== 1 || a.ky !== 1 || Object.keys(layer.t.by).length;
     if (moved) return [];

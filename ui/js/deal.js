@@ -351,23 +351,25 @@ const copyOf = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v
  * One hand, dealt onto the profile's `style` and the `cover` as they are, in the order below — what is set
  * and how likely is in RULES, FAMILIES and RECIPES. What the cover says is left alone (the title and tag,
  * the channel and its colour, the photos, which layers exist), and so is the layout — unless the odds deal one
- * of the user's layout presets, whose structure the hand then has, exactly, but for a part locked, which stays as
- * it is (see putLayout in layers.js); the user's own layers
+ * of the user's layout presets, whose structure the hand then has, exactly, at each of the profile's sizes (those of
+ * its own the profile has not pass by), but for a part locked, which stays as it is (the colour block locked, its layout too: see
+ * putLayout in layers.js); the user's own layers
  * are placed afterwards (dealPlaces in app.js, which needs the cover drawn). env: { R, locks (the parts to
  * leave alone: look, theme, lettering, places — the layout with the places), odds (the chances, see oddsOf), not (the looks dealt already in
  * this run, which the look dealt is none of while it can be), recipes (the user's own, by look), rgb (the channel colour), design (the layers of the
  * profile's design, by id, where moved words go back to), layouts (the user's layout presets, as normalizeLayouts
- * keeps them), sizeKey (the size shown), can(fx) (a lettering can be drawn here), canTint(ref) (an asset can be
+ * keeps them), sizeKey (the size shown), sizes (the profile's size keys, those a preset is put on at), can(fx) (a lettering can be drawn here), canTint(ref) (an asset can be
  * tinted) }. Returns what the cover brings (coverContext), and `layout`: the layout dealt ("keep", or a preset's id).
  */
 export function dealCover(st, cover, env) {
   const { R, locks = {} } = env, O = env.odds || oddsOf(null, env.layouts), pick = (a) => a[Math.floor(R() * a.length)], between = (a, b) => a + R() * (b - a), chance = (p) => R() < p;
   const round = (v, step) => Math.round(v / step) * step, within = ([a, b], step = 0.05) => round(between(a, b), step);
   // 0. the layout: the canvas's as it is, or a layout preset of the user's by its chance (none while where things
-  // stand is to stay) — its template and adjustments, and its parts where it has them, on the cover or left out,
-  // their words running its way, but for a part locked; the rest of the hand is dealt on it as on any other
+  // stand is to stay) — its colour block at each of the profile's sizes, and its parts where it has them there, on the
+  // cover or left out, but for a part locked (the block locked, the block as it was); the rest of the hand is dealt on
+  // it as on any other
   const preset = locks.places ? null : pickLayout(O.groups.layout, env.layouts, R);
-  if (preset) putLayout(st, cover.layers, preset);
+  if (preset) putLayout(st, cover.layers, preset, env.sizes);
   // 1. the look, by its chance — none dealt already in this run while others are left — and a new seed for its random placement
   if (!locks.look) { st.look = pickLook(LOOK_IDS, R, O.groups.look, env.not || []); st.lookSeed = Math.floor(R() * 1000000); }
   // the title's length, the channel colour and the user's own recipe for the look turn its recipe (see recipeOf)
@@ -385,15 +387,15 @@ export function dealCover(st, cover, env) {
   // 4. the ground, dark or light, as the look's recipe has it
   if (!locks.theme) st.theme = chance(recipeOf(st.look, ctx).dark) ? "dark" : "light";
   // 5. words the user moved or resized go back where the rules put them (unless where things stand is to stay):
-  // the layout's — title, subtitle, tag, channel name, brand row — to where the layout preset dealt has them, else
-  // where the profile's design has them, the user's own text layers to a new one's size, at no size of their own,
-  // to be placed afresh (dealPlaces) — but for the lettering a cut-out or an asset weaves with, which stays where it
-  // is with it, as a layer locked does (see wovenIds)
+  // the layout's — title, subtitle, tag, channel name, brand row — where the layout preset dealt put them (step 0),
+  // else to where the profile's design has them, the user's own text layers to a new one's size, at no size of their
+  // own, to be placed afresh (dealPlaces) — but for the lettering a cut-out or an asset weaves with, which stays where
+  // it is with it, as a layer locked does (see wovenIds)
   if (!locks.places) {
     const fresh = newLayer("text").t.all, woven = wovenIds(cover.layers);
     for (const L of cover.layers) {
-      if (L.locked || woven.has(L.id) || !L.visible || !LETTERED.includes(L.type)) continue;
-      const back = preset && preset.parts[L.id] && !L.copy ? preset.parts[L.id] : env.design && env.design.get(L.id);
+      if (L.locked || woven.has(L.id) || !L.visible || !LETTERED.includes(L.type) || (preset && preset.parts[L.id] && !L.copy)) continue;
+      const back = env.design && env.design.get(L.id);
       if (L.type === "text") L.t = { all: { ...L.t.all, s: fresh.s, kx: fresh.kx, ky: fresh.ky }, by: {} };
       else if (back) L.t = copyOf(back.t);
     }
@@ -411,8 +413,8 @@ export function dealCover(st, cover, env) {
   // 7. every layer's own choices: switches, outline and shadow, the letterings and bends as the look's recipe
   // has them (the subtitle after the title, lettered like it now and then), unless the letterings are to stay
   const can = env.can || (() => true), canTint = env.canTint || (() => false), Y = RULES.layers, c = O.chances;
-  // whether a layer is set in columns is the user's (its `vertical` and `rules` are never dealt on their own; a layout
-  // preset dealt, step 0, brings its own); one that is (or that the look sets so of itself, see columned in style.js)
+  // whether a layer is set in columns is the user's (its `vertical` and `rules` are never dealt, nor does a layout
+  // preset carry them); one that is (or that the look sets so of itself, see columned in style.js)
   // is dealt no bend, nor a lettering a column cannot draw (NO_COLUMNS)
   const inColumns = (L) => L.vertical === true || ((L.type === "title" || L.type === "subtitle") && !!LOOKS[st.look].columns && !!LOOKS[st.look].columns(lookParams(st.look, st.lookParams[st.look])));
   const upright = (got) => { const g = { ...got }; delete g.bend; delete g.bendAmt; if (NO_COLUMNS.includes(g.fx)) { delete g.fx; delete g.fxAmt; delete g.fxSeed; } return g; };

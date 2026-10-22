@@ -219,7 +219,14 @@
   .ptile .x{top:4px;right:4px}   /* the tile clips what sticks out */
 
   /* canvas column */
-  #center{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;min-width:0}
+  /* each in its own row, so the line under the toolbar left empty (in Setup) keeps the canvas in the row that grows */
+  #center{display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;min-height:0;min-width:0}
+  #toolbar{grid-row:1}#toolsub{grid-row:2}#stage{grid-row:3}#strip{grid-row:4}
+  /* under the toolbar, what is seldom wanted, quietly: muted words underlined (still 5:1 on its ground), brighter under the pointer */
+  #toolsub{display:flex;align-items:center;gap:14px;padding:0 18px;height:24px;background:#06060b;white-space:nowrap;overflow:hidden}
+  #toolsub:empty{display:none}
+  #toolsub .quiet{border:0;background:none;padding:0;font-size:11.5px;color:#80809a;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+  #toolsub .quiet:hover,#toolsub .quiet:focus-visible{color:#ededf5}
   /* one line whatever the size is called: the name has a slot of its own (cut short, in full on hover),
      the help is behind an ⓘ — so nothing after it moves, and the canvas below keeps its height */
   #toolbar{display:flex;align-items:center;gap:14px;padding:0 18px;height:52px;border-bottom:2px solid var(--line);flex-wrap:nowrap;white-space:nowrap;overflow:hidden}
@@ -395,13 +402,20 @@
   .ls-body{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start}
   .ls-main{display:grid;gap:10px;min-width:0}
   .ls-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
-  .ls-sizes{display:flex;flex-wrap:wrap;gap:4px}.ls-sizes .btn{padding:4px 9px;font:600 12px var(--mono)}
+  .ls-sizes{display:flex;flex-wrap:wrap;align-items:center;gap:4px}.ls-sizes .btn{padding:4px 9px;font:600 12px var(--mono)}
+  .ls-size{display:inline-flex;align-items:center}   /* a size of the preset's own: dashed, with a cross to let it go */
+  .ls-size.custom .btn{border-style:dashed}
+  .ls-size .drop{border:0;background:none;padding:0 4px 0 3px;font-size:14px;line-height:1;color:#8a8aa0;cursor:pointer}.ls-size .drop:hover{color:#fff}
+  .ls-sizes .ls-plus{border-style:dashed;opacity:.8}.ls-sizes .ls-plus:hover{opacity:1}
+  .ls-add{display:inline-flex;align-items:center;gap:4px;font:600 12px var(--mono)}
+  .ls-add .ls-num{width:64px;padding:3px 6px;font:600 12px var(--mono);background:var(--panel);border:2px solid var(--line2)}
   .ls-stage{height:min(58vh,560px);display:grid;place-items:center;background:var(--panel);border:2px solid var(--line);overflow:hidden}
   .ls-stage canvas{display:block;touch-action:none;background:repeating-conic-gradient(#3a3a46 0 25%,#262630 0 50%) 0 0/16px 16px}
   .ls-side{display:grid;gap:14px;min-width:0}
   .ls-side .parts{display:grid;gap:0}.ls-side .parts .chk{margin:3px 0;cursor:default}.ls-side .parts .chk span{cursor:pointer}.ls-side .parts .chk.on span{color:var(--acc);font-weight:600}
-  .ls-side .parts .run{margin:0 0 0 auto;gap:6px;font-size:12px;opacity:.85;cursor:pointer}.ls-side .parts .run input{width:14px;height:14px}.ls-side .parts .run.under{margin:0 0 4px auto}   /* a lettered part's way of running: Vertical beside it, Column rules under that */
+  .ls-side .parts .some{margin-left:auto;font-size:11px;opacity:.6;cursor:help}   /* a part shown at some sizes only */
   .ls-picked{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;border-top:1px solid var(--line);padding-top:10px}
+  .ls-block{display:grid;gap:8px;font-size:13px}.ls-block .layown{margin:0}
   @media(max-width:900px){.ls-body{grid-template-columns:1fr}}
   #modal .dlg.wide{width:min(880px,94vw)}
   .parts{display:grid;gap:3px}
@@ -446,6 +460,7 @@
     </aside>
     <section id="center">
       <div id="toolbar"></div>
+      <div id="toolsub"></div>
       <div id="stage"><canvas id="cv"></canvas></div>
       <div id="strip"></div>
     </section>

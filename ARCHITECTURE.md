@@ -123,34 +123,74 @@ Surprise me chances of each look's optional parts (`recipes`: {look: {params}}, 
 and what Surprise me keeps (`surprise`: the parts to leave alone, `locks`; the chances set in Surprise me's
 chances, `odds`, only what was set; see `normalizeSurprise`), and the user's layout presets (`layouts`, below).
 
-**Layout presets** (`settings.layouts`, for every profile, as the chances are): a cover's structure without its look,
-which Surprise me deals by its chance (see 9.4) and which can be put on the canvas as it is.
+**Layout presets** (`settings.layouts`, for every profile, as the chances are): where a cover's parts stand, without its
+look, which Surprise me deals by its chance (see 9.4) and which can be put on the canvas as it is.
 
 ```jsonc
-[{ "id": "k3j9x0ab", "name": "Poster", "template": "split", "adjust": { "size": 0.42, "slant": 0.04, "flip": true },
-   "by": { "1080x1920": { "template": "stack", "adjust": {} } },   // optional: the sizes it draws in a layout of their own
-   "parts": { "title": { "t": { "all": { … }, "by": { "1080x1920": { … } } }, "shown": true, "vertical": true },
-              "subtitle": { "t": { … }, "shown": false }, … } }]   // a part of each of LAYOUT_PARTS
+[{ "id": "k3j9x0ab", "name": "Poster",
+   "template": "stack", "adjust": { "size": 0.38, "flip": true },          // the colour block: the default…
+   "orient": { "wide": { "template": "split", "adjust": {} } },            // optional: …each orientation's own…
+   "by": { "1080x1920": { "template": "stack", "adjust": { "slant": 0.1 } } },   // optional: …and single sizes' own
+   "custom": ["1080x1350"],                                                // optional: sizes of its own, laid out in its editor
+   "parts": { "title": { "t": { "all": { … }, "by": { "1080x1920": { … } } }, "shown": true },
+              "tag": { "t": { … }, "shown": true, "hide": ["1200x1600"] },   // optional: the sizes it is left out at
+              "subtitle": { "t": { … }, "shown": false }, … } }]           // each of LAYOUT_PARTS (an earlier preset: no colour block)
 ```
 
-The template and its adjustments (the profile's `style.template` and `style.layoutAdjust` of it), the layouts sizes have
-of their own (`by`, the profile's `style.layoutBy`, left out when there are none; see 5.2), and for each of
-the layout's parts that carry words or the graphic (`LAYOUT_PARTS` in `layers.js`: title, subtitle, tag, channel name,
-brand row, channel graphic) its placement `t` (for every size and per size, the graphic's per channel too), whether the
-cover has it (`shown`: not left out, see `off` in 4) and which way its words run (`vertical` and `rules`, `LAYOUT_RUNS`,
-carried when true). Fonts, letterings, colours and the look are not in it. `takeLayout(style, layers)`
-makes one from a style and a cover's layers; `putLayout(style, layers, preset)` puts one on them: its template, with its
-adjustments (none: the template's own; the other templates' left as they are), its sizes' own layouts in place of the
-style's (a preset without any lays every size out alike), each part where it has it, a part it
-shows that was left out coming in visible, one it leaves out hidden, a way of running it has not taken off; a part locked
-stays as it is (its place, whether it shows, which way its words run), dealt or applied, the template going on all the same.
+Three things, at every size, and nothing else. Where each of the layout's parts it places stands (`LAYOUT_PARTS` in
+`layers.js`: title, subtitle, tag, channel name, brand row, channel graphic, and the colour block and its edge): its
+placement `t`, for every size and per size (the graphic's by size alone, for every channel: see `plainPlaces()` below).
+Which of them the layout has (`shown`: on the
+cover, not left out, see `off` in 4), and the sizes it leaves one out at (`hide`; see `sizes` in 4.4). And the colour block
+at each size — the side it lies on, how much it takes, how its edge leans: a template and its adjustments, `{ template,
+adjust }`, as `layoutOf()` answers for a profile (see 5.2). The block is kept in three steps, a default (`template`,
+`adjust`), each orientation's own (`orient`) and single sizes' own (`by`): `presetLayout(preset, key)` is a size's own, else
+its orientation's, else the default, so a size of a profile that the preset never saw is drawn as the sizes facing its way
+are (and its parts stand where `t.all` puts them). Not the fonts, letterings, colours, the look, nor which way words run
+(`vertical`, `rules`: the user's, see 6.1.1). A preset may keep sizes of its own (`custom`, size keys a profile may have),
+laid out in its editor beside the profile's; a profile takes of a preset its own sizes alone.
+
+`takeLayout(style, layers, keys, catId)` makes one from a profile's style and a cover's layers (of channel `catId`) at the
+profile's sizes `keys`: the block's default is the profile's own template and its adjustments; an orientation whose sizes
+are all drawn alike, and otherwise, has that as its own; else each size drawn otherwise has its own. Its parts come from
+`takeParts(layers, keys, was, catId)`: a part counts as shown where the cover has it — not left out, at that size
+(`inSize`) —, its eye open or shut (*Hide layout*, or a part hidden by hand, hides it from view, not from the layout), `hide`
+naming the sizes of `keys` it is not at when it is at some, not shown when it is at none; its places per size for `keys`
+alone, the channel graphic's own for channel `catId` (`"<size>@<channel>"`) made the size's and every channel's own let go
+(`plainPlaces()`), so the preset places it alike on any channel's cover. `putLayout(style, layers, preset, keys)` puts one
+on them, at the profile's sizes `keys` alone: the block's default as the profile's template and its adjustments (none: the
+template's own; the other templates' left as they are), each of those sizes the preset draws otherwise (by its own or its
+orientation's) given that as its own in `layoutBy`, and no size its own besides; each part where it has it at those sizes
+(`t.by` of other sizes left out), a part it shows coming in at the sizes it does not hide (`keepTo`; at none, left out) —
+shown, when it was left out; hidden still, when its eye hid it —, one it does not show left out, one it has no entry for
+left as it is. A part locked stays as it is (its place, whether and where it shows), dealt or applied; and the colour
+block locked (`accent`) keeps the profile's block as well — its template, adjustments and `layoutBy` untouched —, where the
+block lies being that part's place as much as its `t` is. `setPresetLayout(preset, scope, key, fn)` is how the editor
+changes the block (see 9.4): `fn(lay, at, here)` makes of a layout what it becomes, and each layout the scope reaches from
+`key` — `size` the size's own, `orient` its orientation's own and each size's own facing that way, `all` the default and
+every own one — gets it from what it had, told whose it is (`at`: a size key, an orientation, or null for the default)
+and whether `key` is drawn in it (`here`); what then comes to what it would follow anyway is let go. Blocks reached need
+not lie alike (wide sizes side by side, the others stacked), so the editor makes each change one's own (`layout.js`):
+`sideLike(lay, from, to)`, a drag to the side across moving each block to the side across from its own (a mirror: the
+wide panels to the left, the stacked bands to the top), a drag to a side beside moving each there; `scaleBlock(lay, own,
+was, now, lean)`, a change of size or slant measured against the dragged block's size (`blockValues()`) and made in each
+one's, so a panel a third wider makes a band a third deeper rather than giving it the panel's share of the width.
+`newBlock()` is a new preset's block: each orientation in the template `BY_ORIENT` gives it (wide Split, square and tall
+Stack, the default), as the template comes; `newPreset()` is a new preset, that block and every part of `LAYOUT_PARTS`
+shown at every size where the template puts it (the channel name and graphic too, which a new design leaves out).
+
 `normalizeLayouts()` keeps 24 at most (`LAYOUTS`), their ids as they are (unique, never `keep`: Surprise me's chances
-name them), names trimmed to 40 characters, `by` as a profile keeps its `layoutBy` but by any size key (a preset is
-for every profile), every part there (one missing where the template puts it, shown unless a
-new design leaves it out), its numbers within range and its per-size keys only size keys, a lettered part's run values
-only when true (a number or a word is no way of running: left out). Their chances are `surprise.odds.groups.layout`
-({keep, id: chance}); `normalizeSurprise(raw, ids)` keeps them only for the presets there are, so a preset deleted takes
-its chance with it.
+name them), names trimmed to 40 characters, `orient` and `by` as a profile keeps its `layoutBy` but by orientation and by
+any size key (a preset is for every profile), `custom` as size keys between 64 and 8192, each once, 12 at most, each part
+it has an entry for (shown unless it says not), its numbers within range, its per-size keys only size keys, `hide` only
+size keys and only for a part shown. A part it has no entry for is not made up: a preset made now carries all seven
+(`takeParts()`, `newPreset()`), and one made before the colour block was a part carries none for it, which `putLayout()`
+then leaves as it is (its move, whether it shows) — the editor shows it where the template puts it, ticked, and the
+preset carries it once saved there. What an earlier preset held besides — which way a lettered part's words ran — is let
+go; what it holds still applies as it did (a Banner block included, which the
+editor offers no more but draws, and keeps slim when moved between top and bottom). Their chances are
+`surprise.odds.groups.layout` ({keep, id: chance}); `normalizeSurprise(raw, ids)` keeps them only for the presets there
+are, so a preset deleted takes its chance with it.
 
 Other files: `assets/<id>.json` (My assets: images as data URLs, AI assets as specs; either may carry `folder`, the id of its folder), `asset-folders.json` (the folders of My assets, `[{id, name}]`, checked by `normalizeFolders`; an asset whose folder is gone counts as unfiled), `fonts/<name>.font` (imported
 fonts), `photos/<pid>` (pictures, originals and masks; see 6.3), `photo-library.json` (Bitmaps: `[{pid, name, kind, at}]`, `kind` being `upload`, `ai` or `repaint`, newest first, checked by `normalizeLibrary`), `ai.json` (AI connection settings including the token; never exported with
@@ -331,8 +371,10 @@ list, at none.
   order; a list of every one of them is none at all (so the layer shows at a size added later), and one left with
   none stays, empty: unlike a channel, a size gone does not take the layer with it. `keepTo(L, keys, all)` sets a
   list, every size being none. A size added or removed in Setup (`toggle` in `sizesTab()`) keeps the lists of the
-  design and of every channel's cover read so far to the sizes there are now at once, as reading them again would
-  (`refitSizes(layers, all)`; a cover not on the canvas is saved), so nothing waits for the app to be opened again.
+  design and of the cover shown to the sizes there are now at once, as reading them again would (`refitSizes(layers,
+  all)`), both in that one step of undo; another channel's cover read so far is refitted when it is next shown
+  (`coverFor()`), not written meanwhile, so the step undone leaves every channel as it was, and nothing waits for the
+  app to be opened again.
 - **From another profile**: *Copy from another channel* runs the copies through `channelCover()`, so they keep the
   sizes this profile has. A size key is exact pixels, though, so a layer kept to 1920x1080 in a profile whose 16:9 is
   1280x720 would be at no size: copied from another profile (and a project opened into the current profile, its
@@ -436,7 +478,7 @@ cover out asks it: `paintCover()` (through `coverLayout(look, lay, w, h, parts)`
 or `layout()`, `adjustLayout()` and `meetStandards()` in a row, and which the Style tab's sliders use too, to start
 from the layout as it would be drawn at the size shown: with the parts the cover has there, `coverAt()`, a part kept
 to other sizes left out), the canvas's diamonds, the Style tab, layout presets
-(`takeLayout()` / `putLayout()` carry `by`), Surprise me's toast. Hence thumbnails, exports, the 3D view and the cover
+(`takeLayout()` takes the block at each of the profile's sizes, `putLayout()` puts it there, see 3), Surprise me's toast. Hence thumbnails, exports, the 3D view and the cover
 standards follow it with nothing of their own. `ownLayout(style, key)` says whether a size has its own;
 `setLayoutOf(style, keys, lay)` writes one: `keys` null, the profile's own (the template chosen, its adjustments,
 the other templates' kept), else each size of `keys` as its own; `followLayout(style, key)` lets a size's own go
@@ -543,8 +585,8 @@ Every lettered layer (`LETTERED`, copies too) carries `vertical` and `rules`, fa
 (`normalizeLayer()`), kept in the design and the covers. `columned(L)` in `style.js` says whether a layer is
 set in columns: its `vertical`, or for the title and the subtitle the look's own default (`columns(p)`: the
 woodblock book's *Set the title vertically*), which a layer's `vertical` cannot turn off — while it is on the
-properties show the box ticked and greyed (`columnsByLook()` in `app.js`). Surprise me deals neither on its own:
-`dealCover()` leaves them as they are (a layout preset it deals brings its own, see 9.4) and deals a layer in columns
+properties show the box ticked and greyed (`columnsByLook()` in `app.js`). Surprise me deals neither:
+`dealCover()` leaves them as they are (nor does a layout preset carry them, see 3) and deals a layer in columns
 no bend, nor a lettering of `NO_COLUMNS`.
 
 A column is set as a line turned a quarter turn clockwise, so it reads downward. `setColumn()` gives its
@@ -1334,9 +1376,10 @@ The layout is dealt first, by the group `layout`: `keep`, the canvas's own, and 
 at 0 and letting go of one deleted; `RULES.odds.groups.layout` is `{keep: 1}`, so until the user sets the group a hand is
 dealt in the canvas's layout, as before there were presets). `pickLayout()` draws one, and draws nothing while `keep` is
 certain, so such a hand is dealt from the same random numbers as before. Dealt a preset (`env.layouts`, the presets),
-`dealCover()` puts it on before anything else (`putLayout()`: the template, its adjustments, the parts' places, which are
-on the cover, which way their words run; a part locked stays as it is, as it does when the words go back), and the
-words moved go back to the preset's places rather than the design's; the rest of the hand — the look, the ground, the colour block's shape, the letterings, the user's layers' places
+`dealCover()` puts it on before anything else, at the profile's sizes alone (`putLayout()` with `env.sizes`, the profile's
+size keys: the block at each, the parts' places there, which are on the cover and where; a size of the preset's own the
+profile has not passes by; a part locked stays as it is, the colour block locked its layout too), and the words it places stay where it put them rather than
+going back to the design's; the rest of the hand — the look, the ground, the colour block's shape, the letterings, the user's layers' places
 (`dealPlaces()`, on the template dealt) — is dealt on it as ever. With the places locked (`locks.places`) the canvas's
 layout stays, whatever the chances. `dealCover()` returns which was dealt (`layout`: "keep" or the id), which the hand
 keeps (its caption in the window names the preset); a hand is the whole style and the layers, so `putHand()`, and
@@ -1344,24 +1387,55 @@ keeps (its caption in the window names the preset); a hand is the whole style an
 
 The presets are made and seen at the top of the chances window: the group's sliders beside them (`layoutList()`), each
 renamed where it is, edited (`layoutEditor()`), put on the canvas as one step of undo (`applyLayout()`, `putLayout()`
-again: the parts locked stay) or deleted once asked (`deleteLayout()`: its chance goes to the others as when its slider is set to 0, `dropOption()`; none of them
-having any, the group goes and `keep` is certain again); *New* keeps the canvas's (`addLayout()`). *Save as layout* in the
-toolbar above the canvas (`saveLayoutDialog()`) asks a name and does the same; the word that says so (`toast()` with a
-button) opens the chances at the presets (`oddsDialog(true, "layouts")`). The editor is a view of the chances window: the
-profile's style and this channel's layers copied (unlocked: a lock is the cover's, and every part here is the preset's),
-the preset put on the copies and drawn by `drawCover()` at one of the profile's sizes, picked above it (the side built
-again once it is drawn there, so the template's sliders start from that size's layout), with the selected part's frame
-and handles. A part is moved, resized, stretched or turned as on the canvas (`handles()`, `hitAt()`, `adjust()`; for every size, those facing the shown one's way, or the one shown; a drag keeps the rest in
-`o.live`); the template's controls are the Style tab's (`templateControls()`, which `layoutBox()` uses too; here they change the preset's own template, which its sizes without one of their own follow, and a size shown with its own says so, with *Follow again*), a box per
-part sets `off`, and beside a lettered one a box sets `vertical` and, once it is ticked, one under it `rules` (the
-properties' words for them). *Save* takes the preset back off the copies (`takeLayout()`); nothing touches the cover
-until a preset is put on it.
+again, at the profile's sizes: the parts locked stay, the block's layout too when the block is locked) or deleted once asked (`deleteLayout()`: its chance goes to the others as when its slider is set to 0, `dropOption()`; none of them
+having any, the group goes and `keep` is certain again); *New…* opens the editor on a new one (`newPreset()`: every part
+in it, where the template puts it), which is in the list once saved. *Save as layout*, a quiet underlined link in its own line
+under the toolbar above the canvas (`#toolsub`, filled by `syncToolbar()` in Edit and empty in Setup, where it takes no room:
+the column's toolbar, line, stage and strip are each pinned to a row of their own, so the stage keeps the row that grows;
+its grey still 5:1 on its ground, white under the pointer), asks a name (`saveLayoutDialog()`) and
+keeps the canvas's (`addLayout()`: `takeLayout()` at the profile's sizes, the graphic's places this channel's); the word that says so (`toast()` with a
+button) opens the chances at the presets (`oddsDialog(true, "layouts")`).
+
+The editor is a view of the chances window with a canvas of its own, unrelated to the cover being edited: layers of its
+own (`defaultLayers()`, the logo and the corner brackets left out, each of `LAYOUT_PARTS` placed and shown as the preset
+has it, `sizes` standing for `hide`; one it has no entry for as `newPreset()` has it; the graphic's places those of the
+canvas's channel, through `plainPlaces()`), drawn by `drawCover()` with a profile made for it — the cel look on its dark ground,
+no photos, the title, subtitle and tag in placeholder words (`layed.sample*`), the profile's brand row and the canvas's
+channel (a camera for a channel with no graphic, so there is one to place), and the block at the size shown
+(`presetLayout()`) as the style's template and adjustments. Its sizes are the profile's and the preset's own (`custom`,
+added by width and height, 64 to 8192, 12 at most; one let go keeps what was set for it, for a profile that has it), one
+drawn at a time, picked above it beside the scope (`all`, `orient` — the editor's sizes facing that one's way, what it
+opens on, so the wide sizes and the others are laid out apart —, `size`).
+The canvas is painted as a cover is, so what is caught and the block's diamonds are those of the size shown (`coverAt()`
+leaves a part not ticked there out). A part is moved, resized, stretched or turned as on the canvas (`handles()`,
+`hitAt()`, `adjust()` with no channel, so a move of the graphic is the size's, for every channel; a drag keeps the rest in
+`o.live`, and its end lets go of the canvas's move, up and cancel handlers). The colour block has neither the template's list nor its
+sliders: selected, it is outlined without square handles (`o.handles` false) and shows the diamonds (`layoutHandles()`);
+the middle one moves the edge (`dragLayout()`, the `size` it gives), an end leans it (`size` and `slant`), and the block
+itself, dragged, goes to the side the drag leads toward once past about an eighth of the canvas's short side (`sideToward()`, `onSide()`:
+along the foot Stack, on top Stack swapped, on the right Split, on the left Split swapped, its adjustments going with it; a
+Banner keeps its slim band between top and bottom); each lands where the scope reaches through `setPresetLayout()`, from
+the preset as the drag began, so a drag led back leaves it as it was: the side by `sideLike()`, the size and slant on the
+layout drawn here as dragged, on any other by `scaleBlock()`, its own block read at a size drawn in it (`blockOf`: a
+size's own at that size, an orientation's at the first size here facing that way, else `USUAL_SIZE`, the default at the
+first size with none of its own), as drawn there with the parts shown at that size (`drawnBlock`, through
+`coverLayout()`, as `draw` paints it). Sizes sharing a layout are each fitted to the parts they have, and one size kept
+for all of them would snap them to one; so every other size a resize reaches is also given a block of its own, a share
+of the one it showed, and none jumps. A size with a block of its own says so, with
+*Follow again*; *Reset size and slant* puts back the template's for the block, *Reset its place* a part's place (as
+`resetPlacement()` does, by the scope). Beside the canvas a box per part ticks it at the sizes the scope reaches (*some
+sizes* beside one ticked at some only); the part selected, once not at the size shown (unticked there, or a size picked
+where it is not), gives the selection to the first part that is (`keepSel`), so no frame, diamond or line about the
+block's side is left over a part that is not drawn — and `layoutHandles()` gives none for a block left out (`off`, as
+`coverAt()` has it at a size it is not ticked at). The width and height typed for *+ Size* are kept while the side is
+built again. *Save* takes the parts back off its layers (`takeParts(layers, keys, was)`, which
+keeps the preset's places and hiding at another profile's sizes); nothing touches the cover until a preset is put on it.
 
 By the recipes, the looks fall into three families (`FAMILIES`: pop, print, light), each with the chance of the dark ground, of the title keeping the look's own lettering (`auto`), the other letterings that suit it by weight, and the chance and ways of a bend; `RECIPES` gives each look its family and what differs, the chance each part that is off by default comes on, and `tune()` for sliders that go together (rain brings mist in the dark deco). `tuneLook()` sets each slider within 0.3 of the range about its default, likeliest near it (off the very ends unless its default is there), and lets in at most `EXTRAS` (2) of the parts off by default; `letterFor()` deals a layer's lettering (the subtitle like the title by the odds' `subtitleLikeTitle`, never bent; an outline lettering only where outlines can be read; not the lettering named after the look, which is its own already). The families and the looks' own letterings, bends and dark ground are no longer dealt by look: `recipeOf()` takes the dark ground, the lettering (`own`, then `fx` by weight) and the bend (`bend`, then `bends`) from the odds' groups, the same for every look, and keeps of the look's recipe its optional parts and `tune()`. The user sets a look's optional parts, each on its own, in the Style tab (`recipeBox()`) and in Surprise me's chances (`lookParts()`, the same in both); what they change is kept in `settings.recipes[look].params` and `baseRecipe()` lays it over the table's. While the user has not set a group (`odds.set`), the cover turns it (`coverContext()`, passed to `recipeOf()`): a long title — a line wider than 8 characters, or three lines — is bent at 0.3 of the chance and given a sticker's rim or depth half as often, a short one bent half as often again (0.5 at most); a channel colour near black (luminance under 0.05) makes the dark ground 0.6 as likely, a very bright one (over 0.6: near white, a light yellow) the dark ground likelier — none of this for a group the user set, which is dealt exactly as set. `dealPlaces()` takes, of a dozen places allowed, the one that covers the least of the title and the cut-out subjects (`overlap()`), and makes a layer that would still cover more than a quarter of one 0.85 as large and places it again, four times at most; a layer does not keep clear of the subjects it carries (its own, a cut-out itself, and its linked cut-outs, whose boxes go where it goes; a cut-out lying exactly over it is put back over it at its new size and angle, `alignedT()`), those carrying any are placed first, and one clipped into a layer below keeps clear of nothing. Each hand deals only how the cover is drawn: the look and its sliders, dark or light
 ground, the colour block's shape, text effects, and the look effects of the user's layers
-(mostly from the drawn look, now and then from another); the template, its proportions, each size's own layout, whether lettering is
-set in columns and ruled (`vertical`, `rules`: structure; a layer in columns is dealt no bend, see 6.1.1) and where the
-layout layers stand are left alone (unless a layout preset is dealt, above), but for the title, which goes to the top of the layers with whatever
+(mostly from the drawn look, now and then from another); whether lettering is set in columns and ruled is left alone
+(`vertical`, `rules`: the user's; a layer in columns is dealt no bend, see 6.1.1), and so are the template, its
+proportions, each size's own layout and where the layout layers stand (unless a layout preset is dealt, above), but for the title, which goes to the top of the layers with whatever
 is clipped into it (unless it is clipped onto another), below only the subjects cut out of photos that stood over it and the assets woven with it (`weave.with` holding the title), which go on passing in front of it and behind it. `dealPlaces()` gives the user's layers a new place, angle and size, a text layer above `wordsFoot()` (layout.js: the badges' line on a landscape cover, else the bottom 14%, `WORDS_FOOT` in platforms.js, which `meetStandards()` keeps the tag and the channel name above too):
 each size is drawn small once to learn every layer's box, then for the new angle and size the range the
 centre may take at each size (less a hair for outlines and shadows) is found, and a place drawn within
@@ -1540,7 +1614,9 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | add a kind of part to solids | validation and `pieces()` in `solid.js`, `solidPrompt()` and its examples in `ai.js` |
 | add a look | an entry in `LOOKS` in `style.js`, starting with a hook or two |
 | change how Surprise me deals | `RULES` (every number), `FAMILIES` and `RECIPES` (what suits each look) in `deal.js` |
-| change what a layout preset holds | `LAYOUT_PARTS`, `LAYOUT_RUNS`, `takeLayout()` and `putLayout()` in `layers.js`, `normalizeLayouts()` in `store.js` |
+| change what a layout preset holds | `LAYOUT_PARTS`, `takeParts()`, `takeLayout()`, `putLayout()`, `presetLayout()` and `setPresetLayout()` in `layers.js`, `normalizeLayouts()` in `store.js` |
+| change how the colour block is moved to a side in the preset editor | `sideToward()` and `onSide()` in `layout.js` |
+| change how one block change lands on blocks that lie otherwise (every size) | `sideLike()`, `scaleBlock()` and `blockValues()` in `layout.js`; `blockOf` in `layoutEditor()` |
 | change which sizes count as wide, square or tall, or what *Wide side by side, tall and square stacked* gives each | `orientOf()`, `BY_ORIENT` and `layoutByOrient()` in `layout.js` |
 | change what a layer kept to some sizes is at the others | `coverAt()` in `render.js`; the list's labels `sizesNote()` in `app.js` |
 | change what goes with a photo whose background is removed at some sizes | `showApart()` (and `cutAt()`, `cutFrom()`) in `layers.js` |

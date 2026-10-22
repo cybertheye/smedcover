@@ -33,8 +33,10 @@
 // below it — the nearest one not itself clipped, its *base* (see clipBase) — as a clipping mask does:
 // a photo inside the title's letters, a colour inside a silhouette. The base can be any layer but the
 // ground.
-
-import { virtualSize, sizeOfKey, standsFor } from "./layout.js";
+//
+// A layout preset (see takeLayout) is where the layout's parts stand, which of them it has and the colour block's
+// layout, for every size: kept in the settings, dealt by Surprise me, put on a cover as it is.
+import { ORIENTS, BY_ORIENT, orientOfKey, layoutOf, sameLayout, virtualSize, sizeOfKey, standsFor } from "./layout.js";
 
 // the layout layers, bottom first: in the layer list, from the top, corner brackets, title, subtitle,
 // brand logo, brand row, tag, channel name, channel graphic, colour block, background
@@ -403,8 +405,7 @@ function normalizeLayer(raw, catIds, sizeKeys) {
   // lettering may be given its own colour; without one it takes whatever the look gives it
   if (LETTERED.includes(raw.type)) for (const k of HEADLINES.includes(raw.type) ? ["ink", "hi", "plateInk", "hiPlateInk"] : ["ink"]) if (typeof raw[k] === "string" && /^#[0-9a-f]{6}$/i.test(raw[k])) L[k] = raw[k].toLowerCase();
   // lettering may be set in columns, as a Song edition is (`vertical`), its columns ruled (`rules`, meant only then):
-  // structure, which Surprise me never deals on its own; a layout preset it deals brings its own (see putLayout below,
-  // and columned in style.js)
+  // the user's, which Surprise me never deals, nor a layout preset carries (see putLayout below, and columned in style.js)
   if (LETTERED.includes(raw.type)) { L.vertical = raw.vertical === true; L.rules = raw.rules === true; }
   // the looks' effects put on the layer (see layerEffects in style.js): "look.key" a strength 0–1 (0, or
   // missing: off), "look.key:sub" one of its own settings 0–1; they stay with the layer whatever the look
@@ -790,58 +791,144 @@ export function resetPlacement(layer, scope, key, catId, keys = [key]) {
   layer.t = newLayer(layer.type).t;
 }
 
-// ---------- layout presets: a cover's structure without its look (kept in the settings, see normalizeLayouts in store.js)
-// A layout preset holds the template and its adjustments (a profile's style.template and style.layoutAdjust of it), the
-// layouts some sizes have of their own (style.layoutBy, see layoutOf in layout.js), and
-// of the layout's own parts that carry words or the channel's graphic: where each stands (`t`, for every size and
-// per size), whether the cover has it (`shown`: not left out, see `off` above), and for lettering which way its words
-// run (`vertical` and `rules`, kept only when true). Fonts, letterings, colours and the look are not in it.
-// Surprise me deals one by its chance (dealCover in deal.js), and one can be put on the canvas as it is; either way a
-// part the user locked stays as it is.
-/** The layout's parts a layout preset holds. */
-export const LAYOUT_PARTS = ["title", "subtitle", "tag", "catname", "brand", "graphic"];
-/** Which way a lettered part's words run, carried by a preset when it is so: in columns, and the rules between them. */
-export const LAYOUT_RUNS = ["vertical", "rules"];
+// ---------- layout presets: where a cover's parts stand, without its look (kept in the settings, see normalizeLayouts in store.js)
+// A layout preset holds three things, for every size: where each part of the layout it places stands (`t`, for every
+// size and per size, as the layer's own), which of them the layout has (`shown`, and the sizes it leaves one out at,
+// `hide`), and the colour block — the side it lies on, how much it takes, how its edge leans: a template and its
+// adjustments, { template, adjust }, as layoutOf in layout.js answers for a profile. The block is kept as a profile
+// keeps it, a default with sizes of their own over it (`by`), and a step between: each orientation's own (`orient`:
+// wide, square, tall), which a size facing that way has unless it has one of its own, so a profile's sizes the preset
+// never saw are laid out as those facing their way are. Nothing else: no fonts, letterings, colours or look, nor which
+// way words run. A preset may keep sizes of its own too (`custom`), laid out in its editor beside the profile's; a
+// profile takes of a preset its own sizes alone. Surprise me deals one by its chance (dealCover in deal.js), and one
+// can be put on the canvas as it is; either way a part the user locked stays as it is, and the colour block locked
+// keeps its layout too. A preset made now carries every part; one made before the colour block was a part has no
+// entry for it, and a part a preset has no entry for is one it leaves as it is.
+/** The layout's parts a layout preset places: those with words, the channel's graphic, and the colour block and its edge. */
+export const LAYOUT_PARTS = ["title", "subtitle", "tag", "catname", "brand", "graphic", "accent"];
 const clone = (v) => JSON.parse(JSON.stringify(v));
+const layCopy = (lay) => ({ template: lay.template, adjust: { ...(lay.adjust || {}) } });
 /**
- * The layout preset that `style` (a profile's) and `layers` (a cover's) make as they are: { template, adjust, by?, parts:
- * { id: { t, shown, vertical?, rules? } } }, of the parts the layers have (the layout's own, by id: a copy is not one),
- * a way of running only where the words run so (true; a way they do not run is left out); `by`, the sizes drawn in a
- * layout of their own, only when there are some.
+ * Placement `t` (a channel graphic's) with its places for channel `catId` (see byKey) as the size's own, every
+ * channel's own let go: where it stands on that channel's cover, for whichever channel's it is put on (a preset is for
+ * every channel of every profile). A placement with no channel's own, as it is.
  */
-export function takeLayout(style, layers) {
-  const parts = {};
+export function plainPlaces(t, catId) {
+  if (!Object.keys(t.by).some((k) => k.includes("@"))) return t;
+  const by = Object.fromEntries(Object.entries(t.by).filter(([k]) => !k.includes("@")));
+  for (const [k, v] of Object.entries(t.by)) { const [key, cat] = k.split("@"); if (cat && cat === catId) by[key] = v; }
+  return { ...t, by };
+}
+/** The layout ({ template, adjust }) layout preset `p` draws the size keyed `key` in: the size's own, else its orientation's, else the preset's default. */
+export function presetLayout(p, key) {
+  const own = (p.by && p.by[key]) || (p.orient && p.orient[orientOfKey(key)]);
+  return own ? { template: own.template, adjust: own.adjust || {} } : { template: p.template, adjust: p.adjust || {} };
+}
+/**
+ * A new layout preset's colour block, { template, adjust, orient }: each orientation in the template BY_ORIENT gives it,
+ * as the template comes — wide sizes side by side (Split), square and tall ones stacked (Stack, the default).
+ */
+export function newBlock() {
+  const template = BY_ORIENT.square, orient = {};
+  for (const o of ORIENTS) if (BY_ORIENT[o] !== template) orient[o] = { template: BY_ORIENT[o], adjust: {} };
+  return { template, adjust: {}, orient };
+}
+/**
+ * A new layout preset, as its editor starts it: the colour block of newBlock(), and every part of LAYOUT_PARTS in it,
+ * shown at every size where the template puts it — the channel name and graphic too, which a new design leaves out
+ * (DEFAULT_OFF), the graphic on the block.
+ */
+export const newPreset = () => ({ ...newBlock(), parts: Object.fromEntries(LAYOUT_PARTS.map((id) => [id, { t: newLayer(id).t, shown: true }])) });
+/**
+ * Changes layout preset `p`'s colour block, in place, where `scope` reaches from the size keyed `key` (see SCOPES in
+ * the app): "size", that size, as its own; "orient", its orientation's own and each size's own facing that way; "all",
+ * the default, each orientation's own and each size's own. `fn(lay, at, here)` makes of a layout ({ template, adjust })
+ * what it becomes, and each gets it from what it had — `at` saying whose it is (a size key, an orientation, or null for
+ * the default), `here` whether size `key` is drawn in it —, so a change lands on each as that one has it (moved to the
+ * top, every size reached has its block on top; made bigger, each is bigger; and see sideLike and scaleBlock in
+ * layout.js, for blocks that do not lie alike). What then comes to what it would have anyway (an orientation's own as
+ * the default, a size's own as its orientation's) is let go.
+ */
+export function setPresetLayout(p, scope, key, fn) {
+  const o = orientOfKey(key), by = { ...(p.by || {}) }, orient = { ...(p.orient || {}) };
+  if (scope === "size") by[key] = layCopy(fn(presetLayout(p, key), key, true));
+  else {
+    if (scope !== "all" && !orient[o]) orient[o] = { template: p.template, adjust: p.adjust || {} };
+    const mine = by[key] ? key : orient[o] ? o : null;   // what size `key` is drawn in
+    for (const x of Object.keys(orient)) if (scope === "all" || x === o) orient[x] = layCopy(fn(orient[x], x, x === mine));
+    for (const k of Object.keys(by)) if (scope === "all" || orientOfKey(k) === o) by[k] = layCopy(fn(by[k], k, k === mine));
+    if (scope === "all") Object.assign(p, layCopy(fn({ template: p.template, adjust: p.adjust || {} }, null, mine === null)));
+  }
+  const base = { template: p.template, adjust: p.adjust || {} };
+  for (const x of Object.keys(orient)) if (sameLayout(orient[x], base)) delete orient[x];
+  for (const k of Object.keys(by)) if (sameLayout(by[k], orient[orientOfKey(k)] || base)) delete by[k];
+  if (Object.keys(orient).length) p.orient = orient; else delete p.orient;
+  if (Object.keys(by).length) p.by = by; else delete p.by;
+}
+/**
+ * The parts of a layout preset as `layers` (a cover's) have them at the sizes keyed `keys`: { id: { t, shown, hide? } },
+ * of the layout's own (by id: a copy is not one). A part counts as ticked where the cover has it — not left out, at
+ * that size (`sizes`) —, whether its eye shows it or not (Hide layout, a part hidden by hand: still the layout's), `hide`
+ * naming the sizes it is not at when it is at some; at none, it is not shown. Its places per size for `keys` alone, the
+ * channel graphic's for channel `catId` (the cover's) as the size's own (plainPlaces), so the preset puts it there on
+ * any channel's cover. `was`: the preset's parts before (in its editor), whose places and hiding at sizes other than
+ * `keys` (another profile's) are kept.
+ */
+export function takeParts(layers, keys, was = null, catId = null) {
+  const parts = {}, ours = (k) => keys.includes(k.split("@")[0]);
   for (const id of LAYOUT_PARTS) {
     const L = layers.find((l) => l.id === id);
     if (!L) continue;
-    const q = { t: clone(L.t), shown: !L.off };
-    for (const k of LAYOUT_RUNS) if (L[k] === true) q[k] = true;
-    parts[id] = q;
+    const t = id === "graphic" ? plainPlaces(clone(L.t), catId) : clone(L.t), at = L.off ? [] : keys.filter((k) => inSize(L, k)), before = was && was[id];
+    if (!was) t.by = Object.fromEntries(Object.entries(t.by).filter(([k]) => ours(k)));
+    const hide = [...(before && before.hide ? before.hide.filter((k) => !keys.includes(k)) : []), ...keys.filter((k) => !at.includes(k))];
+    parts[id] = at.length ? { t, shown: true, ...(hide.length ? { hide } : {}) } : { t, shown: false };
   }
-  const by = style.layoutBy && Object.keys(style.layoutBy).length ? { by: clone(style.layoutBy) } : {};
-  return { template: style.template, adjust: { ...((style.layoutAdjust || {})[style.template] || {}) }, ...by, parts };
+  return parts;
 }
 /**
- * Puts layout preset `p` (as takeLayout makes it) onto `style` and `layers` (in place): its template, with its
- * adjustments (none: the template as it comes; the other templates' are left as they are), the sizes it draws in a
- * layout of their own (and none of the style's others: a preset without any lays every size out alike), and each part it holds
- * where it has it, on the cover or left out (one that comes back comes in shown, as Layout parts brings it; one
- * hidden by hand and kept on stays hidden), its words running as they do there (a way the preset has not is taken
- * off). A part locked stays as it is — its place, whether it shows, which way its words run — whether the preset is
- * dealt (as dealCover leaves a locked layer where it is) or put on the canvas by hand; the template, the profile's
- * and no layer's, goes on all the same.
+ * The layout preset that `style` (a profile's) and `layers` (a cover's, of channel `catId`) make as they are at the
+ * profile's sizes, keyed `keys`: { template, adjust, orient?, by?, parts } (see takeParts). The block: the profile's own
+ * template and its adjustments the default; an orientation whose sizes are all drawn alike, and otherwise, has that as
+ * its own (so another profile's sizes facing that way are drawn so too); else each size drawn otherwise has its own.
  */
-export function putLayout(style, layers, p) {
-  style.template = p.template;
-  const adjust = (style.layoutAdjust = style.layoutAdjust || {});
-  if (p.adjust && Object.keys(p.adjust).length) adjust[p.template] = { ...p.adjust }; else delete adjust[p.template];
-  if (p.by && Object.keys(p.by).length) style.layoutBy = clone(p.by); else delete style.layoutBy;
+export function takeLayout(style, layers, keys, catId = null) {
+  const base = { template: style.template, adjust: { ...((style.layoutAdjust || {})[style.template] || {}) } }, orient = {}, by = {};
+  for (const o of ORIENTS) {
+    const ks = keys.filter((k) => orientOfKey(k) === o), lays = ks.map((k) => layoutOf(style, k));
+    if (!ks.length) continue;
+    if (lays.every((l) => sameLayout(l, lays[0]))) { if (!sameLayout(lays[0], base)) orient[o] = layCopy(lays[0]); }
+    else ks.forEach((k, i) => { if (!sameLayout(lays[i], base)) by[k] = layCopy(lays[i]); });
+  }
+  return { ...base, ...(Object.keys(orient).length ? { orient } : {}), ...(Object.keys(by).length ? { by } : {}), parts: takeParts(layers, keys, null, catId) };
+}
+/**
+ * Puts layout preset `p` (as normalizeLayouts keeps it) onto `style` and `layers` (in place), at the profile's sizes,
+ * keyed `keys`, alone (a size of the preset's own the profile has not is passed by): its colour block — its default as
+ * the profile's template and its adjustments (none: the template as it comes; the other templates' are left as they
+ * are), each size it draws otherwise (by the size's own or its orientation's) given that as its own, and no size its own
+ * besides —, and each part where the preset has it at those sizes: one it shows comes in at the sizes it does not hide
+ * (see `sizes` above; one that was left out comes in shown, one hidden by its eye stays hidden), one it does not is left
+ * out; a part the preset has no entry for (an earlier preset's colour block) is left as it is. A part locked stays as
+ * it is — its place, whether it shows — whether the preset is dealt (as dealCover leaves a locked layer where it is) or
+ * put on the canvas by hand; and the colour block locked keeps the profile's block as well (the template, its
+ * adjustments, each size's own), the block being where that part stands as much as its place is.
+ */
+export function putLayout(style, layers, p, keys) {
+  const block = layers.find((l) => l.id === "accent");
+  if (!(block && block.locked)) {
+    const base = { template: p.template, adjust: p.adjust || {} }, adjust = (style.layoutAdjust = style.layoutAdjust || {}), by = {};
+    style.template = p.template;
+    if (Object.keys(base.adjust).length) adjust[p.template] = { ...base.adjust }; else delete adjust[p.template];
+    for (const k of keys) { const lay = presetLayout(p, k); if (!sameLayout(lay, base)) by[k] = layCopy(lay); }
+    if (Object.keys(by).length) style.layoutBy = by; else delete style.layoutBy;
+  }
   for (const [id, q] of Object.entries(p.parts || {})) {
     const L = layers.find((l) => l.id === id);
     if (!L || !LAYOUT_PARTS.includes(id) || L.locked) continue;
-    L.t = clone(q.t);
-    if (!q.shown) { L.off = true; L.visible = false; } else if (L.off) { delete L.off; L.visible = true; }
-    if (LETTERED.includes(L.type)) for (const k of LAYOUT_RUNS) L[k] = q[k] === true;   // a way the preset's words do not run is taken off
+    L.t = { all: { ...q.t.all }, by: Object.fromEntries(Object.entries(q.t.by || {}).filter(([k]) => keys.includes(k.split("@")[0])).map(([k, v]) => [k, { ...v }])) };
+    const at = q.shown ? keys.filter((k) => !(q.hide || []).includes(k)) : [];
+    if (!at.length) { L.off = true; L.visible = false; } else { if (L.off) { delete L.off; L.visible = true; } keepTo(L, at, keys); }
   }
 }
 
