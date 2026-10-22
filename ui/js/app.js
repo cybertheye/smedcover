@@ -8,14 +8,14 @@ import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont } from "./store.js";
 import { platformsFor, ratioOf } from "./platforms.js";
-import { boxOf, overlap, titleContrast, coverScore, pickHand } from "./check.js";
-import { tuneLook, recipeOf, baseRecipe, letterFor, coverContext, pickLook, FAMILIES } from "./deal.js";
+import { boxOf, overlap, titleContrast } from "./check.js";
+import { baseRecipe, FAMILIES, RULES, dealCover, coverScore, pickHand } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, LETTERED, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
-  normalizeRecipes, SURPRISE_LOCKS,
+  normalizeRecipes, SURPRISE_LOCKS, RECENT_KEPT,
 } from "./store.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
@@ -2809,7 +2809,7 @@ function borrowDialog(L, here, list) {
   sync(); m.hidden = false;
 }
 /**
- * Surprise me's places for the user's own layers: each anywhere on the canvas, at a new angle and size,
+ * Surprise me's places for the user's own layers (its numbers are RULES.places in deal.js): each anywhere on the canvas, at a new angle and size,
  * but wholly on it at every size — not a pixel off — and words above the foot where the apps show their
  * counts (wordsFoot in layout.js); and, of the places allowed, one that leaves the title and the subjects
  * cut out of photos uncovered, or as little covered as a dozen tries find — a layer that would still cover
@@ -2819,7 +2819,8 @@ function borrowDialog(L, here, list) {
  * where it is. Each layer's box at each size comes from a quick drawing; a layer too big for some size is
  * set straighter, then smaller, until it fits.
  */
-function dealPlaces(between, round) {
+function dealPlaces(R) {
+  const P = RULES.places, between = (a, b) => a + R() * (b - a), round = (v, step) => Math.round(v / step) * step;
   const fills = (L) => fillsCanvas(L) || (L.type === "solid" && L.t.all.s >= 0.98 && !L.t.all.r);
   const movers = S.cover.layers.filter((L) => isFree(L.type) && L.visible && !L.locked && !L.of && !fills(L));
   if (!movers.length) return;
@@ -2840,7 +2841,7 @@ function dealPlaces(between, round) {
     const a = L.t.all, mine = carried(L), per = boxes.map((b) => ({ ...b, hit: b.hits.find((x) => x.id === L.id), keep: clipped ? [] : b.keep.filter((k) => !mine.includes(k.id)) })).filter((b) => b.hit);
     if (!per.length) continue;
     const x0 = a.x, y0 = a.y, s0 = a.s, r0 = a.r, aligned = passivesOf(L).filter((P) => JSON.stringify(P.t) === JSON.stringify(alignedT(L)));
-    let s = clamp(a.s * between(0.8, 1.25), 0.05, 2.5), r = round(between(-12, 12), 1), smaller = 4;
+    let s = clamp(a.s * between(P.scale[0], P.scale[1]), P.size[0], P.size[1]), r = round(between(-P.turn, P.turn), 1), smaller = P.shrinks;
     for (let tries = 0; tries < 40; tries++) {
       // where the centre may go at each size, as fractions of the canvas, with this size and angle: the box
       // upright (turned by the size's own extra angle too), less a hair for outlines and shadows
@@ -2848,7 +2849,7 @@ function dealPlaces(between, round) {
       const fit = [];   // at each size: the place's offset, the box's offset from it and half extents
       for (const p of per) {
         const at = placeOf(L, p.w, p.h, p.key, cat().id), dx = at.cx - a.x * p.w, dy = at.cy - a.y * p.h, k = s / a.s;
-        const t = ((r + (at.r - a.r)) * Math.PI) / 180, hw = p.hit.hw * k, hh = p.hit.hh * k, m = Math.min(p.w, p.h) * 0.015;
+        const t = ((r + (at.r - a.r)) * Math.PI) / 180, hw = p.hit.hw * k, hh = p.hit.hh * k, m = Math.min(p.w, p.h) * P.margin;
         const ex = Math.abs(hw * Math.cos(t)) + Math.abs(hh * Math.sin(t)) + m, ey = Math.abs(hw * Math.sin(t)) + Math.abs(hh * Math.cos(t)) + m, foot = L.type === "text" ? wordsFoot(p.w, p.h) : p.h;
         // the box off the place's centre (a cut-out's is round its subject), turned and sized with it
         const turn = ((r - a.r) * Math.PI) / 180, u = p.hit.cx - at.cx, v = p.hit.cy - at.cy, bx = (u * Math.cos(turn) - v * Math.sin(turn)) * k, by = (u * Math.sin(turn) + v * Math.cos(turn)) * k;
@@ -2859,8 +2860,8 @@ function dealPlaces(between, round) {
         // how much of the title and the cut-out subjects a centre at (x, y) would cover, the worst size
         const covers = (x, y) => Math.max(0, ...fit.map(({ p, dx, dy, bx, by, ex, ey }) => { const cx = x * p.w + dx + bx, cy = y * p.h + dy + by, me = { x0: cx - ex, y0: cy - ey, x1: cx + ex, y1: cy + ey }; return Math.max(0, ...p.keep.map((k) => overlap(k, me))); }));
         let best = null;
-        for (let n = 0; n < 12 && !(best && best.c === 0); n++) { const x = between(lo[0], hi[0]), y = between(lo[1], hi[1]), c = covers(x, y); if (!best || c < best.c) best = { x, y, c }; }
-        if (best.c > 0.25 && smaller-- > 0) { s *= 0.85; continue; }   // nowhere it leaves them mostly clear: a little smaller, and again (to about half)
+        for (let n = 0; n < P.tries && !(best && best.c === 0); n++) { const x = between(lo[0], hi[0]), y = between(lo[1], hi[1]), c = covers(x, y); if (!best || c < best.c) best = { x, y, c }; }
+        if (best.c > P.cover && smaller-- > 0) { s *= P.shrink; continue; }   // nowhere it leaves them mostly clear: a little smaller, and again (to about half)
         a.x = best.x; a.y = best.y; a.r = r; a.s = s;
         for (const P of aligned) P.t = alignedT(L);   // a cut-out that lay over it still does, at its new size and angle
         // and the subjects it carries are where it put them: its own and those of the cut-outs over it turned and
@@ -3522,85 +3523,17 @@ function setMode(mode) {
   syncTop(); syncTabs(); renderPanel(); renderSide(); syncToolbar(); queueDraw();
 }
 /**
- * One hand of Surprise me, dealt onto the cover and the profile's style as they are: the look and its
- * settings, the colour block's shape, text effects and bends, the small switches on each layer, look
- * effects, and where added items sit. What the cover *says* is left alone — the title and tag, the
- * channel and its colour, the photo, which layers exist — and so is the layout. `design`: the layers of the
- * profile's design by id, where moved words go back to.
+ * One hand of Surprise me, dealt onto the cover and the profile's style as they are: everything but where
+ * the user's own layers go by dealCover (deal.js, where all the rules are), then those places by dealPlaces.
+ * `design`: the layers of the profile's design by id, where moved words go back to.
  */
 function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l]))) {
-  const R = Math.random, pick = (a) => a[Math.floor(R() * a.length)], between = (a, b) => a + R() * (b - a), chance = (p) => R() < p;
-  const round = (v, step) => Math.round(v / step) * step, st = S.profile.style, locks = S.settings.surprise.locks;   // the parts to leave alone (SURPRISE_LOCKS)
-  // the look — none of the last few kept, those the user keeps likelier (pickLook) — its sliders tuned by its
-  // recipe (deal.js): about the values it was made with, its optional parts now and then
-  if (!locks.look) { st.look = pickLook(LOOK_IDS, R, S.settings.surprise); st.lookSeed = Math.floor(R() * 1000000); }
-  // the title's length, the channel colour and the user's own recipe for the look turn it (see recipeOf)
-  const ctx = { ...coverContext(S.cover.title, hexToRgb(cat().color)), mine: S.settings.recipes[st.look] };
-  if (!locks.look) {
-    const tuned = tuneLook(st.look, R, ctx);
-    for (const d of LOOKS[st.look].params) if (d.text) tuned[d.key] = (st.lookParams[st.look] || {})[d.key] ?? d.def;   // words typed in are kept
-    if (Object.keys(tuned).length) st.lookParams[st.look] = tuned;
-    // its scene objects: where the layout puts them, or now and then a little off it
-    if (S.cover.scene) delete S.cover.scene[st.look];
-    if (chance(0.4)) for (const key of Object.keys(LOOKS[st.look].scene || {})) moveScene(S.cover, st.look, key, "all", frame().key, round(between(-0.06, 0.06), 0.005), round(between(-0.05, 0.05), 0.005));
-  }
-  if (!locks.theme) st.theme = chance(recipeOf(st.look, ctx).dark) ? "dark" : "light";
-  // words the user moved or resized go back where the rules put them (unless where things stand is to stay):
-  // the layout's — title, subtitle, tag, channel name, brand row — to where the profile's design has them, the
-  // user's own text layers to a new one's size, at no size of their own, to be placed afresh (dealPlaces)
-  if (!locks.places) {
-    const fresh = newLayer("text").t.all;
-    for (const L of S.cover.layers) {
-      if (L.locked || !L.visible || !LETTERED.includes(L.type)) continue;
-      if (L.type === "text") L.t = { all: { ...L.t.all, s: fresh.s, kx: fresh.kx, ky: fresh.ky }, by: {} };
-      else if (design.has(L.id)) L.t = copyOf(design.get(L.id).t);
-    }
-  }
-  // the layout is left as it is — the template, its proportions, where the layout layers stand (but for the
-  // words put back above) — and every layer's own choices are dealt; the letterings and bends as the look's recipe has them, the
-  // subtitle after the title (it is lettered like it half the time)
-  // the title over everything else, with what is clipped into it, so nothing dealt lies over it (one clipped onto another
-  // layer stays) — but for the subjects cut out of photos that stood over it, which still do, as on a magazine cover
-  const list = S.cover.layers, ti = list.findIndex((l) => l.type === "title");
-  if (ti >= 0 && !list[ti].clip) {
-    const title = list.splice(ti, clipEnd(list, ti) - ti + 1), over = [];
-    for (let i = ti; i < list.length; ) if (list[i].type === "photo" && list[i].cut && !list[i].clip) over.push(...list.splice(i, clipEnd(list, i) - i + 1)); else i++;
-    list.push(...title, ...over);
-  }
-  const can = (k) => native || EFFECTS[k].kind !== "outline";
-  const dealFx = (L, got) => { delete L.fx; delete L.fxAmt; delete L.bend; delete L.bendAmt; delete L.warp; delete L.reshape; Object.assign(L, got); };
-  const titled = letterFor(st.look, "title", R, can, null, ctx);
-  for (const L of S.cover.layers) {
-    switch (L.type) {
-      case "bg": L.grid = chance(0.75); break;
-      case "accent": L.shape = pick(ACCENT_SHAPES); break;
-      case "brand": L.rail = chance(0.8); break;
-      case "catname": L.plate = chance(0.75); break;
-      // the letterings, unless they are to stay
-      case "title": if (!locks.lettering) { L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, titled); } break;
-      case "subtitle": if (!locks.lettering) { L.plate = chance(0.3); L.stroke = round(between(0.6, 1.2), 0.05); L.shadow = round(between(0.5, 1.2), 0.05); dealFx(L, letterFor(st.look, "subtitle", R, can, titled, ctx)); } break;
-      case "text": if (!locks.lettering) { L.plate = chance(0.35); L.stroke = round(between(0.6, 1.4), 0.05); L.shadow = round(between(0.5, 1.5), 0.05); dealFx(L, letterFor(st.look, "text", R, can, null, ctx)); } break;
-      case "asset": if (canTint(L.ref) && L.ref.kind !== "graphic") L.tint = chance(0.5); break;
-    }
-    if (FX_TYPES.includes(L.type) && L.type !== "title" && L.type !== "subtitle") {   // look effects: one or two, mostly the look just drawn's, now and then another look's (the title and subtitle keep the user's)
-      delete L.lookFx;
-      if (chance(0.55)) {
-        const fx = {}, others = LOOK_IDS.filter((k) => k !== st.look && effectsFor(k, L.type).length);
-        for (let n = chance(0.4) ? 2 : 1; n > 0; n--) {
-          const from = effectsFor(st.look, L.type).length && chance(0.6) ? st.look : others.length ? pick(others) : null, list = from ? effectsFor(from, L.type).filter((e) => !(`${from}.${e.key}` in fx)) : [];
-          if (!list.length) continue;
-          const e = pick(list);
-          fx[`${from}.${e.key}`] = round(between(0.35, 0.85), 0.05);
-          for (const s of e.sub || []) fx[`${from}.${e.key}:${s.key}`] = round(between(0.2, 0.8), 0.05);
-        }
-        if (Object.keys(fx).length) L.lookFx = fx;
-      }
-    }
-  }
-  if (!locks.places) dealPlaces(between, round);
+  const R = Math.random, sv = S.settings.surprise;
+  dealCover(S.profile.style, S.cover, { R, locks: sv.locks, surprise: sv, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, can: (k) => native || EFFECTS[k].kind !== "outline", canTint });
+  if (!sv.locks.places) dealPlaces(R);
 }
-/** How many hands Surprise me deals to choose from, and how long it may take over them (at least two are dealt). */
-const SURPRISE = { hands: 6, ms: 1500, pace: 90, busy: false, done: 0, step: null };   // pace: the least time between hands shown, ms; done: when the last run ended; step: the step of undo it made ({idx, look}) while nothing has followed it
+/** Surprise me's run (how many hands, how long, how fast they show: RULES.hands in deal.js). done: when the last run ended; step: the step of undo it made ({idx, look}) while nothing has followed it. */
+const SURPRISE = { busy: false, done: 0, step: null };
 const copyOf = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 /** The cover as Surprise me deals it — the style, the layers, the scene objects' places — copied. */
 const handNow = () => ({ style: copyOf(S.profile.style), layers: copyOf(S.cover.layers), scene: copyOf(S.cover.scene) });
@@ -3650,29 +3583,30 @@ async function surprise(e) {
     const at = ratioed(shown) || sizes.find((z) => ratioOf(z.w, z.h)) || shown, here = sizeKey(at);
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     let shownAt = 0, shown_ = 0;   // shown_: the time spent showing hands, not counted against dealing them
-    for (let i = 0; i < SURPRISE.hands && (i < 2 || performance.now() - t0 - shown_ < SURPRISE.ms); i++) {
+    const H = RULES.hands;
+    for (let i = 0; i < H.count && (i < H.least || performance.now() - t0 - shown_ < H.ms); i++) {
       if (i) putHand(before);
       try {
         dealHand(design);
         const { seen, measured, shots } = seenNow(sizes, here), { score, cost, issues } = coverScore({ title: S.cover.title, sizes: measured, seen });
-        hands.push({ ...handNow(), score: score - (S.profile.style.look === was ? 1 : 0), cost, issues });
+        hands.push({ ...handNow(), score: score - (S.profile.style.look === was ? RULES.keep.sameLook : 0), cost, issues });
         // the hand shows before the next is dealt, and long enough after the last to be seen coming
         const since = performance.now() - shownAt, t1 = performance.now();
-        if (since < SURPRISE.pace) await wait(SURPRISE.pace - since);
+        if (since < H.pace) await wait(H.pace - since);
         dealShow(hands.length - 1, hands[hands.length - 1], shots[sizeKey(shown)] || shots[here]);
         shownAt = performance.now(); await nextPaint(); shown_ += performance.now() - t1;
       } catch (e) { console.error(e); }   // a hand that cannot be drawn or measured is left out
     }
     const k = pickHand(hands, Math.random());
     if (k < 0) throw new Error("no hand could be dealt");
-    await wait(SURPRISE.pace * 2);   // a moment with every hand in view, then the one kept, on the canvas and marked
+    await wait(RULES.hands.pace * 2);   // a moment with every hand in view, then the one kept, on the canvas and marked
     putHand(hands[k]);
     SURPRISE.last = { kept: k, ms: Math.round(performance.now() - t0), hands: hands.map((h) => ({ look: h.style.look, score: h.score, cost: h.cost, issues: h.issues.map((i) => `${i.rule}:${i.level}:${i.size}:${i.layer}`) })) };   // for the self-test
     touch({ profile: true, cover: true, panel: true, side: true, strip: true });
     commitHistory();
     const look = S.profile.style.look, sv = S.settings.surprise;
     SURPRISE.step = { idx: S.histIdx, look, learn: !held };   // with the look held, what follows says nothing of the look
-    if (!held) { sv.recent = [...sv.recent.filter((x) => x !== look), look].slice(-4); persistSettings(); }
+    if (!held) { sv.recent = [...sv.recent.filter((x) => x !== look), look].slice(-RECENT_KEPT); persistSettings(); }
     dealKept(k);
     toast(t("msg.surprise", LOOKS[look].name[getLang()], t("tpl." + S.profile.style.template).split(/[：:]/)[0]));
   } catch (err) {
@@ -3700,7 +3634,7 @@ function dealOpen() {
   const lock = (k) => el("button", { class: locks[k] ? "on" : "", title: t(`deal.lock.${k}Tip`), onclick: (e) => { if (locks[k]) delete locks[k]; else locks[k] = true; e.currentTarget.classList.toggle("on", !!locks[k]); persistSettings(); } }, t(`deal.lock.${k}`));
   box.replaceChildren(
     el("div", { class: "head" }, el("b", { id: "deal-what" }, t("deal.dealing")), el("button", { class: "x", title: t("deal.close"), onclick: dealClose }, "×")),
-    el("div", { class: "hands" + (z.h > z.w ? " tall" : ""), id: "deal-hands" }, Array.from({ length: SURPRISE.hands }, () => el("figure", { class: "slot" }))),
+    el("div", { class: "hands" + (z.h > z.w ? " tall" : ""), id: "deal-hands" }, Array.from({ length: RULES.hands.count }, () => el("figure", { class: "slot" }))),
     el("div", { class: "hint", id: "deal-hint" }, t("deal.dealingHint")),
     el("div", { class: "cap" }, t("deal.locks")),
     el("div", { class: "chips small" }, SURPRISE_LOCKS.map(lock)),

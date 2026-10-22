@@ -110,7 +110,7 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.deepEqual(normalizeSettings({ recentFonts: ["A", "A", "", 3, "B", "C", "D", "E", "F", "G"] }).recentFonts, ["A", "B", "C", "D", "E", "F"]);
   // what Surprise me keeps: only the locks it knows (set), the last four looks kept, counts as whole numbers within 0 and 999
   assert.deepEqual(normalizeSettings({ surprise: { locks: { look: true, theme: false, colour: true, places: 1 }, recent: ["a", "b", "no!", 3, "c", "d", "e"], taste: { deco: { kept: 2.6, dropped: -1 }, cel: { kept: 0, dropped: 0 }, "x y": { kept: 1 }, neon: { kept: 5000, dropped: 2 } } } }).surprise,
-    { locks: { look: true }, recent: ["b", "c", "d", "e"], taste: { deco: { kept: 3, dropped: 0 }, neon: { kept: 999, dropped: 2 } } });
+    { locks: { look: true }, recent: ["a", "b", "c", "d", "e"], taste: { deco: { kept: 3, dropped: 0 }, neon: { kept: 999, dropped: 2 } } });
   // the user's own Surprise me recipes: chances kept within 0 and 1, weights within 0 and 10, what is not a name dropped
   assert.deepEqual(normalizeSettings({ recipes: { deco: { family: "pop", own: 1.4, bend: -1, fx: { sticker: 12, "bad key": 1, cel: "x" }, params: { rain: 0.5, fog: 3 } }, "no!": { own: 0.5 }, cel: {}, riso: { family: "nope" } } }).recipes,
     { deco: { family: "pop", own: 1, bend: 0, fx: { sticker: 10 }, params: { rain: 0.5, fog: 1 } } });
@@ -1855,8 +1855,49 @@ test("Surprise me turns a recipe to the cover: a long title bent less and kept l
   assert.equal(pickLook(["a"], rand, { recent: ["a"] }), "a", "with every look recent, any may come");
 });
 
+test("Surprise me deals a hand by the rules in deal.js: what is locked stays, the words go back, the title on top; RULES decides", async () => {
+  const { dealCover, RULES } = await import("../ui/js/deal.js");
+  const { LOOK_IDS } = await import("../ui/js/style.js");
+  let seed = 11;
+  const R = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const fresh = () => {
+    const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p);
+    const text = newLayer("text", { text: "hi" }); text.t.all = { ...text.t.all, s: 1.7 }; text.t.by = { "1920x1080": { dx: 9, dy: 0, s: 1, r: 0, kx: 1, ky: 1 } };
+    c.layers.push(text);
+    c.layers.find((l) => l.id === "title").t.all.s = 2.2;   // the title moved and enlarged by hand
+    return { p, c, text, design: new Map(p.design.layers.map((l) => [l.id, l])) };
+  };
+  const env = (design, more = {}) => ({ R, locks: {}, surprise: { recent: [], taste: {} }, recipes: {}, rgb: [252, 191, 0], design, sizeKey: "1920x1080", ...more });
+  // a free hand: a look, its ground, the title put back and on top, the text layer at a new one's size
+  for (let k = 0; k < 20; k++) {
+    const { p, c, text, design } = fresh();
+    dealCover(p.style, c, env(design));
+    assert.ok(LOOK_IDS.includes(p.style.look) && ["dark", "light"].includes(p.style.theme));
+    assert.deepEqual(c.layers.find((l) => l.id === "title").t, design.get("title").t, "the title goes back where the design has it");
+    assert.equal(c.layers[c.layers.length - 1].type, "title", "the title on top");
+    assert.deepEqual([text.t.all.s, text.t.by], [newLayer("text").t.all.s, {}], "a text layer at a new one's size, of no size of its own");
+  }
+  // locked: the look and its sliders, the ground, the letterings, where things stand
+  {
+    const { p, c, design } = fresh(), title = c.layers.find((l) => l.id === "title");
+    p.style.look = "deco"; p.style.theme = "light"; title.fx = "worn"; const before = JSON.stringify([p.style.lookParams, title.t]);
+    dealCover(p.style, c, env(design, { locks: { look: true, theme: true, lettering: true, places: true } }));
+    assert.deepEqual([p.style.look, p.style.theme, title.fx, JSON.stringify([p.style.lookParams, title.t])], ["deco", "light", "worn", before]);
+  }
+  // the last looks dealt wait their turn
+  {
+    const recent = LOOK_IDS.slice(0, RULES.look.recent);
+    for (let k = 0; k < 30; k++) { const { p, c, design } = fresh(); dealCover(p.style, c, env(design, { surprise: { recent, taste: {} } })); assert.ok(!recent.includes(p.style.look)); }
+  }
+  // the numbers are RULES': changed there, the hands follow
+  const was = RULES.layers.bg.grid;
+  try {
+    for (const grid of [0, 1]) { RULES.layers.bg.grid = grid; const { p, c, design } = fresh(); dealCover(p.style, c, env(design)); assert.equal(c.layers.find((l) => l.type === "bg").grid, !!grid); }
+  } finally { RULES.layers.bg.grid = was; }
+});
+
 test("Surprise me's scoring: the standards' issues count against a cover, the room above their lines for it; one of the best few is kept", async () => {
-  const { coverScore, pickHand } = await import("../ui/js/check.js");
+  const { coverScore, pickHand } = await import("../ui/js/deal.js");
   const sizes = [{ key: "1920x1080", w: 1920, h: 1080, vw: 1920, vh: 1080 }, { key: "1080x1440", w: 1080, h: 1440, vw: 1080, vh: 1440 }];
   const big = { cx: 700, cy: 350, hw: 600, hh: 210, r: 0 }, part = (hit) => [{ id: "title", hit }];
   const seen = (o = {}, p = {}) => ({ "1920x1080": { title: { id: "title", hit: big }, contrast: 6, pictures: [], unknown: true, parts: part(big), ...o }, "1080x1440": { title: { id: "title", hit: { cx: 540, cy: 500, hw: 480, hh: 260, r: 0 } }, contrast: null, pictures: [], unknown: true, parts: [], ...p } });

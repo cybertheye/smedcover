@@ -1,8 +1,8 @@
 // The cover standards: will the cover be read, seen and left uncovered on the platforms it is made for?
 // Rule by rule, as docs/cover-check.zh-CN.md sets them out. Pure. The layouts keep to them by
 // themselves (meetStandards in layout.js); the tests measure painted covers against them here, and
-// Surprise me scores the covers it deals by them (coverScore, pickHand).
-import { isRatio, wanted, PLATFORM_IDS } from "./platforms.js";
+// Surprise me scores the covers it deals by them (coverScore, pickHand in deal.js).
+import { isRatio, wanted } from "./platforms.js";
 
 /** Where each rule draws its lines. Those not from a standard are starting values, to be tuned on real covers. */
 export const LIMITS = {
@@ -122,50 +122,4 @@ export function moveOut(b, zone, vw, vh, gap = 8) {
     { dx: zone.x0 - gap - b.x1, dy: 0 }, { dx: zone.x1 + gap - b.x0, dy: 0 },
   ].filter((m) => b.x0 + m.dx >= 0 && b.x1 + m.dx <= vw && b.y0 + m.dy >= 0 && b.y1 + m.dy <= vh);
   return tries.length ? tries.reduce((a, c) => (Math.hypot(c.dx, c.dy) < Math.hypot(a.dx, a.dy) ? c : a)) : null;
-}
-
-/**
- * How well a cover meets the standards, to choose between covers (Surprise me's hands). o: { title, sizes,
- * seen } as for checkCover; each size is held to every platform that uses its ratio, for landscape and
- * portrait videos alike. `cost`: 10 for each red issue, 3 for each yellow one (not A2 or E1: the words and
- * the sizes, the same whatever the hand); `score`, higher is better: less the cost, up to 1 more for the
- * room above the contrast line (the worst title measured, 3:1 to 7:1) and up to 1 for the room above the A1
- * line (the smallest feed type size, 1 to 1.5 times it). Returns { score, cost, issues }.
- */
-export function coverScore(o) {
-  const all = { ...o, platforms: PLATFORM_IDS, red: "3:4" }, found = new Map(), contrasts = [], feeds = [], n = titleLines(o.title).length;
-  for (const orient of ["h", "v"]) {
-    for (const i of checkCover({ ...all, orient })) {   // once a rule, size and layer (and badge), at its worst: A1 comes once from each orientation's feeds
-      const k = [i.rule, i.size, i.layer, i.rule === "D1" ? i.what : ""].join("|");
-      if (i.rule !== "A2" && i.rule !== "E1" && (!found.has(k) || (i.level === "red" && found.get(k).level !== "red"))) found.set(k, i);
-    }
-    for (const { ratio, uses } of wanted({ ...all, orient })) {
-      const size = o.sizes.find((s) => s.on !== false && isRatio(s.w, s.h, ratio)), seen = size && o.seen[size.key];
-      if (!seen) continue;
-      const feed = Math.min(...uses.map((u) => u.feed || Infinity));
-      if (seen.title && n && feed < Infinity) feeds.push((typeSize(seen.title.hit, n) * feed) / size.vw);
-    }
-  }
-  for (const seen of Object.values(o.seen)) if (Number.isFinite(seen.contrast)) contrasts.push(seen.contrast);   // wherever it was measured
-  const issues = [...found.values()], room = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0), cost = issues.reduce((sum, i) => sum + (i.level === "red" ? 10 : 3), 0);
-  let score = -cost;
-  if (contrasts.length) score += room((Math.min(...contrasts) - LIMITS.contrast.ok) / 4);
-  if (feeds.length) score += room((Math.min(...feeds) / LIMITS.font.ok - 1) / 0.5);
-  return { score, cost, issues };
-}
-/**
- * Which of several covers to keep: `hands` [{ score, cost }] (see coverScore). Only those whose issues cost
- * the least are in the running, so one with a problem is never kept while one without is there; of those,
- * one of the best three that score within `near` of the best, the better likelier (3 : 2 : 1), so the best
- * is not always the one. `r` is a random number in [0, 1). Returns an index, or -1 with no hands.
- */
-export function pickHand(hands, r, near = 2) {
-  const ok = hands.map((h, i) => [Number.isFinite(h.score) ? h.score : -Infinity, i, Number.isFinite(h.cost) ? h.cost : Infinity]);
-  if (!ok.length) return -1;
-  const least = Math.min(...ok.map((h) => h[2])), fair = ok.filter((h) => h[2] === least), best = Math.max(...fair.map((h) => h[0]));
-  const pool = fair.filter(([s]) => s >= best - near || s === best).sort((a, b) => b[0] - a[0]).slice(0, 3);
-  const weights = [3, 2, 1].slice(0, pool.length), total = weights.reduce((a, b) => a + b, 0);
-  let at = r * total;
-  for (let k = 0; k < pool.length; k++) { at -= weights[k]; if (at < 0) return pool[k][1]; }
-  return pool[pool.length - 1][1];
 }
