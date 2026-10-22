@@ -2,7 +2,7 @@
 // A pure function of its options — the app calls it for the canvas, the thumbnails, exports and
 // batch jobs alike.
 import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, brackets } from "./cel.js";
-import { virtualSize, layout, adjustLayout, meetStandards, wordsFoot } from "./layout.js";
+import { virtualSize, layout, adjustLayout, meetStandards, wordsFoot, layoutOf } from "./layout.js";
 import { drawTitle, drawTitleVertical, titleBlockVertical, parseTitle, subtitleFit, subtitleColumns, setLine, passOf, hasCJK, someLetters } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset, assetHalf, userAssets, assetExists } from "./assets.js";
@@ -1342,6 +1342,13 @@ export const partsOf = (cover, cat) => {
   const on = (type) => cover.layers.some((l) => l.id === type && !l.off);   // the layout's own (a copy has an id of its own)
   return { catname: on("catname"), graphic: on("graphic") && !!cat.graphic && cat.graphic.kind !== "none", subtitle: on("subtitle") && parseTitle(cover.subtitle).length > 0, tag: on("tag") && !!cover.tag };
 };
+/**
+ * The geometry of a cover of w × h (virtual units) in look `L` drawn in layout `lay` ({ template, adjust }, see layoutOf
+ * in layout.js): the look's own layout of the template (L.layout) or the template's, adjusted (adjustLayout), and held
+ * to the cover standards (meetStandards) for a cover that has `parts` (see partsOf). What a cover is drawn on, and what
+ * the Style tab's sliders start from.
+ */
+export const coverLayout = (L, lay, w, h, parts) => meetStandards(adjustLayout(L.layout ? L.layout(lay.template, w, h) : layout(lay.template, w, h), w, h, lay.adjust), w, h, lay.adjust, parts);
 /** The graphic a look's figure is drawn from in the channel graphic's place, as env.graphic is given: null when there is none, or it has gone from the library. */
 function figureArt(style, look, C) {
   const ref = style.lookArt && style.lookArt[look];
@@ -1361,7 +1368,7 @@ function paintCover(cv, o) {
   const L0 = setLook(P.style.look, P.style.lookParams && P.style.lookParams[P.style.look], P.style.lookSeed, !!photo || P.style.theme !== "light");   // everything below is drawn under this look
   setScene(sceneOffsets(cover, L0.id, key), w, h, kx);   // where the user dragged its scene objects on this cover
   const base = photo ? THEMES.dark : THEMES[P.style.theme] || THEMES.dark;
-  const G = meetStandards(adjustLayout(L0.layout ? L0.layout(P.style.template, w, h) : layout(P.style.template, w, h), w, h, (P.style.layoutAdjust || {})[P.style.template]), w, h, (P.style.layoutAdjust || {})[P.style.template], partsOf(cover, cat));
+  const G = coverLayout(L0, layoutOf(P.style, key), w, h, partsOf(cover, cat));   // in the layout this size is drawn in: the profile's, or its own
   const env = {
     blocks: {},   // id -> {m, box}: the transform and box of each lettered block painted (see cv._blocks)
     o, w, h, cover, cat, C, acc: rgb(C), style: P.style, photo, key, hiRes: cv.width > w,

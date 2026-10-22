@@ -130,20 +130,25 @@ export function sceneOffsets(cover, look, sizeKey) {
   }
   return out;
 }
-/** Moves a look's scene object by (dx, dy), fractions of the canvas: for every size (scope "all") or this one ("size"). */
-export function moveScene(cover, look, key, scope, sizeKey, dx, dy) {
-  const objs = ((cover.scene = cover.scene || {})[look] = cover.scene[look] || {}), v = (objs[key] = objs[key] || {});
-  if (scope === "size") { const by = (v.by = v.by || {}), b = by[sizeKey] || [0, 0]; by[sizeKey] = offset([b[0] + dx, b[1] + dy]); }
+/** The size keys a change in `scope` reaches by size: this one ("size"), each of `keys` ("orient": the sizes facing the way it does), or none ("all"). */
+const scoped = (scope, sizeKey, keys) => (scope === "size" ? [sizeKey] : scope === "orient" ? keys : null);
+/**
+ * Moves a look's scene object by (dx, dy), fractions of the canvas: for every size (scope "all"), this one ("size"),
+ * or each of `keys` ("orient": the sizes facing the way this one does, see orientOf in layout.js).
+ */
+export function moveScene(cover, look, key, scope, sizeKey, dx, dy, keys = [sizeKey]) {
+  const objs = ((cover.scene = cover.scene || {})[look] = cover.scene[look] || {}), v = (objs[key] = objs[key] || {}), each = scoped(scope, sizeKey, keys);
+  if (each) for (const k of each) { const by = (v.by = v.by || {}), b = by[k] || [0, 0]; by[k] = offset([b[0] + dx, b[1] + dy]); }
   else { const a = v.all || [0, 0]; v.all = offset([a[0] + dx, a[1] + dy]); }
   cover.scene = normalizeScene(cover.scene);
 }
-/** Puts a look's scene object (or all of them, key null) back where the layout puts it: for every size, or this one. */
-export function resetScene(cover, look, key, scope, sizeKey) {
-  const objs = cover.scene && cover.scene[look];
+/** Puts a look's scene object (or all of them, key null) back where the layout puts it: for every size, this one, or each of `keys` (as moveScene). */
+export function resetScene(cover, look, key, scope, sizeKey, keys = [sizeKey]) {
+  const objs = cover.scene && cover.scene[look], each = scoped(scope, sizeKey, keys);
   if (!objs) return;
   for (const k of key ? [key] : Object.keys(objs)) {
     if (!objs[k]) continue;
-    if (scope === "size") { if (objs[k].by) delete objs[k].by[sizeKey]; } else delete objs[k];
+    if (each) { if (objs[k].by) for (const s of each) delete objs[k].by[s]; } else delete objs[k];
   }
   cover.scene = normalizeScene(cover.scene);
 }
@@ -677,10 +682,12 @@ export function resolve(layer, vw, vh, key, catId) {
 }
 
 /**
- * Applies an edit. scope "all" changes every size (fractions); scope "size" changes only `key`.
+ * Applies an edit. scope "all" changes every size (fractions); scope "size" changes only `key`; scope "orient" changes
+ * each size of `group` ([{key, vw, vh}]: the sizes facing the way this one does, see orientOf in layout.js, this one
+ * among them) as "size" changes one, a move there as far across its canvas as it is across this one.
  * patch: {ddx, ddy} move in virtual px, {scale} multiply, {kx, ky} stretch (multiply), {rot} add degrees.
  */
-export function adjust(layer, { vw, vh, key, catId }, scope, patch) {
+export function adjust(layer, { vw, vh, key, catId, group }, scope, patch) {
   const lim = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
   if (scope === "all") {
     const a = layer.t.all;
@@ -692,24 +699,33 @@ export function adjust(layer, { vw, vh, key, catId }, scope, patch) {
     if (patch.ky) a.ky = lim(a.ky * patch.ky, 0.05, 20);
     return;
   }
-  const k = writeKey(layer, key, catId);
-  // start a category-specific entry from the size-wide one so the graphic does not jump
-  const b = (layer.t.by[k] = { ...(layer.t.by[k] || layer.t.by[key] || IDENTITY_BY) });
-  if (patch.ddx) b.dx += patch.ddx;
-  if (patch.ddy) b.dy += patch.ddy;
-  if (patch.scale) b.s = lim(b.s * patch.scale, 0.05, 20);
-  if (patch.rot) b.r = lim(b.r + patch.rot, -360, 360);
-  if (patch.kx) b.kx = lim(b.kx * patch.kx, 0.05, 20);
-  if (patch.ky) b.ky = lim(b.ky * patch.ky, 0.05, 20);
+  for (const g of scope === "orient" && group && group.length ? group : [{ key, vw, vh }]) {
+    const k = writeKey(layer, g.key, catId), fx = g.vw / vw, fy = g.vh / vh;   // 1 for this size
+    // start a category-specific entry from the size-wide one so the graphic does not jump
+    const b = (layer.t.by[k] = { ...(layer.t.by[k] || layer.t.by[g.key] || IDENTITY_BY) });
+    if (patch.ddx) b.dx += patch.ddx * fx;
+    if (patch.ddy) b.dy += patch.ddy * fy;
+    if (patch.scale) b.s = lim(b.s * patch.scale, 0.05, 20);
+    if (patch.rot) b.r = lim(b.r + patch.rot, -360, 360);
+    if (patch.kx) b.kx = lim(b.kx * patch.kx, 0.05, 20);
+    if (patch.ky) b.ky = lim(b.ky * patch.ky, 0.05, 20);
+  }
 }
-/** Clears placement edits: scope "size" drops this size's fine-tuning, "all" restores the default. */
-export function resetPlacement(layer, scope, key, catId) {
-  if (scope === "size") { delete layer.t.by[key]; if (catId) delete layer.t.by[`${key}@${catId}`]; return; }
+/**
+ * Clears placement edits: scope "size" drops this size's fine-tuning, "orient" that of each size of `keys` (the sizes
+ * facing the way this one does), "all" restores the default.
+ */
+export function resetPlacement(layer, scope, key, catId, keys = [key]) {
+  if (scope === "size" || scope === "orient") {
+    for (const k of scope === "orient" ? keys : [key]) { delete layer.t.by[k]; if (catId) delete layer.t.by[`${k}@${catId}`]; }
+    return;
+  }
   layer.t = newLayer(layer.type).t;
 }
 
 // ---------- layout presets: a cover's structure without its look (kept in the settings, see normalizeLayouts in store.js)
-// A layout preset holds the template and its adjustments (a profile's style.template and style.layoutAdjust of it), and
+// A layout preset holds the template and its adjustments (a profile's style.template and style.layoutAdjust of it), the
+// layouts some sizes have of their own (style.layoutBy, see layoutOf in layout.js), and
 // of the layout's own parts that carry words or the channel's graphic: where each stands (`t`, for every size and
 // per size), whether the cover has it (`shown`: not left out, see `off` above), and for lettering which way its words
 // run (`vertical` and `rules`, kept only when true). Fonts, letterings, colours and the look are not in it.
@@ -721,9 +737,10 @@ export const LAYOUT_PARTS = ["title", "subtitle", "tag", "catname", "brand", "gr
 export const LAYOUT_RUNS = ["vertical", "rules"];
 const clone = (v) => JSON.parse(JSON.stringify(v));
 /**
- * The layout preset that `style` (a profile's) and `layers` (a cover's) make as they are: { template, adjust, parts:
+ * The layout preset that `style` (a profile's) and `layers` (a cover's) make as they are: { template, adjust, by?, parts:
  * { id: { t, shown, vertical?, rules? } } }, of the parts the layers have (the layout's own, by id: a copy is not one),
- * a way of running only where the words run so (true; a way they do not run is left out).
+ * a way of running only where the words run so (true; a way they do not run is left out); `by`, the sizes drawn in a
+ * layout of their own, only when there are some.
  */
 export function takeLayout(style, layers) {
   const parts = {};
@@ -734,11 +751,13 @@ export function takeLayout(style, layers) {
     for (const k of LAYOUT_RUNS) if (L[k] === true) q[k] = true;
     parts[id] = q;
   }
-  return { template: style.template, adjust: { ...((style.layoutAdjust || {})[style.template] || {}) }, parts };
+  const by = style.layoutBy && Object.keys(style.layoutBy).length ? { by: clone(style.layoutBy) } : {};
+  return { template: style.template, adjust: { ...((style.layoutAdjust || {})[style.template] || {}) }, ...by, parts };
 }
 /**
  * Puts layout preset `p` (as takeLayout makes it) onto `style` and `layers` (in place): its template, with its
- * adjustments (none: the template as it comes; the other templates' are left as they are), and each part it holds
+ * adjustments (none: the template as it comes; the other templates' are left as they are), the sizes it draws in a
+ * layout of their own (and none of the style's others: a preset without any lays every size out alike), and each part it holds
  * where it has it, on the cover or left out (one that comes back comes in shown, as Layout parts brings it; one
  * hidden by hand and kept on stays hidden), its words running as they do there (a way the preset has not is taken
  * off). A part locked stays as it is — its place, whether it shows, which way its words run — whether the preset is
@@ -749,6 +768,7 @@ export function putLayout(style, layers, p) {
   style.template = p.template;
   const adjust = (style.layoutAdjust = style.layoutAdjust || {});
   if (p.adjust && Object.keys(p.adjust).length) adjust[p.template] = { ...p.adjust }; else delete adjust[p.template];
+  if (p.by && Object.keys(p.by).length) style.layoutBy = clone(p.by); else delete style.layoutBy;
   for (const [id, q] of Object.entries(p.parts || {})) {
     const L = layers.find((l) => l.id === id);
     if (!L || !LAYOUT_PARTS.includes(id) || L.locked) continue;

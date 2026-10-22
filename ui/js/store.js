@@ -130,6 +130,19 @@ function normalizeAdjust(raw) {
   return a;
 }
 
+/**
+ * The layouts some sizes have of their own (see layoutOf in layout.js), as kept: { size key: { template, adjust } }, a
+ * key only where `ok(key)` says it is a size, a template only one there is, its adjustments as the profile's are
+ * (normalizeAdjust), 80 at most. Null when none is left.
+ */
+function normalizeLayoutBy(raw, ok) {
+  const out = {};
+  for (const [k, v] of Object.entries(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}).slice(0, 80)) {
+    if (ok(k) && v && typeof v === "object" && TEMPLATES.includes(v.template)) out[k] = { template: v.template, adjust: normalizeAdjust(v.adjust) };
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 /** Fills in defaults and drops anything malformed, so files from disk (or other people) are safe to use. */
 export function normalizeProfile(raw) {
   const p = raw && typeof raw === "object" ? raw : {};
@@ -157,6 +170,9 @@ export function normalizeProfile(raw) {
   if (!sizes.length) sizes = SIZE_PRESETS.filter((s) => s.on).map(({ w, h }) => ({ w, h, label: "", name: "" }));
   const keys = new Set();
   sizes = sizes.filter((s) => !keys.has(s.w + "x" + s.h) && keys.add(s.w + "x" + s.h));
+  // the sizes drawn in a layout of their own (see layoutOf in layout.js): only the profile's sizes, each kept as the profile's own layout is
+  const by = normalizeLayoutBy(st.layoutBy, (k) => keys.has(k));
+  if (by) style.layoutBy = by;
   const of = p.oldFonts || p.fonts || {}, oldFonts = [of.body, of.display, of.serif].some((v) => typeof v === "string" && v.trim()) ? { body: str(of.body), display: str(of.display), serif: str(of.serif) } : null;
   return {
     version: 2,
@@ -218,7 +234,7 @@ export function normalizeSettings(raw) {
     format: ["png", "jpeg", "webp"].includes(s.format) ? s.format : "png",
     quality: Math.round(num(s.quality, 92, 40, 100)),
     nameTemplate: str(s.nameTemplate) || DEFAULT_SETTINGS.nameTemplate,
-    scope: s.scope === "size" ? "size" : "all",
+    scope: ["orient", "size"].includes(s.scope) ? s.scope : "all",   // what a change of place or layout reaches: every size, those facing the way this one does (see orientOf in layout.js), or this one
     hideScene: s.hideScene === true,   // the scene objects' handles hidden on the canvas
     // how a photo's subject is cut out: "vision" (macOS), "birefnet-lite" or "birefnet" (any system, a downloaded model); "" = the system's own choice
     cutEngine: ["vision", "birefnet-lite", "birefnet"].includes(s.cutEngine) ? s.cutEngine : "",
@@ -237,10 +253,12 @@ export function normalizeSettings(raw) {
 export const LAYOUTS = { most: 24, name: 40 };
 /**
  * The user's layout presets, as kept in the settings for every profile (see takeLayout in layers.js): [{ id, name,
- * template, adjust, parts: { part: { t, shown, vertical?, rules? } } }], LAYOUTS.most at most. An id is kept as it
+ * template, adjust, by?, parts: { part: { t, shown, vertical?, rules? } } }], LAYOUTS.most at most. An id is kept as it
  * is (Surprise me's chances name the presets by it: odds.groups.layout), one missing, taken or "keep" (the
  * option of none) made anew; a name trimmed and cut to length; a template unknown is Stack, its adjustments within
- * LAYOUT_LIMITS; every part of LAYOUT_PARTS there, its placement within range (per size by size keys only), one
+ * LAYOUT_LIMITS; the sizes drawn in a layout of their own (`by`, { size key: { template, adjust } }, kept as a profile
+ * keeps them but by any size key, a preset being for every profile; left out when there is none); every part of
+ * LAYOUT_PARTS there, its placement within range (per size by size keys only), one
  * missing where the template puts it and on the cover unless a new design leaves it out (DEFAULT_OFF); for a
  * lettered part, which way its words run (LAYOUT_RUNS) kept only when true (anything else, a number or a word, is
  * no way they run: left out, as putLayout reads it).
@@ -260,7 +278,8 @@ export function normalizeLayouts(raw) {
       parts[type] = { t, shown: q ? q.shown !== false : !DEFAULT_OFF.includes(type) };
       if (q && LETTERED.includes(type)) for (const k of LAYOUT_RUNS) if (q[k] === true) parts[type][k] = true;
     }
-    out.push({ id, name: str(r.name).trim().slice(0, LAYOUTS.name), template: TEMPLATES.includes(r.template) ? r.template : "stack", adjust: normalizeAdjust(r.adjust), parts });
+    const by = normalizeLayoutBy(r.by, (k) => /^\d{2,5}x\d{2,5}$/.test(k));   // the sizes it draws in a layout of their own
+    out.push({ id, name: str(r.name).trim().slice(0, LAYOUTS.name), template: TEMPLATES.includes(r.template) ? r.template : "stack", adjust: normalizeAdjust(r.adjust), ...(by ? { by } : {}), parts });
   }
   return out;
 }

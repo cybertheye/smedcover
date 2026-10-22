@@ -1,8 +1,8 @@
 // SmedCover UI. Two modes: Edit (cover content, assets, style + the layer stack) and Setup (brand,
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
-import { virtualSize , layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot } from "./layout.js";
-import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles, showsFrame, sceneHandleAt } from "./render.js";
+import { virtualSize , layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot, orientOf, orientOfKey, layoutOf, ownLayout, setLayoutOf, followLayout, layoutByOrient } from "./layout.js";
+import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles, showsFrame, sceneHandleAt, coverLayout, partsOf } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
@@ -75,8 +75,22 @@ const selSize = () => S.profile.sizes.find((s) => sizeKey(s) === S.sel) || S.pro
 const caption = (s) => sizeCaption(s, getLang());                   // what a size is called: its name, or the platforms it is for and its ratio
 const sizeLabel = (s) => `${caption(s)} · ${s.w}×${s.h}`;           // full form, with pixels
 const layer = (id = S.layerId) => S.cover.layers.find((l) => l.id === id) || null;
-/** Geometry context of the size on the main canvas, as the layer maths wants it. */
-const frame = () => { const s = selSize(), [vw, vh] = virtualSize(s.w, s.h); return { vw, vh, key: sizeKey(s), catId: cat().id }; };
+/** The profile's sizes facing the way the size keyed `key` does (see orientOf in layout.js), that one among them, in the profile's order. */
+const sameWay = (key = S.sel) => S.profile.sizes.filter((z) => orientOf(z.w, z.h) === orientOfKey(key));
+/**
+ * Geometry context of the size on the main canvas, as the layer maths wants it; `group`, the sizes facing its way
+ * with their virtual canvases (what the scope's middle choice reaches, see adjust in layers.js).
+ */
+const frame = () => {
+  const s = selSize(), [vw, vh] = virtualSize(s.w, s.h), key = sizeKey(s);
+  return { vw, vh, key, catId: cat().id, group: sameWay(key).map((z) => { const [w, h] = virtualSize(z.w, z.h); return { key: sizeKey(z), vw: w, vh: h }; }) };
+};
+/** The scopes a change of place or layout may have, from the widest: every size, those facing the size's way, the size alone (S.settings.scope). */
+const SCOPES = ["all", "orient", "size"];
+/** What scope `v` is called on the size keyed `key`: the middle one names the sizes it reaches ("All tall"). */
+const scopeName = (v, key = S.sel) => t(v === "orient" ? "scope.orient." + orientOfKey(key) : "scope." + v);
+/** The size keys a change in `scope` reaches by size from the size keyed `key` — those facing its way, or it alone — or null for every size. */
+const scopeKeys = (scope = S.settings.scope, key = S.sel) => (scope === "orient" ? sameWay(key).map(sizeKey) : scope === "size" ? [key] : null);
 function layerName(L) {
   if (isAdded(L) && L.name) return L.name;   // the user's own name for a layer they added
   if (L.copy) return t("layer.copyOf", t("layer." + L.type));
@@ -331,7 +345,7 @@ function drawThumbs() {
 let drawQueued = false;
 function flushDraw() {
   if (!drawQueued) return;
-  drawQueued = false; ensureFonts(S.cover.layers); drawMain(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs);
+  drawQueued = false; ensureFonts(S.cover.layers); drawMain(); markStrip(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs);
   if (S.letterWin) later("letters", 200, lettersShow);   // the ransom note's letters as now drawn (words typed, colours changed)
   if (S.weaveWin) later("weave", 200, weaveShow);   // the woven letters as now typed
   if (LAYED.redraw) later("layed", 80, LAYED.redraw);   // a layout preset's editor, with what arrived since (outlines, fonts)
@@ -350,20 +364,34 @@ $("strip").addEventListener("wheel", (e) => { if (Math.abs(e.deltaY) > Math.abs(
 function buildStrip() {
   $("strip").replaceChildren(...S.profile.sizes.map((size) => {
     const key = sizeKey(size);
-    return el("figure", { class: key === S.sel ? "on" : "", onclick: () => selectSize(key) }, el("canvas", { id: "th-" + key }), el("figcaption", { title: sizeLabel(size) }, ratioText(size.w, size.h)));   // the ratio alone; what it is called and its pixels show on hover and over the canvas
+    return el("figure", { class: key === S.sel ? "on" : "", onclick: () => selectSize(key) }, el("canvas", { id: "th-" + key }),
+      el("figcaption", { title: sizeLabel(size) }, ratioText(size.w, size.h), el("span", { class: "own", title: t("style.ownMark") }, "◆")));   // the ratio alone (what it is called and its pixels show on hover and over the canvas), marked when the size has a layout of its own
   }));
+  markStrip();
+}
+/** Marks the sizes in the strip that are drawn in a layout of their own (see layoutOf in layout.js). */
+function markStrip() {
+  [...$("strip").children].forEach((f, i) => { const z = S.profile.sizes[i]; f.classList.toggle("own", !!z && ownLayout(S.profile.style, sizeKey(z))); });
 }
 function selectSize(key) {
   S.sel = key;
   [...$("strip").children].forEach((f, i) => f.classList.toggle("on", sizeKey(S.profile.sizes[i]) === key));
   syncToolbar(); renderSide(); queueDraw();
+  if (onStyleTab()) renderPanel();   // the template box is the size's: its layout, its own or the profile's, and the sizes facing its way
 }
+const onStyleTab = () => S.mode === "edit" && S.tab.edit === "style";
+/** Sets the scope a change of place or layout has (see SCOPES); the toolbar, the properties and the Style tab's template box say it. */
+function setScope(v) {
+  S.settings.scope = v; persistSettings(); syncToolbar(); renderSide();
+  if (onStyleTab()) renderPanel();
+}
+/** The scope's three choices, as one segmented control: the toolbar's, and the Style tab's template box's (the same setting). */
+const scopeSeg = () => el("div", { class: "seg" }, SCOPES.map((v) => el("button", { class: "btn" + (S.settings.scope === v ? " on" : ""), title: v === "orient" ? t("scope.orientTip", sameWay().map((z) => ratioText(z.w, z.h)).join(" · ")) : null, onclick: () => setScope(v) }, scopeName(v))));
 function syncToolbar() {
-  const scope = (v) => el("button", { class: "btn" + (S.settings.scope === v ? " on" : ""), onclick: () => { S.settings.scope = v; persistSettings(); syncToolbar(); renderSide(); } }, t("scope." + v));
   const size = selSize();   // what it is called over its pixels, in two lines: names after the platforms can be long
   $("toolbar").replaceChildren(...[el("span", { class: "name", title: sizeLabel(size) }, el("b", {}, caption(size)), el("small", {}, `${size.w}×${size.h}`)),
     S.mode === "edit" && el("button", { class: "btn", title: t("layouts.saveTip"), onclick: saveLayoutDialog }, t("layouts.save")),   // the canvas's layout, as a preset Surprise me may deal
-    S.mode === "edit" && el("div", { class: "grp" }, el("span", {}, t("props.scope")), el("div", { class: "seg" }, scope("all"), scope("size"))),
+    S.mode === "edit" && el("div", { class: "grp" }, el("span", {}, t("props.scope")), scopeSeg()),
     S.mode === "edit" && el("span", { class: "help", title: t("cover.how"), onclick: (e) => showTip(e.currentTarget, t("cover.how")) }, el("span", { class: "info" }, "ⓘ"), t("cover.howShort"))].filter(Boolean));
 }
 
@@ -536,7 +564,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
   cv.addEventListener("dblclick", (e) => {   // a scene object's handle: back where the layout puts it
     const sh = S.mode === "edit" && !S.brushWin && sceneGrip(e);
     if (!sh) return;
-    resetScene(S.cover, S.profile.style.look, sh.key, S.settings.scope, frame().key);
+    resetScene(S.cover, S.profile.style.look, sh.key, S.settings.scope, frame().key, scopeKeys());
     touch({ cover: true, side: true });
   });
   cv.addEventListener("pointerdown", (e) => {
@@ -577,20 +605,23 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
       return;
     }
     if (lh) {
-      const st = S.profile.style, tpl = st.template;
+      // the layout this size is drawn in, changed where the scope at the top says: the profile's (every size without a
+      // layout of its own follows it), each size facing this one's way, or this size alone; on a size with a layout of
+      // its own, "every size" changes that one, the one drawn under the pointer (the Style tab says it is the size's own)
+      const st = S.profile.style, key = frame().key, keys = scopeKeys() || (ownLayout(st, key) ? [key] : null);
       let moved = false;
       cv.setPointerCapture(e.pointerId);
       cv.onpointermove = (m) => {
-        const p = virtualPoint(m), [vw, vh] = cv._virtual;
-        st.layoutAdjust[tpl] = dragLayout(cv._layout, vw, vh, st.layoutAdjust[tpl] || {}, lh.id, p.x, p.y, cv._titleBox);
+        const p = virtualPoint(m), [vw, vh] = cv._virtual, lay = layoutOf(st, key);
+        setLayoutOf(st, keys, { template: lay.template, adjust: dragLayout(cv._layout, vw, vh, lay.adjust, lh.id, p.x, p.y, cv._titleBox) });
         moved = true; touch({ profile: true });
       };
       cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; if (moved && S.tab.edit === "style") renderPanel(); };
       return;
     }
     const sh = sceneGrip(e);
-    if (sh) {   // a scene object of the look, with the ground selected: moved on this cover, for all sizes or this one
-      const look = S.profile.style.look, f = frame(), [vw, vh] = cv._virtual;
+    if (sh) {   // a scene object of the look, with the ground selected: moved on this cover, for all sizes, those facing this one's way, or this one
+      const look = S.profile.style.look, f = frame(), [vw, vh] = cv._virtual, keys = scopeKeys();
       let last = at0, moved = false;
       cv.setPointerCapture(e.pointerId);
       // While dragged, only the ground and the frame (where the cyberpunk's sweep is) are repainted, the
@@ -600,7 +631,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
       goLive(["bg", "frame"]);
       cv.onpointermove = (m) => {
         const p = virtualPoint(m);
-        moveScene(S.cover, look, sh.key, S.settings.scope, f.key, (p.x - last.x) / vw, (p.y - last.y) / vh);
+        moveScene(S.cover, look, sh.key, S.settings.scope, f.key, (p.x - last.x) / vw, (p.y - last.y) / vh, keys || [f.key]);
         last = p; moved = true; draftTouch({ cover: true });
       };
       cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; endLive(); if (moved) renderSide(); };
@@ -1946,37 +1977,66 @@ function removeAsset(id) {
 /**
  * The template and its adjustments on style `st` — the profile's in the Style tab, a layout preset's in its editor: the
  * template, how much the colour panel takes, how its edge leans, the title's box, which half goes first, and the way
- * back to the template's own. `cv`: the canvas last drawn in that style, whose layout the block's sliders start from.
+ * back to the template's own. `at` ({w, h, parts}): the size shown, in virtual units, and which parts that take room its
+ * cover has (see partsOf in render.js), where the block's sliders start from (the layout as it would be drawn there).
+ * `to`: what they change — null, the style's own template and adjustments, which every size without a layout of its own
+ * follows; else {key, keys}, the layout size `key` is drawn in, put on each size of `keys` as their own (see layoutOf
+ * and setLayoutOf in layout.js; a template chosen there starts from the adjustments the style keeps for it).
  * `changed(again)` after each change: `again`, the controls are to be built anew (another template's, the swap
  * named the other way); else a slider is on its way.
  */
-function templateControls(st, cv, changed) {
-  const tpl = st.template, adj = (st.layoutAdjust = st.layoutAdjust || {})[tpl] || {};
-  const now = cv && cv._layout && cv._virtual ? layoutValues(cv._layout, cv._virtual[0], cv._virtual[1]) : { size: 0.3, slant: 0 };
+function templateControls(st, at, changed, to = null) {
+  const lay = () => (to ? layoutOf(st, to.key) : { template: st.template, adjust: (st.layoutAdjust || {})[st.template] || {} });
+  const { template: tpl, adjust: adj } = lay();
+  const now = at ? layoutValues(coverLayout(LOOKS[st.look] || LOOKS.cel, { template: tpl, adjust: adj }, at.w, at.h, at.parts), at.w, at.h) : { size: 0.3, slant: 0 };
+  const put = (template, adjust, again) => { setLayoutOf(st, to && to.keys, { template, adjust }); changed(again); };
   const set = (k, v, again = false) => {
-    const a = { ...(st.layoutAdjust[tpl] || {}) };
+    const a = { ...lay().adjust };
     // the block's height and lean go together: one set alone would put the other back to the template's,
     // undoing what the standards made of it (see meetStandards), so the first takes the other as it is now
     if ((k === "size" || k === "slant") && a.size == null && a.slant == null) Object.assign(a, { size: now.size, slant: now.slant });
-    st.layoutAdjust[tpl] = { ...a, [k]: v }; changed(again);
+    put(tpl, { ...a, [k]: v }, again);
   };
   const split = tpl === "split", has = Object.keys(adj).length > 0;
   return [
-    select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), st.template, (v) => { st.template = v; changed(true); }),   // the adjustments' sliders follow the template chosen
+    select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), tpl, (v) => put(v, (st.layoutAdjust || {})[v] || {}, true)),   // the adjustments' sliders follow the template chosen
     el("div", { style: "margin-top:14px" }, cap("style.layout")),
     slider2(t(split ? "style.laySide" : "style.layBand"), LAYOUT_LIMITS.size[0], LAYOUT_LIMITS.size[1], 0.01, adj.size ?? now.size, (v) => set("size", v)),
     slider2(t("style.laySlant"), LAYOUT_LIMITS.slant[0], LAYOUT_LIMITS.slant[1], 0.005, adj.slant ?? now.slant, (v) => set("slant", v)),
     slider2(t("style.layTitleW"), LAYOUT_LIMITS.tw[0], LAYOUT_LIMITS.tw[1], 0.01, adj.tw ?? 1, (v) => set("tw", v)),
     slider2(t("style.layTitleH"), LAYOUT_LIMITS.th[0], LAYOUT_LIMITS.th[1], 0.01, adj.th ?? 1, (v) => set("th", v)),
     el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: !!adj.flip, onchange: (e) => set("flip", e.target.checked, true) }), el("span", {}, t(split ? "style.layFlipSplit" : "style.layFlipStack"))),
-    el("button", { class: "btn wide", style: "margin-top:10px", disabled: !has, onclick: () => { delete st.layoutAdjust[tpl]; changed(true); } }, t("style.layReset")),
+    el("button", { class: "btn wide", style: "margin-top:10px", disabled: !has, onclick: () => put(tpl, {}, true) }, t("style.layReset")),
   ];
 }
-/** The Style tab's template and its adjustments, one box (as the look and the default design have): every cover of the profile follows. */
+/** The size on the canvas as templateControls wants it: its virtual canvas, and which parts that take room the cover has there. */
+const shownAt = () => { const z = selSize(), [w, h] = virtualSize(z.w, z.h); return { w, h, parts: partsOf(S.cover, cat()) }; };
+/**
+ * The Style tab's template and its adjustments, one box (as the look and the default design have), changed where the
+ * scope says (its three choices here too: the toolbar's): the profile's, which every size without a layout of its own
+ * follows; each size facing the canvas's way, as their own; or the canvas's size alone. A size with a layout of its own
+ * says so, with the way back to following the profile's (the strip under the canvas marks such sizes); "Wide side by
+ * side, tall and square stacked" lays every size out by its orientation at once.
+ */
 function layoutBox() {
+  const st = S.profile.style, key = S.sel, keys = scopeKeys(), own = ownLayout(st, key), z = selSize(), ratio = ratioText(z.w, z.h);
+  const reach = keys ? keys.map((k) => { const s = S.profile.sizes.find((x) => sizeKey(x) === k); return s ? ratioText(s.w, s.h) : k; }).join(" · ") : "";
   return el("div", { class: "box" }, cap("style.template"),
-    templateControls(S.profile.style, flatCanvas(), (again) => { if (!again) return draftTouch({ profile: true }); touch({ profile: true }); later("laybox", 60, renderPanel); }),
+    el("div", { class: "layscope" }, scopeSeg()),
+    el("div", { class: "hint", style: "margin:6px 0 10px" }, t("style.layTo." + S.settings.scope, reach)),
+    own && el("div", { class: "layown" }, el("span", {}, t(keys ? "style.own" : "style.ownAll", ratio)),
+      el("button", { class: "linkbtn", title: t("style.followTip"), onclick: () => { followLayout(st, key); touch({ profile: true, panel: true }); } }, t("style.follow"))),
+    templateControls(st, shownAt(), (again) => { if (!again) return draftTouch({ profile: true }); touch({ profile: true }); later("laybox", 60, renderPanel); }, keys && { key, keys }),
+    el("button", { class: "btn wide", style: "margin-top:8px", title: t("style.byOrientTip"), onclick: byOrient }, t("style.byOrient")),
     el("div", { class: "hint" }, t("style.layHint")));
+}
+/** "Wide side by side, tall and square stacked": every size laid out by its orientation (layoutByOrient in layout.js); one step of undo. */
+function byOrient() {
+  clearTimeout(timers.hist); commitHistory();
+  layoutByOrient(S.profile.style, S.profile.sizes);
+  touch({ profile: true, panel: true });
+  commitHistory();   // its own step
+  toast(t("style.byOrientDone"));
 }
 /**
  * Under the slider of the look's figure (see `art` in style.js): what the figure is drawn from — the
@@ -2188,7 +2248,10 @@ function layoutEditor(p, i) {
   const part = (id) => layers.find((l) => l.id === id);
   const E = { sel: LAYOUT_PARTS.find((id) => part(id) && part(id).visible) || "title", key: S.sel, scope: "all", live: null, dirty: false };
   const size = () => S.profile.sizes.find((z) => sizeKey(z) === E.key) || S.profile.sizes[0];
-  const geo = () => { const z = size(), [vw, vh] = virtualSize(z.w, z.h); return { vw, vh, key: sizeKey(z), catId: cat().id }; };
+  const geo = () => {
+    const z = size(), [vw, vh] = virtualSize(z.w, z.h), group = sameWay(sizeKey(z)).map((x) => { const [w, h] = virtualSize(x.w, x.h); return { key: sizeKey(x), vw: w, vh: h }; });
+    return { vw, vh, key: sizeKey(z), catId: cat().id, group };
+  };
   const cv = el("canvas"), stage = el("div", { class: "ls-stage" }, cv), side = el("div", { class: "ls-side" }), top = el("div", { class: "ls-top" });
   const name = el("input", { type: "text", value: p.name, placeholder: layoutName(p, i), maxLength: LAYOUTS.name, spellcheck: false, oninput: () => (E.dirty = true) });
   // the cover as the preset has it, fitted to the room there is, at the screen's pixels
@@ -2264,7 +2327,7 @@ function layoutEditor(p, i) {
   const build = () => {
     top.replaceChildren(
       el("div", { class: "ls-sizes" }, S.profile.sizes.map((z) => el("button", { class: "btn" + (sizeKey(z) === E.key ? " on" : ""), title: sizeLabel(z), onclick: () => { E.key = sizeKey(z); E.drawn = false; redraw(); } }, ratioText(z.w, z.h)))),   // built again once drawn at that size, the block's sliders starting from its layout
-      el("div", { class: "grp" }, el("span", {}, t("props.scope")), el("div", { class: "seg" }, ["all", "size"].map((v) => el("button", { class: "btn" + (E.scope === v ? " on" : ""), onclick: () => { E.scope = v; build(); } }, t("scope." + v))))));
+      el("div", { class: "grp" }, el("span", {}, t("props.scope")), el("div", { class: "seg" }, SCOPES.map((v) => el("button", { class: "btn" + (E.scope === v ? " on" : ""), onclick: () => { E.scope = v; build(); } }, scopeName(v, E.key))))));
     // a part's row: the box says whether the cover has it; its name, clicked, selects it (one shown); a lettered part's
     // words set in columns (竖排) and then ruled (界行线), as its properties set them on the canvas: the preset's own
     const L = part(E.sel), run = (P, k, under = false) => el("label", { class: "chk run" + (under ? " under" : ""), title: t(`props.${k}Tip`) },
@@ -2277,12 +2340,18 @@ function layoutEditor(p, i) {
       } }), el("span", { onclick: () => { if (P.visible) { pick(id); redraw(); } } }, t("layer." + id)), words && run(P, "vertical")),
         words && P.vertical === true && run(P, "rules", true)];
     };
+    // the template controls change the preset's own template, which every size follows but those it draws in a layout
+    // of their own (taken from the canvas, see takeLayout): the size shown says when it is one, and can follow again
+    const z = size(), [zw, zh] = virtualSize(z.w, z.h), own = ownLayout(st, E.key);
     side.replaceChildren(
       el("div", {}, cap("layouts.name"), name),
-      el("div", {}, cap("style.template"), templateControls(st, cv, (again) => { E.dirty = true; redraw(); if (again) later("layedSide", 60, build); })),
+      el("div", {}, cap("style.template"),
+        own && el("div", { class: "layown" }, el("span", {}, t("style.ownAll", ratioText(z.w, z.h))),
+          el("button", { class: "linkbtn", title: t("style.followTip"), onclick: () => { followLayout(st, E.key); E.dirty = true; build(); redraw(); } }, t("style.follow"))),
+        templateControls(st, { w: zw, h: zh, parts: partsOf({ ...S.cover, layers }, cat()) }, (again) => { E.dirty = true; redraw(); if (again) later("layedSide", 60, build); })),
       el("div", {}, cap("layed.parts"), el("div", { class: "parts" }, LAYOUT_PARTS.map(row))),
       L && el("div", { class: "ls-picked" }, el("span", {}, t("layed.picked", t("layer." + E.sel))),
-        el("button", { class: "btn", title: t("layed.resetTip"), onclick: () => { const g = geo(); resetPlacement(L, E.scope, g.key, g.catId); E.dirty = true; redraw(); } }, t("layed.reset"))));
+        el("button", { class: "btn", title: t("layed.resetTip"), onclick: () => { const g = geo(); resetPlacement(L, E.scope, g.key, g.catId, g.group.map((x) => x.key)); E.dirty = true; redraw(); } }, t("layed.reset"))));
   };
   const back = () => { LAYED.redraw = null; oddsDialog(false, "layouts"); };
   const cancel = () => { if (E.dirty && !confirm(t("layed.discard"))) return; back(); };
@@ -2524,7 +2593,7 @@ function sizesTab() {
   const has = (s) => P.sizes.some((x) => sizeKey(x) === sizeKey(s));
   const toggle = (s, on) => {
     if (on && !has(s)) P.sizes.push({ w: s.w, h: s.h, label: s.label || "", name: "" });
-    if (!on) { if (P.sizes.length < 2) return renderPanel(); P.sizes = P.sizes.filter((x) => sizeKey(x) !== sizeKey(s)); }
+    if (!on) { if (P.sizes.length < 2) return renderPanel(); P.sizes = P.sizes.filter((x) => sizeKey(x) !== sizeKey(s)); followLayout(P.style, sizeKey(s)); }   // its layout of its own goes with it
     if (!P.sizes.some((x) => sizeKey(x) === S.sel)) S.sel = sizeKey(P.sizes[0]);
     syncToolbar(); touch({ profile: true, strip: true, panel: true });
   };
@@ -2712,7 +2781,7 @@ const psec = (nameKey, kids, tip = "", at = "") => el("div", { class: "psec" }, 
 /** Put a layer back where it was placed by default. */
 function placementControls(L) {
   const f = frame();
-  return el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { resetPlacement(L, S.settings.scope, f.key, f.catId); touch({ cover: true, side: true }); } }, `${t("props.reset")} · ${t("scope." + S.settings.scope)}`);
+  return el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { resetPlacement(L, S.settings.scope, f.key, f.catId, f.group.map((g) => g.key)); touch({ cover: true, side: true }); } }, `${t("props.reset")} · ${scopeName(S.settings.scope)}`);
 }
 /**
  * A colour of a layer, a row of its own as a checkbox is: the swatch (click to choose), its name, and —
@@ -3373,15 +3442,15 @@ function typeControls(L) {
 const sceneName = (key) => { const s = (LOOKS[S.profile.style.look] || LOOKS.cel).scene; return (s && s[key] && s[key][getLang()]) || key; };
 /**
  * With the ground selected: the current look's scene objects the user may drag on the canvas, each with a
- * button putting it back where the layout puts it (on this cover; for all sizes or this one, as the
- * toolbar's scope says), and one for them all.
+ * button putting it back where the layout puts it (on this cover; for all sizes, those facing this one's way or
+ * this one, as the toolbar's scope says), and one for them all.
  */
 function sceneSection(L) {
   const scene = L.type === "bg" && (LOOKS[S.profile.style.look] || LOOKS.cel).scene;
   if (!scene) return null;
   const look = S.profile.style.look, f = frame(), off = sceneOffsets(S.cover, look, f.key), scope = S.settings.scope;
   const isMoved = (k) => !!off[k] && (Math.abs(off[k][0]) > 1e-4 || Math.abs(off[k][1]) > 1e-4);
-  const reset = (k) => { resetScene(S.cover, look, k, scope, f.key); touch({ cover: true, side: true }); };
+  const reset = (k) => { resetScene(S.cover, look, k, scope, f.key, scopeKeys() || [f.key]); touch({ cover: true, side: true }); };
   return [el("div", { class: "psep" }), psec("props.sec.scene", [
     check("scene.hide", S.settings.hideScene, (v) => { S.settings.hideScene = v; persistSettings(); queueDraw(); renderSide(); }),
     ...Object.keys(scene).map((k) => el("div", { class: "fxs" },
@@ -4272,12 +4341,12 @@ async function surprise(e) {
     if (!hands.length) throw new Error("no hand could be dealt");
     await wait(H.pace * 2);   // a moment with every hand in view, then the first on the canvas, and marked
     putHand(hands[0]);
-    SURPRISE.last = { kept: 0, ms: Math.round(performance.now() - t0), hands: hands.map((h) => ({ look: h.style.look, layout: h.layout, template: h.style.template })) };   // for the self-test
+    SURPRISE.last = { kept: 0, ms: Math.round(performance.now() - t0), hands: hands.map((h) => ({ look: h.style.look, layout: h.layout, template: layoutOf(h.style, sizeKey(shown)).template })) };   // for the self-test
     touch({ profile: true, cover: true, panel: true, side: true, strip: true });
     commitHistory();
     SURPRISE.step = { idx: S.histIdx };
     dealKept(0);
-    toast(t("msg.surprise", LOOKS[S.profile.style.look].name[getLang()], t("tpl." + S.profile.style.template).split(/[：:]/)[0]));
+    toast(t("msg.surprise", LOOKS[S.profile.style.look].name[getLang()], t("tpl." + layoutOf(S.profile.style, S.sel).template).split(/[：:]/)[0]));   // the template of the size on the canvas
   } catch (err) {
     if (before) { putHand(before); S.hist[S.histIdx] = snapshot(); touch({ panel: true, side: true }); }   // the cover as it was, and no step of undo for it
     dealClose();

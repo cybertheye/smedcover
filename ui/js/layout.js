@@ -45,6 +45,71 @@ function interpolate(anchors, aspect) {
 
 export const TEMPLATES = ["stack", "split", "banner"];
 
+// ---------- which way a size faces, and the layout each size is drawn in
+// A profile's sizes fall into three groups by their shape: wide (landscape, 5:4 and wider), square, and tall
+// (portrait, 4:5 and taller). The groups are what the scope's middle choice reaches (see adjust in layers.js),
+// and what "Wide side by side, tall and square stacked" lays out (layoutByOrient).
+/** The orientations a size may have, landscape to portrait. */
+export const ORIENTS = ["wide", "square", "tall"];
+/** Which way a size of w × h faces: "wide" (wider than 1.1 : 1, so 5:4 is), "tall" (narrower than 0.91 : 1, so 4:5 is), else "square". */
+export function orientOf(w, h) {
+  const r = w / h;
+  return r > 1.1 ? "wide" : r < 0.91 ? "tall" : "square";
+}
+/** The orientation of the size keyed "1920x1080" (see sizeKey in render.js); "square" for a key that is not one. */
+export const orientOfKey = (key) => { const m = /^(\d+)x(\d+)$/.exec(String(key)); return m ? orientOf(Number(m[1]), Number(m[2])) : "square"; };
+/**
+ * The template and adjustments size `key` is drawn in: { template, adjust }. A profile's style has one template and
+ * its adjustments (style.template, style.layoutAdjust of it), which every size follows, unless that size has a layout
+ * of its own (style.layoutBy[key]: { template, adjust }, set from the Style tab with the scope at one size or one
+ * orientation, see setLayoutOf). Whatever lays a cover out asks here.
+ */
+export function layoutOf(style, key) {
+  const own = style.layoutBy && key && Object.hasOwn(style.layoutBy, key) ? style.layoutBy[key] : null;
+  return own ? { template: own.template, adjust: own.adjust || {} } : { template: style.template, adjust: (style.layoutAdjust || {})[style.template] || {} };
+}
+/** Whether size `key` has a layout of its own (see layoutOf), rather than following the profile's. */
+export const ownLayout = (style, key) => !!(style.layoutBy && key && Object.hasOwn(style.layoutBy, key));
+/**
+ * Puts layout `lay` ({ template, adjust }) on `style` (in place): with `keys` null, as the profile's own template and its
+ * adjustments, which every size without a layout of its own follows (the other templates' adjustments kept, so a
+ * template chosen again comes back as it was); else on each size of `keys` as a layout of its own.
+ */
+export function setLayoutOf(style, keys, lay) {
+  const adjust = { ...(lay.adjust || {}) };
+  if (!keys) {
+    style.template = lay.template;
+    const a = (style.layoutAdjust = style.layoutAdjust || {});
+    if (Object.keys(adjust).length) a[lay.template] = adjust; else delete a[lay.template];
+    return;
+  }
+  const by = (style.layoutBy = style.layoutBy || {});
+  for (const k of keys) by[k] = { template: lay.template, adjust: { ...adjust } };
+}
+/** Size `key` follows the profile's layout again: its own is let go (see layoutOf). */
+export function followLayout(style, key) {
+  if (!style.layoutBy) return;
+  delete style.layoutBy[key];
+  if (!Object.keys(style.layoutBy).length) delete style.layoutBy;
+}
+/** The template each orientation is given by "Wide side by side, tall and square stacked" (layoutByOrient). */
+export const BY_ORIENT = { wide: "split", square: "stack", tall: "stack" };
+/**
+ * "Wide side by side, tall and square stacked": every size of `sizes` ([{w, h}]) drawn in the template its
+ * orientation takes (BY_ORIENT), as that template comes (no adjustments), in place. A size that the profile's own
+ * template already draws so (that template, not adjusted) follows it; the others are given it as a layout of their
+ * own, and every layout of their own they had before is let go. Asked for, never done of itself: a profile is drawn
+ * as it was until then.
+ */
+export function layoutByOrient(style, sizes) {
+  const plain = !Object.keys((style.layoutAdjust || {})[style.template] || {}).length, by = {};
+  for (const s of sizes) {
+    const template = BY_ORIENT[orientOf(s.w, s.h)];
+    if (template !== style.template || !plain) by[`${s.w}x${s.h}`] = { template, adjust: {} };
+  }
+  if (Object.keys(by).length) style.layoutBy = by; else delete style.layoutBy;
+}
+
 /**
  * Layout for a virtual canvas of w x h. All values are in virtual units.
  *   accent   polygon of the accent-coloured region; its first two points are the dividing edge
@@ -144,7 +209,7 @@ export function blockLayout(template, w, h, o) {
   };
 }
 
-/** What the user may change about a template: all optional, all as fractions so one setting suits every size. */
+/** What the user may change about a template: all optional, all as fractions so one setting suits every size (or every size of a layout of its own, see layoutOf). */
 export const LAYOUT_LIMITS = { size: [0.08, 0.8], slant: [-0.3, 0.3], tw: [0.3, 1], th: [0.3, 1] };
 /**
  * A template's layout as the user has adjusted it.

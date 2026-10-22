@@ -3188,3 +3188,166 @@ test("the host: the app answers the native commands itself, a SmedCover server o
   await assert.rejects(httpInvoke({}, "app_write", { path: "p", data: "d" }, {}, flaky(1), nap), /app_write: Failed to fetch/);
   assert.deepEqual(naps, [], "a write is never sent twice");
 });
+
+// ---------- each size's layout its own, and the scope's three choices
+/** Draws `cover` of profile `p` at `size` on a canvas that records nothing (a proxy), for what the drawing leaves on it: cv._layout, cv._hits. */
+async function drawnAt(p, cover, size) {
+  const { drawCover } = await import("../ui/js/render.js");
+  const ctxOf = (cv) => new Proxy({ canvas: cv, globalAlpha: 1, font: "900 100px X", lineWidth: 1 }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...String(s)].length * 50 })
+    : k === "createLinearGradient" || k === "createRadialGradient" || k === "createPattern" ? () => ({ addColorStop() {} }) : k === "getImageData" ? (x, y, w, h) => ({ data: new Uint8ClampedArray(Math.max(4, w * h * 4)) }) : () => ({})), set: (t, k, v) => { t[k] = v; return true; } });
+  const canvas = () => { const cv = { width: 0, height: 0 }; cv.getContext = () => ctxOf(cv); return cv; }, was = globalThis.document;
+  globalThis.document = { createElement: canvas, fonts: { size: 0 } };
+  try { const cv = canvas(); drawCover(cv, { profile: p, catIndex: 0, size, pixelW: 200, cover, photos: new Map() }); return cv; } finally { globalThis.document = was; }
+}
+
+test("which way a size faces: wide from 5:4 on, tall from 4:5 on, square between; a size key read the same", async () => {
+  const { orientOf, orientOfKey, ORIENTS } = await import("../ui/js/layout.js");
+  assert.deepEqual(ORIENTS, ["wide", "square", "tall"]);
+  assert.deepEqual([orientOf(1920, 1080), orientOf(1600, 1200), orientOf(1250, 1000), orientOf(900, 383)], ["wide", "wide", "wide", "wide"]);
+  assert.deepEqual([orientOf(1080, 1080), orientOf(1100, 1000), orientOf(1000, 1090), orientOf(1050, 1000)], ["square", "square", "square", "square"], "within about a tenth of square");
+  assert.equal(orientOf(1000, 1100), "tall", "narrower than 0.91 : 1");
+  assert.deepEqual([orientOf(1080, 1350), orientOf(1200, 1600), orientOf(1080, 1920)], ["tall", "tall", "tall"]);
+  assert.deepEqual([orientOfKey("1080x1350"), orientOfKey("1920x1080"), orientOfKey("1200x1200"), orientOfKey("nope")], ["tall", "wide", "square", "square"]);
+});
+
+test("each size's layout: the profile's for every size, a size's own over it; set, followed again, kept clean in the profile", async () => {
+  const { layoutOf, ownLayout, setLayoutOf, followLayout } = await import("../ui/js/layout.js");
+  const st = { template: "stack", layoutAdjust: { stack: { size: 0.3 }, split: { tw: 0.8 } } };
+  assert.deepEqual(layoutOf(st, "1920x1080"), { template: "stack", adjust: { size: 0.3 } }, "no layout of its own: the profile's");
+  setLayoutOf(st, ["1920x1080", "1600x1200"], { template: "split", adjust: { size: 0.4 } });
+  assert.deepEqual([layoutOf(st, "1920x1080"), layoutOf(st, "1600x1200"), layoutOf(st, "1080x1920")], [{ template: "split", adjust: { size: 0.4 } }, { template: "split", adjust: { size: 0.4 } }, { template: "stack", adjust: { size: 0.3 } }]);
+  assert.notEqual(st.layoutBy["1920x1080"].adjust, st.layoutBy["1600x1200"].adjust, "each its own");
+  assert.deepEqual([ownLayout(st, "1920x1080"), ownLayout(st, "1080x1920"), ownLayout({ template: "stack" }, "1920x1080")], [true, false, false]);
+  // the profile's own: the template chosen, its adjustments; another template's kept, none left out
+  setLayoutOf(st, null, { template: "split", adjust: { tw: 0.7 } });
+  assert.deepEqual([st.template, st.layoutAdjust], ["split", { stack: { size: 0.3 }, split: { tw: 0.7 } }]);
+  setLayoutOf(st, null, { template: "stack", adjust: {} });
+  assert.deepEqual(st.layoutAdjust, { split: { tw: 0.7 } }, "the template as it comes: nothing kept for it");
+  assert.equal(layoutOf(st, "1920x1080").template, "split", "a size's own stays as it was");
+  followLayout(st, "1920x1080");
+  assert.deepEqual([layoutOf(st, "1920x1080"), Object.keys(st.layoutBy)], [{ template: "stack", adjust: {} }, ["1600x1200"]]);
+  followLayout(st, "1600x1200");
+  assert.equal("layoutBy" in st, false, "none left: none kept");
+  // as kept in the profile: only its sizes' keys, templates there are, adjustments within range; left out when none
+  const p = normalizeProfile({ sizes: [{ w: 1920, h: 1080 }, { w: 1080, h: 1920 }], style: { template: "split", layoutBy: {
+    "1920x1080": { template: "banner", adjust: { size: 3, slant: 0.1, flip: "yes", nope: 1 } }, "1080x1920": { template: "stack" }, "1200x1200": { template: "stack" }, "x": { template: "split" } } } });
+  assert.deepEqual(p.style.layoutBy, { "1920x1080": { template: "banner", adjust: { size: 0.8, slant: 0.1 } }, "1080x1920": { template: "stack", adjust: {} } });
+  assert.equal(normalizeProfile({ sizes: [{ w: 1920, h: 1080 }], style: { layoutBy: { "1920x1080": { template: "nope" } } } }).style.layoutBy, undefined);
+  assert.equal("layoutBy" in normalizeProfile(sampleProfile("en")).style, false, "a profile as it was: no size has its own");
+  assert.deepEqual(normalizeProfile(JSON.parse(JSON.stringify(p))).style, p.style, "read back as written");
+});
+
+test("a size drawn in a layout of its own: that template there, the profile's everywhere else, the same drawing as before until one is set", async () => {
+  const { layoutOf, setLayoutOf, layout, adjustLayout, meetStandards, virtualSize } = await import("../ui/js/layout.js");
+  const { coverLayout, partsOf, sizeKey } = await import("../ui/js/render.js");
+  const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({ title: "Hello", subtitle: "sub", tag: "EP.01" }, p);
+  const parts = partsOf(c, p.categories[0]), adj = p.style.layoutAdjust[p.style.template];
+  for (const z of p.sizes) {
+    const [w, h] = virtualSize(z.w, z.h), drawn = (await drawnAt(p, c, z))._layout;
+    assert.deepEqual(drawn, meetStandards(adjustLayout(layout(p.style.template, w, h), w, h, adj), w, h, adj, parts), "as it was drawn before");
+    assert.deepEqual(coverLayout(LOOKS.cel, layoutOf(p.style, sizeKey(z)), w, h, parts), drawn);
+  }
+  setLayoutOf(p.style, ["1920x1080"], { template: "split", adjust: { size: 0.4 } });
+  const [wide, tall] = [await drawnAt(p, c, p.sizes[0]), await drawnAt(p, c, p.sizes[3])];
+  assert.deepEqual([wide._layout.template, tall._layout.template], ["split", "stack"]);
+  assert.ok(Math.abs((1920 - (wide._layout.accent[0][0] + wide._layout.accent[1][0]) / 2) / 1920 - 0.4) < 1e-9, "its own adjustments");
+});
+
+test("the scope's middle choice: an edit reaches every size facing this one's way, as far across each canvas, and no other; reset, and the scene objects, alike", () => {
+  const sizes = [[1920, 1080], [1600, 1200], [1080, 1920], [1200, 1600], [1200, 1200]].map(([w, h]) => ({ key: `${w}x${h}`, vw: w, vh: h }));
+  const tall = sizes.filter((g) => g.vh > g.vw), at = { ...sizes[2], catId: "c1", group: tall };
+  const a = newLayer("asset", { ref: { kind: "sticker", id: "star" } });
+  adjust(a, at, "orient", { ddx: 108, ddy: -192, scale: 1.5, rot: 10 });
+  assert.deepEqual(Object.keys(a.t.by).sort(), ["1080x1920", "1200x1600"]);
+  assert.deepEqual(a.t.by["1080x1920"], { dx: 108, dy: -192, s: 1.5, r: 10, kx: 1, ky: 1 });
+  assert.deepEqual(a.t.by["1200x1600"], { dx: 120, dy: -160, s: 1.5, r: 10, kx: 1, ky: 1 }, "a tenth across and down there too");
+  assert.equal(resolve(a, 1920, 1080, "1920x1080").cx, 960, "the wide sizes as they were");
+  const before = JSON.parse(JSON.stringify(a.t));
+  adjust(a, { ...at, group: undefined }, "orient", { ddx: 10 });
+  assert.equal(a.t.by["1080x1920"].dx, 118, "with no group named, this size alone");
+  assert.equal(a.t.by["1200x1600"].dx, before.by["1200x1600"].dx);
+  // the channel graphic is tuned per channel there too
+  const g = newLayer("graphic");
+  adjust(g, at, "orient", { ddy: 96 });
+  assert.deepEqual(Object.keys(g.t.by).sort(), ["1080x1920@c1", "1200x1600@c1"]);
+  // put back: the sizes of the group, the others kept
+  adjust(a, sizes[0], "size", { ddx: 5 });
+  resetPlacement(a, "orient", at.key, at.catId, tall.map((x) => x.key));
+  assert.deepEqual(Object.keys(a.t.by), ["1920x1080"]);
+  resetPlacement(g, "orient", at.key, "c1", tall.map((x) => x.key));
+  assert.deepEqual(g.t.by, {});
+  // the looks' scene objects, by the same three choices
+  const c = {};
+  moveScene(c, "court", "ball", "orient", "1080x1920", 0.1, 0, ["1080x1920", "1200x1600"]);
+  moveScene(c, "court", "ball", "size", "1920x1080", 0, 0.05);
+  assert.deepEqual([sceneOffsets(c, "court", "1080x1920").ball, sceneOffsets(c, "court", "1200x1600").ball, sceneOffsets(c, "court", "1920x1080").ball, sceneOffsets(c, "court", "1200x1200").ball], [[0.1, 0], [0.1, 0], [0, 0.05], [0, 0]]);
+  resetScene(c, "court", "ball", "orient", "1200x1600", ["1080x1920", "1200x1600"]);
+  assert.deepEqual(c.scene, { court: { ball: { by: { "1920x1080": [0, 0.05] } } } });
+  // the setting: the three choices kept, anything else every size
+  assert.deepEqual(["all", "orient", "size", "both", undefined].map((scope) => normalizeSettings({ scope }).scope), ["all", "orient", "size", "all", "all"]);
+});
+
+test("layout presets carry each size's own layout: taken from the profile, kept clean, put back on it (or none), dealt as they are", async () => {
+  const { takeLayout, putLayout } = await import("../ui/js/layers.js");
+  const { normalizeLayouts } = await import("../ui/js/store.js");
+  const { dealCover, oddsOf } = await import("../ui/js/deal.js");
+  const { setLayoutOf, layoutOf } = await import("../ui/js/layout.js");
+  const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p);
+  assert.equal("by" in takeLayout(p.style, c.layers), false, "a profile with none: a preset with none, as before");
+  setLayoutOf(p.style, ["1920x1080", "1600x1200"], { template: "split", adjust: { size: 0.35 } });
+  const taken = takeLayout(p.style, c.layers);
+  assert.deepEqual(taken.by, { "1920x1080": { template: "split", adjust: { size: 0.35 } }, "1600x1200": { template: "split", adjust: { size: 0.35 } } });
+  assert.notEqual(taken.by, p.style.layoutBy, "a copy");
+  const [kept] = normalizeLayouts([{ id: "w", ...taken, by: { ...taken.by, "bad": { template: "split" }, "1080x1920": { template: "nope" }, "1200x1200": { template: "banner", adjust: { th: 9 } } } }]);
+  assert.deepEqual(kept.by, { "1920x1080": { template: "split", adjust: { size: 0.35 } }, "1600x1200": { template: "split", adjust: { size: 0.35 } }, "1200x1200": { template: "banner", adjust: { th: 1 } } }, "size keys, templates there are, adjustments in range");
+  assert.deepEqual(normalizeLayouts(JSON.parse(JSON.stringify([kept]))), [kept], "read back as written");
+  assert.equal("by" in normalizeLayouts([{ id: "n", by: { x: 1 } }])[0], false);
+  // put on another profile: its sizes as the preset has them; a preset with none lays every size out alike again
+  const q = normalizeProfile(sampleProfile("en")), d = normalizeCover({}, q);
+  setLayoutOf(q.style, ["1080x1920"], { template: "banner", adjust: {} });
+  putLayout(q.style, d.layers, kept);
+  assert.deepEqual(["1920x1080", "1080x1920", "1200x1200"].map((k) => layoutOf(q.style, k).template), ["split", "stack", "banner"]);
+  putLayout(q.style, d.layers, normalizeLayouts([{ id: "old", template: "split" }])[0]);
+  assert.equal("layoutBy" in q.style, false);
+  assert.deepEqual(["1920x1080", "1080x1920"].map((k) => layoutOf(q.style, k).template), ["split", "split"]);
+  // Surprise me: a preset dealt brings its sizes' layouts; the canvas's own kept as it is
+  const rand = (seed) => () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  for (const [odds, want] of [[{ groups: { layout: { w: 1 } } }, kept.by], [{ groups: { layout: { keep: 1 } } }, { "1080x1920": { template: "stack", adjust: {} } }]]) {
+    const r = normalizeProfile(sampleProfile("en")), e = normalizeCover({}, r);
+    setLayoutOf(r.style, ["1080x1920"], { template: "stack", adjust: {} });
+    dealCover(r.style, e, { R: rand(11), locks: {}, recipes: {}, rgb: [252, 191, 0], design: new Map(r.design.layers.map((l) => [l.id, l])), sizeKey: "1920x1080", layouts: [kept], odds: oddsOf(odds, [kept]) });
+    assert.deepEqual(r.style.layoutBy, want);
+  }
+});
+
+test("Wide side by side, tall and square stacked: each size by its orientation, as the template comes; a size the profile's own already draws so follows it", async () => {
+  const { layoutByOrient, layoutOf, BY_ORIENT } = await import("../ui/js/layout.js");
+  const { sizeKey } = await import("../ui/js/render.js");
+  assert.deepEqual(BY_ORIENT, { wide: "split", square: "stack", tall: "stack" });
+  const p = normalizeProfile(sampleProfile("en")), want = { "1920x1080": "split", "1600x1200": "split", "900x383": "split", "1200x1200": "stack", "1200x1600": "stack", "1080x1920": "stack" };
+  const got = (st) => Object.fromEntries(p.sizes.map((z) => [sizeKey(z), layoutOf(st, sizeKey(z))]));
+  // the profile's Stack as it comes: the wide sizes have Split of their own, the rest follow it
+  const a = { template: "stack", layoutAdjust: {}, layoutBy: { "1080x1920": { template: "banner", adjust: {} } } };
+  layoutByOrient(a, p.sizes);
+  assert.deepEqual(Object.keys(a.layoutBy).sort(), ["1600x1200", "1920x1080", "900x383"], "what was its own before let go");
+  for (const [k, v] of Object.entries(got(a))) assert.deepEqual(v, { template: want[k], adjust: {} }, k);
+  // the profile's Split: the others have Stack of their own
+  const b = { template: "split", layoutAdjust: { stack: { size: 0.4 } } };
+  layoutByOrient(b, p.sizes);
+  assert.deepEqual(Object.keys(b.layoutBy).sort(), ["1080x1920", "1200x1200", "1200x1600"]);
+  for (const [k, v] of Object.entries(got(b))) assert.deepEqual(v, { template: want[k], adjust: {} }, k);
+  // the profile's own adjusted: every size has the template as it comes, of its own; the profile's kept for later
+  const c = { template: "stack", layoutAdjust: { stack: { size: 0.4 } } };
+  layoutByOrient(c, p.sizes);
+  assert.equal(Object.keys(c.layoutBy).length, 6);
+  for (const [k, v] of Object.entries(got(c))) assert.deepEqual(v, { template: want[k], adjust: {} }, k);
+  assert.deepEqual([c.template, c.layoutAdjust], ["stack", { stack: { size: 0.4 } }]);
+  // drawn so: Split on the wide covers, Stack on the others, the title in the column where there is one
+  const pr = normalizeProfile(sampleProfile("en")), cover = normalizeCover({ title: "Hello *there*", subtitle: "sub", tag: "EP.01" }, pr);
+  layoutByOrient(pr.style, pr.sizes);
+  for (const z of pr.sizes) {
+    const cv = await drawnAt(pr, cover, z), split = want[sizeKey(z)] === "split", title = cv._hits.find((h) => h.id === "title");
+    assert.equal(cv._layout.template, want[sizeKey(z)], sizeKey(z));
+    if (split) assert.ok(title && title.cx + title.hw <= cv._layout.edge.line[0], `${sizeKey(z)}: the title in its column, left of the panel`);
+  }
+});

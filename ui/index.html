@@ -103,6 +103,9 @@
   .psec-b>.fxs>span.fxt{font-weight:600;opacity:.75}
   .fxs .linkbtn,.artback .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
   .artback{margin:4px 0 0 92px}   /* under the figure's graphic, past the label column */
+  .layscope .seg .btn{flex:1;padding-left:6px;padding-right:6px}   /* the Style tab's template box: the scope it changes, the toolbar's own */
+  .layown{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;margin:0 0 10px;padding:6px 8px;border:1px dashed var(--acc)}
+  .layown .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
   .fxs .linkbtn:disabled{opacity:.35;cursor:default;text-decoration:none}
   .fxs>.fxa{display:flex;gap:12px}
   .psec-b>.fxs>span.jump{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
@@ -255,6 +258,8 @@
   #strip.alpha canvas{background:repeating-conic-gradient(#3a3a48 0% 25%,#24242e 0% 50%) 0 0/12px 12px}
   #strip figcaption{font-size:12px;line-height:18px;font-weight:600;opacity:.75;margin-top:6px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
   #strip figure{padding-bottom:2px}
+  #strip figcaption .own{display:none;color:var(--acc);font-size:10px;margin-left:5px;cursor:help}   /* a size drawn in a layout of its own */
+  #strip figure.own figcaption .own{display:inline}
   /* (scrollbars are styled with ::-webkit-scrollbar only: the standard scrollbar-* properties would switch them back to auto-hiding overlays) */
 
   /* layers */
