@@ -289,6 +289,8 @@
   #tip{position:fixed;z-index:60;background:var(--panel);border:1px solid var(--line2);box-shadow:0 8px 24px rgba(0,0,0,.45);padding:10px 12px;font-size:12.5px;line-height:1.7;color:#fff;white-space:normal}
   #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#fff;color:var(--ink);padding:12px 22px;font-weight:600;box-shadow:6px 6px 0 var(--acc);opacity:0;pointer-events:none;transition:opacity .2s;z-index:50;max-width:80vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #toast.on{opacity:1}
+  #toast.on.act{pointer-events:auto}   /* a word with a way on: its button can be clicked while it shows */
+  #toast button{margin-left:16px;border:0;background:none;color:var(--ink);font:inherit;font-weight:700;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
   body.drop::after{content:attr(data-drop);position:fixed;inset:12px;border:3px dashed var(--acc);background:rgba(10,10,18,.82);display:grid;place-items:center;font-size:28px;letter-spacing:.2em;z-index:45;pointer-events:none}
   /* the ransom note's letters, one by one: the strip (each letter as drawn) and the picked letter's controls */
   .letters{display:grid;gap:6px;margin:4px 0 8px}
@@ -336,6 +338,7 @@
   #deal figure canvas{display:block;width:100%;height:auto}#deal figure .blank{display:block;width:100%;aspect-ratio:var(--ar)}
   #deal figcaption{display:flex;justify-content:space-between;gap:6px;padding:4px 6px;font-size:11px;line-height:1.4}
   #deal figcaption span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #deal figcaption span.lay{opacity:.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}   /* the layout preset the hand was dealt in */
   #deal figure.kept figcaption{background:var(--acc);color:var(--ink)}
   #deal figure.kept figcaption span{color:var(--ink)}
   #deal .hint{margin:0}
@@ -357,6 +360,27 @@
   #modal .dlg.odds .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
   #modal .dlg.odds .cols > div{display:grid;gap:14px}
   @media(max-width:760px){#modal .dlg.odds .cols{grid-template-columns:1fr}}
+  /* its layout presets, across the window: which layout a hand is dealt in, beside the presets themselves */
+  #modal .dlg.odds .lays-two{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  #modal .dlg.odds .lay{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:6px;align-items:center;margin-bottom:6px}
+  #modal .dlg.odds .lay input{padding:5px 8px}
+  #modal .dlg.odds .lay .btn{padding:5px 8px;font-size:12px}
+  #modal .dlg.odds .lays.ping{animation:lays-ping 1.4s ease-out}
+  @keyframes lays-ping{from{border-color:var(--acc)}to{border-color:var(--line)}}
+  @media(max-width:760px){#modal .dlg.odds .lays-two{grid-template-columns:1fr}}
+  /* a layout preset's editor (layoutEditor): the cover as the preset has it, beside the template and the parts */
+  #modal .dlg.layed{width:min(1180px,96vw)}
+  #modal .dlg.layed .head .acts .btn{padding:7px 16px;font-size:13px}
+  .ls-body{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start}
+  .ls-main{display:grid;gap:10px;min-width:0}
+  .ls-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  .ls-sizes{display:flex;flex-wrap:wrap;gap:4px}.ls-sizes .btn{padding:4px 9px;font:600 12px var(--mono)}
+  .ls-stage{height:min(58vh,560px);display:grid;place-items:center;background:var(--panel);border:2px solid var(--line);overflow:hidden}
+  .ls-stage canvas{display:block;touch-action:none;background:repeating-conic-gradient(#3a3a46 0 25%,#262630 0 50%) 0 0/16px 16px}
+  .ls-side{display:grid;gap:14px;min-width:0}
+  .ls-side .parts{display:grid;gap:0}.ls-side .parts .chk{margin:3px 0;cursor:default}.ls-side .parts .chk span{cursor:pointer}.ls-side .parts .chk.on span{color:var(--acc);font-weight:600}
+  .ls-picked{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;border-top:1px solid var(--line);padding-top:10px}
+  @media(max-width:900px){.ls-body{grid-template-columns:1fr}}
   #modal .dlg.wide{width:min(880px,94vw)}
   .parts{display:grid;gap:3px}
   .part{display:grid;grid-template-columns:12px 16px auto 1fr;align-items:center;gap:9px;border:2px solid var(--line);background:var(--panel);padding:6px 10px 6px 6px;margin:0;cursor:grab;user-select:none}

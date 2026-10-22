@@ -3,9 +3,11 @@
 //               the ranges of the sliders, outlines and shadows, how the user's layers are placed
 //   FAMILIES    what suits each family of looks (the dark ground, letterings, bends)
 //   RECIPES     what suits each look: its family, what differs, its optional parts
-//   dealCover   a hand, in the order it is dealt: the look and its sliders, its scene, the ground, the words
-//               put back, the title on top, each layer's own choices and look effects
-//   rebalance   a group's chances with one of them set, the others moved alike (the chances window)
+//   dealCover   a hand, in the order it is dealt: the layout (the canvas's, or a layout preset of the user's), the
+//               look and its sliders, its scene, the ground, the words put back, the title on top, each layer's own
+//               choices and look effects
+//   rebalance   a group's chances with one of them set, the others moved alike (the chances window); dropOption,
+//               one of them taken away (a layout preset deleted)
 // What needs the cover drawn stays in app.js: surprise() deals the hands (dealHand: dealCover, then the
 // user's layers placed by dealPlaces, which reads RULES.places) and shows each. The user's own chances
 // (Surprise me's chances window) lie over RULES.odds, their recipes (the same panel, and the Style tab) over RECIPES;
@@ -14,7 +16,7 @@
 import { LOOKS, LOOK_IDS, effectsFor, FX_TYPES } from "./style.js";
 import { EFFECTS, BENDS } from "./textfx.js";
 import { titleLines, lineUnits, luminance } from "./check.js";
-import { ACCENT_SHAPES, LETTERED, newLayer, clipEnd, moveScene } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, newLayer, clipEnd, moveScene, putLayout } from "./layers.js";
 
 /**
  * Every number Surprise me deals by: change one here and the hands follow. (What suits each look is in
@@ -29,13 +31,14 @@ export const RULES = {
   // (left empty: every one alike), how many look effects a layer but the title and subtitle is given, and
   // whether each is the look dealt's or another look's; for every look alike, the title's lettering (its own, or
   // another), its bend (none, or one) and the ground (dark or light) — left empty: what the looks' recipes give
-  // on average (builtInGroup). `chances`: switches, each on by a chance of its own —
+  // on average (builtInGroup); the layout: the canvas's own (`keep`, certain until the user sets the group) or one
+  // of the user's layout presets, by its id (the options come and go with them). `chances`: switches, each on by a chance of its own —
   // the brand row's rail; the plate under the channel name, the subtitle, a text layer; an asset tinted the
   // channel colour; the look's scene objects moved a little off their places; the subtitle lettered like the
   // title; a look's part that is off by default coming in, a checkbox on by default staying on, one off by
   // default coming on (each unless the look's recipe has a chance of its own for it)
   odds: {
-    groups: { look: {}, accent: {}, lookFx: { none: 0.45, one: 0.33, two: 0.22 }, lookFxFrom: { own: 0.6, other: 0.4 }, letters: {}, bend: {}, ground: {} },
+    groups: { look: {}, accent: {}, lookFx: { none: 0.45, one: 0.33, two: 0.22 }, lookFxFrom: { own: 0.6, other: 0.4 }, letters: {}, bend: {}, ground: {}, layout: { keep: 1 } },
     chances: { rail: 0.8, catnamePlate: 0.75, subtitlePlate: 0.3, textPlate: 0.35, assetTint: 0.5, sceneMoved: 0.4, subtitleLikeTitle: 0.5, extra: 0.35, toggleOn: 0.75, toggleOff: 0.3 },
   },
   // its sliders (tuneLook): within `spread` of the range either way of the default, off the very ends by
@@ -179,10 +182,11 @@ export function weighted(weights, R) {
   for (const [k, w] of list) { at -= w; if (at < 0) return k; }
   return list[list.length - 1][0];
 }
-/** The options of each of RULES.odds' groups. */
+/** The options of each of RULES.odds' groups; the layout's are "keep" and the ids of `layouts`, the user's layout presets ([{id}]). */
 export const ODD_OPTIONS = {
   look: () => LOOK_IDS, accent: () => ACCENT_SHAPES, lookFx: () => ["none", "one", "two"], lookFxFrom: () => ["own", "other"],
   letters: () => ["own", ...Object.keys(EFFECTS).filter((k) => k !== "auto")], bend: () => ["none", ...Object.keys(BENDS).filter((k) => k !== "taper")], ground: () => ["dark", "light"],
+  layout: (layouts = []) => ["keep", ...layouts.map((l) => l.id)],
 };
 const unit = (v) => Math.min(1, Math.max(0, v));
 /** Below this a chance is none: what sums of fractions leave over (1e-17) must not deal a look set to 0. */
@@ -220,12 +224,13 @@ function builtInGroup(g) {
  * keeps them: { groups, chances }, any part left out). Every group has each of its options (ODD_OPTIONS), their
  * chances adding up to 1: the user's when they add up to anything (an option of theirs left out, a look added
  * since, is at 0), else the rule's, else what the looks' recipes give (builtInGroup), else each alike; every
- * chance is within 0 and 1. `set`: the groups the user set ({group: true}).
+ * chance is within 0 and 1. `set`: the groups the user set ({group: true}). `layouts`: the user's layout presets
+ * ([{id}]), the layout's options beside "keep" (one made since at 0, one deleted gone with its chance).
  */
-export function oddsOf(mine = null) {
+export function oddsOf(mine = null, layouts = []) {
   const m = mine && typeof mine === "object" ? mine : {}, groups = {}, chances = {}, set = {};
   for (const [g, list] of Object.entries(ODD_OPTIONS)) {
-    const ids = list(), own = asGroup(m.groups && m.groups[g], ids);
+    const ids = list(layouts || []), own = asGroup(m.groups && m.groups[g], ids);
     set[g] = !!own;
     groups[g] = own || asGroup(RULES.odds.groups[g], ids) || asGroup(builtInGroup(g), ids) || asGroup(Object.fromEntries(ids.map((k) => [k, 1])), ids);
   }
@@ -252,6 +257,29 @@ export function rebalance(group, key, v) {
   }
   for (const k of others) if (out[k] <= NONE) out[k] = 0;   // no crumbs: what is set to nothing deals nothing
   return out;
+}
+/**
+ * A group's chances without option `key` (a layout preset deleted): what it had goes to the others as when its
+ * slider is set to 0 (rebalance), alike to those that have a chance. Null when none of them has one: the group is
+ * then to go back to the rule's (for the layout, the canvas's own, certain).
+ */
+export function dropOption(group, key) {
+  const others = Object.keys(group || {}).filter((k) => k !== key);
+  if (!others.some((k) => group[k] > NONE)) return null;
+  const out = rebalance(group, key, 0);
+  delete out[key];
+  return out;
+}
+/**
+ * The layout preset a hand is dealt in, by `group`'s chances ({keep, id: chance}: see oddsOf), of `layouts` (the
+ * user's): null for the canvas's own ("keep"). While none of the presets has a chance nothing is drawn, so a hand
+ * is dealt from the same random numbers as before there were any.
+ */
+export function pickLayout(group, layouts, R) {
+  const some = (layouts || []).filter((l) => group && group[l.id] > NONE);
+  if (!some.length) return null;
+  const k = weighted(Object.fromEntries(Object.entries(group).filter(([, v]) => v > NONE)), R);
+  return some.find((l) => l.id === k) || null;
 }
 /**
  * The look for a hand, by the chances of `odds` ({look: chance}): none of those in `not` (the looks dealt already
@@ -322,16 +350,24 @@ const copyOf = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v
 /**
  * One hand, dealt onto the profile's `style` and the `cover` as they are, in the order below — what is set
  * and how likely is in RULES, FAMILIES and RECIPES. What the cover says is left alone (the title and tag,
- * the channel and its colour, the photos, which layers exist), and so is the layout; the user's own layers
+ * the channel and its colour, the photos, which layers exist), and so is the layout — unless the odds deal one
+ * of the user's layout presets, whose structure the hand then has, exactly, but for a part locked, which stays as
+ * it is (see putLayout in layers.js); the user's own layers
  * are placed afterwards (dealPlaces in app.js, which needs the cover drawn). env: { R, locks (the parts to
- * leave alone: look, theme, lettering, places), odds (the chances, see oddsOf), not (the looks dealt already in
+ * leave alone: look, theme, lettering, places — the layout with the places), odds (the chances, see oddsOf), not (the looks dealt already in
  * this run, which the look dealt is none of while it can be), recipes (the user's own, by look), rgb (the channel colour), design (the layers of the
- * profile's design, by id, where moved words go back to), sizeKey (the size shown), can(fx) (a lettering
- * can be drawn here), canTint(ref) (an asset can be tinted) }. Returns what the cover brings (coverContext).
+ * profile's design, by id, where moved words go back to), layouts (the user's layout presets, as normalizeLayouts
+ * keeps them), sizeKey (the size shown), can(fx) (a lettering can be drawn here), canTint(ref) (an asset can be
+ * tinted) }. Returns what the cover brings (coverContext), and `layout`: the layout dealt ("keep", or a preset's id).
  */
 export function dealCover(st, cover, env) {
-  const { R, locks = {} } = env, O = env.odds || oddsOf(), pick = (a) => a[Math.floor(R() * a.length)], between = (a, b) => a + R() * (b - a), chance = (p) => R() < p;
+  const { R, locks = {} } = env, O = env.odds || oddsOf(null, env.layouts), pick = (a) => a[Math.floor(R() * a.length)], between = (a, b) => a + R() * (b - a), chance = (p) => R() < p;
   const round = (v, step) => Math.round(v / step) * step, within = ([a, b], step = 0.05) => round(between(a, b), step);
+  // 0. the layout: the canvas's as it is, or a layout preset of the user's by its chance (none while where things
+  // stand is to stay) — its template and adjustments, and its parts where it has them, on the cover or left out,
+  // their words running its way, but for a part locked; the rest of the hand is dealt on it as on any other
+  const preset = locks.places ? null : pickLayout(O.groups.layout, env.layouts, R);
+  if (preset) putLayout(st, cover.layers, preset);
   // 1. the look, by its chance — none dealt already in this run while others are left — and a new seed for its random placement
   if (!locks.look) { st.look = pickLook(LOOK_IDS, R, O.groups.look, env.not || []); st.lookSeed = Math.floor(R() * 1000000); }
   // the title's length, the channel colour and the user's own recipe for the look turn its recipe (see recipeOf)
@@ -349,14 +385,16 @@ export function dealCover(st, cover, env) {
   // 4. the ground, dark or light, as the look's recipe has it
   if (!locks.theme) st.theme = chance(recipeOf(st.look, ctx).dark) ? "dark" : "light";
   // 5. words the user moved or resized go back where the rules put them (unless where things stand is to stay):
-  // the layout's — title, subtitle, tag, channel name, brand row — to where the profile's design has them, the
-  // user's own text layers to a new one's size, at no size of their own, to be placed afresh (dealPlaces)
+  // the layout's — title, subtitle, tag, channel name, brand row — to where the layout preset dealt has them, else
+  // where the profile's design has them, the user's own text layers to a new one's size, at no size of their own,
+  // to be placed afresh (dealPlaces)
   if (!locks.places) {
     const fresh = newLayer("text").t.all;
     for (const L of cover.layers) {
       if (L.locked || !L.visible || !LETTERED.includes(L.type)) continue;
+      const back = preset && preset.parts[L.id] && !L.copy ? preset.parts[L.id] : env.design && env.design.get(L.id);
       if (L.type === "text") L.t = { all: { ...L.t.all, s: fresh.s, kx: fresh.kx, ky: fresh.ky }, by: {} };
-      else if (env.design && env.design.has(L.id)) L.t = copyOf(env.design.get(L.id).t);
+      else if (back) L.t = copyOf(back.t);
     }
   }
   // 6. the title over everything else, with what is clipped into it, so nothing dealt lies over it (one clipped
@@ -400,6 +438,6 @@ export function dealCover(st, cover, env) {
       }
     }
   }
-  return ctx;
+  return { ...ctx, layout: preset ? preset.id : "keep" };
 }
 

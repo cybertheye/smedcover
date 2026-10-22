@@ -12,7 +12,7 @@ import { SIZE_PRESETS } from "./presets.js";
 import { platformsFor, ratioOf } from "./platforms.js";
 import { TEMPLATES, LAYOUT_LIMITS } from "./layout.js";
 import { LOOKS, LOOK_IDS, lookParams } from "./style.js";
-import { normalizeLayers, normalizeScene } from "./layers.js";
+import { normalizeLayers, normalizeScene, normalizeT, LAYOUT_PARTS, LAYOUT_RUNS, DEFAULT_OFF } from "./layers.js";
 
 const T = globalThis.__TAURI__;
 /**
@@ -122,6 +122,14 @@ export function sizeCaption(s, lang = "zh") {
   return on.length ? `${on.join(" / ")} · ${ratioOf(s.w, s.h)}` : s.label || ratioText(s.w, s.h);
 }
 
+/** A template's adjustments as kept (see adjustLayout in layout.js): each within LAYOUT_LIMITS, the halves swapped (`flip`) only when true. */
+function normalizeAdjust(raw) {
+  const r = raw && typeof raw === "object" ? raw : {}, a = {};
+  for (const k of Object.keys(LAYOUT_LIMITS)) if (Number.isFinite(r[k])) a[k] = Math.min(LAYOUT_LIMITS[k][1], Math.max(LAYOUT_LIMITS[k][0], r[k]));
+  if (r.flip === true) a.flip = true;
+  return a;
+}
+
 /** Fills in defaults and drops anything malformed, so files from disk (or other people) are safe to use. */
 export function normalizeProfile(raw) {
   const p = raw && typeof raw === "object" ? raw : {};
@@ -139,12 +147,7 @@ export function normalizeProfile(raw) {
     lookSeed: Number.isFinite(st.lookSeed) ? Math.abs(Math.round(st.lookSeed)) % 1000000 : 7 };   // places what a look scatters at random
   // what the user changed about each template: only the settings that differ from the template's own
   style.layoutAdjust = {};
-  for (const tpl of TEMPLATES) {
-    const raw = (st.layoutAdjust && st.layoutAdjust[tpl]) || {}, a = {};
-    for (const k of Object.keys(LAYOUT_LIMITS)) if (Number.isFinite(raw[k])) a[k] = Math.min(LAYOUT_LIMITS[k][1], Math.max(LAYOUT_LIMITS[k][0], raw[k]));
-    if (raw.flip === true) a.flip = true;
-    if (Object.keys(a).length) style.layoutAdjust[tpl] = a;
-  }
+  for (const tpl of TEMPLATES) { const a = normalizeAdjust(st.layoutAdjust && st.layoutAdjust[tpl]); if (Object.keys(a).length) style.layoutAdjust[tpl] = a; }
   // tuned values are kept per look, so switching away and back loses nothing
   for (const id of LOOK_IDS) { const v = lookParams(id, st.lookParams && st.lookParams[id]); if (Object.keys(v).length) style.lookParams[id] = v; }
   // the graphic each look's figure is drawn from in place of the channel graphic (see `art` in style.js), for the looks with one
@@ -207,7 +210,7 @@ export const RECENT_FONTS = 6;
 /** Puts a font at the head of the recently used ones. */
 export const useFont = (recent, family) => [family, ...recent.filter((f) => f !== family)].slice(0, RECENT_FONTS);
 export function normalizeSettings(raw) {
-  const s = raw && typeof raw === "object" ? raw : {};
+  const s = raw && typeof raw === "object" ? raw : {}, layouts = normalizeLayouts(s.layouts);   // the user's layout presets, for every profile (Surprise me deals them by their chances)
   return {
     lang: s.lang === "zh" || s.lang === "en" ? s.lang : "",
     profileId: str(s.profileId),
@@ -226,8 +229,42 @@ export function normalizeSettings(raw) {
     columns: Object.fromEntries(["left", "right", "setup"].map((k) => [k, Math.round(num(s.columns && s.columns[k], 0, 0, 900))])),
     recentFonts: [...new Set((Array.isArray(s.recentFonts) ? s.recentFonts : []).map((f) => str(f).replace(/["\\]/g, "").trim().slice(0, 80)).filter(Boolean))].slice(0, RECENT_FONTS),
     recipes: normalizeRecipes(s.recipes),
-    surprise: normalizeSurprise(s.surprise),
+    layouts,
+    surprise: normalizeSurprise(s.surprise, layouts.map((l) => l.id)),
   };
+}
+/** How many layout presets are kept at most, and how long a name may be. */
+export const LAYOUTS = { most: 24, name: 40 };
+/** A value kept as it is when small: true or false, a number, a short word, or a little plain data (copied). */
+const small = (v) => (typeof v === "boolean" || Number.isFinite(v) ? v : typeof v === "string" ? (v.length <= 40 ? v : undefined)
+  : v && typeof v === "object" && JSON.stringify(v).length <= 400 ? JSON.parse(JSON.stringify(v)) : undefined);
+/**
+ * The user's layout presets, as kept in the settings for every profile (see takeLayout in layers.js): [{ id, name,
+ * template, adjust, parts: { part: { t, shown, vertical?, rules? } } }], LAYOUTS.most at most. An id is kept as it
+ * is (Surprise me's chances name the presets by it: odds.groups.layout), one missing, taken or "keep" (the
+ * option of none) made anew; a name trimmed and cut to length; a template unknown is Stack, its adjustments within
+ * LAYOUT_LIMITS; every part of LAYOUT_PARTS there, its placement within range (per size by size keys only), one
+ * missing where the template puts it and on the cover unless a new design leaves it out (DEFAULT_OFF); which way
+ * its words run kept when small (the lettering's own, see LAYOUT_RUNS).
+ */
+export function normalizeLayouts(raw) {
+  const out = [], ids = new Set();
+  for (const r of Array.isArray(raw) ? raw : []) {
+    if (out.length >= LAYOUTS.most) break;
+    if (!r || typeof r !== "object") continue;
+    let id = typeof r.id === "string" && /^[\w-]{1,40}$/.test(r.id) ? r.id : uid();
+    while (ids.has(id) || id === "keep") id = uid();
+    ids.add(id);
+    const parts = {};
+    for (const type of LAYOUT_PARTS) {
+      const q = r.parts && typeof r.parts === "object" && r.parts[type] && typeof r.parts[type] === "object" ? r.parts[type] : null, t = normalizeT(q && q.t, false);
+      t.by = Object.fromEntries(Object.entries(t.by).filter(([k]) => /^\d{2,5}x\d{2,5}(@[\w-]{1,60})?$/.test(k)).slice(0, 80));
+      parts[type] = { t, shown: q ? q.shown !== false : !DEFAULT_OFF.includes(type) };
+      for (const k of LAYOUT_RUNS) { const v = q ? small(q[k]) : undefined; if (v !== undefined) parts[type][k] = v; }
+    }
+    out.push({ id, name: str(r.name).trim().slice(0, LAYOUTS.name), template: TEMPLATES.includes(r.template) ? r.template : "stack", adjust: normalizeAdjust(r.adjust), parts });
+  }
+  return out;
 }
 /** What Surprise me may be told to leave as it is: the look (and its sliders), the dark or light ground, the letterings, where things stand. */
 export const SURPRISE_LOCKS = ["look", "theme", "lettering", "places"];
@@ -235,14 +272,16 @@ export const SURPRISE_LOCKS = ["look", "theme", "lettering", "places"];
  * What Surprise me keeps, on this computer: the parts it is to leave alone (`locks`, see SURPRISE_LOCKS), and the
  * chances the user set in Surprise me's chances window (`odds`: { groups: {group: {option: chance}}, chances: {name:
  * chance} }, only what they set; chances between 0 and 1, names the app does not know left to oddsOf in
- * deal.js, which passes them over and makes each group add up to 1).
+ * deal.js, which passes them over and makes each group add up to 1). The layout's group is named by the layout
+ * presets' ids beside "keep" (the canvas's own): given the ids there are (`layouts`), a preset's that is gone is let go.
  */
-export function normalizeSurprise(raw) {
+export function normalizeSurprise(raw, layouts = null) {
   const r = raw && typeof raw === "object" ? raw : {}, name = (k) => typeof k === "string" && /^[a-zA-Z]{1,24}$/.test(k), locks = {};
-  const table = (o, n) => Object.fromEntries(Object.entries(o && typeof o === "object" ? o : {}).filter(([k, v]) => name(k) && Number.isFinite(v)).slice(0, n).map(([k, v]) => [k, Math.min(1, Math.max(0, v))]));
+  const preset = (k) => typeof k === "string" && (k === "keep" || (layouts ? layouts.includes(k) : /^[\w-]{1,40}$/.test(k)));
+  const table = (o, n, ok = name) => Object.fromEntries(Object.entries(o && typeof o === "object" ? o : {}).filter(([k, v]) => ok(k) && Number.isFinite(v)).slice(0, n).map(([k, v]) => [k, Math.min(1, Math.max(0, v))]));
   for (const k of SURPRISE_LOCKS) if (r.locks && r.locks[k] === true) locks[k] = true;
   const o = r.odds && typeof r.odds === "object" ? r.odds : {}, groups = {};
-  for (const [g, v] of Object.entries(o.groups && typeof o.groups === "object" ? o.groups : {}).slice(0, 12)) if (name(g) && v && typeof v === "object") groups[g] = table(v, 80);
+  for (const [g, v] of Object.entries(o.groups && typeof o.groups === "object" ? o.groups : {}).slice(0, 12)) if (name(g) && v && typeof v === "object") groups[g] = g === "layout" ? table(v, LAYOUTS.most + 1, preset) : table(v, 80);
   const chances = table(o.chances, 40), odds = {};
   if (Object.keys(groups).length) odds.groups = groups;
   if (Object.keys(chances).length) odds.chances = chances;

@@ -52,7 +52,7 @@ ui/
   js/stack3d.js      the layer panel's 3D view: the stack's projection, fitting, labels and drawing (pure maths but for the drawing)
   js/platforms.js    the platforms covers are made for, as data: the ratios each wants, feed widths, what the apps lay over a cover; the sizes' names (platformsFor)
   js/check.js        the cover standards' rules, pure (the tests hold the layouts to them; meetStandards in layout.js)
-  js/deal.js         Surprise me's rules, all in one place: every number it deals by (RULES), what suits each look (FAMILIES, RECIPES), the chances the user may set over them (oddsOf, rebalance), a hand dealt onto a cover (dealCover), pure
+  js/deal.js         Surprise me's rules, all in one place: every number it deals by (RULES), what suits each look (FAMILIES, RECIPES), the chances the user may set over them (oddsOf, rebalance), the layout preset a hand is dealt in (pickLayout), a hand dealt onto a cover (dealCover), pure
   js/textfx.js       text effects: layered, masked, outlined and letter by letter
   js/ransom.js       the ransom note: each letter in a face, on a paper, at an angle of its own
   js/outlines.js     cache of glyph outlines (fetched from the Rust side)
@@ -120,7 +120,31 @@ Earlier data: there used to be one cover, `session.json`, shared by every channe
 (`channels`), export scale, format, JPEG quality, file name pattern, adjustment scope, and the user's own
 Surprise me chances of each look's optional parts (`recipes`: {look: {params}}, only what was changed, checked by `normalizeRecipes`; see `deal.js`),
 and what Surprise me keeps (`surprise`: the parts to leave alone, `locks`; the chances set in Surprise me's
-chances, `odds`, only what was set; see `normalizeSurprise`).
+chances, `odds`, only what was set; see `normalizeSurprise`), and the user's layout presets (`layouts`, below).
+
+**Layout presets** (`settings.layouts`, for every profile, as the chances are): a cover's structure without its look,
+which Surprise me deals by its chance (see 9.4) and which can be put on the canvas as it is.
+
+```jsonc
+[{ "id": "k3j9x0ab", "name": "Poster", "template": "split", "adjust": { "size": 0.42, "slant": 0.04, "flip": true },
+   "parts": { "title": { "t": { "all": { … }, "by": { "1080x1920": { … } } }, "shown": true, "vertical": true },
+              "subtitle": { "t": { … }, "shown": false }, … } }]   // a part of each of LAYOUT_PARTS
+```
+
+The template and its adjustments (the profile's `style.template` and `style.layoutAdjust` of it), and for each of
+the layout's parts that carry words or the graphic (`LAYOUT_PARTS` in `layers.js`: title, subtitle, tag, channel name,
+brand row, channel graphic) its placement `t` (for every size and per size, the graphic's per channel too), whether the
+cover has it (`shown`: not left out, see `off` in 4) and which way its words run (`vertical` and `rules`, `LAYOUT_RUNS`,
+carried when the layer has them). Fonts, letterings, colours and the look are not in it. `takeLayout(style, layers)`
+makes one from a style and a cover's layers; `putLayout(style, layers, preset)` puts one on them: its template, with its
+adjustments (none: the template's own; the other templates' left as they are), each part where it has it, a part it
+shows that was left out coming in visible, one it leaves out hidden, a way of running it has not taken off; a part locked
+stays as it is (its place, whether it shows, which way its words run), dealt or applied, the template going on all the same.
+`normalizeLayouts()` keeps 24 at most (`LAYOUTS`), their ids as they are (unique, never `keep`: Surprise me's chances
+name them), names trimmed to 40 characters, every part there (one missing where the template puts it, shown unless a
+new design leaves it out), its numbers within range and its per-size keys only size keys, the run values only when
+small. Their chances are `surprise.odds.groups.layout` ({keep, id: chance}); `normalizeSurprise(raw, ids)` keeps them
+only for the presets there are, so a preset deleted takes its chance with it.
 
 Other files: `assets/<id>.json` (My assets: images as data URLs, AI assets as specs; either may carry `folder`, the id of its folder), `asset-folders.json` (the folders of My assets, `[{id, name}]`, checked by `normalizeFolders`; an asset whose folder is gone counts as unfiled), `fonts/<name>.font` (imported
 fonts), `photos/<pid>` (pictures, originals and masks; see 6.3), `photo-library.json` (Bitmaps: `[{pid, name, kind, at}]`, `kind` being `upload`, `ai` or `repaint`, newest first, checked by `normalizeLibrary`), `ai.json` (AI connection settings including the token; never exported with
@@ -1054,14 +1078,40 @@ does not count) cancels it: the dialog's own `m.onDismiss` if it waits on an ans
 a project opens with: as its *Cancel*), else just closing. A `data-sticky` one does not answer: the
 first-run welcome, an export's progress.
 
-*Surprise me* (`surprise()`) deals `RULES.hands.count` hands, six (`dealHand()`), each in a look of its own while a look with a chance is left (those dealt so far in the run go in as `env.not`), shows each in its window as it comes, and puts the first on the canvas; nothing is measured or scored. Hands go back onto the objects there are (the style, each layer by id), a hand that throws is left out, and if none can be dealt the cover is put back. Each hand is dealt by `dealCover(style, cover, env)` in `deal.js`, which holds all of Surprise me's rules: `RULES`, every number it deals by (how many hands and how fast they show; `RULES.odds`, the chances the user may set; the sliders, the scene objects, what the cover brings, the letterings; the lettered layers' outline and shadow; the look effects; the places of the user's layers), so a number changed there changes the hands; `FAMILIES` and `RECIPES`, what suits each look; and the order a hand is dealt in — the look and its seed, its sliders, its scene objects, the ground, the words put back (unless where things stand is locked), the title on top, each layer's own choices and letterings, look effects. `app.js` keeps only what needs the cover drawn: `surprise()`, `dealHand()` (`dealCover()`, then the user's layers placed by `dealPlaces()`, which reads `RULES.places`), the window, and the panels the chances are set in.
+*Surprise me* (`surprise()`) deals `RULES.hands.count` hands, six (`dealHand()`), each in a look of its own while a look with a chance is left (those dealt so far in the run go in as `env.not`), shows each in its window as it comes, and puts the first on the canvas; nothing is measured or scored. Hands go back onto the objects there are (the style, each layer by id), a hand that throws is left out, and if none can be dealt the cover is put back. Each hand is dealt by `dealCover(style, cover, env)` in `deal.js`, which holds all of Surprise me's rules: `RULES`, every number it deals by (how many hands and how fast they show; `RULES.odds`, the chances the user may set; the sliders, the scene objects, what the cover brings, the letterings; the lettered layers' outline and shadow; the look effects; the places of the user's layers), so a number changed there changes the hands; `FAMILIES` and `RECIPES`, what suits each look; and the order a hand is dealt in — the layout (the canvas's, or a layout preset of the user's), the look and its seed, its sliders, its scene objects, the ground, the words put back (unless where things stand is locked), the title on top, each layer's own choices and letterings, look effects. `app.js` keeps only what needs the cover drawn: `surprise()`, `dealHand()` (`dealCover()`, then the user's layers placed by `dealPlaces()`, which reads `RULES.places`), the window, and the panels the chances are set in.
 
 The chances, `RULES.odds`, are of two kinds. `groups`, of which one option is dealt, their chances adding up to 1 (`ODD_OPTIONS`): the look (every look alike unless set), the colour block's shape (likewise), how many look effects a layer but the title and subtitle is given (none, one, two), and whether each is the look dealt's or another look's; and, for every look alike, the title's lettering (`own`, the look's own, or another), its bend (`none`, or one) and the ground (dark, light) — left empty in `RULES.odds`, they are what the looks' recipes give on average over the looks (`builtInGroup()`). `chances`, switches each on by a chance of its own: the brand row's rail; the plates under the channel name, the subtitle, a text layer; an asset tinted; the scene objects moved; the subtitle lettered like the title; and what a look's optional parts default to (`extra`, `toggleOn`, `toggleOff`, for a look whose recipe sets none: `partChance()`). What the user sets in Surprise me's chances (`oddsDialog()` in `app.js`, a window of its own over the page, opened from Surprise me's window and the Style tab) is kept in `settings.surprise.odds` ({groups, chances}, only what was set); `oddsOf()` lays it over `RULES.odds` — a group of the user's made to add up to 1, an option it leaves out (a look added since) at 0, one adding up to nothing left to the rule's; `set` says which groups are the user's — and the hand is dealt by that (`env.odds`). Setting one option of a group moves the others alike the other way: what it gains is taken from them alike, none below 0, what it gives up goes to those not at 0, and nothing is left below 1e-9 (`rebalance()`; `oddsGroup()` shows a group as sliders and moves them while one is dragged). `pickLook()` draws the look by its chance: none of `env.not` while another with a chance is left, none at 0.
+
+The layout is dealt first, by the group `layout`: `keep`, the canvas's own, and each layout preset by its id
+(`ODD_OPTIONS.layout(layouts)`: the options come and go with the presets, `oddsOf(mine, layouts)` putting one made since
+at 0 and letting go of one deleted; `RULES.odds.groups.layout` is `{keep: 1}`, so until the user sets the group a hand is
+dealt in the canvas's layout, as before there were presets). `pickLayout()` draws one, and draws nothing while `keep` is
+certain, so such a hand is dealt from the same random numbers as before. Dealt a preset (`env.layouts`, the presets),
+`dealCover()` puts it on before anything else (`putLayout()`: the template, its adjustments, the parts' places, which are
+on the cover, which way their words run; a part locked stays as it is, as it does when the words go back), and the
+words moved go back to the preset's places rather than the design's; the rest of the hand — the look, the ground, the colour block's shape, the letterings, the user's layers' places
+(`dealPlaces()`, on the template dealt) — is dealt on it as ever. With the places locked (`locks.places`) the canvas's
+layout stays, whatever the chances. `dealCover()` returns which was dealt (`layout`: "keep" or the id), which the hand
+keeps (its caption in the window names the preset); a hand is the whole style and the layers, so `putHand()`, and
+`dealTake()` through it, put its template, adjustments and parts back with it.
+
+The presets are made and seen at the top of the chances window: the group's sliders beside them (`layoutList()`), each
+renamed where it is, edited (`layoutEditor()`), put on the canvas as one step of undo (`applyLayout()`, `putLayout()`
+again: the parts locked stay) or deleted once asked (`deleteLayout()`: its chance goes to the others as when its slider is set to 0, `dropOption()`; none of them
+having any, the group goes and `keep` is certain again); *New* keeps the canvas's (`addLayout()`). *Save as layout* in the
+toolbar above the canvas (`saveLayoutDialog()`) asks a name and does the same; the word that says so (`toast()` with a
+button) opens the chances at the presets (`oddsDialog(true, "layouts")`). The editor is a view of the chances window: the
+profile's style and this channel's layers copied, the preset put on the copies and drawn by `drawCover()` at one of the
+profile's sizes, picked above it, with the selected part's frame and handles. A part is moved, resized, stretched or
+turned as on the canvas (`handles()`, `hitAt()`, `adjust()`; for every size or the one shown; a drag keeps the rest in
+`o.live`); the template's controls are the Style tab's (`templateControls()`, which `layoutBox()` uses too), and a box per
+part sets `off`. *Save* takes the preset back off the copies (`takeLayout()`); nothing touches the cover until a preset is
+put on it.
 
 By the recipes, the looks fall into three families (`FAMILIES`: pop, print, light), each with the chance of the dark ground, of the title keeping the look's own lettering (`auto`), the other letterings that suit it by weight, and the chance and ways of a bend; `RECIPES` gives each look its family and what differs, the chance each part that is off by default comes on, and `tune()` for sliders that go together (rain brings mist in the dark deco). `tuneLook()` sets each slider within 0.3 of the range about its default, likeliest near it (off the very ends unless its default is there), and lets in at most `EXTRAS` (2) of the parts off by default; `letterFor()` deals a layer's lettering (the subtitle like the title by the odds' `subtitleLikeTitle`, never bent; an outline lettering only where outlines can be read; not the lettering named after the look, which is its own already). The families and the looks' own letterings, bends and dark ground are no longer dealt by look: `recipeOf()` takes the dark ground, the lettering (`own`, then `fx` by weight) and the bend (`bend`, then `bends`) from the odds' groups, the same for every look, and keeps of the look's recipe its optional parts and `tune()`. The user sets a look's optional parts, each on its own, in the Style tab (`recipeBox()`) and in Surprise me's chances (`lookParts()`, the same in both); what they change is kept in `settings.recipes[look].params` and `baseRecipe()` lays it over the table's. While the user has not set a group (`odds.set`), the cover turns it (`coverContext()`, passed to `recipeOf()`): a long title — a line wider than 8 characters, or three lines — is bent at 0.3 of the chance and given a sticker's rim or depth half as often, a short one bent half as often again (0.5 at most); a channel colour near black (luminance under 0.05) makes the dark ground 0.6 as likely, a very bright one (over 0.6: near white, a light yellow) the dark ground likelier — none of this for a group the user set, which is dealt exactly as set. `dealPlaces()` takes, of a dozen places allowed, the one that covers the least of the title and the cut-out subjects (`overlap()`), and makes a layer that would still cover more than a quarter of one 0.85 as large and places it again, four times at most; a layer does not keep clear of the subjects it carries (its own, a cut-out itself, and its linked cut-outs, whose boxes go where it goes; a cut-out lying exactly over it is put back over it at its new size and angle, `alignedT()`), those carrying any are placed first, and one clipped into a layer below keeps clear of nothing. Each hand deals only how the cover is drawn: the look and its sliders, dark or light
 ground, the colour block's shape, text effects, and the look effects of the user's layers
 (mostly from the drawn look, now and then from another); the template, its proportions and where the
-layout layers stand are left alone, but for the title, which goes to the top of the layers with whatever
+layout layers stand are left alone (unless a layout preset is dealt, above), but for the title, which goes to the top of the layers with whatever
 is clipped into it (unless it is clipped onto another), below only the subjects cut out of photos that stood over it. `dealPlaces()` gives the user's layers a new place, angle and size, a text layer above `wordsFoot()` (layout.js: the badges' line on a landscape cover, else the bottom 14%, `WORDS_FOOT` in platforms.js, which `meetStandards()` keeps the tag and the channel name above too):
 each size is drawn small once to learn every layer's box, then for the new angle and size the range the
 centre may take at each size (less a hair for outlines and shadows) is found, and a place drawn within
@@ -1071,7 +1121,7 @@ moved or resized go back where the rules put them: the layout's lettered layers 
 placement in the profile's design (`channelCover(null, …)`), the user's text layers to a new one's size with
 no size of their own. While hands are dealt, a step waiting to be recorded (`recordHistory()`) waits too. `settings.surprise.locks`
 (`SURPRISE_LOCKS` in `store.js`) leaves the look and its sliders, the ground, the letterings or every place
-alone. The hands show in Surprise me's window as they come (`dealOpen()`, `dealShow()`: each drawn at
+(and the layout with them) alone. The hands show in Surprise me's window as they come (`dealOpen()`, `dealShow()`: each drawn at
 the size shown, with its look; `RULES.hands.pace`, 90 ms, the least between two, so they can be seen arriving);
 the first, on the canvas, is marked (`dealKept()`), and `dealTake()` puts another there on the same step of undo
 while nothing has followed (an edit made since closes the window). The window sits over the left column, so the canvas stays in
@@ -1237,4 +1287,5 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | add a kind of part to solids | validation and `pieces()` in `solid.js`, `solidPrompt()` and its examples in `ai.js` |
 | add a look | an entry in `LOOKS` in `style.js`, starting with a hook or two |
 | change how Surprise me deals | `RULES` (every number), `FAMILIES` and `RECIPES` (what suits each look) in `deal.js` |
+| change what a layout preset holds | `LAYOUT_PARTS`, `LAYOUT_RUNS`, `takeLayout()` and `putLayout()` in `layers.js`, `normalizeLayouts()` in `store.js` |
 | add an interface string | `i18n.js`, in both languages; a test checks that both are present |

@@ -9,13 +9,13 @@ import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont } from "./store.js";
 import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
-import { baseRecipe, RULES, dealCover, oddsOf, rebalance, partChance, ODD_OPTIONS } from "./deal.js";
+import { baseRecipe, RULES, dealCover, oddsOf, rebalance, dropOption, partChance, ODD_OPTIONS } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf, LAYOUT_PARTS, takeLayout, putLayout } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
-  normalizeRecipes, SURPRISE_LOCKS,
+  normalizeRecipes, SURPRISE_LOCKS, normalizeLayouts, LAYOUTS,
 } from "./store.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
@@ -88,11 +88,13 @@ function layerName(L) {
 }
 
 let toastTimer;
-function toast(msg, sticky = false) {
+/** A word at the foot of the window for a moment (`sticky`: until the next one); `act` ({label, run}): a button on it that takes it further. */
+function toast(msg, sticky = false, act = null) {
   const n = $("toast");
-  n.textContent = msg; n.classList.add("on");
+  n.replaceChildren(msg, ...(act ? [el("button", { onclick: () => { n.classList.remove("on"); act.run(); } }, act.label)] : []));
+  n.classList.toggle("act", !!act); n.classList.add("on");
   clearTimeout(toastTimer);
-  if (!sticky) toastTimer = setTimeout(() => n.classList.remove("on"), 3400);
+  if (!sticky) toastTimer = setTimeout(() => n.classList.remove("on"), act ? 6000 : 3400);
 }
 const fail = (e) => toast(t("msg.failed", e && e.message ? e.message : String(e)));
 
@@ -264,6 +266,8 @@ let LIVE = null;
  * (see holdLive).
  */
 const DRAFT = { until: 0 };
+/** A layout preset's editor while it is open (layoutEditor): `redraw` draws its canvas again (when outlines or fonts arrive). */
+const LAYED = { redraw: null };
 const drafting = () => performance.now() < DRAFT.until;
 function draftTouch(opts) { DRAFT.until = performance.now() + 250; later("undraft", 270, queueDraw); touch(opts); }
 const goLive = (ids) => {
@@ -330,6 +334,7 @@ function flushDraw() {
   drawQueued = false; ensureFonts(S.cover.layers); drawMain(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs);
   if (S.letterWin) later("letters", 200, lettersShow);   // the ransom note's letters as now drawn (words typed, colours changed)
   if (S.weaveWin) later("weave", 200, weaveShow);   // the woven letters as now typed
+  if (LAYED.redraw) later("layed", 80, LAYED.redraw);   // a layout preset's editor, with what arrived since (outlines, fonts)
 }
 /** Redraws at most once per frame, however many input events arrive. `stale` false: only what is selected changed. */
 function queueDraw(stale = true) {
@@ -357,6 +362,7 @@ function syncToolbar() {
   const scope = (v) => el("button", { class: "btn" + (S.settings.scope === v ? " on" : ""), onclick: () => { S.settings.scope = v; persistSettings(); syncToolbar(); renderSide(); } }, t("scope." + v));
   const size = selSize();   // what it is called over its pixels, in two lines: names after the platforms can be long
   $("toolbar").replaceChildren(...[el("span", { class: "name", title: sizeLabel(size) }, el("b", {}, caption(size)), el("small", {}, `${size.w}×${size.h}`)),
+    S.mode === "edit" && el("button", { class: "btn", title: t("layouts.saveTip"), onclick: saveLayoutDialog }, t("layouts.save")),   // the canvas's layout, as a preset Surprise me may deal
     S.mode === "edit" && el("div", { class: "grp" }, el("span", {}, t("props.scope")), el("div", { class: "seg" }, scope("all"), scope("size"))),
     S.mode === "edit" && el("span", { class: "help", title: t("cover.how"), onclick: (e) => showTip(e.currentTarget, t("cover.how")) }, el("span", { class: "info" }, "ⓘ"), t("cover.howShort"))].filter(Boolean));
 }
@@ -483,9 +489,10 @@ function layerAt(e) {
   const hit = mine && (!top || top.id === mine.id || area(top) >= area(mine)) ? mine : top;
   return hit ? layer(hit.id) : layer("bg");
 }
+/** The pointer over a selected layer's handles (see handles in render.js): on the canvas, and in a layout preset's editor. */
+const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize", nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize" };
 {
   const cv = $("cv");
-  const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize", nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize" };
   /** The pointer in the selected layer's own rotated frame, plus the handle under it (if any). */
   function grip(e) {
     const L = layer(), hit = cv._hits && cv._hits.find((h) => h.id === S.layerId);
@@ -1932,28 +1939,39 @@ function removeAsset(id) {
   touch({ panel: true, side: true });
 }
 
-/** The sliders that adjust the current template: how much the colour panel takes, how its edge leans, the title's box, and which half goes first. */
-function layoutBox() {
-  const st = S.profile.style, tpl = st.template, adj = st.layoutAdjust[tpl] || {}, cv = flatCanvas();
-  const now = cv._layout && cv._virtual ? layoutValues(cv._layout, cv._virtual[0], cv._virtual[1]) : { size: 0.3, slant: 0 };
-  const set = (k, v) => {
+/**
+ * The template and its adjustments on style `st` — the profile's in the Style tab, a layout preset's in its editor: the
+ * template, how much the colour panel takes, how its edge leans, the title's box, which half goes first, and the way
+ * back to the template's own. `cv`: the canvas last drawn in that style, whose layout the block's sliders start from.
+ * `changed(again)` after each change: `again`, the controls are to be built anew (another template's, the swap
+ * named the other way); else a slider is on its way.
+ */
+function templateControls(st, cv, changed) {
+  const tpl = st.template, adj = (st.layoutAdjust = st.layoutAdjust || {})[tpl] || {};
+  const now = cv && cv._layout && cv._virtual ? layoutValues(cv._layout, cv._virtual[0], cv._virtual[1]) : { size: 0.3, slant: 0 };
+  const set = (k, v, again = false) => {
     const a = { ...(st.layoutAdjust[tpl] || {}) };
     // the block's height and lean go together: one set alone would put the other back to the template's,
     // undoing what the standards made of it (see meetStandards), so the first takes the other as it is now
     if ((k === "size" || k === "slant") && a.size == null && a.slant == null) Object.assign(a, { size: now.size, slant: now.slant });
-    st.layoutAdjust[tpl] = { ...a, [k]: v }; draftTouch({ profile: true });
+    st.layoutAdjust[tpl] = { ...a, [k]: v }; changed(again);
   };
-  const split = tpl === "split", changed = Object.keys(adj).length > 0;
-  // the template and its adjustments, one box (as the look and the default design have)
-  return el("div", { class: "box" }, cap("style.template"),
-    select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), st.template, (v) => { st.template = v; touch({ profile: true }); later("laybox", 60, renderPanel); }),   // the adjustments' sliders follow the template chosen
+  const split = tpl === "split", has = Object.keys(adj).length > 0;
+  return [
+    select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), st.template, (v) => { st.template = v; changed(true); }),   // the adjustments' sliders follow the template chosen
     el("div", { style: "margin-top:14px" }, cap("style.layout")),
     slider2(t(split ? "style.laySide" : "style.layBand"), LAYOUT_LIMITS.size[0], LAYOUT_LIMITS.size[1], 0.01, adj.size ?? now.size, (v) => set("size", v)),
     slider2(t("style.laySlant"), LAYOUT_LIMITS.slant[0], LAYOUT_LIMITS.slant[1], 0.005, adj.slant ?? now.slant, (v) => set("slant", v)),
     slider2(t("style.layTitleW"), LAYOUT_LIMITS.tw[0], LAYOUT_LIMITS.tw[1], 0.01, adj.tw ?? 1, (v) => set("tw", v)),
     slider2(t("style.layTitleH"), LAYOUT_LIMITS.th[0], LAYOUT_LIMITS.th[1], 0.01, adj.th ?? 1, (v) => set("th", v)),
-    el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: !!adj.flip, onchange: (e) => { set("flip", e.target.checked); renderPanel(); } }), el("span", {}, t(split ? "style.layFlipSplit" : "style.layFlipStack"))),
-    el("button", { class: "btn wide", style: "margin-top:10px", disabled: !changed, onclick: () => { delete st.layoutAdjust[tpl]; touch({ profile: true, panel: true }); } }, t("style.layReset")),
+    el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: !!adj.flip, onchange: (e) => set("flip", e.target.checked, true) }), el("span", {}, t(split ? "style.layFlipSplit" : "style.layFlipStack"))),
+    el("button", { class: "btn wide", style: "margin-top:10px", disabled: !has, onclick: () => { delete st.layoutAdjust[tpl]; changed(true); } }, t("style.layReset")),
+  ];
+}
+/** The Style tab's template and its adjustments, one box (as the look and the default design have): every cover of the profile follows. */
+function layoutBox() {
+  return el("div", { class: "box" }, cap("style.template"),
+    templateControls(S.profile.style, flatCanvas(), (again) => { if (!again) return draftTouch({ profile: true }); touch({ profile: true }); later("laybox", 60, renderPanel); }),
     el("div", { class: "hint" }, t("style.layHint")));
 }
 /**
@@ -1978,9 +1996,9 @@ const chancePct = (v) => `${(v * 100).toFixed(v > 0 && v < 0.1 ? 1 : 0)}%`;   //
  * A group of Surprise me's chances of which one option is dealt, adding up to 100%: a slider for each option;
  * moving one moves the others alike the other way (rebalance in deal.js) while it is dragged. `group`:
  * {option: chance}; `names`: [[option, label]]; `save(group)` keeps it as it now is; `reset()`, when given,
- * puts back the rule's.
+ * puts back the rule's. `bare`: not boxed (inside a box of its own already).
  */
-function oddsGroup(title, names, group, save, { hint = "", reset = null } = {}) {
+function oddsGroup(title, names, group, save, { hint = "", reset = null, bare = false } = {}) {
   let now = { ...group };
   const rows = new Map(), show = () => { for (const [k, { input, out }] of rows) { input.value = String(now[k] * 100); out.textContent = chancePct(now[k]); } };
   const row = ([k, label]) => {
@@ -1990,7 +2008,7 @@ function oddsGroup(title, names, group, save, { hint = "", reset = null } = {}) 
     return el("div", { class: "sl", style: "grid-template-columns:112px 1fr 48px" }, el("span", { title: label }, label), input, out);
   };
   const even = () => { now = Object.fromEntries(names.map(([k]) => [k, 1 / names.length])); show(); save(now); };
-  return el("div", { class: "box" }, el("div", { class: "cap" }, title), hint && el("div", { class: "hint", style: "margin:0 0 6px" }, hint), names.map(row),
+  return el("div", { class: bare ? "" : "box" }, el("div", { class: "cap" }, title), hint && el("div", { class: "hint", style: "margin:0 0 6px" }, hint), names.map(row),
     el("div", { class: "acts", style: "display:flex;gap:6px;margin-top:8px" }, el("button", { class: "btn", onclick: even }, t("odds.even")), reset && el("button", { class: "btn", onclick: reset }, t("odds.default"))));
 }
 /** A switch of Surprise me's, on by a chance of its own: a slider from 0 to 100%. `done()`, when given, once it is let go of. */
@@ -2027,13 +2045,16 @@ const ODDS_UI = { look: null };   // the look whose parts the chances panel show
 /**
  * Surprise me's chances, in a window of their own (from Surprise me's window, and the Style tab): every chance it
  * deals by (RULES.odds and the looks' recipes, deal.js), the user's over them, kept in the settings for every
- * profile. The groups of which one is dealt, each adding up to 100% — the look, the colour block's shape, the
- * title's lettering, its bend, the ground (these three for every look alike), how many look effects, whose —;
- * the switches, each with a chance of its own; and the optional parts of the look picked.
+ * profile. First the layout presets: which layout a hand is dealt in (the canvas's, or one of the user's
+ * presets, adding up to 100%) and the presets themselves (layoutList). The groups of which one is dealt, each adding
+ * up to 100% — the look, the colour block's shape, the title's lettering, its bend, the ground (these three for
+ * every look alike), how many look effects, whose —; the switches, each with a chance of its own; and the optional
+ * parts of the look picked. `at`: "layouts", opened at the layout presets.
  */
-function oddsDialog(fresh = true) {
+function oddsDialog(fresh = true, at = "") {
   if (fresh) ODDS_UI.look = null;   // opened anew: the parts of the profile's look
-  const m = $("modal"), sv = S.settings.surprise, odds = oddsOf(sv.odds), lang = getLang(), was = m.querySelector(".dlg.odds"), y = was ? was.scrollTop : 0;
+  LAYED.redraw = null;   // back from a layout preset's editor, if it was open
+  const m = $("modal"), sv = S.settings.surprise, layouts = S.settings.layouts, odds = oddsOf(sv.odds, layouts), lang = getLang(), was = m.querySelector(".dlg.odds"), y = was ? was.scrollTop : 0;
   const again = () => oddsDialog(false);
   const done = () => { closeModal(); renderPanel(); };   // the Style tab's parts show what was set here
   const setGroup = (g, v) => { sv.odds = { ...sv.odds, groups: { ...(sv.odds.groups || {}), [g]: v } }; persistSettings(); };
@@ -2044,6 +2065,11 @@ function oddsDialog(fresh = true) {
   const dlg = el("div", { class: "dlg odds" },
     el("div", { class: "head" }, el("h2", {}, t("odds.title")), el("button", { class: "btn", onclick: done }, t("odds.done"))),
     el("div", { class: "hint", style: "margin:0" }, t("odds.hint")),
+    el("div", { class: "box lays", id: "odds-layouts" }, el("div", { class: "cap" }, t("odds.layouts")),
+      el("div", { class: "hint", style: "margin:0 0 10px" }, t("odds.layoutsHint")),
+      el("div", { class: "lays-two" },
+        oddsGroup(t("odds.layout"), [["keep", t("odds.layout.keep")], ...layouts.map((p, i) => [p.id, layoutName(p, i)])], odds.groups.layout, (v) => setGroup("layout", v), { hint: t("odds.layoutHint"), reset: () => dropGroup("layout"), bare: true }),
+        layoutList(again))),
     el("div", { class: "cols" },
       el("div", {},
         group("look", LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), t("odds.lookHint")),
@@ -2063,6 +2089,209 @@ function oddsDialog(fresh = true) {
   m.replaceChildren(dlg);
   m.hidden = false; m.onDismiss = done;
   dlg.scrollTop = y;
+  if (at === "layouts") {   // the presets' box just under the window's head, lit for a moment
+    const box = $("odds-layouts");
+    dlg.scrollTop += box.getBoundingClientRect().top - dlg.querySelector(".head").getBoundingClientRect().bottom - 10;
+    box.classList.add("ping");
+  }
+}
+// ---------- layout presets: the canvas's structure kept, for Surprise me to deal by its chance (see takeLayout in layers.js)
+/** What a layout preset is called in the interface: its name, else "Layout n" by its place in the list. */
+const layoutName = (p, i) => p.name || t("layouts.defaultName", i + 1);
+/** A name for the next layout preset: "Layout n", the first n from the count on that no preset has. */
+function nextLayoutName() {
+  let n = S.settings.layouts.length + 1;
+  while (S.settings.layouts.some((p) => p.name === t("layouts.defaultName", n))) n++;
+  return t("layouts.defaultName", n);
+}
+/** A new layout preset, `name`, from the canvas as it is: the template and its adjustments, the layout's parts where they stand at every size (takeLayout). Kept for every profile; returns it. */
+function addLayout(name) {
+  let id;
+  do id = uid(); while (id === "keep" || S.settings.layouts.some((p) => p.id === id));
+  const p = normalizeLayouts([{ ...takeLayout(S.profile.style, S.cover.layers), id, name }])[0];
+  S.settings.layouts = [...S.settings.layouts, p]; persistSettings();
+  return p;
+}
+/**
+ * Above the canvas, Save as layout: asks for a name ("Layout n" to begin with), then keeps the canvas's layout as a new
+ * preset (addLayout); the word that says so leads on to its chances.
+ */
+function saveLayoutDialog() {
+  if (SURPRISE.busy) return;
+  if (S.settings.layouts.length >= LAYOUTS.most) return toast(t("layouts.full", LAYOUTS.most));
+  const m = $("modal"), input = el("input", { type: "text", value: nextLayoutName(), maxLength: LAYOUTS.name, spellcheck: false, onkeydown: (e) => { if (e.key === "Enter") go(); } });
+  const go = () => {
+    const p = addLayout(input.value.trim() || nextLayoutName());
+    closeModal();
+    toast(t("layouts.saved", p.name), false, { label: t("layouts.savedGo"), run: () => oddsDialog(true, "layouts") });
+  };
+  m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("layouts.saveTitle")),
+    el("div", { class: "hint", style: "margin:0" }, t("layouts.saveBody")),
+    el("div", {}, cap("layouts.name"), input),
+    el("button", { class: "btn solid wide", onclick: go }, t("layouts.saveGo")),
+    el("button", { class: "btn wide", onclick: closeModal }, t("exp.cancel"))));
+  m.hidden = false;
+  input.focus(); input.select();
+}
+/** Puts layout preset `p` (the i-th) on the canvas: the profile's template and its adjustments, this cover's layout parts but those locked (putLayout); one step of undo. */
+function applyLayout(p, i) {
+  closeModal();
+  clearTimeout(timers.hist); commitHistory();
+  putLayout(S.profile.style, S.cover.layers, p);
+  S.picked = [];
+  if (layer() && layer().off) S.layerId = "bg";   // the part selected is left out now
+  touch({ profile: true, cover: true, panel: true, side: true, strip: true });
+  commitHistory();   // its own step (and the hands of a deal are past taking)
+  toast(t("layouts.applied", layoutName(p, i)));
+}
+/** Deletes layout preset `p` (the i-th), once asked: its chance goes to the others as when set to 0 (dropOption), or, when none has any, the canvas's own is certain again. */
+function deleteLayout(p, i, again) {
+  if (!confirm(t("layouts.deleteSure", layoutName(p, i)))) return;
+  const sv = S.settings.surprise, groups = { ...(sv.odds.groups || {}) };
+  if (groups.layout) { const g = dropOption(oddsOf(sv.odds, S.settings.layouts).groups.layout, p.id); if (g) groups.layout = g; else delete groups.layout; }
+  sv.odds = { ...sv.odds, groups };
+  S.settings.layouts = S.settings.layouts.filter((x) => x.id !== p.id);
+  persistSettings(); again();
+}
+/** The layout presets in Surprise me's chances: each renamed where it is, edited (layoutEditor), put on the canvas or deleted; a new one from the canvas. `again()` shows the window anew. */
+function layoutList(again) {
+  const list = S.settings.layouts;
+  const row = (p, i) => el("div", { class: "lay" },
+    el("input", { type: "text", value: p.name, placeholder: layoutName(p, i), maxLength: LAYOUTS.name, spellcheck: false, title: t("layouts.renameTip"),
+      onkeydown: (e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") { e.stopPropagation(); e.target.value = p.name; e.target.blur(); } },
+      onchange: (e) => { p.name = e.target.value.trim().slice(0, LAYOUTS.name); persistSettings(); again(); } }),
+    el("button", { class: "btn", onclick: () => layoutEditor(p, i) }, t("layouts.edit")),
+    el("button", { class: "btn", title: t("layouts.applyTip"), onclick: () => applyLayout(p, i) }, t("layouts.apply")),
+    el("button", { class: "btn", onclick: () => deleteLayout(p, i, again) }, t("layouts.delete")));
+  return el("div", {}, el("div", { class: "cap" }, t("layouts.list")),
+    list.length ? el("div", { class: "lays-list" }, list.map(row)) : el("div", { class: "hint", style: "margin:0 0 8px" }, t("layouts.none")),
+    el("button", { class: "btn wide", style: "margin-top:8px", disabled: list.length >= LAYOUTS.most, title: t("layouts.newTip"), onclick: () => { addLayout(nextLayoutName()); again(); } }, t("layouts.new")));
+}
+/**
+ * A layout preset's editor, a view of Surprise me's chances window: the cover of the channel on the canvas, drawn by
+ * the cover's own painter with the preset put on it — on copies of the style and the layers, so nothing on the canvas
+ * changes until the preset is put there — at one of the profile's sizes, picked above it. A part (the title, the
+ * subtitle, the tag, the channel name, the brand row, the channel graphic) is dragged to move it, by a corner to
+ * resize it (a side stretches it, the knob turns it), or the wheel resizes it (with Option, turns it), for every size
+ * or the one shown; beside it, the preset's name, the template and its adjustments (as in the Style tab), and which
+ * parts the cover has. Save keeps it; Cancel, Escape or a click beside the window leave it as it was (asked first
+ * when something was changed). Both go back to the chances.
+ */
+function layoutEditor(p, i) {
+  const m = $("modal"), st = copyOf(S.profile.style), layers = copyOf(S.cover.layers);
+  for (const l of layers) delete l.locked;   // a lock is the cover's, not the preset's: here every part is the preset's, and moves
+  putLayout(st, layers, p);
+  const part = (id) => layers.find((l) => l.id === id);
+  const E = { sel: LAYOUT_PARTS.find((id) => part(id) && part(id).visible) || "title", key: S.sel, scope: "all", live: null, dirty: false };
+  const size = () => S.profile.sizes.find((z) => sizeKey(z) === E.key) || S.profile.sizes[0];
+  const geo = () => { const z = size(), [vw, vh] = virtualSize(z.w, z.h); return { vw, vh, key: sizeKey(z), catId: cat().id }; };
+  const cv = el("canvas"), stage = el("div", { class: "ls-stage" }, cv), side = el("div", { class: "ls-side" }), top = el("div", { class: "ls-top" });
+  const name = el("input", { type: "text", value: p.name, placeholder: layoutName(p, i), maxLength: LAYOUTS.name, spellcheck: false, oninput: () => (E.dirty = true) });
+  // the cover as the preset has it, fitted to the room there is, at the screen's pixels
+  const draw = () => {
+    if (!cv.isConnected) return;
+    const z = size(), [vw, vh] = virtualSize(z.w, z.h), room = stage.getBoundingClientRect();
+    const k = Math.max(0.05, Math.min((room.width - 16) / vw, (room.height - 16) / vh));
+    cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
+    drawCover(cv, { profile: { ...S.profile, style: st }, catIndex: catIndex(), size: z, pixelW: Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), cover: { ...S.cover, layers }, photos: S.photos, select: E.sel, live: E.live });
+    if (!E.drawn) { E.drawn = true; build(); }   // the block's sliders start from the layout as now drawn
+  };
+  let queued = false;
+  const redraw = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; draw(); }); };
+  // the pointer in the canvas's virtual units; the selected part's handle under it; the part under it (the selected
+  // one keeps the grab under anything at least as big, as on the canvas)
+  const at = (e) => { const b = cv.getBoundingClientRect(), k = cv._virtual[0] / b.width; return { x: (e.clientX - b.left) * k, y: (e.clientY - b.top) * k, k }; };
+  const ok = (h) => LAYOUT_PARTS.includes(h.id) && !!part(h.id) && part(h.id).visible;
+  const grip = (e) => {
+    const hit = cv._hits && cv._hits.find((h) => h.id === E.sel && ok(h));
+    if (!hit || !showsFrame(hit)) return null;
+    const q = at(e), a = (-hit.r * Math.PI) / 180, dx = q.x - hit.cx, dy = q.y - hit.cy, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+    const near = handles(hit, q.k).map((h) => ({ id: h.id, d: Math.hypot(lx - h.lx, ly - h.ly) })).filter((h) => h.d <= 11 * q.k).sort((a, b) => a.d - b.d)[0];
+    return { hit, q, lx, ly, handle: near ? near.id : null };
+  };
+  const partAt = (e) => {
+    if (!cv._hits) return null;
+    const q = at(e), top = hitAt(cv._hits, q.x, q.y, ok), sel = cv._hits.find((h) => h.id === E.sel && ok(h)), mine = sel && hitAt([sel], q.x, q.y), area = (h) => h.hw * h.hh;
+    const hit = mine && (!top || top.id === mine.id || area(top) >= area(mine)) ? mine : top;
+    return hit ? hit.id : null;
+  };
+  const edit = (patch) => { adjust(part(E.sel), geo(), E.scope, patch); E.dirty = true; redraw(); };
+  const pick = (id) => { if (E.sel !== id) { E.sel = id; build(); } };
+  const end = () => { cv.onpointermove = null; E.live = null; redraw(); };
+  cv.addEventListener("pointermove", (e) => { if (e.buttons) return; const g = grip(e); cv.style.cursor = g && g.handle ? CURSOR[g.handle] : partAt(e) ? "grab" : "default"; });
+  cv.addEventListener("pointerdown", (e) => {
+    const g = grip(e);
+    if (g && g.handle) {   // the selected part's handle: corners resize, sides stretch, the knob turns
+      const { hit, handle } = g, min = 6 * g.q.k, of = (q) => ({ ang: Math.atan2(q.q.y - hit.cy, q.q.x - hit.cx), dist: Math.max(min, Math.hypot(q.lx, q.ly)), lx: Math.max(min, Math.abs(q.lx)), ly: Math.max(min, Math.abs(q.ly)) });
+      let prev = of(g);
+      cv.setPointerCapture(e.pointerId); E.live = { ids: [E.sel], key: E.sel };
+      cv.onpointermove = (mv) => {
+        const q = grip(mv);
+        if (!q) return;
+        const now = of(q);
+        if (handle === "rot") { let d = ((now.ang - prev.ang) * 180) / Math.PI; d = ((d + 540) % 360) - 180; edit({ rot: mv.shiftKey ? Math.round(d) : d }); }
+        else if (handle.length === 2) edit({ scale: now.dist / prev.dist });
+        else if (handle === "e" || handle === "w") edit({ kx: now.lx / prev.lx });
+        else edit({ ky: now.ly / prev.ly });
+        prev = now;
+      };
+      cv.onpointerup = cv.onpointercancel = end;
+      return;
+    }
+    const id = partAt(e);
+    if (!id) return;
+    pick(id);
+    let last = at(e);
+    cv.setPointerCapture(e.pointerId); E.live = { ids: [id], key: id };
+    cv.onpointermove = (mv) => { const q = at(mv); edit({ ddx: q.x - last.x, ddy: q.y - last.y }); last = q; };
+    cv.onpointerup = cv.onpointercancel = end;
+    redraw();
+  });
+  cv.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const id = partAt(e);
+    if (!id) return;
+    pick(id);
+    if (!E.live || E.live.key !== id) E.live = { ids: [id], key: id };
+    later("layedLive", 300, () => { E.live = null; redraw(); });
+    edit(e.altKey ? { rot: e.deltaY > 0 ? 2 : -2 } : { scale: Math.exp(-e.deltaY * 0.0015) });
+  }, { passive: false });
+  // above the canvas: the sizes, and what a change applies to; beside it, the template and the parts
+  const build = () => {
+    top.replaceChildren(
+      el("div", { class: "ls-sizes" }, S.profile.sizes.map((z) => el("button", { class: "btn" + (sizeKey(z) === E.key ? " on" : ""), title: sizeLabel(z), onclick: () => { E.key = sizeKey(z); E.drawn = false; redraw(); } }, ratioText(z.w, z.h)))),   // built again once drawn at that size, the block's sliders starting from its layout
+      el("div", { class: "grp" }, el("span", {}, t("props.scope")), el("div", { class: "seg" }, ["all", "size"].map((v) => el("button", { class: "btn" + (E.scope === v ? " on" : ""), onclick: () => { E.scope = v; build(); } }, t("scope." + v))))));
+    // a part's row: the box says whether the cover has it; its name, clicked, selects it (one shown)
+    const L = part(E.sel), row = (id) => {
+      const P = part(id);
+      return P && el("div", { class: "chk" + (id === E.sel ? " on" : "") }, el("input", { type: "checkbox", checked: !P.off, onchange: (e) => {
+        if (e.target.checked) { delete P.off; P.visible = true; } else { P.off = true; P.visible = false; }
+        E.dirty = true; build(); redraw();
+      } }), el("span", { onclick: () => { if (P.visible) { pick(id); redraw(); } } }, t("layer." + id)));
+    };
+    side.replaceChildren(
+      el("div", {}, cap("layouts.name"), name),
+      el("div", {}, cap("style.template"), templateControls(st, cv, (again) => { E.dirty = true; redraw(); if (again) later("layedSide", 60, build); })),
+      el("div", {}, cap("layed.parts"), el("div", { class: "parts" }, LAYOUT_PARTS.map(row))),
+      L && el("div", { class: "ls-picked" }, el("span", {}, t("layed.picked", t("layer." + E.sel))),
+        el("button", { class: "btn", title: t("layed.resetTip"), onclick: () => { const g = geo(); resetPlacement(L, E.scope, g.key, g.catId); E.dirty = true; redraw(); } }, t("layed.reset"))));
+  };
+  const back = () => { LAYED.redraw = null; oddsDialog(false, "layouts"); };
+  const cancel = () => { if (E.dirty && !confirm(t("layed.discard"))) return; back(); };
+  const save = () => {
+    const kept = normalizeLayouts([{ ...takeLayout(st, layers), id: p.id, name: name.value }])[0];
+    S.settings.layouts = S.settings.layouts.map((x) => (x.id === p.id ? kept : x)); persistSettings();
+    back();
+  };
+  build();
+  m.replaceChildren(el("div", { class: "dlg odds layed" },
+    el("div", { class: "head" }, el("h2", {}, t("layed.title", layoutName(p, i))),
+      el("div", { class: "acts" }, el("button", { class: "btn", onclick: cancel }, t("layed.cancel")), el("button", { class: "btn solid", onclick: save }, t("layed.save")))),
+    el("div", { class: "hint", style: "margin:0" }, t("layed.hint")),
+    el("div", { class: "ls-body" }, el("div", { class: "ls-main" }, top, stage), side)));
+  m.hidden = false; m.onDismiss = cancel;
+  LAYED.redraw = redraw;
+  redraw();
 }
 function styleTab() {
   const st = S.profile.style, set = (k, v) => { st[k] = v; touch({ profile: true }); };
@@ -3600,7 +3829,7 @@ async function saveText(name, text) {
   if (!CAN.saveFiles) return browserSave(name, "data:text/plain;charset=utf-8," + encodeURIComponent(text));
   try { const p = await invoke("save_text", { name, text }); if (p) toast(t("msg.saved", p)); } catch (e) { fail(e); }
 }
-function closeModal() { const m = $("modal"); m.hidden = true; m.replaceChildren(); m.onDismiss = null; delete m.dataset.sticky; }
+function closeModal() { const m = $("modal"); m.hidden = true; m.replaceChildren(); m.onDismiss = null; delete m.dataset.sticky; LAYED.redraw = null; }
 // A click on the dimmed page round a dialog dismisses it, as its cancel would (m.onDismiss, when a dialog
 // waits on an answer; else just closing it) — a press that began inside the dialog and ended outside does
 // not. A dialog that must be answered (the first-run welcome) or is under way (an export's progress) is
@@ -3816,14 +4045,16 @@ function setMode(mode) {
 }
 /**
  * One hand of Surprise me, dealt onto the cover and the profile's style as they are: everything but where
- * the user's own layers go by dealCover (deal.js, where all the rules are), then those places by dealPlaces.
- * `design`: the layers of the profile's design by id, where moved words go back to; `not`: the looks dealt
- * already in this run.
+ * the user's own layers go by dealCover (deal.js, where all the rules are) — the layout among it, the canvas's or
+ * one of the user's layout presets — then those places by dealPlaces, on the layout dealt. `design`: the layers of
+ * the profile's design by id, where moved words go back to (but for a preset's); `not`: the looks dealt already in
+ * this run. Returns the layout dealt: "keep", or the preset's id.
  */
 function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), not = []) {
-  const R = Math.random, sv = S.settings.surprise;
-  dealCover(S.profile.style, S.cover, { R, locks: sv.locks, odds: oddsOf(sv.odds), not, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, can: (k) => CAN.outlines || EFFECTS[k].kind !== "outline", canTint });
+  const R = Math.random, sv = S.settings.surprise, layouts = S.settings.layouts;
+  const { layout } = dealCover(S.profile.style, S.cover, { R, locks: sv.locks, odds: oddsOf(sv.odds, layouts), layouts, not, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, can: (k) => CAN.outlines || EFFECTS[k].kind !== "outline", canTint });
   if (!sv.locks.places) dealPlaces(R);
+  return layout;
 }
 /** Surprise me's run (how many hands, how fast they show: RULES.hands in deal.js). done: when the last run ended; step: the step of undo it made ({idx}) while nothing has followed it. */
 const SURPRISE = { busy: false, done: 0, step: null };
@@ -3865,11 +4096,11 @@ async function surprise(e) {
     for (let i = 0; i < H.count; i++) {
       if (i) putHand(before);
       try {
-        dealHand(design, dealt);
+        const layout = dealHand(design, dealt);
         const cv = el("canvas");
         drawCover(cv, { profile: S.profile, catIndex: catIndex(), size: shown, pixelW: 360, cover: S.cover, photos: S.photos });
         dealt.push(S.profile.style.look);
-        hands.push(handNow());
+        hands.push({ ...handNow(), layout });   // its structure is in the style and the layers it keeps (putHand puts both back)
         // the hand shows before the next is dealt, and long enough after the last to be seen coming
         const since = performance.now() - shownAt;
         if (since < H.pace) await wait(H.pace - since);
@@ -3880,7 +4111,7 @@ async function surprise(e) {
     if (!hands.length) throw new Error("no hand could be dealt");
     await wait(H.pace * 2);   // a moment with every hand in view, then the first on the canvas, and marked
     putHand(hands[0]);
-    SURPRISE.last = { kept: 0, ms: Math.round(performance.now() - t0), hands: hands.map((h) => ({ look: h.style.look })) };   // for the self-test
+    SURPRISE.last = { kept: 0, ms: Math.round(performance.now() - t0), hands: hands.map((h) => ({ look: h.style.look, layout: h.layout, template: h.style.template })) };   // for the self-test
     touch({ profile: true, cover: true, panel: true, side: true, strip: true });
     commitHistory();
     SURPRISE.step = { idx: S.histIdx };
@@ -3918,12 +4149,13 @@ function dealOpen() {
     el("div", { class: "acts" }, el("button", { class: "btn solid deal-again", onclick: surprise }, t("deal.again")), el("button", { class: "btn", onclick: dealClose }, t("deal.done"))));
   box.hidden = false;
 }
-/** Hand i, just dealt, in its place: its drawing at the size shown, and its look. */
+/** Hand i, just dealt, in its place: its drawing at the size shown, its look, and the layout preset it was dealt in (none for the canvas's own). */
 function dealShow(i, h, cv) {
   const slot = $("deal-hands") && $("deal-hands").children[i];
   if (!slot) return;
   DEAL.hands[i] = h;
-  slot.replaceChildren(cv || el("div", { class: "blank" }), el("figcaption", {}, el("span", {}, LOOKS[h.style.look].name[getLang()])));
+  const n = S.settings.layouts.findIndex((p) => p.id === h.layout), lay = n >= 0 ? layoutName(S.settings.layouts[n], n) : "";
+  slot.replaceChildren(cv || el("div", { class: "blank" }), el("figcaption", {}, el("span", {}, LOOKS[h.style.look].name[getLang()]), lay && el("span", { class: "lay", title: t("deal.layoutTip", lay) }, lay)));
   slot.className = "hand"; slot.onclick = () => dealTake(i);
   $("deal-what").textContent = t("deal.dealt", i + 1);
 }

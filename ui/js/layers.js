@@ -280,7 +280,8 @@ export function newLayer(type, extra = {}) {
 /** A new design's layers: the layout layers, the channel name and graphic left out (DEFAULT_OFF). */
 export const defaultLayers = () => BOUND_TYPES.map((type) => newLayer(type, DEFAULT_OFF.includes(type) ? { off: true, visible: false } : {}));
 
-function normalizeT(raw, free) {
+/** A placement as stored (see `t` above), every number within its range; `free`: a free layer's (a centre), else an offset from the template's place. */
+export function normalizeT(raw, free) {
   const a = (raw && raw.all) || {}, by = {};
   for (const [k, v] of Object.entries((raw && raw.by) || {})) {
     if (!v || typeof v !== "object") continue;
@@ -568,6 +569,54 @@ export function adjust(layer, { vw, vh, key, catId }, scope, patch) {
 export function resetPlacement(layer, scope, key, catId) {
   if (scope === "size") { delete layer.t.by[key]; if (catId) delete layer.t.by[`${key}@${catId}`]; return; }
   layer.t = newLayer(layer.type).t;
+}
+
+// ---------- layout presets: a cover's structure without its look (kept in the settings, see normalizeLayouts in store.js)
+// A layout preset holds the template and its adjustments (a profile's style.template and style.layoutAdjust of it), and
+// of the layout's own parts that carry words or the channel's graphic: where each stands (`t`, for every size and
+// per size), whether the cover has it (`shown`: not left out, see `off` above), and for lettering which way its words
+// run (`vertical` and `rules`, when the layer has them). Fonts, letterings, colours and the look are not in it.
+// Surprise me deals one by its chance (dealCover in deal.js), and one can be put on the canvas as it is.
+/** The layout's parts a layout preset holds. */
+export const LAYOUT_PARTS = ["title", "subtitle", "tag", "catname", "brand", "graphic"];
+/** Which way a lettered part's words run, carried by a preset when the layer has it: in columns, and the rules between them. */
+export const LAYOUT_RUNS = ["vertical", "rules"];
+const clone = (v) => JSON.parse(JSON.stringify(v));
+/**
+ * The layout preset that `style` (a profile's) and `layers` (a cover's) make as they are: { template, adjust, parts:
+ * { id: { t, shown, vertical?, rules? } } }, of the parts the layers have (the layout's own, by id: a copy is not one).
+ */
+export function takeLayout(style, layers) {
+  const parts = {};
+  for (const id of LAYOUT_PARTS) {
+    const L = layers.find((l) => l.id === id);
+    if (!L) continue;
+    const q = { t: clone(L.t), shown: !L.off };
+    for (const k of LAYOUT_RUNS) if (L[k] !== undefined) q[k] = clone(L[k]);
+    parts[id] = q;
+  }
+  return { template: style.template, adjust: { ...((style.layoutAdjust || {})[style.template] || {}) }, parts };
+}
+/**
+ * Puts layout preset `p` (as takeLayout makes it) onto `style` and `layers` (in place): its template, with its
+ * adjustments (none: the template as it comes; the other templates' are left as they are), and each part it holds
+ * where it has it, on the cover or left out (one that comes back comes in shown, as Layout parts brings it; one
+ * hidden by hand and kept on stays hidden), its words running as they do there (a way the preset has not is taken
+ * off). A part locked stays as it is — its place, whether it shows, which way its words run — whether the preset is
+ * dealt (as dealCover leaves a locked layer where it is) or put on the canvas by hand; the template, the profile's
+ * and no layer's, goes on all the same.
+ */
+export function putLayout(style, layers, p) {
+  style.template = p.template;
+  const adjust = (style.layoutAdjust = style.layoutAdjust || {});
+  if (p.adjust && Object.keys(p.adjust).length) adjust[p.template] = { ...p.adjust }; else delete adjust[p.template];
+  for (const [id, q] of Object.entries(p.parts || {})) {
+    const L = layers.find((l) => l.id === id);
+    if (!L || !LAYOUT_PARTS.includes(id) || L.locked) continue;
+    L.t = clone(q.t);
+    if (!q.shown) { L.off = true; L.visible = false; } else if (L.off) { delete L.off; L.visible = true; }
+    for (const k of LAYOUT_RUNS) if (q[k] !== undefined) L[k] = clone(q[k]); else delete L[k];
+  }
 }
 
 /** Inserts `layer` directly above the layer with id `aboveId` (or on top when there is none). */
