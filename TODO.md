@@ -50,7 +50,7 @@
    - `add_photo(channel, source)`：服务器上的路径、URL 或位图库里的图，放法同 `placePhoto`。
    - `crop_photo(channel, layer, crop | shape)`。
    - `cut_out(channel, layer)`：桌面用 Vision，服务器用 ONNX。
-   - `weave(channel, layer, by: "head" | "letters", line?, front?)`。
+   - `weave(channel, layer, by: "head" | "letters" | "brush", line?, front?, strokes?)`：笔迹按照片比例给（同 `normalizeWeave`）。
    - `surprise(channel, count?, locks?)`：抽 6 手，每手返回预览；`pick_hand(hand)` 把其中一手放到画布上。
    - `apply_cover_json(channel, cover)`：兜底，提交整张封面，返回被修正或丢掉的部分。
 3. AI 生成（要配好 key，花钱）

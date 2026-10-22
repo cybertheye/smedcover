@@ -587,8 +587,8 @@ when what it shows changed — the words, the colours, the letters set by hand, 
 undo puts another in its place) — not while a pointer is down in it or one of its inputs has the focus,
 unless something in it was just chosen; so it follows words typed and colours changed. It closes the window
 (`lettersClose()`) when the layer is gone, no longer selected or lettered otherwise, and when Edit is left
-(`setMode()`); Esc, *Done* and × close it too. The crop and weave windows (6.3) stand in the same place: opening
-one closes the others, and Surprise me's window closes them all. A letter in depth is stacked from at most 8 copies while something
+(`setMode()`); Esc, *Done* and × close it too. The crop and weave windows and the weave brush's panel (6.3) stand
+in the same place: opening one closes the others, and Surprise me's window closes them all. A letter in depth is stacked from at most 8 copies while something
 is dragged (`isFast()`); a letter cut from the photo is kept by photo (`PHOTO_LETTERS`, 48 a photo).
 
 ### 6.2.1 A perspective of one's own
@@ -641,10 +641,12 @@ as a drag is (`holdLive()`); the window shows how many pixels are kept. *No crop
 Esc, *Done* or ×, when another layer is selected, when the photo comes to fill the canvas, and when Edit is
 left.
 
-**Weave**: a cut-out may carry `weave: {with, by, line, front}` (`normalizeWeave()` in `layers.js`: at most 24
-layer ids and 400 letter keys a layer, `line` within 0.1–0.9; the ids are not looked up, a layer being read on
-its own, and a weave is kept on a photo no longer cut out; `frontOf()` reads a layer's letters, never what an
-object has from its prototype, whatever a file names its layers). A letter key is `row|letter|occurrence`
+**Weave**: a cut-out may carry `weave: {with, by, line, front, strokes}` (`normalizeWeave()` in `layers.js`: at
+most 24 layer ids and 400 letter keys a layer, `line` within 0.1–0.9, the brush's strokes as below; `by` "head",
+"letters" or "brush" (`WEAVE_WAYS`), and each way's data kept whichever is chosen, so going back to one finds it
+as it was; the ids are not looked up, a layer being read on its own, and a weave is kept on a photo no longer cut
+out; `frontOf()` reads a layer's letters, never what an object has from its prototype, whatever a file names its
+layers). A letter key is `row|letter|occurrence`
 (`letterKey`), the letter whatever lies between the first bar and the last — a bar itself, or a stretch of
 another script that `lineCells` sets whole, up to 200 characters — so the choices follow a letter by its line
 and its count there: typing a line above, or the same letter earlier in its line, moves them, as it moves the
@@ -655,14 +657,15 @@ channel (a clipped one kept to its base) is painted alone onto one canvas in the
 clipping group's layers are, undimmed (FOCUS dims the lettering itself) and at full opacity (lettering half
 see-through in front takes the subject's place there wholly, so the hole shows whatever lies between the
 lettering and the cut-out: the cut-out's own photo under a linked cut-out, the ground under one of its own) —
-all of it by `head`, by `letters` only its letters in front (`env.only`, a Set of letter keys, which the title,
-subtitle and text painters read). The layer's look effects come with it: in letter mode one that paints across
-the layer's whole box (a texture, a band) cuts through the subject there too.
+all of it by `head` and by `brush`, by `letters` only its letters in front (`env.only`, a Set of letter keys, which
+the title, subtitle and text painters read). The layer's look effects come with it: in letter mode one that paints
+across the layer's whole box (a texture, a band) cuts through the subject there too.
 It is worked out before the cut-out is painted because the layers' own work canvases (`scratch`, `fxScratch`)
 serve for it. `PAINT.photo` then cuts it out of its whole composite (body, outline, torn edge, shadow) with
 `destination-out` before laying it down (`letThrough`); by `head`, less what lies above the head line first:
 `headLine(box, line)` of the way down the box round its subject (`shownBox()`, so a crop counts), cut in the
-photo's own frame `F`, so the line turns, stretches and scales with the photo. With look effects on the
+photo's own frame `F`, so the line turns, stretches and scales with the photo; by `brush`, kept to the brush's mask
+first (see below), laid in the same frame with `destination-in`. With look effects on the
 cut-out the cut waits for them: `PAINT.photo` hands paintRange its cutter (`env.letThrough`, the way to let
 lettering through in its frame), and the effects' image is kept (`FX_KEPT`) from before the cut, with the cutter,
 so its key leaves the weave out and the lettering is let through each time the image is laid down; an image
@@ -674,12 +677,39 @@ an export makes its own and lets it go), per cut-out and canvas size (`WOVEN`, 1
 of what decides it — the canvas and size, the channel, the style and the look's values, the words, the
 subtitle's place, the layout, each woven layer and where it is, the letters in front, the fonts — and while
 something is dragged it is used again as long as the key holds, so a subject dragged does not paint its
-lettering again; the way and the head line are not part of it (they decide only the cut). Work canvases larger
+lettering again; the head line and the strokes are not part of it, nor the way but for whether it is by letter
+(they decide only the cut), so painting with the brush never paints the lettering again. Work canvases larger
 than an editor's canvas (`BIG_PX`: the clipped layer's, the head line's, `someLetters`') are let go after use. A
 costly photo's slide image (see the drag cache in 6.4) is kept from before the lettering is let through, which
 is cut again each frame where it now is. In the drag cache a cut-out woven with a layer that moves moves too (it
 is repainted with it), after the clipping groups have been taken in (so dragging the base of woven lettering
 counts) and with its own group.
+
+Weaving by the brush: `strokes`, [{front, r, pts}] in the order painted. A stroke in front adds to where the
+lettering comes in front, one behind (`front` false) takes it away again, so painting behind over what was painted
+in front erases it and painting in front again brings it back. The points are in the photo's own frame, fractions
+of the picture's width and height (0 to 1 across it; -1–2 kept), the radius `r` a share of its longer side
+(0.001–0.5): they follow the photo moved, scaled, stretched and turned, at every size, and a linked cut-out's own
+size and angle, staying on what they were painted on. A crop keeps the picture where it is in its frame (see
+*Crop*), so it changes nothing of them (painting outside it changes nothing that shows; uncropped, they are there);
+a photo has no flip (its stretch is kept positive: a picture mirrored by one would take them with it); a picture
+put in its place keeps them where they were, as fractions of it. `normalizeWeave` keeps at most 300 strokes, 2000
+points a stroke and 12000 in all (`WEAVE_MAX`, the first ones), each number to 4 decimals, drops a stroke with no
+point and leaves `strokes` out when there are none. Where the picture is on a canvas is its hit's `pf`, the map
+`photoMap(rect, at)` gives from its fractions to the canvas (the rectangle `PAINT.photo` frames it by, about the
+frame's centre, stretched, turned and placed; a photo filling the canvas, its rectangle as it is); `onCanvas()`,
+its inverse `photoPoint()` and `photoLong()` (the picture's longer side there, a stretch evened out: what a radius
+is a share of) stand beside it, all pure. The mask is drawn in the photo's frame (`brushMask()` in `render.js`): a
+canvas over the picture and a margin an eighth of it wide each way (`BRUSH_PAD`, for an outline or a shadow past
+its edge), about the size the picture has on the canvas but never finer than the canvas (the picture's longer side no
+longer than the canvas's: a photo larger shows only a part of itself; in steps of 256 px, 256 to 4096 on its longer side),
+each stroke a round-capped, round-joined line, its first point a dab (a stroke of one point is one), `source-over`
+in front and `destination-out` behind. It is kept per cut-out and size (`BRUSHED`, 16 M pixels in all; one larger
+than `BIG_PX`, an export's, let go after use, but never the editor's canvas's, so a stroke over a big photo on a big
+screen draws only its new points each frame) with the stroke objects it was drawn from and how many points of
+each, and `brushToDo()` (pure) says what is left to draw: points added to the last stroke, strokes after it (only
+the last stroke grows, while it is painted); anything else (an undo, *Clear*, a stroke changed) is drawn anew. While
+no stroke is in front (`brushesFront()`) `wovenFront` lets nothing through and paints no lettering.
 
 Painting some letters only: `drawTitle` (`st.only`) and `drawFreeText` (`env.only`) find each line's letters with
 `letterCells()` in `ransom.js` — the ransom note's cells (`lineCells`, keyed by `keysOf` as `letterKey` names
@@ -705,6 +735,25 @@ the head line) and the weave window (`#weavewin`: `weaveOpen()`, `weaveShow()`, 
 each a toggle, with all in front, all behind and every other) stand as the crop window does; it closes as that
 does, and when the cut-out is no longer woven by letter. Every change goes through `touch()`, so it is one undo
 step and the canvas follows.
+
+By the brush, *Paint…* (`brushOpen()`) opens its panel (`#brushwin`: `brushShow()`, `brushClose()`, `S.brushWin`
+the cut-out painted on) where the weave window stands; it closes as that does, and when the cut-out is no longer
+woven by the brush. It holds the brush's size (its width in the cover's units, `BRUSH.size`), *In front* or
+*Behind* (`BRUSH.front`; Alt/Option held, the other), *Clear* and *Done*. While it is open the canvas only paints:
+`paintFlat` passes `o.brush`, so no frame or handles are drawn and `brushOverlay()` lays the area in front over the
+canvas in the channel colour, faintly (15%) off the subject and about 35% on it, from the same mask, at the same
+size, as the cut; a press goes to `brushDown()`, a move to `brushRing()` (a ring under the pointer as wide as the
+brush, dashed while it paints behind; Alt pressed or let go turns it), and the wheel, a double-click, a click
+beside the canvas and every key but Esc (which leaves), undo and redo do nothing. A stroke: the press records any
+step still waiting, turns the size into `r` by the hit's `pf` and `photoLong`, and adds the stroke to the layer's;
+each place the pointer passes (its coalesced events, where there are) is taken into the picture by `photoPoint`,
+and `brushNext()` (pure) gives the next point, the mean of the last three places once it lies a quarter of the
+radius or more from the last point: a hand's jitter smoothed a little, no more points than the stroke needs. Let
+go, the place it was let go at is added and the step recorded at once (`commitHistory()`), so each stroke is one
+step of undo, and *Clear* is one too. While a stroke is painted `LIVE` holds the cut-out alone (not its photo, as a
+drag would), so each frame blits the rest, slides the cut-out's last image (see the drag cache in 6.4), cuts the
+lettering through it with the mask drawn on since the frame before, and lays the overlay; the thumbnails wait for
+the stroke's end. Strokes stop at the limits, with a word.
 
 The Background layer (`PAINT.bg`) paints in three. Its base, `base`: "grid", the look's ground — its `background` hook with `photo: null` and `grid: false`, or the theme's colour — then the grid on it, `lookGrid()`: the look's own `gridLines(ctx, env, color)`, else lines every 60, in the look's grid colour for the ground it is on (`th.grid`); or "clear", nothing (see-through: a PNG keeps it, a JPEG is flattened onto `MATTE` in `lib.rs`, the editor shows a checkerboard behind the canvas). Then what the look paints on the base, its scene and pattern: `background` again, with `grid: true` and `ground: false`, which paints none of its ground. With all a look's sliders at their least that paints nothing (the test "what a look paints on the ground lies on its base"), so the base is all there is. A `background` called without `ground` paints its ground; with `grid: false` and no photo, only its ground. A photo's treatment is the same hook with the photo and `grid: false`: the photo and its tint, and for a photo filling the canvas the look's overlays on it. On a see-through base what is laid over a whole picture (a look's `post`: grain, a vignette, wear; the tints and colour fringes some looks lay over their scene) goes only where something is painted, as much as it is (`wherePainted()` in style.js), so what is see-through stays so. `BASE.lines` (render.js) turns the grid off, for comparing drawings without it. `grid` is always on for the Background layer (`normalizeLayer()` puts it back on a cover kept with it off). Light or dark (`style.theme`) is set in its properties; the Style tab no longer has it. When looks and themes ask whether there is a background photo, they mean the lowest visible photo filling the canvas on this channel (`env.photo`).
 
@@ -1036,10 +1085,12 @@ and `swatch()` a small colour swatch (optionally automatic).
 
 - The pointer position is converted to virtual coordinates and tested against `canvas._hits`, top first. The point is rotated back into each layer's own frame, so rotated layers are hit accurately.
 - *Hide layout* (`toggleLayout()`) hides every layout layer on this channel's cover (`layoutLayers()`: the layout's own, `isLayout()`, neither free layers nor copies of layout layers) and remembers, in memory and per cover object, which of them were showing (`LAYOUT_HID`); with all hidden the button reads *Show layout* and brings back just those, or all of them when there is no record (after a change of channel, say). It sets the layers' `visible`, so the eye icons agree and undo works.
-- *3D* (`set3d()`, the state in `V3`, not saved) puts a canvas of its own (`#cv3d`) over the stage, the cover's canvas hidden and not painted under it. Each layer on this channel's cover is painted alone (`drawCover`'s `o.only`: shown even when hidden, kept to its base's shape when clipped onto one, the cover's main photo and theme still set by what is really shown, no look painted over it all) into a sheet in `V3.sheets`, with a small copy of its alpha (`maskOf()`). `stack3d.js` draws them as an axonometric stack — no perspective, so each sheet is one affine transform, and `sheetUnder()` maps a point back onto each sheet exactly, front to back, until a mask says the layer has something there. `drawMain()` hands over to `paint3d()`, which paints again only the sheets that changed: none when only the selection did (`queueDraw(false)`, from `selectLayer` and `pickLayers`), the dragged ones and what is clipped with them while a layer's slider holds `LIVE`, all of them otherwise; `draw3d()` composes the sheets, and `tick3d()` runs it per frame while something eases: opening out of the flat cover and folding back into it (`V3.k`; flat, the stack fits the box the canvas has, so the two meet), a sheet sliding to a new place in the stack (`V3.z`), the scale (held while the view is dragged, then eased to fit), *Reset view*. A pointer on a row of the list (`#side`'s pointermove) dims the other sheets; the sheet under the pointer marks its row (`markRows()`). Leaving Edit closes it at once (`close3d()`).
+- *3D* (`set3d()`, the state in `V3`, not saved) puts a canvas of its own (`#cv3d`) over the stage, the cover's canvas hidden and not painted under it. Each layer on this channel's cover is painted alone (`drawCover`'s `o.only`: shown even when hidden, kept to its base's shape when clipped onto one, the cover's main photo and theme still set by what is really shown, no look painted over it all) into a sheet in `V3.sheets`, with a small copy of its alpha (`maskOf()`). `stack3d.js` draws them as an axonometric stack — no perspective, so each sheet is one affine transform, and `sheetUnder()` maps a point back onto each sheet exactly, front to back, until a mask says the layer has something there. `drawMain()` hands over to `paint3d()`, which paints again only the sheets that changed: none when only the selection did (`queueDraw(false)`, from `selectLayer` and `pickLayers`), the dragged ones and what is clipped with them while a layer's slider holds `LIVE`, all of them otherwise; `draw3d()` composes the sheets, and `tick3d()` runs it per frame while something eases: opening out of the flat cover and folding back into it (`V3.k`; flat, the stack fits the box the canvas has, so the two meet), a sheet sliding to a new place in the stack (`V3.z`), the scale (held while the view is dragged, then eased to fit), *Reset view*. A pointer on a row of the list (`#side`'s pointermove) dims the other sheets; the sheet under the pointer marks its row (`markRows()`). Leaving Edit closes it at once (`close3d()`). Opening it closes the weave's brush (`brushClose()`), which
+paints on the flat canvas, as opening the brush (`brushOpen()`) closes it.
 - With FOCUS on (`S.focus`, not saved) the canvas is painted with `o.spot`, the ids `spotIds()` gives (the selection, with a linked photo's other half): every other layer is painted at `SPOT_DIM` of its opacity, a clipping group dimmed or not as a whole; the list greys their rows, and `focusAllows()` refuses to select them from the list, a photo's thumbnail, a link's mark or the 3D view, with a toast. On the canvas nothing is hit-tested: the selected layer's handles work as ever, any other press and drag goes to `focusDrag()`, and the wheel acts only on `focusTargets()` (the movable members of the selected group, or the selected layer; fixed and locked ones do not count); a click beside the canvas no longer ends the selection. `syncFocus()`, run by `renderSide()`, keeps the canvas's dashed frame and tag up to date.
 - For the selected layer the handles are checked first: corners resize, sides stretch, the top knob rotates. A photo filling the canvas has a frame only once it no longer covers it (the hit's `covers`, see `showsFrame()`), and only the corners: it is never stretched or turned. Handle size is computed in screen pixels, so handles look the same at any zoom.
 - Corner brackets and the Background layer are never dragged; a selected photo filling the canvas is dragged from anywhere on the ground (the background, the colour block, anything locked).
+- While the weave's brush paints (`S.brushWin`, see *Weave* in 6.3) the canvas does nothing else: a press paints (`brushDown()`), a move shows the brush's ring, and nothing is hit-tested, selected, dragged, scaled with the wheel or reset with a double-click; of the keys only Esc and undo and redo act.
 - With the background selected, a press on a scene object's handle (`sceneGrip()`) drags that object's offset on this cover (`moveScene()`, into `all` or `by` as the scope at the top says). While dragged, only the ground and the frame are repainted (`goLive(["bg", "frame"])` — the cyberpunk's sweep is in the frame layer; a light leak or lens flare, painted over everything, is repainted every frame anyway), the other layers kept as images, and in draft (`draftTouch()`): the ground is most of a look's work, and it is the one thing changing. A double-click resets it (`resetScene()`). Handles are white rings edged in black, not the channel colour, to read on any ground; *Hide the handles* (`S.settings.hideScene`) takes them off the canvas and stops them answering a drag. The background's properties have a *Scene objects* group (`sceneSection()`); clicking an object's name has `jumpToScene()` move the system pointer to its handle through Rust's `move_pointer`, and put a fading ring on the page over it (no repaint of the cover).
 
 ### 9.3 Redrawing one layer while dragging
@@ -1257,7 +1308,7 @@ generates one asset in each API style and draws it on a cover. It catches proble
 as the header issue above.
 
 
-With a real photo (`SMEDCOVER_SELFTEST_PHOTO=<file>`) it also cuts out its subject, sets it over the title and writes the cover woven by the head, by letter (in the house lettering, in one lettered upright, in the ransom note), with the lettering half see-through, and once dragged (`weave-*.png`), with an error when a woven cover looks as the cover unwoven, when a drag's frame lets the lettering through elsewhere than a still cover does, when the frames of the head line's slider do not follow it, or when dragging the title over the subject works out the subject's look effects again.
+With a real photo (`SMEDCOVER_SELFTEST_PHOTO=<file>`) it also cuts out its subject, sets it over the title and writes the cover woven by the head, by letter (in the house lettering, in one lettered upright, in the ransom note), with the lettering half see-through, by the brush (a band along the title's second line in front, then up to the subject's middle behind again), and once dragged (`weave-*.png`), with an error when a woven cover looks as the cover unwoven (or the brush's, as before part of it was painted behind), when a drag's frame lets the lettering through elsewhere than a still cover does, when the frames of the head line's slider do not follow it, or when dragging the title over the subject works out the subject's look effects again.
 
 With `SMEDCOVER_SELFTEST_LOOKS=<look ids, comma-separated>` it goes through those looks only — their covers with and without a photo and with every slider at its far end, their layer effects, and their scene objects moved with the handles showing (the basketball poster's otherwise); the drag timing below then times only their scene objects too. Each step is noted in `selftest-progress.txt` in the data folder as it starts, so a run that stalls shows where. The stalls it used to have (every process idle, the web view waiting, at a different step each time) came from its window opening off screen — on another desktop, behind a full-screen app: WebKit stops drawing for a window that cannot be seen, so a canvas read back from the graphics card (an export, a PNG) never returns. In self-test mode the app therefore tells the web view not to watch whether its window can be seen (`_setWindowOcclusionDetectionEnabled:`, the setting WebKit's own tests use; `setup` in `lib.rs`). The city pop and constructivist looks also recolour the photo itself, once, in memory (`treatedOf()` in `photo.js`) rather than reading the canvas back on every redraw.
 

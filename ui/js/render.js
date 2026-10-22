@@ -6,7 +6,7 @@ import { virtualSize, layout, adjustLayout, meetStandards } from "./layout.js";
 import { drawTitle, drawTitleVertical, parseTitle, subtitleFit, setLine, passOf, hasCJK, someLetters } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset, assetHalf, userAssets, assetExists } from "./assets.js";
-import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets, headLine, frontOf, HEADLINES } from "./layers.js";
+import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets, headLine, frontOf, brushesFront, brushToDo, photoMap, HEADLINES } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced, wherePainted } from "./style.js";
 import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped, effectReach } from "./textfx.js";
 import { ransomEpoch } from "./ransom.js";
@@ -534,22 +534,30 @@ const PAINT = {
       hit = { cx: bt.cx + x * Math.cos(a) - y * Math.sin(a), cy: bt.cy + x * Math.sin(a) + y * Math.cos(a), hw: hw * Math.abs(bt.kx), hh: hh * Math.abs(bt.ky), r: bt.r };
     }
     if (bt) Object.assign(hit, { px: bt.cx, py: bt.cy, pw: rect.iw, ph: rect.ih });   // the frame: its centre and size
+    hit.pf = photoMap(rect, fills ? null : bt);   // where the picture is: the map from its own fractions to the canvas (the weave's brush paints by it)
     if (!M) return hit;
     const blit = (c, dx = 0, dy = 0) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(c, dx, dy); ctx.restore(); };
     const W = ctx.canvas.width, H = ctx.canvas.height;
-    // Woven with lettering: how it lets that lettering (`wo`, see wovenFront) through — the letters chosen, or the
-    // lettering below the line where its head ends, which turns and scales with the photo (cut in its own frame, F) —
-    // cut out of a work canvas `c` whose corner is at (ox, oy) on the canvas. Told to paintRange (env.letThrough),
-    // which with look effects lets it through after them, and through the image of them it keeps.
+    // Woven with lettering: how it lets that lettering (`wo`, see wovenFront) through — the letters chosen, the
+    // lettering below the line where its head ends, or where the brush put it in front, both of which turn and scale
+    // with the photo (cut in its own frame, F) — cut out of a work canvas `c` whose corner is at (ox, oy) on the
+    // canvas. Told to paintRange (env.letThrough), which with look effects lets it through after them, and through
+    // the image of them it keeps.
     const cutter = mask && ((wo) => (c, ox, oy) => {
-      const sub = wo.by === "head" && shownBox(maskBox(mask), crop);
+      const sub = wo.by === "head" && shownBox(maskBox(mask), crop), brush = wo.by === "brush" && wo.strokes;
       let src = wo.c, sx = -ox, sy = -oy, s = null;
-      if (sub) {
+      if (sub || brush) {
         s = sheet(2, c.canvas.width, c.canvas.height, new DOMMatrix());
         s.drawImage(wo.c, -ox, -oy);
         s.setTransform(new DOMMatrix().translateSelf(-ox, -oy).multiplySelf(F));
-        const y = rect.y + headLine(sub, wo.line) * rect.ih, far = 1e5;
-        s.globalCompositeOperation = "destination-out"; s.fillRect(rect.x - far, y - far, rect.iw + 2 * far, far);   // the head stays in front
+        if (sub) {
+          const y = rect.y + headLine(sub, wo.line) * rect.ih, far = 1e5;
+          s.globalCompositeOperation = "destination-out"; s.fillRect(rect.x - far, y - far, rect.iw + 2 * far, far);   // the head stays in front
+        } else {   // only where the brush put it in front: its mask, made in the photo's own frame, laid over the picture
+          const b = brushMask(L.id, brush, nw, nh, rect.iw, rect.ih, F, ctx.canvas, !wo.temp), pad = BRUSH_PAD;
+          s.globalCompositeOperation = "destination-in"; s.drawImage(b.c, rect.x - pad * rect.iw, rect.y - pad * rect.ih, rect.iw * (1 + 2 * pad), rect.ih * (1 + 2 * pad));
+          if (b.temp) b.c.width = b.c.height = 0;
+        }
         src = s.canvas; sx = sy = 0;
       }
       c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = "destination-out"; c.drawImage(src, sx, sy); c.restore();
@@ -768,6 +776,52 @@ const PHOTO = { sheets: [], slides: new Map() };   // the photo layers' work can
 // WOVEN_PX pixels in all. Work canvases larger than an editor's canvas (an export's) are let go after use (BIG_PX).
 const WOVEN = new Map(), WOVEN_PX = 16e6, BIG_PX = 5e6;
 const WOVE = { one: null, base: null };   // where a woven layer clipped onto another is kept to that one's shape
+// What the weave's brush puts in front (see `strokes` in layers.js): a mask in the photo's own frame, over the
+// picture and a margin round it (BRUSH_PAD of it each way, for an outline or a shadow past its edge), drawn at
+// about the size the photo has on the canvas (in steps of 256 px, from 256 to 4096 on its longer side) but never
+// finer than the canvas shows it — the picture's longer side no longer than the canvas's: a photo drawn larger than
+// the canvas shows only a part of itself there — kept per cut-out and size with the strokes it was drawn from: while
+// a stroke is painted only its new points are drawn on it (see brushToDo). Up to BRUSHED_PX pixels in all, the least
+// recently used going first. One larger than an editor's canvas is let go after use (an export's, drawn at the
+// export's size), unless it is the editor's own: a stroke painted over a big photo on a big screen then draws only its
+// new points each frame, as it does on any other.
+const BRUSHED = new Map(), BRUSHED_PX = 16e6, BRUSH_PAD = 0.125;
+/**
+ * The brush mask of cut-out `id` (its weave's `strokes`, the picture nw × nh, iw × ih in the units of transform F,
+ * which takes them to the canvas's pixels) on canvas `cv` (the one painted, by its size): {c, temp}, c a canvas over
+ * the picture and its margin, opaque where the lettering comes in front; `temp`: let it go after use, which it never
+ * is when `kept` (the editor's canvas, as WOVEN keeps what it lets through).
+ */
+function brushMask(id, strokes, nw, nh, iw, ih, F, cv, kept = false) {
+  const span = Math.min(Math.max(iw * Math.hypot(F.a, F.b), ih * Math.hypot(F.c, F.d)), Math.max(cv.width, cv.height)) * (1 + 2 * BRUSH_PAD);
+  const long = Math.min(4096, Math.max(256, Math.ceil(span / 256) * 256)), mw = nw >= nh ? long : Math.max(1, Math.round((long * nw) / nh)), mh = nw >= nh ? Math.max(1, Math.round((long * nh) / nw)) : long;
+  const slot = `${id}@${mw}x${mh}`, temp = !kept && mw * mh > BIG_PX;
+  let k = BRUSHED.get(slot), todo = k && k.strokes === strokes ? brushToDo(k.drawn, strokes) : null;
+  if (!todo) {   // drawn anew
+    k = k || { c: Object.assign(document.createElement("canvas"), { width: mw, height: mh }) };
+    k.c.getContext("2d").clearRect(0, 0, mw, mh);
+    Object.assign(k, { strokes, drawn: [] });
+    todo = { from: 0, at: 0 };
+  }
+  const g = k.c.getContext("2d"), f = 1 / (1 + 2 * BRUSH_PAD), unit = Math.max(mw, mh) * f, at = (p) => [(p[0] + BRUSH_PAD) * f * mw, (p[1] + BRUSH_PAD) * f * mh];
+  g.lineCap = g.lineJoin = "round"; g.strokeStyle = g.fillStyle = "#000";
+  for (let i = todo.from; i < strokes.length; i++) {   // in order: one in front adds to what is there, one behind takes it away
+    const s = strokes[i], j0 = i === todo.from ? todo.at : 0, w = s.r * unit;
+    g.globalCompositeOperation = s.front ? "source-over" : "destination-out";
+    if (j0 === 0) { const [x, y] = at(s.pts[0]); g.beginPath(); g.arc(x, y, w, 0, 2 * Math.PI); g.fill(); }   // where it starts: a dab, which is all a stroke of one point is
+    g.beginPath(); g.moveTo(...at(s.pts[Math.max(0, j0 - 1)]));
+    for (let j = Math.max(1, j0); j < s.pts.length; j++) g.lineTo(...at(s.pts[j]));
+    g.lineWidth = 2 * w; g.stroke();
+    k.drawn[i] = { s, n: s.pts.length, front: s.front, r: s.r };
+  }
+  g.globalCompositeOperation = "source-over";
+  BRUSHED.delete(slot);
+  if (temp) return { c: k.c, temp };
+  BRUSHED.set(slot, k);
+  let px = 0; for (const b of BRUSHED.values()) px += b.c.width * b.c.height;
+  for (const [s0, b] of BRUSHED) { if (px <= BRUSHED_PX || BRUSHED.size <= 1) break; px -= b.c.width * b.c.height; BRUSHED.delete(s0); }
+  return { c: k.c, temp };
+}
 /** Lets go of work canvas c when it is an export's (see BIG_PX). */
 const letGo = (c) => { if (c && c.width * c.height > BIG_PX) c.width = c.height = 0; };
 /** Work canvas i of the photo layers, w × h, cleared, with the transform `m`. */
@@ -1204,27 +1258,28 @@ function paintCover(cv, o) {
   /**
    * Weaving (see `weave` in layers.js): what of the lettering a cut-out (layer i) weaves with comes in front of it.
    * Each layer it weaves with that lies below it and shows on this cover is painted alone in the canvas's own
-   * space, as in a clipping group (as if not dimmed: FOCUS dims the lettering itself) — all of it, or in letter mode
-   * only its letters in front (env.only) — onto one canvas, which the cut-out lets through (see PAINT.photo): the
-   * lettering is painted once, below, and seen through the subject. {c, key, by, line}, or null when nothing is
-   * woven. Worked out before the cut-out is painted (the layers' own work canvases serve for it); kept, and while
+   * space, as in a clipping group (as if not dimmed: FOCUS dims the lettering itself) — all of it (by the head, by
+   * the brush), or in letter mode only its letters in front (env.only) — onto one canvas, which the cut-out lets
+   * through (see PAINT.photo): the lettering is painted once, below, and seen through the subject. {c, key, by,
+   * line, strokes}, or null when nothing is woven (by the brush, also while no stroke puts anything in front).
+   * Worked out before the cut-out is painted (the layers' own work canvases serve for it); kept, and while
    * something is dragged used again for as long as what decides it (`key`) is the same.
    */
   const wovenFront = (i) => {
     const X = cover.layers[i], wv = X.weave, rec = X.cut && wv && o.photos && o.photos.get((X.of ? cover.layers.find((l) => l.id === X.of) || {} : X).pid);
-    if (!rec || !rec.mask) return null;
+    if (!rec || !rec.mask || (wv.by === "brush" && !brushesFront(wv))) return null;
     const list = [];
     for (let j = 0; j < i; j++) {
       const l = cover.layers[j], b = clipBase(cover.layers, j);   // a hidden base hides what is clipped onto it
-      if (HEADLINES.includes(l.type) && wv.with.includes(l.id) && l.visible && appliesTo(l, cat.id) && (b < 0 || cover.layers[b].visible) && (wv.by === "head" || frontOf(wv, l.id).length)) list.push(j);
+      if (HEADLINES.includes(l.type) && wv.with.includes(l.id) && l.visible && appliesTo(l, cat.id) && (b < 0 || cover.layers[b].visible) && (wv.by !== "letters" || frontOf(wv, l.id).length)) list.push(j);
     }
     if (!list.length) return null;
     const docFonts = typeof document !== "undefined" && document.fonts ? document.fonts.size : 0;
-    const wkey = [cv.width, cv.height, key, cat.id, wv.by, JSON.stringify(P.style), JSON.stringify(lookValues()), C.join(), main ? main.pid : "", cover.title, cover.subtitle, JSON.stringify(env.sub), JSON.stringify(G), env.hasBrand, docFonts, ransomEpoch(),
+    const wkey = [cv.width, cv.height, key, cat.id, wv.by === "letters", JSON.stringify(P.style), JSON.stringify(lookValues()), C.join(), main ? main.pid : "", cover.title, cover.subtitle, JSON.stringify(env.sub), JSON.stringify(G), env.hasBrand, docFonts, ransomEpoch(),
       ...list.map((j) => { const l = cover.layers[j], b = clipBase(cover.layers, j); return JSON.stringify([l, resolve(l, w, h, key, cat.id), wv.by === "letters" ? frontOf(wv, l.id) : 0, b >= 0 ? [cover.layers[b], resolve(cover.layers[b], w, h, key, cat.id)] : 0]); })].join("|");
     // kept on the editor's canvas only (a thumbnail, a hand of Surprise me, an export make their own, let go after)
     const editor = !!(o.select || o.live), slot = `${X.id}@${cv.width}x${cv.height}`, kept = editor ? WOVEN.get(slot) : null;
-    const out = (c) => ({ c, key: wkey, by: wv.by, line: wv.line, temp: !editor });   // the way and the head line as they are now: not what decided the lettering
+    const out = (c) => ({ c, key: wkey, by: wv.by, line: wv.line, strokes: wv.strokes, temp: !editor });   // the way, the head line and the strokes as they are now: not what decided the lettering
     if (kept && kept.key === wkey && isFast()) { WOVEN.delete(slot); WOVEN.set(slot, kept); return out(kept.c); }
     const canvas = kept ? kept.c : document.createElement("canvas"), g = freshCanvas(canvas, cv, kx, ky);
     // each at full strength, its base too: what of it is in front takes the subject's place there wholly
@@ -1399,7 +1454,8 @@ function paintCover(cv, o) {
   cv._titleBox = env.titleBox || null;
   // where lettered blocks are, for the perspective's handles; a drag paints only some layers, so what is not repainted is kept
   cv._blocks = { ...(o.live ? cv._blocks : null), ...env.blocks, k: kx };
-  if (o.picked && o.picked.length > 1) {
+  if (o.brush) brushOverlay(ctx, cv, cover, o, C, kx, ky);   // painting with the weave's brush: no frame, no handles
+  else if (o.picked && o.picked.length > 1) {
     for (const hit of cv._hits) if (o.picked.includes(hit.id) && showsFrame(hit)) drawSelection(ctx, hit, kx, false);
   } else if (o.select) {
     const hit = cv._hits.find((x) => x.id === o.select);
@@ -1407,6 +1463,31 @@ function paintCover(cv, o) {
     drawLayoutHandles(ctx, cv, cover.layers.find((l) => l.id === o.select), kx, rgb(C));
     if (o.select === "bg" && o.sceneHandles !== false) drawSceneHandles(ctx, cv._scene, kx);
   }
+}
+/**
+ * While the weave's brush paints on cut-out `o.brush` (see brushOpen in app.js): where it puts the lettering in
+ * front, laid over the canvas in the channel colour — clearer (about a third) over the subject, where it counts,
+ * fainter off it, where painting changes nothing, so a stroke that misses shows. From the brush mask the cut-out
+ * is cut by (the same size: the same mask), mapped by where the picture is (the hit's `pf`).
+ */
+function brushOverlay(ctx, cv, cover, o, C, kx, ky) {
+  const L = cover.layers.find((l) => l.id === o.brush), hit = L && cv._hits && cv._hits.find((h) => h.id === L.id);
+  const base = L && (L.of ? cover.layers.find((l) => l.id === L.of) : L), rec = base && o.photos && o.photos.get(base.pid), mask = L && L.cut && rec && rec.mask && rec.mask.img;
+  if (!hit || !hit.pf || !mask || !L.weave || !brushesFront({ ...L.weave, by: "brush" })) return;
+  const [nw, nh] = sizeOf(rec.img), pad = BRUSH_PAD, m = new DOMMatrix([kx, 0, 0, ky, 0, 0]).multiplySelf(new DOMMatrix(hit.pf));   // the picture's fractions to the canvas's pixels
+  const corners = [[-pad, -pad], [1 + pad, -pad], [1 + pad, 1 + pad], [-pad, 1 + pad]].map(([u, v]) => { const p = m.transformPoint({ x: u, y: v }); return [p.x, p.y]; });
+  const bx = Math.max(0, Math.floor(Math.min(...corners.map((p) => p[0])))), by = Math.max(0, Math.floor(Math.min(...corners.map((p) => p[1]))));
+  const bw = Math.min(cv.width, Math.ceil(Math.max(...corners.map((p) => p[0])))) - bx, bh = Math.min(cv.height, Math.ceil(Math.max(...corners.map((p) => p[1])))) - by;
+  if (bw <= 0 || bh <= 0) return;
+  const b = brushMask(L.id, L.weave.strokes, nw, nh, 1, 1, m, cv, true), s = sheet(2, bw, bh, new DOMMatrix().translateSelf(-bx, -by).multiplySelf(m));
+  s.drawImage(b.c, -pad, -pad, 1 + 2 * pad, 1 + 2 * pad);
+  s.globalCompositeOperation = "source-in"; s.fillStyle = rgb(C); s.fillRect(-pad, -pad, 1 + 2 * pad, 1 + 2 * pad);
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 0.15; ctx.drawImage(s.canvas, bx, by);
+  s.globalCompositeOperation = "destination-in"; s.drawImage(mask, 0, 0, 1, 1);   // on the subject, and what the crop keeps of it
+  if (L.crop) { s.fillStyle = "#000"; s.fillRect(L.crop.x, L.crop.y, L.crop.w, L.crop.h); }
+  ctx.globalAlpha = 0.24; ctx.drawImage(s.canvas, bx, by);   // over the faint one: about 0.35 in all
+  ctx.restore();
+  if (b.temp) b.c.width = b.c.height = 0;
 }
 /**
  * Paints layer i of `layers` alone onto `ctx` (see o.only) with the cover's paintRange, shown even when

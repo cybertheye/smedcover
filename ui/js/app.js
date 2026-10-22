@@ -11,7 +11,7 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, rebalance, dropOption, partChance, ODD_OPTIONS } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf, LAYOUT_PARTS, takeLayout, putLayout } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf, LAYOUT_PARTS, takeLayout, putLayout, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
@@ -306,7 +306,7 @@ function paintFlat() {
   const k = Math.max(0.05, Math.min((stage.clientWidth - 36) / vw, (stage.clientHeight - 36) / vh));
   cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
   paint(cv, size, Math.min(vw * 1.5, vw * k * (drafting() ? 1 : window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
-    S.mode === "edit" ? { picked: group().map((L) => L.id), sceneHandles: !S.settings.hideScene, spot: S.focus ? spotIds() : null } : {});
+    S.mode === "edit" ? { picked: group().map((L) => L.id), sceneHandles: !S.settings.hideScene, spot: S.focus ? spotIds() : null, brush: S.brushWin } : {});
   const clear = !layer("bg").visible;
   stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
 }
@@ -520,6 +520,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
     return sceneHandleAt(cv, p.x, p.y, p.k);
   }
   cv.addEventListener("pointermove", (e) => {
+    if (S.brushWin && S.mode === "edit") { brushRing(e); cv.style.cursor = "crosshair"; cv.title = ""; return; }   // painting with the weave's brush: its ring, nothing else
     if (e.buttons || S.mode !== "edit") return;
     const sh = sceneGrip(e);
     cv.title = sh ? `${sceneName(sh.key)} · ${t("scene.dragTip")}` : "";
@@ -531,14 +532,16 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
     const L = layerAt(e);
     cv.style.cursor = !L || L.type === "bg" ? "default" : fillsCanvas(L) ? "move" : "grab";
   });
+  cv.addEventListener("pointerleave", () => { const ring = $("brushring"); if (ring && !BRUSH.stroke) ring.hidden = true; });
   cv.addEventListener("dblclick", (e) => {   // a scene object's handle: back where the layout puts it
-    const sh = S.mode === "edit" && sceneGrip(e);
+    const sh = S.mode === "edit" && !S.brushWin && sceneGrip(e);
     if (!sh) return;
     resetScene(S.cover, S.profile.style.look, sh.key, S.settings.scope, frame().key);
     touch({ cover: true, side: true });
   });
   cv.addEventListener("pointerdown", (e) => {
     if (S.mode !== "edit") return;
+    if (S.brushWin) return brushDown(e);   // the weave's brush: the canvas only paints
     const done = (moved) => () => { cv.onpointermove = null; endLive(); if (moved()) renderSide(); };
     // a handle of the layout itself (the diamonds): dragging it changes the template for every cover of this profile
     const at0 = virtualPoint(e), lh = diamond(e);
@@ -693,6 +696,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
   cv.addEventListener("wheel", (e) => {
     if (S.mode !== "edit") return;
     e.preventDefault();
+    if (S.brushWin) return;   // the canvas only paints
     if (S.focus && group().length) return;   // a group is moved, not scaled
     const L = S.focus ? focusTargets()[0] : layerAt(e);
     if (!L || L.locked || FIXED.includes(L.type) || L.type === "bg") return;
@@ -701,7 +705,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
     edit(L, e.altKey ? { rot: e.deltaY > 0 ? 2 : -2 } : { scale: Math.exp(-e.deltaY * 0.0015) });
     later("side", 250, renderSide);
   }, { passive: false });
-  $("stage").addEventListener("pointerdown", (e) => { if (e.target === $("stage") && S.mode === "edit" && S.cover && !S.focus) selectLayer("bg"); });
+  $("stage").addEventListener("pointerdown", (e) => { if (e.target === $("stage") && S.mode === "edit" && S.cover && !S.focus && !S.brushWin) selectLayer("bg"); });
   // assets dragged from the library land where they are dropped
   cv.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("application/x-smed-asset") || e.dataTransfer.types.includes("application/x-smed-photo")) e.preventDefault(); });
   cv.addEventListener("drop", (e) => {
@@ -2780,7 +2784,7 @@ function overLeft(box) {
 /** Opens the letter window for layer L. */
 function lettersOpen(L) {
   const win = $("letterwin") || document.body.appendChild(el("div", { id: "letterwin", role: "dialog", "aria-label": t("props.sec.letters"), onpointerdown: () => { letterHeld = true; } }));
-  cropClose(); weaveClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
+  cropClose(); weaveClose(); brushClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
   overLeft(win);
   S.letterWin = L.id; win.hidden = false;
   lettersShow(true);
@@ -2982,14 +2986,15 @@ const wovenOf = (L) => (L.weave ? weavableOf(L).filter((l) => L.weave.with.inclu
 /**
  * Weaving a cut-out with the lettering below it (`weave`, see layers.js): on or off — on, it weaves with the
  * title (or the lettering nearest below it), its head in front; the lettering layers below it, each ticked to
- * weave with; the way: its head in front and the rest behind, down to the line set, or the letters chosen in
- * front, chosen in a window of their own (weaveOpen).
+ * weave with; the way: its head in front and the rest behind, down to the line set, the letters chosen in
+ * front, chosen in a window of their own (weaveOpen), or where it is painted so on the canvas (brushOpen). A
+ * way chosen keeps the others' data, for going back to them.
  */
 function weaveControls(L) {
   const w = L.weave, below = weavableOf(L);
-  const put = (patch) => { L.weave = { ...L.weave, ...patch }; touch({ cover: true, side: true }); if (S.weaveWin) weaveShow(true); };
+  const put = (patch) => { L.weave = { ...L.weave, ...patch }; touch({ cover: true, side: true }); if (S.weaveWin) weaveShow(true); if (S.brushWin) brushShow(true); };
   const on = (v) => {
-    if (!v) { delete L.weave; weaveClose(); return touch({ cover: true, side: true }); }
+    if (!v) { delete L.weave; weaveClose(); brushClose(); return touch({ cover: true, side: true }); }
     const first = below.find((l) => l.id === "title") || below[0];
     L.weave = { with: first ? [first.id] : [], by: "head", line: 0.3, front: {} };
     touch({ cover: true, side: true });
@@ -3003,9 +3008,10 @@ function weaveControls(L) {
     check("weave.on", !!w, on),
     w && !below.length && el("div", { class: "hint" }, t("weave.none")),
     w && below.length > 0 && el("div", { class: "weave-with" }, below.map((l) => el("label", { class: "chk" }, el("input", { type: "checkbox", checked: w.with.includes(l.id), onchange: (e) => tick(l, e.target.checked) }), layerName(l)))),
-    w && el("div", { style: "margin-top:10px" }, select(["head", "letters"].map((k) => [k, t("weave.by." + k)]), w.by, (v) => put({ by: v }))),
+    w && el("div", { style: "margin-top:10px" }, select(WEAVE_WAYS.map((k) => [k, t("weave.by." + k)]), w.by, (v) => put({ by: v }))),
     w && w.by === "head" && slider("weave.line", 0.1, 0.9, 0.01, w.line, pct, (v) => { holdLive(L.id); L.weave = { ...L.weave, line: v }; touch({ cover: true }); }),
     w && w.by === "letters" && el("button", { class: "btn wide", style: "margin-top:8px", disabled: !wovenOf(L).length, onclick: () => weaveOpen(L) }, t("weave.choose")),
+    w && w.by === "brush" && el("button", { class: "btn wide", style: "margin-top:8px", disabled: !wovenOf(L).length, onclick: () => brushOpen(L) }, t("weave.paint")),
   ], t("weave.tip"));
 }
 
@@ -3016,7 +3022,7 @@ function weaveControls(L) {
 // selected, Setup, or the cut-out no longer woven letter by letter.
 function weaveOpen(L) {
   const win = $("weavewin") || document.body.appendChild(el("div", { id: "weavewin", role: "dialog", "aria-label": t("weave.title") }));
-  lettersClose(); cropClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
+  lettersClose(); cropClose(); brushClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
   overLeft(win);
   S.weaveWin = L.id; win.hidden = false;
   weaveShow(true);
@@ -3062,6 +3068,123 @@ function weaveLetters(L) {
   });
 }
 
+// ---------- the weave's brush: painted on the canvas, where the lettering comes in front of a cut-out and where it
+// stays behind (`strokes`, see normalizeWeave in layers.js). S.brushWin is the cut-out painted on; its panel
+// (#brushwin) stands over the left column as the weave and crop windows do, one of them closing the others, and
+// closes as they do (Esc, ×, Done, another layer selected, Setup, the cut-out no longer woven by the brush). While
+// it is open the canvas only paints: nothing there is selected, moved, scaled or turned, and of the keys only Esc and
+// undo do anything. A stroke is kept in the photo's own frame, its radius a share of the photo's longer side, so it
+// stays on what it was painted on whatever is done with the photo, at every size. While it is painted only the
+// cut-out is painted again each frame, the rest of the cover kept as images (LIVE, see drawCover), and its brush
+// mask is only drawn on (see brushMask in render.js); let go, it is one step of undo.
+/** The brush: how wide it paints, in the cover's own units (as the canvas's handles are); in front or behind; the stroke being painted and how to end it; where the pointer last was over the canvas. */
+const BRUSH = { size: 80, front: true, stroke: null, end: null, at: null };
+function brushOpen(L) {
+  const win = $("brushwin") || document.body.appendChild(el("div", { id: "brushwin", role: "dialog", "aria-label": t("brush.title") }));
+  lettersClose(); cropClose(); weaveClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
+  if (V3.on) close3d();   // it paints on the flat canvas
+  overLeft(win);
+  S.brushWin = L.id; win.hidden = false;
+  brushShow(true); queueDraw(false);
+}
+function brushClose() {
+  const win = $("brushwin"), ring = $("brushring");
+  if (win) win.hidden = true;
+  if (BRUSH.end) BRUSH.end();   // a stroke being painted ends where it is
+  if (ring) ring.hidden = true;
+  if (!S.brushWin) return;
+  S.brushWin = null; $("cv").style.cursor = "";
+  queueDraw(false);   // without the painted area over it
+}
+/** What the brush panel shows of cut-out L: when it is the same, it is not drawn again. */
+const brushNow = (L) => JSON.stringify([(L.weave.strokes || []).length, BRUSH.front, getLang()]);
+/** The brush panel drawn (again) for its cut-out as it is now, or closed (see above); unless `now`, only when what it shows changed. */
+function brushShow(now = false) {
+  const win = $("brushwin"), L = S.brushWin ? layer(S.brushWin) : null;
+  if (!win || win.hidden) return;
+  if (!L || !L.cut || !L.weave || L.weave.by !== "brush" || S.layerId !== L.id || S.mode !== "edit" || group().length) return brushClose();
+  const box = $("brush-box");
+  if (!now && box && box._layer === L && box.dataset.now === brushNow(L)) return;
+  const way = (front) => el("button", { class: "btn" + (BRUSH.front === front ? " on" : ""), title: t(front ? "brush.frontTip" : "brush.behindTip"), onclick: () => { BRUSH.front = front; brushShow(true); } }, t(front ? "brush.front" : "brush.behind"));
+  const inner = el("div", { id: "brush-box", "data-now": brushNow(L) },
+    slider("brush.size", 6, 400, 1, BRUSH.size, px, (v) => { BRUSH.size = v; }),
+    el("div", { class: "seg wide", style: "margin-top:10px" }, way(true), way(false)));
+  inner._layer = L;
+  win.replaceChildren(
+    el("div", { class: "head" }, el("b", {}, `${t("brush.title")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: brushClose }, "×")),
+    inner,
+    el("div", { class: "hint" }, t("brush.hint")),
+    el("div", { class: "acts" },
+      el("button", { class: "btn", disabled: !(L.weave.strokes || []).length, onclick: () => brushClear(L) }, t("brush.clear")),
+      el("button", { class: "btn", onclick: brushClose }, t("deal.done"))));
+}
+/** Takes every stroke away: one step of undo, as a stroke is. */
+function brushClear(L) {
+  clearTimeout(timers.hist); commitHistory();   // a change still waiting to be recorded is a step of its own
+  const { strokes, ...rest } = L.weave;
+  L.weave = rest;
+  touch({ cover: true }); clearTimeout(timers.hist); commitHistory();
+  brushShow(true);
+}
+/**
+ * A stroke of the brush, from where the pointer is pressed on the canvas to where it is let go: into the cut-out's
+ * strokes, each place the pointer passes taken into the photo's frame by the map its hit carries (`pf`), smoothed a
+ * little (brushNext), a point at least a quarter of the radius from the last; in front, or behind with Alt/Option
+ * held (or the other way round when the panel says behind). Within the strokes' limits (WEAVE_MAX), with a word
+ * when they are reached.
+ */
+function brushDown(e) {
+  const cv = $("cv"), L = layer(S.brushWin), hit = L && cv._hits && cv._hits.find((h) => h.id === L.id), rec = recordOf(L);
+  if (e.button !== 0 || BRUSH.stroke || !hit || !hit.pf || !rec || !rec.img || !L.weave) return;
+  const w = L.weave, used = strokePoints(w);
+  if ((w.strokes || []).length >= WEAVE_MAX.strokes || used >= WEAVE_MAX.total) return toast(t("brush.full"));
+  const [nw, nh] = sizeOf(rec.img), m = hit.pf, room = Math.min(WEAVE_MAX.points, WEAVE_MAX.total - used), aspect = nw / nh;
+  const fix = (q) => q && q.map((v) => Math.round(clamp(v, -1, 2) * 1e4) / 1e4);   // as normalizeWeave keeps it
+  const at = (ev) => { const p = virtualPoint(ev); return fix(photoPoint(m, p.x, p.y)); };
+  const r = Math.round(clamp(BRUSH.size / 2 / photoLong(m, nw, nh), BRUSH_R[0], BRUSH_R[1]) * 1e4) / 1e4, gap = r / 4;
+  const first = at(e);
+  if (!first) return;
+  clearTimeout(timers.hist); commitHistory();   // a change still waiting to be recorded is a step of its own
+  const st = { front: BRUSH.front !== e.altKey, r, pts: [first] }, recent = [first];
+  let full = false;
+  const add = (p) => { if (!p) return; if (st.pts.length < room) st.pts.push(p); else if (!full) { full = true; toast(t("brush.full")); } };
+  (w.strokes = w.strokes || []).push(st);
+  BRUSH.stroke = st;
+  LIVE = { ids: [L.id], key: "brush" };   // only the cut-out is painted again, the rest of the cover kept as it is
+  cv.onpointermove = (mv) => {
+    const all = mv.getCoalescedEvents ? mv.getCoalescedEvents() : [];
+    for (const ev of all.length ? all : [mv]) {   // every place the pointer was since the last event
+      const p = at(ev);
+      if (!p) continue;
+      recent.push(p); if (recent.length > 3) recent.shift();
+      add(fix(brushNext(st.pts, recent, gap, aspect)));
+    }
+    queueDraw();
+  };
+  const end = (up) => {
+    cv.onpointermove = cv.onpointerup = cv.onpointercancel = null; BRUSH.stroke = BRUSH.end = null;
+    const p = up && up.type === "pointerup" && at(up);
+    if (p) add(fix(brushNext(st.pts, [p], gap / 4, aspect)));   // it ends where the pointer was let go
+    persistCover(); commitHistory();   // the stroke: one step of undo
+    endLive(); brushShow(true);
+  };
+  cv.onpointerup = cv.onpointercancel = end;
+  BRUSH.end = () => end(null);
+  queueDraw();
+  cv.setPointerCapture(e.pointerId);
+}
+/** The brush's ring under the pointer over the canvas: as wide as it paints, dashed while it takes the lettering behind. */
+function brushRing(e) {
+  const cv = $("cv"), ring = $("brushring") || document.body.appendChild(el("div", { id: "brushring" }));
+  if (!S.brushWin || !cv._virtual) { ring.hidden = true; return; }
+  const b = cv.getBoundingClientRect(), d = Math.max(4, (BRUSH.size * b.width) / cv._virtual[0]), front = BRUSH.stroke ? BRUSH.stroke.front : BRUSH.front !== !!e.altKey;
+  BRUSH.at = { clientX: e.clientX, clientY: e.clientY };
+  Object.assign(ring.style, { left: `${e.clientX - d / 2}px`, top: `${e.clientY - d / 2}px`, width: `${d}px`, height: `${d}px` });
+  ring.classList.toggle("behind", !front); ring.hidden = false;
+}
+// Alt/Option pressed or let go over the canvas: the ring shows the way the next stroke will go
+for (const type of ["keydown", "keyup"]) addEventListener(type, (e) => { if (e.key === "Alt" && S.brushWin && BRUSH.at && !BRUSH.stroke) brushRing({ ...BRUSH.at, altKey: e.altKey }); });
+
 // The crop window (S.cropWin, the id of a photo or an asset layer): the whole picture, what the layer keeps of it
 // (`crop`, see layers.js) framed, the rest dimmed; the frame dragged by its inside, sides and corners, or drawn
 // anew outside it, at a shape of the user's or free. It stands over the left column, as the letter window does,
@@ -3071,7 +3194,7 @@ const CROP_RATIOS = [[null, "crop.free"], ["photo", "crop.photo"], [1, "1:1"], [
 const WHOLE = { x: 0, y: 0, w: 1, h: 1 };
 function cropOpen(L) {
   const win = $("cropwin") || document.body.appendChild(el("div", { id: "cropwin", role: "dialog", "aria-label": t("crop.title") }));
-  lettersClose(); weaveClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
+  lettersClose(); weaveClose(); brushClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
   overLeft(win);
   S.cropWin = L.id; win.hidden = false;
   cropShow(true);
@@ -3480,6 +3603,7 @@ function renderSide() {
   if (S.letterWin) lettersShow();   // the letter window follows its layer, or closes
   if (S.cropWin) cropShow();   // and the crop window
   if (S.weaveWin) weaveShow();   // and the weave window
+  if (S.brushWin) brushShow();   // and the brush's panel
   const side = $("side"), y = side.scrollTop, L = layer(), here = S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off);
   // keep typing in the text box alive across rebuilds
   const typing = document.activeElement && side.contains(document.activeElement) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename"));
@@ -3528,6 +3652,7 @@ function set3d(on) {
     stage3d();
     Object.assign(V3, { on: true, stale: true, s: 0, aim: null });
     V3.z.clear();
+  if (on) brushClose();   // the brush paints on the flat canvas (and its opening closes this)
     $("stage").classList.add("v3");
     sync3dHud();
   }
@@ -4040,7 +4165,7 @@ function setMode(mode) {
   if (mode !== "edit" && V3.on) close3d();   // the layer column is not there in Setup
   columns();   // the left column has a width of its own in Setup (and the handles' words follow the language)
   $("body").classList.toggle("setup", mode === "setup");
-  if (mode !== "edit") { lettersClose(); cropClose(); weaveClose(); }
+  if (mode !== "edit") { lettersClose(); cropClose(); weaveClose(); brushClose(); }
   syncTop(); syncTabs(); renderPanel(); renderSide(); syncToolbar(); queueDraw();
 }
 /**
@@ -4135,7 +4260,7 @@ function dealOpen() {
   const box = $("deal") || document.body.appendChild(el("div", { id: "deal", role: "dialog", "aria-label": t("top.surprise") }));
   const z = selSize(), locks = S.settings.surprise.locks;
   DEAL.hands = []; DEAL.kept = -1;
-  lettersClose(); cropClose(); weaveClose();   // the letter, crop and weave windows stand where this one does
+  lettersClose(); cropClose(); weaveClose(); brushClose();   // the letter, crop, weave and brush windows stand where this one does
   overLeft(box);
   box.style.setProperty("--ar", `${z.w} / ${z.h}`);
   const lock = (k) => el("button", { class: locks[k] ? "on" : "", title: t(`deal.lock.${k}Tip`), onclick: (e) => { if (locks[k]) delete locks[k]; else locks[k] = true; e.currentTarget.classList.toggle("on", !!locks[k]); persistSettings(); } }, t(`deal.lock.${k}`));
@@ -4322,6 +4447,11 @@ addEventListener("keydown", (e) => {
   if (key === "escape" && S.letterWin) return lettersClose();
   if (key === "escape" && S.cropWin) return cropClose();
   if (key === "escape" && S.weaveWin) return weaveClose();
+  if (S.brushWin && S.mode === "edit") {   // painting with the weave's brush: Esc leaves it, undo and redo go a stroke at a time, no other key acts
+    if (key === "escape") return brushClose();
+    if (mod && key === "z" && !BRUSH.stroke) { e.preventDefault(); return timeTravel(e.shiftKey ? 1 : -1); }
+    return;
+  }
   if (mod && key === "z") { e.preventDefault(); return timeTravel(e.shiftKey ? 1 : -1); }
   if (S.mode !== "edit") return;
   const L = layer();
@@ -4737,10 +4867,11 @@ async function selfTest(dir) {
     }
     // weaving: the real photo's subject cut out and set over the title, its head in front of the lettering and its
     // body behind it; then every other letter in front, in the house lettering, in one lettered upright and in the
-    // ransom note; each woven cover must differ from the unwoven one. The lettering half see-through, woven. A drag:
-    // the subject slid, the lettering let through where it is (as a still cover has it); the head line's slider
-    // dragged, the frames following it; the title dragged over the subject with a look effect on it, the effect
-    // not worked out again.
+    // ransom note; each woven cover must differ from the unwoven one. The lettering half see-through, woven. By the
+    // brush, a band along the title's second line in front, then up to the subject's middle behind again: each must
+    // differ. A drag: the subject slid, the lettering let through where it is (as a still cover has it); the head
+    // line's slider dragged, the frames following it; the title dragged over the subject with a look effect on it,
+    // the effect not worked out again.
     {
       const pic = canCut() && (await invoke("selftest_photo").catch(() => null));
       if (pic) {
@@ -4779,6 +4910,15 @@ async function selfTest(dir) {
           delete title.fx; front.weave.by = "head"; title.o = 0.5;
           const faint = await shot("weave-faint.png");
           title.o = 1;
+          // the brush: a band painted in front along the title's second line, in the photo's own frame; then, up to the
+          // middle of the subject, painted behind again
+          const headWeave = front.weave, hb = hitsOf(), H = hb.find((x) => x.id === front.id), T2 = hb.find((x) => x.id === "title"), [pw, ph2] = sizeOf(recordOf(front).img);
+          const y2 = T2.cy + T2.hh * 0.5, br = Math.round(((T2.hh * 0.4) / photoLong(H.pf, pw, ph2)) * 1e4) / 1e4, at = (x) => photoPoint(H.pf, x, y2).map((v) => Math.round(v * 1e4) / 1e4);
+          front.weave = { ...headWeave, by: "brush", strokes: [{ front: true, r: br, pts: [at(T2.cx - T2.hw), at(T2.cx + T2.hw)] }] };
+          const brush = await shot("weave-brush.png");
+          front.weave.strokes.push({ front: false, r: Math.round(br * 1.2 * 1e4) / 1e4, pts: [at(T2.cx - T2.hw), at(H.cx)] });   // to the middle of the subject
+          const brushErased = await shot("weave-brush-erased.png");
+          front.weave = headWeave;
           const snap = (c) => { const x = Object.assign(document.createElement("canvas"), { width: c.width, height: c.height }); x.getContext("2d").drawImage(c, 0, 0); return x; };
           // a drag of the subject: the first frame keeps it to slide, the next slides it and lets the lettering through again
           const cv = document.createElement("canvas"), live = { ids: [front.id] }, frameAt = () => paint(cv, size, size.w * S.settings.scale, S.cover, catIndex(), null, live);
@@ -4800,11 +4940,12 @@ async function selfTest(dir) {
             if (!cold || report.weave.effects.againWhileDragged) report.errors.push("weave: dragging the lettering works out the woven subject's look effects again");
             tl.t.all.x = x0; delete front.lookFx;
           }
-          report.weave = { ...report.weave, off: off.path, head: head.path, letters: letters.path, ransomOff: ransomOff.path, ransom: ransom.path, upright: upright.path, faint: faint.path, drag: dragged.path,
+          report.weave = { ...report.weave, off: off.path, head: head.path, letters: letters.path, ransomOff: ransomOff.path, ransom: ransom.path, upright: upright.path, faint: faint.path, brush: brush.path, brushErased: brushErased.path, drag: dragged.path,
             changed: { head: apart(off.cv, head.cv), letters: apart(off.cv, letters.cv), headLetters: apart(head.cv, letters.cv), ransom: apart(ransomOff.cv, ransom.cv), upright: apart(uprightOff.cv, upright.cv),
-              faint: apart(head.cv, faint.cv), dragFromStill: apart(dragged.cv, still), lineMoved, lineStill } };
+              faint: apart(head.cv, faint.cv), brush: apart(off.cv, brush.cv), brushErased: apart(brush.cv, brushErased.cv), brushLeft: apart(off.cv, brushErased.cv), dragFromStill: apart(dragged.cv, still), lineMoved, lineStill } };
           const ch = report.weave.changed;
           if (!ch.head) report.errors.push("weave: the head in front looks as the cover unwoven");
+          if (!ch.brush || !ch.brushErased || !ch.brushLeft) report.errors.push("weave: painted in front with the brush, the cover looks as unwoven, or as before part of it was painted behind again");
           if (!ch.letters || !ch.headLetters) report.errors.push("weave: the letters in front look as the cover unwoven, or as the head in front");
           if (!ch.ransom || !ch.upright) report.errors.push("weave: the letters in front of the ransom note, or of an upright lettering, look as the cover unwoven");
           if (!lineMoved || lineStill > lineMoved * 0.05) report.errors.push("weave: the head line's slider dragged, the frames do not follow it");
@@ -5160,7 +5301,7 @@ async function dragTest() {
   await invoke("selftest_done", { report: JSON.stringify(report, null, 2) }).catch(() => null);
 }
 // test hook: lets automated checks drive the app without the UI
-window.__smedcover = { S, drawCover, renderFull, nameFor, touch, addAsset, addLayer, newLayer, selectLayer, selectSize, setMode, layer, surprise, SURPRISE };
+window.__smedcover = { S, drawCover, renderFull, nameFor, touch, addAsset, addLayer, newLayer, selectLayer, selectSize, setMode, layer, surprise, SURPRISE, brushOpen, brushClose };
 start().catch((e) => {
   console.error(e);
   if (HOST !== "server") return fail(e);

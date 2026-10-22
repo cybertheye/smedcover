@@ -256,7 +256,9 @@ const PROPS = {
    * the subtitle, text, copies of the first two); `by` "head": its head in front of them and the rest of it
    * behind, the head ending at `line` (a share of the height of the box round its subject, from its top, in the
    * photo's own frame, so it turns and scales with it); `by` "letters": the letters chosen in front of it, the
-   * others behind (`front`: by layer id, their letterKeys, see ransom.js). Only a cut-out is woven; a whole photo
+   * others behind (`front`: by layer id, their letterKeys, see ransom.js); `by` "brush": the lettering in front
+   * where it was painted so, behind elsewhere (`strokes`, [{front, r, pts}] in order, in the photo's own frame:
+   * see normalizeWeave). Each way keeps its data while another is chosen. Only a cut-out is woven; a whole photo
    * again keeps it, for when it is cut out once more.
    */
   photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, feather: 0, spread: 0, outline: 0, torn: false, dash: false, shadow: 0 },
@@ -420,13 +422,30 @@ export function normalizeCrop(c) {
   const r = (v) => Math.round(v * 1e4) / 1e4, x = r(num(c.x, 0, 0, 0.98)), y = r(num(c.y, 0, 0, 0.98)), w = Math.min(r(num(c.w, 1, 0.02, 1)), r(1 - x)), h = Math.min(r(num(c.h, 1, 0.02, 1)), r(1 - y));
   return x > 1e-4 || y > 1e-4 || w < 0.9999 || h < 0.9999 ? { x, y, w, h } : null;
 }
-/** How many layers a cut-out weaves with at most, and how many letters of each it puts in front (see normalizeWeave). */
-const WEAVE_MAX = { with: 24, front: 400 };
+/**
+ * How many layers a cut-out weaves with at most, and how many letters of each it puts in front; how many brush
+ * strokes it keeps, points a stroke and points in all (see normalizeWeave).
+ */
+export const WEAVE_MAX = { with: 24, front: 400, strokes: 300, points: 2000, total: 12000 };
+/** A brush stroke's radius, in shares of the photo's longer side: the least and the most kept (see normalizeWeave). */
+export const BRUSH_R = [0.001, 0.5];
+/** The ways a cut-out weaves (see `weave` in PROPS.photo); the first when none is given. */
+export const WEAVE_WAYS = ["head", "letters", "brush"];
+const r4 = (v) => Math.round(v * 1e4) / 1e4;
 /**
  * A cut-out's weave (see PROPS.photo) as stored, cleaned: the ids of the layers it weaves with, each once, at most
- * 24; the way, "head" unless "letters"; where the head ends, 0.1–0.9 (0.3 when missing); the letters in front of
- * each layer it weaves with, each a letter's key once, at most 400. The layers are not looked up (each layer is
- * read on its own): those gone, or no longer below it, are passed by when it is painted. Null for no weave.
+ * 24; the way, "head" unless "letters" or "brush"; where the head ends, 0.1–0.9 (0.3 when missing); the letters in
+ * front of each layer it weaves with, each a letter's key once, at most 400; the brush strokes, in the order they
+ * were painted, each {front, r, pts}: in front (the lettering comes in front where it passes) unless `front` is
+ * false (it goes behind there again); its radius `r`, a share of the photo's longer side (0.001–0.5); its points
+ * [u, v], fractions of the picture's width and height (0 its left and top edge, 1 its right and bottom; within
+ * -1–2), so they are in the photo's own frame and follow it when it is moved, scaled, stretched or turned, at every
+ * size. A crop changes nothing of them (the picture stays where it is in its frame: they stay on what they were
+ * painted on), nor does a new picture put in its place. At most 300 strokes, 2000 points a stroke and 12000 in all,
+ * the first kept; each number to 4 decimals; a stroke with no point goes. `strokes` is left out when there are
+ * none. Every way's data is kept whichever is chosen, so going back to one finds it as it was. The layers are not
+ * looked up (each layer is read on its own): those gone, or no longer below it, are passed by when it is painted.
+ * Null for no weave.
  */
 export function normalizeWeave(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -434,10 +453,84 @@ export function normalizeWeave(raw) {
   const ids = [...new Set((Array.isArray(raw.with) ? raw.with : []).map(id).filter(Boolean))].slice(0, WEAVE_MAX.with);
   const from = raw.front && typeof raw.front === "object" && !Array.isArray(raw.front) ? raw.front : {};
   const front = Object.fromEntries(ids.map((k) => [k, Object.hasOwn(from, k) && Array.isArray(from[k]) ? [...new Set(from[k].filter((x) => typeof x === "string" && LETTER_KEY.test(x)))].slice(0, WEAVE_MAX.front) : []]).filter(([, keys]) => keys.length));
-  return { with: ids, by: raw.by === "letters" ? "letters" : "head", line: Math.round(num(raw.line, 0.3, 0.1, 0.9) * 1000) / 1000, front };
+  const strokes = [];
+  let left = WEAVE_MAX.total;
+  for (const s of Array.isArray(raw.strokes) ? raw.strokes : []) {
+    if (strokes.length >= WEAVE_MAX.strokes || left <= 0) break;
+    if (!s || typeof s !== "object" || !Array.isArray(s.pts)) continue;
+    const pts = [];
+    for (const p of s.pts) {
+      if (pts.length >= Math.min(WEAVE_MAX.points, left)) break;
+      if (Array.isArray(p) && p.length === 2 && typeof p[0] === "number" && typeof p[1] === "number" && Number.isFinite(p[0]) && Number.isFinite(p[1])) pts.push([r4(Math.min(2, Math.max(-1, p[0]))), r4(Math.min(2, Math.max(-1, p[1])))]);
+    }
+    if (!pts.length) continue;
+    left -= pts.length;
+    strokes.push({ front: s.front !== false, r: r4(num(s.r, 0.03, BRUSH_R[0], BRUSH_R[1])), pts });
+  }
+  return { with: ids, by: WEAVE_WAYS.includes(raw.by) ? raw.by : "head", line: Math.round(num(raw.line, 0.3, 0.1, 0.9) * 1000) / 1000, front, ...(strokes.length ? { strokes } : {}) };
 }
 /** The letters of layer `id` a weave puts in front (see `weave`): its own list, never what an object has from its prototype. */
 export const frontOf = (weave, id) => (weave && weave.front && Object.hasOwn(weave.front, id) && Array.isArray(weave.front[id]) ? weave.front[id] : []);
+/** How many points a weave's brush strokes have in all (see WEAVE_MAX). */
+export const strokePoints = (weave) => (weave && Array.isArray(weave.strokes) ? weave.strokes.reduce((n, s) => n + s.pts.length, 0) : 0);
+/** Whether a weave by the brush brings any lettering in front: a stroke in front, which a stroke behind may yet take back. */
+export const brushesFront = (weave) => !!(weave && weave.by === "brush" && Array.isArray(weave.strokes) && weave.strokes.some((s) => s.front));
+/**
+ * Where a photo is on the canvas, as the affine map [a, b, c, d, e, f] (as DOMMatrix takes it: x = a·u + c·v + e,
+ * y = b·u + d·v + f) from a point of its picture in fractions of it (u, v; see `strokes` in normalizeWeave) to the
+ * canvas: the picture's rectangle `rect` ({x, y, iw, ih}) in its frame, the frame at (cx, cy), stretched by kx, ky
+ * and turned r degrees about it (`at`, a photo's placement as PAINT.photo has it; none for a photo filling the
+ * canvas, whose rectangle is on the canvas already). Stretching and turning are the frame's, so a picture stretched
+ * stays a picture stretched: a stroke's round brush is as stretched as the photo.
+ */
+export function photoMap(rect, at = null) {
+  const { cx = 0, cy = 0, r = 0, kx = 1, ky = 1 } = at || {}, a = (r * Math.PI) / 180, cos = Math.cos(a), sin = Math.sin(a);
+  return [cos * kx * rect.iw, sin * kx * rect.iw, -sin * ky * rect.ih, cos * ky * rect.ih, cx + cos * kx * rect.x - sin * ky * rect.y, cy + sin * kx * rect.x + cos * ky * rect.y];
+}
+/** The canvas point of a photo's point (u, v), by its map m (see photoMap): where a stroke's point lands. */
+export const onCanvas = (m, u, v) => [m[0] * u + m[2] * v + m[4], m[1] * u + m[3] * v + m[5]];
+/** The photo's point [u, v] under the canvas point (x, y), by its map m (see photoMap); null when the map is flat. */
+export function photoPoint(m, x, y) {
+  const det = m[0] * m[3] - m[1] * m[2];
+  if (!det || !Number.isFinite(det)) return null;
+  const dx = x - m[4], dy = y - m[5];
+  return [(m[3] * dx - m[2] * dy) / det, (m[0] * dy - m[1] * dx) / det];
+}
+/**
+ * How long the longer side of a picture nw × nh is on the canvas by its map m (see photoMap), a stretch evened out
+ * (the mean of the two): what a brush stroke's radius is a share of, so a radius of r is r × this on the canvas.
+ */
+export const photoLong = (m, nw, nh) => Math.sqrt((Math.abs(m[0] * m[3] - m[1] * m[2]) * Math.max(nw, nh)) / Math.max(1e-9, Math.min(nw, nh)));
+/**
+ * The next point of a brush stroke being painted (`pts`, [u, v] in fractions of the photo, see normalizeWeave), or
+ * null for none yet: the mean of the last few places the pointer was (`recent`, the newest last), which smooths a
+ * hand's jitter a little, once it lies at least `gap` from the stroke's last point. `gap` is a share of the photo's
+ * longer side, and `aspect` the picture's width over its height, so a gap is as long across as down.
+ */
+export function brushNext(pts, recent, gap, aspect = 1) {
+  if (!recent.length) return null;
+  const n = Math.min(3, recent.length), tail = recent.slice(-n), p = [tail.reduce((s, q) => s + q[0], 0) / n, tail.reduce((s, q) => s + q[1], 0) / n];
+  const last = pts[pts.length - 1];
+  if (!last) return p;
+  const wx = aspect >= 1 ? 1 : aspect, wy = aspect >= 1 ? 1 / aspect : 1;   // a fraction of the width, and of the height, in shares of the longer side
+  return Math.hypot((p[0] - last[0]) * wx, (p[1] - last[1]) * wy) >= gap ? p : null;
+}
+/**
+ * What of a weave's strokes is still to be drawn onto a brush mask that has `drawn` of them ([{s, n, front, r}]: each
+ * stroke object drawn, how many of its points, its way and its radius then): {from, at}, the stroke and the point of
+ * it to go on from, when the mask only lacks what was added since — points at the end of the last stroke drawn,
+ * strokes after it (a stroke is painted in order, over those before it, so only the last may grow); null when it
+ * has to be drawn anew (a stroke changed, taken away or put in place of another, an undo).
+ */
+export function brushToDo(drawn, strokes) {
+  if (!Array.isArray(strokes) || drawn.length > strokes.length) return null;
+  for (let i = 0; i < drawn.length; i++) {
+    const d = drawn[i], s = strokes[i];
+    if (s !== d.s || s.front !== d.front || s.r !== d.r || s.pts.length < d.n || (i < drawn.length - 1 && s.pts.length !== d.n)) return null;
+  }
+  const last = drawn.length - 1;
+  return last >= 0 && strokes[last].pts.length > drawn[last].n ? { from: last, at: drawn[last].n } : { from: drawn.length, at: 0 };
+}
 /** Where a woven cut-out's head ends (see `weave`): `line` of the way down `box`, the box round its subject ({y0, y1}, fractions of the photo), as a fraction of the photo's height. */
 export const headLine = (box, line) => box.y0 + Math.min(0.9, Math.max(0.1, line)) * (box.y1 - box.y0);
 /** The layers a cut-out at index i of `layers` may weave with (see `weave`): the headline layers below it, bottom first. */

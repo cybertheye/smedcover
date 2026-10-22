@@ -2653,9 +2653,9 @@ test("weaving: a cut-out keeps which lettering it weaves with, how, where its he
   // read as written, the letters in front only of the layers it weaves with, each key once
   const w = photo({ with: ["title", "t<1>", "title", "", 7], by: "letters", line: 0.45, front: { title: ["0|W|1", "0|W|1", "1|穿|1", "bad", "0||1", 3], t1: ["2|a|10"], gone: ["0|x|1"] } }).weave;
   assert.deepEqual(w, { with: ["title", "t1"], by: "letters", line: 0.45, front: { title: ["0|W|1", "1|穿|1"], t1: ["2|a|10"] } });
-  // the way is the head unless letters; the line within 0.1–0.9, 0.3 when missing
+  // the way is the head unless letters or the brush; the line within 0.1–0.9, 0.3 when missing
   assert.deepEqual(photo({}).weave, { with: [], by: "head", line: 0.3, front: {} });
-  assert.deepEqual([photo({ by: "brush", line: 2 }).weave.by, photo({ line: 2 }).weave.line, photo({ line: -1 }).weave.line, photo({ line: "x" }).weave.line], ["head", 0.9, 0.1, 0.3]);
+  assert.deepEqual([photo({ by: "paint", line: 2 }).weave.by, photo({ by: "brush" }).weave.by, photo({ line: 2 }).weave.line, photo({ line: -1 }).weave.line, photo({ line: "x" }).weave.line], ["head", "brush", 0.9, 0.1, 0.3]);
   for (const bad of [null, "head", 3, ["title"]]) assert.equal("weave" in photo(bad), false, `no weave from ${JSON.stringify(bad)}`);
   assert.equal(normalizeWeave(undefined), null);
   // bounded: 24 layers, 400 letters each
@@ -2738,6 +2738,86 @@ test("weaving: copied from another channel, a cut-out weaves with the copies of 
   assert.equal(cut.of, id("a"));
   assert.deepEqual(cut.weave, { with: ["title", id("t1"), id("s2")], by: "letters", line: 0.3, front: { title: ["0|A|1"], [id("t1")]: ["0|h|1"], [id("s2")]: ["0|x|1"] } });
   assert.deepEqual(from.find((l) => l.id === "b").weave.with, ["title", "t1", "s2", "gone"], "the cover copied from is left as it was");
+});
+
+test("weaving by the brush: the strokes kept in the order painted, in the photo's own frame, cleaned and bounded, the other ways' choices kept beside them", async () => {
+  const { normalizeWeave, strokePoints, brushesFront, copyFreeLayers, WEAVE_MAX } = await import("../ui/js/layers.js");
+  const photo = (weave) => normalizeLayers([{ type: "photo", id: "cut", pid: "p1", cut: true, weave }]).find((l) => l.id === "cut");
+  const w = photo({ with: ["title"], by: "brush", line: 0.4, front: { title: ["0|A|1"] }, strokes: [
+    { front: true, r: 0.0312345, pts: [[0.123456, 0.5], [0.2, 0.55555555]] },
+    { front: false, r: 9, pts: [[3, -7], ["0.5", 0.5], [0.5], [NaN, 0.1], [0.4, 0.4]] },   // the radius and the points kept within bounds; a point not two numbers dropped
+    { r: 0.0001, pts: [[0.6, 0.6]] },   // in front unless said otherwise: a dab
+    { front: true, r: 0.05, pts: [] }, { front: true, r: 0.05 }, null, "x"] }).weave;   // nothing to paint: dropped
+  assert.deepEqual(w, { with: ["title"], by: "brush", line: 0.4, front: { title: ["0|A|1"] }, strokes: [
+    { front: true, r: 0.0312, pts: [[0.1235, 0.5], [0.2, 0.5556]] }, { front: false, r: 0.5, pts: [[2, -1], [0.4, 0.4]] }, { front: true, r: 0.001, pts: [[0.6, 0.6]] }] });
+  assert.deepEqual(normalizeWeave(JSON.parse(JSON.stringify(w))), w, "read back as written: an undo step reads the same");
+  // the other ways keep the strokes, and the brush keeps their choices: changing the way loses nothing
+  assert.deepEqual(photo({ ...w, by: "letters" }).weave, { ...w, by: "letters" });
+  assert.deepEqual(photo({ ...w, by: "head" }).weave.strokes, w.strokes);
+  assert.equal("strokes" in photo({ by: "brush", strokes: [] }).weave, false, "none: left out");
+  // what the brush puts in front: a stroke in front, by the brush
+  assert.deepEqual([brushesFront(w), brushesFront({ ...w, by: "head" }), brushesFront({ by: "brush", strokes: [w.strokes[1]] }), brushesFront({ by: "brush" }), brushesFront(null)], [true, false, false, false, false]);
+  assert.deepEqual([strokePoints(w), strokePoints({}), strokePoints(null)], [5, 0, 0]);
+  // bounded: 300 strokes, 2000 points a stroke, 12000 in all, the first kept (the last stroke taken in cut short)
+  const dab = { front: true, r: 0.02, pts: [[0.5, 0.5]] }, line = (n) => ({ front: true, r: 0.02, pts: Array.from({ length: n }, (_, i) => [i / n, 0.5]) });
+  assert.equal(normalizeWeave({ strokes: Array.from({ length: 400 }, () => dab) }).strokes.length, WEAVE_MAX.strokes);
+  assert.equal(normalizeWeave({ strokes: [line(3000)] }).strokes[0].pts.length, WEAVE_MAX.points);
+  const full = normalizeWeave({ strokes: [...Array.from({ length: 5 }, () => line(2000)), line(1500), line(900), dab] }).strokes;
+  assert.deepEqual([full.length, full.map((s) => s.pts.length).slice(-2), strokePoints({ strokes: full })], [7, [1500, 500], WEAVE_MAX.total]);
+  // copied from another channel: the strokes go with the cut-out
+  const from = normalizeLayers([{ type: "bg" }, { type: "photo", id: "a", pid: "p1", fill: true }, { type: "title" }, { type: "photo", id: "b", of: "a", cut: true, weave: w }]);
+  const { copies } = copyFreeLayers(normalizeLayers([{ type: "bg" }, { type: "title" }]), from), cut = copies.find((c) => c.of);
+  assert.deepEqual([cut.weave.by, cut.weave.with, cut.weave.strokes], ["brush", ["title"], w.strokes]);
+  assert.notEqual(cut.weave.strokes, from.find((l) => l.id === "b").weave.strokes, "a copy of its own");
+});
+
+test("weaving by the brush: a stroke's point lands where its place in the picture is, the photo moved, scaled, stretched or turned, at every size; and back", async () => {
+  const { photoMap, onCanvas, photoPoint, photoLong, brushNext, brushToDo } = await import("../ui/js/layers.js");
+  const near = (a, b, msg) => assert.ok(a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-6), `${msg}: ${JSON.stringify(a)} vs ${JSON.stringify(b)}`);
+  // a picture 2:1, as PAINT.photo frames it: 1000 by 500 about the frame's centre
+  const rect = { x: -500, y: -250, iw: 1000, ih: 500 }, at = { cx: 960, cy: 540, r: 0, kx: 1, ky: 1 };
+  near(onCanvas(photoMap(rect, at), 0, 0), [460, 290], "its top left corner");
+  near(onCanvas(photoMap(rect, at), 0.5, 0.5), [960, 540], "its middle at the frame's centre");
+  near(onCanvas(photoMap(rect, { ...at, cx: 100, cy: 50 }), 1, 1), [600, 300], "moved");
+  near(onCanvas(photoMap(rect, { ...at, r: 90 }), 1, 0.5), [960, 1040], "turned a quarter: its right edge's middle below the centre");
+  near(onCanvas(photoMap(rect, { ...at, kx: 2 }), 1, 0.5), [1960, 540], "stretched across");
+  near(onCanvas(photoMap({ x: -40, y: 0, iw: 2000, ih: 1000 }), 0.5, 0.25), [960, 250], "a photo filling the canvas: its rectangle on the canvas as it is");
+  // the editor takes the pointer back into the picture by the same map, however it is placed
+  for (const t of [at, { cx: 300, cy: -80, r: 33, kx: 1.7, ky: 0.6 }, { cx: 0, cy: 0, r: -170, kx: 0.2, ky: 3 }]) {
+    const m = photoMap(rect, t);
+    for (const [u, v] of [[0, 0], [0.31, 0.77], [1.4, -0.2]]) near(photoPoint(m, ...onCanvas(m, u, v)), [u, v], `back from ${JSON.stringify(t)}`);
+  }
+  assert.equal(photoPoint([0, 0, 0, 0, 1, 1], 5, 5), null, "a flat map: nowhere");
+  // a radius is a share of the photo's longer side on the canvas: turning does not change it, scaling does, a stretch by its mean
+  near([photoLong(photoMap(rect, at), 2000, 1000), photoLong(photoMap(rect, { ...at, r: 57 }), 2000, 1000), photoLong(photoMap({ x: 0, y: 0, iw: 2000, ih: 1000 }, at), 2000, 1000), photoLong(photoMap(rect, { ...at, kx: 4 }), 2000, 1000)], [1000, 1000, 2000, 2000], "the longer side");
+  near([photoLong(photoMap({ x: 0, y: 0, iw: 300, ih: 600 }, at), 1000, 2000)], [600], "upright");
+  // at every size: a free photo placed for all sizes, a point of it a third across and two thirds down its picture
+  for (const [vw, vh] of [[1920, 1080], [1080, 1920], [1200, 1200]]) {
+    const L = newLayer("photo", { pid: "p" }), key = `${vw}x${vh}`;
+    L.t.all = { x: 0.4, y: 0.55, s: 0.6, r: 12, kx: 1, ky: 1 };
+    const tr = resolve(L, vw, vh, key, "c"), long = 1000 * tr.s, m = photoMap({ x: -long / 2, y: -long / 4, iw: long, ih: long / 2 }, tr);
+    const p = onCanvas(m, 1 / 3, 2 / 3), o = onCanvas(m, 0, 0), a = (12 * Math.PI) / 180;
+    // back in the photo's own unturned frame, the point is a third of its width and two thirds of its height from its corner
+    const dx = p[0] - o[0], dy = p[1] - o[1];
+    near([(dx * Math.cos(a) + dy * Math.sin(a)) / long, (-dx * Math.sin(a) + dy * Math.cos(a)) / (long / 2)], [1 / 3, 2 / 3], `at ${key}`);
+  }
+  // a stroke's next point: the mean of the last three places, once a gap from the last point; across a wide picture a gap is as long as down it
+  assert.deepEqual(brushNext([], [[0.2, 0.3]], 0.05), [0.2, 0.3], "the first: where the pointer is");
+  assert.equal(brushNext([[0, 0]], [[0.01, 0]], 0.05), null, "too near: not yet");
+  near(brushNext([[0, 0]], [[0.1, 0], [0.2, 0.1], [0.3, -0.1], [0.4, 0]], 0.05), [0.3, 0], "smoothed: the mean of the last three");
+  assert.equal(brushNext([[0, 0]], [[0, 0.1]], 0.08, 2), null, "down a picture twice as wide as tall, a tenth of its height is a twentieth of its longer side");
+  near(brushNext([[0, 0]], [[0.1, 0]], 0.08, 2), [0.1, 0], "across it, a tenth");
+  // what a brush mask still lacks: the points added to the last stroke, the strokes after it; anything else, drawn anew
+  const a = { front: true, r: 0.1, pts: [[0, 0], [1, 1], [2, 2]] }, b = { front: false, r: 0.2, pts: [[0, 0]] }, drawn = [{ s: a, n: 3, front: true, r: 0.1 }];
+  assert.deepEqual(brushToDo([], [a]), { from: 0, at: 0 });
+  assert.deepEqual(brushToDo(drawn, [a]), { from: 1, at: 0 }, "nothing new");
+  a.pts.push([3, 3]);
+  assert.deepEqual(brushToDo(drawn, [a]), { from: 0, at: 3 }, "the stroke being painted, from its new points");
+  assert.deepEqual(brushToDo([{ s: a, n: 4, front: true, r: 0.1 }], [a, b]), { from: 1, at: 0 }, "a stroke after it");
+  assert.equal(brushToDo([{ s: a, n: 4, front: true, r: 0.1 }, { s: b, n: 1, front: false, r: 0.2 }], [a]), null, "a stroke taken away (an undo)");
+  assert.equal(brushToDo([{ s: a, n: 3, front: true, r: 0.1 }, { s: b, n: 1, front: false, r: 0.2 }], [a, b]), null, "a stroke under another grown");
+  assert.equal(brushToDo([{ s: { ...a }, n: 4, front: true, r: 0.1 }], [a]), null, "another object in its place");
+  assert.equal(brushToDo([{ s: a, n: 4, front: false, r: 0.1 }], [a]), null, "turned the other way");
 });
 
 test("the host: the app answers the native commands itself, a SmedCover server over HTTP, a plain page not at all; what each can do follows", async () => {

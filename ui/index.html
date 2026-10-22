@@ -313,13 +313,13 @@
   .lsw.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}.lsw.auto{background:var(--panel);color:#fff;font-size:12px}
   .lcol input[type=color]{width:30px;height:22px;padding:1px;background:var(--panel);border:2px solid var(--line);cursor:pointer}
   /* Surprise me's window: over the left column, the canvas left in view; the hands as they are dealt, the one kept marked */
-  #deal,#letterwin,#cropwin,#weavewin{position:fixed;z-index:35;background:var(--bg);border:3px solid #fff;box-shadow:8px 8px 0 var(--acc);padding:14px;display:grid;gap:10px;overflow:auto}
-  #deal[hidden],#letterwin[hidden],#cropwin[hidden],#weavewin[hidden]{display:none}
-  #deal .head,#letterwin .head,#cropwin .head,#weavewin .head{display:flex;align-items:center;justify-content:space-between;gap:8px}
-  #deal .head b,#letterwin .head b,#cropwin .head b,#weavewin .head b{font-size:15px}
-  #deal .x,#letterwin .x,#cropwin .x,#weavewin .x{background:none;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:0 4px;opacity:.7}
-  #deal .x:hover,#letterwin .x:hover,#cropwin .x:hover,#weavewin .x:hover{opacity:1}
-  #letterwin .hint,#cropwin .hint,#weavewin .hint{margin:0}
+  #deal,#letterwin,#cropwin,#weavewin,#brushwin{position:fixed;z-index:35;background:var(--bg);border:3px solid #fff;box-shadow:8px 8px 0 var(--acc);padding:14px;display:grid;gap:10px;overflow:auto}
+  #deal[hidden],#letterwin[hidden],#cropwin[hidden],#weavewin[hidden],#brushwin[hidden]{display:none}
+  #deal .head,#letterwin .head,#cropwin .head,#weavewin .head,#brushwin .head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  #deal .head b,#letterwin .head b,#cropwin .head b,#weavewin .head b,#brushwin .head b{font-size:15px}
+  #deal .x,#letterwin .x,#cropwin .x,#weavewin .x,#brushwin .x{background:none;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:0 4px;opacity:.7}
+  #deal .x:hover,#letterwin .x:hover,#cropwin .x:hover,#weavewin .x:hover,#brushwin .x:hover{opacity:1}
+  #letterwin .hint,#cropwin .hint,#weavewin .hint,#brushwin .hint{margin:0}
   /* the weave window: each letter of the lettering a cut-out weaves with, in front of it (lit) or behind it (faint, dashed) */
   #weave-box{display:grid;gap:14px}
   .wlayer{display:grid;gap:6px}.wlayer .whead{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
@@ -327,6 +327,10 @@
   .wl.on{border:2px solid var(--acc);background:var(--acc);color:var(--ink);opacity:1}
   .wkey{display:flex;gap:12px;align-items:center;font-size:12px;opacity:.85}.wkey .wl{height:22px;min-width:22px;font-size:12px;cursor:default}
   .weave-with{display:grid;gap:2px;margin-top:6px}
+  /* the weave's brush: its panel over the left column, its ring under the pointer on the canvas (dashed while it takes the lettering behind) */
+  #brushwin .sl{margin-top:0}
+  #brushring{position:fixed;z-index:20;pointer-events:none;border-radius:50%;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(7,7,12,.85),inset 0 0 0 1px rgba(7,7,12,.85)}
+  #brushring[hidden]{display:none}#brushring.behind{border-style:dashed}
   #crop-stage{background:repeating-conic-gradient(#2a2a33 0 25%,#1d1d24 0 50%) 0 0/16px 16px}
   #deal .hands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   #deal .hands.tall{grid-template-columns:repeat(3,minmax(0,1fr))}
