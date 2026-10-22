@@ -140,6 +140,7 @@ A cover is an array of layers, bottom first.
 | Kind | Types | Notes |
 |---|---|---|
 | Layout layers (`bound` in the code) | `bg` `accent` `graphic` `catname` `tag` `brand` `logo` `subtitle` `title` `frame` (their default order, bottom first: `BOUND_TYPES`) | Exactly one of each on every cover. Their content comes from elsewhere (the title text, the channel's graphic, …). They cannot be deleted; the `id` is the type name. All but `bg` and `frame` can be copied (`COPYABLE`). |
+| Free layers | `asset` `text` `photo` `solid` | Assets, text, photos and blocks of colour added by the user; can be deleted and duplicated. An asset may carry `ink` (a vector asset's colour of the user's, over its own and the channel's) and `crop` (as a photo's, see 6.3); a block carries `color` and is the canvas's size at scale 1. |
 | Copies of layout layers | a type of `COPYABLE`, with `copy: true` | Made by duplicating a layout layer; the user's, as a free layer is: can be deleted, renamed and duplicated. |
 
 `normalizeLayers()` repairs a layer list: it drops unknown layers, puts back missing layout layers,
@@ -547,6 +548,40 @@ Adding: an upload or a drop on the window goes through `addPhoto()` (into the ph
 
 Painting: the photo goes through the look's treatment of photos — the look's `background` hook is called with `env.photo` set to this picture and `drawPhoto` drawing it in its own frame — on the whole canvas (a look's washes must cover it), and then only the photo's rectangle is kept, or, with `cut`, only where the mask is opaque. A photo with no cut-out, outline or shadow is painted straight onto the canvas inside a rectangle clip, with no work canvas; the others are put together on work canvases. The outline and shadow come from the silhouette of the shape (the mask, or the photo's rectangle), made once at the photo's scale (at most 1024 px) and cached per shape, so a frame lays one image. With the style *Torn paper* (`torn`) the outline is `tornSheet()` instead, made at the same scale: an exact distance transform of the shape (`distanceField()`, after Felzenszwalb and Huttenlocher), then each pixel is paper if it is nearer the shape than the tear's radius there. The radius is a few layers of value noise: the slow bites and the jags along them in proportion to the outline's width, the small teeth and fibres at a fixed size in cover pixels (so the fibres are as fine on a large photo as on a small one), and it is kept between about 0.3 and 1.15 of the outline's width, so it never tears into the photo. Past the tear stands a fringe of loose fibres; inside it, a band of the paper's core (its colour mixed toward white) that runs wider and narrower, a very fine darker line within that, a faint tooth on the sheet, and the whole sheet throws a soft canvas shadow. The seed is the layer's id (`seedOf()`), so each photo tears its own way and keeps it. With the tear on, the shadow slider uses the torn shape too. Results are cached per shape, width and colour, as silhouettes are. With the style *Dashed* (`dash`; the one or the other) it is `dashedLine()`: the same distance transform, then the closed lines where the distance crosses the dashes' middle radius (`isolines()`, marching squares, the cells where two inside corners face each other decided by their middle, the lines chained so the inside is always on one side), smoothed and stroked with a dash pattern stretched so each closed line has a whole number of dashes; their weight about a third of the outline's width, the outer edge where a solid outline's would be. A copy makes no hit: clicks go through to what is under it.
 
+**Crop**: a photo not filling the canvas, and an asset, may carry `crop: {x, y, w, h}`, the part of the picture
+that shows, in fractions of it (`normalizeCrop()` in `layers.js`: at least 2% each way, within the picture,
+rounded to 1e-4; the whole picture is no crop, and drops the field). Nothing is cut from the picture. The
+photo's frame stays where it is, so the part kept does not move on the cover; only it is painted (the plain
+photo's clip, and the work canvas's `destination-in`, kept to it) and caught: the hit box is the crop's, or
+for a cut-out the box round its subject within the crop (`shownBox()`), with the frame's centre as `px`,
+`py`. So the editor scales, stretches and turns a cropped layer, as it does a cut-out, about what shows of it:
+`edit()` calls `aboutSubject()` for a cropped layer and for a photo cut out, not only for a passive one (a
+stretch along the layer's own axes, turned as it is). The outline, the torn edge, the dashed line and the
+shadow come from the part of the shape the crop keeps (`cropShape()`: the mask, or the plain rectangle, cut
+to the crop on a canvas the crop's size, `at` where it starts, laid down from the crop's corner; a dozen kept
+per shape, for copies of one photo cropped each its own way, so the caches by shape, `silhouette()`'s and the
+tear's, still hold). A photo filling the canvas
+ignores its crop; a cut-out made from a cropped photo starts with the same crop (`cutOut`). An asset
+(`PAINT.asset`) is clipped to its crop about the box `drawAsset()` gives it, which `assetHalf(ref)` in
+`assets.js` gives without drawing, and caught on what is left.
+
+The crop window (`#cropwin`: `cropOpen()`, `cropShow()`, `cropClose()`; `S.cropWin` is the layer it is for)
+is opened by *Crop…* in a photo's Place group or an asset's Crop group (`cropButton()`: *Adjust the crop…*
+once cropped; greyed out, with a tip, for a photo filling the canvas). It stands over the left column as the
+letter window does and shows the whole picture (`cropSource()`: a photo's picture, a cut-out's subject bright
+over the rest of it; an asset drawn in its colours on a canvas), the crop framed and the rest dimmed. A drag
+inside moves the frame, on a side or a corner resizes it, outside draws a new one from there; Shift keeps the
+shape the crop has. The maths is pure, in `layers.js`: `dragCrop(c, handle, dx, dy, ratio)` (a corner keeps
+the shape about the corner across, a side about the middle of the side across; within the picture, 2% at
+least each way), `drawnCrop(a, b, ratio)` (a frame drawn outside the old one, from where it was pressed
+toward the pointer, any way, once the pointer has gone a few pixels, so a click changes nothing) and
+`fitCrop(c, ratio)`, a crop of a shape as large as `c` (no larger than the picture
+holds), as near the middle of `c` as it goes, for the shape chips (*Free*, *Its own shape*, 1:1, 4:3, 3:4, 16:9, 9:16: in pixels,
+turned into fractions of the picture). Each step goes onto the layer through `normalizeCrop()` and is drawn
+as a drag is (`holdLive()`); the window shows how many pixels are kept. *No crop* clears it. It closes on
+Esc, *Done* or ×, when another layer is selected, when the photo comes to fill the canvas, and when Edit is
+left.
+
 The Background layer paints only the ground: the look's ground (its `background` hook with `photo: null`) or the theme's colour, and the grid. Light or dark (`style.theme`) is set in its properties; the Style tab no longer has it. When looks and themes ask whether there is a background photo, they mean the lowest visible photo filling the canvas on this channel (`env.photo`).
 
 Blur: canvas filters are not available in the macOS web view, so the gaussian blur is done in script — three box blurs approximate one gaussian, each a sliding window whose cost does not depend on the radius — on a reduced copy of the picture, cached by picture and amount (per picture).
@@ -570,6 +605,7 @@ The drag cache (`o.live`) cuts the layers into runs that move and runs that do n
 - **Channel graphics** and **stickers** are all drawn in code — there are no image files — so they are sharp at any size and can take the channel colour. `cel.js` provides a cel-shading kit (flat tones, ink lines, pseudo-3D boxes and prisms); `graphics.js` adds more through `registerGraphics()`.
 - **Uploads** are stored as data URLs in the app data directory and cached once decoded.
 - `drawAsset()` is the single entry point and returns the asset's half-extents for hit-testing.
+- `assetHalf(ref)` gives the same half-extents without drawing (null for an asset that is gone), for a cropped asset (see *Crop* in 6.3).
 
 ## 7. Looks (`style.js`)
 

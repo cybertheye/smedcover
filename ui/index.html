@@ -310,13 +310,14 @@
   .lsw.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}.lsw.auto{background:var(--panel);color:#fff;font-size:12px}
   .lcol input[type=color]{width:30px;height:22px;padding:1px;background:var(--panel);border:2px solid var(--line);cursor:pointer}
   /* Surprise me's window: over the left column, the canvas left in view; the hands as they are dealt, the one kept marked */
-  #deal,#letterwin{position:fixed;z-index:35;background:var(--bg);border:3px solid #fff;box-shadow:8px 8px 0 var(--acc);padding:14px;display:grid;gap:10px;overflow:auto}
-  #deal[hidden],#letterwin[hidden]{display:none}
-  #deal .head,#letterwin .head{display:flex;align-items:center;justify-content:space-between;gap:8px}
-  #deal .head b,#letterwin .head b{font-size:15px}
-  #deal .x,#letterwin .x{background:none;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:0 4px;opacity:.7}
-  #deal .x:hover,#letterwin .x:hover{opacity:1}
-  #letterwin .hint{margin:0}
+  #deal,#letterwin,#cropwin{position:fixed;z-index:35;background:var(--bg);border:3px solid #fff;box-shadow:8px 8px 0 var(--acc);padding:14px;display:grid;gap:10px;overflow:auto}
+  #deal[hidden],#letterwin[hidden],#cropwin[hidden]{display:none}
+  #deal .head,#letterwin .head,#cropwin .head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  #deal .head b,#letterwin .head b,#cropwin .head b{font-size:15px}
+  #deal .x,#letterwin .x,#cropwin .x{background:none;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:0 4px;opacity:.7}
+  #deal .x:hover,#letterwin .x:hover,#cropwin .x:hover{opacity:1}
+  #letterwin .hint,#cropwin .hint{margin:0}
+  #crop-stage{background:repeating-conic-gradient(#2a2a33 0 25%,#1d1d24 0 50%) 0 0/16px 16px}
   #deal .hands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   #deal .hands.tall{grid-template-columns:repeat(3,minmax(0,1fr))}
   #deal figure{margin:0;border:2px solid var(--line);background:var(--panel);min-width:0}

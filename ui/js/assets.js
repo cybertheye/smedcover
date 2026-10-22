@@ -51,6 +51,17 @@ const specColour = (spec) => [1, 3, 5].map((i) => parseInt(spec.color.slice(i, i
 /** Whether an asset can take on the category colour. */
 export const canTint = (ref) => !!ref && (ref.kind !== "user" || !!userAssets.get(ref.id)?.spec);
 
+/** The half-extents {hw, hh} drawAsset gives an asset, without drawing it; null when it is missing. */
+export function assetHalf(ref) {
+  if (!ref) return null;
+  if (ref.kind === "graphic") { if (!GRAPHICS.some((g) => g.id === ref.id)) return null; const r = graphicRadius(ref.id, 1); return { hw: r, hh: r }; }
+  if (ref.kind === "sticker") return stickerById(ref.id) ? { hw: 300, hh: 300 } : null;
+  const a = userAssets.get(ref.id);
+  if (a && a.spec) return { hw: 300, hh: 300 };
+  if (!a || !a.img.naturalWidth) return null;
+  const k = 600 / Math.max(a.img.naturalWidth, a.img.naturalHeight);
+  return { hw: (a.img.naturalWidth * k) / 2, hh: (a.img.naturalHeight * k) / 2 };
+}
 /**
  * Draws an asset centred on the origin so that it roughly fills a 600 x 600 box.
  *   color   category colour [r,g,b]; graphics always use it, stickers only when opts.tint

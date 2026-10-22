@@ -2360,3 +2360,46 @@ test("a layout layer but the ground and the corner brackets can be copied: a lay
   assert.equal(tc.t.all.y, 0.4);
   assert.equal(cover.layers.at(-1).id, "title");
 });
+
+test("a photo may be cropped: kept within the picture, dragged by its sides and corners at a shape of its own or free, fitted to a shape", async () => {
+  const { normalizeCrop, dragCrop, drawnCrop, fitCrop } = await import("../ui/js/layers.js");
+  const near = (a, b) => ["x", "y", "w", "h"].every((k) => Math.abs(a[k] - b[k]) < 1e-6);
+  // read: within the picture, at least 2% each way, rounded; the whole picture is no crop
+  assert.equal(normalizeCrop(null), null);
+  assert.equal(normalizeCrop({ x: 0, y: 0, w: 1, h: 1 }), null);
+  assert.deepEqual(normalizeCrop({ x: 0.25, y: 0.1, w: 0.5249999999999999, h: 0.7 }), { x: 0.25, y: 0.1, w: 0.525, h: 0.7 });
+  assert.deepEqual(normalizeCrop({ x: 0.9, y: -1, w: 0.5, h: 0 }), { x: 0.9, y: 0, w: 0.1, h: 0.02 });
+  assert.deepEqual(normalizeCrop({ x: "a", y: 0.5, w: 2, h: 0.5 }), { x: 0, y: 0.5, w: 1, h: 0.5 });
+  const L = normalizeLayers([{ type: "photo", pid: "p1", crop: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 } }, { type: "photo", pid: "p2", crop: { x: 0, y: 0, w: 1, h: 1 } }]).filter((l) => l.type === "photo");
+  assert.deepEqual([L[0].crop, "crop" in L[1]], [{ x: 0.1, y: 0.2, w: 0.3, h: 0.4 }, false]);
+  // dragged: moved within the picture; a side or a corner, free
+  const c = { x: 0.2, y: 0.2, w: 0.4, h: 0.4 };
+  assert.ok(near(dragCrop(c, "move", 0.1, -0.05), { x: 0.3, y: 0.15, w: 0.4, h: 0.4 }));
+  assert.ok(near(dragCrop(c, "move", 0.9, -0.9), { x: 0.6, y: 0, w: 0.4, h: 0.4 }), "stops at the picture's edge");
+  assert.ok(near(dragCrop(c, "w", -0.1, 0.3), { x: 0.1, y: 0.2, w: 0.5, h: 0.4 }));
+  assert.ok(near(dragCrop(c, "se", 0.1, 0.2), { x: 0.2, y: 0.2, w: 0.5, h: 0.6 }));
+  assert.ok(near(dragCrop(c, "nw", 0.5, 0.5), { x: 0.58, y: 0.58, w: 0.02, h: 0.02 }), "never smaller than 2%");
+  assert.ok(near(dragCrop(c, "e", 0.9, 0), { x: 0.2, y: 0.2, w: 0.8, h: 0.4 }), "nor out of the picture");
+  // at a shape: a corner keeps it from the corner across, a side about the middle of the side across
+  for (const [h, dx, dy] of [["se", 0.2, 0.05], ["nw", -0.1, -0.15], ["ne", 0.3, 0.3], ["sw", -0.05, 0.1], ["e", 0.15, 0], ["n", 0, -0.12], ["s", 0, 0.3], ["w", -0.3, 0]]) {
+    for (const ratio of [1, 0.5625, 2]) {
+      const d = dragCrop(c, h, dx, dy, ratio);
+      assert.ok(Math.abs(d.w / d.h - ratio) < 1e-9, `${h} keeps ${ratio}`);
+      assert.ok(d.x >= -1e-9 && d.y >= -1e-9 && d.x + d.w <= 1 + 1e-9 && d.y + d.h <= 1 + 1e-9, `${h} at ${ratio} stays within the picture`);
+      if (h === "se") assert.ok(near({ x: d.x, y: d.y, w: 0, h: 0 }, { x: 0.2, y: 0.2, w: 0, h: 0 }), "the corner across stays put");
+      if (h === "e") assert.ok(Math.abs(d.y + d.h / 2 - 0.4) < 1e-9 && Math.abs(d.x - 0.2) < 1e-9, "about the middle, the side across put");
+    }
+  }
+  // drawn anew outside the frame: from where it was pressed toward the pointer, any way, within the picture
+  assert.ok(near(drawnCrop({ x: 0.5, y: 0.5 }, { x: 0.2, y: 0.1 }), { x: 0.2, y: 0.1, w: 0.3, h: 0.4 }), "up and to the left too");
+  assert.ok(near(drawnCrop({ x: 0.5, y: 0.5 }, { x: 0.9, y: 0.6 }, 2), { x: 0.5, y: 0.5, w: 0.4, h: 0.2 }));
+  const out = drawnCrop({ x: 0.8, y: 0.8 }, { x: 1.5, y: 0.9 }, 1);
+  assert.ok(Math.abs(out.w / out.h - 1) < 1e-9 && out.x + out.w <= 1 + 1e-9 && out.y + out.h <= 1 + 1e-9, "at its shape, stopped by the picture's edge");
+  // fitted to a shape: as large as the crop was (no larger than the picture holds), about its middle, within the picture
+  assert.ok(near(fitCrop(c, 1), c), "already of that shape");
+  const half = fitCrop(c, 0.5);
+  assert.ok(Math.abs(half.w * half.h - 0.16) < 1e-9 && Math.abs(half.w / half.h - 0.5) < 1e-9 && Math.abs(half.x + half.w / 2 - 0.4) < 1e-9 && Math.abs(half.y + half.h / 2 - 0.4) < 1e-9);
+  const edge = fitCrop({ x: 0.7, y: 0.1, w: 0.3, h: 0.2 }, 2);
+  assert.ok(Math.abs(edge.w / edge.h - 2) < 1e-9 && Math.abs(edge.x + edge.w - 1) < 1e-9 && edge.y >= 0, "kept within the picture");
+  assert.ok(near(fitCrop({ x: 0, y: 0, w: 1, h: 1 }, 1), { x: 0, y: 0, w: 1, h: 1 }) && near(fitCrop({ x: 0, y: 0, w: 1, h: 1 }, 0.75), { x: 0.125, y: 0, w: 0.75, h: 1 }), "from the whole picture: the largest of that shape");
+});

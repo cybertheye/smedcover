@@ -10,8 +10,8 @@ import { useFont } from "./store.js";
 import { platformsFor, ratioOf } from "./platforms.js";
 import { boxOf, overlap, titleContrast } from "./check.js";
 import { baseRecipe, FAMILIES, RULES, dealCover, coverScore, pickHand } from "./deal.js";
-import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF } from "./layers.js";
+import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
+import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
@@ -403,10 +403,11 @@ function holdLive(id) { goLive(id); later("live", 300, endLive); }
 /**
  * Applies a placement edit to a layer in the current scope, then redraws. A linked cut-out's moves are
  * its photo's (the two move together); its size, angle and stretch are its own, changed about its subject.
+ * A photo cut out, or a photo or an asset cropped, is scaled and turned about what shows of it.
  */
 function edit(L, patch) {
   const A = owner(L);
-  if (A === L) adjust(L, frame(), S.settings.scope, patch);
+  if (A === L) { adjust(L, frame(), S.settings.scope, patch); if (L.crop || (L.type === "photo" && L.cut)) aboutSubject(L, patch); }
   else {
     const { ddx, ddy, ...own } = patch;
     if (ddx || ddy) adjust(A, frame(), S.settings.scope, { ddx, ddy });
@@ -415,14 +416,18 @@ function edit(L, patch) {
   touch({ cover: true });
 }
 /**
- * Keeps a cut-out's subject where it is while the cut-out is scaled or turned: the centre of its frame
- * (the hit's px, py) is moved round the subject's (the hit's centre) by the same amount.
+ * Keeps a cut-out's subject (a cropped layer's part kept) where it is while it is scaled, stretched or turned:
+ * the centre of its frame (the hit's px, py) is moved round the subject's (the hit's centre) by the same amount.
  */
-function aboutSubject(L, { scale, rot }) {
+function aboutSubject(L, { scale, rot, kx, ky }) {
   const h = $("cv")._hits && $("cv")._hits.find((x) => x.id === L.id);
-  if (!h || h.px == null || (!scale && !rot)) return;
+  if (!h || h.px == null || (!scale && !rot && !kx && !ky)) return;
   let vx = h.px - h.cx, vy = h.py - h.cy;
   if (scale) { vx *= scale; vy *= scale; }
+  if (kx || ky) {   // along the layer's own axes, turned as it is
+    const a = ((h.r || 0) * Math.PI) / 180, c = Math.cos(a), n = Math.sin(a), lx = (vx * c + vy * n) * (kx || 1), ly = (-vx * n + vy * c) * (ky || 1);
+    vx = lx * c - ly * n; vy = lx * n + ly * c;
+  }
   if (rot) { const a = (rot * Math.PI) / 180, c = Math.cos(a), n = Math.sin(a); [vx, vy] = [vx * c - vy * n, vx * n + vy * c]; }
   adjust(L, frame(), S.settings.scope, { ddx: h.cx + vx - h.px, ddy: h.cy + vy - h.py });
   h.px = h.cx + vx; h.py = h.cy + vy;   // until the cover is drawn again
@@ -1365,6 +1370,7 @@ async function cutOut(L) {
   if (had) { touch({ cover: true, side: true, panel: true }); toast(t("cut.redone")); return had; }
   const c = newLayer("photo", { of: L.id, cut: true, own: true });
   c.t = alignedT(L);
+  if (L.crop && !L.fill) c.crop = { ...L.crop };   // of what the photo keeps
   if (L.cats) c.cats = [...L.cats];
   const at = (id) => S.cover.layers.findIndex((l) => l.id === id);
   insertAbove(S.cover.layers, at(L.id) > at("title") ? L.id : "title", c);
@@ -2466,6 +2472,7 @@ function overLeft(box) {
 /** Opens the letter window for layer L. */
 function lettersOpen(L) {
   const win = $("letterwin") || document.body.appendChild(el("div", { id: "letterwin", role: "dialog", "aria-label": t("props.sec.letters"), onpointerdown: () => { letterHeld = true; } }));
+  cropClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
   overLeft(win);
   S.letterWin = L.id; win.hidden = false;
   lettersShow(true);
@@ -2624,6 +2631,7 @@ function photoControls(L, set) {
     L.cut = on; touch({ cover: true, side: true, panel: onCoverTab() });
   };
   const unlinkBtn = (L.of || linked.length > 0) && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => askUnlink(L) }, t("link.unlink"));
+  const cropBtn = cropButton(L);
   return [
     !rec && el("div", { class: "hint err", style: "margin:0 0 10px" }, t("props.photoMissing")),
     psec("props.sec.cut", [
@@ -2639,9 +2647,9 @@ function photoControls(L, set) {
     L.of
       ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")),
           base && el("button", { class: "btn wide", style: "margin-top:8px", title: t("link.realignTip"), onclick: () => { L.t = alignedT(base); touch({ cover: true, side: true }); } }, t("link.realign")),
-          unlinkBtn], t("link.passiveMore"), "first")
+          cropBtn, unlinkBtn], t("link.passiveMore"), "first")
       : psec("props.sec.place", [check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
-          linked.length > 0 && el("div", { class: "hint" }, t("link.leads", linked.map(layerName).join(" · "))), unlinkBtn],
+          linked.length > 0 && el("div", { class: "hint" }, t("link.leads", linked.map(layerName).join(" · "))), cropBtn, unlinkBtn],
           t(L.fill ? "props.fillHint" : "props.printHint")),
     psec("props.sec.picture", [
       slider("props.blur", 0, 80, 1, L.blur, px, (v) => { holdLive(L.id); set("blur", v); }),
@@ -2656,6 +2664,117 @@ function photoControls(L, set) {
         return el("button", { class: "btn" + (now === k ? " on" : ""), onclick: () => { L.torn = k === "torn"; L.dash = k === "dash"; if (k !== "solid" && !(L.outline > 0)) L.outline = 16; touch({ cover: true, side: true, panel: true }); } }, t("props.edge." + k));   // with no outline yet, one to see it on
       })))], t("props.photoLinesTip")),
   ];
+}
+// The crop window (S.cropWin, the id of a photo or an asset layer): the whole picture, what the layer keeps of it
+// (`crop`, see layers.js) framed, the rest dimmed; the frame dragged by its inside, sides and corners, or drawn
+// anew outside it, at a shape of the user's or free. It stands over the left column, as the letter window does,
+// and closes when another layer is selected, or the photo comes to fill the canvas.
+const CROP = { ratio: null };   // the shape kept: null free, "photo" the picture's own, or width / height
+const CROP_RATIOS = [[null, "crop.free"], ["photo", "crop.photo"], [1, "1:1"], [4 / 3, "4:3"], [3 / 4, "3:4"], [16 / 9, "16:9"], [9 / 16, "9:16"]];
+const WHOLE = { x: 0, y: 0, w: 1, h: 1 };
+function cropOpen(L) {
+  const win = $("cropwin") || document.body.appendChild(el("div", { id: "cropwin", role: "dialog", "aria-label": t("crop.title") }));
+  lettersClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
+  overLeft(win);
+  S.cropWin = L.id; win.hidden = false;
+  cropShow(true);
+}
+function cropClose() { const win = $("cropwin"); if (win) win.hidden = true; S.cropWin = null; }
+/**
+ * The whole of what layer L shows, for the crop window: {im, nw, nh, mask} — a photo's picture (and the mask of its
+ * subject when it is cut out), an asset drawn in its colours; null when there is nothing to crop (a photo filling
+ * the canvas, an asset gone from the library).
+ */
+const canCrop = (L) => !!L && (L.type === "photo" ? !!recordOf(L)?.img && !(L.fill && !L.of) : L.type === "asset" && !!assetHalf(L.ref));
+function cropSource(L) {
+  if (!canCrop(L)) return null;
+  if (L.type === "photo") { const rec = recordOf(L), im = rec.img; return { im, nw: im.naturalWidth || im.width, nh: im.naturalHeight || im.height, mask: L.cut && rec.mask && rec.mask.img }; }
+  const half = assetHalf(L.ref);
+  const f = Math.min(2, 1200 / (2 * Math.max(half.hw, half.hh))), im = el("canvas", { width: Math.round(2 * half.hw * f), height: Math.round(2 * half.hh * f) }), g = im.getContext("2d");
+  g.translate(im.width / 2, im.height / 2); g.scale(f, f);
+  drawAsset(g, L.ref, L.ink ? hexToRgb(L.ink) : hexToRgb(cat().color), { tint: L.tint || !!L.ink });
+  return { im, nw: im.width, nh: im.height, mask: null };
+}
+/** The button opening the crop window for L, in its properties. */
+function cropButton(L) {
+  const no = !canCrop(L), fills = L.type === "photo" && L.fill && !L.of;
+  return el("button", { class: "btn wide", style: "margin-top:8px", disabled: no, title: t(fills ? "crop.fillTip" : "crop.openTip"), onclick: () => cropOpen(L) }, t(L.crop && !no ? "crop.edit" : "crop.open"));
+}
+/** The crop window drawn (again) for its layer as it is now, or closed (see above); unless `now`, only when the layer or its crop changed (an undo). */
+function cropShow(now = false) {
+  const win = $("cropwin"), L = S.cropWin ? layer(S.cropWin) : null;
+  if (!win || win.hidden) return;
+  if (!L || S.layerId !== L.id || S.mode !== "edit") return cropClose();
+  const stage = $("crop-stage");
+  if (!now && stage && stage._layer === L && JSON.stringify(stage._crop) === JSON.stringify(L.crop || null)) return;
+  const src = cropSource(L);
+  if (!src) return cropClose();
+  const { im, nw, nh, mask } = src;
+  const cv = el("canvas", { id: "crop-stage", style: "width:100%;display:block;touch-action:none;cursor:crosshair" });
+  cv._layer = L; cv._crop = L.crop || null;
+  const shape = (r) => (r === "photo" ? 1 : r ? (r * nh) / nw : null);   // a shape as dragCrop wants it: in fractions of the picture
+  const size = $("crop-size") || el("div", { id: "crop-size", class: "hint" });
+  const put = (c) => {
+    const n = normalizeCrop(c);
+    if (JSON.stringify(n) === JSON.stringify(L.crop || null)) return;
+    if (n) L.crop = n; else delete L.crop;
+    cv._crop = L.crop || null;
+    holdLive(L.id); touch({ cover: true });
+  };
+  // the picture fitted to the window, the frame over it; drawn again as it is dragged
+  let k = 1, ox = 0, oy = 0, still = null;
+  const draw = () => {
+    const w = cv.clientWidth || 400, h = Math.min(360, Math.round((w * nh) / nw)), dpr = window.devicePixelRatio || 1;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + "px"; }
+    k = Math.min(w / nw, h / nh); ox = (w - nw * k) / 2; oy = (h - nh * k) / 2;
+    const g = cv.getContext("2d"), c = L.crop || WHOLE, X = ox + c.x * nw * k, Y = oy + c.y * nh * k, W = c.w * nw * k, H = c.h * nh * k;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+    if (mask) {   // cut out: the subject bright over the rest of the picture
+      if (!still) { still = Object.assign(document.createElement("canvas"), { width: nw, height: nh }); const s = still.getContext("2d"); s.drawImage(im, 0, 0); s.globalCompositeOperation = "destination-in"; s.drawImage(mask, 0, 0, nw, nh); }
+      g.globalAlpha = 0.35; g.drawImage(im, ox, oy, nw * k, nh * k); g.globalAlpha = 1; g.drawImage(still, ox, oy, nw * k, nh * k);
+    } else g.drawImage(im, ox, oy, nw * k, nh * k);
+    g.fillStyle = "rgba(7,7,12,.6)"; g.beginPath(); g.rect(ox, oy, nw * k, nh * k); g.rect(X, Y, W, H); g.fill("evenodd");
+    g.strokeStyle = "rgba(255,255,255,.35)"; g.lineWidth = 1; g.beginPath();
+    for (const f of [1 / 3, 2 / 3]) { g.moveTo(X + W * f, Y); g.lineTo(X + W * f, Y + H); g.moveTo(X, Y + H * f); g.lineTo(X + W, Y + H * f); }
+    g.stroke();
+    g.strokeStyle = "#07070c"; g.lineWidth = 3; g.strokeRect(X, Y, W, H); g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.strokeRect(X, Y, W, H);
+    for (const [hx, hy] of grips(X, Y, W, H)) { g.fillStyle = "#fff"; g.fillRect(hx - 4, hy - 4, 8, 8); g.strokeStyle = "#07070c"; g.lineWidth = 1; g.strokeRect(hx - 4, hy - 4, 8, 8); }
+    size.textContent = t("crop.size", Math.round(c.w * nw), Math.round(c.h * nh), nw, nh);
+  };
+  const grips = (X, Y, W, H) => [[X, Y, "nw"], [X + W / 2, Y, "n"], [X + W, Y, "ne"], [X + W, Y + H / 2, "e"], [X + W, Y + H, "se"], [X + W / 2, Y + H, "s"], [X, Y + H, "sw"], [X, Y + H / 2, "w"]];
+  const at = (e) => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left - ox) / (nw * k), y: (e.clientY - r.top - oy) / (nh * k), px: e.clientX - r.left, py: e.clientY - r.top }; };
+  const grabbed = (p) => {   // a corner, then a side along its length, then the inside
+    const c = L.crop || WHOLE, X = ox + c.x * nw * k, Y = oy + c.y * nh * k, W = c.w * nw * k, H = c.h * nh * k, near = (a, b) => Math.abs(a - b) <= 8;
+    const g = grips(X, Y, W, H).find(([hx, hy, n]) => n.length === 2 && near(p.px, hx) && near(p.py, hy));
+    if (g) return g[2];
+    const across = p.px > X - 8 && p.px < X + W + 8, down = p.py > Y - 8 && p.py < Y + H + 8;
+    const side = (down && near(p.px, X) && "w") || (down && near(p.px, X + W) && "e") || (across && near(p.py, Y) && "n") || (across && near(p.py, Y + H) && "s");
+    return side || (p.px > X && p.px < X + W && p.py > Y && p.py < Y + H ? "move" : null);
+  };
+  cv.onpointermove = (e) => { if (!cv._drag) { const g = grabbed(at(e)); cv.style.cursor = !g ? "crosshair" : g === "move" ? "move" : `${g}-resize`; } };
+  cv.onpointerdown = (e) => {
+    e.preventDefault(); cv.setPointerCapture(e.pointerId);
+    let last = at(e);
+    const handle = grabbed(last), from = { x: Math.min(1, Math.max(0, last.x)), y: Math.min(1, Math.max(0, last.y)), px: last.px, py: last.py };
+    const keep = (L.crop || WHOLE).w / (L.crop || WHOLE).h;   // Shift keeps the shape it has
+    cv._drag = true;
+    cv.onpointermove = (m) => {
+      const p = at(m), r = m.shiftKey ? keep : shape(CROP.ratio);
+      if (handle) put(dragCrop(L.crop || WHOLE, handle, p.x - last.x, p.y - last.y, handle === "move" ? null : r));
+      else if (Math.hypot(p.px - from.px, p.py - from.py) > 4) put(drawnCrop(from, p, r));   // outside the frame: a new one, from where it was pressed (a click alone changes nothing)
+      last = p; draw();
+    };
+    cv.onpointerup = cv.onpointercancel = () => { cv._drag = false; cropShow(true); };
+  };
+  const chip = ([r, label]) => el("button", { class: CROP.ratio === r ? "on" : "", onclick: () => { CROP.ratio = r; if (r) put(fitCrop(L.crop || WHOLE, shape(r))); cropShow(true); } }, label.includes(":") ? label : t(label));
+  win.replaceChildren(
+    el("div", { class: "head" }, el("b", {}, `${t("crop.title")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: cropClose }, "×")),
+    cv,
+    el("div", { class: "chips small" }, CROP_RATIOS.map(chip)),
+    size,
+    el("div", { class: "hint" }, t("crop.hint")),
+    el("div", { class: "acts" }, el("button", { class: "btn", disabled: !L.crop, onclick: () => { put(WHOLE); cropShow(true); } }, t("crop.reset")), el("button", { class: "btn", onclick: cropClose }, t("deal.done"))));
+  requestAnimationFrame(draw);
 }
 /**
  * The colour of a vector asset: its own colours, the channel colour, or one of the user's
@@ -2691,7 +2810,7 @@ function typeControls(L) {
     case "tag": return [font(), ink("#07070c")];
     case "catname": return [psec("props.sec.show", [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v))]), font(), ink("#07070c")];
     case "graphic": return el("div", { class: "hint", style: "margin:0;grid-column:1/-1" }, t("props.graphicHint"));
-    case "asset": return canTint(L.ref) ? assetColour(L) : null;
+    case "asset": return [canTint(L.ref) && assetColour(L), psec("crop.title", cropButton(L), t("crop.openTip"))];
     case "solid": return psec("props.sec.color", swatch(L, "color", "props.sw.color", cat().color, false));
   }
   return null;
@@ -2962,6 +3081,7 @@ function renderSide() {
   if (!S.cover) return;
   if (layer() && (!appliesTo(layer(), cat().id) || layer().off)) S.layerId = "bg";   // the selected layer is not on this category's cover, or left out of it
   if (S.letterWin) lettersShow();   // the letter window follows its layer, or closes
+  if (S.cropWin) cropShow();   // and the crop window
   const side = $("side"), y = side.scrollTop, L = layer(), here = S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off);
   // keep typing in the text box alive across rebuilds
   const typing = document.activeElement && side.contains(document.activeElement) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename"));
@@ -3522,7 +3642,7 @@ function setMode(mode) {
   if (mode !== "edit" && V3.on) close3d();   // the layer column is not there in Setup
   columns();   // the left column has a width of its own in Setup (and the handles' words follow the language)
   $("body").classList.toggle("setup", mode === "setup");
-  if (mode !== "edit") lettersClose();
+  if (mode !== "edit") { lettersClose(); cropClose(); }
   syncTop(); syncTabs(); renderPanel(); renderSide(); syncToolbar(); queueDraw();
 }
 /**
@@ -3631,7 +3751,7 @@ function dealOpen() {
   const box = $("deal") || document.body.appendChild(el("div", { id: "deal", role: "dialog", "aria-label": t("top.surprise") }));
   const z = selSize(), locks = S.settings.surprise.locks;
   DEAL.hands = []; DEAL.kept = DEAL.auto = -1; DEAL.dropped = false;
-  lettersClose();   // the letter window stands where this one does
+  lettersClose(); cropClose();   // the letter and crop windows stand where this one does
   overLeft(box);
   box.style.setProperty("--ar", `${z.w} / ${z.h}`);
   const lock = (k) => el("button", { class: locks[k] ? "on" : "", title: t(`deal.lock.${k}Tip`), onclick: (e) => { if (locks[k]) delete locks[k]; else locks[k] = true; e.currentTarget.classList.toggle("on", !!locks[k]); persistSettings(); } }, t(`deal.lock.${k}`));
@@ -3848,6 +3968,7 @@ addEventListener("keydown", (e) => {
   if (typing || !S.cover || SURPRISE.busy) return;
   if (key === "escape" && $("deal") && !$("deal").hidden) return dealClose();
   if (key === "escape" && S.letterWin) return lettersClose();
+  if (key === "escape" && S.cropWin) return cropClose();
   if (mod && key === "z") { e.preventDefault(); return timeTravel(e.shiftKey ? 1 : -1); }
   if (S.mode !== "edit") return;
   const L = layer();

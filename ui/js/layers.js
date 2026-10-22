@@ -226,7 +226,7 @@ const PROPS = {
   tag: {},
   catname: { showName: true, plate: true },
   frame: {},
-  asset: { ref: null, tint: false },   // + `ink`: a colour of the user's for a vector asset, over its own and the channel's
+  asset: { ref: null, tint: false },   // + `ink`: a colour of the user's for a vector asset, over its own and the channel's; + `crop`, as a photo's
   /** A block of one colour, the canvas's size at scale 1 (so it can be a ground, or moved and shrunk into a band). */
   solid: { color: "#ffd60a" },
   text: { text: "", stroke: 1, shadow: 1, plate: false },
@@ -243,6 +243,8 @@ const PROPS = {
    * active. `feather`, `spread`: how far the edge of a cut-out fades inward, and outward. `treat`: the look's
    * treatment of photos applies. `cut`: only the subject is kept (the mask). `torn`: the outline is a margin
    * of torn paper; `dash`: a dashed line a little way out (the one or the other). + `ink`, the outline's colour.
+   * + `crop`: {x, y, w, h}, fractions of the picture: only that part of it shows (of a photo not filling the
+   * canvas), the rest kept, to be shown again; the photo's frame stays where it is, so what is kept does not move.
    */
   photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, feather: 0, spread: 0, outline: 0, torn: false, dash: false, shadow: 0 },
 };
@@ -351,6 +353,8 @@ function normalizeLayer(raw, catIds) {
       L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); L.outline = num(raw.outline, 0, 0, 60); L.torn = raw.torn === true; L.dash = !L.torn && raw.dash === true; L.shadow = num(raw.shadow, 0, 0, 1);
       L.feather = num(raw.feather, 0, 0, 60); L.spread = num(raw.spread, 0, 0, 60);
       if (L.of && raw.own === true) L.own = true;
+      const crop = normalizeCrop(raw.crop);
+      if (crop) L.crop = crop;
       if (!L.pid && !L.of) return null;   // nothing to show
       if (typeof raw.ink === "string" && /^#[0-9a-f]{6}$/i.test(raw.ink)) L.ink = raw.ink.toLowerCase();
       break;
@@ -363,6 +367,8 @@ function normalizeLayer(raw, catIds) {
       const r = raw.ref;
       if (!r || !["graphic", "sticker", "user"].includes(r.kind) || typeof r.id !== "string") return null;
       L.ref = { kind: r.kind, id: r.id }; L.tint = raw.tint === true;
+      const crop = normalizeCrop(raw.crop);
+      if (crop) L.crop = crop;
       if (typeof raw.ink === "string" && /^#[0-9a-f]{6}$/i.test(raw.ink)) L.ink = raw.ink.toLowerCase();
       break;
     }
@@ -391,6 +397,65 @@ function normalizeLayer(raw, catIds) {
     }
   }
   return L;
+}
+/** A photo's crop (see PROPS.photo), at least 2% of the picture each way, within it; null for none, or the whole picture. */
+export function normalizeCrop(c) {
+  if (!c || typeof c !== "object") return null;
+  const r = (v) => Math.round(v * 1e4) / 1e4, x = r(num(c.x, 0, 0, 0.98)), y = r(num(c.y, 0, 0, 0.98)), w = Math.min(r(num(c.w, 1, 0.02, 1)), r(1 - x)), h = Math.min(r(num(c.h, 1, 0.02, 1)), r(1 - y));
+  return x > 1e-4 || y > 1e-4 || w < 0.9999 || h < 0.9999 ? { x, y, w, h } : null;
+}
+const CROP_MIN = 0.02;
+/**
+ * A crop (see normalizeCrop; {x: 0, y: 0, w: 1, h: 1} for none) dragged: `handle` "move", or a side or a corner
+ * ("n", "e", "se", …), by dx, dy (fractions of the picture). `ratio`: the width over the height it keeps, in
+ * fractions of the picture (the picture's own shape is 1), or null for free — a corner keeps it about the
+ * corner across, a side about the middle of the side across. It stays within the picture, at least 2% of it.
+ */
+export function dragCrop(c, handle, dx, dy, ratio = null) {
+  if (handle === "move") return { ...c, x: Math.min(1 - c.w, Math.max(0, c.x + dx)), y: Math.min(1 - c.h, Math.max(0, c.y + dy)) };
+  let x0 = c.x, y0 = c.y, x1 = c.x + c.w, y1 = c.y + c.h;
+  const W = handle.includes("w"), E = handle.includes("e"), N = handle.includes("n"), S = handle.includes("s");
+  if (W) x0 = Math.min(x1 - CROP_MIN, Math.max(0, x0 + dx));
+  if (E) x1 = Math.max(x0 + CROP_MIN, Math.min(1, x1 + dx));
+  if (N) y0 = Math.min(y1 - CROP_MIN, Math.max(0, y0 + dy));
+  if (S) y1 = Math.max(y0 + CROP_MIN, Math.min(1, y1 + dy));
+  if (!ratio) return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  const least = Math.max(CROP_MIN, CROP_MIN * ratio);   // the smallest width that keeps both sides at 2%
+  if ((W || E) && (N || S)) {   // a corner: the size the pointer asks for each way, met halfway, from the corner across
+    const ax = W ? c.x + c.w : c.x, ay = N ? c.y + c.h : c.y, roomW = W ? ax : 1 - ax, roomH = N ? ay : 1 - ay;
+    const w = Math.max(least, Math.min(((x1 - x0) + (y1 - y0) * ratio) / 2, roomW, roomH * ratio)), h = w / ratio;
+    return { x: W ? ax - w : ax, y: N ? ay - h : ay, w, h };
+  }
+  if (W || E) {   // a side: the other way follows, about the middle
+    const cy = c.y + c.h / 2, room = 2 * Math.min(cy, 1 - cy), ax = W ? x1 : x0;
+    const w = Math.max(least, Math.min(x1 - x0, room * ratio)), h = w / ratio;
+    return { x: W ? ax - w : ax, y: cy - h / 2, w, h };
+  }
+  const cx = c.x + c.w / 2, room = 2 * Math.min(cx, 1 - cx), ay = N ? y1 : y0;
+  const h = Math.max(least / ratio, Math.min(y1 - y0, room / ratio)), w = h * ratio;
+  return { x: cx - w / 2, y: N ? ay - h : ay, w, h };
+}
+/**
+ * A crop drawn from point a to point b (fractions of the picture: a within it), at shape `ratio` (as in dragCrop)
+ * or free: from a toward b, as large as the picture lets it go that way.
+ */
+export function drawnCrop(a, b, ratio = null) {
+  let w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+  if (ratio) { w = Math.max(w, h * ratio); h = w / ratio; }
+  const right = b.x >= a.x, down = b.y >= a.y, k = Math.min(1, (right ? 1 - a.x : a.x) / w || 1, (down ? 1 - a.y : a.y) / h || 1);
+  w *= k; h *= k;
+  return { x: right ? a.x : a.x - w, y: down ? a.y : a.y - h, w, h };
+}
+/**
+ * A crop of `ratio` (as in dragCrop) as large as `c` (no larger than the picture holds), as near the middle of
+ * `c` as it goes: a shape chosen keeps about what was kept.
+ */
+export function fitCrop(c, ratio) {
+  let h = Math.sqrt((c.w * c.h) / ratio), w = h * ratio;
+  const f = Math.min(1, 1 / w, 1 / h);
+  w *= f; h *= f;
+  const cx = c.x + c.w / 2, cy = c.y + c.h / 2;
+  return { x: Math.min(1 - w, Math.max(0, cx - w / 2)), y: Math.min(1 - h, Math.max(0, cy - h / 2)), w, h };
 }
 /**
  * Repairs a layer list: drops unknown layers, guarantees each bound layer exists exactly once

@@ -5,7 +5,7 @@ import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, br
 import { virtualSize, layout, adjustLayout, meetStandards } from "./layout.js";
 import { drawTitle, drawTitleVertical, parseTitle, subtitleFit, setLine, passOf, hasCJK } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
-import { drawAsset, userAssets, assetExists } from "./assets.js";
+import { drawAsset, assetHalf, userAssets, assetExists } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced } from "./style.js";
 import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped } from "./textfx.js";
@@ -455,6 +455,9 @@ const PAINT = {
    * rectangle, or to its subject when it is cut out; an outline and a shadow come from that shape.
    * A linked cut-out (`of`, see layers.js) shows another layer's photo in that layer's place. A
    * cut-out is caught where its subject is — the box round its mask — rather than the whole photo.
+   * A photo not filling the canvas may be cropped (`crop`, see layers.js): only that part of it shows,
+   * and is caught, its frame staying where it is (so what is kept does not move); the outline and the
+   * shadow follow the crop.
    */
   photo(ctx, L, tr, env) {
     const base = L.of ? env.cover.layers.find((l) => l.id === L.of && l.type === "photo" && !l.of) : L;
@@ -493,10 +496,12 @@ const PAINT = {
       if (F) F.translateSelf(bt.cx, bt.cy).rotateSelf(bt.r).scaleSelf(bt.kx, bt.ky);
       hit = { cx: bt.cx, cy: bt.cy, hw: (iw / 2) * bt.kx, hh: (ih / 2) * bt.ky, r: bt.r };
     }
-    // A cut-out is caught on its subject (the box round its mask). A photo filling the canvas, itself cut,
-    // keeps the ground's way of being caught. `px`, `py`: the centre of the photo's own frame, which the
-    // editor needs to turn and scale a cut-out about its subject.
-    const mb = mask && !fills && maskBox(mask);
+    // A cut-out is caught on its subject (the box round its mask), a cropped photo on what is left of it (of
+    // its subject, when it is cut out too). A photo filling the canvas, itself cut, keeps the ground's way of
+    // being caught. `px`, `py`: the centre of the photo's own frame, which the editor needs to turn and scale
+    // a cut-out, or a crop, about what shows of it.
+    const crop = !fills && L.crop, cr = crop ? { x: rect.x + crop.x * rect.iw, y: rect.y + crop.y * rect.ih, iw: crop.w * rect.iw, ih: crop.h * rect.ih } : rect;
+    const mb = shownBox(mask && !fills && maskBox(mask), crop);
     if (mb) {
       const lx = rect.x + ((mb.x0 + mb.x1) / 2) * rect.iw, ly = rect.y + ((mb.y0 + mb.y1) / 2) * rect.ih, hw = ((mb.x1 - mb.x0) / 2) * rect.iw, hh = ((mb.y1 - mb.y0) / 2) * rect.ih;
       const a = bt.r * RAD, x = lx * bt.kx, y = ly * bt.ky;
@@ -508,7 +513,7 @@ const PAINT = {
     const W = ctx.canvas.width, H = ctx.canvas.height;
     // While a photo is dragged, a costly one (cut out, outlined, shadowed) only slides its last image.
     const costly = L.cut || L.outline > 0 || L.shadow > 0, torn = L.torn && L.outline > 0, dashed = !torn && L.dash && L.outline > 0;
-    const stamp = [W, H, L.cut, L.feather, L.spread, L.outline, torn, dashed, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? rect.iw.toFixed(1) : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`].join("|");
+    const stamp = [W, H, L.cut, L.feather, L.spread, L.outline, torn, dashed, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? rect.iw.toFixed(1) : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`, crop ? cropKey(crop) : ""].join("|");
     const at = fills ? [rect.x, rect.y] : [bt.cx, bt.cy], keep = PHOTO.slides.get(L.id);
     if (costly && isFast() && keep && keep.stamp === stamp) { blit(keep.img, keep.bx + (at[0] - keep.at[0]) * M.a, keep.by + (at[1] - keep.at[1]) * M.d); return hit; }
     const inFrame = (c, fn) => { c.save(); frame(c); fn(c); c.restore(); };
@@ -517,8 +522,8 @@ const PAINT = {
       if (!(L.treat && look().background && look().background(c, { ...env, photo: im, drawPhoto: draw }, { grid: false, blur: L.blur, dim: 0, fill: fills }, lookValues()))) draw();
       inFrame(c, (x) => { if (L.dim > 0) { x.fillStyle = `rgba(7,7,12,${L.dim})`; x.fillRect(rect.x, rect.y, rect.iw, rect.ih); } });
     };
-    if (!costly && !mask) {   // a plain photo: straight onto the canvas, clipped to its rectangle (no work canvas)
-      ctx.save(); frame(ctx); ctx.beginPath(); ctx.rect(rect.x, rect.y, rect.iw, rect.ih); ctx.clip(); ctx.setTransform(M);
+    if (!costly && !mask) {   // a plain photo: straight onto the canvas, clipped to its rectangle, or its crop (no work canvas)
+      ctx.save(); frame(ctx); ctx.beginPath(); ctx.rect(cr.x, cr.y, cr.iw, cr.ih); ctx.clip(); ctx.setTransform(M);
       treat(ctx);
       ctx.restore();
       return hit;
@@ -527,22 +532,24 @@ const PAINT = {
     // the shadow — not the whole canvas: compositing a canvas costs every pixel of it.
     const spread = L.cut && L.spread > 0 ? (L.spread * Math.max(rect.iw, rect.ih)) / 1920 : 0;   // the outward soft edge, in the frame's units
     const reach = (L.outline > 0 ? L.outline : 0) + (torn ? L.outline * 0.25 + 18 : 0) + (L.shadow > 0 ? w * 0.03 : 0) + spread * 3 + 4, k = 1 / Math.max(0.05, Math.min(Math.abs(fills ? 1 : bt.kx), Math.abs(fills ? 1 : bt.ky)));
-    const corners = [[rect.x - reach * k, rect.y - reach * k], [rect.x + rect.iw + reach * k, rect.y - reach * k], [rect.x + rect.iw + reach * k, rect.y + rect.ih + reach * k], [rect.x - reach * k, rect.y + rect.ih + reach * k]].map(([x, y]) => F.transformPoint({ x, y }));
+    const corners = [[cr.x - reach * k, cr.y - reach * k], [cr.x + cr.iw + reach * k, cr.y - reach * k], [cr.x + cr.iw + reach * k, cr.y + cr.ih + reach * k], [cr.x - reach * k, cr.y + cr.ih + reach * k]].map(([x, y]) => F.transformPoint({ x, y }));
     const bx = Math.max(0, Math.floor(Math.min(...corners.map((p) => p.x)))), by = Math.max(0, Math.floor(Math.min(...corners.map((p) => p.y))));
     const bw = Math.min(W, Math.ceil(Math.max(...corners.map((p) => p.x)))) - bx, bh = Math.min(H, Math.ceil(Math.max(...corners.map((p) => p.y)))) - by;
     if (bw <= 0 || bh <= 0) return hit;   // nothing of it on the canvas
     const Mb = new DOMMatrix().translateSelf(-bx, -by).multiplySelf(M);
     const body = sheet(1, bw, bh, Mb);
     treat(body);
-    inFrame(body, (c) => {   // kept to the photo's rectangle, or to its subject
+    inFrame(body, (c) => {   // kept to the photo's rectangle, or its crop, and to its subject
       c.globalCompositeOperation = "destination-in";
-      if (mask) c.drawImage(L.feather > 0 ? feathered(mask, L.feather) : mask, rect.x, rect.y, rect.iw, rect.ih); else { c.fillStyle = "#000"; c.fillRect(rect.x, rect.y, rect.iw, rect.ih); }
+      if (mask) c.drawImage(L.feather > 0 ? feathered(mask, L.feather) : mask, rect.x, rect.y, rect.iw, rect.ih);
+      if (!mask || crop) { c.fillStyle = "#000"; c.fillRect(cr.x, cr.y, cr.iw, cr.ih); }
     });
     if (spread) haloBehind(body, bw, bh, spread * Math.hypot(F.a, F.b));
     if (!costly) { blit(body.canvas, bx, by); return hit; }   // cut out, nothing more
     // shadow and outline from the shape, made once at the photo's scale (see silhouette())
-    const out = sheet(0, bw, bh, Mb), f = rect.iw / nw, shape = mask || plainShape(rec, nw, nh);
-    const lay = (sil, ox = 0, oy = 0, alpha = 1) => inFrame(out, (o) => { o.globalAlpha = alpha; o.drawImage(sil.c, rect.x - sil.p * f + ox, rect.y - sil.p * f + oy, sil.c.width * sil.k * f, sil.c.height * sil.k * f); });
+    const out = sheet(0, bw, bh, Mb), f = rect.iw / nw, shape = cropShape(mask || plainShape(rec, nw, nh), crop);
+    const sx = rect.x + (shape.at ? shape.at[0] * rect.iw : 0), sy = rect.y + (shape.at ? shape.at[1] * rect.ih : 0);   // where the shape starts: the crop's corner
+    const lay = (sil, ox = 0, oy = 0, alpha = 1) => inFrame(out, (o) => { o.globalAlpha = alpha; o.drawImage(sil.c, sx - sil.p * f + ox, sy - sil.p * f + oy, sil.c.width * sil.k * f, sil.c.height * sil.k * f); });
     const tear = torn && ((colour, bare) => tornSheet(shape, L.outline / f, colour, 1 / f, seedOf(L.id), bare));   // 1 / f: photo px per cover px
     if (L.shadow > 0) { const sil = torn ? tear("#07070c", true) : silhouette(shape, 0, "#07070c"), d = w * 0.006 / Math.max(0.2, Math.abs(fills ? 1 : bt.kx)); for (let i = 1; i <= 4; i++) lay(sil, d * i, d * i * 1.2, L.shadow * 0.22); }
     if (L.outline > 0) lay(torn ? tear(L.ink || "#ffffff", false) : dashed ? dashedLine(shape, L.outline / f, L.ink || "#ffffff", 1 / f) : silhouette(shape, L.outline / f, L.ink || "#ffffff"));
@@ -625,7 +632,13 @@ const PAINT = {
   },
   asset(ctx, L, tr, env) {
     // a colour of the user's takes the channel colour's place
-    return centred(ctx, tr.cx, tr.cy, tr, tr.s, () => drawAsset(ctx, L.ref, L.ink ? hexToRgb(L.ink) : env.C, { tint: L.tint || !!L.ink }));
+    const draw = () => drawAsset(ctx, L.ref, L.ink ? hexToRgb(L.ink) : env.C, { tint: L.tint || !!L.ink }), half = L.crop && assetHalf(L.ref);
+    if (!half) return centred(ctx, tr.cx, tr.cy, tr, tr.s, draw);
+    // cropped (see `crop` in layers.js): only that part shows, and is caught, the asset staying where it is
+    const c = L.crop, x = (c.x * 2 - 1) * half.hw, y = (c.y * 2 - 1) * half.hh, w = c.w * 2 * half.hw, h = c.h * 2 * half.hh;
+    if (!centred(ctx, tr.cx, tr.cy, tr, tr.s, () => { ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); return draw(); })) return null;
+    const sx = tr.s * tr.kx, sy = tr.s * tr.ky, a = tr.r * RAD, ix = (x + w / 2) * sx, iy = (y + h / 2) * sy;
+    return { cx: tr.cx + ix * Math.cos(a) - iy * Math.sin(a), cy: tr.cy + ix * Math.sin(a) + iy * Math.cos(a), hw: (w / 2) * Math.abs(sx), hh: (h / 2) * Math.abs(sy), r: tr.r, px: tr.cx, py: tr.cy };
   },
   /** One colour, the canvas's size at scale 1 (free layers are scaled against a 1080-high canvas). */
   solid(ctx, L, tr, env) {
@@ -818,6 +831,38 @@ function maskBox(m) {
   MASK_BOXES.set(m, box);
   pxTime("mask box", t0);
   return box;
+}
+/**
+ * What of a photo shows, as fractions of it ({x0, y0, x1, y1}): the box round its subject (`mb`, see
+ * maskBox), within its crop when it is cropped (see `crop` in layers.js); the crop when it is not cut out,
+ * or nothing of the subject is left in it; null for neither.
+ */
+function shownBox(mb, crop) {
+  if (!crop) return mb || null;
+  const c = { x0: crop.x, y0: crop.y, x1: crop.x + crop.w, y1: crop.y + crop.h };
+  if (!mb) return c;
+  const m = { x0: Math.max(mb.x0, c.x0), y0: Math.max(mb.y0, c.y0), x1: Math.min(mb.x1, c.x1), y1: Math.min(mb.y1, c.y1) };
+  return m.x1 > m.x0 && m.y1 > m.y0 ? m : c;
+}
+const cropKey = (c) => [c.x, c.y, c.w, c.h].map((v) => v.toFixed(4)).join(",");
+const CROPPED = new WeakMap();
+/**
+ * The part of `shape` (a mask, or a photo's plain rectangle) a crop keeps, for the outline and the shadow of a
+ * cropped photo: a canvas the crop's size, its `at` where it starts in the shape (fractions). The same canvas for
+ * the same crop (see silhouette, which keeps its work per shape), a dozen kept per shape (copies of one photo
+ * cropped each its own way).
+ */
+function cropShape(shape, crop) {
+  if (!crop) return shape;
+  const key = cropKey(crop), kept = CROPPED.get(shape) || new Map();
+  CROPPED.set(shape, kept);
+  if (kept.has(key)) { const c = kept.get(key); kept.delete(key); kept.set(key, c); return c; }
+  const [W, H] = sizeOf(shape), x0 = Math.round(crop.x * W), y0 = Math.round(crop.y * H);
+  const c = Object.assign(document.createElement("canvas"), { width: Math.max(1, Math.round(crop.w * W)), height: Math.max(1, Math.round(crop.h * H)), at: [x0 / W, y0 / H] });
+  c.getContext("2d").drawImage(shape, -x0, -y0);
+  kept.set(key, c);
+  for (const k of kept.keys()) { if (kept.size <= 12) break; kept.delete(k); }
+  return c;
 }
 /** An opaque rectangle the size of a photo, for the outline of one that is not cut out. Kept on its record. */
 function plainShape(rec, w, h) {
