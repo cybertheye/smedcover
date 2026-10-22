@@ -6,7 +6,7 @@ import { virtualSize, layout, adjustLayout, meetStandards, wordsFoot, layoutOf }
 import { drawTitle, drawTitleVertical, titleBlockVertical, parseTitle, subtitleFit, subtitleColumns, setLine, passOf, hasCJK, someLetters } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset, assetHalf, userAssets, assetExists } from "./assets.js";
-import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets, headLine, frontOf, brushesFront, brushToDo, photoMap, canWeave, opaqueBox, HEADLINES } from "./layers.js";
+import { resolve, appliesTo, inSize, isLayout, fillsCanvas, clipBase, clipEnd, sceneOffsets, headLine, frontOf, brushesFront, brushToDo, photoMap, canWeave, opaqueBox, HEADLINES } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced, wherePainted, columned, columnBoxOf, fall } from "./style.js";
 import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped, effectReach, inColumn } from "./textfx.js";
 import { ransomEpoch } from "./ransom.js";
@@ -1337,6 +1337,17 @@ export function drawCover(cv, o) {
   if (swap) Object.assign(fonts, swap);
   try { paintCover(cv, o); } finally { if (keep) Object.assign(fonts, keep); }
 }
+/**
+ * The cover as it is at the size keyed `key`: a layer kept to other sizes (`sizes`, see layers.js) is not on it — hidden,
+ * and a layout layer left out (`off`), so the layout gives its room to the others there as for a part left out (see
+ * partsOf), and whatever asks which layers show (the background photo, the brand row, what lettering a cut-out weaves
+ * with, the hits) passes it by. The same cover, unchanged, when every layer shows at that size; else a shallow copy,
+ * each layer that shows the same object, by the same index.
+ */
+export function coverAt(cover, key) {
+  if (cover.layers.every((l) => inSize(l, key))) return cover;
+  return { ...cover, layers: cover.layers.map((l) => (inSize(l, key) ? l : { ...l, visible: false, ...(isLayout(l) && l.type !== "bg" ? { off: true } : {}) })) };
+}
 /** Which of the layout's parts that take room a cover has (see meetStandards): those not left out of it, a graphic only when its channel has one, a subtitle and a tag only with words. */
 export const partsOf = (cover, cat) => {
   const on = (type) => cover.layers.some((l) => l.id === type && !l.off);   // the layout's own (a copy has an id of its own)
@@ -1355,8 +1366,8 @@ function figureArt(style, look, C) {
   return ref && assetExists(ref) ? { ref, draw: (c) => drawAsset(c, ref, C, { tint: true }) } : null;
 }
 function paintCover(cv, o) {
-  const { profile: P, cover } = o, cat = P.categories[o.catIndex];
-  const [w, h] = virtualSize(o.size.w, o.size.h), key = sizeKey(o.size);
+  const P = o.profile, cat = P.categories[o.catIndex];
+  const [w, h] = virtualSize(o.size.w, o.size.h), key = sizeKey(o.size), cover = coverAt(o.cover, key);   // the layers kept to other sizes left out of it
   cv.width = Math.max(1, Math.round(o.pixelW));
   cv.height = Math.max(1, Math.round((o.pixelW * o.size.h) / o.size.w));
   const ctx = cv.getContext("2d"), kx = cv.width / w, ky = cv.height / h;

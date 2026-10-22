@@ -113,7 +113,7 @@ hand-edited files cannot crash the app.
   "scene": { "court": { "ball": { "all": [0.1, -0.05], "by": { "1080x1920": [0.02, 0] } } } } }   // optional: scene objects dragged (see 7.5)
 ```
 
-`S.covers` holds the current profile's channel covers (keyed by channel id) and `S.cover` the one shown; both change only through `setCover()`. Switching profile reads the new one's covers (`loadCovers()`); switching channel (`switchChannel()`) commits the undo step first, then shows that channel's cover — made by `channelCover()` from the profile's design, with a default title, if it has none. Saving (`persistCover`) is debounced per profile and channel. The channel each profile was last on is kept in the settings' `channels` (`{profile id: channel id}`) and read by `channelOf()`. Deleting a profile deletes its `covers/<profile id>/`. *Copy from another channel* (`copyDialog`, `copyInto`) takes the source cover through `coverOf()` (the one in memory for the current profile, else the file, else a new one from the design), `copyPreview()` draws it whole with its own profile at the size on the canvas, and `layers.js`'s pure `copyFreeLayers(into, from)` copies the layers the user added to it (`isAdded`: free layers and copies of layout layers, see 4): deep copies under new ids, a passive layer's `of` turned to its photo's copy, a cut-out's or an asset's `weave` to the copies of the lettering it weaves with (a layout layer's id kept, as every cover has it; any other dropped); each copy goes above the nearest layout layer below it in the source, over the layers added there already, in the order they had. The dialog counts them by kind, the copies as *Layout copies*. The cover is then checked by `channelCover()` as one read is, and the whole is one undo step.
+`S.covers` holds the current profile's channel covers (keyed by channel id) and `S.cover` the one shown; both change only through `setCover()`. Switching profile reads the new one's covers (`loadCovers()`); switching channel (`switchChannel()`) commits the undo step first, then shows that channel's cover — made by `channelCover()` from the profile's design, with a default title, if it has none. Saving (`persistCover`) is debounced per profile and channel. The channel each profile was last on is kept in the settings' `channels` (`{profile id: channel id}`) and read by `channelOf()`. Deleting a profile deletes its `covers/<profile id>/`. *Copy from another channel* (`copyDialog`, `copyInto`) takes the source cover through `coverOf()` (the one in memory for the current profile, else the file, else a new one from the design), `copyPreview()` draws it whole with its own profile at the size on the canvas, and `layers.js`'s pure `copyFreeLayers(into, from)` copies the layers the user added to it (`isAdded`: free layers and copies of layout layers, see 4): deep copies under new ids, a passive layer's `of` turned to its photo's copy, a cut-out's or an asset's `weave` to the copies of the lettering it weaves with (a layout layer's id kept, as every cover has it; any other dropped); each copy goes above the nearest layout layer below it in the source, over the layers added there already, in the order they had. The dialog counts them by kind, the copies as *Layout copies*. From another profile, what the copies keep by size is put on this profile's sizes first (`acrossSizes()`, see 4.4). The cover is then checked by `channelCover()` as one read is, and the whole is one undo step.
 
 Earlier data: there used to be one cover, `session.json`, shared by every channel, whose layers could be kept to some channels with `cats`. While the current profile has no channel covers yet, `migrateSession()` splits it: one copy per channel, `channelCover()` keeping only the layers on that channel and dropping `cats`, the title and tag copied to each; the old file is renamed `session.migrated.json`, and `session-photo*` is first turned into a photo layer by `upgradeCover`, then deleted.
 
@@ -320,6 +320,63 @@ read: `normalizeLayers()` still checks it (removing channels that no longer exis
 with none), and `channelCover()` keeps a channel's layers by `appliesTo(layer, catId)` and drops it.
 A profile's default design may still hold it, and is treated the same way for a new channel cover.
 
+### 4.4 Layers shown at some sizes only
+
+Any layer but the ground may carry `sizes`, a list of size keys: it then shows only at those of the profile's sizes
+(`inSize(layer, key)`), and at the others is as if left out. Without it a layer shows at every size; with an empty
+list, at none.
+
+- **Kept clean**: `normalizeLayer()` (through `normalizeLayers(raw, catIds, sizeKeys)`, which `normalizeCover()`
+  and `normalizeProfile()` call with the profile's size keys) keeps size keys each once, only the profile's, in its
+  order; a list of every one of them is none at all (so the layer shows at a size added later), and one left with
+  none stays, empty: unlike a channel, a size gone does not take the layer with it. `keepTo(L, keys, all)` sets a
+  list, every size being none. A size added or removed in Setup (`toggle` in `sizesTab()`) keeps the lists of the
+  design and of every channel's cover read so far to the sizes there are now at once, as reading them again would
+  (`refitSizes(layers, all)`; a cover not on the canvas is saved), so nothing waits for the app to be opened again.
+- **From another profile**: *Copy from another channel* runs the copies through `channelCover()`, so they keep the
+  sizes this profile has. A size key is exact pixels, though, so a layer kept to 1920x1080 in a profile whose 16:9 is
+  1280x720 would be at no size: copied from another profile (and a project opened into the current profile, its
+  cover's layers before they are read), `acrossSizes(layers, from, to)` first puts what each keeps by size on the
+  sizes here that take the place of those there. `standsFor(key, from, to)` in `layout.js` says which: the size
+  itself where that profile has it; else those it has, and this one has not, of the size's ratio; else, where there
+  are none, those facing the size's way (`orientOf()`) of a ratio no size here has. A layer's list becomes the sizes
+  standing for one in it (none of them: every size rather than none; an empty list stays one), and its `t.by` goes the
+  same way, a move as far across each canvas (`virtualSize()`), a size that profile alone has dropped, a channel's own
+  (`<size>@<channel>`) alike. `style.layoutBy` is not carried so: a profile imported brings its sizes with it, so its
+  own layouts are keyed by them already.
+- **Drawn**: `coverAt(cover, key)` in `render.js`, at the start of `paintCover()`, hides a layer not at this size on
+  a shallow copy of the cover and leaves a layout layer out there (`off`), so whatever looks at which layers show
+  needs nothing of its own: `partsOf()` (the room of a part left out goes to the others, see 5.2), the background
+  photo and the theme, the brand row, the subtitle's plan, the lettering a cut-out weaves with, the ransom note's
+  photo, the hits. Exports, thumbnails and Surprise me's quick drawings (`dealPlaces()` places a layer by the sizes
+  it shows at, those it has hits at) follow. In the app, `mainPhoto()`, `letterPhoto()` and the 3D view's sheets
+  (`here3d()`) ask the size on the canvas.
+- **Edited**: the properties' Layer group has *Shown at* (`sizesControl()`): a button per size by its ratio, lit where
+  the layer shows (the last lit stays), and every size or each orientation's at once. The layer list greys a row not
+  at this size (`away`) and labels one with a list (`sizesNote()`, `sizesSaid()`: *Only 3:4*, *Only tall*, *Not
+  9:16*, *At no size*; an orientation is named when the list is all of its sizes and more than one). A base hides what
+  is clipped onto it (see *Clipping groups* in 6), so a layer clipped onto one not at this size is greyed too, its
+  title saying why (*Clipped to Photo, which is not shown at this size*), and its *Shown at* dashes the sizes its base
+  is not at, with a line under them (`sizes.base`).
+- **Cut out at some sizes**: with the scope at one size or one orientation (see 4.1), *Cut out subject* gives the new
+  linked cut-out the sizes `sizesFor(photo, keys, all)` (those of the scope where the photo shows; where it shows at
+  none, the scope's), or puts the photo's cut-out there too when it has one kept elsewhere. Where the photo does not
+  show at those sizes and a photo of its picture does — the copy *Remove the background* left there — the cut-out is
+  that one's (`cutFrom(layers, photo, keys, all)`), not linked to a photo hidden there. *Remove the background* calls
+  `cutAt(layers, photo, keys, all)`: where the photo shows at no other size it is cut itself; else `showApart()` shows
+  it at those sizes through a copy of it (`duplicate()`, placed back exactly where it is), cut, the photo keeping the
+  rest, and takes what goes with the photo along, so those sizes keep what they had and the others do not change at
+  all. The copy goes in above the photo and what is clipped onto it: in between, it would become their base, and hide
+  them at the other sizes, where it is hidden. What is clipped onto the photo is copied onto the copy; the photo's
+  linked cut-out is copied and linked to the copy (`of`), so there the cut-out follows the photo that shows, dragging it
+  moves that one, and Surprise me moves the two together (`dealPlaces()`); what is clipped onto the cut-out goes
+  with its copy in turn. A layer shown at those sizes alone goes over whole rather than being copied (clipped onto the
+  copy, or linked to it), and one shown at none of them stays. The originals are kept to the other sizes, but a
+  layout layer (the title may be clipped): it is copied as a copy of it (`copy`) and left at every size, its room
+  being the layout's, hidden at those sizes all the same, as its base is. A weave with lettering so copied follows:
+  a cut-out or an asset at every size weaves with both (at each size one of them shows), a copy with the copy, an
+  original with the original. Both say where (`toast`), and the Cut-out group says which sizes the scope reaches.
+
 ## 5. Layout (`layout.js`)
 
 ### 5.1 The virtual canvas
@@ -377,7 +434,8 @@ adjust } }`, as a layer's `t.by` lies over `t.all`, except that it replaces rath
 `layout.js` is the one place that answers which `{ template, adjust }` a size is drawn in, and everything that lays a
 cover out asks it: `paintCover()` (through `coverLayout(look, lay, w, h, parts)` in `render.js`, which is `L.layout`
 or `layout()`, `adjustLayout()` and `meetStandards()` in a row, and which the Style tab's sliders use too, to start
-from the layout as it would be drawn at the size shown), the canvas's diamonds, the Style tab, layout presets
+from the layout as it would be drawn at the size shown: with the parts the cover has there, `coverAt()`, a part kept
+to other sizes left out), the canvas's diamonds, the Style tab, layout presets
 (`takeLayout()` / `putLayout()` carry `by`), Surprise me's toast. Hence thumbnails, exports, the 3D view and the cover
 standards follow it with nothing of their own. `ownLayout(style, key)` says whether a size has its own;
 `setLayoutOf(style, keys, lay)` writes one: `keys` null, the profile's own (the template chosen, its adjustments,
@@ -417,8 +475,8 @@ shapes of the colour block are generated from that edge.
 
 `drawCover(canvas, options)` paints one cover:
 
-1. Work out the virtual size, set the canvas's real pixel size and scale the context once.
-2. Build an environment: template geometry, channel colour, light or dark theme, background photo and so on.
+1. Work out the virtual size, set the canvas's real pixel size and scale the context once. Take the cover as it is at this size (`coverAt(cover, key)`): a layer kept to other sizes (`sizes`, see 4.4) is hidden on it, and a layout layer left out (`off`), on a shallow copy (the very cover when every layer shows at this size).
+2. Build an environment: template geometry (in the layout this size is drawn in, see 5.2), channel colour, light or dark theme, background photo and so on.
 3. Walk the layers bottom to top, skipping hidden ones and ones that do not belong to the current channel; get the placement from `resolve()` and call `PAINT[type]`.
 4. Each painted layer leaves a hit record (centre, half-width, half-height, angle) in `canvas._hits`.
 5. If a selected layer is given, draw its outline and handles last.
@@ -1484,4 +1542,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | change how Surprise me deals | `RULES` (every number), `FAMILIES` and `RECIPES` (what suits each look) in `deal.js` |
 | change what a layout preset holds | `LAYOUT_PARTS`, `LAYOUT_RUNS`, `takeLayout()` and `putLayout()` in `layers.js`, `normalizeLayouts()` in `store.js` |
 | change which sizes count as wide, square or tall, or what *Wide side by side, tall and square stacked* gives each | `orientOf()`, `BY_ORIENT` and `layoutByOrient()` in `layout.js` |
+| change what a layer kept to some sizes is at the others | `coverAt()` in `render.js`; the list's labels `sizesNote()` in `app.js` |
+| change what goes with a photo whose background is removed at some sizes | `showApart()` (and `cutAt()`, `cutFrom()`) in `layers.js` |
+| change which sizes of another profile's a size takes the place of, when layers come from there | `standsFor()` in `layout.js`; `acrossSizes()` in `layers.js` |
 | add an interface string | `i18n.js`, in both languages; a test checks that both are present |

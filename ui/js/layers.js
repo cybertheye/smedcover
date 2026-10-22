@@ -15,6 +15,11 @@
 // A free layer may carry `cats`, a list of category ids: it then exists only on covers of those
 // categories. Without it the layer is on every category's cover.
 //
+// Any layer but the ground may carry `sizes`, a list of size keys: it then shows only at those of the profile's sizes
+// (see inSize), as if left out at the others — a layout layer's room going to the rest there, as for a part left out
+// (see coverAt in render.js). Without it the layer shows at every size; with an empty list, at none (all its sizes
+// gone), still there to be shown again.
+//
 // A layout layer may be left out of a cover (`off: true`, chosen in Cover → Layout parts): it is then
 // hidden, and the editor leaves it out of the layer list and of Hide layout; ticked again, it comes back
 // as it was. The ground is never left out. A new design leaves out the channel name and graphic
@@ -28,6 +33,8 @@
 // below it — the nearest one not itself clipped, its *base* (see clipBase) — as a clipping mask does:
 // a photo inside the title's letters, a colour inside a silhouette. The base can be any layer but the
 // ground.
+
+import { virtualSize, sizeOfKey, standsFor } from "./layout.js";
 
 // the layout layers, bottom first: in the layer list, from the top, corner brackets, title, subtitle,
 // brand logo, brand row, tag, channel name, channel graphic, colour block, background
@@ -224,6 +231,58 @@ export const HEADLINES = ["title", "subtitle", "text"];
 /** Layers that can be grabbed on the canvas (the others are selected from the layer list only). */
 /** Whether a layer is part of the cover of category `catId`. */
 export const appliesTo = (layer, catId) => !layer.cats || layer.cats.includes(catId);
+/** Whether a layer shows at the size keyed `key` (see `sizes` above): every layer without a list of sizes does. */
+export const inSize = (layer, key) => !layer.sizes || layer.sizes.includes(key);
+/**
+ * Keeps layer L to the sizes of `keys` (size keys), in place; `all`: the profile's size keys, in their order, which
+ * its list keeps. Kept to every one of them it carries no list, and so shows at a size added later too.
+ */
+export function keepTo(L, keys, all) {
+  const sizes = all.filter((k) => keys.includes(k));
+  if (sizes.length === all.length) delete L.sizes; else L.sizes = sizes;
+}
+/**
+ * The sizes each of `layers` shows at kept to the profile's `all` (its size keys, in their order), in place, as
+ * normalizeLayer keeps them when they are read: once a size is added or removed, a list of every size left is none,
+ * and one left with none of them an empty one. Returns whether any changed.
+ */
+export function refitSizes(layers, all) {
+  let changed = false;
+  for (const L of layers) {
+    if (!L.sizes) continue;
+    const was = L.sizes.join();
+    keepTo(L, L.sizes, all);
+    if (!L.sizes || L.sizes.join() !== was) changed = true;
+  }
+  return changed;
+}
+/**
+ * Layers from a cover of another profile (`from`: its size keys) put on one of this profile (`to`: its size keys), in
+ * place: what each keeps by size goes to the sizes here that take the place of those there (see standsFor in
+ * layout.js) — the sizes it shows at (`sizes`; with none of them here, where it showed at some there, every size rather
+ * than none), and its placement per size (`t.by`, a move as far across the canvas here as it was there; a channel's own,
+ * "<size>@<channel>", alike). They may be as a file has them, not yet normalized. Returns the layers.
+ */
+export function acrossSizes(layers, from, to) {
+  for (const L of Array.isArray(layers) ? layers : []) {
+    if (!L || typeof L !== "object") continue;
+    if (Array.isArray(L.sizes) && L.sizes.length) {
+      const keys = to.filter((k) => standsFor(k, from, to).some((s) => L.sizes.includes(s)));
+      if (keys.length && keys.length < to.length) L.sizes = keys; else delete L.sizes;
+    }
+    const by = L.t && L.t.by;
+    if (!by || typeof by !== "object") continue;
+    const out = {}, tails = new Set(Object.keys(by).map((k) => k.replace(/^[^@]*/, "")));   // "" and "@<channel>"
+    for (const tail of tails) for (const k of to) {
+      const s = standsFor(k, from, to).find((x) => by[x + tail] && typeof by[x + tail] === "object");
+      if (!s) continue;
+      const e = by[s + tail], [fw, fh] = virtualSize(...sizeOfKey(s)), [tw, th] = virtualSize(...sizeOfKey(k));
+      out[k + tail] = { ...e, dx: (Number(e.dx) * tw) / fw, dy: (Number(e.dy) * th) / fh };
+    }
+    L.t.by = out;
+  }
+  return layers;
+}
 export const isPickable = (layer) => layer.visible && !layer.locked && layer.type !== "frame";
 
 const PROPS = {
@@ -298,7 +357,7 @@ export function normalizeT(raw, free) {
   }
   return { all: { x: num(a.x, free ? 0.5 : 0, -3, 3), y: num(a.y, free ? 0.42 : 0, -3, 3), s: num(a.s, free ? 0.35 : 1, 0.02, 20), r: num(a.r, 0, -360, 360), kx: num(a.kx, 1, 0.05, 20), ky: num(a.ky, 1, 0.05, 20) }, by };
 }
-function normalizeLayer(raw, catIds) {
+function normalizeLayer(raw, catIds, sizeKeys) {
   if (!raw || typeof raw !== "object" || !(raw.type in PROPS)) return null;
   const free = isFree(raw.type), copy = raw.copy === true && COPYABLE.includes(raw.type), base = newLayer(raw.type);
   const id = typeof raw.id === "string" && raw.id ? raw.id : "";
@@ -366,6 +425,14 @@ function normalizeLayer(raw, catIds) {
     const cats = [...new Set(raw.cats.filter((x) => typeof x === "string" && x && (!catIds || catIds.includes(x))))];
     if (!cats.length) return null;
     L.cats = cats;
+  }
+  // the sizes it shows at (see `sizes` above): size keys, each once, only the profile's (with `sizeKeys`, in their
+  // order); every one of the profile's is no list at all, and none is an empty one (unlike a channel, a size gone does
+  // not take the layer with it: it stays, to be shown again)
+  if (raw.type !== "bg" && Array.isArray(raw.sizes)) {
+    const keys = [...new Set(raw.sizes.filter((k) => typeof k === "string" && /^\d{2,5}x\d{2,5}$/.test(k)))].slice(0, 80);
+    if (!sizeKeys) L.sizes = keys;
+    else if (!sizeKeys.every((k) => keys.includes(k))) L.sizes = sizeKeys.filter((k) => keys.includes(k));
   }
   switch (raw.type) {
     case "bg": L.grid = true; L.base = ["look", "clear"].includes(raw.base) ? raw.base : "grid"; L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); break;   // its base: the look's ground and grid, or nothing; the look's scene always on it
@@ -641,12 +708,12 @@ export function fitCrop(c, ratio) {
  * Repairs a layer list: drops unknown layers, guarantees each bound layer exists exactly once
  * (missing ones are put back in their default place), keeps the background at the bottom and
  * makes ids unique. With `catIds` (the categories that exist), layers made for categories that
- * were removed are dropped too.
+ * were removed are dropped too; with `sizeKeys` (the profile's sizes), a layer's sizes are only those.
  */
-export function normalizeLayers(raw, catIds) {
+export function normalizeLayers(raw, catIds, sizeKeys) {
   const seen = new Set(), out = [];
   for (const r of Array.isArray(raw) ? raw : []) {
-    const L = normalizeLayer(r, catIds);
+    const L = normalizeLayer(r, catIds, sizeKeys);
     if (!L) continue;
     if (seen.has(L.id)) { if (!isAdded(L)) continue; L.id = uid(); }
     seen.add(L.id); out.push(L);
@@ -839,6 +906,104 @@ export function copyFreeLayers(into, from) {
   groups.map((g, n) => ({ ...g, i: at(g.anchor), n })).sort((a, b) => b.i - a.i || b.n - a.n)
     .forEach((g) => out.splice(g.i, 0, ...g.copies));
   return { layers: out, copies };
+}
+/**
+ * The sizes what is made of layer L now (a cut-out of it, see the app) is for: those of `keys` (the sizes a scope
+ * reaches, see adjust; null for every size) where L shows, or, where it shows at none of them, `keys` themselves.
+ * `all`: the profile's size keys, in their order.
+ */
+export function sizesFor(L, keys, all) {
+  const here = all.filter((k) => inSize(L, k)), want = keys ? here.filter((k) => keys.includes(k)) : here;
+  return want.length ? want : keys || here;
+}
+/**
+ * The photo a cut-out of photo L made now for the sizes of `keys` (a scope's; null for every size) is linked to (see
+ * `of`): L, where it shows at any of them; else the photo of the same picture shown at the most of them — the copy
+ * Remove the background left there (see cutAt), whose place the cut-out follows there, and which dragging it moves;
+ * L when none is. `all`: the profile's size keys, in their order.
+ */
+export function cutFrom(layers, L, keys, all) {
+  const at = (P) => (keys || all).filter((k) => inSize(P, k)).length;
+  let best = L, most = at(L);
+  if (!most) for (const P of layers) if (P.type === "photo" && !P.of && P.pid === L.pid && at(P) > most) { best = P; most = at(P); }
+  return best;
+}
+/**
+ * Removes photo L's background (its `cut`) at the sizes of `keys` (a scope's; null for every size), in `layers`, in
+ * place. Where L shows at no other size, L itself is cut. Else L is left whole, still shown at its other sizes, and a
+ * copy of it, cut and placed exactly as it is, shows at those (see `sizes`), what goes with L going with it there (see
+ * showApart): it goes in above L and what is clipped onto L, which is copied onto it; L's linked cut-out is copied and
+ * linked to it, so there the cut-out follows the photo shown and moves with it, as at the others with L. Nothing
+ * changes at the other sizes. Returns the copy, or null (also when L shows at none of `keys`: then nothing is done). `all`: the
+ * profile's size keys, in their order.
+ */
+export function cutAt(layers, L, keys, all) {
+  const here = all.filter((k) => inSize(L, k)), there = keys ? here.filter((k) => keys.includes(k)) : here, rest = here.filter((k) => !there.includes(k));
+  if (!rest.length) { L.cut = true; return null; }
+  if (!there.length) return null;
+  const c = showApart(layers, L, there, all);
+  c.cut = true;
+  return c;
+}
+/**
+ * Shows layer X of `layers` (in place) at the sizes of `there` (size keys: some of those it shows at, not all) through a
+ * copy of it, placed exactly as it is, X kept to the others (see `sizes`); returns the copy. What goes with X goes with
+ * the copy at those sizes, as it goes with X: the layers clipped onto X (see clipBase), clipped onto the copy, which goes
+ * in above them rather than between X and them, where it would take them over (hidden at the other sizes, a base hides
+ * what is clipped onto it); a photo's linked cut-outs (see `of`), linked to the copy, so there they follow and are
+ * moved with the photo that shows; and what goes with those in turn. Each such layer shown both at some of those sizes
+ * and at another is split so too, by a copy of its own; one shown at those alone goes over whole (clipped onto the
+ * copy, or linked to it), one at none of them stays as it is. A layout layer clipped onto X (the title may be) is copied
+ * as a copy of it (see `copy`) but stays at every size it was at, its room being the layout's: where X is not shown, it
+ * is not either, as its base is not. The weaves follow (see `weave`): a cut-out or an asset weaving with lettering so
+ * split weaves with the lettering's copy too; one shown at those sizes alone with the copy instead, one kept to the
+ * others with the lettering alone.
+ */
+function showApart(layers, X, there, all) {
+  const side = new Map(), renamed = new Map();   // where each layer split shows now ("there": at those sizes alone; "rest"), and the id of each one's copy
+  // layer D's part at the sizes of `there`: null where it shows at none of them (or is left out of the cover, see
+  // `off`: a copy of it would come in), D itself where it shows at no other (it goes over whole), else a copy of it
+  // there, D kept to the others but a layout layer
+  const part = (D) => {
+    const on = all.filter((k) => inSize(D, k)), to = on.filter((k) => there.includes(k)), left = on.filter((k) => !there.includes(k));
+    if (!to.length || D.off) return null;
+    if (!left.length) { side.set(D, "there"); return D; }
+    const d = duplicate(D);
+    if (!d) return null;   // the corner brackets are never copied
+    d.t = clone(D.t);   // where D is (a copy is nudged, to show it is one)
+    keepTo(d, to, all); side.set(d, "there"); renamed.set(D.id, d.id);
+    if (!isLayout(D)) { keepTo(D, left, all); side.set(D, "rest"); }
+    return d;
+  };
+  const x = part(X), todo = [[X, x]];
+  while (todo.length) {
+    const [D, d] = todo.shift(), group = [];
+    if (!D.clip) {   // what is clipped onto D, onto d
+      const i = layers.indexOf(D);
+      for (const E of layers.slice(i + 1, clipEnd(layers, i) + 1)) {
+        const e = part(E);
+        if (!e) continue;
+        if (e === E) layers.splice(layers.indexOf(E), 1); else todo.push([E, e]);
+        group.push(e);
+      }
+    }
+    if (!layers.includes(d)) layers.splice(clipEnd(layers, layers.indexOf(D)) + 1, 0, d, ...group);
+    if (D.type !== "photo" || D.of) continue;
+    for (const P of layers.filter((l) => l.type === "photo" && l.of === D.id)) {   // a photo's cut-outs, linked to d
+      if (side.get(P) === "rest") continue;   // split already, clipped onto D
+      const p = side.get(P) === "there" ? P : part(P);
+      if (!p) continue;
+      p.of = d.id;
+      if (p !== P) todo.push([P, p]);
+    }
+  }
+  for (const W of layers) {
+    const w = W.weave;
+    if (!w || !w.with.some((id) => renamed.has(id))) continue;
+    const s = side.get(W), to = (id) => (!renamed.has(id) ? [id] : s === "there" ? [renamed.get(id)] : s === "rest" ? [id] : [id, renamed.get(id)]);
+    W.weave = { ...w, with: w.with.flatMap(to), front: Object.fromEntries(Object.entries(w.front || {}).flatMap(([id, keys]) => to(id).map((k) => [k, [...keys]]))) };
+  }
+  return x;
 }
 /**
  * Copy of a free layer, or of a layout layer but the ground and the corner brackets (a copy of it, see `copy`

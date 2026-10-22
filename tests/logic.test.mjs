@@ -3190,14 +3190,18 @@ test("the host: the app answers the native commands itself, a SmedCover server o
 });
 
 // ---------- each size's layout its own, and the scope's three choices
-/** Draws `cover` of profile `p` at `size` on a canvas that records nothing (a proxy), for what the drawing leaves on it: cv._layout, cv._hits. */
-async function drawnAt(p, cover, size) {
+/**
+ * Draws `cover` of profile `p` at `size` on a canvas that records nothing (a proxy), for what the drawing leaves on it:
+ * cv._layout, cv._hits. With `photos` (pictures by pid, {img, mask}), the photo layers showing them are caught too: the
+ * canvas then has no transform to read, so they are placed and not painted.
+ */
+async function drawnAt(p, cover, size, photos = null) {
   const { drawCover } = await import("../ui/js/render.js");
-  const ctxOf = (cv) => new Proxy({ canvas: cv, globalAlpha: 1, font: "900 100px X", lineWidth: 1 }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...String(s)].length * 50 })
+  const ctxOf = (cv) => new Proxy({ canvas: cv, globalAlpha: 1, font: "900 100px X", lineWidth: 1 }, { get: (t, k) => (k in t ? t[k] : k === "getTransform" && photos ? undefined : k === "measureText" ? (s) => ({ width: [...String(s)].length * 50 })
     : k === "createLinearGradient" || k === "createRadialGradient" || k === "createPattern" ? () => ({ addColorStop() {} }) : k === "getImageData" ? (x, y, w, h) => ({ data: new Uint8ClampedArray(Math.max(4, w * h * 4)) }) : () => ({})), set: (t, k, v) => { t[k] = v; return true; } });
   const canvas = () => { const cv = { width: 0, height: 0 }; cv.getContext = () => ctxOf(cv); return cv; }, was = globalThis.document;
   globalThis.document = { createElement: canvas, fonts: { size: 0 } };
-  try { const cv = canvas(); drawCover(cv, { profile: p, catIndex: 0, size, pixelW: 200, cover, photos: new Map() }); return cv; } finally { globalThis.document = was; }
+  try { const cv = canvas(); drawCover(cv, { profile: p, catIndex: 0, size, pixelW: 200, cover, photos: photos || new Map() }); return cv; } finally { globalThis.document = was; }
 }
 
 test("which way a size faces: wide from 5:4 on, tall from 4:5 on, square between; a size key read the same", async () => {
@@ -3350,4 +3354,204 @@ test("Wide side by side, tall and square stacked: each size by its orientation, 
     assert.equal(cv._layout.template, want[sizeKey(z)], sizeKey(z));
     if (split) assert.ok(title && title.cx + title.hw <= cv._layout.edge.line[0], `${sizeKey(z)}: the title in its column, left of the panel`);
   }
+});
+
+// ---------- layers shown only at some sizes
+test("a layer's sizes: size keys, each once, only the profile's, in its order; all of them no list, none an empty one; never the ground's", async () => {
+  const { inSize, keepTo } = await import("../ui/js/layers.js");
+  const all = ["1920x1080", "1200x1600", "1080x1920"];
+  const sizesOf = (raw, keys = all) => { const ls = normalizeLayers([{ type: "text", id: "t", text: "x", sizes: raw }, { type: "bg", sizes: ["1920x1080"] }], null, keys); return ["t", "bg"].map((id) => ls.find((l) => l.id === id).sizes); };
+  assert.deepEqual(sizesOf(["1080x1920", "1920x1080", "1080x1920", "nope", 7, "9999x1"]), [["1920x1080", "1080x1920"], undefined], "the profile's order, the ground never");
+  assert.deepEqual(sizesOf(["1080x1920", "1200x1600", "1920x1080", "1200x1200"]), [undefined, undefined], "every one of the profile's: no list");
+  assert.deepEqual(sizesOf(["1200x1200"]), [[], undefined], "all of its sizes gone: at none, kept to be shown again");
+  assert.deepEqual(sizesOf("1920x1080"), [undefined, undefined]);
+  assert.deepEqual(sizesOf(["1200x1200", "x"], null), [["1200x1200"], undefined], "no profile at hand: any size key");
+  assert.deepEqual(normalizeLayers([{ type: "subtitle", sizes: ["1920x1080"] }], null, all).find((l) => l.id === "subtitle").sizes, ["1920x1080"], "a layout layer too");
+  // the profile's sizes, through the cover and the design
+  const p = normalizeProfile({ sizes: [{ w: 1920, h: 1080 }, { w: 1080, h: 1920 }], design: { layers: [{ type: "tag", sizes: ["1080x1920", "1600x1200"] }] } });
+  assert.deepEqual(p.design.layers.find((l) => l.id === "tag").sizes, ["1080x1920"]);
+  assert.deepEqual(normalizeCover({ layers: [{ type: "text", text: "a", sizes: ["1920x1080", "1080x1920"] }, { type: "title", sizes: ["1080x1920"] }] }, p).layers.map((l) => l.sizes).filter(Boolean), [["1080x1920"]]);
+  // shown at a size, or not; kept to some, every one of them being none
+  const L = newLayer("text");
+  assert.deepEqual([inSize(L, "1920x1080"), inSize({ sizes: ["1080x1920"] }, "1920x1080"), inSize({ sizes: [] }, "1080x1920")], [true, false, false]);
+  keepTo(L, ["1080x1920", "1920x1080"], all);
+  assert.deepEqual(L.sizes, ["1920x1080", "1080x1920"]);
+  keepTo(L, [...L.sizes, "1200x1600"], all);
+  assert.equal("sizes" in L, false);
+});
+
+test("a layer kept to some sizes is not on the cover at the others: not painted nor caught there, a layout layer's room going to the rest as for a part left out; every cover as it was until one is", async () => {
+  const { coverAt, sizeKey } = await import("../ui/js/render.js");
+  const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({ title: "Hello *there*", subtitle: "Three minutes", tag: "EP.01" }, p);
+  const wide = p.sizes.find((z) => z.w === 1920), tall = p.sizes.find((z) => z.h === 1920), ids = (cv) => cv._hits.map((h) => h.id);
+  assert.equal(coverAt(c, "1920x1080"), c, "every layer at every size: the very cover");
+  // a text layer at 9:16 alone
+  const text = newLayer("text", { text: "only tall", id: "hi" });
+  text.sizes = ["1080x1920"]; c.layers.push(text);
+  assert.deepEqual([ids(await drawnAt(p, c, tall)).includes("hi"), ids(await drawnAt(p, c, wide)).includes("hi")], [true, false]);
+  const at = coverAt(c, "1920x1080");
+  assert.ok(at !== c && at.layers.length === c.layers.length && at.layers.every((l, i) => l.id === c.layers[i].id), "a copy, layer for layer");
+  assert.ok(at.layers.slice(0, -1).every((l, i) => l === c.layers[i]) && at.layers.at(-1).visible === false && c.layers.at(-1).visible === true, "the layers shown the same objects, the cover's own untouched");
+  // the subtitle left out of 9:16 alone: there the cover is drawn as one without a subtitle, the title making no room for it
+  const sub = c.layers.find((l) => l.id === "subtitle");
+  sub.sizes = p.sizes.map(sizeKey).filter((k) => k !== "1080x1920");
+  const without = JSON.parse(JSON.stringify(c)), s2 = without.layers.find((l) => l.id === "subtitle");
+  delete s2.sizes; s2.off = true; s2.visible = false;
+  const [kept, out, there] = [await drawnAt(p, c, tall), await drawnAt(p, without, tall), await drawnAt(p, c, wide)];
+  assert.ok(!ids(kept).includes("subtitle") && ids(there).includes("subtitle"));
+  assert.deepEqual([kept._layout, kept._hits], [out._layout, out._hits], "as if left out there");
+  // the background photo: the one shown at this size
+  const photo = newLayer("photo", { pid: "p1", fill: true }), at2 = coverAt({ ...c, layers: [c.layers[0], { ...photo, sizes: ["1200x1600"] }, ...c.layers.slice(1)] }, "1920x1080");
+  assert.equal(at2.layers[1].visible, false, "kept to another size: no photo here");
+  assert.equal(coverAt(c, "1080x1920").layers.find((l) => l.id === "subtitle").off, true);
+});
+
+test("cut out at some sizes: a cut-out for the sizes the scope reaches where the photo shows; the background removed there by a copy over the photo, the photo whole at the others", async () => {
+  const { sizesFor, cutAt, inSize } = await import("../ui/js/layers.js");
+  const all = ["1920x1080", "1600x1200", "1200x1600", "1080x1920", "1200x1200"], tall = ["1200x1600", "1080x1920"];
+  const photo = () => newLayer("photo", { pid: "p1", fill: true, blur: 4 });
+  // what a cut-out is for
+  assert.deepEqual([sizesFor(photo(), null, all), sizesFor(photo(), ["1200x1600"], all), sizesFor(photo(), tall, all)], [all, ["1200x1600"], tall]);
+  assert.deepEqual(sizesFor({ ...photo(), sizes: ["1920x1080", "1080x1920"] }, tall, all), ["1080x1920"], "where the photo shows");
+  assert.deepEqual(sizesFor({ ...photo(), sizes: ["1920x1080"] }, tall, all), tall, "where it shows at none of them: those of the scope");
+  // the background removed at every size, or where the photo shows at those alone: the photo itself
+  for (const [keys, sizes] of [[null, undefined], [tall, tall]]) {
+    const P = photo(), layers = [newLayer("bg"), P];
+    if (sizes) P.sizes = [...sizes];
+    assert.equal(cutAt(layers, P, keys, all), null);
+    assert.deepEqual([P.cut, layers.length, P.sizes], [true, 2, sizes]);
+  }
+  // at 3:4 alone: a copy, cut, right above the photo, exactly where it is, at 3:4; the photo whole and no longer there
+  const P = photo(), title = newLayer("title"), layers = [newLayer("bg"), P, title];
+  P.t.by["1200x1600"] = { dx: 10, dy: 0, s: 1.2, r: 0, kx: 1, ky: 1 };
+  const c = cutAt(layers, P, ["1200x1600"], all);
+  assert.deepEqual(layers.map((l) => l.id), ["bg", P.id, c.id, "title"]);
+  assert.ok(c.id !== P.id && c.cut === true && P.cut === false && c.pid === "p1" && c.fill && c.blur === 4);
+  assert.deepEqual(c.t, P.t, "placed as the photo is");
+  assert.deepEqual([c.sizes, P.sizes], [["1200x1600"], ["1920x1080", "1600x1200", "1080x1920", "1200x1200"]]);
+  assert.deepEqual(all.map((k) => [inSize(P, k), inSize(c, k)]), all.map((k) => (k === "1200x1600" ? [false, true] : [true, false])), "one of the two at each size");
+  // shown at none of them: nothing done
+  const Q = { ...photo(), sizes: ["1920x1080"] }, few = [newLayer("bg"), Q];
+  assert.equal(cutAt(few, Q, tall, all), null);
+  assert.deepEqual([Q.cut, few.length], [false, 2]);
+});
+
+test("copied from another channel or profile, a layer keeps the sizes this profile has; the copy of a layer with them carries them too", async () => {
+  const { copyFreeLayers } = await import("../ui/js/layers.js");
+  const from = normalizeLayers([{ type: "text", id: "a", text: "a", sizes: ["1080x1920", "1080x1350"] }, { type: "text", id: "b", text: "b", sizes: ["1080x1350"] }], null);
+  const p = normalizeProfile(sampleProfile("en")), into = normalizeCover({}, p);
+  const { layers } = copyFreeLayers(into.layers, from), back = normalizeCover({ ...into, layers }, p).layers.filter((l) => l.type === "text");
+  assert.deepEqual(back.map((l) => l.sizes), [["1080x1920"], []], "only this profile's sizes; one with none of them at none, kept");
+  assert.deepEqual(duplicate(from.find((l) => l.id === "a")).sizes, ["1080x1920", "1080x1350"]);
+});
+
+test("the background removed at some sizes takes what goes with the photo along: the copy above what is clipped onto it, which is copied onto the copy, the cut-out copied and linked to it, the weaves following; every size draws as before, the copies standing in at those", async () => {
+  const { cutAt, clipBase, insertAbove } = await import("../ui/js/layers.js");
+  const { sizeKey } = await import("../ui/js/render.js");
+  const p = normalizeProfile(sampleProfile("en")), all = p.sizes.map(sizeKey), tall = ["1200x1600", "1080x1920"], rest = all.filter((k) => !tall.includes(k));
+  const c = normalizeCover({ title: "Hello *there*", subtitle: "Three minutes", tag: "EP.01" }, p);
+  const P = newLayer("photo", { pid: "p1" }), T = newLayer("text", { text: "in the photo", clip: true }), U = newLayer("text", { text: "tall only", clip: true, sizes: ["1080x1920"] });
+  P.t.all.x = 0.3; P.t.by["1080x1920"] = { dx: 40, dy: 0, s: 1.2, r: 0, kx: 1, ky: 1 };
+  c.layers.splice(1, 0, P, T, U);
+  const S = newLayer("photo", { of: P.id, cut: true, own: true, weave: { with: [T.id, "title"], by: "letters", line: 0.3, front: { [T.id]: ["0|i|0"] } } }), Q = newLayer("text", { text: "on the subject", clip: true });
+  S.t.all = { x: 0.05, y: 0, s: 0.5, r: 0, kx: 1, ky: 1 };
+  insertAbove(c.layers, "title", S); insertAbove(c.layers, S.id, Q);
+  const photos = new Map([["p1", { img: { width: 800, height: 600 }, mask: { img: { width: 800, height: 600 } } }]]), before = new Map();
+  for (const z of p.sizes) before.set(sizeKey(z), await drawnAt(p, c, z, photos));
+  const x = cutAt(c.layers, P, tall, all), L = c.layers, base = (l) => L[clipBase(L, L.indexOf(l))];
+  const [T2, S2, Q2] = [(l) => l.text === "in the photo" && l !== T, (l) => l.of === x.id, (l) => l.text === "on the subject" && l !== Q].map((f) => L.find(f));
+  // the copy above the photo and what is clipped onto it, not between them (where it would take them over); that copied onto the copy
+  assert.deepEqual(L.slice(1, 6), [P, T, x, T2, U]);
+  assert.deepEqual([base(T), base(T2), base(U)], [P, x, x], "the photo's own stay its; the copies and one at those sizes alone the copy's");
+  assert.deepEqual([x.cut, P.cut, x.t, T2.t], [true, false, P.t, T.t], "each copy exactly where its original is");
+  // the photo's cut-out: a copy linked to the copy, right above it and what is clipped onto it, with that copied onto it
+  assert.deepEqual(L.slice(L.indexOf(S), L.indexOf(S) + 4), [S, Q, S2, Q2]);
+  assert.deepEqual([S.of, S2.of, base(Q), base(Q2), S2.own, S2.cut], [P.id, x.id, S, S2, true, true]);
+  for (const l of [P, T, S, Q]) assert.deepEqual(l.sizes, rest, "the originals at the other sizes");
+  for (const l of [x, T2, S2, Q2]) assert.deepEqual(l.sizes, tall, "the copies at those");
+  assert.deepEqual(U.sizes, ["1080x1920"]);
+  // the weave: the cut-out's copy with the lettering's copy, the cut-out with the lettering; the title the same
+  assert.deepEqual([S.weave.with, S2.weave.with, Object.keys(S2.weave.front)], [[T.id, "title"], [T2.id, "title"], [T2.id]]);
+  // drawn: the same at every size, the copies where their originals were at those sizes, and only there
+  const as = new Map([[x.id, P.id], [T2.id, T.id], [S2.id, S.id], [Q2.id, Q.id]]), seen = (cv) => cv._hits.map((h) => ({ ...h, id: as.get(h.id) || h.id }));
+  for (const z of p.sizes) {
+    const k = sizeKey(z), was = before.get(k), now = await drawnAt(p, c, z, photos);
+    assert.ok(was._hits.some((h) => h.id === T.id) && was._hits.some((h) => h.id === S.id), k + ": drawn before");
+    assert.deepEqual([now._layout, seen(now)], [was._layout, was._hits], k + ": as before");
+    assert.equal(now._hits.some((h) => as.has(h.id)), tall.includes(k), k + ": the copies at those sizes alone");
+  }
+});
+
+test("the background removed at some sizes: a layout layer clipped onto the photo copied as a copy, itself at every size still (its room the layout's); a weave with what is copied weaves with the copy too; a cut-out at those sizes alone linked over whole; Cut out subject there cuts from the copy", async () => {
+  const { cutAt, cutFrom, clipBase } = await import("../ui/js/layers.js");
+  const all = ["1920x1080", "1600x1200", "1200x1600", "1080x1920"], tall = ["1200x1600", "1080x1920"];
+  const P = newLayer("photo", { pid: "p1" }), title = { ...newLayer("title"), clip: true }, T = newLayer("text", { text: "a", clip: true });
+  const S = newLayer("photo", { of: P.id, cut: true, own: true, sizes: ["1080x1920"] });
+  const W = newLayer("asset", { ref: { kind: "sticker", id: "x" }, weave: { with: ["title", T.id], by: "letters", line: 0.3, front: { title: ["0|H|0"], [T.id]: ["0|a|0"] } } });
+  const other = newLayer("photo", { pid: "p2" }), O = newLayer("photo", { of: other.id, cut: true, own: true });
+  const L = [newLayer("bg"), P, title, T, S, W, other, O];
+  const x = cutAt(L, P, tall, all), [copy, T2] = L.slice(L.indexOf(x) + 1, L.indexOf(x) + 3);
+  assert.deepEqual(L.map((l) => l.id).slice(0, 6), ["bg", P.id, "title", T.id, x.id, copy.id]);
+  assert.ok(copy.copy === true && copy.type === "title" && copy.id !== "title" && copy.clip && L[clipBase(L, L.indexOf(copy))] === x);
+  assert.deepEqual([copy.sizes, title.sizes, title.copy, L[clipBase(L, L.indexOf(title))]], [tall, undefined, undefined, P], "the title itself left at every size, hidden where the photo is");
+  assert.deepEqual([T.sizes, T2.sizes], [["1920x1080", "1600x1200"], tall]);
+  assert.deepEqual([S.of, S.sizes, L.filter((l) => l.of === P.id || l.of === x.id).length], [x.id, ["1080x1920"], 1], "shown at those sizes alone: linked to the copy, not copied");
+  assert.deepEqual(W.weave.with, ["title", copy.id, T.id, T2.id], "shown at every size: with each, the one that shows at a size");
+  assert.deepEqual(W.weave.front, { title: ["0|H|0"], [copy.id]: ["0|H|0"], [T.id]: ["0|a|0"], [T2.id]: ["0|a|0"] });
+  assert.deepEqual([other.sizes, O.of, O.sizes], [undefined, other.id, undefined], "another photo untouched");
+  const P2 = newLayer("photo", { pid: "p4" }), out = { ...newLayer("title", { off: true, visible: false }), clip: true }, few = [newLayer("bg"), P2, out];
+  cutAt(few, P2, tall, all);
+  assert.deepEqual([few.length, few.filter((l) => l.type === "title").length], [4, 1], "a layout layer left out of the cover is not brought in by a copy");
+  // a cut-out made now: of the photo where it shows; where it does not, of the copy shown there; of the photo when none is
+  assert.deepEqual([cutFrom(L, P, ["1920x1080"], all), cutFrom(L, P, tall, all), cutFrom(L, P, ["1080x1920"], all), cutFrom(L, P, null, all)], [P, x, x, P]);
+  assert.equal(cutFrom(L, other, tall, all), other);
+  const lone = { ...newLayer("photo", { pid: "p3" }), sizes: ["1920x1080"] };
+  assert.equal(cutFrom([...L, lone], lone, tall, all), lone, "no photo of its picture there: itself");
+});
+
+test("a size added or removed in Setup: the sizes the layers show at kept to the profile's as when read again", async () => {
+  const { refitSizes } = await import("../ui/js/layers.js");
+  const p = normalizeProfile({ sizes: [{ w: 1920, h: 1080 }, { w: 1200, h: 1600 }, { w: 1080, h: 1920 }] });
+  const c = normalizeCover({ layers: [{ type: "text", id: "a", text: "a", sizes: ["1920x1080", "1200x1600"] }, { type: "text", id: "b", text: "b", sizes: ["1080x1920"] }, { type: "text", id: "c", text: "c", sizes: ["1200x1600"] }, { type: "text", id: "d", text: "d" }] }, p);
+  const keys = (q) => q.sizes.map((z) => `${z.w}x${z.h}`), sizes = (layers) => ["a", "b", "c", "d"].map((id) => layers.find((l) => l.id === id).sizes);
+  p.sizes = p.sizes.filter((z) => z.h !== 1920);   // 9:16 removed
+  assert.equal(refitSizes(c.layers, keys(p)), true);
+  assert.deepEqual(sizes(c.layers), [undefined, [], ["1200x1600"], undefined], "every size left: none; none of them: an empty list");
+  assert.deepEqual(sizes(c.layers), sizes(normalizeCover(JSON.parse(JSON.stringify(c)), p).layers), "as read again");
+  p.sizes.push({ w: 1080, h: 1920, label: "", name: "" });   // and back
+  assert.equal(refitSizes(c.layers, keys(p)), false);
+  assert.deepEqual(sizes(c.layers), [undefined, [], ["1200x1600"], undefined], "a size added shows the layers shown at every size");
+  assert.deepEqual(sizes(c.layers), sizes(normalizeCover(JSON.parse(JSON.stringify(c)), p).layers));
+});
+
+test("copied from another profile, what a layer keeps by size goes to the sizes taking the place of that profile's: the same size, else its ratio, else its orientation, else every size rather than none; its placement per size alike, a move as far across", async () => {
+  const { standsFor } = await import("../ui/js/layout.js");
+  const { acrossSizes, copyFreeLayers } = await import("../ui/js/layers.js");
+  const from = ["1920x1080", "1080x1920", "1200x1600", "1080x1080"], to = ["1280x720", "1080x1920", "1080x1350", "3840x2160"];
+  assert.deepEqual(to.map((k) => standsFor(k, from, to)), [["1920x1080"], ["1080x1920"], ["1200x1600"], ["1920x1080"]], "16:9 by its ratio, 9:16 itself, 4:5 by its orientation (3:4 none here has)");
+  assert.deepEqual(standsFor("1080x1350", ["1080x1920", "1080x1080"], ["1080x1350", "1080x1920"]), [], "9:16 is here: it stands for itself alone");
+  assert.deepEqual(standsFor("1280x720", ["1280x720", "1920x1080"], ["1280x720"]), ["1280x720"]);
+  const raw = [
+    { type: "text", id: "a", text: "a", sizes: ["1920x1080"], t: { all: {}, by: { "1920x1080": { dx: 30, dy: 10 }, "1200x1600": { dx: 12, dy: 16 }, "1080x1920": { s: 1.5 }, "640x480": { dx: 1 } } } },
+    { type: "text", id: "b", text: "b", sizes: ["1080x1080"] },
+    { type: "text", id: "c", text: "c", sizes: ["1200x1600", "1080x1920"] },
+    { type: "text", id: "d", text: "d", sizes: [] },
+    { type: "graphic", id: "e", copy: true, t: { all: {}, by: { "1920x1080@k1": { dx: 8, dy: 0 } } } },
+  ];
+  const layers = acrossSizes(normalizeLayers(raw, null), from, to), of = (id) => layers.find((l) => l.id === id);
+  assert.deepEqual(["a", "b", "c", "d"].map((id) => of(id).sizes), [["1280x720", "3840x2160"], undefined, ["1080x1920", "1080x1350"], []], "by ratio; with none of them here, every size; by orientation; at none there, at none here");
+  const by = of("a").t.by;
+  assert.deepEqual(Object.keys(by).sort(), ["1080x1350", "1080x1920", "1280x720", "3840x2160"], "a size of that profile's only there goes");
+  assert.deepEqual([by["1280x720"].dx, by["1280x720"].dy, by["1080x1920"].s, by["1080x1350"].dx, by["1080x1350"].dy], [30, 10, 1.5, 12, 15], "16:9 the same canvas; 3:4's on 4:5 as far across");
+  assert.deepEqual(Object.keys(of("e").t.by).sort(), ["1280x720@k1", "3840x2160@k1"], "a channel's own too");
+  // through Copy from another channel: the copies then kept as this profile's
+  const p = normalizeProfile({ sizes: to.map((k) => ({ w: +k.split("x")[0], h: +k.split("x")[1] })) }), into = normalizeCover({}, p);
+  const { layers: out, copies } = copyFreeLayers(into.layers, normalizeLayers(raw, null));
+  acrossSizes(copies, from, to);
+  assert.deepEqual(normalizeCover({ ...into, layers: out }, p).layers.filter((l) => l.type === "text").map((l) => l.sizes), [["1280x720", "3840x2160"], undefined, ["1080x1920", "1080x1350"], []]);
+  // the same sizes: nothing changes (but the order of a list, the profile's)
+  const same = normalizeLayers(raw, null), was = JSON.parse(JSON.stringify(same)), keys = [...from, "640x480"];
+  acrossSizes(same, keys, keys);
+  for (const l of was) if (l.sizes) l.sizes = keys.filter((k) => l.sizes.includes(k));
+  assert.deepEqual(same, was);
 });

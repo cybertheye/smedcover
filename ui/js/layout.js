@@ -56,8 +56,26 @@ export function orientOf(w, h) {
   const r = w / h;
   return r > 1.1 ? "wide" : r < 0.91 ? "tall" : "square";
 }
-/** The orientation of the size keyed "1920x1080" (see sizeKey in render.js); "square" for a key that is not one. */
-export const orientOfKey = (key) => { const m = /^(\d+)x(\d+)$/.exec(String(key)); return m ? orientOf(Number(m[1]), Number(m[2])) : "square"; };
+/** The width and height of the size keyed "1920x1080" (see sizeKey in render.js), or null for a key that is not one. */
+export const sizeOfKey = (key) => { const m = /^(\d+)x(\d+)$/.exec(String(key)); return m ? [Number(m[1]), Number(m[2])] : null; };
+/** The orientation of the size keyed "1920x1080"; "square" for a key that is not one. */
+export const orientOfKey = (key) => { const d = sizeOfKey(key); return d ? orientOf(d[0], d[1]) : "square"; };
+/** Whether the sizes keyed `a` and `b` are of one ratio (1920x1080 and 1280x720), as isRatio in platforms.js has it. */
+const sameRatio = (a, b) => { const p = sizeOfKey(a), q = sizeOfKey(b); return !!p && !!q && Math.abs(p[0] / p[1] - q[0] / q[1]) < 0.01; };
+/**
+ * The sizes of another profile (`from`, its size keys) whose place size `key` of this one takes (`to`, this profile's
+ * size keys, `key` among them), when what was kept by size there comes here — a layer's sizes and its placement per size
+ * (see acrossSizes in layers.js): a size key is exact pixels, so 1920x1080 there is no size here whose 16:9 is 1280x720.
+ * Itself, where it is one of them; else those there, and not here, of its ratio; else, where there are none, those
+ * there facing its way (see orientOf) of a ratio no size here has; else none.
+ */
+export function standsFor(key, from, to) {
+  if (from.includes(key)) return [key];
+  const gone = from.filter((k) => !to.includes(k)), like = gone.filter((k) => sameRatio(k, key));
+  if (like.length) return like;
+  const way = orientOfKey(key);
+  return gone.filter((k) => orientOfKey(k) === way && !to.some((x) => sameRatio(x, k)));
+}
 /**
  * The template and adjustments size `key` is drawn in: { template, adjust }. A profile's style has one template and
  * its adjustments (style.template, style.layoutAdjust of it), which every size follows, unless that size has a layout

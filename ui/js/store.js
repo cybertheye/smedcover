@@ -183,7 +183,7 @@ export function normalizeProfile(raw) {
     categories, style,
     sizes,
     // a design keeps no photos: their pictures live with the cover
-    design: { layers: carryFonts(normalizeLayers(p.design && p.design.layers, categories.map((x) => x.id)), oldFonts, style.look).filter((l) => l.type !== "photo" && l.type !== "subject") },
+    design: { layers: carryFonts(normalizeLayers(p.design && p.design.layers, categories.map((x) => x.id), [...keys]), oldFonts, style.look).filter((l) => l.type !== "photo" && l.type !== "subject") },
     ...(oldFonts ? { oldFonts } : {}),   // kept until the open cover has been given them too (see the app), then dropped
     ...(p.layerOrder === 2 ? { layerOrder: 2 } : {}),   // its design and covers have been given the layout layers' new default order (see loadCovers in the app)
     ...(p.tagged === true ? { tagged: true } : {}),     // its covers not yet touched have been given the default tag, once (see loadCovers)
@@ -209,14 +209,14 @@ export function carryFonts(layers, old, lookId) {
   return layers;
 }
 
-/** A cover with every field present. New covers start from the profile's default layer stack. */
+/** A cover with every field present. New covers start from the profile's default layer stack. Its layers' sizes are the profile's (see `sizes` in layers.js). */
 export function normalizeCover(raw, profile) {
   const c = raw && typeof raw === "object" ? raw : {};
   const ids = profile.categories.map((x) => x.id), scene = normalizeScene(c.scene);   // where the looks' scene objects were dragged
   return {
     catId: ids.includes(c.catId) ? c.catId : ids[0],
     title: str(c.title), subtitle: str(c.subtitle), tag: str(c.tag),
-    layers: normalizeLayers(Array.isArray(c.layers) ? c.layers : JSON.parse(JSON.stringify(profile.design.layers)), ids),
+    layers: normalizeLayers(Array.isArray(c.layers) ? c.layers : JSON.parse(JSON.stringify(profile.design.layers)), ids, profile.sizes.map((s) => s.w + "x" + s.h)),
     ...(Object.keys(scene).length ? { scene } : {}),
   };
 }

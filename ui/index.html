@@ -105,7 +105,16 @@
   .artback{margin:4px 0 0 92px}   /* under the figure's graphic, past the label column */
   .layscope .seg .btn{flex:1;padding-left:6px;padding-right:6px}   /* the Style tab's template box: the scope it changes, the toolbar's own */
   .layown{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;margin:0 0 10px;padding:6px 8px;border:1px dashed var(--acc)}
-  .layown .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
+  .sizes-ctl{margin:10px 0 4px}   /* the sizes a layer shows at, in its properties */
+  .sizes-ctl .cap{display:flex;align-items:center;gap:6px}
+  .sizes-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+  .sizes-row .btn{padding:4px 8px;font:600 11px var(--mono);opacity:.55}
+  .sizes-row .btn.on{opacity:1}
+  .sizes-row .btn.here{box-shadow:inset 0 -2px 0 var(--acc)}   /* the size on the canvas */
+  .sizes-row .btn.away{border-style:dashed;opacity:.5}   /* clipped onto a layer not shown at that size: not shown there either */
+  .sizes-picks{display:flex;flex-wrap:wrap;gap:12px;margin-top:6px}
+  .sizes-picks .linkbtn.on{text-decoration:none;opacity:.5;cursor:default}
+  .layown .linkbtn,.sizes-picks .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
   .fxs .linkbtn:disabled{opacity:.35;cursor:default;text-decoration:none}
   .fxs>.fxa{display:flex;gap:12px}
   .psec-b>.fxs>span.jump{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
@@ -270,6 +279,9 @@
   .layer.over{box-shadow:0 -3px 0 var(--acc)}
   .layer.hidden .nm{opacity:.35}
   .layer.dim{opacity:.35;cursor:not-allowed}   /* FOCUS is on another layer: it cannot be selected */
+  .layer.away>.ic,.layer.away>.nm,.layer.away .kind{opacity:.3}   /* kept to other sizes: not on the cover at this one */
+  .layer .sizes{font:600 10px var(--mono);letter-spacing:.02em;white-space:nowrap;padding:1px 5px;border:1px solid currentColor;opacity:.7;cursor:help}
+  .layer.away .sizes{opacity:1;color:var(--acc)}
   .layer .ic{border:0;background:transparent;width:26px;height:26px;cursor:pointer;font-size:14px;opacity:.85;padding:0}
   .layer .ic.off{opacity:.25}
   .layer .ic.pin{display:grid;place-items:center;font-size:12px;opacity:.9;cursor:help}

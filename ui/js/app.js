@@ -1,8 +1,8 @@
 // SmedCover UI. Two modes: Edit (cover content, assets, style + the layer stack) and Setup (brand,
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
-import { virtualSize , layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot, orientOf, orientOfKey, layoutOf, ownLayout, setLayoutOf, followLayout, layoutByOrient } from "./layout.js";
-import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles, showsFrame, sceneHandleAt, coverLayout, partsOf } from "./render.js";
+import { virtualSize , layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot, ORIENTS, orientOf, orientOfKey, layoutOf, ownLayout, setLayoutOf, followLayout, layoutByOrient } from "./layout.js";
+import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles, showsFrame, sceneHandleAt, coverLayout, partsOf, coverAt } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
@@ -11,7 +11,7 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, rebalance, dropOption, partChance, ODD_OPTIONS } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, LETTERED, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf, LAYOUT_PARTS, takeLayout, putLayout, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf, LAYOUT_PARTS, takeLayout, putLayout, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
@@ -91,6 +91,23 @@ const SCOPES = ["all", "orient", "size"];
 const scopeName = (v, key = S.sel) => t(v === "orient" ? "scope.orient." + orientOfKey(key) : "scope." + v);
 /** The size keys a change in `scope` reaches by size from the size keyed `key` — those facing its way, or it alone — or null for every size. */
 const scopeKeys = (scope = S.settings.scope, key = S.sel) => (scope === "orient" ? sameWay(key).map(sizeKey) : scope === "size" ? [key] : null);
+/** The profile's size keys, in its order. */
+const sizeKeys = () => S.profile.sizes.map(sizeKey);
+/**
+ * Sizes `keys` said in the words of string `key`: its "Group" form with the orientation's name when they are every size
+ * facing one way and more than one ("仅竖版", "Only tall"), else with their ratios ("仅 3:4 · 9:16"); `more`, what the
+ * string says after them ({1}…).
+ */
+function sizesSaid(key, keys, ...more) {
+  const o = ORIENTS.find((x) => { const g = S.profile.sizes.filter((z) => orientOf(z.w, z.h) === x).map(sizeKey); return g.length > 1 && g.length === keys.length && g.every((k) => keys.includes(k)); });
+  return o ? t(key + "Group", t("orient." + o), ...more) : t(key, S.profile.sizes.filter((z) => keys.includes(sizeKey(z))).map((z) => ratioText(z.w, z.h)).join(" · "), ...more);
+}
+/** What layer L's sizes (see `sizes` in layers.js) come to, for its row in the layer list: "Only 3:4", "Only tall", "Not 9:16", "At no size"; "" when it shows at every size. */
+function sizesNote(L) {
+  if (!L.sizes) return "";
+  const all = sizeKeys(), on = all.filter((k) => inSize(L, k)), off = all.filter((k) => !on.includes(k));
+  return !on.length ? t("sizes.none") : !off.length ? "" : on.length <= off.length ? sizesSaid("sizes.only", on) : sizesSaid("sizes.not", off);
+}
 function layerName(L) {
   if (isAdded(L) && L.name) return L.name;   // the user's own name for a layer they added
   if (L.copy) return t("layer.copyOf", t("layer." + L.type));
@@ -1093,12 +1110,17 @@ function copyPreview(p) {
   }
   return el("div", {}, box, el("div", { class: "hint", style: "margin:4px 0 0" }, sizeLabel(size)));
 }
-/** Copies the free layers of cover src (of profile p) into the cover on the canvas, as one undo step. */
+/**
+ * Copies the free layers of cover src (of profile p) into the cover on the canvas, as one undo step. From another
+ * profile, what they keep by size goes to the sizes of this one that take the place of p's (see acrossSizes in
+ * layers.js): a size key is exact pixels, and its 16:9 may be 1280x720 here and 1920x1080 there.
+ */
 async function copyInto(p, src) {
   await loadPhotos(pidsOf(src));
   clearTimeout(timers.hist); commitHistory();
   const { layers, copies } = copyFreeLayers(S.cover.layers, src.layers);
   if (!copies.length) return;
+  if (p.id !== S.profile.id) acrossSizes(copies, p.sizes.map(sizeKey), sizeKeys());
   setCover(channelCover({ ...S.cover, layers }, S.profile, S.cover.catId));   // checked as a cover read is
   const top = copies.at(-1).id;
   S.layerId = layer(top) ? top : "title"; S.picked = [];
@@ -1107,8 +1129,8 @@ async function copyInto(p, src) {
   toast(t("copy.done", copies.length, (p.id === S.profile.id ? "" : (p.name || "—") + " · ") + (k ? k.name || k.code : "—")));
   touch({ cover: true, panel: true, side: true });
 }
-/** The cover's background photo: the lowest photo layer that fills the canvas, on this channel. */
-const mainPhoto = () => S.cover.layers.find((l) => fillsCanvas(l) && appliesTo(l, cat().id)) || null;
+/** The cover's background photo: the lowest photo layer that fills the canvas, on this channel, at the size on the canvas (see `sizes` in layers.js). */
+const mainPhoto = () => S.cover.layers.find((l) => fillsCanvas(l) && appliesTo(l, cat().id) && inSize(l, S.sel)) || null;
 /** The picture a photo layer shows: its own, or for a copy its original's. */
 const recordOf = (L) => { const base = L && (L.of ? layer(L.of) : L); return (base && S.photos.get(base.pid)) || null; };
 
@@ -1411,26 +1433,54 @@ async function ensureMask(pid, fresh = false) {
 }
 /** A picture changed (a new one, a repaint): the layers cut from it get its new subject. */
 async function recut(pid) { if (S.cover.layers.some((l) => l.type === "photo" && l.cut && recordOf(l) === S.photos.get(pid))) await ensureMask(pid, true); }
+/** The sizes a cut-out of photo L made now is for: where L shows among those the scope at the top reaches (see sizesFor in layers.js). */
+const cutSizes = (L) => sizesFor(L, scopeKeys(), sizeKeys());
+/**
+ * The photo Cut out subject cuts photo L's subject out of: L, or where L does not show at the sizes the scope at the
+ * top reaches, the photo of its picture that does — the copy Remove the background left there (see cutFrom in layers.js).
+ */
+const cutSource = (L) => cutFrom(S.cover.layers, L, scopeKeys(), sizeKeys());
 /**
  * Cuts the subject out of photo layer L into a linked cut-out (see "linked photos"): above the title
  * (or above L, when L is higher), selected. When L has one already, its subject is found again
- * instead. Returns the cut-out, or null.
+ * instead. With the scope at one size or one orientation, the cut-out shows only there (see `sizes` in layers.js), and
+ * says so; one L has already that does not show there yet is put there too. Where L does not show there and the copy
+ * Remove the background left there does, the cut-out is that copy's (cutSource). Returns the cut-out, or null.
  */
 async function cutOut(L) {
   if (!L || L.type !== "photo" || L.of || CUT.busy || !canCut()) return null;
-  const had = passivesOf(L)[0];
+  L = cutSource(L);
+  const had = passivesOf(L)[0], all = sizeKeys(), want = cutSizes(L);
+  if (had && !want.every((k) => inSize(had, k))) {   // the photo's cut-out is kept to other sizes: it shows at these too
+    keepTo(had, [...all.filter((k) => inSize(had, k)), ...want], all);
+    S.layerId = had.id; S.picked = [];
+    touch({ cover: true, side: true, panel: true });
+    toast(had.sizes ? sizesSaid("cut.alsoIn", had.sizes) : t("cut.everywhere"));
+    return had;
+  }
   if (!(await ensureMask(L.pid, !!had))) return null;
   if (had) { touch({ cover: true, side: true, panel: true }); toast(t("cut.redone")); return had; }
   const c = newLayer("photo", { of: L.id, cut: true, own: true });
   c.t = alignedT(L);
   if (L.crop && !L.fill) c.crop = { ...L.crop };   // of what the photo keeps
   if (L.cats) c.cats = [...L.cats];
+  keepTo(c, want, all);
   const at = (id) => S.cover.layers.findIndex((l) => l.id === id);
   insertAbove(S.cover.layers, at(L.id) > at("title") ? L.id : "title", c);
   S.layerId = c.id; S.picked = [];
   touch({ cover: true, side: true, panel: true });
-  toast(t("cut.made"));
+  toast(c.sizes ? sizesSaid("cut.madeOnly", c.sizes) : t("cut.made"));
   return c;
+}
+/**
+ * Removes the background of photo L (its `cut`) where the scope at the top reaches (see cutAt in layers.js): for every
+ * size, or where L shows at those sizes alone, L itself is cut; else a copy of it, cut, shows at those sizes right
+ * above it, selected, and L no longer does there, the other sizes as they were.
+ */
+function cutWhere(L) {
+  const keys = scopeKeys(), c = cutAt(S.cover.layers, L, keys, sizeKeys());
+  if (c) { S.layerId = c.id; S.picked = []; toast(sizesSaid("cut.bgOnly", c.sizes)); }
+  else if (!L.cut) toast(sizesSaid("cut.notThere", keys));   // it shows at none of them
 }
 
 // ---------- repainting a photo with an image model (see repaint.js)
@@ -2009,8 +2059,12 @@ function templateControls(st, at, changed, to = null) {
     el("button", { class: "btn wide", style: "margin-top:10px", disabled: !has, onclick: () => put(tpl, {}, true) }, t("style.layReset")),
   ];
 }
-/** The size on the canvas as templateControls wants it: its virtual canvas, and which parts that take room the cover has there. */
-const shownAt = () => { const z = selSize(), [w, h] = virtualSize(z.w, z.h); return { w, h, parts: partsOf(S.cover, cat()) }; };
+/**
+ * The size on the canvas as templateControls wants it: its virtual canvas, and which parts that take room the cover has
+ * there — as it is drawn there (coverAt in render.js), a part kept to other sizes left out, so the sliders start from
+ * the layout on the canvas.
+ */
+const shownAt = () => { const z = selSize(), [w, h] = virtualSize(z.w, z.h); return { w, h, parts: partsOf(coverAt(S.cover, S.sel), cat()) }; };
 /**
  * The Style tab's template and its adjustments, one box (as the look and the default design have), changed where the
  * scope says (its three choices here too: the toolbar's): the profile's, which every size without a layout of its own
@@ -2595,7 +2649,11 @@ function sizesTab() {
     if (on && !has(s)) P.sizes.push({ w: s.w, h: s.h, label: s.label || "", name: "" });
     if (!on) { if (P.sizes.length < 2) return renderPanel(); P.sizes = P.sizes.filter((x) => sizeKey(x) !== sizeKey(s)); followLayout(P.style, sizeKey(s)); }   // its layout of its own goes with it
     if (!P.sizes.some((x) => sizeKey(x) === S.sel)) S.sel = sizeKey(P.sizes[0]);
-    syncToolbar(); touch({ profile: true, strip: true, panel: true });
+    // the sizes a layer shows at (see `sizes` in layers.js) kept to those now, as they are when read again: on the design
+    // and on each channel's cover read so far (one not shown saved, as the one shown is)
+    refitSizes(P.design.layers, sizeKeys());
+    for (const c of new Set([S.cover, ...Object.values(S.covers)])) if (refitSizes(c.layers, sizeKeys()) && c !== S.cover) writeJson(coverPath(P.id, c.catId), c).catch(fail);
+    syncToolbar(); touch({ profile: true, cover: true, strip: true, panel: true, side: true });
   };
   const custom = P.sizes.filter((s) => !SIZE_PRESETS.some((p) => sizeKey(p) === sizeKey(s)));
   const unnamed = (s) => caption({ ...s, name: "" });   // what a size is called without a name of the user's
@@ -2661,7 +2719,9 @@ function layerRow(L) {
   const on = L.id === S.layerId || group().includes(L);
   const free = isRemovable(L), base = clipBase(S.cover.layers, S.cover.layers.indexOf(L));
   const off = S.focus && S.mode === "edit" && !spotIds().includes(L.id);   // FOCUS is on another layer
-  return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}${base >= 0 ? " clip" : ""}${off ? " dim" : ""}`, title: off ? t("focus.locked") : base >= 0 ? t("layers.clipped", layerName(S.cover.layers[base])) : null, dataset: { id: L.id }, draggable: L.type !== "bg",
+  // kept to other sizes (see `sizes` in layers.js), or clipped onto a layer that is (a base hides what is clipped onto it): greyed, and said why
+  const own = !inSize(L, S.sel), under = base >= 0 && !inSize(S.cover.layers[base], S.sel), away = own || under, note = sizesNote(L);
+  return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}${base >= 0 ? " clip" : ""}${off ? " dim" : ""}${away ? " away" : ""}`, title: off ? t("focus.locked") : own ? t("sizes.awayTip", note) : under ? t("sizes.awayBase", layerName(S.cover.layers[base])) : base >= 0 ? t("layers.clipped", layerName(S.cover.layers[base])) : null, dataset: { id: L.id }, draggable: L.type !== "bg",
     onclick: (e) => focusAllows(L.id) && (e.shiftKey ? togglePick(L.id) : selectLayer(L.id)),
     ondragstart: (e) => { dragId = L.id; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", L.id); },
     ondragend: () => { dragId = null; },
@@ -2679,7 +2739,7 @@ function layerRow(L) {
       : icon(L.locked ? "▣" : "□", !L.locked, t("layers.lock"), () => { L.locked = !L.locked; }),
     el("span", { class: "nm", title: free ? t("layers.rename") : null, onclick: free ? (e) => nameClick(e, L) : null }, layerName(L),
       L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) })),
-    el("span", { class: "kinds" }, layerKinds(L)));
+    el("span", { class: "kinds" }, note && el("span", { class: "sizes", title: t("sizes.tip") }, note), layerKinds(L)));
 }
 /** A layer's icons: a linked photo's chain and leading / following mark, what it is (photo, text, vector or bitmap asset), then whose it is (a layout layer, or added by the user). */
 function layerKinds(L) {
@@ -2861,7 +2921,7 @@ function columnControls(L) {
 /** The words a headline layer sets: the title's and the subtitle's are the cover's. */
 const wordsOf = (L) => (L.type === "title" ? S.cover.title : L.type === "subtitle" ? S.cover.subtitle : L.text || "");
 /** Whether the cover has a photo shown that the ransom note may cut letters from (see ransomOf in render.js). */
-const letterPhoto = () => S.cover.layers.some((l) => l.type === "photo" && !l.of && !l.cut && l.visible && appliesTo(l, cat().id) && recordOf(l)?.img);
+const letterPhoto = () => S.cover.layers.some((l) => l.type === "photo" && !l.of && !l.cut && l.visible && appliesTo(l, cat().id) && inSize(l, S.sel) && recordOf(l)?.img);
 /** What the ransom note's letters in the panel show: when it is the same, they are not drawn again. */
 const lettersNow = (L) => JSON.stringify([wordsOf(L), L.letters, L.fxSeed, L.fxAmt, L.ransomOff, letterPhoto(), drawnWith(L).papers.map((p) => p.css), S.letterSel, getLang()]);
 let letterHeld = false;   // a pointer is down in the letters' controls (WebKit does not focus a slider dragged)
@@ -3034,8 +3094,11 @@ function photoControls(L, set) {
   const cut = async (on) => {
     if (L.of && !on) { unlink(L); L.cut = false; touch({ cover: true, side: true, panel: onCoverTab() }); return toast(t("link.restored")); }   // a whole photo again, of its own
     if (on && !(await ensureMask(pid))) return renderSide();
-    L.cut = on; touch({ cover: true, side: true, panel: onCoverTab() });
+    if (on && !L.of) cutWhere(L); else L.cut = on;   // where the scope reaches: at one size or orientation, a copy cut out there
+    touch({ cover: true, side: true, panel: onCoverTab() });
   };
+  const from = !L.of && cutSource(L), had = from && passivesOf(from)[0];   // what Cut out subject cuts out of (see cutOut)
+  const redo = !!had && cutSizes(from).every((k) => inSize(had, k)), keys = !L.of && scopeKeys();   // its cut-out is found again; else made, or put where the scope reaches too
   const unlinkBtn = (L.of || linked.length > 0) && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => askUnlink(L) }, t("link.unlink"));
   const cropBtn = cropButton(L);
   return [
@@ -3044,8 +3107,9 @@ function photoControls(L, set) {
       canCut()
         ? el("div", { class: L.of ? "" : "row", style: "margin-top:0" },
             el("button", { class: "btn" + (L.of ? " wide" : ""), disabled: CUT.busy, onclick: () => cut(!L.cut) }, t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut")),
-            !L.of && el("button", { class: "btn", disabled: CUT.busy, title: t(linked.length ? "cut.againTip" : "cut.go"), onclick: () => cutOut(L) }, t(linked.length ? "cut.again" : "cut.goShort")))
+            !L.of && el("button", { class: "btn", disabled: CUT.busy, title: t(redo ? "cut.againTip" : "cut.go"), onclick: () => cutOut(L) }, t(redo ? "cut.again" : "cut.goShort")))
         : el("div", { class: "hint", style: "margin:0" }, t("cutset.needsApp")),
+      canCut() && keys && el("div", { class: "hint" }, sizesSaid("cut.scopeHint", keys)),   // the scope at the top keeps both to some sizes
       L.cut && slider("props.feather", 0, 40, 1, L.feather, px, (v) => { holdLive(L.id); set("feather", v); }),
       L.cut && slider("props.spread", 0, 40, 1, L.spread, px, (v) => { holdLive(L.id); set("spread", v); }),
       CUT.error && el("div", { class: "hint err" }, CUT.error),
@@ -3635,9 +3699,33 @@ function layerSection(L) {
   return [el("div", { class: "psep" }),
     psec("props.sec.layer", [
       slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { holdLive(L.id); L.o = v; touch({ cover: true }); }),
+      sizesControl(L),
       (isFree(L.type) || L.type === "title") && clipControl(L),
       !fixed && !copy && placementControls(L),   // a cut-out's (back over its photo) is with its placement
       ], fixed ? t("props.fixedHint") : "")];
+}
+/**
+ * The sizes layer L shows at (see `sizes` in layers.js): a button for each of the profile's sizes, by its ratio, lit
+ * where it shows, a click putting it there or taking it away (the last one lit stays: a layer at no size is one hidden);
+ * with sizes facing more than one way, every size and each orientation's at once underneath. Clipped onto a layer kept
+ * to other sizes, it does not show where that one does not either (a base hides what is clipped onto it): those sizes'
+ * buttons are greyed, and a line says so.
+ */
+function sizesControl(L) {
+  const all = sizeKeys(), lit = all.filter((k) => inSize(L, k)), list = S.cover.layers, b = clipBase(list, list.indexOf(L));
+  const base = b >= 0 ? list[b] : null, gone = base ? all.filter((k) => !inSize(base, k)) : [];
+  const keep = (keys) => { keepTo(L, keys, all); touch({ cover: true, side: true, panel: onCoverTab() }); };
+  const groups = ORIENTS.map((o) => [o, S.profile.sizes.filter((z) => orientOf(z.w, z.h) === o).map(sizeKey)]).filter(([, g]) => g.length);
+  const same = (keys) => keys.length === lit.length && keys.every((k) => lit.includes(k));
+  return el("div", { class: "sizes-ctl" }, el("div", { class: "cap" }, t("sizes.cap"), info(t("sizes.tip"))),
+    el("div", { class: "sizes-row" }, S.profile.sizes.map((z) => {
+      const k = sizeKey(z), on = lit.includes(k), under = gone.includes(k);
+      return el("button", { class: "btn" + (on ? " on" : "") + (under ? " away" : "") + (k === S.sel ? " here" : ""), title: under ? t("sizes.baseTip", sizeLabel(z), layerName(base)) : sizeLabel(z), disabled: on && lit.length === 1, onclick: () => keep(on ? lit.filter((x) => x !== k) : [...lit, k]) }, ratioText(z.w, z.h));
+    })),
+    gone.length > 0 && el("div", { class: "hint", style: "margin:6px 0 0" }, sizesSaid("sizes.base", gone, layerName(base))),
+    groups.length > 1 && el("div", { class: "sizes-picks" },
+      el("button", { class: "linkbtn" + (same(all) ? " on" : ""), onclick: () => keep(all) }, t("sizes.every")),
+      groups.map(([o, g]) => el("button", { class: "linkbtn" + (same(g) ? " on" : ""), title: g.map((k) => { const z = S.profile.sizes.find((x) => sizeKey(x) === k); return ratioText(z.w, z.h); }).join(" · "), onclick: () => keep(g) }, t("sizes.pick." + o)))));
 }
 /** A free layer's clipping mask: shown only within the shape of the layer below it (see clipBase in layers.js). */
 function clipControl(L) {
@@ -3750,7 +3838,7 @@ function renderSide() {
 // made in the panel show at once; a sheet moved in the list slides to its new place.
 const OPEN_MS = 420, MASK_PX = 160;
 const ease = (p) => (p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2);
-const here3d = () => S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off);
+const here3d = () => S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off && inSize(l, S.sel));   // what the cover at this size has (see `sizes` in layers.js)
 /** Opens the 3D view out of the cover, or folds it back. */
 function set3d(on) {
   if (on) brushClose();   // the brush paints on the flat canvas (and its opening closes this)
@@ -4228,7 +4316,7 @@ const projectActions = {
     let raw;
     try { raw = JSON.parse(await readAs(f, "readAsText")); if (!raw || raw.kind !== "project" || !raw.cover) throw 0; } catch (e) { return toast(t("msg.badFile")); }
     try {
-      let profile = S.profile, catId = S.cover.catId;
+      let profile = S.profile, catId = S.cover.catId, across = null;   // across: the sizes of the profile the cover was made in, opened into another
       const theirs = raw.profile && typeof raw.profile === "object" ? raw.profile : null;
       const here = theirs && S.profiles.find((p) => p.id === theirs.id);
       if (here) profile = here;
@@ -4236,6 +4324,7 @@ const projectActions = {
         const how = await askProjectProfile(theirs.name || raw.profileName || "—");
         if (!how) return;
         if (how === "new") { await adoptFonts(raw.fonts); profile = await addProfile(theirs, false); }
+        else across = normalizeProfile(theirs).sizes.map(sizeKey);
       }
       if (profile.categories.some((c) => c.id === raw.catId)) catId = raw.catId;
       else if (profile !== S.profile) catId = channelOf(profile);
@@ -4245,6 +4334,7 @@ const projectActions = {
       if (profile !== S.profile) await switchProfile(profile.id);
       if (catId !== S.cover.catId) await switchChannel(catId);
       clearTimeout(timers.hist); commitHistory();
+      if (across && Array.isArray(raw.cover.layers)) acrossSizes(raw.cover.layers, across, sizeKeys());   // what its layers keep by size, on this profile's sizes (as Copy from another channel puts it)
       const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
       const opened = await upgradeCover(normalizeCover(raw.cover, S.profile), { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
       setCover(channelCover(opened, S.profile, catId));
