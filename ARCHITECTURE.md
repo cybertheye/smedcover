@@ -1154,6 +1154,21 @@ folder, fonts and models. What it owes the page besides: to refuse the commands 
 (`reveal_data_dir`, `pick_folder`, `save_image`, `save_text`, `move_pointer`, the self-test's), to let only its
 user in, and to keep `ai_request` and `fetch_image` from being a relay for anyone.
 
+A file or a folder that is not there is no failure, on any host: it reads as null, a folder as `[]`
+(`store_read`, `store_list`), and a server must answer so too, never with 404 or an error, or a new data folder
+could never be started from. On this computer a read fails only when something is wrong for good, and that is
+taken for nothing stored. On a server a read can fail for a moment, and taking that for nothing stored would
+write the defaults over what is there or clear things away. So there (`absent()` in `app.js`) a failed read at the
+start of anything that would then be written or cleared (the settings, assets and their folders, the AI
+settings, the user's styles, the profiles, the library, the covers, an old session's pictures) stops the start:
+the page says so, and nothing is written over. The fonts are not among them: nothing is written for a font
+missed. Later on: a picture whose file could not be read is not taken for gone, as one that is not there is
+(`readPhoto()` resolves null, not false), and is asked for again a little later; switching profile changes
+nothing until the other profile's covers are read, and a profile deleted is deleted only once another is shown;
+the styles read again when the window comes back keep the ones there were. And
+`prunePhotos()`, on any host, removes no picture when a cover could not be read, nor one that came in while it
+read them.
+
 What the interface offers goes by what the host can do, `CAN`, not by which host it is: `files` (the data
 folder; else `localStorage`), `fonts` (installed fonts and their files), `outlines` (glyph outlines, the outline
 text effects), `cut` (cutting a subject out), `relay` (AI requests past the browser's cross-origin rules) — all

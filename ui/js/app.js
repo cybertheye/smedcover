@@ -886,14 +886,17 @@ function savePhoto(pid) {
 }
 const pidsOf = (cover) => new Set(cover.layers.filter((l) => l.type === "photo" && l.pid).map((l) => l.pid));
 const READING = new Map();   // pid -> the reading of its files under way, so two callers share one
-/** Reads one picture's three files at once and puts it in the store; resolves true if it could be read. */
+/**
+ * Reads one picture's three files at once and puts it in the store; resolves true if it could be read, false if
+ * it is not there, null if a file could not be read (on a server, for a moment): it may be there all the same.
+ */
 function readPhoto(pid) {
   if (S.photos.has(pid)) return Promise.resolve(true);
   if (!READING.has(pid)) {
-    const read = (ext) => files.read(`photos/${pid}${ext}`).catch(() => "");
-    READING.set(pid, Promise.all([read(""), read(".original"), read(".mask")])
-      .then(([src, original, mask]) => (S.photos.has(pid) ? pid : putPhoto(src || "", { original: original || "", mask: mask || "", pid, save: false })))
-      .then((id) => !!id).finally(() => READING.delete(pid)));
+    const read = (ext) => files.read(`photos/${pid}${ext}`);
+    READING.set(pid, Promise.all([read(""), read(".original"), read(".mask")]).then(
+      async ([src, original, mask]) => S.photos.has(pid) || !!(await putPhoto(src || "", { original: original || "", mask: mask || "", pid, save: false })),
+      () => null).finally(() => READING.delete(pid)));
   }
   return READING.get(pid);
 }
@@ -905,7 +908,7 @@ function readPhoto(pid) {
 async function loadPhotos(pids, each = null) {
   const missing = [], todo = [...new Set(pids)].filter((pid) => !S.photos.has(pid));
   let next = 0;
-  const worker = async () => { while (next < todo.length) { const pid = todo[next++]; if (await readPhoto(pid)) { if (each) each(pid); } else missing.push(pid); } };
+  const worker = async () => { while (next < todo.length) { const pid = todo[next++], got = await readPhoto(pid); if (got) { if (each) each(pid); } else if (got === false) missing.push(pid); } };
   await Promise.all(Array.from({ length: Math.min(3, todo.length) }, worker));
   return missing;
 }
@@ -919,15 +922,22 @@ function thumbOf(rec) {
   }
   return rec.thumb;
 }
-/** Removes the picture files that no cover of any profile shows and the bitmap library does not keep. */
+/**
+ * Removes the picture files that no cover of any profile shows and the bitmap library does not keep — none at all
+ * when a cover could not be read: it may show some.
+ */
 async function prunePhotos() {
+  let sure = true;
+  const unsure = (v) => () => { sure = false; return v; };
   const keep = new Set(S.library.map((e) => e.pid));
   for (const c of Object.values(S.covers)) for (const pid of pidsOf(c)) keep.add(pid);
-  for (const p of S.profiles) for (const f of await files.list("covers/" + p.id).catch(() => [])) {
-    const c = await readJson(`covers/${p.id}/${f}`).catch(() => null);
+  for (const p of S.profiles) for (const f of await files.list("covers/" + p.id).catch(unsure([]))) {
+    const c = await readJson(`covers/${p.id}/${f}`).catch(unsure(null));
     for (const l of (c && Array.isArray(c.layers) && c.layers) || []) if (l && typeof l.pid === "string") keep.add(l.pid);
   }
-  for (const f of await files.list("photos").catch(() => [])) if (!keep.has(f.replace(/\.(original|mask)$/, ""))) files.remove(`photos/${f}`).catch(() => null);
+  if (!sure) return;
+  const kept = (pid) => keep.has(pid) || S.photos.has(pid) || S.library.some((e) => e.pid === pid);   // and a picture that came while the covers were read
+  for (const f of await files.list("photos").catch(() => [])) if (!kept(f.replace(/\.(original|mask)$/, ""))) files.remove(`photos/${f}`).catch(() => null);
 }
 
 // ---------- covers: one for each channel of each profile
@@ -958,7 +968,7 @@ const coverFor = (catId) => S.covers[catId] || (S.covers[catId] = channelCover(n
 /** Reads the covers a profile's channels have. */
 async function loadCovers(profile) {
   const out = {};
-  for (const c of profile.categories) { const raw = await readJson(coverPath(profile.id, c.id)).catch(() => null); if (raw) out[c.id] = channelCover(raw, profile, c.id); }
+  for (const c of profile.categories) { const raw = await readJson(coverPath(profile.id, c.id)).catch(absent(null)); if (raw) out[c.id] = channelCover(raw, profile, c.id); }
   if (profile.layerOrder !== 2) {   // the layout layers' default order changed: the design and covers still in the old one take the new, once
     reorderLayout(profile.design.layers);
     for (const [id, c] of Object.entries(out)) if (reorderLayout(c.layers)) await writeJson(coverPath(profile.id, id), c).catch(fail);
@@ -1164,7 +1174,8 @@ async function addPhoto(src, at = null, name = "") {
 }
 /** Puts a picture of the photo store on the cover as a photo layer, by addPhoto's rules (from the bitmap library, too). */
 async function placePhoto(pid, at = null) {
-  if (!S.photos.has(pid) && (await loadPhotos([pid])).length) { toast(t("msg.badFile")); return null; }
+  if (!S.photos.has(pid)) await loadPhotos([pid]);
+  if (!S.photos.has(pid)) { toast(t("msg.badFile")); return null; }
   if (!mainPhoto()) {
     const L = insertAbove(S.cover.layers, "bg", newLayer("photo", { pid, fill: true }));
     S.layerId = L.id; S.picked = [];
@@ -1503,15 +1514,17 @@ const myStyle = () => (S.imageAi.source.startsWith("my:") ? S.myStyles.find((s) 
 // another editor show up.
 const MY_DIR = "repaint-styles";
 async function loadMyStyles() {
-  const names = (await files.list(MY_DIR).catch(() => [])).filter((f) => /^[a-z0-9][a-z0-9-]*\.md$/.test(f)).slice(0, MAX_STYLES);
+  const names = (await files.list(MY_DIR).catch(absent([]))).filter((f) => /^[a-z0-9][a-z0-9-]*\.md$/.test(f)).slice(0, MAX_STYLES);
   const out = [];
-  for (const f of names) { const text = await files.read(`${MY_DIR}/${f}`).catch(() => null); if (text != null) out.push(userStyle(f, text)); }
+  for (const f of names) { const text = await files.read(`${MY_DIR}/${f}`).catch(absent(null)); if (text != null) out.push(userStyle(f, text)); }
   return out.sort((a, b) => a.order - b.order || a.name[getLang()].localeCompare(b.name[getLang()]));
 }
-/** Reads the folder again; redraws the panel if anything changed. */
+/** Reads the folder again; redraws the panel if anything changed (nothing, when it could not be read just now). */
 async function refreshMyStyles() {
   const was = JSON.stringify(S.myStyles.map((s) => [s.id, s.meta, s.body]));
-  S.myStyles = await loadMyStyles();
+  const mine = await loadMyStyles().catch(() => null);   // a style taken for gone would be unselected
+  if (!mine) return;
+  S.myStyles = mine;
   if (JSON.stringify(S.myStyles.map((s) => [s.id, s.meta, s.body])) === was) return;
   if (S.imageAi.source.startsWith("my:") && !myStyle()) { S.imageAi.source = "look"; persistImageAi(); }   // its file is gone
   if (onCoverTab() && !(document.activeElement && document.activeElement.closest && document.activeElement.closest(".rep"))) renderPanel();
@@ -1523,8 +1536,12 @@ async function addStyle(meta, body) {
   if (S.myStyles.length >= MAX_STYLES) return toast(t("rep.tooMany", MAX_STYLES));
   const id = freeId(Date.now().toString(36), S.myStyles.map((s) => s.id));
   await files.write(`${MY_DIR}/${id}.md`, writeStyle(meta, body)).catch(fail);
-  S.myStyles = await loadMyStyles();
+  await rereadMyStyles([...S.myStyles, userStyle(id + ".md", writeStyle(meta, body))]);
   S.imageAi = normalizeImageAi({ ...S.imageAi, source: "my:" + id }); persistImageAi(); renderPanel();
+}
+/** Reads the folder again after a change to it; when it cannot be read just now (on a server), says so and takes `was` for what is there. */
+async function rereadMyStyles(was) {
+  S.myStyles = await loadMyStyles().catch((e) => { fail(e); return was; });
 }
 /** Brings in a style file from elsewhere (one shared by someone, a skill's SKILL.md…), kept as it is. */
 async function importStyle() {
@@ -1536,7 +1553,7 @@ async function importStyle() {
   // a file without a header gets one, named after the file; one with a header is kept word for word
   const out = /^\uFEFF?---\r?\n/.test(text) ? text : writeStyle({ name: f.name.replace(/\.[^.]+$/, "") }, text);
   await files.write(`${MY_DIR}/${id}.md`, out).catch(fail);
-  S.myStyles = await loadMyStyles();
+  await rereadMyStyles([...S.myStyles, userStyle(id + ".md", out)]);
   S.imageAi = normalizeImageAi({ ...S.imageAi, source: "my:" + id }); persistImageAi(); renderPanel();
   toast(t("rep.imported", st.name[getLang()]));
 }
@@ -1544,7 +1561,7 @@ async function importStyle() {
 async function migrateStyles(raw) {
   const old = legacyStyles(raw);
   if (!old.length) return;
-  const have = await files.list(MY_DIR).catch(() => []);
+  const have = await files.list(MY_DIR).catch(absent([]));
   for (const s of old) if (!have.includes(s.id + ".md")) await files.write(`${MY_DIR}/${s.id}.md`, writeStyle({ name: s.name }, s.prompt)).catch(fail);
   await writeJson("image-ai.json", S.imageAi).catch(fail);   // without them from now on
 }
@@ -1590,7 +1607,7 @@ function repaintBox(P) {
         if (REP.confirmDrop !== mine.id) { REP.confirmDrop = mine.id; renderPanel(); return; }   // a second click confirms
         REP.confirmDrop = null;
         await files.remove(`${MY_DIR}/${mine.file}`).catch(fail);
-        S.myStyles = await loadMyStyles(); S.imageAi = normalizeImageAi({ ...c, source: "look" }); persistImageAi(); renderPanel();
+        await rereadMyStyles(S.myStyles.filter((s) => s.id !== mine.id)); S.imageAi = normalizeImageAi({ ...c, source: "look" }); persistImageAi(); renderPanel();
       } }, t(REP.confirmDrop === mine.id ? "rep.dropSure" : "rep.drop", mine.name[lang]))],
     el("div", { style: "margin-top:8px" }, textInput(c.notes, (v) => set("notes", v), { placeholder: t("rep.notesPh"), maxLength: 600, disabled: REP.busy })),
     el("button", { id: "rep-go", class: "btn solid wide", style: "margin-top:10px", disabled: REP.busy, onclick: repaintPhoto }, REP.busy ? repBusyText() : t(r ? "rep.again" : "rep.go")),
@@ -2188,7 +2205,7 @@ function brandTab() {
           struct();
         } }, t("cat.remove"))));
   };
-  const act = (key) => el("button", { class: "btn", onclick: profileActions[key] }, t("prof." + key));
+  const act = (key) => el("button", { class: "btn", onclick: () => Promise.resolve(profileActions[key]()).catch((e) => { fail(e); syncTop(); renderPanel(); }) }, t("prof." + key));
   return [
     el("div", { class: "box" }, cap("prof.manage"), el("div", { class: "acts", style: "justify-content:flex-start" }, ["new", "duplicate", "delete", "import", "export"].map(act))),
     el("div", {}, cap("brand.profileName"), textInput(P.name, (v) => { P.name = v; touch({ profile: true }); later("top", 600, syncTop); })),
@@ -3583,9 +3600,9 @@ async function adoptPhotos(photos, nameKey) {
 }
 /** Shows another profile, on the channel it was last on, with its own covers as they were left. */
 async function switchProfile(id) {
-  S.profile = S.profiles.find((p) => p.id === id) || S.profiles[0];
-  S.settings.profileId = S.profile.id;
-  S.covers = await loadCovers(S.profile);
+  const profile = S.profiles.find((p) => p.id === id) || S.profiles[0];
+  const covers = await loadCovers(profile);   // first: when they cannot be read, the profile shown stays
+  S.profile = profile; S.settings.profileId = profile.id; S.covers = covers;
   const catId = channelOf(S.profile);
   S.settings.channels[S.profile.id] = catId; persistSettings();
   setCover(coverFor(catId));
@@ -3607,10 +3624,11 @@ const profileActions = {
     if (S.profiles.length < 2) return toast(t("msg.lastProfile"));
     if (!confirm(t("msg.confirmDelete", S.profile.name))) return;
     const gone = S.profile;
+    await switchProfile(S.profiles.find((p) => p !== gone).id);   // first: when the other one cannot be shown, nothing is deleted
     S.profiles = S.profiles.filter((p) => p !== gone);
     await deleteProfile(gone).catch(fail);
     for (const f of await files.list("covers/" + gone.id).catch(() => [])) await files.remove(`covers/${gone.id}/${f}`).catch(() => null);   // its covers go with it
-    await switchProfile(S.profiles[0].id);
+    syncTop(); renderPanel();
   },
   /** A profile file: a new profile (its own id), with the covers of its channels if the file has them. */
   async import() {
@@ -3976,7 +3994,7 @@ function syncTop() {
     el("h1", {}, "SMEDCOVER"),
     el("div", { class: "seg big" }, mode("edit"), mode("setup")),
     el("div", { class: "grp" }, el("span", {}, t("top.profile")),
-      el("select", { onchange: (e) => switchProfile(e.target.value) }, S.profiles.map((p) => el("option", { value: p.id, selected: p.id === S.profile.id }, p.name)))),
+      el("select", { onchange: (e) => switchProfile(e.target.value).catch((err) => { fail(err); syncTop(); }) }, S.profiles.map((p) => el("option", { value: p.id, selected: p.id === S.profile.id }, p.name)))),
     // project files (projectActions: open, save, reset) have no place in the top bar for now; the code stays
     el("div", { class: "grp" }, b("top.undo", () => timeTravel(-1), { disabled: S.histIdx <= 0 }), b("top.redo", () => timeTravel(1), { disabled: S.histIdx >= S.hist.length - 1 }),
       b("top.clear", clearDialog, { title: t("top.clearTip") })),
@@ -4094,20 +4112,28 @@ addEventListener("keydown", (e) => {
 
 // ---------- start
 onOutlines(() => queueDraw());   // an outline that was sent for has arrived: draw again, this time with it
+/**
+ * What a failed read of something that, taken for not there, would be written over or cleared away stands for. A
+ * file that is not there is no failure (it reads as null, a folder as []); where the data is on this computer (the
+ * app's folder, this browser's storage) a failure is rare and lasting, and is taken for nothing stored, v. On a
+ * server a read may fail for a moment (the network, the server starting again): the start stops instead, to be
+ * tried again, and nothing is written over.
+ */
+const absent = (v) => (e) => { if (HOST === "server") throw e; return v; };
 async function start() {
-  S.settings = normalizeSettings(await readJson("settings.json").catch(() => null));
+  S.settings = normalizeSettings(await readJson("settings.json").catch(absent(null)));
   setLang(S.settings.lang || detectLang());
-  for (const name of await files.list("fonts").catch(() => [])) {
+  for (const name of await files.list("fonts").catch(() => [])) {   // nothing is written for a font missed
     if (name.endsWith(".font")) { const src = await files.read("fonts/" + name).catch(() => null); if (src) await registerFont(name.slice(0, -5), src); }
   }
-  for (const a of await loadAssetRecords().catch(() => [])) {
+  for (const a of await loadAssetRecords().catch(absent([]))) {
     let entry = null;
     if (a.spec) { const r = normalizeSpec(a.spec); if (r.spec) entry = putSpecAsset(a.id, a.name, r.spec); } else entry = await putUserAsset(a.id, a.name, a.src);
     if (entry && a.folder) entry.folder = a.folder;
   }
-  S.assetFolders = normalizeFolders(await readJson("asset-folders.json").catch(() => null));
-  S.ai = normalizeAi(await readJson("ai.json").catch(() => null));
-  const rawImageAi = await readJson("image-ai.json").catch(() => null);
+  S.assetFolders = normalizeFolders(await readJson("asset-folders.json").catch(absent(null)));
+  S.ai = normalizeAi(await readJson("ai.json").catch(absent(null)));
+  const rawImageAi = await readJson("image-ai.json").catch(absent(null));
   S.imageAi = normalizeImageAi(rawImageAi);
   await migrateStyles(rawImageAi);
   S.repaintStyles = await loadStyles();
@@ -4121,13 +4147,14 @@ async function start() {
     for (const f of found) if (!f.cjk) S.latinFonts.add(f.name);
   }
   ransomFaces();
-  S.profiles = await loadProfiles().catch(() => []);
+  S.profiles = await loadProfiles().catch(absent([]));
   const selftest = CAN.selftest ? await invoke("selftest_dir").catch(() => null) : null;
   if (!S.profiles.length) await addProfile(selftest ? sampleProfile("en") : await welcome(), false);
   S.profile = S.profiles.find((p) => p.id === S.settings.profileId) || S.profiles[0];
-  S.settings.profileId = S.profile.id; persistSettings();
-  S.library = normalizeLibrary(await readJson("photo-library.json").catch(() => null));
-  if (!(await readJson("photo-library.json").catch(() => null))) await libraryFromFiles();
+  S.settings.profileId = S.profile.id;   // written with the channel below, once the covers are read
+  const library = await readJson("photo-library.json").catch(absent(null));
+  S.library = normalizeLibrary(library);
+  if (!library) await libraryFromFiles();
   S.covers = await loadCovers(S.profile);
   await migrateSession();
   const catId = channelOf(S.profile);
@@ -4153,9 +4180,9 @@ async function migrateSession() {
   let old = normalizeCover(raw, S.profile);
   if (!old.title) old.title = defaultTitle();
   await loadPhotos(pidsOf(old));
-  const photo = (await files.read("session-photo").catch(() => "")) || "";
+  const photo = (await files.read("session-photo").catch(absent(""))) || "";   // its files are removed below
   if (photo) {
-    const read = (f) => files.read(f).catch(() => "").then((v) => v || "");
+    const read = (f) => files.read(f).catch(absent("")).then((v) => v || "");
     old = await upgradeCover(old, { src: photo, original: await read("session-photo-original"), mask: await read("session-photo-mask") });
     for (const pid of pidsOf(old)) await savePhoto(pid);
   } else old = await upgradeCover(old, null);
@@ -4189,7 +4216,7 @@ function keepPicture(pid, name, kind) {
 }
 /** The first time the library is opened: the pictures already there (uploaded before it existed) go in it. */
 async function libraryFromFiles() {
-  const pids = [...new Set((await files.list("photos").catch(() => [])).map((f) => f.replace(/\.(original|mask)$/, "")))];
+  const pids = [...new Set((await files.list("photos").catch(absent([]))).map((f) => f.replace(/\.(original|mask)$/, "")))];
   S.library = pids.map((pid) => ({ pid, name: "", kind: "upload", at: 0 }));
   persistLibrary();
 }
@@ -4211,6 +4238,9 @@ function readLibrary() {
   const show = () => { if (!LIB.soon) LIB.soon = setTimeout(() => { LIB.soon = 0; if (LIB.redraw) LIB.redraw(); }, 150); };
   loadPhotos(todo.map((e) => e.pid), show).then((missing) => {
     if (missing.length) { S.library = S.library.filter((e) => !missing.includes(e.pid)); persistLibrary(); }   // their files are gone
+    // could not be read just now: asked for again when the library is next drawn after a pause (drawing it asks at once)
+    const again = todo.filter((e) => !S.photos.has(e.pid) && !missing.includes(e.pid)).map((e) => e.pid);
+    if (again.length) setTimeout(() => { for (const pid of again) LIB.tried.delete(pid); }, 15000);
     show();
   });
 }
@@ -4901,4 +4931,9 @@ async function dragTest() {
 }
 // test hook: lets automated checks drive the app without the UI
 window.__smedcover = { S, drawCover, renderFull, nameFor, touch, addAsset, addLayer, newLayer, selectLayer, selectSize, setMode, layer, surprise, SURPRISE, seenNow };
-start().catch((e) => { console.error(e); fail(e); });
+start().catch((e) => {
+  console.error(e);
+  if (HOST !== "server") return fail(e);
+  setLang(S.settings.lang || detectLang());   // the settings may be what could not be read
+  toast(t("msg.serverAway", String(e)), true);
+});

@@ -266,6 +266,7 @@ const STR = {
   "fx.kind.mask": ["蒙版类（改变字内质感）", "Masked (changes what is inside the letters)"],
   "fx.kind.outline": ["轮廓类（改变字形）", "Outlined (reshapes the letters)"],
   "fx.kind.letters": ["逐字类（每个字各不相同）", "Letter by letter (each letter its own)"],
+  "msg.serverAway": ["连不上 SmedCover 服务器（{0}），编辑器没有启动，没有覆盖任何数据。请稍后刷新页面再试。", "Could not reach the SmedCover server ({0}). The editor did not start, so nothing was overwritten. Reload the page to try again."],
   "fx.needsApp": ["这类效果需要桌面应用或 SmedCover 服务器读取字体文件；单独在浏览器里打开时显示为普通文字。", "Effects of this kind need the desktop app or a SmedCover server to read font files; in a plain browser they show as ordinary lettering."],
   "props.inkAuto": ["恢复自动", "Back to automatic"],
   "props.inkIsAuto": ["自动", "Automatic"],
