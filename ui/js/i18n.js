@@ -576,6 +576,8 @@ const STR = {
   "fx.warpHint": ["在画布上拖动文字四角的菱形手柄，可以自由调整透视。", "Drag the diamond handles at the lettering's corners on the canvas to set the perspective freely."],
   "fx.warpReset": ["重置透视", "Reset the perspective"],
   "fx.reshuffle": ["换一组", "Reshuffle"],
+  "letters.open": ["逐字调整…", "Letter by letter…"],
+  "letters.openTip": ["打开一个窗口，逐个调整这个图层的字", "Open a window to dress this layer's letters one by one"],
   "letters.hint": ["点一个字可以单独调整它；锁定的字在「换一组」时保持不变。上面的开关决定随机时会不会出现撕边、胶带、立体字和照片字，手动选的不受影响。", "Pick a letter to dress it yourself; a locked letter stays as it is when you Reshuffle. The switches above say whether torn edges, tape, letters in depth and letters cut from the photo come up by chance; what you choose by hand is not affected."],
   "letters.extras": ["随机时可以出现", "May come up by chance"],
   "letters.extra.torn": ["撕边", "Torn edges"],

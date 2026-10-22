@@ -328,7 +328,7 @@ let drawQueued = false;
 function flushDraw() {
   if (!drawQueued) return;
   drawQueued = false; ensureFonts(S.cover.layers); drawMain(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs);
-  if ($("letters-box")) later("letters", 200, refreshLetters);   // the ransom note's letters as now drawn (words typed, colours changed)
+  if (S.letterWin) later("letters", 200, lettersShow);   // the ransom note's letters as now drawn (words typed, colours changed)
 }
 /** Redraws at most once per frame, however many input events arrive. `stale` false: only what is selected changed. */
 function queueDraw(stale = true) {
@@ -2433,6 +2433,7 @@ function fxControl(L) {
       fx !== "auto" && kind !== "passes" && slider("props.fxAmt", 0, 2, 0.05, L.fxAmt ?? 1, times, (v) => { holdLive(L.id); set("fxAmt", v === 1 ? undefined : v, false); }),
       // the ransom note's letters dealt again: another face, paper, ink and angle for each
       fx === "ransom" && el("button", { class: "btn wide", style: "margin-top:8px", title: t("fx.reshuffleTip"), onclick: () => { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === L.fxSeed); set("fxSeed", n, false); } }, t("fx.reshuffle")),
+      fx === "ransom" && el("button", { class: "btn wide letters-btn", style: "margin-top:8px", title: t("letters.openTip"), onclick: () => lettersOpen(L) }, t("letters.open")),
       el("div", { style: "margin-top:12px" }, cap("props.bend"),
         select([["", t("bend.none")], ...Object.entries(BENDS).map(([id, b]) => [id, b.name[getLang()]])], L.bend || "", (v) => { if (v) L.bend = v; else { delete L.bend; delete L.bendAmt; } delete L.warp; delete L.reshape; touch({ cover: true, side: true }); })),
       L.bend && !(L.bend === "taper" && L.warp) && slider("props.bendAmt", 0, 2, 0.05, L.bendAmt ?? 1, times, (v) => { holdLive(L.id); set("bendAmt", v === 1 ? undefined : v, false); }),
@@ -2451,17 +2452,42 @@ const lettersNow = (L) => JSON.stringify([wordsOf(L), L.letters, L.fxSeed, L.fxA
 let letterHeld = false;   // a pointer is down in the letters' controls (WebKit does not focus a slider dragged)
 addEventListener("pointerup", () => { letterHeld = false; }, true);
 addEventListener("pointercancel", () => { letterHeld = false; }, true);
-const letterBox = (L) => el("div", { id: "letters-box", class: "wide", "data-now": lettersNow(L), onpointerdown: () => { letterHeld = true; } }, letterControls(L));
+// ---------- the ransom note's letters one by one, in a window over the left column (the canvas and the
+// layer's properties stay in view); it stays open while the cover is worked on, for the layer it was opened
+// for (S.letterWin), and closes when another layer is selected or the layer is lettered otherwise
+/** Places a floating window over the left column, as wide as it allows (460 at most), as tall as the window. */
+function overLeft(box) {
+  const r = $("left").getBoundingClientRect(), top = Math.max(8, r.top + 8), w = Math.min(Math.max(280, r.width - 16), 460, innerWidth - 16);
+  Object.assign(box.style, { left: `${Math.max(8, Math.min(r.left + 8, innerWidth - w - 8))}px`, top: `${top}px`, width: `${w}px`, maxHeight: `${Math.max(240, Math.min(r.bottom - 8, innerHeight - 8) - top)}px` });
+}
+/** Opens the letter window for layer L. */
+function lettersOpen(L) {
+  const win = $("letterwin") || document.body.appendChild(el("div", { id: "letterwin", role: "dialog", "aria-label": t("props.sec.letters"), onpointerdown: () => { letterHeld = true; } }));
+  overLeft(win);
+  S.letterWin = L.id; win.hidden = false;
+  lettersShow(true);
+}
+function lettersClose() { const win = $("letterwin"); if (win) win.hidden = true; S.letterWin = null; }
 /**
- * The ransom note's letters drawn anew in the panel, after the cover was: its words or colours may have
- * changed while the panel stayed (it is not rebuilt while text is typed in it). Not while a control of
- * theirs is in use, nor when nothing they show changed.
+ * The letter window drawn (again) for its layer as it is now: closed when the layer is gone, lettered
+ * otherwise, or no longer selected. Unless `now` (something in it was chosen), not while one of its controls
+ * is in use, nor when nothing it shows changed — its words, colours, letters set by hand, or the layer
+ * itself (an undo puts another object in its place).
  */
-function refreshLetters() {
-  const box = $("letters-box"), L = layer(), at = document.activeElement;
-  if (!box || !L || L.fx !== "ransom") return;
-  if (letterHeld || (at && box.contains(at) && /^(INPUT|SELECT)$/.test(at.tagName))) return later("letters", 400, refreshLetters);
-  if (box.dataset.now !== lettersNow(L)) box.replaceWith(letterBox(L));
+function lettersShow(now = false) {
+  const win = $("letterwin"), L = S.letterWin ? layer(S.letterWin) : null, at = document.activeElement;
+  if (!win || win.hidden) return;
+  if (!L || L.fx !== "ransom" || S.layerId !== L.id || S.mode !== "edit") return lettersClose();
+  const box = $("letters-box");
+  if (!now && box && box._layer === L && box.dataset.now === lettersNow(L)) return;
+  if (!now && (letterHeld || (at && win.contains(at) && /^(INPUT|SELECT)$/.test(at.tagName)))) return later("letters", 400, lettersShow);
+  const inner = el("div", { id: "letters-box", "data-now": lettersNow(L) }, letterControls(L));
+  inner._layer = L;
+  win.replaceChildren(
+    el("div", { class: "head" }, el("b", {}, `${t("props.sec.letters")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: lettersClose }, "×")),
+    inner,
+    el("div", { class: "hint" }, t("letters.hint")),
+    el("div", { class: "acts" }, el("button", { class: "btn", onclick: lettersClose }, t("deal.done"))));
 }
 /**
  * The ransom note letter by letter (ransom.js): the extras the layer lets in; a strip of its letters as they
@@ -2472,12 +2498,13 @@ function refreshLetters() {
  */
 function letterControls(L) {
   const photo = letterPhoto(), rows = ransomLetters(parseTitle(wordsOf(L)), { id: L.id, salt: `${L.id}:${L.fxSeed || 0}`, edits: L.letters || null, off: L.ransomOff || null, photo }, L.fxAmt ?? 1, drawnWith(L));
-  const put = (key, patch, side = true) => {
+  const put = (key, patch, show = true) => {
     const all = { ...(L.letters || {}) }, e = { ...(all[key] || {}), ...patch };
     for (const k of Object.keys(e)) if (e[k] === undefined) delete e[k];
     if (Object.keys(e).length) all[key] = e; else delete all[key];
     if (Object.keys(all).length) L.letters = all; else delete L.letters;
-    touch({ cover: true, side });
+    touch({ cover: true });
+    if (show) lettersShow(true);
   };
   const sel = S.letterSel && S.letterSel.id === L.id ? S.letterSel.key : null;
   let picked = null;
@@ -2490,7 +2517,7 @@ function letterControls(L) {
       class: `lt k-${p.kind}` + (p.key === sel ? " on" : "") + (p.locked ? " locked" : p.edited ? " edited" : "") + (p.hero ? " hero" : ""),
       style: `--p:${p.paper.css};--i:${p.ink};${p.face ? `font:${faceFont(p.face, 17)};` : ""}transform:rotate(${p.turn.toFixed(1)}deg)`,
       title: [p.face ? p.face.family : "", t(`letters.kind.${p.kind}`), p.locked ? t("letters.locked") : ""].filter(Boolean).join(" · "),
-      onclick: () => { S.letterSel = p.key === sel ? null : { id: L.id, key: p.key }; renderSide(); },
+      onclick: () => { S.letterSel = p.key === sel ? null : { id: L.id, key: p.key }; lettersShow(true); },
     }, p.ch);
   }))));
   const extras = el("div", { class: "chips small", style: "margin-bottom:10px" }, EXTRAS.map((k) => {
@@ -2499,14 +2526,14 @@ function letterControls(L) {
       const off = new Set(L.ransomOff || []);
       if (on) off.add(k); else off.delete(k);
       if (off.size) L.ransomOff = EXTRAS.filter((x) => off.has(x)); else delete L.ransomOff;
-      touch({ cover: true, side: true });
+      touch({ cover: true }); lettersShow(true);
     } }, t(`letters.extra.${k}`));
   }));
   return [
     cap("letters.extras"), extras,
     strip,
     picked ? letterEditor(L, picked, put, photo) : el("div", { class: "hint", style: "margin:6px 0 0" }, t("letters.pick")),
-    L.letters && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete L.letters; touch({ cover: true, side: true }); } }, t("letters.resetAll")),
+    L.letters && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete L.letters; touch({ cover: true }); lettersShow(true); } }, t("letters.resetAll")),
   ];
 }
 /** The controls of one letter of the ransom note: {row, c (its cell), p (how it is dressed now)}; `put(key, patch)` sets what was chosen. */
@@ -2514,14 +2541,14 @@ function letterEditor(L, { row, c, p }, put, photo) {
   const e = (L.letters && L.letters[p.key]) || {}, key = p.key, live = (patch) => { holdLive(L.id); put(key, patch, false); };
   /** A value back to chance: what was set, and what a lock keeps of it. */
   const loose = (field) => { const lock = e.lock && { ...e.lock }; if (lock) delete lock[field]; put(key, { [field]: undefined, ...(lock ? { lock } : {}) }); };
-  const settled = (row) => { row.querySelector("input").addEventListener("change", () => renderSide()); return row; };   // a slider let go: the strip and the controls show it
+  const settled = (row) => { row.querySelector("input").addEventListener("change", () => lettersShow(true)); return row; };   // a slider let go: the strip and the controls show it
   const pools = ransomPools(), faces = (isCJK(c.ch) ? pools.cjk : pools.latin).filter((f) => faceHas(f, c.ch));
   const faceId = (f) => `${f.family}|${f.weight}|${f.italic ? 1 : 0}`;
   // a colour of the letter's: by chance, one of `list`, or any
   const colours = (field, list, now) => el("div", { class: "lcol" },
     el("button", { class: "lsw auto" + (e[field] || (e.lock && e.lock[field]) ? "" : " on"), title: t("letters.random"), onclick: () => loose(field) }, "?"),
     list.map((x) => el("button", { class: "lsw" + (e[field] && now === x.css ? " on" : ""), style: `background:${x.css}`, title: x.css, onclick: () => put(key, { [field]: x.css }) })),
-    el("input", { type: "color", value: now, oninput: (ev) => { live({ [field]: ev.target.value }); later("side", 600, renderSide); } }));
+    el("input", { type: "color", value: now, oninput: (ev) => { live({ [field]: ev.target.value }); later("letters", 600, lettersShow); } }));
   const shown = drawnWith(L), papered = ["tile", "cut", "deep"].includes(p.kind);
   return el("div", { class: "ledit" },
     el("div", { class: "lhead" }, el("b", {}, `「${p.ch}」`), el("span", {}, t("letters.line", row + 1))),
@@ -2572,7 +2599,6 @@ function headlineControls(L, set) {
       L.type === "subtitle" && el("div", { style: "margin-bottom:8px" }, textInput(S.cover.subtitle, (v) => { S.cover.subtitle = v; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); }, { placeholder: t("cover.subtitlePh") })),
       fontControl(L, true)], t("props.textHint"), "top"),
     psec("props.sec.effect", fx.kids, fx.tip),
-    L.fx === "ransom" && psec("props.sec.letters", [letterBox(L)], t("letters.hint"), "wide"),
     psec("props.sec.color", [
       swatch(L, "ink", "props.sw.text", L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff"),
       // on plates of their own the words take what reads there; through a band or on a block set off, the lettering's colour
@@ -2931,6 +2957,7 @@ function syncFocus() {
 function renderSide() {
   if (!S.cover) return;
   if (layer() && (!appliesTo(layer(), cat().id) || layer().off)) S.layerId = "bg";   // the selected layer is not on this category's cover, or left out of it
+  if (S.letterWin) lettersShow();   // the letter window follows its layer, or closes
   const side = $("side"), y = side.scrollTop, L = layer(), free = L && isFree(L.type), here = S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off);
   // keep typing in the text box alive across rebuilds
   const typing = document.activeElement && side.contains(document.activeElement) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename"));
@@ -3491,6 +3518,7 @@ function setMode(mode) {
   if (mode !== "edit" && V3.on) close3d();   // the layer column is not there in Setup
   columns();   // the left column has a width of its own in Setup (and the handles' words follow the language)
   $("body").classList.toggle("setup", mode === "setup");
+  if (mode !== "edit") lettersClose();
   syncTop(); syncTabs(); renderPanel(); renderSide(); syncToolbar(); queueDraw();
 }
 /**
@@ -3664,10 +3692,10 @@ const DEAL_RULES = ["A1", "B1", "C1", "D1"];   // the standards a hand is marked
 /** Opens Surprise me's window (or empties it for a new run): a place for each hand to come. */
 function dealOpen() {
   const box = $("deal") || document.body.appendChild(el("div", { id: "deal", role: "dialog", "aria-label": t("top.surprise") }));
-  const z = selSize(), r = $("left").getBoundingClientRect(), locks = S.settings.surprise.locks;
+  const z = selSize(), locks = S.settings.surprise.locks;
   DEAL.hands = []; DEAL.kept = DEAL.auto = -1; DEAL.dropped = false;
-  const top = Math.max(8, r.top + 8), w = Math.min(Math.max(280, r.width - 16), 460, innerWidth - 16);
-  Object.assign(box.style, { left: `${Math.max(8, Math.min(r.left + 8, innerWidth - w - 8))}px`, top: `${top}px`, width: `${w}px`, maxHeight: `${Math.max(240, Math.min(r.bottom - 8, innerHeight - 8) - top)}px` });
+  lettersClose();   // the letter window stands where this one does
+  overLeft(box);
   box.style.setProperty("--ar", `${z.w} / ${z.h}`);
   const lock = (k) => el("button", { class: locks[k] ? "on" : "", title: t(`deal.lock.${k}Tip`), onclick: (e) => { if (locks[k]) delete locks[k]; else locks[k] = true; e.currentTarget.classList.toggle("on", !!locks[k]); persistSettings(); } }, t(`deal.lock.${k}`));
   box.replaceChildren(
@@ -3882,6 +3910,7 @@ addEventListener("keydown", (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
   if (typing || !S.cover || SURPRISE.busy) return;
   if (key === "escape" && $("deal") && !$("deal").hidden) return dealClose();
+  if (key === "escape" && S.letterWin) return lettersClose();
   if (mod && key === "z") { e.preventDefault(); return timeTravel(e.shiftKey ? 1 : -1); }
   if (S.mode !== "edit") return;
   const L = layer();

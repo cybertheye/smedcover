@@ -498,12 +498,16 @@ only heroes, false keeps the random hero off a letter; `salt` gives the letter a
 one again*). `lock` is a snapshot the editor takes ({seed, face, paper, ink, hero}): the layer's seed of then,
 which the letter's name keeps, and what its neighbours decided, so locking changes nothing and Reshuffle
 leaves it as it was; the letter before it, which it cannot give way to, keeps clear of its face and paper. The edits are in the plan's cache key and, through `o`, in a bent line's. The editor
-(`letterControls()` and `letterEditor()` in `app.js`) shows the letters with `ransomLetters()`, which plans
+is a window over the left column (`#letterwin`, placed by `overLeft()` as Surprise me's window is), opened by
+*Letter by letter…* under *Reshuffle* (`lettersOpen()`; `S.letterWin` is the layer it is for). Its
+`letterControls()` and `letterEditor()` in `app.js` show the letters with `ransomLetters()`, which plans
 each line of the layer's words (`lineCells()` over `parseTitle()`, the cells drawing would make) with the
 papers and channel colour the layer was last drawn with on the editor's canvas (`ransomShown()`, recorded
-when `o.ransom.shown`); after every drawing `refreshLetters()` draws the strip and the controls again when
-what they show changed (not while a pointer is down in them or one of their inputs has the focus), so they
-follow words typed and colours changed. A letter in depth is stacked from at most 8 copies while something
+when `o.ransom.shown`); after every drawing, and with the side panel, `lettersShow()` draws the window again
+when what it shows changed — the words, the colours, the letters set by hand, or the layer object itself (an
+undo puts another in its place) — not while a pointer is down in it or one of its inputs has the focus,
+unless something in it was just chosen; so it follows words typed and colours changed. It closes the window
+(`lettersClose()`) when the layer is gone, no longer selected or lettered otherwise, and when Edit is left
 is dragged (`isFast()`); a letter cut from the photo is kept by photo (`PHOTO_LETTERS`, 48 a photo).
 
 ### 6.2.1 A perspective of one's own

@@ -96,7 +96,6 @@
   .psec-b>.sl.off>:nth-child(2){grid-column:3/-1;font-size:12px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}   /* one line, as tall as a slider's row: the whole reason is in the tip */
   .psec-b>.sl.off>*{opacity:.5}
   .psec-b>.chk{display:flex}
-  .psec-h.wide,.psec-b>.wide{grid-column:1/-1}   /* a group that needs the panel's width (the ransom note's letters): its name over it */
   .psep{grid-column:1/-1;border-top:1px solid var(--line);margin:2px 0}
   .psec-b>.fxh{font-size:12px;font-weight:600;opacity:.75}
   .psec-b>.fxs{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}
@@ -311,12 +310,13 @@
   .lsw.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}.lsw.auto{background:var(--panel);color:#fff;font-size:12px}
   .lcol input[type=color]{width:30px;height:22px;padding:1px;background:var(--panel);border:2px solid var(--line);cursor:pointer}
   /* Surprise me's window: over the left column, the canvas left in view; the hands as they are dealt, the one kept marked */
-  #deal{position:fixed;z-index:35;background:var(--bg);border:3px solid #fff;box-shadow:8px 8px 0 var(--acc);padding:14px;display:grid;gap:10px;overflow:auto}
-  #deal[hidden]{display:none}
-  #deal .head{display:flex;align-items:center;justify-content:space-between;gap:8px}
-  #deal .head b{font-size:15px}
-  #deal .x{background:none;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:0 4px;opacity:.7}
-  #deal .x:hover{opacity:1}
+  #deal,#letterwin{position:fixed;z-index:35;background:var(--bg);border:3px solid #fff;box-shadow:8px 8px 0 var(--acc);padding:14px;display:grid;gap:10px;overflow:auto}
+  #deal[hidden],#letterwin[hidden]{display:none}
+  #deal .head,#letterwin .head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  #deal .head b,#letterwin .head b{font-size:15px}
+  #deal .x,#letterwin .x{background:none;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:0 4px;opacity:.7}
+  #deal .x:hover,#letterwin .x:hover{opacity:1}
+  #letterwin .hint{margin:0}
   #deal .hands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   #deal .hands.tall{grid-template-columns:repeat(3,minmax(0,1fr))}
   #deal figure{margin:0;border:2px solid var(--line);background:var(--panel);min-width:0}
