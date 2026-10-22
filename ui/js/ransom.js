@@ -16,7 +16,7 @@
 // on its own (`salt`); or locked (`lock`: the layer's seed it keeps, whatever Reshuffle deals the others).
 // Besides scraps of paper, a letter may stand in depth, be cut from the cover's photo, sit on a scrap torn
 // along an edge or two, or be taped down: each of these a layer may turn off (`o.ransom.off`).
-import { INK, isFast } from "./style.js";
+import { INK, isFast, fall } from "./style.js";
 import { luminance, contrastRatio } from "./check.js";
 import { LETTER_KINDS as KINDS, RANSOM_EXTRAS as EXTRAS } from "./layers.js";
 export { KINDS, EXTRAS };
@@ -393,10 +393,11 @@ export function ransom(ctx, pass, o) {
   const order = plan.map((_, i) => i).filter((i) => !only || only[i]).sort((i, j) => (plan[i] && plan[i].hero ? 1 : 0) - (plan[j] && plan[j].hero ? 1 : 0));   // the hero last, over its neighbours
   ctx.save();
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "round";
-  const d = o.d || 0, stroke = o.strokeAmt || 0;
+  // the shadows fall down and to the right as the page has it, in a column too (fall in style.js): `[sx, sy]` the way
+  const d = o.d || 0, stroke = o.strokeAmt || 0, [sx, sy] = fall(1, 1);
   /** A letter in the layer's own colours: its shadow, its keyline, its fill (the house lettering, one letter). */
   const lettered = (ch, x, y, hi) => {
-    if (d > 0) { ctx.fillStyle = ctx.strokeStyle = hi ? o.hiShadowCss : o.shadowCss; ctx.lineWidth = fs * 0.04; ctx.strokeText(ch, x + d, y + d); ctx.fillText(ch, x + d, y + d); }
+    if (d > 0) { ctx.fillStyle = ctx.strokeStyle = hi ? o.hiShadowCss : o.shadowCss; ctx.lineWidth = fs * 0.04; ctx.strokeText(ch, x + d * sx, y + d * sy); ctx.fillText(ch, x + d * sx, y + d * sy); }
     if (stroke > 0) { ctx.strokeStyle = o.inkCss; ctx.lineWidth = fs * 0.075 * stroke; ctx.strokeText(ch, x, y); }
     ctx.fillStyle = ctx.strokeStyle = hi ? o.hiCss : o.fillCss; ctx.lineWidth = fs * 0.018; ctx.strokeText(ch, x, y); ctx.fillText(ch, x, y);
   };
@@ -413,7 +414,7 @@ export function ransom(ctx, pass, o) {
     return Object.assign(g, { W: g.w / 2 + px, H: g.h / 2 + py, j: (n) => p.corners[n] * px * 0.45, tooth: fs * 0.035 * c.s });
   });
   const placed = (g, p, paint) => { ctx.save(); ctx.translate(g.x, g.y); ctx.rotate((p.turn * Math.PI) / 180); ctx.font = g.font; paint(); ctx.restore(); };
-  const path = (pts, dx = 0) => { ctx.beginPath(); pts.forEach(([x, y], n) => (n ? ctx.lineTo(x + dx, y + dx) : ctx.moveTo(x + dx, y + dx))); ctx.closePath(); };
+  const path = (pts, dx = 0) => { ctx.beginPath(); pts.forEach(([x, y], n) => (n ? ctx.lineTo(x + dx * sx, y + dx * sy) : ctx.moveTo(x + dx * sx, y + dx * sy))); ctx.closePath(); };
   // the scraps the letters were cut from: a little larger than the letter, their corners not quite square, a shadow under each; a torn
   // side shows the paper's lighter fibres
   for (const i of order) {
@@ -437,13 +438,14 @@ export function ransom(ctx, pass, o) {
     placed(g, p, () => {
       if (p.kind === "tile") { ctx.fillStyle = p.ink; ctx.fillText(p.ch, g.gx, g.gy); }
       else if (p.kind === "cut") {   // hollow: paper inside an ink rim
-        if (d > 0) { ctx.fillStyle = ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.07; ctx.strokeText(p.ch, g.gx + d * 0.6, g.gy + d * 0.6); ctx.fillText(p.ch, g.gx + d * 0.6, g.gy + d * 0.6); }
+        if (d > 0) { ctx.fillStyle = ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.07; ctx.strokeText(p.ch, g.gx + d * 0.6 * sx, g.gy + d * 0.6 * sy); ctx.fillText(p.ch, g.gx + d * 0.6 * sx, g.gy + d * 0.6 * sy); }
         ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.07; ctx.strokeText(p.ch, g.gx, g.gy);
         ctx.fillStyle = p.paper.css; ctx.fillText(p.ch, g.gx, g.gy);
       } else if (p.kind === "deep") {   // in depth: the letter laid back down and to the right, darker as it goes, its face in paper colour on an ink rim
         const m = ctx.getTransform ? ctx.getTransform() : { a: 1, b: 0 }, unit = Math.hypot(m.a, m.b) || 1, depth = fs * 0.1 * c.s;
         const side = p.paper.light ? mix(p.paper.rgb, rgbOf(INK), 0.55) : C && !near(C, p.paper.rgb, 60) ? C : [90, 90, 96], steps = Math.max(3, Math.min(isFast() ? 8 : 40, Math.ceil((depth * unit) / 1.2)));
-        for (let t = steps; t >= 1; t--) { ctx.fillStyle = hex(mix(side, rgbOf(INK), 0.45 * (t / steps))); ctx.fillText(p.ch, g.gx + depth * 0.62 * (t / steps), g.gy + depth * 0.78 * (t / steps)); }
+        const [bx, by] = fall(depth * 0.62, depth * 0.78);
+        for (let t = steps; t >= 1; t--) { ctx.fillStyle = hex(mix(side, rgbOf(INK), 0.45 * (t / steps))); ctx.fillText(p.ch, g.gx + bx * (t / steps), g.gy + by * (t / steps)); }
         ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.03; ctx.strokeText(p.ch, g.gx, g.gy);
         ctx.fillStyle = p.paper.css; ctx.fillText(p.ch, g.gx, g.gy);
       } else if (p.kind === "photo" && photo && ctx.getTransform) {   // cut from the cover's photo, on a white rim and an ink line
@@ -461,7 +463,7 @@ export function ransom(ctx, pass, o) {
           if (cuts.size >= 48) cuts.delete(cuts.keys().next().value);
           cuts.set(id, cut);
         }
-        if (d > 0) { ctx.fillStyle = ctx.strokeStyle = "rgba(7,7,12,0.5)"; ctx.lineWidth = fs * 0.11; ctx.strokeText(p.ch, g.gx + d * 0.6, g.gy + d * 0.6); }
+        if (d > 0) { ctx.fillStyle = ctx.strokeStyle = "rgba(7,7,12,0.5)"; ctx.lineWidth = fs * 0.11; ctx.strokeText(p.ch, g.gx + d * 0.6 * sx, g.gy + d * 0.6 * sy); }
         ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.11; ctx.strokeText(p.ch, g.gx, g.gy);   // an ink line round the rim, so a letter cut from the photo stands off the same photo behind it
         ctx.strokeStyle = WHITE; ctx.lineWidth = fs * 0.08; ctx.strokeText(p.ch, g.gx, g.gy);
         ctx.drawImage(cut, -W / 2, -H / 2, W, H);

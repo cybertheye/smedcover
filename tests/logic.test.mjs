@@ -1241,39 +1241,210 @@ test("text layers are headlines like the title; older layers carried over", () =
   for (const raw of [{ look: "plate", color: "accent", ink: "#112233" }, { plate: true, color: "custom", ink: "#445566", fx: "wave", fxAmt: 0.5 }, { color: "accent" }, { color: "ink" }, {}]) { const L = one(raw); assert.deepEqual(one(L), L); }
 });
 
-test("vertical titles: columns from the right, sideways Latin, sized to fit", async () => {
-  const { drawTitleVertical } = await import("../ui/js/title.js");
-  const made = () => { const calls = []; let depth = 0, turned = false; const ctx = new Proxy({ font: "" }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...s].length * 55 }) : (...a) => { if (k === "save") depth++; if (k === "restore") { depth--; if (depth === 1) turned = false; } if (k === "rotate") turned = true; if (k === "fillText") calls.push({ t: a[0], x: a[1], y: a[2], turned, fill: t.fillStyle }); return {}; }), set: (t, k, v) => { t[k] = v; return true; } }); return [ctx, calls]; };
-  const box = { x: 100, y: 200, w: 900, h: 600 }, st = { font: "serif", fill: "ink", hi: "red", maxFs: 300 };
-  const [ctx, calls] = made();
-  const r = drawTitleVertical(ctx, "霓虹城市\n*夜跑* VLOG", box, st);
-  const first = calls.filter((c) => "霓虹城市".includes(c.t)), second = calls.filter((c) => "夜跑".includes(c.t));
-  assert.equal(first.length, 4); assert.equal(second.length, 2);
-  assert.ok(first.every((c) => c.x === first[0].x) && second.every((c) => c.x === second[0].x));   // each line is one column
-  assert.ok(second[0].x < first[0].x);                                                          // the first column is on the right
-  assert.deepEqual(first.map((c) => c.y).slice().sort((a, b) => a - b), first.map((c) => c.y));  // and reads downward
-  assert.ok(first.every((c) => c.fill === "ink" && !c.turned) && second.every((c) => c.fill === "red"));
-  const latin = calls.find((c) => c.t === "VLOG");
-  assert.ok(latin && latin.turned);                                                             // a Latin run lies on its side, as one piece
+/**
+ * A stand-in canvas that keeps its transform: each fillText is noted where it lands ({t, x, y} on the canvas, the
+ * pen's place), with its net turn in degrees and its fill; each fillRect as {x, y, w, h} on the canvas. Its letters
+ * measure an em each (ASCII 0.6 of one); with `ink`, those named there have their ink too (in ems: left, right,
+ * ascent, descent from the pen), 国 and H always, so a line is set with real metrics.
+ */
+function turningCtx(ink = false) {
+  const calls = [], rects = [], px = (f) => Number((/(\d*\.?\d+)px/.exec(f) || [])[1]) || 10;
+  const INKS = { "国": [0, 1, 0.85, 0.1], H: [-0.05, 0.55, 0.7, 0], "，": [-0.1, 0.3, 0.12, 0.08], "。": [-0.08, 0.32, 0.2, 0.05], "？": [-0.1, 0.45, 0.8, 0] };
+  const target = {
+    m: [1, 0, 0, 1, 0, 0], stack: [], font: "10px X", textAlign: "left", textBaseline: "alphabetic", fillStyle: "#000", lineWidth: 1, globalAlpha: 1, canvas: {},
+    save() { this.stack.push([this.m.slice(), this.font, this.fillStyle, this.textAlign, this.globalAlpha]); },
+    restore() { const s = this.stack.pop(); if (s) [this.m, this.font, this.fillStyle, this.textAlign, this.globalAlpha] = s; },
+    transform(a, b, c, d, e, f) { const m = this.m; this.m = [m[0] * a + m[2] * b, m[1] * a + m[3] * b, m[0] * c + m[2] * d, m[1] * c + m[3] * d, m[0] * e + m[2] * f + m[4], m[1] * e + m[3] * f + m[5]]; },
+    translate(x, y) { this.transform(1, 0, 0, 1, x, y); },
+    rotate(r) { this.transform(Math.cos(r), Math.sin(r), -Math.sin(r), Math.cos(r), 0, 0); },
+    scale(x, y) { this.transform(x, 0, 0, y, 0, 0); },
+    getTransform() { const [a, b, c, d, e, f] = this.m; return { a, b, c, d, e, f }; },
+    at(x, y) { const [a, b, c, d, e, f] = this.m; return [a * x + c * y + e, b * x + d * y + f]; },
+    measureText(t) {
+      const p = px(this.font), w = [...String(t)].reduce((s, ch) => s + (/[\x20-\x7e]/.test(ch) ? 0.6 : 1), 0) * p, k = (ink || t === "国" || t === "H") && INKS[t];
+      return k ? { width: w, actualBoundingBoxLeft: k[0] * p, actualBoundingBoxRight: k[1] * p, actualBoundingBoxAscent: k[2] * p, actualBoundingBoxDescent: k[3] * p } : { width: w };
+    },
+    fillText(t, x, y) { const [X, Y] = this.at(x, y); calls.push({ t, x: X, y: Y, turn: Math.round((Math.atan2(this.m[1], this.m[0]) * 180) / Math.PI), fill: this.fillStyle, font: this.font }); },
+    fillRect(x, y, w, h) { const [X, Y] = this.at(x, y); rects.push({ x: X, y: Y, w, h, alpha: this.globalAlpha, fill: this.fillStyle }); },
+  };
+  const ctx = new Proxy(target, { get: (t, k) => (k in t ? t[k] : () => {}) });
+  return [ctx, calls, rects];
+}
+
+test("vertical lettering: columns from the right, read downward; CJK upright, Latin and brackets on their side, 。，、 at the top right; fitted to the box; ruled when asked", async () => {
+  const { drawTitleVertical, titleBlockVertical } = await import("../ui/js/title.js");
+  setLook("cel");
+  const box = { x: 100, y: 200, w: 900, h: 1000 }, st = { font: "Vt", fill: "ink", hi: "red", maxFs: 100, fx: "plain" };
+  const [ctx, calls, rects] = turningCtx(true);
+  const r = drawTitleVertical(ctx, "霓虹，城市\n*夜跑* VLOG「上」", box, st);
+  const fs = r.fs, col = (s) => calls.filter((c) => s.includes(c.t));
+  const first = col("霓虹城市"), second = col("夜跑上");
+  assert.equal(fs, 100);
+  assert.ok(first.every((c) => c.turn === 0) && col("夜跑").every((c) => c.turn === 0), "CJK stands upright");
+  assert.ok(first.every((c) => Math.abs(c.x - first[0].x) < 1e-6), "each typed line one column");
+  assert.ok(col("夜跑").every((c) => c.x < first[0].x - fs), "the first column on the right");
+  assert.deepEqual(first.map((c) => c.y), first.map((c) => c.y).slice().sort((a, b) => a - b), "read downward");
+  assert.ok(Math.abs(first[1].y - first[0].y - fs * 1.06) < 1e-6, "a cell 1.06 high");
+  assert.ok(first.every((c) => c.fill === "ink") && col("夜跑").every((c) => c.fill === "red"), "the highlighted words in their colour");
+  const latin = calls.filter((c) => /VLOG/.test(c.t)), bracket = calls.find((c) => c.t === "「");
+  assert.equal(latin.length, 1, "a Latin run is one piece");
+  assert.equal(latin[0].t, "VLOG");
+  assert.ok(latin[0].turn === 90 && bracket.turn === 90 && calls.find((c) => c.t === "」").turn === 90, "Latin and brackets lie on their side, turned with the line");
+  // the comma: its ink (at the bottom left of its em) mirrored through the em's middle, to the top right
+  const comma = calls.find((c) => c.t === "，"), mid = (0.1 - 0.85) / 2, ex = 0.2 - 0.5, ey = (0.08 - 0.12) / 2 - mid;
+  assert.equal(comma.turn, 0);
+  assert.ok(Math.abs(comma.x - (first[0].x - 2 * ex * fs)) < 1e-6, `moved right ${comma.x - first[0].x}`);
+  assert.ok(Math.abs(comma.y - (first[1].y + fs * 1.06 - 2 * ey * fs)) < 1e-6, `and up ${comma.y - first[1].y}`);
   assert.ok(r.x === box.x && r.y === box.y && r.w <= box.w + 1 && r.h <= box.h + 1, JSON.stringify(r));
-  // a long column is made to fit the height; many columns, the width
-  const tall = drawTitleVertical(made()[0], "一二三四五六七八九十一二三四五六七八九十", box, st), wide = drawTitleVertical(made()[0], Array(12).fill("字").join("\n"), box, st);
-  assert.ok(tall.h <= box.h + 1 && wide.w <= box.w + 1);
-  assert.equal(drawTitleVertical(made()[0], "  ", box, st), null);
-  // the woodblock look sets its title this way unless told otherwise
+  assert.equal(rects.length, 0, "no rules unless asked");
+  // a long column is made to fit the height, many columns the width; as titleBlockVertical measures it
+  for (const [t, why] of [["一二三四五六七八九十一二三四五六七八九十", "height"], [Array(12).fill("字").join("\n"), "width"]]) {
+    const drawn = drawTitleVertical(turningCtx()[0], t, box, { ...st, maxFs: 300 }), measured = titleBlockVertical(turningCtx()[0], t, box, "Vt", 900, 300);
+    assert.ok(drawn.h <= box.h + 1 && drawn.w <= box.w + 1, why);
+    assert.deepEqual([drawn.x, drawn.y, drawn.w, drawn.h, drawn.fs].map(Math.round), [measured.x, measured.y, measured.w, measured.h, measured.fs].map(Math.round), why);
+  }
+  assert.equal(drawTitleVertical(turningCtx()[0], "  ", box, st), null);
+  // ruled (界行): a hairline either side of every column, faint, in the lettering's colour; the block a column's air wider
+  const [rc, , rr] = turningCtx(), ruled = drawTitleVertical(rc, "一二\n三四\n五", box, { ...st, rules: true }), plain = titleBlockVertical(turningCtx()[0], "一二\n三四\n五", box, "Vt", 900, 100);
+  assert.equal(rr.length, 4);
+  assert.ok(rr.every((q) => q.fill === "ink" && q.alpha < 0.5 && Math.abs(q.h - ruled.h) < 1e-6));
+  assert.deepEqual(rr.map((q) => Math.round(q.x + q.w / 2)), [0, 1, 2, 3].map((k) => Math.round(ruled.x + ruled.w - k * ruled.fs * 1.32)));
+  assert.ok(Math.abs(ruled.w - plain.w - ruled.fs * 0.32) < 1e-6 && ruled.fs === plain.fs, "a column's air wider");
+  // a fixed size (a text layer's) is kept, whatever the box
+  assert.equal(drawTitleVertical(turningCtx()[0], "一二三", { x: 0, y: 0, w: 10, h: 10 }, { ...st, fs: 120 }).fs, 120);
+});
+
+test("in a column the shadow falls down and to the right, as off a line: the light does not turn with the line", async () => {
+  const { drawTitle, drawTitleVertical } = await import("../ui/js/title.js");
+  const { fall } = await import("../ui/js/style.js");
+  const { inColumn } = await import("../ui/js/textfx.js");
+  setLook("cel");
+  assert.deepEqual(fall(3, 5), [3, 5], "off a line, as given");
+  assert.deepEqual(inColumn(turningCtx()[0], () => fall(3, 5)), [5, -3], "in a column, turned back a quarter turn: the line is turned a quarter turn clockwise");
+  const st = { font: "Vt", fill: "ink", hi: "red", shadow: "sh", hiShadow: "sh", stroke: 0, shadowAmt: 1, maxFs: 100, fx: "cel", skew: 0 }, box = { x: 100, y: 200, w: 900, h: 1000 };
+  const offsets = (calls, fs) => ["国", "H"].map((t) => { const main = calls.find((c) => c.t === t && c.fill === "ink"), shade = calls.find((c) => c.t === t && c.fill === "sh"); return [(shade.x - main.x) / fs, (shade.y - main.y) / fs].map((v) => Math.round(v * 1000) / 1000); });
+  const [lc, lines] = turningCtx(true), line = drawTitle(lc, "国H", box, { dx: 0, dy: 0, s: 1 }, { ...st, align: "left" });
+  const [cc, cols] = turningCtx(true), col = drawTitleVertical(cc, "国H", box, st);
+  assert.deepEqual(offsets(lines, line.fs), [[0.062, 0.062], [0.062, 0.062]], "off a line: down and to the right");
+  assert.deepEqual(offsets(cols, col.fs), [[0.062, 0.062], [0.062, 0.062]], "in a column, the upright letter and the one on its side alike");
+  assert.ok(cols.find((c) => c.t === "H" && c.fill === "sh").turn === 90, "the letter on its side stays turned, only where its shadow falls is not");
+});
+
+test("the woodblock look sets the title and the subtitle in columns of itself, by the seal; a layer the user set vertical is in columns in every look", async () => {
+  const { columned, columnBoxOf } = await import("../ui/js/style.js");
+  const title = { type: "title" }, sub = { type: "subtitle" }, text = { type: "text" };
   setLook("songke"); assert.equal(lookValues().vertical, 1);
-  const env = (tag) => ({ h: 1080, cover: { tag }, G: LOOKS.songke.layout("stack", 1920, 1080) });
-  const [c2, k2] = made(); const set = LOOKS.songke.titleSet(c2, "夜跑", box, {}, env(""), lookValues());
-  assert.ok(set && k2.length === 2);
-  assert.ok(set.h > 0 && set.y + set.h <= env("").G.accent[0][1], "the columns stop above the band");
-  const [c3, k3] = made(); LOOKS.songke.titleSet(c3, "夜跑", box, {}, env("EP.07"), lookValues());
-  assert.ok(k3[0].x > k2[0].x, "with a seal in the corner, the title stands clear of it");
-  assert.equal(LOOKS.songke.titleSet(made()[0], "夜跑", box, {}, env(""), { ...lookValues(), vertical: 0 }), null);
+  assert.ok(columned(title) && columned(sub) && !columned(text), "its switch: the title and the subtitle");
+  assert.ok(columned({ type: "text", vertical: true }) && columned({ type: "tag", vertical: true }));
+  setLook("songke", { vertical: 0 });
+  assert.ok(!columned(title) && columned({ type: "title", vertical: true }), "switched off, the layer's own say");
+  setLook("cel");
+  assert.ok(!columned(title) && columned({ type: "title", vertical: true }) && !columned(null));
+  assert.equal(LOOKS.cel.columns, undefined);
+  const box = { x: 100, y: 200, w: 900, h: 600 };
+  assert.deepEqual(columnBoxOf(turningCtx()[0], {}, box), box, "the layout's box, but where a look has a place of its own");
+  setLook("songke");
+  const env = (tag) => ({ w: 1920, h: 1080, cover: { tag }, G: LOOKS.songke.layout("stack", 1920, 1080) });
+  const b0 = columnBoxOf(turningCtx()[0], env(""), box), b1 = columnBoxOf(turningCtx()[0], env("EP.07"), box);
+  assert.ok(b0.h > 0 && b0.y + b0.h <= env("").G.accent[0][1], "the columns stop above the band");
+  assert.ok(b1.x > b0.x, "with a seal in the corner, the title stands clear of it");
   // the whole page in the serif, and the shared font table put back afterwards
   const { fonts } = await import("../ui/js/cel.js");
   assert.deepEqual(LOOKS.songke.faces(fonts), { cn: fonts.serif, en: fonts.serif });
   setLook("cel");
+});
 
+test("lettering set in columns: `vertical` and `rules` on every lettered layer and its copies, false unless true, kept through design and cover", () => {
+  const raw = [{ type: "bg" }, { type: "title", vertical: true, rules: true }, { type: "subtitle", vertical: "yes", rules: 1 }, { type: "tag", vertical: true }, { type: "catname", rules: true },
+    { type: "brand", vertical: true, rules: false }, { type: "text", id: "t1", text: "竖排", vertical: true, rules: true }, { type: "title", copy: true, id: "c1", vertical: true }, { type: "accent", vertical: true }, { type: "logo", vertical: true }];
+  const L = normalizeLayers(raw), by = (id) => L.find((l) => l.id === id);
+  for (const type of LETTERED) assert.ok(L.filter((l) => l.type === type).every((l) => typeof l.vertical === "boolean" && typeof l.rules === "boolean"), type);
+  assert.deepEqual(["title", "subtitle", "tag", "catname", "brand", "t1", "c1"].map((id) => [by(id).vertical, by(id).rules]),
+    [[true, true], [false, false], [true, false], [false, true], [true, false], [true, true], [true, false]], "only true is true");
+  assert.ok(!("vertical" in by("accent")) && !("vertical" in by("logo")) && !("rules" in by("bg")), "only lettering");
+  assert.deepEqual(normalizeLayers(L), L, "settled");
+  assert.ok(["title", "text", "tag"].every((t) => newLayer(t).vertical === false && newLayer(t).rules === false), "a new one in lines");
+  // a copy carries them, and so do the profile's design and the covers made from it
+  const dup = duplicate(by("title"));
+  assert.ok(dup.copy && dup.vertical === true && dup.rules === true && normalizeLayers([...L, dup]).find((l) => l.id === dup.id).vertical);
+  const p = normalizeProfile({ ...sampleProfile("en"), design: { layers: raw } }), c = normalizeCover({ title: "a", layers: raw }, p);
+  assert.ok(p.design.layers.find((l) => l.id === "title").vertical && c.layers.find((l) => l.id === "title").rules && c.layers.find((l) => l.id === "t1").vertical);
+});
+
+test("a column is set as a line is: its pieces in the line's order, keyed alike; upright characters a cell each, a run on its side one piece, brackets turned", async () => {
+  const { setColumn, setLine, parseTitle, hasCJK } = await import("../ui/js/title.js");
+  const { letterCells, lineCells, keysOf } = await import("../ui/js/ransom.js");
+  const { standsUp } = await import("../ui/js/textfx.js");
+  assert.ok([..."汉かナ한，。、？！：；　Ａ１"].every(standsUp) && ![..."ABc1-.「」『』（）《》—…“”～ー"].some(standsUp), "what stands upright");
+  const [ctx] = turningCtx();
+  ctx.font = "900 100px Vk";
+  for (const text of ["霓虹，城市 VLOG 2「上」……*夜跑*", "AB CD 中文 EF", "a，b、c。d", "《书名》——终"]) {
+    const line = parseTitle(text)[0], mixed = hasCJK([line]), v = setColumn(ctx, line, mixed), h = setLine(ctx, line, mixed);
+    assert.equal(v.pieces.map((p) => p.t).join(""), line.map((a) => a.t).join(""), "every character, in order");
+    const keys = (pieces) => letterCells(pieces, (t) => ctx.measureText(t).width, 3).map((c) => c.key);
+    assert.deepEqual(keys(v.pieces), keys(h.pieces), `${text}: the keys a line has`);
+    assert.deepEqual(keys(v.pieces), keysOf(lineCells(line), 3), `${text}: the keys the editor lists`);
+    for (let i = 1; i < v.pieces.length; i++) assert.ok(v.pieces[i].x >= v.pieces[i - 1].x + v.pieces[i - 1].w - 1e-9, "down the column, none over another");
+    assert.ok(v.width >= v.pieces[v.pieces.length - 1].x + v.pieces[v.pieces.length - 1].w);
+  }
+  const line = parseTitle("霓虹，城市 VLOG 2「上」")[0], v = setColumn(ctx, line, true), at = (t) => v.pieces.find((p) => p.t === t);
+  assert.deepEqual(v.pieces.map((p) => p.t), ["霓", "虹", "，", "城", "市", " ", "VLOG 2", "「", "上", "」"], "a run on its side, the space inside it with it");
+  assert.ok(Math.abs(at("虹").x - at("霓").x - 106) < 1e-9 && Math.abs(at("霓").x - 3) < 1e-9, "a cell 1.06 of the size, the character in its middle");
+  assert.ok(at("VLOG 2").s > 1, "Latin beside CJK set larger, as a line sets it");
+  assert.ok(Math.abs(v.mid + 37.5) < 1e-9 && Math.abs(at("VLOG 2").dy - (v.mid + (0.7 * 100 * at("VLOG 2").s) / 2)) < 1e-9, "its capitals' middle on the column's middle");
+  assert.deepEqual(v.runs.map((r) => r.hi), [false]);
+  const hi = setColumn(ctx, parseTitle("ab *夜跑* cd")[0], false);
+  assert.deepEqual(hi.runs.map((r) => r.hi), [false, true, false]);
+  assert.ok(hi.runs[1].x0 === hi.pieces.find((p) => p.t === "夜").x && hi.runs[1].x1 === hi.pieces.find((p) => p.t === "跑").x + hi.pieces.find((p) => p.t === "跑").w, "a highlighted run's extent, for its plate");
+});
+
+test("in a column, what stands upright is turned back where it stands — on any canvas, the outline effects' outlines too; the effects a column cannot draw stand down", async () => {
+  const { inColumn, columnNow, uprightTurn, NO_COLUMNS, paintRuns, EFFECTS } = await import("../ui/js/textfx.js");
+  // the canvas: the line turned a quarter turn, its upright letters turned back about their em's middle; the slant put back after
+  const [ctx, calls] = turningCtx(true);
+  ctx.font = "100px Vu"; ctx.translate(500, 0); ctx.rotate(Math.PI / 2);
+  const own = ctx.fillText;
+  inColumn(ctx, () => { assert.ok(columnNow()); ctx.fillText("中A，", 0, 0); });
+  assert.ok(!columnNow() && ctx.fillText === own, "the canvas as it was");
+  assert.deepEqual(calls.map((c) => [c.t, c.turn]), [["中", 0], ["A", 90], ["，", 0]]);
+  assert.ok(Math.abs(calls[1].y - 100) < 1e-9 && Math.abs(calls[2].x - calls[0].x - 60) < 1e-9, "each where the line puts it (the comma moved to the top right)");
+  // the outline of an upright letter turned the same way — its top left (the least along the line, the most across) where
+  // the canvas's top left is once the line is turned — a mark's moved as its glyph is
+  const square = [[[10, -80], [90, -80], [90, 0], [10, 0]]], up = uprightTurn("中", square, 50, -37.5)(square[0]);
+  assert.deepEqual(up.map((p) => p.map((v) => Math.round(v * 10) / 10)), [[7.5, 2.5], [7.5, -77.5], [87.5, -77.5], [87.5, 2.5]], "turned a quarter back about the middle of its em");
+  const dot = [[[10, -10], [30, -10], [30, 10], [10, 10]]], moved = uprightTurn("，", dot, 50, -37.5)(dot[0]);
+  assert.deepEqual([moved.reduce((s, p) => s + p[0], 0) / 4, moved.reduce((s, p) => s + p[1], 0) / 4], [12.5, -67.5], "a comma's dot up and to the right of the em's middle once the line is turned");
+  // Row shift cuts the canvas into level rows: in a column the look's own lettering stands in for it
+  assert.ok(EFFECTS.rows && NO_COLUMNS.includes("rows"));
+  setLook("songke");
+  const fill = (inside) => { const [c, k] = turningCtx(); const pass = (fn) => fn({ t: "中", hi: false, s: 1, dy: 0, run: { x0: 0, x1: 100 }, first: true }, 0); const go = () => paintRuns(c, pass, { fs: 100, d: 0, strokeAmt: 0, shadowAmt: 0, amt: 1, fillCss: "#fff", hiCss: "#ff0", inkCss: "#000", lineW: 100, unit: 1, seed: 1 }, "rows"); if (inside) inColumn(c, go); else go(); return k[k.length - 1].fill; };
+  assert.equal(fill(false), "#fff", "in a line (with no canvas to cut, in the house lettering)");
+  assert.notEqual(fill(true), "#fff", "in a column, the woodblock book's own ink");
+  setLook("cel");
+});
+
+test("Surprise me never sets lettering in columns or takes it out, nor rules them; a layer in columns is dealt no bend", async () => {
+  const { dealCover } = await import("../ui/js/deal.js");
+  let seed = 23;
+  const R = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  for (let k = 0; k < 40; k++) {
+    const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p);
+    const flags = { title: [true, true], subtitle: [false, true], tag: [true, false], brand: [false, false] };
+    for (const [id, [vertical, rules]] of Object.entries(flags)) Object.assign(c.layers.find((l) => l.id === id), { vertical, rules });
+    c.layers.push(newLayer("text", { text: "竖", vertical: true }));
+    dealCover(p.style, c, { R, locks: {}, recipes: {}, rgb: [252, 191, 0], design: new Map(p.design.layers.map((l) => [l.id, l])), sizeKey: "1920x1080" });
+    for (const [id, f] of Object.entries(flags)) assert.deepEqual([c.layers.find((l) => l.id === id).vertical, c.layers.find((l) => l.id === id).rules], f, id);
+    const text = c.layers.find((l) => l.type === "text"), title = c.layers.find((l) => l.id === "title");
+    assert.ok(text.vertical && !text.rules && !title.bend && !text.bend && title.fx !== "rows" && text.fx !== "rows", JSON.stringify([title.bend, text.bend, title.fx]));
+  }
+});
+
+test("the cover standards read a title in columns by the size of its characters", async () => {
+  const { drawTitleVertical } = await import("../ui/js/title.js");
+  const { typeSize } = await import("../ui/js/check.js");
+  const hit = drawTitleVertical(turningCtx()[0], "一二三四\n五六", { x: 0, y: 0, w: 600, h: 900 }, { font: "Vw", fill: "#fff", hi: "#ff0", fx: "plain" });
+  assert.equal(typeSize({ fs: hit.fs, hh: hit.h / 2 }, 2), hit.fs, "not the block's height over its lines");
+  assert.ok(hit.h / 2 / 1.16 > hit.fs * 1.5);
 });
 
 test("fonts belong to lettering layers; what older profiles chose is carried onto them", async () => {
@@ -1957,7 +2128,7 @@ test("layout presets: kept clean in the settings, ids as they are; their chances
   const raw = [
     { id: "a1", name: "  Poster  ", template: "split", adjust: { size: 2, slant: -0.1, tw: 0.5, flip: true, nope: 3 },
       parts: { title: { t: { all: { x: 0.1, y: 9, s: 0.5 }, by: { "1920x1080": { dx: 20 }, "1080x1920@vlog": { s: 2 }, "bad key": { dx: 5 } } }, shown: true, vertical: true, rules: { every: 2 } },
-        subtitle: { shown: false, vertical: "x".repeat(80) }, tag: { rules: { long: "y".repeat(500) } } } },
+        subtitle: { shown: false, vertical: "x".repeat(80) }, tag: { rules: { long: "y".repeat(500) } }, catname: { vertical: 1, rules: "true" }, graphic: { vertical: true } } },
     { id: "a1", name: "twin" },                                       // an id taken: a new one
     { id: "keep", template: "nope", adjust: { flip: "yes" } },        // "keep" is the canvas's own: a new one
     { id: "bad id!", name: "n".repeat(90) },
@@ -1973,8 +2144,9 @@ test("layout presets: kept clean in the settings, ids as they are; their chances
   for (const p of got) assert.deepEqual(Object.keys(p.parts), LAYOUT_PARTS, "every part there");
   assert.deepEqual(a.parts.title.t.all, { x: 0.1, y: 3, s: 0.5, r: 0, kx: 1, ky: 1 });
   assert.deepEqual(Object.keys(a.parts.title.t.by), ["1920x1080", "1080x1920@vlog"], "by size keys only");
-  assert.deepEqual([a.parts.title.shown, a.parts.title.vertical, a.parts.title.rules], [true, true, { every: 2 }], "which way the words run kept when small");
+  assert.deepEqual([a.parts.title.shown, a.parts.title.vertical, "rules" in a.parts.title], [true, true, false], "which way the words run kept only when true");
   assert.deepEqual([a.parts.subtitle.shown, "vertical" in a.parts.subtitle, "rules" in a.parts.tag], [false, false, false]);
+  assert.deepEqual([a.parts.catname, a.parts.graphic].map((q) => ["vertical" in q, "rules" in q]), [[false, false], [false, false]], "a number or a word is no way of running, nor has the graphic words");
   assert.deepEqual([b.parts.catname.shown, b.parts.graphic.shown, b.parts.title.shown, b.parts.title.t], [false, false, true, { all: { x: 0, y: 0, s: 1, r: 0, kx: 1, ky: 1 }, by: {} }], "a part missing: where the template puts it, as a new design has it");
   assert.equal(normalizeLayouts(Array.from({ length: 40 }, (_, i) => ({ id: "p" + i }))).length, LAYOUTS.most);
   assert.deepEqual(normalizeLayouts(JSON.parse(JSON.stringify(got))), got, "read back as written");
@@ -2062,7 +2234,7 @@ test("Surprise me deals a layout preset exactly — the template, its adjustment
     const { p, c, design } = fresh();
     c.layers.find((l) => l.id === "title").vertical = true;
     dealCover(p.style, c, env(design, rand(5), { odds: oddsOf({ groups: { layout: { a1: 1 } } }, layouts) }));
-    assert.deepEqual(["vertical" in c.layers.find((l) => l.id === "title"), c.layers.find((l) => l.id === "tag").vertical], [false, true]);
+    assert.deepEqual([c.layers.find((l) => l.id === "title").vertical, c.layers.find((l) => l.id === "tag").vertical], [false, true]);
   }
   // two at even chances: both dealt
   const seen = new Set();
@@ -2083,7 +2255,6 @@ test("Surprise me deals a layout preset exactly — the template, its adjustment
     dealCover(p.style, c, env(design, rand(9), { locks: { places: true }, odds: oddsOf({ groups: { layout: { a1: 1 } } }, layouts) }));
     assert.deepEqual(shape(p, c), before);
   }
-  // put on a cover by hand, as Apply to canvas does, and taken off it again: the same preset
   // a part locked stays as it is, dealt or put on by hand: its place, whether it shows, which way its words run; the
   // template and the parts not locked are the preset's all the same
   for (const how of ["dealt", "applied"]) {
@@ -2097,6 +2268,7 @@ test("Surprise me deals a layout preset exactly — the template, its adjustment
     assert.deepEqual(now(), kept, `${how}: the locked parts as they were`);
     assert.deepEqual([p.style.template, JSON.stringify(by("catname").t), by("catname").visible, by("brand").t], [A.template, JSON.stringify(A.parts.catname.t), true, A.parts.brand.t], `${how}: the rest as the preset has it`);
   }
+  // put on a cover by hand, as Apply to canvas does, and taken off it again: the same preset
   {
     const { p, c } = fresh();
     putLayout(p.style, c.layers, B);
@@ -2238,14 +2410,25 @@ test("the subtitle: under the title, smaller, the title making room; giving way 
   assert.ok(n.fs <= titleBlock(ctx, long, narrow, "serif", 340, n.reserve).fs * SUB.most + 1e-9, `subtitle ${n.fs}`);
   // what its words fill: their own width, not the box's (looks keep clear of that)
   assert.ok(Math.abs(s.ink.w - (7 * 50 * Math.floor(s.fs)) / 100) < 1e-9 && s.ink.w < s.box.w && s.ink.x === s.box.x);   // set at a whole size, as drawTitle sets it
-  // the woodblock look, title in columns: the subtitle a column left of the title's, set at the size it was planned at, smaller
-  const { titleBlockVertical } = await import("../ui/js/title.js");
-  const [sw, sh] = virtualSize(1200, 1600), env = { w: sw, h: sh, G: layout("stack", sw, sh), cover: { tag: "", layers: [{ type: "title", visible: true }] } };
-  const tb = { x: env.G.title.x, y: 150, w: env.G.title.w, h: env.G.title.h + env.G.title.y - 150 };
-  const v = LOOKS.songke.subtitleFit(ctx, "在这里写标题\n一行就是一行", "在这里写副标题", tb, env, { vertical: 1 }), vt = titleBlockVertical(ctx, "在这里写标题\n一行就是一行", v.titleBox, "serif", 900, 300);
+  // in columns (see subtitleColumns): both — the subtitle a column left of the title's, set at the size it was planned at, smaller
+  const { titleBlockVertical, subtitleColumns } = await import("../ui/js/title.js");
+  const [sw, sh] = virtualSize(1200, 1600), G = layout("stack", sw, sh), T2 = "在这里写标题\n一行就是一行";
+  const tb = { x: G.title.x, y: 150, w: G.title.w, h: G.title.h + G.title.y - 150 };
+  const v = subtitleColumns(ctx, T2, "在这里写副标题", tb, "serif", sw, sh, { title: true, sub: true }), vt = titleBlockVertical(ctx, T2, v.titleBox, "serif", 900, 300);
   assert.ok(v.vertical && Math.abs(titleBlockVertical(ctx, "在这里写副标题", v.box, "serif", 700, v.fs).fs - Math.floor(v.fs)) <= 1, "drawn at its planned size");
   assert.ok(v.fs < vt.fs && v.ink.x + v.ink.w <= vt.x - v.fs * 0.5 && v.ink.x >= tb.x - 1, "left of the title's columns, inside the box");
-  assert.equal(LOOKS.songke.subtitleFit(ctx, "a", "b", tb, env, { vertical: 0 }), null);   // a horizontal title: the usual place
+  assert.ok(v.box.y > tb.y && v.titleBox.x > tb.x, "a character lower; the title's columns moved over");
+  // the title in columns, the subtitle in a line: under the columns, which keep its room free at the foot of the box
+  const c = subtitleColumns(ctx, T2, "在这里写副标题", tb, "serif", sw, sh, { title: true, sub: false }), ct = titleBlockVertical(ctx, T2, { ...tb, h: tb.h - c.reserve }, "serif", 900, 300);
+  assert.ok(!c.vertical && c.reserve > 0 && c.fs < ct.fs && Math.abs(c.box.y - (ct.y + ct.h + c.fs * SUB.gap)) < 1e-9 && c.box.y + c.box.h <= tb.y + tb.h + 1, "a gap under the columns, in the box");
+  // the title in a line, the subtitle in columns: right of the title's block, from its top, the title's box narrower
+  const d = subtitleColumns(ctx, T2, "在这里写副标题", tb, "serif", sw, sh, { title: false, sub: true }), dt = titleBlock(ctx, T2, d.titleBox, "serif");
+  assert.ok(d.vertical && d.titleBox.w < tb.w && d.fs < dt.fs && Math.abs(d.box.y - dt.y) < 1e-9, "beside the title's block, from its top");
+  assert.ok(d.box.x >= dt.x + dt.w + d.fs * 0.5 && d.box.x + d.box.w <= tb.x + tb.w + 1, "right of it, inside the box");
+  // its rules make its columns a column's air wider, and the title's move further over
+  const ruled = subtitleColumns(ctx, T2, "在这里写副标题", tb, "serif", sw, sh, { title: true, sub: true }, { sub: true });
+  assert.ok(ruled.vertical && ruled.titleBox.x >= v.titleBox.x);
+  assert.equal(subtitleColumns(ctx, T2, "  ", tb, "serif", sw, sh, { title: true, sub: true }), null);   // no words: no subtitle
   // the layouts leave the title's box room for two lines that read, and the subtitle under them, on a new cover
   const parts = { catname: false, graphic: false, subtitle: true };
   for (const id of LOOK_IDS) for (const tp of TEMPLATES) for (const [rw, rh] of [[1920, 1080], [1440, 1080], [1080, 1080], [1080, 1440], [1080, 1920], [900, 383]]) {
@@ -2722,10 +2905,43 @@ test("weaving: only the letters in front are painted — a line kept to them (wh
   drawTitle(r, "AB *CD*", box, { dx: 0, dy: 0, s: 1 }, { ...st(new Set(["0|C|1"])), fx: "ransom", hiPlate: (x, y, w, h, fs, on) => on.fillRect(x, y, w, h) });
   const at = (k) => rn.findIndex((c) => c[0] === k);
   assert.ok(at("clip") >= 0 && at("clip") < at("fillRect") && rn.filter((c) => c[0] === "rect").every((c) => c[1] === 180 && c[1] + c[3] === 240), "kept to C before its plate");
-  // a column of vertical lettering counts as a line; a sideways run is painted when any of its letters is chosen
+  // a column of vertical lettering counts as a line, kept to the letters chosen as a line is (with no canvas, to their shares
+  // along it: 好 in its cell, B its share of the run lying on its side, the column's last letter as far as its outline reaches)
   const [col, v] = recorder();
-  drawTitleVertical(v, "你好AB\n世界", box, { font: "X", fill: "#fff", hi: "#ff0", maxFs: 100, only: new Set(["0|好|1", "0|B|1", "1|世|1"]) });
-  assert.deepEqual(col.filter((c) => c[0] === "fillText").map((c) => c[1]), ["好", "AB", "世"]);
+  drawTitleVertical(v, "你好AB\n世界", box, { font: "X", fx: "plain", fill: "#fff", hi: "#ff0", maxFs: 100, plate: () => plated.push(1), rules: true, only: new Set(["0|好|1", "0|B|1", "1|世|1"]) });
+  assert.deepEqual(col.filter((c) => c[0] === "rect").map((c) => [c[1], c[1] + c[3]]), [[129, 189], [278, 398], [-37, 83]]);
+  assert.deepEqual(col.filter((c) => c[0] === "fillText").map((c) => c[1]), ["你", "好", "AB", "世", "界"]);
+  assert.ok(plated.length === 0 && !col.some((c) => c[0] === "fillRect"), "no plate, no rules");
+  const [none, n] = recorder();
+  drawTitleVertical(n, "你好AB\n世界", box, { font: "X", fx: "plain", fill: "#fff", hi: "#ff0", maxFs: 100, only: new Set(["0|好|1"]) });
+  assert.deepEqual(none.filter((c) => c[0] === "fillText").map((c) => c[1]), ["你", "好", "AB"], "a column without any of them left out");
+});
+
+test("weaving by letter in columns: the letters in front grown, and those behind taken off, along the shadow and the drips as the page has them, as off a line", async () => {
+  const { someLetters, setLine, setColumn, parseTitle } = await import("../ui/js/title.js");
+  const { inColumn } = await import("../ui/js/textfx.js");
+  // the work canvases someLetters keeps the letters on, recorded: each letter's shape drawn where, with what pen, how laid
+  const made = [], was = globalThis.document;
+  globalThis.document = { createElement: () => { const calls = []; made.push(calls); return { width: 0, height: 0, getContext: () => new Proxy({}, { get: (t, k) => (k in t ? t[k] : (...a) => { if (k === "fillText") calls.push({ ch: a[0], x: a[1], y: a[2], lw: t.lineWidth, op: t.globalCompositeOperation }); return {}; }), set: (t, k, v) => { t[k] = v; return true; } }) }; } };
+  const ctx = new Proxy({ font: "900 100px X", lineWidth: 1, canvas: { width: 400, height: 400 } }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...s].length * 60 }) : () => ({})), set: (t, k, v) => { t[k] = v; return true; } });
+  // 你 in front, 好 behind: each letter's shapes, grown (the first pen), taken off (behind) and put back whole (front), as offsets from the first
+  const shapes = (column, fx, o) => {
+    if (made[1]) made[1].length = 0;
+    const go = () => { const line = parseTitle("你好")[0], set = (column ? setColumn : setLine)(ctx, line, true); someLetters(ctx, set, 0, new Set(["0|你|1"]), { fs: 100, strokeAmt: 1, amt: 1, frame: { c: 0 }, ...o }, fx).keep(ctx, () => {}); };
+    if (column) inColumn(ctx, go); else go();
+    const by = {}, grown = made[1][0].lw;
+    for (const c of made[1]) (by[`${c.op === "destination-out" ? "behind" : c.lw === grown ? "grown" : "front"} ${c.ch}`] ||= []).push(c);
+    return Object.fromEntries(Object.entries(by).map(([k, cs]) => [k, cs.map((c) => [Math.round(c.x - cs[0].x), Math.round(c.y - cs[0].y)])]));
+  };
+  try {
+    // a shadow: down and to the right off a line; in a column (its line turned a quarter turn clockwise) along it and to its right side, so down and to the right still
+    assert.deepEqual(shapes(false, "plain", { d: 6.2 }), { "grown 你": [[0, 0], [6, 6]], "behind 好": [[0, 0], [6, 6]], "front 你": [[0, 0], [6, 6]] });
+    assert.deepEqual(shapes(true, "plain", { d: 6.2 }), { "grown 你": [[0, 0], [6, -6]], "behind 好": [[0, 0], [6, -6]], "front 你": [[0, 0], [6, -6]] });
+    // drips: down the line's own space off a line; along the column, down the page, in one
+    const line = shapes(false, "melt", { d: 0 })["grown 你"], col = shapes(true, "melt", { d: 0 })["grown 你"];
+    assert.ok(line.length > 2 && line.every(([x, y]) => x === 0 && y >= 0) && line.at(-1)[1] === 55, JSON.stringify(line));
+    assert.deepEqual(col, line.map(([x, y]) => [y, x]), "the same drips, down the column");
+  } finally { globalThis.document = was; }
 });
 
 test("weaving: copied from another channel, a cut-out weaves with the copies of its lettering, the layout's own, and lets the rest go", async () => {

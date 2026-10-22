@@ -225,17 +225,17 @@ const PROPS = {
   bg: { grid: true, base: "grid", blur: 0, dim: 0 },
   accent: { shape: "slant" },
   graphic: {},
-  brand: { rail: true },
+  brand: { rail: true, vertical: false, rules: false },   // every lettered layer (LETTERED) may be set in columns, ruled or not (see normalizeLayer)
   logo: {},   // the profile's brand logo (brand.logo), at the right end of the brand row
-  title: { stroke: 1, shadow: 1, plate: false },
-  subtitle: { stroke: 1, shadow: 1, plate: false },   // the cover's subtitle (its words: cover.subtitle), under the title
-  tag: {},
-  catname: { showName: true, plate: true },
+  title: { stroke: 1, shadow: 1, plate: false, vertical: false, rules: false },
+  subtitle: { stroke: 1, shadow: 1, plate: false, vertical: false, rules: false },   // the cover's subtitle (its words: cover.subtitle), under the title
+  tag: { vertical: false, rules: false },
+  catname: { showName: true, plate: true, vertical: false, rules: false },
   frame: {},
   asset: { ref: null, tint: false },   // + `ink`: a colour of the user's for a vector asset, over its own and the channel's; + `crop`, as a photo's
   /** A block of one colour, the canvas's size at scale 1 (so it can be a ground, or moved and shrunk into a band). */
   solid: { color: "#ffd60a" },
-  text: { text: "", stroke: 1, shadow: 1, plate: false },
+  text: { text: "", stroke: 1, shadow: 1, plate: false, vertical: false, rules: false },
   subject: { outline: 0, shadow: 0, follow: false },   // legacy, see LEGACY_TYPES
   /**
    * A photo. `pid` names its picture in the photo store (the picture, its original before an AI
@@ -337,6 +337,10 @@ function normalizeLayer(raw, catIds) {
   if (LETTERED.includes(raw.type) && typeof raw.font === "string" && raw.font.trim()) L.font = raw.font.trim().replace(/["\\;{}<>]/g, "").slice(0, 80);
   // lettering may be given its own colour; without one it takes whatever the look gives it
   if (LETTERED.includes(raw.type)) for (const k of HEADLINES.includes(raw.type) ? ["ink", "hi", "plateInk", "hiPlateInk"] : ["ink"]) if (typeof raw[k] === "string" && /^#[0-9a-f]{6}$/i.test(raw[k])) L[k] = raw[k].toLowerCase();
+  // lettering may be set in columns, as a Song edition is (`vertical`), its columns ruled (`rules`, meant only then):
+  // structure, which Surprise me never deals on its own; a layout preset it deals brings its own (see putLayout below,
+  // and columned in style.js)
+  if (LETTERED.includes(raw.type)) { L.vertical = raw.vertical === true; L.rules = raw.rules === true; }
   // the looks' effects put on the layer (see layerEffects in style.js): "look.key" a strength 0–1 (0, or
   // missing: off), "look.key:sub" one of its own settings 0–1; they stay with the layer whatever the look
   if (FX_LAYERS.includes(raw.type) && raw.lookFx && typeof raw.lookFx === "object") {
@@ -668,16 +672,18 @@ export function resetPlacement(layer, scope, key, catId) {
 // A layout preset holds the template and its adjustments (a profile's style.template and style.layoutAdjust of it), and
 // of the layout's own parts that carry words or the channel's graphic: where each stands (`t`, for every size and
 // per size), whether the cover has it (`shown`: not left out, see `off` above), and for lettering which way its words
-// run (`vertical` and `rules`, when the layer has them). Fonts, letterings, colours and the look are not in it.
-// Surprise me deals one by its chance (dealCover in deal.js), and one can be put on the canvas as it is.
+// run (`vertical` and `rules`, kept only when true). Fonts, letterings, colours and the look are not in it.
+// Surprise me deals one by its chance (dealCover in deal.js), and one can be put on the canvas as it is; either way a
+// part the user locked stays as it is.
 /** The layout's parts a layout preset holds. */
 export const LAYOUT_PARTS = ["title", "subtitle", "tag", "catname", "brand", "graphic"];
-/** Which way a lettered part's words run, carried by a preset when the layer has it: in columns, and the rules between them. */
+/** Which way a lettered part's words run, carried by a preset when it is so: in columns, and the rules between them. */
 export const LAYOUT_RUNS = ["vertical", "rules"];
 const clone = (v) => JSON.parse(JSON.stringify(v));
 /**
  * The layout preset that `style` (a profile's) and `layers` (a cover's) make as they are: { template, adjust, parts:
- * { id: { t, shown, vertical?, rules? } } }, of the parts the layers have (the layout's own, by id: a copy is not one).
+ * { id: { t, shown, vertical?, rules? } } }, of the parts the layers have (the layout's own, by id: a copy is not one),
+ * a way of running only where the words run so (true; a way they do not run is left out).
  */
 export function takeLayout(style, layers) {
   const parts = {};
@@ -685,7 +691,7 @@ export function takeLayout(style, layers) {
     const L = layers.find((l) => l.id === id);
     if (!L) continue;
     const q = { t: clone(L.t), shown: !L.off };
-    for (const k of LAYOUT_RUNS) if (L[k] !== undefined) q[k] = clone(L[k]);
+    for (const k of LAYOUT_RUNS) if (L[k] === true) q[k] = true;
     parts[id] = q;
   }
   return { template: style.template, adjust: { ...((style.layoutAdjust || {})[style.template] || {}) }, parts };
@@ -708,7 +714,7 @@ export function putLayout(style, layers, p) {
     if (!L || !LAYOUT_PARTS.includes(id) || L.locked) continue;
     L.t = clone(q.t);
     if (!q.shown) { L.off = true; L.visible = false; } else if (L.off) { delete L.off; L.visible = true; }
-    for (const k of LAYOUT_RUNS) if (q[k] !== undefined) L[k] = clone(q[k]); else delete L[k];
+    if (LETTERED.includes(L.type)) for (const k of LAYOUT_RUNS) L[k] = q[k] === true;   // a way the preset's words do not run is taken off
   }
 }
 

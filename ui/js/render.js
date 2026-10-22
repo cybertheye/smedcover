@@ -2,13 +2,13 @@
 // A pure function of its options — the app calls it for the canvas, the thumbnails, exports and
 // batch jobs alike.
 import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, brackets } from "./cel.js";
-import { virtualSize, layout, adjustLayout, meetStandards } from "./layout.js";
-import { drawTitle, drawTitleVertical, parseTitle, subtitleFit, setLine, passOf, hasCJK, someLetters } from "./title.js";
+import { virtualSize, layout, adjustLayout, meetStandards, wordsFoot } from "./layout.js";
+import { drawTitle, drawTitleVertical, titleBlockVertical, parseTitle, subtitleFit, subtitleColumns, setLine, passOf, hasCJK, someLetters } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset, assetHalf, userAssets, assetExists } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets, headLine, frontOf, brushesFront, brushToDo, photoMap, HEADLINES } from "./layers.js";
-import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced, wherePainted } from "./style.js";
-import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped, effectReach } from "./textfx.js";
+import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced, wherePainted, columned, columnBoxOf, fall } from "./style.js";
+import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped, effectReach, inColumn } from "./textfx.js";
 import { ransomEpoch } from "./ransom.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
@@ -41,12 +41,12 @@ function grid(ctx, color, w, h) {
   for (let y = 20; y < h; y += 60) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
   ctx.stroke();
 }
-// accent plate with an offset white shadow; (x, y) = top-left
+// accent plate with an offset white shadow (down and right as the page has it, see fall in style.js); (x, y) = top-left
 function accentTag(ctx, str, x, y, fs, acc, ink = INK) {
   ctx.font = `700 ${fs}px ${fonts.en}, ${fonts.cn}`;
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-  const w = spacedW(ctx, str, 3) + fs * 1.1, h = fs * 1.34;
-  ctx.fillStyle = "#fff"; para(ctx, x + 8, y + 8, w, h, -fs * 0.22); ctx.fill();
+  const w = spacedW(ctx, str, 3) + fs * 1.1, h = fs * 1.34, [sx, sy] = fall(8, 8);
+  ctx.fillStyle = "#fff"; para(ctx, x + sx, y + sy, w, h, -fs * 0.22); ctx.fill();
   ctx.fillStyle = acc; para(ctx, x, y, w, h, -fs * 0.22); ctx.fill();
   ctx.lineWidth = 6; ctx.strokeStyle = INK; ctx.lineJoin = "miter"; ctx.stroke();
   ctx.fillStyle = ink; spaced(ctx, str, x + fs * 0.55, y + h * 0.5 + fs * 0.4, 3);
@@ -135,10 +135,11 @@ function drawCategory(ctx, cat, G, C, show) {
     nameW = widthAt(fs);
     ctx.save();
     ctx.translate(x, c.y);
-    ctx.transform(1, 0, -0.1, 1, 0, 0);
+    if (!show.upright) ctx.transform(1, 0, -0.1, 1, 0, 0);   // slanted, but in a column (see turned)
     const each = (fn) => { let cx = 0; for (const g of glyphs) { fn(g, cx); cx += ctx.measureText(g).width + 6; } };
-    if (show.ink) { ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.09; if (!c.onAccent) each((g, cx) => ctx.strokeText(g, cx, 0)); ctx.fillStyle = ctx.strokeStyle = show.ink; ctx.lineWidth = fs * 0.02; each((g, cx) => { ctx.strokeText(g, cx, 0); ctx.fillText(g, cx, 0); }); }
-    else if (c.onAccent) { ctx.fillStyle = ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.03; each((g, cx) => { ctx.strokeText(g, cx, 0); ctx.fillText(g, cx, 0); }); }
+    const onBand = c.onAccent && !show.upright;   // in a column it reaches off the band: lettered as off it, outlined
+    if (show.ink) { ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.09; if (!onBand) each((g, cx) => ctx.strokeText(g, cx, 0)); ctx.fillStyle = ctx.strokeStyle = show.ink; ctx.lineWidth = fs * 0.02; each((g, cx) => { ctx.strokeText(g, cx, 0); ctx.fillText(g, cx, 0); }); }
+    else if (onBand) { ctx.fillStyle = ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.03; each((g, cx) => { ctx.strokeText(g, cx, 0); ctx.fillText(g, cx, 0); }); }
     else {
       ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.09; each((g, cx) => ctx.strokeText(g, cx, 0));
       ctx.fillStyle = ctx.strokeStyle = acc; ctx.lineWidth = fs * 0.02; each((g, cx) => { ctx.strokeText(g, cx, 0); ctx.fillText(g, cx, 0); });
@@ -256,6 +257,31 @@ function pixelBox(hit, kx, ky, W, H) {
   const x0 = Math.max(0, Math.floor((hit.cx - ex) * kx)), y0 = Math.max(0, Math.floor((hit.cy - ey) * ky)), x1 = Math.min(W, Math.ceil((hit.cx + ex) * kx)), y1 = Math.min(H, Math.ceil((hit.cy + ey) * ky));
   return { x0, y0, x1, y1, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
 }
+/**
+ * A small part set in a column (the corner tag, the channel name, the brand row: see columned in style.js), as
+ * placed() takes it: `paint(c)` paints it as a line and returns its box; it is painted so, turned a quarter turn
+ * clockwise, so it reads downward, its upright letters turned back where they stand (inColumn in textfx.js) — plates
+ * and keylines turning with it, the shadows thrown off them still falling down and to the right (fall in style.js).
+ * It stands where its line stood: hanging from the top of that box, read
+ * downward, unless it would then reach into the foot the apps lay their counts over (wordsFoot in layout.js), when
+ * it rises from the box's foot instead; at its left end, or its right end in the right half of the canvas; kept on
+ * the canvas, one too long for it from its top. Where it
+ * meets what the layout put beside the line is the user's to change: it is placed as any layout layer is. `rules`:
+ * the colour of its column rules (界行, a hairline at either side, faint, as drawTitleVertical in title.js rules
+ * its columns), when it has them. Its box.
+ */
+const turned = (paint, env, rules = null) => (c) => {
+  const b = paint(probe);   // where it stands as a line (placed() has made the probe)
+  if (!b) return null;
+  const w = b.h, h = b.w, on = (v, room, size) => Math.max(16, Math.min(v, room - 16 - size));   // and on the canvas, a long one from its top
+  const x = on(b.x + b.w / 2 > env.w / 2 ? b.x + b.w - w : b.x, env.w, w), y = on(b.y + h <= wordsFoot(env.w, env.h) ? b.y : b.y + b.h - h, env.h, h);
+  if (c === probe) return { x, y, w, h };
+  if (rules) { c.save(); c.fillStyle = rules; c.globalAlpha *= 0.32; for (const at of [x, x + w]) c.fillRect(at - 0.75, y, 1.5, h); c.restore(); }
+  c.save(); c.translate(x + w, y); c.rotate(Math.PI / 2); c.translate(-b.x, -b.y); inColumn(c, () => paint(c)); c.restore();
+  return { x, y, w, h };
+};
+/** The colour of a small part's column rules (see turned): its lettering's, else the ground's text colour; null without them. */
+const rulesOf = (L, env) => (L.rules ? L.ink || env.th.text : null);
 /** Same for things drawn around their own centre (assets, free text); fn returns half-extents. */
 function centred(ctx, cx, cy, tr, s, fn) {
   ctx.save();
@@ -338,8 +364,8 @@ function drawMark(c, mark, x0, x1, fs, phase, seed) {
     for (let i = n - 1; i >= 0; i--) { const x = a + ((b - a) * i) / n; c.lineTo(x, y(x, foot, 41 + i)); }
     c.closePath(); c.fill();
   } else if (mark.kind === "block" && phase === "under") {
-    const d = fs * 0.1;
-    c.translate((x0 + x1) / 2 + d, -fs * 0.36 + d); c.rotate(-0.025);
+    const [dx, dy] = fall(fs * 0.1, fs * 0.1);   // down and right as the page has it, in a column too
+    c.translate((x0 + x1) / 2 + dx, -fs * 0.36 + dy); c.rotate(-0.025);
     c.fillRect(-(x1 - x0) / 2 - fs * 0.08, -fs * 0.54, x1 - x0 + fs * 0.16, fs * 1.08);
   }
   c.restore();
@@ -347,8 +373,9 @@ function drawMark(c, mark, x0, x1, fs, phase, seed) {
 /** The plate a headline sits on (x, y, w, h: its box; fs: the type size). A look may draw its own. */
 function drawPlate(raw, x, y, w, h, fill, fs, C) {
   if (look().plate) return look().plate(raw, x, y, w, h, fill, fs, lookValues());
-  const ctx = styled(raw, C, true), k = fs / 120;
-  ctx.fillStyle = INK; para(ctx, x + 10 * k, y + 10 * k, w, h, -fs * 0.14); ctx.fill();
+  const ctx = styled(raw, C, true), k = fs / 120, [sx, sy] = fall(10 * k, 10 * k);   // its shadow down and right as the page has it
+  ctx.fillStyle = INK; para(ctx, x + sx, y + sy, w, h, -fs * 0.14); ctx.fill();
+
   ctx.fillStyle = fill; para(ctx, x, y, w, h, -fs * 0.14); ctx.fill();
   ctx.lineWidth = 7 * k; ctx.strokeStyle = INK; ctx.stroke();
 }
@@ -365,8 +392,25 @@ function ransomOf(L, env) {
   const shown = env.cover.layers.filter((l) => l.type === "photo" && !l.of && !l.cut && l.visible && appliesTo(l, env.cat.id) && env.o.photos && env.o.photos.get(l.pid)?.img), P = shown.find(fillsCanvas) || shown[0];
   return { id: L.id, salt: `${L.id}:${L.fxSeed || 0}`, edits: L.letters || null, off: L.ransomOff || null, photo: P ? { img: env.o.photos.get(P.pid).img, key: P.pid } : null, shown: !!env.o.select };
 }
-/** A headline layer's bend, as drawTitle and bentLine take it ({id, amt, own}), or null. */
-const bendOf = (L) => (L.bend ? { id: L.bend, amt: L.bendAmt ?? 1, own: L.bend === "taper" && !!L.warp } : null);
+/** A headline layer's bend, as drawTitle and bentLine take it ({id, amt, own}), or null; none in columns (see columned in style.js). */
+const bendOf = (L) => (L.bend && !columned(L) ? { id: L.bend, amt: L.bendAmt ?? 1, own: L.bend === "taper" && !!L.warp } : null);
+/**
+ * What drawTitle and drawTitleVertical are told of headline layer L's lettering, painted on c: its face, its
+ * colours (headline), its effect, its plate and the plates or marks of its highlighted words, its column rules,
+ * and, while it is painted alone for a cut-out woven with it, the letters in front (env.only, see wovenFront).
+ */
+function lettering(c, L, env) {
+  const st = headline(L, env);
+  return {
+    font: headFont(), fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
+    own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate || bandOrBlock(st),   // for looks that paint the letters themselves
+    stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt, fxSeed: L.fxSeed, ransom: ransomOf(L, env),
+    plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
+    hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
+    hiMark: st.hiMark && ((x0, x1, fs, on, phase, seed) => drawMark(on, st.hiMark, x0, x1, fs, phase, seed)),
+    key: [st.hiPlate || "", JSON.stringify(st.hiMark)].join(), rules: !!L.rules, only: env.only,
+  };
+}
 /** The box the layout gives the title: from under the brand row (or the look's own top) to its foot. */
 function titleBoxOf(env) {
   const { G } = env, top = G.titleTop ?? (env.hasBrand ? 150 : 84);
@@ -374,29 +418,36 @@ function titleBoxOf(env) {
 }
 /**
  * Where the subtitle goes (see subtitleFit in title.js), or null when it is hidden, left out, or has no
- * words: in the title's box, under the title, which makes room for it; a look that sets the title its
- * own way (vertically) may place it so too (its subtitleFit). Worked out before the layers are painted,
- * so in the faces the title is set in (a layer's own font goes first only while it is painted).
+ * words: in the title's box, under the title, which makes room for it. When either is set in columns
+ * (see columned in style.js, subtitleColumns in title.js), beside the title's columns or block, or in a
+ * line under its columns; the title's columns standing where the look has them (columnBoxOf: the
+ * woodblock book's by the seal, down to the band). Worked out before the layers are painted, so in the
+ * faces the title is set in (a layer's own font goes first only while it is painted).
  * `hidden`: where it would go though it is hidden (the title makes no room for it then), or left out
  * while a copy of it shows (see `copy` in layers.js).
  */
-function subtitlePlan(ctx, env, L0, hidden = false) {
+function subtitlePlan(ctx, env, hidden = false) {
   const S = env.cover.layers.find((l) => (l.id === "subtitle" && (l.visible || (hidden && !l.off))) || (hidden && l.copy && l.type === "subtitle" && l.visible));
   if (!S || !parseTitle(env.cover.subtitle).length || typeof ctx.measureText !== "function") return null;
   const T = env.cover.layers.find((l) => l.id === "title" && l.visible), title = T ? env.cover.title : "", box = titleBoxOf(env);
-  const own = L0.subtitleFit && L0.subtitleFit(ctx, title, env.cover.subtitle, box, env, lookValues());
-  if (own) return own;
-  const face = headFont();
-  return subtitleFit(ctx, title, env.cover.subtitle, box, T && T.font ? `"${T.font}", ${face}` : face, env.w, env.h, 340, T ? bendOf(T) : null);
+  const face = headFont(), font = T && T.font ? `"${T.font}", ${face}` : face, cols = { title: !!T && columned(T), sub: columned(S) };
+  if (cols.title || cols.sub) return subtitleColumns(ctx, title, env.cover.subtitle, cols.title ? columnBoxOf(ctx, env, box) : box, font, env.w, env.h, cols, { title: !!(T && T.rules), sub: !!S.rules }, T && !cols.title ? bendOf(T) : null);
+  return subtitleFit(ctx, title, env.cover.subtitle, box, font, env.w, env.h, 340, T ? bendOf(T) : null);
 }
 
 // free text: nominal 120-unit type, centred on the origin, set like the title; while it is painted alone for a cut-out
-// woven with it, only the letters in front of it (env.only, see wovenFront), with no plate, as drawTitle does
+// woven with it, only the letters in front of it (env.only, see wovenFront), with no plate, as drawTitle does. In
+// columns (see columned in style.js) it is set as the title's are, at that size, the block centred on the origin.
 function drawFreeText(ctx, L, env) {
   const raw = ctx;
   ctx = styled(raw, env.C, true);
   const lines = parseTitle(L.text);
   if (!lines.length) return null;
+  if (columned(L)) {
+    const st = lettering(raw, L, env), b = titleBlockVertical(raw, L.text, { x: 0, y: 0, w: 1e6, h: 1e6 }, st.font, 900, 120, st.rules);
+    const got = drawTitleVertical(raw, L.text, { x: -b.w / 2, y: -b.h / 2, w: b.w, h: b.h }, { ...st, fs: b.fs });
+    return got && { hw: Math.max(-got.x, got.x + got.w), hh: Math.max(-got.y, got.y + got.h) };
+  }
   const FS = 120, LH = 1.16, st = headline(L, env);
   ctx.font = `900 ${FS}px ${headFont()}`;
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "round";
@@ -639,56 +690,53 @@ const PAINT = {
       return half;
     });
   },
+  /** The brand row; in a column (see turned) without the channels' rail or number tag, which belong to the right end of a row. */
   brand(ctx, L, tr, env) {
-    const logo = env.logo ? env.logo.x : 0;
-    return placed(ctx, tr, (c) => drawHeader(styled(c, env.C, true), env.o, env.w, L.ink ? { ...env.th, text: L.ink, own: L.ink } : env.th, env.C, env.G.railOnAccent, L.rail, env.G.brandOnAccent, logo));
+    const logo = env.logo ? env.logo.x : 0, v = columned(L);
+    const paint = (c) => drawHeader(styled(c, env.C, true), env.o, env.w, L.ink ? { ...env.th, text: L.ink, own: L.ink } : env.th, env.C, env.G.railOnAccent, L.rail && !v, env.G.brandOnAccent, logo);
+    return placed(ctx, tr, v ? turned(paint, env, rulesOf(L, env)) : paint);
   },
   logo(ctx, L, tr, env) {
     const b = env.logo || (L.copy ? offEdge(logoBox(env.o.profile, env.w, look().logoInset), env.G) : null);   // a copy shows with the logo itself hidden
     if (!b) return null;
     return placed(ctx, tr, (c) => { c.save(); c.translate(b.x + b.w / 2, b.y + b.h / 2); c.scale(b.k, b.k); drawAsset(c, b.ref, env.C, {}); c.restore(); return b; }, b);
   },
+  /**
+   * The title, in the layout's box (narrower when a subtitle in columns stands beside it, see subtitlePlan), in
+   * a line per typed line; or in columns (see columned in style.js), where the look has them stand.
+   */
   title(ctx, L, tr, env) {
-    const box = titleBoxOf(env);
-    env.titleBox = box;
-    const own = look().titleSet;   // a look may set the title itself (vertically, say); null from it means "the usual way"
-    const st = headline(L, env);
-    return placed(ctx, tr, (c) => (own && own(c, env.cover.title, box, L, env, lookValues())) || drawTitle(c, env.cover.title, box, IDENTITY, {
-      font: headFont(), maxFs: 340, align: "left", fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
-      own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate || bandOrBlock(st),   // for looks that paint the letters themselves
-      stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt, fxSeed: L.fxSeed, ransom: ransomOf(L, env),
-      plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
-      hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
-      hiMark: st.hiMark && ((x0, x1, fs, on, phase, seed) => drawMark(on, st.hiMark, x0, x1, fs, phase, seed)),
-      warp: L.warp, reshape: L.reshape, bend: bendOf(L), key: [st.hiPlate || "", JSON.stringify(st.hiMark)].join(), onBlock: (m, block, rest) => { env.blocks[L.id] = { m, box: block, rest }; },
-      reserve: env.sub && !env.sub.vertical ? env.sub.reserve : 0,   // the subtitle's line, under it
-      only: env.only,   // painted alone for a cut-out woven with it: only the letters in front (see wovenFront)
+    const base = titleBoxOf(env), s = env.sub;
+    env.titleBox = base;
+    if (columned(L)) {   // the subtitle's line under the columns, when it has one, kept free at the foot of the box
+      const box = s && s.titleBox ? s.titleBox : columnBoxOf(ctx, env, base), reserve = s && !s.vertical ? Math.min(s.reserve, box.h * 0.5) : 0;
+      return placed(ctx, tr, (c) => drawTitleVertical(c, env.cover.title, { ...box, h: box.h - reserve }, { ...lettering(c, L, env), maxFs: 300 }));
+    }
+    return placed(ctx, tr, (c) => drawTitle(c, env.cover.title, s && s.titleBox ? s.titleBox : base, IDENTITY, {
+      ...lettering(c, L, env), maxFs: 340, align: "left",
+      warp: L.warp, reshape: L.reshape, bend: bendOf(L), onBlock: (m, block, rest) => { env.blocks[L.id] = { m, box: block, rest }; },
+      reserve: s && !s.vertical ? s.reserve : 0,   // the subtitle's line, under it
     }));
   },
-  /** The subtitle: lettered as the title is, smaller, where subtitlePlan puts it. */
+  /** The subtitle: lettered as the title is, smaller, where subtitlePlan puts it; in columns or a line as it is set. */
   subtitle(ctx, L, tr, env) {
     const s = env.sub || env.subHidden;
     if (!s) return null;
-    const st = headline(L, env);
-    if (s.vertical) return placed(ctx, tr, (c) => drawTitleVertical(c, env.cover.subtitle, s.box, { font: s.face ? s.face(fonts) : headFont(), weight: s.weight || 700, fill: L.ink || s.fill || st.fill, hi: L.hi || s.hi || st.hi, maxFs: s.fs, only: env.only }));
+    if (columned(L)) return placed(ctx, tr, (c) => drawTitleVertical(c, env.cover.subtitle, s.box, { ...lettering(c, L, env), weight: 700, maxFs: s.fs }));
     return placed(ctx, tr, (c) => drawTitle(c, env.cover.subtitle, s.box, IDENTITY, {
-      font: headFont(), maxFs: s.fs, align: "left", fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
-      own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate || bandOrBlock(st),
-      stroke: st.stroke, shadowAmt: st.shadowAmt, C: env.C, fx: L.fx, fxAmt: L.fxAmt, fxSeed: L.fxSeed, ransom: ransomOf(L, env),
-      plate: st.plate && ((x, y, w, h, fs) => drawPlate(c, x, y, w, h, st.plate, fs, env.C)), skew: st.plate ? 0 : -0.08,
-      hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
-      hiMark: st.hiMark && ((x0, x1, fs, on, phase, seed) => drawMark(on, st.hiMark, x0, x1, fs, phase, seed)),
-      warp: L.warp, reshape: L.reshape, bend: bendOf(L), key: [st.hiPlate || "", JSON.stringify(st.hiMark)].join(), onBlock: (m, block, rest) => { env.blocks[L.id] = { m, box: block, rest }; },
-      only: env.only,
+      ...lettering(c, L, env), maxFs: s.fs, align: "left",
+      warp: L.warp, reshape: L.reshape, bend: bendOf(L), onBlock: (m, block, rest) => { env.blocks[L.id] = { m, box: block, rest }; },
     }));
   },
   tag(ctx, L, tr, env) {
     if (!env.cover.tag) return null;
-    if (look().tag) return placed(ctx, tr, (c) => look().tag(c, env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.C, lookValues(), L.ink));
-    return placed(ctx, tr, (c) => accentTag(styled(c, env.C, true), env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.acc, L.ink || INK));
+    const paint = look().tag ? (c) => look().tag(c, env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.C, lookValues(), L.ink)
+      : (c) => accentTag(styled(c, env.C, true), env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.acc, L.ink || INK);
+    return placed(ctx, tr, columned(L) ? turned(paint, env, rulesOf(L, env)) : paint);
   },
   catname(ctx, L, tr, env) {
-    return placed(ctx, tr, (c) => drawCategory(styled(c, env.C, true), env.cat, env.G, env.C, { name: L.showName, plate: L.plate, ink: L.ink }));
+    const v = columned(L), paint = (c) => drawCategory(styled(c, env.C, true), env.cat, env.G, env.C, { name: L.showName, plate: L.plate, ink: L.ink, upright: v });
+    return placed(ctx, tr, v ? turned(paint, env, rulesOf(L, env)) : paint);
   },
   frame(ctx, L, tr, env) {
     if (look().frame) look().frame(ctx, env, lookValues());
@@ -1248,9 +1296,9 @@ function paintCover(cv, o) {
     // the graphic the user put in the channel graphic's place for this look's figure (see `art` in style.js), when it is still in the library
     figure: figureArt(P.style, L0.id, C),
   };
-  env.sub = subtitlePlan(ctx, env, L0);
+  env.sub = subtitlePlan(ctx, env);
   // where a hidden one would go, for when it is painted on its own (the 3D view); the title makes no room for it
-  env.subHidden = env.sub || subtitlePlan(ctx, env, L0, true);
+  env.subHidden = env.sub || subtitlePlan(ctx, env, true);
   cv._virtual = [w, h];
   cv._layout = env.G;   // for the editor's layout handles
   // FOCUS: how see-through a layer not kept bright is painted
@@ -1550,7 +1598,7 @@ export function reshapeHandles(cv, layer) {
   return reshaped(b.rest, layer.reshape, b.box).map(([x, y], i) => { const p = b.m.transformPoint({ x, y }); return { id: "e" + i, x: p.x / k, y: p.y / k }; });
 }
 export function layoutHandles(cv, layer) {
-  const headline = layer && ["title", "subtitle", "text"].includes(layer.type) && layer.bend && !layer.locked;
+  const headline = layer && ["title", "subtitle", "text"].includes(layer.type) && layer.bend && !layer.locked && !columned(layer);   // in columns, no bend
   const warp = !headline ? [] : layer.bend === "taper" ? warpHandles(cv, layer) : reshapeHandles(cv, layer);
   return [...warp, ...templateHandles(cv, layer)];
 }

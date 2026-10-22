@@ -33,7 +33,12 @@
 //               block's space, and the block {x, y, w, h} there
 //   warp        the layer's own perspective, if it has one: the block's four corners moved by
 //               [[dx, dy] × 4] (top left, top right, bottom right, bottom left), in block widths and heights
-import { LOOKS, look, lookValues, lookState, lookParams, isFast, INK } from "./style.js";
+// A column (lettering set vertically, see drawTitleVertical in title.js) is painted as a line too: the line
+// turned a quarter turn clockwise, so it reads downward, and painted while inColumn() is under way, which
+// turns what stands upright in a column back where it stands (see below). What a lettering throws off its
+// letters one way — a shadow, depth, an echo — falls as the page has it, in a column as off a line: its offset
+// is given through fall() in style.js, which turns it back in a column.
+import { LOOKS, look, lookValues, lookState, lookParams, isFast, INK, asColumn, fall } from "./style.js";
 import { outline } from "./outlines.js";
 import { ransom, ransomEpoch, hash, seeded } from "./ransom.js";
 
@@ -87,6 +92,122 @@ export const BENDS = {
 };
 
 const noise = (n) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+
+// ---------- columns
+// A column sets CJK characters, kana, hangul, full-width forms, CJK punctuation and emoji upright, one under
+// another; Latin letters, digits and every other script lie on their side, as a vertical line sets them, and
+// so do the brackets, quotes, dashes and ellipses, which turn with the line. Of the marks standing upright,
+// 。，、 sit at the top right of their cell, as a vertical face cuts them (the ink of the horizontal one moved
+// to the other side of the cell's middle, however far from it the font set it), and ？！：； in the middle
+// of it, across.
+const TURNS = "「」『』（）《》〈〉【】〔〕〖〗〘〙〚〛［］｛｝｟｠“”‘’—–―‒…‥⋯～〜ー－＿｜";
+const UPRIGHT = /[\p{Script=Han}\p{Script=Hangul}　-ヿ㄀-ㄯ㆐-ㇿ㈀-㏿＀-￯⺀-⿟\p{Extended_Pictographic}]/u;
+export const TOP_RIGHT = "。，、．｡､﹐﹒", MIDDLE = "？！：；‼⁇⁈⁉";
+/** Whether a character (a grapheme) stands upright in a column, rather than lying on its side with the line. */
+export const standsUp = (ch) => UPRIGHT.test(ch) && !TURNS.includes(ch);
+const graphemesOf = typeof Intl !== "undefined" && Intl.Segmenter ? ((seg) => (t) => Array.from(seg.segment(t), (g) => g.segment))(new Intl.Segmenter(undefined, { granularity: "grapheme" })) : (t) => [...t];
+const CANVAS = ["CanvasRenderingContext2D", "OffscreenCanvasRenderingContext2D"].map((n) => globalThis[n] && globalThis[n].prototype).filter(Boolean);
+const NATIVE = new Map(CANVAS.map((P) => [P, P.measureText]));   // measureText as the canvas has it, before anything sets a piece larger (see larger in title.js)
+const measureOf = (c) => { for (const [P, m] of NATIVE) if (P.isPrototypeOf(c)) return m; return c.measureText; };
+const MIDS = new Map();
+/** How far the middle of an em lies below (+) the baseline of c's font, as its textBaseline sets it: the middle of 国's ink; without real metrics (a test's context), 0.38 of the size above an alphabetic baseline. */
+function emMid(c, measure = measureOf(c)) {
+  const key = `${c.font}|${c.textBaseline}|${FONTS_SEEN}`;
+  if (MIDS.has(key)) return MIDS.get(key);
+  const m = measure.call(c, "国"), up = m.actualBoundingBoxAscent, down = m.actualBoundingBoxDescent, px = Number((/(\d*\.?\d+)px/.exec(c.font || "") || [])[1]) || 100;
+  if (!(Number.isFinite(up) && Number.isFinite(down) && up + down > 0)) return c.textBaseline === "middle" ? 0 : -0.38 * px;   // not kept: a canvas with metrics may come in the same font
+  if (MIDS.size > 200) MIDS.clear();
+  MIDS.set(key, (down - up) / 2);
+  return (down - up) / 2;
+}
+/** The middle of an em in ctx's font, below (+) its baseline: where a column's middle lies from the baseline of the line it is. */
+export const emMiddle = (ctx) => emMid(ctx);
+/**
+ * Where an upright mark's ink goes in its cell, from where the horizontal face has it: {x, y} to move it by, given
+ * where its ink's middle lies from the cell's middle (ex across, ey down). 。，、 to the top right, mirrored through
+ * the middle; ？！：； to the middle across.
+ */
+const markShift = (ch, ex, ey) => (TOP_RIGHT.includes(ch) ? { x: -2 * ex, y: -2 * ey } : MIDDLE.includes(ch) ? { x: -ex, y: 0 } : { x: 0, y: 0 });
+/**
+ * Draws text `t` at (x, y) on c, with `draw` (fillText or strokeText as they were) and `measure`, as a column sets
+ * it: what lies on its side as it is, each character that stands upright turned back a quarter turn about the middle
+ * of its em, where it would stand (its advance's middle, the em's middle), its marks moved as markShift has it.
+ */
+function columnText(c, draw, measure, t, x, y, rest) {
+  const gs = graphemesOf(String(t));
+  if (!gs.some(standsUp)) return draw.call(c, t, x, y, ...rest);
+  const align = c.textAlign, total = measure.call(c, String(t)).width;
+  let pen = x - (align === "center" ? total / 2 : align === "right" || align === "end" ? total : 0);
+  c.textAlign = "left";
+  try {
+    for (let i = 0; i < gs.length; ) {
+      if (!standsUp(gs[i])) {   // a stretch lying on its side, whole
+        let j = i;
+        while (j < gs.length && !standsUp(gs[j])) j++;
+        const s = gs.slice(i, j).join("");
+        draw.call(c, s, pen, y); pen += measure.call(c, s).width; i = j;
+        continue;
+      }
+      const g = gs[i++], m = measure.call(c, g), w = m.width, mid = emMid(c, measure);
+      let dx = -w / 2, dy = -mid;
+      if ((TOP_RIGHT.includes(g) || MIDDLE.includes(g)) && Number.isFinite(m.actualBoundingBoxLeft)) {
+        const s = markShift(g, (m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2 - w / 2, (m.actualBoundingBoxDescent - m.actualBoundingBoxAscent) / 2 - mid);
+        dx += s.x; dy += s.y;
+      }
+      c.save(); c.translate(pen + w / 2, y + mid); c.rotate(-Math.PI / 2); draw.call(c, g, dx, dy); c.restore();
+      pen += w;
+    }
+  } finally { c.textAlign = align; }
+}
+/**
+ * The polylines of an upright letter of a column (`ch`, its outline `shapes` as drawn on the line, its advance's
+ * middle at `cx`, the em's middle at `cy`) turned back as columnText turns its letter: a function of a polyline.
+ */
+export function uprightTurn(ch, shapes, cx, cy) {
+  let s = { x: 0, y: 0 };
+  if (TOP_RIGHT.includes(ch) || MIDDLE.includes(ch)) {
+    const pts = shapes.flat(), xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    if (pts.length) s = markShift(ch, (Math.min(...xs) + Math.max(...xs)) / 2 - cx, (Math.min(...ys) + Math.max(...ys)) / 2 - cy);
+  }
+  return (pts) => pts.map(([x, y]) => { const ux = x - cx + s.x, uy = y - cy + s.y; return [cx + uy, cy - ux]; });
+}
+let COLUMN = 0;   // a column being painted (see inColumn)
+/** Whether a column is being painted (see inColumn): the lettering's line is turned, its upright letters turned back. */
+export const columnNow = () => COLUMN > 0;
+/**
+ * Runs `run` (and returns what it does) with text drawn on every canvas set as a column sets it (columnText): ctx's
+ * line is to be turned a quarter turn clockwise, and this turns the letters that stand upright back, wherever they
+ * are drawn — the looks' work canvases, the ransom note's scraps and the letters cut from the photo, the shapes a
+ * weave keeps letters by — so every lettering sets a column without knowing (as `larger` in title.js sets a piece
+ * larger). ctx itself is set so too when it is no canvas (a test's stand-in). Meanwhile (asColumn in style.js) the
+ * looks' letterings take no slant out of the line, a column being set upright, and the shadows, depths and echoes
+ * the letterings throw fall as the page has them (fall). The outline effects turn their letters' outlines themselves
+ * (glyphShapes).
+ */
+export function inColumn(ctx, run) {
+  if (COLUMN) return run();
+  const kept = CANVAS.map((P) => [P, P.fillText, P.strokeText]);
+  for (const [P, fill, stroke] of kept) {
+    const measure = NATIVE.get(P);
+    P.fillText = function (t, x, y, ...r) { return columnText(this, fill, measure, t, x, y, r); };
+    P.strokeText = function (t, x, y, ...r) { return columnText(this, stroke, measure, t, x, y, r); };
+  }
+  const stand = ctx && !CANVAS.some((P) => P.isPrototypeOf(ctx)) && typeof ctx.fillText === "function", own = {};
+  if (stand) for (const k of ["fillText", "strokeText"]) {
+    const draw = ctx[k], measure = ctx.measureText;
+    own[k] = Object.getOwnPropertyDescriptor(ctx, k);
+    ctx[k] = function (t, x, y, ...r) { return columnText(this, draw, measure, t, x, y, r); };
+  }
+  COLUMN++;
+  try { return asColumn(run); } finally {
+    COLUMN--;
+    for (const [P, fill, stroke] of kept) { P.fillText = fill; P.strokeText = stroke; }
+    if (stand) for (const k of ["fillText", "strokeText"]) { if (own[k]) Object.defineProperty(ctx, k, own[k]); else delete ctx[k]; }
+  }
+}
+/** The effects a column cannot be lettered with, painted in the look's own lettering there instead: Row shift cuts the line into level rows of the canvas, which a turned line has none of. */
+export const NO_COLUMNS = ["rows"];
+
 const spare = [];
 /** A spare canvas the size of `like`, cleared. */
 function scratch(i, like) {
@@ -96,10 +217,10 @@ function scratch(i, like) {
   x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = "source-over"; x.globalAlpha = 1; x.clearRect(0, 0, c.width, c.height);
   return x;
 }
-/** The house lettering: an offset shadow, an ink keyline, the fill. Also the base of the mask effects. */
+/** The house lettering: an offset shadow (down and right, see fall in style.js), an ink keyline, the fill. Also the base of the mask effects. */
 function house(ctx, pass, o, fillToo = true) {
-  const { fs, d } = o;
-  if (d > 0) pass((a, x) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? o.hiShadowCss : o.shadowCss; ctx.lineWidth = fs * 0.04; ctx.strokeText(a.t, x + d, d); ctx.fillText(a.t, x + d, d); });
+  const { fs, d } = o, [dx, dy] = fall(d, d);
+  if (d > 0) pass((a, x) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? o.hiShadowCss : o.shadowCss; ctx.lineWidth = fs * 0.04; ctx.strokeText(a.t, x + dx, dy); ctx.fillText(a.t, x + dx, dy); });
   if (o.strokeAmt > 0) pass((a, x) => { ctx.strokeStyle = o.inkCss; ctx.lineWidth = fs * 0.075 * o.strokeAmt; ctx.strokeText(a.t, x, 0); });
   if (fillToo) pass((a, x) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? o.hiCss : o.fillCss; ctx.lineWidth = fs * 0.018; ctx.strokeText(a.t, x, 0); ctx.fillText(a.t, x, 0); });
 }
@@ -115,8 +236,8 @@ const whitish = (s) => { const h = /^#([0-9a-f]{6})$/i.exec(s || ""), c = h ? [0
 function sticker(ctx, pass, o) {
   const { fs } = o, pale = [o.fillCss, o.hiCss].some(whitish), e1 = fs * 0.035 * Math.max(o.strokeAmt, pale ? 0.5 : 0), e2 = e1 + fs * 0.12, e3 = e2 + fs * 0.035, d = o.d * 1.3;   // pale letters keep a keyline, or they would melt into the rim
   ctx.save(); ctx.lineJoin = "round"; ctx.lineCap = "round";
-  const ring = (half, css, at = 0) => pass((a, x) => { ctx.fillStyle = ctx.strokeStyle = css(a); ctx.lineWidth = half * 2; ctx.strokeText(a.t, x + at, at); ctx.fillText(a.t, x + at, at); });
-  if (d > 0) ring(e3, (a) => (a.hi ? o.hiShadowCss : o.shadowCss), d);
+  const ring = (half, css, [ax, ay] = [0, 0]) => pass((a, x) => { ctx.fillStyle = ctx.strokeStyle = css(a); ctx.lineWidth = half * 2; ctx.strokeText(a.t, x + ax, ay); ctx.fillText(a.t, x + ax, ay); });
+  if (d > 0) ring(e3, (a) => (a.hi ? o.hiShadowCss : o.shadowCss), fall(d, d));
   ring(e3, () => INK);
   ring(e2, () => "#ffffff");
   if (o.beneath) { ctx.save(); o.beneath(); ctx.restore(); }   // the plates and marks under the highlighted words, on the rim rather than hidden by it
@@ -196,8 +317,11 @@ function masked(ctx, pass, o, id) {
 
 // ---------- outline effects
 /**
- * The outline of a run, placed and sized, letter by letter: [{ch, shapes, x0, x1}] — the letter, its closed
- * polylines of [x, y] in the line's own units, and where it stands along the line. Null while it is on its way,
+ * The outline of a run, placed and sized, letter by letter: [{ch, shapes, x0, x1, turn}] — the letter, its closed
+ * polylines of [x, y] in the line's own units, and where it stands along the line; in a column (see inColumn), for a
+ * letter standing upright, `turn`: what turns its polylines back upright where it stands (uprightTurn), applied
+ * once they are reshaped (so a melting letter drips down the page); for one lying on its side, `lie` (see lying),
+ * by which a reshaping that runs down the page (melting) sees it as the page has it. Null while it is on its way,
  * false if not to be had.
  */
 function glyphShapes(ctx, a, at, o) {
@@ -205,7 +329,7 @@ function glyphShapes(ctx, a, at, o) {
   if (!glyphs) return glyphs;
   const total = glyphs.reduce((s, g) => s + g.adv, 0), k = total > 0 ? ctx.measureText(a.t).width / (total * o.fs) : 1;   // fit the width the canvas gives the run
   const sy = a.s || 1, dy = a.dy || 0;   // a piece of Latin set larger and lower beside CJK (see setLine in title.js); the width has it already
-  const out = [], step = o.fs * 0.06, chars = [...a.t];
+  const out = [], step = o.fs * 0.06, chars = [...a.t], mid = COLUMN ? emMid(ctx) : 0;
   let pen = at;
   for (const [gi, g] of glyphs.entries()) {
     const shapes = [];
@@ -219,15 +343,26 @@ function glyphShapes(ctx, a, at, o) {
       }
       shapes.push(pts);
     }
-    out.push({ ch: chars[gi] || "", shapes, x0: pen, x1: pen + g.adv * o.fs * k });
-    pen += g.adv * o.fs * k;
+    const ch = chars[gi] || "", x1 = pen + g.adv * o.fs * k, up = COLUMN && standsUp(ch);
+    out.push({ ch, shapes, x0: pen, x1, turn: up ? uprightTurn(ch, shapes, (pen + x1) / 2, mid) : null, lie: COLUMN && !up ? lying((pen + x1) / 2, mid) : null });
+    pen = x1;
   }
   return out;
 }
+/** A letter's polylines `shapes` (its own, or reshaped), turned back upright when it stands so in a column (see glyphShapes). */
+const turned = (g, shapes) => (g.turn ? shapes.map(g.turn) : shapes);
+/**
+ * For a letter lying on its side in a column, about (cx, cy) in the line's units: {up, down}, functions of a polyline
+ * — up turning it a quarter turn clockwise, as the page has it (down the column is then down), down turning it back.
+ */
+const lying = (cx, cy) => ({
+  up: (pts) => pts.map(([x, y]) => [cx - (y - cy), cy + (x - cx)]),
+  down: (pts) => pts.map(([x, y]) => [cx + (y - cy), cy - (x - cx)]),
+});
 /** The outline of a run as glyphShapes has it, all its letters' polylines together. */
 function contours(ctx, a, at, o) {
   const g = glyphShapes(ctx, a, at, o);
-  return g ? g.flatMap((x) => x.shapes) : g;
+  return g ? g.flatMap((x) => turned(x, x.shapes)) : g;
 }
 const trace = (ctx, shapes) => { ctx.beginPath(); for (const pts of shapes) { pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); } };
 /**
@@ -404,7 +539,8 @@ function inkTest(shapes) {
  * letter as glyphShapes gives it, with `side` and `k` (see weighOf), and giving its new polylines; R its own random numbers,
  * drawn from the letter, which of its kind on the line it is, the line and the layer's fxSeed — the same every
  * time the cover is drawn, others after Reshuffle. `o.amt` is how far it goes; `join` how the keyline meets at
- * the corners. (Puffed up needs no new outline: see outlined.)
+ * the corners; `down`, that it runs down the page, in a column too (see reshapeRun). (Puffed up needs no new
+ * outline: see outlined.)
  */
 export const SHAPED = {
   /**
@@ -445,7 +581,7 @@ export const SHAPED = {
     });
   } },
   /** Melting: the undersides sag, and run down in drips from the lowest of them. */
-  melt: { join: "round", shape: (g, R, o) => {
+  melt: { join: "round", down: true, shape: (g, R, o) => {
     const fs = o.fs, a = o.amt, walks = g.shapes.map((pts) => walk(pts, fs * 0.012, g.side)), all = walks.filter(Boolean).flat();
     if (!all.length) return g.shapes;
     const foot = Math.max(...all.map((p) => p.y)), under = all.filter((p) => p.ny > 0.8), drips = [];
@@ -478,14 +614,20 @@ export function effectReach(id, amt = 1) {
   const a = Math.max(0, amt), all = (v) => ({ x: v * a, up: v * a, down: v * a });
   return { spiky: all(0.13), torn: all(0.04), cut: all(0.08), puffy: all(0.042), melt: { x: 0.02 * a, up: 0, down: 0.55 * a } }[id] || { x: 0, up: 0, down: 0 };
 }
-/** A run's letters reshaped by SHAPED[id] (seen: how many of each letter the line has had before it). */
+/**
+ * A run's letters reshaped by SHAPED[id] (seen: how many of each letter the line has had before it); one that runs
+ * down the page (`down`) reshapes a letter lying on its side in a column as the page has it (its `lie`), so it
+ * drips down the column as an upright one does.
+ */
 function reshapeRun(glyphs, id, o, seen, key) {
   const k = [key, id, o.fs, o.amt, o.fxSeed || 0, o.row || 0, JSON.stringify(seen)].join("|");
   if (SHAPES.has(k)) { for (const g of glyphs) seen[g.ch] = (seen[g.ch] || 0) + 1; return SHAPES.get(k); }
   const out = glyphs.flatMap((g) => {
     const n = (seen[g.ch] = (seen[g.ch] || 0) + 1);
     if (!g.shapes.length) return [];
-    return SHAPED[id].shape({ ...g, ...weighOf(g.shapes, o.fs) }, seeded(hash(`${o.fxSeed || 0}|${o.row || 0}|${g.ch}|${n}`)), o);
+    const lie = SHAPED[id].down && g.lie, shapes = lie ? g.shapes.map(lie.up) : g.shapes;
+    const got = SHAPED[id].shape({ ...g, shapes, ...weighOf(shapes, o.fs) }, seeded(hash(`${o.fxSeed || 0}|${o.row || 0}|${g.ch}|${n}`)), o);
+    return turned(g, lie ? got.map(lie.down) : got);
   });
   if (SHAPES.size > 120) SHAPES.delete(SHAPES.keys().next().value);
   SHAPES.set(k, out);
@@ -498,7 +640,7 @@ function outlined(ctx, pass, o, id) {
     const g = glyphShapes(ctx, a, at, o);
     if (!g) ready = false;
     if (g === null) stopgaps++;
-    runs.push([a, g && (SHAPED[id] ? reshapeRun(g, id, o, seen, [ctx.font, a.t, at, a.s || 1, a.dy || 0, ctx.measureText(a.t).width.toFixed(2)].join("|")) : id === "puffy" ? g : g.flatMap((x) => x.shapes))]);
+    runs.push([a, g && (SHAPED[id] ? reshapeRun(g, id, o, seen, [ctx.font, a.t, at, a.s || 1, a.dy || 0, ctx.measureText(a.t).width.toFixed(2), COLUMN ? "column" : ""].join("|")) : id === "puffy" ? g : g.flatMap((x) => turned(x, x.shapes)))]);
   });
   if (!ready) return house(ctx, pass, o);          // not arrived yet, or not to be had: ordinary lettering meanwhile
   ctx.lineJoin = "round";
@@ -506,9 +648,9 @@ function outlined(ctx, pass, o, id) {
     // Puffed up: each letter grown all round by r (less for thin strokes close together, see weighOf), every
     // corner rounded — its outline stroked that wide with round joins, under the fill; the shadows, then the
     // keylines round the grown letters, then the letters, each over all of the one before
-    const key = o.strokeAmt > 0 ? o.fs * 0.075 * o.strokeAmt : 0, letters = runs.flatMap(([a, glyphs]) => glyphs.filter((g) => g.shapes.length).map((g) => [a, g.shapes, o.fs * 0.042 * o.amt * weighOf(g.shapes, o.fs).k]));
+    const key = o.strokeAmt > 0 ? o.fs * 0.075 * o.strokeAmt : 0, letters = runs.flatMap(([a, glyphs]) => glyphs.filter((g) => g.shapes.length).map((g) => [a, turned(g, g.shapes), o.fs * 0.042 * o.amt * weighOf(g.shapes, o.fs).k]));
     const each = (fn) => { for (const [a, shapes, r] of letters) { trace(ctx, shapes); fn(a, r); } };
-    if (o.d > 0) { ctx.save(); ctx.translate(o.d, o.d); each((a, r) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? o.hiShadowCss : o.shadowCss; ctx.lineWidth = 2 * r + key; ctx.fill(); ctx.stroke(); }); ctx.restore(); }
+    if (o.d > 0) { ctx.save(); ctx.translate(...fall(o.d, o.d)); each((a, r) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? o.hiShadowCss : o.shadowCss; ctx.lineWidth = 2 * r + key; ctx.fill(); ctx.stroke(); }); ctx.restore(); }
     if (key) each((a, r) => { ctx.strokeStyle = o.inkCss; ctx.lineWidth = 2 * r + key; ctx.stroke(); });
     each((a, r) => { ctx.fillStyle = ctx.strokeStyle = a.hi ? o.hiCss : o.fillCss; ctx.lineWidth = 2 * r; ctx.stroke(); ctx.fill(); });
     return;
@@ -516,8 +658,9 @@ function outlined(ctx, pass, o, id) {
   if (SHAPED[id]) { ctx.lineJoin = SHAPED[id].join; ctx.miterLimit = 8; }
   if (id === "extrude") {
     // Real depth: every edge of the outline is swept back into a wall. Walls facing one way are
-    // lit and those facing the other shaded, and each group is filled as one shape.
-    const d = o.fs * 0.11 * o.amt * Math.max(0.3, o.shadowAmt), dx = d, dy = d * 0.85;
+    // lit and those facing the other shaded, and each group is filled as one shape. Back down and to the right,
+    // as the page has it (fall in style.js).
+    const d = o.fs * 0.11 * o.amt * Math.max(0.3, o.shadowAmt), [dx, dy] = fall(d, d * 0.85);
     for (const [a, shapes] of runs) {
       const lit = [], shade = [];
       for (const pts of shapes) for (let i = 0; i < pts.length; i++) {
@@ -532,7 +675,7 @@ function outlined(ctx, pass, o, id) {
     }
   }
   for (const [a, bent] of runs) {
-    if (id !== "extrude" && o.d > 0) { ctx.save(); ctx.translate(o.d, o.d); ctx.fillStyle = a.hi ? o.hiShadowCss : o.shadowCss; trace(ctx, bent); ctx.fill(); ctx.restore(); }
+    if (id !== "extrude" && o.d > 0) { ctx.save(); ctx.translate(...fall(o.d, o.d)); ctx.fillStyle = a.hi ? o.hiShadowCss : o.shadowCss; trace(ctx, bent); ctx.fill(); ctx.restore(); }
     trace(ctx, bent);
     if (o.strokeAmt > 0) { ctx.strokeStyle = o.inkCss; ctx.lineWidth = o.fs * 0.075 * o.strokeAmt; ctx.stroke(); }
     ctx.fillStyle = a.hi ? o.hiCss : o.fillCss; ctx.fill();
@@ -731,7 +874,7 @@ export function effectUses(id = "auto") {
 
 /** Paints the current line with effect `id`. See the top of the file for `pass` and `o`. */
 export function paintRuns(ctx, pass, o, id = "auto") {
-  const fx = EFFECTS[id] ? id : "auto";
+  const fx = EFFECTS[id] && !(COLUMN && NO_COLUMNS.includes(id)) ? id : "auto";
   if (fx === "auto") return look().runs ? look().runs(ctx, pass, o, lookValues()) : house(ctx, pass, o);
   if (fx === "cel") return house(ctx, pass, o);
   if (fx === "sticker") return sticker(ctx, pass, o);

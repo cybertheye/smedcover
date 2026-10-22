@@ -11,7 +11,7 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, rebalance, dropOption, partChance, ODD_OPTIONS } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf, LAYOUT_PARTS, takeLayout, putLayout, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf, LAYOUT_PARTS, takeLayout, putLayout, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
@@ -19,7 +19,7 @@ import {
 } from "./store.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
-import { EFFECTS, BENDS, effectUses, warpCorners, convexWarp } from "./textfx.js";
+import { EFFECTS, BENDS, effectUses, warpCorners, convexWarp, NO_COLUMNS } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { RANSOM_FACES, useRansomFaces, ransomPending, ransomArrived, ransomPools, ransomLetters, ransomShown, papersFor, faceFont, faceHas, inksFor, cased, isCJK, EXTRAS, lineCells, keysOf } from "./ransom.js";
 import { parseTitle } from "./title.js";
@@ -2177,9 +2177,9 @@ function layoutList(again) {
  * changes until the preset is put there — at one of the profile's sizes, picked above it. A part (the title, the
  * subtitle, the tag, the channel name, the brand row, the channel graphic) is dragged to move it, by a corner to
  * resize it (a side stretches it, the knob turns it), or the wheel resizes it (with Option, turns it), for every size
- * or the one shown; beside it, the preset's name, the template and its adjustments (as in the Style tab), and which
- * parts the cover has. Save keeps it; Cancel, Escape or a click beside the window leave it as it was (asked first
- * when something was changed). Both go back to the chances.
+ * or the one shown; beside it, the preset's name, the template and its adjustments (as in the Style tab), which
+ * parts the cover has, and which way a lettered part's words run. Save keeps it; Cancel, Escape or a click beside the
+ * window leave it as it was (asked first when something was changed). Both go back to the chances.
  */
 function layoutEditor(p, i) {
   const m = $("modal"), st = copyOf(S.profile.style), layers = copyOf(S.cover.layers);
@@ -2265,13 +2265,17 @@ function layoutEditor(p, i) {
     top.replaceChildren(
       el("div", { class: "ls-sizes" }, S.profile.sizes.map((z) => el("button", { class: "btn" + (sizeKey(z) === E.key ? " on" : ""), title: sizeLabel(z), onclick: () => { E.key = sizeKey(z); E.drawn = false; redraw(); } }, ratioText(z.w, z.h)))),   // built again once drawn at that size, the block's sliders starting from its layout
       el("div", { class: "grp" }, el("span", {}, t("props.scope")), el("div", { class: "seg" }, ["all", "size"].map((v) => el("button", { class: "btn" + (E.scope === v ? " on" : ""), onclick: () => { E.scope = v; build(); } }, t("scope." + v))))));
-    // a part's row: the box says whether the cover has it; its name, clicked, selects it (one shown)
-    const L = part(E.sel), row = (id) => {
-      const P = part(id);
-      return P && el("div", { class: "chk" + (id === E.sel ? " on" : "") }, el("input", { type: "checkbox", checked: !P.off, onchange: (e) => {
+    // a part's row: the box says whether the cover has it; its name, clicked, selects it (one shown); a lettered part's
+    // words set in columns (竖排) and then ruled (界行线), as its properties set them on the canvas: the preset's own
+    const L = part(E.sel), run = (P, k, under = false) => el("label", { class: "chk run" + (under ? " under" : ""), title: t(`props.${k}Tip`) },
+      el("input", { type: "checkbox", checked: P[k] === true, onchange: (e) => { P[k] = e.target.checked; E.dirty = true; build(); redraw(); } }), t("props." + k));
+    const row = (id) => {
+      const P = part(id), words = P && LETTERED.includes(P.type);
+      return P && [el("div", { class: "chk" + (id === E.sel ? " on" : "") }, el("input", { type: "checkbox", checked: !P.off, onchange: (e) => {
         if (e.target.checked) { delete P.off; P.visible = true; } else { P.off = true; P.visible = false; }
         E.dirty = true; build(); redraw();
-      } }), el("span", { onclick: () => { if (P.visible) { pick(id); redraw(); } } }, t("layer." + id)));
+      } }), el("span", { onclick: () => { if (P.visible) { pick(id); redraw(); } } }, t("layer." + id)), words && run(P, "vertical")),
+        words && P.vertical === true && run(P, "rules", true)];
     };
     side.replaceChildren(
       el("div", {}, cap("layouts.name"), name),
@@ -2746,6 +2750,7 @@ function fxControl(L) {
   const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline"), letters: t("fx.kind.letters") };
   const groups = ["passes", "mask", "outline", "letters"].map((kind) => ({ group: kinds[kind], items: Object.entries(EFFECTS).filter(([, e]) => (e.menu || e.kind) === kind).map(([id, e]) => [id, e.name[getLang()]]) })).filter((g) => g.items.length);
   const fx = EFFECTS[L.fx] ? L.fx : "auto", kind = EFFECTS[fx].kind;   // an effect no longer in the menu (a look's lettering of before) is shown as automatic
+  const cols = inColumns(L);   // set in columns: no bend (the one it has is kept, for when it is in lines again)
   return {
     kids: [
       // a lettering dealt by a seed starts with one of the layer's own: two layers in it are not drawn alike
@@ -2755,14 +2760,34 @@ function fxControl(L) {
       // tears, cuts, drips, bites); and the ransom note's one by one, in a window of their own
       EFFECTS[fx].seeded && el("button", { class: "btn wide", style: "margin-top:8px", title: t(fx === "ransom" ? "fx.reshuffleTip" : "fx.reshuffleEdgeTip"), onclick: () => { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === L.fxSeed); set("fxSeed", n, false); } }, t("fx.reshuffle")),
       fx === "ransom" && el("button", { class: "btn wide letters-btn", style: "margin-top:8px", title: t("letters.openTip"), onclick: () => lettersOpen(L) }, t("letters.open")),
-      el("div", { style: "margin-top:12px" }, cap("props.bend"),
+      cols ? el("div", { class: "hint", style: "margin-top:12px" }, t("fx.bendColumns")) : el("div", { style: "margin-top:12px" }, cap("props.bend"),
         select([["", t("bend.none")], ...Object.entries(BENDS).map(([id, b]) => [id, b.name[getLang()]])], L.bend || "", (v) => { if (v) L.bend = v; else { delete L.bend; delete L.bendAmt; } delete L.warp; delete L.reshape; touch({ cover: true, side: true }); })),
-      L.bend && !(L.bend === "taper" && L.warp) && slider("props.bendAmt", 0, 2, 0.05, L.bendAmt ?? 1, times, (v) => { holdLive(L.id); set("bendAmt", v === 1 ? undefined : v, false); }),
-      L.bend === "taper" && L.warp && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("warp", undefined, true) }, t("fx.warpReset")),
-      L.bend && L.bend !== "taper" && L.reshape && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("reshape", undefined, true) }, t("fx.reshapeReset")),
+      !cols && L.bend && !(L.bend === "taper" && L.warp) && slider("props.bendAmt", 0, 2, 0.05, L.bendAmt ?? 1, times, (v) => { holdLive(L.id); set("bendAmt", v === 1 ? undefined : v, false); }),
+      !cols && L.bend === "taper" && L.warp && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("warp", undefined, true) }, t("fx.warpReset")),
+      !cols && L.bend && L.bend !== "taper" && L.reshape && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("reshape", undefined, true) }, t("fx.reshapeReset")),
     ],
-    tip: [fx === "ransom" && t("fx.ransomHint"), EFFECTS[fx].kind === "outline" && fx !== "extrude" && t("fx.shapedHint"), L.bend && t("fx.bendHint"), L.bend && t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint"), kind === "outline" && !CAN.outlines && t("fx.needsApp")].filter(Boolean).join(" "),
+    tip: [fx === "ransom" && t("fx.ransomHint"), EFFECTS[fx].kind === "outline" && fx !== "extrude" && t("fx.shapedHint"), !cols && L.bend && t("fx.bendHint"), !cols && L.bend && t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint"), kind === "outline" && !CAN.outlines && t("fx.needsApp"), cols && NO_COLUMNS.includes(fx) && t("fx.noColumns")].filter(Boolean).join(" "),
   };
+}
+/** Whether the cover's look sets lettering layer L in columns of itself (its `columns`: the woodblock book's Set the title vertically, for the title and the subtitle), as columned() in style.js has it. */
+const columnsByLook = (L) => {
+  const lk = LOOKS[S.profile.style.look] || LOOKS.cel;
+  return (L.type === "title" || L.type === "subtitle") && !!lk.columns && !!lk.columns(lookParams(lk.id, (S.profile.style.lookParams || {})[lk.id]));
+};
+/** Whether lettering layer L is set in columns: as the user set it (`vertical`), or as the look does of itself. */
+const inColumns = (L) => L.vertical === true || columnsByLook(L);
+/**
+ * Setting lettering layer L in columns, as a Song edition is (竖排, `vertical`), and once it is, ruling them (界行线,
+ * `rules`): both kept with the layer, structure that Surprise me leaves alone. Set so by the look itself, the box is
+ * ticked and greyed, saying where that is changed.
+ */
+function columnControls(L) {
+  const byLook = !L.vertical && columnsByLook(L), lk = LOOKS[S.profile.style.look] || LOOKS.cel;
+  return [
+    el("label", { class: "chk", title: t("props.verticalTip") }, el("input", { type: "checkbox", checked: L.vertical || byLook, disabled: byLook, onchange: (e) => { L.vertical = e.target.checked; touch({ cover: true, side: true }); } }), t("props.vertical")),
+    byLook && el("div", { class: "hint" }, t("props.verticalByLook", lk.name[getLang()])),
+    (L.vertical || byLook) && el("label", { class: "chk", title: t("props.rulesTip") }, el("input", { type: "checkbox", checked: !!L.rules, onchange: (e) => { L.rules = e.target.checked; touch({ cover: true }); } }), t("props.rules")),
+  ];
 }
 /** The words a headline layer sets: the title's and the subtitle's are the cover's. */
 const wordsOf = (L) => (L.type === "title" ? S.cover.title : L.type === "subtitle" ? S.cover.subtitle : L.text || "");
@@ -2919,7 +2944,7 @@ function headlineControls(L, set) {
       L.type === "title" && el("textarea", { value: S.cover.title, spellcheck: false, style: "height:64px;margin-bottom:8px", oninput: (e) => { S.cover.title = e.target.value; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); } }),
       // so are the subtitle's, in Cover → Subtitle
       L.type === "subtitle" && el("div", { style: "margin-bottom:8px" }, textInput(S.cover.subtitle, (v) => { S.cover.subtitle = v; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); }, { placeholder: t("cover.subtitlePh") })),
-      fontControl(L, true)], t("props.textHint"), "top"),
+      fontControl(L, true), ...columnControls(L)], t("props.textHint"), "top"),
     psec("props.sec.effect", fx.kids, fx.tip),
     psec("props.sec.color", [
       swatch(L, "ink", "props.sw.text", L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff"),
@@ -3313,7 +3338,7 @@ function assetColour(L) {
 }
 function typeControls(L) {
   const set = (k, v, side = false) => { L[k] = v; touch({ cover: true, side }); };
-  const font = () => psec("props.sec.text", fontControl(L, true), L.type === "brand" ? "" : t("props.boundHint"));
+  const font = () => psec("props.sec.text", [fontControl(L, true), ...columnControls(L)], [L.type === "brand" ? "" : t("props.boundHint"), L.type === "brand" && L.vertical ? t("props.verticalBrand") : ""].filter(Boolean).join(" "));
   const ink = (shown) => psec("props.sec.color", swatch(L, "ink", "props.sw.text", shown), t("props.inkAutoHint"));
   switch (L.type) {
     case "bg": {
@@ -3648,11 +3673,11 @@ const ease = (p) => (p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2);
 const here3d = () => S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off);
 /** Opens the 3D view out of the cover, or folds it back. */
 function set3d(on) {
+  if (on) brushClose();   // the brush paints on the flat canvas (and its opening closes this)
   if (on && !V3.on) {
     stage3d();
     Object.assign(V3, { on: true, stale: true, s: 0, aim: null });
     V3.z.clear();
-  if (on) brushClose();   // the brush paints on the flat canvas (and its opening closes this)
     $("stage").classList.add("v3");
     sync3dHud();
   }

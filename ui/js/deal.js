@@ -13,8 +13,8 @@
 // (Surprise me's chances window) lie over RULES.odds, their recipes (the same panel, and the Style tab) over RECIPES;
 // both, what they lock and the looks already dealt in the run come in through `env`. Pure: `R` is the random
 // source, a function returning numbers in [0, 1).
-import { LOOKS, LOOK_IDS, effectsFor, FX_TYPES } from "./style.js";
-import { EFFECTS, BENDS } from "./textfx.js";
+import { LOOKS, LOOK_IDS, effectsFor, FX_TYPES, lookParams } from "./style.js";
+import { EFFECTS, BENDS, NO_COLUMNS } from "./textfx.js";
 import { titleLines, lineUnits, luminance } from "./check.js";
 import { ACCENT_SHAPES, LETTERED, newLayer, clipEnd, moveScene, putLayout } from "./layers.js";
 
@@ -408,7 +408,12 @@ export function dealCover(st, cover, env) {
   // 7. every layer's own choices: switches, outline and shadow, the letterings and bends as the look's recipe
   // has them (the subtitle after the title, lettered like it now and then), unless the letterings are to stay
   const can = env.can || (() => true), canTint = env.canTint || (() => false), Y = RULES.layers, c = O.chances;
-  const dealFx = (L, got) => { delete L.fx; delete L.fxAmt; delete L.bend; delete L.bendAmt; delete L.warp; delete L.reshape; Object.assign(L, got); };
+  // whether a layer is set in columns is the user's (its `vertical` and `rules` are never dealt on their own; a layout
+  // preset dealt, step 0, brings its own); one that is (or that the look sets so of itself, see columned in style.js)
+  // is dealt no bend, nor a lettering a column cannot draw (NO_COLUMNS)
+  const inColumns = (L) => L.vertical === true || ((L.type === "title" || L.type === "subtitle") && !!LOOKS[st.look].columns && !!LOOKS[st.look].columns(lookParams(st.look, st.lookParams[st.look])));
+  const upright = (got) => { const g = { ...got }; delete g.bend; delete g.bendAmt; if (NO_COLUMNS.includes(g.fx)) { delete g.fx; delete g.fxAmt; delete g.fxSeed; } return g; };
+  const dealFx = (L, got) => { delete L.fx; delete L.fxAmt; delete L.bend; delete L.bendAmt; delete L.warp; delete L.reshape; Object.assign(L, inColumns(L) ? upright(got) : got); };
   const lines = (L, k) => { L.stroke = within(k.stroke); L.shadow = within(k.shadow); };
   const titled = letterFor(st.look, "title", R, can, null, ctx);
   for (const L of cover.layers) {

@@ -48,7 +48,7 @@ ui/
   js/render.js       drawCover(): walks the layers and paints one cover; selection and hit-testing
   js/layers.js       layer model: placement across sizes, ordering (pure)
   js/layout.js       geometry for any aspect ratio and template (pure)
-  js/title.js        title parsing and fitting
+  js/title.js        title parsing and fitting, in lines and in columns
   js/stack3d.js      the layer panel's 3D view: the stack's projection, fitting, labels and drawing (pure maths but for the drawing)
   js/platforms.js    the platforms covers are made for, as data: the ratios each wants, feed widths, what the apps lay over a cover; the sizes' names (platformsFor)
   js/check.js        the cover standards' rules, pure (the tests hold the layouts to them; meetStandards in layout.js)
@@ -135,16 +135,17 @@ The template and its adjustments (the profile's `style.template` and `style.layo
 the layout's parts that carry words or the graphic (`LAYOUT_PARTS` in `layers.js`: title, subtitle, tag, channel name,
 brand row, channel graphic) its placement `t` (for every size and per size, the graphic's per channel too), whether the
 cover has it (`shown`: not left out, see `off` in 4) and which way its words run (`vertical` and `rules`, `LAYOUT_RUNS`,
-carried when the layer has them). Fonts, letterings, colours and the look are not in it. `takeLayout(style, layers)`
+carried when true). Fonts, letterings, colours and the look are not in it. `takeLayout(style, layers)`
 makes one from a style and a cover's layers; `putLayout(style, layers, preset)` puts one on them: its template, with its
 adjustments (none: the template's own; the other templates' left as they are), each part where it has it, a part it
 shows that was left out coming in visible, one it leaves out hidden, a way of running it has not taken off; a part locked
 stays as it is (its place, whether it shows, which way its words run), dealt or applied, the template going on all the same.
 `normalizeLayouts()` keeps 24 at most (`LAYOUTS`), their ids as they are (unique, never `keep`: Surprise me's chances
 name them), names trimmed to 40 characters, every part there (one missing where the template puts it, shown unless a
-new design leaves it out), its numbers within range and its per-size keys only size keys, the run values only when
-small. Their chances are `surprise.odds.groups.layout` ({keep, id: chance}); `normalizeSurprise(raw, ids)` keeps them
-only for the presets there are, so a preset deleted takes its chance with it.
+new design leaves it out), its numbers within range and its per-size keys only size keys, a lettered part's run values
+only when true (a number or a word is no way of running: left out). Their chances are `surprise.odds.groups.layout`
+({keep, id: chance}); `normalizeSurprise(raw, ids)` keeps them only for the presets there are, so a preset deleted takes
+its chance with it.
 
 Other files: `assets/<id>.json` (My assets: images as data URLs, AI assets as specs; either may carry `folder`, the id of its folder), `asset-folders.json` (the folders of My assets, `[{id, name}]`, checked by `normalizeFolders`; an asset whose folder is gone counts as unfiled), `fonts/<name>.font` (imported
 fonts), `photos/<pid>` (pictures, originals and masks; see 6.3), `photo-library.json` (Bitmaps: `[{pid, name, kind, at}]`, `kind` being `upload`, `ai` or `repaint`, newest first, checked by `normalizeLibrary`), `ai.json` (AI connection settings including the token; never exported with
@@ -229,9 +230,13 @@ goes (`env.sub`, null when it is hidden, left out or empty), in the faces the ti
 at the foot of its box (`drawTitle`'s and `titleBlock`'s `reserve`), the two centred together, the
 subtitle a gap under the last line. Where the reserve would set the title below what reads in the feed
 (`titleFloor()`), the subtitle is made smaller first, down to `SUB.min`; and it is never more than
-`SUB.most` of the title as finally set. `ink` is the block its words fill. A look that sets the title its
-own way may place it too (`subtitleFit` on the look): the woodblock look, with the title in columns, gives
-it a column left of the title's and hands the title a narrower box (`titleBox`). Looks' backgrounds keep
+`SUB.most` of the title as finally set. `ink` is the block its words fill. When the title or the subtitle
+is set in columns (`columned()`, see 6.1.1) `subtitleColumns()` places it instead: both in columns, a column
+left of the title's, a character lower, the title handed a narrower box (`titleBox`); the title in columns
+and the subtitle in a line, the line under the columns, which keep `reserve` free; the title in a line and
+the subtitle in columns, its columns right of the title's block, from its top, the title's box narrower by
+them (`titleBox`). The title's columns stand in the look's own place for them (`columnBoxOf()`: the
+woodblock book's `songBox()`, by the seal and down to the band), else in its box. Looks' backgrounds keep
 clear of both (`titleArea()` in `style.js` takes the subtitle's `ink` in). A hidden subtitle is still placed
 (`env.subHidden`, the title making no room for it), so the 3D view can show it.
 
@@ -269,8 +274,8 @@ the current scope.
 
 ### 4.2 Lettering colours and headline layers
 
-Layers made of words (`title`, `tag`, `catname`, `brand`, `text`) may carry `ink`, their own
-lettering colour. The title and text layers (`HEADLINES`) are one kind of thing: both may also carry
+Layers made of words (`LETTERED`: `title`, `subtitle`, `tag`, `catname`, `brand`, `text`) may carry `ink`, their own
+lettering colour, and all carry `vertical` and `rules`, set in columns and ruled (see 6.1.1). The title and text layers (`HEADLINES`) are one kind of thing: both may also carry
 `hi` (the highlighted words' colour), `stroke` and `shadow` (outline and shadow strengths), `plate`
 and `plateInk` (a plate and its colour), `hiPlate` and `hiPlateInk` (plates under the highlighted words
 alone, drawn in the look's way and coloured by `headline()`, the words on them then in what reads
@@ -426,8 +431,74 @@ draws after the pass (the deco look) uses `inPiece()`; the outline effects, whic
 piece's scale and drop themselves (`glyphShapes`). What marks a whole run — the plates under highlighted
 words, the cyberpunk and negative looks' boxes, the collage's paper strips, the rave, chrome and
 spectrum gradients — is drawn once a run (at its first piece, over `run`), not once a piece. Without real
-metrics (the tests' stand-in contexts) a line is set as the canvas sets it. Vertical titles are set as
-before.
+metrics (the tests' stand-in contexts) a line is set as the canvas sets it. A column is set by
+`setColumn()` (6.1.1).
+
+### 6.1.1 Columns
+
+Every lettered layer (`LETTERED`, copies too) carries `vertical` and `rules`, false unless true
+(`normalizeLayer()`), kept in the design and the covers. `columned(L)` in `style.js` says whether a layer is
+set in columns: its `vertical`, or for the title and the subtitle the look's own default (`columns(p)`: the
+woodblock book's *Set the title vertically*), which a layer's `vertical` cannot turn off — while it is on the
+properties show the box ticked and greyed (`columnsByLook()` in `app.js`). Surprise me deals neither on its own:
+`dealCover()` leaves them as they are (a layout preset it deals brings its own, see 9.4) and deals a layer in columns
+no bend, nor a lettering of `NO_COLUMNS`.
+
+A column is set as a line turned a quarter turn clockwise, so it reads downward. `setColumn()` gives its
+pieces as `setLine()` gives a line's, each with its place along the column: a character standing upright
+(`standsUp()` in `textfx.js`: Han, kana, hangul, full-width forms and CJK punctuation but the brackets, quotes,
+dashes and ellipses, emoji) a piece of its own centred in a cell `GAP` (1.06) ems long; a run of Latin letters,
+digits and signs (a space inside it with it) one piece, `AIR` longer than it, set larger beside CJK as a line
+sets it (`LATIN_TO_HAN`), moved across (`dy`) so its capitals' middle is the column's; a bracket, quote, dash
+or ellipsis a piece a cell long, its ink's middle moved onto the column's; a space a third of an em. `mid` is
+where the column's middle lies from the line's baseline: the middle of an em, the middle of 国's ink
+(`emMiddle()`). The pieces' text is the line's, in order, so `letterCells()` gives a column the keys a line has
+(`letterKey`), whichever way the layer is set: the ransom note's letters dressed by hand and a weave's letters
+in front follow a letter from lines to columns and back.
+
+`drawTitleVertical()` fits the columns into a box (`fitColumns()`: the longest as high as the box, all of them
+as wide, `blockWidth()`: a pitch, `PITCH` 1.32 ems, a column, less the last one's air but for its rules), or
+takes `st.fs` as it is (a text layer's 120, its block about its centre), and stands the block at the box's
+top left; `titleBlockVertical()` measures it without drawing. In the block's turned frame it paints the plate,
+then (`st.rules`) the rules (界行: a hairline at either side of every column, `st.fill` at 0.32 alpha), then each
+column as `lineOf()` paints a line of `drawTitle()` — the highlighted runs' plates and marks, `paintRuns()`, the
+marks over — with `frame.c` 0, the line translated so the column's middle falls where its em's does, under
+`inColumn()`; `env.only` keeps it to some letters by `someLetters()`, a column counted as a line. Its box takes
+in the plate and what the effect throws past the type (`effectReach`), and its `fs` is the size of its
+characters, which the cover standards read (`typeSize()` in `check.js`). There is no bend: `bendOf()` gives
+none for a layer in columns, `layoutHandles()` no handles, and the properties a note in the bend menu's place
+(the bend is kept, for lines again).
+
+`inColumn(ctx, run)` in `textfx.js` turns the upright characters back wherever they are drawn while `run`
+runs: like `larger()`, it wraps `fillText` and `strokeText` on the canvas prototypes (and on ctx itself when it
+is no canvas, a test's stand-in), and `columnText()` draws a string's stretches lying on their side as they
+are and each upright character turned a quarter turn back about the middle of its em where it would stand
+(its advance's middle, `emMid()`), 。，、 moved to the top right of their cell (their ink mirrored through the
+em's middle, `markShift()`) and ？！：； to its middle across. So every lettering sets a column without knowing:
+the looks' `runs()` and work canvases, the masks, the sticker's rims, the ransom note's letters and the
+letters cut from the photo, the shapes `someLetters()` keeps letters by. Meanwhile `asColumn()` in `style.js`
+keeps the looks' `upright()` from taking a slant out of a line that has none, and turns `fall(dx, dy)` on: the
+light does not turn with the line, so every offset a lettering throws one way — the house shadow, the sticker's,
+the looks' drop shadows, depths, long shadows, echoes and inks off register (`echo()`), the ransom note's
+shadows and depth, the outline effects' shadows and Extruded's depth, the plates' shadows (`drawPlate()`, the
+looks' `plate` and `tag`), the block mark — is given as the page has it, and `fall()` turns it back a quarter
+turn in a column, so it falls down and to the right there as off a line. A canvas's own shadow
+(`shadowOffsetX/Y`) is the page's already, as is anything offset in pixels (the inner shadow), and needs
+nothing. The outline effects draw paths, not text: `glyphShapes()` gives each upright letter a `turn`
+(`uprightTurn()`), applied after `SHAPED` has reshaped it, so a melting letter drips down the page; a letter
+lying on its side gets a `lie` instead, by which a reshaping that runs down the page (`down`: melting) sees it
+as the page has it, so it drips down the column too; the reshaped runs are kept apart from a line's
+(`SHAPES`'s key).
+ `NO_COLUMNS` is what a column cannot be lettered
+with, `paintRuns()` painting the look's own lettering there instead: Row shift (`rows`), which cuts the
+canvas into level rows, and a turned line has none.
+
+The small parts — the corner tag (the look's `tag` too), the channel name, the brand row — are painted as
+lines and turned whole (`turned()` in `render.js`, for `placed()`): turned a quarter turn about the line's
+box under `inColumn()`, plates and rails with them; standing where the line stood, hanging from its top
+unless that would reach into the foot the apps lay their counts over (`wordsFoot()`), when it rises from its
+foot, at its left end or, in the right half of the canvas, its right, and kept on the canvas; the channel name
+unslanted and lettered as off the band (it reaches off it), the brand row without its rail or number tag; with `rules`, a hairline at either side in its lettering's colour (`rulesOf()`).
 
 ### 6.2 Text effects (`textfx.js`, `outlines.js`)
 
@@ -725,9 +796,10 @@ noted on the work canvas, the shapes are grown both slanted and upright, and the
 lettering was painted in. It works in the line's own space, so inside a bent line's `paint` it bends with the
 letters (the bent line's key holds the letters). A line with none of them is left out, and so is the plate. The
 ransom note is told the letters (`o.only`) and paints those alone, scrap and tape too; the plates and marks of
-its highlighted words are kept to those letters' shares of the line (`clip`). Vertical lettering (`drawTitleVertical`: a vertical subtitle, and the woodblock book's
-title through its `titleSet`, which passes `env.only` on) leaves out the units none of whose letters is chosen, a
-column keyed as a line. Where the context is no canvas (a test double), a clip to the letters' shares stands in.
+its highlighted words are kept to those letters' shares of the line (`clip`). Lettering in columns
+(`drawTitleVertical`, see 6.1.1) goes the same way, a column counted as a line: it is a line turned, and the
+letters' shapes are drawn under `inColumn()` as its letters are, grown and taken off along the shadow as the page has
+it (`fall()`) and along the drips down the page, which is along the column (`columnNow()`), as the lettering throws them. Where the context is no canvas (a test double), a clip to the letters' shares stands in.
 
 A cut-out's *Weave* group (`weaveControls()` in `app.js`: on, which lettering below it — `weavable()` —, the way,
 the head line) and the weave window (`#weavewin`: `weaveOpen()`, `weaveShow()`, `weaveClose()`, `S.weaveWin`;
@@ -803,7 +875,8 @@ A look is a set of **hooks**. Each is optional, and what a look leaves out is dr
 | `subject` | whatever is painted around the channel graphic and travels with it (a lock-on ring, say) |
 | `seeded` | marks a look that places some things at random |
 | `layout` | the geometry of a cover, for looks that are about arrangement; the result has the shape `layout()` in `layout.js` returns, and usually comes from `blockLayout()`, which gives level bands and upright panels |
-| `titleSet` | lets the look set the title itself (vertically, say); returning nothing means the usual way |
+| `columns` | true when the look sets the title and the subtitle in columns of itself (its default; see 6.1.1) |
+| `columnBox` | where the title's columns stand, when the look has a place of its own for them (the woodblock book's `songBox()`) |
 | `faces` | faces to use for the whole cover. The font table is shared, so `drawCover()` puts it back when it is done |
 | `titleFont` | the title's font stack, for looks with typographic opinions (editorial's serif) |
 | `oneTheme` | marks a look with a single ground, so the interface hides the light / dark choice |
@@ -862,7 +935,7 @@ Looks with a light and a dark ground (record sleeve, editorial) learn which one 
 
 - `wornTexture(w, h)` and `wear(ctx, w, h, colour, alpha, mode, mask, base)` — wear: soft blotches and clustered specks, white on clear at the canvas's size in units, kept per size and seed. Laid on in the paper's colour with `lighten`, it is where ink did not take or has rubbed off (bare paper stays bare); with `multiply`, grime. A `mask` (painted on a canvas of its own, so several shapes can make it) keeps it to a ring or the edges, and `base` adds an even rub there so the worn shape reads as a whole. Risograph's patchy ink, the record sleeve's ring and edge wear and the woodblock book's uneven printing are all this.
 - `softBand()` (a band across the sheet, soft at its sides and uneven along it: the riso's roller streaks) and `ghosted()` (the whole print again, faintly, a little further on, laid with `darken` so bare paper stays bare: the riso's ghosting).
-- `titleArea(ctx, env)` — where the title will stand, measured before it is drawn with `titleBlock()` from `title.js` (and `titleBlockVertical()` for the woodblock book's vertical title, in `songBox()`, the box `titleSet` also uses), so a background can keep its text clear of it. It takes the title layer's own font into account but not a move of the layer. `graphicTop(env, x0, x1)` gives the top of the channel graphic where it stands under a span, for the same purpose. `title.js` measures and draws with the same fitting (`fitLines()`, `fitColumns()`), so the two agree.
+- `titleArea(ctx, env)` — where the title will stand, measured before it is drawn with `titleBlock()` from `title.js` (and `titleBlockVertical()` for a title in columns, in the box the title's painter takes: the subtitle's `titleBox`, or `columnBoxOf()`), so a background can keep its text clear of it. It takes the title layer's own font into account but not a move of the layer. `graphicTop(env, x0, x1)` gives the top of the channel graphic where it stands under a span, for the same purpose. `title.js` measures and draws with the same fitting (`fitLines()`, `fitColumns()`), so the two agree.
 - Risograph: `risoShapes()` (a pink disc, slanted blue bars, a half disc in the channel ink, a pink ring, multiplied, each over its own stretch of the slider and kept to the open field); the halftone size sets `toneField()`'s pitch.
 - 90s animation: the sky's three colours move toward violet, rose and amber with Dusk; the clouds are a count (each one fading in over its own step); `godRays()` are long wedges screened on from above the top edge; `lensFlare()` is a hot source with streaks and a line of ghosts (rings with a brighter rim, hexagons, a dot) through the middle; the light leak is a radial and a linear gradient screened on from one side; the vignette is the shared `vignette()`.
 - Record sleeve: `record()` slides the disc out from the open field's far edge (grooves, two wedges of sheen, a label in the channel colour, greeked small print, the spindle hole); sun fade is three washes (screen, multiply, soft light); the photo halftone is two passes of `dotScreen()`.
@@ -1152,16 +1225,19 @@ again: the parts locked stay) or deleted once asked (`deleteLayout()`: its chanc
 having any, the group goes and `keep` is certain again); *New* keeps the canvas's (`addLayout()`). *Save as layout* in the
 toolbar above the canvas (`saveLayoutDialog()`) asks a name and does the same; the word that says so (`toast()` with a
 button) opens the chances at the presets (`oddsDialog(true, "layouts")`). The editor is a view of the chances window: the
-profile's style and this channel's layers copied, the preset put on the copies and drawn by `drawCover()` at one of the
-profile's sizes, picked above it, with the selected part's frame and handles. A part is moved, resized, stretched or
-turned as on the canvas (`handles()`, `hitAt()`, `adjust()`; for every size or the one shown; a drag keeps the rest in
-`o.live`); the template's controls are the Style tab's (`templateControls()`, which `layoutBox()` uses too), and a box per
-part sets `off`. *Save* takes the preset back off the copies (`takeLayout()`); nothing touches the cover until a preset is
-put on it.
+profile's style and this channel's layers copied (unlocked: a lock is the cover's, and every part here is the preset's),
+the preset put on the copies and drawn by `drawCover()` at one of the profile's sizes, picked above it (the side built
+again once it is drawn there, so the template's sliders start from that size's layout), with the selected part's frame
+and handles. A part is moved, resized, stretched or turned as on the canvas (`handles()`, `hitAt()`, `adjust()`; for every size or the one shown; a drag keeps the rest in
+`o.live`); the template's controls are the Style tab's (`templateControls()`, which `layoutBox()` uses too), a box per
+part sets `off`, and beside a lettered one a box sets `vertical` and, once it is ticked, one under it `rules` (the
+properties' words for them). *Save* takes the preset back off the copies (`takeLayout()`); nothing touches the cover
+until a preset is put on it.
 
 By the recipes, the looks fall into three families (`FAMILIES`: pop, print, light), each with the chance of the dark ground, of the title keeping the look's own lettering (`auto`), the other letterings that suit it by weight, and the chance and ways of a bend; `RECIPES` gives each look its family and what differs, the chance each part that is off by default comes on, and `tune()` for sliders that go together (rain brings mist in the dark deco). `tuneLook()` sets each slider within 0.3 of the range about its default, likeliest near it (off the very ends unless its default is there), and lets in at most `EXTRAS` (2) of the parts off by default; `letterFor()` deals a layer's lettering (the subtitle like the title by the odds' `subtitleLikeTitle`, never bent; an outline lettering only where outlines can be read; not the lettering named after the look, which is its own already). The families and the looks' own letterings, bends and dark ground are no longer dealt by look: `recipeOf()` takes the dark ground, the lettering (`own`, then `fx` by weight) and the bend (`bend`, then `bends`) from the odds' groups, the same for every look, and keeps of the look's recipe its optional parts and `tune()`. The user sets a look's optional parts, each on its own, in the Style tab (`recipeBox()`) and in Surprise me's chances (`lookParts()`, the same in both); what they change is kept in `settings.recipes[look].params` and `baseRecipe()` lays it over the table's. While the user has not set a group (`odds.set`), the cover turns it (`coverContext()`, passed to `recipeOf()`): a long title — a line wider than 8 characters, or three lines — is bent at 0.3 of the chance and given a sticker's rim or depth half as often, a short one bent half as often again (0.5 at most); a channel colour near black (luminance under 0.05) makes the dark ground 0.6 as likely, a very bright one (over 0.6: near white, a light yellow) the dark ground likelier — none of this for a group the user set, which is dealt exactly as set. `dealPlaces()` takes, of a dozen places allowed, the one that covers the least of the title and the cut-out subjects (`overlap()`), and makes a layer that would still cover more than a quarter of one 0.85 as large and places it again, four times at most; a layer does not keep clear of the subjects it carries (its own, a cut-out itself, and its linked cut-outs, whose boxes go where it goes; a cut-out lying exactly over it is put back over it at its new size and angle, `alignedT()`), those carrying any are placed first, and one clipped into a layer below keeps clear of nothing. Each hand deals only how the cover is drawn: the look and its sliders, dark or light
 ground, the colour block's shape, text effects, and the look effects of the user's layers
-(mostly from the drawn look, now and then from another); the template, its proportions and where the
+(mostly from the drawn look, now and then from another); the template, its proportions, whether lettering is
+set in columns and ruled (`vertical`, `rules`: structure; a layer in columns is dealt no bend, see 6.1.1) and where the
 layout layers stand are left alone (unless a layout preset is dealt, above), but for the title, which goes to the top of the layers with whatever
 is clipped into it (unless it is clipped onto another), below only the subjects cut out of photos that stood over it. `dealPlaces()` gives the user's layers a new place, angle and size, a text layer above `wordsFoot()` (layout.js: the badges' line on a landscape cover, else the bottom 14%, `WORDS_FOOT` in platforms.js, which `meetStandards()` keeps the tag and the channel name above too):
 each size is drawn small once to learn every layer's box, then for the new angle and size the range the

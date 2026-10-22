@@ -29,7 +29,8 @@
 //   about: {zh, en}              what the look looks like and what it suits, shown under the look menu
 //   titleFont(fonts)             the font stack of the title, when the look sets its own
 //   faces(fonts)                 font stacks to use in place of the profile's for the whole cover: { cn?, en?, mono? }
-//   titleSet(ctx, title, box, L, env, p)  sets the title itself (returns its box), or returns null to decline
+//   columns(p)                   true when the look sets the title and the subtitle in columns of itself (see columned)
+//   columnBox(ctx, env, box)     where the title's columns stand, when the look has a place of its own for them
 //   layout(template, w, h)       the geometry of a cover, for looks that are about arrangement (see layout.js)
 //   image(ctx, C, unit, p)       prepares the context for an uploaded image (its shadow or glow)
 //   post(ctx, w, h, C, p, unit, hits)  painted over the finished cover (scanlines, vignette); `unit` is
@@ -48,8 +49,8 @@
 // The current look is module state, set by drawCover() from the profile before anything is drawn.
 
 import { fonts, spaced, spacedW, brackets, toneField } from "./cel.js";
-import { blockLayout, subtitleSize, SUB, wordsFoot } from "./layout.js";
-import { drawTitleVertical, titleBlock, titleBlockVertical, parseTitle, inPiece } from "./title.js";
+import { blockLayout, wordsFoot } from "./layout.js";
+import { titleBlock, titleBlockVertical, inPiece } from "./title.js";
 
 const INK = "#07070c";
 const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
@@ -145,11 +146,11 @@ function tube(ctx, draw, colour, glow, core = true) {
 }
 /**
  * The colour echo that stands in for a shadow: `draw(colour)` is run twice, nudged apart, once in
- * cyan and once in red, before the real thing is painted on top.
+ * cyan and once in red, before the real thing is painted on top; nudged as the page has it (fall).
  */
 function echo(ctx, amount, draw) {
   if (amount <= 0) return;
-  for (const [dx, dy, col] of [[-amount, amount * 0.35, CY.cyan], [amount, -amount * 0.35, CY.red]]) { ctx.save(); ctx.translate(dx, dy); draw(css(col)); ctx.restore(); }
+  for (const [dx, dy, col] of [[-amount, amount * 0.35, CY.cyan], [amount, -amount * 0.35, CY.red]]) { ctx.save(); ctx.translate(...fall(dx, dy)); draw(css(col)); ctx.restore(); }
 }
 /** A rectangle with its lower right corner cut off. */
 function chamfer(ctx, x, y, w, h, cut) {
@@ -607,7 +608,22 @@ function grain(ctx, amount, unit, paper = false) {
 }
 const wash = (ctx, w, h, mode, colour, alpha) => { if (alpha <= 0) return; ctx.save(); ctx.globalCompositeOperation = mode; ctx.fillStyle = css(colour, Math.min(1, alpha)); ctx.fillRect(0, 0, w, h); ctx.restore(); };
 const grey = (c) => { const l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; return [l, l, l]; };
-const upright = (ctx) => ctx.transform(1, 0, 0.08, 1, 0, 0);   // undoes the house style's slant on lettering
+let columnar = 0;   // lettering set in columns (see inColumn in textfx.js): its line turned a quarter turn clockwise, upright already
+const upright = (ctx) => { if (!columnar) ctx.transform(1, 0, 0.08, 1, 0, 0); };   // undoes the house style's slant on lettering
+/**
+ * Runs `run` (and returns what it does) as lettering set in a column is painted (see inColumn in textfx.js): the
+ * looks' letterings take no slant out of the line, a column being set upright, and what they throw off it falls
+ * as the page has it (fall).
+ */
+export function asColumn(run) { columnar++; try { return run(); } finally { columnar--; } }
+/**
+ * The offset [x, y] by which lettering throws what it throws off its letters in one direction — a drop shadow, its
+ * depth, a long shadow, an echo, a second ink printed off register, the shadow of its plate — given as the page has
+ * it (dx, dy: down and to the right, say), in the units of the line it is drawn in. In a column the line is turned a
+ * quarter turn clockwise, and the light is not: the offset is turned back, so it falls as it does off a line. (A
+ * canvas's own shadow, shadowOffsetX/Y, is the page's already; and so is anything offset in pixels.)
+ */
+export const fall = (dx, dy) => (columnar ? [dy, -dx] : [dx, dy]);
 
 // ---------- the grids the looks lay on their grounds (each look's `gridLines`, see lookGrid in render.js)
 /** Every `step` from `a` while below `b`. */
@@ -713,8 +729,8 @@ const riso = {
   },
   /** Two inks, one printed slightly off the other, darker where they overlap. */
   runs(ctx, pass, o, p) {
-    const fs = o.fs, C = o.hi || o.C || RISO.pink, main = o.fill || RISO.blue, g = fs * o.shadowAmt * (0.035 + 0.012 * p.shift);   // the shadow slider is how far off the second ink is printed: 0 in register
-    pass((a, x) => { ctx.fillStyle = css(a.hi ? main : C); ctx.fillText(a.t, x + g, g * 0.8); });
+    const fs = o.fs, C = o.hi || o.C || RISO.pink, main = o.fill || RISO.blue, g = fs * o.shadowAmt * (0.035 + 0.012 * p.shift), [gx, gy] = fall(g, g * 0.8);   // the shadow slider is how far off the second ink is printed: 0 in register
+    pass((a, x) => { ctx.fillStyle = css(a.hi ? main : C); ctx.fillText(a.t, x + gx, gy); });
     ctx.save(); ctx.globalCompositeOperation = "multiply";
     pass((a, x) => { ctx.fillStyle = css(a.hi ? C : main); ctx.fillText(a.t, x, 0); });
     ctx.restore();
@@ -910,9 +926,9 @@ const anime = {
   },
   /** A title-card logotype: pale letters, a dark keyline, a white one outside it, and a soft drop shadow. */
   runs(ctx, pass, o) {
-    const fs = o.fs, C = o.hi || o.C || ANI.cream, k = Math.max(0.4, o.strokeAmt), d = fs * 0.055 * o.shadowAmt;
+    const fs = o.fs, C = o.hi || o.C || ANI.cream, k = Math.max(0.4, o.strokeAmt), d = fs * 0.055 * o.shadowAmt, [dx, dy] = fall(d, d);
     ctx.lineJoin = "round";
-    if (d > 0) pass((a, x) => { ctx.strokeStyle = css(ANI.line, 0.5); ctx.lineWidth = fs * 0.2 * k; ctx.strokeText(a.t, x + d, d); });
+    if (d > 0) pass((a, x) => { ctx.strokeStyle = css(ANI.line, 0.5); ctx.lineWidth = fs * 0.2 * k; ctx.strokeText(a.t, x + dx, dy); });
     pass((a, x) => { ctx.strokeStyle = css(ANI.cream); ctx.lineWidth = fs * 0.2 * k; ctx.strokeText(a.t, x, 0); });
     pass((a, x) => { ctx.strokeStyle = css(ANI.line); ctx.lineWidth = fs * 0.105 * k; ctx.strokeText(a.t, x, 0); });
     pass((a, x) => { ctx.fillStyle = a.hi ? css(mix(muted(C), ANI.cream, 0.15)) : css(o.fill || ANI.cream); ctx.fillText(a.t, x, 0); });
@@ -1295,8 +1311,7 @@ function fauxGlyph(ctx, x, y, s, k, t = Math.max(1.2, s * 0.085)) {
  */
 function songText(ctx, env, p, pitch) {
   if (p.text <= 0 && p.notes <= 0) return;
-  const { w, h } = env, F = openField(env), T = titleLayer(env), base = titleBase(env);
-  const A = !T || !base ? null : p.vertical ? withSub(titleBlockVertical(ctx, env.cover.title, env.sub && env.sub.vertical ? env.sub.titleBox : songBox(ctx, env, base), T.font ? `"${T.font}", ${fonts.serif}` : fonts.serif, 900, 300), env) : titleArea(ctx, env);
+  const { w, h } = env, F = openField(env), A = titleArea(ctx, env);
   const y0 = env.hasBrand ? 112 : 74, y1 = Math.min(h - 70, F.y1 - 24), big = pitch * 0.44, small = pitch * 0.22;
   // the free stretches of each column, right to left: not under the title, nor behind the channel graphic
   const cols = [];
@@ -1479,37 +1494,18 @@ const songke = {
     edge(ctx, run, nx, ny) { ctx.lineCap = "butt"; ctx.strokeStyle = css(SONG.ink); ctx.lineWidth = 5; run(0, 0); ctx.lineWidth = 1.5; run(nx * 10, ny * 10); },   // a thick-and-thin border, as round the block
   },
   /**
-   * The title, set as a book sets it: in columns, top to bottom, the first column on the right.
-   * Each typed line is a column. Returns the box it takes, or null to leave it to the usual setting.
+   * The title set as a book sets it, in columns, top to bottom, the first column on the right (Set the title
+   * vertically): each typed line a column, the subtitle a column of its own left of the title's, smaller, so
+   * read after it (see subtitleColumns in title.js). This is the look's own default: a title or subtitle the
+   * user sets vertical (its `vertical`, see columned) is in columns whatever the switch says.
    */
-  titleSet(ctx, title, box, L, env, p) {
-    if (!p.vertical) return null;
-    // Columns want height, where a line wants width: the title takes the field down to the colour
-    // band (or the foot of the page), and stands clear of the seal, which keeps its corner; left of
-    // it, the subtitle's column (see subtitleFit).
-    return drawTitleVertical(ctx, title, env.sub && env.sub.vertical ? env.sub.titleBox : songBox(ctx, env, box), { font: fonts.serif, fill: L.ink || css(SONG.ink), hi: L.hi || css(SONG.red), maxFs: 300, weight: 900, only: env.only });   // only: see wovenFront in render.js
-  },
+  columns: (p) => !!p.vertical,
   /**
-   * The subtitle, with the title in columns: in a column of its own (one per typed line), smaller, left
-   * of the title's, so read after it, beginning a character lower; the title's columns move over to
-   * make room. Null when the title is not vertical: the usual place, under it.
+   * Where the title's columns stand: columns want height, where a line wants width, so the title takes the
+   * field down to the colour band (or the foot of the page), and stands clear of the seal, which keeps its corner.
    */
-  subtitleFit(ctx, title, sub, box, env, p) {
-    const lines = parseTitle(sub);
-    if (!p.vertical || !lines.length) return null;
-    const T = titleLayer(env), face = T && T.font ? `"${T.font}", ${fonts.serif}` : fonts.serif, B = songBox(ctx, env, box);
-    const full = titleBlockVertical(ctx, title, B, face, 900, 300);
-    let fs = subtitleSize(full ? full.fs : Infinity, env.w, env.h), block = null, titleBox = B;
-    // its columns as wide as they are set (each a pitch, less the last one's air), then the gap to the title's
-    const place = () => { const cols = lines.length * fs * 1.32 - fs * 0.32, room = cols + fs * 0.8; titleBox = { ...B, x: B.x + room, w: Math.max(120, B.w - room) }; block = titleBlockVertical(ctx, title, titleBox, face, 900, 300); return cols; };
-    let cols = place();
-    if (block && fs > block.fs * SUB.most) { fs = block.fs * SUB.most; cols = place(); }   // smaller than the title, always
-    const x = block ? block.x - fs * 0.8 - cols : B.x, down = block ? block.fs : 0;
-    // the box a pitch per column wide, as drawTitleVertical sizes columns to fit it
-    const sbox = { x, y: B.y + down, w: lines.length * fs * 1.32, h: Math.max(fs * 2, B.h - down) };
-    return { vertical: true, fs, titleBox, box: sbox, ink: titleBlockVertical(ctx, sub, sbox, face, 700, fs), face: (f) => f.serif, weight: 700, fill: css(SONG.ink), hi: css(SONG.red) };
-  },
-  /** Horizontal lettering (the title when not vertical, text layers): plain ink, highlighted words in vermilion. */
+  columnBox: (ctx, env, box) => songBox(ctx, env, box),
+  /** Lettering (the title, in columns or not, text layers): plain ink, highlighted words in vermilion. */
   runs(ctx, pass, o) {
     upright(ctx);
     pass((a, x) => { ctx.fillStyle = css(a.hi ? o.hi || SONG.red : o.fill || SONG.ink); ctx.fillText(a.t, x, 0); });
@@ -1848,7 +1844,7 @@ const vivid = {
     if (depth > 0) {
       const steps = fast ? 3 : Math.max(2, Math.min(10, Math.round(depth / (fs * 0.009))));
       ctx.fillStyle = ctx.strokeStyle = css(VV.navy); ctx.lineWidth = line;
-      for (let i = steps; i >= 1; i--) { const d = (depth * i) / steps; pass((a, x) => { if (line > 0) ctx.strokeText(a.t, x + d, d); ctx.fillText(a.t, x + d, d); }); }
+      for (let i = steps; i >= 1; i--) { const [dx, dy] = fall((depth * i) / steps, (depth * i) / steps); pass((a, x) => { if (line > 0) ctx.strokeText(a.t, x + dx, dy); ctx.fillText(a.t, x + dx, dy); }); }
     }
     if (line > 0) { ctx.strokeStyle = css(VV.navy); ctx.lineWidth = line; pass((a, x) => ctx.strokeText(a.t, x, 0)); }
     pass((a, x) => { ctx.fillStyle = css(a.hi ? hiFace : face); ctx.fillText(a.t, x, 0); });
@@ -1858,8 +1854,8 @@ const vivid = {
   },
   /** The plate under a text layer: a rounded card with an indigo line and a hard indigo shadow. */
   plate(ctx, x, y, w, h, colour, fs) {
-    const r = Math.min(h / 2, fs * 0.3), d = fs * 0.08;
-    ctx.beginPath(); rounded(ctx, x + d, y + d, w, h, r); ctx.fillStyle = css(VV.navy); ctx.fill();
+    const r = Math.min(h / 2, fs * 0.3), [dx, dy] = fall(fs * 0.08, fs * 0.08);
+    ctx.beginPath(); rounded(ctx, x + dx, y + dy, w, h, r); ctx.fillStyle = css(VV.navy); ctx.fill();
     ctx.beginPath(); rounded(ctx, x, y, w, h, r); ctx.fillStyle = colour; ctx.fill();
     ctx.lineWidth = fs * 0.05; ctx.strokeStyle = css(VV.navy); ctx.stroke();
   },
@@ -1877,9 +1873,9 @@ const vivid = {
    */
   tag(ctx, str, x, y, fs, C, p, ink) {
     ctx.font = `700 ${fs}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-    const w = spacedW(ctx, str, 3) + fs * 1.75, h = fs * 1.34, pill = (dx) => { ctx.beginPath(); rounded(ctx, x + dx, y + dx, w, h, h / 2); };
-    pill(6); ctx.fillStyle = css(VV.navy); ctx.fill();
-    pill(0); ctx.fillStyle = css(VV.cream); ctx.fill(); ctx.lineWidth = 4.5; ctx.strokeStyle = css(VV.navy); ctx.stroke();
+    const w = spacedW(ctx, str, 3) + fs * 1.75, h = fs * 1.34, pill = ([dx, dy]) => { ctx.beginPath(); rounded(ctx, x + dx, y + dy, w, h, h / 2); };
+    pill(fall(6, 6)); ctx.fillStyle = css(VV.navy); ctx.fill();
+    pill([0, 0]); ctx.fillStyle = css(VV.cream); ctx.fill(); ctx.lineWidth = 4.5; ctx.strokeStyle = css(VV.navy); ctx.stroke();
     ctx.beginPath(); ctx.arc(x + h * 0.52, y + h / 2, fs * 0.17, 0, TAU); ctx.fillStyle = css(boost(C)); ctx.fill(); ctx.lineWidth = 3; ctx.stroke();
     ctx.fillStyle = ink || css(VV.navy); spaced(ctx, str, x + h * 0.52 + fs * 0.42, y + h * 0.5 + fs * 0.36, 3);
     return { x: x - 6, y: y - 6, w: w + 18, h: h + 18 };
@@ -1922,12 +1918,23 @@ function starMark(ctx, x, y, r, points, colour) {
  * title layer is not counted.
  */
 function titleArea(ctx, env) {
-  const T = titleLayer(env), box = titleBase(env);
-  if (!T || !box || typeof ctx.measureText !== "function") return null;
-  const face = current.titleFont ? current.titleFont(fonts) : fonts.cn;
+  const T = titleLayer(env), base = titleBase(env);
+  if (!T || !base || typeof ctx.measureText !== "function") return null;
+  const face = current.titleFont ? current.titleFont(fonts) : fonts.cn, font = T.font ? `"${T.font}", ${face}` : face, s = env.sub;
+  const reserve = s && !s.vertical ? s.reserve : 0, box = s && s.titleBox ? s.titleBox : columned(T) ? columnBoxOf(ctx, env, base) : base;
+  if (columned(T)) return withSub(titleBlockVertical(ctx, env.cover.title, { ...box, h: box.h - Math.min(reserve, box.h * 0.5) }, font, 900, 300, !!T.rules), env);
   const bend = T.bend ? { id: T.bend, amt: T.bendAmt ?? 1, own: T.bend === "taper" && !!T.warp } : null;
-  return withSub(titleBlock(ctx, env.cover.title, box, T.font ? `"${T.font}", ${face}` : face, 340, env.sub && !env.sub.vertical ? env.sub.reserve : 0, bend), env);
+  return withSub(titleBlock(ctx, env.cover.title, box, font, 340, reserve, bend), env);
 }
+/**
+ * Whether lettering layer L is set in columns (see drawTitleVertical in title.js): when the user set it so, its
+ * `vertical`; the title and the subtitle also when the look sets them so of itself (its `columns`: the woodblock
+ * book's Set the title vertically), which is the look's default and not the layer's — a title the user set vertical
+ * is in columns in every look.
+ */
+export const columned = (L) => !!L && (L.vertical === true || ((L.type === "title" || L.type === "subtitle") && !!(current.columns && current.columns(values))));
+/** The box the title's columns stand in, from the box the layout gives the title: the look's own place for them (its `columnBox`), else that box. */
+export const columnBoxOf = (ctx, env, box) => (current.columnBox ? current.columnBox(ctx, env, box) : box);
 /** Block b and the block the subtitle's words fill (when there is one: see subtitlePlan in render.js) together. */
 function withSub(b, env) {
   const s = env.sub && (env.sub.ink || env.sub.box);
@@ -2763,7 +2770,7 @@ const monofilm = {
   runs(ctx, pass, o) {
     upright(ctx);
     const fs = o.fs, ink = o.fill || mfInk(), hi = o.hi || o.C || MF.white, soft = Math.min(2, o.shadowAmt);
-    if (soft > 0 && !fast) { ctx.save(); ctx.shadowColor = css(ink, 0.65); ctx.shadowBlur = fs * 0.14 * soft; ctx.globalAlpha = 0.6; pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x + fs * 0.02 * soft, 0); }); ctx.restore(); }
+    if (soft > 0 && !fast) { const [sx, sy] = fall(fs * 0.02 * soft, 0); ctx.save(); ctx.shadowColor = css(ink, 0.65); ctx.shadowBlur = fs * 0.14 * soft; ctx.globalAlpha = 0.6; pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x + sx, sy); }); ctx.restore(); }
     pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x, 0); });
   },
   wrap: (ctx, C, p, plates) => mapped(ctx, plates
@@ -2925,7 +2932,7 @@ const typo = {
     const cuts = p.slice > 0 ? Math.round(1 + 3 * p.slice) : 0, slope = -0.06, L0 = -fs, L1 = right + fs;
     const lines = Array.from({ length: cuts }, (_, k) => -fs * 0.82 + fs * 0.86 * ((k + 0.5 + (rand(k * 3.7 + 390) - 0.5) * 0.5) / cuts));
     const letters = (c) => {
-      if (p.echo > 0) for (let i = Math.round(1 + 4 * p.echo); i >= 1; i--) paint(c, 0, -i * fs * 0.11 * (0.5 + p.echo), (0.32 * p.echo) / i);
+      if (p.echo > 0) for (let i = Math.round(1 + 4 * p.echo); i >= 1; i--) paint(c, ...fall(0, -i * fs * 0.11 * (0.5 + p.echo)), (0.32 * p.echo) / i);   // up the page, in a column too
       if (!cuts) return paint(c, 0, 0);
       for (let k = 0; k <= cuts; k++) {   // band k lies between cut k-1 and cut k
         const top = k ? lines[k - 1] : -fs * 3, bot = k < cuts ? lines[k] : fs * 3, shift = (k % 2 ? 1 : -1) * fs * (0.03 + 0.09 * p.slice) * (0.6 + rand(k * 5.1 + 391) * 0.8);
@@ -3159,8 +3166,8 @@ const toon = {
   /** Bold condensed capitals, flat, with a shadow a little off in a deeper tone of the ground, as a print's second colour; highlighted words in sun yellow or coral. */
   runs(ctx, pass, o) {
     upright(ctx);
-    const fs = o.fs, C = o.C || TOON.coral, ground = toonGround(C), hi = o.hi || (lum(ground) > 0.55 ? TOON.coral : TOON.sun), d = fs * 0.045 * Math.min(2, o.shadowAmt);
-    if (d > 0) pass((a, x) => { ctx.fillStyle = css(mix(ground, TOON.ink, 0.55)); ctx.fillText(a.t, x + d, d); });
+    const fs = o.fs, C = o.C || TOON.coral, ground = toonGround(C), hi = o.hi || (lum(ground) > 0.55 ? TOON.coral : TOON.sun), d = fs * 0.045 * Math.min(2, o.shadowAmt), [dx, dy] = fall(d, d);
+    if (d > 0) pass((a, x) => { ctx.fillStyle = css(mix(ground, TOON.ink, 0.55)); ctx.fillText(a.t, x + dx, dy); });
     pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : o.fill || toonText(C)); ctx.fillText(a.t, x, 0); });
   },
   wrap: (ctx, C, p, plates) => mapped(ctx, plates
@@ -4594,8 +4601,8 @@ const court = {
   /** Heavy condensed capitals with a second colour set off a little behind them, as on a jersey (the shadow slider); highlighted words in ball orange. */
   runs(ctx, pass, o) {
     upright(ctx);
-    const fs = o.fs, team = bbTeam(o.C || BB.royal), d = fs * 0.05 * Math.min(2, o.shadowAmt);
-    if (d > 0) pass((a, x) => { ctx.fillStyle = css(a.hi ? BB.seam : team); ctx.fillText(a.t, x + d, d); });
+    const fs = o.fs, team = bbTeam(o.C || BB.royal), d = fs * 0.05 * Math.min(2, o.shadowAmt), [dx, dy] = fall(d, d);
+    if (d > 0) pass((a, x) => { ctx.fillStyle = css(a.hi ? BB.seam : team); ctx.fillText(a.t, x + dx, dy); });
     pass((a, x) => { ctx.fillStyle = css(a.hi ? o.hi || BB.orange : o.fill || bbInk()); ctx.fillText(a.t, x, 0); });
   },
   wrap: (ctx, C, p, plates) => (plates ? ctx : mapped(ctx, { fill: { ink: BB.ink, light: BB.white }, stroke: { ink: BB.ink, light: BB.white }, line: 0.8 })),
@@ -5282,7 +5289,7 @@ const netart = {
     upright(ctx);
     const fs = o.fs, d = fs * 0.025 * Math.min(2, o.shadowAmt), ink = o.fill || naInk();
     if (!o.hiPlate) pass((a, x) => { if (a.hi) { ctx.fillStyle = css(o.hi || NA.navy); ctx.fillRect(x - fs * 0.03, -fs * 0.88, ctx.measureText(a.t).width + fs * 0.06, fs * 1.04); } });   // a selection box (unless the layer has plates of its own under them)
-    if (d > 0) { ctx.save(); ctx.globalAlpha = 0.85; ctx.globalCompositeOperation = dark ? "screen" : "multiply"; for (const [s, c] of [[-1, [0, 220, 255]], [1, [255, 0, 170]]]) pass((a, x) => { if (!a.hi) { ctx.fillStyle = css(c); ctx.fillText(a.t, x + s * d, 0); } }); ctx.restore(); }
+    if (d > 0) { ctx.save(); ctx.globalAlpha = 0.85; ctx.globalCompositeOperation = dark ? "screen" : "multiply"; for (const [s, c] of [[-1, [0, 220, 255]], [1, [255, 0, 170]]]) { const [dx, dy] = fall(s * d, 0); pass((a, x) => { if (!a.hi) { ctx.fillStyle = css(c); ctx.fillText(a.t, x + dx, dy); } }); } ctx.restore(); }
     pass((a, x) => { ctx.fillStyle = css(a.hi ? (o.hiPlate ? o.hi || NA.light : NA.light) : ink); ctx.fillText(a.t, x, 0); });
   },
   wrap: (ctx, C, p, plates) => (plates ? ctx : mapped(ctx, { fill: { ink: NA.ink, light: NA.light, mid: NA.silver, dark: NA.deep }, stroke: { ink: NA.ink, light: NA.light }, line: 0.6 })),
@@ -5655,8 +5662,9 @@ const verse = {
     const fs = o.fs, d = fs * 0.07 * Math.min(2, o.shadowAmt), ink = o.fill || vsInk(), hi = o.hi || VS.yellow;
     if (d > 0) {
       ctx.save();
-      ctx.fillStyle = canPaint(ctx) ? dotPattern(ctx, VS.magenta, Math.max(3, fs * 0.045)) : css(VS.magenta); pass((a, x) => ctx.fillText(a.t, x + d, d));
-      ctx.globalAlpha = 0.85; ctx.fillStyle = css(VS.cyan); pass((a, x) => ctx.fillText(a.t, x - d * 0.35, -d * 0.2));
+      const [mx, my] = fall(d, d), [cx, cy] = fall(-d * 0.35, -d * 0.2);   // the two inks off register as the page has them
+      ctx.fillStyle = canPaint(ctx) ? dotPattern(ctx, VS.magenta, Math.max(3, fs * 0.045)) : css(VS.magenta); pass((a, x) => ctx.fillText(a.t, x + mx, my));
+      ctx.globalAlpha = 0.85; ctx.fillStyle = css(VS.cyan); pass((a, x) => ctx.fillText(a.t, x + cx, cy));
       ctx.restore();
     }
     ctx.lineJoin = "round"; ctx.strokeStyle = css(VS.ink); ctx.lineWidth = fs * 0.08;
@@ -5670,7 +5678,8 @@ const verse = {
     const f = fs * 0.62;
     ctx.font = `900 ${f}px ${fonts.en}, ${fonts.cn}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
     const w = spacedW(ctx, str, 3) + f * 1.3, h = f * 1.5, top = y + (fs * 1.34 - h);
-    ctx.fillStyle = css(VS.ink); ctx.fillRect(x + 5, top + 5, w, h);
+    const [sx, sy] = fall(5, 5);
+    ctx.fillStyle = css(VS.ink); ctx.fillRect(x + sx, top + sy, w, h);
     ctx.fillStyle = css(VS.yellow); ctx.fillRect(x, top, w, h); ctx.strokeStyle = css(VS.ink); ctx.lineWidth = 3; ctx.strokeRect(x, top, w, h);
     ctx.fillStyle = ink || css(VS.ink); spaced(ctx, str, x + f * 0.65, top + h * 0.5 + f * 0.36, 3);
     return { x: x - 4, y: top - 4, w: w + 10, h: h + 10 };
@@ -6609,7 +6618,7 @@ const spectrum = {
   runs(ctx, pass, o) {
     upright(ctx);
     const fs = o.fs, s = Math.min(2, o.shadowAmt), ink = o.fill || spInk(), n = Math.round(3 + 4 * s);
-    if (s > 0) for (let i = n; i >= 1; i--) { ctx.fillStyle = css(spec(i / n)); pass((a, x) => ctx.fillText(a.t, x + fs * 0.008 * i, fs * 0.014 * i)); }
+    if (s > 0) for (let i = n; i >= 1; i--) { const [dx, dy] = fall(fs * 0.008 * i, fs * 0.014 * i); ctx.fillStyle = css(spec(i / n)); pass((a, x) => ctx.fillText(a.t, x + dx, dy)); }
     pass((a, x) => {
       if (a.hi && !o.hi) { const r = a.run || { x0: x, x1: x + ctx.measureText(a.t).width }, g = ctx.createLinearGradient(r.x0, 0, r.x1, 0); for (let i = 0; i <= 6; i++) g.addColorStop(i / 6, css(spec(i / 7))); ctx.fillStyle = g; }   // across the whole run
       else ctx.fillStyle = css(a.hi ? o.hi : ink);
@@ -7054,8 +7063,9 @@ const citypop = {
     const fs = o.fs, s = Math.min(2, o.shadowAmt), k = o.strokeAmt, hi = o.hi || mix(boost(o.C || CP.pink, 0.6), [255, 255, 255], 0.2);
     ctx.lineJoin = "round";
     if (s > 0) {
-      pass((a, x) => { ctx.fillStyle = css(CP.line); ctx.fillText(a.t, x + fs * 0.075 * s, fs * 0.075 * s); });
-      pass((a, x) => { ctx.fillStyle = css(a.hi ? CP.cyan : CP.pink); ctx.fillText(a.t, x + fs * 0.038 * s, fs * 0.038 * s); });
+      const [fx, fy] = fall(fs * 0.075 * s, fs * 0.075 * s), [nx, ny] = fall(fs * 0.038 * s, fs * 0.038 * s);
+      pass((a, x) => { ctx.fillStyle = css(CP.line); ctx.fillText(a.t, x + fx, fy); });
+      pass((a, x) => { ctx.fillStyle = css(a.hi ? CP.cyan : CP.pink); ctx.fillText(a.t, x + nx, ny); });
     }
     if (k > 0) pass((a, x) => { ctx.strokeStyle = css(CP.line); ctx.lineWidth = fs * 0.1 * k; ctx.strokeText(a.t, x, 0); });
     let grad = null;
@@ -7375,7 +7385,8 @@ const construct = {
   runs(ctx, pass, o) {
     upright(ctx);
     const fs = o.fs, s = Math.min(2, o.shadowAmt), ink = o.fill || cnInk(), red = cnRed(o.C), hi = o.hi || red;
-    if (s > 0) pass((a, x) => { ctx.fillStyle = css(a.hi ? cnInk() : red); ctx.fillText(a.t, x + fs * 0.035 * s, fs * 0.035 * s); });
+    const [dx, dy] = fall(fs * 0.035 * s, fs * 0.035 * s);
+    if (s > 0) pass((a, x) => { ctx.fillStyle = css(a.hi ? cnInk() : red); ctx.fillText(a.t, x + dx, dy); });
     pass((a, x) => { ctx.fillStyle = css(a.hi ? hi : ink); ctx.fillText(a.t, x, 0); });
   },
   wrap: (ctx, C, p, plates) => (plates ? ctx : mapped(ctx, { fill: { ink: CN.ink, light: CN.light, mid: CN.greys[1], dark: CN.greys[3], colour: (c) => (sat(c) > 0.3 ? cnRed(C, p) : grey(c)) }, stroke: { ink: CN.ink, light: CN.light }, line: 0.6 })),
@@ -8021,7 +8032,7 @@ const deco = {
     if (s > 0) {   // the shade: the letters' depth stepped down behind them, in the night's darkest blue
       const d = fs * 0.045 * s, k0 = Math.hypot(ctx.getTransform().a, ctx.getTransform().b), n = Math.max(2, Math.min(10, Math.round((d * k0) / 1.5)));
       ctx.fillStyle = css(shade);
-      for (let i = n; i >= 1; i--) each((c, x) => ctx.fillText(c.t, x + (d * i) / n * 0.6, (d * i) / n));
+      for (let i = n; i >= 1; i--) { const [dx, dy] = fall((d * i) / n * 0.6, (d * i) / n); each((c, x) => ctx.fillText(c.t, x + dx, dy)); }
     }
     // their light thrown round them, added to what is there rather than laid over it: the lamps' warm glow, the neon's own colour
     if (lamp) { glowOf(Mp, css(lamp.glow, 0.42), fs * 0.55, 0, true); glowOf(Mp, css(lamp.glow, 0.6), fs * 0.11, 0, true); }
@@ -8086,7 +8097,8 @@ const deco = {
   /** The plate under a text layer: a black slab with its corners stepped in, ruled in gold. */
   plate(ctx, x, y, w, h, colour, fs) {
     const s = fs * 0.08, pts = [[x + s, y], [x + w - s, y], [x + w - s, y + s], [x + w, y + s], [x + w, y + h - s], [x + w - s, y + h - s], [x + w - s, y + h], [x + s, y + h], [x + s, y + h - s], [x, y + h - s], [x, y + s], [x + s, y + s]];
-    ctx.save(); ctx.translate(fs * 0.05, fs * 0.07); shapeOf(ctx, pts); ctx.fillStyle = css(DK.ink, 0.85); ctx.fill(); ctx.restore();
+    ctx.save(); ctx.translate(...fall(fs * 0.05, fs * 0.07)); shapeOf(ctx, pts); ctx.fillStyle = css(DK.ink, 0.85); ctx.fill(); ctx.restore();
+
     shapeOf(ctx, pts); ctx.fillStyle = colour; ctx.fill(); ctx.lineJoin = "miter"; ctx.lineWidth = fs * 0.03; ctx.strokeStyle = css(DK.gold); ctx.stroke();
   },
   image(ctx, C, unit) { ctx.shadowColor = css(DK.ink, 0.8); ctx.shadowBlur = 0; ctx.shadowOffsetX = 7 * unit; ctx.shadowOffsetY = 9 * unit; },
