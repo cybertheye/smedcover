@@ -1,11 +1,12 @@
 // Glyph outlines for the text effects that reshape letters.
 //
-// The outlines come from the native side (which can read font files); asking for them takes a
-// moment, while drawing cannot wait. So outline() answers at once from a cache — null the first
-// time, when it also sends for the outline — and tells the app when one has arrived, to redraw.
+// The outlines come from the native side (which can read font files: the app's, or a SmedCover
+// server's); asking for them takes a moment, while drawing cannot wait. So outline() answers at once
+// from a cache — null the first time, when it also sends for the outline — and tells the app when one
+// has arrived, to redraw.
 // Without the native side (the interface open in a plain browser) there are no outlines, and the
 // effects that need them fall back to ordinary lettering.
-import { native, invoke } from "./store.js";
+import { CAN, invoke } from "./store.js";
 
 const cache = new Map(), pending = new Map();
 let arrived = () => {};
@@ -27,7 +28,7 @@ export function parseFont(font) {
  * side), false when it cannot be had, or null while it is on its way.
  */
 export function outline(font, text) {
-  if (!native || !text) return false;
+  if (!CAN.outlines || !text) return false;
   const key = font.replace(/[\d.]+px/, "px") + "\n" + text;   // outlines are in ems: the size does not matter
   if (cache.has(key)) return cache.get(key);
   if (!pending.has(key)) {

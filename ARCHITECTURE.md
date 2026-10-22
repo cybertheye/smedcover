@@ -1134,11 +1134,41 @@ folder of the data directory in the file manager — only inside the data direct
 (takes the system pointer to a place in the window's content, in logical pixels: a scene object's
 "take me to its handle").
 
-## 11. Browser fallback
+## 11. Hosts, what each can do, and the layout
 
-The `files` object in `store.js` has two implementations: with Tauri it calls the commands above;
-without it, it falls back to `localStorage`, and exports become browser downloads. So the interface
-can be developed from a static server:
+The same interface runs in three places, its **host** (`HOST` in `store.js`), told apart as the page loads:
+
+| `HOST` | how it is told | `invoke(cmd, args, options)` |
+|---|---|---|
+| `"tauri"` | `window.__TAURI__` is there: the desktop app (or one day an app on a phone) | Tauri's own |
+| `"server"` | the page a SmedCover server sent sets `window.SMEDCOVER_SERVER = { api }` before the modules load | `httpInvoke()`: POST `<api>/invoke/<cmd>` |
+| `"browser"` | neither: the page on its own | none: a rejected promise |
+
+`httpInvoke()` sends the arguments as JSON, or a binary body (a photo's bytes) as it is with
+`options.headers`, and reads JSON back (a JSON content type; empty, or 204, is null), else bytes (an
+`ArrayBuffer`: a mask, a font), as Tauri hands them; an error answer is thrown as its text, as Tauri's are. The
+commands that only read (`app_read`, `app_list`, the fonts, `text_outline`, `cut_models`) are asked again,
+twice, after 0.4 s and 1.2 s, when the server cannot be reached or answers 502–504; a write never is. So the
+commands above keep their names and their arguments whatever the host; a server answers them from its own data
+folder, fonts and models. What it owes the page besides: to refuse the commands that are the app's alone
+(`reveal_data_dir`, `pick_folder`, `save_image`, `save_text`, `move_pointer`, the self-test's), to let only its
+user in, and to keep `ai_request` and `fetch_image` from being a relay for anyone.
+
+What the interface offers goes by what the host can do, `CAN`, not by which host it is: `files` (the data
+folder; else `localStorage`), `fonts` (installed fonts and their files), `outlines` (glyph outlines, the outline
+text effects), `cut` (cutting a subject out), `relay` (AI requests past the browser's cross-origin rules) — all
+three hosts but the plain page — and `saveFiles` (exports and files written where the user picks on this
+computer; else downloads), `folders` (the system's folder dialogs and file manager), `pointer`
+(`move_pointer`), `selftest`, the app's alone. `native` is `HOST === "tauri"`. A capability missing is said
+where it would be used (the outline effects, the cut-out); the progress of a cut-out model's download comes
+by Tauri's events, so only in the app for now.
+
+The layout goes by the screen, not by the host: `arrange()` (`app.js`) sets `data-layout` on the body, "desk"
+(the three columns) or "phone" for a narrow touch screen (`(max-width: 760px) and (pointer: coarse)`), whose
+own arrangement is to come under `body[data-layout="phone"]`; `?layout=phone` or `desk` in the address
+chooses one, to work on it at a desk.
+
+So the interface can still be developed from a static server (the `"browser"` host):
 
 ```bash
 python3 -m http.server -d ui 4599

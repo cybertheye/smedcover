@@ -5,8 +5,9 @@
 //   assets   pictures the user uploaded (shared by all profiles)
 //   settings app-level preferences: language, active profile, export options
 //
-// In the desktop app everything lives in the app data directory (through the Rust side); when the
-// page is opened in a plain browser it falls back to localStorage so the UI can still be developed.
+// In the desktop app everything lives in the app data directory (through the Rust side), and so it does on a
+// SmedCover server, whose page reaches the same commands over HTTP (see HOST); when the page is opened in a
+// plain browser it falls back to localStorage so the UI can still be developed.
 import { SIZE_PRESETS } from "./presets.js";
 import { platformsFor, ratioOf } from "./platforms.js";
 import { TEMPLATES, LAYOUT_LIMITS } from "./layout.js";
@@ -14,11 +15,62 @@ import { LOOKS, LOOK_IDS, lookParams } from "./style.js";
 import { normalizeLayers, normalizeScene } from "./layers.js";
 
 const T = globalThis.__TAURI__;
-export const native = !!T;
-export const invoke = (cmd, args, options) => T.core.invoke(cmd, args, options);
+/**
+ * Where the interface runs: "tauri", in the app (the desktop's, or one day a phone's), which answers the native
+ * commands itself; "server", a page a SmedCover server sent, which sets `window.SMEDCOVER_SERVER` ({api}, where
+ * its commands are, "/api" when left out) before the modules load and answers the same commands over HTTP;
+ * "browser", the page on its own, with no native side at all.
+ */
+export const HOST = T ? "tauri" : globalThis.SMEDCOVER_SERVER ? "server" : "browser";
+/** Whether this is the app itself (its windows, its dialogs, this computer's disk). */
+export const native = HOST === "tauri";
+/**
+ * What the host can do, for the interface to offer it or say why not: `files` keeps profiles and covers as
+ * files in the data folder (else in this browser's storage); `fonts` reads the fonts installed there, and their
+ * files; `outlines` traces glyph outlines (the outline text effects); `cut` cuts a photo's subject out; `relay`
+ * sends requests to AI services past the browser's cross-origin rules; `saveFiles` writes exports and files
+ * where the user chooses on this computer (else they are downloaded); `folders` shows the data folder or picks
+ * one in the system's dialogs; `pointer` moves the mouse pointer; `selftest` runs the self-test.
+ */
+export const CAN = Object.freeze({
+  files: HOST !== "browser", fonts: HOST !== "browser", outlines: HOST !== "browser", cut: HOST !== "browser", relay: HOST !== "browser",
+  saveFiles: native, folders: native, pointer: native, selftest: native,
+});
+/** The commands that only read: asked again, twice, after a moment, when the server cannot be reached or is briefly away (502–504). */
+const READS = new Set(["app_read", "app_list", "list_system_fonts", "font_faces", "font_data", "text_outline", "cut_models"]);
+/**
+ * A command of the native side asked of a SmedCover server: POST <api>/invoke/<cmd>, the arguments as JSON — or a
+ * binary body (a photo's bytes) as it is, with `options.headers`. The answer: JSON (a JSON content type; an empty
+ * one, or 204, is null), else bytes (an ArrayBuffer: a picture, a font), as Tauri hands them back; an error answer
+ * is thrown as its text, as Tauri's are. `send` is fetch and `pause` a timer (others for the tests).
+ */
+export async function httpInvoke(server, cmd, args, options = {}, send = globalThis.fetch, pause = (ms) => new Promise((r) => setTimeout(r, ms))) {
+  const raw = args instanceof ArrayBuffer || ArrayBuffer.isView(args), again = READS.has(cmd);
+  const init = {
+    method: "POST", credentials: "same-origin",
+    headers: raw ? { ...(options.headers || {}), "content-type": "application/octet-stream" } : { "content-type": "application/json" },
+    body: raw ? args : JSON.stringify(args ?? {}),
+  };
+  let res;
+  for (let n = 0; ; n++) {
+    try { res = await send(`${(server && server.api) || "/api"}/invoke/${encodeURIComponent(cmd)}`, init); }
+    catch (e) { if (again && n < 2) { await pause(400 * 3 ** n); continue; } throw `${cmd}: ${(e && e.message) || e}`; }
+    if (again && n < 2 && [502, 503, 504].includes(res.status)) { await pause(400 * 3 ** n); continue; }
+    break;
+  }
+  if (!res.ok) throw await res.text();
+  if (res.status === 204) return null;
+  if (/json/.test(res.headers.get("content-type") || "")) { const text = await res.text(); return text ? JSON.parse(text) : null; }
+  const bytes = await res.arrayBuffer();
+  return bytes.byteLength ? bytes : null;
+}
+/** Asks the native side to run command `cmd` (see HOST): Tauri's invoke, the server's over HTTP, or nothing to ask. */
+export const invoke = HOST === "tauri" ? (cmd, args, options) => T.core.invoke(cmd, args, options)
+  : HOST === "server" ? (cmd, args, options) => httpInvoke(globalThis.SMEDCOVER_SERVER, cmd, args, options)
+  : (cmd) => Promise.reject(`${cmd}: there is no native side in a plain browser`);
 
 const LS = "smedcover:";
-export const files = native
+export const files = CAN.files
   ? {
       read: (path) => invoke("app_read", { path }),
       write: (path, data) => invoke("app_write", { path, data }),

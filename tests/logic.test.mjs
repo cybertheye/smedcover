@@ -2551,3 +2551,42 @@ test("weaving: copied from another channel, a cut-out weaves with the copies of 
   assert.deepEqual(cut.weave, { with: ["title", id("t1"), id("s2")], by: "letters", line: 0.3, front: { title: ["0|A|1"], [id("t1")]: ["0|h|1"], [id("s2")]: ["0|x|1"] } });
   assert.deepEqual(from.find((l) => l.id === "b").weave.with, ["title", "t1", "s2", "gone"], "the cover copied from is left as it was");
 });
+
+test("the host: the app answers the native commands itself, a SmedCover server over HTTP, a plain page not at all; what each can do follows", async () => {
+  const here = await import("../ui/js/store.js");
+  assert.deepEqual([here.HOST, here.native, here.CAN.files, here.CAN.outlines, here.CAN.saveFiles], ["browser", false, false, false, false]);
+  await assert.rejects(here.invoke("app_read", { path: "x" }), /no native side/);
+  // a page a server sent: the commands over HTTP, the data folder and outlines there, nothing written on this computer
+  globalThis.SMEDCOVER_SERVER = { api: "/x/api" };
+  try {
+    const srv = await import("../ui/js/store.js?server");
+    assert.deepEqual([srv.HOST, srv.native, srv.CAN.files, srv.CAN.fonts, srv.CAN.outlines, srv.CAN.cut, srv.CAN.relay, srv.CAN.saveFiles, srv.CAN.folders, srv.CAN.selftest],
+      ["server", false, true, true, true, true, true, false, false, false]);
+    const was = globalThis.fetch, asked = [];
+    globalThis.fetch = async (url, init) => { asked.push([url, init.body]); return { ok: true, status: 200, headers: { get: () => "application/json" }, text: async () => '"saved"' }; };
+    try { assert.equal(await srv.files.read("settings.json"), "saved"); } finally { globalThis.fetch = was; }
+    assert.deepEqual(asked, [["/x/api/invoke/app_read", '{"path":"settings.json"}']], "the files through the server's commands");
+  } finally { delete globalThis.SMEDCOVER_SERVER; }
+  // the request: JSON arguments, or bytes as they are with the headers given; the answer: JSON, bytes, nothing, or an error's text thrown
+  const { httpInvoke } = here, sent = [];
+  const answer = (status, type, body) => async (url, init) => { sent.push([url, init]); return { ok: status < 400, status, headers: { get: () => type }, json: async () => JSON.parse(body), text: async () => body, arrayBuffer: async () => new TextEncoder().encode(body).buffer }; };
+  assert.deepEqual(await httpInvoke({ api: "/api" }, "app_list", { dir: "covers" }, {}, answer(200, "application/json", '["a.json"]')), ["a.json"]);
+  assert.deepEqual([sent[0][0], sent[0][1].method, sent[0][1].headers["content-type"], sent[0][1].body], ["/api/invoke/app_list", "POST", "application/json", '{"dir":"covers"}']);
+  const bytes = new Uint8Array([1, 2, 3]), got = await httpInvoke(null, "subject_mask_onnx", bytes, { headers: { "x-model": "birefnet" } }, answer(200, "application/octet-stream", "PNG"));
+  assert.ok(got instanceof ArrayBuffer && new TextDecoder().decode(got) === "PNG");
+  assert.deepEqual([sent[1][0], sent[1][1].body, sent[1][1].headers["x-model"], sent[1][1].headers["content-type"]], ["/api/invoke/subject_mask_onnx", bytes, "birefnet", "application/octet-stream"]);
+  assert.equal(await httpInvoke({}, "app_write", { path: "p", data: "d" }, {}, answer(204, "", "")), null);
+  await assert.rejects(httpInvoke({}, "app_read", { path: "../x" }, {}, answer(400, "text/plain", "path outside the data folder")), (e) => e === "path outside the data folder");
+  assert.equal(await httpInvoke({}, "app_write", { path: "p", data: "d" }, {}, answer(200, "application/json", "")), null, "an empty answer is nothing");
+  assert.ok((await httpInvoke({}, "subject_mask_onnx", bytes, {}, answer(200, "image/png", "PNG"))) instanceof ArrayBuffer, "a picture comes back as bytes, whatever its type");
+  // a read is asked again when the server cannot be reached or is briefly away; a write is not
+  const flaky = (fails) => { let n = 0; return async (url, init) => { n++; if (n <= fails) { if (fails === 9) return { ok: false, status: 503, headers: { get: () => "text/plain" }, text: async () => "away" }; throw new TypeError("Failed to fetch"); } return answer(200, "application/json", '"there"')(url, init); }; };
+  const naps = [], nap = async (ms) => { naps.push(ms); };
+  assert.equal(await httpInvoke({}, "app_read", { path: "p" }, {}, flaky(2), nap), "there");
+  assert.deepEqual(naps, [400, 1200]);
+  await assert.rejects(httpInvoke({}, "app_read", { path: "p" }, {}, flaky(3), nap), /app_read: Failed to fetch/, "not for ever");
+  await assert.rejects(httpInvoke({}, "app_read", { path: "p" }, {}, flaky(9), nap), (e) => e === "away", "a 503 asked again, then given up");
+  naps.length = 0;
+  await assert.rejects(httpInvoke({}, "app_write", { path: "p", data: "d" }, {}, flaky(1), nap), /app_write: Failed to fetch/);
+  assert.deepEqual(naps, [], "a write is never sent twice");
+});

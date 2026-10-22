@@ -678,9 +678,23 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 `pick_folder`、`save_text`（导出档案、工程、CSV 模板）、`list_system_fonts`（用 fontdb 枚举系统字体，并标出能否排中文）、`reveal_data_dir`（在文件管理器里打开数据目录下的某个文件夹，只限数据目录内）、`move_pointer`（把系统指针移到窗口内容里的某个位置，逻辑像素：场景物件的「跳到拖拽点」）。
 
-## 11. 浏览器回退
+## 11. 宿主、能力和布局
 
-`store.js` 里的 `files` 对象有两种实现：有 Tauri 时调用上面的命令；没有时退回 `localStorage`，导出改为浏览器下载。因此可以直接用静态服务器打开界面做开发：
+同一套界面运行在三种地方，叫**宿主**（`store.js` 的 `HOST`），页面加载时识别：
+
+| `HOST` | 怎么识别 | `invoke(cmd, args, options)` |
+|---|---|---|
+| `"tauri"` | 有 `window.__TAURI__`：桌面应用（将来也可能是手机应用） | Tauri 自己的 |
+| `"server"` | SmedCover 服务器发来的页面，在模块加载前设好 `window.SMEDCOVER_SERVER = { api }` | `httpInvoke()`：POST `<api>/invoke/<cmd>` |
+| `"browser"` | 两者都没有：单独打开的页面 | 没有：返回一个被拒绝的 promise |
+
+`httpInvoke()` 把参数作为 JSON 发出，二进制内容（照片的字节）原样发出并带上 `options.headers`；回答是 JSON 类型就按 JSON 读（空的或 204 为 null），否则是字节（`ArrayBuffer`：遮罩、字体），和 Tauri 一样；出错时抛出回答的文字，也和 Tauri 一样。只读的命令（`app_read`、`app_list`、字体、`text_outline`、`cut_models`）在连不上服务器或回答 502–504 时，隔 0.4 秒、1.2 秒再问两次；写的命令从不重发。所以上面这些命令在哪个宿主下名字和参数都不变，服务器用它自己的数据目录、字体和模型来回答。服务器另外要做到：拒绝只属于应用的命令（`reveal_data_dir`、`pick_folder`、`save_image`、`save_text`、`move_pointer`、自检的命令），只让它的用户进来，不让 `ai_request`、`fetch_image` 成为谁都能用的转发。
+
+界面提供什么，看宿主能做什么（`CAN`），而不是看它是哪个宿主：`files`（数据目录，否则 `localStorage`）、`fonts`（已安装的字体及其文件）、`outlines`（字形轮廓，轮廓类字效）、`cut`（抠出主体）、`relay`（绕过浏览器跨域限制发 AI 请求）——除单独的页面外三种宿主都有；`saveFiles`（导出和文件写到这台电脑上用户选的位置，否则改为下载）、`folders`（系统的文件夹对话框和文件管理器）、`pointer`（`move_pointer`）、`selftest` 只有应用自己有。`native` 就是 `HOST === "tauri"`。缺少某种能力时，在用到它的地方说明（轮廓类字效、抠图）；抠图模型下载的进度靠 Tauri 的事件传来，所以目前只在应用里有。
+
+布局看屏幕，不看宿主：`arrange()`（`app.js`）在 body 上设 `data-layout`，"desk"（三栏）或窄触屏（`(max-width: 760px) and (pointer: coarse)`）的 "phone"，手机自己的排布以后写在 `body[data-layout="phone"]` 下；地址里加 `?layout=phone` 或 `desk` 可以指定，方便在电脑上做手机布局。
+
+因此仍可以直接用静态服务器打开界面做开发（`"browser"` 宿主）：
 
 ```bash
 python3 -m http.server -d ui 4599

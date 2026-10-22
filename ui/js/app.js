@@ -13,7 +13,7 @@ import { baseRecipe, FAMILIES, RULES, dealCover, coverScore, pickHand } from "./
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
 import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf } from "./layers.js";
 import {
-  carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
+  carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
   normalizeRecipes, SURPRISE_LOCKS, RECENT_KEPT,
 } from "./store.js";
@@ -205,7 +205,7 @@ function reachable(family, text = "封面Aa01") {
   return ["monospace", "serif"].some((g) => width(`${quoted(family)}, ${g}`) !== width(g));
 }
 function ensureFont(family) {
-  if (!native || !S.systemFonts.includes(family) || BUNDLED_FONTS.includes(family) || S.importedFonts.includes(family)) return null;
+  if (!CAN.fonts || !S.systemFonts.includes(family) || BUNDLED_FONTS.includes(family) || S.importedFonts.includes(family)) return null;
   if (!SYS_FACES.has(family)) SYS_FACES.set(family, invoke("font_faces", { family }).then(async ({ probe: text, weights }) => {
     if (!text || reachable(family, text)) return false;
     // every upright face at its own weight (a variable one over its range), so each weight of lettering
@@ -233,8 +233,8 @@ function ransomFaces() {
   for (const script of ["latin", "cjk"]) {
     let n = 0;
     for (const [family] of RANSOM_FACES[script]) {
-      if (here.has(family) || (native ? !S.systemFonts.includes(family) : !reachable(family))) continue;
-      if (native && !reachable(family)) { if (n >= RANSOM_AWAY) continue; n++; away.push(family); }
+      if (here.has(family) || (CAN.fonts ? !S.systemFonts.includes(family) : !reachable(family))) continue;
+      if (CAN.fonts && !reachable(family)) { if (n >= RANSOM_AWAY) continue; n++; away.push(family); }
       here.add(family);
     }
   }
@@ -1320,8 +1320,8 @@ async function dropFolder(id) {
 const CUT = { busy: false, error: "" };
 // Two ways: Apple Vision (macOS 14+, built in) and BiRefNet (any system, a model downloaded in Setup →
 // AI → Cut-out, run on this computer by ONNX Runtime; see src-tauri/src/matting.rs).
-const isMac = /Mac/i.test(navigator.userAgent);
-const canCut = () => native;
+const isMac = HOST === "tauri" && /Mac/i.test(navigator.userAgent);   // Vision is this computer's; a server's own is not known yet
+const canCut = () => CAN.cut;
 /** The way of cutting out in use: the one chosen, else Vision on a Mac and the light BiRefNet elsewhere. */
 const cutEngine = () => { const e = S.settings.cutEngine; return e === "vision" ? (isMac ? "vision" : "birefnet-lite") : e || (isMac ? "vision" : "birefnet-lite"); };
 /** Whether the model a BiRefNet way needs is downloaded. */
@@ -1402,7 +1402,7 @@ function shrink(im, max, q = 0.9) {
 /** Sends one request to the image service: {status, text}. `method` "GET" sends no body. */
 async function imageSend(cfg, req, image = true) {
   const body = req.body ? JSON.stringify(req.body) : "", method = req.method || "POST";
-  return native
+  return CAN.relay
     ? await invoke("ai_request", { url: req.url, headers: Object.entries(req.headers), body, proxy: cfg.proxy || null, timeout: cfg.timeout, image, method })
         .catch((e) => { throw new Error(/timed out/i.test(String(e)) ? t("ai.timedOut", cfg.timeout) : String(e)); })
     : await fetch(req.url, { method, headers: req.headers, body: method === "GET" ? undefined : body, signal: AbortSignal.timeout(cfg.timeout * 1000) }).then(async (r) => ({ status: r.status, text: await r.text() }));
@@ -1427,7 +1427,7 @@ async function imageCall(cfg, prompt, pic, shape = null) {
   const out = readImageReply(cfg.provider, reply.status, reply.text);
   if (out.error) throw new Error(out.error);
   // some services leave the picture at a link instead of sending it
-  const img = out.image || (native
+  const img = out.image || (CAN.relay
     ? await invoke("fetch_image", { url: out.url, proxy: cfg.proxy || null, timeout: cfg.timeout })
     : await fetch(out.url).then((r) => r.blob()).then(async (b) => { const u = await readAs(b, "readAsDataURL"); return { mime: b.type || "image/png", data: u.slice(u.indexOf(",") + 1) }; }));
   const src = `data:${img.mime};base64,${img.data}`, im = await loadImage(src);
@@ -1563,7 +1563,7 @@ function repaintBox(P) {
   const sources = [["look", t("rep.src.look", look.name[lang])],
     { group: t("rep.src.preset"), items: S.repaintStyles.map((s) => ["preset:" + s.id, s.name[lang]]) },
     { group: t("rep.src.mine"), items: S.myStyles.map((s) => ["my:" + s.id, s.name[lang]]) },
-    ["+new", t("rep.src.new")], ["+import", t("rep.src.import")], native && ["+folder", t("rep.src.folder")]].filter(Boolean);
+    ["+new", t("rep.src.new")], ["+import", t("rep.src.import")], CAN.folders && ["+folder", t("rep.src.folder")]].filter(Boolean);
   const command = (v) => {
     if (v === "+new") return addStyle({ name: t("rep.newName", S.myStyles.length + 1) }, "");
     if (v === "+import") return importStyle();
@@ -1703,7 +1703,7 @@ const AI_RETRIES = 3;                      // extra attempts when a reply does n
 /** Sends one prompt to the configured endpoint and returns {text, truncated}. Throws with the provider's message. */
 async function aiCall(cfg, system, user) {
   const req = buildRequest(cfg, system, user), body = JSON.stringify(req.body);
-  const reply = native
+  const reply = CAN.relay
     ? await invoke("ai_request", { url: req.url, headers: Object.entries(req.headers), body, proxy: cfg.proxy || null, timeout: cfg.timeout })
         .catch((e) => { throw new Error(/timed out/i.test(String(e)) ? t("ai.timedOut", cfg.timeout) : String(e)); })
     : await fetch(req.url, { method: "POST", headers: req.headers, body, signal: AbortSignal.timeout(cfg.timeout * 1000) }).then(async (r) => ({ status: r.status, text: await r.text() }));
@@ -1817,13 +1817,13 @@ function aiTab() {
 // ---------- Setup → AI → Cut-out: the way of cutting out, and the BiRefNet models
 const CUTDL = { id: "", done: 0, total: 0, error: "", confirmDrop: "" };   // the download running, if any
 const mb = (n) => Math.round(n / 1048576);
-if (native && globalThis.__TAURI__.event) globalThis.__TAURI__.event.listen("cut-model-progress", (e) => {
+if (HOST === "tauri" && globalThis.__TAURI__.event) globalThis.__TAURI__.event.listen("cut-model-progress", (e) => {
   Object.assign(CUTDL, { done: e.payload.done, total: e.payload.total });
   const bar = document.getElementById("cutdl-" + e.payload.id);
   if (bar) bar.textContent = t("cutset.progress", Math.floor((100 * e.payload.done) / Math.max(1, e.payload.total)), mb(e.payload.done), mb(e.payload.total));
 });
 const onCutPane = () => S.mode === "setup" && S.tab.setup === "ai" && S.aiPane === "cut";
-async function refreshCutModels() { S.cutModels = native ? await invoke("cut_models").catch(() => []) : []; }
+async function refreshCutModels() { S.cutModels = CAN.cut ? await invoke("cut_models").catch(() => []) : []; }
 async function downloadModel(id) {
   if (CUTDL.id) return;
   Object.assign(CUTDL, { id, done: 0, total: 0, error: "" }); renderPanel();
@@ -1840,7 +1840,7 @@ async function dropModel(id) {
   await refreshCutModels(); renderPanel();
 }
 function cutPane() {
-  if (!native) return [el("div", { class: "hint", style: "margin:0" }, t("cutset.needsApp"))];
+  if (!CAN.cut) return [el("div", { class: "hint", style: "margin:0" }, t("cutset.needsApp"))];
   const engines = [isMac && "vision", "birefnet-lite", "birefnet"].filter(Boolean), now = cutEngine();
   const setting = (k, v, redraw) => { S.settings[k] = v; persistSettings(); if (redraw) renderPanel(); };
   const row = (m) => {
@@ -1858,7 +1858,7 @@ function cutPane() {
     el("div", {}, cap("cutset.models"), S.cutModels.map(row), CUTDL.error && el("div", { class: "hint err" }, CUTDL.error),
       el("div", { class: "hint" }, t("cutset.speed"))),
     el("div", {}, cap("cutset.proxy"), textInput(S.settings.cutProxy, (v) => setting("cutProxy", v.trim()), { placeholder: "http://127.0.0.1:7890" }), el("div", { class: "hint" }, t("cutset.proxyHint"))),
-    el("button", { class: "btn wide", onclick: () => invoke("reveal_data_dir", { dir: "models" }).catch(fail) }, t("cutset.folder")),
+    CAN.folders && el("button", { class: "btn wide", onclick: () => invoke("reveal_data_dir", { dir: "models" }).catch(fail) }, t("cutset.folder")),
     el("div", { class: "hint" }, t("cutset.licence")),
   ];
 }
@@ -2452,7 +2452,7 @@ function fxControl(L) {
       L.bend === "taper" && L.warp && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("warp", undefined, true) }, t("fx.warpReset")),
       L.bend && L.bend !== "taper" && L.reshape && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("reshape", undefined, true) }, t("fx.reshapeReset")),
     ],
-    tip: [fx === "ransom" && t("fx.ransomHint"), EFFECTS[fx].kind === "outline" && fx !== "extrude" && t("fx.shapedHint"), L.bend && t("fx.bendHint"), L.bend && t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint"), kind === "outline" && !native && t("fx.needsApp")].filter(Boolean).join(" "),
+    tip: [fx === "ransom" && t("fx.ransomHint"), EFFECTS[fx].kind === "outline" && fx !== "extrude" && t("fx.shapedHint"), L.bend && t("fx.bendHint"), L.bend && t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint"), kind === "outline" && !CAN.outlines && t("fx.needsApp")].filter(Boolean).join(" "),
   };
 }
 /** The words a headline layer sets: the title's and the subtitle's are the cover's. */
@@ -2937,7 +2937,7 @@ function jumpToScene(key) {
   const cv = $("cv"), q = (cv._scene || []).find((s) => s.key === key);
   if (!q || !cv._virtual) return toast(t("scene.notShown", sceneName(key)));
   const r = cv.getBoundingClientRect(), k = cv._virtual[0] / r.width, x = r.left + q.x / k, y = r.top + q.y / k;
-  if (native && !S.settings.hideScene) invoke("move_pointer", { x, y }).catch(() => null);
+  if (CAN.pointer && !S.settings.hideScene) invoke("move_pointer", { x, y }).catch(() => null);
   const ring = el("div", { class: "scene-ping", style: `left:${x}px;top:${y}px` });   // a ring on the page over the canvas: no redraw of the cover
   document.body.append(ring);
   setTimeout(() => ring.remove(), 1000);
@@ -3472,7 +3472,7 @@ async function runExport(jobs, save) {
       prog.set(done, name);
       await nextPaint();
       const cv = await renderReady(job.size, job.cover, job.index);
-      const task = (native ? toPng(cv).then((bytes) => { cv.width = cv.height = 0; return save(bytes, name); }) : browserSaveCanvas(cv, name))
+      const task = (CAN.saveFiles ? toPng(cv).then((bytes) => { cv.width = cv.height = 0; return save(bytes, name); }) : browserSaveCanvas(cv, name))
         .then(() => { done++; prog.set(done); }, (e) => { failed = failed || e; })
         .finally(() => pending.delete(task));
       pending.add(task);
@@ -3486,7 +3486,7 @@ async function runExport(jobs, save) {
 }
 async function exportOne(size) {
   const job = { cover: S.cover, index: catIndex(), size };
-  if (!native) return void (await runExport([job]));
+  if (!CAN.saveFiles) return void (await runExport([job]));
   let saved = null;
   const n = await runExport([job], async (bytes, name) => { saved = await invoke("save_image", framed(bytes, { name })); });
   if (n === 1 && saved) toast(t("msg.saved", saved));
@@ -3494,7 +3494,7 @@ async function exportOne(size) {
 /** Writes every selected size of every cover ([{cover, index}]) into one folder the user picks. */
 async function exportMany(covers) {
   let dir = null;
-  try { if (native) { dir = await invoke("pick_folder"); if (!dir) return; } } catch (e) { return fail(e); }
+  try { if (CAN.saveFiles) { dir = await invoke("pick_folder"); if (!dir) return; } } catch (e) { return fail(e); }
   const jobs = covers.flatMap((c) => S.profile.sizes.map((size) => ({ ...c, size })));
   const n = await runExport(jobs, (bytes, name) => invoke("write_image", framed(bytes, { dir, name })));
   if (n === jobs.length) toast(t("msg.savedN", n, dir || "Downloads"));
@@ -3522,7 +3522,7 @@ function csvTemplate() {
   saveText("smedcover-batch.csv", "\uFEFF" + lines.join("\n") + "\n");
 }
 async function saveText(name, text) {
-  if (!native) return browserSave(name, "data:text/plain;charset=utf-8," + encodeURIComponent(text));
+  if (!CAN.saveFiles) return browserSave(name, "data:text/plain;charset=utf-8," + encodeURIComponent(text));
   try { const p = await invoke("save_text", { name, text }); if (p) toast(t("msg.saved", p)); } catch (e) { fail(e); }
 }
 function closeModal() { const m = $("modal"); m.hidden = true; m.replaceChildren(); m.onDismiss = null; delete m.dataset.sticky; }
@@ -3745,7 +3745,7 @@ function setMode(mode) {
  */
 function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l]))) {
   const R = Math.random, sv = S.settings.surprise;
-  dealCover(S.profile.style, S.cover, { R, locks: sv.locks, surprise: sv, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, can: (k) => native || EFFECTS[k].kind !== "outline", canTint });
+  dealCover(S.profile.style, S.cover, { R, locks: sv.locks, surprise: sv, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, can: (k) => CAN.outlines || EFFECTS[k].kind !== "outline", canTint });
   if (!sv.locks.places) dealPlaces(R);
 }
 /** Surprise me's run (how many hands, how long, how fast they show: RULES.hands in deal.js). done: when the last run ended; step: the step of undo it made ({idx, look}) while nothing has followed it. */
@@ -4017,6 +4017,17 @@ function welcome() {
 }
 
 // ---------- the side columns: their inner edges are dragged to make them wider or narrower
+/**
+ * The arrangement the screen calls for, on the body as `data-layout`: "desk", the three columns, or "phone", a narrow
+ * touch screen, which is to have an arrangement of its own (its styles go under body[data-layout="phone"]). It goes
+ * by the screen, not by the host: a phone opening a SmedCover server's page, or an app on a phone, alike. `?layout=`
+ * phone or desk in the page's address chooses one, to work on it at a desk.
+ */
+const PHONE = matchMedia("(max-width: 760px) and (pointer: coarse)"), FORCED = new URLSearchParams(location.search).get("layout");
+const layoutKind = () => (FORCED === "phone" || FORCED === "desk" ? FORCED : PHONE.matches ? "phone" : "desk");
+function arrange() { document.body.dataset.layout = layoutKind(); }
+PHONE.addEventListener("change", () => { arrange(); if (S.profile) columns(); });
+arrange();
 const COLUMNS = { left: { min: 300, def: 372 }, right: { min: 260, def: 320 }, setup: { min: 340, def: 420 } };
 const CENTRE_MIN = 360;   // what the canvas keeps at the least
 /** Sets the columns' widths from the settings (0 = default), each kept between its least and what leaves the canvas room. */
@@ -4104,14 +4115,14 @@ async function start() {
   if ((S.imageAi.source.startsWith("preset:") && !builtIn()) || (S.imageAi.source.startsWith("my:") && !myStyle())) S.imageAi.source = "look";   // a style that is no longer there
   columns();
   await refreshCutModels();
-  if (native) {
+  if (CAN.fonts) {
     const found = await invoke("list_system_fonts").catch(() => []);
     S.systemFonts = found.map((f) => f.name);
     for (const f of found) if (!f.cjk) S.latinFonts.add(f.name);
   }
   ransomFaces();
   S.profiles = await loadProfiles().catch(() => []);
-  const selftest = native ? await invoke("selftest_dir").catch(() => null) : null;
+  const selftest = CAN.selftest ? await invoke("selftest_dir").catch(() => null) : null;
   if (!S.profiles.length) await addProfile(selftest ? sampleProfile("en") : await welcome(), false);
   S.profile = S.profiles.find((p) => p.id === S.settings.profileId) || S.profiles[0];
   S.settings.profileId = S.profile.id; persistSettings();
