@@ -7,7 +7,7 @@ import { drawTitle, drawTitleVertical, parseTitle, subtitleFit, setLine, passOf,
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset, assetHalf, userAssets, assetExists } from "./assets.js";
 import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets, headLine, frontOf, HEADLINES } from "./layers.js";
-import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced } from "./style.js";
+import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced, wherePainted } from "./style.js";
 import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped, effectReach } from "./textfx.js";
 import { ransomEpoch } from "./ransom.js";
 
@@ -448,14 +448,28 @@ function drawFreeText(ctx, L, env) {
   return { hw: hw + pad + fr.x * FS, hh: bh / 2 + Math.max(up + fr.up * FS, down + fr.down * FS) + pad * 0.3 };
 }
 
+/** Whether the base's grid is drawn: off only to compare drawings without it (the checks of the looks' grounds). */
+export const BASE = { lines: true };
+/** The grid laid on the ground (the Background's base "grid"): the look's own (`gridLines` in style.js), else lines every 60 in its colour, dark or light (th.grid). */
+function lookGrid(ctx, env) {
+  if (!BASE.lines) return;
+  const color = env.th.grid(env.C), own = look().gridLines;
+  if (own) own(ctx, env, color); else grid(ctx, color, env.w, env.h);
+}
 const PAINT = {
-  /** The ground: the look's field (or the theme's), and its grid. Photos are layers of their own (see photo). */
+  /**
+   * The Background, in three: its base — "grid", the look's ground (its `background` with nothing on it, else the
+   * theme's field) and the grid on it (lookGrid), or "clear", nothing, see-through — then what the look paints on
+   * it, its scene and its pattern (its `background` with `ground: false`): with all of a look's sliders at nothing,
+   * the base is all there is. Photos are layers of their own (see photo).
+   */
   bg(ctx, L, tr, env) {
-    const { w, h, th } = env;
-    const whole = { cx: w / 2, cy: h / 2, hw: w / 2, hh: h / 2, r: 0 };
-    if (look().background && look().background(ctx, { ...env, photo: null }, L, lookValues())) return whole;
-    ctx.fillStyle = th.field; ctx.fillRect(0, 0, w, h);
-    if (L.grid) grid(ctx, th.grid(env.C), w, h);
+    const { w, h, th } = env, whole = { cx: w / 2, cy: h / 2, hw: w / 2, hh: h / 2, r: 0 }, hook = look().background, e = { ...env, photo: null }, p = lookValues();
+    if (L.base !== "clear") {
+      if (!(hook && hook(ctx, e, { ...L, grid: false }, p))) { ctx.fillStyle = th.field; ctx.fillRect(0, 0, w, h); }
+      lookGrid(ctx, env);
+    }
+    if (hook) hook(ctx, e, { ...L, grid: true, ground: false }, p);
     return whole;
   },
   /**
@@ -1374,7 +1388,10 @@ function paintCover(cv, o) {
     });
     cv._hits = hits;
   }
-  if (L0.post && cover.layers[0].visible) { ctx.save(); L0.post(ctx, w, h, C, lookValues(), kx, cv._hits); ctx.restore(); }   // not over a transparent background
+  if (L0.post && cover.layers[0].visible) {   // not over a hidden background; over a see-through base only where something is painted
+    const post = (x) => L0.post(x, w, h, C, lookValues(), kx, cv._hits);
+    ctx.save(); wherePainted(ctx, post, cover.layers[0].base === "clear", "post"); ctx.restore();
+  }
   setFast(false);
   // where the look's scene objects were placed, for their handles: a drag that does not repaint the ground keeps the last
   const placed = scenePlaced().filter((q) => L0.scene && L0.scene[q.key]);   // only what the look offers to drag

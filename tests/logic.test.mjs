@@ -593,6 +593,24 @@ test("lettering layers may carry their own colour", () => {
 
 test("looks: every look is complete enough to draw and to brief the AI", () => {
   const calls = () => { const n = {}; return [n, new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 50 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : (...a) => { n[k] = (n[k] || 0) + 1; return {}; }), set: () => true })]; };
+test("looks: what a look paints on the ground lies on its base — its ground alone when asked for, and with every slider at nothing, nothing but the base", () => {
+  // the Background's base (see PAINT.bg): the look's ground (`background` with `grid: false`), or nothing; then
+  // its scene and its pattern (`ground: false`), which its sliders bring: all of them at their least, none of it
+  const PAINTS = ["fill", "fillRect", "stroke", "strokeRect", "fillText", "strokeText", "drawImage", "putImageData"];
+  const calls = () => { const n = {}; return [n, new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 50 }) : k === "createLinearGradient" || k === "createRadialGradient" || k === "createPattern" ? () => ({ addColorStop() {} }) : (...a) => { n[k] = (n[k] || 0) + 1; return {}; }), set: () => true })]; };
+  const env = { w: 1920, h: 1080, C: [252, 238, 10], cat: { code: "VLOG", name: "Vlog" }, photo: null, o: { catIndex: 0, size: { w: 1920, h: 1080 }, profile: { brand: { name: "B" }, categories: [{}, {}] } } };
+  const painted = (n) => PAINTS.filter((k) => n[k]).map((k) => `${k}×${n[k]}`);
+  for (const id of LOOK_IDS.filter((k) => LOOKS[k].background)) for (const onDark of [true, false]) {
+    const least = Object.fromEntries(LOOKS[id].params.filter((d) => !d.text).map((d) => [d.key, d.min]));
+    let L = setLook(id, null, 3, onDark), [n, ctx] = calls();
+    L.background(ctx, env, { grid: false }, lookValues());
+    assert.ok(painted(n).length > 0, `${id} (${onDark ? "dark" : "light"}): its ground`);
+    L = setLook(id, least, 3, onDark); [n, ctx] = calls();
+    L.background(ctx, env, { grid: true, ground: false }, lookValues());
+    assert.deepEqual(painted(n), [], `${id} (${onDark ? "dark" : "light"}): with every slider at its least, nothing on the base`);
+  }
+});
+
   const env = { w: 1920, h: 1080, C: [252, 238, 10], cat: { code: "VLOG", name: "Vlog" }, photo: null, o: { catIndex: 0, size: { w: 1920, h: 1080 }, profile: { brand: { name: "B" }, categories: [{}, {}] } } };
   const pass = (fn) => { fn({ t: "Ab", hi: false }, 0); fn({ t: "cd", hi: true }, 60); };
   for (const id of LOOK_IDS.filter((k) => k !== "cel")) for (const onDark of [true, false]) {

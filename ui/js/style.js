@@ -6,7 +6,13 @@
 // (cel) way, so a new look can start as a single hook and grow.
 //
 //   theme(base, C, p)            colours of the field, grid and plain text
-//   background(ctx, env, L, p)   paints the background layer (field, grid, photo); return true if handled
+//   background(ctx, env, L, p)   paints the background layer; return true if handled. Called twice (see PAINT.bg in
+//                                render.js): with L.grid false for the look's ground alone (its colour, sky, paper…),
+//                                then with L.grid true and L.ground false for what stands on it, its scene and pattern,
+//                                which its sliders bring in: all of them at their least, nothing. A photo is painted
+//                                through it too (env.photo, L.ground left out: the ground is painted)
+//   gridLines(ctx, env, color)   the grid laid on the ground when the Background's base is "grid", in the look's own
+//                                manner, in `color` (the theme's grid colour); else lines every 60
 //   accent                       how the colour block is painted: { fill(C), tone, edge(ctx, pts, …) }
 //   runs(ctx, pass, o, p)        paints lettering made of runs (the title, free text): pass(fn) calls
 //                                fn(run, x) for every run of the current line; o has the sizes and colours
@@ -219,7 +225,7 @@ const cyber = {
 
   background(ctx, env, L, p) {
     const { w, h, C } = env;
-    ctx.fillStyle = css(CY.deep); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(CY.deep); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {
       env.drawPhoto();
       if (p.photo > 0) {   // pushed toward the channel colour and into the dark, like a still on a monitor
@@ -230,7 +236,8 @@ const cyber = {
       }
       return true;
     }
-    if (L.grid) {   // a measured sheet: a field of dots, and a registration cross wherever four big squares meet
+    if (!L.grid) return true;
+    if (p.decor > 0) {   // a measured sheet: a field of dots, and a registration cross wherever four big squares meet
       ctx.fillStyle = css(C, 0.34);
       for (let x = 20; x < w; x += 60) for (let y = 20; y < h; y += 60) ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
       ctx.strokeStyle = css(C, 0.6); ctx.lineWidth = 2; ctx.beginPath();
@@ -247,6 +254,18 @@ const cyber = {
       }
     }
     return true;
+  },
+  /** A HUD's measuring grid: dashed lines every 60 through the field of dots, solid ones every 240 through the registration crosses, ruler ticks along the edges. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, xs = every(20, w, 60), ys = every(20, h, 60);
+    gridPen(ctx, color);
+    ctx.globalAlpha = 0.55; ctx.setLineDash([6, 10]); gridPath(ctx, xs, ys, 0, 0, w, h);
+    ctx.globalAlpha = 1; ctx.setLineDash([]); gridPath(ctx, every(200, w, 240), every(200, h, 240), 0, 0, w, h);
+    ctx.beginPath();
+    xs.forEach((x, i) => { const l = i % 4 === 3 ? 28 : 12; ctx.moveTo(x, 0); ctx.lineTo(x, l); ctx.moveTo(x, h); ctx.lineTo(x, h - l); });
+    ys.forEach((y, i) => { const l = i % 4 === 3 ? 28 : 12; ctx.moveTo(0, y); ctx.lineTo(l, y); ctx.moveTo(w, y); ctx.lineTo(w - l, y); });
+    ctx.lineWidth = 3; ctx.stroke();
+    ctx.restore();
   },
 
   accent: {
@@ -590,6 +609,29 @@ const wash = (ctx, w, h, mode, colour, alpha) => { if (alpha <= 0) return; ctx.s
 const grey = (c) => { const l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; return [l, l, l]; };
 const upright = (ctx) => ctx.transform(1, 0, 0.08, 1, 0, 0);   // undoes the house style's slant on lettering
 
+// ---------- the grids the looks lay on their grounds (each look's `gridLines`, see lookGrid in render.js)
+/** Every `step` from `a` while below `b`. */
+const every = (a, b, step) => { const out = []; for (let v = a; v < b; v += step) out.push(v); return out; };
+/** Starts a grid: ctx saved, strokes and fills in `color`, lines `lw` wide (2 at least: thinner ones drop out when a cover is seen small), no dashes. Pair with ctx.restore(). */
+function gridPen(ctx, color, lw = 2) {
+  ctx.save(); ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = lw; ctx.setLineDash([]); ctx.lineCap = "butt"; ctx.lineJoin = "miter";
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ctx.shadowColor = "rgba(0,0,0,0)"; ctx.shadowBlur = 0;
+}
+/** Lines down at each of `xs` from y0 to y1, and across at each of `ys` from x0 to x1, stroked as one path. */
+function gridPath(ctx, xs, ys, x0, y0, x1, y1) {
+  ctx.beginPath();
+  for (const x of xs) { ctx.moveTo(x, y0); ctx.lineTo(x, y1); }
+  for (const y of ys) { ctx.moveTo(x0, y); ctx.lineTo(x1, y); }
+  ctx.stroke();
+}
+/** Straight lines at angle `a` (radians) across the whole w × h, `gap` apart, one through the middle moved `off` along their normal; stroked as one path. */
+function slantPath(ctx, w, h, a, gap, off = 0) {
+  const c = Math.cos(a), s = Math.sin(a), R = Math.hypot(w, h), cx = w / 2, cy = h / 2;
+  ctx.beginPath();
+  for (let d = -Math.ceil(R / 2 / gap) * gap + off; d <= R / 2; d += gap) { const px = cx - s * d, py = cy + c * d; ctx.moveTo(px - c * R, py - s * R); ctx.lineTo(px + c * R, py + s * R); }
+  ctx.stroke();
+}
+
 // ====================================================================== risograph: two spot inks on paper
 /**
  * The big flat forms a riso poster overprints in its inks, multiplied, so they go darker where they
@@ -643,10 +685,10 @@ const riso = {
     { key: "ghost", min: 0, max: 1, step: 0.05, def: 0, name: { zh: "重影", en: "Ghosting" } },
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.45, name: { zh: "纸张颗粒", en: "Paper grain" } },
   ],
-  theme: (base) => ({ ...base, field: css(RISO.paper), text: css(RISO.blue), dim: css(RISO.blue, 0.6), titleFill: css(RISO.blue), titleInk: css(RISO.paper), grid: () => css(RISO.blue, 0.1) }),
+  theme: (base) => ({ ...base, field: css(RISO.paper), text: css(RISO.blue), dim: css(RISO.blue, 0.6), titleFill: css(RISO.blue), titleInk: css(RISO.paper), grid: () => css(RISO.blue, 0.18) }),
   background(ctx, env, L, p) {
     const { w, h, C } = env;
-    ctx.fillStyle = css(RISO.paper); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(RISO.paper); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {   // the photo as a one-ink print: grey, then the blue ink in its shadows, on paper
       env.drawPhoto(1);
       wash(ctx, w, h, "screen", RISO.blue, 1); wash(ctx, w, h, "multiply", RISO.paper, 1);
@@ -657,6 +699,13 @@ const riso = {
     }
     if (L.grid || L.fill) risoShapes(ctx, env, p.shapes);   // on the ground, or over a photo filling the canvas (not on a print)
     return true;
+  },
+  /** A coarse halftone screen at 45°, as the drum prints a flat tint of its blue. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, s = 30, r = 2.6;
+    gridPen(ctx, color); ctx.beginPath();
+    for (let j = 0, y = 0; y < h + s; j++, y += s / 2) for (let x = (j % 2) * (s / 2); x < w + s; x += s) { ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, TAU); }
+    ctx.fill(); ctx.restore();
   },
   accent: {
     fill: (C) => css(C), tone: () => css(RISO.blue, 0.85), toneScale: 0.9,
@@ -818,7 +867,7 @@ const anime = {
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.55, name: { zh: "胶片颗粒", en: "Film grain" } },
     { key: "vignette", min: 0, max: 1, step: 0.05, def: 0.5, name: { zh: "暗角", en: "Vignette" } },
   ],
-  theme: (base) => ({ ...base, field: css([40, 44, 86]), text: css(ANI.cream), dim: css(ANI.cream, 0.6), titleFill: css(ANI.cream), titleInk: css(ANI.line), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css([40, 44, 86]), text: css(ANI.cream), dim: css(ANI.cream, 0.6), titleFill: css(ANI.cream), titleInk: css(ANI.line), grid: () => css(ANI.cream, 0.16) }),
   /**
    * A painted sky — deep above, hazy toward the horizon; with Dusk, violet above and rose and amber
    * below — with soft banks of cloud (more of them, one by one, as Clouds rises; lit from below at
@@ -827,9 +876,11 @@ const anime = {
   background(ctx, env, L, p) {
     const { w, h, C } = env, d = p.dusk;
     if (env.photo) { env.drawPhoto(); wash(ctx, w, h, "multiply", [255, 238, 216], 0.5); if (L.fill) godRays(ctx, w, h, p.rays, d, "rays"); return true; }
-    const sky = ctx.createLinearGradient(0, 0, 0, h);
-    sky.addColorStop(0, css(mix(mix([34, 46, 108], [58, 40, 104], d), C, 0.06))); sky.addColorStop(0.55, css(mix(mix([92, 132, 184], [206, 122, 146], d), C, 0.08))); sky.addColorStop(1, css(mix(mix([244, 208, 172], [255, 172, 96], d), C, 0.14)));
-    ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) {
+      const sky = ctx.createLinearGradient(0, 0, 0, h);
+      sky.addColorStop(0, css(mix(mix([34, 46, 108], [58, 40, 104], d), C, 0.06))); sky.addColorStop(0.55, css(mix(mix([92, 132, 184], [206, 122, 146], d), C, 0.08))); sky.addColorStop(1, css(mix(mix([244, 208, 172], [255, 172, 96], d), C, 0.14)));
+      ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
+    }
     if (!L.grid) return true;
     const lit = mix(ANI.cream, [255, 196, 170], d), n = p.clouds * 13;
     ctx.save(); shift("clouds", w * 0.5, h * 0.43, ctx);   // a scene object: the clouds move as one
@@ -843,6 +894,15 @@ const anime = {
     ctx.restore();
     godRays(ctx, w, h, p.rays, d, "rays");
     return true;
+  },
+  /** An animator's field guide: twelve fields one inside another about the centre, its axes, its diagonals and a ring at its heart. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, cx = w / 2, cy = h / 2;
+    gridPen(ctx, color); ctx.beginPath();
+    for (let f = 1; f <= 12; f++) { const hw = (w / 2) * (f / 12.4), hh = (h / 2) * (f / 12.4); ctx.rect(cx - hw, cy - hh, hw * 2, hh * 2); }
+    ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.moveTo(0, 0); ctx.lineTo(w, h); ctx.moveTo(w, 0); ctx.lineTo(0, h);
+    ctx.moveTo(cx + 14, cy); ctx.arc(cx, cy, 14, 0, TAU);
+    ctx.stroke(); ctx.restore();
   },
   accent: {
     fill: (C) => css(muted(C)), tone: (C) => css(mix(muted(C), ANI.line, 0.34)), toneScale: 0.85,
@@ -961,10 +1021,10 @@ const bluenote = {
     ctx.fillStyle = ink || css(bnInk()); spaced(ctx, str, x + f * 0.45, y + fs * 1.34 - h * 0.26, 4);
     return { x: x - 4, y: y + (fs * 1.34 - h) - 4, w: w + 8, h: h + 8 };
   },
-  theme: (base) => ({ ...base, field: css(bnGround()), text: css(bnInk()), dim: css(bnInk(), 0.55), titleFill: css(bnInk()), titleInk: css(bnGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(bnGround()), text: css(bnInk()), dim: css(bnInk(), 0.55), titleFill: css(bnInk()), titleInk: css(bnGround()), grid: () => css(bnInk(), 0.1) }),
   background(ctx, env, L, p) {
     const { w, h, C } = env;
-    ctx.fillStyle = css(bnGround()); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(bnGround()); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {   // one colour and black: the photograph as it was printed on a sleeve, through a coarse screen
       env.drawPhoto(p.duo);
       wash(ctx, w, h, "multiply", mix([255, 255, 255], C, 0.92), p.duo);
@@ -974,6 +1034,13 @@ const bluenote = {
     }
     if ((L.grid || L.fill) && p.vinyl > 0) record(ctx, env, p.vinyl);
     return true;
+  },
+  /** The sleeve's layout grid: square modules, six down, with gutters between them. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, m = 56, g = 18, cell = (h - 2 * m + g) / 6, cols = Math.max(1, Math.floor((w - 2 * m + g) / cell)), x0 = (w - (cols * cell - g)) / 2;
+    gridPen(ctx, color); ctx.beginPath();
+    for (let i = 0; i < cols; i++) for (let j = 0; j < 6; j++) ctx.rect(x0 + i * cell, m + j * cell, cell - g, cell - g);
+    ctx.stroke(); ctx.restore();
   },
   accent: { fill: (C) => css(C), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },   // a plain block of colour, nothing more
   /** Flat, upright, tight: the type does the work. Highlighted words take the channel colour. */
@@ -1096,10 +1163,10 @@ const editorial = {
     ctx.fillStyle = ink || css(C); spaced(ctx, str, x, by - f * 0.2, 8);
     return { x: x - 4, y: by - f * 1.6, w: w + 8, h: f * 1.7 };
   },
-  theme: (base) => ({ ...base, field: css(edGround()), text: css(edInk()), dim: css(edInk(), 0.55), titleFill: css(edInk()), titleInk: css(edGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(edGround()), text: css(edInk()), dim: css(edInk(), 0.55), titleFill: css(edInk()), titleInk: css(edGround()), grid: () => css(edInk(), 0.11) }),
   background(ctx, env, L, p) {
     const { w, h, C } = env;
-    ctx.fillStyle = css(edGround()); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(edGround()); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {   // black and white, or a duotone in black and the channel's colour as a spot ink: the mid-tones and lights take the ink
       env.drawPhoto(p.mono); wash(ctx, w, h, "multiply", ED.paper, 0.5 * p.mono);
       if (p.spot > 0) { wash(ctx, w, h, "multiply", mix([255, 255, 255], C, 0.85), p.spot); wash(ctx, w, h, "screen", mix([0, 0, 0], C, 0.22), p.spot); }
@@ -1114,6 +1181,15 @@ const editorial = {
     }
     edColumns(ctx, env, p);
     return true;
+  },
+  /** The page's grid: a baseline every 24 between the margins, and the margins and six columns in firmer rules. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, m = 72, gut = 24, cw = (w - 2 * m - gut * 5) / 6, xs = [];
+    for (let i = 0; i < 6; i++) xs.push(m + i * (cw + gut), m + i * (cw + gut) + cw);
+    gridPen(ctx, color);
+    ctx.globalAlpha = 0.6; gridPath(ctx, [], every(m, h - m + 1, 24), m, 0, w - m, 0);
+    ctx.globalAlpha = 1; gridPath(ctx, xs, [m, h - m], m, m, w - m, h - m);
+    ctx.restore();
   },
   accent: {
     fill: (C) => css(mix(edGround(), C, 0.2)), tone: () => "rgba(0,0,0,0)", toneScale: 0,
@@ -1372,10 +1448,10 @@ const songke = {
   faces: (f) => ({ cn: f.serif, en: f.serif }),   // everything on the page is cut in the one face
   /** Level bands: a page has no slanted panels. */
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.25, side: 0.32, strip: 0.14 }),
-  theme: (base) => ({ ...base, field: css(SONG.paper), text: css(SONG.ink), dim: css(SONG.ink, 0.6), titleFill: css(SONG.ink), titleInk: css(SONG.paper), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(SONG.paper), text: css(SONG.ink), dim: css(SONG.ink, 0.6), titleFill: css(SONG.ink), titleInk: css(SONG.paper), grid: () => css(SONG.red, 0.24) }),
   background(ctx, env, L, p) {
     const { w, h } = env;
-    ctx.fillStyle = css(SONG.paper); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(SONG.paper); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {   // as a rubbing would show it: grey, pressed into the paper
       env.drawPhoto(1); wash(ctx, w, h, "multiply", SONG.paper, 1); wash(ctx, w, h, "screen", [60, 48, 36], 0.35);
     }
@@ -1386,6 +1462,17 @@ const songke = {
     }
     if (L.grid || L.fill) { songText(ctx, env, p, pitch); songSeals(ctx, env, p.seals); }
     return true;
+  },
+  /** Ruled paper in vermilion, as a fair copy is written on: the block's columns, right to left, a narrow gap between them, each cut into squares. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, pitch = Math.max(90, Math.round(Math.min(w, h) / 9)), top = 58, bot = h - 58, gap = 5, cols = [];
+    for (let x = w - 64; x - pitch >= 64 - 1; x -= pitch) cols.push([x - pitch + gap, x - gap]);
+    gridPen(ctx, color); ctx.beginPath();
+    for (const [a, b] of cols) {
+      ctx.moveTo(a, top); ctx.lineTo(a, bot); ctx.moveTo(b, top); ctx.lineTo(b, bot);
+      for (let y = top; y <= bot + 0.5; y += b - a) { ctx.moveTo(a, y); ctx.lineTo(b, y); }
+    }
+    ctx.stroke(); ctx.restore();
   },
   accent: {
     fill: (C) => css(mix(SONG.paper, worn(C), 0.78)), tone: () => "rgba(0,0,0,0)", toneScale: 0,
@@ -1678,7 +1765,7 @@ const vivid = {
     { key: "grain", min: 0, max: 1, step: 0.05, def: 0.2, name: { zh: "纸张颗粒", en: "Paper grain" } },
     { key: "vivid", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.7, name: { zh: "照片鲜艳度", en: "Photo vividness" } },
   ],
-  theme: (base) => ({ ...base, field: css(VV.sky), text: css(VV.cream), dim: css(VV.cream, 0.72), titleFill: css(VV.cream), titleInk: css(VV.navy), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(VV.sky), text: css(VV.cream), dim: css(VV.cream, 0.72), titleFill: css(VV.cream), titleInk: css(VV.navy), grid: () => css(VV.white, 0.2) }),
   /**
    * One flat azure sky. With the background's decoration on, from the back: a tower or two of the sky
    * city, clouds massed round their feet and on both sides, the street on the horizon, and pennants.
@@ -1688,7 +1775,7 @@ const vivid = {
    */
   background(ctx, env, L, p) {
     const { w, h } = env;
-    ctx.fillStyle = css(VV.sky); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(VV.sky); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {
       env.drawPhoto();
       if (p.vivid > 0) {
@@ -1731,6 +1818,11 @@ const vivid = {
     if (t > 0) skyline(ctx, w, h, t, at);
     if (p.flags > 0) pennants(ctx, w, top, p.flags);
     return true;
+  },
+  /** A festival lattice across the sky: fine lines on the slant both ways, crossing into diamonds as strings of pennants do. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env;
+    gridPen(ctx, color); slantPath(ctx, w, h, 0.5, 100); slantPath(ctx, w, h, -0.5, 100); ctx.restore();
   },
   accent: {
     fill: (C) => css(boost(C)),
@@ -1875,6 +1967,22 @@ function workLike(ctx, slot) {
 }
 /** Lays a work canvas (see workLike) down on ctx, pixel for pixel. */
 function layDown(ctx, x, alpha = 1, mode = "source-over") { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = Math.min(1, alpha); ctx.globalCompositeOperation = mode; ctx.drawImage(x.canvas, 0, 0); ctx.restore(); }
+/**
+ * What is laid over a whole picture — a look's `post` (grain, a vignette, wear), its tints and fringes over the
+ * scene — on a see-through base (`clear`): paint(x) runs on a copy of ctx's canvas, each pixel's own colour made
+ * all but solid first (the copy laid on itself, so a blend works on that colour rather than on nothing), and the
+ * copy goes back only where the canvas holds something, as much as it does (source-atop): what is see-through stays
+ * so, a soft shadow keeps its colour. Not clear, or no canvas to copy: paint(ctx) as it is. `slot`: its work canvas.
+ */
+export function wherePainted(ctx, paint, clear = true, slot = "painted") {
+  if (!clear || !canPaint(ctx)) return paint(ctx);
+  const x = workLike(ctx, slot);
+  x.save(); x.setTransform(1, 0, 0, 1, 0, 0);
+  for (let i = 0; i < 6; i++) x.drawImage(ctx.canvas, 0, 0);   // 0.3 of a colour becomes 0.88 of it, nothing stays nothing
+  x.restore();
+  paint(x);
+  layDown(ctx, x, 1, "source-atop");
+}
 /**
  * Paints draw() as a soft blur of `colour`, `r` units across: a shadow cast from far off the canvas,
  * since a filter cannot be relied on. What draw() paints itself lands off the canvas.
@@ -2097,7 +2205,7 @@ const negative = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.26, side: 0.34, strip: 0.12 }),
-  theme: (base, C) => ({ ...base, field: css(negGround(C)), text: css(NEG.cream), dim: css(NEG.cream, 0.6), titleFill: css(NEG.cream), titleInk: css(NEG.black), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base, C) => ({ ...base, field: css(negGround(C)), text: css(NEG.cream), dim: css(NEG.cream, 0.6), titleFill: css(NEG.cream), titleInk: css(NEG.black), grid: () => css(negInk(C), dark ? 0.24 : 0.16) }),
   /**
    * The ground; the giant silhouette in a deeper shade of the ground (tone on tone, so the channel
    * graphic in front of it stays the thing that is read); a region of the other colour cut in along a
@@ -2107,7 +2215,7 @@ const negative = {
    */
   background(ctx, env, L, p) {
     const { w, h, C } = env, ground = negGround(C), ink = negInk(C), spot = negSpot(C);
-    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {
       env.drawPhoto(p.duo);
       if (p.duo > 0) {
@@ -2149,6 +2257,15 @@ const negative = {
       }
     }
     return true;
+  },
+  /** The poster's construction lines: the thirds, the two diagonals, and from each corner to the middles of the far sides. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env;
+    gridPen(ctx, color);
+    gridPath(ctx, [w / 3, (w * 2) / 3], [h / 3, (h * 2) / 3], 0, 0, w, h);
+    ctx.beginPath();
+    for (const [a, b, c, d] of [[0, 0, w, h], [w, 0, 0, h], [0, 0, w, h / 2], [0, 0, w / 2, h], [w, 0, 0, h / 2], [w, 0, w / 2, h], [0, h, w, h / 2], [0, h, w / 2, 0], [w, h, 0, h / 2], [w, h, w / 2, 0]]) { ctx.moveTo(a, b); ctx.lineTo(c, d); }
+    ctx.stroke(); ctx.restore();
   },
   accent: { fill: (C) => css(dark ? negSpot(C) : NEG.black), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },   // a flat block of the other colour
   /**
@@ -2230,13 +2347,16 @@ function cinePlace(env, p) {
   const F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0, size = fh * (0.32 + 0.6 * p.giant);
   return { F, cx: F.x0 + fw * 0.44, cy: F.y1 - size * 0.42, size };
 }
-/** The ground without the silhouette: the colour, the light behind where the figure stands, the landscape in layers. */
-function cineGroundPaint(ctx, env, p, at) {
+/** The ground without the silhouette: the colour, the light behind where the figure stands, the landscape in layers (`only`: "ground", the colour alone, or "scene", the light and the landscape alone). */
+function cineGroundPaint(ctx, env, p, at, only = null) {
   const { w, h, C } = env, ground = cineGround(C), u = Math.min(w, h), F = at.F;
-  ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
-  const top = ctx.createLinearGradient(0, 0, 0, h);   // a little deeper at the top, as a dusk sky
-  top.addColorStop(0, css(mix(ground, CINE.night, dark ? 0.45 : 0.22))); top.addColorStop(0.6, css(ground, 0));
-  ctx.fillStyle = top; ctx.fillRect(0, 0, w, h);
+  if (only !== "scene") {
+    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    const top = ctx.createLinearGradient(0, 0, 0, h);   // a little deeper at the top, as a dusk sky
+    top.addColorStop(0, css(mix(ground, CINE.night, dark ? 0.45 : 0.22))); top.addColorStop(0.6, css(ground, 0));
+    ctx.fillStyle = top; ctx.fillRect(0, 0, w, h);
+  }
+  if (only === "ground") return;
   if (p.glow > 0) {   // a soft light behind the head of the figure: a wide halo and a brighter core
     const gx = at.cx, gy = at.cy - at.size * 0.2, lit = mix(ground, CINE.cream, dark ? 0.68 : 0.75);
     for (const [r, a] of [[at.size * 1.5, 0.55], [at.size * 0.7, 0.9]]) {
@@ -2278,7 +2398,7 @@ const cinema = {
   ],
   titleFont: (f) => f.serif,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.2, side: 0.3, strip: 0.11 }),
-  theme: (base, C) => ({ ...base, field: css(cineGround(C)), text: css(cineText()), dim: css(cineText(), 0.6), titleFill: css(cineText()), titleInk: css(cineGround(C)), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base, C) => ({ ...base, field: css(cineGround(C)), text: css(cineText()), dim: css(cineText(), 0.6), titleFill: css(cineText()), titleInk: css(cineGround(C)), grid: () => css(cineText(), 0.12) }),
   /**
    * The ground, its light and ridges, and the silhouette. A photo is toned toward the ground's colour;
    * one that fills the canvas can show only inside the silhouette: the ground is painted again over
@@ -2300,11 +2420,27 @@ const cinema = {
       }
       return true;
     }
-    cineGroundPaint(ctx, env, p, at);
+    if (L.ground !== false) cineGroundPaint(ctx, env, p, at, "ground");   // the colour and its dusk: the base; the light and the ridges stand on it
     if (!L.grid) return true;
+    cineGroundPaint(ctx, env, p, at, "scene");
     const S = p.giant > 0 && graphicShape(env);
     if (S) placeShape(ctx, S, cineShade(C), at.cx, at.cy, at.size);
     return true;
+  },
+  /** A camera's framing chart: the frame lines of the wider screens inside the picture, the corners of its safe area, a centre cross. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, cx = w / 2, cy = h / 2;
+    gridPen(ctx, color);
+    for (const [r, dash] of [[2.39, []], [2, [16, 12]]]) {
+      const fw = Math.min(w, h * r), fh = fw / r, x = cx - fw / 2, y = cy - fh / 2;
+      ctx.setLineDash(dash); gridPath(ctx, fw < w - 1 ? [x, x + fw] : [], fh < h - 1 ? [y, y + fh] : [], 0, 0, w, h);
+    }
+    ctx.setLineDash([]);
+    const sx = w * 0.05, sy = h * 0.05, sw = w * 0.9, sh = h * 0.9, t = 44;
+    ctx.beginPath();
+    for (const [x, y, dx, dy] of [[sx, sy, 1, 1], [sx + sw, sy, -1, 1], [sx, sy + sh, 1, -1], [sx + sw, sy + sh, -1, -1]]) { ctx.moveTo(x + dx * t, y); ctx.lineTo(x, y); ctx.lineTo(x, y + dy * t); }
+    ctx.moveTo(cx - 26, cy); ctx.lineTo(cx + 26, cy); ctx.moveTo(cx, cy - 26); ctx.lineTo(cx, cy + 26);
+    ctx.lineWidth = 3; ctx.stroke(); ctx.restore();
   },
   accent: {
     fill: (C) => css(mix(cineGround(C), cineShade(C), dark ? 0.55 : 0.4)), tone: () => "rgba(0,0,0,0)", toneScale: 0,
@@ -2396,7 +2532,7 @@ const cyano = {
   ],
   titleFont: (f) => f.serif,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.24, side: 0.33, strip: 0.12 }),
-  theme: (base) => ({ ...base, field: css(cyaGround()), text: css(cyaInk()), dim: css(cyaInk(), 0.6), titleFill: css(cyaInk()), titleInk: css(cyaGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(cyaGround()), text: css(cyaInk()), dim: css(cyaInk(), 0.6), titleFill: css(cyaInk()), titleInk: css(cyaGround()), grid: () => css(cyaInk(), 0.18) }),
   /**
    * The blue (or the paper), brushed unevenly; soft airbrushed shapes; the channel graphic left white
    * and glowing; sparkles. A photo becomes a cyanotype: grey, its darks into Prussian blue, its lights
@@ -2404,7 +2540,7 @@ const cyano = {
    */
   background(ctx, env, L, p) {
     const { w, h } = env, u = Math.min(w, h), ground = cyaGround();
-    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {
       env.drawPhoto(p.duo);
       wash(ctx, w, h, "multiply", mix([255, 255, 255], CYA.prussian, 0.9), p.duo);
@@ -2454,6 +2590,14 @@ const cyano = {
       for (let i = 0; i < n; i++) sparkle(ctx, w * (0.06 + rand(i * 3.3 + 300) * 0.88), h * (0.08 + rand(i * 4.1 + 301) * 0.8), u * (0.012 + rand(i * 5.9 + 302) * 0.03) * (0.6 + 0.6 * p.stars), col, dark ? 1 : 0.4);
     }
     return true;
+  },
+  /** Blueprint paper: a fine grid every 24, a firmer one every 120. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, fine = (n) => every(24, n, 24).filter((v) => v % 120);
+    gridPen(ctx, color);
+    ctx.globalAlpha = 0.5; gridPath(ctx, fine(w), fine(h), 0, 0, w, h);
+    ctx.globalAlpha = 1; gridPath(ctx, every(120, w, 120), every(120, h, 120), 0, 0, w, h);
+    ctx.restore();
   },
   accent: {
     fill: () => css(dark ? CYA.deep : CYA.prussian),
@@ -2545,7 +2689,7 @@ const monofilm = {
   ],
   titleFont: (f) => f.serif,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.22, side: 0.32, strip: 0.11 }),
-  theme: (base) => ({ ...base, field: css(mfGround()), text: css(mfInk()), dim: css(mfInk(), 0.55), titleFill: css(mfInk()), titleInk: css(mfGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(mfGround()), text: css(mfInk()), dim: css(mfInk(), 0.55), titleFill: css(mfInk()), titleInk: css(mfGround()), grid: () => css(mfInk(), 0.12) }),
   /**
    * The ground with its haze and out-of-focus lights, and the channel graphic as a soft grey figure in
    * motion. A photo goes black and white, smeared sideways (the motion blur), and a few pieces of it are
@@ -2553,7 +2697,7 @@ const monofilm = {
    */
   background(ctx, env, L, p) {
     const { w, h, C } = env, u = Math.min(w, h), ground = mfGround();
-    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {
       env.drawPhoto(p.mono);
       if (p.motion > 0) {   // the same picture again, slid sideways and faint: a hand-held, moving shot
@@ -2600,6 +2744,19 @@ const monofilm = {
       blurred(ctx, size * 0.012, css(fig, 0.9), () => placeShape(ctx, S, [0, 0, 0], cx, cy, size));
     }
     return true;
+  },
+  /** A contact sheet: strips of film across the sheet, frame after frame, the sprocket holes along their edges. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, fw = 300, fh = 200, gap = 16, band = fh + 64, x0 = 36;
+    gridPen(ctx, color);
+    for (let y = 26; y < h; y += band + 22) {
+      ctx.beginPath();
+      ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.moveTo(0, y + band); ctx.lineTo(w, y + band);
+      for (let x = x0; x < w; x += fw + gap) rounded(ctx, x, y + 32, fw, fh, 12);
+      ctx.stroke();
+      ctx.beginPath(); for (let x = 14; x < w; x += 26) { ctx.rect(x, y + 9, 12, 14); ctx.rect(x, y + band - 23, 12, 14); } ctx.fill();
+    }
+    ctx.restore();
   },
   accent: { fill: () => css(dark ? MF.black : [28, 28, 28]), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.strokeStyle = css(MF.white, 0.55); ctx.lineWidth = 1.5; run(0, 0); } },
   /** A serif seen through a lens: a soft, out-of-focus copy round it (the shadow slider), then the letters; highlighted words in the channel colour. */
@@ -2688,11 +2845,11 @@ const typo = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.18, side: 0.28, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(tyGround()), text: css(tyInk()), dim: css(tyInk(), 0.55), titleFill: css(tyInk()), titleInk: css(tyGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(tyGround()), text: css(tyInk()), dim: css(tyInk(), 0.55), titleFill: css(tyInk()), titleInk: css(tyGround()), grid: () => css(tyInk(), 0.1) }),
   /** The sheet, a burst of hairlines, dry-brush strokes, giant letters cut across. A photo goes hard black and white. */
   background(ctx, env, L, p) {
     const { w, h } = env, u = Math.min(w, h), ground = tyGround(), ink = tyInk(), F = openField(env);
-    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {
       env.drawPhoto(p.mono);
       if (p.mono > 0) { ctx.save(); ctx.globalCompositeOperation = "soft-light"; ctx.globalAlpha = p.mono; env.drawPhoto(1); env.drawPhoto(1); ctx.restore(); }
@@ -2741,6 +2898,16 @@ const typo = {
       }
     }
     return true;
+  },
+  /** The Swiss grid: twelve columns with their gutters, eight fields down, a marker where the fields meet the gutters. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, m = 60, g = 20, cw = (w - 2 * m - 11 * g) / 12, fh = (h - 2 * m) / 8, xs = [], ys = every(m, h - m + 1, fh);
+    for (let i = 0; i < 12; i++) xs.push(m + i * (cw + g), m + i * (cw + g) + cw);
+    gridPen(ctx, color);
+    ctx.globalAlpha = 0.6; gridPath(ctx, xs, [], 0, m, 0, h - m);
+    ctx.globalAlpha = 1; gridPath(ctx, [], ys, m, 0, w - m, 0);
+    ctx.beginPath(); for (let i = 1; i < 12; i++) for (const y of ys) { const x = m + i * (cw + g) - g / 2; ctx.moveTo(x + 4, y); ctx.arc(x, y, 4, 0, TAU); } ctx.fill();
+    ctx.restore();
   },
   accent: { fill: (C) => css(C), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },   // the one colour, flat
   /**
@@ -2952,7 +3119,7 @@ const toon = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.2, side: 0.3, strip: 0.11 }),
-  theme: (base, C) => ({ ...base, field: css(toonGround(C)), text: css(toonText(C)), dim: css(toonText(C), 0.6), titleFill: css(toonText(C)), titleInk: css(toonGround(C)), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base, C) => ({ ...base, field: css(toonGround(C)), text: css(toonText(C)), dim: css(toonText(C), 0.6), titleFill: css(toonText(C)), titleInk: css(toonGround(C)), grid: () => css(toonText(C), 0.12) }),
   /**
    * The ground; a sunburst and stars; the setting sun behind where the channel graphic stands; the
    * giant silhouette against it; a lamp's beam, a winding road, a procession. A photo goes into the
@@ -2961,7 +3128,7 @@ const toon = {
   background(ctx, env, L, p) {
     const { w, h, C } = env, ground = toonGround(C), at = toonPlace(env, p);
     if (p.sun > 0 || p.burst > 0) [at.cx, at.cy] = objAt("sun", at.cx, at.cy, ctx);   // the sun and the rays from it: a scene object
-    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {
       env.drawPhoto(p.duo);
       wash(ctx, w, h, "multiply", mix([255, 255, 255], ground, 0.9), p.duo);
@@ -2979,6 +3146,14 @@ const toon = {
     toonRoad(ctx, env, at, p.road, S);
     toonParade(ctx, env, at, p.parade, S);
     return true;
+  },
+  /** A sunburst's construction: rings round a point under the foot of the picture, and rays from it every 10°. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, cx = w / 2, cy = h * 1.08, R = Math.hypot(w, h), r0 = 140;
+    gridPen(ctx, color); ctx.beginPath();
+    for (let r = r0; r < R; r += 110) { ctx.moveTo(cx + r, cy); ctx.arc(cx, cy, r, 0, TAU); }
+    for (let a = 0; a < 360; a += 10) { const t = (a * Math.PI) / 180; ctx.moveTo(cx + Math.cos(t) * r0, cy + Math.sin(t) * r0); ctx.lineTo(cx + Math.cos(t) * R, cy + Math.sin(t) * R); }
+    ctx.stroke(); ctx.restore();
   },
   accent: { fill: (C) => css(toonFloor(C)), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },
   /** Bold condensed capitals, flat, with a shadow a little off in a deeper tone of the ground, as a print's second colour; highlighted words in sun yellow or coral. */
@@ -3184,7 +3359,7 @@ const avant = {
     { key: "mono", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 1, name: { zh: "黑白照片", en: "Black-and-white photo" } },
   ],
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.17, side: 0.3, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(avGround()), text: css(avInk()), dim: css(avInk(), 0.55), titleFill: css(avInk()), titleInk: css(avGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(avGround()), text: css(avInk()), dim: css(avInk(), 0.55), titleFill: css(avInk()), titleInk: css(avGround()), grid: () => css(avInk(), 0.14) }),
   /**
    * The ground (a studio backdrop, lighter in the middle) and the figure, or the photo in black and
    * white; then, in order, the motion smear, the glow, the blur with its frame of focus, the fluted
@@ -3194,17 +3369,19 @@ const avant = {
    */
   background(ctx, env, L, p) {
     const { w, h } = env, u = Math.min(w, h), ground = avGround();
-    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h); }
     let box;
     if (env.photo) {
       env.drawPhoto(p.mono);
       if (!L.fill) return true;
       box = { cx: w * 0.55, cy: h * 0.5, size: h * 0.9 };
     } else {
+      if (L.ground !== false) {   // the studio backdrop, lighter in the middle: the ground
+        const g = ctx.createRadialGradient(w * 0.6, h * 0.42, 0, w * 0.6, h * 0.42, Math.hypot(w, h) * 0.6);
+        g.addColorStop(0, css(dark ? [44, 44, 48] : [244, 244, 242])); g.addColorStop(1, css(ground));
+        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+      }
       if (!L.grid) return true;
-      const g = ctx.createRadialGradient(w * 0.6, h * 0.42, 0, w * 0.6, h * 0.42, Math.hypot(w, h) * 0.6);
-      g.addColorStop(0, css(dark ? [44, 44, 48] : [244, 244, 242])); g.addColorStop(1, css(ground));
-      ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
       box = avFigure(ctx, env, p);
     }
     avSmear(ctx, u, p.smear);
@@ -3214,8 +3391,16 @@ const avant = {
     avGlass(ctx, env, box, p.glass);
     avMosaic(ctx, env, box, u, p.mosaic, sharp);   // over the glass, so its cells stay square
     avBand(ctx, env, box, p.band, sharp);
-    if (p.fade > 0) { const f = ctx.createLinearGradient(0, h * 0.45, 0, h); f.addColorStop(0, css(ground, 0)); f.addColorStop(1, css(ground, Math.min(1, p.fade * 1.1))); ctx.fillStyle = f; ctx.fillRect(0, 0, w, h); }
+    if (p.fade > 0) wherePainted(ctx, (c) => { const f = c.createLinearGradient(0, h * 0.45, 0, h); f.addColorStop(0, css(ground, 0)); f.addColorStop(1, css(ground, Math.min(1, p.fade * 1.1))); c.fillStyle = f; c.fillRect(0, 0, w, h); }, L.base === "clear");   // on a see-through base, what is there fades
     return true;
+  },
+  /** A layout grid as a design tool shows it: twelve columns in hairlines, and a cross at every column line on each eighth of the height. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, m = 64, xs = every(m, w - m + 1, (w - 2 * m) / 12), ys = every(m, h - m + 1, (h - 2 * m) / 8);
+    gridPen(ctx, color);
+    ctx.globalAlpha = 0.5; gridPath(ctx, xs, [], 0, 0, 0, h);
+    ctx.globalAlpha = 1; ctx.beginPath(); for (const x of xs) for (const y of ys) { ctx.moveTo(x - 10, y); ctx.lineTo(x + 10, y); ctx.moveTo(x, y - 10); ctx.lineTo(x, y + 10); } ctx.stroke();
+    ctx.restore();
   },
   accent: { fill: () => css(dark ? [26, 26, 30] : [206, 206, 203]), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.strokeStyle = css(avInk(), 0.45); ctx.lineWidth = 1.5; run(0, 0); } },
   /** A big grotesque, upright and flat; highlighted words in the channel colour. */
@@ -3441,7 +3626,7 @@ const collage = {
     { key: "slices", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.35, name: { zh: "照片撕条", en: "Photo torn in strips" } },
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
-  theme: (base) => ({ ...base, field: css(clGround()), text: css(clInk()), dim: css(clInk(), 0.6), titleFill: css(clInk()), titleInk: css(clGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(clGround()), text: css(clInk()), dim: css(clInk(), 0.6), titleFill: css(clInk()), titleInk: css(clGround()), grid: () => css(clInk(), 0.1) }),
   /**
    * The sheet and the pieces pasted on it (see clPieces). A photo goes black and white; one filling the
    * canvas is torn into horizontal strips, each set back a little off, with white fibre along the tears,
@@ -3449,7 +3634,7 @@ const collage = {
    */
   background(ctx, env, L, p) {
     const { w, h } = env, u = Math.min(w, h);
-    ctx.fillStyle = css(clGround()); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(clGround()); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {
       env.drawPhoto(p.mono);
       if (!L.fill) return true;
@@ -3473,6 +3658,15 @@ const collage = {
     if (!L.grid) return true;
     clPieces(ctx, env, p, false);
     return true;
+  },
+  /** A cutting mat under the sheet: a grid every 24, firmer every 96, and the angle guides from its corner. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, fine = (n) => every(24, n, 24).filter((v) => v % 96);
+    gridPen(ctx, color);
+    ctx.globalAlpha = 0.45; gridPath(ctx, fine(w), fine(h), 0, 0, w, h);
+    ctx.globalAlpha = 1; gridPath(ctx, every(96, w, 96), every(96, h, 96), 0, 0, w, h);
+    ctx.beginPath(); for (const a of [30, 45, 60]) { const t = (a * Math.PI) / 180; ctx.moveTo(0, h); ctx.lineTo(Math.cos(t) * w * 2, h - Math.sin(t) * w * 2); } ctx.lineWidth = 3; ctx.stroke();
+    ctx.restore();
   },
   accent: { fill: (C) => css(C), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.lineJoin = "round"; ctx.strokeStyle = css(CL.white); ctx.lineWidth = 9; run(0, 0); } },   // a cut piece of paper with its white edge
   /**
@@ -3602,7 +3796,7 @@ const yellow = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.16, side: 0.28, strip: 0.1 }),
-  theme: (base, C) => ({ ...base, field: css(ylGround(C)), text: css(YL.text), dim: css(YL.text, 0.6), titleFill: css(YL.text), titleInk: css(ylGround(C)), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base, C) => ({ ...base, field: css(ylGround(C)), text: css(YL.text), dim: css(YL.text, 0.6), titleFill: css(YL.text), titleInk: css(ylGround(C)), grid: () => css(YL.ink, 0.16) }),
   /**
    * The yellow, then (behind) crossing stripes and a beam, the black silhouette, the giant letters in
    * white — the silhouette turning yellow inside them — and the flock. A photo goes black and white;
@@ -3614,7 +3808,7 @@ const yellow = {
     // the letters are white, so they may stand behind the black title: they take the field's far side; the black silhouette keeps to the room
     const W = p.giant > 0 && R ? ylWord(ctx, env, p, { x0: F0.x0 + (F0.x1 - F0.x0) * 0.42, x1: F0.x1 - (F0.x1 - F0.x0) * 0.04, y0: F0.y0 + 24, y1: F0.y1 }) : null;
     if (W) { const mx = W.x0 + W.bw / 2, my = W.y0 + W.bh / 2, [X, Y] = objAt("letters", mx, my, ctx); W.x0 += X - mx; W.y0 += Y - my; }   // a scene object
-    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {
       env.drawPhoto(p.mono);
       if (L.fill && W && p.inside > 0) { const x = workLike(ctx, "yl"); x.fillStyle = css(ground); x.fillRect(0, 0, w, h); x.globalCompositeOperation = "destination-out"; ylLetters(x, W, [0, 0, 0]); layDown(ctx, x, p.inside); }
@@ -3650,6 +3844,15 @@ const yellow = {
       }
     }
     return true;
+  },
+  /** Registration crosses on the yellow, every 120, a dot between them. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, s = 120;
+    gridPen(ctx, color, 3); ctx.beginPath();
+    for (let x = s / 2; x < w; x += s) for (let y = s / 2; y < h; y += s) { ctx.moveTo(x - 14, y); ctx.lineTo(x + 14, y); ctx.moveTo(x, y - 14); ctx.lineTo(x, y + 14); }
+    ctx.stroke(); ctx.beginPath();
+    for (let x = s; x < w; x += s) for (let y = s; y < h; y += s) { ctx.moveTo(x + 3.5, y); ctx.arc(x, y, 3.5, 0, TAU); }
+    ctx.fill(); ctx.restore();
   },
   accent: { fill: () => css(YL.white), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },   // a white band: the small parts' ink reads on it as on the yellow
   /** Tight black capitals, flat and upright; highlighted words in the accent colour. */
@@ -3781,7 +3984,7 @@ const pitch = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.2, side: 0.3, strip: 0.11 }),
-  theme: (base) => ({ ...base, field: css(ptGround()), text: css(ptLine()), dim: css(ptLine(), 0.6), titleFill: css(ptLine()), titleInk: css(ptGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(ptGround()), text: css(ptLine()), dim: css(ptLine(), 0.6), titleFill: css(ptLine()), titleInk: css(ptGround()), grid: () => css(ptLine(), 0.2) }),
   /**
    * The grass in mown stripes, the stadium, the pitch's lines, the net, the floodlights, the ball and
    * the crowd, in that order. A photo is posterized into the seventies' few flat tones; one filling the
@@ -3789,7 +3992,7 @@ const pitch = {
    */
   background(ctx, env, L, p) {
     const { w, h } = env, u = Math.min(w, h), F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0;
-    ctx.fillStyle = css(ptGround()); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(ptGround()); ctx.fillRect(0, 0, w, h); }
     const mow = () => {
       if (p.mow <= 0) return;
       ctx.save(); ctx.translate(w / 2, h / 2); ctx.rotate(-0.5); ctx.fillStyle = css(dark ? [0, 0, 0] : [190, 120, 0], 0.16 * p.mow);
@@ -3821,7 +4024,7 @@ const pitch = {
     const [bx, by] = p.ball > 0 || p.net > 0 ? objAt("ball", bx0, by0, ctx) : [bx0, by0];   // a scene object, and the net where it struck with it
     if (p.net > 0) goalNet(ctx, env, p.net, bx, by);
     lights();
-    if (p.halftone > 0) dotScreen(ctx, w, h, dark ? [0, 0, 0] : [150, 110, 0], 10, 0.22 * p.halftone);
+    if (p.halftone > 0) wherePainted(ctx, (c) => dotScreen(c, w, h, dark ? [0, 0, 0] : [150, 110, 0], 10, 0.22 * p.halftone), L.base === "clear");
     if (p.ball > 0) football(ctx, bx, by, br, rand(1201) * TAU, p.halftone);
     for (let k = 0, n = p.crowd * 22; k < Math.ceil(n); k++) {   // the crowd: heads and shoulders along the floor, some arms up
       const a = clamp(n - k), x = F.x0 + fw * (0.3 + (0.7 * (k + 0.5)) / 22) + (rand(k * 2.3 + 1220) - 0.5) * fw * 0.02, s = u * (0.05 + rand(k * 3.7 + 1221) * 0.035), y = F.y1 - s * (0.6 + rand(k * 1.9 + 1222) * 0.5);   // clear of the tag in the corner
@@ -3832,6 +4035,15 @@ const pitch = {
       ctx.restore();
     }
     return true;
+  },
+  /** A coach's tactics board: the pitch cut into zones down and channels across in dashed lines, the halfway line and the centre circle. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env;
+    gridPen(ctx, color);
+    ctx.setLineDash([18, 12]); gridPath(ctx, [w / 6, w / 3, (w * 2) / 3, (w * 5) / 6], [h / 5, (h * 2) / 5, (h * 3) / 5, (h * 4) / 5], 0, 0, w, h);
+    ctx.setLineDash([]); ctx.lineWidth = 3; gridPath(ctx, [w / 2], [], 0, 0, 0, h);
+    ctx.beginPath(); ctx.arc(w / 2, h / 2, h * 0.17, 0, TAU); ctx.moveTo(w / 2 + 6, h / 2); ctx.arc(w / 2, h / 2, 6, 0, TAU); ctx.stroke();
+    ctx.restore();
   },
   accent: { fill: () => css(dark ? mix(PT.deep, PT.ink, 0.45) : PT.green), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.strokeStyle = css(PT.white); ctx.lineWidth = 6; run(0, 0); } },   // the touchline
   /** Bold condensed capitals, flat; highlighted words in the channel colour (or yellow, or green, where that would not show). */
@@ -3944,7 +4156,7 @@ const dots = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(DM.black), text: css(DM.white), dim: css(DM.white, 0.55), titleFill: css(DM.white), titleInk: css(DM.black), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(DM.black), text: css(DM.white), dim: css(DM.white, 0.55), titleFill: css(DM.white), titleInk: css(DM.black), grid: () => css(DM.white, 0.16) }),
   /**
    * Black; stars and columns of digits; the surface of dots; the figure (or the photo filling the canvas)
    * read into a grid of dots; then the fringe and the glow over what is there. A print photo is only
@@ -3960,7 +4172,7 @@ const dots = {
       dotGrid(ctx, env, p, 0, 0, cols, rows, cell, (i, j) => { const q = (j * cols + i) * 4; return ((px[q] * 54 + px[q + 1] * 183 + px[q + 2] * 19) >> 8) / 255; },
         (i, j) => { const q = (j * cols + i) * 4, c = [px[q], px[q + 1], px[q + 2]], l = Math.max(...c) || 1; return mix(DM.white, c.map((v) => (v * 255) / l), p.colour); });
     } else {
-      ctx.fillStyle = css(DM.black); ctx.fillRect(0, 0, w, h);
+      if (L.ground !== false) { ctx.fillStyle = css(DM.black); ctx.fillRect(0, 0, w, h); }
       if (!L.grid) return true;
       for (let k = 0, n = p.stars * 120; k < Math.ceil(n); k++) { ctx.fillStyle = css(DM.white, (0.3 + 0.7 * rand(k * 2.3 + 1300)) * clamp(n - k)); ctx.beginPath(); ctx.arc(rand(k * 3.1 + 1301) * w, rand(k * 4.7 + 1302) * h, 0.8 + rand(k * 5.9 + 1303) * 2, 0, TAU); ctx.fill(); }
       if (p.columns > 0) {   // columns of digits running down, fading as they go
@@ -3993,9 +4205,16 @@ const dots = {
         dotGrid(ctx, env, p, x0, y0, cols, rows, cell, (i, j) => (cov[j * cols + i] / 255) * (0.35 + 0.45 * (1 - (i / cols + j / rows) / 2) + 0.3 * noise(i * 0.37 + j * 0.61 + 7)), (i, j) => mix(DM.white, C, 0.15 * noise(i * 0.7 + j * 1.3)));
       }
     }
-    rgbFringe(ctx, u * 0.008 * p.rgb);
+    if (p.rgb > 0) wherePainted(ctx, (c) => rgbFringe(c, u * 0.008 * p.rgb), L.base === "clear");   // on a see-through base, only over what is there
     if (p.glow > 0 && !fast && canPaint(ctx)) { const soft = softCopy(snap(ctx, "dmGlow"), 16, "dmSoft"), cv = ctx.canvas; inPixels(ctx, () => { ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.55 * p.glow; ctx.imageSmoothingEnabled = true; ctx.drawImage(soft, 0, 0, cv.width, cv.height); }); }
     return true;
+  },
+  /** The LED wall itself: its unlit points, every 16. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, s = 16, r = 2.6;
+    gridPen(ctx, color); ctx.beginPath();
+    for (let y = s / 2; y < h; y += s) for (let x = s / 2; x < w; x += s) { ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, TAU); }
+    ctx.fill(); ctx.restore();
   },
   accent: { fill: () => css([12, 12, 16]), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "round"; ctx.strokeStyle = css(DM.white, 0.8); ctx.lineWidth = 4; ctx.setLineDash([0.1, 12]); run(0, 0); ctx.setLineDash([]); } },   // a row of dots along the edge
   /** White capitals, a glow of the channel colour round them (the shadow slider); highlighted words in the channel colour. */
@@ -4072,7 +4291,7 @@ const neon = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.16, side: 0.28, strip: 0.1 }),
-  theme: (base, C) => { const N = neonSet(C); return { ...base, field: css(neonGround(N)), text: css(neonText(N)), dim: css(neonText(N), 0.6), titleFill: css(neonText(N)), titleInk: css(neonGround(N)), grid: () => "rgba(0,0,0,0)" }; },
+  theme: (base, C) => { const N = neonSet(C); return { ...base, field: css(neonGround(N)), text: css(neonText(N)), dim: css(neonText(N), 0.6), titleFill: css(neonText(N)), titleInk: css(neonGround(N)), grid: () => css(neonText(N), 0.14) }; },
   /**
    * The ground, the diagonal plane, the backlight, the bars, then the figure: a rim of hot light a little
    * off it, and its body lit from that side down into the night. A photo is mapped onto the palette
@@ -4082,10 +4301,10 @@ const neon = {
     const { w, h, C } = env, N = neonSet(C), ground = neonGround(N), F = openField(env), fw = F.x1 - F.x0, fh = F.y1 - F.y0;
     const size = fh * (0.55 + 0.5 * p.figure), at = [F.x0 + fw * 0.64, F.y1 - size * 0.46];
     const [cx, cy] = !env.photo && L.grid && (p.figure > 0 || p.glow > 0) ? objAt("figure", at[0], at[1], ctx) : at;   // the figure and its glow: a scene object
-    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h); }
     const after = () => {
       if (p.bloom > 0 && !fast && canPaint(ctx)) { const soft = softCopy(snap(ctx, "neonGlow"), 18, "neonSoft"), cv = ctx.canvas; inPixels(ctx, () => { ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.7 * p.bloom; ctx.imageSmoothingEnabled = true; ctx.drawImage(soft, 0, 0, cv.width, cv.height); }); }
-      if (p.halftone > 0) dotScreen(ctx, w, h, N.deep, 8, 0.45 * p.halftone);
+      if (p.halftone > 0) wherePainted(ctx, (c) => dotScreen(c, w, h, N.deep, 8, 0.45 * p.halftone), L.base === "clear");
     };
     if (env.photo) {
       env.drawPhoto();
@@ -4113,6 +4332,11 @@ const neon = {
     }
     after();
     return true;
+  },
+  /** The light through a noir window's blind: its slats laid across the room on the slant, each a pair of lines. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env;
+    gridPen(ctx, color); slantPath(ctx, w, h, -0.32, 64); slantPath(ctx, w, h, -0.32, 64, 22); ctx.restore();
   },
   accent: { fill: (C) => { const N = neonSet(C); return css(dark ? mix(N.deep, N.mid, 0.22) : N.deep); }, tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run, nx, ny, C) { ctx.lineCap = "butt"; ctx.strokeStyle = css(neonSet(C || NEON.white).hot); ctx.lineWidth = 4; run(0, 0); } },
   /** Pale capitals glowing in the hot tone (the shadow slider), or on the hot ground night-dark ones; highlighted words in the hot tone, or a deep tone of the channel's. */
@@ -4301,7 +4525,7 @@ const court = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.18, side: 0.3, strip: 0.11 }),
-  theme: (base) => ({ ...base, field: css(bbGround()), text: css(bbInk()), dim: css(bbInk(), 0.6), titleFill: css(bbInk()), titleInk: css(bbGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(bbGround()), text: css(bbInk()), dim: css(bbInk(), 0.6), titleFill: css(bbInk()), titleInk: css(bbGround()), grid: () => css(bbInk(), 0.1) }),
   /**
    * The ground; the half court; the dotted hoop; speed trails behind the channel graphic; then the
    * varsity number with the spray and the ball on it. A photo becomes a two-colour print (navy, the team
@@ -4309,7 +4533,7 @@ const court = {
    */
   background(ctx, env, L, p) {
     const { w, h, C } = env, u = Math.min(w, h), team = bbTeam(C);
-    ctx.fillStyle = css(bbGround()); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(bbGround()); ctx.fillRect(0, 0, w, h); }
     if (env.photo) {
       env.drawPhoto(p.duo);
       mapTones(ctx, toneTable([[0, mix(BB.navy, team, 0.2)], [0.55, team], [1, BB.white]], 0.15), p.duo * 0.85);
@@ -4356,6 +4580,15 @@ const court = {
     }
     if (p.ball > 0) basketball(ctx, bx, by, br, -0.5 + rand(1520) * 0.6, p.halftone);
     return true;
+  },
+  /** A hardwood floor: boards across, 48 wide, their butt joints staggered from row to row. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, b = 48;
+    gridPen(ctx, color);
+    gridPath(ctx, [], every(b, h, b), 0, 0, w, 0);
+    ctx.beginPath();
+    for (let j = 0; j * b < h; j++) for (let x = noise(j * 3.1 + 7) * 420, i = 0; x < w; i++, x += 300 + noise(j * 1.7 + i * 2.3) * 360) { ctx.moveTo(x, j * b); ctx.lineTo(x, j * b + b); }
+    ctx.stroke(); ctx.restore();
   },
   accent: { fill: () => css(BB.wood), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.strokeStyle = css(BB.white); ctx.lineWidth = 7; run(0, 0); } },   // the hardwood floor and its boundary line
   /** Heavy condensed capitals with a second colour set off a little behind them, as on a jersey (the shadow slider); highlighted words in ball orange. */
@@ -4436,7 +4669,7 @@ const velvet = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.17, side: 0.3, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(vlGround()), text: css(VL.cream), dim: css(VL.cream, 0.65), titleFill: css(VL.cream), titleInk: css(vlGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(vlGround()), text: css(VL.cream), dim: css(VL.cream, 0.65), titleFill: css(VL.cream), titleInk: css(vlGround()), grid: () => css(VL.cream, 0.2) }),
   /**
    * The sky (deeper toward the top at dusk), stars, velvet hills rising from the floor, then the plush
    * figure: its fuzzy halo, its soft cast shadow, and the body on a work canvas — the colour, a blurred
@@ -4445,8 +4678,8 @@ const velvet = {
    */
   background(ctx, env, L, p) {
     const { w, h, C } = env, u = Math.min(w, h), ground = vlGround(), body = vlBody(C);
-    ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h);
-    if (p.dusk > 0) { const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, css(dark ? [4, 6, 22] : VL.night, 0.85 * p.dusk)); g.addColorStop(0.65, css(dark ? VL.night : VL.peri, 0)); g.addColorStop(1, css(dark ? VL.peri : [170, 180, 250], 0.5 * p.dusk)); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); }
+    if (L.ground !== false) { ctx.fillStyle = css(ground); ctx.fillRect(0, 0, w, h); }
+    if (L.ground !== false && p.dusk > 0) { const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, css(dark ? [4, 6, 22] : VL.night, 0.85 * p.dusk)); g.addColorStop(0.65, css(dark ? VL.night : VL.peri, 0)); g.addColorStop(1, css(dark ? VL.peri : [170, 180, 250], 0.5 * p.dusk)); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); }
     if (env.photo) {
       env.drawPhoto();
       mapTones(ctx, toneTable([[0, VL.night], [0.32, VL.peri], [0.6, VL.green], [0.82, VL.pink], [1, VL.cream]], 0.3), p.tone);
@@ -4485,6 +4718,15 @@ const velvet = {
     }
     avGlow(ctx, p.bloom * 0.6);
     return true;
+  },
+  /** Quilted velvet: stitched lines on the slant both ways, a tuft where they cross. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, g = 110, a = Math.PI / 4, n = [-Math.sin(a), Math.cos(a)], m = [Math.sin(a), Math.cos(a)], k = Math.ceil(Math.hypot(w, h) / g);
+    gridPen(ctx, color);
+    ctx.setLineDash([12, 9]); slantPath(ctx, w, h, a, g); slantPath(ctx, w, h, -a, g); ctx.setLineDash([]);
+    ctx.beginPath();
+    for (let i = -k; i <= k; i++) for (let j = -k; j <= k; j++) { const x = w / 2 + (i * n[0] + j * m[0]) * g, y = h / 2 + (i * n[1] + j * m[1]) * g; if (x > -9 && x < w + 9 && y > -9 && y < h + 9) { ctx.moveTo(x + 5, y); ctx.arc(x, y, 5, 0, TAU); } }
+    ctx.fill(); ctx.restore();
   },
   accent: { fill: () => css(VL.green), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge() {} },   // a green velvet lawn
   /** Cream letters standing up off the page on a soft shadow (the shadow slider); highlighted words in the object colour. */
@@ -4572,7 +4814,7 @@ const rave = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(RV.night), text: css(RV.white), dim: css(RV.white, 0.6), titleFill: css(RV.white), titleInk: css(RV.night), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(RV.night), text: css(RV.white), dim: css(RV.white, 0.6), titleFill: css(RV.white), titleInk: css(RV.night), grid: () => css(mix(RV.violet, RV.pink, 0.5), 0.22) }),
   /**
    * The night; nebulae and stars; the grid floor; the arch with its plus marks; the eclipse halo; liquid
    * blobs; the holographic figure; orbits and bubbles; then the fringe and the glow over all of it. A
@@ -4580,8 +4822,8 @@ const rave = {
    */
   background(ctx, env, L, p) {
     const { w, h, C } = env, u = Math.min(w, h), at = rvPlace(env, p), F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0, spot = boost(C, 0.7);
-    ctx.fillStyle = css(RV.night); ctx.fillRect(0, 0, w, h);
-    const after = () => { rgbFringe(ctx, u * 0.006 * p.fringe); if (p.bloom > 0 && !fast && canPaint(ctx)) { const soft = softCopy(snap(ctx, "rvGlow"), 16, "rvSoft"), cv = ctx.canvas; inPixels(ctx, () => { ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.6 * p.bloom; ctx.imageSmoothingEnabled = true; ctx.drawImage(soft, 0, 0, cv.width, cv.height); }); } };
+    if (L.ground !== false) { ctx.fillStyle = css(RV.night); ctx.fillRect(0, 0, w, h); }
+    const after = () => { if (p.fringe > 0) wherePainted(ctx, (c) => rgbFringe(c, u * 0.006 * p.fringe), L.base === "clear"); if (p.bloom > 0 && !fast && canPaint(ctx)) { const soft = softCopy(snap(ctx, "rvGlow"), 16, "rvSoft"), cv = ctx.canvas; inPixels(ctx, () => { ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.6 * p.bloom; ctx.imageSmoothingEnabled = true; ctx.drawImage(soft, 0, 0, cv.width, cv.height); }); } };
     if (env.photo) {
       env.drawPhoto();
       mapTones(ctx, toneTable([[0, RV.night], [0.3, [90, 20, 150]], [0.55, RV.pink], [0.78, [255, 160, 50]], [1, [210, 255, 250]]], 0.1), p.neon);
@@ -4636,6 +4878,15 @@ const rave = {
     for (let k = 0, n = p.bubbles * 8; k < Math.ceil(n); k++) glassBubble(ctx, F.x0 + fw * (0.3 + rand(k * 2.9 + 1730) * 0.68), F.y0 + fh * (0.08 + rand(k * 3.7 + 1731) * 0.84), u * (0.025 + rand(k * 4.9 + 1732) ** 2 * 0.08), mix(RV.cyan, spot, 0.4), clamp(n - k));
     after();
     return true;
+  },
+  /** A honeycomb, 48 a side. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, s = 48, dx = s * 1.5, dy = s * Math.sqrt(3);
+    gridPen(ctx, color); ctx.beginPath();
+    for (let i = 0, x = 0; x < w + s; i++, x += dx) for (let y = ((i % 2) * dy) / 2; y < h + dy; y += dy) {
+      for (let k = 0; k <= 6; k++) { const t = (k * Math.PI) / 3; k ? ctx.lineTo(x + Math.cos(t) * s, y + Math.sin(t) * s) : ctx.moveTo(x + s, y); }
+    }
+    ctx.stroke(); ctx.restore();
   },
   accent: { fill: () => css([24, 12, 44]), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run, nx, ny, C) { ctx.lineCap = "butt"; ctx.strokeStyle = css(boost(C || RV.pink, 0.7)); ctx.lineWidth = 4; run(0, 0); } },
   /** White capitals in a neon glow of the channel colour (the shadow slider); highlighted words in a holographic sheen. */
@@ -4719,7 +4970,7 @@ const chrome = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(crGround()), text: css(crInk()), dim: css(crInk(), 0.6), titleFill: css(crInk()), titleInk: css(crGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(crGround()), text: css(crInk()), dim: css(crInk(), 0.6), titleFill: css(crInk()), titleInk: css(crGround()), grid: () => css(crInk(), 0.12) }),
   /**
    * The ground; outlined letters; the wireframe; the chrome figure with its drips (on a work canvas:
    * the chrome bands, then the bevel); the holographic streak; bubbles; glitch slices over all of it.
@@ -4727,7 +4978,7 @@ const chrome = {
    */
   background(ctx, env, L, p) {
     const { w, h, C } = env, u = Math.min(w, h), at = crPlace(env, p), F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0, ink = crInk();
-    ctx.fillStyle = css(crGround()); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(crGround()); ctx.fillRect(0, 0, w, h); }
     const slices = () => {
       if (p.glitch <= 0 || !canPaint(ctx)) return;
       const src = snap(ctx, "crSnap"), m = ctx.getTransform(), k = m.a;
@@ -4797,6 +5048,14 @@ const chrome = {
     for (let k = 0, n = p.bubbles * 6; k < Math.ceil(n); k++) glassBubble(ctx, F.x0 + fw * (0.3 + rand(k * 2.9 + 1820) * 0.68), F.y0 + fh * (0.1 + rand(k * 3.7 + 1821) * 0.8), u * (0.03 + rand(k * 4.9 + 1822) ** 2 * 0.09), dark ? [200, 210, 230] : [120, 130, 150], clamp(n - k));
     slices();
     return true;
+  },
+  /** A Y2K wireframe room: frames closing in on the centre in perspective, and lines running into it from the edges. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, cx = w / 2, cy = h / 2, n = 8, inner = 0.12;
+    gridPen(ctx, color); ctx.beginPath();
+    for (const k of [1, 0.62, 0.4, 0.27, 0.18, inner]) ctx.rect(cx - (w / 2) * k, cy - (h / 2) * k, w * k, h * k);
+    for (let i = 0; i <= n; i++) for (const [ex, ey] of [[i / n, 0], [i / n, 1], [0, i / n], [1, i / n]]) { const x = ex * w, y = ey * h; ctx.moveTo(x, y); ctx.lineTo(cx + (x - cx) * inner, cy + (y - cy) * inner); }
+    ctx.stroke(); ctx.restore();
   },
   accent: { fill: () => css(dark ? [20, 20, 24] : [24, 24, 28]), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.strokeStyle = css(CR.white, 0.6); ctx.lineWidth = 1.5; run(0, 0); } },
   /** Capitals in polished chrome (on the grey ground, dark steel), a soft dark shadow under them (the shadow slider); highlighted words in a holographic sheen. */
@@ -4925,7 +5184,7 @@ const netart = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(naGround()), text: css(naInk()), dim: css(naInk(), 0.6), titleFill: css(naInk()), titleInk: css(naGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(naGround()), text: css(naInk()), dim: css(naInk(), 0.6), titleFill: css(naInk()), titleInk: css(naGround()), grid: () => css(naInk(), 0.12) }),
   /**
    * The ground; colour bars, checker patches, ASCII rows; the dithered figure; dialog windows; then,
    * working on what is there, pixel sorting, datamosh and scan shift; cursors last. A photo filling the
@@ -4933,7 +5192,7 @@ const netart = {
    */
   background(ctx, env, L, p) {
     const { w, h, C } = env, u = Math.min(w, h), at = naPlace(env, p), F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0, spot = boost(C, 0.7), ink = naInk();
-    ctx.fillStyle = css(naGround()); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(naGround()); ctx.fillRect(0, 0, w, h); }
     const damage = (box) => {
       if (!canPaint(ctx)) return;
       const m = ctx.getTransform(), k = m.a;
@@ -5008,6 +5267,14 @@ const netart = {
     for (let k = 0, n = p.cursor * 6; k < Math.ceil(n); k++) { ctx.save(); ctx.globalAlpha = clamp(n - k); cursorArrow(ctx, F.x0 + fw * (0.3 + rand(k * 2.9 + 1960) * 0.65), F.y0 + fh * (0.1 + rand(k * 3.7 + 1961) * 0.8), 1.6 + rand(k + 1962) * 1.2); ctx.restore(); }
     ctx.restore();
     return true;
+  },
+  /** A paint program's pixel grid, zoomed in: a square point at every 24, a line round every eight. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, s = 24;
+    gridPen(ctx, color);
+    gridPath(ctx, every(s * 8, w, s * 8), every(s * 8, h, s * 8), 0, 0, w, h);
+    ctx.beginPath(); for (let x = s; x < w; x += s) for (let y = s; y < h; y += s) ctx.rect(x - 2, y - 2, 4, 4); ctx.fill();
+    ctx.restore();
   },
   accent: { fill: () => css(NA.silver), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run, nx, ny) { ctx.lineCap = "butt"; ctx.strokeStyle = css(NA.light); ctx.lineWidth = 3; run(nx * 2, ny * 2); ctx.strokeStyle = css(NA.deep); ctx.lineWidth = 3; run(-nx * 2, -ny * 2); } },   // a bevelled system panel
   /** Plain capitals with a cyan and a magenta copy split off them (the shadow slider); highlighted words selected: white in a navy box. */
@@ -5285,7 +5552,7 @@ const verse = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.16, side: 0.28, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(vsGround()), text: css(vsInk()), dim: css(vsInk(), 0.6), titleFill: css(vsInk()), titleInk: css(vsGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(vsGround()), text: css(vsInk()), dim: css(vsInk(), 0.6), titleFill: css(vsInk()), titleInk: css(vsGround()), grid: () => css(vsInk(), 0.14) }),
   /**
    * The ground (a city glow rising on the night one); towers seen from below; focus lines; scribbles;
    * the figure (on a work canvas: an ink line round it, the flat colour, a shade cut from it and filled
@@ -5295,8 +5562,8 @@ const verse = {
    */
   background(ctx, env, L, p) {
     const { w, h, C } = env, u = Math.min(w, h), at = vsPlace(env, p), F = at.F, fw = F.x1 - F.x0, fh = F.y1 - F.y0;
-    ctx.fillStyle = css(vsGround()); ctx.fillRect(0, 0, w, h);
-    if (dark) { const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, css(VS.night, 0)); g.addColorStop(1, css([120, 30, 120], 0.55)); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); }
+    if (L.ground !== false) { ctx.fillStyle = css(vsGround()); ctx.fillRect(0, 0, w, h); }
+    if (L.ground !== false && dark) { const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, css(VS.night, 0)); g.addColorStop(1, css([120, 30, 120], 0.55)); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); }
     const glitch = (box) => {
       if (p.glitch <= 0 || !canPaint(ctx)) return;
       const src = snap(ctx, "vsGlitch"), m = ctx.getTransform(), k = m.a, bw0 = box.x1 - box.x0, bh0 = box.y1 - box.y0;
@@ -5370,8 +5637,16 @@ const verse = {
       ctx.restore();
     }
     glitch({ x0: F.x0, y0: F.y0, x1: F.x1, y1: F.y1 });
-    plateShift(ctx, u * 0.012 * p.offset);
+    if (p.offset > 0) wherePainted(ctx, (c) => plateShift(c, u * 0.012 * p.offset), L.base === "clear");
     return true;
+  },
+  /** A comic page's panels: three tiers, cut into two, three and two panels, with gutters between. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, m = 40, g = 22, tiers = [[0.36, [0.58, 0.42]], [0.3, [0.28, 0.44, 0.28]], [0.34, [0.42, 0.58]]], H = h - 2 * m - g * 2, W = w - 2 * m;
+    gridPen(ctx, color, 3); ctx.beginPath();
+    let y = m;
+    for (const [th, cols] of tiers) { const ph = H * th, ww = W - g * (cols.length - 1); let x = m; for (const c of cols) { ctx.rect(x, y, ww * c, ph); x += ww * c + g; } y += ph + g; }
+    ctx.stroke(); ctx.restore();
   },
   accent: { fill: (C) => css(vsBody(C)), tone: () => css(VS.ink, 0.55), toneScale: 1, edge(ctx, run, nx, ny) { ctx.lineCap = "butt"; ctx.strokeStyle = css(VS.ink); ctx.lineWidth = 9; run(0, 0); ctx.strokeStyle = css(VS.cyan); ctx.lineWidth = 4; run(nx * 12, ny * 12); } },   // the channel colour in halftone, an ink edge and a cyan line out of register
   /** Comic lettering: a drop in magenta halftone and the cyan plate a little the other way (the shadow slider); highlighted words yellow with an ink line. */
@@ -5449,7 +5724,7 @@ const glass = {
   ],
   titleFont: (f) => f.serif,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.16, side: 0.28, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(pgGround()), text: css(pgInk()), dim: css(pgInk(), 0.6), titleFill: css(pgInk()), titleInk: css(pgGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(pgGround()), text: css(pgInk()), dim: css(pgInk(), 0.6), titleFill: css(pgInk()), titleInk: css(pgGround()), grid: () => css(pgInk(), 0.12) }),
   /**
    * The room: the wall and the floor; the window with its glow and the light it lays on the floor; the
    * figure standing against it; flowers in a vase; brush strokes over all of it; then the glass (see
@@ -5463,7 +5738,7 @@ const glass = {
         const soft = softCopy(snap(ctx, "pgSnap"), 12, "pgFrost"), cv = ctx.canvas;
         inPixels(ctx, () => { ctx.globalAlpha = Math.min(1, p.frost * 0.9); ctx.imageSmoothingEnabled = true; ctx.drawImage(soft, 0, 0, cv.width, cv.height); });
       }
-      if (p.frost > 0) wash(ctx, w, h, "screen", dark ? [60, 62, 56] : [240, 242, 236], 0.4 * p.frost);
+      if (p.frost > 0) wherePainted(ctx, (c) => wash(c, w, h, "screen", dark ? [60, 62, 56] : [240, 242, 236], 0.4 * p.frost), L.base === "clear");
     };
     if (env.photo) {
       env.drawPhoto();
@@ -5471,19 +5746,21 @@ const glass = {
       pane();
       return true;
     }
-    const wall = ctx.createLinearGradient(0, 0, 0, h);
-    wall.addColorStop(0, css(dark ? [44, 50, 38] : [196, 200, 186])); wall.addColorStop(0.7, css(dark ? [30, 34, 26] : [168, 172, 156])); wall.addColorStop(1, css(dark ? [20, 22, 18] : [140, 144, 128]));
-    ctx.fillStyle = wall; ctx.fillRect(0, 0, w, h);
-    if (!L.grid) { pane(); return true; }
     const floor = F.y0 + fh * 0.8;
-    { const g = ctx.createLinearGradient(0, floor, 0, F.y1); g.addColorStop(0, css(dark ? [70, 46, 30] : [156, 110, 72])); g.addColorStop(1, css(dark ? [34, 22, 14] : [104, 70, 44])); ctx.fillStyle = g; ctx.fillRect(F.x0, floor, fw, F.y1 - floor + 4); }
+    if (L.ground !== false) {   // the room's wall and floor: the ground (the glass goes over it with what stands on it)
+      const wall = ctx.createLinearGradient(0, 0, 0, h);
+      wall.addColorStop(0, css(dark ? [44, 50, 38] : [196, 200, 186])); wall.addColorStop(0.7, css(dark ? [30, 34, 26] : [168, 172, 156])); wall.addColorStop(1, css(dark ? [20, 22, 18] : [140, 144, 128]));
+      ctx.fillStyle = wall; ctx.fillRect(0, 0, w, h);
+      const g = ctx.createLinearGradient(0, floor, 0, F.y1); g.addColorStop(0, css(dark ? [70, 46, 30] : [156, 110, 72])); g.addColorStop(1, css(dark ? [34, 22, 14] : [104, 70, 44])); ctx.fillStyle = g; ctx.fillRect(F.x0, floor, fw, F.y1 - floor + 4);
+    }
+    if (!L.grid) return true;
     const { ww, wh } = at, [mx, my] = p.window > 0 || p.warm > 0 ? objAt("window", at.wx + ww / 2, at.wy + wh * 0.3, ctx) : [at.wx + ww / 2, at.wy + wh * 0.3], wx = mx - ww / 2, wy = my - wh * 0.3, wa = Math.min(1, p.window * 3);   // the window and its light: a scene object
     if (p.warm > 0) {   // the window's glow on the wall round it, and the light it lays across the floor
       ctx.save(); ctx.globalCompositeOperation = "screen";
       const g = ctx.createRadialGradient(wx + ww / 2, wy + wh * 0.45, 0, wx + ww / 2, wy + wh * 0.45, Math.max(ww, wh) * 1.3); g.addColorStop(0, css(PG.warm, 0.55 * p.warm)); g.addColorStop(1, css(PG.warm, 0)); ctx.fillStyle = g; ctx.fillRect(F.x0, F.y0, fw, fh);
       ctx.fillStyle = css(PG.warm, 0.45 * p.warm * wa); shapeOf(ctx, [[wx, floor], [wx + ww, floor], [wx + ww * 0.4, F.y1], [wx - ww * 1.3, F.y1]]); ctx.fill();
       ctx.restore();
-      wash(ctx, w, h, "soft-light", PG.warm, 0.3 * p.warm);
+      wherePainted(ctx, (c) => wash(c, w, h, "soft-light", PG.warm, 0.3 * p.warm), L.base === "clear");
     }
     if (p.window > 0) {   // the window: a bright sky, mullions and a sill
       ctx.save(); ctx.globalAlpha = wa;
@@ -5520,6 +5797,13 @@ const glass = {
     brushwork(ctx, { x0: F.x0, y0: F.y0, x1: F.x1, y1: F.y1 }, p.paint, u * 0.013, "pgPaint");
     pane();
     return true;
+  },
+  /** Leaded glass: tall panes, each line of lead a pair of lines. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, pw = 160, ph = 240, xs = [], ys = [];
+    for (let x = pw; x < w; x += pw) xs.push(x - 4, x + 4);
+    for (let y = ph / 2; y < h; y += ph) ys.push(y - 4, y + 4);
+    gridPen(ctx, color); gridPath(ctx, xs, ys, 0, 0, w, h); ctx.restore();
   },
   accent: { fill: () => css(dark ? [52, 56, 48] : [226, 228, 220]), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run, nx, ny) { ctx.lineCap = "butt"; ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.lineWidth = 2; run(-nx * 3, -ny * 3); ctx.strokeStyle = css(PG.ink, 0.35); ctx.lineWidth = 2; run(nx * 2, ny * 2); } },   // a pane of frosted glass
   /** Serif letters with a soft light round them (on the night ground a warm glow, on the silver one a faint shadow: the shadow slider); highlighted words in the flowers' colour. */
@@ -5573,12 +5857,12 @@ function jlPlace(env, p) {
  * The machine's panel, which the circuit, the tiny print and the knobs are laid on, as large as `board`
  * says and whatever size the figure is. At 0.5 it is the field less a margin, its left edge where a figure
  * of the slider's default size (0.55) would reach; toward 1 it grows to the whole field, toward 0 it
- * shrinks about its middle to 0.4 of that.
+ * shrinks about its middle to nothing (at 0 there is no panel: see jelly's background).
  */
 function jlPanel({ F, cx }, board = 0.5) {
   const all = { x0: F.x0 + 24, y0: F.y0 + 24, x1: F.x1 - 24, y1: F.y1 - 24 }, usual = (F.y1 - F.y0) * (0.4 + 0.42 * 0.55), mid = { ...all, x0: Math.max(all.x0, cx - usual) };
   if (board >= 0.5) { const t = (board - 0.5) * 2; return Object.fromEntries(Object.keys(all).map((k) => [k, mid[k] + (all[k] - mid[k]) * t])); }
-  const k = 0.4 + 1.2 * board, mx = (mid.x0 + mid.x1) / 2, my = (mid.y0 + mid.y1) / 2, hw = ((mid.x1 - mid.x0) / 2) * k, hh = ((mid.y1 - mid.y0) / 2) * k;
+  const k = 2 * board, mx = (mid.x0 + mid.x1) / 2, my = (mid.y0 + mid.y1) / 2, hw = ((mid.x1 - mid.x0) / 2) * k, hh = ((mid.y1 - mid.y0) / 2) * k;
   return { x0: mx - hw, y0: my - hh, x1: mx + hw, y1: my + hh };
 }
 /** A polyline moved `o` to its left, its corners mitred. */
@@ -5686,7 +5970,7 @@ const jelly = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(jlGround()), text: css(jlInk()), dim: css(jlInk(), 0.6), titleFill: css(jlInk()), titleInk: css(jlGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(jlGround()), text: css(jlInk()), dim: css(jlInk(), 0.6), titleFill: css(jlInk()), titleInk: css(jlGround()), grid: () => css(jlInk(), 0.12) }),
   /**
    * The machine's panel round the figure: tiny print, the circuit, speakers, cables, knobs; all of it
    * softened (Depth of field); then the figure's glow, the jelly itself (on a work canvas: a colour lit
@@ -5695,8 +5979,8 @@ const jelly = {
    */
   background(ctx, env, L, p) {
     const { w, h, C } = env, u = Math.min(w, h), body = jlBody(C);
-    ctx.fillStyle = css(jlGround()); ctx.fillRect(0, 0, w, h);
-    { const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, "rgba(255,255,255,0.12)"); g.addColorStop(1, "rgba(0,0,0,0.12)"); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); }
+    if (L.ground !== false) { ctx.fillStyle = css(jlGround()); ctx.fillRect(0, 0, w, h); }
+    if (L.ground !== false) { const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, "rgba(255,255,255,0.12)"); g.addColorStop(1, "rgba(0,0,0,0.12)"); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); }
     if (env.photo) {
       env.drawPhoto();
       mapTones(ctx, toneTable([[0, [8, 18, 28]], [0.4, [34, 104, 132]], [0.7, [244, 132, 86]], [1, [252, 246, 228]]]), p.tone);
@@ -5705,14 +5989,15 @@ const jelly = {
     }
     if (!L.grid) return true;
     const at = jlPlace(env, p), F = at.F, { cx, cy, size } = at, P = jlPanel(at, p.board), room = p.board < 0.5 ? jlPanel(at) : P, pw = P.x1 - P.x0, ph = P.y1 - P.y0;
-    ctx.beginPath(); rounded(ctx, P.x0, P.y0, pw, ph, u * 0.025); ctx.fillStyle = css(dark ? JL.deep : [204, 216, 224]); ctx.fill(); ctx.strokeStyle = dark ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.18)"; ctx.lineWidth = 2; ctx.stroke();   // pale on the steel ground, so dark lettering over it still reads
-    if (p.text > 0) {   // columns of tiny print down both sides of the panel, an amber heading over each
+    const board = p.board > 0;   // the panel and what is laid on it (print, circuit, knobs): none at a board size of nothing
+    if (board) { ctx.beginPath(); rounded(ctx, P.x0, P.y0, pw, ph, u * 0.025); ctx.fillStyle = css(dark ? JL.deep : [204, 216, 224]); ctx.fill(); ctx.strokeStyle = dark ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.18)"; ctx.lineWidth = 2; ctx.stroke(); }   // pale on the steel ground, so dark lettering over it still reads
+    if (board && p.text > 0) {   // columns of tiny print down both sides of the panel, an amber heading over each
       ctx.save(); ctx.globalAlpha = Math.min(1, p.text * 3);
       const cw = pw * 0.17, rows = Math.round(4 + 26 * p.text);
       for (const x of [P.x0 + 18, P.x1 - 18 - cw]) { ctx.fillStyle = css(JL.amber, 0.85); ctx.fillRect(x, P.y0 + 18, cw * 0.6, 6); greeked(ctx, x, P.y0 + 34, cw, rows, 8, css(dark ? JL.cream : JL.ink, 0.5), 2420 + x); }
       ctx.restore();
     }
-    if (p.circuit > 0) circuit(ctx, P, p.circuit, dark ? JL.trace : [226, 118, 56], 2430);
+    if (board && p.circuit > 0) circuit(ctx, P, p.circuit, dark ? JL.trace : [226, 118, 56], 2430);
     // the speakers, cables and display are the jelly's: kept within the panel of the default size even when a smaller one is drawn
     if (p.speakers > 0) {   // pairs of speakers either side of the figure, the upper ones first
       const r = size * 0.15, n = p.speakers * 6;
@@ -5725,7 +6010,7 @@ const jelly = {
         ctx.save(); ctx.globalAlpha = clamp(n - k); cable(ctx, [x0, y0, x0 + s * size * 0.1, y0 + size * 0.6, x1 - s * size * 0.3, y1 + size * 0.5, x1, y1], u * (0.012 + rand(k + 2441) * 0.01), cols[k]); ctx.restore();
       }
     }
-    if (p.knobs > 0) {   // a row of knobs and buttons along the panel's foot, a small lamp beside each
+    if (board && p.knobs > 0) {   // a row of knobs and buttons along the panel's foot, a small lamp beside each
       const r = u * 0.024, n = p.knobs * 8, y = P.y1 - r * 2;
       for (let k = 0; k < Math.ceil(n); k++) {
         const x = P.x0 + pw * 0.08 + k * r * 3.4, c = [JL.lime, JL.coral, JL.cream, JL.cobalt][k % 4];
@@ -5783,6 +6068,13 @@ const jelly = {
     }
     avGlow(ctx, p.glow * 0.45);
     return true;
+  },
+  /** Perfboard: a ring of copper round every hole, 32 apart. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, s = 32, r = 5;
+    gridPen(ctx, color); ctx.beginPath();
+    for (let y = s / 2; y < h; y += s) for (let x = s / 2; x < w; x += s) { ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, TAU); }
+    ctx.stroke(); ctx.restore();
   },
   accent: { fill: () => css(dark ? JL.board : JL.cobalt), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run, nx, ny) { ctx.lineCap = "butt"; ctx.strokeStyle = css(JL.ink); ctx.lineWidth = 4; run(0, 0); ctx.strokeStyle = css(JL.lime); ctx.lineWidth = 4; run(-nx * 7, -ny * 7); } },
   /** Plain capitals with a glow of the jelly's colour round them (the shadow slider); highlighted words in glossy jelly, a pale band across their upper part. */
@@ -6007,11 +6299,12 @@ const skies = {
     { key: "vivid", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.6, name: { zh: "照片通透", en: "Photo clarity" } },
   ],
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(skSky()[1]), text: css(SK.white), dim: css(SK.white, 0.75), titleFill: css(SK.white), titleInk: css(SK.ink), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(skSky()[1]), text: css(SK.white), dim: css(SK.white, 0.75), titleFill: css(SK.white), titleInk: css(SK.ink), grid: () => css(SK.white, 0.18) }),
   /**
-   * The sky down to the horizon (above the town, or above the sea when there is one), then from the back:
-   * the sun's rays, fleecy clouds, contrails, the great cumulus standing on the horizon, haze along it,
-   * the sea, the town, the pole and its wires, leaves. A photo is made clearer and more vivid; filling
+   * The ground is the sky down to the horizon (above the town, or above the sea when there is one); over
+   * it, or over the base's grid or nothing, each by its slider, from the back: the sun's rays, fleecy clouds,
+   * contrails, the great cumulus standing on the horizon, haze along it, the sea, the town, the pole and its
+   * wires, leaves. A photo is made clearer and more vivid; filling
    * the canvas, it gets the sun and the haze too.
    */
   background(ctx, env, L, p) {
@@ -6047,11 +6340,13 @@ const skies = {
       godRays(r, w, h, amt, dark ? 1 : 0, null, sunMove);
       inPixels(x, () => { x.globalCompositeOperation = "screen"; x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high"; x.drawImage(small, 0, 0, W, H); });
     };
+    if (L.ground !== false) {   // the sky itself, down to the horizon: the ground
+      const g = ctx.createLinearGradient(0, F.y0, 0, Math.max(F.y0 + 10, horizon)); g.addColorStop(0, css(sky[0])); g.addColorStop(0.55, css(sky[1])); g.addColorStop(1, css(sky[2]));
+      ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    }
+    if (!L.grid) return true;
+    rays(ctx, p.sun * 0.55);   // screened onto what is there: painted each time, as a kept layer on its own could not screen it
     const paintSky = (x) => {
-      const g = x.createLinearGradient(0, F.y0, 0, Math.max(F.y0 + 10, horizon)); g.addColorStop(0, css(sky[0])); g.addColorStop(0.55, css(sky[1])); g.addColorStop(1, css(sky[2]));
-      x.fillStyle = g; x.fillRect(0, 0, w, h);
-      if (!L.grid) return;
-      rays(x, p.sun * 0.55);
       if (p.fleece > 0) fleece(x, F, horizon, p.fleece, 2500);
       x.save(); x.translate(coMove[0], coMove[1]);
       for (let k = 0, n = p.contrail * 2; k < Math.ceil(n); k++) {   // a plane's trail, fading out behind it
@@ -6073,9 +6368,10 @@ const skies = {
       x.restore();
       haze(x, p.haze);
     };
-    const kept = canPaint(ctx) && keptLayer(ctx, "skSky", [dark, seed, L.grid ? 1 : 0, w, h, F.x0, F.y0, F.x1, F.y1, horizon.toFixed(2), p.sun, p.fleece, p.contrail, p.cumulus, p.haze, sceneKey()].join("|"), paintSky);
-    if (kept) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(kept, 0, 0); ctx.restore(); } else paintSky(ctx);
-    if (!L.grid) return true;
+    if (p.fleece > 0 || p.contrail > 0 || p.cumulus > 0 || p.haze > 0) {
+      const kept = canPaint(ctx) && keptLayer(ctx, "skSky", [dark, seed, w, h, F.x0, F.y0, F.x1, F.y1, horizon.toFixed(2), p.fleece, p.contrail, p.cumulus, p.haze, sceneKey()].join("|"), paintSky);
+      if (kept) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(kept, 0, 0); ctx.restore(); } else paintSky(ctx);
+    }
     if (p.sea > 0) {   // the sea from the horizon down behind the town, a sun-glitter path on it
       const sg = ctx.createLinearGradient(0, horizon, 0, F.y1); sg.addColorStop(0, css(dark ? [120, 96, 150] : [92, 158, 214])); sg.addColorStop(1, css(dark ? [34, 30, 76] : [18, 84, 166]));
       ctx.save(); ctx.globalAlpha = Math.min(1, p.sea * 4); ctx.fillStyle = sg; ctx.fillRect(0, horizon, w, F.y1 - horizon + 8);
@@ -6092,6 +6388,14 @@ const skies = {
     }
     avGlow(ctx, p.haze * 0.3);
     return true;
+  },
+  /** A background painter's perspective guide: the horizon, and lines fanning out from a vanishing point on it. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, vx = w * 0.5, vy = h * 0.64, R = Math.hypot(w, h), r0 = 70;
+    gridPen(ctx, color); ctx.beginPath();
+    ctx.moveTo(0, vy); ctx.lineTo(w, vy);
+    for (let a = 0; a < 360; a += 7.5) { const t = (a * Math.PI) / 180; ctx.moveTo(vx + Math.cos(t) * r0, vy + Math.sin(t) * r0); ctx.lineTo(vx + Math.cos(t) * R, vy + Math.sin(t) * R); }
+    ctx.stroke(); ctx.restore();
   },
   accent: { fill: (C) => css(boost(C, 0.4)), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run, nx, ny) { ctx.lineCap = "butt"; ctx.strokeStyle = css(SK.white, 0.9); ctx.lineWidth = 5; run(-nx * 4, -ny * 4); } },
   /** White letters with a soft shadow (by day a deep blue, at dusk a warm glow: the shadow slider); highlighted words in the channel colour, brightened. */
@@ -6201,7 +6505,7 @@ const spectrum = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(spGround()), text: css(spInk()), dim: css(spInk(), 0.6), titleFill: css(spInk()), titleInk: css(spGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(spGround()), text: css(spInk()), dim: css(spInk(), 0.6), titleFill: css(spInk()), titleInk: css(spGround()), grid: () => css(spInk(), 0.14) }),
   /**
    * The paper; an engraved sky; the vortex behind the figure; lines running to the horizon at its feet;
    * waves along the foot of the field; streams and drips (begun under the figure, so they come out of
@@ -6210,7 +6514,7 @@ const spectrum = {
    */
   background(ctx, env, L, p) {
     const { w, h } = env, u = Math.min(w, h), ink = spInk();
-    ctx.fillStyle = css(spGround()); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(spGround()); ctx.fillRect(0, 0, w, h); }
     const engrave = (F) => {   // fine level lines, close at the top and opening out downward
       if (p.engrave <= 0) return;
       const fh = F.y1 - F.y0, deep = F.y0 + fh * (0.2 + 0.5 * p.engrave);
@@ -6292,6 +6596,13 @@ const spectrum = {
     }
     bars(at, F);
     return true;
+  },
+  /** An engraver's level lines across the plate, every 18, swelling gently as a burin's do. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env;
+    gridPen(ctx, color); ctx.beginPath();
+    for (let y = 9, j = 0; y < h; y += 18, j++) for (let x = 0; x <= w + 24; x += 24) { const yy = y + Math.sin(x * 0.006 + j * 0.45) * 3; x ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy); }
+    ctx.stroke(); ctx.restore();
   },
   accent: { fill: () => css(dark ? [30, 30, 28] : SP.mat), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run, nx, ny) { ctx.lineCap = "butt"; ctx.strokeStyle = css(spInk()); ctx.lineWidth = 2.5; run(0, 0); for (let i = 0; i < 6; i++) { ctx.strokeStyle = css(spec(i / 6)); ctx.lineWidth = 2; run(-nx * (6 + i * 3), -ny * (6 + i * 3)); } } },   // a mat with the spectrum running along its edge
   /** Ink capitals standing on a stack of offset copies in spectrum colours (the shadow slider); highlighted words filled with the spectrum. */
@@ -6668,7 +6979,7 @@ const citypop = {
     { key: "cel", needsPhoto: true, min: 0, max: 1, step: 0.05, def: 0.85, name: { zh: "照片赛璐珞化", en: "Photo as cels" } },
   ],
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
-  theme: (base, C, p) => ({ ...base, field: css(cpSky((p && p.dusk) || 0)[1]), text: css(CP.cream), dim: css(CP.cream, 0.6), titleFill: css(CP.cream), titleInk: css(CP.line), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base, C, p) => ({ ...base, field: css(cpSky((p && p.dusk) || 0)[1]), text: css(CP.cream), dim: css(CP.cream, 0.6), titleFill: css(CP.cream), titleInk: css(CP.line), grid: () => css(CP.pink, 0.24) }),
   /**
    * The sky, its stars and clouds, the city (painted once and kept until one of their sliders changes);
    * then the sign, the palms, the water mirroring all of it, the figure in front, the lasers. A photo is
@@ -6683,10 +6994,12 @@ const citypop = {
     }
     const water = F.y1 - fh * 0.32 * p.water, top = water - fh * (0.12 + 0.5 * p.skyline);
     const cloudMove = L.grid && p.clouds > 0 ? objAt("clouds", F.x0 + fw * 0.5, F.y0 + fh * 0.3, ctx).map((v, i) => v - [F.x0 + fw * 0.5, F.y0 + fh * 0.3][i]) : [0, 0];   // a scene object: the clouds move as one
-    const paintSky = (x) => {
-      const g = x.createLinearGradient(0, F.y0, 0, water); g.addColorStop(0, css(sky[0])); g.addColorStop(0.55, css(sky[1])); g.addColorStop(1, css(sky[2]));
-      x.fillStyle = g; x.fillRect(0, 0, w, h);
-      if (!L.grid) return;
+    if (L.ground !== false) {   // the sky itself, down to the water's line: the ground
+      const g = ctx.createLinearGradient(0, F.y0, 0, water); g.addColorStop(0, css(sky[0])); g.addColorStop(0.55, css(sky[1])); g.addColorStop(1, css(sky[2]));
+      ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    }
+    if (!L.grid) return true;
+    const paintSky = (x) => {   // what is in the sky: kept on a layer of its own
       if (p.stars > 0) cpStars(x, F, water, p.stars * 360, d, 2710);
       if (p.clouds > 0) {   // banks of cloud, the far (lower, smaller) ones first
         const n = p.clouds * 10, banks = [];
@@ -6697,9 +7010,10 @@ const citypop = {
       }
       if (p.skyline > 0) cpCity(x, F, top, water, p.lights, p.neon, d, 2760);
     };
-    const kept = canPaint(ctx) && keptLayer(ctx, "cpSky", [seed, L.grid ? 1 : 0, w, h, F.x0, F.y0, F.x1, F.y1, d, p.stars, p.clouds, p.skyline, p.lights, p.neon, p.water, cloudMove.map((v) => v.toFixed(2)).join()].join("|"), paintSky);
-    if (kept) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(kept, 0, 0); ctx.restore(); } else paintSky(ctx);
-    if (!L.grid) return true;
+    if (p.stars > 0 || p.clouds > 0 || p.skyline > 0) {
+      const kept = canPaint(ctx) && keptLayer(ctx, "cpSky", [seed, w, h, F.x0, F.y0, F.x1, F.y1, d, p.stars, p.clouds, p.skyline, p.lights, p.neon, p.water, cloudMove.map((v) => v.toFixed(2)).join()].join("|"), paintSky);
+      if (kept) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(kept, 0, 0); ctx.restore(); } else paintSky(ctx);
+    }
     if (p.neon > 0) { const [sx, sy] = objAt("sign", F.x0 + fw * 0.86, F.y0 + fh * 0.22, ctx); cpSign(ctx, sx, sy, u * (0.16 + 0.14 * p.neon), clamp(p.neon * 2.5), 2780); }   // a scene object
     if (p.palms > 0) {   // a scene object: up to three palms, each growing in turn
       const n = p.palms * 3, set = [[F.x0 + fw * 0.05, 1.05, 0.5], [F.x1 - fw * 0.05, 0.95, -0.6], [F.x0 + fw * 0.2, 0.62, 0.3]];
@@ -6723,6 +7037,16 @@ const citypop = {
     }
     if (p.laser > 0) cpLasers(ctx, F, p.laser * 8, 2700);
     return true;
+  },
+  /** The eighties' grid floor: the horizon, lines running from the foot of the picture to a vanishing point on it, and cross lines closing up toward it. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, hz = h * 0.62, vx = w / 2;
+    gridPen(ctx, color); ctx.beginPath();
+    ctx.moveTo(0, hz); ctx.lineTo(w, hz);
+    const y0 = hz + (h - hz) * 0.08;   // the lines that run to it start a little below it, where they still stand apart
+    for (let i = -14; i <= 14; i++) { const x1 = vx + i * 200; ctx.moveTo(vx + (x1 - vx) * 0.08, y0); ctx.lineTo(x1, h); }
+    for (let k = 3; k <= 10; k++) { const y = hz + (h - hz) * (k / 10) ** 2; ctx.moveTo(0, y); ctx.lineTo(w, y); }
+    ctx.stroke(); ctx.restore();
   },
   accent: { fill: (C) => css(mix([14, 14, 44], C, 0.12)), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; for (const [w, a] of [[16, 0.15], [7, 0.4], [3, 1]]) { ctx.strokeStyle = css(CP.pink, a); ctx.lineWidth = w; run(0, 0); } ctx.strokeStyle = css([255, 210, 236]); ctx.lineWidth = 1.2; run(0, 0); } },   // a neon tube along the block's edge
   /** A title card of the tapes: letters graded from cream to pink, a dark outline (the outline slider), and under them a hard pink step and a deep navy drop (the shadow slider); highlighted words in the channel colour, made bright. */
@@ -6984,7 +7308,7 @@ const construct = {
   ],
   titleFont: (f) => `${f.en}, ${f.cn}`,
   layout: (template, w, h) => blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }),
-  theme: (base) => ({ ...base, field: css(cnGround()), text: css(cnInk()), dim: css(cnInk(), 0.6), titleFill: css(cnInk()), titleInk: css(cnGround()), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base) => ({ ...base, field: css(cnGround()), text: css(cnInk()), dim: css(cnInk(), 0.6), titleFill: css(cnInk()), titleInk: css(cnGround()), grid: () => css(cnInk(), 0.12) }),
   /**
    * The paper; rays from the vanishing point; the wedges; the disc; the trusses; the machine; the bars; the
    * water mirroring all that; the construction lines and the small type over it. A photo is pressed into
@@ -7004,7 +7328,7 @@ const construct = {
       if (L.fill) { ctx.save(); ctx.globalCompositeOperation = "multiply"; cnWedges(ctx, { x0: 0, y0: 0, x1: w, y1: h }, p.wedges * 6, red, flip); disc(ctx); ctx.restore(); }
       return true;
     }
-    ctx.fillStyle = css(cnGround()); ctx.fillRect(0, 0, w, h);
+    if (L.ground !== false) { ctx.fillStyle = css(cnGround()); ctx.fillRect(0, 0, w, h); }
     if (!L.grid) return true;
     let [vx, vy] = [F.x0 + fw * (flip ? 0.38 : 0.62), F.y0 + fh * 0.48];
     if (p.rays > 0) { [vx, vy] = objAt("rays", vx, vy, ctx); cnRays(ctx, F, vx, vy, p.rays * 18, red, 3010); }   // a scene object
@@ -7038,6 +7362,13 @@ const construct = {
     if (p.lines > 0) cnLines(ctx, F, vx, vy, p.lines * 14, red, avoid, 3060);
     if (p.marks > 0) cnMarks(ctx, F, p.marks * 7, red, avoid, 3070);
     return true;
+  },
+  /** A constructivist's sheet: a square grid turned on the slant, and a great circle across it. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env;
+    gridPen(ctx, color); slantPath(ctx, w, h, -0.21, 120); slantPath(ctx, w, h, -0.21 + Math.PI / 2, 120);
+    ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(w * 0.68, h * 0.46, h * 0.4, 0, TAU); ctx.stroke();
+    ctx.restore();
   },
   accent: { fill: (C) => css(cnRed(C)), tone: () => "rgba(0,0,0,0)", toneScale: 0, edge(ctx, run) { ctx.lineCap = "butt"; ctx.strokeStyle = css(CN.ink); ctx.lineWidth = 12; run(0, 0); } },
   /** Upright capitals in ink (paper on black), over a copy of them printed a little off in red (the shadow slider); highlighted words in red, their copy in ink. */
@@ -7546,7 +7877,7 @@ const deco = {
   titleFont: (f) => `${f.en}, ${f.cn}`,
   // the channel name on the black base is set as on the field, in the channel colour
   layout: (template, w, h) => { const G = blockLayout(template, w, h, { band: 0.15, side: 0.28, strip: 0.1 }); return { ...G, cat: { ...G.cat, onAccent: false } }; },
-  theme: (base, C, p) => ({ ...base, field: css(dkSky((p && p.gilt) || 0, (p && p.red) || 0)[1]), text: css(DK.cream), own: css(DK.cream), dim: css(DK.cream, 0.6), titleFill: css(DK.cream), titleInk: css(DK.ink), grid: () => "rgba(0,0,0,0)" }),
+  theme: (base, C, p) => ({ ...base, field: css(dkSky((p && p.gilt) || 0, (p && p.red) || 0)[1]), text: css(DK.cream), own: css(DK.cream), dim: css(DK.cream, 0.6), titleFill: css(DK.cream), titleInk: css(DK.ink), grid: () => css(DK.gold, 0.15) }),
   /**
    * The night, its stars, the moon, the searchlights, the far and middle rows of the city with fog
    * between (painted once and kept until one of their sliders or objects changes); then the great tower,
@@ -7576,23 +7907,24 @@ const deco = {
     if (p.tower > 0 && Math.abs(mx0 - tx) < moonR + TW * 0.12) mx0 = tx - TW * 0.62 - moonR * 1.1;
     const [mx, my] = p.moon > 0 && L.grid ? objAt("moon", mx0, F.y0 + fh * 0.22, ctx) : [0, 0];   // scene objects
     const [bx, by] = p.beams > 0 && L.grid ? objAt("beams", beamAt[0], beamAt[1], ctx) : beamAt;
-    const paintBack = (x) => {
-      const gr = x.createLinearGradient(0, F.y0, 0, base); gr.addColorStop(0, css(sky[0])); gr.addColorStop(0.45, css(sky[1])); gr.addColorStop(0.8, css(sky[2])); gr.addColorStop(1, css(mix(sky[3], spot, 0.12)));
-      x.fillStyle = gr; x.fillRect(0, 0, w, h);
-      x.fillStyle = css(DK.ink); x.fillRect(0, base, w, h - base);
-      if (!L.grid) return;
-      if (p.moon > 0) { dkStars(x, F, mid, p.moon * 150, g, 3300); dkMoon(x, mx, my, moonR, g, sky, 3310); }
-      if (p.beams > 0) dkBeams(x, F, bx, by, p.beams * 5, g, 3320);
-      if (p.skyline > 0) {
-        dkRow(x, F, far, base, { w: [0.026, 0.03], h: [0.45, 0.55], body: mix(sky[3], sky[1], 0.5), rim: dkMoonlight(g), pin: true, litK: 0.5, tiers: true }, p.lights, 0, spot, g, 3330);
-        dkFogBand(x, F.x0, F.x1, base - (base - far) * 0.32, fh * 0.12, fog, 0.8 * p.fog, 3340);
-        dkRow(x, F, mid, base, { w: [0.045, 0.05], h: [0.3, 0.55], tall: 0.14, body: mix(sky[1], [0, 0, 0], 0.45 + 0.35 * p.red), rim: mix(dkMoonlight(g), spot, 0.3), litK: 0.9, tiers: true, flood: true }, p.lights, p.flood, spot, g, 3350);
-        dkFogBand(x, F.x0, F.x1, base, fh * 0.1, mix(fog, spot, 0.2), 0.7 * p.fog, 3345);   // the city's foot glowing in the fog
-      }
-    };
-    const kept = canPaint(ctx) && keptLayer(ctx, "dkBack", [seed, L.grid ? 1 : 0, w, h, F.x0, F.y0, F.x1, F.y1, g, p.red, p.moon, p.beams, p.skyline, p.lights, p.flood, p.fog, mx.toFixed(1), my.toFixed(1), bx.toFixed(1), by.toFixed(1), C.join()].join("|"), paintBack);
-    if (kept) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(kept, 0, 0); ctx.restore(); } else paintBack(ctx);
+    if (L.ground !== false) {   // the night down to the city's foot, and the black below it: the ground
+      const gr = ctx.createLinearGradient(0, F.y0, 0, base); gr.addColorStop(0, css(sky[0])); gr.addColorStop(0.45, css(sky[1])); gr.addColorStop(0.8, css(sky[2])); gr.addColorStop(1, css(mix(sky[3], spot, 0.12)));
+      ctx.fillStyle = gr; ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = css(DK.ink); ctx.fillRect(0, base, w, h - base);
+    }
     if (!L.grid) return true;
+    if (p.moon > 0) { dkStars(ctx, F, mid, p.moon * 150, g, 3300); dkMoon(ctx, mx, my, moonR, g, sky, 3310); }
+    if (p.beams > 0) dkBeams(ctx, F, bx, by, p.beams * 5, g, 3320);   // added to what is there: painted each time, as a kept layer on its own could not add them to it
+    const paintBack = (x) => {   // the far and middle rows of the city with their fog: kept on a layer of their own
+      dkRow(x, F, far, base, { w: [0.026, 0.03], h: [0.45, 0.55], body: mix(sky[3], sky[1], 0.5), rim: dkMoonlight(g), pin: true, litK: 0.5, tiers: true }, p.lights, 0, spot, g, 3330);
+      dkFogBand(x, F.x0, F.x1, base - (base - far) * 0.32, fh * 0.12, fog, 0.8 * p.fog, 3340);
+      dkRow(x, F, mid, base, { w: [0.045, 0.05], h: [0.3, 0.55], tall: 0.14, body: mix(sky[1], [0, 0, 0], 0.45 + 0.35 * p.red), rim: mix(dkMoonlight(g), spot, 0.3), litK: 0.9, tiers: true, flood: true }, p.lights, p.flood, spot, g, 3350);
+      dkFogBand(x, F.x0, F.x1, base, fh * 0.1, mix(fog, spot, 0.2), 0.7 * p.fog, 3345);   // the city's foot glowing in the fog
+    };
+    if (p.skyline > 0) {
+      const kept = canPaint(ctx) && keptLayer(ctx, "dkBack", [seed, w, h, F.x0, F.y0, F.x1, F.y1, g, p.red, p.skyline, p.lights, p.flood, p.fog, C.join()].join("|"), paintBack);
+      if (kept) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(kept, 0, 0); ctx.restore(); } else paintBack(ctx);
+    }
     if (p.tower > 0) {   // a scene object, its handle half way up
       const TH = fh * (0.5 + 0.38 * p.tower), [cx, cy] = objAt("tower", tx, base - TH * 0.45, ctx);
       ctx.save(); ctx.globalAlpha = Math.min(1, p.tower * 4);
@@ -7620,6 +7952,14 @@ const deco = {
     dkRain(ctx, F, p.rain, g, 3390);
     dkArch(ctx, F, p.arch, gold, u);
     return true;
+  },
+  /** Fine gold lines with deco nodes: pairs of pinstripes down every 160, single lines across, a diamond where they meet. */
+  gridLines(ctx, env, color) {
+    const { w, h } = env, s = 160, xs = [], ys = every(s / 2, h, s);
+    for (let x = s / 2; x < w; x += s) xs.push(x - 4, x + 4);
+    gridPen(ctx, color); gridPath(ctx, xs, ys, 0, 0, w, h);
+    ctx.beginPath(); for (let x = s / 2; x < w; x += s) for (const y of ys) { ctx.moveTo(x, y - 15); ctx.lineTo(x + 9, y); ctx.lineTo(x, y + 15); ctx.lineTo(x - 9, y); ctx.closePath(); } ctx.fill();
+    ctx.restore();
   },
   accent: {
     fill: () => css(DK.base), tone: () => "rgba(0,0,0,0)", toneScale: 0,

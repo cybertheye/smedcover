@@ -222,7 +222,7 @@ export const appliesTo = (layer, catId) => !layer.cats || layer.cats.includes(ca
 export const isPickable = (layer) => layer.visible && !layer.locked && layer.type !== "frame";
 
 const PROPS = {
-  bg: { grid: true, blur: 0, dim: 0 },
+  bg: { grid: true, base: "grid", blur: 0, dim: 0 },
   accent: { shape: "slant" },
   graphic: {},
   brand: { rail: true },
@@ -355,7 +355,7 @@ function normalizeLayer(raw, catIds) {
     L.cats = cats;
   }
   switch (raw.type) {
-    case "bg": L.grid = raw.grid !== false; L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); break;
+    case "bg": L.grid = true; L.base = raw.base === "clear" ? "clear" : "grid"; L.blur = num(raw.blur, 0, 0, 80); L.dim = num(raw.dim, 0, 0, 0.9); break;   // its base: the look's ground and grid, or nothing; the look's scene always on it
     case "accent": L.shape = ACCENT_SHAPES.includes(raw.shape) ? raw.shape : "slant"; break;
     case "brand": L.rail = raw.rail !== false; break;
     case "title": case "subtitle": L.stroke = num(raw.stroke, 1, 0, 2); L.shadow = num(raw.shadow, 1, 0, 2); L.plate = raw.plate === true; if (raw.hiPlate === true) L.hiPlate = true; else if (HI_MARKS.includes(raw.hiMark)) L.hiMark = raw.hiMark; break;
