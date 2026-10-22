@@ -112,7 +112,7 @@ hand-edited files cannot crash the app.
   "scene": { "court": { "ball": { "all": [0.1, -0.05], "by": { "1080x1920": [0.02, 0] } } } } }   // optional: scene objects dragged (see 7.5)
 ```
 
-`S.covers` holds the current profile's channel covers (keyed by channel id) and `S.cover` the one shown; both change only through `setCover()`. Switching profile reads the new one's covers (`loadCovers()`); switching channel (`switchChannel()`) commits the undo step first, then shows that channel's cover — made by `channelCover()` from the profile's design, with a default title, if it has none. Saving (`persistCover`) is debounced per profile and channel. The channel each profile was last on is kept in the settings' `channels` (`{profile id: channel id}`) and read by `channelOf()`. Deleting a profile deletes its `covers/<profile id>/`. *Copy from another channel* (`copyDialog`, `copyInto`) takes the source cover through `coverOf()` (the one in memory for the current profile, else the file, else a new one from the design), `copyPreview()` draws it whole with its own profile at the size on the canvas, and `layers.js`'s pure `copyFreeLayers(into, from)` copies its free layers: deep copies under new ids, a passive layer's `of` turned to its photo's copy; each copy goes above the nearest layout layer below it in the source, over the free layers already there, in the order they had. The cover is then checked by `channelCover()` as one read is, and the whole is one undo step.
+`S.covers` holds the current profile's channel covers (keyed by channel id) and `S.cover` the one shown; both change only through `setCover()`. Switching profile reads the new one's covers (`loadCovers()`); switching channel (`switchChannel()`) commits the undo step first, then shows that channel's cover — made by `channelCover()` from the profile's design, with a default title, if it has none. Saving (`persistCover`) is debounced per profile and channel. The channel each profile was last on is kept in the settings' `channels` (`{profile id: channel id}`) and read by `channelOf()`. Deleting a profile deletes its `covers/<profile id>/`. *Copy from another channel* (`copyDialog`, `copyInto`) takes the source cover through `coverOf()` (the one in memory for the current profile, else the file, else a new one from the design), `copyPreview()` draws it whole with its own profile at the size on the canvas, and `layers.js`'s pure `copyFreeLayers(into, from)` copies the layers the user added to it (`isAdded`: free layers and copies of layout layers, see 4): deep copies under new ids, a passive layer's `of` turned to its photo's copy, a cut-out's `weave` to the copies of the lettering it weaves with (a layout layer's id kept, as every cover has it; any other dropped); each copy goes above the nearest layout layer below it in the source, over the layers added there already, in the order they had. The dialog counts them by kind, the copies as *Layout copies*. The cover is then checked by `channelCover()` as one read is, and the whole is one undo step.
 
 Earlier data: there used to be one cover, `session.json`, shared by every channel, whose layers could be kept to some channels with `cats`. While the current profile has no channel covers yet, `migrateSession()` splits it: one copy per channel, `channelCover()` keeping only the layers on that channel and dropping `cats`, the title and tag copied to each; the old file is renamed `session.migrated.json`, and `session-photo*` is first turned into a photo layer by `upgradeCover`, then deleted.
 
@@ -564,6 +564,8 @@ when what it shows changed — the words, the colours, the letters set by hand, 
 undo puts another in its place) — not while a pointer is down in it or one of its inputs has the focus,
 unless something in it was just chosen; so it follows words typed and colours changed. It closes the window
 (`lettersClose()`) when the layer is gone, no longer selected or lettered otherwise, and when Edit is left
+(`setMode()`); Esc, *Done* and × close it too. The crop and weave windows (6.3) stand in the same place: opening
+one closes the others, and Surprise me's window closes them all. A letter in depth is stacked from at most 8 copies while something
 is dragged (`isFast()`); a letter cut from the photo is kept by photo (`PHOTO_LETTERS`, 48 a photo).
 
 ### 6.2.1 A perspective of one's own
@@ -616,6 +618,71 @@ as a drag is (`holdLive()`); the window shows how many pixels are kept. *No crop
 Esc, *Done* or ×, when another layer is selected, when the photo comes to fill the canvas, and when Edit is
 left.
 
+**Weave**: a cut-out may carry `weave: {with, by, line, front}` (`normalizeWeave()` in `layers.js`: at most 24
+layer ids and 400 letter keys a layer, `line` within 0.1–0.9; the ids are not looked up, a layer being read on
+its own, and a weave is kept on a photo no longer cut out; `frontOf()` reads a layer's letters, never what an
+object has from its prototype, whatever a file names its layers). A letter key is `row|letter|occurrence`
+(`letterKey`), the letter whatever lies between the first bar and the last — a bar itself, or a stretch of
+another script that `lineCells` sets whole, up to 200 characters — so the choices follow a letter by its line
+and its count there: typing a line above, or the same letter earlier in its line, moves them, as it moves the
+ransom note's letters dressed by hand. The lettering is never painted twice: it stays below
+and the cut-out lets it through. Before a cut-out is painted, `paintRange` asks `wovenFront(i)` in `paintCover`
+for what of its lettering comes in front: each layer it weaves with that lies below it, shows and is on this
+channel (a clipped one kept to its base) is painted alone onto one canvas in the cover's own pixels, as a
+clipping group's layers are, undimmed (FOCUS dims the lettering itself) and at full opacity (lettering half
+see-through in front takes the subject's place there wholly, so the hole shows whatever lies between the
+lettering and the cut-out: the cut-out's own photo under a linked cut-out, the ground under one of its own) —
+all of it by `head`, by `letters` only its letters in front (`env.only`, a Set of letter keys, which the title,
+subtitle and text painters read). The layer's look effects come with it: in letter mode one that paints across
+the layer's whole box (a texture, a band) cuts through the subject there too.
+It is worked out before the cut-out is painted because the layers' own work canvases (`scratch`, `fxScratch`)
+serve for it. `PAINT.photo` then cuts it out of its whole composite (body, outline, torn edge, shadow) with
+`destination-out` before laying it down (`letThrough`); by `head`, less what lies above the head line first:
+`headLine(box, line)` of the way down the box round its subject (`shownBox()`, so a crop counts), cut in the
+photo's own frame `F`, so the line turns, stretches and scales with the photo. With look effects on the
+cut-out the cut waits for them: `PAINT.photo` hands paintRange its cutter (`env.letThrough`, the way to let
+lettering through in its frame), and the effects' image is kept (`FX_KEPT`) from before the cut, with the cutter,
+so its key leaves the weave out and the lettering is let through each time the image is laid down; an image
+made while nothing was dragged serves the frames of a drag (they would make a coarser one), and nothing is
+kept for a layer repainted every frame (`moved`: those dragged and those that move with them). So dragging the
+lettering over a cut-out with look effects, or the head line's slider, does not work its effects out again. The
+woven canvas is kept on the editor's canvas only (`o.select` or `o.live`; a thumbnail, a hand of Surprise me or
+an export makes its own and lets it go), per cut-out and canvas size (`WOVEN`, 16 M pixels in all), under a key
+of what decides it — the canvas and size, the channel, the style and the look's values, the words, the
+subtitle's place, the layout, each woven layer and where it is, the letters in front, the fonts — and while
+something is dragged it is used again as long as the key holds, so a subject dragged does not paint its
+lettering again; the way and the head line are not part of it (they decide only the cut). Work canvases larger
+than an editor's canvas (`BIG_PX`: the clipped layer's, the head line's, `someLetters`') are let go after use. A
+costly photo's slide image (see the drag cache in 6.4) is kept from before the lettering is let through, which
+is cut again each frame where it now is. In the drag cache a cut-out woven with a layer that moves moves too (it
+is repainted with it), after the clipping groups have been taken in (so dragging the base of woven lettering
+counts) and with its own group.
+
+Painting some letters only: `drawTitle` (`st.only`) and `drawFreeText` (`env.only`) find each line's letters with
+`letterCells()` in `ransom.js` — the ransom note's cells (`lineCells`, keyed by `keysOf` as `letterKey` names
+them), each its share of its piece, and `pen`, where its letter begins as the piece is set (the text before it
+in the piece measured together, so kerned). `someLetters()` in `title.js` paints the line on a work canvas and
+keeps of it what lies on those letters' shapes — drawn at their pens in the line's font, as large and as low as
+their piece, grown by what the lettering throws round them (keyline, sticker rim, `effectReach`) and drawn
+along their shadow, depth or drips — less the bodies of the letters behind and their shadows, those in front
+whole: a letter in front comes forward whole and a neighbour behind stays there, which a clip by the letters'
+shares along the line would not give (a letter's ink reaches past its share). Most looks letter upright on the
+slanted line (`upright()` in `style.js`): while the line is painted, a `transform` taking the slant out is
+noted on the work canvas, the shapes are grown both slanted and upright, and the bodies taken in the frame the
+lettering was painted in. It works in the line's own space, so inside a bent line's `paint` it bends with the
+letters (the bent line's key holds the letters). A line with none of them is left out, and so is the plate. The
+ransom note is told the letters (`o.only`) and paints those alone, scrap and tape too; the plates and marks of
+its highlighted words are kept to those letters' shares of the line (`clip`). Vertical lettering (`drawTitleVertical`: a vertical subtitle, and the woodblock book's
+title through its `titleSet`, which passes `env.only` on) leaves out the units none of whose letters is chosen, a
+column keyed as a line. Where the context is no canvas (a test double), a clip to the letters' shares stands in.
+
+A cut-out's *Weave* group (`weaveControls()` in `app.js`: on, which lettering below it — `weavable()` —, the way,
+the head line) and the weave window (`#weavewin`: `weaveOpen()`, `weaveShow()`, `weaveClose()`, `S.weaveWin`;
+`weaveLetters()` lists each woven layer's letters by `lineCells` over `parseTitle`, keyed as drawing keys them,
+each a toggle, with all in front, all behind and every other) stand as the crop window does; it closes as that
+does, and when the cut-out is no longer woven by letter. Every change goes through `touch()`, so it is one undo
+step and the canvas follows.
+
 The Background layer paints only the ground: the look's ground (its `background` hook with `photo: null`) or the theme's colour, and the grid. Light or dark (`style.theme`) is set in its properties; the Style tab no longer has it. When looks and themes ask whether there is a background photo, they mean the lowest visible photo filling the canvas on this channel (`env.photo`).
 
 Blur: canvas filters are not available in the macOS web view, so the gaussian blur is done in script — three box blurs approximate one gaussian, each a sliding window whose cost does not depend on the radius — on a reduced copy of the picture, cached by picture and amount (per picture).
@@ -632,7 +699,7 @@ Two ways, chosen by the setting `cutEngine` (`cutEngine()`: Vision by default on
 
 `subject_mask` hands the photo's bytes to Apple Vision's `VNGenerateForegroundInstanceMaskRequest` (macOS 14 on; the class is looked up at run time through objc2, so an older system reports that it needs macOS 14), takes `generateScaledMaskForImageForInstances` — a float mask the photo's size — and returns it as a PNG in which only the alpha matters. The interface draws the photo on a canvas and sends that as JPEG, so EXIF orientation is already applied and the mask matches the photo pixel for pixel. The mask lives on the picture's record; when the picture changes (an AI repaint, or back to the original) it is cleared and the layers that use it are cut out again.
 
-The drag cache (`o.live`) cuts the layers into runs that move and runs that do not; each still run is painted once into an image, and each frame repaints only the moving runs. A dragged photo takes its copies with it; a photo with a cut-out, outline or shadow only slides its last image while it moves, and is painted properly when the drag ends.
+The drag cache (`o.live`) cuts the layers into runs that move and runs that do not; each still run is painted once into an image, and each frame repaints only the moving runs. A dragged photo takes its copies with it, and a cut-out woven with a dragged layer is repainted with it; a photo with a cut-out, outline or shadow only slides its last image while it moves (let through again where its woven lettering is), and is painted properly when the drag ends.
 
 ### 6.5 Assets
 
@@ -1096,6 +1163,8 @@ formats and one more in every other look, writes `report.json` and quits. With `
 generates one asset in each API style and draws it on a cover. It catches problems that only show up in the real app, such
 as the header issue above.
 
+
+With a real photo (`SMEDCOVER_SELFTEST_PHOTO=<file>`) it also cuts out its subject, sets it over the title and writes the cover woven by the head, by letter (in the house lettering, in one lettered upright, in the ransom note), with the lettering half see-through, and once dragged (`weave-*.png`), with an error when a woven cover looks as the cover unwoven, when a drag's frame lets the lettering through elsewhere than a still cover does, when the frames of the head line's slider do not follow it, or when dragging the title over the subject works out the subject's look effects again.
 
 With `SMEDCOVER_SELFTEST_LOOKS=<look ids, comma-separated>` it goes through those looks only — their covers with and without a photo and with every slider at its far end, their layer effects, and their scene objects moved with the handles showing (the basketball poster's otherwise); the drag timing below then times only their scene objects too. Each step is noted in `selftest-progress.txt` in the data folder as it starts, so a run that stalls shows where. The stalls it used to have (every process idle, the web view waiting, at a different step each time) came from its window opening off screen — on another desktop, behind a full-screen app: WebKit stops drawing for a window that cannot be seen, so a canvas read back from the graphics card (an export, a PNG) never returns. In self-test mode the app therefore tells the web view not to watch whether its window can be seen (`_setWindowOcclusionDetectionEnabled:`, the setting WebKit's own tests use; `setup` in `lib.rs`). The city pop and constructivist looks also recolour the photo itself, once, in memory (`treatedOf()` in `photo.js`) rather than reading the canvas back on every redraw.
 

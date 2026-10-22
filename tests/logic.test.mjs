@@ -2458,3 +2458,96 @@ test("reshaped edges: points along each outline, corners kept, normals away from
   const torn = SHAPED.torn.shape(g, R(1), o);
   assert.ok(torn[0].some(([x, y]) => inside(x, y)) && torn[0].some(([x, y]) => !inside(x, y) && (x < -0.5 || x > 100.5 || y > 0.5 || y < -100.5)), "in and out");
 });
+
+test("weaving: a cut-out keeps which lettering it weaves with, how, where its head ends and the letters in front, cleaned and bounded", async () => {
+  const { normalizeWeave, normalizeLetters, headLine, weavable, frontOf } = await import("../ui/js/layers.js");
+  const photo = (weave, more = {}) => normalizeLayers([{ type: "photo", id: "cut", pid: "p1", cut: true, weave, ...more }]).find((l) => l.id === "cut");
+  // read as written, the letters in front only of the layers it weaves with, each key once
+  const w = photo({ with: ["title", "t<1>", "title", "", 7], by: "letters", line: 0.45, front: { title: ["0|W|1", "0|W|1", "1|穿|1", "bad", "0||1", 3], t1: ["2|a|10"], gone: ["0|x|1"] } }).weave;
+  assert.deepEqual(w, { with: ["title", "t1"], by: "letters", line: 0.45, front: { title: ["0|W|1", "1|穿|1"], t1: ["2|a|10"] } });
+  // the way is the head unless letters; the line within 0.1–0.9, 0.3 when missing
+  assert.deepEqual(photo({}).weave, { with: [], by: "head", line: 0.3, front: {} });
+  assert.deepEqual([photo({ by: "brush", line: 2 }).weave.by, photo({ line: 2 }).weave.line, photo({ line: -1 }).weave.line, photo({ line: "x" }).weave.line], ["head", 0.9, 0.1, 0.3]);
+  for (const bad of [null, "head", 3, ["title"]]) assert.equal("weave" in photo(bad), false, `no weave from ${JSON.stringify(bad)}`);
+  assert.equal(normalizeWeave(undefined), null);
+  // bounded: 24 layers, 400 letters each
+  const many = photo({ with: Array.from({ length: 40 }, (_, i) => "l" + i), front: { l0: Array.from({ length: 900 }, (_, i) => `0|a|${i + 1}`) } }).weave;
+  assert.deepEqual([many.with.length, many.front.l0.length], [24, 400]);
+  // a front named like an object's own keys stays data
+  const odd = photo({ with: ["__proto__"], front: JSON.parse('{"__proto__": ["0|a|1"]}') }).weave;
+  assert.deepEqual([Object.getPrototypeOf(odd.front) === Object.prototype, Object.keys(odd.front)], [true, ["__proto__"]]);
+  // a letter's key names it between its first bar and its last: a bar itself, or a stretch of another script set whole, is one
+  const hindi = "0|नमस्ते दुनिया|1", long = `0|${"क".repeat(201)}|1`;
+  assert.deepEqual(photo({ with: ["t"], by: "letters", front: { t: ["0|||1", hindi, long, "x|a|1"] } }).weave.front, { t: ["0|||1", hindi] });
+  assert.deepEqual(Object.keys(normalizeLetters({ "1|A|2": { kind: "tile" }, "0|||1": { kind: "bare" }, "A|1": { kind: "tile" } })), ["1|A|2", "0|||1"], "the ransom note's keys alike");
+  // a layer's letters in front are its own list: never what an object has from its prototype
+  assert.deepEqual([frontOf(w, "title"), frontOf(w, "constructor"), frontOf(w, "toString"), frontOf(null, "title"), frontOf({ front: { a: "x" } }, "a")], [["0|W|1", "1|穿|1"], [], [], [], []]);
+  // kept on a photo no longer cut out, for when it is again; the references are not looked up
+  assert.deepEqual(photo({ with: ["nowhere"] }, { cut: false }).weave.with, ["nowhere"]);
+  // the head ends `line` of the way down the subject's box, a fraction of the photo, the line kept within bounds
+  assert.ok(Math.abs(headLine({ y0: 0.2, y1: 0.8 }, 0.3) - 0.38) < 1e-9);
+  assert.ok(Math.abs(headLine({ y0: 0, y1: 1 }, 5) - 0.9) < 1e-9 && Math.abs(headLine({ y0: 0.5, y1: 0.5 }, 0.3) - 0.5) < 1e-9);
+  // what it may weave with: the headline layers below it
+  const layers = normalizeLayers([{ type: "bg" }, { type: "text", id: "a", text: "x" }, { type: "photo", id: "p", pid: "p1" }, { type: "title" }, { type: "photo", id: "c", pid: "p1", cut: true }, { type: "text", id: "b", text: "y" }]);
+  assert.deepEqual(weavable(layers, layers.findIndex((l) => l.id === "c")).map((l) => l.id), ["subtitle", "a", "title"]);   // the missing subtitle put back above the ground
+  assert.deepEqual(weavable(layers, 0), []);
+});
+
+test("weaving: the letters chosen are found along their line, repeated letters apart, CJK and Latin mixed, a run of them one span", async () => {
+  const { letterSpans, letterCells, keysOf, lineCells, letterKey } = await import("../ui/js/ransom.js");
+  const width = { A: 60, B: 40, " ": 20, 你: 100, 好: 100 }, measure = (t) => [...t].reduce((s, ch) => s + (width[ch] ?? 50), 0);
+  // the pieces as setLine sets them: Latin set larger beside CJK (s), each piece as wide as it was set
+  const pieces = [{ t: "ABA ", x: 0, w: 216, s: 1.2 }, { t: "你好", x: 216, w: 200, s: 1 }, { t: "B", x: 416, w: 48, s: 1.2 }];
+  const keys = keysOf(lineCells(pieces), 2);
+  assert.deepEqual(keys, ["2|A|1", "2|B|1", "2|A|2", "2| |1", "2|你|1", "2|好|1", "2|B|2"], "each letter by how many times it came before in the line");
+  const near = (a, b) => assert.ok(a.length === b.length && a.every((s, i) => Math.abs(s[0] - b[i][0]) < 1e-6 && Math.abs(s[1] - b[i][1]) < 1e-6), JSON.stringify(a) + " vs " + JSON.stringify(b));
+  // each cell its share of its piece: A 72, B 48, A 72, the space 24
+  near(letterSpans(pieces, measure, 2, new Set([letterKey(2, "A", 2)])), [[120, 192]]);
+  near(letterSpans(pieces, measure, 2, new Set(["2|A|1"])), [[0, 72]]);
+  near(letterSpans(pieces, measure, 2, new Set(["2|B|1", "2|A|2", "2|你|1"])), [[72, 192], [216, 316]], "side by side one span; the space between leaves a gap");
+  near(letterSpans(pieces, measure, 2, new Set(["2|好|1", "2|B|2"])), [[316, 464]], "across pieces too");
+  // the line's ends reach out past it; another line's keys find nothing
+  near(letterSpans(pieces, measure, 2, new Set(["2|A|1", "2|B|2"]), 30), [[-30, 72], [416, 494]]);
+  assert.deepEqual(letterSpans(pieces, measure, 1, new Set(["2|A|1"])), []);
+  // where each letter begins as its piece is set: the letters before it in the piece measured together (kerned), set as large
+  const kerned = (t) => measure(t) - (t.includes("AB") ? 10 : 0), pens = letterCells(pieces, kerned, 2).map((c) => c.pen);
+  assert.deepEqual(pens.map((p) => Math.round(p * 1e6) / 1e6), [0, 72, 108, 180, 216, 316, 416], "after AB, 10 units kerned away, at its size");
+});
+
+test("weaving: only the letters in front are painted — a line kept to them (where there is no canvas, clipped to their shares), a line without them left out, the plate left behind; vertical lettering by column", async () => {
+  const { drawTitle, drawTitleVertical } = await import("../ui/js/title.js");
+  const recorder = () => { const calls = []; return [calls, new Proxy({ font: "900 100px X", lineWidth: 1 }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...s].length * 60 }) : (...a) => { calls.push([k, ...a]); return {}; }), set: (t, k, v) => { t[k] = v; return true; } })]; };
+  const box = { x: 0, y: 0, w: 4000, h: 1000 }, st = (only) => ({ font: "X", maxFs: 100, fx: "plain", fill: "#fff", hi: "#ff0", stroke: 1, shadowAmt: 1, skew: 0, plate: () => plated.push(1), only });
+  let plated = [];
+  const [all, a] = recorder();
+  drawTitle(a, "AB CD\nEF", box, { dx: 0, dy: 0, s: 1 }, st(null));
+  assert.deepEqual([all.filter((c) => c[0] === "fillText").map((c) => c[1]), all.some((c) => c[0] === "clip"), plated.length], [["AB CD", "EF"], false, 1], "unwoven: every line, no clip, the plate");
+  plated = [];
+  const [some, b] = recorder();
+  drawTitle(b, "AB CD\nEF", box, { dx: 0, dy: 0, s: 1 }, st(new Set(["0|B|1", "0|C|1"])));
+  assert.deepEqual(some.filter((c) => c[0] === "fillText").map((c) => c[1]), ["AB CD"], "the second line has none of them");
+  const rects = some.filter((c) => c[0] === "rect").map((c) => [c[1], c[1] + c[3]]);
+  assert.deepEqual(rects, [[60, 120], [180, 240]], "B, then C: the space between is not theirs");
+  assert.ok(some.findIndex((c) => c[0] === "clip") < some.findIndex((c) => c[0] === "fillText") && plated.length === 0, "kept to them before the line is painted; no plate");
+  // the ransom note paints its chosen letters itself: the plates under its highlighted words are kept to those letters
+  const [rn, r] = recorder();
+  drawTitle(r, "AB *CD*", box, { dx: 0, dy: 0, s: 1 }, { ...st(new Set(["0|C|1"])), fx: "ransom", hiPlate: (x, y, w, h, fs, on) => on.fillRect(x, y, w, h) });
+  const at = (k) => rn.findIndex((c) => c[0] === k);
+  assert.ok(at("clip") >= 0 && at("clip") < at("fillRect") && rn.filter((c) => c[0] === "rect").every((c) => c[1] === 180 && c[1] + c[3] === 240), "kept to C before its plate");
+  // a column of vertical lettering counts as a line; a sideways run is painted when any of its letters is chosen
+  const [col, v] = recorder();
+  drawTitleVertical(v, "你好AB\n世界", box, { font: "X", fill: "#fff", hi: "#ff0", maxFs: 100, only: new Set(["0|好|1", "0|B|1", "1|世|1"]) });
+  assert.deepEqual(col.filter((c) => c[0] === "fillText").map((c) => c[1]), ["好", "AB", "世"]);
+});
+
+test("weaving: copied from another channel, a cut-out weaves with the copies of its lettering, the layout's own, and lets the rest go", async () => {
+  const { copyFreeLayers } = await import("../ui/js/layers.js");
+  const into = normalizeLayers([{ type: "bg" }, { type: "title" }]);
+  const from = normalizeLayers([{ type: "bg" }, { type: "photo", id: "a", pid: "p1", fill: true }, { type: "text", id: "t1", text: "hi" }, { type: "title" }, { type: "subtitle", copy: true, id: "s2" },
+    { type: "photo", id: "b", of: "a", cut: true, weave: { with: ["title", "t1", "s2", "gone"], by: "letters", front: { title: ["0|A|1"], t1: ["0|h|1"], s2: ["0|x|1"], gone: ["0|y|1"] } } }]);
+  const { copies } = copyFreeLayers(into, from), id = (old) => copies[from.filter((l) => l.type === "photo" || l.id === "t1" || l.id === "s2").findIndex((l) => l.id === old)].id;
+  const cut = copies.find((c) => c.of);
+  assert.equal(cut.of, id("a"));
+  assert.deepEqual(cut.weave, { with: ["title", id("t1"), id("s2")], by: "letters", line: 0.3, front: { title: ["0|A|1"], [id("t1")]: ["0|h|1"], [id("s2")]: ["0|x|1"] } });
+  assert.deepEqual(from.find((l) => l.id === "b").weave.with, ["title", "t1", "s2", "gone"], "the cover copied from is left as it was");
+});

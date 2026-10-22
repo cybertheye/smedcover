@@ -3,10 +3,10 @@
 // batch jobs alike.
 import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, brackets } from "./cel.js";
 import { virtualSize, layout, adjustLayout, meetStandards } from "./layout.js";
-import { drawTitle, drawTitleVertical, parseTitle, subtitleFit, setLine, passOf, hasCJK } from "./title.js";
+import { drawTitle, drawTitleVertical, parseTitle, subtitleFit, setLine, passOf, hasCJK, someLetters } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
 import { drawAsset, assetHalf, userAssets, assetExists } from "./assets.js";
-import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets } from "./layers.js";
+import { resolve, appliesTo, fillsCanvas, clipBase, clipEnd, sceneOffsets, headLine, frontOf, HEADLINES } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced } from "./style.js";
 import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped, effectReach } from "./textfx.js";
 import { ransomEpoch } from "./ransom.js";
@@ -390,7 +390,8 @@ function subtitlePlan(ctx, env, L0, hidden = false) {
   return subtitleFit(ctx, title, env.cover.subtitle, box, T && T.font ? `"${T.font}", ${face}` : face, env.w, env.h, 340, T ? bendOf(T) : null);
 }
 
-// free text: nominal 120-unit type, centred on the origin, set like the title
+// free text: nominal 120-unit type, centred on the origin, set like the title; while it is painted alone for a cut-out
+// woven with it, only the letters in front of it (env.only, see wovenFront), with no plate, as drawTitle does
 function drawFreeText(ctx, L, env) {
   const raw = ctx;
   ctx = styled(raw, env.C, true);
@@ -411,7 +412,7 @@ function drawFreeText(ctx, L, env) {
   if (rest && L.reshape) for (const [x, y] of reshaped(rest, L.reshape, box)) { left = Math.min(left, x); right = Math.max(right, x); up = Math.max(up, -bh / 2 - y); down = Math.max(down, y - bh / 2); }   // the handles dragged out
   hw = Math.max(-left, right);   // the layer turns about its centre: its box stays round it
   if (raw.getTransform) env.blocks[L.id] = { m: raw.getTransform(), box, rest };   // where the block is, for the bend's handles
-  if (st.plate) drawPlate(raw, left - pad, -bh / 2 - up - pad * 0.3, right - left + pad * 2, bh + up + down + pad * 0.6, st.plate, FS, env.C);   // the plate only where the lettering went
+  if (st.plate && !env.only) drawPlate(raw, left - pad, -bh / 2 - up - pad * 0.3, right - left + pad * 2, bh + up + down + pad * 0.6, st.plate, FS, env.C);   // the plate only where the lettering went
   lines.forEach((line, li) => {
     ctx.save();
     const { ox, oy } = lineAt(li);
@@ -422,17 +423,24 @@ function drawFreeText(ctx, L, env) {
     const o = {
       fs: FS, d: FS * 0.062 * st.shadowAmt, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: L.fxAmt ?? 1, ransom: ransomOf(L, env), fxSeed: L.fxSeed || 0, row: li, lineW: widths[li], seed: li * 17.3 + 3, C: env.C, unit,
       fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow, fill: st.own, hi: st.ownHi, hiPlate: !!st.hiPlate || bandOrBlock(st),
-      frame: { ox, oy, c: skew, box }, warp: L.warp, reshape: rest ? L.reshape : undefined,
+      frame: { ox, oy, c: skew, box }, warp: L.warp, reshape: rest ? L.reshape : undefined, only: env.only || undefined,
     };
+    const some = env.only && someLetters(raw, set, li, env.only, o, L.fx);
+    if (env.only && !some) return raw.restore();   // none of its letters in front
     const paint = (c, u) => {   // the line as it is, on c (the canvas, or the bent line's own)
-      // under the highlighted words: plates, or a mark (and some marks over them); a sticker lays them on its rim
-      const marks = (phase) => { if (st.hiMark) set.runs.forEach((r, ri) => { if (r.hi) drawMark(c, st.hiMark, r.x0, r.x1, FS, phase, li * 13 + ri); }); };
-      const beneath = () => { if (st.hiPlate) for (const r of set.runs) if (r.hi) drawPlate(c, r.x0 - FS * 0.08, -FS * 0.86, r.x1 - r.x0 + FS * 0.16, FS * 1.06, st.hiPlate, FS, env.C); marks("under"); };
-      const oo = u === unit ? o : { ...o, unit: u };
-      if (L.fx === "sticker") paintRuns(c, pass, { ...oo, beneath }, L.fx); else { beneath(); paintRuns(c, pass, oo, L.fx); }
-      marks("over");
+      // the ransom note paints only those letters itself: the plates and marks of its highlighted words, kept to them
+      const own = some && L.fx === "ransom", kept = (fn) => { if (!own) return fn(); c.save(); some.clip(c); fn(); c.restore(); };
+      const line = (c) => {
+        // under the highlighted words: plates, or a mark (and some marks over them); a sticker lays them on its rim
+        const marks = (phase) => { if (st.hiMark) set.runs.forEach((r, ri) => { if (r.hi) drawMark(c, st.hiMark, r.x0, r.x1, FS, phase, li * 13 + ri); }); };
+        const beneath = () => kept(() => { if (st.hiPlate) for (const r of set.runs) if (r.hi) drawPlate(c, r.x0 - FS * 0.08, -FS * 0.86, r.x1 - r.x0 + FS * 0.16, FS * 1.06, st.hiPlate, FS, env.C); marks("under"); });
+        const oo = u === unit ? o : { ...o, unit: u };
+        if (L.fx === "sticker") paintRuns(c, pass, { ...oo, beneath }, L.fx); else { beneath(); paintRuns(c, pass, oo, L.fx); }
+        kept(() => marks("over"));
+      };
+      if (some && !own) some.keep(c, line); else line(c);
     };
-    if (bend) bentLine(raw, { ...o, bend }, [JSON.stringify(line), raw.font, L.fx, st.hiPlate, JSON.stringify(st.hiMark), JSON.stringify({ ...o, frame: null, warp: null, reshape: null, unit: null })].join("|"), paint);
+    if (bend) bentLine(raw, { ...o, bend }, [JSON.stringify(line), raw.font, L.fx, st.hiPlate, JSON.stringify(st.hiMark), some ? JSON.stringify(some.spans) : "", JSON.stringify({ ...o, frame: null, warp: null, reshape: null, unit: null, only: null })].join("|"), paint);
     else paint(raw, unit);
     raw.restore();
   });
@@ -459,7 +467,9 @@ const PAINT = {
    * cut-out is caught where its subject is — the box round its mask — rather than the whole photo.
    * A photo not filling the canvas may be cropped (`crop`, see layers.js): only that part of it shows,
    * and is caught, its frame staying where it is (so what is kept does not move); the outline and the
-   * shadow follow the crop.
+   * shadow follow the crop. A cut-out woven with lettering below it (`weave`, see layers.js) lets that
+   * lettering through where it comes in front (env.woven, see wovenFront): its whole picture — body, outline,
+   * torn edge, shadow — is cut away there, so the lettering, painted once below, shows.
    */
   photo(ctx, L, tr, env) {
     const base = L.of ? env.cover.layers.find((l) => l.id === L.of && l.type === "photo" && !l.of) : L;
@@ -513,11 +523,40 @@ const PAINT = {
     if (!M) return hit;
     const blit = (c, dx = 0, dy = 0) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(c, dx, dy); ctx.restore(); };
     const W = ctx.canvas.width, H = ctx.canvas.height;
-    // While a photo is dragged, a costly one (cut out, outlined, shadowed) only slides its last image.
+    // Woven with lettering: how it lets that lettering (`wo`, see wovenFront) through — the letters chosen, or the
+    // lettering below the line where its head ends, which turns and scales with the photo (cut in its own frame, F) —
+    // cut out of a work canvas `c` whose corner is at (ox, oy) on the canvas. Told to paintRange (env.letThrough),
+    // which with look effects lets it through after them, and through the image of them it keeps.
+    const cutter = mask && ((wo) => (c, ox, oy) => {
+      const sub = wo.by === "head" && shownBox(maskBox(mask), crop);
+      let src = wo.c, sx = -ox, sy = -oy, s = null;
+      if (sub) {
+        s = sheet(2, c.canvas.width, c.canvas.height, new DOMMatrix());
+        s.drawImage(wo.c, -ox, -oy);
+        s.setTransform(new DOMMatrix().translateSelf(-ox, -oy).multiplySelf(F));
+        const y = rect.y + headLine(sub, wo.line) * rect.ih, far = 1e5;
+        s.globalCompositeOperation = "destination-out"; s.fillRect(rect.x - far, y - far, rect.iw + 2 * far, far);   // the head stays in front
+        src = s.canvas; sx = sy = 0;
+      }
+      c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = "destination-out"; c.drawImage(src, sx, sy); c.restore();
+      if (s) letGo(s.canvas);
+    });
+    env.letThrough = cutter;
+    const woven = mask && env.woven, letThrough = woven && cutter(woven);
+    /** Lays image `img` down at (x, y) on the canvas, let through where it is woven (`own`: a work canvas, cut as it is; else a copy) — unless that waits for the look's effects. */
+    const layDown = (img, x, y, own = false) => {
+      if (woven && !woven.later) {
+        if (!own) { const s = sheet(0, img.width, img.height, new DOMMatrix()); s.drawImage(img, 0, 0); img = s.canvas; }
+        letThrough(img.getContext("2d"), x, y);
+      }
+      blit(img, x, y);
+    };
+    // While a photo is dragged, a costly one (cut out, outlined, shadowed) only slides its last image — as it was
+    // before any lettering woven with it was let through, which is cut again where the lettering is now.
     const costly = L.cut || L.outline > 0 || L.shadow > 0, torn = L.torn && L.outline > 0, dashed = !torn && L.dash && L.outline > 0;
     const stamp = [W, H, L.cut, L.feather, L.spread, L.outline, torn, dashed, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? rect.iw.toFixed(1) : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`, crop ? cropKey(crop) : ""].join("|");
     const at = fills ? [rect.x, rect.y] : [bt.cx, bt.cy], keep = PHOTO.slides.get(L.id);
-    if (costly && isFast() && keep && keep.stamp === stamp) { blit(keep.img, keep.bx + (at[0] - keep.at[0]) * M.a, keep.by + (at[1] - keep.at[1]) * M.d); return hit; }
+    if (costly && isFast() && keep && keep.stamp === stamp) { layDown(keep.img, keep.bx + (at[0] - keep.at[0]) * M.a, keep.by + (at[1] - keep.at[1]) * M.d); return hit; }
     const inFrame = (c, fn) => { c.save(); frame(c); fn(c); c.restore(); };
     const treat = (c) => {   // the look paints on the whole canvas (its washes cover it); the photo itself goes in its frame
       const draw = (grey = 0, treat = null) => inFrame(c, (x) => drawPhotoAt(x, im, rect.x, rect.y, rect.iw, rect.ih, L.blur, env.hiRes, grey, treat));   // treat: { key, fn(RGBA) }, the look's own recolouring of the photo itself
@@ -547,7 +586,7 @@ const PAINT = {
       if (!mask || crop) { c.fillStyle = "#000"; c.fillRect(cr.x, cr.y, cr.iw, cr.ih); }
     });
     if (spread) haloBehind(body, bw, bh, spread * Math.hypot(F.a, F.b));
-    if (!costly) { blit(body.canvas, bx, by); return hit; }   // cut out, nothing more
+    if (!costly) { layDown(body.canvas, bx, by, true); return hit; }   // cut out, nothing more
     // shadow and outline from the shape, made once at the photo's scale (see silhouette())
     const out = sheet(0, bw, bh, Mb), f = rect.iw / nw, shape = cropShape(mask || plainShape(rec, nw, nh), crop);
     const sx = rect.x + (shape.at ? shape.at[0] * rect.iw : 0), sy = rect.y + (shape.at ? shape.at[1] * rect.ih : 0);   // where the shape starts: the crop's corner
@@ -556,12 +595,12 @@ const PAINT = {
     if (L.shadow > 0) { const sil = torn ? tear("#07070c", true) : silhouette(shape, 0, "#07070c"), d = w * 0.006 / Math.max(0.2, Math.abs(fills ? 1 : bt.kx)); for (let i = 1; i <= 4; i++) lay(sil, d * i, d * i * 1.2, L.shadow * 0.22); }
     if (L.outline > 0) lay(torn ? tear(L.ink || "#ffffff", false) : dashed ? dashedLine(shape, L.outline / f, L.ink || "#ffffff", 1 / f) : silhouette(shape, L.outline / f, L.ink || "#ffffff"));
     out.save(); out.setTransform(1, 0, 0, 1, 0, 0); out.drawImage(body.canvas, 0, 0); out.restore();
-    blit(out.canvas, bx, by);
     if (isFast()) {   // kept for the frames to come (a copy: the work canvases are reused)
       const img = keep && keep.img.width === bw && keep.img.height === bh ? keep.img : Object.assign(document.createElement("canvas"), { width: bw, height: bh });
       const g = img.getContext("2d"); g.clearRect(0, 0, bw, bh); g.drawImage(out.canvas, 0, 0);
       PHOTO.slides.set(L.id, { stamp, img, at, bx, by });
     } else PHOTO.slides.delete(L.id);
+    layDown(out.canvas, bx, by, true);
     return hit;
   },
   subject: () => null,   // a layer of earlier files, turned into a photo layer as it is read (see app.js)
@@ -601,6 +640,7 @@ const PAINT = {
       hiMark: st.hiMark && ((x0, x1, fs, on, phase, seed) => drawMark(on, st.hiMark, x0, x1, fs, phase, seed)),
       warp: L.warp, reshape: L.reshape, bend: bendOf(L), key: [st.hiPlate || "", JSON.stringify(st.hiMark)].join(), onBlock: (m, block, rest) => { env.blocks[L.id] = { m, box: block, rest }; },
       reserve: env.sub && !env.sub.vertical ? env.sub.reserve : 0,   // the subtitle's line, under it
+      only: env.only,   // painted alone for a cut-out woven with it: only the letters in front (see wovenFront)
     }));
   },
   /** The subtitle: lettered as the title is, smaller, where subtitlePlan puts it. */
@@ -608,7 +648,7 @@ const PAINT = {
     const s = env.sub || env.subHidden;
     if (!s) return null;
     const st = headline(L, env);
-    if (s.vertical) return placed(ctx, tr, (c) => drawTitleVertical(c, env.cover.subtitle, s.box, { font: s.face ? s.face(fonts) : headFont(), weight: s.weight || 700, fill: L.ink || s.fill || st.fill, hi: L.hi || s.hi || st.hi, maxFs: s.fs }));
+    if (s.vertical) return placed(ctx, tr, (c) => drawTitleVertical(c, env.cover.subtitle, s.box, { font: s.face ? s.face(fonts) : headFont(), weight: s.weight || 700, fill: L.ink || s.fill || st.fill, hi: L.hi || s.hi || st.hi, maxFs: s.fs, only: env.only }));
     return placed(ctx, tr, (c) => drawTitle(c, env.cover.subtitle, s.box, IDENTITY, {
       font: headFont(), maxFs: s.fs, align: "left", fill: st.fill, ink: st.ink, hi: st.hi, shadow: st.shadow, hiShadow: st.hiShadow,
       own: st.own, ownHi: st.ownHi, hiPlated: !!st.hiPlate || bandOrBlock(st),
@@ -617,6 +657,7 @@ const PAINT = {
       hiPlate: st.hiPlate && ((x, y, w, h, fs, on = c) => drawPlate(on, x, y, w, h, st.hiPlate, fs, env.C)),
       hiMark: st.hiMark && ((x0, x1, fs, on, phase, seed) => drawMark(on, st.hiMark, x0, x1, fs, phase, seed)),
       warp: L.warp, reshape: L.reshape, bend: bendOf(L), key: [st.hiPlate || "", JSON.stringify(st.hiMark)].join(), onBlock: (m, block, rest) => { env.blocks[L.id] = { m, box: block, rest }; },
+      only: env.only,
     }));
   },
   tag(ctx, L, tr, env) {
@@ -708,6 +749,13 @@ const FX_KEPT = new Map(), FX_KEPT_PX = 16e6, OBJ_IDS = new WeakMap();
 let objIds = 0;
 const objId = (o) => { if (!o) return 0; let n = OBJ_IDS.get(o); if (!n) OBJ_IDS.set(o, (n = ++objIds)); return n; };
 const PHOTO = { sheets: [], slides: new Map() };   // the photo layers' work canvases, and their images while a photo is dragged
+// The lettering a cut-out lets through (see wovenFront in paintCover) on the editor's canvas, per cut-out and canvas
+// size, with what decided it: while something is dragged, a cut-out moved does not paint its lettering again. Up to
+// WOVEN_PX pixels in all. Work canvases larger than an editor's canvas (an export's) are let go after use (BIG_PX).
+const WOVEN = new Map(), WOVEN_PX = 16e6, BIG_PX = 5e6;
+const WOVE = { one: null, base: null };   // where a woven layer clipped onto another is kept to that one's shape
+/** Lets go of work canvas c when it is an export's (see BIG_PX). */
+const letGo = (c) => { if (c && c.width * c.height > BIG_PX) c.width = c.height = 0; };
 /** Work canvas i of the photo layers, w × h, cleared, with the transform `m`. */
 function sheet(i, w, h, m) {
   const c = PHOTO.sheets[i] || (PHOTO.sheets[i] = document.createElement("canvas"));
@@ -1139,6 +1187,57 @@ function paintCover(cv, o) {
   cv._layout = env.G;   // for the editor's layout handles
   // FOCUS: how see-through a layer not kept bright is painted
   const dimmed = (from, to) => (o.spot && !cover.layers.slice(from, to + 1).some((l) => o.spot.includes(l.id)) ? SPOT_DIM : 1);
+  /**
+   * Weaving (see `weave` in layers.js): what of the lettering a cut-out (layer i) weaves with comes in front of it.
+   * Each layer it weaves with that lies below it and shows on this cover is painted alone in the canvas's own
+   * space, as in a clipping group (as if not dimmed: FOCUS dims the lettering itself) — all of it, or in letter mode
+   * only its letters in front (env.only) — onto one canvas, which the cut-out lets through (see PAINT.photo): the
+   * lettering is painted once, below, and seen through the subject. {c, key, by, line}, or null when nothing is
+   * woven. Worked out before the cut-out is painted (the layers' own work canvases serve for it); kept, and while
+   * something is dragged used again for as long as what decides it (`key`) is the same.
+   */
+  const wovenFront = (i) => {
+    const X = cover.layers[i], wv = X.weave, rec = X.cut && wv && o.photos && o.photos.get((X.of ? cover.layers.find((l) => l.id === X.of) || {} : X).pid);
+    if (!rec || !rec.mask) return null;
+    const list = [];
+    for (let j = 0; j < i; j++) {
+      const l = cover.layers[j], b = clipBase(cover.layers, j);   // a hidden base hides what is clipped onto it
+      if (HEADLINES.includes(l.type) && wv.with.includes(l.id) && l.visible && appliesTo(l, cat.id) && (b < 0 || cover.layers[b].visible) && (wv.by === "head" || frontOf(wv, l.id).length)) list.push(j);
+    }
+    if (!list.length) return null;
+    const docFonts = typeof document !== "undefined" && document.fonts ? document.fonts.size : 0;
+    const wkey = [cv.width, cv.height, key, cat.id, wv.by, JSON.stringify(P.style), JSON.stringify(lookValues()), C.join(), main ? main.pid : "", cover.title, cover.subtitle, JSON.stringify(env.sub), JSON.stringify(G), env.hasBrand, docFonts, ransomEpoch(),
+      ...list.map((j) => { const l = cover.layers[j], b = clipBase(cover.layers, j); return JSON.stringify([l, resolve(l, w, h, key, cat.id), wv.by === "letters" ? frontOf(wv, l.id) : 0, b >= 0 ? [cover.layers[b], resolve(cover.layers[b], w, h, key, cat.id)] : 0]); })].join("|");
+    // kept on the editor's canvas only (a thumbnail, a hand of Surprise me, an export make their own, let go after)
+    const editor = !!(o.select || o.live), slot = `${X.id}@${cv.width}x${cv.height}`, kept = editor ? WOVEN.get(slot) : null;
+    const out = (c) => ({ c, key: wkey, by: wv.by, line: wv.line, temp: !editor });   // the way and the head line as they are now: not what decided the lettering
+    if (kept && kept.key === wkey && isFast()) { WOVEN.delete(slot); WOVEN.set(slot, kept); return out(kept.c); }
+    const canvas = kept ? kept.c : document.createElement("canvas"), g = freshCanvas(canvas, cv, kx, ky);
+    // each at full strength, its base too: what of it is in front takes the subject's place there wholly
+    const strong = (l, fn) => { const was = l.o; l.o = 1; try { fn(); } finally { l.o = was; } };
+    for (const j of list) {
+      const l = cover.layers[j], b = clipBase(cover.layers, j);
+      env.only = wv.by === "letters" ? new Set(frontOf(wv, l.id)) : null;
+      try {
+        if (b < 0) { strong(l, () => paintRange(g, j, j + 1, true)); continue; }
+        // clipped onto a layer below: only where that one is
+        const one = freshCanvas(WOVE.one = WOVE.one || document.createElement("canvas"), cv, kx, ky);
+        strong(l, () => paintRange(one, j, j + 1, true));
+        env.only = null;
+        strong(cover.layers[b], () => paintRange(freshCanvas(WOVE.base = WOVE.base || document.createElement("canvas"), cv, kx, ky), b, b + 1, true));
+        one.setTransform(1, 0, 0, 1, 0, 0); one.globalCompositeOperation = "destination-in"; one.drawImage(WOVE.base, 0, 0); one.globalCompositeOperation = "source-over";
+        g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(WOVE.one, 0, 0); g.restore();
+        letGo(WOVE.one); letGo(WOVE.base);
+      } finally { env.only = null; }
+    }
+    if (editor) {
+      WOVEN.delete(slot); WOVEN.set(slot, { c: canvas, key: wkey });
+      let px = 0; for (const k of WOVEN.values()) px += k.c.width * k.c.height;
+      for (const [s0, k] of WOVEN) { if (px <= WOVEN_PX || WOVEN.size <= 1) break; px -= k.c.width * k.c.height; WOVEN.delete(s0); }
+    }
+    return out(canvas);
+  };
+  const moved = new Set();   // the layers repainted every frame of a drag (see below): what they paint is not kept
   /** Paints layers [from, to) onto `c` (a context already scaled to the virtual canvas) and returns their hits. `whole`: inside a clipping group, which is dimmed as one. */
   const paintRange = (c, from, to, whole = false) => {
     const hits = [];
@@ -1164,22 +1263,31 @@ function paintCover(cv, o) {
       // a layer set in a font of its own: that font goes first in every face while the layer is painted
       const faces = L.font ? { ...fonts } : null;
       if (faces) for (const k of ["cn", "en", "serif"]) fonts[k] = `"${L.font}", ${faces[k]}`;
-      let hit;
+      let hit, woven = null;
       const t0 = TIMING.on ? performance.now() : 0;
       try {
       const fx = layerEffects(L);
+      woven = L.type === "photo" && L.weave ? wovenFront(i) : null;
+      // a cut-out lets its woven lettering through as it is painted, or with look effects after them (see PAINT.photo)
+      env.woven = woven && { ...woven, later: fx.length > 0 }; env.letThrough = null;
       let fxKey = null, slot = null, kept = null;
       if (fx.length && L.type === "photo") {
+        // kept as painted before any lettering woven with it is let through, so the weave is not part of what decides it;
+        // one made while nothing was dragged serves the frames of a drag too
         const base = L.of ? cover.layers.find((l) => l.id === L.of) : L, rec = base && o.photos && o.photos.get(base.pid);
         slot = `${L.id}@${cv.width}x${cv.height}`;
-        fxKey = [kx, ky, key, isFast() ? 1 : 0, objId(rec && rec.img), objId(rec && rec.mask && rec.mask.img), C, main ? main.pid : "",
-          JSON.stringify(P.style), JSON.stringify(tr), JSON.stringify(L), L.of ? JSON.stringify(base) : ""].join("|");
+        const from = [kx, ky, key, objId(rec && rec.img), objId(rec && rec.mask && rec.mask.img), C, main ? main.pid : "",
+          JSON.stringify(P.style), JSON.stringify(tr), JSON.stringify({ ...L, weave: null }), L.of ? JSON.stringify(base) : ""].join("|");
+        fxKey = `${from}|${isFast() ? 1 : 0}`;
         kept = FX_KEPT.get(slot);
-        if (kept && kept.key !== fxKey) kept = null;
+        if (kept && kept.key !== fxKey && !(isFast() && kept.key === `${from}|0`)) kept = null;
       }
       if (kept) {
         FX_KEPT.delete(slot); FX_KEPT.set(slot, kept);   // the newest again
-        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o * dim; c.drawImage(kept.img, kept.got.x0, kept.got.y0); c.restore();
+        let img = kept.img;
+        if (woven && kept.cut) { const s = sheet(3, img.width, img.height, new DOMMatrix()); s.drawImage(img, 0, 0); kept.cut(woven)(s, kept.got.x0, kept.got.y0); img = s.canvas; }
+        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o * dim; c.drawImage(img, kept.got.x0, kept.got.y0); c.restore();
+        if (img !== kept.img) letGo(img);
         hit = kept.hit;
       } else if (L.o < 1 || dim < 1 || fx.length) {   // paint the layer on its own — its look effects added to it there — then blend it in as a whole
         // a layer with effects gets a canvas held in memory: the effects read it back and copy from it, which
@@ -1191,20 +1299,22 @@ function paintCover(cv, o) {
         sx.setTransform(1, 0, 0, 1, 0, 0); sx.globalAlpha = 1; sx.globalCompositeOperation = "source-over"; sx.clearRect(0, 0, cv.width, cv.height); sx.scale(kx, ky);
         hit = PAINT[L.type](sx, L, tr, env);
         // with effects, only the box the layer and its effects reached is laid down
-        const got = hit && fx.length ? paintEffects(sx, pixelBox(hit, kx, ky, cv.width, cv.height), fx, L, kx, env.C) : null;
-        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o * dim;
-        if (got && got.w > 0 && got.h > 0) c.drawImage(scr, got.x0, got.y0, got.w, got.h, got.x0, got.y0, got.w, got.h); else c.drawImage(scr, 0, 0);
-        c.restore();
-        // not while the layer itself is dragged: every frame would make a copy only to be thrown away
-        if (fxKey && got && got.w > 0 && got.h > 0 && !(o.live && (o.live.ids || [o.live.id]).includes(L.id))) {
+        const got = hit && fx.length ? paintEffects(sx, pixelBox(hit, kx, ky, cv.width, cv.height), fx, L, kx, env.C) : null, cut = env.letThrough;
+        // kept before the woven lettering is let through; not while the layer moves (it is dragged, or with what it
+        // weaves with): every frame would make a copy only to be thrown away
+        if (fxKey && got && got.w > 0 && got.h > 0 && !moved.has(i)) {
           const img = document.createElement("canvas"); img.width = got.w; img.height = got.h;
           img.getContext("2d").drawImage(scr, got.x0, got.y0, got.w, got.h, 0, 0, got.w, got.h);
-          FX_KEPT.delete(slot); FX_KEPT.set(slot, { key: fxKey, img, got, hit });
+          FX_KEPT.delete(slot); FX_KEPT.set(slot, { key: fxKey, img, got, hit, cut });
           let px = 0; for (const k of FX_KEPT.values()) px += k.got.w * k.got.h;
           for (const [s0, k] of FX_KEPT) { if (px <= FX_KEPT_PX || FX_KEPT.size <= 1) break; px -= k.got.w * k.got.h; FX_KEPT.delete(s0); }
         }
+        if (woven && cut && fx.length) cut(woven)(sx, 0, 0);   // the lettering woven in front, through its effects too
+        c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = L.o * dim;
+        if (got && got.w > 0 && got.h > 0) c.drawImage(scr, got.x0, got.y0, got.w, got.h, got.x0, got.y0, got.w, got.h); else c.drawImage(scr, 0, 0);
+        c.restore();
       } else hit = PAINT[L.type](c, L, tr, env);
-      } finally { if (faces) Object.assign(fonts, faces); if (TIMING.on) TIMING.ms[L.id] = (TIMING.ms[L.id] || 0) + performance.now() - t0; }
+      } finally { if (woven && woven.temp) woven.c.width = woven.c.height = 0; env.woven = env.letThrough = null; if (faces) Object.assign(fonts, faces); if (TIMING.on) TIMING.ms[L.id] = (TIMING.ms[L.id] || 0) + performance.now() - t0; }
       c.globalAlpha = 1; c.setLineDash([]);
       if (hit) hits.push({ id: L.id, type: L.type, ...hit });
     }
@@ -1217,12 +1327,20 @@ function paintCover(cv, o) {
   }
   const n = cover.layers.length, moving =o.live ? (o.live.ids || [o.live.id]).map((id) => cover.layers.findIndex((l) => l.id === id)).filter((i) => i >= 0) : [];
   // a clipping group moves as one: dragging its base or a layer clipped onto it repaints them all
-  for (const i of [...moving]) {
-    let b = i;
-    while (b > 0 && cover.layers[b].clip) b--;
-    const e = clipEnd(cover.layers, b);   // b itself when nothing is clipped onto it, or it is the ground
-    if (e > b) for (let k = b; k <= e; k++) if (!moving.includes(k)) moving.push(k);
-  }
+  const groups = () => {
+    for (const i of [...moving]) {
+      let b = i;
+      while (b > 0 && cover.layers[b].clip) b--;
+      const e = clipEnd(cover.layers, b);   // b itself when nothing is clipped onto it, or it is the ground
+      if (e > b) for (let k = b; k <= e; k++) if (!moving.includes(k)) moving.push(k);
+    }
+  };
+  groups();
+  // a cut-out woven with lettering that moves (or whose base does) lets it through where it now is: it is repainted
+  // with it, and so is its own group
+  for (const i of [...moving]) cover.layers.forEach((l, k) => { if (k > i && l.type === "photo" && l.weave && l.weave.with.includes(cover.layers[i].id) && !moving.includes(k)) moving.push(k); });
+  groups();
+  for (const i of moving) moved.add(i);
   setFast(moving.length > 0);
   if (!moving.length) cv._hits = paintRange(ctx, 0, n);
   else {

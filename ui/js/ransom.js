@@ -101,6 +101,11 @@ function inkOn(p, C, R) {
 }
 /** The key a letter is dressed by hand under: its line, itself and how many times it came before in the line. */
 export const letterKey = (row, ch, n) => `${row}|${ch}|${n}`;
+/** The keys of the cells of line `row` (see lineCells), in order: each letter's, counted as letterKey counts them. */
+export function keysOf(cells, row) {
+  const seen = new Map();
+  return cells.map((c) => { const n = (seen.get(c.ch) || 0) + 1; seen.set(c.ch, n); return letterKey(row, c.ch, n); });
+}
 
 /**
  * How each letter of a line is dressed (pure; ransom draws it). `cells`: [{ch, hi, whole}] in order (whole:
@@ -129,7 +134,7 @@ export function ransomPlan(cells, pools, { salt = "", row = 0, amt = 1, papers =
   const E = edits || {}, can = { torn: !off.includes("torn"), tape: !off.includes("tape"), deep: !off.includes("deep"), photo: photo && !off.includes("photo") };
   const lockOf = (e) => (e && e.lock && Number.isInteger(e.lock.seed) ? e.lock : null);
   // each letter's own key and name: the letter and how many times it came before; a locked one under the seed it was locked with
-  const seen = new Map(), keys = cells.map((c) => { const n = (seen.get(c.ch) || 0) + 1; seen.set(c.ch, n); return letterKey(row, c.ch, n); });
+  const keys = keysOf(cells, row);
   const names = keys.map((k) => { const e = E[k], lk = lockOf(e); return `${lk ? salt.replace(/:\d*$/, "") + ":" + lk.seed : salt}|${k}${e && e.salt ? "|" + e.salt : ""}`; });
   const dressed = (c) => !c.whole && LETTER.test(c.ch), letters = cells.map((c, i) => (dressed(c) ? i : -1)).filter((i) => i >= 0);
   // the hero: those made heroes by hand (or locked as one), else the letter whose name draws highest (in the highlighted words when
@@ -204,6 +209,36 @@ export function lineCells(pieces) {
     }
   });
   return cells;
+}
+/**
+ * The cells of line `row` where they lie along it: [{ch, key, x, w, pen, s, dy}]. The line is given as its pieces ({t,
+ * x, w, s, dy}, as setLine sets them); each cell is its share of its piece (x, w), as the ransom note measures it
+ * (`measure(text)`: its width in the line's font), set as its piece is (larger by s, lower by dy); `pen`: where its
+ * letter begins as the piece's text is set, kerned with the letters before it in the piece.
+ */
+export function letterCells(pieces, measure, row) {
+  const cells = lineCells(pieces), names = keysOf(cells, row), widths = cells.map((c) => measure(c.ch) * (pieces[c.at].s ?? 1));
+  const sums = pieces.map(() => 0), pens = pieces.map((p) => p.x), before = pieces.map(() => "");
+  cells.forEach((c, i) => { sums[c.at] += widths[i]; });
+  return cells.map((c, i) => {
+    const p = pieces[c.at], w = widths[i] * (p.w && sums[c.at] > 0 ? p.w / sums[c.at] : 1), x = pens[c.at], pen = p.x + (before[c.at] ? measure(before[c.at]) * (p.s ?? 1) : 0);
+    pens[c.at] += w; before[c.at] += c.ch;
+    return { ch: c.ch, key: names[i], x, w, pen, s: p.s ?? 1, dy: p.dy || 0 };
+  });
+}
+/**
+ * Where the letters `keys` (a Set of letter keys) of line `row` lie along it (see letterCells): [[x0, x1]], a run
+ * of them side by side one. The line's first and last cells reach `out` past its ends (what a lettering throws
+ * there: an outline, a shadow).
+ */
+export function letterSpans(pieces, measure, row, keys, out = 0) {
+  const cells = letterCells(pieces, measure, row), spans = [];
+  cells.forEach((c, i) => {
+    if (!keys.has(c.key)) return;
+    const a = i === 0 ? c.x - out : c.x, b = i === cells.length - 1 ? c.x + c.w + out : c.x + c.w, last = spans[spans.length - 1];
+    if (last && a <= last[1] + 1e-3) last[1] = Math.max(last[1], b); else spans.push([a, b]);
+  });
+  return spans;
 }
 
 // ---------- which faces are here
@@ -328,6 +363,8 @@ function tape(ctx, p, W, H, fs) {
  * `o.ransom` the layer's settings, `o.row` the line): every scrap of paper first, then every letter, then
  * the tape, so no scrap hides a letter beside it; the hero last of each. A letter in depth is a stack of
  * fewer copies while something is dragged; one cut from the photo is kept (PHOTO_LETTERS) until it changes.
+ * `o.only` (a Set of letter keys): only those letters are painted, each whole, scrap and tape too (the letters
+ * a cut-out is woven with in front of it, see weave in layers.js), the others where they are, unpainted.
  */
 export function ransom(ctx, pass, o) {
   fontsNow();
@@ -352,7 +389,8 @@ export function ransom(ctx, pass, o) {
     if (PLANS.size > 64) PLANS.clear();
     PLANS.set(key, plan);
   }
-  const order = plan.map((_, i) => i).sort((i, j) => (plan[i] && plan[i].hero ? 1 : 0) - (plan[j] && plan[j].hero ? 1 : 0));   // the hero last, over its neighbours
+  const only = o.only ? keysOf(cells, row).map((k) => o.only.has(k)) : null;
+  const order = plan.map((_, i) => i).filter((i) => !only || only[i]).sort((i, j) => (plan[i] && plan[i].hero ? 1 : 0) - (plan[j] && plan[j].hero ? 1 : 0));   // the hero last, over its neighbours
   ctx.save();
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "round";
   const d = o.d || 0, stroke = o.strokeAmt || 0;

@@ -3,6 +3,7 @@
 import { INK } from "./cel.js";
 import { paintRuns, bentLine, bendExtent, bendRest, reshaped, effectReach } from "./textfx.js";
 import { SUB, subtitleSize, titleFloor } from "./layout.js";
+import { letterKey, letterCells } from "./ransom.js";
 
 /** "a\n*b* c" -> [[{t:"a",hi:false}], [{t:"b",hi:true},{t:" c",hi:false}]]. Literal "\n" also breaks. */
 export function parseTitle(title) {
@@ -154,6 +155,71 @@ function larger({ s, dy }, run) {
   try { return run(); } finally { for (const [P, fill, stroke, measure] of kept) { P.fillText = fill; P.strokeText = stroke; P.measureText = measure; } }
 }
 
+const SOLO = [], SOLO_PX = 5e6;   // the work canvases of a line painted for some of its letters alone (see someLetters); larger than an editor's canvas, let go after use
+/** Work canvas i the size of `like` (a canvas), cleared. */
+function solo(i, like) {
+  const c = SOLO[i] || (SOLO[i] = document.createElement("canvas"));
+  if (c.width !== like.width || c.height !== like.height) { c.width = like.width; c.height = like.height; }
+  const x = c.getContext("2d");
+  x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = "source-over"; x.globalAlpha = 1; x.clearRect(0, 0, c.width, c.height);
+  return x;
+}
+/**
+ * Some letters of a line alone (`only`, a Set of letter keys, see ransom.js: the letters of a lettering woven in
+ * front of a cut-out, see weave in layers.js), of line `row` as set (`set`, setLine's, in ctx's font); `o` the
+ * line's lettering as paintRuns has it (fs, d, strokeAmt, amt, shadowAmt; frame.c, the line's slant) and `fx` its
+ * effect. Null when none of them is on this line; else {cells, spans, clip(c), keep(c, paint)}. keep runs
+ * paint(on), the line painted in its own space, so that of it only what lies on those letters reaches c — each
+ * letter whole, with what its lettering throws round it (an outline, a rim, its shadow, spikes, drips): it is cut
+ * from the line as painted (kerned, effects and all) by the letters' own shapes grown that far, less the bodies of
+ * the letters behind (their fill and keyline, and their shadow, painted over a neighbour's), the bodies of those in
+ * front kept whole. Most looks letter upright on a slanted line (style.js's upright()): the shapes are grown both
+ * slanted and upright, and the bodies taken in the frame the lettering was painted in — upright when paint() turned
+ * the line upright. `clip(c)` keeps what is painted on c to the letters' shares of the line along it (`spans`, as far
+ * as the ends' outlines reach): where c is no canvas (one only measured on, a test's), keep does that instead.
+ */
+export function someLetters(ctx, set, row, only, o, fx) {
+  const fs = o.fs, fr = effectReach(fx, o.amt ?? 1), all = letterCells(set.pieces, (t) => ctx.measureText(t).width, row), cells = all.filter((c) => only.has(c.key));
+  if (!cells.length) return null;
+  const behind = all.filter((c) => !only.has(c.key) && !/^\s+$/.test(c.ch)), body = fs * (0.075 * (o.strokeAmt || 0) + 0.02), slant = (o.frame && o.frame.c) || 0;
+  const out = fs * (0.6 + fr.x), up = fs * (2 + fr.up), down = fs * (1.5 + fr.down), spans = [];
+  for (const c of cells) {
+    const a = c === all[0] ? c.x - out : c.x, b = c === all[all.length - 1] ? c.x + c.w + out : c.x + c.w, last = spans[spans.length - 1];
+    if (last && a <= last[1] + 1e-3) last[1] = Math.max(last[1], b); else spans.push([a, b]);
+  }
+  const clip = (c) => { c.beginPath(); for (const [a, b] of spans) c.rect(a, -up, b - a, up + down); c.clip(); };
+  // how far a letter's lettering reaches round it, and along which offsets it throws its shadow, depth or drips
+  const r = fs * (0.04 + 0.0375 * (o.strokeAmt || 0) + (fx === "sticker" ? 0.2 : 0) + Math.max(fr.x, fr.up));
+  const deep = Math.max((o.d || 0) * (fx === "sticker" ? 1.3 : 1), fx === "extrude" ? fs * 0.11 * (o.amt ?? 1) * Math.max(0.3, o.shadowAmt ?? 1) : 0), drip = fr.down * fs;
+  const offsets = [[0, 0]], shades = [[0, 0]];   // shades: along the shadow alone, where a letter's body is painted again
+  for (let n = Math.ceil(deep / r), i = 1; i <= n; i++) offsets.push([(deep * i) / n, (deep * i) / n]);
+  for (let n = Math.ceil(deep / body), i = 1; i <= n && deep > 0; i++) shades.push([(deep * i) / n, (deep * i) / n]);
+  for (let n = Math.ceil(drip / r), i = 1; i <= n; i++) offsets.push([0, (drip * i) / n]);
+  const keep = (c, paint) => {
+    const canvas = c.canvas;
+    if (typeof document === "undefined" || !canvas || canvas._probe || typeof c.getTransform !== "function") { c.save(); clip(c); paint(c); c.restore(); return; }
+    const m = c.getTransform(), font = c.font, line = solo(0, canvas), shape = solo(1, canvas), turn = line.transform;
+    for (const x of [line, shape]) { x.setTransform(m); x.font = font; x.textAlign = "left"; x.textBaseline = "alphabetic"; x.lineJoin = x.lineCap = "round"; }
+    // painted, noting whether the lettering took the line's slant out
+    let upright = false;
+    if (slant) line.transform = function (a, b, cc, d, e, f) { if (a === 1 && !b && d === 1 && Math.abs(cc + slant) < 1e-9) upright = true; return turn.call(this, a, b, cc, d, e, f); };
+    try { paint(line); } finally { if (slant) delete line.transform; }
+    const letter = (k, dx = 0, dy = 0) => { shape.font = sized(font, k.s); shape.fillText(k.ch, k.pen + dx, k.dy + dy); shape.strokeText(k.ch, k.pen + dx, k.dy + dy); };
+    const framed = (straight, fn) => { shape.setTransform(m); if (straight) shape.transform(1, 0, -slant, 1, 0, 0); fn(); };
+    shape.fillStyle = shape.strokeStyle = "#000"; shape.lineWidth = 2 * r;
+    for (const straight of slant ? [false, true] : [false]) framed(straight, () => { for (const k of cells) if (!/^\s+$/.test(k.ch)) for (const [dx, dy] of offsets) letter(k, dx, dy); });   // grown, along its shadow
+    shape.lineWidth = body;
+    framed(upright, () => {
+      shape.globalCompositeOperation = "destination-out"; for (const k of behind) for (const [dx, dy] of shades) letter(k, dx, dy);   // less the letters behind, and their shadows
+      shape.globalCompositeOperation = "source-over"; for (const k of cells) if (!/^\s+$/.test(k.ch)) for (const [dx, dy] of shades) letter(k, dx, dy);   // those in front whole
+    });
+    line.setTransform(1, 0, 0, 1, 0, 0); line.globalCompositeOperation = "destination-in"; line.drawImage(shape.canvas, 0, 0);
+    c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(line.canvas, 0, 0); c.restore();
+    if (canvas.width * canvas.height > SOLO_PX) for (const x of SOLO) x.width = x.height = 0;   // an export's: not kept
+  };
+  return { cells, spans, clip, keep };
+}
+
 const LH = 1.16;   // line height, in sizes
 /**
  * The lines' widths at size 100, and the size at which they fill `box` (times `s`), bent by `bend` ({id,
@@ -233,6 +299,8 @@ export function subtitleFit(ctx, title, sub, box, font, w, h, maxFs = 340, bend 
  * the size stays what the bend alone gives, the box returned too (the layer is scaled and turned about its
  * centre, which must not move under a handle dragged); the plate and the box's `ink`, what is drawn, take in
  * where the handles went. `onBlock(m, block, rest)` is told where the block is and, bent, where its handles rest.
+ * `only` (a Set of letter keys, see someLetters): only those letters are painted, each line kept to them (the
+ * ransom note, which paints letter by letter, is told which instead), and no plate; the box is the whole block's.
  * Returns the box it occupies (for hit-testing), or null when there is nothing to draw.
  */
 export function drawTitle(ctx, title, box, adj, st) {
@@ -263,7 +331,7 @@ export function drawTitle(ctx, title, box, adj, st) {
   const fr = effectReach(st.fx, st.fxAmt ?? 1);
   if (fr.x || fr.up || fr.down) inked = { x: inked.x - fr.x * fs, y: inked.y - fr.up * fs, w: inked.w + 2 * fr.x * fs, h: inked.h + (fr.up + fr.down) * fs };   // spikes, drips… past the type
   if (st.onBlock) st.onBlock(ctx.getTransform ? ctx.getTransform() : null, block, rest);   // where the block is, for the bend's handles
-  if (st.plate) st.plate(inked.x - pad, inked.y - pad * 0.3, inked.w + pad * 2, inked.h + pad * 0.6, fs);
+  if (st.plate && !st.only) st.plate(inked.x - pad, inked.y - pad * 0.3, inked.w + pad * 2, inked.h + pad * 0.6, fs);
   const mixed = hasCJK(lines);
   lines.forEach((line, li) => {
     const lw = (widths[li] * fs) / 100;
@@ -277,16 +345,23 @@ export function drawTitle(ctx, title, box, adj, st) {
       fs, d, strokeAmt: st.stroke, shadowAmt: st.shadowAmt, amt: st.fxAmt ?? 1, ransom: st.ransom, fxSeed: st.fxSeed || 0, row: li, lineW: lw, seed: li * 17.3 + 1,
       fillCss: st.fill, hiCss: st.hi, inkCss: st.ink, shadowCss: st.shadow, hiShadowCss: st.hiShadow,
       C: st.C, fill: st.own, hi: st.ownHi, hiPlate: !!st.hiPlated, unit: m ? Math.hypot(m.a, m.b) : 1,
-      frame: { ox, oy, c: skew, box: block }, warp: st.warp, reshape: rest ? st.reshape : undefined,
+      frame: { ox, oy, c: skew, box: block }, warp: st.warp, reshape: rest ? st.reshape : undefined, only: st.only || undefined,
     };
+    const some = st.only && someLetters(ctx, set, li, st.only, o, st.fx);
+    if (st.only && !some) return ctx.restore();   // none of its letters is to be painted
     const paint = (c, unit) => {   // the line as it is, on c (the canvas, or the bent line's own)
-      const marks = (phase) => { if (st.hiMark) set.runs.forEach((r, ri) => { if (r.hi) st.hiMark(r.x0, r.x1, fs, c, phase, li * 13 + ri); }); };
-      const beneath = () => { if (st.hiPlate) for (const r of set.runs) if (r.hi) st.hiPlate(r.x0 - fs * 0.08, -fs * 0.86, r.x1 - r.x0 + fs * 0.16, fs * 1.06, fs, c); marks("under"); };   // under each highlighted run, whole
-      const oo = unit === o.unit ? o : { ...o, unit };
-      if (st.fx === "sticker") paintRuns(c, pass, { ...oo, beneath }, st.fx); else { beneath(); paintRuns(c, pass, oo, st.fx); }   // a sticker lays them on its rim, which would hide them
-      marks("over");
+      // the ransom note paints only those letters itself: the plates and marks of its highlighted words, kept to them
+      const own = some && st.fx === "ransom", kept = (fn) => { if (!own) return fn(); c.save(); some.clip(c); fn(); c.restore(); };
+      const line = (c) => {
+        const marks = (phase) => { if (st.hiMark) set.runs.forEach((r, ri) => { if (r.hi) st.hiMark(r.x0, r.x1, fs, c, phase, li * 13 + ri); }); };
+        const beneath = () => kept(() => { if (st.hiPlate) for (const r of set.runs) if (r.hi) st.hiPlate(r.x0 - fs * 0.08, -fs * 0.86, r.x1 - r.x0 + fs * 0.16, fs * 1.06, fs, c); marks("under"); });   // under each highlighted run, whole
+        const oo = unit === o.unit ? o : { ...o, unit };
+        if (st.fx === "sticker") paintRuns(c, pass, { ...oo, beneath }, st.fx); else { beneath(); paintRuns(c, pass, oo, st.fx); }   // a sticker lays them on its rim, which would hide them
+        kept(() => marks("over"));
+      };
+      if (some && !own) some.keep(c, line); else line(c);
     };
-    if (st.bend) bentLine(ctx, { ...o, bend: st.bend }, [JSON.stringify(line), ctx.font, st.fx, st.key || "", JSON.stringify({ ...o, frame: null, warp: null, reshape: null, unit: null })].join("|"), paint);
+    if (st.bend) bentLine(ctx, { ...o, bend: st.bend }, [JSON.stringify(line), ctx.font, st.fx, st.key || "", some ? JSON.stringify(some.spans) : "", JSON.stringify({ ...o, frame: null, warp: null, reshape: null, unit: null, only: null })].join("|"), paint);
     else paint(ctx, o.unit);
     ctx.restore();
   });
@@ -306,13 +381,13 @@ const GAP = 1.06, PITCH = 1.32;   // a character's height and a column's pitch, 
 function fitColumns(ctx, lines, box, font, weight, maxFs) {
   ctx.font = `${weight} 100px ${font}`;
   const sideways = /[\x21-\x7e]/;
-  const columns = lines.map((line) => {
-    const units = [];
+  const columns = lines.map((line, row) => {
+    const units = [], seen = new Map(), key = (ch) => { const n = (seen.get(ch) || 0) + 1; seen.set(ch, n); return letterKey(row, ch, n); };   // each letter's key, as a line's
     for (const a of line) for (const ch of a.t) {
-      const last = units[units.length - 1];
+      const last = units[units.length - 1], k = key(ch);
       if (ch === " " || ch === "　") units.push({ gap: true, h: 34 });
-      else if (sideways.test(ch)) { if (last && last.run !== undefined && last.hi === a.hi) last.run += ch; else units.push({ run: ch, hi: a.hi }); }
-      else units.push({ ch, hi: a.hi, h: 100 * GAP });
+      else if (sideways.test(ch)) { if (last && last.run !== undefined && last.hi === a.hi) { last.run += ch; last.keys.push(k); } else units.push({ run: ch, hi: a.hi, keys: [k] }); }
+      else units.push({ ch, hi: a.hi, h: 100 * GAP, keys: [k] });
     }
     for (const u of units) if (u.run !== undefined) u.h = ctx.measureText(u.run).width + 12;
     return { units, h: units.reduce((s, u) => s + u.h, 0) };
@@ -333,7 +408,9 @@ export function titleBlockVertical(ctx, title, box, font, weight = 900, maxFs = 
  * the first column on the right. CJK characters stand upright one under another; a run of Latin
  * letters or digits lies on its side, as it does in a vertical line. The size is the largest at
  * which the longest column fits the height and all columns fit the width.
- * st: { font, weight, fill, hi, maxFs }. Returns the box it occupies, or null when there is nothing to draw.
+ * st: { font, weight, fill, hi, maxFs, only }: `only` (a Set of letter keys, a column counted as a line, see
+ * someLetters) paints only those letters, a sideways run when any of its letters is one, the others left out
+ * where they are. Returns the box it occupies, or null when there is nothing to draw.
  */
 export function drawTitleVertical(ctx, title, box, st) {
   const lines = parseTitle(title);
@@ -349,6 +426,7 @@ export function drawTitleVertical(ctx, title, box, st) {
     let y = box.y;
     for (const u of col.units) {
       const h = u.h * k;
+      if (st.only && !(u.keys || []).some((key) => st.only.has(key))) { y += h; continue; }
       ctx.fillStyle = u.hi ? st.hi : st.fill;
       if (u.ch) ctx.fillText(u.ch, cx, y + h / 2);
       else if (u.run !== undefined) { ctx.save(); ctx.translate(cx, y + h / 2); ctx.rotate(Math.PI / 2); ctx.fillText(u.run, 0, fs * 0.04); ctx.restore(); }

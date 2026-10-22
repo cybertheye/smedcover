@@ -160,6 +160,12 @@ export const TEXT_EFFECTS = ["auto", "sticker", "cel", "plain", "cyber", "riso",
  */
 export const RANSOM_EXTRAS = ["torn", "tape", "deep", "photo"], LETTER_KINDS = ["tile", "bare", "cut", "deep", "photo"];
 /**
+ * A letter's key, as the ransom note and weaving name it: its line, itself and how many times it came before in the
+ * line (see letterKey in ransom.js). The letter is what lies between the first bar and the last, so it may be a bar
+ * itself, or a stretch of another script set whole (see lineCells), up to 200 characters.
+ */
+const LETTER_KEY = /^\d{1,3}\|[^]{1,200}\|\d{1,4}$/u;
+/**
  * The ransom note's letters dressed by hand, by key ("line|letter|how many times it came before"): each a
  * face {family, weight, italic}, kind, paper and ink ("#rrggbb"), turn (degrees), lift and size, case, hero,
  * edge, tape, its own seed (`salt`), and a lock: the layer's seed it was locked with and what it had then
@@ -172,7 +178,7 @@ export function normalizeLetters(raw) {
   const faceOf = (f) => { const family = f && typeof f.family === "string" ? f.family.replace(/["\\;{}<>]/g, "").trim().slice(0, 60) : ""; return family ? { family, weight: int(f.weight, 100, 900) ?? 700, ...(f.italic === true ? { italic: true } : {}) } : undefined; };
   for (const [key, v] of Object.entries(raw)) {
     if (Object.keys(out).length >= 300) break;
-    if (!/^\d{1,3}\|[^|]{1,16}\|\d{1,4}$/u.test(key) || !v || typeof v !== "object") continue;
+    if (!LETTER_KEY.test(key) || !v || typeof v !== "object") continue;
     const lock = v.lock && typeof v.lock === "object" && int(v.lock.seed, 0, 999999) !== undefined
       ? Object.fromEntries(Object.entries({ seed: v.lock.seed, face: faceOf(v.lock.face), paper: colour(v.lock.paper), ink: colour(v.lock.ink), hero: typeof v.lock.hero === "boolean" ? v.lock.hero : undefined }).filter(([, x]) => x !== undefined))
       : undefined;
@@ -245,6 +251,13 @@ const PROPS = {
    * of torn paper; `dash`: a dashed line a little way out (the one or the other). + `ink`, the outline's colour.
    * + `crop`: {x, y, w, h}, fractions of the picture: only that part of it shows (of a photo not filling the
    * canvas), the rest kept, to be shown again; the photo's frame stays where it is, so what is kept does not move.
+   * + `weave`: a cut-out woven with lettering below it, as a magazine's subject is with its masthead (see
+   * normalizeWeave): {with, by, line, front}. `with`: the ids of the lettering layers it weaves with (the title,
+   * the subtitle, text, copies of the first two); `by` "head": its head in front of them and the rest of it
+   * behind, the head ending at `line` (a share of the height of the box round its subject, from its top, in the
+   * photo's own frame, so it turns and scales with it); `by` "letters": the letters chosen in front of it, the
+   * others behind (`front`: by layer id, their letterKeys, see ransom.js). Only a cut-out is woven; a whole photo
+   * again keeps it, for when it is cut out once more.
    */
   photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, feather: 0, spread: 0, outline: 0, torn: false, dash: false, shadow: 0 },
 };
@@ -355,6 +368,8 @@ function normalizeLayer(raw, catIds) {
       if (L.of && raw.own === true) L.own = true;
       const crop = normalizeCrop(raw.crop);
       if (crop) L.crop = crop;
+      const weave = normalizeWeave(raw.weave);
+      if (weave) L.weave = weave;
       if (!L.pid && !L.of) return null;   // nothing to show
       if (typeof raw.ink === "string" && /^#[0-9a-f]{6}$/i.test(raw.ink)) L.ink = raw.ink.toLowerCase();
       break;
@@ -404,6 +419,28 @@ export function normalizeCrop(c) {
   const r = (v) => Math.round(v * 1e4) / 1e4, x = r(num(c.x, 0, 0, 0.98)), y = r(num(c.y, 0, 0, 0.98)), w = Math.min(r(num(c.w, 1, 0.02, 1)), r(1 - x)), h = Math.min(r(num(c.h, 1, 0.02, 1)), r(1 - y));
   return x > 1e-4 || y > 1e-4 || w < 0.9999 || h < 0.9999 ? { x, y, w, h } : null;
 }
+/** How many layers a cut-out weaves with at most, and how many letters of each it puts in front (see normalizeWeave). */
+const WEAVE_MAX = { with: 24, front: 400 };
+/**
+ * A cut-out's weave (see PROPS.photo) as stored, cleaned: the ids of the layers it weaves with, each once, at most
+ * 24; the way, "head" unless "letters"; where the head ends, 0.1–0.9 (0.3 when missing); the letters in front of
+ * each layer it weaves with, each a letter's key once, at most 400. The layers are not looked up (each layer is
+ * read on its own): those gone, or no longer below it, are passed by when it is painted. Null for no weave.
+ */
+export function normalizeWeave(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const id = (v) => (typeof v === "string" ? v.replace(/[^\w-]/g, "").slice(0, 40) : "");
+  const ids = [...new Set((Array.isArray(raw.with) ? raw.with : []).map(id).filter(Boolean))].slice(0, WEAVE_MAX.with);
+  const from = raw.front && typeof raw.front === "object" && !Array.isArray(raw.front) ? raw.front : {};
+  const front = Object.fromEntries(ids.map((k) => [k, Object.hasOwn(from, k) && Array.isArray(from[k]) ? [...new Set(from[k].filter((x) => typeof x === "string" && LETTER_KEY.test(x)))].slice(0, WEAVE_MAX.front) : []]).filter(([, keys]) => keys.length));
+  return { with: ids, by: raw.by === "letters" ? "letters" : "head", line: Math.round(num(raw.line, 0.3, 0.1, 0.9) * 1000) / 1000, front };
+}
+/** The letters of layer `id` a weave puts in front (see `weave`): its own list, never what an object has from its prototype. */
+export const frontOf = (weave, id) => (weave && weave.front && Object.hasOwn(weave.front, id) && Array.isArray(weave.front[id]) ? weave.front[id] : []);
+/** Where a woven cut-out's head ends (see `weave`): `line` of the way down `box`, the box round its subject ({y0, y1}, fractions of the photo), as a fraction of the photo's height. */
+export const headLine = (box, line) => box.y0 + Math.min(0.9, Math.max(0.1, line)) * (box.y1 - box.y0);
+/** The layers a cut-out at index i of `layers` may weave with (see `weave`): the headline layers below it, bottom first. */
+export const weavable = (layers, i) => layers.slice(0, Math.max(0, i)).filter((l) => HEADLINES.includes(l.type));
 const CROP_MIN = 0.02;
 /**
  * A crop (see normalizeCrop; {x: 0, y: 0, w: 1, h: 1} for none) dragged: `handle` "move", or a side or a corner
@@ -561,7 +598,8 @@ export function moveLayer(layers, id, to) {
 /**
  * Copies the layers the user added to `from` (another cover's layers: free ones and copies of layout ones,
  * see isAdded) into the list `into`, settings and all, each under a new id (a cut-out's link goes to its
- * photo's copy). Each copy goes above the built-in layer it was above there, over the layers added on it
+ * photo's copy, and its weave to the copies of the lettering it weaves with, or the layout's own; any other
+ * it lets go). Each copy goes above the built-in layer it was above there, over the layers added on it
  * there, in the order they had; one above
  * a layout layer this list has not, at the top. Returns the new list and the copies, bottom first.
  */
@@ -577,7 +615,12 @@ export function copyFreeLayers(into, from) {
     if (g && g.anchor === anchor) g.copies.push(c); else groups.push({ anchor, copies: [c] });
   }
   const copies = groups.flatMap((g) => g.copies);
-  for (const c of copies) if (c.of) c.of = renamed.get(c.of) || "";
+  // a link, and the lettering a cut-out weaves with, follow the copies; the layout's own lettering is on every cover
+  const to = (id) => renamed.get(id) || (BOUND_TYPES.includes(id) ? id : "");
+  for (const c of copies) {
+    if (c.of) c.of = renamed.get(c.of) || "";
+    if (c.weave) c.weave = { ...c.weave, with: c.weave.with.map(to).filter(Boolean), front: Object.fromEntries(Object.entries(c.weave.front || {}).map(([k, v]) => [to(k), v]).filter(([k]) => k)) };
+  }
   const at = (id) => {   // above the layout layer and the free layers already over it
     let i = into.findIndex((l) => l.id === id);
     if (i < 0) return into.length;

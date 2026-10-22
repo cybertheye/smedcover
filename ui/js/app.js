@@ -11,7 +11,7 @@ import { platformsFor, ratioOf } from "./platforms.js";
 import { boxOf, overlap, titleContrast } from "./check.js";
 import { baseRecipe, FAMILIES, RULES, dealCover, coverScore, pickHand } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
@@ -21,7 +21,7 @@ import {
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, BENDS, effectUses, warpCorners, convexWarp } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
-import { RANSOM_FACES, useRansomFaces, ransomPending, ransomArrived, ransomPools, ransomLetters, ransomShown, papersFor, faceFont, faceHas, inksFor, cased, isCJK, EXTRAS } from "./ransom.js";
+import { RANSOM_FACES, useRansomFaces, ransomPending, ransomArrived, ransomPools, ransomLetters, ransomShown, papersFor, faceFont, faceHas, inksFor, cased, isCJK, EXTRAS, lineCells, keysOf } from "./ransom.js";
 import { parseTitle } from "./title.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
 import { sizeOf, PIXELS } from "./photo.js";
@@ -330,6 +330,7 @@ function flushDraw() {
   if (!drawQueued) return;
   drawQueued = false; ensureFonts(S.cover.layers); drawMain(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs);
   if (S.letterWin) later("letters", 200, lettersShow);   // the ransom note's letters as now drawn (words typed, colours changed)
+  if (S.weaveWin) later("weave", 200, weaveShow);   // the woven letters as now typed
 }
 /** Redraws at most once per frame, however many input events arrive. `stale` false: only what is selected changed. */
 function queueDraw(stale = true) {
@@ -2474,7 +2475,7 @@ function overLeft(box) {
 /** Opens the letter window for layer L. */
 function lettersOpen(L) {
   const win = $("letterwin") || document.body.appendChild(el("div", { id: "letterwin", role: "dialog", "aria-label": t("props.sec.letters"), onpointerdown: () => { letterHeld = true; } }));
-  cropClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
+  cropClose(); weaveClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
   overLeft(win);
   S.letterWin = L.id; win.hidden = false;
   lettersShow(true);
@@ -2646,6 +2647,7 @@ function photoControls(L, set) {
       L.cut && slider("props.spread", 0, 40, 1, L.spread, px, (v) => { holdLive(L.id); set("spread", v); }),
       CUT.error && el("div", { class: "hint err" }, CUT.error),
     CUT.needModel && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.tab.setup = "ai"; S.aiPane = "cut"; setMode("setup"); } }, t("cut.goModel"))], t("cut.tip", t("cutset.engine." + cutEngine()))),
+    L.cut && weaveControls(L),
     L.of
       ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")),
           base && el("button", { class: "btn wide", style: "margin-top:8px", title: t("link.realignTip"), onclick: () => { L.t = alignedT(base); touch({ cover: true, side: true }); } }, t("link.realign")),
@@ -2667,6 +2669,94 @@ function photoControls(L, set) {
       })))], t("props.photoLinesTip")),
   ];
 }
+
+/** The lettering layers below cut-out L on this cover (those it may weave with), top first, as the layer list has them. */
+const weavableOf = (L) => weavable(S.cover.layers, S.cover.layers.indexOf(L)).filter((l) => appliesTo(l, cat().id) && !l.off).reverse();
+/** Those of them that cut-out L weaves with (see `weave` in layers.js). */
+const wovenOf = (L) => (L.weave ? weavableOf(L).filter((l) => L.weave.with.includes(l.id)) : []);
+/**
+ * Weaving a cut-out with the lettering below it (`weave`, see layers.js): on or off — on, it weaves with the
+ * title (or the lettering nearest below it), its head in front; the lettering layers below it, each ticked to
+ * weave with; the way: its head in front and the rest behind, down to the line set, or the letters chosen in
+ * front, chosen in a window of their own (weaveOpen).
+ */
+function weaveControls(L) {
+  const w = L.weave, below = weavableOf(L);
+  const put = (patch) => { L.weave = { ...L.weave, ...patch }; touch({ cover: true, side: true }); if (S.weaveWin) weaveShow(true); };
+  const on = (v) => {
+    if (!v) { delete L.weave; weaveClose(); return touch({ cover: true, side: true }); }
+    const first = below.find((l) => l.id === "title") || below[0];
+    L.weave = { with: first ? [first.id] : [], by: "head", line: 0.3, front: {} };
+    touch({ cover: true, side: true });
+  };
+  const tick = (l, yes) => {   // a layer woven with, or no longer (its letters in front go with it); as the weave is now (the window may have changed it)
+    const now = L.weave, front = Object.fromEntries(Object.entries(now.front || {}).filter(([id]) => yes || id !== l.id));
+    put({ with: yes ? [...now.with.filter((id) => id !== l.id), l.id] : now.with.filter((id) => id !== l.id), front });
+  };
+  if (!w && !below.length) return psec("props.sec.weave", el("div", { class: "hint", style: "margin:0" }, t("weave.none")), t("weave.tip"), "first");
+  return psec("props.sec.weave", [
+    check("weave.on", !!w, on),
+    w && !below.length && el("div", { class: "hint" }, t("weave.none")),
+    w && below.length > 0 && el("div", { class: "weave-with" }, below.map((l) => el("label", { class: "chk" }, el("input", { type: "checkbox", checked: w.with.includes(l.id), onchange: (e) => tick(l, e.target.checked) }), layerName(l)))),
+    w && el("div", { style: "margin-top:10px" }, select(["head", "letters"].map((k) => [k, t("weave.by." + k)]), w.by, (v) => put({ by: v }))),
+    w && w.by === "head" && slider("weave.line", 0.1, 0.9, 0.01, w.line, pct, (v) => { holdLive(L.id); L.weave = { ...L.weave, line: v }; touch({ cover: true }); }),
+    w && w.by === "letters" && el("button", { class: "btn wide", style: "margin-top:8px", disabled: !wovenOf(L).length, onclick: () => weaveOpen(L) }, t("weave.choose")),
+  ], t("weave.tip"));
+}
+
+// The weave window (S.weaveWin, the id of a cut-out woven letter by letter): for each layer it weaves with, its
+// letters line by line (a column of vertical lettering counting as a line), each in front of the subject or
+// behind it at a click, and all of them at once, or every other one. It stands over the left column as the letter
+// and crop windows do, one of them closing the others, and closes as they do: Esc, ×, Done, another layer
+// selected, Setup, or the cut-out no longer woven letter by letter.
+function weaveOpen(L) {
+  const win = $("weavewin") || document.body.appendChild(el("div", { id: "weavewin", role: "dialog", "aria-label": t("weave.title") }));
+  lettersClose(); cropClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
+  overLeft(win);
+  S.weaveWin = L.id; win.hidden = false;
+  weaveShow(true);
+}
+function weaveClose() { const win = $("weavewin"); if (win) win.hidden = true; S.weaveWin = null; }
+/** What the weave window shows of cut-out L: when it is the same, it is not drawn again. */
+const weaveNow = (L) => JSON.stringify([L.weave, wovenOf(L).map((l) => [l.id, wordsOf(l)]), getLang()]);
+/** The weave window drawn (again) for its cut-out as it is now, or closed (see above); unless `now`, only when what it shows changed. */
+function weaveShow(now = false) {
+  const win = $("weavewin"), L = S.weaveWin ? layer(S.weaveWin) : null;
+  if (!win || win.hidden) return;
+  if (!L || !L.cut || !L.weave || L.weave.by !== "letters" || S.layerId !== L.id || S.mode !== "edit") return weaveClose();
+  const box = $("weave-box");
+  if (!now && box && box._layer === L && box.dataset.now === weaveNow(L)) return;
+  const inner = el("div", { id: "weave-box", "data-now": weaveNow(L) }, weaveLetters(L));
+  inner._layer = L;
+  win.replaceChildren(
+    el("div", { class: "head" }, el("b", {}, `${t("weave.title")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: weaveClose }, "×")),
+    el("div", { class: "wkey" }, el("span", {}, el("span", { class: "wl on" }, "A"), " ", t("weave.inFront")), el("span", {}, el("span", { class: "wl" }, "A"), " ", t("weave.behind"))),
+    inner,
+    el("div", { class: "hint" }, t("weave.hint")),
+    el("div", { class: "acts" }, el("button", { class: "btn", onclick: weaveClose }, t("deal.done"))));
+}
+/** Each layer cut-out L weaves with: its name, all its letters in front or behind at once, and its letters line by line, each to click. */
+function weaveLetters(L) {
+  const layers = wovenOf(L);
+  if (!layers.length) return el("div", { class: "hint" }, t("weave.noLayers"));
+  return layers.map((l) => {
+    const rows = parseTitle(wordsOf(l)).map((runs, row) => { const cells = lineCells(runs); return { cells, keys: keysOf(cells, row) }; });
+    const letters = rows.flatMap(({ cells, keys }) => keys.filter((k, i) => !/^\s+$/.test(cells[i].ch))), front = new Set(frontOf(L.weave, l.id));
+    const set = (keys) => {   // this layer's letters in front, the others' as they are (an object built anew: an id is only ever data)
+      const all = Object.fromEntries(Object.entries(L.weave.front || {}).filter(([id]) => id !== l.id).concat(keys.length ? [[l.id, keys]] : []));
+      L.weave = { ...L.weave, front: all }; touch({ cover: true }); weaveShow(true);
+    };
+    return el("div", { class: "wlayer" },
+      el("div", { class: "whead" }, el("b", {}, layerName(l)),
+        el("div", { class: "chips small" }, [["weave.allFront", () => set(letters)], ["weave.allBehind", () => set([])], ["weave.alternate", () => set(letters.filter((_, i) => i % 2 === 0))]].map(([k, fn]) => el("button", { onclick: fn, disabled: !letters.length }, t(k))))),
+      letters.length ? el("div", { class: "letters" }, rows.map(({ cells, keys }) => el("div", { class: "lrow" }, cells.map((c, i) => {
+        if (/^\s+$/.test(c.ch)) return el("span", { class: "lgap" });
+        const on = front.has(keys[i]);
+        return el("button", { class: "wl" + (on ? " on" : ""), title: t(on ? "weave.inFront" : "weave.behind"), onclick: () => set(on ? [...front].filter((k) => k !== keys[i]) : [...front, keys[i]]) }, c.ch);
+      })))) : el("div", { class: "hint" }, t("weave.noWords")));
+  });
+}
+
 // The crop window (S.cropWin, the id of a photo or an asset layer): the whole picture, what the layer keeps of it
 // (`crop`, see layers.js) framed, the rest dimmed; the frame dragged by its inside, sides and corners, or drawn
 // anew outside it, at a shape of the user's or free. It stands over the left column, as the letter window does,
@@ -2676,7 +2766,7 @@ const CROP_RATIOS = [[null, "crop.free"], ["photo", "crop.photo"], [1, "1:1"], [
 const WHOLE = { x: 0, y: 0, w: 1, h: 1 };
 function cropOpen(L) {
   const win = $("cropwin") || document.body.appendChild(el("div", { id: "cropwin", role: "dialog", "aria-label": t("crop.title") }));
-  lettersClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
+  lettersClose(); weaveClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
   overLeft(win);
   S.cropWin = L.id; win.hidden = false;
   cropShow(true);
@@ -3084,6 +3174,7 @@ function renderSide() {
   if (layer() && (!appliesTo(layer(), cat().id) || layer().off)) S.layerId = "bg";   // the selected layer is not on this category's cover, or left out of it
   if (S.letterWin) lettersShow();   // the letter window follows its layer, or closes
   if (S.cropWin) cropShow();   // and the crop window
+  if (S.weaveWin) weaveShow();   // and the weave window
   const side = $("side"), y = side.scrollTop, L = layer(), here = S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off);
   // keep typing in the text box alive across rebuilds
   const typing = document.activeElement && side.contains(document.activeElement) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename"));
@@ -3644,7 +3735,7 @@ function setMode(mode) {
   if (mode !== "edit" && V3.on) close3d();   // the layer column is not there in Setup
   columns();   // the left column has a width of its own in Setup (and the handles' words follow the language)
   $("body").classList.toggle("setup", mode === "setup");
-  if (mode !== "edit") { lettersClose(); cropClose(); }
+  if (mode !== "edit") { lettersClose(); cropClose(); weaveClose(); }
   syncTop(); syncTabs(); renderPanel(); renderSide(); syncToolbar(); queueDraw();
 }
 /**
@@ -3753,7 +3844,7 @@ function dealOpen() {
   const box = $("deal") || document.body.appendChild(el("div", { id: "deal", role: "dialog", "aria-label": t("top.surprise") }));
   const z = selSize(), locks = S.settings.surprise.locks;
   DEAL.hands = []; DEAL.kept = DEAL.auto = -1; DEAL.dropped = false;
-  lettersClose(); cropClose();   // the letter and crop windows stand where this one does
+  lettersClose(); cropClose(); weaveClose();   // the letter, crop and weave windows stand where this one does
   overLeft(box);
   box.style.setProperty("--ar", `${z.w} / ${z.h}`);
   const lock = (k) => el("button", { class: locks[k] ? "on" : "", title: t(`deal.lock.${k}Tip`), onclick: (e) => { if (locks[k]) delete locks[k]; else locks[k] = true; e.currentTarget.classList.toggle("on", !!locks[k]); persistSettings(); } }, t(`deal.lock.${k}`));
@@ -3971,6 +4062,7 @@ addEventListener("keydown", (e) => {
   if (key === "escape" && $("deal") && !$("deal").hidden) return dealClose();
   if (key === "escape" && S.letterWin) return lettersClose();
   if (key === "escape" && S.cropWin) return cropClose();
+  if (key === "escape" && S.weaveWin) return weaveClose();
   if (mod && key === "z") { e.preventDefault(); return timeTravel(e.shiftKey ? 1 : -1); }
   if (S.mode !== "edit") return;
   const L = layer();
@@ -4371,6 +4463,85 @@ async function selfTest(dir) {
       report.copies = { photo: !!ph, hits: ids.map((id) => !!cv._hits.find((h) => h.id === id)), path: await invoke("write_image", framed(await toPng(cv), { dir, name: "copy-crop.png" })) };
       if (report.copies.hits.some((h) => !h)) report.errors.push("copies and crops: a layer not caught on the canvas");
       S.cover.layers = S.cover.layers.filter((l) => had.has(l.id));
+    }
+    // weaving: the real photo's subject cut out and set over the title, its head in front of the lettering and its
+    // body behind it; then every other letter in front, in the house lettering, in one lettered upright and in the
+    // ransom note; each woven cover must differ from the unwoven one. The lettering half see-through, woven. A drag:
+    // the subject slid, the lettering let through where it is (as a still cover has it); the head line's slider
+    // dragged, the frames following it; the title dragged over the subject with a look effect on it, the effect
+    // not worked out again.
+    {
+      const pic = canCut() && (await invoke("selftest_photo").catch(() => null));
+      if (pic) {
+        await step("weave");
+        const keep = JSON.stringify({ layers: S.cover.layers, title: S.cover.title }), keepSel = S.layerId, size = S.profile.sizes[0], [vw, vh] = virtualSize(size.w, size.h);
+        S.cover.title = "WEAVE *穿插*\nIN FRONT 前后";
+        S.cover.layers = S.cover.layers.filter((l) => l.type !== "photo");
+        const ph = await addPhoto(pic), front = ph && (await cutOut(ph));
+        report.weave = { cut: !!front, error: CUT.error };
+        if (front) {
+          ph.blur = 10; ph.dim = 0.3; front.outline = 6;
+          // the subject twice the title's height, its head over the title's first line, a little right of its middle
+          const hitsOf = () => renderFull(size, S.cover, catIndex())._hits;
+          let hs = hitsOf(), T = hs.find((x) => x.id === "title"), F = hs.find((x) => x.id === front.id);
+          front.t.all.s *= (T.hh * 2) / F.hh;
+          hs = hitsOf(); T = hs.find((x) => x.id === "title"); F = hs.find((x) => x.id === front.id);
+          front.t.all.x += (T.cx + T.hw * 0.15 - F.cx) / vw; front.t.all.y += (T.cy - T.hh - F.hh * 0.1 - (F.cy - F.hh)) / vh;
+          const shot = async (name) => { const cv = await renderReady(size, S.cover, catIndex()); return { cv, path: await invoke("write_image", framed(await toPng(cv), { dir, name })) }; };
+          /** How many pixels (every seventh) of two canvases of one size differ noticeably. */
+          const apart = (a, b) => { const x = a.getContext("2d").getImageData(0, 0, a.width, a.height).data, y = b.getContext("2d").getImageData(0, 0, b.width, b.height).data; let n = 0; for (let i = 0; i < x.length; i += 28) if (Math.abs(x[i] - y[i]) + Math.abs(x[i + 1] - y[i + 1]) + Math.abs(x[i + 2] - y[i + 2]) > 40) n++; return n; };
+          const off = await shot("weave-off.png");
+          front.weave = { with: ["title"], by: "head", line: 0.3, front: {} };
+          const head = await shot("weave-head.png");
+          const keys = parseTitle(S.cover.title).flatMap((runs, row) => { const cells = lineCells(runs); return keysOf(cells, row).filter((k, i) => !/^\s+$/.test(cells[i].ch)); });
+          front.weave = { ...front.weave, by: "letters", front: { title: keys.filter((_, i) => i % 2 === 0) } };
+          const letters = await shot("weave-letters.png");
+          const title = layer("title");
+          title.fx = "ransom"; delete front.weave;
+          const ransomOff = await shot("weave-ransom-off.png");
+          front.weave = { with: ["title"], by: "letters", line: 0.3, front: { title: keys.filter((_, i) => i % 2 === 0) } };
+          const ransom = await shot("weave-ransom.png");
+          title.fx = "bluenote"; delete front.weave;   // a lettering painted upright on the slanted line
+          const uprightOff = await shot("weave-upright-off.png");
+          front.weave = { with: ["title"], by: "letters", line: 0.3, front: { title: keys.filter((_, i) => i % 2 === 0) } };
+          const upright = await shot("weave-upright.png");
+          delete title.fx; front.weave.by = "head"; title.o = 0.5;
+          const faint = await shot("weave-faint.png");
+          title.o = 1;
+          const snap = (c) => { const x = Object.assign(document.createElement("canvas"), { width: c.width, height: c.height }); x.getContext("2d").drawImage(c, 0, 0); return x; };
+          // a drag of the subject: the first frame keeps it to slide, the next slides it and lets the lettering through again
+          const cv = document.createElement("canvas"), live = { ids: [front.id] }, frameAt = () => paint(cv, size, size.w * S.settings.scale, S.cover, catIndex(), null, live);
+          frameAt(); front.t.all.x -= 0.05; frameAt();
+          const dragged = { cv: snap(cv), path: await invoke("write_image", framed(await toPng(cv), { dir, name: "weave-drag.png" })) }, still = renderFull(size, S.cover, catIndex());
+          // the head line's slider dragged (the subject repainted each step, its lettering kept): each step where it is set
+          front.weave.line = 0.3; frameAt(); const line3 = snap(cv); front.weave.line = 0.7; frameAt();
+          const lineMoved = apart(line3, cv), lineStill = (front.weave.line = 0.3, frameAt(), apart(line3, cv));
+          // a look effect on the subject, the title dragged over it: the effect's image is kept, only let through anew
+          const look = S.profile.style.look, e = effectsFor(look, "photo")[0];
+          if (e) {
+            front.lookFx = { [`${look}.${e.key}`]: 0.6 };
+            Object.assign(FX_TIMING, { on: true, ms: {} }); renderFull(size, S.cover, catIndex()); const cold = Object.keys(FX_TIMING.ms).length;
+            const tl = layer("title"), drag = { ids: ["title"] }, dc = document.createElement("canvas"), x0 = tl.t.all.x;
+            FX_TIMING.ms = {};
+            for (let n = 0; n < 4; n++) { tl.t.all.x = x0 + 0.01 * n; paint(dc, size, size.w * S.settings.scale, S.cover, catIndex(), null, drag); }
+            FX_TIMING.on = false;
+            report.weave.effects = { effect: `${look}.${e.key}`, workedOut: cold, againWhileDragged: Object.keys(FX_TIMING.ms).length, path: await invoke("write_image", framed(await toPng(dc), { dir, name: "weave-fx-drag.png" })) };
+            if (!cold || report.weave.effects.againWhileDragged) report.errors.push("weave: dragging the lettering works out the woven subject's look effects again");
+            tl.t.all.x = x0; delete front.lookFx;
+          }
+          report.weave = { ...report.weave, off: off.path, head: head.path, letters: letters.path, ransomOff: ransomOff.path, ransom: ransom.path, upright: upright.path, faint: faint.path, drag: dragged.path,
+            changed: { head: apart(off.cv, head.cv), letters: apart(off.cv, letters.cv), headLetters: apart(head.cv, letters.cv), ransom: apart(ransomOff.cv, ransom.cv), upright: apart(uprightOff.cv, upright.cv),
+              faint: apart(head.cv, faint.cv), dragFromStill: apart(dragged.cv, still), lineMoved, lineStill } };
+          const ch = report.weave.changed;
+          if (!ch.head) report.errors.push("weave: the head in front looks as the cover unwoven");
+          if (!ch.letters || !ch.headLetters) report.errors.push("weave: the letters in front look as the cover unwoven, or as the head in front");
+          if (!ch.ransom || !ch.upright) report.errors.push("weave: the letters in front of the ransom note, or of an upright lettering, look as the cover unwoven");
+          if (!lineMoved || lineStill > lineMoved * 0.05) report.errors.push("weave: the head line's slider dragged, the frames do not follow it");
+          // a drag's frame is drawn coarser here and there (see isFast), never let through elsewhere than a still cover is
+          if (ch.dragFromStill > ch.head * 0.2) report.errors.push(`weave: dragged, the subject lets its lettering through elsewhere than a still cover does (${ch.dragFromStill} pixels apart)`);
+        }
+        const k = JSON.parse(keep); S.cover.layers = k.layers; S.cover.title = k.title; S.layerId = keepSel;
+      }
     }
     // the title and a text layer as headlines on plates, the text with its own colour, an outline and plates under its highlighted words
     {

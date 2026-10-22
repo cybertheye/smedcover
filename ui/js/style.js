@@ -1400,7 +1400,7 @@ const songke = {
     // Columns want height, where a line wants width: the title takes the field down to the colour
     // band (or the foot of the page), and stands clear of the seal, which keeps its corner; left of
     // it, the subtitle's column (see subtitleFit).
-    return drawTitleVertical(ctx, title, env.sub && env.sub.vertical ? env.sub.titleBox : songBox(ctx, env, box), { font: fonts.serif, fill: L.ink || css(SONG.ink), hi: L.hi || css(SONG.red), maxFs: 300, weight: 900 });
+    return drawTitleVertical(ctx, title, env.sub && env.sub.vertical ? env.sub.titleBox : songBox(ctx, env, box), { font: fonts.serif, fill: L.ink || css(SONG.ink), hi: L.hi || css(SONG.red), maxFs: 300, weight: 900, only: env.only });   // only: see wovenFront in render.js
   },
   /**
    * The subtitle, with the title in columns: in a column of its own (one per typed line), smaller, left
