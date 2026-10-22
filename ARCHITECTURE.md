@@ -139,19 +139,39 @@ A cover is an array of layers, bottom first.
 
 | Kind | Types | Notes |
 |---|---|---|
-| Layout layers (`bound` in the code) | `bg` `accent` `graphic` `catname` `tag` `brand` `logo` `subtitle` `title` `frame` (their default order, bottom first: `BOUND_TYPES`) | Exactly one of each on every cover. Their content comes from elsewhere (the title text, the channel's graphic, …). They cannot be deleted; the `id` is the type name. |
-| Free layers | `asset` `text` `photo` `solid` | Assets, text, photos and blocks of colour added by the user; can be deleted and duplicated. An asset may carry `ink` (a vector asset's colour of the user's, over its own and the channel's); a block carries `color` and is the canvas's size at scale 1. |
+| Layout layers (`bound` in the code) | `bg` `accent` `graphic` `catname` `tag` `brand` `logo` `subtitle` `title` `frame` (their default order, bottom first: `BOUND_TYPES`) | Exactly one of each on every cover. Their content comes from elsewhere (the title text, the channel's graphic, …). They cannot be deleted; the `id` is the type name. All but `bg` and `frame` can be copied (`COPYABLE`). |
+| Copies of layout layers | a type of `COPYABLE`, with `copy: true` | Made by duplicating a layout layer; the user's, as a free layer is: can be deleted, renamed and duplicated. |
 
 `normalizeLayers()` repairs a layer list: it drops unknown layers, puts back missing layout layers,
-keeps the background at the bottom and makes ids unique. A free layer may carry `name`, the name the
-user gave it in the layer list (`layerName()` prefers it; without one the name comes from the type and
-content). The interface's buttons do not follow the cover's look.
+keeps the background at the bottom and makes ids unique. A layer the user added (`isAdded()`: a free
+layer or a copy) may carry `name`, the name the user gave it in the layer list (`layerName()` prefers it;
+without one the name comes from the type and content, a copy's from its type: "Title copy",
+`layer.copyOf`). The interface's buttons do not follow the cover's look.
+
+**Copies of layout layers**: `duplicate()` copies a free layer, or a layout layer of `COPYABLE` as a copy
+of it: a layer of the same type with `copy: true` and an id of its own (`normalizeLayer()` gives one that
+reads a layout layer's id, or none, a new one, so a copy is never taken for the original; a layout
+layer's `off` is not read on it, and `duplicate()` brings in a copy of a part left out). It shows what the
+original shows — the title's words, the subtitle, the tag, the brand row, the logo, the channel name, the
+channel graphic, the colour block — in a style and a place of its own, placed as layout layers are (an
+offset from where the template puts the element, `resolve()`) and nudged by 0.03 when made. It is the
+user's: `isAdded()` (free layers and copies) is what can be deleted (`isRemovable(layer)`, which takes the
+layer now), renamed, carried by *Copy from another channel* and dropped by *Clear*; `isLayout()` (a layout
+type, not a copy) is what the layout's order (`layoutOrder()`, `orderLayout()`), *Layout parts*
+(`partsBox()`), *Hide layout* (`layoutLayers()`) and *Reset every layer's placement* go by. The layer list
+shows a copy with the layout icon where a free layer shows what it is, then the user's. Whatever looks for
+the layout's own title, subtitle, logo or graphic looks by id (a layout layer's id is its type), not by
+type: `subtitlePlan()`, `partsOf()`, `env.hasBrand` and `env.logo` in `render.js`, `titleLayer()`,
+`graphicTop()` and `keepClear()` in `style.js`, `dealCover()` putting the title on top, `seenNow()`. A copy
+of the subtitle shows where the subtitle goes while the subtitle itself is hidden or left out
+(`subtitlePlan(…, hidden)`, the title making no room for it), and a copy of the logo where the logo goes
+while the logo is hidden (`PAINT.logo` takes `logoBox()` itself).
 
 The default order changed once (it was `bg accent graphic brand title tag catname frame`; files from before the
 brand logo and the subtitle get `logo` and `subtitle` put in above `brand` as they are read, as any missing
 layout layer is put back after the nearest one before it):
-`reorderLayout()` puts a design or cover still in the old default order into the new one, each free layer
-going with the layout layer it lay directly above. The app does it once per profile, in `loadCovers()`
+`reorderLayout()` puts a design or cover still in the old default order into the new one, each layer the
+user added (a copy too) going with the layout layer it lay directly above. The app does it once per profile, in `loadCovers()`
 (the profile then keeps `layerOrder: 2`), since someone may later put the old order back on purpose.
 In the same way a new cover comes with the tag `EP.01`, and the covers made before that and never touched
 (the placeholder title, no tag) are given it once (`tagged: true`), so a tag emptied later stays empty; and
@@ -164,7 +184,7 @@ design leaves out `DEFAULT_OFF` (the channel name and graphic): `normalizeLayers
 when it puts back missing layout layers, which for a new profile is all of them; a profile's design and its
 covers still on the placeholder title were made to leave them out once (`lean: true`, in `loadCovers()`).
 The same rows put the layout layers in order: a row dropped on another calls `orderLayout(layers, types)`
-(bottom-first types, the ground first; each free layer going with the layout layer it lies directly above;
+(bottom-first types, the ground first; each layer the user added going with the layout layer it lies directly above;
 `reorderLayout()` is it for the old default order) on the cover and on the profile's design, so the new
 order is the default from then on (new channels' covers, *Clear*); the covers other channels have keep theirs.
 
@@ -213,7 +233,7 @@ Every layer has a `t`:
 
 - **`t.all` applies to every size.** Position is stored as a **fraction of the canvas**, so one value lands in a consistent place from 16:9 to 9:16.
   - Free layers: `x`, `y` are the position of the centre.
-  - Layout layers: `x`, `y` are an **offset** from where the template puts the element; 0 by default.
+  - Layout layers (and their copies): `x`, `y` are an **offset** from where the template puts the element; 0 by default.
   - `s` is the overall size, `kx` / `ky` stretch horizontally / vertically, `r` is degrees.
 - **`t.by` is per-size fine-tuning**, keyed by size (`"1920x1080"`), in virtual pixels, applied on top of `t.all`.
 - **The channel graphic** can also be tuned per channel, under `"1920x1080@<channel id>"`, because graphics differ a lot in shape.
@@ -855,7 +875,7 @@ and `swatch()` a small colour swatch (optionally automatic).
 ### 9.2 Working on the canvas
 
 - The pointer position is converted to virtual coordinates and tested against `canvas._hits`, top first. The point is rotated back into each layer's own frame, so rotated layers are hit accurately.
-- *Hide layout* (`toggleLayout()`) hides every layout layer on this channel's cover (`layoutLayers()`: the layers that are not free) and remembers, in memory and per cover object, which of them were showing (`LAYOUT_HID`); with all hidden the button reads *Show layout* and brings back just those, or all of them when there is no record (after a change of channel, say). It sets the layers' `visible`, so the eye icons agree and undo works.
+- *Hide layout* (`toggleLayout()`) hides every layout layer on this channel's cover (`layoutLayers()`: the layout's own, `isLayout()`, neither free layers nor copies of layout layers) and remembers, in memory and per cover object, which of them were showing (`LAYOUT_HID`); with all hidden the button reads *Show layout* and brings back just those, or all of them when there is no record (after a change of channel, say). It sets the layers' `visible`, so the eye icons agree and undo works.
 - *3D* (`set3d()`, the state in `V3`, not saved) puts a canvas of its own (`#cv3d`) over the stage, the cover's canvas hidden and not painted under it. Each layer on this channel's cover is painted alone (`drawCover`'s `o.only`: shown even when hidden, kept to its base's shape when clipped onto one, the cover's main photo and theme still set by what is really shown, no look painted over it all) into a sheet in `V3.sheets`, with a small copy of its alpha (`maskOf()`). `stack3d.js` draws them as an axonometric stack — no perspective, so each sheet is one affine transform, and `sheetUnder()` maps a point back onto each sheet exactly, front to back, until a mask says the layer has something there. `drawMain()` hands over to `paint3d()`, which paints again only the sheets that changed: none when only the selection did (`queueDraw(false)`, from `selectLayer` and `pickLayers`), the dragged ones and what is clipped with them while a layer's slider holds `LIVE`, all of them otherwise; `draw3d()` composes the sheets, and `tick3d()` runs it per frame while something eases: opening out of the flat cover and folding back into it (`V3.k`; flat, the stack fits the box the canvas has, so the two meet), a sheet sliding to a new place in the stack (`V3.z`), the scale (held while the view is dragged, then eased to fit), *Reset view*. A pointer on a row of the list (`#side`'s pointermove) dims the other sheets; the sheet under the pointer marks its row (`markRows()`). Leaving Edit closes it at once (`close3d()`).
 - With FOCUS on (`S.focus`, not saved) the canvas is painted with `o.spot`, the ids `spotIds()` gives (the selection, with a linked photo's other half): every other layer is painted at `SPOT_DIM` of its opacity, a clipping group dimmed or not as a whole; the list greys their rows, and `focusAllows()` refuses to select them from the list, a photo's thumbnail, a link's mark or the 3D view, with a toast. On the canvas nothing is hit-tested: the selected layer's handles work as ever, any other press and drag goes to `focusDrag()`, and the wheel acts only on `focusTargets()` (the movable members of the selected group, or the selected layer; fixed and locked ones do not count); a click beside the canvas no longer ends the selection. `syncFocus()`, run by `renderSide()`, keeps the canvas's dashed frame and tag up to date.
 - For the selected layer the handles are checked first: corners resize, sides stretch, the top knob rotates. A photo filling the canvas has a frame only once it no longer covers it (the hit's `covers`, see `showsFrame()`), and only the corners: it is never stretched or turned. Handle size is computed in screen pixels, so handles look the same at any zoom.
@@ -890,7 +910,7 @@ fills fields in and orders keys anew, and without that the next commit would tak
 change and cut off the steps to redo (which is how *Redo* once stopped working).
 
 *Clear* (top bar, `clearDialog()`): asked first, then the channel's cover is built anew from the
-profile's default design with `channelCover()`, its free layers dropped, the title and tag words kept;
+profile's default design with `channelCover()`, the layers it adds dropped (free ones and copies: only `isLayout()` ones stay), the title and tag words kept;
 history is committed before and after, so it is one step of undo.
 
 *Dialogs*: a click on the dimmed `#modal` (pressed and let go there — a press dragged out of the dialog

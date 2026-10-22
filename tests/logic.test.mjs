@@ -1478,7 +1478,7 @@ test("layers: the subject layer is optional, at most one, removable, and keeps i
   assert.equal(subs.length, 1);                                              // a second one is dropped
   assert.deepEqual([subs[0].id, subs[0].outline, subs[0].shadow, subs[0].follow, subs[0].ink], ["subject", 60, 0.5, true, "#ff0000"]);
   assert.equal(out.indexOf(subs[0]), 5);                                     // where it was put
-  assert.ok(isRemovable("subject") && isRemovable("text") && !isRemovable("title") && !isRemovable("bg"));
+  assert.ok(isRemovable({ type: "subject" }) && isRemovable({ type: "text" }) && !isRemovable({ type: "title" }) && !isRemovable({ type: "bg" }));
   assert.deepEqual([newLayer("subject").outline, newLayer("subject").ink], [0, undefined]);
 });
 
@@ -1602,7 +1602,7 @@ test("solid colour layers: the canvas's size at scale 1, one colour, free like a
   const { isFree, isRemovable } = await import("../ui/js/layers.js");
   const L = newLayer("solid", { color: "#123456" });
   assert.deepEqual([L.t.all.x, L.t.all.y, L.t.all.s], [0.5, 0.5, 1]);
-  assert.ok(isFree("solid") && isRemovable("solid"));
+  assert.ok(isFree("solid") && isRemovable({ type: "solid" }));
   const one = (raw) => normalizeLayers([{ type: "solid", ...raw }]).find((l) => l.type === "solid");
   assert.equal(one({ color: "#ABCDEF" }).color, "#abcdef");
   assert.equal(one({ color: "red" }).color, "#ffd60a");
@@ -2016,7 +2016,7 @@ test("the brand logo stands at the right end of the brand row, as large as LOGO 
   assert.equal(logoBox({ brand: { logo: "" } }, 1920), null);
   assert.equal(logoBox({ brand: { logo: "gone" } }, 1920), null);                   // its asset deleted: nothing, no error
   userAssets.delete("lg");
-  const cover = (offs, subtitle = "", tag = "") => ({ subtitle, tag, layers: ["catname", "graphic", "subtitle", "tag"].map((type) => ({ type, ...(offs.includes(type) ? { off: true } : {}) })) });
+  const cover = (offs, subtitle = "", tag = "") => ({ subtitle, tag, layers: ["catname", "graphic", "subtitle", "tag"].map((type) => ({ id: type, type, ...(offs.includes(type) ? { off: true } : {}) })) });
   assert.deepEqual(partsOf(cover([], "A line", "EP.1"), { graphic: { kind: "graphic", id: "camera" } }), { catname: true, graphic: true, subtitle: true, tag: true });
   assert.deepEqual(partsOf(cover(["catname", "graphic", "subtitle", "tag"], "A line", "EP.1"), { graphic: { kind: "graphic", id: "camera" } }), { catname: false, graphic: false, subtitle: false, tag: false });
   assert.deepEqual(partsOf(cover([]), { graphic: { kind: "none" } }), { catname: true, graphic: false, subtitle: false, tag: false });   // a channel without a graphic; a subtitle and a tag with no words
@@ -2311,4 +2311,52 @@ test("a bend keeps to the picture it is given: nothing thrown far past the line,
   assert.ok(convexWarp([[0, 0], [0, 0.4], [0, -0.4], [0, 0]]) && convexWarp([[0, 0], [-0.05, 0.35], [0.08, -0.1], [0.04, 0]]));
   assert.ok(!convexWarp([[0, 0], [0, 0.48], [0, -0.48], [0, 0]]), "an edge shrunk to about a point");
   assert.ok(!convexWarp(o.warp) && !convexWarp([[0, 1.5], [0, 0], [0, 0], [0, 0]]) && !convexWarp([[0, 0], [0, 0.5], [0, -0.5], [0, 0]]));
+});
+
+test("a layout layer but the ground and the corner brackets can be copied: a layer of its type, the user's, which the layout's order, parts and lookups pass by", async () => {
+  const { COPYABLE, isAdded, isLayout, isRemovable, layoutOrder, orderLayout, copyFreeLayers } = await import("../ui/js/layers.js");
+  const { partsOf } = await import("../ui/js/render.js");
+  const { dealCover } = await import("../ui/js/deal.js");
+  assert.deepEqual(COPYABLE, BOUND_TYPES.filter((t) => t !== "bg" && t !== "frame"));
+  const ls = normalizeLayers(defaultLayers()), by = (id) => ls.find((l) => l.id === id);
+  assert.equal(duplicate(by("bg")), null);
+  assert.equal(duplicate(by("frame")), null);
+  Object.assign(by("title"), { stroke: 1.6, fx: "ransom", fxSeed: 7 }); by("title").t.all.x = 0.1;
+  const c = duplicate(by("title"));
+  assert.ok(c.copy && c.type === "title" && c.id !== "title" && c.stroke === 1.6 && c.fx === "ransom" && c.fxSeed === 7, "the same type and style, an id of its own");
+  assert.ok(Math.abs(c.t.all.x - 0.13) < 1e-9 && Math.abs(c.t.all.y - 0.03) < 1e-9, "placed as the layout layers are, nudged");
+  const g = duplicate(by("graphic"));   // left out of a new design (DEFAULT_OFF): its copy comes in
+  assert.ok(g.copy && !g.off && g.visible);
+  assert.ok(isAdded(c) && isRemovable(c) && !isLayout(c) && isLayout(by("title")) && !isAdded(by("title")) && !isRemovable(by("title")));
+  assert.ok(duplicate(c).copy && duplicate(c).id !== c.id, "a copy copied again");
+  ls.splice(ls.indexOf(by("title")) + 1, 0, c); ls.push(g);
+  assert.deepEqual(layoutOrder(ls), BOUND_TYPES, "the layout's order passes copies by");
+  // re-ordered, a copy goes with the layout layer it lies over, as an added layer does
+  assert.ok(orderLayout(ls, ["bg", "title", ...BOUND_TYPES.filter((t) => t !== "bg" && t !== "title")]));
+  assert.deepEqual(ls.slice(1, 3).map((l) => l.id), ["title", c.id]);
+  // read back: kept under its id; one claiming a layout layer's id, or left out, or of the ground, is read as a copy, in, or not a copy
+  const back = normalizeLayers(JSON.parse(JSON.stringify([...ls, { ...c, id: "title", off: true }, { type: "bg", copy: true }])));
+  const copies = back.filter((l) => l.copy);
+  assert.equal(copies.length, 3);
+  assert.ok(copies.some((l) => l.id === c.id) && copies.every((l) => !BOUND_TYPES.includes(l.id) && !l.off));
+  assert.equal(back.filter((l) => l.id === "title" && !l.copy).length, 1, "the title is still the title");
+  assert.equal(back.filter((l) => l.type === "bg").length, 1);
+  // which parts take room: the layout's own, not a copy's
+  const parts = (layers) => partsOf({ subtitle: "", tag: "EP.1", layers }, { graphic: { kind: "graphic", id: "camera" } });
+  const off = normalizeLayers(defaultLayers()), tag = off.find((l) => l.id === "tag");
+  tag.off = true; tag.visible = false;
+  const tagCopy = duplicate(tag); off.push(tagCopy);
+  assert.equal(parts(off).tag, false);
+  // copied to another cover with the layers the user added, over the layout layer it lay over there
+  const { layers: into, copies: made } = copyFreeLayers(normalizeLayers(defaultLayers()), ls);
+  assert.deepEqual(made.map((l) => [l.type, !!l.copy]), [["title", true], ["graphic", true]]);
+  assert.ok(into[into.findIndex((l) => l.id === "title") + 1] === made[0] && made.every((l) => l.id !== c.id && l.id !== g.id));
+  // Surprise me leaves a copy where it is, and keeps the title over everything (not the copy)
+  const p = normalizeProfile(sampleProfile("en")), cover = normalizeCover({}, p), design = new Map(p.design.layers.map((l) => [l.id, l]));
+  const tc = duplicate(cover.layers.find((l) => l.id === "title")); tc.t.all.y = 0.4;
+  cover.layers.push(tc);
+  let seed = 3;
+  dealCover(p.style, cover, { R: () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648), locks: {}, surprise: { recent: [], taste: {} }, recipes: {}, rgb: [252, 191, 0], design, sizeKey: "1920x1080" });
+  assert.equal(tc.t.all.y, 0.4);
+  assert.equal(cover.layers.at(-1).id, "title");
 });

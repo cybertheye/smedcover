@@ -280,7 +280,7 @@ export function dealCover(st, cover, env) {
   }
   // 6. the title over everything else, with what is clipped into it, so nothing dealt lies over it (one clipped
   // onto another layer stays) — but for the subjects cut out of photos that stood over it, which still do
-  const list = cover.layers, ti = list.findIndex((l) => l.type === "title");
+  const list = cover.layers, ti = list.findIndex((l) => l.id === "title");
   if (ti >= 0 && !list[ti].clip) {
     const title = list.splice(ti, clipEnd(list, ti) - ti + 1), over = [];
     for (let i = ti; i < list.length; ) if (list[i].type === "photo" && list[i].cut && !list[i].clip) over.push(...list.splice(i, clipEnd(list, i) - i + 1)); else i++;

@@ -19,6 +19,11 @@
 // hidden, and the editor leaves it out of the layer list and of Hide layout; ticked again, it comes back
 // as it was. The ground is never left out. A new design leaves out the channel name and graphic
 // (DEFAULT_OFF).
+// A layout layer but the ground and the corner brackets may be copied (`copy: true`, see duplicate): the copy
+// is a layer of the same type under an id of its own, showing the same thing — the title's words, the
+// channel's graphic, the brand row — in a style and a place of its own (placed as the layout layers are, as
+// an offset from where the template puts the element). It is the user's, as a free layer is: it can be
+// deleted, renamed and copied again, and the layout's order, Layout parts and Hide layout pass it by.
 // A free layer may also be clipped (`clip: true`): it then shows only within the shape of the layer
 // below it — the nearest one not itself clipped, its *base* (see clipBase) — as a clipping mask does:
 // a photo inside the title's letters, a colour inside a silhouette. The base can be any layer but the
@@ -35,19 +40,23 @@ export const DEFAULT_OFF = ["catname", "graphic"];
  * they are read.)
  */
 const OLD_ORDER = ["bg", "accent", "graphic", "brand", "logo", "subtitle", "title", "tag", "catname", "frame"];
+/** The layout layers but the ground and the corner brackets: those that may be copied (see `copy` above). */
+export const COPYABLE = BOUND_TYPES.filter((type) => type !== "bg" && type !== "frame");
+/** Whether a layer is one of the layout's own (a copy of one is not). */
+export const isLayout = (layer) => BOUND_TYPES.includes(layer.type) && !layer.copy;
 /** The layout layers' types in `layers`, bottom first. */
-export const layoutOrder = (layers) => layers.filter((l) => BOUND_TYPES.includes(l.type)).map((l) => l.type);
+export const layoutOrder = (layers) => layers.filter(isLayout).map((l) => l.type);
 /**
  * Puts the layout layers of `layers` (in place) in the order `types` (all of BOUND_TYPES, bottom first,
  * the ground first), each layer the user added going with the layout layer it lies directly above (so
  * text over the title stays over it). Returns whether anything moved.
  */
 export function orderLayout(layers, types) {
-  const bound = layers.filter((l) => BOUND_TYPES.includes(l.type));
+  const bound = layers.filter(isLayout);
   if (types[0] !== "bg" || types.length !== bound.length || !bound.every((l) => types.includes(l.type)) || layoutOrder(layers).join() === types.join()) return false;
   const above = new Map(), lead = [];
   let under = null;
-  for (const l of layers) { if (BOUND_TYPES.includes(l.type)) above.set((under = l.type), []); else (under ? above.get(under) : lead).push(l); }
+  for (const l of layers) { if (isLayout(l)) above.set((under = l.type), []); else (under ? above.get(under) : lead).push(l); }
   const byType = Object.fromEntries(bound.map((l) => [l.type, l]));
   layers.splice(0, layers.length, ...lead, ...types.flatMap((type) => [byType[type], ...above.get(type)]));
   return true;
@@ -66,8 +75,10 @@ export const FREE_TYPES = ["asset", "text", "photo", "solid"];
  * background photo's subject cut out, is now a photo layer (see upgradeCover in app.js).
  */
 export const LEGACY_TYPES = ["subject"];
-/** Layers the user can delete: the free ones. */
-export const isRemovable = (type) => FREE_TYPES.includes(type) || LEGACY_TYPES.includes(type);
+/** Layers the user added: the free ones, and copies of layout layers. */
+export const isAdded = (layer) => FREE_TYPES.includes(layer.type) || layer.copy === true;
+/** Layers the user can delete: those they added. */
+export const isRemovable = (layer) => isAdded(layer) || LEGACY_TYPES.includes(layer.type);
 /**
  * The index of the layer that layer i is clipped to (see `clip` above), or -1 if it is not clipped, or
  * clipped onto nothing but the ground (which covers everything, so the clip changes nothing).
@@ -265,9 +276,12 @@ function normalizeT(raw, free) {
 }
 function normalizeLayer(raw, catIds) {
   if (!raw || typeof raw !== "object" || !(raw.type in PROPS)) return null;
-  const free = isFree(raw.type), base = newLayer(raw.type);
-  const L = { ...base, id: free ? (typeof raw.id === "string" && raw.id ? raw.id : base.id) : raw.type,
+  const free = isFree(raw.type), copy = raw.copy === true && COPYABLE.includes(raw.type), base = newLayer(raw.type);
+  const id = typeof raw.id === "string" && raw.id ? raw.id : "";
+  // a copy never takes a layout layer's id
+  const L = { ...base, id: free ? id || base.id : copy ? (id && !BOUND_TYPES.includes(id) ? id : uid()) : raw.type,
     visible: raw.visible !== false, locked: raw.locked === true, o: num(raw.o, 1, 0, 1), t: normalizeT(raw.t, free) };
+  if (copy) L.copy = true;
   if (typeof raw.name === "string" && raw.name) L.name = raw.name.slice(0, 60);
   let lettered = null;
   // a headline may be given a text effect of its own, and a strength for it
@@ -319,7 +333,7 @@ function normalizeLayer(raw, catIds) {
   }
   if (lettered && !(L.lookFx && L.lookFx[lettered])) L.lookFx = { ...(L.lookFx || {}), [lettered]: 0.6 };
   if ((free || raw.type === "title") && raw.clip === true) L.clip = true;   // shown only within the layer below (see clipBase); the title may be too
-  if (!free && raw.type !== "bg" && raw.off === true) { L.off = true; L.visible = false; }   // a layout layer this cover leaves out (see `off` above)
+  if (!free && !copy && raw.type !== "bg" && raw.off === true) { L.off = true; L.visible = false; }   // a layout layer this cover leaves out (see `off` above)
   if (free && Array.isArray(raw.cats)) {   // a layer whose categories are all gone goes with them
     const cats = [...new Set(raw.cats.filter((x) => typeof x === "string" && x && (!catIds || catIds.includes(x))))];
     if (!cats.length) return null;
@@ -389,7 +403,7 @@ export function normalizeLayers(raw, catIds) {
   for (const r of Array.isArray(raw) ? raw : []) {
     const L = normalizeLayer(r, catIds);
     if (!L) continue;
-    if (seen.has(L.id)) { if (!isFree(L.type)) continue; L.id = uid(); }
+    if (seen.has(L.id)) { if (!isAdded(L)) continue; L.id = uid(); }
     seen.add(L.id); out.push(L);
   }
   BOUND_TYPES.forEach((type, i) => {
@@ -480,16 +494,17 @@ export function moveLayer(layers, id, to) {
   return true;
 }
 /**
- * Copies the free layers of `from` (another cover's layers) into the list `into`, settings and all,
- * each under a new id (a cut-out's link goes to its photo's copy). Each copy goes above the built-in
- * layer it was above there, over the free layers already on it there, in the order they had; one above
+ * Copies the layers the user added to `from` (another cover's layers: free ones and copies of layout ones,
+ * see isAdded) into the list `into`, settings and all, each under a new id (a cut-out's link goes to its
+ * photo's copy). Each copy goes above the built-in layer it was above there, over the layers added on it
+ * there, in the order they had; one above
  * a layout layer this list has not, at the top. Returns the new list and the copies, bottom first.
  */
 export function copyFreeLayers(into, from) {
   const ids = new Set(into.map((l) => l.id)), renamed = new Map(), groups = [];
   let anchor = into.length ? into[0].id : "";
   for (const l of from) {
-    if (!isFree(l.type)) { anchor = l.id; continue; }
+    if (!isAdded(l)) { anchor = l.id; continue; }
     const c = JSON.parse(JSON.stringify(l));
     do c.id = uid(); while (ids.has(c.id));
     ids.add(c.id); renamed.set(l.id, c.id);
@@ -501,7 +516,7 @@ export function copyFreeLayers(into, from) {
   const at = (id) => {   // above the layout layer and the free layers already over it
     let i = into.findIndex((l) => l.id === id);
     if (i < 0) return into.length;
-    for (i++; i < into.length && isFree(into[i].type); i++);
+    for (i++; i < into.length && isAdded(into[i]); i++);
     return i;
   };
   const out = [...into];
@@ -509,10 +524,14 @@ export function copyFreeLayers(into, from) {
     .forEach((g) => out.splice(g.i, 0, ...g.copies));
   return { layers: out, copies };
 }
-/** Copy of a free layer, nudged so it is visibly a new one. */
+/**
+ * Copy of a free layer, or of a layout layer but the ground and the corner brackets (a copy of it, see `copy`
+ * above; one of a layer left out of the cover comes in), nudged so it is visibly a new one.
+ */
 export function duplicate(layer) {
-  if (!isFree(layer.type)) return null;
+  if (!isFree(layer.type) && !COPYABLE.includes(layer.type)) return null;
   const c = JSON.parse(JSON.stringify(layer));
   c.id = uid(); c.t.all.x += 0.03; c.t.all.y += 0.03;
+  if (!isFree(layer.type)) { c.copy = true; if (c.off) { delete c.off; c.visible = true; } }
   return c;
 }

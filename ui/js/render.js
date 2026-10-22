@@ -376,11 +376,13 @@ function titleBoxOf(env) {
  * words: in the title's box, under the title, which makes room for it; a look that sets the title its
  * own way (vertically) may place it so too (its subtitleFit). Worked out before the layers are painted,
  * so in the faces the title is set in (a layer's own font goes first only while it is painted).
+ * `hidden`: where it would go though it is hidden (the title makes no room for it then), or left out
+ * while a copy of it shows (see `copy` in layers.js).
  */
 function subtitlePlan(ctx, env, L0, hidden = false) {
-  const S = env.cover.layers.find((l) => l.type === "subtitle" && (l.visible || (hidden && !l.off)));
+  const S = env.cover.layers.find((l) => (l.id === "subtitle" && (l.visible || (hidden && !l.off))) || (hidden && l.copy && l.type === "subtitle" && l.visible));
   if (!S || !parseTitle(env.cover.subtitle).length || typeof ctx.measureText !== "function") return null;
-  const T = env.cover.layers.find((l) => l.type === "title" && l.visible), title = T ? env.cover.title : "", box = titleBoxOf(env);
+  const T = env.cover.layers.find((l) => l.id === "title" && l.visible), title = T ? env.cover.title : "", box = titleBoxOf(env);
   const own = L0.subtitleFit && L0.subtitleFit(ctx, title, env.cover.subtitle, box, env, lookValues());
   if (own) return own;
   const face = headFont();
@@ -572,7 +574,7 @@ const PAINT = {
     return placed(ctx, tr, (c) => drawHeader(styled(c, env.C, true), env.o, env.w, L.ink ? { ...env.th, text: L.ink, own: L.ink } : env.th, env.C, env.G.railOnAccent, L.rail, env.G.brandOnAccent, logo));
   },
   logo(ctx, L, tr, env) {
-    const b = env.logo;
+    const b = env.logo || (L.copy ? offEdge(logoBox(env.o.profile, env.w, look().logoInset), env.G) : null);   // a copy shows with the logo itself hidden
     if (!b) return null;
     return placed(ctx, tr, (c) => { c.save(); c.translate(b.x + b.w / 2, b.y + b.h / 2); c.scale(b.k, b.k); drawAsset(c, b.ref, env.C, {}); c.restore(); return b; }, b);
   },
@@ -1047,7 +1049,7 @@ export function drawCover(cv, o) {
 }
 /** Which of the layout's parts that take room a cover has (see meetStandards): those not left out of it, a graphic only when its channel has one, a subtitle and a tag only with words. */
 export const partsOf = (cover, cat) => {
-  const on = (type) => cover.layers.some((l) => l.type === type && !l.off);
+  const on = (type) => cover.layers.some((l) => l.id === type && !l.off);   // the layout's own (a copy has an id of its own)
   return { catname: on("catname"), graphic: on("graphic") && !!cat.graphic && cat.graphic.kind !== "none", subtitle: on("subtitle") && parseTitle(cover.subtitle).length > 0, tag: on("tag") && !!cover.tag };
 };
 /** The graphic a look's figure is drawn from in the channel graphic's place, as env.graphic is given: null when there is none, or it has gone from the library. */
@@ -1075,8 +1077,8 @@ function paintCover(cv, o) {
     o, w, h, cover, cat, C, acc: rgb(C), style: P.style, photo, key, hiRes: cv.width > w,
     G,
     th: L0.theme ? L0.theme(base, C, lookValues()) : base,
-    hasBrand: cover.layers.some((l) => (l.type === "brand" || (l.type === "logo" && logoBox(P, w))) && l.visible),
-    logo: cover.layers.some((l) => l.type === "logo" && l.visible) ? offEdge(logoBox(P, w, L0.logoInset), G) : null,   // where the brand logo goes, when there is one (the brand row's rail makes way for it)
+    hasBrand: cover.layers.some((l) => (l.id === "brand" || (l.id === "logo" && logoBox(P, w))) && l.visible),
+    logo: cover.layers.some((l) => l.id === "logo" && l.visible) ? offEdge(logoBox(P, w, L0.logoInset), G) : null,   // where the brand logo goes, when there is one (the brand row's rail makes way for it)
     resolve: (l) => resolve(l, w, h, key, cat.id),   // where another layer is (a photo's copy follows its original)
     // the channel graphic, for a look that uses its shape (a giant silhouette, a glowing photogram): draw(ctx) paints it about 0, 0 at scale 1
     graphic: cat.graphic && cat.graphic.kind !== "none" ? { ref: cat.graphic, draw: (c) => drawAsset(c, cat.graphic, C, { tint: true, labels: cat.graphic.labels, stamp: cat.graphic.stamp }) } : null,

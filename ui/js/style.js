@@ -1844,7 +1844,7 @@ function withSub(b, env) {
   return { x, y, w: Math.max(b.x + b.w, s.x + s.w) - x, h: Math.max(b.y + b.h, s.y + s.h) - y };
 }
 /** The title layer, when it shows. */
-const titleLayer = (env) => (env.cover && env.cover.layers.find((l) => l.type === "title" && l.visible)) || null;
+const titleLayer = (env) => (env.cover && env.cover.layers.find((l) => l.id === "title" && l.visible)) || null;
 /** The box the layout gives the title, as render.js hands it to the title's painter. */
 function titleBase(env) {
   const G = env.G;
@@ -1854,7 +1854,7 @@ function titleBase(env) {
 }
 /** The top of the channel graphic, as the layout places it, when it stands under the span x0–x1 (else Infinity), less a margin. */
 function graphicTop(env, x0, x1) {
-  const A = env.G && env.G.art, on = env.graphic && env.cover && env.cover.layers.some((l) => l.type === "graphic" && l.visible);
+  const A = env.G && env.G.art, on = env.graphic && env.cover && env.cover.layers.some((l) => l.id === "graphic" && l.visible);
   if (!A || !on) return Infinity;
   const half = 310 * A.s;
   return A.x + half > x0 && A.x - half < x1 ? A.y - half - 24 : Infinity;
@@ -6371,7 +6371,7 @@ function keepClear(ctx, env) {
   const out = [], T = canPaint(ctx) ? titleArea(ctx, env) : null, tg = env.G && env.G.tag;
   if (T) out.push({ x: T.x - 30, y: T.y - 30, w: T.w + 60, h: T.h + 60 });
   if (tg) out.push({ x: tg.x - 20, y: tg.y - 20, w: 420, h: tg.fs * 1.34 + 40 });
-  const A = env.G && env.G.art, on = env.graphic && env.cover && env.cover.layers.some((l) => l.type === "graphic" && l.visible);
+  const A = env.G && env.G.art, on = env.graphic && env.cover && env.cover.layers.some((l) => l.id === "graphic" && l.visible);
   if (A && on) { const r = 330 * A.s; out.push({ x: A.x - r, y: A.y - r, w: r * 2, h: r * 2 }); }
   return out;
 }

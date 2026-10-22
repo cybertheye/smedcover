@@ -11,7 +11,7 @@ import { platformsFor, ratioOf } from "./platforms.js";
 import { boxOf, overlap, titleContrast } from "./check.js";
 import { baseRecipe, FAMILIES, RULES, dealCover, coverScore, pickHand } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isRemovable, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF } from "./layers.js";
 import {
   carryFonts, native, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
@@ -78,7 +78,8 @@ const layer = (id = S.layerId) => S.cover.layers.find((l) => l.id === id) || nul
 /** Geometry context of the size on the main canvas, as the layer maths wants it. */
 const frame = () => { const s = selSize(), [vw, vh] = virtualSize(s.w, s.h); return { vw, vh, key: sizeKey(s), catId: cat().id }; };
 function layerName(L) {
-  if (isFree(L.type) && L.name) return L.name;   // the user's own name for a layer they added
+  if (isAdded(L) && L.name) return L.name;   // the user's own name for a layer they added
+  if (L.copy) return t("layer.copyOf", t("layer." + L.type));
   if (L.type === "asset") return assetExists(L.ref) ? assetName(L.ref, getLang()) : t("assets.missing");
   if (L.type === "text") return L.text.split("\n")[0].replace(/\*/g, "").slice(0, 16) || t("layer.text");
   if (L.type === "photo") return t(L.of || L.cut ? "layer.photoCut" : L.fill ? "layer.photoFill" : "layer.photo");
@@ -391,7 +392,7 @@ const movers = (list) => list.filter((L) => !L.locked && !FIXED.includes(L.type)
 /** Applies the same placement edit to several layers, then redraws once. */
 function editAll(list, patch) { for (const L of new Set(list.map(owner))) adjust(L, frame(), S.settings.scope, patch); touch({ cover: true }); }
 function removeGroup() {
-  const gone = group().filter((L) => isFree(L.type));
+  const gone = group().filter(isAdded);
   if (!gone.length) return;
   S.cover.layers = S.cover.layers.filter((L) => !gone.includes(L) && !(L.of && gone.some((g) => g.id === L.of)));   // a photo's linked cut-out goes with it
   S.picked = []; S.layerId = "bg";
@@ -441,17 +442,19 @@ function addAsset(ref, at) {
 }
 function removeLayer(id = S.layerId) {
   const L = layer(id);
-  if (!L || !isRemovable(L.type)) return;
+  if (!L || !isRemovable(L)) return;
   if (L.type === "photo") S.cover.layers = S.cover.layers.filter((l) => l.of !== L.id);   // a photo's linked cut-out goes with it (not the other way round)
   const i = S.cover.layers.indexOf(L);
   S.cover.layers.splice(i, 1);
   S.layerId = S.cover.layers[Math.max(1, i - 1)].id;
   touch({ cover: true, side: true, panel: onCoverTab() });
 }
+/** Whether a layer can be copied: one the user added, or a layout layer but the ground and the corner brackets (a linked cut-out is not: cut out the photo again). */
+const copiable = (L) => !!L && (isFree(L.type) || COPYABLE.includes(L.type)) && !(L.type === "photo" && L.of);
 function duplicateLayer() {
-  const L = layer(), c = L && !(L.type === "photo" && L.of) && duplicate(L);   // a linked cut-out is not copied: cut out the photo again
+  const L = layer(), c = copiable(L) && duplicate(L);
   if (!c) return;
-  insertAbove(S.cover.layers, L.id, c); S.layerId = c.id;
+  insertAbove(S.cover.layers, S.cover.layers[clipEnd(S.cover.layers, S.cover.layers.indexOf(L))].id, c); S.layerId = c.id;   // over what is clipped onto it, which stays its
   touch({ cover: true, side: true, panel: onCoverTab() });
 }
 function shiftLayer(dir) {
@@ -754,7 +757,7 @@ function coverTab() {
  */
 let partDrag = null;   // the type of the row being dragged
 function partsBox() {
-  const list = S.cover.layers.filter((l) => !isFree(l.type) && l.type !== "subject" && l.type !== "bg").reverse();   // top first, as in the layer list
+  const list = S.cover.layers.filter((l) => isLayout(l) && l.type !== "bg").reverse();   // top first, as in the layer list
   const flip = (L) => {
     if (L.off) { delete L.off; L.visible = true; } else { L.off = true; L.visible = false; if (S.layerId === L.id) S.layerId = "bg"; }
     touch({ cover: true, side: true, panel: true });
@@ -994,7 +997,7 @@ async function coverOf(p, catId) {
   if (p.id === S.profile.id && S.covers[catId]) return S.covers[catId];
   return channelCover(await readJson(coverPath(p.id, catId)).catch(() => null), p, catId);
 }
-// Cover → Copy from another profile or channel: its free layers, settings and all, into this cover
+// Cover → Copy from another profile or channel: the layers added to it (free ones, copies of layout ones), settings and all, into this cover
 const COPY = { profile: "", cat: "", src: null, job: 0 };
 function copyDialog() {
   if (!S.profiles.some((p) => p.id === COPY.profile)) COPY.profile = S.profile.id;
@@ -1005,9 +1008,9 @@ function copyDialog() {
     const job = ++COPY.job;
     coverOf(p, COPY.cat).then(async (c) => { await loadPhotos(pidsOf(c)); if (job === COPY.job && !$("modal").hidden) { COPY.src = c; copyDialog(); } });
   }
-  const free = COPY.src ? COPY.src.layers.filter((l) => isFree(l.type)) : [];
-  const kinds = [["photo", "layers.kind.photo"], ["text", "layers.kind.text"], ["asset", "layers.kind.svg"], ["solid", "layers.kind.solid"]]
-    .map(([type, key]) => [t(key), free.filter((l) => l.type === type).length]).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(" · ");
+  const free = COPY.src ? COPY.src.layers.filter(isAdded) : [];
+  const kinds = [["photo", "layers.kind.photo"], ["text", "layers.kind.text"], ["asset", "layers.kind.svg"], ["solid", "layers.kind.solid"], ["copy", "layers.kind.copies"]]
+    .map(([type, key]) => [t(key), free.filter((l) => (type === "copy" ? l.copy : l.type === type)).length]).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(" · ");
   const m = $("modal");
   m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("copy.title")),
     el("div", { class: "hint", style: "margin:0 0 12px;font-size:13px;opacity:.8" }, t("copy.hint")),
@@ -2004,7 +2007,7 @@ function styleTab() {
     el("div", { class: "box" }, cap("style.design"),
       el("button", { class: "btn wide", onclick: () => { S.profile.design.layers = JSON.parse(JSON.stringify(S.cover.layers.filter((l) => l.type !== "photo"))); touch({ profile: true }); toast(t("style.designSaved")); } }, t("style.saveDesign")),
       el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.cover.layers = keepPhotos(JSON.parse(JSON.stringify(S.profile.design.layers)), S.cover.layers); S.layerId = "title"; touch({ cover: true, side: true }); } }, t("style.loadDesign")),
-      el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { for (const L of S.cover.layers) if (!isFree(L.type)) resetPlacement(L, "all"); touch({ cover: true, side: true }); } }, t("style.resetAll")),
+      el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { for (const L of S.cover.layers) if (isLayout(L)) resetPlacement(L, "all"); touch({ cover: true, side: true }); } }, t("style.resetAll")),
       el("div", { class: "hint" }, t("style.designHint"))),
   ];
 }
@@ -2267,7 +2270,7 @@ let dragId = null;
 function layerRow(L) {
   const icon = (glyph, off, title, fn) => el("button", { class: "ic" + (off ? " off" : ""), title, onclick: (e) => { e.stopPropagation(); fn(); touch({ cover: true, side: true }); } }, glyph);
   const on = L.id === S.layerId || group().includes(L);
-  const free = isFree(L.type) || L.type === "subject", base = clipBase(S.cover.layers, S.cover.layers.indexOf(L));
+  const free = isRemovable(L), base = clipBase(S.cover.layers, S.cover.layers.indexOf(L));
   const off = S.focus && S.mode === "edit" && !spotIds().includes(L.id);   // FOCUS is on another layer
   return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}${base >= 0 ? " clip" : ""}${off ? " dim" : ""}`, title: off ? t("focus.locked") : base >= 0 ? t("layers.clipped", layerName(S.cover.layers[base])) : null, dataset: { id: L.id }, draggable: L.type !== "bg",
     onclick: (e) => focusAllows(L.id) && (e.shiftKey ? togglePick(L.id) : selectLayer(L.id)),
@@ -2292,8 +2295,8 @@ function layerRow(L) {
 /** A layer's icons: a linked photo's chain and leading / following mark, what it is (photo, text, vector or bitmap asset), then whose it is (a layout layer, or added by the user). */
 function layerKinds(L) {
   const icon = (name, tip) => el("span", { class: "kind " + name, title: tip, innerHTML: ICONS[name] });
-  const free = isFree(L.type) || L.type === "subject";
-  let what = null;
+  const free = isRemovable(L);
+  let what = L.copy ? icon("layout", t("layers.kind.copy", t("layer." + L.type))) : null;
   if (L.type === "photo" || L.type === "subject") what = icon("photo", t("layers.kind.photo"));
   else if (L.type === "text") what = icon("text", t("layers.kind.text"));
   else if (L.type === "solid") what = icon("solid", t("layers.kind.solid"));
@@ -2927,7 +2930,7 @@ function focusAllows(id) {
   return false;
 }
 /** The layout layers on the cover on the canvas (the ones the template brings, marked with the layout icon). */
-const layoutLayers = () => S.cover.layers.filter((l) => !isFree(l.type) && l.type !== "subject" && !l.off && appliesTo(l, cat().id));
+const layoutLayers = () => S.cover.layers.filter((l) => isLayout(l) && !l.off && appliesTo(l, cat().id));
 let LAYOUT_HID = null;   // { cover, ids }: the template's layers that were showing when "Hide layout" hid them
 /**
  * Hide layout / Show layout: hides every one of the template's layers at once, leaving what the user
@@ -2959,7 +2962,7 @@ function renderSide() {
   if (!S.cover) return;
   if (layer() && (!appliesTo(layer(), cat().id) || layer().off)) S.layerId = "bg";   // the selected layer is not on this category's cover, or left out of it
   if (S.letterWin) lettersShow();   // the letter window follows its layer, or closes
-  const side = $("side"), y = side.scrollTop, L = layer(), free = L && isFree(L.type), here = S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off);
+  const side = $("side"), y = side.scrollTop, L = layer(), here = S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off);
   // keep typing in the text box alive across rebuilds
   const typing = document.activeElement && side.contains(document.activeElement) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename"));
   if (typing) return;
@@ -2973,8 +2976,8 @@ function renderSide() {
       el("div", { class: "acts", style: "margin-top:10px;justify-content:flex-start" },
         el("button", { class: "btn", onclick: () => addLayer(newLayer("text", { text: t("layer.newText") })) }, t("layers.addText")),
         el("button", { class: "btn", onclick: () => addLayer(newLayer("solid", { color: cat().color })) }, t("layers.addSolid")),
-        el("button", { class: "btn", disabled: !free || many.length > 0 || !!(L.type === "photo" && L.of), onclick: duplicateLayer }, t("layers.dup")),
-        el("button", { class: "btn", disabled: many.length ? !many.some((x) => isFree(x.type)) : !(L && isRemovable(L.type)), onclick: () => (many.length ? removeGroup() : removeLayer()) }, t("layers.del")),
+        el("button", { class: "btn", disabled: !copiable(L) || many.length > 0, onclick: duplicateLayer }, t("layers.dup")),
+        el("button", { class: "btn", disabled: many.length ? !many.some(isAdded) : !(L && isRemovable(L)), onclick: () => (many.length ? removeGroup() : removeLayer()) }, t("layers.del")),
         el("button", { class: "btn", title: t("layers.up"), disabled: many.length > 0 || i < 1 || i >= here.length - 1, onclick: () => shiftLayer(1) }, "▲"),
         el("button", { class: "btn", title: t("layers.down"), disabled: many.length > 0 || i <= 1, onclick: () => shiftLayer(-1) }, "▼"))),
     many.length ? el("div", { class: "box" }, el("label", { class: "cap" }, t("props.group", many.length)),
@@ -3700,14 +3703,14 @@ addEventListener("pointerdown", (e) => {
  * (measured: the sizes as checkCover takes them; shots: the drawing at each size, by its key).
  */
 function seenNow(sizes, here) {
-  const seen = {}, measured = [], shots = {}, byId = new Map(S.cover.layers.map((l) => [l.id, l])), at = S.cover.layers.findIndex((l) => l.type === "title");
+  const seen = {}, measured = [], shots = {}, byId = new Map(S.cover.layers.map((l) => [l.id, l])), at = S.cover.layers.findIndex((l) => l.id === "title");
   const main = mainPhoto(), cut = !!main && S.cover.layers.some((l) => l.of === main.id && l.cut && l.visible);
   const draw = (size, cover, extra = {}) => { const cv = el("canvas"); drawCover(cv, { profile: S.profile, catIndex: catIndex(), size, pixelW: 360, cover, photos: S.photos, ...extra }); return cv; };
   for (const size of sizes) {
     const cv = draw(size, S.cover), [vw, vh] = cv._virtual, k = cv.width / vw, key = sizeKey(size), hits = cv._hits || [], of = (h) => byId.get(h.id);
     shots[key] = cv;
     measured.push({ key, w: size.w, h: size.h, vw, vh, on: true });
-    const t0 = hits.find((h) => h.type === "title"), title = t0 ? { id: t0.id, hit: t0 } : null;
+    const t0 = hits.find((h) => h.id === "title"), title = t0 ? { id: t0.id, hit: t0 } : null;
     let contrast = null;
     if (t0 && key === here && at >= 0) {
       const q = boxOf(t0), x0 = Math.max(0, Math.floor(q.x0 * k)), y0 = Math.max(0, Math.floor(q.y0 * k)), x1 = Math.min(cv.width, Math.ceil(q.x1 * k)), y1 = Math.min(cv.height, Math.ceil(q.y1 * k));
@@ -3737,7 +3740,7 @@ function clearDialog() {
   const go = () => {
     closeModal(); clearTimeout(timers.hist); commitHistory(); SURPRISE.step = null;
     const fresh = channelCover({ catId: S.cover.catId, title: S.cover.title, subtitle: S.cover.subtitle, tag: S.cover.tag }, S.profile, S.cover.catId);
-    fresh.layers = fresh.layers.filter((l) => !isFree(l.type));   // the design's own added layers go too: empty is empty
+    fresh.layers = fresh.layers.filter(isLayout);   // the design's own added layers go too: empty is empty
     for (const l of fresh.layers) {   // the parts this cover has, and those it leaves out, stay as they are
       const now = layer(l.id);
       if (now && now.off) { l.off = true; l.visible = false; } else if (now && l.off) { delete l.off; l.visible = true; }
