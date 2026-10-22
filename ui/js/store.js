@@ -231,36 +231,35 @@ export function normalizeSettings(raw) {
 }
 /** What Surprise me may be told to leave as it is: the look (and its sliders), the dark or light ground, the letterings, where things stand. */
 export const SURPRISE_LOCKS = ["look", "theme", "lettering", "places"];
-/** How many of the looks dealt last are kept (Surprise me leaves out as many of them as RULES.look.recent in deal.js says). */
-export const RECENT_KEPT = 12;
 /**
- * What Surprise me keeps between runs, on this computer: the parts it is to leave alone (`locks`, see
- * SURPRISE_LOCKS), the looks of the last hands dealt (`recent`, newest last, RECENT_KEPT at most), and how often a
- * hand in each look was kept or dropped (`taste`: {look: {kept, dropped}}, see tasteWeight in deal.js).
+ * What Surprise me keeps, on this computer: the parts it is to leave alone (`locks`, see SURPRISE_LOCKS), and the
+ * chances the user set in Surprise me's chances window (`odds`: { groups: {group: {option: chance}}, chances: {name:
+ * chance} }, only what they set; chances between 0 and 1, names the app does not know left to oddsOf in
+ * deal.js, which passes them over and makes each group add up to 1).
  */
 export function normalizeSurprise(raw) {
-  const r = raw && typeof raw === "object" ? raw : {}, name = (k) => typeof k === "string" && /^[a-zA-Z]{1,24}$/.test(k);
-  const count = (v) => (Number.isFinite(v) ? Math.min(999, Math.max(0, Math.round(v))) : 0), locks = {}, taste = {};
+  const r = raw && typeof raw === "object" ? raw : {}, name = (k) => typeof k === "string" && /^[a-zA-Z]{1,24}$/.test(k), locks = {};
+  const table = (o, n) => Object.fromEntries(Object.entries(o && typeof o === "object" ? o : {}).filter(([k, v]) => name(k) && Number.isFinite(v)).slice(0, n).map(([k, v]) => [k, Math.min(1, Math.max(0, v))]));
   for (const k of SURPRISE_LOCKS) if (r.locks && r.locks[k] === true) locks[k] = true;
-  for (const [k, v] of Object.entries(r.taste && typeof r.taste === "object" ? r.taste : {}).slice(0, 80))
-    if (name(k) && v && typeof v === "object" && (count(v.kept) || count(v.dropped))) taste[k] = { kept: count(v.kept), dropped: count(v.dropped) };
-  return { locks, recent: (Array.isArray(r.recent) ? r.recent : []).filter(name).slice(-RECENT_KEPT), taste };
+  const o = r.odds && typeof r.odds === "object" ? r.odds : {}, groups = {};
+  for (const [g, v] of Object.entries(o.groups && typeof o.groups === "object" ? o.groups : {}).slice(0, 12)) if (name(g) && v && typeof v === "object") groups[g] = table(v, 80);
+  const chances = table(o.chances, 40), odds = {};
+  if (Object.keys(groups).length) odds.groups = groups;
+  if (Object.keys(chances).length) odds.chances = chances;
+  return { locks, odds };
 }
 /**
- * The user's own Surprise me recipes, by look (see baseRecipe in deal.js): only what was set — a family's
- * name, chances between 0 and 1 (own, dark, bend, and each part's in `params`), weights between 0 and 10
- * by name (fx, bends). Names the app does not know are left to deal.js, which passes them over.
+ * The user's own Surprise me recipes, by look (see baseRecipe in deal.js): only the chances they set for its
+ * optional parts (`params`: {part: chance}, each between 0 and 1). The lettering, bend and ground are set for
+ * every look alike (`surprise.odds`); what earlier versions kept of them by look is let go. Names the app does
+ * not know are left to deal.js, which passes them over.
  */
 export function normalizeRecipes(raw) {
-  const out = {}, name = (k) => /^[a-zA-Z]{1,24}$/.test(k), chance = (v) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : null);
-  const table = (o, hi) => Object.fromEntries(Object.entries(o && typeof o === "object" ? o : {}).filter(([k, v]) => name(k) && Number.isFinite(v)).slice(0, 40).map(([k, v]) => [k, Math.min(hi, Math.max(0, v))]));
+  const out = {}, name = (k) => /^[a-zA-Z]{1,24}$/.test(k);
   for (const [look, r] of Object.entries(raw && typeof raw === "object" ? raw : {}).slice(0, 80)) {
-    if (!name(look) || !r || typeof r !== "object") continue;
-    const m = {};
-    if (["pop", "print", "light"].includes(r.family)) m.family = r.family;
-    for (const k of ["own", "dark", "bend"]) if (chance(r[k]) != null) m[k] = chance(r[k]);
-    for (const [k, hi] of [["fx", 10], ["bends", 10], ["params", 1]]) if (r[k] && typeof r[k] === "object") m[k] = table(r[k], hi);
-    if (Object.keys(m).length) out[look] = m;
+    if (!name(look) || !r || typeof r !== "object" || !r.params || typeof r.params !== "object") continue;
+    const params = Object.fromEntries(Object.entries(r.params).filter(([k, v]) => name(k) && Number.isFinite(v)).slice(0, 40).map(([k, v]) => [k, Math.min(1, Math.max(0, v))]));
+    if (Object.keys(params).length) out[look] = { params };
   }
   return out;
 }

@@ -1,19 +1,19 @@
-// Surprise me's rules, all of them, in one place: how a hand is dealt and how one of them is kept.
-//   RULES       every number it deals by — how many hands, how likely each switch, the ranges of the sliders,
-//               outlines and shadows, how the user's layers are placed, how a hand is scored and kept
+// Surprise me's rules, all of them, in one place: how a hand is dealt.
+//   RULES       every number it deals by — how many hands, the chances the user may set (`odds`, see oddsOf),
+//               the ranges of the sliders, outlines and shadows, how the user's layers are placed
 //   FAMILIES    what suits each family of looks (the dark ground, letterings, bends)
 //   RECIPES     what suits each look: its family, what differs, its optional parts
 //   dealCover   a hand, in the order it is dealt: the look and its sliders, its scene, the ground, the words
 //               put back, the title on top, each layer's own choices and look effects
-//   coverScore, pickHand   how the hands are scored by the cover standards (check.js), and which is kept
+//   rebalance   a group's chances with one of them set, the others moved alike (the chances window)
 // What needs the cover drawn stays in app.js: surprise() deals the hands (dealHand: dealCover, then the
-// user's layers placed by dealPlaces, which reads RULES.places), measures each and shows it. The user's own
-// recipes (the Style tab) lie over RECIPES; what they lock, and their taste, come in through `env`. Pure:
-// `R` is the random source, a function returning numbers in [0, 1).
+// user's layers placed by dealPlaces, which reads RULES.places) and shows each. The user's own chances
+// (Surprise me's chances window) lie over RULES.odds, their recipes (the same panel, and the Style tab) over RECIPES;
+// both, what they lock and the looks already dealt in the run come in through `env`. Pure: `R` is the random
+// source, a function returning numbers in [0, 1).
 import { LOOKS, LOOK_IDS, effectsFor, FX_TYPES } from "./style.js";
 import { EFFECTS, BENDS } from "./textfx.js";
-import { titleLines, lineUnits, luminance, checkCover, typeSize, LIMITS } from "./check.js";
-import { PLATFORM_IDS, wanted, isRatio } from "./platforms.js";
+import { titleLines, lineUnits, luminance } from "./check.js";
 import { ACCENT_SHAPES, LETTERED, newLayer, clipEnd, moveScene } from "./layers.js";
 
 /**
@@ -21,50 +21,49 @@ import { ACCENT_SHAPES, LETTERED, newLayer, clipEnd, moveScene } from "./layers.
  * FAMILIES and RECIPES; the order a hand is dealt in, in dealCover.) Ranges are [from, to].
  */
 export const RULES = {
-  // a run: how many hands are dealt, how long dealing them may take (ms; `least` are dealt whatever it takes),
-  // the least time between two hands shown in its window (ms)
-  hands: { count: 6, ms: 1500, least: 2, pace: 90 },
-  // how a hand is scored (coverScore): what a red and a yellow issue costs, the rules left out (the words and
-  // the sizes, the same whatever the hand); up to 1 more for the room above the contrast line (the worst title
-  // measured, from the line to `contrastSpan` above it) and up to 1 for the room above the A1 line (the
-  // smallest feed type size, from the line to `typeSpan` times more)
-  score: { red: 10, yellow: 3, skip: ["A2", "E1"], contrastSpan: 4, typeSpan: 0.5 },
-  // which hand is kept (pickHand): of those whose issues cost the least, the best three within `near` of the
-  // best, by `weights`; a hand in the look the cover had scores `sameLook` less
-  keep: { near: 2, weights: [3, 2, 1], sameLook: 1 },
-  // the look: none of the last `recent` dealt (while others are left); the user's taste makes one from
-  // `taste[0]` to `taste[1]` times as likely (tasteWeight)
-  look: { recent: 4, taste: [0.25, 3] },
+  // a run: how many hands are dealt (all of them, each in a look of its own while there are looks left), the
+  // least time between two shown in its window (ms)
+  hands: { count: 6, pace: 90 },
+  // the chances Surprise me's chances window shows, which the user may set (theirs lie over these, see oddsOf).
+  // `groups`: of each, one option is dealt, their chances adding up to 1 — the look and the colour block's shape
+  // (left empty: every one alike), how many look effects a layer but the title and subtitle is given, and
+  // whether each is the look dealt's or another look's; for every look alike, the title's lettering (its own, or
+  // another), its bend (none, or one) and the ground (dark or light) — left empty: what the looks' recipes give
+  // on average (builtInGroup). `chances`: switches, each on by a chance of its own —
+  // the brand row's rail; the plate under the channel name, the subtitle, a text layer; an asset tinted the
+  // channel colour; the look's scene objects moved a little off their places; the subtitle lettered like the
+  // title; a look's part that is off by default coming in, a checkbox on by default staying on, one off by
+  // default coming on (each unless the look's recipe has a chance of its own for it)
+  odds: {
+    groups: { look: {}, accent: {}, lookFx: { none: 0.45, one: 0.33, two: 0.22 }, lookFxFrom: { own: 0.6, other: 0.4 }, letters: {}, bend: {}, ground: {} },
+    chances: { rail: 0.8, catnamePlate: 0.75, subtitlePlate: 0.3, textPlate: 0.35, assetTint: 0.5, sceneMoved: 0.4, subtitleLikeTitle: 0.5, extra: 0.35, toggleOn: 0.75, toggleOff: 0.3 },
+  },
   // its sliders (tuneLook): within `spread` of the range either way of the default, off the very ends by
-  // `ends` (unless the default is there); a part off by default comes in by `extra` (or the recipe's chance),
-  // `extras` at most, to within `extraRange` of its range; a checkbox on by default stays on by `toggleOn`,
-  // one off by default comes on by `toggleOff` (or the recipe's chance)
-  sliders: { spread: 0.3, ends: 0.08, extra: 0.35, extras: 2, extraRange: [0.3, 0.75], toggleOn: 0.75, toggleOff: 0.3 },
-  // its scene objects: by `chance` off where the layout puts them, by up to `dx` and `dy` of the canvas, in
-  // steps of `step`
-  scene: { chance: 0.4, dx: 0.06, dy: 0.05, step: 0.005 },
+  // `ends` (unless the default is there); the parts off by default that come in (odds: `extra`), `extras` at
+  // most, to within `extraRange` of their range
+  sliders: { spread: 0.3, ends: 0.08, extras: 2, extraRange: [0.3, 0.75] },
+  // its scene objects, when moved (odds: `sceneMoved`): by up to `dx` and `dy` of the canvas, in steps of `step`
+  scene: { dx: 0.06, dy: 0.05, step: 0.005 },
   // what the cover brings (coverContext, recipeOf): a title is long with a line wider than `long` characters
   // or `longLines` lines, short with no line wider than `short` and two lines at most; a long one is bent
   // `longBend` as often, and given a sticker's rim or depth `longRim` as often; a short one is bent
-  // `shortBend` as often, `shortBendMost` at most; a channel colour darker than `black` (luminance) makes the
+  // `shortBend` as often, `shortBendMost` at most (never less often than the look's own); a channel colour darker than `black` (luminance) makes the
   // dark ground `blackDark` as likely, one brighter than `bright` moves it `brightPull` of the way to
   // certain, `brightMost` at most — neither when the user set the dark ground's chance
   cover: { long: 8, longLines: 3, short: 4, longBend: 0.3, longRim: 0.5, shortBend: 1.5, shortBendMost: 0.5, black: 0.05, blackDark: 0.6, bright: 0.6, brightPull: 0.4, brightMost: 0.95 },
   // the letterings (letterFor): a strength within `fxAmt`, a bend's within `bendAmt` (in 20ths); the
-  // subtitle lettered like the title by `subtitleLikeTitle`, else keeping its look's own by `subtitleOwn` at
+  // subtitle not lettered like the title (odds: `subtitleLikeTitle`) keeps its look's own by `subtitleOwn` at
   // least; a text layer keeps its look's own `textOwn` times as often as the title
-  letterings: { fxAmt: [0.6, 1.5], bendAmt: [0.5, 1.1], subtitleLikeTitle: 0.5, subtitleOwn: 0.85, textOwn: 0.85 },
-  // each layer's own switches (by type: how likely each is on), outline and shadow (ranges, in 20ths)
+  letterings: { fxAmt: [0.6, 1.5], bendAmt: [0.5, 1.1], subtitleOwn: 0.85, textOwn: 0.85 },
+  // the lettered layers' outline and shadow (ranges, in 20ths)
   layers: {
-    bg: { grid: 0.75 }, brand: { rail: 0.8 }, catname: { plate: 0.75 }, asset: { tint: 0.5 },
     title: { stroke: [0.6, 1.4], shadow: [0.5, 1.5] },
-    subtitle: { plate: 0.3, stroke: [0.6, 1.2], shadow: [0.5, 1.2] },
-    text: { plate: 0.35, stroke: [0.6, 1.4], shadow: [0.5, 1.5] },
+    subtitle: { stroke: [0.6, 1.2], shadow: [0.5, 1.2] },
+    text: { stroke: [0.6, 1.4], shadow: [0.5, 1.5] },
   },
-  // look effects on a layer but the title and subtitle (theirs are the user's): by `chance` some, by `two`
-  // two of them; each from the look dealt by `ownLook`, else from another look; at `amount` (its parts at
-  // `sub`), in steps of `step`
-  lookFx: { chance: 0.55, two: 0.4, ownLook: 0.6, amount: [0.35, 0.85], sub: [0.2, 0.8], step: 0.05 },
+  // look effects on a layer but the title and subtitle (theirs are the user's; how many, and from which look:
+  // odds `lookFx`, `lookFxFrom`): at `amount` (its parts at `sub`), in steps of `step`
+  lookFx: { amount: [0.35, 0.85], sub: [0.2, 0.8], step: 0.05 },
   // the user's own layers (dealPlaces in app.js): `scale` times their size (within `size`), turned by up to
   // `turn` degrees; `tries` places tried for the one that covers the least of the title and the cut-out
   // subjects; one still covering more than `cover` of them made `shrink` times as large and placed again,
@@ -138,29 +137,36 @@ export function coverContext(title, rgb) {
 }
 /**
  * A look's recipe as the table has it, its family's choices filled in: { family, dark, own, fx, bend, bends,
- * params, tune }. `mine`: what the user set for it in its place (see the Style tab; any of family, dark, own,
- * bend, fx, bends, params), which wins.
+ * params, tune }. `mine`: what the user set for its optional parts (`params`: each part's chance), which wins.
+ * The dark ground, the lettering and the bend are dealt for every look alike (RULES.odds, see recipeOf); the
+ * table's are what those are, on average over the looks, until the user sets them (see builtInGroup).
  */
 export function baseRecipe(id, mine = null) {
-  const r = RECIPES[id] || { family: "pop" }, m = mine || {}, family = FAMILIES[m.family] ? m.family : r.family, f = FAMILIES[family] || FAMILIES.pop;
-  const t = family === r.family ? r : {};   // another family than the table's: its choices, not the table's
+  const r = RECIPES[id] || { family: "pop" }, f = FAMILIES[r.family] || FAMILIES.pop;
   return {
-    family, dark: m.dark ?? t.dark ?? f.dark, own: m.own ?? t.own ?? f.own, fx: { ...(m.fx || t.fx || f.fx) },
-    bend: m.bend ?? t.bend ?? f.bend, bends: { ...(m.bends || t.bends || f.bends) }, params: { ...(r.params || {}), ...(m.params || {}) }, tune: r.tune || null,
+    family: r.family, dark: r.dark ?? f.dark, own: r.own ?? f.own, fx: { ...(r.fx || f.fx) },
+    bend: r.bend ?? f.bend, bends: { ...(r.bends || f.bends) }, params: { ...(r.params || {}), ...((mine && mine.params) || {}) }, tune: r.tune || null,
   };
 }
 /**
- * A look's recipe for a hand (see baseRecipe; `ctx.mine`, the user's own for it), turned to the cover (`ctx`,
- * see coverContext): a long title is bent less and less often given a lettering that takes room round the
- * letters (a sticker's rim, depth), so its type stays large; a short one is bent a little more often; a channel
- * colour near black would sink into the dark ground and a very bright one (near white, or a light yellow) into the
- * light one, so the other is likelier — unless the user set the dark ground's chance themselves.
+ * A look's recipe for a hand: its optional parts and `tune` its own (baseRecipe; `ctx.mine`, the user's for
+ * them), the dark ground, the title's lettering and its bend as the chances say for every look (`ctx.odds`, see
+ * oddsOf: `own`, the look's own lettering, and `fx` the others' weights; `bend`, any, and `bends` theirs; `dark`).
+ * While the user has not set them, the cover turns them (`ctx`, see coverContext): a long title is bent less and
+ * less often given a lettering that takes room round the letters (a sticker's rim, depth), so its type stays
+ * large; a short one is bent a little more often; a channel colour near black would sink into the dark ground
+ * and a very bright one (near white, or a light yellow) into the light one, so the other is likelier. Set, they
+ * are dealt as set.
  */
 export function recipeOf(id, ctx = {}) {
-  const out = baseRecipe(id, ctx.mine), c = RULES.cover;
-  if (ctx.long) { out.bend *= c.longBend; for (const k of ["sticker", "extrude"]) if (out.fx[k]) out.fx[k] *= c.longRim; }
-  else if (ctx.short) out.bend = Math.min(c.shortBendMost, out.bend * c.shortBend);
-  if (ctx.lum == null || (ctx.mine && ctx.mine.dark != null)) return out;
+  const r = baseRecipe(id, ctx.mine), O = ctx.odds || oddsOf(), c = RULES.cover, L = O.groups.letters, B = O.groups.bend;
+  const out = { ...r, own: L.own, fx: Object.fromEntries(Object.entries(L).filter(([k, v]) => k !== "own" && v > 0)),
+    bend: 1 - B.none, bends: Object.fromEntries(Object.entries(B).filter(([k, v]) => k !== "none" && v > 0)), dark: O.groups.ground.dark };
+  if (ctx.long) {
+    if (!O.set.bend) out.bend *= c.longBend;
+    if (!O.set.letters) for (const k of ["sticker", "extrude"]) if (out.fx[k]) out.fx[k] *= c.longRim;
+  } else if (ctx.short && !O.set.bend) out.bend = Math.max(out.bend, Math.min(c.shortBendMost, out.bend * c.shortBend));
+  if (ctx.lum == null || O.set.ground) return out;
   if (ctx.lum < c.black) out.dark *= c.blackDark;
   else if (ctx.lum > c.bright) out.dark = Math.max(out.dark, Math.min(c.brightMost, out.dark + (1 - out.dark) * c.brightPull));
   return out;
@@ -173,36 +179,111 @@ export function weighted(weights, R) {
   for (const [k, w] of list) { at -= w; if (at < 0) return k; }
   return list[list.length - 1][0];
 }
-/**
- * How much likelier the user has made a look ({kept, dropped}: how often a hand in it was kept — edited on,
- * exported — or undone at once, or another hand taken over it): (kept + 1) / (dropped + 1), within 0.25 and 3.
- */
-export function tasteWeight(t) {
-  const kept = (t && t.kept) || 0, dropped = (t && t.dropped) || 0, [lo, hi] = RULES.look.taste;
-  return Math.min(hi, Math.max(lo, (kept + 1) / (dropped + 1)));
+/** The options of each of RULES.odds' groups. */
+export const ODD_OPTIONS = {
+  look: () => LOOK_IDS, accent: () => ACCENT_SHAPES, lookFx: () => ["none", "one", "two"], lookFxFrom: () => ["own", "other"],
+  letters: () => ["own", ...Object.keys(EFFECTS).filter((k) => k !== "auto")], bend: () => ["none", ...Object.keys(BENDS).filter((k) => k !== "taper")], ground: () => ["dark", "light"],
+};
+const unit = (v) => Math.min(1, Math.max(0, v));
+/** Below this a chance is none: what sums of fractions leave over (1e-17) must not deal a look set to 0. */
+const NONE = 1e-9;
+/** `group`'s chances for `ids`, made to add up to 1 (a crumb below NONE is 0); null when they add up to nothing. */
+function asGroup(group, ids) {
+  const o = Object.fromEntries(ids.map((k) => { const v = Number(group && group[k]) || 0; return [k, v > NONE ? v : 0]; })), sum = ids.reduce((s, k) => s + o[k], 0);
+  if (!(sum > 0)) return null;
+  for (const k of ids) o[k] /= sum;
+  return o;
 }
-/** The look for a hand: none of the last RULES.look.recent of `recent` (while any other is left), each as likely as the user's `taste` makes it (tasteWeight). */
-export function pickLook(ids, R, { recent = [], taste = {} } = {}) {
-  const last = recent.slice(-RULES.look.recent), fresh = ids.filter((k) => !last.includes(k)), pool = fresh.length ? fresh : ids;
-  return weighted(Object.fromEntries(pool.map((k) => [k, tasteWeight(taste[k])])), R);
+const BUILT = {};
+/**
+ * What the looks' recipes (FAMILIES, RECIPES) give, on average over the looks, for a group of RULES.odds left
+ * empty there: the title's lettering (`own`, the look's own, and each other one), its bend (`none`, and each),
+ * the ground (over the looks that have both). Null for a group they say nothing of (every option alike).
+ */
+function builtInGroup(g) {
+  if (!["letters", "bend", "ground"].includes(g)) return null;
+  if (BUILT[g]) return BUILT[g];
+  const out = {}, add = (k, v) => (out[k] = (out[k] || 0) + v);
+  for (const id of LOOK_IDS) {
+    const r = baseRecipe(id);
+    if (g === "ground") { if (!LOOKS[id].oneTheme) { add("dark", r.dark); add("light", 1 - r.dark); } continue; }
+    const [none, chance, table, ok] = g === "letters" ? ["own", 1 - r.own, r.fx, (k) => EFFECTS[k] && k !== "auto" && k !== id] : ["none", r.bend, r.bends, (k) => BENDS[k] && k !== "taper"];
+    const list = Object.entries(table).filter(([k, w]) => ok(k) && w > 0), sum = list.reduce((s, [, w]) => s + w, 0);
+    if (!sum) { add(none, 1); continue; }
+    add(none, 1 - chance);
+    for (const [k, w] of list) add(k, (chance * w) / sum);
+  }
+  return (BUILT[g] = out);
+}
+/**
+ * The chances a hand is dealt by: RULES.odds with the user's over them (`mine`, as Surprise me's chances panel
+ * keeps them: { groups, chances }, any part left out). Every group has each of its options (ODD_OPTIONS), their
+ * chances adding up to 1: the user's when they add up to anything (an option of theirs left out, a look added
+ * since, is at 0), else the rule's, else what the looks' recipes give (builtInGroup), else each alike; every
+ * chance is within 0 and 1. `set`: the groups the user set ({group: true}).
+ */
+export function oddsOf(mine = null) {
+  const m = mine && typeof mine === "object" ? mine : {}, groups = {}, chances = {}, set = {};
+  for (const [g, list] of Object.entries(ODD_OPTIONS)) {
+    const ids = list(), own = asGroup(m.groups && m.groups[g], ids);
+    set[g] = !!own;
+    groups[g] = own || asGroup(RULES.odds.groups[g], ids) || asGroup(builtInGroup(g), ids) || asGroup(Object.fromEntries(ids.map((k) => [k, 1])), ids);
+  }
+  for (const [k, v] of Object.entries(RULES.odds.chances)) { const u = m.chances && m.chances[k]; chances[k] = Number.isFinite(u) ? unit(u) : v; }
+  return { groups, chances, set };
+}
+/**
+ * A group's chances (adding up to 1) with option `key` set to `v`: what it gained is taken from the others
+ * alike, what it gave up shared alike among those of them that have a chance (all of them when none has) —
+ * none going below 0 (what one has not got to give, the rest give), one at 0 left at 0. Returns a new group,
+ * adding up to 1.
+ */
+export function rebalance(group, key, v) {
+  const ids = Object.keys(group), out = asGroup(group, ids) || Object.fromEntries(ids.map((k) => [k, 1 / ids.length])), others = ids.filter((k) => k !== key);
+  if (!(key in out)) return out;
+  if (!others.length) return { [key]: 1 };
+  out[key] = unit(v);
+  const need = () => 1 - out[key] - others.reduce((s, k) => s + out[k], 0);   // what the others are to move by, together
+  for (let n = 0, left = need(); Math.abs(left) > 1e-12 && n <= others.length; n++, left = need()) {
+    const some = others.filter((k) => out[k] > NONE), can = left < 0 || some.length ? some : others;
+    if (!can.length) break;
+    const each = left / can.length;
+    for (const k of can) out[k] = Math.max(0, out[k] + each);
+  }
+  for (const k of others) if (out[k] <= NONE) out[k] = 0;   // no crumbs: what is set to nothing deals nothing
+  return out;
+}
+/**
+ * The look for a hand, by the chances of `odds` ({look: chance}): none of those in `not` (the looks dealt already
+ * in this run) while one with a chance is left, and none at 0.
+ */
+export function pickLook(ids, R, odds = oddsOf().groups.look, not = []) {
+  const w = (k) => (odds[k] > NONE ? odds[k] : 0), some = ids.filter((k) => w(k) > 0), fresh = some.filter((k) => !not.includes(k));
+  return weighted(Object.fromEntries((fresh.length ? fresh : some).map((k) => [k, w(k)])), R) || ids[0];
 }
 const snap = (v, d) => { const s = d.step || 0.05; return Math.min(d.max, Math.max(d.min, Math.round(v / s) * s)); };
+/** How likely a look's optional part `d` (a checkbox, a slider off by default) is on in a hand: by the recipe `r`, else by `odds` (see oddsOf). */
+export function partChance(d, r, odds = null) {
+  const o = r.params[d.key], c = (odds || oddsOf()).chances;
+  return typeof o === "number" ? o : d.toggle ? (d.def > d.min ? c.toggleOn : c.toggleOff) : c.extra;
+}
 /** How many of a look's parts that are off by default one hand may bring in (RULES.sliders.extras). */
 export const EXTRAS = RULES.sliders.extras;
 /**
  * A look's sliders tuned for a hand: each about the value the look was made with (within 0.3 of the range
  * either way, likeliest near it, off the very ends unless that is where its default is); the parts that
- * are off by default come in only now and then (each by the recipe's chance, else 0.35), EXTRAS at most,
- * to between 0.3 and 0.75 of their range; a checkbox is on as likely as the recipe says, else 3 in 4 when
- * it is on by default and 3 in 10 when not. Typed words are left to the caller. Returns { key: value }.
+ * are off by default come in only now and then (each by the recipe's chance, else the odds' `extra`), EXTRAS
+ * at most, to between 0.3 and 0.75 of their range; a checkbox is on as likely as the recipe says, else by the
+ * odds' `toggleOn` when it is on by default and `toggleOff` when not (ctx.odds: see oddsOf). Typed words are
+ * left to the caller. Returns { key: value }.
  */
 export function tuneLook(id, R, ctx = {}) {
   const L = LOOKS[id], r = recipeOf(id, ctx), out = {}, extras = [], k = RULES.sliders;
   for (const d of L.params) {
     if (d.text) continue;
-    const o = r.params[d.key], span = d.max - d.min;
-    if (d.toggle) out[d.key] = R() < (typeof o === "number" ? o : d.def > d.min ? k.toggleOn : k.toggleOff) ? d.max : d.min;
-    else if (d.def <= d.min) { out[d.key] = d.min; if (R() < (typeof o === "number" ? o : k.extra)) extras.push(d); }
+    const span = d.max - d.min;
+    if (d.toggle) out[d.key] = R() < partChance(d, r, ctx.odds) ? d.max : d.min;
+    else if (d.def <= d.min) { out[d.key] = d.min; if (R() < partChance(d, r, ctx.odds)) extras.push(d); }
     else out[d.key] = snap(Math.min(Math.max(d.def, d.min + span * (1 - k.ends)), Math.max(Math.min(d.def, d.min + span * k.ends), d.def + span * k.spread * (R() - R()))), d);
   }
   while (extras.length > k.extras) extras.splice(Math.floor(R() * extras.length), 1);
@@ -213,7 +294,7 @@ export function tuneLook(id, R, ctx = {}) {
 /**
  * The lettering a layer is dealt under look `id`: { fx, fxAmt, fxSeed, bend, bendAmt }; fx left out for the look's
  * own, bend for none, fxAmt for a lettering without a strength, fxSeed but for the ransom note (its letters as Reshuffle deals them). `role`: "title", "subtitle" (lettered like
- * the title half the time, else mostly the look's own, never bent) or "text" (a little likelier than the
+ * the title by the odds' `subtitleLikeTitle`, else mostly the look's own, never bent) or "text" (a little likelier than the
  * title to letter otherwise). A lettering named after the look (cel's outline and shadow, the record
  * sleeve's, the editorial's) is its own already, so not dealt as another.
  * @param {string} id
@@ -221,14 +302,14 @@ export function tuneLook(id, R, ctx = {}) {
  * @param {() => number} R
  * @param {(fx: string) => boolean} [can] whether a lettering can be drawn here (outlines need the desktop app)
  * @param {{fx?: string, fxAmt?: number} | null} [title] what the title was dealt, for the subtitle
- * @param {{long?: boolean, short?: boolean, lum?: number | null, mine?: object}} [ctx] what the cover brings (see coverContext), and the user's own recipe for the look
+ * @param {{long?: boolean, short?: boolean, lum?: number | null, mine?: object, odds?: object}} [ctx] what the cover brings (see coverContext), the user's own recipe for the look, the chances (oddsOf)
  */
 export function letterFor(id, role, R, can = () => true, title = null, ctx = {}) {
   const r = recipeOf(id, ctx), out = {}, fx = Object.fromEntries(Object.entries(r.fx).filter(([k]) => EFFECTS[k] && k !== "auto" && k !== id && can(k))), w = RULES.letterings;
   const within = ([a, b]) => Math.round((a + R() * (b - a)) * 20) / 20;
   const choose = () => { const k = weighted(fx, R); if (k) { out.fx = k; if (EFFECTS[k].kind !== "passes") out.fxAmt = within(w.fxAmt); if (EFFECTS[k].seeded) out.fxSeed = 1 + Math.floor(R() * 999998); } };
   if (role === "subtitle") {
-    if (title && title.fx && R() < w.subtitleLikeTitle) { out.fx = title.fx; if (title.fxAmt != null) out.fxAmt = title.fxAmt; }
+    if (title && title.fx && R() < (ctx.odds || oddsOf()).chances.subtitleLikeTitle) { out.fx = title.fx; if (title.fxAmt != null) out.fxAmt = title.fxAmt; }
     else if (R() >= Math.max(r.own, w.subtitleOwn)) choose();
     return out;
   }
@@ -243,18 +324,18 @@ const copyOf = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v
  * and how likely is in RULES, FAMILIES and RECIPES. What the cover says is left alone (the title and tag,
  * the channel and its colour, the photos, which layers exist), and so is the layout; the user's own layers
  * are placed afterwards (dealPlaces in app.js, which needs the cover drawn). env: { R, locks (the parts to
- * leave alone: look, theme, lettering, places), surprise ({recent, taste}: the looks dealt lately, the
- * user's taste), recipes (the user's own, by look), rgb (the channel colour), design (the layers of the
+ * leave alone: look, theme, lettering, places), odds (the chances, see oddsOf), not (the looks dealt already in
+ * this run, which the look dealt is none of while it can be), recipes (the user's own, by look), rgb (the channel colour), design (the layers of the
  * profile's design, by id, where moved words go back to), sizeKey (the size shown), can(fx) (a lettering
  * can be drawn here), canTint(ref) (an asset can be tinted) }. Returns what the cover brings (coverContext).
  */
 export function dealCover(st, cover, env) {
-  const { R, locks = {} } = env, pick = (a) => a[Math.floor(R() * a.length)], between = (a, b) => a + R() * (b - a), chance = (p) => R() < p;
+  const { R, locks = {} } = env, O = env.odds || oddsOf(), pick = (a) => a[Math.floor(R() * a.length)], between = (a, b) => a + R() * (b - a), chance = (p) => R() < p;
   const round = (v, step) => Math.round(v / step) * step, within = ([a, b], step = 0.05) => round(between(a, b), step);
-  // 1. the look — none of the last few dealt, those the user keeps likelier — and a new seed for its random placement
-  if (!locks.look) { st.look = pickLook(LOOK_IDS, R, env.surprise || {}); st.lookSeed = Math.floor(R() * 1000000); }
+  // 1. the look, by its chance — none dealt already in this run while others are left — and a new seed for its random placement
+  if (!locks.look) { st.look = pickLook(LOOK_IDS, R, O.groups.look, env.not || []); st.lookSeed = Math.floor(R() * 1000000); }
   // the title's length, the channel colour and the user's own recipe for the look turn its recipe (see recipeOf)
-  const ctx = { ...coverContext(cover.title, env.rgb), mine: (env.recipes || {})[st.look] };
+  const ctx = { ...coverContext(cover.title, env.rgb), mine: (env.recipes || {})[st.look], odds: O };
   if (!locks.look) {
     // 2. its sliders about the values it was made with, its optional parts now and then (typed words are kept)
     const tuned = tuneLook(st.look, R, ctx);
@@ -263,7 +344,7 @@ export function dealCover(st, cover, env) {
     // 3. its scene objects: where the layout puts them, or now and then a little off it
     const sc = RULES.scene;
     if (cover.scene) delete cover.scene[st.look];
-    if (chance(sc.chance)) for (const key of Object.keys(LOOKS[st.look].scene || {})) moveScene(cover, st.look, key, "all", env.sizeKey, round(between(-sc.dx, sc.dx), sc.step), round(between(-sc.dy, sc.dy), sc.step));
+    if (chance(O.chances.sceneMoved)) for (const key of Object.keys(LOOKS[st.look].scene || {})) moveScene(cover, st.look, key, "all", env.sizeKey, round(between(-sc.dx, sc.dx), sc.step), round(between(-sc.dy, sc.dy), sc.step));
   }
   // 4. the ground, dark or light, as the look's recipe has it
   if (!locks.theme) st.theme = chance(recipeOf(st.look, ctx).dark) ? "dark" : "light";
@@ -288,29 +369,28 @@ export function dealCover(st, cover, env) {
   }
   // 7. every layer's own choices: switches, outline and shadow, the letterings and bends as the look's recipe
   // has them (the subtitle after the title, lettered like it now and then), unless the letterings are to stay
-  const can = env.can || (() => true), canTint = env.canTint || (() => false), Y = RULES.layers;
+  const can = env.can || (() => true), canTint = env.canTint || (() => false), Y = RULES.layers, c = O.chances;
   const dealFx = (L, got) => { delete L.fx; delete L.fxAmt; delete L.bend; delete L.bendAmt; delete L.warp; delete L.reshape; Object.assign(L, got); };
   const lines = (L, k) => { L.stroke = within(k.stroke); L.shadow = within(k.shadow); };
   const titled = letterFor(st.look, "title", R, can, null, ctx);
   for (const L of cover.layers) {
     switch (L.type) {
-      case "bg": L.grid = chance(Y.bg.grid); break;
-      case "accent": L.shape = pick(ACCENT_SHAPES); break;
-      case "brand": L.rail = chance(Y.brand.rail); break;
-      case "catname": L.plate = chance(Y.catname.plate); break;
+      case "accent": L.shape = weighted(O.groups.accent, R) || pick(ACCENT_SHAPES); break;
+      case "brand": L.rail = chance(c.rail); break;
+      case "catname": L.plate = chance(c.catnamePlate); break;
       case "title": if (!locks.lettering) { lines(L, Y.title); dealFx(L, titled); } break;
-      case "subtitle": if (!locks.lettering) { L.plate = chance(Y.subtitle.plate); lines(L, Y.subtitle); dealFx(L, letterFor(st.look, "subtitle", R, can, titled, ctx)); } break;
-      case "text": if (!locks.lettering) { L.plate = chance(Y.text.plate); lines(L, Y.text); dealFx(L, letterFor(st.look, "text", R, can, null, ctx)); } break;
-      case "asset": if (canTint(L.ref) && L.ref.kind !== "graphic") L.tint = chance(Y.asset.tint); break;
+      case "subtitle": if (!locks.lettering) { L.plate = chance(c.subtitlePlate); lines(L, Y.subtitle); dealFx(L, letterFor(st.look, "subtitle", R, can, titled, ctx)); } break;
+      case "text": if (!locks.lettering) { L.plate = chance(c.textPlate); lines(L, Y.text); dealFx(L, letterFor(st.look, "text", R, can, null, ctx)); } break;
+      case "asset": if (canTint(L.ref) && L.ref.kind !== "graphic") L.tint = chance(c.assetTint); break;
     }
-    // 8. look effects on the rest: one or two, mostly the look just dealt's, now and then another look's
+    // 8. look effects on the rest: none, one or two (by their chances), each the look just dealt's or another look's
     if (FX_TYPES.includes(L.type) && L.type !== "title" && L.type !== "subtitle") {
-      const F = RULES.lookFx;
+      const F = RULES.lookFx, count = { one: 1, two: 2 }[weighted(O.groups.lookFx, R)] || 0;
       delete L.lookFx;
-      if (chance(F.chance)) {
+      if (count) {
         const fx = {}, others = LOOK_IDS.filter((k) => k !== st.look && effectsFor(k, L.type).length);
-        for (let n = chance(F.two) ? 2 : 1; n > 0; n--) {
-          const from = effectsFor(st.look, L.type).length && chance(F.ownLook) ? st.look : others.length ? pick(others) : null, list = from ? effectsFor(from, L.type).filter((e) => !(`${from}.${e.key}` in fx)) : [];
+        for (let n = count; n > 0; n--) {
+          const from = effectsFor(st.look, L.type).length && chance(O.groups.lookFxFrom.own) ? st.look : others.length ? pick(others) : null, list = from ? effectsFor(from, L.type).filter((e) => !(`${from}.${e.key}` in fx)) : [];
           if (!list.length) continue;
           const e = pick(list);
           fx[`${from}.${e.key}`] = within(F.amount, F.step);
@@ -323,48 +403,3 @@ export function dealCover(st, cover, env) {
   return ctx;
 }
 
-/**
- * How well a cover meets the standards (check.js), to choose between the hands. o: { title, sizes, seen } as
- * for checkCover; each size is held to every platform that uses its ratio, for landscape and portrait videos
- * alike. `cost`: RULES.score.red for each red issue, `yellow` for each yellow one (not those of `skip`);
- * `score`, higher is better: less the cost, up to 1 more for the room above the contrast line (the worst
- * title measured) and up to 1 for the room above the A1 line (the smallest feed type size). Returns
- * { score, cost, issues }.
- */
-export function coverScore(o) {
-  const all = { ...o, platforms: PLATFORM_IDS, red: "3:4" }, found = new Map(), contrasts = [], feeds = [], n = titleLines(o.title).length, k = RULES.score;
-  for (const orient of ["h", "v"]) {
-    for (const i of checkCover({ ...all, orient })) {   // once a rule, size and layer (and badge), at its worst: A1 comes once from each orientation's feeds
-      const key = [i.rule, i.size, i.layer, i.rule === "D1" ? i.what : ""].join("|");
-      if (!k.skip.includes(i.rule) && (!found.has(key) || (i.level === "red" && found.get(key).level !== "red"))) found.set(key, i);
-    }
-    for (const { ratio, uses } of wanted({ ...all, orient })) {
-      const size = o.sizes.find((s) => s.on !== false && isRatio(s.w, s.h, ratio)), seen = size && o.seen[size.key];
-      if (!seen) continue;
-      const feed = Math.min(...uses.map((u) => u.feed || Infinity));
-      if (seen.title && n && feed < Infinity) feeds.push((typeSize(seen.title.hit, n) * feed) / size.vw);
-    }
-  }
-  for (const seen of Object.values(o.seen)) if (Number.isFinite(seen.contrast)) contrasts.push(seen.contrast);   // wherever it was measured
-  const issues = [...found.values()], room = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0), cost = issues.reduce((sum, i) => sum + (i.level === "red" ? k.red : k.yellow), 0);
-  let score = -cost;
-  if (contrasts.length) score += room((Math.min(...contrasts) - LIMITS.contrast.ok) / k.contrastSpan);
-  if (feeds.length) score += room((Math.min(...feeds) / LIMITS.font.ok - 1) / k.typeSpan);
-  return { score, cost, issues };
-}
-/**
- * Which of several hands to keep: `hands` [{ score, cost }] (see coverScore). Only those whose issues cost
- * the least are in the running, so one with a problem is never kept while one without is there; of those,
- * one of the best that score within `near` of the best, the better likelier (RULES.keep.weights), so the best
- * is not always the one. `r` is a random number in [0, 1). Returns an index, or -1 with no hands.
- */
-export function pickHand(hands, r, near = RULES.keep.near) {
-  const ok = hands.map((h, i) => [Number.isFinite(h.score) ? h.score : -Infinity, i, Number.isFinite(h.cost) ? h.cost : Infinity]);
-  if (!ok.length) return -1;
-  const least = Math.min(...ok.map((h) => h[2])), fair = ok.filter((h) => h[2] === least), best = Math.max(...fair.map((h) => h[0]));
-  const pool = fair.filter(([s]) => s >= best - near || s === best).sort((a, b) => b[0] - a[0]).slice(0, RULES.keep.weights.length);
-  const weights = RULES.keep.weights.slice(0, pool.length), total = weights.reduce((a, b) => a + b, 0);
-  let at = r * total;
-  for (let k = 0; k < pool.length; k++) { at -= weights[k]; if (at < 0) return pool[k][1]; }
-  return pool[pool.length - 1][1];
-}

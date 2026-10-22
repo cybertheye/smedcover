@@ -336,16 +336,12 @@
   #deal figure canvas{display:block;width:100%;height:auto}#deal figure .blank{display:block;width:100%;aspect-ratio:var(--ar)}
   #deal figcaption{display:flex;justify-content:space-between;gap:6px;padding:4px 6px;font-size:11px;line-height:1.4}
   #deal figcaption span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #deal figcaption .ok{color:#3ddc84}#deal figcaption .warn{color:var(--acc)}#deal figcaption .bad{color:#ff7a88}
-  #deal figcaption span:last-child{white-space:nowrap;flex:none}
-  #deal .hands.tall figcaption{flex-direction:column;gap:0}#deal .hands.tall figcaption span:last-child{white-space:normal}
   #deal figure.kept figcaption{background:var(--acc);color:var(--ink)}
   #deal figure.kept figcaption span{color:var(--ink)}
   #deal .hint{margin:0}
   #deal .link{background:none;border:0;color:#fff;text-decoration:underline;cursor:pointer;padding:0;font-size:12px}
-  #deal .link:disabled{opacity:.4;cursor:default;text-decoration:none}
   body.dealing .app{pointer-events:none}   /* nothing else to be done to the cover while hands are dealt onto it */
-  body.dealing #deal figure{pointer-events:none}body.dealing #deal .acts button{pointer-events:none;opacity:.5}
+  body.dealing #deal figure{pointer-events:none}body.dealing #deal .acts button,body.dealing #deal .hint .link{pointer-events:none;opacity:.5}
   @keyframes dealIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
   @media (prefers-reduced-motion:reduce){#deal figure.hand{animation:none}}
   #modal{position:fixed;inset:0;background:rgba(5,5,10,.86);display:grid;place-items:center;z-index:40}
@@ -355,6 +351,12 @@
   #modal .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .15s}
   #modal .count{font:600 15px var(--mono)}
   #modal h2{font:400 34px "Bebas Neue",var(--ui);letter-spacing:.06em;margin:0}
+  /* Surprise me's chances (oddsDialog): wide, in two columns, its head staying in view */
+  #modal .dlg.odds{width:min(1000px,94vw)}
+  #modal .dlg.odds .head{display:flex;justify-content:space-between;align-items:center;gap:12px;position:sticky;top:-26px;margin:-26px -26px 0;padding:16px 26px 10px;background:var(--bg);z-index:1}
+  #modal .dlg.odds .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+  #modal .dlg.odds .cols > div{display:grid;gap:14px}
+  @media(max-width:760px){#modal .dlg.odds .cols{grid-template-columns:1fr}}
   #modal .dlg.wide{width:min(880px,94vw)}
   .parts{display:grid;gap:3px}
   .part{display:grid;grid-template-columns:12px 16px auto 1fr;align-items:center;gap:9px;border:2px solid var(--line);background:var(--panel);padding:6px 10px 6px 6px;margin:0;cursor:grab;user-select:none}

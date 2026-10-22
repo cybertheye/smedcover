@@ -103,17 +103,19 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.notEqual(c.layers, p.design.layers);                       // a copy, not the same array
   const own = normalizeCover({ layers: [{ type: "title", stroke: 0.5 }] }, p);
   assert.equal(own.layers.find((l) => l.id === "title").stroke, 0.5);
-  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size", hideScene: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], recipes: {}, surprise: { locks: {}, recent: [], taste: {} } });
+  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size", hideScene: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], recipes: {}, surprise: { locks: {}, odds: {} } });
   assert.deepEqual(normalizeSettings({ channels: { p1: "c1", "bad key!": "c2", p2: 7 } }).channels, { p1: "c1" });
   assert.deepEqual(normalizeSettings({ columns: { left: 410.4, right: -5, setup: "x" } }).columns, { left: 410, right: 0, setup: 0 });
   assert.deepEqual([normalizeSettings({ cutEngine: "birefnet" }).cutEngine, normalizeSettings({ cutEngine: "magic" }).cutEngine], ["birefnet", ""]);
   assert.deepEqual(normalizeSettings({ recentFonts: ["A", "A", "", 3, "B", "C", "D", "E", "F", "G"] }).recentFonts, ["A", "B", "C", "D", "E", "F"]);
-  // what Surprise me keeps: only the locks it knows (set), the last four looks kept, counts as whole numbers within 0 and 999
-  assert.deepEqual(normalizeSettings({ surprise: { locks: { look: true, theme: false, colour: true, places: 1 }, recent: ["a", "b", "no!", 3, "c", "d", "e"], taste: { deco: { kept: 2.6, dropped: -1 }, cel: { kept: 0, dropped: 0 }, "x y": { kept: 1 }, neon: { kept: 5000, dropped: 2 } } } }).surprise,
-    { locks: { look: true }, recent: ["a", "b", "c", "d", "e"], taste: { deco: { kept: 3, dropped: 0 }, neon: { kept: 999, dropped: 2 } } });
-  // the user's own Surprise me recipes: chances kept within 0 and 1, weights within 0 and 10, what is not a name dropped
-  assert.deepEqual(normalizeSettings({ recipes: { deco: { family: "pop", own: 1.4, bend: -1, fx: { sticker: 12, "bad key": 1, cel: "x" }, params: { rain: 0.5, fog: 3 } }, "no!": { own: 0.5 }, cel: {}, riso: { family: "nope" } } }).recipes,
-    { deco: { family: "pop", own: 1, bend: 0, fx: { sticker: 10 }, params: { rain: 0.5, fog: 1 } } });
+  // what Surprise me keeps: only the locks it knows (set), and the chances the user set, each within 0 and 1, by name (what it no longer keeps, its old taste and recent looks, goes)
+  assert.deepEqual(normalizeSettings({ surprise: { locks: { look: true, theme: false, colour: true, places: 1 }, recent: ["a", "b"], taste: { deco: { kept: 2 } },
+    odds: { groups: { look: { deco: 0.5, neon: 2, "x y": 0.1, cel: "a" }, "no!": { a: 1 } }, chances: { rail: -1, textPlate: 0.4, "x y": 1 } } } }).surprise,
+    { locks: { look: true }, odds: { groups: { look: { deco: 0.5, neon: 1 } }, chances: { rail: 0, textPlate: 0.4 } } });
+  assert.deepEqual(normalizeSettings({}).surprise, { locks: {}, odds: {} });
+  // the user's own Surprise me recipes: only each look's parts' chances, within 0 and 1, what is not a name dropped; what earlier versions kept by look of letterings, bends and the ground let go
+  assert.deepEqual(normalizeSettings({ recipes: { deco: { family: "pop", own: 1.4, bend: -1, fx: { sticker: 12 }, params: { rain: 0.5, fog: 3, "x y": 1, gilt: "a" } }, "no!": { params: { a: 1 } }, cel: { own: 0.5 }, riso: { params: {} } } }).recipes,
+    { deco: { params: { rain: 0.5, fog: 1 } } });
   assert.deepEqual(useFont(["A", "B", "C"], "B"), ["B", "A", "C"]);                 // the latest first, once
 });
 
@@ -591,8 +593,6 @@ test("lettering layers may carry their own colour", () => {
   assert.deepEqual(LOOKS.cyber.params.map((q) => q.key).at(-1), "tearClear");            // the checkbox closes the list
 });
 
-test("looks: every look is complete enough to draw and to brief the AI", () => {
-  const calls = () => { const n = {}; return [n, new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 50 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : (...a) => { n[k] = (n[k] || 0) + 1; return {}; }), set: () => true })]; };
 test("looks: what a look paints on the ground lies on its base — its ground alone when asked for, and with every slider at nothing, nothing but the base", () => {
   // the Background's base (see PAINT.bg): the look's ground (`background` with `grid: false`), or nothing; then
   // its scene and its pattern (`ground: false`), which its sliders bring: all of them at their least, none of it
@@ -611,6 +611,8 @@ test("looks: what a look paints on the ground lies on its base — its ground al
   }
 });
 
+test("looks: every look is complete enough to draw and to brief the AI", () => {
+  const calls = () => { const n = {}; return [n, new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 50 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : (...a) => { n[k] = (n[k] || 0) + 1; return {}; }), set: () => true })]; };
   const env = { w: 1920, h: 1080, C: [252, 238, 10], cat: { code: "VLOG", name: "Vlog" }, photo: null, o: { catIndex: 0, size: { w: 1920, h: 1080 }, profile: { brand: { name: "B" }, categories: [{}, {}] } } };
   const pass = (fn) => { fn({ t: "Ab", hi: false }, 0); fn({ t: "cd", hi: true }, 60); };
   for (const id of LOOK_IDS.filter((k) => k !== "cel")) for (const onDark of [true, false]) {
@@ -1186,8 +1188,9 @@ test("the ransom note: each letter dressed its own way, the same wherever the li
   // Surprise me deals its letters with it; a layer keeps them, and only for it
   let seed = 3;
   const R = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
-  const got = Array.from({ length: 400 }, () => letterFor("collage", "title", R)).filter((x) => x.fx === "ransom");
-  assert.ok(got.length > 20 && got.every((x) => Number.isInteger(x.fxSeed) && x.fxSeed > 0 && x.fxAmt > 0), "the collage deals the ransom note, with letters of its own");
+  const { oddsOf } = await import("../ui/js/deal.js"), odds = oddsOf({ groups: { letters: { ransom: 1 } } });
+  const got = Array.from({ length: 400 }, () => letterFor("collage", "title", R, () => true, null, { odds })).filter((x) => x.fx === "ransom");
+  assert.ok(got.length === 400 && got.every((x) => Number.isInteger(x.fxSeed) && x.fxSeed > 0 && x.fxAmt > 0), "the ransom note dealt, with letters of its own");
   const [a, b] = normalizeLayers([{ type: "title", fx: "ransom", fxSeed: 42 }, { type: "text", id: "t", text: "x", fx: "plain", fxSeed: 42 }]).filter((l) => l.type === "title" || l.type === "text");
   assert.deepEqual([a.fx, a.fxSeed, b.fxSeed], ["ransom", 42, 42], "kept under another effect too, for when the ransom note comes back");
   assert.equal(normalizeLayers([{ type: "title", fx: "ransom", fxSeed: 1.5 }]).find((l) => l.type === "title").fxSeed, undefined);
@@ -1819,15 +1822,16 @@ test("Surprise me's recipes: every look has one, naming only letterings, bends a
       if (d.def <= d.min) assert.ok(on[d.key] / N < 0.6, `${id}.${d.key}: on in ${on[d.key]} of ${N}`);
     }
   }
-  // letterings: the look's own most of the time where it matters; nothing that cannot be drawn; the subtitle never bent
-  const share = (id, role, test, n = 2000) => { let k = 0; for (let i = 0; i < n; i++) if (test(letterFor(id, role, R, (f) => f !== "extrude"))) k++; return k / n; };
-  assert.ok(share("deco", "title", (o) => !o.fx) > 0.9 && share("deco", "title", (o) => o.bend) === 0, "the dark deco keeps its lit lamps, unbent");
-  assert.equal(share("songke", "title", (o) => o.bend), 0);
-  assert.ok(share("cel", "title", (o) => o.fx && o.fx !== "cel") > 0.45 && share("cel", "title", (o) => o.fx === "cel") === 0, "cel lends its title to the other letterings more (its own outline and shadow is not one)");
-  assert.equal(share("editorial", "title", (o) => o.fx === "editorial") + share("bluenote", "title", (o) => o.fx === "bluenote"), 0);
-  assert.equal(share("court", "title", (o) => o.fx === "extrude"), 0, "an outline lettering left out where outlines cannot be read");
-  assert.equal(share("rave", "subtitle", (o) => o.bend), 0);
-  assert.ok(share("riso", "title", (o) => o.fx && !["worn", "dots", "rows"].includes(o.fx)) === 0, "the risograph's own choice of letterings");
+  // letterings, for every look alike (oddsOf): by default what the looks' recipes give on average; set, as set, the
+  // dark deco too; nothing that cannot be drawn; never the lettering named after the look (its own already); the subtitle never bent
+  const { oddsOf } = await import("../ui/js/deal.js"), base = oddsOf().groups;
+  assert.ok(base.letters.own > 0.6 && base.letters.own < 0.95 && base.bend.none > 0.7 && base.bend.none < 1 && base.ground.dark > 0.3 && base.ground.dark < 0.8, JSON.stringify([base.letters.own, base.bend.none, base.ground.dark]));
+  const share = (id, role, test, odds, n = 2000) => { let k = 0; for (let i = 0; i < n; i++) if (test(letterFor(id, role, R, (f) => f !== "extrude", null, { odds }))) k++; return k / n; };
+  const set = oddsOf({ groups: { letters: { ransom: 1 }, bend: { arc: 1 } } });
+  assert.equal(share("deco", "title", (o) => o.fx === "ransom" && o.bend === "arc", set), 1, "set for every look: the dark deco too");
+  assert.equal(share("court", "title", (o) => o.fx === "extrude", oddsOf({ groups: { letters: { extrude: 1, own: 1 } } })), 0, "an outline lettering left out where outlines cannot be read");
+  assert.equal(share("editorial", "title", (o) => o.fx === "editorial", oddsOf({ groups: { letters: { editorial: 1 } } })), 0, "the lettering named after the look is its own, not dealt as another");
+  assert.equal(share("rave", "subtitle", (o) => o.bend, set), 0);
   const t = { fx: "worn", fxAmt: 1.2 };
   const same = (() => { let k = 0; for (let i = 0; i < 2000; i++) if (letterFor("cel", "subtitle", R, () => true, t).fx === "worn") k++; return k / 2000; })();
   assert.ok(same > 0.4 && same < 0.65, `the subtitle lettered like the title about half the time (${same})`);
@@ -1835,8 +1839,8 @@ test("Surprise me's recipes: every look has one, naming only letterings, bends a
   assert.equal(weighted({ a: 0, b: 2 }, R), "b");
 });
 
-test("Surprise me turns a recipe to the cover: a long title bent less and kept large, a channel colour kept off a ground like it", async () => {
-  const { coverContext, recipeOf } = await import("../ui/js/deal.js");
+test("Surprise me turns the chances to the cover while they are the rules': a long title bent less and kept large, a channel colour kept off a ground like it; set, as set", async () => {
+  const { coverContext, recipeOf, oddsOf, baseRecipe } = await import("../ui/js/deal.js");
   assert.deepEqual(coverContext("封面标题\n*第二行*", [252, 238, 10]).long, false);
   assert.equal(coverContext("这是一个非常非常长的封面标题哦", null).long, true, "a line wider than 8 characters");
   assert.equal(coverContext("一\n二\n三", null).long, true, "three lines");
@@ -1845,32 +1849,59 @@ test("Surprise me turns a recipe to the cover: a long title bent less and kept l
   const plain = recipeOf("verse"), long = recipeOf("verse", { long: true }), short = recipeOf("verse", { short: true });
   assert.ok(Math.abs(long.bend - plain.bend * 0.3) < 1e-9 && long.fx.sticker === plain.fx.sticker / 2 && long.fx.extrude === plain.fx.extrude / 2 && long.fx.cel === plain.fx.cel);
   assert.ok(short.bend > plain.bend && short.bend <= 0.5);
-  assert.equal(recipeOf("deco", { short: true }).bend, 0, "never bent stays never bent");
   assert.ok(recipeOf("neon", { lum: 0.01 }).dark < recipeOf("neon").dark && recipeOf("riso", { lum: 0.9 }).dark > recipeOf("riso").dark && recipeOf("riso", { lum: 0.3 }).dark === recipeOf("riso").dark);
-  assert.ok(recipeOf("verse").fx !== recipeOf("verse", { long: true }).fx && recipeOf("verse").fx.sticker === 2, "the table itself is left alone");
-  // the user's own recipe for a look wins over the table, what it leaves out still the table's
-  const { baseRecipe, letterFor } = await import("../ui/js/deal.js");
-  const mine = { own: 0, fx: { sticker: 1 }, params: { rain: 1 } }, b = baseRecipe("deco", mine);
-  assert.deepEqual([b.own, b.fx, b.params.rain, b.params.airship, b.family, b.bend], [0, { sticker: 1 }, 1, 0.25, "light", 0]);
-  const R = () => 0.5;
-  assert.equal(letterFor("deco", "title", R, () => true, null, { mine }).fx, "sticker", "never its own lettering, only what the user allowed");
-  assert.equal(recipeOf("deco", { mine, short: true }).bend, 0);
-  // a dark ground's chance the user set is theirs, whatever the channel colour; one pushed up is never pulled down
-  for (const lum of [0.01, 0.9]) for (const dark of [0, 1]) assert.equal(recipeOf("riso", { lum, mine: { dark } }).dark, dark);
-  for (const id of LOOK_IDS) assert.ok(recipeOf(id, { lum: 0.9 }).dark >= baseRecipe(id).dark, id);
-  // a family stored on its own brings that family's choices, not the table's for the look
-  const { FAMILIES } = await import("../ui/js/deal.js"), pop = baseRecipe("deco", { family: "pop" });
-  assert.deepEqual([pop.family, pop.dark, pop.own, pop.fx, pop.bend], ["pop", FAMILIES.pop.dark, FAMILIES.pop.own, FAMILIES.pop.fx, FAMILIES.pop.bend]);
-  assert.equal(pop.params.rain, baseRecipe("deco").params.rain);   // its parts' chances are still the look's
-  // the look for a hand: never one of the last kept while others are left, the user's taste weighing in
-  const { pickLook, tasteWeight } = await import("../ui/js/deal.js");
-  assert.deepEqual([tasteWeight(), tasteWeight({ kept: 2 }), tasteWeight({ dropped: 1 }), tasteWeight({ kept: 20 }), tasteWeight({ dropped: 20 })], [1, 3, 0.5, 3, 0.25]);
+  // the same for every look: the ground, the lettering and the bend are not the look's own
+  assert.deepEqual(["dark", "own", "bend"].map((k) => recipeOf("deco")[k]), ["dark", "own", "bend"].map((k) => recipeOf("cel")[k]));
+  // set by the user: dealt as set, whatever the title and the channel colour
+  const odds = oddsOf({ groups: { bend: { arc: 1 }, letters: { sticker: 1 }, ground: { dark: 0.3, light: 0.7 } } });
+  for (const ctx of [{ long: true }, { short: true }, { lum: 0.01 }, { lum: 0.9 }]) {
+    const q = recipeOf("verse", { ...ctx, odds });
+    assert.deepEqual([q.bend, q.bends, q.fx, q.own, q.dark], [1, { arc: 1 }, { sticker: 1 }, 0, 0.3], JSON.stringify(ctx));
+  }
+  // a look's optional parts: the user's over the table's
+  const b = baseRecipe("deco", { params: { rain: 1 } });
+  assert.deepEqual([b.params.rain, b.params.airship], [1, 0.25]);
+  // the look for a hand: as likely as its chance, none dealt already in the run while another with a chance is left, none at 0
+  const { pickLook } = await import("../ui/js/deal.js");
   let seed = 7;
   const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648), ids = ["a", "b", "c", "d"], got = { a: 0, b: 0, c: 0, d: 0 };
-  for (let i = 0; i < 4000; i++) got[pickLook(ids, rand, { recent: ["a"], taste: { b: { kept: 2 }, c: { dropped: 1 } } })]++;
-  assert.equal(got.a, 0, "a look kept lately waits its turn");
-  assert.ok(Math.abs(got.b / got.c - 6) < 1 && Math.abs(got.b / got.d - 3) < 0.5, JSON.stringify(got));   // weights 3 : 0.5 : 1
-  assert.equal(pickLook(["a"], rand, { recent: ["a"] }), "a", "with every look recent, any may come");
+  for (let i = 0; i < 4000; i++) got[pickLook(ids, rand, { a: 0.4, b: 0.3, c: 0.3, d: 0 }, ["a"])]++;
+  assert.deepEqual([got.a, got.d], [0, 0], "a look dealt already in the run waits, one at 0 never comes");
+  assert.ok(Math.abs(got.b / got.c - 1) < 0.15, JSON.stringify(got));
+  for (let i = 0; i < 40; i++) assert.equal(pickLook(ids, rand, { a: 0.5, b: 0.5, c: 0, d: 0 }, ["a", "b"]) === "c", false, "with every look with a chance dealt, those come again, not one at 0");
+});
+
+test("Surprise me's chances: the rule's, the user's over them; a group adds up to 1, moving one moves the rest alike", async () => {
+  const { oddsOf, rebalance, RULES, ODD_OPTIONS } = await import("../ui/js/deal.js");
+  const { LOOK_IDS } = await import("../ui/js/style.js");
+  const near = (a, b) => Math.abs(a - b) < 1e-9, sum = (g) => Object.values(g).reduce((s, v) => s + v, 0);
+  const base = oddsOf();
+  for (const [g, list] of Object.entries(ODD_OPTIONS)) { assert.deepEqual(Object.keys(base.groups[g]).sort(), [...list()].sort(), g); assert.ok(near(sum(base.groups[g]), 1), g); }
+  assert.ok(LOOK_IDS.every((k) => near(base.groups.look[k], 1 / LOOK_IDS.length)), "every look alike to begin with");
+  assert.deepEqual(base.chances, RULES.odds.chances);
+  // the user's: a group of theirs made to add up to 1 (an option they left out at 0), one adding up to nothing left to the rule's; their chances kept within 0 and 1
+  const mine = oddsOf({ groups: { look: { deco: 3, neon: 1 }, lookFx: { none: 0, one: 0, two: 0 } }, chances: { rail: 1.5, catnamePlate: 0.1, nosuch: 1 } });
+  assert.deepEqual([mine.groups.look.deco, mine.groups.look.neon, mine.groups.look.cel], [0.75, 0.25, 0]);
+  assert.deepEqual(mine.groups.lookFx, base.groups.lookFx);
+  assert.deepEqual([mine.chances.rail, mine.chances.catnamePlate, "nosuch" in mine.chances], [1, 0.1, false]);
+  // one set, the others alike the other way, none below 0
+  const g = rebalance({ a: 0.25, b: 0.25, c: 0.25, d: 0.25 }, "a", 0.55);
+  assert.ok(near(g.a, 0.55) && near(g.b, 0.15) && near(g.c, 0.15) && near(g.d, 0.15) && near(sum(g), 1), JSON.stringify(g));
+  const h = rebalance({ a: 0.5, b: 0.45, c: 0.05 }, "a", 0.8);   // c has only 0.05 to give: b gives the rest
+  assert.ok(near(h.a, 0.8) && near(h.c, 0) && near(h.b, 0.2) && near(sum(h), 1), JSON.stringify(h));
+  const up = rebalance({ a: 1, b: 0, c: 0 }, "a", 0.4);
+  assert.ok(near(up.b, 0.3) && near(up.c, 0.3), "what one gives up the others share alike (when none has a chance, all of them)");
+  const kept = rebalance({ a: 1 / 3, b: 1 / 3, c: 1 / 3, d: 0, e: 0 }, "a", 0.3);
+  assert.ok(kept.d === 0 && kept.e === 0 && near(kept.b, 0.35) && near(kept.c, 0.35), "an option set to 0 stays at 0: " + JSON.stringify(kept));
+  // set all the way up in one go, the rest are none at all, not crumbs that would still be dealt
+  const all = rebalance(oddsOf().groups.look, "neon", 1);
+  assert.ok(LOOK_IDS.every((k) => k === "neon" || all[k] === 0), "no crumbs");
+  const { pickLook } = await import("../ui/js/deal.js");
+  const crumbs = Object.fromEntries(LOOK_IDS.map((k) => [k, k === "neon" ? 1 : 2e-17]));
+  for (let i = 0; i < 6; i++) assert.equal(pickLook(LOOK_IDS, Math.random, crumbs, LOOK_IDS.filter((k) => k !== "cel")), "neon", "a crumb is no chance");
+  assert.equal(oddsOf({ groups: { look: crumbs } }).groups.look.cel, 0);
+  assert.deepEqual(rebalance({ a: 0.5, b: 0.5 }, "a", 2), { a: 1, b: 0 });
+  assert.deepEqual(rebalance({ only: 1 }, "only", 0.3), { only: 1 });
 });
 
 test("Surprise me deals a hand by the rules in deal.js: what is locked stays, the words go back, the title on top; RULES decides", async () => {
@@ -1885,7 +1916,7 @@ test("Surprise me deals a hand by the rules in deal.js: what is locked stays, th
     c.layers.find((l) => l.id === "title").t.all.s = 2.2;   // the title moved and enlarged by hand
     return { p, c, text, design: new Map(p.design.layers.map((l) => [l.id, l])) };
   };
-  const env = (design, more = {}) => ({ R, locks: {}, surprise: { recent: [], taste: {} }, recipes: {}, rgb: [252, 191, 0], design, sizeKey: "1920x1080", ...more });
+  const env = (design, more = {}) => ({ R, locks: {}, recipes: {}, rgb: [252, 191, 0], design, sizeKey: "1920x1080", ...more });
   // a free hand: a look, its ground, the title put back and on top, the text layer at a new one's size
   for (let k = 0; k < 20; k++) {
     const { p, c, text, design } = fresh();
@@ -1902,44 +1933,28 @@ test("Surprise me deals a hand by the rules in deal.js: what is locked stays, th
     dealCover(p.style, c, env(design, { locks: { look: true, theme: true, lettering: true, places: true } }));
     assert.deepEqual([p.style.look, p.style.theme, title.fx, JSON.stringify([p.style.lookParams, title.t])], ["deco", "light", "worn", before]);
   }
-  // the last looks dealt wait their turn
+  // the looks dealt already in the run wait their turn
   {
-    const recent = LOOK_IDS.slice(0, RULES.look.recent);
-    for (let k = 0; k < 30; k++) { const { p, c, design } = fresh(); dealCover(p.style, c, env(design, { surprise: { recent, taste: {} } })); assert.ok(!recent.includes(p.style.look)); }
+    const not = LOOK_IDS.slice(0, 5);
+    for (let k = 0; k < 30; k++) { const { p, c, design } = fresh(); dealCover(p.style, c, env(design, { not })); assert.ok(!not.includes(p.style.look)); }
   }
-  // the numbers are RULES': changed there, the hands follow
-  const was = RULES.layers.bg.grid;
+  // the chances are the user's (oddsOf), else RULES': changed there, the hands follow
+  const was = RULES.odds.chances.rail;
   try {
-    for (const grid of [0, 1]) { RULES.layers.bg.grid = grid; const { p, c, design } = fresh(); dealCover(p.style, c, env(design)); assert.equal(c.layers.find((l) => l.type === "bg").grid, !!grid); }
-  } finally { RULES.layers.bg.grid = was; }
+    for (const rail of [0, 1]) { RULES.odds.chances.rail = rail; const { p, c, design } = fresh(); dealCover(p.style, c, env(design)); assert.equal(c.layers.find((l) => l.type === "brand").rail, !!rail); }
+  } finally { RULES.odds.chances.rail = was; }
+  const { oddsOf } = await import("../ui/js/deal.js");
+  for (let k = 0; k < 10; k++) {
+    const { p, c, design } = fresh();
+    dealCover(p.style, c, env(design, { odds: oddsOf({ groups: { look: { neon: 1 }, accent: { wave: 1 } }, chances: { rail: 0 } }) }));
+    assert.deepEqual([p.style.look, c.layers.find((l) => l.type === "accent").shape, c.layers.find((l) => l.type === "brand").rail], ["neon", "wave", false]);
+  }
 });
 
-test("Surprise me's scoring: the standards' issues count against a cover, the room above their lines for it; one of the best few is kept", async () => {
-  const { coverScore, pickHand } = await import("../ui/js/deal.js");
-  const sizes = [{ key: "1920x1080", w: 1920, h: 1080, vw: 1920, vh: 1080 }, { key: "1080x1440", w: 1080, h: 1440, vw: 1080, vh: 1440 }];
-  const big = { cx: 700, cy: 350, hw: 600, hh: 210, r: 0 }, part = (hit) => [{ id: "title", hit }];
-  const seen = (o = {}, p = {}) => ({ "1920x1080": { title: { id: "title", hit: big }, contrast: 6, pictures: [], unknown: true, parts: part(big), ...o }, "1080x1440": { title: { id: "title", hit: { cx: 540, cy: 500, hw: 480, hh: 260, r: 0 } }, contrast: null, pictures: [], unknown: true, parts: [], ...p } });
-  const score = (o, p, title = "封面标题\n*第二行*") => coverScore({ title, sizes, seen: seen(o, p) });
-  const fine = score();
-  assert.deepEqual(fine.issues, [], "no sizes asked for, and the words, are not the hand's doing (E1, A2)");
-  assert.ok(score({}, {}, "这是一个非常非常长的封面标题哦").issues.length === 0);
-  assert.ok(score({ contrast: 2.5 }).score <= fine.score - 3 && score({ contrast: 1.5 }).score <= fine.score - 10, "B1 yellow costs 3, red 10");
-  assert.ok(score({ contrast: 4 }).score < fine.score && score({ contrast: 9 }).score === score({ contrast: 7 }).score, "more contrast is better, up to 7:1");
-  const corner = { cx: 1750, cy: 1000, hw: 150, hh: 60, r: 0 };
-  assert.ok(score({ parts: [...part(big), { id: "t1", hit: corner }] }).issues.some((i) => i.rule === "D1" && i.level === "red"), "words under B站's duration");
-  assert.ok(score({}, { title: { id: "title", hit: { cx: 540, cy: 500, hw: 300, hh: 90, r: 0 } } }).issues.some((i) => i.rule === "A1"), "a portrait title too small for 抖音's feed");
-  const small = score({ title: { id: "title", hit: { cx: 600, cy: 300, hw: 500, hh: 150, r: 0 } } });   // 16:9 is in the feeds of landscape and portrait videos alike: one A1, not two
-  assert.equal(small.issues.filter((i) => i.rule === "A1" && i.size === "1920x1080").length, 1);
-  // keeping one: never one with a problem while one without is there, the best likeliest, not always it
-  const hands = (list) => list.map(([score, cost]) => ({ score, cost }));
-  const picks = Array.from({ length: 60 }, (_, i) => pickHand(hands([[0.5, 0], [-3, 3], [1.2, 0], [0.9, 0], [-10, 10], [1.1, 0], [-1.2, 3]]), i / 60));
-  assert.ok(picks.every((i) => [2, 5, 3].includes(i)) && picks.filter((i) => i === 2).length > picks.filter((i) => i === 5).length && new Set(picks).size === 3);
-  const flawed = Array.from({ length: 30 }, (_, i) => pickHand(hands([[0.27, 0], [-1, 3]]), i / 30));
-  assert.ok(flawed.every((i) => i === 0), "a yellow issue loses to a clean hand however much room the rest leaves");
-  assert.equal(pickHand(hands([[-10, 10], [-13, 13]]), 0.99), 0, "when every hand falls short, the least of them");
-  assert.equal(pickHand(hands([[NaN, 0], [0.4, 0]]), 0.1), 1, "a hand that could not be scored is not kept");
-  assert.equal(pickHand([], 0.5), -1);
-  assert.equal(score({ contrast: NaN }).score, score({ contrast: null }).score, "a contrast that could not be measured counts for nothing");
+test("the ground always has its look's backdrop: a cover kept with it off has it back", () => {
+  const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p);
+  c.layers.find((l) => l.type === "bg").grid = false;
+  assert.equal(normalizeCover(JSON.parse(JSON.stringify(c)), p).layers.find((l) => l.type === "bg").grid, true);
 });
 
 test("every look's layout meets the cover standards: nothing under the apps' badges, a graphic to look at, room for a title that reads", async () => {
@@ -2374,7 +2389,7 @@ test("a layout layer but the ground and the corner brackets can be copied: a lay
   const tc = duplicate(cover.layers.find((l) => l.id === "title")); tc.t.all.y = 0.4;
   cover.layers.push(tc);
   let seed = 3;
-  dealCover(p.style, cover, { R: () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648), locks: {}, surprise: { recent: [], taste: {} }, recipes: {}, rgb: [252, 191, 0], design, sizeKey: "1920x1080" });
+  dealCover(p.style, cover, { R: () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648), locks: {}, recipes: {}, rgb: [252, 191, 0], design, sizeKey: "1920x1080" });
   assert.equal(tc.t.all.y, 0.4);
   assert.equal(cover.layers.at(-1).id, "title");
 });

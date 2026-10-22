@@ -7,15 +7,15 @@ import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont } from "./store.js";
-import { platformsFor, ratioOf } from "./platforms.js";
-import { boxOf, overlap, titleContrast } from "./check.js";
-import { baseRecipe, FAMILIES, RULES, dealCover, coverScore, pickHand } from "./deal.js";
+import { platformsFor } from "./platforms.js";
+import { boxOf, overlap } from "./check.js";
+import { baseRecipe, RULES, dealCover, oddsOf, rebalance, partChance, ODD_OPTIONS } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
 import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
-  normalizeRecipes, SURPRISE_LOCKS, RECENT_KEPT,
+  normalizeRecipes, SURPRISE_LOCKS,
 } from "./store.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
@@ -129,7 +129,7 @@ function resetHistory() { S.hist = [snapshot()]; S.histIdx = 0; SURPRISE.step = 
 function commitHistory() {
   const snap = snapshot();
   if (snap === S.hist[S.histIdx]) return;
-  if (SURPRISE.step && S.histIdx === SURPRISE.step.idx) { learn("kept"); SURPRISE.step = null; dealClose(); }   // edited on: the hand Surprise me dealt is kept
+  if (SURPRISE.step && S.histIdx === SURPRISE.step.idx) { SURPRISE.step = null; dealClose(); }   // edited on: the hands are past taking
   S.hist = S.hist.slice(0, S.histIdx + 1);
   S.hist.push(snap);
   if (S.hist.length > 80) S.hist.splice(0, S.hist.length - 80);
@@ -141,7 +141,6 @@ function recordHistory() { later("hist", 500, () => (SURPRISE.busy ? recordHisto
 async function timeTravel(step) {
   clearTimeout(timers.hist);
   commitHistory();   // a change still waiting to be recorded is a step of its own: undo goes back to before it
-  if (step < 0 && SURPRISE.step && S.histIdx === SURPRISE.step.idx) learn("dropped");   // the hand Surprise me dealt, undone at once
   SURPRISE.step = null; dealClose();
   const i = S.histIdx + step;
   if (i < 0 || i >= S.hist.length) return;
@@ -1973,37 +1972,97 @@ function lookArtRow() {
     ref && el("div", { class: "artback" }, el("button", { class: "linkbtn", onclick: () => set(null) }, t("style.artBack"))),
   ];
 }
-// ---------- Surprise me's recipe for the current look, seen and set by hand
-const RECIPE_UI = { open: false };   // whether the box is unfolded
+// ---------- Surprise me's chances, seen and set by hand: in their own window (from Surprise me's, and the Style tab), and for the current look under its sliders
+const chancePct = (v) => `${(v * 100).toFixed(v > 0 && v < 0.1 ? 1 : 0)}%`;   // a chance as the panel shows it
 /**
- * The current look's Surprise me recipe (deal.js), folded away under the look's sliders: its family (picking
- * one sets the rest to the family's), how often it keeps its own lettering, which other letterings and bends it
- * may be given, how often it is bent, how often on the dark ground, and how often each of its optional parts
- * (switches, sliders off by default) comes in. What is changed is kept in the settings (S.settings.recipes), for every profile,
- * over the table; Restore puts the table's back.
+ * A group of Surprise me's chances of which one option is dealt, adding up to 100%: a slider for each option;
+ * moving one moves the others alike the other way (rebalance in deal.js) while it is dragged. `group`:
+ * {option: chance}; `names`: [[option, label]]; `save(group)` keeps it as it now is; `reset()`, when given,
+ * puts back the rule's.
  */
+function oddsGroup(title, names, group, save, { hint = "", reset = null } = {}) {
+  let now = { ...group };
+  const rows = new Map(), show = () => { for (const [k, { input, out }] of rows) { input.value = String(now[k] * 100); out.textContent = chancePct(now[k]); } };
+  const row = ([k, label]) => {
+    const out = el("output", {}, chancePct(now[k] || 0));
+    const input = el("input", { type: "range", min: 0, max: 100, step: 0.5, value: (now[k] || 0) * 100, oninput: (e) => { now = rebalance(now, k, Number(e.target.value) / 100); show(); save(now); } });
+    rows.set(k, { input, out });
+    return el("div", { class: "sl", style: "grid-template-columns:112px 1fr 48px" }, el("span", { title: label }, label), input, out);
+  };
+  const even = () => { now = Object.fromEntries(names.map(([k]) => [k, 1 / names.length])); show(); save(now); };
+  return el("div", { class: "box" }, el("div", { class: "cap" }, title), hint && el("div", { class: "hint", style: "margin:0 0 6px" }, hint), names.map(row),
+    el("div", { class: "acts", style: "display:flex;gap:6px;margin-top:8px" }, el("button", { class: "btn", onclick: even }, t("odds.even")), reset && el("button", { class: "btn", onclick: reset }, t("odds.default"))));
+}
+/** A switch of Surprise me's, on by a chance of its own: a slider from 0 to 100%. `done()`, when given, once it is let go of. */
+function oddsChance(label, v, save, done = null) {
+  const out = el("output", {}, chancePct(v));
+  return el("div", { class: "sl", style: "grid-template-columns:112px 1fr 48px" }, el("span", { title: label }, label),
+    el("input", { type: "range", min: 0, max: 100, step: 1, value: v * 100, oninput: (e) => { const x = Number(e.target.value) / 100; out.textContent = chancePct(x); save(x); }, onchange: done }), out);
+}
+/**
+ * Surprise me's chances for look `look`'s optional parts (switches, sliders off by default), each on its own: its
+ * recipe's (deal.js), the user's over them (S.settings.recipes, for every profile); Restore puts the table's back.
+ * In the Style tab and in Surprise me's chances (oddsDialog). `redraw()`: what to draw again after a restore.
+ */
+function lookParts(look, redraw = renderPanel) {
+  const L = LOOKS[look] || LOOKS.cel, lang = getLang(), mine = () => S.settings.recipes[look] || {}, r = baseRecipe(look, mine());
+  const keep = (patch) => { S.settings.recipes = normalizeRecipes({ ...S.settings.recipes, [look]: { ...mine(), ...patch } }); persistSettings(); };
+  const extras = L.params.filter((d) => !d.text && (d.toggle || d.def <= d.min)), odds = oddsOf(S.settings.surprise.odds);
+  return [
+    extras.length ? extras.map((d) => oddsChance(d.name[lang], partChance(d, r, odds), (v) => keep({ params: { ...(mine().params || {}), [d.key]: v } })))
+      : el("div", { class: "hint", style: "margin:0" }, t("odds.noParts")),
+    extras.length > 0 && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { delete S.settings.recipes[look]; persistSettings(); redraw(); } }, t("recipe.reset")),
+  ];
+}
+const RECIPE_UI = { open: false };   // whether the Style tab's box is unfolded
+/** The current look's Surprise me chances in the Style tab, folded away under its sliders: its optional parts (lookParts), and the way to the rest (oddsDialog). */
 function recipeBox() {
-  const look = S.profile.style.look, L = LOOKS[look] || LOOKS.cel, lang = getLang(), mine = () => S.settings.recipes[look] || {}, r = baseRecipe(look, mine());
-  const keep = (patch, redraw = false) => { S.settings.recipes = normalizeRecipes({ ...S.settings.recipes, [look]: { ...mine(), ...patch } }); persistSettings(); if (redraw) renderPanel(); };
-  const flip = (key, k, w) => { const cur = { ...r[key] }; if (cur[k] > 0) delete cur[k]; else cur[k] = w; keep({ [key]: cur }, true); };
-  const chips = (key, ids, names, base) => el("div", { class: "chips small" }, ids.map((k) => el("button", { class: r[key][k] > 0 ? "on" : "", onclick: () => flip(key, k, base[k] || 1) }, names[k].name[lang])));
-  const extras = L.params.filter((d) => !d.text && (d.toggle || d.def <= d.min)), family = FAMILIES[r.family];
-  const chance = (d) => r.params[d.key] ?? (d.toggle ? (d.def > d.min ? 0.75 : 0.3) : 0.35);
   return el("details", { class: "box recipe", open: RECIPE_UI.open, ontoggle: (e) => (RECIPE_UI.open = e.target.open) },
     el("summary", { class: "cap" }, t("recipe.title")),
     el("div", { class: "hint", style: "margin:0 0 4px" }, t("recipe.hint")),
-    el("div", { class: "sl", style: "grid-template-columns:84px 1fr" }, el("span", {}, t("recipe.family")),
-      select(Object.keys(FAMILIES).map((k) => [k, t("recipe.family." + k)]), r.family, (v) => { const f = FAMILIES[v]; keep({ family: v, own: f.own, dark: undefined, fx: { ...f.fx }, bend: f.bend, bends: { ...f.bends } }, true); })),
-    slider2(t("recipe.own"), 0, 1, 0.05, r.own, (v) => keep({ own: v })),
-    el("div", { class: "cap", style: "margin:12px 0 6px" }, t("recipe.fx")),
-    chips("fx", Object.keys(EFFECTS).filter((k) => k !== "auto" && k !== look), EFFECTS, family.fx),
-    slider2(t("recipe.bend"), 0, 0.5, 0.05, r.bend, (v) => keep({ bend: v })),
-    el("div", { class: "cap", style: "margin:12px 0 6px" }, t("recipe.bends")),
-    chips("bends", Object.keys(BENDS).filter((k) => k !== "taper"), BENDS, family.bends),
-    !L.oneTheme && slider2(t("recipe.dark"), 0, 1, 0.05, r.dark, (v) => keep({ dark: v })),
-    extras.length > 0 && el("div", { class: "cap", style: "margin:12px 0 0" }, t("recipe.extras")),
-    extras.map((d) => slider2(d.name[lang], 0, 1, 0.05, chance(d), (v) => keep({ params: { ...(mine().params || {}), [d.key]: v } }))),
-    el("button", { class: "btn wide", style: "margin-top:12px", onclick: () => { delete S.settings.recipes[look]; persistSettings(); renderPanel(); } }, t("recipe.reset")));
+    lookParts(S.profile.style.look),
+    el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => oddsDialog() }, t("odds.open")));
+}
+const ODDS_UI = { look: null };   // the look whose parts the chances panel shows (null: the profile's)
+/**
+ * Surprise me's chances, in a window of their own (from Surprise me's window, and the Style tab): every chance it
+ * deals by (RULES.odds and the looks' recipes, deal.js), the user's over them, kept in the settings for every
+ * profile. The groups of which one is dealt, each adding up to 100% — the look, the colour block's shape, the
+ * title's lettering, its bend, the ground (these three for every look alike), how many look effects, whose —;
+ * the switches, each with a chance of its own; and the optional parts of the look picked.
+ */
+function oddsDialog(fresh = true) {
+  if (fresh) ODDS_UI.look = null;   // opened anew: the parts of the profile's look
+  const m = $("modal"), sv = S.settings.surprise, odds = oddsOf(sv.odds), lang = getLang(), was = m.querySelector(".dlg.odds"), y = was ? was.scrollTop : 0;
+  const again = () => oddsDialog(false);
+  const done = () => { closeModal(); renderPanel(); };   // the Style tab's parts show what was set here
+  const setGroup = (g, v) => { sv.odds = { ...sv.odds, groups: { ...(sv.odds.groups || {}), [g]: v } }; persistSettings(); };
+  const dropGroup = (g) => { const groups = { ...(sv.odds.groups || {}) }; delete groups[g]; sv.odds = { ...sv.odds, groups }; persistSettings(); again(); };
+  const setChance = (k, v) => { sv.odds = { ...sv.odds, chances: { ...(sv.odds.chances || {}), [k]: v } }; persistSettings(); };
+  const group = (g, names, hint = "") => oddsGroup(t("odds." + g), names, odds.groups[g], (v) => setGroup(g, v), { hint, reset: () => dropGroup(g) });
+  const look = ODDS_UI.look && LOOKS[ODDS_UI.look] ? ODDS_UI.look : S.profile.style.look;
+  const dlg = el("div", { class: "dlg odds" },
+    el("div", { class: "head" }, el("h2", {}, t("odds.title")), el("button", { class: "btn", onclick: done }, t("odds.done"))),
+    el("div", { class: "hint", style: "margin:0" }, t("odds.hint")),
+    el("div", { class: "cols" },
+      el("div", {},
+        group("look", LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), t("odds.lookHint")),
+        group("accent", ODD_OPTIONS.accent().map((k) => [k, t("shape." + k)]))),
+      el("div", {},
+        group("letters", ODD_OPTIONS.letters().map((k) => [k, k === "own" ? t("odds.ownLetters") : EFFECTS[k].name[lang]]), t("odds.lettersHint")),
+        group("bend", ODD_OPTIONS.bend().map((k) => [k, k === "none" ? t("odds.noBend") : BENDS[k].name[lang]]), t("odds.bendHint")),
+        group("ground", [["dark", t("theme.dark")], ["light", t("theme.light")]], t("odds.groundHint")),
+        group("lookFx", ODD_OPTIONS.lookFx().map((k) => [k, t("odds.lookFx." + k)]), t("odds.lookFxHint")),
+        group("lookFxFrom", ODD_OPTIONS.lookFxFrom().map((k) => [k, t("odds.lookFxFrom." + k)])),
+        el("div", { class: "box" }, el("div", { class: "cap" }, t("odds.chances")), el("div", { class: "hint", style: "margin:0 0 6px" }, t("odds.chancesHint")),
+          Object.keys(RULES.odds.chances).map((k) => oddsChance(t("odds.c." + k), odds.chances[k], (v) => setChance(k, v), again))),   // let go of: the look's parts below follow
+        el("div", { class: "box" }, el("div", { class: "cap" }, t("odds.byLook")), el("div", { class: "hint", style: "margin:0 0 6px" }, t("odds.byLookHint")),
+          select(LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), look, (v) => { ODDS_UI.look = v; again(); }),
+          el("div", { style: "margin-top:8px" }, lookParts(look, again))))),
+    el("button", { class: "btn wide", onclick: () => { if (!confirm(t("odds.resetSure"))) return; sv.odds = {}; persistSettings(); again(); } }, t("odds.reset")));
+  m.replaceChildren(dlg);
+  m.hidden = false; m.onDismiss = done;
+  dlg.scrollTop = y;
 }
 function styleTab() {
   const st = S.profile.style, set = (k, v) => { st[k] = v; touch({ profile: true }); };
@@ -3479,7 +3538,6 @@ function progress(total) {
  * save(bytes, name) does the writing; returns how many were written.
  */
 async function runExport(jobs, save) {
-  if (SURPRISE.step && S.histIdx === SURPRISE.step.idx) { learn("kept"); SURPRISE.step = null; }   // exported as Surprise me dealt it: kept
   const prog = progress(jobs.length), pending = new Set();
   let done = 0, failed = null;
   try {
@@ -3759,14 +3817,15 @@ function setMode(mode) {
 /**
  * One hand of Surprise me, dealt onto the cover and the profile's style as they are: everything but where
  * the user's own layers go by dealCover (deal.js, where all the rules are), then those places by dealPlaces.
- * `design`: the layers of the profile's design by id, where moved words go back to.
+ * `design`: the layers of the profile's design by id, where moved words go back to; `not`: the looks dealt
+ * already in this run.
  */
-function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l]))) {
+function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), not = []) {
   const R = Math.random, sv = S.settings.surprise;
-  dealCover(S.profile.style, S.cover, { R, locks: sv.locks, surprise: sv, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, can: (k) => CAN.outlines || EFFECTS[k].kind !== "outline", canTint });
+  dealCover(S.profile.style, S.cover, { R, locks: sv.locks, odds: oddsOf(sv.odds), not, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, can: (k) => CAN.outlines || EFFECTS[k].kind !== "outline", canTint });
   if (!sv.locks.places) dealPlaces(R);
 }
-/** Surprise me's run (how many hands, how long, how fast they show: RULES.hands in deal.js). done: when the last run ended; step: the step of undo it made ({idx, look}) while nothing has followed it. */
+/** Surprise me's run (how many hands, how fast they show: RULES.hands in deal.js). done: when the last run ended; step: the step of undo it made ({idx}) while nothing has followed it. */
 const SURPRISE = { busy: false, done: 0, step: null };
 const copyOf = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 /** The cover as Surprise me deals it — the style, the layers, the scene objects' places — copied. */
@@ -3782,20 +3841,11 @@ function putHand(h) {
   S.cover.layers = h.layers.map((v) => { const L = had.get(v.id); if (!L) return copyOf(v); into(L, v); return L; });
   if (h.scene) S.cover.scene = copyOf(h.scene); else delete S.cover.scene;
 }
-/** What follows the step Surprise me made, `how` ("kept", "dropped"), counted for its look, unless the look was held. */
-function learn(how) { if (SURPRISE.step && SURPRISE.step.learn) taste(SURPRISE.step.look, how); }
-/** A hand in `look` kept (edited on, exported) or dropped (undone at once, another taken over it): Surprise me deals that look more or less often (tasteWeight in deal.js). By `by` (±1). */
-function taste(look, how, by = 1) {
-  const all = S.settings.surprise.taste, e = all[look] || (all[look] = { kept: 0, dropped: 0 });
-  e[how] = Math.min(999, Math.max(0, e[how] + by));
-  persistSettings();
-}
 /**
- * SURPRISE ME: deals a few hands (dealHand), measures each at every size (seenNow), scores it by the cover
- * standards — the title's type size in the feeds, its contrast, a picture big enough, nothing under the
- * apps' badges — and keeps one of the best (coverScore, pickHand in check.js); a hand in the look the cover
- * had is marked down a little. Each hand shows in Surprise me's window as it is dealt, and the one kept is
- * marked there (another may be taken instead, see dealTake). One step of undo brings the previous cover back.
+ * SURPRISE ME: deals RULES.hands.count hands (dealHand), each in a look of its own while there are looks left,
+ * by the chances set in Surprise me's chances window (oddsOf in deal.js), each shown in Surprise me's window as it
+ * comes; then puts the first on the canvas. Another may be taken instead with a click (dealTake). One step of
+ * undo brings the previous cover back.
  */
 async function surprise(e) {
   if (SURPRISE.busy || (e && e.timeStamp < SURPRISE.done)) return;   // a click from while the last one held the window up
@@ -3809,59 +3859,51 @@ async function surprise(e) {
     clearTimeout(timers.hist); commitHistory();   // whatever was being edited becomes a step of its own, so each hand is exactly one undo
     SURPRISE.step = null;
     before = handNow();
-    const design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), held = !!S.settings.surprise.locks.look;
-    const was = before.style.look, hands = [];
-    const sizes = S.profile.sizes.filter((z) => z.on !== false), t0 = performance.now();
-    // the title's contrast is measured at one size: the one shown, or the first of its ratio, which the standards read (else the first with a ratio)
-    const ratioed = (z) => sizes.find((y) => ratioOf(y.w, y.h) && ratioOf(y.w, y.h) === ratioOf(z.w, z.h)), shown = selSize();
-    const at = ratioed(shown) || sizes.find((z) => ratioOf(z.w, z.h)) || shown, here = sizeKey(at);
+    const design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), hands = [], dealt = [], shown = selSize(), t0 = performance.now(), H = RULES.hands;
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-    let shownAt = 0, shown_ = 0;   // shown_: the time spent showing hands, not counted against dealing them
-    const H = RULES.hands;
-    for (let i = 0; i < H.count && (i < H.least || performance.now() - t0 - shown_ < H.ms); i++) {
+    let shownAt = 0;
+    for (let i = 0; i < H.count; i++) {
       if (i) putHand(before);
       try {
-        dealHand(design);
-        const { seen, measured, shots } = seenNow(sizes, here), { score, cost, issues } = coverScore({ title: S.cover.title, sizes: measured, seen });
-        hands.push({ ...handNow(), score: score - (S.profile.style.look === was ? RULES.keep.sameLook : 0), cost, issues });
+        dealHand(design, dealt);
+        const cv = el("canvas");
+        drawCover(cv, { profile: S.profile, catIndex: catIndex(), size: shown, pixelW: 360, cover: S.cover, photos: S.photos });
+        dealt.push(S.profile.style.look);
+        hands.push(handNow());
         // the hand shows before the next is dealt, and long enough after the last to be seen coming
-        const since = performance.now() - shownAt, t1 = performance.now();
+        const since = performance.now() - shownAt;
         if (since < H.pace) await wait(H.pace - since);
-        dealShow(hands.length - 1, hands[hands.length - 1], shots[sizeKey(shown)] || shots[here]);
-        shownAt = performance.now(); await nextPaint(); shown_ += performance.now() - t1;
-      } catch (e) { console.error(e); }   // a hand that cannot be drawn or measured is left out
+        dealShow(hands.length - 1, hands[hands.length - 1], cv);
+        shownAt = performance.now(); await nextPaint();
+      } catch (e) { console.error(e); }   // a hand that cannot be drawn is left out
     }
-    const k = pickHand(hands, Math.random());
-    if (k < 0) throw new Error("no hand could be dealt");
-    await wait(RULES.hands.pace * 2);   // a moment with every hand in view, then the one kept, on the canvas and marked
-    putHand(hands[k]);
-    SURPRISE.last = { kept: k, ms: Math.round(performance.now() - t0), hands: hands.map((h) => ({ look: h.style.look, score: h.score, cost: h.cost, issues: h.issues.map((i) => `${i.rule}:${i.level}:${i.size}:${i.layer}`) })) };   // for the self-test
+    if (!hands.length) throw new Error("no hand could be dealt");
+    await wait(H.pace * 2);   // a moment with every hand in view, then the first on the canvas, and marked
+    putHand(hands[0]);
+    SURPRISE.last = { kept: 0, ms: Math.round(performance.now() - t0), hands: hands.map((h) => ({ look: h.style.look })) };   // for the self-test
     touch({ profile: true, cover: true, panel: true, side: true, strip: true });
     commitHistory();
-    const look = S.profile.style.look, sv = S.settings.surprise;
-    SURPRISE.step = { idx: S.histIdx, look, learn: !held };   // with the look held, what follows says nothing of the look
-    if (!held) { sv.recent = [...sv.recent.filter((x) => x !== look), look].slice(-RECENT_KEPT); persistSettings(); }
-    dealKept(k);
-    toast(t("msg.surprise", LOOKS[look].name[getLang()], t("tpl." + S.profile.style.template).split(/[：:]/)[0]));
+    SURPRISE.step = { idx: S.histIdx };
+    dealKept(0);
+    toast(t("msg.surprise", LOOKS[S.profile.style.look].name[getLang()], t("tpl." + S.profile.style.template).split(/[：:]/)[0]));
   } catch (err) {
     if (before) { putHand(before); S.hist[S.histIdx] = snapshot(); touch({ panel: true, side: true }); }   // the cover as it was, and no step of undo for it
     dealClose();
     fail(err);
   } finally {
-    await nextPaint();   // still at work until the hand kept is on the screen: clicks made before then are let go (see `done`)
+    await nextPaint();   // still at work until the hand is on the screen: clicks made before then are let go (see `done`)
     SURPRISE.busy = false; SURPRISE.done = performance.now();
     document.body.classList.remove("dealing"); syncTop();
   }
 }
 // ---------- Surprise me's window, over the left column (the canvas stays in view): the hands as they are dealt,
-// the one kept marked, another to be taken instead with a click; the parts to leave alone next time
-const DEAL = { hands: [], kept: -1, auto: -1, dropped: false };   // auto: the hand Surprise me kept; dropped: its look counted as dropped (another taken)
-const DEAL_RULES = ["A1", "B1", "C1", "D1"];   // the standards a hand is marked for missing (see coverScore)
+// the one on the canvas marked, another put there with a click; the parts to leave alone next time
+const DEAL = { hands: [], kept: -1 };   // kept: the hand on the canvas
 /** Opens Surprise me's window (or empties it for a new run): a place for each hand to come. */
 function dealOpen() {
   const box = $("deal") || document.body.appendChild(el("div", { id: "deal", role: "dialog", "aria-label": t("top.surprise") }));
   const z = selSize(), locks = S.settings.surprise.locks;
-  DEAL.hands = []; DEAL.kept = DEAL.auto = -1; DEAL.dropped = false;
+  DEAL.hands = []; DEAL.kept = -1;
   lettersClose(); cropClose(); weaveClose();   // the letter, crop and weave windows stand where this one does
   overLeft(box);
   box.style.setProperty("--ar", `${z.w} / ${z.h}`);
@@ -3872,49 +3914,39 @@ function dealOpen() {
     el("div", { class: "hint", id: "deal-hint" }, t("deal.dealingHint")),
     el("div", { class: "cap" }, t("deal.locks")),
     el("div", { class: "chips small" }, SURPRISE_LOCKS.map(lock)),
-    el("div", { class: "hint" }, t("deal.taste"), " ", el("button", { class: "link", title: t("deal.forgetTip"), onclick: (e) => { S.settings.surprise.taste = {}; S.settings.surprise.recent = []; persistSettings(); e.currentTarget.disabled = true; } }, t("deal.forget"))),
+    el("div", { class: "hint" }, t("deal.odds"), " ", el("button", { class: "link", onclick: () => oddsDialog() }, t("deal.oddsGo"))),
     el("div", { class: "acts" }, el("button", { class: "btn solid deal-again", onclick: surprise }, t("deal.again")), el("button", { class: "btn", onclick: dealClose }, t("deal.done"))));
   box.hidden = false;
 }
-/** Hand i, just dealt, in its place: its drawing at the size shown, its look, the standards it misses (red or yellow). */
+/** Hand i, just dealt, in its place: its drawing at the size shown, and its look. */
 function dealShow(i, h, cv) {
   const slot = $("deal-hands") && $("deal-hands").children[i];
   if (!slot) return;
   DEAL.hands[i] = h;
-  const missed = DEAL_RULES.filter((r) => h.issues.some((x) => x.rule === r)), red = h.issues.some((x) => x.level === "red");
-  const verdict = missed.length ? el("span", { class: red ? "bad" : "warn", title: missed.map((r) => t(`deal.ruleTip.${r}`)).join("\n") }, missed.map((r) => t(`deal.rule.${r}`)).join(" · ")) : el("span", { class: "ok" }, t("deal.clean"));
-  slot.replaceChildren(cv || el("div", { class: "blank" }), el("figcaption", {}, el("span", {}, LOOKS[h.style.look].name[getLang()]), verdict));
+  slot.replaceChildren(cv || el("div", { class: "blank" }), el("figcaption", {}, el("span", {}, LOOKS[h.style.look].name[getLang()])));
   slot.className = "hand"; slot.onclick = () => dealTake(i);
   $("deal-what").textContent = t("deal.dealt", i + 1);
 }
-/** The hands all dealt: the places left empty go, the one kept is marked. */
+/** The hands all dealt: the places left empty go, hand k (on the canvas) is marked. */
 function dealKept(k) {
   const list = $("deal-hands");
   if (!list) return;
   for (const f of [...list.querySelectorAll("figure.slot")]) f.remove();
-  DEAL.kept = DEAL.auto = k; dealMark();
+  DEAL.kept = k; dealMark();
 }
 function dealMark() {
   [...$("deal-hands").children].forEach((f, i) => f.classList.toggle("kept", i === DEAL.kept));
   $("deal-what").textContent = t("deal.kept", DEAL.kept + 1, LOOKS[DEAL.hands[DEAL.kept].style.look].name[getLang()]);
   $("deal-hint").textContent = t("deal.keptHint");
 }
-/**
- * Takes hand i instead of the one kept, while nothing has followed the run: still one step of undo; the
- * look of the hand Surprise me kept counts as dropped (once), the one taken goes with the step (see taste).
- */
+/** Puts hand i on the canvas instead, while nothing has followed the run: still one step of undo. */
 function dealTake(i) {
   if (SURPRISE.busy || i === DEAL.kept || !DEAL.hands[i]) return;
   clearTimeout(timers.hist); commitHistory();   // an edit made since is a step of its own, and the hands are past taking
   if (!SURPRISE.step || S.histIdx !== SURPRISE.step.idx) return dealClose();
-  const auto = DEAL.hands[DEAL.auto].style.look, other = DEAL.hands[i].style.look !== auto;
-  if (SURPRISE.step.learn && other !== DEAL.dropped) { taste(auto, "dropped", other ? 1 : -1); DEAL.dropped = other; }
   putHand(DEAL.hands[i]); DEAL.kept = i;
   touch({ profile: true, cover: true, panel: true, side: true, strip: true });
   S.hist[S.histIdx] = snapshot();
-  const look = S.profile.style.look, sv = S.settings.surprise;
-  SURPRISE.step.look = look;
-  if (SURPRISE.step.learn) { sv.recent = [...sv.recent.slice(0, -1).filter((x) => x !== look), look]; persistSettings(); }
   dealMark();
 }
 /** Closes Surprise me's window. */
@@ -3922,45 +3954,8 @@ function dealClose() { const box = $("deal"); if (box) box.hidden = true; }
 // a press anywhere but in the window (or on SURPRISE ME) closes it: the cover is being worked on again
 addEventListener("pointerdown", (e) => {
   const box = $("deal");
-  if (box && !box.hidden && !SURPRISE.busy && !box.contains(e.target) && !(e.target.closest && e.target.closest(".deal-btn"))) dealClose();
+  if (box && !box.hidden && !SURPRISE.busy && !box.contains(e.target) && !(e.target.closest && e.target.closest(".deal-btn, #modal"))) dealClose();   // the chances' window (oddsDialog) over it leaves it open
 }, true);
-/**
- * The cover as it is now, measured for the standards (checkCover's `seen`), drawn small at each of `sizes`:
- * the title (its hit carries the type size set), the pictures, and what must stay clear of the apps'
- * badges (the title, the subtitle, the user's words, cut-outs). At the size keyed `here`, the title against
- * what is under it too: its pixels as the cover shows them with what lies over it see-through (where the
- * title alone, drawn once more, is solid), against the cover drawn with the title and every layer above it
- * see-through — still there for whatever makes room for them, at opacity 0. Returns { seen, measured, shots }
- * (measured: the sizes as checkCover takes them; shots: the drawing at each size, by its key).
- */
-function seenNow(sizes, here) {
-  const seen = {}, measured = [], shots = {}, byId = new Map(S.cover.layers.map((l) => [l.id, l])), at = S.cover.layers.findIndex((l) => l.id === "title");
-  const main = mainPhoto(), cut = !!main && S.cover.layers.some((l) => l.of === main.id && l.cut && l.visible);
-  const draw = (size, cover, extra = {}) => { const cv = el("canvas"); drawCover(cv, { profile: S.profile, catIndex: catIndex(), size, pixelW: 360, cover, photos: S.photos, ...extra }); return cv; };
-  for (const size of sizes) {
-    const cv = draw(size, S.cover), [vw, vh] = cv._virtual, k = cv.width / vw, key = sizeKey(size), hits = cv._hits || [], of = (h) => byId.get(h.id);
-    shots[key] = cv;
-    measured.push({ key, w: size.w, h: size.h, vw, vh, on: true });
-    const t0 = hits.find((h) => h.id === "title"), title = t0 ? { id: t0.id, hit: t0 } : null;
-    let contrast = null;
-    if (t0 && key === here && at >= 0) {
-      const q = boxOf(t0), x0 = Math.max(0, Math.floor(q.x0 * k)), y0 = Math.max(0, Math.floor(q.y0 * k)), x1 = Math.min(cv.width, Math.ceil(q.x1 * k)), y1 = Math.min(cv.height, Math.ceil(q.y1 * k));
-      if (x1 - x0 > 2 && y1 - y0 > 2) {
-        const px = (c) => c.getContext("2d").getImageData(x0, y0, x1 - x0, y1 - y0).data;
-        const over = clipEnd(S.cover.layers, at), seeThrough = (from) => ({ ...S.cover, layers: S.cover.layers.map((l, i) => (i >= from ? { ...l, o: 0 } : l)) });
-        const text = px(draw(size, seeThrough(over + 1))), alone = px(draw(size, S.cover, { only: at }));
-        for (let i = 3; i < text.length; i += 4) text[i] = alone[i];   // the title's colours as the cover shows them (a picture clipped into it, the look's finish), where it is solid — not what lies over it
-        contrast = titleContrast(text, px(draw(size, seeThrough(at))));
-      }
-    }
-    seen[key] = {
-      title, contrast, unknown: !!main && !cut,
-      pictures: hits.filter((h) => ["graphic", "asset", "photo"].includes(h.type) && !(of(h) && fillsCanvas(of(h)))).map((h) => ({ id: h.id, hit: h })),
-      parts: hits.filter((h) => ["title", "subtitle", "text"].includes(h.type) || (h.type === "photo" && of(h) && of(h).cut)).map((h) => ({ id: h.id, hit: h })),
-    };
-  }
-  return { seen, measured, shots };
-}
 /**
  * Asks, then empties this channel's cover: every layer the user added goes, the layout layers return to
  * the profile's default design (places, effects, colours), the scene objects to where the layout puts
@@ -4086,8 +4081,11 @@ addEventListener("drop", async (e) => {
 });
 addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
-  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
-  if (typing || !S.cover || SURPRISE.busy) return;
+  const a = document.activeElement, typing = /^(INPUT|TEXTAREA|SELECT)$/.test(a && a.tagName);
+  const m = $("modal");   // a dialog open: Escape is its cancel (but in a text being typed), and no key reaches what lies under it
+  if (!m.hidden) { if (key === "escape" && !m.dataset.sticky && !(typing && !/^(range|checkbox|radio)$/.test(a.type))) (m.onDismiss || closeModal)(); return; }
+  if (typing) return;
+  if (!S.cover || SURPRISE.busy) return;
   if (key === "escape" && $("deal") && !$("deal").hidden) return dealClose();
   if (key === "escape" && S.letterWin) return lettersClose();
   if (key === "escape" && S.cropWin) return cropClose();
@@ -4677,14 +4675,14 @@ async function selfTest(dir) {
         fills.forEach((l, i) => (l.visible = shown[i])); st.look = keepLook;
       }
     }
-    // Surprise me: hands dealt, measured at every size and one kept, the cover put back after
+    // Surprise me: six hands dealt, each in a look of its own, the first kept; the cover put back after
     report.surprise = [];
     {
       const keep = JSON.stringify({ style: S.profile.style, layers: S.cover.layers, scene: S.cover.scene });
       for (let i = 0; i < 4; i++) {
         await step(`surprise ${i + 1}`); SURPRISE.last = null; await surprise(); await new Promise((r) => setTimeout(r, 0));
         const L = SURPRISE.last;
-        report.surprise.push(L ? { ms: L.ms, kept: L.hands[L.kept], scores: L.hands.map((h) => h.score) } : { error: "no hand kept" });
+        report.surprise.push(L ? { ms: L.ms, kept: L.hands[L.kept], looks: L.hands.map((h) => h.look), distinct: new Set(L.hands.map((h) => h.look)).size } : { error: "no hand kept" });
       }
       const k = JSON.parse(keep); S.profile.style = k.style; S.cover.layers = k.layers; if (k.scene) S.cover.scene = k.scene; else delete S.cover.scene;
       touch({ profile: true, cover: true, panel: true, side: true });
@@ -4930,7 +4928,7 @@ async function dragTest() {
   await invoke("selftest_done", { report: JSON.stringify(report, null, 2) }).catch(() => null);
 }
 // test hook: lets automated checks drive the app without the UI
-window.__smedcover = { S, drawCover, renderFull, nameFor, touch, addAsset, addLayer, newLayer, selectLayer, selectSize, setMode, layer, surprise, SURPRISE, seenNow };
+window.__smedcover = { S, drawCover, renderFull, nameFor, touch, addAsset, addLayer, newLayer, selectLayer, selectSize, setMode, layer, surprise, SURPRISE };
 start().catch((e) => {
   console.error(e);
   if (HOST !== "server") return fail(e);
