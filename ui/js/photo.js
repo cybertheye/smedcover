@@ -8,6 +8,16 @@
 export const PIXELS = { on: false, ms: {} };
 export const pxTime = (name, t0) => { if (PIXELS.on) PIXELS.ms[name] = (PIXELS.ms[name] || 0) + performance.now() - t0; };
 
+let draft = false;   // see setDraft()
+/**
+ * Whether what is painted now is a draft — a frame of a slider or a layer being dragged (see render.js) —
+ * whose photo copies are then drawn from the graphics card (see onCard): fast, and a hair different from
+ * a still cover's, which goes on drawing them as it always has.
+ */
+export function setDraft(on) { draft = !!on; }
+/** Whether what is painted now is a draft (see setDraft): what a draft paints is not a still cover's, nor kept as one. */
+export const isDraft = () => draft;
+
 /** Gaussian blur approximated by three box blurs, in place on RGBA bytes (alpha untouched). */
 export function gaussBlur(d, w, h, sigma) {
   const r = Math.max(1, Math.round(Math.sqrt(sigma * sigma * 4 + 1) / 2 - 0.5)), inv = 1 / (2 * r + 1);
@@ -75,7 +85,7 @@ function blurred(im, b, hi) {
     const id = x.getImageData(0, 0, w, h);
     gaussBlur(id.data, w, h, sigma / f);
     x.putImageData(id, 0, 0);
-    slot.im = im; slot.key = key;
+    slot.im = im; slot.key = key; c.filled = (c.filled || 0) + 1;
     pxTime("photo blur", t0);
   }
   return slot.cv;
@@ -96,7 +106,7 @@ function greyOf(src, im, key, hi) {
     const id = x.getImageData(0, 0, w, h), d = id.data;
     for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = (d[i] * 54 + d[i + 1] * 183 + d[i + 2] * 19) >> 8;
     x.putImageData(id, 0, 0);
-    slot.im = im; slot.key = key;
+    slot.im = im; slot.key = key; c.filled = (c.filled || 0) + 1;
     pxTime("grey copy", t0);
   }
   return slot.cv;
@@ -121,8 +131,42 @@ export function drawPhotoAt(ctx, im, x, y, iw, ih, blur, hiRes, grey = 0, treat 
   let src = blur > 0 ? blurred(im, blur, hiRes) : im;
   if (treat) src = treatedOf(src, im, `${blur}|${hiRes}|${treat.key}`, hiRes, treat.fn);
   ctx.imageSmoothingQuality = "high";
-  if (grey < 1) ctx.drawImage(src, x, y, iw, ih);
-  if (grey > 0) { ctx.save(); ctx.globalAlpha = Math.min(1, grey); ctx.drawImage(greyOf(src, im, `${blur}|${hiRes}|${treat ? treat.key : ""}`, hiRes), x, y, iw, ih); ctx.restore(); }
+  if (grey < 1) ctx.drawImage(onCard(src), x, y, iw, ih);
+  if (grey > 0) { ctx.save(); ctx.globalAlpha = Math.min(1, grey); ctx.drawImage(onCard(greyOf(src, im, `${blur}|${hiRes}|${treat ? treat.key : ""}`, hiRes)), x, y, iw, ih); ctx.restore(); }
+}
+let cards = new WeakMap(), carded = [];   // a kept copy (blurred, grey, worked by the look) -> {cv, filled}: its pixels on a canvas on the graphics card; those canvases
+/**
+ * What a draft draws for `src`: for one of the copies kept here, the same pixels on a canvas the web view
+ * keeps on the graphics card, made once each time that copy is filled again; the picture itself is drawn as
+ * it is, and outside a draft everything is. The copies are worked out on canvases held in memory (their
+ * pixels are read back and written in script), and WebKit sends such a canvas to the card again each time
+ * it is drawn — some milliseconds for a photo's copy, and a look may draw its photo a dozen times a frame
+ * (the black-and-white film's motion trail and its pieces of collage do): its sliders were dragged at a few
+ * frames a second, and the knob trailed the mouse. From the card, the same takes a fraction of a millisecond.
+ * Kept until the drag or the draft ends (see dropCards).
+ */
+function onCard(src) {
+  if (!draft || !src.filled) return src;
+  let k = cards.get(src);
+  if (!k || k.filled !== src.filled) {
+    const cv = k ? k.cv : document.createElement("canvas");
+    if (!k) carded.push(cv);
+    cv.width = src.width; cv.height = src.height;
+    cv.getContext("2d").drawImage(src, 0, 0);
+    cards.set(src, (k = { cv, filled: src.filled }));
+  }
+  return k.cv;
+}
+/**
+ * Lets the copies on the graphics card go (see onCard), as the drag or the draft they were made for ends: a
+ * still cover has no use for them, and kept with the photo's own copies, as long as the photo, they held the
+ * card for nothing — a layer dragged on a Retina canvas draws the copies made for its larger pixels (2400 px
+ * on their longer side), some 17 MB each. The next draft makes them again, once each.
+ */
+export function dropCards() {
+  if (!carded.length) return;
+  for (const cv of carded) cv.width = cv.height = 0;
+  carded = []; cards = new WeakMap();
 }
 const treated = new WeakMap();   // the photo (or its blurred copy) worked on by a look, per picture: one slot for previews, one for export
 /**
@@ -143,7 +187,7 @@ function treatedOf(src, im, key, hi, fn) {
     const id = x.getImageData(0, 0, w, h);
     fn(id.data);
     x.putImageData(id, 0, 0);
-    slot.im = im; slot.key = key;
+    slot.im = im; slot.key = key; c.filled = (c.filled || 0) + 1;
     pxTime("photo worked by the look", t0);
   }
   return slot.cv;

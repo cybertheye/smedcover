@@ -4,10 +4,10 @@
 import { INK, fonts, rgb, mixc, BLK, clamp, toneField, spaced, spacedW, para, brackets } from "./cel.js";
 import { virtualSize, layout, adjustLayout, meetStandards, wordsFoot, layoutOf } from "./layout.js";
 import { drawTitle, drawTitleVertical, titleBlockVertical, parseTitle, subtitleFit, subtitleColumns, setLine, passOf, hasCJK, someLetters } from "./title.js";
-import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime } from "./photo.js";
+import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime, setDraft, isDraft } from "./photo.js";
 import { drawAsset, assetHalf, userAssets, assetExists } from "./assets.js";
 import { resolve, appliesTo, inSize, isLayout, fillsCanvas, clipBase, clipEnd, sceneOffsets, headLine, frontOf, brushesFront, brushToDo, photoMap, canWeave, opaqueBox, HEADLINES } from "./layers.js";
-import { setLook, setFast, isFast, look, lookValues, styled, layerEffects, paintEffects, setScene, scenePlaced, wherePainted, columned, columnBoxOf, fall } from "./style.js";
+import { setLook, setFast, isFast, look, lookValues, noteReads, readsInto, styled, layerEffects, paintEffects, setScene, scenePlaced, wherePainted, columned, columnBoxOf, fall } from "./style.js";
 import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped, effectReach, inColumn } from "./textfx.js";
 import { ransomEpoch } from "./ransom.js";
 
@@ -833,6 +833,19 @@ function freshCanvas(c, cv, kx, ky) {
 const FX_KEPT = new Map(), FX_KEPT_PX = 16e6, OBJ_IDS = new WeakMap();
 let objIds = 0;
 const objId = (o) => { if (!o) return 0; let n = OBJ_IDS.get(o); if (!n) OBJ_IDS.set(o, (n = ++objIds)); return n; };
+/**
+ * How a paint draws (see fxServes): 0 a still cover; 1 a draft, its photos from their copies on the graphics card
+ * (see setDraft in photo.js), which WebKit resamples a hair otherwise; 2 a drag's frame, drawn coarser here and
+ * there too (see setFast). A drag's frame is a draft.
+ */
+const paintLevel = () => (isFast() ? 2 : isDraft() ? 1 : 0);
+/**
+ * Whether what a layer's look effects were kept as (see FX_KEPT: {from, level}) serves it now: made from the same
+ * things (`from`) and painted at least as well as this paint (`level`, see paintLevel) — a still cover's serves any,
+ * a draft's another draft or a drag's frame, never a still cover: the full picture painted as a slider is let go
+ * would be a draft's where the canvas has the draft's pixels (a screen of pixel ratio 1, an export of that size).
+ */
+export const fxServes = (kept, from, level) => !!kept && kept.from === from && kept.level <= level;
 const PHOTO = { sheets: [], slides: new Map() };   // the photo layers' work canvases, and their images while a photo is dragged
 // The lettering a cut-out lets through (see wovenFront in paintCover) on the editor's canvas, per cut-out and canvas
 // size, with what decided it: while something is dragged, a cut-out moved does not paint its lettering again. Up to
@@ -1325,6 +1338,11 @@ function dashedLine(shape, grow, colour, perCover) {
  *              (a layout preset's colour block, see layoutEditor in app.js)
  *   o.live     {ids} while those layers are being dragged: the layers that do not move are cached
  *              in this object between frames (editor only; drop the object when the drag ends)
+ *   o.draft    true while a slider is dragged (editor only): photos are drawn from their copies on the
+ *              graphics card, as in a frame of o.live (see setDraft in photo.js); {key} while it is a
+ *              look's slider for its value `key`: the layers that did not read that value when last
+ *              painted (see noteReads in style.js) are cached in this object between frames, as o.live
+ *              caches those not dragged (drop the object when the drag ends)
  *   o.picked   ids of the layers in a group selection, outlined without handles (editor only)
  *   o.spot     ids of the layers kept bright, every other one dimmed (the editor's FOCUS); a clipping
  *              group is dimmed or not as a whole
@@ -1334,10 +1352,11 @@ function dashedLine(shape, grow, colour, perCover) {
  */
 export function drawCover(cv, o) {
   // A look may set the whole cover in faces of its own. The font table is shared, so it is put
-  // back however the drawing ends.
+  // back however the drawing ends; so is the way a drag's frame or a draft draws (see setFast,
+  // setDraft), not to be left to a thumbnail or an export after a frame that failed.
   const L = setLook(o.profile.style.look), swap = L.faces ? L.faces(fonts) : null, keep = swap ? { ...fonts } : null;
   if (swap) Object.assign(fonts, swap);
-  try { paintCover(cv, o); } finally { if (keep) Object.assign(fonts, keep); }
+  try { paintCover(cv, o); } finally { if (keep) Object.assign(fonts, keep); setFast(false); setDraft(false); }
 }
 /**
  * The cover as it is at the size keyed `key`: a layer kept to other sizes (`sizes`, see layers.js) is not on it — hidden,
@@ -1379,6 +1398,10 @@ function paintCover(cv, o) {
   const main = cover.layers.find((l) => fillsCanvas(l) && l.visible && appliesTo(l, cat.id)), mainRec = main && o.photos && o.photos.get(main.pid);
   const photo = (mainRec && mainRec.img) || null;
   const L0 = setLook(P.style.look, P.style.lookParams && P.style.lookParams[P.style.look], P.style.lookSeed, !!photo || P.style.theme !== "light");   // everything below is drawn under this look
+  // a look's slider dragged (o.draft.key): which of its values each layer reads is noted, and what is read
+  // before the layers (the theme, the layout) in `global` (see the runs below)
+  const noted = !o.live && o.draft && o.draft.key ? o.draft : null;
+  if (noted) { noteReads(); readsInto((noted.global = new Set())); }
   setScene(sceneOffsets(cover, L0.id, key), w, h, kx);   // where the user dragged its scene objects on this cover
   const base = photo ? THEMES.dark : THEMES[P.style.theme] || THEMES.dark;
   const G = coverLayout(L0, layoutOf(P.style, key), w, h, partsOf(cover, cat));   // in the layout this size is drawn in: the profile's, or its own
@@ -1479,26 +1502,26 @@ function paintCover(cv, o) {
       const faces = L.font ? { ...fonts } : null;
       if (faces) for (const k of ["cn", "en", "serif"]) fonts[k] = `"${L.font}", ${faces[k]}`;
       let hit, woven = null;
-      const t0 = TIMING.on ? performance.now() : 0;
+      const t0 = TIMING.on ? performance.now() : 0, mine = noted && new Set(), above = noted && readsInto(mine);
       try {
       const fx = layerEffects(L);
       woven = L.weave && canWeave(L) ? wovenFront(i) : null;
       // a cut-out or an asset lets its woven lettering through as it is painted, or with look effects after them (see PAINT.photo)
       env.woven = woven && { ...woven, later: fx.length > 0 }; env.letThrough = null;
-      let fxKey = null, slot = null, kept = null;
+      let from = null, slot = null, kept = null;
       if (fx.length && (L.type === "photo" || (L.type === "asset" && L.weave))) {
         // kept as painted before any lettering woven with it is let through, so the weave is not part of what decides it;
-        // one made while nothing was dragged serves the frames of a drag too. A woven asset's too (the lettering under
-        // it dragged repaints it), by the asset it draws and the fonts there are (a word sticker painted before its face
-        // arrived is not kept past it); one not woven is repainted only as it moves itself
+        // one made while nothing was dragged serves the frames of a drag too, one made in a draft never a still cover
+        // (see fxServes). A woven asset's too (the lettering under it dragged repaints it), by the asset it draws and the
+        // fonts there are (a word sticker painted before its face arrived is not kept past it); one not woven is
+        // repainted only as it moves itself
         const base = L.of ? cover.layers.find((l) => l.id === L.of) : L, rec = base && o.photos && o.photos.get(base.pid);
         slot = `${L.id}@${cv.width}x${cv.height}`;
-        const from = [kx, ky, key, objId(rec && rec.img), objId(rec && rec.mask && rec.mask.img), C, main ? main.pid : "",
+        from = [kx, ky, key, objId(rec && rec.img), objId(rec && rec.mask && rec.mask.img), C, main ? main.pid : "",
           JSON.stringify(P.style), JSON.stringify(tr), JSON.stringify({ ...L, weave: null }), L.of ? JSON.stringify(base) : "",
           L.type === "asset" ? `${L.ref.kind === "user" ? objId(userAssets.get(L.ref.id)) : ""}/${fontState()}` : ""].join("|");
-        fxKey = `${from}|${isFast() ? 1 : 0}`;
         kept = FX_KEPT.get(slot);
-        if (kept && kept.key !== fxKey && !(isFast() && kept.key === `${from}|0`)) kept = null;
+        if (!fxServes(kept, from, paintLevel())) kept = null;
       }
       if (kept) {
         FX_KEPT.delete(slot); FX_KEPT.set(slot, kept);   // the newest again
@@ -1520,10 +1543,10 @@ function paintCover(cv, o) {
         const got = hit && fx.length ? paintEffects(sx, pixelBox(hit, kx, ky, cv.width, cv.height), fx, L, kx, env.C) : null, cut = env.letThrough;
         // kept before the woven lettering is let through; not while the layer moves (it is dragged, or with what it
         // weaves with): every frame would make a copy only to be thrown away
-        if (fxKey && got && got.w > 0 && got.h > 0 && !moved.has(i)) {
+        if (from && got && got.w > 0 && got.h > 0 && !moved.has(i)) {
           const img = document.createElement("canvas"); img.width = got.w; img.height = got.h;
           img.getContext("2d").drawImage(scr, got.x0, got.y0, got.w, got.h, 0, 0, got.w, got.h);
-          FX_KEPT.delete(slot); FX_KEPT.set(slot, { key: fxKey, img, got, hit, cut });
+          FX_KEPT.delete(slot); FX_KEPT.set(slot, { from, level: paintLevel(), img, got, hit, cut });
           let px = 0; for (const k of FX_KEPT.values()) px += k.got.w * k.got.h;
           for (const [s0, k] of FX_KEPT) { if (px <= FX_KEPT_PX || FX_KEPT.size <= 1) break; px -= k.got.w * k.got.h; FX_KEPT.delete(s0); }
         }
@@ -1532,7 +1555,15 @@ function paintCover(cv, o) {
         if (got && got.w > 0 && got.h > 0) c.drawImage(scr, got.x0, got.y0, got.w, got.h, got.x0, got.y0, got.w, got.h); else c.drawImage(scr, 0, 0);
         c.restore();
       } else hit = PAINT[L.type](c, L, tr, env);
-      } finally { if (woven && woven.temp) woven.c.width = woven.c.height = 0; env.woven = env.letThrough = null; if (faces) Object.assign(fonts, faces); if (TIMING.on) TIMING.ms[L.id] = (TIMING.ms[L.id] || 0) + performance.now() - t0; }
+      } finally {
+        if (woven && woven.temp) woven.c.width = woven.c.height = 0; env.woven = env.letThrough = null; if (faces) Object.assign(fonts, faces); if (TIMING.on) TIMING.ms[L.id] = (TIMING.ms[L.id] || 0) + performance.now() - t0;
+        if (noted) {   // what this layer read, each time it was painted this frame; a layer painted inside another (woven lettering) counts for that one too
+          readsInto(above);
+          if (above) for (const k of mine) above.add(k);
+          const was = noted.reads.get(L.id);
+          if (was && was.frame === noted.frame) for (const k of mine) was.keys.add(k); else noted.reads.set(L.id, { frame: noted.frame, keys: mine });
+        }
+      }
       c.globalAlpha = 1; c.setLineDash([]);
       if (hit) hits.push({ id: L.id, type: L.type, ...hit });
     }
@@ -1543,7 +1574,20 @@ function paintCover(cv, o) {
     cv._scene = []; cv._blocks = { k: kx }; cv._titleBox = null;
     return;
   }
-  const n = cover.layers.length, moving =o.live ? (o.live.ids || [o.live.id]).map((id) => cover.layers.findIndex((l) => l.id === id)).filter((i) => i >= 0) : [];
+  const n = cover.layers.length, moving = o.live ? (o.live.ids || [o.live.id]).map((id) => cover.layers.findIndex((l) => l.id === id)).filter((i) => i >= 0) : [];
+  if (noted) {
+    // A look's slider is dragged: the layers that read its setting when last painted are painted again each
+    // frame, as dragged layers are, and the rest kept (what is read nowhere but in `post` keeps them all).
+    // In the first frame, or when the setting decides what comes before the layers, all are painted again.
+    readsInto(null);
+    noted.frame = (noted.frame || 0) + 1;
+    const first = !noted.reads;
+    if (first) noted.reads = new Map();
+    for (let i = 0; i < n; i++) {
+      const r = noted.reads.get(cover.layers[i].id);
+      if (first || noted.global.has(noted.key) || (r && r.keys.has(noted.key))) moving.push(i);
+    }
+  }
   // a clipping group moves as one: dragging its base or a layer clipped onto it repaints them all
   const groups = () => {
     for (const i of [...moving]) {
@@ -1559,50 +1603,59 @@ function paintCover(cv, o) {
   for (const i of [...moving]) cover.layers.forEach((l, k) => { if (k > i && l.weave && canWeave(l) && l.weave.with.includes(cover.layers[i].id) && !moving.includes(k)) moving.push(k); });
   groups();
   for (const i of moving) moved.add(i);
-  setFast(moving.length > 0);
-  if (!moving.length) cv._hits = paintRange(ctx, 0, n);
+  setFast(!noted && moving.length > 0); setDraft(moving.length > 0 || !!o.draft);   // a drag's frames are drawn coarser here and there; a draft's photos, faster
+  let scene = null;   // in a frame that keeps runs of layers: the scene objects placed, those of a kept run as it placed them
+  if (!moving.length && !noted) cv._hits = paintRange(ctx, 0, n);
   else {
-    // Layers are being dragged. The cover is cut into runs of layers that move and runs that do
-    // not; each still run is painted once into an image kept in o.live, and each frame only blits
-    // those and repaints the moving runs. (Dragging the background photo moves it and its cut-out copy
-    // above the title: the four layers between them stay one image.)
-    const live = o.live, still = new Set(moving), runs = [];
+    // Layers are being dragged (or read a look's setting being dragged). The cover is cut into runs of
+    // layers that move and runs that do not; each still run is painted once into an image kept in o.live
+    // (o.draft), and each frame only blits those and repaints the moving runs. (Dragging the background
+    // photo moves it and its cut-out copy above the title: the four layers between them stay one image.)
+    const live = o.live || noted, still = new Set(moving), runs = [];
+    scene = scenePlaced();   // what was placed before the layers; each run's own are added below, in order (a still run's, kept with it)
     for (let i = 0; i < n; i++) {
       const mv = still.has(i), last = runs[runs.length - 1];
       if (last && last.moving === mv) last.to = i + 1; else runs.push({ from: i, to: i + 1, moving: mv });
     }
-    const stamp = `${cv.width}x${cv.height}|${n}|${[...still].sort((a, b) => a - b).join(",")}|${o.spot ? o.spot.join(",") : ""}`;
+    // a draft's kept runs hold for this cover at this size and for the look's other values as they are: the cover as
+    // given (o.cover), whose identity holds from frame to frame, not as drawn at this size (coverAt), a copy each time
+    // a layer is kept to other sizes
+    const stamp = `${cv.width}x${cv.height}|${n}|${[...still].sort((a, b) => a - b).join(",")}|${o.spot ? o.spot.join(",") : ""}` + (noted ? `|${objId(o.cover)}|${key}|${o.catIndex}|${JSON.stringify({ ...lookValues(), [noted.key]: null })}` : "");
     if (live.stamp !== stamp) {
       live.stamp = stamp; if (TIMING.on) TIMING.rebuilt++;
       live.runs = runs.map((r) => {
         if (r.moving) return null;
         const img = document.createElement("canvas");
         img.width = cv.width; img.height = cv.height;
-        const c = img.getContext("2d");
+        const c = img.getContext("2d"), at = scenePlaced().length;
         c.scale(kx, ky);
-        return { img, hits: paintRange(c, r.from, r.to) };
+        const hits = paintRange(c, r.from, r.to);
+        return { img, hits, scene: scenePlaced().slice(at) };
       });
     }
     const hits = [];
     runs.forEach((r, i) => {
-      if (r.moving) { hits.push(...paintRange(ctx, r.from, r.to)); return; }
+      if (r.moving) { const at = scenePlaced().length; hits.push(...paintRange(ctx, r.from, r.to)); scene.push(...scenePlaced().slice(at)); return; }
       const kept = live.runs[i];
       ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(kept.img, 0, 0); ctx.restore();
-      hits.push(...kept.hits);
+      hits.push(...kept.hits); scene.push(...kept.scene);
     });
     cv._hits = hits;
   }
+  const atPost = scenePlaced().length;
   if (L0.post && cover.layers[0].visible) {   // not over a hidden background; over a see-through base only where something is painted
     const post = (x) => L0.post(x, w, h, C, lookValues(), kx, cv._hits);
     ctx.save(); wherePainted(ctx, post, cover.layers[0].base === "clear", "post"); ctx.restore();
   }
-  setFast(false);
-  // where the look's scene objects were placed, for their handles: a drag that does not repaint the ground keeps the last
-  const placed = scenePlaced().filter((q) => L0.scene && L0.scene[q.key]);   // only what the look offers to drag
-  cv._scene = placed.length || !o.live ? placed : cv._scene || [];
-  cv._titleBox = env.titleBox || null;
+  setFast(false); setDraft(false);
+  // where the look's scene objects were placed, for their handles: a run of layers kept between frames (a drag that does
+  // not repaint the ground, a draft that repaints only what reads its setting) gives those it placed as it was painted;
+  // each where it was first placed, bottom up, as a still cover places it (see objAt in style.js)
+  const shown = new Set();
+  cv._scene = (scene ? scene.concat(scenePlaced().slice(atPost)) : scenePlaced()).filter((q) => L0.scene && L0.scene[q.key] && !shown.has(q.key) && shown.add(q.key));   // only what the look offers to drag
+  cv._titleBox = env.titleBox || (noted && cv._titleBox) || null;
   // where lettered blocks are, for the perspective's handles; a drag paints only some layers, so what is not repainted is kept
-  cv._blocks = { ...(o.live ? cv._blocks : null), ...env.blocks, k: kx };
+  cv._blocks = { ...(o.live || noted ? cv._blocks : null), ...env.blocks, k: kx };
   if (o.brush) brushOverlay(ctx, cv, cover, o, C, kx, ky);   // painting with the weave's brush: no frame, no handles
   else if (o.picked && o.picked.length > 1) {
     for (const hit of cv._hits) if (o.picked.includes(hit.id) && showsFrame(hit)) drawSelection(ctx, hit, kx, false);

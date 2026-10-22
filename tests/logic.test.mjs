@@ -1835,6 +1835,86 @@ test("the soft-edge blur of one channel: spreads a step symmetrically, keeps a c
   assert.deepEqual(row(0).map((v) => v.toFixed(4)), row(8).map((v) => v.toFixed(4)), "rows alike stay alike (the vertical pass keeps them)");
 });
 
+test("a draft draws a photo's kept copies from a copy on the graphics card, made once a filling; a still cover as ever", async () => {
+  const { drawPhotoAt, setDraft } = await import("../ui/js/photo.js");
+  const was = globalThis.document, pen = (onDraw) => new Proxy({}, { get: (t, k) => (k in t ? t[k] : k === "getImageData" ? (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }) : (...a) => { if (k === "drawImage") onDraw(a[0]); return {}; }), set: (t, k, v) => { t[k] = v; return true; } });
+  globalThis.document = { createElement: () => { const c = { width: 0, height: 0, drew: [] }; const x = pen((src) => c.drew.push(src)); c.getContext = () => x; return c; } };
+  const im = { naturalWidth: 400, naturalHeight: 300 }, drawn = [], ctx = pen((src) => drawn.push(src));
+  const grey = (amount = 1, blur = 0) => drawPhotoAt(ctx, im, 0, 0, 400, 300, blur, false, amount);
+  try {
+    grey();
+    const kept = drawn[0];
+    assert.ok(kept !== im && kept.filled === 1, "a still cover draws the grey copy kept in memory");
+    setDraft(true);
+    grey(); grey();
+    const card = drawn[1];
+    assert.ok(card !== kept && drawn[2] === card, "a draft draws another canvas, made once");
+    assert.deepEqual(card.drew, [kept], "the same pixels: the kept copy drawn onto it");
+    grey(0.5);
+    assert.equal(drawn[3], im, "the picture itself is drawn as it is");
+    assert.equal(drawn[4], card);
+    grey(1, 6);   // blurred: the grey copy is filled again, from the blurred one
+    assert.ok(kept.filled === 2 && drawn[5] === card && card.drew.length === 2, "a copy filled again is put on the card again");
+    setDraft(false);
+    grey(1, 6);
+    assert.equal(drawn[6], kept, "out of a draft, the kept copy again");
+  } finally { setDraft(false); globalThis.document = was; }
+});
+
+test("the copies on the graphics card go as the drag or the draft ends, and the next draft makes them again", async () => {
+  const { drawPhotoAt, setDraft, isDraft, dropCards } = await import("../ui/js/photo.js");
+  const was = globalThis.document, pen = (onDraw) => new Proxy({}, { get: (t, k) => (k in t ? t[k] : k === "getImageData" ? (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }) : (...a) => { if (k === "drawImage") onDraw(a[0]); return {}; }), set: (t, k, v) => { t[k] = v; return true; } });
+  globalThis.document = { createElement: () => { const c = { width: 0, height: 0, drew: [] }; const x = pen((src) => c.drew.push(src)); c.getContext = () => x; return c; } };
+  const im = { naturalWidth: 640, naturalHeight: 480 }, drawn = [], ctx = pen((src) => drawn.push(src));
+  const grey = () => drawPhotoAt(ctx, im, 0, 0, 640, 480, 0, true, 1);
+  try {
+    setDraft(true);
+    assert.equal(isDraft(), true);
+    grey();
+    const card = drawn[0], kept = card.drew[0];
+    assert.ok(card.width === 640 && card.height === 480 && kept.filled === 1, "a draft draws the grey copy from its copy on the card");
+    dropCards();
+    assert.ok(card.width === 0 && card.height === 0, "let go: its pixels gone");
+    grey();
+    assert.ok(drawn[1] !== card && drawn[1].width === 640 && drawn[1].drew[0] === kept, "the next draft makes another, from the copy kept in memory, which stays");
+    dropCards(); dropCards();   // nothing left to let go
+    setDraft(false);
+    assert.equal(isDraft(), false);
+    grey();
+    assert.equal(drawn[2], kept, "a still cover draws the copy kept in memory");
+  } finally { setDraft(false); globalThis.document = was; }
+});
+
+test("a layer's look effects kept in a draft never serve a still cover", async () => {
+  const { fxServes } = await import("../ui/js/render.js");
+  const kept = (level) => ({ from: "f", level });
+  for (const [made, now, serves] of [[0, 0, true], [0, 1, true], [0, 2, true], [1, 1, true], [1, 2, true], [2, 2, true], [1, 0, false], [2, 0, false], [2, 1, false]])
+    assert.equal(fxServes(kept(made), "f", now), serves, `made at ${made}, painted at ${now}`);
+  assert.equal(fxServes(kept(0), "g", 2), false, "made from other things");
+  assert.equal(fxServes(null, "f", 0), false);
+});
+
+test("looks: which of a look's values are read can be noted, layer by layer", async () => {
+  const { noteReads, readsInto } = await import("../ui/js/style.js");
+  setLook("monofilm", { mono: 0.4 });
+  const before = new Set();
+  noteReads(); readsInto(before);
+  assert.equal(lookValues().mono, 0.4); void lookValues().grain;
+  const layer = new Set(), was = readsInto(layer);
+  assert.equal(was, before);
+  void lookValues().haze;
+  assert.equal(readsInto(was), layer);
+  assert.deepEqual([...before], ["mono", "grain"]); assert.deepEqual([...layer], ["haze"]);
+  const key = new Set(); readsInto(key);
+  JSON.stringify(lookValues());   // a cache's key made of them all reads them all
+  assert.deepEqual([...key].filter((k) => k !== "toJSON").sort(), LOOKS.monofilm.params.map((q) => q.key).sort());
+  readsInto(null); void lookValues().fold;
+  assert.equal(key.has("fold") && before.has("fold"), false, "noted nowhere");
+  readsInto(before); setLook("monofilm"); void lookValues().dust;
+  assert.equal(before.has("dust"), false, "a look made current again is not watched");
+  readsInto(null); setLook("cel");
+});
+
 test("a photo filling the canvas shows its frame, corners only, once it no longer covers the canvas", async () => {
   const { showsFrame, handles } = await import("../ui/js/render.js");
   const ids = (hit) => handles(hit, 1).map((h) => h.id).sort().join(" ");

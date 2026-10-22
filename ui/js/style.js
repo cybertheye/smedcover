@@ -9229,6 +9229,18 @@ export function lookParams(id, given) {
 export function setLook(id, given, s = 7, onDark = true) { current = LOOKS[id] || cel; values = lookParams(current.id, given); seed = Number.isFinite(s) ? s : 7; dark = !!onDark; return current; }
 export const look = () => current;
 export const lookValues = () => values;
+let reads = null;   // see readsInto()
+/**
+ * From now until setLook() is called again, notes which of the current look's values are read: each read
+ * is added to the set last named by readsInto() (none: not noted). A painter can only paint otherwise for
+ * another value of a setting by reading it, so what did not read it cannot have changed: while a look's
+ * slider is dragged, a layer that did not read its setting is kept as painted (see o.draft in render.js).
+ * Every way to the values goes through `values` (lookValues() hands out the same), so every read is seen;
+ * a copy made of them all (a cache's key) reads them all.
+ */
+export function noteReads() { const own = values; values = new Proxy(own, { get: (o, k) => { if (reads && typeof k === "string") reads.add(k); return o[k]; } }); }
+/** Where reads of the look's values are noted from now on (null: nowhere); returns where they were. */
+export function readsInto(set) { const was = reads; reads = set; return was; }
 /** What else decides how the current look paints, besides its values: the ground it is on and the profile's seed. */
 export const lookState = () => `${dark ? 1 : 0}|${seed}`;
 /** The context graphics and the small cover parts should draw on under the current look. */

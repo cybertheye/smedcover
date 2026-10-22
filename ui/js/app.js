@@ -24,7 +24,7 @@ import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { RANSOM_FACES, useRansomFaces, ransomPending, ransomArrived, ransomPools, ransomLetters, ransomShown, papersFor, faceFont, faceHas, inksFor, cased, isCJK, EXTRAS, lineCells, keysOf } from "./ransom.js";
 import { parseTitle } from "./title.js";
 import { LOOKS, LOOK_IDS, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
-import { sizeOf, PIXELS } from "./photo.js";
+import { sizeOf, PIXELS, dropCards } from "./photo.js";
 import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, labelRoom, drawStack } from "./stack3d.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
@@ -292,15 +292,30 @@ let LIVE = null;
 /**
  * While a slider of the left panel is dragged — a look's own setting, the layout's proportions — the
  * cover is painted as a draft, at the screen's own pixels rather than the Retina ones (a quarter of the
- * work), and the size thumbnails wait; the full picture comes back a moment after the last step. Such a
- * setting can touch every layer, so the rest of the cover cannot be kept as a layer's own slider keeps it
- * (see holdLive).
+ * work), its photos drawn from their copies on the graphics card (see setDraft in photo.js), and the size
+ * thumbnails wait. The full picture comes back as the slider is let go (`held`: the pointer is still down),
+ * or, stepped from the keyboard, a moment after the last step: not each time the hand rests a moment, which
+ * on a heavy look put a whole redraw in the way of the next step. Such a setting can touch every layer, so
+ * the rest of the cover cannot simply be kept as a layer's own slider keeps it (see holdLive); but a look's
+ * own setting (`key`) is read by only some of them, and those that did not read it are kept while it is
+ * dragged (`kept`: o.draft in render.js). `down`: the slider (or the canvas) the main button went down on,
+ * till it is let go; `from`: where the last input came from. A draft is held only for input from what was
+ * pressed: a press whose release never came (a context menu took it) held the next change made from the
+ * keyboard — a look's switch flipped with Space, a setting typed after Tab — for ever, the canvas a draft
+ * and the thumbnails waiting; the pointer moved over the page with no button down lets it go.
  */
-const DRAFT = { until: 0 };
+const DRAFT = { until: 0, held: false, down: null, from: null, key: null, kept: null };
 /** A layout preset's editor while it is open (layoutEditor): `redraw` draws its canvas again (when outlines or fonts arrive). */
 const LAYED = { redraw: null };
-const drafting = () => performance.now() < DRAFT.until;
-function draftTouch(opts) { DRAFT.until = performance.now() + 250; later("undraft", 270, queueDraw); touch(opts); }
+const drafting = () => DRAFT.held || performance.now() < DRAFT.until;
+function draftTouch(opts, key = null) { DRAFT.until = performance.now() + 250; DRAFT.held = !!DRAFT.down && DRAFT.from === DRAFT.down; DRAFT.key = key; later("undraft", 270, () => DRAFT.held || queueDraw()); touch(opts); }
+/** The pointer let go (or the window left, a context menu opened, a slider's `change`, which comes as its knob is let go): a draft held till then is painted in full. */
+function letGo() { DRAFT.down = null; if (DRAFT.held) { DRAFT.held = false; DRAFT.until = 0; queueDraw(); } }
+addEventListener("pointerdown", (e) => { DRAFT.down = e.button === 0 && !e.ctrlKey && (e.target.type === "range" || e.target.id === "cv") ? e.target : null; }, true);   // a slider's knob, or a scene object on the canvas; not a right click (a Control-click on a Mac)
+for (const type of ["input", "change", "click", "keydown"]) addEventListener(type, (e) => { DRAFT.from = e.target; }, true);
+addEventListener("pointermove", (e) => { DRAFT.from = e.target; if (DRAFT.down && !(e.buttons & 1)) letGo(); }, true);   // moved with no button down: the release was missed
+addEventListener("pointerup", letGo, true); addEventListener("pointercancel", letGo, true); addEventListener("contextmenu", letGo, true); addEventListener("blur", letGo);
+addEventListener("change", (e) => { if (e.target.type === "range") letGo(); }, true);
 const goLive = (ids) => {
   ids = [...new Set([].concat(ids).map((id) => (layer(id) ? owner(layer(id)).id : id)))];   // a linked cut-out moves with its photo
   for (const L of S.cover.layers) if (L.of && ids.includes(L.of)) ids.push(L.id);   // a photo's copies move with it
@@ -336,14 +351,19 @@ function paintFlat() {
   const stage = $("stage"), cv = $("cv"), size = selSize(), [vw, vh] = virtualSize(size.w, size.h);
   const k = Math.max(0.05, Math.min((stage.clientWidth - 36) / vw, (stage.clientHeight - 36) / vh));
   cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
-  paint(cv, size, Math.min(vw * 1.5, vw * k * (drafting() ? 1 : window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
-    S.mode === "edit" ? { picked: group().map((L) => L.id), sceneHandles: !S.settings.hideScene, spot: S.focus ? spotIds() : null, brush: S.brushWin } : {});
+  const draft = drafting(), keyed = draft && DRAFT.key;
+  if (!keyed) DRAFT.kept = null; else if (!DRAFT.kept || DRAFT.kept.key !== keyed) DRAFT.kept = { key: keyed };   // a look's setting dragged (see o.draft)
+  if (!draft && !LIVE) dropCards();   // painted still: the drag or the draft is over, and the photos' copies on the graphics card can go
+  paint(cv, size, Math.min(vw * 1.5, vw * k * (draft ? 1 : window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
+    { draft: DRAFT.kept || draft, ...(S.mode === "edit" ? { picked: group().map((L) => L.id), sceneHandles: !S.settings.hideScene, spot: S.focus ? spotIds() : null, brush: S.brushWin } : {}) });
   const clear = !layer("bg").visible;
   stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
 }
 /**
- * Redraws the size thumbnails under the canvas, one per turn of the event loop, so the window keeps
- * answering between them (on a heavy cover each is a whole cover). Never while something is dragged:
+ * Redraws the size thumbnails under the canvas, one a frame, so the window keeps answering between them
+ * (on a heavy cover each is a whole cover): what a canvas is told to draw, the web view draws after, on
+ * the graphics card, and thumbnails drawn one per turn of the event loop all went ahead at once — the
+ * slider let go a moment before, taken again, waited behind them all. Never while something is dragged:
  * a drag that paused long enough for them would be held up by them, and they by it, frame after frame.
  * A new round, or a drag, stops one that is under way.
  */
@@ -352,10 +372,10 @@ function drawThumbs() {
   if (LIVE || drafting()) return later("thumbs", 300, drawThumbs);   // after the drag
   const round = ++thumbsRound, sizes = [...S.profile.sizes];
   const next = () => {
-    if (round !== thumbsRound || LIVE || !sizes.length) return;
+    if (round !== thumbsRound || LIVE || drafting() || !sizes.length) return;
     const size = sizes.shift(), cv = $("th-" + sizeKey(size));
     if (cv) paint(cv, size, virtualSize(size.w, size.h)[0] * 0.2);
-    setTimeout(next, 0);
+    requestAnimationFrame(next);
   };
   next();
 }
@@ -367,14 +387,25 @@ function flushDraw() {
   if (S.weaveWin) later("weave", 200, weaveShow);   // the woven letters as now typed
   if (LAYED.redraw) later("layed", 80, LAYED.redraw);   // a layout preset's editor, with what arrived since (outlines, fonts)
 }
-/** Redraws at most once per frame, however many input events arrive. `stale` false: only what is selected changed. */
+/**
+ * Redraws at most once per frame, however many input events arrive. `stale` false: only what is selected
+ * changed. Animation frames pause while the window is hidden, so then a timer draws instead; not while it
+ * shows, where a frame that is late is late because the last is still being drawn (the graphics card is
+ * behind), and a draw on a timer only piled more on: the page, the knob of the slider being dragged with
+ * it, was shown less often still. Only should no frame come at all for a second (a web view that stopped
+ * giving them without saying it is hidden) does a timer draw, as nothing would be drawn again otherwise.
+ */
+let framesRun = 0;
+const drawInFrame = () => { framesRun++; flushDraw(); };
 function queueDraw(stale = true) {
   if (stale) V3.stale = true;
   if (drawQueued) return;
   drawQueued = true;
-  requestAnimationFrame(flushDraw);
-  setTimeout(flushDraw, 150);   // animation frames pause while the window is hidden
+  requestAnimationFrame(drawInFrame);
+  if (document.hidden) setTimeout(flushDraw, 150);
+  else { const ran = framesRun; setTimeout(() => framesRun === ran && flushDraw(), 1000); }
 }
+document.addEventListener("visibilitychange", () => { if (document.hidden) flushDraw(); });   // hidden with a draw waiting
 new ResizeObserver(() => S.profile && queueDraw()).observe($("stage"));
 
 $("strip").addEventListener("wheel", (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.preventDefault(); $("strip").scrollLeft += e.deltaY; } }, { passive: false });
@@ -2605,7 +2636,7 @@ function layoutEditor(p, i, fresh = false) {
 function styleTab() {
   const st = S.profile.style, set = (k, v) => { st[k] = v; touch({ profile: true }); };
   const L = LOOKS[st.look] || LOOKS.cel, vals = lookParams(st.look, st.lookParams[st.look]);
-  const tune = (k, v) => { st.lookParams[st.look] = { ...vals, ...st.lookParams[st.look], [k]: v }; draftTouch({ profile: true }); };
+  const tune = (k, v) => { st.lookParams[st.look] = { ...vals, ...st.lookParams[st.look], [k]: v }; draftTouch({ profile: true }, k); };
   return [
     el("div", { class: "box" }, cap("style.look"),
       select(LOOK_IDS.map((k) => [k, LOOKS[k].name[getLang()]]), st.look, (v) => { st.look = v; touch({ profile: true, panel: true, side: true, strip: true }); }),
@@ -5728,11 +5759,18 @@ async function dragTest() {
       times.sort((a, b) => a - b);
       report.look.steppingFull = { [d.key]: Math.round(times[3]) };
     }
-    for (const d of own.filter((q) => !q.needsPhoto)) {
+    // each stepped as its slider steps it, a draft that keeps the layers that did not read it (see o.draft in
+    // render.js), and as a draft that paints every layer each step (as the layout's sliders are): what keeping them saves
+    const stepped = async (d, key) => {
       const times = [];
-      for (let i = 1; i <= 7; i++) { st.lookParams[st.look] = { ...kept, [d.key]: clamp(d.def + (i % 2 ? 0.05 : -0.05), d.min, d.max) }; draftTouch({ profile: true }); const t = performance.now(); await frame(); if (i > 1) times.push(performance.now() - t); }
+      for (let i = 1; i <= 7; i++) { st.lookParams[st.look] = { ...kept, [d.key]: clamp(d.def + (i % 2 ? 0.05 : -0.05), d.min, d.max) }; draftTouch({ profile: true }, key); const t = performance.now(); await frame(); if (i > 1) times.push(performance.now() - t); }
       times.sort((a, b) => a - b);
-      report.look.stepping[d.key] = Math.round(times[3]);
+      return Math.round(times[3]);
+    };
+    report.look.steppingEveryLayer = {};
+    for (const d of own.filter((q) => !q.needsPhoto)) {
+      report.look.stepping[d.key] = await stepped(d, d.key);
+      report.look.steppingEveryLayer[d.key] = await stepped(d, null);
     }
     if (kept) st.lookParams[st.look] = kept; else delete st.lookParams[st.look];
     touch({ profile: true });
