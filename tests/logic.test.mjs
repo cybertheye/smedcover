@@ -2990,6 +2990,117 @@ test("weaving by the brush: the strokes kept in the order painted, in the photo'
   assert.notEqual(cut.weave.strokes, from.find((l) => l.id === "b").weave.strokes, "a copy of its own");
 });
 
+test("weaving an asset: a sticker, a graphic, an image or a 3D object weaves as a cut-out does, its weave kept, cleaned and bounded alike; an old cover is read as it was", async () => {
+  const { canWeave, normalizeWeave, WEAVE_MAX } = await import("../ui/js/layers.js");
+  const asset = (weave, ref = { kind: "sticker", id: "burst" }) => normalizeLayers([{ type: "asset", id: "a1", ref, tint: true, weave }]).find((l) => l.id === "a1");
+  const raw = { with: ["title", "t<1>", "title", 7], by: "brush", line: 2, front: { title: ["0|W|1", "bad"], gone: ["0|x|1"] },
+    strokes: [{ front: true, r: 0.0312345, pts: [[0.123456, 0.5], [3, -7]] }, { front: false, r: 9, pts: [[0.5, 0.5]] }, { pts: [] }] };
+  for (const ref of [{ kind: "sticker", id: "burst" }, { kind: "graphic", id: "gear" }, { kind: "user", id: "u3d" }]) {
+    const L = asset(raw, ref);
+    assert.deepEqual(L.weave, normalizeWeave(raw), `${ref.kind}: as a cut-out's`);
+    assert.deepEqual(L.weave, { with: ["title", "t1"], by: "brush", line: 0.9, front: { title: ["0|W|1"] }, strokes: [{ front: true, r: 0.0312, pts: [[0.1235, 0.5], [2, -1]] }, { front: false, r: 0.5, pts: [[0.5, 0.5]] }] });
+    assert.ok(canWeave(L), `${ref.kind} weaves`);
+  }
+  assert.deepEqual(asset({}).weave, { with: [], by: "head", line: 0.3, front: {} });
+  for (const bad of [undefined, null, "head", 3, ["title"]]) assert.equal("weave" in asset(bad), false, `no weave from ${JSON.stringify(bad)}`);
+  const many = asset({ with: Array.from({ length: 40 }, (_, i) => "l" + i), strokes: Array.from({ length: 400 }, () => ({ r: 0.02, pts: [[0.5, 0.5]] })) }).weave;
+  assert.deepEqual([many.with.length, many.strokes.length], [WEAVE_MAX.with, WEAVE_MAX.strokes], "bounded as a cut-out's");
+  // a cover of before, its assets with no weave, reads as it did; one with a weave written back reads the same again
+  const p = normalizeProfile(sampleProfile("en"));
+  const old = normalizeCover({ title: "x", layers: [{ type: "bg" }, { type: "title" }, { type: "asset", id: "s", ref: { kind: "sticker", id: "burst" }, t: { all: { x: 0.3, y: 0.4, s: 0.5 } } }] }, p);
+  const s = old.layers.find((l) => l.id === "s");
+  assert.equal("weave" in s, false);
+  s.weave = normalizeWeave(raw);
+  assert.deepEqual(normalizeCover(JSON.parse(JSON.stringify(old)), p).layers.find((l) => l.id === "s").weave, s.weave, "read back as written: an undo step reads the same");
+  // what weaves: a cut-out and every asset; a whole photo keeps its weave, unwoven, and no other layer weaves
+  const [ph, cut, tx, so] = normalizeLayers([{ type: "photo", id: "p", pid: "p1", weave: raw }, { type: "photo", id: "c", pid: "p1", cut: true }, { type: "text", id: "t", text: "a" }, { type: "solid", id: "o" }]).filter((l) => ["p", "c", "t", "o"].includes(l.id));
+  assert.deepEqual([ph, cut, tx, so, null].map(canWeave), [false, true, false, false, false]);
+  assert.ok(ph.weave, "kept on a whole photo, for when it is cut out");
+  assert.equal("weave" in normalizeLayers([{ type: "solid", id: "o", weave: raw }]).find((l) => l.id === "o"), false, "a colour layer keeps none");
+});
+
+test("weaving an asset: copied from another channel, it weaves with the copies of its lettering, the layout's own, and lets the rest go, strokes and all", async () => {
+  const { copyFreeLayers } = await import("../ui/js/layers.js");
+  const into = normalizeLayers([{ type: "bg" }, { type: "title" }]);
+  const weave = { with: ["title", "t1", "s2", "gone"], by: "letters", line: 0.45, front: { title: ["0|A|1"], t1: ["0|h|1"], gone: ["0|y|1"] }, strokes: [{ front: true, r: 0.05, pts: [[0.1, 0.5], [0.9, 0.5]] }] };
+  const from = normalizeLayers([{ type: "bg" }, { type: "text", id: "t1", text: "hi" }, { type: "title" }, { type: "subtitle", copy: true, id: "s2" },
+    { type: "asset", id: "a1", ref: { kind: "user", id: "u3d" }, weave }, { type: "asset", id: "a2", ref: { kind: "sticker", id: "burst" } }]);
+  const { copies } = copyFreeLayers(into, from), id = (old) => copies[["t1", "s2", "a1", "a2"].indexOf(old)].id;
+  const a = copies.find((c) => c.ref && c.ref.id === "u3d"), b = copies.find((c) => c.ref && c.ref.id === "burst");
+  assert.deepEqual(a.weave, { with: ["title", id("t1"), id("s2")], by: "letters", line: 0.45, front: { title: ["0|A|1"], [id("t1")]: ["0|h|1"] }, strokes: weave.strokes });
+  assert.notEqual(a.weave.strokes, from.find((l) => l.id === "a1").weave.strokes, "a copy of its own");
+  assert.equal("weave" in b, false, "an asset not woven is copied as it is");
+  assert.deepEqual(from.find((l) => l.id === "a1").weave.with, ["title", "t1", "s2", "gone"], "the cover copied from is left as it was");
+});
+
+test("weaving an asset: Surprise me puts the title over the user's layers but for the cut-outs and the assets woven with it, and leaves every weave as it was", async () => {
+  const { dealCover } = await import("../ui/js/deal.js");
+  let seed = 5;
+  const R = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  for (let k = 0; k < 10; k++) {
+    const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p);
+    const w = (with_) => ({ with: with_, by: "brush", line: 0.4, front: {}, strokes: [{ front: true, r: 0.05, pts: [[0.1, 0.5], [0.9, 0.5]] }] });
+    const added = normalizeLayers([{ type: "asset", id: "woven", ref: { kind: "sticker", id: "burst" }, weave: w(["title"]) }, { type: "asset", id: "plain", ref: { kind: "sticker", id: "boom" } },
+      { type: "asset", id: "sub", ref: { kind: "user", id: "u3d" }, weave: w(["subtitle"]) }, { type: "photo", id: "cut", pid: "p1", cut: true }]).filter((l) => ["woven", "plain", "sub", "cut"].includes(l.id));
+    c.layers.push(...added);
+    const before = JSON.stringify(added.map((l) => l.weave || null));
+    dealCover(p.style, c, { R, locks: {}, recipes: {}, rgb: [252, 191, 0], design: new Map(p.design.layers.map((l) => [l.id, l])), sizeKey: "1920x1080" });
+    const at = (id) => c.layers.findIndex((l) => l.id === id);
+    assert.ok(at("woven") > at("title") && at("cut") > at("title"), "woven with the title, and cut out: still over it");
+    assert.ok(at("plain") < at("title") && at("sub") < at("title"), "an asset not woven with the title goes under it");
+    assert.equal(JSON.stringify(added.map((l) => l.weave || null)), before, "every weave as it was");
+  }
+});
+
+test("weaving: a weave holds its layers where they are when Surprise me deals — the cut-out or asset that weaves, the lettering below it it weaves with — as a layer locked is", async () => {
+  const { wovenIds } = await import("../ui/js/layers.js");
+  const { dealCover } = await import("../ui/js/deal.js");
+  const ls = normalizeLayers([{ type: "bg" }, { type: "text", id: "t1", text: "a" }, { type: "text", id: "t2", text: "b" }, { type: "title" },
+    { type: "asset", id: "a1", ref: { kind: "sticker", id: "burst" }, weave: { with: ["title", "t1", "above", "gone"] } },
+    { type: "photo", id: "c1", pid: "p1", cut: true, weave: { with: ["t2"] } }, { type: "photo", id: "p2", pid: "p1", weave: { with: ["title"] } },
+    { type: "asset", id: "a2", ref: { kind: "sticker", id: "boom" }, weave: { with: [] } }, { type: "asset", id: "a3", ref: { kind: "sticker", id: "boom" }, weave: { with: ["above"] } },
+    { type: "text", id: "above", text: "c" }]);
+  // what weaves with lettering below it, and that lettering; not a whole photo, not a weave with nothing, nor lettering above it
+  assert.deepEqual([...wovenIds(ls)].sort(), ["a1", "c1", "t1", "t2", "title"]);
+  assert.deepEqual([...wovenIds(normalizeLayers([{ type: "bg" }, { type: "title" }]))], []);
+  assert.deepEqual([...wovenIds(normalizeLayers([{ type: "bg" }, { type: "title", visible: false }, { type: "asset", id: "s", ref: { kind: "sticker", id: "burst" }, weave: { with: ["title"] } }]))], []);
+  // nor a weave that shows nothing: its layer hidden, by letters with none in front, by the brush with no stroke in front
+  const one = (weave, more = {}) => [...wovenIds(normalizeLayers([{ type: "bg" }, { type: "title" }, { type: "asset", id: "s", ref: { kind: "sticker", id: "burst" }, weave: { with: ["title"], ...weave }, ...more }]))].sort();
+  assert.deepEqual([one({}), one({}, { visible: false }), one({ by: "letters" }), one({ by: "letters", front: { title: ["0|W|0"] } }),
+    one({ by: "brush", strokes: [{ front: false, r: 0.1, pts: [[0.5, 0.5]] }] }), one({ by: "brush", strokes: [{ front: true, r: 0.1, pts: [[0.5, 0.5]] }] })],
+    [["s", "title"], [], [], ["s", "title"], [], ["s", "title"]]);
+  // dealt: the title woven with stays where it was moved to, a text layer woven with keeps its size; unwoven, both go back
+  let seed = 3;
+  const R = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  for (const woven of [true, false]) {
+    const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p), title = c.layers.find((l) => l.id === "title");
+    title.t.all = { ...title.t.all, x: 0.07, y: -0.05, s: 1.4 };
+    const text = newLayer("text", { text: "hi" }); text.t.all = { ...text.t.all, s: 1.9 };
+    const sticker = newLayer("asset", { ref: { kind: "sticker", id: "burst" } });
+    if (woven) sticker.weave = { with: ["title", text.id], by: "head", line: 0.3, front: {} };
+    c.layers.push(text, sticker);
+    const before = [JSON.stringify(title.t), text.t.all.s];
+    dealCover(p.style, c, { R, locks: {}, recipes: {}, rgb: [252, 191, 0], design: new Map(p.design.layers.map((l) => [l.id, l])), sizeKey: "1920x1080" });
+    if (woven) assert.deepEqual([JSON.stringify(title.t), text.t.all.s], before, "woven: where they were");
+    else assert.ok(JSON.stringify(title.t) !== before[0] && text.t.all.s !== before[1], "not woven: back where the rules put them");
+  }
+});
+
+test("weaving: the box round what is opaque in a picture's pixels — a cut-out's mask, what an asset draws — as fractions of it, by how opaque", async () => {
+  const { opaqueBox } = await import("../ui/js/layers.js");
+  // 8 × 4 pixels: a faint one at (1, 0), solid ones from (2, 1) to (5, 2)
+  const w = 8, h = 4, px = new Uint8ClampedArray(w * h * 4), at = (x, y, a) => { px[(y * w + x) * 4 + 3] = a; };
+  at(1, 0, 30); for (let x = 2; x <= 5; x++) for (let y = 1; y <= 2; y++) at(x, y, 255);
+  assert.deepEqual(opaqueBox(px, w, h), { x0: 2 / 8, y0: 1 / 4, x1: 6 / 8, y1: 3 / 4 }, "opaque enough to count: above 64");
+  assert.deepEqual(opaqueBox(px, w, h, 0), { x0: 1 / 8, y0: 0, x1: 6 / 8, y1: 3 / 4 }, "anything drawn at all");
+  assert.equal(opaqueBox(new Uint8ClampedArray(w * h * 4), w, h, 0), null, "nothing drawn: no box");
+  at(7, 3, 65);
+  assert.deepEqual(opaqueBox(px, w, h), { x0: 2 / 8, y0: 1 / 4, x1: 1, y1: 1 }, "to the far corner, the whole last pixel");
+  // the head is measured on it: a share of the way down it
+  const { headLine } = await import("../ui/js/layers.js");
+  assert.ok(Math.abs(headLine(opaqueBox(px, w, h), 0.5) - 0.625) < 1e-9);
+});
+
 test("weaving by the brush: a stroke's point lands where its place in the picture is, the photo moved, scaled, stretched or turned, at every size; and back", async () => {
   const { photoMap, onCanvas, photoPoint, photoLong, brushNext, brushToDo } = await import("../ui/js/layers.js");
   const near = (a, b, msg) => assert.ok(a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-6), `${msg}: ${JSON.stringify(a)} vs ${JSON.stringify(b)}`);

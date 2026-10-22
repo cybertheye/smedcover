@@ -16,7 +16,7 @@
 import { LOOKS, LOOK_IDS, effectsFor, FX_TYPES, lookParams } from "./style.js";
 import { EFFECTS, BENDS, NO_COLUMNS } from "./textfx.js";
 import { titleLines, lineUnits, luminance } from "./check.js";
-import { ACCENT_SHAPES, LETTERED, newLayer, clipEnd, moveScene, putLayout } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, newLayer, clipEnd, moveScene, putLayout, canWeave, wovenIds } from "./layers.js";
 
 /**
  * Every number Surprise me deals by: change one here and the hands follow. (What suits each look is in
@@ -387,22 +387,25 @@ export function dealCover(st, cover, env) {
   // 5. words the user moved or resized go back where the rules put them (unless where things stand is to stay):
   // the layout's — title, subtitle, tag, channel name, brand row — to where the layout preset dealt has them, else
   // where the profile's design has them, the user's own text layers to a new one's size, at no size of their own,
-  // to be placed afresh (dealPlaces)
+  // to be placed afresh (dealPlaces) — but for the lettering a cut-out or an asset weaves with, which stays where it
+  // is with it, as a layer locked does (see wovenIds)
   if (!locks.places) {
-    const fresh = newLayer("text").t.all;
+    const fresh = newLayer("text").t.all, woven = wovenIds(cover.layers);
     for (const L of cover.layers) {
-      if (L.locked || !L.visible || !LETTERED.includes(L.type)) continue;
+      if (L.locked || woven.has(L.id) || !L.visible || !LETTERED.includes(L.type)) continue;
       const back = preset && preset.parts[L.id] && !L.copy ? preset.parts[L.id] : env.design && env.design.get(L.id);
       if (L.type === "text") L.t = { all: { ...L.t.all, s: fresh.s, kx: fresh.kx, ky: fresh.ky }, by: {} };
       else if (back) L.t = copyOf(back.t);
     }
   }
   // 6. the title over everything else, with what is clipped into it, so nothing dealt lies over it (one clipped
-  // onto another layer stays) — but for the subjects cut out of photos that stood over it, which still do
+  // onto another layer stays) — but for the subjects cut out of photos that stood over it, which still do, and the
+  // assets woven with it (see canWeave in layers.js), which still pass in front of it and behind it
   const list = cover.layers, ti = list.findIndex((l) => l.id === "title");
+  const stays = (l) => !l.clip && ((l.type === "photo" && l.cut) || (canWeave(l) && !!l.weave && l.weave.with.includes("title")));
   if (ti >= 0 && !list[ti].clip) {
     const title = list.splice(ti, clipEnd(list, ti) - ti + 1), over = [];
-    for (let i = ti; i < list.length; ) if (list[i].type === "photo" && list[i].cut && !list[i].clip) over.push(...list.splice(i, clipEnd(list, i) - i + 1)); else i++;
+    for (let i = ti; i < list.length; ) if (stays(list[i])) over.push(...list.splice(i, clipEnd(list, i) - i + 1)); else i++;
     list.push(...title, ...over);
   }
   // 7. every layer's own choices: switches, outline and shadow, the letterings and bends as the look's recipe

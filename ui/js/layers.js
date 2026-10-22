@@ -232,7 +232,7 @@ const PROPS = {
   tag: { vertical: false, rules: false },
   catname: { showName: true, plate: true, vertical: false, rules: false },
   frame: {},
-  asset: { ref: null, tint: false },   // + `ink`: a colour of the user's for a vector asset, over its own and the channel's; + `crop`, as a photo's
+  asset: { ref: null, tint: false },   // + `ink`: a colour of the user's for a vector asset, over its own and the channel's; + `crop` and `weave`, as a photo's (see canWeave)
   /** A block of one colour, the canvas's size at scale 1 (so it can be a ground, or moved and shrunk into a band). */
   solid: { color: "#ffd60a" },
   text: { text: "", stroke: 1, shadow: 1, plate: false, vertical: false, rules: false },
@@ -259,7 +259,8 @@ const PROPS = {
    * others behind (`front`: by layer id, their letterKeys, see ransom.js); `by` "brush": the lettering in front
    * where it was painted so, behind elsewhere (`strokes`, [{front, r, pts}] in order, in the photo's own frame:
    * see normalizeWeave). Each way keeps its data while another is chosen. Only a cut-out is woven; a whole photo
-   * again keeps it, for when it is cut out once more.
+   * again keeps it, for when it is cut out once more. An asset weaves the same way (see canWeave), its picture the
+   * box it is drawn in and its subject what it draws there.
    */
   photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, feather: 0, spread: 0, outline: 0, torn: false, dash: false, shadow: 0 },
 };
@@ -391,6 +392,8 @@ function normalizeLayer(raw, catIds) {
       L.ref = { kind: r.kind, id: r.id }; L.tint = raw.tint === true;
       const crop = normalizeCrop(raw.crop);
       if (crop) L.crop = crop;
+      const weave = normalizeWeave(raw.weave);
+      if (weave) L.weave = weave;
       if (typeof raw.ink === "string" && /^#[0-9a-f]{6}$/i.test(raw.ink)) L.ink = raw.ink.toLowerCase();
       break;
     }
@@ -433,7 +436,7 @@ export function normalizeCrop(c) {
 export const WEAVE_MAX = { with: 24, front: 400, strokes: 300, points: 2000, total: 12000 };
 /** A brush stroke's radius, in shares of the photo's longer side: the least and the most kept (see normalizeWeave). */
 export const BRUSH_R = [0.001, 0.5];
-/** The ways a cut-out weaves (see `weave` in PROPS.photo); the first when none is given. */
+/** The ways a cut-out, or an asset, weaves (see `weave` in PROPS.photo); the first when none is given. */
 export const WEAVE_WAYS = ["head", "letters", "brush"];
 const r4 = (v) => Math.round(v * 1e4) / 1e4;
 /**
@@ -445,7 +448,8 @@ const r4 = (v) => Math.round(v * 1e4) / 1e4;
  * [u, v], fractions of the picture's width and height (0 its left and top edge, 1 its right and bottom; within
  * -1–2), so they are in the photo's own frame and follow it when it is moved, scaled, stretched or turned, at every
  * size. A crop changes nothing of them (the picture stays where it is in its frame: they stay on what they were
- * painted on), nor does a new picture put in its place. At most 300 strokes, 2000 points a stroke and 12000 in all,
+ * painted on), nor does a new picture put in its place. An asset's are fractions of the box it is drawn in, and
+ * its radius a share of that box's longer side. At most 300 strokes, 2000 points a stroke and 12000 in all,
  * the first kept; each number to 4 decimals; a stroke with no point goes. `strokes` is left out when there are
  * none. Every way's data is kept whichever is chosen, so going back to one finds it as it was. The layers are not
  * looked up (each layer is read on its own): those gone, or no longer below it, are passed by when it is painted.
@@ -535,10 +539,46 @@ export function brushToDo(drawn, strokes) {
   const last = drawn.length - 1;
   return last >= 0 && strokes[last].pts.length > drawn[last].n ? { from: last, at: drawn[last].n } : { from: drawn.length, at: 0 };
 }
-/** Where a woven cut-out's head ends (see `weave`): `line` of the way down `box`, the box round its subject ({y0, y1}, fractions of the photo), as a fraction of the photo's height. */
+/** Where a woven cut-out's head ends (see `weave`): `line` of the way down `box`, the box round its subject ({y0, y1}, fractions of the photo), as a fraction of the photo's height. An asset's alike, in the box it is drawn in. */
 export const headLine = (box, line) => box.y0 + Math.min(0.9, Math.max(0.1, line)) * (box.y1 - box.y0);
 /** The layers a cut-out at index i of `layers` may weave with (see `weave`): the headline layers below it, bottom first. */
 export const weavable = (layers, i) => layers.slice(0, Math.max(0, i)).filter((l) => HEADLINES.includes(l.type));
+/**
+ * Whether layer L weaves with the lettering below it, by its `weave` (see PROPS.photo): a photo cut out, and every
+ * asset — a sticker, a graphic, an image of the user's, a 3D object — which is see-through round what it draws
+ * already, so it needs no cutting out (and weaves in a plain browser too). Its subject is then what it draws, its
+ * picture the box it is drawn in (see assetHalf in assets.js): the head measured on that, the brush's strokes kept in it.
+ */
+export const canWeave = (L) => !!L && (L.type === "asset" || (L.type === "photo" && L.cut === true));
+/**
+ * The ids of the layers of `layers` that a weave holds together: each cut-out or asset that weaves (see canWeave) with
+ * lettering below it on this cover, and that lettering. Surprise me leaves them where they are, as it leaves a layer
+ * locked (see dealCover in deal.js, dealPlaces in app.js): moved apart, the weave would show nothing. A weave that
+ * shows nothing already holds nothing: its layer hidden (or the lettering it weaves with), by letters with none of a layer's in front, by the brush
+ * with no stroke in front.
+ */
+export function wovenIds(layers) {
+  const out = new Set();
+  layers.forEach((L, i) => {
+    const w = L && L.weave;
+    if (!canWeave(L) || !w || !L.visible || (w.by === "brush" && !(w.strokes || []).some((s) => s.front))) return;
+    const with_ = weavable(layers, i).filter((l) => w.with.includes(l.id) && l.visible && (w.by !== "letters" || frontOf(w, l.id).length > 0));
+    if (!with_.length) return;
+    out.add(L.id);
+    for (const l of with_) out.add(l.id);
+  });
+  return out;
+}
+/**
+ * The box round what is opaque in a picture's pixels (`data`, RGBA, w × h): those whose alpha is above `min`, as
+ * fractions of its size ({x0, y0, x1, y1}), or null when there are none. A cut-out's subject is measured so on its
+ * mask, an asset's on what it draws (see maskBox and assetBox in render.js).
+ */
+export function opaqueBox(data, w, h, min = 64) {
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let i = 0; i < w; i++) if (data[(y * w + i) * 4 + 3] > min) { if (i < x0) x0 = i; if (i > x1) x1 = i; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  return x1 < 0 ? null : { x0: x0 / w, y0: y0 / h, x1: (x1 + 1) / w, y1: (y1 + 1) / h };
+}
 const CROP_MIN = 0.02;
 /**
  * A crop (see normalizeCrop; {x: 0, y: 0, w: 1, h: 1} for none) dragged: `handle` "move", or a side or a corner
@@ -746,8 +786,8 @@ export function moveLayer(layers, id, to) {
 /**
  * Copies the layers the user added to `from` (another cover's layers: free ones and copies of layout ones,
  * see isAdded) into the list `into`, settings and all, each under a new id (a cut-out's link goes to its
- * photo's copy, and its weave to the copies of the lettering it weaves with, or the layout's own; any other
- * it lets go). Each copy goes above the built-in layer it was above there, over the layers added on it
+ * photo's copy, and a cut-out's or an asset's weave to the copies of the lettering it weaves with, or the
+ * layout's own; any other it lets go). Each copy goes above the built-in layer it was above there, over the layers added on it
  * there, in the order they had; one above
  * a layout layer this list has not, at the top. Returns the new list and the copies, bottom first.
  */
@@ -763,7 +803,7 @@ export function copyFreeLayers(into, from) {
     if (g && g.anchor === anchor) g.copies.push(c); else groups.push({ anchor, copies: [c] });
   }
   const copies = groups.flatMap((g) => g.copies);
-  // a link, and the lettering a cut-out weaves with, follow the copies; the layout's own lettering is on every cover
+  // a link, and the lettering a cut-out or an asset weaves with, follow the copies; the layout's own lettering is on every cover
   const to = (id) => renamed.get(id) || (BOUND_TYPES.includes(id) ? id : "");
   for (const c of copies) {
     if (c.of) c.of = renamed.get(c.of) || "";

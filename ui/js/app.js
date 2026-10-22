@@ -11,7 +11,7 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, rebalance, dropOption, partChance, ODD_OPTIONS } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, LETTERED, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf, LAYOUT_PARTS, takeLayout, putLayout, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf, LAYOUT_PARTS, takeLayout, putLayout, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
@@ -2981,7 +2981,7 @@ function photoControls(L, set) {
       L.cut && slider("props.spread", 0, 40, 1, L.spread, px, (v) => { holdLive(L.id); set("spread", v); }),
       CUT.error && el("div", { class: "hint err" }, CUT.error),
     CUT.needModel && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.tab.setup = "ai"; S.aiPane = "cut"; setMode("setup"); } }, t("cut.goModel"))], t("cut.tip", t("cutset.engine." + cutEngine()))),
-    L.cut && weaveControls(L),
+    canWeave(L) && weaveControls(L),
     L.of
       ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")),
           base && el("button", { class: "btn wide", style: "margin-top:8px", title: t("link.realignTip"), onclick: () => { L.t = alignedT(base); touch({ cover: true, side: true }); } }, t("link.realign")),
@@ -3004,16 +3004,18 @@ function photoControls(L, set) {
   ];
 }
 
-/** The lettering layers below cut-out L on this cover (those it may weave with), top first, as the layer list has them. */
+/** The lettering layers below cut-out L (or asset L) on this cover (those it may weave with), top first, as the layer list has them. */
 const weavableOf = (L) => weavable(S.cover.layers, S.cover.layers.indexOf(L)).filter((l) => appliesTo(l, cat().id) && !l.off).reverse();
 /** Those of them that cut-out L weaves with (see `weave` in layers.js). */
 const wovenOf = (L) => (L.weave ? weavableOf(L).filter((l) => L.weave.with.includes(l.id)) : []);
+/** Weaving's words for what weaves, string `key`: a cut-out has a subject, a head and a photo; an asset is itself, with a top and a box of its own (`key`.asset). */
+const weaveT = (L, key) => t(L && L.type === "asset" ? key + ".asset" : key);
 /**
- * Weaving a cut-out with the lettering below it (`weave`, see layers.js): on or off — on, it weaves with the
- * title (or the lettering nearest below it), its head in front; the lettering layers below it, each ticked to
- * weave with; the way: its head in front and the rest behind, down to the line set, the letters chosen in
- * front, chosen in a window of their own (weaveOpen), or where it is painted so on the canvas (brushOpen). A
- * way chosen keeps the others' data, for going back to them.
+ * Weaving a cut-out, or an asset (see canWeave), with the lettering below it (`weave`, see layers.js): on or off —
+ * on, it weaves with the title (or the lettering nearest below it), its head in front; the lettering layers below
+ * it, each ticked to weave with; the way: its head (an asset's top) in front and the rest behind, down to the line
+ * set, the letters chosen in front, chosen in a window of their own (weaveOpen), or where it is painted so on the
+ * canvas (brushOpen). A way chosen keeps the others' data, for going back to them.
  */
 function weaveControls(L) {
   const w = L.weave, below = weavableOf(L);
@@ -3028,21 +3030,21 @@ function weaveControls(L) {
     const now = L.weave, front = Object.fromEntries(Object.entries(now.front || {}).filter(([id]) => yes || id !== l.id));
     put({ with: yes ? [...now.with.filter((id) => id !== l.id), l.id] : now.with.filter((id) => id !== l.id), front });
   };
-  if (!w && !below.length) return psec("props.sec.weave", el("div", { class: "hint", style: "margin:0" }, t("weave.none")), t("weave.tip"), "first");
+  if (!w && !below.length) return psec("props.sec.weave", el("div", { class: "hint", style: "margin:0" }, t("weave.none")), weaveT(L, "weave.tip"), "first");
   return psec("props.sec.weave", [
     check("weave.on", !!w, on),
     w && !below.length && el("div", { class: "hint" }, t("weave.none")),
     w && below.length > 0 && el("div", { class: "weave-with" }, below.map((l) => el("label", { class: "chk" }, el("input", { type: "checkbox", checked: w.with.includes(l.id), onchange: (e) => tick(l, e.target.checked) }), layerName(l)))),
-    w && el("div", { style: "margin-top:10px" }, select(WEAVE_WAYS.map((k) => [k, t("weave.by." + k)]), w.by, (v) => put({ by: v }))),
-    w && w.by === "head" && slider("weave.line", 0.1, 0.9, 0.01, w.line, pct, (v) => { holdLive(L.id); L.weave = { ...L.weave, line: v }; touch({ cover: true }); }),
+    w && el("div", { style: "margin-top:10px" }, select(WEAVE_WAYS.map((k) => [k, k === "head" ? weaveT(L, "weave.by.head") : t("weave.by." + k)]), w.by, (v) => put({ by: v }))),
+    w && w.by === "head" && slider(L.type === "asset" ? "weave.line.asset" : "weave.line", 0.1, 0.9, 0.01, w.line, pct, (v) => { holdLive(L.id); L.weave = { ...L.weave, line: v }; touch({ cover: true }); }),
     w && w.by === "letters" && el("button", { class: "btn wide", style: "margin-top:8px", disabled: !wovenOf(L).length, onclick: () => weaveOpen(L) }, t("weave.choose")),
     w && w.by === "brush" && el("button", { class: "btn wide", style: "margin-top:8px", disabled: !wovenOf(L).length, onclick: () => brushOpen(L) }, t("weave.paint")),
-  ], t("weave.tip"));
+  ], weaveT(L, "weave.tip"));
 }
 
-// The weave window (S.weaveWin, the id of a cut-out woven letter by letter): for each layer it weaves with, its
-// letters line by line (a column of vertical lettering counting as a line), each in front of the subject or
-// behind it at a click, and all of them at once, or every other one. It stands over the left column as the letter
+// The weave window (S.weaveWin, the id of a cut-out, or an asset, woven letter by letter): for each layer it weaves
+// with, its letters line by line (a column of vertical lettering counting as a line), each in front of the subject
+// or behind it at a click, and all of them at once, or every other one. It stands over the left column as the letter
 // and crop windows do, one of them closing the others, and closes as they do: Esc, ×, Done, another layer
 // selected, Setup, or the cut-out no longer woven letter by letter.
 function weaveOpen(L) {
@@ -3059,19 +3061,19 @@ const weaveNow = (L) => JSON.stringify([L.weave, wovenOf(L).map((l) => [l.id, wo
 function weaveShow(now = false) {
   const win = $("weavewin"), L = S.weaveWin ? layer(S.weaveWin) : null;
   if (!win || win.hidden) return;
-  if (!L || !L.cut || !L.weave || L.weave.by !== "letters" || S.layerId !== L.id || S.mode !== "edit") return weaveClose();
+  if (!L || !canWeave(L) || !L.weave || L.weave.by !== "letters" || S.layerId !== L.id || S.mode !== "edit") return weaveClose();
   const box = $("weave-box");
   if (!now && box && box._layer === L && box.dataset.now === weaveNow(L)) return;
   const inner = el("div", { id: "weave-box", "data-now": weaveNow(L) }, weaveLetters(L));
   inner._layer = L;
   win.replaceChildren(
     el("div", { class: "head" }, el("b", {}, `${t("weave.title")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: weaveClose }, "×")),
-    el("div", { class: "wkey" }, el("span", {}, el("span", { class: "wl on" }, "A"), " ", t("weave.inFront")), el("span", {}, el("span", { class: "wl" }, "A"), " ", t("weave.behind"))),
+    el("div", { class: "wkey" }, el("span", {}, el("span", { class: "wl on" }, "A"), " ", weaveT(L, "weave.inFront")), el("span", {}, el("span", { class: "wl" }, "A"), " ", weaveT(L, "weave.behind"))),
     inner,
-    el("div", { class: "hint" }, t("weave.hint")),
+    el("div", { class: "hint" }, weaveT(L, "weave.hint")),
     el("div", { class: "acts" }, el("button", { class: "btn", onclick: weaveClose }, t("deal.done"))));
 }
-/** Each layer cut-out L weaves with: its name, all its letters in front or behind at once, and its letters line by line, each to click. */
+/** Each layer cut-out (or asset) L weaves with: its name, all its letters in front or behind at once, and its letters line by line, each to click. */
 function weaveLetters(L) {
   const layers = wovenOf(L);
   if (!layers.length) return el("div", { class: "hint" }, t("weave.noLayers"));
@@ -3088,7 +3090,7 @@ function weaveLetters(L) {
       letters.length ? el("div", { class: "letters" }, rows.map(({ cells, keys }) => el("div", { class: "lrow" }, cells.map((c, i) => {
         if (/^\s+$/.test(c.ch)) return el("span", { class: "lgap" });
         const on = front.has(keys[i]);
-        return el("button", { class: "wl" + (on ? " on" : ""), title: t(on ? "weave.inFront" : "weave.behind"), onclick: () => set(on ? [...front].filter((k) => k !== keys[i]) : [...front, keys[i]]) }, c.ch);
+        return el("button", { class: "wl" + (on ? " on" : ""), title: weaveT(L, on ? "weave.inFront" : "weave.behind"), onclick: () => set(on ? [...front].filter((k) => k !== keys[i]) : [...front, keys[i]]) }, c.ch);
       })))) : el("div", { class: "hint" }, t("weave.noWords")));
   });
 }
@@ -3099,9 +3101,10 @@ function weaveLetters(L) {
 // closes as they do (Esc, ×, Done, another layer selected, Setup, the cut-out no longer woven by the brush). While
 // it is open the canvas only paints: nothing there is selected, moved, scaled or turned, and of the keys only Esc and
 // undo do anything. A stroke is kept in the photo's own frame, its radius a share of the photo's longer side, so it
-// stays on what it was painted on whatever is done with the photo, at every size. While it is painted only the
-// cut-out is painted again each frame, the rest of the cover kept as images (LIVE, see drawCover), and its brush
-// mask is only drawn on (see brushMask in render.js); let go, it is one step of undo.
+// stays on what it was painted on whatever is done with the photo, at every size; on an asset, in the box it is drawn
+// in, as its head is measured (see PAINT.asset in render.js). While it is painted only the cut-out is painted again
+// each frame, the rest of the cover kept as images (LIVE, see drawCover), and its brush mask is only drawn on (see
+// brushMask in render.js); let go, it is one step of undo.
 /** The brush: how wide it paints, in the cover's own units (as the canvas's handles are); in front or behind; the stroke being painted and how to end it; where the pointer last was over the canvas. */
 const BRUSH = { size: 80, front: true, stroke: null, end: null, at: null };
 function brushOpen(L) {
@@ -3127,10 +3130,10 @@ const brushNow = (L) => JSON.stringify([(L.weave.strokes || []).length, BRUSH.fr
 function brushShow(now = false) {
   const win = $("brushwin"), L = S.brushWin ? layer(S.brushWin) : null;
   if (!win || win.hidden) return;
-  if (!L || !L.cut || !L.weave || L.weave.by !== "brush" || S.layerId !== L.id || S.mode !== "edit" || group().length) return brushClose();
+  if (!L || !canWeave(L) || !L.weave || L.weave.by !== "brush" || S.layerId !== L.id || S.mode !== "edit" || group().length) return brushClose();
   const box = $("brush-box");
   if (!now && box && box._layer === L && box.dataset.now === brushNow(L)) return;
-  const way = (front) => el("button", { class: "btn" + (BRUSH.front === front ? " on" : ""), title: t(front ? "brush.frontTip" : "brush.behindTip"), onclick: () => { BRUSH.front = front; brushShow(true); } }, t(front ? "brush.front" : "brush.behind"));
+  const way = (front) => el("button", { class: "btn" + (BRUSH.front === front ? " on" : ""), title: weaveT(L, front ? "brush.frontTip" : "brush.behindTip"), onclick: () => { BRUSH.front = front; brushShow(true); } }, t(front ? "brush.front" : "brush.behind"));
   const inner = el("div", { id: "brush-box", "data-now": brushNow(L) },
     slider("brush.size", 6, 400, 1, BRUSH.size, px, (v) => { BRUSH.size = v; }),
     el("div", { class: "seg wide", style: "margin-top:10px" }, way(true), way(false)));
@@ -3138,7 +3141,7 @@ function brushShow(now = false) {
   win.replaceChildren(
     el("div", { class: "head" }, el("b", {}, `${t("brush.title")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: brushClose }, "×")),
     inner,
-    el("div", { class: "hint" }, t("brush.hint")),
+    el("div", { class: "hint" }, weaveT(L, "brush.hint")),
     el("div", { class: "acts" },
       el("button", { class: "btn", disabled: !(L.weave.strokes || []).length, onclick: () => brushClear(L) }, t("brush.clear")),
       el("button", { class: "btn", onclick: brushClose }, t("deal.done"))));
@@ -3151,19 +3154,25 @@ function brushClear(L) {
   touch({ cover: true }); clearTimeout(timers.hist); commitHistory();
   brushShow(true);
 }
+/** The size of what woven layer L is painted on with the brush, [w, h]: a cut-out's picture, the box an asset is drawn in; null when it has none. */
+function pictureSize(L) {
+  if (L.type === "asset") { const half = assetHalf(L.ref); return half ? [2 * half.hw, 2 * half.hh] : null; }
+  const rec = recordOf(L);
+  return rec && rec.img ? sizeOf(rec.img) : null;
+}
 /**
  * A stroke of the brush, from where the pointer is pressed on the canvas to where it is let go: into the cut-out's
- * strokes, each place the pointer passes taken into the photo's frame by the map its hit carries (`pf`), smoothed a
- * little (brushNext), a point at least a quarter of the radius from the last; in front, or behind with Alt/Option
- * held (or the other way round when the panel says behind). Within the strokes' limits (WEAVE_MAX), with a word
- * when they are reached.
+ * (or the asset's) strokes, each place the pointer passes taken into the photo's frame by the map its hit carries
+ * (`pf`), smoothed a little (brushNext), a point at least a quarter of the radius from the last; in front, or behind
+ * with Alt/Option held (or the other way round when the panel says behind). Within the strokes' limits (WEAVE_MAX),
+ * with a word when they are reached.
  */
 function brushDown(e) {
-  const cv = $("cv"), L = layer(S.brushWin), hit = L && cv._hits && cv._hits.find((h) => h.id === L.id), rec = recordOf(L);
-  if (e.button !== 0 || BRUSH.stroke || !hit || !hit.pf || !rec || !rec.img || !L.weave) return;
+  const cv = $("cv"), L = layer(S.brushWin), hit = L && cv._hits && cv._hits.find((h) => h.id === L.id), size = L && pictureSize(L);
+  if (e.button !== 0 || BRUSH.stroke || !hit || !hit.pf || !size || !L.weave) return;
   const w = L.weave, used = strokePoints(w);
   if ((w.strokes || []).length >= WEAVE_MAX.strokes || used >= WEAVE_MAX.total) return toast(t("brush.full"));
-  const [nw, nh] = sizeOf(rec.img), m = hit.pf, room = Math.min(WEAVE_MAX.points, WEAVE_MAX.total - used), aspect = nw / nh;
+  const [nw, nh] = size, m = hit.pf, room = Math.min(WEAVE_MAX.points, WEAVE_MAX.total - used), aspect = nw / nh;
   const fix = (q) => q && q.map((v) => Math.round(clamp(v, -1, 2) * 1e4) / 1e4);   // as normalizeWeave keeps it
   const at = (ev) => { const p = virtualPoint(ev); return fix(photoPoint(m, p.x, p.y)); };
   const r = Math.round(clamp(BRUSH.size / 2 / photoLong(m, nw, nh), BRUSH_R[0], BRUSH_R[1]) * 1e4) / 1e4, gap = r / 4;
@@ -3355,7 +3364,7 @@ function typeControls(L) {
     case "tag": return [font(), ink("#07070c")];
     case "catname": return [psec("props.sec.show", [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v))]), font(), ink("#07070c")];
     case "graphic": return el("div", { class: "hint", style: "margin:0;grid-column:1/-1" }, t("props.graphicHint"));
-    case "asset": return [canTint(L.ref) && assetColour(L), psec("crop.title", cropButton(L), t("crop.openTip"))];
+    case "asset": return [canTint(L.ref) && assetColour(L), psec("crop.title", cropButton(L), t("crop.openTip")), weaveControls(L)];
     case "solid": return psec("props.sec.color", swatch(L, "color", "props.sw.color", cat().color, false));
   }
   return null;
@@ -3483,13 +3492,15 @@ function borrowDialog(L, here, list) {
  * more than a quarter of one is made a little smaller and placed again, down to about half its size. A photo
  * takes its subject along (a cut-out over it is put back over it), and is placed before the rest. A layer locked, filling the canvas
  * (a background photo, a colour block as large as the canvas) or following its photo (a cut-out) is left
- * where it is. Each layer's box at each size comes from a quick drawing; a layer too big for some size is
+ * where it is; so is a weave, as a layer locked is (see wovenIds in layers.js): a cut-out or an asset woven with
+ * lettering, the lettering it weaves with (a text layer), and a photo whose cut-out weaves, which it would take
+ * along. Each layer's box at each size comes from a quick drawing; a layer too big for some size is
  * set straighter, then smaller, until it fits.
  */
 function dealPlaces(R) {
   const P = RULES.places, between = (a, b) => a + R() * (b - a), round = (v, step) => Math.round(v / step) * step;
-  const fills = (L) => fillsCanvas(L) || (L.type === "solid" && L.t.all.s >= 0.98 && !L.t.all.r);
-  const movers = S.cover.layers.filter((L) => isFree(L.type) && L.visible && !L.locked && !L.of && !fills(L));
+  const fills = (L) => fillsCanvas(L) || (L.type === "solid" && L.t.all.s >= 0.98 && !L.t.all.r), woven = wovenIds(S.cover.layers);
+  const movers = S.cover.layers.filter((L) => isFree(L.type) && L.visible && !L.locked && !L.of && !fills(L) && !woven.has(L.id) && !passivesOf(L).some((p) => woven.has(p.id)));
   if (!movers.length) return;
   const boxes = S.profile.sizes.filter((s) => s.on !== false).map((size) => {
     const cv = document.createElement("canvas"), key = sizeKey(size);
@@ -4979,6 +4990,71 @@ async function selfTest(dir) {
         }
         const k = JSON.parse(keep); S.cover.layers = k.layers; S.cover.title = k.title; S.layerId = keepSel;
       }
+    }
+    // weaving an asset, which needs no photo and no cutting out: a sticker set over the title, its top in front of the
+    // lettering and the rest behind; a band along the title's second line painted in front, in the box it is drawn in;
+    // every other letter in front. Each must differ from the cover unwoven, and only where the sticker is; a drag of the
+    // sticker, and one of the title, frame by frame as a still cover has it (`weave-asset-*.png`).
+    {
+      await step("weave an asset");
+      const keep = JSON.stringify({ layers: S.cover.layers, title: S.cover.title }), size = S.profile.sizes[0], [vw, vh] = virtualSize(size.w, size.h);
+      S.cover.title = "WEAVE *穿插*\nIN FRONT 前后";
+      S.cover.layers = S.cover.layers.filter((l) => l.type !== "photo" && l.type !== "asset");
+      const sk = newLayer("asset", { ref: { kind: "sticker", id: "burst" }, tint: true });
+      insertAbove(S.cover.layers, "title", sk);
+      // as tall as one and a half lines of the title, its top above the title's, a little right of the title's middle
+      const hitsOf = () => renderFull(size, S.cover, catIndex())._hits;
+      let hs = hitsOf(), T = hs.find((x) => x.id === "title"), K = hs.find((x) => x.id === sk.id);
+      sk.t.all.s *= (T.hh * 1.5) / K.hh;
+      hs = hitsOf(); T = hs.find((x) => x.id === "title"); K = hs.find((x) => x.id === sk.id);
+      sk.t.all.x += (T.cx + T.hw * 0.1 - K.cx) / vw; sk.t.all.y += (T.cy - T.hh * 1.3 + K.hh - K.cy) / vh;
+      const shot = async (name) => { const cv = await renderReady(size, S.cover, catIndex()); return { cv, path: await invoke("write_image", framed(await toPng(cv), { dir, name })) }; };
+      // where the sticker shows on the cover unwoven — its rim, its shadow and all, which reach past its box, and what
+      // the look lays over it all: where the cover unwoven differs from the cover without it. Lettering let through
+      // shows as the cover without the sticker does, so it can change nothing anywhere else
+      let shown = null, bare = null;
+      /** Whether the sticker shows at pixel (x, y) of a canvas w × h, or within two pixels of it. */
+      const onSticker = (x, y, w, h) => {
+        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+          const u = x + dx, v = y + dy, o = (v * w + u) * 4;
+          if (u >= 0 && v >= 0 && u < w && v < h && Math.abs(shown[o] - bare[o]) + Math.abs(shown[o + 1] - bare[o + 1]) + Math.abs(shown[o + 2] - bare[o + 2]) + Math.abs(shown[o + 3] - bare[o + 3]) > 8) return true;
+        }
+        return false;
+      };
+      /** How many pixels (every seventh) of two canvases of one size differ noticeably, and how many of those lie where the sticker does not show. */
+      const apart = (a, b) => {
+        const x = a.getContext("2d").getImageData(0, 0, a.width, a.height).data, y = b.getContext("2d").getImageData(0, 0, b.width, b.height).data, w = a.width;
+        let n = 0, off = 0;
+        for (let i = 0; i < x.length; i += 28) if (Math.abs(x[i] - y[i]) + Math.abs(x[i + 1] - y[i + 1]) + Math.abs(x[i + 2] - y[i + 2]) > 40) { n++; const p = i / 4; if (shown && !onSticker(p % w, Math.floor(p / w), w, a.height)) off++; }
+        return [n, off];
+      };
+      const off = await shot("weave-asset-off.png");
+      { sk.visible = false; const c = await renderReady(size, S.cover, catIndex()); sk.visible = true; bare = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; shown = off.cv.getContext("2d").getImageData(0, 0, c.width, c.height).data; }
+      sk.weave = { with: ["title"], by: "head", line: 0.4, front: {} };
+      const head = await shot("weave-asset-head.png"), H = head.cv._hits.find((x) => x.id === sk.id), T2 = head.cv._hits.find((x) => x.id === "title");
+      const y2 = T2.cy + T2.hh * 0.5, br = Math.round(((T2.hh * 0.35) / photoLong(H.pf, 1, 1)) * 1e4) / 1e4, at = (x) => photoPoint(H.pf, x, y2).map((v) => Math.round(v * 1e4) / 1e4);
+      sk.weave = { ...sk.weave, by: "brush", strokes: [{ front: true, r: br, pts: [at(T2.cx - T2.hw), at(T2.cx + T2.hw)] }] };
+      const brush = await shot("weave-asset-brush.png");
+      const keys = parseTitle(S.cover.title).flatMap((runs, row) => { const cells = lineCells(runs); return keysOf(cells, row).filter((k, i) => !/^\s+$/.test(cells[i].ch)); });
+      sk.weave = { ...sk.weave, by: "letters", front: { title: keys.filter((_, i) => i % 2 === 0) } };
+      const letters = await shot("weave-asset-letters.png");
+      sk.weave.by = "head";
+      // drags, on a canvas of the cover's size: the sticker moved, then the title, each frame against a still cover
+      const frames = (ids, move) => {
+        const cv = document.createElement("canvas"), live = { ids }, at2 = () => paint(cv, size, size.w * S.settings.scale, S.cover, catIndex(), null, live);
+        at2(); move(); at2();
+        return cv;
+      };
+      const x0 = sk.t.all.x, dragged = frames([sk.id], () => { sk.t.all.x = x0 - 0.04; }), still = renderFull(size, S.cover, catIndex());
+      sk.t.all.x = x0;
+      const tl = layer("title"), tx = tl.t.all.x, titleDragged = frames(["title"], () => { tl.t.all.x = tx + 0.02; }), titleStill = renderFull(size, S.cover, catIndex());
+      tl.t.all.x = tx;
+      const ch = { head: apart(off.cv, head.cv), brush: apart(off.cv, brush.cv), headBrush: apart(head.cv, brush.cv), letters: apart(off.cv, letters.cv), dragFromStill: apart(dragged, still)[0], titleDragFromStill: apart(titleDragged, titleStill)[0] };
+      report.weaveAsset = { off: off.path, head: head.path, brush: brush.path, letters: letters.path, changed: ch };
+      if (!ch.head[0] || !ch.brush[0] || !ch.headBrush[0] || !ch.letters[0]) report.errors.push("weave an asset: woven by its top, by the brush or by letter, the cover looks as unwoven, or the brush's as the top's");
+      if (ch.head[1] || ch.brush[1] || ch.letters[1]) report.errors.push("weave an asset: the lettering comes in front where the sticker does not show");
+      if (ch.dragFromStill > ch.head[0] * 0.2 || ch.titleDragFromStill > ch.head[0] * 0.2) report.errors.push(`weave an asset: dragged, it lets its lettering through elsewhere than a still cover does (${ch.dragFromStill}, ${ch.titleDragFromStill} pixels apart)`);
+      const k = JSON.parse(keep); S.cover.layers = k.layers; S.cover.title = k.title;
     }
     // the title and a text layer as headlines on plates, the text with its own colour, an outline and plates under its highlighted words
     {
