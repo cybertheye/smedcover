@@ -510,15 +510,18 @@ function lookGrid(ctx, env) {
 const PAINT = {
   /**
    * The Background, in three: its base — "grid", the look's ground (its `background` with nothing on it, else the
-   * theme's field) and the grid on it (lookGrid), or "clear", nothing, see-through — then what the look paints on
-   * it, its scene and its pattern (its `background` with `ground: false`): with all of a look's sliders at nothing,
-   * the base is all there is. Photos are layers of their own (see photo).
+   * theme's field) and the grid on it (lookGrid); "look", the look's ground as it was before there were bases, no
+   * grid drawn on it (but the theme's field and its grid where the look has no ground of its own, as cel); or
+   * "clear", nothing, see-through — then what the look paints on it, its scene and its pattern (its `background`
+   * with `ground: false`): with all of a look's sliders at nothing, the base is all there is. Photos are layers of
+   * their own (see photo).
    */
   bg(ctx, L, tr, env) {
     const { w, h, th } = env, whole = { cx: w / 2, cy: h / 2, hw: w / 2, hh: h / 2, r: 0 }, hook = look().background, e = { ...env, photo: null }, p = lookValues();
     if (L.base !== "clear") {
-      if (!(hook && hook(ctx, e, { ...L, grid: false }, p))) { ctx.fillStyle = th.field; ctx.fillRect(0, 0, w, h); }
-      lookGrid(ctx, env);
+      const own = !!(hook && hook(ctx, e, { ...L, grid: false }, p));
+      if (!own) { ctx.fillStyle = th.field; ctx.fillRect(0, 0, w, h); }
+      if (L.base === "grid" || !own) lookGrid(ctx, env);
     }
     if (hook) hook(ctx, e, { ...L, grid: true, ground: false }, p);
     return whole;

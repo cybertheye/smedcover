@@ -3344,7 +3344,7 @@ function typeControls(L) {
     case "bg": {
       const oneTheme = (LOOKS[S.profile.style.look] || LOOKS.cel).oneTheme, covered = S.profile.style.theme === "light" && recordOf(mainPhoto());
       return psec("props.sec.ground", [
-        select([["grid", t("bg.base.grid")], ["clear", t("bg.base.clear")]], L.base, (v) => set("base", v)),
+        select([["grid", t("bg.base.grid")], ["look", t("bg.base.look")], ["clear", t("bg.base.clear")]], L.base, (v) => set("base", v)),
         oneTheme ? el("div", { class: "hint", style: "margin:0" }, t("props.oneTheme")) : select([["dark", t("theme.dark")], ["light", t("theme.light")]], S.profile.style.theme, (v) => { S.profile.style.theme = v; touch({ profile: true, side: true }); })], [t("props.bgHint"), covered && t("props.lightUnderPhoto")].filter(Boolean).join(" "));
     }
     case "photo": return photoControls(L, set);

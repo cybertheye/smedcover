@@ -2282,6 +2282,9 @@ test("the ground always has its look's backdrop: a cover kept with it off has it
   const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p);
   c.layers.find((l) => l.type === "bg").grid = false;
   assert.equal(normalizeCover(JSON.parse(JSON.stringify(c)), p).layers.find((l) => l.type === "bg").grid, true);
+  // its base: the look's ground with a grid on it (the default), the look's ground as it first was, or nothing
+  const base = (v) => normalizeLayers([{ type: "bg", base: v }]).find((l) => l.type === "bg").base;
+  assert.deepEqual([undefined, "grid", "look", "clear", "photo", 3].map(base), ["grid", "grid", "look", "clear", "grid", "grid"]);
 });
 
 test("every look's layout meets the cover standards: nothing under the apps' badges, a graphic to look at, room for a title that reads", async () => {
