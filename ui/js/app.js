@@ -435,17 +435,19 @@ function setScope(v) {
 }
 /** The scope's three choices, as one segmented control: the toolbar's, and the Style tab's template box's (the same setting). */
 const scopeSeg = () => el("div", { class: "seg" }, SCOPES.map((v) => el("button", { class: "btn" + (S.settings.scope === v ? " on" : ""), title: v === "orient" ? t("scope.orientTip", sameWay().map((z) => ratioText(z.w, z.h)).join(" · ")) : null, onclick: () => setScope(v) }, scopeName(v))));
+/** Whether Save as layout shows under the toolbar: hidden for now, presets made in the chances (New…); saveLayoutDialog and addLayout stay. */
+const SAVE_AS_LAYOUT = false;
 /**
  * The toolbar above the canvas, one line: the size shown, the scope, how the canvas is worked. Under it, in a line of
  * its own and quietly (a link, not a button: it is seldom wanted), Save as layout — the canvas's layout as a preset
- * Surprise me may deal.
+ * Surprise me may deal — while SAVE_AS_LAYOUT lets it show.
  */
 function syncToolbar() {
   const size = selSize(), edit = S.mode === "edit";   // what it is called over its pixels, in two lines: names after the platforms can be long
   $("toolbar").replaceChildren(...[el("span", { class: "name", title: sizeLabel(size) }, el("b", {}, caption(size)), el("small", {}, `${size.w}×${size.h}`)),
     edit && el("div", { class: "grp" }, el("span", {}, t("props.scope")), scopeSeg()),
     edit && el("span", { class: "help", title: t("cover.how"), onclick: (e) => showTip(e.currentTarget, t("cover.how")) }, el("span", { class: "info" }, "ⓘ"), t("cover.howShort"))].filter(Boolean));
-  $("toolsub").replaceChildren(...(edit ? [el("button", { class: "quiet", title: t("layouts.saveTip"), onclick: saveLayoutDialog }, t("layouts.save"))] : []));
+  $("toolsub").replaceChildren(...(edit && SAVE_AS_LAYOUT ? [el("button", { class: "quiet", title: t("layouts.saveTip"), onclick: saveLayoutDialog }, t("layouts.save"))] : []));
 }
 
 // ---------- editing layers

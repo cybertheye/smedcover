@@ -1397,7 +1397,8 @@ renamed where it is, edited (`layoutEditor()`), put on the canvas as one step of
 again, at the profile's sizes: the parts locked stay, the block's layout too when the block is locked) or deleted once asked (`deleteLayout()`: its chance goes to the others as when its slider is set to 0, `dropOption()`; none of them
 having any, the group goes and `keep` is certain again); *New…* opens the editor on a new one (`newPreset()`: every part
 in it, where the template puts it), which is in the list once saved. *Save as layout*, a quiet underlined link in its own line
-under the toolbar above the canvas (`#toolsub`, filled by `syncToolbar()` in Edit and empty in Setup, where it takes no room:
+under the toolbar above the canvas, is hidden for now (`SAVE_AS_LAYOUT` false in `app.js`: the line stays empty and takes
+no room; the code below is kept) (`#toolsub`, filled by `syncToolbar()` in Edit and empty in Setup, where it takes no room:
 the column's toolbar, line, stage and strip are each pinned to a row of their own, so the stage keeps the row that grows;
 its grey still 5:1 on its ground, white under the pointer), asks a name (`saveLayoutDialog()`) and
 keeps the canvas's (`addLayout()`: `takeLayout()` at the profile's sizes, the graphic's places this channel's); the word that says so (`toast()` with a
