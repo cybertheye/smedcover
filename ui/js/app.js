@@ -5367,7 +5367,7 @@ function dealOpen() {
       el("div", { class: "locks" }, el("small", {}, t("deal.locks")), el("div", {}, SURPRISE_LOCKS.map(lock))),
       el("span", { class: "grow" }),
       el("button", { class: "linkbtn", title: t("deal.odds"), onclick: () => oddsDialog() }, t("deal.oddsGo")),
-      el("button", { class: "btn again", onclick: surprise }, ico("spark", 18), t("deal.again")),
+      el("button", { class: "btn again", onclick: surprise }, ico("spark", 18), t("deal.again"), el("kbd", {}, t("top.space"))),
       el("button", { class: "btn solid done", onclick: dealClose }, t("deal.done"))));
   box.hidden = false;
   dealFit();
@@ -5496,7 +5496,7 @@ function syncTop() {
     el("div", { class: "spacer" }),
     el("div", { class: "grp" }, step("top.undo", "undo", -1, S.histIdx <= 0), step("top.redo", "redo", 1, S.histIdx >= S.hist.length - 1), el("span", {}, t("top.saved"))),
     el("div", { class: "spacer" }),
-    el("button", { class: "btn cta glassy deal-btn", title: t("top.surpriseHint"), disabled: SURPRISE.busy, onclick: surprise }, ico("spark", 18), t(SURPRISE.busy ? "top.surpriseBusy" : "top.surprise")),
+    el("button", { class: "btn cta glassy deal-btn", title: t("top.surpriseHint"), disabled: SURPRISE.busy, onclick: surprise }, ico("spark", 18), t(SURPRISE.busy ? "top.surpriseBusy" : "top.surprise"), el("kbd", {}, t("top.space"))),
     el("button", { class: "btn cta solid", onclick: exportDialog }, ico("download", 18), t("top.export")),
     el("button", { class: "ibtn" + (MENU.open ? " on" : ""), id: "morebtn", title: t("top.more"), "aria-label": t("top.more"), "aria-haspopup": "menu", "aria-expanded": String(MENU.open), onclick: toggleMenu }, ico("more", 18)));
   document.body.dataset.drop = t("msg.dropHere");
@@ -5716,8 +5716,9 @@ addEventListener("keydown", (e) => {
   if (key === "escape" && FTB.pop) { FTB.pop = ""; return renderBar(); }   // the bar's popover first
   if (typing) return;
   if (!S.cover || SURPRISE.busy) return;
-  if ($("deal") && !$("deal").hidden) {   // Surprise me's window over the cover: Esc undoes the deal, undo and redo work, no other key reaches the cover
+  if ($("deal") && !$("deal").hidden) {   // Surprise me's window over the cover: Esc undoes the deal, Space deals again, undo and redo work, no other key reaches the cover
     if (key === "escape") return dealUndo();
+    if (key === " " && !mod && !e.altKey) { e.preventDefault(); if (!e.repeat) surprise(e); return; }   // not the button with the focus pressed as well
     if (mod && key === "z") { e.preventDefault(); return timeTravel(e.shiftKey ? 1 : -1); }
     return;
   }
@@ -5731,6 +5732,10 @@ addEventListener("keydown", (e) => {
     return;
   }
   if (mod && key === "z") { e.preventDefault(); return timeTravel(e.shiftKey ? 1 : -1); }
+  // Space deals, as Surprise me's button does, with the editor in front: not in the 3D view, nor while something is dragged
+  // on the canvas or a window stands over the sheet (the menu, the letter, crop and weave windows); not the button with
+  // the focus pressed as well
+  if (key === " " && !mod && !e.altKey && S.mode === "edit" && !MENU.open && !V3.on && !LIVE && !FTB.drag && !S.letterWin && !S.cropWin && !S.weaveWin) { e.preventDefault(); if (!e.repeat) surprise(e); return; }
   if (S.mode !== "edit") return;
   const L = layer();
   if (mod && key === "d") { e.preventDefault(); return group().length ? null : duplicateLayer(); }

@@ -58,6 +58,7 @@
   .btn.cta svg{flex:none}
   .btn.cta.glassy{background:var(--glass2);border:1px solid rgba(255,255,255,.24);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.28)}
   .btn.cta.glassy:hover:not(:disabled){background:rgba(255,255,255,.2)}
+  .btn.cta kbd{font:500 11px var(--mono);color:rgba(255,255,255,.65);border:1px solid rgba(255,255,255,.28);border-radius:6px;padding:1px 5px}   /* the key that does it too */
   .seg{display:flex;padding:3px;gap:2px;border-radius:12px;background:rgba(0,0,0,.25);border:1px solid var(--line)}
   .seg .btn{border:0;background:transparent;border-radius:9px;color:var(--text2)}
   .seg .btn:hover:not(:disabled){background:rgba(255,255,255,.08);color:var(--text)}
@@ -534,6 +535,7 @@
   #deal .lock.on{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.42);color:#fff}
   #deal .again,#deal .done{height:48px;border-radius:14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
   #deal .again{padding:0 20px}#deal .done{padding:0 28px}
+  #deal .again kbd{font-weight:500;color:var(--text2);margin-left:2px}
   body.dealing .app{pointer-events:none}   /* nothing else to be done to the cover while hands are dealt onto it */
   body.dealing #deal figure,body.dealing #deal .deal-dim,body.dealing #deal .deal-undo,body.dealing #deal .deal-bar button{pointer-events:none}
   body.dealing #deal .deal-undo,body.dealing #deal .deal-bar button{opacity:.5}
