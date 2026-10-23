@@ -263,6 +263,8 @@ export function normalizeSettings(raw) {
     // the side columns' widths in px, as dragged (0 = the default): left and right while editing, left in Setup
     columns: Object.fromEntries(["left", "right", "setup"].map((k) => [k, Math.round(num(s.columns && s.columns[k], 0, 0, 900))])),
     recentFonts: [...new Set((Array.isArray(s.recentFonts) ? s.recentFonts : []).map((f) => str(f).replace(/["\\]/g, "").trim().slice(0, 80)).filter(Boolean))].slice(0, RECENT_FONTS),
+    // how many times each look was made a profile's on this computer, by its card or a hand of Surprise me kept (the Look sheet's ★ Most used): whole counts of looks there are
+    lookUse: Object.fromEntries(LOOK_IDS.map((id) => [id, Math.floor(num(s.lookUse && typeof s.lookUse === "object" ? s.lookUse[id] : 0, 0, 0, 1e6))]).filter(([, n]) => n > 0)),
     recipes: normalizeRecipes(s.recipes),
     layouts,
     surprise: normalizeSurprise(s.surprise, layouts.map((l) => l.id)),
