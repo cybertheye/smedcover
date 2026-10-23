@@ -87,6 +87,13 @@
   .quick:hover{background:rgba(255,255,255,.13)}
   .quick.on{border-color:color-mix(in srgb,var(--acc) 70%,transparent);background:color-mix(in srgb,var(--acc) 14%,transparent)}
   .quick .sw-chip{width:18px;height:18px;border-radius:5px;box-shadow:0 0 0 1px rgba(255,255,255,.3)}
+  /* the search over every shelf: a field with its magnifier, and ✕ while it holds words */
+  .asearch{display:flex;align-items:center;gap:8px;height:38px;padding:0 5px 0 12px;border-radius:12px;background:var(--field);border:1px solid var(--line2);color:var(--text3)}
+  .asearch:focus-within{border-color:color-mix(in srgb,var(--acc) 70%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,var(--acc) 14%,transparent)}
+  .asearch input[type=text]{flex:1;min-width:0;height:100%;padding:0;border:0;border-radius:0;background:transparent;font-size:13px;box-shadow:none}
+  .asearch input::placeholder{color:var(--text3)}
+  .asearch .clr{flex:none;width:28px;height:28px;border:0;border-radius:8px;background:transparent;color:var(--text2);font-size:12px;cursor:pointer;padding:0}
+  .asearch .clr:hover{background:rgba(255,255,255,.12);color:#fff}
   .shelf{display:grid;gap:10px}
   .shelf-h{display:flex;align-items:baseline;gap:12px}
   .shelf-h .cap .n{color:var(--text3)}
@@ -744,6 +751,19 @@
   .gspecs figure{margin:0;display:grid;gap:6px}
   .gspecs figcaption{font-size:12px;color:var(--text2);text-align:center}
   .gacts{justify-content:flex-end}
+  /* what the result was made from and which try; under it, what the tab made this session beside the result's actions */
+  .gmade-cap{font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:-4px}
+  .gfoot{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+  .gfoot .gacts{margin-left:auto}
+  .gmade{display:flex;align-items:flex-start;gap:10px;min-width:0}
+  .gmade .cap{margin:0;white-space:nowrap;line-height:54px}   /* beside the first row of thumbnails */
+  .gthumbs{display:flex;flex-wrap:wrap;gap:8px}
+  .gthumb{width:72px;height:54px;padding:0;border:0;border-radius:10px;overflow:hidden;background:rgba(0,0,0,.3);box-shadow:0 0 0 1px rgba(255,255,255,.15);cursor:pointer;display:grid;place-items:center}
+  .gthumb:hover{box-shadow:0 0 0 1px rgba(255,255,255,.5)}
+  .gthumb.on{box-shadow:0 0 0 2px var(--acc)}
+  .gthumb:disabled{opacity:.45;cursor:default;box-shadow:0 0 0 1px rgba(255,255,255,.15)}
+  .gthumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .gthumb canvas{width:72px;height:54px;display:block}
   @media(max-width:900px){.repbody,.genbody{grid-template-columns:1fr}.repside{max-height:none}}
   .genw .seg .btn.dot::after{content:"";display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;background:var(--acc);vertical-align:2px}
   /* Assets → the way to AI stickers */

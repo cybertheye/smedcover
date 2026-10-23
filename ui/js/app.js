@@ -1336,12 +1336,18 @@ function shelf(key, title, count, tiles, extra = null, tip = "") {
     tiles(!open && more));
 }
 /**
+ * The Assets sheet's state for this session only: `q` the words its search field holds (while there are any, the sheet
+ * shows what they find instead of its shelves), `kind` the kind of picture the photo shelf shows alone ("" every kind).
+ */
+const ASSETS_UI = { q: "", kind: "" };
+/**
  * Assets: everything that goes on a cover. Ways to add — text, a colour, a photo uploaded or made by AI — then the
- * photos on this cover, and shelves: the photos kept (the bitmap library), stickers, channel graphics, my vector
- * assets (in folders), and a sticker made by AI from a sentence.
+ * search, the photos on this cover, and shelves: the photos kept (the bitmap library), stickers, channel graphics, my
+ * vector assets (in folders), and a sticker made by AI from a sentence. While the search has words in it, what they
+ * find takes the place of everything under it (assetsFound()).
  */
 function assetsSheet() {
-  const lang = getLang(), mine = [...userAssets.values()], stickers = STICKERS.map((s) => ({ kind: "sticker", id: s.id }));
+  const lang = getLang(), mine = [...userAssets.values()], stickers = STICKERS.map((s) => ({ kind: "sticker", id: s.id })), q = ASSETS_UI.q.trim();
   const add = (label, icon, onclick, on = false) => el("button", { class: "quick" + (on ? " on" : ""), onclick }, icon, el("span", {}, label));
   return [
     sheetHead(t("sheet.assets"), t("sheet.assetsSub")),
@@ -1351,17 +1357,79 @@ function assetsSheet() {
       add(t("cover.upload"), ico("upload", 20), uploadPhotos),
       add(t("gen.open"), ico("spark", 20), () => genWin("photo"), GEN.busy || AI.busy)),
     el("div", { class: "hint", style: "margin:-6px 0 0" }, t("add.dropHint")),
-    coverPhotos(),
-    shelf("photos", t("shelf.photos"), S.library.length,
-      (few) => { const all = libraryTiles((pid) => placePhoto(pid), () => { if (onAssetsTab()) renderPanel(); }, true); if (few && all.classList.contains("tiles")) [...all.children].slice(8).forEach((n) => n.remove()); return all; },
-      el("button", { class: "linkbtn", title: t("lib.uploadTip"), onclick: stockPhotos }, t("lib.stock")), t("lib.hint")),
-    shelf("stickers", t("shelf.stickers"), stickers.length, (few) => few
-      ? el("div", { class: "tiles" }, stickers.slice(0, 8).map((ref) => tile(ref)))
-      : el("div", { class: "shelf-groups" }, STICKER_GROUPS.map((g) => el("div", {}, el("div", { class: "hint", style: "margin:0 0 6px" }, g.name[lang]), el("div", { class: "tiles" }, STICKERS.filter((s) => s.group === g.id).map((s) => tile({ kind: "sticker", id: s.id }))))))),
-    shelf("graphics", t("shelf.graphics"), GRAPHICS.length, (few) => el("div", { class: "tiles" }, (few ? GRAPHICS.slice(0, 8) : GRAPHICS).map((g) => tile({ kind: "graphic", id: g.id })))),
-    mineSection(mine),
-    aiSection(),
+    assetSearch(),
+    q ? assetsFound(q) : [
+      coverPhotos(),
+      photoShelf(),
+      shelf("stickers", t("shelf.stickers"), stickers.length, (few) => few
+        ? el("div", { class: "tiles" }, stickers.slice(0, 8).map((ref) => tile(ref)))
+        : el("div", { class: "shelf-groups" }, STICKER_GROUPS.map((g) => el("div", {}, el("div", { class: "hint", style: "margin:0 0 6px" }, g.name[lang]), el("div", { class: "tiles" }, STICKERS.filter((s) => s.group === g.id).map((s) => tile({ kind: "sticker", id: s.id }))))))),
+      shelf("graphics", t("shelf.graphics"), GRAPHICS.length, (few) => el("div", { class: "tiles" }, (few ? GRAPHICS.slice(0, 8) : GRAPHICS).map((g) => tile({ kind: "graphic", id: g.id })))),
+      mineSection(mine),
+      aiSection(),
+    ],
   ];
+}
+/**
+ * The Assets sheet's search field. What is typed builds the sheet again a moment after the last key (renderPanel gives
+ * the field back its focus and caret, see heldField), not while an input method is still composing a word; ✕ or Esc
+ * empties it, and the sheet is as it was.
+ */
+function assetSearch() {
+  const find = (v) => { ASSETS_UI.q = v; later("asearch", 120, () => { if (onAssetsTab()) renderPanel(); }); };
+  const clear = () => { clearTimeout(timers.asearch); ASSETS_UI.q = ""; renderPanel(); };
+  return el("div", { class: "asearch" }, ico("search", 16),
+    el("input", { type: "text", value: ASSETS_UI.q, placeholder: t("shelf.search"), "aria-label": t("shelf.search"), maxLength: 60, spellcheck: false, autocomplete: "off", dataset: { k: "asearch" },
+      oninput: (e) => { if (!e.isComposing) find(e.target.value); }, oncompositionend: (e) => find(e.target.value),
+      onkeydown: (e) => { if (e.key !== "Escape" || e.isComposing) return; e.stopPropagation(); if (e.target.value) { e.target.value = ""; clear(); } else e.target.blur(); } }),
+    ASSETS_UI.q && el("button", { class: "clr", title: t("shelf.searchClear"), "aria-label": t("shelf.searchClear"),
+      onclick: () => { clear(); const f = $("panel").querySelector('[data-k="asearch"]'); if (f) f.focus(); } }, "✕"));
+}
+/** The text of `s` as the search compares it: one case, full-width letters and digits as half-width ones. */
+const folded = (s) => String(s || "").normalize("NFKC").toLowerCase();
+/** Whether every word of `q` is found in one of the texts given (strings, or lists of them). */
+function matches(q, ...texts) {
+  const hay = folded(texts.flat().join("\n"));
+  return folded(q).split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
+}
+/**
+ * What the Assets sheet's search finds, under the names of the shelves it is on, each tile doing what it does there: the
+ * photo shelf's pictures by their names (and kinds), stickers and channel graphics by their names in either language
+ * (a sticker by its group's, too), my vector assets by their names — an AI-made one's in either language — and their
+ * folders'. Nothing found: a line saying so.
+ */
+function assetsFound(q) {
+  const folder = new Map(S.assetFolders.map((f) => [f.id, f.name])), group = new Map(STICKER_GROUPS.map((g) => [g.id, g.name]));
+  const photos = new Set(S.library.filter((e) => matches(q, e.name, t("lib.kind." + e.kind))).map((e) => e.pid));
+  const stickers = STICKERS.filter((s) => matches(q, s.name.zh, s.name.en, Object.values(group.get(s.group) || {})));
+  const graphics = GRAPHICS.filter((g) => matches(q, g.name.zh, g.name.en));
+  const mine = [...userAssets.values()].filter((a) => matches(q, a.name, Object.values((a.spec && a.spec.name) || {}), folder.get(a.folder) || ""));
+  const grid = (list, few, make) => el("div", { class: "tiles" }, (few ? list.slice(0, 8) : list).map(make));
+  const found = [
+    photos.size > 0 && shelf("q:photos", t("shelf.photos"), photos.size, (few) => photoTiles((e) => photos.has(e.pid), few)),
+    stickers.length > 0 && shelf("q:stickers", t("shelf.stickers"), stickers.length, (few) => grid(stickers, few, (s) => tile({ kind: "sticker", id: s.id }))),
+    graphics.length > 0 && shelf("q:graphics", t("shelf.graphics"), graphics.length, (few) => grid(graphics, few, (g) => tile({ kind: "graphic", id: g.id }))),
+    mine.length > 0 && shelf("q:mine", t("assets.mine"), mine.length, (few) => grid(mine, few, (a) => tile({ kind: "user", id: a.id }, () => removeAsset(a.id)))),
+  ].filter(Boolean);
+  return found.length ? found : el("div", { class: "hint", style: "margin:0" }, t("shelf.searchNone", q));
+}
+/**
+ * The photo shelf: the bitmap library's pictures; where it holds pictures of more than one kind (uploaded, made by AI,
+ * repainted), a chip a kind above them shows that kind alone (ASSETS_UI.kind).
+ */
+function photoShelf() {
+  const kinds = LIBRARY_KINDS.filter((k) => S.library.some((e) => e.kind === k)), kind = kinds.length > 1 && kinds.includes(ASSETS_UI.kind) ? ASSETS_UI.kind : "";
+  const only = kind ? (e) => e.kind === kind : null, n = (k) => (k ? S.library.filter((e) => e.kind === k).length : S.library.length);
+  const chip = (k) => el("button", { class: k === kind ? "on" : "", onclick: () => { ASSETS_UI.kind = k; renderPanel(); } }, t("lib.chip." + (k || "all"), n(k)));
+  return shelf("photos", t("shelf.photos"), n(kind),
+    (few) => [kinds.length > 1 && el("div", { class: "chips small" }, chip(""), kinds.map(chip)), photoTiles(only, few)],
+    el("button", { class: "linkbtn", title: t("lib.uploadTip"), onclick: stockPhotos }, t("lib.stock")), t("lib.hint"));
+}
+/** The photo shelf's tiles (those of the pictures `only` keeps, if given), the first eight with `few`. */
+function photoTiles(only, few) {
+  const all = libraryTiles((pid) => placePhoto(pid), () => { if (onAssetsTab()) renderPanel(); }, true, only);
+  if (few && all.classList.contains("tiles")) [...all.children].slice(8).forEach((n) => n.remove());
+  return all;
 }
 /** Layers: the list, kept in layerBox (see renderSide). */
 const layersSheet = () => [layerBox];
@@ -1818,6 +1886,7 @@ async function generatePhoto() {
   clearInterval(tick);
   if (job !== GEN.job) return;                       // cancelled meanwhile
   Object.assign(GEN, { busy: false, result, error });
+  if (result) madeNow("photo", result, text, ref);
   genDone("photo", error);
   genRedraw();
 }
@@ -1837,7 +1906,58 @@ async function keepGeneratedPhoto() {
   if (await (r.pid ? placePhoto(r.pid) : addPhoto(r.src))) { closeModal(); if (onAssetsTab()) renderPanel(); } else genRedraw();
 }
 // ---------- AI generate, in a window of its own: a photo (the image model) or a sticker or graphic (the text model)
-const GENWIN = { tab: "photo", dot: new Set() };   // the tab shown ("photo" or "art"); the tabs with something done since they were last shown
+/**
+ * The window's state: the tab shown ("photo" or "art"); the tabs with something done since they were last shown; and
+ * what each tab made this session, in memory only, newest first, MADE_MAX at most (`made`: {r, prompt, ref, n, kept},
+ * the result, the words and the reference picture it was made from, which try at those words it was, and for a sticker
+ * the asset it was kept as), with the tries at each tab's words counted (`tries`).
+ */
+const GENWIN = { tab: "photo", dot: new Set(), made: { photo: [], art: [] }, tries: { photo: new Map(), art: new Map() } };
+const MADE_MAX = 12;
+/** Result `r`, just made on tab `tab` from `prompt` and `ref`: first in the window's strip, with which try at those words it is. */
+function madeNow(tab, r, prompt, ref) {
+  const words = prompt.trim(), n = (GENWIN.tries[tab].get(words) || 0) + 1;
+  GENWIN.tries[tab].set(words, n);
+  GENWIN.made[tab] = [{ r, prompt: words, ref, n }, ...GENWIN.made[tab]].slice(0, MADE_MAX);
+}
+/** The strip's entry for result `r` of tab `tab`, while it is there. */
+const madeOf = (tab, r) => (r && GENWIN.made[tab].find((x) => x.r === r)) || null;
+/** What entry `x` was made from and which try it was: 「the words」 · try 2. */
+const madeSays = (x) => { const w = x.prompt.replace(/\s+/g, " "); return x.prompt ? t("gen.madeFrom", w.length > 40 ? w.slice(0, 39) + "…" : w, x.n) : t("gen.madeFromRef", x.n); };
+/** Shows entry `x` of the strip as the result again, its words and reference picture back in the form, so that Make another makes it again. */
+function showMade(tab, x) {
+  if (tab === "photo") Object.assign(GEN, { result: x.r, prompt: x.prompt, ref: x.ref, error: "" });
+  else Object.assign(AI, { result: x.r, target: x.prompt, image: x.ref, error: "" });
+  genWin();
+}
+/** Discards the result shown on tab `tab`, and takes it out of the strip. */
+function dropMade(tab) {
+  const r = tab === "photo" ? GEN.result : AI.result;
+  GENWIN.made[tab] = GENWIN.made[tab].filter((x) => x.r !== r);
+  if (tab === "photo") GEN.result = null; else AI.result = null;
+  genWin();
+}
+/** The words of tab `tab`'s Generate: Make another while the result shown was made from what the form holds. */
+function goText(tab) {
+  const photo = tab === "photo", x = madeOf(tab, photo ? GEN.result : AI.result);
+  return t(x && x.prompt === (photo ? GEN.prompt : AI.target).trim() && x.ref === (photo ? GEN.ref : AI.image) ? "gen.another" : photo ? "gen.go" : "ai.generate");
+}
+/** The strip of what tab `tab` made this session, `shown` marked: a click shows one as the result again (not while another is being made). */
+function madeStrip(tab, shown, busy) {
+  const list = GENWIN.made[tab];
+  return list.length > 0 && el("div", { class: "gmade" }, el("span", { class: "cap" }, t("gen.made")),
+    el("div", { class: "gthumbs" }, list.map((x) => {
+      const rec = tab === "photo" && x.r.pid && S.photos.get(x.r.pid), says = madeSays(x);
+      return el("button", { class: "gthumb" + (x === shown ? " on" : ""), disabled: busy, title: says, "aria-label": says, onclick: () => showMade(tab, x) },
+        tab === "photo" ? el("img", { src: rec ? thumbOf(rec) : x.r.src, alt: "" }) : specThumb(x.r));
+    })));
+}
+/** A sticker or graphic made by AI, small, in its own colours: a thumbnail of the strip. */
+function specThumb(spec) {
+  const cv = el("canvas", { width: 144, height: 108 }), c = cv.getContext("2d");
+  c.translate(72, 54); c.scale(0.48, 0.48); drawSpec(c, spec, null);
+  return cv;
+}
 const genOpen = () => !!$("modal").querySelector(".dlg.genw");
 /** Draws the AI generate window again if it is open, and the Assets sheet (what is under way there). */
 const genRedraw = () => { if (genOpen()) genWin(); if (onAssetsTab()) renderPanel(); };
@@ -1855,8 +1975,9 @@ function heldField(box) { const a = document.activeElement; return a && box.cont
 function giveBack(box, h) { const f = h && box.querySelector(`[data-k="${h.k}"]`); if (!f) return; f.focus(); try { f.setSelectionRange(h.s, h.e); } catch (e) { /* not a text field */ } }
 /**
  * AI generate: on the left what to make — the words, for a sticker the kind it is drawn as, a picture to go by — and
- * Generate; on the right what came back, to put on the cover (a photo; a sticker kept in My vector assets too), keep,
- * or drop. A generation goes on with the window shut and waits in it; a toast says when it is done.
+ * Generate; on the right what came back, saying what it was made from and which try it was, to put on the cover (a
+ * photo; a sticker kept in My vector assets too), keep, or drop, and under it the strip of what the tab made this
+ * session, to show one again. A generation goes on with the window shut and waits in it; a toast says when it is done.
  */
 function genWin(tab = GENWIN.tab) {
   GENWIN.tab = tab; GENWIN.dot.delete(tab);
@@ -1875,32 +1996,37 @@ function genWin(tab = GENWIN.tab) {
       el("button", { class: "btn solid", onclick: () => { closeModal(); S.tab.setup = "ai"; SET_UI.at = photo ? "image" : "text"; setMode("setup"); } }, t(photo ? "rep.goSetup" : "ai.goSetup"))];
     result = el("div", { class: "gempty" }, t("gen.notReady"));
   } else if (photo) {
-    const c = S.imageAi, r = GEN.result;
+    const c = S.imageAi, r = GEN.result, shown = madeOf("photo", r);
     form = [el("div", { class: "cap" }, t("gen.what")),
-      el("textarea", { value: GEN.prompt, spellcheck: false, maxLength: 2000, disabled: busy, dataset: { k: "gprompt" }, style: "height:110px;font-size:14px", placeholder: t(GEN.ref ? "gen.phRef" : "gen.ph"), oninput: (e) => { GEN.prompt = e.target.value; } }),
+      el("textarea", { value: GEN.prompt, spellcheck: false, maxLength: 2000, disabled: busy, dataset: { k: "gprompt" }, style: "height:110px;font-size:14px", placeholder: t(GEN.ref ? "gen.phRef" : "gen.ph"),
+        oninput: (e) => { GEN.prompt = e.target.value; const b = $("gen-go"); if (b && !GEN.busy) b.textContent = goText("photo"); } }),
       el("div", { class: "cap" }, t("gen.ref")), refZone(GEN.ref, pickGenRef, () => { GEN.ref = null; genWin(); }, t("gen.refOn")),
       el("div", { class: "hint" }, t("gen.hint", t("img.provider." + c.provider), c.model, caption(size))),
       el("div", { class: "ggo" }, busy && el("button", { class: "btn", onclick: cancelGeneratePhoto }, t("ai.cancel")),
-        el("button", { id: "gen-go", class: "btn solid", disabled: busy, onclick: generatePhoto }, busy ? genBusyText() : t(r ? "gen.again" : "gen.go")))];
-    result = r ? [el("figure", { class: "gpic" }, el("img", { src: r.src, alt: "" }), el("figcaption", {}, `${r.w} × ${r.h}`)),
-        el("div", { class: "gacts" }, el("button", { class: "btn", onclick: () => { GEN.result = null; genWin(); } }, t("ai.discard")), el("button", { class: "btn solid", onclick: keepGeneratedPhoto }, t("gen.keep")))]
-      : el("div", { class: "gempty" + (busy ? " busy" : "") }, busy ? t("gen.working") : GEN.error ? el("span", { class: "err" }, t("msg.failed", GEN.error)) : t("gen.emptyPhoto"));
+        el("button", { id: "gen-go", class: "btn solid", disabled: busy, onclick: generatePhoto }, busy ? genBusyText() : goText("photo")))];
+    result = [shown && el("div", { class: "gmade-cap" }, madeSays(shown)),
+      r ? el("figure", { class: "gpic" }, el("img", { src: r.src, alt: "" }), el("figcaption", {}, `${r.w} × ${r.h}`))
+        : el("div", { class: "gempty" + (busy ? " busy" : "") }, busy ? t("gen.working") : GEN.error ? el("span", { class: "err" }, t("msg.failed", GEN.error)) : t("gen.emptyPhoto")),
+      (r || GENWIN.made.photo.length > 0) && el("div", { class: "gfoot" }, madeStrip("photo", shown, busy),
+        r && el("div", { class: "gacts" }, el("button", { class: "btn", onclick: () => dropMade("photo") }, t("ai.discard")), el("button", { class: "btn solid", onclick: keepGeneratedPhoto }, t("gen.keep"))))];
   } else {
-    const r = AI.result, setKind = (k) => { S.ai = normalizeAi({ ...S.ai, kind: k }); persistAi(); genWin(); };
+    const r = AI.result, shown = madeOf("art", r), kept = !!(shown && shown.kept && userAssets.has(shown.kept)), setKind = (k) => { S.ai = normalizeAi({ ...S.ai, kind: k }); persistAi(); genWin(); };
     form = [el("div", { class: "cap" }, t("gen.what")),
       el("textarea", { value: AI.target, spellcheck: false, maxLength: 300, disabled: busy, dataset: { k: "atarget" }, style: "height:84px;font-size:14px", placeholder: t(AI.image ? "ai.targetPhImage" : "ai.targetPh"),
-        oninput: (e) => { AI.target = e.target.value; }, onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); generateAsset(); } } }),
+        oninput: (e) => { AI.target = e.target.value; const b = $("ai-go"); if (b && !AI.busy) b.textContent = goText("art"); }, onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); generateAsset(); } } }),
       el("div", { class: "cap" }, t("gen.kind")),
       el("div", { class: "gkinds" }, AI_KINDS.map((k) => el("button", { class: "gkind" + (S.ai.kind === k ? " on" : ""), disabled: busy, onclick: () => setKind(k) }, el("b", {}, t("ai.kind." + k)), el("small", {}, t("ai.kindHint." + k))))),
       el("div", { class: "cap" }, t("gen.ref")), refZone(AI.image, pickReference, () => { AI.image = null; genWin(); }, t("ai.refOn")),
       el("div", { class: "hint" }, t("ai.hint", S.ai.model)),
       el("div", { class: "ggo" }, busy && el("button", { class: "btn", onclick: cancelGenerate }, t("ai.cancel")),
-        el("button", { id: "ai-go", class: "btn solid", disabled: busy, onclick: generateAsset }, busy ? aiBusyText() : t(r ? "ai.again" : "ai.generate")))];
-    result = r ? [el("div", { class: "gspecs" }, el("figure", {}, specPreview(r, null), el("figcaption", {}, t("gen.ownColour"))), el("figure", {}, specPreview(r, cat().color), el("figcaption", {}, t("gen.channelColour", cat().name || cat().code)))),
-        el("div", { class: "hint" }, r.name[getLang()]),
-        el("div", { class: "gacts" }, el("button", { class: "btn", onclick: () => { AI.result = null; genWin(); } }, t("ai.discard")),
-          el("button", { class: "btn", onclick: () => keepGenerated() }, t("ai.keep")), el("button", { class: "btn solid", onclick: () => keepGenerated(true) }, t("gen.place")))]
-      : el("div", { class: "gempty" + (busy ? " busy" : "") }, busy ? t("gen.working") : AI.error ? el("span", { class: "err" }, t("msg.failed", AI.error)) : t("gen.emptyArt"));
+        el("button", { id: "ai-go", class: "btn solid", disabled: busy, onclick: generateAsset }, busy ? aiBusyText() : goText("art")))];
+    result = [shown && el("div", { class: "gmade-cap" }, madeSays(shown)),
+      r ? [el("div", { class: "gspecs" }, el("figure", {}, specPreview(r, null), el("figcaption", {}, t("gen.ownColour"))), el("figure", {}, specPreview(r, cat().color), el("figcaption", {}, t("gen.channelColour", cat().name || cat().code)))),
+          el("div", { class: "hint" }, r.name[getLang()])]
+        : el("div", { class: "gempty" + (busy ? " busy" : "") }, busy ? t("gen.working") : AI.error ? el("span", { class: "err" }, t("msg.failed", AI.error)) : t("gen.emptyArt")),
+      (r || GENWIN.made.art.length > 0) && el("div", { class: "gfoot" }, madeStrip("art", shown, busy),
+        r && el("div", { class: "gacts" }, el("button", { class: "btn", onclick: () => dropMade("art") }, t("ai.discard")),
+          el("button", { class: "btn", disabled: kept, onclick: () => keepGenerated() }, t(kept ? "gen.kept" : "ai.keep")), el("button", { class: "btn solid", onclick: () => keepGenerated(true) }, t("gen.place"))))];
   }
   m.replaceChildren(el("div", { class: "dlg genw" }, head, el("div", { class: "genbody" }, el("div", { class: "gform" }, form), el("div", { class: "gresult" }, result))));
   m.hidden = false; m.onDismiss = closeModal;
@@ -1978,18 +2104,26 @@ async function generateAsset() {
   clearInterval(tick);
   if (job !== AI.job) return;                       // cancelled meanwhile: the late answer is dropped
   Object.assign(AI, { busy: false, result, error });
+  if (result) madeNow("art", result, target, image);
   genDone("art", error);
   genRedraw();
 }
 /** Stops waiting for the reply. The request itself cannot be recalled, so the provider may still bill it. */
 function cancelGenerate() { AI.job++; Object.assign(AI, { busy: false, error: "", result: null }); genRedraw(); }
 const aiBusyText = () => t("ai.busy", Math.max(0, Math.round((Date.now() - AI.since) / 1000))) + (AI.attempt > 1 ? t("ai.attempt", AI.attempt) : "");
-/** Keeps the asset made in My vector assets; `place`: and puts it on the cover. */
+/**
+ * Keeps the asset made in My vector assets; `place`: and puts it on the cover. One kept already (shown again from the
+ * window's strip of what was made) is not kept a second time: that one is put on the cover.
+ */
 async function keepGenerated(place = false) {
-  const spec = AI.result;
+  const spec = AI.result, m = madeOf("art", spec);
   if (!spec) return;
-  const a = putSpecAsset("a" + uid(), spec.name[getLang()], spec);
-  await saveAssetRecord(a).catch(fail);
+  let a = m && m.kept && userAssets.get(m.kept);
+  if (!a) {
+    a = putSpecAsset("a" + uid(), spec.name[getLang()], spec);
+    await saveAssetRecord(a).catch(fail);
+    if (m) m.kept = a.id;
+  }
   AI.result = null;
   if (place) { closeModal(); addAsset({ kind: "user", id: a.id }); if (onAssetsTab()) renderPanel(); return; }
   toast(t("ai.saved", a.name));
@@ -5413,6 +5547,7 @@ const SHELL_ICONS = {
   spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
   download: '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
   upload: '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
 };
 const ico = (k, px = 20) => el("span", { class: "ico", style: `display:inline-grid;width:${px}px;height:${px}px`, innerHTML: `<svg viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SHELL_ICONS[k]}</svg>` });
@@ -5557,10 +5692,11 @@ function renderPanel() {
   if (!S.cover) return;
   if (PREVIEW.look || PREVIEW.timer) { clearTimeout(PREVIEW.timer); PREVIEW.timer = 0; if (PREVIEW.look) { PREVIEW.look = null; previewTag(); queueDraw(); } }
   useLook();
-  const panel = $(S.mode === "setup" ? "setpanel" : "panel"), y = panel.scrollTop;
+  const panel = $(S.mode === "setup" ? "setpanel" : "panel"), y = panel.scrollTop, held = heldField(panel);
   document.documentElement.style.setProperty("--acc", cat().color);
   document.documentElement.style.setProperty("--acc-ink", inkOn(cat().color));
   panel.replaceChildren(...TABS[S.mode][S.tab[S.mode]]().flat(Infinity).filter(Boolean));
+  giveBack(panel, held);   // a field being typed in (the Assets sheet's search) keeps its focus and caret
   panel.scrollTop = y;
   if (S.mode === "setup") syncTabs();   // the nav's profile: its name, channels and colours, as the page now has them
   const at = S.mode === "setup" && SET_UI.at && document.getElementById("set-" + SET_UI.at);   // a card of the page asked for (see SET_UI)
@@ -5827,12 +5963,13 @@ function readLibrary() {
 /**
  * The library's pictures as tiles, newest first: a click hands the picture to `pick`; they can be dragged
  * onto the canvas, and with `removable` taken out of the library. Pictures not read yet are read, then
- * `redraw` is called.
+ * `redraw` is called. With `only`, the pictures it keeps alone (the search, a kind of picture).
  */
-function libraryTiles(pick, redraw, removable = false) {
+function libraryTiles(pick, redraw, removable = false, only = null) {
   LIB.redraw = redraw;
   readLibrary();
-  const shown = S.library.filter((e) => S.photos.has(e.pid)), waiting = S.library.some((e) => !S.photos.has(e.pid));
+  const list = only ? S.library.filter(only) : S.library;
+  const shown = list.filter((e) => S.photos.has(e.pid)), waiting = list.some((e) => !S.photos.has(e.pid));
   return shown.length ? el("div", { class: "tiles" }, shown.map((e) => {
     const rec = S.photos.get(e.pid), name = e.name || t("lib.kind." + e.kind);
     return el("div", { class: "tile ptile", title: `${name} · ${t("lib.kind." + e.kind)}`, draggable: true, onclick: () => pick(e.pid),
