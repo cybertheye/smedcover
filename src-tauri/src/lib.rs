@@ -763,8 +763,23 @@ fn read_capped(response: ureq::Response, cap: u64) -> Res<String> {
         .into_reader()
         .take(cap)
         .read_to_string(&mut text)
-        .map_err(err)?;
+        .map_err(net_err)?;
     Ok(text)
+}
+
+/// A request's error as text, a wait that ran out always saying "timed out", which is what the web
+/// view looks for to explain it (ai.timedOut in app.js): Windows words it "os error 10060" alone.
+fn net_err<E: std::error::Error + 'static>(e: E) -> String {
+    let text = e.to_string();
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&e);
+    while let Some(c) = cause {
+        let io = c.downcast_ref::<std::io::Error>();
+        if io.is_some_and(|io| io.kind() == std::io::ErrorKind::TimedOut) {
+            return if text.to_lowercase().contains("timed out") { text } else { format!("timed out: {text}") };
+        }
+        cause = c.source();
+    }
+    text
 }
 
 /// An agent for `url`: the timeout, and the proxy if one applies.
@@ -850,7 +865,7 @@ fn send(
             status,
             text: read_capped(response, AI_MAX_REPLY).unwrap_or_default(),
         }),
-        Err(e) => Err(err(e)),
+        Err(e) => Err(net_err(e)),
     }
 }
 
@@ -859,14 +874,14 @@ fn send(
 fn get_image(url: &str, proxy: &str, timeout_secs: u64) -> Res<FetchedImage> {
     use base64::Engine;
     let agent = agent_for(url, proxy, timeout_secs)?;
-    let response = agent.get(url).call().map_err(err)?;
+    let response = agent.get(url).call().map_err(net_err)?;
     let mime = response.content_type().to_ascii_lowercase();
     let mut bytes = Vec::new();
     response
         .into_reader()
         .take(AI_MAX_IMAGE_REPLY)
         .read_to_end(&mut bytes)
-        .map_err(err)?;
+        .map_err(net_err)?;
     let mime = if mime.starts_with("image/") {
         mime
     } else {
@@ -1299,6 +1314,18 @@ mod tests {
         assert!(error.to_lowercase().contains("timed out"), "{error}");
         assert!(started.elapsed().as_secs() >= 4 && started.elapsed().as_secs() < 15);
         drop(listener);
+    }
+
+    #[test]
+    fn a_wait_that_ran_out_says_timed_out_on_windows_too() {
+        use std::io::{Error, ErrorKind};
+        // what ureq hands back there: the kind is right, the words are the system's
+        let windows: ureq::Error = Error::new(ErrorKind::TimedOut, "A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond. (os error 10060)").into();
+        assert!(net_err(windows).starts_with("timed out: "));
+        let unix: ureq::Error = Error::new(ErrorKind::TimedOut, "timed out reading response").into();
+        assert!(!net_err(unix).contains("timed out: "));   // said once only
+        let refused: ureq::Error = Error::new(ErrorKind::ConnectionRefused, "connection refused").into();
+        assert!(!net_err(refused).contains("timed out"));
     }
 
     #[test]
