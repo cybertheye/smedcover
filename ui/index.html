@@ -10,72 +10,125 @@
   @font-face{font-family:"Bebas Neue";src:url("fonts/BebasNeue-Regular.ttf");font-weight:100 900;font-display:block}
   @font-face{font-family:"JetBrains Mono";src:url("fonts/JetBrainsMono.ttf");font-weight:100 800;font-display:block}
 
-  :root{--bg:#0a0a12;--panel:#14141f;--line:#2a2a3c;--line2:#44445a;--ink:#07070c;--acc:#fcee0a;
+  /* Frosted glass over the cover: the page's ground is the cover itself, small and blurred (#ambient), and every
+     panel is a pane of glass over it (.glass), letting its colours through. Where the glass would slow the canvas,
+     or the web view cannot blur, html.solid makes the panes plain and translucent (see glassWatch in app.js). */
+  :root{color-scheme:dark;--bg:#0b0b11;--ink:#15151c;--acc:#fcee0a;--acc-ink:#15151c;
+        --text:#f5f5f7;--text2:rgba(245,245,247,.68);--text3:rgba(245,245,247,.5);
+        --panel:rgba(255,255,255,.05);--line:rgba(255,255,255,.12);--line2:rgba(255,255,255,.24);
+        --field:rgba(10,10,16,.32);
+        --glass:rgba(255,255,255,.075);--glass2:rgba(255,255,255,.14);--solid:rgba(27,27,38,.94);--solid2:rgba(44,44,58,.96);
+        --glass-line:rgba(255,255,255,.16);--glass-hi:inset 0 1px 0 rgba(255,255,255,.2);--glass-drop:0 24px 60px rgba(0,0,0,.38);
+        --blur:blur(30px) saturate(170%);
         --ui:"Noto Sans SC",-apple-system,"Segoe UI",sans-serif;--mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace}
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%;background:var(--bg);color:#fff;font-family:var(--ui);font-size:14px;overflow:hidden}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px;overflow:hidden}
   button,input,select,textarea{font:inherit;color:inherit}
-  .app{display:grid;grid-template-rows:auto 1fr;height:100vh}
+  #ambient{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+  #ambient canvas{position:absolute;left:-10%;top:-10%;width:120%;height:120%;filter:blur(64px) saturate(150%) brightness(.62)}
+  #ambient::after{content:"";position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 45%,rgba(10,10,18,.12),rgba(8,8,14,.66))}
+  .glass{background-color:var(--glass);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid var(--glass-line);box-shadow:var(--glass-hi),var(--glass-drop)}
+  html.solid .glass{background-color:var(--solid);-webkit-backdrop-filter:none;backdrop-filter:none}
+  .app{position:relative;z-index:1;display:grid;grid-template-rows:auto minmax(0,1fr);height:100vh;padding:12px;gap:12px}
 
-  /* top bar */
-  header{display:flex;align-items:center;gap:16px;padding:9px 18px;border-bottom:2px solid var(--line);flex-wrap:wrap}
-  header h1{font:400 28px "Bebas Neue",sans-serif;letter-spacing:.08em;margin:0 4px 0 0}
+  /* top bar: the profile and channel, undo and redo, then Surprise me, Export and the ⋯ menu */
+  header{display:flex;align-items:center;gap:12px;height:56px;padding:0 10px 0 18px;border-radius:18px}
+  header h1{font:400 26px "Bebas Neue",sans-serif;letter-spacing:.08em;margin:0 2px 0 0}
+  header .sep{width:1px;height:24px;background:var(--line2)}
+  .crumb{display:flex;align-items:center;gap:4px;min-width:0}
+  .crumb>span{color:var(--text3)}
+  .crumb select{width:auto;max-width:190px;border:0;background:transparent;padding:6px 8px;border-radius:10px;cursor:pointer}
+  .crumb select:hover{background:rgba(255,255,255,.08)}
+  .crumb .dot{width:9px;height:9px;border-radius:50%;background:var(--acc);flex:none}
   .grp{display:flex;align-items:center;gap:6px}
-  .grp>span{font:600 11px var(--mono);letter-spacing:.12em;opacity:.55;text-transform:uppercase;margin-right:2px;white-space:nowrap}
+  .grp>span{font-size:12px;color:var(--text3);white-space:nowrap}
   .spacer{flex:1}
-  .btn{border:2px solid var(--line2);background:transparent;padding:6px 11px;cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap}
-  .btn:hover:not(:disabled){border-color:#fff}
+  .ibtn{width:40px;height:40px;display:grid;place-items:center;border:0;border-radius:12px;background:transparent;color:var(--text);cursor:pointer;padding:0}
+  .ibtn:hover:not(:disabled){background:rgba(255,255,255,.1)}
+  .ibtn:disabled{opacity:.35;cursor:default}
+  .ibtn.on{background:rgba(255,255,255,.18)}
+  .btn{border:1px solid var(--line2);background:rgba(255,255,255,.06);padding:7px 12px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap}
+  .btn:hover:not(:disabled){background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.36)}
   .btn:disabled{opacity:.3;cursor:default}
-  .btn.on{background:#fff;color:var(--ink);border-color:#fff}
-  .btn.solid{background:#fff;color:var(--ink);border-color:#fff;box-shadow:4px 4px 0 var(--acc)}
+  .btn.on{background:rgba(255,255,255,.9);color:var(--ink);border-color:transparent}
+  .btn.solid{background:var(--acc);color:var(--acc-ink);border-color:transparent;font-weight:700}
+  .btn.solid:hover:not(:disabled){background:var(--acc);filter:brightness(1.08)}
   .btn.wide{width:100%;padding:11px}
-  .btn.cta{padding:8px 22px;font-size:15px;letter-spacing:.04em}
-  .seg{display:flex}
-  .seg .btn+.btn{border-left:0}
+  .btn.cta{height:40px;padding:0 18px;font-size:14px;display:inline-flex;align-items:center;gap:8px;border-radius:12px}
+  .btn.cta svg{flex:none}
+  .btn.cta.glassy{background:var(--glass2);border:1px solid rgba(255,255,255,.24);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.28)}
+  .btn.cta.glassy:hover:not(:disabled){background:rgba(255,255,255,.2)}
+  .seg{display:flex;padding:3px;gap:2px;border-radius:12px;background:rgba(0,0,0,.25);border:1px solid var(--line)}
+  .seg .btn{border:0;background:transparent;border-radius:9px;color:var(--text2)}
+  .seg .btn:hover:not(:disabled){background:rgba(255,255,255,.08);color:var(--text)}
+  .seg .btn.on,.seg .btn.on:hover:not(:disabled){background:rgba(255,255,255,.9);color:var(--ink);font-weight:700}
   .seg.big .btn{padding:8px 20px;font-size:15px}
-  header select{background:var(--panel);border:2px solid var(--line);padding:6px 8px;max-width:180px}
+  header select{background:var(--field);border:1px solid var(--line);padding:6px 8px;max-width:180px}
 
-  /* body: tools | canvas | layers. Side columns scroll on their own; the canvas always stays in view. */
-  .body{display:grid;grid-template-columns:var(--lw,372px) minmax(0,1fr) var(--rw,320px);min-height:0}
-  .body.setup{grid-template-columns:var(--sw,420px) minmax(0,1fr)}
+  /* the ⋯ menu, under its button */
+  #menu{position:fixed;z-index:42;width:320px;padding:8px;border-radius:18px;display:flex;flex-direction:column;gap:2px;background-color:rgba(28,30,40,.62)}
+  html.solid #menu{background-color:var(--solid2)}
+  #menu[hidden]{display:none}
+  #menu .mg{font-size:11px;color:var(--text3);letter-spacing:.06em;padding:8px 12px 4px}
+  #menu .mi{display:flex;align-items:center;gap:12px;min-height:40px;padding:6px 10px 6px 12px;border-radius:11px;border:0;background:transparent;color:var(--text);text-align:left;width:100%;cursor:pointer}
+  #menu .mi:hover{background:rgba(255,255,255,.12)}
+  #menu .mi .mt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+  #menu .mi .mt small{font-size:11.5px;color:var(--text3);line-height:1.4}
+  #menu .mi .sc{font-size:12px;color:var(--text3)}
+  #menu .mi.danger{color:#ff9a8a}
+  #menu .sep{height:1px;background:var(--line);margin:4px 8px}
+  #menu .row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;padding:6px 8px 4px 12px;font-size:13px;color:var(--text2)}
+  #menu .tog{width:40px;height:24px;border-radius:12px;background:rgba(255,255,255,.18);position:relative;border:0;cursor:pointer;padding:0;flex:none}
+  #menu .tog::after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:9px;background:#fff;transition:left .15s}
+  #menu .tog.on{background:#3ddc97}
+  #menu .tog.on::after{left:19px}
+
+  /* body: the dock | the open sheet | the canvas | the selected layer's properties. Each scrolls on its own;
+     the canvas always stays in view. */
+  .body{display:grid;grid-template-columns:76px var(--lw,340px) minmax(0,1fr) var(--rw,320px);gap:12px;min-height:0}
   /* the side columns are as wide as their edge is dragged (see columns() in app.js) */
   aside{position:relative}
-  .split{position:absolute;top:0;bottom:0;width:9px;cursor:col-resize;z-index:5;touch-action:none}
-  #left .split{right:-6px}
-  #right .split{left:-6px}
+  .split{position:absolute;top:18px;bottom:18px;width:9px;cursor:col-resize;z-index:5;touch-action:none;border-radius:5px}
+  #left .split{right:-11px}
+  #right .split{left:-11px}
   .split:hover,.split.on{background:linear-gradient(90deg,transparent 3px,var(--acc) 3px,var(--acc) 5px,transparent 5px)}
-  .body.setup #right{display:none}
-  aside{display:flex;flex-direction:column;min-height:0}
-  #left{border-right:2px solid var(--line)}
-  #right{border-left:2px solid var(--line)}
-  .tabs{display:flex}
-  .tabs button{flex:1;border:0;border-bottom:3px solid transparent;background:transparent;padding:12px 4px;cursor:pointer;font-weight:600;opacity:.55}
-  .tabs button.on{opacity:1;border-bottom-color:var(--acc)}
-  .scroll{overflow-y:auto;min-height:0;padding:16px 14px 40px;display:flex;flex-direction:column;gap:16px;scrollbar-gutter:stable}
+  aside{display:flex;flex-direction:column;min-height:0;border-radius:22px}
+  #left>.scroll,#right>.scroll{border-radius:22px}
+  #right>.scroll{padding:18px 14px 40px}
+  #right .box{border:0;background:none;padding:0;border-radius:0}   /* the column is the box: the selected layer's properties fill it */
+  /* the dock: one button per sheet, the canvas's help at its foot */
+  #dock{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 6px;border-radius:22px;min-height:0}
+  #dock button{width:64px;height:64px;border:0;border-radius:16px;background:transparent;color:var(--text2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:12px;cursor:pointer;padding:0}
+  #dock button:hover{background:rgba(255,255,255,.08);color:var(--text)}
+  #dock button.on{background:rgba(255,255,255,.18);color:#fff;font-weight:500;box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
+  #dock .help{width:44px;height:44px;margin-top:auto;color:var(--text3)}
+  .sheet-h{display:flex;flex-direction:column;gap:4px;margin-bottom:2px}
+  .sheet-h b{font-size:19px;font-weight:700}
+  .scroll{overflow-y:auto;min-height:0;padding:20px 18px 40px;display:flex;flex-direction:column;gap:16px;scrollbar-gutter:stable}
   .scroll>*{flex:none}
   .scroll::-webkit-scrollbar{width:10px}
-  .scroll::-webkit-scrollbar-track{background:var(--panel)}
-  .scroll::-webkit-scrollbar-thumb{background:#55556e;border:2px solid var(--panel)}
+  .scroll::-webkit-scrollbar-track{background:transparent}
+  .scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border:3px solid transparent;background-clip:padding-box;border-radius:6px}
+  .scroll::-webkit-scrollbar-thumb:hover{background-color:rgba(255,255,255,.3)}
 
-  label.cap,.cap{display:block;font:600 11px var(--mono);letter-spacing:.12em;opacity:.6;margin-bottom:8px;text-transform:uppercase}
-  input[type=text],input[type=password],input[type=number],textarea,select{width:100%;background:var(--panel);border:2px solid var(--line);padding:9px;border-radius:0}
+  label.cap,.cap{display:block;font-size:12px;color:var(--text2);letter-spacing:.04em;margin-bottom:8px}
+  input[type=text],input[type=password],input[type=number],textarea,select{width:100%;background:var(--field);border:1px solid var(--line);padding:9px 12px;border-radius:12px}
+  select{cursor:pointer}
+  option{background:#22222e;color:var(--text)}   /* a dropdown's list, where the system draws it (WebView2) */
   input[type=text]:disabled{opacity:.35}
-  textarea{height:100px;resize:vertical;font-size:16px}
-  input:focus,textarea:focus,select:focus{outline:none;border-color:#fff}
-  .hint{font-size:12px;opacity:.5;line-height:1.7;margin-top:6px}
-  .box{border:2px solid var(--line);padding:12px}
+  textarea{height:100px;resize:vertical;font-size:16px;line-height:1.6}
+  input:focus,textarea:focus,select:focus{outline:none;border-color:color-mix(in srgb,var(--acc) 70%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,var(--acc) 14%,transparent)}
+  .hint{font-size:12px;color:var(--text3);line-height:1.7;margin-top:6px}
+  .box{border:1px solid var(--line);background:rgba(0,0,0,.16);border-radius:16px;padding:14px}
   .hint.ok{color:#3ddc84;opacity:1}
   .hint.err{opacity:1}
   .seg.wide{margin-bottom:4px}.seg.wide .btn{flex:1}
   /* a pane switch (Assets): | Vector assets | Bitmaps | as a control the panel's width — each pane a segment between
      upright bars; the chosen one white, raised a little, its bars in the channel colour; the other dim */
-  .subtabs{display:flex;margin:2px 0 8px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--panel)}
-  .subtabs button{flex:1;position:relative;border:0;border-left:3px solid var(--line2);border-right:3px solid var(--line2);background:none;color:#fff;font-family:inherit;font-weight:700;font-size:14px;letter-spacing:.06em;padding:11px 0;cursor:pointer}
-  .subtabs button span{opacity:.4}
-  .subtabs button+button{margin-left:-3px}   /* one bar between two */
-  .subtabs button:hover span{opacity:.75}
-  .subtabs button.on{border-color:var(--acc);background:#1d1d2c;z-index:1}
-  .subtabs button.on span{opacity:1}
+  .subtabs{display:flex;gap:2px;padding:3px;margin:2px 0 8px;border-radius:12px;background:rgba(0,0,0,.25);border:1px solid var(--line)}
+  .subtabs button{flex:1;border:0;border-radius:9px;background:none;color:var(--text2);font-family:inherit;font-weight:500;font-size:14px;padding:8px 0;cursor:pointer}
+  .subtabs button:hover{background:rgba(255,255,255,.08);color:var(--text)}
+  .subtabs button.on{background:rgba(255,255,255,.9);color:var(--ink);font-weight:700}
   .peek{margin-top:8px;font-size:12px}.peek summary{cursor:pointer;opacity:.7}
   .peek pre{white-space:pre-wrap;max-height:220px;overflow:auto;margin:6px 0 0;padding:8px;border:1px solid var(--line2);font:12px/1.6 ui-monospace,monospace;opacity:.85}
   /* the selected layer's properties: group names on the left, lined up across groups; controls on the right */
@@ -126,15 +179,15 @@
   .sub{font-size:12px;opacity:.6;margin-bottom:6px;display:flex;align-items:center;gap:4px}
   /* a colour: a row of its own, as a checkbox is — the swatch, its name, then "automatic" or a way back to it */
   .sw{display:flex;align-items:center;gap:10px;min-height:22px}
-  .sw input[type=color]{width:30px;height:22px;padding:1px;background:var(--panel);border:2px solid var(--line);cursor:pointer;flex:none}
+  .sw input[type=color]{width:30px;height:22px;padding:1px;background:var(--panel);border:1px solid var(--line2);border-radius:7px;cursor:pointer;flex:none}
   .sw .auto{font-size:12px;opacity:.45}
   .sw .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
-  .cutmodel{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid var(--line);padding:10px;margin-top:8px}
+  .cutmodel{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:8px}
   .cutmodel b{font-size:13px}
   .mine-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
   .mine-head .cap{margin:0}
   .mine-head .btn{padding:4px 9px;font-size:12px}
-  .folder,.loose{border:1px solid var(--line);margin-top:8px}
+  .folder,.loose{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:8px}
   .loose{border-color:transparent}
   .folder .tiles,.loose .tiles{padding:8px}
   .folder.over,.loose.over{outline:2px dashed var(--acc);outline-offset:2px}
@@ -145,7 +198,7 @@
   .fhead .rename{flex:1;font-size:13px;padding:2px 6px;min-width:0}
   .fhead .fcount{font:600 11px var(--mono);opacity:.5}
   .fhead .btn{padding:2px 8px;font-size:12px}
-  .pitem{border:1.5px dashed var(--line2);padding:10px;margin-top:12px}
+  .pitem{border:1.5px dashed var(--line2);border-radius:14px;padding:10px;margin-top:12px}
   .pitem .thumb{margin-top:0;cursor:pointer;position:relative}
   .pitem[style*="--link"]{border-color:var(--link)}
   .pitem.passive{margin-left:18px;border-style:dotted}
@@ -156,21 +209,24 @@
   .pitem .thumb .chain{display:inline-block;width:14px;height:14px;vertical-align:-2px;margin-right:4px;color:var(--link)}
   .pitem .thumb .chain svg{width:14px;height:14px}
   .thumb{margin-top:10px;display:grid;gap:4px;font-size:12px;opacity:.85}
-  .thumb img{width:100%;max-height:180px;object-fit:contain;background:#000;border:2px solid var(--line2)}
+  .thumb img{width:100%;max-height:180px;object-fit:contain;background:#000;border:1px solid var(--line2);border-radius:10px}
   .rep{border-top:1px dashed var(--line2);margin-top:14px}
   .compare{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
   .compare figure{margin:0;display:grid;gap:4px;font-size:12px;opacity:.9}
-  .compare img{width:100%;aspect-ratio:4/3;object-fit:contain;background:#000;border:2px solid var(--line2)}
+  .compare img{width:100%;aspect-ratio:4/3;object-fit:contain;background:#000;border:1px solid var(--line2);border-radius:10px}
   .compare.one{grid-template-columns:1fr}
-  .cpv{width:100%;display:grid;place-items:center;background:#000;border:2px solid var(--line2);font-size:12px;opacity:.95}
+  .cpv{width:100%;display:grid;place-items:center;background:#000;border:1px solid var(--line2);border-radius:10px;overflow:hidden;font-size:12px;opacity:.95}
   .cpv canvas{width:100%;height:100%;display:block;background:repeating-conic-gradient(#3a3a46 0 25%,#262630 0 50%) 0 0/16px 16px}
   .ref{display:grid;grid-template-columns:56px 1fr auto;gap:10px;align-items:center;margin-top:8px;font-size:12px;opacity:.9}
-  .ref img{width:56px;height:56px;object-fit:cover;border:2px solid var(--line2)}
+  .ref img{width:56px;height:56px;object-fit:cover;border:1px solid var(--line2);border-radius:8px}
   .ref .btn{padding:4px 9px;font-size:12px}
   .hint.err{color:#ff7a88;opacity:1;word-break:break-word}
-  .chips{display:flex;flex-wrap:wrap;gap:6px}
-  .chips button{border:2px solid var(--c,#fff);background:transparent;color:var(--c,#fff);padding:8px 12px;cursor:pointer;font-weight:600;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .chips button.on{background:var(--c,#fff);color:var(--ink)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chips button{border:1px solid var(--line2);background:transparent;color:var(--text);padding:7px 13px 7px 11px;border-radius:999px;cursor:pointer;font-weight:500;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-flex;align-items:center;gap:7px}
+  .chips:not(.small) button::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--c,#fff);flex:none}   /* a channel: its colour */
+  .chips button:hover{background:rgba(255,255,255,.08)}
+  .chips button.on{background:rgba(255,255,255,.18);border-color:rgba(255,255,255,.45)}
+  .chips.small button.on{background:rgba(255,255,255,.9);color:var(--ink);border-color:transparent}
   .chips.small{gap:4px}.chips.small button{padding:4px 8px;font-size:12px;font-weight:500}
   .recipe summary{cursor:pointer;margin:0;list-style:none}.recipe summary::-webkit-details-marker{display:none}.recipe summary::before{content:"▸ "}.recipe[open] summary::before{content:"▾ "}.recipe[open] summary{margin-bottom:8px}   /* Surprise me's recipe for the look, folded by default */
   .sl{display:grid;grid-template-columns:52px 1fr 52px;align-items:center;gap:8px;margin-top:10px;font-size:13px}
@@ -185,13 +241,13 @@
   .row.row3 .btn{padding-inline:4px;overflow:hidden;text-overflow:ellipsis}
   .row3{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end}
   .ink{display:grid;grid-template-columns:1fr 44px auto;align-items:center;gap:8px;margin-top:10px;font-size:13px}
-  .ink input[type=color]{width:44px;height:32px;padding:2px;background:var(--panel);border:2px solid var(--line);cursor:pointer}
+  .ink input[type=color]{width:44px;height:32px;padding:2px;background:var(--panel);border:1px solid var(--line2);border-radius:7px;cursor:pointer}
   .ink .btn{padding:4px 9px;font-size:12px}
   .chk{display:flex;align-items:center;gap:10px;cursor:pointer;margin:8px 0}
   .chk input{width:17px;height:17px;accent-color:var(--acc);flex:none}
-  .card{border:2px solid var(--line);border-left:8px solid var(--c);padding:12px;display:grid;gap:8px}
+  .card{border:1px solid var(--line);border-left:6px solid var(--c);border-radius:14px;background:rgba(0,0,0,.18);padding:12px;display:grid;gap:8px}
   .card .head{display:grid;grid-template-columns:44px 1fr;gap:8px}
-  .card input[type=color]{width:44px;height:40px;padding:2px;background:var(--panel);border:2px solid var(--line);cursor:pointer}
+  .card input[type=color]{width:44px;height:40px;padding:2px;background:var(--panel);border:1px solid var(--line2);border-radius:7px;cursor:pointer}
   .card .two{display:grid;grid-template-columns:1fr 110px;gap:8px}
   .card .acts,.acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
   .acts .btn{padding:4px 9px;font-size:12px}
@@ -201,15 +257,16 @@
 
   /* asset tiles */
   .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-  .tile{position:relative;aspect-ratio:1;border:2px solid var(--line);background:#1b1b2a;cursor:pointer;padding:0;display:grid;place-items:center}
+  .tile{position:relative;aspect-ratio:1;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.22);cursor:pointer;padding:0;display:grid;place-items:center}
   .tile.on{border-color:var(--acc)}
   .tile .none{font-size:12px;opacity:.7}
   #modal .tiles{grid-template-columns:repeat(auto-fill,minmax(84px,1fr))}
-  .gpick{display:flex;align-items:center;gap:10px;width:100%;border:2px solid var(--line);background:#1b1b2a;color:inherit;font:inherit;padding:4px 10px 4px 4px;cursor:pointer;text-align:left}
+  .gpick{display:flex;align-items:center;gap:10px;width:100%;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.22);color:inherit;font:inherit;padding:4px 10px 4px 4px;cursor:pointer;text-align:left}
   .gpick:hover{border-color:#fff}
   .gpick>span:not(.more){flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .gpick .more{font-size:12px;opacity:.6}
   .tile:hover{border-color:#fff}
+  .tile.on{border:2px solid var(--acc)}
   .ptile{padding:0;overflow:hidden}
   .ptile img{width:100%;aspect-ratio:1;object-fit:cover;display:block;pointer-events:none}
   .ptile .kind{position:absolute;left:4px;bottom:4px;font:600 10px var(--mono);background:rgba(7,7,12,.75);padding:1px 5px}
@@ -220,30 +277,32 @@
 
   /* canvas column */
   /* each in its own row, so the line under the toolbar left empty (in Setup) keeps the canvas in the row that grows */
-  #center{display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;min-height:0;min-width:0}
-  #toolbar{grid-row:1}#toolsub{grid-row:2}#stage{grid-row:3}#strip{grid-row:4}
-  /* under the toolbar, what is seldom wanted, quietly: muted words underlined (still 5:1 on its ground), brighter under the pointer */
-  #toolsub{display:flex;align-items:center;gap:14px;padding:0 18px;height:24px;background:#06060b;white-space:nowrap;overflow:hidden}
+  /* the canvas, floating on the ground; under it the tray: the size shown, every size, and the scope */
+  #center{display:grid;grid-template-rows:minmax(0,1fr) auto auto;gap:12px;min-height:0;min-width:0;position:relative}
+  #stage{grid-row:1}#toolsub{grid-row:2}#tray{grid-row:3}
+  /* under the canvas, what is seldom wanted, quietly: muted words underlined, brighter under the pointer */
+  #toolsub{display:flex;align-items:center;justify-content:center;gap:14px;height:20px;white-space:nowrap;overflow:hidden}
   #toolsub:empty{display:none}
-  #toolsub .quiet{border:0;background:none;padding:0;font-size:11.5px;color:#80809a;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+  #toolsub .quiet{border:0;background:none;padding:0;font-size:11.5px;color:var(--text3);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
   #toolsub .quiet:hover,#toolsub .quiet:focus-visible{color:#ededf5}
-  /* one line whatever the size is called: the name has a slot of its own (cut short, in full on hover),
-     the help is behind an ⓘ — so nothing after it moves, and the canvas below keeps its height */
-  #toolbar{display:flex;align-items:center;gap:14px;padding:0 18px;height:52px;border-bottom:2px solid var(--line);flex-wrap:nowrap;white-space:nowrap;overflow:hidden}
-  #toolbar .name{font:600 13px var(--mono);letter-spacing:.04em;font-variant-numeric:tabular-nums;width:30ch;flex:none;display:grid;line-height:17px}
-  #toolbar .name>*{overflow:hidden;text-overflow:ellipsis}
-  #toolbar .name small{font-size:11px;opacity:.55}
-  #toolbar .help{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;opacity:.6;cursor:help;flex:none}
-  #toolbar .help:hover{opacity:1}
-  #stage{min-height:0;min-width:0;display:grid;place-items:center;padding:18px;overflow:hidden;background:#06060b;position:relative}
+  /* the size shown: what it is called over its pixels, cut short (in full on hover) */
+  #toolbar{flex:0 1 150px;min-width:96px;align-self:center;padding-right:16px;border-right:1px solid var(--line)}
+  #toolbar .name{font-size:13px;display:flex;flex-direction:column;gap:4px;min-width:0}
+  #toolbar .name>*{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #toolbar .name small{font:12px var(--mono);color:var(--text3)}
+  #stage{min-height:0;min-width:0;display:grid;place-items:center;padding:18px;overflow:hidden;position:relative}
+  /* the tray: the sizes, each a thumbnail; the scope at its end */
+  #tray{display:flex;align-items:flex-end;gap:18px;padding:12px 16px;border-radius:22px;min-width:0}
+  #tray .scope{display:flex;flex-direction:column;gap:8px;align-items:flex-start;flex:none;margin-left:auto}
+  #tray .scope>span{font-size:12px;color:var(--text2)}
   #stage.focus #cv{outline:2px dashed var(--acc);outline-offset:4px}
-  #focustag{position:absolute;top:8px;left:50%;transform:translateX(-50%);max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--acc);color:var(--ink);font:700 11px var(--mono);letter-spacing:.06em;padding:3px 10px;pointer-events:none}
+  #focustag{position:absolute;top:8px;left:50%;transform:translateX(-50%);max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--acc);color:var(--acc-ink);font:700 12px var(--ui);padding:4px 12px;border-radius:999px;pointer-events:none}
   #focustag.off{background:#555;color:#fff}
   .lhead{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
   .lbtns{display:flex;gap:6px}
-  .focusbtn{border:1px solid var(--line2);background:transparent;color:inherit;font:700 10px var(--mono);letter-spacing:.08em;padding:3px 8px;cursor:pointer;opacity:.75}
+  .focusbtn{border:1px solid var(--line2);border-radius:8px;background:rgba(255,255,255,.05);color:inherit;font:500 12px var(--ui);padding:4px 9px;cursor:pointer;opacity:.85}
   .focusbtn:hover{opacity:1}
-  .focusbtn.on{background:var(--acc);border-color:var(--acc);color:var(--ink);opacity:1}
+  .focusbtn.on{background:var(--acc);border-color:transparent;color:var(--acc-ink);opacity:1}
   .focusbtn.v3btn{display:inline-flex;align-items:center;gap:4px}
   .focusbtn.v3btn svg{width:12px;height:12px}
   /* the layers in 3D: a canvas over the stage, the cover's own canvas waiting under it; a bar of controls at its foot */
@@ -251,28 +310,31 @@
   #stage.v3 #cv3d{display:block}
   #stage.v3 #cv{visibility:hidden}
   #stage.v3 #focustag{display:none}
-  #v3hud{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:none;align-items:center;gap:10px;max-width:calc(100% - 24px);padding:6px 8px 6px 12px;background:rgba(20,20,31,.94);border:1px solid var(--line2);font-size:12px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s}
+  #v3hud{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:none;align-items:center;gap:10px;max-width:calc(100% - 24px);padding:7px 8px 7px 14px;background:rgba(28,30,40,.82);border:1px solid rgba(255,255,255,.2);border-radius:14px;box-shadow:0 14px 34px rgba(0,0,0,.4);font-size:12px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s}
   #stage.v3 #v3hud{display:flex}
   #stage.v3open #v3hud{opacity:1;pointer-events:auto}
   #v3hud .v3tip{opacity:.6;overflow:hidden;text-overflow:ellipsis;min-width:0;cursor:help}
   #v3hud .v3sl{display:flex;align-items:center;gap:6px;flex:none;opacity:.85}
   #v3hud .v3sl input{width:90px;accent-color:var(--acc)}
   #v3hud .focusbtn{flex:none}
-  #stage canvas{display:block;touch-action:none;box-shadow:0 0 0 2px var(--line2)}
+  #stage canvas{display:block;touch-action:none;border-radius:6px;box-shadow:0 0 0 1px rgba(255,255,255,.12),0 40px 90px rgba(0,0,0,.55)}
+  #stage #cv3d{border-radius:0}
   #cv,#strip canvas,#deal figure canvas{background:repeating-conic-gradient(#3a3a46 0 25%,#262630 0 50%) 0 0/16px 16px}   /* a see-through ground shows as a checkerboard */
   #stage.alpha canvas{background:repeating-conic-gradient(#3a3a48 0% 25%,#24242e 0% 50%) 0 0/20px 20px}
-  #strip{display:flex;gap:14px;padding:12px 18px 8px;border-top:2px solid var(--line);overflow-x:scroll;overflow-y:hidden;align-items:flex-end;min-width:0}
-  #strip::-webkit-scrollbar{height:12px}
-  #strip::-webkit-scrollbar-track{background:var(--panel)}
-  #strip::-webkit-scrollbar-thumb{background:#55556e;border:2px solid var(--panel)}
-  #strip::-webkit-scrollbar-thumb:hover{background:#8080a0}
+  #strip{display:flex;gap:14px;padding:2px 2px 4px;overflow-x:auto;overflow-y:hidden;align-items:flex-end;min-width:0;flex:0 1 auto}
+  #strip::-webkit-scrollbar{height:8px}
+  #strip::-webkit-scrollbar-track{background:transparent}
+  #strip::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:4px}
+  #strip::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.3)}
   .nm-row{display:grid;grid-template-columns:96px 1fr;gap:8px;align-items:center;margin-top:8px}
   .nm-row span{font:600 12px var(--mono);opacity:.6}
-  #strip figure{margin:0;cursor:pointer;outline:2px solid transparent;outline-offset:4px;flex:none}
-  #strip figure.on{outline-color:var(--acc)}
-  #strip canvas{display:block;height:84px;width:auto}
+  #strip figure{margin:0;cursor:pointer;flex:none;display:flex;flex-direction:column;align-items:center}
+  #strip figure canvas{border-radius:6px;box-shadow:0 0 0 1px rgba(255,255,255,.18)}
+  #strip figure.on canvas{box-shadow:0 0 0 2px var(--acc)}
+  #strip figure.on figcaption{opacity:1;color:#fff}
+  #strip canvas{display:block;height:64px;width:auto}
   #strip.alpha canvas{background:repeating-conic-gradient(#3a3a48 0% 25%,#24242e 0% 50%) 0 0/12px 12px}
-  #strip figcaption{font-size:12px;line-height:18px;font-weight:600;opacity:.75;margin-top:6px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+  #strip figcaption{font:600 12px/18px var(--mono);opacity:.7;margin-top:6px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
   #strip figure{padding-bottom:2px}
   #strip figcaption .own{display:none;color:var(--acc);font-size:10px;margin-left:5px;cursor:help}   /* a size drawn in a layout of its own */
   #strip figure.own figcaption .own{display:inline}
@@ -280,8 +342,9 @@
 
   /* layers */
   .layers{display:grid;gap:3px}
-  .layer{display:grid;grid-template-columns:26px 26px 1fr auto;align-items:center;gap:4px;border:2px solid var(--line);background:var(--panel);padding:3px 6px 3px 3px;cursor:pointer;user-select:none}
-  .layer.on{border-color:var(--acc)}
+  .layer{display:grid;grid-template-columns:26px 26px 1fr auto;align-items:center;gap:4px;border:1px solid transparent;border-radius:11px;background:rgba(255,255,255,.04);padding:4px 6px 4px 4px;cursor:pointer;user-select:none}
+  .layer:hover{background:rgba(255,255,255,.08)}
+  .layer.on{border-color:color-mix(in srgb,var(--acc) 75%,transparent);background:color-mix(in srgb,var(--acc) 14%,transparent)}
   .layer.peek:not(.on){border-color:#9a9ab4}   /* its sheet is under the pointer in the 3D view */
   .layer.over{box-shadow:0 -3px 0 var(--acc)}
   .layer.hidden .nm{opacity:.35}
@@ -310,12 +373,12 @@
   .layer.clip .nm::before{content:"↓ ";color:var(--acc)}
   .layer .rename{font-size:13px;padding:2px 6px;min-width:0;width:100%}
 
-  #tip{position:fixed;z-index:60;background:var(--panel);border:1px solid var(--line2);box-shadow:0 8px 24px rgba(0,0,0,.45);padding:10px 12px;font-size:12.5px;line-height:1.7;color:#fff;white-space:normal}
-  #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#fff;color:var(--ink);padding:12px 22px;font-weight:600;box-shadow:6px 6px 0 var(--acc);opacity:0;pointer-events:none;transition:opacity .2s;z-index:50;max-width:80vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #tip{position:fixed;z-index:60;background:var(--solid2);border:1px solid var(--line2);border-radius:12px;box-shadow:0 14px 34px rgba(0,0,0,.45);padding:10px 12px;font-size:12.5px;line-height:1.7;color:#fff;white-space:normal}
+  #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:rgba(250,250,252,.94);color:var(--ink);padding:12px 22px;border-radius:999px;font-weight:600;box-shadow:0 14px 40px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .2s;z-index:50;max-width:80vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #toast.on{opacity:1}
   #toast.on.act{pointer-events:auto}   /* a word with a way on: its button can be clicked while it shows */
   #toast button{margin-left:16px;border:0;background:none;color:var(--ink);font:inherit;font-weight:700;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
-  body.drop::after{content:attr(data-drop);position:fixed;inset:12px;border:3px dashed var(--acc);background:rgba(10,10,18,.82);display:grid;place-items:center;font-size:28px;letter-spacing:.2em;z-index:45;pointer-events:none}
+  body.drop::after{content:attr(data-drop);position:fixed;inset:12px;border:3px dashed var(--acc);border-radius:24px;background:rgba(10,10,18,.82);display:grid;place-items:center;font-size:28px;letter-spacing:.2em;z-index:45;pointer-events:none}
   /* the ransom note's letters, one by one: the strip (each letter as drawn) and the picked letter's controls */
   .letters{display:grid;gap:6px;margin:4px 0 8px}
   .lrow{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
@@ -333,11 +396,12 @@
   .ledit .lhead{display:flex;justify-content:space-between;align-items:baseline}.ledit .lhead b{font-size:18px}
   .lgrid{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px 10px;align-items:center;margin:10px 0}
   .lcol{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
-  .lsw{width:22px;height:22px;border:2px solid var(--line);padding:0;cursor:pointer}
+  .lsw{width:22px;height:22px;border:1px solid var(--line2);border-radius:6px;padding:0;cursor:pointer}
   .lsw.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}.lsw.auto{background:var(--panel);color:#fff;font-size:12px}
-  .lcol input[type=color]{width:30px;height:22px;padding:1px;background:var(--panel);border:2px solid var(--line);cursor:pointer}
+  .lcol input[type=color]{width:30px;height:22px;padding:1px;background:var(--panel);border:1px solid var(--line2);border-radius:7px;cursor:pointer}
   /* Surprise me's window: over the left column, the canvas left in view; the hands as they are dealt, the one kept marked */
-  #deal,#letterwin,#cropwin,#weavewin,#brushwin{position:fixed;z-index:35;background:var(--bg);border:3px solid #fff;box-shadow:8px 8px 0 var(--acc);padding:14px;display:grid;gap:10px;overflow:auto}
+  #deal,#letterwin,#cropwin,#weavewin,#brushwin{position:fixed;z-index:35;background-color:rgba(28,30,40,.72);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid rgba(255,255,255,.22);border-radius:20px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 30px 70px rgba(0,0,0,.55);padding:16px;display:grid;gap:10px;overflow:auto}
+  html.solid #deal,html.solid #letterwin,html.solid #cropwin,html.solid #weavewin,html.solid #brushwin{background-color:var(--solid2);-webkit-backdrop-filter:none;backdrop-filter:none}
   #deal[hidden],#letterwin[hidden],#cropwin[hidden],#weavewin[hidden],#brushwin[hidden]{display:none}
   #deal .head,#letterwin .head,#cropwin .head,#weavewin .head,#brushwin .head{display:flex;align-items:center;justify-content:space-between;gap:8px}
   #deal .head b,#letterwin .head b,#cropwin .head b,#weavewin .head b,#brushwin .head b{font-size:15px}
@@ -358,7 +422,7 @@
   #crop-stage{background:repeating-conic-gradient(#2a2a33 0 25%,#1d1d24 0 50%) 0 0/16px 16px}
   #deal .hands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   #deal .hands.tall{grid-template-columns:repeat(3,minmax(0,1fr))}
-  #deal figure{margin:0;border:2px solid var(--line);background:var(--panel);min-width:0}
+  #deal figure{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:rgba(0,0,0,.25);min-width:0}
   #deal figure.slot{aspect-ratio:var(--ar);background:repeating-linear-gradient(135deg,var(--panel) 0 8px,var(--line) 8px 9px);opacity:.6}
   #deal figure.hand{cursor:pointer;animation:dealIn .25s ease-out}
   #deal figure.hand:hover{border-color:var(--line2)}
@@ -375,13 +439,29 @@
   body.dealing #deal figure{pointer-events:none}body.dealing #deal .acts button,body.dealing #deal .hint .link{pointer-events:none;opacity:.5}
   @keyframes dealIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
   @media (prefers-reduced-motion:reduce){#deal figure.hand{animation:none}}
-  #modal{position:fixed;inset:0;background:rgba(5,5,10,.86);display:grid;place-items:center;z-index:40}
+  #modal{position:fixed;inset:0;background:rgba(5,5,10,.55);display:grid;place-items:center;z-index:40}
   #modal[hidden]{display:none}
-  #modal .dlg{width:min(540px,92vw);max-height:88vh;overflow:auto;background:var(--bg);border:3px solid #fff;box-shadow:12px 12px 0 var(--acc);padding:26px;display:grid;gap:14px}
-  #modal .bar{height:14px;border:2px solid #fff;background:var(--panel)}
+  #modal .dlg{width:min(540px,92vw);max-height:88vh;overflow:auto;background-color:rgba(26,26,36,.78);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid rgba(255,255,255,.2);border-radius:24px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 40px 110px rgba(0,0,0,.6);padding:26px;display:grid;gap:14px}
+  html.solid #modal .dlg{background-color:var(--solid2);-webkit-backdrop-filter:none;backdrop-filter:none}
+  #modal .bar{height:10px;border-radius:5px;overflow:hidden;background:rgba(255,255,255,.12)}
   #modal .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .15s}
   #modal .count{font:600 15px var(--mono)}
-  #modal h2{font:400 34px "Bebas Neue",var(--ui);letter-spacing:.06em;margin:0}
+  #modal h2{font:900 22px var(--ui);letter-spacing:.02em;margin:0}
+
+  /* Settings: a window over the editor, its pages on the left (what was the Setup mode) */
+  #settings{position:fixed;inset:0;z-index:30;display:grid;place-items:center;background:rgba(5,5,10,.45)}
+  #settings[hidden]{display:none}
+  #settings .win{width:min(1240px,calc(100vw - 48px));height:min(820px,calc(100vh - 48px));border-radius:28px;display:flex;overflow:hidden;background-color:rgba(22,22,30,.55);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 40px 120px rgba(0,0,0,.6)}
+  html.solid #settings .win{background-color:var(--solid)}
+  #setnav{width:236px;flex:none;padding:24px 14px 18px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:6px;background:rgba(0,0,0,.12)}
+  #setnav .cap{padding:0 12px;margin-bottom:6px}
+  #setnav button{height:42px;display:flex;align-items:center;gap:12px;padding:0 12px;border-radius:12px;border:0;background:transparent;color:var(--text2);font-size:14px;text-align:left;cursor:pointer}
+  #setnav button:hover{background:rgba(255,255,255,.08);color:var(--text)}
+  #setnav button.on{background:rgba(255,255,255,.16);color:#fff;font-weight:700;box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
+  #settings .setbody{flex:1;min-width:0;position:relative;display:flex;flex-direction:column}
+  #settings .setbody>.scroll{flex:1;padding:26px 32px 40px}
+  #settings .x{position:absolute;right:18px;top:18px;z-index:2;width:36px;height:36px;border-radius:11px;border:0;background:rgba(255,255,255,.08);color:#fff;font-size:14px;cursor:pointer}
+  #settings .x:hover{background:rgba(255,255,255,.16)}
   /* Surprise me's chances (oddsDialog): wide, in two columns, its head staying in view */
   #modal .dlg.odds{width:min(1000px,94vw)}
   #modal .dlg.odds .head{display:flex;justify-content:space-between;align-items:center;gap:12px;position:sticky;top:-26px;margin:-26px -26px 0;padding:16px 26px 10px;background:var(--bg);z-index:1}
@@ -409,7 +489,7 @@
   .ls-sizes .ls-plus{border-style:dashed;opacity:.8}.ls-sizes .ls-plus:hover{opacity:1}
   .ls-add{display:inline-flex;align-items:center;gap:4px;font:600 12px var(--mono)}
   .ls-add .ls-num{width:64px;padding:3px 6px;font:600 12px var(--mono);background:var(--panel);border:2px solid var(--line2)}
-  .ls-stage{height:min(58vh,560px);display:grid;place-items:center;background:var(--panel);border:2px solid var(--line);overflow:hidden}
+  .ls-stage{height:min(58vh,560px);display:grid;place-items:center;background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:14px;overflow:hidden}
   .ls-stage canvas{display:block;touch-action:none;background:repeating-conic-gradient(#3a3a46 0 25%,#262630 0 50%) 0 0/16px 16px}
   .ls-side{display:grid;gap:14px;min-width:0}
   .ls-side .parts{display:grid;gap:0}.ls-side .parts .chk{margin:3px 0;cursor:default}.ls-side .parts .chk span{cursor:pointer}.ls-side .parts .chk.on span{color:var(--acc);font-weight:600}
@@ -419,8 +499,8 @@
   @media(max-width:900px){.ls-body{grid-template-columns:1fr}}
   #modal .dlg.wide{width:min(880px,94vw)}
   .parts{display:grid;gap:3px}
-  .part{display:grid;grid-template-columns:12px 16px auto 1fr;align-items:center;gap:9px;border:2px solid var(--line);background:var(--panel);padding:6px 10px 6px 6px;margin:0;cursor:grab;user-select:none}
-  .part:hover{border-color:#9a9ab4}
+  .part{display:grid;grid-template-columns:12px 16px auto 1fr;align-items:center;gap:9px;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:7px 10px 7px 6px;margin:0;cursor:grab;user-select:none}
+  .part:hover{border-color:var(--line2);background:rgba(255,255,255,.08)}
   .part .grip{opacity:.4;font-size:13px;line-height:1}
   .part input{width:16px;height:16px;margin:0;accent-color:var(--acc);cursor:pointer}
   .part b{font-size:13px;white-space:nowrap}
@@ -429,12 +509,12 @@
   .part.dragging{opacity:.4}
   .part.over-up{box-shadow:0 -3px 0 var(--acc)}
   .part.over-down{box-shadow:0 3px 0 var(--acc)}
-  .logo-row{display:flex;align-items:center;gap:10px;border:2px solid var(--line);background:#1b1b2a;padding:4px 6px 4px 4px}
+  .logo-row{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.22);padding:4px 6px 4px 4px}
   .logo-row>span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
   .logo-row .lthumb{width:44px;height:44px;flex:none;display:grid;place-items:center;background:repeating-conic-gradient(#2a2a3a 0 25%,#1b1b2a 0 50%) 0 0/12px 12px}
   .logo-row .btn{padding:6px 12px}
   .fxcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
-  .fxcard{text-align:left;border:2px dashed var(--line);background:transparent;color:inherit;font:inherit;padding:10px 12px;cursor:pointer;display:block}
+  .fxcard{text-align:left;border:1px dashed var(--line2);border-radius:12px;background:transparent;color:inherit;font:inherit;padding:10px 12px;cursor:pointer;display:block}
   .fxcard:hover{border-color:#fff}
   .fxcard.on{border-color:var(--acc);background:rgba(255,255,255,.05)}
   .fxcard b{display:block;margin-bottom:6px;font-size:14px}
@@ -447,26 +527,29 @@
   .fxcards.slim .fxcard span{display:block;font-size:11.5px;line-height:1.45;opacity:.6}
   .fxcards.slim .fxcard:not(.on){opacity:.55}
   /* the phone's own arrangement goes under body[data-layout="phone"] (see arrange() in app.js): a narrow touch screen, whatever the host */
-  @media(max-width:1100px){html,body{overflow:auto}.app{height:auto}.body,.body.setup{grid-template-columns:1fr}aside{border:0!important}.split{display:none}.scroll{overflow:visible}#stage{height:60vh}}
+  /* a narrow window: everything one under another, the dock a row of buttons */
+  @media(max-width:1100px){html,body{overflow:auto}.app{height:auto}.body{grid-template-columns:1fr}.split{display:none}.body .scroll{overflow:visible}#stage{height:60vh}
+    #dock{flex-direction:row;overflow-x:auto}#dock .help{margin:0 0 0 auto}header{height:auto;flex-wrap:wrap;padding:8px 10px 8px 16px}
+    #settings .win{flex-direction:column}#setnav{width:auto;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}}
 </style>
 </head>
 <body>
+<div id="ambient"><canvas id="amb" width="48" height="27"></canvas></div>
 <div class="app">
-  <header id="top"></header>
+  <header id="top" class="glass"></header>
   <div class="body" id="body">
-    <aside id="left">
-      <nav class="tabs" id="tabs"></nav>
-      <div class="scroll" id="panel"></div>
-    </aside>
+    <nav id="dock" class="glass"></nav>
+    <aside id="left" class="glass"><div class="scroll" id="panel"></div></aside>
     <section id="center">
-      <div id="toolbar"></div>
-      <div id="toolsub"></div>
       <div id="stage"><canvas id="cv"></canvas></div>
-      <div id="strip"></div>
+      <div id="toolsub"></div>
+      <div id="tray" class="glass"><div id="toolbar"></div><div id="strip"></div><div class="scope" id="scope"></div></div>
     </section>
-    <aside id="right"><div class="scroll" id="side"></div></aside>
+    <aside id="right" class="glass"><div class="scroll" id="side"></div></aside>
   </div>
 </div>
+<div id="settings" hidden><div class="win glass"><nav id="setnav"></nav><div class="setbody"><button class="x" id="setclose">✕</button><div class="scroll" id="setpanel"></div></div></div></div>
+<div id="menu" class="glass" hidden></div>
 <div id="toast"></div>
 <div id="modal" hidden></div>
 <input type="file" id="file" hidden>

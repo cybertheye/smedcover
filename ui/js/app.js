@@ -64,7 +64,7 @@ const S = {
   cutModels: [],                         // the BiRefNet models and whether each is downloaded: [{id, bytes, have}] (cut_models)
   picked: [],                                       // a group selection: the ids of the layers in it (see group())
   importedFonts: [], systemFonts: [], latinFonts: new Set(["Bebas Neue", "JetBrains Mono"]),   // latinFonts: those that cannot set Chinese
-  mode: "edit", tab: { edit: "cover", setup: "brand" },
+  mode: "edit", tab: { edit: "content", setup: "brand" },
   sel: "",                               // size key shown on the main canvas
   layerId: "title",                      // selected layer
   hist: [], histIdx: -1,
@@ -145,6 +145,8 @@ const loadImage = (src) => new Promise((res) => { const im = new Image(); im.onl
 // ---------- persistence (debounced) and undo history
 const timers = {};
 const later = (key, ms, fn) => { clearTimeout(timers[key]); timers[key] = setTimeout(fn, ms); };
+/** The layer list, kept from one drawing of the Layers sheet to the next (renderSide fills it, the sheet shows it). */
+const layerBox = el("div", { id: "layerbox", style: "display:grid;gap:14px" });
 const persistProfile = () => later("profile", 400, () => saveProfile(S.profile).catch(fail));
 /** Where a cover is kept: one file for each channel of each profile. */
 const coverPath = (profileId, catId) => `covers/${profileId}/${catId}.json`;
@@ -382,7 +384,7 @@ function drawThumbs() {
 let drawQueued = false;
 function flushDraw() {
   if (!drawQueued) return;
-  drawQueued = false; ensureFonts(S.cover.layers); drawMain(); markStrip(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs);
+  drawQueued = false; ensureFonts(S.cover.layers); drawMain(); markStrip(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); later("ambient", 350, paintAmbient);
   if (S.letterWin) later("letters", 200, lettersShow);   // the ransom note's letters as now drawn (words typed, colours changed)
   if (S.weaveWin) later("weave", 200, weaveShow);   // the woven letters as now typed
   if (LAYED.redraw) later("layed", 80, LAYED.redraw);   // a layout preset's editor, with what arrived since (outlines, fonts)
@@ -396,7 +398,7 @@ function flushDraw() {
  * giving them without saying it is hidden) does a timer draw, as nothing would be drawn again otherwise.
  */
 let framesRun = 0;
-const drawInFrame = () => { framesRun++; flushDraw(); };
+const drawInFrame = (now) => { framesRun++; glassWatch(now); flushDraw(); };
 function queueDraw(stale = true) {
   if (stale) V3.stale = true;
   if (drawQueued) return;
@@ -427,7 +429,8 @@ function selectSize(key) {
   syncToolbar(); renderSide(); queueDraw();
   if (onStyleTab()) renderPanel();   // the template box is the size's: its layout, its own or the profile's, and the sizes facing its way
 }
-const onStyleTab = () => S.mode === "edit" && S.tab.edit === "style";
+/** Whether the open sheet shows the look or the layout, which a change of size or of a layout drawn anew bears on. */
+const onStyleTab = () => S.mode === "edit" && (S.tab.edit === "look" || S.tab.edit === "layout");
 /** Sets the scope a change of place or layout has (see SCOPES); the toolbar, the properties and the Style tab's template box say it. */
 function setScope(v) {
   S.settings.scope = v; persistSettings(); syncToolbar(); renderSide();
@@ -444,9 +447,8 @@ const SAVE_AS_LAYOUT = false;
  */
 function syncToolbar() {
   const size = selSize(), edit = S.mode === "edit";   // what it is called over its pixels, in two lines: names after the platforms can be long
-  $("toolbar").replaceChildren(...[el("span", { class: "name", title: sizeLabel(size) }, el("b", {}, caption(size)), el("small", {}, `${size.w}×${size.h}`)),
-    edit && el("div", { class: "grp" }, el("span", {}, t("props.scope")), scopeSeg()),
-    edit && el("span", { class: "help", title: t("cover.how"), onclick: (e) => showTip(e.currentTarget, t("cover.how")) }, el("span", { class: "info" }, "ⓘ"), t("cover.howShort"))].filter(Boolean));
+  $("toolbar").replaceChildren(el("span", { class: "name", title: sizeLabel(size) }, el("b", {}, caption(size)), el("small", {}, `${size.w}×${size.h}`)));
+  $("scope").replaceChildren(...(edit ? [el("span", {}, t("props.scope")), scopeSeg()] : []));
   $("toolsub").replaceChildren(...(edit && SAVE_AS_LAYOUT ? [el("button", { class: "quiet", title: t("layouts.saveTip"), onclick: saveLayoutDialog }, t("layouts.save"))] : []));
 }
 
@@ -672,7 +674,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
         setLayoutOf(st, keys, { template: lay.template, adjust: dragLayout(cv._layout, vw, vh, lay.adjust, lh.id, p.x, p.y, cv._titleBox) });
         moved = true; touch({ profile: true });
       };
-      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; if (moved && S.tab.edit === "style") renderPanel(); };
+      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; if (moved && onStyleTab()) renderPanel(); };
       return;
     }
     const sh = sceneGrip(e);
@@ -834,9 +836,13 @@ function select(options, value, onchange) {   // options: [[value, label]] or {g
 const px = (v) => String(Math.round(v)), times = (v) => v.toFixed(2) + "×", pct = (v) => Math.round(v * 100) + "%";
 
 // ---------- left panel, Edit mode
-function coverTab() {
+/** A sheet's heading: what it is for, in a word, and a line under it. */
+const sheetHead = (title, sub) => el("div", { class: "sheet-h" }, el("b", {}, title), sub && el("div", { class: "hint", style: "margin:0" }, sub));
+/** Content: the channel, and the cover's words — its title, subtitle and tag. */
+function contentSheet() {
   const c = S.cover;
   return [
+    sheetHead(t("sheet.content"), t("sheet.contentSub")),
     el("div", {}, cap("cover.category"), el("div", { class: "chips" }, S.profile.categories.map((k) =>
       el("button", { class: k.id === c.catId ? "on" : "", style: `--c:${k.color}`, onclick: () => switchChannel(k.id) }, k.name || k.code || "—"))),
       el("div", { class: "hint" }, t("cover.channelHint")),
@@ -847,8 +853,6 @@ function coverTab() {
     el("div", {}, cap("cover.subtitle"), textInput(c.subtitle, (v) => { c.subtitle = v; touch({ cover: true }); if (S.layerId === "subtitle") later("side", 700, renderSide); }, { placeholder: t("cover.subtitlePh") }),
       el("div", { class: "hint" }, t("cover.subtitleHint"))),
     el("div", {}, cap("cover.tag"), textInput(c.tag, (v) => { c.tag = v; touch({ cover: true }); }, { placeholder: t("cover.tagPh") })),
-    partsBox(),
-    photoBox(),
   ];
 }
 /**
@@ -921,17 +925,17 @@ function photoItem(L) {
     open && im && !passive && repaintBox(L));
 }
 /**
- * The ways in of a photo — upload, AI generate and (in Cover → Add photos) from the bitmaps — and the
- * AI generation box when it is open. In Cover an upload goes on the cover; in Assets → Bitmaps
- * (`fromLibrary` false) only into the library.
+ * The ways in of a photo — upload, AI generate and (in Assets → Add photos) from the bitmaps — and the
+ * AI generation box when it is open. In Add photos an upload goes on the cover; in the Bitmaps pane under it
+ * (`fromLibrary` false) only into the library, and AI generation is left to Add photos above it.
  */
 function photoAdders(fromLibrary) {
   return [
     el("div", { class: "row" + (fromLibrary ? " row3" : ""), style: "margin-top:0" },   // in Cover: from assets, upload, AI generate — one line
       fromLibrary && el("button", { class: "btn", title: t("lib.importHint"), onclick: libraryDialog }, t("lib.import")),
       el("button", { class: "btn", title: fromLibrary ? null : t("lib.uploadTip"), onclick: fromLibrary ? uploadPhotos : stockPhotos }, t("cover.upload")),
-      el("button", { class: "btn" + (GEN.open ? " on" : ""), onclick: () => { GEN.open = !GEN.open; renderPanel(); } }, t("gen.open"))),
-    GEN.open && genBox()];
+      fromLibrary && el("button", { class: "btn" + (GEN.open ? " on" : ""), onclick: () => { GEN.open = !GEN.open; renderPanel(); } }, t("gen.open"))),
+    fromLibrary && GEN.open && genBox()];
 }
 /** Cover → Add photos → From assets: a picture of the bitmaps, chosen, goes on the cover. */
 function libraryDialog() {
@@ -1358,13 +1362,18 @@ function assetsTab() {
   const pane = S.assetPane === "bitmap" ? "bitmap" : "vector", tab = (k) => el("button", { class: pane === k ? "on" : "", onclick: () => { S.assetPane = k; renderPanel(); $("panel").scrollTop = 0; } }, el("span", {}, t("assets.pane." + k)));   // the label dims, not the bars
   return [el("div", { class: "subtabs" }, tab("vector"), tab("bitmap")), ...(pane === "bitmap" ? bitmapPane() : vectorPane())];
 }
+/** The colour block's edge, one shape for every size and layout (in the Layout sheet). */
+const shapesSection = () => el("div", {}, cap("assets.shapes"), el("div", { class: "tiles" }, ACCENT_SHAPES.map(shapeTile)), el("div", { class: "hint" }, t("assets.shapesHint")));
+/** Assets: the cover's photos, then the libraries (vector assets, bitmaps). */
+const assetsSheet = () => [sheetHead(t("sheet.assets"), t("sheet.assetsSub")), photoBox(), ...assetsTab()];
+/** Layers: the list, kept in layerBox (see renderSide). */
+const layersSheet = () => [layerBox];
 function vectorPane() {
   const lang = getLang(), mine = [...userAssets.values()];
   return [
     aiSection(),
     mineSection(mine),
     el("div", {}, cap("assets.graphics"), el("div", { class: "tiles" }, GRAPHICS.map((g) => tile({ kind: "graphic", id: g.id })))),
-    el("div", {}, cap("assets.shapes"), el("div", { class: "tiles" }, ACCENT_SHAPES.map(shapeTile)), el("div", { class: "hint" }, t("assets.shapesHint"))),
     STICKER_GROUPS.map((g) => el("div", {}, el("label", { class: "cap" }, g.name[lang]), el("div", { class: "tiles" }, STICKERS.filter((s) => s.group === g.id).map((s) => tile({ kind: "sticker", id: s.id }))))),
   ];
 }
@@ -1534,7 +1543,8 @@ function cutWhere(L) {
 // for: the photo layer whose repaint is open; result: {src, w, h} waiting to be used or dropped; test: the image model's connection check
 // for: the photo layer whose repaint is open; of: the one the running repaint, or its result or error, belongs to
 const REP = { for: "", of: "", busy: false, job: 0, since: 0, error: "", result: null, test: null, confirmDrop: null };
-const onCoverTab = () => S.mode === "edit" && S.tab.edit === "cover";
+/** Whether the open sheet shows the cover's own things — its words, its layout parts, its photos — which follow its layers. */
+const onCoverTab = () => S.mode === "edit" && ["content", "layout", "assets"].includes(S.tab.edit);
 const repBusyText = () => t("rep.busy", Math.max(0, Math.round((Date.now() - REP.since) / 1000)));
 /** A copy of a picture no longer than `max` on its longer side, as JPEG: {mime, data, url, w, h}. */
 function shrink(im, max, q = 0.9) {
@@ -2635,11 +2645,13 @@ function layoutEditor(p, i, fresh = false) {
   LAYED.redraw = redraw;
   redraw();
 }
-function styleTab() {
+/** Look: the look, its settings, and how Surprise me matches it. */
+function lookSheet() {
   const st = S.profile.style, set = (k, v) => { st[k] = v; touch({ profile: true }); };
   const L = LOOKS[st.look] || LOOKS.cel, vals = lookParams(st.look, st.lookParams[st.look]);
   const tune = (k, v) => { st.lookParams[st.look] = { ...vals, ...st.lookParams[st.look], [k]: v }; draftTouch({ profile: true }, k); };
   return [
+    sheetHead(t("sheet.look"), t("sheet.lookSub")),
     el("div", { class: "box" }, cap("style.look"),
       select(LOOK_IDS.map((k) => [k, LOOKS[k].name[getLang()]]), st.look, (v) => { st.look = v; touch({ profile: true, panel: true, side: true, strip: true }); }),
       L.about && el("div", { class: "about" }, L.about[getLang()]),
@@ -2657,14 +2669,22 @@ function styleTab() {
       L.seeded && el("div", { class: "hint" }, t("style.shuffleHint")),
       L.params.length > 0 && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete st.lookParams[st.look]; if (st.lookArt) delete st.lookArt[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))),
     recipeBox(),
-    layoutBox(),
-    el("div", { class: "box" }, cap("style.design"),
-      el("button", { class: "btn wide", onclick: () => { S.profile.design.layers = JSON.parse(JSON.stringify(S.cover.layers.filter((l) => l.type !== "photo"))); touch({ profile: true }); toast(t("style.designSaved")); } }, t("style.saveDesign")),
-      el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.cover.layers = keepPhotos(JSON.parse(JSON.stringify(S.profile.design.layers)), S.cover.layers); S.layerId = "title"; touch({ cover: true, side: true }); } }, t("style.loadDesign")),
-      el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { for (const L of S.cover.layers) if (isLayout(L)) resetPlacement(L, "all"); touch({ cover: true, side: true }); } }, t("style.resetAll")),
-      el("div", { class: "hint" }, t("style.designHint"))),
   ];
 }
+/** Layout: the template and each size's layout, the parts it has, the colour block's edge, and every part back in place. */
+function layoutSheet() {
+  return [
+    sheetHead(t("sheet.layout"), t("sheet.layoutSub")),
+    layoutBox(),
+    partsBox(),
+    shapesSection(),
+    el("button", { class: "btn wide", onclick: resetPlaces }, t("style.resetAll")),
+  ];
+}
+/** The default design (the ⋯ menu): the cover's layers but its photos kept as the profile's start, or taken back from it. */
+function saveDesign() { S.profile.design.layers = JSON.parse(JSON.stringify(S.cover.layers.filter((l) => l.type !== "photo"))); touch({ profile: true }); toast(t("style.designSaved")); }
+function loadDesign() { S.cover.layers = keepPhotos(JSON.parse(JSON.stringify(S.profile.design.layers)), S.cover.layers); S.layerId = "title"; touch({ cover: true, side: true, panel: onCoverTab() }); }
+function resetPlaces() { for (const L of S.cover.layers) if (isLayout(L)) resetPlacement(L, "all"); touch({ cover: true, side: true }); }
 
 // ---------- left panel, Setup mode
 /** A small picture of graphic `ref` (null: none) in the channel colour `colour`, `px` across. */
@@ -2978,7 +2998,7 @@ function layerKinds(L) {
 function goToLayer(id) {
   if (!focusAllows(id)) return false;
   selectLayer(id);
-  const row = document.querySelector(`#side .layer[data-id="${CSS.escape(id)}"]`);
+  const row = layerBox.querySelector(`.layer[data-id="${CSS.escape(id)}"]`);
   if (row) { row.scrollIntoView({ block: "nearest" }); row.classList.add("flash"); setTimeout(() => row.classList.remove("flash"), 700); }
   return true;
 }
@@ -3011,7 +3031,7 @@ function nameClick(e, L) {
 }
 /** Turns a layer's name in the list into a field: Enter or leaving it keeps the new name, Esc does not; an empty name goes back to the automatic one. */
 function renameLayer(id) {
-  const L = layer(id), row = $("side").querySelector(`.layer[data-id="${CSS.escape(id)}"]`);
+  const L = layer(id), row = layerBox.querySelector(`.layer[data-id="${CSS.escape(id)}"]`);
   if (!L || !row) return;
   const auto = layerName({ ...L, name: "" }), was = layerName(L);
   const input = el("input", { type: "text", class: "rename", value: was, maxLength: 60, spellcheck: false,
@@ -4104,10 +4124,10 @@ function renderSide() {
   if (S.brushWin) brushShow();   // and the brush's panel
   const side = $("side"), y = side.scrollTop, L = layer(), here = S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off);
   // keep typing in the text box alive across rebuilds
-  const typing = document.activeElement && side.contains(document.activeElement) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename"));
+  const typing = document.activeElement && (side.contains(document.activeElement) || layerBox.contains(document.activeElement)) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename"));
   if (typing) return;
   const i = L ? here.indexOf(L) : -1, many = group();
-  side.replaceChildren(
+  layerBox.replaceChildren(   // the list, in the Layers sheet
     el("div", {}, el("div", { class: "lhead" }, cap("layers.title"),
         el("div", { class: "lbtns" }, el("button", { class: "focusbtn v3btn" + (V3.to ? " on" : ""), title: t("v3.tip"), onclick: () => set3d(!V3.to), innerHTML: `${ICONS.stack}<span>${t("v3.label")}</span>` }),
           (() => { const off = layoutLayers().every((l) => !l.visible); return el("button", { class: "focusbtn" + (off ? " on" : ""), title: t("layout.tip"), onclick: toggleLayout }, t(off ? "layout.show" : "layout.hide")); })(),
@@ -4119,7 +4139,8 @@ function renderSide() {
         el("button", { class: "btn", disabled: !copiable(L) || many.length > 0, onclick: duplicateLayer }, t("layers.dup")),
         el("button", { class: "btn", disabled: many.length ? !many.some(isAdded) : !(L && isRemovable(L)), onclick: () => (many.length ? removeGroup() : removeLayer()) }, t("layers.del")),
         el("button", { class: "btn", title: t("layers.up"), disabled: many.length > 0 || i < 1 || i >= here.length - 1, onclick: () => shiftLayer(1) }, "▲"),
-        el("button", { class: "btn", title: t("layers.down"), disabled: many.length > 0 || i <= 1, onclick: () => shiftLayer(-1) }, "▼"))),
+        el("button", { class: "btn", title: t("layers.down"), disabled: many.length > 0 || i <= 1, onclick: () => shiftLayer(-1) }, "▼"))));
+  side.replaceChildren(   // what is selected, in the column on the right
     many.length ? el("div", { class: "box" }, el("label", { class: "cap" }, t("props.group", many.length)),
       el("div", { class: "hint", style: "margin-top:0" }, many.map(layerName).join(" · ")),
       many.some((x) => x.locked) && el("div", { class: "hint" }, t("props.groupLocked")),
@@ -4210,8 +4231,8 @@ function stage3d() {
     tick3d();
   }, { passive: false });
   // the list and the stack point at each other: the pointer on a row lights its sheet and dims the rest
-  $("side").addEventListener("pointermove", (e) => { if (V3.on) peek3d((e.target.closest && e.target.closest(".layers .layer") || {}).dataset?.id || ""); });
-  $("side").addEventListener("pointerleave", () => peek3d(""));
+  layerBox.addEventListener("pointermove", (e) => { if (V3.on) peek3d((e.target.closest && e.target.closest(".layers .layer") || {}).dataset?.id || ""); });
+  layerBox.addEventListener("pointerleave", () => peek3d(""));
 }
 function sync3dHud() {
   $("v3hud").replaceChildren(
@@ -4224,7 +4245,7 @@ function sync3dHud() {
 function peek3d(id) { if (V3.on && V3.peek !== id) { V3.peek = id; tick3d(); } }
 /** The row of the sheet under the pointer is marked in the list. */
 function markRows() {
-  for (const row of document.querySelectorAll("#side .layers .layer")) row.classList.toggle("peek", V3.on && row.dataset.id === V3.hover);
+  for (const row of layerBox.querySelectorAll(".layers .layer")) row.classList.toggle("peek", V3.on && row.dataset.id === V3.hover);
 }
 /** Whether the layer of sheet `sh` has anything at (fx, fy) across the cover: its painted alpha, a cell either way of it. */
 function solid(sh, fx, fy) {
@@ -4662,9 +4683,10 @@ const projectActions = {
 // ---------- chrome
 function setMode(mode) {
   S.mode = mode;
-  if (mode !== "edit" && V3.on) close3d();   // the layer column is not there in Setup
-  columns();   // the left column has a width of its own in Setup (and the handles' words follow the language)
-  $("body").classList.toggle("setup", mode === "setup");
+  if (mode !== "edit" && V3.on) close3d();   // Settings lies over the canvas
+  columns();   // the handles' words follow the language
+  $("settings").hidden = mode !== "setup";
+  closeMenu();
   if (mode !== "edit") { lettersClose(); cropClose(); weaveClose(); brushClose(); }
   syncTop(); syncTabs(); renderPanel(); renderSide(); syncToolbar(); queueDraw();
 }
@@ -4838,36 +4860,139 @@ function clearDialog() {
     el("button", { class: "btn wide", onclick: closeModal }, t("exp.cancel"))));
   m.hidden = false;
 }
+/** The shell's icons, 24 units across (the dock, the top bar, the menu). */
+const SHELL_ICONS = {
+  content: '<path d="M5 6V4h14v2"/><path d="M12 4v16"/><path d="M9 20h6"/>',
+  look: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5C21 6.6 17 3 12 3Z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/>',
+  layout: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 14 21 11"/>',
+  assets: '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
+  layers: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14"/><path d="M12 17h.01"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
+  spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
+  download: '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
+  more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
+};
+const ico = (k, px = 20) => el("span", { class: "ico", style: `display:inline-grid;width:${px}px;height:${px}px`, innerHTML: `<svg viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SHELL_ICONS[k]}</svg>` });
+/**
+ * The top bar: the profile and the channel; undo and redo; Surprise me, Export, and the ⋯ menu (the cover's
+ * default design and Clear, the profile's settings, the glass, the language).
+ */
 function syncTop() {
   if (!S.profile) return;
-  const b = (key, onclick, props = {}) => el("button", { class: "btn", onclick, ...props }, t(key));
-  const mode = (m) => el("button", { class: "btn" + (S.mode === m ? " on" : ""), onclick: () => setMode(m) }, t("mode." + m));
+  const step = (key, icon, by, off) => el("button", { class: "ibtn", title: t(key), "aria-label": t(key), disabled: off, onclick: () => timeTravel(by) }, ico(icon, 18));
   $("top").replaceChildren(
     el("h1", {}, "SMEDCOVER"),
-    el("div", { class: "seg big" }, mode("edit"), mode("setup")),
-    el("div", { class: "grp" }, el("span", {}, t("top.profile")),
-      el("select", { onchange: (e) => switchProfile(e.target.value).catch((err) => { fail(err); syncTop(); }) }, S.profiles.map((p) => el("option", { value: p.id, selected: p.id === S.profile.id }, p.name)))),
-    // project files (projectActions: open, save, reset) have no place in the top bar for now; the code stays
-    el("div", { class: "grp" }, b("top.undo", () => timeTravel(-1), { disabled: S.histIdx <= 0 }), b("top.redo", () => timeTravel(1), { disabled: S.histIdx >= S.hist.length - 1 }),
-      b("top.clear", clearDialog, { title: t("top.clearTip") })),
+    el("div", { class: "sep" }),
+    el("div", { class: "crumb" },
+      el("select", { title: t("top.profile"), onchange: (e) => switchProfile(e.target.value).catch((err) => { fail(err); syncTop(); }) }, S.profiles.map((p) => el("option", { value: p.id, selected: p.id === S.profile.id }, p.name))),
+      el("span", {}, "/"), el("span", { class: "dot" }),
+      S.cover && el("select", { title: t("top.channel"), onchange: (e) => switchChannel(e.target.value) }, S.profile.categories.map((k) => el("option", { value: k.id, selected: k.id === S.cover.catId }, k.name || k.code || "—")))),
     el("div", { class: "spacer" }),
-    el("button", { class: "btn solid cta deal-btn", style: "margin-right:10px", title: t("top.surpriseHint"), disabled: SURPRISE.busy, onclick: surprise }, t(SURPRISE.busy ? "top.surpriseBusy" : "top.surprise")),
-    el("button", { class: "btn solid cta", onclick: exportDialog }, t("top.export")),
-    el("select", { title: t("lang"), onchange: (e) => { S.settings.lang = e.target.value; setLang(e.target.value); persistSettings(); setMode(S.mode); buildStrip(); } },
-      [["zh", "中文"], ["en", "English"]].map(([v, l]) => el("option", { value: v, selected: v === getLang() }, l))));
+    el("div", { class: "grp" }, step("top.undo", "undo", -1, S.histIdx <= 0), step("top.redo", "redo", 1, S.histIdx >= S.hist.length - 1), el("span", {}, t("top.saved"))),
+    el("div", { class: "spacer" }),
+    el("button", { class: "btn cta glassy deal-btn", title: t("top.surpriseHint"), disabled: SURPRISE.busy, onclick: surprise }, ico("spark", 18), t(SURPRISE.busy ? "top.surpriseBusy" : "top.surprise")),
+    el("button", { class: "btn cta solid", onclick: exportDialog }, ico("download", 18), t("top.export")),
+    el("button", { class: "ibtn" + (MENU.open ? " on" : ""), id: "morebtn", title: t("top.more"), "aria-label": t("top.more"), "aria-haspopup": "menu", "aria-expanded": String(MENU.open), onclick: toggleMenu }, ico("more", 18)));
   document.body.dataset.drop = t("msg.dropHere");
+  if (MENU.open) renderMenu();
 }
-const TABS = { edit: { cover: coverTab, style: styleTab, assets: assetsTab }, setup: { brand: brandTab, sizes: sizesTab, ai: aiTab } };
+// ---------- the ⋯ menu
+const MENU = { open: false };
+function toggleMenu() { if (MENU.open) closeMenu(); else openMenu(); }
+function openMenu() {
+  MENU.open = true; renderMenu();
+  const m = $("menu"), b = $("morebtn").getBoundingClientRect();
+  Object.assign(m.style, { top: `${b.bottom + 8}px`, right: `${Math.max(8, innerWidth - b.right)}px` });
+  m.hidden = false; $("morebtn").classList.add("on"); $("morebtn").setAttribute("aria-expanded", "true");
+}
+function closeMenu() {
+  MENU.open = false; $("menu").hidden = true;
+  const b = $("morebtn"); if (b) { b.classList.remove("on"); b.setAttribute("aria-expanded", "false"); }
+}
+function renderMenu() {
+  const go = (fn) => () => { closeMenu(); fn(); };
+  const item = (label, sub, fn, cls = "") => el("button", { class: "mi " + cls, role: "menuitem", onclick: go(fn) }, el("span", { class: "mt" }, el("span", {}, label), sub && el("small", {}, sub)));
+  const page = (k) => item(t("tab." + k), null, () => { S.tab.setup = k; setMode("setup"); });
+  const on = glassOn();
+  $("menu").replaceChildren(
+    el("div", { class: "mg" }, t("menu.cover")),
+    item(t("style.saveDesign"), t("menu.saveDesignSub"), saveDesign),
+    item(t("style.loadDesign"), t("menu.loadDesignSub"), loadDesign),
+    item(t("menu.clear"), t("top.clearTip"), clearDialog, "danger"),
+    el("div", { class: "sep" }),
+    el("div", { class: "mg" }, t("menu.profile", S.profile.name)),
+    page("brand"), page("sizes"), page("ai"),
+    el("div", { class: "sep" }),
+    el("div", { class: "row", title: CAN_BLUR ? t("menu.glassTip") : null }, el("span", {}, t("menu.glass")),
+      el("button", { class: "tog" + (on ? " on" : ""), role: "switch", "aria-checked": String(on), "aria-label": t("menu.glass"), disabled: !CAN_BLUR, onclick: () => { setGlass(!on, true); renderMenu(); } })),
+    el("div", { class: "row" }, el("span", {}, t("langName")),
+      el("div", { class: "seg" }, [["zh", "中文"], ["en", "English"]].map(([v, l]) => el("button", { class: "btn" + (v === getLang() ? " on" : ""),
+        onclick: go(() => { S.settings.lang = v; setLang(v); persistSettings(); setMode(S.mode); buildStrip(); }) }, l)))));
+}
+addEventListener("pointerdown", (e) => { if (MENU.open && !$("menu").contains(e.target) && !(e.target.closest && e.target.closest("#morebtn"))) closeMenu(); });
+// Settings closes by its ✕, Esc, or a click beside its window
+$("setclose").onclick = () => setMode("edit");
+$("settings").addEventListener("pointerdown", (e) => { if (e.target === $("settings")) setMode("edit"); });
+// ---------- the glass: frosted panes over the blurred cover, or plain ones where they would slow the canvas
+const CAN_BLUR = !!(globalThis.CSS && (CSS.supports("backdrop-filter", "blur(2px)") || CSS.supports("-webkit-backdrop-filter", "blur(2px)")));
+const glassOn = () => CAN_BLUR && S.settings.glass !== false;
+/** Frosts the panes, or makes them plain; `byHand`, the user's choice (the menu), kept. */
+function setGlass(on, byHand = false) {
+  if (byHand) { S.settings.glass = on; persistSettings(); GLASS.trial = 0; GLASS.done = true; }   // the user's word ends a trial
+  document.documentElement.classList.toggle("solid", !(on && CAN_BLUR));
+}
+/**
+ * Watches the frames while something is dragged — a slider held, a layer moved on the canvas — when the canvas is
+ * drawn in one frame after another (typing draws as often as keys come, which says nothing of the frames). Should
+ * they come slowly with the glass on, the panes go plain for as many frames again, and stay plain — said once — if
+ * that made them come faster by a fifth; else the glass comes back. Tried once a session at most.
+ */
+const GLASS = { last: 0, gaps: [], trial: 0, done: false };
+function glassWatch(now) {
+  const dragging = !!(DRAFT.down || LIVE), gap = GLASS.last ? now - GLASS.last : 0;
+  GLASS.last = dragging ? now : 0;
+  if (!dragging || !gap || gap > 250 || GLASS.done || (!GLASS.trial && !glassOn())) return;   // gap > 250: not one frame after another
+  GLASS.gaps.push(gap);
+  if (GLASS.gaps.length < 90) return;
+  const mid = GLASS.gaps.sort((a, b) => a - b)[45]; GLASS.gaps = [];
+  if (!GLASS.trial) { if (mid > 28) { GLASS.trial = mid; document.documentElement.classList.add("solid"); } return; }
+  if (mid < GLASS.trial * 0.8) { setGlass(false, true); toast(t("ui.glassOff")); }
+  else setGlass(glassOn());
+  GLASS.trial = 0; GLASS.done = true;
+}
+/** The page's ground (#ambient): the cover as last drawn, tiny — CSS blurs it — so the glass takes its colours. */
+function paintAmbient() {
+  const src = $("cv"), dst = $("amb");
+  if (!src.width || !src.height) return;
+  const h = Math.max(1, Math.round((48 * src.height) / src.width));
+  if (dst.height !== h) dst.height = h;
+  const x = dst.getContext("2d"); x.clearRect(0, 0, 48, h); x.drawImage(src, 0, 0, 48, h);   // cleared: a see-through cover leaves nothing of the last behind
+}
+const TABS = { edit: { content: contentSheet, look: lookSheet, layout: layoutSheet, assets: assetsSheet, layers: layersSheet }, setup: { brand: brandTab, sizes: sizesTab, ai: aiTab } };
+/** The dock's buttons, one per sheet, each opening its sheet; in Settings, its pages down the window's left. */
 function syncTabs() {
-  $("tabs").replaceChildren(...Object.keys(TABS[S.mode]).map((k) => el("button", { class: k === S.tab[S.mode] ? "on" : "", onclick: () => { S.tab[S.mode] = k; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, t("tab." + k))));
+  if (S.mode === "setup") {
+    $("setclose").title = t("set.close"); $("setclose").setAttribute("aria-label", t("set.close"));
+    $("setnav").replaceChildren(el("div", { class: "cap" }, t("set.title")),
+      ...Object.keys(TABS.setup).map((k) => el("button", { class: k === S.tab.setup ? "on" : "", onclick: () => { S.tab.setup = k; syncTabs(); renderPanel(); $("setpanel").scrollTop = 0; } }, t("tab." + k))));
+    return;
+  }
+  $("dock").replaceChildren(...Object.keys(TABS.edit).map((k) => el("button", { class: k === S.tab.edit ? "on" : "", "aria-pressed": String(k === S.tab.edit),
+      onclick: () => { S.tab.edit = k; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, ico(k, 22), t("dock." + k))),
+    el("button", { class: "help", title: t("cover.how"), "aria-label": t("cover.howShort"), onclick: (e) => showTip(e.currentTarget, t("cover.how")) }, ico("help", 20)));
 }
 /** Makes the profile's look current, for anything drawn outside a cover (asset tiles, previews). */
 const useLook = () => setLook(S.profile.style.look, S.profile.style.lookParams[S.profile.style.look], S.profile.style.lookSeed, !!recordOf(mainPhoto()) || S.profile.style.theme !== "light");
+/** Ink that reads on the channel colour: dark on a light one, white on a dark one (the Export button, the sheet's accents). */
+const inkOn = (hex) => { const [r, g, b] = hexToRgb(hex); return 0.2126 * r + 0.7152 * g + 0.0722 * b > 150 ? "#15151c" : "#ffffff"; };
 function renderPanel() {
   if (!S.cover) return;
   useLook();
-  const panel = $("panel"), y = panel.scrollTop;
+  const panel = $(S.mode === "setup" ? "setpanel" : "panel"), y = panel.scrollTop;
   document.documentElement.style.setProperty("--acc", cat().color);
+  document.documentElement.style.setProperty("--acc-ink", inkOn(cat().color));
   panel.replaceChildren(...TABS[S.mode][S.tab[S.mode]]().flat(Infinity).filter(Boolean));
   panel.scrollTop = y;
 }
@@ -4898,11 +5023,11 @@ const layoutKind = () => (FORCED === "phone" || FORCED === "desk" ? FORCED : PHO
 function arrange() { document.body.dataset.layout = layoutKind(); }
 PHONE.addEventListener("change", () => { arrange(); if (S.profile) columns(); });
 arrange();
-const COLUMNS = { left: { min: 300, def: 372 }, right: { min: 260, def: 320 }, setup: { min: 340, def: 420 } };
+const COLUMNS = { left: { min: 280, def: 340 }, right: { min: 260, def: 320 }, setup: { min: 340, def: 420 } };
 const CENTRE_MIN = 360;   // what the canvas keeps at the least
 /** Sets the columns' widths from the settings (0 = default), each kept between its least and what leaves the canvas room. */
 function columns() {
-  const b = $("body"), w = innerWidth, c = S.settings.columns;
+  const b = $("body"), w = innerWidth - 136, c = S.settings.columns;   // 136: the dock (76), the three gaps between the columns and the page's margins
   const fit = (k, other) => Math.round(clamp(c[k] || COLUMNS[k].def, COLUMNS[k].min, Math.max(COLUMNS[k].min, w - CENTRE_MIN - other)));
   const left = fit("left", c.right || COLUMNS.right.def), right = fit("right", left);
   b.style.setProperty("--lw", left + "px"); b.style.setProperty("--rw", right + "px"); b.style.setProperty("--sw", fit("setup", 0) + "px");
@@ -4939,8 +5064,10 @@ addEventListener("drop", async (e) => {
 addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
   const a = document.activeElement, typing = /^(INPUT|TEXTAREA|SELECT)$/.test(a && a.tagName);
+  if (key === "escape" && MENU.open) return closeMenu();
   const m = $("modal");   // a dialog open: Escape is its cancel (but in a text being typed), and no key reaches what lies under it
   if (!m.hidden) { if (key === "escape" && !m.dataset.sticky && !(typing && !/^(range|checkbox|radio)$/.test(a.type))) (m.onDismiss || closeModal)(); return; }
+  if (key === "escape" && S.mode === "setup" && !(typing && !/^(range|checkbox|radio|select-one)$/.test(a.type))) return setMode("edit");
   if (typing) return;
   if (!S.cover || SURPRISE.busy) return;
   if (key === "escape" && $("deal") && !$("deal").hidden) return dealClose();
@@ -4983,6 +5110,7 @@ onOutlines(() => queueDraw());   // an outline that was sent for has arrived: dr
 const absent = (v) => (e) => { if (HOST === "server") throw e; return v; };
 async function start() {
   S.settings = normalizeSettings(await readJson("settings.json").catch(absent(null)));
+  setGlass(glassOn());
   setLang(S.settings.lang || detectLang());
   for (const name of await files.list("fonts").catch(() => [])) {   // nothing is written for a font missed
     if (name.endsWith(".font")) { const src = await files.read("fonts/" + name).catch(() => null); if (src) await registerFont(name.slice(0, -5), src); }
