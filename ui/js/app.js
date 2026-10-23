@@ -1,7 +1,7 @@
 // SmedCover UI. Two modes: Edit (cover content, assets, style + the layer stack) and Setup (brand,
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
-import { virtualSize, layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot, ORIENTS, orientOf, orientOfKey, layoutOf, ownLayout, setLayoutOf, followLayout, layoutByOrient, sideOf, sideToward, sideLike, scaleBlock, sizeOfKey } from "./layout.js";
+import { virtualSize, layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot, ORIENTS, orientOf, orientOfKey, layoutOf, ownLayout, setLayoutOf, followLayout, layoutByOrient, SIDES, sideOf, sideToward, sideLike, scaleBlock, sizeOfKey } from "./layout.js";
 import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles, showsFrame, sceneHandleAt, coverLayout, partsOf, coverAt } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang } from "./i18n.js";
@@ -2447,12 +2447,14 @@ const USUAL_SIZE = { wide: "1920x1080", square: "1200x1200", tall: "1080x1920" }
  * every channel's cover. The colour block has no template to pick nor sliders: selected, its diamonds move its edge
  * (the middle one: how much it takes) or lean it (an end; dragLayout in layout.js), and the block itself, dragged
  * toward another side, goes there (sideToward in layout.js; setPresetLayout in layers.js lands either where the scope
- * reaches). Where that reaches blocks that do not lie alike (wide sizes side by side, the others stacked), each takes the
+ * reaches), as it does by that side's button beside the canvas. Where that reaches blocks that do not lie alike (wide
+ * sizes side by side, the others stacked), each takes the
  * change as its own: dragged across, each goes to the side across from its own, dragged to a side beside, each goes
  * there (sideLike); made bigger or leaned, each by as much of its own block (scaleBlock). Beside it: the preset's name;
  * its parts, each ticked where the layout has it (unticked, it is left out where the preset is put, see putLayout), at
  * the sizes the scope reaches — a part unticked at the size shown no longer selected, so no handle is left over where
- * it is not —; and the part selected, put back where the template puts it. A part an earlier preset has no entry for
+ * it is not —; and the part selected, put back where the template puts it (the block: its size and slant, or its
+ * place). A part an earlier preset has no entry for
  * (the colour block, before it was one) is shown where the template puts it, ticked, and is the preset's once saved.
  * `fresh`: a new preset, in the list once saved. Save keeps it; Cancel, Escape or a click beside the window leave it as
  * it was (asked first when something was changed). Both close it. Nothing here touches the cover.
@@ -2659,14 +2661,16 @@ function layoutEditor(p, i, fresh = false) {
     E.dirty = true; build(); redraw();
   };
   // the size shown follows its orientation's block again, or the preset's; the part selected put back where the
-  // template puts it (the block: how much it takes and how it leans, its side kept), where the scope reaches
+  // template puts it; the block's size and slant (how much it takes, how it leans) as its template gives them, its
+  // side kept; the block to side `to`, as when it is dragged there (each the scope reaches alike, sideLike) — each where
+  // the scope reaches
   const follow = () => { const by = { ...E.p.by }; delete by[size().key]; if (Object.keys(by).length) E.p.by = by; else delete E.p.by; E.dirty = true; build(); redraw(); };
-  const reset = () => {
-    const g = geo();
-    resetPlacement(part(E.sel), E.scope, g.key, g.catId, g.group.map((x) => x.key));
-    if (E.sel === "accent") setPresetLayout(E.p, E.scope, g.key, (lay) => ({ template: lay.template, adjust: Object.fromEntries(Object.entries(lay.adjust).filter(([k]) => k !== "size" && k !== "slant")) }));
+  const reset = () => { const g = geo(); resetPlacement(part(E.sel), E.scope, g.key, g.catId, g.group.map((x) => x.key)); E.dirty = true; build(); redraw(); };
+  const resetBlock = () => {
+    setPresetLayout(E.p, E.scope, geo().key, (lay) => ({ template: lay.template, adjust: Object.fromEntries(Object.entries(lay.adjust).filter(([k]) => k !== "size" && k !== "slant")) }));
     E.dirty = true; build(); redraw();
   };
+  const toSide = (to) => { const first = sideOf(presetLayout(E.p, size().key)); if (to !== first) { reblock(copyOf(E.p), (lay) => sideLike(lay, first, to)); build(); } };
   // above the canvas: the sizes (and one to add), and what a change reaches; beside it, the parts and the one selected
   const build = () => {
     const z = size(), all = keys(), block = E.sel === "accent";
@@ -2698,10 +2702,17 @@ function layoutEditor(p, i, fresh = false) {
     side.replaceChildren(...[
       el("div", {}, cap("layed.parts"), el("div", { class: "parts" }, LAYOUT_PARTS.map(row)), el("div", { class: "hint", style: "margin:6px 0 0" }, t("layed.partsHint"))),
       el("div", { class: "ls-picked" }, el("span", {}, t("layed.picked", t("layer." + E.sel))),
-        el("button", { class: "btn", title: t(block ? "layed.blockResetTip" : "layed.resetTip"), onclick: reset }, t(block ? "layed.blockReset" : "layed.reset"))),
+        !block && el("button", { class: "btn", title: t("layed.resetTip"), onclick: reset }, t("layed.reset"))),
+      // the block: the side it lies on at this size, a button each (as a drag toward that side); its size and slant, and its place, put back
       block && el("div", { class: "ls-block" },
-        el("div", {}, t("layed.side", ratioText(z.w, z.h), t("layed.side." + sideOf(presetLayout(E.p, z.key))))),
+        el("div", {}, el("label", { class: "cap" }, t("layed.side", ratioText(z.w, z.h))),
+          el("div", { class: "seg" }, SIDES.map((v) => {
+            const on = sideOf(presetLayout(E.p, z.key)) === v;
+            return el("button", { class: "btn" + (on ? " on" : ""), "aria-pressed": String(on), title: on ? null : t("layed.sideTip"), onclick: () => toSide(v) }, t("layed.side." + v));
+          }))),
         E.p.by && E.p.by[z.key] && el("div", { class: "layown" }, el("span", {}, t("style.own")), el("button", { class: "linkbtn", title: t("layed.followTip"), onclick: follow }, t("style.follow"))),
+        el("div", { class: "acts" }, el("button", { class: "btn", title: t("layed.blockResetTip"), onclick: resetBlock }, t("layed.blockReset")),
+          el("button", { class: "btn", title: t("layed.resetTip"), onclick: reset }, t("layed.reset"))),
         el("div", { class: "hint", style: "margin:0" }, t("layed.blockHint")))].filter(Boolean));
   };
   const back = () => { LAYED.redraw = null; closeModal(); if (S.mode === "edit" && S.tab.edit === "layout") renderPanel(); };   // back to the Layout sheet, where the presets are
