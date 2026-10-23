@@ -97,5 +97,22 @@ houseLook(cel);
 export { FX_STAGES, FX_TIMING, FX_TYPES, INK, LOOKS, asColumn, columnBoxOf, columned, css, effectsFor, fall, isFast, layerEffects, look, lookParams, lookState, lookValues, noteReads, paintEffects, parseColour, readsInto, role, scenePlaced, setFast, setLook, setScene, styled, wherePainted } from "./looks/kit.js";
 
 export const LOOK_IDS = Object.keys(LOOKS);
+/** The kinds of look the Look sheet's chips sort them by (see lookSheet in app.js), in the order the chips show. */
+export const LOOK_CATEGORIES = ["night", "illustration", "poster", "print", "experimental"];
+/**
+ * What kind each look is, one or more of LOOK_CATEGORIES, as its name and what it says of itself (`about`) have it:
+ * a city or a club by night; drawn or painted; after a kind of poster; after a way of printing; and what is about
+ * the medium itself, the type, the glitch, the pixels. Every look has at least one.
+ */
+export const LOOK_TAGS = {
+  cel: ["illustration"], cyber: ["night", "experimental"], riso: ["print"], anime: ["illustration"], bluenote: ["print"],
+  editorial: ["print"], songke: ["print"], vivid: ["illustration"], negative: ["poster"], cinema: ["poster"], cyano: ["print"],
+  monofilm: ["print"], typo: ["poster", "experimental"], toon: ["poster"], avant: ["poster", "experimental"], collage: ["experimental"],
+  yellow: ["poster"], pitch: ["poster"], dots: ["night", "experimental"], neon: ["night", "illustration"], court: ["poster"],
+  velvet: ["illustration"], rave: ["night", "poster"], chrome: ["experimental"], netart: ["experimental"], verse: ["illustration"],
+  glass: ["illustration"], jelly: ["illustration"], skies: ["illustration"], spectrum: ["print", "experimental"],
+  citypop: ["night", "illustration"], construct: ["poster"], deco: ["night", "illustration"], wasteland: ["illustration"],
+  facet: ["night", "illustration"],
+};
 /** Internals the tests reach for. */
 export const __test = { toneTable, hueTurn, joinCells, celPixels, dkPixels, dkSpot, wlPixels, wlHot, wlBlock, wlMemory, fcDelaunay, fcFacets, fcGrade, fcRim, fcTones, fcLetters, fcWord, fcSignAt, fcMemory, fcFreeAll };

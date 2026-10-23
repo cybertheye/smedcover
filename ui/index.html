@@ -104,6 +104,15 @@
   .lookcard .lookpic{flex:none;display:block;width:100%;aspect-ratio:16/9;height:auto;object-fit:contain;background:rgba(0,0,0,.35)}   /* contain: a tall cover shown whole */
   .lookcard .nm{padding:7px 9px 8px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .lookcard .badge{position:absolute;left:6px;top:6px;padding:1px 8px;border-radius:999px;background:var(--acc);color:var(--acc-ink);font-size:11px;font-weight:700}
+  .lookgrid .lookcard[hidden]{display:none}
+  .lookgrid.finding .lookcard.on{order:-1}   /* the profile's own look first while the search or a chip sorts the cards */
+  .lookgrid-none{margin:0}
+  /* above the cards: the search and a chip for each kind of look */
+  .lookfind{display:flex;flex-direction:column;gap:10px}
+  .lookfind-q{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border-radius:12px;border:1px solid var(--line2);background:rgba(10,10,16,.3);color:var(--text3);cursor:text}
+  .lookfind-q:focus-within{border-color:color-mix(in srgb,var(--acc) 70%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,var(--acc) 14%,transparent)}
+  .lookfind-q input[type=text]{flex:1;min-width:0;height:100%;padding:0;border:0;border-radius:0;background:transparent;color:var(--text);font-size:13px;box-shadow:none}
+  .lookchips{gap:6px}
   #pvtag{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);z-index:4;padding:6px 14px;border-radius:999px;background:rgba(28,30,40,.82);border:1px solid rgba(255,255,255,.22);font-size:12.5px;white-space:nowrap;pointer-events:none}
   #pvtag[hidden],#stage.v3 #pvtag{display:none}
 

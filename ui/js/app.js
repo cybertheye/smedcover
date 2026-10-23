@@ -23,7 +23,7 @@ import { EFFECTS, BENDS, effectUses, warpCorners, convexWarp, NO_COLUMNS } from 
 import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
 import { RANSOM_FACES, useRansomFaces, ransomPending, ransomArrived, ransomPools, ransomLetters, ransomShown, papersFor, faceFont, faceHas, inksFor, cased, isCJK, EXTRAS, lineCells, keysOf } from "./ransom.js";
 import { parseTitle } from "./title.js";
-import { LOOKS, LOOK_IDS, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
+import { LOOKS, LOOK_IDS, LOOK_TAGS, LOOK_CATEGORIES, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
 import { sizeOf, PIXELS, dropCards } from "./photo.js";
 import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, labelRoom, drawStack } from "./stack3d.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt } from "./repaint.js";
@@ -2723,6 +2723,7 @@ function lookSheet() {
   const tune = (k, v) => { st.lookParams[st.look] = { ...vals, ...st.lookParams[st.look], [k]: v }; draftTouch({ profile: true }, k); };
   return [
     sheetHead(t("sheet.look"), t("sheet.lookSub")),
+    lookFinder(),
     lookCards(),
     el("div", { class: "box" }, el("div", { class: "lhead", style: "justify-content:flex-start;gap:6px;margin-bottom:6px" }, el("b", {}, t("look.tune", L.name[getLang()])), info(t("style.lookHint"))),
       L.about && el("div", { class: "about" }, L.about[getLang()]),
@@ -2763,13 +2764,13 @@ const lookOwn = (id) => { const st = S.profile.style; return JSON.stringify([st.
 function refreshLookCards() {
   if (!onLookSheet()) return;
   const base = lookBase(), look = S.profile.style.look, stale = [];
-  for (const [id, pic] of LOOKCARDS.pics) { if (!pic.cv.isConnected) continue; pic.want = base + lookOwn(id); if (pic.sig !== pic.want) stale.push(id); }
+  for (const [id, pic] of LOOKCARDS.pics) { if (!pic.cv.isConnected || pic.cv.parentNode.hidden) continue; pic.want = base + lookOwn(id); if (pic.sig !== pic.want) stale.push(id); }   // a card the search hides waits till it shows
   if (!stale.length) return;
   LOOKCARDS.queue = stale.includes(look) ? [look, ...stale.filter((x) => x !== look)] : stale;
   drawLookCards(++LOOKCARDS.round);
 }
 function lookCards() {
-  const st = S.profile.style, lang = getLang(), stale = [];
+  const st = S.profile.style, lang = getLang(), stale = [], shown = lookFilter();
   const base = lookBase();
   const card = (id) => {
     let pic = LOOKCARDS.pics.get(id);
@@ -2778,24 +2779,81 @@ function lookCards() {
     if (pic.sig !== pic.want) stale.push(id);
     const on = id === st.look;
     return el("button", { class: "lookcard" + (on ? " on" : ""), dataset: { id }, "aria-pressed": String(on), title: LOOKS[id].about ? LOOKS[id].about[lang] : LOOKS[id].name[lang],
-      onpointerenter: () => hoverLook(id), onclick: () => pickLook(id) },
+      hidden: !on && !shown(id), onpointerenter: () => hoverLook(id), onclick: () => pickLook(id) },
       pic.cv, el("span", { class: "nm" }, LOOKS[id].name[lang]), on && el("span", { class: "badge" }, t("look.current")));
   };
-  const grid = el("div", { class: "lookgrid", onpointerleave: () => hoverLook(null), onscroll: (e) => { LOOKCARDS.scroll = e.currentTarget.scrollTop; } }, LOOK_IDS.map(card));
+  const grid = el("div", { class: "lookgrid" + (lookFinding() ? " finding" : ""), onpointerleave: () => hoverLook(null), onscroll: (e) => { LOOKCARDS.scroll = e.currentTarget.scrollTop; } }, LOOK_IDS.map(card));
   requestAnimationFrame(() => {   // where it was; the first time, at the profile's look
     if (LOOKCARDS.scroll != null) grid.scrollTop = LOOKCARDS.scroll;
     else { const on = grid.querySelector(".on"); if (on) grid.scrollTop = on.offsetTop - grid.offsetTop - 8; }
   });
   LOOKCARDS.queue = stale.includes(st.look) ? [st.look, ...stale.filter((x) => x !== st.look)] : stale;
   drawLookCards(++LOOKCARDS.round);
-  return grid;
+  return [grid, el("div", { class: "hint lookgrid-none", hidden: !lookFinding() || LOOK_IDS.some(shown) }, t("look.none"))];
 }
-/** Draws the cards waiting, one a frame, while the Look sheet is open; not while something is dragged (as the size thumbnails wait). */
+/**
+ * The Look sheet's search and chip, for this session: `q` the words typed, `tag` the chip picked ("" every look, a kind
+ * of LOOK_CATEGORIES, or "used", those this computer has used most). They only hide cards: the profile's own look is
+ * never hidden, and while they are at work it comes first.
+ */
+const LOOK_UI = { q: "", tag: "" };
+/** How many looks ★ Most used shows at most. */
+const MOST_USED = 6;
+/** The looks this computer has made a profile's most often (S.settings.lookUse), the most first; none while nothing is counted. */
+const mostUsed = () => Object.entries(S.settings.lookUse).filter(([id, n]) => LOOKS[id] && n > 0).sort((a, b) => b[1] - a[1]).slice(0, MOST_USED).map(([id]) => id);
+/** Counts look `id` as made a profile's once more, by its card or a hand of Surprise me kept. */
+function countLook(id) { S.settings.lookUse[id] = (S.settings.lookUse[id] || 0) + 1; persistSettings(); }
+const lookFinding = () => !!(LOOK_UI.q.trim() || LOOK_UI.tag);
+/**
+ * Whether a look is among those the search and the chip let through, as a test by look id: the chip's kind (LOOK_TAGS),
+ * or among the most used; every word typed found in its name, in either language, in what it says of itself, or in
+ * the names of its kinds.
+ */
+function lookFilter() {
+  const used = LOOK_UI.tag === "used" ? mostUsed() : null, words = LOOK_UI.q.toLowerCase().split(/\s+/).filter(Boolean);
+  return (id) => {
+    if (used ? !used.includes(id) : LOOK_UI.tag && !LOOK_TAGS[id].includes(LOOK_UI.tag)) return false;
+    if (!words.length) return true;
+    const L = LOOKS[id], text = [L.name.zh, L.name.en, L.about && L.about.zh, L.about && L.about.en, ...LOOK_TAGS[id].map((k) => t("look.cat." + k))].join(" ").toLowerCase();
+    return words.every((w) => text.includes(w));
+  };
+}
+/** Above the look cards: a search field and a chip for each kind of look (★ Most used once something is counted). */
+function lookFinder() {
+  const used = mostUsed().length > 0;
+  if (LOOK_UI.tag === "used" && !used) LOOK_UI.tag = "";
+  const chips = el("div", { class: "rchips lookchips", role: "tablist", "aria-label": t("look.cats") },
+    [["", t("look.cat.all")], ...LOOK_CATEGORIES.map((k) => [k, t("look.cat." + k)]), used && ["used", t("look.cat.used")]].filter(Boolean).map(([k, label]) =>
+      el("button", { class: "rchip" + (LOOK_UI.tag === k ? " on" : ""), role: "tab", "aria-selected": String(LOOK_UI.tag === k), title: k === "used" ? t("look.cat.usedTip") : null,
+        onclick: () => { LOOK_UI.tag = k; for (const b of chips.children) { const on = b.dataset.k === k; b.classList.toggle("on", on); b.setAttribute("aria-selected", String(on)); } findLooks(); }, dataset: { k } }, label)));
+  const find = (e) => { if (e.isComposing) return; LOOK_UI.q = e.target.value; findLooks(); };   // not while a word is being composed (pinyin, kana)
+  return el("div", { class: "lookfind" },
+    el("label", { class: "lookfind-q" }, ico("search", 16),
+      el("input", { type: "text", value: LOOK_UI.q, placeholder: t("look.searchPh"), "aria-label": t("look.search"), spellcheck: false, autocomplete: "off",
+        oninput: find, oncompositionend: find,
+        onkeydown: (e) => { if (e.key === "Escape" && e.target.value) { e.stopPropagation(); e.target.value = ""; LOOK_UI.q = ""; findLooks(); } } })),   // Esc empties it first
+    chips);
+}
+/** The search or the chip changed: the cards it lets through shown (the profile's own always), the rest hidden, those shown drawn if stale; the line saying none is left when so. */
+function findLooks() {
+  const grid = $("panel").querySelector(".lookgrid"), none = $("panel").querySelector(".lookgrid-none");
+  if (!grid) return;
+  const shown = lookFilter(), look = S.profile.style.look;
+  let any = false;
+  for (const card of grid.children) { const on = shown(card.dataset.id); card.hidden = !on && card.dataset.id !== look; any = any || on; }
+  grid.classList.toggle("finding", lookFinding());
+  if (none) none.hidden = !lookFinding() || any;
+  grid.scrollTop = 0; LOOKCARDS.scroll = 0;
+  hoverLook(null);
+  refreshLookCards();
+}
+/** Draws the cards waiting, one a frame, while the Look sheet is open; not while something is dragged (as the size thumbnails wait), nor one the search hides (drawn when it shows: refreshLookCards). */
 function drawLookCards(round) {
   const next = () => {
     if (round !== LOOKCARDS.round || !onLookSheet()) return;
     if (LIVE || drafting()) return setTimeout(next, 300);
-    const id = LOOKCARDS.queue.shift();
+    let id;
+    do id = LOOKCARDS.queue.shift(); while (id && LOOKCARDS.pics.get(id) && LOOKCARDS.pics.get(id).cv.parentNode.hidden);
     if (!id) return;
     const pic = LOOKCARDS.pics.get(id);
     if (pic) {
@@ -2819,7 +2877,7 @@ function pickLook(id) {
   clearTimeout(PREVIEW.timer); PREVIEW.timer = 0; PREVIEW.look = null; previewTag();
   const st = S.profile.style;
   if (st.look === id) return queueDraw();
-  st.look = id; touch({ profile: true, panel: true, side: true, strip: true });
+  st.look = id; countLook(id); touch({ profile: true, panel: true, side: true, strip: true });
 }
 /** Over the canvas while a look is previewed: which, and that a click puts it on. */
 function previewTag() {
@@ -5303,8 +5361,12 @@ function dealUndo() {
   const at = DEAL.from == null ? -1 : S.hist.lastIndexOf(DEAL.from, S.histIdx);
   if (SURPRISE.step && S.histIdx === SURPRISE.step.idx && at >= 0) timeTravel(at - S.histIdx); else dealClose();
 }
-/** Closes Surprise me's window, keeping the hand on the canvas. */
-function dealClose() { const box = $("deal"); if (box) box.hidden = true; }
+/** Closes Surprise me's window, keeping the hand on the canvas; a hand kept in a look other than the cover had before the window's first deal counts as that look picked (★ Most used). */
+function dealClose() {
+  const box = $("deal");
+  if (box && !box.hidden && DEAL.kept >= 0 && SURPRISE.step && S.histIdx === SURPRISE.step.idx && DEAL.from && JSON.parse(DEAL.from).p.style.look !== S.profile.style.look) countLook(S.profile.style.look);
+  if (box) box.hidden = true;
+}
 /**
  * Asks, then empties this channel's cover: every layer the user added goes, the layout layers return to
  * the profile's default design (places, effects, colours), the scene objects to where the layout puts
@@ -5335,6 +5397,7 @@ const SHELL_ICONS = {
   content: '<path d="M5 6V4h14v2"/><path d="M12 4v16"/><path d="M9 20h6"/>',
   look: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5C21 6.6 17 3 12 3Z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/>',
   layout: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 14 21 11"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   sizes: '<rect x="2.5" y="5" width="13" height="9" rx="1.5"/><rect x="11" y="9" width="10.5" height="12" rx="1.5"/>',
   assets: '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
   layers: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>',

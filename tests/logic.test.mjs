@@ -103,7 +103,10 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.notEqual(c.layers, p.design.layers);                       // a copy, not the same array
   const own = normalizeCover({ layers: [{ type: "title", stroke: 0.5 }] }, p);
   assert.equal(own.layers.find((l) => l.id === "title").stroke, 0.5);
-  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size", hideScene: false, glass: true, drawer: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], recipes: {}, layouts: [], surprise: { locks: {}, odds: {} } });
+  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "size", hideScene: false, glass: true, drawer: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], lookUse: {}, recipes: {}, layouts: [], surprise: { locks: {}, odds: {} } });
+  // how often each look was picked: whole counts of looks there are, none at 0, in the registry's order
+  assert.deepEqual(normalizeSettings({ lookUse: { riso: 2.7, cel: 3, nope: 5, cyber: -1, deco: "4", neon: "x", facet: 0, songke: 9e9 } }).lookUse, { cel: 3, riso: 2, songke: 1e6, deco: 4 });
+  assert.deepEqual([normalizeSettings({ lookUse: [3] }).lookUse, normalizeSettings({ lookUse: "cel" }).lookUse], [{}, {}]);
   assert.deepEqual(normalizeSettings({ channels: { p1: "c1", "bad key!": "c2", p2: 7 } }).channels, { p1: "c1" });
   assert.deepEqual(normalizeSettings({ columns: { left: 410.4, right: -5, setup: "x" } }).columns, { left: 410, right: 0, setup: 0 });
   assert.deepEqual([normalizeSettings({ cutEngine: "birefnet" }).cutEngine, normalizeSettings({ cutEngine: "magic" }).cutEngine], ["birefnet", ""]);
@@ -511,6 +514,16 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli", "gilded"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid", "glass"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
+});
+
+import { LOOK_TAGS, LOOK_CATEGORIES } from "../ui/js/style.js";
+test("looks: every look is of one kind at least, of those the Look sheet's chips know, and every kind holds a handful", () => {
+  assert.deepEqual(Object.keys(LOOK_TAGS).sort(), [...LOOK_IDS].sort());   // none left out, none of a look there is not
+  for (const id of LOOK_IDS) {
+    const tags = LOOK_TAGS[id];
+    assert.ok(tags.length >= 1 && tags.every((k) => LOOK_CATEGORIES.includes(k)) && new Set(tags).size === tags.length, id);
+  }
+  for (const k of LOOK_CATEGORIES) { const n = LOOK_IDS.filter((id) => LOOK_TAGS[id].includes(k)).length; assert.ok(n >= 4 && n <= LOOK_IDS.length / 2, `${k}: ${n}`); }
 });
 
 test("looks: the house look changes nothing, the cyberpunk look re-maps what is drawn", () => {
