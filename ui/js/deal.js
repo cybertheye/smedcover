@@ -401,7 +401,7 @@ const copyOf = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v
  * its own the profile has not pass by), but for a part locked, which stays as it is (the colour block locked, its layout too: see
  * putLayout in layers.js); the user's own layers
  * are placed afterwards (dealPlaces in app.js, which needs the cover drawn). env: { R, locks (the parts to
- * leave alone: look, theme, lettering, places — the layout with the places), odds (the chances, see oddsOf), not (the looks dealt already in
+ * leave alone: look, theme, lettering, places, layout — the layout with the places too), odds (the chances, see oddsOf), not (the looks dealt already in
  * this run, which the look dealt is none of while it can be), recipes (the user's own, by look), rgb (the channel colour), design (the layers of the
  * profile's design, by id, where moved words go back to), layouts (the user's layout presets, as normalizeLayouts
  * keeps them), sizeKey (the size shown), sizes (the profile's size keys, those a preset is put on at), can(fx) (a lettering can be drawn here), canTint(ref) (an asset can be
@@ -410,11 +410,11 @@ const copyOf = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v
 export function dealCover(st, cover, env) {
   const { R, locks = {} } = env, O = env.odds || oddsOf(null, env.layouts), pick = (a) => a[Math.floor(R() * a.length)], between = (a, b) => a + R() * (b - a), chance = (p) => R() < p;
   const round = (v, step) => Math.round(v / step) * step, within = ([a, b], step = 0.05) => round(between(a, b), step);
-  // 0. the layout: the canvas's as it is, or a layout preset of the user's by its chance (none while where things
-  // stand is to stay) — its colour block at each of the profile's sizes, and its parts where it has them there, on the
-  // cover or left out, but for a part locked (the block locked, the block as it was); the rest of the hand is dealt on
-  // it as on any other
-  const preset = locks.places ? null : pickLayout(O.groups.layout, env.layouts, R);
+  // 0. the layout: the canvas's as it is, or a layout preset of the user's by its chance (none while the layout, or
+  // where things stand, is to stay: as when the canvas's own is certain) — its colour block at each of the profile's
+  // sizes, and its parts where it has them there, on the cover or left out, but for a part locked (the block locked,
+  // the block as it was); the rest of the hand is dealt on it as on any other
+  const preset = locks.places || locks.layout ? null : pickLayout(O.groups.layout, env.layouts, R);
   if (preset) putLayout(st, cover.layers, preset, env.sizes);
   // 1. the look, by its chance — none dealt already in this run while others are left — and a new seed for its random placement
   if (!locks.look) { st.look = pickLook(LOOK_IDS, R, O.groups.look, env.not || []); st.lookSeed = Math.floor(R() * 1000000); }

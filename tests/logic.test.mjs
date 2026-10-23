@@ -109,9 +109,9 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.deepEqual([normalizeSettings({ cutEngine: "birefnet" }).cutEngine, normalizeSettings({ cutEngine: "magic" }).cutEngine], ["birefnet", ""]);
   assert.deepEqual(normalizeSettings({ recentFonts: ["A", "A", "", 3, "B", "C", "D", "E", "F", "G"] }).recentFonts, ["A", "B", "C", "D", "E", "F"]);
   // what Surprise me keeps: only the locks it knows (set), and the chances the user set, each within 0 and 1, by name (what it no longer keeps, its old taste and recent looks, goes)
-  assert.deepEqual(normalizeSettings({ surprise: { locks: { look: true, theme: false, colour: true, places: 1 }, recent: ["a", "b"], taste: { deco: { kept: 2 } },
+  assert.deepEqual(normalizeSettings({ surprise: { locks: { look: true, theme: false, colour: true, places: 1, layout: true }, recent: ["a", "b"], taste: { deco: { kept: 2 } },
     odds: { groups: { look: { deco: 0.5, neon: 2, "x y": 0.1, cel: "a" }, "no!": { a: 1 } }, chances: { rail: -1, textPlate: 0.4, "x y": 1 } } } }).surprise,
-    { locks: { look: true }, odds: { groups: { look: { deco: 0.5, neon: 1 } }, chances: { rail: 0, textPlate: 0.4 } } });
+    { locks: { look: true, layout: true }, odds: { groups: { look: { deco: 0.5, neon: 1 } }, chances: { rail: 0, textPlate: 0.4 } } });
   assert.deepEqual(normalizeSettings({}).surprise, { locks: {}, odds: {} });
   // the user's own Surprise me recipes: only each look's parts' chances, within 0 and 1, what is not a name dropped; what earlier versions kept by look of letterings, bends and the ground let go
   assert.deepEqual(normalizeSettings({ recipes: { deco: { family: "pop", own: 1.4, bend: -1, fx: { sticker: 12 }, params: { rain: 0.5, fog: 3, "x y": 1, gilt: "a" } }, "no!": { params: { a: 1 } }, cel: { own: 0.5 }, riso: { params: {} } } }).recipes,
@@ -2596,6 +2596,16 @@ test("Surprise me deals a layout preset exactly — the colour block at each siz
     const { p, c, design, keys } = fresh(), before = takeLayout(p.style, c.layers, keys);
     dealCover(p.style, c, env(design, rand(9), { locks: { places: true }, odds: oddsOf({ groups: { layout: { a1: 1 } } }, layouts) }));
     assert.deepEqual(takeLayout(p.style, c.layers, keys), before);
+  }
+  // the layout locked: no preset dealt, whatever the chances, the rest as with the canvas's own certain — the same hand
+  // from the same random numbers, the words back where the design has them
+  {
+    const one = fresh(), two = fresh();
+    const got = dealCover(one.p.style, one.c, env(one.design, rand(42), { locks: { layout: true }, odds: oddsOf({ groups: { layout: { a1: 1 } } }, layouts) }));
+    dealCover(two.p.style, two.c, env(two.design, rand(42), { odds: oddsOf({ groups: { layout: { keep: 1 } } }, layouts) }));
+    assert.equal(got.layout, "keep");
+    assert.deepEqual([one.p.style, one.c], [two.p.style, two.c]);
+    assert.deepEqual(one.c.layers.find((l) => l.id === "title").t, one.design.get("title").t);
   }
   // a part locked stays as it is, dealt or put on by hand: its place, whether it shows and where; the block and the
   // parts not locked are the preset's all the same

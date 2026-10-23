@@ -5355,9 +5355,18 @@ function dealOpen() {
   lettersClose(); cropClose(); weaveClose(); brushClose();   // the letter, crop, weave and brush windows would be under it
   if (FTB.pop) { FTB.pop = ""; renderBar(); }
   box.style.setProperty("--ar", `${z.w} / ${z.h}`);
-  const lock = (k) => el("button", { class: "lock" + (locks[k] ? " on" : ""), title: t(`deal.lock.${k}Tip`),
-    onclick: (e) => { if (locks[k]) delete locks[k]; else locks[k] = true; persistSettings(); e.currentTarget.replaceWith(lock(k)); } },
-    el("span", { class: "ico", innerHTML: ICONS[locks[k] ? "lock" : "unlock"] }), t(`deal.lock.${k}`));
+  // a lock pressed: the row drawn again, Places locked holding the layout locked too (shown so, and not to be pressed)
+  const lock = (k) => {
+    const held = k === "layout" && !!locks.places, on = held || !!locks[k];
+    return el("button", { class: "lock" + (on ? " on" : ""), title: t(held ? "deal.lock.layoutByPlaces" : `deal.lock.${k}Tip`), disabled: held, dataset: { lock: k },
+      onclick: (e) => {
+        const had = document.activeElement === e.currentTarget, row = e.currentTarget.parentNode;
+        if (locks[k]) delete locks[k]; else locks[k] = true;
+        persistSettings(); row.replaceChildren(...SURPRISE_LOCKS.map(lock));
+        if (had) row.querySelector(`[data-lock="${k}"]`).focus();
+      } },
+      el("span", { class: "ico", innerHTML: ICONS[on ? "lock" : "unlock"] }), t(`deal.lock.${k}`));
+  };
   box.replaceChildren(
     el("div", { class: "deal-dim", onclick: dealClose }),
     el("div", { class: "deal-head" }, el("h2", {}, t("deal.title")), el("div", { id: "deal-what" }, t("deal.dealing"))),

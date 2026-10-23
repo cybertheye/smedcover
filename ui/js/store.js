@@ -297,8 +297,8 @@ export function normalizeLayouts(raw) {
   }
   return out;
 }
-/** What Surprise me may be told to leave as it is: the look (and its sliders), the dark or light ground, the letterings, where things stand. */
-export const SURPRISE_LOCKS = ["look", "theme", "lettering", "places"];
+/** What Surprise me may be told to leave as it is: the look (and its sliders), the dark or light ground, the letterings, where things stand, the layout (the canvas's: no layout preset dealt; where things stand locked keeps it too). */
+export const SURPRISE_LOCKS = ["look", "theme", "lettering", "places", "layout"];
 /**
  * What Surprise me keeps, on this computer: the parts it is to leave alone (`locks`, see SURPRISE_LOCKS), and the
  * chances the user set in Surprise me's chances window (`odds`: { groups: {group: {option: chance}}, chances: {name:
