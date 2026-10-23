@@ -108,7 +108,7 @@
   #pvtag[hidden],#stage.v3 #pvtag{display:none}
 
   /* the ⋯ menu, under its button */
-  #menu{position:fixed;z-index:42;width:320px;padding:8px;border-radius:18px;display:flex;flex-direction:column;gap:2px;background-color:rgba(28,30,40,.62)}
+  #menu{position:fixed;z-index:42;width:320px;max-height:calc(100vh - 80px);overflow-y:auto;padding:8px;border-radius:18px;display:flex;flex-direction:column;gap:2px;background-color:rgba(28,30,40,.62)}
   html.solid #menu{background-color:var(--solid2)}
   #menu[hidden]{display:none}
   #menu .mg{font-size:11px;color:var(--text3);letter-spacing:.06em;padding:8px 12px 4px}
@@ -118,6 +118,10 @@
   #menu .mi .mt small{font-size:11.5px;color:var(--text3);line-height:1.4}
   #menu .mi .sc{font-size:12px;color:var(--text3)}
   #menu .mi.danger{color:#ff9a8a}
+  #menu .mi .chev{flex:none;width:7px;height:7px;margin-right:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);opacity:.5}
+  #menu .mi .chev.open{transform:rotate(45deg)}
+  #menu .mi.sub{padding-left:24px;min-height:36px}
+  #menu .foot{font-size:11.5px;line-height:1.55;color:var(--text3);padding:8px 12px 6px}
   #menu .sep{height:1px;background:var(--line);margin:4px 8px}
   #menu .row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;padding:6px 8px 4px 12px;font-size:13px;color:var(--text2)}
 
@@ -236,8 +240,6 @@
   .sw input[type=color]{width:30px;height:22px;padding:1px;background:var(--panel);border:1px solid var(--line2);border-radius:7px;cursor:pointer;flex:none}
   .sw .auto{font-size:12px;opacity:.45}
   .sw .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
-  .cutmodel{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:8px}
-  .cutmodel b{font-size:13px}
   .mine-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
   .mine-head .cap{margin:0}
   .mine-head .btn{padding:4px 9px;font-size:12px}
@@ -299,15 +301,8 @@
   .ink .btn{padding:4px 9px;font-size:12px}
   .chk{display:flex;align-items:center;gap:10px;cursor:pointer;margin:8px 0}
   .chk input{width:17px;height:17px;accent-color:var(--acc);flex:none}
-  .card{border:1px solid var(--line);border-left:6px solid var(--c);border-radius:14px;background:rgba(0,0,0,.18);padding:12px;display:grid;gap:8px}
-  .card .head{display:grid;grid-template-columns:44px 1fr;gap:8px}
-  .card input[type=color]{width:44px;height:40px;padding:2px;background:var(--panel);border:1px solid var(--line2);border-radius:7px;cursor:pointer}
-  .card .two{display:grid;grid-template-columns:1fr 110px;gap:8px}
-  .card .acts,.acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+  .acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
   .acts .btn{padding:4px 9px;font-size:12px}
-  .sizes .chk{margin:6px 0;font-family:var(--mono);font-size:13px}
-  .sizes .chk span{opacity:.5;margin-left:auto}
-  .dl{display:grid;gap:8px}
 
   /* asset tiles */
   .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
@@ -318,7 +313,7 @@
   .gpick{display:flex;align-items:center;gap:10px;width:100%;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.22);color:inherit;font:inherit;padding:4px 10px 4px 4px;cursor:pointer;text-align:left}
   .gpick:hover{border-color:#fff}
   .gpick>span:not(.more){flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .gpick .more{font-size:12px;opacity:.6}
+  .gpick .more{font-size:12px;opacity:.6;flex:none;white-space:nowrap}
   .tile:hover{border-color:#fff}
   .tile.on{border:2px solid var(--acc)}
   .ptile{padding:0;overflow:hidden}
@@ -380,8 +375,6 @@
   #strip::-webkit-scrollbar-track{background:transparent}
   #strip::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:4px}
   #strip::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.3)}
-  .nm-row{display:grid;grid-template-columns:96px 1fr;gap:8px;align-items:center;margin-top:8px}
-  .nm-row span{font:600 12px var(--mono);opacity:.6}
   #strip figure{margin:0;cursor:pointer;flex:none;display:flex;flex-direction:column;align-items:center}
   #strip figure canvas{border-radius:6px;box-shadow:0 0 0 1px rgba(255,255,255,.18)}
   #strip figure.on canvas{box-shadow:0 0 0 2px var(--acc)}
@@ -560,13 +553,129 @@
   html.solid #settings .win{background-color:var(--solid)}
   #setnav{width:236px;flex:none;padding:24px 14px 18px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:6px;background:rgba(0,0,0,.12)}
   #setnav .cap{padding:0 12px;margin-bottom:6px}
-  #setnav button{height:42px;display:flex;align-items:center;gap:12px;padding:0 12px;border-radius:12px;border:0;background:transparent;color:var(--text2);font-size:14px;text-align:left;cursor:pointer}
-  #setnav button:hover{background:rgba(255,255,255,.08);color:var(--text)}
-  #setnav button.on{background:rgba(255,255,255,.16);color:#fff;font-weight:700;box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
+  #setnav .sni{height:42px;display:flex;align-items:center;gap:12px;padding:0 12px;border-radius:12px;border:0;background:transparent;color:var(--text2);font-size:14px;text-align:left;cursor:pointer}
+  #setnav .sni:hover{background:rgba(255,255,255,.08);color:var(--text)}
+  #setnav .sni.on{background:rgba(255,255,255,.16);color:#fff;font-weight:700;box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
+  #setnav .sni .dots{width:18px;height:18px;border-radius:50%;flex:none}
+  #setnav .who{display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:10px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.05)}
+  #setnav .who .av{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none;font-size:14px;font-weight:700}
+  #setnav .who>span:last-child{min-width:0;display:flex;flex-direction:column;gap:2px}
+  #setnav .who b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #setnav .who small{font-size:11.5px;color:var(--text3)}
+  #setnav .grow{flex:1}
+  #setnav .pacts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:0 4px}
+  #setnav .btn{height:34px;padding:0;font-size:12.5px}
+  #setnav>.btn.danger{margin:2px 4px 0;border-color:transparent;background:transparent;color:#ff9a8a}
+  #setnav>.btn.danger:hover{background:rgba(255,120,100,.12)}
   #settings .setbody{flex:1;min-width:0;position:relative;display:flex;flex-direction:column}
   #settings .setbody>.scroll{flex:1;padding:26px 32px 40px}
   #settings .x{position:absolute;right:18px;top:18px;z-index:2;width:36px;height:36px;border-radius:11px;border:0;background:rgba(255,255,255,.08);color:#fff;font-size:14px;cursor:pointer}
   #settings .x:hover{background:rgba(255,255,255,.16)}
+  /* the settings pages: a heading with a line under it; fields three to a row; cards of glass for what goes together */
+  #setpanel{display:flex;flex-direction:column;gap:18px}
+  #setpanel>.hint{margin:-8px 0 0}
+  .sh{display:flex;flex-direction:column;gap:4px;padding-right:48px}
+  .sh b{font-size:22px;font-weight:800}
+  .sh span{font-size:13px;color:var(--text2)}
+  #setpanel .cap small,.fld .cap small{margin-left:8px;font-size:11.5px;font-weight:400;letter-spacing:0;color:var(--text3)}
+  #setpanel>.cap{margin:4px 0 -8px}
+  .fields3{display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:16px;align-items:start}
+  .fld{min-width:0}
+  .fld>.seg,.aib .seg,.xopts .seg{display:inline-flex}
+  .fld>.hint{margin:6px 0 0}
+  .scard{scroll-margin-top:60px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.04);padding:14px 18px;display:flex;align-items:center;flex-wrap:wrap;gap:12px 14px;min-width:0}
+  .scard .grow{flex:1;min-width:180px;display:flex;flex-direction:column;gap:2px}
+  .scard .grow b{font-size:14px}
+  .scard .grow small{font-size:12px;color:var(--text3)}
+  .scard .lab{font-size:12px;color:var(--text2)}
+  .scard input.unit{width:110px}
+  .scard .pv{height:34px;padding:0 12px;border-radius:9px;background:rgba(0,0,0,.35);font:600 13px var(--mono);letter-spacing:.06em;display:flex;align-items:center;gap:8px;white-space:nowrap}
+  .scard .pv b{color:var(--acc)}
+  .scard .pv i{font-style:normal;padding:2px 8px;border-radius:4px}
+  .logo-row{display:flex;align-items:center;gap:10px;min-height:44px}
+  .logo-row .lthumb{width:40px;height:40px;flex:none;border-radius:11px;display:grid;place-items:center;overflow:hidden;background:repeating-conic-gradient(#2a2a3a 0 25%,#1b1b2a 0 50%) 0 0/10px 10px}
+  .logo-row .lthumb.none{background:none;border:1.5px dashed rgba(255,255,255,.3);color:var(--text3)}
+  .logo-row small{font-size:12px;color:var(--text3)}
+  /* an input with its name inside it, quietly, before what is typed */
+  .pin{display:flex;align-items:center;gap:8px;min-width:0;border:1px solid var(--line2);border-radius:12px;background:rgba(0,0,0,.22);padding:0 0 0 12px}
+  .pin>span{font-size:12px;color:var(--text3);white-space:nowrap}
+  .pin input{border:0;background:transparent;padding-left:0;min-width:0}
+  /* the channels, three cards to a row; the one on the canvas outlined in its colour */
+  .chgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .chcard{position:relative;display:grid;gap:8px;padding:12px;border-radius:16px;border:1px solid var(--line);background:rgba(255,255,255,.04);min-width:0}
+  .chcard.here{border:1.5px solid var(--c);background:color-mix(in srgb,var(--c) 7%,transparent)}
+  .chcard .chrow{display:flex;align-items:center;gap:8px}
+  .chcard .swc{width:26px;height:26px;border-radius:50%;flex:none;background:var(--c);box-shadow:0 0 0 1px rgba(255,255,255,.3);position:relative;overflow:hidden;cursor:pointer}
+  .chcard .swc input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+  .chcard input.chname{flex:1;font-weight:700;min-width:0}
+  .chcard .more{width:30px;height:30px;flex:none;border:0;border-radius:9px;background:transparent;color:var(--text2);font-size:16px;cursor:pointer}
+  .chcard .more:hover,.chcard .more[aria-expanded=true]{background:rgba(255,255,255,.12);color:#fff}
+  .chcard .chmenu{position:absolute;right:10px;top:46px;z-index:3;display:flex;flex-direction:column;min-width:120px;padding:4px;border-radius:12px;background:var(--solid2);border:1px solid var(--line2);box-shadow:0 14px 34px rgba(0,0,0,.45)}
+  .chcard .chmenu button{border:0;background:transparent;color:var(--text);text-align:left;padding:8px 10px;border-radius:8px;font-size:13px;cursor:pointer}
+  .chcard .chmenu button:hover:not(:disabled){background:rgba(255,255,255,.1)}
+  .chcard .chmenu button:disabled{opacity:.35;cursor:default}
+  .chcard .chmenu .danger{color:#ff9a8a}
+  .chcard .two{display:grid;grid-template-columns:minmax(0,1fr) 96px;gap:8px}
+  .chcard .pill{position:absolute;right:12px;bottom:-11px;height:22px;padding:0 10px;border-radius:999px;background:var(--c);color:var(--acc-ink);font-size:11.5px;font-weight:700;display:flex;align-items:center}
+  .chadd{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:150px;border-radius:16px;border:1.5px dashed rgba(255,255,255,.22);background:transparent;color:var(--text);cursor:pointer}
+  .chadd:hover{border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.04)}
+  .chadd small{font-size:12px;color:var(--text3)}
+  /* the sizes: a row each, its name of the user's own, ratio, platforms, pixels and the switch */
+  .szlist{display:grid;gap:6px}
+  .szrow{display:grid;grid-template-columns:minmax(120px,200px) 64px minmax(0,1fr) 110px auto;gap:14px;align-items:center;padding:6px 12px 6px 6px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid transparent}
+  .szrow.on{background:rgba(255,255,255,.06);border-color:var(--line)}
+  .szrow input{padding:8px 10px}
+  .szrow input:disabled{opacity:.35}
+  .szrow .ratio{font:700 13px var(--mono)}
+  .szrow .plats{font-size:12.5px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .szrow .px{font:12px var(--mono);color:var(--text2);text-align:right}
+  .szrow:not(.on)>span{opacity:.5}
+  .addsize .pin{width:120px}
+  /* Settings → AI: a card each, its head saying what it is set to; its fields two by two */
+  .aicard{display:grid;gap:14px;align-items:stretch}
+  .aih{display:flex;align-items:center;gap:10px}
+  .aih .state{font-size:12px;color:var(--text3);padding:3px 10px;border-radius:999px;border:1px solid var(--line);white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis}
+  .aih .state.on{color:var(--text);border-color:rgba(255,255,255,.3)}
+  .aib{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px;align-items:start}
+  .aib>*{min-width:0}
+  .aib>.hint,.aib>.wide,.aib>.aifoot,.aib>.cutrows{grid-column:1/-1}
+  .aib>.hint{margin:0}
+  .aib .hint{margin-top:6px}
+  .aifoot{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .aifoot .hint{margin:0!important}
+  .cutrows{display:grid;gap:6px}
+  .cutrow{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.03)}
+  .cutrow.on{border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.07)}
+  .cutrow label{flex:1;display:flex;align-items:center;gap:12px;cursor:pointer;min-width:0}
+  .cutrow label>span{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .cutrow b{font-size:13.5px}
+  .cutrow small{font-size:12px;color:var(--text3)}
+  @media(max-width:1360px){.chgrid{grid-template-columns:1fr 1fr}}
+  @media(max-width:1100px){.fields3,.chgrid{grid-template-columns:1fr 1fr}.szrow{grid-template-columns:minmax(100px,1fr) 56px 90px auto}.szrow .plats{display:none}}
+  /* Export: this channel's cover at each size, the format, resolution and names, then Only this size and Export all */
+  #modal .dlg.xp{width:min(860px,94vw);gap:16px}
+  .xhead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+  .xhead h2{margin:0}
+  .xhead .hint{margin:6px 0 0}
+  .xhead .x{width:38px;height:38px;border-radius:12px;border:0;background:rgba(255,255,255,.08);color:#fff;font-size:15px;cursor:pointer;flex:none}
+  .xhead .x:hover{background:rgba(255,255,255,.16)}
+  .xcap b{font-size:14px}
+  .xsizes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .xrow{display:flex;align-items:center;gap:12px;padding:8px 14px 8px 8px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.04);min-width:0}
+  .xrow.here{border-color:rgba(255,255,255,.35)}
+  .xthumb{width:72px;height:48px;flex:none;display:grid;place-items:center;border-radius:8px;background:rgba(0,0,0,.3);overflow:hidden}
+  .xthumb canvas{max-width:72px;max-height:48px;display:block}
+  .xname{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+  .xname b{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .xname small{font:12px var(--mono);color:var(--text3)}
+  .xrow .linkbtn{opacity:0}
+  .xrow:hover .linkbtn,.xrow .linkbtn:focus-visible{opacity:1}
+  .xopts{display:flex;gap:22px;align-items:flex-end;flex-wrap:wrap;padding-top:14px;border-top:1px solid var(--line)}
+  .xopts .grow{flex:1;min-width:220px}
+  .xfoot{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .xfoot .grow{flex:1}
+  .xfoot .btn{height:48px;padding:0 20px;border-radius:14px;font-size:14px;display:flex;align-items:center;gap:8px}
+  @media(max-width:760px){.xsizes{grid-template-columns:1fr}}
   /* Surprise me's chances (oddsDialog): wide, its head staying in view; each group a card — its name, Even out and
      Restore on one line, its sliders under it (in two columns for the long ones) — the smaller groups two by two */
   #modal .dlg.odds{width:min(1100px,94vw);gap:14px}
@@ -622,10 +731,6 @@
   .part .eye{display:inline-grid;flex:none}
   .part:hover{background:rgba(255,255,255,.14)}
   .part.off{background:transparent;color:var(--text3);border-style:dashed}
-  .logo-row{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.22);padding:4px 6px 4px 4px}
-  .logo-row>span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
-  .logo-row .lthumb{width:44px;height:44px;flex:none;display:grid;place-items:center;background:repeating-conic-gradient(#2a2a3a 0 25%,#1b1b2a 0 50%) 0 0/12px 12px}
-  .logo-row .btn{padding:6px 12px}
   .fxcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
   .fxcard{text-align:left;border:1px dashed var(--line2);border-radius:12px;background:transparent;color:inherit;font:inherit;padding:10px 12px;cursor:pointer;display:block}
   .fxcard:hover{border-color:#fff}
@@ -643,7 +748,7 @@
   /* a narrow window: everything one under another, the dock a row of buttons */
   @media(max-width:1100px){html,body{overflow:auto}.app{height:auto}.body,.body.nodrawer{grid-template-columns:1fr}.split{display:none}.body .scroll{overflow:visible}#stage{height:60vh}
     #dock{flex-direction:row;overflow-x:auto}#dock .help{margin:0 0 0 auto}header{height:auto;flex-wrap:wrap;padding:8px 10px 8px 16px}
-    #settings .win{flex-direction:column}#setnav{width:auto;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}}
+    #settings .win{flex-direction:column}#setnav{width:auto;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}#setnav .grow,#setnav .who{display:none}}
 </style>
 </head>
 <body>

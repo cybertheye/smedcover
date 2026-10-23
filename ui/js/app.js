@@ -378,7 +378,7 @@ function drawThumbs() {
   const next = () => {
     if (round !== thumbsRound || LIVE || drafting() || !sizes.length) return;
     const size = sizes.shift(), cv = $("th-" + sizeKey(size));
-    if (cv) paint(cv, size, virtualSize(size.w, size.h)[0] * 0.2);
+    if (cv) { paint(cv, size, virtualSize(size.w, size.h)[0] * 0.2); cv.dataset.painted = "1"; }
     requestAnimationFrame(next);
   };
   next();
@@ -1712,7 +1712,7 @@ function repaintBox(P) {
   const rewrite = (v) => { const st = myStyle(); if (!st) return; st.body = v; st.prompt = promptOf(v); saveMyStyle(st); };
   if (!imageReady(c)) {
     return el("div", { class: "rep" }, el("div", { class: "hint", style: "margin:0 0 10px" }, t("rep.needSetup")),
-      el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; setMode("setup"); } }, t("rep.goSetup")));
+      el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; SET_UI.at = "image"; setMode("setup"); } }, t("rep.goSetup")));
   }
   const look = LOOKS[S.profile.style.look] || LOOKS.cel, ours = REP.of === P.id, r = ours ? REP.result : null;
   const sources = [["look", t("rep.src.look", look.name[lang])],
@@ -1804,7 +1804,7 @@ function genBox() {
   const c = S.imageAi, r = GEN.result, size = selSize();
   if (!imageReady(c)) {
     return el("div", { class: "rep" }, el("div", { class: "hint", style: "margin:0 0 10px" }, t("gen.needSetup")),
-      el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; S.aiPane = "image"; setMode("setup"); } }, t("rep.goSetup")));
+      el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; SET_UI.at = "image"; setMode("setup"); } }, t("rep.goSetup")));
   }
   return el("div", { class: "rep" },
     el("textarea", { value: GEN.prompt, spellcheck: false, maxLength: 2000, disabled: GEN.busy, style: "height:84px;font-size:14px", placeholder: t(GEN.ref ? "gen.phRef" : "gen.ph"), oninput: (e) => { GEN.prompt = e.target.value; } }),
@@ -1825,8 +1825,8 @@ function genBox() {
 /** The image model's settings: Setup → AI → Image model. */
 function imageAiPane() {
   const c = S.imageAi, d = IMAGE_DEFAULTS[c.provider];
-  const ep = el("div", { class: "hint", style: "margin-top:-10px;word-break:break-all" }, t("ai.endpoint", imageEndpoint(c)));
-  const testBtn = el("button", { class: "btn wide", disabled: !imageReady(c), onclick: () => test() }, t("ai.test"));
+  const ep = el("div", { class: "hint", style: "word-break:break-all" }, t("ai.endpoint", imageEndpoint(c)));
+  const testBtn = el("button", { class: "btn", disabled: !imageReady(c), onclick: () => test() }, t("ai.test"));
   const set = (k, v, redraw = false) => {
     S.imageAi = normalizeImageAi({ ...S.imageAi, [k]: v }); REP.test = null; persistImageAi();
     if (redraw) return renderPanel();
@@ -1835,21 +1835,17 @@ function imageAiPane() {
   const test = async () => {
     REP.test = { ok: null, text: t("ai.testing") }; renderPanel();
     try { REP.test = await checkImageAi(S.imageAi); } catch (e) { REP.test = { ok: false, text: t("msg.failed", String(e && e.message ? e.message : e)) }; }
-    if (S.mode === "setup" && S.tab.setup === "ai") renderPanel();
+    refreshAiPage();
   };
-  const field = (key, k, props = {}) => el("div", {}, cap(key), textInput(c[k], (v) => set(k, v), props));
+  const field = (key, k, props = {}, under = null) => el("div", {}, cap(key), textInput(c[k], (v) => set(k, v), props), under);
   return [
-    el("div", { class: "hint", style: "margin:0" }, t("img.intro")),
     el("div", {}, cap("img.provider"), select(IMAGE_PROVIDERS.map((k) => [k, t("img.provider." + k)]), c.provider, (v) => set("provider", v, true))),
-    field("ai.baseUrl", "baseUrl", { placeholder: d.baseUrl }), ep,
+    field("ai.baseUrl", "baseUrl", { placeholder: d.baseUrl }, ep),
     field("ai.token", "token", { type: "password", placeholder: t("ai.tokenPh"), autocomplete: "off" }),
-    field("ai.model", "model", { placeholder: t("img.modelPh", d.model) }),
-    el("div", { class: "hint", style: "margin-top:-10px" }, t("img.modelHint." + c.provider)),
+    field("ai.model", "model", { placeholder: t("img.modelPh", d.model) }, el("div", { class: "hint" }, t("img.modelHint." + c.provider))),
     el("div", {}, cap("ai.timeout"), el("input", { type: "number", min: 30, max: 1800, step: 30, value: c.timeout, onchange: (e) => set("timeout", e.target.value, true) })),
     field("ai.proxy", "proxy", { placeholder: "http://127.0.0.1:7890" }),
-    testBtn,
-    testLine(REP.test),
-    el("div", { class: "hint" }, t("img.testHint")),
+    el("div", { class: "aifoot" }, testBtn, testLine(REP.test), info(t("img.testHint"))),
     el("div", { class: "hint" }, t("img.privacy")),
   ];
 }
@@ -1964,10 +1960,21 @@ function aiSection() {
 }
 /** A connection test's outcome, in green when it worked and red when it did not. */
 const testLine = (r) => r && el("div", { class: `hint ${r.ok === true ? "ok" : r.ok === false ? "err" : ""}`, style: "margin-top:-8px;word-break:break-word" }, r.text);
-/** Setup → AI: the text model (assets) and the image model (photo repaint), one pane at a time. */
+/**
+ * Settings → AI, a card each: the text model (assets from a sentence), the image model (photos repainted or made) —
+ * each saying the model it is set to, or that it is not set yet — and the cut-out (done on this computer).
+ */
 function aiTab() {
-  const pane = S.aiPane || "text", tab = (k) => el("button", { class: "btn" + (pane === k ? " on" : ""), onclick: () => { S.aiPane = k; renderPanel(); } }, t("ai.pane." + k));
-  return [el("div", { class: "seg wide" }, tab("text"), tab("image"), tab("cut")), ...(pane === "image" ? imageAiPane() : pane === "cut" ? cutPane() : textAiPane())];
+  const card = (k, tip, kids, aside) => el("section", { class: "scard aicard", id: "set-" + k },
+    el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("ai.card." + k)), el("small", {}, t("ai.card." + k + "Sub"))), tip && info(tip), aside),
+    el("div", { class: "aib" }, kids));
+  const state = (ready, model) => el("span", { class: "state" + (ready ? " on" : "") }, ready ? model : t("ai.notSet"));
+  return [
+    el("div", { class: "sh" }, el("b", {}, t("tab.ai")), el("span", {}, t("ai.pageSub"))),
+    card("text", t("ai.intro"), textAiPane(), state(aiReady(S.ai), S.ai.model)),
+    card("image", t("img.intro"), imageAiPane(), state(imageReady(S.imageAi), S.imageAi.model || IMAGE_DEFAULTS[S.imageAi.provider].model)),
+    card("cut", t("cutset.intro"), cutPane(), CAN.cut && CAN.folders && el("button", { class: "linkbtn", onclick: () => invoke("reveal_data_dir", { dir: "models" }).catch(fail) }, t("cutset.folder"))),
+  ];
 }
 // ---------- Setup → AI → Cut-out: the way of cutting out, and the BiRefNet models
 const CUTDL = { id: "", done: 0, total: 0, error: "", confirmDrop: "" };   // the download running, if any
@@ -1977,7 +1984,13 @@ if (HOST === "tauri" && globalThis.__TAURI__.event) globalThis.__TAURI__.event.l
   const bar = document.getElementById("cutdl-" + e.payload.id);
   if (bar) bar.textContent = t("cutset.progress", Math.floor((100 * e.payload.done) / Math.max(1, e.payload.total)), mb(e.payload.done), mb(e.payload.total));
 });
-const onCutPane = () => S.mode === "setup" && S.tab.setup === "ai" && S.aiPane === "cut";
+/** Draws Settings → AI again once something there finished (a test, a download), but not under a field being typed in: once it is left. */
+function refreshAiPage() {
+  if (!(S.mode === "setup" && S.tab.setup === "ai")) return;
+  const a = document.activeElement;
+  if (a && $("setpanel").contains(a) && (a.tagName === "TEXTAREA" || a.tagName === "INPUT" && !/^(radio|checkbox|range)$/.test(a.type))) return later("aipage", 600, refreshAiPage);
+  renderPanel();
+}
 async function refreshCutModels() { S.cutModels = CAN.cut ? await invoke("cut_models").catch(() => []) : []; }
 async function downloadModel(id) {
   if (CUTDL.id) return;
@@ -1986,7 +1999,7 @@ async function downloadModel(id) {
   catch (e) { const msg = String(e && e.message ? e.message : e); CUTDL.error = /cancelled/.test(msg) ? "" : t("msg.failed", msg); }
   CUTDL.id = ""; await refreshCutModels();
   if (S.cutModels.some((m) => m.id === id && m.have)) { CUT.needModel = false; CUT.error = ""; toast(t("cutset.done", t("cutset.engine." + id))); }
-  if (onCutPane()) renderPanel();
+  refreshAiPage();
 }
 async function dropModel(id) {
   if (CUTDL.confirmDrop !== id) { CUTDL.confirmDrop = id; return renderPanel(); }
@@ -1998,59 +2011,55 @@ function cutPane() {
   if (!CAN.cut) return [el("div", { class: "hint", style: "margin:0" }, t("cutset.needsApp"))];
   const engines = [isMac && "vision", "birefnet-lite", "birefnet"].filter(Boolean), now = cutEngine();
   const setting = (k, v, redraw) => { S.settings[k] = v; persistSettings(); if (redraw) renderPanel(); };
-  const row = (m) => {
-    const busy = CUTDL.id === m.id;
-    return el("div", { class: "cutmodel" },
-      el("div", {}, el("b", {}, t("cutset.engine." + m.id)), el("div", { class: "hint", style: "margin:2px 0 0" }, busy ? el("span", { id: "cutdl-" + m.id }, t("cutset.starting")) : t(m.have ? "cutset.have" : "cutset.missing", mb(m.bytes)))),
-      busy ? el("button", { class: "btn", onclick: () => invoke("cut_model_cancel").catch(fail) }, t("cutset.cancel"))
-        : m.have ? el("button", { class: "btn", onclick: () => dropModel(m.id) }, t(CUTDL.confirmDrop === m.id ? "cutset.dropSure" : "cutset.drop"))
-        : el("button", { class: "btn", disabled: !!CUTDL.id, onclick: () => downloadModel(m.id) }, t("cutset.download")));
+  const row = (k) => {
+    const m = S.cutModels.find((x) => x.id === k), busy = !!m && CUTDL.id === k;
+    return el("div", { class: "cutrow" + (now === k ? " on" : "") },
+      el("label", {}, el("input", { type: "radio", name: "cutway", checked: now === k, onchange: () => setting("cutEngine", k, true) }),
+        el("span", {}, el("b", {}, t("cutset.engine." + k)),
+          el("small", { id: busy ? "cutdl-" + k : null }, k === "vision" ? t("cutset.builtIn") : busy ? t("cutset.starting") : !m ? t("cutset.unknown") : t(m.have ? "cutset.have" : "cutset.missing", mb(m.bytes))))),
+      k !== "vision" && (busy ? el("button", { class: "btn", onclick: () => invoke("cut_model_cancel").catch(fail) }, t("cutset.cancel"))
+        : m && m.have ? el("button", { class: "linkbtn", onclick: () => dropModel(k) }, t(CUTDL.confirmDrop === k ? "cutset.dropSure" : "cutset.drop"))
+        : el("button", { class: "btn", disabled: !!CUTDL.id, onclick: () => downloadModel(k) }, t("cutset.download"))));
   };
   return [
-    el("div", { class: "hint", style: "margin:0" }, t("cutset.intro")),
-    el("div", {}, cap("cutset.way"), select(engines.map((k) => [k, t("cutset.engine." + k)]), now, (v) => setting("cutEngine", v, true)),
-      !cutReady(now) && el("div", { class: "hint err" }, t("cutset.wayMissing"))),
-    el("div", {}, cap("cutset.models"), S.cutModels.map(row), CUTDL.error && el("div", { class: "hint err" }, CUTDL.error),
-      el("div", { class: "hint" }, t("cutset.speed"))),
-    el("div", {}, cap("cutset.proxy"), textInput(S.settings.cutProxy, (v) => setting("cutProxy", v.trim()), { placeholder: "http://127.0.0.1:7890" }), el("div", { class: "hint" }, t("cutset.proxyHint"))),
-    CAN.folders && el("button", { class: "btn wide", onclick: () => invoke("reveal_data_dir", { dir: "models" }).catch(fail) }, t("cutset.folder")),
+    el("div", { class: "cutrows" }, engines.map(row)),
+    !cutReady(now) && el("div", { class: "hint err" }, t("cutset.wayMissing")),
+    CUTDL.error && el("div", { class: "hint err" }, CUTDL.error),
+    el("div", { class: "hint" }, t("cutset.speed")),
+    el("div", {}, el("label", { class: "cap" }, t("cutset.proxy"), info(t("cutset.proxyHint"))), textInput(S.settings.cutProxy, (v) => setting("cutProxy", v.trim()), { placeholder: "http://127.0.0.1:7890" })),
     el("div", { class: "hint" }, t("cutset.licence")),
   ];
 }
 function textAiPane() {
   const c = S.ai, ph = AI_PLACEHOLDER[c.style];
   const where = () => (aiReady(S.ai) ? t("ai.endpoint", endpoint(S.ai)) : "");
-  const ep = el("div", { class: "hint", style: "margin-top:-10px;word-break:break-all" }, where());
-  const testBtn = el("button", { class: "btn wide", disabled: !aiReady(c), onclick: () => test() }, t("ai.test"));
+  const ep = el("div", { class: "hint", style: "word-break:break-all" }, where());
+  const testBtn = el("button", { class: "btn", disabled: !aiReady(c), onclick: () => test() }, t("ai.test"));
   const set = (k, v, redraw = false) => {
     S.ai = normalizeAi({ ...S.ai, [k]: v }); AI.test = ""; persistAi();
     if (redraw) return renderPanel();
     ep.textContent = where(); testBtn.disabled = !aiReady(S.ai);       // typing must not rebuild the form
   };
-  const field = (key, k, props = {}) => el("div", {}, cap(key), textInput(c[k], (v) => set(k, v), props));
+  const field = (key, k, props = {}, under = null) => el("div", {}, cap(key), textInput(c[k], (v) => set(k, v), props), under);
   const test = async () => {
     AI.test = { ok: null, text: t("ai.testing") }; renderPanel();
     try { const out = await aiCall(S.ai, "Reply with the single word OK.", "ping"); AI.test = { ok: true, text: t("ai.testOk", out.text.trim().slice(0, 60)) }; }
     catch (e) { AI.test = { ok: false, text: t("msg.failed", String(e && e.message ? e.message : e)) }; }
-    if (S.mode === "setup" && S.tab.setup === "ai") renderPanel();
+    refreshAiPage();
   };
   return [
-    el("div", { class: "hint", style: "margin:0" }, t("ai.intro")),
-    el("div", {}, cap("ai.style"), select(AI_STYLES.map((k) => [k, t("ai.style." + k)]), c.style, (v) => set("style", v, true))),
-    field("ai.baseUrl", "baseUrl", { placeholder: ph.baseUrl }),
-    ep,
+    el("div", {}, cap("ai.style"), el("div", { class: "seg" }, AI_STYLES.map((k) => el("button", { class: "btn" + (c.style === k ? " on" : ""), title: t("ai.style." + k), onclick: () => set("style", k, true) }, t("ai.styleShort." + k))))),
+    field("ai.baseUrl", "baseUrl", { placeholder: ph.baseUrl }, ep),
     field("ai.token", "token", { type: "password", placeholder: t("ai.tokenPh"), autocomplete: "off" }),
     field("ai.model", "model", { placeholder: t("ai.modelPh") }),
     c.style === "anthropic" && [
       el("div", {}, cap("ai.auth"), select([["key", t("ai.auth.key")], ["bearer", t("ai.auth.bearer")]], c.auth, (v) => set("auth", v))),
       el("div", {}, cap("ai.maxTokens"), el("input", { type: "number", min: 512, max: 64000, step: 256, value: c.maxTokens, onchange: (e) => set("maxTokens", e.target.value, true) })),
     ],
-    el("div", {}, cap("ai.timeout"), el("input", { type: "number", min: 30, max: 1800, step: 30, value: c.timeout, onchange: (e) => set("timeout", e.target.value, true) }),
-      el("div", { class: "hint" }, t("ai.timeoutHint"))),
+    el("div", {}, el("label", { class: "cap" }, t("ai.timeout"), info(t("ai.timeoutHint"))), el("input", { type: "number", min: 30, max: 1800, step: 30, value: c.timeout, onchange: (e) => set("timeout", e.target.value, true) })),
     field("ai.proxy", "proxy", { placeholder: "http://127.0.0.1:7890" }),
-    el("div", {}, cap("ai.notes"), el("textarea", { value: c.notes, spellcheck: false, style: "height:84px;font-size:14px", placeholder: t("ai.notesPh"), oninput: (e) => set("notes", e.target.value) })),
-    testBtn,
-    testLine(AI.test),
+    el("div", { class: "wide" }, cap("ai.notes"), el("textarea", { value: c.notes, spellcheck: false, style: "height:84px;font-size:14px", placeholder: t("ai.notesPh"), oninput: (e) => set("notes", e.target.value) })),
+    el("div", { class: "aifoot" }, testBtn, testLine(AI.test)),
     el("div", { class: "hint" }, t("ai.privacy")),
   ];
 }
@@ -2926,68 +2935,101 @@ async function uploadLogo() {
   if (L) { delete L.off; L.visible = true; }   // uploading one is wanting it on the cover
   touch({ profile: true, cover: true, panel: true, side: true });
 }
-/** The brand logo: a picture of it and its name (or that there is none), and buttons to upload one or another, and to remove it. */
+/** The settings window's state: `at`, a card of the page to bring into view when it is next drawn ("batch", "image", "cut"); `menu`, the channel whose ⋯ is open. */
+const SET_UI = { at: "", menu: "" };
+/** The profile's logo: its picture (or a place for one), Upload or Replace, Remove. In Settings → Brand, and the logo layer's properties. */
 function logoControls() {
   const P = S.profile, a = P.brand.logo && userAssets.get(P.brand.logo);
   return el("div", { class: "logo-row" },
-    el("div", { class: "lthumb" }, a && graphicThumb({ kind: "user", id: a.id }, cat().color, 44)),
-    el("span", {}, a ? a.name : t("brand.logoNone")),
+    el("span", { class: "lthumb" + (a ? "" : " none") }, a ? graphicThumb({ kind: "user", id: a.id }, cat().color, 40) : "＋"),
     el("button", { class: "btn", onclick: uploadLogo }, t(a ? "brand.logoSwap" : "brand.logoUp")),
-    a && el("button", { class: "btn", onclick: () => { P.brand.logo = ""; touch({ profile: true, panel: true, side: true }); } }, t("brand.logoDrop")));
+    a ? el("button", { class: "linkbtn", onclick: () => { P.brand.logo = ""; touch({ profile: true, panel: true, side: true }); } }, t("brand.logoDrop")) : el("small", {}, t("brand.logoKind")));
 }
+/** What the brand row's number says on this channel's cover, as drawn (see the brand row in render.js). */
+const counterText = (P) => [P.brand.unit, P.categories.length > 1 ? `${String(catIndex() + 1).padStart(2, "0")} / ${String(P.categories.length).padStart(2, "0")}` : ""].filter(Boolean).join(" ");
+/** The brand row's preview: the brand's name, this channel's code on its colour, the number. */
+const brandPreview = (P) => [P.brand.name, cat().code && el("i", { style: `background:${cat().color};color:${inkOn(cat().color)}` }, cat().code), el("b", {}, counterText(P))];
+/**
+ * Settings → Brand: the profile's name, the brand's name and logo, the number on the brand row (with a preview); then
+ * the channels, a card each — colour, name, sub-name, code, graphic, ⋯ to move or delete it — the one on the canvas
+ * marked, a click on any showing it there; a card to add one.
+ */
 function brandTab() {
   const P = S.profile, lang = getLang(), struct = () => touch({ profile: true, cover: true, panel: true, side: true });
+  const field = (key, sub, kid) => el("div", { class: "fld" }, el("div", { class: "cap" }, t(key), sub && el("small", {}, sub)), kid);
+  const pin = (key, kid) => el("label", { class: "pin" }, el("span", {}, t(key)), kid);   // an input with its name inside
   const card = (c, i) => {
-    const lib = c.graphic.kind === "graphic" && GRAPHICS.find((g) => g.id === c.graphic.id);
+    const lib = c.graphic.kind === "graphic" && GRAPHICS.find((g) => g.id === c.graphic.id), here = S.cover.catId === c.id, open = SET_UI.menu === c.id;
     // working on a channel shows that channel on the canvas
-    const show = () => { if (S.cover.catId !== c.id) switchChannel(c.id); };
-    return el("div", { class: "card", style: `--c:${c.color}`, onfocusin: show, onpointerdown: show, oninput: show },
-      el("div", { class: "head" },
-        el("input", { type: "color", value: c.color, title: t("cat.color"), oninput: (e) => { c.color = e.target.value; e.target.closest(".card").style.setProperty("--c", c.color); document.documentElement.style.setProperty("--acc", c.color); touch({ profile: true }); } }),
-        textInput(c.name, (v) => { c.name = v; touch({ profile: true }); }, { placeholder: t("cat.name") })),
+    const show = (e) => { if (!e.target.closest(".more, .chmenu") && S.cover.catId !== c.id) switchChannel(c.id); };   // not its ⋯ and menu: a re-render would take the click
+    const move = (by) => { P.categories.splice(i + by, 0, P.categories.splice(i, 1)[0]); SET_UI.menu = ""; struct(); };
+    const remove = () => {
+      SET_UI.menu = "";
+      if (P.categories.length < 2) { renderPanel(); return toast(t("msg.lastCategory")); }
+      const [gone] = P.categories.splice(i, 1);
+      delete S.covers[gone.id]; files.remove(coverPath(P.id, gone.id)).catch(() => null);   // its cover goes with it
+      if (S.cover.catId === gone.id) { S.settings.channels[P.id] = P.categories[0].id; persistSettings(); setCover(coverFor(P.categories[0].id)); loadPhotos(pidsOf(S.cover)).then(() => queueDraw()); }
+      else setCover(normalizeCover(S.cover, P));
+      struct();
+    };
+    return el("div", { class: "chcard" + (here ? " here" : ""), style: `--c:${c.color}`, onfocusin: show, onpointerdown: show, oninput: show },
+      el("div", { class: "chrow" },
+        el("label", { class: "swc", title: t("cat.color") }, el("input", { type: "color", value: c.color, oninput: (e) => { c.color = e.target.value; e.target.closest(".chcard").style.setProperty("--c", c.color); document.documentElement.style.setProperty("--acc", c.color); touch({ profile: true }); } })),
+        textInput(c.name, (v) => { c.name = v; touch({ profile: true }); }, { placeholder: t("cat.name"), class: "chname" }),
+        el("button", { class: "more", title: t("cat.more"), "aria-expanded": String(open), onclick: () => { SET_UI.menu = open ? "" : c.id; renderPanel(); } }, "⋯")),
+      open && el("div", { class: "chmenu" },
+        el("button", { disabled: i === 0, onclick: () => move(-1) }, t("cat.up")),
+        el("button", { disabled: i === P.categories.length - 1, onclick: () => move(1) }, t("cat.down")),
+        el("button", { class: "danger", onclick: remove }, t("cat.remove"))),
       el("div", { class: "two" },
-        textInput(c.sub, (v) => { c.sub = v; touch({ profile: true }); }, { placeholder: t("cat.sub") }),
-        textInput(c.code, (v) => { c.code = v; touch({ profile: true }); }, { placeholder: t("cat.code") })),
+        pin("cat.subShort", textInput(c.sub, (v) => { c.sub = v; touch({ profile: true }); })),
+        pin("cat.code", textInput(c.code, (v) => { c.code = v; touch({ profile: true }); }))),
       el("button", { class: "gpick", title: t("cat.pickTip"), onclick: () => graphicPicker(c.graphic.kind === "none" ? null : c.graphic, c.color, (ref) => { c.graphic = ref ? { kind: ref.kind, id: ref.id, labels: [], stamp: "" } : { kind: "none" }; struct(); }) },
-        graphicThumb(c.graphic.kind === "none" ? null : c.graphic, c.color, 44), el("span", {}, c.graphic.kind === "none" ? t("cat.none") : assetExists(c.graphic) ? assetName(c.graphic, lang) : t("assets.missing")), el("span", { class: "more" }, t("cat.pick"))),
+        graphicThumb(c.graphic.kind === "none" ? null : c.graphic, c.color, 32), el("span", {}, c.graphic.kind === "none" ? t("cat.none") : assetExists(c.graphic) ? assetName(c.graphic, lang) : t("assets.missing")), el("span", { class: "more" }, t("cat.pick"))),
       lib && lib.labels && textInput((c.graphic.labels || []).join("，"), (v) => { c.graphic.labels = v.split(/[,，]/).map((x) => x.trim()).filter(Boolean).slice(0, 4); touch({ profile: true }); }, { placeholder: t("cat.labels") }),
       lib && lib.stamp && textInput(c.graphic.stamp || "", (v) => { c.graphic.stamp = v; touch({ profile: true }); }, { placeholder: t("cat.stamp") }),
-      el("div", { class: "acts" },
-        el("button", { class: "btn", disabled: i === 0, onclick: () => { P.categories.splice(i - 1, 0, P.categories.splice(i, 1)[0]); struct(); } }, t("cat.up")),
-        el("button", { class: "btn", disabled: i === P.categories.length - 1, onclick: () => { P.categories.splice(i + 1, 0, P.categories.splice(i, 1)[0]); struct(); } }, t("cat.down")),
-        el("button", { class: "btn", onclick: () => {
-          if (P.categories.length < 2) return toast(t("msg.lastCategory"));
-          const [gone] = P.categories.splice(i, 1);
-          delete S.covers[gone.id]; files.remove(coverPath(P.id, gone.id)).catch(() => null);   // its cover goes with it
-          if (S.cover.catId === gone.id) { S.settings.channels[P.id] = P.categories[0].id; persistSettings(); setCover(coverFor(P.categories[0].id)); loadPhotos(pidsOf(S.cover)).then(() => queueDraw()); }
-          else setCover(normalizeCover(S.cover, P));
-          struct();
-        } }, t("cat.remove"))));
+      here && el("span", { class: "pill" }, t("brand.onCanvas")));
   };
-  const act = (key) => el("button", { class: "btn", onclick: () => Promise.resolve(profileActions[key]()).catch((e) => { fail(e); syncTop(); renderPanel(); }) }, t("prof." + key));
+  const preview = el("span", { class: "pv" }, brandPreview(P)), redo = () => preview.replaceChildren(...brandPreview(P).filter(Boolean));
   return [
-    el("div", { class: "box" }, cap("prof.manage"), el("div", { class: "acts", style: "justify-content:flex-start" }, ["new", "duplicate", "delete", "import", "export"].map(act))),
-    el("div", {}, cap("brand.profileName"), textInput(P.name, (v) => { P.name = v; touch({ profile: true }); later("top", 600, syncTop); })),
-    el("div", {}, cap("brand.name"), textInput(P.brand.name, (v) => { P.brand.name = v; touch({ profile: true }); })),
-    el("div", {}, cap("brand.logo"), logoControls(), el("div", { class: "hint" }, t("brand.logoHint"))),
-    el("div", {}, cap("brand.unit"),
-      check("brand.counter", P.brand.counter, (v) => { P.brand.counter = v; touch({ profile: true, panel: true }); }),
-      textInput(P.brand.unit, (v) => { P.brand.unit = v; touch({ profile: true }); }, { disabled: !P.brand.counter }),
-      el("div", { class: "hint" }, t("brand.unitHint"))),
-    el("div", {}, cap("brand.categories"), el("div", { style: "display:grid;gap:10px" }, P.categories.map(card),
-      el("button", { class: "btn wide", onclick: () => {
+    el("div", { class: "sh" }, el("b", {}, t("tab.brand")), el("span", {}, t("brand.pageSub"))),
+    el("div", { class: "fields3" },
+      field("brand.profileName", "", textInput(P.name, (v) => { P.name = v; touch({ profile: true }); later("top", 600, () => { syncTop(); syncTabs(); }); })),
+      field("brand.name", t("brand.nameSub"), textInput(P.brand.name, (v) => { P.brand.name = v; touch({ profile: true }); redo(); })),
+      field("brand.logo", t("brand.logoSub"), logoControls())),
+    el("div", { class: "scard counter" },
+      el("button", { class: "tog" + (P.brand.counter ? " on" : ""), role: "switch", "aria-checked": String(!!P.brand.counter), "aria-label": t("brand.counter"), onclick: () => { P.brand.counter = !P.brand.counter; touch({ profile: true, panel: true }); } }),
+      el("div", { class: "grow" }, el("b", {}, t("brand.counter"), " ", info(t("brand.unitHint"))), el("small", {}, t("brand.counterSub"))),
+      el("span", { class: "lab" }, t("brand.unit")),
+      textInput(P.brand.unit, (v) => { P.brand.unit = v; touch({ profile: true }); redo(); }, { disabled: !P.brand.counter, class: "unit" }),
+      P.brand.counter && [el("span", { class: "lab" }, t("brand.preview")), preview]),
+    el("div", { class: "cap" }, t("brand.channelsN", P.categories.length), el("small", {}, t("brand.channelsSub"))),
+    el("div", { class: "chgrid" }, P.categories.map(card),
+      el("button", { class: "chadd", onclick: () => {
         const palette = ["#ffb703", "#fb5607", "#3a86ff", "#a855f7", "#06d6a0", "#ff5fa2"];
         P.categories.push({ id: uid(), name: t("cat.new"), sub: "", code: "", color: palette[P.categories.length % palette.length], graphic: { kind: "graphic", id: GRAPHICS[P.categories.length % GRAPHICS.length].id, labels: [], stamp: "" } });
         struct();
-      } }, t("brand.add")))),
+      } }, el("b", {}, t("brand.add")), el("small", {}, t("brand.addSub")))),
   ];
 }
+// a press anywhere but on a channel's ⋯ menu shuts it
+addEventListener("pointerdown", (e) => {   // the page is not drawn again: the press goes on to what it is on
+  if (!SET_UI.menu || (e.target.closest && e.target.closest(".chmenu, .chcard .more"))) return;
+  SET_UI.menu = "";
+  for (const m of document.querySelectorAll(".chcard .chmenu")) m.remove();
+  for (const b of document.querySelectorAll(".chcard .more[aria-expanded=true]")) b.setAttribute("aria-expanded", "false");
+}, true);
+/**
+ * Settings → Sizes & export: every size there is (the presets, then the user's own), each a row — a name of the user's
+ * own, its ratio, the platforms it is for, its pixels, a switch to make covers at it (one at least); a size of one's
+ * own to add; the format and the resolution, the file names with an example; and the batch export from a table.
+ */
 function sizesTab() {
-  const P = S.profile, se = S.settings;
+  const P = S.profile, se = S.settings, lang = getLang();
   const has = (s) => P.sizes.some((x) => sizeKey(x) === sizeKey(s));
   const toggle = (s, on) => {
     if (on && !has(s)) P.sizes.push({ w: s.w, h: s.h, label: s.label || "", name: "" });
-    if (!on) { if (P.sizes.length < 2) return renderPanel(); P.sizes = P.sizes.filter((x) => sizeKey(x) !== sizeKey(s)); followLayout(P.style, sizeKey(s)); }   // its layout of its own goes with it
+    if (!on) { if (P.sizes.length < 2) { toast(t("exp.lastSize")); return renderPanel(); } P.sizes = P.sizes.filter((x) => sizeKey(x) !== sizeKey(s)); followLayout(P.style, sizeKey(s)); }   // its layout of its own goes with it
     if (!P.sizes.some((x) => sizeKey(x) === S.sel)) S.sel = sizeKey(P.sizes[0]);
     // the sizes a layer shows at (see `sizes` in layers.js) kept to those now, as they are when read again: on the design
     // and the cover shown, both in this one step of undo; another channel's when it is next shown (coverFor), so undone
@@ -2997,25 +3039,37 @@ function sizesTab() {
     syncToolbar(); touch({ profile: true, cover: true, strip: true, panel: true, side: true });
   };
   const custom = P.sizes.filter((s) => !SIZE_PRESETS.some((p) => sizeKey(p) === sizeKey(s)));
-  const unnamed = (s) => caption({ ...s, name: "" });   // what a size is called without a name of the user's
-  const mine = (s) => !platformsFor(s.w, s.h).length && !s.label;   // a size of the user's own, for no platform
-  const row = (s) => el("label", { class: "chk" }, el("input", { type: "checkbox", checked: has(s), onchange: (e) => toggle(s, e.target.checked) }), mine(s) ? `${t("exp.custom")} · ${unnamed(s)}` : unnamed(s), el("span", {}, `${s.w}×${s.h}`));
-  const cw = el("input", { type: "number", min: 64, max: 8192, placeholder: "W", value: 1280 }), chh = el("input", { type: "number", min: 64, max: 8192, placeholder: "H", value: 720 });
+  const row = (s) => {
+    const mine = P.sizes.find((x) => sizeKey(x) === sizeKey(s)), on = !!mine, plats = platformsFor(s.w, s.h, lang).join(" · ") || s.label || t("exp.custom");
+    return el("div", { class: "szrow" + (on ? " on" : "") },
+      textInput(mine ? mine.name : "", (v) => { mine.name = v.trim().slice(0, 40); persistProfile(); recordHistory(); later("strip", 250, () => { buildStrip(); syncToolbar(); queueDraw(); }); },
+        { placeholder: on ? t("exp.namePh") : "", disabled: !on, maxLength: 40, title: t("exp.namesHint") }),
+      el("span", { class: "ratio" }, ratioText(s.w, s.h)),
+      el("span", { class: "plats", title: plats }, plats),
+      el("span", { class: "px" }, `${s.w} × ${s.h}`),
+      el("button", { class: "tog" + (on ? " on" : ""), role: "switch", "aria-checked": String(on), "aria-label": sizeLabel(s), onclick: () => toggle(s, !on) }));
+  };
+  const cw = el("input", { type: "number", min: 64, max: 8192, value: 1280 }), chh = el("input", { type: "number", min: 64, max: 8192, value: 720 });
   const setting = (k, v, panel = false) => { se[k] = v; persistSettings(); if (panel) renderPanel(); };
+  const seg = (k, opts) => el("div", { class: "seg" }, opts.map(([v, l]) => el("button", { class: "btn" + (se[k] === v ? " on" : ""), onclick: () => setting(k, v, true) }, l)));
+  const example = el("div", { class: "hint" }, t("exp.example", nameFor(selSize(), S.cover, catIndex())));
   return [
-    el("div", { class: "box sizes" }, cap("exp.sizes"), SIZE_PRESETS.map(row), custom.map(row),
-      el("div", { class: "row3", style: "margin-top:12px" }, cw, chh,
-        el("button", { class: "btn", style: "padding:10px", onclick: () => toggle(normalizeSize({ w: cw.value, h: chh.value, label: "" }), true) }, t("exp.addSize")))),
-    el("div", { class: "box" }, cap("exp.names"),
-      P.sizes.map((s) => el("div", { class: "nm-row" }, el("span", {}, `${s.w}×${s.h}`),
-        textInput(s.name, (v) => { s.name = v.trim().slice(0, 40); persistProfile(); recordHistory(); later("strip", 250, () => { buildStrip(); syncToolbar(); queueDraw(); }); }, { placeholder: unnamed(s), maxLength: 40 }))),
-      el("div", { class: "hint" }, t("exp.namesHint"))),
-    el("div", {}, cap("exp.scale"), select([1, 2, 3, 4].map((n) => [String(n), `${n}x`]), String(se.scale), (v) => setting("scale", Number(v)))),
-    el("div", {}, cap("exp.format"), select([["png", "PNG"], ["jpeg", "JPEG"], ["webp", "WebP"]], se.format, (v) => setting("format", v, true)),
-      se.format === "jpeg" && slider("exp.quality", 40, 100, 1, se.quality, px, (v) => setting("quality", v)),
-      se.format === "webp" && el("div", { class: "hint" }, t("exp.webpNote")),
-      el("div", { class: "hint" }, t("exp.transparentHint"))),
-    el("div", {}, cap("exp.name"), textInput(se.nameTemplate, (v) => setting("nameTemplate", v)), el("div", { class: "hint" }, t("exp.nameHint"))),
+    el("div", { class: "sh" }, el("b", {}, t("tab.sizes")), el("span", {}, t("exp.pageSub"))),
+    el("div", { class: "cap" }, t("exp.sizesN", P.sizes.length), el("small", {}, t("exp.sizesSub"))),
+    el("div", { class: "szlist" }, SIZE_PRESETS.map(row), custom.map(row)),
+    el("div", { class: "scard addsize" }, el("div", { class: "grow" }, el("b", {}, t("exp.customAdd")), el("small", {}, t("exp.customSub"))),
+      el("label", { class: "pin" }, el("span", {}, t("exp.w")), cw), el("span", {}, "×"), el("label", { class: "pin" }, el("span", {}, t("exp.h")), chh),
+      el("button", { class: "btn", onclick: () => toggle(normalizeSize({ w: cw.value, h: chh.value, label: "" }), true) }, t("exp.addSize"))),
+    el("div", { class: "fields3" },
+      el("div", { class: "fld" }, el("div", { class: "cap" }, t("exp.format")), seg("format", [["png", "PNG"], ["jpeg", "JPEG"], ["webp", "WebP"]])),
+      el("div", { class: "fld" }, el("div", { class: "cap" }, t("exp.scale")), seg("scale", [1, 2, 3, 4].map((n) => [n, `${n}×`]))),
+      el("div", { class: "fld" }, se.format === "jpeg" && slider("exp.quality", 40, 100, 1, se.quality, px, (v) => setting("quality", v)), se.format === "webp" && el("div", { class: "hint" }, t("exp.webpNote")))),
+    el("div", { class: "hint" }, t("exp.transparentHint")),
+    el("div", { class: "fld" }, el("div", { class: "cap" }, t("exp.name"), info(t("exp.nameHint"))),
+      textInput(se.nameTemplate, (v) => { setting("nameTemplate", v); example.textContent = t("exp.example", nameFor(selSize(), S.cover, catIndex())); }), example),
+    el("div", { class: "scard batch", id: "set-batch" }, el("div", { class: "grow" }, el("b", {}, t("exp.batch"), " ", info(t("exp.batchHint"))), el("small", {}, t("exp.batchSub"))),
+      el("button", { class: "btn", onclick: csvTemplate }, t("exp.csvTemplate")),
+      el("button", { class: "btn solid", onclick: batchFromCsv }, t("exp.csv"))),
   ];
 }
 /** Adds a font file to the app: every layer can use it from then on. Returns its family name, or null. */
@@ -3515,7 +3569,7 @@ function photoControls(L, set) {
       L.cut && slider("props.feather", 0, 40, 1, L.feather, px, (v) => { holdLive(L.id); set("feather", v); }),
       L.cut && slider("props.spread", 0, 40, 1, L.spread, px, (v) => { holdLive(L.id); set("spread", v); }),
       CUT.error && el("div", { class: "hint err" }, CUT.error),
-    CUT.needModel && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.tab.setup = "ai"; S.aiPane = "cut"; setMode("setup"); } }, t("cut.goModel"))], t("cut.tip", t("cutset.engine." + cutEngine()))),
+    CUT.needModel && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.tab.setup = "ai"; SET_UI.at = "cut"; setMode("setup"); } }, t("cut.goModel"))], t("cut.tip", t("cutset.engine." + cutEngine()))),
     canWeave(L) && weaveControls(L),
     L.of
       ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")),
@@ -4775,16 +4829,41 @@ function closeModal() { const m = $("modal"); m.hidden = true; m.replaceChildren
   m.addEventListener("pointerdown", (e) => { fromBackdrop = e.target === m; });
   m.addEventListener("click", (e) => { if (fromBackdrop && e.target === m && !m.dataset.sticky) (m.onDismiss || closeModal)(); });
 }
+/**
+ * Export: this channel's cover at every size of the profile, each a row with its picture (the tray's), what it is
+ * called and its pixels, and Export for it alone; the format, the resolution and the file names (the same settings
+ * as Settings → Sizes & export), an example of the name; then Only this size, and every size into a folder.
+ */
 function exportDialog() {
-  const m = $("modal"), se = S.settings;
-  m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("exp.dialog")),
-    el("div", { class: "hint", style: "margin:0" }, t("exp.summary", se.format.toUpperCase(), se.scale)),
-    el("div", { class: "dl" }, S.profile.sizes.map((s) => el("button", { class: "btn wide", onclick: () => exportOne(s) }, `${t("exp.one")} ${sizeLabel(s)}`)),
-      el("button", { class: "btn solid wide", onclick: () => exportMany([{ cover: S.cover, index: catIndex() }]) }, `${t("exp.all")} (${S.profile.sizes.length})`)),
-    el("div", { class: "box" }, cap("exp.batch"), el("div", { class: "hint", style: "margin:0 0 12px" }, t("exp.batchHint")),
-      el("button", { class: "btn wide", onclick: batchFromCsv }, t("exp.csv")),
-      el("button", { class: "btn wide", style: "margin-top:8px", onclick: csvTemplate }, t("exp.csvTemplate"))),
-    el("button", { class: "btn wide", onclick: closeModal }, t("close"))));
+  const m = $("modal"), se = S.settings, sizes = S.profile.sizes, c = cat();
+  const set = (k, v) => { se[k] = v; persistSettings(); exportDialog(); };
+  const seg = (k, opts) => el("div", { class: "seg" }, opts.map(([v, l]) => el("button", { class: "btn" + (se[k] === v ? " on" : ""), onclick: () => set(k, v) }, l)));
+  const thumb = (z) => {   // the tray's, once painted; else painted here
+    const cv = el("canvas"), src = $("th-" + sizeKey(z));
+    if (src && src.dataset.painted) { cv.width = src.width; cv.height = src.height; cv.getContext("2d").drawImage(src, 0, 0); } else paint(cv, z, virtualSize(z.w, z.h)[0] * 0.2);
+    return cv;
+  };
+  const example = el("div", { class: "hint" }, t("exp.example", nameFor(selSize(), S.cover, catIndex())));
+  m.replaceChildren(el("div", { class: "dlg xp" },
+    el("div", { class: "xhead" }, el("div", {}, el("h2", {}, t("exp.title")), el("div", { class: "hint" }, [c.name || c.code, S.cover.tag, (LOOKS[S.profile.style.look] || LOOKS.cel).name[getLang()]].filter(Boolean).join(" · "))),
+      el("button", { class: "x", title: t("close"), onclick: closeModal }, "✕")),
+    el("div", { class: "xcap" }, el("b", {}, t("exp.sizesN", sizes.length))),
+    el("div", { class: "xsizes" }, sizes.map((z) => el("div", { class: "xrow" + (sizeKey(z) === S.sel ? " here" : "") },
+      el("span", { class: "xthumb" }, thumb(z)),
+      el("span", { class: "xname" }, el("b", { title: sizeLabel(z) }, caption(z)), el("small", {}, `${z.w}×${z.h}`)),
+      el("button", { class: "linkbtn", title: t("exp.oneTip", sizeLabel(z)), onclick: () => exportOne(z) }, t("exp.one"))))),
+    el("div", { class: "xopts" },
+      el("div", {}, el("div", { class: "cap" }, t("exp.format")), seg("format", [["png", "PNG"], ["jpeg", "JPEG"], ["webp", "WebP"]])),
+      el("div", {}, el("div", { class: "cap" }, t("exp.scale")), seg("scale", [1, 2, 3, 4].map((n) => [n, `${n}×`]))),
+      el("div", { class: "grow" }, el("div", { class: "cap" }, t("exp.name"), info(t("exp.nameHint"))),
+        textInput(se.nameTemplate, (v) => { se.nameTemplate = v; persistSettings(); example.textContent = t("exp.example", nameFor(selSize(), S.cover, catIndex())); }))),
+    se.format === "jpeg" && slider("exp.quality", 40, 100, 1, se.quality, px, (v) => { se.quality = v; persistSettings(); }),
+    example,
+    el("div", { class: "xfoot" },
+      el("button", { class: "linkbtn", title: t("exp.batchHint"), onclick: () => { closeModal(); S.tab.setup = "sizes"; SET_UI.at = "batch"; setMode("setup"); } }, t("exp.batchGo")),
+      el("span", { class: "grow" }),
+      el("button", { class: "btn", onclick: () => exportOne(selSize()) }, t("exp.onlyHere")),
+      el("button", { class: "btn solid", onclick: () => exportMany([{ cover: S.cover, index: catIndex() }]) }, ico("download", 18), t("exp.allN", sizes.length)))));
   m.hidden = false;
 }
 
@@ -5191,6 +5270,7 @@ const SHELL_ICONS = {
   content: '<path d="M5 6V4h14v2"/><path d="M12 4v16"/><path d="M9 20h6"/>',
   look: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5C21 6.6 17 3 12 3Z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/>',
   layout: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 14 21 11"/>',
+  sizes: '<rect x="2.5" y="5" width="13" height="9" rx="1.5"/><rect x="11" y="9" width="10.5" height="12" rx="1.5"/>',
   assets: '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
   layers: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14"/><path d="M12 17h.01"/>',
@@ -5226,10 +5306,12 @@ function syncTop() {
   if (MENU.open) renderMenu();
 }
 // ---------- the ⋯ menu
-const MENU = { open: false };
+const MENU = { open: false, profiles: false };
+/** String `key` with a count: `key`.one for one ("1 channel"), else `key` ("5 channels"). */
+const counted = (key, n) => t(n === 1 ? key + ".one" : key, n);   // profiles: the other profiles listed, to switch to
 function toggleMenu() { if (MENU.open) closeMenu(); else openMenu(); }
 function openMenu() {
-  MENU.open = true; renderMenu();
+  MENU.open = true; MENU.profiles = false; renderMenu();
   const m = $("menu"), b = $("morebtn").getBoundingClientRect();
   Object.assign(m.style, { top: `${b.bottom + 8}px`, right: `${Math.max(8, innerWidth - b.right)}px` });
   m.hidden = false; $("morebtn").classList.add("on"); $("morebtn").setAttribute("aria-expanded", "true");
@@ -5241,22 +5323,27 @@ function closeMenu() {
 function renderMenu() {
   const go = (fn) => () => { closeMenu(); fn(); };
   const item = (label, sub, fn, cls = "") => el("button", { class: "mi " + cls, role: "menuitem", onclick: go(fn) }, el("span", { class: "mt" }, el("span", {}, label), sub && el("small", {}, sub)));
-  const page = (k) => item(t("tab." + k), null, () => { S.tab.setup = k; setMode("setup"); });
-  const on = glassOn();
-  $("menu").replaceChildren(
+  const page = (k, sub) => item(t("tab." + k), sub, () => { S.tab.setup = k; setMode("setup"); });
+  const on = glassOn(), others = S.profiles.filter((p) => p !== S.profile);
+  $("menu").replaceChildren(...[
     el("div", { class: "mg" }, t("menu.cover")),
     item(t("style.saveDesign"), t("menu.saveDesignSub"), saveDesign),
     item(t("style.loadDesign"), t("menu.loadDesignSub"), loadDesign),
     item(t("menu.clear"), t("top.clearTip"), clearDialog, "danger"),
     el("div", { class: "sep" }),
     el("div", { class: "mg" }, t("menu.profile", S.profile.name)),
-    page("brand"), page("sizes"), page("ai"),
+    page("brand", counted("menu.channels", S.profile.categories.length)), page("sizes", counted("menu.sizes", S.profile.sizes.length)), page("ai", t("menu.aiSub")),
+    others.length > 0 && el("button", { class: "mi", role: "menuitem", "aria-expanded": String(!!MENU.profiles), onclick: () => { MENU.profiles = !MENU.profiles; renderMenu(); } },
+      el("span", { class: "mt" }, el("span", {}, t("menu.switch"))), el("span", { class: "chev" + (MENU.profiles ? " open" : "") })),
+    MENU.profiles && others.map((p) => el("button", { class: "mi sub", role: "menuitem", onclick: go(() => switchProfile(p.id).catch((err) => { fail(err); syncTop(); })) },
+      el("span", { class: "mt" }, el("span", {}, p.name), el("small", {}, counted("menu.channels", p.categories.length))))),
     el("div", { class: "sep" }),
     el("div", { class: "row", title: CAN_BLUR ? t("menu.glassTip") : null }, el("span", {}, t("menu.glass")),
       el("button", { class: "tog" + (on ? " on" : ""), role: "switch", "aria-checked": String(on), "aria-label": t("menu.glass"), disabled: !CAN_BLUR, onclick: () => { setGlass(!on, true); renderMenu(); } })),
     el("div", { class: "row" }, el("span", {}, t("langName")),
       el("div", { class: "seg" }, [["zh", "中文"], ["en", "English"]].map(([v, l]) => el("button", { class: "btn" + (v === getLang() ? " on" : ""),
-        onclick: go(() => { S.settings.lang = v; setLang(v); persistSettings(); setMode(S.mode); buildStrip(); }) }, l)))));
+        onclick: go(() => { S.settings.lang = v; setLang(v); persistSettings(); setMode(S.mode); buildStrip(); }) }, l)))),
+    el("div", { class: "foot" }, t("menu.foot"))].flat().filter(Boolean));
 }
 addEventListener("pointerdown", (e) => { if (MENU.open && !$("menu").contains(e.target) && !(e.target.closest && e.target.closest("#morebtn"))) closeMenu(); });
 // Settings closes by its ✕, Esc, or a click beside its window
@@ -5301,9 +5388,17 @@ const TABS = { edit: { content: contentSheet, look: lookSheet, layout: layoutShe
 /** The dock's buttons, one per sheet, each opening its sheet; in Settings, its pages down the window's left. */
 function syncTabs() {
   if (S.mode === "setup") {
+    const P = S.profile, act = (key) => el("button", { class: "btn" + (key === "delete" ? " danger" : ""), onclick: () => Promise.resolve(profileActions[key]()).catch((e) => { fail(e); syncTop(); renderPanel(); }) }, t("prof.nav." + key));
+    const dots = `conic-gradient(${P.categories.map((c, i) => `${c.color} ${(i * 100) / P.categories.length}% ${((i + 1) * 100) / P.categories.length}%`).join(",")})`;
+    const icon = { brand: el("span", { class: "dots", style: `background:${dots}` }), sizes: ico("sizes", 18), ai: ico("spark", 18) };
     $("setclose").title = t("set.close"); $("setclose").setAttribute("aria-label", t("set.close"));
     $("setnav").replaceChildren(el("div", { class: "cap" }, t("set.title")),
-      ...Object.keys(TABS.setup).map((k) => el("button", { class: k === S.tab.setup ? "on" : "", onclick: () => { S.tab.setup = k; syncTabs(); renderPanel(); $("setpanel").scrollTop = 0; } }, t("tab." + k))));
+      el("div", { class: "who" }, el("span", { class: "av", style: `background:${cat().color};color:${inkOn(cat().color)}` }, [...(P.name || "?").trim()][0] || "?"),
+        el("span", {}, el("b", {}, P.name), el("small", {}, counted("set.profileSub", P.categories.length)))),
+      ...Object.keys(TABS.setup).map((k) => el("button", { class: "sni" + (k === S.tab.setup ? " on" : ""), onclick: () => { S.tab.setup = k; syncTabs(); renderPanel(); $("setpanel").scrollTop = 0; } }, icon[k], t("tab." + k))),
+      el("div", { class: "grow" }),
+      el("div", { class: "cap" }, t("set.thisProfile")),
+      el("div", { class: "pacts" }, act("new"), act("duplicate"), act("import"), act("export")), act("delete"));
     return;
   }
   $("dock").replaceChildren(...Object.keys(TABS.edit).map((k) => el("button", { class: k === S.tab.edit ? "on" : "", "aria-pressed": String(k === S.tab.edit),
@@ -5323,6 +5418,9 @@ function renderPanel() {
   document.documentElement.style.setProperty("--acc-ink", inkOn(cat().color));
   panel.replaceChildren(...TABS[S.mode][S.tab[S.mode]]().flat(Infinity).filter(Boolean));
   panel.scrollTop = y;
+  if (S.mode === "setup") syncTabs();   // the nav's profile: its name, channels and colours, as the page now has them
+  const at = S.mode === "setup" && SET_UI.at && document.getElementById("set-" + SET_UI.at);   // a card of the page asked for (see SET_UI)
+  if (at) { SET_UI.at = ""; at.scrollIntoView({ block: "start" }); }
 }
 
 function welcome() {
