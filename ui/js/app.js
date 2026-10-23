@@ -889,20 +889,18 @@ function coverPhotos() {
  * background, and has neither: it follows its photo.
  */
 function photoItem(L) {
-  const rec = recordOf(L), im = rec && rec.img, open = REP.for === L.id, passive = !!L.of, tied = passive || passivesOf(L).length > 0;
-  const mine = REP.of === L.id, label = open ? "rep.close" : mine && REP.busy ? "rep.running" : mine && REP.result ? "rep.ready" : "rep.title";
+  const rec = recordOf(L), im = rec && rec.img, passive = !!L.of, tied = passive || passivesOf(L).length > 0;
+  const mine = REP.of === L.id, label = mine && REP.busy ? "rep.running" : mine && REP.result ? "rep.ready" : "rep.title";
   const locked = passive ? t("link.passiveLocked", layerName(owner(L))) : null;
   return el("div", { class: "pitem" + (passive ? " passive" : "") + (L.id === S.layerId ? " on" : ""), dataset: { id: L.id }, style: tied ? `--link:${linkColour(L)}` : null },
     el("div", { class: "thumb", title: t("cover.photoSelect"), onclick: () => focusAllows(L.id) && selectLayer(L.id) },
       im ? el("img", { src: L.cut && rec.mask ? cutThumb(rec) : thumbOf(rec), alt: "" }) : el("div", { class: "hint err", style: "margin:0" }, t("props.photoMissing")),
-      el("button", { class: "del", title: t(passivesOf(L).length ? "cover.removeLinked" : "cover.removePhoto"), onclick: (e) => { e.stopPropagation(); if (REP.for === L.id) REP.for = ""; removeLayer(L.id); renderPanel(); } }, "×"),
+      el("button", { class: "del", title: t(passivesOf(L).length ? "cover.removeLinked" : "cover.removePhoto"), onclick: (e) => { e.stopPropagation(); removeLayer(L.id); renderPanel(); } }, "×"),
       el("span", {}, tied && el("span", { class: "chain", innerHTML: ICONS.chain }), layerName(L), im && ` · ${sizeOf(im)[0]} × ${sizeOf(im)[1]}`, rec && rec.original && ` · ${t("rep.isRepainted")}`,
         passive && ` · ${t("link.follows", layerName(owner(L)))}`)),
     el("div", { class: "row", style: "margin-top:6px" },
-      el("button", { class: "btn" + (open || (mine && (REP.busy || REP.result)) ? " on" : ""), disabled: passive || !im || (REP.busy && !mine), title: locked,
-        onclick: () => { REP.for = open ? "" : L.id; renderPanel(); } }, t(label)),   // a result waits for its photo until the next repaint
-      el("button", { class: "btn", disabled: passive || (REP.busy && mine), title: locked, onclick: () => replacePhoto(L) }, t("cover.replacePhoto"))),
-    open && im && !passive && repaintBox(L));
+      el("button", { class: "btn" + (mine && (REP.busy || REP.result) ? " on" : ""), disabled: passive || !im || (REP.busy && !mine), title: locked, onclick: () => repaintOpen(L) }, t(label)),   // a result waits for its photo until the next repaint
+      el("button", { class: "btn", disabled: passive || (REP.busy && mine), title: locked, onclick: () => replacePhoto(L) }, t("cover.replacePhoto"))));
 }
 /**
  * The ways in of a photo — upload, AI generate and (in Assets → Add photos) from the bitmaps — and the
@@ -1350,9 +1348,8 @@ function assetsSheet() {
       add(t("add.text"), ico("content", 20), () => addLayer(newLayer("text", { text: t("layer.newText") }))),
       add(t("add.solid"), el("span", { class: "sw-chip", style: `background:${cat().color}` }), () => addLayer(newLayer("solid", { color: cat().color }))),
       add(t("cover.upload"), ico("upload", 20), uploadPhotos),
-      add(t("gen.open"), ico("spark", 20), () => { GEN.open = !GEN.open; renderPanel(); }, GEN.open)),
+      add(t("gen.open"), ico("spark", 20), () => genWin("photo"), GEN.busy || AI.busy)),
     el("div", { class: "hint", style: "margin:-6px 0 0" }, t("add.dropHint")),
-    GEN.open && genBox(),
     coverPhotos(),
     shelf("photos", t("shelf.photos"), S.library.length,
       (few) => { const all = libraryTiles((pid) => placePhoto(pid), () => { if (onAssetsTab()) renderPanel(); }, true); if (few && all.classList.contains("tiles")) [...all.children].slice(8).forEach((n) => n.remove()); return all; },
@@ -1593,11 +1590,11 @@ async function repaintPhoto() {
   const mine = myStyle(), preset = builtIn();
   if (mine && !promptOf(mine.body)) return toast(t("rep.needCustom"));
   let text = mine ? promptOf(mine.body) : "";
-  if (preset) { try { text = await styleText(preset); } catch (e) { REP.error = String(e.message); return renderPanel(); } }
+  if (preset) { try { text = await styleText(preset); } catch (e) { REP.error = String(e.message); return repRedraw(); } }
   const P = repTarget(), job = ++REP.job, from = rec.original ? await loadImage(rec.original) : rec.img;
   const prompt = repaintPrompt({ source: mine || preset ? "text" : "look", look: S.profile.style.look, color: cat().color, text, notes: cfg.notes });
-  Object.assign(REP, { of: P.id, busy: true, error: "", result: null, since: Date.now() });
-  renderPanel();
+  Object.assign(REP, { of: P.id, busy: true, error: "", result: null, since: Date.now(), as: repStyleName() });
+  repRedraw();
   const tick = setInterval(() => { const b = document.getElementById("rep-go"); if (b && REP.busy) b.textContent = repBusyText(); }, 1000);
   let result = null, error = "";
   try {
@@ -1609,10 +1606,10 @@ async function repaintPhoto() {
   clearInterval(tick);
   if (job !== REP.job) return;                       // cancelled meanwhile
   Object.assign(REP, { busy: false, result, error });
-  if (REP.for !== P.id && layer(P.id)) toast(t(error ? "rep.failedToast" : "rep.readyToast", layerName(P)));   // closed meanwhile: it waits under the photo's AI repaint
-  if (onCoverTab()) renderPanel();
+  if (REP.for !== P.id && layer(P.id)) toast(t(error ? "rep.failedToast" : "rep.readyToast", layerName(P)));   // closed meanwhile: it waits in the photo's AI repaint
+  repRedraw();
 }
-function cancelRepaint() { REP.job++; Object.assign(REP, { of: "", busy: false, error: "", result: null }); renderPanel(); }
+function cancelRepaint() { REP.job++; Object.assign(REP, { of: "", busy: false, error: "", result: null }); repRedraw(); }
 /**
  * Puts another picture into a photo's record — a repaint, or back to the original — so every layer
  * showing it changes; its subject is cut out again for the layers that are cut.
@@ -1626,6 +1623,7 @@ async function usePicture(L, pid) {
   if (!A || !pid) return;
   A.pid = pid; REP.result = null;
   touch({ cover: true, panel: true, side: true });
+  repRedraw();
   recut(pid);
 }
 async function useRepaint() {
@@ -1665,7 +1663,7 @@ async function refreshMyStyles() {
   S.myStyles = mine;
   if (JSON.stringify(S.myStyles.map((s) => [s.id, s.meta, s.body])) === was) return;
   if (S.imageAi.source.startsWith("my:") && !myStyle()) { S.imageAi.source = "look"; persistImageAi(); }   // its file is gone
-  if (onCoverTab() && !(document.activeElement && document.activeElement.closest && document.activeElement.closest(".rep"))) renderPanel();
+  if (!(document.activeElement && document.activeElement.closest && document.activeElement.closest(".repw"))) repRedraw();
 }
 addEventListener("focus", () => { if (S.cover) refreshMyStyles(); });
 const saveMyStyle = (st) => later("style-" + st.id, 400, () => files.write(`${MY_DIR}/${st.file}`, writeStyle(st.meta, st.body)).catch(fail));
@@ -1675,7 +1673,7 @@ async function addStyle(meta, body) {
   const id = freeId(Date.now().toString(36), S.myStyles.map((s) => s.id));
   await files.write(`${MY_DIR}/${id}.md`, writeStyle(meta, body)).catch(fail);
   await rereadMyStyles([...S.myStyles, userStyle(id + ".md", writeStyle(meta, body))]);
-  S.imageAi = normalizeImageAi({ ...S.imageAi, source: "my:" + id }); persistImageAi(); renderPanel();
+  S.imageAi = normalizeImageAi({ ...S.imageAi, source: "my:" + id }); persistImageAi(); repRedraw();
 }
 /** Reads the folder again after a change to it; when it cannot be read just now (on a server), says so and takes `was` for what is there. */
 async function rereadMyStyles(was) {
@@ -1684,15 +1682,15 @@ async function rereadMyStyles(was) {
 /** Brings in a style file from elsewhere (one shared by someone, a skill's SKILL.md…), kept as it is. */
 async function importStyle() {
   const f = await pickFile(".md,.markdown,.txt,text/markdown,text/plain");
-  if (!f) return renderPanel();
+  if (!f) return repRedraw();
   const text = await readAs(f, "readAsText");
   const id = freeId(f.name, S.myStyles.map((s) => s.id)), st = userStyle(id + ".md", text);
-  if (!st.prompt) { toast(t("rep.importEmpty")); return renderPanel(); }
+  if (!st.prompt) { toast(t("rep.importEmpty")); return repRedraw(); }
   // a file without a header gets one, named after the file; one with a header is kept word for word
   const out = /^\uFEFF?---\r?\n/.test(text) ? text : writeStyle({ name: f.name.replace(/\.[^.]+$/, "") }, text);
   await files.write(`${MY_DIR}/${id}.md`, out).catch(fail);
   await rereadMyStyles([...S.myStyles, userStyle(id + ".md", out)]);
-  S.imageAi = normalizeImageAi({ ...S.imageAi, source: "my:" + id }); persistImageAi(); renderPanel();
+  S.imageAi = normalizeImageAi({ ...S.imageAi, source: "my:" + id }); persistImageAi(); repRedraw();
   toast(t("rep.imported", st.name[getLang()]));
 }
 /** Writes out the styles image-ai.json held before they were files, once. */
@@ -1703,66 +1701,103 @@ async function migrateStyles(raw) {
   for (const s of old) if (!have.includes(s.id + ".md")) await files.write(`${MY_DIR}/${s.id}.md`, writeStyle({ name: s.name }, s.prompt)).catch(fail);
   await writeJson("image-ai.json", S.imageAi).catch(fail);   // without them from now on
 }
-/** The AI repaint of photo layer P: where the style comes from, what to add, the result beside the original. */
-function repaintBox(P) {
-  const c = S.imageAi, lang = getLang(), rec = recordOf(P);
-  const set = (k, v, redraw = false) => { S.imageAi = normalizeImageAi({ ...S.imageAi, [k]: v }); persistImageAi(); if (redraw) renderPanel(); };
-  /** Edits the selected style of the user's own and saves its file (typing must not rebuild the form). */
+/**
+ * The AI repaint of a photo, in a window of its own: the original beside this repaint's result (or how far it has got),
+ * Discard, Again and Use it, and the way back to the original; beside them what it is painted as — the current look,
+ * a built-in style, or one of the user's own (files, edited here) — a note to add, and Repaint. REP.for: the photo
+ * layer whose window is open. A repaint goes on with the window shut, and waits in it for the photo.
+ */
+const REPWIN = { all: false };   // every built-in style listed, or the first few
+/** Opens the AI repaint of photo layer L; not while another photo's repaint is under way (one at a time). */
+function repaintOpen(L) {
+  if (REP.busy && REP.of !== L.id) return toast(t("rep.busyOther", layer(REP.of) ? layerName(layer(REP.of)) : ""));
+  REP.for = L.id; repaintWin();
+}
+/** What the repaint is painted as now: the user's style, a built-in one, or the current look, by name. */
+const repStyleName = () => { const mine = myStyle(), preset = builtIn(), lang = getLang(); return mine ? mine.name[lang] : preset ? preset.name[lang] : (LOOKS[S.profile.style.look] || LOOKS.cel).name[lang]; };
+/** Draws the repaint window again if it is open, and the photos listed in Assets (their repaint's state). */
+function repRedraw() {
+  if ($("modal").querySelector(".dlg.repw")) repaintWin();
+  if (onCoverTab()) renderPanel();
+  renderBar();   // a photo's AI repaint there is off while another's runs
+}
+function repClose() { REP.for = ""; closeModal(); if (onCoverTab()) renderPanel(); }
+function repaintWin() {
+  const P = repTarget(), m = $("modal"), held = heldField(m);
+  if (!P) return repClose();
+  const c = S.imageAi, lang = getLang(), rec = recordOf(P), im = rec && rec.img, ours = REP.of === P.id, r = ours ? REP.result : null;
+  const set = (k, v, redraw = false) => { S.imageAi = normalizeImageAi({ ...S.imageAi, [k]: v }); persistImageAi(); if (redraw) repaintWin(); };
+  /** Edits the selected style of the user's own and saves its file (typing must not rebuild the window). */
   const rename = (v) => { const st = myStyle(); if (!st) return; delete st.meta["name.zh"]; delete st.meta["name.en"]; st.meta.name = v; st.name = { zh: v, en: v }; saveMyStyle(st); };
   const rewrite = (v) => { const st = myStyle(); if (!st) return; st.body = v; st.prompt = promptOf(v); saveMyStyle(st); };
+  const head = el("div", { class: "xhead" }, el("div", {}, el("h2", {}, t("rep.title")), el("div", { class: "hint" }, `${layerName(P)} · ${t("rep.sub")}`)),
+    el("button", { class: "x", title: t("close"), onclick: repClose }, "✕"));
+  m.onDismiss = repClose;
   if (!imageReady(c)) {
-    return el("div", { class: "rep" }, el("div", { class: "hint", style: "margin:0 0 10px" }, t("rep.needSetup")),
-      el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; SET_UI.at = "image"; setMode("setup"); } }, t("rep.goSetup")));
+    m.replaceChildren(el("div", { class: "dlg repw small" }, head, el("div", { class: "hint", style: "margin:0" }, t("rep.needSetup")),
+      el("button", { class: "btn solid", onclick: () => { repClose(); S.tab.setup = "ai"; SET_UI.at = "image"; setMode("setup"); } }, t("rep.goSetup"))));
+    m.hidden = false;
+    return;
   }
-  const look = LOOKS[S.profile.style.look] || LOOKS.cel, ours = REP.of === P.id, r = ours ? REP.result : null;
-  const sources = [["look", t("rep.src.look", look.name[lang])],
-    { group: t("rep.src.preset"), items: S.repaintStyles.map((s) => ["preset:" + s.id, s.name[lang]]) },
-    { group: t("rep.src.mine"), items: S.myStyles.map((s) => ["my:" + s.id, s.name[lang]]) },
-    ["+new", t("rep.src.new")], ["+import", t("rep.src.import")], CAN.folders && ["+folder", t("rep.src.folder")]].filter(Boolean);
-  const command = (v) => {
-    if (v === "+new") return addStyle({ name: t("rep.newName", S.myStyles.length + 1) }, "");
-    if (v === "+import") return importStyle();
-    if (v === "+folder") { invoke("reveal_data_dir", { dir: MY_DIR }).catch(fail); return renderPanel(); }   // the menu goes back to the style in use
-    set("source", v, true);
-  };
-  const mine = myStyle(), preset = builtIn();
+  const look = LOOKS[S.profile.style.look] || LOOKS.cel, mine = myStyle(), preset = builtIn();
+  const chip = (v, label, title = "") => el("button", { class: "rchip" + (c.source === v ? " on" : ""), title: title || null, disabled: REP.busy, onclick: () => set("source", v, true) }, label);
+  const presets = REPWIN.all ? S.repaintStyles : [...new Set([...S.repaintStyles.slice(0, 8), preset].filter(Boolean))];   // folded: the first few, and the one chosen
   /** Fills a <pre> with a built-in style's prompt the first time it is opened. */
   const peek = (e) => { const pre = e.currentTarget.querySelector("pre"); if (e.currentTarget.open && !pre.textContent) styleText(preset).then((x) => { pre.textContent = x; }, (err) => { pre.textContent = String(err.message); }); };
-  return el("div", { class: "rep" },
-    select(sources, c.source, command),
-    preset && [
-      preset.about && el("div", { class: "about" }, preset.about[lang]),
-      preset.credit && el("div", { class: "hint" }, t("rep.credit", preset.credit)),
-      el("details", { class: "peek", ontoggle: peek }, el("summary", {}, t("rep.peek")), el("pre", {})),
-      el("button", { class: "btn wide", style: "margin-top:8px", onclick: async () => addStyle({ name: preset.name[lang] + t("rep.copySuffix"), ...(preset.credit ? { credit: preset.credit } : {}) }, await styleText(preset).catch(() => "")) }, t("rep.copy"))],
-    mine && [
-      mine.about && el("div", { class: "about" }, mine.about[lang]),
-      mine.credit && el("div", { class: "hint" }, t("rep.credit", mine.credit)),
-      el("div", { style: "margin-top:8px" }, textInput(mine.name[lang], rename, { placeholder: t("rep.namePh"), maxLength: 60, onchange: () => renderPanel() })),
-      el("textarea", { value: mine.body, spellcheck: false, style: "height:160px;font-size:13px;margin-top:8px", placeholder: t("rep.customPh"), oninput: (e) => rewrite(e.target.value) }),
-      el("div", { class: "hint" }, t("rep.customHint", `repaint-styles/${mine.file}`)),
-      el("button", { class: "btn wide", style: "margin-top:8px", onclick: async () => {
-        if (REP.confirmDrop !== mine.id) { REP.confirmDrop = mine.id; renderPanel(); return; }   // a second click confirms
-        REP.confirmDrop = null;
-        await files.remove(`${MY_DIR}/${mine.file}`).catch(fail);
-        await rereadMyStyles(S.myStyles.filter((s) => s.id !== mine.id)); S.imageAi = normalizeImageAi({ ...c, source: "look" }); persistImageAi(); renderPanel();
-      } }, t(REP.confirmDrop === mine.id ? "rep.dropSure" : "rep.drop", mine.name[lang]))],
-    el("div", { style: "margin-top:8px" }, textInput(c.notes, (v) => set("notes", v), { placeholder: t("rep.notesPh"), maxLength: 600, disabled: REP.busy })),
-    el("button", { id: "rep-go", class: "btn solid wide", style: "margin-top:10px", disabled: REP.busy, onclick: repaintPhoto }, REP.busy ? repBusyText() : t(r ? "rep.again" : "rep.go")),
-    REP.busy && el("button", { class: "btn wide", style: "margin-top:8px", onclick: cancelRepaint }, t("ai.cancel")),
-    ours && REP.error && el("div", { class: "hint err" }, t("msg.failed", REP.error)),
-    r && [
-      el("div", { class: "compare one" },
-        el("figure", {}, el("img", { src: r.src, alt: "" }), el("figcaption", {}, `${t("rep.after")} · ${r.w} × ${r.h}`))),
-      el("div", { class: "row" },
-        el("button", { class: "btn solid", onclick: useRepaint }, t("rep.use")),
-        el("button", { class: "btn", onclick: () => { REP.result = null; renderPanel(); } }, t("ai.discard")))],
-    rec.original && el("button", { class: "btn wide", style: "margin-top:8px", disabled: REP.busy, onclick: () => restoreOriginal(P) }, t("rep.restore")),
-    el("div", { class: "hint" }, t("rep.hint", t("img.provider." + c.provider), c.model)));
+  const picture = (src, w, h, label) => el("figure", {}, el("img", { src, alt: "" }), el("figcaption", {}, label, w ? ` · ${w} × ${h}` : ""));
+  const busy = ours && REP.busy;
+  m.replaceChildren(el("div", { class: "dlg repw" }, head,
+    el("div", { class: "repbody" },
+      el("div", { class: "repview" },
+        el("div", { class: "cmp" },
+          im ? (rec.original ? picture(rec.original, 0, 0, t("rep.before")) : picture(rec.src, ...sizeOf(im), t("rep.before"))) : el("div", { class: "hint err" }, t("props.photoMissing")),   // the one it was painted from: its size not known here
+          r ? picture(r.src, r.w, r.h, t("rep.result", REP.as || repStyleName()))
+            : el("div", { class: "cmp-wait" + (busy ? " busy" : "") }, busy ? t("rep.running") : ours && REP.error ? el("span", { class: "err" }, t("msg.failed", REP.error)) : t("rep.empty"))),
+        el("div", { class: "repacts" },
+          rec && rec.original && el("button", { class: "linkbtn", disabled: REP.busy, onclick: () => restoreOriginal(P) }, t("rep.restore")),
+          el("span", { class: "grow" }),
+          r && [el("button", { class: "btn", onclick: () => { REP.result = null; repaintWin(); } }, t("ai.discard")),
+            el("button", { class: "btn", onclick: repaintPhoto }, t("rep.again")),
+            el("button", { class: "btn solid", onclick: useRepaint }, t("rep.use"))])),
+      el("div", { class: "repside" },
+        el("div", { class: "cap" }, t("rep.as")),
+        el("div", { class: "rchips" }, chip("look", t("rep.src.look", look.name[lang]))),
+        el("div", { class: "cap sub" }, t("rep.src.presetN", S.repaintStyles.length),
+          S.repaintStyles.length > 8 && el("button", { class: "linkbtn", onclick: () => { REPWIN.all = !REPWIN.all; repaintWin(); } }, t(REPWIN.all ? "odds.fold" : "rep.allPresets"))),
+        el("div", { class: "rchips" }, presets.map((st) => chip("preset:" + st.id, st.name[lang], st.about && st.about[lang]))),
+        el("div", { class: "cap sub" }, t("rep.src.mine"), CAN.folders && el("button", { class: "linkbtn", onclick: () => invoke("reveal_data_dir", { dir: MY_DIR }).catch(fail) }, t("rep.src.folder"))),
+        el("div", { class: "rchips" }, S.myStyles.map((st) => chip("my:" + st.id, st.name[lang])),
+          el("button", { class: "rchip add", disabled: REP.busy, onclick: () => addStyle({ name: t("rep.newName", S.myStyles.length + 1) }, "") }, t("rep.src.new")),
+          el("button", { class: "rchip add", disabled: REP.busy, onclick: importStyle }, t("rep.src.import"))),
+        preset && el("div", { class: "rdetail" },
+          preset.about && el("div", { class: "about" }, preset.about[lang]),
+          preset.credit && el("div", { class: "hint" }, t("rep.credit", preset.credit)),
+          el("details", { class: "peek", ontoggle: peek }, el("summary", {}, t("rep.peek")), el("pre", {})),
+          el("button", { class: "linkbtn", onclick: async () => addStyle({ name: preset.name[lang] + t("rep.copySuffix"), ...(preset.credit ? { credit: preset.credit } : {}) }, await styleText(preset).catch(() => "")) }, t("rep.copy"))),
+        mine && el("div", { class: "rdetail" },
+          mine.about && el("div", { class: "about" }, mine.about[lang]),
+          mine.credit && el("div", { class: "hint" }, t("rep.credit", mine.credit)),
+          textInput(mine.name[lang], rename, { placeholder: t("rep.namePh"), maxLength: 60, onchange: () => repaintWin(), dataset: { k: "stname" } }),
+          el("textarea", { value: mine.body, spellcheck: false, style: "height:140px;font-size:13px", placeholder: t("rep.customPh"), dataset: { k: "stbody" }, oninput: (e) => rewrite(e.target.value) }),
+          el("div", { class: "hint" }, t("rep.customHint", `repaint-styles/${mine.file}`)),
+          el("button", { class: "linkbtn danger", onclick: async () => {
+            if (REP.confirmDrop !== mine.id) { REP.confirmDrop = mine.id; repaintWin(); return; }   // a second click confirms
+            REP.confirmDrop = null;
+            await files.remove(`${MY_DIR}/${mine.file}`).catch(fail);
+            await rereadMyStyles(S.myStyles.filter((s) => s.id !== mine.id)); S.imageAi = normalizeImageAi({ ...c, source: "look" }); persistImageAi(); repaintWin();
+          } }, t(REP.confirmDrop === mine.id ? "rep.dropSure" : "rep.drop", mine.name[lang]))),
+        el("div", { class: "cap" }, t("rep.notes")),
+        textInput(c.notes, (v) => set("notes", v), { placeholder: t("rep.notesPh"), maxLength: 600, disabled: REP.busy, dataset: { k: "notes" } }),
+        el("div", { class: "hint" }, t("rep.hint", t("img.provider." + c.provider), c.model)),
+        el("div", { class: "repgo" },
+          busy && el("button", { class: "btn", onclick: cancelRepaint }, t("ai.cancel")),
+          el("button", { id: "rep-go", class: "btn solid", disabled: REP.busy || !im, onclick: repaintPhoto }, busy ? repBusyText() : t(r ? "rep.again" : "rep.go")))))));
+  m.hidden = false;
+  giveBack(m, held);
 }
 // ---------- a photo made by the image model, from words and perhaps a reference picture
 // ref: {mime, data, url, w, h} of the reference; result: {src, w, h} waiting to be added or dropped
-const GEN = { open: false, busy: false, job: 0, since: 0, prompt: "", ref: null, error: "", result: null };
+const GEN = { busy: false, job: 0, since: 0, prompt: "", ref: null, error: "", result: null };
 const genBusyText = () => t("gen.busy", Math.max(0, Math.round((Date.now() - GEN.since) / 1000)));
 /** Makes a picture in the shape of the size on the canvas. */
 async function generatePhoto() {
@@ -1770,7 +1805,7 @@ async function generatePhoto() {
   if ((!text && !ref) || GEN.busy) return;
   const job = ++GEN.job;
   Object.assign(GEN, { busy: true, error: "", result: null, since: Date.now() });
-  renderPanel();
+  genRedraw();
   const tick = setInterval(() => { const b = document.getElementById("gen-go"); if (b && GEN.busy) b.textContent = genBusyText(); }, 1000);
   let result = null, error = "";
   try {
@@ -1782,45 +1817,93 @@ async function generatePhoto() {
   clearInterval(tick);
   if (job !== GEN.job) return;                       // cancelled meanwhile
   Object.assign(GEN, { busy: false, result, error });
-  if (onCoverTab()) renderPanel();
+  genDone("photo", error);
+  genRedraw();
 }
-function cancelGeneratePhoto() { GEN.job++; Object.assign(GEN, { busy: false, error: "", result: null }); renderPanel(); }
+function cancelGeneratePhoto() { GEN.job++; Object.assign(GEN, { busy: false, error: "", result: null }); genRedraw(); }
 /** Takes a picture as the reference for the next one made: sent along, at most 1536 px on its longer side. */
 async function pickGenRef() {
   const f = await pickFile("image/png,image/jpeg,image/webp");
   if (!f) return;
   const im = await loadImage(await readAs(f, "readAsDataURL"));
   if (!im) return toast(t("msg.badFile"));
-  GEN.ref = shrink(im, 1536); renderPanel();
+  GEN.ref = shrink(im, 1536); genRedraw();
 }
 async function keepGeneratedPhoto() {
   const r = GEN.result;
   if (!r) return;
   GEN.result = null;
-  if (!(await (r.pid ? placePhoto(r.pid) : addPhoto(r.src)))) renderPanel();
+  if (await (r.pid ? placePhoto(r.pid) : addPhoto(r.src))) { closeModal(); if (onAssetsTab()) renderPanel(); } else genRedraw();
 }
-/** Cover → Photos → AI generate. */
-function genBox() {
-  const c = S.imageAi, r = GEN.result, size = selSize();
-  if (!imageReady(c)) {
-    return el("div", { class: "rep" }, el("div", { class: "hint", style: "margin:0 0 10px" }, t("gen.needSetup")),
-      el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; SET_UI.at = "image"; setMode("setup"); } }, t("rep.goSetup")));
+// ---------- AI generate, in a window of its own: a photo (the image model) or a sticker or graphic (the text model)
+const GENWIN = { tab: "photo", dot: new Set() };   // the tab shown ("photo" or "art"); the tabs with something done since they were last shown
+const genOpen = () => !!$("modal").querySelector(".dlg.genw");
+/** Draws the AI generate window again if it is open, and the Assets sheet (what is under way there). */
+const genRedraw = () => { if (genOpen()) genWin(); if (onAssetsTab()) renderPanel(); };
+/**
+ * A generation on tab `tab` is done: shown at once when that tab is open; marked on its tab when the other one is; else
+ * a toast, with a way to it when no other window is open (it would take that window's place).
+ */
+function genDone(tab, error) {
+  if (genOpen()) { if (GENWIN.tab !== tab) GENWIN.dot.add(tab); return; }
+  const free = $("modal").hidden;
+  toast(t(`gen.${error ? "failed" : "ready"}.${tab}`), false, free ? { label: t("gen.see"), run: () => { if ($("modal").hidden) genWin(tab); } } : null);
+}
+/** The text field being typed in inside `box` (one with a data-k), to give it back its focus and caret once `box` is built again. */
+function heldField(box) { const a = document.activeElement; return a && box.contains(a) && a.dataset && a.dataset.k ? { k: a.dataset.k, s: a.selectionStart, e: a.selectionEnd } : null; }
+function giveBack(box, h) { const f = h && box.querySelector(`[data-k="${h.k}"]`); if (!f) return; f.focus(); try { f.setSelectionRange(h.s, h.e); } catch (e) { /* not a text field */ } }
+/**
+ * AI generate: on the left what to make — the words, for a sticker the kind it is drawn as, a picture to go by — and
+ * Generate; on the right what came back, to put on the cover (a photo; a sticker kept in My vector assets too), keep,
+ * or drop. A generation goes on with the window shut and waits in it; a toast says when it is done.
+ */
+function genWin(tab = GENWIN.tab) {
+  GENWIN.tab = tab; GENWIN.dot.delete(tab);
+  const m = $("modal"), photo = tab === "photo", size = selSize(), held = heldField(m);
+  const ready = photo ? imageReady(S.imageAi) : aiReady(S.ai), busy = photo ? GEN.busy : AI.busy;
+  const head = el("div", { class: "xhead" },
+    el("div", {}, el("h2", {}, t("gen.title")), el("div", { class: "hint" }, photo ? t("gen.photoSub", caption(size)) : t("ai.card.textSub"))),
+    el("div", { class: "seg" }, ["photo", "art"].map((k) => el("button", { class: "btn" + (k === tab ? " on" : "") + (GENWIN.dot.has(k) ? " dot" : ""), onclick: () => genWin(k) }, t("gen.tab." + k)))),
+    el("button", { class: "x", title: t("close"), onclick: closeModal }, "✕"));
+  const refZone = (ref, onPick, onDrop, refOn) => ref
+    ? el("div", { class: "gref" }, el("img", { src: ref.url, alt: "" }), el("span", {}, refOn), el("button", { class: "linkbtn", disabled: busy, onclick: onDrop }, t("ai.refRemove")))
+    : el("button", { class: "gref empty", disabled: busy, onclick: onPick }, t("gen.refAddLong"));
+  let form, result;
+  if (!ready) {
+    form = [el("div", { class: "hint", style: "margin:0" }, t(photo ? "gen.needSetup" : "ai.needSetup")),
+      el("button", { class: "btn solid", onclick: () => { closeModal(); S.tab.setup = "ai"; SET_UI.at = photo ? "image" : "text"; setMode("setup"); } }, t(photo ? "rep.goSetup" : "ai.goSetup"))];
+    result = el("div", { class: "gempty" }, t("gen.notReady"));
+  } else if (photo) {
+    const c = S.imageAi, r = GEN.result;
+    form = [el("div", { class: "cap" }, t("gen.what")),
+      el("textarea", { value: GEN.prompt, spellcheck: false, maxLength: 2000, disabled: busy, dataset: { k: "gprompt" }, style: "height:110px;font-size:14px", placeholder: t(GEN.ref ? "gen.phRef" : "gen.ph"), oninput: (e) => { GEN.prompt = e.target.value; } }),
+      el("div", { class: "cap" }, t("gen.ref")), refZone(GEN.ref, pickGenRef, () => { GEN.ref = null; genWin(); }, t("gen.refOn")),
+      el("div", { class: "hint" }, t("gen.hint", t("img.provider." + c.provider), c.model, caption(size))),
+      el("div", { class: "ggo" }, busy && el("button", { class: "btn", onclick: cancelGeneratePhoto }, t("ai.cancel")),
+        el("button", { id: "gen-go", class: "btn solid", disabled: busy, onclick: generatePhoto }, busy ? genBusyText() : t(r ? "gen.again" : "gen.go")))];
+    result = r ? [el("figure", { class: "gpic" }, el("img", { src: r.src, alt: "" }), el("figcaption", {}, `${r.w} × ${r.h}`)),
+        el("div", { class: "gacts" }, el("button", { class: "btn", onclick: () => { GEN.result = null; genWin(); } }, t("ai.discard")), el("button", { class: "btn solid", onclick: keepGeneratedPhoto }, t("gen.keep")))]
+      : el("div", { class: "gempty" + (busy ? " busy" : "") }, busy ? t("gen.working") : GEN.error ? el("span", { class: "err" }, t("msg.failed", GEN.error)) : t("gen.emptyPhoto"));
+  } else {
+    const r = AI.result, setKind = (k) => { S.ai = normalizeAi({ ...S.ai, kind: k }); persistAi(); genWin(); };
+    form = [el("div", { class: "cap" }, t("gen.what")),
+      el("textarea", { value: AI.target, spellcheck: false, maxLength: 300, disabled: busy, dataset: { k: "atarget" }, style: "height:84px;font-size:14px", placeholder: t(AI.image ? "ai.targetPhImage" : "ai.targetPh"),
+        oninput: (e) => { AI.target = e.target.value; }, onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); generateAsset(); } } }),
+      el("div", { class: "cap" }, t("gen.kind")),
+      el("div", { class: "gkinds" }, AI_KINDS.map((k) => el("button", { class: "gkind" + (S.ai.kind === k ? " on" : ""), disabled: busy, onclick: () => setKind(k) }, el("b", {}, t("ai.kind." + k)), el("small", {}, t("ai.kindHint." + k))))),
+      el("div", { class: "cap" }, t("gen.ref")), refZone(AI.image, pickReference, () => { AI.image = null; genWin(); }, t("ai.refOn")),
+      el("div", { class: "hint" }, t("ai.hint", S.ai.model)),
+      el("div", { class: "ggo" }, busy && el("button", { class: "btn", onclick: cancelGenerate }, t("ai.cancel")),
+        el("button", { id: "ai-go", class: "btn solid", disabled: busy, onclick: generateAsset }, busy ? aiBusyText() : t(r ? "ai.again" : "ai.generate")))];
+    result = r ? [el("div", { class: "gspecs" }, el("figure", {}, specPreview(r, null), el("figcaption", {}, t("gen.ownColour"))), el("figure", {}, specPreview(r, cat().color), el("figcaption", {}, t("gen.channelColour", cat().name || cat().code)))),
+        el("div", { class: "hint" }, r.name[getLang()]),
+        el("div", { class: "gacts" }, el("button", { class: "btn", onclick: () => { AI.result = null; genWin(); } }, t("ai.discard")),
+          el("button", { class: "btn", onclick: () => keepGenerated() }, t("ai.keep")), el("button", { class: "btn solid", onclick: () => keepGenerated(true) }, t("gen.place")))]
+      : el("div", { class: "gempty" + (busy ? " busy" : "") }, busy ? t("gen.working") : AI.error ? el("span", { class: "err" }, t("msg.failed", AI.error)) : t("gen.emptyArt"));
   }
-  return el("div", { class: "rep" },
-    el("textarea", { value: GEN.prompt, spellcheck: false, maxLength: 2000, disabled: GEN.busy, style: "height:84px;font-size:14px", placeholder: t(GEN.ref ? "gen.phRef" : "gen.ph"), oninput: (e) => { GEN.prompt = e.target.value; } }),
-    GEN.ref
-      ? el("div", { class: "ref" }, el("img", { src: GEN.ref.url, alt: "" }), el("span", {}, t("gen.refOn")),
-          el("button", { class: "btn", disabled: GEN.busy, onclick: () => { GEN.ref = null; renderPanel(); } }, t("ai.refRemove")))
-      : el("button", { class: "btn wide", style: "margin-top:8px", disabled: GEN.busy, onclick: pickGenRef }, t("gen.refAdd")),
-    el("button", { id: "gen-go", class: "btn solid wide", style: "margin-top:10px", disabled: GEN.busy, onclick: generatePhoto }, GEN.busy ? genBusyText() : t(r ? "gen.again" : "gen.go")),
-    GEN.busy && el("button", { class: "btn wide", style: "margin-top:8px", onclick: cancelGeneratePhoto }, t("ai.cancel")),
-    GEN.error && el("div", { class: "hint err" }, t("msg.failed", GEN.error)),
-    r && [
-      el("div", { class: "thumb" }, el("img", { src: r.src, alt: "" }), el("span", {}, `${r.w} × ${r.h}`)),
-      el("div", { class: "row" },
-        el("button", { class: "btn solid", onclick: keepGeneratedPhoto }, t("gen.keep")),
-        el("button", { class: "btn", onclick: () => { GEN.result = null; renderPanel(); } }, t("ai.discard")))],
-    el("div", { class: "hint" }, t("gen.hint", t("img.provider." + c.provider), c.model, caption(size))));
+  m.replaceChildren(el("div", { class: "dlg genw" }, head, el("div", { class: "genbody" }, el("div", { class: "gform" }, form), el("div", { class: "gresult" }, result))));
+  m.hidden = false; m.onDismiss = closeModal;
+  giveBack(m, held);
 }
 /** The image model's settings: Setup → AI → Image model. */
 function imageAiPane() {
@@ -1886,7 +1969,7 @@ async function generateAsset() {
   if ((!target && !image) || AI.busy) return;   // a picture alone is enough to go on
   const job = ++AI.job;
   Object.assign(AI, { busy: true, error: "", result: null, since: Date.now(), attempt: 1 });
-  renderPanel();
+  genRedraw();
   const tick = setInterval(() => { const b = document.getElementById("ai-go"); if (b && AI.busy) b.textContent = aiBusyText(); }, 1000);
   let result = null, error = "";
   try { result = await requestSpec(S.ai, target, (n) => { if (job === AI.job) AI.attempt = n; }, () => job === AI.job, image); }
@@ -1894,19 +1977,22 @@ async function generateAsset() {
   clearInterval(tick);
   if (job !== AI.job) return;                       // cancelled meanwhile: the late answer is dropped
   Object.assign(AI, { busy: false, result, error });
-  if (onAssetsTab()) renderPanel();
+  genDone("art", error);
+  genRedraw();
 }
 /** Stops waiting for the reply. The request itself cannot be recalled, so the provider may still bill it. */
-function cancelGenerate() { AI.job++; Object.assign(AI, { busy: false, error: "", result: null }); renderPanel(); }
+function cancelGenerate() { AI.job++; Object.assign(AI, { busy: false, error: "", result: null }); genRedraw(); }
 const aiBusyText = () => t("ai.busy", Math.max(0, Math.round((Date.now() - AI.since) / 1000))) + (AI.attempt > 1 ? t("ai.attempt", AI.attempt) : "");
-async function keepGenerated() {
+/** Keeps the asset made in My vector assets; `place`: and puts it on the cover. */
+async function keepGenerated(place = false) {
   const spec = AI.result;
   if (!spec) return;
   const a = putSpecAsset("a" + uid(), spec.name[getLang()], spec);
   await saveAssetRecord(a).catch(fail);
   AI.result = null;
+  if (place) { closeModal(); addAsset({ kind: "user", id: a.id }); if (onAssetsTab()) renderPanel(); return; }
   toast(t("ai.saved", a.name));
-  renderPanel();
+  genRedraw();
 }
 /**
  * Takes a picture as the reference for the next generation. It is scaled down to at most 768 px
@@ -1924,7 +2010,7 @@ async function pickReference() {
   x.imageSmoothingQuality = "high"; x.drawImage(im, 0, 0, cv.width, cv.height);
   const url = cv.toDataURL("image/jpeg", 0.85);
   AI.image = { mime: "image/jpeg", data: url.slice(url.indexOf(",") + 1), url };
-  renderPanel();
+  genRedraw();
 }
 function specPreview(spec, tint) {
   const cv = el("canvas", { width: 220, height: 220 }), x = cv.getContext("2d");
@@ -1932,31 +2018,10 @@ function specPreview(spec, tint) {
   drawSpec(x, spec, tint);
   return el("div", { class: "tile", style: "cursor:default" }, cv);
 }
+/** Assets → AI stickers: the way to AI generate's sticker tab (with what is under way there). */
 function aiSection() {
-  if (!aiReady(S.ai)) {
-    return el("div", { class: "box" }, cap("ai.title"), el("div", { class: "hint", style: "margin:0 0 10px" }, t("ai.needSetup")),
-      el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; setMode("setup"); } }, t("ai.goSetup")));
-  }
-  const r = AI.result;
-  const setKind = (k) => { S.ai = normalizeAi({ ...S.ai, kind: k }); persistAi(); renderPanel(); };
-  return el("div", { class: "box" }, cap("ai.title"),
-    el("div", { class: "seg", style: "margin-bottom:10px" }, AI_KINDS.map((k) => el("button", { class: "btn" + (S.ai.kind === k ? " on" : ""), style: "flex:1", disabled: AI.busy, title: t("ai.kindHint." + k), onclick: () => setKind(k) }, t("ai.kind." + k)))),
-    textInput(AI.target, (v) => { AI.target = v; }, { placeholder: t(AI.image ? "ai.targetPhImage" : "ai.targetPh"), maxLength: 300, disabled: AI.busy, onkeydown: (e) => { if (e.key === "Enter") generateAsset(); } }),
-    AI.image
-      ? el("div", { class: "ref" }, el("img", { src: AI.image.url, alt: "" }), el("span", {}, t("ai.refOn")),
-          el("button", { class: "btn", disabled: AI.busy, onclick: () => { AI.image = null; renderPanel(); } }, t("ai.refRemove")))
-      : el("button", { class: "btn wide", style: "margin-top:8px", disabled: AI.busy, onclick: pickReference }, t("ai.refAdd")),
-    el("button", { id: "ai-go", class: "btn solid wide", style: "margin-top:10px", disabled: AI.busy, onclick: generateAsset }, AI.busy ? aiBusyText() : t(r ? "ai.again" : "ai.generate")),
-    AI.busy && el("button", { class: "btn wide", style: "margin-top:8px", onclick: cancelGenerate }, t("ai.cancel")),
-    AI.error && el("div", { class: "hint err" }, t("msg.failed", AI.error)),
-    r && [
-      el("div", { class: "tiles", style: "grid-template-columns:1fr 1fr;margin-top:12px" }, specPreview(r, null), specPreview(r, cat().color)),
-      el("div", { class: "hint" }, t("ai.previewHint", r.name[getLang()])),
-      el("div", { class: "row" },
-        el("button", { class: "btn solid", onclick: keepGenerated }, t("ai.keep")),
-        el("button", { class: "btn", onclick: () => { AI.result = null; renderPanel(); } }, t("ai.discard"))),
-    ],
-    el("div", { class: "hint" }, t("ai.kindHint." + S.ai.kind) + " " + t("ai.hint", S.ai.model)));
+  return el("button", { class: "scard aientry", onclick: () => genWin("art") },
+    el("span", { class: "grow" }, el("b", {}, t("ai.title")), el("small", {}, AI.busy ? t("gen.working") : AI.result ? t("gen.waiting") : t("ai.card.textSub"))), el("span", { class: "more" }, t("gen.openShort")));
 }
 /** A connection test's outcome, in green when it worked and red when it did not. */
 const testLine = (r) => r && el("div", { class: `hint ${r.ok === true ? "ok" : r.ok === false ? "err" : ""}`, style: "margin-top:-8px;word-break:break-word" }, r.text);
@@ -2430,7 +2495,10 @@ function layoutEditor(p, i, fresh = false) {
     return { vw, vh, key: z.key, catId: null, group };
   };
   const reach = () => (E.scope === "all" ? keys() : E.scope === "orient" ? geo().group.map((x) => x.key) : [size().key]);
-  const cv = el("canvas"), stage = el("div", { class: "ls-stage" }, cv), side = el("div", { class: "ls-side" }), top = el("div", { class: "ls-top" });
+  const cv = el("canvas"), stage = el("div", { class: "ls-stage" }, cv), side = el("div", { class: "ls-side" }), top = el("div", { class: "ls-top" }), strip = el("div", { class: "ls-strip" });
+  // each size's look of the preset, under the canvas: a canvas each, kept while the strip is built again and painted a moment after a change
+  const thumbs = new Map(), thumbOf = (key) => { if (!thumbs.has(key)) thumbs.set(key, el("canvas")); return thumbs.get(key); };
+  const paintThumbs = () => { for (const z of sizes()) { const tc = thumbOf(z.key); if (tc.isConnected) drawCover(tc, { profile: profileAt(z.key), catIndex: catIndex(), size: z, pixelW: 220, cover: { ...words, layers }, photos: none }); } };
   const name = el("input", { type: "text", value: p.name, placeholder: layoutName(p, i), maxLength: LAYOUTS.name, spellcheck: false, oninput: () => (E.dirty = true) });
   // fitted to the room there is, at the screen's pixels; painted as a cover is, so the block and its diamonds are those
   // of this size (a part kept to other sizes left out of it, see coverAt in render.js)
@@ -2441,6 +2509,7 @@ function layoutEditor(p, i, fresh = false) {
     cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
     drawCover(cv, { profile: profileAt(z.key), catIndex: catIndex(), size: z, pixelW: Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), cover: { ...words, layers }, photos: none,
       select: E.sel, live: E.live, handles: E.sel !== "accent" });
+    if (!E.live) later("layed-thumbs", 250, paintThumbs);
   };
   let queued = false;
   const redraw = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; draw(); }); };
@@ -2604,15 +2673,17 @@ function layoutEditor(p, i, fresh = false) {
     const num = (k, hint) => el("input", { type: "number", class: "ls-num", min: 64, max: 8192, step: 1, placeholder: hint, value: E[k], oninput: (e) => (E[k] = e.target.value),
       onkeydown: (e) => { if (e.key === "Enter") add(); if (e.key === "Escape") { e.stopPropagation(); E.adding = false; build(); } } });
     const wIn = num("addW", "1080"), hIn = num("addH", "1350"), add = () => addSize(Number(wIn.value), Number(hIn.value));
-    top.replaceChildren(
+    top.replaceChildren(el("div", { class: "grp" }, el("span", {}, t("props.scope")), el("div", { class: "seg" }, SCOPES.map((v) => el("button", { class: "btn" + (E.scope === v ? " on" : ""),
+      title: v === "orient" ? t("scope.orientTip", sizes().filter((x) => geo().group.some((g) => g.key === x.key)).map((x) => ratioText(x.w, x.h)).join(" · ")) : null, onclick: () => { E.scope = v; build(); } }, scopeName(v, z.key))))));
+    strip.replaceChildren(el("div", { class: "ls-cap" }, el("b", {}, t("layed.strip")), el("small", {}, t("layed.stripSub"))),
       el("div", { class: "ls-sizes" },
-        sizes().map((x) => el("span", { class: "ls-size" + (x.custom ? " custom" : "") },
-          el("button", { class: "btn" + (x.key === z.key ? " on" : ""), title: x.custom ? t("layed.customTip", `${x.w}×${x.h}`) : sizeLabel(x), onclick: () => { E.key = x.key; keepSel(); build(); redraw(); } }, ratioText(x.w, x.h)),
+        sizes().map((x) => el("span", { class: "ls-size" + (x.custom ? " custom" : "") + (x.key === z.key ? " on" : "") },
+          el("button", { class: "ls-thumb", title: x.custom ? t("layed.customTip", `${x.w}×${x.h}`) : sizeLabel(x), onclick: () => { E.key = x.key; keepSel(); build(); redraw(); } },
+            el("span", { class: "tbox" }, thumbOf(x.key)), el("span", {}, ratioText(x.w, x.h))),
           x.custom && el("button", { class: "drop", title: t("layed.dropSize"), onclick: () => dropSize(x.key) }, "×"))),
-        E.adding ? el("span", { class: "ls-add" }, wIn, "×", hIn, el("button", { class: "btn", onclick: add }, t("layed.addGo")), el("button", { class: "btn", onclick: () => { E.adding = false; build(); } }, t("layed.cancel")))
-          : el("button", { class: "btn ls-plus", title: t("layed.addTip"), onclick: () => { E.adding = true; build(); } }, t("layed.add"))),
-      el("div", { class: "grp" }, el("span", {}, t("props.scope")), el("div", { class: "seg" }, SCOPES.map((v) => el("button", { class: "btn" + (E.scope === v ? " on" : ""),
-        title: v === "orient" ? t("scope.orientTip", sizes().filter((x) => geo().group.some((g) => g.key === x.key)).map((x) => ratioText(x.w, x.h)).join(" · ")) : null, onclick: () => { E.scope = v; build(); } }, scopeName(v, z.key))))));
+        E.adding ? el("span", { class: "ls-add" }, wIn, "×", hIn, el("button", { class: "btn", onclick: add }, t("layed.addGo")), el("button", { class: "linkbtn", onclick: () => { E.adding = false; build(); } }, t("layed.cancel")))
+          : el("button", { class: "ls-plus", title: t("layed.addTip"), onclick: () => { E.adding = true; build(); } }, t("layed.add"))));
+    later("layed-thumbs", 60, paintThumbs);
     if (E.adding) wIn.focus();
     // a part's row: ticked where the layout has it at this size, and said so when that is some sizes only; its name,
     // clicked, selects it (one here)
@@ -2624,7 +2695,6 @@ function layoutEditor(p, i, fresh = false) {
         on.length > 0 && on.length < all.length && el("small", { class: "some", title: t("layed.someTip", sizes().filter((x) => on.includes(x.key)).map((x) => ratioText(x.w, x.h)).join(" · ")) }, t("layed.some")));
     };
     side.replaceChildren(...[
-      el("div", {}, cap("layouts.name"), name),
       el("div", {}, cap("layed.parts"), el("div", { class: "parts" }, LAYOUT_PARTS.map(row)), el("div", { class: "hint", style: "margin:6px 0 0" }, t("layed.partsHint"))),
       el("div", { class: "ls-picked" }, el("span", {}, t("layed.picked", t("layer." + E.sel))),
         el("button", { class: "btn", title: t(block ? "layed.blockResetTip" : "layed.resetTip"), onclick: reset }, t(block ? "layed.blockReset" : "layed.reset"))),
@@ -2641,11 +2711,12 @@ function layoutEditor(p, i, fresh = false) {
     back();
   };
   build();
-  m.replaceChildren(el("div", { class: "dlg odds layed" },
-    el("div", { class: "head" }, el("h2", {}, fresh ? t("layed.newTitle") : t("layed.title", layoutName(p, i))),
+  m.replaceChildren(el("div", { class: "dlg layed" },
+    el("div", { class: "lehead" },
+      el("div", { class: "ttl" }, el("div", {}, el("h2", {}, t(fresh ? "layed.newTitle" : "layed.editTitle")), name), el("div", { class: "hint" }, t("layed.sub"), " ", info(t("layed.hint")))),
+      top,
       el("div", { class: "acts" }, el("button", { class: "btn", onclick: cancel }, t("layed.cancel")), el("button", { class: "btn solid", onclick: save }, t("layed.save")))),
-    el("div", { class: "hint", style: "margin:0" }, t("layed.hint")),
-    el("div", { class: "ls-body" }, el("div", { class: "ls-main" }, top, stage), side)));
+    el("div", { class: "ls-body" }, side, el("div", { class: "ls-main" }, stage, strip))));
   m.hidden = false; m.onDismiss = cancel;
   LAYED.redraw = redraw;
   redraw();
@@ -3413,7 +3484,7 @@ function lettersShow(now = false) {
   const inner = el("div", { id: "letters-box", "data-now": lettersNow(L) }, letterControls(L));
   inner._layer = L;
   win.replaceChildren(
-    el("div", { class: "head" }, el("b", {}, `${t("props.sec.letters")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: lettersClose }, "×")),
+    el("div", { class: "head" }, el("b", {}, `${t("props.sec.letters")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: lettersClose }, "✕")),
     inner,
     el("div", { class: "hint" }, t("letters.hint")),
     el("div", { class: "acts" }, el("button", { class: "btn", onclick: lettersClose }, t("deal.done"))));
@@ -3656,7 +3727,7 @@ function weaveShow(now = false) {
   const inner = el("div", { id: "weave-box", "data-now": weaveNow(L) }, weaveLetters(L));
   inner._layer = L;
   win.replaceChildren(
-    el("div", { class: "head" }, el("b", {}, `${t("weave.title")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: weaveClose }, "×")),
+    el("div", { class: "head" }, el("b", {}, `${t("weave.title")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: weaveClose }, "✕")),
     el("div", { class: "wkey" }, el("span", {}, el("span", { class: "wl on" }, "A"), " ", weaveT(L, "weave.inFront")), el("span", {}, el("span", { class: "wl" }, "A"), " ", weaveT(L, "weave.behind"))),
     inner,
     el("div", { class: "hint" }, weaveT(L, "weave.hint")),
@@ -3728,7 +3799,7 @@ function brushShow(now = false) {
     el("div", { class: "seg wide", style: "margin-top:10px" }, way(true), way(false)));
   inner._layer = L;
   win.replaceChildren(
-    el("div", { class: "head" }, el("b", {}, `${t("brush.title")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: brushClose }, "×")),
+    el("div", { class: "head" }, el("b", {}, `${t("brush.title")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: brushClose }, "✕")),
     inner,
     el("div", { class: "hint" }, weaveT(L, "brush.hint")),
     el("div", { class: "acts" },
@@ -4004,7 +4075,7 @@ function cropShow(now = false) {
     cropShow(true);
   } }, label.includes(":") ? label : t(label));
   win.replaceChildren(
-    el("div", { class: "head" }, el("b", {}, `${t("crop.title")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: cropClose }, "×")),
+    el("div", { class: "head" }, el("b", {}, `${t("crop.title")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: cropClose }, "✕")),
     cv,
     el("div", { class: "chips small" }, CROP_RATIOS.map(chip)),
     size,
@@ -4421,7 +4492,7 @@ function barItems(L) {
   if (T === "photo") {
     if (canCut()) items.push({ key: "cut", label: t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut"), off: CUT.busy, act: () => cutPhoto(L, !L.cut) });
     items.push({ key: "crop", label: t(L.crop && canCrop(L) ? "crop.edit" : "crop.open"), off: !canCrop(L), title: t(L.fill && !L.of ? "crop.fillTip" : "crop.openTip"), act: () => cropOpen(L) });
-    if (!L.of) items.push({ key: "repaint", label: t("rep.title"), off: !(recordOf(L) || {}).img, title: t("bar.repaintTip"), act: () => repaintFor(L) },
+    if (!L.of) items.push({ key: "repaint", label: t("rep.title"), off: !(recordOf(L) || {}).img || (REP.busy && REP.of !== L.id), act: () => repaintOpen(L) },
       { key: "replace", label: t("cover.replacePhoto"), off: REP.busy && REP.of === L.id, act: () => replacePhoto(L) });
   }
   if (T === "asset") {
@@ -4489,12 +4560,6 @@ function hoverShow(id) {
   Object.assign(HOVER.style, { left: box.cx - box.hw + "px", top: box.cy - box.hh + "px", width: box.hw * 2 + "px", height: box.hh * 2 + "px", transform: `rotate(${box.r}deg)` });
 }
 const hoverHide = () => { HOVER.hidden = true; };
-/** Opens the AI repaint of photo layer L where it is: under the photo, in Assets → the cover's photos. */
-function repaintFor(L) {
-  REP.for = L.id; S.tab.edit = "assets"; syncTabs(); renderPanel();
-  const item = $("panel").querySelector(`.pitem[data-id="${CSS.escape(L.id)}"]`);
-  if (item) item.scrollIntoView({ block: "start" });
-}
 addEventListener("pointerdown", (e) => {   // a click away from the bar and its popover shuts the popover
   if (!FTB.pop || BAR.contains(e.target) || POP.contains(e.target) || (e.target.closest && e.target.closest("#tip"))) return;
   FTB.pop = ""; renderBar();
@@ -4581,11 +4646,12 @@ function stage3d() {
 }
 function sync3dHud() {
   $("v3hud").replaceChildren(
+    el("b", {}, t("v3.label")),
     el("span", { class: "v3tip", title: t("v3.tip") }, t("v3.hint")),
     el("label", { class: "v3sl" }, t("v3.spread"), el("input", { type: "range", min: LIMITS.spread[0], max: LIMITS.spread[1], step: 0.05, value: V3.spread,
       oninput: (e) => { V3.aim = null; V3.spread = Number(e.target.value); tick3d(); } })),
     el("button", { class: "focusbtn", onclick: () => { V3.aim = { ...VIEW }; tick3d(); } }, t("v3.reset")),
-    el("button", { class: "focusbtn on", onclick: () => set3d(false) }, t("v3.exit")));
+    el("button", { class: "focusbtn on", onclick: () => set3d(false) }, t("v3.exit"), el("kbd", {}, "Esc")));
 }
 function peek3d(id) { if (V3.on && V3.peek !== id) { V3.peek = id; tick3d(); } }
 /** The row of the sheet under the pointer is marked in the list. */
