@@ -180,7 +180,7 @@ function edgePoints(shape, A, B, nx, ny) {
 }
 function strokeEdge(ctx, pts, nx, ny, sharp, C, lw = 16) {
   const run = (ox, oy) => { ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p[0] + ox, p[1] + oy) : ctx.moveTo(p[0] + ox, p[1] + oy))); ctx.stroke(); };
-  if (look().accent) return look().accent.edge(ctx, run, nx, ny, C, lookValues());
+  if (look().accent) return look().accent.edge(ctx, run, nx, ny, C, lookValues(), pts);
   ctx.lineCap = "butt"; ctx.lineJoin = sharp ? "miter" : "round";
   ctx.strokeStyle = INK; ctx.lineWidth = lw; run(0, 0);
   ctx.strokeStyle = "#fff"; ctx.lineWidth = 4; run(nx * (lw / 2 + 16), ny * (lw / 2 + 16));
@@ -210,6 +210,7 @@ export function paintAccent(ctx, shape, G, C) {
   polygon(ctx, block); ctx.fillStyle = acc; ctx.fill();
   ctx.save(); polygon(ctx, block); ctx.clip();
   toneField(raw, bx - 60, by - 60, bx + bw + 60, by + bh + 60, 28, LA ? LA.tone(C) : rgb(mixc(C, BLK, 0.24)), (x, y) => (((y - by) / bh) * 1.15 - 0.4 + (x - bx) / (bw * 2.6)) * (LA ? LA.toneScale : 1));
+  if (LA && LA.body) LA.body(raw, { x: bx, y: by, w: bw, h: bh }, nx, ny, C, lookValues());   // a surface of the look's own, inside the block
   if (shape === "stripes") {                                 // hazard band just inside the edge
     polygon(ctx, ext([A, B]).concat(ext([shift(A, 46), shift(B, 46)]).reverse())); ctx.clip();
     ctx.fillStyle = INK;
@@ -618,7 +619,7 @@ const PAINT = {
     if (costly && isFast() && keep && keep.stamp === stamp) { layDown(keep.img, keep.bx + (at[0] - keep.at[0]) * M.a, keep.by + (at[1] - keep.at[1]) * M.d); return hit; }
     const inFrame = (c, fn) => { c.save(); frame(c); fn(c); c.restore(); };
     const treat = (c) => {   // the look paints on the whole canvas (its washes cover it); the photo itself goes in its frame
-      const draw = (grey = 0, treat = null) => inFrame(c, (x) => drawPhotoAt(x, im, rect.x, rect.y, rect.iw, rect.ih, L.blur, env.hiRes, grey, treat));   // treat: { key, fn(RGBA) }, the look's own recolouring of the photo itself
+      const draw = (grey = 0, treat = null) => inFrame(c, (x) => drawPhotoAt(x, im, rect.x, rect.y, rect.iw, rect.ih, L.blur, env.hiRes, grey, treat));   // treat: { key, fn(RGBA, w, h) }, the look's own recolouring of the photo itself
       if (!(L.treat && look().background && look().background(c, { ...env, photo: im, drawPhoto: draw }, { grid: false, blur: L.blur, dim: 0, fill: fills }, lookValues()))) draw();
       inFrame(c, (x) => { if (L.dim > 0) { x.fillStyle = `rgba(7,7,12,${L.dim})`; x.fillRect(rect.x, rect.y, rect.iw, rect.ih); } });
     };

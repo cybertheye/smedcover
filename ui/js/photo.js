@@ -126,9 +126,15 @@ export function drawPhoto(ctx, im, w, h, adj, blur, dim, hiRes, grey = 0) {
   drawPhotoAt(ctx, im, x, y, iw, ih, blur, hiRes, grey);
   if (dim > 0) { ctx.fillStyle = `rgba(7,7,12,${dim})`; ctx.fillRect(0, 0, w, h); }
 }
-/** Draws `im` into the rectangle x, y, w × h, blurred by `blur` px and with `grey` of its colour taken out. */
+/**
+ * Draws `im` into the rectangle x, y, w × h, blurred by `blur` px and with `grey` of its colour taken out.
+ * treat: { key, fn, quick? }, the look's own work on the photo (see treatedOf); in a draft (a slider being
+ * dragged, its blur say) that would have the work done afresh each frame, its `quick` one ({ key, fn }), if
+ * it has one, until the drag is let go.
+ */
 export function drawPhotoAt(ctx, im, x, y, iw, ih, blur, hiRes, grey = 0, treat = null) {
   let src = blur > 0 ? blurred(im, blur, hiRes) : im;
+  if (treat && treat.quick && draft && !holds(im, hiRes, `${blur}|${hiRes}|${treat.key}`)) treat = treat.quick;
   if (treat) src = treatedOf(src, im, `${blur}|${hiRes}|${treat.key}`, hiRes, treat.fn);
   ctx.imageSmoothingQuality = "high";
   if (grey < 1) ctx.drawImage(onCard(src), x, y, iw, ih);
@@ -168,27 +174,32 @@ export function dropCards() {
   for (const cv of carded) cv.width = cv.height = 0;
   carded = []; cards = new WeakMap();
 }
-const treated = new WeakMap();   // the photo (or its blurred copy) worked on by a look, per picture: one slot for previews, one for export
+const treated = new WeakMap(), TREATED_KEEP = 3;   // the photo (or its blurred copy) worked on by a look, per picture: the last few (TREATED_KEEP) for previews, as many for export, newest first
+/** The copies of `im` worked on by a look (see treatedOf), for previews or for export: [{ cv, key }], newest first. */
+const treatedList = (im, hi) => { const s = treated.get(im) || {}; treated.set(im, s); return s[hi ? "hi" : "lo"] || (s[hi ? "hi" : "lo"] = []); };
+/** Whether the copy of `im` worked on for `key` is kept (see treatedOf). */
+const holds = (im, hi, key) => { const s = treated.get(im), l = s && s[hi ? "hi" : "lo"]; return !!l && l.some((e) => e.key === key); };
 /**
- * A copy of `src` with its pixels worked on by fn(RGBA data) — a look recolouring the photo — computed once
- * on a canvas in memory and kept until the photo, its blur or `key` changes: done once, where reading the
- * whole canvas back from the graphics card would cost every redraw.
+ * A copy of `src` with its pixels worked on by fn(RGBA data, width, height, src) — a look recolouring the photo, or painting it over,
+ * which may look at `src` itself (the photo, or its blurred copy) the same whatever size the copy is made at — computed once
+ * on a canvas in memory and kept, the last few for a picture (a photo at two blurs, a background and a print of
+ * it, each its own) until the photo goes: done once, where reading the whole canvas back from the graphics card
+ * would cost every redraw.
  */
 function treatedOf(src, im, key, hi, fn) {
+  const list = treatedList(im, hi), at = list.findIndex((e) => e.key === key);
+  if (at >= 0) { const e = list[at]; if (at) { list.splice(at, 1); list.unshift(e); } return e.cv; }   // the newest again
   const cap = hi ? 2400 : 1100, sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height, f = Math.min(1, cap / Math.max(sw, sh));
   const w = Math.max(1, Math.round(sw * f)), h = Math.max(1, Math.round(sh * f));
-  const slot = slotOf(treated, im, hi);
-  if (slot.im !== im || slot.key !== key) {
-    const t0 = performance.now(), c = slot.cv;
-    c.width = w; c.height = h;
-    const x = c.getContext("2d", { willReadFrequently: true });
-    x.imageSmoothingQuality = "high";
-    x.drawImage(src, 0, 0, w, h);
-    const id = x.getImageData(0, 0, w, h);
-    fn(id.data);
-    x.putImageData(id, 0, 0);
-    slot.im = im; slot.key = key; c.filled = (c.filled || 0) + 1;
-    pxTime("photo worked by the look", t0);
-  }
-  return slot.cv;
+  const t0 = performance.now(), e = list.length >= TREATED_KEEP ? list.pop() : { cv: document.createElement("canvas") }, c = e.cv;   // the least lately used one's canvas, filled again
+  c.width = w; c.height = h;
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.imageSmoothingQuality = "high";
+  x.drawImage(src, 0, 0, w, h);
+  const id = x.getImageData(0, 0, w, h);
+  fn(id.data, w, h, src);
+  x.putImageData(id, 0, 0);
+  e.key = key; c.filled = (c.filled || 0) + 1; list.unshift(e);
+  pxTime("photo worked by the look", t0);
+  return c;
 }

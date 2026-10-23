@@ -507,7 +507,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli", "gilded"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid", "glass"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
@@ -665,7 +665,7 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
 
 test("the poster looks: many settings each, their own grounds, flat layouts (all but the collage, on the slanted ones), and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
-  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco"]) {
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland"]) {
     const L = LOOKS[id];
     assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
     assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
@@ -871,6 +871,87 @@ test("the dark deco: Gotham's night by default, a crimson sky and black and gold
     if (C[2] !== 120) assert.ok(Math.abs(hue(glass) - hue(C)) < 0.25, `the glass keeps the channel's hue: ${C} -> ${glass.map(Math.round)}`);
     assert.ok(lumOf(glass) > 0.3, `and is light: ${C} -> ${glass.map(Math.round)}`);
     assert.ok(!strokes.some((v) => { const c = parseColour(v); return c && lumOf(c) < 0.1; }), "no black outline");
+  }
+  setLook("cel");
+});
+
+test("the silent wasteland: a dusk or a snowfield with one hot accent, a scene that comes in part by part, a photo painted in strokes of its own colours", async () => {
+  const L = LOOKS.wasteland, { wlHot, wlBlock, wlPixels, noteReads, readsInto } = { ...(await import("../ui/js/style.js")).__test, ...(await import("../ui/js/style.js")) };
+  const lumOf = (c) => (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255;
+  assert.ok(L.params.length >= 12 && L.seeded && !L.oneTheme && typeof L.layout === "function", `${L.params.length} settings, seeded, both grounds, flat layouts of its own`);
+  assert.ok(Object.keys(L.scene).length >= 5 && L.elementFx.length >= 4, "scene objects and effects");
+  // its two grounds: a dusk of olive and teal, a snowfield in a cold blue-white
+  const field = (onDark) => { setLook("wasteland", {}, 3, onDark); return parseColour(L.theme({}, [40, 120, 220], lookValues()).field); };
+  const dusk = field(true), snow = field(false);
+  assert.ok(lumOf(dusk) < 0.2 && dusk[1] > dusk[0] && dusk[2] <= dusk[1] + 6, `a dusk of olive and teal: ${dusk}`);
+  assert.ok(lumOf(snow) > 0.6 && snow[2] > snow[0], `a snowfield, cold: ${snow}`);
+  // the one hot accent: a blood red at dusk, an orange on the snow, turned by degrees to the channel colour
+  const hot = (onDark, p = {}) => { setLook("wasteland", p, 3, onDark); return wlHot([40, 120, 220], lookValues()); };
+  const [red, orange, half, blue] = [hot(true), hot(false), hot(true, { chan: 0.5 }), hot(true, { chan: 1 })];
+  assert.ok(red[0] > red[1] * 3 && red[0] > red[2] * 3, `a blood red: ${red.map(Math.round)}`);
+  assert.ok(orange[0] > orange[1] && orange[1] > orange[2] * 1.5, `an orange: ${orange.map(Math.round)}`);
+  assert.ok(blue[2] > blue[0] && half[2] > red[2] && half[2] < blue[2], "the channel colour by degrees");
+  // the colour block: a wall in the foreground painted long ago in the channel colour, greyed toward the ground's earth, its value
+  // in a narrow band (in front of the scene, light enough for the house ink) and its hue still the channel's
+  for (const onDark of [true, false]) {
+    setLook("wasteland", {}, 3, onDark);
+    for (const C of [[20, 30, 120], [252, 238, 10], [6, 214, 160], [10, 10, 10], [250, 250, 250]]) { const b = wlBlock(C), l = lumOf(b); assert.ok(Math.abs(l - (onDark ? 0.31 : 0.36)) <= 0.045, `${onDark ? "dusk" : "snow"}: ${C} -> ${b.map(Math.round)}`); }
+    const [blue, yellow] = [wlBlock([20, 60, 220]), wlBlock([252, 220, 10])];
+    assert.ok(blue[2] > blue[0] + 10 && yellow[0] > yellow[2] + 10, `the channel's hue kept: ${blue.map(Math.round)}, ${yellow.map(Math.round)}`);
+  }
+  // a photo's colours brought into the palette: black lifted as haze lifts it, white to bone, a strong warm colour kept warm, alpha kept, nothing at nothing
+  const px = (cols, a = 1, dk = true) => { const d = new Uint8ClampedArray(cols.flat()); wlPixels(d, a, dk); return [...Array(cols.length).keys()].map((i) => [...d.slice(i * 4, i * 4 + 4)]); };
+  const [black, white, scarlet, grey] = px([[0, 0, 0, 255], [255, 255, 255, 255], [220, 30, 30, 255], [128, 128, 128, 180]]);
+  assert.ok(lumOf(black) > 0.04 && black[1] >= black[0], `the shadows lifted into the dusk's teal: ${black}`);
+  assert.ok(white[0] > 220 && white[0] > white[2] + 10, `the lights to bone: ${white}`);
+  assert.ok(scarlet[0] > scarlet[1] * 2 && scarlet[0] > scarlet[2] * 2, `a strong red kept red: ${scarlet}`);
+  assert.equal(grey[3], 180, "alpha kept");
+  assert.ok(px([[0, 0, 0, 255]], 1, false)[0][2] > px([[0, 0, 0, 255]], 1, false)[0][0], "on the snow, the shadows go to slate blue");
+  assert.deepEqual(px([[90, 140, 60, 255]], 0), [[90, 140, 60, 255]], "at nothing, nothing changes");
+  // the scene: with every slider at its least, nothing; each part's own slider alone brings it in
+  const rec = () => { const n = { paints: 0 }; return [n, new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 50 }) : k === "createLinearGradient" || k === "createRadialGradient" || k === "createPattern" ? () => ({ addColorStop() {} }) : (...a) => { if (["fill", "fillRect", "stroke", "drawImage"].includes(k)) n.paints++; return {}; }), set: () => true })]; };
+  const env = { w: 1920, h: 1080, C: [252, 238, 10], cat: { code: "AB", name: "x" }, photo: null, o: { profile: { brand: { name: "B" }, categories: [{}] }, catIndex: 0, size: { w: 1920, h: 1080 } }, G: L.layout("stack", 1920, 1080) };
+  const least = Object.fromEntries(L.params.filter((d) => !d.text).map((d) => [d.key, d.min]));
+  for (const key of ["sun", "clouds", "mega", "ruins", "forest", "poles", "smoke", "water", "debris", "figure", "haze"]) for (const onDark of [true, false]) {
+    setLook("wasteland", { ...least, [key]: 0.6 }, 3, onDark); const [n, ctx] = rec();
+    assert.equal(L.background(ctx, env, { grid: true, ground: false }, lookValues()), true);
+    assert.ok(n.paints > 0, `${key} (${onDark ? "dusk" : "snow"}) paints its part`);
+  }
+  // the block's surface painted inside it, stroke by stroke, and its edge broken along whatever shape it has (dead grass on an edge facing the sky)
+  for (const [nx, ny] of [[0, -1], [0, 1], [-1, 0]]) {
+    const [n, ctx] = rec();
+    L.accent.body(ctx, { x: 0, y: 900, w: 1920, h: 180 }, nx, ny, [252, 238, 10], lookValues());
+    const before = n.paints;
+    L.accent.edge(ctx, () => {}, nx, ny, [252, 238, 10], lookValues(), [[0, 900], [960, 940], [1920, 900]]);
+    assert.ok(before > 3 && n.paints > before, `the block's surface and edge (${nx}, ${ny})`);
+  }
+  // a photo: painted in strokes once (drawPhotoAt keeps the treatment by its key) whatever the slider fading it in, and as it is under it
+  const drawn = (photo) => { setLook("wasteland", { photo }, 3, true); const calls = []; L.background(rec()[1], { ...env, photo: {}, drawPhoto: (grey = 0, treat = null) => calls.push(treat ? treat.key : "as it is") }, { grid: false, fill: true }, lookValues()); return calls; };
+  const [full, some, none] = [drawn(1), drawn(0.4), drawn(0)];
+  assert.deepEqual([full.length, none], [1, ["as it is"]], "all painted, or not at all");
+  assert.deepEqual(some, ["as it is", full[0]], "faded in over the photo, from the same painted copy");
+  // while the photo's blur is dragged, a quick version of its own (only brought into the palette), kept apart
+  let treat = null;
+  setLook("wasteland", {}, 3, true); L.background(rec()[1], { ...env, photo: {}, drawPhoto: (grey = 0, t = null) => { if (t) treat = t; } }, { grid: false, fill: true }, lookValues());
+  assert.ok(treat.quick && treat.quick.key !== treat.key && typeof treat.quick.fn === "function", "a quick version for a draft");
+  const q = new Uint8ClampedArray([0, 0, 0, 255]); treat.quick.fn(q, 1, 1);
+  assert.ok(q[0] + q[1] + q[2] > 0 && q[3] === 255, "brought into the palette, alpha kept");
+  // what it keeps goes as another look is chosen (setLook calls the look left's `leave`)
+  const own = L.leave; let left = 0; L.leave = () => left++;
+  try { setLook("wasteland", {}, 3, true); setLook("wasteland", {}, 4, true); setLook("cel"); setLook("cel"); } finally { L.leave = own; }
+  assert.equal(left, 1, "left once, when another look is chosen");
+  // the lettering: highlighted words in the hot accent, the rest in the ground's own; the accent's slider read only when there is a highlighted word
+  for (const onDark of [true, false]) {
+    const fills = [], ctx = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...s].length * 40 }) : () => {}), set: (t, k, v) => { if (k === "fillStyle" && typeof v === "string") fills.push(v); t[k] = v; return true; } });
+    setLook("wasteland", {}, 3, onDark);
+    L.runs(ctx, (fn) => { fn({ t: "Ab", hi: false }, 0); fn({ t: "cd", hi: true }, 80); }, { fs: 100, strokeAmt: 1, shadowAmt: 1, C: [40, 120, 220], unit: 1 }, lookValues());
+    const [plain, accent] = [parseColour(fills[0]), parseColour(fills.at(-1))];
+    assert.ok(onDark ? lumOf(plain) > 0.7 : lumOf(plain) < 0.2, `the ground's own lettering: ${plain}`);
+    assert.ok(accent[0] > accent[2] * 2 && Math.abs(lumOf(accent) - lumOf(plain)) > 0.15, `the highlighted words hot, and apart from the rest: ${accent}`);
+    noteReads(); const seen = new Set(), was = readsInto(seen);
+    L.runs(ctx, (fn) => fn({ t: "Ab", hi: false }, 0), { fs: 100, strokeAmt: 1, shadowAmt: 1, C: [40, 120, 220], unit: 1 }, lookValues());
+    readsInto(was);
+    assert.ok(!seen.has("chan"), "a line with no highlighted word leaves the accent's slider alone");
   }
   setLook("cel");
 });

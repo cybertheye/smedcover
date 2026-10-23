@@ -128,6 +128,7 @@ export const RECIPES = {
   citypop: { family: "light", own: 0.9, bends: { arc: 1 }, params: { figure: 0.35, laser: 0.3 }, tune: (p) => { if (p.dusk > 0.4) p.stars = Math.min(p.stars, 0.2); } },   // few stars yet at dusk
   construct: { family: "print", own: 0.85, bend: 0.05, bends: { rise: 1 }, params: { water: 0.3, chan: 0.3 } },
   deco: { family: "light", own: 0.95, bend: 0, params: { red: 0.2, rain: 0.2, airship: 0.25, sign: 0.3, arch: 0.25, figure: 0.25, gilt: 0.15 }, tune: (p) => { if (p.rain > 0) p.fog = Math.max(p.fog, 0.45); } },   // rain comes with mist
+  wasteland: { family: "print", own: 0.9, dark: 0.65, fx: { worn: 3, plain: 2, torn: 1, eroded: 1 }, bend: 0.03, bends: { arc: 1 }, params: { chan: 0.25 }, tune: (p) => { if (p.smoke > 0.6) p.haze = Math.max(p.haze, 0.45); } },   // a heavy plume hangs in a haze
 };
 /**
  * What a cover brings to a hand: `long` (a line of its title longer than 8 characters' width, or three
