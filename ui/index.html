@@ -134,6 +134,16 @@
   #left>.scroll,#right>.scroll{border-radius:22px}
   #right>.scroll{padding:18px 14px 40px}
   #right .box{border:0;background:none;padding:0;border-radius:0}   /* the column is the box: the selected layer's properties fill it */
+  /* the drawer of the selected layer's properties: shut, the canvas takes its column */
+  .body.nodrawer{grid-template-columns:76px var(--lw,340px) minmax(0,1fr)}
+  .body.nodrawer #right{display:none}
+  #right .dhead{display:flex;align-items:center;gap:8px;margin:0 0 10px}
+  #right .dhead>div{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+  #right .dhead small{font-size:11.5px;color:var(--text3)}
+  #right .dhead b{font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #right .dhead .x{flex:none;width:30px;height:30px;border-radius:10px;border:0;background:rgba(255,255,255,.08);color:var(--text);font-size:13px;cursor:pointer}
+  #right .dhead .x:hover{background:rgba(255,255,255,.16)}
+  #right .dfoot{display:flex;gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
   /* the dock: one button per sheet, the canvas's help at its foot */
   #dock{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 6px;border-radius:22px;min-height:0}
   #dock button{width:64px;height:64px;border:0;border-radius:16px;background:transparent;color:var(--text2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:12px;cursor:pointer;padding:0}
@@ -169,25 +179,31 @@
   .subtabs button.on{background:rgba(255,255,255,.9);color:var(--ink);font-weight:700}
   .peek{margin-top:8px;font-size:12px}.peek summary{cursor:pointer;opacity:.7}
   .peek pre{white-space:pre-wrap;max-height:220px;overflow:auto;margin:6px 0 0;padding:8px;border:1px solid var(--line2);font:12px/1.6 ui-monospace,monospace;opacity:.85}
-  /* the selected layer's properties: group names on the left, lined up across groups; controls on the right */
-  /* The selected layer's properties: one grid for all of its groups, four columns — the group's name,
-     a control's own label, the control, its value — so sliders, values and checkboxes line up from
-     group to group. A group and its body take no box of their own (display:contents): their children
-     are the grid's items. A slider's three parts take columns 2–4; anything else spans 2–4. */
-  .props{display:grid;grid-template-columns:max-content max-content minmax(0,1fr) max-content;column-gap:10px;row-gap:12px;align-items:center}
-  .psec,.psec-b{display:contents}
-  .psec-h{grid-column:1;font-size:12px;font-weight:600;opacity:.55;white-space:nowrap;display:flex;align-items:center;gap:4px}
-  .psec-h.top{align-self:start;padding-top:10px}
-  .psec-h.first{align-self:start;padding-top:1px}
-  .psec-b>*{grid-column:2/-1;min-width:0;margin:0!important}
+  /* The selected layer's properties, in the drawer: its groups one under another, each a line with its name, what it is
+     set to (while it is shut) and a chevron; open, its controls under it on a grid of three columns — a control's own
+     label, the control, its value — so a group's sliders, values and checkboxes line up. The body takes no box of its
+     own (display:contents): its children are the group's grid items. A slider's three parts take a column each;
+     anything else spans the three. A popover of the bar over the canvas lays out a group's controls the same way. */
+  .props{display:flex;flex-direction:column}
+  .psec{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;column-gap:10px;row-gap:12px;align-items:center;padding:11px 2px;border-top:1px solid var(--line)}
+  .props>.psec:first-child{border-top:0;padding-top:2px}
+  .psec-b{display:contents}
+  .psec:not(.open)>.psec-b{display:none}
+  .psec-h{grid-column:1/-1;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;cursor:pointer;user-select:none;min-width:0}
+  .psec-h .sum{flex:1;min-width:0;text-align:right;font-size:12px;font-weight:400;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .psec.open>.psec-h .sum{visibility:hidden}
+  .psec-h .chev{flex:none;width:7px;height:7px;margin:0 4px 3px 2px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);opacity:.45;transition:transform .15s}
+  .psec.open>.psec-h .chev{transform:rotate(45deg);margin-bottom:5px}
+  .psec-h:hover .chev{opacity:.9}
+  .psec-b>*{grid-column:1/-1;min-width:0;margin:0!important}
   .psec-b>.sl{display:contents}
-  .psec-b>.sl>:nth-child(1){grid-column:2;white-space:nowrap;font-size:13px}
-  .psec-b>.sl>:nth-child(2){grid-column:3;width:100%;margin:0}
-  .psec-b>.sl>:nth-child(3){grid-column:4;font:600 12px var(--mono);text-align:right;opacity:.8;min-width:3.6em}
-  .psec-b>.sl.off>:nth-child(2){grid-column:3/-1;font-size:12px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}   /* one line, as tall as a slider's row: the whole reason is in the tip */
+  .psec-b>.sl>:nth-child(1){grid-column:1;white-space:nowrap;font-size:13px}
+  .psec-b>.sl>:nth-child(2){grid-column:2;width:100%;margin:0}
+  .psec-b>.sl>:nth-child(3){grid-column:3;font:600 12px var(--mono);text-align:right;opacity:.8;min-width:3.6em}
+  .psec-b>.sl.off>:nth-child(2){grid-column:2/-1;font-size:12px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}   /* one line, as tall as a slider's row: the whole reason is in the tip */
   .psec-b>.sl.off>*{opacity:.5}
   .psec-b>.chk{display:flex}
-  .psep{grid-column:1/-1;border-top:1px solid var(--line);margin:2px 0}
+  .psep{height:8px}
   .psec-b>.fxh{font-size:12px;font-weight:600;opacity:.75}
   .psec-b>.fxs{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}
   .psec-b>.fxs>span{opacity:.7}
@@ -380,26 +396,29 @@
 
   /* layers */
   .layers{display:grid;gap:3px}
-  .layer{display:grid;grid-template-columns:26px 26px 1fr auto;align-items:center;gap:4px;border:1px solid transparent;border-radius:11px;background:rgba(255,255,255,.04);padding:4px 6px 4px 4px;cursor:pointer;user-select:none}
+  .layer{display:grid;grid-template-columns:18px minmax(0,1fr) auto 24px 24px;align-items:center;gap:6px;border:1px solid transparent;border-radius:11px;background:rgba(255,255,255,.04);padding:4px 4px 4px 8px;min-height:34px;cursor:pointer;user-select:none}
   .layer:hover{background:rgba(255,255,255,.08)}
   .layer.on{border-color:color-mix(in srgb,var(--acc) 75%,transparent);background:color-mix(in srgb,var(--acc) 14%,transparent)}
   .layer.peek:not(.on){border-color:#9a9ab4}   /* its sheet is under the pointer in the 3D view */
   .layer.over{box-shadow:0 -3px 0 var(--acc)}
   .layer.hidden .nm{opacity:.35}
   .layer.dim{opacity:.35;cursor:not-allowed}   /* FOCUS is on another layer: it cannot be selected */
-  .layer.away>.ic,.layer.away>.nm,.layer.away .kind{opacity:.3}   /* kept to other sizes: not on the cover at this one */
+  .layer.away>.ic,.layer.away>.nm,.layer.away .kind,.layer.away>.what{opacity:.3}   /* kept to other sizes: not on the cover at this one */
   .layer .sizes{font:600 10px var(--mono);letter-spacing:.02em;white-space:nowrap;padding:1px 5px;border:1px solid currentColor;opacity:.7;cursor:help}
   .layer.away .sizes{opacity:1;color:var(--acc)}
-  .layer .ic{border:0;background:transparent;width:26px;height:26px;cursor:pointer;font-size:14px;opacity:.85;padding:0}
-  .layer .ic.off{opacity:.25}
-  .layer .ic.pin{display:grid;place-items:center;font-size:12px;opacity:.9;cursor:help}
+  /* a row's eye and lock show under the pointer and on the selected row, and always when not as they start (hidden, locked) */
+  .layer .ic{border:0;background:transparent;width:24px;height:24px;cursor:pointer;color:var(--text);opacity:.75;padding:0;display:grid;place-items:center;visibility:hidden}
+  .layer:hover .ic,.layer.on .ic,.layer .ic.keep{visibility:visible}
+  .layer .ic:hover{opacity:1}
+  .layer .ic.pin{opacity:.45;cursor:help}
+  .layer .what{display:grid;place-items:center;opacity:.6}
+  .layer .nm .words{margin-left:7px;color:var(--text3);font-size:12px}
+  .layer .badge{font-size:10.5px;line-height:1.5;padding:0 6px;border-radius:6px;background:rgba(255,255,255,.09);color:var(--text2);white-space:nowrap;cursor:help}
   .layer .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
   .layer .only{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c);margin-left:7px;vertical-align:1px}
   .chips.small button{padding:5px 9px;font-size:12px}
-  .layer .kinds{display:flex;gap:5px;align-items:center;padding-left:6px}
+  .layer .kinds{display:flex;gap:5px;align-items:center}
   .layer .kind{display:grid;place-items:center;width:16px;height:16px;opacity:.5;cursor:help}
-  .layer .kind.layout,.layer .kind.user{opacity:.8}
-  .layer .kind.user{color:var(--acc)}
   .layer .kind.chain,.layer .kind.role{opacity:1}
   .layer .kind.chain,.layer .kind.role{cursor:pointer}
   .layer .kind.role:hover{filter:brightness(1.4)}
@@ -408,6 +427,32 @@
   .layer .kind.chain:hover{filter:brightness(1.4)}
   .layer .nm[title]{cursor:text}
   .layer.clip{margin-left:16px}
+  /* under the list, the selected layer and what can be done to it */
+  .selbar{display:flex;align-items:center;gap:2px;margin-top:10px;padding:5px 5px 5px 12px;border-radius:14px;background:rgba(255,255,255,.06)}
+  .selbar>span{flex:1;min-width:0;font-size:12.5px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .selbar>span b{color:var(--text);font-weight:600}
+  .ib{flex:none;width:30px;height:30px;border:0;border-radius:9px;background:transparent;color:var(--text);display:grid;place-items:center;cursor:pointer;padding:0}
+  .ib:hover:not(:disabled){background:rgba(255,255,255,.12)}
+  .ib:disabled{opacity:.3;cursor:default}
+  .ib.on{background:rgba(255,255,255,.18)}
+  /* over the canvas: the selected layer's bar of its most used settings, a popover of one of them, and the frame of
+     the layer under the pointer in the list */
+  #ftb{position:absolute;z-index:20;display:flex;flex-wrap:wrap;align-items:center;gap:2px;padding:4px;border-radius:14px;white-space:nowrap;max-width:calc(100% - 12px)}
+  #ftb[hidden],#fpop[hidden],#hoverbox[hidden]{display:none}
+  #ftb,#fpop{background-color:rgba(24,24,34,.66)}   /* over the cover itself, darker glass than the panels', to read on a light one */
+  html.solid #ftb,html.solid #fpop{background-color:var(--solid)}
+  #ftb button{height:32px;border:0;border-radius:10px;background:transparent;color:var(--text);font-size:13px;padding:0 10px;cursor:pointer;display:flex;align-items:center;gap:6px;max-width:190px}
+  #ftb button>span{overflow:hidden;text-overflow:ellipsis}
+  #ftb button:hover:not(:disabled){background:rgba(255,255,255,.12)}
+  #ftb button.on{background:rgba(255,255,255,.2)}
+  #ftb button:disabled{opacity:.35;cursor:default}
+  #ftb .sep{width:1px;height:18px;background:var(--line);margin:0 3px}
+  #ftb .chip{flex:none;width:14px;height:14px;border-radius:50%;box-shadow:0 0 0 1px rgba(255,255,255,.45)}
+  #ftb .aa{font-weight:700;opacity:.8}
+  #fpop{position:absolute;z-index:21;width:300px;max-width:calc(100% - 12px);max-height:min(60vh,460px);overflow:auto;padding:12px 14px 14px;border-radius:16px}
+  #fpop .fpop-h{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px}
+  #fpop .psec{border:0;padding:0}
+  #hoverbox{position:absolute;z-index:19;pointer-events:none;border:1.5px solid #5aa9ff;border-radius:3px;box-shadow:0 0 0 1px rgba(0,0,0,.3)}
   .layer.clip .nm::before{content:"↓ ";color:var(--acc)}
   .layer .rename{font-size:13px;padding:2px 6px;min-width:0;width:100%}
 
@@ -561,7 +606,7 @@
   .fxcards.slim .fxcard:not(.on){opacity:.55}
   /* the phone's own arrangement goes under body[data-layout="phone"] (see arrange() in app.js): a narrow touch screen, whatever the host */
   /* a narrow window: everything one under another, the dock a row of buttons */
-  @media(max-width:1100px){html,body{overflow:auto}.app{height:auto}.body{grid-template-columns:1fr}.split{display:none}.body .scroll{overflow:visible}#stage{height:60vh}
+  @media(max-width:1100px){html,body{overflow:auto}.app{height:auto}.body,.body.nodrawer{grid-template-columns:1fr}.split{display:none}.body .scroll{overflow:visible}#stage{height:60vh}
     #dock{flex-direction:row;overflow-x:auto}#dock .help{margin:0 0 0 auto}header{height:auto;flex-wrap:wrap;padding:8px 10px 8px 16px}
     #settings .win{flex-direction:column}#setnav{width:auto;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}}
 </style>
@@ -570,7 +615,7 @@
 <div id="ambient"><canvas id="amb" width="48" height="27"></canvas></div>
 <div class="app">
   <header id="top" class="glass"></header>
-  <div class="body" id="body">
+  <div class="body nodrawer" id="body">
     <nav id="dock" class="glass"></nav>
     <aside id="left" class="glass"><div class="scroll" id="panel"></div></aside>
     <section id="center">

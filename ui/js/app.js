@@ -11,7 +11,7 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, rebalance, dropOption, partChance, ODD_OPTIONS } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
@@ -386,7 +386,7 @@ function drawThumbs() {
 let drawQueued = false;
 function flushDraw() {
   if (!drawQueued) return;
-  drawQueued = false; ensureFonts(S.cover.layers); drawMain(); markStrip(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); later("ambient", 350, paintAmbient);
+  drawQueued = false; ensureFonts(S.cover.layers); drawMain(); placeBar(); markStrip(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); later("ambient", 350, paintAmbient);
   if (S.letterWin) later("letters", 200, lettersShow);   // the ransom note's letters as now drawn (words typed, colours changed)
   if (S.weaveWin) later("weave", 200, weaveShow);   // the woven letters as now typed
   if (LAYED.redraw) later("layed", 80, LAYED.redraw);   // a layout preset's editor, with what arrived since (outlines, fonts)
@@ -621,9 +621,9 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
     cv.style.cursor = !L || L.type === "bg" ? "default" : fillsCanvas(L) ? "move" : "grab";
   });
   cv.addEventListener("pointerleave", () => { const ring = $("brushring"); if (ring && !BRUSH.stroke) ring.hidden = true; });
-  cv.addEventListener("dblclick", (e) => {   // a scene object's handle: back where the layout puts it
+  cv.addEventListener("dblclick", (e) => {   // a scene object's handle: back where the layout puts it; anything else: its properties, in the drawer
     const sh = S.mode === "edit" && !S.brushWin && sceneGrip(e);
-    if (!sh) return;
+    if (!sh) { if (S.mode === "edit" && !S.brushWin && !group().length && !S.settings.drawer) setDrawer(true); return; }
     resetScene(S.cover, S.profile.style.look, sh.key, S.settings.scope, frame().key, scopeKeys());
     touch({ cover: true, side: true });
   });
@@ -3030,7 +3030,8 @@ function fontControl(L, bare = false) {
 // ---------- right column: layers and the selected layer's properties
 let dragId = null;
 function layerRow(L) {
-  const icon = (glyph, off, title, fn) => el("button", { class: "ic" + (off ? " off" : ""), title, onclick: (e) => { e.stopPropagation(); fn(); touch({ cover: true, side: true }); } }, glyph);
+  // the eye and the lock: shown under the pointer and on the selected row, and always when `keep` (not as they start)
+  const icon = (svg, keep, title, fn) => el("button", { class: "ic" + (keep ? " keep" : ""), title, innerHTML: svg, onclick: (e) => { e.stopPropagation(); fn(); touch({ cover: true, side: true }); } });
   const on = L.id === S.layerId || group().includes(L);
   const free = isRemovable(L), base = clipBase(S.cover.layers, S.cover.layers.indexOf(L));
   const off = S.focus && S.mode === "edit" && !spotIds().includes(L.id);   // FOCUS is on another layer
@@ -3040,6 +3041,7 @@ function layerRow(L) {
     onclick: (e) => focusAllows(L.id) && (e.shiftKey ? togglePick(L.id) : selectLayer(L.id)),
     ondragstart: (e) => { dragId = L.id; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", L.id); },
     ondragend: () => { dragId = null; },
+    onpointerenter: () => hoverShow(L.id), onpointerleave: hoverHide,
     ondragover: (e) => { if (dragId && dragId !== L.id) { e.preventDefault(); e.currentTarget.classList.add("over"); } },
     ondragleave: (e) => e.currentTarget.classList.remove("over"),
     ondrop: (e) => {   // dropping on a row puts the dragged layer directly above it
@@ -3049,25 +3051,35 @@ function layerRow(L) {
       const from = S.cover.layers.findIndex((l) => l.id === id), to = S.cover.layers.indexOf(L);
       if (moveLayer(S.cover.layers, id, from < to ? to : to + 1)) touch({ cover: true, side: true, panel: onCoverTab() }); else renderSide();
     } },
-    icon(L.visible ? "◉" : "○", !L.visible, t("layers.show"), () => { L.visible = !L.visible; }),
-    PINNED.includes(L.type) ? el("span", { class: "ic pin", title: t("layers.pinned." + L.type) }, "🔒")
-      : icon(L.locked ? "▣" : "□", !L.locked, t("layers.lock"), () => { L.locked = !L.locked; }),
+    layerWhat(L),
     el("span", { class: "nm", title: free ? t("layers.rename") : null, onclick: free ? (e) => nameClick(e, L) : null }, layerName(L),
-      L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) })),
-    el("span", { class: "kinds" }, note && el("span", { class: "sizes", title: t("sizes.tip") }, note), layerKinds(L)));
+      L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) }),
+      layerSub(L) && el("span", { class: "words" }, layerSub(L))),
+    el("span", { class: "kinds" }, note && el("span", { class: "sizes", title: t("sizes.tip") }, note), layerKinds(L)),
+    icon(L.visible ? ICONS.eye : ICONS.eyeOff, !L.visible, t("layers.show"), () => { L.visible = !L.visible; }),
+    PINNED.includes(L.type) ? el("span", { class: "ic pin", title: t("layers.pinned." + L.type), innerHTML: ICONS.lock })
+      : icon(L.locked ? ICONS.lock : ICONS.unlock, !!L.locked, t("layers.lock"), () => { L.locked = !L.locked; }));
 }
-/** A layer's icons: a linked photo's chain and leading / following mark, what it is (photo, text, vector or bitmap asset), then whose it is (a layout layer, or added by the user). */
-function layerKinds(L) {
-  const icon = (name, tip) => el("span", { class: "kind " + name, title: tip, innerHTML: ICONS[name] });
-  const free = isRemovable(L);
-  let what = L.copy ? icon("layout", t("layers.kind.copy", t("layer." + L.type))) : null;
-  if (L.type === "photo" || L.type === "subject") what = icon("photo", t("layers.kind.photo"));
-  else if (L.type === "text") what = icon("text", t("layers.kind.text"));
-  else if (L.type === "solid") what = icon("solid", t("layers.kind.solid"));
-  else if (L.type === "asset") {
+/** The cover's words a lettering layer of the layout sets, after its name in the list ("" for any other). */
+function layerSub(L) {
+  const words = { title: S.cover.title, subtitle: S.cover.subtitle, tag: S.cover.tag, catname: cat().name }[L.type];
+  return (words || "").replace(/\*/g, "").replace(/\s+/g, " ").trim().slice(0, 40);
+}
+/** A layer's icon at the head of its row: what it is — a photo, words, a colour, a vector or a bitmap. */
+function layerWhat(L) {
+  const icon = (name, tip) => el("span", { class: "what", title: tip, innerHTML: ICONS[name] });
+  if (L.type === "asset") {
     const a = L.ref.kind === "user" && userAssets.get(L.ref.id), raster = a && !a.spec && !/^data:image\/svg/.test(a.src || "");
-    what = raster ? icon("photo", t("layers.kind.image")) : icon("svg", t("layers.kind.svg"));
+    return raster ? icon("photo", t("layers.kind.image")) : icon("svg", t("layers.kind.svg"));
   }
+  if (L.type === "photo" || L.type === "subject") return icon("photo", t("layers.kind.photo"));
+  if (L.type === "logo") return icon("photo", t("layer.logo"));
+  if (["text", "title", "subtitle", "tag", "catname", "brand"].includes(L.type)) return icon("text", t("layers.kind.text"));
+  if (L.type === "solid" || L.type === "bg") return icon("solid", t(L.type === "bg" ? "layer.bg" : "layers.kind.solid"));
+  return icon("svg", t("layer." + L.type));
+}
+/** A layer's marks after its name: a linked photo's chain and leading / following mark; Layout on the template's own (but the ground, always there). */
+function layerKinds(L) {
   const link = [];
   if (L.type === "photo" && (L.of || passivesOf(L).length)) {   // a linked photo: the chain (a click offers to end the link) and which end it is
     const passive = !!L.of, colour = linkColour(L), other = passive ? layerName(owner(L)) : passivesOf(L).map(layerName).join(" · ");
@@ -3075,7 +3087,9 @@ function layerKinds(L) {
       el("span", { class: "kind role", style: `color:${colour}`, title: t(passive ? "link.passiveTip" : "link.activeTip", other), innerHTML: ICONS[passive ? "passive" : "active"],
         onclick: (e) => { e.stopPropagation(); const to = passive ? owner(L) : passivesOf(L)[0]; if (to && to !== L) goToLayer(to.id); } }));
   }
-  return [...link, what, free ? icon("user", t("layers.kind.user")) : icon("layout", t("layers.kind.layout"))];   // a link's marks first, then what the layer is
+  const layout = !isRemovable(L) && L.type !== "bg";
+  return [...link, layout && el("span", { class: "badge", title: t("layers.kind.layout") }, t("layers.badge.layout")),
+    L.copy && el("span", { class: "badge", title: t("layers.kind.copy", t("layer." + L.type)) }, t("layers.badge.copy"))];
 }
 /** Selects layer id and brings its row into view (it may be far up or down the list). */
 function goToLayer(id) {
@@ -3087,8 +3101,15 @@ function goToLayer(id) {
 }
 /** 14-px line icons for the layer list, in the text colour. */
 const ICONS = Object.fromEntries(Object.entries({
-  layout: '<rect x="2" y="2" width="12" height="12" rx="1.2"/><path d="M2 6.2h12M6.6 6.2V14"/>',   // a page laid out in panels: a layout layer
-  user: '<circle cx="8" cy="5.2" r="2.7"/><path d="M2.6 14.5c.6-3 2.7-4.6 5.4-4.6s4.8 1.6 5.4 4.6"/>',
+  eye: '<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>',
+  eyeOff: '<path d="M2 2l12 12"/><path d="M6.6 3.7A6.6 6.6 0 0 1 8 3.5c4.1 0 6.5 4.5 6.5 4.5a11 11 0 0 1-2 2.6M4.3 4.9C2.5 6.1 1.5 8 1.5 8s2.4 4.5 6.5 4.5c1.1 0 2.1-.3 3-.8"/>',
+  lock: '<rect x="3.5" y="7" width="9" height="7" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>',
+  dup: '<rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1.2"/><path d="M10.5 5.5V3.2c0-.7-.5-1.2-1.2-1.2H3.2C2.5 2 2 2.5 2 3.2v6.1c0 .7.5 1.2 1.2 1.2h2.3"/>',
+  up: '<path d="M8 13.5v-11M3.8 6.7 8 2.5l4.2 4.2"/>',
+  down: '<path d="M8 2.5v11M3.8 9.3 8 13.5l4.2-4.2"/>',
+  trash: '<path d="M2.5 4.2h11M6.2 4.2V2.5h3.6v1.7M3.9 4.2l.7 9.3h6.8l.7-9.3"/>',
+  props: '<path d="M2 4h6.5M12.5 4H14M2 8h1.5M7.5 8H14M2 12h8.5"/><circle cx="10.5" cy="4" r="1.6"/><circle cx="5.5" cy="8" r="1.6"/><circle cx="12.5" cy="12" r="1.6"/>',
+  unlock: '<rect x="3.5" y="7" width="9" height="7" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 4.8-1"/>',
   photo: '<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M1.5 11.5l4-4 3 3 2-2 4 4"/><circle cx="11" cy="5.8" r="1.1"/>',
   text: '<path d="M3 3.5h10M8 3.5v10M6 13.5h4"/>',
   solid: '<rect x="2.5" y="2.5" width="11" height="11" rx="1" fill="currentColor" fill-opacity=".45"/>',
@@ -3131,9 +3152,9 @@ function renameLayer(id) {
 }
 /** Where a layer is placed is set on the canvas (drag, the handles, the wheel); here it can be put back. */
 // ---------- the properties of the selected layer
-// Laid out as a two-column grid: a short name on the left for each group of settings, its controls on
-// the right; the names line up whatever their length. Explanations sit behind an ⓘ (hover, or click to
-// read it as a toast); only warnings are written out.
+// In the drawer on the right, each group of settings a line that opens to its controls (see psec), what it is set to
+// said on the line while it is shut; the most used of them on the bar over the canvas too (see barItems). Explanations
+// sit behind an ⓘ (hover, or click to read it as a toast); only warnings are written out.
 /** An ⓘ that shows `text` on hover, and in a bubble beside it when clicked. */
 const info = (text) => el("span", { class: "info", title: text, onclick: (e) => { e.stopPropagation(); showTip(e.currentTarget, text); } }, "ⓘ");
 /** A bubble with `text` by element `at` (wrapped, unlike a toast); the next click anywhere closes it. */
@@ -3148,11 +3169,48 @@ function showTip(at, text) {
   setTimeout(() => addEventListener("pointerdown", () => { tip.hidden = true; }, { once: true }), 0);
 }
 /**
- * One group of properties: its name (and an ⓘ with `tip`), then its controls. The name is centred on
- * the group's first row; `at` "top" puts it level with the top of a text box, "first" with the first
- * line of a paragraph.
+ * Which groups of properties are open, by name, as last opened or shut by hand; one never touched is open when it
+ * is the first of its layer's (see openSecs).
  */
-const psec = (nameKey, kids, tip = "", at = "") => el("div", { class: "psec" }, el("div", { class: "psec-h" + (at ? " " + at : "") }, t(nameKey), tip && info(tip)), el("div", { class: "psec-b" }, kids));
+const SECS = new Map();
+/**
+ * One group of properties: a line with its name (and an ⓘ with `tip`), what it is set to while shut (see secSum)
+ * and a chevron, a click on it opening or shutting it; then its controls.
+ */
+const psec = (nameKey, kids, tip = "") => el("div", { class: "psec", dataset: { key: nameKey } },
+  el("div", { class: "psec-h", onclick: (e) => { const g = e.currentTarget.parentElement, open = !g.classList.contains("open"); SECS.set(nameKey, open); g.classList.toggle("open", open); g.querySelector(".sum").textContent = secSum(g); } },
+    el("span", {}, t(nameKey)), tip && info(tip), el("span", { class: "sum" }), el("span", { class: "chev" })),
+  el("div", { class: "psec-b" }, kids));
+/**
+ * What a group of properties is set to, in a few words: its menus' choices, its colours (or Automatic), the boxes
+ * ticked, its sliders moved off either end, how many sizes it shows at; Off when nothing is ticked in a group of
+ * boxes alone. Read off its controls, so a group says it without being told.
+ */
+function secSum(g) {
+  const bits = [];
+  let boxes = 0;
+  for (const n of g.querySelector(".psec-b").querySelectorAll("select, .sw, .seg .btn.on, .sizes-row, input[type=checkbox], .sl:not(.off)")) {
+    if (n.tagName === "SELECT") bits.push(n.selectedOptions[0] ? n.selectedOptions[0].textContent : "");
+    else if (n.classList.contains("sw")) bits.push(n.querySelector(".auto") ? t("props.inkIsAuto") : n.querySelector("input").value.toUpperCase());
+    else if (n.classList.contains("sizes-row")) { const on = n.querySelectorAll(".btn.on").length, all = n.children.length; if (all > 1) bits.push(on === all ? t("props.sum.allSizes") : t("props.sum.sizes", on, all)); }
+    else if (n.type === "checkbox") { boxes++; if (n.checked && !n.disabled) bits.push(n.parentElement.textContent); }
+    else if (n.classList.contains("sl")) {   // a slider at either end, or at 1× (a strength or a bend as it comes), says nothing
+      const r = n.querySelector("input[type=range]"), v = n.children[2].textContent;
+      if (r && r.value !== r.min && r.value !== r.max && v !== times(1)) bits.push(`${n.children[0].textContent} ${v}`);
+    }
+    else bits.push(n.textContent);
+  }
+  const said = [...new Set(bits.map((b) => b.trim()).filter(Boolean))];   // two colours both automatic: Automatic, once
+  return said.length ? said.slice(0, 3).join(" · ") : boxes ? t("props.sum.off") : "";
+}
+/** Opens the groups of properties in `box` as last left (the first open, untouched) and writes what each shut one is set to. */
+function openSecs(box) {
+  [...box.querySelectorAll(".psec")].forEach((g, i) => {
+    const k = g.dataset.key;
+    g.classList.toggle("open", SECS.has(k) ? SECS.get(k) : i === 0);
+    g.querySelector(".sum").textContent = secSum(g);
+  });
+}
 /** Put a layer back where it was placed by default. */
 function placementControls(L) {
   const f = frame();
@@ -3388,7 +3446,7 @@ function headlineControls(L, set) {
       L.type === "title" && el("textarea", { value: S.cover.title, spellcheck: false, style: "height:64px;margin-bottom:8px", oninput: (e) => { S.cover.title = e.target.value; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); } }),
       // so are the subtitle's, in Cover → Subtitle
       L.type === "subtitle" && el("div", { style: "margin-bottom:8px" }, textInput(S.cover.subtitle, (v) => { S.cover.subtitle = v; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); }, { placeholder: t("cover.subtitlePh") })),
-      fontControl(L, true), ...columnControls(L)], t("props.textHint"), "top"),
+      fontControl(L, true), ...columnControls(L)], t("props.textHint")),
     psec("props.sec.effect", fx.kids, fx.tip),
     psec("props.sec.color", [
       swatch(L, "ink", "props.sw.text", L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff"),
@@ -3403,15 +3461,18 @@ function headlineControls(L, set) {
       (v) => { delete L.hiPlate; delete L.hiMark; if (v === "plate") L.hiPlate = true; else if (v) L.hiMark = v; touch({ cover: true, side: true }); })], t("hi.hint")),
   ];
 }
+/** Removes the background of photo layer L (on), or puts it back: a linked cut-out is made a whole photo again, of its own. */
+async function cutPhoto(L, on) {
+  const base = L.of ? layer(L.of) : L;
+  if (L.of && !on) { unlink(L); L.cut = false; touch({ cover: true, side: true, panel: onCoverTab() }); return toast(t("link.restored")); }
+  if (on && !(await ensureMask(base && base.pid))) return renderSide();
+  if (on && !L.of) cutWhere(L); else L.cut = on;   // where the scope reaches: at one size or orientation, a copy cut out there
+  touch({ cover: true, side: true, panel: onCoverTab() });
+}
 /** The properties of a photo layer. */
 function photoControls(L, set) {
-  const base = L.of ? layer(L.of) : L, rec = recordOf(L), pid = base && base.pid, linked = passivesOf(L);
-  const cut = async (on) => {
-    if (L.of && !on) { unlink(L); L.cut = false; touch({ cover: true, side: true, panel: onCoverTab() }); return toast(t("link.restored")); }   // a whole photo again, of its own
-    if (on && !(await ensureMask(pid))) return renderSide();
-    if (on && !L.of) cutWhere(L); else L.cut = on;   // where the scope reaches: at one size or orientation, a copy cut out there
-    touch({ cover: true, side: true, panel: onCoverTab() });
-  };
+  const base = L.of ? layer(L.of) : L, rec = recordOf(L), linked = passivesOf(L);
+  const cut = (on) => cutPhoto(L, on);
   const from = !L.of && cutSource(L), had = from && passivesOf(from)[0];   // what Cut out subject cuts out of (see cutOut)
   const redo = !!had && cutSizes(from).every((k) => inSize(had, k)), keys = !L.of && scopeKeys();   // its cut-out is found again; else made, or put where the scope reaches too
   const unlinkBtn = (L.of || linked.length > 0) && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => askUnlink(L) }, t("link.unlink"));
@@ -3433,7 +3494,7 @@ function photoControls(L, set) {
     L.of
       ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")),
           base && el("button", { class: "btn wide", style: "margin-top:8px", title: t("link.realignTip"), onclick: () => { L.t = alignedT(base); touch({ cover: true, side: true }); } }, t("link.realign")),
-          cropBtn, unlinkBtn], t("link.passiveMore"), "first")
+          cropBtn, unlinkBtn], t("link.passiveMore"))
       : psec("props.sec.place", [check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
           linked.length > 0 && el("div", { class: "hint" }, t("link.leads", linked.map(layerName).join(" · "))), cropBtn, unlinkBtn],
           t(L.fill ? "props.fillHint" : "props.printHint")),
@@ -3478,7 +3539,7 @@ function weaveControls(L) {
     const now = L.weave, front = Object.fromEntries(Object.entries(now.front || {}).filter(([id]) => yes || id !== l.id));
     put({ with: yes ? [...now.with.filter((id) => id !== l.id), l.id] : now.with.filter((id) => id !== l.id), front });
   };
-  if (!w && !below.length) return psec("props.sec.weave", el("div", { class: "hint", style: "margin:0" }, t("weave.none")), weaveT(L, "weave.tip"), "first");
+  if (!w && !below.length) return psec("props.sec.weave", el("div", { class: "hint", style: "margin:0" }, t("weave.none")), weaveT(L, "weave.tip"));
   return psec("props.sec.weave", [
     check("weave.on", !!w, on),
     w && !below.length && el("div", { class: "hint" }, t("weave.none")),
@@ -4207,33 +4268,157 @@ function renderSide() {
   if (S.brushWin) brushShow();   // and the brush's panel
   const side = $("side"), y = side.scrollTop, L = layer(), here = S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off);
   // keep typing in the text box alive across rebuilds
-  const typing = document.activeElement && (side.contains(document.activeElement) || layerBox.contains(document.activeElement)) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename"));
+  const typing = document.activeElement && [side, layerBox, POP].some((b) => b.contains(document.activeElement)) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename"));
   if (typing) return;
   const i = L ? here.indexOf(L) : -1, many = group();
-  layerBox.replaceChildren(   // the list, in the Layers sheet
+  const ib = (svg, title, off, onclick, on = false) => el("button", { class: "ib" + (on ? " on" : ""), title, disabled: off, innerHTML: svg, onclick });
+  layerBox.replaceChildren(   // the list, in the Layers sheet, and under it the selected layer and what can be done to it
     el("div", {}, el("div", { class: "lhead" }, cap("layers.title"),
         el("div", { class: "lbtns" }, el("button", { class: "focusbtn v3btn" + (V3.to ? " on" : ""), title: t("v3.tip"), onclick: () => set3d(!V3.to), innerHTML: `${ICONS.stack}<span>${t("v3.label")}</span>` }),
           el("button", { class: "focusbtn" + (S.focus ? " on" : ""), title: t("focus.tip"), onclick: () => setFocus(!S.focus) }, t("focus.label")))),
       el("div", { class: "layers" }, [...here].reverse().map(layerRow)),
-      el("div", { class: "acts", style: "margin-top:10px;justify-content:flex-start" },
-        el("button", { class: "btn", disabled: !copiable(L) || many.length > 0, onclick: duplicateLayer }, t("layers.dup")),
-        el("button", { class: "btn", disabled: many.length ? !many.some(isAdded) : !(L && isRemovable(L)), onclick: () => (many.length ? removeGroup() : removeLayer()) }, t("layers.del")),
-        el("button", { class: "btn", title: t("layers.up"), disabled: many.length > 0 || i < 1 || i >= here.length - 1, onclick: () => shiftLayer(1) }, "▲"),
-        el("button", { class: "btn", title: t("layers.down"), disabled: many.length > 0 || i <= 1, onclick: () => shiftLayer(-1) }, "▼"))));
-  side.replaceChildren(   // what is selected, in the column on the right
-    many.length ? el("div", { class: "box" }, el("label", { class: "cap" }, t("props.group", many.length)),
-      el("div", { class: "hint", style: "margin-top:0" }, many.map(layerName).join(" · ")),
+      el("div", { class: "selbar" },
+        el("span", {}, many.length ? t("props.group", many.length) : L ? [t("layers.selected"), el("b", {}, layerName(L))] : t("layers.none")),
+        ib(ICONS.dup, t("layers.dup"), !copiable(L) || many.length > 0, duplicateLayer),
+        ib(ICONS.up, t("layers.up"), many.length > 0 || i < 1 || i >= here.length - 1, () => shiftLayer(1)),
+        ib(ICONS.down, t("layers.down"), many.length > 0 || i <= 1, () => shiftLayer(-1)),
+        ib(ICONS.trash, t("layers.del"), many.length ? !many.some(isAdded) : !(L && isRemovable(L)), () => (many.length ? removeGroup() : removeLayer())),
+        ib(ICONS.props, t(S.settings.drawer ? "drawer.close" : "drawer.open"), false, () => setDrawer(!S.settings.drawer), S.settings.drawer))));
+  // what is selected, in the drawer on the right (nothing is built while it is shut)
+  side.replaceChildren(...(!S.settings.drawer ? [] : [
+    el("div", { class: "dhead" }, el("div", {}, el("small", {}, t("drawer.title")), el("b", {}, many.length ? t("props.group", many.length) : L ? layerName(L) : "—")),
+      el("button", { class: "x", title: t("drawer.close"), onclick: () => setDrawer(false) }, "✕")),
+    many.length ? el("div", { class: "box" }, el("div", { class: "hint", style: "margin-top:0" }, many.map(layerName).join(" · ")),
       many.some((x) => x.locked) && el("div", { class: "hint" }, t("props.groupLocked")),
       el("div", { class: "hint" }, t("props.groupHint")),
       el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => focusAllows("bg") && selectLayer("bg") }, t("props.groupEnd")))
-    : L ? el("div", { class: "box" }, el("label", { class: "cap" }, `${t("props.title")} · ${layerName(L)}`),
-      el("div", { class: "props" }, typeControls(L), sceneSection(L), lookFxSection(L), layerSection(L)))
-      : el("div", { class: "hint" }, t("layers.none")));
+    : L ? [el("div", { class: "props" }, typeControls(L), sceneSection(L), lookFxSection(L), layerSection(L)),
+        L.type !== "bg" && el("div", { class: "dfoot" },
+          copiable(L) && el("button", { class: "linkbtn", onclick: duplicateLayer }, t("drawer.dup")),
+          el("button", { class: "linkbtn", onclick: () => { L.visible = !L.visible; touch({ cover: true, side: true }); } }, t(L.visible ? "drawer.hide" : "drawer.show")))]
+      : el("div", { class: "hint" }, t("layers.none"))]).flat().filter(Boolean));
+  openSecs(side);
   side.scrollTop = y;
-  // the selected layer's photo, in Cover → Add photos, is framed in the channel colour (without rebuilding that panel)
+  // the selected layer's photo, in Assets → the cover's photos, is framed in the channel colour (without rebuilding that panel)
   for (const item of document.querySelectorAll("#panel .pitem")) item.classList.toggle("on", item.dataset.id === S.layerId);
-  syncFocus(); markRows();
+  syncFocus(); markRows(); renderBar();
 }
+/** Opens or shuts the drawer of the selected layer's properties on the right (kept in the settings); shut, the canvas takes its column. */
+function setDrawer(on) {
+  S.settings.drawer = on; persistSettings();
+  columns(); renderSide();
+}
+
+// ---------- the bar over the canvas
+// The selected layer's most used settings on a bar of glass over it on the canvas: above it, clear of its turning
+// handle; under it, or inside its top, where there is no room. Each is a button that opens a popover under the bar
+// holding the same controls as its group in the drawer, or does what it says; More… opens the drawer. It goes while
+// anything is dragged, in 3D, in Settings and with a group selected. A row of the layer list under the pointer is
+// framed on the canvas (see hoverShow).
+const BAR = el("div", { id: "ftb", class: "glass", hidden: true }), POP = el("div", { id: "fpop", class: "glass", hidden: true }), HOVER = el("div", { id: "hoverbox", hidden: true });
+$("center").append(BAR, POP, HOVER);
+const FTB = { pop: "", of: "", drag: false };   // the item whose popover is open, the layer it is of, and whether the canvas is being dragged
+// gone while the pointer is down on the canvas (a layer moved, turned or resized), back where it then is when it is let go
+$("cv").addEventListener("pointerdown", () => { FTB.drag = true; placeBar(); }, true);
+for (const type of ["pointerup", "pointercancel"]) addEventListener(type, () => { if (FTB.drag) { FTB.drag = false; placeBar(); } }, true);
+/** What the effect a headline has is called (Auto when it has none of its own). */
+const fxLabel = (L) => (EFFECTS[L.fx] && L.fx !== "auto" ? EFFECTS[L.fx].name[getLang()] : t("bar.fxAuto"));
+/**
+ * The bar's buttons for layer L: {key, label, title?, aa? (a font's mark before it), chip? (a colour before it), on?,
+ * off?, and sec (the key of the group of properties the popover shows) or pop (the popover's controls) or act (what
+ * a click does)}.
+ */
+function barItems(L) {
+  const T = L.type, items = [], sec = (key, label, more = {}) => ({ key, sec: key, label, ...more });
+  if (LETTERED.includes(T)) {
+    items.push({ key: "font", aa: true, label: L.font || t("bar.fontAuto"), title: t("props.font"), pop: () => [fontControl(L, true)] });
+    if (HEADLINES.includes(T)) items.push(sec("props.sec.effect", t("bar.effect", fxLabel(L))));
+    items.push(sec("props.sec.color", t("bar.color"), { chip: L.ink || null }));
+    const byLook = columnsByLook(L);
+    items.push({ key: "vertical", label: t("props.vertical"), title: t(byLook ? "props.verticalByLook" : "props.verticalTip", (LOOKS[S.profile.style.look] || LOOKS.cel).name[getLang()]), on: inColumns(L), off: byLook,
+      act: () => { L.vertical = !L.vertical; touch({ cover: true, side: true }); } });
+  }
+  if (T === "photo") {
+    if (canCut()) items.push({ key: "cut", label: t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut"), off: CUT.busy, act: () => cutPhoto(L, !L.cut) });
+    items.push({ key: "crop", label: t(L.crop && canCrop(L) ? "crop.edit" : "crop.open"), off: !canCrop(L), title: t(L.fill && !L.of ? "crop.fillTip" : "crop.openTip"), act: () => cropOpen(L) });
+    if (!L.of) items.push({ key: "repaint", label: t("rep.title"), off: !(recordOf(L) || {}).img, title: t("bar.repaintTip"), act: () => repaintFor(L) },
+      { key: "replace", label: t("cover.replacePhoto"), off: REP.busy && REP.of === L.id, act: () => replacePhoto(L) });
+  }
+  if (T === "asset") {
+    if (canTint(L.ref)) items.push(sec("props.sec.color", t("bar.color"), { chip: L.ink || null }));
+    items.push({ key: "crop", label: t(L.crop && canCrop(L) ? "crop.edit" : "crop.open"), off: !canCrop(L), title: t("crop.openTip"), act: () => cropOpen(L) });
+  }
+  if (canWeave(L)) items.push(sec("props.sec.weave", t("props.sec.weave"), { on: !!L.weave }));
+  if (T === "solid") items.push(sec("props.sec.color", t("bar.color"), { chip: L.color || cat().color }));
+  if (T === "accent") items.push(sec("props.sec.shape", t("props.sec.shape")));
+  if (T === "bg") items.push(sec("props.sec.ground", t("props.sec.ground")));
+  items.push({ key: "more", label: t("bar.more"), title: t(S.settings.drawer ? "drawer.close" : "drawer.open"), on: S.settings.drawer, act: () => setDrawer(!S.settings.drawer) });
+  return items;
+}
+/** Group `key` of layer L's properties, built afresh as the drawer has it (its controls and its tip), or null. */
+function secOf(L, key) {
+  const g = [typeControls(L)].flat(Infinity).find((n) => n && n.dataset && n.dataset.key === key);
+  return g ? { kids: [...g.querySelector(".psec-b").childNodes], tip: (g.querySelector(".psec-h .info") || {}).title || "" } : null;
+}
+/** Builds the bar for the selected layer, and its popover if one is open (it shuts on another layer), then puts them in place. */
+function renderBar() {
+  const L = layer(), on = S.mode === "edit" && !!L && !group().length;
+  if (!on || FTB.of !== (L && L.id)) FTB.pop = "";
+  FTB.of = L ? L.id : "";
+  const items = on ? barItems(L) : [];
+  BAR.replaceChildren(...items.flatMap((it, i) => [it.key === "more" && i > 0 && el("span", { class: "sep" }),
+    el("button", { class: (it.on || FTB.pop === it.key ? "on" : ""), title: it.title || null, disabled: !!it.off, dataset: { key: it.key },
+      onclick: () => { if (it.act) { FTB.pop = ""; renderBar(); it.act(); } else { FTB.pop = FTB.pop === it.key ? "" : it.key; renderBar(); } } },
+      it.aa && el("span", { class: "aa" }, "Aa"), it.chip && el("span", { class: "chip", style: `background:${it.chip}` }), el("span", {}, it.label))]).filter(Boolean));
+  const it = items.find((x) => x.key === FTB.pop && !x.act);
+  const sec = it && it.sec && secOf(L, it.sec), kids = it ? (it.pop ? it.pop() : sec && sec.kids) : null;
+  if (!kids) FTB.pop = "";
+  POP.replaceChildren(...(kids ? [el("div", { class: "fpop-h" }, it.sec ? t(it.sec) : it.title || it.label, sec && sec.tip && info(sec.tip)), el("div", { class: "psec open" }, el("div", { class: "psec-b" }, kids))] : []));
+  placeBar();
+}
+/** Where layer id is drawn on the canvas, in #center's pixels: {cx, cy, hw, hh, r} (its centre, half sizes, turn), or null when it is not drawn here. */
+function onScreen(id) {
+  const cv = $("cv"), L = layer(id), h = L && L.type === "bg" && cv._virtual ? { cx: cv._virtual[0] / 2, cy: cv._virtual[1] / 2, hw: cv._virtual[0] / 2, hh: cv._virtual[1] / 2, r: 0 } : cv._hits && cv._hits.find((x) => x.id === id);
+  if (!h || !cv._virtual) return null;
+  const r = cv.getBoundingClientRect(), c = $("center").getBoundingClientRect(), k = r.width / cv._virtual[0];
+  return { cx: r.left - c.left + h.cx * k, cy: r.top - c.top + h.cy * k, hw: h.hw * k, hh: h.hh * k, r: h.r || 0, fill: !!h.fill };
+}
+/** Puts the bar over the selected layer and its popover under the bar; hides them while they would be in the way. */
+function placeBar() {
+  const L = layer(), box = S.mode === "edit" && L && BAR.childElementCount && !V3.on && !FTB.drag && !S.brushWin && onScreen(L.id);
+  BAR.hidden = !box; POP.hidden = !box || !POP.childElementCount;
+  if (!box) return;
+  const stage = $("stage"), top = stage.offsetTop, bottom = top + stage.offsetHeight, wide = $("center").clientWidth;
+  const a = (box.r * Math.PI) / 180, ex = Math.abs(box.hw * Math.cos(a)) + Math.abs(box.hh * Math.sin(a)), ey = Math.abs(box.hw * Math.sin(a)) + Math.abs(box.hh * Math.cos(a));
+  const turns = L.type !== "bg" && !FIXED.includes(L.type) && !box.fill, bw = BAR.offsetWidth, bh = BAR.offsetHeight;
+  let y = box.cy - ey - (turns ? 54 : 12) - bh;   // above, clear of the turning handle
+  if (y < top + 6) y = box.cy + ey + 14;   // under
+  if (y + bh > bottom - 6) y = Math.max(top + 6, box.cy - ey + 8);   // inside its top
+  const x = Math.max(6, Math.min(box.cx - bw / 2, wide - bw - 6));
+  BAR.style.left = x + "px"; BAR.style.top = y + "px";
+  if (POP.hidden) return;
+  const b = BAR.querySelector(`button[data-key="${CSS.escape(FTB.pop)}"]`), pw = POP.offsetWidth, ph = POP.offsetHeight;
+  const px = Math.max(6, Math.min(x + (b ? b.offsetLeft : 0), wide - pw - 6)), under = y + bh + 8;
+  POP.style.left = px + "px"; POP.style.top = (under + ph <= bottom - 6 || y - ph - 8 < top ? under : y - ph - 8) + "px";
+}
+/** Frames layer id on the canvas while its row in the list is under the pointer. */
+function hoverShow(id) {
+  const box = S.mode === "edit" && !V3.on && onScreen(id);
+  HOVER.hidden = !box;
+  if (!box) return;
+  Object.assign(HOVER.style, { left: box.cx - box.hw + "px", top: box.cy - box.hh + "px", width: box.hw * 2 + "px", height: box.hh * 2 + "px", transform: `rotate(${box.r}deg)` });
+}
+const hoverHide = () => { HOVER.hidden = true; };
+/** Opens the AI repaint of photo layer L where it is: under the photo, in Assets → the cover's photos. */
+function repaintFor(L) {
+  REP.for = L.id; S.tab.edit = "assets"; syncTabs(); renderPanel();
+  const item = $("panel").querySelector(`.pitem[data-id="${CSS.escape(L.id)}"]`);
+  if (item) item.scrollIntoView({ block: "start" });
+}
+addEventListener("pointerdown", (e) => {   // a click away from the bar and its popover shuts the popover
+  if (!FTB.pop || BAR.contains(e.target) || POP.contains(e.target) || (e.target.closest && e.target.closest("#tip"))) return;
+  FTB.pop = ""; renderBar();
+}, true);
 
 // ---------- the layers in 3D
 // The 3D button over the layer list takes the cover apart: each layer painted on its own (o.only in
@@ -4266,7 +4451,7 @@ function close3d() {
   V3.sheets.clear(); V3.z.clear(); V3.shown = []; V3.view = null;
   if (S.mode === "edit") drawMain();
   $("stage").classList.remove("v3", "v3open");
-  markRows(); syncFocus();
+  markRows(); syncFocus(); placeBar();
 }
 /** The 3D view's canvas and its bar of controls, put in the stage once. */
 function stage3d() {
@@ -5109,9 +5294,10 @@ const COLUMNS = { left: { min: 280, def: 340 }, right: { min: 260, def: 320 }, s
 const CENTRE_MIN = 360;   // what the canvas keeps at the least
 /** Sets the columns' widths from the settings (0 = default), each kept between its least and what leaves the canvas room. */
 function columns() {
-  const b = $("body"), w = innerWidth - 136, c = S.settings.columns;   // 136: the dock (76), the three gaps between the columns and the page's margins
+  const b = $("body"), open = !!S.settings.drawer, w = innerWidth - (open ? 136 : 124), c = S.settings.columns;   // 136: the dock (76), the three gaps between the columns (two with the drawer shut) and the page's margins
   const fit = (k, other) => Math.round(clamp(c[k] || COLUMNS[k].def, COLUMNS[k].min, Math.max(COLUMNS[k].min, w - CENTRE_MIN - other)));
-  const left = fit("left", c.right || COLUMNS.right.def), right = fit("right", left);
+  const left = fit("left", open ? c.right || COLUMNS.right.def : 0), right = fit("right", left);
+  b.classList.toggle("nodrawer", !open);
   b.style.setProperty("--lw", left + "px"); b.style.setProperty("--rw", right + "px"); b.style.setProperty("--sw", fit("setup", 0) + "px");
   for (const h of document.querySelectorAll(".split")) h.title = t("ui.split");
 }
@@ -5150,6 +5336,7 @@ addEventListener("keydown", (e) => {
   const m = $("modal");   // a dialog open: Escape is its cancel (but in a text being typed), and no key reaches what lies under it
   if (!m.hidden) { if (key === "escape" && !m.dataset.sticky && !(typing && !/^(range|checkbox|radio)$/.test(a.type))) (m.onDismiss || closeModal)(); return; }
   if (key === "escape" && S.mode === "setup" && !(typing && !/^(range|checkbox|radio|select-one)$/.test(a.type))) return setMode("edit");
+  if (key === "escape" && FTB.pop) { FTB.pop = ""; return renderBar(); }   // the bar's popover first
   if (typing) return;
   if (!S.cover || SURPRISE.busy) return;
   if (key === "escape" && $("deal") && !$("deal").hidden) return dealClose();

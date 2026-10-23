@@ -237,6 +237,7 @@ export function normalizeSettings(raw) {
     scope: ["orient", "size"].includes(s.scope) ? s.scope : "all",   // what a change of place or layout reaches: every size, those facing the way this one does (see orientOf in layout.js), or this one
     hideScene: s.hideScene === true,   // the scene objects' handles hidden on the canvas
     glass: s.glass !== false,   // the panels frosted glass over the cover (false: plain, translucent; see glassWatch in app.js)
+    drawer: s.drawer === true,   // the drawer of the selected layer's properties open on the right (see setDrawer in app.js)
     // how a photo's subject is cut out: "vision" (macOS), "birefnet-lite" or "birefnet" (any system, a downloaded model); "" = the system's own choice
     cutEngine: ["vision", "birefnet-lite", "birefnet"].includes(s.cutEngine) ? s.cutEngine : "",
     cutProxy: str(s.cutProxy).trim().slice(0, 300),   // a proxy for downloading the models ("" = the environment's)
