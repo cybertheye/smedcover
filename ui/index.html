@@ -87,6 +87,13 @@
   .quick:hover{background:rgba(255,255,255,.13)}
   .quick.on{border-color:color-mix(in srgb,var(--acc) 70%,transparent);background:color-mix(in srgb,var(--acc) 14%,transparent)}
   .quick .sw-chip{width:18px;height:18px;border-radius:5px;box-shadow:0 0 0 1px rgba(255,255,255,.3)}
+  /* the search over every shelf: a field with its magnifier, and ✕ while it holds words */
+  .asearch{display:flex;align-items:center;gap:8px;height:38px;padding:0 5px 0 12px;border-radius:12px;background:var(--field);border:1px solid var(--line2);color:var(--text3)}
+  .asearch:focus-within{border-color:color-mix(in srgb,var(--acc) 70%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,var(--acc) 14%,transparent)}
+  .asearch input[type=text]{flex:1;min-width:0;height:100%;padding:0;border:0;border-radius:0;background:transparent;font-size:13px;box-shadow:none}
+  .asearch input::placeholder{color:var(--text3)}
+  .asearch .clr{flex:none;width:28px;height:28px;border:0;border-radius:8px;background:transparent;color:var(--text2);font-size:12px;cursor:pointer;padding:0}
+  .asearch .clr:hover{background:rgba(255,255,255,.12);color:#fff}
   .shelf{display:grid;gap:10px}
   .shelf-h{display:flex;align-items:baseline;gap:12px}
   .shelf-h .cap .n{color:var(--text3)}
