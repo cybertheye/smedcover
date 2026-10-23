@@ -451,6 +451,11 @@
   #fpop .fpop-h{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px}
   #fpop .psec{border:0;padding:0}
   #hoverbox{position:absolute;z-index:19;pointer-events:none;border:1.5px solid #5aa9ff;border-radius:3px;box-shadow:0 0 0 1px rgba(0,0,0,.3)}
+  /* with the Layout sheet open, each layout part framed over the stage and named (placeFrames); a press goes through to the canvas */
+  #partframes{position:absolute;z-index:18;pointer-events:none;overflow:hidden}
+  #partframes[hidden]{display:none}
+  #partframes .pframe{position:absolute;box-sizing:border-box;border:1.5px dashed rgba(255,255,255,.8);border-radius:4px;background:rgba(255,255,255,.05);box-shadow:0 0 0 1px rgba(7,7,12,.3),inset 0 0 0 1px rgba(7,7,12,.3)}   /* edged in dark, to read on a light ground too */
+  #partframes .ptag{position:absolute;height:20px;padding:0 7px;border-radius:6px;background:rgba(20,20,28,.78);color:#fff;font-size:11px;line-height:20px;white-space:nowrap}
   .layer.clip .nm::before{content:"↓ ";color:var(--acc)}
   .layer .rename{font-size:13px;padding:2px 6px;min-width:0;width:100%}
 

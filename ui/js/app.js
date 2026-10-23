@@ -387,6 +387,7 @@ let drawQueued = false;
 function flushDraw() {
   if (!drawQueued) return;
   drawQueued = false; ensureFonts(S.cover.layers); drawMain(); placeBar(); markStrip(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); later("ambient", 350, paintAmbient);
+  placeFrames();   // the layout's parts framed, where the Layout sheet is open
   if (S.letterWin) later("letters", 200, lettersShow);   // the ransom note's letters as now drawn (words typed, colours changed)
   if (S.weaveWin) later("weave", 200, weaveShow);   // the woven letters as now typed
   if (LAYED.redraw) later("layed", 80, LAYED.redraw);   // a layout preset's editor, with what arrived since (outlines, fonts)
@@ -574,7 +575,12 @@ function layerAt(e) {
   const top = hitAt(cv._hits, p.x, p.y, ok), sel = cv._hits.find((h) => h.id === S.layerId && ok(h));
   const mine = sel && hitAt([sel], p.x, p.y), area = (h) => h.hw * h.hh;
   const hit = mine && (!top || top.id === mine.id || area(top) >= area(mine)) ? mine : top;
-  return hit ? layer(hit.id) : layer("bg");
+  // with the layout's parts framed (see placeFrames), a press inside a frame takes that part — the smallest, where frames
+  // lie one in another — unless what is hit is smaller still (a sticker on the title): so a part lying under another,
+  // or under a picture, is reached by its frame
+  const part = partsFramed() && cv._hits.filter((h) => framable(h) && hitAt([h], p.x, p.y, ok, 0)).sort((a, b) => area(a) - area(b))[0];
+  const pick = part && (!hit || area(hit) > area(part)) ? part : hit;
+  return pick ? layer(pick.id) : layer("bg");
 }
 /** The pointer over a selected layer's handles (see handles in render.js): on the canvas, and in a layout preset's editor. */
 const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize", nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize" };
@@ -4573,6 +4579,44 @@ function hoverShow(id) {
   Object.assign(HOVER.style, { left: box.cx - box.hw + "px", top: box.cy - box.hh + "px", width: box.hw * 2 + "px", height: box.hh * 2 + "px", transform: `rotate(${box.r}deg)` });
 }
 const hoverHide = () => { HOVER.hidden = true; };
+// While the Layout sheet is shown, each layout part drawn on the canvas (but the ground) is framed with a dashed line
+// and named as the layer list names it, so what each one takes is seen; the selected one keeps its own frame and
+// handles. A press inside a frame takes that part, even one lying under another (see layerAt). Boxes laid over the
+// stage, as the hover frame is, not drawn on the cover: put in place again after each drawing (flushDraw), so they
+// follow a drag, the window resized and the size shown.
+const FRAMES = el("div", { id: "partframes", hidden: true }), FRAMED = new Map();   // FRAMED: layer id -> its frame and its name's tag
+$("center").append(FRAMES);
+/** Whether the layout's parts are framed now: the Layout sheet shown (not hidden by the drawer in a narrow window), on the flat canvas. */
+const partsFramed = () => S.mode === "edit" && S.tab.edit === "layout" && !sheetHidden() && !V3.on && !S.brushWin && !!S.cover;
+/** Whether hit h is of a part that is framed and taken by its frame: a layout layer of the cover's own but the ground, shown and not locked. */
+const framable = (h) => { const L = layer(h.id); return !!L && h.type !== "bg" && isLayout(L) && isPickable(L); };
+/** Frames the layout's parts on the stage (see partsFramed), each but those selected; with FOCUS, only those worked on. */
+function placeFrames() {
+  const cv = $("cv"), sel = new Set(pickedIds()), spot = S.focus ? spotIds() : null;
+  const parts = partsFramed() && cv._hits && cv._virtual ? cv._hits.filter((h) => framable(h) && !sel.has(h.id) && (!spot || spot.includes(h.id))) : [];
+  FRAMES.hidden = !parts.length;
+  if (!parts.length) return;
+  const stage = $("stage"), r = cv.getBoundingClientRect(), c = $("center").getBoundingClientRect(), k = r.width / cv._virtual[0], W = stage.offsetWidth;
+  Object.assign(FRAMES.style, { left: stage.offsetLeft + "px", top: stage.offsetTop + "px", width: W + "px", height: stage.offsetHeight + "px" });
+  const ox = r.left - c.left - stage.offsetLeft, oy = r.top - c.top - stage.offsetTop;
+  const each = parts.map((h) => {
+    if (!FRAMED.has(h.id)) FRAMED.set(h.id, { box: el("div", { class: "pframe" }), tag: el("span", { class: "ptag" }) });
+    const f = FRAMED.get(h.id), name = layerName(layer(h.id)), x = ox + h.cx * k, y = oy + h.cy * k, hw = h.hw * k + 2, hh = h.hh * k + 2;
+    if (f.tag.textContent !== name) f.tag.textContent = name;
+    Object.assign(f.box.style, { left: x - hw + "px", top: y - hh + "px", width: hw * 2 + "px", height: hh * 2 + "px", transform: h.r ? `rotate(${h.r}deg)` : "" });
+    const a = ((h.r || 0) * Math.PI) / 180;   // how far it reaches across and down, turned as it is
+    return { f, x, y, ex: Math.abs(hw * Math.cos(a)) + Math.abs(hh * Math.sin(a)), ey: Math.abs(hw * Math.sin(a)) + Math.abs(hh * Math.cos(a)) };
+  });
+  const ids = parts.map((h) => h.id).join(" ");
+  if (FRAMES.dataset.ids !== ids) { FRAMES.dataset.ids = ids; FRAMES.replaceChildren(...each.flatMap((p) => [p.f.box, p.f.tag])); }
+  // each name beside its frame's top, on the right; on the left where the stage has no room for it there; else inside the frame's top
+  for (const p of each) p.w = p.f.tag.offsetWidth;
+  for (const { f, x, y, ex, ey, w } of each) {
+    const right = x + ex + 6, left = x - ex - 6 - w, inside = right + w > W - 4 && left < 4;
+    f.tag.style.left = (inside ? x - ex + 4 : right + w <= W - 4 ? right : left) + "px";
+    f.tag.style.top = Math.max(2, y - ey + (inside ? 4 : 0)) + "px";
+  }
+}
 addEventListener("pointerdown", (e) => {   // a click away from the bar and its popover shuts the popover
   if (!FTB.pop || BAR.contains(e.target) || POP.contains(e.target) || (e.target.closest && e.target.closest("#tip"))) return;
   FTB.pop = ""; renderBar();
@@ -4609,7 +4653,7 @@ function close3d() {
   V3.sheets.clear(); V3.z.clear(); V3.shown = []; V3.view = null;
   if (S.mode === "edit") drawMain();
   $("stage").classList.remove("v3", "v3open");
-  markRows(); syncFocus(); placeBar();
+  markRows(); syncFocus(); placeBar(); placeFrames();
 }
 /** The 3D view's canvas and its bar of controls, put in the stage once. */
 function stage3d() {
@@ -5510,6 +5554,7 @@ function renderPanel() {
   if (S.mode === "setup") syncTabs();   // the nav's profile: its name, channels and colours, as the page now has them
   const at = S.mode === "setup" && SET_UI.at && document.getElementById("set-" + SET_UI.at);   // a card of the page asked for (see SET_UI)
   if (at) { SET_UI.at = ""; at.scrollIntoView({ block: "start" }); }
+  placeFrames();   // the layout's parts framed with the Layout sheet shown, and no longer with another
 }
 
 function welcome() {
