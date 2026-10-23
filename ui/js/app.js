@@ -357,7 +357,7 @@ function paintFlat() {
   const draft = drafting(), keyed = draft && DRAFT.key;
   if (!keyed) DRAFT.kept = null; else if (!DRAFT.kept || DRAFT.kept.key !== keyed) DRAFT.kept = { key: keyed };   // a look's setting dragged (see o.draft)
   if (!draft && !LIVE) dropCards();   // painted still: the drag or the draft is over, and the photos' copies on the graphics card can go
-  const shown = previewed();   // a look or a text effect previewed from its card, on this canvas only (see PREVIEW)
+  const shown = previewed();   // a look, a text effect or a layout preset previewed from its card, on this canvas only (see PREVIEW)
   paint(cv, size, Math.min(vw * 1.5, vw * k * (draft ? 1 : window.devicePixelRatio || 1)), shown.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
     { draft: DRAFT.kept || draft, ...(S.mode === "edit" ? { picked: group().map((L) => L.id), sceneHandles: !S.settings.hideScene, spot: S.focus ? spotIds() : null, brush: S.brushWin } : {}),
       ...(shown.profile !== S.profile ? { profile: shown.profile } : {}) });
@@ -2746,16 +2746,18 @@ function lookSheet() {
 /**
  * What the canvas shows instead of the cover as it is while a card is under the pointer, a moment after it came
  * (null: none): `look`, the look of a look card; `fx`, a text effect's card, {id, fx, seed} (the layer, the effect,
- * the seed a lettering dealt by one is drawn with). Only the drawing takes it (paint, through previewed()): the
- * profile and the cover keep their own, so nothing of it is saved or undone; a click on the card puts it on.
- * `timer`: the moment being waited, for `wait` (the kind it will show).
+ * the seed a lettering dealt by one is drawn with); `layout`, a layout preset's card, {id, name, p} (the preset, the
+ * cover laid out by it at each drawing, see laidOut). Only the drawing takes it (paint, through previewed()): the profile
+ * and the cover keep their own, so nothing of it is saved or undone; a click on the card (a preset's Apply to canvas)
+ * puts it on. `timer`: the moment being waited, for `wait` (the kind it will show).
  */
-const PREVIEW = { look: null, fx: null, timer: 0, wait: "" };
+const PREVIEW = { look: null, fx: null, layout: null, timer: 0, wait: "" };
 /** The profile as drawn in look `id` (a copy: the profile's own style untouched). */
 const inLook = (id) => ({ ...S.profile, style: { ...S.profile.style, look: id } });
 /** The profile and the cover the canvas is painted from: S's own, or copies as a card under the pointer has them (see PREVIEW). */
 function previewed() {
   let profile = S.profile, cover = S.cover;
+  if (PREVIEW.layout) ({ profile, cover } = laidOut(PREVIEW.layout.p));
   if (PREVIEW.look) profile = inLook(PREVIEW.look);
   const f = PREVIEW.fx;
   if (f) cover = { ...cover, layers: cover.layers.map((l) => (l.id === f.id ? { ...l, fx: f.fx === "auto" ? undefined : f.fx, fxSeed: l.fxSeed || f.seed || undefined } : l)) };
@@ -2767,7 +2769,7 @@ function previewed() {
  */
 function previewSoon(kind, v, ok = () => true) {
   clearTimeout(PREVIEW.timer); PREVIEW.timer = 0; PREVIEW.wait = "";
-  const clear = () => { const was = PREVIEW.look || PREVIEW.fx; PREVIEW.look = PREVIEW.fx = null; return !!was; };
+  const clear = () => { const was = PREVIEW.look || PREVIEW.fx || PREVIEW.layout; PREVIEW.look = PREVIEW.fx = PREVIEW.layout = null; return !!was; };
   if (!v) { if (clear()) { previewTag(); queueDraw(); } return; }
   PREVIEW.wait = kind;
   PREVIEW.timer = setTimeout(() => { PREVIEW.timer = 0; PREVIEW.wait = ""; if (!ok()) return; clear(); PREVIEW[kind] = v; previewTag(); queueDraw(); }, 140);
@@ -2903,14 +2905,16 @@ function pickLook(id) {
   if (st.look === id) return;
   st.look = id; countLook(id); touch({ profile: true, panel: true, side: true, strip: true });
 }
-/** Over the canvas while a look or a text effect is previewed: which, and that a click puts it on. */
+/** Over the canvas while a look, a text effect or a layout preset is previewed: which, and how it is put on; the preset's card says so too. */
 function previewTag() {
   let tag = $("pvtag");
   if (!tag) { tag = el("div", { id: "pvtag" }); $("stage").append(tag); }
-  const lang = getLang(), f = PREVIEW.fx;
-  tag.hidden = !PREVIEW.look && !f;
+  const lang = getLang(), f = PREVIEW.fx, lay = PREVIEW.layout;
+  tag.hidden = !PREVIEW.look && !f && !lay;
   if (PREVIEW.look) tag.textContent = t("look.previewing", LOOKS[PREVIEW.look].name[lang]);
   else if (f) tag.textContent = t("fx.previewing", f.fx === "auto" ? t("fx.cardAuto") : EFFECTS[f.fx].name[lang]);
+  else if (lay) tag.textContent = t("layouts.previewing", lay.name);
+  for (const c of document.querySelectorAll("#panel .preset")) c.classList.toggle("previewing", !!lay && c.dataset.id === lay.id);
 }
 /** Layout: the layout presets, the template at this size, the colour block's edge, which parts show, and all the layout hidden or put back in place. */
 function layoutSheet() {
@@ -2935,19 +2939,32 @@ function layoutSheet() {
  */
 function presetCards() {
   const list = S.settings.layouts;
-  const card = (p, i) => el("div", { class: "preset" },
-    el("input", { type: "text", value: p.name, placeholder: layoutName(p, i), maxLength: LAYOUTS.name, spellcheck: false, title: t("layouts.renameTip"),
-      onkeydown: (e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") { e.stopPropagation(); e.target.value = p.name; e.target.blur(); } },
-      onchange: (e) => { p.name = e.target.value.trim().slice(0, LAYOUTS.name); persistSettings(); renderPanel(); } }),
+  const card = (p, i) => el("div", { class: "preset" + (PREVIEW.layout && PREVIEW.layout.id === p.id ? " previewing" : ""), dataset: { id: p.id }, onpointerenter: () => hoverPreset(p, i) },
+    el("div", { class: "preset-h" },
+      el("input", { type: "text", value: p.name, placeholder: layoutName(p, i), maxLength: LAYOUTS.name, spellcheck: false, title: t("layouts.renameTip"),
+        onkeydown: (e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") { e.stopPropagation(); e.target.value = p.name; e.target.blur(); } },
+        onchange: (e) => { p.name = e.target.value.trim().slice(0, LAYOUTS.name); persistSettings(); renderPanel(); } }),
+      el("span", { class: "pv" }, t("layouts.previewingCard"))),
     el("div", { class: "acts" },
       el("button", { class: "btn solid", title: t("layouts.applyTip"), onclick: () => applyLayout(p, i) }, t("layouts.apply")),
-      el("button", { class: "btn", onclick: () => layoutEditor(p, i) }, t("layouts.edit")),
-      el("button", { class: "btn", onclick: () => deleteLayout(p, i, renderPanel) }, t("layouts.delete"))));
+      el("button", { class: "btn", onclick: () => { endPreview("layout"); layoutEditor(p, i); } }, t("layouts.edit")),
+      el("button", { class: "btn", onclick: () => { endPreview("layout"); deleteLayout(p, i, renderPanel); } }, t("layouts.delete"))));
   return el("div", {},
     el("div", { class: "lhead" }, capInfo("layouts.list", t("layouts.about")),
       el("button", { class: "linkbtn", disabled: list.length >= LAYOUTS.most, title: t("layouts.newTip"),
         onclick: () => layoutEditor(normalizeLayouts([{ ...newPreset(), id: newLayoutId(), name: nextLayoutName() }])[0], list.length, true) }, t("layouts.new"))),
-    list.length ? el("div", { class: "presets" }, list.map(card)) : el("div", { class: "hint", style: "margin:0" }, t("layouts.none")));
+    list.length ? el("div", { class: "presets", onpointerleave: () => hoverPreset(null) }, list.map(card)) : el("div", { class: "hint", style: "margin:0" }, t("layouts.none")));
+}
+/** A preset's card under the pointer: the canvas shows the cover laid out by it a moment later (PREVIEW.layout); none: as it is. */
+function hoverPreset(p, i) {
+  if (!p) return previewSoon("layout", null);
+  previewSoon("layout", { id: p.id, name: layoutName(p, i), p }, () => S.mode === "edit" && !sheetHidden() && S.tab.edit === "layout" && S.settings.layouts.includes(p));
+}
+/** The profile and the cover as applyLayout would leave them with preset `p` put on, at the profile's sizes: copies, made as the canvas is drawn, so they follow whatever changes meanwhile. */
+function laidOut(p) {
+  const style = copyOf(S.profile.style), layers = S.cover.layers.map((l) => (LAYOUT_PARTS.includes(l.id) ? copyOf(l) : l));
+  putLayout(style, layers, p, sizeKeys());
+  return { profile: { ...S.profile, style }, cover: { ...S.cover, layers } };
 }
 /** The default design (the ⋯ menu): the cover's layers but its photos kept as the profile's start, or taken back from it. */
 function saveDesign() { S.profile.design.layers = JSON.parse(JSON.stringify(S.cover.layers.filter((l) => l.type !== "photo"))); touch({ profile: true }); toast(t("style.designSaved")); }
@@ -5732,7 +5749,7 @@ const useLook = () => setLook(S.profile.style.look, S.profile.style.lookParams[S
 const inkOn = (hex) => { const [r, g, b] = hexToRgb(hex); return 0.2126 * r + 0.7152 * g + 0.0722 * b > 150 ? "#15151c" : "#ffffff"; };
 function renderPanel() {
   if (!S.cover) return;
-  endPreview("look");   // its cards drawn anew
+  endPreview("look", "layout");   // their cards drawn anew
   useLook();
   const panel = $(S.mode === "setup" ? "setpanel" : "panel"), y = panel.scrollTop;
   document.documentElement.style.setProperty("--acc", cat().color);

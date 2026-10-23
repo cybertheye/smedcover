@@ -80,6 +80,12 @@
   .presets{display:grid;gap:8px}
   .preset{display:grid;gap:8px;padding:10px;border-radius:14px;background:rgba(0,0,0,.2);border:1px solid var(--line)}
   .preset input{padding:7px 10px;font-weight:700}
+  .preset:hover{border-color:var(--line2)}
+  .preset.previewing{border-color:rgba(255,255,255,.5)}
+  .preset-h{display:flex;align-items:center;gap:8px}
+  .preset-h input{flex:1;min-width:0}
+  .preset-h .pv{display:none;flex:none;font-size:12px;color:var(--text2);white-space:nowrap}
+  .preset.previewing .pv{display:inline}   /* the canvas shows the cover laid out by it (see hoverPreset) */
   .preset .acts{justify-content:flex-start}
   /* Assets → ways to add, four to a row; then shelves, each with its name, how many, and "All" */
   .quicks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}

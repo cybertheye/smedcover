@@ -272,6 +272,8 @@ const STR = {
   "layouts.delete": ["删除", "Delete"],
   "layouts.deleteSure": ["删除版式设定「{0}」？它的概率会平均分给其他还不是 0% 的项。", "Delete the layout preset “{0}”? Its chance goes alike to the options not at 0%."],
   "layouts.applied": ["已把「{0}」套用到画布，可以撤销", "“{0}” is on the canvas; Undo takes it off"],
+  "layouts.previewing": ["预览：{0} · 点「套用到画布」换上，移开就恢复", "Preview: {0} · Apply to canvas puts it on, move away to go back"],
+  "layouts.previewingCard": ["预览中", "Previewing"],
   "layouts.renameTip": ["在这里改名，回车确定", "Rename it here; Enter keeps it"],
   "layouts.save": ["保存为版式设定", "Save as layout"],
   "layouts.saveTip": ["把画布现在的版式存成一个版式设定（标题、副标题、角标、频道名、品牌行、频道图形和色块在每个尺寸上的位置、显示与否，以及每个尺寸的色块），「你看着办」可以按概率用它", "Keep the canvas's layout as a layout preset (where the title, subtitle, tag, channel name, brand row, channel graphic and colour block stand at every size, whether each shows, and each size's colour block), which Surprise me can deal by its chance"],
