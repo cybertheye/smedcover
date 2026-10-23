@@ -5254,6 +5254,13 @@ const projectActions = {
   },
   reset() { setCover(channelCover(null, S.profile, S.cover.catId)); S.layerId = "title"; touch({ cover: true, panel: true, side: true }); },
 };
+/**
+ * Whether project files can be had here (the ⋯ menu's Project file, ⌘O and ⌘S): saved through the app's dialog, else
+ * downloaded, which a page that cannot download cannot do; every host opens one with the file picker.
+ */
+const CAN_PROJECT = CAN.saveFiles || "download" in HTMLAnchorElement.prototype;
+/** How a shortcut's key is written: ⌘ on a Mac, Ctrl+ elsewhere. */
+const MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl+";
 
 // ---------- chrome
 function setMode(mode) {
@@ -5489,7 +5496,7 @@ const SHELL_ICONS = {
 const ico = (k, px = 20) => el("span", { class: "ico", style: `display:inline-grid;width:${px}px;height:${px}px`, innerHTML: `<svg viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SHELL_ICONS[k]}</svg>` });
 /**
  * The top bar: the profile and the channel; undo and redo; Surprise me, Export, and the ⋯ menu (the cover's
- * default design and Clear, the profile's settings, the glass, the language).
+ * default design and Clear, the profile's settings, project files, the glass, the language).
  */
 function syncTop() {
   if (!S.profile) return;
@@ -5529,6 +5536,8 @@ function renderMenu() {
   const go = (fn) => () => { closeMenu(); fn(); };
   const item = (label, sub, fn, cls = "") => el("button", { class: "mi " + cls, role: "menuitem", onclick: go(fn) }, el("span", { class: "mt" }, el("span", {}, label), sub && el("small", {}, sub)));
   const page = (k, sub) => item(t("tab." + k), sub, () => { S.tab.setup = k; setMode("setup"); });
+  const keyed = (label, k, fn) => el("button", { class: "mi", role: "menuitem", "aria-keyshortcuts": (MOD_KEY === "⌘" ? "Meta+" : "Control+") + k, onclick: go(() => fn().catch(fail)) },
+    el("span", { class: "mt" }, el("span", {}, label)), el("kbd", { class: "sc" }, MOD_KEY + k));   // its shortcut at its end
   const on = glassOn(), others = S.profiles.filter((p) => p !== S.profile);
   $("menu").replaceChildren(...[
     el("div", { class: "mg" }, t("menu.cover")),
@@ -5542,6 +5551,8 @@ function renderMenu() {
       el("span", { class: "mt" }, el("span", {}, t("menu.switch"))), el("span", { class: "chev" + (MENU.profiles ? " open" : "") })),
     MENU.profiles && others.map((p) => el("button", { class: "mi sub", role: "menuitem", onclick: go(() => switchProfile(p.id).catch((err) => { fail(err); syncTop(); })) },
       el("span", { class: "mt" }, el("span", {}, p.name), el("small", {}, counted("menu.channels", p.categories.length))))),
+    CAN_PROJECT && [el("div", { class: "sep" }), el("div", { class: "mg" }, t("proj.group")),
+      keyed(t("proj.open"), "O", projectActions.open), keyed(t("proj.save"), "S", projectActions.save)],
     el("div", { class: "sep" }),
     el("div", { class: "row", title: CAN_BLUR ? t("menu.glassTip") : null }, el("span", {}, t("menu.glass")),
       el("button", { class: "tog" + (on ? " on" : ""), role: "switch", "aria-checked": String(on), "aria-label": t("menu.glass"), disabled: !CAN_BLUR, onclick: () => { setGlass(!on, true); renderMenu(); } })),
@@ -5720,6 +5731,9 @@ addEventListener("keydown", (e) => {
   if (key === "escape" && MENU.open) return closeMenu();
   const m = $("modal");   // a dialog open: Escape is its cancel (but in a text being typed), and no key reaches what lies under it
   if (!m.hidden) { if (key === "escape" && !m.dataset.sticky && !(typing && !/^(range|checkbox|radio)$/.test(a.type))) (m.onDismiss || closeModal)(); return; }
+  // a project file, from the editor, Surprise me's window not over it: ⌘S even while typing in a field (what is typed is on the cover already)
+  const projKey = mod && !e.shiftKey && !e.altKey && (key === "s" || (key === "o" && !typing));
+  if (projKey && CAN_PROJECT && S.mode === "edit" && S.cover && !SURPRISE.busy && !($("deal") && !$("deal").hidden)) { e.preventDefault(); closeMenu(); return (key === "s" ? projectActions.save() : projectActions.open()).catch(fail); }
   if (key === "escape" && S.mode === "setup" && !(typing && !/^(range|checkbox|radio|select-one)$/.test(a.type))) return setMode("edit");
   if (key === "escape" && FTB.pop) { FTB.pop = ""; return renderBar(); }   // the bar's popover first
   if (typing) return;
