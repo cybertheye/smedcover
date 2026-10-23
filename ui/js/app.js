@@ -432,8 +432,8 @@ function selectSize(key) {
   if (onStyleTab()) renderPanel();   // the template box is the size's: its layout, its own or the profile's, and the sizes facing its way
 }
 /** Whether the open sheet shows the look or the layout, which a change of size or of a layout drawn anew bears on. */
-const onStyleTab = () => S.mode === "edit" && (S.tab.edit === "look" || S.tab.edit === "layout");
-/** Sets the scope a change of place or layout has (see SCOPES); the toolbar, the properties and the Style tab's template box say it. */
+const onStyleTab = () => S.mode === "edit" && !sheetHidden() && (S.tab.edit === "look" || S.tab.edit === "layout");
+/** Sets the scope a change of place or layout has (see SCOPES); the tray under the canvas and the properties say it. */
 function setScope(v) {
   S.settings.scope = v; persistSettings(); syncToolbar(); renderSide();
   if (onStyleTab()) renderPanel();
@@ -1531,7 +1531,7 @@ function cutWhere(L) {
 // for: the photo layer whose repaint is open; of: the one the running repaint, or its result or error, belongs to
 const REP = { for: "", of: "", busy: false, job: 0, since: 0, error: "", result: null, test: null, confirmDrop: null };
 /** Whether the open sheet shows the cover's own things — its words, its layout parts, its photos — which follow its layers. */
-const onCoverTab = () => S.mode === "edit" && ["content", "layout", "assets"].includes(S.tab.edit);
+const onCoverTab = () => S.mode === "edit" && !sheetHidden() && ["content", "layout", "assets"].includes(S.tab.edit);
 const repBusyText = () => t("rep.busy", Math.max(0, Math.round((Date.now() - REP.since) / 1000)));
 /** A copy of a picture no longer than `max` on its longer side, as JPEG: {mime, data, url, w, h}. */
 function shrink(im, max, q = 0.9) {
@@ -1963,7 +1963,7 @@ async function requestSpec(cfg, target, onAttempt = () => null, stillWanted = ()
     turns.push({ role: "assistant", content: out.text.slice(0, 12000) }, { role: "user", content: retryMessage(r.error) });
   }
 }
-const onAssetsTab = () => S.mode === "edit" && S.tab.edit === "assets";
+const onAssetsTab = () => S.mode === "edit" && !sheetHidden() && S.tab.edit === "assets";
 async function generateAsset() {
   const target = AI.target.trim(), image = AI.image;
   if ((!target && !image) || AI.busy) return;   // a picture alone is enough to go on
@@ -2338,7 +2338,7 @@ function oddsDialog(fresh = true, at = "") {
     el("div", { class: "ogrid" },
       group("layout", [["keep", t("odds.layout.keep")], ...layouts.map((p, i) => [p.id, layoutName(p, i)])], { id: "odds-layouts", tip: `${t("odds.layoutHint")} ${t("odds.layoutsHint")}`, fold: 4,
         foot: el("div", { class: "ofoot" }, el("span", { class: "hint" }, t("odds.presetsWhere")),
-          el("button", { class: "linkbtn", onclick: () => { closeModal(); if (!SURPRISE.busy) dealClose(); S.tab.edit = "layout"; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, t("odds.presetsGo"))) }),
+          el("button", { class: "linkbtn", onclick: () => { closeModal(); if (!SURPRISE.busy) dealClose(); showSheet("layout"); } }, t("odds.presetsGo"))) }),
       group("ground", [["dark", t("theme.dark")], ["light", t("theme.light")]], { tip: t("odds.groundHint") }),
       group("letters", ODD_OPTIONS.letters().map((k) => [k, k === "own" ? t("odds.ownLetters") : EFFECTS[k].name[lang]]), { tip: t("odds.lettersHint"), fold: 3 }),
       group("bend", ODD_OPTIONS.bend().map((k) => [k, k === "none" ? t("odds.noBend") : BENDS[k].name[lang]]), { tip: t("odds.bendHint"), fold: 3 }),
@@ -2761,7 +2761,7 @@ const inLook = (id) => ({ ...S.profile, style: { ...S.profile.style, look: id } 
  * (a newer one stops an older); `scroll`, where the cards were scrolled to.
  */
 const LOOKCARDS = { pics: new Map(), queue: [], round: 0, scroll: null };
-const onLookSheet = () => S.mode === "edit" && S.tab.edit === "look";
+const onLookSheet = () => S.mode === "edit" && !sheetHidden() && S.tab.edit === "look";
 const lookBase = () => { const st = S.profile.style; return JSON.stringify([S.sel, S.cover.catId, S.cover.title, S.cover.subtitle, S.cover.tag, S.cover.layers, S.cover.scene, S.profile.brand, S.profile.categories, S.photos.size, { ...st, look: 0, lookParams: 0, lookArt: 0 }]); };
 const lookOwn = (id) => { const st = S.profile.style; return JSON.stringify([st.lookParams[id], (st.lookArt || {})[id]]); };
 /** The cards in sight drawn anew where what they show has changed since (an edit while the Look sheet is open, outlines arrived). */
@@ -3451,12 +3451,12 @@ const lettersNow = (L) => JSON.stringify([wordsOf(L), L.letters, L.fxSeed, L.fxA
 let letterHeld = false;   // a pointer is down in the letters' controls (WebKit does not focus a slider dragged)
 addEventListener("pointerup", () => { letterHeld = false; }, true);
 addEventListener("pointercancel", () => { letterHeld = false; }, true);
-// ---------- the ransom note's letters one by one, in a window over the left column (the canvas and the
-// layer's properties stay in view); it stays open while the cover is worked on, for the layer it was opened
+// ---------- the ransom note's letters one by one, in a window over the sheet (the canvas and the layer's
+// properties stay in view; over the drawer where it has taken the sheet's place); it stays open while the cover is worked on, for the layer it was opened
 // for (S.letterWin), and closes when another layer is selected or the layer is lettered otherwise
-/** Places a floating window over the left column, as wide as it allows (460 at most), as tall as the window. */
+/** Places a floating window over the left column (over the drawer where it has taken the sheet's place: see columns()), as wide as it allows (460 at most), as tall as the window. */
 function overLeft(box) {
-  const r = $("left").getBoundingClientRect(), top = Math.max(8, r.top + 8), w = Math.min(Math.max(280, r.width - 16), 460, innerWidth - 16);
+  const r = $(sheetHidden() ? "right" : "left").getBoundingClientRect(), top = Math.max(8, r.top + 8), w = Math.min(Math.max(280, r.width - 16), 460, innerWidth - 16);
   Object.assign(box.style, { left: `${Math.max(8, Math.min(r.left + 8, innerWidth - w - 8))}px`, top: `${top}px`, width: `${w}px`, maxHeight: `${Math.max(240, Math.min(r.bottom - 8, innerHeight - 8) - top)}px` });
 }
 /** Opens the letter window for layer L. */
@@ -4456,8 +4456,12 @@ function renderSide() {
 }
 /** Opens or shuts the drawer of the selected layer's properties on the right (kept in the settings); shut, the canvas takes its column. */
 function setDrawer(on) {
+  const fromSheet = $("left").contains(document.activeElement), fromDrawer = $("right").contains(document.activeElement);
   S.settings.drawer = on; persistSettings();
   columns(); renderSide();
+  // the button pressed gone, rebuilt with the sheet or with the drawer: to the drawer's ✕, or the sheet's own dock button
+  const to = on && fromSheet ? $("side").querySelector(".dhead button") : !on && fromDrawer ? $("dock").querySelector("button.on") : null;
+  if (to) to.focus({ preventScroll: true });
 }
 
 // ---------- the bar over the canvas
@@ -5467,9 +5471,19 @@ function syncTabs() {
       el("div", { class: "pacts" }, act("new"), act("duplicate"), act("import"), act("export")), act("delete"));
     return;
   }
-  $("dock").replaceChildren(...Object.keys(TABS.edit).map((k) => el("button", { class: k === S.tab.edit ? "on" : "", "aria-pressed": String(k === S.tab.edit),
-      onclick: () => { S.tab.edit = k; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, ico(k, 22), t("dock." + k))),
+  const shown = (k) => k === S.tab.edit && !sheetHidden();
+  $("dock").replaceChildren(...Object.keys(TABS.edit).map((k) => el("button", { class: shown(k) ? "on" : "", "aria-pressed": String(shown(k)), onclick: () => showSheet(k) }, ico(k, 22), t("dock." + k))),
     el("button", { class: "help", title: t("cover.how"), "aria-label": t("cover.howShort"), onclick: (e) => showTip(e.currentTarget, t("cover.how")) }, ico("help", 20)));
+}
+/** Shows sheet `k` in the left column, the drawer shut where it had taken the sheet's place. */
+function showSheet(k) {
+  const fromDock = $("dock").contains(document.activeElement);
+  S.tab.edit = k;
+  if (sheetHidden()) setDrawer(false);   // which draws the sheet as it comes back (columns())
+  else { syncTabs(); renderPanel(); }
+  $("panel").scrollTop = 0;
+  const b = fromDock && $("dock").querySelector("button.on");   // the dock drawn anew: the key's place kept on the button pressed
+  if (b) b.focus({ preventScroll: true });
 }
 /** Makes the profile's look current, for anything drawn outside a cover (asset tiles, previews). */
 const useLook = () => setLook(S.profile.style.look, S.profile.style.lookParams[S.profile.style.look], S.profile.style.lookSeed, !!recordOf(mainPhoto()) || S.profile.style.theme !== "light");
@@ -5517,13 +5531,24 @@ PHONE.addEventListener("change", () => { arrange(); if (S.profile) columns(); })
 arrange();
 const COLUMNS = { left: { min: 280, def: 340 }, right: { min: 260, def: 320 }, setup: { min: 340, def: 420 } };
 const CENTRE_MIN = 360;   // what the canvas keeps at the least
+const CENTRE_ROOMY = 560;   // less, with the drawer open and the sheet and the drawer as wide as they are at first, and the drawer takes the sheet's place
+const STACKED = matchMedia("(max-width: 1000px)");   // the window too narrow for columns: everything one under another (index.html)
+const sheetHidden = () => $("body").classList.contains("tight");   // the drawer in the sheet's place (columns())
 /** Sets the columns' widths from the settings (0 = default), each kept between its least and what leaves the canvas room. */
 function columns() {
-  const b = $("body"), open = !!S.settings.drawer, w = innerWidth - (open ? 136 : 124), c = S.settings.columns;   // 136: the dock (76), the three gaps between the columns (two with the drawer shut) and the page's margins
+  const b = $("body"), open = !!S.settings.drawer, w = innerWidth - (open ? 136 : 124), c = S.settings.columns;   // 136: the dock (76), the three gaps between the columns (two with the drawer shut; with it in the sheet's place too, the drawer then 12 short of its most) and the page's margins
   const fit = (k, other) => Math.round(clamp(c[k] || COLUMNS[k].def, COLUMNS[k].min, Math.max(COLUMNS[k].min, w - CENTRE_MIN - other)));
-  const left = fit("left", open ? c.right || COLUMNS.right.def : 0), right = fit("right", left);
-  b.classList.toggle("nodrawer", !open);
+  const left = fit("left", open ? c.right || COLUMNS.right.def : 0), was = sheetHidden();
+  // by the window's width alone (the columns at their widths at first), so that a column's edge dragged never hides the sheet: a canvas left narrower by a hand is the hand's
+  const tight = open && !STACKED.matches && w - COLUMNS.left.def - COLUMNS.right.def < CENTRE_ROOMY;
+  const right = tight ? fit("right", 0) : fit("right", left);
+  b.classList.toggle("nodrawer", !open); b.classList.toggle("tight", tight);
   b.style.setProperty("--lw", left + "px"); b.style.setProperty("--rw", right + "px"); b.style.setProperty("--sw", fit("setup", 0) + "px");
+  if (tight !== was && S.mode === "edit" && S.cover) { syncTabs(); if (!tight) renderPanel(); }   // the sheet back: drawn as things now are
+  for (const id of ["letterwin", "cropwin", "weavewin", "brushwin"]) {   // the windows over the column, where it now is; the crop's picture drawn to its new width once it settles
+    const win = $(id), was = win && win.style.width;
+    if (win && !win.hidden) { overLeft(win); if (id === "cropwin" && win.style.width !== was) later("cropfit", 150, () => cropShow(true)); }
+  }
   for (const h of document.querySelectorAll(".split")) h.title = t("ui.split");
 }
 addEventListener("resize", () => S.profile && columns());
@@ -5535,7 +5560,7 @@ for (const [side, id] of [["left", "left"], ["right", "right"]]) {
     e.preventDefault(); handle.setPointerCapture(e.pointerId); handle.classList.add("on");
     const key = S.mode === "setup" && side === "left" ? "setup" : side, aside = $(id).getBoundingClientRect();
     handle.onpointermove = (m) => { S.settings.columns[key] = Math.round(side === "left" ? m.clientX - aside.left : aside.right - m.clientX); columns(); };
-    handle.onpointerup = handle.onpointercancel = () => { handle.onpointermove = null; handle.classList.remove("on"); S.settings.columns[key] = Math.round($(id).getBoundingClientRect().width); persistSettings(); };
+    handle.onpointerup = handle.onpointercancel = () => { handle.onpointermove = null; handle.classList.remove("on"); const wd = Math.round($(id).getBoundingClientRect().width); if (wd) S.settings.columns[key] = wd; persistSettings(); columns(); };
   });
 }
 
@@ -5609,6 +5634,8 @@ const absent = (v) => (e) => { if (HOST === "server") throw e; return v; };
 async function start() {
   S.settings = normalizeSettings(await readJson("settings.json").catch(absent(null)));
   setGlass(glassOn());
+  const probe = document.body.appendChild(el("div", { style: "position:absolute;top:-99px;width:60px;height:60px;overflow:scroll" }));
+  document.documentElement.classList.toggle("bars", probe.offsetWidth > probe.clientWidth); probe.remove();   // scrollbars that take room: drawn thin (index.html)
   setLang(S.settings.lang || detectLang());
   for (const name of await files.list("fonts").catch(() => [])) {   // nothing is written for a font missed
     if (name.endsWith(".font")) { const src = await files.read("fonts/" + name).catch(() => null); if (src) await registerFont(name.slice(0, -5), src); }
