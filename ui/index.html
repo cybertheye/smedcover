@@ -117,6 +117,8 @@
   #menu .mi .mt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
   #menu .mi .mt small{font-size:11.5px;color:var(--text3);line-height:1.4}
   #menu .mi .sc{font-size:12px;color:var(--text3)}
+  #menu .mi .light{display:flex;align-items:center;gap:6px;min-width:0}
+  #menu .mi .light>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #menu .mi.danger{color:#ff9a8a}
   #menu .mi .chev{flex:none;width:7px;height:7px;margin-right:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);opacity:.5}
   #menu .mi .chev.open{transform:rotate(45deg)}
@@ -559,6 +561,7 @@
   #setnav .sni:hover{background:rgba(255,255,255,.08);color:var(--text)}
   #setnav .sni.on{background:rgba(255,255,255,.16);color:#fff;font-weight:700;box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
   #setnav .sni .dots{width:18px;height:18px;border-radius:50%;flex:none}
+  #setnav .sni .light{display:flex;margin-left:-4px}
   #setnav .who{display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:10px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.05)}
   #setnav .who .av{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none;font-size:14px;font-weight:700}
   #setnav .who>span:last-child{min-width:0;display:flex;flex-direction:column;gap:2px}
@@ -636,8 +639,18 @@
   /* Settings → AI: a card each, its head saying what it is set to; its fields two by two */
   .aicard{display:grid;gap:14px;align-items:stretch}
   .aih{display:flex;align-items:center;gap:10px}
-  .aih .state{font-size:12px;color:var(--text3);padding:3px 10px;border-radius:999px;border:1px solid var(--line);white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis}
-  .aih .state.on{color:var(--text);border-color:rgba(255,255,255,.3)}
+  .aih .state{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--text3);padding:3px 10px;border-radius:999px;border:1px solid var(--line);white-space:nowrap;max-width:240px}
+  .aih .state>span{overflow:hidden;text-overflow:ellipsis}
+  .aih .state.ok{color:var(--text);border-color:rgba(255,255,255,.3)}
+  .aih .state.busy{color:#ffe29a;border-color:rgba(255,201,60,.4)}
+  .aih .state.err{color:#ffb3a8;border-color:rgba(255,107,91,.45)}
+  /* an AI service's light (aiLight in app.js): grey not set up, green ready, amber at work, red when its last request failed */
+  .aidot{display:inline-block;width:7px;height:7px;border-radius:50%;flex:none;background:rgba(245,245,247,.35)}
+  .aidot.ok{background:#3ddc97}
+  .aidot.busy{background:#ffc93c;animation:aiWork 1.1s ease-in-out infinite}
+  .aidot.err{background:#ff6b5b}
+  @keyframes aiWork{50%{opacity:.3}}
+  @media (prefers-reduced-motion:reduce){.aidot.busy{animation:none}}
   .aib{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px;align-items:start}
   .aib>*{min-width:0}
   .aib>.hint,.aib>.wide,.aib>.aifoot,.aib>.cutrows{grid-column:1/-1}
