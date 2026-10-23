@@ -11,7 +11,7 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, rebalance, dropOption, partChance, ODD_OPTIONS } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, weavable, frontOf, LAYOUT_PARTS, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
+import { ACCENT_SHAPES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
@@ -1509,7 +1509,7 @@ async function cutOut(L) {
   if (had) { touch({ cover: true, side: true, panel: true }); toast(t("cut.redone")); return had; }
   const c = newLayer("photo", { of: L.id, cut: true, own: true });
   c.t = alignedT(L);
-  if (L.crop && !L.fill) c.crop = { ...L.crop };   // of what the photo keeps
+  if (L.crop && !L.fill) c.crop = normalizeCrop(L.crop);   // of what the photo keeps (a copy: a free crop's corners its own)
   if (L.cats) c.cats = [...L.cats];
   keepTo(c, want, all);
   const at = (id) => S.cover.layers.findIndex((l) => l.id === id);
@@ -3566,16 +3566,18 @@ for (const type of ["keydown", "keyup"]) addEventListener(type, (e) => { if (e.k
 
 // The crop window (S.cropWin, the id of a photo or an asset layer): the whole picture, what the layer keeps of it
 // (`crop`, see layers.js) framed, the rest dimmed; the frame dragged by its inside, sides and corners, or drawn
-// anew outside it, at a shape of the user's or free. It stands over the left column, as the letter window does,
-// and closes when another layer is selected, or the photo comes to fill the canvas.
-const CROP = { ratio: null };   // the shape kept: null free, "photo" the picture's own, or width / height
-const CROP_RATIOS = [[null, "crop.free"], ["photo", "crop.photo"], [1, "1:1"], [4 / 3, "4:3"], [3 / 4, "3:4"], [16 / 9, "16:9"], [9 / 16, "9:16"]];
-const WHOLE = { x: 0, y: 0, w: 1, h: 1 };
+// anew outside it, at a shape of the user's or of any ratio. Or cropped free, to a shape of any outline: its corners
+// round handles joined by its edges, each dragged alone, the shape by its inside, a corner added where an edge is
+// pressed (and dragged on at once) and taken away by a double-click or Delete. It stands over the left column, as the
+// letter window does, and closes when another layer is selected, or the photo comes to fill the canvas.
+const CROP = { ratio: null, point: null, tap: null };   // the shape kept: null any ratio, "photo" the picture's own, width / height, or "free" any outline; `point`, the free crop's corner picked (Delete takes it away); `tap`, the last press on one ({i, t}: a second soon after takes it away)
+const CROP_RATIOS = [[null, "crop.anyRatio"], ["photo", "crop.photo"], [1, "1:1"], [4 / 3, "4:3"], [3 / 4, "3:4"], [16 / 9, "16:9"], [9 / 16, "9:16"], ["free", "crop.free"]];
+const WHOLE = { x: 0, y: 0, w: 1, h: 1 }, CROP_PAD = 8;   // CROP_PAD: the window's margin round the picture, in CSS pixels
 function cropOpen(L) {
   const win = $("cropwin") || document.body.appendChild(el("div", { id: "cropwin", role: "dialog", "aria-label": t("crop.title") }));
   lettersClose(); weaveClose(); brushClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
   overLeft(win);
-  S.cropWin = L.id; win.hidden = false;
+  S.cropWin = L.id; win.hidden = false; CROP.point = CROP.tap = null;
   cropShow(true);
 }
 function cropClose() { const win = $("cropwin"); if (win) win.hidden = true; S.cropWin = null; }
@@ -3599,6 +3601,30 @@ function cropButton(L) {
   const no = !canCrop(L), fills = L.type === "photo" && L.fill && !L.of;
   return el("button", { class: "btn wide", style: "margin-top:8px", disabled: no, title: t(fills ? "crop.fillTip" : "crop.openTip"), onclick: () => cropOpen(L) }, t(L.crop && !no ? "crop.edit" : "crop.open"));
 }
+/** Crop c (see normalizeCrop; none for the whole picture) put on layer L and drawn as a drag is; whether it changed anything. */
+function setCrop(L, c) {
+  const n = normalizeCrop(c);
+  if (JSON.stringify(n) === JSON.stringify(L.crop || null)) return false;
+  if (n) L.crop = n; else delete L.crop;
+  holdLive(L.id); touch({ cover: true });
+  return true;
+}
+/**
+ * The free crop's corner picked in the crop window taken away (a double-click on it, Delete, Backspace), its two
+ * neighbours joined; never below three corners, nor to a shape with (almost) no area (see dropPoint: a word says
+ * which). Whether the window crops free: a key pressed then takes a corner away, or none, and never deletes the
+ * layer instead.
+ */
+function cropDropPoint() {
+  const L = S.cropWin && layer(S.cropWin);
+  if (!L || CROP.ratio !== "free") return false;
+  if (CROP.point == null) return true;
+  const pts = cropPoly(L.crop), less = dropPoint(pts, CROP.point);
+  if (less === pts) { toast(t(pts.length <= 3 ? "crop.least" : "crop.flat")); return true; }
+  setCrop(L, { pts: less }); CROP.point = CROP.tap = null;
+  cropShow(true);
+  return true;
+}
 /** The crop window drawn (again) for its layer as it is now, or closed (see above); unless `now`, only when the layer or its crop changed (an undo). */
 function cropShow(now = false) {
   const win = $("cropwin"), L = S.cropWin ? layer(S.cropWin) : null;
@@ -3608,37 +3634,51 @@ function cropShow(now = false) {
   if (!now && stage && stage._layer === L && JSON.stringify(stage._crop) === JSON.stringify(L.crop || null)) return;
   const src = cropSource(L);
   if (!src) return cropClose();
+  // the window crops as the layer is cropped: free when it is so, a rectangle when it is one (an undo may turn it)
+  if (L.crop && L.crop.pts) CROP.ratio = "free"; else if (L.crop && CROP.ratio === "free") CROP.ratio = null;
+  const free = CROP.ratio === "free";
+  if (!free || CROP.point >= cropPoly(L.crop).length) CROP.point = null;
   const { im, nw, nh, mask } = src;
-  const cv = el("canvas", { id: "crop-stage", style: "width:100%;display:block;touch-action:none;cursor:crosshair" });
+  const cv = el("canvas", { id: "crop-stage", style: `width:100%;display:block;touch-action:none;cursor:${free ? "default" : "crosshair"}` });
   cv._layer = L; cv._crop = L.crop || null;
   const shape = (r) => (r === "photo" ? 1 : r ? (r * nh) / nw : null);   // a shape as dragCrop wants it: in fractions of the picture
   const size = $("crop-size") || el("div", { id: "crop-size", class: "hint" });
-  const put = (c) => {
-    const n = normalizeCrop(c);
-    if (JSON.stringify(n) === JSON.stringify(L.crop || null)) return;
-    if (n) L.crop = n; else delete L.crop;
-    cv._crop = L.crop || null;
-    holdLive(L.id); touch({ cover: true });
-  };
-  // the picture fitted to the window, the frame over it; drawn again as it is dragged
-  let k = 1, ox = 0, oy = 0, still = null;
+  const put = (c) => { if (setCrop(L, c)) cv._crop = L.crop || null; };
+  // the picture fitted to the window, the frame (or the free crop's shape) over it; drawn again as it is dragged
+  let k = 1, ox = 0, oy = 0, still = null, hover = null;   // hover: where a corner would go on the edge under the pointer
+  const onStage = ([u, v]) => [ox + u * nw * k, oy + v * nh * k];
   const draw = () => {
     const w = cv.clientWidth || 400, h = Math.min(360, Math.round((w * nh) / nw)), dpr = window.devicePixelRatio || 1;
     if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + "px"; }
-    k = Math.min(w / nw, h / nh); ox = (w - nw * k) / 2; oy = (h - nh * k) / 2;
+    const pad = Math.min(CROP_PAD, h / 4);   // a margin round it, for the handles on its edges (less round a very thin picture)
+    k = Math.min((w - 2 * pad) / nw, (h - 2 * pad) / nh); ox = (w - nw * k) / 2; oy = (h - nh * k) / 2;
     const g = cv.getContext("2d"), c = L.crop || WHOLE, X = ox + c.x * nw * k, Y = oy + c.y * nh * k, W = c.w * nw * k, H = c.h * nh * k;
     g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
     if (mask) {   // cut out: the subject bright over the rest of the picture
       if (!still) { still = Object.assign(document.createElement("canvas"), { width: nw, height: nh }); const s = still.getContext("2d"); s.drawImage(im, 0, 0); s.globalCompositeOperation = "destination-in"; s.drawImage(mask, 0, 0, nw, nh); }
       g.globalAlpha = 0.35; g.drawImage(im, ox, oy, nw * k, nh * k); g.globalAlpha = 1; g.drawImage(still, ox, oy, nw * k, nh * k);
     } else g.drawImage(im, ox, oy, nw * k, nh * k);
-    g.fillStyle = "rgba(7,7,12,.6)"; g.beginPath(); g.rect(ox, oy, nw * k, nh * k); g.rect(X, Y, W, H); g.fill("evenodd");
-    g.strokeStyle = "rgba(255,255,255,.35)"; g.lineWidth = 1; g.beginPath();
-    for (const f of [1 / 3, 2 / 3]) { g.moveTo(X + W * f, Y); g.lineTo(X + W * f, Y + H); g.moveTo(X, Y + H * f); g.lineTo(X + W, Y + H * f); }
-    g.stroke();
-    g.strokeStyle = "#07070c"; g.lineWidth = 3; g.strokeRect(X, Y, W, H); g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.strokeRect(X, Y, W, H);
-    for (const [hx, hy] of grips(X, Y, W, H)) { g.fillStyle = "#fff"; g.fillRect(hx - 4, hy - 4, 8, 8); g.strokeStyle = "#07070c"; g.lineWidth = 1; g.strokeRect(hx - 4, hy - 4, 8, 8); }
-    size.textContent = t("crop.size", Math.round(c.w * nw), Math.round(c.h * nh), nw, nh);
+    if (free) {   // the shape: what lies outside it dimmed, its edges, its corners as round handles (the one picked in the channel colour)
+      const P = cropPoly(L.crop).map(onStage), trace = () => { P.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); };
+      g.fillStyle = "rgba(7,7,12,.6)"; g.beginPath(); g.rect(ox, oy, nw * k, nh * k); trace(); g.fill("evenodd");
+      g.beginPath(); trace(); g.lineJoin = "round"; g.strokeStyle = "#07070c"; g.lineWidth = 3; g.stroke(); g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.stroke();
+      if (hover) {   // a press here adds a corner: a faint one, with a plus
+        g.beginPath(); g.arc(hover.px, hover.py, 6, 0, Math.PI * 2); g.fillStyle = "rgba(255,255,255,.55)"; g.fill(); g.strokeStyle = "#07070c"; g.lineWidth = 1; g.stroke();
+        g.beginPath(); g.moveTo(hover.px - 3, hover.py); g.lineTo(hover.px + 3, hover.py); g.moveTo(hover.px, hover.py - 3); g.lineTo(hover.px, hover.py + 3); g.lineWidth = 1.5; g.stroke();
+      }
+      P.forEach(([x, y], i) => {
+        const on = i === CROP.point;
+        g.beginPath(); g.arc(x, y, on ? 6.5 : 5, 0, Math.PI * 2); g.fillStyle = on ? cat().color : "#fff"; g.fill(); g.strokeStyle = "#07070c"; g.lineWidth = on ? 2 : 1.5; g.stroke();
+      });
+    } else {
+      g.fillStyle = "rgba(7,7,12,.6)"; g.beginPath(); g.rect(ox, oy, nw * k, nh * k); g.rect(X, Y, W, H); g.fill("evenodd");
+      g.strokeStyle = "rgba(255,255,255,.35)"; g.lineWidth = 1; g.beginPath();
+      for (const f of [1 / 3, 2 / 3]) { g.moveTo(X + W * f, Y); g.lineTo(X + W * f, Y + H); g.moveTo(X, Y + H * f); g.lineTo(X + W, Y + H * f); }
+      g.stroke();
+      g.strokeStyle = "#07070c"; g.lineWidth = 3; g.strokeRect(X, Y, W, H); g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.strokeRect(X, Y, W, H);
+      for (const [hx, hy] of grips(X, Y, W, H)) { g.fillStyle = "#fff"; g.fillRect(hx - 4, hy - 4, 8, 8); g.strokeStyle = "#07070c"; g.lineWidth = 1; g.strokeRect(hx - 4, hy - 4, 8, 8); }
+    }
+    size.textContent = t("crop.size", Math.round(c.w * nw), Math.round(c.h * nh), nw, nh) + (free ? ` · ${t("crop.points", cropPoly(L.crop).length)}` : "");
   };
   const grips = (X, Y, W, H) => [[X, Y, "nw"], [X + W / 2, Y, "n"], [X + W, Y, "ne"], [X + W, Y + H / 2, "e"], [X + W, Y + H, "se"], [X + W / 2, Y + H, "s"], [X, Y + H, "sw"], [X, Y + H / 2, "w"]];
   const at = (e) => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left - ox) / (nw * k), y: (e.clientY - r.top - oy) / (nh * k), px: e.clientX - r.left, py: e.clientY - r.top }; };
@@ -3650,9 +3690,53 @@ function cropShow(now = false) {
     const side = (down && near(p.px, X) && "w") || (down && near(p.px, X + W) && "e") || (across && near(p.py, Y) && "n") || (across && near(p.py, Y + H) && "s");
     return side || (p.px > X && p.px < X + W && p.py > Y && p.py < Y + H ? "move" : null);
   };
-  cv.onpointermove = (e) => { if (!cv._drag) { const g = grabbed(at(e)); cv.style.cursor = !g ? "crosshair" : g === "move" ? "move" : `${g}-resize`; } };
+  // a corner ({point}), then an edge ({edge, at}: where a corner would go on it; `full` with 64 corners already), then the inside ({move})
+  const grabbedFree = (p) => {
+    const P = cropPoly(L.crop).map(onStage), d = P.map(([x, y]) => Math.hypot(p.px - x, p.py - y)), i = d.indexOf(Math.min(...d));
+    if (d[i] <= 9) return { point: i };
+    const e = edgePoint(P, p.px, p.py);
+    if (e.d <= 7) return { edge: e.i, at: [(e.x - ox) / (nw * k), (e.y - oy) / (nh * k)], px: e.x, py: e.y, full: P.length >= CROP_PTS };
+    return inPoly(P, p.px, p.py) ? { move: true } : null;
+  };
+  cv.onpointermove = (e) => {
+    if (cv._drag) return;
+    if (!free) { const g = grabbed(at(e)); cv.style.cursor = !g ? "crosshair" : g === "move" ? "move" : `${g}-resize`; return; }
+    const g = grabbedFree(at(e)), was = hover, edge = g && g.edge != null;
+    hover = edge && !g.full ? g : null;   // with 64 corners an edge offers none: it says so instead
+    cv.style.cursor = !g ? "default" : g.point != null ? "grab" : edge ? (g.full ? "not-allowed" : "copy") : "move";
+    cv.title = edge ? (g.full ? t("crop.most", CROP_PTS) : t("crop.addPoint")) : "";
+    if (was || hover) draw();
+  };
+  cv.onpointerleave = () => { if (hover && !cv._drag) { hover = null; draw(); } };
   cv.onpointerdown = (e) => {
     e.preventDefault(); cv.setPointerCapture(e.pointerId);
+    if (free) {   // a corner dragged alone, one added on the edge pressed and dragged on at once, or the whole shape moved
+      const from = at(e), g = grabbedFree(from), stamp = performance.now();
+      let pts = cropPoly(L.crop), i = null;
+      if (!g) { CROP.point = CROP.tap = null; return draw(); }
+      if (g.edge != null) {
+        const more = addPoint(pts, g.edge, g.at);
+        if (more === pts) return toast(t("crop.most", CROP_PTS));
+        if (!hasArea(more)) return;   // rounded as it is kept, a corner on the edge of a shape with only just enough could tip it
+        pts = more; i = g.edge + 1; CROP.tap = null;
+        put({ pts });
+      } else if (g.point != null) {
+        i = g.point;
+        if (CROP.tap && CROP.tap.i === i && stamp - CROP.tap.t < 400) { CROP.point = i; cropDropPoint(); return; }   // a double-click on a corner: it goes
+        CROP.tap = { i, t: stamp };
+      }
+      CROP.point = i; hover = null; cv._drag = true; cv.title = "";
+      if (i != null) cv.style.cursor = "grabbing";
+      cv.onpointermove = (m) => {
+        const p = at(m), dx = p.x - from.x, dy = p.y - from.y;
+        if (Math.hypot(p.px - from.px, p.py - from.py) > 3) CROP.tap = null;   // dragged: not the first click of a double-click
+        const next = i == null ? movePoly(pts, dx, dy) : dragPoint(pts, i, dx, dy);
+        if (hasArea(next)) put({ pts: next });   // a corner, or the shape, stops where the shape last had area as it is kept (see hasArea)
+        draw();
+      };
+      cv.onpointerup = cv.onpointercancel = () => { cv._drag = false; cropShow(true); };
+      return draw();
+    }
     let last = at(e);
     const handle = grabbed(last), from = { x: Math.min(1, Math.max(0, last.x)), y: Math.min(1, Math.max(0, last.y)), px: last.px, py: last.py };
     const keep = (L.crop || WHOLE).w / (L.crop || WHOLE).h;   // Shift keeps the shape it has
@@ -3665,13 +3749,22 @@ function cropShow(now = false) {
     };
     cv.onpointerup = cv.onpointercancel = () => { cv._drag = false; cropShow(true); };
   };
-  const chip = ([r, label]) => el("button", { class: CROP.ratio === r ? "on" : "", onclick: () => { CROP.ratio = r; if (r) put(fitCrop(L.crop || WHOLE, shape(r))); cropShow(true); } }, label.includes(":") ? label : t(label));
+  // a shape chosen: free starts from the whole picture's four corners (a free crop stays as it is); any ratio, from a
+  // free crop, is the box round it; any other shape is fitted about what was kept
+  const chip = ([r, label]) => el("button", { class: CROP.ratio === r ? "on" : "", onclick: () => {
+    const was = L.crop;
+    CROP.ratio = r; CROP.point = CROP.tap = null;
+    if (r === "free") { if (!(was && was.pts)) put(null); }
+    else if (r) put(fitCrop(was || WHOLE, shape(r)));
+    else if (was && was.pts) put({ x: was.x, y: was.y, w: was.w, h: was.h });
+    cropShow(true);
+  } }, label.includes(":") ? label : t(label));
   win.replaceChildren(
     el("div", { class: "head" }, el("b", {}, `${t("crop.title")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: cropClose }, "×")),
     cv,
     el("div", { class: "chips small" }, CROP_RATIOS.map(chip)),
     size,
-    el("div", { class: "hint" }, t("crop.hint")),
+    el("div", { class: "hint" }, t(free ? "crop.hintFree" : "crop.hint")),
     el("div", { class: "acts" }, el("button", { class: "btn", disabled: !L.crop, onclick: () => { put(WHOLE); cropShow(true); } }, t("crop.reset")), el("button", { class: "btn", onclick: cropClose }, t("deal.done"))));
   requestAnimationFrame(draw);
 }
@@ -4853,6 +4946,7 @@ addEventListener("keydown", (e) => {
   if (key === "escape" && $("deal") && !$("deal").hidden) return dealClose();
   if (key === "escape" && S.letterWin) return lettersClose();
   if (key === "escape" && S.cropWin) return cropClose();
+  if ((key === "delete" || key === "backspace") && S.cropWin && S.mode === "edit" && cropDropPoint()) return e.preventDefault();   // a free crop's corner picked, not the layer
   if (key === "escape" && S.weaveWin) return weaveClose();
   if (S.brushWin && S.mode === "edit") {   // painting with the weave's brush: Esc leaves it, undo and redo go a stroke at a time, no other key acts
     if (key === "escape") return brushClose();
@@ -5257,17 +5351,21 @@ async function selfTest(dir) {
       for (const k of ["fx", "fxAmt", "fxSeed", "bend"]) delete titleLayer[k];
       S.cover.title = fxTitle;
     }
-    // a layout layer copied, in a lettering and a place of its own; a photo cropped, with a torn edge and a shadow; a sticker cropped
+    // a layout layer copied, in a lettering and a place of its own; a photo cropped, with a torn edge and a shadow, and one cropped free; a sticker cropped, and one cropped free
     {
       const had = new Set(S.cover.layers.map((l) => l.id)), cp = duplicate(titleLayer), pic = await invoke("selftest_photo").catch(() => null);
       Object.assign(cp, { fx: "puffy", ink: "#ff3366" }); cp.t.all.y += 0.38;
       insertAbove(S.cover.layers, "title", cp);
       const ph = pic ? newLayer("photo", { pid: await putPhoto(pic), crop: { x: 0.2, y: 0.1, w: 0.5, h: 0.6 }, outline: 12, torn: true, shadow: 0.5 }) : null;
       if (ph) { ph.t.all = { ...ph.t.all, x: 0.78, y: 0.42, s: 0.55 }; S.cover.layers.push(ph); }
+      const pp = ph ? newLayer("photo", { pid: ph.pid, crop: normalizeCrop({ pts: [[0.3, 0.05], [0.85, 0.2], [0.6, 0.55], [0.75, 0.95], [0.2, 0.8]] }), outline: 10, torn: true, shadow: 0.6 }) : null;   // and one cropped free
+      if (pp) { pp.t.all = { ...pp.t.all, x: 0.6, y: 0.7, s: 0.4 }; S.cover.layers.push(pp); }
       const sk = newLayer("asset", { ref: { kind: "sticker", id: "burst" }, tint: true, crop: { x: 0, y: 0, w: 0.5, h: 0.5 } });
       sk.t.all = { ...sk.t.all, x: 0.2, y: 0.78, s: 0.45 }; S.cover.layers.push(sk);
+      const fr = newLayer("asset", { ref: { kind: "sticker", id: "burst" }, tint: true, crop: normalizeCrop({ pts: [[0.5, 0], [1, 0.6], [0.7, 1], [0.1, 0.8]] }) });   // and one cropped free
+      fr.t.all = { ...fr.t.all, x: 0.42, y: 0.78, s: 0.45 }; S.cover.layers.push(fr);
       await step("copies and crops");
-      const cv = await renderReady(S.profile.sizes[0], S.cover, catIndex()), ids = [cp.id, ph && ph.id, sk.id].filter(Boolean);
+      const cv = await renderReady(S.profile.sizes[0], S.cover, catIndex()), ids = [cp.id, ph && ph.id, pp && pp.id, sk.id, fr.id].filter(Boolean);
       report.copies = { photo: !!ph, hits: ids.map((id) => !!cv._hits.find((h) => h.id === id)), path: await invoke("write_image", framed(await toPng(cv), { dir, name: "copy-crop.png" })) };
       if (report.copies.hits.some((h) => !h)) report.errors.push("copies and crops: a layer not caught on the canvas");
       S.cover.layers = S.cover.layers.filter((l) => had.has(l.id));

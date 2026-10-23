@@ -6,7 +6,7 @@ import { virtualSize, layout, adjustLayout, meetStandards, wordsFoot, layoutOf }
 import { drawTitle, drawTitleVertical, titleBlockVertical, parseTitle, subtitleFit, subtitleColumns, setLine, passOf, hasCJK, someLetters } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime, setDraft, isDraft } from "./photo.js";
 import { drawAsset, assetHalf, userAssets, assetExists } from "./assets.js";
-import { resolve, appliesTo, inSize, isLayout, fillsCanvas, clipBase, clipEnd, sceneOffsets, headLine, frontOf, brushesFront, brushToDo, photoMap, canWeave, opaqueBox, HEADLINES } from "./layers.js";
+import { resolve, appliesTo, inSize, isLayout, fillsCanvas, clipBase, clipEnd, sceneOffsets, headLine, frontOf, brushesFront, brushToDo, photoMap, onCanvas, inPoly, edgePoint, canWeave, opaqueBox, HEADLINES } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, noteReads, readsInto, styled, layerEffects, paintEffects, setScene, scenePlaced, wherePainted, columned, columnBoxOf, fall } from "./style.js";
 import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped, effectReach, inColumn } from "./textfx.js";
 import { ransomEpoch } from "./ransom.js";
@@ -535,9 +535,11 @@ const PAINT = {
    * cut-out is caught where its subject is — the box round its mask — rather than the whole photo.
    * A photo not filling the canvas may be cropped (`crop`, see layers.js): only that part of it shows,
    * and is caught, its frame staying where it is (so what is kept does not move); the outline and the
-   * shadow follow the crop. A cut-out woven with lettering below it (`weave`, see layers.js) lets that
-   * lettering through where it comes in front (env.woven, see wovenFront): its whole picture — body, outline,
-   * torn edge, shadow — is cut away there, so the lettering, painted once below, shows.
+   * shadow follow the crop. A free crop (`pts`) keeps what lies inside its corners: the box round them is
+   * the frame and the hit, and the hit carries the shape on the canvas (`poly`), where alone it is caught.
+   * A cut-out woven with lettering below it (`weave`, see layers.js) lets that lettering through where it
+   * comes in front (env.woven, see wovenFront): its whole picture — body, outline, torn edge, shadow — is
+   * cut away there, so the lettering, painted once below, shows.
    */
   photo(ctx, L, tr, env) {
     const base = L.of ? env.cover.layers.find((l) => l.id === L.of && l.type === "photo" && !l.of) : L;
@@ -580,7 +582,7 @@ const PAINT = {
     // its subject, when it is cut out too). A photo filling the canvas, itself cut, keeps the ground's way of
     // being caught. `px`, `py`: the centre of the photo's own frame, which the editor needs to turn and scale
     // a cut-out, or a crop, about what shows of it.
-    const crop = !fills && L.crop, cr = crop ? { x: rect.x + crop.x * rect.iw, y: rect.y + crop.y * rect.ih, iw: crop.w * rect.iw, ih: crop.h * rect.ih } : rect;
+    const crop = !fills && L.crop, cr = crop ? { x: rect.x + crop.x * rect.iw, y: rect.y + crop.y * rect.ih, iw: crop.w * rect.iw, ih: crop.h * rect.ih } : rect, poly = crop && crop.pts;
     const mb = shownBox(mask && !fills && maskBox(mask), crop);
     if (mb) {
       const lx = rect.x + ((mb.x0 + mb.x1) / 2) * rect.iw, ly = rect.y + ((mb.y0 + mb.y1) / 2) * rect.ih, hw = ((mb.x1 - mb.x0) / 2) * rect.iw, hh = ((mb.y1 - mb.y0) / 2) * rect.ih;
@@ -589,6 +591,7 @@ const PAINT = {
     }
     if (bt) Object.assign(hit, { px: bt.cx, py: bt.cy, pw: rect.iw, ph: rect.ih });   // the frame: its centre and size
     hit.pf = photoMap(rect, fills ? null : bt);   // where the picture is: the map from its own fractions to the canvas (the weave's brush paints by it)
+    if (poly) hit.poly = poly.map(([u, v]) => onCanvas(hit.pf, u, v));   // a free crop: caught within its shape alone
     if (!M) return hit;
     const blit = (c, dx = 0, dy = 0) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(c, dx, dy); ctx.restore(); };
     const W = ctx.canvas.width, H = ctx.canvas.height;
@@ -620,7 +623,9 @@ const PAINT = {
       inFrame(c, (x) => { if (L.dim > 0) { x.fillStyle = `rgba(7,7,12,${L.dim})`; x.fillRect(rect.x, rect.y, rect.iw, rect.ih); } });
     };
     if (!costly && !mask) {   // a plain photo: straight onto the canvas, clipped to its rectangle, or its crop (no work canvas)
-      ctx.save(); frame(ctx); ctx.beginPath(); ctx.rect(cr.x, cr.y, cr.iw, cr.ih); ctx.clip(); ctx.setTransform(M);
+      ctx.save(); frame(ctx);
+      if (poly) { tracePoly(ctx, poly, rect); ctx.clip("evenodd"); } else { ctx.beginPath(); ctx.rect(cr.x, cr.y, cr.iw, cr.ih); ctx.clip(); }
+      ctx.setTransform(M);
       treat(ctx);
       ctx.restore();
       return hit;
@@ -639,7 +644,7 @@ const PAINT = {
     inFrame(body, (c) => {   // kept to the photo's rectangle, or its crop, and to its subject
       c.globalCompositeOperation = "destination-in";
       if (mask) c.drawImage(L.feather > 0 ? feathered(mask, L.feather) : mask, rect.x, rect.y, rect.iw, rect.ih);
-      if (!mask || crop) { c.fillStyle = "#000"; c.fillRect(cr.x, cr.y, cr.iw, cr.ih); }
+      if (!mask || crop) { c.fillStyle = "#000"; if (poly) { tracePoly(c, poly, rect); c.fill("evenodd"); } else c.fillRect(cr.x, cr.y, cr.iw, cr.ih); }
     });
     if (spread) haloBehind(body, bw, bh, spread * Math.hypot(F.a, F.b));
     if (!costly) { layDown(body.canvas, bx, by, true); return hit; }   // cut out, nothing more
@@ -729,7 +734,8 @@ const PAINT = {
   /**
    * An asset (see assets.js), drawn about its place at its size, angle and stretch, in its own colours, the channel
    * colour or one of the user's. Cropped (see `crop` in layers.js), only that part shows, and is caught, the asset
-   * staying where it is. Its hit carries where the box it is drawn in is on the canvas (`pf`, as a photo's picture:
+   * staying where it is; cropped free, what lies inside the crop's corners, caught there alone (`poly`, as a
+   * photo's). Its hit carries where the box it is drawn in is on the canvas (`pf`, as a photo's picture:
    * the weave's brush paints by it). Woven with lettering below it (`weave`, see canWeave in layers.js) it lets that
    * lettering through where it comes in front (env.woven, see wovenFront), as a cut-out does: it is drawn on a work
    * canvas round what it draws (see assetBox), and the lettering cut out of all of it there — its shadow and ink
@@ -740,10 +746,13 @@ const PAINT = {
     // a colour of the user's takes the channel colour's place
     const C = L.ink ? hexToRgb(L.ink) : env.C, tint = L.tint || !!L.ink, half = assetHalf(L.ref);
     if (!half) return null;
-    const c = L.crop, x = c ? (c.x * 2 - 1) * half.hw : 0, y = c ? (c.y * 2 - 1) * half.hh : 0, w = c ? c.w * 2 * half.hw : 0, h = c ? c.h * 2 * half.hh : 0;
-    const paint = (g) => centred(g, tr.cx, tr.cy, tr, tr.s, () => { if (c) { g.beginPath(); g.rect(x, y, w, h); g.clip(); } return drawAsset(g, L.ref, C, { tint }); });
     // the box it is drawn in, in its own units, and its frame: from those units to the canvas's pixels
     const rect = { x: -half.hw, y: -half.hh, iw: 2 * half.hw, ih: 2 * half.hh }, M = ctx.getTransform ? ctx.getTransform() : null;
+    const c = L.crop, x = c ? (c.x * 2 - 1) * half.hw : 0, y = c ? (c.y * 2 - 1) * half.hh : 0, w = c ? c.w * 2 * half.hw : 0, h = c ? c.h * 2 * half.hh : 0;
+    const paint = (g) => centred(g, tr.cx, tr.cy, tr, tr.s, () => {
+      if (c && c.pts) { tracePoly(g, c.pts, rect); g.clip("evenodd"); } else if (c) { g.beginPath(); g.rect(x, y, w, h); g.clip(); }
+      return drawAsset(g, L.ref, C, { tint });
+    });
     const F = M && new DOMMatrix(M).translateSelf(tr.cx, tr.cy).rotateSelf(tr.r).scaleSelf(tr.s * tr.kx, tr.s * tr.ky);
     const cutter = F && weaveCut(L.id, F, rect, rect.iw, rect.ih, ctx.canvas, () => { const b = assetBox(L.ref, C, tint); return b && shownBox(b.solid, c); });
     env.letThrough = cutter;
@@ -766,6 +775,7 @@ const PAINT = {
     const hit = c ? { cx: tr.cx + ix * Math.cos(a) - iy * Math.sin(a), cy: tr.cy + ix * Math.sin(a) + iy * Math.cos(a), hw: (w / 2) * Math.abs(sx), hh: (h / 2) * Math.abs(sy), r: tr.r, px: tr.cx, py: tr.cy }
       : { cx: tr.cx, cy: tr.cy, hw: half.hw * tr.s * tr.kx, hh: half.hh * tr.s * tr.ky, r: tr.r };
     hit.pf = photoMap({ x: rect.x * tr.s, y: rect.y * tr.s, iw: rect.iw * tr.s, ih: rect.ih * tr.s }, tr);   // the box it is drawn in, on the canvas
+    if (c && c.pts) hit.poly = c.pts.map(([u, v]) => onCanvas(hit.pf, u, v));
     return hit;
   },
   /** One colour, the canvas's size at scale 1 (free layers are scaled against a 1080-high canvas). */
@@ -1102,11 +1112,18 @@ function shownBox(mb, crop) {
   const m = { x0: Math.max(mb.x0, c.x0), y0: Math.max(mb.y0, c.y0), x1: Math.min(mb.x1, c.x1), y1: Math.min(mb.y1, c.y1) };
   return m.x1 > m.x0 && m.y1 > m.y0 ? m : c;
 }
-const cropKey = (c) => [c.x, c.y, c.w, c.h].map((v) => v.toFixed(4)).join(",");
+const cropKey = (c) => [c.x, c.y, c.w, c.h].map((v) => v.toFixed(4)).join(",") + (c.pts ? ";" + c.pts.join(" ") : "");
+/** Traces a free crop's corners (`pts`, fractions of the picture) over the picture's rectangle r ({x, y, iw, ih}) as a path of its own, to be clipped or filled even-odd. */
+function tracePoly(g, pts, r) {
+  g.beginPath();
+  pts.forEach(([u, v], i) => (i ? g.lineTo(r.x + u * r.iw, r.y + v * r.ih) : g.moveTo(r.x + u * r.iw, r.y + v * r.ih)));
+  g.closePath();
+}
 const CROPPED = new WeakMap();
 /**
  * The part of `shape` (a mask, or a photo's plain rectangle) a crop keeps, for the outline and the shadow of a
- * cropped photo: a canvas the crop's size, its `at` where it starts in the shape (fractions). The same canvas for
+ * cropped photo: a canvas the crop's size, its `at` where it starts in the shape (fractions); of a free crop, what
+ * lies inside its corners, the rest of the box cleared, so the outline goes round the shape. The same canvas for
  * the same crop (see silhouette, which keeps its work per shape), a dozen kept per shape (copies of one photo
  * cropped each its own way).
  */
@@ -1117,7 +1134,9 @@ function cropShape(shape, crop) {
   if (kept.has(key)) { const c = kept.get(key); kept.delete(key); kept.set(key, c); return c; }
   const [W, H] = sizeOf(shape), x0 = Math.round(crop.x * W), y0 = Math.round(crop.y * H);
   const c = Object.assign(document.createElement("canvas"), { width: Math.max(1, Math.round(crop.w * W)), height: Math.max(1, Math.round(crop.h * H)), at: [x0 / W, y0 / H] });
-  c.getContext("2d").drawImage(shape, -x0, -y0);
+  const g = c.getContext("2d");
+  g.drawImage(shape, -x0, -y0);
+  if (crop.pts) { g.globalCompositeOperation = "destination-in"; tracePoly(g, crop.pts, { x: -x0, y: -y0, iw: W, ih: H }); g.fill("evenodd"); }
   kept.set(key, c);
   for (const k of kept.keys()) { if (kept.size <= 12) break; kept.delete(k); }
   return c;
@@ -1702,7 +1721,8 @@ function brushOverlay(ctx, cv, cover, o, C, kx, ky) {
   s.globalCompositeOperation = "source-in"; s.fillStyle = rgb(C); s.fillRect(-pad, -pad, 1 + 2 * pad, 1 + 2 * pad);
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 0.15; ctx.drawImage(s.canvas, bx, by);
   s.globalCompositeOperation = "destination-in"; subject(s, t);   // on the subject, and what the crop keeps of it
-  if (L.crop) { s.fillStyle = "#000"; s.fillRect(L.crop.x, L.crop.y, L.crop.w, L.crop.h); }
+  const crop = !(L.fill && !L.of) && L.crop;   // a photo filling the canvas ignores its crop, as PAINT.photo does
+  if (crop) { s.fillStyle = "#000"; if (crop.pts) { tracePoly(s, crop.pts, { x: 0, y: 0, iw: 1, ih: 1 }); s.fill("evenodd"); } else s.fillRect(crop.x, crop.y, crop.w, crop.h); }
   ctx.globalAlpha = 0.24; ctx.drawImage(s.canvas, bx, by);   // over the faint one: about 0.35 in all
   ctx.restore();
   if (b.temp) b.c.width = b.c.height = 0;
@@ -1813,13 +1833,16 @@ function drawSceneHandles(ctx, list, k) {
 }
 /** The scene object's handle at virtual point (x, y) (k: canvas pixels per unit, for the handles' size on screen), or null. */
 export const sceneHandleAt = (cv, x, y, k) => (cv._scene || []).find((s) => Math.hypot(x - s.x, y - s.y) <= 14 * k) || null;   // (the editor asks only while they show)
-/** Topmost hit (from cv._hits) containing the virtual point (x, y) for which accept(hit) is true. */
+/**
+ * Topmost hit (from cv._hits) containing the virtual point (x, y) for which accept(hit) is true: within its box, and
+ * for a layer cropped free (`poly`), within its shape too, or as near its outline as the box's margin.
+ */
 export function hitAt(hits, x, y, accept = () => true, margin = 12) {
   for (let i = hits.length - 1; i >= 0; i--) {
     const t = hits[i];
     if (!accept(t)) continue;
     const a = -t.r * RAD, dx = x - t.cx, dy = y - t.cy, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
-    if (Math.abs(lx) <= t.hw + margin && Math.abs(ly) <= t.hh + margin) return t;
+    if (Math.abs(lx) <= t.hw + margin && Math.abs(ly) <= t.hh + margin && (!t.poly || inPoly(t.poly, x, y) || edgePoint(t.poly, x, y).d <= margin)) return t;
   }
   return null;
 }

@@ -520,7 +520,7 @@ shapes of the colour block are generated from that edge.
 1. Work out the virtual size, set the canvas's real pixel size and scale the context once. Take the cover as it is at this size (`coverAt(cover, key)`): a layer kept to other sizes (`sizes`, see 4.4) is hidden on it, and a layout layer left out (`off`), on a shallow copy (the very cover when every layer shows at this size).
 2. Build an environment: template geometry (in the layout this size is drawn in, see 5.2), channel colour, light or dark theme, background photo and so on.
 3. Walk the layers bottom to top, skipping hidden ones and ones that do not belong to the current channel; get the placement from `resolve()` and call `PAINT[type]`.
-4. Each painted layer leaves a hit record (centre, half-width, half-height, angle) in `canvas._hits`.
+4. Each painted layer leaves a hit record (centre, half-width, half-height, angle; for a layer cropped free, its shape too, `poly`) in `canvas._hits`.
 5. If a selected layer is given, draw its outline and handles last.
 
 Two helpers keep transforms consistent:
@@ -836,9 +836,33 @@ shadow come from the part of the shape the crop keeps (`cropShape()`: the mask, 
 to the crop on a canvas the crop's size, `at` where it starts, laid down from the crop's corner; a dozen kept
 per shape, for copies of one photo cropped each its own way, so the caches by shape, `silhouette()`'s and the
 tear's, still hold). A photo filling the canvas
-ignores its crop; a cut-out made from a cropped photo starts with the same crop (`cutOut`). An asset
+ignores its crop (the brush's overlay too); a cut-out made from a cropped photo starts with the same crop (`cutOut`). An asset
 (`PAINT.asset`) is clipped to its crop about the box `drawAsset()` gives it, which `assetHalf(ref)` in
 `assets.js` gives without drawing, and caught on what is left.
+
+A **free crop** is a shape of any outline: `crop: {x, y, w, h, pts}`, `pts` its corners in order round it ([u, v],
+fractions of the picture, within it, rounded as a rectangle's are; 3 to 64 of them, `CROP_PTS`, the first kept, what
+is not a pair of numbers dropped) and x, y, w, h the box round them (worked out again from them whenever it is read,
+at least 2% each way, within the picture). So everything that reads a crop's box reads a free crop's as a
+rectangle's: the frame, the hit's box and `px`, `py`, `shownBox()` (a cut-out's subject within it), the work canvases'
+reach, `aboutSubject()`, a woven asset's box, the head line, Surprise me's room; only where a crop is painted and
+caught does the shape count. With fewer than three corners it is read as the rectangle it carries, and the picture's
+four corners in order round it are the whole picture, no crop. So is a shape with (almost) no area (`hasArea()`: less of
+the picture than the smallest rectangle crop keeps, `CROP_AREA`, 2% by 2%, or less than 1% of the longer side of the box
+round it, its area over that side; its corners on a line or on one point, or squeezed to a sliver along one, while a star
+burst of thin spikes, a crescent or a thin L has enough), which would show nothing and leave a frame a sliver: rather the
+whole picture, as its four corners are, than that box. `hasArea()` judges the corners as they are kept (within the
+picture, to 1e-4), so a shape the window puts on a layer by it is never then read as no crop. Its area
+is `polyArea()`, exact and even-odd as it is painted (taken in strips between the heights of its corners and of the
+points where its edges cross: a bow-tie's two lobes both count, a shape gone round twice covers nothing). A rectangle has
+no `pts` and is read, painted and caught as it ever was, to the pixel. Painted, the shape is traced (`tracePoly()`) where a rectangle is clipped or filled: the
+plain photo's clip, the work canvas's `destination-in`, `cropShape()` (the shape cut to the box's canvas as before, then
+kept to the corners with `destination-in`, so the outline, the tear, the dashes and the shadow go round the shape; its
+key, `cropKey()`, takes the corners in, as the slide image's stamp does), an asset's clip about its box and the brush's
+overlay; filled even-odd, as `inPoly()` counts, so a shape crossing itself shows the same everywhere. Its hit carries
+`poly`, the corners on the canvas (through the hit's `pf`), and `hitAt()` catches it only within that, or as near its
+outline as the box's margin (`edgePoint()`); the selection's frame and handles stay the box. Duplicating, undo, a copy
+from another channel and a file read carry the corners as they carry the rest of a layer (`JSON`, `normalizeCrop()`).
 
 The crop window (`#cropwin`: `cropOpen()`, `cropShow()`, `cropClose()`; `S.cropWin` is the layer it is for)
 is opened by *Crop…* in a photo's Place group or an asset's Crop group (`cropButton()`: *Adjust the crop…*
@@ -851,11 +875,31 @@ the shape about the corner across, a side about the middle of the side across; w
 least each way), `drawnCrop(a, b, ratio)` (a frame drawn outside the old one, from where it was pressed
 toward the pointer, any way, once the pointer has gone a few pixels, so a click changes nothing) and
 `fitCrop(c, ratio)`, a crop of a shape as large as `c` (no larger than the picture
-holds), as near the middle of `c` as it goes, for the shape chips (*Free*, *Its own shape*, 1:1, 4:3, 3:4, 16:9, 9:16: in pixels,
-turned into fractions of the picture). Each step goes onto the layer through `normalizeCrop()` and is drawn
+holds), as near the middle of `c` as it goes, for the shape chips (*Any ratio*, *Its own shape*, 1:1, 4:3, 3:4, 16:9, 9:16: in pixels,
+turned into fractions of the picture). Each step goes onto the layer through `normalizeCrop()` (`setCrop()`) and is drawn
 as a drag is (`holdLive()`); the window shows how many pixels are kept. *No crop* clears it. It closes on
 Esc, *Done* or ×, when another layer is selected, when the photo comes to fill the canvas, and when Edit is
-left.
+left. The picture stands 8 px in from the window's edges (`CROP_PAD`; less round a very thin one), so the handles on its edges show whole.
+
+The last chip, *Free* (`CROP.ratio` "free"), crops to a shape. The window then draws its corners as round handles
+(the one picked, `CROP.point`, in the channel colour) joined by its edges, what lies outside dimmed; it is in that way
+whenever the layer's crop is free, and a rectangle crop turns it back to *Any ratio* (an undo may change either).
+Chosen, it starts on the whole picture's four corners (`cropPoly()`: a rectangle's corners, the whole picture's for
+none; no crop until one moves), and a free crop chosen again stays as it is. A press on a corner drags it alone, from
+where the press began (`dragPoint(pts, i, dx, dy)`: within the picture, those joined to it where they were), and stops
+where the shape last had area as it is kept (a place that would leave it none, `hasArea()`, is passed over, so the
+corner waits there and goes on once the pointer is where the shape has some again); one within 7 px of an edge adds a
+corner there and drags it on at once (`edgePoint(poly, x, y)`, the nearest point of the outline, in the window's pixels;
+`addPoint(pts, i, p)`, after corner i); one inside the shape moves it whole (`movePoly()`, as far as its box stays within
+the picture). Each step goes on only if the shape keeps area (the corner added, the shape moved, rounded as kept, too).
+Over an edge the pointer is a plus, a faint corner with a plus is drawn where it would go and the picture's tooltip says
+a click adds one; with 64 corners already none is offered there (no plus, the pointer not-allowed, the tooltip and a
+press saying 64 at most). A second press on the same corner within 400 ms, not dragged between (`CROP.tap`), takes it
+away, as Delete or Backspace takes the one picked (`cropDropPoint()`, `dropPoint()`): never below three corners, nor to
+a shape with (almost) no area, a word saying which; while the window crops free the key never deletes the layer, a
+corner picked or not.
+*Any ratio* chosen on a free crop gives the box round it; another shape fits one about that box (`fitCrop()`). The
+window shows the box's pixels and how many corners there are.
 
 **Weave**: a cut-out, or an asset, may carry `weave: {with, by, line, front, strokes}` (`normalizeWeave()` in `layers.js`: at
 most 24 layer ids and 400 letter keys a layer, `line` within 0.1–0.9, the brush's strokes as below; `by` "head",
@@ -1629,4 +1673,5 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | change what a layer kept to some sizes is at the others | `coverAt()` in `render.js`; the list's labels `sizesNote()` in `app.js` |
 | change what goes with a photo whose background is removed at some sizes | `showApart()` (and `cutAt()`, `cutFrom()`) in `layers.js` |
 | change which sizes of another profile's a size takes the place of, when layers come from there | `standsFor()` in `layout.js`; `acrossSizes()` in `layers.js` |
+| change how a free crop is kept, edited, painted or caught | `normalizeCrop()`, `CROP_AREA`, `hasArea()`, `polyArea()`, `cropPoly()`, `dragPoint()`, `addPoint()`, `dropPoint()`, `movePoly()`, `edgePoint()` and `inPoly()` in `layers.js`; `tracePoly()`, `cropShape()` and `hitAt()` in `render.js`; `cropShow()` and `cropDropPoint()` in `app.js` |
 | add an interface string | `i18n.js`, in both languages; a test checks that both are present |

@@ -298,7 +298,7 @@ const PROPS = {
   tag: { vertical: false, rules: false },
   catname: { showName: true, plate: true, vertical: false, rules: false },
   frame: {},
-  asset: { ref: null, tint: false },   // + `ink`: a colour of the user's for a vector asset, over its own and the channel's; + `crop` and `weave`, as a photo's (see canWeave)
+  asset: { ref: null, tint: false },   // + `ink`: a colour of the user's for a vector asset, over its own and the channel's; + `crop` (a free one too) and `weave`, as a photo's (see canWeave)
   /** A block of one colour, the canvas's size at scale 1 (so it can be a ground, or moved and shrunk into a band). */
   solid: { color: "#ffd60a" },
   text: { text: "", stroke: 1, shadow: 1, plate: false, vertical: false, rules: false },
@@ -317,6 +317,8 @@ const PROPS = {
    * of torn paper; `dash`: a dashed line a little way out (the one or the other). + `ink`, the outline's colour.
    * + `crop`: {x, y, w, h}, fractions of the picture: only that part of it shows (of a photo not filling the
    * canvas), the rest kept, to be shown again; the photo's frame stays where it is, so what is kept does not move.
+   * A free crop adds `pts`, the corners of a shape of any outline ([u, v], fractions of the picture), x, y, w, h
+   * being the box round them: only what lies inside them shows (see normalizeCrop).
    * + `weave`: a cut-out woven with lettering below it, as a magazine's subject is with its masthead (see
    * normalizeWeave): {with, by, line, front}. `with`: the ids of the lettering layers it weaves with (the title,
    * the subtitle, text, copies of the first two); `by` "head": its head in front of them and the rest of it
@@ -496,11 +498,47 @@ function normalizeLayer(raw, catIds, sizeKeys) {
   }
   return L;
 }
-/** A photo's crop (see PROPS.photo), at least 2% of the picture each way, within it; null for none, or the whole picture. */
+/** The most corners a free crop keeps (see normalizeCrop). */
+export const CROP_PTS = 64;
+/**
+ * The least of the picture a free crop keeps, as a share of its area: as much as the smallest rectangle crop keeps
+ * (2% each way). A shape with less, or spread too thin along its box (see hasArea), has (almost) no area: it is not
+ * kept, nor a corner dragged, moved or taken away to it.
+ */
+export const CROP_AREA = 0.0004;
+/** A free crop's corner's number as it is kept (see normalizeCrop): within the picture, to 1e-4. */
+const inCrop = (v) => Math.round(Math.min(1, Math.max(0, v)) * 1e4) / 1e4;
+/**
+ * A photo's crop (see PROPS.photo), or an asset's: a rectangle, at least 2% of the picture each way, within it; null
+ * for none, or the whole picture. A free crop is a shape of any outline: its corners `pts`, in order round it, each
+ * [u, v] in fractions of the picture, put within it and rounded to 1e-4 (those not a pair of numbers dropped, the
+ * first 64 kept), and x, y, w, h the box round them, at least 2% each way, so whatever reads a crop's box (the frame,
+ * the work canvases, the box round a subject) reads a free crop's as a rectangle's. Its corners are what decides it:
+ * a box it carries is worked out again. With fewer than 3 corners it is read as the rectangle it carries; the four
+ * corners of the picture in order round it are the whole picture, no crop. A shape with (almost) no area (see
+ * CROP_AREA, polyArea), its corners on a line or on one point, would show nothing and leave a frame a sliver: it is
+ * read as no crop too, the whole picture (as its four corners are), rather than as the sliver of a box it carries.
+ * A rectangle is kept as it ever was.
+ */
 export function normalizeCrop(c) {
   if (!c || typeof c !== "object") return null;
-  const r = (v) => Math.round(v * 1e4) / 1e4, x = r(num(c.x, 0, 0, 0.98)), y = r(num(c.y, 0, 0, 0.98)), w = Math.min(r(num(c.w, 1, 0.02, 1)), r(1 - x)), h = Math.min(r(num(c.h, 1, 0.02, 1)), r(1 - y));
+  const r = (v) => Math.round(v * 1e4) / 1e4;
+  const pts = (Array.isArray(c.pts) ? c.pts : []).filter((p) => Array.isArray(p) && p.length === 2 && p.every((v) => typeof v === "number" && Number.isFinite(v))).slice(0, CROP_PTS).map((p) => p.map(inCrop));
+  if (pts.length >= 3) {
+    if (wholePoly(pts) || !hasArea(pts)) return null;
+    const box = (i) => { const lo = Math.min(...pts.map((p) => p[i])), d = Math.max(CROP_MIN, r(Math.max(...pts.map((p) => p[i])) - lo)); return [Math.min(lo, r(1 - d)), d]; };
+    const [x, w] = box(0), [y, h] = box(1);
+    return { x, y, w, h, pts };
+  }
+  const x = r(num(c.x, 0, 0, 0.98)), y = r(num(c.y, 0, 0, 0.98)), w = Math.min(r(num(c.w, 1, 0.02, 1)), r(1 - x)), h = Math.min(r(num(c.h, 1, 0.02, 1)), r(1 - y));
   return x > 1e-4 || y > 1e-4 || w < 0.9999 || h < 0.9999 ? { x, y, w, h } : null;
+}
+/** Whether a free crop's corners are the picture's own four, in order round it (either way): the whole picture. */
+function wholePoly(pts) {
+  if (pts.length !== 4) return false;
+  const k = pts.map(([u, v]) => (u === 0 && v === 0 ? 0 : u === 1 && v === 0 ? 1 : u === 1 && v === 1 ? 2 : u === 0 && v === 1 ? 3 : -1));
+  const step = (k[1] - k[0] + 4) % 4;
+  return !k.includes(-1) && (step === 1 || step === 3) && k.every((n, i) => (k[(i + 1) % 4] - n + 4) % 4 === step);
 }
 /**
  * How many layers a cut-out weaves with at most, and how many letters of each it puts in front; how many brush
@@ -704,6 +742,96 @@ export function fitCrop(c, ratio) {
   w *= f; h *= f;
   const cx = c.x + c.w / 2, cy = c.y + c.h / 2;
   return { x: Math.min(1 - w, Math.max(0, cx - w / 2)), y: Math.min(1 - h, Math.max(0, cy - h / 2)), w, h };
+}
+/**
+ * The corners of crop `c` as a free crop has them (see normalizeCrop), fractions of the picture: its own, or a
+ * rectangle's four from its top left round to the right; the whole picture's for none, which is where a free crop
+ * starts. A copy: the window works on it and puts it back through normalizeCrop.
+ */
+export const cropPoly = (c) => (c && Array.isArray(c.pts) ? c.pts.map((p) => [...p]) : (({ x, y, w, h }) => [[x, y], [x + w, y], [x + w, y + h], [x, y + h]])(c || { x: 0, y: 0, w: 1, h: 1 }));
+const in01 = (v) => Math.min(1, Math.max(0, v));
+/** A free crop's corner i moved by dx, dy (fractions of the picture), within the picture; the others, those joined to it too, stay where they are. */
+export const dragPoint = (pts, i, dx, dy) => pts.map((p, j) => (j === i ? [in01(p[0] + dx), in01(p[1] + dy)] : p));
+/**
+ * A corner put on a free crop's edge i (from corner i to the next) at point p, within the picture: the corners with it
+ * after corner i, so it joins the two the edge joined. As they were with 64 corners already (see CROP_PTS).
+ */
+export const addPoint = (pts, i, p) => (pts.length >= CROP_PTS ? pts : [...pts.slice(0, i + 1), [in01(p[0]), in01(p[1])], ...pts.slice(i + 1)]);
+/**
+ * A free crop's corner i taken away, its two neighbours joined; as they were (the very array) when that would leave
+ * fewer than three corners, or a shape with (almost) no area (see hasArea).
+ */
+export function dropPoint(pts, i) {
+  const less = pts.filter((p, j) => j !== i);
+  return pts.length <= 3 || !hasArea(less) ? pts : less;
+}
+/**
+ * The area polygon `poly` ([[x, y], …], closed) covers, filled even-odd as a free crop is: where it crosses itself
+ * twice over a place, that place is not covered, and the lobes of a shape crossed once both count (a sum of signed
+ * areas would cancel them). Exact: taken in strips between the heights of its corners and of the points where its
+ * edges cross, within each of which every edge's crossing of a level line moves straight and keeps its order, so the
+ * length covered along the strip's middle line is its mean.
+ */
+export function polyArea(poly) {
+  const n = poly.length, ys = poly.map((p) => p[1]);
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    const [ax, ay] = poly[i], [bx, by] = poly[(i + 1) % n], [cx, cy] = poly[j], [ex, ey] = poly[(j + 1) % n];
+    const rx = bx - ax, ry = by - ay, sx = ex - cx, sy = ey - cy, d = rx * sy - ry * sx;
+    if (!d) continue;
+    const t = ((cx - ax) * sy - (cy - ay) * sx) / d, u = ((cx - ax) * ry - (cy - ay) * rx) / d;
+    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) ys.push(ay + t * ry);
+  }
+  const hs = [...new Set(ys)].sort((a, b) => a - b);
+  let area = 0;
+  for (let k = 0; k + 1 < hs.length; k++) {
+    const y = (hs[k] + hs[k + 1]) / 2, xs = [];
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const [xi, yi] = poly[i], [xj, yj] = poly[j];
+      if (yi > y !== yj > y) xs.push(xi + ((y - yi) * (xj - xi)) / (yj - yi));
+    }
+    xs.sort((a, b) => a - b);
+    for (let m = 0; m + 1 < xs.length; m += 2) area += (xs[m + 1] - xs[m]) * (hs[k + 1] - hs[k]);
+  }
+  return area;
+}
+/**
+ * Whether a free crop's corners (fractions of the picture) keep enough of it to be kept: as much of it as the
+ * smallest rectangle crop (CROP_AREA), and its area over the longer side of the box round it 1% at least, so a shape
+ * squeezed to a sliver along a line, however long, has (almost) no area either, while a star burst of thin spikes, a
+ * crescent or a thin L has enough. Judged on the corners as they would be kept (within the picture, to 1e-4, see
+ * normalizeCrop), so what the window puts on a layer by it is never then read as no crop.
+ */
+export function hasArea(pts) {
+  const q = pts.map((p) => p.map(inCrop)), a = polyArea(q), side = (k) => Math.max(...q.map((p) => p[k])) - Math.min(...q.map((p) => p[k]));
+  return a >= CROP_AREA && a / Math.max(side(0), side(1)) >= CROP_MIN / 2;
+}
+/** A free crop moved whole by dx, dy (fractions of the picture), as far as the box round it stays within the picture. */
+export function movePoly(pts, dx, dy) {
+  const lo = (k) => Math.min(...pts.map((p) => p[k])), hi = (k) => Math.max(...pts.map((p) => p[k]));
+  const mx = Math.min(1 - hi(0), Math.max(-lo(0), dx)), my = Math.min(1 - hi(1), Math.max(-lo(1), dy));
+  return pts.map(([u, v]) => [u + mx, v + my]);
+}
+/**
+ * The point of polygon `poly`'s outline ([[x, y], …], closed) nearest (x, y): {i, x, y, d}, on its edge from corner i
+ * to the next, d away. Where a click on an edge puts a corner of a free crop, and how near a layer cropped so is caught.
+ */
+export function edgePoint(poly, x, y) {
+  let best = null;
+  poly.forEach(([ax, ay], i) => {
+    const [bx, by] = poly[(i + 1) % poly.length], dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy;
+    const t = l ? Math.min(1, Math.max(0, ((x - ax) * dx + (y - ay) * dy) / l)) : 0, px = ax + t * dx, py = ay + t * dy, d = Math.hypot(x - px, y - py);
+    if (!best || d < best.d) best = { i, x: px, y: py, d };
+  });
+  return best;
+}
+/** Whether (x, y) lies inside polygon `poly` ([[x, y], …]), counted even-odd, as a free crop is painted. */
+export function inPoly(poly, x, y) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
 /**
  * Repairs a layer list: drops unknown layers, guarantees each bound layer exists exactly once

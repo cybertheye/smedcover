@@ -2884,6 +2884,182 @@ test("a photo may be cropped: kept within the picture, dragged by its sides and 
   assert.ok(near(fitCrop({ x: 0, y: 0, w: 1, h: 1 }, 1), { x: 0, y: 0, w: 1, h: 1 }) && near(fitCrop({ x: 0, y: 0, w: 1, h: 1 }, 0.75), { x: 0.125, y: 0, w: 0.75, h: 1 }), "from the whole picture: the largest of that shape");
 });
 
+test("a free crop: corners of any shape, kept within the picture, rounded, 3 to 64 of them, junk dropped; the box round them its frame; the whole picture's four corners no crop", async () => {
+  const { normalizeCrop, CROP_PTS } = await import("../ui/js/layers.js");
+  // the box worked out from the corners, whatever box it carries
+  assert.deepEqual(normalizeCrop({ x: 0, y: 0, w: 1, h: 1, pts: [[0.1, 0.2], [0.9, 0.1], [0.5, 0.8]] }), { x: 0.1, y: 0.1, w: 0.8, h: 0.7, pts: [[0.1, 0.2], [0.9, 0.1], [0.5, 0.8]] });
+  // within the picture, to 1e-4
+  assert.deepEqual(normalizeCrop({ pts: [[-0.5, 0.2], [1.4, 0.1], [0.5, 0.333333333]] }).pts, [[0, 0.2], [1, 0.1], [0.5, 0.3333]]);
+  // what is not a pair of numbers goes
+  assert.deepEqual(normalizeCrop({ pts: [[0.1, 0.1], "x", [NaN, 1], [0.5], null, [0.9, 0.1], [0.5, "0.9"], [0.5, 0.9, 1], [0.5, 0.9]] }).pts, [[0.1, 0.1], [0.9, 0.1], [0.5, 0.9]]);
+  // fewer than three corners: the rectangle it carries, or none
+  assert.deepEqual(normalizeCrop({ x: 0.2, y: 0.2, w: 0.5, h: 0.5, pts: [[0.1, 0.1], [0.5, 0.5]] }), { x: 0.2, y: 0.2, w: 0.5, h: 0.5 });
+  assert.equal(normalizeCrop({ pts: [[0.1, 0.1], "junk", {}] }), null);
+  assert.equal(normalizeCrop({ pts: "nope" }), null);
+  // at most 64, the first kept
+  const many = Array.from({ length: 70 }, (_, i) => [0.5 + 0.4 * Math.cos(i / 11), 0.5 + 0.4 * Math.sin(i / 11)]);
+  const kept = normalizeCrop({ pts: many }).pts;
+  assert.equal(CROP_PTS, 64);
+  assert.equal(kept.length, 64);
+  assert.deepEqual(kept[63], many[63].map((v) => Math.round(v * 1e4) / 1e4));
+  // the box at least 2% each way, within the picture, round a shape narrower than that
+  assert.deepEqual(normalizeCrop({ pts: [[0.5, 0.1], [0.515, 0.1], [0.515, 0.9], [0.5, 0.9]] }), { x: 0.5, y: 0.1, w: 0.02, h: 0.8, pts: [[0.5, 0.1], [0.515, 0.1], [0.515, 0.9], [0.5, 0.9]] });
+  assert.deepEqual(normalizeCrop({ pts: [[0.985, 0.1], [1, 0.1], [1, 0.9], [0.985, 0.9]] }), { x: 0.98, y: 0.1, w: 0.02, h: 0.8, pts: [[0.985, 0.1], [1, 0.1], [1, 0.9], [0.985, 0.9]] });
+  // the picture's own four corners in order, either way round and from any of them: the whole picture
+  assert.equal(normalizeCrop({ pts: [[0, 0], [1, 0], [1, 1], [0, 1]] }), null);
+  assert.equal(normalizeCrop({ pts: [[1, 1], [1, 0], [0, 0], [0, 1]] }), null);
+  assert.equal(normalizeCrop({ pts: [[0, 0], [1.2, -0.1], [1, 1], [0, 1]] }), null, "put within the picture first");
+  assert.deepEqual(normalizeCrop({ pts: [[0, 0], [1, 1], [1, 0], [0, 1]] }).pts, [[0, 0], [1, 1], [1, 0], [0, 1]], "crossed, they are not");
+  assert.deepEqual(normalizeCrop({ pts: [[0, 0], [0.5, 0], [1, 0], [1, 1], [0, 1]] }).pts.length, 5, "a corner added on an edge of the whole picture is kept, to be dragged");
+  // read again as written; on a photo and an asset, through a cover as a file is read
+  const c = normalizeCrop({ pts: [[0.12345, 0.2], [0.9, 0.15], [0.7, 0.85], [0.2, 0.9]] });
+  assert.deepEqual(normalizeCrop(JSON.parse(JSON.stringify(c))), c);
+  const p = normalizeProfile(sampleProfile("en"));
+  const cover = normalizeCover({ layers: [...p.design.layers, { type: "photo", pid: "p1", crop: c }, { type: "asset", ref: { kind: "sticker", id: "burst" }, crop: { pts: [[0.5, 0], [1, 1], [0, 1]] } }, { type: "photo", pid: "p2", crop: { pts: [[0.1, 0.1]], x: 0.1, y: 0.2, w: 0.3, h: 0.4 } }] }, p);
+  const [ph, as, rc] = cover.layers.filter((l) => l.crop);
+  assert.deepEqual([ph.crop, as.crop, rc.crop], [c, { x: 0, y: 0, w: 1, h: 1, pts: [[0.5, 0], [1, 1], [0, 1]] }, { x: 0.1, y: 0.2, w: 0.3, h: 0.4 }]);
+  assert.deepEqual(normalizeCover(JSON.parse(JSON.stringify(cover)), p).layers, cover.layers, "saved and read back, the same");
+  // a copy of a layer cropped free has corners of its own
+  const d = duplicate(ph);
+  assert.deepEqual(d.crop, ph.crop);
+  assert.notEqual(d.crop.pts, ph.crop.pts);
+});
+
+test("a free crop edited: it starts on the picture's four corners; a corner dragged moves alone, within the picture; one added on an edge joins the two it lay between; one taken away, never below three; the shape moved whole stays within", async () => {
+  const { cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, normalizeCrop } = await import("../ui/js/layers.js");
+  // where a free crop starts: the whole picture's corners, from the top left round to the right; a rectangle's corners; a free crop's own (a copy)
+  assert.deepEqual(cropPoly(null), [[0, 0], [1, 0], [1, 1], [0, 1]]);
+  assert.deepEqual(cropPoly({ x: 0.2, y: 0.1, w: 0.5, h: 0.6 }), [[0.2, 0.1], [0.7, 0.1], [0.7, 0.7], [0.2, 0.7]]);
+  const own = normalizeCrop({ pts: [[0.1, 0.1], [0.9, 0.2], [0.5, 0.9]] });
+  assert.deepEqual(cropPoly(own), own.pts);
+  assert.notEqual(cropPoly(own)[0], own.pts[0], "a copy, to work on");
+  // a corner dragged: it alone moves, those joined to it stay where they are
+  const sq = cropPoly(null), moved = dragPoint(sq, 1, -0.3, 0.25);
+  assert.deepEqual(moved, [[0, 0], [0.7, 0.25], [1, 1], [0, 1]]);
+  assert.deepEqual(sq, [[0, 0], [1, 0], [1, 1], [0, 1]], "the corners it was given unchanged");
+  assert.deepEqual(dragPoint(moved, 2, 0.5, -1.5), [[0, 0], [0.7, 0.25], [1, 0], [0, 1]], "within the picture");
+  assert.deepEqual(normalizeCrop({ pts: moved }), { x: 0, y: 0, w: 1, h: 1, pts: [[0, 0], [0.7, 0.25], [1, 1], [0, 1]] }, "a free crop now, its box the whole picture");
+  // a corner added on an edge: where the press is nearest on the outline, after the corner the edge starts at
+  const e = edgePoint([[0, 0], [100, 0], [100, 100], [0, 100]], 40, 4);
+  assert.deepEqual(e, { i: 0, x: 40, y: 0, d: 4 });
+  assert.deepEqual(edgePoint([[0, 0], [100, 0], [100, 100], [0, 100]], 3, 60), { i: 3, x: 0, y: 60, d: 3 }, "the edge back to the first corner too");
+  const five = addPoint(sq, 0, [0.4, 0]);
+  assert.deepEqual(five, [[0, 0], [0.4, 0], [1, 0], [1, 1], [0, 1]]);
+  assert.deepEqual(dragPoint(five, 1, 0.1, 0.3), [[0, 0], [0.5, 0.3], [1, 0], [1, 1], [0, 1]], "and dragged on at once: a notch, its neighbours where they were");
+  assert.deepEqual(addPoint(sq, 3, [-0.2, 0.5]), [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0.5]], "on the edge back to the first corner, within the picture");
+  const full = Array.from({ length: 64 }, (_, i) => [i / 64, 0.5]);
+  assert.equal(addPoint(full, 3, [0.1, 0.1]), full, "64 corners at most");
+  // a corner taken away: its neighbours joined; three always stay
+  assert.deepEqual(dropPoint(five, 1), sq);
+  const three = dropPoint(sq, 2);
+  assert.deepEqual(three, [[0, 0], [1, 0], [0, 1]]);
+  assert.equal(dropPoint(three, 0), three, "never below three");
+  // the shape moved whole: as far as the box round it stays within the picture
+  assert.deepEqual(movePoly([[0.2, 0.2], [0.6, 0.3], [0.4, 0.7]], 0.1, -0.05).map((p) => p.map((v) => Math.round(v * 1e4) / 1e4)), [[0.3, 0.15], [0.7, 0.25], [0.5, 0.65]]);
+  assert.deepEqual(movePoly([[0.2, 0.2], [0.6, 0.3], [0.4, 0.7]], 0.9, -0.5).map((p) => p.map((v) => Math.round(v * 1e4) / 1e4)), [[0.6, 0], [1, 0.1], [0.8, 0.5]]);
+  // inside, counted even-odd: a notch is outside; a star's middle, crossed twice, too
+  const notch = [[0, 0], [50, 50], [100, 0], [100, 100], [0, 100]];
+  assert.deepEqual([inPoly(notch, 50, 70), inPoly(notch, 50, 20), inPoly(notch, 150, 50)], [true, false, false]);
+  const star = [0, 1, 2, 3, 4].map((i) => [50 + 50 * Math.sin((i * 4 * Math.PI) / 5), 50 - 50 * Math.cos((i * 4 * Math.PI) / 5)]);
+  assert.deepEqual([inPoly(star, 50, 52), inPoly(star, 50, 8)], [false, true]);
+});
+
+test("a free crop keeps some area: one with (almost) none is no crop; no corner is taken away, nor dragged, to leave the shape none; its area counted even-odd, as it is painted, exactly", async () => {
+  const { polyArea, hasArea, CROP_AREA, normalizeCrop, dropPoint, dragPoint, addPoint, cropPoly } = await import("../ui/js/layers.js");
+  const near = (a, b) => Math.abs(a - b) < 1e-12;
+  // covered as a free crop is painted: a square, a triangle; both lobes of a bow-tie (signed areas would cancel); a
+  // square gone round twice, covered twice over and so not at all; a pentagram's points, not its middle; a line
+  assert.ok(near(polyArea([[0, 0], [1, 0], [1, 1], [0, 1]]), 1) && near(polyArea([[0.1, 0.1], [0.9, 0.1], [0.1, 0.5]]), 0.16));
+  assert.ok(near(polyArea([[0, 0], [1, 1], [1, 0], [0, 1]]), 0.5), "both lobes of a bow-tie");
+  assert.equal(polyArea([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0], [1, 0], [1, 1], [0, 1]]), 0, "gone round twice");
+  const R = 0.5, r = (R * Math.sin(Math.PI / 10)) / Math.sin((7 * Math.PI) / 10), star = [0, 1, 2, 3, 4].map((i) => [0.5 + R * Math.sin((i * 4 * Math.PI) / 5), 0.5 - R * Math.cos((i * 4 * Math.PI) / 5)]);
+  assert.ok(near(polyArea(star), 5 * R * r * Math.sin(Math.PI / 5) - 2.5 * r * r * Math.sin((2 * Math.PI) / 5)), "a pentagram: its points, not its middle");
+  assert.equal(polyArea([[0.2, 0.3], [0.6, 0.3], [0.9, 0.3]]), 0, "on a line");
+  // the least kept: as much as the smallest rectangle crop keeps, 2% of the picture each way, and its area over the
+  // longer side of its box 1% at least: enough, too little, a long sliver with more than enough area, three on a line
+  assert.equal(CROP_AREA, 0.02 * 0.02);
+  assert.deepEqual([hasArea([[0, 0], [0.06, 0], [0, 0.06]]), hasArea([[0, 0], [0.03, 0], [0, 0.02]]), hasArea([[0.1, 0.5], [0.9, 0.5], [0.5, 0.505]]), hasArea([[0.2, 0.3], [0.6, 0.3], [0.9, 0.3]])], [true, false, false, false]);
+  // a band across the picture 1.2% thick is enough, one 0.8% thick is not; star bursts of thin spikes are (an outer
+  // radius of 0.45: 32 spikes to an inner one of 0.083, 11.7% of the picture; 16 to 0.046; 12 to 0.036), but not one
+  // whose spikes are hairs
+  const band = (t) => [[0, 0.5], [1, 0.5], [1, 0.5 + t], [0, 0.5 + t]];
+  assert.deepEqual([hasArea(band(0.012)), hasArea(band(0.008))], [true, false]);
+  const burst = (n, r) => Array.from({ length: 2 * n }, (_, i) => { const a = (i * Math.PI) / n, k = i % 2 ? r : 0.45; return [0.5 + k * Math.sin(a), 0.5 - k * Math.cos(a)]; });
+  assert.ok(near(polyArea(burst(32, 0.083)), 32 * 0.45 * 0.083 * Math.sin(Math.PI / 32)) && polyArea(burst(32, 0.083)) > 0.117);
+  assert.deepEqual([[32, 0.083], [32, 0.02], [16, 0.046], [12, 0.036], [32, 0.005]].map(([n, r]) => hasArea(burst(n, r))), [true, true, true, true, false]);
+  assert.equal(normalizeCrop({ pts: burst(32, 0.083) }).pts.length, 64, "kept, every corner");
+  // read: a shape with (almost) none is no crop, the whole picture, not the sliver of a box it carries; a thin one thick enough is kept
+  assert.equal(normalizeCrop({ pts: [[0.5, 0.5], [0.5, 0.5], [0.5, 0.5]] }), null);
+  assert.equal(normalizeCrop({ x: 0, y: 0, w: 1, h: 0.02, pts: [[0, 0], [0.5, 0], [1, 0]] }), null);
+  assert.equal(normalizeCrop({ pts: [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0], [1, 0], [1, 1], [0, 1]] }), null);
+  assert.equal(normalizeCrop({ pts: [[0.1, 0.5], [0.9, 0.5], [0.5, 0.505]] }), null, "a sliver along a line");
+  assert.deepEqual(normalizeCrop({ pts: [[0.1, 0.5], [0.9, 0.5], [0.5, 0.53]] }), { x: 0.1, y: 0.5, w: 0.8, h: 0.03, pts: [[0.1, 0.5], [0.9, 0.5], [0.5, 0.53]] });
+  // taken away: the middle of the top edge added, the bottom right taken away, then the bottom left would leave a line: it stays
+  const four = dropPoint(addPoint(cropPoly(null), 0, [0.5, 0]), 3);
+  assert.deepEqual(four, [[0, 0], [0.5, 0], [1, 0], [0, 1]]);
+  assert.equal(dropPoint(four, 3), four, "the last corner off the line stays");
+  assert.deepEqual(dropPoint(four, 1), [[0, 0], [1, 0], [0, 1]], "one on the line may go");
+  // dragged onto the line of the others, a corner would leave none (the window keeps it where the shape last had some)
+  const tri = [[0.1, 0.1], [0.9, 0.1], [0.5, 0.8]];
+  assert.deepEqual([hasArea(dragPoint(tri, 2, 0, -0.7)), hasArea(dragPoint(tri, 2, 0.3, -0.7)), hasArea(dragPoint(tri, 2, 0, -0.65)), hasArea(dragPoint(tri, 2, 0, -1))], [false, false, true, true], "on the line, anywhere along it; off it; past it to the picture's edge");
+});
+
+test("a free crop's corners judged as they are kept: what the window puts on a layer, it keeps (never read as no crop for being rounded)", async () => {
+  const { hasArea, normalizeCrop, dragPoint, dropPoint } = await import("../ui/js/layers.js");
+  // a corner dragged toward the line of the others, by steps finer than the 1e-4 a corner is kept to: whatever
+  // hasArea lets the window put, normalizeCrop keeps, and whatever it refuses, normalizeCrop would read as no crop
+  const tri = [[0.1, 0.5], [0.9, 0.5], [0.5, 0.6]];
+  for (let k = 0; k <= 4000; k++) {
+    const y = 0.5 + k * 2.5e-5 + 3e-6, next = dragPoint(tri, 2, 0, y - 0.6);
+    assert.equal(hasArea(next), normalizeCrop({ pts: next }) !== null, `at ${y}`);
+    // and a corner taken away: refused exactly when what it would leave is read as no crop
+    const quad = [[0.1, 0.5], [0.9, 0.5], [0.5, y], [0.3, 0.5]], less = dropPoint(quad, 3);
+    assert.equal(less !== quad, normalizeCrop({ pts: less }) !== null, `taken away at ${y}`);
+  }
+  // the drag as the window takes it: to 0.56, to 0.52003 (0.52 kept, on the edge of enough), to 0.515 (too thin:
+  // refused), let go: the crop is still there, its corner where the shape last had enough, as kept
+  let crop = normalizeCrop({ pts: tri });
+  for (const y of [0.56, 0.52003, 0.515]) { const next = dragPoint(tri, 2, 0, y - 0.6); if (hasArea(next)) crop = normalizeCrop({ pts: next }); }
+  assert.ok(crop && crop.pts[2][1] >= 0.52 && crop.pts[2][1] < 0.56, JSON.stringify(crop));
+  assert.deepEqual(normalizeCrop(crop), crop, "and read back the same");
+});
+
+test("cropped free, a photo or an asset keeps its frame where it was: its box the box round the corners, the picture where it was, caught only within the shape; a rectangle crop as before", async () => {
+  const { normalizeCrop, onCanvas } = await import("../ui/js/layers.js");
+  const { hitAt } = await import("../ui/js/render.js");
+  const p = normalizeProfile(sampleProfile("en")), size = p.sizes[0];
+  const pts = [[0.2, 0.1], [0.8, 0.3], [0.6, 0.9], [0.1, 0.6]], free = normalizeCrop({ pts }), rect = normalizeCrop({ x: free.x, y: free.y, w: free.w, h: free.h });
+  assert.deepEqual(rect, { x: 0.1, y: 0.1, w: 0.7, h: 0.8 });
+  const photos = new Map([["p1", { img: { width: 800, height: 600 } }]]);
+  const hitsOf = async (crop) => {
+    const c = normalizeCover({ title: "Hi" }, p);
+    const ph = newLayer("photo", { pid: "p1", ...(crop ? { crop } : {}) }), as = newLayer("asset", { ref: { kind: "sticker", id: "burst" }, ...(crop ? { crop } : {}) });
+    ph.id = "ph"; as.id = "as";
+    Object.assign(ph.t.all, { x: 0.3, y: 0.5, s: 0.6, r: 20 }); Object.assign(as.t.all, { x: 0.75, y: 0.5, s: 0.5, r: -15, kx: 1.2 });
+    c.layers.splice(1, 0, ph, as);
+    const cv = await drawnAt(p, c, size, photos);
+    return ["ph", "as"].map((id) => cv._hits.find((h) => h.id === id));
+  };
+  const [none, boxed, shaped] = [await hitsOf(null), await hitsOf(rect), await hitsOf(free)];
+  for (let k = 0; k < 2; k++) {
+    const [n, b, s] = [none[k], boxed[k], shaped[k]], near = (a, z) => Math.abs(a - z) < 1e-9;
+    // the frame: the box round the corners, as a rectangle crop of that box has it, about the same centre of the frame
+    for (const f of ["cx", "cy", "hw", "hh", "r", "px", "py"]) assert.ok(near(s[f], b[f]), `${s.id} ${f}`);
+    // what is kept stays where it was: the picture on the canvas as uncropped (the frame's centre too)
+    assert.deepEqual(s.pf, n.pf);
+    assert.ok(near(s.px ?? s.cx, n.px ?? n.cx) && near(s.py ?? s.cy, n.py ?? n.cy));
+    // the shape on the canvas: the corners where the picture puts them, within the box
+    assert.deepEqual(s.poly, pts.map(([u, v]) => onCanvas(s.pf, u, v)));
+    assert.equal("poly" in b, false, "a rectangle crop has none, as before");
+    // caught within the shape, or near its outline; not in the box's corner the shape leaves out
+    const inside = onCanvas(s.pf, 0.45, 0.5), cut = onCanvas(s.pf, 0.75, 0.85);
+    assert.equal(hitAt([s], ...inside)?.id, s.id);
+    assert.equal(hitAt([b], ...cut)?.id, b.id, "the rectangle's corner is caught");
+    assert.equal(hitAt([s], ...cut), null, "the free crop's is not");
+    assert.equal(hitAt([s], ...onCanvas(s.pf, 0.5, 0.185))?.id, s.id, "by its edge, within the margin");
+  }
+});
+
 test("reshaped edges: points along each outline, corners kept, normals away from the ink; each letter's edge its own, the same every time", async () => {
   const { walk, areaOf, weighOf, SHAPED, EFFECTS, effectReach } = await import("../ui/js/textfx.js");
   const { hash, seeded } = await import("../ui/js/ransom.js");
