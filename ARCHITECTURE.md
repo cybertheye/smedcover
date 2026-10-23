@@ -61,7 +61,9 @@ ui/
   js/cel.js          cel-shading kit and the first five channel graphics
   js/graphics.js     fifteen more channel graphics
   js/stickers.js     the 72 stickers (twelve of them frames), and the shared painters
-  js/style.js        looks: a set of hooks per look, and the current look
+  js/style.js        looks: the hooks a look may have, the registry (LOOKS) and the API the app imports
+  js/looks/kit.js    what the looks share: helpers, scene objects, the current look's state (setLook), effects' machinery
+  js/looks/<id>.js   one file per look (cel, cyber, riso … wasteland, facet): its object, helpers and layer effects
   js/spec.js         stickers described as data: validation and interpreter (AI-generated assets)
   (src-tauri/src/subject.rs: the photo's subject mask, from Vision)
   js/repaint.js      photo repaint: the three image services' requests and replies, repaint prompts, reading built-in styles
@@ -232,7 +234,7 @@ type, not a copy) is what the layout's order (`layoutOrder()`, `orderLayout()`),
 shows a copy with the layout icon where a free layer shows what it is, then the user's. Whatever looks for
 the layout's own title, subtitle, logo or graphic looks by id (a layout layer's id is its type), not by
 type: `subtitlePlan()`, `partsOf()`, `env.hasBrand` and `env.logo` in `render.js`, `titleLayer()`,
-`graphicTop()` and `keepClear()` in `style.js`, `dealCover()` putting the title on top. A copy
+`graphicTop()` and `keepClear()` in `looks/kit.js`, `dealCover()` putting the title on top. A copy
 of the subtitle shows where the subtitle goes while the subtitle itself is hidden or left out
 (`subtitlePlan(…, hidden)`, the title making no room for it), and a copy of the logo where the logo goes
 while the logo is hidden (`PAINT.logo` takes `logoBox()` itself).
@@ -262,7 +264,7 @@ order is the default from then on (new channels' covers, *Clear*); the covers ot
 Brand, so it travels with an exported profile: `usedUserAssets()` names it). The `logo` layer draws it at
 the right end of the brand row (`logoBox()` in `render.js`: right-aligned `LOGO`-sized, centred on the row,
 72 units in from the edge or a look's `logoInset`); the brand row's rail, or its number tag, stands to its
-left, and a look's own things in that corner move aside (`besideLogo()` in `style.js`; `env.logo` is the box,
+left, and a look's own things in that corner move aside (`besideLogo()` in `looks/kit.js`; `env.logo` is the box,
 null when the layer is hidden or there is no logo). `brand.counter` (false by default) says whether the brand
 row shows the channel's number after `brand.unit`, and the number tag on a colour panel.
 
@@ -282,7 +284,7 @@ and the subtitle in a line, the line under the columns, which keep `reserve` fre
 the subtitle in columns, its columns right of the title's block, from its top, the title's box narrower by
 them (`titleBox`). The title's columns stand in the look's own place for them (`columnBoxOf()`: the
 woodblock book's `songBox()`, by the seal and down to the band), else in its box. Looks' backgrounds keep
-clear of both (`titleArea()` in `style.js` takes the subtitle's `ink` in). A hidden subtitle is still placed
+clear of both (`titleArea()` in `looks/kit.js` takes the subtitle's `ink` in). A hidden subtitle is still placed
 (`env.subHidden`, the title making no room for it), so the 3D view can show it.
 
 **The title as lettering**: the title has what a text layer has. It may be clipped (below), and carry look
@@ -582,7 +584,7 @@ metrics (the tests' stand-in contexts) a line is set as the canvas sets it. A co
 ### 6.1.1 Columns
 
 Every lettered layer (`LETTERED`, copies too) carries `vertical` and `rules`, false unless true
-(`normalizeLayer()`), kept in the design and the covers. `columned(L)` in `style.js` says whether a layer is
+(`normalizeLayer()`), kept in the design and the covers. `columned(L)` in `looks/kit.js` says whether a layer is
 set in columns: its `vertical`, or for the title and the subtitle the look's own default (`columns(p)`: the
 woodblock book's *Set the title vertically*), which a layer's `vertical` cannot turn off — while it is on the
 properties show the box ticked and greyed (`columnsByLook()` in `app.js`). Surprise me deals neither:
@@ -621,7 +623,7 @@ are and each upright character turned a quarter turn back about the middle of it
 (its advance's middle, `emMid()`), 。，、 moved to the top right of their cell (their ink mirrored through the
 em's middle, `markShift()`) and ？！：； to its middle across. So every lettering sets a column without knowing:
 the looks' `runs()` and work canvases, the masks, the sticker's rims, the ransom note's letters and the
-letters cut from the photo, the shapes `someLetters()` keeps letters by. Meanwhile `asColumn()` in `style.js`
+letters cut from the photo, the shapes `someLetters()` keeps letters by. Meanwhile `asColumn()` in `looks/kit.js`
 keeps the looks' `upright()` from taking a slant out of a line that has none, and turns `fall(dx, dy)` on: the
 light does not turn with the line, so every offset a lettering throws one way — the house shadow, the sticker's,
 the looks' drop shadows, depths, long shadows, echoes and inks off register (`echo()`), the ransom note's
@@ -997,7 +999,7 @@ their piece, grown by what the lettering throws round them (keyline, sticker rim
 along their shadow, depth or drips — less the bodies of the letters behind and their shadows, those in front
 whole: a letter in front comes forward whole and a neighbour behind stays there, which a clip by the letters'
 shares along the line would not give (a letter's ink reaches past its share). Most looks letter upright on the
-slanted line (`upright()` in `style.js`): while the line is painted, a `transform` taking the slant out is
+slanted line (`upright()` in `looks/kit.js`): while the line is painted, a `transform` taking the slant out is
 noted on the work canvas, the shapes are grown both slanted and upright, and the bodies taken in the frame the
 lettering was painted in. It works in the line's own space, so inside a bent line's `paint` it bends with the
 letters (the bent line's key holds the letters). A line with none of them is left out, and so is the plate. The
@@ -1036,7 +1038,7 @@ drag would), so each frame blits the rest, slides the cut-out's last image (see 
 lettering through it with the mask drawn on since the frame before, and lays the overlay; the thumbnails wait for
 the stroke's end. Strokes stop at the limits, with a word.
 
-The Background layer (`PAINT.bg`) paints in three. Its base, `base`: "grid", the look's ground — its `background` hook with `photo: null` and `grid: false`, or the theme's colour — then the grid on it, `lookGrid()`: the look's own `gridLines(ctx, env, color)`, else lines every 60, in the look's grid colour for the ground it is on (`th.grid`); "look", the ground as it was before there were bases, no grid on it (where the look has no ground of its own, as cel, the theme's field and its grid all the same); or "clear", nothing (see-through: a PNG keeps it, a JPEG is flattened onto `MATTE` in `lib.rs`, the editor shows a checkerboard behind the canvas). Then what the look paints on the base, its scene and pattern: `background` again, with `grid: true` and `ground: false`, which paints none of its ground. With all a look's sliders at their least that paints nothing (the test "what a look paints on the ground lies on its base"), so the base is all there is. A `background` called without `ground` paints its ground; with `grid: false` and no photo, only its ground. A photo's treatment is the same hook with the photo and `grid: false`: the photo and its tint, and for a photo filling the canvas the look's overlays on it. On a see-through base what is laid over a whole picture (a look's `post`: grain, a vignette, wear; the tints and colour fringes some looks lay over their scene) goes only where something is painted, as much as it is (`wherePainted()` in style.js), so what is see-through stays so. `BASE.lines` (render.js) turns the grid off, for comparing drawings without it. `grid` is always on for the Background layer (`normalizeLayer()` puts it back on a cover kept with it off). Light or dark (`style.theme`) is set in its properties; the Style tab no longer has it. When looks and themes ask whether there is a background photo, they mean the lowest visible photo filling the canvas on this channel (`env.photo`).
+The Background layer (`PAINT.bg`) paints in three. Its base, `base`: "grid", the look's ground — its `background` hook with `photo: null` and `grid: false`, or the theme's colour — then the grid on it, `lookGrid()`: the look's own `gridLines(ctx, env, color)`, else lines every 60, in the look's grid colour for the ground it is on (`th.grid`); "look", the ground as it was before there were bases, no grid on it (where the look has no ground of its own, as cel, the theme's field and its grid all the same); or "clear", nothing (see-through: a PNG keeps it, a JPEG is flattened onto `MATTE` in `lib.rs`, the editor shows a checkerboard behind the canvas). Then what the look paints on the base, its scene and pattern: `background` again, with `grid: true` and `ground: false`, which paints none of its ground. With all a look's sliders at their least that paints nothing (the test "what a look paints on the ground lies on its base"), so the base is all there is. A `background` called without `ground` paints its ground; with `grid: false` and no photo, only its ground. A photo's treatment is the same hook with the photo and `grid: false`: the photo and its tint, and for a photo filling the canvas the look's overlays on it. On a see-through base what is laid over a whole picture (a look's `post`: grain, a vignette, wear; the tints and colour fringes some looks lay over their scene) goes only where something is painted, as much as it is (`wherePainted()` in `looks/kit.js`), so what is see-through stays so. `BASE.lines` (render.js) turns the grid off, for comparing drawings without it. `grid` is always on for the Background layer (`normalizeLayer()` puts it back on a cover kept with it off). Light or dark (`style.theme`) is set in its properties; the Style tab no longer has it. When looks and themes ask whether there is a background photo, they mean the lowest visible photo filling the canvas on this channel (`env.photo`).
 
 Blur: canvas filters are not available in the macOS web view, so the gaussian blur is done in script — three box blurs approximate one gaussian, each a sliding window whose cost does not depend on the radius — on a reduced copy of the picture, cached by picture and amount (per picture).
 
@@ -1061,7 +1063,14 @@ The drag cache (`o.live`) cuts the layers into runs that move and runs that do n
 - `drawAsset()` is the single entry point and returns the asset's half-extents for hit-testing.
 - `assetHalf(ref)` gives the same half-extents without drawing (null for an asset that is gone), for a cropped asset (see *Crop* in 6.3) and a woven one (see *Weave* in 6.3), whose box it is.
 
-## 7. Looks (`style.js`)
+## 7. Looks (`style.js`, `looks/`)
+
+Each look lives in a file of its own, `looks/<id>.js`: its object (the hooks below), its helpers and its layer
+effects (`elementFx`). What more than one look uses is in `looks/kit.js`: colour and drawing helpers, scene objects,
+the current look's module state and the effects' machinery; nothing there imports a look. `style.js` is the registry:
+it imports every look, puts it in `LOOKS` (which kit.js holds, empty until then) in the menu's order, hands over the
+house look (`houseLook(cel)`), and re-exports the API the rest of the app imports, so no other module changed. A
+change inside one look's file touches no other look; a change to kit.js, render.js or photo.js may touch them all.
 
 The **content** of a cover — layers, placements, sticker and solid specs, the title text — carries no
 style information, so switching look is only a different way of drawing: every asset, AI-generated
@@ -1095,7 +1104,7 @@ A look is a set of **hooks**. Each is optional, and what a look leaves out is dr
 | `params` | tunable numbers, shown as sliders in the Style tab |
 | `prompt` / `solidPrompt` | the *Style* section of the AI prompts |
 
-The current look is module state in `style.js`, set by `drawCover()` from the profile before it
+The current look is module state in `looks/kit.js`, set by `drawCover()` from the profile before it
 draws; the interface also sets it before painting asset tiles.
 
 ### 7.1 The stand-in context: a new look without touching the drawing code
@@ -1142,7 +1151,7 @@ Looks with a light and a dark ground (record sleeve, editorial) learn which one 
 - **Monochrome film**: the motion ghost is a few blurred copies of the silhouette dragged to one side, fainter the further; the photo's motion blur is the same picture laid again a little to either side; the photo collage takes a few rectangles of the photo, redraws the photo a little off true inside each, keeps them clear of the title's box (`G.title`), and multiplies one in three with the channel colour. The folds are drawn in `post`: each dark on one side, light on the other.
 - **Experimental type** does its title effects in `runs`. The cut: a number of slightly slanted lines, set by the slider, cut the line of lettering into bands, each knocked sideways; the echoes: the same line repeated above, fainter each time; the dissolving: the line is painted on a work canvas and read back, and from a point along it, more and more toward its end, small cells are erased and each thrown out as a dot of its colour, before the whole is laid back on the canvas (not during a drag). The giant letters are the first letters of the channel's code, each cut in two along a slant and the halves pulled apart along the cut.
 
-**More settings for the first five looks.** Risograph, 90s animation, record sleeve, editorial and woodblock book each have eight to ten settings, every one changing its effect by degrees: a thing comes in over its own stretch of the slider (fading in, growing, sliding), and "more" adds more of it rather than the same thing a little larger. Shared tools for them, in `style.js`:
+**More settings for the first five looks.** Risograph, 90s animation, record sleeve, editorial and woodblock book each have eight to ten settings, every one changing its effect by degrees: a thing comes in over its own stretch of the slider (fading in, growing, sliding), and "more" adds more of it rather than the same thing a little larger. Tools for them: `wornTexture()`, `wear()` and `titleArea()` are in `looks/kit.js`, the rest in each look's own file:
 
 - `wornTexture(w, h)` and `wear(ctx, w, h, colour, alpha, mode, mask, base)` — wear: soft blotches and clustered specks, white on clear at the canvas's size in units, kept per size and seed. Laid on in the paper's colour with `lighten`, it is where ink did not take or has rubbed off (bare paper stays bare); with `multiply`, grime. A `mask` (painted on a canvas of its own, so several shapes can make it) keeps it to a ring or the edges, and `base` adds an even rub there so the worn shape reads as a whole. Risograph's patchy ink, the record sleeve's ring and edge wear and the woodblock book's uneven printing are all this.
 - `softBand()` (a band across the sheet, soft at its sides and uneven along it: the riso's roller streaks) and `ghosted()` (the whole print again, faintly, a little further on, laid with `darken` so bare paper stays bare: the riso's ghosting).
@@ -1225,7 +1234,7 @@ Looks with a light and a dark ground (record sleeve, editorial) learn which one 
 Three levels, from light to deep:
 
 1. **Sliders** — a look's `params`, saved in the profile under `style.lookParams[look]`; no code.
-2. **Constants** — in `style.js`, `CY` is the cyberpunk palette (field, black, three shades of glass, the red and cyan of the split, white); `echo()` sets the direction and distance of an echo; `tube()` the width and opacity of each layer of a line of light; `chamfer()` is the cut corner.
+2. **Constants** — in `looks/cyber.js`, `CY` is the cyberpunk palette (field, black, three shades of glass, the red and cyan of the split, white); `echo()` sets the direction and distance of an echo; `tube()` the width and opacity of each layer of a line of light; `chamfer()` is the cut corner.
 3. **Hooks** — change how a hook draws: the grid and the giant code in `background`, the interface detail in `frame`, the split, tear and scanlines in `post`, the layers of the lettering in `runs`.
 
 To add a slider, add an entry to the look's `params` and read the value in a hook; the interface and
@@ -1413,7 +1422,7 @@ A look's costly whole-picture effects (the colour split, so far) are left out of
 
 The left panel's sliders — a look's own settings, the layout's proportions — are another matter: they may change every layer. While one is dragged (`draftTouch()`), the main canvas is painted as a **draft** (`o.draft`): at the screen's own pixels rather than the Retina ones (a quarter of them on a Retina screen), its photos drawn from their copies on the graphics card (see 7.2, `setDraft()` in `photo.js`), and the size thumbnails wait. The draft holds for as long as the pointer that went down on the slider (or on a scene object, 9.2) is down (`DRAFT.held`), and the full picture is painted as it is let go — `pointerup`, or the slider's `change` (`letGo()`) — not each time the hand rests a moment, which on a heavy look put a whole redraw in the way of the next step; stepped from the keyboard, a quarter of a second after the last step. Only the main button holds it (not a right click, nor a Control-click), and only for input from what it went down on (`DRAFT.from`): a release a context menu took held the next change made from the keyboard — a switch flipped with Space, a setting typed after Tab — for ever, the canvas a draft and the thumbnails waiting. A context menu, or the pointer moved with no button down, lets it go. A layer's own sliders keep using `holdLive()` above.
 
-A look's own setting is read by only some of the layers, so while its slider is dragged (`o.draft` is then `{key}`, the setting) the rest are kept. The look's values note which of them are read (`noteReads()` and `readsInto()` in `style.js`: until the next `setLook()` the values are a Proxy over themselves, and `lookValues()` hands out the same, so every read is seen; a copy of them all, a cache's key, reads them all): for each layer as it is painted — a layer painted inside another (the lettering a cut-out weaves with) counts for that one too — and, apart, what is read before the layers (the theme, the layout). A painter can only paint otherwise for another value of a setting by reading it, so a layer that did not read `key` when it was last painted cannot have changed. The layers that did are repainted each frame as dragged ones are, with their clipping groups and what weaves with them; the others are kept as images in `o.draft`, runs of them painted once and laid down each frame, as `o.live` keeps them for this canvas, this cover at this size and the look's other values — the cover as given: as drawn at a size where a layer is kept to others it is a copy each time (`coverAt()`), and the runs were painted again every frame (the dark deco's sliders, the tag kept to another size, at 9–12 frames a second where they are 37–46). What only `post` reads (grain, say) keeps every layer. The first frame paints everything (nothing is noted yet), and so does each frame when the setting decides something before the layers (the deco look's *Crimson sky* and *Gilt* go into its theme). A still run above a repainted layer is painted on its own and laid over it, as `o.live`'s are, so a layer in it that does something with what is under it — lays itself on in multiply, screen or "lighter", copies the canvas for a glow or a second impression, works its pixels — does it to its run alone until the slider is let go. Measured against a draft that paints every layer, for every slider of every look over a photo (WebKit): the riso's *Overprinted shapes* up to 141 levels off on 3% of the pixels (its *Misregistration* 177 on a few), the cyberpunk's *Colour split* 242 on 1% (its *Photo tint* 136), five of the glitch net art's sliders 152–202 on 3.5%, four of the dark deco's 57–61 on 15% (its photo is laid on in "lighter" over the night its sliders change, its lettering's glows screened over that); every other slider at most 8 levels off, more than 3 levels on at most a quarter of a percent of the pixels (1–3 levels, not to be seen, on up to a quarter of them). Repainting such layers along with the ones repainted made those drafts exact, and was tried (each layer noted as it is painted, through the canvas's composite operation and its reads): it is not cheap. The photo filling the canvas washes itself in multiply or soft-light in almost every look, so it was repainted with the ground in every frame, and 70 of the 339 sliders lost more than 15% of their frames — the dark deco's three quarters of them, its lettering's glows being the costliest thing it paints. So such layers are kept, and the picture comes right as the slider is let go. A run kept also keeps the scene objects it placed, as it keeps its hits, so their handles stay while a slider or a layer is dragged; they went from the canvas when a repainted layer, or `post`, placed one of its own.
+A look's own setting is read by only some of the layers, so while its slider is dragged (`o.draft` is then `{key}`, the setting) the rest are kept. The look's values note which of them are read (`noteReads()` and `readsInto()` in `looks/kit.js`: until the next `setLook()` the values are a Proxy over themselves, and `lookValues()` hands out the same, so every read is seen; a copy of them all, a cache's key, reads them all): for each layer as it is painted — a layer painted inside another (the lettering a cut-out weaves with) counts for that one too — and, apart, what is read before the layers (the theme, the layout). A painter can only paint otherwise for another value of a setting by reading it, so a layer that did not read `key` when it was last painted cannot have changed. The layers that did are repainted each frame as dragged ones are, with their clipping groups and what weaves with them; the others are kept as images in `o.draft`, runs of them painted once and laid down each frame, as `o.live` keeps them for this canvas, this cover at this size and the look's other values — the cover as given: as drawn at a size where a layer is kept to others it is a copy each time (`coverAt()`), and the runs were painted again every frame (the dark deco's sliders, the tag kept to another size, at 9–12 frames a second where they are 37–46). What only `post` reads (grain, say) keeps every layer. The first frame paints everything (nothing is noted yet), and so does each frame when the setting decides something before the layers (the deco look's *Crimson sky* and *Gilt* go into its theme). A still run above a repainted layer is painted on its own and laid over it, as `o.live`'s are, so a layer in it that does something with what is under it — lays itself on in multiply, screen or "lighter", copies the canvas for a glow or a second impression, works its pixels — does it to its run alone until the slider is let go. Measured against a draft that paints every layer, for every slider of every look over a photo (WebKit): the riso's *Overprinted shapes* up to 141 levels off on 3% of the pixels (its *Misregistration* 177 on a few), the cyberpunk's *Colour split* 242 on 1% (its *Photo tint* 136), five of the glitch net art's sliders 152–202 on 3.5%, four of the dark deco's 57–61 on 15% (its photo is laid on in "lighter" over the night its sliders change, its lettering's glows screened over that); every other slider at most 8 levels off, more than 3 levels on at most a quarter of a percent of the pixels (1–3 levels, not to be seen, on up to a quarter of them). Repainting such layers along with the ones repainted made those drafts exact, and was tried (each layer noted as it is painted, through the canvas's composite operation and its reads): it is not cheap. The photo filling the canvas washes itself in multiply or soft-light in almost every look, so it was repainted with the ground in every frame, and 70 of the 339 sliders lost more than 15% of their frames — the dark deco's three quarters of them, its lettering's glows being the costliest thing it paints. So such layers are kept, and the picture comes right as the slider is let go. A run kept also keeps the scene objects it placed, as it keeps its hits, so their handles stay while a slider or a layer is dragged; they went from the canvas when a repainted layer, or `post`, placed one of its own.
 
 What a canvas is told to draw, the web view draws after, on the graphics card; a frame that comes late is waiting for it. So `queueDraw()` draws in the next animation frame and nowhere else while the page shows (a timer draws instead only while it is hidden, when frames stop, or should no frame come at all for a second): a draw on a timer as well, 150 ms after the input, piled more onto a card that was already behind, and the page — the knob of the slider being dragged with it — was shown less often still. The size thumbnails are drawn one a frame (`drawThumbs()`), not one per turn of the event loop: they went to the card all at once, and a slider taken again a moment after it was let go waited behind them.
 
@@ -1683,7 +1692,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | add an export format | `encode()` in `lib.rs`, `EXT` and the format picker in `app.js` |
 | add a drawing operation for AI assets | validation and `drawSpec()` in `spec.js`, the prompt and examples in `ai.js` |
 | add a kind of part to solids | validation and `pieces()` in `solid.js`, `solidPrompt()` and its examples in `ai.js` |
-| add a look | an entry in `LOOKS` in `style.js`, starting with a hook or two |
+| add a look | a file `looks/<id>.js` exporting the look's object (starting with a hook or two), imported and put in `LOOKS` in `style.js` |
 | change how Surprise me deals | `RULES` (every number), `FAMILIES` and `RECIPES` (what suits each look) in `deal.js` |
 | change what a layout preset holds | `LAYOUT_PARTS`, `takeParts()`, `takeLayout()`, `putLayout()`, `presetLayout()` and `setPresetLayout()` in `layers.js`, `normalizeLayouts()` in `store.js` |
 | change how the colour block is moved to a side in the preset editor | `sideToward()` and `onSide()` in `layout.js` |

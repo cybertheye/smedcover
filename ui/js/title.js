@@ -174,7 +174,7 @@ function solo(i, like) {
  * letter whole, with what its lettering throws round it (an outline, a rim, its shadow, spikes, drips): it is cut
  * from the line as painted (kerned, effects and all) by the letters' own shapes grown that far, less the bodies of
  * the letters behind (their fill and keyline, and their shadow, painted over a neighbour's), the bodies of those in
- * front kept whole. Most looks letter upright on a slanted line (style.js's upright()): the shapes are grown both
+ * front kept whole. Most looks letter upright on a slanted line (upright() in looks/kit.js): the shapes are grown both
  * slanted and upright, and the bodies taken in the frame the lettering was painted in — upright when paint() turned
  * the line upright. In a column (see inColumn in textfx.js) the shapes are grown, and the bodies taken off, along the
  * shadow as the page has it (fall in style.js: down and to the right, not with the turned line) and along the drips

@@ -212,7 +212,7 @@ export function normalizeLetters(raw) {
 /** The bends a headline may be given whatever its lettering (`bend`, how far: `bendAmt`; see BENDS in textfx.js). */
 export const BEND_IDS = ["arc", "arcLow", "circle", "shell", "bulge", "pinch", "fisheye", "rise", "taper", "wave", "flag"];
 // Four of those were looks' letterings, offered in the menu by name; the menu no longer has them, and
-// their looks have post effects doing what they did (see elementFx in style.js). A text layer that
+// their looks have post effects doing what they did (see elementFx in looks/kit.js and each look's file). A text layer that
 // chose one takes that effect instead, at a middling strength; the title keeps the name, and is painted
 // as automatic. (For a day the underline was a look effect too, "editorial.underline": a layer with it
 // on goes back to the menu's Underlined highlight.)

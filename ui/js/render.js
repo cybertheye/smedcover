@@ -1552,7 +1552,7 @@ function paintCover(cv, o) {
         hit = kept.hit;
       } else if (L.o < 1 || dim < 1 || fx.length) {   // paint the layer on its own — its look effects added to it there — then blend it in as a whole
         // a layer with effects gets a canvas held in memory: the effects read it back and copy from it, which
-        // on a canvas kept on the graphics card means a round trip each time (see fxCanvas in style.js)
+        // on a canvas kept on the graphics card means a round trip each time (see fxCanvas in looks/kit.js)
         if (fx.length && !fxScratch) { fxScratch = document.createElement("canvas"); fxScratch.getContext("2d", { willReadFrequently: true }); }
         const scr = fx.length ? fxScratch : (scratch = scratch || document.createElement("canvas"));
         if (scr.width !== cv.width || scr.height !== cv.height) { scr.width = cv.width; scr.height = cv.height; }
@@ -1670,7 +1670,7 @@ function paintCover(cv, o) {
   setFast(false); setDraft(false);
   // where the look's scene objects were placed, for their handles: a run of layers kept between frames (a drag that does
   // not repaint the ground, a draft that repaints only what reads its setting) gives those it placed as it was painted;
-  // each where it was first placed, bottom up, as a still cover places it (see objAt in style.js)
+  // each where it was first placed, bottom up, as a still cover places it (see objAt in looks/kit.js)
   const shown = new Set();
   cv._scene = (scene ? scene.concat(scenePlaced().slice(atPost)) : scenePlaced()).filter((q) => L0.scene && L0.scene[q.key] && !shown.has(q.key) && shown.add(q.key));   // only what the look offers to drag
   cv._titleBox = env.titleBox || (noted && cv._titleBox) || null;
