@@ -3175,6 +3175,14 @@ function fontControl(L, bare = false) {
 
 // ---------- the Layers sheet's list, and the selected layer's properties in the drawer
 let dragId = null;
+/**
+ * Which of the cover's layers the Layers sheet lists, for the session (the chips over the list): all of them, those the
+ * user added (isAdded: the free ones, and copies of layout layers), or the layout's own (isLayout, the ground among
+ * them). While only some are listed, a row is not dragged to re-order: where it would land among those not listed
+ * cannot be shown. A selected layer the list leaves out stays selected, named under the list.
+ */
+const LAYERS_UI = { filter: "all" };
+const LAYER_FILTERS = { all: () => true, mine: isAdded, layout: isLayout };
 function layerRow(L) {
   // the eye and the lock: shown under the pointer and on the selected row, and always when `keep` (not as they start)
   const icon = (svg, keep, title, fn) => el("button", { class: "ic" + (keep ? " keep" : ""), title, innerHTML: svg, onclick: (e) => { e.stopPropagation(); fn(); touch({ cover: true, side: true }); } });
@@ -3183,7 +3191,7 @@ function layerRow(L) {
   const off = S.focus && S.mode === "edit" && !spotIds().includes(L.id);   // FOCUS is on another layer
   // kept to other sizes (see `sizes` in layers.js), or clipped onto a layer that is (a base hides what is clipped onto it): greyed, and said why
   const own = !inSize(L, S.sel), under = base >= 0 && !inSize(S.cover.layers[base], S.sel), away = own || under, note = sizesNote(L);
-  return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}${base >= 0 ? " clip" : ""}${off ? " dim" : ""}${away ? " away" : ""}`, title: off ? t("focus.locked") : own ? t("sizes.awayTip", note) : under ? t("sizes.awayBase", layerName(S.cover.layers[base])) : base >= 0 ? t("layers.clipped", layerName(S.cover.layers[base])) : null, dataset: { id: L.id }, draggable: L.type !== "bg",
+  return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}${base >= 0 ? " clip" : ""}${off ? " dim" : ""}${away ? " away" : ""}`, title: off ? t("focus.locked") : own ? t("sizes.awayTip", note) : under ? t("sizes.awayBase", layerName(S.cover.layers[base])) : base >= 0 ? t("layers.clipped", layerName(S.cover.layers[base])) : null, dataset: { id: L.id }, draggable: L.type !== "bg" && LAYERS_UI.filter === "all",
     onclick: (e) => focusAllows(L.id) && (e.shiftKey ? togglePick(L.id) : selectLayer(L.id)),
     ondragstart: (e) => { dragId = L.id; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", L.id); },
     ondragend: () => { dragId = null; },
@@ -4418,11 +4426,17 @@ function renderSide() {
   if (typing) return;
   const i = L ? here.indexOf(L) : -1, many = group();
   const ib = (svg, title, off, onclick, on = false) => el("button", { class: "ib" + (on ? " on" : ""), title, disabled: off, innerHTML: svg, onclick });
+  // the chips over the list (see LAYERS_UI): every layer, those the user added and the layout's own, each with how many
+  const fk = LAYERS_UI.filter, listed = here.filter(LAYER_FILTERS[fk]);
+  const chip = (k) => el("button", { class: "btn" + (fk === k ? " on" : ""), "aria-pressed": String(fk === k), title: k === "all" ? null : t(`layers.filter.${k}Tip`),
+    onclick: () => { if (LAYERS_UI.filter !== k) { LAYERS_UI.filter = k; renderSide(); } } }, k === "all" ? t("layers.filter.all") : t("layers.filter." + k, here.filter(LAYER_FILTERS[k]).length));
   layerBox.replaceChildren(   // the list, in the Layers sheet, and under it the selected layer and what can be done to it
     el("div", {}, el("div", { class: "lhead" }, cap("layers.title"),
         el("div", { class: "lbtns" }, el("button", { class: "focusbtn v3btn" + (V3.to ? " on" : ""), title: t("v3.tip"), onclick: () => set3d(!V3.to), innerHTML: `${ICONS.stack}<span>${t("v3.label")}</span>` }),
           el("button", { class: "focusbtn" + (S.focus ? " on" : ""), title: t("focus.tip"), onclick: () => setFocus(!S.focus) }, t("focus.label")))),
-      el("div", { class: "layers" }, [...here].reverse().map(layerRow)),
+      el("div", { class: "lfilter" }, el("div", { class: "seg" }, Object.keys(LAYER_FILTERS).map(chip)),
+        fk !== "all" && el("div", { class: "hint" }, t(listed.length ? "layers.filter.reorder" : "layers.filter.none"))),
+      el("div", { class: "layers" }, [...listed].reverse().map(layerRow)),
       el("div", { class: "selbar" },
         el("span", {}, many.length ? t("props.group", many.length) : L ? [t("layers.selected"), el("b", {}, layerName(L))] : t("layers.none")),
         ib(ICONS.dup, t("layers.dup"), !copiable(L) || many.length > 0, duplicateLayer),

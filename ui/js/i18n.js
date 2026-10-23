@@ -342,6 +342,13 @@ const STR = {
   "style.designSaved": ["已设为默认设计", "Saved as the default design"],
 
   "layers.title": ["图层", "Layers"],
+  "layers.filter.all": ["全部", "All"],
+  "layers.filter.mine": ["我加的 {0}", "Mine {0}"],
+  "layers.filter.layout": ["版式 {0}", "Layout {0}"],
+  "layers.filter.mineTip": ["只看你加的图层：照片、文字、素材、纯色，和版式图层的副本", "Only the layers you added: photos, text, assets, colours and copies of layout layers"],
+  "layers.filter.layoutTip": ["只看版式自带的图层（背景也是）", "Only the layout's own layers (the background among them)"],
+  "layers.filter.reorder": ["筛选时不能拖动改顺序，选「全部」再拖", "Some layers only: show All to drag them into a new order"],
+  "layers.filter.none": ["还没有你加的图层：照片、文字和素材在「素材」里加", "You have added no layers yet: photos, text and assets are added from Assets"],
   "layers.dup": ["复制", "Duplicate"],
   "layer.copyOf": ["{0} 副本", "{0} copy"],
   "crop.title": ["裁剪", "Crop"],
