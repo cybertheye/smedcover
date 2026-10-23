@@ -102,6 +102,7 @@ const STR = {
   "odds.looksCap": ["风格 · {0} 个", "Looks · {0}"],
   "odds.off": ["关", "Off"],
   "odds.offTip": ["关掉：不会被抽到", "Off: never dealt"],
+  "odds.lastLook": ["至少要留一个风格能被抽到", "At least one look must keep a chance"],
   "odds.dotsOf": ["「{0}」被抽到的机会", "How likely {0} is"],
   "odds.moreLooks": ["还有 {0} 个风格 ›", "{0} more looks ›"],
   "odds.filter.all": ["全部 {0}", "All {0}"],
@@ -1151,3 +1152,5 @@ export function t(key, ...args) {
 }
 /** Every key, for tests. */
 export const keys = () => Object.keys(STR);
+/** A string in both languages, [zh, en]: for a search that finds what is typed in either. */
+export const bothLangs = (key) => [...(STR[key] || [])];

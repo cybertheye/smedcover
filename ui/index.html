@@ -829,7 +829,7 @@
   .gref span{flex:1;min-width:0}
   .gref.empty{justify-content:center;height:64px;border:1.5px dashed rgba(255,255,255,.22);background:transparent;cursor:pointer;font-size:13px}
   .gref.empty:hover{border-color:rgba(255,255,255,.45);color:#fff}
-  .gresult{display:grid;gap:12px;min-width:0}
+  .gresult{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;min-width:0}   /* its column no wider than the window gives it: the strip scrolls instead */
   .gempty{min-height:300px;display:grid;place-items:center;text-align:center;padding:20px;border:1.5px dashed rgba(255,255,255,.2);border-radius:16px;font-size:13px;color:var(--text3)}
   .gempty.busy{border-style:solid;color:var(--text);animation:pulse 1.6s ease-in-out infinite}
   .gempty .err{color:#ff7a88}
@@ -844,10 +844,10 @@
   .gmade-cap{font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:-4px}
   .gfoot{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
   .gfoot .gacts{margin-left:auto}
-  .gmade{display:flex;align-items:flex-start;gap:10px;min-width:0}
+  .gmade{display:flex;align-items:flex-start;gap:10px;min-width:0;flex:1 1 240px}
   .gmade .cap{margin:0;white-space:nowrap;line-height:54px}   /* beside the first row of thumbnails */
-  .gthumbs{display:flex;flex-wrap:wrap;gap:8px}
-  .gthumb{width:72px;height:54px;padding:0;border:0;border-radius:10px;overflow:hidden;background:rgba(0,0,0,.3);box-shadow:0 0 0 1px rgba(255,255,255,.15);cursor:pointer;display:grid;place-items:center}
+  .gthumbs{display:flex;gap:8px;overflow-x:auto;min-width:0;padding-bottom:4px}   /* one row, scrolled: the actions stay in view */
+  .gthumb{flex:none;width:72px;height:54px;padding:0;border:0;border-radius:10px;overflow:hidden;background:rgba(0,0,0,.3);box-shadow:0 0 0 1px rgba(255,255,255,.15);cursor:pointer;display:grid;place-items:center}
   .gthumb:hover{box-shadow:0 0 0 1px rgba(255,255,255,.5)}
   .gthumb.on{box-shadow:0 0 0 2px var(--acc)}
   .gthumb:disabled{opacity:.45;cursor:default;box-shadow:0 0 0 1px rgba(255,255,255,.15)}

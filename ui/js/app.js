@@ -4,7 +4,7 @@ import { fonts, clamp } from "./cel.js";
 import { virtualSize, layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot, ORIENTS, orientOf, orientOfKey, layoutOf, ownLayout, setLayoutOf, followLayout, layoutByOrient, SIDES, sideOf, sideToward, sideLike, scaleBlock, sizeOfKey } from "./layout.js";
 import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles, showsFrame, sceneHandleAt, coverLayout, partsOf, coverAt } from "./render.js";
 import { csvToJobs } from "./csv.js";
-import { t, setLang, getLang, detectLang } from "./i18n.js";
+import { t, setLang, getLang, detectLang, bothLangs } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont } from "./store.js";
 import { platformsFor } from "./platforms.js";
@@ -579,8 +579,9 @@ function layerAt(e) {
   // with the layout's parts framed (see placeFrames), a press inside a frame takes that part — the smallest, where frames
   // lie one in another — unless what is hit is smaller still (a sticker on the title): so a part lying under another,
   // or under a picture, is reached by its frame
-  const part = partsFramed() && cv._hits.filter((h) => framable(h) && hitAt([h], p.x, p.y, ok, 0)).sort((a, b) => area(a) - area(b))[0];
-  const pick = part && (!hit || area(hit) > area(part)) ? part : hit;
+  // its frame is its box, as drawn: for the colour block, the slanted edge aside; and a press on the selected layer stays its own
+  const part = partsFramed() && cv._hits.filter((h) => framable(h) && hitAt([{ ...h, poly: null }], p.x, p.y, ok, 0)).sort((a, b) => area(a) - area(b))[0];
+  const pick = part && !(mine && hit === mine) && (!hit || area(hit) > area(part)) ? part : hit;
   return pick ? layer(pick.id) : layer("bg");
 }
 /** The pointer over a selected layer's handles (see handles in render.js): on the canvas, and in a layout preset's editor. */
@@ -1401,7 +1402,7 @@ function matches(q, ...texts) {
  */
 function assetsFound(q) {
   const folder = new Map(S.assetFolders.map((f) => [f.id, f.name])), group = new Map(STICKER_GROUPS.map((g) => [g.id, g.name]));
-  const photos = new Set(S.library.filter((e) => matches(q, e.name, t("lib.kind." + e.kind))).map((e) => e.pid));
+  const photos = new Set(S.library.filter((e) => matches(q, e.name, bothLangs("lib.kind." + e.kind), bothLangs("lib.chip." + e.kind).map((w) => w.replace("{0}", "")))).map((e) => e.pid));
   const stickers = STICKERS.filter((s) => matches(q, s.name.zh, s.name.en, Object.values(group.get(s.group) || {})));
   const graphics = GRAPHICS.filter((g) => matches(q, g.name.zh, g.name.en));
   const mine = [...userAssets.values()].filter((a) => matches(q, a.name, Object.values((a.spec && a.spec.name) || {}), folder.get(a.folder) || ""));
@@ -1629,8 +1630,8 @@ async function checkImageAi(cfg) {
   return aiTracked("image", cfg, async () => {   // its light: red when it failed; "cannot tell" is no failure
     let r = await ask(false);
     if (r.again) r = await ask(true);
-    return { ok: r.ok, text: t("img.check." + r.key, cfg.model) + (r.detail ? ` (${r.detail})` : "") };
-  }, (r, err) => !!err || r.ok === false);
+    return { ok: r.ok, key: r.key, text: t("img.check." + r.key, cfg.model) + (r.detail ? ` (${r.detail})` : "") };
+  }, (r, err) => (err ? true : r.key === "notListed" || r.key === "noList" ? null : r.ok === false));
 }
 /**
  * Sends a prompt, with a picture or without (`pic` null: a new picture is made), to the image model
@@ -2227,14 +2228,15 @@ function aiLightsSync() { for (const n of document.querySelectorAll("[data-ai]")
  */
 async function aiTracked(k, cfg, run, failed = (out, err) => !!err) {
   const sig = aiSig(k, cfg), L = AI_LIGHT[k];
-  if (sig !== aiSig(k)) return run();
+  if (sig !== aiSig(k) || SELFTESTING) return run();   // a request with other settings, or the self-test's, says nothing of the user's
   let out, err = null;
   L.busy++; aiLightsSync();
   try { return (out = await run()); }
   catch (e) { err = e; throw e; }
   finally {
     L.busy--;
-    if (aiSig(k) === sig) { if (failed(out, err)) L.failed = sig; else { L.failed = ""; L.worked = sig; } }
+    const verdict = aiSig(k) === sig ? failed(out, err) : null;   // null: nothing learnt either way
+    if (verdict === true) L.failed = sig; else if (verdict === false) { L.failed = ""; L.worked = sig; }
     aiLightsSync();
   }
 }
@@ -2603,7 +2605,11 @@ function oddsLooks(sv, layouts, put, reset, again) {
     }
     for (const [k, b] of seg) b.textContent = t("odds.filter." + k, count(k, o));
   };
-  const setDots = (k, d) => { put(withDots(mine(), k, Math.min(N, Math.max(0, d)), LOOK_IDS)); show(); };
+  const setDots = (k, d) => {
+    const next = withDots(mine(), k, Math.min(N, Math.max(0, d)), LOOK_IDS);
+    if (!LOOK_IDS.some((id) => next[id] > 1e-9)) return toast(t("odds.lastLook"));   // none left: a group of none would deal every look alike
+    put(next); show();
+  };
   const card = (k) => {
     const name = LOOKS[k].name[lang], pct = el("span", { class: "pct" });
     const row = el("div", { class: "odots", role: "slider", tabindex: 0, "aria-label": t("odds.dotsOf", name), "aria-valuemin": 0, "aria-valuemax": N,
@@ -2611,7 +2617,7 @@ function oddsLooks(sv, layouts, put, reset, again) {
       onkeydown: (e) => {
         const d = dots(k), to = { ArrowRight: d + 1, ArrowUp: d + 1, ArrowLeft: d - 1, ArrowDown: d - 1, Home: 0, End: N }[e.key];
         if (to == null) return;
-        e.preventDefault(); setDots(k, to);
+        e.preventDefault(); if (Math.min(N, Math.max(0, to)) !== d) setDots(k, to);   // at an end already: a chance between dots stays as it is
       } },
       DOTS.map((_, d) => el("i", { dataset: { d }, title: d ? "" : t("odds.offTip") })));
     const box = el("div", { class: "olook", title: LOOKS[k].about ? LOOKS[k].about[lang] : name }, el("canvas", { class: "lookpic", width: 300, height: 169 }), el("div", { class: "ln" }, el("span", { title: name }, name), pct), row);
@@ -3047,7 +3053,7 @@ function layoutEditor(p, i, fresh = false) {
       el("div", {}, cap("layed.parts"), el("div", { class: "parts" }, LAYOUT_PARTS.map(row)), el("div", { class: "hint", style: "margin:6px 0 0" }, t("layed.partsHint"))),
       el("div", { class: "ls-picked" }, el("span", {}, t("layed.picked", t("layer." + E.sel))),
         !block && el("button", { class: "btn", title: t("layed.resetTip"), onclick: reset }, t("layed.reset"))),
-      // the block: the side it lies on at this size, a button each (as a drag toward that side); its size and slant, and its place, put back
+      // the block: the side it lies on at this size, a button each (as a drag toward that side); its size and slant put back
       block && el("div", { class: "ls-block" },
         el("div", {}, el("label", { class: "cap" }, t("layed.side", ratioText(z.w, z.h))),
           el("div", { class: "seg" }, SIDES.map((v) => {
@@ -3055,8 +3061,7 @@ function layoutEditor(p, i, fresh = false) {
             return el("button", { class: "btn" + (on ? " on" : ""), "aria-pressed": String(on), title: on ? null : t("layed.sideTip"), onclick: () => toSide(v) }, t("layed.side." + v));
           }))),
         E.p.by && E.p.by[z.key] && el("div", { class: "layown" }, el("span", {}, t("style.own")), el("button", { class: "linkbtn", title: t("layed.followTip"), onclick: follow }, t("style.follow"))),
-        el("div", { class: "acts" }, el("button", { class: "btn", title: t("layed.blockResetTip"), onclick: resetBlock }, t("layed.blockReset")),
-          el("button", { class: "btn", title: t("layed.resetTip"), onclick: reset }, t("layed.reset"))),
+        el("div", { class: "acts" }, el("button", { class: "btn", title: t("layed.blockResetTip"), onclick: resetBlock }, t("layed.blockReset"))),   // its place is its side, the buttons above
         el("div", { class: "hint", style: "margin:0" }, t("layed.blockHint")))].filter(Boolean));
   };
   const back = () => { LAYED.redraw = null; closeModal(); if (S.mode === "edit" && S.tab.edit === "layout") renderPanel(); };   // back to the Layout sheet, where the presets are
@@ -3199,11 +3204,11 @@ const lookFinding = () => !!(LOOK_UI.q.trim() || LOOK_UI.tag);
  * the names of its kinds.
  */
 function lookFilter() {
-  const used = LOOK_UI.tag === "used" ? mostUsed() : null, words = LOOK_UI.q.toLowerCase().split(/\s+/).filter(Boolean);
+  const used = LOOK_UI.tag === "used" ? mostUsed() : null, words = folded(LOOK_UI.q).split(/\s+/).filter(Boolean);
   return (id) => {
     if (used ? !used.includes(id) : LOOK_UI.tag && !LOOK_TAGS[id].includes(LOOK_UI.tag)) return false;
     if (!words.length) return true;
-    const L = LOOKS[id], text = [L.name.zh, L.name.en, L.about && L.about.zh, L.about && L.about.en, ...LOOK_TAGS[id].map((k) => t("look.cat." + k))].join(" ").toLowerCase();
+    const L = LOOKS[id], text = folded([L.name.zh, L.name.en, L.about && L.about.zh, L.about && L.about.en, ...LOOK_TAGS[id].flatMap((k) => bothLangs("look.cat." + k))].join(" "));
     return words.every((w) => text.includes(w));
   };
 }
@@ -3218,9 +3223,9 @@ function lookFinder() {
   const find = (e) => { if (e.isComposing) return; LOOK_UI.q = e.target.value; findLooks(); };   // not while a word is being composed (pinyin, kana)
   return el("div", { class: "lookfind" },
     el("label", { class: "lookfind-q" }, ico("search", 16),
-      el("input", { type: "text", value: LOOK_UI.q, placeholder: t("look.searchPh"), "aria-label": t("look.search"), spellcheck: false, autocomplete: "off",
+      el("input", { type: "text", value: LOOK_UI.q, placeholder: t("look.searchPh"), "aria-label": t("look.search"), spellcheck: false, autocomplete: "off", dataset: { k: "lookq" },
         oninput: find, oncompositionend: find,
-        onkeydown: (e) => { if (e.key === "Escape" && e.target.value) { e.stopPropagation(); e.target.value = ""; LOOK_UI.q = ""; findLooks(); } } })),   // Esc empties it first
+        onkeydown: (e) => { if (e.key !== "Escape" || e.isComposing) return; e.stopPropagation(); if (e.target.value) { e.target.value = ""; LOOK_UI.q = ""; findLooks(); } else e.target.blur(); } })),   // Esc empties it first, then leaves it, as the Assets search's does
     chips);
 }
 /** The search or the chip changed: the cards it lets through shown (the profile's own always), the rest hidden, those shown drawn if stale; the line saying none is left when so. */
@@ -4148,10 +4153,10 @@ function lettersOpen(L) {
   const win = $("letterwin") || document.body.appendChild(el("div", { id: "letterwin", role: "dialog", "aria-label": t("props.sec.letters"), onpointerdown: () => { letterHeld = true; } }));
   cropClose(); weaveClose(); brushClose(); if ($("deal") && !$("deal").hidden) dealClose();   // the windows over the left column stand where this one does; Surprise me's covers it
   overLeft(win);
-  S.letterWin = L.id; win.hidden = false;
+  S.letterWin = L.id; win.hidden = false; placeFrames();
   lettersShow(true);
 }
-function lettersClose() { const win = $("letterwin"); if (win) win.hidden = true; S.letterWin = null; }
+function lettersClose() { const win = $("letterwin"); if (win) win.hidden = true; S.letterWin = null; placeFrames(); }
 /**
  * The letter window drawn (again) for its layer as it is now: closed when the layer is gone, lettered
  * otherwise, or no longer selected. Unless `now` (something in it was chosen), not while one of its controls
@@ -4395,10 +4400,10 @@ function weaveOpen(L) {
   const win = $("weavewin") || document.body.appendChild(el("div", { id: "weavewin", role: "dialog", "aria-label": t("weave.title") }));
   lettersClose(); cropClose(); brushClose(); if ($("deal") && !$("deal").hidden) dealClose();   // the windows over the left column stand where this one does; Surprise me's covers it
   overLeft(win);
-  S.weaveWin = L.id; win.hidden = false;
+  S.weaveWin = L.id; win.hidden = false; placeFrames();
   weaveShow(true);
 }
-function weaveClose() { const win = $("weavewin"); if (win) win.hidden = true; S.weaveWin = null; }
+function weaveClose() { const win = $("weavewin"); if (win) win.hidden = true; S.weaveWin = null; placeFrames(); }
 /** What the weave window shows of cut-out L: when it is the same, it is not drawn again. */
 const weaveNow = (L) => JSON.stringify([L.weave, wovenOf(L).map((l) => [l.id, wordsOf(l)]), getLang()]);
 /** The weave window drawn (again) for its cut-out as it is now, or closed (see above); unless `now`, only when what it shows changed. */
@@ -4576,10 +4581,10 @@ function cropOpen(L) {
   const win = $("cropwin") || document.body.appendChild(el("div", { id: "cropwin", role: "dialog", "aria-label": t("crop.title") }));
   lettersClose(); weaveClose(); brushClose(); if ($("deal") && !$("deal").hidden) dealClose();   // the windows over the left column stand where this one does; Surprise me's covers it
   overLeft(win);
-  S.cropWin = L.id; win.hidden = false; CROP.point = CROP.tap = null;
+  S.cropWin = L.id; win.hidden = false; CROP.point = CROP.tap = null; placeFrames();
   cropShow(true);
 }
-function cropClose() { const win = $("cropwin"); if (win) win.hidden = true; S.cropWin = null; }
+function cropClose() { const win = $("cropwin"); if (win) win.hidden = true; S.cropWin = null; placeFrames(); }
 /**
  * The whole of what layer L shows, for the crop window: {im, nw, nh, mask} — a photo's picture (and the mask of its
  * subject when it is cut out), an asset drawn in its colours; null when there is nothing to crop (a photo filling
@@ -5267,7 +5272,7 @@ const hoverHide = () => { HOVER.hidden = true; };
 const FRAMES = el("div", { id: "partframes", hidden: true }), FRAMED = new Map();   // FRAMED: layer id -> its frame and its name's tag
 $("center").append(FRAMES);
 /** Whether the layout's parts are framed now: the Layout sheet shown (not hidden by the drawer in a narrow window), on the flat canvas. */
-const partsFramed = () => S.mode === "edit" && S.tab.edit === "layout" && !sheetHidden() && !V3.on && !S.brushWin && !!S.cover;
+const partsFramed = () => S.mode === "edit" && S.tab.edit === "layout" && !sheetHidden() && !V3.on && !S.brushWin && !S.letterWin && !S.cropWin && !S.weaveWin && !!S.cover;
 /** Whether hit h is of a part that is framed and taken by its frame: a layout layer of the cover's own but the ground, shown and not locked. */
 const framable = (h) => { const L = layer(h.id); return !!L && h.type !== "bg" && isLayout(L) && isPickable(L); };
 /** Frames the layout's parts on the stage (see partsFramed), each but those selected; with FOCUS, only those worked on. */
@@ -5560,12 +5565,23 @@ function progress(total) {
  * toast, unless told) is told.
  */
 async function runExport(jobs, save, onFail = fail) {
-  const prog = progress(jobs.length), pending = new Set();
+  const prog = progress(jobs.length), pending = new Set(), used = new Set();
+  // a name already given in this export (a pattern without the size, or the channel, say) gets the size (as w×h), then a
+  // number; told apart as the disk tells them, regardless of case (one file on APFS and NTFS)
+  const key = (n) => n.normalize("NFC").toLowerCase();
+  const apart = (name, z) => {
+    const dot = name.lastIndexOf("."), ext = dot > 0 ? name.slice(dot) : "", wh = `${z.w}x${z.h}`;
+    const base = (dot > 0 ? name.slice(0, dot) : name) + (name.includes(wh) ? "" : `_${wh}`);
+    let out = name, n = 2;
+    if (used.has(key(out))) out = base + ext;
+    while (used.has(key(out))) out = `${base}-${n++}${ext}`;
+    used.add(key(out)); return out;
+  };
   let done = 0, failed = null;
   try {
     for (const job of jobs) {
       if (prog.cancelled || failed) break;
-      const name = nameFor(job.size, job.cover, job.index);
+      const name = apart(nameFor(job.size, job.cover, job.index), job.size);
       prog.set(done, name);
       await nextPaint();
       const cv = await renderReady(job.size, job.cover, job.index);
@@ -5585,7 +5601,7 @@ async function runExport(jobs, save, onFail = fail) {
 const exportDir = () => (CAN.saveFiles && S.settings.exportDirs[S.profile.id]) || "";
 const keepExportDir = (dir) => { S.settings.exportDirs[S.profile.id] = dir; persistSettings(); };
 /** A folder as it is shown: the home folder as ~. */
-const shortDir = (dir) => dir.replace(/^(\/Users\/[^/]+|\/home\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)(?=[\\/]|$)/, "~");
+const shortDir = (dir) => dir.replace(/^(\/Users\/(?!Shared(?:\/|$))[^/]+|\/home\/[^/]+|[A-Za-z]:\\Users\\(?!Public(?:\\|$))[^\\]+)(?=[\\/]|$)/, "~");
 /** Asks for the folder to export into and keeps it for the profile; resolves with it, or null when none was chosen. */
 async function pickExportDir() {
   try { const dir = await invoke("pick_folder"); if (dir) keepExportDir(dir); return dir || null; } catch (e) { fail(e); return null; }
@@ -5613,6 +5629,7 @@ async function writeJobs(jobs) {
     let err = null, last = "";
     const n = await runExport(jobs, async (bytes, name) => { last = await invoke("write_image", framed(bytes, { dir, name })); }, (e) => { err = e; });
     if (!err) return { n, dir, last };
+    if (/encode|invalid file name|expected a binary body/i.test(String((err && err.message) || err))) { fail(err); return null; }   // a picture not encoded, a name the system refuses: not the folder's fault
     dir = await askOtherDir(dir, err);
   }
   return null;
@@ -5769,9 +5786,12 @@ function setTicked(keys) {
   persistSettings();
 }
 /** The Export window's main button: this channel's cover at the sizes ticked, into one folder. */
+let exportingTicked = false;   // an export of the ticked sizes under way: a second press (a double-click, ⌘E again) waits for it
 function exportTicked() {
   const sizes = S.profile.sizes.filter(ticked);
-  if (sizes.length) exportMany([{ cover: S.cover, index: catIndex() }], sizes);
+  if (!sizes.length || exportingTicked) return;
+  exportingTicked = true;
+  exportMany([{ cover: S.cover, index: catIndex() }], sizes).finally(() => { exportingTicked = false; });
 }
 /**
  * Export: this channel's cover at every size of the profile, each a row with a tick (whether the main button exports
@@ -5897,6 +5917,7 @@ const profileActions = {
     await switchProfile(S.profiles.find((p) => p !== gone).id);   // first: when the other one cannot be shown, nothing is deleted
     S.profiles = S.profiles.filter((p) => p !== gone);
     await deleteProfile(gone).catch(fail);
+    delete S.settings.exportSizes[gone.id]; delete S.settings.exportDirs[gone.id]; persistSettings();
     for (const f of await files.list("covers/" + gone.id).catch(() => [])) await files.remove(`covers/${gone.id}/${f}`).catch(() => null);   // its covers go with it
     syncTop(); renderPanel();
   },
@@ -6414,8 +6435,17 @@ function showSheet(k) {
 const useLook = () => setLook(S.profile.style.look, S.profile.style.lookParams[S.profile.style.look], S.profile.style.lookSeed, !!recordOf(mainPhoto()) || S.profile.style.theme !== "light");
 /** Ink that reads on the channel colour: dark on a light one, white on a dark one (the Export button, the sheet's accents). */
 const inkOn = (hex) => { const [r, g, b] = hexToRgb(hex); return 0.2126 * r + 0.7152 * g + 0.0722 * b > 150 ? "#15151c" : "#ffffff"; };
+let COMPOSING = null;   // the field an input method is putting a word together in (see renderPanel); none once the word is done or the field left
+addEventListener("compositionstart", (e) => { COMPOSING = e.target; }, true);
+addEventListener("compositionend", () => { COMPOSING = null; }, true);
+addEventListener("focusout", (e) => { if (e.target === COMPOSING) COMPOSING = null; }, true);
+// the control the keyboard brought the focus to (Tab, arrows), known as the focus comes: a click's focus is not it (see the keydown listener's Space)
+let KEYFOCUS = null;
+addEventListener("focusin", (e) => { KEYFOCUS = e.target instanceof Element && e.target.matches(":focus-visible") ? e.target : null; }, true);
+addEventListener("pointerdown", () => { KEYFOCUS = null; }, true);
 function renderPanel() {
   if (!S.cover) return;
+  if (COMPOSING && COMPOSING === document.activeElement && $(S.mode === "setup" ? "setpanel" : "panel").contains(COMPOSING)) return later("panel-ime", 150, renderPanel);   // an input method mid-word in it: once the word is done
   endPreview("look", "layout");   // their cards drawn anew
   useLook();
   const panel = $(S.mode === "setup" ? "setpanel" : "panel"), y = panel.scrollTop, held = heldField(panel);
@@ -6508,20 +6538,24 @@ addEventListener("drop", async (e) => {
 });
 addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
+  // the app's own shortcuts (⌘E, ⌘S, ⌘O): ⌘ on a Mac, where Control and a letter move the caret in a field; Ctrl elsewhere
+  const cmd = (MOD_KEY === "⌘" ? e.metaKey : e.ctrlKey) && !e.shiftKey && !e.altKey;
   const a = document.activeElement, typing = /^(INPUT|TEXTAREA|SELECT)$/.test(a && a.tagName);
+  if (cmd && (key === "s" || key === "o")) e.preventDefault();   // never the browser's own Save or Open, wherever they do nothing here
   if (key === "escape" && MENU.open) return closeMenu();
   const m = $("modal");   // a dialog open: Escape is its cancel (but in a text being typed), and no key reaches what lies under it
   if (!m.hidden) {
-    if (mod && key === "e" && !e.shiftKey && !e.altKey && m.querySelector(":scope > .dlg.xp")) { e.preventDefault(); return exportTicked(); }   // the Export window: its sizes ticked, even from its file name
+    if (cmd && key === "e" && m.querySelector(":scope > .dlg.xp")) { e.preventDefault(); if (!e.repeat) exportTicked(); return; }   // the Export window: its sizes ticked, even from its file name; a key held is one press
     if (key === "escape" && !m.dataset.sticky && !(typing && !/^(range|checkbox|radio)$/.test(a.type))) (m.onDismiss || closeModal)();
     return;
   }
   // a project file, from the editor, Surprise me's window not over it: ⌘S even while typing in a field (what is typed is on the cover already)
-  const projKey = mod && !e.shiftKey && !e.altKey && (key === "s" || (key === "o" && !typing));
-  if (projKey && CAN_PROJECT && S.mode === "edit" && S.cover && !SURPRISE.busy && !($("deal") && !$("deal").hidden)) { e.preventDefault(); closeMenu(); return (key === "s" ? projectActions.save() : projectActions.open()).catch(fail); }
+  const projKey = cmd && (key === "s" || (key === "o" && !typing));
+  if (projKey && CAN_PROJECT && S.mode === "edit" && S.cover && !SURPRISE.busy && !($("deal") && !$("deal").hidden)) { if (e.repeat) return; closeMenu(); return (key === "s" ? projectActions.save() : projectActions.open()).catch(fail); }
   if (key === "escape" && S.mode === "setup" && !(typing && !/^(range|checkbox|radio|select-one)$/.test(a.type))) return setMode("edit");
   if (key === "escape" && FTB.pop) { FTB.pop = ""; return renderBar(); }   // the bar's popover first
   if (typing) return;
+  if (key === " " && a && a === KEYFOCUS && a.matches("button,[role=button],[role=checkbox],[role=switch],[role=slider],[role=separator],[role=tab],summary,a[href]")) return;   // the keyboard brought to a control: Space is its own
   if (!S.cover || SURPRISE.busy) return;
   if ($("deal") && !$("deal").hidden) {   // Surprise me's window over the cover: Esc undoes the deal, Space deals again, undo and redo work, no other key reaches the cover
     if (key === "escape") return dealUndo();
@@ -6542,9 +6576,9 @@ addEventListener("keydown", (e) => {
   // Space deals, as Surprise me's button does, with the editor in front: not in the 3D view, nor while something is dragged
   // on the canvas or a window stands over the sheet (the menu, the letter, crop and weave windows); not the button with
   // the focus pressed as well
-  if (key === " " && !mod && !e.altKey && S.mode === "edit" && !MENU.open && !V3.on && !LIVE && !FTB.drag && !S.letterWin && !S.cropWin && !S.weaveWin) { e.preventDefault(); if (!e.repeat) surprise(e); return; }
+  if (key === " " && !mod && !e.altKey && S.mode === "edit" && !MENU.open && !FTB.pop && !V3.on && !LIVE && !FTB.drag && !S.letterWin && !S.cropWin && !S.weaveWin) { e.preventDefault(); if (!e.repeat) surprise(e); return; }
   if (S.mode !== "edit") return;
-  if (mod && key === "e" && !e.shiftKey && !e.altKey) { e.preventDefault(); return exportDialog(); }
+  if (cmd && key === "e") { e.preventDefault(); if (e.repeat) return; closeMenu(); return exportDialog(); }
   const L = layer();
   if (mod && key === "d") { e.preventDefault(); return group().length ? null : duplicateLayer(); }
   if (key === "escape") return V3.to ? set3d(false) : S.focus ? setFocus(false) : selectLayer("bg");
@@ -6724,7 +6758,9 @@ async function testedLooks() {
   return want ? LOOK_IDS.filter((k) => want.includes(k)) : LOOK_IDS;
 }
 /** SMEDCOVER_SELFTEST mode: export real covers in every format through the normal path, report, quit. */
+let SELFTESTING = false;   // the self-test running: its requests and cut-outs leave the AI lights alone (aiTracked)
 async function selfTest(dir) {
+  SELFTESTING = true;
   if (await invoke("selftest_drag").catch(() => false)) return dragTest().catch((e) => invoke("selftest_done", { report: JSON.stringify({ error: String((e && e.stack) || e) }) }));
   const report = { ok: false, files: [], errors: [] }, looks = await testedLooks();
   report.lookIds = looks.length === LOOK_IDS.length ? "all" : looks;
