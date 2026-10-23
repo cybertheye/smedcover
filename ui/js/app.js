@@ -1530,8 +1530,8 @@ async function ensureMask(pid, fresh = false) {
   Object.assign(CUT, { busy: true, error: "", needModel: false }); if (onCoverTab()) renderPanel(); renderSide();
   const img = rec.img;
   try {
-    const png = engine === "vision" ? await invoke("subject_mask", await photoBytes(img))
-      : await invoke("subject_mask_onnx", await photoBytes(img, 2048), { headers: { "x-model": engine } });
+    const png = await aiTracked("cut", engine, async () => (engine === "vision" ? invoke("subject_mask", await photoBytes(img))
+      : invoke("subject_mask_onnx", await photoBytes(img, 2048), { headers: { "x-model": engine } })), (out, err) => !!err && !/no subject/i.test(String(err && err.message ? err.message : err)));   // a photo with no subject found is no fault of the cut-out's
     if (rec.img !== img) return false;   // the picture changed meanwhile
     const src = await readAs(new Blob([png], { type: "image/png" }), "readAsDataURL"), m = await loadImage(src);
     rec.mask = m ? { img: m, src } : null;
@@ -1625,16 +1625,20 @@ async function imageSend(cfg, req, image = true) {
 /** Checks the image service's key and model without making a picture: {ok, text}, ok being true, false or null (cannot tell). */
 async function checkImageAi(cfg) {
   const ask = async (list) => { const a = await imageSend(cfg, imageCheck(cfg, list), false); return readImageCheck(cfg, a.status, a.text, list); };
-  let r = await ask(false);
-  if (r.again) r = await ask(true);
-  return { ok: r.ok, text: t("img.check." + r.key, cfg.model) + (r.detail ? ` (${r.detail})` : "") };
+  return aiTracked("image", cfg, async () => {   // its light: red when it failed; "cannot tell" is no failure
+    let r = await ask(false);
+    if (r.again) r = await ask(true);
+    return { ok: r.ok, text: t("img.check." + r.key, cfg.model) + (r.detail ? ` (${r.detail})` : "") };
+  }, (r, err) => !!err || r.ok === false);
 }
 /**
  * Sends a prompt, with a picture or without (`pic` null: a new picture is made), to the image model
  * and returns the picture that comes back: {src, w, h}. `shape` {w, h} is the shape to ask for when
- * it is not the picture's; asking for it also tells a Gemini model, which otherwise copies the picture's.
+ * it is not the picture's; asking for it also tells a Gemini model, which otherwise copies the picture's. Its light
+ * (aiTracked) is amber meanwhile, and red should it fail.
  */
-async function imageCall(cfg, prompt, pic, shape = null) {
+function imageCall(cfg, prompt, pic, shape = null) { return aiTracked("image", cfg, () => imageMake(cfg, prompt, pic, shape)); }
+async function imageMake(cfg, prompt, pic, shape) {
   const req = buildImageRequest(cfg, prompt, pic, (shape || pic).w, (shape || pic).h, { shape: !!shape });
   let reply = await imageSend(cfg, req);
   // a model that does not take one of the optional settings says so: ask again without it
@@ -2038,7 +2042,7 @@ function imageAiPane() {
   const ep = el("div", { class: "hint", style: "word-break:break-all" }, t("ai.endpoint", imageEndpoint(c)));
   const testBtn = el("button", { class: "btn", disabled: !imageReady(c), onclick: () => test() }, t("ai.test"));
   const set = (k, v, redraw = false) => {
-    S.imageAi = normalizeImageAi({ ...S.imageAi, [k]: v }); REP.test = null; persistImageAi();
+    S.imageAi = normalizeImageAi({ ...S.imageAi, [k]: v }); REP.test = null; persistImageAi(); aiLightsSync();
     if (redraw) return renderPanel();
     ep.textContent = t("ai.endpoint", imageEndpoint(S.imageAi)); testBtn.disabled = !imageReady(S.imageAi);
   };
@@ -2061,8 +2065,9 @@ function imageAiPane() {
 }
 const AI = { target: "", busy: false, error: "", result: null, test: "", job: 0, since: 0, attempt: 1, image: null };   // image: {mime, data, url} of a reference picture
 const AI_RETRIES = 3;                      // extra attempts when a reply does not follow the format
-/** Sends one prompt to the configured endpoint and returns {text, truncated}. Throws with the provider's message. */
-async function aiCall(cfg, system, user) {
+/** Sends one prompt to the configured endpoint and returns {text, truncated}. Throws with the provider's message. Its light (aiTracked) is amber meanwhile, and red should it fail. */
+function aiCall(cfg, system, user) { return aiTracked("text", cfg, () => aiAsk(cfg, system, user)); }
+async function aiAsk(cfg, system, user) {
   const req = buildRequest(cfg, system, user), body = JSON.stringify(req.body);
   const reply = CAN.relay
     ? await invoke("ai_request", { url: req.url, headers: Object.entries(req.headers), body, proxy: cfg.proxy || null, timeout: cfg.timeout })
@@ -2160,20 +2165,92 @@ function aiSection() {
 }
 /** A connection test's outcome, in green when it worked and red when it did not. */
 const testLine = (r) => r && el("div", { class: `hint ${r.ok === true ? "ok" : r.ok === false ? "err" : ""}`, style: "margin-top:-8px;word-break:break-word" }, r.text);
+// ---------- the AI services' lights: grey, not set up; green, set up and its last request or connection test did not
+// fail; amber, a request under way; red, its last request or test failed, until one goes through or its settings
+// change. Lit by the requests the user makes, none made to light it; kept for this session only, nothing saved. Shown
+// in the ⋯ menu's AI (all three as one), beside AI in Settings' nav, and on each card's head in Settings → AI.
+const AI_SERVICES = ["text", "image", "cut"];
+/** For each service: how many of its requests are under way; the settings (aiSig) its last one failed with, and those one went through with. */
+const AI_LIGHT = Object.fromEntries(AI_SERVICES.map((k) => [k, { busy: 0, failed: "", worked: "" }]));
 /**
- * Settings → AI, a card each: the text model (assets from a sentence), the image model (photos repainted or made) —
- * each saying the model it is set to, or that it is not set yet — and the cut-out (done on this computer).
+ * The settings a request of service k is sent by (cfg, else those in force), as a string to compare: how it is sent,
+ * not what is asked for (the text model's notes and kind, the image model's style and notes); the cut-out's way.
+ */
+function aiSig(k, cfg) {
+  if (k === "cut") return cfg || cutEngine();
+  const c = cfg || (k === "text" ? S.ai : S.imageAi);
+  return JSON.stringify(k === "text" ? [c.style, c.baseUrl, c.token, c.model, c.auth, c.maxTokens, c.timeout, c.proxy] : [c.provider, c.baseUrl, c.token, c.model, c.timeout, c.proxy]);
+}
+const aiSetUp = (k) => (k === "text" ? aiReady(S.ai) : k === "image" ? imageReady(S.imageAi) : canCut() && cutReady());
+/** Service k's light: "off", "busy", "err" or "ok". What went before with other settings than these no longer counts. */
+function aiLight(k) {
+  const L = AI_LIGHT[k], sig = aiSig(k);
+  if (L.failed !== sig) L.failed = "";
+  if (L.worked !== sig) L.worked = "";
+  return !aiSetUp(k) ? "off" : L.busy ? "busy" : L.failed ? "err" : "ok";
+}
+/** What service k's light says: green is Connected once a request went through with these settings, Ready till then. */
+function aiSays(k) {
+  const s = aiLight(k);
+  return t(s === "ok" ? (AI_LIGHT[k].worked ? "ai.light.ok" : "ai.light.ready") : "ai.light." + s);
+}
+/** The three lights as one, {s, say}: amber while any works, red when any failed (naming it, when one), green when any is set up (naming those not), else grey. */
+function aiAll() {
+  const s = Object.fromEntries(AI_SERVICES.map((k) => [k, aiLight(k)])), of = (v) => AI_SERVICES.filter((k) => s[k] === v);
+  const names = (ks) => ks.map((k) => t("ai.card." + k)).join(t("ai.light.and")), bad = of("err"), off = of("off");
+  if (of("busy").length) return { s: "busy", say: t("ai.light.busy") };
+  if (bad.length) return { s: "err", say: bad.length === 1 ? t("ai.light.errOf", names(bad)) : t("ai.light.err") };
+  if (off.length === AI_SERVICES.length) return { s: "off", say: t("ai.light.off") };
+  const said = t(AI_SERVICES.some((k) => s[k] === "ok" && AI_LIGHT[k].worked) ? "ai.light.ok" : "ai.light.ready");
+  return { s: "ok", say: off.length ? `${said} · ${t("ai.light.notSetOf", names(off))}` : said };
+}
+const aiDot = (s, say = null) => el("i", { class: "aidot " + s, title: say, role: say ? "img" : null, "aria-label": say, "aria-hidden": say ? null : "true" });
+/** A card's head in Settings → AI: its light, and the model (the cut-out's way) when green, else what the light says. */
+function aiPill(k) {
+  const s = aiLight(k), say = aiSays(k);
+  const what = k === "text" ? S.ai.model : k === "image" ? S.imageAi.model || IMAGE_DEFAULTS[S.imageAi.provider].model : t("cutset.engine." + cutEngine()).split(/[（(]/)[0].trim();
+  return el("span", { class: "state " + s, "data-ai": k, title: s === "ok" ? `${say} · ${what}` : null }, aiDot(s), el("span", {}, s === "ok" ? what : s === "off" ? t("ai.notSet") : say));
+}
+/** Each place a light is shown, built again by aiLightsSync. */
+const AI_SHOW = {
+  text: () => aiPill("text"), image: () => aiPill("image"), cut: () => aiPill("cut"),
+  menu: () => { const a = aiAll(); return el("span", { class: "light", "data-ai": "menu" }, aiDot(a.s), el("span", {}, a.say)); },
+  nav: () => { const a = aiAll(); return el("span", { class: "light", "data-ai": "nav" }, aiDot(a.s, a.say)); },
+};
+/** The lights shown, drawn again as they now are (a request begun or ended, a setting typed in), and nothing else. */
+function aiLightsSync() { for (const n of document.querySelectorAll("[data-ai]")) n.replaceWith(AI_SHOW[n.dataset.ai]()); }
+/**
+ * Runs `run`, a request of service k sent with settings cfg, its light amber meanwhile; then, if those are still the
+ * settings in force, lit by how it went: `failed(out, err)` says whether it failed (by default, when it threw). A
+ * request sent with other settings than the user's (the self-test's) leaves the light alone.
+ */
+async function aiTracked(k, cfg, run, failed = (out, err) => !!err) {
+  const sig = aiSig(k, cfg), L = AI_LIGHT[k];
+  if (sig !== aiSig(k)) return run();
+  let out, err = null;
+  L.busy++; aiLightsSync();
+  try { return (out = await run()); }
+  catch (e) { err = e; throw e; }
+  finally {
+    L.busy--;
+    if (aiSig(k) === sig) { if (failed(out, err)) L.failed = sig; else { L.failed = ""; L.worked = sig; } }
+    aiLightsSync();
+  }
+}
+/**
+ * Settings → AI, a card each: the text model (assets from a sentence), the image model (photos repainted or made) and
+ * the cut-out (done on this computer), each head with its light, saying the model it is set to (the cut-out's way)
+ * or what the light means.
  */
 function aiTab() {
   const card = (k, tip, kids, aside) => el("section", { class: "scard aicard", id: "set-" + k },
     el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("ai.card." + k)), el("small", {}, t("ai.card." + k + "Sub"))), tip && info(tip), aside),
     el("div", { class: "aib" }, kids));
-  const state = (ready, model) => el("span", { class: "state" + (ready ? " on" : "") }, ready ? model : t("ai.notSet"));
   return [
     el("div", { class: "sh" }, el("b", {}, t("tab.ai")), el("span", {}, t("ai.pageSub"))),
-    card("text", t("ai.intro"), textAiPane(), state(aiReady(S.ai), S.ai.model)),
-    card("image", t("img.intro"), imageAiPane(), state(imageReady(S.imageAi), S.imageAi.model || IMAGE_DEFAULTS[S.imageAi.provider].model)),
-    card("cut", t("cutset.intro"), cutPane(), CAN.cut && CAN.folders && el("button", { class: "linkbtn", onclick: () => invoke("reveal_data_dir", { dir: "models" }).catch(fail) }, t("cutset.folder"))),
+    card("text", t("ai.intro"), textAiPane(), aiPill("text")),
+    card("image", t("img.intro"), imageAiPane(), aiPill("image")),
+    card("cut", t("cutset.intro"), cutPane(), [aiPill("cut"), CAN.cut && CAN.folders && el("button", { class: "linkbtn", onclick: () => invoke("reveal_data_dir", { dir: "models" }).catch(fail) }, t("cutset.folder"))]),
   ];
 }
 // ---------- Settings → AI → Cut-out: the way of cutting out, and the BiRefNet models
@@ -2197,7 +2274,7 @@ async function downloadModel(id) {
   Object.assign(CUTDL, { id, done: 0, total: 0, error: "" }); renderPanel();
   try { await invoke("cut_model_download", { id, proxy: S.settings.cutProxy || null }); }
   catch (e) { const msg = String(e && e.message ? e.message : e); CUTDL.error = /cancelled/.test(msg) ? "" : t("msg.failed", msg); }
-  CUTDL.id = ""; await refreshCutModels();
+  CUTDL.id = ""; await refreshCutModels(); aiLightsSync();
   if (S.cutModels.some((m) => m.id === id && m.have)) { CUT.needModel = false; CUT.error = ""; toast(t("cutset.done", t("cutset.engine." + id))); }
   refreshAiPage();
 }
@@ -2236,7 +2313,7 @@ function textAiPane() {
   const ep = el("div", { class: "hint", style: "word-break:break-all" }, where());
   const testBtn = el("button", { class: "btn", disabled: !aiReady(c), onclick: () => test() }, t("ai.test"));
   const set = (k, v, redraw = false) => {
-    S.ai = normalizeAi({ ...S.ai, [k]: v }); AI.test = ""; persistAi();
+    S.ai = normalizeAi({ ...S.ai, [k]: v }); AI.test = ""; persistAi(); aiLightsSync();
     if (redraw) return renderPanel();
     ep.textContent = where(); testBtn.disabled = !aiReady(S.ai);       // typing must not rebuild the form
   };
@@ -3168,8 +3245,8 @@ const counterText = (P) => [P.brand.unit, P.categories.length > 1 ? `${String(ca
 const brandPreview = (P) => [P.brand.name, cat().code && el("i", { style: `background:${cat().color};color:${inkOn(cat().color)}` }, cat().code), el("b", {}, counterText(P))];
 /**
  * Settings → Brand: the profile's name, the brand's name and logo, the number on the brand row (with a preview); then
- * the channels, a card each — colour, name, sub-name, code, graphic, ⋯ to move or delete it — the one on the canvas
- * marked, a click on any showing it there; a card to add one.
+ * the channels, a card each — its grip to drag it among the others (chDrag), colour, name, sub-name, code, graphic, ⋯
+ * to move or delete it — the one on the canvas marked, a click on any showing it there; a card to add one.
  */
 function brandTab() {
   const P = S.profile, lang = getLang(), struct = () => touch({ profile: true, cover: true, panel: true, side: true });
@@ -3178,8 +3255,8 @@ function brandTab() {
   const card = (c, i) => {
     const lib = c.graphic.kind === "graphic" && GRAPHICS.find((g) => g.id === c.graphic.id), here = S.cover.catId === c.id, open = SET_UI.menu === c.id;
     // working on a channel shows that channel on the canvas
-    const show = (e) => { if (!e.target.closest(".more, .chmenu") && S.cover.catId !== c.id) switchChannel(c.id); };   // not its ⋯ and menu: a re-render would take the click
-    const move = (by) => { P.categories.splice(i + by, 0, P.categories.splice(i, 1)[0]); SET_UI.menu = ""; struct(); };
+    const show = (e) => { if (!e.target.closest(".more, .chmenu, .grip") && S.cover.catId !== c.id) switchChannel(c.id); };   // not its ⋯ and menu, nor its grip: a re-render would take the click, or the drag
+    const move = (to) => { P.categories.splice(to, 0, P.categories.splice(i, 1)[0]); SET_UI.menu = ""; struct(); };   // to place `to`: the ⋯ menu's Up and Down, and the card dragged by its grip
     const remove = () => {
       SET_UI.menu = "";
       if (P.categories.length < 2) { renderPanel(); return toast(t("msg.lastCategory")); }
@@ -3191,12 +3268,13 @@ function brandTab() {
     };
     return el("div", { class: "chcard" + (here ? " here" : ""), style: `--c:${c.color}`, onfocusin: show, onpointerdown: show, oninput: show },
       el("div", { class: "chrow" },
+        P.categories.length > 1 && el("span", { class: "grip", title: t("cat.drag"), "aria-hidden": "true", onpointerdown: (e) => chDrag(e, move) }, "⋮⋮"),   // the ⋯ menu's Up and Down do it from the keyboard
         el("label", { class: "swc", title: t("cat.color") }, el("input", { type: "color", value: c.color, oninput: (e) => { c.color = e.target.value; e.target.closest(".chcard").style.setProperty("--c", c.color); document.documentElement.style.setProperty("--acc", c.color); touch({ profile: true }); } })),
         textInput(c.name, (v) => { c.name = v; touch({ profile: true }); }, { placeholder: t("cat.name"), class: "chname" }),
         el("button", { class: "more", title: t("cat.more"), "aria-expanded": String(open), onclick: () => { SET_UI.menu = open ? "" : c.id; renderPanel(); } }, "⋯")),
       open && el("div", { class: "chmenu" },
-        el("button", { disabled: i === 0, onclick: () => move(-1) }, t("cat.up")),
-        el("button", { disabled: i === P.categories.length - 1, onclick: () => move(1) }, t("cat.down")),
+        el("button", { disabled: i === 0, onclick: () => move(i - 1) }, t("cat.up")),
+        el("button", { disabled: i === P.categories.length - 1, onclick: () => move(i + 1) }, t("cat.down")),
         el("button", { class: "danger", onclick: remove }, t("cat.remove"))),
       el("div", { class: "two" },
         pin("cat.subShort", textInput(c.sub, (v) => { c.sub = v; touch({ profile: true }); })),
@@ -3220,7 +3298,7 @@ function brandTab() {
       el("span", { class: "lab" }, t("brand.unit")),
       textInput(P.brand.unit, (v) => { P.brand.unit = v; touch({ profile: true }); redo(); }, { disabled: !P.brand.counter, class: "unit" }),
       P.brand.counter && [el("span", { class: "lab" }, t("brand.preview")), preview]),
-    el("div", { class: "cap" }, t("brand.channelsN", P.categories.length), el("small", {}, t("brand.channelsSub"))),
+    el("div", { class: "cap" }, t("brand.channelsN", P.categories.length), el("small", {}, [P.categories.length > 1 && t("brand.channelsDrag"), t("brand.channelsSub")].filter(Boolean).join(" · "))),
     el("div", { class: "chgrid" }, P.categories.map(card),
       el("button", { class: "chadd", onclick: () => {
         const palette = ["#ffb703", "#fb5607", "#3a86ff", "#a855f7", "#06d6a0", "#ff5fa2"];
@@ -3228,6 +3306,68 @@ function brandTab() {
         struct();
       } }, el("b", {}, t("brand.add")), el("small", {}, t("brand.addSub")))),
   ];
+}
+/**
+ * A channel card dragged by its grip (e, the press on it) in Settings → Brand & channels: the card rises and follows
+ * the pointer, a place in its colour opens where it would go, before or after the card nearest its middle, and the
+ * others make room; let go, it moves there as the ⋯ menu's Up and Down move it (`move(to)`, its place among the
+ * others: one step of undo, the profile saved). The page scrolls when the pointer nears its top or foot. Esc, or the
+ * press taken away (the page drawn again meanwhile), leaves it where it was.
+ */
+function chDrag(e, move) {
+  if (e.button !== 0 || !e.isPrimary) return;
+  e.preventDefault();   // no text chosen, no field left
+  const grip = e.currentTarget, card = grip.closest(".chcard"), grid = card.parentElement, page = grid.closest(".scroll");
+  grip.setPointerCapture(e.pointerId);   // first: should it fail, nothing has changed
+  const others = () => [...grid.children].filter((n) => n.classList.contains("chcard") && n !== card);
+  const from = [...grid.children].filter((n) => n.classList.contains("chcard")).indexOf(card), r = card.getBoundingClientRect();
+  const grab = { x: e.clientX - r.left, y: e.clientY - r.top };
+  let x = e.clientX, y = e.clientY, frame = 0, done = false;
+  const hole = el("div", { class: "chhole", style: `--c:${card.style.getPropertyValue("--c")};min-height:${Math.round(r.height)}px` });
+  card.before(hole);
+  card.classList.add("lifted"); card.style.width = r.width + "px";
+  document.body.classList.add("chdrag");
+  const place = () => {   // the card kept over the grid, under the pointer; the place goes where the card's middle is
+    const g = grid.getBoundingClientRect();
+    const left = clamp(x - grab.x - g.left, 0, Math.max(0, g.width - r.width)), top = clamp(y - grab.y - g.top, -r.height / 2, Math.max(0, g.height - r.height / 2));
+    card.style.left = left + "px"; card.style.top = top + "px";
+    const cx = g.left + left + r.width / 2, cy = g.top + top + r.height / 2;
+    let near = null, best = Infinity;
+    for (const o of others()) {
+      const b = o.getBoundingClientRect(), d = Math.hypot(Math.max(b.left - cx, 0, cx - b.right), Math.max(b.top - cy, 0, cy - b.bottom));
+      if (d < best) { best = d; near = { o, b }; }
+    }
+    if (!near) return;
+    // after it when lower than it; in its row, when right of its middle (one card a row, a narrow window: lower than its middle)
+    const across = getComputedStyle(grid).gridTemplateColumns.split(" ").length > 1;
+    const after = !across ? cy > near.b.top + near.b.height / 2 : cy > near.b.bottom || (cy >= near.b.top && cx > near.b.left + near.b.width / 2);
+    let at = after ? near.o.nextElementSibling : near.o;
+    if (at === card) at = card.nextElementSibling;   // the card itself takes no place while it is up
+    if (at !== hole && at !== hole.nextElementSibling && !(at === card.nextElementSibling && hole.nextElementSibling === card)) grid.insertBefore(hole, at);
+  };
+  const tick = () => {   // near the page's top or foot, it scrolls, the place following
+    if (!card.isConnected) return end(false);   // the page drawn again under it
+    const p = page && page.getBoundingClientRect(), edge = 56;
+    const by = !p ? 0 : y < p.top + edge ? -Math.ceil((p.top + edge - y) / 4) : y > p.bottom - edge ? Math.ceil((y - p.bottom + edge) / 4) : 0;
+    if (by) { const was = page.scrollTop; page.scrollTop += by; if (page.scrollTop !== was) place(); }
+    frame = requestAnimationFrame(tick);
+  };
+  const end = (keep) => {
+    if (done) return;
+    done = true;
+    cancelAnimationFrame(frame); removeEventListener("keydown", esc, true);
+    grip.onpointermove = grip.onpointerup = grip.onpointercancel = grip.onlostpointercapture = null;
+    const to = [...grid.children].filter((n) => n === hole || (n.classList.contains("chcard") && n !== card)).indexOf(hole);
+    hole.remove(); card.classList.remove("lifted"); card.style.left = card.style.top = card.style.width = "";
+    document.body.classList.remove("chdrag");
+    if (keep && to >= 0 && to !== from && card.isConnected) move(to);
+  };
+  const esc = (k) => { if (k.key === "Escape") { k.preventDefault(); k.stopPropagation(); end(false); } };   // before Settings takes it to close
+  addEventListener("keydown", esc, true);
+  grip.onpointermove = (m) => { x = m.clientX; y = m.clientY; place(); };
+  grip.onpointerup = () => end(true);
+  grip.onpointercancel = grip.onlostpointercapture = () => end(false);
+  place(); frame = requestAnimationFrame(tick);
 }
 // a press anywhere but on a channel's ⋯ menu shuts it
 addEventListener("pointerdown", (e) => {   // the page is not drawn again: the press goes on to what it is on
@@ -5317,6 +5457,13 @@ const projectActions = {
   },
   reset() { setCover(channelCover(null, S.profile, S.cover.catId)); S.layerId = "title"; touch({ cover: true, panel: true, side: true }); },
 };
+/**
+ * Whether project files can be had here (the ⋯ menu's Project file, ⌘O and ⌘S): saved through the app's dialog, else
+ * downloaded, which a page that cannot download cannot do; every host opens one with the file picker.
+ */
+const CAN_PROJECT = CAN.saveFiles || "download" in HTMLAnchorElement.prototype;
+/** How a shortcut's key is written: ⌘ on a Mac, Ctrl+ elsewhere. */
+const MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl+";
 
 // ---------- chrome
 function setMode(mode) {
@@ -5553,7 +5700,7 @@ const SHELL_ICONS = {
 const ico = (k, px = 20) => el("span", { class: "ico", style: `display:inline-grid;width:${px}px;height:${px}px`, innerHTML: `<svg viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SHELL_ICONS[k]}</svg>` });
 /**
  * The top bar: the profile and the channel; undo and redo; Surprise me, Export, and the ⋯ menu (the cover's
- * default design and Clear, the profile's settings, the glass, the language).
+ * default design and Clear, the profile's settings, project files, the glass, the language).
  */
 function syncTop() {
   if (!S.profile) return;
@@ -5593,6 +5740,8 @@ function renderMenu() {
   const go = (fn) => () => { closeMenu(); fn(); };
   const item = (label, sub, fn, cls = "") => el("button", { class: "mi " + cls, role: "menuitem", onclick: go(fn) }, el("span", { class: "mt" }, el("span", {}, label), sub && el("small", {}, sub)));
   const page = (k, sub) => item(t("tab." + k), sub, () => { S.tab.setup = k; setMode("setup"); });
+  const keyed = (label, k, fn) => el("button", { class: "mi", role: "menuitem", "aria-keyshortcuts": (MOD_KEY === "⌘" ? "Meta+" : "Control+") + k, onclick: go(() => fn().catch(fail)) },
+    el("span", { class: "mt" }, el("span", {}, label)), el("kbd", { class: "sc" }, MOD_KEY + k));   // its shortcut at its end
   const on = glassOn(), others = S.profiles.filter((p) => p !== S.profile);
   $("menu").replaceChildren(...[
     el("div", { class: "mg" }, t("menu.cover")),
@@ -5601,11 +5750,13 @@ function renderMenu() {
     item(t("menu.clear"), t("top.clearTip"), clearDialog, "danger"),
     el("div", { class: "sep" }),
     el("div", { class: "mg" }, t("menu.profile", S.profile.name)),
-    page("brand", counted("menu.channels", S.profile.categories.length)), page("sizes", counted("menu.sizes", S.profile.sizes.length)), page("ai", t("menu.aiSub")),
+    page("brand", counted("menu.channels", S.profile.categories.length)), page("sizes", counted("menu.sizes", S.profile.sizes.length)), page("ai", AI_SHOW.menu()),
     others.length > 0 && el("button", { class: "mi", role: "menuitem", "aria-expanded": String(!!MENU.profiles), onclick: () => { MENU.profiles = !MENU.profiles; renderMenu(); } },
       el("span", { class: "mt" }, el("span", {}, t("menu.switch"))), el("span", { class: "chev" + (MENU.profiles ? " open" : "") })),
     MENU.profiles && others.map((p) => el("button", { class: "mi sub", role: "menuitem", onclick: go(() => switchProfile(p.id).catch((err) => { fail(err); syncTop(); })) },
       el("span", { class: "mt" }, el("span", {}, p.name), el("small", {}, counted("menu.channels", p.categories.length))))),
+    CAN_PROJECT && [el("div", { class: "sep" }), el("div", { class: "mg" }, t("proj.group")),
+      keyed(t("proj.open"), "O", projectActions.open), keyed(t("proj.save"), "S", projectActions.save)],
     el("div", { class: "sep" }),
     el("div", { class: "row", title: CAN_BLUR ? t("menu.glassTip") : null }, el("span", {}, t("menu.glass")),
       el("button", { class: "tog" + (on ? " on" : ""), role: "switch", "aria-checked": String(on), "aria-label": t("menu.glass"), disabled: !CAN_BLUR, onclick: () => { setGlass(!on, true); renderMenu(); } })),
@@ -5664,7 +5815,7 @@ function syncTabs() {
     $("setnav").replaceChildren(el("div", { class: "cap" }, t("set.title")),
       el("div", { class: "who" }, el("span", { class: "av", style: `background:${cat().color};color:${inkOn(cat().color)}` }, [...(P.name || "?").trim()][0] || "?"),
         el("span", {}, el("b", {}, P.name), el("small", {}, counted("set.profileSub", P.categories.length)))),
-      ...Object.keys(TABS.setup).map((k) => el("button", { class: "sni" + (k === S.tab.setup ? " on" : ""), onclick: () => { S.tab.setup = k; syncTabs(); renderPanel(); $("setpanel").scrollTop = 0; } }, icon[k], t("tab." + k))),
+      ...Object.keys(TABS.setup).map((k) => el("button", { class: "sni" + (k === S.tab.setup ? " on" : ""), onclick: () => { S.tab.setup = k; syncTabs(); renderPanel(); $("setpanel").scrollTop = 0; } }, icon[k], t("tab." + k), k === "ai" && AI_SHOW.nav())),
       el("div", { class: "grow" }),
       el("div", { class: "cap" }, t("set.thisProfile")),
       el("div", { class: "pacts" }, act("new"), act("duplicate"), act("import"), act("export")), act("delete"));
@@ -5786,6 +5937,9 @@ addEventListener("keydown", (e) => {
   if (key === "escape" && MENU.open) return closeMenu();
   const m = $("modal");   // a dialog open: Escape is its cancel (but in a text being typed), and no key reaches what lies under it
   if (!m.hidden) { if (key === "escape" && !m.dataset.sticky && !(typing && !/^(range|checkbox|radio)$/.test(a.type))) (m.onDismiss || closeModal)(); return; }
+  // a project file, from the editor, Surprise me's window not over it: ⌘S even while typing in a field (what is typed is on the cover already)
+  const projKey = mod && !e.shiftKey && !e.altKey && (key === "s" || (key === "o" && !typing));
+  if (projKey && CAN_PROJECT && S.mode === "edit" && S.cover && !SURPRISE.busy && !($("deal") && !$("deal").hidden)) { e.preventDefault(); closeMenu(); return (key === "s" ? projectActions.save() : projectActions.open()).catch(fail); }
   if (key === "escape" && S.mode === "setup" && !(typing && !/^(range|checkbox|radio|select-one)$/.test(a.type))) return setMode("edit");
   if (key === "escape" && FTB.pop) { FTB.pop = ""; return renderBar(); }   // the bar's popover first
   if (typing) return;

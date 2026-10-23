@@ -124,6 +124,9 @@
   #menu .mi .mt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
   #menu .mi .mt small{font-size:11.5px;color:var(--text3);line-height:1.4}
   #menu .mi .sc{font-size:12px;color:var(--text3)}
+  #menu .mi kbd.sc{flex:none;font:500 12.5px -apple-system,"Segoe UI",var(--ui);letter-spacing:.04em}
+  #menu .mi .light{display:flex;align-items:center;gap:6px;min-width:0}
+  #menu .mi .light>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #menu .mi.danger{color:#ff9a8a}
   #menu .mi .chev{flex:none;width:7px;height:7px;margin-right:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);opacity:.5}
   #menu .mi .chev.open{transform:rotate(45deg)}
@@ -574,6 +577,7 @@
   #setnav .sni:hover{background:rgba(255,255,255,.08);color:var(--text)}
   #setnav .sni.on{background:rgba(255,255,255,.16);color:#fff;font-weight:700;box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
   #setnav .sni .dots{width:18px;height:18px;border-radius:50%;flex:none}
+  #setnav .sni .light{display:flex;margin-left:-4px}
   #setnav .who{display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:10px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.05)}
   #setnav .who .av{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none;font-size:14px;font-weight:700}
   #setnav .who>span:last-child{min-width:0;display:flex;flex-direction:column;gap:2px}
@@ -618,10 +622,18 @@
   .pin>span{font-size:12px;color:var(--text3);white-space:nowrap}
   .pin input{border:0;background:transparent;padding-left:0;min-width:0}
   /* the channels, three cards to a row; the one on the canvas outlined in its colour */
-  .chgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .chgrid{position:relative;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
   .chcard{position:relative;display:grid;gap:8px;padding:12px;border-radius:16px;border:1px solid var(--line);background:rgba(255,255,255,.04);min-width:0}
   .chcard.here{border:1.5px solid var(--c);background:color-mix(in srgb,var(--c) 7%,transparent)}
   .chcard .chrow{display:flex;align-items:center;gap:8px}
+  /* a card dragged by its grip (chDrag in app.js) rises over the others and follows the pointer; where it would go, a
+     place in its colour opens and the others make room */
+  .chcard .grip{flex:none;width:16px;height:30px;margin:0 -4px 0 -6px;display:grid;place-items:center;border-radius:7px;color:var(--text3);font-size:12px;letter-spacing:-1px;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+  .chcard .grip:hover{color:var(--text);background:rgba(255,255,255,.08)}
+  .chcard.lifted{position:absolute;z-index:6;background:color-mix(in srgb,var(--c) 10%,var(--solid2));border-color:color-mix(in srgb,var(--c) 60%,transparent);box-shadow:0 24px 56px rgba(0,0,0,.55);transform:scale(1.02)}
+  .chcard.lifted .grip{color:var(--text);background:rgba(255,255,255,.12)}
+  .chhole{border-radius:16px;border:1.5px dashed var(--c);background:color-mix(in srgb,var(--c) 12%,transparent)}
+  body.chdrag,body.chdrag *{cursor:grabbing!important;user-select:none;-webkit-user-select:none}
   .chcard .swc{width:26px;height:26px;border-radius:50%;flex:none;background:var(--c);box-shadow:0 0 0 1px rgba(255,255,255,.3);position:relative;overflow:hidden;cursor:pointer}
   .chcard .swc input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
   .chcard input.chname{flex:1;font-weight:700;min-width:0}
@@ -651,8 +663,18 @@
   /* Settings → AI: a card each, its head saying what it is set to; its fields two by two */
   .aicard{display:grid;gap:14px;align-items:stretch}
   .aih{display:flex;align-items:center;gap:10px}
-  .aih .state{font-size:12px;color:var(--text3);padding:3px 10px;border-radius:999px;border:1px solid var(--line);white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis}
-  .aih .state.on{color:var(--text);border-color:rgba(255,255,255,.3)}
+  .aih .state{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--text3);padding:3px 10px;border-radius:999px;border:1px solid var(--line);white-space:nowrap;max-width:240px}
+  .aih .state>span{overflow:hidden;text-overflow:ellipsis}
+  .aih .state.ok{color:var(--text);border-color:rgba(255,255,255,.3)}
+  .aih .state.busy{color:#ffe29a;border-color:rgba(255,201,60,.4)}
+  .aih .state.err{color:#ffb3a8;border-color:rgba(255,107,91,.45)}
+  /* an AI service's light (aiLight in app.js): grey not set up, green ready, amber at work, red when its last request failed */
+  .aidot{display:inline-block;width:7px;height:7px;border-radius:50%;flex:none;background:rgba(245,245,247,.35)}
+  .aidot.ok{background:#3ddc97}
+  .aidot.busy{background:#ffc93c;animation:aiWork 1.1s ease-in-out infinite}
+  .aidot.err{background:#ff6b5b}
+  @keyframes aiWork{50%{opacity:.3}}
+  @media (prefers-reduced-motion:reduce){.aidot.busy{animation:none}}
   .aib{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px;align-items:start}
   .aib>*{min-width:0}
   .aib>.hint,.aib>.wide,.aib>.aifoot,.aib>.cutrows{grid-column:1/-1}
