@@ -37,7 +37,7 @@ Why it is split this way:
 
 - **What you see is what you export.** Preview and export run the same drawing code; only the pixel count differs.
 - **The drawing code runs in a plain browser**, so development and automated checks do not need the desktop app.
-- **The Rust side is small**, and so is its reach: the interface never gets an arbitrary file path. It can read and write the app data directory, and the places the user picks in a dialog.
+- **The Rust side is small**, and so is its reach: the app data directory is read and written by relative paths only, which cannot leave it (10.1), and outside it the interface writes where the user picked in a dialog. That last rests on the interface: an export folder, once picked, is kept for its profile in `settings.json` (`exportDirs`, see 3) and handed back on every export, and `write_image` checks only that it is an absolute folder (10.2).
 
 ## 2. Files
 
@@ -52,7 +52,7 @@ ui/
   js/stack3d.js      the Layers sheet's 3D view: the stack's projection, fitting, labels and drawing (pure maths but for the drawing)
   js/platforms.js    the platforms covers are made for, as data: the ratios each wants, feed widths, what the apps lay over a cover; the sizes' names (platformsFor)
   js/check.js        the cover standards' rules, pure (the tests hold the layouts to them; meetStandards in layout.js)
-  js/deal.js         Surprise me's rules, all in one place: every number it deals by (RULES), what suits each look (FAMILIES, RECIPES), the chances the user may set over them (oddsOf, rebalance), the layout preset a hand is dealt in (pickLayout), a hand dealt onto a cover (dealCover), pure
+  js/deal.js         Surprise me's rules, all in one place: every number it deals by (RULES), what suits each look (FAMILIES, RECIPES), the chances the user may set over them (oddsOf, rebalance; moveShare for the chances window's bars, DOTS, dotsOf and withDots for its dots), the layout preset a hand is dealt in (pickLayout), a hand dealt onto a cover (dealCover), pure
   js/textfx.js       text effects: layered, masked, outlined and letter by letter
   js/ransom.js       the ransom note: each letter in a face, on a paper, at an angle of its own
   js/outlines.js     cache of glyph outlines (fetched from the Rust side)
@@ -61,7 +61,7 @@ ui/
   js/cel.js          cel-shading kit and the first five channel graphics
   js/graphics.js     fifteen more channel graphics
   js/stickers.js     the 72 stickers (twelve of them frames), and the shared painters
-  js/style.js        looks: the hooks a look may have, the registry (LOOKS) and the API the app imports
+  js/style.js        looks: the hooks a look may have, the registry (LOOKS), the kinds the Look sheet sorts them by (LOOK_CATEGORIES, LOOK_TAGS) and the API the app imports
   js/looks/kit.js    what the looks share: helpers, scene objects, the current look's state (setLook), effects' machinery
   js/looks/<id>.js   one file per look (cel, cyber, riso … wasteland, facet): its object, helpers and layer effects
   js/spec.js         stickers described as data: validation and interpreter (AI-generated assets)
@@ -120,12 +120,20 @@ hand-edited files cannot crash the app.
 Earlier data: there used to be one cover, `session.json`, shared by every channel, whose layers could be kept to some channels with `cats`. While the current profile has no channel covers yet, `migrateSession()` splits it: one copy per channel, `channelCover()` keeping only the layers on that channel and dropping `cats`, the title and tag copied to each; the old file is renamed `session.migrated.json`, and `session-photo*` is first turned into a photo layer by `upgradeCover`, then deleted.
 
 **Settings** (`settings.json`): language, current profile, the channel each profile was last on
-(`channels`), export scale, format, JPEG quality, file name pattern, adjustment scope (`scope`: `all`, `orient` or `size`, see 4.1), and the user's own
+(`channels`), export scale, format, JPEG quality, file name pattern (`nameTemplate`, the one string whether it is edited
+as tags or as text, see 9.5), and by profile id the sizes the Export window leaves unticked (`exportSizes`:
+`{profile id: {size key: false}}`, only those unticked, so a size not named — one added since — is ticked; a profile with
+none unticked is not kept; `normalizeExportSizes`) and the folder its exports go into (`exportDirs`: `{profile id: path}`,
+none until the first export picks one); adjustment scope (`scope`: `all`, `orient` or `size`, see 4.1); how many times
+each look was made a profile's on this computer, by its card or by a hand of Surprise me kept (`lookUse`: whole counts,
+only of looks there are and above 0 — the Look sheet's ★ Most used, 9.5); and the user's own
 Surprise me chances of each look's optional parts (`recipes`: {look: {params}}, only what was changed, checked by `normalizeRecipes`; see `deal.js`),
-and what Surprise me keeps (`surprise`: the parts to leave alone, `locks`; the chances set in Surprise me's
+and what Surprise me keeps (`surprise`: the parts to leave alone, `locks`, of `SURPRISE_LOCKS` — `look`, `theme`,
+`lettering`, `places`, `layout`; the chances set in Surprise me's
 chances, `odds`, only what was set; see `normalizeSurprise`), and the user's layout presets (`layouts`, below); and of
 the window (9.5), whether its panes are frosted glass (`glass`), whether the properties drawer is open (`drawer`) and the
-widths its columns were dragged to (`columns`).
+widths its columns were dragged to (`columns`). Deleting a profile (`profileActions.delete()`) drops its entries in
+`exportSizes` and `exportDirs`.
 
 **Layout presets** (`settings.layouts`, for every profile, as the chances are): where a cover's parts stand, without its
 look, which Surprise me deals by its chance (see 9.4) and which can be put on the canvas as it is.
@@ -202,7 +210,7 @@ profiles or projects).
 
 A **profile file** (`.smedprofile.json`, version 3): `{app, kind: "profile", version, profile, assets, fonts}`; a whole backup adds `covers` (`{channel id: cover}`), `photos` (`{pid: {src, original, mask}}`) and `channel` (the one it was on). `exportProfile()` writes it, `profileActions.import()` reads it: always a new profile (a new id, the same channel ids), its covers checked by `channelCover()` and written under `covers/<new id>/`, the pictures into the photo store and the library.
 
-A **project file** (`.smedcover.json`, version 4; opened and saved from the ⋯ menu's *Project file*, or with ⌘O and ⌘S — Ctrl off the Mac, ⌘S even while typing — where the host can save files, `CAN_PROJECT`): `{app, kind: "project", version, profileName, profile, catId, cover, photos, assets, fonts}`. Opening one (`projectActions.open()`): with a profile of that id here, it goes to that profile and channel `catId`; without, `askProjectProfile()` asks whether to import it as a new profile or put it into the current one; version 3 and before have no `profile` and open on the channel on the canvas. `commitHistory()` runs first, so it can be undone.
+A **project file** (`.smedcover.json`, version 4; opened and saved from the ⋯ menu's *Project file*, or with ⌘O and ⌘S — Ctrl off the Mac, ⌘S even while typing — where the host can save or download a file, `CAN_PROJECT`): `{app, kind: "project", version, profileName, profile, catId, cover, photos, assets, fonts}`. Opening one (`projectActions.open()`): with a profile of that id here, it goes to that profile and channel `catId`; without, `askProjectProfile()` asks whether to import it as a new profile or put it into the current one; version 3 and before have no `profile` and open on the channel on the canvas. `commitHistory()` runs first, so it can be undone.
 
 Both carry the user's assets they use (`embedAssets`) and imported fonts (`embedFonts`: those a layer's `font` names that are in `S.importedFonts`; `adoptFonts` installs the ones this computer lacks, into `fonts/`).
 
@@ -664,7 +672,7 @@ There are four kinds, differing in what they can change:
 | Outlined | each letter's outline is fetched as points, and filled as shapes | the letterforms: extruded with real depth, or their edges reshaped (spiky, torn, scissor-cut, melting, puffed up, eaten away) |
 | Letter by letter | each letter drawn on its own, in the place the line's font gives it | each letter's face, paper, ink and angle: the ransom note |
 
-The menu, `EFFECTS`, holds the typesetting effects and the editorial look's Underlined highlight, which has to know the highlighted words and so can only be lettering. Sticker (`sticker()`) is strokes alone — a shadow, a dark line, a white rim and a keyline, each a pass of thick round-joined strokes under the fill — so the rim runs the letters together and fills their small gaps without outlines. An effect may be listed under another group than its kind's (`menu`): Extruded, drawn from outlines, is listed with the layered letterings it looks like, so the Outlined group holds the reshaped edges. An effect marked `seeded` draws its letters from the layer's `fxSeed`, which *Reshuffle* (shown under the effect for every seeded one) deals again: the ransom note and the reshaped edges but Puffed up. A look's lettering is what *auto* uses. Sliced, Overprint, Double keyline and Sunlit block were in the menu once; what they do is their looks' post effects now (see 7.4), for any layer: `layers.js` still knows the names (`TEXT_EFFECTS`), turns them into the matching post effect on a text layer (at 0.6), and keeps them on the title, painted as *auto*.
+`EFFECTS`, what the Effect group offers (as cards, each the layer's first letter drawn in the effect: `fxCards()`, see 9.5), holds the typesetting effects and the editorial look's Underlined highlight, which has to know the highlighted words and so can only be lettering. Sticker (`sticker()`) is strokes alone — a shadow, a dark line, a white rim and a keyline, each a pass of thick round-joined strokes under the fill — so the rim runs the letters together and fills their small gaps without outlines. An effect may be counted with another group than its kind's (`menu`), which sets where its card comes (`FX_ORDER`, the groups in turn): Extruded, drawn from outlines, goes with the layered letterings it looks like, so the Outlined group holds the reshaped edges. An effect marked `seeded` draws its letters from the layer's `fxSeed`, which *Reshuffle* (shown under the effect for every seeded one) deals again: the ransom note and the reshaped edges but Puffed up. A look's lettering is what *auto* uses. Sliced, Overprint, Double keyline and Sunlit block were in the menu once; what they do is their looks' post effects now (see 7.4), for any layer: `layers.js` still knows the names (`TEXT_EFFECTS`), turns them into the matching post effect on a text layer (at 0.6), and keeps them on the title, painted as *auto*.
 
 **Where outlines come from** — a web view cannot read the outlines in a font file, so the Rust side
 supplies them. The `text_outline` command parses the font with `ttf-parser`, flattens curves to
@@ -1376,6 +1384,33 @@ Built-in styles are Markdown files in `ui/repaint-styles/`: the file name is the
 
 `repaintPrompt` puts the prompt together: the style source (the current look's `repaint(colour)`, a built-in style's file, or the user's words), then "this is a cover background: no text or border, keep the shape", then any extra words. Following a look also asks to keep the composition, so the background layer's placement still fits; presets and custom text decide composition themselves. When the service refuses an optional setting (size, watermark…) with a 400, `refusedParam` finds its name in the message and the request goes again without it, at most three times. The connection test (`imageCheck` / `readImageCheck`) makes no picture: OpenAI and Gemini are asked about the model with a GET, Seedream is sent an empty prompt and its refusal read; `ai_request` can send a GET for this. The user's own styles are Markdown files of the same form in the app data folder `repaint-styles/` (`userStyle` reads them leniently — no header or unknown keys are fine, and unknown keys are kept, so `writeStyle` loses nothing), read again when the window comes back to the front; `reveal_data_dir` opens that folder in the file manager. The `styles` / `custom` that `image-ai.json` held earlier are written out as files once at start (`legacyStyles`). A repaint always starts from the original, kept as the picture record's `original` (`photos/<pid>.original` in the session, `photos.<pid>.original` in project files).
 
+### 8.6 The AI lights (`app.js`)
+
+Each of the three services (`AI_SERVICES`: `text`, `image`, `cut`) has a light, worked out from what the requests the
+user made did, and from nothing else: no request is sent to light it, and nothing of it is saved. `AI_LIGHT[k]` holds
+how many of its requests are under way (`busy`) and the settings its last one failed with (`failed`) and the settings
+one went through with (`worked`), each as `aiSig(k, cfg)`: how a request is sent — the text model's style, address,
+token, model, authentication, output limit, timeout and proxy; the image model's service, address, token, model,
+timeout and proxy; the cut-out's way — not what it asks for, so a new description or kind of sticker changes nothing.
+`aiLight(k)` compares them with the settings in force, so what went before with other settings no longer counts, and
+answers `off` (not set up: `aiSetUp()`, `aiReady()`, `imageReady()`, or `canCut()` with `cutReady()`), `busy`, `err` or
+`ok`; `aiSays(k)` words it, green being *Connected* once a request went through with these settings and *Ready* till
+then; `aiAll()` makes the three one (amber while any works, red when any failed — named when it is one — grey when none
+is set up, else green, with those not set up named).
+
+Every request goes through one wrapper, `aiTracked(k, cfg, run, failed)`: the light amber meanwhile (`busy` counted, so
+two at once do not put it out early), then, if the settings it was sent with are still those in force, red or green by
+`failed(out, err)` (by default: it threw) — `true` a failure, `false` a request that went through, `null` nothing learnt
+either way, which leaves `failed` and `worked` as they were. The ways in are wrapped where they are made, so no caller can miss it:
+`aiCall()` is `aiTracked("text", …)` round `aiAsk()` (the stickers and graphics, and *Test connection*'s ping);
+`imageCall()` round `imageMake()` (repaints and generated photos); `checkImageAi()`, the image model's test, for which a
+model missing from the service's list (`notListed`) or a service that lists none (`noList`) is `null`, neither a failure
+nor proof that it works; and the cut-out in `ensureMask()`, counting a photo with no subject found as no failure. A
+request sent with settings other than those in force, and every request of the self-test (`SELFTESTING`, against its
+stand-in server and on its own photos), leaves the lights alone. Where it is shown, each place is an element marked `data-ai` (`AI_SHOW`: the cards' heads, `aiPill()`, the ⋯
+menu's line under *AI* and the dot beside *AI* in Settings' nav), and `aiLightsSync()` builds those again, and nothing
+else, as a request begins or ends, a setting is typed (the text and image panes' `set`) or a model has downloaded.
+
 ## 9. Interaction (`app.js`)
 
 ### 9.1 State and refresh
@@ -1402,7 +1437,7 @@ and `swatch()` a small colour swatch (optionally automatic).
 
 ### 9.2 Working on the canvas
 
-- The pointer position is converted to virtual coordinates and tested against `canvas._hits`, top first. The point is rotated back into each layer's own frame, so rotated layers are hit accurately.
+- The pointer position is converted to virtual coordinates and tested against `canvas._hits`, top first. The point is rotated back into each layer's own frame, so rotated layers are hit accurately. `layerAt()` takes the topmost layer that may be picked (`isPickable()`: shown, not locked, not the corner brackets), the selected one keeping the grab under anything at least as big; and while the layout's parts are framed on the canvas (`partsFramed()`, the Layout sheet in front, see *The layout's parts framed* in 9.5), a press inside a part's frame — its hit's whole box, as the frame is drawn, with no margin round it and the colour block's slanted outline (`poly`) set aside (`hitAt([{ ...h, poly: null }], …, 0)`) — takes that part, the smallest where frames lie one in another, unless what was hit is smaller still, or is the selected layer, whose grab stays its own: so a part under another layer, or under a photo filling the canvas, is reached by its frame, and a sticker set on the title still by itself.
 - *Hide every layout part* (a switch at the foot of the Layout sheet, `toggleLayout()`) hides every layout layer on this channel's cover (`layoutLayers()`: the layout's own, `isLayout()`, neither free layers nor copies of layout layers) and remembers, in memory and per cover object, which of them were showing (`LAYOUT_HID`); while all are hidden the switch is on, and turned off it brings back just those, or all of them when there is no record (after a change of channel, say). It sets the layers' `visible`, so the eye icons agree and undo works.
 - *3D layers* (`set3d()`, the state in `V3`, not saved) puts a canvas of its own (`#cv3d`) over the stage, the cover's canvas hidden and not painted under it. Each layer on this channel's cover is painted alone (`drawCover`'s `o.only`: shown even when hidden, kept to its base's shape when clipped onto one, the cover's main photo and theme still set by what is really shown, no look painted over it all) into a sheet in `V3.sheets`, with a small copy of its alpha (`maskOf()`). `stack3d.js` draws them as an axonometric stack — no perspective, so each sheet is one affine transform, and `sheetUnder()` maps a point back onto each sheet exactly, front to back, until a mask says the layer has something there. `drawMain()` hands over to `paint3d()`, which paints again only the sheets that changed: none when only the selection did (`queueDraw(false)`, from `selectLayer` and `pickLayers`), the dragged ones and what is clipped with them while a layer's slider holds `LIVE`, all of them otherwise; `draw3d()` composes the sheets, and `tick3d()` runs it per frame while something eases: opening out of the flat cover and folding back into it (`V3.k`; flat, the stack fits the box the canvas has, so the two meet), a sheet sliding to a new place in the stack (`V3.z`), the scale (held while the view is dragged, then eased to fit), *Reset view*. A pointer on a row of the list (`layerBox`'s pointermove, in the Layers sheet) dims the other sheets; the sheet under the pointer marks its row (`markRows()`). While it is open the bar over the canvas is away; opening Settings closes it at once (`close3d()`). Opening it closes the weave's brush (`brushClose()`), which
 paints on the flat canvas, as opening the brush (`brushOpen()`) closes it.
@@ -1454,9 +1489,14 @@ does not count) cancels it: the dialog's own `m.onDismiss` if it waits on an ans
 a project opens with: as its *Cancel*), else just closing. A `data-sticky` one does not answer: the
 first-run welcome, an export's progress.
 
-*Surprise me* (`surprise()`) deals `RULES.hands.count` hands, six (`dealHand()`), each in a look of its own while a look with a chance is left (those dealt so far in the run go in as `env.not`), shows each in its window as it comes, and puts the first on the canvas; nothing is measured or scored. Hands go back onto the objects there are (the style, each layer by id), a hand that throws is left out, and if none can be dealt the cover is put back. Each hand is dealt by `dealCover(style, cover, env)` in `deal.js`, which holds all of Surprise me's rules: `RULES`, every number it deals by (how many hands and how fast they show; `RULES.odds`, the chances the user may set; the sliders, the scene objects, what the cover brings, the letterings; the lettered layers' outline and shadow; the look effects; the places of the user's layers), so a number changed there changes the hands; `FAMILIES` and `RECIPES`, what suits each look; and the order a hand is dealt in — the layout (the canvas's, or a layout preset of the user's), the look and its seed, its sliders, its scene objects, the ground, the words put back (unless where things stand is locked), the title on top, each layer's own choices and letterings, look effects. `app.js` keeps only what needs the cover drawn: `surprise()`, `dealHand()` (`dealCover()`, then the user's layers placed by `dealPlaces()`, which reads `RULES.places`), the window (see 9.5), and the window and the sheet the chances are set in.
+*Surprise me* (`surprise()`, from its button or Space, see *Keys* in 9.5) deals `RULES.hands.count` hands, six (`dealHand()`), each in a look of its own while a look with a chance is left (those dealt so far in the run go in as `env.not`), shows each in its window as it comes, and puts the first on the canvas; nothing is measured or scored. Hands go back onto the objects there are (the style, each layer by id), a hand that throws is left out, and if none can be dealt the cover is put back. Each hand is dealt by `dealCover(style, cover, env)` in `deal.js`, which holds all of Surprise me's rules: `RULES`, every number it deals by (how many hands and how fast they show; `RULES.odds`, the chances the user may set; the sliders, the scene objects, what the cover brings, the letterings; the lettered layers' outline and shadow; the look effects; the places of the user's layers), so a number changed there changes the hands; `FAMILIES` and `RECIPES`, what suits each look; and the order a hand is dealt in — the layout (the canvas's, or a layout preset of the user's), the look and its seed, its sliders, its scene objects, the ground, the words put back (unless where things stand is locked), the title on top, each layer's own choices and letterings, look effects. `app.js` keeps only what needs the cover drawn: `surprise()`, `dealHand()` (`dealCover()`, then the user's layers placed by `dealPlaces()`, which reads `RULES.places`), the window (see 9.5), and the window and the sheet the chances are set in.
 
-The chances, `RULES.odds`, are of two kinds. `groups`, of which one option is dealt, their chances adding up to 1 (`ODD_OPTIONS`): the look (every look alike unless set), the colour block's shape (likewise), how many look effects a layer but the title and subtitle is given (none, one, two), and whether each is the look dealt's or another look's; and, for every look alike, the title's lettering (`own`, the look's own, or another), its bend (`none`, or one) and the ground (dark, light) — left empty in `RULES.odds`, they are what the looks' recipes give on average over the looks (`builtInGroup()`). `chances`, switches each on by a chance of its own: the brand row's rail; the plates under the channel name, the subtitle, a text layer; an asset tinted; the scene objects moved; the subtitle lettered like the title; and what a look's optional parts default to (`extra`, `toggleOn`, `toggleOff`, for a look whose recipe sets none: `partChance()`). What the user sets in Surprise me's chances (`oddsDialog()` in `app.js`, a window of its own, opened from Surprise me's window and the Look sheet: each group a card, the looks first — all of them, the more likely or those off — and every long group folded to its likeliest options with the rest's sum until unfolded, `ODDS_UI`) is kept in `settings.surprise.odds` ({groups, chances}, only what was set); `oddsOf()` lays it over `RULES.odds` — a group of the user's made to add up to 1, an option it leaves out (a look added since) at 0, one adding up to nothing left to the rule's; `set` says which groups are the user's — and the hand is dealt by that (`env.odds`). Setting one option of a group moves the others alike the other way: what it gains is taken from them alike, none below 0, what it gives up goes to those not at 0, and nothing is left below 1e-9 (`rebalance()`; `oddsGroup()` shows a group as sliders and moves them while one is dragged). `pickLook()` draws the look by its chance: none of `env.not` while another with a chance is left, none at 0.
+The chances, `RULES.odds`, are of two kinds. `groups`, of which one option is dealt, their chances adding up to 1 (`ODD_OPTIONS`): the look (every look alike unless set), the colour block's shape (likewise), how many look effects a layer but the title and subtitle is given (none, one, two), and whether each is the look dealt's or another look's; and, for every look alike, the title's lettering (`own`, the look's own, or another), its bend (`none`, or one) and the ground (dark, light) — left empty in `RULES.odds`, they are what the looks' recipes give on average over the looks (`builtInGroup()`). `chances`, switches each on by a chance of its own: the brand row's rail; the plates under the channel name, the subtitle, a text layer; an asset tinted; the scene objects moved; the subtitle lettered like the title; and what a look's optional parts default to (`extra`, `toggleOn`, `toggleOff`, for a look whose recipe sets none: `partChance()`). What the user sets in Surprise me's chances (`oddsDialog()` in `app.js`, a window of its own, opened from Surprise me's window and the Look sheet; see below) is kept in `settings.surprise.odds` ({groups, chances}, only what was set); `oddsOf()` lays it over `RULES.odds` — a group of the user's made to add up to 1, an option it leaves out (a look added since) at 0, one adding up to nothing left to the rule's; `set` says which groups are the user's — and the hand is dealt by that (`env.odds`). `pickLook()` draws the look by its chance: none of `env.not` while another with a chance is left, none at 0.
+
+The window has two columns. On the left the looks, a card each (`oddsLooks()`): the cover drawn in that look (`oddsPics()`: the Look sheet's card picture, `LOOKCARDS.pics`, where it was drawn from the cover as it now is, else drawn one a frame and kept there for the sheet too; `ODDS_UI.round` stops a drawing that a newer one replaced), its name, its share and a row of dots. A look's chance is set by its dots, which stand for chances as they are kept rather than for a new number: `d` dots lit are `DOTS[d]` times an even share (one over the number of looks), `DOTS` being `[0, 0.25, 0.5, 1, 2, 4]` — the leftmost off, each more twice as likely — and `EVEN_DOTS` (3) each look's while the user has set none. `withDots(mine, id, d)` sets look `id` alone, every other look's chance left exactly as it was (each an even share, while none was set), and `oddsOf()` makes the group add up to 1 as ever, so the hands are dealt as before until a dot is clicked; `dotsOf(v)` shows a chance kept (one set on the sliders of before, say) on the nearest dot by ratio, one at least for any chance, without changing it. A dot is clicked, or the row (a `slider` for the keyboard) stepped by the arrow keys, Home and End; a key that leaves the
+dots where they are (at an end of the row) changes nothing, so a chance between two dots stays as it is, and a change that
+would leave no look with a chance is refused with a word (`setDots()`, `odds.lastLook`): a group of nothing would read as
+unset and deal every look alike. The looks are folded to the likeliest eight until unfolded (`ODDS_UI.open` holding `look`), or filtered to those above `EVEN_DOTS` or those off (`ODDS_UI.filter`); under them, the optional parts of the look picked (`lookParts()`, as in the Look sheet). On the right, each group of which one is dealt is one bar (`oddsGroup()`) split into a segment an option, as wide as its chance, its name and share shown where they fit — measured once the bar is drawn (`fit()`, again by a `ResizeObserver` as the window is resized) — and in a tip. The white divider between two neighbours (a `separator` the keyboard can take: the arrows move it a point, five with Shift, Home and End all the way), or the divider nearest the pointer within 10 px (of several standing together, as options at 0% make them, the rightmost dragged right and the leftmost dragged left, so an option at 0% can be given a share again), moves share between those two alone, in half points: `moveShare(group, left, right, v)` gives `left` `v` of what the two have and `right` the rest, every other option left as it is. A long group (`fold`) shows its likeliest options and the rest as one segment, whose options keep their shares of it (alike when it had none) as `moveShare()` gives them their sum, until unfolded, when every option is on the bar and named under it. Under the bars the switches, each still a slider (`oddsChance()`). `rebalance()`, which moves the others alike as one option is set, is left for a layout preset deleted (`dropOption()`: its option set to 0, its share going to those that have one).
 
 The layout is dealt first, by the group `layout`: `keep`, the canvas's own, and each layout preset by its id
 (`ODD_OPTIONS.layout(layouts)`: the options come and go with the presets, `oddsOf(mine, layouts)` putting one made since
@@ -1467,17 +1507,22 @@ certain, so such a hand is dealt from the same random numbers as before. Dealt a
 size keys: the block at each, the parts' places there, which are on the cover and where; a size of the preset's own the
 profile has not passes by; a part locked stays as it is, the colour block locked its layout too), and the words it places stay where it put them rather than
 going back to the design's; the rest of the hand — the look, the ground, the colour block's shape, the letterings, the user's layers' places
-(`dealPlaces()`, on the template dealt) — is dealt on it as ever. With the places locked (`locks.places`) the canvas's
-layout stays, whatever the chances. `dealCover()` returns which was dealt (`layout`: "keep" or the id), which the hand
+(`dealPlaces()`, on the template dealt) — is dealt on it as ever. With the places or the layout locked (`locks.places`,
+`locks.layout`) the canvas's layout stays, whatever the chances: `pickLayout()` is not asked, as when `keep` is certain,
+so such a hand is dealt from the same random numbers as one with `keep` at 100%. `dealCover()` returns which was dealt (`layout`: "keep" or the id), which the hand
 keeps (its caption in the window names the preset); a hand is the whole style and the layers, so `putHand()`, and
 `dealTake()` through it, put its template, adjustments and parts back with it.
 
 The presets are made and seen at the top of the Layout sheet, a card each (`presetCards()`; their chances are set in
 the chances window, whose layout card points back here), each
 renamed where it is, edited (`layoutEditor()`), put on the canvas as one step of undo (`applyLayout()`, `putLayout()`
-again, at the profile's sizes: the parts locked stay, the block's layout too when the block is locked) or deleted once asked (`deleteLayout()`: its chance goes to the others as when its slider is set to 0, `dropOption()`; none of them
+again, at the profile's sizes: the parts locked stay, the block's layout too when the block is locked) or deleted once asked (`deleteLayout()`: its chance goes to the others as `rebalance()` sets an option to 0, `dropOption()`; none of them
 having any, the group goes and `keep` is certain again); *＋ New…* opens the editor on a new one (`newPreset()`: every part
-in it, where the template puts it), which is in the list once saved. *Save as layout*, a quiet underlined link in its own line
+in it, where the template puts it), which is in the list once saved. A card under the pointer a moment shows the cover laid
+out by its preset on the canvas (`hoverPreset()`, `PREVIEW.layout`, see *Previews from cards* in 9.5): `laidOut(p)` puts it on
+copies of the profile's style and of the cover's layout parts — the other layers shared, as nothing there changes them —
+by `putLayout()` at the profile's sizes, as `applyLayout()` would, each time the canvas is drawn, so the preview follows
+whatever changes meanwhile; *Edit…* and *Delete* end it before they open their windows. *Save as layout*, a quiet underlined link in its own line
 between the canvas and the tray under it, is hidden for now (`SAVE_AS_LAYOUT` false in `app.js`: the line stays empty and takes
 no room; the code below is kept) (`#toolsub`, filled by `syncToolbar()` while the editor is in front and empty in Settings:
 the stage, that line and the tray are each pinned to a row of their own of `#center`, so the stage keeps the row that grows;
@@ -1512,8 +1557,11 @@ first size with none of its own), as drawn there with the parts shown at that si
 `coverLayout()`, as `draw` paints it). Sizes sharing a layout are each fitted to the parts they have, and one size kept
 for all of them would snap them to one; so every other size a resize reaches is also given a block of its own, a share
 of the one it showed, and none jumps. A size with a block of its own says so, with
-*Follow again*; *Reset size and slant* puts back the template's for the block, *Reset its place* a part's place (as
-`resetPlacement()` does, by the scope). Left of the canvas a box per part ticks it at the sizes the scope reaches (*some
+*Follow again*. With the block selected, a button for each side (`SIDES` in `layout.js`: bottom, top, right, left, the one
+it lies on at the size shown lit) does what a drag to that side does (`toSide()`: `sideLike()` from the side it lies on
+here, through `reblock()` and `setPresetLayout()`, where the scope reaches); *Reset size and slant* (`resetBlock()`)
+puts back its template's size and slant, on its side; the block has no *Reset its place*, its place being its side, set
+by those buttons (any other part has, `reset()`, as `resetPlacement()` does, by the scope). Left of the canvas a box per part ticks it at the sizes the scope reaches (*some
 sizes* beside one ticked at some only); the part selected, once not at the size shown (unticked there, or a size picked
 where it is not), gives the selection to the first part that is (`keepSel`), so no frame, diamond or line about the
 block's side is left over a part that is not drawn — and `layoutHandles()` gives none for a block left out (`off`, as
@@ -1537,8 +1585,8 @@ back to the design either. Before that, words the user
 moved or resized go back where the rules put them: the layout's lettered layers (`LETTERED`) to their
 placement in the profile's design (`channelCover(null, …)`), the user's text layers to a new one's size with
 no size of their own. While hands are dealt, a step waiting to be recorded (`recordHistory()`) waits too. `settings.surprise.locks`
-(`SURPRISE_LOCKS` in `store.js`) leaves the look and its sliders, the ground, the letterings or every place
-(and the layout with them) alone. The hands show in Surprise me's window as they come (`dealOpen()`, `dealShow()`: each drawn at
+(`SURPRISE_LOCKS` in `store.js`) leaves the look and its sliders, the ground, the letterings, every place
+(and the layout with them) or the layout alone (`layout`: the canvas's, no preset dealt, everything else dealt as ever). The hands show in Surprise me's window as they come (`dealOpen()`, `dealShow()`: each drawn at
 the size shown, with its look; `RULES.hands.pace`, 90 ms, the least between two, so they can be seen arriving);
 the first, on the canvas, is marked (`dealKept()`), and `dealTake()` puts another there on the same step of undo
 while nothing has followed (an undo or redo, which the window lets through, closes it). The window lies over the whole
@@ -1582,19 +1630,40 @@ to show them always), `start()` finds it out with a probe and sets `html.bars`, 
 the sheets' are.
 
 **The top bar and ⋯.** `syncTop()` builds the bar: the profile and the channel (two menus), undo and redo, Surprise
-me, Export, and ⋯ (`MENU`, `renderMenu()`, placed under its button by `openMenu()`): what changes a whole cover (*Set
+me (its key, Space, in a `kbd` on it), Export (its tip naming ⌘E), and ⋯ (`MENU`, `renderMenu()`, placed under its button by `openMenu()`): what changes a whole cover (*Set
 as the default design* and *Restore the default design*, `saveDesign()` and `loadDesign()`; *Empty this cover…*,
 `clearDialog()`), the profile's three Settings pages, each saying what it holds (how many channels, how many sizes,
 through `counted(key, n, …)`, which picks a string's `.one` form for one; every count whose wording changes for one
-goes through it), the other
-profiles to switch to (unfolded on asking, `MENU.profiles`), the glass and the language. A press beside it, or Esc,
-shuts it.
+goes through it; *AI*'s line is the three AI lights as one, `AI_SHOW.menu`, see 8.6), the other
+profiles to switch to (unfolded on asking, `MENU.profiles`), *Project file* (*Open project…* and *Save project*,
+`projectActions`, each made by `keyed()` with its key in a `kbd` at its end and `aria-keyshortcuts`; left out where the
+host can neither save nor download a file, `CAN_PROJECT`), the glass and the language. A press beside it, or Esc,
+shuts it. A key is written as `MOD_KEY` has it: ⌘ on a Mac, Ctrl+ elsewhere — and the app's own shortcuts (⌘E, ⌘S,
+⌘O) are taken so too (`cmd`: the Meta key alone on a Mac, where Control and a letter move the caret in a field; Ctrl
+elsewhere; neither with Shift or Alt).
+
+**Keys.** One `keydown` listener on the window takes them, in this order: ⌘S and ⌘O never reach the browser's or web
+view's own Save and Open (`preventDefault()` first, wherever they do nothing here); Esc shuts the ⋯ menu; with a dialog
+open in `#modal`, Esc is its cancel (but in a field being typed in) and ⌘E is the Export window's main button
+(`exportTicked()`, even from its file name), and no other key goes past it; ⌘S, and ⌘O but in a field, save or open a
+project file from the editor while Surprise me's window is shut and no deal is under way — ⌘S even in a field, as what is
+typed is on the cover already; Esc leaves Settings, then shuts the bar's popover; nothing further while a field has the
+focus; Space is left to a control the keyboard brought the focus to (a button or the like: `KEYFOCUS`, noted as the
+focus arrives, from `focusin` when the element is `:focus-visible` then, and let go at any `pointerdown` — asked at the
+key itself, `:focus-visible` would not tell, as browsers mark whatever has the focus so once a key is down, by the spec's own heuristic), so Space
+presses it as ever, and nothing is dealt; nothing further while a deal is under way (`SURPRISE.busy`). With
+Surprise me's window open only Esc (`dealUndo()`), Space (another deal) and undo and redo act; then the letter, crop
+and weave windows' Esc and the brush's keys; undo and redo; then Space, which deals (`surprise()`) with the editor in
+front and neither the ⋯ menu, the bar's popover (`FTB.pop`), the 3D view, a drag on the canvas (`LIVE`, `FTB.drag`) nor
+the letter, crop or weave window in the way; and in the editor alone ⌘E (`exportDialog()`, the ⋯ menu shut first), ⌘D,
+Esc, F, Delete and the arrows. Space dealing is taken from the button the mouse last pressed (`preventDefault()`), so a
+deal is not made twice; a key held down (`e.repeat`) deals, opens, saves or exports once.
 
 **The dock and the sheets.** `syncTabs()` fills the dock with a button a sheet (`TABS.edit`; the icons `SHELL_ICONS`,
 drawn by `ico()`), one sheet open at a time (`S.tab.edit`, not saved; `showSheet()`): Content (`contentSheet()`: the channel and the
 cover's words, the long notes behind an ⓘ, *Copy from another channel…* at its foot), Look (`lookSheet()`), Layout
 (`layoutSheet()`: the layout presets, this size's template, the colour block's edge, which parts show; *Hide every
-layout part* and *Reset the layout parts' places* at its foot), Assets (`assetsSheet()`: the ways to add, this cover's
+layout part* and *Reset the layout parts' places* at its foot), Assets (`assetsSheet()`: the ways to add, the search, this cover's
 photos, then shelves showing their first two rows until *All*, `shelf()`, `SHELVES`) and Layers (`layersSheet()`).
 `renderPanel()` builds the open sheet whole; each but Layers begins with its own heading (`sheetHead()`). Whether a change bears on it is asked of
 what it shows, so it is built again only then: `onCoverTab()` (Content, Layout or Assets: the cover's words, parts and
@@ -1604,16 +1673,92 @@ sheet holds `layerBox`, one element kept from one drawing to the next and filled
 follows the layers rather than the sheet: a row a layer (`layerRow()`: the kind's icon, `layerWhat()`; the name and the
 cover's words it sets, `layerSub()`; the eye and the lock, shown under the pointer, on the selected row, or when hidden
 or locked), a row under the pointer framed on the canvas (`hoverShow()`), and under the list the selected layer with
-duplicate, up, down, delete and the drawer.
+duplicate, up, down, delete and the drawer. Chips over the list narrow it for the session (`LAYERS_UI.filter`, by
+`LAYER_FILTERS`: every layer, those the user added, `isAdded()`, or the layout's own, `isLayout()`), the last two with how many;
+while only some are listed no row is `draggable`, as where a row would land among those not listed cannot be shown, and a
+line says so; the selection is not touched, so a selected layer the list leaves out is still named under it.
+
+**Searching the Assets sheet.** `ASSETS_UI` holds, for the session, the words in the sheet's search field (`q`) and the
+kind of picture the photo shelf shows alone (`kind`). While there are words, `assetsFound()` takes the place of
+everything under the field: what they find on each shelf, under the shelf's name (`shelf()` with keys of their own, so
+a shelf unfolded there is not unfolded on the sheet) — the library's pictures by their names and kinds, stickers by
+their names in both languages and their groups', channel graphics by their names, the user's vector assets by their
+names (an AI asset's in both languages, from its spec) and their folders' — each tile made as on its shelf, so it is
+clicked, dragged or deleted the same way. `matches()` wants every word, compared `folded()` (NFKC, one case: full-width
+letters and digits as half-width); a picture's kind is matched by every name the interface gives it, the thumbnail's
+and the chip's, in both languages (`bothLangs()` in `i18n.js`). `assetSearch()` builds the sheet again 120 ms after the last key, not while an input
+method is composing (it waits for `compositionend`), and `renderPanel()` gives the field back its focus and caret
+(`heldField()`, `giveBack()`, as the AI windows do; the Look sheet's search too); ✕ or Esc empty it. Nor does any other
+change build the sheet under a word being composed: `COMPOSING` is the field an input method is putting a word together
+in (set at the window's `compositionstart`, let go at `compositionend` or when that field loses the focus), and while it
+still has the focus and is in the sheet (or the Settings page), `renderPanel()` tries again 150 ms later. `photoShelf()` shows a chip a kind
+(`LIBRARY_KINDS` that the library holds, when it holds more than one), `libraryTiles()` taking `only`, a test, for the
+kind and for the search alike (`photoTiles()`).
 
 **The looks as cards.** Each card of the Look sheet is the cover drawn in that look (`lookCards()`), a cover for every
 look, so a card's picture is kept (`LOOKCARDS.pics`) with what it was drawn from (`sig`: the cover, the size, the style
 but its look, the look's own settings; `lookBase()`, `lookOwn()`); those that are stale are drawn one a frame, the
 profile's first, and not while anything is dragged (`drawLookCards()`), and after an edit only those whose `sig` changed
 (`refreshLookCards()`). A card under the pointer for 140 ms shows its look on the canvas (`hoverLook()`,
-`PREVIEW.look`): only `drawMain()` takes it, as the profile in that look (`inLook()`), so nothing is saved or undone and
-thumbnails and exports keep the profile's own; a tag over the canvas says so (`previewTag()`), and it ends when the
-pointer leaves or the sheet is built again. A click makes it the profile's (`pickLook()` in `app.js`, not `deal.js`'s).
+`PREVIEW.look`, see below). A click makes it the profile's (`pickLook()` in `app.js`, not `deal.js`'s) and counts it
+(`countLook()`, into `settings.lookUse`), as `dealClose()` counts a hand of Surprise me kept in a look other than the
+cover had before the window's first deal.
+
+Above the cards, `lookFinder()`: a search field and a chip for each kind of look (`LOOK_CATEGORIES`; what kind each
+look is, one or more, `LOOK_TAGS` in `style.js`, which a test holds to every look and to a handful of looks a kind), and
+*★ Most used* once something is counted (`mostUsed()`: the `MOST_USED`, six, most counted). `LOOK_UI` keeps what is
+typed and picked for the session. `lookFilter()` is the test they make — the chip's kind or the most used, then every
+word typed in the look's names, its `about` or its kinds' names, each in both languages (`bothLangs()`), compared
+`folded()` as the Assets sheet's search compares them. They only hide cards
+(`findLooks()` sets `hidden` on those it does not let through, without building the sheet again, so the field keeps
+the keyboard): the profile's own look is never hidden, and comes first while they are at work (`.finding`, CSS
+`order`); `drawLookCards()` and `refreshLookCards()` pass a hidden card by, so it is drawn once it shows; a line says
+when none is let through. Composing a word (pinyin, kana) changes nothing until it is done.
+
+**Previews from cards.** Three kinds of card show on the canvas what a click would do, a moment after the pointer comes
+(140 ms): a look's (`hoverLook()`), a text effect's (`hoverFx()`) and a layout preset's (`hoverPreset()`). One object
+holds what is previewed, `PREVIEW` — `look`, a look id; `fx`, `{id, fx, seed}` (the layer, the effect, the seed a
+lettering dealt by one is drawn with); `layout`, `{id, name, p}` (the preset) — and `timer` and `wait`, the moment being
+waited for and the kind it will show. `previewSoon(kind, v, ok)` waits the moment, asks `ok()` whether it still holds
+(the sheet still shown, the layer still the one), then puts `v` in the place of whatever was previewed; `v` null puts
+the canvas back at once. Only the main canvas's drawing takes it: `paintFlat()` paints `previewed()` — the cover laid out
+by the preset (`laidOut()`), the profile in the look (`inLook()`), the layer in the effect, on copies, so nothing is saved,
+recorded or undone, and the thumbnails and exports keep the cover's own. `previewTag()` says over the canvas which, and
+how it is put on (a click on the card; for a preset, *Apply to canvas*), and marks the preset's card *Previewing*.
+`endPreview(...kinds)` ends a preview of the kinds given, and one waiting: `renderPanel()` ends the look's and the
+preset's, as their cards are built anew, `renderBar()` the effect's, as its cards (in the drawer and the bar's popover)
+are; `pickLook()` and `pickFx()` end theirs before putting theirs on.
+
+**Text effects as cards.** The Effect group of a lettered layer's properties (`fxControl()`) begins with `fxCards(L)`:
+Automatic, then the layer's own effect, then the others in `FX_ORDER`, the first `FX_FOLDED` (six) until *See all*
+(`FX_UI.all`, for the session). Each card is the layer's first letter (`firstLetter()`, the highlights' marks left out;
+a stand-in while it has none) drawn in that effect, in its face, colours and strengths, as the cover's look letters it.
+A picture is keyed by all it is drawn from — the effect, the seed, the letter, the face, the colours, the strengths, the
+look and its settings and seed, the ground, whether there is a photo, the channel colour — and drawn once into `FXPICS.pics`
+(the 80 last kept), then copied onto every card that shows it, so the drawer and the bar's popover, both built anew at
+each change, draw nothing again. It is drawn only when a card of it comes into sight (`FXPICS.seen`, an
+`IntersectionObserver`), one a frame and not while anything is dragged (`drawFxPics()`); `paintFxPic()` draws, with
+`drawCover()`'s `only`, a free text layer standing for the card's at the middle of a small cover (`FX_CARD`), the
+cover's ground and main photo setting the scene, then reads whether the letter came out dark, to show it on a light
+card. A face still being read from its files (`ensureFont()`), or an outline asked for (`outlinesSettled()`), has it
+drawn again once there (`fxAgain()`). A lettering dealt by a seed is shown, previewed and put on with the layer's own
+`fxSeed`, else one kept for the layer this session (`fxSeedOf()`, `FX_UI.seeds`), so two layers in it are not drawn alike
+and what is put on is what was shown. A click (`pickFx()`) commits what went before as a step of its own, then sets
+`fx`, one step of undo. `secSum()` sums the group by the card picked. While an effect is previewed `placeBar()` leaves the
+bar and its popover where they are, or the card would move from under the pointer; the popover is wider for the cards
+(`#fpop.wide`), and kept within the window, scrolling, where it would run off its foot.
+
+**The layout's parts framed.** While the Layout sheet is in front on the flat canvas (`partsFramed()`: in the editor,
+the sheet not hidden by the drawer, not in 3D, not while the weave's brush paints nor while the letter, crop or weave
+window stands over the sheet — opening and closing each places the frames again), `placeFrames()` frames each layout
+part drawn at the size shown — of the canvas's hits, those `framable()`: a layout layer of the cover's own, not the
+ground, shown and not locked (`isPickable()`, which leaves the corner brackets out), and with FOCUS on only those
+worked on — in a dashed box over the stage, turned as the part is, named as the layer list names it (`layerName()`),
+the name beside the frame's top, on the left where the right has no room, else inside. The selected parts are left to
+their own frame and handles. The boxes (`FRAMES`, `#partframes`; one per part kept in `FRAMED`) are laid over the stage,
+as the hover frame is, not painted on the cover, so the export never sees them; `flushDraw()` puts them in place after
+every drawing, so they follow a drag, the window resized and the size shown, and `renderPanel()` and `close3d()` show
+or hide them as the sheet changes. A press inside one goes through to the canvas, where `layerAt()` takes that part (9.2).
 
 **The bar over the canvas.** The selected layer's most used settings stand on a bar of glass over it (`BAR`, `#ftb`, in
 `#center`). `barItems(L)` says which, by the kind of layer — a lettering's font, effect, colour and columns; a photo's
@@ -1643,31 +1788,85 @@ never touched is open when it is the first of its layer's (`openSecs()`).
 draws them widest at the size's shape between the heading and the bar, and `DEAL.px` is how wide they are painted (540
 px at most). Each says its look and, in a few words, its ground, its title's lettering and its layout (`handSays()`);
 the one on the canvas is marked. A bar of glass under them holds the parts to leave alone (`SURPRISE_LOCKS`), the way to
-the chances (`oddsDialog()`), *Deal again* and *Done*. `DEAL.from` is the history's entry before the window's first
+the chances (`oddsDialog()`), *Deal again* (with its key, Space, which deals again from anywhere in the window) and
+*Done*. A lock pressed has the row built again, each lock by its `data-lock`, and gives the focus back to it when it had
+it; the layout's lock is held while the places are locked (shown locked, not to be pressed, its tip saying why), as
+locked places keep the layout anyway. `DEAL.from` is the history's entry before the window's first
 deal: *Undo the deal* at its corner, or Esc (`dealUndo()`), goes back to it with `timeTravel()`, so redo takes the deals
 again; else it only closes the window. While it is open no key reaches what is under it but undo and redo, and opening
 it shuts the letter, crop and weave windows, the brush's panel and the bar's popover. *Done*, or a click on the dim,
-keeps the hand on the canvas (`dealClose()`).
+keeps the hand on the canvas (`dealClose()`, which counts the look of a hand kept for ★ Most used when it is not the
+one the cover had before the first deal, `DEAL.from`, and nothing has been undone or redone since).
 
 **Settings** (`#settings`) is a window over the editor. `setMode("setup")` shows it; `S.mode` is still what the rest
 asks to know whether the editor is in front, so what goes with the editor follows: the bar over the canvas is away, the
 3D view, the letter, crop and weave windows and the brush's panel close, and no key but Esc, undo and redo acts. Its nav
 (`syncTabs()` again, into `#setnav`) shows the profile (its name, how many channels, their colours), its three pages (`TABS.setup`:
-`brandTab()`, `sizesTab()`, `aiTab()`; `S.tab.setup`) and the profile's actions (`profileActions`: new, duplicate,
-import, export, delete); `renderPanel()` draws the page into `#setpanel`. ✕, Esc or a press beside it shuts it. The ways
+`brandTab()`, `sizesTab()`, `aiTab()`; `S.tab.setup`; beside *AI* the AI lights as one dot, `AI_SHOW.nav`, see 8.6) and the profile's actions (`profileActions`: new, duplicate,
+import, export, delete); `renderPanel()` draws the page into `#setpanel`. On Brand & channels, with two channels or more,
+each card has a grip (⋮⋮) that `chDrag()` takes: the card is lifted out of the grid's flow (`.lifted`) and follows the
+pointer, which the grip captures, a place in its colour (`.chhole`) going before or after the card nearest the lifted
+one's middle (in its row, by which side of that card's middle; one card a row, by height), the page scrolling near its
+top or foot while the pointer stays there (a frame at a time); let go, the card is moved to the place's index by the
+same `move(to)` the ⋯ menu's Up and Down call, one step of undo, the profile saved; Esc (taken before Settings can close
+on it), a pointer lost, or the page drawn again under it, leaves it where it was. A press on the grip does not show
+that channel on the canvas, as a press on the rest of the card does. On Sizes & export, the file names are `nameField()`
+and the folder `saveToRow()`, as in the Export window (below); on AI, each card's head is `aiPill()`. ✕, Esc or a press beside it shuts it. The ways
 in from elsewhere open it at the card they mean: `SET_UI.at` names one to bring into view when the page is next drawn
 (`text`, `image`, `cut` or `batch`: the card whose id is `"set-" + SET_UI.at`) — *Set up an image model* or *Set up AI* in the repaint and generate
 windows, the cut-out's *Get the model…*, Export's *Batch export…* (the batch from a table lives in Sizes & export,
 `batchFromCsv()`). `SET_UI.menu` is the channel card whose ⋯ (move, delete) is open on the Brand & channels page.
 
 **The editor's windows.** Export, AI repaint, AI generate, the chances, a layout preset's editor and the small dialogs
-take turns in `#modal` (*Dialogs* in 9.4), each a pane of glass. Export (`exportDialog()`) is a row a size, its picture
-copied from the tray's thumbnail and *Export* for it alone (`exportOne()`); then the format, resolution and file names
-with an example, *This size only* and *Export all n…* (`exportMany()`). `repaintWin()` (for `REP.for`) and `genWin()`
+take turns in `#modal` (*Dialogs* in 9.4), each a pane of glass. Export (`exportDialog()`, the top bar's button or ⌘E)
+is a row a size: a tick, its picture copied from the tray's thumbnail, its name and pixels, and *Export* for it alone
+(`exportOne()`). Whether a size is ticked is `ticked(z)`, from `settings.exportSizes` by profile, which keeps only the
+sizes left unticked, so a size added since is ticked; `setTicked(keys)` writes the profile's (letting go of sizes it no
+longer has), and taking a size again in Settings clears its entry. A tick, a press on the row, or one of the quick
+choices (every size, the wide ones only, the tall ones only — `orientOf()`, the square sizes with the tall, as
+`BY_ORIENT` stacks them; the last two only when the profile has both) is shown where it is (`sync()`: the ticks, how many
+of how many, the choice they make, the main button), not by building the window again, so the keyboard keeps its place.
+Then the format, resolution and file names with an example (and *Batch export…* beside it), the folder they go into
+(`saveToRow()`), *This size only*, and the main button, *Export n* (`exportTicked()`: the sizes ticked, through
+`exportMany()`), shut off while none is; while one it started runs (`exportingTicked`), another press — a double-click,
+⌘E again — does nothing. The folder is the profile's (`exportDir()`, `settings.exportDirs`; none where the
+host saves no files, `CAN.saveFiles`, and the files download): with none kept the first export asks
+(`pickExportDir()`), and a single size saved through the save dialog keeps the folder it went into (`keepExportDir()`);
+`writeJobs()` writes every job there; `runExport()` hands a failure to it instead of a toast, and any failure to write
+into the folder — gone, moved, its disk away, no right to write, read-only, full: any error of the system's, or
+`write_image`'s "not a folder" — has `askOtherDir()` say so and ask for another, which is kept, and write them all
+there. Only what is not the folder's fault is reported as it is, the folder kept: a picture that could not be encoded, a
+file name the system refuses, a body that came wrong (the messages `encode`, `invalid file name`, `expected a binary
+body`). Within one export no two files get one name: `runExport()` keeps the names given, compared as the disk compares
+them (NFC, one case: one file on APFS and NTFS), and one given already (a pattern without `{size}`, say) gets the size
+after it as `_<w>x<h>` (not when the name has it already), then a number (`apart()`), so no file of the export writes over another. Only the files of one export are kept apart: one of the same name already in the folder, from an earlier export, is replaced (`write_image` writes with `fs::write`). The row shows the folder with the home
+folder as ~ (`shortDir()`, but not `/Users/Shared` or `C:\Users\Public`), all of it on hover. The
+batch from a table goes through `exportMany()` too, at every size of the profile, whatever is ticked.
+
+The file name pattern is `nameField()`, here and in Settings: the pattern, still the one string, cut at its tokens
+(`NAME_TOKEN`, `{category}` read as `{channel}`) into stretches of text and chips. Each stretch is an input as wide as
+what it holds (a hidden copy of its text sizes it), so the box reads as one line; a chip is named in the interface's
+language (`exp.tok.*`) with × to take it out. What is typed is written into the pattern where that stretch stands; a
+token typed out in full builds the box again with it as a chip, the caret after it; Backspace at a stretch's start and
+Delete at its end take out the chip beside it, and the arrows step over one into the next stretch. ＋ is a `select` laid
+over the button, so the system opens its menu, and adds a token (`NAME_TOKENS`) where the caret last was in a stretch,
+else at the end. After the last stretch, in grey, what `exportName()` adds (the resolution's @2x, the extension). *Edit as text*
+(`NAME_UI.text`, for the session) shows the pattern in one field instead. The example under it follows every change.
+
+`repaintWin()` (for `REP.for`) and `genWin()`
 (`GENWIN.tab`: a photo, or stickers and graphics) are built again whole as their state changes (`repRedraw()`,
 `genRedraw()`), the field being typed in given back its focus and caret (`heldField()`, `giveBack()`); a repaint or a
 generation goes on with its window shut, waits in it, and says when it is done — a toast (for a generation, with a way
-to it), or a mark on its tab while the other tab is shown (`genDone()`, `GENWIN.dot`). The letter, crop and weave windows
+to it), or a mark on its tab while the other tab is shown (`genDone()`, `GENWIN.dot`). What each tab made is kept for the
+session (`GENWIN.made`: `{photo, art}`, newest first, `MADE_MAX`, twelve, at most): `madeNow()` puts a result first as
+`generatePhoto()` or `generateAsset()` gets it, whether the window is open or not, with which try at those words it is
+(`GENWIN.tries`), the words and the reference picture it was made from, and for a sticker, once kept, the asset it was kept
+as (`kept`). `madeStrip()` shows them under the result, in one row that scrolls so the result's actions stay in view (a photo by
+its picture, a sticker drawn small, `specThumb()`), and
+`madeSays()` what the one shown was made from; a click (`showMade()`) makes one the result again and puts its words and
+picture back in the form, so `goText()` names the button *Make another* while the result shown was made from what the
+form holds; *Discard* (`dropMade()`) takes it out of the strip; `keepGenerated()` keeps a sticker in My vector assets
+once, and puts the one kept on the cover when asked again. Nothing of it is saved. The letter, crop and weave windows
 and the brush's panel stand over the sheet instead (`overLeft()`), so the canvas and the drawer stay in view while they
 are used; over the drawer, where it has taken the sheet's place, which leaves the canvas in view.
 
@@ -1694,7 +1893,7 @@ canvas ──toBlob (async)──▶ PNG bytes ──binary frame──▶ Rust 
    ```
 
    The metadata travels in the body rather than in request headers because, in the real app, custom headers did not reach Rust.
-3. `save_image` (with a save dialog) and `write_image` (into a folder already chosen) are async commands that run on a worker thread. PNG is written as is; JPEG is flattened onto a dark matte and encoded; WebP is encoded lossless.
+3. `save_image` (with a save dialog) and `write_image` (into a folder already chosen: the profile's, `exportDirs`, picked once in a dialog — `pick_folder`, or the folder a file was saved into through `save_image`'s — and kept; it refuses a path that is not an absolute folder; a write into it that fails for the folder's sake — that, or any error of the system's — has the interface ask for another, 9.5) are async commands that run on a worker thread. PNG is written as is; JPEG is flattened onto a dark matte and encoded; WebP is encoded lossless.
 4. The interface keeps at most two writes pending, and is already painting the next cover while it waits. A progress dialog shows the count; cancelling stops new work from being dispatched.
 
 File names pass through `safe_name()`, which keeps only the last path component, so a name cannot be
@@ -1766,7 +1965,9 @@ folder; else `localStorage`), `fonts` (installed fonts and their files), `outlin
 text effects), `cut` (cutting a subject out), `relay` (AI requests past the browser's cross-origin rules) — all
 three hosts but the plain page — and `saveFiles` (exports and files written where the user picks on this
 computer; else downloads), `folders` (the system's folder dialogs and file manager), `pointer`
-(`move_pointer`), `selftest`, the app's alone. `native` is `HOST === "tauri"`. A capability missing is said
+(`move_pointer`), `selftest`, the app's alone. `native` is `HOST === "tauri"`. Some offers follow from these:
+`CAN_PROJECT` (project files, in the ⋯ menu and on ⌘O / ⌘S) is `saveFiles`, or a page that can download a file; the
+export folder (`saveToRow()`, `exportDirs`) is shown only with `saveFiles`. A capability missing is said
 where it would be used (the outline effects, the cut-out); the progress of a cut-out model's download comes
 by Tauri's events, so only in the app for now.
 
@@ -1791,7 +1992,7 @@ frame waits for the fonts, otherwise the title would be fitted using the wrong g
 
 | Level | Command | Covers |
 |---|---|---|
-| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation, file name pattern, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string |
+| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export ticks and folders and the looks' use, by profile and look), file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string |
 | Rust unit tests | `cd src-tauri && cargo test` | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling, requests against a local stand-in server, proxy rules |
 | End-to-end self-test | `SMEDCOVER_SELFTEST=<folder> <executable>` | the full export path between the real web view and Rust |
 
@@ -1831,6 +2032,12 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | add a kind of part to solids | validation and `pieces()` in `solid.js`, `solidPrompt()` and its examples in `ai.js` |
 | add a look | a file `looks/<id>.js` exporting the look's object (starting with a hook or two), imported and put in `LOOKS` in `style.js` |
 | change how Surprise me deals | `RULES` (every number), `FAMILIES` and `RECIPES` (what suits each look) in `deal.js` |
+| change how the chances window shows and sets the chances | `DOTS`, `EVEN_DOTS`, `dotsOf()`, `withDots()` (the looks' dots) and `moveShare()` (a bar's divider) in `deal.js`; `oddsLooks()`, `oddsGroup()` and `oddsDialog()` in `app.js` |
+| put a look in a kind, or add a kind | `LOOK_TAGS` and `LOOK_CATEGORIES` in `style.js`, a `look.cat.*` name in `i18n.js` (a test holds every look to a kind and every kind to a handful of looks) |
+| add a card that previews on the canvas | a kind in `PREVIEW`, what it changes in `previewed()`, its words in `previewTag()`, `previewSoon()` on its cards and `endPreview()` where they are built anew (`app.js`) |
+| add a token to the file names | `exportName()` in `store.js`; `NAME_TOKENS` and `NAME_TOKEN` in `app.js`; its chip's name `exp.tok.*` in `i18n.js` |
+| add a keyboard shortcut | the window's `keydown` listener in `app.js`, above `start()` (its order decides what a dialog, a field or Surprise me's window lets through); `MOD_KEY` writes it |
+| light another AI request | wrap it in `aiTracked()` with its service and settings (`app.js`, see 8.6) |
 | change what a layout preset holds | `LAYOUT_PARTS`, `takeParts()`, `takeLayout()`, `putLayout()`, `presetLayout()` and `setPresetLayout()` in `layers.js`, `normalizeLayouts()` in `store.js` |
 | change how the colour block is moved to a side in the preset editor | `sideToward()` and `onSide()` in `layout.js` |
 | change how one block change lands on blocks that lie otherwise (every size) | `sideLike()`, `scaleBlock()` and `blockValues()` in `layout.js`; `blockOf` in `layoutEditor()` |
