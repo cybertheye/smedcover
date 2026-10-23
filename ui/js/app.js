@@ -198,6 +198,7 @@ async function timeTravel(step) {
  * the layer column; strip: rebuild the thumbnail strip (sizes changed).
  */
 function touch({ profile = false, cover = false, panel = false, side = false, strip = false } = {}) {
+  if (!panel && onLookSheet()) later("lookcards", 500, refreshLookCards);   // the looks' cards follow what was changed elsewhere
   if (profile) persistProfile();
   if (cover) persistCover();
   if (strip) buildStrip();
@@ -357,7 +358,8 @@ function paintFlat() {
   if (!keyed) DRAFT.kept = null; else if (!DRAFT.kept || DRAFT.kept.key !== keyed) DRAFT.kept = { key: keyed };   // a look's setting dragged (see o.draft)
   if (!draft && !LIVE) dropCards();   // painted still: the drag or the draft is over, and the photos' copies on the graphics card can go
   paint(cv, size, Math.min(vw * 1.5, vw * k * (draft ? 1 : window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
-    { draft: DRAFT.kept || draft, ...(S.mode === "edit" ? { picked: group().map((L) => L.id), sceneHandles: !S.settings.hideScene, spot: S.focus ? spotIds() : null, brush: S.brushWin } : {}) });
+    { draft: DRAFT.kept || draft, ...(S.mode === "edit" ? { picked: group().map((L) => L.id), sceneHandles: !S.settings.hideScene, spot: S.focus ? spotIds() : null, brush: S.brushWin } : {}),
+      ...(PREVIEW.look ? { profile: inLook(PREVIEW.look) } : {}) });   // a look previewed from its card, on this canvas only (see PREVIEW)
   const clear = !layer("bg").visible;
   stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
 }
@@ -2613,17 +2615,16 @@ function layoutEditor(p, i, fresh = false) {
   LAYED.redraw = redraw;
   redraw();
 }
-/** Look: the look, its settings, and how Surprise me matches it. */
+/** Look: every look as a card, the cover drawn in it; under the cards, this look's settings and how Surprise me matches it. */
 function lookSheet() {
-  const st = S.profile.style, set = (k, v) => { st[k] = v; touch({ profile: true }); };
+  const st = S.profile.style;
   const L = LOOKS[st.look] || LOOKS.cel, vals = lookParams(st.look, st.lookParams[st.look]);
   const tune = (k, v) => { st.lookParams[st.look] = { ...vals, ...st.lookParams[st.look], [k]: v }; draftTouch({ profile: true }, k); };
   return [
     sheetHead(t("sheet.look"), t("sheet.lookSub")),
-    el("div", { class: "box" }, cap("style.look"),
-      select(LOOK_IDS.map((k) => [k, LOOKS[k].name[getLang()]]), st.look, (v) => { st.look = v; touch({ profile: true, panel: true, side: true, strip: true }); }),
+    lookCards(),
+    el("div", { class: "box" }, el("div", { class: "lhead", style: "justify-content:flex-start;gap:6px;margin-bottom:6px" }, el("b", {}, t("look.tune", L.name[getLang()])), info(t("style.lookHint"))),
       L.about && el("div", { class: "about" }, L.about[getLang()]),
-      el("div", { class: "hint" }, t("style.lookHint")),
       L.params.map((d) => [d.text
         ? el("div", { class: "sl", style: "grid-template-columns:84px 1fr" }, el("span", {}, d.name[getLang()]),
             textInput(vals[d.key], (v) => tune(d.key, v), { maxLength: d.max, placeholder: d.placeholder ? d.placeholder[getLang()] : "" }))
@@ -2633,11 +2634,98 @@ function lookSheet() {
           ? el("div", { class: "sl off", style: "grid-template-columns:84px 1fr", title: t("style.needsPhoto") }, el("span", {}, d.name[getLang()]), el("span", { class: "why" }, t("style.needsPhoto")))   // nothing for it to act on yet
           : slider2(d.name[getLang()], d.min, d.max, d.step, vals[d.key], (v) => tune(d.key, v)),
         d.key === L.art && lookArtRow()]),
-      L.seeded && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { st.lookSeed = Math.floor(Math.random() * 1000000); touch({ profile: true }); } }, t("style.shuffle")),
-      L.seeded && el("div", { class: "hint" }, t("style.shuffleHint")),
+      L.seeded && el("button", { class: "btn wide", style: "margin-top:10px", title: t("style.shuffleHint"), onclick: () => { st.lookSeed = Math.floor(Math.random() * 1000000); touch({ profile: true }); } }, t("style.shuffle")),
       L.params.length > 0 && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete st.lookParams[st.look]; if (st.lookArt) delete st.lookArt[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))),
     recipeBox(),
   ];
+}
+// ---------- Look: the looks as cards, each the cover drawn in it
+/**
+ * The look the canvas is drawn in, instead of the profile's, while its card is under the pointer (null: none). Only
+ * the drawing takes it (paint): the profile keeps its own, so nothing of it is saved or undone; a click on the card
+ * makes it the profile's.
+ */
+const PREVIEW = { look: null, timer: 0 };
+/** The profile as drawn in look `id` (a copy: the profile's own style untouched). */
+const inLook = (id) => ({ ...S.profile, style: { ...S.profile.style, look: id } });
+/**
+ * Each look's card picture, kept from one drawing of the sheet to the next: {cv, sig, want} by look id, where `sig`
+ * is what it was drawn from (the cover, the size, the style but its look, the look's own settings) and `want` what it
+ * is to be drawn from. `queue`: the looks waiting to be drawn anew, the profile's first; `round`, the drawing's turn
+ * (a newer one stops an older); `scroll`, where the cards were scrolled to.
+ */
+const LOOKCARDS = { pics: new Map(), queue: [], round: 0, scroll: null };
+const onLookSheet = () => S.mode === "edit" && S.tab.edit === "look";
+const lookBase = () => { const st = S.profile.style; return JSON.stringify([S.sel, S.cover.catId, S.cover.title, S.cover.subtitle, S.cover.tag, S.cover.layers, S.cover.scene, S.profile.brand, S.profile.categories, S.photos.size, { ...st, look: 0, lookParams: 0, lookArt: 0 }]); };
+const lookOwn = (id) => { const st = S.profile.style; return JSON.stringify([st.lookParams[id], (st.lookArt || {})[id]]); };
+/** The cards in sight drawn anew where what they show has changed since (an edit while the Look sheet is open, outlines arrived). */
+function refreshLookCards() {
+  if (!onLookSheet()) return;
+  const base = lookBase(), look = S.profile.style.look, stale = [];
+  for (const [id, pic] of LOOKCARDS.pics) { if (!pic.cv.isConnected) continue; pic.want = base + lookOwn(id); if (pic.sig !== pic.want) stale.push(id); }
+  if (!stale.length) return;
+  LOOKCARDS.queue = stale.includes(look) ? [look, ...stale.filter((x) => x !== look)] : stale;
+  drawLookCards(++LOOKCARDS.round);
+}
+function lookCards() {
+  const st = S.profile.style, lang = getLang(), stale = [];
+  const base = lookBase();
+  const card = (id) => {
+    let pic = LOOKCARDS.pics.get(id);
+    if (!pic) { pic = { cv: el("canvas", { class: "lookpic", width: 300, height: 169 }), sig: "", want: "" }; LOOKCARDS.pics.set(id, pic); }
+    pic.want = base + lookOwn(id);
+    if (pic.sig !== pic.want) stale.push(id);
+    const on = id === st.look;
+    return el("button", { class: "lookcard" + (on ? " on" : ""), dataset: { id }, "aria-pressed": String(on), title: LOOKS[id].about ? LOOKS[id].about[lang] : LOOKS[id].name[lang],
+      onpointerenter: () => hoverLook(id), onclick: () => pickLook(id) },
+      pic.cv, el("span", { class: "nm" }, LOOKS[id].name[lang]), on && el("span", { class: "badge" }, t("look.current")));
+  };
+  const grid = el("div", { class: "lookgrid", onpointerleave: () => hoverLook(null), onscroll: (e) => { LOOKCARDS.scroll = e.currentTarget.scrollTop; } }, LOOK_IDS.map(card));
+  requestAnimationFrame(() => {   // where it was; the first time, at the profile's look
+    if (LOOKCARDS.scroll != null) grid.scrollTop = LOOKCARDS.scroll;
+    else { const on = grid.querySelector(".on"); if (on) grid.scrollTop = on.offsetTop - grid.offsetTop - 8; }
+  });
+  LOOKCARDS.queue = stale.includes(st.look) ? [st.look, ...stale.filter((x) => x !== st.look)] : stale;
+  drawLookCards(++LOOKCARDS.round);
+  return grid;
+}
+/** Draws the cards waiting, one a frame, while the Look sheet is open; not while something is dragged (as the size thumbnails wait). */
+function drawLookCards(round) {
+  const next = () => {
+    if (round !== LOOKCARDS.round || !onLookSheet()) return;
+    if (LIVE || drafting()) return setTimeout(next, 300);
+    const id = LOOKCARDS.queue.shift();
+    if (!id) return;
+    const pic = LOOKCARDS.pics.get(id);
+    if (pic) {
+      try { paint(pic.cv, selSize(), 300, S.cover, catIndex(), null, null, { profile: inLook(id) }); if (!outlinesPending()) pic.sig = pic.want; }   // waiting for outlines: drawn again once they come
+      catch (e) { console.error(e); pic.sig = pic.want; }   // one look failing leaves the others to be drawn
+      finally { useLook(); }
+    }
+    requestAnimationFrame(next);
+  };
+  requestAnimationFrame(next);
+}
+/** A card under the pointer: the canvas shows its look a moment later; none (or the profile's own): the canvas as it is. */
+function hoverLook(id) {
+  clearTimeout(PREVIEW.timer); PREVIEW.timer = 0;
+  if (id === S.profile.style.look) id = null;
+  if (!id) { if (PREVIEW.look) { PREVIEW.look = null; previewTag(); queueDraw(); } return; }
+  PREVIEW.timer = setTimeout(() => { PREVIEW.timer = 0; if (!onLookSheet()) return; PREVIEW.look = id; previewTag(); queueDraw(); }, 140);
+}
+/** A card clicked: its look is the profile's. */
+function pickLook(id) {
+  clearTimeout(PREVIEW.timer); PREVIEW.timer = 0; PREVIEW.look = null; previewTag();
+  const st = S.profile.style;
+  if (st.look === id) return queueDraw();
+  st.look = id; touch({ profile: true, panel: true, side: true, strip: true });
+}
+/** Over the canvas while a look is previewed: which, and that a click puts it on. */
+function previewTag() {
+  let tag = $("pvtag");
+  if (!tag) { tag = el("div", { id: "pvtag" }); $("stage").append(tag); }
+  tag.hidden = !PREVIEW.look;
+  if (PREVIEW.look) tag.textContent = t("look.previewing", LOOKS[PREVIEW.look].name[getLang()]);
 }
 /** Layout: the layout presets, the template at this size, the colour block's edge, which parts show, and all the layout hidden or put back in place. */
 function layoutSheet() {
@@ -4982,6 +5070,7 @@ const useLook = () => setLook(S.profile.style.look, S.profile.style.lookParams[S
 const inkOn = (hex) => { const [r, g, b] = hexToRgb(hex); return 0.2126 * r + 0.7152 * g + 0.0722 * b > 150 ? "#15151c" : "#ffffff"; };
 function renderPanel() {
   if (!S.cover) return;
+  if (PREVIEW.look || PREVIEW.timer) { clearTimeout(PREVIEW.timer); PREVIEW.timer = 0; if (PREVIEW.look) { PREVIEW.look = null; previewTag(); queueDraw(); } }
   useLook();
   const panel = $(S.mode === "setup" ? "setpanel" : "panel"), y = panel.scrollTop;
   document.documentElement.style.setProperty("--acc", cat().color);
@@ -5092,7 +5181,7 @@ addEventListener("keydown", (e) => {
 });
 
 // ---------- start
-onOutlines(() => queueDraw());   // an outline that was sent for has arrived: draw again, this time with it
+onOutlines(() => { queueDraw(); later("lookcards", 300, refreshLookCards); });   // an outline that was sent for has arrived: draw again, this time with it
 /**
  * What a failed read of something that, taken for not there, would be written over or cleared away stands for. A
  * file that is not there is no failure (it reads as null, a folder as []); where the data is on this computer (the
