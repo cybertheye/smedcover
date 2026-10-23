@@ -472,6 +472,7 @@ const STR = {
   "brand.counterSub": ["第几个频道 / 共几个频道", "Which channel / how many"],
   "brand.preview": ["预览", "Preview"],
   "brand.channelsN": ["频道 · {0}", "Channels · {0}"],
+  "brand.channelsDrag": ["拖 ⋮⋮ 排顺序", "Drag ⋮⋮ to reorder"],
   "brand.channelsSub": ["点一张卡片，画布就切到那个频道", "Click a card and the canvas shows that channel"],
   "brand.onCanvas": ["画布上显示中", "On the canvas"],
   "brand.addSub": ["每个频道一张独立的封面", "Each channel has a cover of its own"],
@@ -501,6 +502,7 @@ const STR = {
   "cat.stamp": ["印章文字", "Stamp text"],
   "cat.up": ["上移", "Up"],
   "cat.down": ["下移", "Down"],
+  "cat.drag": ["拖动，排到别的位置", "Drag to move it among the others"],
   "cat.remove": ["删除", "Delete"],
   "cat.new": ["新频道", "New channel"],
 

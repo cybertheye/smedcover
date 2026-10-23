@@ -3094,8 +3094,8 @@ const counterText = (P) => [P.brand.unit, P.categories.length > 1 ? `${String(ca
 const brandPreview = (P) => [P.brand.name, cat().code && el("i", { style: `background:${cat().color};color:${inkOn(cat().color)}` }, cat().code), el("b", {}, counterText(P))];
 /**
  * Settings → Brand: the profile's name, the brand's name and logo, the number on the brand row (with a preview); then
- * the channels, a card each — colour, name, sub-name, code, graphic, ⋯ to move or delete it — the one on the canvas
- * marked, a click on any showing it there; a card to add one.
+ * the channels, a card each — its grip to drag it among the others (chDrag), colour, name, sub-name, code, graphic, ⋯
+ * to move or delete it — the one on the canvas marked, a click on any showing it there; a card to add one.
  */
 function brandTab() {
   const P = S.profile, lang = getLang(), struct = () => touch({ profile: true, cover: true, panel: true, side: true });
@@ -3104,8 +3104,8 @@ function brandTab() {
   const card = (c, i) => {
     const lib = c.graphic.kind === "graphic" && GRAPHICS.find((g) => g.id === c.graphic.id), here = S.cover.catId === c.id, open = SET_UI.menu === c.id;
     // working on a channel shows that channel on the canvas
-    const show = (e) => { if (!e.target.closest(".more, .chmenu") && S.cover.catId !== c.id) switchChannel(c.id); };   // not its ⋯ and menu: a re-render would take the click
-    const move = (by) => { P.categories.splice(i + by, 0, P.categories.splice(i, 1)[0]); SET_UI.menu = ""; struct(); };
+    const show = (e) => { if (!e.target.closest(".more, .chmenu, .grip") && S.cover.catId !== c.id) switchChannel(c.id); };   // not its ⋯ and menu, nor its grip: a re-render would take the click, or the drag
+    const move = (to) => { P.categories.splice(to, 0, P.categories.splice(i, 1)[0]); SET_UI.menu = ""; struct(); };   // to place `to`: the ⋯ menu's Up and Down, and the card dragged by its grip
     const remove = () => {
       SET_UI.menu = "";
       if (P.categories.length < 2) { renderPanel(); return toast(t("msg.lastCategory")); }
@@ -3117,12 +3117,13 @@ function brandTab() {
     };
     return el("div", { class: "chcard" + (here ? " here" : ""), style: `--c:${c.color}`, onfocusin: show, onpointerdown: show, oninput: show },
       el("div", { class: "chrow" },
+        P.categories.length > 1 && el("span", { class: "grip", title: t("cat.drag"), "aria-hidden": "true", onpointerdown: (e) => chDrag(e, move) }, "⋮⋮"),   // the ⋯ menu's Up and Down do it from the keyboard
         el("label", { class: "swc", title: t("cat.color") }, el("input", { type: "color", value: c.color, oninput: (e) => { c.color = e.target.value; e.target.closest(".chcard").style.setProperty("--c", c.color); document.documentElement.style.setProperty("--acc", c.color); touch({ profile: true }); } })),
         textInput(c.name, (v) => { c.name = v; touch({ profile: true }); }, { placeholder: t("cat.name"), class: "chname" }),
         el("button", { class: "more", title: t("cat.more"), "aria-expanded": String(open), onclick: () => { SET_UI.menu = open ? "" : c.id; renderPanel(); } }, "⋯")),
       open && el("div", { class: "chmenu" },
-        el("button", { disabled: i === 0, onclick: () => move(-1) }, t("cat.up")),
-        el("button", { disabled: i === P.categories.length - 1, onclick: () => move(1) }, t("cat.down")),
+        el("button", { disabled: i === 0, onclick: () => move(i - 1) }, t("cat.up")),
+        el("button", { disabled: i === P.categories.length - 1, onclick: () => move(i + 1) }, t("cat.down")),
         el("button", { class: "danger", onclick: remove }, t("cat.remove"))),
       el("div", { class: "two" },
         pin("cat.subShort", textInput(c.sub, (v) => { c.sub = v; touch({ profile: true }); })),
@@ -3146,7 +3147,7 @@ function brandTab() {
       el("span", { class: "lab" }, t("brand.unit")),
       textInput(P.brand.unit, (v) => { P.brand.unit = v; touch({ profile: true }); redo(); }, { disabled: !P.brand.counter, class: "unit" }),
       P.brand.counter && [el("span", { class: "lab" }, t("brand.preview")), preview]),
-    el("div", { class: "cap" }, t("brand.channelsN", P.categories.length), el("small", {}, t("brand.channelsSub"))),
+    el("div", { class: "cap" }, t("brand.channelsN", P.categories.length), el("small", {}, [P.categories.length > 1 && t("brand.channelsDrag"), t("brand.channelsSub")].filter(Boolean).join(" · "))),
     el("div", { class: "chgrid" }, P.categories.map(card),
       el("button", { class: "chadd", onclick: () => {
         const palette = ["#ffb703", "#fb5607", "#3a86ff", "#a855f7", "#06d6a0", "#ff5fa2"];
@@ -3154,6 +3155,68 @@ function brandTab() {
         struct();
       } }, el("b", {}, t("brand.add")), el("small", {}, t("brand.addSub")))),
   ];
+}
+/**
+ * A channel card dragged by its grip (e, the press on it) in Settings → Brand & channels: the card rises and follows
+ * the pointer, a place in its colour opens where it would go, before or after the card nearest its middle, and the
+ * others make room; let go, it moves there as the ⋯ menu's Up and Down move it (`move(to)`, its place among the
+ * others: one step of undo, the profile saved). The page scrolls when the pointer nears its top or foot. Esc, or the
+ * press taken away (the page drawn again meanwhile), leaves it where it was.
+ */
+function chDrag(e, move) {
+  if (e.button !== 0 || !e.isPrimary) return;
+  e.preventDefault();   // no text chosen, no field left
+  const grip = e.currentTarget, card = grip.closest(".chcard"), grid = card.parentElement, page = grid.closest(".scroll");
+  grip.setPointerCapture(e.pointerId);   // first: should it fail, nothing has changed
+  const others = () => [...grid.children].filter((n) => n.classList.contains("chcard") && n !== card);
+  const from = [...grid.children].filter((n) => n.classList.contains("chcard")).indexOf(card), r = card.getBoundingClientRect();
+  const grab = { x: e.clientX - r.left, y: e.clientY - r.top };
+  let x = e.clientX, y = e.clientY, frame = 0, done = false;
+  const hole = el("div", { class: "chhole", style: `--c:${card.style.getPropertyValue("--c")};min-height:${Math.round(r.height)}px` });
+  card.before(hole);
+  card.classList.add("lifted"); card.style.width = r.width + "px";
+  document.body.classList.add("chdrag");
+  const place = () => {   // the card kept over the grid, under the pointer; the place goes where the card's middle is
+    const g = grid.getBoundingClientRect();
+    const left = clamp(x - grab.x - g.left, 0, Math.max(0, g.width - r.width)), top = clamp(y - grab.y - g.top, -r.height / 2, Math.max(0, g.height - r.height / 2));
+    card.style.left = left + "px"; card.style.top = top + "px";
+    const cx = g.left + left + r.width / 2, cy = g.top + top + r.height / 2;
+    let near = null, best = Infinity;
+    for (const o of others()) {
+      const b = o.getBoundingClientRect(), d = Math.hypot(Math.max(b.left - cx, 0, cx - b.right), Math.max(b.top - cy, 0, cy - b.bottom));
+      if (d < best) { best = d; near = { o, b }; }
+    }
+    if (!near) return;
+    // after it when lower than it; in its row, when right of its middle (one card a row, a narrow window: lower than its middle)
+    const across = getComputedStyle(grid).gridTemplateColumns.split(" ").length > 1;
+    const after = !across ? cy > near.b.top + near.b.height / 2 : cy > near.b.bottom || (cy >= near.b.top && cx > near.b.left + near.b.width / 2);
+    let at = after ? near.o.nextElementSibling : near.o;
+    if (at === card) at = card.nextElementSibling;   // the card itself takes no place while it is up
+    if (at !== hole && at !== hole.nextElementSibling && !(at === card.nextElementSibling && hole.nextElementSibling === card)) grid.insertBefore(hole, at);
+  };
+  const tick = () => {   // near the page's top or foot, it scrolls, the place following
+    if (!card.isConnected) return end(false);   // the page drawn again under it
+    const p = page && page.getBoundingClientRect(), edge = 56;
+    const by = !p ? 0 : y < p.top + edge ? -Math.ceil((p.top + edge - y) / 4) : y > p.bottom - edge ? Math.ceil((y - p.bottom + edge) / 4) : 0;
+    if (by) { const was = page.scrollTop; page.scrollTop += by; if (page.scrollTop !== was) place(); }
+    frame = requestAnimationFrame(tick);
+  };
+  const end = (keep) => {
+    if (done) return;
+    done = true;
+    cancelAnimationFrame(frame); removeEventListener("keydown", esc, true);
+    grip.onpointermove = grip.onpointerup = grip.onpointercancel = grip.onlostpointercapture = null;
+    const to = [...grid.children].filter((n) => n === hole || (n.classList.contains("chcard") && n !== card)).indexOf(hole);
+    hole.remove(); card.classList.remove("lifted"); card.style.left = card.style.top = card.style.width = "";
+    document.body.classList.remove("chdrag");
+    if (keep && to >= 0 && to !== from && card.isConnected) move(to);
+  };
+  const esc = (k) => { if (k.key === "Escape") { k.preventDefault(); k.stopPropagation(); end(false); } };   // before Settings takes it to close
+  addEventListener("keydown", esc, true);
+  grip.onpointermove = (m) => { x = m.clientX; y = m.clientY; place(); };
+  grip.onpointerup = () => end(true);
+  grip.onpointercancel = grip.onlostpointercapture = () => end(false);
+  place(); frame = requestAnimationFrame(tick);
 }
 // a press anywhere but on a channel's ⋯ menu shuts it
 addEventListener("pointerdown", (e) => {   // the page is not drawn again: the press goes on to what it is on
