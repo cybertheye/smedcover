@@ -1,0 +1,3 @@
+# Text files are checked out with LF line endings on every system, Windows too: `npm test` compares
+# ui/repaint-styles/index.json with what scripts/repaint-styles.mjs writes, byte for byte.
+* text=auto eol=lf
