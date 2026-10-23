@@ -9,7 +9,7 @@ import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont } from "./store.js";
 import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
-import { baseRecipe, RULES, dealCover, oddsOf, rebalance, dropOption, partChance, ODD_OPTIONS } from "./deal.js";
+import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
 import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
 import {
@@ -2226,49 +2226,108 @@ function lookArtRow() {
 // ---------- Surprise me's chances, seen and set by hand: in their own window (from Surprise me's, and the Look sheet), and for the current look under its sliders
 const chancePct = (v) => `${(v * 100).toFixed(v > 0 && v < 0.1 ? 1 : 0)}%`;   // a chance as the panel shows it
 /**
- * A group of Surprise me's chances of which one option is dealt, adding up to 100%, as a card: its name (an ⓘ with
- * `tip`), Even out and Restore (`reset()`, when given: the rule's back), then a slider for each option; moving one
- * moves the others alike the other way (rebalance in deal.js) while it is dragged. `group`: {option: chance};
- * `names`: [[option, label]]; `save(group)` keeps it as it now is. A long group (`fold`: how many it shows) is folded
- * to its likeliest options, the rest one line with their sum, until unfolded (ODDS_UI.open, by `key`); `filter`
- * ("more": those above an even share, "off": those at 0%) shows only those, unfolded. `head`: more on the line of its
- * name; `two`: the sliders in two columns; `foot`: more under them; `id`: the card's.
+ * A group of Surprise me's chances of which one option is dealt, adding up to 100%, as one bar split into a segment
+ * an option, as wide as its chance, with its name and share on it where they fit (and under the pointer). The white
+ * divider between two neighbours, dragged or moved by the arrow keys once it has the focus, moves share from one to the
+ * other, the rest staying as they are (moveShare in deal.js). Above the bar its name (an ⓘ with `tip`), Even out and
+ * Restore (`reset()`, when given: the rule's back). `group`: {option: chance}; `names`: [[option, label]];
+ * `save(group)` keeps it as it now is. A long group (`fold`: how many it shows) shows its likeliest options, then the
+ * rest as one segment, their sum, until unfolded (ODDS_UI.open, by `key`): every option on the bar then, the likeliest
+ * still first, and each named under it with its share. `foot`: more under it; `id`: its own.
  */
 function oddsGroup(title, names, group, save, opts = {}) {
-  const { hint = "", tip = "", reset = null, key = "", fold = 0, filter = "", head = null, two = false, foot = null, id = null } = opts;
+  const { tip = "", reset = null, key = "", fold = 0, foot = null, id = null } = opts;
   let now = { ...group };
-  const even = 1 / names.length, keep = filter === "more" ? ([k]) => (now[k] || 0) > even + 1e-6 : filter === "off" ? ([k]) => !(now[k] > 0) : null;
-  const folded = !keep && fold > 0 && names.length > fold + 1 && !ODDS_UI.open.has(key);
-  const list = keep ? names.filter(keep) : folded ? [...names].sort((x, y) => (now[y[0]] || 0) - (now[x[0]] || 0)).slice(0, fold) : names;
-  const rest = folded ? names.filter((n) => !list.includes(n)) : [], restOut = el("output", {});
-  const rows = new Map(), show = () => {
-    for (const [k, { input, out }] of rows) { input.value = String(now[k] * 100); out.textContent = chancePct(now[k]); }
-    restOut.textContent = chancePct(rest.reduce((sum, [k]) => sum + (now[k] || 0), 0));
+  const long = fold > 0 && names.length > fold + 1, open = long && ODDS_UI.open.has(key), named = new Map(names);
+  const top = long ? [...names].sort((x, y) => (now[y[0]] || 0) - (now[x[0]] || 0)).slice(0, fold) : names, rest = names.filter((n) => !top.includes(n));
+  const keys = [...top, ...(open ? rest : [])].map(([k]) => [k]).concat(long && !open ? [rest.map(([k]) => k)] : []);
+  const share = (p, g = now) => p.keys.reduce((s, k) => s + (g[k] || 0), 0);
+  const parts = keys.map((ks, i) => {
+    const name = ks.length > 1 ? t("odds.rest", ks.length) : named.get(ks[0]), tone = ks.length > 1 ? "t4" : ["t1", "t3", "t2"][i % 3], b = el("b", {}, name), em = el("em", {}), out = el("em", {});
+    return { keys: ks, name, b, em, out, seg: el("span", { class: "oseg " + tone }, el("span", {}, b, em)), item: open && el("span", {}, el("i", { class: tone }), name, out) };
+  });
+  const cuts = parts.slice(1).map((p, j) => el("i", { class: "ocut", role: "separator", tabindex: 0, "aria-orientation": "vertical", "aria-valuemin": 0, "aria-valuemax": 100, "aria-label": t("odds.cut", parts[j].name, p.name), onkeydown: (e) => step(e, j) }));
+  // what a segment's words need, measured once the bar is drawn: each segment then shows its name and share, its name or
+  // its share alone, or neither, as its width allows
+  let room = null;
+  const fit = () => {
+    const W = bar.clientWidth;
+    if (!W) return;
+    if (!room) {
+      for (const p of parts) { p.seg.classList.remove("n", "p", "x"); p.em.textContent = "88.8%"; }
+      room = parts.map((p) => [p.b.offsetWidth, p.em.offsetWidth]);
+      for (const p of parts) p.em.textContent = chancePct(share(p));
+    }
+    parts.forEach((p, i) => {
+      const w = share(p) * W - 18, [b, em] = room[i], c = b + em + 6 <= w ? "" : b <= w ? "n" : em <= w ? "p" : "x";   // 18: the padding; 6: the gap
+      p.seg.classList.remove("n", "p", "x"); if (c) p.seg.classList.add(c);
+    });
   };
-  const row = ([k, label]) => {
-    const out = el("output", {}, chancePct(now[k] || 0));
-    const input = el("input", { type: "range", min: 0, max: 100, step: 0.5, value: (now[k] || 0) * 100, oninput: (e) => { now = rebalance(now, k, Number(e.target.value) / 100); show(); save(now); } });
-    rows.set(k, { input, out });
-    return el("div", { class: "sl", style: "grid-template-columns:112px 1fr 48px" }, el("span", { title: label }, label), input, out);
+  const show = () => {
+    let at = 0;
+    parts.forEach((p, i) => {
+      const v = share(p), pct = chancePct(v);
+      p.seg.style.width = `${v * 100}%`; p.em.textContent = pct; p.out.textContent = pct; p.seg.title = `${p.name} · ${pct}`;
+      if (i) {
+        const c = cuts[i - 1], was = parts[i - 1];
+        c.style.left = `${at * 100}%`; c.setAttribute("aria-valuenow", String(Math.round(at * 100)));
+        c.setAttribute("aria-valuetext", `${was.name} ${chancePct(share(was))} · ${p.name} ${pct}`);
+      }
+      at += v;
+    });
+    fit();
   };
-  const again = (open) => {
-    if (open) ODDS_UI.open.add(key); else ODDS_UI.open.delete(key);
+  const set = (j, v, from = now) => { now = moveShare(from, parts[j].keys, parts[j + 1].keys, v); show(); save(now); };
+  // a divider with the focus: the arrows move it by a point (Shift: five), Home and End all the way
+  const step = (e, j) => {
+    const a = share(parts[j]), d = e.shiftKey ? 0.05 : 0.01, k = e.key;
+    const v = k === "ArrowLeft" || k === "ArrowDown" ? a - d : k === "ArrowRight" || k === "ArrowUp" ? a + d : k === "Home" ? 0 : k === "End" ? a + share(parts[j + 1]) : null;
+    if (v == null) return;
+    e.preventDefault(); set(j, v);
+  };
+  // a divider dragged: the one under the pointer; where several stand together (options at 0% between them), the
+  // rightmost when it is dragged right, the leftmost when left — so an option at 0% can be given a share again
+  let drag = null;
+  const grab = (e) => {
+    if (e.button !== 0 || !cuts.length) return;
+    const r = bar.getBoundingClientRect(), x = e.clientX - r.left, at = [];
+    parts.reduce((s, p, i) => { if (i) at.push(s * r.width); return s + share(p); }, 0);
+    const best = at.reduce((b, a, j) => (Math.abs(a - x) < Math.abs(at[b] - x) ? j : b), 0);
+    if (Math.abs(at[best] - x) > 10) return;
+    e.preventDefault();
+    const by = at.map((a, j) => j).filter((j) => Math.abs(at[j] - at[best]) < 0.5);
+    drag = { by, j: by.length === 1 ? by[0] : null, x: e.clientX, r, from: { ...now } };
+    if (drag.j != null) cuts[drag.j].focus({ preventScroll: true });
+    bar.setPointerCapture(e.pointerId);
+  };
+  const move = (e) => {
+    if (!drag) return;
+    if (drag.j == null) {
+      if (Math.abs(e.clientX - drag.x) < 2) return;
+      drag.j = e.clientX > drag.x ? Math.max(...drag.by) : Math.min(...drag.by);
+      cuts[drag.j].focus({ preventScroll: true });
+    }
+    const j = drag.j, from = drag.from, start = parts.slice(0, j).reduce((s, p) => s + share(p, from), 0), most = share(parts[j], from) + share(parts[j + 1], from);
+    set(j, Math.min(most, Math.max(0, Math.round(((e.clientX - drag.r.left) / drag.r.width - start) * 200) / 200)), from);   // in half points
+  };
+  const bar = el("div", { class: "obar", onpointerdown: grab, onpointermove: move, onpointerup: () => (drag = null), onpointercancel: () => (drag = null) },
+    el("div", { class: "osegs" }, parts.map((p) => p.seg)), cuts);
+  const again = (unfold) => {
+    if (unfold) ODDS_UI.open.add(key); else ODDS_UI.open.delete(key);
     const next = oddsGroup(title, names, now, save, opts);
     box.replaceWith(next);
-    if (!open) next.scrollIntoView({ block: "nearest" });   // folded: the card, not what was under it
+    if (!unfold) next.scrollIntoView({ block: "nearest" });   // folded: the group, not what was under it
   };
-  const box = el("div", { class: "ocard", id },
-    el("div", { class: "ocard-h" }, el("b", {}, title), tip && info(tip), head, el("span", { class: "grow" }),
-      el("button", { class: "linkbtn", onclick: () => { now = Object.fromEntries(names.map(([k]) => [k, even])); show(); save(now); } }, t("odds.even")),
-      reset && el("button", { class: "linkbtn", onclick: reset }, t("odds.default"))),
-    hint && el("div", { class: "hint" }, hint),
-    el("div", { class: "orows" + (two ? " two" : "") }, list.map(row),
-      keep && !list.length && el("div", { class: "hint" }, t("odds.none")),
-      folded && el("div", { class: "sl rest", style: "grid-template-columns:112px 1fr 48px" }, el("span", {}, t("odds.rest", rest.length)),
-        el("button", { class: "linkbtn", onclick: () => again(true) }, t("odds.unfold", names.length)), restOut),
-      !keep && fold > 0 && names.length > fold + 1 && ODDS_UI.open.has(key) && el("button", { class: "linkbtn fold", onclick: () => again(false) }, t("odds.fold"))),
+  const box = el("div", { class: "ogrp", id },
+    el("div", { class: "ogl" }, el("b", {}, title), tip && info(tip), el("span", { class: "grow" }),
+      long && el("button", { class: "linkbtn", onclick: () => again(!open) }, open ? t("odds.fold") : t("odds.unfold", names.length)),
+      el("button", { class: "linkbtn", onclick: () => { now = Object.fromEntries(names.map(([k]) => [k, 1 / names.length])); show(); save(now); } }, t("odds.evenBar")),
+      reset && el("button", { class: "linkbtn", onclick: reset }, t("odds.defaultBar"))),
+    bar,
+    open && el("div", { class: "olegend" }, parts.map((p) => p.item)),
     foot);
   show();
+  new ResizeObserver(fit).observe(bar);   // drawn, and the window resized
   return box;
 }
 /** A switch of Surprise me's, on by a chance of its own: a slider from 0 to 100%. `done()`, when given, once it is let go of. */
@@ -2301,15 +2360,88 @@ function recipeBox() {
     lookParts(S.profile.style.look),
     el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => oddsDialog() }, t("odds.open")));
 }
-const ODDS_UI = { look: null, open: new Set(), filter: "all" };   // the look whose parts the chances window shows (null: the profile's), the groups unfolded, the looks shown
+const ODDS_UI = { look: null, open: new Set(), filter: "all", round: 0 };   // the look whose parts the chances window shows (null: the profile's), the groups unfolded ("look": the looks), the looks shown; round: the looks' pictures' drawing (a newer one stops an older)
+/**
+ * The looks in Surprise me's chances window, a card each: the cover drawn in it (oddsPics), its name, its share and a
+ * row of dots — the leftmost off, each more twice as likely (DOTS in deal.js). A dot clicked, or the arrow keys on the
+ * row, sets that look's chance alone (withDots); one kept between two dots shows on the nearer (dotsOf) and stays as
+ * it is till then. Every look, those set above an even share or those off (ODDS_UI.filter); all of them folded to the
+ * likeliest eight until unfolded. `put(group)` keeps the looks' group, `reset()` the rule's back.
+ */
+function oddsLooks(sv, layouts, put, reset, again) {
+  const lang = getLang(), N = DOTS.length - 1, mine = () => (sv.odds.groups || {}).look || {}, odds = () => oddsOf(sv.odds, layouts);
+  const dots = (k, o = odds()) => (o.set.look ? dotsOf(mine()[k] || 0) : EVEN_DOTS);
+  const count = (f, o = odds()) => LOOK_IDS.filter((k) => (f === "more" ? dots(k, o) > EVEN_DOTS : f === "off" ? !dots(k, o) : true)).length;
+  const f = ODDS_UI.filter, unfolded = ODDS_UI.open.has("look"), o0 = odds();
+  const list = f === "all" ? (unfolded ? LOOK_IDS : [...LOOK_IDS].sort((a, b) => o0.groups.look[b] - o0.groups.look[a]).slice(0, 8)) : LOOK_IDS.filter((k) => (f === "more" ? dots(k, o0) > EVEN_DOTS : !dots(k, o0)));
+  const cards = new Map(), seg = new Map();
+  const show = () => {
+    const o = odds();
+    for (const [k, c] of cards) {
+      const d = dots(k, o), pct = d ? chancePct(o.groups.look[k]) : t("odds.off");
+      c.box.classList.toggle("off", !d); c.pct.textContent = pct;
+      [...c.row.children].forEach((i, n) => i.classList.toggle("on", n ? n <= d : !d));
+      c.row.setAttribute("aria-valuenow", String(d)); c.row.setAttribute("aria-valuetext", d ? `${d}/${N} · ${pct}` : pct);
+    }
+    for (const [k, b] of seg) b.textContent = t("odds.filter." + k, count(k, o));
+  };
+  const setDots = (k, d) => { put(withDots(mine(), k, Math.min(N, Math.max(0, d)), LOOK_IDS)); show(); };
+  const card = (k) => {
+    const name = LOOKS[k].name[lang], pct = el("span", { class: "pct" });
+    const row = el("div", { class: "odots", role: "slider", tabindex: 0, "aria-label": t("odds.dotsOf", name), "aria-valuemin": 0, "aria-valuemax": N,
+      onclick: (e) => { const d = e.target.dataset && e.target.dataset.d; if (d != null) setDots(k, Number(d)); },
+      onkeydown: (e) => {
+        const d = dots(k), to = { ArrowRight: d + 1, ArrowUp: d + 1, ArrowLeft: d - 1, ArrowDown: d - 1, Home: 0, End: N }[e.key];
+        if (to == null) return;
+        e.preventDefault(); setDots(k, to);
+      } },
+      DOTS.map((_, d) => el("i", { dataset: { d }, title: d ? "" : t("odds.offTip") })));
+    const box = el("div", { class: "olook", title: LOOKS[k].about ? LOOKS[k].about[lang] : name }, el("canvas", { class: "lookpic", width: 300, height: 169 }), el("div", { class: "ln" }, el("span", { title: name }, name), pct), row);
+    cards.set(k, { box, pct, row });
+    return box;
+  };
+  const filters = el("div", { class: "seg" }, ["all", "more", "off"].map((k) => { const b = el("button", { class: "btn" + (f === k ? " on" : ""), onclick: () => { ODDS_UI.filter = k; again(); } }); seg.set(k, b); return b; }));
+  const out = [
+    el("div", { class: "ocap" }, el("span", {}, t("odds.looksCap", LOOK_IDS.length), " ", info(t("odds.lookHint"))), el("span", {}, t("odds.lookShort", RULES.hands.count))),
+    el("div", { class: "otools" }, filters, el("span", { class: "grow" }),
+      el("button", { class: "linkbtn", onclick: () => { put(Object.fromEntries(LOOK_IDS.map((k) => [k, 1 / LOOK_IDS.length]))); show(); } }, t("odds.even")),
+      el("button", { class: "linkbtn", onclick: reset }, t("odds.default"))),
+    el("div", { class: "olooks" }, list.map(card), !list.length && el("div", { class: "hint" }, t("odds.none"))),
+    f === "all" && el("button", { class: "linkbtn ofold", onclick: () => { if (unfolded) ODDS_UI.open.delete("look"); else ODDS_UI.open.add("look"); again(); } }, unfolded ? t("odds.fold") : t("odds.moreLooks", LOOK_IDS.length - list.length)),
+  ];
+  show();
+  oddsPics([...cards].map(([k, c]) => [k, c.box.querySelector("canvas")]));
+  return out;
+}
+/**
+ * The looks' pictures in the chances window: the Look sheet's (LOOKCARDS) where they are drawn from the cover as it now
+ * is, else drawn now, one a frame while the window is open, and kept there for the sheet too. `list`: [[look, canvas]].
+ */
+function oddsPics(list) {
+  const base = lookBase(), round = ++ODDS_UI.round, wait = [];
+  const copy = (pic, cv) => { cv.width = pic.cv.width; cv.height = pic.cv.height; cv.getContext("2d").drawImage(pic.cv, 0, 0); };
+  for (const [id, cv] of list) { const pic = LOOKCARDS.pics.get(id); if (pic && pic.sig === base + lookOwn(id)) copy(pic, cv); else wait.push([id, cv]); }
+  const next = () => {
+    if (round !== ODDS_UI.round || !wait.length || !wait[0][1].isConnected) return;   // drawn anew, or the window shut
+    const [id, cv] = wait.shift();
+    let pic = LOOKCARDS.pics.get(id);
+    if (!pic) { pic = { cv: el("canvas", { class: "lookpic", width: 300, height: 169 }), sig: "", want: "" }; LOOKCARDS.pics.set(id, pic); }
+    pic.want = base + lookOwn(id);
+    try { paint(pic.cv, selSize(), 300, S.cover, catIndex(), null, null, { profile: inLook(id) }); if (!outlinesPending()) pic.sig = pic.want; copy(pic, cv); }
+    catch (e) { console.error(e); }   // one look failing leaves the others to be drawn
+    finally { useLook(); }
+    requestAnimationFrame(next);
+  };
+  requestAnimationFrame(next);
+}
 /**
  * Surprise me's chances, in a window of their own (from Surprise me's window, and the Look sheet): every chance it
  * deals by (RULES.odds and the looks' recipes, deal.js), the user's over them, kept in the settings for every
- * profile, each group a card. First the looks (all of them, those above an even share, or those off), folded to the
- * likeliest; then which layout a hand is dealt in (the canvas's, or one of the user's presets, with the way to the
- * presets in the Layout sheet), the ground, the title's lettering and bend, the colour block's shape, how many look
- * effects and whose — each group adding up to 100%, the long ones folded —; the switches, each with a chance of its
- * own; and the optional parts of the look picked. `at`: "layouts", opened at the layouts.
+ * profile. On the left the looks, each with its dots (oddsLooks), and the optional parts of the look picked; on the
+ * right the groups of which one is dealt, each a bar adding up to 100% (oddsGroup): which layout a hand is dealt in
+ * (the canvas's, or one of the user's presets, with the way to the presets in the Layout sheet), the ground, the
+ * title's lettering and bend, the colour block's shape, how many look effects and whose — the long ones folded —;
+ * then the switches, each with a chance of its own. `at`: "layouts", opened at the layouts.
  */
 function oddsDialog(fresh = true, at = "") {
   if (fresh) Object.assign(ODDS_UI, { look: null, filter: "all", open: new Set() });   // opened anew: the parts of the profile's look, every look, the long groups folded
@@ -2322,30 +2454,30 @@ function oddsDialog(fresh = true, at = "") {
   const setChance = (k, v) => { sv.odds = { ...sv.odds, chances: { ...(sv.odds.chances || {}), [k]: v } }; persistSettings(); };
   const group = (g, names, more = {}) => oddsGroup(t("odds." + g), names, odds.groups[g], (v) => setGroup(g, v), { key: g, reset: () => dropGroup(g), ...more });
   const look = ODDS_UI.look && LOOKS[ODDS_UI.look] ? ODDS_UI.look : S.profile.style.look;
-  const even = 1 / LOOK_IDS.length, count = (f) => LOOK_IDS.filter((k) => (f === "more" ? odds.groups.look[k] > even + 1e-6 : f === "off" ? !(odds.groups.look[k] > 0) : true)).length;
-  const filters = el("div", { class: "seg" }, ["all", "more", "off"].map((f) => el("button", { class: "btn" + (ODDS_UI.filter === f ? " on" : ""), onclick: () => { ODDS_UI.filter = f; again(); } }, t("odds.filter." + f, count(f)))));
   const dlg = el("div", { class: "dlg odds" },
     el("div", { class: "head" },
       el("div", { class: "ttl" }, el("h2", {}, t("odds.title")), el("div", { class: "hint" }, t("odds.sub", RULES.hands.count), " ", info(t("odds.hint")))),
       el("button", { class: "linkbtn", title: t("odds.reset"), onclick: () => { if (!confirm(t("odds.resetSure"))) return; sv.odds = {}; persistSettings(); again(); } }, t("odds.resetAll")),
       el("button", { class: "btn solid", onclick: done }, t("odds.done"))),
-    group("look", LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), { tip: t("odds.lookHint"), hint: t("odds.lookShort", RULES.hands.count), head: filters, fold: 8, two: true, filter: ODDS_UI.filter === "all" ? "" : ODDS_UI.filter }),
-    el("div", { class: "ogrid" },
-      group("layout", [["keep", t("odds.layout.keep")], ...layouts.map((p, i) => [p.id, layoutName(p, i)])], { id: "odds-layouts", tip: `${t("odds.layoutHint")} ${t("odds.layoutsHint")}`, fold: 4,
-        foot: el("div", { class: "ofoot" }, el("span", { class: "hint" }, t("odds.presetsWhere")),
-          el("button", { class: "linkbtn", onclick: () => { closeModal(); if (!SURPRISE.busy) dealClose(); showSheet("layout"); } }, t("odds.presetsGo"))) }),
-      group("ground", [["dark", t("theme.dark")], ["light", t("theme.light")]], { tip: t("odds.groundHint") }),
-      group("letters", ODD_OPTIONS.letters().map((k) => [k, k === "own" ? t("odds.ownLetters") : EFFECTS[k].name[lang]]), { tip: t("odds.lettersHint"), fold: 3 }),
-      group("bend", ODD_OPTIONS.bend().map((k) => [k, k === "none" ? t("odds.noBend") : BENDS[k].name[lang]]), { tip: t("odds.bendHint"), fold: 3 }),
-      group("accent", ODD_OPTIONS.accent().map((k) => [k, t("shape." + k)]), { fold: 3 }),
-      group("lookFx", ODD_OPTIONS.lookFx().map((k) => [k, t("odds.lookFx." + k)]), { tip: t("odds.lookFxHint") }),
-      group("lookFxFrom", ODD_OPTIONS.lookFxFrom().map((k) => [k, t("odds.lookFxFrom." + k)]))),
-    el("div", { class: "ocard" }, el("div", { class: "ocard-h" }, el("b", {}, t("odds.chances")), info(t("odds.chancesHint"))),
-      el("div", { class: "hint" }, t("odds.chancesShort")),
-      el("div", { class: "orows two" }, Object.keys(RULES.odds.chances).map((k) => oddsChance(t("odds.c." + k), odds.chances[k], (v) => setChance(k, v), again)))),   // let go of: the look's parts below follow
-    el("div", { class: "ocard" }, el("div", { class: "ocard-h" }, el("b", {}, t("odds.byLook")), info(t("odds.byLookHint")), el("span", { class: "grow" }),
-        select(LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), look, (v) => { ODDS_UI.look = v; again(); })),
-      el("div", { class: "orows two" }, lookParts(look, again))));
+    el("div", { class: "ocols" },
+      el("div", { class: "ocol" },
+        oddsLooks(sv, layouts, (v) => setGroup("look", v), () => dropGroup("look"), again),
+        el("div", { class: "ocard" }, el("div", { class: "ocard-h" }, el("b", {}, t("odds.byLook")), info(t("odds.byLookHint")), el("span", { class: "grow" }),
+            select(LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), look, (v) => { ODDS_UI.look = v; again(); })),
+          el("div", { class: "orows" }, lookParts(look, again)))),
+      el("div", { class: "ocol" },
+        el("div", { class: "ocap" }, el("span", {}, t("odds.barsCap")), el("span", {}, t("odds.barsSum"))),
+        group("layout", [["keep", t("odds.layout.keep")], ...layouts.map((p, i) => [p.id, layoutName(p, i)])], { id: "odds-layouts", tip: `${t("odds.layoutHint")} ${t("odds.layoutsHint")}`, fold: 4,
+          foot: el("div", { class: "ofoot" }, el("span", { class: "hint" }, t("odds.presetsWhere")),
+            el("button", { class: "linkbtn", onclick: () => { closeModal(); if (!SURPRISE.busy) dealClose(); showSheet("layout"); } }, t("odds.presetsGo"))) }),
+        group("ground", [["dark", t("theme.dark")], ["light", t("theme.light")]], { tip: t("odds.groundHint") }),
+        group("letters", ODD_OPTIONS.letters().map((k) => [k, k === "own" ? t("odds.ownLetters") : EFFECTS[k].name[lang]]), { tip: t("odds.lettersHint"), fold: 3 }),
+        group("bend", ODD_OPTIONS.bend().map((k) => [k, k === "none" ? t("odds.noBend") : BENDS[k].name[lang]]), { tip: t("odds.bendHint"), fold: 3 }),
+        group("accent", ODD_OPTIONS.accent().map((k) => [k, t("shape." + k)]), { fold: 3 }),
+        group("lookFx", ODD_OPTIONS.lookFx().map((k) => [k, t("odds.lookFx." + k)]), { tip: t("odds.lookFxHint") }),
+        group("lookFxFrom", ODD_OPTIONS.lookFxFrom().map((k) => [k, t("odds.lookFxFrom." + k)])),
+        el("div", { class: "ocap" }, el("span", {}, t("odds.chances"), " · ", t("odds.chancesShort"), " ", info(t("odds.chancesHint")))),
+        el("div", { class: "orows two" }, Object.keys(RULES.odds.chances).map((k) => oddsChance(t("odds.c." + k), odds.chances[k], (v) => setChance(k, v), again))))));   // let go of: the look's parts follow
   m.replaceChildren(dlg);
   m.hidden = false; m.onDismiss = done;
   dlg.scrollTop = y;

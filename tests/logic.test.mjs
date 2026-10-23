@@ -2355,6 +2355,42 @@ test("Surprise me's chances: the rule's, the user's over them; a group adds up t
   assert.deepEqual(rebalance({ only: 1 }, "only", 0.3), { only: 1 });
 });
 
+test("the chances window's bars and dots: a divider moves share between two neighbours alone; the looks' dots stand for chances as kept, a click changing that look's alone", async () => {
+  const { oddsOf, moveShare, DOTS, EVEN_DOTS, dotsOf, withDots } = await import("../ui/js/deal.js");
+  const { LOOK_IDS } = await import("../ui/js/style.js");
+  const near = (a, b) => Math.abs(a - b) < 1e-9, sum = (g) => Object.values(g).reduce((s, v) => s + v, 0), n = LOOK_IDS.length;
+  // two neighbours share what they have anew, within it; the others stay as they are
+  const g = moveShare({ a: 0.5, b: 0.3, c: 0.2 }, ["a"], ["b"], 0.6);
+  assert.ok(near(g.a, 0.6) && near(g.b, 0.2) && g.c === 0.2 && near(sum(g), 1), JSON.stringify(g));
+  assert.deepEqual(moveShare({ a: 0.5, b: 0.3, c: 0.2 }, ["a"], ["b"], 2), { a: 0.8, b: 0, c: 0.2 });
+  assert.deepEqual(moveShare({ a: 0.5, b: 0.3, c: 0.2 }, ["a"], ["b"], -1), { a: 0, b: 0.8, c: 0.2 });
+  // the rest of a long group folded into one segment: its options keep their shares of it, alike when it had nothing
+  const h = moveShare({ a: 0.4, b: 0.3, c: 0.2, d: 0.1 }, ["b"], ["c", "d"], 0.4);
+  assert.ok(near(h.b, 0.4) && near(h.c, 0.4 / 3) && near(h.d, 0.2 / 3) && h.a === 0.4 && near(sum(h), 1), JSON.stringify(h));
+  const z = moveShare({ a: 1, b: 0, c: 0 }, ["a"], ["b", "c"], 0.6);
+  assert.ok(near(z.b, 0.2) && near(z.c, 0.2), JSON.stringify(z));
+  assert.equal(moveShare({ a: 0.5, b: 0.5 }, ["a"], ["b"], 1 - 1e-12).b, 0, "no crumbs: what is left nothing deals nothing");
+  // the dots: an even share is EVEN_DOTS, each dot more twice as likely, none off; a chance between two on the nearer,
+  // any chance one at least
+  assert.deepEqual(DOTS.map((w, d) => dotsOf(w / n)), DOTS.map((w, d) => d));
+  assert.deepEqual([dotsOf(1 / n), dotsOf(0), dotsOf(1.4 / n), dotsOf(1.5 / n), dotsOf(1e-6), dotsOf(1)], [EVEN_DOTS, 0, EVEN_DOTS, EVEN_DOTS + 1, 1, DOTS.length - 1]);
+  // the old sliders' chances (adding up to 1) show on their dots by their share: an even share on EVEN_DOTS
+  const old = Object.fromEntries(LOOK_IDS.map((k) => [k, k === "deco" ? 0.5 : k === "cel" ? 0 : 0.5 / (n - 2)]));
+  assert.deepEqual([dotsOf(old.deco), dotsOf(old.cel), dotsOf(old.neon)], [DOTS.length - 1, 0, 2]);
+  // none set: every look at an even share, and the one clicked at its dots
+  const one = withDots(null, "neon", 5);
+  assert.ok(LOOK_IDS.every((k) => near(one[k], k === "neon" ? DOTS[5] / n : 1 / n)) && LOOK_IDS.every((k) => dotsOf(one[k]) === (k === "neon" ? 5 : EVEN_DOTS)));
+  assert.ok(near(oddsOf({ groups: { look: one } }).groups.look.neon, DOTS[5] / (n - 1 + DOTS[5])), "twice as likely a dot, by the share kept");
+  // set: the clicked look's chance alone changes, the others' as they were (so the hands are dealt as before for them)
+  const two = withDots(old, "cel", EVEN_DOTS);
+  assert.ok(LOOK_IDS.every((k) => (k === "cel" ? near(two.cel, 1 / n) : two[k] === old[k])), "the others untouched");
+  const off = withDots(one, "neon", 0);
+  assert.ok(off.neon === 0 && oddsOf({ groups: { look: off } }).groups.look.neon === 0 && LOOK_IDS.every((k) => k === "neon" || off[k] === one[k]));
+  // the deal by the dots is the deal by the chances kept: the same group read as before
+  const dealt = oddsOf({ groups: { look: one } }).groups.look, scaled = oddsOf({ groups: { look: Object.fromEntries(Object.entries(one).map(([k, v]) => [k, v * 7])) } }).groups.look;
+  assert.ok(LOOK_IDS.every((k) => near(dealt[k], scaled[k])), "the chances kept are read by their shares alone");
+});
+
 test("Surprise me deals a hand by the rules in deal.js: what is locked stays, the words go back, the title on top; RULES decides", async () => {
   const { dealCover, RULES } = await import("../ui/js/deal.js");
   const { LOOK_IDS } = await import("../ui/js/style.js");

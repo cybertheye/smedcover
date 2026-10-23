@@ -742,33 +742,81 @@
   button.scard.aientry{width:100%;text-align:left;color:var(--text);cursor:pointer;padding:12px 16px}
   button.scard.aientry:hover{border-color:rgba(255,255,255,.3)}
   .aientry .more{font-size:12.5px;color:var(--acc)}
-  /* Surprise me's chances (oddsDialog): wide, its head staying in view; each group a card — its name, Even out and
-     Restore on one line, its sliders under it (in two columns for the long ones) — the smaller groups two by two */
-  #modal .dlg.odds{width:min(1100px,94vw);gap:14px}
+  /* Surprise me's chances (oddsDialog): wide, its head staying in view; the looks on the left, a card each — the cover
+     in it, its name and share, its dots (the leftmost, round, is off) — and under them the optional parts of the look
+     picked; on the right a bar a group, split into its options, a white divider between each two, then the switches */
+  #modal .dlg.odds{width:min(1300px,94vw);gap:14px}
   #modal .dlg.odds .head{display:flex;align-items:center;gap:18px;position:sticky;top:-26px;margin:-26px -26px 0;padding:18px 26px 14px;background:var(--bg);border-bottom:1px solid var(--line);z-index:2}
   #modal .dlg.odds .head .ttl{flex:1;min-width:0}
   #modal .dlg.odds .head h2{margin:0 0 4px}
   #modal .dlg.odds .head .hint{margin:0}
+  .ocols{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:30px;align-items:start}
+  .ocol{display:flex;flex-direction:column;gap:14px;min-width:0}
+  .ocap{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--text2)}
+  .otools{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px}
+  .otools .seg .btn{padding:4px 10px;font-size:12px}
+  .otools .grow{flex:1}
+  .otools .linkbtn,.ofold{font-size:12px}
+  .ofold{align-self:flex-start}
+  .olooks{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:10px}
+  .olooks>.hint{grid-column:1/-1;margin:0}
+  .olook{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:rgba(0,0,0,.25);min-width:0}
+  .olook .lookpic{display:block;width:100%;aspect-ratio:16/9;height:auto;object-fit:contain;background:rgba(0,0,0,.35)}
+  .olook .ln{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:7px 9px 2px;font-size:12.5px}
+  .olook .ln span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .olook .ln .pct{flex:none;font:600 11.5px var(--mono);color:var(--text2)}
+  .olook.off .lookpic{filter:grayscale(1) brightness(.5)}
+  .olook.off .ln{color:var(--text3)}
+  .odots{display:flex;align-items:center;gap:4px;margin:0 3px 3px;padding:0 6px;border-radius:7px;cursor:pointer;user-select:none;-webkit-user-select:none}
+  .odots:focus-visible{outline:2px solid color-mix(in srgb,var(--acc) 70%,transparent);outline-offset:0}
+  .odots i{flex:1;height:18px;display:grid;align-items:center}
+  .odots i::before{content:"";height:5px;border-radius:3px;background:rgba(255,255,255,.16)}
+  .odots i:hover::before{background:rgba(255,255,255,.34)}
+  .odots i.on::before{background:var(--acc)}
+  .odots i:first-child{flex:none;width:12px;justify-items:center}
+  .odots i:first-child::before{width:8px;height:8px;border-radius:50%;box-sizing:border-box;border:1.5px solid rgba(255,255,255,.4);background:none}
+  .odots i:first-child.on::before{background:rgba(255,255,255,.6);border-color:transparent}
   .ocard{border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.04);padding:14px 18px 16px;min-width:0}
   .ocard-h{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px}
-  .ocard-h b{font-size:15px}
+  .ocard-h b{font-size:14px}
   .ocard-h .grow{flex:1}
-  .ocard-h .seg .btn{padding:4px 10px;font-size:12px}
-  .ocard-h select{width:auto;min-width:180px}
-  .ocard>.hint{margin:4px 0 0}
+  .ocard-h select{width:auto;min-width:160px}
   .orows{display:grid;column-gap:28px}
   .orows.two{grid-template-columns:repeat(2,minmax(0,1fr))}
   .orows .sl{margin-top:10px}
-  .orows .sl.rest>span{color:var(--text2)}
-  .orows .sl.rest .linkbtn{justify-self:start}
-  .orows .fold{justify-self:start;margin-top:10px}
-  .orows.two>.btn.wide,.orows.two>.hint,.orows.two>.fold{grid-column:1/-1}
-  .ofoot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+  .dlg.odds .orows>.sl{grid-template-columns:minmax(0,1fr) 96px 44px!important}   /* the name wide, the slider short (the Look sheet's are the other way) */
+  .orows.two>.btn.wide,.orows.two>.hint{grid-column:1/-1}
+  .ogrp{display:flex;flex-direction:column;gap:7px;border-radius:12px}
+  .ogl{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;font-size:13px}
+  .ogl b{font-weight:600}
+  .ogl .grow{flex:1}
+  .ogl .linkbtn{font-size:12px}
+  .obar{position:relative;height:30px;touch-action:none;user-select:none;-webkit-user-select:none}
+  .osegs{position:absolute;inset:0;display:flex;border-radius:9px;overflow:hidden;background:rgba(0,0,0,.3);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+  .oseg{flex:none;display:flex;overflow:hidden;height:100%}
+  .oseg+.oseg{box-shadow:inset 2px 0 0 rgba(20,20,28,.9)}
+  .oseg>span{flex:1 0 auto;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:0 9px;font-size:11.5px;white-space:nowrap}
+  .oseg b{font-weight:500}
+  .oseg em,.olegend em{font:normal 600 11px var(--mono);opacity:.8}
+  .oseg.n em,.oseg.p b,.oseg.x>span{display:none}
+  .ogrp .t1{background:var(--acc);color:var(--acc-ink)}
+  .ogrp .t2{background:color-mix(in srgb,var(--acc) 50%,transparent);color:#fff}
+  .ogrp .t3{background:rgba(255,255,255,.22);color:var(--text)}
+  .ogrp .t4{background:rgba(255,255,255,.1);color:var(--text2)}
+  .ocut{position:absolute;top:-3px;bottom:-3px;width:16px;margin-left:-8px;display:grid;place-items:center;cursor:ew-resize;outline:none;z-index:1}
+  .ocut::after{content:"";width:6px;height:16px;border-radius:3px;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+  .ocut:hover::after{height:20px}
+  .ocut:focus-visible::after{box-shadow:0 0 0 1px rgba(0,0,0,.4),0 0 0 4px color-mix(in srgb,var(--acc) 60%,transparent)}
+  .olegend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--text2)}
+  .olegend>span{display:inline-flex;align-items:center;gap:6px}
+  .olegend i{width:9px;height:9px;border-radius:3px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+  .olegend em{color:var(--text)}
+  .ofoot{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
   .ofoot .hint{margin:0}
-  .ogrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}
-  @media(max-width:760px){.ogrid,.orows.two{grid-template-columns:1fr}}
+  @media(max-width:900px){.ocols{grid-template-columns:minmax(0,1fr)}}
+  @media(max-width:760px){.orows.two{grid-template-columns:1fr}}
   #odds-layouts.ping{animation:lays-ping 1.4s ease-out}
-  @keyframes lays-ping{from{border-color:var(--acc)}to{border-color:var(--line)}}
+  @keyframes lays-ping{from{box-shadow:0 0 0 8px color-mix(in srgb,var(--acc) 30%,transparent)}to{box-shadow:0 0 0 8px transparent}}
   /* a layout preset's editor (layoutEditor): the cover as the preset has it, beside the template and the parts */
   /* a layout preset's editor: its name, the scope and Save in the head; the parts on the left; the canvas and, under
      it, the preset at each size (a click takes it there) */
