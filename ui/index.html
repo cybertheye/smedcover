@@ -696,6 +696,24 @@
   .xdir b{min-width:0;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .xdir b.none{font-weight:400;color:var(--text3)}
   .xdir .linkbtn{flex:none}
+  /* the file name pattern as tags (the Export window, Settings → Sizes & export): a chip a token, the text between
+     them in inputs as wide as what they hold (a hidden copy of it sizes each), what is added after it in grey, then ＋
+     (a menu of the tokens laid over it, so the system opens it) */
+  .ncap{display:flex;align-items:center;gap:4px}
+  .ncap .linkbtn{margin-left:auto;font-size:12px;letter-spacing:0}
+  .nbox{display:flex;flex-wrap:wrap;align-items:center;gap:4px 2px;min-height:40px;padding:5px 6px 5px 10px;border-radius:12px;background:var(--field);border:1px solid var(--line);cursor:text;font-size:13px}
+  .nbox:focus-within{border-color:color-mix(in srgb,var(--acc) 70%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,var(--acc) 14%,transparent)}
+  .nslot{position:relative;display:inline-block;min-width:0;max-width:100%}
+  .nslot>span{display:block;visibility:hidden;white-space:pre;overflow:hidden;min-width:5px;min-height:1.5em;padding:3px 1px}
+  .nbox .nslot>input{position:absolute;inset:0;width:100%;height:100%;padding:3px 1px;border:0;border-radius:4px;background:transparent;color:var(--text);font:inherit}
+  .nbox .nslot>input:focus{box-shadow:none;background:rgba(255,255,255,.06)}
+  .ntok{display:inline-flex;align-items:center;gap:1px;height:26px;padding:0 2px 0 8px;border-radius:6px;background:color-mix(in srgb,var(--acc) 18%,transparent);color:color-mix(in srgb,var(--acc) 45%,#fff);white-space:nowrap;cursor:default}
+  .ntok .nx{width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:inherit;font-size:14px;line-height:1;opacity:.55;cursor:pointer}
+  .ntok .nx:hover,.ntok .nx:focus-visible{opacity:1;background:rgba(255,255,255,.12)}
+  .ntail{color:var(--text3);padding:0 2px;white-space:nowrap;cursor:default}
+  .nplus{position:relative;margin-left:auto;width:28px;height:28px;flex:none;display:grid;place-items:center;border-radius:8px;border:1px dashed var(--line2);color:var(--text2);font-size:14px;cursor:pointer}
+  .nplus:hover,.nplus:focus-within{background:rgba(255,255,255,.08);color:var(--text)}
+  .nplus select{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;padding:0;border:0}
   @media(max-width:760px){.xsizes{grid-template-columns:1fr}}
   /* AI repaint: the original beside the result (or how far it has got) on the left, what to paint it as on the right */
   #modal .dlg.repw{width:min(1120px,96vw);gap:16px}
