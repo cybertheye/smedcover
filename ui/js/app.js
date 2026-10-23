@@ -1880,6 +1880,7 @@ async function generatePhoto() {
   clearInterval(tick);
   if (job !== GEN.job) return;                       // cancelled meanwhile
   Object.assign(GEN, { busy: false, result, error });
+  if (result) madeNow("photo", result, text, ref);
   genDone("photo", error);
   genRedraw();
 }
@@ -1899,7 +1900,58 @@ async function keepGeneratedPhoto() {
   if (await (r.pid ? placePhoto(r.pid) : addPhoto(r.src))) { closeModal(); if (onAssetsTab()) renderPanel(); } else genRedraw();
 }
 // ---------- AI generate, in a window of its own: a photo (the image model) or a sticker or graphic (the text model)
-const GENWIN = { tab: "photo", dot: new Set() };   // the tab shown ("photo" or "art"); the tabs with something done since they were last shown
+/**
+ * The window's state: the tab shown ("photo" or "art"); the tabs with something done since they were last shown; and
+ * what each tab made this session, in memory only, newest first, MADE_MAX at most (`made`: {r, prompt, ref, n, kept},
+ * the result, the words and the reference picture it was made from, which try at those words it was, and for a sticker
+ * the asset it was kept as), with the tries at each tab's words counted (`tries`).
+ */
+const GENWIN = { tab: "photo", dot: new Set(), made: { photo: [], art: [] }, tries: { photo: new Map(), art: new Map() } };
+const MADE_MAX = 12;
+/** Result `r`, just made on tab `tab` from `prompt` and `ref`: first in the window's strip, with which try at those words it is. */
+function madeNow(tab, r, prompt, ref) {
+  const words = prompt.trim(), n = (GENWIN.tries[tab].get(words) || 0) + 1;
+  GENWIN.tries[tab].set(words, n);
+  GENWIN.made[tab] = [{ r, prompt: words, ref, n }, ...GENWIN.made[tab]].slice(0, MADE_MAX);
+}
+/** The strip's entry for result `r` of tab `tab`, while it is there. */
+const madeOf = (tab, r) => (r && GENWIN.made[tab].find((x) => x.r === r)) || null;
+/** What entry `x` was made from and which try it was: 「the words」 · try 2. */
+const madeSays = (x) => { const w = x.prompt.replace(/\s+/g, " "); return x.prompt ? t("gen.madeFrom", w.length > 40 ? w.slice(0, 39) + "…" : w, x.n) : t("gen.madeFromRef", x.n); };
+/** Shows entry `x` of the strip as the result again, its words and reference picture back in the form, so that Make another makes it again. */
+function showMade(tab, x) {
+  if (tab === "photo") Object.assign(GEN, { result: x.r, prompt: x.prompt, ref: x.ref, error: "" });
+  else Object.assign(AI, { result: x.r, target: x.prompt, image: x.ref, error: "" });
+  genWin();
+}
+/** Discards the result shown on tab `tab`, and takes it out of the strip. */
+function dropMade(tab) {
+  const r = tab === "photo" ? GEN.result : AI.result;
+  GENWIN.made[tab] = GENWIN.made[tab].filter((x) => x.r !== r);
+  if (tab === "photo") GEN.result = null; else AI.result = null;
+  genWin();
+}
+/** The words of tab `tab`'s Generate: Make another while the result shown was made from what the form holds. */
+function goText(tab) {
+  const photo = tab === "photo", x = madeOf(tab, photo ? GEN.result : AI.result);
+  return t(x && x.prompt === (photo ? GEN.prompt : AI.target).trim() && x.ref === (photo ? GEN.ref : AI.image) ? "gen.another" : photo ? "gen.go" : "ai.generate");
+}
+/** The strip of what tab `tab` made this session, `shown` marked: a click shows one as the result again (not while another is being made). */
+function madeStrip(tab, shown, busy) {
+  const list = GENWIN.made[tab];
+  return list.length > 0 && el("div", { class: "gmade" }, el("span", { class: "cap" }, t("gen.made")),
+    el("div", { class: "gthumbs" }, list.map((x) => {
+      const rec = tab === "photo" && x.r.pid && S.photos.get(x.r.pid), says = madeSays(x);
+      return el("button", { class: "gthumb" + (x === shown ? " on" : ""), disabled: busy, title: says, "aria-label": says, onclick: () => showMade(tab, x) },
+        tab === "photo" ? el("img", { src: rec ? thumbOf(rec) : x.r.src, alt: "" }) : specThumb(x.r));
+    })));
+}
+/** A sticker or graphic made by AI, small, in its own colours: a thumbnail of the strip. */
+function specThumb(spec) {
+  const cv = el("canvas", { width: 144, height: 108 }), c = cv.getContext("2d");
+  c.translate(72, 54); c.scale(0.48, 0.48); drawSpec(c, spec, null);
+  return cv;
+}
 const genOpen = () => !!$("modal").querySelector(".dlg.genw");
 /** Draws the AI generate window again if it is open, and the Assets sheet (what is under way there). */
 const genRedraw = () => { if (genOpen()) genWin(); if (onAssetsTab()) renderPanel(); };
@@ -1917,8 +1969,9 @@ function heldField(box) { const a = document.activeElement; return a && box.cont
 function giveBack(box, h) { const f = h && box.querySelector(`[data-k="${h.k}"]`); if (!f) return; f.focus(); try { f.setSelectionRange(h.s, h.e); } catch (e) { /* not a text field */ } }
 /**
  * AI generate: on the left what to make — the words, for a sticker the kind it is drawn as, a picture to go by — and
- * Generate; on the right what came back, to put on the cover (a photo; a sticker kept in My vector assets too), keep,
- * or drop. A generation goes on with the window shut and waits in it; a toast says when it is done.
+ * Generate; on the right what came back, saying what it was made from and which try it was, to put on the cover (a
+ * photo; a sticker kept in My vector assets too), keep, or drop, and under it the strip of what the tab made this
+ * session, to show one again. A generation goes on with the window shut and waits in it; a toast says when it is done.
  */
 function genWin(tab = GENWIN.tab) {
   GENWIN.tab = tab; GENWIN.dot.delete(tab);
@@ -1937,32 +1990,37 @@ function genWin(tab = GENWIN.tab) {
       el("button", { class: "btn solid", onclick: () => { closeModal(); S.tab.setup = "ai"; SET_UI.at = photo ? "image" : "text"; setMode("setup"); } }, t(photo ? "rep.goSetup" : "ai.goSetup"))];
     result = el("div", { class: "gempty" }, t("gen.notReady"));
   } else if (photo) {
-    const c = S.imageAi, r = GEN.result;
+    const c = S.imageAi, r = GEN.result, shown = madeOf("photo", r);
     form = [el("div", { class: "cap" }, t("gen.what")),
-      el("textarea", { value: GEN.prompt, spellcheck: false, maxLength: 2000, disabled: busy, dataset: { k: "gprompt" }, style: "height:110px;font-size:14px", placeholder: t(GEN.ref ? "gen.phRef" : "gen.ph"), oninput: (e) => { GEN.prompt = e.target.value; } }),
+      el("textarea", { value: GEN.prompt, spellcheck: false, maxLength: 2000, disabled: busy, dataset: { k: "gprompt" }, style: "height:110px;font-size:14px", placeholder: t(GEN.ref ? "gen.phRef" : "gen.ph"),
+        oninput: (e) => { GEN.prompt = e.target.value; const b = $("gen-go"); if (b && !GEN.busy) b.textContent = goText("photo"); } }),
       el("div", { class: "cap" }, t("gen.ref")), refZone(GEN.ref, pickGenRef, () => { GEN.ref = null; genWin(); }, t("gen.refOn")),
       el("div", { class: "hint" }, t("gen.hint", t("img.provider." + c.provider), c.model, caption(size))),
       el("div", { class: "ggo" }, busy && el("button", { class: "btn", onclick: cancelGeneratePhoto }, t("ai.cancel")),
-        el("button", { id: "gen-go", class: "btn solid", disabled: busy, onclick: generatePhoto }, busy ? genBusyText() : t(r ? "gen.again" : "gen.go")))];
-    result = r ? [el("figure", { class: "gpic" }, el("img", { src: r.src, alt: "" }), el("figcaption", {}, `${r.w} × ${r.h}`)),
-        el("div", { class: "gacts" }, el("button", { class: "btn", onclick: () => { GEN.result = null; genWin(); } }, t("ai.discard")), el("button", { class: "btn solid", onclick: keepGeneratedPhoto }, t("gen.keep")))]
-      : el("div", { class: "gempty" + (busy ? " busy" : "") }, busy ? t("gen.working") : GEN.error ? el("span", { class: "err" }, t("msg.failed", GEN.error)) : t("gen.emptyPhoto"));
+        el("button", { id: "gen-go", class: "btn solid", disabled: busy, onclick: generatePhoto }, busy ? genBusyText() : goText("photo")))];
+    result = [shown && el("div", { class: "gmade-cap" }, madeSays(shown)),
+      r ? el("figure", { class: "gpic" }, el("img", { src: r.src, alt: "" }), el("figcaption", {}, `${r.w} × ${r.h}`))
+        : el("div", { class: "gempty" + (busy ? " busy" : "") }, busy ? t("gen.working") : GEN.error ? el("span", { class: "err" }, t("msg.failed", GEN.error)) : t("gen.emptyPhoto")),
+      (r || GENWIN.made.photo.length > 0) && el("div", { class: "gfoot" }, madeStrip("photo", shown, busy),
+        r && el("div", { class: "gacts" }, el("button", { class: "btn", onclick: () => dropMade("photo") }, t("ai.discard")), el("button", { class: "btn solid", onclick: keepGeneratedPhoto }, t("gen.keep"))))];
   } else {
-    const r = AI.result, setKind = (k) => { S.ai = normalizeAi({ ...S.ai, kind: k }); persistAi(); genWin(); };
+    const r = AI.result, shown = madeOf("art", r), kept = !!(shown && shown.kept && userAssets.has(shown.kept)), setKind = (k) => { S.ai = normalizeAi({ ...S.ai, kind: k }); persistAi(); genWin(); };
     form = [el("div", { class: "cap" }, t("gen.what")),
       el("textarea", { value: AI.target, spellcheck: false, maxLength: 300, disabled: busy, dataset: { k: "atarget" }, style: "height:84px;font-size:14px", placeholder: t(AI.image ? "ai.targetPhImage" : "ai.targetPh"),
-        oninput: (e) => { AI.target = e.target.value; }, onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); generateAsset(); } } }),
+        oninput: (e) => { AI.target = e.target.value; const b = $("ai-go"); if (b && !AI.busy) b.textContent = goText("art"); }, onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); generateAsset(); } } }),
       el("div", { class: "cap" }, t("gen.kind")),
       el("div", { class: "gkinds" }, AI_KINDS.map((k) => el("button", { class: "gkind" + (S.ai.kind === k ? " on" : ""), disabled: busy, onclick: () => setKind(k) }, el("b", {}, t("ai.kind." + k)), el("small", {}, t("ai.kindHint." + k))))),
       el("div", { class: "cap" }, t("gen.ref")), refZone(AI.image, pickReference, () => { AI.image = null; genWin(); }, t("ai.refOn")),
       el("div", { class: "hint" }, t("ai.hint", S.ai.model)),
       el("div", { class: "ggo" }, busy && el("button", { class: "btn", onclick: cancelGenerate }, t("ai.cancel")),
-        el("button", { id: "ai-go", class: "btn solid", disabled: busy, onclick: generateAsset }, busy ? aiBusyText() : t(r ? "ai.again" : "ai.generate")))];
-    result = r ? [el("div", { class: "gspecs" }, el("figure", {}, specPreview(r, null), el("figcaption", {}, t("gen.ownColour"))), el("figure", {}, specPreview(r, cat().color), el("figcaption", {}, t("gen.channelColour", cat().name || cat().code)))),
-        el("div", { class: "hint" }, r.name[getLang()]),
-        el("div", { class: "gacts" }, el("button", { class: "btn", onclick: () => { AI.result = null; genWin(); } }, t("ai.discard")),
-          el("button", { class: "btn", onclick: () => keepGenerated() }, t("ai.keep")), el("button", { class: "btn solid", onclick: () => keepGenerated(true) }, t("gen.place")))]
-      : el("div", { class: "gempty" + (busy ? " busy" : "") }, busy ? t("gen.working") : AI.error ? el("span", { class: "err" }, t("msg.failed", AI.error)) : t("gen.emptyArt"));
+        el("button", { id: "ai-go", class: "btn solid", disabled: busy, onclick: generateAsset }, busy ? aiBusyText() : goText("art")))];
+    result = [shown && el("div", { class: "gmade-cap" }, madeSays(shown)),
+      r ? [el("div", { class: "gspecs" }, el("figure", {}, specPreview(r, null), el("figcaption", {}, t("gen.ownColour"))), el("figure", {}, specPreview(r, cat().color), el("figcaption", {}, t("gen.channelColour", cat().name || cat().code)))),
+          el("div", { class: "hint" }, r.name[getLang()])]
+        : el("div", { class: "gempty" + (busy ? " busy" : "") }, busy ? t("gen.working") : AI.error ? el("span", { class: "err" }, t("msg.failed", AI.error)) : t("gen.emptyArt")),
+      (r || GENWIN.made.art.length > 0) && el("div", { class: "gfoot" }, madeStrip("art", shown, busy),
+        r && el("div", { class: "gacts" }, el("button", { class: "btn", onclick: () => dropMade("art") }, t("ai.discard")),
+          el("button", { class: "btn", disabled: kept, onclick: () => keepGenerated() }, t(kept ? "gen.kept" : "ai.keep")), el("button", { class: "btn solid", onclick: () => keepGenerated(true) }, t("gen.place"))))];
   }
   m.replaceChildren(el("div", { class: "dlg genw" }, head, el("div", { class: "genbody" }, el("div", { class: "gform" }, form), el("div", { class: "gresult" }, result))));
   m.hidden = false; m.onDismiss = closeModal;
@@ -2040,18 +2098,26 @@ async function generateAsset() {
   clearInterval(tick);
   if (job !== AI.job) return;                       // cancelled meanwhile: the late answer is dropped
   Object.assign(AI, { busy: false, result, error });
+  if (result) madeNow("art", result, target, image);
   genDone("art", error);
   genRedraw();
 }
 /** Stops waiting for the reply. The request itself cannot be recalled, so the provider may still bill it. */
 function cancelGenerate() { AI.job++; Object.assign(AI, { busy: false, error: "", result: null }); genRedraw(); }
 const aiBusyText = () => t("ai.busy", Math.max(0, Math.round((Date.now() - AI.since) / 1000))) + (AI.attempt > 1 ? t("ai.attempt", AI.attempt) : "");
-/** Keeps the asset made in My vector assets; `place`: and puts it on the cover. */
+/**
+ * Keeps the asset made in My vector assets; `place`: and puts it on the cover. One kept already (shown again from the
+ * window's strip of what was made) is not kept a second time: that one is put on the cover.
+ */
 async function keepGenerated(place = false) {
-  const spec = AI.result;
+  const spec = AI.result, m = madeOf("art", spec);
   if (!spec) return;
-  const a = putSpecAsset("a" + uid(), spec.name[getLang()], spec);
-  await saveAssetRecord(a).catch(fail);
+  let a = m && m.kept && userAssets.get(m.kept);
+  if (!a) {
+    a = putSpecAsset("a" + uid(), spec.name[getLang()], spec);
+    await saveAssetRecord(a).catch(fail);
+    if (m) m.kept = a.id;
+  }
   AI.result = null;
   if (place) { closeModal(); addAsset({ kind: "user", id: a.id }); if (onAssetsTab()) renderPanel(); return; }
   toast(t("ai.saved", a.name));
