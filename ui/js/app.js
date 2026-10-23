@@ -3088,7 +3088,8 @@ addEventListener("pointerdown", (e) => {   // the page is not drawn again: the p
 /**
  * Settings → Sizes & export: every size there is (the presets, then the user's own), each a row — a name of the user's
  * own, its ratio, the platforms it is for, its pixels, a switch to make covers at it (one at least); a size of one's
- * own to add; the format and the resolution, the file names with an example; and the batch export from a table.
+ * own to add; the format and the resolution, the file names with an example, the folder they go into; and the batch
+ * export from a table.
  */
 function sizesTab() {
   const P = S.profile, se = S.settings, lang = getLang();
@@ -3137,6 +3138,7 @@ function sizesTab() {
     el("div", { class: "hint" }, t("exp.transparentHint")),
     el("div", { class: "fld" }, el("div", { class: "cap" }, t("exp.name"), info(t("exp.nameHint"))),
       textInput(se.nameTemplate, (v) => { setting("nameTemplate", v); example.textContent = t("exp.example", nameFor(selSize(), S.cover, catIndex())); }), example),
+    saveToRow(),
     el("div", { class: "scard batch", id: "set-batch" }, el("div", { class: "grow" }, el("b", {}, t("exp.batch"), " ", info(t("exp.batchHint"))), el("small", {}, t("exp.batchSub"))),
       el("button", { class: "btn", onclick: csvTemplate }, t("exp.csvTemplate")),
       el("button", { class: "btn solid", onclick: batchFromCsv }, t("exp.csv"))),
@@ -4822,9 +4824,10 @@ function progress(total) {
  * Exports jobs ([{cover, index, size}]) one after another without freezing the window: each cover is
  * drawn, encoded to PNG off the main thread and handed to Rust as raw bytes, where it is converted
  * and written on a worker thread (up to two at a time) while the next cover is already being drawn.
- * save(bytes, name) does the writing; returns how many were written.
+ * save(bytes, name) does the writing; returns how many were written, or -1 when one could not be, which onFail (a
+ * toast, unless told) is told.
  */
-async function runExport(jobs, save) {
+async function runExport(jobs, save, onFail = fail) {
   const prog = progress(jobs.length), pending = new Set();
   let done = 0, failed = null;
   try {
@@ -4842,24 +4845,76 @@ async function runExport(jobs, save) {
     }
     await Promise.all(pending);
   } finally { prog.close(); }
-  if (failed) { fail(failed); return -1; }
+  if (failed) { onFail(failed); return -1; }
   if (prog.cancelled) toast(t("msg.cancelled", done, jobs.length));
   return done;
 }
+/** The folder the profile's exports are written into (settings.exportDirs); "" while none is kept, or where the host writes no files. */
+const exportDir = () => (CAN.saveFiles && S.settings.exportDirs[S.profile.id]) || "";
+const keepExportDir = (dir) => { S.settings.exportDirs[S.profile.id] = dir; persistSettings(); };
+/** A folder as it is shown: the home folder as ~. */
+const shortDir = (dir) => dir.replace(/^(\/Users\/[^/]+|\/home\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)(?=[\\/]|$)/, "~");
+/** Asks for the folder to export into and keeps it for the profile; resolves with it, or null when none was chosen. */
+async function pickExportDir() {
+  try { const dir = await invoke("pick_folder"); if (dir) keepExportDir(dir); return dir || null; } catch (e) { fail(e); return null; }
+}
+/** Writing into `dir` failed (it is gone, its disk away, or it cannot be written into): says so and asks for another; resolves with it, or null. */
+function askOtherDir(dir, err) {
+  return new Promise((done) => {
+    const m = $("modal"), pick = (again) => async () => { closeModal(); done(again ? await pickExportDir() : null); };
+    m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("exp.dirFailTitle")),
+      el("div", { class: "hint", style: "margin:0;font-size:13px;opacity:.8" }, t("exp.dirFailBody", shortDir(dir), err && err.message ? err.message : String(err))),
+      el("button", { class: "btn solid wide", onclick: pick(true) }, t("exp.dirOther")),
+      el("button", { class: "btn wide", onclick: pick(false) }, t("exp.cancel"))));
+    m.onDismiss = pick(false);   // a click outside is its cancel
+    m.hidden = false;
+  });
+}
+/**
+ * Writes jobs into the profile's export folder, asking for one when none is kept yet; where writing there fails, says
+ * so and asks for another, and writes them all there. Resolves with how many were written, where, and the last file's
+ * path ({n, dir, last}), or null when no folder was chosen.
+ */
+async function writeJobs(jobs) {
+  let dir = exportDir() || (await pickExportDir());
+  while (dir) {
+    let err = null, last = "";
+    const n = await runExport(jobs, async (bytes, name) => { last = await invoke("write_image", framed(bytes, { dir, name })); }, (e) => { err = e; });
+    if (!err) return { n, dir, last };
+    dir = await askOtherDir(dir, err);
+  }
+  return null;
+}
+/** One size of this channel's cover: into the profile's folder; with none kept yet, where the user says, and its folder kept. */
 async function exportOne(size) {
   const job = { cover: S.cover, index: catIndex(), size };
   if (!CAN.saveFiles) return void (await runExport([job]));
+  if (exportDir()) { const r = await writeJobs([job]); if (r && r.n === 1) toast(t("msg.saved", r.last)); return; }
   let saved = null;
   const n = await runExport([job], async (bytes, name) => { saved = await invoke("save_image", framed(bytes, { name })); });
-  if (n === 1 && saved) toast(t("msg.saved", saved));
+  if (n !== 1 || !saved) return;
+  toast(t("msg.saved", saved));
+  const dir = saved.replace(/[\\/][^\\/]*$/, "");
+  if (dir && dir !== saved) keepExportDir(dir);
 }
-/** Writes every cover ([{cover, index}]) at each of `sizes` (the profile's, unless told) into one folder the user picks. */
+/** Writes every cover ([{cover, index}]) at each of `sizes` (the profile's, unless told) into the profile's folder (writeJobs), or downloads them. */
 async function exportMany(covers, sizes = S.profile.sizes) {
-  let dir = null;
-  try { if (CAN.saveFiles) { dir = await invoke("pick_folder"); if (!dir) return; } } catch (e) { return fail(e); }
   const jobs = covers.flatMap((c) => sizes.map((size) => ({ ...c, size })));
-  const n = await runExport(jobs, (bytes, name) => invoke("write_image", framed(bytes, { dir, name })));
-  if (n === jobs.length) toast(counted("msg.savedN", n, dir || t("msg.downloads")));
+  if (!CAN.saveFiles) { const n = await runExport(jobs); if (n === jobs.length) toast(counted("msg.savedN", n, t("msg.downloads"))); return; }
+  const r = await writeJobs(jobs);
+  if (r && r.n === jobs.length) toast(counted("msg.savedN", r.n, r.dir));
+}
+/** Where exports go, in the Export window and Settings: the profile's folder (all of it on hover) and the way to change it; nothing where the host writes no files (they download). */
+function saveToRow() {
+  if (!CAN.saveFiles) return null;
+  const row = el("div", { class: "xdir" });
+  const fill = () => {
+    const dir = exportDir();
+    row.replaceChildren(el("span", {}, t("exp.saveTo")), el("b", { class: dir ? "" : "none", title: dir }, dir ? shortDir(dir) : t("exp.dirNone")),
+      el("button", { class: "linkbtn", onclick: async () => { if (await pickExportDir()) fill(); } }, t(dir ? "exp.dirChange" : "exp.dirPick")));
+  };
+  fill();
+  return row;
 }
 async function batchFromCsv() {
   const f = await pickFile(".csv,.tsv,.txt,text/csv");
@@ -4916,8 +4971,9 @@ function exportTicked() {
  * it), its picture (the tray's), what it is called and its pixels, and Export for it alone; over them how many are
  * ticked and the quick choices (every size, the wide ones only, the tall ones only — the square ones go with the tall,
  * as the layout that stacks the tall and the square has them); the format, the resolution and the file names (the
- * same settings as Settings → Sizes & export), an example of the name; then Only this size, and the sizes ticked into
- * a folder. A tick changed is shown where it is, not by building the window again, so the keyboard keeps its place.
+ * same settings as Settings → Sizes & export), an example of the name; then the folder they go into, Only this size,
+ * and the sizes ticked (⌘E, Ctrl+E off the Mac, here as in the editor). A tick changed is shown where it is, not by
+ * building the window again, so the keyboard keeps its place.
  */
 function exportDialog() {
   const m = $("modal"), se = S.settings, sizes = S.profile.sizes, c = cat();
@@ -4943,7 +4999,7 @@ function exportDialog() {
       el("span", { class: "xname" }, el("b", { title: sizeLabel(z) }, caption(z)), el("small", {}, `${z.w}×${z.h}`)),
       el("button", { class: "linkbtn", title: t("exp.oneTip", sizeLabel(z)), onclick: () => exportOne(z) }, t("exp.one"))) };
   });
-  const count = el("span", { class: "xcount" }), goSays = el("span"), go = el("button", { class: "btn solid", onclick: exportTicked }, ico("download", 18), goSays);
+  const count = el("span", { class: "xcount" }), goSays = el("span"), go = el("button", { class: "btn solid", onclick: exportTicked }, ico("download", 18), goSays, el("kbd", {}, MOD_KEY + "E"));
   const sync = () => {   // the ticks, how many, the quick choice they make (dimmed), the main button
     const on = lit(), same = (list) => list.length === on.length && list.every((z) => on.includes(sizeKey(z)));
     for (const r of rows) { const yes = on.includes(r.k); r.row.classList.toggle("off", !yes); r.tick.setAttribute("aria-checked", String(yes)); r.tick.textContent = yes ? "✓" : ""; }
@@ -4965,10 +5021,10 @@ function exportDialog() {
       el("div", { class: "grow" }, el("div", { class: "cap" }, t("exp.name"), info(t("exp.nameHint"))),
         textInput(se.nameTemplate, (v) => { se.nameTemplate = v; persistSettings(); example.textContent = t("exp.example", nameFor(selSize(), S.cover, catIndex())); }))),
     se.format === "jpeg" && slider("exp.quality", 40, 100, 1, se.quality, px, (v) => { se.quality = v; persistSettings(); }),
-    example,
+    el("div", { class: "xex" }, example,
+      el("button", { class: "linkbtn", title: t("exp.batchHint"), onclick: () => { closeModal(); S.tab.setup = "sizes"; SET_UI.at = "batch"; setMode("setup"); } }, t("exp.batchGo"))),
     el("div", { class: "xfoot" },
-      el("button", { class: "linkbtn", title: t("exp.batchHint"), onclick: () => { closeModal(); S.tab.setup = "sizes"; SET_UI.at = "batch"; setMode("setup"); } }, t("exp.batchGo")),
-      el("span", { class: "grow" }),
+      saveToRow() || el("span", { class: "grow" }),
       el("button", { class: "btn", onclick: () => exportOne(selSize()) }, t("exp.onlyHere")),
       go)));
   m.hidden = false;
@@ -5407,7 +5463,7 @@ function syncTop() {
     el("div", { class: "grp" }, step("top.undo", "undo", -1, S.histIdx <= 0), step("top.redo", "redo", 1, S.histIdx >= S.hist.length - 1), el("span", {}, t("top.saved"))),
     el("div", { class: "spacer" }),
     el("button", { class: "btn cta glassy deal-btn", title: t("top.surpriseHint"), disabled: SURPRISE.busy, onclick: surprise }, ico("spark", 18), t(SURPRISE.busy ? "top.surpriseBusy" : "top.surprise")),
-    el("button", { class: "btn cta solid", onclick: exportDialog }, ico("download", 18), t("top.export")),
+    el("button", { class: "btn cta solid", title: t("top.exportTip", MOD_KEY + "E"), onclick: exportDialog }, ico("download", 18), t("top.export")),
     el("button", { class: "ibtn" + (MENU.open ? " on" : ""), id: "morebtn", title: t("top.more"), "aria-label": t("top.more"), "aria-haspopup": "menu", "aria-expanded": String(MENU.open), onclick: toggleMenu }, ico("more", 18)));
   document.body.dataset.drop = t("msg.dropHere");
   if (MENU.open) renderMenu();
@@ -5616,12 +5672,18 @@ addEventListener("drop", async (e) => {
   const at = over ? { x: clamp((e.clientX - b.left) / b.width, 0, 1), y: clamp((e.clientY - b.top) / b.height, 0, 1) } : null;
   for (const f of [...e.dataTransfer.files].filter((x) => x.type.startsWith("image/"))) await addPhoto(await readAs(f, "readAsDataURL"), at, f.name.replace(/\.[^.]+$/, ""));
 });
+/** How a shortcut is said: with ⌘ on a Mac, Ctrl+ elsewhere (the keydown listener takes either). */
+const MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl+";
 addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
   const a = document.activeElement, typing = /^(INPUT|TEXTAREA|SELECT)$/.test(a && a.tagName);
   if (key === "escape" && MENU.open) return closeMenu();
   const m = $("modal");   // a dialog open: Escape is its cancel (but in a text being typed), and no key reaches what lies under it
-  if (!m.hidden) { if (key === "escape" && !m.dataset.sticky && !(typing && !/^(range|checkbox|radio)$/.test(a.type))) (m.onDismiss || closeModal)(); return; }
+  if (!m.hidden) {
+    if (mod && key === "e" && !e.shiftKey && !e.altKey && m.querySelector(":scope > .dlg.xp")) { e.preventDefault(); return exportTicked(); }   // the Export window: its sizes ticked, even from its file name
+    if (key === "escape" && !m.dataset.sticky && !(typing && !/^(range|checkbox|radio)$/.test(a.type))) (m.onDismiss || closeModal)();
+    return;
+  }
   if (key === "escape" && S.mode === "setup" && !(typing && !/^(range|checkbox|radio|select-one)$/.test(a.type))) return setMode("edit");
   if (key === "escape" && FTB.pop) { FTB.pop = ""; return renderBar(); }   // the bar's popover first
   if (typing) return;
@@ -5642,6 +5704,7 @@ addEventListener("keydown", (e) => {
   }
   if (mod && key === "z") { e.preventDefault(); return timeTravel(e.shiftKey ? 1 : -1); }
   if (S.mode !== "edit") return;
+  if (mod && key === "e" && !e.shiftKey && !e.altKey) { e.preventDefault(); return exportDialog(); }
   const L = layer();
   if (mod && key === "d") { e.preventDefault(); return group().length ? null : duplicateLayer(); }
   if (key === "escape") return V3.to ? set3d(false) : S.focus ? setFocus(false) : selectLayer("bg");

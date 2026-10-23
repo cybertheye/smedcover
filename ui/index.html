@@ -683,9 +683,19 @@
   .xrow:hover .linkbtn,.xrow .linkbtn:focus-visible{opacity:1}
   .xopts{display:flex;gap:22px;align-items:flex-end;flex-wrap:wrap;padding-top:14px;border-top:1px solid var(--line)}
   .xopts .grow{flex:1;min-width:220px}
+  .xex{display:flex;align-items:baseline;justify-content:space-between;gap:6px 16px;flex-wrap:wrap}
+  .xex .hint{margin:0;min-width:0;overflow-wrap:anywhere}
   .xfoot{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
   .xfoot .grow{flex:1}
   .xfoot .btn{height:48px;padding:0 20px;border-radius:14px;font-size:14px;display:flex;align-items:center;gap:8px}
+  .xfoot .btn kbd{font:600 11.5px/1.4 -apple-system,"Segoe UI",var(--ui);border:1px solid currentColor;border-radius:6px;padding:0 6px;margin-left:2px;opacity:.6}
+  /* where exports go: the folder kept, and Change (the Export window's foot, Settings → Sizes & export) */
+  .xdir{min-width:0;display:flex;align-items:baseline;gap:8px;font-size:13px;color:var(--text2)}
+  .xfoot .xdir{flex:1 1 220px}
+  .xdir>span{flex:none}
+  .xdir b{min-width:0;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .xdir b.none{font-weight:400;color:var(--text3)}
+  .xdir .linkbtn{flex:none}
   @media(max-width:760px){.xsizes{grid-template-columns:1fr}}
   /* AI repaint: the original beside the result (or how far it has got) on the left, what to paint it as on the right */
   #modal .dlg.repw{width:min(1120px,96vw);gap:16px}

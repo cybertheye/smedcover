@@ -248,6 +248,9 @@ export function normalizeSettings(raw) {
     quality: Math.round(num(s.quality, 92, 40, 100)),
     nameTemplate: str(s.nameTemplate) || DEFAULT_SETTINGS.nameTemplate,
     exportSizes: normalizeExportSizes(s.exportSizes),
+    // the folder each profile's exports are written into, { profileId: path }; with none kept, its first export asks for one
+    exportDirs: Object.fromEntries(Object.entries(s.exportDirs && typeof s.exportDirs === "object" ? s.exportDirs : {})
+      .filter(([k, v]) => /^[\w-]{1,60}$/.test(k) && typeof v === "string" && v.trim() && v.length <= 4096).slice(0, 200)),
     scope: ["orient", "size"].includes(s.scope) ? s.scope : "all",   // what a change of place or layout reaches: every size, those facing the way this one does (see orientOf in layout.js), or this one
     hideScene: s.hideScene === true,   // the scene objects' handles hidden on the canvas
     glass: s.glass !== false,   // the panels frosted glass over the cover (false: plain, translucent; see glassWatch in app.js)
