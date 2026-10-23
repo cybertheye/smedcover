@@ -6,8 +6,9 @@
 //   dealCover   a hand, in the order it is dealt: the layout (the canvas's, or a layout preset of the user's), the
 //               look and its sliders, its scene, the ground, the words put back, the title on top, each layer's own
 //               choices and look effects
-//   rebalance   a group's chances with one of them set, the others moved alike (the chances window); dropOption,
-//               one of them taken away (a layout preset deleted)
+//   rebalance   a group's chances with one of them set, the others moved alike; moveShare, two neighbours on a
+//               group's bar sharing what they have anew (the chances window); dropOption, one of them taken away (a
+//               layout preset deleted); DOTS, dotsOf, withDots: the looks' chances as the window's dots
 // What needs the cover drawn stays in app.js: surprise() deals the hands (dealHand: dealCover, then the
 // user's layers placed by dealPlaces, which reads RULES.places) and shows each. The user's own chances
 // (Surprise me's chances window) lie over RULES.odds, their recipes (the same panel, and the Style tab) over RECIPES;
@@ -273,6 +274,49 @@ export function dropOption(group, key) {
   return out;
 }
 /**
+ * A group's chances with what options `left` and `right` have between them shared anew: `left` given `v` of it
+ * (within 0 and all of it), `right` the rest — the white divider between two neighbours on a group's bar in the chances
+ * window dragged, where one of them may stand for several options (the rest of a long group, folded). The options of a
+ * side keep their shares of it (alike when it had nothing); the others are left as they are. Returns a new group.
+ */
+export function moveShare(group, left, right, v) {
+  const out = { ...group }, sum = (ks) => ks.reduce((s, k) => s + (out[k] || 0), 0), all = sum(left) + sum(right), a = Math.min(all, Math.max(0, v));
+  const share = (ks, to) => { const had = sum(ks); for (const k of ks) out[k] = had > 0 ? ((out[k] || 0) * to) / had : to / ks.length; };
+  share(left, a); share(right, all - a);
+  for (const k of [...left, ...right]) if (out[k] <= NONE) out[k] = 0;   // no crumbs
+  return out;
+}
+/**
+ * The looks' chances as the chances window shows and sets them: a row of dots, n of them lit standing for DOTS[n]
+ * times an even share (one over the number of looks) — 0, the leftmost, is off; EVEN_DOTS is each look's while the
+ * user has set none. Kept as ever, a chance by look (oddsOf makes them add up to 1), so the hands are dealt as they
+ * were until a dot is clicked.
+ */
+export const DOTS = [0, 0.25, 0.5, 1, 2, 4];
+export const EVEN_DOTS = 3;
+/**
+ * The dots look chance `v` (as the user keeps it) shows, of `n` looks: the nearest of DOTS by ratio to v over the
+ * even share — one at least for any chance (a chance between two dots on the nearer one, left as it is), none only
+ * for none.
+ */
+export function dotsOf(v, n = LOOK_IDS.length) {
+  if (!(v > NONE)) return 0;
+  const at = Math.log2(v * n);
+  let best = 1;
+  for (let d = 2; d < DOTS.length; d++) if (Math.abs(Math.log2(DOTS[d]) - at) < Math.abs(Math.log2(DOTS[best]) - at)) best = d;
+  return best;
+}
+/**
+ * The looks' group as the user keeps it (`mine`: {look: chance}; null or adding up to nothing while they have set
+ * none) with look `id` given `d` dots: DOTS[d] over the number of looks (`ids`), every other look's chance left as it
+ * is — each an even share while none was set.
+ */
+export function withDots(mine, id, d, ids = LOOK_IDS) {
+  const n = ids.length, out = asGroup(mine, ids) ? { ...mine } : Object.fromEntries(ids.map((k) => [k, 1 / n]));
+  out[id] = DOTS[Math.min(DOTS.length - 1, Math.max(0, d))] / n;
+  return out;
+}
+/**
  * The layout preset a hand is dealt in, by `group`'s chances ({keep, id: chance}: see oddsOf), of `layouts` (the
  * user's): null for the canvas's own ("keep"). While none of the presets has a chance nothing is drawn, so a hand
  * is dealt from the same random numbers as before there were any.
@@ -357,7 +401,7 @@ const copyOf = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v
  * its own the profile has not pass by), but for a part locked, which stays as it is (the colour block locked, its layout too: see
  * putLayout in layers.js); the user's own layers
  * are placed afterwards (dealPlaces in app.js, which needs the cover drawn). env: { R, locks (the parts to
- * leave alone: look, theme, lettering, places — the layout with the places), odds (the chances, see oddsOf), not (the looks dealt already in
+ * leave alone: look, theme, lettering, places, layout — the layout with the places too), odds (the chances, see oddsOf), not (the looks dealt already in
  * this run, which the look dealt is none of while it can be), recipes (the user's own, by look), rgb (the channel colour), design (the layers of the
  * profile's design, by id, where moved words go back to), layouts (the user's layout presets, as normalizeLayouts
  * keeps them), sizeKey (the size shown), sizes (the profile's size keys, those a preset is put on at), can(fx) (a lettering can be drawn here), canTint(ref) (an asset can be
@@ -366,11 +410,11 @@ const copyOf = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v
 export function dealCover(st, cover, env) {
   const { R, locks = {} } = env, O = env.odds || oddsOf(null, env.layouts), pick = (a) => a[Math.floor(R() * a.length)], between = (a, b) => a + R() * (b - a), chance = (p) => R() < p;
   const round = (v, step) => Math.round(v / step) * step, within = ([a, b], step = 0.05) => round(between(a, b), step);
-  // 0. the layout: the canvas's as it is, or a layout preset of the user's by its chance (none while where things
-  // stand is to stay) — its colour block at each of the profile's sizes, and its parts where it has them there, on the
-  // cover or left out, but for a part locked (the block locked, the block as it was); the rest of the hand is dealt on
-  // it as on any other
-  const preset = locks.places ? null : pickLayout(O.groups.layout, env.layouts, R);
+  // 0. the layout: the canvas's as it is, or a layout preset of the user's by its chance (none while the layout, or
+  // where things stand, is to stay: as when the canvas's own is certain) — its colour block at each of the profile's
+  // sizes, and its parts where it has them there, on the cover or left out, but for a part locked (the block locked,
+  // the block as it was); the rest of the hand is dealt on it as on any other
+  const preset = locks.places || locks.layout ? null : pickLayout(O.groups.layout, env.layouts, R);
   if (preset) putLayout(st, cover.layers, preset, env.sizes);
   // 1. the look, by its chance — none dealt already in this run while others are left — and a new seed for its random placement
   if (!locks.look) { st.look = pickLook(LOOK_IDS, R, O.groups.look, env.not || []); st.lookSeed = Math.floor(R() * 1000000); }
