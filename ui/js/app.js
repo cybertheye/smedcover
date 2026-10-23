@@ -194,8 +194,8 @@ async function timeTravel(step) {
 }
 
 /**
- * Call after any change. profile/cover: what to save; panel/side: rebuild the left tool panel /
- * the layer column; strip: rebuild the thumbnail strip (sizes changed).
+ * Call after any change. profile/cover: what to save; panel/side: rebuild the open sheet (or Settings' page) /
+ * the layer list and the drawer; strip: rebuild the thumbnails under the canvas (sizes changed).
  */
 function touch({ profile = false, cover = false, panel = false, side = false, strip = false } = {}) {
   if (!panel && onLookSheet()) later("lookcards", 500, refreshLookCards);   // the looks' cards follow what was changed elsewhere
@@ -438,14 +438,14 @@ function setScope(v) {
   S.settings.scope = v; persistSettings(); syncToolbar(); renderSide();
   if (onStyleTab()) renderPanel();
 }
-/** The scope's three choices, as one segmented control: the toolbar's, and the Style tab's template box's (the same setting). */
+/** The scope's three choices, as one segmented control: the tray's, under the canvas. */
 const scopeSeg = () => el("div", { class: "seg" }, SCOPES.map((v) => el("button", { class: "btn" + (S.settings.scope === v ? " on" : ""), title: v === "orient" ? t("scope.orientTip", sameWay().map((z) => ratioText(z.w, z.h)).join(" · ")) : null, onclick: () => setScope(v) }, scopeName(v))));
-/** Whether Save as layout shows under the toolbar: hidden for now, presets made in the chances (New…); saveLayoutDialog and addLayout stay. */
+/** Whether Save as layout shows under the canvas: hidden for now, presets made in the Layout sheet (＋ New…); saveLayoutDialog and addLayout stay. */
 const SAVE_AS_LAYOUT = false;
 /**
- * The toolbar above the canvas, one line: the size shown, the scope, how the canvas is worked. Under it, in a line of
- * its own and quietly (a link, not a button: it is seldom wanted), Save as layout — the canvas's layout as a preset
- * Surprise me may deal — while SAVE_AS_LAYOUT lets it show.
+ * The tray under the canvas: the size shown (#toolbar) and the scope (#scope). Over the tray, in a line of its own and
+ * quietly (a link, not a button: it is seldom wanted), Save as layout — the canvas's layout as a preset Surprise me may
+ * deal — while SAVE_AS_LAYOUT lets it show.
  */
 function syncToolbar() {
   const size = selSize(), edit = S.mode === "edit";   // what it is called over its pixels, in two lines: names after the platforms can be long
@@ -489,7 +489,7 @@ function removeGroup() {
   if (!gone.length) return;
   S.cover.layers = S.cover.layers.filter((L) => !gone.includes(L) && !(L.of && gone.some((g) => g.id === L.of)));   // a photo's linked cut-out goes with it
   S.picked = []; S.layerId = "bg";
-  touch({ cover: true, side: true, panel: onCoverTab() });   // the photos listed in the Cover tab follow
+  touch({ cover: true, side: true, panel: onCoverTab() });   // the photos listed in the Assets sheet follow
 }
 /** While a slider of one layer is dragged, only that layer is repainted (as in a drag on the canvas); the whole cover once it stops. */
 function holdLive(id) { goLive(id); later("live", 300, endLive); }
@@ -665,9 +665,9 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
       return;
     }
     if (lh) {
-      // the layout this size is drawn in, changed where the scope at the top says: the profile's (every size without a
+      // the layout this size is drawn in, changed where the scope under the canvas says: the profile's (every size without a
       // layout of its own follows it), each size facing this one's way, or this size alone; on a size with a layout of
-      // its own, "every size" changes that one, the one drawn under the pointer (the Style tab says it is the size's own)
+      // its own, "every size" changes that one, the one drawn under the pointer (the Layout sheet says it is the size's own)
       const st = S.profile.style, key = frame().key, keys = scopeKeys() || (ownLayout(st, key) ? [key] : null);
       let moved = false;
       cv.setPointerCapture(e.pointerId);
@@ -837,7 +837,7 @@ function select(options, value, onchange) {   // options: [[value, label]] or {g
 }
 const px = (v) => String(Math.round(v)), times = (v) => v.toFixed(2) + "×", pct = (v) => Math.round(v * 100) + "%";
 
-// ---------- left panel, Edit mode
+// ---------- the sheets (S.mode "edit")
 /** A sheet's heading: what it is for, in a word, and a line under it. */
 const sheetHead = (title, sub) => el("div", { class: "sheet-h" }, el("b", {}, title), sub && el("div", { class: "hint", style: "margin:0" }, sub));
 /** A field's caption with its longer explanation behind an ⓘ beside it. */
@@ -902,12 +902,7 @@ function photoItem(L) {
       el("button", { class: "btn" + (mine && (REP.busy || REP.result) ? " on" : ""), disabled: passive || !im || (REP.busy && !mine), title: locked, onclick: () => repaintOpen(L) }, t(label)),   // a result waits for its photo until the next repaint
       el("button", { class: "btn", disabled: passive || (REP.busy && mine), title: locked, onclick: () => replacePhoto(L) }, t("cover.replacePhoto"))));
 }
-/**
- * The ways in of a photo — upload, AI generate and (in Assets → Add photos) from the bitmaps — and the
- * AI generation box when it is open. In Add photos an upload goes on the cover; in the Bitmaps pane under it
- * (`fromLibrary` false) only into the library, and AI generation is left to Add photos above it.
- */
-/** Asks for photos and keeps them in the bitmap library only (Assets → Bitmaps). */
+/** Asks for photos and keeps them in the bitmap library only (the photo shelf in the Assets sheet). */
 async function stockPhotos() {
   let n = 0;
   for (const f of await pickFiles("image/*", true)) {
@@ -1105,7 +1100,7 @@ function copyDialog() {
       cats.length ? el("div", { class: "chips" }, cats.map((k) => el("button", { class: k.id === COPY.cat ? "on" : "", style: `--c:${k.color}`, onclick: () => pick("cat", k.id) }, k.name || k.code || "—")))
         : el("div", { class: "hint", style: "margin:0" }, t("copy.noChannel"))),
     COPY.cat && copyPreview(p),
-    el("div", { class: "hint", style: "margin:0" }, !COPY.cat ? "" : !COPY.src ? t("copy.reading") : free.length ? t("copy.count", free.length, kinds) : t("copy.none")),
+    el("div", { class: "hint", style: "margin:0" }, !COPY.cat ? "" : !COPY.src ? t("copy.reading") : free.length ? counted("copy.count", free.length, kinds) : t("copy.none")),
     el("button", { class: "btn solid wide", disabled: !free.length, onclick: () => copyInto(p, COPY.src) }, t("copy.go")),
     el("button", { class: "btn wide", onclick: closeModal }, t("exp.cancel"))));
   m.hidden = false;
@@ -1138,7 +1133,7 @@ async function copyInto(p, src) {
   S.layerId = layer(top) ? top : "title"; S.picked = [];
   closeModal();
   const k = p.categories.find((c) => c.id === src.catId);
-  toast(t("copy.done", copies.length, (p.id === S.profile.id ? "" : (p.name || "—") + " · ") + (k ? k.name || k.code : "—")));
+  toast(counted("copy.done", copies.length, (p.id === S.profile.id ? "" : (p.name || "—") + " · ") + (k ? k.name || k.code : "—")));
   touch({ cover: true, panel: true, side: true });
 }
 /** The cover's background photo: the lowest photo layer that fills the canvas, on this channel, at the size on the canvas (see `sizes` in layers.js). */
@@ -1435,7 +1430,7 @@ async function dropFolder(id) {
 // ---------- AI-generated assets
 // ---------- a photo's subject, cut out (Apple Vision, macOS 14+; see src-tauri/src/subject.rs)
 const CUT = { busy: false, error: "" };
-// Two ways: Apple Vision (macOS 14+, built in) and BiRefNet (any system, a model downloaded in Setup →
+// Two ways: Apple Vision (macOS 14+, built in) and BiRefNet (any system, a model downloaded in Settings →
 // AI → Cut-out, run on this computer by ONNX Runtime; see src-tauri/src/matting.rs).
 const isMac = HOST === "tauri" && /Mac/i.test(navigator.userAgent);   // Vision is this computer's; a server's own is not known yet
 const canCut = () => CAN.cut;
@@ -1476,7 +1471,7 @@ async function ensureMask(pid, fresh = false) {
 }
 /** A picture changed (a new one, a repaint): the layers cut from it get its new subject. */
 async function recut(pid) { if (S.cover.layers.some((l) => l.type === "photo" && l.cut && recordOf(l) === S.photos.get(pid))) await ensureMask(pid, true); }
-/** The sizes a cut-out of photo L made now is for: where L shows among those the scope at the top reaches (see sizesFor in layers.js). */
+/** The sizes a cut-out of photo L made now is for: where L shows among those the scope under the canvas reaches (see sizesFor in layers.js). */
 const cutSizes = (L) => sizesFor(L, scopeKeys(), sizeKeys());
 /**
  * The photo Cut out subject cuts photo L's subject out of: L, or where L does not show at the sizes the scope at the
@@ -1516,7 +1511,7 @@ async function cutOut(L) {
   return c;
 }
 /**
- * Removes the background of photo L (its `cut`) where the scope at the top reaches (see cutAt in layers.js): for every
+ * Removes the background of photo L (its `cut`) where the scope under the canvas reaches (see cutAt in layers.js): for every
  * size, or where L shows at those sizes alone, L itself is cut; else a copy of it, cut, shows at those sizes right
  * above it, selected, and L no longer does there, the other sizes as they were.
  */
@@ -1905,7 +1900,7 @@ function genWin(tab = GENWIN.tab) {
   m.hidden = false; m.onDismiss = closeModal;
   giveBack(m, held);
 }
-/** The image model's settings: Setup → AI → Image model. */
+/** The image model's settings: Settings → AI → Image model. */
 function imageAiPane() {
   const c = S.imageAi, d = IMAGE_DEFAULTS[c.provider];
   const ep = el("div", { class: "hint", style: "word-break:break-all" }, t("ai.endpoint", imageEndpoint(c)));
@@ -2041,7 +2036,7 @@ function aiTab() {
     card("cut", t("cutset.intro"), cutPane(), CAN.cut && CAN.folders && el("button", { class: "linkbtn", onclick: () => invoke("reveal_data_dir", { dir: "models" }).catch(fail) }, t("cutset.folder"))),
   ];
 }
-// ---------- Setup → AI → Cut-out: the way of cutting out, and the BiRefNet models
+// ---------- Settings → AI → Cut-out: the way of cutting out, and the BiRefNet models
 const CUTDL = { id: "", done: 0, total: 0, error: "", confirmDrop: "" };   // the download running, if any
 const mb = (n) => Math.round(n / 1048576);
 if (HOST === "tauri" && globalThis.__TAURI__.event) globalThis.__TAURI__.event.listen("cut-model-progress", (e) => {
@@ -2146,7 +2141,7 @@ function removeAsset(id) {
 }
 
 /**
- * The template and its adjustments on style `st`, the profile's, in the Style tab (a layout preset's editor has none:
+ * The template and its adjustments on style `st`, the profile's, in the Layout sheet (a layout preset's editor has none:
  * its colour block is dragged, see layoutEditor): the template, how much the colour panel takes, how its edge leans,
  * the title's box, which half goes first, and the way back to the template's own. `at` ({w, h, parts}): the size
  * shown, in virtual units, and which parts that take room its cover has (see partsOf in render.js), where the block's
@@ -2188,9 +2183,9 @@ function templateControls(st, at, changed, to = null) {
  */
 const shownAt = () => { const z = selSize(), [w, h] = virtualSize(z.w, z.h); return { w, h, parts: partsOf(coverAt(S.cover, S.sel), cat()) }; };
 /**
- * The Style tab's template and its adjustments, one box (as the look and the default design have), changed where the
- * scope says (its three choices here too: the toolbar's): the profile's, which every size without a layout of its own
- * follows; each size facing the canvas's way, as their own; or the canvas's size alone. A size with a layout of its own
+ * The Layout sheet's template and its adjustments, one box, changed where the scope under the canvas says: the
+ * profile's, which every size without a layout of its own follows; each size facing the canvas's way, as their own; or
+ * the canvas's size alone. A size with a layout of its own
  * says so, with the way back to following the profile's (the strip under the canvas marks such sizes); "Wide side by
  * side, tall and square stacked" lays every size out by its orientation at once.
  */
@@ -2228,7 +2223,7 @@ function lookArtRow() {
     ref && el("div", { class: "artback" }, el("button", { class: "linkbtn", onclick: () => set(null) }, t("style.artBack"))),
   ];
 }
-// ---------- Surprise me's chances, seen and set by hand: in their own window (from Surprise me's, and the Style tab), and for the current look under its sliders
+// ---------- Surprise me's chances, seen and set by hand: in their own window (from Surprise me's, and the Look sheet), and for the current look under its sliders
 const chancePct = (v) => `${(v * 100).toFixed(v > 0 && v < 0.1 ? 1 : 0)}%`;   // a chance as the panel shows it
 /**
  * A group of Surprise me's chances of which one option is dealt, adding up to 100%, as a card: its name (an ⓘ with
@@ -2285,7 +2280,7 @@ function oddsChance(label, v, save, done = null) {
 /**
  * Surprise me's chances for look `look`'s optional parts (switches, sliders off by default), each on its own: its
  * recipe's (deal.js), the user's over them (S.settings.recipes, for every profile); Restore puts the table's back.
- * In the Style tab and in Surprise me's chances (oddsDialog). `redraw()`: what to draw again after a restore.
+ * In the Look sheet and in Surprise me's chances (oddsDialog). `redraw()`: what to draw again after a restore.
  */
 function lookParts(look, redraw = renderPanel) {
   const L = LOOKS[look] || LOOKS.cel, lang = getLang(), mine = () => S.settings.recipes[look] || {}, r = baseRecipe(look, mine());
@@ -2297,8 +2292,8 @@ function lookParts(look, redraw = renderPanel) {
     extras.length > 0 && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { delete S.settings.recipes[look]; persistSettings(); redraw(); } }, t("recipe.reset")),
   ];
 }
-const RECIPE_UI = { open: false };   // whether the Style tab's box is unfolded
-/** The current look's Surprise me chances in the Style tab, folded away under its sliders: its optional parts (lookParts), and the way to the rest (oddsDialog). */
+const RECIPE_UI = { open: false };   // whether the Look sheet's box is unfolded
+/** The current look's Surprise me chances in the Look sheet, folded away under its sliders: its optional parts (lookParts), and the way to the rest (oddsDialog). */
 function recipeBox() {
   return el("details", { class: "box recipe", open: RECIPE_UI.open, ontoggle: (e) => (RECIPE_UI.open = e.target.open) },
     el("summary", { class: "cap" }, t("recipe.title")),
@@ -2386,7 +2381,7 @@ function addLayout(name) {
   return p;
 }
 /**
- * Under the toolbar, Save as layout: asks for a name ("Layout n" to begin with), then keeps the canvas's layout as a new
+ * Under the canvas, Save as layout (hidden for now: SAVE_AS_LAYOUT): asks for a name ("Layout n" to begin with), then keeps the canvas's layout as a new
  * preset (addLayout); the word that says so leads on to its chances.
  */
 function saveLayoutDialog() {
@@ -2433,7 +2428,7 @@ function deleteLayout(p, i, again) {
 /** A usual size facing each way, where the layout editor sees how big a block kept for that orientation is when it has no size facing so (see blockOf in layoutEditor). */
 const USUAL_SIZE = { wide: "1920x1080", square: "1200x1200", tall: "1080x1920" };
 /**
- * A layout preset's editor, a view of Surprise me's chances window, on a canvas of its own: not the cover being edited
+ * A layout preset's editor, a window from the Layout sheet's preset cards, on a canvas of its own: not the cover being edited
  * but the plainest there is — the cel look on its dark ground, no photos, none of the user's layers, neither the logo
  * nor the corner brackets — with nothing on it but what a preset places (LAYOUT_PARTS): the title, subtitle and tag in
  * words of the editor's own (layed.sample*), the profile's brand row, the channel's name and graphic (the channel on
@@ -2454,7 +2449,7 @@ const USUAL_SIZE = { wide: "1920x1080", square: "1200x1200", tall: "1080x1920" }
  * it is not —; and the part selected, put back where the template puts it. A part an earlier preset has no entry for
  * (the colour block, before it was one) is shown where the template puts it, ticked, and is the preset's once saved.
  * `fresh`: a new preset, in the list once saved. Save keeps it; Cancel, Escape or a click beside the window leave it as
- * it was (asked first when something was changed). Both go back to the chances. Nothing here touches the cover.
+ * it was (asked first when something was changed). Both close it. Nothing here touches the cover.
  */
 function layoutEditor(p, i, fresh = false) {
   const m = $("modal"), c = cat(), none = new Map();
@@ -2875,7 +2870,7 @@ function saveDesign() { S.profile.design.layers = JSON.parse(JSON.stringify(S.co
 function loadDesign() { S.cover.layers = keepPhotos(JSON.parse(JSON.stringify(S.profile.design.layers)), S.cover.layers); S.layerId = "title"; touch({ cover: true, side: true, panel: onCoverTab() }); }
 function resetPlaces() { for (const L of S.cover.layers) if (isLayout(L)) resetPlacement(L, "all"); touch({ cover: true, side: true }); }
 
-// ---------- left panel, Setup mode
+// ---------- Settings' pages (S.mode "setup")
 /** A small picture of graphic `ref` (null: none) in the channel colour `colour`, `px` across. */
 function graphicThumb(ref, colour, px) {
   const cv = el("canvas", { width: px * 2, height: px * 2, style: `width:${px}px;height:${px}px` });
@@ -3178,7 +3173,7 @@ function fontControl(L, bare = false) {
   }), L.font && S.latinFonts.has(L.font) && el("div", { class: "hint" }, t("font.latinHint")));
 }
 
-// ---------- right column: layers and the selected layer's properties
+// ---------- the Layers sheet's list, and the selected layer's properties in the drawer
 let dragId = null;
 function layerRow(L) {
   // the eye and the lock: shown under the pointer and on the selected row, and always when `keep` (not as they start)
@@ -3636,7 +3631,7 @@ function photoControls(L, set) {
             el("button", { class: "btn" + (L.of ? " wide" : ""), disabled: CUT.busy, onclick: () => cut(!L.cut) }, t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut")),
             !L.of && el("button", { class: "btn", disabled: CUT.busy, title: t(redo ? "cut.againTip" : "cut.go"), onclick: () => cutOut(L) }, t(redo ? "cut.again" : "cut.goShort")))
         : el("div", { class: "hint", style: "margin:0" }, t("cutset.needsApp")),
-      canCut() && keys && el("div", { class: "hint" }, sizesSaid("cut.scopeHint", keys)),   // the scope at the top keeps both to some sizes
+      canCut() && keys && el("div", { class: "hint" }, sizesSaid("cut.scopeHint", keys)),   // the scope under the canvas keeps both to some sizes
       L.cut && slider("props.feather", 0, 40, 1, L.feather, px, (v) => { holdLive(L.id); set("feather", v); }),
       L.cut && slider("props.spread", 0, 40, 1, L.spread, px, (v) => { holdLive(L.id); set("spread", v); }),
       CUT.error && el("div", { class: "hint err" }, CUT.error),
@@ -4100,7 +4095,7 @@ function assetColour(L) {
 }
 function typeControls(L) {
   const set = (k, v, side = false) => { L[k] = v; touch({ cover: true, side }); };
-  const font = () => psec("props.sec.text", [fontControl(L, true), ...columnControls(L)], [L.type === "brand" ? "" : t("props.boundHint"), L.type === "brand" && L.vertical ? t("props.verticalBrand") : ""].filter(Boolean).join(" "));
+  const font = () => psec("props.sec.text", [fontControl(L, true), ...columnControls(L)], [L.type === "brand" ? "" : t(L.type === "catname" ? "props.catnameHint" : "props.boundHint"), L.type === "brand" && L.vertical ? t("props.verticalBrand") : ""].filter(Boolean).join(" "));
   const ink = (shown) => psec("props.sec.color", swatch(L, "ink", "props.sw.text", shown), t("props.inkAutoHint"));
   switch (L.type) {
     case "bg": {
@@ -4127,7 +4122,7 @@ const sceneName = (key) => { const s = (LOOKS[S.profile.style.look] || LOOKS.cel
 /**
  * With the ground selected: the current look's scene objects the user may drag on the canvas, each with a
  * button putting it back where the layout puts it (on this cover; for all sizes, those facing this one's way or
- * this one, as the toolbar's scope says), and one for them all.
+ * this one, as the scope under the canvas says), and one for them all.
  */
 function sceneSection(L) {
   const scene = L.type === "bg" && (LOOKS[S.profile.style.look] || LOOKS.cel).scene;
@@ -4860,7 +4855,7 @@ async function exportMany(covers) {
   try { if (CAN.saveFiles) { dir = await invoke("pick_folder"); if (!dir) return; } } catch (e) { return fail(e); }
   const jobs = covers.flatMap((c) => S.profile.sizes.map((size) => ({ ...c, size })));
   const n = await runExport(jobs, (bytes, name) => invoke("write_image", framed(bytes, { dir, name })));
-  if (n === jobs.length) toast(t("msg.savedN", n, dir || "Downloads"));
+  if (n === jobs.length) toast(counted("msg.savedN", n, dir || t("msg.downloads")));
 }
 async function batchFromCsv() {
   const f = await pickFile(".csv,.tsv,.txt,text/csv");
@@ -4877,7 +4872,7 @@ async function batchFromCsv() {
   });
   for (const j of jobs) await loadPhotos(pidsOf(j.cover));
   await exportMany(jobs);
-  if (unknown) setTimeout(() => toast(t("msg.batchUnknown", unknown)), 3600);
+  if (unknown) setTimeout(() => toast(counted("msg.batchUnknown", unknown)), 3600);
 }
 function csvTemplate() {
   const zh = getLang() === "zh", c = S.profile.categories;
@@ -5197,7 +5192,7 @@ async function surprise(e) {
         shownAt = performance.now(); await nextPaint();
       } catch (e) { console.error(e); }   // a hand that cannot be drawn is left out
     }
-    if (!hands.length) throw new Error("no hand could be dealt");
+    if (!hands.length) throw new Error(t("deal.none"));
     await wait(H.pace * 2);   // a moment with every hand in view, then the first on the canvas, and marked
     putHand(hands[0]);
     SURPRISE.last = { kept: 0, ms: Math.round(performance.now() - t0), hands: hands.map((h) => ({ look: h.style.look, layout: h.layout, template: layoutOf(h.style, sizeKey(shown)).template })) };   // for the self-test
@@ -5287,7 +5282,7 @@ function dealKept(k) {
 }
 function dealMark() {
   [...$("deal-hands").children].forEach((f, i) => f.classList.toggle("kept", i === DEAL.kept));
-  $("deal-what").textContent = t("deal.sub", DEAL.hands.filter(Boolean).length);
+  $("deal-what").textContent = counted("deal.sub", DEAL.hands.filter(Boolean).length);
 }
 /** Puts hand i on the canvas instead, while nothing has followed the run: still one step of undo. */
 function dealTake(i) {
@@ -5378,7 +5373,7 @@ function syncTop() {
 // ---------- the ⋯ menu
 const MENU = { open: false, profiles: false };
 /** String `key` with a count: `key`.one for one ("1 channel"), else `key` ("5 channels"). */
-const counted = (key, n) => t(n === 1 ? key + ".one" : key, n);   // profiles: the other profiles listed, to switch to
+const counted = (key, n, ...more) => t(n === 1 ? key + ".one" : key, n, ...more);   // profiles: the other profiles listed, to switch to
 function toggleMenu() { if (MENU.open) closeMenu(); else openMenu(); }
 function openMenu() {
   MENU.open = true; MENU.profiles = false; renderMenu();
@@ -5505,7 +5500,7 @@ function renderPanel() {
 
 function welcome() {
   return new Promise((resolve) => {
-    const modal = $("modal"), name = textInput("", () => null, { placeholder: "MY CHANNEL" });
+    const modal = $("modal"), name = textInput("", () => null, { placeholder: t("welcome.namePh") });
     const go = (sample) => { closeModal(); resolve(sample ? sampleProfile(getLang()) : starterProfile(getLang(), name.value.trim())); };
     modal.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("welcome.title")), el("div", {}, t("welcome.body")),
       el("div", {}, cap("welcome.brand"), name),
@@ -5519,7 +5514,7 @@ function welcome() {
 
 // ---------- the side columns: their inner edges are dragged to make them wider or narrower
 /**
- * The arrangement the screen calls for, on the body as `data-layout`: "desk", the three columns, or "phone", a narrow
+ * The arrangement the screen calls for, on the body as `data-layout`: "desk", the columns side by side, or "phone", a narrow
  * touch screen, which is to have an arrangement of its own (its styles go under body[data-layout="phone"]). It goes
  * by the screen, not by the host: a phone opening a SmedCover server's page, or an app on a phone, alike. `?layout=`
  * phone or desk in the page's address chooses one, to work on it at a desk.
