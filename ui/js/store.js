@@ -225,6 +225,19 @@ export const DEFAULT_SETTINGS = { lang: "", profileId: "", scale: 2, format: "pn
 export const RECENT_FONTS = 6;
 /** Puts a font at the head of the recently used ones. */
 export const useFont = (recent, family) => [family, ...recent.filter((f) => f !== family)].slice(0, RECENT_FONTS);
+/**
+ * The sizes the Export window leaves unticked, by profile: { profileId: { sizeKey: false } }. A size not named is
+ * ticked, so a size added to a profile later is; a profile with none unticked is not kept.
+ */
+export function normalizeExportSizes(raw) {
+  const out = {};
+  for (const [id, keys] of Object.entries(raw && typeof raw === "object" ? raw : {}).slice(0, 200)) {
+    if (!/^[\w-]{1,60}$/.test(id) || !keys || typeof keys !== "object") continue;
+    const off = Object.keys(keys).filter((k) => keys[k] === false && SIZE_KEY.test(k)).slice(0, 80);
+    if (off.length) out[id] = Object.fromEntries(off.map((k) => [k, false]));
+  }
+  return out;
+}
 export function normalizeSettings(raw) {
   const s = raw && typeof raw === "object" ? raw : {}, layouts = normalizeLayouts(s.layouts);   // the user's layout presets, for every profile (Surprise me deals them by their chances)
   return {
@@ -234,6 +247,10 @@ export function normalizeSettings(raw) {
     format: ["png", "jpeg", "webp"].includes(s.format) ? s.format : "png",
     quality: Math.round(num(s.quality, 92, 40, 100)),
     nameTemplate: str(s.nameTemplate) || DEFAULT_SETTINGS.nameTemplate,
+    exportSizes: normalizeExportSizes(s.exportSizes),
+    // the folder each profile's exports are written into, { profileId: path }; with none kept, its first export asks for one
+    exportDirs: Object.fromEntries(Object.entries(s.exportDirs && typeof s.exportDirs === "object" ? s.exportDirs : {})
+      .filter(([k, v]) => /^[\w-]{1,60}$/.test(k) && typeof v === "string" && v.trim() && v.length <= 4096).slice(0, 200)),
     scope: ["orient", "size"].includes(s.scope) ? s.scope : "all",   // what a change of place or layout reaches: every size, those facing the way this one does (see orientOf in layout.js), or this one
     hideScene: s.hideScene === true,   // the scene objects' handles hidden on the canvas
     glass: s.glass !== false,   // the panels frosted glass over the cover (false: plain, translucent; see glassWatch in app.js)
