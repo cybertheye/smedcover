@@ -1490,7 +1490,7 @@ function renameFolder(id) {
   const f = S.assetFolders.find((x) => x.id === id), name = $("panel").querySelector(`.folder[data-id="${CSS.escape(id)}"] .fname`);
   if (!f || !name) return;
   const input = el("input", { type: "text", class: "rename", value: f.name, maxLength: 40, spellcheck: false,
-    onkeydown: (e) => { e.stopPropagation(); if (e.key === "Enter") input.blur(); if (e.key === "Escape") { input.value = f.name; input.blur(); } },
+    onkeydown: (e) => { if (projectKey(e)) { input.blur(); return; } e.stopPropagation(); if (e.key === "Enter") input.blur(); if (e.key === "Escape") { input.value = f.name; input.blur(); } },   // ⌘S/⌘O on to the window's keys, the name kept first
     onblur: () => { const v = input.value.trim(); if (v && v !== f.name) { f.name = v; persistFolders(); } renderPanel(); } });
   name.replaceWith(input); input.focus(); input.select();
 }
@@ -3828,7 +3828,7 @@ function renameLayer(id) {
   const auto = layerName({ ...L, name: "" }), was = layerName(L);
   const input = el("input", { type: "text", class: "rename", value: was, maxLength: 60, spellcheck: false,
     onclick: (e) => e.stopPropagation(), onpointerdown: (e) => e.stopPropagation(),
-    onkeydown: (e) => { e.stopPropagation(); if (e.key === "Enter") input.blur(); if (e.key === "Escape") { input.value = was; input.blur(); } },
+    onkeydown: (e) => { if (projectKey(e)) { input.blur(); return; } e.stopPropagation(); if (e.key === "Enter") input.blur(); if (e.key === "Escape") { input.value = was; input.blur(); } },   // ⌘S/⌘O on to the window's keys, the name kept first
     onblur: () => {
       const v = input.value.trim();
       if (v !== was) { if (v && v !== auto) L.name = v; else delete L.name; }
@@ -6046,6 +6046,8 @@ const projectActions = {
 const CAN_PROJECT = CAN.saveFiles || "download" in HTMLAnchorElement.prototype;
 /** How a shortcut's key is written: ⌘ on a Mac, Ctrl+ elsewhere. */
 const MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl+";
+/** Whether key event e is ⌘S or ⌘O (Ctrl off the Mac): let through by the fields that keep every other key to themselves. */
+const projectKey = (e) => (MOD_KEY === "⌘" ? e.metaKey : e.ctrlKey) && !e.shiftKey && !e.altKey && /^[so]$/i.test(e.key);
 
 // ---------- chrome
 function setMode(mode) {
