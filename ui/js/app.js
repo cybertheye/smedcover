@@ -160,10 +160,10 @@ const persistSettings = () => later("settings", 400, () => writeJson("settings.j
 
 const snapshot = () => JSON.stringify({ p: S.profile, c: S.cover });
 function resetHistory() { S.hist = [snapshot()]; S.histIdx = 0; SURPRISE.step = null; dealClose(); syncTop(); }
-/** Adds the present state to the undo history, unless it is already its last entry. */
-function commitHistory() {
+/** Adds the present state to the undo history, unless it is already its last entry (`always`: even then). */
+function commitHistory(always = false) {
   const snap = snapshot();
-  if (snap === S.hist[S.histIdx]) return;
+  if (!always && snap === S.hist[S.histIdx]) return;
   if (SURPRISE.step && S.histIdx === SURPRISE.step.idx) { SURPRISE.step = null; dealClose(); }   // edited on: the hands are past taking
   S.hist = S.hist.slice(0, S.histIdx + 1);
   S.hist.push(snap);
@@ -2157,23 +2157,50 @@ function lookArtRow() {
 // ---------- Surprise me's chances, seen and set by hand: in their own window (from Surprise me's, and the Style tab), and for the current look under its sliders
 const chancePct = (v) => `${(v * 100).toFixed(v > 0 && v < 0.1 ? 1 : 0)}%`;   // a chance as the panel shows it
 /**
- * A group of Surprise me's chances of which one option is dealt, adding up to 100%: a slider for each option;
- * moving one moves the others alike the other way (rebalance in deal.js) while it is dragged. `group`:
- * {option: chance}; `names`: [[option, label]]; `save(group)` keeps it as it now is; `reset()`, when given,
- * puts back the rule's. `bare`: not boxed (inside a box of its own already).
+ * A group of Surprise me's chances of which one option is dealt, adding up to 100%, as a card: its name (an ⓘ with
+ * `tip`), Even out and Restore (`reset()`, when given: the rule's back), then a slider for each option; moving one
+ * moves the others alike the other way (rebalance in deal.js) while it is dragged. `group`: {option: chance};
+ * `names`: [[option, label]]; `save(group)` keeps it as it now is. A long group (`fold`: how many it shows) is folded
+ * to its likeliest options, the rest one line with their sum, until unfolded (ODDS_UI.open, by `key`); `filter`
+ * ("more": those above an even share, "off": those at 0%) shows only those, unfolded. `head`: more on the line of its
+ * name; `two`: the sliders in two columns; `foot`: more under them; `id`: the card's.
  */
-function oddsGroup(title, names, group, save, { hint = "", reset = null, bare = false } = {}) {
+function oddsGroup(title, names, group, save, opts = {}) {
+  const { hint = "", tip = "", reset = null, key = "", fold = 0, filter = "", head = null, two = false, foot = null, id = null } = opts;
   let now = { ...group };
-  const rows = new Map(), show = () => { for (const [k, { input, out }] of rows) { input.value = String(now[k] * 100); out.textContent = chancePct(now[k]); } };
+  const even = 1 / names.length, keep = filter === "more" ? ([k]) => (now[k] || 0) > even + 1e-6 : filter === "off" ? ([k]) => !(now[k] > 0) : null;
+  const folded = !keep && fold > 0 && names.length > fold + 1 && !ODDS_UI.open.has(key);
+  const list = keep ? names.filter(keep) : folded ? [...names].sort((x, y) => (now[y[0]] || 0) - (now[x[0]] || 0)).slice(0, fold) : names;
+  const rest = folded ? names.filter((n) => !list.includes(n)) : [], restOut = el("output", {});
+  const rows = new Map(), show = () => {
+    for (const [k, { input, out }] of rows) { input.value = String(now[k] * 100); out.textContent = chancePct(now[k]); }
+    restOut.textContent = chancePct(rest.reduce((sum, [k]) => sum + (now[k] || 0), 0));
+  };
   const row = ([k, label]) => {
     const out = el("output", {}, chancePct(now[k] || 0));
     const input = el("input", { type: "range", min: 0, max: 100, step: 0.5, value: (now[k] || 0) * 100, oninput: (e) => { now = rebalance(now, k, Number(e.target.value) / 100); show(); save(now); } });
     rows.set(k, { input, out });
     return el("div", { class: "sl", style: "grid-template-columns:112px 1fr 48px" }, el("span", { title: label }, label), input, out);
   };
-  const even = () => { now = Object.fromEntries(names.map(([k]) => [k, 1 / names.length])); show(); save(now); };
-  return el("div", { class: bare ? "" : "box" }, el("div", { class: "cap" }, title), hint && el("div", { class: "hint", style: "margin:0 0 6px" }, hint), names.map(row),
-    el("div", { class: "acts", style: "display:flex;gap:6px;margin-top:8px" }, el("button", { class: "btn", onclick: even }, t("odds.even")), reset && el("button", { class: "btn", onclick: reset }, t("odds.default"))));
+  const again = (open) => {
+    if (open) ODDS_UI.open.add(key); else ODDS_UI.open.delete(key);
+    const next = oddsGroup(title, names, now, save, opts);
+    box.replaceWith(next);
+    if (!open) next.scrollIntoView({ block: "nearest" });   // folded: the card, not what was under it
+  };
+  const box = el("div", { class: "ocard", id },
+    el("div", { class: "ocard-h" }, el("b", {}, title), tip && info(tip), head, el("span", { class: "grow" }),
+      el("button", { class: "linkbtn", onclick: () => { now = Object.fromEntries(names.map(([k]) => [k, even])); show(); save(now); } }, t("odds.even")),
+      reset && el("button", { class: "linkbtn", onclick: reset }, t("odds.default"))),
+    hint && el("div", { class: "hint" }, hint),
+    el("div", { class: "orows" + (two ? " two" : "") }, list.map(row),
+      keep && !list.length && el("div", { class: "hint" }, t("odds.none")),
+      folded && el("div", { class: "sl rest", style: "grid-template-columns:112px 1fr 48px" }, el("span", {}, t("odds.rest", rest.length)),
+        el("button", { class: "linkbtn", onclick: () => again(true) }, t("odds.unfold", names.length)), restOut),
+      !keep && fold > 0 && names.length > fold + 1 && ODDS_UI.open.has(key) && el("button", { class: "linkbtn fold", onclick: () => again(false) }, t("odds.fold"))),
+    foot);
+  show();
+  return box;
 }
 /** A switch of Surprise me's, on by a chance of its own: a slider from 0 to 100%. `done()`, when given, once it is let go of. */
 function oddsChance(label, v, save, done = null) {
@@ -2205,56 +2232,55 @@ function recipeBox() {
     lookParts(S.profile.style.look),
     el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => oddsDialog() }, t("odds.open")));
 }
-const ODDS_UI = { look: null };   // the look whose parts the chances panel shows (null: the profile's)
+const ODDS_UI = { look: null, open: new Set(), filter: "all" };   // the look whose parts the chances window shows (null: the profile's), the groups unfolded, the looks shown
 /**
  * Surprise me's chances, in a window of their own (from Surprise me's window, and the Look sheet): every chance it
  * deals by (RULES.odds and the looks' recipes, deal.js), the user's over them, kept in the settings for every
- * profile. First the layout presets: which layout a hand is dealt in (the canvas's, or one of the user's
- * presets, adding up to 100%), and the way to the presets themselves (the Layout sheet). The groups of which one is dealt, each adding
- * up to 100% — the look, the colour block's shape, the title's lettering, its bend, the ground (these three for
- * every look alike), how many look effects, whose —; the switches, each with a chance of its own; and the optional
- * parts of the look picked. `at`: "layouts", opened at the layout presets.
+ * profile, each group a card. First the looks (all of them, those above an even share, or those off), folded to the
+ * likeliest; then which layout a hand is dealt in (the canvas's, or one of the user's presets, with the way to the
+ * presets in the Layout sheet), the ground, the title's lettering and bend, the colour block's shape, how many look
+ * effects and whose — each group adding up to 100%, the long ones folded —; the switches, each with a chance of its
+ * own; and the optional parts of the look picked. `at`: "layouts", opened at the layouts.
  */
 function oddsDialog(fresh = true, at = "") {
-  if (fresh) ODDS_UI.look = null;   // opened anew: the parts of the profile's look
+  if (fresh) Object.assign(ODDS_UI, { look: null, filter: "all", open: new Set() });   // opened anew: the parts of the profile's look, every look, the long groups folded
   LAYED.redraw = null;   // back from a layout preset's editor, if it was open
   const m = $("modal"), sv = S.settings.surprise, layouts = S.settings.layouts, odds = oddsOf(sv.odds, layouts), lang = getLang(), was = m.querySelector(".dlg.odds"), y = was ? was.scrollTop : 0;
   const again = () => oddsDialog(false);
-  const done = () => { closeModal(); renderPanel(); };   // the Style tab's parts show what was set here
+  const done = () => { closeModal(); renderPanel(); };   // the Look sheet's parts show what was set here
   const setGroup = (g, v) => { sv.odds = { ...sv.odds, groups: { ...(sv.odds.groups || {}), [g]: v } }; persistSettings(); };
   const dropGroup = (g) => { const groups = { ...(sv.odds.groups || {}) }; delete groups[g]; sv.odds = { ...sv.odds, groups }; persistSettings(); again(); };
   const setChance = (k, v) => { sv.odds = { ...sv.odds, chances: { ...(sv.odds.chances || {}), [k]: v } }; persistSettings(); };
-  const group = (g, names, hint = "") => oddsGroup(t("odds." + g), names, odds.groups[g], (v) => setGroup(g, v), { hint, reset: () => dropGroup(g) });
+  const group = (g, names, more = {}) => oddsGroup(t("odds." + g), names, odds.groups[g], (v) => setGroup(g, v), { key: g, reset: () => dropGroup(g), ...more });
   const look = ODDS_UI.look && LOOKS[ODDS_UI.look] ? ODDS_UI.look : S.profile.style.look;
+  const even = 1 / LOOK_IDS.length, count = (f) => LOOK_IDS.filter((k) => (f === "more" ? odds.groups.look[k] > even + 1e-6 : f === "off" ? !(odds.groups.look[k] > 0) : true)).length;
+  const filters = el("div", { class: "seg" }, ["all", "more", "off"].map((f) => el("button", { class: "btn" + (ODDS_UI.filter === f ? " on" : ""), onclick: () => { ODDS_UI.filter = f; again(); } }, t("odds.filter." + f, count(f)))));
   const dlg = el("div", { class: "dlg odds" },
-    el("div", { class: "head" }, el("h2", {}, t("odds.title")), el("button", { class: "btn", onclick: done }, t("odds.done"))),
-    el("div", { class: "hint", style: "margin:0" }, t("odds.hint")),
-    el("div", { class: "box lays", id: "odds-layouts" }, el("div", { class: "cap" }, t("odds.layouts")),
-      el("div", { class: "hint", style: "margin:0 0 10px" }, t("odds.layoutsHint")),
-      el("div", { class: "lays-two" },
-        oddsGroup(t("odds.layout"), [["keep", t("odds.layout.keep")], ...layouts.map((p, i) => [p.id, layoutName(p, i)])], odds.groups.layout, (v) => setGroup("layout", v), { hint: t("odds.layoutHint"), reset: () => dropGroup("layout"), bare: true }),
-        el("div", {}, el("div", { class: "hint", style: "margin:0 0 10px" }, t("odds.presetsWhere")),
-          el("button", { class: "btn", onclick: () => { closeModal(); if (!SURPRISE.busy) dealClose(); S.tab.edit = "layout"; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, t("odds.presetsGo"))))),
-    el("div", { class: "cols" },
-      el("div", {},
-        group("look", LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), t("odds.lookHint")),
-        group("accent", ODD_OPTIONS.accent().map((k) => [k, t("shape." + k)]))),
-      el("div", {},
-        group("letters", ODD_OPTIONS.letters().map((k) => [k, k === "own" ? t("odds.ownLetters") : EFFECTS[k].name[lang]]), t("odds.lettersHint")),
-        group("bend", ODD_OPTIONS.bend().map((k) => [k, k === "none" ? t("odds.noBend") : BENDS[k].name[lang]]), t("odds.bendHint")),
-        group("ground", [["dark", t("theme.dark")], ["light", t("theme.light")]], t("odds.groundHint")),
-        group("lookFx", ODD_OPTIONS.lookFx().map((k) => [k, t("odds.lookFx." + k)]), t("odds.lookFxHint")),
-        group("lookFxFrom", ODD_OPTIONS.lookFxFrom().map((k) => [k, t("odds.lookFxFrom." + k)])),
-        el("div", { class: "box" }, el("div", { class: "cap" }, t("odds.chances")), el("div", { class: "hint", style: "margin:0 0 6px" }, t("odds.chancesHint")),
-          Object.keys(RULES.odds.chances).map((k) => oddsChance(t("odds.c." + k), odds.chances[k], (v) => setChance(k, v), again))),   // let go of: the look's parts below follow
-        el("div", { class: "box" }, el("div", { class: "cap" }, t("odds.byLook")), el("div", { class: "hint", style: "margin:0 0 6px" }, t("odds.byLookHint")),
-          select(LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), look, (v) => { ODDS_UI.look = v; again(); }),
-          el("div", { style: "margin-top:8px" }, lookParts(look, again))))),
-    el("button", { class: "btn wide", onclick: () => { if (!confirm(t("odds.resetSure"))) return; sv.odds = {}; persistSettings(); again(); } }, t("odds.reset")));
+    el("div", { class: "head" },
+      el("div", { class: "ttl" }, el("h2", {}, t("odds.title")), el("div", { class: "hint" }, t("odds.sub", RULES.hands.count), " ", info(t("odds.hint")))),
+      el("button", { class: "linkbtn", title: t("odds.reset"), onclick: () => { if (!confirm(t("odds.resetSure"))) return; sv.odds = {}; persistSettings(); again(); } }, t("odds.resetAll")),
+      el("button", { class: "btn solid", onclick: done }, t("odds.done"))),
+    group("look", LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), { tip: t("odds.lookHint"), hint: t("odds.lookShort", RULES.hands.count), head: filters, fold: 8, two: true, filter: ODDS_UI.filter === "all" ? "" : ODDS_UI.filter }),
+    el("div", { class: "ogrid" },
+      group("layout", [["keep", t("odds.layout.keep")], ...layouts.map((p, i) => [p.id, layoutName(p, i)])], { id: "odds-layouts", tip: `${t("odds.layoutHint")} ${t("odds.layoutsHint")}`, fold: 4,
+        foot: el("div", { class: "ofoot" }, el("span", { class: "hint" }, t("odds.presetsWhere")),
+          el("button", { class: "linkbtn", onclick: () => { closeModal(); if (!SURPRISE.busy) dealClose(); S.tab.edit = "layout"; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, t("odds.presetsGo"))) }),
+      group("ground", [["dark", t("theme.dark")], ["light", t("theme.light")]], { tip: t("odds.groundHint") }),
+      group("letters", ODD_OPTIONS.letters().map((k) => [k, k === "own" ? t("odds.ownLetters") : EFFECTS[k].name[lang]]), { tip: t("odds.lettersHint"), fold: 3 }),
+      group("bend", ODD_OPTIONS.bend().map((k) => [k, k === "none" ? t("odds.noBend") : BENDS[k].name[lang]]), { tip: t("odds.bendHint"), fold: 3 }),
+      group("accent", ODD_OPTIONS.accent().map((k) => [k, t("shape." + k)]), { fold: 3 }),
+      group("lookFx", ODD_OPTIONS.lookFx().map((k) => [k, t("odds.lookFx." + k)]), { tip: t("odds.lookFxHint") }),
+      group("lookFxFrom", ODD_OPTIONS.lookFxFrom().map((k) => [k, t("odds.lookFxFrom." + k)]))),
+    el("div", { class: "ocard" }, el("div", { class: "ocard-h" }, el("b", {}, t("odds.chances")), info(t("odds.chancesHint"))),
+      el("div", { class: "hint" }, t("odds.chancesShort")),
+      el("div", { class: "orows two" }, Object.keys(RULES.odds.chances).map((k) => oddsChance(t("odds.c." + k), odds.chances[k], (v) => setChance(k, v), again)))),   // let go of: the look's parts below follow
+    el("div", { class: "ocard" }, el("div", { class: "ocard-h" }, el("b", {}, t("odds.byLook")), info(t("odds.byLookHint")), el("span", { class: "grow" }),
+        select(LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), look, (v) => { ODDS_UI.look = v; again(); })),
+      el("div", { class: "orows two" }, lookParts(look, again))));
   m.replaceChildren(dlg);
   m.hidden = false; m.onDismiss = done;
   dlg.scrollTop = y;
-  if (at === "layouts") {   // the presets' box just under the window's head, lit for a moment
+  if (at === "layouts") {   // the layouts' card just under the window's head, lit for a moment
     const box = $("odds-layouts");
     dlg.scrollTop += box.getBoundingClientRect().top - dlg.querySelector(".head").getBoundingClientRect().bottom - 10;
     box.classList.add("ping");
@@ -3311,7 +3337,7 @@ function overLeft(box) {
 /** Opens the letter window for layer L. */
 function lettersOpen(L) {
   const win = $("letterwin") || document.body.appendChild(el("div", { id: "letterwin", role: "dialog", "aria-label": t("props.sec.letters"), onpointerdown: () => { letterHeld = true; } }));
-  cropClose(); weaveClose(); brushClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
+  cropClose(); weaveClose(); brushClose(); if ($("deal") && !$("deal").hidden) dealClose();   // the windows over the left column stand where this one does; Surprise me's covers it
   overLeft(win);
   S.letterWin = L.id; win.hidden = false;
   lettersShow(true);
@@ -3558,7 +3584,7 @@ function weaveControls(L) {
 // selected, Setup, or the cut-out no longer woven letter by letter.
 function weaveOpen(L) {
   const win = $("weavewin") || document.body.appendChild(el("div", { id: "weavewin", role: "dialog", "aria-label": t("weave.title") }));
-  lettersClose(); cropClose(); brushClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
+  lettersClose(); cropClose(); brushClose(); if ($("deal") && !$("deal").hidden) dealClose();   // the windows over the left column stand where this one does; Surprise me's covers it
   overLeft(win);
   S.weaveWin = L.id; win.hidden = false;
   weaveShow(true);
@@ -3618,7 +3644,7 @@ function weaveLetters(L) {
 const BRUSH = { size: 80, front: true, stroke: null, end: null, at: null };
 function brushOpen(L) {
   const win = $("brushwin") || document.body.appendChild(el("div", { id: "brushwin", role: "dialog", "aria-label": t("brush.title") }));
-  lettersClose(); cropClose(); weaveClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
+  lettersClose(); cropClose(); weaveClose(); if ($("deal") && !$("deal").hidden) dealClose();   // the windows over the left column stand where this one does; Surprise me's covers it
   if (V3.on) close3d();   // it paints on the flat canvas
   overLeft(win);
   S.brushWin = L.id; win.hidden = false;
@@ -3739,7 +3765,7 @@ const CROP_RATIOS = [[null, "crop.anyRatio"], ["photo", "crop.photo"], [1, "1:1"
 const WHOLE = { x: 0, y: 0, w: 1, h: 1 }, CROP_PAD = 8;   // CROP_PAD: the window's margin round the picture, in CSS pixels
 function cropOpen(L) {
   const win = $("cropwin") || document.body.appendChild(el("div", { id: "cropwin", role: "dialog", "aria-label": t("crop.title") }));
-  lettersClose(); weaveClose(); brushClose(); if ($("deal") && !$("deal").hidden) dealClose();   // they stand where this one does
+  lettersClose(); weaveClose(); brushClose(); if ($("deal") && !$("deal").hidden) dealClose();   // the windows over the left column stand where this one does; Surprise me's covers it
   overLeft(win);
   S.cropWin = L.id; win.hidden = false; CROP.point = CROP.tap = null;
   cropShow(true);
@@ -4997,9 +5023,11 @@ async function surprise(e) {
   let before = null;
   try {
     syncTop();
+    const first = !$("deal") || $("deal").hidden;   // not Deal again in the window
     dealOpen();
     await nextPaint();   // the button and the window show it is at work before the window is held up
     clearTimeout(timers.hist); commitHistory();   // whatever was being edited becomes a step of its own, so each hand is exactly one undo
+    if (first) DEAL.from = S.hist[S.histIdx];   // the cover before this window's deals, for Undo the deal
     SURPRISE.step = null;
     before = handNow();
     const design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), hands = [], dealt = [], shown = selSize(), t0 = performance.now(), H = RULES.hands;
@@ -5010,7 +5038,7 @@ async function surprise(e) {
       try {
         const layout = dealHand(design, dealt);
         const cv = el("canvas");
-        drawCover(cv, { profile: S.profile, catIndex: catIndex(), size: shown, pixelW: 360, cover: S.cover, photos: S.photos });
+        drawCover(cv, { profile: S.profile, catIndex: catIndex(), size: shown, pixelW: DEAL.px, cover: S.cover, photos: S.photos });
         dealt.push(S.profile.style.look);
         hands.push({ ...handNow(), layout });   // its structure is in the style and the layers it keeps (putHand puts both back)
         // the hand shows before the next is dealt, and long enough after the last to be seen coming
@@ -5025,10 +5053,9 @@ async function surprise(e) {
     putHand(hands[0]);
     SURPRISE.last = { kept: 0, ms: Math.round(performance.now() - t0), hands: hands.map((h) => ({ look: h.style.look, layout: h.layout, template: layoutOf(h.style, sizeKey(shown)).template })) };   // for the self-test
     touch({ profile: true, cover: true, panel: true, side: true, strip: true });
-    commitHistory();
+    commitHistory(true);   // a step of its own even if the hand is the cover as it was: another hand taken, or the deal undone, leaves the step before it alone
     SURPRISE.step = { idx: S.histIdx };
     dealKept(0);
-    toast(t("msg.surprise", LOOKS[S.profile.style.look].name[getLang()], t("tpl." + layoutOf(S.profile.style, S.sel).template).split(/[：:]/)[0]));   // the template of the size on the canvas
   } catch (err) {
     if (before) { putHand(before); S.hist[S.histIdx] = snapshot(); touch({ panel: true, side: true }); }   // the cover as it was, and no step of undo for it
     dealClose();
@@ -5039,35 +5066,66 @@ async function surprise(e) {
     document.body.classList.remove("dealing"); syncTop();
   }
 }
-// ---------- Surprise me's window, over the left column (the canvas stays in view): the hands as they are dealt,
-// the one on the canvas marked, another put there with a click; the parts to leave alone next time
-const DEAL = { hands: [], kept: -1 };   // kept: the hand on the canvas
+// ---------- Surprise me's window, over the whole window, the cover dimmed behind it: the hands as they are dealt, as
+// large as fit to judge them by, the one on the canvas marked, another put there with a click; under them, on a bar
+// of glass, the parts to leave alone next time, the way to the chances, Deal again and Done. Esc (Undo the run) puts
+// the cover back as it was before the run; Done, or a click on the dim around, keeps the hand on the canvas.
+const DEAL = { hands: [], kept: -1, px: 360, from: null };   // kept: the hand on the canvas; px: how wide a hand is drawn; from: the history's entry before the window's first deal
 /** Opens Surprise me's window (or empties it for a new run): a place for each hand to come. */
 function dealOpen() {
-  const box = $("deal") || document.body.appendChild(el("div", { id: "deal", role: "dialog", "aria-label": t("top.surprise") }));
+  const box = $("deal") || document.body.appendChild(el("div", { id: "deal", role: "dialog", "aria-label": t("deal.title") }));
   const z = selSize(), locks = S.settings.surprise.locks;
   DEAL.hands = []; DEAL.kept = -1;
-  lettersClose(); cropClose(); weaveClose(); brushClose();   // the letter, crop, weave and brush windows stand where this one does
-  overLeft(box);
+  lettersClose(); cropClose(); weaveClose(); brushClose();   // the letter, crop, weave and brush windows would be under it
+  if (FTB.pop) { FTB.pop = ""; renderBar(); }
   box.style.setProperty("--ar", `${z.w} / ${z.h}`);
-  const lock = (k) => el("button", { class: locks[k] ? "on" : "", title: t(`deal.lock.${k}Tip`), onclick: (e) => { if (locks[k]) delete locks[k]; else locks[k] = true; e.currentTarget.classList.toggle("on", !!locks[k]); persistSettings(); } }, t(`deal.lock.${k}`));
+  const lock = (k) => el("button", { class: "lock" + (locks[k] ? " on" : ""), title: t(`deal.lock.${k}Tip`),
+    onclick: (e) => { if (locks[k]) delete locks[k]; else locks[k] = true; persistSettings(); e.currentTarget.replaceWith(lock(k)); } },
+    el("span", { class: "ico", innerHTML: ICONS[locks[k] ? "lock" : "unlock"] }), t(`deal.lock.${k}`));
   box.replaceChildren(
-    el("div", { class: "head" }, el("b", { id: "deal-what" }, t("deal.dealing")), el("button", { class: "x", title: t("deal.close"), onclick: dealClose }, "×")),
-    el("div", { class: "hands" + (z.h > z.w ? " tall" : ""), id: "deal-hands" }, Array.from({ length: RULES.hands.count }, () => el("figure", { class: "slot" }))),
-    el("div", { class: "hint", id: "deal-hint" }, t("deal.dealingHint")),
-    el("div", { class: "cap" }, t("deal.locks")),
-    el("div", { class: "chips small" }, SURPRISE_LOCKS.map(lock)),
-    el("div", { class: "hint" }, t("deal.odds"), " ", el("button", { class: "link", onclick: () => oddsDialog() }, t("deal.oddsGo"))),
-    el("div", { class: "acts" }, el("button", { class: "btn solid deal-again", onclick: surprise }, t("deal.again")), el("button", { class: "btn", onclick: dealClose }, t("deal.done"))));
+    el("div", { class: "deal-dim", onclick: dealClose }),
+    el("div", { class: "deal-head" }, el("h2", {}, t("deal.title")), el("div", { id: "deal-what" }, t("deal.dealing"))),
+    el("button", { class: "deal-undo glass", title: t("deal.undoTip"), onclick: dealUndo }, el("kbd", {}, "Esc"), t("deal.undo")),
+    el("div", { class: "hands", id: "deal-hands" }, Array.from({ length: RULES.hands.count }, () => el("figure", { class: "slot" }, el("div", { class: "blank" }), el("figcaption", {})))),
+    el("div", { class: "deal-bar glass" },
+      el("div", { class: "locks" }, el("small", {}, t("deal.locks")), el("div", {}, SURPRISE_LOCKS.map(lock))),
+      el("span", { class: "grow" }),
+      el("button", { class: "linkbtn", title: t("deal.odds"), onclick: () => oddsDialog() }, t("deal.oddsGo")),
+      el("button", { class: "btn again", onclick: surprise }, ico("spark", 18), t("deal.again")),
+      el("button", { class: "btn solid done", onclick: dealClose }, t("deal.done"))));
   box.hidden = false;
+  dealFit();
 }
-/** Hand i, just dealt, in its place: its drawing at the size shown, its look, and the layout preset it was dealt in (none for the canvas's own). */
+/** Lays the hands out as large as they fit between the heading and the bar: in 2, 3 or 6 columns, whichever gives the widest. */
+function dealFit() {
+  const list = $("deal-hands");
+  if (!list) return;
+  const z = selSize(), n = RULES.hands.count, gap = 18, cap = 52, W = Math.min(innerWidth - 96, 1280), H = Math.max(200, innerHeight - 300);   // 300: the heading, the bar and the margins
+  let best = null;
+  for (const cols of [2, 3, 6]) {
+    const rows = Math.ceil(n / cols), w = Math.min((W - gap * (cols - 1)) / cols, ((H - gap * (rows - 1)) / rows - cap) * (z.w / z.h));
+    if (!best || w > best.w) best = { cols, w };
+  }
+  list.style.gridTemplateColumns = `repeat(${best.cols}, ${Math.floor(best.w)}px)`;
+  DEAL.px = Math.round(Math.min(540, best.w * Math.min(1.5, devicePixelRatio || 1)));   // sharp enough, and six of them drawn in a second
+}
+addEventListener("resize", () => { if ($("deal") && !$("deal").hidden) dealFit(); });
+/** A hand in a few words: its ground (for a look with two), its title's lettering, its layout (the preset's name, or the template's at the size shown). */
+function handSays(h) {
+  const lang = getLang(), lk = LOOKS[h.style.look] || LOOKS.cel, title = h.layers.find((l) => l.id === "title");
+  const fx = title && title.fx && title.fx !== "auto" && EFFECTS[title.fx] ? EFFECTS[title.fx].name[lang] : t("odds.ownLetters");
+  const n = S.settings.layouts.findIndex((p) => p.id === h.layout);
+  const lay = n >= 0 ? layoutName(S.settings.layouts[n], n) : t("tpl." + layoutOf(h.style, S.sel).template).split(/[：:]/)[0];
+  return [!lk.oneTheme && t("deal.ground." + h.style.theme), fx, lay].filter(Boolean).join(" · ");
+}
+/** Hand i, just dealt, in its place: its drawing at the size shown, its look, and what it is in a few words. */
 function dealShow(i, h, cv) {
   const slot = $("deal-hands") && $("deal-hands").children[i];
   if (!slot) return;
   DEAL.hands[i] = h;
-  const n = S.settings.layouts.findIndex((p) => p.id === h.layout), lay = n >= 0 ? layoutName(S.settings.layouts[n], n) : "";
-  slot.replaceChildren(cv || el("div", { class: "blank" }), el("figcaption", {}, el("span", {}, LOOKS[h.style.look].name[getLang()]), lay && el("span", { class: "lay", title: t("deal.layoutTip", lay) }, lay)));
+  const says = handSays(h);
+  slot.replaceChildren(cv || el("div", { class: "blank" }), el("span", { class: "on" }, t("deal.onCanvas")),
+    el("figcaption", {}, el("b", {}, LOOKS[h.style.look].name[getLang()]), el("span", { title: says }, says)));
   slot.className = "hand"; slot.onclick = () => dealTake(i);
   $("deal-what").textContent = t("deal.dealt", i + 1);
 }
@@ -5080,8 +5138,7 @@ function dealKept(k) {
 }
 function dealMark() {
   [...$("deal-hands").children].forEach((f, i) => f.classList.toggle("kept", i === DEAL.kept));
-  $("deal-what").textContent = t("deal.kept", DEAL.kept + 1, LOOKS[DEAL.hands[DEAL.kept].style.look].name[getLang()]);
-  $("deal-hint").textContent = t("deal.keptHint");
+  $("deal-what").textContent = t("deal.sub", DEAL.hands.filter(Boolean).length);
 }
 /** Puts hand i on the canvas instead, while nothing has followed the run: still one step of undo. */
 function dealTake(i) {
@@ -5093,13 +5150,17 @@ function dealTake(i) {
   S.hist[S.histIdx] = snapshot();
   dealMark();
 }
-/** Closes Surprise me's window. */
+/**
+ * Undo the deal: the cover as it was before the window's first deal (back through its steps of undo, which redo takes
+ * again), and the window closed; only closed should that step be gone from the history, or the cover edited since.
+ */
+function dealUndo() {
+  if (SURPRISE.busy) return;
+  const at = DEAL.from == null ? -1 : S.hist.lastIndexOf(DEAL.from, S.histIdx);
+  if (SURPRISE.step && S.histIdx === SURPRISE.step.idx && at >= 0) timeTravel(at - S.histIdx); else dealClose();
+}
+/** Closes Surprise me's window, keeping the hand on the canvas. */
 function dealClose() { const box = $("deal"); if (box) box.hidden = true; }
-// a press anywhere but in the window (or on SURPRISE ME) closes it: the cover is being worked on again
-addEventListener("pointerdown", (e) => {
-  const box = $("deal");
-  if (box && !box.hidden && !SURPRISE.busy && !box.contains(e.target) && !(e.target.closest && e.target.closest(".deal-btn, #modal"))) dealClose();   // the chances' window (oddsDialog) over it leaves it open
-}, true);
 /**
  * Asks, then empties this channel's cover: every layer the user added goes, the layout layers return to
  * the profile's default design (places, effects, colours), the scene objects to where the layout puts
@@ -5339,7 +5400,11 @@ addEventListener("keydown", (e) => {
   if (key === "escape" && FTB.pop) { FTB.pop = ""; return renderBar(); }   // the bar's popover first
   if (typing) return;
   if (!S.cover || SURPRISE.busy) return;
-  if (key === "escape" && $("deal") && !$("deal").hidden) return dealClose();
+  if ($("deal") && !$("deal").hidden) {   // Surprise me's window over the cover: Esc undoes the deal, undo and redo work, no other key reaches the cover
+    if (key === "escape") return dealUndo();
+    if (mod && key === "z") { e.preventDefault(); return timeTravel(e.shiftKey ? 1 : -1); }
+    return;
+  }
   if (key === "escape" && S.letterWin) return lettersClose();
   if (key === "escape" && S.cropWin) return cropClose();
   if ((key === "delete" || key === "backspace") && S.cropWin && S.mode === "edit" && cropDropPoint()) return e.preventDefault();   // a free crop's corner picked, not the layer

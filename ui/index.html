@@ -483,13 +483,13 @@
   .lsw.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}.lsw.auto{background:var(--panel);color:#fff;font-size:12px}
   .lcol input[type=color]{width:30px;height:22px;padding:1px;background:var(--panel);border:1px solid var(--line2);border-radius:7px;cursor:pointer}
   /* Surprise me's window: over the left column, the canvas left in view; the hands as they are dealt, the one kept marked */
-  #deal,#letterwin,#cropwin,#weavewin,#brushwin{position:fixed;z-index:35;background-color:rgba(28,30,40,.72);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid rgba(255,255,255,.22);border-radius:20px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 30px 70px rgba(0,0,0,.55);padding:16px;display:grid;gap:10px;overflow:auto}
-  html.solid #deal,html.solid #letterwin,html.solid #cropwin,html.solid #weavewin,html.solid #brushwin{background-color:var(--solid2);-webkit-backdrop-filter:none;backdrop-filter:none}
-  #deal[hidden],#letterwin[hidden],#cropwin[hidden],#weavewin[hidden],#brushwin[hidden]{display:none}
-  #deal .head,#letterwin .head,#cropwin .head,#weavewin .head,#brushwin .head{display:flex;align-items:center;justify-content:space-between;gap:8px}
-  #deal .head b,#letterwin .head b,#cropwin .head b,#weavewin .head b,#brushwin .head b{font-size:15px}
-  #deal .x,#letterwin .x,#cropwin .x,#weavewin .x,#brushwin .x{background:none;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:0 4px;opacity:.7}
-  #deal .x:hover,#letterwin .x:hover,#cropwin .x:hover,#weavewin .x:hover,#brushwin .x:hover{opacity:1}
+  #letterwin,#cropwin,#weavewin,#brushwin{position:fixed;z-index:35;background-color:rgba(28,30,40,.72);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid rgba(255,255,255,.22);border-radius:20px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 30px 70px rgba(0,0,0,.55);padding:16px;display:grid;gap:10px;overflow:auto}
+  html.solid #letterwin,html.solid #cropwin,html.solid #weavewin,html.solid #brushwin{background-color:var(--solid2);-webkit-backdrop-filter:none;backdrop-filter:none}
+  #letterwin[hidden],#cropwin[hidden],#weavewin[hidden],#brushwin[hidden]{display:none}
+  #letterwin .head,#cropwin .head,#weavewin .head,#brushwin .head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  #letterwin .head b,#cropwin .head b,#weavewin .head b,#brushwin .head b{font-size:15px}
+  #letterwin .x,#cropwin .x,#weavewin .x,#brushwin .x{background:none;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:0 4px;opacity:.7}
+  #letterwin .x:hover,#cropwin .x:hover,#weavewin .x:hover,#brushwin .x:hover{opacity:1}
   #letterwin .hint,#cropwin .hint,#weavewin .hint,#brushwin .hint{margin:0}
   /* the weave window: each letter of the lettering a cut-out weaves with, in front of it (lit) or behind it (faint, dashed) */
   #weave-box{display:grid;gap:14px}
@@ -503,23 +503,45 @@
   #brushring{position:fixed;z-index:20;pointer-events:none;border-radius:50%;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(7,7,12,.85),inset 0 0 0 1px rgba(7,7,12,.85)}
   #brushring[hidden]{display:none}#brushring.behind{border-style:dashed}
   #crop-stage{background:repeating-conic-gradient(#2a2a33 0 25%,#1d1d24 0 50%) 0 0/16px 16px}
-  #deal .hands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-  #deal .hands.tall{grid-template-columns:repeat(3,minmax(0,1fr))}
-  #deal figure{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:rgba(0,0,0,.25);min-width:0}
-  #deal figure.slot{aspect-ratio:var(--ar);background:repeating-linear-gradient(135deg,var(--panel) 0 8px,var(--line) 8px 9px);opacity:.6}
-  #deal figure.hand{cursor:pointer;animation:dealIn .25s ease-out}
-  #deal figure.hand:hover{border-color:var(--line2)}
-  #deal figure.kept{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc)}
-  #deal figure canvas{display:block;width:100%;height:auto}#deal figure .blank{display:block;width:100%;aspect-ratio:var(--ar)}
-  #deal figcaption{display:flex;justify-content:space-between;gap:6px;padding:4px 6px;font-size:11px;line-height:1.4}
-  #deal figcaption span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #deal figcaption span.lay{opacity:.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}   /* the layout preset the hand was dealt in */
-  #deal figure.kept figcaption{background:var(--acc);color:var(--ink)}
-  #deal figure.kept figcaption span{color:var(--ink)}
-  #deal .hint{margin:0}
-  #deal .link{background:none;border:0;color:#fff;text-decoration:underline;cursor:pointer;padding:0;font-size:12px}
+  /* Surprise me's window: over the whole window, the cover dimmed and blurred behind it; the hands as large as fit
+     (see dealFit), under them a bar of glass with the parts to leave alone, the chances, Deal again and Done */
+  #deal{position:fixed;inset:0;z-index:36;display:flex;flex-direction:column;align-items:center;gap:22px;padding:28px 48px;overflow:auto}
+  #deal[hidden]{display:none}
+  #deal .deal-dim{position:fixed;inset:0;z-index:-1;background:radial-gradient(110% 90% at 50% 40%,rgba(10,10,18,.5),rgba(6,6,10,.86));-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+  html.solid #deal .deal-dim{background:rgba(8,8,12,.92);-webkit-backdrop-filter:none;backdrop-filter:none}
+  #deal .deal-head{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding-top:6px}
+  #deal .deal-head h2{margin:0;font-size:28px;font-weight:900;letter-spacing:.02em}
+  #deal #deal-what{font-size:14px;color:var(--text2)}
+  #deal .deal-undo{position:fixed;top:24px;right:24px;height:40px;border-radius:999px;display:flex;align-items:center;gap:8px;padding:0 14px;color:var(--text2);font-size:13px;cursor:pointer}
+  #deal .deal-undo:hover{color:#fff}
+  #deal kbd{font:11px var(--mono);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:1px 6px}
+  #deal .hands{display:grid;gap:18px;justify-content:center}
+  #deal figure{position:relative;margin:0;border:1px solid rgba(255,255,255,.14);border-radius:16px;overflow:hidden;background:rgba(255,255,255,.05);min-width:0}
+  #deal figure .blank{display:block;width:100%;aspect-ratio:var(--ar)}
+  #deal figure.slot .blank{background:repeating-linear-gradient(135deg,rgba(255,255,255,.04) 0 10px,rgba(255,255,255,.08) 10px 11px)}
+  #deal figure.slot{opacity:.6}
+  #deal figure.hand{cursor:pointer;animation:dealIn .25s ease-out;transition:transform .15s,border-color .15s}
+  #deal figure.hand:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.35)}
+  #deal figure.kept{border:2px solid var(--acc);box-shadow:0 0 0 6px color-mix(in srgb,var(--acc) 18%,transparent),0 22px 50px rgba(0,0,0,.5)}
+  #deal figure canvas{display:block;width:100%;height:auto}
+  #deal figure .on{position:absolute;left:10px;top:10px;height:26px;padding:0 10px;border-radius:999px;background:var(--acc);color:var(--acc-ink);font-size:12px;font-weight:700;display:none;align-items:center}
+  #deal figure.kept .on{display:flex}
+  #deal figcaption{display:flex;flex-direction:column;gap:2px;min-height:52px;box-sizing:border-box;padding:8px 12px;font-size:12px;color:var(--text2)}
+  #deal figcaption b{font-size:14px;color:var(--text)}
+  #deal figcaption>*{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #deal .deal-bar{margin-top:auto;width:min(1200px,100%);box-sizing:border-box;border-radius:24px;display:flex;align-items:center;flex-wrap:wrap;gap:14px 18px;padding:14px 18px 14px 24px}
+  #deal .deal-bar .grow{flex:1}
+  #deal .locks{display:flex;flex-direction:column;gap:8px}
+  #deal .locks small{font-size:12px;color:var(--text3)}
+  #deal .locks>div{display:flex;flex-wrap:wrap;gap:8px}
+  #deal .lock{height:34px;border-radius:999px;border:1px solid var(--line2);background:transparent;color:var(--text2);display:flex;align-items:center;gap:6px;padding:0 12px;font-size:13px;cursor:pointer}
+  #deal .lock .ico{display:grid}
+  #deal .lock.on{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.42);color:#fff}
+  #deal .again,#deal .done{height:48px;border-radius:14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+  #deal .again{padding:0 20px}#deal .done{padding:0 28px}
   body.dealing .app{pointer-events:none}   /* nothing else to be done to the cover while hands are dealt onto it */
-  body.dealing #deal figure{pointer-events:none}body.dealing #deal .acts button,body.dealing #deal .hint .link{pointer-events:none;opacity:.5}
+  body.dealing #deal figure,body.dealing #deal .deal-dim,body.dealing #deal .deal-undo,body.dealing #deal .deal-bar button{pointer-events:none}
+  body.dealing #deal .deal-undo,body.dealing #deal .deal-bar button{opacity:.5}
   @keyframes dealIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
   @media (prefers-reduced-motion:reduce){#deal figure.hand{animation:none}}
   #modal{position:fixed;inset:0;background:rgba(5,5,10,.55);display:grid;place-items:center;z-index:40}
@@ -545,20 +567,33 @@
   #settings .setbody>.scroll{flex:1;padding:26px 32px 40px}
   #settings .x{position:absolute;right:18px;top:18px;z-index:2;width:36px;height:36px;border-radius:11px;border:0;background:rgba(255,255,255,.08);color:#fff;font-size:14px;cursor:pointer}
   #settings .x:hover{background:rgba(255,255,255,.16)}
-  /* Surprise me's chances (oddsDialog): wide, in two columns, its head staying in view */
-  #modal .dlg.odds{width:min(1000px,94vw)}
-  #modal .dlg.odds .head{display:flex;justify-content:space-between;align-items:center;gap:12px;position:sticky;top:-26px;margin:-26px -26px 0;padding:16px 26px 10px;background:var(--bg);z-index:1}
-  #modal .dlg.odds .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
-  #modal .dlg.odds .cols > div{display:grid;gap:14px}
-  @media(max-width:760px){#modal .dlg.odds .cols{grid-template-columns:1fr}}
-  /* its layout presets, across the window: which layout a hand is dealt in, beside the presets themselves */
-  #modal .dlg.odds .lays-two{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
-  #modal .dlg.odds .lay{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:6px;align-items:center;margin-bottom:6px}
-  #modal .dlg.odds .lay input{padding:5px 8px}
-  #modal .dlg.odds .lay .btn{padding:5px 8px;font-size:12px}
-  #modal .dlg.odds .lays.ping{animation:lays-ping 1.4s ease-out}
+  /* Surprise me's chances (oddsDialog): wide, its head staying in view; each group a card — its name, Even out and
+     Restore on one line, its sliders under it (in two columns for the long ones) — the smaller groups two by two */
+  #modal .dlg.odds{width:min(1100px,94vw);gap:14px}
+  #modal .dlg.odds .head{display:flex;align-items:center;gap:18px;position:sticky;top:-26px;margin:-26px -26px 0;padding:18px 26px 14px;background:var(--bg);border-bottom:1px solid var(--line);z-index:2}
+  #modal .dlg.odds .head .ttl{flex:1;min-width:0}
+  #modal .dlg.odds .head h2{margin:0 0 4px}
+  #modal .dlg.odds .head .hint{margin:0}
+  .ocard{border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.04);padding:14px 18px 16px;min-width:0}
+  .ocard-h{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px}
+  .ocard-h b{font-size:15px}
+  .ocard-h .grow{flex:1}
+  .ocard-h .seg .btn{padding:4px 10px;font-size:12px}
+  .ocard-h select{width:auto;min-width:180px}
+  .ocard>.hint{margin:4px 0 0}
+  .orows{display:grid;column-gap:28px}
+  .orows.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .orows .sl{margin-top:10px}
+  .orows .sl.rest>span{color:var(--text2)}
+  .orows .sl.rest .linkbtn{justify-self:start}
+  .orows .fold{justify-self:start;margin-top:10px}
+  .orows.two>.btn.wide,.orows.two>.hint,.orows.two>.fold{grid-column:1/-1}
+  .ofoot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+  .ofoot .hint{margin:0}
+  .ogrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}
+  @media(max-width:760px){.ogrid,.orows.two{grid-template-columns:1fr}}
+  #odds-layouts.ping{animation:lays-ping 1.4s ease-out}
   @keyframes lays-ping{from{border-color:var(--acc)}to{border-color:var(--line)}}
-  @media(max-width:760px){#modal .dlg.odds .lays-two{grid-template-columns:1fr}}
   /* a layout preset's editor (layoutEditor): the cover as the preset has it, beside the template and the parts */
   #modal .dlg.layed{width:min(1180px,96vw)}
   #modal .dlg.layed .head .acts .btn{padding:7px 16px;font-size:13px}
