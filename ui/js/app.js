@@ -357,9 +357,10 @@ function paintFlat() {
   const draft = drafting(), keyed = draft && DRAFT.key;
   if (!keyed) DRAFT.kept = null; else if (!DRAFT.kept || DRAFT.kept.key !== keyed) DRAFT.kept = { key: keyed };   // a look's setting dragged (see o.draft)
   if (!draft && !LIVE) dropCards();   // painted still: the drag or the draft is over, and the photos' copies on the graphics card can go
-  paint(cv, size, Math.min(vw * 1.5, vw * k * (draft ? 1 : window.devicePixelRatio || 1)), S.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
+  const shown = previewed();   // a look or a text effect previewed from its card, on this canvas only (see PREVIEW)
+  paint(cv, size, Math.min(vw * 1.5, vw * k * (draft ? 1 : window.devicePixelRatio || 1)), shown.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
     { draft: DRAFT.kept || draft, ...(S.mode === "edit" ? { picked: group().map((L) => L.id), sceneHandles: !S.settings.hideScene, spot: S.focus ? spotIds() : null, brush: S.brushWin } : {}),
-      ...(PREVIEW.look ? { profile: inLook(PREVIEW.look) } : {}) });   // a look previewed from its card, on this canvas only (see PREVIEW)
+      ...(shown.profile !== S.profile ? { profile: shown.profile } : {}) });
   const clear = !layer("bg").visible;
   stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
 }
@@ -2743,13 +2744,39 @@ function lookSheet() {
 }
 // ---------- Look: the looks as cards, each the cover drawn in it
 /**
- * The look the canvas is drawn in, instead of the profile's, while its card is under the pointer (null: none). Only
- * the drawing takes it (paint): the profile keeps its own, so nothing of it is saved or undone; a click on the card
- * makes it the profile's.
+ * What the canvas shows instead of the cover as it is while a card is under the pointer, a moment after it came
+ * (null: none): `look`, the look of a look card; `fx`, a text effect's card, {id, fx, seed} (the layer, the effect,
+ * the seed a lettering dealt by one is drawn with). Only the drawing takes it (paint, through previewed()): the
+ * profile and the cover keep their own, so nothing of it is saved or undone; a click on the card puts it on.
+ * `timer`: the moment being waited, for `wait` (the kind it will show).
  */
-const PREVIEW = { look: null, timer: 0 };
+const PREVIEW = { look: null, fx: null, timer: 0, wait: "" };
 /** The profile as drawn in look `id` (a copy: the profile's own style untouched). */
 const inLook = (id) => ({ ...S.profile, style: { ...S.profile.style, look: id } });
+/** The profile and the cover the canvas is painted from: S's own, or copies as a card under the pointer has them (see PREVIEW). */
+function previewed() {
+  let profile = S.profile, cover = S.cover;
+  if (PREVIEW.look) profile = inLook(PREVIEW.look);
+  const f = PREVIEW.fx;
+  if (f) cover = { ...cover, layers: cover.layers.map((l) => (l.id === f.id ? { ...l, fx: f.fx === "auto" ? undefined : f.fx, fxSeed: l.fxSeed || f.seed || undefined } : l)) };
+  return { profile, cover };
+}
+/**
+ * A card under the pointer: what it shows (`v`, of PREVIEW's `kind`) is on the canvas 140 ms later, if `ok()` still
+ * says so then, in the place of whatever was previewed till then; v null: the canvas as it is, at once.
+ */
+function previewSoon(kind, v, ok = () => true) {
+  clearTimeout(PREVIEW.timer); PREVIEW.timer = 0; PREVIEW.wait = "";
+  const clear = () => { const was = PREVIEW.look || PREVIEW.fx; PREVIEW.look = PREVIEW.fx = null; return !!was; };
+  if (!v) { if (clear()) { previewTag(); queueDraw(); } return; }
+  PREVIEW.wait = kind;
+  PREVIEW.timer = setTimeout(() => { PREVIEW.timer = 0; PREVIEW.wait = ""; if (!ok()) return; clear(); PREVIEW[kind] = v; previewTag(); queueDraw(); }, 140);
+}
+/** Ends a preview of the kinds given, and one waiting to be (its cards drawn anew, or one clicked): the canvas as it is. */
+function endPreview(...kinds) {
+  if (kinds.includes(PREVIEW.wait)) { clearTimeout(PREVIEW.timer); PREVIEW.timer = 0; PREVIEW.wait = ""; }
+  if (kinds.some((k) => PREVIEW[k])) { for (const k of kinds) PREVIEW[k] = null; previewTag(); queueDraw(); }
+}
 /**
  * Each look's card picture, kept from one drawing of the sheet to the next: {cv, sig, want} by look id, where `sig`
  * is what it was drawn from (the cover, the size, the style but its look, the look's own settings) and `want` what it
@@ -2867,24 +2894,23 @@ function drawLookCards(round) {
 }
 /** A card under the pointer: the canvas shows its look a moment later; none (or the profile's own): the canvas as it is. */
 function hoverLook(id) {
-  clearTimeout(PREVIEW.timer); PREVIEW.timer = 0;
-  if (id === S.profile.style.look) id = null;
-  if (!id) { if (PREVIEW.look) { PREVIEW.look = null; previewTag(); queueDraw(); } return; }
-  PREVIEW.timer = setTimeout(() => { PREVIEW.timer = 0; if (!onLookSheet()) return; PREVIEW.look = id; previewTag(); queueDraw(); }, 140);
+  previewSoon("look", id === S.profile.style.look ? null : id, onLookSheet);
 }
 /** A card clicked: its look is the profile's. */
 function pickLook(id) {
-  clearTimeout(PREVIEW.timer); PREVIEW.timer = 0; PREVIEW.look = null; previewTag();
+  endPreview("look");
   const st = S.profile.style;
-  if (st.look === id) return queueDraw();
+  if (st.look === id) return;
   st.look = id; countLook(id); touch({ profile: true, panel: true, side: true, strip: true });
 }
-/** Over the canvas while a look is previewed: which, and that a click puts it on. */
+/** Over the canvas while a look or a text effect is previewed: which, and that a click puts it on. */
 function previewTag() {
   let tag = $("pvtag");
   if (!tag) { tag = el("div", { id: "pvtag" }); $("stage").append(tag); }
-  tag.hidden = !PREVIEW.look;
-  if (PREVIEW.look) tag.textContent = t("look.previewing", LOOKS[PREVIEW.look].name[getLang()]);
+  const lang = getLang(), f = PREVIEW.fx;
+  tag.hidden = !PREVIEW.look && !f;
+  if (PREVIEW.look) tag.textContent = t("look.previewing", LOOKS[PREVIEW.look].name[lang]);
+  else if (f) tag.textContent = t("fx.previewing", f.fx === "auto" ? t("fx.cardAuto") : EFFECTS[f.fx].name[lang]);
 }
 /** Layout: the layout presets, the template at this size, the colour block's edge, which parts show, and all the layout hidden or put back in place. */
 function layoutSheet() {
@@ -3393,8 +3419,9 @@ const psec = (nameKey, kids, tip = "") => el("div", { class: "psec", dataset: { 
 function secSum(g) {
   const bits = [];
   let boxes = 0;
-  for (const n of g.querySelector(".psec-b").querySelectorAll("select, .sw, .seg .btn.on, .sizes-row, input[type=checkbox], .sl:not(.off)")) {
+  for (const n of g.querySelector(".psec-b").querySelectorAll("select, .fxtile.on, .sw, .seg .btn.on, .sizes-row, input[type=checkbox], .sl:not(.off)")) {
     if (n.tagName === "SELECT") bits.push(n.selectedOptions[0] ? n.selectedOptions[0].textContent : "");
+    else if (n.classList.contains("fxtile")) bits.push(n.dataset.name);   // the text effect's card picked
     else if (n.classList.contains("sw")) bits.push(n.querySelector(".auto") ? t("props.inkIsAuto") : n.querySelector("input").value.toUpperCase());
     else if (n.classList.contains("sizes-row")) { const on = n.querySelectorAll(".btn.on").length, all = n.children.length; if (all > 1) bits.push(on === all ? t("props.sum.allSizes") : t("props.sum.sizes", on, all)); }
     else if (n.type === "checkbox") { boxes++; if (n.checked && !n.disabled) bits.push(n.parentElement.textContent); }
@@ -3453,14 +3480,11 @@ function titleLines(L, set0) {
  */
 function fxControl(L) {
   const set = (k, v, side) => { if (v === undefined) delete L[k]; else L[k] = v; touch({ cover: true, side }); };
-  const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline"), letters: t("fx.kind.letters") };
-  const groups = ["passes", "mask", "outline", "letters"].map((kind) => ({ group: kinds[kind], items: Object.entries(EFFECTS).filter(([, e]) => (e.menu || e.kind) === kind).map(([id, e]) => [id, e.name[getLang()]]) })).filter((g) => g.items.length);
   const fx = EFFECTS[L.fx] ? L.fx : "auto", kind = EFFECTS[fx].kind;   // an effect no longer in the menu (a look's lettering of before) is shown as automatic
   const cols = inColumns(L);   // set in columns: no bend (the one it has is kept, for when it is in lines again)
   return {
     kids: [
-      // a lettering dealt by a seed starts with one of the layer's own: two layers in it are not drawn alike
-      select(groups, fx, (v) => { if (EFFECTS[v] && EFFECTS[v].seeded && !L.fxSeed) L.fxSeed = 1 + Math.floor(Math.random() * 999998); set("fx", v === "auto" ? undefined : v, true); }),
+      fxCards(L),
       fx !== "auto" && kind !== "passes" && slider("props.fxAmt", 0, 2, 0.05, L.fxAmt ?? 1, times, (v) => { holdLive(L.id); set("fxAmt", v === 1 ? undefined : v, false); }),
       // the ransom note's letters dealt again: another face, paper, ink and angle for each (a reshaped edge: other spikes,
       // tears, cuts, drips, bites); and the ransom note's one by one, in a window of their own
@@ -3474,6 +3498,160 @@ function fxControl(L) {
     ],
     tip: [fx === "ransom" && t("fx.ransomHint"), EFFECTS[fx].kind === "outline" && fx !== "extrude" && t("fx.shapedHint"), !cols && L.bend && t("fx.bendHint"), !cols && L.bend && t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint"), kind === "outline" && !CAN.outlines && t("fx.needsApp"), cols && NO_COLUMNS.includes(fx) && t("fx.noColumns")].filter(Boolean).join(" "),
   };
+}
+// ---------- the text effects as cards, each the layer's first letter drawn in it
+/**
+ * The effect cards for this session: `all`, every effect shown (else the first FX_FOLDED); `seeds`, by layer id, the
+ * seed a lettering dealt by one is shown and put on with for a layer with none of its own yet (each its own, so two
+ * layers in it are not drawn alike).
+ */
+const FX_UI = { all: false, seeds: new Map() };
+/** The effects in the order of their cards: Automatic, then by kind as the menu had them (layered, masked, outlined, letter by letter). */
+const FX_ORDER = ["passes", "mask", "outline", "letters"].flatMap((k) => Object.keys(EFFECTS).filter((id) => (EFFECTS[id].menu || EFFECTS[id].kind) === k));
+/** How many cards show until See all: Automatic, the layer's own and the first of the others. */
+const FX_FOLDED = 6;
+/** What a card's letter is drawn on: a cover of this size, its letter a free text layer of this scale at its centre. */
+const FX_CARD = { w: 200, h: 100, s: 7.5 };
+const fxSeedOf = (L) => {
+  if (L.fxSeed) return L.fxSeed;
+  if (!FX_UI.seeds.has(L.id)) FX_UI.seeds.set(L.id, 1 + Math.floor(Math.random() * 999998));
+  return FX_UI.seeds.get(L.id);
+};
+/** The first letter of the words headline layer L sets (the marks of its highlights left out), or a stand-in while it has none. */
+function firstLetter(L) {
+  const words = L.type === "title" ? S.cover.title : L.type === "subtitle" ? S.cover.subtitle : L.text;
+  for (const line of parseTitle(words)) for (const run of line) { const ch = [...run.t].find((c) => c.trim()); if (ch) return ch; }
+  return t("fx.sample");
+}
+/**
+ * The text effects of headline layer L as cards, in the Effect group of the drawer and so in its popover on the bar:
+ * Automatic first, then the layer's own, then the others up to FX_FOLDED, See all unfolding the rest. Each is the
+ * layer's first letter in that effect, in its face and colours, as the cover's look letters it; under the pointer a
+ * moment it shows on the canvas (PREVIEW.fx), a click puts it on.
+ */
+function fxCards(L) {
+  const lang = getLang(), st = S.profile.style, cur = EFFECTS[L.fx] ? L.fx : "auto";
+  const order = ["auto", ...(cur === "auto" ? [] : [cur]), ...FX_ORDER.filter((id) => id !== "auto" && id !== cur)];
+  // what a picture is drawn from but its effect: the letter, the layer's face, colours and strengths, the look as the cover has it, the channel colour
+  const from = [firstLetter(L), L.font || "", L.ink || "", L.hi || "", L.stroke ?? 1, L.shadow ?? 1, L.fxAmt ?? 1, st.look, st.lookParams[st.look] || null, st.lookSeed, st.theme, !!recordOf(mainPhoto()), cat().color];
+  const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline"), letters: t("fx.kind.letters") };
+  for (const w of FXPICS.watched) if (!w.isConnected) { FXPICS.seen.unobserve(w); FXPICS.watched.delete(w); }   // the cards of a drawing before the last, never seen
+  const card = (id) => {
+    const e = EFFECTS[id], seed = e.seeded ? fxSeedOf(L) : 0, c = el("canvas", { width: FX_CARD.w, height: FX_CARD.h });
+    const b = el("button", { class: "fxtile" + (id === cur ? " on" : ""), "aria-pressed": String(id === cur), dataset: { name: e.name[lang] },
+      title: id === "auto" ? e.name[lang] : `${e.name[lang]} · ${kinds[e.menu || e.kind]}`, onpointerenter: () => hoverFx(L, id), onclick: () => pickFx(L, id) },
+      c, el("span", {}, id === "auto" ? t("fx.cardAuto").split(" · ").map((w, i) => [i ? " · " : "", el("i", {}, w)]) : e.name[lang]));   // Automatic's two halves, each whole on its line
+    fxPic(JSON.stringify([id, seed, ...from]), { id, seed, ch: from[0], L }, c, b);
+    return b;
+  };
+  return el("div", { class: "fxdeck" },
+    el("div", { class: "fxhint" }, t("fx.cardsHint")),
+    el("div", { class: "fxgrid", onpointerleave: () => hoverFx(L, null) }, (FX_UI.all ? order : order.slice(0, FX_FOLDED)).map(card)),
+    el("button", { class: "btn wide", onclick: () => { FX_UI.all = !FX_UI.all; renderSide(); } }, FX_UI.all ? t("fx.seeFewer") : t("fx.seeAll", FX_ORDER.length - 1)));
+}
+/**
+ * The effect cards' pictures, by what each is drawn from (see fxCards): {key, cv, of, done, faced, light, shows} — its
+ * key, a small canvas with the letter drawn on it, the layer drawn (a free text layer standing for the card's),
+ * whether it is drawn as it is to stay (no outline it asked for still on its way, its faces read: `faced`), whether its
+ * letter is dark (so shown on a light ground), and the cards waiting for it ([canvas, card], the last few made: the
+ * drawer's and the popover's are built anew at each change, and the popover's even when it shows another group, so
+ * those of before are let go). Each is drawn once and copied onto every card that shows it, so the
+ * drawer and the bar's popover, built anew at each change, draw nothing again; and only once a card of it comes in
+ * sight (`seen`): not in a group shut, nor scrolled away below See all. `queue`: those waiting to be drawn, one a
+ * frame; `on`, whether that is under way; `watched`, the card canvases waiting to be seen; `read`, the faces known
+ * to be read from their files (see ensureFont), which no picture waits for.
+ */
+const FXPICS = { pics: new Map(), queue: [], on: false, watched: new Set(), read: new Set(),
+  seen: new IntersectionObserver((seen) => {
+    for (const e of seen) {
+      if (!e.isIntersecting) continue;
+      FXPICS.seen.unobserve(e.target); FXPICS.watched.delete(e.target);
+      const key = e.target.dataset.fx;
+      if (FXPICS.pics.has(key) && !FXPICS.queue.includes(key)) FXPICS.queue.push(key);
+    }
+    drawFxPics();
+  }) };
+/** Shows the picture keyed `key` on card canvas `c` (of card `b`): at once when drawn, else once it is (drawn one a frame, once the card is in sight). */
+function fxPic(key, job, c, b) {
+  let pic = FXPICS.pics.get(key);
+  if (!pic) {
+    const cv = el("canvas");
+    cv.getContext("2d", { willReadFrequently: true });   // its letter's colour is read off it
+    const L = job.L, of = { ...newLayer("text"), id: "fxcard", text: job.ch, font: L.font, ink: L.ink, hi: L.hi, stroke: L.stroke ?? 1, shadow: L.shadow ?? 1, fxAmt: L.fxAmt,
+      fx: job.id === "auto" ? undefined : job.id, fxSeed: job.seed || undefined, t: { all: { x: 0.5, y: 0.5, s: FX_CARD.s, r: 0, kx: 1, ky: 1 }, by: {} } };
+    pic = { key, cv, of, done: false, faced: false, light: false, shows: [] };
+    FXPICS.pics.set(key, pic);
+    if (FXPICS.pics.size > 80) FXPICS.pics.delete(FXPICS.pics.keys().next().value);   // the oldest: another text, colour or look since
+  }
+  pic.shows.push([c, b]);
+  if (pic.shows.length > 6) pic.shows.splice(0, pic.shows.length - 6);
+  if (pic.done) return showFxPic(pic);
+  c.dataset.fx = key; FXPICS.watched.add(c); FXPICS.seen.observe(c);
+}
+/** Draws the pictures waiting, one a frame, those of cards still shown; not while something is dragged. */
+function drawFxPics() {
+  if (FXPICS.on) return;
+  FXPICS.on = true;
+  const next = () => {
+    if (LIVE || drafting()) return setTimeout(next, 300);
+    let key, pic = null;
+    while ((key = FXPICS.queue.shift())) {
+      pic = FXPICS.pics.get(key);
+      if (pic) pic.shows = pic.shows.filter(([c]) => c.isConnected);
+      if (pic && pic.shows.length) break;
+    }
+    if (!key) { FXPICS.on = false; return; }
+    try { paintFxPic(pic); showFxPic(pic); }
+    catch (e) { console.error(e); pic.done = true; pic.shows = []; }   // a picture failing leaves its cards blank, and the others to be drawn
+    requestAnimationFrame(next);
+  };
+  requestAnimationFrame(next);
+}
+/** Picture `pic` drawn again once what it waits for is here (an outline it asked for, a face being read). */
+function fxAgain(pic, ready) {
+  ready.then(() => { if (FXPICS.pics.get(pic.key) === pic && !FXPICS.queue.includes(pic.key)) FXPICS.queue.push(pic.key); drawFxPics(); });
+}
+/** Paints picture `pic`: its letter alone, as the cover would paint it at the card's size, the cover's ground and main photo setting the scene (its look, its theme). */
+function paintFxPic(pic) {
+  // its face, or the ransom note's, still being read from their files: drawn now in what stands in, and again once read
+  const faces = pic.faced ? [] : [...new Set([pic.of.font, ...(pic.of.fx === "ransom" ? ransomPending() : [])].filter((f) => f && !FXPICS.read.has(f)))]
+    .map((f) => { const job = ensureFont(f); return job && job.then(() => FXPICS.read.add(f)); }).filter(Boolean);
+  if (faces.length) fxAgain(pic, Promise.all(faces).then(() => { pic.faced = true; }));
+  else pic.faced = true;
+  const main = mainPhoto(), layers = [S.cover.layers[0], main && recordOf(main) ? main : null, pic.of].filter(Boolean);
+  try { drawCover(pic.cv, { profile: S.profile, catIndex: catIndex(), size: FX_CARD, pixelW: FX_CARD.w, cover: { ...S.cover, layers }, photos: S.photos, only: layers.length - 1 }); }
+  catch (e) { console.error(e); }   // a lettering failing leaves the card blank, and the others
+  finally { useLook(); }
+  pic.done = pic.faced && !outlinesPending();
+  if (pic.faced && !pic.done) fxAgain(pic, outlinesSettled());   // drawn again with the outlines it asked for
+  const d = pic.cv.getContext("2d").getImageData(0, 0, pic.cv.width, pic.cv.height).data;
+  let sum = 0, a = 0;
+  for (let i = 0; i < d.length; i += 16) { sum += d[i + 3] * (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]); a += d[i + 3]; }   // every fourth pixel, by how much of it is painted
+  pic.light = a > 0 && sum / a < 96;
+}
+/** Copies picture `pic` onto the cards waiting for it, each on a light ground when its letter is dark. */
+function showFxPic(pic) {
+  for (const [c, b] of pic.shows) {
+    const g = c.getContext("2d");
+    g.clearRect(0, 0, c.width, c.height); g.drawImage(pic.cv, 0, 0, c.width, c.height);
+    b.classList.toggle("light", pic.light);
+  }
+  if (pic.done) pic.shows = [];
+}
+/** An effect's card under the pointer: the canvas shows layer L in it a moment later; none (or the one it has): as it is. */
+function hoverFx(L, id) {
+  const cur = EFFECTS[L.fx] ? L.fx : "auto";
+  if (id === "ransom") ensureFonts([{ fx: id }]);   // the ransom note's faces, read for the canvas too (they draw it again as they come)
+  previewSoon("fx", id && id !== cur ? { id: L.id, fx: id, seed: EFFECTS[id].seeded ? fxSeedOf(L) : 0 } : null, () => S.mode === "edit" && layer(L.id) === L);
+}
+/** An effect's card clicked: layer L has it, one step of undo. */
+function pickFx(L, id) {
+  endPreview("fx");
+  if (id === (EFFECTS[L.fx] ? L.fx : "auto")) return;
+  clearTimeout(timers.hist); commitHistory();   // what was done before is a step of its own
+  if (EFFECTS[id].seeded && !L.fxSeed) L.fxSeed = fxSeedOf(L);   // a lettering dealt by a seed: the layer's own from now on, as previewed (two layers in it are not drawn alike)
+  if (id === "auto") delete L.fx; else L.fx = id;
+  touch({ cover: true, side: true });
 }
 /** Whether the cover's look sets lettering layer L in columns of itself (its `columns`: the woodblock book's Set the title vertically, for the title and the subtitle), as columned() in style.js has it. */
 const columnsByLook = (L) => {
@@ -4570,6 +4748,7 @@ function secOf(L, key) {
 }
 /** Builds the bar for the selected layer, and its popover if one is open (it shuts on another layer), then puts them in place. */
 function renderBar() {
+  endPreview("fx");   // the effect cards drawn anew (here and in the drawer), or gone
   const L = layer(), on = S.mode === "edit" && !!L && !group().length;
   if (!on || FTB.of !== (L && L.id)) FTB.pop = "";
   FTB.of = L ? L.id : "";
@@ -4582,6 +4761,7 @@ function renderBar() {
   const sec = it && it.sec && secOf(L, it.sec), kids = it ? (it.pop ? it.pop() : sec && sec.kids) : null;
   if (!kids) FTB.pop = "";
   POP.replaceChildren(...(kids ? [el("div", { class: "fpop-h" }, it.sec ? t(it.sec) : it.title || it.label, sec && sec.tip && info(sec.tip)), el("div", { class: "psec open" }, el("div", { class: "psec-b" }, kids))] : []));
+  POP.classList.toggle("wide", !!kids && it.sec === "props.sec.effect");   // the effects' cards three to a row
   placeBar();
 }
 /** Where layer id is drawn on the canvas, in #center's pixels: {cx, cy, hw, hh, r} (its centre, half sizes, turn), or null when it is not drawn here. */
@@ -4593,6 +4773,7 @@ function onScreen(id) {
 }
 /** Puts the bar over the selected layer and its popover under the bar; hides them while they would be in the way. */
 function placeBar() {
+  if (PREVIEW.fx && !BAR.hidden) return;   // an effect previewed from its card: the bar and its popover stay, or the card would move from under the pointer
   const L = layer(), box = S.mode === "edit" && L && BAR.childElementCount && !V3.on && !FTB.drag && !S.brushWin && onScreen(L.id);
   BAR.hidden = !box; POP.hidden = !box || !POP.childElementCount;
   if (!box) return;
@@ -4605,9 +4786,11 @@ function placeBar() {
   const x = Math.max(6, Math.min(box.cx - bw / 2, wide - bw - 6));
   BAR.style.left = x + "px"; BAR.style.top = y + "px";
   if (POP.hidden) return;
+  POP.style.maxHeight = "";
   const b = BAR.querySelector(`button[data-key="${CSS.escape(FTB.pop)}"]`), pw = POP.offsetWidth, ph = POP.offsetHeight;
-  const px = Math.max(6, Math.min(x + (b ? b.offsetLeft : 0), wide - pw - 6)), under = y + bh + 8;
-  POP.style.left = px + "px"; POP.style.top = (under + ph <= bottom - 6 || y - ph - 8 < top ? under : y - ph - 8) + "px";
+  const px = Math.max(6, Math.min(x + (b ? b.offsetLeft : 0), wide - pw - 6)), under = y + bh + 8, below = under + ph <= bottom - 6 || y - ph - 8 < top;
+  POP.style.left = px + "px"; POP.style.top = (below ? under : y - ph - 8) + "px";
+  if (below && under + ph > $("center").clientHeight - 6) POP.style.maxHeight = Math.max(140, $("center").clientHeight - 6 - under) + "px";   // under, kept in the window (a tall one, the effects' cards, scrolls)
 }
 /** Frames layer id on the canvas while its row in the list is under the pointer. */
 function hoverShow(id) {
@@ -5549,7 +5732,7 @@ const useLook = () => setLook(S.profile.style.look, S.profile.style.lookParams[S
 const inkOn = (hex) => { const [r, g, b] = hexToRgb(hex); return 0.2126 * r + 0.7152 * g + 0.0722 * b > 150 ? "#15151c" : "#ffffff"; };
 function renderPanel() {
   if (!S.cover) return;
-  if (PREVIEW.look || PREVIEW.timer) { clearTimeout(PREVIEW.timer); PREVIEW.timer = 0; if (PREVIEW.look) { PREVIEW.look = null; previewTag(); queueDraw(); } }
+  endPreview("look");   // its cards drawn anew
   useLook();
   const panel = $(S.mode === "setup" ? "setpanel" : "panel"), y = panel.scrollTop;
   document.documentElement.style.setProperty("--acc", cat().color);
