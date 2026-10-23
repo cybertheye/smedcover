@@ -507,7 +507,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli", "gilded"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid", "glass"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
@@ -665,7 +665,7 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
 
 test("the poster looks: many settings each, their own grounds, flat layouts (all but the collage, on the slanted ones), and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
-  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland"]) {
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet"]) {
     const L = LOOKS[id];
     assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
     assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
@@ -694,7 +694,7 @@ test("the poster looks: many settings each, their own grounds, flat layouts (all
 
 test("a look's figure drawn from a graphic: each such look names its slider, and a profile keeps the graphic put in its place", () => {
   const arts = LOOK_IDS.filter((id) => LOOKS[id].art);
-  assert.deepEqual(arts.sort(), ["avant", "chrome", "cinema", "citypop", "construct", "cyano", "deco", "dots", "glass", "jelly", "monofilm", "negative", "neon", "netart", "rave", "spectrum", "toon", "velvet", "verse", "yellow"]);
+  assert.deepEqual(arts.sort(), ["avant", "chrome", "cinema", "citypop", "construct", "cyano", "deco", "dots", "facet", "glass", "jelly", "monofilm", "negative", "neon", "netart", "rave", "spectrum", "toon", "velvet", "verse", "yellow"]);
   for (const id of arts) { const d = LOOKS[id].params.find((q) => q.key === LOOKS[id].art); assert.ok(d && !d.text && !d.toggle && !d.needsPhoto, `${id}: the picker sits under a slider`); }
   const p = normalizeProfile({ style: { lookArt: { jelly: { kind: "sticker", id: "star" }, citypop: { kind: "user", id: "u9", extra: 1 }, deco: { kind: "bogus", id: "x" }, cel: { kind: "graphic", id: "gear" }, nope: { kind: "graphic", id: "gear" }, toon: { kind: "graphic" } } } });
   assert.deepEqual(p.style.lookArt, { jelly: { kind: "sticker", id: "star" }, citypop: { kind: "user", id: "u9" } });   // only looks with a figure, only real references
@@ -955,6 +955,125 @@ test("the silent wasteland: a dusk or a snowfield with one hot accent, a scene t
   }
   setLook("cel");
 });
+
+test("the origami noir: a picture cut into facets that cover it, each the mean of what it covers, the same for the same picture; graded into a teal night, amber and a strong red kept; the neon in the channel's hue; a fog on the light ground, the near towers dark against it; towers folded of a lit plane and a shaded one, parting as they near; a refined cut keeps a small dark feature; a cut-out's facets whole, its mask its edge; a warm highlight warm, lips red; the neon's word cut at a word, its letters whole, side by side or stacked, placed clear of the words, down a tower where the room is narrow, or not at all; what it keeps let go as it is left", async () => {
+  const L = LOOKS.facet, { fcDelaunay, fcFacets, fcGrade, fcRim, fcTones, fcLetters, fcWord, fcSignAt, fcFreeAll } = (await import("../ui/js/style.js")).__test;
+  assert.ok(L.params.length >= 12 && L.seeded && !L.oneTheme && L.art === "figure" && typeof L.layout === "function", `${L.params.length} settings, seeded, both grounds, a figure, flat layouts of its own`);
+  assert.ok(Object.keys(L.scene).length >= 4 && L.elementFx.length >= 4, "scene objects and effects");
+  // the triangulation: points in general position make 2n − 2 − h triangles (h on the hull), and none lies inside another triangle's circle
+  let s = 9;
+  const R = () => { s = (s + 0x6d2b79f5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };   // mulberry32
+  const P = Float64Array.from({ length: 400 }, () => R() * 100), T = fcDelaunay(P), n = 200;
+  const pts = [...Array(n).keys()].map((i) => [P[2 * i], P[2 * i + 1]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]), cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), lo = [], up = [];
+  for (const p of pts) { while (lo.length >= 2 && cross(lo.at(-2), lo.at(-1), p) <= 0) lo.pop(); lo.push(p); }
+  for (const p of pts.reverse()) { while (up.length >= 2 && cross(up.at(-2), up.at(-1), p) <= 0) up.pop(); up.push(p); }
+  assert.equal(T.length / 3, 2 * n - 2 - (lo.length + up.length - 2));
+  let bad = 0;
+  for (let t = 0; t < T.length; t += 3) {
+    const [a, b, c] = [T[t], T[t + 1], T[t + 2]].map((i) => [P[2 * i], P[2 * i + 1]]), turn = cross(a, b, c);
+    for (let p = 0; p < n; p++) {
+      const [px, py] = [P[2 * p], P[2 * p + 1]], [dx, dy, ex, ey, fx, fy] = [a[0] - px, a[1] - py, b[0] - px, b[1] - py, c[0] - px, c[1] - py];
+      const det = (dx * dx + dy * dy) * (ex * fy - ey * fx) - (ex * ex + ey * ey) * (dx * fy - dy * fx) + (fx * fx + fy * fy) * (dx * ey - dy * ex);
+      if ((turn > 0 ? det : -det) > 1e-6) bad++;
+    }
+  }
+  assert.equal(bad, 0, "Delaunay: no point inside another triangle's circle");
+  assert.equal(fcDelaunay(Float64Array.from([0, 0, 1, 1, 2, 2])).length, 0, "points all on one line make none");
+  // a picture: its left half a dark red, its right a pale grey, a black disc on that
+  const w = 160, h = 100, d = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) d.set([...((x - 118) ** 2 + (y - 50) ** 2 < 400 ? [10, 10, 10] : x < 80 ? [150, 20, 24] : [200, 204, 210]), 255], (y * w + x) * 4);
+  const M = fcFacets(d, w, h, 0.3), again = fcFacets(d, w, h, 0.3);
+  assert.deepEqual([[...again.tris], [...again.pts], [...again.cols]], [[...M.tris], [...M.pts], [...M.cols]], "the same picture, the same facets");
+  assert.ok(fcFacets(d, w, h, 1).tris.length < M.tris.length, "coarser facets are fewer");
+  const at = (i) => [M.pts[2 * i] * w, M.pts[2 * i + 1] * h], holds = (t, x, y) => { const [a, b, c] = [0, 1, 2].map((v) => at(M.tris[3 * t + v])), s1 = cross(a, b, [x, y]), s2 = cross(b, c, [x, y]), s3 = cross(c, a, [x, y]); return (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0); };
+  for (let y = 0.5; y < h; y += 7) for (let x = 0.5; x < w; x += 7) assert.ok([...Array(M.tris.length / 3).keys()].some((t) => holds(t, x, y)), `the facets cover the picture: ${x}, ${y}`);
+  let red = 0;
+  for (let t = 0; t < M.tris.length / 3; t++) {
+    const xs = [0, 1, 2].map((v) => at(M.tris[3 * t + v])[0]);
+    if (Math.max(...xs) < 78 && Math.min(...xs) > 0) { red++; assert.ok(Math.abs(M.cols[4 * t] - 150) < 3 && Math.abs(M.cols[4 * t + 1] - 20) < 3 && M.cols[4 * t + 3] === 255, "a facet within the red is the red"); }
+  }
+  assert.ok(red > 4, "facets within the red");
+  assert.ok([...Array(M.pts.length / 2).keys()].filter((i) => Math.abs(at(i)[0] - 80) < 1.5 && at(i)[1] > 0 && at(i)[1] < h).length >= 4, "corners set along the edge between red and grey, so the facets follow it");
+  // a small dark feature (an eye) on a flat skin: a refined cut gives it facets of its own, as dark as it is
+  const fw = 240, fh = 160, f = new Uint8ClampedArray(fw * fh * 4);
+  for (let y = 0; y < fh; y++) for (let x = 0; x < fw; x++) f.set([...(((x - 120) / 6) ** 2 + ((y - 80) / 3.5) ** 2 < 1 ? [20, 16, 14] : [214, 160, 128]), 255], (y * fw + x) * 4);
+  const dark = (Q) => [...Array(Q.tris.length / 3).keys()].some((t) => Q.cols[4 * t] < 90);
+  assert.ok(dark(fcFacets(f, fw, fh, 0.6, undefined, true)), "a refined cut keeps the eye dark");
+  // a cut-out's pixels (a disc, its edge soft, nothing round it): every facet it reaches whole, the rest left out, so nothing of it is see-through and its mask alone makes its edge
+  const cw = 120, chh = 90, cd = new Uint8ClampedArray(cw * chh * 4);
+  for (let y = 0; y < chh; y++) for (let x = 0; x < cw; x++) { const r = Math.hypot(x - 60, y - 45); if (r < 31) cd.set([200, 60, 50, Math.round(255 * Math.min(1, 31 - r))], (y * cw + x) * 4); }
+  const alphas = (Q) => [...Array(Q.tris.length / 3).keys()].map((t) => Q.cols[4 * t + 3]), C = fcFacets(cd, cw, chh, 0.3, undefined, false, true);
+  assert.ok(alphas(fcFacets(cd, cw, chh, 0.3)).some((a) => a > 0 && a < 255), "as a plain picture its edge's facets are part see-through");
+  assert.ok(alphas(C).every((a) => a === 0 || a === 255) && alphas(C).includes(255) && alphas(C).includes(0) && C.whole, "as a cut-out every facet whole or left out");
+  // the grade
+  const g = (c, lamp = 0, fold = 0, lv) => fcGrade(c[0], c[1], c[2], lamp, fold, [0, 0, 0], lv).map(Math.round), lumOf = (c) => (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255;
+  const [black, grey, skin, scarlet, white] = [[20, 20, 20], [128, 128, 128], [226, 170, 140], [200, 30, 36], [250, 250, 250]].map((c) => g(c));
+  assert.ok(Math.max(...black) < 14, `the blacks crushed: ${black}`);
+  assert.ok(grey[1] > grey[0] + 10 && grey[2] > grey[0] + 10, `a grey into the teal: ${grey}`);
+  assert.ok(skin[0] > skin[2] * 1.5, `skin kept warm: ${skin}`);
+  assert.ok(scarlet[0] > scarlet[1] * 3 && scarlet[0] > 120, `a strong red kept red and strong: ${scarlet}`);
+  assert.ok(white[0] > 180 && Math.min(...white) < 250, `the lights pale, short of white: ${white}`);
+  const olive = g([128, 128, 128], 1);
+  assert.ok(olive[0] >= olive[2], `by lamplight a grey goes olive: ${olive}`);
+  assert.ok(lumOf(g([128, 128, 128], 0, 0.05)) > lumOf(grey), "a facet turned to the light is lighter");
+  assert.ok(lumOf(g([60, 60, 60], 0, 0, [0, 90])) > lumOf(g([60, 60, 60])) + 0.1, "a dark photo is lifted over its own range");
+  assert.ok(lumOf(g([80, 80, 80])) > lumOf(g([45, 45, 45])) + 0.02, "dark hair and cloth keep their planes apart");
+  const [hl, wh, lips] = [[255, 246, 236], [246, 246, 246], [196, 84, 78]].map((c) => g(c));
+  assert.ok(hl[0] - hl[2] > wh[0] - wh[2] + 12, `a highlight on skin warm, not a cold pale: ${hl} against ${wh}`);
+  assert.ok(lips[0] > lips[1] * 2, `lips red: ${lips}`);
+  // the neon: the channel's hue, light enough to glow; a grey channel colour gives the sign's red
+  const hue = (c) => Math.atan2(Math.sqrt(3) * (c[1] - c[2]), 2 * c[0] - c[1] - c[2]);
+  for (const c of [[214, 28, 42], [6, 214, 160], [255, 183, 3], [40, 60, 200]]) { const r = fcRim(c); assert.ok(Math.abs(hue(r) - hue(c)) < 0.25 && lumOf(r) > 0.25, `${c} -> ${r.map(Math.round)}`); }
+  assert.deepEqual(fcRim([128, 128, 128]), [236, 44, 56]);
+  // the grounds: a teal night, a morning of fog
+  setLook("facet", {}, 3, true);
+  const night = parseColour(L.theme({}, [40, 120, 220], lookValues()).field);
+  assert.ok(night[2] > night[0] && night[1] > night[0] && lumOf(night) < 0.12, `a teal night: ${night}`);
+  setLook("facet", {}, 3, false);
+  const fog = parseColour(L.theme({}, [40, 120, 220], lookValues()).field);
+  assert.ok(lumOf(fog) > 0.6, `a morning of fog: ${fog}`);
+  // every slider at either end, the others as they are, paints and returns (a mist band over neon letters that are not there once never did)
+  const env = { w: 1920, h: 1080, C: [40, 120, 220], photo: null, cat: { code: "AB", name: "x" }, o: { profile: { brand: { name: "B" }, categories: [{}] }, catIndex: 0, size: { w: 1920, h: 1080 } }, G: L.layout("stack", 1920, 1080) };
+  const ctx0 = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
+  for (const onDark of [true, false]) for (const q of L.params.filter((d) => !d.text)) for (const v of [q.min, q.max]) { setLook("facet", { [q.key]: v }, 3, onDark); assert.equal(L.background(ctx0, env, { grid: true }, lookValues()), true, `${q.key} = ${v}`); }
+  // the towers: far off their planes close in tone, lost in the haze; near, darker and parting, the lit one above the shaded; on the fog the near ones dark against it
+  for (const onDark of [true, false]) {
+    setLook("facet", {}, 3, onDark);
+    const [far, near] = [fcTones(0.1, 0), fcTones(0.8, 0)], part = (t) => lumOf(t.lit) - lumOf(t.shade);
+    assert.ok(lumOf(near.body) < lumOf(far.body) && part(far) > 0 && part(near) > part(far) * 1.5, `${onDark ? "night" : "fog"}: ${near.body} ${far.body}`);
+    if (!onDark) assert.ok(lumOf(near.body) < 0.3 && lumOf(far.body) > 0.6, "on the fog the near towers dark, the far ones lost in it");
+  }
+  // the neon's letters: side by side with a gap of their own, the word's middle where it is put, a space a wider gap, eight at most; an emoji with its joiners one, a CJK character a solid tube
+  const N = fcLetters(ctx0, 500, 100, "AB");
+  assert.deepEqual([N.chars, N.xs[0] + N.total / 2, N.xs[1] - (N.xs[0] + N.ws[0])], [["A", "B"], 500, 12]);
+  assert.deepEqual(fcLetters(ctx0, 0, 100, "A B").chars, ["A", "", "B"]);
+  assert.equal(fcLetters(ctx0, 0, 100, "ABCDEFGHIJ").chars.length, 8);
+  const E = fcLetters(ctx0, 0, 100, "👨‍👩‍👧東A");
+  assert.deepEqual([E.chars.length, E.solid], [3, [true, true, false]]);
+  const V = fcLetters(ctx0, 300, 100, "AB", true);   // stacked: each centred, the first above the second, the last one's foot the word's
+  assert.deepEqual([V.xs.map((x, i) => x + V.ws[i] / 2), V.ys[1], V.ys[0] < V.ys[1] - 100, V.T > 200], [[300, 300], 0, true, true]);
+  // the neon's word: in capitals, whole words while they fit in eight, else the first word's first eight
+  assert.deepEqual(["Pixel Harbor", "noir", "Tokyo 2", "NOIRCITYNIGHTS", "  "].map(fcWord), ["PIXEL", "NOIR", "TOKYO 2", "NOIRCITY", ""]);
+  // the neon's place: clear of the words (and the tag, the graphic), its foot above the street; with no room, none
+  const Fd = { x0: 0, y0: 0, x1: 1920, y1: 1080 }, words = { x: 80, y: 120, w: 900, h: 700 }, S0 = fcSignAt(ctx0, Fd, 1000, 300, "SHOT", [words]);
+  assert.ok(S0 && !overlapsBox(words, { x: S0.x - S0.W / 2, y: S0.y - S0.H, w: S0.W, h: S0.H }) && S0.y < 1000, `clear of the words: ${JSON.stringify(S0)}`);
+  assert.equal(fcSignAt(ctx0, Fd, 1000, 300, "SHOT", [{ x: 0, y: 0, w: 1920, h: 1080 }]), null, "no room: no sign");
+  const narrow = { x: 0, y: 0, w: 1780, h: 1080 }, D = fcSignAt(ctx0, Fd, 1000, 300, "SHOT", [narrow]);   // a narrow column beside the words: stacked down a tower there
+  assert.ok(D && D.down && !overlapsBox(narrow, D.box) && D.box.x + D.box.w <= 1920 && D.box.h > D.box.w * 3, `down a tower: ${JSON.stringify(D)}`);
+  // what it keeps goes as another look is chosen
+  assert.equal(L.leave, fcFreeAll);
+  // the lettering, where there is no canvas to work on: the plain letters in paper (ink on the fog), the highlighted ones in the neon
+  for (const onDark of [true, false]) {
+    const fills = [], ctx = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (str) => ({ width: [...str].length * 40 }) : () => {}), set: (t, k, v) => { if (k === "fillStyle") fills.push(v); t[k] = v; return true; } });
+    setLook("facet", {}, 3, onDark);
+    L.runs(ctx, (fn) => { fn({ t: "Ab", hi: false }, 0); fn({ t: "cd", hi: true }, 80); }, { fs: 100, strokeAmt: 1, shadowAmt: 1, C: [40, 120, 220], unit: 1 }, lookValues());
+    const [plain, hi] = [fills[0], fills.at(-1)].map((v) => parseColour(v));
+    assert.ok(onDark ? lumOf(plain) > 0.8 : lumOf(plain) < 0.3, `the letters ${onDark ? "pale on the night" : "dark on the fog"}: ${plain}`);
+    assert.deepEqual(hi.slice(0, 3).map(Math.round), fcRim([40, 120, 220]).map((v) => v | 0), "the highlighted words in the neon");
+  }
+  setLook("cel");
+});
+const overlapsBox = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 test("look effects on a layer: kept clean, carried by the layer whatever the look, painted stage by stage", () => {
   const [tx] = normalizeLayers([{ type: "text", text: "x", lookFx: { "riso.dots": 0.5, "riso.dots:pitch": 0, "chrome.drips": 0, "chrome.drips:x": 1, "netart.sort": 7, "bad key": 1, "riso.shift": "0.3", "riso.ghost": null } }]).filter((l) => l.type === "text");

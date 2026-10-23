@@ -128,11 +128,16 @@ export function drawPhoto(ctx, im, w, h, adj, blur, dim, hiRes, grey = 0) {
 }
 /**
  * Draws `im` into the rectangle x, y, w × h, blurred by `blur` px and with `grey` of its colour taken out.
- * treat: { key, fn, quick? }, the look's own work on the photo (see treatedOf); in a draft (a slider being
+ * treat: the look's own work on the photo, { key, fn, quick? } (see treatedOf); in a draft (a slider being
  * dragged, its blur say) that would have the work done afresh each frame, its `quick` one ({ key, fn }), if
- * it has one, until the drag is let go.
+ * it has one, until the drag is let go. Or { key, fn(RGBA, w, h, cut), draw(ctx, model, x, y, w, h), cap, mask? }, a
+ * look drawing the photo itself from what fn worked out of its pixels (see modelOf): the facets of the origami
+ * noir, drawn as shapes, sharp at any size; with `mask` (a cut-out's), worked out of what it keeps alone; with
+ * `quickCap`, in a draft that needs a model not worked out yet (a slider that changes it being dragged), on a
+ * copy that size, until the drag is let go.
  */
 export function drawPhotoAt(ctx, im, x, y, iw, ih, blur, hiRes, grey = 0, treat = null) {
+  if (treat && treat.draw) { treat.draw(ctx, modelOf(blur > 0 ? blurred(im, blur, false) : im, im, blur, treat.key, treat.cap || 800, treat.fn, treat.mask, draft ? treat.quickCap : 0), x, y, iw, ih); return; }
   let src = blur > 0 ? blurred(im, blur, hiRes) : im;
   if (treat && treat.quick && draft && !holds(im, hiRes, `${blur}|${hiRes}|${treat.key}`)) treat = treat.quick;
   if (treat) src = treatedOf(src, im, `${blur}|${hiRes}|${treat.key}`, hiRes, treat.fn);
@@ -173,6 +178,44 @@ export function dropCards() {
   if (!carded.length) return;
   for (const cv of carded) cv.width = cv.height = 0;
   carded = []; cards = new WeakMap();
+}
+const models = new WeakMap(), MODELS_KEEP = 3;   // per picture: the last few copies of its pixels read (MODELS_KEEP), each with the last few things a look worked out of them, newest first
+/**
+ * What fn(RGBA data, w, h, cut) makes of the pixels of `src` (the photo, or its blurred copy) — the shapes a look
+ * draws the photo as — worked out on a copy `cap` px on its longer side, cut to `mask` (a cut-out's: what it
+ * keeps alone; `cut` then true, the mask clipping what is drawn after), and kept: the last few copies of a picture read (a photo at two blurs, a background and its
+ * cut-out, each its own), and the last few shapes worked out of each (a new `key`, a look's slider, works out only
+ * the shapes again). With `quick`, shapes not worked out yet are worked out on a copy that size instead. One for
+ * previews and exports alike (the preview's blurred copy is the one read), so an export draws the very shapes the
+ * preview showed, only sharper.
+ */
+function modelOf(src, im, blur, key, cap, fn, mask = null, quick = 0) {
+  const list = models.get(im) || [];
+  models.set(im, list);
+  if (quick) { const e0 = list.find((e) => e.blur === blur && e.cap === cap && e.mask === mask); if (!e0 || !e0.made.some((q) => q.key === key)) cap = quick; }   // not worked out yet: quickly, on the smaller copy
+  let at = list.findIndex((e) => e.blur === blur && e.cap === cap && e.mask === mask), e = list[at];
+  if (at > 0) { list.splice(at, 1); list.unshift(e); }   // the newest again
+  if (at < 0) {
+    const sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height, f = Math.min(1, cap / Math.max(sw, sh));
+    const w = Math.max(1, Math.round(sw * f)), h = Math.max(1, Math.round(sh * f)), c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    x.imageSmoothingQuality = "high";
+    x.drawImage(src, 0, 0, w, h);
+    if (mask) { x.globalCompositeOperation = "destination-in"; x.drawImage(mask, 0, 0, w, h); }
+    e = { blur, cap, mask, px: x.getImageData(0, 0, w, h).data, w, h, made: [] };
+    list.unshift(e);
+    if (list.length > MODELS_KEEP) list.pop();
+  }
+  let m = e.made.find((q) => q.key === key);
+  if (!m) {
+    const t0 = performance.now();
+    m = { key, model: fn(e.px, e.w, e.h, !!mask) };
+    e.made.unshift(m);
+    if (e.made.length > MODELS_KEEP) e.made.pop();
+    pxTime("photo worked by the look", t0);
+  } else if (e.made[0] !== m) { e.made.splice(e.made.indexOf(m), 1); e.made.unshift(m); }
+  return m.model;
 }
 const treated = new WeakMap(), TREATED_KEEP = 3;   // the photo (or its blurred copy) worked on by a look, per picture: the last few (TREATED_KEEP) for previews, as many for export, newest first
 /** The copies of `im` worked on by a look (see treatedOf), for previews or for export: [{ cv, key }], newest first. */
