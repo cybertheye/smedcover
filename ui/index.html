@@ -65,6 +65,36 @@
   .seg.big .btn{padding:8px 20px;font-size:15px}
   header select{background:var(--field);border:1px solid var(--line);padding:6px 8px;max-width:180px}
 
+  /* a sheet's foot: what is seldom wanted, last */
+  .sheet-foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--line);display:flex;flex-direction:column;align-items:flex-start;gap:12px}
+  .linkbtn{border:0;background:none;color:#ffd166;font-size:13px;padding:0;cursor:pointer;text-align:left}
+  .linkbtn:where(:hover:not(:disabled)){color:#ffe29a;text-decoration:underline;text-underline-offset:3px}   /* :where — the properties' own links keep their colour */
+  .linkbtn:disabled{opacity:.35;cursor:default}
+  .togrow{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border-radius:14px;background:rgba(0,0,0,.2);border:1px solid var(--line)}
+  .tog{width:40px;height:24px;border-radius:12px;background:rgba(255,255,255,.18);position:relative;border:0;cursor:pointer;padding:0;flex:none}
+  .tog::after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:9px;background:#fff;transition:left .15s}
+  .tog.on{background:#3ddc97}
+  .tog.on::after{left:19px}
+  .tog:disabled{opacity:.4;cursor:default}
+  /* Layout → the layout presets, each a card */
+  .presets{display:grid;gap:8px}
+  .preset{display:grid;gap:8px;padding:10px;border-radius:14px;background:rgba(0,0,0,.2);border:1px solid var(--line)}
+  .preset input{padding:7px 10px;font-weight:700}
+  .preset .acts{justify-content:flex-start}
+  /* Assets → ways to add, four to a row; then shelves, each with its name, how many, and "All" */
+  .quicks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+  .quick{height:68px;border-radius:14px;border:1px solid var(--line2);background:rgba(255,255,255,.07);color:var(--text);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:12px;cursor:pointer;padding:0}
+  .quick:hover{background:rgba(255,255,255,.13)}
+  .quick.on{border-color:color-mix(in srgb,var(--acc) 70%,transparent);background:color-mix(in srgb,var(--acc) 14%,transparent)}
+  .quick .sw-chip{width:18px;height:18px;border-radius:5px;box-shadow:0 0 0 1px rgba(255,255,255,.3)}
+  .shelf{display:grid;gap:10px}
+  .shelf-h{display:flex;align-items:baseline;gap:12px}
+  .shelf-h .cap .n{color:var(--text3)}
+  .shelf-h .linkbtn:first-of-type{margin-left:auto}
+  .shelf-groups{display:grid;gap:12px}
+  .tiles.shapes{grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
+  .tiles.shapes .tile{border-radius:9px}
+
   /* the ⋯ menu, under its button */
   #menu{position:fixed;z-index:42;width:320px;padding:8px;border-radius:18px;display:flex;flex-direction:column;gap:2px;background-color:rgba(28,30,40,.62)}
   html.solid #menu{background-color:var(--solid2)}
@@ -78,10 +108,6 @@
   #menu .mi.danger{color:#ff9a8a}
   #menu .sep{height:1px;background:var(--line);margin:4px 8px}
   #menu .row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;padding:6px 8px 4px 12px;font-size:13px;color:var(--text2)}
-  #menu .tog{width:40px;height:24px;border-radius:12px;background:rgba(255,255,255,.18);position:relative;border:0;cursor:pointer;padding:0;flex:none}
-  #menu .tog::after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:9px;background:#fff;transition:left .15s}
-  #menu .tog.on{background:#3ddc97}
-  #menu .tog.on::after{left:19px}
 
   /* body: the dock | the open sheet | the canvas | the selected layer's properties. Each scrolls on its own;
      the canvas always stays in view. */
@@ -498,17 +524,12 @@
   .ls-block{display:grid;gap:8px;font-size:13px}.ls-block .layown{margin:0}
   @media(max-width:900px){.ls-body{grid-template-columns:1fr}}
   #modal .dlg.wide{width:min(880px,94vw)}
-  .parts{display:grid;gap:3px}
-  .part{display:grid;grid-template-columns:12px 16px auto 1fr;align-items:center;gap:9px;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:7px 10px 7px 6px;margin:0;cursor:grab;user-select:none}
-  .part:hover{border-color:var(--line2);background:rgba(255,255,255,.08)}
-  .part .grip{opacity:.4;font-size:13px;line-height:1}
-  .part input{width:16px;height:16px;margin:0;accent-color:var(--acc);cursor:pointer}
-  .part b{font-size:13px;white-space:nowrap}
-  .part .d{font-size:12px;opacity:.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .part.off b{opacity:.4}
-  .part.dragging{opacity:.4}
-  .part.over-up{box-shadow:0 -3px 0 var(--acc)}
-  .part.over-down{box-shadow:0 3px 0 var(--acc)}
+  .parts{display:flex;flex-wrap:wrap;gap:8px}
+  .part{height:34px;display:flex;align-items:center;gap:6px;border:1px solid var(--line2);border-radius:10px;background:rgba(255,255,255,.08);color:var(--text);padding:0 9px;font-size:13px;cursor:pointer;min-width:0}
+  .part>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .part .eye{display:inline-grid;flex:none}
+  .part:hover{background:rgba(255,255,255,.14)}
+  .part.off{background:transparent;color:var(--text3);border-style:dashed}
   .logo-row{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.22);padding:4px 6px 4px 4px}
   .logo-row>span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
   .logo-row .lthumb{width:44px;height:44px;flex:none;display:grid;place-items:center;background:repeating-conic-gradient(#2a2a3a 0 25%,#1b1b2a 0 50%) 0 0/12px 12px}

@@ -838,70 +838,48 @@ const px = (v) => String(Math.round(v)), times = (v) => v.toFixed(2) + "×", pct
 // ---------- left panel, Edit mode
 /** A sheet's heading: what it is for, in a word, and a line under it. */
 const sheetHead = (title, sub) => el("div", { class: "sheet-h" }, el("b", {}, title), sub && el("div", { class: "hint", style: "margin:0" }, sub));
-/** Content: the channel, and the cover's words — its title, subtitle and tag. */
+/** A field's caption with its longer explanation behind an ⓘ beside it. */
+const capInfo = (key, tip) => el("div", { class: "lhead", style: "justify-content:flex-start;gap:6px" }, cap(key), info(tip));
+/** Content: the channel, and the cover's words — its title, subtitle and tag; copying another channel's at its foot. */
 function contentSheet() {
   const c = S.cover;
   return [
     sheetHead(t("sheet.content"), t("sheet.contentSub")),
-    el("div", {}, cap("cover.category"), el("div", { class: "chips" }, S.profile.categories.map((k) =>
-      el("button", { class: k.id === c.catId ? "on" : "", style: `--c:${k.color}`, onclick: () => switchChannel(k.id) }, k.name || k.code || "—"))),
-      el("div", { class: "hint" }, t("cover.channelHint")),
-      el("button", { class: "btn", style: "margin-top:8px", onclick: copyDialog }, t("copy.open"))),
+    el("div", {}, capInfo("cover.category", t("cover.channelHint")), el("div", { class: "chips" }, S.profile.categories.map((k) =>
+      el("button", { class: k.id === c.catId ? "on" : "", style: `--c:${k.color}`, onclick: () => switchChannel(k.id) }, k.name || k.code || "—")))),
     el("div", {}, cap("cover.title"),
       el("textarea", { value: c.title, spellcheck: false, oninput: (e) => { c.title = e.target.value; touch({ cover: true }); if (S.layerId === "title") later("side", 700, renderSide); } }),
       el("div", { class: "hint" }, t("cover.titleHint"))),
-    el("div", {}, cap("cover.subtitle"), textInput(c.subtitle, (v) => { c.subtitle = v; touch({ cover: true }); if (S.layerId === "subtitle") later("side", 700, renderSide); }, { placeholder: t("cover.subtitlePh") }),
-      el("div", { class: "hint" }, t("cover.subtitleHint"))),
+    el("div", {}, capInfo("cover.subtitle", t("cover.subtitleHint")), textInput(c.subtitle, (v) => { c.subtitle = v; touch({ cover: true }); if (S.layerId === "subtitle") later("side", 700, renderSide); }, { placeholder: t("cover.subtitlePh") })),
     el("div", {}, cap("cover.tag"), textInput(c.tag, (v) => { c.tag = v; touch({ cover: true }); }, { placeholder: t("cover.tagPh") })),
+    el("div", { class: "sheet-foot" }, el("button", { class: "linkbtn", onclick: copyDialog }, t("copy.open"))),
   ];
 }
 /**
- * Cover → Layout parts: a row for each of the template's layers but the ground, top first as in the layer
- * list. One unticked is left out of this cover (`off`, see layers.js): hidden, gone from the layer list;
- * ticked again, it is back as it was. A row dragged onto another takes its place in the stack: on this
- * cover (the layer list shows it), and in the profile's design, so it is the default order from then on
- * (new channels' covers, Clear).
+ * Layout → which parts show: one switch for each of the template's layers but the ground, top first as in the layer
+ * list. One switched off is left out of this cover (`off`, see layers.js): hidden, gone from the layer list; on again,
+ * it is back as it was. The order they are stacked in is the layer list's (Layers).
  */
-let partDrag = null;   // the type of the row being dragged
 function partsBox() {
   const list = S.cover.layers.filter((l) => isLayout(l) && l.type !== "bg").reverse();   // top first, as in the layer list
   const flip = (L) => {
     if (L.off) { delete L.off; L.visible = true; } else { L.off = true; L.visible = false; if (S.layerId === L.id) S.layerId = "bg"; }
     touch({ cover: true, side: true, panel: true });
   };
-  const place = (type, onto) => {
-    const types = list.map((l) => l.type), from = types.indexOf(type), to = types.indexOf(onto);
-    if (from < 0 || to < 0 || from === to) return;
-    types.splice(to, 0, types.splice(from, 1)[0]);
-    const order = ["bg", ...types.reverse()];
-    orderLayout(S.cover.layers, order); orderLayout(S.profile.design.layers, order);
-    touch({ cover: true, profile: true, side: true, panel: true });
-  };
-  const row = (L, i) => el("label", { class: "part" + (L.off ? " off" : ""), draggable: true, title: t(L.off ? "cover.partOff" : "cover.partOn"),
-      ondragstart: (e) => { partDrag = L.type; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("application/x-smed-part", L.type); e.currentTarget.classList.add("dragging"); },   // not text: dropped in a text field it would type itself there
-      ondragend: (e) => { partDrag = null; e.currentTarget.classList.remove("dragging"); },
-      ondragover: (e) => { if (!partDrag || partDrag === L.type) return; e.preventDefault(); e.currentTarget.classList.add(list.findIndex((x) => x.type === partDrag) < i ? "over-down" : "over-up"); },
-      ondragleave: (e) => e.currentTarget.classList.remove("over-up", "over-down"),
-      ondrop: (e) => { e.preventDefault(); e.stopPropagation(); const type = partDrag; partDrag = null; if (type) place(type, L.type); } },
-    el("span", { class: "grip", "aria-hidden": "true" }, "⠿"),
-    el("input", { type: "checkbox", checked: !L.off, onchange: () => flip(L) }),
-    el("b", {}, layerName(L)), el("span", { class: "d" }, t("cover.part." + L.type)));
-  return el("div", {}, el("div", { class: "lhead" }, cap("cover.parts"), info(t("cover.partsTip"))),
-    el("div", { class: "parts" }, list.map(row)),
-    el("div", { class: "hint" }, t("cover.partsHint")));
+  const chip = (L) => el("button", { class: "part" + (L.off ? " off" : ""), "aria-pressed": String(!L.off), title: `${layerName(L)} · ${t("cover.part." + L.type)}`, onclick: () => flip(L) },
+    el("span", { class: "eye", innerHTML: L.off ? EYE_OFF : EYE_ON }), el("span", {}, layerName(L)));
+  return el("div", {}, capInfo("cover.parts", t("cover.partsTip")), el("div", { class: "parts" }, list.map(chip)), el("div", { class: "hint" }, t("cover.partsHint")));
 }
+const EYE_ON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7c1.8 0 3.4-.5 4.8-1.3"/></svg>';
 /**
- * Cover → Photos: upload a photo or have one made by the image model, then every photo on this
- * channel's cover as a thumbnail, each with its AI repaint. Everything else about a photo is in its
- * layer's properties.
+ * Assets → the photos on this cover: each a thumbnail (a click selects its layer, the × on it deletes it) with its AI
+ * repaint and another picture; nothing when it has none. Everything else about a photo is in its layer's properties.
  */
-function photoBox() {
+function coverPhotos() {
   const here = S.cover.layers.filter((l) => l.type === "photo" && appliesTo(l, cat().id));
   const list = here.filter((l) => !l.of).flatMap((l) => [l, ...here.filter((x) => x.of === l.id)]);   // each photo, then its cut-out
-  return el("div", { class: "box" }, cap("cover.photos"),
-    photoAdders(true),
-    el("div", { class: "hint" }, t("cover.photoHint")),
-    list.map(photoItem));
+  return list.length ? el("div", {}, capInfo("cover.photosHere", t("cover.photoHint")), list.map(photoItem)) : null;
 }
 /**
  * One photo of the cover: its thumbnail (a click selects its layer, the x that shows on it deletes
@@ -929,23 +907,6 @@ function photoItem(L) {
  * AI generation box when it is open. In Add photos an upload goes on the cover; in the Bitmaps pane under it
  * (`fromLibrary` false) only into the library, and AI generation is left to Add photos above it.
  */
-function photoAdders(fromLibrary) {
-  return [
-    el("div", { class: "row" + (fromLibrary ? " row3" : ""), style: "margin-top:0" },   // in Cover: from assets, upload, AI generate — one line
-      fromLibrary && el("button", { class: "btn", title: t("lib.importHint"), onclick: libraryDialog }, t("lib.import")),
-      el("button", { class: "btn", title: fromLibrary ? null : t("lib.uploadTip"), onclick: fromLibrary ? uploadPhotos : stockPhotos }, t("cover.upload")),
-      fromLibrary && el("button", { class: "btn" + (GEN.open ? " on" : ""), onclick: () => { GEN.open = !GEN.open; renderPanel(); } }, t("gen.open"))),
-    fromLibrary && GEN.open && genBox()];
-}
-/** Cover → Add photos → From assets: a picture of the bitmaps, chosen, goes on the cover. */
-function libraryDialog() {
-  const m = $("modal");
-  m.replaceChildren(el("div", { class: "dlg", dataset: { kind: "library" } }, el("h2", {}, t("lib.importTitle")),
-    el("div", { class: "hint", style: "margin:0;font-size:13px;opacity:.8" }, t("lib.importHint")),
-    libraryTiles((pid) => { closeModal(); placePhoto(pid); }, () => { const d = $("modal").querySelector(".dlg"); if (!$("modal").hidden && d && d.dataset.kind === "library") libraryDialog(); }),
-    el("button", { class: "btn wide", onclick: closeModal }, t("exp.cancel"))));
-  m.hidden = false;
-}
 /** Asks for photos and keeps them in the bitmap library only (Assets → Bitmaps). */
 async function stockPhotos() {
   let n = 0;
@@ -1358,25 +1319,52 @@ function shapeTile(shape) {
     onclick: () => { L.shape = shape; L.visible = true; S.layerId = "accent"; touch({ cover: true, panel: true, side: true }); } }, cv);
 }
 /** Assets: two panes — vector assets (made in code or by AI, shared by every profile) and the bitmap library. */
-function assetsTab() {
-  const pane = S.assetPane === "bitmap" ? "bitmap" : "vector", tab = (k) => el("button", { class: pane === k ? "on" : "", onclick: () => { S.assetPane = k; renderPanel(); $("panel").scrollTop = 0; } }, el("span", {}, t("assets.pane." + k)));   // the label dims, not the bars
-  return [el("div", { class: "subtabs" }, tab("vector"), tab("bitmap")), ...(pane === "bitmap" ? bitmapPane() : vectorPane())];
-}
 /** The colour block's edge, one shape for every size and layout (in the Layout sheet). */
-const shapesSection = () => el("div", {}, cap("assets.shapes"), el("div", { class: "tiles" }, ACCENT_SHAPES.map(shapeTile)), el("div", { class: "hint" }, t("assets.shapesHint")));
-/** Assets: the cover's photos, then the libraries (vector assets, bitmaps). */
-const assetsSheet = () => [sheetHead(t("sheet.assets"), t("sheet.assetsSub")), photoBox(), ...assetsTab()];
-/** Layers: the list, kept in layerBox (see renderSide). */
-const layersSheet = () => [layerBox];
-function vectorPane() {
-  const lang = getLang(), mine = [...userAssets.values()];
+const shapesSection = () => el("div", {}, capInfo("assets.shapes", t("assets.shapesHint")), el("div", { class: "tiles shapes" }, ACCENT_SHAPES.map(shapeTile)));
+/** Which shelves of the Assets sheet show all they hold (the others, their first rows). */
+const SHELVES = new Set();
+/**
+ * A shelf of the Assets sheet: its name and how many, then its first two rows of tiles (eight), or all of them once
+ * "All" is clicked. `tiles` gives the tiles: `few` the first eight, else every one (laid out as `all` would).
+ */
+function shelf(key, title, count, tiles, extra = null, tip = "") {
+  const open = SHELVES.has(key), more = count > 8;
+  return el("div", { class: "shelf" },
+    el("div", { class: "shelf-h" }, el("span", { class: "cap", style: "margin:0" }, title, el("span", { class: "n" }, ` · ${count}`)), tip && info(tip), extra,
+      more && el("button", { class: "linkbtn", onclick: () => { if (open) SHELVES.delete(key); else SHELVES.add(key); renderPanel(); } }, t(open ? "shelf.less" : "shelf.all", count))),
+    tiles(!open && more));
+}
+/**
+ * Assets: everything that goes on a cover. Ways to add — text, a colour, a photo uploaded or made by AI — then the
+ * photos on this cover, and shelves: the photos kept (the bitmap library), stickers, channel graphics, my vector
+ * assets (in folders), and a sticker made by AI from a sentence.
+ */
+function assetsSheet() {
+  const lang = getLang(), mine = [...userAssets.values()], stickers = STICKERS.map((s) => ({ kind: "sticker", id: s.id }));
+  const add = (label, icon, onclick, on = false) => el("button", { class: "quick" + (on ? " on" : ""), onclick }, icon, el("span", {}, label));
   return [
-    aiSection(),
+    sheetHead(t("sheet.assets"), t("sheet.assetsSub")),
+    el("div", { class: "quicks" },
+      add(t("add.text"), ico("content", 20), () => addLayer(newLayer("text", { text: t("layer.newText") }))),
+      add(t("add.solid"), el("span", { class: "sw-chip", style: `background:${cat().color}` }), () => addLayer(newLayer("solid", { color: cat().color }))),
+      add(t("cover.upload"), ico("upload", 20), uploadPhotos),
+      add(t("gen.open"), ico("spark", 20), () => { GEN.open = !GEN.open; renderPanel(); }, GEN.open)),
+    el("div", { class: "hint", style: "margin:-6px 0 0" }, t("add.dropHint")),
+    GEN.open && genBox(),
+    coverPhotos(),
+    shelf("photos", t("shelf.photos"), S.library.length,
+      (few) => { const all = libraryTiles((pid) => placePhoto(pid), () => { if (onAssetsTab()) renderPanel(); }, true); if (few && all.classList.contains("tiles")) [...all.children].slice(8).forEach((n) => n.remove()); return all; },
+      el("button", { class: "linkbtn", title: t("lib.uploadTip"), onclick: stockPhotos }, t("lib.stock")), t("lib.hint")),
+    shelf("stickers", t("shelf.stickers"), stickers.length, (few) => few
+      ? el("div", { class: "tiles" }, stickers.slice(0, 8).map((ref) => tile(ref)))
+      : el("div", { class: "shelf-groups" }, STICKER_GROUPS.map((g) => el("div", {}, el("div", { class: "hint", style: "margin:0 0 6px" }, g.name[lang]), el("div", { class: "tiles" }, STICKERS.filter((s) => s.group === g.id).map((s) => tile({ kind: "sticker", id: s.id }))))))),
+    shelf("graphics", t("shelf.graphics"), GRAPHICS.length, (few) => el("div", { class: "tiles" }, (few ? GRAPHICS.slice(0, 8) : GRAPHICS).map((g) => tile({ kind: "graphic", id: g.id })))),
     mineSection(mine),
-    el("div", {}, cap("assets.graphics"), el("div", { class: "tiles" }, GRAPHICS.map((g) => tile({ kind: "graphic", id: g.id })))),
-    STICKER_GROUPS.map((g) => el("div", {}, el("label", { class: "cap" }, g.name[lang]), el("div", { class: "tiles" }, STICKERS.filter((s) => s.group === g.id).map((s) => tile({ kind: "sticker", id: s.id }))))),
+    aiSection(),
   ];
 }
+/** Layers: the list, kept in layerBox (see renderSide). */
+const layersSheet = () => [layerBox];
 // ---------- My assets, in folders
 // Each asset may carry `folder`, the id of a folder in S.assetFolders; one whose folder is gone is
 // simply unfiled. A tile is filed by dragging it onto a folder (or onto "Unfiled" to take it out).
@@ -1792,7 +1780,7 @@ async function generatePhoto() {
   clearInterval(tick);
   if (job !== GEN.job) return;                       // cancelled meanwhile
   Object.assign(GEN, { busy: false, result, error });
-  if (onCoverTab() || onBitmapPane()) renderPanel();
+  if (onCoverTab()) renderPanel();
 }
 function cancelGeneratePhoto() { GEN.job++; Object.assign(GEN, { busy: false, error: "", result: null }); renderPanel(); }
 /** Takes a picture as the reference for the next one made: sent along, at most 1536 px on its longer side. */
@@ -2133,14 +2121,12 @@ const shownAt = () => { const z = selSize(), [w, h] = virtualSize(z.w, z.h); ret
 function layoutBox() {
   const st = S.profile.style, key = S.sel, keys = scopeKeys(), own = ownLayout(st, key), z = selSize(), ratio = ratioText(z.w, z.h);
   const reach = keys ? keys.map((k) => { const s = S.profile.sizes.find((x) => sizeKey(x) === k); return s ? ratioText(s.w, s.h) : k; }).join(" · ") : "";
-  return el("div", { class: "box" }, cap("style.template"),
-    el("div", { class: "layscope" }, scopeSeg()),
-    el("div", { class: "hint", style: "margin:6px 0 10px" }, t("style.layTo." + S.settings.scope, reach)),
+  return el("div", { class: "box" }, capInfo("style.template", t("style.layHint")),
+    el("div", { class: "hint", style: "margin:0 0 10px" }, t("style.layTo." + S.settings.scope, reach), " ", t("style.scopeWhere")),
     own && el("div", { class: "layown" }, el("span", {}, t(keys ? "style.own" : "style.ownAll", ratio)),
       el("button", { class: "linkbtn", title: t("style.followTip"), onclick: () => { followLayout(st, key); touch({ profile: true, panel: true }); } }, t("style.follow"))),
     templateControls(st, shownAt(), (again) => { if (!again) return draftTouch({ profile: true }); touch({ profile: true }); later("laybox", 60, renderPanel); }, keys && { key, keys }),
-    el("button", { class: "btn wide", style: "margin-top:8px", title: t("style.byOrientTip"), onclick: byOrient }, t("style.byOrient")),
-    el("div", { class: "hint" }, t("style.layHint")));
+    el("button", { class: "btn wide", style: "margin-top:8px", title: t("style.byOrientTip"), onclick: byOrient }, t("style.byOrient")));
 }
 /** "Wide side by side, tall and square stacked": every size laid out by its orientation (layoutByOrient in layout.js); one step of undo. */
 function byOrient() {
@@ -2219,10 +2205,10 @@ function recipeBox() {
 }
 const ODDS_UI = { look: null };   // the look whose parts the chances panel shows (null: the profile's)
 /**
- * Surprise me's chances, in a window of their own (from Surprise me's window, and the Style tab): every chance it
+ * Surprise me's chances, in a window of their own (from Surprise me's window, and the Look sheet): every chance it
  * deals by (RULES.odds and the looks' recipes, deal.js), the user's over them, kept in the settings for every
  * profile. First the layout presets: which layout a hand is dealt in (the canvas's, or one of the user's
- * presets, adding up to 100%) and the presets themselves (layoutList). The groups of which one is dealt, each adding
+ * presets, adding up to 100%), and the way to the presets themselves (the Layout sheet). The groups of which one is dealt, each adding
  * up to 100% — the look, the colour block's shape, the title's lettering, its bend, the ground (these three for
  * every look alike), how many look effects, whose —; the switches, each with a chance of its own; and the optional
  * parts of the look picked. `at`: "layouts", opened at the layout presets.
@@ -2245,7 +2231,8 @@ function oddsDialog(fresh = true, at = "") {
       el("div", { class: "hint", style: "margin:0 0 10px" }, t("odds.layoutsHint")),
       el("div", { class: "lays-two" },
         oddsGroup(t("odds.layout"), [["keep", t("odds.layout.keep")], ...layouts.map((p, i) => [p.id, layoutName(p, i)])], odds.groups.layout, (v) => setGroup("layout", v), { hint: t("odds.layoutHint"), reset: () => dropGroup("layout"), bare: true }),
-        layoutList(again))),
+        el("div", {}, el("div", { class: "hint", style: "margin:0 0 10px" }, t("odds.presetsWhere")),
+          el("button", { class: "btn", onclick: () => { closeModal(); if (!SURPRISE.busy) dealClose(); S.tab.edit = "layout"; syncTabs(); renderPanel(); $("panel").scrollTop = 0; } }, t("odds.presetsGo"))))),
     el("div", { class: "cols" },
       el("div", {},
         group("look", LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), t("odds.lookHint")),
@@ -2340,25 +2327,6 @@ function deleteLayout(p, i, again) {
   sv.odds = { ...sv.odds, groups };
   S.settings.layouts = S.settings.layouts.filter((x) => x.id !== p.id);
   persistSettings(); again();
-}
-/**
- * The layout presets in Surprise me's chances: each renamed where it is, edited (layoutEditor), put on the canvas or
- * deleted; a new one laid out in the editor from the start (wide sizes side by side, the others stacked, every part in
- * it: see newPreset in layers.js), kept once saved there. `again()` shows the window anew.
- */
-function layoutList(again) {
-  const list = S.settings.layouts;
-  const row = (p, i) => el("div", { class: "lay" },
-    el("input", { type: "text", value: p.name, placeholder: layoutName(p, i), maxLength: LAYOUTS.name, spellcheck: false, title: t("layouts.renameTip"),
-      onkeydown: (e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") { e.stopPropagation(); e.target.value = p.name; e.target.blur(); } },
-      onchange: (e) => { p.name = e.target.value.trim().slice(0, LAYOUTS.name); persistSettings(); again(); } }),
-    el("button", { class: "btn", onclick: () => layoutEditor(p, i) }, t("layouts.edit")),
-    el("button", { class: "btn", title: t("layouts.applyTip"), onclick: () => applyLayout(p, i) }, t("layouts.apply")),
-    el("button", { class: "btn", onclick: () => deleteLayout(p, i, again) }, t("layouts.delete")));
-  return el("div", {}, el("div", { class: "cap" }, t("layouts.list")),
-    list.length ? el("div", { class: "lays-list" }, list.map(row)) : el("div", { class: "hint", style: "margin:0 0 8px" }, t("layouts.none")),
-    el("button", { class: "btn wide", style: "margin-top:8px", disabled: list.length >= LAYOUTS.most, title: t("layouts.newTip"),
-      onclick: () => layoutEditor(normalizeLayouts([{ ...newPreset(), id: newLayoutId(), name: nextLayoutName() }])[0], list.length, true) }, t("layouts.new")));
 }
 /** A usual size facing each way, where the layout editor sees how big a block kept for that orientation is when it has no size facing so (see blockOf in layoutEditor). */
 const USUAL_SIZE = { wide: "1920x1080", square: "1200x1200", tall: "1080x1920" };
@@ -2628,7 +2596,7 @@ function layoutEditor(p, i, fresh = false) {
         E.p.by && E.p.by[z.key] && el("div", { class: "layown" }, el("span", {}, t("style.own")), el("button", { class: "linkbtn", title: t("layed.followTip"), onclick: follow }, t("style.follow"))),
         el("div", { class: "hint", style: "margin:0" }, t("layed.blockHint")))].filter(Boolean));
   };
-  const back = () => { LAYED.redraw = null; oddsDialog(false, "layouts"); };
+  const back = () => { LAYED.redraw = null; closeModal(); if (S.mode === "edit" && S.tab.edit === "layout") renderPanel(); };   // back to the Layout sheet, where the presets are
   const cancel = () => { if (E.dirty && !confirm(t("layed.discard"))) return; back(); };
   const save = () => {
     const kept = normalizeLayouts([{ ...E.p, custom: E.custom, parts: takeParts(layers, keys(), p.parts, c.id), id: p.id, name: name.value }])[0];
@@ -2671,15 +2639,42 @@ function lookSheet() {
     recipeBox(),
   ];
 }
-/** Layout: the template and each size's layout, the parts it has, the colour block's edge, and every part back in place. */
+/** Layout: the layout presets, the template at this size, the colour block's edge, which parts show, and all the layout hidden or put back in place. */
 function layoutSheet() {
+  const off = layoutLayers().every((l) => !l.visible);
   return [
     sheetHead(t("sheet.layout"), t("sheet.layoutSub")),
+    presetCards(),
     layoutBox(),
-    partsBox(),
     shapesSection(),
-    el("button", { class: "btn wide", onclick: resetPlaces }, t("style.resetAll")),
+    partsBox(),
+    el("div", { class: "sheet-foot" },
+      el("div", { class: "togrow", title: t("layout.tip") },
+        el("div", { style: "flex:1;min-width:0" }, el("div", { style: "font-weight:700" }, t("layout.hideAll")), el("div", { class: "hint", style: "margin:2px 0 0" }, t("layout.hideAllSub"))),
+        el("button", { class: "tog" + (off ? " on" : ""), role: "switch", "aria-checked": String(off), "aria-label": t("layout.hideAll"), onclick: () => { toggleLayout(); renderPanel(); } })),
+      el("button", { class: "linkbtn", onclick: resetPlaces }, t("style.resetAll"))),
   ];
+}
+/**
+ * Layout → the layout presets, each a card: its name (renamed where it is), put on the canvas, edited in the preset's
+ * editor (layoutEditor), or deleted; a new one laid out in the editor from the start (wide sizes side by side, the others
+ * stacked, every part in it: see newPreset in layers.js), kept once saved there. Surprise me deals them by their chances.
+ */
+function presetCards() {
+  const list = S.settings.layouts;
+  const card = (p, i) => el("div", { class: "preset" },
+    el("input", { type: "text", value: p.name, placeholder: layoutName(p, i), maxLength: LAYOUTS.name, spellcheck: false, title: t("layouts.renameTip"),
+      onkeydown: (e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") { e.stopPropagation(); e.target.value = p.name; e.target.blur(); } },
+      onchange: (e) => { p.name = e.target.value.trim().slice(0, LAYOUTS.name); persistSettings(); renderPanel(); } }),
+    el("div", { class: "acts" },
+      el("button", { class: "btn solid", title: t("layouts.applyTip"), onclick: () => applyLayout(p, i) }, t("layouts.apply")),
+      el("button", { class: "btn", onclick: () => layoutEditor(p, i) }, t("layouts.edit")),
+      el("button", { class: "btn", onclick: () => deleteLayout(p, i, renderPanel) }, t("layouts.delete"))));
+  return el("div", {},
+    el("div", { class: "lhead" }, capInfo("layouts.list", t("layouts.about")),
+      el("button", { class: "linkbtn", disabled: list.length >= LAYOUTS.most, title: t("layouts.newTip"),
+        onclick: () => layoutEditor(normalizeLayouts([{ ...newPreset(), id: newLayoutId(), name: nextLayoutName() }])[0], list.length, true) }, t("layouts.new"))),
+    list.length ? el("div", { class: "presets" }, list.map(card)) : el("div", { class: "hint", style: "margin:0" }, t("layouts.none")));
 }
 /** The default design (the ⋯ menu): the cover's layers but its photos kept as the profile's start, or taken back from it. */
 function saveDesign() { S.profile.design.layers = JSON.parse(JSON.stringify(S.cover.layers.filter((l) => l.type !== "photo"))); touch({ profile: true }); toast(t("style.designSaved")); }
@@ -4130,12 +4125,9 @@ function renderSide() {
   layerBox.replaceChildren(   // the list, in the Layers sheet
     el("div", {}, el("div", { class: "lhead" }, cap("layers.title"),
         el("div", { class: "lbtns" }, el("button", { class: "focusbtn v3btn" + (V3.to ? " on" : ""), title: t("v3.tip"), onclick: () => set3d(!V3.to), innerHTML: `${ICONS.stack}<span>${t("v3.label")}</span>` }),
-          (() => { const off = layoutLayers().every((l) => !l.visible); return el("button", { class: "focusbtn" + (off ? " on" : ""), title: t("layout.tip"), onclick: toggleLayout }, t(off ? "layout.show" : "layout.hide")); })(),
           el("button", { class: "focusbtn" + (S.focus ? " on" : ""), title: t("focus.tip"), onclick: () => setFocus(!S.focus) }, t("focus.label")))),
       el("div", { class: "layers" }, [...here].reverse().map(layerRow)),
       el("div", { class: "acts", style: "margin-top:10px;justify-content:flex-start" },
-        el("button", { class: "btn", onclick: () => addLayer(newLayer("text", { text: t("layer.newText") })) }, t("layers.addText")),
-        el("button", { class: "btn", onclick: () => addLayer(newLayer("solid", { color: cat().color })) }, t("layers.addSolid")),
         el("button", { class: "btn", disabled: !copiable(L) || many.length > 0, onclick: duplicateLayer }, t("layers.dup")),
         el("button", { class: "btn", disabled: many.length ? !many.some(isAdded) : !(L && isRemovable(L)), onclick: () => (many.length ? removeGroup() : removeLayer()) }, t("layers.del")),
         el("button", { class: "btn", title: t("layers.up"), disabled: many.length > 0 || i < 1 || i >= here.length - 1, onclick: () => shiftLayer(1) }, "▲"),
@@ -4872,6 +4864,7 @@ const SHELL_ICONS = {
   redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
   spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
   download: '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
+  upload: '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/>',
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
 };
 const ico = (k, px = 20) => el("span", { class: "ico", style: `display:inline-grid;width:${px}px;height:${px}px`, innerHTML: `<svg viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SHELL_ICONS[k]}</svg>` });
@@ -5201,7 +5194,7 @@ function keepPicture(pid, name, kind) {
   if (!pid || S.library.some((e) => e.pid === pid)) return;
   S.library.unshift({ pid, name: String(name || "").slice(0, 60), kind, at: Date.now() });
   persistLibrary();
-  if (onBitmapPane()) renderPanel();
+  if (onAssetsTab()) renderPanel();
 }
 /** The first time the library is opened: the pictures already there (uploaded before it existed) go in it. */
 async function libraryFromFiles() {
@@ -5234,14 +5227,6 @@ function readLibrary() {
   });
 }
 /** Assets → Bitmaps: the library's pictures, to click or drag onto the cover. */
-function bitmapPane() {
-  return [
-    el("div", { class: "box" }, cap("lib.add"), photoAdders(false)),
-    el("div", {}, cap("lib.all", ` · ${S.library.length}`),
-      el("div", { class: "hint", style: "margin:0 0 10px" }, t("lib.hint")),
-      libraryTiles((pid) => placePhoto(pid), () => { if (onBitmapPane()) renderPanel(); }, true))];
-}
-const onBitmapPane = () => S.mode === "edit" && S.tab.edit === "assets" && S.assetPane === "bitmap";
 /**
  * The library's pictures as tiles, newest first: a click hands the picture to `pick`; they can be dragged
  * onto the canvas, and with `removable` taken out of the library. Pictures not read yet are read, then
