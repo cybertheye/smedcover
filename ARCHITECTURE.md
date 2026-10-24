@@ -1607,10 +1607,9 @@ from the cover being made. The glass is not free: the web view blurs again what 
 changes, and while something is dragged that can cost frames. So where it cannot blur at all (`CAN_BLUR`), or the
 user turned it off (*Frosted glass* in the ⋯ menu: `settings.glass`, `setGlass(on, true)`), `html.solid` makes every
 pane a plain translucent colour. And `glassWatch()`, run in each frame the canvas is drawn in (`drawInFrame()`, which `queueDraw()` asks for), times the frames while something is
-dragged (a slider held, `DRAFT.down`; a layer, `LIVE`): when their middle gap passes 28 ms with the glass on, it tries
-the panes plain for as many frames again, and keeps them so — the setting turned off, and said once — if that brought
-the frames a fifth closer together; else the glass comes back. It tries once a session (`GLASS.done`), and the user's
-own choice ends a trial.
+dragged (a slider held, `DRAFT.down`; a layer, `LIVE`): when the middle gap of 90 passes 28 ms with the glass on, it
+marks them slow (`GLASS.slow`), and the next `pointerup` shows a note once on this computer (`settings.glassHint`) with
+a button that makes the panes plain. The glass never changes by itself: only the user's hand turns it off.
 
 **Narrow windows.** With the drawer open the canvas could be squeezed between two side columns; so where it would be
 left narrower than `CENTRE_ROOMY` (560 px), `columns()` sets `.tight` on `#body`: the sheet's column is hidden and the
@@ -2049,6 +2048,6 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | put a setting on the bar over the canvas | `barItems()` in `app.js`: a group of the properties by its key (`sec`), controls of its own (`pop`) or an action (`act`) |
 | add a sheet to the dock | its function in `TABS.edit` and an icon in `SHELL_ICONS` (`app.js`); `dock.*` and its heading's `sheet.*` in `i18n.js` |
 | add a page to Settings | its function in `TABS.setup` and an icon in the `icon` map inside `syncTabs()` (`app.js`); `tab.*` in `i18n.js` |
-| change when the panes go plain | `glassWatch()`, `setGlass()` and `CAN_BLUR` in `app.js`; `html.solid` in `index.html` |
+| change when the note on slow glass shows, or how the panes go plain | `glassWatch()`, `setGlass()` and `CAN_BLUR` in `app.js`; `html.solid` in `index.html` |
 | change when the drawer takes the sheet's place, or the columns stack | `CENTRE_ROOMY`, `STACKED` and `columns()` in `app.js`; `.body.tight` and the `max-width: 1000px` rules in `index.html` |
 | add an interface string | `i18n.js`, in both languages; a test checks that both are present |

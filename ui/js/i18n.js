@@ -71,7 +71,8 @@ const STR = {
   "menu.loadDesignSub": ["回到档案的默认设计，可以撤销", "Back to the profile's default design; Undo brings this back"],
   "menu.glass": ["毛玻璃效果", "Frosted glass"],
   "menu.glassTip": ["面板透出背后封面的颜色。关掉后面板是半透明的纯色，旧电脑上更流畅。", "Panels let the cover's colours through. Off, they are plain and translucent, smoother on older computers."],
-  "ui.glassOff": ["界面换成了纯色面板，画面更流畅；在右上角「⋯」里可以再打开毛玻璃", "Panels are plain now, which keeps the canvas smooth; turn the frosted glass back on under ⋯ at the top right"],
+  "ui.glassSlow": ["拖动时画面有点卡。换成纯色面板会更流畅；之后在右上角「⋯」里随时可以开关毛玻璃", "Dragging is a little slow here. Plain panels would be smoother; the frosted glass is turned on or off under ⋯ at the top right"],
+  "ui.glassPlain": ["换成纯色", "Make them plain"],
 
   "top.profile": ["档案", "Profile"],
   "top.undo": ["撤销", "Undo"],

@@ -253,7 +253,8 @@ export function normalizeSettings(raw) {
       .filter(([k, v]) => /^[\w-]{1,60}$/.test(k) && typeof v === "string" && v.trim() && v.length <= 4096).slice(0, 200)),
     scope: ["orient", "size"].includes(s.scope) ? s.scope : "all",   // what a change of place or layout reaches: every size, those facing the way this one does (see orientOf in layout.js), or this one
     hideScene: s.hideScene === true,   // the scene objects' handles hidden on the canvas
-    glass: s.glass !== false,   // the panels frosted glass over the cover (false: plain, translucent; see glassWatch in app.js)
+    glass: s.glass !== false,   // the panels frosted glass over the cover (false: plain, translucent; see setGlass in app.js)
+    glassHint: s.glassHint === true,   // the note offering plain panels, when dragging was slow with the glass, was shown (see glassWatch)
     drawer: s.drawer === true,   // the drawer of the selected layer's properties open on the right (see setDrawer in app.js)
     // how a photo's subject is cut out: "vision" (macOS), "birefnet-lite" or "birefnet" (any system, a downloaded model); "" = the system's own choice
     cutEngine: ["vision", "birefnet-lite", "birefnet"].includes(s.cutEngine) ? s.cutEngine : "",

@@ -747,7 +747,7 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 ### 9.5 窗口
 
-**外壳和毛玻璃。** 顶栏下面是几栏（`.body`，一张网格）：停靠栏、打开着的面板（`#left`、`#panel`）、画布（`#center`：画布区，下面是托盘——当前尺寸 `#toolbar`、各尺寸的缩略图 `#strip`、调整范围 `#scope`，旁边放不下时调整范围换到缩略图下面一行）和属性抽屉（`#right`、`#side`），抽屉收起时它那一栏让给画布（`.nodrawer`）。面板和抽屉拖内侧边缘可以调宽窄（`columns()`，记在 `settings.columns`），画布至少留 `CENTRE_MIN`。最底下垫着封面本身：每次绘制后过一会儿，`paintAmbient()` 把主画布缩成 48 像素宽画进 `#amb`（`flushDraw()` 里的 `later("ambient", …)`），CSS 把它模糊、压暗后铺满整个窗口（`#ambient`）。上面每块面板都是一块毛玻璃（`.glass`：半透明底色加 `backdrop-filter`），所以窗口的颜色跟着正在做的封面变。毛玻璃不是白来的：面板下面的东西一变，网页视图就要重新模糊一遍，拖动时可能拖慢帧数。所以网页视图根本不能模糊时（`CAN_BLUR`），或用户在「⋯」菜单里关掉「毛玻璃效果」时（`settings.glass`，`setGlass(on, true)`），`html.solid` 把所有面板换成半透明的纯色。另外 `glassWatch()` 在每个画画布的帧里都跑一下（`queueDraw()` 要来的 `drawInFrame()`），在拖东西时（按着滑条 `DRAFT.down`，或拖图层 `LIVE`）量帧间隔：毛玻璃开着、间隔的中位数超过 28 毫秒时，先把面板换成纯色再量同样多帧，帧间隔缩短五分之一以上就保持纯色（关掉设置，提示一次），否则换回毛玻璃。每次启动最多试一次（`GLASS.done`），用户自己动了开关，试验也就结束。
+**外壳和毛玻璃。** 顶栏下面是几栏（`.body`，一张网格）：停靠栏、打开着的面板（`#left`、`#panel`）、画布（`#center`：画布区，下面是托盘——当前尺寸 `#toolbar`、各尺寸的缩略图 `#strip`、调整范围 `#scope`，旁边放不下时调整范围换到缩略图下面一行）和属性抽屉（`#right`、`#side`），抽屉收起时它那一栏让给画布（`.nodrawer`）。面板和抽屉拖内侧边缘可以调宽窄（`columns()`，记在 `settings.columns`），画布至少留 `CENTRE_MIN`。最底下垫着封面本身：每次绘制后过一会儿，`paintAmbient()` 把主画布缩成 48 像素宽画进 `#amb`（`flushDraw()` 里的 `later("ambient", …)`），CSS 把它模糊、压暗后铺满整个窗口（`#ambient`）。上面每块面板都是一块毛玻璃（`.glass`：半透明底色加 `backdrop-filter`），所以窗口的颜色跟着正在做的封面变。毛玻璃不是白来的：面板下面的东西一变，网页视图就要重新模糊一遍，拖动时可能拖慢帧数。所以网页视图根本不能模糊时（`CAN_BLUR`），或用户在「⋯」菜单里关掉「毛玻璃效果」时（`settings.glass`，`setGlass(on, true)`），`html.solid` 把所有面板换成半透明的纯色。另外 `glassWatch()` 在每个画画布的帧里都跑一下（`queueDraw()` 要来的 `drawInFrame()`），在拖东西时（按着滑条 `DRAFT.down`，或拖图层 `LIVE`）量帧间隔：毛玻璃开着、90 个间隔的中位数超过 28 毫秒时，记下「卡」（`GLASS.slow`），下一次松手（`pointerup`）时提示一次，提示里有按钮可以换成纯色面板；这台电脑上只提示一次（`settings.glassHint`）。毛玻璃从不自己切换，只有用户能关掉它。
 
 **窄窗口。** 属性抽屉开着时，画布会夹在两边的栏中间变窄；所以画布会窄于 `CENTRE_ROOMY`（560 像素）时，`columns()` 给 `#body` 加上 `.tight`：面板那一栏藏起来，属性抽屉占它的位置。判断只看窗口宽度，两边的栏按默认宽度算，这样拖动栏的边永远不会把面板挤掉：手拉窄的画布，是手要的。`sheetHidden()` 回答是不是这样。停靠栏的按钮，以及概率窗口里去「版式」面板的链接，都经过 `showSheet(k)`：显示面板，抽屉占着面板的位置时先收起抽屉。面板藏着时停靠栏没有按钮亮着，`onLookSheet()` 和 `onStyleTab()` 为 false：风格卡片不画，换尺寸或换调整范围也不重建看不见的面板（`touch()` 要求重建面板时照样重建）。`columns()` 切换这个状态时同步停靠栏，面板回来时按现在的样子重画它；而且它每次运行（窗口大小变了、拖了栏宽、打开或收起抽屉）都把开着的逐字、裁剪、穿插窗口和画笔面板重新放好（`overLeft()`），裁剪窗口的画面等栏宽停下后再按新宽度重画。按下的按钮被重画后，键盘焦点留在原处：焦点原在面板里时，`setDrawer()` 把它交给抽屉的 ✕；原在抽屉里时，交给面板对应的停靠栏按钮；`showSheet()` 交给停靠栏里亮着的按钮。窗口窄于 1000 像素时（`STACKED`；桌面应用的窗口最窄 1080）所有东西改成上下排，停靠栏变成一排按钮，也就不会出现 `.tight`。滚动条会占地方的地方（Windows、Linux、设成总是显示滚动条的 Mac），`start()` 用一个探测元素查出来，设上 `html.bars`，所有滚动条都画成和面板里一样的细条。
 
@@ -914,6 +914,6 @@ python3 -m http.server -d ui 4599
 | 把一项设置放到画布上的浮动工具条 | `app.js` 的 `barItems()`：按键名引用属性里的一组（`sec`）、自己的控件（`pop`），或一个动作（`act`） |
 | 给停靠栏加一个面板 | `app.js` 里 `TABS.edit` 加上它的函数，`SHELL_ICONS` 加图标；`i18n.js` 的 `dock.*` 和它标题用的 `sheet.*` |
 | 给「设置」加一页 | `app.js` 里 `TABS.setup` 加上它的函数，`syncTabs()` 里的 `icon` 表加图标；`i18n.js` 的 `tab.*` |
-| 改面板什么时候换成纯色 | `app.js` 的 `glassWatch()`、`setGlass()` 和 `CAN_BLUR`；`index.html` 的 `html.solid` |
+| 改毛玻璃卡顿提示什么时候出现、面板怎样换成纯色 | `app.js` 的 `glassWatch()`、`setGlass()` 和 `CAN_BLUR`；`index.html` 的 `html.solid` |
 | 改属性抽屉什么时候占面板的位置，或什么时候改成上下排 | `app.js` 的 `CENTRE_ROOMY`、`STACKED` 和 `columns()`；`index.html` 的 `.body.tight` 和 `max-width: 1000px` 那一段 |
 | 加一句界面文字 | `i18n.js`，中英文都要写；测试会检查两种语言是否齐全 |

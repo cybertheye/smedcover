@@ -6367,33 +6367,34 @@ addEventListener("pointerdown", (e) => { if (MENU.open && !$("menu").contains(e.
 // Settings closes by its ✕, Esc, or a click beside its window
 $("setclose").onclick = () => setMode("edit");
 $("settings").addEventListener("pointerdown", (e) => { if (e.target === $("settings")) setMode("edit"); });
-// ---------- the glass: frosted panes over the blurred cover, or plain ones where they would slow the canvas
+// ---------- the glass: frosted panes over the blurred cover, or plain ones, as the user chooses in the ⋯ menu
 const CAN_BLUR = !!(globalThis.CSS && (CSS.supports("backdrop-filter", "blur(2px)") || CSS.supports("-webkit-backdrop-filter", "blur(2px)")));
 const glassOn = () => CAN_BLUR && S.settings.glass !== false;
 /** Frosts the panes, or makes them plain; `byHand`, the user's choice (the menu), kept. */
 function setGlass(on, byHand = false) {
-  if (byHand) { S.settings.glass = on; persistSettings(); GLASS.trial = 0; GLASS.done = true; }   // the user's word ends a trial
+  if (byHand) { S.settings.glass = on; persistSettings(); }
   document.documentElement.classList.toggle("solid", !(on && CAN_BLUR));
 }
 /**
  * Watches the frames while something is dragged — a slider held, a layer moved on the canvas — when the canvas is
  * drawn in one frame after another (typing draws as often as keys come, which says nothing of the frames). Should
- * they come slowly with the glass on, the panes go plain for as many frames again, and stay plain — said once — if
- * that made them come faster by a fifth; else the glass comes back. Tried once a session at most.
+ * they come slowly with the glass on, a note offers plain panes once the drag is let go, with a button to make them
+ * so; only once on this computer (settings.glassHint). The glass itself changes only by the user's hand.
  */
-const GLASS = { last: 0, gaps: [], trial: 0, done: false };
+const GLASS = { last: 0, gaps: [], slow: false };
 function glassWatch(now) {
   const dragging = !!(DRAFT.down || LIVE), gap = GLASS.last ? now - GLASS.last : 0;
   GLASS.last = dragging ? now : 0;
-  if (!dragging || !gap || gap > 250 || GLASS.done || (!GLASS.trial && !glassOn())) return;   // gap > 250: not one frame after another
+  if (!dragging || !gap || gap > 250 || GLASS.slow || S.settings.glassHint || !glassOn()) return;   // gap > 250: not one frame after another
   GLASS.gaps.push(gap);
   if (GLASS.gaps.length < 90) return;
-  const mid = GLASS.gaps.sort((a, b) => a - b)[45]; GLASS.gaps = [];
-  if (!GLASS.trial) { if (mid > 28) { GLASS.trial = mid; document.documentElement.classList.add("solid"); } return; }
-  if (mid < GLASS.trial * 0.8) { setGlass(false, true); toast(t("ui.glassOff")); }
-  else setGlass(glassOn());
-  GLASS.trial = 0; GLASS.done = true;
+  GLASS.slow = GLASS.gaps.sort((a, b) => a - b)[45] > 28; GLASS.gaps = [];
 }
+addEventListener("pointerup", () => {
+  if (!GLASS.slow || S.settings.glassHint || !glassOn()) return;
+  S.settings.glassHint = true; persistSettings();
+  toast(t("ui.glassSlow"), false, { label: t("ui.glassPlain"), run: () => { setGlass(false, true); if (MENU.open) renderMenu(); } });
+});
 /** The page's ground (#ambient): the cover as last drawn, tiny — CSS blurs it — so the glass takes its colours. */
 function paintAmbient() {
   const src = $("cv"), dst = $("amb");
