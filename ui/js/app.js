@@ -6399,6 +6399,7 @@ addEventListener("pointerup", () => {
   toast(t("ui.glassSlow"), false, { label: t("ui.glassPlain"), run: () => { setGlass(false, true); if (MENU.open) renderMenu(); } });
 }, true);
 for (const k of ["pointercancel", "blur"]) addEventListener(k, () => { GLASS.down = GLASS.slow = false; GLASS.gaps = []; });
+addEventListener("pointermove", (e) => { if (GLASS.down && !(e.buttons & 1)) GLASS.down = GLASS.slow = false; }, true);   // the release was missed (the window moved, a list's popup): nothing to say
 /**
  * On a Mac the window has no title bar of its own (titleBarStyle "Overlay" in tauri.conf.json): its close, minimise and
  * zoom buttons float over the top bar's left end, which html.macbar leaves room for. The top bar (all but its buttons

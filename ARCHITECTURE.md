@@ -1611,7 +1611,7 @@ dragged by the pointer (`GLASS.down`, between a `pointerdown` and its `pointerup
 `LIVE` — keys held on a slider set `LIVE` too, but their gaps are the keys', so they are not counted): when the middle
 gap of 90 passes 28 ms with the glass on, it marks them slow (`GLASS.slow`), and that drag's `pointerup` shows a note
 once on this computer (`settings.glassHint`) with a button that makes the panes plain; a drag that ends otherwise
-(`pointercancel`, the window's `blur`) forgets it. The glass never changes by itself: only the user's hand turns it off.
+(`pointercancel`, the window's `blur`, a pointer moving with no button down) forgets it. The glass never changes by itself: only the user's hand turns it off.
 
 **The Mac title bar.** On macOS the window's title bar is see-through (`titleBarStyle: "Overlay"`, `hiddenTitle` and
 `trafficLightPosition` in `tauri.conf.json`), its buttons placed in the top bar's left end (the top bar sits 12 px in
