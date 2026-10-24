@@ -1616,12 +1616,12 @@ once on this computer (`settings.glassHint`) with a button that makes the panes 
 **The Mac title bar.** On macOS the window's title bar is see-through (`titleBarStyle: "Overlay"`, `hiddenTitle` and
 `trafficLightPosition` in `tauri.conf.json`), its buttons placed in the top bar's left end (the top bar sits 12 px in
 and is 56 px tall, so its middle is 40 px down). `macTitleBar()`, called from `start()` when `isMac`, sets `html.macbar`,
-which leaves the buttons room in the top bar and keeps Settings' window clear of them, and marks the top bar
+which leaves the buttons room in the top bar and keeps Settings' window and the dialogs (`#modal`) clear of them, and marks the top bar
 `data-tauri-drag-region="deep"` (Tauri's own: the window moves from anywhere in it but its buttons and lists, a double
 click zooms it) and `.app` a bare one (its margin). Settings, a dialog (`#modal`) and Surprise me's window cover both;
-while one is open a strip along the window's top, `#winbar` (22 px, under Surprise me's Undo), moves the window in
-their place. Tauri's script stops the press there, so a press on any of the three takes the focus from a field by
-hand, as a press on nothing would. In a narrow window the top bar's lists give way (`.app`'s one column is
+while one is open a strip along the window's top, `#winbar` (22 px, clear of Surprise me's Undo below it), moves the
+window in their place. Tauri's script stops the press there, so a press on the top bar (not on its buttons or lists),
+the margin itself or the strip takes the focus from a field by hand, as a press on nothing would. In a narrow window the top bar's lists give way (`.app`'s one column is
 `minmax(0,1fr)`, the lists' `min-width:0`) and below 1200 px *Saved as you go* goes, so ⋯ stays in the window. In full
 screen the buttons are gone: a resize asks `isFullscreen()` and takes their room away, and asks again a second later,
 as the way out of full screen is over only after its animation. Moving the window needs

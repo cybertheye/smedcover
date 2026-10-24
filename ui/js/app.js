@@ -6411,7 +6411,7 @@ addEventListener("pointermove", (e) => { if (GLASS.down && !(e.buttons & 1)) GLA
 function macTitleBar() {
   const top = $("top"), app = document.querySelector(".app"), bar = document.body.appendChild(el("div", { id: "winbar" })), html = document.documentElement;
   top.dataset.tauriDragRegion = "deep"; app.dataset.tauriDragRegion = ""; bar.dataset.tauriDragRegion = "";   // .app: its margin only, not what is in it
-  for (const n of [top, app, bar]) n.addEventListener("pointerdown", (e) => { if (!e.target.closest("button,select")) document.activeElement?.blur?.(); });
+  for (const n of [top, app, bar]) n.addEventListener("pointerdown", (e) => { if (n === top ? !e.target.closest("button,select") : e.target === n) document.activeElement?.blur?.(); });   // .app: its margin, not the editor in it
   const win = globalThis.__TAURI__.window.getCurrentWindow(), room = () => win.isFullscreen().then((full) => html.classList.toggle("macbar", !full)).catch(() => {});
   html.classList.add("macbar");
   addEventListener("resize", () => { later("macbar", 150, room); later("macbar-out", 1000, room); });
