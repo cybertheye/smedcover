@@ -6376,25 +6376,29 @@ function setGlass(on, byHand = false) {
   document.documentElement.classList.toggle("solid", !(on && CAN_BLUR));
 }
 /**
- * Watches the frames while something is dragged — a slider held, a layer moved on the canvas — when the canvas is
- * drawn in one frame after another (typing draws as often as keys come, which says nothing of the frames). Should
- * they come slowly with the glass on, a note offers plain panes once the drag is let go, with a button to make them
- * so; only once on this computer (settings.glassHint). The glass itself changes only by the user's hand.
+ * Watches the frames while something is dragged by the pointer — a slider held, a layer moved on the canvas — when
+ * the canvas is drawn in one frame after another (typing, or keys held on a slider, draw as often as keys come, which
+ * says nothing of the frames). Should they come slowly with the glass on, a note offers plain panes when that drag is
+ * let go, with a button to make them so; only once on this computer (settings.glassHint). A drag that ends otherwise
+ * (cancelled, the window left) says nothing. The glass itself changes only by the user's hand.
  */
-const GLASS = { last: 0, gaps: [], slow: false };
+const GLASS = { last: 0, gaps: [], slow: false, down: false };
 function glassWatch(now) {
-  const dragging = !!(DRAFT.down || LIVE), gap = GLASS.last ? now - GLASS.last : 0;
+  const dragging = GLASS.down && !!(DRAFT.down || LIVE), gap = GLASS.last ? now - GLASS.last : 0;
   GLASS.last = dragging ? now : 0;
   if (!dragging || !gap || gap > 250 || GLASS.slow || S.settings.glassHint || !glassOn()) return;   // gap > 250: not one frame after another
   GLASS.gaps.push(gap);
   if (GLASS.gaps.length < 90) return;
   GLASS.slow = GLASS.gaps.sort((a, b) => a - b)[45] > 28; GLASS.gaps = [];
 }
+addEventListener("pointerdown", () => { GLASS.down = true; }, true);
 addEventListener("pointerup", () => {
-  if (!GLASS.slow || S.settings.glassHint || !glassOn()) return;
+  const slow = GLASS.slow; GLASS.down = GLASS.slow = false;
+  if (!slow || S.settings.glassHint || !glassOn()) return;
   S.settings.glassHint = true; persistSettings();
   toast(t("ui.glassSlow"), false, { label: t("ui.glassPlain"), run: () => { setGlass(false, true); if (MENU.open) renderMenu(); } });
-});
+}, true);
+for (const k of ["pointercancel", "blur"]) addEventListener(k, () => { GLASS.down = GLASS.slow = false; GLASS.gaps = []; });
 /** The page's ground (#ambient): the cover as last drawn, tiny — CSS blurs it — so the glass takes its colours. */
 function paintAmbient() {
   const src = $("cv"), dst = $("amb");

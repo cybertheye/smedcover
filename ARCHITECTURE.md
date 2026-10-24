@@ -1607,9 +1607,11 @@ from the cover being made. The glass is not free: the web view blurs again what 
 changes, and while something is dragged that can cost frames. So where it cannot blur at all (`CAN_BLUR`), or the
 user turned it off (*Frosted glass* in the ⋯ menu: `settings.glass`, `setGlass(on, true)`), `html.solid` makes every
 pane a plain translucent colour. And `glassWatch()`, run in each frame the canvas is drawn in (`drawInFrame()`, which `queueDraw()` asks for), times the frames while something is
-dragged (a slider held, `DRAFT.down`; a layer, `LIVE`): when the middle gap of 90 passes 28 ms with the glass on, it
-marks them slow (`GLASS.slow`), and the next `pointerup` shows a note once on this computer (`settings.glassHint`) with
-a button that makes the panes plain. The glass never changes by itself: only the user's hand turns it off.
+dragged by the pointer (`GLASS.down`, between a `pointerdown` and its `pointerup`; a slider held, `DRAFT.down`; a layer,
+`LIVE` — keys held on a slider set `LIVE` too, but their gaps are the keys', so they are not counted): when the middle
+gap of 90 passes 28 ms with the glass on, it marks them slow (`GLASS.slow`), and that drag's `pointerup` shows a note
+once on this computer (`settings.glassHint`) with a button that makes the panes plain; a drag that ends otherwise
+(`pointercancel`, the window's `blur`) forgets it. The glass never changes by itself: only the user's hand turns it off.
 
 **Narrow windows.** With the drawer open the canvas could be squeezed between two side columns; so where it would be
 left narrower than `CENTRE_ROOMY` (560 px), `columns()` sets `.tight` on `#body`: the sheet's column is hidden and the
