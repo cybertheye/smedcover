@@ -29,15 +29,20 @@
   #ambient::after{content:"";position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 45%,rgba(10,10,18,.12),rgba(8,8,14,.66))}
   .glass{background-color:var(--glass);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid var(--glass-line);box-shadow:var(--glass-hi),var(--glass-drop)}
   html.solid .glass{background-color:var(--solid);-webkit-backdrop-filter:none;backdrop-filter:none}
-  .app{position:relative;z-index:1;display:grid;grid-template-rows:auto minmax(0,1fr);height:100vh;padding:12px;gap:12px}
+  .app{position:relative;z-index:1;display:grid;grid-template-rows:auto minmax(0,1fr);grid-template-columns:minmax(0,1fr);height:100vh;padding:12px;gap:12px}
 
   /* top bar: the profile and channel, undo and redo, then Surprise me, Export and the ⋯ menu */
   header{display:flex;align-items:center;gap:12px;height:56px;padding:0 10px 0 18px;border-radius:18px}
   header h1{font:400 26px "Bebas Neue",sans-serif;letter-spacing:.08em;margin:0 2px 0 0}
   header .sep{width:1px;height:24px;background:var(--line2)}
+  /* on a Mac the window's own close, minimise and zoom buttons float over the top bar's left end (macTitleBar in app.js) */
+  html.macbar header{padding-left:96px}
+  @media(max-width:1200px){html.macbar header .grp>span{display:none}}   /* "Saved as you go" gives the buttons' room back */
+  #winbar{position:fixed;left:0;right:0;top:0;height:22px;z-index:45;display:none}
+  body:has(#settings:not([hidden])) #winbar,body:has(#modal:not([hidden])) #winbar,body:has(#deal:not([hidden])) #winbar{display:block}
   .crumb{display:flex;align-items:center;gap:4px;min-width:0}
   .crumb>span{color:var(--text3)}
-  .crumb select{width:auto;max-width:190px;border:0;background:transparent;padding:6px 8px;border-radius:10px;cursor:pointer}
+  .crumb select{width:auto;max-width:190px;min-width:0;border:0;background:transparent;padding:6px 8px;border-radius:10px;cursor:pointer}
   .crumb select:hover{background:rgba(255,255,255,.08)}
   .crumb .dot{width:9px;height:9px;border-radius:50%;background:var(--acc);flex:none}
   .grp{display:flex;align-items:center;gap:6px}
@@ -599,6 +604,8 @@
   /* Settings: a window over the editor, its pages on the left (what was the Setup mode) */
   #settings{position:fixed;inset:0;z-index:30;display:grid;place-items:center;background:rgba(5,5,10,.45)}
   #settings[hidden]{display:none}
+  html.macbar #settings,html.macbar #modal{padding-top:44px}   /* the window's buttons clear of its top left corner */
+  html.macbar #settings .win{height:min(820px,calc(100vh - 104px))}
   #settings .win{width:min(1240px,calc(100vw - 48px));height:min(820px,calc(100vh - 48px));border-radius:28px;display:flex;overflow:hidden;background-color:rgba(22,22,30,.55);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 40px 120px rgba(0,0,0,.6)}
   html.solid #settings .win{background-color:var(--solid)}
   #setnav{width:236px;flex:none;padding:24px 14px 18px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:6px;background:rgba(0,0,0,.12)}

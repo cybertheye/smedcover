@@ -1613,6 +1613,21 @@ gap of 90 passes 28 ms with the glass on, it marks them slow (`GLASS.slow`), and
 once on this computer (`settings.glassHint`) with a button that makes the panes plain; a drag that ends otherwise
 (`pointercancel`, the window's `blur`) forgets it. The glass never changes by itself: only the user's hand turns it off.
 
+**The Mac title bar.** On macOS the window's title bar is see-through (`titleBarStyle: "Overlay"`, `hiddenTitle` and
+`trafficLightPosition` in `tauri.conf.json`), its buttons placed in the top bar's left end (the top bar sits 12 px in
+and is 56 px tall, so its middle is 40 px down). `macTitleBar()`, called from `start()` when `isMac`, sets `html.macbar`,
+which leaves the buttons room in the top bar and keeps Settings' window clear of them, and marks the top bar
+`data-tauri-drag-region="deep"` (Tauri's own: the window moves from anywhere in it but its buttons and lists, a double
+click zooms it) and `.app` a bare one (its margin). Settings, a dialog (`#modal`) and Surprise me's window cover both;
+while one is open a strip along the window's top, `#winbar` (22 px, under Surprise me's Undo), moves the window in
+their place. Tauri's script stops the press there, so a press on any of the three takes the focus from a field by
+hand, as a press on nothing would. In a narrow window the top bar's lists give way (`.app`'s one column is
+`minmax(0,1fr)`, the lists' `min-width:0`) and below 1200 px *Saved as you go* goes, so ⋯ stays in the window. In full
+screen the buttons are gone: a resize asks `isFullscreen()` and takes their room away, and asks again a second later,
+as the way out of full screen is over only after its animation. Moving the window needs
+`core:window:allow-start-dragging` (`capabilities/default.json`).
+On Windows and Linux the system's own title bar stays.
+
 **Narrow windows.** With the drawer open the canvas could be squeezed between two side columns; so where it would be
 left narrower than `CENTRE_ROOMY` (560 px), `columns()` sets `.tight` on `#body`: the sheet's column is hidden and the
 drawer takes its place. It judges by the window's width alone, the side columns taken at their default widths, so that
@@ -2051,5 +2066,6 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | add a sheet to the dock | its function in `TABS.edit` and an icon in `SHELL_ICONS` (`app.js`); `dock.*` and its heading's `sheet.*` in `i18n.js` |
 | add a page to Settings | its function in `TABS.setup` and an icon in the `icon` map inside `syncTabs()` (`app.js`); `tab.*` in `i18n.js` |
 | change when the note on slow glass shows, or how the panes go plain | `glassWatch()`, `setGlass()` and `CAN_BLUR` in `app.js`; `html.solid` in `index.html` |
+| move the Mac window's buttons, or what moves the window | `trafficLightPosition` in `tauri.conf.json`; `macTitleBar()` in `app.js`; `html.macbar` in `index.html` |
 | change when the drawer takes the sheet's place, or the columns stack | `CENTRE_ROOMY`, `STACKED` and `columns()` in `app.js`; `.body.tight` and the `max-width: 1000px` rules in `index.html` |
 | add an interface string | `i18n.js`, in both languages; a test checks that both are present |

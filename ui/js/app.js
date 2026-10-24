@@ -6399,6 +6399,22 @@ addEventListener("pointerup", () => {
   toast(t("ui.glassSlow"), false, { label: t("ui.glassPlain"), run: () => { setGlass(false, true); if (MENU.open) renderMenu(); } });
 }, true);
 for (const k of ["pointercancel", "blur"]) addEventListener(k, () => { GLASS.down = GLASS.slow = false; GLASS.gaps = []; });
+/**
+ * On a Mac the window has no title bar of its own (titleBarStyle "Overlay" in tauri.conf.json): its close, minimise and
+ * zoom buttons float over the top bar's left end, which html.macbar leaves room for. The top bar (all but its buttons
+ * and lists) and the window's margin move the window, and a double click there zooms it, as a title bar's would
+ * (data-tauri-drag-region, Tauri's own); while Settings, a dialog or Surprise me's window covers them, a strip along
+ * the window's top (#winbar) does. A press there still takes the focus from a field, as a press on nothing would. In
+ * full screen the buttons are gone, and so is their room (asked again once the way out of it has ended).
+ */
+function macTitleBar() {
+  const top = $("top"), app = document.querySelector(".app"), bar = document.body.appendChild(el("div", { id: "winbar" })), html = document.documentElement;
+  top.dataset.tauriDragRegion = "deep"; app.dataset.tauriDragRegion = ""; bar.dataset.tauriDragRegion = "";   // .app: its margin only, not what is in it
+  for (const n of [top, app, bar]) n.addEventListener("pointerdown", (e) => { if (!e.target.closest("button,select")) document.activeElement?.blur?.(); });
+  const win = globalThis.__TAURI__.window.getCurrentWindow(), room = () => win.isFullscreen().then((full) => html.classList.toggle("macbar", !full)).catch(() => {});
+  html.classList.add("macbar");
+  addEventListener("resize", () => { later("macbar", 150, room); later("macbar-out", 1000, room); });
+}
 /** The page's ground (#ambient): the cover as last drawn, tiny — CSS blurs it — so the glass takes its colours. */
 function paintAmbient() {
   const src = $("cv"), dst = $("amb");
@@ -6617,6 +6633,7 @@ async function start() {
   setGlass(glassOn());
   const probe = document.body.appendChild(el("div", { style: "position:absolute;top:-99px;width:60px;height:60px;overflow:scroll" }));
   document.documentElement.classList.toggle("bars", probe.offsetWidth > probe.clientWidth); probe.remove();   // scrollbars that take room: drawn thin (index.html)
+  if (isMac) macTitleBar();
   setLang(S.settings.lang || detectLang());
   for (const name of await files.list("fonts").catch(() => [])) {   // nothing is written for a font missed
     if (name.endsWith(".font")) { const src = await files.read("fonts/" + name).catch(() => null); if (src) await registerFont(name.slice(0, -5), src); }
