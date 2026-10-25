@@ -8,7 +8,8 @@
     "dev": "tauri dev",
     "build": "tauri build",
     "styles": "node scripts/repaint-styles.mjs",
-    "test": "node scripts/repaint-styles.mjs --check && node --test tests/*.test.mjs"
+    "tools": "node scripts/tools.mjs",
+    "test": "node scripts/repaint-styles.mjs --check && node scripts/tools.mjs --check && node --test tests/*.test.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
