@@ -2158,12 +2158,14 @@ Then the format, resolution and file names with an example (and *Batch export…
 ⌘E again — does nothing. The folder is the profile's (`exportDir()`, `settings.exportDirs`; none where the
 host saves no files, `CAN.saveFiles`, and the files download): with none kept the first export asks
 (`pickExportDir()`), and a single size saved through the save dialog keeps the folder it went into (`keepExportDir()`);
-`writeJobs()` writes every job there; `runExport()` hands a failure to it instead of a toast, and any failure to write
+`writeJobs()` writes every job there, through `writeInto(dir, jobs)`, which writes them into one folder once and
+asks nothing (`{n, paths, err}`); `runExport()` hands a failure to it instead of a toast, and any failure to write
 into the folder — gone, moved, its disk away, no right to write, read-only, full: any error of the system's, or
 `write_image`'s "not a folder" — has `askOtherDir()` say so and ask for another, which is kept, and write them all
 there. Only what is not the folder's fault is reported as it is, the folder kept: a picture that could not be encoded, a
 file name the system refuses, a body that came wrong (the messages `encode`, `invalid file name`, `expected a binary
-body`). Within one export no two files get one name: `runExport()` keeps the names given, compared as the disk compares
+body`: `NOT_THE_FOLDER`). `runExport()`, `nameFor()`, `framed()` and `renderReady()` take the format, resolution and
+names (`out`), and `runExport()` what shows its progress, in place of the settings' and the modal's. Within one export no two files get one name: `runExport()` keeps the names given, compared as the disk compares
 them (NFC, one case: one file on APFS and NTFS), and one given already (a pattern without `{size}`, say) gets the size
 after it as `_<w>x<h>` (not when the name has it already), then a number (`apart()`), so no file of the export writes over another. Only the files of one export are kept apart: one of the same name already in the folder, from an earlier export, is replaced (`write_image` writes with `fs::write`). The row shows the folder with the home
 folder as ~ (`shortDir()`, but not `/Users/Shared` or `C:\Users\Public`), all of it on hover. The

@@ -6774,27 +6774,39 @@ function tick3d() {
 }
 
 // ---------- export
-function renderFull(size, cover, index) {
+/**
+ * Cover `cover` (channel `index`'s) drawn on a canvas of its own at size `size`, as exported: `pixelW` pixels wide, by
+ * default the size's width at `scale` (the resolution set, settings.scale), in profile `profile`'s style (the current one's).
+ */
+function renderFull(size, cover, index, { profile = S.profile, pixelW = null, scale = S.settings.scale } = {}) {
   const cv = document.createElement("canvas");
-  paint(cv, size, size.w * S.settings.scale, cover, index);
+  paint(cv, size, pixelW || size.w * scale, cover, index, null, null, { profile });
   return cv;
 }
 /**
  * renderFull() for an export: effects that reshape letters need the letters' outlines, which are
  * fetched in the background. If drawing the cover asked for any, wait for them and draw it again.
  */
-async function renderReady(size, cover, index) {
+async function renderReady(size, cover, index, how = {}) {
   await ensureFonts(cover.layers);
-  let cv = renderFull(size, cover, index);
-  for (let round = 0; round < 3 && outlinesPending(); round++) { await outlinesSettled(); cv = renderFull(size, cover, index); }
+  let cv = renderFull(size, cover, index, how);
+  for (let round = 0; round < 3 && outlinesPending(); round++) { await outlinesSettled(); cv = renderFull(size, cover, index, how); }
   return cv;
 }
-const nameFor = (size, cover, index) => exportName(S.settings.nameTemplate, { index, cat: S.profile.categories[index], title: cover.title, size, scale: S.settings.scale, ext: EXT[S.settings.format] });
+/**
+ * The file name a cover is exported under (see exportName in store.js); `out` ({nameTemplate, scale, format}, each
+ * optional) in place of the settings' own.
+ */
+const nameFor = (size, cover, index, { nameTemplate = S.settings.nameTemplate, scale = S.settings.scale, format = S.settings.format } = {}) =>
+  exportName(nameTemplate, { index, cat: S.profile.categories[index], title: cover.title, size, scale, ext: EXT[format] });
 /** PNG bytes of a canvas. Encoding is asynchronous, so the window keeps responding meanwhile. */
 const toPng = (cv) => new Promise((res, rej) => cv.toBlob((b) => (b ? b.arrayBuffer().then((a) => res(new Uint8Array(a)), rej) : rej(new Error("could not encode the image"))), "image/png"));
-/** Body of a binary export call: [u32 LE length][JSON metadata][PNG bytes] (see parse_frame in lib.rs). */
-function framed(png, extra) {
-  const meta = new TextEncoder().encode(JSON.stringify({ dir: "", ...extra, format: S.settings.format, quality: S.settings.quality }));
+/**
+ * Body of a binary export call: [u32 LE length][JSON metadata][PNG bytes] (see parse_frame in lib.rs). The file is
+ * written in `out`'s format and quality ({format, quality}, each optional), else the settings'.
+ */
+function framed(png, extra, { format = S.settings.format, quality = S.settings.quality } = {}) {
+  const meta = new TextEncoder().encode(JSON.stringify({ dir: "", ...extra, format, quality }));
   const out = new Uint8Array(4 + meta.length + png.length);
   new DataView(out.buffer).setUint32(0, meta.length, true);
   out.set(meta, 4); out.set(png, 4 + meta.length);
@@ -6803,8 +6815,7 @@ function framed(png, extra) {
 /** Resolves once the browser has had a chance to paint (or shortly after, when the window is hidden). */
 const nextPaint = () => new Promise((r) => { requestAnimationFrame(() => setTimeout(r, 0)); setTimeout(r, 80); });
 function browserSave(name, href) { const a = el("a", { href, download: name }); document.body.append(a); a.click(); a.remove(); }
-function browserSaveCanvas(cv, name) {   // plain-browser fallback: the browser encodes; a dark matte under JPEG
-  const { format, quality } = S.settings;
+function browserSaveCanvas(cv, name, { format = S.settings.format, quality = S.settings.quality } = {}) {   // plain-browser fallback: the browser encodes; a dark matte under JPEG
   let src = cv;
   if (format === "jpeg") { src = el("canvas", { width: cv.width, height: cv.height }); const x = src.getContext("2d"); x.fillStyle = "#0a0a12"; x.fillRect(0, 0, src.width, src.height); x.drawImage(cv, 0, 0); }
   return new Promise((res) => src.toBlob((b) => { const url = URL.createObjectURL(b); browserSave(name, url); setTimeout(() => URL.revokeObjectURL(url), 4000); res(); }, "image/" + format, quality / 100));
@@ -6827,11 +6838,13 @@ function progress(total) {
  * Exports jobs ([{cover, index, size}]) one after another without freezing the window: each cover is
  * drawn, encoded to PNG off the main thread and handed to Rust as raw bytes, where it is converted
  * and written on a worker thread (up to two at a time) while the next cover is already being drawn.
- * save(bytes, name) does the writing; returns how many were written, or -1 when one could not be, which onFail (a
- * toast, unless told) is told.
+ * save(bytes, name, job) does the writing; returns how many were written, or -1 when one could not be, which onFail (a
+ * toast, unless told) is told. `progress`: what shows how far it has got (progress(total) by default, the modal: an
+ * object with set(done, name), close() and `cancelled`); `out`: the format, resolution and names to use instead of
+ * the settings' (see nameFor).
  */
-async function runExport(jobs, save, onFail = fail) {
-  const prog = progress(jobs.length), pending = new Set(), used = new Set();
+async function runExport(jobs, save, onFail = fail, { progress: track = progress, out = {} } = {}) {
+  const prog = track(jobs.length), pending = new Set(), used = new Set();
   // a name already given in this export (a pattern without the size, or the channel, say) gets the size (as w×h), then a
   // number; told apart as the disk tells them, regardless of case (one file on APFS and NTFS)
   const key = (n) => n.normalize("NFC").toLowerCase();
@@ -6847,11 +6860,11 @@ async function runExport(jobs, save, onFail = fail) {
   try {
     for (const job of jobs) {
       if (prog.cancelled || failed) break;
-      const name = apart(nameFor(job.size, job.cover, job.index), job.size);
+      const name = apart(nameFor(job.size, job.cover, job.index, out), job.size);
       prog.set(done, name);
       await nextPaint();
-      const cv = await renderReady(job.size, job.cover, job.index);
-      const task = (CAN.saveFiles ? toPng(cv).then((bytes) => { cv.width = cv.height = 0; return save(bytes, name); }) : browserSaveCanvas(cv, name))
+      const cv = await renderReady(job.size, job.cover, job.index, { scale: out.scale });
+      const task = (CAN.saveFiles ? toPng(cv).then((bytes) => { cv.width = cv.height = 0; return save(bytes, name, job); }) : browserSaveCanvas(cv, name, out))
         .then(() => { done++; prog.set(done); }, (e) => { failed = failed || e; })
         .finally(() => pending.delete(task));
       pending.add(task);
@@ -6884,6 +6897,19 @@ function askOtherDir(dir, err) {
     m.hidden = false;
   });
 }
+/** A failure to write an export that is not the folder's fault: a picture not encoded, a name the system refuses, a body that came wrong. */
+const NOT_THE_FOLDER = /encode|invalid file name|expected a binary body/i;
+/**
+ * Writes jobs into folder `dir`, once, asking nothing: resolves with how many were written (as runExport), each file
+ * written ({name, path, job}, in the order they were done) and what stopped it (null: nothing). `opts`: runExport's
+ * ({progress, out}), `out` also the format and quality the files are written in.
+ */
+async function writeInto(dir, jobs, opts = {}) {
+  let err = null;
+  const paths = [];
+  const n = await runExport(jobs, async (bytes, name, job) => { paths.push({ name, path: await invoke("write_image", framed(bytes, { dir, name }, opts.out)), job }); }, (e) => { err = e; }, opts);
+  return { n, paths, err };
+}
 /**
  * Writes jobs into the profile's export folder, asking for one when none is kept yet; where writing there fails, says
  * so and asks for another, and writes them all there. Resolves with how many were written, where, and the last file's
@@ -6892,10 +6918,9 @@ function askOtherDir(dir, err) {
 async function writeJobs(jobs) {
   let dir = exportDir() || (await pickExportDir());
   while (dir) {
-    let err = null, last = "";
-    const n = await runExport(jobs, async (bytes, name) => { last = await invoke("write_image", framed(bytes, { dir, name })); }, (e) => { err = e; });
-    if (!err) return { n, dir, last };
-    if (/encode|invalid file name|expected a binary body/i.test(String((err && err.message) || err))) { fail(err); return null; }   // a picture not encoded, a name the system refuses: not the folder's fault
+    const { n, paths, err } = await writeInto(dir, jobs);
+    if (!err) return { n, dir, last: paths.length ? paths[paths.length - 1].path : "" };
+    if (NOT_THE_FOLDER.test(String((err && err.message) || err))) { fail(err); return null; }   // a picture not encoded, a name the system refuses: not the folder's fault
     dir = await askOtherDir(dir, err);
   }
   return null;
