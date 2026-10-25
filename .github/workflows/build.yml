@@ -64,9 +64,8 @@ jobs:
         with:
           targets: ${{ matrix.rust-targets }}
 
+      # The Cargo workspace is the repository's root, its target/ folder there (the action's default).
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
 
       - run: npm ci
 
@@ -74,8 +73,7 @@ jobs:
         run: npm test
 
       - name: Run Rust tests
-        working-directory: src-tauri
-        run: cargo test
+        run: cargo test --workspace --locked
 
       - name: Build installers
         uses: tauri-apps/tauri-action@v0
@@ -95,10 +93,10 @@ jobs:
           name: smedcover-${{ matrix.artifact }}
           if-no-files-found: error
           path: |
-            src-tauri/target/**/release/bundle/dmg/*.dmg
-            src-tauri/target/**/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/**/release/bundle/nsis/*.exe
-            src-tauri/target/**/release/bundle/msi/*.msi
-            src-tauri/target/**/release/bundle/deb/*.deb
-            src-tauri/target/**/release/bundle/rpm/*.rpm
-            src-tauri/target/**/release/bundle/appimage/*.AppImage
+            target/**/release/bundle/dmg/*.dmg
+            target/**/release/bundle/macos/*.app.tar.gz
+            target/**/release/bundle/nsis/*.exe
+            target/**/release/bundle/msi/*.msi
+            target/**/release/bundle/deb/*.deb
+            target/**/release/bundle/rpm/*.rpm
+            target/**/release/bundle/appimage/*.AppImage

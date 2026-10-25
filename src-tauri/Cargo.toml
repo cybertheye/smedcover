@@ -1,10 +1,10 @@
 [package]
 name = "smedcover"
-version = "0.3.1"
+version.workspace = true
 description = "Branded cover-image generator for video creators"
-license = "AGPL-3.0-or-later"
-authors = ["cybertheye"]
-edition = "2021"
+license.workspace = true
+authors.workspace = true
+edition.workspace = true
 
 [lib]
 name = "smedcover_lib"
@@ -40,7 +40,3 @@ zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSString", "NSIndexSet"] }
-
-# Dependencies are optimised even in development builds: the image codecs are far too slow otherwise.
-[profile.dev.package."*"]
-opt-level = 3

@@ -1,0 +1,16 @@
+# The Rust side of SmedCover is one Cargo workspace: one lock file and one target/ folder, here at the root.
+# `src-tauri/` is the desktop app; `tauri build` and `tauri dev` build it from its own folder.
+[workspace]
+resolver = "2"
+members = ["src-tauri"]
+
+[workspace.package]
+version = "0.3.1"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+authors = ["cybertheye"]
+
+# Dependencies are optimised even in development builds: the image codecs are far too slow otherwise.
+# Cargo reads profiles only from the workspace's root.
+[profile.dev.package."*"]
+opt-level = 3
