@@ -149,6 +149,36 @@ test("checkArgs says in a sentence what is wrong with a call's arguments", () =>
   assert.match(checkArgs(s("set_text"), { title: "x".repeat(2001) }), /"title" must be at most 2000 characters long/);
 });
 
+test("checkArgs counts a string's characters only against a length limit, and without spreading it: a 40 MB picture is checked at once", () => {
+  const big = "A".repeat(40 * 1024 * 1024), s = TOOL_BY.add_photo.inputSchema;
+  let t0 = performance.now();
+  assert.equal(checkArgs(s, { source: { data: big } }), null);
+  assert.ok(performance.now() - t0 < 50, `no limit: not counted (${Math.round(performance.now() - t0)} ms)`);
+  t0 = performance.now();
+  assert.equal(checkArgs({ type: "string", maxLength: 50 * 1024 * 1024 }, big), null);
+  assert.equal(checkArgs({ type: "string", maxLength: 1000 }, big), '"arguments" must be at most 1000 characters long (it has more than 2000).');
+  assert.equal(checkArgs({ type: "string", maxLength: 30 * 1024 * 1024 }, big), `"arguments" must be at most ${30 * 1024 * 1024} characters long (it has ${40 * 1024 * 1024}).`);
+  assert.equal(checkArgs({ type: "string", minLength: 3 }, big), null);
+  assert.match(checkArgs(TOOL_BY.set_look.inputSchema, { look: big }), /^"look" must be one of: .*; got "A{56}…\.$/, "not made JSON of for each look");
+  assert.ok(performance.now() - t0 < 1500, `with limits: counted no further than needed (${Math.round(performance.now() - t0)} ms)`);
+  // characters, as JSON Schema counts them: an astral one (two UTF-16 units) is one
+  const astral = "😀👍🏽𝒳🎉";   // 5 code points, 10 units
+  assert.equal(astral.length, 10); assert.equal([...astral].length, 5);
+  assert.equal(checkArgs({ type: "string", maxLength: 5 }, astral), null);
+  assert.equal(checkArgs({ type: "string", maxLength: 4 }, astral), '"arguments" must be at most 4 characters long (it has 5).');
+  assert.equal(checkArgs({ type: "string", minLength: 5 }, astral), null);
+  assert.equal(checkArgs({ type: "string", minLength: 6 }, astral), '"arguments" must be at least 6 characters long.');
+  assert.equal(checkArgs({ type: "string", minLength: 2, maxLength: 2 }, "\ud83d"), '"arguments" must be at least 2 characters long.', "a lone surrogate is one");
+  assert.equal(checkArgs({ type: "string", maxLength: 1 }, "\ud83d\ud83d"), '"arguments" must be at most 1 characters long (it has 2).');
+  assert.equal(checkArgs({ type: "string", minLength: 1 }, ""), '"arguments" must be at least 1 characters long.');
+  assert.match(checkArgs(TOOL_BY.set_text.inputSchema, { tag: "😀".repeat(201) }), /"tag" must be at most 200 characters long \(it has 201\)/);
+  assert.equal(checkArgs(TOOL_BY.set_text.inputSchema, { tag: "😀".repeat(200) }), null);
+  // a long list is checked for repeats in one pass
+  t0 = performance.now();
+  assert.match(checkArgs({ type: "array", uniqueItems: true }, [...Array.from({ length: 200000 }, (_, i) => `x${i}`), "x7"]), /lists "x7" twice/);
+  assert.ok(performance.now() - t0 < 1000, `${Math.round(performance.now() - t0)} ms`);
+});
+
 test("checkCall checks what a tool needs beyond its schema: at least, exactly or at most one of some arguments", () => {
   assert.equal(checkCall(TOOL_BY.set_text, {}), "Give at least one of: title, subtitle, tag.");
   assert.equal(checkCall(TOOL_BY.set_text, { subtitle: "" }), null);
@@ -598,11 +628,155 @@ test("the dispatcher checks a call, waits for the user, holds the window and mak
   assert.ok(!seen.some(([n]) => n === "list_library"));
 });
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const never = () => new Promise(() => {});
+
+test("the queue lets go of a call that says nothing for its timeout: the next one runs, what it answers later is dropped", async () => {
+  const { makeQueue } = await import("../ui/js/agent.js");
+  const q = makeQueue(), log = [];
+  let late = null;
+  const hung = q.push("hung", async (lease) => { log.push("hung+"); await never(); return lease; }, { timeoutMs: 40, lapsed: (why) => `let go: ${why}` });
+  const slow = q.push("slow", async (lease) => { late = lease; log.push("slow+"); await sleep(120); log.push("slow-"); return "slow, too late"; }, { timeoutMs: 40, lapsed: (why) => `let go: ${why}` });
+  const after = q.push("after", async () => { log.push("after+"); return "after"; });
+  const talks = q.push("talks", async (lease) => { for (let i = 0; i < 6; i++) { await sleep(25); lease.touch(); } return "done"; }, { timeoutMs: 100, lapsed: () => "let go" });
+  assert.equal(await hung, "let go: timeout");
+  assert.equal(await slow, "let go: timeout", "answered at its timeout, not when it ends");
+  assert.equal(late.gone, true);
+  assert.equal(await after, "after");
+  assert.equal(await talks, "done", "each word sets the clock going again: 150 ms of work, never 100 without a word");
+  assert.equal(q.running, null);
+  await sleep(120);
+  assert.deepEqual(log, ["hung+", "slow+", "after+", "slow-"], "the slow call's end came after the queue had gone on, and was dropped");
+  // a failure after being let go is dropped too, not thrown at anyone
+  const failsLate = q.push("x", async () => { await sleep(30); throw new Error("late"); }, { timeoutMs: 10, lapsed: () => "gone" });
+  assert.equal(await failsLate, "gone");
+  await sleep(40);
+});
+
+test("the queue: a call waiting is cancelled (it never runs), the call running is let go of; those waiting are told every so often", async () => {
+  const { makeQueue, CANCELLED } = await import("../ui/js/agent.js");
+  const q = makeQueue(), told = [];
+  const a = q.push("a", () => never(), { lapsed: (why) => `a: ${why}` });
+  const b = q.push("b", async () => "b ran", { waiting: (ms) => told.push(["b", ms]), every: 20 });
+  const c = q.push("c", async () => "c ran", { waiting: (ms) => told.push(["c", ms]), every: 20 });
+  await sleep(110);
+  assert.equal(q.running, "a"); assert.equal(q.waiting, 2);
+  assert.ok(told.filter(([n]) => n === "b").length >= 2 && told.filter(([n]) => n === "c").length >= 2, `each waiting call told so, every 20 ms (${told.length})`);
+  assert.ok(told.every(([, ms]) => ms >= 15));
+  assert.equal(q.cancel("a"), false, "the call running is not taken out of the queue…");
+  assert.equal(q.letGo("b", "x"), false, "…nor let go of under another's id");
+  assert.equal(q.cancel("c"), true);
+  assert.equal(await c, CANCELLED);
+  assert.equal(q.letGo("a", "cancelled"), true, "…but let go of");
+  assert.equal(await a, "a: cancelled");
+  assert.equal(await b, "b ran", "the next one runs");
+  const n = told.length;
+  await sleep(50);
+  assert.equal(told.length, n, "nothing told once a call runs or is cancelled");
+});
+
+test("the dispatcher lets go of a call that hangs: answered failed at its timeout, the window given back, the next call runs, a late failure not put back", async () => {
+  const { makeAgent, stepping } = await import("../ui/js/agent.js");
+  const log = [];
+  let held = null;
+  const commands = Object.fromEntries(TOOLS.map((d) => [d.name, async () => toResult({ structured: { ok: d.name } })]));
+  commands.undo = async () => { held = stepping(); return never(); };   // e.g. undo → timeTravel → applyFonts, waiting for good
+  commands.set_look = async (args, ctx) => { await sleep(60); log.push(`set_look cancelled: ${ctx.cancelled()}`); throw new Error("half done"); };
+  commands.set_text = async (args, ctx) => { for (let i = 0; i < 6; i++) { await sleep(30); ctx.progress(i + 1, 6); } return toResult({ structured: { words: true } }); };
+  const step = async (fn) => { log.push("step in"); try { return await fn(); } catch (e) { log.push("put back"); throw e; } finally { log.push("step out"); } };
+  const agent = makeAgent({ commands, step, quietFor: () => Infinity, every: 20 });
+  const progress = [];
+  const hung = agent.handle({ id: 1, tool: "undo", args: {}, timeoutMs: 50 }), next = agent.handle({ id: 2, tool: "get_context", args: {} }, { progress: (p) => progress.push(p) });
+  const r = await hung;
+  assert.equal(held, true, "the window was held while it ran");
+  assert.equal(r.ok, false); assert.equal(r.error.code, "failed");
+  assert.match(r.error.message, /^undo did not finish: nothing was heard from it for 0 s, so it was let go and the window given back to the user\. It may still finish later: check with get_cover/);
+  assert.equal(stepping(), false, "the window is the user's again");
+  assert.equal((await next).ok, true, "the call behind it runs");
+  assert.ok(progress.some((p) => p.message === "Waiting for an earlier call to finish."), "and was told it waited");
+  // a step that fails after being let go: not put back over what the user has done since, its step ended by step's own finally
+  const s = await agent.handle({ id: 3, tool: "set_look", args: { look: "cyber" }, timeoutMs: 30 });
+  assert.match(s.error.message, /^set_look did not finish/);
+  const warn = console.warn;
+  console.warn = () => {};
+  try { await sleep(60); } finally { console.warn = warn; }
+  assert.deepEqual(log, ["step in", "set_look cancelled: true", "step out"]);
+  // a call that keeps saying how far it has got is never let go of, however long it takes
+  const words = [], w = await agent.handle({ id: 4, tool: "set_text", args: { title: "x" }, timeoutMs: 100 }, { progress: (p) => words.push(p) });
+  assert.equal(w.ok, true);
+  assert.deepEqual(words.map((p) => p.progress), [1, 2, 3, 4, 5, 6], "180 ms of work, never 100 without a word");
+});
+
+test("the dispatcher: a call the host cancels while it runs is let go of after a moment, the window given back; one waiting never runs", async () => {
+  const { makeAgent, stepping, CANCELLED } = await import("../ui/js/agent.js");
+  let ran = [];
+  const commands = Object.fromEntries(TOOLS.map((d) => [d.name, async () => { ran.push(d.name); return toResult({ structured: {} }); }]));
+  commands.redo = () => never();
+  commands.export = async (args, ctx) => { while (!ctx.cancelled()) await sleep(5); return toResult({ text: "Stopped after 2 files." }); };   // checks between files
+  const agent = makeAgent({ commands, quietFor: () => Infinity, grace: 30 });
+  const running = agent.handle({ id: "r", tool: "redo", args: {} }), queued = agent.handle({ id: "q", tool: "get_cover", args: {} }), after = agent.handle({ id: "n", tool: "get_context", args: {} });
+  await sleep(10);
+  assert.equal(stepping(), true);
+  assert.equal(agent.cancel("q"), true, "a call waiting: taken out");
+  assert.equal(agent.cancel("r"), false, "a call running: told, and let go of after the grace");
+  const t0 = performance.now(), r = await running;
+  assert.ok(performance.now() - t0 >= 15, "not before the grace");
+  assert.deepEqual(r.error, { code: "failed", message: "redo was cancelled before it finished; the window is the user's again. It may still finish later: check with get_cover before going on." });
+  assert.equal(stepping(), false);
+  assert.equal(await queued, CANCELLED);
+  assert.equal((await after).ok, true);
+  assert.deepEqual(ran, ["get_context"], "the cancelled call never ran");
+  // one that heeds ctx.cancelled() ends by itself within the grace, and answers as it does
+  const ex = agent.handle({ id: "e", tool: "export", args: {} });
+  await sleep(10);
+  agent.cancel("e");
+  assert.deepEqual((await ex).result.content, [{ type: "text", text: "Stopped after 2 files." }]);
+  // cancelled while it waits for the user: it stops waiting and never runs
+  ran = [];
+  const shy = makeAgent({ commands, busy: () => "a dialog is open", quietFor: () => Infinity, grace: 10 });
+  const waits = shy.handle({ id: "w", tool: "set_text", args: { title: "x" } });
+  await sleep(20);
+  shy.cancel("w");
+  assert.equal((await waits).error.message, "set_text was cancelled before it finished.", "it had not begun: no window to give back");
+  await sleep(150);
+  assert.deepEqual(ran, []);
+});
+
+test("the dispatcher always answers: a name of Object.prototype is no tool, a throw while the window is taken still answers and gives it back", async () => {
+  const { makeAgent, stepping, serve } = await import("../ui/js/agent.js");
+  const commands = Object.fromEntries(TOOLS.map((d) => [d.name, async () => toResult({ structured: {} })]));
+  const agent = makeAgent({ commands, quietFor: () => Infinity });
+  for (const tool of ["toString", "constructor", "__proto__", "hasOwnProperty", "valueOf", 7, null, undefined]) {
+    const r = await agent.handle({ id: "p", tool, args: {} });
+    assert.equal(r.error.code, "unknown_tool", String(tool));
+  }
+  const odd = makeAgent({ commands: { ...commands, toString: async () => toResult({}) }, quietFor: () => Infinity });
+  assert.equal((await odd.handle({ id: "o", tool: "toString" })).error.code, "unknown_tool", "a command that is no tool is not run");
+  assert.equal((await agent.handle(null)).ok, false, "no call at all is answered too");
+  const said = console.error;
+  console.error = () => {};
+  try {
+    const broken = makeAgent({ commands, quietFor: () => Infinity, closeTransient: () => { throw new Error("a popover would not shut"); } });
+    assert.deepEqual((await broken.handle({ id: "b", tool: "set_look", args: { look: "cyber" } })).error, { code: "failed", message: "set_look failed: a popover would not shut" });
+    assert.equal(stepping(), false, "the window given back");
+    assert.equal((await broken.handle({ id: "c", tool: "get_context", args: {} })).ok, true, "and the next call runs");
+    const busy = makeAgent({ commands, quietFor: () => Infinity, busy: () => { throw new Error("busy broke"); } });
+    assert.deepEqual((await busy.handle({ id: "d", tool: "get_context", args: {} })).error, { code: "failed", message: "get_context failed: busy broke" });
+    // serve answers each call, whatever the dispatcher does
+    const replies = [];
+    let onCall;
+    serve({ handle: (call) => (call.tool === "x" ? Promise.reject(new Error("lost")) : Promise.resolve({ id: call.id, ok: true })) }, { listen: (c) => { onCall = c; }, reply: (id, r) => replies.push(r), progress: () => {} });
+    onCall({ id: 1, tool: "x" }); onCall({ id: 2, tool: "y" });
+    await sleep(5);
+    assert.deepEqual(replies.sort((a, b) => a.id - b.id), [{ id: 1, ok: false, error: { code: "failed", message: "The call failed: lost" } }, { id: 2, ok: true }]);
+  } finally { console.error = said; }
+});
+
 test("every tool that changes something says in both languages what it is doing, for the pill over the window", async () => {
   const { keys } = await import("../ui/js/i18n.js");
   const have = new Set(keys());
   for (const d of TOOLS) if (!d.annotations.readOnlyHint) assert.ok(have.has(`agent.step.${d.name}`), d.name);
-  for (const k of ["agent.working", "agent.wait", "agent.switched", "agent.exporting"]) assert.ok(have.has(k), k);
+  for (const k of ["agent.working", "agent.wait", "agent.switched", "agent.exporting", "agent.slow", "agent.stop", "agent.stopTip"]) assert.ok(have.has(k), k);
   for (const k of have) if (k.startsWith("agent.step.")) assert.ok(TOOL_BY[k.slice(11)] && !TOOL_BY[k.slice(11)].annotations.readOnlyHint, `${k}: a tool that changes something`);
 });
 

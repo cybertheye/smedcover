@@ -284,12 +284,34 @@ export const toolsText = () => JSON.stringify(toolsJson(), null, 2) + "\n";
 // ---------- checking a call's arguments (a subset of JSON Schema: what the tools' schemas use)
 const kindOf = (v) => (v === null ? "null" : Array.isArray(v) ? "array" : Number.isInteger(v) ? "integer" : typeof v);
 const fits = (v, type) => (type === "number" ? typeof v === "number" && Number.isFinite(v) : type === "integer" ? Number.isInteger(v) : kindOf(v) === type);
-const shown = (v) => { const s = JSON.stringify(v); return s === undefined ? String(v) : s.length > 60 ? s.slice(0, 57) + "…" : s; };
+const shown = (v) => { const s = JSON.stringify(typeof v === "string" && v.length > 60 ? v.slice(0, 60) : v); return s === undefined ? String(v) : s.length > 60 ? s.slice(0, 57) + "…" : s; };   // a long string cut before it is quoted
 const named = (path) => `"${path || "arguments"}"`;
 const article = (type) => (/^[aeiou]/.test(type) ? "an " : "a ") + type;
 /** How a pattern is said in a message. */
 const SAYS = { [HEX]: '"#rrggbb"', [HEX_OR_AUTO]: '"#rrggbb" or "auto"' };
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const same = (a, b) => a === b || (!!a && !!b && typeof a === "object" && typeof b === "object" && JSON.stringify(a) === JSON.stringify(b));   // a string never made JSON of
+/**
+ * How many characters (code points) string `s` has, counting no further than `most`: an astral character, two UTF-16
+ * units, is one, as JSON Schema counts them; a string of millions is not spread into an array to count it.
+ */
+function charCount(s, most = Infinity) {
+  let n = 0;
+  for (let i = 0; i < s.length && n < most; i++, n++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) { const d = s.charCodeAt(i + 1); if (d >= 0xdc00 && d <= 0xdfff) i++; }
+  }
+  return n;
+}
+/** What is wrong with the length of string `v` at `path` against minLength and maxLength, null when nothing is: its units first (at least its characters, at most twice them), counted only when they cannot tell. */
+function wrongLength(schema, v, path) {
+  const lo = schema.minLength, hi = schema.maxLength;
+  if (hi != null && v.length > hi) {
+    const n = charCount(v, 2 * hi + 1);
+    if (n > hi) return `${named(path)} must be at most ${hi} characters long (it has ${n > 2 * hi ? `more than ${2 * hi}` : n}).`;
+  }
+  if (lo != null && v.length < 2 * lo && (v.length < lo || charCount(v, lo) < lo)) return `${named(path)} must be at least ${lo} characters long.`;
+  return null;
+}
 /** What is wrong with value `v` at `path` against `schema`, in a sentence; null when nothing is. */
 function wrong(schema, v, path) {
   if (!schema || typeof schema !== "object") return null;
@@ -311,15 +333,14 @@ function wrong(schema, v, path) {
     if (schema.maximum != null && v > schema.maximum) return `${named(path)} must be at most ${schema.maximum} (got ${v}).`;
   }
   if (typeof v === "string") {
-    const n = [...v].length;
-    if (schema.minLength != null && n < schema.minLength) return `${named(path)} must be at least ${schema.minLength} characters long.`;
-    if (schema.maxLength != null && n > schema.maxLength) return `${named(path)} must be at most ${schema.maxLength} characters long (it has ${n}).`;
+    const long = schema.minLength != null || schema.maxLength != null ? wrongLength(schema, v, path) : null;
+    if (long) return long;
     if (schema.pattern && !new RegExp(schema.pattern, "u").test(v)) return `${named(path)} must be ${SAYS[schema.pattern] || `of the form ${schema.pattern}`}; got ${shown(v)}.`;
   }
   if (Array.isArray(v)) {
     if (schema.minItems != null && v.length < schema.minItems) return `${named(path)} must have at least ${schema.minItems} item${schema.minItems === 1 ? "" : "s"} (it has ${v.length}).`;
     if (schema.maxItems != null && v.length > schema.maxItems) return `${named(path)} must have at most ${schema.maxItems} items (it has ${v.length}).`;
-    if (schema.uniqueItems) { const seen = v.map((x) => JSON.stringify(x)), twice = seen.find((x, i) => seen.indexOf(x) !== i); if (twice !== undefined) return `${named(path)} lists ${twice} twice.`; }
+    if (schema.uniqueItems) { const seen = new Set(); for (const x of v) { const k = JSON.stringify(x); if (seen.has(k)) return `${named(path)} lists ${k.length > 60 ? k.slice(0, 57) + "…" : k} twice.`; seen.add(k); } }   // in one pass, however long the list
     if (schema.items) for (let i = 0; i < v.length; i++) { const m = wrong(schema.items, v[i], `${path}[${i}]`); if (m) return m; }
   }
   if (kindOf(v) === "object") {
