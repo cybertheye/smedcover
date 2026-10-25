@@ -1481,8 +1481,9 @@ and the undo history.
 After changing data, code calls `touch({ profile, cover, panel, side, strip })`, which marks what
 needs saving, schedules a redraw, rebuilds a part of the window if asked — `panel` the sheet open on the left, or the
 Settings page while Settings is open (`renderPanel()`); `side` the layer list, the properties drawer and the bar over
-the canvas (`renderSide()`); `strip` the size thumbnails under the canvas (`buildStrip()`) — and records undo
-history. Saving, redrawing and history are debounced, so a long drag does not write to disk
+the canvas (`renderSide()`); `strip` the size thumbnails under the canvas (`buildStrip()`, for sizes added, gone or renamed: it keeps each size's
+picture till it is drawn again, and shapes a new one as its size, so the tray never overflows for a moment with blank
+300 × 150 canvases, its scrollbar making it taller and the canvas smaller) — and records undo history. Saving, redrawing and history are debounced, so a long drag does not write to disk
 repeatedly. A change that leaves the Look sheet as it is still has its cards drawn again, half a second later, where
 what they show has changed (`refreshLookCards()`, see 9.5).
 

@@ -416,10 +416,17 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) flush
 new ResizeObserver(() => S.profile && queueDraw()).observe($("stage"));
 
 $("strip").addEventListener("wheel", (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.preventDefault(); $("strip").scrollLeft += e.deltaY; } }, { passive: false });
+/**
+ * The tray's thumbnails anew (a size added or gone, a name changed). A size's picture already there is kept till
+ * drawThumbs draws it again, and a new one is shaped as its size from the first: an empty canvas is 300 × 150, and
+ * a strip of those, wider than the pictures, overflowed till they were drawn, its scrollbar making the tray taller
+ * and the canvas over it smaller for a moment.
+ */
 function buildStrip() {
   $("strip").replaceChildren(...S.profile.sizes.map((size) => {
-    const key = sizeKey(size);
-    return el("figure", { class: key === S.sel ? "on" : "", onclick: () => selectSize(key) }, el("canvas", { id: "th-" + key }),
+    const key = sizeKey(size), [w, h] = virtualSize(size.w, size.h);
+    const cv = $("th-" + key) || el("canvas", { id: "th-" + key, width: Math.round(w * 0.2), height: Math.round(h * 0.2) });
+    return el("figure", { class: key === S.sel ? "on" : "", onclick: () => selectSize(key) }, cv,
       el("figcaption", { title: sizeLabel(size) }, ratioText(size.w, size.h), el("span", { class: "own", title: t("style.ownMark") }, "◆")));   // the ratio alone (what it is called and its pixels show on hover and over the canvas), marked when the size has a layout of its own
   }));
   markStrip();
@@ -3437,7 +3444,7 @@ function pickLook(id) {
   endPreview("look");
   const st = S.profile.style;
   if (st.look === id) return;
-  st.look = id; countLook(id); touch({ profile: true, panel: true, side: true, strip: true });
+  st.look = id; countLook(id); touch({ profile: true, panel: true, side: true });   // the sizes are as they were: the thumbnails are drawn again in the look, not built anew
 }
 /** Over the canvas while a look, a text effect or a layout preset is previewed: which, and how it is put on; the preset's card says so too. */
 function previewTag() {
