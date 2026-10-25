@@ -864,6 +864,8 @@
   #modal .prog i{display:block;height:100%;width:0;background:var(--acc);transition:width .15s}
   #modal .count{font:600 15px var(--mono)}
   #modal h2,#ask h2{font:900 22px var(--ui);letter-spacing:.02em;margin:0}
+  #modal .dlg.welcome .head{display:flex;align-items:center;gap:14px}   /* the first start's welcome: its title, and the language at the right */
+  #modal .dlg.welcome .head h2{flex:1;min-width:0}
   /* a question asked before something is done that cannot be taken back (askSure in app.js): a layer of its own over
      Settings, a dialog or the layout editor; the safe choice has the focus, a destructive answer is red */
   #ask{z-index:44}
