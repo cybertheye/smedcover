@@ -8572,7 +8572,7 @@ async function agentTest(dir) {
   if (!noStep) no("agentStep: a change of nothing made a step");
   if (!putBack) no("agentStep: a change that failed was not put back, or cut off redo");
   // what goes wrong answers as the host expects; a call waits for a dialog
-  const errs = { unknown: await call("draw_me"), invalid: await call("render_preview", { maxSide: 9 }), notYet: await call("set_text", { title: "x" }) };
+  const errs = { unknown: await call("draw_me"), invalid: await call("render_preview", { maxSide: 9 }), notYet: await call("crop_photo", { layer: "title", reset: true }) };
   r.answers = Object.fromEntries(Object.entries(errs).map(([k, x]) => [k, x.ok ? "ok" : x.error.code]));
   if (r.answers.unknown !== "unknown_tool" || r.answers.invalid !== "invalid_arguments" || r.answers.notYet !== "unavailable") no(`errors answered ${JSON.stringify(r.answers)}`);
   if (S.histIdx !== j0) no("a tool that is not done yet made a step");
@@ -8582,8 +8582,137 @@ async function agentTest(dir) {
   r.waitedForDialog = Math.round(performance.now() - t0);
   if (!waited.ok || r.waitedForDialog < 300) no(`a call did not wait for the dialog (${r.waitedForDialog} ms)`);
   S.cover.title = keep.title; S.cover.tag = keep.tag; touch({ cover: true, panel: true, side: true }); commitPending();
+  await agentToolsTest({ call, ok, r, no });
   r.ok = !r.errors.length;
   return r;
+}
+/**
+ * The agent's tools that change the cover, in the self-test (agentTest's `call`, `ok`, report `r` and `no`): each called
+ * through the dispatcher on the self-test cover makes exactly one step (none when nothing changed, none for a call
+ * refused), undo brings back the state before it and redo the change; a call aimed at another channel switches the
+ * window there, its change the first step of the new history; agentStep put back after a switch done (kept) and
+ * after one begun and not done (undone, the history and its redo as they were). The cover, the profile and the channel
+ * shown are put back as they were. Findings under r.tools, r.refused, r.switch and r.rollback.
+ */
+async function agentToolsTest({ call, ok, r, no }) {
+  const home = S.cover.catId, start = snapshot(), others = S.profile.categories.filter((c) => c.id !== home).map((c) => c.id), kept = Object.fromEntries(others.map((id) => [id, copyOf(S.covers[id])]));
+  const norm = (snap) => { const { p, c } = JSON.parse(snap), q = normalizeProfile(p); return { p: q, c: normalizeCover(c, q) }; };
+  const same = (a, b) => sameValue(JSON.parse(a), JSON.parse(b)) || sameValue(norm(a), norm(b));   // as stored, or as read back
+  r.tools = []; r.refused = [];
+  /**
+   * A change through the dispatcher: `steps` new steps (1; 0 for nothing changed; "switch": the window switched, the
+   * change the first step of a new history), then undone (back to the state before it, or on arriving) and done again.
+   */
+  const change = async (tool, args, steps = 1) => {
+    commitPending();
+    const fresh = steps === "switch", want = fresh ? 1 : steps, before = snapshot(), i0 = S.histIdx, x = await call(tool, args), got = { tool, steps: fresh ? S.histIdx : S.histIdx - i0 };
+    if (!x.ok) { no(`${tool} ${JSON.stringify(args)}: ${x.error.code}: ${x.error.message}`); r.tools.push({ ...got, error: x.error.code }); return null; }
+    const s = x.result.structuredContent || {}, base = fresh ? S.hist[0] : before;
+    if (got.steps !== want || S.hist.length !== S.histIdx + 1) no(`${tool} ${JSON.stringify(args)}: ${got.steps} steps of undo, not ${want}`);
+    if (want) {
+      const after = snapshot();
+      await ok("undo"); got.undo = same(snapshot(), base);
+      await ok("redo"); got.redo = same(snapshot(), after);
+      if (!got.undo) no(`${tool}: undo did not bring back the state before it`);
+      if (!got.redo) no(`${tool}: redo did not bring the change back`);
+    }
+    if (s.warnings) got.warnings = s.warnings;
+    r.tools.push(got);
+    return s;
+  };
+  /** A call refused: answered with `code`, no step, nothing changed. */
+  const refuse = async (tool, args, code = "invalid_arguments") => {
+    commitPending();
+    const before = snapshot(), i0 = S.histIdx, len = S.hist.length, x = await call(tool, args), fine = !x.ok && x.error.code === code && S.histIdx === i0 && S.hist.length === len && snapshot() === before;
+    r.refused.push({ tool, code: x.ok ? "ok" : x.error.code, fine });
+    if (!fine) no(`${tool} ${JSON.stringify(args)}: not refused as ${code} without a step (${x.ok ? "done" : x.error.message})`);
+  };
+  // the words, the look, the channel
+  await change("set_text", { title: "Agent *tools*\nself test", subtitle: "One step each", tag: "AG.01" });
+  await change("set_text", { tag: "AG.01" }, 0);
+  await change("set_look", { look: S.profile.style.look === "riso" ? "cyber" : "riso", seed: 321 });   // looks with settings of their own
+  const lk = LOOKS[S.profile.style.look], d = lk.params.find((q) => !q.text && !q.toggle);
+  const s = await change("set_look", { params: { [d.key]: d.max + 1 } }, lookParams(lk.id, S.profile.style.lookParams[lk.id])[d.key] === d.max ? 0 : 1);
+  if (!s || !s.warnings || s.params[d.key] !== d.max) no(`set_look: ${d.key} not clamped to ${d.max} and said`);
+  await change("set_channel", { channel: home, color: "#33aa77" });
+  // a layer's place, effect, font, bend, colours, and whether it shows
+  const placed = await change("place_layer", { layer: "title", x: 0.02, y: -0.03, scale: 1.1, rotate: 3 });
+  if (placed && (placed.place.x !== 0.02 || placed.place.y !== -0.03 || placed.place.s !== 1.1 || placed.place.r !== 3 || !placed.box)) no(`place_layer: placed at ${JSON.stringify(placed.place)}, box ${JSON.stringify(placed.box)}`);
+  const tallSize = S.profile.sizes.find((z) => z.h > z.w);
+  if (tallSize) {
+    await change("place_layer", { layer: "title", move: { dx: 0.05 }, size: sizeKey(tallSize), scope: "size" });
+    if (S.sel !== sizeKey(tallSize)) no("place_layer: the size asked is not the one the window shows");
+    selectSize(sizeKey(S.profile.sizes[0]));
+  }
+  await change("place_layer", { layer: "title", reset: true });
+  await change("set_layer_effect", { layer: "title", effect: "dots", amount: 1.3 });
+  if (CAN.outlines) await change("set_layer_effect", { layer: "subtitle", effect: "torn" });
+  await change("set_layer_font", { layer: "title", font: "bebas neue" });
+  await change("set_layer_font", { layer: "title", font: "" });
+  await change("set_layer_bend", { layer: "title", bend: "wave", amount: 1.2 });
+  await change("set_layer_color", { layer: "title", ink: "#FFFFFF", hi: "#ff3366", plate: true, plateInk: "#111111" });
+  await change("show_layer", { layer: "subtitle", visible: false });
+  if (layer("catname")) { await change("show_layer", { layer: "catname", included: !!layer("catname").off }); await change("show_layer", { layer: "catname", included: !!layer("catname").off }); }
+  await change("show_layer", { layer: "tag", opacity: 0.6, sizes: [sizeKey(S.profile.sizes[0])] });
+  // the stack
+  const tx = await change("add_layer", { kind: "text", text: "AGENT *TEXT*", at: { x: 0.7, y: 0.8 }, scale: 0.3 });
+  if (tx && S.cover.layers.at(-1).id !== tx.layer.id) no("add_layer: the text added is not on top");
+  const st = await change("add_layer", { kind: "asset", asset: { kind: "sticker", id: STICKERS[0].id }, above: "title" });
+  if (st && S.cover.layers[S.cover.layers.findIndex((l) => l.id === "title") + 1].id !== st.layer.id) no("add_layer: the sticker is not just above the title");
+  const so = await change("add_layer", { kind: "solid", color: "#224488", above: "bg", scale: 0.5 });
+  const cp = await change("add_layer", { kind: "copy", of: "subtitle" });
+  if (cp && (cp.layer.kind !== "copy" || S.cover.layers[S.cover.layers.findIndex((l) => l.id === cp.layer.id) - 1].id !== "subtitle")) no("add_layer: the copy is not a copy just above what it copies");
+  if (tx && st && so && cp) {
+    await change("reorder_layer", { layer: st.layer.id, to: "bottom" });
+    if (S.cover.layers[1].id !== st.layer.id) no("reorder_layer: not at the bottom");
+    await change("reorder_layer", { layer: st.layer.id, above: tx.layer.id });
+    await change("reorder_layer", { layer: tx.layer.id, to: "down" });
+    const gone = await change("remove_layer", { layer: so.layer.id });
+    if (gone && (gone.removed.join() !== so.layer.id || layer(so.layer.id))) no("remove_layer: the solid is not gone");
+  }
+  // refused, each before anything is touched
+  await refuse("remove_layer", { layer: "title" });
+  await refuse("place_layer", { layer: "frame", x: 0.5 });
+  await refuse("place_layer", { layer: "bg", scale: 2 });
+  await refuse("set_layer_font", { layer: "title", font: "No Such Font 4242" });
+  await refuse("set_look", { params: { noSuchSetting: 1 } });
+  await refuse("set_look", { params: JSON.parse('{"__proto__": 1}') });
+  await refuse("add_layer", { kind: "copy", of: "frame" });
+  if (others.length) await refuse("remove_layer", { layer: "title", channel: others[0] });
+  if (S.cover.catId !== home) no("a call refused switched the window");
+  // aimed at another channel: the window goes there, the change the first step of its new history
+  if (others.length) {
+    const other = others[0], said = await change("set_text", { channel: other, title: "Agent on *another* channel" }, "switch");
+    r.switch = { to: other, shown: S.cover.catId, hist: [S.histIdx, S.hist.length], title: said && said.title };
+    if (S.cover.catId !== other || S.histIdx !== 1 || S.hist.length !== 2) no(`set_text on another channel: the window shows ${S.cover.catId}, history ${S.histIdx}/${S.hist.length}`);
+  }
+  // agentStep put back: after a switch done (kept), and after one begun and not done (undone, redo kept)
+  r.rollback = {};
+  if (others.length > 1) {
+    const there = others[1];
+    try { await agentStep(async () => { await switchChannel(there); S.cover.tag = "BROKEN"; touch({ cover: true }); throw new Error("on purpose"); }); } catch (e) { void e; }
+    r.rollback.switched = S.cover.catId === there && S.hist.length === 1 && S.cover.tag !== "BROKEN";
+    if (!r.rollback.switched) no("agentStep: a failure after a switch did not keep the switch and put back the cover as it arrived");
+  }
+  await switchChannel(home);
+  S.cover.tag = "AG.REDO"; touch({ cover: true }); commitPending(); await timeTravel(-1);   // a step to redo
+  const at = S.histIdx, len = S.hist.length, snap = S.hist[at], other = others[0];
+  if (other) {
+    try { await agentStep(async () => { setCover(coverFor(other)); S.settings.channels[S.profile.id] = other; S.cover.tag = "HALF"; throw new Error("half a switch"); }); } catch (e) { void e; }
+    r.rollback.halfChannel = S.cover.catId === home && S.histIdx === at && S.hist.length === len && same(snapshot(), snap) && S.settings.channels[S.profile.id] === home;
+    if (!r.rollback.halfChannel) no("agentStep: a channel switch begun and not done was not undone, or the history not kept");
+  }
+  const mine = S.profile, covers = S.covers;
+  try { await agentStep(async () => { S.profile = normalizeProfile({ ...copyOf(mine), id: "agent-ghost", name: "Ghost" }); S.covers = {}; setCover(normalizeCover({ catId: S.profile.categories[0].id }, S.profile)); throw new Error("half a switch"); }); } catch (e) { void e; }
+  r.rollback.halfProfile = S.profile.id === mine.id && S.profiles.filter((p) => p.id === mine.id).length === 1 && !S.profiles.some((p) => p.id === "agent-ghost") && S.covers === covers && S.cover.catId === home && S.hist.length === len && S.histIdx === at;
+  if (!r.rollback.halfProfile) no("agentStep: a profile switch begun and not done was not undone");
+  try { await agentStep(async () => { S.cover.tag = "KEPT FIRST"; touch({ cover: true }); commitHistory(true); throw new Error("after a step of its own"); }); } catch (e) { void e; }
+  r.rollback.redoKept = S.hist.length === len && S.histIdx === at && S.histIdx < S.hist.length - 1;
+  if (!r.rollback.redoKept) no("agentStep: a step taken meanwhile cut off redo, or stayed, once the change failed");
+  // all as it was: the profile and this channel's cover, the other channels' covers, this channel shown
+  for (const id of others) { if (kept[id]) S.covers[id] = channelCover(kept[id], S.profile, id); else delete S.covers[id]; }
+  await restoreSnap(start); resetHistory();
+  if (S.cover.catId !== home) no("the agent's tools test did not end on the channel it began on");
 }
 /** SMEDCOVER_SELFTEST mode: export real covers in every format through the normal path, report, quit. */
 let SELFTESTING = false;   // the self-test running: its requests and cut-outs leave the AI lights alone (aiTracked)
