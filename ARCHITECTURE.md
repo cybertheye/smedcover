@@ -1560,7 +1560,9 @@ arrows, Home, End and letters typed go through it, Enter or a click picks, Esc, 
 keys it takes go no further, so its Esc neither shuts the bar's popover nor lets go of the layer); `swatch()` a colour's
 row (the whole row opens the colour picker; *Automatic*, or the colour with the way back to it). A control told its
 default (`def`) says when it is off it with the class `chg`: a scrub bar's value or a colour then in the channel colour
-(`--acc-lite`), with ↺ beside it (`RESET_ICON`) in a rail 30 px wide down the group's right where only these stand;
+(`--acc-lite`), with ↺ (`RESET_ICON`, the `.rs` button) at the control's own right end, over it, the value making room
+(every control runs to the right edge, under its group's chevron, which takes no clicks: turned, it would be drawn over
+the line's button);
 `secSum()` puts what is off its default first, and `writeSum()` marks the line with a dot. A control changed in place
 (a bar dragged, a switch clicked) writes its group's line again itself (`resum()`), the group not built anew, and while
 a bar is dragged (`body.scrubbing`) `renderSide()` waits for it to be let go. A popover of the bar over the canvas holds
@@ -1571,7 +1573,7 @@ header as `segs()`, its timeouts and reply length as scrub bars of `SHOWN.sec` a
 `picker()`, and the file names' ＋ opening `openPicker()`), the letter window (`letterEditor()`: a letter's size, angle
 and lift as scrub bars, its kind, face, case, tape and hero as pickers, its edge as `segs()`, its paper and ink round
 swatches; what may come up by chance a `.multi` row of buttons lit while on), the brush's panel, the Look sheet's
-parameters (`.kcol`: `.trow` fields, `switchRow()`, scrub bars ticked at `def`, the rail kept as in the drawer), Surprise
+parameters (`.kcol`: `.trow` fields, `switchRow()`, scrub bars ticked at `def`), Surprise
 me's chances (`oddsChance()`, a scrub bar of `SHOWN.chance` ticked at the rule's or the recipe's chance), the layout
 editor's parts (`.lpart`, a switch each), the 3D view's *Spread* and *Copy from another channel*'s profile (a picker).
 `scrub()` takes, besides, `done()` (once a change is made: a drag let go, a value typed, a key, ↺), and `back()` with

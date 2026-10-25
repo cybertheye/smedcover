@@ -872,7 +872,7 @@ const times = (v) => v.toFixed(2) + "×", pct = (v) => Math.round(v * 100) + "%"
 // ---------- the controls of the selected layer's properties (the drawer and the bar's popover)
 // One family, each a row 34 px high (see .psec in index.html): the scrub bar, the colour, the switch, the choice among
 // many; a few ways side by side are a .seg. A control that knows its default says when it is off it (the class chg, read
-// by its group's line, see secSum), and the scrub bar and the colour put it back with the ↺ in the rail beside them.
+// by its group's line, see secSum), and the scrub bar and the colour put it back with the ↺ at their own end.
 const RESET_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 3.5V8H8"/></svg>';
 const CHEV_ICON = (d) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
 /**
@@ -911,7 +911,7 @@ const typedValue = (s, fmt) => { const n = s.normalize("NFKC").replace(/,/g, "."
  * `def`, the value it has by default, which a drag comes to rest on within a few pixels. A double-click (or Enter) types
  * the value in: Enter keeps it, Esc leaves it as it was, the arrows step it (Shift: ten steps). With the focus on it (a
  * range input under it, which Tab reaches and a screen reader reads) the arrow keys, Home and End move it, Shift ten
- * steps at a time. Off its default, the value is in the channel colour and a ↺ beside it puts it back. `fmt`: one of
+ * steps at a time. Off its default, the value is in the channel colour and a ↺ at the bar's end puts it back. `fmt`: one of
  * SHOWN. `off`: why it cannot be changed now, said in its place. `opts`: `done()`, once a change is made (a drag let go,
  * a value typed in, a key, ↺); `back()` with `own` and `backTip`, where the way back is not to a value (a letter's
  * size back to chance, a chance back to the recipe's): ↺ while it is the user's own, which calls it. The box's `_show(v)`
@@ -932,7 +932,7 @@ function scrub(label, min, max, step, value, fmt, oninput, def = null, off = "",
       const again = rs.isConnected ? range : root.querySelector(`.bar input[aria-label="${CSS.escape(label)}"]`);
       if (again) again.focus({ preventScroll: true });
     } });
-  const box = el("div", { class: "sc" + (def == null && !back ? " bare" : ""), dataset: def != null ? { def } : {} }, bar, rs);
+  const box = el("div", { class: "sc", dataset: def != null ? { def } : {} }, bar, rs);
   let v = value;
   const show = () => {
     fill.style.width = at(v) * 100 + "%";
@@ -4807,7 +4807,7 @@ function placementControls(L) {
 /**
  * A colour of a layer, a row of its own: the whole row opens the colour picker; its colour, its name, and — with
  * `auto`, where the layer may also have none and take what the look gives it — "automatic" while it has none, or the
- * colour it has, in the channel colour, with the way back to automatic (↺) in the rail beside it. `shown` is the
+ * colour it has, in the channel colour, with the way back to automatic (↺) at the row's end. `shown` is the
  * swatch's colour while automatic.
  */
 function swatch(L, key, labelKey, shown, auto = true) {
@@ -4821,7 +4821,7 @@ function swatch(L, key, labelKey, shown, auto = true) {
       el("input", { type: "color", value: now, "aria-label": labelKey ? t(labelKey) : null,
         oninput: (e) => { put(e.target.value); dot.style.background = e.target.value; if (said.classList.contains("hex")) said.textContent = e.target.value.toUpperCase(); later("side", 600, renderSide); } }),
       dot, labelKey && el("span", { class: "nm" }, t(labelKey)), said),
-    auto && own ? el("button", { type: "button", class: "rs", title: t("props.inkAuto"), "aria-label": [labelKey && t(labelKey), t("props.inkAuto")].filter(Boolean).join(" · "), innerHTML: RESET_ICON, onclick: () => { put(""); renderSide(); } }) : el("span"));
+    auto && own ? el("button", { type: "button", class: "rs", title: t("props.inkAuto"), "aria-label": [labelKey && t(labelKey), t("props.inkAuto")].filter(Boolean).join(" · "), innerHTML: RESET_ICON, onclick: () => { put(""); renderSide(); } }) : null);
 }
 /**
  * A headline's outline and shadow sliders. Not every text effect draws them (the flat looks' plain

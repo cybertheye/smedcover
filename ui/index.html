@@ -308,9 +308,9 @@
      is set to while it is shut and a chevron, the whole line the button that opens and shuts it — over its controls,
      one under another. One family of controls, each a row 34 px high: those that hold a value on a dark well (a scrub
      bar, a colour, a choice among many, a few ways side by side), the on/off ones a row with the switch at its end.
-     Down the right runs a rail 30 px wide where only the ↺ stands that puts a control back to its default, so a look
-     down that edge finds every change; a value moved off its default is in the channel colour (--acc-lite), and its
-     group's line says so while shut: a dot, and that value first. A popover of the bar over the canvas holds a group's
+     Every control runs to the right edge, under its group's chevron; one moved off its default has, at its own end,
+     the ↺ that puts it back, and its value in the channel colour (--acc-lite), and its group's line says so while shut:
+     a dot, and that value first. A popover of the bar over the canvas holds a group's
      controls the same way. */
   .props{display:flex;flex-direction:column}
   .psec{border-top:1px solid rgba(255,255,255,.09)}
@@ -332,13 +332,11 @@
   .psec.open>.psec-h .chev{transform:rotate(90deg)}
   .psec:not(.open)>.psec-b{display:none}
   .psec-b{display:flex;flex-direction:column;gap:8px;min-width:0;padding:2px 2px 14px}
-  .psec-b>*{min-width:0;margin-top:0!important;margin-bottom:0!important;margin-left:0!important}
-  .psec-b>:not(.sc):not(.cr){margin-right:30px!important}   /* the rail */
-  .psec-b>.sc,.psec-b>.cr{margin-right:0!important}
+  .psec-b>*{min-width:0;margin:0!important}
   .psec-b .hint{margin:0;color:rgba(245,245,247,.74)}
   .psec-b .hint.err{color:#ff7a88}
   .psec-b .cap{color:rgba(245,245,247,.74)}
-  .psec-b>.cap{margin:2px 30px -3px 2px!important;letter-spacing:0}   /* a caption, close to what it names */
+  .psec-b>.cap{margin:2px 0 -3px 2px!important;letter-spacing:0}   /* a caption, close to what it names */
   .psec-b .ico{display:grid;place-items:center}
   .psec-b textarea,.psec-b input[type=text]{width:auto}
   .psec-b textarea{height:64px;padding:7px 10px;border-radius:10px;background:rgba(0,0,0,.28);font-size:14px;line-height:1.6}
@@ -360,12 +358,10 @@
   .artback{margin:0 0 0 84px}   /* under the figure's graphic, past the label column */
   /* a column of the app's controls (the Look sheet's settings of the look), and a word typed with its name before it */
   .kcol{display:flex;flex-direction:column;gap:8px;margin-top:10px}
-  .kcol>:not(.sc){margin-right:30px}   /* the rail, as the bars' */
   .kcol>.btn.wide{width:auto}
   .trow{display:grid;grid-template-columns:76px minmax(0,1fr);gap:8px;align-items:center;font-size:13px}
   .trow>span:first-child{color:var(--text2)}
   .recipe>.sc,.recipe>.tacts,.recipe>.hint+.sc{margin-top:8px}
-  .sc~.tacts{margin-right:30px}.recipe>.btn.wide{width:calc(100% - 30px)}   /* the rail, as the bars' */
   .layscope .seg .btn{flex:1;padding-left:6px;padding-right:6px}   /* the Style tab's template box: the scope it changes, the toolbar's own */
   .layown{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;margin:0 0 10px;padding:6px 8px;border:1px dashed var(--acc)}
   .layown .linkbtn{font-size:12px}
@@ -404,9 +400,7 @@
   .sub{font-size:12px;opacity:.6;margin-bottom:6px;display:flex;align-items:center;gap:4px}
   /* a scrub bar, the properties' slider (see scrub in app.js): its name and value inside a bar dragged anywhere along
      it, the value following the pointer; the tick its default; a double-click types the value in */
-  .sc,.cr{display:grid;grid-template-columns:minmax(0,1fr) 28px;gap:2px;align-items:center}
-  :not(.psec-b,.kcol)>.sc.bare{grid-template-columns:minmax(0,1fr)}   /* no default to go back to: no rail, but in the drawer and a look's settings, where the rail lines their controls up */
-  :not(.psec-b,.kcol)>.sc.bare>.rs{display:none}
+  .sc,.cr{position:relative;min-width:0}
   .scrow{display:flex;align-items:center;gap:6px}   /* a scrub bar and the ⓘ that explains it */
   .scrow>.sc{flex:1;min-width:0}
   .bar{position:relative;display:flex;align-items:center;justify-content:space-between;gap:8px;height:34px;padding:0 10px;border-radius:10px;background:rgba(0,0,0,.28);border:1px solid var(--line);overflow:hidden;cursor:ew-resize;user-select:none;-webkit-user-select:none;touch-action:none}
@@ -434,13 +428,16 @@
   .bar.off .lb{color:var(--text3)}
   .bar.off .fill,.bar.off .tick{display:none}   /* no value to show while it cannot act */
   .bar .why{position:relative;flex:1;min-width:0;text-align:right;font-size:12px;color:rgba(245,245,247,.74);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  /* the way back to a default, in the rail: shown only where a control is off its default */
-  .rs{width:28px;height:28px;border-radius:8px;border:0;background:transparent;color:rgba(245,245,247,.8);display:grid;place-items:center;padding:0;cursor:pointer}
-  .rs[hidden]{display:grid;visibility:hidden}   /* its place in the rail kept */
+  /* the way back to a default: only where a control is off it, at the control's own end, over it (its value making
+     room), so a press on it is not a drag of the bar nor opens the colour */
+  .rs{position:absolute;z-index:1;right:4px;top:50%;width:26px;height:26px;margin-top:-13px;border-radius:7px;border:0;background:transparent;color:rgba(245,245,247,.86);display:grid;place-items:center;padding:0;cursor:pointer}
+  .rs[hidden]{display:none}
+  .sc:has(>.rs:not([hidden])) .bar{padding-right:32px}
+  .cr:has(>.rs) .cb{padding-right:34px}
   .rs svg{width:15px;height:15px}
   .rs:hover{background:rgba(255,255,255,.1);color:#fff}
   .rs:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
-  /* a colour: the whole row opens the picker; automatic says so, a colour of one's own has the way back in the rail */
+  /* a colour: the whole row opens the picker; automatic says so, a colour of one's own has the way back at its end */
   .cb{position:relative;display:flex;align-items:center;gap:10px;min-width:0;height:34px;padding:0 10px 0 8px;border-radius:10px;background:rgba(0,0,0,.28);border:1px solid var(--line);font-size:13px;cursor:pointer}
   .cb:hover{border-color:rgba(255,255,255,.28)}
   .cb:has(input:focus-visible){border-color:color-mix(in srgb,var(--acc) 80%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--acc) 20%,transparent)}
@@ -722,7 +719,6 @@
   #fpop .fpop-h{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px}
   #fpop .psec{border:0;padding:0}
   #fpop .psec-b{padding:0}
-  #fpop .psec-b:not(:has(>.sc,>.cr))>*{margin-right:0!important}   /* a group with no way back to a default needs no rail there */
   #fpop.wide{width:380px}
   /* the text effects as cards (the Effect group, in the drawer and in its popover): the layer's first letter drawn in each */
   .fxdeck{display:flex;flex-direction:column;gap:8px}
@@ -781,10 +777,10 @@
   .lt.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}
   .lt.edited::after,.lt.locked::after{content:"";position:absolute;top:-4px;right:-4px;width:7px;height:7px;border-radius:50%;background:var(--acc)}
   .lt.locked::after{border-radius:0;background:#fff}
-  .ledit{border-top:2px solid var(--line);margin-top:8px;padding-top:8px}.ledit .row{display:flex;flex-wrap:wrap;gap:6px;margin-right:30px}.ledit .row .btn{flex:1 1 auto}
+  .ledit{border-top:2px solid var(--line);margin-top:8px;padding-top:8px}.ledit .row{display:flex;flex-wrap:wrap;gap:6px}.ledit .row .btn{flex:1 1 auto}
   .lbars{display:flex;flex-direction:column;gap:8px;margin:10px 0}   /* a letter's size, angle and lift, scrub bars */
   .ledit .lhead{display:flex;justify-content:space-between;align-items:baseline}.ledit .lhead b{font-size:18px}
-  .lgrid{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px 10px;align-items:center;margin:10px 30px 10px 0}   /* the rail, as the bars' */
+  .lgrid{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px 10px;align-items:center;margin:10px 0}
   .lgrid .seg .btn{flex:1 1 auto}   /* By chance wider than Cut */
   .lcol{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
   /* a letter's paper or ink: round swatches as the properties' colours are, by chance (?), one of the look's, or any (the last, the picker) */
@@ -811,7 +807,6 @@
   .wkey{display:flex;gap:12px;align-items:center;font-size:12px;opacity:.85}.wkey .wl{height:22px;min-width:22px;font-size:12px;cursor:default}
   /* the weave's brush: its panel over the left column, its ring under the pointer on the canvas (dashed while it takes the lettering behind) */
   #brush-box{display:flex;flex-direction:column;gap:10px}
-  #brush-box>.seg{margin-right:30px}   /* the rail, as the bar's */
   #brushring{position:fixed;z-index:20;pointer-events:none;border-radius:50%;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(7,7,12,.85),inset 0 0 0 1px rgba(7,7,12,.85)}
   #brushring[hidden]{display:none}#brushring.behind{border-style:dashed}
   #crop-stage{background:repeating-conic-gradient(#2a2a33 0 25%,#1d1d24 0 50%) 0 0/16px 16px}
