@@ -4672,3 +4672,37 @@ test("copied from another profile, what a layer keeps by size goes to the sizes 
   for (const l of was) if (l.sizes) l.sizes = keys.filter((k) => l.sizes.includes(k));
   assert.deepEqual(same, was);
 });
+
+test("the 3D view paints again only the sheets that changed, and what shows them, after those still waiting, the selected first", async () => {
+  const { moreChanged, sheetOrder } = await import("../ui/js/stack3d.js");
+  const { paintedWith } = await import("../ui/js/layers.js");
+  const ids = (s) => (s === null ? null : [...s].sort().join(" "));
+  // what changed, named by successive draws: put together, any (null) winning, and never narrowed again
+  assert.equal(ids(moreChanged(new Set(), ["title"])), "title");
+  assert.equal(ids(moreChanged(new Set(["title"]), new Set(["sticker", "title"]))), "sticker title");
+  assert.equal(moreChanged(new Set(["title"]), null), null, "not said: any may have");
+  assert.equal(moreChanged(null, ["title"]), null, "all of them already");
+  assert.equal(ids(moreChanged(new Set(["a"]), (function* () { yield "b"; })())), "a b", "any iterable");
+  assert.equal(moreChanged(new Set(), new Set()).size, 0, "none named: no sheet painted again");
+  assert.equal(moreChanged(null, new Set()), null, "none named after any: still all of them");
+  // the order: the selected first, then from the top of the stack down; waiting and new alike, each once, only what is in the stack
+  const stack = ["bg", "photo", "title", "sticker", "brand"];
+  assert.deepEqual(sheetOrder(stack, ["sticker", "photo"], ["title", "photo", "gone"], ["photo"]), ["photo", "sticker", "title"]);
+  assert.deepEqual(sheetOrder(stack, [], stack, ["title", "bg"]), ["title", "bg", "brand", "sticker", "photo"], "a group selected: its sheets first, top down");
+  assert.deepEqual(sheetOrder(stack, ["brand"], [], ["title"]), ["brand"], "nothing new: those waiting still wait");
+  assert.deepEqual(sheetOrder(stack, [], [], ["title"]), []);
+  // what else shows a layer, each painted alone: its clipping group, a photo's cut-out (and what is clipped onto that),
+  // a cut-out or an asset weaving with lettering among them
+  const layers = [
+    { id: "bg", type: "bg" }, { id: "block", type: "accent" }, { id: "title", type: "title", clip: true }, { id: "sub", type: "text", clip: true },
+    { id: "photo", type: "photo" }, { id: "cut", type: "photo", of: "photo", cut: true }, { id: "glow", type: "text", clip: true },
+    { id: "brand", type: "text" }, { id: "star", type: "asset", weave: { with: ["sub"] } }, { id: "flat", type: "photo", weave: { with: ["brand"] } },
+  ];
+  assert.equal(ids(paintedWith(layers, ["title"])), "block star sub title", "the base under it, what else is clipped onto it, and what weaves with that");
+  assert.equal(ids(paintedWith(layers, new Set(["block"]))), "block star sub title");
+  assert.equal(ids(paintedWith(layers, ["photo"])), "cut glow photo", "its cut-out, and what is clipped onto the cut-out");
+  assert.equal(ids(paintedWith(layers, ["glow"])), "cut glow");
+  assert.equal(ids(paintedWith(layers, ["brand"])), "brand", "a photo not cut out weaves with nothing");
+  assert.equal(ids(paintedWith(layers, ["bg"])), "bg");
+  assert.equal(ids(paintedWith(layers, [])), "");
+});

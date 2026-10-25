@@ -79,6 +79,21 @@ export function sheetUnder(V, sheets, x, y, solid) {
   return null;
 }
 
+/**
+ * The layers changed since the sheets were last queued, with those of `ids` changed too: a Set of ids, or null for
+ * any of them (as `ids` null says), which nothing added to it narrows again.
+ */
+export const moreChanged = (changed, ids) => (changed === null || ids == null ? null : new Set([...changed, ...ids]));
+/**
+ * The sheets to paint, in the order they are painted: those still `waiting` and those `more` brings, each once and
+ * only while its layer is in the stack (`ids`, bottom first) — the selected (`picked`) first, then from the top of
+ * the stack down. A sheet already painted and not among them keeps its picture.
+ */
+export function sheetOrder(ids, waiting, more, picked) {
+  const want = new Set([...waiting, ...more]), top = ids.filter((id) => want.has(id)).reverse();
+  return [...top.filter((id) => picked.includes(id)), ...top.filter((id) => !picked.includes(id))];
+}
+
 const LABEL = { h: 20, gap: 3, pad: 7, lead: 26, font: '600 12px "Noto Sans SC", -apple-system, "Segoe UI", sans-serif' };
 /** How wide the column of labels is for these names (screen pixels), the leader lines included. */
 export function labelRoom(ctx, names, max = 170) {

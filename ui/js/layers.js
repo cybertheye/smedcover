@@ -684,6 +684,25 @@ export function wovenIds(layers) {
   return out;
 }
 /**
+ * The ids of the layers of `layers` whose picture, each painted alone (the 3D view's sheets, see `only` in drawCover),
+ * may change when that of those in `ids` does: they, every layer clipped together with one of them (painted in its
+ * base's shape, or the base under it), a photo's cut-outs and copies (placed by it, see `of`), a cut-out or an asset
+ * weaving with lettering among them (what of it is in front painted on it); and so on from those, as far as it goes.
+ */
+export function paintedWith(layers, ids) {
+  const out = new Set(ids);
+  for (let n = -1; n !== out.size; ) {
+    n = out.size;
+    layers.forEach((L, i) => {
+      if (out.has(L.id)) {
+        const b = clipBase(layers, i), from = b >= 0 ? b : i;
+        for (let j = from; j <= clipEnd(layers, from); j++) out.add(layers[j].id);
+      } else if ((L.of && out.has(L.of)) || (canWeave(L) && L.weave && (L.weave.with || []).some((id) => out.has(id)))) out.add(L.id);
+    });
+  }
+  return out;
+}
+/**
  * The box round what is opaque in a picture's pixels (`data`, RGBA, w × h): those whose alpha is above `min`, as
  * fractions of its size ({x0, y0, x1, y1}), or null when there are none. A cut-out's subject is measured so on its
  * mask, an asset's on what it draws (see maskBox and assetBox in render.js).

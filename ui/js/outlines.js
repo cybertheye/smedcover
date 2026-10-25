@@ -9,7 +9,7 @@
 import { CAN, invoke } from "./store.js";
 
 const cache = new Map(), pending = new Map();
-let arrived = () => {};
+let arrived = () => {}, missed = 0;
 /** Sets what to call when an outline that was asked for has arrived. */
 export const onOutlines = (fn) => { arrived = fn; };
 
@@ -41,10 +41,16 @@ export function outline(font, text) {
       });
     pending.set(key, job);
   }
+  missed++;
   return null;
 }
 /** How many outlines are still on their way, and a promise for when they have all arrived. */
 export const outlinesPending = () => pending.size;
 export const outlinesSettled = () => Promise.all([...pending.values()]);
+/**
+ * How many times outline() has answered null, an outline still on its way: read before and after a drawing, it tells
+ * whether that drawing went without one, to be drawn again once it comes (a sheet of the 3D view, see paintSheets in app.js).
+ */
+export const outlinesMissed = () => missed;
 /** Test hook: puts an outline in the cache as if it had arrived. */
 export const primeOutline = (font, text, glyphs) => cache.set(font.replace(/[\d.]+px/, "px") + "\n" + text, glyphs);

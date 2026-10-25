@@ -11,7 +11,7 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, paintedWith, refitSizes, acrossSizes, cutFrom } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, CUSTOM_BY, normalizeSize, exportName, sizeCaption, ratioText,
@@ -21,12 +21,12 @@ import { DEFAULTS, layOver } from "./defaults.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, BENDS, effectUses, warpCorners, convexWarp, NO_COLUMNS } from "./textfx.js";
-import { onOutlines, outlinesPending, outlinesSettled } from "./outlines.js";
+import { onOutlines, outlinesPending, outlinesSettled, outlinesMissed } from "./outlines.js";
 import { RANSOM_FACES, useRansomFaces, ransomPending, ransomArrived, ransomPools, ransomLetters, ransomShown, papersFor, faceFont, faceHas, inksFor, cased, isCJK, EXTRAS, lineCells, keysOf } from "./ransom.js";
 import { parseTitle } from "./title.js";
 import { LOOKS, LOOK_IDS, LOOK_TAGS, LOOK_CATEGORIES, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
 import { sizeOf, PIXELS, dropCards } from "./photo.js";
-import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, labelRoom, drawStack } from "./stack3d.js";
+import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, moreChanged, sheetOrder, labelRoom, drawStack } from "./stack3d.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt, coverCrop } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, AI_DEFAULTS, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 
@@ -263,11 +263,17 @@ function ensureFont(family) {
     const faces = [];
     for (let n = 0; n < weights.length; n++) faces.push(await new FontFace(family, await invoke("font_data", { family, n }), { weight: weights[n] }).load());
     for (const f of faces) document.fonts.add(f);
-    queueDraw();
+    queueDraw(true, setIn(family));
     return true;
-  }).catch(() => false).then((added) => { if (ransomArrived(family)) queueDraw(); return added; }));   // there, or not to be had: the ransom note waits no more (see ransomFaces)
+  }).catch(() => false).then((added) => { if (ransomArrived(family)) queueDraw(true, S.cover ? S.cover.layers.filter((L) => L.fx === "ransom").map((L) => L.id) : null); return added; }));   // there, or not to be had: the ransom note waits no more (see ransomFaces)
   return SYS_FACES.get(family);
 }
+/**
+ * The layers a face of `family` added to the page may change, for the 3D view (see queueDraw): those set in it; every
+ * one when the title is, for the subtitle is fitted under it, and the looks place what they draw, the ground's
+ * furniture, a photo's effects, by where its lines fall (see subtitlePlan in render.js, titleArea in kit.js). null: any.
+ */
+const setIn = (family) => (!S.cover || S.cover.layers.some((L) => L.id === "title" && L.font === family) ? null : S.cover.layers.filter((L) => L.font === family).map((L) => L.id));
 /** Sees that the system fonts the layers are set in are there for every canvas (and the ransom note's faces, when a layer is lettered so); resolves once they are. */
 const ensureFonts = (layers) => Promise.all([...new Set([...layers.map((L) => L.font), ...(layers.some((L) => L.fx === "ransom") ? ransomPending() : [])].filter(Boolean))].map(ensureFont).filter(Boolean));
 /** How many system fonts of each script the ransom note loads from their files at most (see ransomFaces). */
@@ -354,8 +360,8 @@ const V3 = {
   yaw: VIEW.yaw, pitch: VIEW.pitch, spread: VIEW.spread, aim: null,   // the view; aim: the view it is easing back to (Reset view)
   s: 0,                                   // the scale shown: eased towards the one that fits, and held while the view is dragged
   z: new Map(),                           // layer id -> its place in the stack as shown, easing towards where it is now
-  sheets: new Map(),                      // layer id -> {cv, mask, box, key}: the layer painted on its own
-  stale: true,                            // the layers have changed since they were painted
+  sheets: new Map(),                      // layer id -> {cv, mask, box, key, waits}: the layer painted on its own (waits: without an outline still on its way, see paintSheets)
+  changed: null,                          // the layers changed since the sheets were queued: a Set of ids, or null for any of them (see queueDraw)
   todo: [], pw: 0, key: "", needs: 0, paintRaf: 0,   // the sheets still to paint, a few a frame, how wide and under what key (see paint3d)
   hover: "", peek: "",                    // the sheet under the pointer; the layer whose row in the list it is on
   drag: false, raf: 0, view: null, shown: [],   // the view and the sheets last drawn, to find what is under the pointer
@@ -418,16 +424,19 @@ function flushDraw() {
 }
 /**
  * Redraws at most once per frame, however many input events arrive. `stale` false: only what is selected
- * changed. Animation frames pause while the window is hidden, so then a timer draws instead; not while it
- * shows, where a frame that is late is late because the last is still being drawn (the graphics card is
- * behind), and a draw on a timer only piled more on: the page, the knob of the slider being dragged with
- * it, was shown less often still. Only should no frame come at all for a second (a web view that stopped
- * giving them without saying it is hidden) does a timer draw, as nothing would be drawn again otherwise.
+ * changed. `ids`, with it: the layers whose pixels may have changed, null when any may have (an edit; empty, none:
+ * the stage resized); the canvas is painted whole all the same, but the 3D view paints again only those sheets (see
+ * paint3d), whatever more is named before it does. Animation frames pause while the window is hidden, so
+ * then a timer draws instead; not while it shows, where a frame that is late is late because the last is
+ * still being drawn (the graphics card is behind), and a draw on a timer only piled more on: the page, the
+ * knob of the slider being dragged with it, was shown less often still. Only should no frame come at all for
+ * a second (a web view that stopped giving them without saying it is hidden) does a timer draw, as nothing
+ * would be drawn again otherwise.
  */
 let framesRun = 0;
 const drawInFrame = (now) => { framesRun++; glassWatch(now); flushDraw(); };
-function queueDraw(stale = true) {
-  if (stale) V3.stale = drawStale = true;
+function queueDraw(stale = true, ids = null) {
+  if (stale) { drawStale = true; V3.changed = moreChanged(V3.changed, ids); }
   if (drawQueued) return;
   drawQueued = true;
   requestAnimationFrame(drawInFrame);
@@ -435,7 +444,7 @@ function queueDraw(stale = true) {
   else { const ran = framesRun; setTimeout(() => framesRun === ran && flushDraw(), 1000); }
 }
 document.addEventListener("visibilitychange", () => { if (document.hidden) flushDraw(); });   // hidden with a draw waiting
-new ResizeObserver(() => S.profile && queueDraw()).observe($("stage"));
+new ResizeObserver(() => S.profile && queueDraw(true, [])).observe($("stage"));   // no layer changed: the 3D view's sheets painted again only where they are to be wider (see paint3d)
 
 $("strip").addEventListener("wheel", (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.preventDefault(); $("strip").scrollLeft += e.deltaY; } }, { passive: false });
 /**
@@ -6398,7 +6407,7 @@ function set3d(on) {
   if (on) brushClose();   // the brush paints on the flat canvas (and its opening closes this)
   if (on && !V3.on) {
     stage3d();
-    Object.assign(V3, { on: true, stale: true, s: 0, aim: null });
+    Object.assign(V3, { on: true, changed: null, s: 0, aim: null });
     V3.z.clear();
     $("stage").classList.add("v3");
     sync3dHud();
@@ -6412,6 +6421,7 @@ function set3d(on) {
 function close3d() {
   Object.assign(V3, { on: false, k: 0, from: 0, to: 0, hover: "", peek: "", drag: false });
   V3.sheets.clear(); V3.z.clear(); V3.shown = []; V3.view = null; V3.todo = []; cancelAnimationFrame(V3.paintRaf); V3.paintRaf = 0;
+  V3.changed = null;   // nothing kept to paint again
   if (S.mode === "edit") drawMain();
   $("stage").classList.remove("v3", "v3open");
   markRows(); syncFocus(); placeBar(); placeFrames();
@@ -6512,11 +6522,15 @@ function sheetCap(W, H, vw, vh) {
 /** How many pixels across a sheet needs, seen at scale s (virtual pixels to the screen's), with a little to spare. */
 const sheetNeeds = (vw, s) => Math.round(vw * s * Math.min(2, window.devicePixelRatio || 1) * 1.2);
 /**
- * drawMain() while the 3D view is up: the layers that changed are to be painted again, each on its own — while one is
- * being changed (see holdLive) just it, and what is clipped with it. They are painted a few a frame (paintSheets), the
- * selected first, then from the top of the stack down, the stack drawn at once with the sheets there are: it opens
- * without waiting for them all. A sheet is painted about as wide as it is seen with the stack open (V3.pw), not as wide
- * as the cover on the canvas.
+ * drawMain() while the 3D view is up: the sheets of the layers that changed (V3.changed, see queueDraw) are to be
+ * painted again, with those that show them too (paintedWith in layers.js: what is clipped with them, a photo's
+ * cut-outs, a cut-out weaving with lettering among them) and every sheet painted under another key (another width,
+ * size or channel); all of them when what changed is not known (an edit), and while one is being changed (see
+ * holdLive) just it and what goes with it. They join those still waiting — a sheet painted and not changed since keeps
+ * its picture, so what arrives as the view opens (outlines, a face read from its files) no longer starts it over —
+ * and are painted a few a frame (paintSheets), the selected first, then from the top of the stack down, the stack
+ * drawn at once with the sheets there are: it opens without waiting for them all. A sheet is painted about as wide as
+ * it is seen with the stack open (V3.pw), not as wide as the cover on the canvas.
  */
 function paint3d() {
   const c = $("cv3d"), stage = $("stage"), dpr = window.devicePixelRatio || 1, W = stage.clientWidth, H = stage.clientHeight;
@@ -6529,21 +6543,11 @@ function paint3d() {
   if (!V3.needs || needs > V3.needs * 1.3 || needs < V3.needs / 1.6) V3.needs = needs;   // painted again only once that is well off
   const pw = Math.min(sheetCap(W, H, vw, vh), V3.needs), key = `${pw}|${sizeKey(size)}|${catIndex()}`;
   for (const id of V3.sheets.keys()) if (!list.some((l) => l.id === id)) V3.sheets.delete(id);
-  if (V3.stale) {
-    let only = null;
-    if (LIVE) {   // the layers being changed, and every layer clipped together with one of them
-      only = new Set();
-      for (const id of LIVE.ids) {
-        const i = S.cover.layers.findIndex((l) => l.id === id);
-        if (i < 0) continue;
-        const b = clipBase(S.cover.layers, i), from = b >= 0 ? b : i;   // its group: the base it is clipped onto, or itself, and what is clipped onto that
-        only.add(id);
-        for (let j = from; j <= clipEnd(S.cover.layers, from); j++) only.add(S.cover.layers[j].id);
-      }
-    }
-    const picked = group().length ? group().map((L) => L.id) : [S.layerId], todo = list.filter((L) => !only || only.has(L.id) || (V3.sheets.get(L.id) || {}).key !== key).reverse();
-    V3.todo = [...todo.filter((L) => picked.includes(L.id)), ...todo.filter((L) => !picked.includes(L.id))].map((L) => L.id);
-    Object.assign(V3, { pw, key, stale: false });
+  if (V3.changed === null || V3.changed.size || key !== V3.key) {
+    const ids = LIVE ? [...LIVE.ids, ...(V3.changed || [])] : V3.changed, only = ids && paintedWith(S.cover.layers, ids);
+    const picked = group().length ? group().map((L) => L.id) : [S.layerId];
+    V3.todo = sheetOrder(list.map((L) => L.id), V3.todo, list.filter((L) => !only || only.has(L.id) || (V3.sheets.get(L.id) || {}).key !== key).map((L) => L.id), picked);
+    Object.assign(V3, { pw, key, changed: new Set() });
   }
   paintSheets(false);
   draw3d();
@@ -6557,8 +6561,10 @@ function paintSheets(redraw = true) {
     const id = V3.todo.shift();
     if (!at.has(id)) continue;
     const sh = V3.sheets.get(id) || { cv: document.createElement("canvas") };
+    const missed = outlinesMissed();
     drawCover(sh.cv, { profile: S.profile, catIndex: catIndex(), size, pixelW: V3.pw, cover: S.cover, photos: S.photos, only: at.get(id) });
     sh.mask = maskOf(sh.cv); sh.box = inkBox(sh.mask); sh.key = V3.key;
+    sh.waits = outlinesMissed() !== missed;   // painted without an outline still on its way: painted again once outlines come (see onOutlines)
     V3.sheets.set(id, sh);
     if (performance.now() - t0 > SHEET_MS) break;
   }
@@ -6603,7 +6609,7 @@ function draw3d() {
   V.s = V3.s;
   V3.view = V;
   // turned or spread so the sheets are seen well larger than they were painted for: painted again, as wide as that
-  if (!more && !V3.drag && k === 1 && V3.needs && sheetNeeds(vw, V.s) > V3.needs * 1.3 && V3.pw < sheetCap(W, H, vw, vh)) queueDraw();
+  if (!more && !V3.drag && k === 1 && V3.needs && sheetNeeds(vw, V.s) > V3.needs * 1.3 && V3.pw < sheetCap(W, H, vw, vh)) queueDraw(true, []);   // seen larger: painted again wider (a new key), no layer changed
   V3.shown = list.map((L) => {
     const sh = V3.sheets.get(L.id);
     return { id: L.id, img: sh && sh.cv, box: sh && sh.box, z: V3.z.get(L.id) * gap, alpha: seen(L) ? 1 : 0.35 * deco, hidden: !seen(L), label: label(L),
@@ -7887,7 +7893,7 @@ addEventListener("keydown", (e) => {
 });
 
 // ---------- start
-onOutlines(() => { queueDraw(); later("lookcards", 300, refreshLookCards); });   // an outline that was sent for has arrived: draw again, this time with it
+onOutlines(() => { queueDraw(true, [...V3.sheets].filter(([, sh]) => sh.waits).map(([id]) => id)); later("lookcards", 300, refreshLookCards); });   // an outline that was sent for has arrived: draw again, this time with it (of the 3D view's sheets, those painted without one)
 /**
  * What a failed read of something that, taken for not there, would be written over or cleared away stands for. A
  * file that is not there is no failure (it reads as null, a folder as []); where the data is on this computer (the
