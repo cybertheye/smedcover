@@ -21,7 +21,8 @@
 //!
 //! What is done to a result before it goes on (see [`read_result`]): a `data:…;base64,` prefix is
 //! taken off an image's data; a text block holding `structuredContent` as JSON is added if there is
-//! no text block; one of more than [`MAX_IMAGES`] images or [`MAX_RESULT_BYTES`] is refused.
+//! no text block; `structuredContent` that is not an object (MCP wants one) is dropped, its JSON kept
+//! as that text; one of more than [`MAX_IMAGES`] images or [`MAX_RESULT_BYTES`] is refused.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -64,9 +65,9 @@ pub trait PageBridge: Send + Sync + 'static {
 /// Whether there is a page to carry out calls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PageState {
-    /// None, and none is expected (no window, no browser connected).
+    /// None, and none is expected (no window, no browser connected): calls fail at once.
     None,
-    /// One is on its way: the window is starting or reloading.
+    /// One is on its way (the window is starting or reloading): calls wait for it.
     Loading,
     /// One is ready; each page that attaches has a new epoch.
     Ready { epoch: u64 },
@@ -114,7 +115,7 @@ pub struct Call {
 /// Why a call has no answer from the page, or the page's own error.
 #[derive(Clone, Debug, PartialEq)]
 pub enum BridgeError {
-    /// There was no page to carry it out, and none came in time.
+    /// There was no page to carry it out, and none was on its way or came in time.
     NotReady,
     /// The page went away (reloaded, closed) before it answered; says why.
     PageGone(String),
@@ -171,8 +172,12 @@ impl fmt::Display for BridgeError {
 impl std::error::Error for BridgeError {}
 
 /// What reaches the page: the desktop app's Tauri channel, a server's WebSocket.
+///
+/// [`PageSink::send`] is called with the [`Dispatcher`]'s lock on its page held, so it must hand
+/// the message on and return (queue it, never wait for the page to take it) and must not call back
+/// into the dispatcher.
 pub trait PageSink: Send + Sync {
-    /// Sends one message; fails if the page cannot be reached.
+    /// Sends one message without waiting; fails if the page cannot be reached.
     fn send(&self, msg: &Value) -> Result<(), String>;
 }
 
@@ -208,7 +213,8 @@ pub struct PageProgress {
 /// How long the [`Dispatcher`] waits, and for how many calls.
 #[derive(Clone, Debug)]
 pub struct Limits {
-    /// How long a call waits for a page to be ready before [`BridgeError::NotReady`].
+    /// How long a call waits for a page that is on its way ([`PageState::Loading`]) before
+    /// [`BridgeError::NotReady`].
     pub ready_wait: Duration,
     /// The longest a call may take from when the page is given it, whatever its progress.
     pub ceiling: Duration,
@@ -256,7 +262,8 @@ impl Default for Dispatcher {
 }
 
 impl Dispatcher {
-    /// No page yet, with the usual [`Limits`].
+    /// No page, and none on its way (calls fail at once until a host says one is coming with
+    /// [`Dispatcher::loading`], or one attaches), with the usual [`Limits`].
     pub fn new() -> Dispatcher {
         Dispatcher::with_limits(Limits::default())
     }
@@ -380,11 +387,14 @@ impl Dispatcher {
         let ready_by = Instant::now() + self.limits.ready_wait;
         let mut state = self.state.subscribe();
         let (id, answer, poke) = loop {
-            let ready = async { state.wait_for(|s| matches!(s, PageState::Ready { .. })).await.is_ok() };
+            // a page that is on its way is waited for; with none expected, there is no point
+            let settled = async {
+                state.wait_for(|s| *s != PageState::Loading).await.map(|s| matches!(*s, PageState::Ready { .. })).unwrap_or(false)
+            };
             tokio::select! {
                 biased;
                 _ = call.cancel.cancelled() => return Err(BridgeError::Cancelled),
-                ready = tokio::time::timeout_at(ready_by, ready) => {
+                ready = tokio::time::timeout_at(ready_by, settled) => {
                     if ready != Ok(true) {
                         return Err(BridgeError::NotReady);
                     }
@@ -552,12 +562,17 @@ pub fn read_result(result: Value) -> Result<CallToolResult, BridgeError> {
     if images > MAX_IMAGES {
         return bad(format!("it has {images} images, more than {MAX_IMAGES}"));
     }
-    let structured = result.get("structuredContent").filter(|v| !v.is_null()).map(Value::to_string);
-    if let Some(structured) = structured {
-        bytes += structured.len();
-        if texts == 0 {
-            bytes += structured.len();
-            content.push(json!({"type": "text", "text": structured}));
+    // MCP's structured content is an object: anything else is dropped, but kept as text
+    let structured = result.get("structuredContent").map(|v| (v.is_object(), v.to_string()));
+    if let Some((is_object, text)) = structured {
+        if !is_object {
+            result.remove("structuredContent");
+        } else {
+            bytes += text.len();
+        }
+        if texts == 0 && text != "null" {
+            bytes += text.len();
+            content.push(json!({"type": "text", "text": text}));
         }
     }
     if bytes > MAX_RESULT_BYTES {
@@ -763,6 +778,22 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn with_no_page_on_its_way_calls_fail_at_once() {
+        let d = Arc::new(Dispatcher::new());
+        let started = Instant::now();
+        assert_eq!(spawn_call(&d, call("get_context", MINUTE)).await.unwrap().unwrap_err(), BridgeError::NotReady);
+        assert_eq!(started.elapsed(), Duration::ZERO);
+        // one on its way that is then given up on: the calls waiting for it fail then
+        d.loading();
+        let task = spawn_call(&d, call("get_context", MINUTE));
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(!task.is_finished());
+        d.close("the window closed");
+        assert_eq!(task.await.unwrap().unwrap_err(), BridgeError::NotReady);
+        assert!(about(started.elapsed(), Duration::from_secs(3)), "{:?}", started.elapsed());
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_page_that_cannot_be_reached_is_not_ready() {
         let (d, sink) = attached();
         sink.broken.store(true, Ordering::SeqCst);
@@ -938,6 +969,14 @@ mod tests {
         // an error the tool ran into stays one
         let r = read_result(json!({"content": [{"type": "text", "text": "no such layer"}], "isError": true})).unwrap();
         assert_eq!(r.is_error, Some(true));
+        // structured content that is not an object is dropped, its JSON kept as text if there is none
+        for (structured, text) in [(json!([1, 2]), Some("[1,2]")), (json!("hi"), Some("\"hi\"")), (json!(7), Some("7")), (json!(null), None)] {
+            let r = read_result(json!({"structuredContent": structured})).unwrap();
+            assert_eq!(r.structured_content, None, "{structured}");
+            assert_eq!(r.content.first().and_then(|c| c.as_text()).map(|t| t.text.as_str()), text);
+        }
+        let r = read_result(json!({"content": [{"type": "text", "text": "two"}], "structuredContent": [1, 2]})).unwrap();
+        assert_eq!((r.structured_content, r.content.len()), (None, 1));
         // data that only looks like a data URL is left alone
         assert_eq!(strip_data_url("data:image/png,abc"), "data:image/png,abc");
         assert_eq!(strip_data_url("abc"), "abc");

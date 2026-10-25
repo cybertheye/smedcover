@@ -249,6 +249,17 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_pages_own_list() {
+        // ui/tools.json, as the page's scripts/tools.mjs writes it
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../ui/tools.json")).unwrap();
+        let desktop = ToolList::from_json(&text, Host::Desktop).unwrap();
+        let server = ToolList::from_json(&text, Host::Server).unwrap();
+        assert!(!server.is_empty() && desktop.len() >= server.len());
+        assert!(desktop.instructions().is_some_and(|s| !s.is_empty()));
+        assert!(desktop.entries().iter().all(|t| t.hosts.contains(&Host::Desktop) && t.timeout <= MAX_TIMEOUT));
+    }
+
+    #[test]
     fn keeps_order_strips_the_extension_and_reads_it() {
         let text = file(json!([
             tool("b_tool", Some(json!({"hosts": ["desktop", "server"], "timeoutMs": 30000}))),

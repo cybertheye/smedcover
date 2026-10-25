@@ -2,6 +2,9 @@
 //! `{"on": false, "port": 25277, "token": "smc_…"}`. Only the Rust side reads and writes it (the
 //! page asks for what it shows); it is written to a temporary file that then takes its place, and on
 //! Unix only its owner may read it.
+//!
+//! The temporary file's name is always the same (`mcp.json.tmp`), so a host saves from one place at
+//! a time: under the lock it keeps its settings in.
 
 use std::fs;
 use std::io::{ErrorKind, Write};
@@ -14,6 +17,9 @@ use crate::{err, Res};
 
 /// The file's name in the data folder.
 pub const FILE: &str = "mcp.json";
+/// What a file that could not be read as settings is renamed to, for the curious, before it is
+/// replaced.
+pub const BAD_FILE: &str = "mcp.json.bad";
 /// The port the endpoint listens on unless the user picks another (on 127.0.0.1 only).
 pub const DEFAULT_PORT: u16 = 25277;
 /// The lowest port the user may pick: those below are the system's.
@@ -33,24 +39,30 @@ impl McpConfig {
         Ok(McpConfig { on: false, port: DEFAULT_PORT, token: Secret::generate()? })
     }
 
-    /// The settings saved in the data folder `data`. A file that is not there, or that cannot be
-    /// read as settings, gives [`McpConfig::new`]'s; a port out of range gives [`DEFAULT_PORT`]; a
-    /// missing or malformed token is replaced with a new one. Whatever had to be filled in is saved
-    /// at once, so the token stays the same from then on. Only a failure to read or write the file
-    /// is an error.
+    /// The settings saved in the data folder `data`. A file that is not there gives
+    /// [`McpConfig::new`]'s; so does one that cannot be read as settings (not UTF-8, not JSON, not
+    /// an object), which is first renamed [`BAD_FILE`]. A port out of range gives [`DEFAULT_PORT`];
+    /// a missing or malformed token is replaced with a new one. Whatever had to be filled in is saved
+    /// at once, so the token stays the same from then on. On Unix a file others may read or write is
+    /// made its owner's alone. Only a failure to read, rename or write the file is an error. Call it
+    /// under the same lock as [`McpConfig::save`].
     pub fn load(data: &Path) -> Res<McpConfig> {
         let path = data.join(FILE);
-        let text = match fs::read_to_string(&path) {
-            Ok(text) => Some(text),
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => Some(bytes),
             Err(e) if e.kind() == ErrorKind::NotFound => None,
             Err(e) => return Err(format!("{FILE}: {e}")),
         };
-        let saved: Option<Value> = text.as_deref().and_then(|t| serde_json::from_str(t).ok()).filter(Value::is_object);
+        let saved: Option<Value> = bytes.as_deref().and_then(|b| serde_json::from_slice(b).ok()).filter(Value::is_object);
         let Some(saved) = saved else {
+            if bytes.is_some() {
+                fs::rename(&path, data.join(BAD_FILE)).map_err(|e| format!("{FILE}: {e}"))?;
+            }
             let config = McpConfig::new()?;
             config.save(data)?;
             return Ok(config);
         };
+        owner_only(&path).map_err(|e| format!("{FILE}: {e}"))?;
         let on = saved.get("on").and_then(Value::as_bool);
         let port = saved.get("port").and_then(Value::as_u64).and_then(|p| u16::try_from(p).ok()).filter(|p| check_port(*p).is_ok());
         let token = saved.get("token").and_then(Value::as_str).and_then(Secret::parse);
@@ -66,7 +78,8 @@ impl McpConfig {
         Ok(config)
     }
 
-    /// Saves the settings in the data folder `data` (which is made if it is not there).
+    /// Saves the settings in the data folder `data` (which is made if it is not there). The host
+    /// saves under one lock: the temporary file's name is always the same.
     pub fn save(&self, data: &Path) -> Res<()> {
         fs::create_dir_all(data).map_err(|e| format!("{FILE}: {e}"))?;
         let text = serde_json::to_string_pretty(&json!({"on": self.on, "port": self.port, "token": self.token.expose()})).map_err(err)?;
@@ -110,6 +123,21 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         let _ = fs::remove_file(&tmp);
     }
     result
+}
+
+/// On Unix, takes away what others may do with the file at `path` (it holds the token).
+fn owner_only(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(path)?.permissions().mode();
+        if mode & 0o077 != 0 {
+            fs::set_permissions(path, fs::Permissions::from_mode(mode & 0o700))?;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 fn temp_path(path: &Path) -> PathBuf {
@@ -156,11 +184,17 @@ mod tests {
         assert!(Secret::parse(read.token.expose()).is_some());
         let reread = McpConfig::load(data).unwrap();
         assert!(reread.token.matches(read.token.expose()), "the new token was saved");
-        // a file that is not settings at all starts over, off
-        fs::write(data.join(FILE), "{\"on\": tr").unwrap();
-        let fresh = McpConfig::load(data).unwrap();
-        assert!(!fresh.on);
-        assert!(!fresh.token.matches(read.token.expose()));
+        // a file that is not settings at all starts over, off, the old one kept aside
+        let not_utf8: &[u8] = b"{\"on\": true, \"token\": \"\xff\xfe\"}";
+        for bad in [&b"{\"on\": tr"[..], b"[1, 2]", not_utf8] {
+            fs::write(data.join(FILE), bad).unwrap();
+            let fresh = McpConfig::load(data).unwrap();
+            assert!(!fresh.on);
+            assert!(!fresh.token.matches(read.token.expose()));
+            assert_eq!(fs::read(data.join(BAD_FILE)).unwrap(), bad);
+            let saved: Value = serde_json::from_slice(&fs::read(data.join(FILE)).unwrap()).unwrap();
+            assert_eq!(saved["on"], false);
+        }
     }
 
     #[test]
@@ -186,6 +220,12 @@ mod tests {
         fs::write(dir.path().join("mcp.json.tmp"), "x").unwrap();
         fs::set_permissions(dir.path().join("mcp.json.tmp"), fs::Permissions::from_mode(0o644)).unwrap();
         McpConfig::new().unwrap().save(dir.path()).unwrap();
+        let mode = fs::metadata(dir.path().join(FILE)).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        // one that others were let into (copied, restored from a backup) is taken back on reading,
+        // though nothing in it had to be filled in
+        fs::set_permissions(dir.path().join(FILE), fs::Permissions::from_mode(0o664)).unwrap();
+        McpConfig::load(dir.path()).unwrap();
         let mode = fs::metadata(dir.path().join(FILE)).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }
