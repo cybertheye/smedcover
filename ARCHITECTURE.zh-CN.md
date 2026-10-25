@@ -76,13 +76,17 @@ ui/
   defaults.json      应用的默认值，按模块分：settings、profile、layout、surprise、ui
   js/csv.js          批量导出用的 CSV 解析（「设置 → 尺寸与导出」）
   js/i18n.js         界面文字（中 / 英）
+  js/tools.js        agent 工具（MCP）的数据：名字、说明、参数结构、标注、页面自己读的属性；参数检查、回答的格式、命令用来查找的函数（纯函数）
+  js/commands.js     每个 agent 工具做什么，建立在应用自己的函数之上（makeCommands(api)）
+  js/agent.js        agent 外壳：一次一个调用、等用户、一步进行时挡住窗口、开发用的钩子
+  tools.json         宿主的 MCP 入口列出的工具，由 tools.js 生成（scripts/tools.mjs）
   fonts/             内置字体及许可
 core/src/            Rust 侧干活的部分，服务器也能共用（crate smedcover-core）：存储、导出、字体、轮廓、抠图、AI 请求（见第 10 节）
 src-tauri/src/lib.rs 桌面应用：数据目录、命令（对 core/ 的薄封装）、对话框、自检
 tests/               不依赖 DOM 的模块的单元测试
 ```
 
-`layers.js`、`layout.js`、`title.js` 的解析部分、`csv.js`、`store.js` 的校验部分都不碰 DOM，因此可以直接用 Node 测试。
+`layers.js`、`layout.js`、`title.js` 的解析部分、`csv.js`、`store.js` 的校验部分和 `tools.js` 都不碰 DOM，因此可以直接用 Node 测试；`commands.js`、`agent.js` 也只在有调用时才碰。
 
 ## 3. 数据模型
 
@@ -742,7 +746,7 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 ### 9.4 撤销
 
-每次改动后（防抖 0.5 秒）把档案和封面序列化成一个字符串快照，与上一个不同才入栈，最多保留 80 步。撤销就是把快照解析回来并重新校验（`restoreSnap(snap)`：把档案和封面放回画布并保存）。`HOLD.history` 为真时，防抖的提交（`recordHistory()`）一直等着，好让一次分几处的改动算一步，由设它的一方在改完后提交。实现简单，代价是每步存一份完整数据；在目前的数据规模下可以接受。恢复之后，`timeTravel()` 用恢复后的状态重写这一格快照：校验会补上缺省字段、换掉键的顺序，若不重写，下一次提交会把这点差别当成新改动，截掉可以重做的那几步（「重做」曾因此失效）。
+每次改动后（防抖 0.5 秒）把档案和封面序列化成一个字符串快照，与上一个不同才入栈，最多保留 80 步。撤销就是把快照解析回来并重新校验（`restoreSnap(snap)`：把档案和封面放回画布并保存）。`HOLD.history` 为真时，防抖的提交（`recordHistory()`）一直等着，好让一次分几处的改动算一步，由设它的一方在改完后提交。实现简单，代价是每步存一份完整数据；在目前的数据规模下可以接受。恢复之后，`timeTravel()` 用恢复后的状态重写这一格快照：校验会补上缺省字段、换掉键的顺序，若不重写，下一次提交会把这点差别当成新改动，截掉可以重做的那几步（「重做」曾因此失效）。agent 的一次改动也是一步，由 `agentStep()` 做（见 11.1）。
 
 **清空这张封面…**（「⋯」菜单，`clearDialog()`）：先确认，再用 `channelCover()` 按档案的默认设计重建这个频道的封面，去掉其中用户添加的图层（自由图层和副本，只留 `isLayout()` 的），标题、副标题和角标文字照旧；前后各提交一次历史，所以是一步撤销。
 
@@ -885,6 +889,20 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 python3 -m http.server -d ui 4599
 ```
 
+### 11.1 Agent：工具、命令、外壳
+
+agent（MCP 客户端，比如 Claude Code）通过工具操作 SmedCover，每个工具是对封面做的一件完整的事（改文字、摆放图层、画预览、导出），而不是读写文件。调用从哪里进来是宿主的事（桌面应用在 127.0.0.1 上的入口、服务器的 `/mcp`，见 TODO.md）；回答调用的是页面，分在三个模块里。
+
+`tools.js` 用数据定义每个工具（`TOOLS`）：名字、标题和英文说明（写给模型看：做什么、回答什么、拒绝什么）；参数结构（JSON Schema，每个对象都用 `additionalProperties: false` 封住，枚举就是应用自己的常量——`LOOK_IDS`、`EFFECTS`、`BEND_IDS`、`SURPRISE_LOCKS`、`WEAVE_WAYS`、`SCOPES`、`FORMATS`——全部内联，不用 `$ref`，顶层不用 `anyOf`，有的客户端不接受）；回答的结构；MCP 的标注（`readOnlyHint`；`destructiveHint` 为假时也写出来，因为 MCP 默认是真；`idempotentHint`；`add_photo` 的 `openWorldHint`）；以及只有页面读的：`history`（作为一步撤销运行）、`busy`（等用户的哪些事，`light` 或 `strict`）、`hosts`（`desktop`、`server`：选中、撤销和重做只属于桌面窗口）、`timeoutMs`（宿主等页面多久没消息就放弃：读半分钟，改一分钟，画预览、抽牌两分钟，抠图十分钟，导出半小时）、`needs`（参数结构不用组合关键字就说不出来的：几个参数里至少、恰好或至多一个）。`checkArgs(schema, args)` 按工具用到的那部分 JSON Schema 检查一次调用，用一句话告诉模型哪里不对（`"maxSide" must be at most 2048 (got 4000).`、`Unknown argument "colour" (this tool takes: …)`）；`checkCall(def, args)` 再加上 `needs`。`toResult({structured, images, text})` 做出 MCP 的 `CallToolResult`（一段文字，默认是结构化回答的 JSON；每张 PNG 一个图片块；`structuredContent`），`toError(code, message)` 做出失败，`code` 是 `unknown_tool`、`invalid_arguments`、`not_allowed`、`busy`、`unavailable`、`failed` 之一（第一种宿主转成协议错误，其余转成 `isError`）。还有命令用来查找的函数：`findProfile()`（先按 id，再按名字）、`findChannel()`（先按 id，再按批量表格的认法，即 `store.js` 的 `channelIndex()`）、`findSize()`（像素、相差 1% 以内的比例、名字或说明；对上好几个就报错并列出它们）、`letterKeysOf()`（穿插窗口里给出的字的键）、`boxesOf()`（把一次绘制的 `_hits` 换成占画面的比例）、`sheetPlan()`（拼图里每个尺寸的位置）。
+
+`scripts/tools.mjs` 在每次打包前（`beforeBuildCommand`，和重绘风格的 `index.json` 一样）用 `toolsJson()` 写出 `ui/tools.json`：`{format: 1, instructions, tools: [{name, title, description, inputSchema, outputSchema?, annotations, "x-smedcover": {hosts, timeoutMs}}]}`，`instructions` 是给 agent 的入门说明（档案、频道、尺寸和图层；每次改动都是用户开着的窗口里的一步撤销；通常的调用顺序）。宿主从这个文件列出工具，所以页面还没起来时也能回答；文件和 `tools.js` 不一致时 `npm test` 失败；`agent.js` 的 `toolsHash()` 是这个文件的 SHA-256（对 `toolsText()`，即逐字节的文件内容），页面用它说明自己回答的是哪一份清单。
+
+`commands.js` 做每个工具说的事：`makeCommands(api)` 给每个工具一个函数 `(args, ctx) → 回答`，建立在 `API` 之上（`app.js` 末尾，冻结的对象）：状态，以及应用自己读、改、画、写的那些函数——编辑器用的就是它们，所以 agent 的改动和用户的一样被检查、被画出来。读的工具从不切换窗口：别的频道或档案的封面按存着的样子读（`coverOf()`），用那个档案的风格画（`renderReady(size, cover, index, {profile, pixelW})`）。`render_preview` 按要的长边画一个尺寸（`widthFor()`），像导出那样等字体和轮廓，回答 PNG 和每个图层落在哪里；带 `all` 时把所有尺寸画在一张带说明的拼图上。只读的工具、选中、撤销和重做已经做好，其余的暂时回答 `unavailable`。
+
+`agent.js` 是外壳。调用按来的顺序一次一个地运行（`makeQueue()`：还在排队时取消的从不运行；正在运行的继续，通过 `ctx.cancelled()` 知道）。每个调用先检查（`checkCall()`），再等用户手上没事（`whenIdle()`，依据 `userBusy()`：按着、拖着、开着对话框、正在打字；改动还要等「设置」、编辑器的几个窗口和进行中的导出），而且手离开窗口 400 毫秒；等的时候每 5 秒告诉调用方一次（一条进度消息，让宿主的计时重新开始），改动等 30 秒（读等 10 秒）还不行就回答 `busy`。改东西的调用运行时挡住窗口：先关掉菜单、浮层和悬停预览，离开输入框（`closeTransient()`）；`#agent` 盖在窗口上（在菜单和对话框之上，在问题、标题栏和提示条之下；`body.agent .app` 不接受指针）；按键、粘贴和滚轮在别的东西看到之前就被吞掉，拖进来的文件放掉——不会补放：一步很短——150 毫秒后，顶上出现一块玻璃小条，说正在做什么（`agent.step.<tool>`），按一下它会跳一下（「稍等」）。工具带 `history` 的在 `agentStep(fn)`（`app.js`）里运行：用户正在做的改动先单独成为一步（`commitPending()`），`HOLD.history` 让防抖的提交等着，结束时提交一次——什么都没变就不算一步。半途失败时，把开头那次提交后取的快照放回去（期间多出来的步，比如 `keepFirst()` 的，一并去掉）；如果它切换过频道或档案，就放回刚切过去时的样子，切换本身留着，和用户自己切换一样；放回去的那一步按现在的样子重写一遍，和 `timeTravel()` 一样，否则结尾的提交会把这点差别当成改动，截掉可以重做的步。
+
+调度器按宿主要收到的样子回答每个调用：`{id, ok: true, result}` 或 `{id, ok: false, error: {code, message}}`。传输负责把调用送进来、把回答送出去（`serve(agent, {listen, reply, progress})`）；桌面的传输——`mcp_attach` 交来的 Tauri `Channel`，用 `mcp_reply`、`mcp_progress` 回答——等 Rust 那边一起写。在那之前，`globalThis.smedcoverAgent.call(name, args)` 从控制台或单独页面里的测试走同一个调度器（`tools()`：工具清单）。`startAgent()` 在 `start()` 的最后启动外壳，自检模式下不启动；自检时由 `SMEDCOVER_SELFTEST_AGENT=1` 在单独的一步里启动（见 13）。
+
 ## 12. 字体
 
 三款内置字体通过 `@font-face` 加载，三个平台渲染一致。用户导入的字体以 data URL 存入 `fonts/`，启动时用 `FontFace` 注册。启动时会等字体就绪后再画第一帧，否则标题的字号适配会按错误的字宽计算。
@@ -893,7 +911,7 @@ python3 -m http.server -d ui 4599
 
 | 层次 | 命令 | 覆盖 |
 |---|---|---|
-| 前端单元测试 | `npm test` | 布局、图层位置与层级、适用频道、CSV、数据校验（按档案的导出窗口里关掉的尺寸和文件夹、按风格的使用次数）、默认值和盖在上面的 `custom.json`、写进 `custom.json` 的设置（只写不一样的，读回来不变，从 `settings.json` 读一次）、文件名规则、「你看着办」的规则和概率（条的 `moveShare()`、圆点的 `dotsOf()` 和 `withDots()`、锁住版式）、每个风格的分类、素材库的数量与命名、风格的颜色映射与参数、贴纸描述与立体图形描述的校验与绘制、两种接口风格的请求与回复、3D 视图的投影、点选与标签、界面文字的中英文齐全、`ui/` 里没有原生的 `confirm()`、`alert()`、`prompt()` |
+| 前端单元测试 | `npm test` | 布局、图层位置与层级、适用频道、CSV、数据校验（按档案的导出窗口里关掉的尺寸和文件夹、按风格的使用次数）、默认值和盖在上面的 `custom.json`、写进 `custom.json` 的设置（只写不一样的，读回来不变，从 `settings.json` 读一次）、文件名规则、「你看着办」的规则和概率（条的 `moveShare()`、圆点的 `dotsOf()` 和 `withDots()`、锁住版式）、每个风格的分类、素材库的数量与命名、风格的颜色映射与参数、贴纸描述与立体图形描述的校验与绘制、两种接口风格的请求与回复、3D 视图的投影、点选与标签、界面文字的中英文齐全、`ui/` 里没有原生的 `confirm()`、`alert()`、`prompt()`；agent 工具（`agent.test.mjs`）：每个定义完整、标注和规格一致、枚举就是应用的常量、`ui/tools.json` 是最新的、参数检查的结论和说法、查找档案频道尺寸、回答的格式、在替身 `API` 上的只读命令、选中、撤销和重做、队列、`whenIdle()` 和调度器 |
 | Rust 单元测试 | `cargo test --workspace`（`npm run test:rust`） | 路径沙盒、存储读写、帧解析、三种格式的编码、文件名处理、对本地模拟服务发请求、代理规则、从字体集里切出一个字面、描出的轮廓、按名字找字体（自带的、导入的、重新导入的）、抠图的模型和运行库安装包 |
 | 端到端自检 | `SMEDCOVER_SELFTEST=<目录> <可执行文件>` | 在真实的网页视图和 Rust 之间走完整导出流程 |
 
@@ -902,6 +920,8 @@ python3 -m http.server -d ui 4599
 它还给每个风格效果计时（`report.json` 的 `fxTime`，用 `FX_TIMING`）：用效果自己的默认设置，单独放在尽量大的图层上——铺满画布的照片、铺满画布的色块、大字、大贴纸——分别画在和笔记本上的编辑画布一样宽（1600 px；大屏上最宽到 2880 px）、和风格卡片一样宽（300 px）的画布上。封面画到每一张画布上（尺寸缩略图、风格卡片、3D 薄片）都要把效果重算一遍，所以工作量不随画布缩小的效果会拖慢所有这些地方，蓝调唱片的「照片网点」就是这样（5.9 秒和 1.8 秒）。超过 `FX_BUDGET.slow`（100 ms；卡片宽度 30 ms）的重测一次后列在 `slow` 里；超过 `FX_BUDGET.max`（4 秒；1 秒，给比 M 系列 Mac 慢的机器留了余地，M 系列上最慢的是 1.4 秒和 0.4 秒）的算错误。卡片宽度上超过 `slow`、而且耗时超过编辑画布宽度时四分之一的，另列为「不怎么随画布变小」（`shrinksLittle`）。`SMEDCOVER_SELFTEST_LOOKS` 也会限制这一项；每个风格在 `selftest-progress.txt` 里记一步（`fxtime-<风格>`）。
 
 给了真实照片（`SMEDCOVER_SELFTEST_PHOTO=<文件>`）时，还会抠出它的主体放到标题上，写出按头部穿插、逐字穿插（普通字、摆正了画的字、剪报字）、文字半透明时穿插、用画笔穿插（沿标题第二行涂一道「在前」，再从左边到主体中间涂回「在后」）和拖动后的封面（`weave-*.png`）；穿插后和不穿插一模一样（画笔擦掉一段后和擦之前一模一样也算）、拖动时透出文字的地方和静止时不一样、拖头部线滑条时画面不跟着变、拖着标题经过主体时重算了主体的风格效果，都会报错。不管有没有照片，它还会把一张贴纸放到标题上同样穿插，按上部、画笔和逐字各一次，并拖动贴纸和标题（`weave-asset-*.png`）；穿插后和不穿插一模一样、文字在看不到贴纸的地方跑到了前面（不穿插的封面和去掉贴纸的封面一样的地方，四周放宽两个像素）、拖动时透出文字的地方和静止时不一样，都会报错。
+
+设置 `SMEDCOVER_SELFTEST_AGENT=1` 时，还会启动 agent 外壳（11.1）——拦住调用的是 `userBusy()` 说的事，自检本身除外——像 agent 的调用那样通过调度器调用只读工具、选中、撤销和重做（`agentTest()`）：`get_context` 列出已有的档案、频道和尺寸以及窗口显示的是什么；`get_cover` 的图层就是封面的图层；`render_preview` 解码出来的长边就是要的（640，还有另一个频道的一个竖版尺寸高 512，窗口不切换），以及所有尺寸的拼图；`select_layer` 按要求选中；手动改一处之后，`undo` 让 `S.histIdx` 退到它之前，`redo` 再前进；`agentStep()` 让一次改动成为一步、不改不成步、半途失败的改动被放回且可重做的步不受影响；未知工具、错误参数、还没做的工具都按宿主要的方式回答；对话框开着时调用会等。预览写进自检目录（`agent-preview.png`、`agent-preview-tall.png`、`agent-sheet.png`），结果记在 `report.json` 的 `agent` 下，出错也计入报告的错误。
 
 设置 `SMEDCOVER_SELFTEST_LOOKS=<风格 id，逗号分隔>` 时，只检查列出的风格——它们有照片和没照片的封面、所有滑条拉到最大的封面、它们的图层风格效果，以及移动过、显示着拖拽点的场景物件（否则只拍篮球海报的）；下面的拖动计时也只测它们的场景物件。每一步开始时都会记进数据目录里的 `selftest-progress.txt`，自检卡住时能看出停在哪一步。以前偶发的卡住（所有进程空闲、网页视图在等待、每次停在不同的步骤）是因为自检窗口开在了屏幕之外——别的桌面上、全屏应用后面：WebKit 对看不见的窗口停止绘制，从显卡读回画布（导出、编码 PNG）就一直等不到结果。所以自检模式下应用会让网页视图不检测窗口是否可见（`_setWindowOcclusionDetectionEnabled:`，WebKit 自己的测试也用这个设置；见 `lib.rs` 的 `setup`）。另外，都市夜曲和构成主义直接在内存里给照片本身调色、只做一次（`photo.js` 的 `treatedOf()`），而不是每次重画都读回画布。
 
@@ -968,3 +988,4 @@ python3 -m http.server -d ui 4599
 | 多记一项用户的设置 | `store.js` 的 `normalizeSettings()` 里加一个字段（检查设置只在这一处），有默认值的话写进 `defaults.json` 的 `settings`；在 `S.settings` 上改，再调 `app.js` 的 `persistSettings()`，和默认值不一样时就写进 `custom.json`（`settingsToKeep()`） |
 | 加一句界面文字 | `i18n.js`，中英文都要写；测试会检查两种语言是否齐全 |
 | 撤销不了的操作先问一句 | `app.js` 里动手前 `await askSure({title, body, go})`（不要用浏览器的 `confirm()`、`alert()`、`prompt()`：有测试不让它们出现在 `ui/` 里）；`index.html` 里的 `#ask` |
+| 加一个或改一个 agent 工具 | `tools.js` 的 `TOOLS` 里写它的定义，再 `npm run tools`；它做什么写在 `commands.js` 的 `makeCommands()` 里，通过 `app.js` 末尾的 `API` 用到应用；会改东西的工具，在 `i18n.js` 里加 `agent.step.<tool>` |
