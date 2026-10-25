@@ -240,8 +240,10 @@ export function normalizeExportSizes(raw) {
   }
   return out;
 }
-/** What a change of place or layout reaches (settings.scope): every size, those facing the size shown's way, or that size. */
-const SCOPES = ["all", "orient", "size"];
+/** What a change of place or layout reaches (settings.scope), from the widest: every size, those facing the size shown's way, or that size. */
+export const SCOPES = ["all", "orient", "size"];
+/** The formats exports are written in (settings.format). */
+export const FORMATS = ["png", "jpeg", "webp"];
 /**
  * The scope every start begins at, whatever it was when the app closed: the defaults' (settings.scope in defaults.json),
  * as shipped `orient`, every size facing the way the size shown does. So it is not kept (settingsToKeep).
@@ -260,7 +262,7 @@ export function normalizeSettings(raw) {
     lang: oneOf(s.lang, ["zh", "en"], D.lang, ""),
     profileId: str(s.profileId),
     scale: oneOf(Number(s.scale), [1, 2, 3, 4], D.scale, 2),
-    format: oneOf(s.format, ["png", "jpeg", "webp"], D.format, "png"),
+    format: oneOf(s.format, FORMATS, D.format, "png"),
     quality: Math.round(num(s.quality, num(D.quality, 92, 40, 100), 40, 100)),
     nameTemplate: str(s.nameTemplate) || nameTemplate(),
     exportSizes: normalizeExportSizes(s.exportSizes),

@@ -6,7 +6,7 @@ import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, han
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang, bothLangs } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
-import { useFont, startScope, channelIndex } from "./store.js";
+import { useFont, startScope, channelIndex, SCOPES } from "./store.js";
 import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
@@ -87,8 +87,6 @@ const frame = () => {
   const s = selSize(), [vw, vh] = virtualSize(s.w, s.h), key = sizeKey(s);
   return { vw, vh, key, catId: cat().id, group: sameWay(key).map((z) => { const [w, h] = virtualSize(z.w, z.h); return { key: sizeKey(z), vw: w, vh: h }; }) };
 };
-/** The scopes a change of place or layout may have, from the widest: every size, those facing the size's way, the size alone (S.settings.scope). */
-const SCOPES = ["all", "orient", "size"];
 /** What scope `v` is called on the size keyed `key`: the middle one names the sizes it reaches ("All tall"). */
 const scopeName = (v, key = S.sel) => t(v === "orient" ? "scope.orient." + orientOfKey(key) : "scope." + v);
 /** The size keys a change in `scope` reaches by size from the size keyed `key` — those facing its way, or it alone — or null for every size. */
@@ -596,8 +594,9 @@ function aboutSubject(L, { scale, rot, kx, ky }) {
   adjust(L, frame(), S.settings.scope, { ddx: h.cx + vx - h.px, ddy: h.cy + vy - h.py });
   h.px = h.cx + vx; h.py = h.cy + vy;   // until the cover is drawn again
 }
-function addLayer(L) {
-  insertAbove(S.cover.layers, S.layerId === "bg" ? "bg" : S.layerId, L);
+/** Puts new layer L on the cover above the layer `above` names (the selected one, unless told; at the top where it names none), selected. Returns L. */
+function addLayer(L, above = S.layerId === "bg" ? "bg" : S.layerId) {
+  insertAbove(S.cover.layers, above, L);
   S.layerId = L.id;
   touch({ cover: true, side: true });
   return L;
@@ -620,15 +619,32 @@ function removeLayer(id = S.layerId) {
 }
 /** Whether a layer can be copied: one the user added, or a layout layer but the ground and the corner brackets (a linked cut-out is not: cut out the photo again). */
 const copiable = (L) => !!L && (isFree(L.type) || COPYABLE.includes(L.type)) && !(L.type === "photo" && L.of);
-function duplicateLayer() {
-  const L = layer(), c = copiable(L) && duplicate(L);
-  if (!c) return;
+/** Copies layer `id` (the selected one, unless told), when it can be (copiable), just above it, selected. Returns the copy, or null. */
+function duplicateLayer(id = S.layerId) {
+  const L = layer(id), c = copiable(L) && duplicate(L);
+  if (!c) return null;
   insertAbove(S.cover.layers, S.cover.layers[clipEnd(S.cover.layers, S.cover.layers.indexOf(L))].id, c); S.layerId = c.id;   // over what is clipped onto it, which stays its
   touch({ cover: true, side: true, panel: onCoverTab() });
+  return c;
 }
-function shiftLayer(dir) {
-  const to = stepIndex(S.cover.layers, S.layerId, dir, cat().id);
-  if (to > 0 && moveLayer(S.cover.layers, S.layerId, to)) touch({ cover: true, side: true, panel: onCoverTab() });
+/** Moves layer `id` (the selected one, unless told) past the next layer of this channel's cover up (dir 1) or down (-1). Returns whether it moved. */
+function shiftLayer(dir, id = S.layerId) {
+  const to = stepIndex(S.cover.layers, id, dir, cat().id);
+  if (!(to > 0 && moveLayer(S.cover.layers, id, to))) return false;
+  touch({ cover: true, side: true, panel: onCoverTab() });
+  return true;
+}
+/**
+ * Moves layer `id` to index `to` of the cover's layers (see moveLayer in layers.js). The layout's parts then stacked
+ * otherwise, the profile's design takes their order too, so new covers and Empty this cover have it (the layers the user
+ * added stay where they are in it); with the cover, one step of undo. Returns whether it moved.
+ */
+function restack(id, to) {
+  const was = layoutOrder(S.cover.layers).join();
+  if (!moveLayer(S.cover.layers, id, to)) return false;
+  const order = layoutOrder(S.cover.layers), design = order.join() !== was && orderLayout(S.profile.design.layers, order);
+  touch({ cover: true, profile: design, side: true, panel: onCoverTab() });
+  return true;
 }
 // pointer on the main canvas: click selects the topmost layer under it, drag moves, wheel resizes
 function virtualPoint(e) {
@@ -1578,8 +1594,11 @@ async function addPhoto(src, at = null, name = "", fill = false) {
   keepPicture(pid, name, "upload");
   return placePhoto(pid, at, fill);
 }
-/** Puts a picture of the photo store on the cover as a photo layer, by addPhoto's rules (from the bitmap library, too). */
-async function placePhoto(pid, at = null, fill = false) {
+/**
+ * Puts a picture of the photo store on the cover as a photo layer, by addPhoto's rules (from the bitmap library, too):
+ * above layer `above` (the selected one, unless told; see addLayer) where it does not fill the canvas.
+ */
+async function placePhoto(pid, at = null, fill = false, above = undefined) {
   if (!S.photos.has(pid)) await loadPhotos([pid]);
   if (!S.photos.has(pid)) { toast(t("msg.badFile")); return null; }
   if (fill) {
@@ -1591,7 +1610,7 @@ async function placePhoto(pid, at = null, fill = false) {
   }
   const L = newLayer("photo", { pid });
   if (at) { L.t.all.x = at.x; L.t.all.y = at.y; }
-  addLayer(L); renderPanel();
+  addLayer(L, above); renderPanel();
   toast(t("cover.photoAdded"));
   return L;
 }
@@ -1903,24 +1922,28 @@ async function ensureMask(pid, fresh = false) {
 }
 /** A picture changed (a new one, a repaint): the layers cut from it get its new subject. */
 async function recut(pid) { if (S.cover.layers.some((l) => l.type === "photo" && l.cut && recordOf(l) === S.photos.get(pid))) await ensureMask(pid, true); }
-/** The sizes a cut-out of photo L made now is for: where L shows among those the scope under the canvas reaches (see sizesFor in layers.js). */
-const cutSizes = (L) => sizesFor(L, scopeKeys(), sizeKeys());
+/**
+ * The sizes a cut-out of photo L made now is for: where L shows among those the scope under the canvas reaches (see
+ * sizesFor in layers.js), or among size keys `keys` when told (null: every size).
+ */
+const cutSizes = (L, keys = scopeKeys()) => sizesFor(L, keys, sizeKeys());
 /**
  * The photo Cut out subject cuts photo L's subject out of: L, or where L does not show at the sizes the scope at the
- * top reaches, the photo of its picture that does — the copy Remove the background left there (see cutFrom in layers.js).
+ * top reaches (or `keys`), the photo of its picture that does — the copy Remove the background left there (see cutFrom in layers.js).
  */
-const cutSource = (L) => cutFrom(S.cover.layers, L, scopeKeys(), sizeKeys());
+const cutSource = (L, keys = scopeKeys()) => cutFrom(S.cover.layers, L, keys, sizeKeys());
 /**
  * Cuts the subject out of photo layer L into a linked cut-out (see "linked photos"): above the title
  * (or above L, when L is higher), selected. When L has one already, its subject is found again
  * instead. With the scope at one size or one orientation, the cut-out shows only there (see `sizes` in layers.js), and
  * says so; one L has already that does not show there yet is put there too. Where L does not show there and the copy
- * Remove the background left there does, the cut-out is that copy's (cutSource). Returns the cut-out, or null.
+ * Remove the background left there does, the cut-out is that copy's (cutSource). `keys`: the size keys to go by
+ * instead of the scope's (null: every size). Returns the cut-out, or null.
  */
-async function cutOut(L) {
+async function cutOut(L, keys = scopeKeys()) {
   if (!L || L.type !== "photo" || L.of || CUT.busy || !canCut()) return null;
-  L = cutSource(L);
-  const had = passivesOf(L)[0], all = sizeKeys(), want = cutSizes(L);
+  L = cutSource(L, keys);
+  const had = passivesOf(L)[0], all = sizeKeys(), want = cutSizes(L, keys);
   if (had && !want.every((k) => inSize(had, k))) {   // the photo's cut-out is kept to other sizes: it shows at these too
     keepTo(had, [...all.filter((k) => inSize(had, k)), ...want], all);
     S.layerId = had.id; S.picked = [];
@@ -4666,12 +4689,8 @@ function layerRow(L) {
       e.preventDefault(); e.stopPropagation();
       const id = dragId; dragId = null;
       if (!id) return;
-      const from = S.cover.layers.findIndex((l) => l.id === id), to = S.cover.layers.indexOf(L), was = layoutOrder(S.cover.layers).join();
-      if (!moveLayer(S.cover.layers, id, from < to ? to : to + 1)) return renderSide();
-      // the layout's parts now stacked otherwise: the profile's design takes their order too, so new covers and Empty
-      // this cover have it (the layers the user added stay where they are in it); with the cover, one step of undo
-      const order = layoutOrder(S.cover.layers), design = order.join() !== was && orderLayout(S.profile.design.layers, order);
-      touch({ cover: true, profile: design, side: true, panel: onCoverTab() });
+      const from = S.cover.layers.findIndex((l) => l.id === id), to = S.cover.layers.indexOf(L);
+      if (!restack(id, from < to ? to : to + 1)) return renderSide();
     } },
     // a row that can be dragged says so by the grip at its head (under the pointer and on the selected row); one that cannot keeps the place empty
     el("span", { class: "grip", title: grip ? t("layers.drag") : null, "aria-hidden": "true" }, grip ? "⋮⋮" : ""),
@@ -6283,7 +6302,7 @@ function renderSide() {
       ground && el("div", { class: "lybase" }, layerRow(ground))),
     el("div", { class: "selbar" },
       el("span", { class: "who", title: !many.length && L ? layerName(L) : null }, many.length ? t("props.group", many.length) : L ? [t("layers.selected"), el("b", {}, layerName(L))] : t("layers.none")),
-      ib(ICONS.dup, t("layers.dup"), !copiable(L) || many.length > 0, duplicateLayer),
+      ib(ICONS.dup, t("layers.dup"), !copiable(L) || many.length > 0, () => duplicateLayer()),
       ib(ICONS.up, t("layers.up"), many.length > 0 || i < 1 || i >= here.length - 1, () => shiftLayer(1)),
       ib(ICONS.down, t("layers.down"), many.length > 0 || i <= 1, () => shiftLayer(-1)),
       ib(showing ? ICONS.eyeOff : ICONS.eye, t(showing ? "drawer.hide" : "drawer.show"), !hides.length, () => { for (const l of hides) l.visible = !showing; touch({ cover: true, side: true }); }),
@@ -6324,7 +6343,7 @@ function drawerHead(L, many) {
     el("small", {}, `${kind} · ${lit === all.length ? t("props.sum.allSizes") : t("props.sum.sizes", lit, all.length)}`),
     own && el("span", { class: "acts" },
       ib(L.visible ? ICONS.eyeOff : ICONS.eye, t(L.visible ? "drawer.hide" : "drawer.show"), false, () => { L.visible = !L.visible; touch({ cover: true, side: true }); }),
-      ib(ICONS.dup, t("drawer.dup"), !copiable(L), duplicateLayer),
+      ib(ICONS.dup, t("drawer.dup"), !copiable(L), () => duplicateLayer()),
       ib(ICONS.trash, t(isRemovable(L) ? "layers.del" : "layers.delLayout"), !isRemovable(L), () => removeLayer())));
 }
 /** The list's edges fade where rows go on past them: scrolled up under the chips, or on down under the Background's line (.lyscroll in index.html). */
@@ -6801,6 +6820,8 @@ const nameFor = (size, cover, index, { nameTemplate = S.settings.nameTemplate, s
   exportName(nameTemplate, { index, cat: S.profile.categories[index], title: cover.title, size, scale, ext: EXT[format] });
 /** PNG bytes of a canvas. Encoding is asynchronous, so the window keeps responding meanwhile. */
 const toPng = (cv) => new Promise((res, rej) => cv.toBlob((b) => (b ? b.arrayBuffer().then((a) => res(new Uint8Array(a)), rej) : rej(new Error("could not encode the image"))), "image/png"));
+/** A canvas as a PNG in base64 (a data URL's data, without its head). */
+const pngBase64 = async (cv) => { const url = await readAs(new Blob([await toPng(cv)], { type: "image/png" }), "readAsDataURL"); return url.slice(url.indexOf(",") + 1); };
 /**
  * Body of a binary export call: [u32 LE length][JSON metadata][PNG bytes] (see parse_frame in lib.rs). The file is
  * written in `out`'s format and quality ({format, quality}, each optional), else the settings'.
@@ -7421,16 +7442,42 @@ const SURPRISE = { busy: false, done: 0, step: null };
 const copyOf = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 /** The cover as Surprise me deals it — the style, the layers, the scene objects' places — copied. */
 const handNow = () => ({ style: copyOf(S.profile.style), layers: copyOf(S.cover.layers), scene: copyOf(S.cover.scene) });
+/** Object o made a copy of v, in place: what v has not taken out of it, the rest v's. */
+const mergeInto = (o, v) => { for (const k of Object.keys(o)) if (!(k in v)) delete o[k]; Object.assign(o, copyOf(v)); };
 /**
  * Hand h put back onto the objects there are — the style, each layer by its id — so whatever holds one
  * (a panel, a cut-out under way) still holds the cover's.
  */
 function putHand(h) {
-  const into = (o, v) => { for (const k of Object.keys(o)) if (!(k in v)) delete o[k]; Object.assign(o, copyOf(v)); };
-  into(S.profile.style, h.style);
+  mergeInto(S.profile.style, h.style);
   const had = new Map(S.cover.layers.map((l) => [l.id, l]));
-  S.cover.layers = h.layers.map((v) => { const L = had.get(v.id); if (!L) return copyOf(v); into(L, v); return L; });
+  S.cover.layers = h.layers.map((v) => { const L = had.get(v.id); if (!L) return copyOf(v); mergeInto(L, v); return L; });
   if (h.scene) S.cover.scene = copyOf(h.scene); else delete S.cover.scene;
+}
+/** Whether a and b (as JSON has them) hold the same, their keys in whatever order. */
+const sameValue = (a, b) => a === b || (!!a && !!b && typeof a === "object" && typeof b === "object" && Array.isArray(a) === Array.isArray(b)
+  && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => k in b && sameValue(a[k], b[k])));
+/**
+ * The cover on the canvas checked as a cover read is (channelCover), what the check changed put back onto the objects
+ * there are, as putHand puts a hand (so whatever holds one still holds the cover's). Returns what it changed: the cover's
+ * fields ("title"), the layers' ("layers.<id>.<field>"), a layer dropped or added ("layers.<id>") and their order ("layers").
+ */
+function settleCover() {
+  const c = S.cover, was = copyOf(c), now = copyOf(channelCover(copyOf(c), S.profile, c.catId)), said = [];
+  for (const k of new Set([...Object.keys(was), ...Object.keys(now)])) if (k !== "layers" && !sameValue(was[k], now[k])) said.push(k);
+  const old = new Map(was.layers.map((l) => [l.id, l]));
+  for (const v of now.layers) {
+    const o = old.get(v.id);
+    if (!o) said.push(`layers.${v.id}`);
+    else for (const k of new Set([...Object.keys(o), ...Object.keys(v)])) if (!sameValue(o[k], v[k])) said.push(`layers.${v.id}.${k}`);
+  }
+  for (const id of old.keys()) if (!now.layers.some((v) => v.id === id)) said.push(`layers.${id}`);
+  const ids = (ls) => ls.map((l) => l.id).filter((id) => old.has(id) && now.layers.some((v) => v.id === id)).join();
+  if (ids(was.layers) !== ids(now.layers)) said.push("layers");
+  const had = new Map(c.layers.map((l) => [l.id, l]));
+  const layers = now.layers.map((v) => { const L = had.get(v.id); if (!L) return v; mergeInto(L, v); return L; });
+  mergeInto(c, { ...now, layers: [] }); c.layers = layers;
+  return said;
 }
 /**
  * Deals `count` hands one after another (dealHand), each in a look of its own while there are looks left, `locks` left
@@ -7766,6 +7813,19 @@ function closeMenu() {
   MENU.open = false; $("menu").hidden = true;
   const b = $("morebtn"); if (b) { b.classList.remove("on"); b.setAttribute("aria-expanded", "false"); }
 }
+/** Whether element a is a field words are typed into (not a slider, a colour, a switch). */
+const textField = (a) => !!a && (a.isContentEditable || a.tagName === "TEXTAREA" || (a.tagName === "INPUT" && !["range", "color", "checkbox", "radio", "button", "file"].includes(a.type)));
+/**
+ * Shuts what is open for a moment over the editor — the ⋯ menu, the bar's popover, a picker's list, a look, an effect
+ * or a layout shown on hover — and takes the focus out of a field being typed in, so the sheets drawn next are drawn whole.
+ */
+function closeTransient() {
+  closeMenu();
+  if (FTB.pop) { FTB.pop = ""; renderBar(); }
+  for (const b of document.querySelectorAll('[aria-expanded="true"]')) if (b._shut) b._shut(false);
+  endPreview("look", "fx", "layout");
+  if (textField(document.activeElement)) document.activeElement.blur();
+}
 function renderMenu() {
   const go = (fn) => () => { closeMenu(); fn(); };
   const item = (label, sub, fn, cls = "") => el("button", { class: "mi " + cls, role: "menuitem", onclick: go(fn) }, el("span", { class: "mt" }, el("span", {}, label), sub && el("small", {}, sub)));
@@ -8018,6 +8078,36 @@ for (const [side, id] of [["left", "left"], ["right", "right"]]) {
 
 // ---------- window-level events
 let dragDepth = 0;
+/** When words were last typed into a field (its input event): typing, for userBusy, is a field focused and typed into within 1.2 s. */
+const TYPED = { at: -Infinity };
+addEventListener("input", (e) => { if (textField(e.target)) TYPED.at = performance.now(); }, true);
+/**
+ * What the user is in the middle of, in a few words of English, or null: what a change made for them (an agent's) waits
+ * for. Always: the self-test, a question or a dialog open, Surprise me's window or its dealing, a press or a drag under
+ * way (on the canvas, a slider, a row of the Layers sheet, an asset, a channel's card, files over the window), a word
+ * being put together by an input method, typing; `strict` (for a change): Settings, the letter, crop and weave windows,
+ * the brush's panel open too, and an export of the sizes ticked under way.
+ */
+function userBusy(strict = false) {
+  const deal = $("deal");
+  if (SELFTESTING) return "the self-test is running";
+  if (ASK.answer) return "a question is waiting for an answer";
+  if (!$("modal").hidden) return "a dialog is open";
+  if (SURPRISE.busy) return "Surprise me is dealing";
+  if (deal && !deal.hidden) return "Surprise me's window is open";
+  if (PRESS.down || FTB.drag || LIVE || DRAFT.held || document.body.classList.contains("scrubbing")) return "the pointer is down on the cover or a slider";
+  if (dragDepth > 0 || dragId || DRAGGED_ASSET || document.querySelector(".lifted")) return "something is being dragged";
+  if (COMPOSING) return "a word is being typed with an input method";
+  if (textField(document.activeElement) && performance.now() - TYPED.at < 1200) return "the user is typing";
+  if (!strict) return null;
+  if (S.mode === "setup") return "Settings is open";
+  if (S.letterWin) return "the letter window is open";
+  if (S.cropWin) return "the crop window is open";
+  if (S.weaveWin) return "the weave window is open";
+  if (S.brushWin) return "the weave brush is in use";
+  if (exportingTicked) return "an export is under way";
+  return null;
+}
 const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
 // (with AI generate open, a picture is its reference instead: its drop zone lights up, body.gdrop)
 addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; document.body.classList.add(genOpen() ? "gdrop" : "drop"); });
