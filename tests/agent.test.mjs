@@ -153,8 +153,9 @@ test("checkArgs counts a string's characters only against a length limit, and wi
   const big = "A".repeat(40 * 1024 * 1024), s = TOOL_BY.add_photo.inputSchema, cap = s.properties.source.properties.data.maxLength;
   assert.equal(cap, 24 * 1024 * 1024, "a picture inline: 24 Mi characters at most");
   assert.equal(TOOL_BY.open_project.inputSchema.properties.project.maxLength, cap, "and a project's text");
+  const within = "A".repeat(20 * 1024 * 1024);
   let t0 = performance.now();
-  assert.equal(checkArgs(s, { source: { data: big.slice(0, 20 * 1024 * 1024) } }), null);
+  assert.equal(checkArgs(s, { source: { data: within } }), null);
   assert.ok(performance.now() - t0 < 50, `within the limit in UTF-16 units: not counted (${Math.round(performance.now() - t0)} ms)`);
   assert.equal(checkArgs(s, { source: { data: big } }), `"source.data" must be at most ${cap} characters long (it has ${big.length}).`);
   assert.match(checkArgs(TOOL_BY.open_project.inputSchema, { project: big }), /"project" must be at most 25165824 characters long/);
