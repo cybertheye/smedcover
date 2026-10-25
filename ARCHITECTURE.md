@@ -1578,7 +1578,9 @@ editor's parts (`.lpart`, a switch each), the 3D view's *Spread* and *Copy from 
 `own` and `backTip` where the way back is not to a value (a letter's size back to chance): ↺ then shows while the value
 is the user's own and calls `back()`; its box's `_show(v)` shows a value changed elsewhere without calling `oninput`
 (the 3D view's spread, by the wheel and *Reset view*); ↺ that builds its window anew leaves the focus on the bar of the
-same name. Fields, `.seg` and the small text buttons (`.tbtn`, `.linkbtn`: plain words, a light ground under the
+same name. A value typed in and left by a press elsewhere runs `done()` only once that press is over and its click has
+landed (`afterPress()`, `PRESS`), and not at all if the click took the bar away, so no window is built anew under a
+button being pressed (a chance typed, then *Done*; a letter's angle typed, then *Lock*). Fields, `.seg` and the small text buttons (`.tbtn`, `.linkbtn`: plain words, a light ground under the
 pointer, `.danger` red) are styled once for the whole app. The only `select`s left are the top bar's profile and channel
 lists, each ending in *＋ New…* and measured by a hidden copy of itself; the cut-out's engines are radio rows (each with
 its own download or delete), drawn by the app.
@@ -1875,7 +1877,9 @@ open in `#modal`, Esc is its cancel (but in a field being typed in) and ⌘E is 
 (`exportTicked()`, even from its file name), and no other key goes past it; ⌘S, and ⌘O but in a field, save or open a
 project file from the editor while Surprise me's window is shut and no deal is under way — ⌘S even in a field, as what is
 typed is on the cover already; Esc leaves Settings, then shuts the bar's popover; nothing further while a field has the
-focus; Space is left to a control the keyboard brought the focus to (a button or the like: `KEYFOCUS`, noted as the
+focus (a bar's range or a colour is none: undo, ⌘D and Esc still act, but its arrows, Home, End and Page keys are its own,
+Space deals nothing, and Delete, Backspace and F reach the layer only from its own properties, the drawer or the bar's
+popover, not from the Look sheet, the letter window or the 3D view); Space is left to a control the keyboard brought the focus to (a button or the like: `KEYFOCUS`, noted as the
 focus arrives, from `focusin` when the element is `:focus-visible` then, and let go at any `pointerdown` — asked at the
 key itself, `:focus-visible` would not tell, as browsers mark whatever has the focus so once a key is down, by the spec's own heuristic), so Space
 presses it as ever, and nothing is dealt; nothing further while a deal is under way (`SURPRISE.busy`). With

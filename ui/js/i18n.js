@@ -1215,6 +1215,8 @@ const STR = {
   "ai.auth": ["认证方式", "Authentication"],
   "ai.auth.key": ["x-api-key（官方接口的 API Key）", "x-api-key (an API key for the official API)"],
   "ai.auth.bearer": ["Authorization: Bearer（网关签发的令牌）", "Authorization: Bearer (a token issued by a gateway)"],
+  "ai.authShort.key": ["x-api-key", "x-api-key"],
+  "ai.authShort.bearer": ["Authorization: Bearer", "Authorization: Bearer"],
   "ai.maxTokens": ["最大输出长度（max_tokens）", "Output limit (max_tokens)"],
   "ai.proxy": ["代理（可选）", "Proxy (optional)"],
   "ai.notes": ["补充要求（可选）", "Additional requirements (optional)"],

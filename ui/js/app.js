@@ -891,6 +891,18 @@ const SHOWN = {
 };
 /** The ways of showing a scrub bar's value that take whole numbers only (see scrub's put). */
 const WHOLE_SHOWN = new Set([SHOWN.px, SHOWN.int, SHOWN.deg, SHOWN.sec]);
+/**
+ * A press of the pointer under way (`down`, from its pointerdown to its release) and what waits for it to end: `afterPress(fn)`
+ * runs fn once the press is let go and its click has landed — at once when there is none — so a window is not built
+ * anew under a button being pressed (a value typed into a bar, left by that press, rebuilds the window it is in).
+ */
+const PRESS = { down: false, then: [] };
+function afterPress(fn) { if (PRESS.down) PRESS.then.push(fn); else fn(); }
+function pressOver() { PRESS.down = false; const fns = PRESS.then.splice(0); if (fns.length) setTimeout(() => fns.forEach((f) => f())); }   // after the click
+addEventListener("pointerdown", () => { PRESS.down = true; }, true);
+for (const k of ["pointerup", "pointercancel"]) addEventListener(k, pressOver, true);
+addEventListener("blur", (e) => { if (e.target === window) pressOver(); });   // the window left (not a field's blur, which a press may cause)
+addEventListener("pointermove", (e) => { if (PRESS.down && !(e.buttons & 1)) pressOver(); }, true);   // the release was missed
 /** What was typed into a scrub bar, as a number of `fmt` (see SHOWN): full-width digits and a comma for the point taken too; NaN when it is none. */
 const typedValue = (s, fmt) => { const n = s.normalize("NFKC").replace(/,/g, ".").replace(/[^\d.+-]/g, ""); return n && !/^[+-]?\.?$/.test(n) ? fmt.read(n) : NaN; };
 /**
@@ -985,7 +997,9 @@ function scrub(label, min, max, step, value, fmt, oninput, def = null, off = "",
       if (keep && Number.isFinite(n)) put(n, true); else if (!keep) put(was, true);
       field.replaceWith(out); if (unit) unit.remove();
       bar.classList.remove("typing");
-      if (done && v !== was) done();
+      // the change made: at once when a key ended it; left for a press, once that press is over and its click has landed,
+      // and only while the bar is still there (the click may have shut or built its window anew)
+      if (done && v !== was) { if (refocus) done(); else afterPress(() => { if (box.isConnected) done(); }); }
       if (refocus && bar.isConnected) range.focus({ preventScroll: true });
     };
     field.addEventListener("keydown", (e) => {
@@ -2737,7 +2751,7 @@ function textAiPane() {
     field("ai.token", "token", { type: "password", placeholder: t("ai.tokenPh"), autocomplete: "off" }),
     field("ai.model", "model", { placeholder: t("ai.modelPh") }),
     c.style === "anthropic" && [
-      el("div", {}, cap("ai.auth"), segs(t("ai.auth"), [["key", t("ai.auth.key")], ["bearer", t("ai.auth.bearer")]], c.auth, (v) => set("auth", v))),
+      el("div", {}, cap("ai.auth"), segs(t("ai.auth"), ["key", "bearer"].map((k) => [k, t("ai.authShort." + k), null, t("ai.auth." + k)]), c.auth, (v) => set("auth", v))),
       scrub(t("ai.maxTokens"), 512, 64000, 256, c.maxTokens, SHOWN.int, (v) => set("maxTokens", v), AI_DEFAULTS.maxTokens),
     ],
     el("div", { class: "scrow" }, scrub(t("ai.timeout"), 30, 1800, 30, c.timeout, SHOWN.sec, (v) => set("timeout", v), AI_DEFAULTS.timeout), info(t("ai.timeoutHint"))),
@@ -3004,7 +3018,11 @@ function oddsGroup(title, names, group, save, opts = {}) {
   return box;
 }
 /** A switch of Surprise me's, on by a chance of its own: a scrub bar from 0 to 100%, its tick (and ↺) at `def`, the chance it has by default. `done()`, when given, once it is let go of. */
-const oddsChance = (label, v, save, done = null, def = null) => scrub(label, 0, 1, 0.01, v, SHOWN.chance, save, def, "", { done });
+const oddsChance = (label, v, save, done = null, def = null) => {
+  const b = scrub(label, 0, 1, 0.01, v, SHOWN.chance, save, def, "", { done });
+  b.classList.add("lines");   // a long name in two lines rather than cut
+  return b;
+};
 /**
  * Surprise me's chances for look `look`'s optional parts (switches, sliders off by default), each on its own: its
  * recipe's (deal.js), the user's over them (S.settings.recipes, for every profile); Restore puts the table's back.
@@ -3643,7 +3661,10 @@ function tuneHead(L) {
 function lookSheet() {
   const st = S.profile.style;
   const L = LOOKS[st.look] || LOOKS.cel, vals = lookParams(st.look, st.lookParams[st.look]);
-  const tune = (k, v) => { st.lookParams[st.look] = { ...vals, ...st.lookParams[st.look], [k]: v }; draftTouch({ profile: true }, k); };
+  // seldom wanted: small, at the end, and shut off until a setting is the user's own (a setting changed lets it on, the sheet not built anew)
+  const restore = el("button", { type: "button", class: "tbtn", disabled: !st.lookParams[st.look] && !(st.lookArt && st.lookArt[st.look]),
+    onclick: () => { delete st.lookParams[st.look]; if (st.lookArt) delete st.lookArt[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"));
+  const tune = (k, v) => { st.lookParams[st.look] = { ...vals, ...st.lookParams[st.look], [k]: v }; restore.disabled = false; draftTouch({ profile: true }, k); };
   return [
     sheetHead(t("sheet.look"), t("sheet.lookSub")),
     lookFinder(),
@@ -3661,9 +3682,7 @@ function lookSheet() {
           : scrub(d.name[getLang()], d.min, d.max, d.step, vals[d.key], SHOWN.num, (v) => tune(d.key, v), d.def),
         d.key === L.art && lookArtRow()]),
         L.seeded && el("button", { class: "btn wide", title: t("style.shuffleHint"), onclick: () => { st.lookSeed = Math.floor(Math.random() * 1000000); touch({ profile: true }); } }, t("style.shuffle")),
-        // seldom wanted: small, at the end
-        L.params.length > 0 && el("div", { class: "tacts" }, el("button", { type: "button", class: "tbtn", disabled: !st.lookParams[st.look] && !(st.lookArt && st.lookArt[st.look]),
-          onclick: () => { delete st.lookParams[st.look]; if (st.lookArt) delete st.lookArt[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))))),
+        L.params.length > 0 && el("div", { class: "tacts" }, restore))),
     recipeBox(),
   ];
 }
@@ -7780,6 +7799,9 @@ addEventListener("keydown", (e) => {
   if (key === "escape" && FTB.pop) { FTB.pop = ""; return renderBar(); }   // the bar's popover first
   if (typing) return;
   if (valued && a.type === "range" && /^(arrow|home$|end$|page)/.test(key)) return;
+  if (valued && key === " ") return;   // a bar or a colour with the focus: Space deals nothing
+  // away from the layer's own properties (the Look sheet, the letter window, the 3D view), a bar's keys are not the layer's
+  if (valued && (key === "delete" || key === "backspace" || key === "f") && !a.closest("#right, #side, #fpop")) return;
   if (key === " " && a && a === KEYFOCUS && a.matches("button,[role=button],[role=checkbox],[role=switch],[role=slider],[role=separator],[role=tab],summary,a[href]")) return;   // the keyboard brought to a control: Space is its own
   if (!S.cover || SURPRISE.busy) return;
   if ($("deal") && !$("deal").hidden) {   // Surprise me's window over the cover: Esc undoes the deal, Space deals again, undo and redo work, no other key reaches the cover
