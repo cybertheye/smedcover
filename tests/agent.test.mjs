@@ -313,6 +313,92 @@ test("select_layer selects as the user would, undo and redo go as far as the his
   assert.deepEqual((await cmds.redo({ steps: 2 })).structuredContent, { index: 2, steps: 2, canUndo: true, canRedo: false });
 });
 
+test("the queue runs one call at a time, in order; a call cancelled while it waits never runs", async () => {
+  const { makeQueue, CANCELLED } = await import("../ui/js/agent.js");
+  const q = makeQueue(), log = [];
+  let open = 0, most = 0;
+  const job = (name, ms, fail = false) => async () => { open++; most = Math.max(most, open); log.push(`${name}+`); await new Promise((r) => setTimeout(r, ms)); log.push(`${name}-`); open--; if (fail) throw new Error(name); return name; };
+  const a = q.push(1, job("a", 30)), b = q.push(2, job("b", 5, true)), c = q.push(3, job("c", 1)), d = q.push(4, job("d", 1));
+  assert.equal(q.waiting, 4);
+  assert.equal(q.cancel(3), true);
+  assert.equal(q.cancel(3), false, "once");
+  assert.equal(await c, CANCELLED, "answered at once");
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(q.running, 1);
+  assert.equal(q.cancel(1), false, "a call running is not stopped");
+  assert.equal(await a, "a");
+  await assert.rejects(b, /b/);
+  assert.equal(await d, "d", "a failure before it does not hold it up");
+  assert.deepEqual(log, ["a+", "a-", "b+", "b-", "d+", "d-"]);
+  assert.equal(most, 1);
+  assert.equal(q.running, null); assert.equal(q.waiting, 0);
+});
+
+test("whenIdle waits while the user is busy or has just touched the window, telling the caller every few seconds, and gives up with the reason", async () => {
+  const { whenIdle, QUIET } = await import("../ui/js/agent.js");
+  let clock = 0, reasons = ["a dialog is open", "a dialog is open", null], told = [];
+  const env = { now: () => clock, sleep: async (ms) => { clock += ms; }, waiting: (r, ms) => told.push([r, ms]) };
+  assert.equal(await whenIdle(false, 1000, { ...env, busy: () => reasons.shift() ?? null }), null);
+  assert.equal(clock, 200, "polled every 100 ms");
+  clock = 0; told = [];
+  const strict = [];
+  assert.equal(await whenIdle(true, 12000, { ...env, busy: (s) => { strict.push(s); return "Settings is open"; } }), "Settings is open");
+  assert.ok(clock >= 12000 && strict.every((s) => s === true));
+  assert.deepEqual(told.map(([r, ms]) => [r, ms]), [["Settings is open", 5000], ["Settings is open", 10000]]);
+  clock = 0;
+  let last = -100;   // input 100 ms before: waits till QUIET has passed
+  assert.equal(await whenIdle(false, 5000, { ...env, quietFor: () => clock - last }), null);
+  assert.equal(clock, QUIET - 100);
+});
+
+test("the dispatcher checks a call, waits for the user, holds the window and makes one step of a change, and answers each way the host expects", async () => {
+  const { makeAgent, CANCELLED } = await import("../ui/js/agent.js");
+  const seen = [], steps = [];
+  let busyFor = 0;
+  const commands = Object.fromEntries(TOOLS.map((d) => [d.name, async (args) => { seen.push([d.name, args]); return toResult({ structured: { ok: d.name } }); }]));
+  commands.set_text = async () => toError("unavailable", "not implemented yet");
+  commands.undo = async () => { throw new ToolError("invalid_arguments", "nothing to undo"); };
+  commands.redo = async () => { throw new Error("boom"); };
+  const agent = makeAgent({ commands, busy: () => (busyFor-- > 0 ? "a dialog is open" : null), step: async (fn) => { steps.push("in"); try { return await fn(); } finally { steps.push("out"); } }, quietFor: () => Infinity, host: "server" });
+  const call = (tool, args, progress) => agent.handle({ id: tool, tool, args }, { progress });
+  assert.deepEqual(await call("nope", {}), { id: "nope", ok: false, error: { code: "unknown_tool", message: "Unknown tool: nope" } });
+  assert.deepEqual(await call("render_preview", { maxSide: 1 }), { id: "render_preview", ok: false, error: { code: "invalid_arguments", message: '"maxSide" must be at least 128 (got 1).' } });
+  assert.equal((await call("get_selection", {})).error.code, "not_allowed", "a live tool, on a server");
+  const got = await call("get_cover", { channel: 2 });
+  assert.deepEqual(got, { id: "get_cover", ok: true, result: toResult({ structured: { ok: "get_cover" } }) });
+  assert.deepEqual(seen.at(-1), ["get_cover", { channel: 2 }]);
+  assert.deepEqual(steps, [], "a read is no step");
+  await call("set_look", { look: "cyber" });
+  assert.deepEqual(steps, ["in", "out"], "a change is one step");
+  assert.deepEqual(await call("set_text", { title: "x" }), { id: "set_text", ok: false, error: { code: "unavailable", message: "not implemented yet" } });
+  assert.deepEqual((await call("export", {})).ok, true);
+  assert.deepEqual(steps, ["in", "out", "in", "out"], "export makes no step");
+  const agentDesk = makeAgent({ commands, quietFor: () => Infinity });
+  assert.deepEqual((await agentDesk.handle({ id: 1, tool: "undo", args: {} })).error, { code: "invalid_arguments", message: "nothing to undo" });
+  const said = console.error;
+  console.error = () => {};   // the dispatcher logs what it did not expect
+  try { assert.deepEqual((await agentDesk.handle({ id: 2, tool: "redo", args: {} })).error, { code: "failed", message: "redo failed: boom" }); } finally { console.error = said; }
+  // waits while the user is busy, and says so
+  busyFor = 3;
+  const progress = [];
+  assert.equal((await call("list_options", {}, (p) => progress.push(p))).ok, true);
+  // cancelled while waiting behind another: never runs, nothing answered
+  busyFor = 2;
+  const first = call("get_context", {}), second = agent.handle({ id: "later", tool: "list_library", args: {} });
+  assert.equal(agent.cancel("later"), true);
+  assert.equal(await second, CANCELLED);
+  assert.equal((await first).ok, true);
+  assert.ok(!seen.some(([n]) => n === "list_library"));
+});
+
+test("every tool that changes something says in both languages what it is doing, for the pill over the window", async () => {
+  const { keys } = await import("../ui/js/i18n.js");
+  const have = new Set(keys());
+  for (const d of TOOLS) if (!d.annotations.readOnlyHint) assert.ok(have.has(`agent.step.${d.name}`), d.name);
+  for (const k of ["agent.working", "agent.wait", "agent.switched", "agent.exporting"]) assert.ok(have.has(k), k);
+  for (const k of have) if (k.startsWith("agent.step.")) assert.ok(TOOL_BY[k.slice(11)] && !TOOL_BY[k.slice(11)].annotations.readOnlyHint, `${k}: a tool that changes something`);
+});
+
 test("render helpers: the width for a longer side, the layers' boxes as shares of the image, a contact sheet's plan", () => {
   assert.equal(widthFor({ w: 1920, h: 1080 }, 1024), 1024);
   assert.equal(Math.round((widthFor({ w: 1080, h: 1920 }, 1024) * 1920) / 1080), 1024);   // drawCover's height from it

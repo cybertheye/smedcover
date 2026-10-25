@@ -31,6 +31,7 @@ import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, moreChanged, sheetOrde
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt, coverCrop } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, AI_DEFAULTS, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 import { makeCommands } from "./commands.js";
+import { startAgent, stepping } from "./agent.js";
 
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
@@ -215,6 +216,30 @@ async function timeTravel(step) {
   // the step as it now is: reading it back may write it a little differently (fields filled in, keys in
   // another order), and the next commit would take that for a change and cut off the steps to redo
   S.hist[i] = snapshot();
+}
+/**
+ * Runs fn, a change an agent makes (see agent.js), as one step of undo, and resolves with what it resolves with: the
+ * change the user was making becomes a step of its own first, the debounced commit is held while fn runs (HOLD), and
+ * the step is committed once it is over — none when nothing changed. Should fn fail part-way, what it changed is put
+ * back (photos and pictures put in the library stay): the profile and cover as they were before it, any step taken
+ * meanwhile (keepFirst's) let go; or, when it switched channel or profile (a new history), as they were on arriving
+ * there, the switch kept as the user's own is. The step put back is written again as it now is, as timeTravel does.
+ */
+async function agentStep(fn) {
+  commitPending();
+  const at = S.histIdx, snap = S.hist[at], here = `${S.profile.id}/${S.cover.catId}`;
+  HOLD.history = true;
+  try { return await fn(); }
+  catch (e) {
+    clearTimeout(timers.hist);
+    if (`${S.profile.id}/${S.cover.catId}` !== here) { S.hist = S.hist.slice(0, 1); S.histIdx = 0; SURPRISE.step = null; await restoreSnap(S.hist[0]); }
+    else {
+      if (S.hist[at] === snap && S.histIdx !== at) { S.hist = S.hist.slice(0, at + 1); S.histIdx = at; SURPRISE.step = null; }
+      if (snapshot() !== snap) await restoreSnap(snap);
+    }
+    S.hist[S.histIdx] = snapshot(); syncTop();
+    throw e;
+  } finally { HOLD.history = false; commitPending(); }
 }
 
 /**
@@ -8126,7 +8151,7 @@ addEventListener("drop", async (e) => {
   if (!hasFiles(e)) return;
   e.preventDefault(); dragDepth = 0; document.body.classList.remove("drop", "gdrop");
   if (genOpen()) return genDropped(e.dataTransfer.files);
-  if (SURPRISE.busy) return;   // hands are being dealt onto the cover
+  if (SURPRISE.busy || stepping()) return;   // hands are being dealt onto the cover, or an agent is changing it (agent.js)
   // dropped photos become photo layers, like prints (the first of a cover too), where they were dropped on the canvas
   const cv = $("cv"), b = cv.getBoundingClientRect(), over = S.mode === "edit" && e.clientX >= b.left && e.clientX <= b.right && e.clientY >= b.top && e.clientY <= b.bottom;
   const at = over ? { x: clamp((e.clientX - b.left) / b.width, 0, 1), y: clamp((e.clientY - b.top) / b.height, 0, 1) } : null;
@@ -8334,7 +8359,10 @@ async function start() {
   resetHistory();
   if (custom.tell) custom.tell();   // what was wrong with custom.json
   if (selftest) selfTest(selftest);
-  else setTimeout(readLibrary, 1500);   // once the window is up: read the bitmap library in the background, ready for when it is opened
+  else {
+    setTimeout(readLibrary, 1500);   // once the window is up: read the bitmap library in the background, ready for when it is opened
+    startAgent(agentOpts());   // an agent's calls taken from now on (agent.js)
+  }
 }
 /**
  * Before each channel had a cover of its own the app kept one cover (session.json) for every channel of
@@ -9322,6 +9350,8 @@ const API = Object.freeze({
   renderReady, toPng, pngBase64, runExport, writeInto, framed, nameFor, openProject,
 });
 const COMMANDS = makeCommands(API);
+/** What the agent shell is given (see makeAgent in agent.js); `busy`, what of the user's a call waits for (userBusy). */
+const agentOpts = (busy = userBusy) => ({ commands: COMMANDS, busy, step: agentStep, closeTransient, host: HOST === "server" ? "server" : "desktop" });
 // test hook: lets automated checks drive the app without the UI
 window.__smedcover = { S, drawCover, renderFull, nameFor, touch, addAsset, addLayer, newLayer, selectLayer, selectSize, setMode, layer, surprise, SURPRISE, brushOpen, brushClose };
 start().catch((e) => {

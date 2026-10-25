@@ -138,7 +138,7 @@ export function makeCommands(api) {
     render_preview: async (args) => {
       const { p, index, catId } = target(args), c = await api.coverOf(p, catId), side = args.maxSide ?? 1024;
       await api.loadPhotos([...api.pidsOf(c)]);
-      const pending = () => ({ fonts: api.fontsReading(c.layers), outlines: api.outlinesPending() });
+      const pending = () => ({ fonts: !!api.fontsReading(c.layers), outlines: api.outlinesPending() > 0 });   // outlinesPending: how many are on their way
       if (!args.all) {
         const z = sizeIn(p, args), cv = await api.renderReady(z, c, index, { profile: p, pixelW: widthFor(z, side) });
         const data = await api.pngBase64(cv), { width, height } = cv, boxes = boxesOf(cv._hits, cv._virtual || [z.w, z.h]);
