@@ -76,16 +76,18 @@ export function imageEndpoint(cfg, edit = true) {
 
 const round16 = (v) => Math.max(16, Math.round(v / 16) * 16);
 /**
- * The size to ask for, keeping the photo's shape so its placement on the cover still fits:
+ * The size to ask for: the shape nearest the photo's that the service paints, so that as little as possible is cut
+ * away when the picture that comes back is fitted to the photo's own size (see coverCrop):
  *   openai     the newer models take any size (sides divisible by 16, shape between 1:3 and 3:1,
- *              about 2.5 megapixels here); older ones only 1024x1024, 1536x1024 and 1024x1536.
+ *              about 2.5 megapixels here); older ones only 1024x1024, 1536x1024 and 1024x1536, the
+ *              nearest of them taken (halfway between two shapes, by ratio, either cuts away as much).
  *   seedream   "WxH" of about 4 megapixels — inside the range every Seedream model accepts.
- *   gemini     nothing: the picture comes back in the shape of the one sent.
+ *   gemini     nothing: the picture comes back in the shape it paints nearest the one sent (GEMINI_RATIOS).
  */
 export function repaintSize(cfg, w, h) {
-  const r = Math.min(3, Math.max(1 / 3, w / Math.max(1, h)));
+  const r = Math.min(3, Math.max(1 / 3, w / Math.max(1, h))), mid = Math.sqrt(1.5);
   if (cfg.provider === "openai") {
-    if (/^gpt-image-1|^dall-e|^chatgpt-image/i.test(cfg.model)) return r > 1.2 ? "1536x1024" : r < 0.83 ? "1024x1536" : "1024x1024";
+    if (/^gpt-image-1|^dall-e|^chatgpt-image/i.test(cfg.model)) return r > mid ? "1536x1024" : r < 1 / mid ? "1024x1536" : "1024x1024";
     const px = 2560 * 1440 * 0.68, W = round16(Math.sqrt(px * r)), H = round16(W / r);
     return `${W}x${H}`;
   }
@@ -94,6 +96,16 @@ export function repaintSize(cfg, w, h) {
     return `${W}x${H}`;
   }
   return null;
+}
+
+/**
+ * The part of a w × h picture that, scaled, fills W × H: the largest in that shape, in the middle — {x, y, w, h}. A
+ * repaint comes back in a shape the service could paint, at its own size; cut to this and scaled to the photo's size,
+ * it lies exactly over the photo it was painted from.
+ */
+export function coverCrop(w, h, W, H) {
+  const k = Math.min(w / W, h / H), cw = Math.min(w, W * k), ch = Math.min(h, H * k);
+  return { x: (w - cw) / 2, y: (h - ch) / 2, w: cw, h: ch };
 }
 
 /** The shapes a Gemini image model can be asked for. */
@@ -210,6 +222,7 @@ export function readImageReply(provider, status, text) {
 //   name.en: 8-bit pixel editorial   required
 //   about.zh: …   about.en: …        optional: shown under the menu
 //   order: 10                        optional: place in the menu, low first (default 100)
+//   swatch: #1d3557 #de4030 #f1e9d8  optional: one to four colours, shown on its card as a hint of the style
 //   credit: …                        optional: where it comes from, shown under the menu
 //   ---
 //   the prompt; <!-- comments --> in it are not sent
@@ -219,7 +232,12 @@ export function readImageReply(provider, status, text) {
 // the list, ui/repaint-styles/index.json, before every build, and the app reads a style's prompt
 // only when it is wanted.
 
-export const STYLE_KEYS = ["name", "name.zh", "name.en", "about", "about.zh", "about.en", "description", "order", "credit"];
+export const STYLE_KEYS = ["name", "name.zh", "name.en", "about", "about.zh", "about.en", "description", "order", "swatch", "credit"];
+/** A style's swatch: its colours (one to four, "#rgb" or "#rrggbb", between spaces or commas), or null when it is not that. */
+export function swatchOf(v) {
+  const list = String(v == null ? "" : v).split(/[\s,]+/).filter(Boolean);
+  return list.length >= 1 && list.length <= 4 && list.every((c) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(c)) ? list.map((c) => c.toLowerCase()) : null;
+}
 /**
  * A style file split into its header and its prompt: {meta, prompt, errors}. The header is the
  * lines between a first line "---" and the next "---", each "key: value".
@@ -277,7 +295,7 @@ export function freeId(filename, taken) {
 export const promptOf = (md) => String(md).replace(/<!--[\s\S]*?-->/g, "").replace(/\n{3,}/g, "\n\n").trim();
 
 /**
- * The index entries for a folder's .md files: {styles: [{id, file, name, about?, credit?}], errors}.
+ * The index entries for a folder's .md files: {styles: [{id, file, name, about?, credit?, swatch?}], errors}.
  * `read(file)` returns a file's text. In menu order: by `order`, then by id.
  */
 export function styleIndex(files, read) {
@@ -291,9 +309,12 @@ export function styleIndex(files, read) {
     if (!prompt) { errors.push(`${file}: no prompt after the header`); continue; }
     const order = meta.order === undefined ? 100 : Number(meta.order);
     if (!Number.isFinite(order)) { errors.push(`${file}: order must be a number`); continue; }
+    const swatch = meta.swatch === undefined ? null : swatchOf(meta.swatch);
+    if (meta.swatch !== undefined && !swatch) { errors.push(`${file}: swatch must be one to four colours, e.g. #1d3557 #de4030 #f1e9d8`); continue; }
     const { name, about } = namesOf(meta, id), style = { id, file, order, name };
     if (about) style.about = about;
     if (meta.credit) style.credit = meta.credit;
+    if (swatch) style.swatch = swatch;
     styles.push(style);
   }
   styles.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));

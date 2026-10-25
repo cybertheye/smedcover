@@ -11,7 +11,12 @@
       "zh": "这是一种以限墨双色、圆形半调网点、纸色留白与可控印刷误差为核心的编辑式印刷美学。融合复古杂志封面、丝网版画与 Riso 孔版印刷的视觉特征：通过网点大小和密度重建明暗，以主辅墨分工建立视觉层级，让纸张底色成为构图的一部分。整体大胆、克制、平面化，强调主体轮廓与构图秩序。复古感来自印刷逻辑，而不是泛黄、污渍或简单的颗粒滤镜。",
       "en": "A two-ink editorial print aesthetic built around circular halftone dots, paper-white negative space, and controlled print imperfections. It combines the visual language of retro editorial covers, screen printing, and Riso zines. Tonal depth is reconstructed through dot size and density, while primary and secondary inks establish a clear visual hierarchy. The result is bold, restrained, graphic, and compositionally clear. Its vintage character comes from the logic of printmaking—not from yellowing, stains, or generic grain filters."
     },
-    "credit": "Adapted from \"taxue-halftone\" by taxueseek - https://github.com/taxueseek/taxue-halftone (MIT)"
+    "credit": "Adapted from \"taxue-halftone\" by taxueseek - https://github.com/taxueseek/taxue-halftone (MIT)",
+    "swatch": [
+      "#1d3557",
+      "#de4030",
+      "#f1e9d8"
+    ]
   },
   {
     "id": "pixel-editorial",
@@ -25,7 +30,12 @@
       "zh": "把照片提炼成稀疏、抽象的 8-bit 像素画：大面积留白的纸面上一小簇粗像素块，或铺满画面的几块像素平面。不是像素滤镜，构图会重新安排。",
       "en": "Distils the photo into a sparse, abstract 8-bit pixel piece — a small cluster of coarse blocks on a wide paper field, or a few broad pixel planes edge to edge. Not a pixel filter; the composition is rearranged."
     },
-    "credit": "Adapted from \"Abstract 8-bit Instagram Pixel Editorial\" by TwentyfiveBTea — https://github.com/TwentyfiveBTea/8bit-pixel-art (AGPL-3.0)"
+    "credit": "Adapted from \"Abstract 8-bit Instagram Pixel Editorial\" by TwentyfiveBTea — https://github.com/TwentyfiveBTea/8bit-pixel-art (AGPL-3.0)",
+    "swatch": [
+      "#1f1f24",
+      "#e4572e",
+      "#efe9dc"
+    ]
   },
   {
     "id": "print-illustration",
@@ -39,7 +49,12 @@
       "zh": "将照片转化为有呼吸感的复古编辑印刷插画，位于摄影与抽象图形之间。保留主体身份、关键关系、氛围、方向与长宽比；用不规则色块、粗糙油墨、干刷、纸张纹理和轻微套印偏差重建画面，而非简单叠加滤镜",
       "en": "Turn a photograph into a tactile vintage editorial print illustration positioned between photography and abstract graphic art. Preserve subject identity, key relationships, atmosphere, orientation, and aspect ratio; rebuild the image with irregular color fields, rough ink, dry-brush marks, paper grain, and subtle print misregistration instead of applying a generic filter."
     },
-    "credit": "Adapted from \"ai-editorial-print-studio\" by liuzihe849-png - https://github.com/liuzihe849-png/ai-editorial-print-studio (MIT License)"
+    "credit": "Adapted from \"ai-editorial-print-studio\" by liuzihe849-png - https://github.com/liuzihe849-png/ai-editorial-print-studio (MIT License)",
+    "swatch": [
+      "#2e4a5a",
+      "#d9793b",
+      "#eadfc6"
+    ]
   },
   {
     "id": "bitmap-print",
@@ -53,7 +68,12 @@
       "zh": "把照片主体转成大尺寸的细点阵印刷图像：由细小可见的方形像素和网点组成，靠疏密变化做出柔和的明暗过渡，阶梯状边缘、缺失像素的空隙、低分辨率扫描线；单色或近单色油墨（青蓝、品红、灰粉、紫、浅绿或黑），印在带纤维的暖白或浅灰纸上。不是复古游戏像素画。",
       "en": "Turns the photo's subject into a large fine-bitmap print: built from small visible square pixels and halftone dots, soft tonal transitions made by density, stepped aliased edges, missing-pixel gaps and low-resolution scan lines; one or nearly one ink (cyan-blue, magenta, dusty rose, violet, pale green or black) on warm off-white or pale grey paper with fibres. Not retro game pixel art."
     },
-    "credit": "Adapted from \"pixel-style-poster-skill\" by v92388375-gif — https://github.com/v92388375-gif/pixel-style-poster-skill (MIT)"
+    "credit": "Adapted from \"pixel-style-poster-skill\" by v92388375-gif — https://github.com/v92388375-gif/pixel-style-poster-skill (MIT)",
+    "swatch": [
+      "#222222",
+      "#888888",
+      "#eeeeee"
+    ]
   },
   {
     "id": "crayon-mixed-media",
@@ -67,7 +87,12 @@
       "zh": "把照片重画成手感很重的混合媒材小画：细黑钢笔线搭结构，干蜡笔和彩铅的粗粝笔触上色，偶尔一块淡水彩表现透明和光，再嵌入一两小块真实照片碎片形成\"真与画\"的碰撞；线条稚拙、会抖、有断口，留大量纸白。",
       "en": "Redraws the photo as a strongly hand-made mixed-media picture: thin black pen lines for structure, dry wax crayon and coloured pencil for colour, an occasional pale wash for transparency and light, and one or two small real photo fragments for a deliberate real-versus-drawn collision; naive, wobbling, broken lines and plenty of paper white."
     },
-    "credit": "Adapted from \"heytea-style\" by heytea-style contributors — https://github.com/Hchen1218/heytea-style (MIT); an unofficial visual study, not affiliated with any brand"
+    "credit": "Adapted from \"heytea-style\" by heytea-style contributors — https://github.com/Hchen1218/heytea-style (MIT); an unofficial visual study, not affiliated with any brand",
+    "swatch": [
+      "#e76f51",
+      "#2a9d8f",
+      "#f4a261"
+    ]
   },
   {
     "id": "doodle-on-photo",
@@ -81,7 +106,12 @@
       "zh": "照片主体保持真实，放在大面积纯白里；在主体最有故事感的那一部分上，用稚拙、抖动、断续的黑色线条画一个荒诞的小故事，借用原有的边缘、褶皱和层次当结构，再点缀几笔蒸汽、火花和速度线。干净、有活力、有点好笑。",
       "en": "The photo's subject stays real, set on a wide pure-white field; across its most story-like part a shaky, broken, childlike black line draws one absurd little story, using the subject's own edges, folds and layers as structure, with a few strokes of steam, sparks and speed. Clean, lively, slightly absurd."
     },
-    "credit": "Adapted from \"heytea-creative-style\" by Guoba loves potatoes — https://github.com/shouna12358-png/heytea-creative-style (MIT); an unofficial study, not affiliated with any brand"
+    "credit": "Adapted from \"heytea-creative-style\" by Guoba loves potatoes — https://github.com/shouna12358-png/heytea-creative-style (MIT); an unofficial study, not affiliated with any brand",
+    "swatch": [
+      "#ffffff",
+      "#ff006e",
+      "#8338ec"
+    ]
   },
   {
     "id": "dreamy-motion",
@@ -95,7 +125,12 @@
       "zh": "编辑式的\"可控失焦\"：保留一个清晰可认的主体，其余变成大块有方向的动态模糊——前景擦过镜头的虚影、中景被拖长的路人或物体、背景拉成光带；冷色场配一束暖光，胶片颗粒和轻微光晕。",
       "en": "Editorial \"controlled optical imperfection\": one hero stays readable, everything else becomes large, directional motion — a near-lens sweep in the foreground, stretched passers-by or objects in the middle, light and colour pulled into trails behind; a cool field against one warm light, film grain and gentle halation."
     },
-    "credit": "Adapted from \"dreamy-motion-editorial\" by Dreamy Motion Editorial contributors — https://github.com/lzs0594/dreamy-motion-editorial (MIT)"
+    "credit": "Adapted from \"dreamy-motion-editorial\" by Dreamy Motion Editorial contributors — https://github.com/lzs0594/dreamy-motion-editorial (MIT)",
+    "swatch": [
+      "#a78bfa",
+      "#f0abfc",
+      "#93c5fd"
+    ]
   },
   {
     "id": "field-study",
@@ -109,7 +144,12 @@
       "zh": "把照片当作一件\"视觉标本\"重绘成极简的编辑式插画：纯色暖奶油底，主体和辅助元素只占两到四成，2–5 种低饱和平涂色块，几根细而略带手抖的墨线，大面积安静留白；风景压成几层平面，群体变成有节奏的小形状。",
       "en": "Redraws the photo as a \"visual specimen\" in a minimal editorial field-study illustration: a flat warm-cream ground, the subject and its few supports taking only twenty to forty per cent, two to five low-saturation flat colour shapes, a few thin, slightly shaky ink lines, and wide quiet space; landscapes become a few flat layers, groups become rhythms of small shapes."
     },
-    "credit": "Adapted from \"photo-to-minimal-illustration\" by iamkong — https://github.com/iamkong/photo-to-minimal-illustration (MIT)"
+    "credit": "Adapted from \"photo-to-minimal-illustration\" by iamkong — https://github.com/iamkong/photo-to-minimal-illustration (MIT)",
+    "swatch": [
+      "#6b7f5e",
+      "#c98b5a",
+      "#f3ead7"
+    ]
   },
   {
     "id": "fragment-collage",
@@ -123,7 +163,12 @@
       "zh": "把照片里的人和物剪下来，重新组织成高对比的幽默拼贴：一个巨大的主体、几块放大的局部和重复的小细节，3–4 种强对比色，统一一种拼贴质感（撕纸复印、胶带便签、报纸票据或干净的数码拼贴）。",
       "en": "Cuts the people and things in the photo out and reassembles them as a loud, funny collage: one big hero, a few enlarged details and a repeated small one, three or four high-contrast colours, and one collage material throughout (torn photocopy, tape and sticky notes, newsprint and tickets, or clean digital cut-outs)."
     },
-    "credit": "Adapted from \"fantasy-qiqiguaiguai-skill\" by dacnay816y62-hub — https://github.com/dacnay816y62-hub/fantasy-qiqiguaiguai-skill (MIT)"
+    "credit": "Adapted from \"fantasy-qiqiguaiguai-skill\" by dacnay816y62-hub — https://github.com/dacnay816y62-hub/fantasy-qiqiguaiguai-skill (MIT)",
+    "swatch": [
+      "#ffbe0b",
+      "#3a86ff",
+      "#111111"
+    ]
   },
   {
     "id": "haze-night",
@@ -137,7 +182,12 @@
       "zh": "把夜景或弱光环境照重建成风格化的摄影夜城：大片青绿、蓝绿或石油蓝的工业雾霾和城市光污染铺满天空与远景，小而集中的琥珀、暖白、信号红或洋红光源在其中燃烧，深而有层次的暗部，可选雨后湿地面的破碎倒影把两种颜色搅在一起。保留地点的辨识特征，材质仍是照片。",
       "en": "Rebuilds a night or low-light scene as a stylised photographic night city: a broad field of cyan, teal or petrol-blue industrial haze and light pollution over sky and distance, small concentrated amber, warm-white, signal-red or magenta lights burning inside it, deep but structured darkness, and optionally post-rain ground whose broken reflections stir the two colours together. The place stays recognisable; the materials stay photographic."
     },
-    "credit": "Adapted from \"neil-night-skill\" by Nealsun1993 — https://github.com/Nealsun1993/neil-night-skill (MIT)"
+    "credit": "Adapted from \"neil-night-skill\" by Nealsun1993 — https://github.com/Nealsun1993/neil-night-skill (MIT)",
+    "swatch": [
+      "#22223b",
+      "#9a8c98",
+      "#f2a65a"
+    ]
   },
   {
     "id": "ink-relic",
@@ -151,7 +201,12 @@
       "zh": "把照片压缩成一枚印在暖白纸上的现代版画\"遗物\"：深墨色块、柔化的边缘、负形切口、稀疏的线和刻度，保留主体与底座、道路、地平线这类完整关系，最多一点来自原图的暖色印章般的点缀，周围大片留白。像时间把照片压进了纸里。",
       "en": "Compresses the photo into a modern printmaking \"relic\" on warm off-white paper: deep ink blocks, softened edges, negative-space cuts, sparse lines and ticks, keeping the subject together with its base, path or horizon, at most one small warm accent from the photo placed like a seal, with generous empty paper around it. As if time had pressed the photo into paper."
     },
-    "credit": "Adapted from \"photo-relic-editorial\" by wnby — https://github.com/wnby/photo-relic-editorial (MIT)"
+    "credit": "Adapted from \"photo-relic-editorial\" by wnby — https://github.com/wnby/photo-relic-editorial (MIT)",
+    "swatch": [
+      "#1c1c1c",
+      "#b5482f",
+      "#f2ede2"
+    ]
   },
   {
     "id": "ink-seal",
@@ -165,7 +220,12 @@
       "zh": "把照片压缩成一枚手工按压的印章图形，印在干净的暖白档案纸上：圆形、方框、长条、拱形或主体轮廓形的印，粗糙的丝网和干墨、磨损的网点、不均匀的压力和一点套色偏差，保留原图的颜色记忆，约七成留白。",
       "en": "Compresses the photo into one hand-pressed seal printed on clean warm-white archival paper: a circular, square-framed, panoramic, arched or subject-shaped seal in rough screen print and dry ink, worn halftone, uneven pressure and a little registration error, keeping the photo's colour memory, with about seventy per cent blank paper."
     },
-    "credit": "Adapted from \"skill-make-photo-stamp-archive\" by Dlcccc71913 — https://github.com/Dlcccc71913/skill-make-photo-stamp-archive (MIT)"
+    "credit": "Adapted from \"skill-make-photo-stamp-archive\" by Dlcccc71913 — https://github.com/Dlcccc71913/skill-make-photo-stamp-archive (MIT)",
+    "swatch": [
+      "#a32b2b",
+      "#3b3b3b",
+      "#f5f0e6"
+    ]
   },
   {
     "id": "ink-wash-editorial",
@@ -179,7 +239,12 @@
       "zh": "把墨、水、晕染和纸当作当代编辑设计的材料，而不是传统国画题材：照片主体保持可认，边缘逐渐化进墨晕、干笔断口和纸色空隙里；纸色按题材挑选（冷白、米白、雾灰、青瓷、淡靛、灰粉、赭黄……），留一大片安静的纸面，最多一处克制的现代点色。",
       "en": "Treats ink, water, absorption and paper as materials of contemporary editorial design rather than as a traditional Chinese painting theme: the photo's subject stays recognisable while its edges dissolve into ink blooms, dry-brush breaks and paper-coloured gaps; the paper tone is chosen for the subject (cool white, rice, mist grey, celadon, pale indigo, rose-grey, ochre…), a large field of quiet paper is kept, with at most one restrained modern accent."
     },
-    "credit": "Adapted from \"ink-wash-poster\" by TwentyfiveBTea — https://github.com/TwentyfiveBTea/ink-wash-poster (AGPL-3.0)"
+    "credit": "Adapted from \"ink-wash-poster\" by TwentyfiveBTea — https://github.com/TwentyfiveBTea/ink-wash-poster (AGPL-3.0)",
+    "swatch": [
+      "#1a1a1a",
+      "#7d8a86",
+      "#efe9dc"
+    ]
   },
   {
     "id": "memory-watercolor",
@@ -193,7 +258,12 @@
       "zh": "把照片变成一页安静的档案式水彩：只留下一两处能认出的结构（主轮廓、主轴线、光影体块），其余化成半透明、残缺、略微错位的淡彩痕迹，四成左右是有纤维感的浅色纸面。神似而不形似。",
       "en": "Turns the photo into a quiet archival watercolour page: one or two recognisable structures (the main silhouette, an axis, a mass of light and shade) stay, the rest becomes translucent, incomplete, slightly displaced washes, with about forty per cent left as pale, fibrous paper. Like it in spirit, not copied in shape."
     },
-    "credit": "Adapted from \"compose-photo-memory-archive\" by sbj — https://github.com/sbj61188-lab/compose-photo-memory-archive (MIT)"
+    "credit": "Adapted from \"compose-photo-memory-archive\" by sbj — https://github.com/sbj61188-lab/compose-photo-memory-archive (MIT)",
+    "swatch": [
+      "#7a9cb8",
+      "#c9a27e",
+      "#f3eee4"
+    ]
   },
   {
     "id": "paper-revival",
@@ -207,7 +277,12 @@
       "zh": "把照片重画成一小幅手绘插画，落在大面积的白纸上：主体只占一成多，用铅笔边缘、笔刷痕和水彩的柔和，鲜艳的颜色只集中在这一小块里，八成以上留白，可以带一点很小的拼贴或印章暗示。",
       "en": "Redraws the photo as a small hand-drawn illustration on a wide sheet of white paper: the subject takes little more than a tenth of the page, in pencil edges, brush marks and watercolour softness; vivid colour stays inside that small area, more than eighty per cent of the paper is left blank, with perhaps a tiny hint of collage or a stamp."
     },
-    "credit": "Adapted from \"photo-revival\" by FANTASY — https://github.com/dacnay816y62-hub/photo-revival (MIT)"
+    "credit": "Adapted from \"photo-revival\" by FANTASY — https://github.com/dacnay816y62-hub/photo-revival (MIT)",
+    "swatch": [
+      "#3d5a80",
+      "#e07a5f",
+      "#fbfaf6"
+    ]
   },
   {
     "id": "paper-zine",
@@ -221,7 +296,12 @@
       "zh": "一张扫描的旧纸，七到九成留白，只承载一个小小的视觉事件：照片里最有意味的主体缩成一小块淡化的照片碎片、剪影或墨块，带一处鲜明的高饱和色；复印、孔版颗粒或活字压印的质感。诗意、安静、像日韩独立小志。",
       "en": "A scanned sheet of old paper, seventy to ninety per cent empty, carrying one small visual event: the photo's most telling subject shrunk to a faded photo fragment, silhouette or ink block, with one clear saturated accent; photocopy, risograph or letterpress texture. Poetic, quiet, like a Japanese or Korean indie zine."
     },
-    "credit": "Adapted from \"gc-minimal-zine-poster\" by LiamGvchi — https://github.com/LiamGvchi/gc-minimal-zine-poster (MIT)"
+    "credit": "Adapted from \"gc-minimal-zine-poster\" by LiamGvchi — https://github.com/LiamGvchi/gc-minimal-zine-poster (MIT)",
+    "swatch": [
+      "#6b6459",
+      "#e63946",
+      "#ece4d4"
+    ]
   },
   {
     "id": "postcard-motif",
@@ -235,7 +315,12 @@
       "zh": "从照片里挑出最好看、最有代表性的那一处——通常是最有颜色的部分（一片湖水、一道山脊、一扇爬满藤的窗、一朵花）——用水彩、水粉、墨线或剪纸重新画出来，保留原轮廓和颜色性格，放在安静的明信片纸面上，旁边最多配一个小的辅助图形。",
       "en": "Picks the most attractive, most telling part of the photo — usually its strongest colour (a stretch of lake water, a ridge, a window wrapped in ivy, a flower) — and redraws it in watercolour, gouache, ink or cut paper, keeping its outline and colour character, set on a quiet postcard-paper field with at most one small supporting motif beside it."
     },
-    "credit": "Adapted from \"photo-to-zine-postcard\" by Enbozhao — https://github.com/Whiplashzeb/photo-to-zine-postcard (MIT)"
+    "credit": "Adapted from \"photo-to-zine-postcard\" by Enbozhao — https://github.com/Whiplashzeb/photo-to-zine-postcard (MIT)",
+    "swatch": [
+      "#3a7ca5",
+      "#6a994e",
+      "#f2e8d5"
+    ]
   },
   {
     "id": "pulp-poster",
@@ -249,7 +334,12 @@
       "zh": "把照片重做成九十年代通俗印刷电影海报的画面：一种高饱和平色铺满背景，主体压成硬边高反差的形状（人脸保留真实照片，建筑和物体做两三阶的分色），全画面只有三四种颜色，再加旧纸颗粒、折痕、轻微套色错位和不匀的油墨。",
       "en": "Rebuilds the photo as the picture of a 1990s pulp-print movie poster: one high-chroma flat colour floods the background, the subject is pressed into hard-edged, high-contrast shapes (a face stays photographic, buildings and objects are posterised into two or three tones), three or four colours in all, with aged paper grain, a crease, slight misregistration and uneven ink."
     },
-    "credit": "Adapted from \"neil-quentin\" by Nealsun1993 — https://github.com/Nealsun1993/neil-quentin (MIT)"
+    "credit": "Adapted from \"neil-quentin\" by Nealsun1993 — https://github.com/Nealsun1993/neil-quentin (MIT)",
+    "swatch": [
+      "#e63946",
+      "#1d1d1d",
+      "#f4d35e"
+    ]
   },
   {
     "id": "record-sleeve",
@@ -263,7 +353,12 @@
       "zh": "把照片当作原始素材，重做成一张独立厂牌唱片的封面画面：先从画面情绪推断\"音乐类型\"（氛围、独立摇滚、朋克、电子、爵士、民谣、梦幻流行……），再选两到四种相称的处理——重新调色、颗粒与褪色、虚焦与光学位移、拼贴叠层、刻意的不完美——围绕一个象征性的视觉锚点，留出有意味的空白。",
       "en": "Treats the photo as raw material and remakes it as the artwork of an independent-label record sleeve: first infer a \"sound\" from the picture's mood (ambient, indie rock, punk, electronic, jazz, folk, dream pop…), then choose two to four fitting treatments — colour reconstruction, grain and fading, soft focus and optical displacement, collage and layering, deliberate imperfection — around one symbolic visual anchor, with meaningful negative space."
     },
-    "credit": "Adapted from \"vinyl-image-generator\" by liigoQi — https://github.com/liigoQi/vinyl-image-generator (MIT)"
+    "credit": "Adapted from \"vinyl-image-generator\" by liigoQi — https://github.com/liigoQi/vinyl-image-generator (MIT)",
+    "swatch": [
+      "#2b2d42",
+      "#ef8354",
+      "#bfc0c0"
+    ]
   },
   {
     "id": "release-print-film",
@@ -277,7 +372,12 @@
       "zh": "仿 2383 电影拷贝片的调色：密实干净的暗部、柔和的高光肩部、减色法般厚实的色彩、按光源区分的冷暖，肤色保持自然；只在真正亮的高光边缘出现窄窄的暖红色光晕（halation），加细腻的 35mm 颗粒。画面内容和构图完全不变。",
       "en": "A 2383-inspired release-print grade: dense, clean blacks, a soft highlight shoulder, rich subtractive-looking colour, warm and cool separated by the light itself, natural protected skin; a narrow warm red halation only on genuinely bright edges, and fine 35 mm grain. The picture's content and composition stay exactly as they are."
     },
-    "credit": "Adapted from \"kodak-2383-film-look\" by Niko — https://github.com/N1kO724/kodak-2383-film-look (MIT); \"2383\" is used descriptively, not affiliated with Eastman Kodak"
+    "credit": "Adapted from \"kodak-2383-film-look\" by Niko — https://github.com/N1kO724/kodak-2383-film-look (MIT); \"2383\" is used descriptively, not affiliated with Eastman Kodak",
+    "swatch": [
+      "#101418",
+      "#c0392b",
+      "#e8c39e"
+    ]
   },
   {
     "id": "riso-archive",
@@ -291,7 +391,12 @@
       "zh": "把照片拆成可观察的事实——数量、间距、遮挡、方向、色彩角色——再用 2–3 种孔版油墨重建成一小簇稀疏的印刷图形，浮在按照片冷暖挑选的纸上，六到八成五留白；颗粒、边缘渗墨和轻微套色错位。安静、像档案、像独立小志。",
       "en": "Breaks the photo down into observable facts — counts, spacing, occlusion, direction, colour roles — and rebuilds them as a sparse little cluster of risograph marks in two or three inks, floating on paper whose temperature matches the photo, with 65–85% left empty; grain, ink bleed and slight misregistration. Quiet, archival, like an indie zine."
     },
-    "credit": "Adapted from \"photo-riso-poster\" by luckdvr — https://github.com/luckdvr/photo-riso-poster (MIT)"
+    "credit": "Adapted from \"photo-riso-poster\" by luckdvr — https://github.com/luckdvr/photo-riso-poster (MIT)",
+    "swatch": [
+      "#ff48b0",
+      "#0078bf",
+      "#f4efe6"
+    ]
   },
   {
     "id": "silhouette-window",
@@ -305,7 +410,12 @@
       "zh": "正负形互换的剪影拼贴：一大片手工裁切的平涂彩纸盖住照片，人物或主体的剪影被镂空成窗口，从窗口里露出原照片；另有几块同形的实心色块压在照片上。保留胶片原有的颗粒和色彩，纸面有纤维、墨色不匀和轻微套印偏差，配几颗手画的小星星。",
       "en": "A positive–negative silhouette collage: a large hand-cut sheet of flat coloured paper covers the photo, the people's or subject's silhouettes cut out of it as windows through which the original photo shows, with a few matching solid shapes laid over the photo elsewhere. The photo keeps its own film grain and colour; the paper has fibres, uneven ink and slight registration drift, with a few hand-drawn little stars."
     },
-    "credit": "Adapted from \"silhouette-group-collage\" (剪影群像风格 Skill) by 理智画 — https://github.com/liuzihe849-png/silhouette-group-collage (MIT)"
+    "credit": "Adapted from \"silhouette-group-collage\" (剪影群像风格 Skill) by 理智画 — https://github.com/liuzihe849-png/silhouette-group-collage (MIT)",
+    "swatch": [
+      "#2a9d8f",
+      "#f4d35e",
+      "#f7f3ea"
+    ]
   },
   {
     "id": "surreal-pop",
@@ -319,7 +429,12 @@
       "zh": "照片主体去色成黑白，作为\"现实锚\"保留下来；天空、地面、墙面被两三块巨大的平涂色形替换，颜色从原图提纯、互补或反转而来；全图只有一个\"不可能的巨物\"，它来自画面里已有的东西或这个地方最出名的典故。明亮、梦幻，只有一处不对劲。",
       "en": "The photo's subject turns black and white and stays as the \"reality anchor\"; sky, ground and walls are replaced by two or three huge flat matte colour shapes whose colours are purified, complemented or inverted from the photo; and there is exactly one impossible giant thing, taken from something already in the picture or from what the place is famous for. Bright, dreamlike, with only one thing wrong."
     },
-    "credit": "Adapted from \"surreal-pop-collage\" by 2998980-hue — https://github.com/2998980-hue/surreal-pop-collage (MIT)"
+    "credit": "Adapted from \"surreal-pop-collage\" by 2998980-hue — https://github.com/2998980-hue/surreal-pop-collage (MIT)",
+    "swatch": [
+      "#ff8fab",
+      "#5ec8e5",
+      "#1a1a1a"
+    ]
   },
   {
     "id": "travel-sketch",
@@ -333,7 +448,12 @@
       "zh": "把照片画成一张十几分钟的现场速写：炭黑针管笔的线条松弛、会歪、会断，大胆省略五到七成细节，透视略被压扁；用干燥的纤维头马克笔一笔笔上色，颜色取自照片但偏灰偏旧，只涂三四成的物体，近一半纸面不上色。",
       "en": "Draws the photo as a ten-to-fifteen-minute on-location sketch: loose, leaning, broken charcoal fineliner contours, half to two-thirds of the detail boldly left out, perspective gently compressed; colour laid in countable strokes of a dry fibre-tip marker, the photo's hues shifted toward grey, on only a third of the objects, with about half the paper left uncoloured."
     },
-    "credit": "Adapted from \"photo-to-travel-sketch\" by Liigo Qi — https://github.com/liigoQi/photo-to-travel-sketch (MIT)"
+    "credit": "Adapted from \"photo-to-travel-sketch\" by Liigo Qi — https://github.com/liigoQi/photo-to-travel-sketch (MIT)",
+    "swatch": [
+      "#2b2b2b",
+      "#8aa1b1",
+      "#f5f1e8"
+    ]
   },
   {
     "id": "watercolour-echo",
@@ -347,6 +467,11 @@
       "zh": "整张画面是暖象牙白的水彩纸，中间只留一个很小、很轻的水彩记忆残片：一个清楚可认的主体，加两到四处更淡、更不完整的辅助痕迹（地平线、倒影、影子、一抹色），八成以上是安静的留白。",
       "en": "The whole picture is a sheet of warm ivory watercolour paper holding one very small, very light watercolour memory fragment: one clear subject plus two to four paler, less complete supporting traces (a horizon, a reflection, a shadow, a wash of colour), with more than eighty per cent quiet paper around it."
     },
-    "credit": "Adapted from \"photo-ink-echo\" by zhouaria28-cloud — https://github.com/zhouaria28-cloud/photo-ink-echo (MIT)"
+    "credit": "Adapted from \"photo-ink-echo\" by zhouaria28-cloud — https://github.com/zhouaria28-cloud/photo-ink-echo (MIT)",
+    "swatch": [
+      "#9bb7c9",
+      "#d8b4a0",
+      "#f6f0e3"
+    ]
   }
 ]

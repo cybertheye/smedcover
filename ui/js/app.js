@@ -27,7 +27,7 @@ import { parseTitle } from "./title.js";
 import { LOOKS, LOOK_IDS, LOOK_TAGS, LOOK_CATEGORIES, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
 import { sizeOf, PIXELS, dropCards } from "./photo.js";
 import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, labelRoom, drawStack } from "./stack3d.js";
-import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt } from "./repaint.js";
+import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt, coverCrop } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 
 const $ = (id) => document.getElementById(id);
@@ -1235,7 +1235,7 @@ async function replacePhoto(L) {
   if (!pid) return toast(t("msg.badFile"));
   keepPicture(pid, f.name.replace(/\.[^.]+$/, ""), "upload");
   L.pid = pid;
-  if (REP.of === L.id && !REP.busy) Object.assign(REP, { of: "", result: null, error: "" });
+  if (REP.of === L.id && !REP.busy) Object.assign(REP, { of: "", made: [], result: null, error: "" });
   touch({ cover: true, side: true, panel: true });
   toast(t("cover.replaced"));
   if ((L.cut || passivesOf(L).some((p) => p.cut)) && canCut()) await ensureMask(pid);
@@ -1616,12 +1616,16 @@ function cutWhere(L) {
 }
 
 // ---------- repainting a photo with an image model (see repaint.js)
-// for: the photo layer whose repaint is open; result: {src, w, h} waiting to be used or dropped; test: the image model's connection check
-// for: the photo layer whose repaint is open; of: the one the running repaint, or its result or error, belongs to
-const REP = { for: "", of: "", busy: false, job: 0, since: 0, error: "", result: null, test: null, confirmDrop: null };
+// for: the photo layer whose repaint is open; of: the one the running repaint, or its results or error, belong to;
+// made: what this session's repaints of it brought back, oldest first, at most REP_MADE ({src, w, h, pid, as}: the
+// picture, its size, its place in the photo store, the name of what it was painted as, {zh, en}); result: the one of
+// them shown, waiting to be used or dropped; test: the image model's connection check
+const REP = { for: "", of: "", busy: false, job: 0, since: 0, error: "", made: [], result: null, test: null, confirmDrop: null };
+const REP_MADE = 12;
 /** Whether the open sheet shows the cover's own things — its words, its layout parts, its photos — which follow its layers. */
 const onCoverTab = () => S.mode === "edit" && !sheetHidden() && ["content", "layout", "assets"].includes(S.tab.edit);
-const repBusyText = () => t("rep.busy", Math.max(0, Math.round((Date.now() - REP.since) / 1000)));
+const repSecs = () => Math.max(0, Math.round((Date.now() - REP.since) / 1000));
+const repBusyText = () => t("rep.busy", repSecs());
 /** A copy of a picture no longer than `max` on its longer side, as JPEG: {mime, data, url, w, h}. */
 function shrink(im, max, q = 0.9) {
   const W = im.naturalWidth || im.width, H = im.naturalHeight || im.height;   // an Image, or a canvas
@@ -1684,25 +1688,53 @@ async function repaintPhoto() {
   if (mine && !promptOf(mine.body)) return toast(t("rep.needCustom"));
   let text = mine ? promptOf(mine.body) : "";
   if (preset) { try { text = await styleText(preset); } catch (e) { REP.error = String(e.message); return repRedraw(); } }
-  const P = repTarget(), job = ++REP.job, from = rec.original ? await loadImage(rec.original) : rec.img;
+  const P = repTarget(), job = ++REP.job, from = (rec.original ? await loadImage(rec.original) : null) || rec.img, as = repStyleName();
   const prompt = repaintPrompt({ source: mine || preset ? "text" : "look", look: S.profile.style.look, color: cat().color, text, notes: cfg.notes });
-  Object.assign(REP, { of: P.id, busy: true, error: "", result: null, since: Date.now(), as: repStyleName() });
+  if (REP.of !== P.id) Object.assign(REP, { made: [], result: null });   // another photo's results (they stay in the library)
+  Object.assign(REP, { of: P.id, busy: true, error: "", since: Date.now() });   // the result shown stays, to be compared meanwhile
   repRedraw();
-  const tick = setInterval(() => { const b = document.getElementById("rep-go"); if (b && REP.busy) b.textContent = repBusyText(); }, 1000);
+  const tick = setInterval(() => {
+    if (!REP.busy) return;
+    const b = document.getElementById("rep-go"), tile = document.getElementById("rep-tile");
+    if (b) b.textContent = repBusyText();
+    if (tile) tile.textContent = t("rep.tile", repSecs());
+  }, 1000);
   let result = null, error = "";
   try {
-    result = await imageCall(cfg, prompt, shrink(from || rec.img, 1536));
+    // kept at the size of the photo it was painted from, cut to its shape where the service paints another: so it lies
+    // exactly over it in the compare view, and takes its place on the cover without moving
+    result = { ...(await fitPicture(await imageCall(cfg, prompt, shrink(from, 1536)), ...sizeOf(from), rec.original || rec.src)), as };
     result.pid = await putPhoto(result.src, { original: rec.original || rec.src });   // a picture of its own, which remembers the one it was painted from
     keepPicture(result.pid, t("lib.repaintOf", layer(P.id) ? layerName(P) : ""), "repaint");
   }
   catch (e) { error = String(e && e.message ? e.message : e); }
   clearInterval(tick);
   if (job !== REP.job) return;                       // cancelled meanwhile
-  Object.assign(REP, { busy: false, result, error });
+  Object.assign(REP, { busy: false, error });
+  if (result) Object.assign(REP, { made: [...REP.made, result].slice(-REP_MADE), result });   // shown at once
   if (REP.for !== P.id && layer(P.id)) toast(t(error ? "rep.failedToast" : "rep.readyToast", layerName(P)));   // closed meanwhile: it waits in the photo's AI repaint
   repRedraw();
 }
-function cancelRepaint() { REP.job++; Object.assign(REP, { of: "", busy: false, error: "", result: null }); repRedraw(); }
+/**
+ * Picture `out` ({src, w, h}) made W × H: the middle of it in that shape (coverCrop), scaled — as PNG when `like`, the
+ * picture it stands for, is one, else as JPEG. As it is when it is that size already.
+ */
+async function fitPicture(out, W, H, like) {
+  if (out.w === W && out.h === H) return out;
+  const im = await loadImage(out.src);
+  if (!im) throw new Error(t("rep.badImage"));
+  const c = coverCrop(out.w, out.h, W, H), cv = document.createElement("canvas");
+  cv.width = W; cv.height = H;
+  const x = cv.getContext("2d");
+  x.imageSmoothingQuality = "high";
+  x.drawImage(im, c.x, c.y, c.w, c.h, 0, 0, W, H);
+  const src = /^data:image\/png/.test(like) ? cv.toDataURL("image/png") : cv.toDataURL("image/jpeg", 0.92);
+  return src.length > 32 ? { src, w: W, h: H } : out;   // a canvas too big to read back: the picture as it came
+}
+/** Stops waiting for the repaint under way; this session's results stay. */
+function cancelRepaint() { REP.job++; Object.assign(REP, { busy: false, error: "" }); repRedraw(); }
+/** Drops the result shown from this session's (it stays in the library); the newest of the others is shown instead. */
+function dropResult() { REP.made = REP.made.filter((x) => x !== REP.result); REP.result = REP.made[REP.made.length - 1] || null; repRedraw(); }
 /**
  * Puts another picture into a photo's record — a repaint, or back to the original — so every layer
  * showing it changes; its subject is cut out again for the layers that are cut.
@@ -1795,19 +1827,23 @@ async function migrateStyles(raw) {
   await writeJson("image-ai.json", S.imageAi).catch(fail);   // without them from now on
 }
 /**
- * The AI repaint of a photo, in a window of its own: the original beside this repaint's result (or how far it has got),
- * Discard, Again and Use it, and the way back to the original; beside them what it is painted as — the current look,
- * a built-in style, or one of the user's own (files, edited here) — a note to add, and Repaint. REP.for: the photo
- * layer whose window is open. A repaint goes on with the window shut, and waits in it for the photo.
+ * The AI repaint of a photo, in a window of its own. On the left, the photo in a compare view: the original, and over it
+ * from the split rightwards the result shown (or, with none, the repaint the photo shows if it is one), the split
+ * dragged by its round handle or anywhere on the view (REPWIN.at); under it this session's results (REP.made, the one
+ * shown framed, a tile counting the seconds while another is painted), Back to the original, Discard, Try again and Use
+ * this. On the right what it is painted as — the current look, a built-in style (a card each, with its colours; what it
+ * is and its prompt under the cards once chosen), or one of the user's own (files, edited here under their chips) — a
+ * note to add, the service and what it costs, and Repaint. REP.for: the photo layer whose window is open. A repaint goes
+ * on with the window shut, and waits in it for the photo.
  */
-const REPWIN = { all: false };   // every built-in style listed, or the first few
+const REPWIN = { all: false, at: 0.5 };   // every built-in style listed, or the first few; where the compare view is split, 0 to 1
 /** Opens the AI repaint of photo layer L; not while another photo's repaint is under way (one at a time). */
 function repaintOpen(L) {
   if (REP.busy && REP.of !== L.id) return toast(t("rep.busyOther", layer(REP.of) ? layerName(layer(REP.of)) : ""));
   REP.for = L.id; repaintWin();
 }
-/** What the repaint is painted as now: the user's style, a built-in one, or the current look, by name. */
-const repStyleName = () => { const mine = myStyle(), preset = builtIn(), lang = getLang(); return mine ? mine.name[lang] : preset ? preset.name[lang] : (LOOKS[S.profile.style.look] || LOOKS.cel).name[lang]; };
+/** What the repaint is painted as now — the user's style, a built-in one, or the current look — by name: {zh, en}. */
+const repStyleName = () => (myStyle() || builtIn() || LOOKS[S.profile.style.look] || LOOKS.cel).name;
 /** Draws the repaint window again if it is open, and the photos listed in Assets (their repaint's state). */
 function repRedraw() {
   if ($("modal").querySelector(".dlg.repw")) repaintWin();
@@ -1815,60 +1851,99 @@ function repRedraw() {
   renderBar();   // a photo's AI repaint there is off while another's runs
 }
 function repClose() { REP.for = ""; closeModal(); if (onCoverTab()) renderPanel(); }
+/** The compare view's split at `at` (0 to 1): the result shown from there rightwards, the line and the handle on it. */
+function repSplit(view, at) {
+  REPWIN.at = clamp(at, 0, 1);
+  view.style.setProperty("--at", REPWIN.at);
+  const knob = view.querySelector(".knob");
+  if (knob) knob.setAttribute("aria-valuenow", String(Math.round(REPWIN.at * 100)));
+}
 function repaintWin() {
-  const P = repTarget(), m = $("modal"), held = heldField(m);
+  const P = repTarget(), m = $("modal"), held = heldField(m), list = m.querySelector(".repw .repopts"), top = list ? list.scrollTop : 0;
   if (!P) return repClose();
-  const c = S.imageAi, lang = getLang(), rec = recordOf(P), im = rec && rec.img, ours = REP.of === P.id, r = ours ? REP.result : null;
+  const c = S.imageAi, lang = getLang(), rec = recordOf(P), im = rec && rec.img, ours = REP.of === P.id, r = ours ? REP.result : null, busy = ours && REP.busy;
   const set = (k, v, redraw = false) => { S.imageAi = normalizeImageAi({ ...S.imageAi, [k]: v }); persistImageAi(); if (redraw) repaintWin(); };
   /** Edits the selected style of the user's own and saves its file (typing must not rebuild the window). */
   const rename = (v) => { const st = myStyle(); if (!st) return; delete st.meta["name.zh"]; delete st.meta["name.en"]; st.meta.name = v; st.name = { zh: v, en: v }; saveMyStyle(st); };
   const rewrite = (v) => { const st = myStyle(); if (!st) return; st.body = v; st.prompt = promptOf(v); saveMyStyle(st); };
-  const head = el("div", { class: "xhead" }, el("div", {}, el("h2", {}, t("rep.title")), el("div", { class: "hint" }, `${layerName(P)} · ${t("rep.sub")}`)),
-    el("button", { class: "x", title: t("close"), onclick: repClose }, "✕"));
+  const close = el("button", { class: "x", title: t("close"), onclick: repClose }, "✕");
   m.onDismiss = repClose;
   if (!imageReady(c)) {
-    m.replaceChildren(el("div", { class: "dlg repw small" }, head, el("div", { class: "hint", style: "margin:0" }, t("rep.needSetup")),
+    m.replaceChildren(el("div", { class: "dlg repw small" }, el("div", { class: "xhead" }, el("div", {}, el("h2", {}, t("rep.title")), el("div", { class: "hint" }, `${layerName(P)} · ${t("rep.sub")}`)), close),
+      el("div", { class: "hint", style: "margin:0" }, t("rep.needSetup")),
       el("button", { class: "btn solid", onclick: () => { repClose(); S.tab.setup = "ai"; SET_UI.at = "image"; setMode("setup"); } }, t("rep.goSetup"))));
     m.hidden = false;
     return;
   }
   const look = LOOKS[S.profile.style.look] || LOOKS.cel, mine = myStyle(), preset = builtIn();
-  const chip = (v, label, title = "") => el("button", { class: "rchip" + (c.source === v ? " on" : ""), title: title || null, disabled: REP.busy, onclick: () => set("source", v, true) }, label);
-  const presets = REPWIN.all ? S.repaintStyles : [...new Set([...S.repaintStyles.slice(0, 8), preset].filter(Boolean))];   // folded: the first few, and the one chosen
+  // the compare view: the original, and over it from the split rightwards the result shown, or else the repaint in use
+  const before = rec && (rec.original || rec.src), after = r ? r.src : rec && rec.original ? rec.src : "", afterName = r ? t("rep.result", r.as[lang]) : t("rep.isRepainted");
+  const [w, h] = im ? sizeOf(im) : [3, 2];   // the photo's shape (a repaint has its original's size), checked as the original loads
+  const knob = after && el("span", { class: "knob", role: "slider", tabindex: 0, "aria-label": t("rep.compare"), title: t("rep.compare"), "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": Math.round(REPWIN.at * 100),
+    onkeydown: (e) => {
+      const k = e.key.toLowerCase(), by = e.shiftKey ? 0.2 : 0.05, to = { arrowleft: REPWIN.at - by, arrowright: REPWIN.at + by, home: 0, end: 1 }[k];
+      if (to === undefined) return;
+      e.preventDefault(); repSplit(e.currentTarget.parentElement, to);
+    } }, "‹ ›");
+  /** The split follows the pointer pressed on the view for as long as it is held. */
+  const drag = (e) => {
+    if (e.button !== 0 || !e.isPrimary) return;
+    const view = e.currentTarget, follow = (ev) => { const b = view.getBoundingClientRect(); repSplit(view, (ev.clientX - b.left) / b.width); };
+    e.preventDefault();
+    view.setPointerCapture(e.pointerId);
+    follow(e);
+    view.onpointermove = follow;
+    view.onpointerup = view.onpointercancel = () => { view.onpointermove = null; };
+  };
+  const view = im ? el("div", { class: "cmp" + (after ? " two" : ""), style: `--ar:${w / h};--at:${REPWIN.at}`, onpointerdown: after ? drag : null },
+    el("img", { src: before, alt: t("rep.before"), draggable: false, onload: (e) => e.currentTarget.parentElement.style.setProperty("--ar", e.currentTarget.naturalWidth / e.currentTarget.naturalHeight) }),
+    after && el("div", { class: "after" }, el("img", { src: after, alt: afterName, draggable: false })),
+    el("span", { class: "vlabel" }, t("rep.before")),
+    after && [el("span", { class: "vlabel r" }, afterName), el("i", { class: "cut" }), knob],
+    !after && el("span", { class: "cmp-wait" + (busy ? " busy" : "") }, t(busy ? "rep.running" : "rep.empty")),
+    ours && REP.error && el("div", { class: "cmp-err" }, t("msg.failed", REP.error)))
+    : el("div", { class: "hint err" }, t("props.photoMissing"));
+  // this session's results, the one shown framed, and a tile while another is painted
+  const made = ours ? REP.made : [];
+  const strip = (made.length > 0 || busy) && el("div", { class: "repmade" }, el("span", { class: "cap" }, t("rep.made")),
+    el("div", { class: "repthumbs" },
+      made.map((x) => el("button", { class: "repthumb" + (x === r ? " on" : ""), title: t("rep.result", x.as[lang]), "aria-pressed": String(x === r), onclick: () => { REP.result = x; repRedraw(); } }, el("img", { src: x.src, alt: "" }))),
+      busy && el("span", { id: "rep-tile", class: "repthumb wait" }, t("rep.tile", repSecs()))));
+  // what to paint it as: the current look, a built-in style (the first eight, or the first seven and the one chosen, until All), one of the user's own
+  const card = (v, kids, title = null, kind = "") => el("button", { class: `rcard${kind}${c.source === v ? " on" : ""}`, title, "aria-pressed": String(c.source === v), disabled: REP.busy, onclick: () => set("source", v, true) }, kids);
+  const chip = (v, label) => el("button", { class: "rchip" + (c.source === v ? " on" : ""), "aria-pressed": String(c.source === v), disabled: REP.busy, onclick: () => set("source", v, true) }, label);
+  const all = S.repaintStyles, at = preset ? all.indexOf(preset) : -1;
+  const presets = REPWIN.all || all.length <= 8 ? all : at >= 8 ? [...all.slice(0, 7), preset] : all.slice(0, 8);
   /** Fills a <pre> with a built-in style's prompt the first time it is opened. */
   const peek = (e) => { const pre = e.currentTarget.querySelector("pre"); if (e.currentTarget.open && !pre.textContent) styleText(preset).then((x) => { pre.textContent = x; }, (err) => { pre.textContent = String(err.message); }); };
-  const picture = (src, w, h, label) => el("figure", {}, el("img", { src, alt: "" }), el("figcaption", {}, label, w ? ` · ${w} × ${h}` : ""));
-  const busy = ours && REP.busy;
-  m.replaceChildren(el("div", { class: "dlg repw" }, head,
-    el("div", { class: "repbody" },
-      el("div", { class: "repview" },
-        el("div", { class: "cmp" },
-          im ? (rec.original ? picture(rec.original, 0, 0, t("rep.before")) : picture(rec.src, ...sizeOf(im), t("rep.before"))) : el("div", { class: "hint err" }, t("props.photoMissing")),   // the one it was painted from: its size not known here
-          r ? picture(r.src, r.w, r.h, t("rep.result", REP.as || repStyleName()))
-            : el("div", { class: "cmp-wait" + (busy ? " busy" : "") }, busy ? t("rep.running") : ours && REP.error ? el("span", { class: "err" }, t("msg.failed", REP.error)) : t("rep.empty"))),
+  m.replaceChildren(el("div", { class: "dlg repw" }, el("div", { class: "repbody" },
+    el("div", { class: "repview" },
+      el("div", { class: "rephead" }, el("h2", {}, t("rep.title")), el("span", {}, layerName(P)), el("span", {}, t("rep.sub"))),
+      el("div", { class: "repstage" }, view),
+      el("div", { class: "repfoot" }, strip, el("span", { class: "grow" }),
         el("div", { class: "repacts" },
           rec && rec.original && el("button", { class: "linkbtn", disabled: REP.busy, onclick: () => restoreOriginal(P) }, t("rep.restore")),
-          el("span", { class: "grow" }),
-          r && [el("button", { class: "btn", onclick: () => { REP.result = null; repaintWin(); } }, t("ai.discard")),
-            el("button", { class: "btn", onclick: repaintPhoto }, t("rep.again")),
-            el("button", { class: "btn solid", onclick: useRepaint }, t("rep.use"))])),
-      el("div", { class: "repside" },
-        el("div", { class: "cap" }, t("rep.as")),
-        el("div", { class: "rchips" }, chip("look", t("rep.src.look", look.name[lang]))),
-        el("div", { class: "cap sub" }, t("rep.src.presetN", S.repaintStyles.length),
-          S.repaintStyles.length > 8 && el("button", { class: "linkbtn", onclick: () => { REPWIN.all = !REPWIN.all; repaintWin(); } }, t(REPWIN.all ? "odds.fold" : "rep.allPresets"))),
-        el("div", { class: "rchips" }, presets.map((st) => chip("preset:" + st.id, st.name[lang], st.about && st.about[lang]))),
-        el("div", { class: "cap sub" }, t("rep.src.mine"), CAN.folders && el("button", { class: "linkbtn", onclick: () => invoke("reveal_data_dir", { dir: MY_DIR }).catch(fail) }, t("rep.src.folder"))),
-        el("div", { class: "rchips" }, S.myStyles.map((st) => chip("my:" + st.id, st.name[lang])),
-          el("button", { class: "rchip add", disabled: REP.busy, onclick: () => addStyle({ name: t("rep.newName", S.myStyles.length + 1) }, "") }, t("rep.src.new")),
-          el("button", { class: "rchip add", disabled: REP.busy, onclick: importStyle }, t("rep.src.import"))),
+          r && [el("button", { class: "btn quiet", onclick: dropResult }, t("ai.discard")),
+            el("button", { class: "btn", disabled: REP.busy, onclick: repaintPhoto }, t("rep.again")),
+            el("button", { class: "btn solid", onclick: useRepaint }, t("rep.use"))]))),
+    el("div", { class: "repside" }, close,
+      el("div", { class: "reptitle" }, t("rep.as")),
+      el("div", { class: "repopts" },
+        card("look", [el("i", { class: "radio" }), el("b", {}, t("rep.src.look", look.name[lang]))], null, " follow"),
+        el("div", { class: "cap" }, el("span", {}, t("rep.src.presetN", all.length)),
+          all.length > 8 && el("button", { class: "linkbtn", onclick: () => { REPWIN.all = !REPWIN.all; repaintWin(); } }, t(REPWIN.all ? "odds.fold" : "rep.allPresets"))),
+        el("div", { class: "rcards" }, presets.map((st) => card("preset:" + st.id, [el("b", {}, st.name[lang]), st.swatch && el("span", { class: "sw3" }, st.swatch.map((x) => el("i", { style: `background:${x}` })))], st.about && st.about[lang]))),
         preset && el("div", { class: "rdetail" },
-          preset.about && el("div", { class: "about" }, preset.about[lang]),
+          preset.about && el("div", { class: "about", title: preset.about[lang] }, preset.about[lang]),
           preset.credit && el("div", { class: "hint" }, t("rep.credit", preset.credit)),
           el("details", { class: "peek", ontoggle: peek }, el("summary", {}, t("rep.peek")), el("pre", {})),
           el("button", { class: "linkbtn", onclick: async () => addStyle({ name: preset.name[lang] + t("rep.copySuffix"), ...(preset.credit ? { credit: preset.credit } : {}) }, await styleText(preset).catch(() => "")) }, t("rep.copy"))),
+        el("div", { class: "cap" }, el("span", {}, t("rep.src.mine")), CAN.folders && el("button", { class: "linkbtn", onclick: () => invoke("reveal_data_dir", { dir: MY_DIR }).catch(fail) }, t("rep.src.folder"))),
+        el("div", { class: "rchips" }, S.myStyles.map((st) => chip("my:" + st.id, st.name[lang])),
+          el("button", { class: "rchip add", disabled: REP.busy, onclick: () => addStyle({ name: t("rep.newName", S.myStyles.length + 1) }, "") }, t("rep.src.new")),
+          el("button", { class: "rchip add", disabled: REP.busy, onclick: importStyle }, t("rep.src.import"))),
         mine && el("div", { class: "rdetail" },
-          mine.about && el("div", { class: "about" }, mine.about[lang]),
+          mine.about && el("div", { class: "about", title: mine.about[lang] }, mine.about[lang]),
           mine.credit && el("div", { class: "hint" }, t("rep.credit", mine.credit)),
           textInput(mine.name[lang], rename, { placeholder: t("rep.namePh"), maxLength: 60, onchange: () => repaintWin(), dataset: { k: "stname" } }),
           el("textarea", { value: mine.body, spellcheck: false, style: "height:140px;font-size:13px", placeholder: t("rep.customPh"), dataset: { k: "stbody" }, oninput: (e) => rewrite(e.target.value) }),
@@ -1879,13 +1954,15 @@ function repaintWin() {
             await files.remove(`${MY_DIR}/${mine.file}`).catch(fail);
             await rereadMyStyles(S.myStyles.filter((s) => s.id !== mine.id)); S.imageAi = normalizeImageAi({ ...c, source: "look" }); persistImageAi(); repaintWin();
           } }, t(REP.confirmDrop === mine.id ? "rep.dropSure" : "rep.drop", mine.name[lang]))),
-        el("div", { class: "cap" }, t("rep.notes")),
-        textInput(c.notes, (v) => set("notes", v), { placeholder: t("rep.notesPh"), maxLength: 600, disabled: REP.busy, dataset: { k: "notes" } }),
-        el("div", { class: "hint" }, t("rep.hint", t("img.provider." + c.provider), c.model)),
-        el("div", { class: "repgo" },
-          busy && el("button", { class: "btn", onclick: cancelRepaint }, t("ai.cancel")),
-          el("button", { id: "rep-go", class: "btn solid", disabled: REP.busy || !im, onclick: repaintPhoto }, busy ? repBusyText() : t(r ? "rep.again" : "rep.go")))))));
+        el("div", {}, el("div", { class: "cap" }, t("rep.notes")),
+          textInput(c.notes, (v) => set("notes", v), { placeholder: t("rep.notesPh"), maxLength: 600, disabled: REP.busy, dataset: { k: "notes" } }))),
+      el("div", { class: "hint" }, t("rep.hint", t("img.provider." + c.provider), c.model)),
+      el("div", { class: "repgo" },
+        busy && el("button", { class: "btn", onclick: cancelRepaint }, t("ai.cancel")),
+        el("button", { id: "rep-go", class: "btn cta glassy go", disabled: REP.busy || !im, onclick: repaintPhoto }, busy ? repBusyText() : t("rep.go")))))));
   m.hidden = false;
+  const opts = m.querySelector(".repopts");
+  if (opts) opts.scrollTop = top;   // where the list was scrolled to, as the window is built again
   giveBack(m, held);
 }
 // ---------- a photo made by the image model, from words and perhaps a reference picture
@@ -3823,6 +3900,7 @@ function layerRow(L) {
   const off = S.focus && S.mode === "edit" && !spotIds().includes(L.id);   // FOCUS is on another layer
   // kept to other sizes (see `sizes` in layers.js), or clipped onto a layer that is (a base hides what is clipped onto it): greyed, and said why
   const own = !inSize(L, S.sel), under = base >= 0 && !inSize(S.cover.layers[base], S.sel), away = own || under, note = sizesNote(L);
+  const grip = L.type !== "bg" && LAYERS_UI.filter === "all";   // whether it can be dragged (as `draggable` below)
   return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}${base >= 0 ? " clip" : ""}${off ? " dim" : ""}${away ? " away" : ""}`, title: off ? t("focus.locked") : own ? t("sizes.awayTip", note) : under ? t("sizes.awayBase", layerName(S.cover.layers[base])) : base >= 0 ? t("layers.clipped", layerName(S.cover.layers[base])) : null, dataset: { id: L.id }, draggable: L.type !== "bg" && LAYERS_UI.filter === "all",
     onclick: (e) => focusAllows(L.id) && (e.shiftKey ? togglePick(L.id) : selectLayer(L.id)),
     ondragstart: (e) => { dragId = L.id; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", L.id); },
@@ -3841,6 +3919,8 @@ function layerRow(L) {
       const order = layoutOrder(S.cover.layers), design = order.join() !== was && orderLayout(S.profile.design.layers, order);
       touch({ cover: true, profile: design, side: true, panel: onCoverTab() });
     } },
+    // a row that can be dragged says so by the grip at its head (under the pointer and on the selected row); one that cannot keeps the place empty
+    el("span", { class: "grip", title: grip ? t("layers.drag") : null, "aria-hidden": "true" }, grip ? "⋮⋮" : ""),
     layerWhat(L),
     el("span", { class: "nm", title: free ? t("layers.rename") : null, onclick: free ? (e) => nameClick(e, L) : null }, layerName(L),
       L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) }),

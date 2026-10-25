@@ -1836,6 +1836,25 @@ test("repaint: each image service gets the photo in its own form, and its reply 
   assert.match(R.readImageReply("seedream", 502, "<html>gateway</html>").error, /^HTTP 502/);
 });
 
+test("repaint: the shape asked for is the nearest the service paints, and what comes back is cut to the photo's own size", async () => {
+  const { repaintSize, coverCrop, normalizeImageAi } = await import("../ui/js/repaint.js");
+  const old = normalizeImageAi({ provider: "openai", model: "gpt-image-1" }), ratio = (s) => { const [w, h] = s.split("x").map(Number); return w / h; };
+  // the older models' three sizes: halfway between two shapes, by ratio, is where one gives way to the other
+  assert.deepEqual([[1600, 1000], [1220, 1000], [1230, 1000], [1000, 1000], [1000, 1220], [1000, 1230], [1000, 1600]].map(([w, h]) => repaintSize(old, w, h)),
+    ["1536x1024", "1024x1024", "1536x1024", "1024x1024", "1024x1024", "1024x1536", "1024x1536"]);
+  // any size: the photo's shape, within the rounding to 16 pixels (and 3:1 at most)
+  for (const [w, h] of [[1600, 1000], [1080, 1920], [4000, 3000], [1000, 1000]]) assert.ok(Math.abs(ratio(repaintSize(normalizeImageAi({ provider: "openai", model: "gpt-image-2" }), w, h)) / (w / h) - 1) < 0.01, `${w}x${h}`);
+  assert.ok(Math.abs(ratio(repaintSize(normalizeImageAi({ provider: "seedream" }), 1600, 1000)) - 1.6) < 0.002);
+  assert.equal(repaintSize(normalizeImageAi({ provider: "gemini" }), 1600, 1000), null);   // Gemini follows the picture sent
+  // the middle of a picture in the photo's shape: all of one side, the other cut evenly; nothing cut when the shapes agree
+  assert.deepEqual(coverCrop(1536, 1024, 1600, 1000), { x: 0, y: 32, w: 1536, h: 960 });
+  assert.deepEqual(coverCrop(1024, 1536, 1600, 1000), { x: 0, y: 448, w: 1024, h: 640 });
+  assert.deepEqual(coverCrop(1024, 1024, 1000, 1600), { x: 192, y: 0, w: 640, h: 1024 });
+  assert.deepEqual(coverCrop(2048, 1280, 1600, 1000), { x: 0, y: 0, w: 2048, h: 1280 });
+  const c = coverCrop(1365, 768, 1920, 1080);   // 16:9 a pixel off: under a pixel cut
+  assert.ok(c.w === 1365 && Math.abs(c.h - 767.8) < 0.1 && Math.abs(c.y - 0.1) < 0.1, JSON.stringify(c));
+});
+
 test("repaint: the prompt follows the look, a preset or the user's own words, and always asks for a clean background", async () => {
   const { repaintPrompt } = await import("../ui/js/repaint.js");
   const look = repaintPrompt({ source: "look", look: "riso", color: "#ff3355", notes: "darker sky" });
@@ -1896,9 +1915,13 @@ test("repaint: built-in styles are Markdown files with a header, named by their 
   assert.deepEqual(styles[1], { id: "watercolour", file: "watercolour.md", order: 5, name: { zh: "水彩", en: "Watercolour" }, about: { zh: "松动的水彩", en: "松动的水彩" } });
   assert.equal(errors.length, 3);   // a file name that is not an id, a missing English name, nothing but a comment
   assert.deepEqual(styleIndex(["one.md"], () => "---\nname: 单名\n---\nX").styles[0].name, { zh: "单名", en: "单名" });   // one name serves both
-  // every file in the folder is in the list, readable, and has a prompt
+  // the colours on its card: one to four, by spaces or commas
+  assert.deepEqual(styleIndex(["sw.md"], () => "---\nname: a\nswatch: #1D3557, #de4030 #fff\n---\nX").styles[0].swatch, ["#1d3557", "#de4030", "#fff"]);
+  for (const bad of ["red", "#12345", "#111 #222 #333 #444 #555", ""]) assert.match(styleIndex(["sw.md"], () => `---\nname: a\nswatch: ${bad}\n---\nX`).errors[0], /swatch must be/, bad);
+  // every file in the folder is in the list, readable, and has a prompt and its colours
   const dir = new URL("../ui/repaint-styles/", import.meta.url), list = JSON.parse(fs.readFileSync(new URL("index.json", dir), "utf8"));
   assert.deepEqual(list.map((x) => x.file).sort(), fs.readdirSync(dir).filter((f) => f.endsWith(".md")).sort());
+  for (const st of list) assert.equal((st.swatch || []).length, 3, st.id);
   const pixel = parseStyle(fs.readFileSync(new URL("pixel-editorial.md", dir), "utf8"));
   assert.deepEqual(pixel.errors, []);
   assert.ok(pixel.prompt.startsWith("Reinterpret the attached photo") && pixel.prompt.length === 2538 && !pixel.prompt.includes("TwentyfiveBTea"));   // unchanged; the credit stays in the header
