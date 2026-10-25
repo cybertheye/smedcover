@@ -6552,7 +6552,7 @@ function closeModal() { const m = $("modal"); m.hidden = true; m.replaceChildren
  * was beneath. Never the browser's own confirm, alert or prompt: in the app's web view they do not wait for the
  * answer, so what one guarded was done before the user had said anything (a test in tests/logic.test.mjs keeps them out).
  */
-const ASK = { answer: null };
+const ASK = { answer: null, at: 0 };
 function askSure({ title, body = "", go, danger = true }) {
   if (ASK.answer) ASK.answer(false);   // one question at a time
   return new Promise((resolve) => {
@@ -6568,15 +6568,16 @@ function askSure({ title, body = "", go, danger = true }) {
     const yes = el("button", { class: "btn wide " + (danger ? "danger" : "solid"), onclick: () => answer(true) }, go);
     box.replaceChildren(el("div", { class: "dlg", role: "alertdialog", "aria-modal": "true", "aria-label": title },
       el("h2", {}, title), body && el("div", { class: "hint" }, body), el("div", { class: "askacts" }, no, yes)));
-    box.hidden = false;
+    box.hidden = false; ASK.at = performance.now();
     (danger ? no : yes).focus({ preventScroll: true });
   });
 }
-// a click beside the question is its no (pressed and let go there, as for #modal)
+// a click beside the question is its no (pressed and let go there, as for #modal); not the second click of a double
+// click on the button that asked, which lands there as the question opens
 {
   const box = $("ask");
   let fromBackdrop = false;
-  box.addEventListener("pointerdown", (e) => { fromBackdrop = e.target === box; });
+  box.addEventListener("pointerdown", (e) => { fromBackdrop = e.target === box && performance.now() - ASK.at > 400; });
   box.addEventListener("click", (e) => { if (fromBackdrop && e.target === box && ASK.answer) ASK.answer(false); });
 }
 /** Whether the Export window ticks size z (settings.exportSizes keeps, by profile, the sizes left unticked: one not named is ticked). */
@@ -7126,9 +7127,18 @@ function fitList(s) {
 }
 /**
  * A key on a closed list of the top bar: where the arrows change the choice at once (Windows, Linux; on a Mac they
- * open the list), they stop at the last profile or channel rather than step onto making a new one.
+ * open the list), they stop at the last profile or channel rather than step onto making a new one; so do End and
+ * PageDown, which would jump there (moved here by hand to the last one, or three on, at most).
  */
-const stayOff = (e) => { if (MOD_KEY !== "⌘" && /^(ArrowDown|ArrowRight|PageDown|End)$/.test(e.key) && e.target.selectedIndex >= e.target.options.length - 2) e.preventDefault(); };
+const stayOff = (e) => {
+  if (MOD_KEY === "⌘") return;
+  const s = e.target, last = s.options.length - 2;
+  if (/^(End|PageDown)$/.test(e.key)) {
+    e.preventDefault();
+    const to = e.key === "End" ? last : Math.min(s.selectedIndex + 3, last);
+    if (to !== s.selectedIndex) { s.selectedIndex = to; s.dispatchEvent(new Event("change")); }
+  } else if (/^(ArrowDown|ArrowRight)$/.test(e.key) && s.selectedIndex >= last) e.preventDefault();
+};
 /**
  * The top bar: the profile and the channel (each list ending in making a new one); undo and redo; Surprise me, Export, and the ⋯ menu (the cover's
  * default design and Clear, the profile's settings, project files, the glass, the language).
