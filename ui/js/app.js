@@ -7880,12 +7880,20 @@ function renderPanel() {
 
 function welcome() {
   return new Promise((resolve) => {
-    const modal = $("modal"), name = textInput("", () => null, { placeholder: t("welcome.namePh") });
-    const go = (sample) => { closeModal(); resolve(sample ? sampleProfile(getLang()) : starterProfile(getLang(), name.value.trim())); };
-    modal.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("welcome.title")), el("div", {}, t("welcome.body")),
-      el("div", {}, cap("welcome.brand"), name),
-      el("button", { class: "btn solid wide", onclick: () => go(false) }, t("welcome.starter")),
-      el("button", { class: "btn wide", onclick: () => go(true) }, t("welcome.sample"))));
+    const modal = $("modal"), name = textInput("", () => null);
+    const go = (sample) => { closeModal(); resolve(sample ? sampleProfile(getLang()) : starterProfile(getLang(), name.value.trim())); };   // made in the language chosen
+    const pick = (v) => { S.settings.lang = v; setLang(v); columns(); draw(); name.focus(); };   // saved by start(), with the profile; the split handles' titles too
+    const draw = () => {   // in the language as it is now; the same field, so what is typed stays
+      name.placeholder = t("welcome.namePh");
+      modal.replaceChildren(el("div", { class: "dlg welcome" },
+        el("div", { class: "head" }, el("h2", {}, t("welcome.title")),
+          el("div", { class: "seg", role: "group", "aria-label": t("langName") }, [["zh", "中文"], ["en", "English"]].map(([v, l]) => el("button", { class: "btn" + (v === getLang() ? " on" : ""), onclick: () => pick(v) }, l)))),
+        el("div", {}, t("welcome.body")),
+        el("div", {}, cap("welcome.brand"), name),
+        el("button", { class: "btn solid wide", onclick: () => go(false) }, t("welcome.starter")),
+        el("button", { class: "btn wide", onclick: () => go(true) }, t("welcome.sample"))));
+    };
+    draw();
     modal.dataset.sticky = "1";   // there is no profile yet: one of the two must be chosen
     modal.hidden = false;
     name.focus();
