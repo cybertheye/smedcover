@@ -936,7 +936,7 @@
     {
       "name": "place_layer",
       "title": "Place a layer",
-      "description": "Moves, scales, turns or stretches a layer: absolute (x, y, scale, rotate, stretchX, stretchY), relative (move {dx, dy}, scaleBy, rotateBy), or reset: true for where the layout puts it. For a layer that was added x, y is its centre as shares of the canvas (0.5, 0.5 the middle); for a layout part, its offset from its place in the layout, likewise in shares of the canvas. scope says which sizes the change reaches (all by default). Not for bg, the frame or a locked layer, nor turning or stretching a photo that fills the canvas. One undo step. Returns its placement and its box at `size`.",
+      "description": "Moves, scales, turns or stretches a layer: absolute (x, y, scale, rotate, stretchX, stretchY), relative (move {dx, dy}, scaleBy, rotateBy), or reset: true for where the layout puts it. All are as the layer is at `size` (the one on the canvas when left out, which the window then shows): for a layer that was added x, y is its centre as shares of the canvas (0.5, 0.5 the middle); for a layout part or a copy of one, its offset from its place in the layout, likewise in shares of the canvas; scale is get_cover's place.s times what that size adds (a sticker is put on at 0.3, text at 0.35, a solid at 1, a layout part at 1). scope says which sizes the change reaches (all by default; the others move as far across their own canvas). A cut-out linked to a photo goes where its photo goes (move moves both; x and y are refused), its scale, turn and stretch its own. Not for bg, the frame or a locked layer, nor turning or stretching a photo that fills the canvas. One undo step. Returns its placement at `size` in the same terms, and its box there as render_preview gives boxes.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -982,7 +982,7 @@
           },
           "scale": {
             "type": "number",
-            "description": "Its size, 1 as made.",
+            "description": "Its scale (see above).",
             "minimum": 0.02,
             "maximum": 20
           },
@@ -1048,6 +1048,9 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "size": {
+            "type": "string"
+          },
           "place": {
             "type": "object",
             "properties": {
@@ -1072,27 +1075,34 @@
             }
           },
           "box": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "w": {
+                    "type": "number"
+                  },
+                  "h": {
+                    "type": "number"
+                  },
+                  "r": {
+                    "type": "number"
+                  }
+                }
               },
-              "x": {
-                "type": "number"
-              },
-              "y": {
-                "type": "number"
-              },
-              "w": {
-                "type": "number"
-              },
-              "h": {
-                "type": "number"
-              },
-              "r": {
-                "type": "number"
+              {
+                "type": "null"
               }
-            }
+            ]
           },
           "warnings": {
             "type": "array",
@@ -1102,6 +1112,7 @@
           }
         },
         "required": [
+          "size",
           "place"
         ]
       },
@@ -1317,7 +1328,7 @@
     {
       "name": "set_layer_font",
       "title": "Set a font",
-      "description": "Sets the font of a lettering layer (title, subtitle, tag, channel name, brand row, text): a family that is installed, bundled or imported (list_options fonts; matched with the case aside, near names suggested when none matches), or \"\" for the look's own. vertical: true sets it in columns, false in lines. Not counted among the user's recent fonts. One undo step. Returns the layer.",
+      "description": "Sets the font of a lettering layer (title, subtitle, tag, channel name, brand row, text): a family that is installed, bundled or imported (list_options fonts; matched with the case aside, near names suggested when none matches), or \"\" for the look's own; and/or vertical: true sets it in columns, false in lines. Not counted among the user's recent fonts. One undo step. Returns the layer.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1347,8 +1358,7 @@
           }
         },
         "required": [
-          "layer",
-          "font"
+          "layer"
         ],
         "additionalProperties": false
       },

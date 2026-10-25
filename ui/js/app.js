@@ -601,17 +601,18 @@ function removeGroup() {
 /** While a slider of one layer is dragged, only that layer is repainted (as in a drag on the canvas); the whole cover once it stops. */
 function holdLive(id) { goLive(id); later("live", 300, endLive); }
 /**
- * Applies a placement edit to a layer in the current scope, then redraws. A linked cut-out's moves are
- * its photo's (the two move together); its size, angle and stretch are its own, changed about its subject.
- * A photo cut out, or a photo or an asset cropped, is scaled and turned about what shows of it.
+ * Applies a placement edit to a layer in `scope` (the one chosen under the canvas, unless told: an agent's call says
+ * its own), then redraws. A linked cut-out's moves are its photo's (the two move together); its size, angle and
+ * stretch are its own, changed about its subject. A photo cut out, or a photo or an asset cropped, is scaled and
+ * turned about what shows of it.
  */
-function edit(L, patch) {
+function edit(L, patch, scope = S.settings.scope) {
   const A = owner(L);
-  if (A === L) { adjust(L, frame(), S.settings.scope, patch); if (L.crop || (L.type === "photo" && L.cut)) aboutSubject(L, patch); }
+  if (A === L) { adjust(L, frame(), scope, patch); if (L.crop || (L.type === "photo" && L.cut)) aboutSubject(L, patch, scope); }
   else {
     const { ddx, ddy, ...own } = patch;
-    if (ddx || ddy) adjust(A, frame(), S.settings.scope, { ddx, ddy });
-    if (Object.keys(own).length) { adjust(L, frame(), S.settings.scope, own); aboutSubject(L, own); }
+    if (ddx || ddy) adjust(A, frame(), scope, { ddx, ddy });
+    if (Object.keys(own).length) { adjust(L, frame(), scope, own); aboutSubject(L, own, scope); }
   }
   touch({ cover: true });
 }
@@ -619,7 +620,7 @@ function edit(L, patch) {
  * Keeps a cut-out's subject (a cropped layer's part kept) where it is while it is scaled, stretched or turned:
  * the centre of its frame (the hit's px, py) is moved round the subject's (the hit's centre) by the same amount.
  */
-function aboutSubject(L, { scale, rot, kx, ky }) {
+function aboutSubject(L, { scale, rot, kx, ky }, scope = S.settings.scope) {
   const h = $("cv")._hits && $("cv")._hits.find((x) => x.id === L.id);
   if (!h || h.px == null || (!scale && !rot && !kx && !ky)) return;
   let vx = h.px - h.cx, vy = h.py - h.cy;
@@ -629,7 +630,7 @@ function aboutSubject(L, { scale, rot, kx, ky }) {
     vx = lx * c - ly * n; vy = lx * n + ly * c;
   }
   if (rot) { const a = (rot * Math.PI) / 180, c = Math.cos(a), n = Math.sin(a); [vx, vy] = [vx * c - vy * n, vx * n + vy * c]; }
-  adjust(L, frame(), S.settings.scope, { ddx: h.cx + vx - h.px, ddy: h.cy + vy - h.py });
+  adjust(L, frame(), scope, { ddx: h.cx + vx - h.px, ddy: h.cy + vy - h.py });
   h.px = h.cx + vx; h.py = h.cy + vy;   // until the cover is drawn again
 }
 /** Puts new layer L on the cover above the layer `above` names (the selected one, unless told; at the top where it names none), selected. Returns L. */
@@ -9447,16 +9448,18 @@ async function dragTest() {
 // own ways of reading, changing, drawing and writing it, the same the editor uses
 /** The change still waiting to be recorded (recordHistory) made a step of undo now. */
 const commitPending = () => { clearTimeout(timers.hist); commitHistory(); };
+/** The cover's canvas with what was waiting to be drawn drawn now (the flat one under the 3D view too): where its layers landed (_hits) is where they are. */
+const drawnNow = () => { flushDraw(); return flatCanvas(); };
 const API = Object.freeze({
   S, CAN, HOST, appVersion, invoke, BUNDLED_FONTS, CUT, SURPRISE, HOLD,
   // what is shown, selected, and what a layer is
   cat, catIndex, selSize, layer, frame, sizeKeys, scopeKeys, layerName, copiable, owner, passivesOf, recordOf, weavableOf, wovenOf, inColumns, canCrop, canCut, cutReady, cutEngine, exportDir, ticked, channelOf, pickedIds,
   // the history, and putting a change on the screen
-  touch, commitHistory, commitPending, clearPendingHistory: () => clearTimeout(timers.hist), snapshot, restoreSnap, timeTravel, settleCover, setCover, channelCover, coverFor, coverOf, toast,
+  touch, commitHistory, commitPending, clearPendingHistory: () => clearTimeout(timers.hist), snapshot, restoreSnap, timeTravel, settleCover, setCover, channelCover, coverFor, coverOf, drawnNow, toast,
   // the window
   switchProfile, switchChannel, selectSize, selectLayer, pickLayers, closeTransient, weaveClose, brushClose, cropClose,
   // changes
-  edit, addLayer, addAsset, removeLayer, duplicateLayer, shiftLayer, restack, setCrop, cutOut, putPhoto, placePhoto, keepPicture, loadPhotos, pidsOf, ensureFonts, fontsReading, outlinesPending, toGround,
+  edit, addLayer, addAsset, removeLayer, duplicateLayer, shiftLayer, restack, alignedT, fxSeedOf, setCrop, cutOut, putPhoto, placePhoto, keepPicture, loadPhotos, pidsOf, ensureFonts, fontsReading, outlinesPending, toGround,
   // Surprise me
   dealHands, keepFirst, takeHand, handSays, handNow, putHand,
   // drawing and files

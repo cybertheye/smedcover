@@ -7,7 +7,7 @@
 import { SCOPES, FORMATS, SURPRISE_LOCKS, channelIndex, sizeCaption } from "./store.js";
 import { LOOK_IDS } from "./style.js";
 import { EFFECTS } from "./textfx.js";
-import { BEND_IDS, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, CROP_PTS } from "./layers.js";
+import { BEND_IDS, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, CROP_PTS, isFree, resolve } from "./layers.js";
 import { RULES } from "./deal.js";
 import { parseTitle } from "./title.js";
 import { lineCells, keysOf } from "./ransom.js";
@@ -149,21 +149,21 @@ export const TOOLS = [
     input({ profile: PROFILE, channel: CHANNEL, name: str("Its name.", { maxLength: 80 }), sub: str("The line under its name.", { maxLength: 120 }), code: str("Its code.", { maxLength: 40 }), color: str("Its colour, \"#rrggbb\".", { pattern: HEX }) }, ["channel"]),
     { needs: { any: ["name", "sub", "code", "color"] }, outputSchema: CHANNEL_OUT }),
   TOOL("place_layer", "Place a layer",
-    "Moves, scales, turns or stretches a layer: absolute (x, y, scale, rotate, stretchX, stretchY), relative (move {dx, dy}, scaleBy, rotateBy), or reset: true for where the layout puts it. For a layer that was added x, y is its centre as shares of the canvas (0.5, 0.5 the middle); for a layout part, its offset from its place in the layout, likewise in shares of the canvas. scope says which sizes the change reaches (all by default). Not for bg, the frame or a locked layer, nor turning or stretching a photo that fills the canvas. One undo step. Returns its placement and its box at `size`.",
+    "Moves, scales, turns or stretches a layer: absolute (x, y, scale, rotate, stretchX, stretchY), relative (move {dx, dy}, scaleBy, rotateBy), or reset: true for where the layout puts it. All are as the layer is at `size` (the one on the canvas when left out, which the window then shows): for a layer that was added x, y is its centre as shares of the canvas (0.5, 0.5 the middle); for a layout part or a copy of one, its offset from its place in the layout, likewise in shares of the canvas; scale is get_cover's place.s times what that size adds (a sticker is put on at 0.3, text at 0.35, a solid at 1, a layout part at 1). scope says which sizes the change reaches (all by default; the others move as far across their own canvas). A cut-out linked to a photo goes where its photo goes (move moves both; x and y are refused), its scale, turn and stretch its own. Not for bg, the frame or a locked layer, nor turning or stretching a photo that fills the canvas. One undo step. Returns its placement at `size` in the same terms, and its box there as render_preview gives boxes.",
     input({ profile: PROFILE, channel: CHANNEL, layer: LAYER, size: SIZE, scope: SCOPE,
-      x: num("Across (see above).", -3, 3), y: num("Down (see above).", -3, 3), scale: num("Its size, 1 as made.", 0.02, 20), rotate: num("Its turn in degrees, clockwise.", -360, 360),
+      x: num("Across (see above).", -3, 3), y: num("Down (see above).", -3, 3), scale: num("Its scale (see above).", 0.02, 20), rotate: num("Its turn in degrees, clockwise.", -360, 360),
       stretchX: num("Its stretch across, 1 none.", 0.05, 20), stretchY: num("Its stretch down, 1 none.", 0.05, 20),
       move: obj({ dx: num("Across, as a share of the canvas's width.", -3, 3), dy: num("Down, as a share of the canvas's height.", -3, 3) }, [], "Moves it by this much."),
       scaleBy: num("Scales it by this much.", 0.05, 20), rotateBy: num("Turns it by this many degrees.", -360, 360), reset: bool("Back to where the layout puts it, at the sizes scope reaches.") }, ["layer"]),
-    { annotations: { ...EDIT, idempotentHint: false }, needs: { any: ["x", "y", "scale", "rotate", "stretchX", "stretchY", "move", "scaleBy", "rotateBy", "reset"] }, outputSchema: out({ place: PLACE, box: BOX, warnings: WARNINGS }, ["place"]) }),
+    { annotations: { ...EDIT, idempotentHint: false }, needs: { any: ["x", "y", "scale", "rotate", "stretchX", "stretchY", "move", "scaleBy", "rotateBy", "reset"] }, outputSchema: out({ size: { type: "string" }, place: PLACE, box: { anyOf: [BOX, { type: "null" }] }, warnings: WARNINGS }, ["size", "place"]) }),
   TOOL("set_layer_effect", "Set a text effect",
     "Sets a headline's (the title's, the subtitle's or a text layer's) text effect: effect (as list_options lists them; \"auto\" lets the look decide), amount (its strength 0–2; not for the effects of kind \"passes\"), reshuffle (deals a seeded effect's letters again), outline and shadow (0–2). Effects that need glyph outlines are refused where the host has none. One undo step. Returns the layer.",
     input({ profile: PROFILE, channel: CHANNEL, layer: LAYER, effect: pick(Object.keys(EFFECTS), "The text effect."), amount: num("Its strength.", 0, 2), reshuffle: bool("Deal its letters again (seeded effects)."), outline: num("The outline's weight.", 0, 2), shadow: num("The shadow's weight.", 0, 2) }, ["layer"]),
     { needs: { any: ["effect", "amount", "reshuffle", "outline", "shadow"] }, outputSchema: LAYER_DONE }),
   TOOL("set_layer_font", "Set a font",
-    "Sets the font of a lettering layer (title, subtitle, tag, channel name, brand row, text): a family that is installed, bundled or imported (list_options fonts; matched with the case aside, near names suggested when none matches), or \"\" for the look's own. vertical: true sets it in columns, false in lines. Not counted among the user's recent fonts. One undo step. Returns the layer.",
-    input({ profile: PROFILE, channel: CHANNEL, layer: LAYER, font: str("The font family, or \"\" for the look's own.", { maxLength: 80 }), vertical: bool("Set in columns.") }, ["layer", "font"]),
-    { outputSchema: LAYER_DONE }),
+    "Sets the font of a lettering layer (title, subtitle, tag, channel name, brand row, text): a family that is installed, bundled or imported (list_options fonts; matched with the case aside, near names suggested when none matches), or \"\" for the look's own; and/or vertical: true sets it in columns, false in lines. Not counted among the user's recent fonts. One undo step. Returns the layer.",
+    input({ profile: PROFILE, channel: CHANNEL, layer: LAYER, font: str("The font family, or \"\" for the look's own.", { maxLength: 80 }), vertical: bool("Set in columns.") }, ["layer"]),
+    { needs: { any: ["font", "vertical"] }, outputSchema: LAYER_DONE }),
   TOOL("set_layer_bend", "Bend a headline",
     "Bends a headline (the title, the subtitle or a text layer): bend, one of list_options' bends or \"none\"; amount 0–2 (default 1). Takes away a perspective or a reshaping dragged by hand. One undo step. Returns the layer.",
     input({ profile: PROFILE, channel: CHANNEL, layer: LAYER, bend: pick(["none", ...BEND_IDS], "The bend."), amount: num("How far.", 0, 2) }, ["layer", "bend"]),
@@ -399,6 +399,60 @@ export function findSize(sizes, want) {
  * Ids said for a message: the first `most` of them, then how many more ("bg, title, … and 9 more").
  */
 export const idsSaid = (ids, most = 12) => (ids.length > most ? `${ids.slice(0, most).join(", ")} … and ${ids.length - most} more` : ids.join(", "));
+/** The edit distance between two short strings (Levenshtein's), for names that are near one another. */
+function distance(a, b) {
+  let row = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return row[b.length];
+}
+/**
+ * Of `names`, those nearest `want` (a font asked for that is not there), at most `most`: those with it in their name, or
+ * whose name it has in it, first (the shorter first), then those a few letters from it, the case and spaces aside.
+ */
+export function nearNames(want, names, most = 5) {
+  const fold = (s) => String(s).toLowerCase().replace(/\s+/g, " ").trim(), w = fold(want), seen = new Set(), out = [];
+  if (!w) return [];
+  const put = (n) => { if (!seen.has(n) && out.length < most) { seen.add(n); out.push(n); } };
+  for (const n of names.filter((n) => fold(n).includes(w) || w.includes(fold(n))).sort((a, b) => a.length - b.length)) put(n);
+  const room = Math.max(2, Math.round(w.length / 3));
+  for (const [n] of names.map((n) => [n, distance(fold(n), w)]).filter(([, d]) => d <= room).sort((a, b) => a[1] - b[1])) put(n);
+  return out;
+}
+/**
+ * Layer L's placement at the size `fr` ({vw, vh, key, catId}: its virtual canvas, as frame() in app.js gives it) in
+ * place_layer's terms: x and y as shares of the canvas — a layer that was added, its centre; a layout part, a copy of
+ * one or a linked cut-out, its offset (from where the layout puts it, or from its photo) —, s its scale (its own and
+ * the size's together, the canvas's height left out), r its turn in degrees, kx and ky its stretch.
+ */
+export function placeAt(L, { vw, vh, key, catId }) {
+  const p = resolve(L, vw, vh, key, catId), k = isFree(L.type) ? Math.min(vw, vh) / 1080 : 1;
+  return { x: (isFree(L.type) ? p.cx : p.dx) / vw, y: (isFree(L.type) ? p.cy : p.dy) / vh, s: p.s / k, r: p.r, kx: p.kx, ky: p.ky };
+}
+/**
+ * What place_layer's arguments `a` come to for layer L at size `fr` (see placeAt): `patch`, the edit adjust() in
+ * layers.js applies in any scope ({ddx, ddy} in virtual pixels, scale, rot, kx, ky: factors and degrees, only those
+ * that change anything), and `want`, the placement each argument given asks for at that size (x, y, s, r, kx, ky).
+ * Absolute ones (x, y, scale, rotate, stretchX, stretchY) are reached from where it is now, relative ones (move {dx,
+ * dy}, scaleBy, rotateBy) added to it; giving both kinds of one is the caller's to refuse.
+ */
+export function placePatch(L, fr, a) {
+  const now = placeAt(L, fr), patch = {}, want = {}, m = a.move || {};
+  const to = (k, abs, rel, plus) => (abs !== undefined ? (want[k] = abs) : rel !== undefined ? (want[k] = plus(now[k], rel)) : undefined);
+  const add = (v, d) => v + d, times = (v, f) => v * f;
+  const x = to("x", a.x, m.dx, add), y = to("y", a.y, m.dy, add), s = to("s", a.scale, a.scaleBy, times), r = to("r", a.rotate, a.rotateBy, add);
+  const kx = to("kx", a.stretchX, undefined, times), ky = to("ky", a.stretchY, undefined, times);
+  if (x !== undefined && x !== now.x) patch.ddx = (x - now.x) * fr.vw;
+  if (y !== undefined && y !== now.y) patch.ddy = (y - now.y) * fr.vh;
+  if (s !== undefined && s !== now.s) patch.scale = s / now.s;
+  if (r !== undefined && r !== now.r) patch.rot = r - now.r;
+  if (kx !== undefined && kx !== now.kx) patch.kx = kx / now.kx;
+  if (ky !== undefined && ky !== now.ky) patch.ky = ky / now.ky;
+  return { patch, want };
+}
 /** The keys of the letters of `words` (a title's, a text layer's), as the weave and the ransom note name them (see weaveLetters in app.js): spaces left out. */
 export const letterKeysOf = (words) => parseTitle(String(words || "")).flatMap((runs, row) => { const cells = lineCells(runs); return keysOf(cells, row).filter((k, i) => !/^\s+$/.test(cells[i].ch)); });
 /** The width to draw size `z` at for its longer side to be `side` pixels (drawCover rounds the height from it). */

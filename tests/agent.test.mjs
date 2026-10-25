@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { TOOLS, TOOL_BY, ERRORS, INSTRUCTIONS, FLAGS, toolsJson, toolsText, checkArgs, checkCall, toResult, toError, isError, ToolError, findSize, findChannel, findProfile, letterKeysOf, boxesOf, sheetPlan, widthFor, keyOf } from "../ui/js/tools.js";
+import { TOOLS, TOOL_BY, ERRORS, INSTRUCTIONS, FLAGS, toolsJson, toolsText, checkArgs, checkCall, toResult, toError, isError, ToolError, findSize, findChannel, findProfile, letterKeysOf, boxesOf, sheetPlan, widthFor, keyOf, placeAt, placePatch, nearNames, idsSaid } from "../ui/js/tools.js";
 import { SCOPES, FORMATS, SURPRISE_LOCKS, normalizeSize, normalizeProfile } from "../ui/js/store.js";
 import { LOOK_IDS, LOOKS } from "../ui/js/style.js";
 import { EFFECTS, BENDS } from "../ui/js/textfx.js";
@@ -262,13 +262,13 @@ async function fakeApi() {
 }
 
 /** The tools still to be done: each answers unavailable. One done is taken off the list; one forgotten fails the test below. */
-const PENDING = ["place_layer", "set_layer_effect", "set_layer_font", "set_layer_bend", "set_layer_color", "show_layer", "add_layer", "remove_layer", "reorder_layer", "add_photo", "crop_photo", "cut_out", "weave", "surprise", "pick_hand", "apply_cover_json", "open_project", "batch_covers", "export"];
+const PENDING = ["add_layer", "remove_layer", "reorder_layer", "add_photo", "crop_photo", "cut_out", "weave", "surprise", "pick_hand", "apply_cover_json", "open_project", "batch_covers", "export"];
 test("every tool has a command; those not done yet are these, and answer that they are not, before touching anything", async () => {
   const { makeCommands } = await import("../ui/js/commands.js");
   const cmds = makeCommands(new Proxy({}, { get: () => () => {} }));
   assert.deepEqual(Object.keys(cmds).sort(), TOOLS.map((d) => d.name).sort());
   assert.deepEqual(TOOLS.filter((d) => cmds[d.name].pending).map((d) => d.name), PENDING, "the tools not done yet");
-  assert.equal(TOOLS.length - PENDING.length, 12);
+  assert.equal(TOOLS.length - PENDING.length, 18);
   for (const n of PENDING) assert.deepEqual(await cmds[n]({}), toError("unavailable", "not implemented yet"), n);
 });
 
@@ -349,17 +349,76 @@ test("what a tool needs: a flag set to false asks for nothing, any other false s
     assert.equal(checkCall(TOOL_BY[tool], { layer: "x", ...args }), null, `${tool} ${JSON.stringify(args)}: false says something`);
 });
 
+test("place_layer's arithmetic: what is asked is reached through adjust and resolve, in every scope, for a layer added and a layout part", async () => {
+  const { newLayer, adjust } = await import("../ui/js/layers.js");
+  const { virtualSize } = await import("../ui/js/layout.js");
+  const at = (key) => { const [w, h] = key.split("x").map(Number), [vw, vh] = virtualSize(w, h); return { vw, vh, key }; };
+  const here = at("1920x1080"), other = at("1600x1200"), fr = { ...here, catId: "c1", group: [here, other] }, there = { ...other, catId: "c1" };
+  const asks = [{ x: 0.3, y: 0.7, scale: 0.8, rotate: -12, stretchX: 1.5, stretchY: 0.9 }, { move: { dx: 0.05, dy: -0.1 }, scaleBy: 1.25, rotateBy: 30 }, { x: -0.2 }, { scale: 2 }];
+  for (const type of ["text", "photo", "title", "graphic"]) for (const scope of ["all", "orient", "size"]) for (const ask of asks) {
+    const L = newLayer(type);
+    L.t.by["1920x1080"] = { dx: 12, dy: -8, s: 1.1, r: 3, kx: 1, ky: 1.2 };   // tuned at this size already
+    const was = placeAt(L, fr), far = placeAt(L, there), { patch, want } = placePatch(L, fr, ask);
+    adjust(L, fr, scope, patch);
+    const now = placeAt(L, fr), then = placeAt(L, there), name = `${type} ${scope} ${JSON.stringify(ask)}`;
+    for (const [k, v] of Object.entries(want)) assert.ok(Math.abs(now[k] - v) < 1e-9, `${name}: ${k} ${now[k]} ≠ ${v}`);
+    if (ask.move) { assert.ok(Math.abs(want.x - (was.x + 0.05)) < 1e-12 && Math.abs(want.s - was.s * 1.25) < 1e-12 && Math.abs(want.r - (was.r + 30)) < 1e-12, `${name}: relative to where it was`); }
+    for (const k of ["x", "y", "s", "r", "kx", "ky"]) if (!(k in want)) assert.ok(Math.abs(now[k] - was[k]) < 1e-9, `${name}: ${k} left as it was`);
+    // the size facing another way: moved as far across its own canvas by "all" and "orient", left alone by "size"
+    if (scope === "size") assert.deepEqual(then, far, `${name}: another size untouched`);
+    else if ("x" in want) assert.ok(Math.abs(then.x - far.x - (now.x - was.x)) < 1e-9, `${name}: another size moved as far`);
+  }
+  const L = newLayer("text");
+  assert.deepEqual(placePatch(L, fr, { x: 0.5, scale: placeAt(L, fr).s }).patch, {}, "asked where it is: nothing to do");
+  assert.deepEqual(placeAt(L, fr), { x: 0.5, y: 0.42, s: 0.35, r: 0, kx: 1, ky: 1 }, "a layer added: its centre, its scale without the canvas's height");
+});
+
+test("near names for a font not there, ids said for a message; set_layer_font takes vertical alone", () => {
+  assert.deepEqual(nearNames("Helvetic", ["Menlo", "Helvetica Neue", "Helvetica"]), ["Helvetica", "Helvetica Neue"]);
+  assert.deepEqual(nearNames("pingfang", ["PingFang TC", "Menlo", "PingFang SC"]), ["PingFang TC", "PingFang SC"]);
+  assert.deepEqual(nearNames("Menol", ["Arial", "Menlo", "Monaco"]), ["Menlo"]);
+  assert.deepEqual(nearNames("", ["Menlo"]), []);
+  assert.equal(idsSaid(["a", "b", "c"], 2), "a, b … and 1 more");
+  assert.equal(idsSaid(["a", "b"]), "a, b");
+  assert.equal(checkCall(TOOL_BY.set_layer_font, { layer: "x", vertical: false }), null);
+  assert.equal(checkCall(TOOL_BY.set_layer_font, { layer: "x" }), "Give at least one of: font, vertical.");
+});
+
 test("a change is checked whole before anything is touched: refused, the window stays where it was and nothing is changed", async () => {
   const { makeCommands } = await import("../ui/js/commands.js");
   const { api, S, text, sticker, calls } = await fakeApi(), cmds = makeCommands(api), was = JSON.stringify(S);
   const refusals = [
+    ["place_layer", { layer: "frame", x: 0.5 }, /The frame follows the template/],
+    ["place_layer", { layer: "bg", scale: 2, channel: 1 }, /bg is the ground: it is not placed/],
+    ["place_layer", { layer: text.id, x: 0.2, move: { dx: 0.1 } }, /Give "x" or "move.dx", not both/],
+    ["place_layer", { layer: text.id, reset: true, scale: 2 }, /"reset" goes alone/],
+    ["place_layer", { layer: "nope", x: 0.2, channel: 1 }, /No layer "nope" on this cover; its layers are: bg, accent, .* \(get_cover lists them\)/],
+    ["place_layer", { layer: "title", x: 0.2, size: "5:1" }, /The profile has no size "5:1"/],
+    ["set_layer_font", { layer: "title", font: "Helvetic", channel: 1 }, /No font "Helvetic" here; near it: Helvetica/],
+    ["set_layer_font", { layer: "accent", font: "Menlo" }, /"accent" is a layer of type accent, not a lettering layer/],
     ["set_look", { look: "cyber", params: { nope: 1 } }, /Cyberpunk \(cyber\) has no setting "nope"; its settings are: split, tear/],
     ["set_look", { params: JSON.parse('{"__proto__": 1}') }, /"params.__proto__" is no look's setting/],
     ["set_look", { look: "cyber", params: { split: "x" } }, /"params.split" \(.*\) takes a number/],
+    ["set_layer_effect", { layer: "title", amount: 1.5 }, /The look's own lettering has no strength to set/],
+    ["set_layer_effect", { layer: "title", reshuffle: true }, /deals nothing at random/],
+    ["set_layer_effect", { layer: "tag", effect: "plain" }, /"tag" is a layer of type tag, not a headline/],
+    ["set_layer_bend", { layer: "title", bend: "none", amount: 1 }, /with bend "none" there is none/],
+    ["set_layer_color", { layer: "title", color: "#ff0000" }, /"color" is for a solid layer; "title" is a layer of type title/],
+    ["set_layer_color", { layer: "tag", hi: "#ff0000" }, /"hi" is for a headline/],
+    ["set_layer_color", { layer: "title", tint: true }, /"tint" is for a vector asset/],
+    ["show_layer", { layer: text.id, included: false }, /"included" is for the layout's own parts/],
+    ["show_layer", { layer: "graphic", visible: true }, /"graphic" is left out of this cover: bring it back with included: true/],
+    ["show_layer", { layer: "bg", opacity: 0.5 }, /bg has no opacity/],
+    ["show_layer", { layer: "frame", locked: true }, /frame is never placed by hand/],
+    ["show_layer", { layer: "title", sizes: ["5:1"] }, /no size "5:1"/],
     ["set_channel", { channel: "nope", name: "x" }, /No channel "nope"/],
     ["set_text", { title: "x", profile: "nobody" }, /No profile "nobody"/],
   ];
   for (const [tool, args, said] of refusals) await assert.rejects(cmds[tool](args), (e) => e instanceof ToolError && e.code === "invalid_arguments" && said.test(e.message), `${tool} ${JSON.stringify(args)}`);
+  await assert.rejects(cmds.set_layer_effect({ layer: "title", effect: "spiky", channel: 1 }), (e) => e.code === "unavailable" && /outlines, which this host cannot read/.test(e.message), "an outline effect where there are none");
+  text.locked = true;
+  await assert.rejects(cmds.place_layer({ layer: text.id, x: 0.1 }), /is locked in place/);
+  text.locked = false;
   assert.deepEqual(calls, [], "nothing that changes anything was called: no switch, no edit, no touch");
   assert.equal(JSON.stringify(S), was, "the state as it was");
 });
@@ -383,6 +442,52 @@ test("a change does what the editor does, where it is aimed: the window switched
   // a channel: the window shows it, its colour as the profile keeps colours
   assert.deepEqual((await cmds.set_channel({ channel: "Film Stories", name: "Films", color: "#AABBCC" })).structuredContent, { id: film, name: "Films", sub: p.categories[1].sub, code: p.categories[1].code, color: "#aabbcc" });
   assert.equal(S.cover.catId, film);
+  // a place: at the size asked, which the window then shows, in the scope asked
+  calls.length = 0;
+  const placed = (await cmds.place_layer({ layer: text.id, x: 0.25, y: 0.75, scale: 0.5, rotate: 10, size: "9:16", scope: "size" })).structuredContent;
+  assert.equal(S.sel, "1080x1920"); assert.equal(placed.size, "1080x1920");
+  assert.deepEqual(placed.place, { x: 0.25, y: 0.75, s: 0.5, r: 10, kx: 1, ky: 1 });
+  assert.deepEqual(text.t.all, { x: 0.5, y: 0.42, s: 0.35, r: 0, kx: 1, ky: 1 }, "scope size: the other sizes as they were");
+  assert.deepEqual(calls.filter((c) => c[0] === "edit").map((c) => c[3]), ["size", "size"], "its size and turn, then where it goes");
+  await cmds.place_layer({ layer: text.id, reset: true, scope: "size" });
+  assert.ok(!text.t.by["1080x1920"], "put back at that size");
+  const far = (await cmds.place_layer({ layer: text.id, scale: 20, scaleBy: undefined, x: 3 })).structuredContent;
+  assert.deepEqual([far.place.x, far.place.s], [3, 20]);
+  const beyond = (await cmds.place_layer({ layer: text.id, move: { dx: 1 } })).structuredContent;
+  assert.equal(beyond.place.x, 3); assert.match(beyond.warnings[0], /"x" came to 3, not 4: as far as it goes/);
+  // a text effect, as its card: a seeded one takes the seed its card is drawn with
+  const title = S.cover.layers.find((l) => l.id === "title");
+  assert.equal((await cmds.set_layer_effect({ layer: "title", effect: "ransom", amount: 1.4 })).structuredContent.layer.fx, "ransom");
+  assert.equal(title.fxSeed, 4242); assert.equal(title.fxAmt, 1.4);
+  await cmds.set_layer_effect({ layer: "title", amount: 1, reshuffle: true });
+  assert.ok(!("fxAmt" in title) && title.fxSeed !== 4242, "the strength back to its own, the letters dealt again");
+  // a font, matched with the case aside, not among the recent fonts; columns
+  const recent = JSON.stringify(S.settings.recentFonts);
+  const font = (await cmds.set_layer_font({ layer: "title", font: "helvetica" })).structuredContent;
+  assert.equal(title.font, "Helvetica"); assert.match(font.warnings[0], /has no Chinese/); assert.equal(JSON.stringify(S.settings.recentFonts), recent);
+  await cmds.set_layer_font({ layer: "title", vertical: true });
+  assert.equal(title.font, "Helvetica"); assert.equal(title.vertical, true);
+  // a bend takes away a perspective dragged by hand; in columns it is kept for later, and said
+  title.reshape = [[0.1, 0]];
+  const bent = (await cmds.set_layer_bend({ layer: "title", bend: "arc", amount: 1.5 })).structuredContent;
+  assert.deepEqual([title.bend, title.bendAmt, "reshape" in title], ["arc", 1.5, false]); assert.match(bent.warnings[0], /set in columns/);
+  await cmds.set_layer_bend({ layer: "title", bend: "none" });
+  assert.ok(!("bend" in title) && !("bendAmt" in title));
+  // colours, each where the layer has it
+  const tx = (await cmds.set_layer_color({ layer: text.id, ink: "#FF0000", plateInk: "auto", hi: "#00ff00" })).structuredContent.layer;
+  assert.deepEqual([text.ink, text.hi, "plateInk" in text, tx.ink], ["#ff0000", "#00ff00", false, "#ff0000"]);
+  await cmds.set_layer_color({ layer: sticker.id, tint: false });
+  assert.equal(sticker.tint, false);
+  const plate = (await cmds.set_layer_color({ layer: "title", plateInk: "#123456" })).structuredContent;
+  assert.match(plate.warnings[0], /once there is a plate/);
+  // shown, left out, kept to some sizes
+  const graphic = S.cover.layers.find((l) => l.id === "graphic");
+  await cmds.show_layer({ layer: "graphic", included: true });
+  assert.ok(!graphic.off && graphic.visible);
+  await cmds.show_layer({ layer: text.id, opacity: 0.5, locked: true, sizes: ["16:9", "1:1", "1920x1080"] });
+  assert.deepEqual([text.o, text.locked, text.sizes], [0.5, true, ["1920x1080", "1200x1200"]]);
+  await cmds.show_layer({ layer: text.id, sizes: "all", locked: false });
+  assert.ok(!("sizes" in text) && !text.locked);
   assert.ok(!calls.some((c) => c[0] === "switchProfile"), "never another profile");
 });
 /** Look `id`'s own settings. */

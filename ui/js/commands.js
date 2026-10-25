@@ -7,10 +7,10 @@
 // changes the cover goes where it is aimed first (aim: the window switched there, the layer named found and checked,
 // before anything is touched), then does what the editor does for the same change: the same fields, the same touch().
 // No DOM at the top: Node imports this file (the tests); a canvas is made only when a preview is drawn.
-import { TOOLS, toResult, toError, ToolError, findProfile, findChannel, findSize, keyOf, letterKeysOf, boxesOf, sheetPlan, widthFor, idsSaid } from "./tools.js";
+import { TOOLS, toResult, toError, ToolError, findProfile, findChannel, findSize, keyOf, letterKeysOf, boxesOf, sheetPlan, widthFor, idsSaid, nearNames, placeAt, placePatch } from "./tools.js";
 import { LOOKS, LOOK_IDS, LOOK_TAGS, lookParams } from "./style.js";
-import { EFFECTS, BENDS } from "./textfx.js";
-import { BEND_IDS, HEADLINES, LETTERED, isLayout, isRemovable } from "./layers.js";
+import { EFFECTS, BENDS, effectUses, NO_COLUMNS } from "./textfx.js";
+import { BEND_IDS, HEADLINES, LETTERED, isLayout, isRemovable, fillsCanvas, resetPlacement, keepTo, inSize } from "./layers.js";
 import { STICKERS, GRAPHICS, userAssets, canTint } from "./assets.js";
 import { t } from "./i18n.js";
 import { PLATFORMS } from "./platforms.js";
@@ -27,11 +27,20 @@ const OPTIONS = ["looks", "effects", "bends", "fonts", "platforms", "sizes", "lo
 const copy = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 const has = (s, q) => !q || String(s || "").toLowerCase().includes(String(q).trim().toLowerCase());
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const r4 = (v) => Math.round(v * 1e4) / 1e4;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 /** A call the cover cannot take as it is (a layer of the wrong kind, a font not there…): what is wrong, for the agent. */
 const refused = (message) => new ToolError("invalid_arguments", message);
 /** A colour as the layers keep it: "#rrggbb" in small letters. */
 const hex = (v) => v.toLowerCase();
+/** The types of layer each colour of set_layer_color is for, said for the agent when it is given to another. */
+const COLOURED = {
+  ink: [[...LETTERED, "photo", "asset"], "a lettering layer, a photo (its outline) or a vector asset"],
+  hi: [HEADLINES, "a headline (the title, the subtitle or a text layer)"], plateInk: [HEADLINES, "a headline"], hiPlateInk: [HEADLINES, "a headline"],
+  plate: [[...HEADLINES, "catname"], "a headline or the channel name"], tint: [["asset"], "a vector asset"], color: [["solid"], "a solid layer"],
+};
+/** The layers a lettering tool works on, said for the agent. */
+const SAID = { headline: "a headline (the title, the subtitle or a text layer)", lettering: "a lettering layer (title, subtitle, tag, catname, brand or text)" };
 
 export function makeCommands(api) {
   const { S } = api;
@@ -124,6 +133,10 @@ export function makeCommands(api) {
     if (L0 && !L) throw new ToolError("failed", `"${L0.id}" was not on the cover once the window had switched to it.`);
     return { p: S.profile, index: api.catIndex(), catId, z: api.selSize(), f: api.frame(), L, switched };
   }
+  /** What a tool that changed layer L answers: the layer as get_cover lists it, and what was clamped or will not show (warnings), when anything was. */
+  const layerDone = (L, warnings = []) => toResult({ structured: { layer: layerOut(L, S.cover), ...(warnings.length ? { warnings } : {}) } });
+  /** The fonts a layer can be set in: the bundled ones, those imported and those installed. */
+  const fontsHere = () => [...new Set([...api.BUNDLED_FONTS, ...S.importedFonts, ...S.systemFonts])];
 
   const commands = {
     get_context: async () => {
@@ -263,6 +276,122 @@ export function makeCommands(api) {
       if (args.color !== undefined) c.color = hex(args.color);
       api.touch({ profile: true, panel: true, side: true });   // the window's accent follows the channel colour (renderPanel)
       return toResult({ structured: { id: c.id, name: c.name, sub: c.sub, code: c.code, color: c.color } });
+    },
+
+    // ---- a layer's place and looks
+    place_layer: async (args) => {
+      const turns = ["rotate", "rotateBy", "stretchX", "stretchY"].some((k) => args[k] !== undefined), moves = args.x !== undefined || args.y !== undefined;
+      const both = [["x", "move.dx", args.x, args.move && args.move.dx], ["y", "move.dy", args.y, args.move && args.move.dy], ["scale", "scaleBy", args.scale, args.scaleBy], ["rotate", "rotateBy", args.rotate, args.rotateBy]].find((q) => q[2] !== undefined && q[3] !== undefined);
+      if (both) throw refused(`Give "${both[0]}" or "${both[1]}", not both.`);
+      if (args.reset && Object.keys(args).some((k) => ["x", "y", "scale", "rotate", "stretchX", "stretchY", "move", "scaleBy", "rotateBy"].includes(k))) throw refused('"reset" goes alone: it puts the layer back where the layout puts it.');
+      const { L, f } = await aim(args, { unlocked: true, check: (L) => (L.type === "bg" ? "bg is the ground: it is not placed (a look's scene objects are dragged on the canvas)."
+        : L.type === "frame" ? "The frame follows the template: it is not placed by hand."
+        : fillsCanvas(L) && turns ? `"${L.id}" fills the canvas: it is moved and scaled, not turned or stretched.`
+        : L.of && moves ? `"${L.id}" is a cut-out linked to photo "${L.of}" and goes where it goes: place that, or move both with "move".` : null) });
+      const scope = args.scope ?? "all", warnings = [];
+      if (args.reset) {
+        if (L.of) L.t = api.alignedT(api.owner(L));   // a cut-out back over its photo, as Realign does
+        else resetPlacement(L, scope, f.key, f.catId, f.group.map((g) => g.key));   // as Reset under the layer's properties
+        api.touch({ cover: true, side: true });
+      } else {
+        if (L.crop || (L.type === "photo" && L.cut)) api.drawnNow();   // scaled and turned about what shows of it, as it is drawn now
+        // its size, turn and stretch first (a cut-out's or a crop's about its subject), then where it goes, as the canvas's handles and a drag do
+        for (const part of [{ scale: args.scale, scaleBy: args.scaleBy, rotate: args.rotate, rotateBy: args.rotateBy, stretchX: args.stretchX, stretchY: args.stretchY }, { x: args.x, y: args.y, move: args.move }]) {
+          const { patch, want } = placePatch(L, f, part), said = { x: "x", y: "y", s: "scale", r: "rotate", kx: "stretchX", ky: "stretchY" };
+          if (L.of) { delete want.x; delete want.y; }   // a linked cut-out's moves are its photo's
+          if (Object.keys(patch).length) api.edit(L, patch, scope);
+          const now = placeAt(L, f);
+          for (const [k, v] of Object.entries(want)) if (Math.abs(now[k] - v) > 1e-6) warnings.push(`"${said[k]}" came to ${r4(now[k])}, not ${r4(v)}: as far as it goes${scope === "all" ? "" : ` at the sizes scope "${scope}" reaches`}.`);
+        }
+      }
+      const cv = api.drawnNow(), box = boxesOf(cv._hits, cv._virtual || [f.vw, f.vh]).find((b) => b.id === L.id) || null;
+      if (!box) warnings.push(`"${L.id}" is not drawn at ${f.key} (hidden, left out, or kept to other sizes).`);
+      const at = placeAt(L, f);
+      return toResult({ structured: { size: f.key, place: { x: r4(at.x), y: r4(at.y), s: r4(at.s), r: r4(at.r), kx: r4(at.kx), ky: r4(at.ky) }, box, ...(warnings.length ? { warnings } : {}) } });
+    },
+    set_layer_effect: async (args) => {
+      const { L } = await aim(args, { types: HEADLINES, what: SAID.headline, check: (L) => {
+        const was = EFFECTS[L.fx] ? L.fx : "auto", fx = args.effect ?? was, e = EFFECTS[fx], named = fx === "auto" ? "The look's own lettering" : e.name.en;
+        if (fx !== was && e.kind === "outline" && !api.CAN.outlines) throw new ToolError("unavailable", `${e.name.en} is drawn from the letters' outlines, which this host cannot read (the desktop app can).`);
+        if (args.amount !== undefined && (fx === "auto" || e.kind === "passes")) return `${named} has no strength to set ("amount" is for the masked, outlined and letter-by-letter effects).`;
+        if (args.reshuffle && !e.seeded) return `${named} deals nothing at random: there is nothing to reshuffle.`;
+        return null;
+      } });
+      const warnings = [], was = EFFECTS[L.fx] ? L.fx : "auto";
+      if (args.effect !== undefined && args.effect !== was) {   // as an effect's card clicked (pickFx)
+        if (EFFECTS[args.effect].seeded && !L.fxSeed) L.fxSeed = api.fxSeedOf(L);   // the seed its card is drawn with: the layer's own from now on
+        if (args.effect === "auto") delete L.fx; else L.fx = args.effect;
+      }
+      if (args.amount !== undefined) { if (args.amount === 1) delete L.fxAmt; else L.fxAmt = args.amount; }   // as its Strength
+      if (args.reshuffle) { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === L.fxSeed); L.fxSeed = n; }   // as Reshuffle
+      const use = effectUses(L.fx), named = (EFFECTS[use.id] || LOOKS[use.id] || { name: { en: use.id } }).name.en;
+      for (const [k, key] of [["outline", "stroke"], ["shadow", "shadow"]]) if (args[k] !== undefined) { L[key] = args[k]; if (!use[key]) warnings.push(`${named} draws no ${k}: it is kept for an effect that does.`); }   // as Outline and Shadow
+      if (L.fx && NO_COLUMNS.includes(L.fx) && api.inColumns(L)) warnings.push(`${EFFECTS[L.fx].name.en} is not drawn in columns: set in columns, the layer shows the look's own lettering.`);
+      api.touch({ cover: true, side: true });
+      return layerDone(L, warnings);
+    },
+    set_layer_font: async (args) => {
+      const want = args.font === undefined ? undefined : args.font.trim(), all = fontsHere(), font = want ? all.find((f) => f.toLowerCase() === want.toLowerCase()) : want;
+      if (want && !font) { const near = nearNames(want, all); throw refused(`No font "${want}" here${near.length ? `; near it: ${near.join(", ")}` : ""} (list_options with fontQuery lists the installed ones).`); }
+      const { L } = await aim(args, { types: LETTERED, what: SAID.lettering }), warnings = [];
+      if (font) L.font = font; else if (font === "") delete L.font;   // as the font menu (fontControl), but not put among the recent fonts
+      if (args.vertical !== undefined) L.vertical = args.vertical;   // as Lines and Columns
+      if (L.font && S.latinFonts.has(L.font)) warnings.push(`${L.font} has no Chinese: Chinese words are set in another face.`);
+      api.touch({ cover: true, side: true });
+      return layerDone(L, warnings);
+    },
+    set_layer_bend: async (args) => {
+      if (args.bend === "none" && args.amount !== undefined) throw refused('"amount" is how far a bend goes: with bend "none" there is none.');
+      const { L } = await aim(args, { types: HEADLINES, what: SAID.headline }), warnings = [];
+      if (args.bend === "none") { delete L.bend; delete L.bendAmt; } else L.bend = args.bend;   // as the bend menu (bendControl), which takes a perspective or a shape dragged by hand away
+      delete L.warp; delete L.reshape;
+      if (args.amount !== undefined) { if (args.amount === 1) delete L.bendAmt; else L.bendAmt = args.amount; }
+      if (L.bend && api.inColumns(L)) warnings.push("The layer is set in columns, where nothing is bent: the bend is kept for when it is in lines again.");
+      api.touch({ cover: true, side: true });
+      return layerDone(L, warnings);
+    },
+    set_layer_color: async (args) => {
+      const given = Object.keys(COLOURED).filter((k) => args[k] !== undefined);
+      const { L } = await aim(args, { check: (L) => {
+        const odd = given.find((k) => !COLOURED[k][0].includes(L.type));
+        if (odd) return `"${odd}" is for ${COLOURED[odd][1]}; "${L.id}" is a layer of type ${L.type}.`;
+        if (L.type === "asset" && (args.ink !== undefined || args.tint !== undefined) && !canTint(L.ref)) return `"${L.id}" is a picture in colours of its own: only a vector asset takes a colour.`;
+        if (L.type === "asset" && L.ref.kind === "graphic" && args.tint === false) return "A channel graphic is always one colour: the channel's, or its ink.";
+        return null;
+      } });
+      const warnings = [];
+      if (args.plate !== undefined) L.plate = args.plate;   // Plate under the words
+      for (const k of ["ink", "hi", "plateInk", "hiPlateInk"]) {   // as each swatch: a colour, or back to automatic (↺)
+        if (args[k] === undefined) continue;
+        if (args[k] === "auto") delete L[k]; else L[k] = hex(args[k]);
+        if (k === "ink" && L.type !== "asset" && L.type !== "photo") delete L.color;   // a text layer of before no longer in the channel colour
+      }
+      if (args.tint !== undefined && L.ref.kind !== "graphic") L.tint = args.tint;   // its own colours, or the channel's (assetColour)
+      if (args.color !== undefined) L.color = hex(args.color);
+      if (args.plateInk !== undefined && args.plateInk !== "auto" && !L.plate) warnings.push("The plate's colour shows once there is a plate (plate: true).");
+      if (args.hiPlateInk !== undefined && args.hiPlateInk !== "auto" && !L.hiPlate && !L.hiMark) warnings.push("The highlights' colour shows once the highlighted words have plates or a mark of their own (the layer's properties).");
+      if (L.type === "asset" && args.tint !== undefined && L.ink) warnings.push(`Its ink (${L.ink}) wins over the channel colour: set ink to "auto" for the tint to show.`);
+      if (L.type === "photo" && args.ink !== undefined && !(L.outline > 0)) warnings.push("A photo's ink is its outline's colour: it shows once it has an outline.");
+      api.touch({ cover: true, side: true });
+      return layerDone(L, warnings);
+    },
+    show_layer: async (args) => {
+      const p = target(args).p, keys = args.sizes === undefined || args.sizes === "all" ? null : args.sizes.map((z) => keyOf(findSize(p.sizes, z)));
+      const { L } = await aim(args, { check: (L) => (args.included !== undefined && !(isLayout(L) && L.type !== "bg") ? `"included" is for the layout's own parts but bg; "${L.id}" ${isLayout(L) ? "is the ground" : "was added: hide it, or remove it with remove_layer"}.`
+        : args.visible === true && L.off && args.included !== true ? `"${L.id}" is left out of this cover: bring it back with included: true.`
+        : args.opacity !== undefined && L.type === "bg" ? "bg has no opacity: hide it (visible: false) for a clear ground."
+        : args.locked !== undefined && (L.type === "bg" || L.type === "frame") ? `${L.id} is never placed by hand: there is nothing to lock.`
+        : args.sizes !== undefined && L.type === "bg" ? "bg shows at every size." : null) });
+      const all = api.sizeKeys(), warnings = [];
+      if (args.included === true && L.off) { delete L.off; L.visible = true; }   // as its switch under Layout → Parts (partsBox)
+      if (args.included === false && !L.off) { L.off = true; L.visible = false; if (S.layerId === L.id) S.layerId = "bg"; }
+      if (args.visible !== undefined && !L.off) L.visible = args.visible;   // the eye in its row
+      if (args.opacity !== undefined) L.o = args.opacity;   // Opacity under its properties
+      if (args.locked !== undefined) L.locked = args.locked;   // the padlock in its row
+      if (args.sizes !== undefined) keepTo(L, keys || all, all);   // the sizes it shows at, under its properties
+      if (!inSize(L, S.sel) && L.visible) warnings.push(`It is not shown at ${S.sel}, the size on the canvas.`);
+      api.touch({ cover: true, side: true, panel: true });
+      return layerDone(L, warnings);
     },
   };
   for (const d of TOOLS) if (!commands[d.name]) commands[d.name] = notYet;
