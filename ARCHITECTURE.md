@@ -71,7 +71,9 @@ ui/
   js/solid.js        3D objects described as data: validation, drawn with the channel graphics' renderer
   js/ai.js           AI generation: settings, requests for both API styles, the preset prompt (pure)
   js/store.js        data model, validation, persistence
-  js/presets.js      starter profiles and size presets (one for each ratio a platform wants)
+  js/presets.js      starter profiles (the starter's name, brand and channels from defaults.json) and size presets (one for each ratio a platform wants)
+  js/defaults.js     the defaults: defaults.json read once, the user's custom.json laid over it (DEFAULTS, layOver)
+  defaults.json      the app's defaults, by module: settings, profile, layout, surprise, ui
   js/csv.js          CSV reader for batch export (Settings → Sizes & export)
   js/i18n.js         interface strings (zh / en)
   fonts/             bundled fonts and their licences
@@ -124,7 +126,7 @@ Earlier data: there used to be one cover, `session.json`, shared by every channe
 as tags or as text, see 9.5), and by profile id the sizes the Export window leaves unticked (`exportSizes`:
 `{profile id: {size key: false}}`, only those unticked, so a size not named — one added since — is ticked; a profile with
 none unticked is not kept; `normalizeExportSizes`) and the folder its exports go into (`exportDirs`: `{profile id: path}`,
-none until the first export picks one); adjustment scope (`scope`: `all`, `orient` or `size`, see 4.1); how many times
+none until the first export picks one); adjustment scope (`scope`: `all`, `orient` or `size`, see 4.1; kept, but every start sets it to the defaults' own, `startScope()`); how many times
 each look was made a profile's on this computer, by its card or by a hand of Surprise me kept (`lookUse`: whole counts,
 only of looks there are and above 0 — the Look sheet's ★ Most used, 9.5); and the user's own
 Surprise me chances of each look's optional parts (`recipes`: {look: {params}}, only what was changed, checked by `normalizeRecipes`; see `deal.js`),
@@ -134,6 +136,35 @@ chances, `odds`, only what was set; see `normalizeSurprise`), and the user's lay
 the window (9.5), whether its panes are frosted glass (`glass`), whether the properties drawer is open (`drawer`) and the
 widths its columns were dragged to (`columns`). Deleting a profile (`profileActions.delete()`) drops its entries in
 `exportSizes` and `exportDirs`.
+
+**Defaults** (`ui/defaults.json`, shipped with the app; `custom.json` in the data folder, the user's own, written by
+hand): the defaults worth changing without touching the code, by module. `settings`: what `normalizeSettings()` falls
+back to — the language (`""`, the system's), the export's resolution, format, JPEG quality and file names, the scope
+(and, through `startScope()`, the one every start begins at),
+the glass, the drawer, the cut-out's engine. `profile`: what a new profile starts with — its ground, look and seed
+(`style`), its sizes (`sizes`; `SIZE_PRESETS` in `presets.js` stays the list Settings offers), and the starter's name,
+brand and channels (`starter`, read by `starterProfile()`; a name given per language, `{zh, en}`). `layout`: the layout
+each orientation is given by default (`byOrient`, see 5.2: what a new profile, a size added to one, a new layout preset
+and a template's reset start from). `surprise`: the chances Surprise me deals by under the
+user's own (`odds`, `RULES.odds` in `deal.js`, see 9.4). `ui`: the side columns' least and first widths (`columns`),
+what the canvas keeps (`centreMin`, `centreRoomy`) and when dragging counts as slow with the glass (`glassSlowMs`; see
+9.5). The 35 looks' own slider defaults stay in their files, as do Surprise me's other numbers (`RULES`).
+
+`defaults.js` reads `defaults.json` once, as the module loads — `fetch()` beside itself in the page (the desktop app's
+own protocol, a server's page and a plain browser alike, as the built-in repaint styles are read), the disk under Node
+for the tests; a top-level `await` either way — into `SHIPPED` (frozen) and `DEFAULTS`, the one object every module
+reads a default from when it needs it, never a copy taken as it loads. The first thing `start()` does is read
+`custom.json` (`customDefaults()`: `files.read`, so the data folder; in a plain browser, its storage under
+`smedcover:custom.json`) and lay it over (`layOver(custom)`, in place), before `normalizeSettings()` or anything else
+reads a default. It goes key by key, as deep as it goes: a value is taken only where `defaults.json` has that key and a
+value of the same kind — a finite number, text, true or false, a list whose items are each of the kind of its first
+(an object item keeping what that first has), an object gone into key by key; an object left empty there (Surprise me's
+chances by look) takes any name with a number, text or true/false. Anything else is let go and the default kept, and
+`layOver()` returns the paths of what it let go. A file that is not JSON is taken for none. Either is said once, in a
+toast, when the window is up (`msg.customBad`, `msg.customLeft`): nothing in it stops the app from starting. Whether a
+value is within range is for what reads it — `normalizeSettings()`, `normalizeProfile()`, `oddsOf()`, `orientDefault()`,
+`column()` — which holds it there as it holds what the files hold. A default is what has not been set: a setting
+`settings.json` holds stays the user's, and a profile stays as it is.
 
 **Layout presets** (`settings.layouts`, for every profile, as the chances are): where a cover's parts stand, without its
 look, which Surprise me deals by its chance (see 9.4) and which can be put on the canvas as it is.
@@ -187,8 +218,9 @@ not lie alike (wide sizes side by side, the others stacked), so the editor makes
 wide panels to the left, the stacked bands to the top), a drag to a side beside moving each there; `scaleBlock(lay, own,
 was, now, lean)`, a change of size or slant measured against the dragged block's size (`blockValues()`) and made in each
 one's, so a panel a third wider makes a band a third deeper rather than giving it the panel's share of the width.
-`newBlock()` is a new preset's block: each orientation in the template `BY_ORIENT` gives it (wide Split, square and tall
-Stack, the default), as the template comes; `newPreset()` is a new preset, that block and every part of `LAYOUT_PARTS`
+`newBlock()` is a new preset's block: each orientation in the layout it is given by default (`orientDefault()`, see
+5.2: as shipped, wide Split, the preset's default, tall Stack and square Banner, each with its size and slant), an
+orientation drawn as the default having no entry of its own; `newPreset()` is a new preset, that block and every part of `LAYOUT_PARTS`
 shown at every size where the template puts it (the channel name and graphic too, which a new design leaves out).
 
 `normalizeLayouts()` keeps 24 at most (`LAYOUTS`), their ids as they are (unique, never `keep`: Surprise me's chances
@@ -331,7 +363,9 @@ Every layer has a `t`:
 `resolve()` combines the two into the final placement: positions add, scales and stretches multiply,
 angles add. `adjust()` is the single entry point for every edit: dragging, handles, the wheel and arrow
 keys all express a change as a patch (the properties have no placement sliders, only *Reset placement*), which is written to `t.all` or `t.by` depending on
-the current scope (`settings.scope`), which has three choices:
+the current scope (`settings.scope`; every start begins at the one the defaults give, `settings.scope` in `defaults.json`,
+`orient` as shipped, whatever it was when the app closed: `startScope()` in `store.js`, set in `start()`), which has three
+choices:
 
 - `all`: `t.all`, for every size.
 - `size`: `t.by` of the size on the canvas.
@@ -461,7 +495,9 @@ change colours and positions.
 
 Then `meetStandards()` holds the result to the cover standards (docs/cover-check.zh-CN.md), whatever the
 look; a colour block the user resized or tilted stays where they put it (so a drag of its handles is not
-undone on the next frame). On a cover the apps lay badges over (16:9, 4:3: `badged()`) nothing with words
+undone on the next frame), and so does one a default layout gives a size and slant (below): the bands of the tall and
+square sizes' defaults, 14% and 13% of the height, are too slim to hold the channel name, which the words' foot then
+keeps above them. On a cover the apps lay badges over (16:9, 4:3: `badged()`) nothing with words
 in it, nor the graphic, reaches them (`FOOT` in `platforms.js`, 84% down): the channel name puts its
 sub-name beside it and moves up, and a colour block too shallow to hold it there grows (taking the tag,
 the graphic and the title's foot up with it). On every cover the words keep out of the bottom 14%, where the
@@ -517,10 +553,23 @@ template chosen for a size starts from the adjustments the profile keeps for tha
 takes its own with it; `normalizeProfile()` keeps `layoutBy` only for the profile's sizes, templates there are, and
 adjustments through the same `normalizeAdjust()`.
 
-`layoutByOrient(style, sizes)` is *Wide side by side, tall and square stacked* (`BY_ORIENT`: wide Split, square and
-tall Stack, each as the template comes): sizes the profile's own template already draws so (that template, not
-adjusted) follow it, the others are given theirs, and every earlier `layoutBy` goes. It is only ever asked for, one
-step of undo, so a profile is drawn exactly as before until then. The layout layers' places are offsets from where the
+**The default layouts.** Each orientation has a layout by default, `orientDefault(o)`, from `layout.byOrient` in
+`defaults.json` (its template one there is, its adjustments through `normalizeAdjust()`): as shipped, wide Split with
+the panel 0.21 of the width and the edge leaning 0.17, tall Stack with the band 0.14 of the height leaning 0.08, square
+Banner 0.13 and level, the title's box 1 × 1 in each. `layoutByOrient(style, sizes)` lays every size out so, in place:
+the profile's own layout stays where some sizes' default it is, else becomes the default of the orientation most of
+`sizes` face (the first size's on a tie), so that what every size follows is drawn somewhere; each size it does not
+draw so is given its default as its own, and every earlier `layoutBy` goes. `normalizeProfile()` does it for a
+profile with no `style` at all, a new one (the starters, the full example: `starterProfile()`, `sampleProfile()`, the
+welcome dialog and *New* under *This profile*); a profile that has a style is drawn as it was, and for it
+`layoutByOrient()` is *Wide split, tall stacked, square banner* in the Layout sheet (`byOrient()`), one step of undo.
+A size added in Settings → Sizes & export (`toggle` in `sizesTab()`) goes through `layoutAdded(style, sizes, key)`:
+drawn as the profile's other sizes facing its way are, where they are all drawn alike, else in its orientation's
+default, as its own where that is not the profile's. A template's defaults, `templateDefault(template, o)`, are those
+of the orientation whose default it is (`o`'s first): the Layout sheet's *Restore this template's defaults* puts them
+back (and is off while they are what it has), a template chosen there with no adjustments kept for it starts from
+them (`templateControls()`, the canvas's orientation first), and the preset editor's *Reset size and slant*
+(`resetBlock()`) puts back their size and slant, its side and title's box kept (`blockDefault()`). The layout layers' places are offsets from where the
 template puts each element, so a size drawn in another template takes its title, tag and the rest with it.
 
 ### 5.3 Templates
@@ -1502,9 +1551,9 @@ does not count) cancels it: the dialog's own `m.onDismiss` if it waits on an ans
 a project opens with: as its *Cancel*), else just closing. A `data-sticky` one does not answer: the
 first-run welcome, an export's progress.
 
-*Surprise me* (`surprise()`, from its button or Space, see *Keys* in 9.5) deals `RULES.hands.count` hands, six (`dealHand()`), each in a look of its own while a look with a chance is left (those dealt so far in the run go in as `env.not`), shows each in its window as it comes, and puts the first on the canvas; nothing is measured or scored. Hands go back onto the objects there are (the style, each layer by id), a hand that throws is left out, and if none can be dealt the cover is put back. Each hand is dealt by `dealCover(style, cover, env)` in `deal.js`, which holds all of Surprise me's rules: `RULES`, every number it deals by (how many hands and how fast they show; `RULES.odds`, the chances the user may set; the sliders, the scene objects, what the cover brings, the letterings; the lettered layers' outline and shadow; the look effects; the places of the user's layers), so a number changed there changes the hands; `FAMILIES` and `RECIPES`, what suits each look; and the order a hand is dealt in — the layout (the canvas's, or a layout preset of the user's), the look and its seed, its sliders, its scene objects, the ground, the words put back (unless where things stand is locked), the title on top, each layer's own choices and letterings, look effects. `app.js` keeps only what needs the cover drawn: `surprise()`, `dealHand()` (`dealCover()`, then the user's layers placed by `dealPlaces()`, which reads `RULES.places`), the window (see 9.5), and the window and the sheet the chances are set in.
+*Surprise me* (`surprise()`, from its button or Space, see *Keys* in 9.5) deals `RULES.hands.count` hands, six (`dealHand()`), each in a look of its own while a look with a chance is left (those dealt so far in the run go in as `env.not`), shows each in its window as it comes, and puts the first on the canvas; nothing is measured or scored. Hands go back onto the objects there are (the style, each layer by id), a hand that throws is left out, and if none can be dealt the cover is put back. Each hand is dealt by `dealCover(style, cover, env)` in `deal.js`, which holds all of Surprise me's rules: `RULES`, every number it deals by (how many hands and how fast they show; `RULES.odds`, the chances the user may set, kept in `defaults.json`; the sliders, the scene objects, what the cover brings, the letterings; the lettered layers' outline and shadow; the look effects; the places of the user's layers), so a number changed there changes the hands; `FAMILIES` and `RECIPES`, what suits each look; and the order a hand is dealt in — the layout (the canvas's, or a layout preset of the user's), the look and its seed, its sliders, its scene objects, the ground, the words put back (unless where things stand is locked), the title on top, each layer's own choices and letterings, look effects. `app.js` keeps only what needs the cover drawn: `surprise()`, `dealHand()` (`dealCover()`, then the user's layers placed by `dealPlaces()`, which reads `RULES.places`), the window (see 9.5), and the window and the sheet the chances are set in.
 
-The chances, `RULES.odds`, are of two kinds. `groups`, of which one option is dealt, their chances adding up to 1 (`ODD_OPTIONS`): the look (every look alike unless set), the colour block's shape (likewise), how many look effects a layer but the title and subtitle is given (none, one, two), and whether each is the look dealt's or another look's; and, for every look alike, the title's lettering (`own`, the look's own, or another), its bend (`none`, or one) and the ground (dark, light) — left empty in `RULES.odds`, they are what the looks' recipes give on average over the looks (`builtInGroup()`). `chances`, switches each on by a chance of its own: the brand row's rail; the plates under the channel name, the subtitle, a text layer; an asset tinted; the scene objects moved; the subtitle lettered like the title; and what a look's optional parts default to (`extra`, `toggleOn`, `toggleOff`, for a look whose recipe sets none: `partChance()`). What the user sets in Surprise me's chances (`oddsDialog()` in `app.js`, a window of its own, opened from Surprise me's window and the Look sheet; see below) is kept in `settings.surprise.odds` ({groups, chances}, only what was set); `oddsOf()` lays it over `RULES.odds` — a group of the user's made to add up to 1, an option it leaves out (a look added since) at 0, one adding up to nothing left to the rule's; `set` says which groups are the user's — and the hand is dealt by that (`env.odds`). `pickLook()` draws the look by its chance: none of `env.not` while another with a chance is left, none at 0.
+The chances, `RULES.odds` (`surprise.odds` in `defaults.json`, read from `DEFAULTS` each time, so the user's `custom.json` may change them; `oddsOf()` holds each between 0 and 1), are of two kinds. `groups`, of which one option is dealt, their chances adding up to 1 (`ODD_OPTIONS`): the look (every look alike unless set), the colour block's shape (likewise), how many look effects a layer but the title and subtitle is given (none, one, two), and whether each is the look dealt's or another look's; and, for every look alike, the title's lettering (`own`, the look's own, or another), its bend (`none`, or one) and the ground (dark, light) — left empty in `RULES.odds`, they are what the looks' recipes give on average over the looks (`builtInGroup()`). `chances`, switches each on by a chance of its own: the brand row's rail; the plates under the channel name, the subtitle, a text layer; an asset tinted; the scene objects moved; the subtitle lettered like the title; and what a look's optional parts default to (`extra`, `toggleOn`, `toggleOff`, for a look whose recipe sets none: `partChance()`). What the user sets in Surprise me's chances (`oddsDialog()` in `app.js`, a window of its own, opened from Surprise me's window and the Look sheet; see below) is kept in `settings.surprise.odds` ({groups, chances}, only what was set); `oddsOf()` lays it over `RULES.odds` — a group of the user's made to add up to 1, an option it leaves out (a look added since) at 0, one adding up to nothing left to the rule's; `set` says which groups are the user's — and the hand is dealt by that (`env.odds`). `pickLook()` draws the look by its chance: none of `env.not` while another with a chance is left, none at 0.
 
 The window has two columns. On the left the looks, a card each (`oddsLooks()`): the cover drawn in that look (`oddsPics()`: the Look sheet's card picture, `LOOKCARDS.pics`, where it was drawn from the cover as it now is, else drawn one a frame and kept there for the sheet too; `ODDS_UI.round` stops a drawing that a newer one replaced), its name, its share and a row of dots. A look's chance is set by its dots, which stand for chances as they are kept rather than for a new number: `d` dots lit are `DOTS[d]` times an even share (one over the number of looks), `DOTS` being `[0, 0.25, 0.5, 1, 2, 4]` — the leftmost off, each more twice as likely — and `EVEN_DOTS` (3) each look's while the user has set none. `withDots(mine, id, d)` sets look `id` alone, every other look's chance left exactly as it was (each an even share, while none was set), and `oddsOf()` makes the group add up to 1 as ever, so the hands are dealt as before until a dot is clicked; `dotsOf(v)` shows a chance kept (one set on the sliders of before, say) on the nearest dot by ratio, one at least for any chance, without changing it. A dot is clicked, or the row (a `slider` for the keyboard) stepped by the arrow keys, Home and End; a key that leaves the
 dots where they are (at an end of the row) changes nothing, so a chance between two dots stays as it is, and a change that
@@ -1573,7 +1622,7 @@ of the one it showed, and none jumps. A size with a block of its own says so, wi
 *Follow again*. With the block selected, a button for each side (`SIDES` in `layout.js`: bottom, top, right, left, the one
 it lies on at the size shown lit) does what a drag to that side does (`toSide()`: `sideLike()` from the side it lies on
 here, through `reblock()` and `setPresetLayout()`, where the scope reaches); *Reset size and slant* (`resetBlock()`)
-puts back its template's size and slant, on its side; the block has no *Reset its place*, its place being its side, set
+puts back its template's default size and slant (`blockDefault()`, see 5.2), on its side; the block has no *Reset its place*, its place being its side, set
 by those buttons (any other part has, `reset()`, as `resetPlacement()` does, by the scope). Left of the canvas a box per part ticks it at the sizes the scope reaches (*some
 sizes* beside one ticked at some only); the part selected, once not at the size shown (unticked there, or a size picked
 where it is not), gives the selection to the first part that is (`keepSel`), so no frame, diamond or line about the
@@ -1612,7 +1661,8 @@ being worked while hands are dealt onto the cover.
 canvas (`#center`: the stage, and under it the tray — the size shown, `#toolbar`; every size's thumbnail, `#strip`; the
 scope, `#scope`, which wraps under the sizes when there is no room beside them) and the properties drawer (`#right`,
 `#side`), whose column goes to the canvas while it is shut (`.nodrawer`). The sheet and the drawer are dragged wider by
-their inner edges (`columns()`, kept in `settings.columns`), the canvas keeping `CENTRE_MIN` at the least. Behind it all lies the
+their inner edges (`columns()`, kept in `settings.columns`; each column's least and first widths, `column()`, are
+`ui.columns` in `defaults.json`), the canvas keeping `centreMin()` at the least (`ui.centreMin`, 360 px). Behind it all lies the
 cover itself: `paintAmbient()` copies the main canvas, 48 pixels wide, into `#amb` a moment after each drawing
 (`later("ambient", …)` in `flushDraw()`), and CSS blurs and darkens it to fill the window (`#ambient`). A new ground
 fades in over 0.7 s: the ground as seen until then goes on a second canvas, `#amb0`, over the new one and fades out
@@ -1626,7 +1676,7 @@ user turned it off (*Frosted glass* in the ⋯ menu: `settings.glass`, `setGlass
 pane a plain translucent colour. And `glassWatch()`, run in each frame the canvas is drawn in (`drawInFrame()`, which `queueDraw()` asks for), times the frames while something is
 dragged by the pointer (`GLASS.down`, between a `pointerdown` and its `pointerup`; a slider held, `DRAFT.down`; a layer,
 `LIVE` — keys held on a slider set `LIVE` too, but their gaps are the keys', so they are not counted): when the middle
-gap of 90 passes 28 ms with the glass on, it marks them slow (`GLASS.slow`), and that drag's `pointerup` shows a note
+gap of 90 passes `ui.glassSlowMs` in `defaults.json` (28 ms) with the glass on, it marks them slow (`GLASS.slow`), and that drag's `pointerup` shows a note
 once on this computer (`settings.glassHint`) with a button that makes the panes plain; a drag that ends otherwise
 (`pointercancel`, the window's `blur`, a pointer moving with no button down) forgets it. The glass never changes by itself: only the user's hand turns it off.
 
@@ -1656,7 +1706,7 @@ Mac asks again a second later, as the way out of full screen is over only after 
 `allow-close` (`capabilities/default.json`); `core:default` allows the double click's zoom.
 
 **Narrow windows.** With the drawer open the canvas could be squeezed between two side columns; so where it would be
-left narrower than `CENTRE_ROOMY` (560 px), `columns()` sets `.tight` on `#body`: the sheet's column is hidden and the
+left narrower than `centreRoomy()` (`ui.centreRoomy` in `defaults.json`, 560 px), `columns()` sets `.tight` on `#body`: the sheet's column is hidden and the
 drawer takes its place. It judges by the window's width alone, the side columns taken at their default widths, so that
 a column's edge dragged never hides the sheet: a canvas left narrower by a hand is the hand's. `sheetHidden()` says whether it is so. The dock's
 buttons, and the chances window's way to the Layout sheet, go through `showSheet(k)`, which shows the sheet, shutting the
@@ -1880,8 +1930,8 @@ is a row a size: a tick, its picture copied from the tray's thumbnail, its name 
 (`exportOne()`). Whether a size is ticked is `ticked(z)`, from `settings.exportSizes` by profile, which keeps only the
 sizes left unticked, so a size added since is ticked; `setTicked(keys)` writes the profile's (letting go of sizes it no
 longer has), and taking a size again in Settings clears its entry. A tick, a press on the row, or one of the quick
-choices (every size, the wide ones only, the tall ones only — `orientOf()`, the square sizes with the tall, as
-`BY_ORIENT` stacks them; the last two only when the profile has both) is shown where it is (`sync()`: the ticks, how many
+choices (every size, the wide ones only, the tall ones only — `orientOf()`, the square sizes with the tall; the last
+two only when the profile has both) is shown where it is (`sync()`: the ticks, how many
 of how many, the choice they make, the main button), not by building the window again, so the keyboard keeps its place.
 Then the format, resolution and file names with an example (and *Batch export…* beside it), the folder they go into
 (`saveToRow()`), *This size only*, and the main button, *Export n* (`exportTicked()`: the sizes ticked, through
@@ -2049,7 +2099,7 @@ frame waits for the fonts, otherwise the title would be fitted using the wrong g
 
 | Level | Command | Covers |
 |---|---|---|
-| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export ticks and folders and the looks' use, by profile and look), file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string |
+| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export ticks and folders and the looks' use, by profile and look), the defaults and `custom.json` laid over them, file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string |
 | Rust unit tests | `cd src-tauri && cargo test` | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling, requests against a local stand-in server, proxy rules |
 | End-to-end self-test | `SMEDCOVER_SELFTEST=<folder> <executable>` | the full export path between the real web view and Rust |
 
@@ -2089,7 +2139,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | add a drawing operation for AI assets | validation and `drawSpec()` in `spec.js`, the prompt and examples in `ai.js` |
 | add a kind of part to solids | validation and `pieces()` in `solid.js`, `solidPrompt()` and its examples in `ai.js` |
 | add a look | a file `looks/<id>.js` exporting the look's object (starting with a hook or two), imported and put in `LOOKS` in `style.js` |
-| change how Surprise me deals | `RULES` (every number), `FAMILIES` and `RECIPES` (what suits each look) in `deal.js` |
+| change how Surprise me deals | `RULES` (every number), `FAMILIES` and `RECIPES` (what suits each look) in `deal.js`; the chances as shipped, `surprise.odds` in `defaults.json` |
 | change how the chances window shows and sets the chances | `DOTS`, `EVEN_DOTS`, `dotsOf()`, `withDots()` (the looks' dots) and `moveShare()` (a bar's divider) in `deal.js`; `oddsLooks()`, `oddsGroup()` and `oddsDialog()` in `app.js` |
 | put a look in a kind, or add a kind | `LOOK_TAGS` and `LOOK_CATEGORIES` in `style.js`, a `look.cat.*` name in `i18n.js` (a test holds every look to a kind and every kind to a handful of looks) |
 | add a card that previews on the canvas | a kind in `PREVIEW`, what it changes in `previewed()`, its words in `previewTag()`, `previewSoon()` on its cards and `endPreview()` where they are built anew (`app.js`) |
@@ -2099,7 +2149,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | change what a layout preset holds | `LAYOUT_PARTS`, `takeParts()`, `takeLayout()`, `putLayout()`, `presetLayout()` and `setPresetLayout()` in `layers.js`, `normalizeLayouts()` in `store.js` |
 | change how the colour block is moved to a side in the preset editor | `sideToward()` and `onSide()` in `layout.js` |
 | change how one block change lands on blocks that lie otherwise (every size) | `sideLike()`, `scaleBlock()` and `blockValues()` in `layout.js`; `blockOf` in `layoutEditor()` |
-| change which sizes count as wide, square or tall, or what *Wide side by side, tall and square stacked* gives each | `orientOf()`, `BY_ORIENT` and `layoutByOrient()` in `layout.js` |
+| change which sizes count as wide, square or tall, or each one's default layout (what a new profile, a size added, a new preset and *Wide split, tall stacked, square banner* give it) | `orientOf()`, `orientDefault()`, `layoutByOrient()`, `layoutAdded()` and `templateDefault()` in `layout.js`; `layout.byOrient` in `defaults.json` |
 | change what a layer kept to some sizes is at the others | `coverAt()` in `render.js`; the list's labels `sizesNote()` in `app.js` |
 | change what goes with a photo whose background is removed at some sizes | `showApart()` (and `cutAt()`, `cutFrom()`) in `layers.js` |
 | change which sizes of another profile's a size takes the place of, when layers come from there | `standsFor()` in `layout.js`; `acrossSizes()` in `layers.js` |
@@ -2107,9 +2157,10 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | put a setting on the bar over the canvas | `barItems()` in `app.js`: a group of the properties by its key (`sec`), controls of its own (`pop`) or an action (`act`); `dot`, `icon` and `sep` for how it looks |
 | add a sheet to the dock | its function in `TABS.edit` and an icon in `SHELL_ICONS` (`app.js`); `dock.*` and its heading's `sheet.*` in `i18n.js` |
 | add a page to Settings | its function in `TABS.setup` and an icon in the `icon` map inside `syncTabs()` (`app.js`); `tab.*` in `i18n.js` |
-| change when the note on slow glass shows, or how the panes go plain | `glassWatch()`, `setGlass()` and `CAN_BLUR` in `app.js`; `html.solid` in `index.html` |
+| change when the note on slow glass shows, or how the panes go plain | `glassWatch()`, `setGlass()` and `CAN_BLUR` in `app.js` (how slow, `ui.glassSlowMs` in `defaults.json`); `html.solid` in `index.html` |
 | change how the ground behind the glass fades into a new cover | `paintAmbient()` and `ambientMoved()` in `app.js`; `#ambient` in `index.html` |
 | move the window's buttons, or what moves the window | `trafficLightPosition` in `tauri.conf.json` (Mac); `ownTitleBar()` in `app.js`; `html.ownbar` and `#winbtns` (Windows, Linux) in `index.html` |
 | change the window's size or other settings | `app.windows` in `tauri.conf.json`, and again in `tauri.windows.conf.json` and `tauri.linux.conf.json`, which replace that list whole |
-| change when the drawer takes the sheet's place, or the columns stack | `CENTRE_ROOMY`, `STACKED` and `columns()` in `app.js`; `.body.tight` and the `max-width: 1000px` rules in `index.html` |
+| change when the drawer takes the sheet's place, or the columns stack | `centreRoomy()`, `STACKED` and `columns()` in `app.js` (the widths, `ui` in `defaults.json`); `.body.tight` and the `max-width: 1000px` rules in `index.html` |
+| change a default: a setting's, a new profile's, each orientation's layout, Surprise me's chances, the window's numbers | `defaults.json`; for a key of its own, what reads it too (`normalizeSettings()` and `normalizeProfile()` in `store.js`, `starterProfile()` in `presets.js`, `orientDefault()` in `layout.js`, `RULES.odds` in `deal.js`, `column()` in `app.js`); how `custom.json` is laid over it, `layOver()` in `defaults.js` |
 | add an interface string | `i18n.js`, in both languages; a test checks that both are present |

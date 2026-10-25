@@ -8,11 +8,11 @@
 // In the desktop app everything lives in the app data directory (through the Rust side), and so it does on a
 // SmedCover server, whose page reaches the same commands over HTTP (see HOST); when the page is opened in a
 // plain browser it falls back to localStorage so the UI can still be developed.
-import { SIZE_PRESETS } from "./presets.js";
 import { platformsFor, ratioOf } from "./platforms.js";
-import { TEMPLATES, LAYOUT_LIMITS, ORIENTS } from "./layout.js";
+import { TEMPLATES, ORIENTS, normalizeAdjust, layoutByOrient } from "./layout.js";
 import { LOOKS, LOOK_IDS, lookParams } from "./style.js";
 import { normalizeLayers, normalizeScene, normalizeT, LAYOUT_PARTS } from "./layers.js";
+import { DEFAULTS } from "./defaults.js";
 
 const T = globalThis.__TAURI__;
 /**
@@ -88,8 +88,8 @@ export const uid = () => Math.random().toString(36).slice(2, 10);
 const str = (v, d = "") => (typeof v === "string" ? v : d);
 const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(hi, Math.max(lo, Number(v))) : d);
 const color = (v) => (/^#[0-9a-f]{6}$/i.test(str(v)) ? v.toLowerCase() : "#fcee0a");
-
-export const DEFAULT_STYLE = { template: "stack", theme: "dark", look: "cel", lookParams: {}, lookSeed: 7, layoutAdjust: {}, lookArt: {} };
+/** `v` where it is one of `ok`, else the default `d` where that is (defaults.json, or the user's custom.json over it), else `hard`. */
+const oneOf = (v, ok, d, hard) => (ok.includes(v) ? v : ok.includes(d) ? d : hard);
 /** Looks that are gone, and what a profile that used one gets instead: its first name, or the nearest look left. */
 const RETIRED = { ghibli: "vivid", bluetone: "cyano", redstreet: "negative", gilded: "glass" };
 
@@ -122,14 +122,6 @@ export function sizeCaption(s, lang = "zh") {
   return on.length ? `${on.join(" / ")} · ${ratioOf(s.w, s.h)}` : s.label || ratioText(s.w, s.h);
 }
 
-/** A template's adjustments as kept (see adjustLayout in layout.js): each within LAYOUT_LIMITS, the halves swapped (`flip`) only when true. */
-function normalizeAdjust(raw) {
-  const r = raw && typeof raw === "object" ? raw : {}, a = {};
-  for (const k of Object.keys(LAYOUT_LIMITS)) if (Number.isFinite(r[k])) a[k] = Math.min(LAYOUT_LIMITS[k][1], Math.max(LAYOUT_LIMITS[k][0], r[k]));
-  if (r.flip === true) a.flip = true;
-  return a;
-}
-
 /**
  * The layouts some sizes have of their own (see layoutOf in layout.js), as kept: { size key: { template, adjust } }, a
  * key only where `ok(key)` says it is a size, a template only one there is, its adjustments as the profile's are
@@ -154,10 +146,10 @@ export function normalizeProfile(raw) {
     return { id, name: str(c.name), sub: str(c.sub), code: str(c.code), color: color(c.color), graphic: normalizeGraphic(c.graphic) };
   });
   if (!categories.length) categories.push({ id: uid(), name: "Category", sub: "", code: "", color: "#fcee0a", graphic: { kind: "graphic", id: "camera", labels: [], stamp: "" } });
-  const st = p.style && typeof p.style === "object" ? p.style : {};
-  const style = { template: TEMPLATES.includes(st.template) ? st.template : "stack", theme: st.theme === "light" ? "light" : "dark",
-    look: LOOK_IDS.includes(st.look) ? st.look : RETIRED[st.look] || "cel", lookParams: {},
-    lookSeed: Number.isFinite(st.lookSeed) ? Math.abs(Math.round(st.lookSeed)) % 1000000 : 7 };   // places what a look scatters at random
+  const st = p.style && typeof p.style === "object" ? p.style : {}, D = DEFAULTS.profile.style;   // D: what a new profile starts with (defaults.json)
+  const style = { template: TEMPLATES.includes(st.template) ? st.template : "stack", theme: st.theme === "light" || st.theme === "dark" ? st.theme : D.theme === "light" ? "light" : "dark",
+    look: LOOK_IDS.includes(st.look) ? st.look : RETIRED[st.look] || oneOf(D.look, LOOK_IDS, null, "cel"), lookParams: {},
+    lookSeed: Math.abs(Math.round(Number.isFinite(st.lookSeed) ? st.lookSeed : num(D.lookSeed, 7, 0, 999999))) % 1000000 };   // places what a look scatters at random
   // what the user changed about each template: only the settings that differ from the template's own
   style.layoutAdjust = {};
   for (const tpl of TEMPLATES) { const a = normalizeAdjust(st.layoutAdjust && st.layoutAdjust[tpl]); if (Object.keys(a).length) style.layoutAdjust[tpl] = a; }
@@ -167,12 +159,18 @@ export function normalizeProfile(raw) {
   style.lookArt = {};
   for (const id of LOOK_IDS) { const r = st.lookArt && st.lookArt[id]; if (LOOKS[id].art && r && KINDS.includes(r.kind) && str(r.id)) style.lookArt[id] = { kind: r.kind, id: str(r.id).slice(0, 80) }; }
   let sizes = (Array.isArray(p.sizes) ? p.sizes : []).map(normalizeSize);
-  if (!sizes.length) sizes = SIZE_PRESETS.filter((s) => s.on).map(({ w, h }) => ({ w, h, label: "", name: "" }));
+  if (!sizes.length) {   // a new profile's (defaults.json): those given in full, at least one
+    const given = DEFAULTS.profile.sizes.filter((s) => Number.isFinite(s.w) && Number.isFinite(s.h));
+    sizes = (given.length ? given : [{ w: 1920, h: 1080 }]).map((s) => normalizeSize({ w: s.w, h: s.h }));
+  }
   const keys = new Set();
   sizes = sizes.filter((s) => !keys.has(s.w + "x" + s.h) && keys.add(s.w + "x" + s.h));
   // the sizes drawn in a layout of their own (see layoutOf in layout.js): only the profile's sizes, each kept as the profile's own layout is
   const by = normalizeLayoutBy(st.layoutBy, (k) => keys.has(k));
   if (by) style.layoutBy = by;
+  // a profile with no style at all is a new one (a starter's, the example): each size in its orientation's default layout
+  // (layout.byOrient in defaults.json); one that has a style is drawn as it was
+  if (!(p.style && typeof p.style === "object")) layoutByOrient(style, sizes);
   const of = p.oldFonts || p.fonts || {}, oldFonts = [of.body, of.display, of.serif].some((v) => typeof v === "string" && v.trim()) ? { body: str(of.body), display: str(of.display), serif: str(of.serif) } : null;
   return {
     version: 2,
@@ -221,7 +219,6 @@ export function normalizeCover(raw, profile) {
   };
 }
 
-export const DEFAULT_SETTINGS = { lang: "", profileId: "", scale: 2, format: "png", quality: 92, nameTemplate: "{n}-{channel}_{title}_{size}", scope: "all", recentFonts: [] };
 export const RECENT_FONTS = 6;
 /** Puts a font at the head of the recently used ones. */
 export const useFont = (recent, family) => [family, ...recent.filter((f) => f !== family)].slice(0, RECENT_FONTS);
@@ -238,26 +235,40 @@ export function normalizeExportSizes(raw) {
   }
   return out;
 }
+/** What a change of place or layout reaches (settings.scope): every size, those facing the size shown's way, or that size. */
+const SCOPES = ["all", "orient", "size"];
+/**
+ * The scope every start begins at, whatever it was when the app closed: the defaults' (settings.scope in defaults.json,
+ * the user's custom.json over it), as shipped `orient`, every size facing the way the size shown does.
+ */
+export const startScope = () => oneOf(DEFAULTS.settings.scope, SCOPES, null, "orient");
+/** The file name pattern exports start with (settings.nameTemplate in defaults.json). */
+const nameTemplate = () => str(DEFAULTS.settings.nameTemplate).trim() || "{n}-{channel}_{title}_{size}";
+/**
+ * The settings as kept, every field there and within range: one missing or not of its kind is the default (`settings` in
+ * defaults.json, the user's custom.json over it, see defaults.js), held to the same range.
+ */
 export function normalizeSettings(raw) {
-  const s = raw && typeof raw === "object" ? raw : {}, layouts = normalizeLayouts(s.layouts);   // the user's layout presets, for every profile (Surprise me deals them by their chances)
+  const s = raw && typeof raw === "object" ? raw : {}, layouts = normalizeLayouts(s.layouts), D = DEFAULTS.settings;   // layouts: the user's layout presets, for every profile (Surprise me deals them by their chances)
+  const flag = (v, d) => (typeof v === "boolean" ? v : d);
   return {
-    lang: s.lang === "zh" || s.lang === "en" ? s.lang : "",
+    lang: oneOf(s.lang, ["zh", "en"], D.lang, ""),
     profileId: str(s.profileId),
-    scale: [1, 2, 3, 4].includes(Number(s.scale)) ? Number(s.scale) : 2,
-    format: ["png", "jpeg", "webp"].includes(s.format) ? s.format : "png",
-    quality: Math.round(num(s.quality, 92, 40, 100)),
-    nameTemplate: str(s.nameTemplate) || DEFAULT_SETTINGS.nameTemplate,
+    scale: oneOf(Number(s.scale), [1, 2, 3, 4], D.scale, 2),
+    format: oneOf(s.format, ["png", "jpeg", "webp"], D.format, "png"),
+    quality: Math.round(num(s.quality, num(D.quality, 92, 40, 100), 40, 100)),
+    nameTemplate: str(s.nameTemplate) || nameTemplate(),
     exportSizes: normalizeExportSizes(s.exportSizes),
     // the folder each profile's exports are written into, { profileId: path }; with none kept, its first export asks for one
     exportDirs: Object.fromEntries(Object.entries(s.exportDirs && typeof s.exportDirs === "object" ? s.exportDirs : {})
       .filter(([k, v]) => /^[\w-]{1,60}$/.test(k) && typeof v === "string" && v.trim() && v.length <= 4096).slice(0, 200)),
-    scope: ["orient", "size"].includes(s.scope) ? s.scope : "all",   // what a change of place or layout reaches: every size, those facing the way this one does (see orientOf in layout.js), or this one
-    hideScene: s.hideScene === true,   // the scene objects' handles hidden on the canvas
-    glass: s.glass !== false,   // the panels frosted glass over the cover (false: plain, translucent; see setGlass in app.js)
+    scope: oneOf(s.scope, SCOPES, D.scope, "orient"),   // what a change of place or layout reaches: every size, those facing the way this one does (see orientOf in layout.js), or this one
+    hideScene: flag(s.hideScene, D.hideScene === true),   // the scene objects' handles hidden on the canvas
+    glass: flag(s.glass, D.glass !== false),   // the panels frosted glass over the cover (false: plain, translucent; see setGlass in app.js)
     glassHint: s.glassHint === true,   // the note offering plain panels, when dragging was slow with the glass, was shown (see glassWatch)
-    drawer: s.drawer === true,   // the drawer of the selected layer's properties open on the right (see setDrawer in app.js)
+    drawer: flag(s.drawer, D.drawer === true),   // the drawer of the selected layer's properties open on the right (see setDrawer in app.js)
     // how a photo's subject is cut out: "vision" (macOS), "birefnet-lite" or "birefnet" (any system, a downloaded model); "" = the system's own choice
-    cutEngine: ["vision", "birefnet-lite", "birefnet"].includes(s.cutEngine) ? s.cutEngine : "",
+    cutEngine: oneOf(s.cutEngine, ["vision", "birefnet-lite", "birefnet"], D.cutEngine, ""),
     cutProxy: str(s.cutProxy).trim().slice(0, 300),   // a proxy for downloading the models ("" = the environment's)
     // the channel each profile was last on: {profileId: channelId} (each channel of each profile has a cover of its own)
     channels: Object.fromEntries(Object.entries(s.channels && typeof s.channels === "object" ? s.channels : {}).filter(([k, v]) => typeof v === "string" && /^[\w-]{1,60}$/.test(k)).slice(0, 200)),
@@ -410,7 +421,7 @@ export const deleteProfile = (p) => files.remove(`profiles/${p.id}.json`);
 /** File name for an exported cover, from the user's template. Characters unsafe in file names are dropped. */
 export function exportName(template, { index, cat, title, size, scale, ext }) {
   const clean = (s) => String(s).replace(/\\n|[\n\r]+/g, " ").replace(/[*\\/:?"<>|]+/g, "").replace(/\s+/g, " ").trim();
-  const base = String(template || DEFAULT_SETTINGS.nameTemplate)
+  const base = String(template || nameTemplate())
     .replace(/\{n\}/g, String(index + 1).padStart(2, "0"))
     .replace(/\{(channel|category)\}/g, clean(cat.name) || "cover")
     .replace(/\{code\}/g, clean(cat.code))

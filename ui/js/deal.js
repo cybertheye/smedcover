@@ -18,6 +18,7 @@ import { LOOKS, LOOK_IDS, effectsFor, FX_TYPES, lookParams } from "./style.js";
 import { EFFECTS, BENDS, NO_COLUMNS } from "./textfx.js";
 import { titleLines, lineUnits, luminance } from "./check.js";
 import { ACCENT_SHAPES, LETTERED, newLayer, clipEnd, moveScene, putLayout, canWeave, wovenIds } from "./layers.js";
+import { DEFAULTS } from "./defaults.js";
 
 /**
  * Every number Surprise me deals by: change one here and the hands follow. (What suits each look is in
@@ -37,11 +38,9 @@ export const RULES = {
   // the brand row's rail; the plate under the channel name, the subtitle, a text layer; an asset tinted the
   // channel colour; the look's scene objects moved a little off their places; the subtitle lettered like the
   // title; a look's part that is off by default coming in, a checkbox on by default staying on, one off by
-  // default coming on (each unless the look's recipe has a chance of its own for it)
-  odds: {
-    groups: { look: {}, accent: {}, lookFx: { none: 0.45, one: 0.33, two: 0.22 }, lookFxFrom: { own: 0.6, other: 0.4 }, letters: {}, bend: {}, ground: {}, layout: { keep: 1 } },
-    chances: { rail: 0.8, catnamePlate: 0.75, subtitlePlate: 0.3, textPlate: 0.35, assetTint: 0.5, sceneMoved: 0.4, subtitleLikeTitle: 0.5, extra: 0.35, toggleOn: 0.75, toggleOff: 0.3 },
-  },
+  // default coming on (each unless the look's recipe has a chance of its own for it). They are kept in defaults.json
+  // (surprise.odds, see defaults.js), where the user's custom.json may change them; read from there each time
+  get odds() { return DEFAULTS.surprise.odds; },
   // its sliders (tuneLook): within `spread` of the range either way of the default, off the very ends by
   // `ends` (unless the default is there); the parts off by default that come in (odds: `extra`), `extras` at
   // most, to within `extraRange` of their range
@@ -237,7 +236,7 @@ export function oddsOf(mine = null, layouts = []) {
     set[g] = !!own;
     groups[g] = own || asGroup(RULES.odds.groups[g], ids) || asGroup(builtInGroup(g), ids) || asGroup(Object.fromEntries(ids.map((k) => [k, 1])), ids);
   }
-  for (const [k, v] of Object.entries(RULES.odds.chances)) { const u = m.chances && m.chances[k]; chances[k] = Number.isFinite(u) ? unit(u) : v; }
+  for (const [k, v] of Object.entries(RULES.odds.chances)) { const u = m.chances && m.chances[k]; chances[k] = unit(Number.isFinite(u) ? u : v); }
   return { groups, chances, set };
 }
 /**

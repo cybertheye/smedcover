@@ -5,6 +5,7 @@
 
 import { FOOT, WORDS_FOOT, PLATFORM_IDS, RED_RATIOS, isRatio, wanted } from "./platforms.js";
 import { LIMITS } from "./check.js";
+import { DEFAULTS } from "./defaults.js";
 
 const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -48,7 +49,7 @@ export const TEMPLATES = ["stack", "split", "banner"];
 // ---------- which way a size faces, and the layout each size is drawn in
 // A profile's sizes fall into three groups by their shape: wide (landscape, 5:4 and wider), square, and tall
 // (portrait, 4:5 and taller). The groups are what the scope's middle choice reaches (see adjust in layers.js),
-// and what "Wide side by side, tall and square stacked" lays out (layoutByOrient).
+// and what each is given by default (orientDefault; "Wide split, tall stacked, square banner", layoutByOrient).
 /** The orientations a size may have, landscape to portrait. */
 export const ORIENTS = ["wide", "square", "tall"];
 /** Which way a size of w × h faces: "wide" (wider than 1.1 : 1, so 5:4 is), "tall" (narrower than 0.91 : 1, so 4:5 is), else "square". */
@@ -110,22 +111,58 @@ export function followLayout(style, key) {
   delete style.layoutBy[key];
   if (!Object.keys(style.layoutBy).length) delete style.layoutBy;
 }
-/** The template each orientation is given by "Wide side by side, tall and square stacked" (layoutByOrient). */
-export const BY_ORIENT = { wide: "split", square: "stack", tall: "stack" };
 /**
- * "Wide side by side, tall and square stacked": every size of `sizes` ([{w, h}]) drawn in the template its
- * orientation takes (BY_ORIENT), as that template comes (no adjustments), in place. A size that the profile's own
- * template already draws so (that template, not adjusted) follows it; the others are given it as a layout of their
- * own, and every layout of their own they had before is let go. Asked for, never done of itself: a profile is drawn
- * as it was until then.
+ * The layout each orientation is given by default (`layout.byOrient` in defaults.json, see defaults.js), { template,
+ * adjust }: a template there is (else Split for wide sizes, Stack for the others), its adjustments as a profile keeps
+ * them (normalizeAdjust). A new object each time.
+ */
+export function orientDefault(o) {
+  const d = DEFAULTS.layout.byOrient[o] || {};
+  return { template: TEMPLATES.includes(d.template) ? d.template : o === "wide" ? "split" : "stack", adjust: normalizeAdjust(d.adjust) };
+}
+/**
+ * The adjustments template `template` has by default: those of the orientation whose default layout it is
+ * (orientDefault) — orientation `o`'s first, where two have it —, none (the template as it comes) when it is none's.
+ * As shipped, Split's are the wide sizes', Stack's the tall ones', Banner's the square ones'.
+ */
+export function templateDefault(template, o = null) {
+  for (const x of o ? [o, ...ORIENTS] : ORIENTS) { const d = orientDefault(x); if (d.template === template) return d.adjust; }
+  return {};
+}
+/** Layout `lay` with its colour block's size and slant as its template has them by default (templateDefault, `o` as there), its side and the title's box as they were. */
+export function blockDefault(lay, o = null) {
+  const d = templateDefault(lay.template, o), adjust = { ...(lay.adjust || {}) };
+  delete adjust.size; delete adjust.slant;
+  for (const k of ["size", "slant"]) if (d[k] != null) adjust[k] = d[k];
+  return { template: lay.template, adjust };
+}
+/**
+ * "Wide split, tall stacked, square banner": every size of `sizes` ([{w, h}]) drawn in the layout its orientation
+ * is given by default (orientDefault), in place. The profile's own layout stays where sizes facing some way are drawn in
+ * it so (that template, those adjustments); else it becomes the default of the orientation most of them face (the first
+ * size's, on a tie), so that what every size follows is drawn somewhere. The sizes it does not draw so are given theirs
+ * as a layout of their own, and every layout of their own they had before is let go. A new profile is laid out so
+ * (normalizeProfile in store.js); a profile there is, only when asked, so it is drawn as it was until then.
  */
 export function layoutByOrient(style, sizes) {
-  const plain = !Object.keys((style.layoutAdjust || {})[style.template] || {}).length, by = {};
-  for (const s of sizes) {
-    const template = BY_ORIENT[orientOf(s.w, s.h)];
-    if (template !== style.template || !plain) by[`${s.w}x${s.h}`] = { template, adjust: {} };
+  const orients = sizes.map((s) => orientOf(s.w, s.h)), by = {};
+  if (!orients.some((o) => sameLayout(orientDefault(o), layoutOf(style, null)))) {
+    const n = (o) => orients.filter((x) => x === o).length;
+    setLayoutOf(style, null, orientDefault(orients.reduce((a, b) => (n(b) > n(a) ? b : a), orients[0] || "wide")));
   }
+  const base = layoutOf(style, null);
+  sizes.forEach((s, i) => { const d = orientDefault(orients[i]); if (!sameLayout(d, base)) by[`${s.w}x${s.h}`] = d; });
   if (Object.keys(by).length) style.layoutBy = by; else delete style.layoutBy;
+}
+/**
+ * Size `key` just added to a profile whose sizes are `sizes` ([{w, h}], it among them): drawn as the profile's other
+ * sizes facing its way are, where they are all drawn alike, else in its orientation's default layout (orientDefault);
+ * as a layout of its own where that is not the profile's own. In place.
+ */
+export function layoutAdded(style, sizes, key) {
+  const way = orientOfKey(key), like = sizes.map((s) => `${s.w}x${s.h}`).filter((k) => k !== key && orientOfKey(k) === way).map((k) => layoutOf(style, k));
+  const lay = like.length && like.every((l) => sameLayout(l, like[0])) ? like[0] : orientDefault(way);
+  if (sameLayout(lay, layoutOf(style, null))) followLayout(style, key); else setLayoutOf(style, [key], lay);
 }
 /** The two layouts { template, adjust } the same: one template, and the same adjustments (in whatever order they were set). */
 export function sameLayout(a, b) {
@@ -289,6 +326,13 @@ export function blockLayout(template, w, h, o) {
 
 /** What the user may change about a template: all optional, all as fractions so one setting suits every size (or every size of a layout of its own, see layoutOf). */
 export const LAYOUT_LIMITS = { size: [0.08, 0.8], slant: [-0.3, 0.3], tw: [0.3, 1], th: [0.3, 1] };
+/** A template's adjustments as kept (see adjustLayout): each within LAYOUT_LIMITS, the halves swapped (`flip`) only when true. */
+export function normalizeAdjust(raw) {
+  const r = raw && typeof raw === "object" ? raw : {}, a = {};
+  for (const k of Object.keys(LAYOUT_LIMITS)) if (Number.isFinite(r[k])) a[k] = Math.min(LAYOUT_LIMITS[k][1], Math.max(LAYOUT_LIMITS[k][0], r[k]));
+  if (r.flip === true) a.flip = true;
+  return a;
+}
 /**
  * A template's layout as the user has adjusted it.
  *   size   how much of the canvas the colour panel takes: its height for "stack" and "banner",

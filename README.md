@@ -206,11 +206,11 @@ Every layer except Background and Corner brackets can be moved, resized, stretch
 
 The tray under the canvas is one line where there is room (else *Applies to* goes under the thumbnails): the size shown, what it is called over its pixels (in a slot of its own, so nothing after it moves when you switch sizes); then a thumbnail of every size, named by its ratio (its name and pixels on hover), a click showing it on the canvas; and at its end *Applies to*. How the mouse and keys work is under **?** at the foot of the dock (*Canvas controls*). *Applies to* decides where your change lands:
 
-- **All sizes** (default) — placement is stored relative to the canvas, so one adjustment maps to every size.
-- **Same orientation** — the size on screen and every size facing the same way change together, the others not. The button is named after the group: *All wide* on a landscape size, *All square* on a square one, *All tall* on a portrait one; hover it for the sizes it reaches. Wider than 1.1 : 1 is wide (5:4 too), narrower than 0.91 : 1 tall (4:5 too), anything between square. A move goes as far across each canvas as it does across this one: a tenth of the width on 16:9 is a tenth on 4:3.
+- **All sizes** — placement is stored relative to the canvas, so one adjustment maps to every size.
+- **Same orientation** (where every start begins) — the size on screen and every size facing the same way change together, the others not. The button is named after the group: *All wide* on a landscape size, *All square* on a square one, *All tall* on a portrait one; hover it for the sizes it reaches. Wider than 1.1 : 1 is wide (5:4 too), narrower than 0.91 : 1 tall (4:5 too), anything between square. A move goes as far across each canvas as it does across this one: a tenth of the width on 16:9 is a tenth on 4:3.
 - **This size only** — fine-tunes just the size on screen.
 
-In *This size only* and *Same orientation*, the channel graphic's placement is remembered per channel. *Applies to* also decides where a change of layout lands (see *Adjusting the template* below), where scene objects go, and what *Reset placement* resets.
+Each time the app starts, *Applies to* is on *Same orientation*, whatever it was when you closed it (`settings.scope` in [your own defaults](#your-own-defaults-customjson) picks another: `all`, `orient` or `size`). In *This size only* and *Same orientation*, the channel graphic's placement is remembered per channel. *Applies to* also decides where a change of layout lands (see *Adjusting the template* below), where scene objects go, and what *Reset placement* resets.
 
 ### Layers
 
@@ -232,7 +232,7 @@ In *This size only* and *Same orientation*, the channel graphic's placement is r
 - The properties, in the drawer on the right, come in groups (Text, Effect, Colour, Lines, Plate — or Cut-out, Place, Picture, Lines…). Each is a line with its name: click it to open its controls under it; shut, it says what the group is set to. The first is open to begin with, and each stays open or shut as you leave it. After a rule at the bottom, the Layer group every layer has: opacity, *Shown at* and *Reset placement* (a cut-out has none; its *Line up with the photo again* is in its Place group). Explanations sit behind the ⓘ beside a group's name: hover it, or click it.
 - **Shown at some sizes only**: *Shown at*, in the Layer group, is a row of buttons, one for each of the profile's output sizes, named by its ratio (16:9, 4:3, 1:1, 3:4, 9:16…), all lit to begin with. A click takes the layer off that size, another puts it back; one stays lit at least. *All sizes*, *Wide*, *Square* and *Tall* underneath pick a group at once (they are not there when every size faces one way). At a size it is not shown at, the layer is as if left out: not in the export, the thumbnail or the 3D view, not to be clicked on the canvas; a layout layer's room (the subtitle's, say) goes to the others, and the title grows into it. Every layer but the background can be kept so, the subtitle out of 9:16 for one. In the layer list, a layer kept to some sizes has a label after its name, such as *Only 3:4*, *Only tall* or *Not 9:16*, and its row is greyed at a size it is not shown at. A layer clipped to one not shown at a size is not shown there either: its row is greyed there too, and in its *Shown at* those sizes are dashed, with a line saying why. A size added later shows only the layers shown at every size; a size removed leaves a layer shown at it alone *At no size*, to be lit again, and a layer shown everywhere but there is from then on shown at every size, a size added later included (at once, as after opening the app again; undone, every channel's layers are as they were). *Copy from another channel* keeps the sizes, those this profile has; from another profile, whose sizes may be other pixels of the same shape, a size this one does not have goes to its sizes of the same ratio (1920×1080 there is 1280×720 here), else to those facing the same way, and a layer that would be left at no size is shown at every size; a placement for one size goes the same way. Surprise me places your layers by the sizes they show at.
 - Colours take a row each, as checkboxes do: the swatch, its name, then *Automatic* (following the look and the channel colour); once you pick a colour it reads *Back to automatic* — click it to return.
-- The sheet and the drawer are resized by dragging their edge with the canvas (the sheet at least 280 px, the drawer at least 260 px, the canvas keeps 360 px); double-click an edge for the default width. Widths are remembered.
+- The sheet and the drawer are resized by dragging their edge with the canvas (the sheet at least 280 px, the drawer at least 260 px, the canvas keeps 360 px; these and the default widths are in [your own defaults](#your-own-defaults-customjson)); double-click an edge for the default width. Widths are remembered.
 - A vector asset (stickers, frames, channel graphics, AI assets) has *Colour*: its own colours, the channel colour, or a colour of your own.
 - Every asset, vector or bitmap, has *Crop*: *Crop…* keeps only part of it, as with a photo, to a rectangle or a shape of any outline (*Free*; see *Photos*).
 - Every asset has *Weave* too: it passes in front of and behind the lettering below it, as a cut-out does (see *Weave* under *Cutting out the subject*), in the browser as well.
@@ -286,7 +286,7 @@ It deals in a window over the whole app, the cover dimmed behind it. Each hand s
 
 They are listed in the *Layout* sheet, under *My layout presets*, a card each: rename it where it is (Enter keeps it); *Apply to canvas* puts it on the cover (the colour block at each of the profile's sizes, for every cover of the profile, unless the colour block is locked; the parts' places and which are shown on this channel's cover, but for those locked; sizes of the preset's own that the profile has not are passed by; one step of undo); *Edit…* opens the layout editor; *Delete* asks first, and its chance goes alike to the options not at 0% (all at 0%: back to the canvas's own at 100%). Hold the pointer over a card and a moment later the canvas shows the cover laid out by that preset, as *Apply to canvas* would leave it; the card says *Previewing*, and a tag on the canvas says that *Apply to canvas* puts it on. It is only on the canvas, never saved nor a step of undo, and ends when the pointer leaves the cards or the sheet is drawn again (*Edit…* and *Delete* end it first).
 
-Lay out a new one with *＋ New…*, beside *My layout presets*: to begin with, all seven parts in it (the channel graphic on the block), wide sizes side by side, square and tall ones stacked. The **layout editor** (*Edit…*, or *＋ New…*) is a window of its own, with a canvas unrelated to the cover you are editing: the plainest look (*Cel*), no photos, none of your layers, placeholder words ("Your title here / second line", "Your subtitle goes here", "EP.01"), your brand row, the channel's name and graphic, and the colour block. In its head, *New layout preset* or *Edit layout preset* with the preset's name; *Applies to*: every size, those facing the size's way (what the editor opens on, so wide sizes and the others are laid out apart), or this one only; then *Cancel* and *Save*. Under the canvas, *This layout at each size*: the profile's sizes, then the preset's own, each drawn as the preset has it, a click taking the canvas there (*＋ Size*, a width and a height: dashed, with × to remove; applying and dealing use only the sizes the profile has). Drag a part to move it; drag a corner or scroll to resize, a side to stretch, the top knob to turn. The colour block has no template list or sliders: click it, then drag the diamond in the middle of its edge to make it bigger or smaller, an end's diamond to slant the edge, or the block itself up, down, left or right to move it to that side. Where *Applies to* reaches sizes facing other ways (*All sizes*, say), each block takes the change as its own: dragged to the side across, each goes to the side across from its own (a panel on the right to the left, a band along the bottom to the top); to a side beside, all go there; bigger, smaller or slanted, each by as much of its own block, not by a panel's share of the width put on a band. A size with a block of its own says so, and *Follow again* lets it go. On the left: *Parts in the layout*, a tick each (a tick lands as *Applies to* says; *some sizes* beside one ticked at some sizes only; the part selected, unticked at the size shown, is no longer selected, so the block's diamonds go with it), and *Reset its place* for the part selected. With the colour block selected, *Where the block lies at* the size shown has a button for each side, *Bottom*, *Top*, *Right* and *Left*, each doing what dragging the block to that side does, as far as *Applies to* reaches; then *Reset size and slant* (the size and slant its template gives it, on the side it is); its place is its side, so it has no *Reset its place*. Dragging the block still moves it. Only the preset changes there, never the cover on the canvas; *Save* keeps it, *Cancel* (or Esc, or a click outside) lets it go, asking first when something was changed; either goes back to the *Layout* sheet.
+Lay out a new one with *＋ New…*, beside *My layout presets*: to begin with, all seven parts in it (the channel graphic on the block), each orientation in its default layout (see *Default layouts* under [Adjusting the template](#adjusting-the-template): wide sizes side by side, tall ones stacked, square ones a banner). The **layout editor** (*Edit…*, or *＋ New…*) is a window of its own, with a canvas unrelated to the cover you are editing: the plainest look (*Cel*), no photos, none of your layers, placeholder words ("Your title here / second line", "Your subtitle goes here", "EP.01"), your brand row, the channel's name and graphic, and the colour block. In its head, *New layout preset* or *Edit layout preset* with the preset's name; *Applies to*: every size, those facing the size's way (what the editor opens on, so wide sizes and the others are laid out apart), or this one only; then *Cancel* and *Save*. Under the canvas, *This layout at each size*: the profile's sizes, then the preset's own, each drawn as the preset has it, a click taking the canvas there (*＋ Size*, a width and a height: dashed, with × to remove; applying and dealing use only the sizes the profile has). Drag a part to move it; drag a corner or scroll to resize, a side to stretch, the top knob to turn. The colour block has no template list or sliders: click it, then drag the diamond in the middle of its edge to make it bigger or smaller, an end's diamond to slant the edge, or the block itself up, down, left or right to move it to that side. Where *Applies to* reaches sizes facing other ways (*All sizes*, say), each block takes the change as its own: dragged to the side across, each goes to the side across from its own (a panel on the right to the left, a band along the bottom to the top); to a side beside, all go there; bigger, smaller or slanted, each by as much of its own block, not by a panel's share of the width put on a band. A size with a block of its own says so, and *Follow again* lets it go. On the left: *Parts in the layout*, a tick each (a tick lands as *Applies to* says; *some sizes* beside one ticked at some sizes only; the part selected, unticked at the size shown, is no longer selected, so the block's diamonds go with it), and *Reset its place* for the part selected. With the colour block selected, *Where the block lies at* the size shown has a button for each side, *Bottom*, *Top*, *Right* and *Left*, each doing what dragging the block to that side does, as far as *Applies to* reaches; then *Reset size and slant* (its template's default size and slant, on the side it is); its place is its side, so it has no *Reset its place*. Dragging the block still moves it. Only the preset changes there, never the cover on the canvas; *Save* keeps it, *Cancel* (or Esc, or a click outside) lets it go, asking first when something was changed; either goes back to the *Layout* sheet.
 
 ### Title and text layers
 
@@ -659,13 +659,28 @@ The *Layout* sheet's *Template* box is hidden for now, and with it the choice of
 
 Adjustments are stored as fractions of the picture, so one setting suits every size; the default keeps one for each of the three templates, in the profile. After a swap the brand row sits on the colour block and turns to ink. If the colour block layer itself has been moved or turned, the diamonds on the edge are hidden; reset that layer's placement to get them back.
 
+**Default layouts.** Each orientation has a layout of its own by default:
+
+| Orientation | Template | Colour block | Band height / panel width | Edge slant | Title box width, height |
+|---|---|---|---|---|---|
+| Wide (16:9, 4:3, 2.35:1) | Split | on the right | 0.21 | 0.17 | 1, 1 |
+| Tall (3:4, 9:16) | Stack | along the bottom | 0.14 | 0.08 | 1, 1 |
+| Square (1:1) | Banner | along the bottom | 0.13 | 0 | 1, 1 |
+
+- A new profile starts with them (the starter, the full example, *New* under *This profile*): its default layout is the one of the orientation most of its sizes face (wide), and the sizes facing the other ways have theirs as their own.
+- A size added later in *Sizes & export* is drawn as the sizes facing its way are, when they all are drawn alike; else in its orientation's default.
+- A new layout preset starts with them too.
+- *Restore this template's defaults* gives the template its default values (Split the wide ones, Stack the tall ones, Banner the square ones; a template no orientation has by default, none), and so does a template chosen when the profile keeps no adjustments for it.
+- The profiles you already have are drawn as they were.
+- The numbers are in `defaults.json` (`layout.byOrient`); `custom.json` can change them (see [Your own defaults](#your-own-defaults-customjson)).
+
 **Each size may have a layout of its own.** Ratios want different things: 16:9 and 4:3 suit a side-by-side layout, 9:16 and 3:4 a stacked one. The layout (the template and its adjustments) works as a layer's placement does: one for all sizes, and a size's own over it.
 
 - The profile has a default layout, which every size shares. A size given a layout of its own is drawn in that one, and no longer follows the default.
 - *Size & slant* changes what *Applies to*, under the canvas, reaches (its ⓘ says which sizes a change lands on). *All sizes* changes the default; *All wide / All square / All tall* gives every size facing that way the layout as it is now, as its own; *This size only* gives the size on screen its own.
 - When the size on screen has its own layout, *Size & slant* says *This size has its own layout*, and *Follow again* lets it go, so the size follows the default once more. With *All sizes* the sliders then show and change the default, which this size does not follow. In the tray of sizes under the canvas, a size with its own layout has a small diamond after its ratio.
 - Dragging the diamonds on the edge on the canvas follows *Applies to* as well, with one exception: with *All sizes* on a size that has its own layout, the drag changes that one, the layout you see under the pointer.
-- *Wide side by side, tall and square stacked*, at the foot of the *Template* box (hidden for now): in one go, wide sizes take Split and tall and square ones Stack, each as the template comes; the title, the tag and the rest follow the new layouts. Where the default already is the template a group wants (not adjusted), those sizes go on following it, and the others are given theirs; any layout of their own the sizes had before is let go. It is one step of undo, and it only happens when you click it, so an older profile opens exactly as it looked.
+- *Wide split, tall stacked, square banner*, at the foot of the *Template* box (hidden for now): in one go, every size takes its orientation's default layout (above); the title, the tag and the rest follow the new layouts. Where the profile's default layout already is that of some sizes, they go on following it; else it becomes the one of the orientation most of the sizes face. The others are given theirs; any layout of their own the sizes had before is let go. It is one step of undo, and it only happens when you click it, so an older profile opens exactly as it looked.
 - A size removed takes its own layout with it. Layout presets carry each size's colour block (see *Layout presets*); Surprise me changes no size's layout, unless it deals a preset.
 
 ### Templates and the default design
@@ -733,7 +748,7 @@ The layouts keep to a few rules, so a cover reads in the apps' feeds as it comes
 - **Room for what is there.** A part left out under *Which parts show* gives its room to the others: without the channel name the colour block along the foot slims down (to 16% of the height, the tag on its edge still above the badges) and the title grows into the room; without the channel graphic the title keeps its whole box, and the *Split* template's panel narrows to a band down the side (13% of a portrait cover's width, 25% of a 16:9 one's), widening the title's column.
 - **Every part shown.** A new cover comes with the tag `EP.01`, so the corner tag shows from the start (covers made before that and never touched were given it once); type your own under *Content → Corner tag*, or empty it to leave the tag out. So does the subtitle, with a placeholder (*Write your subtitle here*), given once too to the covers not yet touched.
 
-They hold for the template's own places: a layer you drag stays where you put it, and so does a colour block you resize or tilt with its *Size & slant*. With the channel graphic on, the *Split* template's title column is narrow at portrait sizes: there a line of more than 5 characters is set smaller than the feeds read well.
+They hold for the template's own places: a layer you drag stays where you put it, and so does a colour block you resize or tilt with its *Size & slant*, or one of the default layouts (which set its size and slant). Their bands at the tall and square sizes are too slim to hold the channel name: with the name shown there, make the band deeper. With the channel graphic on, the *Split* template's title column is narrow at portrait sizes: there a line of more than 5 characters is set smaller than the feeds read well.
 
 The covers each platform wants (checked on a phone):
 
@@ -780,7 +795,7 @@ Tutorials,Another title,,
 
 ## Where your data lives
 
-Profiles, each channel's cover, assets, settings and your own repaint styles (the `repaint-styles/` folder) are kept in the system's app data directory.
+Profiles, each channel's cover, assets, settings, your own repaint styles (the `repaint-styles/` folder) and your own defaults (`custom.json`, see below) are kept in the system's app data directory.
 Exports are written only where you choose: each profile remembers the folder you chose for it (see *Save to* under [Export](#export)).
 
 | System | Location |
@@ -794,6 +809,39 @@ To move to another computer or share with someone, export the profile (*Export�
 - *With each channel's cover and its photos* unticked: the brand settings only (channels, sizes, look, default design, and the assets and imported fonts they use) — to share as a template.
 - Ticked: a whole backup of the profile, every channel's cover and the photos on them included — to move to another computer; it can be large.
 - Importing always adds a new profile; a whole backup brings back every channel's cover, on the channel it was exported from.
+
+### Your own defaults (`custom.json`)
+
+The defaults the app starts from are in `defaults.json`, which comes with the app (`ui/defaults.json` in the source), by module:
+
+| Module | What it holds |
+|---|---|
+| `settings` | what a setting is until you choose one: the language (`""` follows the system), the export's `scale`, `format`, `quality` and file names (`nameTemplate`), what *Applies to* is at every start (`scope`), the frosted `glass`, the `drawer` open, the cut-out's engine (`cutEngine`) |
+| `profile` | what a new profile starts with: its ground, look and seed (`style`), its `sizes`, and the starter's name, brand and channels (`starter`; a name may be given in each language, `{ "zh": …, "en": … }`) |
+| `layout` | the layout each orientation is given (`byOrient`: `wide`, `square`, `tall`, each a template and its adjustments) |
+| `surprise` | Surprise me's chances (`odds`), under those you set in its chances window |
+| `ui` | the side columns' least and first widths in px (`columns`), the room the canvas keeps (`centreMin`, `centreRoomy`), how slow dragging must be, in ms between frames, for the note on the glass (`glassSlowMs`) |
+
+To change one, put a file named `custom.json` in the data folder (above, beside `settings.json`) with only what you want otherwise. It is laid over `defaults.json` key by key: what it names replaces the default, everything else stays. For example, JPEG at 85%, and a starter profile with two channels of your own:
+
+```json
+{
+  "settings": { "format": "jpeg", "quality": 85 },
+  "profile": {
+    "starter": {
+      "channels": [
+        { "id": "game", "name": { "zh": "游戏", "en": "Games" }, "sub": "GAMES", "code": "GAME", "color": "#ff3366", "graphic": "gear" },
+        { "id": "talk", "name": { "zh": "闲聊", "en": "Talk" }, "sub": "TALK", "code": "TALK", "color": "#00e5ff", "graphic": "camera" }
+      ]
+    }
+  }
+}
+```
+
+- It is read as the app starts: start it again after a change.
+- A default is what something has until it is set. A setting you have chosen stays yours (it is in `settings.json`), and the profiles you have are left as they are; a new profile takes the defaults.
+- A name the app does not know, or a value of the wrong kind (text where a number goes), is left out and the default kept; a number out of range is held to it. A list (the sizes, the channels) replaces the default's whole. A file that is not valid JSON is passed over and the app starts with its own defaults. Either way, a message at the foot of the window says so once.
+- The app has no button for the data folder itself. *Open the models folder* (Settings → AI, the cut-out) and *Open the styles folder* (a photo's AI repaint, beside *My styles*) open folders inside it: `custom.json` goes one level up from either. A page in a plain browser has no data folder: it keeps everything in the browser's storage, `custom.json` under the key `smedcover:custom.json`.
 
 ### Project files
 

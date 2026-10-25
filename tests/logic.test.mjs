@@ -128,6 +128,50 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.deepEqual(useFont(["A", "B", "C"], "B"), ["B", "A", "C"]);                 // the latest first, once
 });
 
+test("the defaults: defaults.json, the user's custom.json laid over it key by key; a name it does not know or a value of the wrong kind let go, the default kept; read where they are used, held to range there", async () => {
+  const { DEFAULTS, SHIPPED, layOver } = await import("../ui/js/defaults.js");
+  const { RULES, oddsOf } = await import("../ui/js/deal.js");
+  const same = DEFAULTS;
+  try {
+    assert.deepEqual(DEFAULTS, SHIPPED, "as shipped until custom.json is read");
+    assert.deepEqual([normalizeSettings({}).quality, normalizeSettings({}).nameTemplate], [92, "{n}-{channel}_{title}_{size}"]);
+    const left = layOver({
+      settings: { quality: 80, format: "webp", scale: "3", glass: false, drawer: "yes", nope: 1 },
+      profile: { style: { look: "riso" }, sizes: [{ w: 1080, h: 1350 }, { w: "x", h: 500 }, 7],
+        starter: { name: { en: "Studio" }, channels: [{ id: "game", name: { en: "Games", zh: "游戏" }, color: "#ff0000", graphic: "gear", mood: "x" }] } },
+      surprise: { odds: { groups: { look: { riso: 2 }, lookFx: { none: 1, many: 1 } }, chances: { rail: 5, extra: 0.1 } } },
+      ui: { columns: { left: { width: 400 } }, glassSlowMs: "fast" },
+      colour: "red",
+    });
+    assert.deepEqual(left.sort(), ["colour", "profile.sizes[1].w", "profile.sizes[2]", "profile.starter.channels[0].mood", "settings.drawer", "settings.nope", "settings.scale", "surprise.odds.groups.lookFx.many", "ui.glassSlowMs"]);
+    assert.equal(DEFAULTS, same, "the one object, changed in place");
+    assert.deepEqual(DEFAULTS.ui.columns, { ...SHIPPED.ui.columns, left: { min: 280, width: 400 } }, "the rest of an object kept");
+    assert.deepEqual([DEFAULTS.ui.glassSlowMs, DEFAULTS.settings.drawer, DEFAULTS.surprise.odds.groups.lookFx], [28, false, { none: 1, one: 0.33, two: 0.22 }]);
+    // the settings: what a file leaves out is the default, what it has is its own
+    const s = normalizeSettings({});
+    assert.deepEqual([s.quality, s.format, s.scale, s.glass, s.drawer], [80, "webp", 2, false, false]);
+    assert.deepEqual([normalizeSettings({ quality: 60, glass: true }).quality, normalizeSettings({ quality: 60, glass: true }).glass], [60, true]);
+    // a new profile: its look, its sizes (one not given in full left out), the starter's name and channels
+    const p = normalizeProfile(starterProfile("en", ""));
+    assert.deepEqual([p.name, p.style.look, p.style.theme, p.sizes.map((z) => `${z.w}x${z.h}`)], ["Studio", "riso", "dark", ["1080x1350"]]);
+    assert.deepEqual(p.categories.map((c) => [c.id, c.name, c.color, c.graphic.id]), [["game", "Games", "#ff0000", "gear"]]);
+    assert.equal(normalizeProfile(starterProfile("zh", "")).categories[0].name, "游戏");
+    assert.equal(normalizeProfile({ style: { look: "cel" }, sizes: [{ w: 1920, h: 1080 }] }).style.look, "cel", "a profile's own kept");
+    // Surprise me's chances: read from the defaults each time, held between 0 and 1, each group adding up to 1
+    assert.equal(RULES.odds.chances.extra, 0.1);
+    assert.deepEqual([oddsOf().chances.rail, oddsOf().chances.extra, oddsOf().groups.look.riso], [1, 0.1, 1]);
+    // out of range: held there by what reads it
+    layOver({ settings: { quality: 500, format: "gif", lang: "fr" } });
+    assert.deepEqual([normalizeSettings({}).quality, normalizeSettings({}).format, normalizeSettings({}).lang], [100, "png", ""]);
+    assert.equal(DEFAULTS.profile.style.look, "cel", "each time from defaults.json as shipped");
+    // none, or not an object: the shipped defaults
+    assert.deepEqual([layOver(null), DEFAULTS], [[], SHIPPED]);
+    assert.deepEqual(layOver([1, 2]), ["(custom.json)"]);
+    assert.deepEqual(DEFAULTS, SHIPPED);
+  } finally { layOver(null); }
+  assert.deepEqual(normalizeProfile(starterProfile("zh", "")).categories.map((c) => c.name), ["日常", "教程", "作品"], "the starter as shipped");
+});
+
 test("usedUserAssets finds uploads referenced by categories and layers", () => {
   const p = normalizeProfile({ categories: [{ id: "a", graphic: { kind: "user", id: "u1" } }], design: { layers: [{ type: "asset", ref: { kind: "user", id: "u2" } }, { type: "asset", ref: { kind: "sticker", id: "star" } }] } });
   const c = normalizeCover({ layers: [{ type: "asset", ref: { kind: "user", id: "u3" } }] }, p);
@@ -1220,7 +1264,7 @@ test("templates can be adjusted, and their halves swapped", async () => {
   // what a profile keeps: only real settings, within limits, per template
   const p = normalizeProfile({ style: { layoutAdjust: { stack: { size: 9, slant: "x", flip: true, junk: 1 }, split: {}, nope: { size: 0.3 } } } });
   assert.deepEqual(p.style.layoutAdjust, { stack: { size: 0.8, flip: true } });
-  assert.deepEqual(normalizeProfile(null).style.layoutAdjust, {});
+  assert.deepEqual(normalizeProfile({ style: {} }).style.layoutAdjust, {});
 });
 
 test("text effects: a layer may choose one, and every one can be painted", async () => {
@@ -3751,6 +3795,11 @@ async function drawnAt(p, cover, size, photos = null) {
   try { const cv = canvas(); drawCover(cv, { profile: p, catIndex: 0, size, pixelW: 200, cover, photos: photos || new Map() }); return cv; } finally { globalThis.document = was; }
 }
 
+/** A profile as profiles were before each orientation had a layout of its own by default: a style of its own, every size in Stack as it comes. */
+const asWas = (raw = sampleProfile("en")) => normalizeProfile({ ...raw, style: { template: "stack" } });
+/** A layout preset's colour block as new ones were made before then: wide sizes in Split, the others in Stack, each as the template comes. */
+const OLD_BLOCK = () => ({ template: "stack", adjust: {}, orient: { wide: { template: "split", adjust: {} } } });
+
 test("which way a size faces: wide from 5:4 on, tall from 4:5 on, square between; a size key read the same", async () => {
   const { orientOf, orientOfKey, ORIENTS } = await import("../ui/js/layout.js");
   assert.deepEqual(ORIENTS, ["wide", "square", "tall"]);
@@ -3784,14 +3833,14 @@ test("each size's layout: the profile's for every size, a size's own over it; se
     "1920x1080": { template: "banner", adjust: { size: 3, slant: 0.1, flip: "yes", nope: 1 } }, "1080x1920": { template: "stack" }, "1200x1200": { template: "stack" }, "x": { template: "split" } } } });
   assert.deepEqual(p.style.layoutBy, { "1920x1080": { template: "banner", adjust: { size: 0.8, slant: 0.1 } }, "1080x1920": { template: "stack", adjust: {} } });
   assert.equal(normalizeProfile({ sizes: [{ w: 1920, h: 1080 }], style: { layoutBy: { "1920x1080": { template: "nope" } } } }).style.layoutBy, undefined);
-  assert.equal("layoutBy" in normalizeProfile(sampleProfile("en")).style, false, "a profile as it was: no size has its own");
+  assert.equal("layoutBy" in asWas().style, false, "a profile as it was: no size has its own");
   assert.deepEqual(normalizeProfile(JSON.parse(JSON.stringify(p))).style, p.style, "read back as written");
 });
 
 test("a size drawn in a layout of its own: that template there, the profile's everywhere else, the same drawing as before until one is set", async () => {
   const { layoutOf, setLayoutOf, layout, adjustLayout, meetStandards, virtualSize } = await import("../ui/js/layout.js");
   const { coverLayout, partsOf, sizeKey } = await import("../ui/js/render.js");
-  const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({ title: "Hello", subtitle: "sub", tag: "EP.01" }, p);
+  const p = asWas(), c = normalizeCover({ title: "Hello", subtitle: "sub", tag: "EP.01" }, p);
   const parts = partsOf(c, p.categories[0]), adj = p.style.layoutAdjust[p.style.template];
   for (const z of p.sizes) {
     const [w, h] = virtualSize(z.w, z.h), drawn = (await drawnAt(p, c, z))._layout;
@@ -3834,20 +3883,32 @@ test("the scope's middle choice: an edit reaches every size facing this one's wa
   assert.deepEqual([sceneOffsets(c, "court", "1080x1920").ball, sceneOffsets(c, "court", "1200x1600").ball, sceneOffsets(c, "court", "1920x1080").ball, sceneOffsets(c, "court", "1200x1200").ball], [[0.1, 0], [0.1, 0], [0, 0.05], [0, 0]]);
   resetScene(c, "court", "ball", "orient", "1200x1600", ["1080x1920", "1200x1600"]);
   assert.deepEqual(c.scene, { court: { ball: { by: { "1920x1080": [0, 0.05] } } } });
-  // the setting: the three choices kept, anything else every size
-  assert.deepEqual(["all", "orient", "size", "both", undefined].map((scope) => normalizeSettings({ scope }).scope), ["all", "orient", "size", "all", "all"]);
+  // the setting: the three choices kept, anything else the defaults' (those facing the same way)
+  assert.deepEqual(["all", "orient", "size", "both", undefined].map((scope) => normalizeSettings({ scope }).scope), ["all", "orient", "size", "orient", "orient"]);
 });
 
-test("a layout preset's colour block, per size: taken by orientation where a profile's sizes facing one way agree, else by size; a size it never saw drawn as those facing its way; a new one wide side by side, the rest stacked", async () => {
+test("the scope every start begins at: the defaults' (those facing the same way as shipped), whatever was kept; custom.json may name another, one that is none of the three let go", async () => {
+  const { startScope } = await import("../ui/js/store.js");
+  const { layOver } = await import("../ui/js/defaults.js");
+  try {
+    assert.equal(startScope(), "orient");
+    layOver({ settings: { scope: "size" } });
+    assert.deepEqual([startScope(), normalizeSettings({}).scope, normalizeSettings({ scope: "all" }).scope], ["size", "size", "all"], "a scope kept is the settings' own; the start sets it");
+    layOver({ settings: { scope: "both" } });
+    assert.deepEqual([startScope(), normalizeSettings({}).scope], ["orient", "orient"]);
+  } finally { layOver(null); }
+});
+
+test("a layout preset's colour block, per size: taken by orientation where a profile's sizes facing one way agree, else by size; a size it never saw drawn as those facing its way; a new one each orientation in its default layout", async () => {
   const { takeLayout, presetLayout, newBlock } = await import("../ui/js/layers.js");
   const { normalizeLayouts } = await import("../ui/js/store.js");
-  const { setLayoutOf, layoutOf, layoutByOrient } = await import("../ui/js/layout.js");
-  const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p), keys = p.sizes.map((z) => `${z.w}x${z.h}`);
+  const { setLayoutOf, layoutOf, orientDefault } = await import("../ui/js/layout.js");
+  const p = asWas(), c = normalizeCover({}, p), keys = p.sizes.map((z) => `${z.w}x${z.h}`);
   // laid out alike: the profile's own, no orientation's nor size's
   const plain = takeLayout(p.style, c.layers, keys);
   assert.deepEqual([plain.template, plain.adjust, "orient" in plain, "by" in plain], ["stack", {}, false, false]);
   // wide side by side, the rest stacked: the wide sizes agree, so the wide ones have it as theirs
-  layoutByOrient(p.style, p.sizes);
+  setLayoutOf(p.style, ["1920x1080", "1600x1200", "900x383"], { template: "split", adjust: {} });
   const wide = takeLayout(p.style, c.layers, keys);
   assert.deepEqual([wide.template, wide.orient, "by" in wide], ["stack", { wide: { template: "split", adjust: {} } }, false]);
   // one tall size its own: the tall ones no longer agree, so the one drawn otherwise has its own
@@ -3858,19 +3919,19 @@ test("a layout preset's colour block, per size: taken by orientation where a pro
   assert.notEqual(one.by["1080x1920"].adjust, p.style.layoutBy["1080x1920"].adjust, "a copy");
   // a size it never saw: as those facing its way, else the default
   assert.deepEqual(["1280x720", "1080x1350", "1000x1000"].map((k) => presetLayout(one, k).template), ["split", "stack", "stack"]);
-  // a new preset: wide sizes side by side, square and tall ones stacked, each as its template comes
-  const made = normalizeLayouts([{ id: "n", ...newBlock() }])[0];
-  assert.deepEqual([made.template, made.orient, "by" in made], ["stack", { wide: { template: "split", adjust: {} } }, false]);
-  const want = { "1920x1080": "split", "1600x1200": "split", "900x383": "split", "1200x1200": "stack", "1200x1600": "stack", "1080x1920": "stack", "1080x1350": "stack", "1250x1000": "split" };
-  for (const [k, template] of Object.entries(want)) assert.deepEqual(presetLayout(made, k), { template, adjust: {} }, k);
+  // a new preset: each orientation in its default layout — wide sizes side by side, tall ones stacked, square ones a banner, each with its default size and slant
+  const made = normalizeLayouts([{ id: "n", ...newBlock() }])[0], [W, Q, T] = ["wide", "square", "tall"].map(orientDefault);
+  assert.deepEqual([made.template, made.adjust, made.orient, "by" in made], ["split", { size: 0.21, slant: 0.17, tw: 1, th: 1 }, { square: Q, tall: T }, false]);
+  const want = { "1920x1080": W, "1600x1200": W, "900x383": W, "1200x1200": Q, "1200x1600": T, "1080x1920": T, "1080x1350": T, "1250x1000": W };
+  for (const [k, lay] of Object.entries(want)) assert.deepEqual(presetLayout(made, k), lay, k);
   assert.deepEqual(normalizeLayouts(JSON.parse(JSON.stringify([made, { ...one, id: "o" }]))), normalizeLayouts([made, { ...one, id: "o" }]), "read back as written");
 });
 
 test("a layout preset put on a profile: the block at the profile's sizes alone, each as the preset draws it; a part unticked left out, one hidden at some sizes kept to the others; an earlier preset as it was", async () => {
-  const { takeLayout, takeParts, putLayout, presetLayout, newBlock } = await import("../ui/js/layers.js");
+  const { takeLayout, takeParts, putLayout, presetLayout } = await import("../ui/js/layers.js");
   const { normalizeLayouts } = await import("../ui/js/store.js");
   const { layoutOf } = await import("../ui/js/layout.js");
-  const p = normalizeProfile(sampleProfile("en")), keys = p.sizes.map((z) => `${z.w}x${z.h}`);
+  const p = asWas(), keys = p.sizes.map((z) => `${z.w}x${z.h}`);
   // taken from a cover: a part counts as ticked where the cover has it — not left out, at that size —, its eye shut or not
   const c = normalizeCover({}, p), at = (L, k) => L.find((l) => l.id === k);
   at(c.layers, "subtitle").off = true; at(c.layers, "subtitle").visible = false;
@@ -3886,12 +3947,12 @@ test("a layout preset put on a profile: the block at the profile's sizes alone, 
   const kept = takeParts(c.layers, ["1920x1080", "1080x1920"], { tag: { hide: ["1200x1600", "1920x1080"] } });
   assert.deepEqual([kept.tag.hide, Object.keys(kept.title.t.by)], [["1200x1600"], ["1920x1080", "4000x100"]]);
   // put on another cover, the profile laid out otherwise before
-  const q = normalizeProfile(sampleProfile("en")), d = normalizeCover({}, q);
+  const q = asWas(), d = normalizeCover({}, q);
   q.style.layoutBy = { "1080x1920": { template: "banner", adjust: {} } };
   at(d.layers, "title").sizes = ["1080x1920"];
   delete at(d.layers, "catname").off; at(d.layers, "catname").visible = true;
   at(d.layers, "tag").visible = false;   // hidden by its eye
-  const preset = normalizeLayouts([{ id: "w", ...newBlock(), by: { "1080x1920": { template: "stack", adjust: { flip: true } }, "1080x1350": { template: "split", adjust: { size: 0.3 } } },
+  const preset = normalizeLayouts([{ id: "w", ...OLD_BLOCK(), by: { "1080x1920": { template: "stack", adjust: { flip: true } }, "1080x1350": { template: "split", adjust: { size: 0.3 } } },
     custom: ["1080x1350"], parts: { ...taken.parts, title: { ...taken.parts.title, t: { all: taken.parts.title.t.all, by: { "1080x1350": { dx: 5 }, "1080x1920": { dy: 7 } } } } } }])[0];
   putLayout(q.style, d.layers, preset, keys);
   for (const k of keys) assert.deepEqual(layoutOf(q.style, k), presetLayout(preset, k), k);
@@ -3910,10 +3971,10 @@ test("a layout preset put on a profile: the block at the profile's sizes alone, 
 });
 
 test("a layout preset's colour block changed where the scope reaches: each size reached gets the change made to what it had; what comes to what it would follow anyway is let go", async () => {
-  const { setPresetLayout, presetLayout, newBlock } = await import("../ui/js/layers.js");
+  const { setPresetLayout, presetLayout } = await import("../ui/js/layers.js");
   const { onSide } = await import("../ui/js/layout.js");
   const bigger = (lay) => ({ template: lay.template, adjust: { ...lay.adjust, size: 0.4 } });
-  const p = newBlock();
+  const p = OLD_BLOCK();
   // this size only: its own
   setPresetLayout(p, "size", "1080x1920", (lay) => onSide(lay, "top"));
   assert.deepEqual(p.by, { "1080x1920": { template: "stack", adjust: { flip: true } } });
@@ -3932,10 +3993,11 @@ test("a layout preset's colour block changed where the scope reaches: each size 
 });
 
 test("the layout editor's block changed where blocks do not lie alike: dragged across, each to the side across from its own; to a side beside, all there; made bigger or leaned, each by as much of its own block", async () => {
-  const { setPresetLayout, presetLayout, newBlock } = await import("../ui/js/layers.js");
+  const { setPresetLayout, presetLayout } = await import("../ui/js/layers.js");
   const { sideOf, sideLike, scaleBlock, blockValues, LAYOUT_LIMITS } = await import("../ui/js/layout.js");
+  const newBlock = OLD_BLOCK;   // wide sizes side by side, the rest stacked, each as the template comes
   const near = (a, b) => Math.abs(a - b) < 1e-9, sides = (p) => ["1920x1080", "1200x1200", "1080x1920"].map((k) => sideOf(presetLayout(p, k)));
-  // a new preset, its wide panel dragged from the right to the left at every size: the stacked bands go to the top, not to the left
+  // a preset, its wide panel dragged from the right to the left at every size: the stacked bands go to the top, not to the left
   const a = newBlock();
   assert.deepEqual(sides(a), ["right", "bottom", "bottom"]);
   setPresetLayout(a, "all", "1920x1080", (lay) => sideLike(lay, "right", "left"));
@@ -4023,7 +4085,7 @@ test("the colour block locked keeps its layout, dealt or applied: the template, 
   const { normalizeLayouts } = await import("../ui/js/store.js");
   const { layoutOf } = await import("../ui/js/layout.js");
   const rand = (seed) => () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
-  const fresh = newPreset(), preset = normalizeLayouts([{ id: "x", ...fresh, adjust: { size: 0.5 }, parts: { ...fresh.parts, title: { shown: true, t: { all: { x: 0.2 } } }, subtitle: { shown: false } } }])[0];
+  const fresh = newPreset(), preset = normalizeLayouts([{ id: "x", ...fresh, ...OLD_BLOCK(), adjust: { size: 0.5 }, parts: { ...fresh.parts, title: { shown: true, t: { all: { x: 0.2 } } }, subtitle: { shown: false } } }])[0];
   for (const how of ["dealt", "applied"]) for (const locked of [true, false]) {
     const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({}, p), keys = p.sizes.map((z) => `${z.w}x${z.h}`), by = (id) => c.layers.find((l) => l.id === id);
     p.style.template = "stack"; p.style.layoutAdjust = { stack: { size: 0.3, slant: 0.02 } }; p.style.layoutBy = { "1080x1920": { template: "stack", adjust: { flip: true } } };
@@ -4103,36 +4165,65 @@ test("Surprise me deals a preset at the profile's sizes only: the block at each 
   }
 });
 
-test("Wide side by side, tall and square stacked: each size by its orientation, as the template comes; a size the profile's own already draws so follows it", async () => {
-  const { layoutByOrient, layoutOf, BY_ORIENT } = await import("../ui/js/layout.js");
+test("each orientation's default layout: wide Split, tall Stack, square Banner, with their sizes and slants; a new profile laid out so, one there is only when asked; the profile's own the default most of its sizes take", async () => {
+  const { layoutByOrient, layoutOf, orientDefault, templateDefault, blockDefault } = await import("../ui/js/layout.js");
   const { sizeKey } = await import("../ui/js/render.js");
-  assert.deepEqual(BY_ORIENT, { wide: "split", square: "stack", tall: "stack" });
-  const p = normalizeProfile(sampleProfile("en")), want = { "1920x1080": "split", "1600x1200": "split", "900x383": "split", "1200x1200": "stack", "1200x1600": "stack", "1080x1920": "stack" };
-  const got = (st) => Object.fromEntries(p.sizes.map((z) => [sizeKey(z), layoutOf(st, sizeKey(z))]));
-  // the profile's Stack as it comes: the wide sizes have Split of their own, the rest follow it
-  const a = { template: "stack", layoutAdjust: {}, layoutBy: { "1080x1920": { template: "banner", adjust: {} } } };
-  layoutByOrient(a, p.sizes);
-  assert.deepEqual(Object.keys(a.layoutBy).sort(), ["1600x1200", "1920x1080", "900x383"], "what was its own before let go");
-  for (const [k, v] of Object.entries(got(a))) assert.deepEqual(v, { template: want[k], adjust: {} }, k);
-  // the profile's Split: the others have Stack of their own
-  const b = { template: "split", layoutAdjust: { stack: { size: 0.4 } } };
-  layoutByOrient(b, p.sizes);
-  assert.deepEqual(Object.keys(b.layoutBy).sort(), ["1080x1920", "1200x1200", "1200x1600"]);
-  for (const [k, v] of Object.entries(got(b))) assert.deepEqual(v, { template: want[k], adjust: {} }, k);
-  // the profile's own adjusted: every size has the template as it comes, of its own; the profile's kept for later
-  const c = { template: "stack", layoutAdjust: { stack: { size: 0.4 } } };
-  layoutByOrient(c, p.sizes);
-  assert.equal(Object.keys(c.layoutBy).length, 6);
-  for (const [k, v] of Object.entries(got(c))) assert.deepEqual(v, { template: want[k], adjust: {} }, k);
-  assert.deepEqual([c.template, c.layoutAdjust], ["stack", { stack: { size: 0.4 } }]);
-  // drawn so: Split on the wide covers, Stack on the others, the title in the column where there is one
-  const pr = normalizeProfile(sampleProfile("en")), cover = normalizeCover({ title: "Hello *there*", subtitle: "sub", tag: "EP.01" }, pr);
-  layoutByOrient(pr.style, pr.sizes);
-  for (const z of pr.sizes) {
-    const cv = await drawnAt(pr, cover, z), split = want[sizeKey(z)] === "split", title = cv._hits.find((h) => h.id === "title");
-    assert.equal(cv._layout.template, want[sizeKey(z)], sizeKey(z));
-    if (split) assert.ok(title && title.cx + title.hw <= cv._layout.edge.line[0], `${sizeKey(z)}: the title in its column, left of the panel`);
+  const [W, Q, T] = ["wide", "square", "tall"].map(orientDefault);
+  assert.deepEqual([W, T, Q], [{ template: "split", adjust: { size: 0.21, slant: 0.17, tw: 1, th: 1 } }, { template: "stack", adjust: { size: 0.14, slant: 0.08, tw: 1, th: 1 } }, { template: "banner", adjust: { size: 0.13, slant: 0, tw: 1, th: 1 } }]);
+  const want = { "1920x1080": W, "1600x1200": W, "900x383": W, "1200x1200": Q, "1200x1600": T, "1080x1920": T };
+  const got = (st, sizes) => Object.fromEntries(sizes.map((z) => [sizeKey(z), layoutOf(st, sizeKey(z))]));
+  // a new profile, the example's or a starter's: the profile's own the wide sizes' (most of its sizes), the others theirs
+  for (const raw of [sampleProfile("en"), starterProfile("zh", "")]) {
+    const p = normalizeProfile(raw);
+    assert.deepEqual([p.style.template, p.style.layoutAdjust, Object.keys(p.style.layoutBy).sort()], ["split", { split: W.adjust }, ["1080x1920", "1200x1200", "1200x1600"]]);
+    assert.deepEqual(got(p.style, p.sizes), want);
+    assert.deepEqual(normalizeProfile(JSON.parse(JSON.stringify(p))).style, p.style, "read back as written");
   }
+  // a profile there is: drawn as it was, until asked
+  assert.deepEqual([asWas().style.template, asWas().style.layoutAdjust, "layoutBy" in asWas().style], ["stack", {}, false]);
+  // asked: Stack as it comes is no orientation's default, so the profile's own becomes the wide sizes'; what was its own before let go
+  const sizes = asWas().sizes;
+  const a = { template: "stack", layoutAdjust: { stack: { size: 0.4 } }, layoutBy: { "1080x1920": { template: "banner", adjust: {} } } };
+  layoutByOrient(a, sizes);
+  assert.deepEqual([a.template, a.layoutAdjust, Object.keys(a.layoutBy).sort()], ["split", { stack: { size: 0.4 }, split: W.adjust }, ["1080x1920", "1200x1200", "1200x1600"]], "the other templates' adjustments kept for later");
+  assert.deepEqual(got(a, sizes), want);
+  // the profile's own a default some of its sizes take already (the tall ones'): it stays, and the others are given theirs
+  const b = { template: "stack", layoutAdjust: { stack: { ...T.adjust } } };
+  layoutByOrient(b, sizes);
+  assert.deepEqual([b.template, Object.keys(b.layoutBy).sort()], ["stack", ["1200x1200", "1600x1200", "1920x1080", "900x383"]]);
+  assert.deepEqual(got(b, sizes), want);
+  // more tall sizes than wide: the tall ones' the profile's own
+  const tall = [{ w: 1080, h: 1920 }, { w: 1920, h: 1080 }, { w: 1200, h: 1600 }], c = { template: "banner" };
+  layoutByOrient(c, tall);
+  assert.deepEqual([c.template, Object.keys(c.layoutBy)], ["stack", ["1920x1080"]]);
+  // a template's defaults: its orientation's, the one asked for first; none for a template no orientation is given
+  assert.deepEqual([templateDefault("split"), templateDefault("stack", "wide"), templateDefault("banner")], [W.adjust, T.adjust, Q.adjust]);
+  assert.deepEqual(blockDefault({ template: "stack", adjust: { size: 0.5, flip: true, tw: 0.6 } }), { template: "stack", adjust: { flip: true, tw: 0.6, size: 0.14, slant: 0.08 } }, "its side and title's box kept");
+  // drawn so: Split on the wide covers, the title in the column left of the panel; Stack on the tall ones; Banner on the square one
+  const pr = normalizeProfile(sampleProfile("en")), cover = normalizeCover({ title: "Hello *there*", subtitle: "sub", tag: "EP.01" }, pr);
+  for (const z of pr.sizes) {
+    const cv = await drawnAt(pr, cover, z), lay = want[sizeKey(z)], title = cv._hits.find((h) => h.id === "title");
+    assert.equal(cv._layout.template, lay.template, sizeKey(z));
+    if (lay.template === "split") assert.ok(title && title.cx + title.hw <= Math.min(cv._layout.edge.line[0], cv._layout.edge.line[2]), `${sizeKey(z)}: the title in its column, left of the panel`);
+  }
+});
+
+test("a size added to a profile later: drawn as the sizes facing its way are, where they agree, else in its orientation's default layout; its own only where that is not the profile's", async () => {
+  const { layoutAdded, layoutOf, setLayoutOf, orientDefault } = await import("../ui/js/layout.js");
+  const [W, Q, T] = ["wide", "square", "tall"].map(orientDefault);
+  const add = (p, w, h) => { p.sizes.push({ w, h, label: "", name: "" }); layoutAdded(p.style, p.sizes, `${w}x${h}`); return layoutOf(p.style, `${w}x${h}`); };
+  // a new profile: a wide size follows the profile's own (the wide default); a tall one as the tall ones are
+  const p = normalizeProfile(sampleProfile("en"));
+  assert.deepEqual([add(p, 1280, 720), "1280x720" in p.style.layoutBy, add(p, 1080, 1350), "1080x1350" in p.style.layoutBy], [W, false, T, true]);
+  // the tall sizes changed (All tall): one added is drawn as they are
+  setLayoutOf(p.style, ["1080x1920", "1200x1600", "1080x1350"], { template: "split", adjust: { size: 0.3, flip: true } });
+  assert.deepEqual(add(p, 720, 1280), { template: "split", adjust: { size: 0.3, flip: true } });
+  // they do not agree: its orientation's default; none facing its way: the default as well
+  setLayoutOf(p.style, ["1080x1920"], { template: "stack", adjust: {} });
+  assert.deepEqual([add(p, 1440, 2560), add(normalizeProfile({ ...sampleProfile("en"), sizes: [{ w: 1920, h: 1080 }] }), 1000, 1000)], [T, Q]);
+  // a profile as it was: a size facing the way its sizes do, drawn as they are (its own Stack)
+  const q = asWas();
+  assert.deepEqual([add(q, 1080, 1350), "layoutBy" in q.style], [{ template: "stack", adjust: {} }, false]);
 });
 
 // ---------- layers shown only at some sizes

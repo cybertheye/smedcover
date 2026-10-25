@@ -36,7 +36,7 @@
 //
 // A layout preset (see takeLayout) is where the layout's parts stand, which of them it has and the colour block's
 // layout, for every size: kept in the settings, dealt by Surprise me, put on a cover as it is.
-import { ORIENTS, BY_ORIENT, orientOfKey, layoutOf, sameLayout, virtualSize, sizeOfKey, standsFor } from "./layout.js";
+import { ORIENTS, orientDefault, orientOfKey, layoutOf, sameLayout, virtualSize, sizeOfKey, standsFor } from "./layout.js";
 
 // the layout layers, bottom first: in the layer list, from the top, corner brackets, title, subtitle,
 // brand logo, brand row, tag, channel name, channel graphic, colour block, background
@@ -953,13 +953,15 @@ export function presetLayout(p, key) {
   return own ? { template: own.template, adjust: own.adjust || {} } : { template: p.template, adjust: p.adjust || {} };
 }
 /**
- * A new layout preset's colour block, { template, adjust, orient }: each orientation in the template BY_ORIENT gives it,
- * as the template comes — wide sizes side by side (Split), square and tall ones stacked (Stack, the default).
+ * A new layout preset's colour block, { template, adjust, orient }: each orientation in the layout it is given by
+ * default (orientDefault) — as shipped, wide sizes side by side (Split, the default), tall ones stacked (Stack), square
+ * ones in a banner (Banner), each with its default size and slant —, an orientation drawn as the default having no
+ * entry of its own.
  */
 export function newBlock() {
-  const template = BY_ORIENT.square, orient = {};
-  for (const o of ORIENTS) if (BY_ORIENT[o] !== template) orient[o] = { template: BY_ORIENT[o], adjust: {} };
-  return { template, adjust: {}, orient };
+  const base = orientDefault("wide"), orient = {};
+  for (const o of ORIENTS) { const d = orientDefault(o); if (!sameLayout(d, base)) orient[o] = d; }
+  return { ...base, orient };
 }
 /**
  * A new layout preset, as its editor starts it: the colour block of newBlock(), and every part of LAYOUT_PARTS in it,

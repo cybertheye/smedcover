@@ -1,12 +1,12 @@
 // SmedCover UI. Two modes: Edit (cover content, assets, style + the layer stack) and Setup (brand,
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
-import { virtualSize, layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot, ORIENTS, orientOf, orientOfKey, layoutOf, ownLayout, setLayoutOf, followLayout, layoutByOrient, SIDES, sideOf, sideToward, sideLike, scaleBlock, sizeOfKey } from "./layout.js";
+import { virtualSize, layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot, ORIENTS, orientOf, orientOfKey, layoutOf, ownLayout, setLayoutOf, followLayout, layoutByOrient, SIDES, sideOf, sideToward, sideLike, scaleBlock, sizeOfKey, templateDefault, blockDefault, layoutAdded, sameLayout } from "./layout.js";
 import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, handles, showsFrame, sceneHandleAt, coverLayout, partsOf, coverAt } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang, bothLangs } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
-import { useFont } from "./store.js";
+import { useFont, startScope } from "./store.js";
 import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
@@ -17,6 +17,7 @@ import {
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
   normalizeRecipes, SURPRISE_LOCKS, normalizeLayouts, LAYOUTS,
 } from "./store.js";
+import { DEFAULTS, layOver } from "./defaults.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, BENDS, effectUses, warpCorners, convexWarp, NO_COLUMNS } from "./textfx.js";
@@ -2380,26 +2381,27 @@ function removeAsset(id) {
 /**
  * The template and its adjustments on style `st`, the profile's, in the Layout sheet (a layout preset's editor has none:
  * its colour block is dragged, see layoutEditor): the template, how much the colour panel takes, how its edge leans,
- * the title's box, which half goes first, and the way back to the template's own. `at` ({w, h, parts}): the size
- * shown, in virtual units, and which parts that take room its cover has (see partsOf in render.js), where the block's
- * sliders start from (the layout as it would be drawn there).
+ * the title's box, which half goes first, and the way back to the template's defaults (templateDefault in layout.js).
+ * `at` ({w, h, parts}): the size shown, in virtual units, and which parts that take room its cover has (see partsOf in
+ * render.js), where the block's sliders start from (the layout as it would be drawn there).
  * `to`: what they change — null, the style's own template and adjustments, which every size without a layout of its own
  * follows; else {key, keys}, the layout size `key` is drawn in, put on each size of `keys` as their own (see layoutOf
- * and setLayoutOf in layout.js; a template chosen there starts from the adjustments the style keeps for it).
+ * and setLayoutOf in layout.js; a template chosen there starts from the adjustments the style keeps for it, else from
+ * its defaults).
  * `changed(again)` after each change: `again`, the controls are to be built anew (another template's, the swap
  * named the other way); else a slider is on its way.
  */
 function templateControls(st, at, changed, to = null) {
   const a = layoutAdjuster(st, at, changed, to), { tpl, adj, put, set } = a;
-  const split = tpl === "split", has = Object.keys(adj).length > 0;
+  const split = tpl === "split", byDefault = templateDefault(tpl, orientOfKey(S.sel));   // what the template has by default (the canvas's orientation's, where that is its)
   return [
-    select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), tpl, (v) => put(v, (st.layoutAdjust || {})[v] || {}, true)),   // the adjustments' sliders follow the template chosen
+    select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), tpl, (v) => put(v, (st.layoutAdjust || {})[v] || templateDefault(v, orientOfKey(S.sel)), true)),   // the adjustments' sliders follow the template chosen (none kept for it: its defaults)
     el("div", { style: "margin-top:14px" }, cap("style.layout")),
     blockSliders(a),
     slider2(t("style.layTitleW"), LAYOUT_LIMITS.tw[0], LAYOUT_LIMITS.tw[1], 0.01, adj.tw ?? 1, (v) => set("tw", v)),
     slider2(t("style.layTitleH"), LAYOUT_LIMITS.th[0], LAYOUT_LIMITS.th[1], 0.01, adj.th ?? 1, (v) => set("th", v)),
     el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: !!adj.flip, onchange: (e) => set("flip", e.target.checked, true) }), el("span", {}, t(split ? "style.layFlipSplit" : "style.layFlipStack"))),
-    el("button", { class: "btn wide", style: "margin-top:10px", disabled: !has, onclick: () => put(tpl, {}, true) }, t("style.layReset")),
+    el("button", { class: "btn wide", style: "margin-top:10px", disabled: sameLayout({ template: tpl, adjust: adj }, { template: tpl, adjust: byDefault }), onclick: () => put(tpl, byDefault, true) }, t("style.layReset")),
   ];
 }
 /**
@@ -2436,8 +2438,8 @@ const shownAt = () => { const z = selSize(), [w, h] = virtualSize(z.w, z.h); ret
  * The Layout sheet's template and its adjustments, one box, changed where the scope under the canvas says: the
  * profile's, which every size without a layout of its own follows; each size facing the canvas's way, as their own; or
  * the canvas's size alone. A size with a layout of its own
- * says so, with the way back to following the profile's (the strip under the canvas marks such sizes); "Wide side by
- * side, tall and square stacked" lays every size out by its orientation at once.
+ * says so, with the way back to following the profile's (the strip under the canvas marks such sizes); "Wide split,
+ * tall stacked, square banner" lays every size out in its orientation's default layout at once.
  */
 function layoutBox() {
   const st = S.profile.style, at = layoutScope(() => touch({ profile: true, panel: true }));
@@ -2469,7 +2471,7 @@ function blockSection() {
   const a = layoutAdjuster(S.profile.style, shownAt(), (again) => (again ? touch({ profile: true, side: true }) : draftTouch({ profile: true })), at.to);
   return psec("props.sec.block", [blockSliders(a), at.own], `${t("props.blockHint")} ${at.says} ${t("style.scopeWhere")}`);
 }
-/** "Wide side by side, tall and square stacked": every size laid out by its orientation (layoutByOrient in layout.js); one step of undo. */
+/** "Wide split, tall stacked, square banner": every size in its orientation's default layout (layoutByOrient in layout.js); one step of undo. */
 function byOrient() {
   clearTimeout(timers.hist); commitHistory();
   layoutByOrient(S.profile.style, S.profile.sizes);
@@ -3067,7 +3069,7 @@ function layoutEditor(p, i, fresh = false) {
   const follow = () => { const by = { ...E.p.by }; delete by[size().key]; if (Object.keys(by).length) E.p.by = by; else delete E.p.by; E.dirty = true; build(); redraw(); };
   const reset = () => { const g = geo(); resetPlacement(part(E.sel), E.scope, g.key, g.catId, g.group.map((x) => x.key)); E.dirty = true; build(); redraw(); };
   const resetBlock = () => {
-    setPresetLayout(E.p, E.scope, geo().key, (lay) => ({ template: lay.template, adjust: Object.fromEntries(Object.entries(lay.adjust).filter(([k]) => k !== "size" && k !== "slant")) }));
+    setPresetLayout(E.p, E.scope, geo().key, (lay, at) => blockDefault(lay, at && (ORIENTS.includes(at) ? at : orientOfKey(at))));
     E.dirty = true; build(); redraw();
   };
   const toSide = (to) => { const first = sideOf(presetLayout(E.p, size().key)); if (to !== first) { reblock(copyOf(E.p), (lay) => sideLike(lay, first, to)); build(); } };
@@ -3367,8 +3369,8 @@ function layoutSheet() {
 }
 /**
  * Layout → the layout presets, each a card: its name (renamed where it is), put on the canvas, edited in the preset's
- * editor (layoutEditor), or deleted; a new one laid out in the editor from the start (wide sizes side by side, the others
- * stacked, every part in it: see newPreset in layers.js), kept once saved there. Surprise me deals them by their chances.
+ * editor (layoutEditor), or deleted; a new one laid out in the editor from the start (each orientation in its default
+ * layout, every part in it: see newPreset in layers.js), kept once saved there. Surprise me deals them by their chances.
  */
 function presetCards() {
   const list = S.settings.layouts;
@@ -3694,6 +3696,7 @@ function sizesTab() {
   const toggle = (s, on) => {
     if (on && !has(s)) {
       P.sizes.push({ w: s.w, h: s.h, label: s.label || "", name: "" });
+      layoutAdded(P.style, P.sizes, sizeKey(s));   // drawn as the sizes facing its way are, else in its orientation's default layout
       const off = se.exportSizes[P.id];   // a size taken again starts ticked in the Export window, as a new one does
       if (off && sizeKey(s) in off) { delete off[sizeKey(s)]; persistSettings(); }
     }
@@ -6541,7 +6544,7 @@ function glassWatch(now) {
   if (!dragging || !gap || gap > 250 || GLASS.slow || S.settings.glassHint || !glassOn()) return;   // gap > 250: not one frame after another
   GLASS.gaps.push(gap);
   if (GLASS.gaps.length < 90) return;
-  GLASS.slow = GLASS.gaps.sort((a, b) => a - b)[45] > 28; GLASS.gaps = [];
+  GLASS.slow = GLASS.gaps.sort((a, b) => a - b)[45] > DEFAULTS.ui.glassSlowMs; GLASS.gaps = [];   // slow: half the frames further apart than that, in ms (ui.glassSlowMs in defaults.json)
 }
 addEventListener("pointerdown", () => { GLASS.down = true; }, true);
 addEventListener("pointerup", () => {
@@ -6699,18 +6702,19 @@ const layoutKind = () => (FORCED === "phone" || FORCED === "desk" ? FORCED : PHO
 function arrange() { document.body.dataset.layout = layoutKind(); }
 PHONE.addEventListener("change", () => { arrange(); if (S.profile) columns(); });
 arrange();
-const COLUMNS = { left: { min: 280, def: 340 }, right: { min: 260, def: 320 }, setup: { min: 340, def: 420 } };
-const CENTRE_MIN = 360;   // what the canvas keeps at the least
-const CENTRE_ROOMY = 560;   // less, with the drawer open and the sheet and the drawer as wide as they are at first, and the drawer takes the sheet's place
+/** A side column's least width and its width at first, in px (ui.columns in defaults.json): left and right while editing, left in Setup. */
+const column = (k) => { const c = DEFAULTS.ui.columns[k], min = clamp(c.min, 160, 900); return { min, def: clamp(c.width, min, 900) }; };
+const centreMin = () => clamp(DEFAULTS.ui.centreMin, 0, 2000);   // what the canvas keeps at the least
+const centreRoomy = () => clamp(DEFAULTS.ui.centreRoomy, 0, 4000);   // less, with the drawer open and the sheet and the drawer as wide as they are at first, and the drawer takes the sheet's place
 const STACKED = matchMedia("(max-width: 1000px)");   // the window too narrow for columns: everything one under another (index.html)
 const sheetHidden = () => $("body").classList.contains("tight");   // the drawer in the sheet's place (columns())
 /** Sets the columns' widths from the settings (0 = default), each kept between its least and what leaves the canvas room. */
 function columns() {
   const b = $("body"), open = !!S.settings.drawer, w = innerWidth - (open ? 136 : 124), c = S.settings.columns;   // 136: the dock (76), the three gaps between the columns (two with the drawer shut; with it in the sheet's place too, the drawer then 12 short of its most) and the page's margins
-  const fit = (k, other) => Math.round(clamp(c[k] || COLUMNS[k].def, COLUMNS[k].min, Math.max(COLUMNS[k].min, w - CENTRE_MIN - other)));
-  const left = fit("left", open ? c.right || COLUMNS.right.def : 0), was = sheetHidden();
+  const fit = (k, other) => { const C = column(k); return Math.round(clamp(c[k] || C.def, C.min, Math.max(C.min, w - centreMin() - other))); };
+  const left = fit("left", open ? c.right || column("right").def : 0), was = sheetHidden();
   // by the window's width alone (the columns at their widths at first), so that a column's edge dragged never hides the sheet: a canvas left narrower by a hand is the hand's
-  const tight = open && !STACKED.matches && w - COLUMNS.left.def - COLUMNS.right.def < CENTRE_ROOMY;
+  const tight = open && !STACKED.matches && w - column("left").def - column("right").def < centreRoomy();
   const right = tight ? fit("right", 0) : fit("right", left);
   b.classList.toggle("nodrawer", !open); b.classList.toggle("tight", tight);
   b.style.setProperty("--lw", left + "px"); b.style.setProperty("--rw", right + "px"); b.style.setProperty("--sw", fit("setup", 0) + "px");
@@ -6818,8 +6822,22 @@ onOutlines(() => { queueDraw(); later("lookcards", 300, refreshLookCards); });  
  * tried again, and nothing is written over.
  */
 const absent = (v) => (e) => { if (HOST === "server") throw e; return v; };
+/**
+ * custom.json, the user's own defaults, in the data folder (see defaults.js), laid over the app's before anything reads
+ * them. Never written by the app: one that cannot be read is none. Returns what to tell the user of it once the window
+ * is up — a file that is not JSON (the app's own defaults used), values it has that were let go — or null.
+ */
+async function customDefaults() {
+  const text = await files.read("custom.json").catch(() => null);
+  let raw = null;
+  try { raw = text ? JSON.parse(text) : null; } catch (e) { layOver(null); return () => toast(t("msg.customBad", e.message)); }
+  const left = layOver(raw);
+  return left.length ? () => toast(counted("msg.customLeft", left.length, left.slice(0, 4).join(", ") + (left.length > 4 ? "…" : ""))) : null;
+}
 async function start() {
+  const custom = await customDefaults();
   S.settings = normalizeSettings(await readJson("settings.json").catch(absent(null)));
+  S.settings.scope = startScope();   // Applies to starts where the defaults say (All wide / square / tall), whatever it was at the close
   setGlass(glassOn());
   const probe = document.body.appendChild(el("div", { style: "position:absolute;top:-99px;width:60px;height:60px;overflow:scroll" }));
   document.documentElement.classList.toggle("bars", probe.offsetWidth > probe.clientWidth); probe.remove();   // scrollbars that take room: drawn thin (index.html)
@@ -6867,6 +6885,7 @@ async function start() {
   prunePhotos();
   await applyProfile();
   resetHistory();
+  if (custom) custom();   // what was wrong with custom.json
   if (selftest) selfTest(selftest);
   else setTimeout(readLibrary, 1500);   // once the window is up: read the bitmap library in the background, ready for when it is opened
 }
