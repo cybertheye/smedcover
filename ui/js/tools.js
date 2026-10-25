@@ -75,7 +75,7 @@ const LAYER_OUT = out({
 const CHANNEL_OUT = out({ id: { type: "string" }, name: { type: "string" }, sub: { type: "string" }, code: { type: "string" }, color: { type: "string" } }, ["id"]);
 const SELECTION = out({ profile: { type: "string" }, channel: { type: "string" }, size: { type: "string" }, scope: { type: "string" }, layer: { type: "string" }, layers: { type: "array", items: { type: "string" } } }, ["profile", "channel", "size", "layer"]);
 const HISTORY = out({ index: { type: "integer" }, steps: { type: "integer" }, canUndo: { type: "boolean" }, canRedo: { type: "boolean" } }, ["index", "canUndo", "canRedo"]);
-const WRITTEN = out({ dir: { type: "string" }, files: { type: "array", items: out({ path: { type: "string" }, channel: { type: "string" }, title: { type: "string" }, size: { type: "string" } }) } }, ["files"]);
+const WRITTEN = out({ dir: { type: "string" }, files: { type: "array", items: out({ path: { type: "string" }, channel: { type: "string" }, title: { type: "string" }, size: { type: "string" } }) }, cancelled: { type: "boolean" } }, ["dir", "files"]);
 const WARNINGS = { type: "array", items: { type: "string" } };
 const LAYER_DONE = out({ layer: LAYER_OUT, warnings: WARNINGS }, ["layer"]);
 
@@ -118,8 +118,8 @@ export const TOOLS = [
     { annotations: READ, outputSchema: out({ profile: { type: "string" }, channel: { type: "string" }, title: { type: "string" }, subtitle: { type: "string" }, tag: { type: "string" }, look: { type: "string" }, theme: { type: "string" },
       layers: { type: "array", items: LAYER_OUT }, raw: { type: "object" } }, ["profile", "channel", "layers"]) }),
   TOOL("list_options", "List options",
-    "The values other tools accept. Returns looks (id, name, its kinds, oneTheme when it has a single ground, seeded when it scatters things at random, its settings — key, range, step, default — for set_look's params, its scene objects), text effects (id, name, kind, seeded, needsOutlines, available here), bends, fonts (bundled, imported, installed: filtered by fontQuery, at most 200 listed; latin: those that cannot set Chinese), the platforms and the ratios their covers use, size presets, and Surprise me's locks. `only` limits the answer to some of these.",
-    input({ only: list(pick(["looks", "effects", "bends", "fonts", "platforms", "sizes", "locks"], ""), "Only these groups.", { minItems: 1, uniqueItems: true }), fontQuery: str("Only installed fonts whose name has this in it (case aside).", { maxLength: 80 }) }),
+    "The values other tools accept. Returns looks (id, name, its kinds, a line on what it is drawn like and what it is for, oneTheme when it has a single ground, seeded when it scatters things at random), text effects (id, name, kind, seeded, needsOutlines, available here), bends, fonts (bundled, imported, installed: filtered by fontQuery, at most 200 listed; latin: those that cannot set Chinese), the platforms and the ratios their covers use, size presets, and Surprise me's locks. look: one look alone, all of it — what it is in full, its settings (key, range, step, default: set_look's params) and its scene objects. `only` limits the answer to some of these groups (with look and no only: the looks alone).",
+    input({ only: list(pick(["looks", "effects", "bends", "fonts", "platforms", "sizes", "locks"], ""), "Only these groups.", { minItems: 1, uniqueItems: true }), look: pick(LOOK_IDS, "This look alone, with its settings."), fontQuery: str("Only installed fonts whose name has this in it (case aside).", { maxLength: 80 }) }),
     { annotations: READ, outputSchema: out({ looks: { type: "array" }, effects: { type: "array" }, bends: { type: "array" }, fonts: { type: "object" }, platforms: { type: "array" }, sizes: { type: "array" }, locks: { type: "array" } }) }),
   TOOL("list_library", "List the library",
     "Pictures and assets that can be put on a cover. Returns photos (the bitmap library: pid — for add_photo's source.library —, name, kind upload/ai/repaint, when it was added), stickers and graphics (built in: id, name, group), and mine (the user's own assets: id, name, kind image/ai) — the ids for add_layer's asset. kind keeps one group; query, those whose name has the word in it; at most limit of each (default 100).",
@@ -140,7 +140,7 @@ export const TOOLS = [
     input({ profile: PROFILE, channel: CHANNEL, title: str("The title.", { maxLength: 2000 }), subtitle: str("The subtitle.", { maxLength: 2000 }), tag: str("The tag, the small label in a corner (\"EP.01\").", { maxLength: 200 }) }),
     { needs: { any: ["title", "subtitle", "tag"] }, outputSchema: out({ title: { type: "string" }, subtitle: { type: "string" }, tag: { type: "string" }, warnings: WARNINGS }) }),
   TOOL("set_look", "Set the look",
-    "Sets the profile's look, which every channel of it shares, and/or its settings: params (the look's own settings by key, as list_options lists them; a value out of range is clamped and said in warnings, an unknown key refused), theme (a dark or light ground, for looks with two), seed (where the look scatters things), resetParams (its settings back to their defaults). Not counted among the user's most used looks. One undo step. Returns the look, theme, seed and settings as they now are.",
+    "Sets the profile's look, which every channel of it shares, and/or its settings: params (the look's own settings by key, as list_options with look lists them; a value out of range is clamped and said in warnings, an unknown key refused), theme (a dark or light ground, for looks with two), seed (where the look scatters things), resetParams (its settings back to their defaults). Not counted among the user's most used looks. One undo step. Returns the look, theme, seed and settings as they now are.",
     input({ profile: PROFILE, look: pick(LOOK_IDS, "The look's id."), params: { type: "object", description: "The look's settings to change, by key: a number, or text for a text setting.", additionalProperties: { type: ["number", "string"] } },
       theme: pick(["dark", "light"], "The ground."), seed: int("Where the look scatters things at random.", 0, 999999), resetParams: bool("Its settings back to their defaults first.") }),
     { needs: { any: ["look", "params", "theme", "seed", "resetParams"] }, outputSchema: out({ look: { type: "string" }, theme: { type: "string" }, seed: { type: "integer" }, params: { type: "object" }, warnings: WARNINGS }, ["look"]) }),
@@ -149,12 +149,12 @@ export const TOOLS = [
     input({ profile: PROFILE, channel: CHANNEL, name: str("Its name.", { maxLength: 80 }), sub: str("The line under its name.", { maxLength: 120 }), code: str("Its code.", { maxLength: 40 }), color: str("Its colour, \"#rrggbb\".", { pattern: HEX }) }, ["channel"]),
     { needs: { any: ["name", "sub", "code", "color"] }, outputSchema: CHANNEL_OUT }),
   TOOL("place_layer", "Place a layer",
-    "Moves, scales, turns or stretches a layer: absolute (x, y, scale, rotate, stretchX, stretchY), relative (move {dx, dy}, scaleBy, rotateBy), or reset: true for where the layout puts it. All are as the layer is at `size` (the one on the canvas when left out, which the window then shows): for a layer that was added x, y is its centre as shares of the canvas (0.5, 0.5 the middle); for a layout part or a copy of one, its offset from its place in the layout, likewise in shares of the canvas; scale is get_cover's place.s times what that size adds (a sticker is put on at 0.3, text at 0.35, a solid at 1, a layout part at 1). scope says which sizes the change reaches (all by default; the others move as far across their own canvas). A cut-out linked to a photo goes where its photo goes (move moves both; x and y are refused), its scale, turn and stretch its own. Not for bg, the frame or a locked layer, nor turning or stretching a photo that fills the canvas. One undo step. Returns its placement at `size` in the same terms, and its box there as render_preview gives boxes.",
+    "Moves, scales, turns or stretches a layer: absolute (x, y, scale, rotate, stretchX, stretchY), relative (move {dx, dy}, scaleBy, rotateBy), or reset: true for where it was put on (see reset). All are as the layer is at `size` (the one on the canvas when left out, which the window then shows): for a layer that was added x, y is its centre as shares of the canvas (0.5, 0.5 the middle); for a layout part or a copy of one, its offset from its place in the layout, likewise in shares of the canvas; for a cut-out or a cropped photo, the centre of the whole picture's frame, not of the part that shows (box says where that landed); scale is get_cover's place.s times what that size adds (a sticker is put on at 0.3, text at 0.35, a solid at 1, a layout part at 1). scope says which sizes the change reaches (all by default; the others move as far across their own canvas). A cut-out linked to a photo goes where its photo goes (move moves both; x and y are refused), its scale, turn and stretch its own. Not for bg, the frame or a locked layer, nor turning or stretching a photo that fills the canvas. One undo step. Returns its placement at `size` in the same terms, and its box there as render_preview gives boxes.",
     input({ profile: PROFILE, channel: CHANNEL, layer: LAYER, size: SIZE, scope: SCOPE,
       x: num("Across (see above).", -3, 3), y: num("Down (see above).", -3, 3), scale: num("Its scale (see above).", 0.02, 20), rotate: num("Its turn in degrees, clockwise.", -360, 360),
       stretchX: num("Its stretch across, 1 none.", 0.05, 20), stretchY: num("Its stretch down, 1 none.", 0.05, 20),
       move: obj({ dx: num("Across, as a share of the canvas's width.", -3, 3), dy: num("Down, as a share of the canvas's height.", -3, 3) }, [], "Moves it by this much."),
-      scaleBy: num("Scales it by this much.", 0.05, 20), rotateBy: num("Turns it by this many degrees.", -360, 360), reset: bool("Back to where the layout puts it, at the sizes scope reaches.") }, ["layer"]),
+      scaleBy: num("Scales it by this much.", 0.05, 20), rotateBy: num("Turns it by this many degrees.", -360, 360), reset: bool("Back to where it was put on, at the sizes scope reaches: a layout part where the layout puts it, a layer that was added in the middle at the scale it is put on at, a photo filling the canvas filling it; a linked cut-out back over its photo at every size.") }, ["layer"]),
     { annotations: { ...EDIT, idempotentHint: false }, needs: { any: ["x", "y", "scale", "rotate", "stretchX", "stretchY", "move", "scaleBy", "rotateBy", "reset"] }, outputSchema: out({ size: { type: "string" }, place: PLACE, box: { anyOf: [BOX, { type: "null" }] }, warnings: WARNINGS }, ["size", "place"]) }),
   TOOL("set_layer_effect", "Set a text effect",
     "Sets a headline's (the title's, the subtitle's or a text layer's) text effect: effect (as list_options lists them; \"auto\" lets the look decide), amount (its strength 0–2; not for the effects of kind \"passes\"), reshuffle (deals a seeded effect's letters again), outline and shadow (0–2). Effects that need glyph outlines are refused where the host has none. One undo step. Returns the layer.",
@@ -178,7 +178,7 @@ export const TOOLS = [
     input({ profile: PROFILE, channel: CHANNEL, layer: LAYER, visible: bool("Shown."), opacity: num("How opaque.", 0, 1), locked: bool("Locked in place."), included: bool("A layout part on the cover (false: left out)."), sizes: SIZES }, ["layer"]),
     { needs: { any: ["visible", "opacity", "locked", "included", "sizes"] }, outputSchema: LAYER_DONE }),
   TOOL("add_layer", "Add a layer",
-    "Adds a layer just above `above` (a layer id, or \"top\"; by default the top, and a copy just above what it copies): kind \"text\" (its words in text; *highlight* and \\n as in a title), \"solid\" (a block of colour the canvas's size; color, by default the channel colour), \"asset\" (a sticker, a graphic or the user's own: asset {kind, id} from list_library) or \"copy\" (a copy of layer `of`: a layout part other than bg and frame, or a layer that was added). at {x, y} puts its centre there (shares of the canvas; for a copy of a layout part, its offset, as place_layer has it), scale sets its size (as place_layer's scale). The new layer is selected. One undo step. Returns it as get_cover lists layers.",
+    "Adds a layer just above `above` (a layer id, or \"top\"; by default the top, and a copy just above what it copies): kind \"text\" (its words in text; *highlight* and \\n as in a title), \"solid\" (a block of colour the canvas's size; color, by default the channel colour), \"asset\" (a sticker, a graphic or the user's own: asset {kind, id} from list_library) or \"copy\" (a copy of layer `of`: a layout part other than bg and frame, or a layer that was added). at {x, y} puts it there at every size, as place_layer's x and y in scope all (its centre as shares of the canvas; for a copy of a layout part, its offset from where the layout puts that part): a copy of a layer tuned at some sizes leaves those tunings of its place behind. scale sets its size at every size likewise (place_layer's scale). The new layer is selected. One undo step. Returns it as get_cover lists layers.",
     input({ profile: PROFILE, channel: CHANNEL, kind: pick(["text", "solid", "asset", "copy"], "What to add."), text: str("A text layer's words.", { maxLength: 2000 }), color: str("A solid's colour, \"#rrggbb\".", { pattern: HEX }),
       asset: obj({ kind: pick(["sticker", "graphic", "user"], "Which library."), id: str("Its id, from list_library.", { maxLength: 80 }) }, ["kind", "id"], "The asset to add."),
       of: str("The layer to copy."), above: str("The layer it goes above, or \"top\"."), at: AT, scale: num("Its scale (a sticker 0.3, text 0.35, a solid 1: the canvas's size).", 0.02, 20) }, ["kind"]),
@@ -188,57 +188,57 @@ export const TOOLS = [
     input({ profile: PROFILE, channel: CHANNEL, layer: LAYER }, ["layer"]),
     { annotations: GONE, history: true, outputSchema: out({ removed: { type: "array", items: { type: "string" } } }, ["removed"]) }),
   TOOL("reorder_layer", "Reorder a layer",
-    "Moves a layer in the stack: to \"top\", \"bottom\", \"up\" or \"down\" one (past the next layer of this cover), or to just above layer `above`. Moving the layout's own parts orders them so in the profile's design too. One undo step. Returns its place in the stack (0 the bottom) and the layers' ids in order.",
-    input({ profile: PROFILE, channel: CHANNEL, layer: LAYER, to: pick(["top", "bottom", "up", "down"], "Where to."), above: str("The layer it goes just above.") }, ["layer"]),
+    "Moves a layer in the stack: to \"top\", \"bottom\", or just above layer `above` (\"top\": the topmost), as a row dropped in the layer list — which orders the layout's own parts so in the profile's design too —; or \"up\" or \"down\" one, past the next layer of this cover, as its ▲ and ▼ do (this cover alone). One undo step. Returns its place in the stack (0 the bottom) and the layers' ids in order.",
+    input({ profile: PROFILE, channel: CHANNEL, layer: LAYER, to: pick(["top", "bottom", "up", "down"], "Where to."), above: str("The layer it goes just above, or \"top\".") }, ["layer"]),
     { annotations: { ...EDIT, idempotentHint: false }, needs: { one: ["to", "above"] }, outputSchema: out({ index: { type: "integer" }, layers: { type: "array", items: { type: "string" } }, warnings: WARNINGS }, ["index"]) }),
   TOOL("add_photo", "Add a photo",
-    "Puts a photo on the cover. source is exactly one of: path (an image file on this computer, absolute), url (an image on the web), library (a pid from list_library) or data (the image in base64, or a data: URL). fill: true makes it the background, filling the canvas; else it is placed as a print, its centre at `at` {x, y}. It goes above `above` (default the selected layer). The picture joins the bitmap library. One undo step. Returns the new layer and the picture's pid.",
+    "Puts a photo on the cover. source is exactly one of: path (an image file on this computer, absolute: PNG, JPEG, WebP, GIF, HEIC or AVIF, at most 64 MB), url (an http(s) link to an image), library (a pid from list_library) or data (the image in base64, or a data: URL). Prefer a path or a url: data travels whole through the conversation, at most 24 Mi characters. fill: true makes it the background, filling the canvas, just above bg; else it is placed as a print, its centre at `at` {x, y}, just above `above` (a layer id or \"top\"; by default the selected layer). A new picture joins the bitmap library. One undo step. Returns the new layer and the picture's pid.",
     input({ profile: PROFILE, channel: CHANNEL,
-      source: { type: "object", description: "Where the picture comes from: exactly one of these.", properties: { path: str("An image file, absolute.", { maxLength: 4096 }), url: str("An http(s) URL.", { maxLength: 4096 }), library: str("A pid from list_library.", { maxLength: 40 }), data: str("Base64, or a data: URL.") }, minProperties: 1, maxProperties: 1, additionalProperties: false },
+      source: { type: "object", description: "Where the picture comes from: exactly one of these.", properties: { path: str("An image file, absolute.", { maxLength: 4096 }), url: str("An http(s) URL.", { maxLength: 4096 }), library: str("A pid from list_library.", { maxLength: 40 }), data: str("Base64, or a data: URL (prefer path or url).", { maxLength: 25165824 }) }, minProperties: 1, maxProperties: 1, additionalProperties: false },
       at: AT, fill: bool("Fill the canvas, as the background."), name: str("Its name in the library.", { maxLength: 60 }), above: str("The layer it goes above, or \"top\".") }, ["source"]),
     { annotations: { ...ADD, openWorldHint: true }, outputSchema: out({ layer: LAYER_OUT, pid: { type: "string" } }, ["layer", "pid"]) }),
   TOOL("crop_photo", "Crop a photo",
-    "Crops a photo or asset layer: crop {x, y, w, h} (shares of the picture) or a free shape {pts: [[u, v], …]} (3 to 64 corners in order round it, shares of the picture), or ratio (\"photo\" or w:h) for the largest crop of that ratio about the middle, or reset: true for the whole picture. Not for a photo that fills the canvas. One undo step. Returns the crop as kept (null: none).",
+    "Crops a photo or asset layer, as its crop window does: crop {x, y, w, h} (all four, shares of the picture: its left and top edges, its width and height) or a free shape {pts: [[u, v], …]} (3 to 64 corners in order round it, shares of the picture), or ratio (\"photo\" or w:h) for a crop of that ratio about as large as the one it has, about its middle, or reset: true for the whole picture. Not for a photo that fills the canvas. One undo step. Returns the crop as kept (null: none), and in warnings what was kept within the picture.",
     input({ profile: PROFILE, channel: CHANNEL, layer: LAYER,
       crop: obj({ x: num("Its left edge.", 0, 1), y: num("Its top edge.", 0, 1), w: num("Its width.", 0.02, 1), h: num("Its height.", 0.02, 1), pts: list(POINT, "A free shape's corners.", { minItems: 3, maxItems: CROP_PTS }) }, [], "The part kept: a rectangle, or a shape (pts)."),
       ratio: pick(["photo", "1:1", "4:3", "3:4", "16:9", "9:16"], "Crop to this ratio (\"photo\": the picture's own)."), reset: bool("The whole picture again.") }, ["layer"]),
-    { needs: { one: ["crop", "ratio", "reset"] }, outputSchema: out({ crop: { type: ["object", "null"] } }, ["crop"]) }),
+    { needs: { one: ["crop", "ratio", "reset"] }, outputSchema: out({ crop: { type: ["object", "null"] }, warnings: WARNINGS }, ["crop"]) }),
   TOOL("cut_out", "Cut out a subject",
-    "Cuts the subject out of a photo layer (on macOS with Vision, elsewhere with a downloaded model): a layer with the subject alone, linked to the photo, goes above the title so it can stand in front of it. scope keeps it to the sizes facing size's way, or to size alone. The first cut-out of a photo can take a while. One undo step. Returns the cut-out layer's id and the sizes it shows at.",
+    "Cuts the subject out of a photo layer (on macOS with Vision, elsewhere with a downloaded model): a layer with the subject alone, linked to the photo, goes above the title so it can stand in front of it; a photo cut out already has its subject found again. scope keeps it to the sizes facing size's way, or to size alone (default all). The first cut-out of a photo can take a while. Answers unavailable where the host cannot cut out or the model is not downloaded (the user downloads it in Settings → AI → Cut-out). One undo step. Returns the cut-out layer's id and the sizes it shows at.",
     input({ profile: PROFILE, channel: CHANNEL, layer: LAYER, size: SIZE, scope: SCOPE }, ["layer"]),
     { annotations: ADD, timeoutMs: 600000, outputSchema: out({ cutout: { type: "string" }, sizes: either(ALL, { type: "array", items: { type: "string" } }) }, ["cutout"]) }),
   TOOL("weave", "Weave with the lettering",
-    "Weaves a cut-out (or an asset) with the lettering below it, as a magazine's subject is with its masthead. by \"head\": its head in front, ending at line (0.1–0.9 of the subject's height from its top), the rest behind; \"letters\": front gives, for each lettering layer id, \"all\", \"none\", \"alternate\" or a list of letter keys (get_cover with letters: true) to put in front, the rest behind; \"brush\": strokes [{front, r, pts}] painted in the picture's own frame (pts as shares of its width and height, r of its longer side). with: the lettering layers it weaves with (default every one below it). off: true unweaves it. One undo step. Returns the weave as kept.",
+    "Weaves a cut-out (or an asset) with the lettering below it, as a magazine's subject is with its masthead. by \"head\": its head in front, ending at line (0.1–0.9 of the subject's height from its top), the rest behind; \"letters\": front gives, for each lettering layer id, \"all\", \"none\", \"alternate\" or a list of letter keys (get_cover with letters: true) to put in front, the rest behind; \"brush\": strokes [{front, r, pts}] painted in the picture's own frame (pts as shares of its width and height, r of its longer side), in place of those it has. with: the lettering layers below it that it weaves with (a first weave: the title, else the nearest below). Each way's settings are kept when another is chosen. off: true unweaves it. One undo step. Returns the weave as kept, and in warnings what will not show as it is.",
     input({ profile: PROFILE, channel: CHANNEL, layer: LAYER, off: bool("Unweave it."), by: pick(WEAVE_WAYS, "How."), with: list(str("A lettering layer's id."), "The layers it weaves with.", { maxItems: WEAVE_MAX.with, uniqueItems: true }),
       line: num("Where the head ends.", 0.1, 0.9),
       front: { type: "object", description: "By lettering layer id: the letters in front.", additionalProperties: either(pick(["all", "none", "alternate"], ""), list({ type: "string" }, "", { maxItems: WEAVE_MAX.front })) },
       strokes: list(obj({ front: bool("In front where it passes (false: behind)."), r: num("Its radius.", BRUSH_R[0], BRUSH_R[1]), pts: list(POINT, "Its points.", { minItems: 1, maxItems: WEAVE_MAX.points }) }, ["front", "r", "pts"]), "The brush strokes, in order.", { maxItems: WEAVE_MAX.strokes }) }, ["layer"]),
-    { needs: { any: ["off", "by", "with", "line", "front", "strokes"] }, outputSchema: out({ weave: { type: ["object", "null"] } }, ["weave"]) }),
+    { needs: { any: ["off", "by", "with", "line", "front", "strokes"] }, outputSchema: out({ weave: { type: ["object", "null"] }, warnings: WARNINGS }, ["weave"]) }),
   TOOL("surprise", "Surprise me",
-    `Surprise me: deals count (default ${RULES.hands.count}) variations of the cover — look, lettering, layout — and puts the first on the canvas. locks keeps these as they are, this time only: ${SURPRISE_LOCKS.join(", ")}. Returns each hand (its number, look, layout and a few words) and, by default, one contact sheet of them labelled from 1 (images: "each" for an image per hand, "none" for none). Take another with pick_hand. One undo step.`,
+    `Surprise me: deals count (default ${RULES.hands.count}) variations of the cover — look, lettering, layout — at the size on the canvas, and puts the first on the canvas. locks keeps these as they are, this time only: ${SURPRISE_LOCKS.join(", ")} (default: those set in Surprise me's window). Not counted among the user's most used looks. Returns each hand (its number, look, layout and a few words) and, by default, one contact sheet of them labelled from 1 (images: "each" for an image per hand, "none" for none). Take another with pick_hand. One undo step.`,
     input({ profile: PROFILE, channel: CHANNEL, count: int("How many hands.", 1, RULES.hands.count), locks: list(pick(SURPRISE_LOCKS, ""), "What to leave as it is.", { uniqueItems: true }), images: pick(["sheet", "each", "none"], "Which images to return (default sheet).") }),
-    { annotations: ADD, timeoutMs: 120000, outputSchema: out({ hands: { type: "array", items: out({ hand: { type: "integer" }, look: { type: "string" }, lookName: { type: "string" }, layout: { type: "string" }, says: { type: "string" } }) }, kept: { type: "integer" } }, ["hands", "kept"]) }),
+    { annotations: ADD, timeoutMs: 120000, outputSchema: out({ hands: { type: "array", items: out({ hand: { type: "integer" }, look: { type: "string" }, lookName: { type: "string" }, layout: { type: "string" }, says: { type: "string" } }) }, kept: { type: "integer" }, locks: { type: "array", items: { type: "string" } } }, ["hands", "kept"]) }),
   TOOL("pick_hand", "Pick a hand",
     "Puts hand `hand` (from 1, as labelled) of the last surprise on the canvas instead, on the same undo step. Refused once the cover has been changed since the deal: deal again then.",
     input({ hand: int("The hand's number.", 1, RULES.hands.count) }, ["hand"]),
-    { outputSchema: out({ kept: { type: "integer" } }, ["kept"]) }),
+    { outputSchema: out({ kept: { type: "integer" }, look: { type: "string" }, lookName: { type: "string" } }, ["kept"]) }),
   TOOL("apply_cover_json", "Apply a cover",
-    "A last resort: replaces the cover with `cover`, a whole cover as SmedCover stores it ({title, subtitle, tag, layers}; get_cover with raw: true gives one to start from). It is checked as a file read from disk is: returns what was corrected or dropped, and the photos and assets it names that are not here. One undo step.",
+    "A last resort: replaces the cover with `cover`, a whole cover as SmedCover stores it ({title, subtitle, tag, layers}; get_cover with raw: true gives one to start from). It is checked as a file read from disk is. Returns what was corrected (\"title\", \"layers.<id>.<field>\", \"layers\" for their order), dropped (a field or a layer it could not keep) and restored (a layout part it lacked, put back), and the photos (pids) and assets (kind:id) it names that are not here. One undo step.",
     input({ profile: PROFILE, channel: CHANNEL, cover: { type: "object", description: "The cover." } }, ["cover"]),
-    { annotations: { ...GONE, idempotentHint: true }, history: true, outputSchema: out({ corrected: { type: "array", items: { type: "string" } }, dropped: { type: "array", items: { type: "string" } }, missingPhotos: { type: "array", items: { type: "string" } }, missingAssets: { type: "array", items: { type: "string" } } }) }),
+    { annotations: { ...GONE, idempotentHint: true }, history: true, outputSchema: out({ corrected: { type: "array", items: { type: "string" } }, dropped: { type: "array", items: { type: "string" } }, restored: { type: "array", items: { type: "string" } }, missingPhotos: { type: "array", items: { type: "string" } }, missingAssets: { type: "array", items: { type: "string" } } }, ["corrected", "dropped", "restored", "missingPhotos", "missingAssets"]) }),
   TOOL("open_project", "Open a project",
-    "Opens a SmedCover project (a .smedcover.json file: a profile with its covers, photos, assets and fonts), from a file on this computer (file, an absolute path) or given whole (project, the object or its JSON text): as a new profile (as \"new\", the default) or over the current one (\"current\"). The window switches to it. Returns the profile and the channel opened.",
-    input({ file: str("The project file, absolute.", { maxLength: 4096 }), project: { type: ["object", "string"], description: "The project, or its JSON text." }, as: pick(["new", "current"], "A new profile, or over the current one.") }),
-    { annotations: GONE, history: true, needs: { one: ["file", "project"] }, outputSchema: out({ profile: out({ id: { type: "string" }, name: { type: "string" }, created: { type: "boolean" } }), channel: { type: "string" } }, ["profile", "channel"]) }),
+    "Opens a SmedCover project (a .smedcover.json file: a profile with its covers, photos, assets and fonts), from a file on this computer (file, an absolute path to a *.smedcover.json, at most 128 MB; preferred) or given whole (project, the object or its JSON text, at most 24 Mi characters). Its profile, when it is here, takes it; else `as` says where: a new profile (\"new\", the default) or the current one (\"current\"). The window switches to its profile and channel, its cover one step of undo there. Returns the profile (created: whether it was made new) and the channel opened.",
+    input({ file: str("The project file, absolute.", { maxLength: 4096 }), project: { type: ["object", "string"], description: "The project, or its JSON text.", maxLength: 25165824 }, as: pick(["new", "current"], "A new profile, or over the current one.") }),
+    { annotations: GONE, history: true, needs: { one: ["file", "project"] }, outputSchema: out({ profile: out({ id: { type: "string" }, name: { type: "string" }, created: { type: "boolean" } }), channel: { type: "string" }, warnings: WARNINGS }, ["profile", "channel"]) }),
 
   // ---- making files
   TOOL("batch_covers", "Make covers in a batch",
-    "Makes and exports a cover for each job, as importing a CSV does: jobs [{channel, title, tag?, subtitle?}] (channel by name, code or number) or csv (the same as text: channel, title, tag, subtitle, with or without a header row). Each starts from its channel's cover with the words replaced, at sizes (default every size of the profile), into folder dir (absolute; default the profile's export folder), in format, at scale (1–4×; default the export settings'). Never overwrites a file: a name taken gets a number. Nothing is written when a job names a channel the profile does not have. The covers in the window are not changed. Returns the folder and each file written.",
+    "Makes and exports a cover for each job, as importing a CSV does: jobs [{channel, title, tag?, subtitle?}] (channel by id, name, code or number) or csv (the same as text: channel, title, tag, subtitle, with or without a header row; a row with no channel is the one shown). Each starts from its channel's cover with the words replaced, at sizes (default every size of the profile), into folder dir (absolute; default the profile's export folder), in format, at scale (1–4×; default the export settings'). Never overwrites a file: a name taken gets a number. Nothing is written when a job names a channel the profile does not have. The covers in the window are not changed. Only where the host writes files. Returns the folder and each file written (cancelled: true when the call was cancelled part-way).",
     input({ profile: PROFILE, jobs: list(obj({ channel: CHANNEL, title: str("Its title.", { maxLength: 2000 }), tag: str("Its tag.", { maxLength: 200 }), subtitle: str("Its subtitle.", { maxLength: 2000 }) }, ["channel", "title"]), "The covers to make.", { minItems: 1, maxItems: 500 }),
       csv: str("The jobs as CSV text.", { maxLength: 1000000 }), sizes: SIZES, dir: str("The folder to write into, absolute.", { maxLength: 4096 }), format: pick(FORMATS, "The image format."), scale: int("The resolution, times the size's pixels.", 1, 4) }),
     { annotations: GONE, history: false, timeoutMs: 1800000, needs: { one: ["jobs", "csv"] }, outputSchema: WRITTEN }),
   TOOL("export", "Export",
-    "Writes covers to image files: channels (default the one shown; \"all\" for every channel) at sizes (default those ticked in the Export window; \"all\" for every size), into dir (an absolute folder; default the profile's export folder — pass dir when it has none), in format (png, jpeg, webp) and at scale (1–4×; default the export settings'), each named by the export name pattern. Never overwrites a file: a name taken gets a number. Only where the host writes files. Returns the folder and each file's path.",
+    "Writes covers to image files: channels (default the one shown; \"all\" for every channel) at sizes (default those ticked in the Export window; \"all\" for every size), into dir (an absolute folder; default the profile's export folder — pass dir when it has none), in format (png, jpeg, webp) and at scale (1–4×; default the export settings'), each named by the export name pattern. Never overwrites a file: a name taken gets a number. The folder given is not kept for the profile. Only where the host writes files. Returns the folder and each file's path (cancelled: true when the call was cancelled part-way).",
     input({ profile: PROFILE, channels: either(ALL, list(CHANNEL, "", { minItems: 1, maxItems: 200 })), sizes: SIZES, dir: str("The folder to write into, absolute.", { maxLength: 4096 }), format: pick(FORMATS, "The image format."), scale: int("The resolution, times the size's pixels.", 1, 4) }),
     { annotations: GONE, history: false, timeoutMs: 1800000, outputSchema: WRITTEN }),
 
@@ -496,7 +496,10 @@ export function boxesOf(hits, [vw, vh]) {
 /**
  * A contact sheet of `sizes` ([{w, h}]): each drawn at one height, in rows as wide as fit within `side` × 1.5, a caption
  * of `cap` pixels under each, `gap` between them — the height the tallest that lets the sheet fit that square, from
- * side / 2 down. Returns {width, height, tile: the drawings' height, tiles: [{x, y, w, h}] (the drawings, in order)}.
+ * side / 2 down. So many that they do not fit a pixel high with their captions: the gaps and captions halved till they
+ * do (a caller draws no caption too small to read), so the sheet stays within the square for any profile's sizes (at
+ * most 80, none past 128:1). Returns {width, height, tile: the drawings' height, tiles: [{x, y, w, h}] (the drawings,
+ * in order), gap, cap}.
  */
 export function sheetPlan(sizes, side, { gap = 16, cap = 30 } = {}) {
   const most = Math.round(side * 1.5);
@@ -509,8 +512,54 @@ export function sheetPlan(sizes, side, { gap = 16, cap = 30 } = {}) {
       tiles.push({ x, y, w, h: th });
       x += w + gap; width = Math.max(width, x);
     }
-    return { width, height: y + th + cap + gap, tile: th, tiles };
+    return { width, height: y + th + cap + gap, tile: th, tiles, gap, cap };
   };
-  for (let th = Math.round(side / 2); th > 24; th = Math.floor(th * 0.92)) { const p = flow(th); if (p.width <= most && p.height <= most) return p; }
-  return flow(24);
+  for (let th = Math.round(side / 2); th >= 1; th = th > 24 ? Math.floor(th * 0.92) : th - 1) { const p = flow(th); if (p.width <= most && p.height <= most) return p; }
+  return gap > 0 || cap > 0 ? sheetPlan(sizes, side, { gap: gap >> 1, cap: cap >> 1 }) : flow(1);
+}
+/**
+ * The type of a picture by its first bytes (a Uint8Array, or an ArrayBuffer): PNG, JPEG, GIF, WebP, or HEIC/HEIF/AVIF
+ * (an ISO media file's ftyp box with one of their brands), as picture_type in core/src/files.rs tells them; null for
+ * anything else.
+ */
+export function imageType(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), at = (i, s) => [...s].every((c, k) => b[i + k] === c.charCodeAt(0));
+  if (at(0, "\x89PNG\r\n\x1a\n")) return "image/png";
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (at(0, "GIF87a") || at(0, "GIF89a")) return "image/gif";
+  if (at(0, "RIFF") && at(8, "WEBP")) return "image/webp";
+  if (at(4, "ftyp")) {
+    const brand = String.fromCharCode(...b.slice(8, 12));
+    return ["avif", "avis"].includes(brand) ? "image/avif" : ["heic", "heix", "hevc", "hevx", "heim", "heis"].includes(brand) ? "image/heic" : ["mif1", "msf1"].includes(brand) ? "image/heif" : null;
+  }
+  return null;
+}
+/** Whether a and b, as JSON has them, hold the same, their keys in whatever order. */
+const alike = (a, b) => a === b || (!!a && !!b && typeof a === "object" && typeof b === "object" && Array.isArray(a) === Array.isArray(b)
+  && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => Object.hasOwn(b, k) && alike(a[k], b[k])));
+/**
+ * What checking a cover given whole (apply_cover_json's `raw`) made of it (`fixed`: channelCover's), for the agent:
+ * `corrected`, each field given that was kept otherwise ("title", "layers.<id>.<field>"; "layers" for the order of those
+ * kept); `dropped`, each field and layer given that was not kept ("scene", "layers.<id>.<field>", "layers.<id>", a
+ * layer without an id by its place, "layers[3]"); `restored`, each layer kept that was not given (a layout part put
+ * back); a field not given that was filled in is none of these. `missingPhotos`, the pids of its photo layers not
+ * hasPhoto(pid); `missingAssets`, its asset layers' refs ("sticker:burst") not hasAsset(ref).
+ */
+export function coverDiff(raw, fixed, { hasPhoto = () => true, hasAsset = () => true } = {}) {
+  const r = raw && typeof raw === "object" ? raw : {}, corrected = [], dropped = [], restored = [];
+  for (const k of Object.keys(r)) if (k !== "layers") (Object.hasOwn(fixed, k) ? (alike(r[k], fixed[k]) ? null : corrected) : dropped)?.push(k);
+  const given = Array.isArray(r.layers) ? r.layers : [], kept = new Map(fixed.layers.map((L) => [L.id, L])), matched = new Set();
+  if (r.layers !== undefined && !Array.isArray(r.layers)) corrected.push("layers");
+  given.forEach((g, i) => {
+    const id = g && typeof g === "object" && typeof g.id === "string" ? g.id : null, L = id !== null && !matched.has(id) ? kept.get(id) : null;
+    if (!L) return dropped.push(id !== null ? `layers.${id}` : `layers[${i}]`);
+    matched.add(id);
+    for (const k of Object.keys(g)) (Object.hasOwn(L, k) ? (alike(g[k], L[k]) ? null : corrected) : dropped)?.push(`layers.${id}.${k}`);
+  });
+  for (const L of fixed.layers) if (!matched.has(L.id)) restored.push(`layers.${L.id}`);
+  const order = (ls) => ls.map((l) => l && l.id).filter((id) => matched.has(id)).join("\n");
+  if (order(given.filter((g, i) => given.findIndex((x) => x && x.id === g?.id) === i)) !== order(fixed.layers)) corrected.push("layers");
+  const missingPhotos = [...new Set(fixed.layers.filter((L) => L.type === "photo" && L.pid && !hasPhoto(L.pid)).map((L) => L.pid))];
+  const missingAssets = [...new Set(fixed.layers.filter((L) => L.type === "asset" && L.ref && !hasAsset(L.ref)).map((L) => `${L.ref.kind}:${L.ref.id}`))];
+  return { corrected, dropped, restored, missingPhotos, missingAssets };
 }

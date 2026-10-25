@@ -7126,12 +7126,13 @@ const NOT_THE_FOLDER = /encode|invalid file name|expected a binary body/i;
 /**
  * Writes jobs into folder `dir`, once, asking nothing: resolves with how many were written (as runExport), each file
  * written ({name, path, job}, in the order they were done) and what stopped it (null: nothing). `opts`: runExport's
- * ({progress, out}), `out` also the format and quality the files are written in.
+ * ({progress, out}), `out` also the format and quality the files are written in; `fresh`, never over a file (a name
+ * taken gets a number, see write_fresh in core/src/image.rs; an agent's exports), `path` then the name written.
  */
 async function writeInto(dir, jobs, opts = {}) {
   let err = null;
-  const paths = [];
-  const n = await runExport(jobs, async (bytes, name, job) => { paths.push({ name, path: await invoke("write_image", framed(bytes, { dir, name }, opts.out)), job }); }, (e) => { err = e; }, opts);
+  const paths = [], fresh = opts.fresh ? { fresh: true } : {};
+  const n = await runExport(jobs, async (bytes, name, job) => { paths.push({ name, path: await invoke("write_image", framed(bytes, { dir, name, ...fresh }, opts.out)), job }); }, (e) => { err = e; }, opts);
   return { n, paths, err };
 }
 /**
@@ -7258,12 +7259,13 @@ function nameField(example) {
 }
 /**
  * The covers a batch exports for rows of a table (csvToJobs): each on the channel its row names (channelIndex in
- * store.js), or the one on the canvas where it names none this profile has; `unknown`, how many named one it has not.
+ * store.js; a row's `index`, when it has one, the channel's own: an agent's batch_covers found it), or the one on the
+ * canvas where it names none this profile has; `unknown`, how many named one it has not.
  */
 function batchJobs(rows) {
   let unknown = 0;
   const jobs = rows.map((r) => {
-    let index = channelIndex(r.category, S.profile.categories);
+    let index = Number.isInteger(r.index) && S.profile.categories[r.index] ? r.index : channelIndex(r.category, S.profile.categories);
     if (index < 0) { index = catIndex(); if (String(r.category).trim()) unknown++; }
     return { index, cover: { ...coverFor(S.profile.categories[index].id), title: r.title, tag: r.tag, subtitle: r.subtitle } };   // that channel's own cover, with the row's words (no subtitle but the row's own)
   });
@@ -7586,6 +7588,12 @@ async function openProject(raw, ask) {
   touch({ cover: true, panel: true, side: true, strip: true });
   return { profile: S.profile, catId: S.cover.catId };
 }
+/** The project file of the cover on the canvas (version 4): the cover with its profile and channel, the pictures, vector assets and imported fonts it uses. */
+async function projectFile() {
+  const fonts = await embedFonts([S.cover.layers, S.profile.design.layers]);
+  return { app: "smedcover", kind: "project", version: 4, profileName: S.profile.name, profile: S.profile, catId: S.cover.catId, cover: S.cover,
+    photos: embedPhotos([S.cover]), assets: embedAssets(usedUserAssets(S.profile, S.cover)), fonts };
+}
 const projectActions = {
   /** A project file picked and opened (openProject), asking how where its profile is not here (askProjectProfile). */
   async open() {
@@ -7597,12 +7605,8 @@ const projectActions = {
       if (await openProject(raw, askProjectProfile)) toast(t("proj.opened", S.profile.name, cat().name || cat().code || "—"));
     } catch (e) { fail(e); }
   },
-  /** Version 4: the cover with its profile and channel, the pictures, vector assets and imported fonts it uses. */
   async save() {
-    const fonts = await embedFonts([S.cover.layers, S.profile.design.layers]);
-    saveText(`${(S.cover.title.split("\n")[0] || "cover").replace(/[*\\/:?"<>|]+/g, "").slice(0, 24) || "cover"}.smedcover.json`,
-      JSON.stringify({ app: "smedcover", kind: "project", version: 4, profileName: S.profile.name, profile: S.profile, catId: S.cover.catId, cover: S.cover,
-        photos: embedPhotos([S.cover]), assets: embedAssets(usedUserAssets(S.profile, S.cover)), fonts }));
+    saveText(`${(S.cover.title.split("\n")[0] || "cover").replace(/[*\\/:?"<>|]+/g, "").slice(0, 24) || "cover"}.smedcover.json`, JSON.stringify(await projectFile()));
   },
   reset() { setCover(channelCover(null, S.profile, S.cover.catId)); S.layerId = "title"; touch({ cover: true, panel: true, side: true }); },
 };
@@ -8741,10 +8745,10 @@ async function agentTest(dir) {
   if (!noStep) no("agentStep: a change of nothing made a step");
   if (!putBack) no("agentStep: a change that failed was not put back, or cut off redo");
   // what goes wrong answers as the host expects; a call waits for a dialog
-  const errs = { unknown: await call("draw_me"), invalid: await call("render_preview", { maxSide: 9 }), notYet: await call("crop_photo", { layer: "title", reset: true }) };
+  const errs = { unknown: await call("draw_me"), invalid: await call("render_preview", { maxSide: 9 }), refused: await call("crop_photo", { layer: "title", reset: true }), notHere: await call("add_photo", { source: { path: "/no/such/picture.png" } }) };
   r.answers = Object.fromEntries(Object.entries(errs).map(([k, x]) => [k, x.ok ? "ok" : x.error.code]));
-  if (r.answers.unknown !== "unknown_tool" || r.answers.invalid !== "invalid_arguments" || r.answers.notYet !== "unavailable") no(`errors answered ${JSON.stringify(r.answers)}`);
-  if (S.histIdx !== j0) no("a tool that is not done yet made a step");
+  if (r.answers.unknown !== "unknown_tool" || r.answers.invalid !== "invalid_arguments" || r.answers.refused !== "invalid_arguments" || r.answers.notHere !== "invalid_arguments") no(`errors answered ${JSON.stringify(r.answers)}`);
+  if (S.histIdx !== j0) no("a call refused made a step");
   $("modal").replaceChildren(el("div", { class: "dlg" }, "…")); $("modal").hidden = false;
   setTimeout(() => { $("modal").hidden = true; }, 300);
   const t0 = performance.now(), waited = await call("get_selection");
@@ -8752,6 +8756,7 @@ async function agentTest(dir) {
   if (!waited.ok || r.waitedForDialog < 300) no(`a call did not wait for the dialog (${r.waitedForDialog} ms)`);
   S.cover.title = keep.title; S.cover.tag = keep.tag; touch({ cover: true, panel: true, side: true }); commitPending();
   await agentToolsTest({ call, ok, r, no });
+  await agentFilesTest({ call, ok, r, no, dir });
   r.ok = !r.errors.length;
   return r;
 }
@@ -8777,6 +8782,43 @@ async function mcpTest() {
   return r;
 }
 /**
+ * The self-test's checks of an agent's change through the dispatcher (agentTest's `call`, `ok` and `no`), noted in
+ * `log.tools` and `log.refused`. change(tool, args, steps): `steps` new steps of undo (1; 0 for nothing changed;
+ * "switch": the window switched, the change the first step of a new history), then undone (back to the state before it,
+ * or on arriving) and done again; resolves with its structured answer, or null. refuse(tool, args, code): answered with
+ * `code`, no step, nothing changed. same(a, b): two snapshots alike, as stored or as read back.
+ */
+function agentSteps({ call, ok, no }, log) {
+  const norm = (snap) => { const { p, c } = JSON.parse(snap), q = normalizeProfile(p); return { p: q, c: normalizeCover(c, q) }; };
+  const same = (a, b) => sameValue(JSON.parse(a), JSON.parse(b)) || sameValue(norm(a), norm(b));   // as stored, or as read back
+  const said = (args) => { const s = JSON.stringify(args); return s.length > 160 ? s.slice(0, 157) + "…" : s; };   // a picture's data cut short
+  const change = async (tool, args, steps = 1) => {
+    commitPending();
+    const fresh = steps === "switch", want = fresh ? 1 : steps, before = snapshot(), i0 = S.histIdx, x = await call(tool, args), got = { tool, steps: fresh ? S.histIdx : S.histIdx - i0 };
+    if (!x.ok) { no(`${tool} ${said(args)}: ${x.error.code}: ${x.error.message}`); log.tools.push({ ...got, error: x.error.code }); return null; }
+    const s = x.result.structuredContent || {}, base = fresh ? S.hist[0] : before;
+    if (got.steps !== want || S.hist.length !== S.histIdx + 1) no(`${tool} ${said(args)}: ${got.steps} steps of undo, not ${want}`);
+    if (want) {
+      const after = snapshot();
+      await ok("undo"); got.undo = same(snapshot(), base);
+      await ok("redo"); got.redo = same(snapshot(), after);
+      if (!got.undo) no(`${tool}: undo did not bring back the state before it`);
+      if (!got.redo) no(`${tool}: redo did not bring the change back`);
+    }
+    if (s.warnings) got.warnings = s.warnings;
+    log.tools.push(got);
+    return s;
+  };
+  const refuse = async (tool, args, code = "invalid_arguments") => {
+    commitPending();
+    const before = snapshot(), i0 = S.histIdx, len = S.hist.length, x = await call(tool, args), fine = !x.ok && x.error.code === code && S.histIdx === i0 && S.hist.length === len && snapshot() === before;
+    log.refused.push({ tool, code: x.ok ? "ok" : x.error.code, fine, ...(x.ok ? {} : { said: x.error.message.slice(0, 160) }) });
+    if (!fine) no(`${tool} ${said(args)}: not refused as ${code} without a step (${x.ok ? "done" : x.error.message})`);
+    return x;
+  };
+  return { change, refuse, same };
+}
+/**
  * The agent's tools that change the cover, in the self-test (agentTest's `call`, `ok`, report `r` and `no`): each called
  * through the dispatcher on the self-test cover makes exactly one step (none when nothing changed, none for a call
  * refused), undo brings back the state before it and redo the change; a call aimed at another channel switches the
@@ -8786,37 +8828,8 @@ async function mcpTest() {
  */
 async function agentToolsTest({ call, ok, r, no }) {
   const home = S.cover.catId, start = snapshot(), others = S.profile.categories.filter((c) => c.id !== home).map((c) => c.id), kept = Object.fromEntries(others.map((id) => [id, copyOf(S.covers[id])]));
-  const norm = (snap) => { const { p, c } = JSON.parse(snap), q = normalizeProfile(p); return { p: q, c: normalizeCover(c, q) }; };
-  const same = (a, b) => sameValue(JSON.parse(a), JSON.parse(b)) || sameValue(norm(a), norm(b));   // as stored, or as read back
   r.tools = []; r.refused = [];
-  /**
-   * A change through the dispatcher: `steps` new steps (1; 0 for nothing changed; "switch": the window switched, the
-   * change the first step of a new history), then undone (back to the state before it, or on arriving) and done again.
-   */
-  const change = async (tool, args, steps = 1) => {
-    commitPending();
-    const fresh = steps === "switch", want = fresh ? 1 : steps, before = snapshot(), i0 = S.histIdx, x = await call(tool, args), got = { tool, steps: fresh ? S.histIdx : S.histIdx - i0 };
-    if (!x.ok) { no(`${tool} ${JSON.stringify(args)}: ${x.error.code}: ${x.error.message}`); r.tools.push({ ...got, error: x.error.code }); return null; }
-    const s = x.result.structuredContent || {}, base = fresh ? S.hist[0] : before;
-    if (got.steps !== want || S.hist.length !== S.histIdx + 1) no(`${tool} ${JSON.stringify(args)}: ${got.steps} steps of undo, not ${want}`);
-    if (want) {
-      const after = snapshot();
-      await ok("undo"); got.undo = same(snapshot(), base);
-      await ok("redo"); got.redo = same(snapshot(), after);
-      if (!got.undo) no(`${tool}: undo did not bring back the state before it`);
-      if (!got.redo) no(`${tool}: redo did not bring the change back`);
-    }
-    if (s.warnings) got.warnings = s.warnings;
-    r.tools.push(got);
-    return s;
-  };
-  /** A call refused: answered with `code`, no step, nothing changed. */
-  const refuse = async (tool, args, code = "invalid_arguments") => {
-    commitPending();
-    const before = snapshot(), i0 = S.histIdx, len = S.hist.length, x = await call(tool, args), fine = !x.ok && x.error.code === code && S.histIdx === i0 && S.hist.length === len && snapshot() === before;
-    r.refused.push({ tool, code: x.ok ? "ok" : x.error.code, fine });
-    if (!fine) no(`${tool} ${JSON.stringify(args)}: not refused as ${code} without a step (${x.ok ? "done" : x.error.message})`);
-  };
+  const { change, refuse, same } = agentSteps({ call, ok, no }, r);
   // the words, the look, the channel
   await change("set_text", { title: "Agent *tools*\nself test", subtitle: "One step each", tag: "AG.01" });
   await change("set_text", { tag: "AG.01" }, 0);
@@ -8916,6 +8929,149 @@ async function agentToolsTest({ call, ok, r, no }) {
   for (const id of others) { if (kept[id]) S.covers[id] = channelCover(kept[id], S.profile, id); else delete S.covers[id]; }
   await restoreSnap(start); resetHistory();
   if (S.cover.catId !== home) no("the agent's tools test did not end on the channel it began on");
+}
+/**
+ * The agent's photo, cut-out, weave, Surprise me, project and file tools in the self-test (agentTest's `call`, `ok`,
+ * report `r` and `no`; `dir`, the self-test folder), on the self-test cover: a picture drawn here and written into the
+ * folder put on from its file, again from the library as the background, and one as data; the print cropped to a
+ * rectangle and a shape and back; the self-test photo (SMEDCOVER_SELFTEST_PHOTO) cut out, where an engine is ready, and
+ * the cut-out (else a sticker over the title) woven by its head and by letter; Surprise me dealt (its sheet decoded and
+ * written into the folder) and another hand taken on its step, refused once the deal was undone; a cover applied whole,
+ * what was corrected said; a project written into the data folder opened as a new profile and into the current one.
+ * Each change exactly one step of undo, undone and redone; refusals none. Then exports into a folder of the
+ * self-test's, twice, the second never over the first's files and the folder not kept, and batches from jobs and from a
+ * CSV, one naming a channel the profile has not writing nothing, the covers unchanged. The cover, the profile and the
+ * channel shown are put back as they were, the profile the project made removed. Findings under r.files.
+ */
+async function agentFilesTest({ call, ok, r, no, dir }) {
+  const f = (r.files = { tools: [], refused: [] }), start = snapshot(), home = S.profile.id, homeCat = S.cover.catId;
+  const { change, refuse, same } = agentSteps({ call, ok, no }, f);
+  const at = (id) => S.cover.layers.findIndex((l) => l.id === id), bytesOf = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  // a picture of the self-test's own, drawn here and written into its folder: a sky, a hill, a figure
+  const pic = el("canvas", { width: 960, height: 640 }), g = pic.getContext("2d"), sky = g.createLinearGradient(0, 0, 0, 640);
+  sky.addColorStop(0, "#5aa0e8"); sky.addColorStop(1, "#f6d29a"); g.fillStyle = sky; g.fillRect(0, 0, 960, 640);
+  g.fillStyle = "#3d7a3a"; g.beginPath(); g.ellipse(480, 700, 700, 220, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#e0b090"; g.beginPath(); g.arc(480, 250, 70, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#c0392b"; g.beginPath(); g.ellipse(480, 470, 130, 160, 0, 0, Math.PI * 2); g.fill();
+  const path = (f.photoPath = await invoke("write_image", framed(await toPng(pic), { dir, name: "agent-photo.png" }, { format: "png" })));
+  // the picture from its file, as a print; again from the library, as the background; a small one as data
+  const added = await change("add_photo", { source: { path }, at: { x: 0.72, y: 0.62 } }), printId = added && added.layer.id;
+  if (added && (!layer(printId) || !S.library.some((e) => e.pid === added.pid && e.name === "agent-photo"))) no("add_photo: the picture from a file is not on the cover, or not in the library under its file's name");
+  const filled = added && (await change("add_photo", { source: { library: added.pid }, fill: true }));
+  if (filled && (!filled.layer.fill || at(filled.layer.id) !== 1)) no("add_photo: the library's picture does not fill the canvas just above bg");
+  const dot = el("canvas", { width: 64, height: 64 }), dg = dot.getContext("2d");
+  dg.fillStyle = "#ffcc00"; dg.fillRect(0, 0, 64, 64);
+  const data = await change("add_photo", { source: { data: dot.toDataURL("image/png") }, at: { x: 0.2, y: 0.2 }, name: "agent-dot" });
+  await refuse("add_photo", { source: { path: `${dir}/no-such-picture.png` } });
+  await refuse("add_photo", { source: { library: "no-such-pid" } });
+  f.photos = { path: !!added, library: !!filled, data: !!data };
+  // the print cropped to a rectangle and to a free shape, then the whole picture again (no step when it is whole already)
+  if (printId) {
+    const box = await change("crop_photo", { layer: printId, crop: { x: 0.1, y: 0.15, w: 0.6, h: 0.7 } });
+    if (box && JSON.stringify(layer(printId).crop) !== JSON.stringify({ x: 0.1, y: 0.15, w: 0.6, h: 0.7 })) no(`crop_photo: the rectangle kept as ${JSON.stringify(layer(printId).crop)}`);
+    const shape = await change("crop_photo", { layer: printId, crop: { pts: [[0.2, 0.1], [0.9, 0.3], [0.6, 0.95], [0.1, 0.7]] } });
+    if (shape && !(layer(printId).crop && layer(printId).crop.pts && layer(printId).crop.pts.length === 4)) no("crop_photo: the shape was not kept");
+    await change("crop_photo", { layer: printId, reset: true });
+    if (layer(printId).crop) no("crop_photo: reset left a crop");
+    await change("crop_photo", { layer: printId, reset: true }, 0);
+    if (filled) await refuse("crop_photo", { layer: filled.layer.id, crop: { x: 0, y: 0, w: 0.5, h: 0.5 } });
+    f.crop = { box: box && box.crop, shape: shape && shape.crop };
+  }
+  // the self-test photo cut out (Vision on macOS, else a model downloaded), the cut-out woven by its head and by letter
+  const real = await invoke("selftest_photo").catch(() => null);
+  let woven = null;
+  if (real && CAN.cut && cutReady()) {
+    const ph = await change("add_photo", { source: { data: real }, fill: true }), t0 = performance.now(), cut = ph && (await change("cut_out", { layer: ph.layer.id }));
+    f.cut = { ms: Math.round(performance.now() - t0), ok: !!cut, error: CUT.error || null };
+    const c = cut && layer(cut.cutout);
+    if (cut && (!c || c.of !== ph.layer.id || at(c.id) <= at("title"))) no("cut_out: the cut-out is not linked to its photo, above the title");
+    if (c) woven = c.id;
+  } else f.cut = { skipped: real ? "no cut-out engine ready" : "no SMEDCOVER_SELFTEST_PHOTO" };
+  if (!woven) { const st = await change("add_layer", { kind: "asset", asset: { kind: "sticker", id: STICKERS[0].id }, above: "title" }); woven = st && st.layer.id; }
+  if (woven) {
+    const head = await change("weave", { layer: woven, by: "head", line: 0.4 });
+    if (head && !(head.weave.by === "head" && head.weave.with.includes("title") && head.weave.line === 0.4)) no(`weave by the head: ${JSON.stringify(head.weave)}`);
+    const keys = (await ok("get_cover", { letters: true })).structuredContent.layers.find((l) => l.id === "title").letterKeys;
+    const letters = await change("weave", { layer: woven, by: "letters", front: { title: "alternate" } });
+    if (letters && JSON.stringify(letters.weave.front.title) !== JSON.stringify(keys.filter((_, i) => i % 2 === 0))) no("weave by letter: not every other letter of the title in front");
+    await refuse("weave", { layer: woven, front: JSON.parse('{"__proto__": "all"}') });
+    await change("weave", { layer: woven, off: true });
+    f.weave = { layer: woven, by: woven && layer(woven) && layer(woven).type, head: !!head, letters: !!letters };
+  }
+  // Surprise me: one step and a sheet of the hands; another hand on that step; refused once the deal was undone
+  const used = JSON.stringify(S.settings.lookUse), locks = JSON.stringify(S.settings.surprise.locks), look0 = S.profile.style.look;
+  commitPending();
+  const i0 = S.histIdx, before = snapshot(), dealt = await call("surprise", { count: 3, locks: ["look"] });
+  if (!dealt.ok) no(`surprise: ${dealt.error.code}: ${dealt.error.message}`);
+  else {
+    const s = dealt.result.structuredContent, img = dealt.result.content.find((x) => x.type === "image"), im = img && (await loadImage("data:image/png;base64," + img.data));
+    f.surprise = { hands: s.hands.map((h) => `${h.hand} ${h.look}: ${h.says}`), sheet: im ? [im.naturalWidth, im.naturalHeight] : null, steps: S.histIdx - i0 };
+    if (img) f.surprise.path = await invoke("write_image", framed(bytesOf(img.data), { dir, name: "agent-surprise.png" }, { format: "png" }));
+    if (S.histIdx - i0 !== 1) no(`surprise: ${S.histIdx - i0} steps of undo, not 1`);
+    if (!im || im.naturalWidth < 400 || s.hands.length !== 3) no("surprise: not three hands, or no contact sheet that decodes");
+    if (S.profile.style.look !== look0) no("surprise: the look was locked, yet dealt");
+    const picked = await call("pick_hand", { hand: 2 });
+    f.surprise.picked = picked.ok ? picked.result.structuredContent : picked.error;
+    if (!picked.ok || S.histIdx - i0 !== 1 || S.hist.length !== S.histIdx + 1) no(`pick_hand: ${picked.ok ? `${S.histIdx - i0} steps of undo, not the deal's one` : picked.error.message}`);
+    await ok("undo");
+    if (!same(snapshot(), before)) no("surprise: undo did not bring back the cover before the deal");
+    await ok("redo");
+    await refuse("pick_hand", { hand: 1 });   // undone and done again: its hands are past taking
+  }
+  if (JSON.stringify(S.settings.lookUse) !== used) no("surprise: a hand counted among the most used looks");
+  if (JSON.stringify(S.settings.surprise.locks) !== locks) no("surprise: the call's locks were kept");
+  // a cover applied whole: what was corrected, put back and is not here, said
+  const raw = (await ok("get_cover", { raw: true })).structuredContent.raw;
+  raw.title = "Applied *whole*"; raw.layers = raw.layers.filter((l) => l.id !== "tag"); raw.layers.find((l) => l.id === "title").o = 5; raw.layers.push({ type: "photo", id: "agentghost", pid: "no-such-picture" });
+  const applied = (f.applied = await change("apply_cover_json", { cover: raw }));
+  if (applied && !(applied.corrected.includes("layers.title.o") && applied.restored.includes("layers.tag") && applied.missingPhotos.includes("no-such-picture") && S.cover.title === "Applied *whole*")) no(`apply_cover_json: ${JSON.stringify(applied)}`);
+  // a project written here: opened as a new profile (the window there, its cover the first step), then into the current one
+  const proj = await projectFile(), had = new Set(S.profiles.map((p) => p.id)), projPath = `${dir}/data/agent-project.smedcover.json`;
+  Object.assign(proj, { profile: { ...copyOf(proj.profile), id: `agentproj${uid()}`, name: "Agent project" }, cover: { ...copyOf(proj.cover), title: "From a *project*" }, profileName: "Agent project" });
+  await files.write("agent-project.smedcover.json", JSON.stringify(proj));
+  const asNew = await change("open_project", { file: projPath, as: "new" }, "switch"), made = S.profiles.find((p) => !had.has(p.id));
+  if (asNew && (!asNew.profile.created || !made || S.profile !== made || made.name !== "Agent project" || S.cover.title !== "From a *project*")) no(`open_project as new: ${JSON.stringify(asNew)}`);
+  if (S.profile.id !== home) await switchProfile(home);
+  if (S.cover.catId !== homeCat) await switchChannel(homeCat);
+  const asCurrent = await change("open_project", { file: projPath, as: "current" });
+  if (asCurrent && (asCurrent.profile.created || S.profile.id !== home || S.cover.title !== "From a *project*")) no(`open_project into the current profile: ${JSON.stringify(asCurrent)}`);
+  await refuse("open_project", { file: `${dir}/data/custom.json` });
+  f.project = { asNew: asNew && asNew.profile, asCurrent: asCurrent && asCurrent.profile };
+  // exports into a folder of the self-test's, twice: the second never over the first's files; the folder not kept
+  await files.write("agent-export/.keep", "");
+  const out = `${dir}/data/agent-export`, two = S.profile.sizes.slice(0, 2).map(sizeKey), j0 = S.histIdx, dirs = JSON.stringify(S.settings.exportDirs);
+  const runs = [await call("export", { dir: out, sizes: two, format: "png", scale: 1 }), await call("export", { dir: out, sizes: two, format: "png", scale: 1 })];
+  const paths = runs.map((x) => (x.ok ? x.result.structuredContent.files.map((q) => q.path) : [])), written = (await files.list("agent-export")).filter((n) => !n.startsWith("."));
+  f.export = { first: paths[0], second: paths[1], written };
+  for (const x of runs) if (!x.ok) no(`export: ${x.error.code}: ${x.error.message}`);
+  if (paths.flat().length !== 2 * two.length || new Set(paths.flat()).size !== 2 * two.length || written.length !== 2 * two.length) no(`export: twice into one folder left ${written.length} files (${paths.flat().join(", ")}), not ${2 * two.length}`);
+  if (S.histIdx !== j0) no("export made a step of undo");
+  if (JSON.stringify(S.settings.exportDirs) !== dirs) no("export: the folder given was kept for the profile");
+  const keptDir = S.settings.exportDirs[S.profile.id];
+  delete S.settings.exportDirs[S.profile.id];
+  await refuse("export", {});   // none kept, none given: pass dir
+  if (keptDir) S.settings.exportDirs[S.profile.id] = keptDir;
+  // batches from jobs and from a CSV; one naming a channel the profile has not writes nothing; the covers as they were
+  await files.write("agent-batch/.keep", "");
+  const bdir = `${dir}/data/agent-batch`, one = [sizeKey(S.profile.sizes[0])], title = S.cover.title, n = S.profile.categories.length;
+  const jobs = await call("batch_covers", { jobs: [{ channel: 1, title: "Batch *one*" }, { channel: n, title: "Batch two", tag: "B2" }], sizes: one, dir: bdir });
+  const csv = await call("batch_covers", { csv: "channel,title,tag\n1,CSV *one*,C1\n,CSV two,", sizes: one, dir: bdir });
+  const count = async () => (await files.list("agent-batch")).filter((x) => !x.startsWith(".")).length, n0 = await count();
+  await refuse("batch_covers", { csv: "No such channel,Its title", sizes: one, dir: bdir });
+  f.batch = { jobs: jobs.ok ? jobs.result.structuredContent.files.map((q) => q.path) : jobs.error, csv: csv.ok ? csv.result.structuredContent.files.map((q) => `${q.channel} ${q.title}`) : csv.error, written: n0 };
+  if (!jobs.ok || !csv.ok || n0 !== 4) no(`batch_covers: ${n0} files written from two jobs and a CSV of two rows, not 4 (${JSON.stringify(f.batch)})`);
+  if ((await count()) !== n0) no("batch_covers: a CSV naming a channel the profile has not wrote something");
+  if (S.cover.title !== title) no("batch_covers changed the cover in the window");
+  // all as it was: the profile the project made gone, this profile and cover, this channel shown
+  if (made) {
+    S.profiles = S.profiles.filter((p) => p !== made);
+    await deleteProfile(made).catch(fail);
+    for (const x of await files.list("covers/" + made.id).catch(() => [])) await files.remove(`covers/${made.id}/${x}`).catch(() => null);
+    delete S.settings.channels[made.id]; persistSettings();
+  }
+  if (S.profile.id !== home) await switchProfile(home);
+  await restoreSnap(start); resetHistory();
+  if (S.cover.catId !== homeCat) no("the agent's file tools test did not end on the channel it began on");
 }
 /** SMEDCOVER_SELFTEST mode: export real covers in every format through the normal path, report, quit. */
 let SELFTESTING = false;   // the self-test running: its requests and cut-outs leave the AI lights alone (aiTracked)
@@ -9791,7 +9947,7 @@ const drawnNow = () => { flushDraw(); return flatCanvas(); };
 const API = Object.freeze({
   S, CAN, HOST, appVersion, invoke, BUNDLED_FONTS, CUT, SURPRISE, HOLD,
   // what is shown, selected, and what a layer is
-  cat, catIndex, selSize, layer, frame, sizeKeys, scopeKeys, layerName, copiable, owner, passivesOf, recordOf, weavableOf, wovenOf, inColumns, canCrop, canCut, cutReady, cutEngine, exportDir, ticked, channelOf, pickedIds,
+  cat, catIndex, selSize, layer, frame, sizeKeys, scopeKeys, layerName, copiable, owner, passivesOf, recordOf, weavableOf, wovenOf, inColumns, canCrop, pictureSize, canCut, cutReady, cutEngine, exportDir, ticked, channelOf, pickedIds,
   // the history, and putting a change on the screen
   touch, commitHistory, commitPending, clearPendingHistory: () => clearTimeout(timers.hist), snapshot, restoreSnap, timeTravel, settleCover, setCover, channelCover, coverFor, coverOf, drawnNow, toast,
   // the window
@@ -9801,7 +9957,7 @@ const API = Object.freeze({
   // Surprise me
   dealHands, keepFirst, takeHand, handSays, handNow, putHand,
   // drawing and files
-  renderReady, toPng, pngBase64, runExport, writeInto, framed, nameFor, openProject,
+  renderReady, toPng, pngBase64, readAs, runExport, writeInto, framed, nameFor, batchJobs, openProject,
 });
 const COMMANDS = makeCommands(API);
 /** What the agent shell is given (see makeAgent in agent.js); `busy`, what of the user's a call waits for (userBusy). */

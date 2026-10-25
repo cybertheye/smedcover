@@ -15,6 +15,8 @@
 //!   whose runtime and models it downloads ([`cut`]);
 //! * sending the request for an AI-generated asset, so it is not subject to the web view's
 //!   cross-origin rules ([`net`]);
+//! * reading a picture or a project file an agent names, and nothing else outside the data folder
+//!   ([`files`]);
 //! * the MCP endpoint agents call SmedCover's tools through, each call handed to the page
 //!   ([`mcp`]);
 //! * where the desktop app keeps its data, for a command line or server on the same computer
@@ -30,6 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub mod cut;
+pub mod files;
 pub mod fonts;
 pub mod image;
 pub mod mcp;

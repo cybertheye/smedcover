@@ -174,6 +174,11 @@ function release(token) {
   b.classList.remove("on", "pulse", "late"); b.hidden = true;
   document.body.classList.remove("agent");
 }
+/** What the step holding the window as `token` has got to, in the pill's small line ("Exporting 3 of 12"): not once it offers to stop waiting, nor for a step let go of. */
+function pillSays(token, text) {
+  const b = box(), small = b && b.querySelector(".pill small");
+  if (token && STEP.by === token && !token.offered && small) small.textContent = text;
+}
 /** A press on the held window: the pill shows at once, says to wait a moment (unless it already offers to stop), and pulses. */
 function pulse() {
   const b = box();
@@ -220,7 +225,7 @@ export function makeAgent({ commands, busy = () => null, step = (fn) => fn(), cl
     if (gone()) return fail(id, "failed", `${def.name} was cancelled before it started.`);
     if (said) return fail(id, "busy", `SmedCover is busy: ${said}. Try again shortly.`);
     const changes = !def.annotations.readOnlyHint, base = me.n;
-    const ctx = { progress: (progress, total, message) => tell({ progress: base + progress, ...(total == null ? {} : { total: base + total }), ...(message ? { message } : {}) }), cancelled: gone };
+    const ctx = { progress: (progress, total, message) => tell({ progress: base + progress, ...(total == null ? {} : { total: base + total }), ...(message ? { message } : {}) }), cancelled: gone, say: (text) => pillSays(me.held, text) };
     try {
       if (changes) { me.t0 = performance.now(); me.held = holding(() => queue.letGo(id, "stopped")); hold(me.held, def.name, stopAfter); closeTransient(); }
       const go = async () => {

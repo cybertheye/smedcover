@@ -2,7 +2,7 @@
 //! are converted to PNG, JPEG or WebP and written here.
 
 use std::fs;
-use std::io::Cursor;
+use std::io::{Cursor, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 use ::image::{codecs::jpeg::JpegEncoder, ImageFormat, RgbImage};
@@ -45,7 +45,9 @@ pub fn encode(png: &[u8], format: &str, quality: u8) -> Res<Vec<u8>> {
     Ok(out)
 }
 
-/// What accompanies the image bytes of an export request.
+/// What accompanies the image bytes of an export request. `fresh`: never write over a file, a name taken
+/// getting a number (an agent's exports); without it, as the user's own exports always have, over the file
+/// of that name.
 #[derive(Deserialize)]
 pub struct ExportMeta {
     pub name: String,
@@ -53,6 +55,8 @@ pub struct ExportMeta {
     pub quality: u8,
     #[serde(default)]
     pub dir: String,
+    #[serde(default)]
+    pub fresh: bool,
 }
 
 /// Splits a binary export request into its metadata and PNG bytes. The body is framed as
@@ -85,14 +89,44 @@ pub fn extension(name: &str) -> String {
 
 /// Writes one cover into `meta.dir`, a folder the user picked before (`pick_folder` in the app),
 /// converted to its format; where it was written. A folder that is not absolute, or not there, is refused.
+/// With `meta.fresh`, a file of that name is left alone: the cover goes under the first free one of
+/// `name-2.ext`, `name-3.ext`, … (see [`write_fresh`]).
 pub fn write_into(meta: &ExportMeta, png: &[u8]) -> Res<PathBuf> {
     let dir = PathBuf::from(&meta.dir);
     if !dir.is_absolute() || !dir.is_dir() {
         return Err(format!("not a folder: {}", dir.display()));
     }
     let path = dir.join(safe_name(&meta.name)?);
-    fs::write(&path, encode(png, &meta.format, meta.quality)?).map_err(err)?;
+    let bytes = encode(png, &meta.format, meta.quality)?;
+    if meta.fresh {
+        return write_fresh(&path, &bytes);
+    }
+    fs::write(&path, bytes).map_err(err)?;
     Ok(path)
+}
+
+/// Writes `bytes` to `path`, or, when a file has that name, to the first free one of `stem-2.ext`,
+/// `stem-3.ext`, …; never over a file. Each name is taken by making the file (`create_new`), so two writes
+/// at once, or a file made meanwhile, never end up under one name. Where it was written.
+pub fn write_fresh(path: &Path, bytes: &[u8]) -> Res<PathBuf> {
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    for n in 1..=10_000u32 {
+        let at = if n == 1 { path.to_path_buf() } else { path.with_file_name(format!("{stem}-{n}{ext}")) };
+        match fs::OpenOptions::new().write(true).create_new(true).open(&at) {
+            Ok(mut file) => {
+                if let Err(e) = file.write_all(bytes) {
+                    drop(file);
+                    let _ = fs::remove_file(&at); // not half a picture under its name
+                    return Err(err(e));
+                }
+                return Ok(at);
+            }
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(err(e)),
+        }
+    }
+    Err(format!("no free name for {}", path.display()))
 }
 
 #[cfg(test)]
@@ -116,6 +150,33 @@ mod tests {
         );
         assert!(safe_name("..").is_err());
         assert_eq!(extension("a/b/Cover.JPG"), "jpg");
+    }
+
+    #[test]
+    fn write_into_fresh_never_writes_over_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = png(&RgbaImage::from_pixel(2, 2, Rgba([9, 9, 9, 255])));
+        let meta = |name: &str, fresh: bool| ExportMeta { name: name.into(), format: "png".into(), quality: 90, dir: dir.path().display().to_string(), fresh };
+        let first = write_into(&meta("01-Cover_1920x1080.png", true), &bytes).unwrap();
+        assert_eq!(first, dir.path().join("01-Cover_1920x1080.png"));
+        fs::write(dir.path().join("01-Cover_1920x1080-2.png"), b"the user's").unwrap();
+        let third = write_into(&meta("01-Cover_1920x1080.png", true), &bytes).unwrap();
+        assert_eq!(third, dir.path().join("01-Cover_1920x1080-3.png"), "a number, past the names taken");
+        assert_eq!(fs::read(dir.path().join("01-Cover_1920x1080-2.png")).unwrap(), b"the user's", "left alone");
+        assert_eq!(fs::read(&first).unwrap(), bytes);
+        // without it, as the user's own exports always have: over the file of that name
+        assert_eq!(write_into(&meta("01-Cover_1920x1080.png", false), b"PNG again").unwrap(), first);
+        assert_eq!(fs::read(&first).unwrap(), b"PNG again");
+        // a name without an extension; `fresh` read from a frame, false when it does not say
+        assert_eq!(write_fresh(&dir.path().join("plain"), b"a").unwrap(), dir.path().join("plain"));
+        assert_eq!(write_fresh(&dir.path().join("plain"), b"b").unwrap(), dir.path().join("plain-2"));
+        let frame = |json: &str| {
+            let mut body = (json.len() as u32).to_le_bytes().to_vec();
+            body.extend_from_slice(json.as_bytes());
+            body
+        };
+        assert!(parse_frame(&frame(r#"{"name":"a.png","format":"png","quality":1,"fresh":true}"#)).unwrap().0.fresh);
+        assert!(!parse_frame(&frame(r#"{"name":"a.png","format":"png","quality":1}"#)).unwrap().0.fresh);
     }
 
     #[test]

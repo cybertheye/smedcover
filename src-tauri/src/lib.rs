@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use smedcover_core::cut::{self, CutModel};
+use smedcover_core::files;
 use smedcover_core::fonts::{self, FontFaces, FontInfo};
 use smedcover_core::image::{encode, extension, parse_frame, safe_name, write_into, ExportMeta};
 use smedcover_core::outline::Outline;
@@ -290,6 +291,24 @@ async fn ai_request(
         .map_err(err)?
 }
 
+// ---------------------------------------------------------------- files an agent names (the rules: smedcover_core::files)
+
+/// A picture on this computer for an agent's `add_photo` (see `files::read_picture`): its bytes, as they are.
+#[tauri::command]
+async fn read_picture(path: String) -> Res<tauri::ipc::Response> {
+    tauri::async_runtime::spawn_blocking(move || files::read_picture(Path::new(&path)).map(|(_, bytes)| tauri::ipc::Response::new(bytes)))
+        .await
+        .map_err(err)?
+}
+
+/// A project file on this computer for an agent's `open_project` (see `files::read_project`): its text.
+#[tauri::command]
+async fn read_project(path: String) -> Res<String> {
+    tauri::async_runtime::spawn_blocking(move || files::read_project(Path::new(&path)))
+        .await
+        .map_err(err)?
+}
+
 /// In self-test mode, a real photo to cut the subject out of (SMEDCOVER_SELFTEST_PHOTO), as a data URL.
 #[tauri::command]
 fn selftest_photo() -> Option<String> {
@@ -338,7 +357,8 @@ fn selftest_perf() -> bool {
 }
 
 /// In self-test mode, whether to call the agent tools too (SMEDCOVER_SELFTEST_AGENT): the page's dispatcher answers
-/// the read-only tools, the selection, undo and redo as an agent's calls, and reports under `agent`.
+/// every tool as an agent's calls, writing a picture, a project and exports into the self-test folder, and reports
+/// under `agent`.
 #[tauri::command]
 fn selftest_agent() -> bool {
     selftest_root().is_some() && std::env::var_os("SMEDCOVER_SELFTEST_AGENT").is_some()
@@ -434,6 +454,8 @@ pub fn run() {
             list_system_fonts,
             ai_request,
             fetch_image,
+            read_picture,
+            read_project,
             text_outline,
             font_faces,
             font_data,
