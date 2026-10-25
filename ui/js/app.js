@@ -3470,7 +3470,7 @@ function lookCards() {
     pic.want = base + lookOwn(id);
     if (pic.sig !== pic.want) stale.push(id);
     const on = id === st.look;
-    return el("div", { class: "lookcard" + (on ? " on" : ""), dataset: { id }, hidden: !on && !shown(id) },
+    return el("div", { class: "lookcard" + (on ? " on" : ""), dataset: { id }, hidden: !shown(id) && !(on && ownAlways()) },
       el("button", { class: "lookpick", "aria-pressed": String(on), title: LOOKS[id].about ? LOOKS[id].about[lang] : LOOKS[id].name[lang], onpointerenter: () => hoverLook(id), onclick: () => pickLook(id) },
         pic.cv, el("span", { class: "nm" }, LOOKS[id].name[lang]), on && el("span", { class: "badge" }, t("look.current"))),
       likeButton(id));
@@ -3509,19 +3509,22 @@ function likeLook(id) {
   if (LOOK_UI.tag === "liked") findLooks(true);
 }
 /**
- * Under ♥ Liked, the cards the latest liked first, after the profile's own (first while the search or a chip is at
- * work, liked or not: .lookgrid.finding); CSS order, the cards themselves left in place. Elsewhere, as LOOK_IDS has them.
+ * Under ♥ Liked, the cards the latest liked first, the profile's own in its place among them (its inline order over
+ * .lookgrid.finding's); CSS order, the cards themselves left in place. Elsewhere, as LOOK_IDS has them, the profile's
+ * own first while the search or a chip is at work (.lookgrid.finding).
  */
 function sortLooks(grid) {
-  const likes = LOOK_UI.tag === "liked" ? S.settings.lookLikes : [], look = S.profile.style.look;
-  for (const card of grid.children) { const i = card.dataset.id === look ? -1 : likes.indexOf(card.dataset.id); card.style.order = i < 0 ? "" : String(i); }
+  const likes = LOOK_UI.tag === "liked" ? S.settings.lookLikes : [];
+  for (const card of grid.children) { const i = likes.indexOf(card.dataset.id); card.style.order = i < 0 ? "" : String(i); }
 }
 /**
  * The Look sheet's search and chip, for this session: `q` the words typed, `tag` the chip picked ("" every look, a kind
  * of LOOK_CATEGORIES, "used", those this computer has used most, or "liked", those liked on it). They only hide cards:
- * the profile's own look is never hidden, and while they are at work it comes first.
+ * the profile's own look is never hidden (ownAlways), and while they are at work it comes first, but under ♥ Liked.
  */
 const LOOK_UI = { q: "", tag: "" };
+/** Whether the profile's own look shows whatever the search and the chip say: always, but under ♥ Liked, which holds the liked looks only (the profile's among them where it is one). */
+const ownAlways = () => LOOK_UI.tag !== "liked";
 /** How many looks ★ Most used shows at most. */
 const MOST_USED = 6;
 /** The looks this computer has made a profile's most often (S.settings.lookUse), the most first; none while nothing is counted. */
@@ -3560,16 +3563,16 @@ function lookFinder() {
     chips);
 }
 /**
- * The search or the chip changed: the cards it lets through shown (the profile's own always), in ♥ Liked's order
- * there, the rest hidden, those shown drawn if stale; the line saying none is left when so. Scrolled to the top, but
- * not with `stay` (a look liked or unliked under ♥ Liked: the cards follow where they are).
+ * The search or the chip changed: the cards it lets through shown (the profile's own always, but under ♥ Liked), in
+ * ♥ Liked's order there, the rest hidden, those shown drawn if stale; the line saying none is left when so. Scrolled
+ * to the top, but not with `stay` (a look liked or unliked under ♥ Liked: the cards follow where they are).
  */
 function findLooks(stay = false) {
   const grid = $("panel").querySelector(".lookgrid"), none = $("panel").querySelector(".lookgrid-none");
   if (!grid) return;
-  const shown = lookFilter(), look = S.profile.style.look;
+  const shown = lookFilter(), look = S.profile.style.look, own = ownAlways();
   let any = false;
-  for (const card of grid.children) { const on = shown(card.dataset.id); card.hidden = !on && card.dataset.id !== look; any = any || on; }
+  for (const card of grid.children) { const on = shown(card.dataset.id); card.hidden = !on && !(own && card.dataset.id === look); any = any || on; }
   grid.classList.toggle("finding", lookFinding());
   sortLooks(grid);
   if (none) { none.hidden = !lookFinding() || any; none.textContent = noLooks(); }

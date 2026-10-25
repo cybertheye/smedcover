@@ -775,7 +775,7 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 **风格卡片。** 「风格」面板里每张卡片都是用那个风格画出来的这张封面（`lookCards()`），有多少风格就要画多少张封面，所以卡片的图留着（`LOOKCARDS.pics`），连同画它时依据的东西（`sig`：封面、尺寸、除风格以外的样式、风格自己的参数；`lookBase()`、`lookOwn()`）；过时的卡片一帧画一张，档案当前的风格先画，拖东西时不画（`drawLookCards()`），改动之后也只重画 `sig` 变了的（`refreshLookCards()`）。鼠标在一张卡片上停 140 毫秒，画布就用它的风格画（`hoverLook()`、`PREVIEW.look`，见下）。点一下就换成档案的风格（`app.js` 的 `pickLook()`，不是 `deal.js` 里那个），并记一次（`countLook()`，记进 `settings.lookUse`）；`dealClose()` 也这样记：留下的那一手的风格和窗口第一次抽之前封面的风格不同时。每张卡片是并排的两个按钮，不是一个套着另一个：风格本身（`.lookpick`，图和名字，预览和换上都靠它），和盖在名字右端的 ♡（`likeButton()`、`.lookheart`），点它喜欢或取消喜欢这个风格（`likeLook()`：记进 `settings.lookLikes`，最近的在前），不换上也不预览（它拦下自己的点击，鼠标移到它上面就结束预览）。
 
-卡片上方是 `lookFinder()`：一个搜索框，和每类风格一个按钮（`LOOK_CATEGORIES`；每个风格属于哪一类或哪几类在 `style.js` 的 `LOOK_TAGS` 里，测试保证每个风格至少一类、每类有好几个风格），有了记录后还有「★ 常用」（`mostUsed()`：次数最多的 `MOST_USED` 个，即 6 个），最后总有「♥ 喜欢」（`settings.lookLikes`，按它的顺序：`sortLooks()` 在这一类下用 CSS 的 `order` 排，档案当前的风格之后；一个都没喜欢时，卡片下面那行字说怎么加，`noLooks()`；在这一类下喜欢或取消喜欢，卡片当场出现或藏起来，`findLooks(true)`，不滚回顶上）。`LOOK_UI` 记着这次打开应用期间打的字和选的分类。`lookFilter()` 是它们合成的判断——先看分类、常用或喜欢，再看打的每个词是否出现在风格的名字、`about` 或所属分类的名字里，都按中英文两种（`bothLangs()`），并和素材搜索一样经过 `folded()` 比较。它们只把卡片藏起来（`findLooks()` 给不通过的卡片设 `hidden`，不重建面板，所以搜索框的焦点不丢）：档案当前的风格从不藏，筛选时排在最前（`.finding`，CSS 的 `order`）；`drawLookCards()` 和 `refreshLookCards()` 跳过藏起来的卡片，露出来时才画；一个都没有时显示一行说明。输入法拼字时不筛选，拼完再筛。
+卡片上方是 `lookFinder()`：一个搜索框，和每类风格一个按钮（`LOOK_CATEGORIES`；每个风格属于哪一类或哪几类在 `style.js` 的 `LOOK_TAGS` 里，测试保证每个风格至少一类、每类有好几个风格），有了记录后还有「★ 常用」（`mostUsed()`：次数最多的 `MOST_USED` 个，即 6 个），最后总有「♥ 喜欢」（`settings.lookLikes`，按它的顺序：`sortLooks()` 在这一类下用 CSS 的 `order` 排，档案当前的风格也在自己的位置；一个都没喜欢时，卡片下面那行字说怎么加，`noLooks()`；在这一类下喜欢或取消喜欢，卡片当场出现或藏起来，`findLooks(true)`，不滚回顶上）。`LOOK_UI` 记着这次打开应用期间打的字和选的分类。`lookFilter()` 是它们合成的判断——先看分类、常用或喜欢，再看打的每个词是否出现在风格的名字、`about` 或所属分类的名字里，都按中英文两种（`bothLangs()`），并和素材搜索一样经过 `folded()` 比较。它们只把卡片藏起来（`findLooks()` 给不通过的卡片设 `hidden`，不重建面板，所以搜索框的焦点不丢）：档案当前的风格从不藏，筛选时排在最前（`.finding`，CSS 的 `order`），只有「♥ 喜欢」例外：那里只有喜欢的风格（`ownAlways()`）；`drawLookCards()` 和 `refreshLookCards()` 跳过藏起来的卡片，露出来时才画；一个都没有时显示一行说明。输入法拼字时不筛选，拼完再筛。
 
 卡片下面是「调这个风格」：它的标题行（`tuneHead()`）默认把风格的 `about` 收起，点这一行或末尾的箭头才展开（`TUNE_UI.about`，只记在这次打开应用期间；就地显示或隐藏，不重建面板）；后面是这个风格的滑条。
 
@@ -920,7 +920,7 @@ python3 -m http.server -d ui 4599
 | 改概率窗口怎么显示和调概率 | `deal.js` 的 `DOTS`、`EVEN_DOTS`、`dotsOf()`、`withDots()`（风格的圆点）和 `moveShare()`（条的分隔条）；`app.js` 的 `oddsLooks()`、`oddsGroup()` 和 `oddsDialog()` |
 | 改「AI 生成」窗口的排版 | `app.js` 的 `genWin()`、`madeStrip()`、`specPreview()` 和 `KIND_ICONS`；`index.html` 里 `.dlg.genw` 及其后的规则 |
 | 给风格归类，或加一类 | `style.js` 的 `LOOK_TAGS` 和 `LOOK_CATEGORIES`，`i18n.js` 加 `look.cat.*` 名称（测试保证每个风格都有类、每类都有好几个风格） |
-| 改「风格」面板的「★ 常用」或「♥ 喜欢」 | `app.js` 的 `mostUsed()`、`countLook()`、`likeButton()`、`likeLook()`、`sortLooks()` 和 `lookFilter()`；记下的东西是 `store.js` 的 `normalizeSettings()` 里的 `lookUse` 和 `lookLikes` |
+| 改「风格」面板的「★ 常用」或「♥ 喜欢」 | `app.js` 的 `mostUsed()`、`countLook()`、`likeButton()`、`likeLook()`、`sortLooks()`、`ownAlways()` 和 `lookFilter()`；记下的东西是 `store.js` 的 `normalizeSettings()` 里的 `lookUse` 和 `lookLikes` |
 | 加一种能在画布上预览的卡片 | `app.js`：`PREVIEW` 加一种，`previewed()` 里写它改什么，`previewTag()` 里写它的说明，卡片上用 `previewSoon()`，卡片重建的地方 `endPreview()` |
 | 给文件名加一项 | `store.js` 的 `exportName()`；`app.js` 的 `NAME_TOKENS` 和 `NAME_TOKEN`；`i18n.js` 里标签的名字 `exp.tok.*` |
 | 加一个快捷键 | `app.js` 里 `start()` 上面那个窗口的 `keydown` 监听（它的顺序决定弹框、输入框和「你看着办」窗口放过哪些键）；`MOD_KEY` 负责写法 |
