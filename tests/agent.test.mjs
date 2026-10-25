@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { TOOLS, TOOL_BY, ERRORS, INSTRUCTIONS, toolsJson, toolsText, checkArgs, checkCall, toResult, toError, isError, ToolError, findSize, findChannel, findProfile, letterKeysOf, boxesOf, sheetPlan, widthFor, keyOf } from "../ui/js/tools.js";
+import { TOOLS, TOOL_BY, ERRORS, INSTRUCTIONS, FLAGS, toolsJson, toolsText, checkArgs, checkCall, toResult, toError, isError, ToolError, findSize, findChannel, findProfile, letterKeysOf, boxesOf, sheetPlan, widthFor, keyOf } from "../ui/js/tools.js";
 import { SCOPES, FORMATS, SURPRISE_LOCKS, normalizeSize, normalizeProfile } from "../ui/js/store.js";
 import { LOOK_IDS } from "../ui/js/style.js";
 import { EFFECTS, BENDS } from "../ui/js/textfx.js";
@@ -61,7 +61,7 @@ test("the tools are marked as the spec has them: reading, changing, writing file
   assert.equal(TOOL_BY.add_photo.annotations.openWorldHint, true);
   for (const n of LIVE) assert.deepEqual(TOOL_BY[n].hosts, ["desktop"], n);
   for (const d of TOOLS) if (!LIVE.includes(d.name)) assert.deepEqual(d.hosts, ["desktop", "server"], d.name);
-  for (const d of TOOLS) assert.equal(d.busy, d.annotations.readOnlyHint || d.name === "select_layer" ? "light" : "strict", d.name);
+  for (const d of TOOLS) assert.equal(d.busy, d.annotations.readOnlyHint ? "light" : "strict", `${d.name}: a change waits for Settings and the editor's windows (another selection shuts them)`);
   const timeout = (n) => TOOL_BY[n].timeoutMs;
   for (const n of [...READS.filter((n) => n !== "render_preview"), "get_selection"]) assert.equal(timeout(n), 30000, n);
   assert.equal(timeout("render_preview"), 120000); assert.equal(timeout("surprise"), 120000);
@@ -311,6 +311,19 @@ test("select_layer selects as the user would, undo and redo go as far as the his
   assert.deepEqual(travels, ["commit", -1], "the pending change made a step first, then one step back: there was no other");
   assert.equal((await cmds.undo({})).content[0].text, "Nothing to undo.");
   assert.deepEqual((await cmds.redo({ steps: 2 })).structuredContent, { index: 2, steps: 2, canUndo: true, canRedo: false });
+  // a call that is wrong changes nothing: the size named is not shown before the layers are found
+  S.sel = "1920x1080";
+  await assert.rejects(cmds.select_layer({ size: "9:16", layers: ["bg", "title"] }), /cannot be selected with other layers/);
+  assert.equal(S.sel, "1920x1080");
+});
+
+test("what a tool needs: a flag set to false asks for nothing, any other false says something", () => {
+  assert.deepEqual(FLAGS, ["reset", "resetParams", "reshuffle", "off"]);
+  assert.equal(checkCall(TOOL_BY.set_look, { resetParams: false }), "Give at least one of: look, params, theme, seed, resetParams.");
+  assert.equal(checkCall(TOOL_BY.place_layer, { layer: "x", reset: false }), "Give at least one of: x, y, scale, rotate, stretchX, stretchY, move, scaleBy, rotateBy, reset.");
+  assert.equal(checkCall(TOOL_BY.crop_photo, { layer: "x", crop: { x: 0, y: 0, w: 0.5, h: 0.5 }, reset: false }), null);
+  for (const [tool, args] of [["show_layer", { visible: false }], ["show_layer", { locked: false }], ["show_layer", { included: false }], ["set_layer_color", { plate: false }], ["set_layer_color", { tint: false }]])
+    assert.equal(checkCall(TOOL_BY[tool], { layer: "x", ...args }), null, `${tool} ${JSON.stringify(args)}: false says something`);
 });
 
 test("the queue runs one call at a time, in order; a call cancelled while it waits never runs", async () => {

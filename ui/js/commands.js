@@ -162,13 +162,13 @@ export function makeCommands(api) {
     },
     get_selection: async () => toResult({ structured: selection() }),
     select_layer: async (args) => {
-      if (args.size !== undefined) { const k = keyOf(findSize(S.profile.sizes, args.size)); if (k !== S.sel) api.selectSize(k); }
-      if (args.layer !== undefined) api.selectLayer(layerHere(args.layer).id);
-      if (args.layers) {
-        const list = args.layers.map(layerHere), odd = list.find((L) => L.type === "bg" || L.type === "frame");
-        if (odd && list.length > 1) throw new ToolError("invalid_arguments", `"${odd.id}" cannot be selected with other layers.`);
-        api.pickLayers(list.map((L) => L.id));
-      }
+      // everything named found first, then shown: a call that is wrong changes nothing
+      const k = args.size !== undefined ? keyOf(findSize(S.profile.sizes, args.size)) : null, one = args.layer !== undefined ? layerHere(args.layer) : null;
+      const list = args.layers ? args.layers.map(layerHere) : null, odd = list && list.find((L) => L.type === "bg" || L.type === "frame");
+      if (odd && list.length > 1) throw new ToolError("invalid_arguments", `"${odd.id}" cannot be selected with other layers.`);
+      if (k && k !== S.sel) api.selectSize(k);
+      if (one) api.selectLayer(one.id);
+      if (list) api.pickLayers(list.map((L) => L.id));
       return toResult({ structured: selection() });
     },
     undo: travel(-1),

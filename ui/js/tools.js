@@ -113,7 +113,7 @@ export const TOOLS = [
       history: out({ canUndo: { type: "boolean" }, canRedo: { type: "boolean" } }),
     }, ["profiles", "current"]) }),
   TOOL("get_cover", "Get a cover",
-    "A channel's cover as it is now, read without switching the window: its title, subtitle and tag, the profile's look and theme, and its layers, bottom first. Each layer: id (name layers by it in other tools), type, kind (\"layout\": one of the layout's own parts, which can be hidden but not removed; \"free\": one that was added; \"copy\": a copy of a layout part), its name as the editor shows it, visible, opacity, locked, included (a layout part on the cover or left out), removable, copyable, place (x, y; s its scale, r its turn in degrees, kx and ky its stretch — for a layer that was added x, y is its centre as shares of the canvas, for a layout part its offset from where the layout puts it), tunedAt (sizes it was moved at alone), sizes (those it shows at, or \"all\"), and what its type has: text, font, ink, hi, plate, plateInk, hiPlateInk, fx and fxAmt (text effect), bend and bendAmt, vertical, a photo's pid, fill, cut and of (the photo a cut-out is linked to), an asset's ref and tint, a solid's color, crop, weave. letters: true adds each lettering layer's letterKeys (for weave's front). raw: true adds the cover as SmedCover stores it (for apply_cover_json).",
+    "A channel's cover as it is now, read without switching the window: its title, subtitle and tag, the profile's look and theme, and its layers, bottom first. Each layer: id (name layers by it in other tools), type, kind (\"layout\": one of the layout's own parts, which can be hidden or left out of the cover but not removed; \"free\": a layer that was added, or of a kind from an earlier version; \"copy\": a copy of a layout part), its name as the editor shows it, visible, opacity, locked, included (a layout part on the cover or left out), removable (whether remove_layer takes it), copyable, place (x, y; s its scale, r its turn in degrees, kx and ky its stretch — for a layer that was added x, y is its centre as shares of the canvas, for a layout part or a copy of one its offset from where the layout puts it, for a linked cut-out its offset from its photo), tunedAt (sizes it was moved at alone), sizes (those it shows at, or \"all\"), and what its type has: text, font, ink, hi, plate, plateInk, hiPlateInk, hiMark (what marks the highlighted words: none, plate, circle, marker or block), fx and fxAmt (text effect), outline and shadow (their weights), bend and bendAmt, vertical, a photo's pid, fill, cut and of (the photo a cut-out is linked to), an asset's ref and tint, a solid's color, crop, weave, and clip (true: shown only within the layer below). letters: true adds each lettering layer's letterKeys (for weave's front). raw: true adds the cover as SmedCover stores it (for apply_cover_json).",
     input({ profile: PROFILE, channel: CHANNEL, letters: bool("Also list each lettering layer's letter keys."), raw: bool("Also return the cover as stored, under `raw`.") }),
     { annotations: READ, outputSchema: out({ profile: { type: "string" }, channel: { type: "string" }, title: { type: "string" }, subtitle: { type: "string" }, tag: { type: "string" }, look: { type: "string" }, theme: { type: "string" },
       layers: { type: "array", items: LAYER_OUT }, raw: { type: "object" } }, ["profile", "channel", "layers"]) }),
@@ -250,7 +250,7 @@ export const TOOLS = [
   TOOL("select_layer", "Select a layer",
     "Selects a layer (layer; \"bg\" selects nothing) or several together (layers), and/or shows another size on the canvas (size), as the user would — to show them what you mean. Not a step of undo. Desktop only. Returns the selection.",
     input({ layer: LAYER, layers: list(str("A layer's id."), "Layers to select together.", { minItems: 1, maxItems: 100, uniqueItems: true }), size: SIZE }),
-    { annotations: EDIT, history: false, busy: "light", hosts: DESKTOP, needs: { any: ["layer", "layers", "size"], most: ["layer", "layers"] }, outputSchema: SELECTION }),
+    { annotations: EDIT, history: false, hosts: DESKTOP, needs: { any: ["layer", "layers", "size"], most: ["layer", "layers"] }, outputSchema: SELECTION }),   // strict: another selection shuts the crop, weave, letter and brush windows
   TOOL("undo", "Undo",
     "Undoes the last steps (steps, default 1) of the window's history — the user's and yours alike: each change a tool made is one step. Desktop only. Returns where the history now is.",
     input({ steps: int("How many steps.", 1, 20) }),
@@ -338,11 +338,16 @@ function wrong(schema, v, path) {
 }
 /** What is wrong with `args` against a tool's input schema, in a sentence for the agent; null when nothing is. */
 export const checkArgs = (schema, args) => wrong(schema, args === undefined ? {} : args, "");
+/**
+ * The arguments that ask for something to be done when true (put back, deal again, unweave): false is as good as left
+ * out, for what a tool needs. Every other false says something (visible: false hides a layer, plate: false takes one away).
+ */
+export const FLAGS = ["reset", "resetParams", "reshuffle", "off"];
 /** What is wrong with a call of tool `def` with `args`: its schema, then what it needs of them beyond it (see TOOL). Null when nothing is. */
 export function checkCall(def, args) {
   const bad = checkArgs(def.inputSchema, args);
   if (bad || !def.needs) return bad;
-  const has = (k) => args && args[k] !== undefined, n = (ks) => ks.filter(has).length, { any, one, most } = def.needs;
+  const has = (k) => args && args[k] !== undefined && !(args[k] === false && FLAGS.includes(k)), n = (ks) => ks.filter(has).length, { any, one, most } = def.needs;
   if (any && !n(any)) return `Give at least one of: ${any.join(", ")}.`;
   if (one && n(one) !== 1) return `Give exactly one of: ${one.join(", ")}${n(one) ? ` (not ${one.filter(has).join(" and ")})` : ""}.`;
   if (most && n(most) > 1) return `Give at most one of: ${most.join(", ")}.`;

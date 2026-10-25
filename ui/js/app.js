@@ -175,7 +175,13 @@ async function writeCustom() {
 const persistSettings = () => later("settings", 400, () => writeCustom().catch(fail));
 
 const snapshot = () => JSON.stringify({ p: S.profile, c: S.cover });
-function resetHistory() { S.hist = [snapshot()]; S.histIdx = 0; SURPRISE.step = null; dealClose(); syncTop(); }
+/**
+ * The history being kept: `epoch`, how many there have been (each channel or profile shown begins one, resetHistory),
+ * by which agentStep tells a switch done from one begun and failed; `covers`, the profile's covers when it began (a
+ * switch of profile replaces them before it begins the next).
+ */
+const HIST = { epoch: 0, covers: null };
+function resetHistory() { S.hist = [snapshot()]; S.histIdx = 0; HIST.epoch++; HIST.covers = S.covers; SURPRISE.step = null; dealClose(); syncTop(); }
 /** Adds the present state to the undo history, unless it is already its last entry (`always`: even then). */
 function commitHistory(always = false) {
   const snap = snapshot();
@@ -221,22 +227,28 @@ async function timeTravel(step) {
  * Runs fn, a change an agent makes (see agent.js), as one step of undo, and resolves with what it resolves with: the
  * change the user was making becomes a step of its own first, the debounced commit is held while fn runs (HOLD), and
  * the step is committed once it is over — none when nothing changed. Should fn fail part-way, what it changed is put
- * back (photos and pictures put in the library stay): the profile and cover as they were before it, any step taken
- * meanwhile (keepFirst's) let go; or, when it switched channel or profile (a new history), as they were on arriving
- * there, the switch kept as the user's own is. The step put back is written again as it now is, as timeTravel does.
+ * back (photos and pictures put in the library stay): the profile and cover as they were before it, and the history as
+ * it was, the steps to redo too (a step taken meanwhile, keepFirst's, let go); or, when it switched channel or profile
+ * (a new history began), as they were on arriving there, the switch kept as the user's own is. A switch begun and not
+ * done (the profile, its covers or the cover replaced, no new history yet) is undone first, so the profile is put back
+ * in its own place. The step put back is written again as it now is, as timeTravel does.
  */
 async function agentStep(fn) {
   commitPending();
-  const at = S.histIdx, snap = S.hist[at], here = `${S.profile.id}/${S.cover.catId}`;
+  const at = S.histIdx, hist = [...S.hist], snap = hist[at], epoch = HIST.epoch, dealt = SURPRISE.step, sel = [S.layerId, S.picked];
   HOLD.history = true;
   try { return await fn(); }
   catch (e) {
     clearTimeout(timers.hist);
-    if (`${S.profile.id}/${S.cover.catId}` !== here) { S.hist = S.hist.slice(0, 1); S.histIdx = 0; SURPRISE.step = null; await restoreSnap(S.hist[0]); }
-    else {
-      if (S.hist[at] === snap && S.histIdx !== at) { S.hist = S.hist.slice(0, at + 1); S.histIdx = at; SURPRISE.step = null; }
-      if (snapshot() !== snap) await restoreSnap(snap);
+    const moved = HIST.epoch !== epoch, goal = moved ? S.hist[0] : snap, { p, c } = JSON.parse(goal);   // back to where a switch arrived, else to before
+    if (S.profile.id !== p.id || S.covers !== HIST.covers || S.cover.catId !== c.catId) {   // a switch begun and not done
+      S.profile = S.profiles.find((x) => x.id === p.id) || S.profile; S.covers = HIST.covers;
+      if (!moved) [S.layerId, S.picked] = sel;
     }
+    if (moved) { S.hist = S.hist.slice(0, 1); S.histIdx = 0; SURPRISE.step = null; }
+    else { S.hist = hist; S.histIdx = at; SURPRISE.step = dealt; }
+    if (snapshot() !== goal) await restoreSnap(goal);
+    if (S.settings.profileId !== S.profile.id || S.settings.channels[S.profile.id] !== S.cover.catId) { S.settings.profileId = S.profile.id; S.settings.channels[S.profile.id] = S.cover.catId; persistSettings(); }   // the one shown is the one remembered
     S.hist[S.histIdx] = snapshot(); syncTop();
     throw e;
   } finally { HOLD.history = false; commitPending(); }

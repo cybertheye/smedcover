@@ -2368,7 +2368,8 @@ the page: half a minute to read, a minute to change, two to draw a preview or de
 export) and `needs` (what a schema cannot say without a combinator: at least, exactly or at most one of some
 arguments). `checkArgs(schema, args)` checks a call against the part of JSON Schema the tools use and says what is
 wrong in a sentence for the model (`"maxSide" must be at most 2048 (got 4000).`, `Unknown argument "colour" (this tool
-takes: …)`); `checkCall(def, args)` adds `needs`. `toResult({structured, images, text})` makes MCP's
+takes: …)`); `checkCall(def, args)` adds `needs`, where a flag set to false (`FLAGS`: `reset`, `resetParams`,
+`reshuffle`, `off`) counts as left out and any other false says something (`visible: false`). `toResult({structured, images, text})` makes MCP's
 `CallToolResult` (a text block, by default the structured answer as JSON; each PNG an image block;
 `structuredContent`) and `toError(code, message)` a failure, `code` one of `unknown_tool`, `invalid_arguments`,
 `not_allowed`, `busy`, `unavailable`, `failed` (the host makes a protocol error of the first, `isError` of the rest).
@@ -2406,10 +2407,13 @@ wheel swallowed before anything sees them and a drop let go — not replayed: a 
 of glass at the top saying what is being done (`agent.step.<tool>`), which a press pulses ("One moment"). One whose tool
 has `history` runs inside `agentStep(fn)` (`app.js`): the change the user was making becomes a step of its own first
 (`commitPending()`), `HOLD.history` keeps the debounced commit back, and the step is committed once — none when nothing
-changed. Should it fail part-way, the snapshot taken after the opening commit is put back (a step taken meanwhile,
-`keepFirst()`'s, let go), or, when it switched channel or profile, the cover as it was on arriving, the switch kept as
-the user's own is; the step put back is written again as it now is, as `timeTravel()` does, or the closing commit would
-take the difference for a change and cut off redo.
+changed. Should it fail part-way, the snapshot taken after the opening commit is put back and the history as it was,
+the steps to redo too (a step taken meanwhile, `keepFirst()`'s, let go; the 80 kept as they were); or, when a new
+history began (`HIST.epoch`, which `resetHistory()` counts: the switch of channel or profile was done), the cover as it
+was on arriving, the switch kept as the user's own is. A switch begun and not done — the profile, its covers or the cover
+replaced, no new history yet — is undone first (the profile found by the snapshot's id, the covers `HIST.covers`), so
+the profile is put back in its own place; the channel shown is the one remembered. The step put back is written again
+as it now is, as `timeTravel()` does, or the closing commit would take the difference for a change and cut off redo.
 
 The dispatcher answers each call as the host is to be sent it: `{id, ok: true, result}` or `{id, ok: false, error:
 {code, message}}`. A transport brings the calls and takes the answers (`serve(agent, {listen, reply, progress})`); the
