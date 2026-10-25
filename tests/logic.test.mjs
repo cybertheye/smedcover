@@ -324,7 +324,8 @@ test("every interface string has both languages", async () => {
 test("no native confirm, alert or prompt in the UI: in the app's web view they do not wait for the answer (askSure in app.js asks instead)", async () => {
   const { readdir, readFile } = await import("node:fs/promises");
   const { join } = await import("node:path");
-  const root = new URL("../ui/", import.meta.url).pathname;
+  const { fileURLToPath } = await import("node:url");
+  const root = fileURLToPath(new URL("../ui/", import.meta.url));   // not .pathname: on Windows that is /D:/…, which join turns into D:\D:\…
   const files = (await readdir(root, { recursive: true })).filter((f) => /\.(m?js|html)$/.test(f));
   const call = /(?<![\w$.])(confirm|alert|prompt)\(/, named = /\b(window|globalThis|self|top|parent)\s*(\.|\[\s*["'`])\s*(confirm|alert|prompt)\b/;
   const found = [];
