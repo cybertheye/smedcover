@@ -3699,10 +3699,11 @@ function renamePreset(name, p, i) {
   input.focus(); input.select();
 }
 /**
- * Each layout preset card's picture, kept from one drawing of the Layout sheet to the next: {cv, p, sig, seen} by preset
- * id ("" the canvas as it is), where `sig` is what it was drawn from (the cover, the profile, the size and the preset)
- * and `seen` whether its card is in sight (`io`). Drawn one a frame, those in sight that are stale, a moment after a
- * change; not while something is dragged. `round`: the drawing's turn (a newer one stops an older).
+ * Each layout preset card's picture, kept from one drawing of the Layout sheet to the next: {cv, p, base, own, seen} by
+ * preset id ("" the canvas as it is), where `base` is what it was drawn from but the preset (presetBase: the cover, the
+ * profile, the size), `own` the preset and the picture's width, and `seen` whether its card is in sight (`io`). Those in
+ * sight that are stale are drawn when the page is idle, a moment after a change; not while something is dragged.
+ * `round`: the drawing's turn (a newer one stops an older).
  */
 const PRESET_PICS = { pics: new Map(), round: 0, io: null };
 const onLayoutSheet = () => S.mode === "edit" && !sheetHidden() && S.tab.edit === "layout";
@@ -3710,7 +3711,7 @@ const onLayoutSheet = () => S.mode === "edit" && !sheetHidden() && S.tab.edit ==
 function presetPic(id, p) {
   let pic = PRESET_PICS.pics.get(id);
   if (!pic) {
-    pic = { cv: el("canvas", { width: 300, height: 169 }), p, sig: "", seen: false };
+    pic = { cv: el("canvas", { width: 300, height: 169 }), p, base: "", own: "", seen: false };
     PRESET_PICS.pics.set(id, pic);
     PRESET_PICS.io = PRESET_PICS.io || new IntersectionObserver((seen) => {
       for (const e of seen) { const x = [...PRESET_PICS.pics.values()].find((q) => q.cv === e.target); if (x) x.seen = e.isIntersecting; }
@@ -3723,34 +3724,44 @@ function presetPic(id, p) {
 }
 /** What the preset cards' pictures are drawn from but the preset: the cover, the profile, the size on the canvas. */
 const presetBase = () => JSON.stringify([S.sel, S.cover.catId, S.cover.title, S.cover.subtitle, S.cover.tag, S.cover.layers, S.cover.scene, S.profile.brand, S.profile.categories, S.profile.sizes, S.profile.style, S.photos.size]);
+/** Runs `fn` when the page is idle (at the latest after 400 ms); where the web view has no requestIdleCallback (WebKit), a moment later, in a task of its own. */
+const whenIdle = (fn) => (globalThis.requestIdleCallback ? requestIdleCallback(fn, { timeout: 400 }) : setTimeout(fn, 30));
 /**
- * Draws the preset cards' pictures that are stale and in sight while the Layout sheet is open, as many a frame as fit in
- * a few milliseconds (one at least): the cover at the size on the canvas, laid out by the preset as the canvas previews
- * it (laidOut), twice as many pixels across as it is shown. Not while something is dragged (as the size thumbnails wait).
+ * Draws the preset cards' pictures that are stale and in sight while the Layout sheet is open: the cover at the size on
+ * the canvas, laid out by the preset as the canvas previews it (laidOut), as many pixels across as the screen shows
+ * (twice the card's width on a Retina screen), and as a drag's frames are drawn (o.fast in drawCover: the effects that
+ * cost whole-canvas work left out, which at that size hardly show). Each drawn when the page is idle, one after
+ * another (more in one idle moment while it has room), so no edit is followed by a long frame; not while something is
+ * dragged (as the size thumbnails wait). What the pictures are drawn from is worked out once a round: the cover, the
+ * profile and the size once for all of them, each preset's own once.
  */
 function refreshPresetPics() {
   if (!onLayoutSheet()) return;
-  const round = ++PRESET_PICS.round, base = presetBase(), z = selSize(), drawn = new Set();   // drawn: once a round (one waiting for outlines is drawn again once they come, see flushDraw)
+  const round = ++PRESET_PICS.round, base = presetBase(), z = selSize(), drawn = new Set(), owns = new Map();   // drawn: once a round (one waiting for outlines is drawn again once they come, see flushDraw)
   let px = 0;   // the pictures' width in pixels, the same for every card: measured once the cards are laid out
-  const sigOf = (pic) => {
-    if (!px) { const box = pic.cv.parentNode; px = Math.round(2 * Math.min((box && box.clientWidth) || 150, (((box && box.clientHeight) || 84) * z.w) / z.h)); }
-    return `${base}|${px}|${pic.p ? JSON.stringify(pic.p) : ""}`;
+  const ownOf = (pic) => {
+    if (!px) { const box = pic.cv.parentNode; px = Math.round(Math.min(2, devicePixelRatio || 1) * Math.min((box && box.clientWidth) || 150, (((box && box.clientHeight) || 84) * z.w) / z.h)); }
+    if (!owns.has(pic)) owns.set(pic, `${px}|${pic.p ? JSON.stringify(pic.p) : ""}`);
+    return owns.get(pic);
   };
-  const next = () => {
+  const stale = (x) => {
+    if (x.base === base) x.base = base;   // the same string from now on: compared again this round at once
+    return x.base !== base || x.own !== ownOf(x);
+  };
+  const next = (idle) => {
     if (round !== PRESET_PICS.round || !onLayoutSheet()) return;
-    if (LIVE || drafting()) return setTimeout(next, 300);
-    const start = performance.now();
+    if (LIVE || drafting()) return setTimeout(() => whenIdle(next), 300);
     let pic;
-    while ((pic = [...PRESET_PICS.pics.values()].find((x) => x.seen && x.cv.isConnected && !drawn.has(x) && x.sig !== sigOf(x)))) {
-      const sig = sigOf(pic), { profile, cover } = pic.p ? laidOut(pic.p) : { profile: S.profile, cover: S.cover };
+    while ((pic = [...PRESET_PICS.pics.values()].find((x) => x.seen && x.cv.isConnected && !drawn.has(x) && stale(x)))) {
+      const own = ownOf(pic), { profile, cover } = pic.p ? laidOut(pic.p) : { profile: S.profile, cover: S.cover };
       drawn.add(pic);
-      try { paint(pic.cv, z, px, cover, catIndex(), null, null, { profile }); pic.sig = outlinesPending() ? "" : sig; }   // waiting for outlines: drawn again once they come
-      catch (e) { console.error(e); pic.sig = sig; }   // one failing leaves the others to be drawn
+      try { paint(pic.cv, z, px, cover, catIndex(), null, null, { profile, fast: true }); pic.base = outlinesPending() ? "" : base; pic.own = own; }   // waiting for outlines: drawn again once they come
+      catch (e) { console.error(e); pic.base = base; pic.own = own; }   // one failing leaves the others to be drawn
       finally { useLook(); }
-      if (performance.now() - start > 8) return requestAnimationFrame(next);   // the rest in the frames to come
+      if (!(idle && idle.timeRemaining && idle.timeRemaining() > 12)) return whenIdle(next);   // the rest in idle moments to come
     }
   };
-  requestAnimationFrame(next);
+  whenIdle(next);
 }
 /** A preset's card under the pointer: the canvas shows the cover laid out by it a moment later (PREVIEW.layout); none: as it is. */
 function hoverPreset(p, i) {

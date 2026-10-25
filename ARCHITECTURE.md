@@ -1642,10 +1642,13 @@ The presets are made and seen at the top of the Layout sheet, two to a row, a ca
 the chances window, whose layout card points back here), after one for the canvas as it is (*Current*, outlined in
 `--acc`). Each card's picture is the cover at the size on the canvas laid out by the preset as the hover preview lays it
 out (`laidOut()`, below), so whatever a preset holds shows there; its canvas is kept from one drawing of the sheet to the
-next (`PRESET_PICS`, by preset id, "" the canvas's) with what it was drawn from (the cover, the profile, the size, the
-preset and its width in pixels, twice what is shown); `refreshPresetPics()` draws those stale and in sight (an
-`IntersectionObserver`) as many a frame as fit in 8 ms, one at least, never while something is dragged (`LIVE`,
-`drafting()`): when the sheet is drawn, as a card comes into sight, and half a second after the last canvas drawing
+next (`PRESET_PICS`, by preset id, "" the canvas's) with what it was drawn from (`base`: the cover, the profile and
+the size, worked out once a round for all of them; `own`: the preset and the width in pixels, the screen's own, twice
+what is shown on a Retina one, once a round each); `refreshPresetPics()` draws those stale and in sight (an
+`IntersectionObserver`) as a drag's frames are drawn (`o.fast` in `drawCover()`: the effects that cost whole-canvas
+work left out, which at that size hardly show; the Glass look's picture takes 11 ms so, 75 in full), each when the
+page is idle (`whenIdle()`: `requestIdleCallback`, or a short timer in a web view without it), more in one idle moment
+while it has room, never while something is dragged (`LIVE`, `drafting()`): when the sheet is drawn, as a card comes into sight, and half a second after the last canvas drawing
 (`flushDraw()`), so a change of the cover, the size or the profile, and outlines arrived, are followed. A preset's card,
 clicked, puts it on the canvas as one step of undo (`applyLayout()`, `putLayout()`
 again, at the profile's sizes, with `presetEnv()`: the parts locked stay, the block's layout too when the block is locked); its ⋯ menu (the
@@ -2281,7 +2284,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | add a keyboard shortcut | the window's `keydown` listener in `app.js`, above `start()` (its order decides what a dialog, a field or Surprise me's window lets through); `MOD_KEY` writes it |
 | light another AI request | wrap it in `aiTracked()` with its service and settings (`app.js`, see 8.6) |
 | change what a layout preset holds | `LAYOUT_PARTS`, `COLUMN_PARTS` (whose words a preset sets in a line or in columns), `takeParts()`, `takeLayout()`, `putLayout()`, `presetLayout()` and `setPresetLayout()` in `layers.js`, `normalizeLayouts()` in `store.js` |
-| change the Layout sheet's preset cards: their pictures, when those are drawn, a card's ⋯ menu | `presetCards()`, `presetPic()`, `refreshPresetPics()` (`PRESET_PICS`), `renamePreset()` and `laidOut()` in `app.js`; `.preset` in `index.html` |
+| change the Layout sheet's preset cards: their pictures, when those are drawn, a card's ⋯ menu | `presetCards()`, `presetPic()`, `refreshPresetPics()` (`PRESET_PICS`), `renamePreset()`, `whenIdle()` and `laidOut()` in `app.js`; `o.fast` in `drawCover()` (`render.js`); `.preset` in `index.html` |
 | change which layers a preset's elements of the user's own place, or what is added where there are none | `EXTRA_KINDS`, `takes`, `extrasOn()`, `extraLayer()` and `insertExtra()` in `layers.js`; `presetEnv()` in `app.js` (the channel, which assets are vector ones, the words and colour added) |
 | change how an element of the user's own is drawn in the preset editor, or where it comes in | `standIn` in `layoutEditor()` and `PORTRAIT` in `app.js`; `newExtra()` in `layers.js` |
 | change how the colour block is moved to a side in the preset editor | `sideToward()` and `onSide()` in `layout.js` |

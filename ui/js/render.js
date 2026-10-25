@@ -1405,6 +1405,9 @@ function dashedLine(shape, grow, colour, perCover) {
  *              look's slider for its value `key`: the layers that did not read that value when last
  *              painted (see noteReads in style.js) are cached in this object between frames, as o.live
  *              caches those not dragged (drop the object when the drag ends)
+ *   o.fast     true: drawn as a drag's frames are (setFast in looks/kit.js), the effects that cost
+ *              whole-canvas work left out — a small picture, where they would hardly show (the Layout
+ *              sheet's preset cards, see refreshPresetPics in app.js)
  *   o.picked   ids of the layers in a group selection, outlined without handles (editor only)
  *   o.spot     ids of the layers kept bright, every other one dimmed (the editor's FOCUS); a clipping
  *              group is dimmed or not as a whole
@@ -1665,7 +1668,7 @@ function paintCover(cv, o) {
   for (const i of [...moving]) cover.layers.forEach((l, k) => { if (k > i && l.weave && canWeave(l) && l.weave.with.includes(cover.layers[i].id) && !moving.includes(k)) moving.push(k); });
   groups();
   for (const i of moving) moved.add(i);
-  setFast(!noted && moving.length > 0); setDraft(moving.length > 0 || !!o.draft);   // a drag's frames are drawn coarser here and there; a draft's photos, faster
+  setFast(!!o.fast || (!noted && moving.length > 0)); setDraft(moving.length > 0 || !!o.draft);   // a drag's frames are drawn coarser here and there; a draft's photos, faster
   let scene = null;   // in a frame that keeps runs of layers: the scene objects placed, those of a kept run as it placed them
   if (!moving.length && !noted) cv._hits = paintRange(ctx, 0, n);
   else {
