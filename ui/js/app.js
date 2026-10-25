@@ -7407,12 +7407,13 @@ function setMode(mode) {
  * one of the user's layout presets — then those places by dealPlaces, on the layout dealt (but for the layers a preset's
  * elements of the user's own placed, which stay where it put them). `design`: the layers of
  * the profile's design by id, where moved words go back to (but for a preset's); `not`: the looks dealt already in
- * this run. Returns the layout dealt: "keep", or the preset's id.
+ * this run; `locks`: the parts left alone (see SURPRISE_LOCKS), Surprise me's own by default. Returns the layout
+ * dealt: "keep", or the preset's id.
  */
-function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), not = []) {
+function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), not = [], locks = S.settings.surprise.locks) {
   const R = Math.random, sv = S.settings.surprise, layouts = S.settings.layouts;
-  const { layout, placed } = dealCover(S.profile.style, S.cover, { R, locks: sv.locks, odds: oddsOf(sv.odds, layouts), layouts, not, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, sizes: sizeKeys(), put: presetEnv(), can: (k) => CAN.outlines || EFFECTS[k].kind !== "outline", canTint });
-  if (!sv.locks.places) dealPlaces(R, placed);
+  const { layout, placed } = dealCover(S.profile.style, S.cover, { R, locks, odds: oddsOf(sv.odds, layouts), layouts, not, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, sizes: sizeKeys(), put: presetEnv(), can: (k) => CAN.outlines || EFFECTS[k].kind !== "outline", canTint });
+  if (!locks.places) dealPlaces(R, placed);
   return layout;
 }
 /** Surprise me's run (how many hands, how fast they show: RULES.hands in deal.js). done: when the last run ended; step: the step of undo it made ({idx}) while nothing has followed it. */
@@ -7430,6 +7431,49 @@ function putHand(h) {
   const had = new Map(S.cover.layers.map((l) => [l.id, l]));
   S.cover.layers = h.layers.map((v) => { const L = had.get(v.id); if (!L) return copyOf(v); into(L, v); return L; });
   if (h.scene) S.cover.scene = copyOf(h.scene); else delete S.cover.scene;
+}
+/**
+ * Deals `count` hands one after another (dealHand), each in a look of its own while there are looks left, `locks` left
+ * alone, the cover put back as it was (`before`, a handNow() taken first) between two: each drawn at size `shown`, `px`
+ * pixels wide, and handed to `each(i, hand, canvas)` (awaited) as it comes. Resolves with the hands, {style, layers,
+ * scene, layout} each; the last one dealt is left on the cover. A hand that cannot be drawn is left out.
+ */
+async function dealHands({ before = handNow(), count = RULES.hands.count, locks = S.settings.surprise.locks, px = DEAL.px, shown = selSize(), each = null } = {}) {
+  const design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), hands = [], dealt = [];
+  for (let i = 0; i < count; i++) {
+    if (i) putHand(before);
+    try {
+      const layout = dealHand(design, dealt, locks);
+      const cv = el("canvas");
+      drawCover(cv, { profile: S.profile, catIndex: catIndex(), size: shown, pixelW: px, cover: S.cover, photos: S.photos });
+      dealt.push(S.profile.style.look);
+      hands.push({ ...handNow(), layout });   // its structure is in the style and the layers it keeps (putHand puts both back)
+      if (each) await each(hands.length - 1, hands[hands.length - 1], cv);
+    } catch (e) { console.error(e); }   // a hand that cannot be drawn is left out
+  }
+  return hands;
+}
+/**
+ * Puts the first of the hands dealt (dealHands) on the canvas, as a step of undo of its own: SURPRISE.step, which another
+ * hand taken instead (takeHand) stays on while nothing has followed it.
+ */
+function keepFirst(hands) {
+  putHand(hands[0]);
+  touch({ profile: true, cover: true, panel: true, side: true, strip: true });
+  commitHistory(true);   // a step of its own even if the hand is the cover as it was: another hand taken, or the deal undone, leaves the step before it alone
+  SURPRISE.step = { idx: S.histIdx };
+}
+/**
+ * Puts hand h, of the run whose step is SURPRISE.step, on the canvas instead, on that same step of undo. False, and
+ * nothing put, when something has followed the run (an edit made since becomes a step of its own first).
+ */
+function takeHand(h) {
+  clearTimeout(timers.hist); commitHistory();   // an edit made since is a step of its own, and the hands are past taking
+  if (!SURPRISE.step || S.histIdx !== SURPRISE.step.idx) return false;
+  putHand(h);
+  touch({ profile: true, cover: true, panel: true, side: true, strip: true });
+  S.hist[S.histIdx] = snapshot();
+  return true;
 }
 /**
  * SURPRISE ME: deals RULES.hands.count hands (dealHand), each in a look of its own while there are looks left,
@@ -7451,31 +7495,20 @@ async function surprise(e) {
     if (first) DEAL.from = S.hist[S.histIdx];   // the cover before this window's deals, for Undo the deal
     SURPRISE.step = null;
     before = handNow();
-    const design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), hands = [], dealt = [], shown = selSize(), t0 = performance.now(), H = RULES.hands;
+    const shown = selSize(), t0 = performance.now(), H = RULES.hands;
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     let shownAt = 0;
-    for (let i = 0; i < H.count; i++) {
-      if (i) putHand(before);
-      try {
-        const layout = dealHand(design, dealt);
-        const cv = el("canvas");
-        drawCover(cv, { profile: S.profile, catIndex: catIndex(), size: shown, pixelW: DEAL.px, cover: S.cover, photos: S.photos });
-        dealt.push(S.profile.style.look);
-        hands.push({ ...handNow(), layout });   // its structure is in the style and the layers it keeps (putHand puts both back)
-        // the hand shows before the next is dealt, and long enough after the last to be seen coming
-        const since = performance.now() - shownAt;
-        if (since < H.pace) await wait(H.pace - since);
-        dealShow(hands.length - 1, hands[hands.length - 1], cv);
-        shownAt = performance.now(); await nextPaint();
-      } catch (e) { console.error(e); }   // a hand that cannot be drawn is left out
-    }
+    const hands = await dealHands({ before, count: H.count, locks: S.settings.surprise.locks, px: DEAL.px, shown, each: async (i, h, cv) => {
+      // the hand shows before the next is dealt, and long enough after the last to be seen coming
+      const since = performance.now() - shownAt;
+      if (since < H.pace) await wait(H.pace - since);
+      dealShow(i, h, cv);
+      shownAt = performance.now(); await nextPaint();
+    } });
     if (!hands.length) throw new Error(t("deal.none"));
     await wait(H.pace * 2);   // a moment with every hand in view, then the first on the canvas, and marked
-    putHand(hands[0]);
     SURPRISE.last = { kept: 0, ms: Math.round(performance.now() - t0), hands: hands.map((h) => ({ look: h.style.look, layout: h.layout, template: layoutOf(h.style, sizeKey(shown)).template })) };   // for the self-test
-    touch({ profile: true, cover: true, panel: true, side: true, strip: true });
-    commitHistory(true);   // a step of its own even if the hand is the cover as it was: another hand taken, or the deal undone, leaves the step before it alone
-    SURPRISE.step = { idx: S.histIdx };
+    keepFirst(hands);
     dealKept(0);
   } catch (err) {
     if (before) { putHand(before); S.hist[S.histIdx] = snapshot(); touch({ panel: true, side: true }); }   // the cover as it was, and no step of undo for it
@@ -7573,12 +7606,8 @@ function dealMark() {
 /** Puts hand i on the canvas instead, while nothing has followed the run: still one step of undo. */
 function dealTake(i) {
   if (SURPRISE.busy || i === DEAL.kept || !DEAL.hands[i]) return;
-  clearTimeout(timers.hist); commitHistory();   // an edit made since is a step of its own, and the hands are past taking
-  if (!SURPRISE.step || S.histIdx !== SURPRISE.step.idx) return dealClose();
-  putHand(DEAL.hands[i]); DEAL.kept = i;
-  touch({ profile: true, cover: true, panel: true, side: true, strip: true });
-  S.hist[S.histIdx] = snapshot();
-  dealMark();
+  if (!takeHand(DEAL.hands[i])) return dealClose();
+  DEAL.kept = i; dealMark();
 }
 /**
  * Undo the deal: the cover as it was before the window's first deal (back through its steps of undo, which redo takes
