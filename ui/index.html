@@ -63,11 +63,11 @@
   .ibtn{width:40px;height:40px;display:grid;place-items:center;border:0;border-radius:12px;background:transparent;color:var(--text);cursor:pointer;padding:0}
   .ibtn:hover:not(:disabled){background:rgba(255,255,255,.1)}
   .ibtn:disabled{opacity:.35;cursor:default}
-  .ibtn.on{background:rgba(255,255,255,.18)}
+  .ibtn.on,.ibtn.on:hover:not(:disabled){background:rgba(255,255,255,.18)}
   .btn{border:1px solid var(--line2);background:rgba(255,255,255,.06);padding:7px 12px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap}
   .btn:hover:not(:disabled){background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.36)}
   .btn:disabled{opacity:.3;cursor:default}
-  .btn.on{background:rgba(255,255,255,.9);color:var(--ink);border-color:transparent}
+  .btn.on,.btn.on:hover:not(:disabled){background:rgba(255,255,255,.9);color:var(--ink);border-color:transparent}   /* selected: as it is under the pointer too */
   .btn.solid{background:var(--acc);color:var(--acc-ink);border-color:transparent;font-weight:700}
   .btn.solid:hover:not(:disabled){background:var(--acc);filter:brightness(1.08)}
   .btn.wide{width:100%;padding:11px}
@@ -165,8 +165,9 @@
   .lookcard .nm{padding:7px 32px 8px 9px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}   /* room at its end for the ♡ */
   .lookcard .badge{position:absolute;left:6px;top:6px;padding:1px 8px;border-radius:999px;background:var(--acc);color:var(--acc-ink);font-size:11px;font-weight:700}
   .lookgrid .lookcard[hidden]{display:none}
+  .lookgrid:not(:has(>.lookcard:not([hidden]))){display:none}   /* no card shown (♥ Liked with nothing liked): no empty grid above the line saying so */
   .lookgrid.finding .lookcard.on{order:-1}   /* the profile's own look first while the search or a chip sorts the cards (under ♥ Liked, sortLooks puts it in its place) */
-  .lookgrid-none{margin:0}
+  .hint.lookgrid-none{margin:0}   /* .hint, later on, would give it a margin over the sheet's own gap */
   /* above the cards: the search and a chip for each kind of look */
   .lookfind{display:flex;flex-direction:column;gap:10px}
   .lookfind-q{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border-radius:12px;border:1px solid var(--line2);background:rgba(10,10,16,.3);color:var(--text3);cursor:text}
@@ -556,7 +557,7 @@
   .ib{flex:none;width:30px;height:30px;border:0;border-radius:9px;background:transparent;color:var(--text);display:grid;place-items:center;cursor:pointer;padding:0}
   .ib:hover:not(:disabled){background:rgba(255,255,255,.12)}
   .ib:disabled{opacity:.3;cursor:default}
-  .ib.on{background:rgba(255,255,255,.18)}
+  .ib.on,.ib.on:hover:not(:disabled){background:rgba(255,255,255,.18)}
   /* over the canvas: the selected layer's bar of its most used settings, a popover of one of them, and the frame of
      the layer under the pointer in the list */
   #ftb{position:absolute;z-index:20;display:flex;flex-wrap:wrap;align-items:center;gap:2px;padding:4px;border-radius:14px;white-space:nowrap;max-width:calc(100% - 12px)}
@@ -566,7 +567,7 @@
   #ftb button{height:32px;border:0;border-radius:10px;background:transparent;color:var(--text);font-size:13px;padding:0 10px;cursor:pointer;display:flex;align-items:center;gap:6px;max-width:190px}
   #ftb button>span{overflow:hidden;text-overflow:ellipsis}
   #ftb button:hover:not(:disabled){background:rgba(255,255,255,.12)}
-  #ftb button.on{background:rgba(255,255,255,.2)}
+  #ftb button.on,#ftb button.on:hover:not(:disabled){background:rgba(255,255,255,.2)}
   #ftb button.open,#ftb button.open:hover{background:rgba(255,255,255,.9);color:#15151c}   /* its popover open: a light pill */
   #ftb button.more{background:rgba(255,255,255,.14)}   /* More…, a segment of its own */
   #ftb button.more:hover:not(:disabled),#ftb button.more.on{background:rgba(255,255,255,.24)}
@@ -969,7 +970,7 @@
   .rcard{min-height:58px;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:6px;padding:8px 12px;border-radius:12px;border:1px solid var(--line);background:rgba(0,0,0,.22);color:var(--text);text-align:left;cursor:pointer;flex:none}
   .rcard b{font-size:13px;font-weight:500;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}   /* a long name on two lines */
   .rcard:hover:not(:disabled){border-color:var(--line2)}
-  .rcard.on{border:2px solid var(--acc);background:color-mix(in srgb,var(--acc) 10%,transparent);padding:7px 11px}
+  .rcard.on,.rcard.on:hover:not(:disabled){border:2px solid var(--acc);background:color-mix(in srgb,var(--acc) 10%,transparent);padding:7px 11px}
   .rcard:disabled{opacity:.45;cursor:default}
   .rcard .sw3{display:flex;gap:3px}
   .rcard .sw3 i{width:16px;height:6px;border-radius:3px;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
@@ -981,7 +982,7 @@
   .rchips{display:flex;flex-wrap:wrap;gap:6px}
   .rchip{border:1px solid var(--line2);background:transparent;color:var(--text);padding:6px 12px;border-radius:999px;font-size:12.5px;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rchip:hover:not(:disabled){background:rgba(255,255,255,.08)}
-  .rchip.on{background:rgba(255,255,255,.9);color:var(--ink);border-color:transparent;font-weight:700}
+  .rchip.on,.rchip.on:hover:not(:disabled){background:rgba(255,255,255,.9);color:var(--ink);border-color:transparent;font-weight:700}   /* selected: as it is under the pointer too */
   .rchip.add{border-style:dashed;color:var(--text2)}
   .rchip:disabled{opacity:.45;cursor:default}
   .rdetail{display:grid;gap:8px;padding:12px;border-radius:14px;background:rgba(255,255,255,.05);border:1px solid var(--line)}
