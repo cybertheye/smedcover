@@ -1721,7 +1721,12 @@ channel (a camera for a channel with no graphic, so there is one to place), and 
 (`presetLayout()`) as the style's template and adjustments. Its sizes are the profile's and the preset's own (`custom`,
 added by width and height, 64 to 8192, 12 at most; one let go keeps what was set for it, for a profile that has it), one
 drawn at a time, picked in the strip under the canvas, where the preset is drawn small at each of them (`paintThumbs`),
-with *＋ Size* at its end. Its head holds the preset's name, the scope (`all`, `orient` — the editor's sizes facing that
+with *＋ Size* at its end. Beside the canvas, the parts (`.ls-side`) are as tall as the canvas and the strip under
+it whichever part is selected (`contain: size`: what is in it never sizes it, so the window does not grow and shrink
+from part to part): the list (`.ls-list`), the part selected's name and buttons, then its own settings (`.ls-opts`),
+each as tall as it is while there is room, then the settings giving way first and the list after; each scrolls with
+its thin bar always there, kept where it was when the side is built again, the list brought, once, to an element just added
+or to the kinds to add as they open (`reveal`). Its head holds the preset's name, the scope (`all`, `orient` — the editor's sizes facing that
 one's way, what it opens on, so the wide sizes and the others are laid out apart —, `size`), *Cancel* and *Save*.
 The canvas is painted as a cover is, so what is caught and the block's diamonds are those of the size shown (`coverAt()`
 leaves a part switched off there out). A part is moved, resized, stretched or turned as on the canvas (`handles()`,
@@ -1855,6 +1860,11 @@ to show them always), `start()` finds it out with a probe and sets `html.bars`, 
 the sheets' are. A pane's bar is not cut to its rounded corners, so its track stops a little short of them at either
 end (`::-webkit-scrollbar-track` margins: the sheets, the drawer and Settings' page always, the dialogs, the ⋯ menu,
 the bar's popover and the letter, crop, weave and brush windows under `html.bars`), and the bar stays inside the pane.
+A pane whose bar is always drawn so (`.scroll`: the sheets, the drawer, Settings' page; the Look sheet's cards; the
+layout editor's list of parts and settings of the part selected) scrolls with `overflow-y: scroll`, not `auto` with `scrollbar-gutter:
+stable`: WebKit keeps a gutter as wide as its own bar (17 px) until there is something to scroll, then draws this one
+(10 px), so what was in it moved each time a group opened or shut. Always there, with nothing to scroll the bar shows
+no thumb, its track clear; the pane's right padding is that much less, so its content stands as far from either edge.
 
 **The top bar and ⋯.** `syncTop()` builds the bar: the profile and the channel (two menus, each ending, after an `<hr>`, in an entry that makes a new one, `NEW_ONE`: `newFromTop()` puts the list back on what is shown, makes it with `profileActions.new()` or `addChannel()` — what Settings' *New* and its card to add a channel do — and then `switchChannel()` to it, and opens Settings at *Brand & channels* with its name field focused and selected; `fitList()` keeps each list as wide as its widest name, which that longer entry would otherwise make it, and `stayOff()` keeps the arrow keys on a closed list, where they change the choice at once off the Mac, from stepping onto it), undo and redo, Surprise
 me (its key, Space, in a `kbd` on it), Export (its tip naming ⌘E), and ⋯ (`MENU`, `renderMenu()`, placed under its button by `openMenu()`): what changes a whole cover (*Set

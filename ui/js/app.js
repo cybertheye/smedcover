@@ -3313,10 +3313,11 @@ const PORTRAIT = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg 
 function layoutEditor(p, i, fresh = false) {
   const m = $("modal"), c = cat(), photos = new Map();   // the photos drawn: the portrait a picture element is drawn by, once it can be
   // the block, worked on as the preset keeps it (setPresetLayout); the parts and the elements of the user's own (`extras`:
-  // { id, kind, sticker? }, in order), on layers of the editor's own; `picking`, the kinds of element offered to add
+  // { id, kind, sticker? }, in order), on layers of the editor's own; `picking`, the kinds of element offered to add;
+  // `reveal`, an element just added, to be brought into the list's view
   const E = { p: { template: p.template, adjust: { ...p.adjust }, ...(p.orient ? { orient: copyOf(p.orient) } : {}), ...(p.by ? { by: copyOf(p.by) } : {}) },
     custom: [...(p.custom || [])], extras: (p.extras || []).map((x) => ({ id: x.id, kind: x.kind, ...(x.sticker ? { sticker: x.sticker } : {}) })),
-    key: S.sel, scope: "orient", sel: "title", live: null, dirty: false, adding: false, addW: "", addH: "", picking: false };
+    key: S.sel, scope: "orient", sel: "title", live: null, dirty: false, adding: false, addW: "", addH: "", picking: false, reveal: false };
   // the sizes it is laid out at: the profile's, then its own (one the profile has too is the profile's)
   const sizes = () => [...S.profile.sizes.map((z) => ({ ...z, key: sizeKey(z) })),
     ...E.custom.filter((k) => !S.profile.sizes.some((z) => sizeKey(z) === k)).map((k) => { const [w, h] = k.split("x").map(Number); return { w, h, key: k, custom: true }; })];
@@ -3549,7 +3550,7 @@ function layoutEditor(p, i, fresh = false) {
     const x = newExtra(kind, id, E.extras.filter((y) => y.kind === kind).length);
     E.extras.push({ id, kind, ...(x.sticker ? { sticker: x.sticker } : {}) });
     standIn(x);
-    E.sel = id; E.picking = false; E.dirty = true; build(); redraw();
+    E.sel = id; E.picking = false; E.dirty = true; E.reveal = true; build(); redraw();
   };
   const dropExtra = (id) => {
     E.extras = E.extras.filter((x) => x.id !== id);
@@ -3599,29 +3600,42 @@ function layoutEditor(p, i, fresh = false) {
         el("div", { class: "kinds" }, EXTRA_KINDS.map((k) => el("button", { class: "btn", onclick: () => addExtra(k) }, t("layed.kind." + k)))),
         el("button", { class: "linkbtn", onclick: () => { E.picking = false; build(); } }, t("layed.cancel")))
       : el("button", { class: "linkbtn ls-addx", disabled: full, title: t(full ? "layed.manyExtras" : "layed.addExtraTip", LAYOUTS.extras), onclick: () => { E.picking = true; build(); } }, t("layed.addExtra"));
-    side.replaceChildren(...[
-      el("div", {}, cap("layed.parts"), el("div", { class: "parts" }, LAYOUT_PARTS.map(row), E.extras.length > 0 && el("div", { class: "ls-mine" }, t("layed.mine")), E.extras.map((y) => row(y.id))),
-        adder, el("div", { class: "hint", style: "margin:6px 0 0" }, t("layed.partsHint"))),
+    // the list and the part selected's settings each in a room of its own (index.html), scrolled where they were (the
+    // settings back at their top for another part)
+    const was = { list: side.querySelector(".ls-list")?.scrollTop || 0, opts: side.dataset.sel === E.sel ? side.querySelector(".ls-opts")?.scrollTop || 0 : 0 };
+    side.replaceChildren(
+      el("div", { class: "ls-list" }, capInfo("layed.parts", t("layed.partsHint")), el("div", { class: "parts" }, LAYOUT_PARTS.map(row), E.extras.length > 0 && el("div", { class: "ls-mine" }, t("layed.mine")), E.extras.map((y) => row(y.id))),
+        adder),
       // an element of the user's own: what it does where the preset is put, behind an ⓘ
       el("div", { class: "ls-picked" }, el("span", {}, t("layed.picked", nameOf(E.sel)), x && " ", x && info(t("layed.extraHint." + x.kind))),
         el("div", { class: "acts" }, !block && el("button", { class: "btn", title: t("layed.resetTip"), onclick: reset }, t("layed.reset")),
           x && el("button", { class: "btn", onclick: () => dropExtra(x.id) }, t("layed.remove")))),
-      // the words of the part selected in a line or in columns, at every size (a lettered part's but the brand row's, a
-      // text element's)
-      (COLUMN_PARTS.includes(E.sel) || (x && x.kind === "text")) && el("div", { class: "togrow ls-run" },
-        el("div", { style: "flex:1;min-width:0" }, el("div", { style: "font-weight:700" }, t("props.vertical")), el("div", { class: "hint", style: "margin:2px 0 0" }, t("layed.verticalSub"))),
-        el("button", { class: "tog" + (part(E.sel).vertical ? " on" : ""), role: "switch", "aria-checked": String(!!part(E.sel).vertical), "aria-label": t("props.vertical"), title: t("props.verticalTip"),
-          onclick: () => { const L = part(E.sel); L.vertical = !L.vertical; E.dirty = true; build(); redraw(); } })),
-      // the block: the side it lies on at this size, a button each (as a drag toward that side); its size and slant put back
-      block && el("div", { class: "ls-block" },
-        el("div", {}, el("label", { class: "cap" }, t("layed.side", ratioText(z.w, z.h))),
-          el("div", { class: "seg" }, SIDES.map((v) => {
-            const on = sideOf(presetLayout(E.p, z.key)) === v;
-            return el("button", { class: "btn" + (on ? " on" : ""), "aria-pressed": String(on), title: on ? null : t("layed.sideTip"), onclick: () => toSide(v) }, t("layed.side." + v));
-          }))),
-        E.p.by && E.p.by[z.key] && el("div", { class: "layown" }, el("span", {}, t("style.own")), el("button", { class: "linkbtn", title: t("layed.followTip"), onclick: follow }, t("style.follow"))),
-        el("div", { class: "acts" }, el("button", { class: "btn", title: t("layed.blockResetTip"), onclick: resetBlock }, t("layed.blockReset"))),   // its place is its side, the buttons above
-        el("div", { class: "hint", style: "margin:0" }, t("layed.blockHint")))].filter(Boolean));
+      el("div", { class: "ls-opts" },
+        // the words of the part selected in a line or in columns, at every size (a lettered part's but the brand row's, a
+        // text element's)
+        (COLUMN_PARTS.includes(E.sel) || (x && x.kind === "text")) && el("div", { class: "togrow ls-run" },
+          el("div", { style: "flex:1;min-width:0" }, el("div", { style: "font-weight:700" }, t("props.vertical")), el("div", { class: "hint", style: "margin:2px 0 0" }, t("layed.verticalSub"))),
+          el("button", { class: "tog" + (part(E.sel).vertical ? " on" : ""), role: "switch", "aria-checked": String(!!part(E.sel).vertical), "aria-label": t("props.vertical"), title: t("props.verticalTip"),
+            onclick: () => { const L = part(E.sel); L.vertical = !L.vertical; E.dirty = true; build(); redraw(); } })),
+        // the block: the side it lies on at this size, a button each (as a drag toward that side); its size and slant put back
+        block && el("div", { class: "ls-block" },
+          el("div", {}, el("label", { class: "cap" }, t("layed.side", ratioText(z.w, z.h))),
+            el("div", { class: "seg" }, SIDES.map((v) => {
+              const on = sideOf(presetLayout(E.p, z.key)) === v;
+              return el("button", { class: "btn" + (on ? " on" : ""), "aria-pressed": String(on), title: on ? null : t("layed.sideTip"), onclick: () => toSide(v) }, t("layed.side." + v));
+            }))),
+          E.p.by && E.p.by[z.key] && el("div", { class: "layown" }, el("span", {}, t("style.own")), el("button", { class: "linkbtn", title: t("layed.followTip"), onclick: follow }, t("style.follow"))),
+          el("div", { class: "acts" }, el("button", { class: "btn", title: t("layed.blockResetTip"), onclick: resetBlock }, t("layed.blockReset"))),   // its place is its side, the buttons above
+          el("div", { class: "hint", style: "margin:0" }, t("layed.blockHint")))));
+    const list = side.firstChild, opening = E.picking && !side.dataset.picking;
+    list.scrollTop = was.list; side.lastChild.scrollTop = was.opts; side.dataset.sel = E.sel; side.dataset.picking = E.picking ? "1" : "";
+    // brought into view in the list, once: the kinds to add as they open, an element just added (`reveal`)
+    const seen = opening ? list.querySelector(".ls-kinds") : E.reveal && list.querySelector(".lpart.on");
+    E.reveal = false;
+    if (seen && list.isConnected) {
+      const b = list.getBoundingClientRect(), r = seen.getBoundingClientRect();
+      if (r.bottom > b.bottom) list.scrollTop += Math.min(r.bottom - b.bottom, r.top - b.top); else if (r.top < b.top) list.scrollTop -= b.top - r.top;
+    }
   };
   const back = () => { LAYED.redraw = null; closeModal(); if (S.mode === "edit" && S.tab.edit === "layout") renderPanel(); };   // back to the Layout sheet, where the presets are
   const cancel = async () => { if (E.dirty && !(await askSure({ title: t("layed.discard"), body: t("layed.discardBody"), go: t("layed.discardGo") }))) return; back(); };

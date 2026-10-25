@@ -1306,11 +1306,23 @@
   .lehead .hint{margin:0}
   .lehead .grp{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2)}
   .lehead .acts .btn{padding:8px 18px;font-size:13px}
-  .ls-body{display:grid;grid-template-columns:280px minmax(0,1fr);gap:18px;align-items:start}
+  .ls-body{display:grid;grid-template-columns:280px minmax(0,1fr);gap:18px}
   .ls-main{display:grid;gap:12px;min-width:0}
   .ls-stage{height:min(50vh,500px);display:grid;place-items:center;background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:16px;overflow:hidden}
   .ls-stage canvas{display:block;touch-action:none;background:repeating-conic-gradient(#3a3a46 0 25%,#262630 0 50%) 0 0/16px 16px}
-  .ls-side{display:grid;gap:14px;min-width:0;padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.04)}
+  /* the parts: as tall as the canvas and the sizes under it whatever part is selected (contain:size: what is in it never
+     sizes it, so the dialog keeps its size); the list, then the part selected's name and buttons, then its own settings,
+     the list and the settings each scrolled in their room */
+  .ls-side{display:flex;flex-direction:column;gap:14px;min-width:0;contain:size;padding:14px 6px 14px 16px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.04)}
+  /* each its natural height while there is room; then the settings give way first (shrinking ten times as fast), the
+     list after them; each scrolls, its thin bar always there (see .scroll): 6 px and the bar's 10 on the right */
+  .ls-list{flex:0 1 auto;min-height:72px;overflow-y:scroll}
+  .ls-picked{flex:none;margin-right:10px}
+  .ls-opts{flex:0 10 auto;min-height:96px;overflow-y:scroll;display:grid;align-content:start;gap:14px}
+  :is(.ls-list,.ls-opts)::-webkit-scrollbar{width:10px}
+  :is(.ls-list,.ls-opts)::-webkit-scrollbar-track{background:transparent}
+  :is(.ls-list,.ls-opts)::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border:3px solid transparent;background-clip:padding-box;border-radius:6px}
+  :is(.ls-list,.ls-opts)::-webkit-scrollbar-thumb:hover{background-color:rgba(255,255,255,.3)}
   .ls-side .parts{display:grid;gap:0}
   .ls-side .parts .lpart{display:flex;align-items:center;gap:8px;min-height:34px;padding:0 2px}   /* a part: its name (a click picks it), then on or off */
   .ls-side .parts .lpart .nm{flex:1;min-width:0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1344,7 +1356,7 @@
   .ls-plus:hover{border-color:rgba(255,255,255,.5);color:#fff}
   .ls-add{display:inline-flex;align-items:center;gap:6px;font:600 12px var(--mono);align-self:center}
   .ls-add .ls-num{width:70px;padding:5px 8px;font:600 12px var(--mono)}
-  @media(max-width:900px){.ls-body{grid-template-columns:1fr}}
+  @media(max-width:900px){.ls-body{grid-template-columns:1fr}.ls-side{contain:none;height:min(60vh,520px)}}
   #modal .dlg.wide{width:min(880px,94vw)}
   .parts{display:flex;flex-wrap:wrap;gap:8px}
   .part{height:34px;display:flex;align-items:center;gap:6px;border:1px solid var(--line2);border-radius:10px;background:rgba(255,255,255,.08);color:var(--text);padding:0 9px;font-size:13px;cursor:pointer;min-width:0}
