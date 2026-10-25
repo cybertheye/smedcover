@@ -30,6 +30,8 @@ import { sizeOf, PIXELS, dropCards } from "./photo.js";
 import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, moreChanged, sheetOrder, labelRoom, drawStack } from "./stack3d.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt, coverCrop } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, AI_DEFAULTS, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
+import { makeCommands } from "./commands.js";
+import { startAgent, stepping } from "./agent.js";
 
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
@@ -214,6 +216,30 @@ async function timeTravel(step) {
   // the step as it now is: reading it back may write it a little differently (fields filled in, keys in
   // another order), and the next commit would take that for a change and cut off the steps to redo
   S.hist[i] = snapshot();
+}
+/**
+ * Runs fn, a change an agent makes (see agent.js), as one step of undo, and resolves with what it resolves with: the
+ * change the user was making becomes a step of its own first, the debounced commit is held while fn runs (HOLD), and
+ * the step is committed once it is over — none when nothing changed. Should fn fail part-way, what it changed is put
+ * back (photos and pictures put in the library stay): the profile and cover as they were before it, any step taken
+ * meanwhile (keepFirst's) let go; or, when it switched channel or profile (a new history), as they were on arriving
+ * there, the switch kept as the user's own is. The step put back is written again as it now is, as timeTravel does.
+ */
+async function agentStep(fn) {
+  commitPending();
+  const at = S.histIdx, snap = S.hist[at], here = `${S.profile.id}/${S.cover.catId}`;
+  HOLD.history = true;
+  try { return await fn(); }
+  catch (e) {
+    clearTimeout(timers.hist);
+    if (`${S.profile.id}/${S.cover.catId}` !== here) { S.hist = S.hist.slice(0, 1); S.histIdx = 0; SURPRISE.step = null; await restoreSnap(S.hist[0]); }
+    else {
+      if (S.hist[at] === snap && S.histIdx !== at) { S.hist = S.hist.slice(0, at + 1); S.histIdx = at; SURPRISE.step = null; }
+      if (snapshot() !== snap) await restoreSnap(snap);
+    }
+    S.hist[S.histIdx] = snapshot(); syncTop();
+    throw e;
+  } finally { HOLD.history = false; commitPending(); }
 }
 
 /**
@@ -8125,7 +8151,7 @@ addEventListener("drop", async (e) => {
   if (!hasFiles(e)) return;
   e.preventDefault(); dragDepth = 0; document.body.classList.remove("drop", "gdrop");
   if (genOpen()) return genDropped(e.dataTransfer.files);
-  if (SURPRISE.busy) return;   // hands are being dealt onto the cover
+  if (SURPRISE.busy || stepping()) return;   // hands are being dealt onto the cover, or an agent is changing it (agent.js)
   // dropped photos become photo layers, like prints (the first of a cover too), where they were dropped on the canvas
   const cv = $("cv"), b = cv.getBoundingClientRect(), over = S.mode === "edit" && e.clientX >= b.left && e.clientX <= b.right && e.clientY >= b.top && e.clientY <= b.bottom;
   const at = over ? { x: clamp((e.clientX - b.left) / b.width, 0, 1), y: clamp((e.clientY - b.top) / b.height, 0, 1) } : null;
@@ -8333,7 +8359,10 @@ async function start() {
   resetHistory();
   if (custom.tell) custom.tell();   // what was wrong with custom.json
   if (selftest) selfTest(selftest);
-  else setTimeout(readLibrary, 1500);   // once the window is up: read the bitmap library in the background, ready for when it is opened
+  else {
+    setTimeout(readLibrary, 1500);   // once the window is up: read the bitmap library in the background, ready for when it is opened
+    startAgent(agentOpts());   // an agent's calls taken from now on (agent.js)
+  }
 }
 /**
  * Before each channel had a cover of its own the app kept one cover (session.json) for every channel of
@@ -8445,6 +8474,101 @@ const FX_BUDGET = { px: { editor: 1600, card: LOOKPIC.w }, slow: { editor: 100, 
 async function testedLooks() {
   const named = await invoke("selftest_looks").catch(() => null), want = named ? named.split(",").map((x) => x.trim()) : null;
   return want ? LOOK_IDS.filter((k) => want.includes(k)) : LOOK_IDS;
+}
+/**
+ * The self-test's agent step (SMEDCOVER_SELFTEST_AGENT): the agent shell started as start() starts it, what holds a
+ * call back being userBusy's but the self-test itself; the read-only tools, the selection, undo and redo called through
+ * its dispatcher as an agent's calls come, each answer checked against the state, the previews decoded at the size
+ * asked and written into the self-test folder (`dir`); and agentStep's one step: a change, none, a change that fails.
+ * Returns the report's `agent` ({ok, ms, …, errors}); the cover is left as it was.
+ */
+async function agentTest(dir) {
+  const r = { ms: {}, errors: [] }, no = (m) => r.errors.push(m), keep = { title: S.cover.title, tag: S.cover.tag };
+  const agent = startAgent(agentOpts((strict) => { SELFTESTING = false; try { return userBusy(strict); } finally { SELFTESTING = true; } }));   // all it says but the self-test itself
+  let n = 0;
+  const call = async (tool, args = {}) => {
+    const t0 = performance.now(), reply = await agent.handle({ id: `selftest-${++n}`, tool, args });
+    r.ms[tool] = Math.max(r.ms[tool] || 0, Math.round(performance.now() - t0));
+    return reply;
+  };
+  const ok = async (tool, args) => { const x = await call(tool, args); if (!x.ok) throw new Error(`${tool}: ${x.error.code}: ${x.error.message}`); return x.result; };
+  const png = async (res, name) => {   // the image an answer carries: decoded, and written into the self-test folder
+    const data = res.content.find((c) => c.type === "image").data, bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+    const im = await loadImage("data:image/png;base64," + data);
+    return { w: im ? im.naturalWidth : 0, h: im ? im.naturalHeight : 0, path: await invoke("write_image", framed(bytes, { dir, name }, { format: "png" })) };
+  };
+  // what there is and what is shown
+  const ctx = (await ok("get_context")).structuredContent, mine = ctx.profiles.find((p) => p.id === S.profile.id);
+  r.context = { profiles: ctx.profiles.length, channels: mine ? mine.channels.length : 0, sizes: mine ? mine.sizes.map((z) => z.key) : [], current: ctx.current, can: ctx.can };
+  if (ctx.profiles.length !== S.profiles.length || !mine) no("get_context: the profiles are not listed");
+  else if (mine.channels.map((c) => c.id).join() !== S.profile.categories.map((c) => c.id).join() || mine.sizes.map((z) => z.key).join() !== sizeKeys().join()) no("get_context: the channels or sizes are not the profile's");
+  if (ctx.current.channel !== S.cover.catId || ctx.current.size !== S.sel || ctx.current.layer !== S.layerId) no("get_context: what is shown is not what the window shows");
+  const cover = (await ok("get_cover", { letters: true })).structuredContent;
+  r.cover = { layers: cover.layers.length, title: cover.title };
+  if (cover.layers.map((l) => `${l.id}/${l.type}/${l.visible}`).join() !== S.cover.layers.map((l) => `${l.id}/${l.type}/${l.visible}`).join()) no("get_cover: the layers are not the cover's");
+  if (cover.title !== S.cover.title || !cover.layers.find((l) => l.id === "title").letterKeys.length) no("get_cover: the title or its letter keys are wrong");
+  const opts = (await ok("list_options")).structuredContent;
+  if (opts.looks.length !== LOOK_IDS.length || opts.effects.length !== Object.keys(EFFECTS).length) no("list_options: not every look or effect is listed");
+  const lib = (await ok("list_library", { limit: 5 })).structuredContent;
+  r.library = { photos: lib.photos.length, stickers: lib.stickers.length, graphics: lib.graphics.length, mine: lib.mine.length };
+  // previews: the longer side as asked, another channel drawn without switching, every size on one sheet
+  const here = S.cover.catId, one = await ok("render_preview", { maxSide: 640 }), a = await png(one, "agent-preview.png"), s1 = one.structuredContent;
+  r.preview = { ...a, said: [s1.width, s1.height], boxes: s1.boxes.length, pending: s1.pending };
+  if (Math.max(a.w, a.h) !== 640 || a.w !== s1.width || a.h !== s1.height) no(`render_preview: ${a.w}×${a.h}, not 640 on its longer side`);
+  if (!s1.boxes.some((b) => b.id === "title")) no("render_preview: the title has no box");
+  const tallSize = S.profile.sizes.find((z) => z.h > z.w);
+  if (tallSize) {
+    const tall = await ok("render_preview", { size: sizeKey(tallSize), maxSide: 512, channel: S.profile.categories.length > 1 ? 2 : 1 }), b = await png(tall, "agent-preview-tall.png");
+    r.previewTall = { ...b, size: sizeKey(tallSize) };
+    if (b.h !== 512) no(`render_preview: a tall size drawn ${b.w}×${b.h}, not 512 high`);
+  }
+  if (S.cover.catId !== here) no("render_preview: drawing another channel switched the window");
+  const sheet = await ok("render_preview", { all: true, maxSide: 1024 }), c = await png(sheet, "agent-sheet.png"), s3 = sheet.structuredContent;
+  r.sheet = { ...c, sizes: s3.sizes.length };
+  if (s3.sizes.length !== S.profile.sizes.length || c.w !== s3.width || c.h !== s3.height || Math.max(c.w, c.h) > 1536) no("render_preview: the contact sheet is not every size, or not the size it says");
+  // the selection
+  const sel = (await ok("select_layer", { layer: "tag" })).structuredContent, got = (await ok("get_selection")).structuredContent;
+  if (S.layerId !== "tag" || sel.layer !== "tag" || got.layer !== "tag") no("select_layer: the tag is not selected");
+  await ok("select_layer", { layers: ["title", "tag"] });
+  if (pickedIds().join() !== "title,tag") no("select_layer: the two are not selected together");
+  await ok("select_layer", { layer: "title" });
+  // undo and redo, after a change made by hand (still waiting to be recorded: a step of its own first)
+  const i0 = S.histIdx, before = S.cover.title;
+  S.cover.title = "Agent *undo* test"; touch({ cover: true, panel: true });
+  const u = (await ok("undo")).structuredContent;
+  if (S.histIdx !== i0 || S.cover.title !== before || u.index !== i0 || !u.canRedo) no(`undo: at ${S.histIdx} (${u.index}), not ${i0}, or the title not put back`);
+  const d = (await ok("redo")).structuredContent;
+  if (S.histIdx !== i0 + 1 || S.cover.title !== "Agent *undo* test" || d.canRedo) no("redo: the change made by hand is not back");
+  await ok("undo");
+  r.history = { from: i0, undo: u, redo: d };
+  // agentStep: a change is one step, none is none, a change that fails is put back and leaves redo as it was
+  const j0 = S.histIdx, len0 = S.hist.length;
+  await agentStep(async () => { S.cover.tag = "AGENT"; touch({ cover: true }); });
+  await new Promise((ok2) => setTimeout(ok2, 650));   // past the debounced commit
+  const oneStep = S.histIdx === j0 + 1 && S.hist.length === j0 + 2 && JSON.parse(S.hist[S.histIdx]).c.tag === "AGENT";
+  await agentStep(async () => {});
+  const noStep = S.histIdx === j0 + 1;
+  await timeTravel(-1);
+  let threw = false;
+  try { await agentStep(async () => { S.cover.tag = "BROKEN"; touch({ cover: true }); throw new Error("on purpose"); }); } catch (e) { threw = e.message === "on purpose"; }
+  const putBack = threw && S.cover.tag === keep.tag && S.histIdx === j0 && S.hist.length === j0 + 2;
+  r.step = { oneStep, noStep, putBack, hist: [len0, S.hist.length] };
+  if (!oneStep) no("agentStep: a change is not exactly one step");
+  if (!noStep) no("agentStep: a change of nothing made a step");
+  if (!putBack) no("agentStep: a change that failed was not put back, or cut off redo");
+  // what goes wrong answers as the host expects; a call waits for a dialog
+  const errs = { unknown: await call("draw_me"), invalid: await call("render_preview", { maxSide: 9 }), notYet: await call("set_text", { title: "x" }) };
+  r.answers = Object.fromEntries(Object.entries(errs).map(([k, x]) => [k, x.ok ? "ok" : x.error.code]));
+  if (r.answers.unknown !== "unknown_tool" || r.answers.invalid !== "invalid_arguments" || r.answers.notYet !== "unavailable") no(`errors answered ${JSON.stringify(r.answers)}`);
+  if (S.histIdx !== j0) no("a tool that is not done yet made a step");
+  $("modal").replaceChildren(el("div", { class: "dlg" }, "…")); $("modal").hidden = false;
+  setTimeout(() => { $("modal").hidden = true; }, 300);
+  const t0 = performance.now(), waited = await call("get_selection");
+  r.waitedForDialog = Math.round(performance.now() - t0);
+  if (!waited.ok || r.waitedForDialog < 300) no(`a call did not wait for the dialog (${r.waitedForDialog} ms)`);
+  S.cover.title = keep.title; S.cover.tag = keep.tag; touch({ cover: true, panel: true, side: true }); commitPending();
+  r.ok = !r.errors.length;
+  return r;
 }
 /** SMEDCOVER_SELFTEST mode: export real covers in every format through the normal path, report, quit. */
 let SELFTESTING = false;   // the self-test running: its requests and cut-outs leave the AI lights alone (aiTracked)
@@ -8571,6 +8695,12 @@ async function selfTest(dir) {
         S.cover.layers = S.cover.layers.filter((l) => l.text !== "only on A");
         await switchChannel(home);
       }
+    }
+    // the agent's tools, called as an agent's calls come (SMEDCOVER_SELFTEST_AGENT)
+    if (await invoke("selftest_agent").catch(() => false)) {
+      await step("agent");
+      try { report.agent = await agentTest(dir); } catch (e) { report.agent = { ok: false, errors: [String((e && e.stack) || e)] }; }
+      for (const e of report.agent.errors) report.errors.push(`agent: ${e}`);
     }
     S.cover.title = "Self test\n*binary* export"; S.cover.tag = "EP.01";
     for (const format of ["png", "jpeg", "webp"]) {
@@ -9301,6 +9431,28 @@ async function dragTest() {
   }
   await invoke("selftest_done", { report: JSON.stringify(report, null, 2) }).catch(() => null);
 }
+// ---------- what an agent's commands reach (makeCommands in commands.js, driven by agent.js): the state, and the app's
+// own ways of reading, changing, drawing and writing it, the same the editor uses
+/** The change still waiting to be recorded (recordHistory) made a step of undo now. */
+const commitPending = () => { clearTimeout(timers.hist); commitHistory(); };
+const API = Object.freeze({
+  S, CAN, HOST, appVersion, invoke, BUNDLED_FONTS, CUT, SURPRISE, HOLD,
+  // what is shown, selected, and what a layer is
+  cat, catIndex, selSize, layer, frame, sizeKeys, scopeKeys, layerName, copiable, owner, passivesOf, recordOf, weavableOf, wovenOf, inColumns, canCrop, canCut, cutReady, cutEngine, exportDir, ticked, channelOf, pickedIds,
+  // the history, and putting a change on the screen
+  touch, commitHistory, commitPending, clearPendingHistory: () => clearTimeout(timers.hist), snapshot, restoreSnap, timeTravel, settleCover, setCover, channelCover, coverFor, coverOf,
+  // the window
+  switchProfile, switchChannel, selectSize, selectLayer, pickLayers, closeTransient, weaveClose, brushClose, cropClose,
+  // changes
+  edit, addLayer, addAsset, removeLayer, duplicateLayer, shiftLayer, restack, setCrop, cutOut, putPhoto, placePhoto, keepPicture, loadPhotos, pidsOf, ensureFonts, fontsReading, outlinesPending, toGround,
+  // Surprise me
+  dealHands, keepFirst, takeHand, handSays, handNow, putHand,
+  // drawing and files
+  renderReady, toPng, pngBase64, runExport, writeInto, framed, nameFor, openProject,
+});
+const COMMANDS = makeCommands(API);
+/** What the agent shell is given (see makeAgent in agent.js); `busy`, what of the user's a call waits for (userBusy). */
+const agentOpts = (busy = userBusy) => ({ commands: COMMANDS, busy, step: agentStep, closeTransient, host: HOST === "server" ? "server" : "desktop" });
 // test hook: lets automated checks drive the app without the UI
 window.__smedcover = { S, drawCover, renderFull, nameFor, touch, addAsset, addLayer, newLayer, selectLayer, selectSize, setMode, layer, surprise, SURPRISE, brushOpen, brushClose };
 start().catch((e) => {

@@ -1,0 +1,3695 @@
+{
+  "format": 1,
+  "instructions": "SmedCover makes video cover images.\n\nA profile is a brand: its look (the style every cover of it is drawn in), its channels (each with a name, code and colour, and a cover of its own) and its output sizes (such as 1920x1080 and 1080x1920). A cover is a title, a subtitle and a tag over a stack of layers, bottom first: the layout's own parts (bg, title, subtitle, tag, brand, …), which can be moved, restyled and hidden but not removed, and layers that were added (text, photos, solid colours, stickers, graphics). One cover is drawn at every size of its profile; a change of place reaches all sizes, those facing one way, or one size (scope).\n\nOn the desktop you work in the user's open window, which they watch: each change a tool makes is one step they can undo, the window switches to the profile and channel you change, and while they are in the middle of something your call waits for them (or answers busy: try again shortly). The read-only tools never switch the window.\n\nUsual flow: get_context (profiles, channels, sizes, what this host can do) → get_cover (the layers and their ids) → change things (set_text, set_look, place_layer, …, or surprise for ready-made variations) → render_preview to see the result → export. Name layers by the ids get_cover gives; sizes as \"1920x1080\", a ratio (\"16:9\") or their name; channels by id, name, code or number from 1.",
+  "tools": [
+    {
+      "name": "get_context",
+      "title": "Get context",
+      "description": "What SmedCover has and shows now. Call it first. Returns every profile with its look, channels (id, name, sub, code, colour) and sizes (key such as \"1920x1080\", caption, orientation, whether the Export window has it ticked) and its export folder; what the window shows (profile, channel, size, scope, selected layers); the export settings; whether undo and redo can go further; and what this host can do (cut out a photo's subject, outline text effects, text and image AI configured, write files, a window the user watches: live).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "app": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "host": {
+                "type": "string"
+              }
+            }
+          },
+          "can": {
+            "type": "object",
+            "properties": {
+              "cut": {
+                "type": "boolean"
+              },
+              "cutReady": {
+                "type": "boolean"
+              },
+              "cutEngine": {
+                "type": "string"
+              },
+              "outlines": {
+                "type": "boolean"
+              },
+              "textAi": {
+                "type": "boolean"
+              },
+              "imageAi": {
+                "type": "boolean"
+              },
+              "saveFiles": {
+                "type": "boolean"
+              },
+              "live": {
+                "type": "boolean"
+              }
+            }
+          },
+          "profiles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "brand": {
+                  "type": "string"
+                },
+                "look": {
+                  "type": "string"
+                },
+                "theme": {
+                  "type": "string"
+                },
+                "channels": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "sub": {
+                        "type": "string"
+                      },
+                      "code": {
+                        "type": "string"
+                      },
+                      "color": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ]
+                  }
+                },
+                "sizes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "w": {
+                        "type": "integer"
+                      },
+                      "h": {
+                        "type": "integer"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "caption": {
+                        "type": "string"
+                      },
+                      "orient": {
+                        "type": "string"
+                      },
+                      "ticked": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                },
+                "exportDir": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "channels",
+                "sizes"
+              ]
+            }
+          },
+          "current": {
+            "type": "object",
+            "properties": {
+              "profile": {
+                "type": "string"
+              },
+              "channel": {
+                "type": "string"
+              },
+              "size": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "layer": {
+                "type": "string"
+              },
+              "layers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "profile",
+              "channel",
+              "size",
+              "layer"
+            ]
+          },
+          "export": {
+            "type": "object",
+            "properties": {
+              "format": {
+                "type": "string"
+              },
+              "scale": {
+                "type": "integer"
+              },
+              "quality": {
+                "type": "integer"
+              },
+              "nameTemplate": {
+                "type": "string"
+              }
+            }
+          },
+          "history": {
+            "type": "object",
+            "properties": {
+              "canUndo": {
+                "type": "boolean"
+              },
+              "canRedo": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "required": [
+          "profiles",
+          "current"
+        ]
+      },
+      "annotations": {
+        "title": "Get context",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 30000
+      }
+    },
+    {
+      "name": "get_cover",
+      "title": "Get a cover",
+      "description": "A channel's cover as it is now, read without switching the window: its title, subtitle and tag, the profile's look and theme, and its layers, bottom first. Each layer: id (name layers by it in other tools), type, kind (\"layout\": one of the layout's own parts, which can be hidden but not removed; \"free\": one that was added; \"copy\": a copy of a layout part), its name as the editor shows it, visible, opacity, locked, included (a layout part on the cover or left out), removable, copyable, place (x, y; s its scale, r its turn in degrees, kx and ky its stretch — for a layer that was added x, y is its centre as shares of the canvas, for a layout part its offset from where the layout puts it), tunedAt (sizes it was moved at alone), sizes (those it shows at, or \"all\"), and what its type has: text, font, ink, hi, plate, plateInk, hiPlateInk, fx and fxAmt (text effect), bend and bendAmt, vertical, a photo's pid, fill, cut and of (the photo a cut-out is linked to), an asset's ref and tint, a solid's color, crop, weave. letters: true adds each lettering layer's letterKeys (for weave's front). raw: true adds the cover as SmedCover stores it (for apply_cover_json).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "letters": {
+            "type": "boolean",
+            "description": "Also list each lettering layer's letter keys."
+          },
+          "raw": {
+            "type": "boolean",
+            "description": "Also return the cover as stored, under `raw`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "look": {
+            "type": "string"
+          },
+          "theme": {
+            "type": "string"
+          },
+          "layers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "layout",
+                    "free",
+                    "copy"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "visible": {
+                  "type": "boolean"
+                },
+                "opacity": {
+                  "type": "number"
+                },
+                "locked": {
+                  "type": "boolean"
+                },
+                "included": {
+                  "type": "boolean"
+                },
+                "removable": {
+                  "type": "boolean"
+                },
+                "copyable": {
+                  "type": "boolean"
+                },
+                "place": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "s": {
+                      "type": "number"
+                    },
+                    "r": {
+                      "type": "number"
+                    },
+                    "kx": {
+                      "type": "number"
+                    },
+                    "ky": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "tunedAt": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sizes": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "all"
+                      ]
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "type",
+                "kind"
+              ]
+            }
+          },
+          "raw": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "profile",
+          "channel",
+          "layers"
+        ]
+      },
+      "annotations": {
+        "title": "Get a cover",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 30000
+      }
+    },
+    {
+      "name": "list_options",
+      "title": "List options",
+      "description": "The values other tools accept. Returns looks (id, name, its kinds, oneTheme when it has a single ground, seeded when it scatters things at random, its settings — key, range, step, default — for set_look's params, its scene objects), text effects (id, name, kind, seeded, needsOutlines, available here), bends, fonts (bundled, imported, installed: filtered by fontQuery, at most 200 listed; latin: those that cannot set Chinese), the platforms and the ratios their covers use, size presets, and Surprise me's locks. `only` limits the answer to some of these.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "only": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "looks",
+                "effects",
+                "bends",
+                "fonts",
+                "platforms",
+                "sizes",
+                "locks"
+              ]
+            },
+            "description": "Only these groups.",
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "fontQuery": {
+            "type": "string",
+            "description": "Only installed fonts whose name has this in it (case aside).",
+            "maxLength": 80
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "looks": {
+            "type": "array"
+          },
+          "effects": {
+            "type": "array"
+          },
+          "bends": {
+            "type": "array"
+          },
+          "fonts": {
+            "type": "object"
+          },
+          "platforms": {
+            "type": "array"
+          },
+          "sizes": {
+            "type": "array"
+          },
+          "locks": {
+            "type": "array"
+          }
+        }
+      },
+      "annotations": {
+        "title": "List options",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 30000
+      }
+    },
+    {
+      "name": "list_library",
+      "title": "List the library",
+      "description": "Pictures and assets that can be put on a cover. Returns photos (the bitmap library: pid — for add_photo's source.library —, name, kind upload/ai/repaint, when it was added), stickers and graphics (built in: id, name, group), and mine (the user's own assets: id, name, kind image/ai) — the ids for add_layer's asset. kind keeps one group; query, those whose name has the word in it; at most limit of each (default 100).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "photos",
+              "stickers",
+              "graphics",
+              "mine"
+            ],
+            "description": "Only this group."
+          },
+          "query": {
+            "type": "string",
+            "description": "Only those whose name has this in it (case aside).",
+            "maxLength": 80
+          },
+          "limit": {
+            "type": "integer",
+            "description": "At most this many of each group (default 100).",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "photos": {
+            "type": "array"
+          },
+          "stickers": {
+            "type": "array"
+          },
+          "graphics": {
+            "type": "array"
+          },
+          "mine": {
+            "type": "array"
+          },
+          "more": {
+            "type": "object"
+          }
+        }
+      },
+      "annotations": {
+        "title": "List the library",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 30000
+      }
+    },
+    {
+      "name": "render_preview",
+      "title": "Render a preview",
+      "description": "Draws a channel's cover as it will be exported and returns it as a PNG image, its longer side maxSide pixels (default 1024) — look at it to check a change. Drawn without switching the window. Also returns where each layer landed (boxes: id, centre x and y, width w and height h as shares of the image, r its turn in degrees) and pending (fonts or outlines still on their way: draw again in a moment if true). all: true draws every size of the profile on one contact sheet instead, each captioned (sizes: where each is on the sheet; no boxes).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "size": {
+            "type": "string",
+            "description": "A size of the profile: its pixels (\"1920x1080\"), its ratio (\"16:9\") or its name. The one on the canvas when left out."
+          },
+          "all": {
+            "type": "boolean",
+            "description": "Every size on one contact sheet."
+          },
+          "maxSide": {
+            "type": "integer",
+            "description": "The image's longer side in pixels (default 1024; a sheet may be up to 1.5 times as wide).",
+            "minimum": 128,
+            "maximum": 2048
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "sizes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "caption": {
+                  "type": "string"
+                },
+                "x": {
+                  "type": "integer"
+                },
+                "y": {
+                  "type": "integer"
+                },
+                "w": {
+                  "type": "integer"
+                },
+                "h": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "boxes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "w": {
+                  "type": "number"
+                },
+                "h": {
+                  "type": "number"
+                },
+                "r": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "pending": {
+            "type": "object",
+            "properties": {
+              "fonts": {
+                "type": "boolean"
+              },
+              "outlines": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "required": [
+          "sizes",
+          "width",
+          "height"
+        ]
+      },
+      "annotations": {
+        "title": "Render a preview",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 120000
+      }
+    },
+    {
+      "name": "set_text",
+      "title": "Set the words",
+      "description": "Sets the cover's title, subtitle and/or tag (at least one). Mark highlighted words with *asterisks* (\"Make *this* stand out\") and break lines with \\n, as the editor does; \"\" empties one. One undo step. Returns the three as they now are.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "title": {
+            "type": "string",
+            "description": "The title.",
+            "maxLength": 2000
+          },
+          "subtitle": {
+            "type": "string",
+            "description": "The subtitle.",
+            "maxLength": 2000
+          },
+          "tag": {
+            "type": "string",
+            "description": "The tag, the small label in a corner (\"EP.01\").",
+            "maxLength": 200
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          }
+        }
+      },
+      "annotations": {
+        "title": "Set the words",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "set_look",
+      "title": "Set the look",
+      "description": "Sets the profile's look, which every channel of it shares, and/or its settings: params (the look's own settings by key, as list_options lists them; a value out of range is clamped and said in warnings, an unknown key refused), theme (a dark or light ground, for looks with two), seed (where the look scatters things), resetParams (its settings back to their defaults). Not counted among the user's most used looks. One undo step. Returns the look, theme, seed and settings as they now are.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "look": {
+            "type": "string",
+            "enum": [
+              "cel",
+              "cyber",
+              "riso",
+              "anime",
+              "bluenote",
+              "editorial",
+              "songke",
+              "vivid",
+              "negative",
+              "cinema",
+              "cyano",
+              "monofilm",
+              "typo",
+              "toon",
+              "avant",
+              "collage",
+              "yellow",
+              "pitch",
+              "dots",
+              "neon",
+              "court",
+              "velvet",
+              "rave",
+              "chrome",
+              "netart",
+              "verse",
+              "glass",
+              "jelly",
+              "skies",
+              "spectrum",
+              "citypop",
+              "construct",
+              "deco",
+              "wasteland",
+              "facet"
+            ],
+            "description": "The look's id."
+          },
+          "params": {
+            "type": "object",
+            "description": "The look's settings to change, by key: a number, or text for a text setting.",
+            "additionalProperties": {
+              "type": [
+                "number",
+                "string"
+              ]
+            }
+          },
+          "theme": {
+            "type": "string",
+            "enum": [
+              "dark",
+              "light"
+            ],
+            "description": "The ground."
+          },
+          "seed": {
+            "type": "integer",
+            "description": "Where the look scatters things at random.",
+            "minimum": 0,
+            "maximum": 999999
+          },
+          "resetParams": {
+            "type": "boolean",
+            "description": "Its settings back to their defaults first."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "look": {
+            "type": "string"
+          },
+          "theme": {
+            "type": "string"
+          },
+          "seed": {
+            "type": "integer"
+          },
+          "params": {
+            "type": "object"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "look"
+        ]
+      },
+      "annotations": {
+        "title": "Set the look",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "set_channel",
+      "title": "Set a channel",
+      "description": "Changes a channel of a profile: its name, the line under it (sub), its code (short, as \"VLOG\") and its colour (#rrggbb, the accent the looks draw with). One undo step. Returns the channel.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name.",
+            "maxLength": 80
+          },
+          "sub": {
+            "type": "string",
+            "description": "The line under its name.",
+            "maxLength": 120
+          },
+          "code": {
+            "type": "string",
+            "description": "Its code.",
+            "maxLength": 40
+          },
+          "color": {
+            "type": "string",
+            "description": "Its colour, \"#rrggbb\".",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          }
+        },
+        "required": [
+          "channel"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sub": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "annotations": {
+        "title": "Set a channel",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "place_layer",
+      "title": "Place a layer",
+      "description": "Moves, scales, turns or stretches a layer: absolute (x, y, scale, rotate, stretchX, stretchY), relative (move {dx, dy}, scaleBy, rotateBy), or reset: true for where the layout puts it. For a layer that was added x, y is its centre as shares of the canvas (0.5, 0.5 the middle); for a layout part, its offset from its place in the layout, likewise in shares of the canvas. scope says which sizes the change reaches (all by default). Not for bg, the frame or a locked layer, nor turning or stretching a photo that fills the canvas. One undo step. Returns its placement and its box at `size`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "layer": {
+            "type": "string",
+            "description": "The layer's id, as get_cover lists it (the layout's own parts are named by their type: title, subtitle, tag, brand, …)."
+          },
+          "size": {
+            "type": "string",
+            "description": "A size of the profile: its pixels (\"1920x1080\"), its ratio (\"16:9\") or its name. The one on the canvas when left out."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "orient",
+              "size"
+            ],
+            "description": "Which sizes a change of place reaches: \"all\" of them (the default), those facing the same way as `size` (\"orient\"), or `size` alone (\"size\")."
+          },
+          "x": {
+            "type": "number",
+            "description": "Across (see above).",
+            "minimum": -3,
+            "maximum": 3
+          },
+          "y": {
+            "type": "number",
+            "description": "Down (see above).",
+            "minimum": -3,
+            "maximum": 3
+          },
+          "scale": {
+            "type": "number",
+            "description": "Its size, 1 as made.",
+            "minimum": 0.02,
+            "maximum": 20
+          },
+          "rotate": {
+            "type": "number",
+            "description": "Its turn in degrees, clockwise.",
+            "minimum": -360,
+            "maximum": 360
+          },
+          "stretchX": {
+            "type": "number",
+            "description": "Its stretch across, 1 none.",
+            "minimum": 0.05,
+            "maximum": 20
+          },
+          "stretchY": {
+            "type": "number",
+            "description": "Its stretch down, 1 none.",
+            "minimum": 0.05,
+            "maximum": 20
+          },
+          "move": {
+            "type": "object",
+            "description": "Moves it by this much.",
+            "properties": {
+              "dx": {
+                "type": "number",
+                "description": "Across, as a share of the canvas's width.",
+                "minimum": -3,
+                "maximum": 3
+              },
+              "dy": {
+                "type": "number",
+                "description": "Down, as a share of the canvas's height.",
+                "minimum": -3,
+                "maximum": 3
+              }
+            },
+            "additionalProperties": false
+          },
+          "scaleBy": {
+            "type": "number",
+            "description": "Scales it by this much.",
+            "minimum": 0.05,
+            "maximum": 20
+          },
+          "rotateBy": {
+            "type": "number",
+            "description": "Turns it by this many degrees.",
+            "minimum": -360,
+            "maximum": 360
+          },
+          "reset": {
+            "type": "boolean",
+            "description": "Back to where the layout puts it, at the sizes scope reaches."
+          }
+        },
+        "required": [
+          "layer"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "place": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "s": {
+                "type": "number"
+              },
+              "r": {
+                "type": "number"
+              },
+              "kx": {
+                "type": "number"
+              },
+              "ky": {
+                "type": "number"
+              }
+            }
+          },
+          "box": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "w": {
+                "type": "number"
+              },
+              "h": {
+                "type": "number"
+              },
+              "r": {
+                "type": "number"
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "place"
+        ]
+      },
+      "annotations": {
+        "title": "Place a layer",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "set_layer_effect",
+      "title": "Set a text effect",
+      "description": "Sets a headline's (the title's, the subtitle's or a text layer's) text effect: effect (as list_options lists them; \"auto\" lets the look decide), amount (its strength 0–2; not for the effects of kind \"passes\"), reshuffle (deals a seeded effect's letters again), outline and shadow (0–2). Effects that need glyph outlines are refused where the host has none. One undo step. Returns the layer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "layer": {
+            "type": "string",
+            "description": "The layer's id, as get_cover lists it (the layout's own parts are named by their type: title, subtitle, tag, brand, …)."
+          },
+          "effect": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "sticker",
+              "cel",
+              "plain",
+              "bluenote",
+              "editorial",
+              "dots",
+              "stripes",
+              "inner",
+              "worn",
+              "rows",
+              "extrude",
+              "spiky",
+              "torn",
+              "cut",
+              "melt",
+              "puffy",
+              "eroded",
+              "ransom"
+            ],
+            "description": "The text effect."
+          },
+          "amount": {
+            "type": "number",
+            "description": "Its strength.",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "reshuffle": {
+            "type": "boolean",
+            "description": "Deal its letters again (seeded effects)."
+          },
+          "outline": {
+            "type": "number",
+            "description": "The outline's weight.",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "shadow": {
+            "type": "number",
+            "description": "The shadow's weight.",
+            "minimum": 0,
+            "maximum": 2
+          }
+        },
+        "required": [
+          "layer"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "layout",
+                  "free",
+                  "copy"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "visible": {
+                "type": "boolean"
+              },
+              "opacity": {
+                "type": "number"
+              },
+              "locked": {
+                "type": "boolean"
+              },
+              "included": {
+                "type": "boolean"
+              },
+              "removable": {
+                "type": "boolean"
+              },
+              "copyable": {
+                "type": "boolean"
+              },
+              "place": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "s": {
+                    "type": "number"
+                  },
+                  "r": {
+                    "type": "number"
+                  },
+                  "kx": {
+                    "type": "number"
+                  },
+                  "ky": {
+                    "type": "number"
+                  }
+                }
+              },
+              "tunedAt": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sizes": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "all"
+                    ]
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "kind"
+            ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "layer"
+        ]
+      },
+      "annotations": {
+        "title": "Set a text effect",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "set_layer_font",
+      "title": "Set a font",
+      "description": "Sets the font of a lettering layer (title, subtitle, tag, channel name, brand row, text): a family that is installed, bundled or imported (list_options fonts; matched with the case aside, near names suggested when none matches), or \"\" for the look's own. vertical: true sets it in columns, false in lines. Not counted among the user's recent fonts. One undo step. Returns the layer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "layer": {
+            "type": "string",
+            "description": "The layer's id, as get_cover lists it (the layout's own parts are named by their type: title, subtitle, tag, brand, …)."
+          },
+          "font": {
+            "type": "string",
+            "description": "The font family, or \"\" for the look's own.",
+            "maxLength": 80
+          },
+          "vertical": {
+            "type": "boolean",
+            "description": "Set in columns."
+          }
+        },
+        "required": [
+          "layer",
+          "font"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "layout",
+                  "free",
+                  "copy"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "visible": {
+                "type": "boolean"
+              },
+              "opacity": {
+                "type": "number"
+              },
+              "locked": {
+                "type": "boolean"
+              },
+              "included": {
+                "type": "boolean"
+              },
+              "removable": {
+                "type": "boolean"
+              },
+              "copyable": {
+                "type": "boolean"
+              },
+              "place": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "s": {
+                    "type": "number"
+                  },
+                  "r": {
+                    "type": "number"
+                  },
+                  "kx": {
+                    "type": "number"
+                  },
+                  "ky": {
+                    "type": "number"
+                  }
+                }
+              },
+              "tunedAt": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sizes": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "all"
+                    ]
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "kind"
+            ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "layer"
+        ]
+      },
+      "annotations": {
+        "title": "Set a font",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "set_layer_bend",
+      "title": "Bend a headline",
+      "description": "Bends a headline (the title, the subtitle or a text layer): bend, one of list_options' bends or \"none\"; amount 0–2 (default 1). Takes away a perspective or a reshaping dragged by hand. One undo step. Returns the layer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "layer": {
+            "type": "string",
+            "description": "The layer's id, as get_cover lists it (the layout's own parts are named by their type: title, subtitle, tag, brand, …)."
+          },
+          "bend": {
+            "type": "string",
+            "enum": [
+              "none",
+              "arc",
+              "arcLow",
+              "circle",
+              "shell",
+              "bulge",
+              "pinch",
+              "fisheye",
+              "rise",
+              "taper",
+              "wave",
+              "flag"
+            ],
+            "description": "The bend."
+          },
+          "amount": {
+            "type": "number",
+            "description": "How far.",
+            "minimum": 0,
+            "maximum": 2
+          }
+        },
+        "required": [
+          "layer",
+          "bend"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "layout",
+                  "free",
+                  "copy"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "visible": {
+                "type": "boolean"
+              },
+              "opacity": {
+                "type": "number"
+              },
+              "locked": {
+                "type": "boolean"
+              },
+              "included": {
+                "type": "boolean"
+              },
+              "removable": {
+                "type": "boolean"
+              },
+              "copyable": {
+                "type": "boolean"
+              },
+              "place": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "s": {
+                    "type": "number"
+                  },
+                  "r": {
+                    "type": "number"
+                  },
+                  "kx": {
+                    "type": "number"
+                  },
+                  "ky": {
+                    "type": "number"
+                  }
+                }
+              },
+              "tunedAt": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sizes": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "all"
+                    ]
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "kind"
+            ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "layer"
+        ]
+      },
+      "annotations": {
+        "title": "Bend a headline",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "set_layer_color",
+      "title": "Set a layer's colours",
+      "description": "Sets a layer's colours, each \"#rrggbb\" or \"auto\" for what the look gives it: ink (a lettering layer's words; a photo's outline; a vector sticker's or the user's AI asset's colour over its own), hi (a headline's highlighted words), plateInk (the plate under a headline's words), hiPlateInk (the plates or marks under its highlighted words). plate puts a plate under a headline's or the channel name's words, or takes it away; tint makes a vector asset follow the channel colour (false: its own colours); color is a solid layer's colour (\"#rrggbb\"). One undo step. Returns the layer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "layer": {
+            "type": "string",
+            "description": "The layer's id, as get_cover lists it (the layout's own parts are named by their type: title, subtitle, tag, brand, …)."
+          },
+          "ink": {
+            "type": "string",
+            "description": "Its ink: \"#rrggbb\", or \"auto\" for what the look gives it.",
+            "pattern": "^(#[0-9a-fA-F]{6}|auto)$"
+          },
+          "hi": {
+            "type": "string",
+            "description": "The highlighted words' colour: \"#rrggbb\", or \"auto\" for what the look gives it.",
+            "pattern": "^(#[0-9a-fA-F]{6}|auto)$"
+          },
+          "plate": {
+            "type": "boolean",
+            "description": "A plate under the words."
+          },
+          "plateInk": {
+            "type": "string",
+            "description": "The plate's colour: \"#rrggbb\", or \"auto\" for what the look gives it.",
+            "pattern": "^(#[0-9a-fA-F]{6}|auto)$"
+          },
+          "hiPlateInk": {
+            "type": "string",
+            "description": "The highlights' plates' or marks' colour: \"#rrggbb\", or \"auto\" for what the look gives it.",
+            "pattern": "^(#[0-9a-fA-F]{6}|auto)$"
+          },
+          "tint": {
+            "type": "boolean",
+            "description": "Follow the channel colour (a vector asset)."
+          },
+          "color": {
+            "type": "string",
+            "description": "A solid layer's colour, \"#rrggbb\".",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          }
+        },
+        "required": [
+          "layer"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "layout",
+                  "free",
+                  "copy"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "visible": {
+                "type": "boolean"
+              },
+              "opacity": {
+                "type": "number"
+              },
+              "locked": {
+                "type": "boolean"
+              },
+              "included": {
+                "type": "boolean"
+              },
+              "removable": {
+                "type": "boolean"
+              },
+              "copyable": {
+                "type": "boolean"
+              },
+              "place": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "s": {
+                    "type": "number"
+                  },
+                  "r": {
+                    "type": "number"
+                  },
+                  "kx": {
+                    "type": "number"
+                  },
+                  "ky": {
+                    "type": "number"
+                  }
+                }
+              },
+              "tunedAt": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sizes": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "all"
+                    ]
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "kind"
+            ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "layer"
+        ]
+      },
+      "annotations": {
+        "title": "Set a layer's colours",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "show_layer",
+      "title": "Show or hide a layer",
+      "description": "Shows or hides a layer (visible), sets its opacity (0–1), locks it against being moved on the canvas (locked), leaves a layout part out of the cover or brings it back (included), or keeps it to some sizes (sizes: a list of sizes, or \"all\"). One undo step. Returns the layer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "layer": {
+            "type": "string",
+            "description": "The layer's id, as get_cover lists it (the layout's own parts are named by their type: title, subtitle, tag, brand, …)."
+          },
+          "visible": {
+            "type": "boolean",
+            "description": "Shown."
+          },
+          "opacity": {
+            "type": "number",
+            "description": "How opaque.",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "Locked in place."
+          },
+          "included": {
+            "type": "boolean",
+            "description": "A layout part on the cover (false: left out)."
+          },
+          "sizes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A size: pixels, ratio or name."
+                },
+                "minItems": 1,
+                "maxItems": 80
+              }
+            ]
+          }
+        },
+        "required": [
+          "layer"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "layout",
+                  "free",
+                  "copy"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "visible": {
+                "type": "boolean"
+              },
+              "opacity": {
+                "type": "number"
+              },
+              "locked": {
+                "type": "boolean"
+              },
+              "included": {
+                "type": "boolean"
+              },
+              "removable": {
+                "type": "boolean"
+              },
+              "copyable": {
+                "type": "boolean"
+              },
+              "place": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "s": {
+                    "type": "number"
+                  },
+                  "r": {
+                    "type": "number"
+                  },
+                  "kx": {
+                    "type": "number"
+                  },
+                  "ky": {
+                    "type": "number"
+                  }
+                }
+              },
+              "tunedAt": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sizes": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "all"
+                    ]
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "kind"
+            ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "layer"
+        ]
+      },
+      "annotations": {
+        "title": "Show or hide a layer",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "add_layer",
+      "title": "Add a layer",
+      "description": "Adds a layer just above `above` (a layer id, or \"top\", the default): kind \"text\" (its words in text; *highlight* and \\n as in a title), \"solid\" (a block of colour the canvas's size; color), \"asset\" (a sticker, a graphic or the user's own: asset {kind, id} from list_library) or \"copy\" (a copy of layer `of`: a layout part other than bg and frame, or a layer that was added). at {x, y} puts its centre there (shares of the canvas), scale sets its size. The new layer is selected. One undo step. Returns it as get_cover lists layers.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "solid",
+              "asset",
+              "copy"
+            ],
+            "description": "What to add."
+          },
+          "text": {
+            "type": "string",
+            "description": "A text layer's words.",
+            "maxLength": 2000
+          },
+          "color": {
+            "type": "string",
+            "description": "A solid's colour, \"#rrggbb\".",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "asset": {
+            "type": "object",
+            "description": "The asset to add.",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sticker",
+                  "graphic",
+                  "user"
+                ],
+                "description": "Which library."
+              },
+              "id": {
+                "type": "string",
+                "description": "Its id, from list_library.",
+                "maxLength": 80
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "of": {
+            "type": "string",
+            "description": "The layer to copy."
+          },
+          "above": {
+            "type": "string",
+            "description": "The layer it goes above, or \"top\"."
+          },
+          "at": {
+            "type": "object",
+            "description": "Where its centre goes, as shares of the canvas.",
+            "properties": {
+              "x": {
+                "type": "number",
+                "description": "Across, 0 the left edge, 1 the right.",
+                "minimum": -3,
+                "maximum": 3
+              },
+              "y": {
+                "type": "number",
+                "description": "Down, 0 the top edge, 1 the bottom.",
+                "minimum": -3,
+                "maximum": 3
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "additionalProperties": false
+          },
+          "scale": {
+            "type": "number",
+            "description": "Its size, 1 the canvas's (a solid) or as made.",
+            "minimum": 0.02,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "layout",
+                  "free",
+                  "copy"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "visible": {
+                "type": "boolean"
+              },
+              "opacity": {
+                "type": "number"
+              },
+              "locked": {
+                "type": "boolean"
+              },
+              "included": {
+                "type": "boolean"
+              },
+              "removable": {
+                "type": "boolean"
+              },
+              "copyable": {
+                "type": "boolean"
+              },
+              "place": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "s": {
+                    "type": "number"
+                  },
+                  "r": {
+                    "type": "number"
+                  },
+                  "kx": {
+                    "type": "number"
+                  },
+                  "ky": {
+                    "type": "number"
+                  }
+                }
+              },
+              "tunedAt": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sizes": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "all"
+                    ]
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "kind"
+            ]
+          }
+        },
+        "required": [
+          "layer"
+        ]
+      },
+      "annotations": {
+        "title": "Add a layer",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "remove_layer",
+      "title": "Remove a layer",
+      "description": "Removes a layer that was added (a photo takes its linked cut-out with it). The layout's own parts cannot be removed: hide them with show_layer. Undoable, one step. Returns the ids removed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "layer": {
+            "type": "string",
+            "description": "The layer's id, as get_cover lists it (the layout's own parts are named by their type: title, subtitle, tag, brand, …)."
+          }
+        },
+        "required": [
+          "layer"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "removed"
+        ]
+      },
+      "annotations": {
+        "title": "Remove a layer",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "reorder_layer",
+      "title": "Reorder a layer",
+      "description": "Moves a layer in the stack: to \"top\", \"bottom\", \"up\" or \"down\" one (past the next layer of this cover), or to just above layer `above`. Moving the layout's own parts orders them so in the profile's design too. One undo step. Returns its place in the stack (0 the bottom) and the layers' ids in order.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "layer": {
+            "type": "string",
+            "description": "The layer's id, as get_cover lists it (the layout's own parts are named by their type: title, subtitle, tag, brand, …)."
+          },
+          "to": {
+            "type": "string",
+            "enum": [
+              "top",
+              "bottom",
+              "up",
+              "down"
+            ],
+            "description": "Where to."
+          },
+          "above": {
+            "type": "string",
+            "description": "The layer it goes just above."
+          }
+        },
+        "required": [
+          "layer"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "layers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "index"
+        ]
+      },
+      "annotations": {
+        "title": "Reorder a layer",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "add_photo",
+      "title": "Add a photo",
+      "description": "Puts a photo on the cover. source is exactly one of: path (an image file on this computer, absolute), url (an image on the web), library (a pid from list_library) or data (the image in base64, or a data: URL). fill: true makes it the background, filling the canvas; else it is placed as a print, its centre at `at` {x, y}. It goes above `above` (default the selected layer). The picture joins the bitmap library. One undo step. Returns the new layer and the picture's pid.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "source": {
+            "type": "object",
+            "description": "Where the picture comes from: exactly one of these.",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "An image file, absolute.",
+                "maxLength": 4096
+              },
+              "url": {
+                "type": "string",
+                "description": "An http(s) URL.",
+                "maxLength": 4096
+              },
+              "library": {
+                "type": "string",
+                "description": "A pid from list_library.",
+                "maxLength": 40
+              },
+              "data": {
+                "type": "string",
+                "description": "Base64, or a data: URL."
+              }
+            },
+            "minProperties": 1,
+            "maxProperties": 1,
+            "additionalProperties": false
+          },
+          "at": {
+            "type": "object",
+            "description": "Where its centre goes, as shares of the canvas.",
+            "properties": {
+              "x": {
+                "type": "number",
+                "description": "Across, 0 the left edge, 1 the right.",
+                "minimum": -3,
+                "maximum": 3
+              },
+              "y": {
+                "type": "number",
+                "description": "Down, 0 the top edge, 1 the bottom.",
+                "minimum": -3,
+                "maximum": 3
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "additionalProperties": false
+          },
+          "fill": {
+            "type": "boolean",
+            "description": "Fill the canvas, as the background."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name in the library.",
+            "maxLength": 60
+          },
+          "above": {
+            "type": "string",
+            "description": "The layer it goes above, or \"top\"."
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "layout",
+                  "free",
+                  "copy"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "visible": {
+                "type": "boolean"
+              },
+              "opacity": {
+                "type": "number"
+              },
+              "locked": {
+                "type": "boolean"
+              },
+              "included": {
+                "type": "boolean"
+              },
+              "removable": {
+                "type": "boolean"
+              },
+              "copyable": {
+                "type": "boolean"
+              },
+              "place": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "s": {
+                    "type": "number"
+                  },
+                  "r": {
+                    "type": "number"
+                  },
+                  "kx": {
+                    "type": "number"
+                  },
+                  "ky": {
+                    "type": "number"
+                  }
+                }
+              },
+              "tunedAt": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sizes": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "all"
+                    ]
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "kind"
+            ]
+          },
+          "pid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "layer",
+          "pid"
+        ]
+      },
+      "annotations": {
+        "title": "Add a photo",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "crop_photo",
+      "title": "Crop a photo",
+      "description": "Crops a photo or asset layer: crop {x, y, w, h} (shares of the picture) or a free shape {pts: [[u, v], …]} (3 to 64 corners in order round it, shares of the picture), or ratio (\"photo\" or w:h) for the largest crop of that ratio about the middle, or reset: true for the whole picture. Not for a photo that fills the canvas. One undo step. Returns the crop as kept (null: none).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "layer": {
+            "type": "string",
+            "description": "The layer's id, as get_cover lists it (the layout's own parts are named by their type: title, subtitle, tag, brand, …)."
+          },
+          "crop": {
+            "type": "object",
+            "description": "The part kept: a rectangle, or a shape (pts).",
+            "properties": {
+              "x": {
+                "type": "number",
+                "description": "Its left edge.",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "y": {
+                "type": "number",
+                "description": "Its top edge.",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "w": {
+                "type": "number",
+                "description": "Its width.",
+                "minimum": 0.02,
+                "maximum": 1
+              },
+              "h": {
+                "type": "number",
+                "description": "Its height.",
+                "minimum": 0.02,
+                "maximum": 1
+              },
+              "pts": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "description": "A free shape's corners.",
+                "minItems": 3,
+                "maxItems": 64
+              }
+            },
+            "additionalProperties": false
+          },
+          "ratio": {
+            "type": "string",
+            "enum": [
+              "photo",
+              "1:1",
+              "4:3",
+              "3:4",
+              "16:9",
+              "9:16"
+            ],
+            "description": "Crop to this ratio (\"photo\": the picture's own)."
+          },
+          "reset": {
+            "type": "boolean",
+            "description": "The whole picture again."
+          }
+        },
+        "required": [
+          "layer"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "crop": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "crop"
+        ]
+      },
+      "annotations": {
+        "title": "Crop a photo",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "cut_out",
+      "title": "Cut out a subject",
+      "description": "Cuts the subject out of a photo layer (on macOS with Vision, elsewhere with a downloaded model): a layer with the subject alone, linked to the photo, goes above the title so it can stand in front of it. scope keeps it to the sizes facing size's way, or to size alone. The first cut-out of a photo can take a while. One undo step. Returns the cut-out layer's id and the sizes it shows at.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "layer": {
+            "type": "string",
+            "description": "The layer's id, as get_cover lists it (the layout's own parts are named by their type: title, subtitle, tag, brand, …)."
+          },
+          "size": {
+            "type": "string",
+            "description": "A size of the profile: its pixels (\"1920x1080\"), its ratio (\"16:9\") or its name. The one on the canvas when left out."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "orient",
+              "size"
+            ],
+            "description": "Which sizes a change of place reaches: \"all\" of them (the default), those facing the same way as `size` (\"orient\"), or `size` alone (\"size\")."
+          }
+        },
+        "required": [
+          "layer"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "cutout": {
+            "type": "string"
+          },
+          "sizes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        },
+        "required": [
+          "cutout"
+        ]
+      },
+      "annotations": {
+        "title": "Cut out a subject",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 600000
+      }
+    },
+    {
+      "name": "weave",
+      "title": "Weave with the lettering",
+      "description": "Weaves a cut-out (or an asset) with the lettering below it, as a magazine's subject is with its masthead. by \"head\": its head in front, ending at line (0.1–0.9 of the subject's height from its top), the rest behind; \"letters\": front gives, for each lettering layer id, \"all\", \"none\", \"alternate\" or a list of letter keys (get_cover with letters: true) to put in front, the rest behind; \"brush\": strokes [{front, r, pts}] painted in the picture's own frame (pts as shares of its width and height, r of its longer side). with: the lettering layers it weaves with (default every one below it). off: true unweaves it. One undo step. Returns the weave as kept.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "layer": {
+            "type": "string",
+            "description": "The layer's id, as get_cover lists it (the layout's own parts are named by their type: title, subtitle, tag, brand, …)."
+          },
+          "off": {
+            "type": "boolean",
+            "description": "Unweave it."
+          },
+          "by": {
+            "type": "string",
+            "enum": [
+              "head",
+              "letters",
+              "brush"
+            ],
+            "description": "How."
+          },
+          "with": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "A lettering layer's id."
+            },
+            "description": "The layers it weaves with.",
+            "maxItems": 24,
+            "uniqueItems": true
+          },
+          "line": {
+            "type": "number",
+            "description": "Where the head ends.",
+            "minimum": 0.1,
+            "maximum": 0.9
+          },
+          "front": {
+            "type": "object",
+            "description": "By lettering layer id: the letters in front.",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "all",
+                    "none",
+                    "alternate"
+                  ]
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 400
+                }
+              ]
+            }
+          },
+          "strokes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "front": {
+                  "type": "boolean",
+                  "description": "In front where it passes (false: behind)."
+                },
+                "r": {
+                  "type": "number",
+                  "description": "Its radius.",
+                  "minimum": 0.001,
+                  "maximum": 0.5
+                },
+                "pts": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  "description": "Its points.",
+                  "minItems": 1,
+                  "maxItems": 2000
+                }
+              },
+              "required": [
+                "front",
+                "r",
+                "pts"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The brush strokes, in order.",
+            "maxItems": 300
+          }
+        },
+        "required": [
+          "layer"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "weave": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "weave"
+        ]
+      },
+      "annotations": {
+        "title": "Weave with the lettering",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "surprise",
+      "title": "Surprise me",
+      "description": "Surprise me: deals count (default 6) variations of the cover — look, lettering, layout — and puts the first on the canvas. locks keeps these as they are, this time only: look, theme, lettering, places, layout. Returns each hand (its number, look, layout and a few words) and, by default, one contact sheet of them labelled from 1 (images: \"each\" for an image per hand, \"none\" for none). Take another with pick_hand. One undo step.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "count": {
+            "type": "integer",
+            "description": "How many hands.",
+            "minimum": 1,
+            "maximum": 6
+          },
+          "locks": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "look",
+                "theme",
+                "lettering",
+                "places",
+                "layout"
+              ]
+            },
+            "description": "What to leave as it is.",
+            "uniqueItems": true
+          },
+          "images": {
+            "type": "string",
+            "enum": [
+              "sheet",
+              "each",
+              "none"
+            ],
+            "description": "Which images to return (default sheet)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "hands": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "hand": {
+                  "type": "integer"
+                },
+                "look": {
+                  "type": "string"
+                },
+                "lookName": {
+                  "type": "string"
+                },
+                "layout": {
+                  "type": "string"
+                },
+                "says": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "kept": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hands",
+          "kept"
+        ]
+      },
+      "annotations": {
+        "title": "Surprise me",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 120000
+      }
+    },
+    {
+      "name": "pick_hand",
+      "title": "Pick a hand",
+      "description": "Puts hand `hand` (from 1, as labelled) of the last surprise on the canvas instead, on the same undo step. Refused once the cover has been changed since the deal: deal again then.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "hand": {
+            "type": "integer",
+            "description": "The hand's number.",
+            "minimum": 1,
+            "maximum": 6
+          }
+        },
+        "required": [
+          "hand"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "kept": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kept"
+        ]
+      },
+      "annotations": {
+        "title": "Pick a hand",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "apply_cover_json",
+      "title": "Apply a cover",
+      "description": "A last resort: replaces the cover with `cover`, a whole cover as SmedCover stores it ({title, subtitle, tag, layers}; get_cover with raw: true gives one to start from). It is checked as a file read from disk is: returns what was corrected or dropped, and the photos and assets it names that are not here. One undo step.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "cover": {
+            "type": "object",
+            "description": "The cover."
+          }
+        },
+        "required": [
+          "cover"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "corrected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dropped": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "missingPhotos": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "missingAssets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "annotations": {
+        "title": "Apply a cover",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "open_project",
+      "title": "Open a project",
+      "description": "Opens a SmedCover project (a .smedcover.json file: a profile with its covers, photos, assets and fonts), from a file on this computer (file, an absolute path) or given whole (project, the object or its JSON text): as a new profile (as \"new\", the default) or over the current one (\"current\"). The window switches to it. Returns the profile and the channel opened.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "The project file, absolute.",
+            "maxLength": 4096
+          },
+          "project": {
+            "type": [
+              "object",
+              "string"
+            ],
+            "description": "The project, or its JSON text."
+          },
+          "as": {
+            "type": "string",
+            "enum": [
+              "new",
+              "current"
+            ],
+            "description": "A new profile, or over the current one."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "created": {
+                "type": "boolean"
+              }
+            }
+          },
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile",
+          "channel"
+        ]
+      },
+      "annotations": {
+        "title": "Open a project",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "batch_covers",
+      "title": "Make covers in a batch",
+      "description": "Makes and exports a cover for each job, as importing a CSV does: jobs [{channel, title, tag?, subtitle?}] (channel by name, code or number) or csv (the same as text: channel, title, tag, subtitle, with or without a header row). Each starts from its channel's cover with the words replaced, at sizes (default every size of the profile), into folder dir (absolute; default the profile's export folder), in format, at scale (1–4×; default the export settings'). Never overwrites a file: a name taken gets a number. Nothing is written when a job names a channel the profile does not have. The covers in the window are not changed. Returns the folder and each file written.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "jobs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "channel": {
+                  "type": [
+                    "string",
+                    "integer"
+                  ],
+                  "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Its title.",
+                  "maxLength": 2000
+                },
+                "tag": {
+                  "type": "string",
+                  "description": "Its tag.",
+                  "maxLength": 200
+                },
+                "subtitle": {
+                  "type": "string",
+                  "description": "Its subtitle.",
+                  "maxLength": 2000
+                }
+              },
+              "required": [
+                "channel",
+                "title"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The covers to make.",
+            "minItems": 1,
+            "maxItems": 500
+          },
+          "csv": {
+            "type": "string",
+            "description": "The jobs as CSV text.",
+            "maxLength": 1000000
+          },
+          "sizes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A size: pixels, ratio or name."
+                },
+                "minItems": 1,
+                "maxItems": 80
+              }
+            ]
+          },
+          "dir": {
+            "type": "string",
+            "description": "The folder to write into, absolute.",
+            "maxLength": 4096
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg",
+              "webp"
+            ],
+            "description": "The image format."
+          },
+          "scale": {
+            "type": "integer",
+            "description": "The resolution, times the size's pixels.",
+            "minimum": 1,
+            "maximum": 4
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "dir": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "channel": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "files"
+        ]
+      },
+      "annotations": {
+        "title": "Make covers in a batch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 1800000
+      }
+    },
+    {
+      "name": "export",
+      "title": "Export",
+      "description": "Writes covers to image files: channels (default the one shown; \"all\" for every channel) at sizes (default those ticked in the Export window; \"all\" for every size), into dir (an absolute folder; default the profile's export folder — pass dir when it has none), in format (png, jpeg, webp) and at scale (1–4×; default the export settings'), each named by the export name pattern. Never overwrites a file: a name taken gets a number. Only where the host writes files. Returns the folder and each file's path.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channels": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "string",
+                    "integer"
+                  ],
+                  "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+                },
+                "minItems": 1,
+                "maxItems": 200
+              }
+            ]
+          },
+          "sizes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A size: pixels, ratio or name."
+                },
+                "minItems": 1,
+                "maxItems": 80
+              }
+            ]
+          },
+          "dir": {
+            "type": "string",
+            "description": "The folder to write into, absolute.",
+            "maxLength": 4096
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg",
+              "webp"
+            ],
+            "description": "The image format."
+          },
+          "scale": {
+            "type": "integer",
+            "description": "The resolution, times the size's pixels.",
+            "minimum": 1,
+            "maximum": 4
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "dir": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "channel": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "files"
+        ]
+      },
+      "annotations": {
+        "title": "Export",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 1800000
+      }
+    },
+    {
+      "name": "get_selection",
+      "title": "Get the selection",
+      "description": "What the window shows and has selected: the profile, the channel, the size on the canvas, the scope a change of place reaches, and the selected layer (layers: all of a group). Desktop only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "string"
+          },
+          "layers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "profile",
+          "channel",
+          "size",
+          "layer"
+        ]
+      },
+      "annotations": {
+        "title": "Get the selection",
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop"
+        ],
+        "timeoutMs": 30000
+      }
+    },
+    {
+      "name": "select_layer",
+      "title": "Select a layer",
+      "description": "Selects a layer (layer; \"bg\" selects nothing) or several together (layers), and/or shows another size on the canvas (size), as the user would — to show them what you mean. Not a step of undo. Desktop only. Returns the selection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "string",
+            "description": "The layer's id, as get_cover lists it (the layout's own parts are named by their type: title, subtitle, tag, brand, …)."
+          },
+          "layers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "A layer's id."
+            },
+            "description": "Layers to select together.",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true
+          },
+          "size": {
+            "type": "string",
+            "description": "A size of the profile: its pixels (\"1920x1080\"), its ratio (\"16:9\") or its name. The one on the canvas when left out."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "string"
+          },
+          "layers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "profile",
+          "channel",
+          "size",
+          "layer"
+        ]
+      },
+      "annotations": {
+        "title": "Select a layer",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "undo",
+      "title": "Undo",
+      "description": "Undoes the last steps (steps, default 1) of the window's history — the user's and yours alike: each change a tool made is one step. Desktop only. Returns where the history now is.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "integer",
+            "description": "How many steps.",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "steps": {
+            "type": "integer"
+          },
+          "canUndo": {
+            "type": "boolean"
+          },
+          "canRedo": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "index",
+          "canUndo",
+          "canRedo"
+        ]
+      },
+      "annotations": {
+        "title": "Undo",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "redo",
+      "title": "Redo",
+      "description": "Redoes steps undone (steps, default 1). Desktop only. Returns where the history now is.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "integer",
+            "description": "How many steps.",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "steps": {
+            "type": "integer"
+          },
+          "canUndo": {
+            "type": "boolean"
+          },
+          "canRedo": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "index",
+          "canUndo",
+          "canRedo"
+        ]
+      },
+      "annotations": {
+        "title": "Redo",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop"
+        ],
+        "timeoutMs": 60000
+      }
+    }
+  ]
+}
