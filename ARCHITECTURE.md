@@ -1661,8 +1661,8 @@ being worked while hands are dealt onto the cover.
 
 **Shell and glass.** A top bar over the columns (`.body`, a grid): the dock, the sheet open (`#left`, `#panel`), the
 canvas (`#center`: the stage, and under it the tray — the size shown, `#toolbar`; every size's thumbnail, `#strip`; the
-scope, `#scope`, which wraps under the sizes when there is no room beside them) and the properties drawer (`#right`,
-`#side`), whose column goes to the canvas while it is shut (`.nodrawer`). The sheet and the drawer are dragged wider by
+scope, `#scope`, its label and choices centred on the line as the size's name and pixels are, which wraps under the
+sizes when there is no room beside them) and the properties drawer (`#right`, `#side`), whose column goes to the canvas while it is shut (`.nodrawer`). The sheet and the drawer are dragged wider by
 their inner edges (`columns()`, kept in `settings.columns`; each column's least and first widths, `column()`, are
 `ui.columns` in `defaults.json`), the canvas keeping `centreMin()` at the least (`ui.centreMin`, 360 px). Behind it all lies the
 cover itself: `paintAmbient()` copies the main canvas, 48 pixels wide, into `#amb` a moment after each drawing
