@@ -38,8 +38,8 @@
 //   image(ctx, C, unit, p)       prepares the context for an uploaded image (its shadow or glow)
 //   post(ctx, w, h, C, p, unit, hits)  painted over the finished cover (scanlines, vignette); `unit` is
 //                                canvas pixels per virtual unit, `hits` where each layer ended up
-//   params                       … an entry with toggle: true is shown as a checkbox (0 or 1)
-//   params                       tunable numbers shown as sliders: [{ key, min, max, step, def, name: {zh, en} }];
+//   params                       … an entry with toggle: true is shown as a switch (0 or 1)
+//   params                       tunable numbers shown as scrub bars: [{ key, min, max, step, def, name: {zh, en} }];
 //                                needsPhoto: true marks one that only acts on a background photo
 //   prompt / solidPrompt         the "Style" section of the AI prompts for this look (see ai.js)
 //   scene: { key: {zh, en} }     the scene objects the user may drag on the canvas (the ball, the giant

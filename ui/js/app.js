@@ -28,7 +28,7 @@ import { LOOKS, LOOK_IDS, LOOK_TAGS, LOOK_CATEGORIES, setLook, lookParams, effec
 import { sizeOf, PIXELS, dropCards } from "./photo.js";
 import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, labelRoom, drawStack } from "./stack3d.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt, coverCrop } from "./repaint.js";
-import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
+import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, AI_DEFAULTS, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
@@ -865,24 +865,9 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
 // ---------- small form helpers
 const cap = (key, extra = "") => el("label", { class: "cap" }, t(key) + extra);
 function textInput(value, oninput, props = {}) { return el("input", { type: "text", value, spellcheck: false, oninput: (e) => oninput(e.target.value), ...props }); }
-/** A slider with a ready-made label (looks name their own parameters). */
-function slider2(label, min, max, step, value, oninput) {
-  const out = el("output", {}, value.toFixed(2));
-  return el("div", { class: "sl", style: "grid-template-columns:84px 1fr 44px" }, el("span", {}, label),
-    el("input", { type: "range", min, max, step, value, oninput: (e) => { const v = Number(e.target.value); out.textContent = v.toFixed(2); oninput(v); } }), out);
-}
-function slider(labelKey, min, max, step, value, fmt, oninput) {
-  const out = el("output", {}, fmt(value));
-  return el("div", { class: "sl" }, el("span", {}, t(labelKey)),
-    el("input", { type: "range", min, max, step, value, oninput: (e) => { const v = Number(e.target.value); out.textContent = fmt(v); oninput(v); } }), out);
-}
-/** An on/off setting of the selected layer's properties: a row with its name and the switch at its end (see switchRow). `opts` as there. */
+/** An on/off setting: a row with its name and the switch at its end (see switchRow). `opts` as there. */
 const check = (labelKey, checked, onchange, opts = {}) => switchRow(t(labelKey), checked, onchange, opts);
-function select(options, value, onchange) {   // options: [[value, label]] or {group, items}
-  const opt = ([v, l]) => el("option", { value: v, selected: v === value }, l);
-  return el("select", { onchange: (e) => onchange(e.target.value) }, options.map((o) => (Array.isArray(o) ? opt(o) : o.items.length ? el("optgroup", { label: o.group }, o.items.map(opt)) : null)));
-}
-const px = (v) => String(Math.round(v)), times = (v) => v.toFixed(2) + "×", pct = (v) => Math.round(v * 100) + "%";
+const times = (v) => v.toFixed(2) + "×", pct = (v) => Math.round(v * 100) + "%";
 
 // ---------- the controls of the selected layer's properties (the drawer and the bar's popover)
 // One family, each a row 34 px high (see .psec in index.html): the scrub bar, the colour, the switch, the choice among
@@ -899,7 +884,13 @@ const SHOWN = {
   pct: { show: pct, text: (v) => String(Math.round(v * 100)), read: (s) => Number(s) / 100, unit: "%" },
   px: { show: (v) => `${Math.round(v)} px`, text: (v) => String(Math.round(v)), read: Number, unit: "px" },
   num: { show: (v) => v.toFixed(2), text: (v) => v.toFixed(2), read: Number, unit: "" },
+  int: { show: (v) => String(Math.round(v)), text: (v) => String(Math.round(v)), read: Number, unit: "" },
+  deg: { show: (v) => `${Math.round(v)}°`, text: (v) => String(Math.round(v)), read: Number, unit: "°" },
+  sec: { show: (v) => `${Math.round(v)} s`, text: (v) => String(Math.round(v)), read: Number, unit: "s" },
+  chance: { show: (v) => chancePct(v), text: (v) => String(Number((v * 100).toFixed(1))), read: (s) => Number(s) / 100, unit: "%" },
 };
+/** The ways of showing a scrub bar's value that take whole numbers only (see scrub's put). */
+const WHOLE_SHOWN = new Set([SHOWN.px, SHOWN.int, SHOWN.deg, SHOWN.sec]);
 /** What was typed into a scrub bar, as a number of `fmt` (see SHOWN): full-width digits and a comma for the point taken too; NaN when it is none. */
 const typedValue = (s, fmt) => { const n = s.normalize("NFKC").replace(/,/g, ".").replace(/[^\d.+-]/g, ""); return n && !/^[+-]?\.?$/.test(n) ? fmt.read(n) : NaN; };
 /**
@@ -909,43 +900,69 @@ const typedValue = (s, fmt) => { const n = s.normalize("NFKC").replace(/,/g, "."
  * the value in: Enter keeps it, Esc leaves it as it was, the arrows step it (Shift: ten steps). With the focus on it (a
  * range input under it, which Tab reaches and a screen reader reads) the arrow keys, Home and End move it, Shift ten
  * steps at a time. Off its default, the value is in the channel colour and a ↺ beside it puts it back. `fmt`: one of
- * SHOWN. `off`: why it cannot be changed now, said in its place.
+ * SHOWN. `off`: why it cannot be changed now, said in its place. `opts`: `done()`, once a change is made (a drag let go,
+ * a value typed in, a key, ↺); `back()` with `own` and `backTip`, where the way back is not to a value (a letter's
+ * size back to chance, a chance back to the recipe's): ↺ while it is the user's own, which calls it. The box's `_show(v)`
+ * shows a value changed elsewhere (the 3D view's spread, by the wheel), without calling `oninput`.
  */
-function scrub(label, min, max, step, value, fmt, oninput, def = null, off = "") {
+function scrub(label, min, max, step, value, fmt, oninput, def = null, off = "", { done = null, back = null, own = false, backTip = "" } = {}) {
   const at = (v) => clamp(max > min ? (v - min) / (max - min) : 0, 0, 1);
   const onStep = (n) => Number((min + Math.round((n - min) / step) * step).toFixed(6));
   const fill = el("span", { class: "fill" }), out = el("output", {});
   const range = el("input", { type: "range", min, max, step, value, disabled: !!off, "aria-label": label });
   const bar = el("label", { class: "bar" + (off ? " off" : ""), title: off || t("props.scrubTip") },
-    fill, def != null && el("span", { class: "tick", style: `left:${at(def) * 100}%` }), el("span", { class: "lb" }, label), off ? el("span", { class: "why" }, off) : out, range);
-  const rs = el("button", { type: "button", class: "rs", hidden: true, innerHTML: RESET_ICON, onclick: () => { put(def, true); range.focus({ preventScroll: true }); } });
-  const box = el("div", { class: "sc", dataset: def != null ? { def } : {} }, bar, rs);
+    range, fill, def != null && el("span", { class: "tick", style: `left:${at(def) * 100}%` }), el("span", { class: "lb", title: label }, label), off ? el("span", { class: "why" }, off) : out);   // the range first: Tab from a value typed goes on to what follows the bar
+  const rs = el("button", { type: "button", class: "rs", hidden: true, innerHTML: RESET_ICON,
+    onclick: () => {
+      const root = rs.closest("#side, #fpop, #modal, #panel, #settings, #letterwin") || document.body;
+      if (back) { own = false; show(); back(); } else { put(def, true); if (done) done(); }
+      // the focus on the bar, or on the bar of that name where the window was built anew
+      const again = rs.isConnected ? range : root.querySelector(`.bar input[aria-label="${CSS.escape(label)}"]`);
+      if (again) again.focus({ preventScroll: true });
+    } });
+  const box = el("div", { class: "sc" + (def == null && !back ? " bare" : ""), dataset: def != null ? { def } : {} }, bar, rs);
   let v = value;
   const show = () => {
     fill.style.width = at(v) * 100 + "%";
     out.textContent = fmt.show(v);
     range.value = v; range.setAttribute("aria-valuetext", fmt.show(v));
-    const chg = def != null && Math.abs(v - def) > 1e-6;
+    const chg = back ? own : def != null && Math.abs(v - def) > 1e-6;
     box.classList.toggle("chg", chg); rs.hidden = !chg;
     if (def != null) { rs.title = t("props.resetTo", label, fmt.show(def)); rs.setAttribute("aria-label", rs.title); }
   };
   // to value n: one of its steps (`exact`, as typed or the default, as it is), within its ends
   const put = (n, exact = false) => {
     n = clamp(exact ? n : onStep(n), min, max);
-    if (fmt === SHOWN.px) n = Math.round(n);
+    if (WHOLE_SHOWN.has(fmt)) n = Math.round(n);
     if (n === v) return;
-    v = n; show(); oninput(v); resum(box);
+    v = n; own = true; show(); oninput(v); resum(box);
   };
+  if (back) { rs.title = backTip; rs.setAttribute("aria-label", `${label} · ${backTip}`); }
   show();
+  box._show = (n) => { v = clamp(n, min, max); show(); };
   if (off) return box;
   // dragged: by how far the pointer goes, the bar's width its whole range
   bar.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || bar.classList.contains("typing")) return;
+    if (e.button !== 0 || e.ctrlKey || bar.classList.contains("typing")) return;   // not a Control-click (a Mac's right click)
     e.preventDefault(); range.focus({ preventScroll: true });
     const x0 = e.clientX, v0 = v, w = bar.clientWidth || 1;
     let moved = false;
     try { bar.setPointerCapture(e.pointerId); } catch { /* a pointer the page did not see go down */ }
+    // let go: on the bar, or anywhere (the bar may be gone from under the pointer, its popover shut or the drawer built
+    // anew, and its own release never come), or a move with the button no longer down (the release missed)
+    const end = () => {
+      bar.onpointermove = bar.onpointerup = bar.onpointercancel = bar.onlostpointercapture = null;
+      for (const type of ["pointerup", "pointercancel"]) removeEventListener(type, end, true);
+      removeEventListener("pointermove", loose, true);
+      bar.classList.remove("drag"); document.body.classList.remove("scrubbing");
+      if (moved && done) done();
+    };
+    const loose = (m) => { if (!(m.buttons & 1)) end(); };
+    for (const type of ["pointerup", "pointercancel"]) addEventListener(type, end, true);
+    addEventListener("pointermove", loose, true);
+    bar.onpointerup = bar.onpointercancel = bar.onlostpointercapture = end;
     bar.onpointermove = (m) => {
+      if (!(m.buttons & 1)) return end();
       const dx = m.clientX - x0;
       if (!moved && Math.abs(dx) < 3) return;
       if (!moved) { moved = true; bar.classList.add("drag"); document.body.classList.add("scrubbing"); }
@@ -953,28 +970,26 @@ function scrub(label, min, max, step, value, fmt, oninput, def = null, off = "")
       if (def != null && Math.abs(at(n) - at(def)) * w < 6) return put(def, true);   // drawn to its default
       put(n);
     };
-    bar.onpointerup = bar.onpointercancel = bar.onlostpointercapture = () => {
-      bar.onpointermove = bar.onpointerup = bar.onpointercancel = bar.onlostpointercapture = null;
-      bar.classList.remove("drag"); document.body.classList.remove("scrubbing");
-    };
   });
   // typed: the number in a field in the value's place
   const typeIn = () => {
     if (bar.classList.contains("typing")) return;
     const was = v, field = el("input", { type: "text", class: "num", value: fmt.text(v), spellcheck: false, inputMode: "decimal", "aria-label": label });
     const unit = fmt.unit && el("span", { class: "unit" }, fmt.unit);
-    let done = false;
-    const end = (keep) => {
-      if (done) return;
-      done = true;
+    let over = false;
+    // kept or not; the focus back on the bar only when a key ended it (left for elsewhere, it stays where it went)
+    const end = (keep, refocus = false) => {
+      if (over) return;
+      over = true;
       const n = typedValue(field.value, fmt);
       if (keep && Number.isFinite(n)) put(n, true); else if (!keep) put(was, true);
       field.replaceWith(out); if (unit) unit.remove();
       bar.classList.remove("typing");
-      if (bar.isConnected) range.focus({ preventScroll: true });
+      if (done && v !== was) done();
+      if (refocus && bar.isConnected) range.focus({ preventScroll: true });
     };
     field.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(e.key === "Enter"); }   // Esc not also shutting the bar's popover
+      if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(e.key === "Enter", true); }   // Esc not also shutting the bar's popover
       else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
         e.preventDefault();
         const n = typedValue(field.value, fmt);
@@ -990,10 +1005,11 @@ function scrub(label, min, max, step, value, fmt, oninput, def = null, off = "")
   };
   bar.addEventListener("dblclick", typeIn);
   range.addEventListener("input", () => put(Number(range.value)));   // the arrow keys, Home, End, Page Up and Down
+  if (done) range.addEventListener("change", done);   // a key's step made
   range.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); return typeIn(); }
     const dir = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[e.key];
-    if (dir && e.shiftKey) { e.preventDefault(); put(v + dir * step * 10); }
+    if (dir && e.shiftKey) { e.preventDefault(); const was = v; put(v + dir * step * 10); if (done && v !== was) done(); }
   });
   return box;
 }
@@ -1050,9 +1066,9 @@ function picker(options, value, onchange, { name = "", id = "", pv = null, glyph
  * whose name starts so; Esc, Tab or a press anywhere else shuts it as it was. The focus goes back to the picker, found
  * again by its id once the choice has built the properties anew.
  */
-function openPicker(b, options, value, onchange, { glyph = null, font = null } = {}) {
+function openPicker(b, options, value, onchange, { glyph = null, font = null, refocus = true } = {}) {
   if (document.querySelector(".pklist")) return;
-  const root = b.closest("#side, #fpop") || document.body, id = b.dataset.pick;
+  const root = b.closest("#side, #fpop, #modal, #panel, #settings") || document.body, id = b.dataset.pick;
   const item = ([v, label]) => el("button", { type: "button", class: "mi", role: "option", "aria-selected": String(v === value), tabIndex: -1, dataset: { v },
     style: font && font(v) ? `font-family:"${font(v)}",var(--ui)` : null, onclick: () => choose(v) },
     glyph && el("span", { class: "gl", innerHTML: glyph(v) }), el("span", { class: "tx" }, label), v === value && el("span", { class: "ck", innerHTML: CHEV_ICON("m5 12 5 5 9-10") }));
@@ -1079,6 +1095,7 @@ function openPicker(b, options, value, onchange, { glyph = null, font = null } =
   const choose = (v) => {
     close(false);
     if (v !== value) onchange(v);
+    if (!refocus) return;   // where the choice puts the focus itself
     const again = b.isConnected ? b : id && root.querySelector(`.pk[data-pick="${CSS.escape(id)}"]`);
     if (again) again.focus({ preventScroll: true });
   };
@@ -1370,7 +1387,7 @@ function copyDialog() {
   const m = $("modal");
   m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("copy.title")),
     el("div", { class: "hint", style: "margin:0 0 12px;font-size:13px;opacity:.8" }, t("copy.hint")),
-    cap("copy.profile"), select(S.profiles.map((x) => [x.id, x.name || "—"]), COPY.profile, (v) => pick("profile", v)),
+    cap("copy.profile"), picker(S.profiles.map((x) => [x.id, x.name || "—"]), COPY.profile, (v) => pick("profile", v), { name: t("copy.profile"), id: "copyprofile" }),
     el("div", { style: "margin-top:12px" }, cap("copy.channel"),
       cats.length ? el("div", { class: "chips" }, cats.map((k) => el("button", { class: k.id === COPY.cat ? "on" : "", style: `--c:${k.color}`, onclick: () => pick("cat", k.id) }, k.name || k.code || "—")))
         : el("div", { class: "hint", style: "margin:0" }, t("copy.noChannel"))),
@@ -2442,11 +2459,11 @@ function imageAiPane() {
   };
   const field = (key, k, props = {}, under = null) => el("div", {}, cap(key), textInput(c[k], (v) => set(k, v), props), under);
   return [
-    el("div", {}, cap("img.provider"), select(IMAGE_PROVIDERS.map((k) => [k, t("img.provider." + k)]), c.provider, (v) => set("provider", v, true))),
+    el("div", {}, cap("img.provider"), picker(IMAGE_PROVIDERS.map((k) => [k, t("img.provider." + k)]), c.provider, (v) => set("provider", v, true), { name: t("img.provider"), id: "imgprovider" })),
     field("ai.baseUrl", "baseUrl", { placeholder: d.baseUrl }, ep),
     field("ai.token", "token", { type: "password", placeholder: t("ai.tokenPh"), autocomplete: "off" }),
     field("ai.model", "model", { placeholder: t("img.modelPh", d.model) }, el("div", { class: "hint" }, t("img.modelHint." + c.provider))),
-    el("div", {}, cap("ai.timeout"), el("input", { type: "number", min: 30, max: 1800, step: 30, value: c.timeout, onchange: (e) => set("timeout", e.target.value, true) })),
+    scrub(t("ai.timeout"), 30, 1800, 30, c.timeout, SHOWN.sec, (v) => set("timeout", v), 300),
     field("ai.proxy", "proxy", { placeholder: "http://127.0.0.1:7890" }),
     el("div", { class: "aifoot" }, testBtn, testLine(REP.test), info(t("img.testHint"))),
     el("div", { class: "hint" }, t("img.privacy")),
@@ -2715,15 +2732,15 @@ function textAiPane() {
     refreshAiPage();
   };
   return [
-    el("div", {}, cap("ai.style"), el("div", { class: "seg" }, AI_STYLES.map((k) => el("button", { class: "btn" + (c.style === k ? " on" : ""), title: t("ai.style." + k), onclick: () => set("style", k, true) }, t("ai.styleShort." + k))))),
+    el("div", {}, cap("ai.style"), segs(t("ai.style"), AI_STYLES.map((k) => [k, t("ai.styleShort." + k), null, t("ai.style." + k)]), c.style, (k) => set("style", k, true))),
     field("ai.baseUrl", "baseUrl", { placeholder: ph.baseUrl }, ep),
     field("ai.token", "token", { type: "password", placeholder: t("ai.tokenPh"), autocomplete: "off" }),
     field("ai.model", "model", { placeholder: t("ai.modelPh") }),
     c.style === "anthropic" && [
-      el("div", {}, cap("ai.auth"), select([["key", t("ai.auth.key")], ["bearer", t("ai.auth.bearer")]], c.auth, (v) => set("auth", v))),
-      el("div", {}, cap("ai.maxTokens"), el("input", { type: "number", min: 512, max: 64000, step: 256, value: c.maxTokens, onchange: (e) => set("maxTokens", e.target.value, true) })),
+      el("div", {}, cap("ai.auth"), segs(t("ai.auth"), [["key", t("ai.auth.key")], ["bearer", t("ai.auth.bearer")]], c.auth, (v) => set("auth", v))),
+      scrub(t("ai.maxTokens"), 512, 64000, 256, c.maxTokens, SHOWN.int, (v) => set("maxTokens", v), AI_DEFAULTS.maxTokens),
     ],
-    el("div", {}, el("label", { class: "cap" }, t("ai.timeout"), " ", info(t("ai.timeoutHint"))), el("input", { type: "number", min: 30, max: 1800, step: 30, value: c.timeout, onchange: (e) => set("timeout", e.target.value, true) })),
+    el("div", { class: "scrow" }, scrub(t("ai.timeout"), 30, 1800, 30, c.timeout, SHOWN.sec, (v) => set("timeout", v), AI_DEFAULTS.timeout), info(t("ai.timeoutHint"))),
     field("ai.proxy", "proxy", { placeholder: "http://127.0.0.1:7890" }),
     el("div", { class: "wide" }, cap("ai.notes"), el("textarea", { value: c.notes, spellcheck: false, style: "height:84px;font-size:14px", placeholder: t("ai.notesPh"), oninput: (e) => set("notes", e.target.value) })),
     el("div", { class: "aifoot" }, testBtn, testLine(AI.test)),
@@ -2764,12 +2781,12 @@ function templateControls(st, at, changed, to = null) {
   const a = layoutAdjuster(st, at, changed, to), { tpl, adj, put, set } = a;
   const split = tpl === "split", byDefault = templateDefault(tpl, orientOfKey(S.sel));   // what the template has by default (the canvas's orientation's, where that is its)
   return [
-    select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), tpl, (v) => put(v, (st.layoutAdjust || {})[v] || templateDefault(v, orientOfKey(S.sel)), true)),   // the adjustments' sliders follow the template chosen (none kept for it: its defaults)
+    segs(t("props.blockAt"), ["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), tpl, (v) => put(v, (st.layoutAdjust || {})[v] || templateDefault(v, orientOfKey(S.sel)), true)),   // the adjustments' sliders follow the template chosen (none kept for it: its defaults)
     el("div", { style: "margin-top:14px" }, cap("style.layout")),
     blockSliders(a),
-    slider2(t("style.layTitleW"), LAYOUT_LIMITS.tw[0], LAYOUT_LIMITS.tw[1], 0.01, adj.tw ?? 1, (v) => set("tw", v)),
-    slider2(t("style.layTitleH"), LAYOUT_LIMITS.th[0], LAYOUT_LIMITS.th[1], 0.01, adj.th ?? 1, (v) => set("th", v)),
-    el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: !!adj.flip, onchange: (e) => set("flip", e.target.checked, true) }), el("span", {}, t(split ? "style.layFlipSplit" : "style.layFlipStack"))),
+    scrub(t("style.layTitleW"), LAYOUT_LIMITS.tw[0], LAYOUT_LIMITS.tw[1], 0.01, adj.tw ?? 1, SHOWN.num, (v) => set("tw", v), 1),
+    scrub(t("style.layTitleH"), LAYOUT_LIMITS.th[0], LAYOUT_LIMITS.th[1], 0.01, adj.th ?? 1, SHOWN.num, (v) => set("th", v), 1),
+    check(split ? "style.layFlipSplit" : "style.layFlipStack", !!adj.flip, (on) => set("flip", on, true)),
     el("button", { class: "btn wide", style: "margin-top:10px", disabled: sameLayout({ template: tpl, adjust: adj }, { template: tpl, adjust: byDefault }), onclick: () => put(tpl, byDefault, true) }, t("style.layReset")),
   ];
 }
@@ -2792,11 +2809,15 @@ function layoutAdjuster(st, at, changed, to = null) {
   };
   return { tpl, adj, now, put, set };
 }
-/** The colour block's two sliders, of layoutAdjuster's `a`: how much of the canvas it takes (the panel's width for Split, the band's height else), and how its edge leans. */
-const blockSliders = (a) => [
-  slider2(t(a.tpl === "split" ? "style.laySide" : "style.layBand"), LAYOUT_LIMITS.size[0], LAYOUT_LIMITS.size[1], 0.01, a.adj.size ?? a.now.size, (v) => a.set("size", v)),
-  slider2(t("style.laySlant"), LAYOUT_LIMITS.slant[0], LAYOUT_LIMITS.slant[1], 0.005, a.adj.slant ?? a.now.slant, (v) => a.set("slant", v)),
-];
+/**
+ * The colour block's two scrub bars, of layoutAdjuster's `a`: how much of the canvas it takes (the panel's width for
+ * Split, the band's height else), and how its edge leans; each ticked at what the template has by default.
+ */
+function blockSliders(a) {
+  const d = templateDefault(a.tpl, orientOfKey(S.sel));
+  const bar = (k, label, step) => scrub(t(label), LAYOUT_LIMITS[k][0], LAYOUT_LIMITS[k][1], step, a.adj[k] ?? a.now[k], SHOWN.num, (v) => a.set(k, v), d[k] ?? null);
+  return [bar("size", a.tpl === "split" ? "style.laySide" : "style.layBand", 0.01), bar("slant", "style.laySlant", 0.005)];
+}
 /**
  * The size on the canvas as templateControls wants it: its virtual canvas, and which parts that take room the cover has
  * there — as it is drawn there (coverAt in render.js), a part kept to other sizes left out, so the sliders start from
@@ -2844,13 +2865,10 @@ function blockSection() {
   const step = (fn) => { clearTimeout(timers.hist); commitHistory(); fn(); commitHistory(); };   // its own step of undo
   // a position picked: the sliders follow it (from what the style keeps for it, else its defaults), as templateControls's list does
   const place = (v) => { if (v !== a.tpl) step(() => a.put(v, (st.layoutAdjust || {})[v] || templateDefault(v, orientOfKey(S.sel)), true)); };
-  // its size and lean as scrub bars, the tick at what the template has by default (the canvas's orientation's)
-  const d = templateDefault(a.tpl, orientOfKey(S.sel));
-  const slide = (k, label, step) => scrub(t(label), LAYOUT_LIMITS[k][0], LAYOUT_LIMITS[k][1], step, a.adj[k] ?? a.now[k], SHOWN.num, (v) => a.set(k, v), d[k] ?? null);
   return psec("props.sec.block", [
     segs(t("props.blockAt"), ["stack", "split", "banner"].map((k) => [k, t("tpl." + k), null, t("tpl." + k + "Tip")]), a.tpl, place),
     check("props.blockFlip", !!a.adj.flip, (on) => step(() => a.set("flip", on, true)), { title: t("props.blockFlipTip." + a.tpl), def: false }),
-    slide("size", a.tpl === "split" ? "style.laySide" : "style.layBand", 0.01), slide("slant", "style.laySlant", 0.005), at.own,
+    blockSliders(a), at.own,
     el("button", { class: "btn wide", title: t("style.byOrientTip"), onclick: byOrient }, t("style.byOrient")),
   ], `${t("props.blockHint")} ${at.says} ${t("style.scopeWhere")}`);
 }
@@ -2872,7 +2890,7 @@ function lookArtRow() {
   const set = (r) => { const arts = (S.profile.style.lookArt = S.profile.style.lookArt || {}); if (r) arts[look] = { kind: r.kind, id: r.id }; else delete arts[look]; touch({ profile: true, panel: true }); };
   const picker = () => graphicPicker(own ? ref : null, c.color, set, { title: t("style.artPick"), first: { label: t(channel ? "style.artChannel" : "style.artNone"), ref: channel, cap: t("style.artDefault") }, upload: true, hint: t("style.artHint"), subjects: true });
   return [
-    el("div", { class: "sl", style: "grid-template-columns:84px 1fr" }, el("span", {}, t("style.art")),
+    el("div", { class: "trow" }, el("span", {}, t("style.art")),
       el("button", { class: "gpick", style: "padding:2px 8px 2px 2px;font-size:13px;min-width:0", title: t("style.artTip"), onclick: picker },
         graphicThumb(own ? ref : channel, c.color, 28), el("span", {}, own ? assetName(ref, getLang()) : t(channel ? "style.artChannel" : "style.artNone")), el("span", { class: "more" }, t("cat.pick")))),
     ref && el("div", { class: "artback" }, el("button", { class: "linkbtn", onclick: () => set(null) }, t("style.artBack"))),
@@ -2985,12 +3003,8 @@ function oddsGroup(title, names, group, save, opts = {}) {
   new ResizeObserver(fit).observe(bar);   // drawn, and the window resized
   return box;
 }
-/** A switch of Surprise me's, on by a chance of its own: a slider from 0 to 100%. `done()`, when given, once it is let go of. */
-function oddsChance(label, v, save, done = null) {
-  const out = el("output", {}, chancePct(v));
-  return el("div", { class: "sl", style: "grid-template-columns:112px 1fr 48px" }, el("span", { title: label }, label),
-    el("input", { type: "range", min: 0, max: 100, step: 1, value: v * 100, oninput: (e) => { const x = Number(e.target.value) / 100; out.textContent = chancePct(x); save(x); }, onchange: done }), out);
-}
+/** A switch of Surprise me's, on by a chance of its own: a scrub bar from 0 to 100%, its tick (and ↺) at `def`, the chance it has by default. `done()`, when given, once it is let go of. */
+const oddsChance = (label, v, save, done = null, def = null) => scrub(label, 0, 1, 0.01, v, SHOWN.chance, save, def, "", { done });
 /**
  * Surprise me's chances for look `look`'s optional parts (switches, sliders off by default), each on its own: its
  * recipe's (deal.js), the user's over them (S.settings.recipes, for every profile); Restore puts the table's back.
@@ -3001,12 +3015,12 @@ function lookParts(look, redraw = renderPanel) {
   const keep = (patch) => { S.settings.recipes = normalizeRecipes({ ...S.settings.recipes, [look]: { ...mine(), ...patch } }); persistSettings(); };
   const extras = L.params.filter((d) => !d.text && (d.toggle || d.def <= d.min)), odds = oddsOf(S.settings.surprise.odds);
   return [
-    extras.length ? extras.map((d) => oddsChance(d.name[lang], partChance(d, r, odds), (v) => keep({ params: { ...(mine().params || {}), [d.key]: v } })))
+    extras.length ? extras.map((d) => oddsChance(d.name[lang], partChance(d, r, odds), (v) => keep({ params: { ...(mine().params || {}), [d.key]: v } }), null, partChance(d, baseRecipe(look), odds)))
       : el("div", { class: "hint", style: "margin:0" }, t("odds.noParts")),
-    extras.length > 0 && el("button", { class: "btn wide", style: "margin-top:8px", onclick: async () => {
+    extras.length > 0 && el("div", { class: "tacts" }, el("button", { type: "button", class: "tbtn", onclick: async () => {
       if (S.settings.recipes[look] && !(await askSure({ title: t("recipe.resetSure", L.name[lang]), body: t("recipe.resetBody"), go: t("odds.default") }))) return;
       delete S.settings.recipes[look]; persistSettings(); redraw();
-    } }, t("recipe.reset")),
+    } }, t("recipe.reset"))),
   ];
 }
 const RECIPE_UI = { open: false };   // whether the Look sheet's box is unfolded
@@ -3128,7 +3142,7 @@ function oddsDialog(fresh = true, at = "") {
       el("div", { class: "ocol" },
         oddsLooks(sv, layouts, (v) => setGroup("look", v), unset("look", t("dock.look")), again),
         el("div", { class: "ocard" }, el("div", { class: "ocard-h" }, el("b", {}, t("odds.byLook")), info(t("odds.byLookHint")), el("span", { class: "grow" }),
-            select(LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), look, (v) => { ODDS_UI.look = v; again(); })),
+            picker(LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), look, (v) => { ODDS_UI.look = v; again(); }, { name: t("odds.byLook"), id: "oddslook" })),
           el("div", { class: "orows" }, lookParts(look, again)))),
       el("div", { class: "ocol" },
         el("div", { class: "ocap" }, el("span", {}, t("odds.barsCap")), el("span", {}, t("odds.barsSum"))),
@@ -3142,7 +3156,7 @@ function oddsDialog(fresh = true, at = "") {
         group("lookFx", ODD_OPTIONS.lookFx().map((k) => [k, t("odds.lookFx." + k)]), { tip: t("odds.lookFxHint") }),
         group("lookFxFrom", ODD_OPTIONS.lookFxFrom().map((k) => [k, t("odds.lookFxFrom." + k)])),
         el("div", { class: "ocap" }, el("span", {}, t("odds.chances"), " · ", t("odds.chancesShort"), " ", info(t("odds.chancesHint")))),
-        el("div", { class: "orows two" }, Object.keys(RULES.odds.chances).map((k) => oddsChance(t("odds.c." + k), odds.chances[k], (v) => setChance(k, v), again))))));   // let go of: the look's parts follow
+        el("div", { class: "orows two" }, Object.keys(RULES.odds.chances).map((k) => oddsChance(t("odds.c." + k), odds.chances[k], (v) => setChance(k, v), again, RULES.odds.chances[k]))))));   // let go of: the look's parts follow
   m.replaceChildren(dlg);
   m.hidden = false; m.onDismiss = done;
   dlg.scrollTop = y;
@@ -3264,16 +3278,16 @@ const PORTRAIT = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg 
  * sizes side by side, the others stacked), each takes the
  * change as its own: dragged across, each goes to the side across from its own, dragged to a side beside, each goes
  * there (sideLike); made bigger or leaned, each by as much of its own block (scaleBlock). Beside it: the preset's name;
- * its parts, each ticked where the layout has it (unticked, it is left out where the preset is put, see putLayout), at
- * the sizes the scope reaches — a part unticked at the size shown no longer selected, so no handle is left over where
+ * its parts, each switched on where the layout has it (off, it is left out where the preset is put, see putLayout), at
+ * the sizes the scope reaches — a part switched off at the size shown no longer selected, so no handle is left over where
  * it is not —; and the part selected, put back where the template puts it (the block: its size and slant, or its
  * place), and the title's, subtitle's, tag's or channel name's words set in columns or in a line (Vertical, at every
  * size; in a line to begin with, and where an earlier preset says nothing of it). A part an earlier preset has no entry for
- * (the colour block, before it was one) is shown where the template puts it, ticked, and is the preset's once saved.
+ * (the colour block, before it was one) is shown where the template puts it, on, and is the preset's once saved.
  * Under the parts, the preset's elements of the user's own (`extras`, LAYOUTS.extras at most): Add an element offers the
  * four kinds (EXTRA_KINDS), and the one picked comes in near the middle (newExtra), at every size, selected; each is
  * drawn by a stand-in of its kind — words of the editor's own in the look's lettering, a block of the channel colour,
- * the anonymous portrait (PORTRAIT), its built-in sticker — and is then moved, sized, ticked and reset as a part is
+ * the anonymous portrait (PORTRAIT), its built-in sticker — and is then moved, sized, switched and reset as a part is
  * (reset at every size: back where it came in), a text one set in columns or not too, and let go of by its × or Remove.
  * `fresh`: a new preset, in the list once saved. Save keeps it; Cancel, Escape or a click beside the window leave it as
  * it was (asked first when something was changed). Both close it. Nothing here touches the cover.
@@ -3491,7 +3505,7 @@ function layoutEditor(p, i, fresh = false) {
     if (E.key === key) { E.key = keys()[0]; keepSel(); }
     E.dirty = true; build(); redraw();
   };
-  // a part ticked or not at the sizes the scope reaches; ticked, it is the one selected; unticked here, it is no longer
+  // a part switched on or off at the sizes the scope reaches; on, it is the one selected; off here, it is no longer
   // (the block's diamonds and what is said of its side go with it)
   const tick = (L, on) => {
     const r = reach(), now = shownHere(L);
@@ -3533,7 +3547,7 @@ function layoutEditor(p, i, fresh = false) {
   // above the canvas: the sizes (and one to add), and what a change reaches; beside it, the parts and the one selected
   const build = () => {
     const z = size(), all = keys(), block = E.sel === "accent";
-    // what is typed kept while the side is built again (a part ticked, a size picked), until a size is added
+    // what is typed kept while the side is built again (a part switched, a size picked), until a size is added
     const num = (k, hint) => el("input", { type: "number", class: "ls-num", min: 64, max: 8192, step: 1, placeholder: hint, value: E[k], oninput: (e) => (E[k] = e.target.value),
       onkeydown: (e) => { if (e.key === "Enter") add(); if (e.key === "Escape") { e.stopPropagation(); E.adding = false; build(); } } });
     const wIn = num("addW", "1080"), hIn = num("addH", "1350"), add = () => addSize(Number(wIn.value), Number(hIn.value));
@@ -3549,15 +3563,16 @@ function layoutEditor(p, i, fresh = false) {
           : el("button", { class: "ls-plus", title: t("layed.addTip"), onclick: () => { E.adding = true; build(); } }, t("layed.add"))));
     later("layed-thumbs", 60, paintThumbs);
     if (E.adding) wIn.focus();
-    // a part's or an element's row: ticked where the layout has it at this size, and said so when that is some sizes
+    // a part's or an element's row: switched on where the layout has it at this size, and said so when that is some sizes
     // only; its name, clicked, selects it (one here); an element of the user's own, an × to let it go
     const row = (id) => {
       const P = part(id), on = shownHere(P), here = on.includes(z.key), mine = !!extraOf(id);
-      return el("div", { class: "chk" + (id === E.sel ? " on" : "") },
-        el("input", { type: "checkbox", checked: here, onchange: (e) => tick(P, e.target.checked) }),
-        el("span", { onclick: () => { if (here) { pick(id); redraw(); } } }, nameOf(id)),
+      return el("div", { class: "lpart" + (id === E.sel ? " on" : "") },
+        el("span", { class: "nm", onclick: () => { if (here) { pick(id); redraw(); } } }, nameOf(id)),
         on.length > 0 && on.length < all.length && el("small", { class: "some", title: t("layed.someTip", sizes().filter((x) => on.includes(x.key)).map((x) => ratioText(x.w, x.h)).join(" · ")) }, t("layed.some")),
-        mine && el("button", { class: "drop", title: t("layed.dropExtra"), "aria-label": t("layed.dropExtra"), onclick: () => dropExtra(id) }, "×"));
+        mine && el("button", { class: "drop", title: t("layed.dropExtra"), "aria-label": t("layed.dropExtra"), onclick: () => dropExtra(id) }, "×"),
+        el("button", { type: "button", class: "tog" + (here ? " on" : ""), role: "switch", "aria-checked": String(here), "aria-label": nameOf(id), dataset: { part: id },
+          onclick: () => { tick(P, !here); const again = document.querySelector(`.lpart .tog[data-part="${CSS.escape(id)}"]`); if (again) again.focus({ preventScroll: true }); } }));   // the focus on it, the list built anew
     };
     // under the parts, an element of the user's own to add: the way to the kinds, or the kinds to pick one of
     const full = E.extras.length >= LAYOUTS.extras, x = extraOf(E.sel);
@@ -3635,17 +3650,20 @@ function lookSheet() {
     lookCards(),
     el("div", { class: "box" }, tuneHead(L),
       L.about && el("div", { class: "about", hidden: !TUNE_UI.about }, L.about[getLang()]),
-      L.params.map((d) => [d.text
-        ? el("div", { class: "sl", style: "grid-template-columns:84px 1fr" }, el("span", {}, d.name[getLang()]),
+      // its settings: a word typed, on or off, or a scrub bar ticked at what the look was made with (↺ back to it)
+      el("div", { class: "kcol" }, L.params.map((d) => [d.text
+        ? el("label", { class: "trow" }, el("span", {}, d.name[getLang()]),
             textInput(vals[d.key], (v) => tune(d.key, v), { maxLength: d.max, placeholder: d.placeholder ? d.placeholder[getLang()] : "" }))
         : d.toggle
-        ? el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: vals[d.key] > 0, onchange: (e) => tune(d.key, e.target.checked ? 1 : 0) }), el("span", {}, d.name[getLang()]))
+        ? switchRow(d.name[getLang()], vals[d.key] > 0, (on) => tune(d.key, on ? 1 : 0))
         : d.needsPhoto && !recordOf(mainPhoto())
-          ? el("div", { class: "sl off", style: "grid-template-columns:84px 1fr", title: t("style.needsPhoto") }, el("span", {}, d.name[getLang()]), el("span", { class: "why" }, t("style.needsPhoto")))   // nothing for it to act on yet
-          : slider2(d.name[getLang()], d.min, d.max, d.step, vals[d.key], (v) => tune(d.key, v)),
+          ? scrub(d.name[getLang()], d.min, d.max, d.step, vals[d.key], SHOWN.num, () => {}, null, t("style.needsPhoto"))   // nothing for it to act on yet
+          : scrub(d.name[getLang()], d.min, d.max, d.step, vals[d.key], SHOWN.num, (v) => tune(d.key, v), d.def),
         d.key === L.art && lookArtRow()]),
-      L.seeded && el("button", { class: "btn wide", style: "margin-top:10px", title: t("style.shuffleHint"), onclick: () => { st.lookSeed = Math.floor(Math.random() * 1000000); touch({ profile: true }); } }, t("style.shuffle")),
-      L.params.length > 0 && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete st.lookParams[st.look]; if (st.lookArt) delete st.lookArt[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))),
+        L.seeded && el("button", { class: "btn wide", title: t("style.shuffleHint"), onclick: () => { st.lookSeed = Math.floor(Math.random() * 1000000); touch({ profile: true }); } }, t("style.shuffle")),
+        // seldom wanted: small, at the end
+        L.params.length > 0 && el("div", { class: "tacts" }, el("button", { type: "button", class: "tbtn", disabled: !st.lookParams[st.look] && !(st.lookArt && st.lookArt[st.look]),
+          onclick: () => { delete st.lookParams[st.look]; if (st.lookArt) delete st.lookArt[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"))))),
     recipeBox(),
   ];
 }
@@ -4331,7 +4349,7 @@ function sizesTab() {
     if (on && !has(s)) {
       P.sizes.push({ w: s.w, h: s.h, label: s.label || "", name: "" });
       layoutAdded(P.style, P.sizes, sizeKey(s));   // drawn as the sizes facing its way are, else in its orientation's default layout
-      const off = se.exportSizes[P.id];   // a size taken again starts ticked in the Export window, as a new one does
+      const off = se.exportSizes[P.id];   // a size taken again starts switched on in the Export window, as a new one does
       if (off && sizeKey(s) in off) { delete off[sizeKey(s)]; persistSettings(); }
     }
     if (!on) { if (P.sizes.length < 2) { toast(t("exp.lastSize")); return renderPanel(); } P.sizes = P.sizes.filter((x) => sizeKey(x) !== sizeKey(s)); followLayout(P.style, sizeKey(s)); }   // its layout of its own goes with it
@@ -4356,7 +4374,7 @@ function sizesTab() {
   };
   const cw = el("input", { type: "number", min: 64, max: 8192, value: 1280 }), chh = el("input", { type: "number", min: 64, max: 8192, value: 720 });
   const setting = (k, v, panel = false) => { se[k] = v; persistSettings(); if (panel) renderPanel(); };
-  const seg = (k, opts) => el("div", { class: "seg" }, opts.map(([v, l]) => el("button", { class: "btn" + (se[k] === v ? " on" : ""), onclick: () => setting(k, v, true) }, l)));
+  const seg = (k, opts) => segs(t("exp." + k), opts, se[k], (v) => setting(k, v, true));
   const example = el("div", { class: "hint" }, t("exp.example", nameFor(selSize(), S.cover, catIndex())));
   return [
     el("div", { class: "sh" }, el("b", {}, t("tab.sizes")), el("span", {}, t("exp.pageSub"))),
@@ -4368,7 +4386,7 @@ function sizesTab() {
     el("div", { class: "fields3" },
       el("div", { class: "fld" }, el("div", { class: "cap" }, t("exp.format")), seg("format", [["png", "PNG"], ["jpeg", "JPEG"], ["webp", "WebP"]])),
       el("div", { class: "fld" }, el("div", { class: "cap" }, t("exp.scale")), seg("scale", [1, 2, 3, 4].map((n) => [n, `${n}×`]))),
-      el("div", { class: "fld" }, se.format === "jpeg" && slider("exp.quality", 40, 100, 1, se.quality, px, (v) => setting("quality", v)), se.format === "webp" && el("div", { class: "hint" }, t("exp.webpNote")))),
+      el("div", { class: "fld" + (se.format === "jpeg" ? " lo" : "") }, se.format === "jpeg" && qualityBar((v) => setting("quality", v)), se.format === "webp" && el("div", { class: "hint" }, t("exp.webpNote")))),
     el("div", { class: "hint" }, t("exp.transparentHint")),
     el("div", { class: "fld" }, nameField(example), example),
     saveToRow(),
@@ -4377,6 +4395,8 @@ function sizesTab() {
       el("button", { class: "btn solid", onclick: batchFromCsv }, t("exp.csv"))),
   ];
 }
+/** The JPEG's quality, 40 to 100, as a scrub bar: in Settings → Sizes & export and in the Export window. */
+const qualityBar = (put) => scrub(t("exp.quality"), 40, 100, 1, S.settings.quality, SHOWN.int, put, (DEFAULTS.settings || {}).quality ?? 92);
 /** Adds a font file to the app: every layer can use it from then on. Returns its family name, or null. */
 async function importFont() {
   const f = await pickFile(".ttf,.otf,.woff,.woff2");
@@ -5027,8 +5047,8 @@ const columnsByLook = (L) => {
 const inColumns = (L) => L.vertical === true || columnsByLook(L);
 /**
  * Setting lettering layer L in columns, as a Song edition is (竖排, `vertical`), and once it is, ruling them (界行线,
- * `rules`): both kept with the layer, structure that Surprise me leaves alone. Set so by the look itself, the box is
- * ticked and greyed, saying where that is changed.
+ * `rules`): both kept with the layer, structure that Surprise me leaves alone. Set so by the look itself, Vertical is
+ * chosen and greyed, saying where that is changed.
  */
 function columnControls(L) {
   const byLook = !L.vertical && columnsByLook(L), lk = LOOKS[S.profile.style.look] || LOOKS.cel, on = !!L.vertical || byLook;
@@ -5120,9 +5140,9 @@ function letterControls(L) {
       onclick: () => { S.letterSel = p.key === sel ? null : { id: L.id, key: p.key }; lettersShow(true); },
     }, p.ch);
   }))));
-  const extras = el("div", { class: "chips small", style: "margin-bottom:10px" }, EXTRAS.map((k) => {
+  const extras = el("div", { class: "multi", role: "group", "aria-label": t("letters.extras"), style: "margin-bottom:10px" }, EXTRAS.map((k) => {
     const on = !(L.ransomOff || []).includes(k);
-    return el("button", { class: on ? "on" : "", title: t(k === "photo" && !photo ? "letters.extra.photoNone" : `letters.extra.${k}Tip`), onclick: () => {
+    return el("button", { type: "button", class: "btn" + (on ? " on" : ""), "aria-pressed": String(on), title: t(k === "photo" && !photo ? "letters.extra.photoNone" : `letters.extra.${k}Tip`), onclick: () => {
       const off = new Set(L.ransomOff || []);
       if (on) off.add(k); else off.delete(k);
       if (off.size) L.ransomOff = EXTRAS.filter((x) => off.has(x)); else delete L.ransomOff;
@@ -5133,7 +5153,7 @@ function letterControls(L) {
     cap("letters.extras"), extras,
     strip,
     picked ? letterEditor(L, picked, put, photo) : el("div", { class: "hint", style: "margin:6px 0 0" }, t("letters.pick")),
-    L.letters && el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { delete L.letters; touch({ cover: true }); lettersShow(true); } }, t("letters.resetAll")),
+    L.letters && el("div", { class: "tacts", style: "margin-top:8px" }, el("button", { type: "button", class: "tbtn", onclick: () => { delete L.letters; touch({ cover: true }); lettersShow(true); } }, t("letters.resetAll"))),
   ];
 }
 /** The controls of one letter of the ransom note: {row, c (its cell), p (how it is dressed now)}; `put(key, patch)` sets what was chosen. */
@@ -5141,7 +5161,9 @@ function letterEditor(L, { row, c, p }, put, photo) {
   const e = (L.letters && L.letters[p.key]) || {}, key = p.key, live = (patch) => { holdLive(L.id); put(key, patch, false); };
   /** A value back to chance: what was set, and what a lock keeps of it. */
   const loose = (field) => { const lock = e.lock && { ...e.lock }; if (lock) delete lock[field]; put(key, { [field]: undefined, ...(lock ? { lock } : {}) }); };
-  const settled = (row) => { row.querySelector("input").addEventListener("change", () => lettersShow(true)); return row; };   // a slider let go: the strip and the controls show it
+  // a size, an angle or a lift: a scrub bar, ↺ while set by hand, back to chance; let go, the strip and the controls show it
+  const amount = (field, labelKey, min, max, step, fmt) => scrub(t(labelKey), min, max, step, p[field], fmt, (v) => live({ [field]: v }), null, "",
+    { done: () => lettersShow(true), back: () => loose(field), own: e[field] != null, backTip: t("letters.reset") });
   const pools = ransomPools(), faces = (isCJK(c.ch) ? pools.cjk : pools.latin).filter((f) => faceHas(f, c.ch));
   const faceId = (f) => `${f.family}|${f.weight}|${f.italic ? 1 : 0}`;
   // a colour of the letter's: by chance, one of `list`, or any
@@ -5158,27 +5180,29 @@ function letterEditor(L, { row, c, p }, put, photo) {
       el("button", { class: "btn", disabled: !L.letters || !L.letters[key], onclick: () => put(key, Object.fromEntries(Object.keys(e).map((k) => [k, undefined]))) }, t("letters.reset"))),
     el("div", { class: "lgrid" },
       el("span", {}, t("letters.kind")),
-      select([["", t("letters.random")], ...["tile", "bare", "cut", "deep", ...(photo ? ["photo"] : [])].map((k) => [k, t(`letters.kind.${k}`)])], e.kind || "", (v) => put(key, { kind: v || undefined })),
+      picker([["", t("letters.random")], ...["tile", "bare", "cut", "deep", ...(photo ? ["photo"] : [])].map((k) => [k, t(`letters.kind.${k}`)])], e.kind || "", (v) => put(key, { kind: v || undefined }),
+        { name: t("letters.kind"), id: "lkind", def: "" }),
       el("span", {}, t("letters.face")),
-      select([["", t("letters.randomNow", p.face ? p.face.family : "—")], ...faces.map((f) => [faceId(f), `${f.family} ${f.weight}${f.italic ? " italic" : ""}`])], e.face ? faceId({ italic: false, ...e.face }) : "", (v) => {
+      picker([["", t("letters.randomNow", p.face ? p.face.family : "—")], ...faces.map((f) => [faceId(f), `${f.family} ${f.weight}${f.italic ? " italic" : ""}`])], e.face ? faceId({ italic: false, ...e.face }) : "", (v) => {
         if (!v) return loose("face");
         const [family, weight, italic] = v.split("|");
         put(key, { face: { family, weight: Number(weight), ...(italic === "1" ? { italic: true } : {}) } });
-      }),
+      }, { name: t("letters.face"), id: "lface", def: "", font: (v) => v.split("|")[0] || null }),
       papered && el("span", {}, t(p.kind === "deep" ? "letters.front" : "letters.paper")), papered && colours("paper", shown.papers, p.paper.css),
       p.kind === "tile" && el("span", {}, t("letters.ink")), p.kind === "tile" && colours("ink", inksFor(shown.C), p.ink)),
-    settled(slider("letters.size", 0.5, 1.6, 0.02, p.size, times, (v) => live({ size: v }))),
-    settled(slider("letters.turn", -45, 45, 1, p.turn, (v) => `${Math.round(v)}°`, (v) => live({ turn: v }))),
-    settled(slider("letters.lift", -0.5, 0.5, 0.01, p.lift, (v) => v.toFixed(2), (v) => live({ lift: v }))),
+    el("div", { class: "lbars" }, amount("size", "letters.size", 0.5, 1.6, 0.02, SHOWN.times), amount("turn", "letters.turn", -45, 45, 1, SHOWN.deg), amount("lift", "letters.lift", -0.5, 0.5, 0.01, SHOWN.num)),
     el("div", { class: "lgrid" },
       !isCJK(c.ch) && cased(c.ch) && el("span", {}, t("letters.case")),
-      !isCJK(c.ch) && cased(c.ch) && select([["", t("letters.random")], ["typed", t("letters.case.typed")], ["upper", t("letters.case.upper")], ["lower", t("letters.case.lower")]], e.case || "", (v) => put(key, { case: v || undefined })),
+      !isCJK(c.ch) && cased(c.ch) && picker([["", t("letters.random")], ["typed", t("letters.case.typed")], ["upper", t("letters.case.upper")], ["lower", t("letters.case.lower")]], e.case || "", (v) => put(key, { case: v || undefined }),
+        { name: t("letters.case"), id: "lcase", def: "" }),
       p.kind === "tile" && el("span", {}, t("letters.edge")),
-      p.kind === "tile" && select([["", t("letters.random")], ["cut", t("letters.edge.cut")], ["torn", t("letters.edge.torn")]], e.edge || "", (v) => put(key, { edge: v || undefined })),
+      p.kind === "tile" && segs(t("letters.edge"), [["", t("letters.random")], ["cut", t("letters.edge.cut")], ["torn", t("letters.edge.torn")]], e.edge || "", (v) => put(key, { edge: v || undefined }), { def: "" }),
       p.kind === "tile" && el("span", {}, t("letters.tape")),
-      p.kind === "tile" && select([["", t("letters.random")], ["0", t("letters.tape.0")], ["1", t("letters.tape.1")], ["2", t("letters.tape.2")]], e.tape == null ? "" : String(e.tape), (v) => put(key, { tape: v === "" ? undefined : Number(v) }))),
+      p.kind === "tile" && picker([["", t("letters.random")], ["0", t("letters.tape.0")], ["1", t("letters.tape.1")], ["2", t("letters.tape.2")]], e.tape == null ? "" : String(e.tape), (v) => put(key, { tape: v === "" ? undefined : Number(v) }),
+        { name: t("letters.tape"), id: "ltape", def: "" })),
     el("div", { class: "lgrid" }, el("span", {}, t("letters.hero")),
-      select([["", t(p.hero ? "letters.hero.chanceYes" : "letters.hero.chanceNo")], ["yes", t("letters.hero.yes")], ["no", t("letters.hero.no")]], e.hero === true ? "yes" : e.hero === false ? "no" : "", (v) => (v ? put(key, { hero: v === "yes" }) : loose("hero")))));
+      picker([["", t(p.hero ? "letters.hero.chanceYes" : "letters.hero.chanceNo")], ["yes", t("letters.hero.yes")], ["no", t("letters.hero.no")]], e.hero === true ? "yes" : e.hero === false ? "no" : "", (v) => (v ? put(key, { hero: v === "yes" }) : loose("hero")),
+        { name: t("letters.hero"), id: "lhero", def: "" })));
 }
 /** The papers and channel colour a layer's letters were last drawn with (see ransomShown), or those of the channel colour before they were drawn. */
 const drawnWith = (L) => ransomShown(L.id) || { papers: papersFor({ C: hexToRgb(cat().color) }), C: hexToRgb(cat().color) };
@@ -5288,7 +5312,7 @@ const weaveT = (L, key) => t(L && L.type === "asset" ? key + ".asset" : key);
 /**
  * Weaving a cut-out, or an asset (see canWeave), with the lettering below it (`weave`, see layers.js): on or off —
  * on, it weaves with the title (or the lettering nearest below it), its head in front; the lettering layers below
- * it, each ticked to weave with; the way: its head (an asset's top) in front and the rest behind, down to the line
+ * it, each switched on to weave with; the way: its head (an asset's top) in front and the rest behind, down to the line
  * set, the letters chosen in front, chosen in a window of their own (weaveOpen), or where it is painted so on the
  * canvas (brushOpen). A way chosen keeps the others' data, for going back to them.
  */
@@ -5408,10 +5432,10 @@ function brushShow(now = false) {
   if (!L || !canWeave(L) || !L.weave || L.weave.by !== "brush" || S.layerId !== L.id || S.mode !== "edit" || group().length) return brushClose();
   const box = $("brush-box");
   if (!now && box && box._layer === L && box.dataset.now === brushNow(L)) return;
-  const way = (front) => el("button", { class: "btn" + (BRUSH.front === front ? " on" : ""), title: weaveT(L, front ? "brush.frontTip" : "brush.behindTip"), onclick: () => { BRUSH.front = front; brushShow(true); } }, t(front ? "brush.front" : "brush.behind"));
   const inner = el("div", { id: "brush-box", "data-now": brushNow(L) },
-    slider("brush.size", 6, 400, 1, BRUSH.size, px, (v) => { BRUSH.size = v; }),
-    el("div", { class: "seg wide", style: "margin-top:10px" }, way(true), way(false)));
+    scrub(t("brush.size"), 6, 400, 1, BRUSH.size, SHOWN.px, (v) => { BRUSH.size = v; }, 80),
+    segs(t("brush.title"), [true, false].map((front) => [front, t(front ? "brush.front" : "brush.behind"), null, weaveT(L, front ? "brush.frontTip" : "brush.behindTip")]), BRUSH.front,
+      (front) => { BRUSH.front = front; brushShow(true); }));
   inner._layer = L;
   win.replaceChildren(
     el("div", { class: "head" }, el("b", {}, `${t("brush.title")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: brushClose }, "✕")),
@@ -6038,7 +6062,7 @@ function renderSide() {
   // keep typing in the text box alive across rebuilds
   const typing = document.activeElement && [side, layerBox, POP].some((b) => b.contains(document.activeElement)) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename") || document.activeElement.classList.contains("num"));   // a name, or a scrub bar's value, being typed
   if (typing) return;
-  if (document.body.classList.contains("scrubbing")) return later("side", 250, renderSide);   // a scrub bar being dragged: built anew once it is let go
+  if (document.querySelector(".bar.drag")) return later("side", 250, renderSide);   // a scrub bar being dragged: built anew once it is let go
   const i = L ? here.indexOf(L) : -1, many = group();
   const ib = (svg, title, off, onclick, on = false) => el("button", { class: "ib" + (on ? " on" : ""), title, disabled: off, innerHTML: svg, onclick });
   // the chips over the list (see LAYERS_UI): every layer, those the user added and the layout's own, each with how many
@@ -6092,16 +6116,16 @@ function renderSide() {
 function drawerHead(L, many) {
   const ib = (svg, title, off, onclick, more = {}) => el("button", { type: "button", class: "ib", title, "aria-label": title, disabled: off, innerHTML: svg, onclick, ...more });
   const close = ib(ICONS.close, t("drawer.close"), false, () => setDrawer(false), { dataset: { close: "1" } });
-  if (many.length || !L) return el("div", { class: "dhead" }, el("span"), el("b", {}, many.length ? t("props.group", many.length) : "—"), el("span", { class: "acts" }, close));
+  if (many.length || !L) return el("div", { class: "dhead" }, el("b", {}, many.length ? t("props.group", many.length) : "—"), close);
   const all = sizeKeys(), lit = all.filter((k) => inSize(L, k)).length, own = L.type !== "bg";
   const kind = L.copy ? t("layers.badge.copy") : isRemovable(L) ? t("drawer.kind.added") : t("drawer.kind.layout");
-  return el("div", { class: "dhead" }, layerTile(L), el("b", { title: layerName(L) }, layerName(L)),
-    el("span", { class: "acts" },
-      own && ib(L.visible ? ICONS.eyeOff : ICONS.eye, t(L.visible ? "drawer.hide" : "drawer.show"), false, () => { L.visible = !L.visible; touch({ cover: true, side: true }); }),
-      own && ib(ICONS.dup, t("drawer.dup"), !copiable(L), duplicateLayer),
-      own && ib(ICONS.trash, t(isRemovable(L) ? "layers.del" : "layers.delLayout"), !isRemovable(L), () => removeLayer()),
-      close),
-    el("small", {}, `${kind} · ${lit === all.length ? t("props.sum.allSizes") : t("props.sum.sizes", lit, all.length)}`));
+  // the name has the first line to itself but for ✕; what can be done to the layer is on the second, by what it is
+  return el("div", { class: "dhead" }, layerTile(L), el("b", { title: layerName(L) }, layerName(L)), close,
+    el("small", {}, `${kind} · ${lit === all.length ? t("props.sum.allSizes") : t("props.sum.sizes", lit, all.length)}`),
+    own && el("span", { class: "acts" },
+      ib(L.visible ? ICONS.eyeOff : ICONS.eye, t(L.visible ? "drawer.hide" : "drawer.show"), false, () => { L.visible = !L.visible; touch({ cover: true, side: true }); }),
+      ib(ICONS.dup, t("drawer.dup"), !copiable(L), duplicateLayer),
+      ib(ICONS.trash, t(isRemovable(L) ? "layers.del" : "layers.delLayout"), !isRemovable(L), () => removeLayer())));
 }
 /** The list's edges fade where rows go on past them: scrolled up under the chips, or on down under the Background's line (.lyscroll in index.html). */
 function listFades(list) {
@@ -6385,9 +6409,7 @@ function stage3d() {
     if (V3.to !== 1) return;
     V3.aim = null;
     V3.spread = clamp(V3.spread * Math.exp(-e.deltaY * 0.002), ...LIMITS.spread);
-    const r = $("v3hud").querySelector("input");
-    if (r) r.value = V3.spread;
-    tick3d();
+    spreadShown(); tick3d();
   }, { passive: false });
   // the list and the stack point at each other: the pointer on a row lights its sheet and dims the rest
   layerBox.addEventListener("pointermove", (e) => { if (V3.on) peek3d((e.target.closest && e.target.closest(".layers .layer") || {}).dataset?.id || ""); });
@@ -6397,11 +6419,12 @@ function sync3dHud() {
   $("v3hud").replaceChildren(
     el("b", {}, t("v3.label")),
     el("span", { class: "v3tip", title: t("v3.tip") }, t("v3.hint")),
-    el("label", { class: "v3sl" }, t("v3.spread"), el("input", { type: "range", min: LIMITS.spread[0], max: LIMITS.spread[1], step: 0.05, value: V3.spread,
-      oninput: (e) => { V3.aim = null; V3.spread = Number(e.target.value); tick3d(); } })),
+    el("div", { class: "v3sl" }, scrub(t("v3.spread"), LIMITS.spread[0], LIMITS.spread[1], 0.05, V3.spread, SHOWN.num, (v) => { V3.aim = null; V3.spread = v; tick3d(); }, VIEW.spread)),
     el("button", { class: "focusbtn", onclick: () => { V3.aim = { ...VIEW }; tick3d(); } }, t("v3.reset")),
     el("button", { class: "focusbtn on", onclick: () => set3d(false) }, t("v3.exit"), el("kbd", {}, "Esc")));
 }
+/** The HUD's Spread bar showing the spread as it is now (the wheel, Reset view). */
+function spreadShown() { const b = $("v3hud").querySelector(".sc"); if (b) b._show(V3.spread); }
 function peek3d(id) { if (V3.on && V3.peek !== id) { V3.peek = id; tick3d(); } }
 /** The row of the sheet under the pointer is marked in the list. */
 function markRows() {
@@ -6509,8 +6532,7 @@ function draw3d() {
     for (const q of ["yaw", "pitch", "spread"]) V3[q] += (V3.aim[q] - V3[q]) * 0.2;
     if (["yaw", "pitch", "spread"].every((q) => Math.abs(V3.aim[q] - V3[q]) < 0.01)) { Object.assign(V3, V3.aim); V3.aim = null; }
     else more = true;
-    const r = $("v3hud").querySelector("input");
-    if (r) r.value = V3.spread;
+    spreadShown();
   }
   const stage = $("stage"), W = stage.clientWidth, H = stage.clientHeight, dpr = window.devicePixelRatio || 1, ctx = c.getContext("2d");
   const size = selSize(), [vw, vh] = virtualSize(size.w, size.h), list = here3d(), k = V3.k, deco = k * k;
@@ -6590,7 +6612,7 @@ function browserSaveCanvas(cv, name) {   // plain-browser fallback: the browser 
 
 /** Modal progress for exports: a bar, a counter, the current file and a cancel button. */
 function progress(total) {
-  const m = $("modal"), bar = el("div", { class: "bar" }, el("i")), count = el("div", { class: "count" }), file = el("div", { class: "hint", style: "margin:0;min-height:1.7em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" });
+  const m = $("modal"), bar = el("div", { class: "prog" }, el("i")), count = el("div", { class: "count" }), file = el("div", { class: "hint", style: "margin:0;min-height:1.7em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" });
   const state = { cancelled: false };
   const cancel = el("button", { class: "btn wide", onclick: () => { state.cancelled = true; cancel.disabled = true; } }, t("exp.cancel"));
   m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("exp.dialog")), count, bar, file, total > 1 && cancel));
@@ -6766,10 +6788,11 @@ function nameField(example) {
     const chip = (tk, i) => el("span", { class: "ntok", title: tk.raw }, t("exp.tok." + tk.k),
       el("button", { class: "nx", title: t("exp.tokOut", t("exp.tok." + tk.k)), "aria-label": t("exp.tokOut", t("exp.tok." + tk.k)),
         onclick: () => { const v = se.nameTemplate, a = starts[i] + texts[i].length; redo(v.slice(0, a) + v.slice(a + tk.raw.length), a); } }, "×"));
-    const plus = el("label", { class: "nplus", title: t("exp.tokAdd") }, "＋",
-      el("select", { "aria-label": t("exp.tokAdd"), onchange: (e) => { const v = se.nameTemplate, a = at >= 0 && at <= v.length ? at : v.length, raw = `{${e.target.value}}`; redo(v.slice(0, a) + raw + v.slice(a), a + raw.length); } },
-        el("option", { value: "", selected: true, disabled: true, hidden: true }, "＋"),
-        NAME_TOKENS.map((k) => el("option", { value: k }, `${t("exp.tok." + k)}　{${k}}`))));
+    // ＋: the tokens in the app's list of choices (see openPicker), one put in where the caret was
+    const plus = el("button", { type: "button", class: "nplus", title: t("exp.tokAdd"), "aria-label": t("exp.tokAdd"), "aria-haspopup": "listbox",
+      onclick: () => (plus._shut ? plus._shut(true) : openPicker(plus, NAME_TOKENS.map((k) => [k, `${t("exp.tok." + k)}　{${k}}`]), null, (k) => {
+        const v = se.nameTemplate, a = at >= 0 && at <= v.length ? at : v.length, raw = `{${k}}`; redo(v.slice(0, a) + raw + v.slice(a), a + raw.length);
+      }, { refocus: false })) }, "＋");
     const box = el("div", { class: "nbox", onclick: (e) => { if (e.target === box) step0(); } },
       made.map((x, i) => [x.el, toks[i] && chip(toks[i], i)]),
       el("span", { class: "ntail" }, (se.scale > 1 ? "@" + se.scale + "x" : "") + "." + EXT[se.format]), plus);
@@ -6858,9 +6881,9 @@ function askSure({ title, body = "", go, danger = true }) {
   box.addEventListener("pointerdown", (e) => { fromBackdrop = e.target === box && performance.now() - ASK.at > 400; });
   box.addEventListener("click", (e) => { if (fromBackdrop && e.target === box && ASK.answer) ASK.answer(false); });
 }
-/** Whether the Export window ticks size z (settings.exportSizes keeps, by profile, the sizes left unticked: one not named is ticked). */
+/** Whether the Export window has size z switched on (settings.exportSizes keeps, by profile, the sizes switched off: one not named is on). */
 const ticked = (z) => (S.settings.exportSizes[S.profile.id] || {})[sizeKey(z)] !== false;
-/** Ticks the profile's sizes keyed `keys` in the Export window and unticks the others (a size the profile no longer has is let go). */
+/** Switches the profile's sizes keyed `keys` on in the Export window and the others off (a size the profile no longer has is let go). */
 function setTicked(keys) {
   const off = sizeKeys().filter((k) => !keys.includes(k)), all = S.settings.exportSizes;
   if (off.length) all[S.profile.id] = Object.fromEntries(off.map((k) => [k, false])); else delete all[S.profile.id];
@@ -6875,12 +6898,12 @@ function exportTicked() {
   exportMany([{ cover: S.cover, index: catIndex() }], sizes).finally(() => { exportingTicked = false; });
 }
 /**
- * Export: this channel's cover at every size of the profile, each a row with a tick (whether the main button exports
+ * Export: this channel's cover at every size of the profile, each a row with a switch (whether the main button exports
  * it), its picture (the tray's), what it is called and its pixels, and Export for it alone; over them how many are
- * ticked and the quick choices (every size, the wide ones only, the tall ones only — the square ones go with the tall,
+ * on and the quick choices (every size, the wide ones only, the tall ones only — the square ones go with the tall,
  * as the layout that stacks the tall and the square has them); the format, the resolution and the file names (the
  * same settings as Settings → Sizes & export), an example of the name; then the folder they go into, Only this size,
- * and the sizes ticked (⌘E, Ctrl+E off the Mac, here as in the editor). A tick changed is shown where it is, not by
+ * and the sizes switched on (⌘E, Ctrl+E off the Mac, here as in the editor). A switch changed is shown where it is, not by
  * building the window again, so the keyboard keeps its place.
  */
 function exportDialog() {
@@ -6893,14 +6916,14 @@ function exportDialog() {
   const picks = [["exp.pickAll", sizes, ""], ["exp.pickWide", wide, "exp.pickWideTip"], ["exp.pickTall", tall, "exp.pickTallTip"]]
     .filter(([, list], i) => sizes.length > 1 && (i === 0 || (wide.length && tall.length)))
     .map(([key, list, tip]) => ({ list, b: el("button", { class: "linkbtn", title: tip ? t(tip, ratios(list)) : ratios(list), onclick: () => { setTicked(list.map(sizeKey)); sync(); } }, t(key)) }));
-  const seg = (k, opts) => el("div", { class: "seg" }, opts.map(([v, l]) => el("button", { class: "btn" + (se[k] === v ? " on" : ""), onclick: () => set(k, v) }, l)));
+  const seg = (k, opts) => segs(t("exp." + k), opts, se[k], (v) => set(k, v));
   const thumb = (z) => {   // the tray's, once painted; else painted here
     const cv = el("canvas"), src = $("th-" + sizeKey(z));
     if (src && src.dataset.painted) { cv.width = src.width; cv.height = src.height; cv.getContext("2d").drawImage(src, 0, 0); } else paint(cv, z, virtualSize(z.w, z.h)[0] * 0.2);
     return cv;
   };
   const rows = sizes.map((z) => {   // a press on the row ticks it too, but on its own Export
-    const k = sizeKey(z), tick = el("button", { class: "xtick", role: "checkbox", "aria-label": sizeLabel(z), onclick: () => flip(k) });
+    const k = sizeKey(z), tick = el("button", { type: "button", class: "tog", role: "switch", "aria-label": sizeLabel(z), onclick: () => flip(k) });
     return { k, tick, row: el("div", { class: "xrow" + (k === S.sel ? " here" : ""), onclick: (e) => { if (!e.target.closest("button")) flip(k); } },
       tick,
       el("span", { class: "xthumb" }, thumb(z)),
@@ -6910,7 +6933,7 @@ function exportDialog() {
   const count = el("span", { class: "xcount" }), goSays = el("span"), go = el("button", { class: "btn solid", onclick: exportTicked }, ico("download", 18), goSays, el("kbd", {}, MOD_KEY + "E"));
   const sync = () => {   // the ticks, how many, the quick choice they make (dimmed), the main button
     const on = lit(), same = (list) => list.length === on.length && list.every((z) => on.includes(sizeKey(z)));
-    for (const r of rows) { const yes = on.includes(r.k); r.row.classList.toggle("off", !yes); r.tick.setAttribute("aria-checked", String(yes)); r.tick.textContent = yes ? "✓" : ""; }
+    for (const r of rows) { const yes = on.includes(r.k); r.row.classList.toggle("off", !yes); r.tick.classList.toggle("on", yes); r.tick.setAttribute("aria-checked", String(yes)); }
     count.textContent = t("exp.chosen", on.length, sizes.length);
     for (const p of picks) p.b.classList.toggle("on", same(p.list));
     goSays.textContent = t("exp.goN", on.length);
@@ -6927,7 +6950,7 @@ function exportDialog() {
       el("div", {}, el("div", { class: "cap" }, t("exp.format")), seg("format", [["png", "PNG"], ["jpeg", "JPEG"], ["webp", "WebP"]])),
       el("div", {}, el("div", { class: "cap" }, t("exp.scale")), seg("scale", [1, 2, 3, 4].map((n) => [n, `${n}×`]))),
       el("div", { class: "grow" }, nameField(example))),
-    se.format === "jpeg" && slider("exp.quality", 40, 100, 1, se.quality, px, (v) => { se.quality = v; persistSettings(); }),
+    se.format === "jpeg" && qualityBar((v) => { se.quality = v; persistSettings(); }),
     el("div", { class: "xex" }, example,
       el("button", { class: "linkbtn", title: t("exp.batchHint"), onclick: () => { closeModal(); S.tab.setup = "sizes"; SET_UI.at = "batch"; setMode("setup"); } }, t("exp.batchGo"))),
     el("div", { class: "xfoot" },
@@ -7028,7 +7051,7 @@ const PROF = { withCovers: false };
 function profileExportDialog() {
   const m = $("modal");
   m.replaceChildren(el("div", { class: "dlg" }, el("h2", {}, t("prof.exportTitle")),
-    el("label", { class: "chk", style: "margin:0" }, el("input", { type: "checkbox", checked: PROF.withCovers, onchange: (e) => { PROF.withCovers = e.target.checked; } }), el("span", {}, t("prof.withCovers"))),
+    check("prof.withCovers", PROF.withCovers, (on) => { PROF.withCovers = on; }),
     el("div", { class: "hint", style: "margin:0;font-size:13px;opacity:.8" }, t("prof.withCoversHint")),
     el("button", { class: "btn solid wide", onclick: () => { closeModal(); exportProfile(PROF.withCovers); } }, t("prof.exportGo")),
     el("button", { class: "btn wide", onclick: closeModal }, t("exp.cancel"))));
@@ -7730,7 +7753,10 @@ addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
   // the app's own shortcuts (⌘E, ⌘S, ⌘O): ⌘ on a Mac, where Control and a letter move the caret in a field; Ctrl elsewhere
   const cmd = (MOD_KEY === "⌘" ? e.metaKey : e.ctrlKey) && !e.shiftKey && !e.altKey;
-  const a = document.activeElement, typing = /^(INPUT|TEXTAREA|SELECT)$/.test(a && a.tagName);
+  // a range input (a scrub bar's, see scrub) or a colour's is no field being typed in: the shortcuts go on past it, but
+  // the keys that move a range move it, not the layer
+  const a = document.activeElement, valued = !!a && a.tagName === "INPUT" && (a.type === "range" || a.type === "color");
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(a && a.tagName) && !valued;
   if (cmd && (key === "s" || key === "o")) e.preventDefault();   // never the browser's own Save or Open, wherever they do nothing here
   if (ASK.answer) {   // a question asked (askSure): Esc says no, Tab goes between its two buttons, Enter presses the one with the focus (the button's own); no key reaches what lies under it
     if (e.repeat) return e.preventDefault();   // a key held from before it was asked answers nothing
@@ -7753,6 +7779,7 @@ addEventListener("keydown", (e) => {
   if (key === "escape" && S.mode === "setup" && !(typing && !/^(range|checkbox|radio|select-one)$/.test(a.type))) return setMode("edit");
   if (key === "escape" && FTB.pop) { FTB.pop = ""; return renderBar(); }   // the bar's popover first
   if (typing) return;
+  if (valued && a.type === "range" && /^(arrow|home$|end$|page)/.test(key)) return;
   if (key === " " && a && a === KEYFOCUS && a.matches("button,[role=button],[role=checkbox],[role=switch],[role=slider],[role=separator],[role=tab],summary,a[href]")) return;   // the keyboard brought to a control: Space is its own
   if (!S.cover || SURPRISE.busy) return;
   if ($("deal") && !$("deal").hidden) {   // Surprise me's window over the cover: Esc undoes the deal, Space deals again, undo and redo work, no other key reaches the cover

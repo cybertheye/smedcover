@@ -76,8 +76,10 @@
   .btn.cta.glassy{background:var(--glass2);border:1px solid rgba(255,255,255,.24);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.28)}
   .btn.cta.glassy:hover:not(:disabled){background:rgba(255,255,255,.2)}
   .btn.cta kbd{font:500 11px var(--mono);color:rgba(255,255,255,.65);border:1px solid rgba(255,255,255,.28);border-radius:6px;padding:1px 5px}   /* the key that does it too */
-  .seg{display:flex;padding:3px;gap:2px;border-radius:12px;background:rgba(0,0,0,.25);border:1px solid var(--line)}
-  .seg .btn{border:0;background:transparent;border-radius:9px;color:var(--text2)}
+  /* a few ways side by side, the one chosen lit (see segs in app.js): a well 34 px high, as every control of the app is */
+  .seg{display:flex;padding:2px;gap:2px;min-height:34px;border-radius:10px;background:rgba(0,0,0,.28);border:1px solid var(--line)}
+  .seg .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:28px;padding:3px 12px;border:0;background:transparent;border-radius:8px;color:var(--text2)}
+  .seg .btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--acc)}
   .seg .btn:hover:not(:disabled){background:rgba(255,255,255,.08);color:var(--text)}
   .seg .btn.on,.seg .btn.on:hover:not(:disabled){background:rgba(255,255,255,.9);color:var(--ink);font-weight:700}
   .seg.big .btn{padding:8px 20px;font-size:15px}
@@ -85,9 +87,15 @@
 
   /* a sheet's foot: what is seldom wanted, last */
   .sheet-foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--line);display:flex;flex-direction:column;align-items:flex-start;gap:12px}
-  .linkbtn{border:0;background:none;color:#ffd166;font-size:13px;padding:0;cursor:pointer;text-align:left}
-  .linkbtn:where(:hover:not(:disabled)){color:#ffe29a;text-decoration:underline;text-underline-offset:3px}   /* :where — the properties' own links keep their colour */
-  .linkbtn:disabled{opacity:.35;cursor:default}
+  /* the app's small text button, for what is done seldom or at one remove (a look's effects cleared, a size exported
+     alone, a model deleted, another window opened…), in the danger colour where a click cannot be undone */
+  .linkbtn,.tbtn{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 8px;border:0;border-radius:8px;background:none;color:rgba(245,245,247,.82);font:500 12.5px var(--ui);white-space:nowrap;text-decoration:none;text-align:left;cursor:pointer}
+  .linkbtn:hover:not(:disabled),.tbtn:hover:not(:disabled){background:rgba(255,255,255,.08);color:#fff}
+  .linkbtn:focus-visible,.tbtn:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+  .linkbtn:disabled,.tbtn:disabled{opacity:.35;cursor:default}
+  .linkbtn.on,.tbtn.on{background:rgba(255,255,255,.1);color:#fff;cursor:default}
+  .linkbtn.danger,.tbtn.danger{color:#ff9a8a}
+  .sheet-foot .linkbtn{margin-left:-8px}   /* its words in line with the sheet's */
   .togrow{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border-radius:14px;background:rgba(0,0,0,.2);border:1px solid var(--line)}
   /* the app's one switch: on, lit white as a segment chosen is, its knob dark at the right end */
   .tog{width:36px;height:22px;border-radius:11px;background:rgba(255,255,255,.2);position:relative;border:0;cursor:pointer;padding:0;flex:none;transition:background .15s}
@@ -229,11 +237,12 @@
   .body.tight #left{display:none}
   /* the drawer's head: the layer's tile, as its row in the layer list has it, its name, what kind of layer it is and at
      which sizes it shows; then hide, duplicate, delete and close */
-  #right .dhead{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:10px;row-gap:1px;margin:0 0 10px;padding-left:2px}
-  #right .dhead .th{grid-row:1/3}
-  #right .dhead b{font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #right .dhead small{grid-column:2/4;font-size:12px;color:rgba(245,245,247,.72);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #right .dhead .acts{display:flex;gap:2px}
+  #right .dhead{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"tile name name" "tile sub acts";align-items:center;column-gap:10px;row-gap:0;margin:0 0 10px;padding-left:2px}
+  #right .dhead .th{grid-area:tile}
+  #right .dhead b{grid-area:name;padding-right:34px;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #right .dhead [data-close]{grid-area:name;justify-self:end}   /* over the end of the name's line, which has the rest of it */
+  #right .dhead small{grid-area:sub;font-size:12px;color:rgba(245,245,247,.72);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #right .dhead .acts{grid-area:acts;display:flex;gap:2px}
   #right .dhead .ib{width:28px;height:28px;border-radius:8px;color:rgba(245,245,247,.82)}
   #right .dhead .ib:hover:not(:disabled){color:#fff}
   #right .dhead .ib svg{width:16px;height:16px}
@@ -265,7 +274,15 @@
   .scroll::-webkit-scrollbar-thumb:hover{background-color:rgba(255,255,255,.3)}
 
   label.cap,.cap{display:block;font-size:12px;color:var(--text2);letter-spacing:.04em;margin-bottom:8px}
-  input[type=text],input[type=password],input[type=number],textarea,select{width:100%;background:var(--field);border:1px solid var(--line);padding:9px 12px;border-radius:12px}
+  /* a field: the dark well every control of the app sits on; a number one typed only, without the system's arrows (↑ ↓ step it) */
+  input[type=text],input[type=password],input[type=number],textarea,select{width:100%;background:rgba(0,0,0,.28);border:1px solid var(--line);padding:9px 12px;border-radius:10px}
+  :is(input[type=text],input[type=password],input[type=number],textarea,select):hover:not(:disabled):not(:focus){border-color:rgba(255,255,255,.28)}
+  input[type=number]{appearance:textfield;-moz-appearance:textfield}
+  input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+  /* one of a few, each a row (the cut-out's engine): a ring, lit white round a dark middle when chosen */
+  input[type=radio]{appearance:none;-webkit-appearance:none;flex:none;width:18px;height:18px;margin:0;border-radius:50%;border:1.5px solid rgba(255,255,255,.45);background:rgba(0,0,0,.28);cursor:pointer}
+  input[type=radio]:checked{border:5px solid rgba(255,255,255,.9);background:var(--ink)}
+  input[type=radio]:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
   select{cursor:pointer}
   option{background:#22222e;color:var(--text)}   /* a dropdown's list, where the system draws it (WebView2) */
   input[type=text]:disabled{opacity:.35}
@@ -328,27 +345,30 @@
   .psec-b .btn svg{flex:none;width:15px;height:15px}
   .psec-b .btn:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
   .psec-b>.row{margin:0;gap:8px}
-  .psec-b .seg{height:34px;padding:2px;gap:2px;border-radius:10px;background:rgba(0,0,0,.28)}
-  .psec-b .seg .btn{flex:1 1 0;min-width:0;min-height:0;height:28px;padding:0 6px;border:0;border-radius:8px;font-size:12.5px;overflow:hidden;text-overflow:ellipsis}
-  .psec-b .seg .btn svg{width:14px;height:14px}
-  .psec-b .seg .btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--acc)}
-  .psec-b .seg .btn:disabled{opacity:.45}
+  :is(.psec-b,.lgrid,#brush-box) .seg{min-height:34px;padding:2px;gap:2px;border-radius:10px;background:rgba(0,0,0,.28)}
+  :is(.psec-b,.lgrid,#brush-box) .seg .btn{flex:1 1 0;min-width:0;min-height:28px;padding:3px 5px;border:0;border-radius:8px;font-size:12.5px;line-height:1.2;white-space:normal}   /* a long name in two lines rather than cut */
+  :is(.psec-b,.lgrid,#brush-box) .seg .btn svg{width:14px;height:14px}
+  :is(.psec-b,.lgrid,#brush-box) .seg .btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--acc)}
+  :is(.psec-b,.lgrid,#brush-box) .seg .btn:disabled{opacity:.45}
   .psep{height:8px}
   .psec-b>.fxh{font-size:12px;font-weight:600;color:rgba(245,245,247,.74)}
   .psec-b>.fxs{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:28px;font-size:12px;color:rgba(245,245,247,.74)}
   .psec-b>.fxs>span.fxt{font-weight:600}
-  .artback .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
-  .artback{margin:4px 0 0 92px}   /* under the figure's graphic, past the label column */
+  .artback{margin:0 0 0 84px}   /* under the figure's graphic, past the label column */
+  /* a column of the app's controls (the Look sheet's settings of the look), and a word typed with its name before it */
+  .kcol{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+  .kcol>:not(.sc){margin-right:30px}   /* the rail, as the bars' */
+  .kcol>.btn.wide{width:auto}
+  .trow{display:grid;grid-template-columns:76px minmax(0,1fr);gap:8px;align-items:center;font-size:13px}
+  .trow>span:first-child{color:var(--text2)}
+  .recipe>.sc,.recipe>.tacts,.recipe>.hint+.sc{margin-top:8px}
+  .sc~.tacts{margin-right:30px}.recipe>.btn.wide{width:calc(100% - 30px)}   /* the rail, as the bars' */
   .layscope .seg .btn{flex:1;padding-left:6px;padding-right:6px}   /* the Style tab's template box: the scope it changes, the toolbar's own */
   .layown{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;margin:0 0 10px;padding:6px 8px;border:1px dashed var(--acc)}
-  .layown .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
+  .layown .linkbtn{font-size:12px}
   /* a small text button, for what is done seldom or cannot be undone at a click: a look's effects cleared, a scene
      object put back, every look effect removed (in the danger colour) */
-  .tbtn,.fxs .linkbtn,.sizes-picks .linkbtn{display:inline-flex;align-items:center;height:28px;padding:0 8px;border:0;border-radius:8px;background:none;color:rgba(245,245,247,.82);font:400 12px var(--ui);white-space:nowrap;text-decoration:none;cursor:pointer}
-  .tbtn:hover:not(:disabled),.fxs .linkbtn:hover:not(:disabled),.sizes-picks .linkbtn:hover:not(:disabled){background:rgba(255,255,255,.08);color:#fff;text-decoration:none}
-  .tbtn:focus-visible,.fxs .linkbtn:focus-visible,.sizes-picks .linkbtn:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
-  .tbtn:disabled,.fxs .linkbtn:disabled{opacity:.35;cursor:default}
-  .tbtn.danger{color:#ff9a8a}
+  .fxs .linkbtn,.sizes-picks .linkbtn{font-size:12px}
   .tacts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:2px}
   .fxs>.fxa{display:flex;gap:2px}
   .psec-b>.fxs>span.jump{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
@@ -357,16 +377,17 @@
      channel colour; the quick groups under it */
   .sizes-ctl{display:flex;flex-direction:column;gap:6px}
   .sizes-ctl .cap{display:flex;align-items:center;gap:4px;margin:2px 0 0 2px}
-  .sizes-row{display:flex;flex-wrap:wrap;gap:2px;min-height:34px;padding:2px;border-radius:10px;background:rgba(0,0,0,.28);border:1px solid var(--line)}
-  .sizes-row .btn{flex:1 0 auto;min-width:0;height:28px;padding:0 4px;border:0;border-radius:8px;background:transparent;color:rgba(245,245,247,.66);font:600 11px var(--mono)}
-  .sizes-row .btn:hover:not(:disabled){background:rgba(255,255,255,.08);color:var(--text)}
-  .sizes-row .btn.on,.sizes-row .btn.on:hover:not(:disabled){background:rgba(255,255,255,.9);color:var(--ink)}
+  .sizes-row,.multi{display:flex;flex-wrap:wrap;gap:2px;min-height:34px;padding:2px;border-radius:10px;background:rgba(0,0,0,.28);border:1px solid var(--line)}
+  .sizes-row .btn,.multi .btn{flex:1 0 auto;min-width:0;height:28px;padding:0 4px;border:0;border-radius:8px;background:transparent;color:rgba(245,245,247,.66);font:600 11px var(--mono)}
+  .multi{display:grid;grid-template-columns:1fr 1fr}
+  .multi .btn{padding:0 10px;font:500 12.5px var(--ui);color:var(--text2)}   /* several of a few on at once, by name (a ransom note's extras) */
+  :is(.sizes-row,.multi) .btn:hover:not(:disabled){background:rgba(255,255,255,.08);color:var(--text)}
+  :is(.sizes-row,.multi) .btn.on,:is(.sizes-row,.multi) .btn.on:hover:not(:disabled){background:rgba(255,255,255,.9);color:var(--ink)}
   .sizes-row .btn:disabled{opacity:1;cursor:default}   /* the last one lit: it stays */
   .sizes-row .btn.here{box-shadow:inset 0 0 0 2px var(--acc)}   /* the size on the canvas */
   .sizes-row .btn.away{opacity:.5;outline:1px dashed currentColor;outline-offset:-4px}   /* clipped onto a layer not shown at that size: not shown there either */
-  .sizes-row .btn:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+  :is(.sizes-row,.multi) .btn:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
   .sizes-picks{display:flex;flex-wrap:wrap;gap:2px;margin-top:-2px}
-  .sizes-picks .linkbtn.on{background:rgba(255,255,255,.1);color:#fff;cursor:default}
   .scene-ping{position:fixed;width:20px;height:20px;margin:-10px 0 0 -10px;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px #000;pointer-events:none;z-index:30;animation:scene-ping .9s ease-out forwards}
   @keyframes scene-ping{from{transform:scale(1);opacity:1}to{transform:scale(3.2);opacity:0}}
   /* the ⓘ, its middle at the middle of the letters beside it, .35em over their baseline (the em the text's). In a row of
@@ -381,6 +402,10 @@
   /* a scrub bar, the properties' slider (see scrub in app.js): its name and value inside a bar dragged anywhere along
      it, the value following the pointer; the tick its default; a double-click types the value in */
   .sc,.cr{display:grid;grid-template-columns:minmax(0,1fr) 28px;gap:2px;align-items:center}
+  :not(.psec-b,.kcol)>.sc.bare{grid-template-columns:minmax(0,1fr)}   /* no default to go back to: no rail, but in the drawer and a look's settings, where the rail lines their controls up */
+  :not(.psec-b,.kcol)>.sc.bare>.rs{display:none}
+  .scrow{display:flex;align-items:center;gap:6px}   /* a scrub bar and the ⓘ that explains it */
+  .scrow>.sc{flex:1;min-width:0}
   .bar{position:relative;display:flex;align-items:center;justify-content:space-between;gap:8px;height:34px;padding:0 10px;border-radius:10px;background:rgba(0,0,0,.28);border:1px solid var(--line);overflow:hidden;cursor:ew-resize;user-select:none;-webkit-user-select:none;touch-action:none}
   .bar:hover{border-color:rgba(255,255,255,.28)}
   .bar .fill{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.13);pointer-events:none}
@@ -403,6 +428,7 @@
   .bar .unit{position:relative;font:600 12px var(--mono);color:rgba(245,245,247,.74)}
   .bar.off{cursor:not-allowed;background:rgba(0,0,0,.18);border-style:dashed}
   .bar.off .lb{color:var(--text3)}
+  .bar.off .fill,.bar.off .tick{display:none}   /* no value to show while it cannot act */
   .bar .why{position:relative;flex:1;min-width:0;text-align:right;font-size:12px;color:rgba(245,245,247,.74);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   /* the way back to a default, in the rail: shown only where a control is off its default */
   .rs{width:28px;height:28px;border-radius:8px;border:0;background:transparent;color:rgba(245,245,247,.8);display:grid;place-items:center;padding:0;cursor:pointer}
@@ -482,13 +508,8 @@
   .chips.small button.on{background:rgba(255,255,255,.9);color:var(--ink);border-color:transparent}
   .chips.small{gap:4px}.chips.small button{padding:4px 8px;font-size:12px;font-weight:500}
   .recipe summary{cursor:pointer;margin:0;list-style:none}.recipe summary::-webkit-details-marker{display:none}.recipe summary::before{content:"▸ "}.recipe[open] summary::before{content:"▾ "}.recipe[open] summary{margin-bottom:8px}   /* Surprise me's recipe for the look, folded by default */
-  .sl{display:grid;grid-template-columns:52px 1fr 52px;align-items:center;gap:8px;margin-top:10px;font-size:13px}
-  .sl input{accent-color:var(--acc);width:100%}
-  .sl.off{opacity:.5}
   #marquee{position:fixed;z-index:20;pointer-events:none;border:1.5px dashed #fff;outline:1px solid rgba(7,7,12,.85);background:rgba(255,255,255,.08)}
   .about{font-size:12.5px;line-height:1.75;margin-top:10px;padding:10px 12px;border-left:2px solid var(--line2);background:rgba(255,255,255,.03);opacity:.85}
-  .sl .why{font-size:12px;line-height:1.4}
-  .sl output{font:600 12px var(--mono);text-align:right;opacity:.8}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
   .row.row3{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
   .row.row3 .btn{padding-inline:4px;overflow:hidden;text-overflow:ellipsis}
@@ -496,8 +517,6 @@
   .ink{display:grid;grid-template-columns:1fr 44px auto;align-items:center;gap:8px;margin-top:10px;font-size:13px}
   .ink input[type=color]{width:44px;height:32px;padding:2px;background:var(--panel);border:1px solid var(--line2);border-radius:7px;cursor:pointer}
   .ink .btn{padding:4px 9px;font-size:12px}
-  .chk{display:flex;align-items:center;gap:10px;cursor:pointer;margin:8px 0}
-  .chk input{width:17px;height:17px;accent-color:var(--acc);flex:none}
   .acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
   .acts .btn{padding:4px 9px;font-size:12px}
 
@@ -560,8 +579,7 @@
   #stage.v3 #v3hud{display:flex}
   #stage.v3open #v3hud{opacity:1;pointer-events:auto}
   #v3hud .v3tip{opacity:.6;overflow:hidden;text-overflow:ellipsis;min-width:0;cursor:help}
-  #v3hud .v3sl{display:flex;align-items:center;gap:6px;flex:none;opacity:.85}
-  #v3hud .v3sl input{width:90px;accent-color:var(--acc)}
+  #v3hud .v3sl{flex:none;width:200px}   /* the spread, a scrub bar */
   #v3hud .focusbtn{flex:none;display:flex;align-items:center;gap:6px}
   #v3hud>b{flex:none;font-size:13px}
   #v3hud kbd{font:10.5px var(--mono);border:1px solid currentColor;border-radius:5px;padding:0 5px;opacity:.7}
@@ -759,13 +777,19 @@
   .lt.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}
   .lt.edited::after,.lt.locked::after{content:"";position:absolute;top:-4px;right:-4px;width:7px;height:7px;border-radius:50%;background:var(--acc)}
   .lt.locked::after{border-radius:0;background:#fff}
-  .ledit{border-top:2px solid var(--line);margin-top:8px;padding-top:8px}.ledit .row{display:flex;flex-wrap:wrap;gap:6px}.ledit .row .btn{flex:1 1 auto}.ledit .sl{grid-template-columns:72px 1fr 52px}
+  .ledit{border-top:2px solid var(--line);margin-top:8px;padding-top:8px}.ledit .row{display:flex;flex-wrap:wrap;gap:6px;margin-right:30px}.ledit .row .btn{flex:1 1 auto}
+  .lbars{display:flex;flex-direction:column;gap:8px;margin:10px 0}   /* a letter's size, angle and lift, scrub bars */
   .ledit .lhead{display:flex;justify-content:space-between;align-items:baseline}.ledit .lhead b{font-size:18px}
-  .lgrid{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px 10px;align-items:center;margin:10px 0}
+  .lgrid{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px 10px;align-items:center;margin:10px 30px 10px 0}   /* the rail, as the bars' */
+  .lgrid .seg .btn{flex:1 1 auto}   /* By chance wider than Cut */
   .lcol{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
-  .lsw{width:22px;height:22px;border:1px solid var(--line2);border-radius:6px;padding:0;cursor:pointer}
-  .lsw.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}.lsw.auto{background:var(--panel);color:#fff;font-size:12px}
-  .lcol input[type=color]{width:30px;height:22px;padding:1px;background:var(--panel);border:1px solid var(--line2);border-radius:7px;cursor:pointer}
+  /* a letter's paper or ink: round swatches as the properties' colours are, by chance (?), one of the look's, or any (the last, the picker) */
+  .lsw{width:22px;height:22px;border:0;border-radius:50%;padding:0;cursor:pointer;box-shadow:0 0 0 1px rgba(255,255,255,.3)}
+  .lsw.on{box-shadow:0 0 0 2px var(--bg),0 0 0 4px rgba(255,255,255,.9)}.lsw.auto{background:rgba(0,0,0,.28);color:#fff;font-size:12px}
+  .lsw:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
+  .lcol input[type=color]{-webkit-appearance:none;appearance:none;width:22px;height:22px;padding:0;border:0;border-radius:50%;background:none;cursor:pointer;box-shadow:0 0 0 2px rgba(255,255,255,.42)}
+  .lcol input[type=color]::-webkit-color-swatch-wrapper{padding:0}
+  .lcol input[type=color]::-webkit-color-swatch{border:0;border-radius:50%}
   /* Surprise me's window: over the left column, the canvas left in view; the hands as they are dealt, the one kept marked */
   #letterwin,#cropwin,#weavewin,#brushwin{position:fixed;z-index:35;background-color:rgba(28,30,40,.72);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid rgba(255,255,255,.22);border-radius:20px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 30px 70px rgba(0,0,0,.55);padding:16px;display:grid;gap:10px;overflow:auto}
   html.solid #letterwin,html.solid #cropwin,html.solid #weavewin,html.solid #brushwin{background-color:var(--solid2);-webkit-backdrop-filter:none;backdrop-filter:none}
@@ -782,7 +806,8 @@
   .wl.on{border:2px solid var(--acc);background:var(--acc);color:var(--ink);opacity:1}
   .wkey{display:flex;gap:12px;align-items:center;font-size:12px;opacity:.85}.wkey .wl{height:22px;min-width:22px;font-size:12px;cursor:default}
   /* the weave's brush: its panel over the left column, its ring under the pointer on the canvas (dashed while it takes the lettering behind) */
-  #brushwin .sl{margin-top:0}
+  #brush-box{display:flex;flex-direction:column;gap:10px}
+  #brush-box>.seg{margin-right:30px}   /* the rail, as the bar's */
   #brushring{position:fixed;z-index:20;pointer-events:none;border-radius:50%;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(7,7,12,.85),inset 0 0 0 1px rgba(7,7,12,.85)}
   #brushring[hidden]{display:none}#brushring.behind{border-style:dashed}
   #crop-stage{background:repeating-conic-gradient(#2a2a33 0 25%,#1d1d24 0 50%) 0 0/16px 16px}
@@ -833,8 +858,8 @@
   #modal[hidden],#ask[hidden]{display:none}
   #modal .dlg,#ask .dlg{width:min(540px,92vw);max-height:88vh;overflow:auto;background-color:rgba(26,26,36,.78);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid rgba(255,255,255,.2);border-radius:24px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 40px 110px rgba(0,0,0,.6);padding:26px;display:grid;gap:14px}
   html.solid #modal .dlg,html.solid #ask .dlg{background-color:var(--solid2);-webkit-backdrop-filter:none;backdrop-filter:none}
-  #modal .bar{height:10px;border-radius:5px;overflow:hidden;background:rgba(255,255,255,.12)}
-  #modal .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .15s}
+  #modal .prog{height:10px;border-radius:5px;overflow:hidden;background:rgba(255,255,255,.12)}
+  #modal .prog i{display:block;height:100%;width:0;background:var(--acc);transition:width .15s}
   #modal .count{font:600 15px var(--mono)}
   #modal h2,#ask h2{font:900 22px var(--ui);letter-spacing:.02em;margin:0}
   /* a question asked before something is done that cannot be taken back (askSure in app.js): a layer of its own over
@@ -884,6 +909,7 @@
   #setpanel .cap small,.fld .cap small{margin-left:8px;font-size:11.5px;font-weight:400;letter-spacing:0;color:var(--text3)}
   #setpanel>.cap{margin:4px 0 -8px}
   .fields3{display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:16px;align-items:start}
+  .fields3>.fld.lo{align-self:end}
   .fld{min-width:0}
   .fld>.seg,.aib .seg,.xopts .seg{display:inline-flex}
   .fld>.hint{margin:6px 0 0}
@@ -960,6 +986,8 @@
   @media (prefers-reduced-motion:reduce){.aidot.busy{animation:none}}
   .aib{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px;align-items:start}
   .aib>*{min-width:0}
+  .aib>.sc,.aib>.scrow{align-self:end}   /* a bar, its name inside, level with the field beside it under its caption */
+  .aib>div>.pk{width:100%}
   .aib>.hint,.aib>.wide,.aib>.aifoot,.aib>.cutrows{grid-column:1/-1}
   .aib>.hint{margin:0}
   .aib .hint{margin-top:6px}
@@ -986,13 +1014,10 @@
   .xcap b{font-size:14px}
   .xcount{font-size:14px;color:var(--text3)}
   .xpicks{display:flex;gap:14px}
-  .xpicks .linkbtn.on{opacity:.5;cursor:default;text-decoration:none}
   .xsizes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
   .xrow{display:flex;align-items:center;gap:12px;padding:8px 14px 8px 12px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.04);min-width:0;cursor:pointer}
   .xrow.here{border-color:rgba(255,255,255,.35)}
-  .xtick{width:22px;height:22px;flex:none;padding:0;border-radius:7px;border:1.5px solid rgba(255,255,255,.4);background:transparent;color:var(--acc-ink);display:grid;place-items:center;font-size:14px;font-weight:900;line-height:1;cursor:pointer}
-  .xtick[aria-checked=true]{background:var(--acc);border-color:transparent}
-  .xtick:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  .xrow .tog{flex:none}   /* exported or not: the app's switch, as Settings → Sizes has one for each size */
   .xrow.off .xthumb,.xrow.off .xname{opacity:.45}
   .xthumb{width:72px;height:48px;flex:none;display:grid;place-items:center;border-radius:8px;background:rgba(0,0,0,.3);overflow:hidden}
   .xthumb canvas{max-width:72px;max-height:48px;display:block}
@@ -1003,6 +1028,7 @@
   .xrow:hover .linkbtn,.xrow .linkbtn:focus-visible{opacity:1}
   .xopts{display:flex;gap:22px;align-items:flex-end;flex-wrap:wrap;padding-top:14px;border-top:1px solid var(--line)}
   .xopts .grow{flex:1;min-width:220px}
+  #modal .dlg.xp>.sc{flex:none;width:min(400px,100%)}
   .xex{display:flex;align-items:baseline;justify-content:space-between;gap:6px 16px;flex-wrap:wrap}
   .xex .hint{margin:0;min-width:0;overflow-wrap:anywhere}
   .xfoot{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
@@ -1031,9 +1057,9 @@
   .ntok .nx{width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:inherit;font-size:14px;line-height:1;opacity:.55;cursor:pointer}
   .ntok .nx:hover,.ntok .nx:focus-visible{opacity:1;background:rgba(255,255,255,.12)}
   .ntail{color:var(--text3);padding:0 2px;white-space:nowrap;cursor:default}
-  .nplus{position:relative;margin-left:auto;width:28px;height:28px;flex:none;display:grid;place-items:center;border-radius:8px;border:1px dashed var(--line2);color:var(--text2);font-size:14px;cursor:pointer}
-  .nplus:hover,.nplus:focus-within{background:rgba(255,255,255,.08);color:var(--text)}
-  .nplus select{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;padding:0;border:0}
+  .nplus{position:relative;padding:0;background:none;font-family:inherit;margin-left:auto;width:28px;height:28px;flex:none;display:grid;place-items:center;border-radius:8px;border:1px dashed var(--line2);color:var(--text2);font-size:14px;cursor:pointer}
+  .nplus:hover,.nplus[aria-expanded=true]{background:rgba(255,255,255,.08);color:var(--text)}
+  .nplus:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
   @media(max-width:760px){.xsizes{grid-template-columns:1fr}}
   /* AI repaint (repaintWin), as the design has it: on the left the photo in a compare view — the original, and the
      result from the split rightwards, the split dragged by its round handle — with this session's results under it and
@@ -1111,7 +1137,6 @@
   .rdetail .hint,.rdetail .about{margin:0}
   .rdetail .about{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;padding-bottom:0;border-bottom:10px solid transparent}   /* three lines (the whole on hover); its foot a border, which the lines cut off do not show through */
   .rdetail .linkbtn{justify-self:start}
-  .linkbtn.danger{color:#ff9a8a}
   .repgo,.ggo{justify-content:flex-end;margin-top:4px}
   .repgo .btn,.ggo .btn,.gacts .btn,.repacts .btn{height:44px;padding:0 18px;border-radius:12px}
   /* AI generate (genWin in app.js): its name, the tabs and what the tab makes across the top; what to make on the left,
@@ -1229,12 +1254,10 @@
   .ocard-h{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px}
   .ocard-h b{font-size:14px}
   .ocard-h .grow{flex:1}
-  .ocard-h select{width:auto;min-width:160px}
-  .orows{display:grid;column-gap:28px}
+  .ocard-h .pk{min-width:160px}
+  .orows{display:grid;gap:8px 28px;margin-top:10px}
   .orows.two{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .orows .sl{margin-top:10px}
-  .dlg.odds .orows>.sl{grid-template-columns:minmax(0,1fr) 96px 44px!important}   /* the name wide, the slider short (the Look sheet's are the other way) */
-  .orows.two>.btn.wide,.orows.two>.hint{grid-column:1/-1}
+  .orows.two>.btn.wide,.orows.two>.hint,.orows>.tacts{grid-column:1/-1}
   .ogrp{display:flex;flex-direction:column;gap:7px;border-radius:12px}
   .ogl{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;font-size:13px}
   .ogl b{font-weight:600}
@@ -1283,10 +1306,12 @@
   .ls-stage{height:min(50vh,500px);display:grid;place-items:center;background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:16px;overflow:hidden}
   .ls-stage canvas{display:block;touch-action:none;background:repeating-conic-gradient(#3a3a46 0 25%,#262630 0 50%) 0 0/16px 16px}
   .ls-side{display:grid;gap:14px;min-width:0;padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.04)}
-  .ls-side .parts{display:grid;gap:0}.ls-side .parts .chk{margin:3px 0;cursor:default}.ls-side .parts .chk span{cursor:pointer}.ls-side .parts .chk.on span{color:var(--acc);font-weight:600}
-  .ls-side .parts .some{margin-left:auto;font-size:11px;opacity:.6;cursor:help}   /* a part shown at some sizes only */
-  .ls-side .parts .drop{margin-left:auto;width:20px;height:20px;flex:none;border-radius:50%;border:0;background:var(--solid2);color:var(--text2);font-size:13px;line-height:1;cursor:pointer}   /* an element of the user's own, let go */
-  .ls-side .parts .some + .drop{margin-left:6px}
+  .ls-side .parts{display:grid;gap:0}
+  .ls-side .parts .lpart{display:flex;align-items:center;gap:8px;min-height:34px;padding:0 2px}   /* a part: its name (a click picks it), then on or off */
+  .ls-side .parts .lpart .nm{flex:1;min-width:0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ls-side .parts .lpart.on .nm{color:var(--acc);font-weight:600}
+  .ls-side .parts .some{font-size:11px;opacity:.6;cursor:help}   /* a part shown at some sizes only */
+  .ls-side .parts .drop{width:20px;height:20px;flex:none;border-radius:50%;border:0;background:var(--solid2);color:var(--text2);font-size:13px;line-height:1;cursor:pointer}   /* an element of the user's own, let go */
   .ls-side .parts .drop:hover{color:#fff}
   .ls-mine{margin:8px 0 2px;padding-top:8px;border-top:1px solid var(--line);font-size:12px;color:var(--text3)}   /* the user's own elements, under the parts */
   .ls-addx{margin-top:6px;font-size:13px}

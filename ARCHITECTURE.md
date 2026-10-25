@@ -123,9 +123,9 @@ Earlier data: there used to be one cover, `session.json`, shared by every channe
 
 **Settings** (`custom.json`, under `settings`, only what differs from the defaults: see below): language, current profile, the channel each profile was last on
 (`channels`), export scale, format, JPEG quality, file name pattern (`nameTemplate`, the one string whether it is edited
-as tags or as text, see 9.5), and by profile id the sizes the Export window leaves unticked (`exportSizes`:
-`{profile id: {size key: false}}`, only those unticked, so a size not named — one added since — is ticked; a profile with
-none unticked is not kept; `normalizeExportSizes`) and the folder its exports go into (`exportDirs`: `{profile id: path}`,
+as tags or as text, see 9.5), and by profile id the sizes the Export window has switched off (`exportSizes`:
+`{profile id: {size key: false}}`, only those off, so a size not named — one added since — is on; a profile with
+none off is not kept; `normalizeExportSizes`) and the folder its exports go into (`exportDirs`: `{profile id: path}`,
 none until the first export picks one); adjustment scope (`scope`: `all`, `orient` or `size`, see 4.1; not kept: every start sets it to the defaults' own, `startScope()`); how many times
 each look was made a profile's on this computer, by its card or by a hand of Surprise me kept (`lookUse`: whole counts,
 only of looks there are and above 0 — the Look sheet's ★ Most used, 9.5); the looks liked there by the ♡ on their cards
@@ -278,7 +278,7 @@ most (`LAYOUTS.extras`), one of an unknown kind let go, an id kept unless missin
 free layer by size keys only, `vertical` only on a text one, `sticker` only on a vector one (an id; `EXTRA_STICKER` when
 none), left out when there is none. A part it has no entry for is not made up: a preset made now carries all eight
 (`takeParts()`, `newPreset()`), and one made before the colour block or the brand logo was a part carries none for it, which `putLayout()`
-then leaves as it is (its move, whether it shows) — the editor shows it where the template puts it, ticked, and the
+then leaves as it is (its move, whether it shows) — the editor shows it where the template puts it, switched on, and the
 preset carries it once saved there. `vertical` is the field earlier presets kept only when true and that was let go for a
 while; a preset kept since says nothing of it, which `putLayout()` takes as leaving the layer's own (the editor shows such
 a part in a line, and the preset says so once saved there). What an earlier preset holds still applies as it did (a Banner block included, which the
@@ -716,7 +716,7 @@ Every lettered layer (`LETTERED`, copies too) carries `vertical` and `rules`, fa
 (`normalizeLayer()`), kept in the design and the covers. `columned(L)` in `looks/kit.js` says whether a layer is
 set in columns: its `vertical`, or for the title and the subtitle the look's own default (`columns(p)`: the
 woodblock book's *Set the title vertically*), which a layer's `vertical` cannot turn off — while it is on the
-properties show the box ticked and greyed, and the bar over the canvas its button (`columnsByLook()` in `app.js`). Surprise me deals neither:
+properties show *Vertical* chosen and greyed, and the bar over the canvas its button (`columnsByLook()` in `app.js`). Surprise me deals neither:
 `dealCover()` leaves them as they are (but for the `vertical` of the title, subtitle, tag and channel name, which a layout
 preset it deals carries, see 3) and deals a layer in columns no bend, nor a lettering of `NO_COLUMNS`.
 
@@ -1230,7 +1230,7 @@ A look is a set of **hooks**. Each is optional, and what a look leaves out is dr
 | `oneTheme` | marks a look with a single ground, so the interface hides the light / dark choice |
 | `image` | the shadow or glow of an uploaded image |
 | `post` | an overlay painted over the finished cover, such as scanlines and a vignette |
-| `params` | tunable numbers, shown as sliders in the Look sheet, under the looks' cards |
+| `params` | tunable numbers, shown as scrub bars in the Look sheet, under the looks' cards, ticked at `def` (one with `toggle: true` as a switch) |
 | `prompt` / `solidPrompt` | the *Style* section of the AI prompts |
 
 The current look is module state in `looks/kit.js`, set by `drawCover()` from the profile before it
@@ -1291,7 +1291,7 @@ Looks with a light and a dark ground (record sleeve, editorial) learn which one 
 - Editorial: `edColumns()` sets a large quotation mark in the channel colour and two columns of greeked body text right of the title (and the column rule) and above the channel graphic, filling paragraph by paragraph; the spot colour is a duotone, multiplied and screened, never the "color" blend mode; the gutter shadow is gradients at the two edges.
 - Woodblock book: `songText()` fills the ruled columns the title leaves free, right to left: runs of large characters broken by commentary in two small lines side by side, the characters made up by `fauxGlyph()` (thin horizontals, heavier verticals, in two parts or one, as a Song face builds a character — not real characters); vermilion circles beside some characters and tiny side comments along the rules. `songSeals()` paints three collectors' seals (intaglio, relief, round) on a work canvas — the intaglio one's characters cut out with `destination-out` — and lays them on in multiply. `waterStains()` and `wormholes()` are drawn in `post`.
 
-**A typed setting.** A parameter with `text: true` (and `max`, its length) is a text field instead of a slider: `lookParams()` keeps a string, trimmed and cut to length; the Look sheet shows an input with the parameter's `placeholder`; *Surprise me* keeps what was typed. The experimental type look's *Their letters* is one (up to eight): the giant letters, or each channel's code when it is empty. Up to three keep the two staggered rows; a longer word is set in one line stepping down, its size the smaller of the usual and what lets the word, measured, fit its span.
+**A typed setting.** A parameter with `text: true` (and `max`, its length) is a text field instead of a scrub bar: `lookParams()` keeps a string, trimmed and cut to length; the Look sheet shows an input with the parameter's `placeholder`; *Surprise me* keeps what was typed. The experimental type look's *Their letters* is one (up to eight): the giant letters, or each channel's code when it is empty. Up to three keep the two staggered rows; a longer word is set in one line stepping down, its size the smaller of the usual and what lets the word, measured, fit its span.
 
 **Withdrawn looks.** `RETIRED` in `store.js` maps a look that is gone to the nearest one left (`bluetone` → `cyano`, `redstreet` → `negative`, and `ghibli`, the summer look's first name, → `vivid`); any other unknown look falls back to `cel`.
 
@@ -1565,8 +1565,23 @@ default (`def`) says when it is off it with the class `chg`: a scrub bar's value
 (a bar dragged, a switch clicked) writes its group's line again itself (`resum()`), the group not built anew, and while
 a bar is dragged (`body.scrubbing`) `renderSide()` waits for it to be let go. A popover of the bar over the canvas holds
 a group's controls the same way (with the rail only where the group has a ↺). `layerSection()` makes the Layer group
-every layer has. The other windows (the letter window, the brush's panel, Export, the Look sheet's parameters) keep
-their own sliders and boxes (`slider()`, `slider2()`, `select()`, `.chk`).
+every layer has. Every other window takes the same family: Settings and Export (`segs()` for the format and the
+resolution, `qualityBar()` for the JPEG's quality, a `.tog` switch for each size to export, the AI's API style and key
+header as `segs()`, its timeouts and reply length as scrub bars of `SHOWN.sec` and `SHOWN.int`, the image service a
+`picker()`, and the file names' ＋ opening `openPicker()`), the letter window (`letterEditor()`: a letter's size, angle
+and lift as scrub bars, its kind, face, case, tape and hero as pickers, its edge as `segs()`, its paper and ink round
+swatches; what may come up by chance a `.multi` row of buttons lit while on), the brush's panel, the Look sheet's
+parameters (`.kcol`: `.trow` fields, `switchRow()`, scrub bars ticked at `def`, the rail kept as in the drawer), Surprise
+me's chances (`oddsChance()`, a scrub bar of `SHOWN.chance` ticked at the rule's or the recipe's chance), the layout
+editor's parts (`.lpart`, a switch each), the 3D view's *Spread* and *Copy from another channel*'s profile (a picker).
+`scrub()` takes, besides, `done()` (once a change is made: a drag let go, a value typed, a key, ↺), and `back()` with
+`own` and `backTip` where the way back is not to a value (a letter's size back to chance): ↺ then shows while the value
+is the user's own and calls `back()`; its box's `_show(v)` shows a value changed elsewhere without calling `oninput`
+(the 3D view's spread, by the wheel and *Reset view*); ↺ that builds its window anew leaves the focus on the bar of the
+same name. Fields, `.seg` and the small text buttons (`.tbtn`, `.linkbtn`: plain words, a light ground under the
+pointer, `.danger` red) are styled once for the whole app. The only `select`s left are the top bar's profile and channel
+lists, each ending in *＋ New…* and measured by a hidden copy of itself; the cut-out's engines are radio rows (each with
+its own download or delete), drawn by the app.
 The ⓘ is drawn (`INFO_ICON`), not the character, whose place in the line changes from font to font; `.info` sets its
 middle at the middle of the letters beside it, in a line of text (`vertical-align`) or a row of boxes (centred, then
 `top` for the line's middle being higher than the letters'). A caption with an ⓘ in a row is `capInfo()`, the row
@@ -1642,7 +1657,7 @@ The chances, `RULES.odds` (`surprise.odds` in `defaults.json`, read from `DEFAUL
 The window has two columns. On the left the looks, a card each (`oddsLooks()`): the cover drawn in that look (`oddsPics()`: the Look sheet's card picture, `LOOKCARDS.pics`, where it was drawn from the cover as it now is, else drawn one a frame and kept there for the sheet too; `ODDS_UI.round` stops a drawing that a newer one replaced), its name, its share and a row of dots. A look's chance is set by its dots, which stand for chances as they are kept rather than for a new number: `d` dots lit are `DOTS[d]` times an even share (one over the number of looks), `DOTS` being `[0, 0.25, 0.5, 1, 2, 4]` — the leftmost off, each more twice as likely — and `EVEN_DOTS` (3) each look's while the user has set none. `withDots(mine, id, d)` sets look `id` alone, every other look's chance left exactly as it was (each an even share, while none was set), and `oddsOf()` makes the group add up to 1 as ever, so the hands are dealt as before until a dot is clicked; `dotsOf(v)` shows a chance kept (one set on the sliders of before, say) on the nearest dot by ratio, one at least for any chance, without changing it. A dot is clicked, or the row (a `slider` for the keyboard) stepped by the arrow keys, Home and End; a key that leaves the
 dots where they are (at an end of the row) changes nothing, so a chance between two dots stays as it is, and a change that
 would leave no look with a chance is refused with a word (`setDots()`, `odds.lastLook`): a group of nothing would read as
-unset and deal every look alike. The looks are folded to the likeliest eight until unfolded (`ODDS_UI.open` holding `look`), or filtered to those above `EVEN_DOTS` or those off (`ODDS_UI.filter`); under them, the optional parts of the look picked (`lookParts()`, as in the Look sheet). On the right, each group of which one is dealt is one bar (`oddsGroup()`) split into a segment an option, as wide as its chance, its name and share shown where they fit — measured once the bar is drawn (`fit()`, again by a `ResizeObserver` as the window is resized) — and in a tip. The white divider between two neighbours (a `separator` the keyboard can take: the arrows move it a point, five with Shift, Home and End all the way), or the divider nearest the pointer within 10 px (of several standing together, as options at 0% make them, the rightmost dragged right and the leftmost dragged left, so an option at 0% can be given a share again), moves share between those two alone, in half points: `moveShare(group, left, right, v)` gives `left` `v` of what the two have and `right` the rest, every other option left as it is. A long group (`fold`) shows its likeliest options and the rest as one segment, whose options keep their shares of it (alike when it had none) as `moveShare()` gives them their sum, until unfolded, when every option is on the bar and named under it. Under the bars the switches, each still a slider (`oddsChance()`). `rebalance()`, which moves the others alike as one option is set, is left for a layout preset deleted (`dropOption()`: its option set to 0, its share going to those that have one).
+unset and deal every look alike. The looks are folded to the likeliest eight until unfolded (`ODDS_UI.open` holding `look`), or filtered to those above `EVEN_DOTS` or those off (`ODDS_UI.filter`); under them, the optional parts of the look picked (`lookParts()`, as in the Look sheet). On the right, each group of which one is dealt is one bar (`oddsGroup()`) split into a segment an option, as wide as its chance, its name and share shown where they fit — measured once the bar is drawn (`fit()`, again by a `ResizeObserver` as the window is resized) — and in a tip. The white divider between two neighbours (a `separator` the keyboard can take: the arrows move it a point, five with Shift, Home and End all the way), or the divider nearest the pointer within 10 px (of several standing together, as options at 0% make them, the rightmost dragged right and the leftmost dragged left, so an option at 0% can be given a share again), moves share between those two alone, in half points: `moveShare(group, left, right, v)` gives `left` `v` of what the two have and `right` the rest, every other option left as it is. A long group (`fold`) shows its likeliest options and the rest as one segment, whose options keep their shares of it (alike when it had none) as `moveShare()` gives them their sum, until unfolded, when every option is on the bar and named under it. Under the bars the switches, each a scrub bar ticked at its default (`oddsChance()`). `rebalance()`, which moves the others alike as one option is set, is left for a layout preset deleted (`dropOption()`: its option set to 0, its share going to those that have one).
 
 The layout is dealt first, by the group `layout`: `keep`, the canvas's own, and each layout preset by its id
 (`ODD_OPTIONS.layout(layouts)`: the options come and go with the presets, `oddsOf(mine, layouts)` putting one made since
@@ -1707,7 +1722,7 @@ drawn at a time, picked in the strip under the canvas, where the preset is drawn
 with *＋ Size* at its end. Its head holds the preset's name, the scope (`all`, `orient` — the editor's sizes facing that
 one's way, what it opens on, so the wide sizes and the others are laid out apart —, `size`), *Cancel* and *Save*.
 The canvas is painted as a cover is, so what is caught and the block's diamonds are those of the size shown (`coverAt()`
-leaves a part not ticked there out). A part is moved, resized, stretched or turned as on the canvas (`handles()`,
+leaves a part switched off there out). A part is moved, resized, stretched or turned as on the canvas (`handles()`,
 `hitAt()`, `adjust()` with no channel, so a move of the graphic is the size's, for every channel; a drag keeps the rest in
 `o.live`, and its end lets go of the canvas's move, up and cancel handlers). The colour block has neither the template's list nor its
 sliders: selected, it is outlined without square handles (`o.handles` false) and shows the diamonds (`layoutHandles()`);
@@ -1728,17 +1743,18 @@ here, through `reblock()` and `setPresetLayout()`, where the scope reaches); *Re
 puts back its template's default size and slant (`blockDefault()`, see 5.2), on its side; the block has no *Reset its place*, its place being its side, set
 by those buttons (any other part has, `reset()`, as `resetPlacement()` does, by the scope). The title, subtitle, tag or
 channel name selected (`COLUMN_PARTS`) has a *Vertical* switch under it, the editor layer's `vertical`, drawn so on the
-canvas and taken back by `takeParts()` (off where the preset says nothing of it). Left of the canvas a box per part ticks it at the sizes the scope reaches (*some
-sizes* beside one ticked at some only); the part selected, once not at the size shown (unticked there, or a size picked
+canvas and taken back by `takeParts()` (off where the preset says nothing of it). Left of the canvas each part's row (`.lpart`) ends in a switch that puts it in or out at the sizes the scope reaches,
+the focus kept on it as the list is built again (*some sizes* beside one on at some only; a click on the name selects
+it); the part selected, once not at the size shown (switched off there, or a size picked
 where it is not), gives the selection to the first part that is (`keepSel`), so no frame, diamond or line about the
 block's side is left over a part that is not drawn — and `layoutHandles()` gives none for a block left out (`off`, as
-`coverAt()` has it at a size it is not ticked at). The width and height typed for *＋ Size* are kept while the head, the parts and the strip
+`coverAt()` has it at a size it is not on at). The width and height typed for *＋ Size* are kept while the head, the parts and the strip
 are built again. Under the parts, the elements of the user's own (`E.extras`: `{ id, kind, sticker? }`, in order):
 *＋ Add an element* (`E.picking`) offers `EXTRA_KINDS` as four buttons, and the one picked (`addExtra()`, while fewer
 than `LAYOUTS.extras`) comes in as `newExtra()` has it, at every size, selected; each is drawn by a stand-in layer under
 its id (`standIn`: `extraLayer()` with the editor's words, `layed.sampleText`, in the look's lettering, the channel colour,
 and for a picture the photo `portrait`, `PORTRAIT`, an SVG of a grey head and shoulders decoded by `pictureOf()` into the
-editor's own photos; put where `insertExtra()` would put a layer added to a cover), caught, moved, sized, ticked and
+editor's own photos; put where `insertExtra()` would put a layer added to a cover), caught, moved, sized, switched and
 reset as a part is (`ok`, `ids()`, `keepSel`; reset at every size puts back `newExtra()`'s place), named by its kind and
 its number among those of its kind (`nameOf`), a text one with *Vertical* too, its ⓘ saying what it places on a cover
 (`layed.extraHint.*`), let go of by its × or *Remove* (`dropExtra()`). *Save* takes the parts back off its layers
@@ -2073,15 +2089,15 @@ windows, the cut-out's *Get the model…*, Export's *Batch export…* (the batch
 
 **The editor's windows.** Export, AI repaint, AI generate, the chances, a layout preset's editor and the small dialogs
 take turns in `#modal` (*Dialogs* in 9.4), each a pane of glass. Export (`exportDialog()`, the top bar's button or ⌘E)
-is a row a size: a tick, its picture copied from the tray's thumbnail, its name and pixels, and *Export* for it alone
-(`exportOne()`). Whether a size is ticked is `ticked(z)`, from `settings.exportSizes` by profile, which keeps only the
-sizes left unticked, so a size added since is ticked; `setTicked(keys)` writes the profile's (letting go of sizes it no
-longer has), and taking a size again in Settings clears its entry. A tick, a press on the row, or one of the quick
+is a row a size: a switch (`.tog`), its picture copied from the tray's thumbnail, its name and pixels, and *Export* for it alone
+(`exportOne()`). Whether a size is on is `ticked(z)`, from `settings.exportSizes` by profile, which keeps only the
+sizes switched off, so a size added since is on; `setTicked(keys)` writes the profile's (letting go of sizes it no
+longer has), and taking a size again in Settings clears its entry. A switch, a press on the row, or one of the quick
 choices (every size, the wide ones only, the tall ones only — `orientOf()`, the square sizes with the tall; the last
-two only when the profile has both) is shown where it is (`sync()`: the ticks, how many
+two only when the profile has both) is shown where it is (`sync()`: the switches, how many
 of how many, the choice they make, the main button), not by building the window again, so the keyboard keeps its place.
 Then the format, resolution and file names with an example (and *Batch export…* beside it), the folder they go into
-(`saveToRow()`), *This size only*, and the main button, *Export n* (`exportTicked()`: the sizes ticked, through
+(`saveToRow()`), *This size only*, and the main button, *Export n* (`exportTicked()`: the sizes switched on, through
 `exportMany()`), shut off while none is; while one it started runs (`exportingTicked`), another press — a double-click,
 ⌘E again — does nothing. The folder is the profile's (`exportDir()`, `settings.exportDirs`; none where the
 host saves no files, `CAN.saveFiles`, and the files download): with none kept the first export asks
@@ -2095,15 +2111,15 @@ body`). Within one export no two files get one name: `runExport()` keeps the nam
 them (NFC, one case: one file on APFS and NTFS), and one given already (a pattern without `{size}`, say) gets the size
 after it as `_<w>x<h>` (not when the name has it already), then a number (`apart()`), so no file of the export writes over another. Only the files of one export are kept apart: one of the same name already in the folder, from an earlier export, is replaced (`write_image` writes with `fs::write`). The row shows the folder with the home
 folder as ~ (`shortDir()`, but not `/Users/Shared` or `C:\Users\Public`), all of it on hover. The
-batch from a table goes through `exportMany()` too, at every size of the profile, whatever is ticked.
+batch from a table goes through `exportMany()` too, at every size of the profile, whatever is switched on.
 
 The file name pattern is `nameField()`, here and in Settings: the pattern, still the one string, cut at its tokens
 (`NAME_TOKEN`, `{category}` read as `{channel}`) into stretches of text and chips. Each stretch is an input as wide as
 what it holds (a hidden copy of its text sizes it), so the box reads as one line; a chip is named in the interface's
 language (`exp.tok.*`) with × to take it out. What is typed is written into the pattern where that stretch stands; a
 token typed out in full builds the box again with it as a chip, the caret after it; Backspace at a stretch's start and
-Delete at its end take out the chip beside it, and the arrows step over one into the next stretch. ＋ is a `select` laid
-over the button, so the system opens its menu, and adds a token (`NAME_TOKENS`) where the caret last was in a stretch,
+Delete at its end take out the chip beside it, and the arrows step over one into the next stretch. ＋ opens the app's
+list (`openPicker()`, with `refocus: false`: the caret's stretch takes the focus back) and adds a token (`NAME_TOKENS`) where the caret last was in a stretch,
 else at the end. After the last stretch, in grey, what `exportName()` adds (the resolution's @2x, the extension). *Edit as text*
 (`NAME_UI.text`, for the session) shows the pattern in one field instead. The example under it follows every change.
 
@@ -2265,7 +2281,7 @@ frame waits for the fonts, otherwise the title would be fitted using the wrong g
 
 | Level | Command | Covers |
 |---|---|---|
-| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export ticks and folders and the looks' use, by profile and look), the defaults and `custom.json` laid over them, the settings written to `custom.json` (only what differs, read back the same, from `settings.json` once), file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string, no native `confirm()`, `alert()` or `prompt()` in `ui/` |
+| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export's sizes switched off and folders and the looks' use, by profile and look), the defaults and `custom.json` laid over them, the settings written to `custom.json` (only what differs, read back the same, from `settings.json` once), file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string, no native `confirm()`, `alert()` or `prompt()` in `ui/` |
 | Rust unit tests | `cd src-tauri && cargo test` | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling, requests against a local stand-in server, proxy rules |
 | End-to-end self-test | `SMEDCOVER_SELFTEST=<folder> <executable>` | the full export path between the real web view and Rust |
 
