@@ -4762,3 +4762,15 @@ test("glyph outlines are kept from one launch to the next: those used last, at m
   assert.ok(all.length < R.OUTLINE_KEEP.max, `${all.length} characters`);
   assert.deepEqual(at, ["t3", "t4", "t5"], "the three used last");
 });
+
+test("the ransom note finds its faces only once it is first drawn or asked what it waits for", async () => {
+  const R = await import("../ui/js/ransom.js?lazy");
+  let calls = 0;
+  R.findRansomFaces(() => { calls++; R.useRansomFaces((f) => f === "Georgia" || f === "Kaiti SC", ["Kaiti SC"]); });
+  assert.equal(calls, 0, "not at the start");
+  assert.deepEqual(R.ransomPools().latin.map((f) => f.family), ["Georgia"]);
+  assert.deepEqual(R.ransomPools().cjk.map((f) => f.family), ["Kaiti SC"]);
+  assert.deepEqual(R.ransomPending(), ["Kaiti SC"]);
+  assert.equal(calls, 1, "once");
+  assert.equal(R.ransomArrived("Kaiti SC"), true); assert.deepEqual(R.ransomPending(), []);
+});

@@ -869,6 +869,8 @@ SMEDCOVER_SELFTEST=/absolute/empty/folder src-tauri/target/release/bundle/macos/
 
 To go through some looks only (the self-test makes several covers in each, so all of them take minutes), name them: `SMEDCOVER_SELFTEST_LOOKS=citypop,construct`.
 
+To time how soon things show after the start instead, add `SMEDCOVER_SELFTEST_PERF=1` (and a photo to fill the canvas, `SMEDCOVER_SELFTEST_PHOTO=/path/to/photo.jpg`): `report.json` then holds when each step of the start was over, how long the 3D view and the Look sheet's cards took to show, opened at once, and how many sheets and cards were drawn. Start it twice on the same folder to see a second launch.
+
 `.github/workflows/build.yml` builds installers on GitHub Actions (it has not been run yet): macOS for Apple silicon and for Intel, separately (`.dmg`, `.app.tar.gz`), Windows x64 (`.exe`, `.msi`), Linux x64 (`.deb`, `.rpm`, `.AppImage`).
 
 ## To do

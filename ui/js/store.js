@@ -426,13 +426,9 @@ export const readJson = async (path) => parse(await files.read(path));
 export const writeJson = (path, value) => files.write(path, JSON.stringify(value, null, 2));
 
 export async function loadProfiles() {
-  const out = [];
-  for (const name of await files.list("profiles")) {
-    if (!name.endsWith(".json")) continue;
-    const raw = await readJson("profiles/" + name);
-    if (raw) out.push(normalizeProfile(raw));
-  }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  const names = (await files.list("profiles")).filter((name) => name.endsWith(".json"));
+  const raws = await Promise.all(names.map((name) => readJson("profiles/" + name)));   // read side by side
+  return raws.filter(Boolean).map(normalizeProfile).sort((a, b) => a.name.localeCompare(b.name));
 }
 export const saveProfile = (p) => writeJson(`profiles/${p.id}.json`, p);
 
@@ -441,10 +437,9 @@ export const saveProfile = (p) => writeJson(`profiles/${p.id}.json`, p);
  * stickers; either may carry `folder`, the id of the folder it is filed in (see normalizeFolders).
  */
 export async function loadAssetRecords() {
-  const out = [];
-  for (const name of await files.list("assets")) {
-    if (!name.endsWith(".json")) continue;
-    const raw = await readJson("assets/" + name);
+  const out = [], names = (await files.list("assets")).filter((name) => name.endsWith(".json"));
+  const raws = await Promise.all(names.map((name) => readJson("assets/" + name)));   // read side by side, kept in order
+  for (const raw of raws) {
     const folder = raw && typeof raw.folder === "string" ? raw.folder.slice(0, 40) : "";
     if (raw && typeof raw.id === "string" && typeof raw.src === "string") out.push({ id: raw.id, name: str(raw.name, "asset"), src: raw.src, folder });
     else if (raw && typeof raw.id === "string" && raw.spec && typeof raw.spec === "object") out.push({ id: raw.id, name: str(raw.name, "AI"), spec: raw.spec, folder });

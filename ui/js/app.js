@@ -23,7 +23,7 @@ import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, BENDS, effectUses, warpCorners, convexWarp, NO_COLUMNS } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled, outlinesMissed, OUTLINE_KEEP, keepOutlines, keptOutlines, forgetOutlines } from "./outlines.js";
 import { LOOKPIC, hashText, lookPicSig, readLookPic, writeLookPic, strayLookPics } from "./lookpics.js";
-import { RANSOM_FACES, useRansomFaces, ransomPending, ransomArrived, ransomPools, ransomLetters, ransomShown, papersFor, faceFont, faceHas, inksFor, cased, isCJK, EXTRAS, lineCells, keysOf } from "./ransom.js";
+import { RANSOM_FACES, useRansomFaces, findRansomFaces, ransomPending, ransomArrived, ransomPools, ransomLetters, ransomShown, papersFor, faceFont, faceHas, inksFor, cased, isCJK, EXTRAS, lineCells, keysOf } from "./ransom.js";
 import { parseTitle } from "./title.js";
 import { LOOKS, LOOK_IDS, LOOK_TAGS, LOOK_CATEGORIES, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
 import { sizeOf, PIXELS, dropCards } from "./photo.js";
@@ -292,7 +292,8 @@ const RANSOM_AWAY = 4;
  * The faces the ransom note cuts its letters from (ransom.js): the bundled fonts and the system fonts it
  * knows that are installed (in a plain browser, those a canvas can set). Those a canvas outside the page
  * does not reach (see ensureFont) are loaded from their files when a layer is lettered so: only the first
- * few of each script, for a Chinese font is large.
+ * few of each script, for a Chinese font is large. Called when the ransom note is first drawn (findRansomFaces in
+ * ransom.js): trying each face loads it, too long to spend at every start.
  */
 function ransomFaces() {
   const here = new Set(BUNDLED_FONTS), away = [];
@@ -300,7 +301,7 @@ function ransomFaces() {
     let n = 0;
     for (const [family] of RANSOM_FACES[script]) {
       if (here.has(family) || (CAN.fonts ? !S.systemFonts.includes(family) : !reachable(family))) continue;
-      if (CAN.fonts && !reachable(family)) { if (n >= RANSOM_AWAY) continue; n++; away.push(family); }
+      if (CAN.fonts && !reachable(family)) { if (SYS_READ.has(family) || n >= RANSOM_AWAY) continue; n++; away.push(family); }   // read already (for a layer set in it) and still not there: not to be had
       here.add(family);
     }
   }
@@ -1358,7 +1359,8 @@ const coverFor = (catId) => {
 /** Reads the covers a profile's channels have. */
 async function loadCovers(profile) {
   const out = {};
-  for (const c of profile.categories) { const raw = await readJson(coverPath(profile.id, c.id)).catch(absent(null)); if (raw) out[c.id] = channelCover(raw, profile, c.id); }
+  const raws = await Promise.all(profile.categories.map((c) => readJson(coverPath(profile.id, c.id)).catch(absent(null))));   // read side by side
+  profile.categories.forEach((c, i) => { if (raws[i]) out[c.id] = channelCover(raws[i], profile, c.id); });
   if (profile.layerOrder !== 2) {   // the layout layers' default order changed: the design and covers still in the old one take the new, once
     reorderLayout(profile.design.layers);
     for (const [id, c] of Object.entries(out)) if (reorderLayout(c.layers)) await writeJson(coverPath(profile.id, id), c).catch(fail);
@@ -3831,6 +3833,7 @@ function fromKept(id, pic) {
 function paintLookCard(id, pic) {
   try {
     paint(pic.cv, selSize(), LOOKPIC.w, S.cover, catIndex(), null, null, { profile: inLook(id) });
+    PERF.cards++; PERF.lastCard = performance.now();
     if (!outlinesPending() && !fontsReading(S.cover.layers)) { pic.sig = pic.want; LOOKPICS.dirty.add(id); later("lookpics", 2000, keepLookPics); }
     else { pic.sig = ""; LOOKPICS.dirty.delete(id); }
   } catch (e) { console.error(e); pic.sig = pic.want; LOOKPICS.dirty.delete(id); }   // one look failing leaves the others to be drawn
@@ -6647,6 +6650,8 @@ function inkBox(m) {
   x0 = Math.max(0, x0 - 1); y0 = Math.max(0, y0 - 1); x1 = Math.min(m.w, x1 + 2); y1 = Math.min(m.h, y1 + 2);
   return { x: x0 / m.w, y: y0 / m.h, w: (x1 - x0) / m.w, h: (y1 - y0) / m.h };
 }
+/** What the self-test of how soon things show counts (perfTest): sheets of the 3D view and look cards painted, and when the last was. */
+const PERF = { sheets: 0, cards: 0, lastSheet: 0, lastCard: 0 };
 const SHEET_MS = 12;   // painting the sheets: about this long a frame, at least one sheet; the rest on the frames after
 /** The most pixels across a sheet is painted at: a sheet is seen smaller than the stage, and this many is plenty (fewer while a slider is dragged). */
 function sheetCap(W, H, vw, vh) {
@@ -6697,6 +6702,7 @@ function paintSheets(redraw = true) {
     const sh = V3.sheets.get(id) || { cv: document.createElement("canvas") };
     const missed = outlinesMissed();
     drawCover(sh.cv, { profile: S.profile, catIndex: catIndex(), size, pixelW: V3.pw, cover: S.cover, photos: S.photos, only: at.get(id) });
+    PERF.sheets++; PERF.lastSheet = performance.now();
     sh.mask = maskOf(sh.cv); sh.box = inkBox(sh.mask); sh.key = V3.key;
     sh.waits = outlinesMissed() !== missed;   // painted without an outline still on its way: painted again once outlines come (see onOutlines)
     V3.sheets.set(id, sh);
@@ -8077,8 +8083,13 @@ async function readCustom() {
   if (raw) { const { by, settings, ...rest } = raw; CUSTOM.rest = rest; }
   return { raw, tell: left.length ? () => toast(counted("msg.customLeft", left.length, left.slice(0, 4).join(", ") + (left.length > 4 ? "…" : ""))) : null };
 }
+/** When each step of the start was over (ms since the page began to load), for the self-test of how soon things show (perfTest). */
+const BOOT = [];
+const booted = (step) => BOOT.push([step, Math.round(performance.now())]);
 async function start() {
-  const outlinesRead = CAN.outlines && HOST === "tauri" ? files.read(OUTLINE_KEEP.file).catch(() => null) : null;   // the outlines kept from the last launch, read meanwhile
+  booted("script");   // the page's modules read and run
+  const systemFonts = CAN.fonts ? invoke("list_system_fonts").catch(() => []) : null;   // a third of a second or so, found meanwhile on a thread of its own
+  const outlinesRead = CAN.outlines && HOST === "tauri" ? files.read(OUTLINE_KEEP.file).catch(() => null) : null;   // the outlines kept from the last launch, read meanwhile too
   const custom = await readCustom();
   // the settings: custom.json's; until the app has written it, settings.json's too, where earlier versions kept them, read this once (custom.json is written below)
   S.settings = await readSettings(custom.raw, () => readJson("settings.json").catch(absent(null)));
@@ -8088,14 +8099,17 @@ async function start() {
   document.documentElement.classList.toggle("bars", probe.offsetWidth > probe.clientWidth); probe.remove();   // scrollbars that take room: drawn thin (index.html)
   if (HOST === "tauri") ownTitleBar();
   setLang(S.settings.lang || detectLang());
-  for (const name of await files.list("fonts").catch(() => [])) {   // nothing is written for a font missed
-    if (name.endsWith(".font")) { const src = await files.read("fonts/" + name).catch(() => null); if (src) await registerFont(name.slice(0, -5), src); OUTLINES.fonts.push([name, src ? src.length : 0]); }   // what the outlines kept were traced from, in part
-  }
+  booted("settings");
+  const fontNames = (await files.list("fonts").catch(() => [])).filter((name) => name.endsWith(".font"));   // nothing is written for a font missed
+  const fontSrcs = await Promise.all(fontNames.map((name) => files.read("fonts/" + name).catch(() => null)));   // read side by side, added in order
+  for (const [i, name] of fontNames.entries()) if (fontSrcs[i]) await registerFont(name.slice(0, -5), fontSrcs[i]);
+  OUTLINES.fonts = fontNames.map((name, i) => [name, fontSrcs[i] ? fontSrcs[i].length : 0]);   // what the outlines kept were traced from, in part
   for (const a of await loadAssetRecords().catch(absent([]))) {
     let entry = null;
     if (a.spec) { const r = normalizeSpec(a.spec); if (r.spec) entry = putSpecAsset(a.id, a.name, r.spec); } else entry = await putUserAsset(a.id, a.name, a.src);
     if (entry && a.folder) entry.folder = a.folder;
   }
+  booted("fontsAssets");
   S.assetFolders = normalizeFolders(await readJson("asset-folders.json").catch(absent(null)));
   S.ai = normalizeAi(await readJson("ai.json").catch(absent(null)));
   const rawImageAi = await readJson("image-ai.json").catch(absent(null));
@@ -8105,9 +8119,11 @@ async function start() {
   S.myStyles = await loadMyStyles();
   if ((S.imageAi.source.startsWith("preset:") && !builtIn()) || (S.imageAi.source.startsWith("my:") && !myStyle())) S.imageAi.source = "look";   // a style that is no longer there
   columns();
+  booted("styles");
   await refreshCutModels();
-  if (CAN.fonts) {
-    const found = await invoke("list_system_fonts").catch(() => []);
+  booted("cutModels");
+  if (systemFonts) {
+    const found = await systemFonts;
     S.systemFonts = found.map((f) => f.name);
     for (const f of found) if (!f.cjk) S.latinFonts.add(f.name);
   }
@@ -8116,9 +8132,11 @@ async function start() {
     OUTLINES.sig = outlineSig(await appVersion()); OUTLINES.chars = text ? text.length : 0;
     OUTLINES.taken = keptOutlines(text, OUTLINES.sig);
   }
-  ransomFaces();
+  booted("systemFonts");
+  findRansomFaces(ransomFaces);   // the ransom note's faces, found once it is first drawn
   S.profiles = await loadProfiles().catch(absent([]));
   const selftest = CAN.selftest ? await invoke("selftest_dir").catch(() => null) : null;
+  if (selftest && (await invoke("selftest_perf").catch(() => false))) for (const t of [TIMING, PIXELS, FX_TIMING]) Object.assign(t, { on: true, ms: {} });   // the first drawing timed, by layer (perfTest)
   if (!S.profiles.length) await addProfile(selftest ? sampleProfile("en") : await welcome(), false);
   S.profile = S.profiles.find((p) => p.id === S.settings.profileId) || S.profiles[0];
   S.settings.profileId = S.profile.id;   // written with the channel below, once the covers are read
@@ -8127,13 +8145,16 @@ async function start() {
   if (!library) await libraryFromFiles();
   S.covers = await loadCovers(S.profile);
   await migrateSession();
+  booted("profilesCovers");
   const catId = channelOf(S.profile);
   S.settings.channels[S.profile.id] = catId; persistSettings();   // custom.json written: at the first start, from settings.json's
   setCover(coverFor(catId));
   await loadPhotos(pidsOf(S.cover));
+  booted("photos");
   persistCover();
   prunePhotos();
   await applyProfile();
+  booted("ui"); requestAnimationFrame(() => booted("frame"));   // the canvas drawn, the window showing it
   requestAnimationFrame(() => setTimeout(readLookPics));   // the look cards' pictures kept from the last launch, read after the canvas's first frame
   resetHistory();
   if (custom.tell) custom.tell();   // what was wrong with custom.json
@@ -8246,6 +8267,7 @@ async function testedLooks() {
 let SELFTESTING = false;   // the self-test running: its requests and cut-outs leave the AI lights alone (aiTracked)
 async function selfTest(dir) {
   SELFTESTING = true;
+  if (await invoke("selftest_perf").catch(() => false)) return perfTest().catch((e) => invoke("selftest_done", { report: JSON.stringify({ error: String((e && e.stack) || e) }) }));
   if (await invoke("selftest_drag").catch(() => false)) return dragTest().catch((e) => invoke("selftest_done", { report: JSON.stringify({ error: String((e && e.stack) || e) }) }));
   const report = { ok: false, files: [], errors: [] }, looks = await testedLooks();
   report.lookIds = looks.length === LOOK_IDS.length ? "all" : looks;
@@ -8851,6 +8873,76 @@ async function selfTest(dir) {
     report.ok = !report.errors.length;
   } catch (e) { report.errors.push(String(e && e.message ? e.message : e)); }
   await invoke("selftest_done", { report: JSON.stringify(report, null, 2) }).catch(() => null);
+}
+/**
+ * The self-test of how soon things show after the start (SMEDCOVER_SELFTEST_PERF), at once on starting: how long each
+ * step of the start took (BOOT) and when the page began to load (timeOrigin, for the window's own opening, timed from
+ * outside); the 3D view opened (till every layer has its sheet, and till nothing has been painted for half a second
+ * and no outline is on its way), then the Look sheet (till the cards in sight show a picture, till they are drawn as
+ * they are to be, till all are), then the 3D view again, warm. With SMEDCOVER_SELFTEST_PHOTO the cover has that photo
+ * filling the canvas; the first start on a folder makes the cover busy, as a user's grows, and the next finds it.
+ */
+async function perfTest() {
+  const frame = () => new Promise((r) => { requestAnimationFrame(() => r()); setTimeout(r, 1000); });
+  await frame();   // the first, the start's last step
+  const report = { timeOrigin: Math.round(performance.timeOrigin), boot: Object.fromEntries(BOOT) }, ms = (t) => Math.round(t);
+  // what the first drawing spent its time on: by layer (TIMING), on pixels worked out in script (PIXELS), on look effects (FX_TIMING)
+  const most = (o, name = (k) => k) => Object.fromEntries(Object.entries(o).filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => [name(k), ms(v)]));
+  report.firstDraw = { byLayer: most(TIMING.ms, (id) => `${layerName(layer(id) || { type: id })} (${id})`), pixels: most(PIXELS.ms), lookFx: most(FX_TIMING.ms) };
+  for (const t of [TIMING, PIXELS, FX_TIMING]) t.on = false;
+  const until = async (done, max = 60000) => { const t0 = performance.now(); while (!done() && performance.now() - t0 < max) await frame(); return performance.now() - t0; };
+  const steps = {}, step = (k, t0) => { steps[k] = ms(performance.now() - t0); return performance.now(); };
+  let t = performance.now();
+  const real = await invoke("selftest_photo").catch(() => null);
+  t = step("photoRead", t);
+  if (real && !mainPhoto()) { await addPhoto(real, null, "", true); t = step("photoAdded", t); await frame(); t = step("photoDrawn", t); }
+  // a busy cover (the first start makes it, the next finds it): ten more words, each reshaped by an effect that needs
+  // its glyphs' outlines, some set in installed fonts read from their files; the title reshaped too
+  if (S.cover.layers.length < 15) {
+    const own = S.systemFonts.filter((f) => !BUNDLED_FONTS.includes(f) && !reachable(f)).sort().slice(0, 4);
+    const fxs = ["spiky", "melt", "puffy", "eroded", "cut", "torn", "extrude"], fontsUsed = [...own, ...BUNDLED_FONTS.slice(0, 2)];
+    layer("title").fx = "extrude";
+    for (let i = 0; i < 10; i++) {
+      const L = newLayer("text", { text: ["Night market 夜市", "Episode 封面", "Harbour 港口", "Rain 雨"][i % 4], fx: fxs[i % fxs.length], ...(fontsUsed.length ? { font: fontsUsed[i % fontsUsed.length] } : {}) });
+      L.t.all = { ...L.t.all, x: 0.15 + 0.7 * ((i * 37) % 10) / 10, y: 0.12 + 0.76 * ((i * 53) % 10) / 10, s: 0.18 };
+      S.cover.layers.splice(S.cover.layers.length - 1, 0, L);
+    }
+    report.fixtureFonts = own;
+    queueDraw(); await frame(); t = step("fixtureDrawn", t);
+  }
+  await writeJson(coverPath(S.profile.id, S.cover.catId), S.cover);
+  t = step("coverWritten", t);
+  report.steps = steps; report.layers = here3d().length; report.photo = !!mainPhoto(); report.look = S.profile.style.look;
+  // 1. the 3D view, cold
+  const open3d = async () => {
+    showSheet("layers"); Object.assign(PERF, { sheets: 0, lastSheet: 0 });
+    const t0 = performance.now(); set3d(true);
+    const all = await until(() => here3d().every((L) => V3.sheets.has(L.id)));
+    const end = await until(() => !V3.todo.length && !outlinesPending() && performance.now() - Math.max(PERF.lastSheet, t0) > 500);
+    const r = { allSheets: ms(all), settled: ms(Math.max(PERF.lastSheet, t0) - t0), sheetPaints: PERF.sheets, timedOut: end >= 60000 };
+    set3d(false); await until(() => !V3.on, 3000);
+    return r;
+  };
+  report.open3dCold = await open3d();
+  // 2. the Look sheet's cards
+  Object.assign(PERF, { cards: 0, lastCard: 0 });
+  showSheet("look"); await frame();
+  const cards = () => [...document.querySelectorAll(".lookgrid .lookcard:not([hidden])")];
+  const inSight = (c) => { const g = c.closest(".lookgrid").getBoundingClientRect(), r = c.getBoundingClientRect(); return r.bottom > g.top + 1 && r.top < g.bottom - 1; };
+  const pic = (c) => LOOKCARDS.pics.get(c.dataset.id) || {};
+  const seen = await until(() => cards().filter(inSight).every((c) => pic(c).shown));
+  const right = await until(() => cards().filter(inSight).every((c) => pic(c).sig === pic(c).want)) + seen;
+  const all = await until(() => cards().every((c) => pic(c).sig === pic(c).want) && !outlinesPending()) + right;
+  report.lookCards = { cards: cards().length, inSight: cards().filter(inSight).length, inSightShown: ms(seen), inSightFinal: ms(right), allFinal: ms(all), cardPaints: PERF.cards };
+  // 3. the 3D view, warm
+  report.open3dWarm = await open3d();
+  // what a user's stay would write for the next start: the cards' pictures, the outlines
+  await keepLookPics();
+  const outlines = keepOutlines(OUTLINES.sig);
+  if (outlines) await files.write(OUTLINE_KEEP.file, outlines);
+  report.outlines = { takenAtStart: OUTLINES.taken, fileAtStart: OUTLINES.chars, fileNow: outlines ? outlines.length : OUTLINES.chars };
+  report.ok = true;
+  await invoke("selftest_done", { report: JSON.stringify(report) });
 }
 /**
  * SMEDCOVER_SELFTEST_DRAG: measures how smooth editing is on the cover in the data folder, at a Retina

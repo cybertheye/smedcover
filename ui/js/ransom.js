@@ -242,7 +242,15 @@ export function letterSpans(pieces, measure, row, keys, out = 0) {
 }
 
 // ---------- which faces are here
-let POOLS = { latin: [], cjk: [] }, PENDING = new Set(), EPOCH = 0;
+let POOLS = { latin: [], cjk: [] }, PENDING = new Set(), EPOCH = 0, SETUP = null;
+/**
+ * Sets how the faces that are here are found: `setup`, which calls useRansomFaces, is called only once the ransom
+ * note is first drawn or asked what it waits for, not at the start: finding them tries each face of RANSOM_FACES on a
+ * canvas, which loads it, a third of a second every start spent for lettering most covers never have.
+ */
+export function findRansomFaces(setup) { SETUP = setup; }
+/** The faces found, if they are yet to be (see findRansomFaces). */
+function found() { if (SETUP) { const setup = SETUP; SETUP = null; setup(); } }
 /**
  * The faces that are here: those of RANSOM_FACES whose family `here(family)` is true. `pending`: families
  * not yet to be had on a canvas (system fonts loaded on demand, see ensureFont in app.js), assumed to have
@@ -254,13 +262,13 @@ export function useRansomFaces(here, pending = []) {
   PENDING = new Set(pending); forget();
 }
 /** The families still to be loaded before every letter can be drawn in its face. */
-export const ransomPending = () => [...PENDING];
+export const ransomPending = () => { found(); return [...PENDING]; };
 /** Family `family` can be drawn with now (or never will be). Whether it was still awaited. */
 export function ransomArrived(family) { if (!PENDING.delete(family)) return false; forget(); return true; }
 /** Changes whenever a face arrives or the faces change, so what was drawn with a stand-in is drawn again (see bentLine). */
 export const ransomEpoch = () => EPOCH;
 /** The faces in use, by script: {latin, cjk}, each [{family, weight, often, italic}]. */
-export const ransomPools = () => POOLS;
+export const ransomPools = () => { found(); return POOLS; };
 
 const HAS = new Map(), METRICS = new Map(), PLANS = new Map();   // the plans of the lines drawn last, by what decides them
 /** Forgets what was measured and planned (fonts arrived), and tells bentLine. */
@@ -321,7 +329,7 @@ export function ransomLetters(lines, r, amt = 1, before = { papers: papersFor({}
   const shown = SHOWN.get(r.id) || before;
   return lines.map((runs, row) => {
     const cells = lineCells(runs);
-    return { row, cells, plan: ransomPlan(cells, POOLS, { salt: r.salt, row, amt, papers: shown.papers, C: shown.C, has, edits: r.edits, off: r.off || [], photo: !!r.photo }) };
+    return { row, cells, plan: ransomPlan(cells, ransomPools(), { salt: r.salt, row, amt, papers: shown.papers, C: shown.C, has, edits: r.edits, off: r.off || [], photo: !!r.photo }) };
   });
 }
 
@@ -385,7 +393,7 @@ export function ransom(ctx, pass, o) {
   const key = JSON.stringify([r.salt ?? "", row, amt, C, o.hiCss, r.edits || null, r.off || null, !!photo, cells.map((c) => [c.ch, c.hi, c.whole])]);
   let plan = PLANS.get(key);
   if (!plan) {
-    plan = ransomPlan(cells, POOLS, { salt: r.salt ?? "", row, amt, papers, C, has, edits: r.edits, off: r.off || [], photo: !!photo });
+    plan = ransomPlan(cells, ransomPools(), { salt: r.salt ?? "", row, amt, papers, C, has, edits: r.edits, off: r.off || [], photo: !!photo });
     if (PLANS.size > 64) PLANS.clear();
     PLANS.set(key, plan);
   }

@@ -998,6 +998,13 @@ fn selftest_drag() -> bool {
     selftest_root().is_some() && std::env::var_os("SMEDCOVER_SELFTEST_DRAG").is_some()
 }
 
+/// In self-test mode, whether to time how soon things show after the start instead (SMEDCOVER_SELFTEST_PERF): the
+/// start's steps, the 3D view and the Look sheet's cards, opened at once.
+#[tauri::command]
+fn selftest_perf() -> bool {
+    selftest_root().is_some() && std::env::var_os("SMEDCOVER_SELFTEST_PERF").is_some()
+}
+
 /// What this build's interface is: a hash of `ui/` as it was built (build.rs). The look cards' pictures kept from
 /// one launch to the next carry it, so a build that draws otherwise does not take another's for its own. Under
 /// `tauri dev` (cfg `dev`, set by tauri-build) the interface is served from its folder as it is edited, without
@@ -1068,6 +1075,7 @@ pub fn run() {
             cut_model_delete,
             selftest_models,
             selftest_drag,
+            selftest_perf,
             ui_build,
             move_pointer,
             selftest_photo,

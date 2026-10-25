@@ -166,6 +166,14 @@ writes none of these modules (they are written back as read, `CUSTOM.rest`). Whe
 what reads it — `normalizeSettings()`, `normalizeProfile()`, `oddsOf()`, `orientDefault()`, `column()` — which holds it
 there as it holds what the files hold. A default is what has not been set: a profile stays as it is.
 
+The rest of the start reads side by side what does not wait on something read before it: the system's fonts are
+listed (`list_system_fonts`, on a thread of the Rust side's own) and the outlines kept (6.2) read while `custom.json`,
+the imported fonts, the assets, the styles, the profiles and the covers are, each set of files asked for at once and
+kept in order (`loadProfiles()`, `loadAssetRecords()`, `loadCovers()`; a font is added to the page in order once they
+are all read). The Rust side still reads them one after another (`app_read` is a command without `async`, run on its
+main thread): what is saved is the wait between one request and the next. Nothing is tried on a canvas at the start: the ransom note's faces are found when it is first drawn (6.2).
+`BOOT` notes when each step was over, for the self-test that times it (13).
+
 `custom.json`'s `settings` are the user's settings themselves, not defaults: `layOver()` leaves them, so
 `DEFAULTS.settings` stays as shipped. `readSettings(custom, legacy)` (`store.js`) gives `normalizeSettings()` of them,
 `defaults.json`'s settings with the user's over them, `normalizeSettings()` staying the one place settings are checked.
@@ -907,7 +915,9 @@ large as the line's capital (or 国) times its size, no wider than its cell (1.0
 centred where the line's letters are: every scrap first and every letter after, so no scrap hides a letter
 beside it, the hero last of each. The plan is kept per line (`PLANS`, by its letters, seeds, strength and
 colours); a canvas only measured on (`placed()`'s probe) gets the house lettering instead. Faces: `RANSOM_FACES` lists the bundled fonts and the
-system fonts of macOS, Windows and Linux worth cutting from; `ransomFaces()` in `app.js` keeps those installed
+system fonts of macOS, Windows and Linux worth cutting from; `ransomFaces()` in `app.js` (called once the ransom note
+is first drawn or asked what it waits for, `findRansomFaces()`: trying each face on a canvas loads it, a third of a
+second that every start spent before) keeps those installed
 (`list_system_fonts`; in a plain browser, those a canvas reaches) and passes `useRansomFaces()` the ones a
 canvas outside the page cannot reach yet, at most `RANSOM_AWAY` (4) a script: `ensureFonts()` loads them
 (`ensureFont()`) when a layer has the ransom note, and `ransomArrived()` ends their wait. Until then a letter
@@ -2338,6 +2348,14 @@ as the header issue above.
 With a real photo (`SMEDCOVER_SELFTEST_PHOTO=<file>`) it also cuts out its subject, sets it over the title and writes the cover woven by the head, by letter (in the house lettering, in one lettered upright, in the ransom note), with the lettering half see-through, by the brush (a band along the title's second line in front, then up to the subject's middle behind again), and once dragged (`weave-*.png`), with an error when a woven cover looks as the cover unwoven (or the brush's, as before part of it was painted behind), when a drag's frame lets the lettering through elsewhere than a still cover does, when the frames of the head line's slider do not follow it, or when dragging the title over the subject works out the subject's look effects again. With or without a photo, it also weaves a sticker set over the title the same way, by its top, by the brush and by letter, and drags it and the title (`weave-asset-*.png`), with an error when a woven cover looks as the cover unwoven, when the lettering comes in front where the sticker does not show (where the cover unwoven is as the cover without it, two pixels round it), or when a drag's frame lets it through elsewhere than a still cover does.
 
 With `SMEDCOVER_SELFTEST_LOOKS=<look ids, comma-separated>` it goes through those looks only — their covers with and without a photo and with every slider at its far end, their layer effects, and their scene objects moved with the handles showing (the basketball poster's otherwise); the drag timing below then times only their scene objects too. Each step is noted in `selftest-progress.txt` in the data folder as it starts, so a run that stalls shows where. The stalls it used to have (every process idle, the web view waiting, at a different step each time) came from its window opening off screen — on another desktop, behind a full-screen app: WebKit stops drawing for a window that cannot be seen, so a canvas read back from the graphics card (an export, a PNG) never returns. In self-test mode the app therefore tells the web view not to watch whether its window can be seen (`_setWindowOcclusionDetectionEnabled:`, the setting WebKit's own tests use; `setup` in `lib.rs`). The city pop and constructivist looks also recolour the photo itself, once, in memory (`treatedOf()` in `photo.js`) rather than reading the canvas back on every redraw.
+
+With `SMEDCOVER_SELFTEST_PERF=1` it times how soon things show instead (`perfTest()`): when each step of `start()` was
+over (`BOOT`, `booted()`, ms since the page began to load) and when the page began (`timeOrigin`, to time the window's
+own opening from outside); the 3D view opened at once (every layer's sheet there, sheets painted: one each when nothing
+starts it over), the Look sheet's cards (in sight shown, in sight and all drawn as they are to be, cards drawn), the 3D
+view again, warm; `firstDraw`, what the start's first drawing of the canvas spent its time on (by layer, `TIMING`; pixels in script, `PIXELS`; look effects, `FX_TIMING`, switched on before it); then it writes the cards' pictures and the outlines, as a user's stay would, for the next start on
+the same folder to find. With `SMEDCOVER_SELFTEST_PHOTO` the cover has that photo filling the canvas; the first start on
+a folder makes the cover busy (ten more words reshaped by effects that need outlines, some in installed fonts).
 
 With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads the cover in the data folder (a copy of real app data can be put there) and, at a Retina screen's pixel ratio, times a whole redraw (first, and again with everything cached), the size thumbnails, dragging each text and photo layer across the canvas with pointer events (the first frames of each drag, and the frames after), stepping the sliders of the photos that cost most (dim, the soft edges, outline), the current look's own sliders (a whole redraw with each at 0, then each stepped as a drag steps it — a draft keeping the layers that did not read it, see 9.3 — and again as a draft that paints every layer), and, when the cover has look effects, each effect's own time. Each part is split into the layers that cost most (`TIMING` in `render.js`) and the time spent computing pixels in script, such as blurs (`PIXELS` in `photo.js`); both are off otherwise. A frame is waited for at most a second, as a covered window gets none.
 
