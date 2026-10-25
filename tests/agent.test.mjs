@@ -149,6 +149,36 @@ test("checkArgs says in a sentence what is wrong with a call's arguments", () =>
   assert.match(checkArgs(s("set_text"), { title: "x".repeat(2001) }), /"title" must be at most 2000 characters long/);
 });
 
+test("checkArgs counts a string's characters only against a length limit, and without spreading it: a 40 MB picture is checked at once", () => {
+  const big = "A".repeat(40 * 1024 * 1024), s = TOOL_BY.add_photo.inputSchema;
+  let t0 = performance.now();
+  assert.equal(checkArgs(s, { source: { data: big } }), null);
+  assert.ok(performance.now() - t0 < 50, `no limit: not counted (${Math.round(performance.now() - t0)} ms)`);
+  t0 = performance.now();
+  assert.equal(checkArgs({ type: "string", maxLength: 50 * 1024 * 1024 }, big), null);
+  assert.equal(checkArgs({ type: "string", maxLength: 1000 }, big), '"arguments" must be at most 1000 characters long (it has more than 2000).');
+  assert.equal(checkArgs({ type: "string", maxLength: 30 * 1024 * 1024 }, big), `"arguments" must be at most ${30 * 1024 * 1024} characters long (it has ${40 * 1024 * 1024}).`);
+  assert.equal(checkArgs({ type: "string", minLength: 3 }, big), null);
+  assert.match(checkArgs(TOOL_BY.set_look.inputSchema, { look: big }), /^"look" must be one of: .*; got "A{56}…\.$/, "not made JSON of for each look");
+  assert.ok(performance.now() - t0 < 1500, `with limits: counted no further than needed (${Math.round(performance.now() - t0)} ms)`);
+  // characters, as JSON Schema counts them: an astral one (two UTF-16 units) is one
+  const astral = "😀👍🏽𝒳🎉";   // 5 code points, 10 units
+  assert.equal(astral.length, 10); assert.equal([...astral].length, 5);
+  assert.equal(checkArgs({ type: "string", maxLength: 5 }, astral), null);
+  assert.equal(checkArgs({ type: "string", maxLength: 4 }, astral), '"arguments" must be at most 4 characters long (it has 5).');
+  assert.equal(checkArgs({ type: "string", minLength: 5 }, astral), null);
+  assert.equal(checkArgs({ type: "string", minLength: 6 }, astral), '"arguments" must be at least 6 characters long.');
+  assert.equal(checkArgs({ type: "string", minLength: 2, maxLength: 2 }, "\ud83d"), '"arguments" must be at least 2 characters long.', "a lone surrogate is one");
+  assert.equal(checkArgs({ type: "string", maxLength: 1 }, "\ud83d\ud83d"), '"arguments" must be at most 1 characters long (it has 2).');
+  assert.equal(checkArgs({ type: "string", minLength: 1 }, ""), '"arguments" must be at least 1 characters long.');
+  assert.match(checkArgs(TOOL_BY.set_text.inputSchema, { tag: "😀".repeat(201) }), /"tag" must be at most 200 characters long \(it has 201\)/);
+  assert.equal(checkArgs(TOOL_BY.set_text.inputSchema, { tag: "😀".repeat(200) }), null);
+  // a long list is checked for repeats in one pass
+  t0 = performance.now();
+  assert.match(checkArgs({ type: "array", uniqueItems: true }, [...Array.from({ length: 200000 }, (_, i) => `x${i}`), "x7"]), /lists "x7" twice/);
+  assert.ok(performance.now() - t0 < 1000, `${Math.round(performance.now() - t0)} ms`);
+});
+
 test("checkCall checks what a tool needs beyond its schema: at least, exactly or at most one of some arguments", () => {
   assert.equal(checkCall(TOOL_BY.set_text, {}), "Give at least one of: title, subtitle, tag.");
   assert.equal(checkCall(TOOL_BY.set_text, { subtitle: "" }), null);
