@@ -36,6 +36,14 @@ zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSString", "NSIndexSet"] }
 tempfile = "3"
+# Where the desktop app keeps its data (the same crate and version Tauri finds it with).
+dirs = "7"
+# The MCP endpoint's bearer token comes from the system's random source.
+getrandom = "0.4"
+# The MCP endpoint (Apache-2.0): both eras of the protocol, the stateless 2026-07-28 and the
+# `initialize` handshake of 2025-03-26 to 2025-11-25, over streamable HTTP. Pinned: it changes fast,
+# and the HTTP tests in core/tests/mcp_http.rs are what an upgrade has to pass.
+rmcp = { version = "=3.7.0", default-features = false, features = ["server", "base64", "transport-streamable-http-server", "transport-streamable-http-server-session"] }
 
 # Dependencies are optimised even in development builds: the image codecs are far too slow otherwise.
 # Cargo reads profiles only from the workspace's root.

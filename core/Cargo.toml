@@ -20,6 +20,10 @@ sha2 = { workspace = true }
 flate2 = { workspace = true }
 tar = { workspace = true }
 zip = { workspace = true }
+dirs = { workspace = true }
+# The MCP endpoint (see the workspace's Cargo.toml).
+rmcp = { workspace = true }
+getrandom = { workspace = true }
 
 # The subject cut-out uses Apple's Vision framework, reached through the Objective-C runtime.
 [target.'cfg(target_os = "macos")'.dependencies]
