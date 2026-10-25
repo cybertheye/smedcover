@@ -149,11 +149,19 @@ const timers = {};
 const later = (key, ms, fn) => { clearTimeout(timers[key]); timers[key] = setTimeout(fn, ms); };
 /** The layer list, kept from one drawing of the Layers sheet to the next (renderSide fills it, the sheet shows it). */
 const layerBox = el("div", { id: "layerbox" });   // the Layers sheet (see renderSide; its layout in index.html)
-const persistProfile = () => later("profile", 400, () => saveProfile(S.profile).catch(fail));
+/** The profile and cover saves still waiting, by key: flushWrites() runs them at once. */
+const WRITES = {};
+const laterWrite = (key, fn) => { WRITES[key] = fn; later(key, 400, () => { delete WRITES[key]; return fn(); }); };
+/** Writes every profile and cover save still waiting, before another profile is shown or read from its files. */
+function flushWrites() {
+  return Promise.all(Object.keys(WRITES).map((key) => { const fn = WRITES[key]; clearTimeout(timers[key]); delete WRITES[key]; return fn(); }));
+}
+/** Saves the profile on the canvas, to its own file (the one it is, even if another is shown by the time it is written). */
+const persistProfile = () => { const p = S.profile; laterWrite(`profile:${p.id}`, () => saveProfile(p).catch(fail)); };
 /** Where a cover is kept: one file for each channel of each profile. */
 const coverPath = (profileId, catId) => `covers/${profileId}/${catId}.json`;
 /** Saves the cover on the canvas, to its own file (the one it is, even if another is shown by the time it is written). */
-const persistCover = () => { const c = S.cover, id = S.profile.id; later(`cover:${id}:${c.catId}`, 400, () => writeJson(coverPath(id, c.catId), c).catch(fail)); };
+const persistCover = () => { const c = S.cover, id = S.profile.id; laterWrite(`cover:${id}:${c.catId}`, () => writeJson(coverPath(id, c.catId), c).catch(fail)); };
 /** Makes `c` the cover on the canvas, and the one kept for its channel. */
 const setCover = (c) => { S.cover = c; S.covers[c.catId] = c; return c; };
 const persistAi = () => later("ai", 400, () => writeJson("ai.json", S.ai).catch(fail));
@@ -255,6 +263,7 @@ async function agentStep(fn, ctl = {}) {
     if (moved) { S.hist = S.hist.slice(0, 1); S.histIdx = 0; SURPRISE.step = null; }
     else { S.hist = hist; S.histIdx = at; SURPRISE.step = dealt; }
     if (snapshot() !== goal) await restoreSnap(goal);
+    if (!own()) throw e;   // let go of while it was being put back: the shell has ended the step
     if (S.settings.profileId !== S.profile.id || S.settings.channels[S.profile.id] !== S.cover.catId) { S.settings.profileId = S.profile.id; S.settings.channels[S.profile.id] = S.cover.catId; persistSettings(); }   // the one shown is the one remembered
     S.hist[S.histIdx] = snapshot(); syncTop();
     throw e;
@@ -1476,6 +1485,7 @@ async function switchChannel(catId) {
 /** Channel catId's cover of profile p as it is now: the one in memory for the current profile, else as stored (or new). */
 async function coverOf(p, catId) {
   if (p.id === S.profile.id && S.covers[catId]) return S.covers[catId];
+  await flushWrites();   // as it was last left, not as the file was before a save still waiting
   return channelCover(await readJson(coverPath(p.id, catId)).catch(() => null), p, catId);
 }
 // Cover → Copy from another profile or channel: the layers added to it (free ones, copies of layout ones), settings and all, into this cover
@@ -7294,6 +7304,7 @@ async function adoptPhotos(photos, nameKey) {
 }
 /** Shows another profile, on the channel it was last on, with its own covers as they were left. */
 async function switchProfile(id) {
+  await flushWrites();   // the profile left, and its covers, written before the other's are read
   const profile = S.profiles.find((p) => p.id === id) || S.profiles[0];
   const covers = await loadCovers(profile);   // first: when they cannot be read, the profile shown stays
   S.profile = profile; S.settings.profileId = profile.id; S.covers = covers;
