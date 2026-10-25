@@ -76,13 +76,18 @@ ui/
   defaults.json      the app's defaults, by module: settings, profile, layout, surprise, ui
   js/csv.js          CSV reader for batch export (Settings → Sizes & export)
   js/i18n.js         interface strings (zh / en)
+  js/tools.js        the agent tools (MCP) as data: names, descriptions, schemas, hints, what the page reads of each; the argument check, the answers' shapes, what the commands find things by (pure)
+  js/commands.js     what each agent tool does, over the app's own functions (makeCommands(api))
+  js/agent.js        the agent shell: one call at a time, waiting for the user, the window held during a step, the dev hook
+  tools.json         the tools as the host's MCP endpoint lists them, written from tools.js (scripts/tools.mjs)
   fonts/             bundled fonts and their licences
 src-tauri/src/lib.rs all of the Rust side
 tests/               unit tests for the DOM-free modules
 ```
 
-`layers.js`, `layout.js`, the parsing half of `title.js`, `csv.js` and the validation half of
-`store.js` never touch the DOM, so Node can test them directly.
+`layers.js`, `layout.js`, the parsing half of `title.js`, `csv.js`, the validation half of
+`store.js` and `tools.js` never touch the DOM, so Node can test them directly; nor do `commands.js` and
+`agent.js` until a call runs.
 
 ## 3. Data model
 
@@ -1665,7 +1670,8 @@ cost of a full copy per step — fine at the current data size. `HOLD.history` h
 (`recordHistory()`) back while a change of several parts is under way that is to be one step, whoever set it
 committing once it is over. Once restored, `timeTravel()` writes that step's snapshot again from the state as restored: checking it
 fills fields in and orders keys anew, and without that the next commit would take the difference for a
-change and cut off the steps to redo (which is how *Redo* once stopped working).
+change and cut off the steps to redo (which is how *Redo* once stopped working). An agent's change is one step
+too, made by `agentStep()` (see 11.1).
 
 *Empty this cover…* (the ⋯ menu, `clearDialog()`): asked first, then the channel's cover is built anew from the
 profile's default design with `channelCover()`, the layers it adds dropped (free ones and copies: only `isLayout()` ones stay), the title, subtitle and tag words kept;
@@ -2335,6 +2341,75 @@ So the interface can still be developed from a static server (the `"browser"` ho
 python3 -m http.server -d ui 4599
 ```
 
+### 11.1 Agents: the tools, the commands, the shell
+
+An agent — an MCP client such as Claude Code — drives SmedCover through tools, each a whole thing done to a cover
+(set the words, place a layer, draw a preview, export), never a file read or written. Where the calls come in is the
+host's (the desktop app's endpoint on 127.0.0.1, a server's `/mcp`: see TODO.md); what answers them is the page, in
+three modules.
+
+`tools.js` defines every tool as data (`TOOLS`): its name, title and English description (written for the model:
+what it does, what it answers, what it refuses), its input schema (JSON Schema, every object closed with
+`additionalProperties: false`, the enums the app's own constants — `LOOK_IDS`, `EFFECTS`, `BEND_IDS`,
+`SURPRISE_LOCKS`, `WEAVE_WAYS`, `SCOPES`, `FORMATS` — inlined, no `$ref`, and no `anyOf` at the top, which some clients
+refuse), its output schema, MCP's hints (`readOnlyHint`; `destructiveHint` said where it is false too, MCP's default
+being true; `idempotentHint`; `openWorldHint` for `add_photo`), and what only the page reads: `history` (run as one
+step of undo), `busy` (what of the user's it waits for, `light` or `strict`), `hosts` (`desktop`, `server`: the
+selection, undo and redo are the desktop window's alone), `timeoutMs` (how long the host waits without a word from
+the page: half a minute to read, a minute to change, two to draw a preview or deal, ten to cut out, half an hour to
+export) and `needs` (what a schema cannot say without a combinator: at least, exactly or at most one of some
+arguments). `checkArgs(schema, args)` checks a call against the part of JSON Schema the tools use and says what is
+wrong in a sentence for the model (`"maxSide" must be at most 2048 (got 4000).`, `Unknown argument "colour" (this tool
+takes: …)`); `checkCall(def, args)` adds `needs`. `toResult({structured, images, text})` makes MCP's
+`CallToolResult` (a text block, by default the structured answer as JSON; each PNG an image block;
+`structuredContent`) and `toError(code, message)` a failure, `code` one of `unknown_tool`, `invalid_arguments`,
+`not_allowed`, `busy`, `unavailable`, `failed` (the host makes a protocol error of the first, `isError` of the rest).
+And the helpers the commands find things by: `findProfile()` (its id, then its name), `findChannel()` (its id, then as
+a batch table names one, `channelIndex()` in `store.js`), `findSize()` (pixels, a ratio within 1%, a name or caption;
+several matching is an error naming them), `letterKeysOf()` (the letter keys the weave window offers), `boxesOf()` (a
+drawing's `_hits` as shares of the image) and `sheetPlan()` (a contact sheet's tiles).
+
+`scripts/tools.mjs` writes `ui/tools.json` from `toolsJson()` before every build (`beforeBuildCommand`, as the repaint
+styles' `index.json` is written): `{format: 1, instructions, tools: [{name, title, description, inputSchema,
+outputSchema?, annotations, "x-smedcover": {hosts, timeoutMs}}]}`, `instructions` a primer for the agent (profiles,
+channels, sizes and layers; each change one step of undo in the user's open window; the usual order of calls). The
+host lists the tools from that file, so it can answer before the page is up; `npm test` fails when the file and
+`tools.js` disagree, and `toolsHash()` in `agent.js` is the file's SHA-256 (of `toolsText()`, the file to the byte),
+by which the page says which list it answers to.
+
+`commands.js` does what each tool says: `makeCommands(api)` returns a function for each, `(args, ctx) → answer`, over
+`API` (at the foot of `app.js`, frozen): the state, and the app's own ways of reading, changing, drawing and writing it
+— those the editor uses, so an agent's change is checked and drawn as the user's is. A read never switches the
+window: another channel's or profile's cover is read as it is kept (`coverOf()`) and drawn in that profile's style
+(`renderReady(size, cover, index, {profile, pixelW})`). `render_preview` draws a size with its longer side as asked
+(`widthFor()`), waiting for fonts and outlines as an export does, and answers the PNG with where each layer landed;
+with `all`, every size on one captioned sheet. The read-only tools, the selection, undo and redo are done; the others
+answer `unavailable` for now.
+
+`agent.js` is the shell. Calls run one at a time in the order they came (`makeQueue()`: a call cancelled while it
+waits never runs; one running goes on, told through `ctx.cancelled()`). Each is checked (`checkCall()`), then waits
+till the user is in the middle of nothing (`whenIdle()` over `userBusy()`: a press, a drag, a dialog, typing; for a
+change Settings, the editor's windows and an export under way too) and their hands have been off the window for
+400 ms, telling the caller every 5 s that it waits (a progress message, which sets the host's timer going again), and
+answering `busy` after 30 s (10 s for a read). A call that changes something holds the window while it runs: the menu,
+popovers and hover previews shut and a field left (`closeTransient()`), `#agent` over the window (above the menu and
+dialogs, under a question, the title bar and the toast; `body.agent .app` takes no pointer), the keys, pastes and the
+wheel swallowed before anything sees them and a drop let go — not replayed: a step is short — and, after 150 ms, a pill
+of glass at the top saying what is being done (`agent.step.<tool>`), which a press pulses ("One moment"). One whose tool
+has `history` runs inside `agentStep(fn)` (`app.js`): the change the user was making becomes a step of its own first
+(`commitPending()`), `HOLD.history` keeps the debounced commit back, and the step is committed once — none when nothing
+changed. Should it fail part-way, the snapshot taken after the opening commit is put back (a step taken meanwhile,
+`keepFirst()`'s, let go), or, when it switched channel or profile, the cover as it was on arriving, the switch kept as
+the user's own is; the step put back is written again as it now is, as `timeTravel()` does, or the closing commit would
+take the difference for a change and cut off redo.
+
+The dispatcher answers each call as the host is to be sent it: `{id, ok: true, result}` or `{id, ok: false, error:
+{code, message}}`. A transport brings the calls and takes the answers (`serve(agent, {listen, reply, progress})`); the
+desktop's — a Tauri `Channel` handed over with `mcp_attach`, answers by `mcp_reply` and `mcp_progress` — is to be
+written with the Rust side. Meanwhile `globalThis.smedcoverAgent.call(name, args)` runs the same dispatcher from the
+console or a test in a plain page (`tools()`: the list). `startAgent()` starts the shell at the end of `start()`, not
+in self-test mode; there `SMEDCOVER_SELFTEST_AGENT=1` starts it in a step of its own (see 13).
+
 ## 12. Fonts
 
 The three bundled fonts are loaded with `@font-face` and render the same on every platform. Imported
@@ -2345,7 +2420,7 @@ frame waits for the fonts, otherwise the title would be fitted using the wrong g
 
 | Level | Command | Covers |
 |---|---|---|
-| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export's sizes switched off and folders and the looks' use, by profile and look), the defaults and `custom.json` laid over them, the settings written to `custom.json` (only what differs, read back the same, from `settings.json` once), file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string, no native `confirm()`, `alert()` or `prompt()` in `ui/` |
+| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export's sizes switched off and folders and the looks' use, by profile and look), the defaults and `custom.json` laid over them, the settings written to `custom.json` (only what differs, read back the same, from `settings.json` once), file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string, no native `confirm()`, `alert()` or `prompt()` in `ui/`; the agent tools (`agent.test.mjs`): every definition whole and marked as the spec has it, the enums the app's constants, `ui/tools.json` up to date, the argument check's verdicts and sentences, finding profiles, channels and sizes, the answers' shapes, the read-only commands, selection, undo and redo over a stand-in `API`, the queue, `whenIdle()` and the dispatcher |
 | Rust unit tests | `cd src-tauri && cargo test` | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling, requests against a local stand-in server, proxy rules |
 | End-to-end self-test | `SMEDCOVER_SELFTEST=<folder> <executable>` | the full export path between the real web view and Rust |
 
@@ -2358,6 +2433,8 @@ It also times every look effect (`fxTime` in `report.json`, with `FX_TIMING`), a
 
 
 With a real photo (`SMEDCOVER_SELFTEST_PHOTO=<file>`) it also cuts out its subject, sets it over the title and writes the cover woven by the head, by letter (in the house lettering, in one lettered upright, in the ransom note), with the lettering half see-through, by the brush (a band along the title's second line in front, then up to the subject's middle behind again), and once dragged (`weave-*.png`), with an error when a woven cover looks as the cover unwoven (or the brush's, as before part of it was painted behind), when a drag's frame lets the lettering through elsewhere than a still cover does, when the frames of the head line's slider do not follow it, or when dragging the title over the subject works out the subject's look effects again. With or without a photo, it also weaves a sticker set over the title the same way, by its top, by the brush and by letter, and drags it and the title (`weave-asset-*.png`), with an error when a woven cover looks as the cover unwoven, when the lettering comes in front where the sticker does not show (where the cover unwoven is as the cover without it, two pixels round it), or when a drag's frame lets it through elsewhere than a still cover does.
+
+With `SMEDCOVER_SELFTEST_AGENT=1` it also starts the agent shell (11.1) — what holds a call back being `userBusy()`'s but the self-test itself — and calls the read-only tools, the selection, undo and redo through its dispatcher as an agent's calls come (`agentTest()`): `get_context` lists the profiles, channels and sizes there are, and what the window shows; `get_cover`'s layers are the cover's; `render_preview` decodes at the longer side asked (640, and a tall size 512 high, of another channel, the window not switching), and every size on one sheet; `select_layer` selects as asked; after a change made by hand, `undo` takes `S.histIdx` back past it and `redo` forward again; `agentStep()` makes a change one step, nothing no step, and puts back a change that fails, redo left as it was; an unknown tool, a wrong argument and a tool not done yet answer as the host expects; and a call waits for a dialog. Its previews are written into the folder (`agent-preview.png`, `agent-preview-tall.png`, `agent-sheet.png`) and its findings go under `agent` in `report.json`, any error among the report's.
 
 With `SMEDCOVER_SELFTEST_LOOKS=<look ids, comma-separated>` it goes through those looks only — their covers with and without a photo and with every slider at its far end, their layer effects, and their scene objects moved with the handles showing (the basketball poster's otherwise); the drag timing below then times only their scene objects too. Each step is noted in `selftest-progress.txt` in the data folder as it starts, so a run that stalls shows where. The stalls it used to have (every process idle, the web view waiting, at a different step each time) came from its window opening off screen — on another desktop, behind a full-screen app: WebKit stops drawing for a window that cannot be seen, so a canvas read back from the graphics card (an export, a PNG) never returns. In self-test mode the app therefore tells the web view not to watch whether its window can be seen (`_setWindowOcclusionDetectionEnabled:`, the setting WebKit's own tests use; `setup` in `lib.rs`). The city pop and constructivist looks also recolour the photo itself, once, in memory (`treatedOf()` in `photo.js`) rather than reading the canvas back on every redraw.
 
@@ -2398,6 +2475,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | change the shape a repaint is asked for, or how what comes back is fitted to its photo | `repaintSize()` and `coverCrop()` in `repaint.js`; `fitPicture()` in `app.js` |
 | add a look | a file `looks/<id>.js` exporting the look's object (starting with a hook or two), imported and put in `LOOKS` in `style.js` |
 | change how Surprise me deals | `RULES` (every number), `FAMILIES` and `RECIPES` (what suits each look) in `deal.js`; the chances as shipped, `surprise.odds` in `defaults.json` |
+| add or change an agent tool | its definition in `TOOLS` (`tools.js`), then `npm run tools`; what it does in `makeCommands()` (`commands.js`), reaching the app through `API` at the foot of `app.js`; for one that changes something, `agent.step.<tool>` in `i18n.js` |
 | change how the chances window shows and sets the chances | `DOTS`, `EVEN_DOTS`, `dotsOf()`, `withDots()` (the looks' dots) and `moveShare()` (a bar's divider) in `deal.js`; `oddsLooks()`, `oddsGroup()` and `oddsDialog()` in `app.js` |
 | change how the AI generate window is laid out | `genWin()`, `madeStrip()`, `specPreview()` and `KIND_ICONS` in `app.js`; `.dlg.genw` and the rules after it in `index.html` |
 | put a look in a kind, or add a kind | `LOOK_TAGS` and `LOOK_CATEGORIES` in `style.js`, a `look.cat.*` name in `i18n.js` (a test holds every look to a kind and every kind to a handful of looks) |
