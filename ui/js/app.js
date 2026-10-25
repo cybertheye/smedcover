@@ -8852,7 +8852,8 @@ async function selfTest(dir) {
     // a font a canvas outside the page cannot reach (one the user installed, one macOS downloads): once
     // ensured, it can — and the title painted with a look effect, on such a canvas, is set in it
     const away = [];
-    for (const f of S.systemFonts.filter((f) => !BUNDLED_FONTS.includes(f) && !reachable(f))) {   // tried with the usual characters, then with ones each has
+    for (const f of S.systemFonts) {   // tried with the usual characters, then with ones each has; one by one till three are found, for trying a font loads it (some 30 ms; a system can have 1,600)
+      if (BUNDLED_FONTS.includes(f) || reachable(f)) continue;
       const info = await invoke("font_faces", { family: f }).catch(() => null);
       if (info && info.probe && !reachable(f, info.probe)) away.push({ family: f, probe: info.probe, faces: info.weights.length });
       if (away.length >= 3) break;
@@ -8899,7 +8900,8 @@ async function perfTest() {
   // a busy cover (the first start makes it, the next finds it): ten more words, each reshaped by an effect that needs
   // its glyphs' outlines, some set in installed fonts read from their files; the title reshaped too
   if (S.cover.layers.length < 15) {
-    const own = S.systemFonts.filter((f) => !BUNDLED_FONTS.includes(f) && !reachable(f)).sort().slice(0, 4);
+    const own = [];   // the first four by name a canvas outside the page cannot reach: tried one by one till they are found, for trying a font loads it (some 30 ms; a system can have 1,600)
+    for (const f of [...S.systemFonts].sort()) { if (own.length >= 4) break; if (!BUNDLED_FONTS.includes(f) && !reachable(f)) own.push(f); }
     const fxs = ["spiky", "melt", "puffy", "eroded", "cut", "torn", "extrude"], fontsUsed = [...own, ...BUNDLED_FONTS.slice(0, 2)];
     layer("title").fx = "extrude";
     for (let i = 0; i < 10; i++) {
