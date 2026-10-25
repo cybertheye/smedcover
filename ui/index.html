@@ -137,8 +137,17 @@
   .lookcard{position:relative;display:flex;flex-direction:column;padding:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:rgba(0,0,0,.25);color:var(--text);cursor:pointer;text-align:left}
   .lookcard:hover{border-color:rgba(255,255,255,.5)}
   .lookcard.on{border:2px solid var(--acc)}
+  /* the card is two buttons: the look (its picture and name) and, over the name's right end, its ♡ */
+  .lookpick{display:flex;flex-direction:column;width:100%;padding:0;border:0;border-radius:0;background:none;color:inherit;text-align:left;cursor:pointer}
+  .lookpick:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+  .lookheart{position:absolute;right:4px;bottom:3px;display:grid;place-items:center;width:26px;height:26px;padding:0;border:0;border-radius:8px;background:none;color:var(--text2);cursor:pointer}
+  .lookheart:hover{background:rgba(255,255,255,.1);color:var(--text)}
+  .lookheart:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+  .lookheart.on,.lookheart.on:hover{color:#ff5b6e}
+  .lookheart.on path,.lookchips .ico path{fill:currentColor}   /* liked: the heart filled, a warm red (the chip's in its own colour) */
+  .lookchips .rchip .ico{vertical-align:-2px;margin-right:4px}
   .lookcard .lookpic{flex:none;display:block;width:100%;aspect-ratio:16/9;height:auto;object-fit:contain;background:rgba(0,0,0,.35)}   /* contain: a tall cover shown whole */
-  .lookcard .nm{padding:7px 9px 8px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lookcard .nm{padding:7px 32px 8px 9px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}   /* room at its end for the ♡ */
   .lookcard .badge{position:absolute;left:6px;top:6px;padding:1px 8px;border-radius:999px;background:var(--acc);color:var(--acc-ink);font-size:11px;font-weight:700}
   .lookgrid .lookcard[hidden]{display:none}
   .lookgrid.finding .lookcard.on{order:-1}   /* the profile's own look first while the search or a chip sorts the cards */

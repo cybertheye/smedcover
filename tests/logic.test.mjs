@@ -103,10 +103,13 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.notEqual(c.layers, p.design.layers);                       // a copy, not the same array
   const own = normalizeCover({ layers: [{ type: "title", stroke: 0.5 }] }, p);
   assert.equal(own.layers.find((l) => l.id === "title").stroke, 0.5);
-  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", exportSizes: {}, exportDirs: {}, scope: "size", hideScene: false, glass: true, glassHint: false, drawer: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], lookUse: {}, recipes: {}, layouts: [], surprise: { locks: {}, odds: {} } });
+  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", exportSizes: {}, exportDirs: {}, scope: "size", hideScene: false, glass: true, glassHint: false, drawer: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], lookUse: {}, lookLikes: [], recipes: {}, layouts: [], surprise: { locks: {}, odds: {} } });
   // how often each look was picked: whole counts of looks there are, none at 0, in the registry's order
   assert.deepEqual(normalizeSettings({ lookUse: { riso: 2.7, cel: 3, nope: 5, cyber: -1, deco: "4", neon: "x", facet: 0, songke: 9e9 } }).lookUse, { cel: 3, riso: 2, songke: 1e6, deco: 4 });
   assert.deepEqual([normalizeSettings({ lookUse: [3] }).lookUse, normalizeSettings({ lookUse: "cel" }).lookUse], [{}, {}]);
+  // the looks liked: looks there are, each once, in the order kept (the latest liked first)
+  assert.deepEqual(normalizeSettings({ lookLikes: ["riso", "nope", "cel", 3, "riso", null, "deco"] }).lookLikes, ["riso", "cel", "deco"]);
+  assert.deepEqual([normalizeSettings({ lookLikes: "cel" }).lookLikes, normalizeSettings({ lookLikes: { cel: 1 } }).lookLikes], [[], []]);
   assert.deepEqual(normalizeSettings({ channels: { p1: "c1", "bad key!": "c2", p2: 7 } }).channels, { p1: "c1" });
   assert.deepEqual([normalizeSettings({ glassHint: true }).glassHint, normalizeSettings({ glassHint: "yes" }).glassHint], [true, false]);   // the note on slow glass: shown once
   // the sizes Export leaves unticked, by profile: only those unticked (false), by a size key, of a profile id that is one; a profile with none unticked goes

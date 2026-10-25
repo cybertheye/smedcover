@@ -3348,23 +3348,56 @@ function lookCards() {
     pic.want = base + lookOwn(id);
     if (pic.sig !== pic.want) stale.push(id);
     const on = id === st.look;
-    return el("button", { class: "lookcard" + (on ? " on" : ""), dataset: { id }, "aria-pressed": String(on), title: LOOKS[id].about ? LOOKS[id].about[lang] : LOOKS[id].name[lang],
-      hidden: !on && !shown(id), onpointerenter: () => hoverLook(id), onclick: () => pickLook(id) },
-      pic.cv, el("span", { class: "nm" }, LOOKS[id].name[lang]), on && el("span", { class: "badge" }, t("look.current")));
+    return el("div", { class: "lookcard" + (on ? " on" : ""), dataset: { id }, hidden: !on && !shown(id) },
+      el("button", { class: "lookpick", "aria-pressed": String(on), title: LOOKS[id].about ? LOOKS[id].about[lang] : LOOKS[id].name[lang], onpointerenter: () => hoverLook(id), onclick: () => pickLook(id) },
+        pic.cv, el("span", { class: "nm" }, LOOKS[id].name[lang]), on && el("span", { class: "badge" }, t("look.current"))),
+      likeButton(id));
   };
   const grid = el("div", { class: "lookgrid" + (lookFinding() ? " finding" : ""), onpointerleave: () => hoverLook(null), onscroll: (e) => { LOOKCARDS.scroll = e.currentTarget.scrollTop; } }, LOOK_IDS.map(card));
+  sortLooks(grid);
   requestAnimationFrame(() => {   // where it was; the first time, at the profile's look
     if (LOOKCARDS.scroll != null) grid.scrollTop = LOOKCARDS.scroll;
     else { const on = grid.querySelector(".on"); if (on) grid.scrollTop = on.offsetTop - grid.offsetTop - 8; }
   });
   LOOKCARDS.queue = stale.includes(st.look) ? [st.look, ...stale.filter((x) => x !== st.look)] : stale;
   drawLookCards(++LOOKCARDS.round);
-  return [grid, el("div", { class: "hint lookgrid-none", hidden: !lookFinding() || LOOK_IDS.some(shown) }, t("look.none"))];
+  return [grid, el("div", { class: "hint lookgrid-none", hidden: !lookFinding() || LOOK_IDS.some(shown) }, noLooks())];
+}
+/** The line under the cards when none is let through: under ♥ Liked with nothing liked yet, how to like one. */
+const noLooks = () => t(LOOK_UI.tag === "liked" && !S.settings.lookLikes.length ? "look.likedNone" : "look.none");
+/**
+ * A look card's ♡, at the right end of its name: a click adds the look to ♥ Liked, or takes it out, without putting
+ * it on or previewing it (the card's own button does that: the ♡ lies beside it, not in it).
+ */
+function likeButton(id) {
+  const b = el("button", { class: "lookheart", onpointerenter: () => hoverLook(null), onclick: (e) => { e.stopPropagation(); likeLook(id); markLike(b, id); } }, ico("heart", 16));
+  markLike(b, id);
+  return b;
+}
+/** The ♡ as filled or not, and what it says it will do. */
+function markLike(b, id) {
+  const on = S.settings.lookLikes.includes(id), say = t(on ? "look.unlike" : "look.like");
+  b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); b.setAttribute("aria-label", say); b.title = say;
+}
+/** Likes look `id` (the latest liked first), or unlikes it if it was; under ♥ Liked, the cards follow at once. */
+function likeLook(id) {
+  const likes = S.settings.lookLikes, was = likes.includes(id);
+  S.settings.lookLikes = was ? likes.filter((x) => x !== id) : [id, ...likes];
+  persistSettings();
+  if (LOOK_UI.tag === "liked") findLooks(true);
+}
+/**
+ * Under ♥ Liked, the cards the latest liked first, after the profile's own (first while the search or a chip is at
+ * work, liked or not: .lookgrid.finding); CSS order, the cards themselves left in place. Elsewhere, as LOOK_IDS has them.
+ */
+function sortLooks(grid) {
+  const likes = LOOK_UI.tag === "liked" ? S.settings.lookLikes : [], look = S.profile.style.look;
+  for (const card of grid.children) { const i = card.dataset.id === look ? -1 : likes.indexOf(card.dataset.id); card.style.order = i < 0 ? "" : String(i); }
 }
 /**
  * The Look sheet's search and chip, for this session: `q` the words typed, `tag` the chip picked ("" every look, a kind
- * of LOOK_CATEGORIES, or "used", those this computer has used most). They only hide cards: the profile's own look is
- * never hidden, and while they are at work it comes first.
+ * of LOOK_CATEGORIES, "used", those this computer has used most, or "liked", those liked on it). They only hide cards:
+ * the profile's own look is never hidden, and while they are at work it comes first.
  */
 const LOOK_UI = { q: "", tag: "" };
 /** How many looks ★ Most used shows at most. */
@@ -3376,25 +3409,25 @@ function countLook(id) { S.settings.lookUse[id] = (S.settings.lookUse[id] || 0) 
 const lookFinding = () => !!(LOOK_UI.q.trim() || LOOK_UI.tag);
 /**
  * Whether a look is among those the search and the chip let through, as a test by look id: the chip's kind (LOOK_TAGS),
- * or among the most used; every word typed found in its name, in either language, in what it says of itself, or in
- * the names of its kinds.
+ * or among the most used or the liked; every word typed found in its name, in either language, in what it says of
+ * itself, or in the names of its kinds.
  */
 function lookFilter() {
-  const used = LOOK_UI.tag === "used" ? mostUsed() : null, words = folded(LOOK_UI.q).split(/\s+/).filter(Boolean);
+  const among = LOOK_UI.tag === "used" ? mostUsed() : LOOK_UI.tag === "liked" ? S.settings.lookLikes : null, words = folded(LOOK_UI.q).split(/\s+/).filter(Boolean);
   return (id) => {
-    if (used ? !used.includes(id) : LOOK_UI.tag && !LOOK_TAGS[id].includes(LOOK_UI.tag)) return false;
+    if (among ? !among.includes(id) : LOOK_UI.tag && !LOOK_TAGS[id].includes(LOOK_UI.tag)) return false;
     if (!words.length) return true;
     const L = LOOKS[id], text = folded([L.name.zh, L.name.en, L.about && L.about.zh, L.about && L.about.en, ...LOOK_TAGS[id].flatMap((k) => bothLangs("look.cat." + k))].join(" "));
     return words.every((w) => text.includes(w));
   };
 }
-/** Above the look cards: a search field and a chip for each kind of look (★ Most used once something is counted). */
+/** Above the look cards: a search field and a chip for each kind of look (★ Most used once something is counted), then ♥ Liked. */
 function lookFinder() {
   const used = mostUsed().length > 0;
   if (LOOK_UI.tag === "used" && !used) LOOK_UI.tag = "";
   const chips = el("div", { class: "rchips lookchips", role: "tablist", "aria-label": t("look.cats") },
-    [["", t("look.cat.all")], ...LOOK_CATEGORIES.map((k) => [k, t("look.cat." + k)]), used && ["used", t("look.cat.used")]].filter(Boolean).map(([k, label]) =>
-      el("button", { class: "rchip" + (LOOK_UI.tag === k ? " on" : ""), role: "tab", "aria-selected": String(LOOK_UI.tag === k), title: k === "used" ? t("look.cat.usedTip") : null,
+    [["", t("look.cat.all")], ...LOOK_CATEGORIES.map((k) => [k, t("look.cat." + k)]), used && ["used", t("look.cat.used")], ["liked", [ico("heart", 13), t("look.cat.liked")]]].filter(Boolean).map(([k, label]) =>
+      el("button", { class: "rchip" + (LOOK_UI.tag === k ? " on" : ""), role: "tab", "aria-selected": String(LOOK_UI.tag === k), title: k === "used" ? t("look.cat.usedTip") : k === "liked" ? t("look.cat.likedTip") : null,
         onclick: () => { LOOK_UI.tag = k; for (const b of chips.children) { const on = b.dataset.k === k; b.classList.toggle("on", on); b.setAttribute("aria-selected", String(on)); } findLooks(); }, dataset: { k } }, label)));
   const find = (e) => { if (e.isComposing) return; LOOK_UI.q = e.target.value; findLooks(); };   // not while a word is being composed (pinyin, kana)
   return el("div", { class: "lookfind" },
@@ -3404,17 +3437,21 @@ function lookFinder() {
         onkeydown: (e) => { if (e.key !== "Escape" || e.isComposing) return; e.stopPropagation(); if (e.target.value) { e.target.value = ""; LOOK_UI.q = ""; findLooks(); } else e.target.blur(); } })),   // Esc empties it first, then leaves it, as the Assets search's does
     chips);
 }
-/** The search or the chip changed: the cards it lets through shown (the profile's own always), the rest hidden, those shown drawn if stale; the line saying none is left when so. */
-function findLooks() {
+/**
+ * The search or the chip changed: the cards it lets through shown (the profile's own always), in ♥ Liked's order
+ * there, the rest hidden, those shown drawn if stale; the line saying none is left when so. Scrolled to the top, but
+ * not with `stay` (a look liked or unliked under ♥ Liked: the cards follow where they are).
+ */
+function findLooks(stay = false) {
   const grid = $("panel").querySelector(".lookgrid"), none = $("panel").querySelector(".lookgrid-none");
   if (!grid) return;
   const shown = lookFilter(), look = S.profile.style.look;
   let any = false;
   for (const card of grid.children) { const on = shown(card.dataset.id); card.hidden = !on && card.dataset.id !== look; any = any || on; }
   grid.classList.toggle("finding", lookFinding());
-  if (none) none.hidden = !lookFinding() || any;
-  grid.scrollTop = 0; LOOKCARDS.scroll = 0;
-  hoverLook(null);
+  sortLooks(grid);
+  if (none) { none.hidden = !lookFinding() || any; none.textContent = noLooks(); }
+  if (!stay) { grid.scrollTop = 0; LOOKCARDS.scroll = 0; hoverLook(null); }
   refreshLookCards();
 }
 /** Draws the cards waiting, one a frame, while the Look sheet is open; not while something is dragged (as the size thumbnails wait), nor one the search hides (drawn when it shows: refreshLookCards). */
@@ -6568,6 +6605,7 @@ const SHELL_ICONS = {
   download: '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
   upload: '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  heart: '<path d="M12 20s-7.5-4.6-7.5-10.1A4.4 4.4 0 0 1 12 7a4.4 4.4 0 0 1 7.5 2.9C19.5 15.4 12 20 12 20Z"/>',   // a look liked, in the Look sheet (filled by CSS where it is)
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
 };
 const ico = (k, px = 20) => el("span", { class: "ico", style: `display:inline-grid;width:${px}px;height:${px}px`, innerHTML: `<svg viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SHELL_ICONS[k]}</svg>` });

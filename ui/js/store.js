@@ -277,6 +277,8 @@ export function normalizeSettings(raw) {
     recentFonts: [...new Set((Array.isArray(s.recentFonts) ? s.recentFonts : []).map((f) => str(f).replace(/["\\]/g, "").trim().slice(0, 80)).filter(Boolean))].slice(0, RECENT_FONTS),
     // how many times each look was made a profile's on this computer, by its card or a hand of Surprise me kept (the Look sheet's ★ Most used): whole counts of looks there are
     lookUse: Object.fromEntries(LOOK_IDS.map((id) => [id, Math.floor(num(s.lookUse && typeof s.lookUse === "object" ? s.lookUse[id] : 0, 0, 0, 1e6))]).filter(([, n]) => n > 0)),
+    // the looks liked on this computer with the ♡ on their cards (the Look sheet's ♥ Liked), the latest liked first: looks there are, each once
+    lookLikes: [...new Set((Array.isArray(s.lookLikes) ? s.lookLikes : []).filter((id) => LOOK_IDS.includes(id)))],
     recipes: normalizeRecipes(s.recipes),
     layouts,
     surprise: normalizeSurprise(s.surprise, layouts.map((l) => l.id)),

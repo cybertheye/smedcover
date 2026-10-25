@@ -128,7 +128,8 @@ as tags or as text, see 9.5), and by profile id the sizes the Export window leav
 none unticked is not kept; `normalizeExportSizes`) and the folder its exports go into (`exportDirs`: `{profile id: path}`,
 none until the first export picks one); adjustment scope (`scope`: `all`, `orient` or `size`, see 4.1; kept, but every start sets it to the defaults' own, `startScope()`); how many times
 each look was made a profile's on this computer, by its card or by a hand of Surprise me kept (`lookUse`: whole counts,
-only of looks there are and above 0 — the Look sheet's ★ Most used, 9.5); and the user's own
+only of looks there are and above 0 — the Look sheet's ★ Most used, 9.5); the looks liked there by the ♡ on their cards
+(`lookLikes`: look ids, the latest liked first, each once, only of looks there are — its ♥ Liked); and the user's own
 Surprise me chances of each look's optional parts (`recipes`: {look: {params}}, only what was changed, checked by `normalizeRecipes`; see `deal.js`),
 and what Surprise me keeps (`surprise`: the parts to leave alone, `locks`, of `SURPRISE_LOCKS` — `look`, `theme`,
 `lettering`, `places`, `layout`; the chances set in Surprise me's
@@ -1801,12 +1802,18 @@ profile's first, and not while anything is dragged (`drawLookCards()`), and afte
 (`refreshLookCards()`). A card under the pointer for 140 ms shows its look on the canvas (`hoverLook()`,
 `PREVIEW.look`, see below). A click makes it the profile's (`pickLook()` in `app.js`, not `deal.js`'s) and counts it
 (`countLook()`, into `settings.lookUse`), as `dealClose()` counts a hand of Surprise me kept in a look other than the
-cover had before the window's first deal.
+cover had before the window's first deal. A card is two buttons side by side, not one in the other: the look (`.lookpick`,
+its picture and name, which previews and picks) and, over the right end of the name, its ♡ (`likeButton()`, `.lookheart`),
+which likes the look or unlikes it (`likeLook()`: into `settings.lookLikes`, the latest first) and neither picks nor
+previews it (it stops its click, and the pointer on it ends a preview).
 
 Above the cards, `lookFinder()`: a search field and a chip for each kind of look (`LOOK_CATEGORIES`; what kind each
-look is, one or more, `LOOK_TAGS` in `style.js`, which a test holds to every look and to a handful of looks a kind), and
-*★ Most used* once something is counted (`mostUsed()`: the `MOST_USED`, six, most counted). `LOOK_UI` keeps what is
-typed and picked for the session. `lookFilter()` is the test they make — the chip's kind or the most used, then every
+look is, one or more, `LOOK_TAGS` in `style.js`, which a test holds to every look and to a handful of looks a kind),
+*★ Most used* once something is counted (`mostUsed()`: the `MOST_USED`, six, most counted), and *♥ Liked*, always
+(`settings.lookLikes`, in its order: `sortLooks()` sets CSS `order` under it, after the profile's own; with nothing liked,
+the line under the cards says how to like one, `noLooks()`; a look liked or unliked under it shows or hides at once,
+`findLooks(true)`, where the cards are). `LOOK_UI` keeps what is
+typed and picked for the session. `lookFilter()` is the test they make — the chip's kind, the most used or the liked, then every
 word typed in the look's names, its `about` or its kinds' names, each in both languages (`bothLangs()`), compared
 `folded()` as the Assets sheet's search compares them. They only hide cards
 (`findLooks()` sets `hidden` on those it does not let through, without building the sheet again, so the field keeps
@@ -2167,6 +2174,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | change how the chances window shows and sets the chances | `DOTS`, `EVEN_DOTS`, `dotsOf()`, `withDots()` (the looks' dots) and `moveShare()` (a bar's divider) in `deal.js`; `oddsLooks()`, `oddsGroup()` and `oddsDialog()` in `app.js` |
 | change how the AI generate window is laid out | `genWin()`, `madeStrip()`, `specPreview()` and `KIND_ICONS` in `app.js`; `.dlg.genw` and the rules after it in `index.html` |
 | put a look in a kind, or add a kind | `LOOK_TAGS` and `LOOK_CATEGORIES` in `style.js`, a `look.cat.*` name in `i18n.js` (a test holds every look to a kind and every kind to a handful of looks) |
+| change ★ Most used or ♥ Liked in the Look sheet | `mostUsed()`, `countLook()`, `likeButton()`, `likeLook()`, `sortLooks()` and `lookFilter()` in `app.js`; what is kept, `lookUse` and `lookLikes` in `normalizeSettings()` (`store.js`) |
 | add a card that previews on the canvas | a kind in `PREVIEW`, what it changes in `previewed()`, its words in `previewTag()`, `previewSoon()` on its cards and `endPreview()` where they are built anew (`app.js`) |
 | add a token to the file names | `exportName()` in `store.js`; `NAME_TOKENS` and `NAME_TOKEN` in `app.js`; its chip's name `exp.tok.*` in `i18n.js` |
 | add a keyboard shortcut | the window's `keydown` listener in `app.js`, above `start()` (its order decides what a dialog, a field or Surprise me's window lets through); `MOD_KEY` writes it |
