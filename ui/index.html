@@ -121,10 +121,15 @@
   .shelf{display:grid;gap:10px}
   .shelf-h{display:flex;align-items:baseline;gap:12px}
   .shelf-h .cap .n{color:var(--text3)}
+  .shelf-h .info{align-self:center}   /* the row is lined up by baselines, which a drawn ⓘ has none of */
   .shelf-h .linkbtn:first-of-type{margin-left:auto}
   .shelf-groups{display:grid;gap:12px}
   .tiles.shapes{grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
-  .tiles.shapes .tile{border-radius:9px}
+  /* the colour block's edges: grey shapes on a lighter ground, the one in use in the accent (not the channel's colour on each) */
+  .shp{height:38px;min-width:0;border-radius:9px;border:1px solid var(--line);background:rgba(0,0,0,.22);padding:4px;color:var(--text3);display:flex;cursor:pointer}
+  .shp svg{width:100%;height:100%;border-radius:5px;background:rgba(255,255,255,.1)}
+  .shp:hover{border-color:#fff;color:var(--text2)}
+  .shp.on{border:2px solid var(--acc);color:var(--acc);padding:3px}
 
   /* Look → every look as a card, the cover drawn in it; the cards scroll on their own so the look's settings stay near */
   .lookgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:max-content;gap:10px;max-height:min(48vh,440px);overflow-y:auto;padding:2px 4px 2px 2px;margin:0 -4px 0 -2px;scrollbar-gutter:stable}
@@ -144,6 +149,14 @@
   .lookfind-q:focus-within{border-color:color-mix(in srgb,var(--acc) 70%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,var(--acc) 14%,transparent)}
   .lookfind-q input[type=text]{flex:1;min-width:0;height:100%;padding:0;border:0;border-radius:0;background:transparent;color:var(--text);font-size:13px;box-shadow:none}
   .lookchips{gap:6px}
+  /* under the cards, Tune this look: its heading opens and shuts the look's description, a chevron at its end as on the drawer's groups */
+  .tunehead{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+  .tunehead b{min-width:0}
+  .tunehead.folds{cursor:pointer;user-select:none}
+  .tunehead .fold{flex:none;margin-left:auto;width:26px;height:26px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--text2);display:grid;place-items:center;cursor:pointer}
+  .tunehead.folds:hover .fold{background:rgba(255,255,255,.08);color:var(--text)}
+  .tunehead .chev{width:7px;height:7px;margin:0 5px 0 0;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform .15s}
+  .tunehead .fold[aria-expanded=true] .chev{transform:rotate(45deg);margin:0 0 5px}
   #pvtag{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);z-index:4;padding:6px 14px;border-radius:999px;background:rgba(28,30,40,.82);border:1px solid rgba(255,255,255,.22);font-size:12.5px;white-space:nowrap;pointer-events:none}
   #pvtag[hidden],#stage.v3 #pvtag{display:none}
 
@@ -210,7 +223,13 @@
   :where(html.bars) ::-webkit-scrollbar-track,:where(html.bars) ::-webkit-scrollbar-corner{background:transparent}
   :where(html.bars) ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border:3px solid transparent;background-clip:padding-box;border-radius:6px}
   :where(html.bars) ::-webkit-scrollbar-thumb:hover{background-color:rgba(255,255,255,.3)}
-  .scroll::-webkit-scrollbar-track{background:transparent}
+  /* a pane's scrollbar is not cut to the pane's rounded corners (WebKit draws it over them, as Chromium does), so its
+     track stops short of them, a little less than the corner's radius from either end: the bar stays inside the pane */
+  :where(html.bars) #menu::-webkit-scrollbar-track{margin:14px 0}
+  :where(html.bars) #fpop::-webkit-scrollbar-track{margin:12px 0}
+  :where(html.bars) :is(#letterwin,#cropwin,#weavewin,#brushwin)::-webkit-scrollbar-track{margin:16px 0}
+  :where(html.bars) #modal .dlg::-webkit-scrollbar-track{margin:20px 0}
+  .scroll::-webkit-scrollbar-track{background:transparent;margin:18px 0}
   .scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border:3px solid transparent;background-clip:padding-box;border-radius:6px}
   .scroll::-webkit-scrollbar-thumb:hover{background-color:rgba(255,255,255,.3)}
 
@@ -283,7 +302,12 @@
   .psec-b>.fxs>span.jump:hover{opacity:1}
   .scene-ping{position:fixed;width:20px;height:20px;margin:-10px 0 0 -10px;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px #000;pointer-events:none;z-index:30;animation:scene-ping .9s ease-out forwards}
   @keyframes scene-ping{from{transform:scale(1);opacity:1}to{transform:scale(3.2);opacity:0}}
-  .info{display:inline-grid;place-items:center;width:15px;height:15px;font-size:12px;opacity:.7;cursor:help;font-weight:400}
+  /* the ⓘ, its middle at the middle of the letters beside it, .35em over their baseline (the em the text's). In a row of
+     boxes it is centred on the caption's line, whose middle (Noto Sans SC's, at any line height) is .1em higher than
+     its letters' — hence top; in a line of text vertical-align puts it .1em higher than that first. So a caption
+     beside it in a row must not keep a margin of its own there (.capi). */
+  .info{display:inline-block;flex:none;position:relative;top:.1em;width:14px;height:14px;vertical-align:calc(.45em - 7px);opacity:.7;cursor:help}
+  .info svg{display:block;width:100%;height:100%}
   .info:hover{opacity:1;color:var(--acc)}
   .sub{font-size:12px;opacity:.6;margin-bottom:6px;display:flex;align-items:center;gap:4px}
   /* a colour: a row of its own, as a checkbox is — the swatch, its name, then "automatic" or a way back to it */
@@ -391,6 +415,9 @@
   #focustag{position:absolute;top:8px;left:50%;transform:translateX(-50%);max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--acc);color:var(--acc-ink);font:700 12px var(--ui);padding:4px 12px;border-radius:999px;pointer-events:none}
   #focustag.off{background:#555;color:#fff}
   .lhead{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  /* a caption and its ⓘ (capInfo): the row keeps the space under the caption, so the two are centred on each other */
+  .capi{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+  .capi>.cap,.lhead>.capi{margin:0}
   .lbtns{display:flex;gap:6px}
   .lfilter{margin:8px 0}   /* the list's chips: all, the user's, the layout's (LAYERS_UI) */
   .lfilter .seg .btn{flex:1;min-width:0;padding:5px 8px;font-size:12px;overflow:hidden;text-overflow:ellipsis}

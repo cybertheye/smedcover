@@ -1443,6 +1443,10 @@ value), so a group's sliders, values and checkboxes line up. The group's body ta
 children are the grid's items, a slider's three parts a column each, any other control across the three. A popover of
 the bar over the canvas lays a group out the same way. `layerSection()` makes the Layer group every layer has,
 and `swatch()` a small colour swatch (optionally automatic).
+The ⓘ is drawn (`INFO_ICON`), not the character, whose place in the line changes from font to font; `.info` sets its
+middle at the middle of the letters beside it, in a line of text (`vertical-align`) or a row of boxes (centred, then
+`top` for the line's middle being higher than the letters'). A caption with an ⓘ in a row is `capInfo()`, the row
+(`.capi`) keeping the space under the caption so that no margin pulls the caption off the ⓘ's middle.
 
 ### 9.2 Working on the canvas
 
@@ -1666,7 +1670,9 @@ anew to its width once the column has settled. A button pressed that is drawn an
 drawer; `showSheet()` to the dock's lit button. Below 1000 px wide (`STACKED`; the desktop app's window is never narrower than 1080) everything stands one under
 another instead, the dock a row of buttons, and nothing is tight. Where scrollbars take room (Windows, Linux, a Mac set
 to show them always), `start()` finds it out with a probe and sets `html.bars`, and every scrollbar is drawn thin, as
-the sheets' are.
+the sheets' are. A pane's bar is not cut to its rounded corners, so its track stops a little short of them at either
+end (`::-webkit-scrollbar-track` margins: the sheets, the drawer and Settings' page always, the dialogs, the ⋯ menu,
+the bar's popover and the letter, crop, weave and brush windows under `html.bars`), and the bar stays inside the pane.
 
 **The top bar and ⋯.** `syncTop()` builds the bar: the profile and the channel (two menus), undo and redo, Surprise
 me (its key, Space, in a `kbd` on it), Export (its tip naming ⌘E), and ⋯ (`MENU`, `renderMenu()`, placed under its button by `openMenu()`): what changes a whole cover (*Set
@@ -1753,6 +1759,10 @@ word typed in the look's names, its `about` or its kinds' names, each in both la
 the keyboard): the profile's own look is never hidden, and comes first while they are at work (`.finding`, CSS
 `order`); `drawLookCards()` and `refreshLookCards()` pass a hidden card by, so it is drawn once it shows; a line says
 when none is let through. Composing a word (pinyin, kana) changes nothing until it is done.
+
+Under the cards, *Tune this look*: its heading (`tuneHead()`) keeps the look's `about` shut until a click on the line
+or its chevron opens it (`TUNE_UI.about`, for the session; shown or hidden in place, the sheet not built again), then
+the look's sliders.
 
 **Previews from cards.** Three kinds of card show on the canvas what a click would do, a moment after the pointer comes
 (140 ms): a look's (`hoverLook()`), a text effect's (`hoverFx()`) and a layout preset's (`hoverPreset()`). One object
@@ -2071,7 +2081,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 |---|---|
 | add a channel graphic | write the draw function in `graphics.js` and `registerGraphics()` it; `assets.js` needs nothing |
 | add a sticker | `stickers.js` |
-| add a colour block shape | `ACCENT_SHAPES` in `layers.js`, `paintAccent()` and `edgePoints()` in `render.js`, a name in `i18n.js` |
+| add a colour block shape | `ACCENT_SHAPES` in `layers.js`, `paintAccent()` and `edgePoints()` in `render.js`, its tile in the Layout sheet (`SHAPE_ICONS` in `app.js`), a name in `i18n.js` |
 | add a template | `TEMPLATES` and `layout()` in `layout.js`, a name in `i18n.js` |
 | show the Layout sheet's template box again, or change the colour block's *Size & slant* | `TEMPLATE_BOX` and `layoutBox()`; `blockSection()`, `blockSliders()`, `layoutAdjuster()` and `layoutScope()` in `app.js` |
 | add a property to a layer | `PROPS` and `normalizeLayer()` in `layers.js`, `PAINT` in `render.js`, `typeControls()` in `app.js` (`headlineControls()` for the title and text layers) |

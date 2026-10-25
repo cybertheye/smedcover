@@ -15,6 +15,8 @@ const STR = {
   "sheet.lookSub": ["风格重画整张封面，文字和位置不变", "A look redraws the whole cover; the words and places stay"],
   "look.current": ["当前", "Current"],
   "look.tune": ["调这个风格 · {0}", "Tune this look · {0}"],
+  "look.aboutShow": ["展开风格简介", "Show what this look is"],
+  "look.aboutHide": ["收起风格简介", "Hide what this look is"],
   "look.previewing": ["预览：{0} · 点卡片换上，移开就恢复", "Preview: {0} · click its card to use it, move away to go back"],
   "look.search": ["搜索风格", "Search looks"],
   "look.searchPh": ["搜：夜景、胶片、手绘…", "Search: night, film, hand-drawn…"],

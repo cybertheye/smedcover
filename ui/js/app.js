@@ -2,7 +2,7 @@
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
 import { virtualSize, layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot, ORIENTS, orientOf, orientOfKey, layoutOf, ownLayout, setLayoutOf, followLayout, layoutByOrient, SIDES, sideOf, sideToward, sideLike, scaleBlock, sizeOfKey } from "./layout.js";
-import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, paintAccent, handles, showsFrame, sceneHandleAt, coverLayout, partsOf, coverAt } from "./render.js";
+import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, handles, showsFrame, sceneHandleAt, coverLayout, partsOf, coverAt } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang, bothLangs } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
@@ -849,7 +849,7 @@ const px = (v) => String(Math.round(v)), times = (v) => v.toFixed(2) + "×", pct
 /** A sheet's heading: what it is for, in a word, and a line under it. */
 const sheetHead = (title, sub) => el("div", { class: "sheet-h" }, el("b", {}, title), sub && el("div", { class: "hint", style: "margin:0" }, sub));
 /** A field's caption with its longer explanation behind an ⓘ beside it. */
-const capInfo = (key, tip) => el("div", { class: "lhead", style: "justify-content:flex-start;gap:6px" }, cap(key), info(tip));
+const capInfo = (key, tip) => el("div", { class: "capi" }, cap(key), info(tip));
 /** Content: the channel, and the cover's words — its title, subtitle and tag; copying another channel's at its foot. */
 function contentSheet() {
   const c = S.cover;
@@ -1313,14 +1313,30 @@ function tile(ref, onRemove) {
     ondragend: () => { DRAGGED_ASSET = null; } },
     cv, onRemove && el("button", { class: "x", title: t("assets.remove"), onclick: (e) => { e.stopPropagation(); onRemove(); } }, "×"));
 }
+/**
+ * The colour block's edges as the Layout sheet's tiles draw them, in a 40×28 box: the block below its edge, filled with
+ * the tile's colour (grey, the one in use in the accent) rather than the channel's, so the row reads as a set of shapes.
+ */
+const SHAPE_ICONS = {
+  slant: '<path d="M0 20 L40 9 V28 H0Z"/>',
+  flat: '<path d="M0 15 H40 V28 H0Z"/>',
+  reverse: '<path d="M0 9 L40 20 V28 H0Z"/>',
+  zigzag: '<path d="M0 16 L5 11 L10 16 L15 11 L20 16 L25 11 L30 16 L35 11 L40 16 V28 H0Z"/>',
+  wave: '<path d="M0 15 Q5 9 10 15 T20 15 T30 15 T40 15 V28 H0Z"/>',
+  steps: '<path d="M0 16 H6 V11 H12 V16 H18 V11 H24 V16 H30 V11 H36 V16 H40 V28 H0Z"/>',
+  torn: '<path d="M0 15 L4 12 L7 16 L11 13 L14 17 L18 12 L22 15 L25 12 L29 16 L33 13 L36 16 L40 13 V28 H0Z"/>',
+  chevron: '<path d="M0 11 L20 19 L40 11 V28 H0Z"/>',
+  scallop: '<path d="M0 14 A5 5 0 0 0 10 14 A5 5 0 0 0 20 14 A5 5 0 0 0 30 14 A5 5 0 0 0 40 14 V28 H0Z"/>',
+  double: '<path d="M0 11 H40 V14 H0Z M0 18 H40 V28 H0Z"/>',
+  stripes: '<path d="M0 15 H40 V28 H0Z"/><path d="M-2 28 L6 15 M6 28 L14 15 M14 28 L22 15 M22 28 L30 15 M30 28 L38 15 M38 28 L46 15" fill="none" stroke="#15151c" stroke-width="3"/>',
+  arc: '<path d="M0 21 Q20 5 40 21 V28 H0Z"/>',
+};
 /** Tile for a colour-block shape: applies it to the colour-block layer instead of adding a layer. */
 function shapeTile(shape) {
-  const cv = el("canvas", { width: 132, height: 132 }), x = cv.getContext("2d"), L = layer("accent");
-  x.fillStyle = "#0a0a12"; x.fillRect(0, 0, 132, 132);
-  x.scale(0.22, 0.22);
-  paintAccent(x, shape, { accent: [[0, 330], [600, 250], [600, 600], [0, 600]], edge: { nx: 0, ny: -1 } }, hexToRgb(cat().color));
-  return el("div", { class: "tile", title: t("shape." + shape), style: L.shape === shape ? "border-color:var(--acc)" : "",
-    onclick: () => { L.shape = shape; L.visible = true; S.layerId = "accent"; touch({ cover: true, panel: true, side: true }); } }, cv);
+  const L = layer("accent"), on = L.shape === shape;
+  return el("button", { class: "shp" + (on ? " on" : ""), title: t("shape." + shape), "aria-label": t("shape." + shape), "aria-pressed": String(on),
+    innerHTML: `<svg viewBox="0 0 40 28" preserveAspectRatio="none" fill="currentColor" aria-hidden="true">${SHAPE_ICONS[shape]}</svg>`,
+    onclick: () => { L.shape = shape; L.visible = true; S.layerId = "accent"; touch({ cover: true, panel: true, side: true }); } });
 }
 /** Assets: two panes — vector assets (made in code or by AI, shared by every profile) and the bitmap library. */
 /** The colour block's edge, one shape for every size and layout (in the Layout sheet). */
@@ -2307,7 +2323,7 @@ function cutPane() {
     !cutReady(now) && el("div", { class: "hint err" }, t("cutset.wayMissing")),
     CUTDL.error && el("div", { class: "hint err" }, CUTDL.error),
     el("div", { class: "hint" }, t("cutset.speed")),
-    el("div", {}, el("label", { class: "cap" }, t("cutset.proxy"), info(t("cutset.proxyHint"))), textInput(S.settings.cutProxy, (v) => setting("cutProxy", v.trim()), { placeholder: "http://127.0.0.1:7890" })),
+    el("div", {}, el("label", { class: "cap" }, t("cutset.proxy"), " ", info(t("cutset.proxyHint"))), textInput(S.settings.cutProxy, (v) => setting("cutProxy", v.trim()), { placeholder: "http://127.0.0.1:7890" })),
     el("div", { class: "hint" }, t("cutset.licence")),
   ];
 }
@@ -2337,7 +2353,7 @@ function textAiPane() {
       el("div", {}, cap("ai.auth"), select([["key", t("ai.auth.key")], ["bearer", t("ai.auth.bearer")]], c.auth, (v) => set("auth", v))),
       el("div", {}, cap("ai.maxTokens"), el("input", { type: "number", min: 512, max: 64000, step: 256, value: c.maxTokens, onchange: (e) => set("maxTokens", e.target.value, true) })),
     ],
-    el("div", {}, el("label", { class: "cap" }, t("ai.timeout"), info(t("ai.timeoutHint"))), el("input", { type: "number", min: 30, max: 1800, step: 30, value: c.timeout, onchange: (e) => set("timeout", e.target.value, true) })),
+    el("div", {}, el("label", { class: "cap" }, t("ai.timeout"), " ", info(t("ai.timeoutHint"))), el("input", { type: "number", min: 30, max: 1800, step: 30, value: c.timeout, onchange: (e) => set("timeout", e.target.value, true) })),
     field("ai.proxy", "proxy", { placeholder: "http://127.0.0.1:7890" }),
     el("div", { class: "wide" }, cap("ai.notes"), el("textarea", { value: c.notes, spellcheck: false, style: "height:84px;font-size:14px", placeholder: t("ai.notesPh"), oninput: (e) => set("notes", e.target.value) })),
     el("div", { class: "aifoot" }, testBtn, testLine(AI.test)),
@@ -3116,6 +3132,19 @@ function layoutEditor(p, i, fresh = false) {
   LAYED.redraw = redraw;
   redraw();
 }
+/** Whether Tune this look, in the Look sheet, shows the look's description: shut until its heading is clicked, for the session. */
+const TUNE_UI = { about: false };
+/** Tune this look's heading: the look's name and an ⓘ, and while the look has a description, a chevron; a click on the line opens or shuts it. */
+function tuneHead(L) {
+  const fold = (e) => {
+    TUNE_UI.about = !TUNE_UI.about;
+    const box = e.currentTarget.closest(".box"), b = box.querySelector(".fold");
+    box.querySelector(".about").hidden = !TUNE_UI.about;
+    b.setAttribute("aria-expanded", String(TUNE_UI.about)); b.title = t(TUNE_UI.about ? "look.aboutHide" : "look.aboutShow");
+  };
+  return el("div", { class: "tunehead" + (L.about ? " folds" : ""), onclick: L.about && fold }, el("b", {}, t("look.tune", L.name[getLang()]), " ", info(t("style.lookHint"))),   // the ⓘ in the line, after the name's last word when it wraps
+    L.about && el("button", { class: "fold", "aria-expanded": String(TUNE_UI.about), title: t(TUNE_UI.about ? "look.aboutHide" : "look.aboutShow") }, el("span", { class: "chev" })));
+}
 /** Look: every look as a card, the cover drawn in it; under the cards, this look's settings and how Surprise me matches it. */
 function lookSheet() {
   const st = S.profile.style;
@@ -3125,8 +3154,8 @@ function lookSheet() {
     sheetHead(t("sheet.look"), t("sheet.lookSub")),
     lookFinder(),
     lookCards(),
-    el("div", { class: "box" }, el("div", { class: "lhead", style: "justify-content:flex-start;gap:6px;margin-bottom:6px" }, el("b", {}, t("look.tune", L.name[getLang()])), info(t("style.lookHint"))),
-      L.about && el("div", { class: "about" }, L.about[getLang()]),
+    el("div", { class: "box" }, tuneHead(L),
+      L.about && el("div", { class: "about", hidden: !TUNE_UI.about }, L.about[getLang()]),
       L.params.map((d) => [d.text
         ? el("div", { class: "sl", style: "grid-template-columns:84px 1fr" }, el("span", {}, d.name[getLang()]),
             textInput(vals[d.key], (v) => tune(d.key, v), { maxLength: d.max, placeholder: d.placeholder ? d.placeholder[getLang()] : "" }))
@@ -3354,7 +3383,7 @@ function presetCards() {
       el("button", { class: "btn", onclick: () => { endPreview("layout"); layoutEditor(p, i); } }, t("layouts.edit")),
       el("button", { class: "btn", onclick: () => { endPreview("layout"); deleteLayout(p, i, renderPanel); } }, t("layouts.delete"))));
   return el("div", {},
-    el("div", { class: "lhead" }, capInfo("layouts.list", t("layouts.about")),
+    el("div", { class: "lhead", style: "margin-bottom:8px" }, capInfo("layouts.list", t("layouts.about")),
       el("button", { class: "linkbtn", disabled: list.length >= LAYOUTS.most, title: t("layouts.newTip"),
         onclick: () => layoutEditor(normalizeLayouts([{ ...newPreset(), id: newLayoutId(), name: nextLayoutName() }])[0], list.length, true) }, t("layouts.new"))),
     list.length ? el("div", { class: "presets", onpointerleave: () => hoverPreset(null) }, list.map(card)) : el("div", { class: "hint", style: "margin:0" }, t("layouts.none")));
@@ -3886,8 +3915,10 @@ function renameLayer(id) {
 // In the drawer on the right, each group of settings a line that opens to its controls (see psec), what it is set to
 // said on the line while it is shut; the most used of them on the bar over the canvas too (see barItems). Explanations
 // sit behind an ⓘ (hover, or click to read it as a toast); only warnings are written out.
+/** The ⓘ, drawn rather than the character, whose place in the line would change from font to font (see .info in index.html). */
+const INFO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M12 11v5.5"/><path d="M12 7.6h.01"/></svg>';
 /** An ⓘ that shows `text` on hover, and in a bubble beside it when clicked. */
-const info = (text) => el("span", { class: "info", title: text, onclick: (e) => { e.stopPropagation(); showTip(e.currentTarget, text); } }, "ⓘ");
+const info = (text) => el("span", { class: "info", title: text, innerHTML: INFO_ICON, onclick: (e) => { e.stopPropagation(); showTip(e.currentTarget, text); } });
 /** A bubble with `text` by element `at` (wrapped, unlike a toast); the next click anywhere closes it. */
 function showTip(at, text) {
   const tip = $("tip") || document.body.appendChild(el("div", { id: "tip", hidden: true }));
