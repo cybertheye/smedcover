@@ -1,0 +1,65 @@
+{
+  "settings": {
+    "lang": "",
+    "scale": 2,
+    "format": "png",
+    "quality": 92,
+    "nameTemplate": "{n}-{channel}_{title}_{size}",
+    "scope": "orient",
+    "hideScene": false,
+    "glass": true,
+    "drawer": false,
+    "cutEngine": ""
+  },
+  "profile": {
+    "style": { "theme": "dark", "look": "cel", "lookSeed": 7 },
+    "sizes": [
+      { "w": 1920, "h": 1080 },
+      { "w": 1600, "h": 1200 },
+      { "w": 1200, "h": 1600 },
+      { "w": 1080, "h": 1920 },
+      { "w": 1200, "h": 1200 },
+      { "w": 900, "h": 383 }
+    ],
+    "starter": {
+      "name": { "zh": "我的品牌", "en": "My brand" },
+      "brand": { "name": "MY CHANNEL", "unit": "CHANNEL" },
+      "channels": [
+        { "id": "vlog", "name": { "zh": "日常", "en": "Vlog" }, "sub": "DAILY VLOG", "code": "VLOG", "color": "#fcee0a", "graphic": "camera" },
+        { "id": "tuto", "name": { "zh": "教程", "en": "Tutorials" }, "sub": "HOW-TO", "code": "TUTO", "color": "#00e5ff", "graphic": "probe" },
+        { "id": "proj", "name": { "zh": "作品", "en": "Projects" }, "sub": "PROJECTS", "code": "PROJ", "color": "#2dff8f", "graphic": "gear" }
+      ]
+    }
+  },
+  "layout": {
+    "byOrient": {
+      "wide": { "template": "split", "adjust": { "size": 0.21, "slant": 0.17, "tw": 1, "th": 1, "flip": false } },
+      "tall": { "template": "stack", "adjust": { "size": 0.14, "slant": 0.08, "tw": 1, "th": 1, "flip": false } },
+      "square": { "template": "banner", "adjust": { "size": 0.13, "slant": 0, "tw": 1, "th": 1, "flip": false } }
+    }
+  },
+  "surprise": {
+    "odds": {
+      "groups": {
+        "look": {}, "accent": {},
+        "lookFx": { "none": 0.45, "one": 0.33, "two": 0.22 }, "lookFxFrom": { "own": 0.6, "other": 0.4 },
+        "letters": {}, "bend": {}, "ground": {},
+        "layout": { "keep": 1 }
+      },
+      "chances": {
+        "rail": 0.8, "catnamePlate": 0.75, "subtitlePlate": 0.3, "textPlate": 0.35, "assetTint": 0.5, "sceneMoved": 0.4,
+        "subtitleLikeTitle": 0.5, "extra": 0.35, "toggleOn": 0.75, "toggleOff": 0.3
+      }
+    }
+  },
+  "ui": {
+    "columns": {
+      "left": { "min": 280, "width": 340 },
+      "right": { "min": 260, "width": 320 },
+      "setup": { "min": 340, "width": 420 }
+    },
+    "centreMin": 360,
+    "centreRoomy": 560,
+    "glassSlowMs": 28
+  }
+}
