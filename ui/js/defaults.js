@@ -22,8 +22,13 @@ async function shipped() {
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const freeze = (v) => { if (v && typeof v === "object") { for (const x of Object.values(v)) freeze(x); Object.freeze(v); } return v; };
 
+/** defaults.json as read, or a word in the window that it could not be (no module can start without it). */
+async function read() {
+  try { return JSON.parse(await shipped()); }
+  catch (e) { if (!NODE && globalThis.document && document.body) document.body.textContent = `SmedCover could not read its defaults (defaults.json): ${e.message}`; throw e; }
+}
 /** defaults.json as shipped, never changed: what custom.json is checked against. */
-export const SHIPPED = freeze(JSON.parse(await shipped()));
+export const SHIPPED = freeze(await read());
 /** The defaults in use: defaults.json with custom.json laid over it (layOver). The one object, for as long as the page lives. */
 export const DEFAULTS = clone(SHIPPED);
 
@@ -63,6 +68,7 @@ function layInto(into, raw, like, at, out) {
  */
 function fit(v, like, at, out) {
   const kind = kindOf(like);
+  if (kind === "object" && kindOf(v) === "string" && Object.keys(like).sort().join() === "en,zh") return { zh: v, en: v };   // a name in one language, for both
   if (!kind || kindOf(v) !== kind) { out.push(at); return undefined; }
   if (kind === "object") { const o = {}; layInto(o, v, like, at, out); return o; }
   if (kind !== "array") return v;

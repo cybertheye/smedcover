@@ -546,8 +546,8 @@ canvas; and, when the size shown has its own layout, *This size has its own layo
 the sliders then change the profile's own, which that size does not follow). A slider dragged draws the cover as a
 draft (`draftTouch()`), one step of undo; a diamond let go on the canvas builds the drawer again, so the sliders follow.
 The strip marks a size with its own layout (`markStrip()`). The template box itself (`layoutBox()`: the template, the
-block's and the title box's sliders, the swap, the way back to the template's own, *Wide side by side, tall and square
-stacked*) is hidden for now (`TEMPLATE_BOX` false in `app.js`, its code kept): the template is changed by a layout preset. A diamond dragged on the canvas changes what the scope
+block's and the title box's sliders, the swap, the way back to the template's defaults, *Wide split, tall stacked, square
+banner*) is hidden for now (`TEMPLATE_BOX` false in `app.js`, its code kept): the template is changed by a layout preset. A diamond dragged on the canvas changes what the scope
 says, but with `all` on a size with its own layout it changes that one: it is the one drawn under the pointer. A
 template chosen for a size starts from the adjustments the profile keeps for that template. A size removed in Settings
 takes its own with it; `normalizeProfile()` keeps `layoutBy` only for the profile's sizes, templates there are, and

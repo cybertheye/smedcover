@@ -6939,7 +6939,7 @@ const absent = (v) => (e) => { if (HOST === "server") throw e; return v; };
 async function customDefaults() {
   const text = await files.read("custom.json").catch(() => null);
   let raw = null;
-  try { raw = text ? JSON.parse(text) : null; } catch (e) { layOver(null); return () => toast(t("msg.customBad", e.message)); }
+  try { raw = text ? JSON.parse(text.replace(/^\uFEFF/, "")) : null; } catch (e) { layOver(null); return () => toast(t("msg.customBad", e.message)); }
   const left = layOver(raw);
   return left.length ? () => toast(counted("msg.customLeft", left.length, left.slice(0, 4).join(", ") + (left.length > 4 ? "…" : ""))) : null;
 }

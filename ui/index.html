@@ -1006,7 +1006,7 @@
   /* a short window: the words' box lower and each kind's mark beside its name, so the left column still holds it all */
   @media(max-height:780px){.gform,.gfields{gap:12px}.gform .cap{margin-bottom:6px}.gform textarea{height:68px}.gform textarea.tall{height:128px}
     .gkind{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:4px 8px;padding:10px 12px}.gkind .ico{width:22px;height:22px}.gkind small{grid-column:1/-1}}
-  @media(max-width:900px){.repbody,.genbody{grid-template-columns:1fr}.repside{max-height:none}}
+  @media(max-width:900px){.repbody{grid-template-columns:1fr}.genbody{flex-direction:column}.gform{width:auto}.repside{max-height:none}}
   .genw .seg .btn.dot::after{content:"";display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;background:var(--acc);vertical-align:2px}
   /* Assets → the way to AI stickers */
   button.scard.aientry{width:100%;text-align:left;color:var(--text);cursor:pointer;padding:12px 16px}
