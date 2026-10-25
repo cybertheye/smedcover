@@ -4184,7 +4184,7 @@ function firstLetter(L) {
  */
 function fxCards(L) {
   const lang = getLang(), st = S.profile.style, cur = EFFECTS[L.fx] ? L.fx : "auto";
-  const order = ["auto", ...(cur === "auto" ? [] : [cur]), ...FX_ORDER.filter((id) => id !== "auto" && id !== cur)];
+  const order = ["auto", ...FX_ORDER.filter((id) => id !== "auto")];   // one order, so a card picked stays where it was
   // what a picture is drawn from but its effect: the letter, the layer's face, colours and strengths, the look as the cover has it, the channel colour
   const from = [firstLetter(L), L.font || "", L.ink || "", L.hi || "", L.stroke ?? 1, L.shadow ?? 1, L.fxAmt ?? 1, st.look, st.lookParams[st.look] || null, st.lookSeed, st.theme, !!recordOf(mainPhoto()), cat().color];
   const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline"), letters: t("fx.kind.letters") };
@@ -4192,7 +4192,7 @@ function fxCards(L) {
   const card = (id, i) => {
     const e = EFFECTS[id], seed = e.seeded ? fxSeedOf(L) : 0, c = el("canvas", { width: FX_CARD.w, height: FX_CARD.h });
     // past FX_FOLDED, until See all: not shown in the drawer (the popover's row shows them), so their pictures wait to be scrolled to
-    const b = el("button", { class: "fxtile" + (id === cur ? " on" : "") + (i >= FX_FOLDED && !FX_UI.all ? " folded" : ""), "aria-pressed": String(id === cur), dataset: { name: e.name[lang] },
+    const b = el("button", { class: "fxtile" + (id === cur ? " on" : "") + (i >= FX_FOLDED && id !== cur && !FX_UI.all ? " folded" : ""), "aria-pressed": String(id === cur), dataset: { name: e.name[lang] },
       title: id === "auto" ? e.name[lang] : `${e.name[lang]} · ${kinds[e.menu || e.kind]}`, onpointerenter: () => hoverFx(L, id), onclick: () => pickFx(L, id) },
       c, el("span", {}, id === "auto" ? t("fx.cardAuto").split(" · ").map((w, i) => [i ? " · " : "", el("i", {}, w)]) : e.name[lang]));   // Automatic's two halves, each whole on its line
     fxPic(JSON.stringify([id, seed, ...from]), { id, seed, ch: from[0], L }, c, b);
@@ -4200,7 +4200,7 @@ function fxCards(L) {
   };
   return el("div", { class: "fxdeck" },
     el("div", { class: "fxhint" }, t("fx.cardsHint")),
-    fxRow(el("div", { class: "fxgrid", onpointerleave: () => hoverFx(L, null) }, order.map(card))),
+    fxRow(el("div", { class: "fxgrid", onpointerleave: () => hoverFx(L, null) }, order.map(card)), L),
     el("button", { class: "btn wide seeall", onclick: () => { FX_UI.all = !FX_UI.all; renderSide(); } }, FX_UI.all ? t("fx.seeFewer") : t("fx.seeAll", FX_ORDER.length - 1)));
 }
 /** Watches the effect rows' size (a popover laid out, the window resized), to say again at which ends there is more. */
@@ -4211,11 +4211,18 @@ const FXROWS = new ResizeObserver((seen) => { for (const e of seen) fxRowEnds(e.
  * turns the row too, until its end, then scrolls the popover as before. In the drawer the cards stay three to a row
  * and the arrows are not shown.
  */
-function fxRow(grid) {
+function fxRow(grid, L) {
   const arrow = (dir) => el("button", { class: "fxarrow " + (dir < 0 ? "l" : "r"), tabindex: -1, title: t(dir < 0 ? "fx.prev" : "fx.next"), "aria-label": t(dir < 0 ? "fx.prev" : "fx.next"),
     innerHTML: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${dir < 0 ? "M10 3 5 8l5 5" : "m6 3 5 5-5 5"}"/></svg>`,
     onclick: () => { const k = grid.children; glide(grid, dir * 6 * (k.length > 1 ? k[1].offsetLeft - k[0].offsetLeft : grid.clientWidth / 6)); } });
-  grid.addEventListener("scroll", () => fxRowEnds(grid.parentElement), { passive: true });
+  grid.addEventListener("scroll", () => { FX_UI.left = { id: L.id, x: grid.scrollLeft }; fxRowEnds(grid.parentElement); }, { passive: true });
+  requestAnimationFrame(() => {   // where it was scrolled to for this layer (a card picked draws the popover anew), else with the layer's own card in sight
+    if (!grid.isConnected) return;
+    const on = grid.querySelector(".fxtile.on");
+    if (FX_UI.left && FX_UI.left.id === L.id) grid.scrollLeft = FX_UI.left.x;
+    else if (on && on.offsetLeft + on.offsetWidth > grid.clientWidth) grid.scrollLeft = on.offsetLeft - (grid.clientWidth - on.offsetWidth) / 2;
+    fxRowEnds(grid.parentElement);
+  });
   grid.addEventListener("wheel", (e) => {
     const max = grid.scrollWidth - grid.clientWidth, to = grid._to ?? grid.scrollLeft;
     if (max < 1 || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || (e.deltaY < 0 ? to <= 0 : to >= max)) return;   // sideways already, or at its end: as the wheel goes
@@ -4521,12 +4528,12 @@ const readsOn = (hex) => { const c = hexToRgb(hex); return c[0] * 0.299 + c[1] *
  * words; the plates and marks under them).
  */
 function inksShown(L) {
-  if (!HEADLINES.includes(L.type)) return { ink: L.type === "brand" ? "#ffffff" : "#07070c" };
   const light = S.profile.style.theme === "light" && !recordOf(mainPhoto()) && !(LOOKS[S.profile.style.look] || LOOKS.cel).oneTheme;
+  if (!HEADLINES.includes(L.type)) return { ink: L.type === "brand" && !light ? "#ffffff" : "#07070c" };   // the brand row in the ground's lettering colour
   // the plates' and marks' own colour when left automatic: the channel colour, or on a plate of that colour ink or white
   const mark = L.plate && (!L.plateInk || L.plateInk.toLowerCase() === cat().color.toLowerCase()) ? readsOn(cat().color) : cat().color;
   // on plates of their own the words take what reads there; through a band or on a block set off, the lettering's colour
-  return { ink: L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff", mark,
+  return { ink: L.plate ? readsOn(L.plateInk || cat().color) : light ? "#07070c" : "#ffffff", mark,
     hi: L.hiPlate ? readsOn(L.hiPlateInk || mark) : L.hiMark && L.hiMark !== "circle" ? (L.ink || (L.plate ? readsOn(L.plateInk || cat().color) : light ? "#07070c" : "#ffffff")) : cat().color };
 }
 /** The title, subtitle and text layers alike: words, effect, bend, colours, lines, plate. */
@@ -5439,7 +5446,7 @@ function barItems(L) {
     // what its words and (the title, subtitle and text) its highlighted words are in, as the Colour group's swatches show them
     const shown = inksShown(L), ink = L.ink || (L.color === "accent" ? cat().color : shown.ink);
     items.push(sec("props.sec.color", "", { title: t("bar.color"), sep: true, dot: HEADLINES.includes(T) ? [ink, L.hi || shown.hi] : [ink] }));
-    if (HEADLINES.includes(T)) items.push(sec("props.sec.effect", t("bar.effect", fxLabel(L)), { icon: "wand" }), sec("props.bend", t("props.bend")));
+    if (HEADLINES.includes(T)) items.push(sec("props.sec.effect", t("bar.effect", fxLabel(L)), { icon: "wand" }), sec("props.bend", t("props.bend"), { off: inColumns(L) }));
     const byLook = columnsByLook(L);
     items.push({ key: "vertical", label: t("props.vertical"), title: t(byLook ? "props.verticalByLook" : "props.verticalTip", (LOOKS[S.profile.style.look] || LOOKS.cel).name[getLang()]), on: inColumns(L), off: byLook,
       act: () => { L.vertical = !L.vertical; touch({ cover: true, side: true }); } });
@@ -6678,7 +6685,8 @@ function ownTitleBar() {
   top.dataset.tauriDragRegion = "deep"; app.dataset.tauriDragRegion = ""; bar.dataset.tauriDragRegion = "";   // .app: its margin only, not what is in it
   for (const n of [top, app, bar]) n.addEventListener("pointerdown", (e) => { if (n === top ? !e.target.closest("button,select") : e.target === n) document.activeElement?.blur?.(); });   // .app: its margin, not the editor in it
   const win = globalThis.__TAURI__.window.getCurrentWindow(), room = () => win.isFullscreen().then((full) => html.classList.toggle("ownbar", !full)).catch(() => {});
-  if (!isMac) {
+  win.isDecorated().then((framed) => {
+    if (framed) return;   // a Mac's own buttons, over the see-through title bar
     const sign = { close: "M3 3l4 4M7 3l-4 4", min: "M2.5 5h5", zoom: "M5 2.5v5M2.5 5h5" };
     const button = (k, act) => el("button", { class: k, tabindex: "-1", onmousedown: (e) => e.preventDefault(), onclick: () => win[act]().catch(fail) },   // a field keeps its focus, as with a Mac's
       el("span", { innerHTML: `<svg viewBox="0 0 10 10" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="${sign[k]}"/></svg>` }));
@@ -6686,7 +6694,7 @@ function ownTitleBar() {
     box.dataset.tauriDragRegion = "";   // between the buttons, as on the top bar under them
     const used = (on) => box.classList.toggle("idle", !on);
     win.isFocused().then(used).catch(() => {}); win.onFocusChanged(({ payload }) => used(payload)).catch(() => {});
-  }
+  }).catch(() => {});
   html.classList.add("ownbar");
   addEventListener("resize", () => { later("ownbar", 150, room); if (isMac) later("ownbar-out", 1000, room); });
 }
@@ -6697,13 +6705,13 @@ function ownTitleBar() {
  * the blur, or a wish for less motion (prefers-reduced-motion), is painted straight in.
  */
 const AMB = { fade: null };   // the old ground's fade, while it runs
-const ambCtx = (c) => c.getContext("2d", { willReadFrequently: true });   // tiny, and read back (ambientMoved)
+const ambCtx = (c) => c.getContext("2d");   // accelerated, as the cover's canvas is: reading back 48 pixels across (ambientMoved) is cheap, reading back the cover would not be
 function paintAmbient() {
   const src = $("cv"), dst = $("amb"), old = $("amb0");
   if (!src.width || !src.height) return;
   const h = Math.max(1, Math.round((48 * src.height) / src.width)), left = AMB.fade ? +getComputedStyle(old).opacity : 0;
   AMB.fade?.cancel(); AMB.fade = null; old.hidden = true;
-  if (old.height !== dst.height) old.height = dst.height;
+  if (old.height !== dst.height) { const was = el("canvas", { width: 48, height: old.height }); ambCtx(was).drawImage(old, 0, 0); old.height = dst.height; ambCtx(old).drawImage(was, 0, 0, 48, old.height); }   // a new shape mid-fade: what is left of it kept
   const o = ambCtx(old);
   o.globalCompositeOperation = "destination-in"; o.fillStyle = `rgba(0,0,0,${left})`; o.fillRect(0, 0, 48, old.height);   // what is left of the ground before
   o.globalCompositeOperation = "destination-over"; o.drawImage(dst, 0, 0); o.globalCompositeOperation = "source-over";   // over the one it was fading into

@@ -1832,9 +1832,9 @@ preset's, as their cards are built anew, `renderBar()` the effect's, as its card
 are; `pickLook()` and `pickFx()` end theirs before putting theirs on.
 
 **Text effects as cards.** The Effect group of a lettered layer's properties (`fxControl()`; the bend is a group of its
-own after it, `bendControl()`) begins with `fxCards(L)`: Automatic, then the layer's own effect, then the others in
-`FX_ORDER`. Every card is built; in the drawer, three to a row, those past `FX_FOLDED` (six) are hidden (`.folded`) until
-*See all* (`FX_UI.all`, for the session). In the bar's popover they are one row (`fxRow()`), six and an edge of the next
+own after it, `bendControl()`) begins with `fxCards(L)`: Automatic, then the others in `FX_ORDER`, one order, so a card picked
+stays where it was. Every card is built; in the drawer, three to a row, those past `FX_FOLDED` (six) but the layer's own
+are hidden (`.folded`) until *See all* (`FX_UI.all`, for the session). In the bar's popover they are one row (`fxRow()`), six and an edge of the next
 in sight, the rest scrolled to sideways: `fxRowEnds()` marks the ends with more beyond them (as the row scrolls, and as
 `FXROWS`, a `ResizeObserver`, sees the popover laid out or the window resized), where the cards fade out under an arrow
 (a CSS mask) whose click glides the row on by six cards (`glide()`, eased over a few frames); the wheel turns the row
