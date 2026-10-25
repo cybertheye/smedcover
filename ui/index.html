@@ -538,25 +538,32 @@
   #ftb button.open .dot{box-shadow:0 0 0 2px rgba(21,21,28,.35)}
   #ftb .ico{flex:none}
   #ftb .aa{font-weight:700;opacity:.8}
-  #fpop{position:absolute;z-index:21;width:300px;max-width:calc(100% - 12px);max-height:min(60vh,460px);overflow:auto;padding:12px 14px 14px;border-radius:16px}
+  #fpop{position:absolute;z-index:21;width:300px;max-width:calc(100% - 12px);max-height:min(60vh,460px);overflow:auto;padding:16px 14px 14px;border-radius:16px}
+  /* moved by a drag on any part of it that is no control (popGrabs in app.js): a grip at its top edge, and the hand over what drags */
+  #fpop{cursor:grab}
+  #fpop::before{content:"";position:absolute;top:6px;left:calc(50% - 16px);width:32px;height:4px;border-radius:2px;background:rgba(255,255,255,.28)}
+  :where(#fpop) :where(input,select,textarea,button,a,[role],[tabindex],.fxgrid){cursor:auto}
+  body.popdrag,body.popdrag *{cursor:grabbing!important;user-select:none;-webkit-user-select:none}
   #fpop .fpop-h{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px}
   #fpop .psec{border:0;padding:0}
-  #fpop.wide{width:600px}
+  #fpop.wide{width:380px}
   /* the text effects as cards (the Effect group, in the drawer and in its popover): the layer's first letter drawn in each */
   .fxdeck{display:flex;flex-direction:column;gap:8px}
   .fxdeck .fxhint{font-size:12px;color:var(--text3)}
   .fxgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
   .fxtile.folded,.fxarrow{display:none}
-  /* in the popover all in one row, six in sight and an edge of the next, the rest scrolled to (fxRow); at an end with
-     more beyond it, the cards fade out under an arrow */
+  /* in the popover pages of six side by side, each two rows of three filled row by row (--r, --c set by fxCards; --cols
+     whole pages), one page in sight and the rest scrolled to sideways (fxRow); at an end with more beyond it, the cards
+     fade out under an arrow */
   .fxrow{position:relative}
   #fpop .fxtile.folded{display:flex}
+  #fpop .fxtile{grid-row:var(--r);grid-column:var(--c)}
   #fpop .fxdeck .seeall{display:none}
-  #fpop .fxgrid{--fl:0px;--fr:0px;grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:calc((100% - 48px) / 6.3);padding:2px 0;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;
+  #fpop .fxgrid{--fl:0px;--fr:0px;grid-template-columns:repeat(var(--cols),calc((100% - 16px) / 3));grid-template-rows:repeat(2,auto);padding:2px 0;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;
     -webkit-mask-image:linear-gradient(to right,transparent,#000 var(--fl),#000 calc(100% - var(--fr)),transparent);mask-image:linear-gradient(to right,transparent,#000 var(--fl),#000 calc(100% - var(--fr)),transparent)}
   #fpop .fxgrid::-webkit-scrollbar{display:none}
-  #fpop .fxrow.l .fxgrid{--fl:44px}
-  #fpop .fxrow.r .fxgrid{--fr:44px}
+  #fpop .fxrow.l .fxgrid{--fl:26px}
+  #fpop .fxrow.r .fxgrid{--fr:26px}
   #fpop .fxrow.l .fxarrow.l,#fpop .fxrow.r .fxarrow.r{display:grid}
   .fxarrow{position:absolute;top:calc(50% - 14px);width:28px;height:28px;padding:0;place-items:center;border-radius:50%;border:1px solid rgba(255,255,255,.22);background:rgba(24,24,34,.88);color:var(--text);cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.4)}
   .fxarrow:hover{background:rgba(64,64,78,.95)}

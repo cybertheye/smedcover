@@ -465,7 +465,17 @@ function syncToolbar() {
 }
 
 // ---------- editing layers
-function selectLayer(id) { if (S.layerId === id && !group().length) return; S.picked = []; S.layerId = id; renderSide(); queueDraw(false); }
+function selectLayer(id) {
+  const back = FTB.away; FTB.away = "";   // a layer chosen, the background too: its bar shows again (see selectNothing)
+  if (S.layerId === id && !group().length) { if (back) placeBar(); return; }
+  S.picked = []; S.layerId = id; renderSide(); queueDraw(false);
+}
+/**
+ * Selects nothing: the background, as pickedIds counts it, with the bar over the canvas and its popover put away until
+ * a layer is chosen again (selectLayer), so nothing stands over the cover; the arrows nudge nothing meanwhile. A press
+ * on the stage beside the cover, or Esc.
+ */
+function selectNothing() { selectLayer("bg"); FTB.away = "bg"; FTB.pop = ""; renderBar(); }
 /**
  * The layers of the group selection on this channel's cover, or [] when there is none. A group holds
  * while the selected layer is one of its members: selecting anything else by any route ends it.
@@ -812,7 +822,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
     edit(L, e.altKey ? { rot: e.deltaY > 0 ? 2 : -2 } : { scale: Math.exp(-e.deltaY * 0.0015) });
     later("side", 250, renderSide);
   }, { passive: false });
-  $("stage").addEventListener("pointerdown", (e) => { if (e.target === $("stage") && S.mode === "edit" && S.cover && !S.focus && !S.brushWin) selectLayer("bg"); });
+  $("stage").addEventListener("pointerdown", (e) => { if (e.target === $("stage") && S.mode === "edit" && S.cover && !S.focus && !S.brushWin) selectNothing(); });
   // assets dragged from the library land where they are dropped
   cv.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("application/x-smed-asset") || e.dataTransfer.types.includes("application/x-smed-photo")) e.preventDefault(); });
   cv.addEventListener("drop", (e) => {
@@ -4204,7 +4214,7 @@ function bendControl(L) {
 const FX_UI = { all: false, seeds: new Map() };
 /** The effects in the order of their cards: Automatic, then by kind as the menu had them (layered, masked, outlined, letter by letter). */
 const FX_ORDER = ["passes", "mask", "outline", "letters"].flatMap((k) => Object.keys(EFFECTS).filter((id) => (EFFECTS[id].menu || EFFECTS[id].kind) === k));
-/** How many cards the drawer shows until See all (Automatic, the layer's own and the first of the others); the popover's row as many in sight. */
+/** How many cards the drawer shows until See all (Automatic, the layer's own and the first of the others); the popover as many in sight, two rows of three. */
 const FX_FOLDED = 6;
 /** What a card's letter is drawn on: a cover of this size, its letter a free text layer of this scale at its centre. */
 const FX_CARD = { w: 200, h: 100, s: 7.5 };
@@ -4222,9 +4232,10 @@ function firstLetter(L) {
 /**
  * The text effects of headline layer L as cards, in the Effect group of the drawer and so in its popover on the bar:
  * Automatic first, then the layer's own, then the others. In the drawer three to a row, up to FX_FOLDED, See all
- * unfolding the rest; in the popover all in one row, six in sight and the rest scrolled to sideways (see fxRow). Each
- * is the layer's first letter in that effect, in its face and colours, as the cover's look letters it; under the
- * pointer a moment it shows on the canvas (PREVIEW.fx), a click puts it on.
+ * unfolding the rest; in the popover in pages of FX_FOLDED side by side, each two rows of three filled row by row (a
+ * card's row and column in it, --r and --c), one page in sight and the others scrolled to sideways (see fxRow). Each is
+ * the layer's first letter in that effect, in its face and colours, as the cover's look letters it; under the pointer a
+ * moment it shows on the canvas (PREVIEW.fx), a click puts it on.
  */
 function fxCards(L) {
   const lang = getLang(), st = S.profile.style, cur = EFFECTS[L.fx] ? L.fx : "auto";
@@ -4234,9 +4245,10 @@ function fxCards(L) {
   const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline"), letters: t("fx.kind.letters") };
   for (const w of FXPICS.watched) if (!w.isConnected) { FXPICS.seen.unobserve(w); FXPICS.watched.delete(w); }   // the cards of a drawing before the last, never seen
   const card = (id, i) => {
-    const e = EFFECTS[id], seed = e.seeded ? fxSeedOf(L) : 0, c = el("canvas", { width: FX_CARD.w, height: FX_CARD.h });
-    // past FX_FOLDED, until See all: not shown in the drawer (the popover's row shows them), so their pictures wait to be scrolled to
+    const e = EFFECTS[id], seed = e.seeded ? fxSeedOf(L) : 0, c = el("canvas", { width: FX_CARD.w, height: FX_CARD.h }), j = i % FX_FOLDED, across = FX_FOLDED / 2;
+    // past FX_FOLDED, until See all: not shown in the drawer (the popover's pages show them), so their pictures wait to be scrolled to
     const b = el("button", { class: "fxtile" + (id === cur ? " on" : "") + (i >= FX_FOLDED && id !== cur && !FX_UI.all ? " folded" : ""), "aria-pressed": String(id === cur), dataset: { name: e.name[lang] },
+      style: `--r:${1 + Math.floor(j / across)};--c:${1 + Math.floor(i / FX_FOLDED) * across + (j % across)}`,   // where it stands in its page of the popover
       title: id === "auto" ? e.name[lang] : `${e.name[lang]} · ${kinds[e.menu || e.kind]}`, onpointerenter: () => hoverFx(L, id), onclick: () => pickFx(L, id) },
       c, el("span", {}, id === "auto" ? t("fx.cardAuto").split(" · ").map((w, i) => [i ? " · " : "", el("i", {}, w)]) : e.name[lang]));   // Automatic's two halves, each whole on its line
     fxPic(JSON.stringify([id, seed, ...from]), { id, seed, ch: from[0], L }, c, b);
@@ -4244,27 +4256,28 @@ function fxCards(L) {
   };
   return el("div", { class: "fxdeck" },
     el("div", { class: "fxhint" }, t("fx.cardsHint")),
-    fxRow(el("div", { class: "fxgrid", onpointerleave: () => hoverFx(L, null) }, order.map(card)), L),
+    fxRow(el("div", { class: "fxgrid", style: `--cols:${Math.ceil(order.length / FX_FOLDED) * (FX_FOLDED / 2)}`, onpointerleave: () => hoverFx(L, null) }, order.map(card)), L),   // whole pages, the last one too
     el("button", { class: "btn wide seeall", onclick: () => { FX_UI.all = !FX_UI.all; renderSide(); } }, FX_UI.all ? t("fx.seeFewer") : t("fx.seeAll", FX_ORDER.length - 1)));
 }
 /** Watches the effect rows' size (a popover laid out, the window resized), to say again at which ends there is more. */
 const FXROWS = new ResizeObserver((seen) => { for (const e of seen) fxRowEnds(e.target.parentElement); });
 /**
- * The cards in `grid` as the bar's popover shows them, one row scrolled sideways: an arrow at either end where there
- * is more that way, the cards there fading out under it, a click on it gliding the row on by six cards; the wheel
- * turns the row too, until its end, then scrolls the popover as before. In the drawer the cards stay three to a row
- * and the arrows are not shown.
+ * The cards in `grid` as the bar's popover shows them, in pages of six side by side scrolled sideways: an arrow at
+ * either end where there is more that way, the cards there fading out under it, a click on it gliding the cards on to
+ * the next page; the wheel turns them too, until their end, then scrolls the popover as before. In the drawer the cards
+ * stay three to a row and the arrows are not shown.
  */
 function fxRow(grid, L) {
+  const page = () => grid.clientWidth + (parseFloat(getComputedStyle(grid).columnGap) || 0);   // a page's width and the gap after it, from one page's start to the next's
   const arrow = (dir) => el("button", { class: "fxarrow " + (dir < 0 ? "l" : "r"), tabindex: -1, title: t(dir < 0 ? "fx.prev" : "fx.next"), "aria-label": t(dir < 0 ? "fx.prev" : "fx.next"),
     innerHTML: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${dir < 0 ? "M10 3 5 8l5 5" : "m6 3 5 5-5 5"}"/></svg>`,
-    onclick: () => { const k = grid.children; glide(grid, dir * 6 * (k.length > 1 ? k[1].offsetLeft - k[0].offsetLeft : grid.clientWidth / 6)); } });
+    onclick: () => { const w = page(), at = grid._to ?? grid.scrollLeft; glide(grid, (Math.round(at / w) + dir) * w - at); } });   // to the next page's start
   grid.addEventListener("scroll", () => { FX_UI.left = { id: L.id, x: grid.scrollLeft }; fxRowEnds(grid.parentElement); }, { passive: true });
   requestAnimationFrame(() => {   // where it was scrolled to for this layer (a card picked draws the popover anew), else with the layer's own card in sight
     if (!grid.isConnected) return;
     const on = grid.querySelector(".fxtile.on");
     if (FX_UI.left && FX_UI.left.id === L.id) grid.scrollLeft = FX_UI.left.x;
-    else if (on && on.offsetLeft + on.offsetWidth > grid.clientWidth) grid.scrollLeft = on.offsetLeft - (grid.clientWidth - on.offsetWidth) / 2;
+    else if (on) grid.scrollLeft = Math.floor([...grid.children].indexOf(on) / FX_FOLDED) * page();   // its page
     fxRowEnds(grid.parentElement);
   });
   grid.addEventListener("wheel", (e) => {
@@ -5466,12 +5479,16 @@ function setDrawer(on) {
 // ---------- the bar over the canvas
 // The selected layer's most used settings on a bar of glass over it on the canvas: above it, clear of its turning
 // handle; under it, or inside its top, where there is no room. Each is a button that opens a popover under the bar
-// holding the same controls as its group in the drawer, or does what it says; More… opens the drawer. It goes while
-// anything is dragged, in 3D, in Settings and with a group selected. A row of the layer list under the pointer is
-// framed on the canvas (see hoverShow).
+// holding the same controls as its group in the drawer, or does what it says; More… opens the drawer. The popover
+// can be moved out of the way of what it changes, by a drag on any part of it that is no control (see popGrabs). The
+// bar goes while anything is dragged, in 3D, in Settings and with a group selected. A row of the layer list under the
+// pointer is framed on the canvas (see hoverShow).
 const BAR = el("div", { id: "ftb", class: "glass", hidden: true }), POP = el("div", { id: "fpop", class: "glass", hidden: true }), HOVER = el("div", { id: "hoverbox", hidden: true });
 $("center").append(BAR, POP, HOVER);
-const FTB = { pop: "", of: "", drag: false };   // the item whose popover is open, the layer it is of, and whether the canvas is being dragged
+// the item whose popover is open, the layer it is of, whether the canvas is being dragged, and where the popover was
+// moved to while it is open ({key, x, y} in #center's pixels, or null: in its own place under the bar); `away`, while
+// nothing is selected, the layer standing for nothing (the background: see selectNothing), its bar put away, else ""
+const FTB = { pop: "", of: "", drag: false, at: null, away: "" };
 // gone while the pointer is down on the canvas (a layer moved, turned or resized), back where it then is when it is let go
 $("cv").addEventListener("pointerdown", () => { FTB.drag = true; placeBar(); }, true);
 for (const type of ["pointerup", "pointercancel"]) addEventListener(type, () => { if (FTB.drag) { FTB.drag = false; placeBar(); } }, true);
@@ -5521,6 +5538,7 @@ function secOf(L, key) {
 function renderBar() {
   endPreview("fx");   // the effect cards drawn anew (here and in the drawer), or gone
   const L = layer(), on = S.mode === "edit" && !!L && !group().length;
+  if (FTB.away !== (L && L.id)) FTB.away = "";   // another layer selected, by whatever way: its bar shows
   if (!on || FTB.of !== (L && L.id)) FTB.pop = "";
   FTB.of = L ? L.id : "";
   const items = on ? barItems(L) : [];
@@ -5534,8 +5552,9 @@ function renderBar() {
   const it = items.find((x) => x.key === FTB.pop && !x.act);
   const sec = it && it.sec && secOf(L, it.sec), kids = it ? (it.pop ? it.pop() : sec && sec.kids) : null;
   if (!kids) FTB.pop = "";
+  if (FTB.at && FTB.at.key !== FTB.pop) FTB.at = null;   // shut, or another opened: in its own place again the next time
   POP.replaceChildren(...(kids ? [el("div", { class: "fpop-h" }, it.sec ? t(it.sec) : it.title || it.label, sec && sec.tip && info(sec.tip)), el("div", { class: "psec open" }, el("div", { class: "psec-b" }, kids))] : []));
-  POP.classList.toggle("wide", !!kids && it.sec === "props.sec.effect");   // the effects' cards in a row, six in sight
+  POP.classList.toggle("wide", !!kids && it.sec === "props.sec.effect");   // the effects' cards, a page of six in sight
   placeBar();
 }
 /** Where layer id is drawn on the canvas, in #center's pixels: {cx, cy, hw, hh, r} (its centre, half sizes, turn), or null when it is not drawn here. */
@@ -5548,7 +5567,7 @@ function onScreen(id) {
 /** Puts the bar over the selected layer and its popover under the bar; hides them while they would be in the way. */
 function placeBar() {
   if (PREVIEW.fx && !BAR.hidden) return;   // an effect previewed from its card: the bar and its popover stay, or the card would move from under the pointer
-  const L = layer(), box = S.mode === "edit" && L && BAR.childElementCount && !V3.on && !FTB.drag && !S.brushWin && onScreen(L.id);
+  const L = layer(), box = S.mode === "edit" && L && L.id !== FTB.away && BAR.childElementCount && !V3.on && !FTB.drag && !S.brushWin && onScreen(L.id);
   BAR.hidden = !box; POP.hidden = !box || !POP.childElementCount;
   if (!box) return;
   const stage = $("stage"), top = stage.offsetTop, bottom = top + stage.offsetHeight, wide = $("center").clientWidth;
@@ -5561,6 +5580,7 @@ function placeBar() {
   const x = Math.max(6, Math.min(box.cx - bw / 2, wide - bw - 6));
   BAR.style.left = x + "px"; BAR.style.top = y + "px";
   if (POP.hidden) return;
+  if (FTB.at) return popTo(FTB.at.x, FTB.at.y);   // where it was moved to, through every change made in it
   POP.style.maxHeight = "";
   const b = BAR.querySelector(`button[data-key="${CSS.escape(FTB.pop)}"]`), pw = POP.offsetWidth, ph = POP.offsetHeight;
   const px = Math.max(6, Math.min(x + (b ? b.offsetLeft : 0), wide - pw - 6)), under = y + bh + 8, below = under + ph <= bottom - 6 || y - ph - 8 < top;
@@ -5617,6 +5637,39 @@ addEventListener("pointerdown", (e) => {   // a click away from the bar and its 
   if (!FTB.pop || BAR.contains(e.target) || POP.contains(e.target) || (e.target.closest && e.target.closest("#tip"))) return;
   FTB.pop = ""; renderBar();
 }, true);
+/**
+ * Whether a press on the bar's popover moves it: one on a part of it that is no control — its head, its grip, the
+ * room around its controls, their captions — and not inside a box that scrolls (the effects' cards) nor on its own
+ * scrollbar. A press on a field, a list, a slider, a button, a card or anything else clicked is that control's own.
+ */
+function popGrabs(e) {
+  const r = POP.getBoundingClientRect();
+  if (e.clientX - r.left - POP.clientLeft >= POP.clientWidth || e.clientY - r.top - POP.clientTop >= POP.clientHeight) return false;   // its scrollbar
+  for (let n = e.target; n && n !== POP; n = n.parentElement) {
+    if (n.matches("input,select,textarea,button,a[href],[role],[tabindex],[contenteditable]") || (n.tagName === "LABEL" && n.control) || n.onclick || n.onpointerdown) return false;
+    const c = getComputedStyle(n);
+    if ((/auto|scroll/.test(c.overflowX) && n.scrollWidth > n.clientWidth) || (/auto|scroll/.test(c.overflowY) && n.scrollHeight > n.clientHeight)) return false;
+  }
+  return true;
+}
+/** Puts the bar's popover at x, y (in #center's pixels) where it was moved to, all of it kept inside the window, and remembers it there while it is open. */
+function popTo(x, y) {
+  const c = $("center").getBoundingClientRect();
+  POP.style.maxHeight = "";   // all of it shown, though it was cut short under the bar
+  x = clamp(x, 6 - c.left, innerWidth - c.left - POP.offsetWidth - 6); y = clamp(y, 6 - c.top, innerHeight - c.top - POP.offsetHeight - 6);
+  POP.style.left = x + "px"; POP.style.top = y + "px";
+  FTB.at = { key: FTB.pop, x, y };
+}
+// the popover dragged by the pointer, held by it (so not taken for a drag on the canvas, nor of the window)
+POP.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || !popGrabs(e)) return;
+  e.preventDefault();
+  const dx = POP.offsetLeft - e.clientX, dy = POP.offsetTop - e.clientY, end = () => { POP.onpointermove = POP.onpointerup = POP.onpointercancel = null; document.body.classList.remove("popdrag"); };
+  POP.setPointerCapture(e.pointerId);
+  document.body.classList.add("popdrag");   // no text selected meanwhile
+  POP.onpointermove = (m) => popTo(dx + m.clientX, dy + m.clientY);
+  POP.onpointerup = POP.onpointercancel = end;
+});
 
 // ---------- the layers in 3D
 // The 3D button over the layer list takes the cover apart: each layer painted on its own (o.only in
@@ -6960,8 +7013,9 @@ addEventListener("keydown", (e) => {
   if (cmd && key === "e") { e.preventDefault(); if (e.repeat) return; closeMenu(); return exportDialog(); }
   const L = layer();
   if (mod && key === "d") { e.preventDefault(); return group().length ? null : duplicateLayer(); }
-  if (key === "escape") return V3.to ? set3d(false) : S.focus ? setFocus(false) : selectLayer("bg");
+  if (key === "escape") return V3.to ? set3d(false) : S.focus ? setFocus(false) : selectNothing();
   if (key === "f" && !mod && !e.altKey) { e.preventDefault(); return setFocus(!S.focus); }
+  if (FTB.away && FTB.away === S.layerId) return;   // nothing selected (a press beside the cover, or Esc): nothing to nudge or remove
   const many = group(), step0 = e.shiftKey ? 10 : 1, nudge = { arrowleft: [-step0, 0], arrowright: [step0, 0], arrowup: [0, -step0], arrowdown: [0, step0] }[key];
   if (many.length) {   // a group: delete and the arrows act on all of it
     if (key === "delete" || key === "backspace") { e.preventDefault(); return removeGroup(); }

@@ -1755,7 +1755,7 @@ Surprise me's window open only Esc (`dealUndo()`), Space (another deal) and undo
 and weave windows' Esc and the brush's keys; undo and redo; then Space, which deals (`surprise()`) with the editor in
 front and neither the ⋯ menu, the bar's popover (`FTB.pop`), the 3D view, a drag on the canvas (`LIVE`, `FTB.drag`) nor
 the letter, crop or weave window in the way; and in the editor alone ⌘E (`exportDialog()`, the ⋯ menu shut first), ⌘D,
-Esc, F, Delete and the arrows. Space dealing is taken from the button the mouse last pressed (`preventDefault()`), so a
+Esc (`selectNothing()`), F, Delete and the arrows, these two not while nothing is selected (`FTB.away`). Space dealing is taken from the button the mouse last pressed (`preventDefault()`), so a
 deal is not made twice; a key held down (`e.repeat`) deals, opens, saves or exports once.
 
 **The dock and the sheets.** `syncTabs()` fills the dock with a button a sheet (`TABS.edit`; the icons `SHELL_ICONS`,
@@ -1842,10 +1842,11 @@ are; `pickLook()` and `pickFx()` end theirs before putting theirs on.
 **Text effects as cards.** The Effect group of a lettered layer's properties (`fxControl()`; the bend is a group of its
 own after it, `bendControl()`) begins with `fxCards(L)`: Automatic, then the others in `FX_ORDER`, one order, so a card picked
 stays where it was. Every card is built; in the drawer, three to a row, those past `FX_FOLDED` (six) but the layer's own
-are hidden (`.folded`) until *See all* (`FX_UI.all`, for the session). In the bar's popover they are one row (`fxRow()`), six and an edge of the next
-in sight, the rest scrolled to sideways: `fxRowEnds()` marks the ends with more beyond them (as the row scrolls, and as
+are hidden (`.folded`) until *See all* (`FX_UI.all`, for the session). In the bar's popover they are in pages of six side by side (`fxRow()`), each two
+rows of three filled row by row (each card's place set by `fxCards()` as `--r` and `--c`, the grid as many columns as
+whole pages take, `--cols`), one page in sight, the others scrolled to sideways; the layer's own card's page is shown on opening: `fxRowEnds()` marks the ends with more beyond them (as the row scrolls, and as
 `FXROWS`, a `ResizeObserver`, sees the popover laid out or the window resized), where the cards fade out under an arrow
-(a CSS mask) whose click glides the row on by six cards (`glide()`, eased over a few frames); the wheel turns the row
+(a CSS mask) whose click glides the row on to the next page's start (`glide()`, eased over a few frames); the wheel turns the row
 until its end, then scrolls the popover. Each card is the layer's first letter (`firstLetter()`, the highlights' marks left out;
 a stand-in while it has none) drawn in that effect, in its face, colours and strengths, as the cover's look letters it.
 A picture is keyed by all it is drawn from — the effect, the seed, the letter, the face, the colours, the strengths, the
@@ -1861,7 +1862,7 @@ drawn again once there (`fxAgain()`). A lettering dealt by a seed is shown, prev
 and what is put on is what was shown. A click (`pickFx()`) commits what went before as a step of its own, then sets
 `fx`, one step of undo. `secSum()` sums the group by the card picked. While an effect is previewed `placeBar()` leaves the
 bar and its popover where they are, or the card would move from under the pointer; the popover is wider for the cards
-(`#fpop.wide`), and kept within the window, scrolling, where it would run off its foot.
+(`#fpop.wide`, a page of them), and kept within the window, scrolling, where it would run off its foot.
 
 **The layout's parts framed.** While the Layout sheet is in front on the flat canvas (`partsFramed()`: in the editor,
 the sheet not hidden by the drawer, not in 3D, not while the weave's brush paints nor while the letter, crop or weave
@@ -1885,12 +1886,20 @@ colour block's shape, and its size and slant; the ground — each a group of the
 it does (`act`); *More…* opens the drawer. A group's popover holds the drawer's own controls for it, built afresh by `secOf()` (it runs `typeControls()`
 and takes that group out), so the two never say different things and a control added to a group is on the bar too.
 `renderBar()` builds it, from `renderSide()`, so it follows every change of the layer; the popover shuts on another
-layer, Esc or a press beside it. `placeBar()` puts the bar above the layer, clear of its turning knob, else under it,
+layer, Esc or a press beside it. A drag on the popover moves it (its pointerdown, the pointer held by it, so it is
+taken for neither a drag on the canvas nor of the window) where it starts on a part that is no control (`popGrabs()`:
+not a field, list, slider, button, card or anything clicked, nor inside a box that scrolls, nor on its scrollbar;
+`cursor: grab` there, and a grip at its top edge, `#fpop::before`); `popTo()` puts it there, kept inside the window,
+and keeps it in `FTB.at` while that popover is open, so `placeBar()` leaves it there through every change made in it;
+shut, or another opened, it is in its own place again (`renderBar()` lets `FTB.at` go). `placeBar()` puts the bar above the layer, clear of its turning knob, else under it,
 else inside its top (`onScreen()`: where the layer is drawn, from the canvas's hits), measured at the left edge so it
 wraps only in a canvas narrower than it, and `flushDraw()` places it again
 after every drawing. It is away while the pointer is down on the canvas (`FTB.drag`), while the layer is not drawn
 there (hidden, or kept to other sizes: `onScreen()` gives nothing), in 3D, while the brush paints, with a group selected
-and in Settings.
+and in Settings; and after a press on the stage beside the cover or Esc, which select nothing (`selectNothing()`: the
+background, as `pickedIds()` counts it, its id kept in `FTB.away`), until a layer is chosen again: `selectLayer()`, the
+background's too, lets `FTB.away` go, and so does `renderBar()` once another layer is selected by any other way.
+Meanwhile the drawer and the layer list show the background as ever, and the arrows and Delete act on nothing.
 
 **The drawer.** Everything about the selected layer is in the drawer on the right (`renderSide()`, into `#side`; with a
 group selected, what can be done to the group), each group made by `psec()` (9.1). It is shut to begin with and kept as
