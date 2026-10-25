@@ -102,19 +102,33 @@ function drawHeader(ctx, o, w, th, C, onAccentRight, rail, onAccent = false, log
 
 /** The most room the brand logo takes at the right end of the brand row, in units: its height, and its width (a wide one; at most `share` of the canvas's). */
 export const LOGO = { h: 84, w: 340, share: 0.22, mid: 90 };
+/** Pictures given by their data URL rather than as an asset (the layout editor's letter logo and portrait), each decoded once and kept: src -> {img, ready, then}. */
+const PICTURES = new Map();
+/** The picture data URL `src` shows, { img }, once it is decoded (null till then); `then` is called once it is, when it is not yet. */
+export function pictureOf(src, then) {
+  let p = PICTURES.get(src);
+  if (!p) {
+    p = { img: new Image(), ready: false, then: [] };
+    p.img.onload = () => { p.ready = true; for (const f of p.then.splice(0)) f(); };
+    p.img.src = src; PICTURES.set(src, p);
+  }
+  if (!p.ready && then) p.then.push(then);
+  return p.ready ? p : null;
+}
 /**
  * Where the profile's brand logo goes on a canvas `w` units wide: its box, right-aligned `inset` from the
  * right edge (where the brand row's rail ends; a look may want it further in, `logoInset`) and centred on
  * the row, as large as LOGO lets it be; `k` scales the asset to it (drawn
- * about its centre, see drawAsset) and `ref` is it. Null when the profile has none, or it is gone.
+ * about its centre, see drawAsset) and `ref` is it — or, for a logo given as a picture's data URL (the layout
+ * editor's letter logo, see pictureOf), `img` is the picture. Null when the profile has none, or it is gone.
  */
 export function logoBox(P, w, inset = 72) {
-  const a = P.brand.logo && userAssets.get(P.brand.logo);
+  const src = P.brand.logo, own = !!src && src.startsWith("data:image/"), a = src && (own ? pictureOf(src) : userAssets.get(src));
   if (!a) return null;
   const iw = a.img ? a.img.naturalWidth : 600, ih = a.img ? a.img.naturalHeight : 600;
   if (!iw || !ih) return null;
   const n = 600 / Math.max(iw, ih), k = Math.min(LOGO.h / (ih * n), Math.min(LOGO.w, w * LOGO.share) / (iw * n)), bw = iw * n * k, bh = ih * n * k;
-  return { x: w - inset - bw, y: LOGO.mid - bh / 2, w: bw, h: bh, k, ref: { kind: "user", id: a.id } };
+  return { x: w - inset - bw, y: LOGO.mid - bh / 2, w: bw, h: bh, k, ...(own ? { img: a.img } : { ref: { kind: "user", id: a.id } }) };
 }
 
 /** A logo box that would straddle the edge of the colour panel of "split" (one too narrow to hold it, see SIDE_BARE) moved left of the edge, onto the title's column. */
@@ -703,7 +717,9 @@ const PAINT = {
   logo(ctx, L, tr, env) {
     const b = env.logo || (L.copy ? offEdge(logoBox(env.o.profile, env.w, look().logoInset), env.G) : null);   // a copy shows with the logo itself hidden
     if (!b) return null;
-    return placed(ctx, tr, (c) => { c.save(); c.translate(b.x + b.w / 2, b.y + b.h / 2); c.scale(b.k, b.k); drawAsset(c, b.ref, env.C, {}); c.restore(); return b; }, b);
+    // drawn about its centre in its 600-unit box, as drawAsset draws an asset (a picture given as it is, so)
+    const paint = (c) => { if (b.ref) drawAsset(c, b.ref, env.C, {}); else c.drawImage(b.img, -b.w / b.k / 2, -b.h / b.k / 2, b.w / b.k, b.h / b.k); };
+    return placed(ctx, tr, (c) => { c.save(); c.translate(b.x + b.w / 2, b.y + b.h / 2); c.scale(b.k, b.k); paint(c); c.restore(); return b; }, b);
   },
   /**
    * The title, in the layout's box (narrower when a subtitle in columns stands beside it, see subtitlePlan), in

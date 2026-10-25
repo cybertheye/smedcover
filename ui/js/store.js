@@ -12,7 +12,7 @@
 import { platformsFor, ratioOf } from "./platforms.js";
 import { TEMPLATES, ORIENTS, normalizeAdjust, layoutByOrient } from "./layout.js";
 import { LOOKS, LOOK_IDS, lookParams } from "./style.js";
-import { normalizeLayers, normalizeScene, normalizeT, LAYOUT_PARTS } from "./layers.js";
+import { normalizeLayers, normalizeScene, normalizeT, BOUND_TYPES, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, EXTRA_STICKER } from "./layers.js";
 import { DEFAULTS } from "./defaults.js";
 
 const T = globalThis.__TAURI__;
@@ -309,8 +309,8 @@ export async function readSettings(custom, legacy) {
   const own = custom && typeof custom === "object" && !Array.isArray(custom) && Object.hasOwn(custom, "settings");
   return normalizeSettings(own ? custom.settings : await legacy());
 }
-/** How many layout presets are kept at most, how long a name may be, and how many sizes of its own a preset may keep. */
-export const LAYOUTS = { most: 24, name: 40, custom: 12 };
+/** How many layout presets are kept at most, how long a name may be, how many sizes of its own a preset may keep, and how many elements of the user's own it may have. */
+export const LAYOUTS = { most: 24, name: 40, custom: 12, extras: 8 };
 const SIZE_KEY = /^(\d{2,5})x(\d{2,5})$/;
 /** Size keys ("1080x1350") as a preset keeps them: each once, in the order given, `most` at most; `fits`, only of a size a profile may have (normalizeSize). */
 const sizeKeysOf = (raw, most, fits = false) => [...new Set((Array.isArray(raw) ? raw : []).filter((k) => {
@@ -319,7 +319,7 @@ const sizeKeysOf = (raw, most, fits = false) => [...new Set((Array.isArray(raw) 
 }))].slice(0, most);
 /**
  * The user's layout presets, as kept in the settings for every profile (see takeLayout in layers.js): [{ id, name,
- * template, adjust, orient?, by?, custom?, parts: { part: { t, shown, hide? } } }], LAYOUTS.most at most. An id is kept
+ * template, adjust, orient?, by?, custom?, parts: { part: { t, shown, hide?, vertical? } }, extras? }], LAYOUTS.most at most. An id is kept
  * as it is (Surprise me's chances name the presets by it: odds.groups.layout), one missing, taken or "keep" (the option
  * of none) made anew; a name trimmed and cut to length. The colour block: a template unknown is Stack, its adjustments
  * within LAYOUT_LIMITS; each orientation's own (`orient`, { wide|square|tall: { template, adjust } }) and the sizes drawn
@@ -329,8 +329,14 @@ const sizeKeysOf = (raw, most, fits = false) => [...new Set((Array.isArray(raw) 
  * placement within range (per size by size keys only), shown unless it says not; a part shown may name the sizes it
  * is left out at (`hide`, size keys). A part it has no entry for is not made up: a preset made now carries all of them
  * (see takeParts and newPreset in layers.js), and one made before the colour block was a part carries none for it,
- * which it leaves as it is where it is put (putLayout), its move and whether it shows. What earlier presets held
- * besides — which way a lettered part's words ran — is let go.
+ * which it leaves as it is where it is put (putLayout), its move and whether it shows. Which way the words of each of
+ * COLUMN_PARTS run, in a line or in columns (`vertical`): kept when it says, true or false — a preset made now says it
+ * of each of them, one made before says nothing and leaves the layer's own as it is where it is put; the brand row's,
+ * and the columns' rules, are never a preset's. Its elements of the user's own (`extras`: [{ id, kind, t, shown, hide?,
+ * vertical?, sticker? }], see putLayout), in order, LAYOUTS.extras at most, left out when there is none: one of a kind
+ * not of EXTRA_KINDS let go; an id kept as it is, one missing, taken or a layout layer's made anew; placed and shown as
+ * a part is, but by size keys alone (it is placed alike on every channel's cover); words in columns or not (`vertical`)
+ * kept when it says, true or false; a vector sticker's sticker an id (EXTRA_STICKER when none).
  */
 export function normalizeLayouts(raw) {
   const out = [], ids = new Set();
@@ -340,18 +346,32 @@ export function normalizeLayouts(raw) {
     let id = typeof r.id === "string" && /^[\w-]{1,40}$/.test(r.id) ? r.id : uid();
     while (ids.has(id) || id === "keep") id = uid();
     ids.add(id);
+    // where a part or an element stands (a free layer's placement for an element: a centre, by size keys alone) and whether it shows
+    const placed = (q, free) => {
+      const t = normalizeT(q.t, free);
+      t.by = Object.fromEntries(Object.entries(t.by).filter(([k]) => (free ? SIZE_KEY : /^\d{2,5}x\d{2,5}(@[\w-]{1,60})?$/).test(k)).slice(0, 80));
+      const shown = q.shown !== false, hide = shown ? sizeKeysOf(q.hide, 80) : [];
+      return shown ? { t, shown, ...(hide.length ? { hide } : {}) } : { t, shown };
+    };
     const parts = {};
     for (const type of LAYOUT_PARTS) {
       const q = r.parts && typeof r.parts === "object" && r.parts[type] && typeof r.parts[type] === "object" ? r.parts[type] : null;
       if (!q) continue;   // not this preset's to place
-      const t = normalizeT(q.t, false);
-      t.by = Object.fromEntries(Object.entries(t.by).filter(([k]) => /^\d{2,5}x\d{2,5}(@[\w-]{1,60})?$/.test(k)).slice(0, 80));
-      const shown = q.shown !== false, hide = shown ? sizeKeysOf(q.hide, 80) : [];
-      parts[type] = shown ? { t, shown, ...(hide.length ? { hide } : {}) } : { t, shown };
+      parts[type] = { ...placed(q, false), ...(COLUMN_PARTS.includes(type) && typeof q.vertical === "boolean" ? { vertical: q.vertical } : {}) };
+    }
+    const extras = [], xids = new Set();
+    for (const x of Array.isArray(r.extras) ? r.extras : []) {
+      if (extras.length >= LAYOUTS.extras) break;
+      if (!x || typeof x !== "object" || !EXTRA_KINDS.includes(x.kind)) continue;
+      let xid = typeof x.id === "string" && /^[\w-]{1,40}$/.test(x.id) && !BOUND_TYPES.includes(x.id) ? x.id : "x" + uid();
+      while (xids.has(xid)) xid = "x" + uid();
+      xids.add(xid);
+      extras.push({ id: xid, kind: x.kind, ...placed(x, true), ...(x.kind === "text" && typeof x.vertical === "boolean" ? { vertical: x.vertical } : {}),
+        ...(x.kind === "vector" ? { sticker: typeof x.sticker === "string" && /^[\w-]{1,40}$/.test(x.sticker) ? x.sticker : EXTRA_STICKER } : {}) });
     }
     const orient = normalizeLayoutBy(r.orient, (k) => ORIENTS.includes(k)), by = normalizeLayoutBy(r.by, (k) => SIZE_KEY.test(k)), custom = sizeKeysOf(r.custom, LAYOUTS.custom, true);
     out.push({ id, name: str(r.name).trim().slice(0, LAYOUTS.name), template: TEMPLATES.includes(r.template) ? r.template : "stack", adjust: normalizeAdjust(r.adjust),
-      ...(orient ? { orient } : {}), ...(by ? { by } : {}), ...(custom.length ? { custom } : {}), parts });
+      ...(orient ? { orient } : {}), ...(by ? { by } : {}), ...(custom.length ? { custom } : {}), parts, ...(extras.length ? { extras } : {}) });
   }
   return out;
 }

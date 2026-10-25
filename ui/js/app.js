@@ -2,7 +2,7 @@
 // sizes, fonts). The cover is a collage of layers painted by render.js; persistence is in store.js.
 import { fonts, clamp } from "./cel.js";
 import { virtualSize, layoutValues, dragLayout, LAYOUT_LIMITS, wordsFoot, ORIENTS, orientOf, orientOfKey, layoutOf, ownLayout, setLayoutOf, followLayout, layoutByOrient, SIDES, sideOf, sideToward, sideLike, scaleBlock, sizeOfKey, templateDefault, blockDefault, layoutAdded, sameLayout } from "./layout.js";
-import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, handles, showsFrame, sceneHandleAt, coverLayout, partsOf, coverAt } from "./render.js";
+import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, handles, showsFrame, sceneHandleAt, coverLayout, partsOf, coverAt, pictureOf } from "./render.js";
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang, bothLangs } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
@@ -11,7 +11,7 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, normalizeSize, exportName, sizeCaption, ratioText,
@@ -2952,14 +2952,20 @@ function saveLayoutDialog() {
   input.focus(); input.select();
 }
 /**
+ * What a layout preset's elements of the user's own are put on this cover with (see putLayout in layers.js): the
+ * channel's, which assets are vector ones (those that take the channel colour), and the words and colour of a layer added.
+ */
+const presetEnv = () => ({ catId: cat().id, vector: canTint, words: t("layed.sampleText"), color: cat().color });
+/**
  * Puts layout preset `p` (the i-th) on the canvas, at the profile's sizes (those of the preset's own pass by): the
  * colour block's layout at each, for every cover of the profile (unless this cover's block is locked), and this cover's
- * layout parts but those locked (putLayout); one step of undo.
+ * layout parts but those locked, and the layers its elements of the user's own place, added where it has none of their
+ * kind (putLayout); one step of undo.
  */
 function applyLayout(p, i) {
   closeModal();
   clearTimeout(timers.hist); commitHistory();
-  putLayout(S.profile.style, S.cover.layers, p, sizeKeys());
+  putLayout(S.profile.style, S.cover.layers, p, sizeKeys(), presetEnv());
   S.picked = [];
   if (layer() && layer().off) S.layerId = "bg";   // the part selected is left out now
   touch({ profile: true, cover: true, panel: true, side: true, strip: true });
@@ -2978,10 +2984,25 @@ function deleteLayout(p, i, again) {
 /** A usual size facing each way, where the layout editor sees how big a block kept for that orientation is when it has no size facing so (see blockOf in layoutEditor). */
 const USUAL_SIZE = { wide: "1920x1080", square: "1200x1200", tall: "1080x1920" };
 /**
+ * The brand logo as the layout editor draws it, the profile's own picture not being drawn there: a letter logo, the
+ * brand's initial ("L" without a brand name) on a rounded square in the channel colour `color`, rimmed in white so it
+ * shows on the colour block too, as the data URL of an SVG (drawn through pictureOf in render.js).
+ */
+function letterLogo(name, color) {
+  const ch = ([...name.trim()][0] || "L").toUpperCase().replace(/[&<>"]/g, (m) => `&#${m.charCodeAt(0)};`);
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect x="4" y="4" width="112" height="112" rx="26" fill="${color}" stroke="#ffffff" stroke-width="8"/>`
+    + `<text x="60" y="62" text-anchor="middle" dominant-baseline="central" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue',Arial,sans-serif" font-size="68" font-weight="800" fill="${inkOn(color)}">${ch}</text></svg>`);
+}
+/** The layout editor's stand-in for a picture element: an anonymous portrait, a grey head and shoulders on a lighter grey, as the data URL of an SVG (no one's photo). */
+const PORTRAIT = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="750" viewBox="0 0 600 750">`
+  + `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#dcdfe5"/><stop offset="1" stop-color="#b8bcc5"/></linearGradient></defs><rect width="600" height="750" fill="url(#g)"/>`
+  + `<g fill="#878c97"><circle cx="300" cy="290" r="130"/><rect x="248" y="380" width="104" height="110" rx="36"/><path d="M60 750c0-175 105-292 240-292s240 117 240 292z"/></g></svg>`);
+/**
  * A layout preset's editor, a window from the Layout sheet's preset cards, on a canvas of its own: not the cover being edited
- * but the plainest there is — the cel look on its dark ground, no photos, none of the user's layers, neither the logo
- * nor the corner brackets — with nothing on it but what a preset places (LAYOUT_PARTS): the title, subtitle and tag in
- * words of the editor's own (layed.sample*), the profile's brand row, the channel's name and graphic (the channel on
+ * but the plainest there is — the cel look on its dark ground, none of the cover's photos or the user's layers, nor the corner
+ * brackets — with nothing on it but what a preset places (LAYOUT_PARTS): the title, subtitle and tag in
+ * words of the editor's own (layed.sample*), the profile's brand row, the brand logo as a letter logo (letterLogo: the
+ * profile's own, or none, is not what is placed but where), the channel's name and graphic (the channel on
  * the canvas; a camera when it has no graphic, so there is something to place), and the colour block and its edge. It
  * is drawn at one size at a time, picked above it from the profile's sizes and the preset's own (`custom`, added there
  * by width and height), and each change lands where the scope beside them says: every size, those facing that size's
@@ -2998,16 +3019,24 @@ const USUAL_SIZE = { wide: "1920x1080", square: "1200x1200", tall: "1080x1920" }
  * its parts, each ticked where the layout has it (unticked, it is left out where the preset is put, see putLayout), at
  * the sizes the scope reaches — a part unticked at the size shown no longer selected, so no handle is left over where
  * it is not —; and the part selected, put back where the template puts it (the block: its size and slant, or its
- * place). A part an earlier preset has no entry for
+ * place), and the title's, subtitle's, tag's or channel name's words set in columns or in a line (Vertical, at every
+ * size; in a line to begin with, and where an earlier preset says nothing of it). A part an earlier preset has no entry for
  * (the colour block, before it was one) is shown where the template puts it, ticked, and is the preset's once saved.
+ * Under the parts, the preset's elements of the user's own (`extras`, LAYOUTS.extras at most): Add an element offers the
+ * four kinds (EXTRA_KINDS), and the one picked comes in near the middle (newExtra), at every size, selected; each is
+ * drawn by a stand-in of its kind — words of the editor's own in the look's lettering, a block of the channel colour,
+ * the anonymous portrait (PORTRAIT), its built-in sticker — and is then moved, sized, ticked and reset as a part is
+ * (reset at every size: back where it came in), a text one set in columns or not too, and let go of by its × or Remove.
  * `fresh`: a new preset, in the list once saved. Save keeps it; Cancel, Escape or a click beside the window leave it as
  * it was (asked first when something was changed). Both close it. Nothing here touches the cover.
  */
 function layoutEditor(p, i, fresh = false) {
-  const m = $("modal"), c = cat(), none = new Map();
-  // the block, worked on as the preset keeps it (setPresetLayout); the parts, on layers of the editor's own
+  const m = $("modal"), c = cat(), photos = new Map();   // the photos drawn: the portrait a picture element is drawn by, once it can be
+  // the block, worked on as the preset keeps it (setPresetLayout); the parts and the elements of the user's own (`extras`:
+  // { id, kind, sticker? }, in order), on layers of the editor's own; `picking`, the kinds of element offered to add
   const E = { p: { template: p.template, adjust: { ...p.adjust }, ...(p.orient ? { orient: copyOf(p.orient) } : {}), ...(p.by ? { by: copyOf(p.by) } : {}) },
-    custom: [...(p.custom || [])], key: S.sel, scope: "orient", sel: "title", live: null, dirty: false, adding: false, addW: "", addH: "" };
+    custom: [...(p.custom || [])], extras: (p.extras || []).map((x) => ({ id: x.id, kind: x.kind, ...(x.sticker ? { sticker: x.sticker } : {}) })),
+    key: S.sel, scope: "orient", sel: "title", live: null, dirty: false, adding: false, addW: "", addH: "", picking: false };
   // the sizes it is laid out at: the profile's, then its own (one the profile has too is the profile's)
   const sizes = () => [...S.profile.sizes.map((z) => ({ ...z, key: sizeKey(z) })),
     ...E.custom.filter((k) => !S.profile.sizes.some((z) => sizeKey(z) === k)).map((k) => { const [w, h] = k.split("x").map(Number); return { w, h, key: k, custom: true }; })];
@@ -3017,22 +3046,40 @@ function layoutEditor(p, i, fresh = false) {
   // the sizes a part shows at, of these; and put to show at `at` (none: left out)
   const shownHere = (L) => (L.off ? [] : keys().filter((k) => inSize(L, k)));
   const showAt = (L, at) => { if (at.length) { delete L.off; L.visible = true; keepTo(L, at, keys()); } else { L.off = true; L.visible = false; } };
-  for (const L of layers) if (L.type !== "bg" && !LAYOUT_PARTS.includes(L.id)) { L.off = true; L.visible = false; }   // the logo, the corner brackets: no preset's
+  for (const L of layers) if (L.type !== "bg" && !LAYOUT_PARTS.includes(L.id)) { L.off = true; L.visible = false; }   // the corner brackets: no preset's
   for (const id of LAYOUT_PARTS) {   // one it has no entry for as a new preset has it; the graphic's places this channel's, for every channel
     const q = p.parts[id] || { t: newLayer(id).t, shown: true }, L = part(id);
     L.t = id === "graphic" ? plainPlaces(copyOf(q.t), c.id) : copyOf(q.t);
     showAt(L, q.shown ? keys().filter((k) => !(q.hide || []).includes(k)) : []);
+    if (COLUMN_PARTS.includes(id)) L.vertical = q.vertical === true;   // an earlier preset's, which says nothing of it: in a line
   }
+  // each element of the user's own drawn by a stand-in of its kind under its id (extraLayer: words of the editor's own in
+  // the look's lettering, a block of the channel colour, the anonymous portrait, its sticker), where a layer of its kind
+  // added to a cover would go (insertExtra), placed and shown as the preset has it
+  const standIn = (x) => {
+    const L = extraLayer(x, { words: t("layed.sampleText"), color: c.color, image: "portrait" });
+    L.id = x.id; L.t = copyOf(x.t);
+    if (x.kind === "text") L.vertical = x.vertical === true;
+    insertExtra(layers, L, x.kind);
+    showAt(L, x.shown ? keys().filter((k) => !(x.hide || []).includes(k)) : []);
+  };
+  for (const x of p.extras || []) standIn(x);
+  const extraOf = (id) => E.extras.find((x) => x.id === id), ids = () => [...LAYOUT_PARTS, ...E.extras.map((x) => x.id)];
+  // what a part or an element is called: an element by its kind, numbered among those of its kind when there are more
+  const nameOf = (id) => {
+    const x = extraOf(id), same = x ? E.extras.filter((y) => y.kind === x.kind) : [];
+    return x ? t("layed.kind." + x.kind) + (same.length > 1 ? " " + (same.indexOf(x) + 1) : "") : t("layer." + id);
+  };
   // the part selected one at the size shown: else the first there is (the title when there is none)
-  const keepSel = () => { if (!shownHere(part(E.sel)).includes(size().key)) E.sel = LAYOUT_PARTS.find((id) => shownHere(part(id)).includes(size().key)) || "title"; };
+  const keepSel = () => { if (!part(E.sel) || !shownHere(part(E.sel)).includes(size().key)) E.sel = ids().find((id) => shownHere(part(id)).includes(size().key)) || "title"; };
   keepSel();
-  // what it is drawn with: words of its own, the profile's brand, the channel's name and graphic; the cel look on its
-  // dark ground, the block as the preset has it at the size
-  const words = { catId: c.id, title: t("layed.sampleTitle"), subtitle: t("layed.sampleSub"), tag: t("layed.sampleTag") };
+  // what it is drawn with: words of its own, the profile's brand with a letter logo, the channel's name and graphic; the
+  // cel look on its dark ground, the block as the preset has it at the size
+  const words = { catId: c.id, title: t("layed.sampleTitle"), subtitle: t("layed.sampleSub"), tag: t("layed.sampleTag") }, logo = letterLogo(S.profile.brand.name, c.color);
   const channel = { ...c, name: c.name || t("layed.sampleChannel"), graphic: c.graphic && c.graphic.kind !== "none" ? c.graphic : { kind: "graphic", id: "camera", labels: [], stamp: "" } };
   const profileAt = (key) => {
     const lay = presetLayout(E.p, key);
-    return { ...S.profile, brand: { ...S.profile.brand, name: S.profile.brand.name || t("layed.sampleBrand"), logo: "" }, categories: S.profile.categories.map((x) => (x.id === c.id ? channel : x)),
+    return { ...S.profile, brand: { ...S.profile.brand, name: S.profile.brand.name || t("layed.sampleBrand"), logo }, categories: S.profile.categories.map((x) => (x.id === c.id ? channel : x)),
       style: { template: lay.template, layoutAdjust: { [lay.template]: { ...lay.adjust } }, theme: "dark", look: "cel", lookParams: {}, lookSeed: 7, lookArt: {} } };
   };
   // the size shown as the layer maths wants it, its group the sizes here facing its way, and no channel (a move of the
@@ -3045,7 +3092,7 @@ function layoutEditor(p, i, fresh = false) {
   const cv = el("canvas"), stage = el("div", { class: "ls-stage" }, cv), side = el("div", { class: "ls-side" }), top = el("div", { class: "ls-top" }), strip = el("div", { class: "ls-strip" });
   // each size's look of the preset, under the canvas: a canvas each, kept while the strip is built again and painted a moment after a change
   const thumbs = new Map(), thumbOf = (key) => { if (!thumbs.has(key)) thumbs.set(key, el("canvas")); return thumbs.get(key); };
-  const paintThumbs = () => { for (const z of sizes()) { const tc = thumbOf(z.key); if (tc.isConnected) drawCover(tc, { profile: profileAt(z.key), catIndex: catIndex(), size: z, pixelW: 220, cover: { ...words, layers }, photos: none }); } };
+  const paintThumbs = () => { for (const z of sizes()) { const tc = thumbOf(z.key); if (tc.isConnected) drawCover(tc, { profile: profileAt(z.key), catIndex: catIndex(), size: z, pixelW: 220, cover: { ...words, layers }, photos }); } };
   const name = el("input", { type: "text", value: p.name, placeholder: layoutName(p, i), maxLength: LAYOUTS.name, spellcheck: false, oninput: () => (E.dirty = true) });
   // fitted to the room there is, at the screen's pixels; painted as a cover is, so the block and its diamonds are those
   // of this size (a part kept to other sizes left out of it, see coverAt in render.js)
@@ -3054,7 +3101,7 @@ function layoutEditor(p, i, fresh = false) {
     const z = size(), [vw, vh] = virtualSize(z.w, z.h), room = stage.getBoundingClientRect();
     const k = Math.max(0.05, Math.min((room.width - 16) / vw, (room.height - 16) / vh));
     cv.style.width = Math.round(vw * k) + "px"; cv.style.height = Math.round(vh * k) + "px";
-    drawCover(cv, { profile: profileAt(z.key), catIndex: catIndex(), size: z, pixelW: Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), cover: { ...words, layers }, photos: none,
+    drawCover(cv, { profile: profileAt(z.key), catIndex: catIndex(), size: z, pixelW: Math.min(vw * 1.5, vw * k * (window.devicePixelRatio || 1)), cover: { ...words, layers }, photos,
       select: E.sel, live: E.live, handles: E.sel !== "accent" });
     if (!E.live) later("layed-thumbs", 250, paintThumbs);
   };
@@ -3064,7 +3111,7 @@ function layoutEditor(p, i, fresh = false) {
   // diamonds); the part under it (the selected one keeps the grab under anything at least as big, as on the canvas —
   // but the block, which holds most of what lies on it)
   const at = (e) => { const b = cv.getBoundingClientRect(), k = cv._virtual[0] / b.width; return { x: (e.clientX - b.left) * k, y: (e.clientY - b.top) * k, k }; };
-  const ok = (h) => LAYOUT_PARTS.includes(h.id);
+  const ok = (h) => LAYOUT_PARTS.includes(h.id) || !!extraOf(h.id);
   const grip = (e) => {
     const hit = E.sel !== "accent" && cv._hits && cv._hits.find((h) => h.id === E.sel);
     if (!hit || !showsFrame(hit)) return null;
@@ -3182,7 +3229,7 @@ function layoutEditor(p, i, fresh = false) {
     const key = `${w}x${h}`;
     if (!keys().includes(key)) {
       if (E.custom.length >= LAYOUTS.custom) return toast(t("layed.manySizes", LAYOUTS.custom));
-      const was = LAYOUT_PARTS.map((id) => [part(id), shownHere(part(id))]);
+      const was = ids().map((id) => [part(id), shownHere(part(id))]);
       E.custom.push(key);
       for (const [L, on] of was) if (on.length) showAt(L, [...on, key]);
       E.dirty = true;
@@ -3190,7 +3237,7 @@ function layoutEditor(p, i, fresh = false) {
     E.key = key; E.adding = false; E.addW = E.addH = ""; keepSel(); build(); redraw();
   };
   const dropSize = (key) => {
-    const was = LAYOUT_PARTS.map((id) => [part(id), shownHere(part(id))]);
+    const was = ids().map((id) => [part(id), shownHere(part(id))]);
     E.custom = E.custom.filter((k) => k !== key);
     for (const [L, on] of was) if (on.length) showAt(L, on.filter((k) => k !== key));
     if (E.key === key) { E.key = keys()[0]; keepSel(); }
@@ -3209,7 +3256,27 @@ function layoutEditor(p, i, fresh = false) {
   // side kept; the block to side `to`, as when it is dragged there (each the scope reaches alike, sideLike) — each where
   // the scope reaches
   const follow = () => { const by = { ...E.p.by }; delete by[size().key]; if (Object.keys(by).length) E.p.by = by; else delete E.p.by; E.dirty = true; build(); redraw(); };
-  const reset = () => { const g = geo(); resetPlacement(part(E.sel), E.scope, g.key, g.catId, g.group.map((x) => x.key)); E.dirty = true; build(); redraw(); };
+  const reset = () => {   // an element of the user's own, at every size: back where it was added
+    const g = geo(), x = extraOf(E.sel);
+    if (x && E.scope === "all") part(E.sel).t = newExtra(x.kind, x.id).t; else resetPlacement(part(E.sel), E.scope, g.key, g.catId, g.group.map((x) => x.key));
+    E.dirty = true; build(); redraw();
+  };
+  // an element of the user's own of `kind` added (LAYOUTS.extras at most), shown at every size and selected; or let go of
+  const addExtra = (kind) => {
+    if (E.extras.length >= LAYOUTS.extras) return;
+    let id;
+    do id = "x" + uid(); while (part(id));
+    const x = newExtra(kind, id, E.extras.filter((y) => y.kind === kind).length);
+    E.extras.push({ id, kind, ...(x.sticker ? { sticker: x.sticker } : {}) });
+    standIn(x);
+    E.sel = id; E.picking = false; E.dirty = true; build(); redraw();
+  };
+  const dropExtra = (id) => {
+    E.extras = E.extras.filter((x) => x.id !== id);
+    layers.splice(layers.indexOf(part(id)), 1);
+    if (E.sel === id) { E.sel = "title"; keepSel(); }
+    E.dirty = true; build(); redraw();
+  };
   const resetBlock = () => {
     setPresetLayout(E.p, E.scope, geo().key, (lay, at) => blockDefault(lay, at && (ORIENTS.includes(at) ? at : orientOfKey(at))));
     E.dirty = true; build(); redraw();
@@ -3234,19 +3301,36 @@ function layoutEditor(p, i, fresh = false) {
           : el("button", { class: "ls-plus", title: t("layed.addTip"), onclick: () => { E.adding = true; build(); } }, t("layed.add"))));
     later("layed-thumbs", 60, paintThumbs);
     if (E.adding) wIn.focus();
-    // a part's row: ticked where the layout has it at this size, and said so when that is some sizes only; its name,
-    // clicked, selects it (one here)
+    // a part's or an element's row: ticked where the layout has it at this size, and said so when that is some sizes
+    // only; its name, clicked, selects it (one here); an element of the user's own, an × to let it go
     const row = (id) => {
-      const P = part(id), on = shownHere(P), here = on.includes(z.key);
+      const P = part(id), on = shownHere(P), here = on.includes(z.key), mine = !!extraOf(id);
       return el("div", { class: "chk" + (id === E.sel ? " on" : "") },
         el("input", { type: "checkbox", checked: here, onchange: (e) => tick(P, e.target.checked) }),
-        el("span", { onclick: () => { if (here) { pick(id); redraw(); } } }, t("layer." + id)),
-        on.length > 0 && on.length < all.length && el("small", { class: "some", title: t("layed.someTip", sizes().filter((x) => on.includes(x.key)).map((x) => ratioText(x.w, x.h)).join(" · ")) }, t("layed.some")));
+        el("span", { onclick: () => { if (here) { pick(id); redraw(); } } }, nameOf(id)),
+        on.length > 0 && on.length < all.length && el("small", { class: "some", title: t("layed.someTip", sizes().filter((x) => on.includes(x.key)).map((x) => ratioText(x.w, x.h)).join(" · ")) }, t("layed.some")),
+        mine && el("button", { class: "drop", title: t("layed.dropExtra"), "aria-label": t("layed.dropExtra"), onclick: () => dropExtra(id) }, "×"));
     };
+    // under the parts, an element of the user's own to add: the way to the kinds, or the kinds to pick one of
+    const full = E.extras.length >= LAYOUTS.extras, x = extraOf(E.sel);
+    const adder = E.picking
+      ? el("div", { class: "ls-kinds" }, el("span", { class: "cap" }, t("layed.pickKind")),
+        el("div", { class: "kinds" }, EXTRA_KINDS.map((k) => el("button", { class: "btn", onclick: () => addExtra(k) }, t("layed.kind." + k)))),
+        el("button", { class: "linkbtn", onclick: () => { E.picking = false; build(); } }, t("layed.cancel")))
+      : el("button", { class: "linkbtn ls-addx", disabled: full, title: t(full ? "layed.manyExtras" : "layed.addExtraTip", LAYOUTS.extras), onclick: () => { E.picking = true; build(); } }, t("layed.addExtra"));
     side.replaceChildren(...[
-      el("div", {}, cap("layed.parts"), el("div", { class: "parts" }, LAYOUT_PARTS.map(row)), el("div", { class: "hint", style: "margin:6px 0 0" }, t("layed.partsHint"))),
-      el("div", { class: "ls-picked" }, el("span", {}, t("layed.picked", t("layer." + E.sel))),
-        !block && el("button", { class: "btn", title: t("layed.resetTip"), onclick: reset }, t("layed.reset"))),
+      el("div", {}, cap("layed.parts"), el("div", { class: "parts" }, LAYOUT_PARTS.map(row), E.extras.length > 0 && el("div", { class: "ls-mine" }, t("layed.mine")), E.extras.map((y) => row(y.id))),
+        adder, el("div", { class: "hint", style: "margin:6px 0 0" }, t("layed.partsHint"))),
+      // an element of the user's own: what it does where the preset is put, behind an ⓘ
+      el("div", { class: "ls-picked" }, el("span", {}, t("layed.picked", nameOf(E.sel)), x && " ", x && info(t("layed.extraHint." + x.kind))),
+        el("div", { class: "acts" }, !block && el("button", { class: "btn", title: t("layed.resetTip"), onclick: reset }, t("layed.reset")),
+          x && el("button", { class: "btn", onclick: () => dropExtra(x.id) }, t("layed.remove")))),
+      // the words of the part selected in a line or in columns, at every size (a lettered part's but the brand row's, a
+      // text element's)
+      (COLUMN_PARTS.includes(E.sel) || (x && x.kind === "text")) && el("div", { class: "togrow ls-run" },
+        el("div", { style: "flex:1;min-width:0" }, el("div", { style: "font-weight:700" }, t("props.vertical")), el("div", { class: "hint", style: "margin:2px 0 0" }, t("layed.verticalSub"))),
+        el("button", { class: "tog" + (part(E.sel).vertical ? " on" : ""), role: "switch", "aria-checked": String(!!part(E.sel).vertical), "aria-label": t("props.vertical"), title: t("props.verticalTip"),
+          onclick: () => { const L = part(E.sel); L.vertical = !L.vertical; E.dirty = true; build(); redraw(); } })),
       // the block: the side it lies on at this size, a button each (as a drag toward that side); its size and slant put back
       block && el("div", { class: "ls-block" },
         el("div", {}, el("label", { class: "cap" }, t("layed.side", ratioText(z.w, z.h))),
@@ -3261,7 +3345,7 @@ function layoutEditor(p, i, fresh = false) {
   const back = () => { LAYED.redraw = null; closeModal(); if (S.mode === "edit" && S.tab.edit === "layout") renderPanel(); };   // back to the Layout sheet, where the presets are
   const cancel = () => { if (E.dirty && !confirm(t("layed.discard"))) return; back(); };
   const save = () => {
-    const kept = normalizeLayouts([{ ...E.p, custom: E.custom, parts: takeParts(layers, keys(), p.parts, c.id), id: p.id, name: name.value }])[0];
+    const kept = normalizeLayouts([{ ...E.p, custom: E.custom, parts: takeParts(layers, keys(), p.parts, c.id), extras: takeExtras(layers, E.extras, keys(), p.extras || []), id: p.id, name: name.value }])[0];
     S.settings.layouts = fresh ? [...S.settings.layouts, kept] : S.settings.layouts.map((x) => (x.id === p.id ? kept : x)); persistSettings();
     back();
   };
@@ -3275,6 +3359,9 @@ function layoutEditor(p, i, fresh = false) {
   m.hidden = false; m.onDismiss = cancel;
   LAYED.redraw = redraw;
   redraw();
+  pictureOf(logo, redraw);   // drawn again once the letter logo can be (and its sizes' pictures after it), and the portrait
+  const portrait = () => { const pic = pictureOf(PORTRAIT); if (pic) photos.set("portrait", pic); return pic; };
+  if (!portrait()) pictureOf(PORTRAIT, () => { portrait(); redraw(); });
 }
 /** Whether Tune this look, in the Look sheet, shows the look's description: shut until its heading is clicked, for the session. */
 const TUNE_UI = { about: false };
@@ -3666,10 +3753,16 @@ function hoverPreset(p, i) {
   if (!p) return previewSoon("layout", null);
   previewSoon("layout", { id: p.id, name: layoutName(p, i), p }, () => S.mode === "edit" && !sheetHidden() && S.tab.edit === "layout" && S.settings.layouts.includes(p));
 }
-/** The profile and the cover as applyLayout would leave them with preset `p` put on, at the profile's sizes: copies, made as the canvas is drawn, so they follow whatever changes meanwhile. */
+/**
+ * The profile and the cover as applyLayout would leave them with preset `p` put on, at the profile's sizes: copies, made
+ * as the canvas is drawn, so they follow whatever changes meanwhile — the style, the layout parts and the layers the
+ * preset's elements place (extrasOn) copied, the others shared, as nothing changes them, in a list of its own, which
+ * the layers an element adds join and leave with it.
+ */
 function laidOut(p) {
-  const style = copyOf(S.profile.style), layers = S.cover.layers.map((l) => (LAYOUT_PARTS.includes(l.id) ? copyOf(l) : l));
-  putLayout(style, layers, p, sizeKeys());
+  const env = presetEnv(), took = new Set(extrasOn(S.cover.layers, p, env));
+  const style = copyOf(S.profile.style), layers = S.cover.layers.map((l) => (LAYOUT_PARTS.includes(l.id) || took.has(l) ? copyOf(l) : l));
+  putLayout(style, layers, p, sizeKeys(), env);
   return { profile: { ...S.profile, style }, cover: { ...S.cover, layers } };
 }
 /** The default design (the ⋯ menu): the cover's layers but its photos kept as the profile's start, or taken back from it. */
@@ -5469,12 +5562,13 @@ function borrowDialog(L, here, list) {
  * where it is; so is a weave, as a layer locked is (see wovenIds in layers.js): a cut-out or an asset woven with
  * lettering, the lettering it weaves with (a text layer), and a photo whose cut-out weaves, which it would take
  * along. Each layer's box at each size comes from a quick drawing; a layer too big for some size is
- * set straighter, then smaller, until it fits.
+ * set straighter, then smaller, until it fits. `keep`: the ids of layers to leave where they are besides (those a
+ * layout preset dealt placed by its elements of the user's own).
  */
-function dealPlaces(R) {
+function dealPlaces(R, keep = []) {
   const P = RULES.places, between = (a, b) => a + R() * (b - a), round = (v, step) => Math.round(v / step) * step;
   const fills = (L) => fillsCanvas(L) || (L.type === "solid" && L.t.all.s >= 0.98 && !L.t.all.r), woven = wovenIds(S.cover.layers);
-  const movers = S.cover.layers.filter((L) => isFree(L.type) && L.visible && !L.locked && !L.of && !fills(L) && !woven.has(L.id) && !passivesOf(L).some((p) => woven.has(p.id)));
+  const movers = S.cover.layers.filter((L) => isFree(L.type) && L.visible && !L.locked && !L.of && !fills(L) && !woven.has(L.id) && !passivesOf(L).some((p) => woven.has(p.id)) && !keep.includes(L.id));
   if (!movers.length) return;
   const boxes = S.profile.sizes.filter((s) => s.on !== false).map((size) => {
     const cv = document.createElement("canvas"), key = sizeKey(size);
@@ -6648,14 +6742,15 @@ function setMode(mode) {
 /**
  * One hand of Surprise me, dealt onto the cover and the profile's style as they are: everything but where
  * the user's own layers go by dealCover (deal.js, where all the rules are) — the layout among it, the canvas's or
- * one of the user's layout presets — then those places by dealPlaces, on the layout dealt. `design`: the layers of
+ * one of the user's layout presets — then those places by dealPlaces, on the layout dealt (but for the layers a preset's
+ * elements of the user's own placed, which stay where it put them). `design`: the layers of
  * the profile's design by id, where moved words go back to (but for a preset's); `not`: the looks dealt already in
  * this run. Returns the layout dealt: "keep", or the preset's id.
  */
 function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), not = []) {
   const R = Math.random, sv = S.settings.surprise, layouts = S.settings.layouts;
-  const { layout } = dealCover(S.profile.style, S.cover, { R, locks: sv.locks, odds: oddsOf(sv.odds, layouts), layouts, not, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, sizes: sizeKeys(), can: (k) => CAN.outlines || EFFECTS[k].kind !== "outline", canTint });
-  if (!sv.locks.places) dealPlaces(R);
+  const { layout, placed } = dealCover(S.profile.style, S.cover, { R, locks: sv.locks, odds: oddsOf(sv.odds, layouts), layouts, not, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, sizes: sizeKeys(), put: presetEnv(), can: (k) => CAN.outlines || EFFECTS[k].kind !== "outline", canTint });
+  if (!sv.locks.places) dealPlaces(R, placed);
   return layout;
 }
 /** Surprise me's run (how many hands, how fast they show: RULES.hands in deal.js). done: when the last run ended; step: the step of undo it made ({idx}) while nothing has followed it. */

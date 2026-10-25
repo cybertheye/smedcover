@@ -407,7 +407,8 @@ function normalizeLayer(raw, catIds, sizeKeys) {
   // lettering may be given its own colour; without one it takes whatever the look gives it
   if (LETTERED.includes(raw.type)) for (const k of HEADLINES.includes(raw.type) ? ["ink", "hi", "plateInk", "hiPlateInk"] : ["ink"]) if (typeof raw[k] === "string" && /^#[0-9a-f]{6}$/i.test(raw[k])) L[k] = raw[k].toLowerCase();
   // lettering may be set in columns, as a Song edition is (`vertical`), its columns ruled (`rules`, meant only then):
-  // the user's, which Surprise me never deals, nor a layout preset carries (see putLayout below, and columned in style.js)
+  // the user's, which Surprise me never deals of itself; a layout preset carries the title's, subtitle's, tag's and
+  // channel name's `vertical` (COLUMN_PARTS, see putLayout below, and columned in style.js), never `rules`
   if (LETTERED.includes(raw.type)) { L.vertical = raw.vertical === true; L.rules = raw.rules === true; }
   // the looks' effects put on the layer (see layerEffects in style.js): "look.key" a strength 0–1 (0, or
   // missing: off), "look.key:sub" one of its own settings 0–1; they stay with the layer whatever the look
@@ -926,14 +927,75 @@ export function resetPlacement(layer, scope, key, catId, keys = [key]) {
 // adjustments, { template, adjust }, as layoutOf in layout.js answers for a profile. The block is kept as a profile
 // keeps it, a default with sizes of their own over it (`by`), and a step between: each orientation's own (`orient`:
 // wide, square, tall), which a size facing that way has unless it has one of its own, so a profile's sizes the preset
-// never saw are laid out as those facing their way are. Nothing else: no fonts, letterings, colours or look, nor which
-// way words run. A preset may keep sizes of its own too (`custom`), laid out in its editor beside the profile's; a
+// never saw are laid out as those facing their way are. And of the title, subtitle, tag and channel name, which way
+// their words run: in a line or in columns (`vertical`, see COLUMN_PARTS). Nothing else: no fonts, letterings, colours
+// or look. A preset may keep sizes of its own too (`custom`), laid out in its editor beside the profile's; a
 // profile takes of a preset its own sizes alone. Surprise me deals one by its chance (dealCover in deal.js), and one
 // can be put on the canvas as it is; either way a part the user locked stays as it is, and the colour block locked
-// keeps its layout too. A preset made now carries every part; one made before the colour block was a part has no
-// entry for it, and a part a preset has no entry for is one it leaves as it is.
-/** The layout's parts a layout preset places: those with words, the channel's graphic, and the colour block and its edge. */
-export const LAYOUT_PARTS = ["title", "subtitle", "tag", "catname", "brand", "graphic", "accent"];
+// keeps its layout too. A preset made now carries every part, and which way each of COLUMN_PARTS runs; one made before
+// the colour block (or the brand logo) was a part has no entry for it, and a part a preset has no entry for is one it
+// leaves as it is, as one made before it kept which way words run leaves that as it is.
+// Besides its parts, a preset may have elements of the user's own (`extras`, EXTRA_KINDS: words, a colour, a picture, a
+// vector sticker), each placed and shown as a part is: put on a cover, each places one of the cover's own layers of its
+// kind, in order, one being added where there is none left (see putLayout).
+/** The layout's parts a layout preset places: those with words, the brand logo, the channel's graphic, and the colour block and its edge. */
+export const LAYOUT_PARTS = ["title", "subtitle", "tag", "catname", "brand", "logo", "graphic", "accent"];
+/** The parts whose words a preset sets in a line or in columns (竖排, the layer's `vertical`): the lettered ones but the brand row. */
+export const COLUMN_PARTS = ["title", "subtitle", "tag", "catname"];
+/** The kinds of element of the user's own a preset may have (`extras`): words, a block of one colour, a picture, a vector sticker. */
+export const EXTRA_KINDS = ["text", "solid", "image", "vector"];
+/** The built-in sticker a vector element is drawn with, and makes a layer of, unless it names another (see stickers.js). */
+export const EXTRA_STICKER = "burst";
+/** Whether an asset's picture is a vector one: a sticker, a channel graphic (the app counts the user's stickers made as data too, see canTint in assets.js). */
+const vectorRef = (ref) => !!ref && (ref.kind === "sticker" || ref.kind === "graphic");
+/**
+ * Whether layer L is of the kind an element of `kind` places: text; a colour; a picture — a photo neither filling the
+ * canvas nor a linked cut-out —; a vector sticker — an asset whose picture `vector` says is a vector one.
+ */
+const takes = (kind, L, vector) => (kind === "text" ? L.type === "text" : kind === "solid" ? L.type === "solid" : kind === "image" ? L.type === "photo" && !L.fill && !L.of : L.type === "asset" && vector(L.ref));
+/**
+ * A new element of the user's own, of `kind`, under id `id`, as the layout editor adds it — the n-th of its kind, each
+ * a little lower and further right than the one before, so they do not lie on one another: near the middle, at about the size a
+ * layer of its kind comes in at, shown at every size; words in a line, a vector sticker the usual one.
+ */
+export function newExtra(kind, id, n = 0) {
+  const [x, y, s] = { text: [0.5, 0.62, 0.4], solid: [0.3, 0.72, 0.3], image: [0.72, 0.5, 0.42], vector: [0.8, 0.3, 0.22] }[kind], d = (n % 4) * 0.05;
+  return { id, kind, t: { all: { x: x + d, y: y + d, s, r: 0, kx: 1, ky: 1 }, by: {} }, shown: true, ...(kind === "text" ? { vertical: false } : {}), ...(kind === "vector" ? { sticker: EXTRA_STICKER } : {}) };
+}
+/**
+ * A layer for element `x` of a preset where a cover has none of its kind left (see putLayout), or for the layout
+ * editor to draw it by: words (`env.words`), a block of `env.color` (the channel's), the element's sticker in the
+ * channel colour; a picture only of the photo `env.image` names (the editor's stand-in): none is made up for a cover.
+ */
+export function extraLayer(x, env = {}) {
+  if (x.kind === "text") return newLayer("text", { text: env.words || "Text" });
+  if (x.kind === "solid") return newLayer("solid", { color: env.color || PROPS.solid.color });
+  if (x.kind === "vector") return newLayer("asset", { ref: { kind: "sticker", id: x.sticker || EXTRA_STICKER }, tint: true });
+  return env.image ? newLayer("photo", { pid: env.image }) : null;
+}
+/**
+ * Puts layer L, made for an element of `kind`, into `layers` (in place): over the last of its kind (and what is clipped
+ * onto it), so those of a kind stay in their elements' order; else a colour or a picture over the colour block (under
+ * the words), words or a sticker on top.
+ */
+export function insertExtra(layers, L, kind, vector = vectorRef) {
+  const last = layers.findLast((l) => l !== L && takes(kind, l, vector)), under = last || (kind === "solid" || kind === "image" ? layers.find((l) => l.id === "accent") : null);
+  layers.splice(under ? clipEnd(layers, layers.indexOf(under)) + 1 : layers.length, 0, L);
+  return L;
+}
+/**
+ * The layers of `layers` that layout preset `p`'s elements of the user's own place, in its order (null for one whose
+ * kind the cover has none left of): each the next of its kind, bottom first, on channel `env.catId`'s cover (its
+ * layers kept to other channels passed by), whose assets `env.vector(ref)` says are vector ones (see putLayout).
+ */
+export function extrasOn(layers, p, env = {}) {
+  const used = new Set(), vector = env.vector || vectorRef;
+  return (p.extras || []).map((x) => {
+    const L = layers.find((l) => !used.has(l) && takes(x.kind, l, vector) && (env.catId == null || appliesTo(l, env.catId)));
+    if (L) used.add(L);
+    return L || null;
+  });
+}
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const layCopy = (lay) => ({ template: lay.template, adjust: { ...(lay.adjust || {}) } });
 /**
@@ -966,9 +1028,9 @@ export function newBlock() {
 /**
  * A new layout preset, as its editor starts it: the colour block of newBlock(), and every part of LAYOUT_PARTS in it,
  * shown at every size where the template puts it — the channel name and graphic too, which a new design leaves out
- * (DEFAULT_OFF), the graphic on the block.
+ * (DEFAULT_OFF), the graphic on the block —, the words of COLUMN_PARTS in a line.
  */
-export const newPreset = () => ({ ...newBlock(), parts: Object.fromEntries(LAYOUT_PARTS.map((id) => [id, { t: newLayer(id).t, shown: true }])) });
+export const newPreset = () => ({ ...newBlock(), parts: Object.fromEntries(LAYOUT_PARTS.map((id) => [id, { t: newLayer(id).t, shown: true, ...(COLUMN_PARTS.includes(id) ? { vertical: false } : {}) }])) });
 /**
  * Changes layout preset `p`'s colour block, in place, where `scope` reaches from the size keyed `key` (see SCOPES in
  * the app): "size", that size, as its own; "orient", its orientation's own and each size's own facing that way; "all",
@@ -996,10 +1058,11 @@ export function setPresetLayout(p, scope, key, fn) {
   if (Object.keys(by).length) p.by = by; else delete p.by;
 }
 /**
- * The parts of a layout preset as `layers` (a cover's) have them at the sizes keyed `keys`: { id: { t, shown, hide? } },
- * of the layout's own (by id: a copy is not one). A part counts as ticked where the cover has it — not left out, at
+ * The parts of a layout preset as `layers` (a cover's) have them at the sizes keyed `keys`: { id: { t, shown, hide?,
+ * vertical? } }, of the layout's own (by id: a copy is not one). A part counts as ticked where the cover has it — not left out, at
  * that size (`sizes`) —, whether its eye shows it or not (Hide layout, a part hidden by hand: still the layout's), `hide`
- * naming the sizes it is not at when it is at some; at none, it is not shown. Its places per size for `keys` alone, the
+ * naming the sizes it is not at when it is at some; at none, it is not shown. Each of COLUMN_PARTS says whether its
+ * words run in columns (`vertical`, true or false: as the layer has it). Its places per size for `keys` alone, the
  * channel graphic's for channel `catId` (the cover's) as the size's own (plainPlaces), so the preset puts it there on
  * any channel's cover. `was`: the preset's parts before (in its editor), whose places and hiding at sizes other than
  * `keys` (another profile's) are kept.
@@ -1009,12 +1072,29 @@ export function takeParts(layers, keys, was = null, catId = null) {
   for (const id of LAYOUT_PARTS) {
     const L = layers.find((l) => l.id === id);
     if (!L) continue;
-    const t = id === "graphic" ? plainPlaces(clone(L.t), catId) : clone(L.t), at = L.off ? [] : keys.filter((k) => inSize(L, k)), before = was && was[id];
+    const t = id === "graphic" ? plainPlaces(clone(L.t), catId) : clone(L.t);
     if (!was) t.by = Object.fromEntries(Object.entries(t.by).filter(([k]) => ours(k)));
-    const hide = [...(before && before.hide ? before.hide.filter((k) => !keys.includes(k)) : []), ...keys.filter((k) => !at.includes(k))];
-    parts[id] = at.length ? { t, shown: true, ...(hide.length ? { hide } : {}) } : { t, shown: false };
+    parts[id] = { ...shownOf(L, t, keys, was && was[id]), ...(COLUMN_PARTS.includes(id) ? { vertical: L.vertical === true } : {}) };
   }
   return parts;
+}
+/** { t, shown, hide? } of layer L at the sizes keyed `keys`, placed at `t` (see takeParts); `before`, what the preset had for it, whose hiding at other sizes is kept. */
+function shownOf(L, t, keys, before) {
+  const at = L.off ? [] : keys.filter((k) => inSize(L, k));
+  const hide = [...(before && before.hide ? before.hide.filter((k) => !keys.includes(k)) : []), ...keys.filter((k) => !at.includes(k))];
+  return at.length ? { t, shown: true, ...(hide.length ? { hide } : {}) } : { t, shown: false };
+}
+/**
+ * A layout preset's elements of the user's own as the layout editor's `layers` have them, each the layer of its id, at
+ * the sizes keyed `keys`: [{ id, kind, t, shown, hide?, vertical?, sticker? }] in the order of `extras` (the editor's:
+ * { id, kind, sticker? }), placed and shown as takeParts counts a part, words in columns or not as their layer is;
+ * `was`, the preset's before, whose hiding at sizes other than `keys` is kept.
+ */
+export function takeExtras(layers, extras, keys, was = []) {
+  return extras.map((x) => {
+    const L = layers.find((l) => l.id === x.id);
+    return { id: x.id, kind: x.kind, ...shownOf(L, clone(L.t), keys, was.find((w) => w.id === x.id)), ...(x.kind === "text" ? { vertical: L.vertical === true } : {}), ...(x.kind === "vector" ? { sticker: x.sticker || EXTRA_STICKER } : {}) };
+  });
 }
 /**
  * The layout preset that `style` (a profile's) and `layers` (a cover's, of channel `catId`) make as they are at the
@@ -1039,12 +1119,20 @@ export function takeLayout(style, layers, keys, catId = null) {
  * are), each size it draws otherwise (by the size's own or its orientation's) given that as its own, and no size its own
  * besides —, and each part where the preset has it at those sizes: one it shows comes in at the sizes it does not hide
  * (see `sizes` above; one that was left out comes in shown, one hidden by its eye stays hidden), one it does not is left
- * out; a part the preset has no entry for (an earlier preset's colour block) is left as it is. A part locked stays as
- * it is — its place, whether it shows — whether the preset is dealt (as dealCover leaves a locked layer where it is) or
- * put on the canvas by hand; and the colour block locked keeps the profile's block as well (the template, its
+ * out; a part the preset has no entry for (an earlier preset's colour block or brand logo) is left as it is. Each of COLUMN_PARTS has
+ * its words run as the preset says (`vertical`), in a line or in columns; one that says nothing (an earlier preset's)
+ * runs as it did. A part locked stays as it is — its place, whether it shows, which way its words run — whether the
+ * preset is dealt (as dealCover leaves a locked layer where it is) or put on the canvas by hand; and the colour block locked keeps the profile's block as well (the template, its
  * adjustments, each size's own), the block being where that part stands as much as its place is.
+ * Then the preset's elements of the user's own, in order (see extrasOn, with `env`: { catId, the cover's channel; vector(ref),
+ * which assets are vector ones; words and color, those of a layer added }): each places the next of the cover's layers
+ * of its kind — its place, the sizes it shows at (at none, kept to none, there to be shown again), a text one's words
+ * in columns or not —, a layer locked staying as it is; where the cover has none of its kind left, one is added
+ * (extraLayer, insertExtra), but for a picture, and but where the element shows at none of `keys`. So the preset put
+ * again places the same layers again, adding none. Added, they are the user's layers as any other (isAdded).
+ * Returns the ids of the layers the elements place (for Surprise me to leave where they are put).
  */
-export function putLayout(style, layers, p, keys) {
+export function putLayout(style, layers, p, keys, env = {}) {
   const block = layers.find((l) => l.id === "accent");
   if (!(block && block.locked)) {
     const base = { template: p.template, adjust: p.adjust || {} }, adjust = (style.layoutAdjust = style.layoutAdjust || {}), by = {};
@@ -1059,7 +1147,20 @@ export function putLayout(style, layers, p, keys) {
     L.t = { all: { ...q.t.all }, by: Object.fromEntries(Object.entries(q.t.by || {}).filter(([k]) => keys.includes(k.split("@")[0])).map(([k, v]) => [k, { ...v }])) };
     const at = q.shown ? keys.filter((k) => !(q.hide || []).includes(k)) : [];
     if (!at.length) { L.off = true; L.visible = false; } else { if (L.off) { delete L.off; L.visible = true; } keepTo(L, at, keys); }
+    if (COLUMN_PARTS.includes(id) && typeof q.vertical === "boolean") L.vertical = q.vertical;
   }
+  const on = extrasOn(layers, p, env), placed = [];
+  (p.extras || []).forEach((x, i) => {
+    const at = x.shown ? keys.filter((k) => !(x.hide || []).includes(k)) : [];
+    let L = on[i];
+    if (!L) { if (!at.length || !(L = extraLayer(x, env))) return; insertExtra(layers, L, x.kind, env.vector); }
+    placed.push(L.id);
+    if (L.locked) return;
+    L.t = { all: { ...x.t.all }, by: Object.fromEntries(Object.entries(x.t.by || {}).filter(([k]) => keys.includes(k)).map(([k, v]) => [k, { ...v }])) };
+    keepTo(L, at, keys);
+    if (x.kind === "text" && typeof x.vertical === "boolean") L.vertical = x.vertical;
+  });
+  return placed;
 }
 
 /** Inserts `layer` directly above the layer with id `aboveId` (or on top when there is none). */

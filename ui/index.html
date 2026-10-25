@@ -1160,7 +1160,16 @@
   .ls-side{display:grid;gap:14px;min-width:0;padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.04)}
   .ls-side .parts{display:grid;gap:0}.ls-side .parts .chk{margin:3px 0;cursor:default}.ls-side .parts .chk span{cursor:pointer}.ls-side .parts .chk.on span{color:var(--acc);font-weight:600}
   .ls-side .parts .some{margin-left:auto;font-size:11px;opacity:.6;cursor:help}   /* a part shown at some sizes only */
+  .ls-side .parts .drop{margin-left:auto;width:20px;height:20px;flex:none;border-radius:50%;border:0;background:var(--solid2);color:var(--text2);font-size:13px;line-height:1;cursor:pointer}   /* an element of the user's own, let go */
+  .ls-side .parts .some + .drop{margin-left:6px}
+  .ls-side .parts .drop:hover{color:#fff}
+  .ls-mine{margin:8px 0 2px;padding-top:8px;border-top:1px solid var(--line);font-size:12px;color:var(--text3)}   /* the user's own elements, under the parts */
+  .ls-addx{margin-top:6px;font-size:13px}
+  .ls-kinds{display:grid;gap:6px;margin-top:8px;justify-items:start}.ls-kinds .cap{margin:0}
+  .ls-kinds .kinds{display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%}.ls-kinds .kinds .btn{min-width:0;padding:7px 6px;font-size:12.5px}   /* the kinds of element, one to add */
+  .ls-side .ls-picked{flex-wrap:wrap}.ls-side .ls-picked .acts{display:flex;flex-wrap:nowrap;gap:6px;margin-left:auto}   /* the part selected's name, and its buttons beside it or under it */
   .ls-picked{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;border-top:1px solid var(--line);padding-top:12px}
+  .ls-run{padding:8px 12px;font-size:13px}   /* the part selected, its words in a line or in columns */
   .ls-block{display:grid;gap:8px;font-size:13px}.ls-block .layown{margin:0}
   .ls-block .seg .btn{flex:1;min-width:0;padding:6px 4px}   /* the side the block lies on, a button a side */
   .ls-block .acts{display:flex;gap:8px}.ls-block .acts .btn{flex:1;min-width:0;padding:7px 6px;font-size:12.5px;white-space:normal}
