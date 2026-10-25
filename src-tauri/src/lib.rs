@@ -345,7 +345,8 @@ fn selftest_perf() -> bool {
 }
 
 /// In self-test mode, whether to call the agent tools too (SMEDCOVER_SELFTEST_AGENT): the page's dispatcher answers
-/// the read-only tools, the selection, undo and redo as an agent's calls, and reports under `agent`.
+/// every tool as an agent's calls, writing a picture, a project and exports into the self-test folder, and reports
+/// under `agent`.
 #[tauri::command]
 fn selftest_agent() -> bool {
     selftest_root().is_some() && std::env::var_os("SMEDCOVER_SELFTEST_AGENT").is_some()
