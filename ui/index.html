@@ -443,15 +443,9 @@
   /* a caption and its ⓘ (capInfo): the row keeps the space under the caption, so the two are centred on each other */
   .capi{display:flex;align-items:center;gap:6px;margin-bottom:8px}
   .capi>.cap,.lhead>.capi{margin:0}
-  .lbtns{display:flex;gap:6px}
-  .lfilter{margin:8px 0}   /* the list's chips: all, the user's, the layout's (LAYERS_UI) */
-  .lfilter .seg .btn{flex:1;min-width:0;padding:5px 8px;font-size:12px;overflow:hidden;text-overflow:ellipsis}
-  .lfilter .hint{margin-top:6px;line-height:1.5}
   .focusbtn{border:1px solid var(--line2);border-radius:8px;background:rgba(255,255,255,.05);color:inherit;font:500 12px var(--ui);padding:4px 9px;cursor:pointer;opacity:.85}
   .focusbtn:hover{opacity:1}
   .focusbtn.on{background:var(--acc);border-color:transparent;color:var(--acc-ink);opacity:1}
-  .focusbtn.v3btn{display:inline-flex;align-items:center;gap:4px}
-  .focusbtn.v3btn svg{width:12px;height:12px}
   /* the layers in 3D: a canvas over the stage, the cover's own canvas waiting under it; a bar of controls at its foot */
   #stage #cv3d{position:absolute;inset:0;width:100%;height:100%;display:none;box-shadow:none;background:none;cursor:grab}
   #stage.v3 #cv3d{display:block}
@@ -487,35 +481,60 @@
   #strip figure.own figcaption .own{display:inline}
   /* (scrollbars are styled with ::-webkit-scrollbar only: the standard scrollbar-* properties would switch them back to auto-hiding overlays) */
 
-  /* layers */
-  .layers{display:grid;gap:3px}
-  .layer{display:grid;grid-template-columns:12px 18px minmax(0,1fr) auto 24px 24px;align-items:center;gap:6px;border:1px solid transparent;border-radius:11px;background:rgba(255,255,255,.04);padding:4px 4px 4px 2px;min-height:34px;cursor:pointer;user-select:none}
-  .layer:hover{background:rgba(255,255,255,.08)}
-  .layer.on{border-color:color-mix(in srgb,var(--acc) 75%,transparent);background:color-mix(in srgb,var(--acc) 14%,transparent)}
+  /* layers: the Layers sheet (renderSide) — its head (the count, 3D), the chips and FOCUS, the list, and at its foot the
+     selected layer's bar; the sheet is the column's height, and the list scrolls on its own between the head and the bar */
+  #panel:has(>#layerbox){flex:1 1 auto;overflow:hidden;scrollbar-gutter:auto;padding:20px 14px 14px}
+  #panel>#layerbox{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:12px}
+  .lyhead{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .lycount{display:flex;align-items:baseline;gap:8px;min-width:0}
+  .lycount b{flex:none;font-size:19px;font-weight:700}
+  .lycount span{font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lytg{flex:none;height:32px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:rgba(255,255,255,.06);color:var(--text);font:500 12px var(--ui);display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
+  .lytg:hover{background:rgba(255,255,255,.12)}
+  .lytg.on,.lytg.on:hover{background:var(--acc);border-color:transparent;color:var(--acc-ink)}
+  .lytg svg{width:15px;height:15px}
+  .lytg kbd{font:500 10px/14px var(--mono);border:1px solid currentColor;border-radius:5px;padding:0 4px;opacity:.6}
+  .lyfilter{display:flex;align-items:stretch;gap:8px}   /* the list's chips: all, the user's, the layout's (LAYERS_UI); FOCUS beside them */
+  .lyfilter .seg{flex:1;min-width:0}
+  .lyfilter .seg .btn{flex:1 1 auto;min-width:0;padding:5px 6px;font-size:12px;overflow:hidden;text-overflow:ellipsis}
+  .lyfilter .lytg{height:auto}
+  .lyhint{margin-top:8px;line-height:1.5}
+  /* a row: the grip, a tile of what the layer shows (layerTile), its name over what it holds, its chips, eye and lock */
+  .layers{display:grid;align-content:start;gap:3px;flex:1 1 auto;min-height:0;overflow-y:auto;padding:3px 0;margin:-3px 0}   /* (room for the drop line over the first row) */
+  .layer{display:grid;grid-template-columns:14px 36px minmax(0,1fr) auto;align-items:center;gap:9px;border:1.5px solid transparent;border-radius:12px;padding:5px 6px 5px 2px;min-height:50px;box-sizing:border-box;cursor:pointer;user-select:none}
+  .layer:hover{background:rgba(255,255,255,.07)}
+  .layer.on{border-color:color-mix(in srgb,var(--acc) 75%,transparent);background:color-mix(in srgb,var(--acc) 15%,transparent)}
   .layer.peek:not(.on){border-color:#9a9ab4}   /* its sheet is under the pointer in the 3D view */
   .layer.over{box-shadow:0 -3px 0 var(--acc)}
-  .layer.hidden .nm{opacity:.35}
+  .layer.hidden .th,.layer.hidden .nm{opacity:.45}   /* hidden: dimmed, its crossed eye kept in sight */
   .layer.dim{opacity:.35;cursor:not-allowed}   /* FOCUS is on another layer: it cannot be selected */
-  .layer.away>.ic,.layer.away>.nm,.layer.away .kind,.layer.away>.what{opacity:.3}   /* kept to other sizes: not on the cover at this one */
-  .layer .sizes{font:600 10px var(--mono);letter-spacing:.02em;white-space:nowrap;padding:1px 5px;border:1px solid currentColor;opacity:.7;cursor:help}
-  .layer.away .sizes{opacity:1;color:var(--acc)}
-  /* a row's eye and lock show under the pointer and on the selected row, and always when not as they start (hidden, locked) */
-  .layer .ic{border:0;background:transparent;width:24px;height:24px;cursor:pointer;color:var(--text);opacity:.75;padding:0;display:grid;place-items:center;visibility:hidden}
-  .layer:hover .ic,.layer.on .ic,.layer .ic.keep{visibility:visible}
+  .layer.away .th,.layer.away .nm,.layer.away .kind,.layer.away .badge,.layer.away .ic{opacity:.4}   /* kept to other sizes: not on the cover at this one (its line says so, its chip stays bright) */
+  .layer .th{width:36px;height:36px;border-radius:9px;overflow:hidden;display:grid;place-items:center;background:rgba(0,0,0,.35);box-shadow:0 0 0 1px rgba(255,255,255,.12);color:#fff;font:800 12px/1 var(--ui);white-space:nowrap}
+  .layer .th.one{font-size:16px}
+  .layer .th img{width:100%;height:100%;object-fit:cover;display:block}
+  .layer .th .ico{display:grid;place-items:center;opacity:.7}
+  .layer .th .ico svg{width:18px;height:18px}
+  .layer .th .ico.fill,.layer .th .ico.fill svg{width:100%;height:100%;opacity:1}
+  .layer .txt{min-width:0;display:flex;flex-direction:column;gap:2px}
+  .layer .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:700}
+  .layer .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--text3)}
+  .layer .end{display:flex;align-items:center;gap:6px;min-width:0}
+  .layer .badge,.layer .sizes{flex:none;font-size:10.5px;line-height:16px;padding:0 6px;border:1px solid transparent;border-radius:6px;white-space:nowrap;cursor:help}
+  .layer .badge{background:rgba(255,255,255,.1);color:var(--text2)}
+  .layer .sizes{flex:0 1 auto;min-width:0;max-width:110px;overflow:hidden;text-overflow:ellipsis;border-color:color-mix(in srgb,var(--acc) 70%,transparent);color:color-mix(in srgb,var(--acc) 55%,#fff)}   /* shown at some sizes only */
+  /* a row's eye and lock show under the pointer and on the selected row, and always when not as they start (hidden, locked; the Background's padlock) */
+  .layer .ic{border:0;background:transparent;width:22px;height:24px;cursor:pointer;color:var(--text);opacity:.75;padding:0;display:none;place-items:center}
+  .layer:hover .ic,.layer.on .ic,.layer .ic.keep{display:grid}
+  .layer .ic svg{width:16px;height:16px}
   .layer .ic:hover{opacity:1}
   .layer .ic.pin{opacity:.45;cursor:help}
-  /* the grip at the head of a row that can be dragged (layerRow), shown as the eye and lock are; not while it is renamed */
+  /* the grip at the head of a row that can be dragged (layerRow), shown on the selected row and under the pointer; not while it is renamed */
   .layer .grip{display:grid;place-items:center;height:24px;font-size:13px;letter-spacing:-3px;color:var(--text3);cursor:grab;visibility:hidden}
   .layer:hover .grip,.layer.on .grip{visibility:visible}
   .layer .grip:hover{color:var(--text)}
   .layer:has(.rename) .grip{visibility:hidden}
-  .layer .what{display:grid;place-items:center;opacity:.6}
-  .layer .nm .words{margin-left:7px;color:var(--text3);font-size:12px}
-  .layer .badge{font-size:10.5px;line-height:1.5;padding:0 6px;border-radius:6px;background:rgba(255,255,255,.09);color:var(--text2);white-space:nowrap;cursor:help}
-  .layer .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
   .layer .only{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c);margin-left:7px;vertical-align:1px}
   .chips.small button{padding:5px 9px;font-size:12px}
-  .layer .kinds{display:flex;gap:5px;align-items:center}
   .layer .kind{display:grid;place-items:center;width:16px;height:16px;opacity:.5;cursor:help}
   .layer .kind.chain,.layer .kind.role{opacity:1}
   .layer .kind.chain,.layer .kind.role{cursor:pointer}
@@ -525,10 +544,13 @@
   .layer .kind.chain:hover{filter:brightness(1.4)}
   .layer .nm[title]{cursor:text}
   .layer.clip{margin-left:16px}
-  /* under the list, the selected layer and what can be done to it */
-  .selbar{display:flex;align-items:center;gap:2px;margin-top:10px;padding:5px 5px 5px 12px;border-radius:14px;background:rgba(255,255,255,.06)}
-  .selbar>span{flex:1;min-width:0;font-size:12.5px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .selbar>span b{color:var(--text);font-weight:600}
+  /* at the sheet's foot, the selected layer and what can be done to it */
+  .selbar{flex:none;margin-top:auto;display:flex;align-items:center;gap:2px;min-height:48px;box-sizing:border-box;padding:0 6px 0 12px;border-radius:14px;background:rgba(0,0,0,.25);border:1px solid var(--line)}
+  .selbar>.who{flex:1;min-width:0;font-size:12.5px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .selbar>.who b{color:var(--text);font-weight:700}
+  .selbar .sep{flex:none;width:1px;height:20px;background:var(--line2);margin:0 4px}
+  .selbar .ib{width:28px}
+  .selbar .ib svg{width:16px;height:16px}
   .ib{flex:none;width:30px;height:30px;border:0;border-radius:9px;background:transparent;color:var(--text);display:grid;place-items:center;cursor:pointer;padding:0}
   .ib:hover:not(:disabled){background:rgba(255,255,255,.12)}
   .ib:disabled{opacity:.3;cursor:default}

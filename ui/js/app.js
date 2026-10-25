@@ -147,7 +147,7 @@ const loadImage = (src) => new Promise((res) => { const im = new Image(); im.onl
 const timers = {};
 const later = (key, ms, fn) => { clearTimeout(timers[key]); timers[key] = setTimeout(fn, ms); };
 /** The layer list, kept from one drawing of the Layers sheet to the next (renderSide fills it, the sheet shows it). */
-const layerBox = el("div", { id: "layerbox", style: "display:grid;gap:14px" });
+const layerBox = el("div", { id: "layerbox" });   // the Layers sheet (see renderSide; its layout in index.html)
 const persistProfile = () => later("profile", 400, () => saveProfile(S.profile).catch(fail));
 /** Where a cover is kept: one file for each channel of each profile. */
 const coverPath = (profileId, catId) => `covers/${profileId}/${catId}.json`;
@@ -4068,6 +4068,7 @@ function layerRow(L) {
   // kept to other sizes (see `sizes` in layers.js), or clipped onto a layer that is (a base hides what is clipped onto it): greyed, and said why
   const own = !inSize(L, S.sel), under = base >= 0 && !inSize(S.cover.layers[base], S.sel), away = own || under, note = sizesNote(L);
   const grip = L.type !== "bg" && LAYERS_UI.filter === "all";   // whether it can be dragged (as `draggable` below)
+  const sub = away ? t("layers.sub.away") : layerSub(L);
   return el("div", { class: `layer${on ? " on" : ""}${L.visible ? "" : " hidden"}${base >= 0 ? " clip" : ""}${off ? " dim" : ""}${away ? " away" : ""}`, title: off ? t("focus.locked") : own ? t("sizes.awayTip", note) : under ? t("sizes.awayBase", layerName(S.cover.layers[base])) : base >= 0 ? t("layers.clipped", layerName(S.cover.layers[base])) : null, dataset: { id: L.id }, draggable: L.type !== "bg" && LAYERS_UI.filter === "all",
     onclick: (e) => focusAllows(L.id) && (e.shiftKey ? togglePick(L.id) : selectLayer(L.id)),
     ondragstart: (e) => { dragId = L.id; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", L.id); },
@@ -4088,32 +4089,131 @@ function layerRow(L) {
     } },
     // a row that can be dragged says so by the grip at its head (under the pointer and on the selected row); one that cannot keeps the place empty
     el("span", { class: "grip", title: grip ? t("layers.drag") : null, "aria-hidden": "true" }, grip ? "⋮⋮" : ""),
-    layerWhat(L),
-    el("span", { class: "nm", title: free ? t("layers.rename") : null, onclick: free ? (e) => nameClick(e, L) : null }, layerName(L),
-      L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) }),
-      layerSub(L) && el("span", { class: "words" }, layerSub(L))),
-    el("span", { class: "kinds" }, note && el("span", { class: "sizes", title: t("sizes.tip") }, note), layerKinds(L)),
-    icon(L.visible ? ICONS.eye : ICONS.eyeOff, !L.visible, t("layers.show"), () => { L.visible = !L.visible; }),
-    PINNED.includes(L.type) ? el("span", { class: "ic pin", title: t("layers.pinned." + L.type), innerHTML: ICONS.lock })
-      : icon(L.locked ? ICONS.lock : ICONS.unlock, !!L.locked, t("layers.lock"), () => { L.locked = !L.locked; }));
+    layerTile(L),
+    // its name, in bold, over what it holds or why it is not on the cover here
+    el("div", { class: "txt" },
+      el("span", { class: "nm", title: free ? t("layers.rename") : null, onclick: free ? (e) => nameClick(e, L) : null }, layerName(L),
+        L.cats && el("span", { class: "only", style: `--c:${cat().color}`, title: t("layers.only", L.cats.map((id) => { const k = S.profile.categories.find((c) => c.id === id); return k ? k.name || k.code : ""; }).filter(Boolean).join(" · ")) })),
+      sub && el("span", { class: "sub" }, sub)),
+    el("span", { class: "end" }, note && el("span", { class: "sizes", title: t("sizes.tip") }, note), layerKinds(L),
+      icon(L.visible ? ICONS.eye : ICONS.eyeOff, !L.visible, t("layers.show"), () => { L.visible = !L.visible; }),
+      PINNED.includes(L.type) ? el("span", { class: "ic pin" + (L.type === "bg" ? " keep" : ""), title: t("layers.pinned." + L.type), innerHTML: ICONS.lock })   // the ground's always: it never leaves the bottom
+        : icon(L.locked ? ICONS.lock : ICONS.unlock, !!L.locked, t("layers.lock"), () => { L.locked = !L.locked; })));
 }
-/** The cover's words a lettering layer of the layout sets, after its name in the list ("" for any other). */
+/** Where the words a lettering layer sets come from: the cover, the channel, the brand or the layer itself. */
+const LETTERING = { title: () => S.cover.title, subtitle: () => S.cover.subtitle, tag: () => S.cover.tag, catname: () => cat().name, brand: () => S.profile.brand.name, text: (L) => L.text };
+/** Words on one line: the highlight's asterisks out, the line breaks spaces. */
+const oneLine = (s) => String(s || "").replace(/\*/g, "").replace(/\s+/g, " ").trim();
+/**
+ * The grey line under a layer's name in the list: what it holds — the words it sets, the channel's graphic, the picture
+ * a photo is from, its colour, the colour block's edge, the look the ground is painted in — or "" with nothing to say. (A
+ * layer not on the cover at this size says so instead, see layerRow.)
+ */
 function layerSub(L) {
-  const words = { title: S.cover.title, subtitle: S.cover.subtitle, tag: S.cover.tag, catname: cat().name }[L.type];
-  return (words || "").replace(/\*/g, "").replace(/\s+/g, " ").trim().slice(0, 40);
+  const T = L.type, words = (s) => oneLine(s).slice(0, 60);
+  if (T === "brand") return [S.profile.brand.name, cat().code].map(oneLine).filter(Boolean).join(" · ");
+  if (T === "text") return L.name ? words(L.text) : L.font || t("bar.fontAuto");   // its words are its name, unless it was renamed
+  if (LETTERING[T]) return words(LETTERING[T](L));
+  if (T === "photo" || T === "subject") { const b = L.of ? layer(L.of) : L, e = b && S.library.find((x) => x.pid === b.pid); return e ? e.name : ""; }
+  if (T === "asset") return t(rasterAsset(L) ? "layers.kind.image" : "layers.kind.svg");
+  if (T === "solid") return [String(L.color || "").toUpperCase(), L.o < 1 && `${Math.round(L.o * 100)}%`].filter(Boolean).join(" · ");   // and how see-through
+  if (T === "accent") return t("shape." + (L.shape || "slant")).replace(/\s*[（(][^（()）]*[)）]$/, "");   // its edge, without "(default)"
+  if (T === "graphic") { const g = cat().graphic; return g && g.kind !== "none" && assetExists(g) ? assetName(g, getLang()) : ""; }
+  if (T === "logo") return oneLine(S.profile.brand.name);
+  if (T === "bg") return t("layers.sub.bg", (LOOKS[S.profile.style.look] || LOOKS.cel).name[getLang()]);
+  if (T === "frame") return t("layers.sub.frame");
+  return "";
 }
-/** A layer's icon at the head of its row: what it is — a photo, words, a colour, a vector or a bitmap. */
-function layerWhat(L) {
-  const icon = (name, tip) => el("span", { class: "what", title: tip, innerHTML: ICONS[name] });
-  if (L.type === "asset") {
-    const a = L.ref.kind === "user" && userAssets.get(L.ref.id), raster = a && !a.spec && !/^data:image\/svg/.test(a.src || "");
-    return raster ? icon("photo", t("layers.kind.image")) : icon("svg", t("layers.kind.svg"));
+/** Whether an asset layer shows a bitmap of the user's (not a vector: a sticker, a channel graphic, an SVG or an AI-made asset). */
+const rasterAsset = (L) => { const a = L.ref.kind === "user" && userAssets.get(L.ref.id); return !!a && !a.spec && !/^data:image\/svg/.test(a.src || ""); };
+/** What kind of layer L is, as the tile at the head of its row says on hover. */
+function layerKind(L) {
+  if (L.type === "asset") return t(rasterAsset(L) ? "layers.kind.image" : "layers.kind.svg");
+  if (L.type === "photo" || L.type === "subject") return t("layers.kind.photo");
+  if (LETTERING[L.type]) return t("layers.kind.text");
+  if (L.type === "solid") return t("layers.kind.solid");
+  return t("layer." + L.type);
+}
+/** The first letters of `words` for a tile: up to n CJK characters; of Latin words, the first two's initials (one word: its first n letters). */
+function initials(words, n) {
+  const s = oneLine(words);
+  if (!s) return "";
+  if (isCJK(s[0])) return Array.from(s.replace(/\s/g, "")).slice(0, n).join("");
+  const w = s.split(" ").map((x) => x.replace(/[^\p{L}\p{N}]/gu, "")).filter(Boolean);
+  if (!w.length) return Array.from(s).slice(0, n).join("");
+  if (n > 1 && w.length > 1) return (Array.from(w[0])[0] + Array.from(w[1])[0]).toUpperCase();
+  const a = Array.from(w[0]).slice(0, n);
+  return a[0].toUpperCase() + a.slice(1).join("");
+}
+const TILE_PX = 72;   // the pictures on the tiles, in pixels a side (a 36-px tile on a screen of twice the density)
+/** Small square pictures of the photos and bitmaps on the tiles, as data URLs: by picture, then by the mask a cut-out shows its subject by (or none). */
+const TILE_PICS = new WeakMap();
+function tilePic(img, mask = null) {
+  const made = TILE_PICS.get(img) || TILE_PICS.set(img, new Map()).get(img);
+  if (!made.has(mask)) {
+    const c = el("canvas", { width: TILE_PX, height: TILE_PX }), g = c.getContext("2d");
+    const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height, s = Math.min(w, h);   // the middle of it
+    g.drawImage(img, (w - s) / 2, (h - s) / 2, s, s, 0, 0, TILE_PX, TILE_PX);
+    if (mask) {
+      const k = (mask.naturalWidth || mask.width) / w;
+      g.globalCompositeOperation = "destination-in";
+      g.drawImage(mask, ((w - s) / 2) * k, ((h - s) / 2) * k, s * k, s * k, 0, 0, TILE_PX, TILE_PX);
+    }
+    made.set(mask, c.toDataURL());
   }
-  if (L.type === "photo" || L.type === "subject") return icon("photo", t("layers.kind.photo"));
-  if (L.type === "logo") return icon("photo", t("layer.logo"));
-  if (["text", "title", "subtitle", "tag", "catname", "brand"].includes(L.type)) return icon("text", t("layers.kind.text"));
-  if (L.type === "solid" || L.type === "bg") return icon("solid", t(L.type === "bg" ? "layer.bg" : "layers.kind.solid"));
-  return icon("svg", t("layer." + L.type));
+  return made.get(mask);
+}
+/**
+ * A layer's tile at the head of its row: the first letters of the words a lettering layer sets, light on dark (one for
+ * the title, two for the rest); a small picture of a photo, a bitmap, the background and the colour block (the last
+ * two see layerPics); a colour layer's colour; an icon for the others (the frame, stickers and vector assets, the
+ * channel graphic, the logo). On hover it says what kind of layer it is.
+ */
+function layerTile(L) {
+  const T = L.type, tip = layerKind(L), tile = (cls, kids, style = null) => el("span", { class: "th" + (cls ? " " + cls : ""), title: tip, style }, kids);
+  const iconTile = (name) => tile("", el("span", { class: "ico", innerHTML: ICONS[name] }));
+  const picture = (src) => el("img", { src, alt: "" });
+  if (LETTERING[T]) {
+    const s = initials(LETTERING[T](L), T === "title" ? 1 : 2);
+    return s ? tile("letters" + (Array.from(s).length < 2 ? " one" : ""), s) : iconTile("text");
+  }
+  if (T === "photo" || T === "subject") {
+    const rec = recordOf(L), cut = (L.of || L.cut) && rec && rec.mask;   // a cut-out: its subject alone
+    return rec && rec.img ? tile("pic", picture(tilePic(rec.img, cut ? rec.mask.img : null))) : iconTile("photo");
+  }
+  if (T === "asset" && rasterAsset(L)) { const a = userAssets.get(L.ref.id); return a.img ? tile("pic", picture(tilePic(a.img))) : iconTile("photo"); }
+  if (T === "solid") return tile("pic", null, `background:${L.color}`);
+  if (T === "bg") return tile("pic", LAYER_PICS.bg ? picture(LAYER_PICS.bg) : el("span", { class: "ico", innerHTML: ICONS.solid }));
+  if (T === "accent") return tile("pic", LAYER_PICS.accent ? picture(LAYER_PICS.accent)   // till it is painted: the channel colour, slanted
+    : el("span", { class: "ico fill", innerHTML: `<svg viewBox="0 0 36 36"><path d="M0 24 36 14V36H0Z" fill="${cat().color}"/></svg>` }));
+  return iconTile(T === "frame" ? "frame" : T === "logo" ? "photo" : "svg");
+}
+/**
+ * The Background's and the colour block's pictures on their tiles: each painted on its own (as the 3D view paints a
+ * sheet), small — the ground's middle; the whole canvas squeezed square for the block, so its place and edge show. Not
+ * at each rebuild of the list: a moment after the cover, its look or the size shown last changed, kept till they do again.
+ */
+const LAYER_PICS = { key: "", bg: "", accent: "", cv: null };   // cv: the canvas each is painted on first
+const picsKey = () => JSON.stringify([S.sel, catIndex(), S.cover.title, S.cover.subtitle, S.cover.tag, S.cover.layers, S.cover.scene, S.profile.style, S.profile.brand, cat()]);
+function layerPics() {
+  if (picsKey() === LAYER_PICS.key) return;
+  later("layerpics", 300, () => {
+    if (!S.cover) return;
+    const z = selSize(), key = picsKey();
+    for (const id of ["bg", "accent"]) {
+      const i = S.cover.layers.findIndex((l) => l.id === id);
+      if (i < 0) continue;
+      const cv = LAYER_PICS.cv || (LAYER_PICS.cv = document.createElement("canvas")), out = el("canvas", { width: TILE_PX, height: TILE_PX }), g = out.getContext("2d");
+      drawCover(cv, { profile: S.profile, catIndex: catIndex(), size: z, pixelW: TILE_PX * Math.max(1, z.w / z.h), cover: S.cover, photos: S.photos, only: i });
+      const s = Math.min(cv.width, cv.height);
+      if (id === "bg") g.drawImage(cv, (cv.width - s) / 2, (cv.height - s) / 2, s, s, 0, 0, TILE_PX, TILE_PX);
+      else g.drawImage(cv, 0, 0, TILE_PX, TILE_PX);
+      LAYER_PICS[id] = out.toDataURL();
+      const th = layerBox.querySelector(`.layer[data-id="${id}"] .th`);
+      if (th) th.replaceChildren(el("img", { src: LAYER_PICS[id], alt: "" }));
+    }
+    LAYER_PICS.key = key;
+  });
 }
 /** A layer's marks after its name: a linked photo's chain and leading / following mark; Layout on the template's own (but the ground, always there). */
 function layerKinds(L) {
@@ -4155,6 +4255,8 @@ const ICONS = Object.fromEntries(Object.entries({
   passive: '<circle cx="8" cy="8" r="5.6" stroke-dasharray="2.2 1.8"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/>',
   svg: '<path d="M8 1.8l4.6 5.4L8 14.2 3.4 7.2z"/><path d="M8 1.8v6.4"/><circle cx="8" cy="9.2" r="1.1"/>',
   stack: '<path d="M8 1.8l6 3-6 3-6-3z"/><path d="M2 8.1l6 3 6-3"/><path d="M2 11.2l6 3 6-3"/>',   // sheets one over another: the 3D view
+  focus: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2.6M8 11.6v2.6M1.8 8h2.6M11.6 8h2.6"/>',   // FOCUS: a sight on the one layer
+  frame: '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/>',   // the corner brackets
 }).map(([k, d]) => [k, `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`]));
 /**
  * A click on a name selects the layer like a click anywhere on its row; a second one soon after, on
@@ -5546,20 +5648,27 @@ function renderSide() {
   const fk = LAYERS_UI.filter, listed = here.filter(LAYER_FILTERS[fk]);
   const chip = (k) => el("button", { class: "btn" + (fk === k ? " on" : ""), "aria-pressed": String(fk === k), title: k === "all" ? null : t(`layers.filter.${k}Tip`),
     onclick: () => { if (LAYERS_UI.filter !== k) { LAYERS_UI.filter = k; renderSide(); } } }, k === "all" ? t("layers.filter.all") : t("layers.filter." + k, here.filter(LAYER_FILTERS[k]).length));
-  layerBox.replaceChildren(   // the list, in the Layers sheet, and under it the selected layer and what can be done to it
-    el("div", {}, el("div", { class: "lhead" }, cap("layers.title"),
-        el("div", { class: "lbtns" }, el("button", { class: "focusbtn v3btn" + (V3.to ? " on" : ""), title: t("v3.tip"), onclick: () => set3d(!V3.to), innerHTML: `${ICONS.stack}<span>${t("v3.label")}</span>` }),
-          el("button", { class: "focusbtn" + (S.focus ? " on" : ""), title: t("focus.tip"), onclick: () => setFocus(!S.focus) }, t("focus.label")))),
-      el("div", { class: "lfilter" }, el("div", { class: "seg" }, Object.keys(LAYER_FILTERS).map(chip)),
-        fk !== "all" && el("div", { class: "hint" }, t(listed.length ? "layers.filter.reorder" : "layers.filter.none"))),
-      el("div", { class: "layers" }, [...listed].reverse().map(layerRow)),
-      el("div", { class: "selbar" },
-        el("span", {}, many.length ? t("props.group", many.length) : L ? [t("layers.selected"), el("b", {}, layerName(L))] : t("layers.none")),
-        ib(ICONS.dup, t("layers.dup"), !copiable(L) || many.length > 0, duplicateLayer),
-        ib(ICONS.up, t("layers.up"), many.length > 0 || i < 1 || i >= here.length - 1, () => shiftLayer(1)),
-        ib(ICONS.down, t("layers.down"), many.length > 0 || i <= 1, () => shiftLayer(-1)),
-        ib(ICONS.trash, t("layers.del"), many.length ? !many.some(isAdded) : !(L && isRemovable(L)), () => (many.length ? removeGroup() : removeLayer())),
-        ib(ICONS.props, t(S.settings.drawer ? "drawer.close" : "drawer.open"), false, () => setDrawer(!S.settings.drawer), S.settings.drawer))));
+  // what the bar's eye hides or shows: the group, or the selected layer; all of it shown again once none of it is showing
+  const hides = many.length ? many : L ? [L] : [], showing = hides.some((l) => l.visible), gone = many.length ? !many.some(isAdded) : !(L && isRemovable(L));
+  const was = layerBox.querySelector(".layers"), top = was ? was.scrollTop : 0;   // the list scrolls on its own (index.html): kept where it was
+  layerBox.replaceChildren(   // in the Layers sheet: its head, the chips, the list, and at its foot the selected layer and what can be done to it
+    el("div", { class: "lyhead" }, el("div", { class: "lycount" }, el("b", {}, t("layers.title")), el("span", {}, counted("layers.count", here.length))),
+      el("button", { class: "lytg" + (V3.to ? " on" : ""), title: t("v3.tip"), "aria-pressed": String(!!V3.to), onclick: () => set3d(!V3.to), innerHTML: `${ICONS.stack}<span>${t("v3.button")}</span>` })),
+    el("div", {}, el("div", { class: "lyfilter" }, el("div", { class: "seg" }, Object.keys(LAYER_FILTERS).map(chip)),
+        el("button", { class: "lytg" + (S.focus ? " on" : ""), title: t("focus.tip"), "aria-pressed": String(!!S.focus), onclick: () => setFocus(!S.focus), innerHTML: `${ICONS.focus}<span>${t("focus.label")}</span><kbd>F</kbd>` })),
+      fk !== "all" && el("div", { class: "hint lyhint" }, t(listed.length ? "layers.filter.reorder" : "layers.filter.none"))),
+    el("div", { class: "layers" }, [...listed].reverse().map(layerRow)),
+    el("div", { class: "selbar" },
+      el("span", { class: "who", title: !many.length && L ? layerName(L) : null }, many.length ? t("props.group", many.length) : L ? [t("layers.selected"), el("b", {}, layerName(L))] : t("layers.none")),
+      ib(ICONS.dup, t("layers.dup"), !copiable(L) || many.length > 0, duplicateLayer),
+      ib(ICONS.up, t("layers.up"), many.length > 0 || i < 1 || i >= here.length - 1, () => shiftLayer(1)),
+      ib(ICONS.down, t("layers.down"), many.length > 0 || i <= 1, () => shiftLayer(-1)),
+      ib(showing ? ICONS.eyeOff : ICONS.eye, t(showing ? "drawer.hide" : "drawer.show"), !hides.length, () => { for (const l of hides) l.visible = !showing; touch({ cover: true, side: true }); }),
+      ib(ICONS.props, t(S.settings.drawer ? "drawer.close" : "drawer.open"), false, () => setDrawer(!S.settings.drawer), S.settings.drawer),
+      el("span", { class: "sep" }),
+      ib(ICONS.trash, t(gone && L && !many.length ? "layers.delLayout" : "layers.del"), gone, () => (many.length ? removeGroup() : removeLayer()))));
+  layerBox.querySelector(".layers").scrollTop = top;
+  layerPics();
   // what is selected, in the drawer on the right (nothing is built while it is shut)
   side.replaceChildren(...(!S.settings.drawer ? [] : [
     el("div", { class: "dhead" }, el("div", {}, el("small", {}, t("drawer.title")), el("b", {}, many.length ? t("props.group", many.length) : L ? layerName(L) : "—")),

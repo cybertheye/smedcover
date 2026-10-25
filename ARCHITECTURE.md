@@ -1802,11 +1802,20 @@ what it shows, so it is built again only then: `onCoverTab()` (Content, Layout o
 photos), `onStyleTab()` (Look or Layout: the size shown and its layout), `onLookSheet()`, `onAssetsTab()` — the second
 and third false while the sheet is hidden (above). The Layers
 sheet holds `layerBox`, one element kept from one drawing to the next and filled by `renderSide()`, since the list
-follows the layers rather than the sheet: a row a layer (`layerRow()`: a ⋮⋮ grip on a row that can be dragged, its place left
-empty on one that cannot; the kind's icon, `layerWhat()`; the name and the
-cover's words it sets, `layerSub()`; the eye and the lock, shown under the pointer, on the selected row, or when hidden
-or locked), a row under the pointer framed on the canvas (`hoverShow()`), and under the list the selected layer with
-duplicate, up, down, delete and the drawer. Chips over the list narrow it for the session (`LAYERS_UI.filter`, by
+follows the layers rather than the sheet. It is the column's height (index.html: `#panel:has(>#layerbox)`), the list
+scrolling on its own between the head and the bar at the foot, its place kept as the sheet is filled again. The head: *Layers*, how
+many layers the cover has, and *3D* (`set3d()`); then the chips and *FOCUS* with its key, F (`setFocus()`); then a row a
+layer (`layerRow()`: a ⋮⋮ grip on a row that can be dragged, its place left
+empty on one that cannot; a 36-px tile, `layerTile()` — the first letters of the words a lettering layer sets
+(`LETTERING`, `initials()`), a small picture of a photo or bitmap (`tilePic()`, kept by picture), of the Background and
+of the colour block (`layerPics()`: each painted alone by `drawCover`'s `o.only`, small, 300 ms after the cover, its
+look or the size shown last changed, not at each rebuild), a colour layer's colour, an icon for the rest; the name in
+bold over a grey line, `layerSub()`: the words it sets, the picture it is from, its colour, the block's edge, the look
+the ground is painted in — or that it is not shown at this size; its chips, *Layout*, *Copy*, a linked photo's marks
+(`layerKinds()`) and the sizes it is kept to (`sizesNote()`); the eye and the lock, shown under the pointer, on the
+selected row, or when hidden or locked, the Background's padlock always), a row under the pointer framed on the canvas
+(`hoverShow()`), and at the foot the selected layer with duplicate, up, down, hide or show (a group's layers together),
+the drawer and delete (on a layout layer, disabled, saying to hide it). Chips over the list narrow it for the session (`LAYERS_UI.filter`, by
 `LAYER_FILTERS`: every layer, those the user added, `isAdded()`, or the layout's own, `isLayout()`), the last two with how many;
 while only some are listed no row is `draggable`, as where a row would land among those not listed cannot be shown, and a
 line says so; the selection is not touched, so a selected layer the list leaves out is still named under it.
@@ -2227,6 +2236,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | change how one block change lands on blocks that lie otherwise (every size) | `sideLike()`, `scaleBlock()` and `blockValues()` in `layout.js`; `blockOf` in `layoutEditor()` |
 | change which sizes count as wide, square or tall, or each one's default layout (what a new profile, a size added, a new preset and *Block by orientation* give it) | `orientOf()`, `orientDefault()`, `layoutByOrient()`, `layoutAdded()` and `templateDefault()` in `layout.js`; `layout.byOrient` in `defaults.json` |
 | change what a layer kept to some sizes is at the others | `coverAt()` in `render.js`; the list's labels `sizesNote()` in `app.js` |
+| change what a row of the layer list shows (its tile, the grey line under its name, its chips) or the bar at the sheet's foot | `layerRow()`, `layerTile()` (the Background's and the colour block's pictures: `layerPics()`), `layerSub()`, `layerKinds()` and `renderSide()` in `app.js`; their look, `.layer` and `.selbar` in `index.html` |
 | change what goes with a photo whose background is removed at some sizes | `showApart()` (and `cutAt()`, `cutFrom()`) in `layers.js` |
 | change which sizes of another profile's a size takes the place of, when layers come from there | `standsFor()` in `layout.js`; `acrossSizes()` in `layers.js` |
 | change how a free crop is kept, edited, painted or caught | `normalizeCrop()`, `CROP_AREA`, `hasArea()`, `polyArea()`, `cropPoly()`, `dragPoint()`, `addPoint()`, `dropPoint()`, `movePoly()`, `edgePoint()` and `inPoly()` in `layers.js`; `tracePoly()`, `cropShape()` and `hitAt()` in `render.js`; `cropShow()` and `cropDropPoint()` in `app.js` |
