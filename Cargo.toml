@@ -43,10 +43,17 @@ getrandom = "0.4"
 # The MCP endpoint (Apache-2.0): both eras of the protocol, the stateless 2026-07-28 and the
 # `initialize` handshake of 2025-03-26 to 2025-11-25, over streamable HTTP. Pinned: it changes fast,
 # and the HTTP tests in core/tests/mcp_http.rs are what an upgrade has to pass.
-# Waiting for the page's answers, and the endpoint's runtime (the app's is Tauri's).
-tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }
-tokio-util = "0.7"
 rmcp = { version = "=3.7.0", default-features = false, features = ["server", "base64", "transport-streamable-http-server", "transport-streamable-http-server-session"] }
+# Waiting for the page's answers, and the endpoint's runtime (the app's is Tauri's).
+tokio = { version = "1", features = ["net", "sync", "time", "macros", "rt"] }
+tokio-util = "0.7"
+# The MCP endpoint's HTTP server, on 127.0.0.1 only.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "json"] }
+# On Windows the endpoint's port is bound for SmedCover alone (SO_EXCLUSIVEADDRUSE).
+socket2 = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
+# The HTTP tests call the endpoint as rmcp's own client does, in both eras (over plain HTTP: no TLS).
+reqwest = { version = "0.13", default-features = false }
 
 # Dependencies are optimised even in development builds: the image codecs are far too slow otherwise.
 # Cargo reads profiles only from the workspace's root.

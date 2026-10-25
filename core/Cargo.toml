@@ -26,13 +26,22 @@ rmcp = { workspace = true }
 getrandom = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+axum = { workspace = true }
 
 # The subject cut-out uses Apple's Vision framework, reached through the Objective-C runtime.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true }
 objc2-foundation = { workspace = true }
 
+# The endpoint's port is bound for SmedCover alone.
+[target.'cfg(windows)'.dependencies]
+socket2 = { workspace = true }
+windows-sys = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 # A paused clock, for the waits and timeouts of the calls handed to the page.
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }
+# The HTTP tests (tests/mcp_http.rs) use rmcp's client too.
+rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
+reqwest = { workspace = true }
