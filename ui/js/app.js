@@ -187,8 +187,24 @@ function commitHistory(always = false) {
   S.histIdx = S.hist.length - 1;
   syncTop();
 }
+/**
+ * What holds the undo history back: `history`, while a change of several parts is under way that is to be one step
+ * (recordHistory waits, as it waits while Surprise me deals; whoever set it commits the step once it is over).
+ */
+const HOLD = { history: false };
 /** Records history a moment after the last change, so a drag or a burst of typing is one step. */
-function recordHistory() { later("hist", 500, () => (SURPRISE.busy ? recordHistory() : commitHistory())); }   // not while Surprise me deals hands onto the cover
+function recordHistory() { later("hist", 500, () => (SURPRISE.busy || HOLD.history ? recordHistory() : commitHistory())); }   // not while Surprise me deals hands onto the cover
+/** Puts the profile and the cover of history entry `snap` (a snapshot()) back on the canvas, and saves them. */
+async function restoreSnap(snap) {
+  const { p, c } = JSON.parse(snap);
+  const profile = normalizeProfile(p);
+  S.profiles[S.profiles.findIndex((x) => x.id === S.profile.id)] = profile;
+  S.profile = profile;
+  setCover(normalizeCover(c, profile));
+  await applyProfile();
+  syncTop();
+  persistProfile(); persistCover();
+}
 async function timeTravel(step) {
   clearTimeout(timers.hist);
   commitHistory();   // a change still waiting to be recorded is a step of its own: undo goes back to before it
@@ -196,17 +212,10 @@ async function timeTravel(step) {
   const i = S.histIdx + step;
   if (i < 0 || i >= S.hist.length) return;
   S.histIdx = i;
-  const { p, c } = JSON.parse(S.hist[i]);
-  const profile = normalizeProfile(p);
-  S.profiles[S.profiles.findIndex((x) => x.id === S.profile.id)] = profile;
-  S.profile = profile;
-  setCover(normalizeCover(c, profile));
-  await applyProfile();
+  await restoreSnap(S.hist[i]);
   // the step as it now is: reading it back may write it a little differently (fields filled in, keys in
   // another order), and the next commit would take that for a change and cut off the steps to redo
   S.hist[i] = snapshot();
-  syncTop();
-  persistProfile(); persistCover();
 }
 
 /**

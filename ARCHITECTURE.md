@@ -1658,8 +1658,10 @@ Measured in the app's engine (WKWebView on macOS 26, a Retina screen, the sample
 
 After each change (debounced by half a second) the profile and cover are serialised into one string
 snapshot, pushed only if it differs from the last, up to 80 steps. Undo parses a snapshot back and
-validates it again. Simple, at the cost of a full copy per step — fine at the current data size.
-Once restored, `timeTravel()` writes that step's snapshot again from the state as restored: checking it
+validates it again (`restoreSnap(snap)`: the profile and cover put back on the canvas and saved). Simple, at the
+cost of a full copy per step — fine at the current data size. `HOLD.history` holds the debounced commit
+(`recordHistory()`) back while a change of several parts is under way that is to be one step, whoever set it
+committing once it is over. Once restored, `timeTravel()` writes that step's snapshot again from the state as restored: checking it
 fills fields in and orders keys anew, and without that the next commit would take the difference for a
 change and cut off the steps to redo (which is how *Redo* once stopped working).
 
