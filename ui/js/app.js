@@ -6,7 +6,7 @@ import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, han
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang, bothLangs } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
-import { useFont, startScope } from "./store.js";
+import { useFont, startScope, channelIndex, SCOPES } from "./store.js";
 import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
@@ -87,8 +87,6 @@ const frame = () => {
   const s = selSize(), [vw, vh] = virtualSize(s.w, s.h), key = sizeKey(s);
   return { vw, vh, key, catId: cat().id, group: sameWay(key).map((z) => { const [w, h] = virtualSize(z.w, z.h); return { key: sizeKey(z), vw: w, vh: h }; }) };
 };
-/** The scopes a change of place or layout may have, from the widest: every size, those facing the size's way, the size alone (S.settings.scope). */
-const SCOPES = ["all", "orient", "size"];
 /** What scope `v` is called on the size keyed `key`: the middle one names the sizes it reaches ("All tall"). */
 const scopeName = (v, key = S.sel) => t(v === "orient" ? "scope.orient." + orientOfKey(key) : "scope." + v);
 /** The size keys a change in `scope` reaches by size from the size keyed `key` — those facing its way, or it alone — or null for every size. */
@@ -187,8 +185,24 @@ function commitHistory(always = false) {
   S.histIdx = S.hist.length - 1;
   syncTop();
 }
+/**
+ * What holds the undo history back: `history`, while a change of several parts is under way that is to be one step
+ * (recordHistory waits, as it waits while Surprise me deals; whoever set it commits the step once it is over).
+ */
+const HOLD = { history: false };
 /** Records history a moment after the last change, so a drag or a burst of typing is one step. */
-function recordHistory() { later("hist", 500, () => (SURPRISE.busy ? recordHistory() : commitHistory())); }   // not while Surprise me deals hands onto the cover
+function recordHistory() { later("hist", 500, () => (SURPRISE.busy || HOLD.history ? recordHistory() : commitHistory())); }   // not while Surprise me deals hands onto the cover
+/** Puts the profile and the cover of history entry `snap` (a snapshot()) back on the canvas, and saves them. */
+async function restoreSnap(snap) {
+  const { p, c } = JSON.parse(snap);
+  const profile = normalizeProfile(p);
+  S.profiles[S.profiles.findIndex((x) => x.id === S.profile.id)] = profile;
+  S.profile = profile;
+  setCover(normalizeCover(c, profile));
+  await applyProfile();
+  syncTop();
+  persistProfile(); persistCover();
+}
 async function timeTravel(step) {
   clearTimeout(timers.hist);
   commitHistory();   // a change still waiting to be recorded is a step of its own: undo goes back to before it
@@ -196,17 +210,10 @@ async function timeTravel(step) {
   const i = S.histIdx + step;
   if (i < 0 || i >= S.hist.length) return;
   S.histIdx = i;
-  const { p, c } = JSON.parse(S.hist[i]);
-  const profile = normalizeProfile(p);
-  S.profiles[S.profiles.findIndex((x) => x.id === S.profile.id)] = profile;
-  S.profile = profile;
-  setCover(normalizeCover(c, profile));
-  await applyProfile();
+  await restoreSnap(S.hist[i]);
   // the step as it now is: reading it back may write it a little differently (fields filled in, keys in
   // another order), and the next commit would take that for a change and cut off the steps to redo
   S.hist[i] = snapshot();
-  syncTop();
-  persistProfile(); persistCover();
 }
 
 /**
@@ -587,8 +594,9 @@ function aboutSubject(L, { scale, rot, kx, ky }) {
   adjust(L, frame(), S.settings.scope, { ddx: h.cx + vx - h.px, ddy: h.cy + vy - h.py });
   h.px = h.cx + vx; h.py = h.cy + vy;   // until the cover is drawn again
 }
-function addLayer(L) {
-  insertAbove(S.cover.layers, S.layerId === "bg" ? "bg" : S.layerId, L);
+/** Puts new layer L on the cover above the layer `above` names (the selected one, unless told; at the top where it names none), selected. Returns L. */
+function addLayer(L, above = S.layerId === "bg" ? "bg" : S.layerId) {
+  insertAbove(S.cover.layers, above, L);
   S.layerId = L.id;
   touch({ cover: true, side: true });
   return L;
@@ -611,15 +619,32 @@ function removeLayer(id = S.layerId) {
 }
 /** Whether a layer can be copied: one the user added, or a layout layer but the ground and the corner brackets (a linked cut-out is not: cut out the photo again). */
 const copiable = (L) => !!L && (isFree(L.type) || COPYABLE.includes(L.type)) && !(L.type === "photo" && L.of);
-function duplicateLayer() {
-  const L = layer(), c = copiable(L) && duplicate(L);
-  if (!c) return;
+/** Copies layer `id` (the selected one, unless told), when it can be (copiable), just above it, selected. Returns the copy, or null. */
+function duplicateLayer(id = S.layerId) {
+  const L = layer(id), c = copiable(L) && duplicate(L);
+  if (!c) return null;
   insertAbove(S.cover.layers, S.cover.layers[clipEnd(S.cover.layers, S.cover.layers.indexOf(L))].id, c); S.layerId = c.id;   // over what is clipped onto it, which stays its
   touch({ cover: true, side: true, panel: onCoverTab() });
+  return c;
 }
-function shiftLayer(dir) {
-  const to = stepIndex(S.cover.layers, S.layerId, dir, cat().id);
-  if (to > 0 && moveLayer(S.cover.layers, S.layerId, to)) touch({ cover: true, side: true, panel: onCoverTab() });
+/** Moves layer `id` (the selected one, unless told) past the next layer of this channel's cover up (dir 1) or down (-1). Returns whether it moved. */
+function shiftLayer(dir, id = S.layerId) {
+  const to = stepIndex(S.cover.layers, id, dir, cat().id);
+  if (!(to > 0 && moveLayer(S.cover.layers, id, to))) return false;
+  touch({ cover: true, side: true, panel: onCoverTab() });
+  return true;
+}
+/**
+ * Moves layer `id` to index `to` of the cover's layers (see moveLayer in layers.js). The layout's parts then stacked
+ * otherwise, the profile's design takes their order too, so new covers and Empty this cover have it (the layers the user
+ * added stay where they are in it); with the cover, one step of undo. Returns whether it moved.
+ */
+function restack(id, to) {
+  const was = layoutOrder(S.cover.layers).join();
+  if (!moveLayer(S.cover.layers, id, to)) return false;
+  const order = layoutOrder(S.cover.layers), design = order.join() !== was && orderLayout(S.profile.design.layers, order);
+  touch({ cover: true, profile: design, side: true, panel: onCoverTab() });
+  return true;
 }
 // pointer on the main canvas: click selects the topmost layer under it, drag moves, wheel resizes
 function virtualPoint(e) {
@@ -1569,8 +1594,11 @@ async function addPhoto(src, at = null, name = "", fill = false) {
   keepPicture(pid, name, "upload");
   return placePhoto(pid, at, fill);
 }
-/** Puts a picture of the photo store on the cover as a photo layer, by addPhoto's rules (from the bitmap library, too). */
-async function placePhoto(pid, at = null, fill = false) {
+/**
+ * Puts a picture of the photo store on the cover as a photo layer, by addPhoto's rules (from the bitmap library, too):
+ * above layer `above` (the selected one, unless told; see addLayer) where it does not fill the canvas.
+ */
+async function placePhoto(pid, at = null, fill = false, above = undefined) {
   if (!S.photos.has(pid)) await loadPhotos([pid]);
   if (!S.photos.has(pid)) { toast(t("msg.badFile")); return null; }
   if (fill) {
@@ -1582,7 +1610,7 @@ async function placePhoto(pid, at = null, fill = false) {
   }
   const L = newLayer("photo", { pid });
   if (at) { L.t.all.x = at.x; L.t.all.y = at.y; }
-  addLayer(L); renderPanel();
+  addLayer(L, above); renderPanel();
   toast(t("cover.photoAdded"));
   return L;
 }
@@ -1894,24 +1922,28 @@ async function ensureMask(pid, fresh = false) {
 }
 /** A picture changed (a new one, a repaint): the layers cut from it get its new subject. */
 async function recut(pid) { if (S.cover.layers.some((l) => l.type === "photo" && l.cut && recordOf(l) === S.photos.get(pid))) await ensureMask(pid, true); }
-/** The sizes a cut-out of photo L made now is for: where L shows among those the scope under the canvas reaches (see sizesFor in layers.js). */
-const cutSizes = (L) => sizesFor(L, scopeKeys(), sizeKeys());
+/**
+ * The sizes a cut-out of photo L made now is for: where L shows among those the scope under the canvas reaches (see
+ * sizesFor in layers.js), or among size keys `keys` when told (null: every size).
+ */
+const cutSizes = (L, keys = scopeKeys()) => sizesFor(L, keys, sizeKeys());
 /**
  * The photo Cut out subject cuts photo L's subject out of: L, or where L does not show at the sizes the scope at the
- * top reaches, the photo of its picture that does — the copy Remove the background left there (see cutFrom in layers.js).
+ * top reaches (or `keys`), the photo of its picture that does — the copy Remove the background left there (see cutFrom in layers.js).
  */
-const cutSource = (L) => cutFrom(S.cover.layers, L, scopeKeys(), sizeKeys());
+const cutSource = (L, keys = scopeKeys()) => cutFrom(S.cover.layers, L, keys, sizeKeys());
 /**
  * Cuts the subject out of photo layer L into a linked cut-out (see "linked photos"): above the title
  * (or above L, when L is higher), selected. When L has one already, its subject is found again
  * instead. With the scope at one size or one orientation, the cut-out shows only there (see `sizes` in layers.js), and
  * says so; one L has already that does not show there yet is put there too. Where L does not show there and the copy
- * Remove the background left there does, the cut-out is that copy's (cutSource). Returns the cut-out, or null.
+ * Remove the background left there does, the cut-out is that copy's (cutSource). `keys`: the size keys to go by
+ * instead of the scope's (null: every size). Returns the cut-out, or null.
  */
-async function cutOut(L) {
+async function cutOut(L, keys = scopeKeys()) {
   if (!L || L.type !== "photo" || L.of || CUT.busy || !canCut()) return null;
-  L = cutSource(L);
-  const had = passivesOf(L)[0], all = sizeKeys(), want = cutSizes(L);
+  L = cutSource(L, keys);
+  const had = passivesOf(L)[0], all = sizeKeys(), want = cutSizes(L, keys);
   if (had && !want.every((k) => inSize(had, k))) {   // the photo's cut-out is kept to other sizes: it shows at these too
     keepTo(had, [...all.filter((k) => inSize(had, k)), ...want], all);
     S.layerId = had.id; S.picked = [];
@@ -4657,12 +4689,8 @@ function layerRow(L) {
       e.preventDefault(); e.stopPropagation();
       const id = dragId; dragId = null;
       if (!id) return;
-      const from = S.cover.layers.findIndex((l) => l.id === id), to = S.cover.layers.indexOf(L), was = layoutOrder(S.cover.layers).join();
-      if (!moveLayer(S.cover.layers, id, from < to ? to : to + 1)) return renderSide();
-      // the layout's parts now stacked otherwise: the profile's design takes their order too, so new covers and Empty
-      // this cover have it (the layers the user added stay where they are in it); with the cover, one step of undo
-      const order = layoutOrder(S.cover.layers), design = order.join() !== was && orderLayout(S.profile.design.layers, order);
-      touch({ cover: true, profile: design, side: true, panel: onCoverTab() });
+      const from = S.cover.layers.findIndex((l) => l.id === id), to = S.cover.layers.indexOf(L);
+      if (!restack(id, from < to ? to : to + 1)) return renderSide();
     } },
     // a row that can be dragged says so by the grip at its head (under the pointer and on the selected row); one that cannot keeps the place empty
     el("span", { class: "grip", title: grip ? t("layers.drag") : null, "aria-hidden": "true" }, grip ? "⋮⋮" : ""),
@@ -6274,7 +6302,7 @@ function renderSide() {
       ground && el("div", { class: "lybase" }, layerRow(ground))),
     el("div", { class: "selbar" },
       el("span", { class: "who", title: !many.length && L ? layerName(L) : null }, many.length ? t("props.group", many.length) : L ? [t("layers.selected"), el("b", {}, layerName(L))] : t("layers.none")),
-      ib(ICONS.dup, t("layers.dup"), !copiable(L) || many.length > 0, duplicateLayer),
+      ib(ICONS.dup, t("layers.dup"), !copiable(L) || many.length > 0, () => duplicateLayer()),
       ib(ICONS.up, t("layers.up"), many.length > 0 || i < 1 || i >= here.length - 1, () => shiftLayer(1)),
       ib(ICONS.down, t("layers.down"), many.length > 0 || i <= 1, () => shiftLayer(-1)),
       ib(showing ? ICONS.eyeOff : ICONS.eye, t(showing ? "drawer.hide" : "drawer.show"), !hides.length, () => { for (const l of hides) l.visible = !showing; touch({ cover: true, side: true }); }),
@@ -6315,7 +6343,7 @@ function drawerHead(L, many) {
     el("small", {}, `${kind} · ${lit === all.length ? t("props.sum.allSizes") : t("props.sum.sizes", lit, all.length)}`),
     own && el("span", { class: "acts" },
       ib(L.visible ? ICONS.eyeOff : ICONS.eye, t(L.visible ? "drawer.hide" : "drawer.show"), false, () => { L.visible = !L.visible; touch({ cover: true, side: true }); }),
-      ib(ICONS.dup, t("drawer.dup"), !copiable(L), duplicateLayer),
+      ib(ICONS.dup, t("drawer.dup"), !copiable(L), () => duplicateLayer()),
       ib(ICONS.trash, t(isRemovable(L) ? "layers.del" : "layers.delLayout"), !isRemovable(L), () => removeLayer())));
 }
 /** The list's edges fade where rows go on past them: scrolled up under the chips, or on down under the Background's line (.lyscroll in index.html). */
@@ -6765,27 +6793,41 @@ function tick3d() {
 }
 
 // ---------- export
-function renderFull(size, cover, index) {
+/**
+ * Cover `cover` (channel `index`'s) drawn on a canvas of its own at size `size`, as exported: `pixelW` pixels wide, by
+ * default the size's width at `scale` (the resolution set, settings.scale), in profile `profile`'s style (the current one's).
+ */
+function renderFull(size, cover, index, { profile = S.profile, pixelW = null, scale = S.settings.scale } = {}) {
   const cv = document.createElement("canvas");
-  paint(cv, size, size.w * S.settings.scale, cover, index);
+  paint(cv, size, pixelW || size.w * scale, cover, index, null, null, { profile });
   return cv;
 }
 /**
  * renderFull() for an export: effects that reshape letters need the letters' outlines, which are
  * fetched in the background. If drawing the cover asked for any, wait for them and draw it again.
  */
-async function renderReady(size, cover, index) {
+async function renderReady(size, cover, index, how = {}) {
   await ensureFonts(cover.layers);
-  let cv = renderFull(size, cover, index);
-  for (let round = 0; round < 3 && outlinesPending(); round++) { await outlinesSettled(); cv = renderFull(size, cover, index); }
+  let cv = renderFull(size, cover, index, how);
+  for (let round = 0; round < 3 && outlinesPending(); round++) { await outlinesSettled(); cv = renderFull(size, cover, index, how); }
   return cv;
 }
-const nameFor = (size, cover, index) => exportName(S.settings.nameTemplate, { index, cat: S.profile.categories[index], title: cover.title, size, scale: S.settings.scale, ext: EXT[S.settings.format] });
+/**
+ * The file name a cover is exported under (see exportName in store.js); `out` ({nameTemplate, scale, format}, each
+ * optional) in place of the settings' own.
+ */
+const nameFor = (size, cover, index, { nameTemplate = S.settings.nameTemplate, scale = S.settings.scale, format = S.settings.format } = {}) =>
+  exportName(nameTemplate, { index, cat: S.profile.categories[index], title: cover.title, size, scale, ext: EXT[format] });
 /** PNG bytes of a canvas. Encoding is asynchronous, so the window keeps responding meanwhile. */
 const toPng = (cv) => new Promise((res, rej) => cv.toBlob((b) => (b ? b.arrayBuffer().then((a) => res(new Uint8Array(a)), rej) : rej(new Error("could not encode the image"))), "image/png"));
-/** Body of a binary export call: [u32 LE length][JSON metadata][PNG bytes] (see parse_frame in lib.rs). */
-function framed(png, extra) {
-  const meta = new TextEncoder().encode(JSON.stringify({ dir: "", ...extra, format: S.settings.format, quality: S.settings.quality }));
+/** A canvas as a PNG in base64 (a data URL's data, without its head). */
+const pngBase64 = async (cv) => { const url = await readAs(new Blob([await toPng(cv)], { type: "image/png" }), "readAsDataURL"); return url.slice(url.indexOf(",") + 1); };
+/**
+ * Body of a binary export call: [u32 LE length][JSON metadata][PNG bytes] (see parse_frame in lib.rs). The file is
+ * written in `out`'s format and quality ({format, quality}, each optional), else the settings'.
+ */
+function framed(png, extra, { format = S.settings.format, quality = S.settings.quality } = {}) {
+  const meta = new TextEncoder().encode(JSON.stringify({ dir: "", ...extra, format, quality }));
   const out = new Uint8Array(4 + meta.length + png.length);
   new DataView(out.buffer).setUint32(0, meta.length, true);
   out.set(meta, 4); out.set(png, 4 + meta.length);
@@ -6794,8 +6836,7 @@ function framed(png, extra) {
 /** Resolves once the browser has had a chance to paint (or shortly after, when the window is hidden). */
 const nextPaint = () => new Promise((r) => { requestAnimationFrame(() => setTimeout(r, 0)); setTimeout(r, 80); });
 function browserSave(name, href) { const a = el("a", { href, download: name }); document.body.append(a); a.click(); a.remove(); }
-function browserSaveCanvas(cv, name) {   // plain-browser fallback: the browser encodes; a dark matte under JPEG
-  const { format, quality } = S.settings;
+function browserSaveCanvas(cv, name, { format = S.settings.format, quality = S.settings.quality } = {}) {   // plain-browser fallback: the browser encodes; a dark matte under JPEG
   let src = cv;
   if (format === "jpeg") { src = el("canvas", { width: cv.width, height: cv.height }); const x = src.getContext("2d"); x.fillStyle = "#0a0a12"; x.fillRect(0, 0, src.width, src.height); x.drawImage(cv, 0, 0); }
   return new Promise((res) => src.toBlob((b) => { const url = URL.createObjectURL(b); browserSave(name, url); setTimeout(() => URL.revokeObjectURL(url), 4000); res(); }, "image/" + format, quality / 100));
@@ -6818,11 +6859,13 @@ function progress(total) {
  * Exports jobs ([{cover, index, size}]) one after another without freezing the window: each cover is
  * drawn, encoded to PNG off the main thread and handed to Rust as raw bytes, where it is converted
  * and written on a worker thread (up to two at a time) while the next cover is already being drawn.
- * save(bytes, name) does the writing; returns how many were written, or -1 when one could not be, which onFail (a
- * toast, unless told) is told.
+ * save(bytes, name, job) does the writing; returns how many were written, or -1 when one could not be, which onFail (a
+ * toast, unless told) is told. `progress`: what shows how far it has got (progress(total) by default, the modal: an
+ * object with set(done, name), close() and `cancelled`); `out`: the format, resolution and names to use instead of
+ * the settings' (see nameFor).
  */
-async function runExport(jobs, save, onFail = fail) {
-  const prog = progress(jobs.length), pending = new Set(), used = new Set();
+async function runExport(jobs, save, onFail = fail, { progress: track = progress, out = {} } = {}) {
+  const prog = track(jobs.length), pending = new Set(), used = new Set();
   // a name already given in this export (a pattern without the size, or the channel, say) gets the size (as w×h), then a
   // number; told apart as the disk tells them, regardless of case (one file on APFS and NTFS)
   const key = (n) => n.normalize("NFC").toLowerCase();
@@ -6838,11 +6881,11 @@ async function runExport(jobs, save, onFail = fail) {
   try {
     for (const job of jobs) {
       if (prog.cancelled || failed) break;
-      const name = apart(nameFor(job.size, job.cover, job.index), job.size);
+      const name = apart(nameFor(job.size, job.cover, job.index, out), job.size);
       prog.set(done, name);
       await nextPaint();
-      const cv = await renderReady(job.size, job.cover, job.index);
-      const task = (CAN.saveFiles ? toPng(cv).then((bytes) => { cv.width = cv.height = 0; return save(bytes, name); }) : browserSaveCanvas(cv, name))
+      const cv = await renderReady(job.size, job.cover, job.index, { scale: out.scale });
+      const task = (CAN.saveFiles ? toPng(cv).then((bytes) => { cv.width = cv.height = 0; return save(bytes, name, job); }) : browserSaveCanvas(cv, name, out))
         .then(() => { done++; prog.set(done); }, (e) => { failed = failed || e; })
         .finally(() => pending.delete(task));
       pending.add(task);
@@ -6875,6 +6918,19 @@ function askOtherDir(dir, err) {
     m.hidden = false;
   });
 }
+/** A failure to write an export that is not the folder's fault: a picture not encoded, a name the system refuses, a body that came wrong. */
+const NOT_THE_FOLDER = /encode|invalid file name|expected a binary body/i;
+/**
+ * Writes jobs into folder `dir`, once, asking nothing: resolves with how many were written (as runExport), each file
+ * written ({name, path, job}, in the order they were done) and what stopped it (null: nothing). `opts`: runExport's
+ * ({progress, out}), `out` also the format and quality the files are written in.
+ */
+async function writeInto(dir, jobs, opts = {}) {
+  let err = null;
+  const paths = [];
+  const n = await runExport(jobs, async (bytes, name, job) => { paths.push({ name, path: await invoke("write_image", framed(bytes, { dir, name }, opts.out)), job }); }, (e) => { err = e; }, opts);
+  return { n, paths, err };
+}
 /**
  * Writes jobs into the profile's export folder, asking for one when none is kept yet; where writing there fails, says
  * so and asks for another, and writes them all there. Resolves with how many were written, where, and the last file's
@@ -6883,10 +6939,9 @@ function askOtherDir(dir, err) {
 async function writeJobs(jobs) {
   let dir = exportDir() || (await pickExportDir());
   while (dir) {
-    let err = null, last = "";
-    const n = await runExport(jobs, async (bytes, name) => { last = await invoke("write_image", framed(bytes, { dir, name })); }, (e) => { err = e; });
-    if (!err) return { n, dir, last };
-    if (/encode|invalid file name|expected a binary body/i.test(String((err && err.message) || err))) { fail(err); return null; }   // a picture not encoded, a name the system refuses: not the folder's fault
+    const { n, paths, err } = await writeInto(dir, jobs);
+    if (!err) return { n, dir, last: paths.length ? paths[paths.length - 1].path : "" };
+    if (NOT_THE_FOLDER.test(String((err && err.message) || err))) { fail(err); return null; }   // a picture not encoded, a name the system refuses: not the folder's fault
     dir = await askOtherDir(dir, err);
   }
   return null;
@@ -6998,19 +7053,25 @@ function nameField(example) {
   build();
   return wrap;
 }
+/**
+ * The covers a batch exports for rows of a table (csvToJobs): each on the channel its row names (channelIndex in
+ * store.js), or the one on the canvas where it names none this profile has; `unknown`, how many named one it has not.
+ */
+function batchJobs(rows) {
+  let unknown = 0;
+  const jobs = rows.map((r) => {
+    let index = channelIndex(r.category, S.profile.categories);
+    if (index < 0) { index = catIndex(); if (String(r.category).trim()) unknown++; }
+    return { index, cover: { ...coverFor(S.profile.categories[index].id), title: r.title, tag: r.tag, subtitle: r.subtitle } };   // that channel's own cover, with the row's words (no subtitle but the row's own)
+  });
+  return { jobs, unknown };
+}
 async function batchFromCsv() {
   const f = await pickFile(".csv,.tsv,.txt,text/csv");
   if (!f) return;
   const rows = csvToJobs(await readAs(f, "readAsText"));
   if (!rows.length) return toast(t("msg.batchEmpty"));
-  const norm = (s) => String(s).trim().toLowerCase();
-  let unknown = 0;
-  const jobs = rows.map((r) => {
-    const key = norm(r.category);
-    let index = S.profile.categories.findIndex((c, i) => key && (norm(c.name) === key || norm(c.code) === key || String(i + 1) === key || String(i + 1).padStart(2, "0") === key));
-    if (index < 0) { index = catIndex(); if (key) unknown++; }
-    return { index, cover: { ...coverFor(S.profile.categories[index].id), title: r.title, tag: r.tag, subtitle: r.subtitle } };   // that channel's own cover, with the row's words (no subtitle but the row's own)
-  });
+  const { jobs, unknown } = batchJobs(rows);
   for (const j of jobs) await loadPhotos(pidsOf(j.cover));
   await exportMany(jobs);
   if (unknown) setTimeout(() => toast(counted("msg.batchUnknown", unknown)), 3600);
@@ -7285,44 +7346,51 @@ function embedPhotos(covers) {
   for (const pid of new Set(covers.flatMap((c) => [...pidsOf(c)]))) { const r = S.photos.get(pid); if (r) out[pid] = { src: r.src, original: r.original || null, mask: r.mask ? r.mask.src : null }; }
   return out;
 }
+/**
+ * Opens project file `raw` (parsed) into its own profile and channel: the profile here with its id, else as a new
+ * profile or into the current one (on its channel if this profile has it), as `ask(name)` answers ("new", "current", or
+ * null: not at all; asked only then). Files before version 4 have no profile: they open into the channel on the canvas.
+ * Undo brings back the cover it replaced. Resolves with the profile and channel it opened on ({profile, catId}), or null
+ * when not opened; throws msg.badFile when `raw` is no project.
+ */
+async function openProject(raw, ask) {
+  if (!raw || raw.kind !== "project" || !raw.cover) throw new Error(t("msg.badFile"));
+  let profile = S.profile, catId = S.cover.catId, across = null;   // across: the sizes of the profile the cover was made in, opened into another
+  const theirs = raw.profile && typeof raw.profile === "object" ? raw.profile : null;
+  const here = theirs && S.profiles.find((p) => p.id === theirs.id);
+  if (here) profile = here;
+  else if (theirs) {
+    const how = await ask(theirs.name || raw.profileName || "—");
+    if (!how) return null;
+    if (how === "new") { await adoptFonts(raw.fonts); profile = await addProfile(theirs, false); }
+    else across = normalizeProfile(theirs).sizes.map(sizeKey);
+  }
+  if (profile.categories.some((c) => c.id === raw.catId)) catId = raw.catId;
+  else if (profile !== S.profile) catId = channelOf(profile);
+  await adoptEmbedded(raw.assets);
+  await adoptFonts(raw.fonts);
+  await adoptPhotos(raw.photos, "lib.fromProject");
+  if (profile !== S.profile) await switchProfile(profile.id);
+  if (catId !== S.cover.catId) await switchChannel(catId);
+  clearTimeout(timers.hist); commitHistory();
+  if (across && Array.isArray(raw.cover.layers)) acrossSizes(raw.cover.layers, across, sizeKeys());   // what its layers keep by size, on this profile's sizes (as Copy from another channel puts it)
+  const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
+  const opened = await upgradeCover(normalizeCover(raw.cover, S.profile), { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
+  setCover(channelCover(opened, S.profile, catId));
+  await loadPhotos(pidsOf(S.cover));
+  S.layerId = "title"; S.picked = [];
+  touch({ cover: true, panel: true, side: true, strip: true });
+  return { profile: S.profile, catId: S.cover.catId };
+}
 const projectActions = {
-  /**
-   * A project file opens into its own profile and channel: the profile here with its id, else — asked —
-   * as a new profile, or into the current one (on its channel if this profile has it). Files before
-   * version 4 have no profile: they open into the channel on the canvas. Undo brings back the cover it replaced.
-   */
+  /** A project file picked and opened (openProject), asking how where its profile is not here (askProjectProfile). */
   async open() {
     const f = await pickFile(".json,application/json");
     if (!f) return;
     let raw;
     try { raw = JSON.parse(await readAs(f, "readAsText")); if (!raw || raw.kind !== "project" || !raw.cover) throw 0; } catch (e) { return toast(t("msg.badFile")); }
     try {
-      let profile = S.profile, catId = S.cover.catId, across = null;   // across: the sizes of the profile the cover was made in, opened into another
-      const theirs = raw.profile && typeof raw.profile === "object" ? raw.profile : null;
-      const here = theirs && S.profiles.find((p) => p.id === theirs.id);
-      if (here) profile = here;
-      else if (theirs) {
-        const how = await askProjectProfile(theirs.name || raw.profileName || "—");
-        if (!how) return;
-        if (how === "new") { await adoptFonts(raw.fonts); profile = await addProfile(theirs, false); }
-        else across = normalizeProfile(theirs).sizes.map(sizeKey);
-      }
-      if (profile.categories.some((c) => c.id === raw.catId)) catId = raw.catId;
-      else if (profile !== S.profile) catId = channelOf(profile);
-      await adoptEmbedded(raw.assets);
-      await adoptFonts(raw.fonts);
-      await adoptPhotos(raw.photos, "lib.fromProject");
-      if (profile !== S.profile) await switchProfile(profile.id);
-      if (catId !== S.cover.catId) await switchChannel(catId);
-      clearTimeout(timers.hist); commitHistory();
-      if (across && Array.isArray(raw.cover.layers)) acrossSizes(raw.cover.layers, across, sizeKeys());   // what its layers keep by size, on this profile's sizes (as Copy from another channel puts it)
-      const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
-      const opened = await upgradeCover(normalizeCover(raw.cover, S.profile), { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
-      setCover(channelCover(opened, S.profile, catId));
-      await loadPhotos(pidsOf(S.cover));
-      S.layerId = "title"; S.picked = [];
-      touch({ cover: true, panel: true, side: true, strip: true });
-      toast(t("proj.opened", S.profile.name, cat().name || cat().code || "—"));
+      if (await openProject(raw, askProjectProfile)) toast(t("proj.opened", S.profile.name, cat().name || cat().code || "—"));
     } catch (e) { fail(e); }
   },
   /** Version 4: the cover with its profile and channel, the pictures, vector assets and imported fonts it uses. */
@@ -7360,12 +7428,13 @@ function setMode(mode) {
  * one of the user's layout presets — then those places by dealPlaces, on the layout dealt (but for the layers a preset's
  * elements of the user's own placed, which stay where it put them). `design`: the layers of
  * the profile's design by id, where moved words go back to (but for a preset's); `not`: the looks dealt already in
- * this run. Returns the layout dealt: "keep", or the preset's id.
+ * this run; `locks`: the parts left alone (see SURPRISE_LOCKS), Surprise me's own by default. Returns the layout
+ * dealt: "keep", or the preset's id.
  */
-function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), not = []) {
+function dealHand(design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), not = [], locks = S.settings.surprise.locks) {
   const R = Math.random, sv = S.settings.surprise, layouts = S.settings.layouts;
-  const { layout, placed } = dealCover(S.profile.style, S.cover, { R, locks: sv.locks, odds: oddsOf(sv.odds, layouts), layouts, not, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, sizes: sizeKeys(), put: presetEnv(), can: (k) => CAN.outlines || EFFECTS[k].kind !== "outline", canTint });
-  if (!sv.locks.places) dealPlaces(R, placed);
+  const { layout, placed } = dealCover(S.profile.style, S.cover, { R, locks, odds: oddsOf(sv.odds, layouts), layouts, not, recipes: S.settings.recipes, rgb: hexToRgb(cat().color), design, sizeKey: frame().key, sizes: sizeKeys(), put: presetEnv(), can: (k) => CAN.outlines || EFFECTS[k].kind !== "outline", canTint });
+  if (!locks.places) dealPlaces(R, placed);
   return layout;
 }
 /** Surprise me's run (how many hands, how fast they show: RULES.hands in deal.js). done: when the last run ended; step: the step of undo it made ({idx}) while nothing has followed it. */
@@ -7373,16 +7442,85 @@ const SURPRISE = { busy: false, done: 0, step: null };
 const copyOf = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 /** The cover as Surprise me deals it — the style, the layers, the scene objects' places — copied. */
 const handNow = () => ({ style: copyOf(S.profile.style), layers: copyOf(S.cover.layers), scene: copyOf(S.cover.scene) });
+/** Object o made a copy of v, in place: what v has not taken out of it, the rest v's. */
+const mergeInto = (o, v) => { for (const k of Object.keys(o)) if (!(k in v)) delete o[k]; Object.assign(o, copyOf(v)); };
 /**
  * Hand h put back onto the objects there are — the style, each layer by its id — so whatever holds one
  * (a panel, a cut-out under way) still holds the cover's.
  */
 function putHand(h) {
-  const into = (o, v) => { for (const k of Object.keys(o)) if (!(k in v)) delete o[k]; Object.assign(o, copyOf(v)); };
-  into(S.profile.style, h.style);
+  mergeInto(S.profile.style, h.style);
   const had = new Map(S.cover.layers.map((l) => [l.id, l]));
-  S.cover.layers = h.layers.map((v) => { const L = had.get(v.id); if (!L) return copyOf(v); into(L, v); return L; });
+  S.cover.layers = h.layers.map((v) => { const L = had.get(v.id); if (!L) return copyOf(v); mergeInto(L, v); return L; });
   if (h.scene) S.cover.scene = copyOf(h.scene); else delete S.cover.scene;
+}
+/** Whether a and b (as JSON has them) hold the same, their keys in whatever order. */
+const sameValue = (a, b) => a === b || (!!a && !!b && typeof a === "object" && typeof b === "object" && Array.isArray(a) === Array.isArray(b)
+  && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => k in b && sameValue(a[k], b[k])));
+/**
+ * The cover on the canvas checked as a cover read is (channelCover), what the check changed put back onto the objects
+ * there are, as putHand puts a hand (so whatever holds one still holds the cover's). Returns what it changed: the cover's
+ * fields ("title"), the layers' ("layers.<id>.<field>"), a layer dropped or added ("layers.<id>") and their order ("layers").
+ */
+function settleCover() {
+  const c = S.cover, was = copyOf(c), now = copyOf(channelCover(copyOf(c), S.profile, c.catId)), said = [];
+  for (const k of new Set([...Object.keys(was), ...Object.keys(now)])) if (k !== "layers" && !sameValue(was[k], now[k])) said.push(k);
+  const old = new Map(was.layers.map((l) => [l.id, l]));
+  for (const v of now.layers) {
+    const o = old.get(v.id);
+    if (!o) said.push(`layers.${v.id}`);
+    else for (const k of new Set([...Object.keys(o), ...Object.keys(v)])) if (!sameValue(o[k], v[k])) said.push(`layers.${v.id}.${k}`);
+  }
+  for (const id of old.keys()) if (!now.layers.some((v) => v.id === id)) said.push(`layers.${id}`);
+  const ids = (ls) => ls.map((l) => l.id).filter((id) => old.has(id) && now.layers.some((v) => v.id === id)).join();
+  if (ids(was.layers) !== ids(now.layers)) said.push("layers");
+  const had = new Map(c.layers.map((l) => [l.id, l]));
+  const layers = now.layers.map((v) => { const L = had.get(v.id); if (!L) return v; mergeInto(L, v); return L; });
+  mergeInto(c, { ...now, layers: [] }); c.layers = layers;
+  return said;
+}
+/**
+ * Deals `count` hands one after another (dealHand), each in a look of its own while there are looks left, `locks` left
+ * alone, the cover put back as it was (`before`, a handNow() taken first) between two: each drawn at size `shown`, `px`
+ * pixels wide, and handed to `each(i, hand, canvas)` (awaited) as it comes. Resolves with the hands, {style, layers,
+ * scene, layout} each; the last one dealt is left on the cover. A hand that cannot be drawn is left out.
+ */
+async function dealHands({ before = handNow(), count = RULES.hands.count, locks = S.settings.surprise.locks, px = DEAL.px, shown = selSize(), each = null } = {}) {
+  const design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), hands = [], dealt = [];
+  for (let i = 0; i < count; i++) {
+    if (i) putHand(before);
+    try {
+      const layout = dealHand(design, dealt, locks);
+      const cv = el("canvas");
+      drawCover(cv, { profile: S.profile, catIndex: catIndex(), size: shown, pixelW: px, cover: S.cover, photos: S.photos });
+      dealt.push(S.profile.style.look);
+      hands.push({ ...handNow(), layout });   // its structure is in the style and the layers it keeps (putHand puts both back)
+      if (each) await each(hands.length - 1, hands[hands.length - 1], cv);
+    } catch (e) { console.error(e); }   // a hand that cannot be drawn is left out
+  }
+  return hands;
+}
+/**
+ * Puts the first of the hands dealt (dealHands) on the canvas, as a step of undo of its own: SURPRISE.step, which another
+ * hand taken instead (takeHand) stays on while nothing has followed it.
+ */
+function keepFirst(hands) {
+  putHand(hands[0]);
+  touch({ profile: true, cover: true, panel: true, side: true, strip: true });
+  commitHistory(true);   // a step of its own even if the hand is the cover as it was: another hand taken, or the deal undone, leaves the step before it alone
+  SURPRISE.step = { idx: S.histIdx };
+}
+/**
+ * Puts hand h, of the run whose step is SURPRISE.step, on the canvas instead, on that same step of undo. False, and
+ * nothing put, when something has followed the run (an edit made since becomes a step of its own first).
+ */
+function takeHand(h) {
+  clearTimeout(timers.hist); commitHistory();   // an edit made since is a step of its own, and the hands are past taking
+  if (!SURPRISE.step || S.histIdx !== SURPRISE.step.idx) return false;
+  putHand(h);
+  touch({ profile: true, cover: true, panel: true, side: true, strip: true });
+  S.hist[S.histIdx] = snapshot();
+  return true;
 }
 /**
  * SURPRISE ME: deals RULES.hands.count hands (dealHand), each in a look of its own while there are looks left,
@@ -7404,31 +7542,20 @@ async function surprise(e) {
     if (first) DEAL.from = S.hist[S.histIdx];   // the cover before this window's deals, for Undo the deal
     SURPRISE.step = null;
     before = handNow();
-    const design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), hands = [], dealt = [], shown = selSize(), t0 = performance.now(), H = RULES.hands;
+    const shown = selSize(), t0 = performance.now(), H = RULES.hands;
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     let shownAt = 0;
-    for (let i = 0; i < H.count; i++) {
-      if (i) putHand(before);
-      try {
-        const layout = dealHand(design, dealt);
-        const cv = el("canvas");
-        drawCover(cv, { profile: S.profile, catIndex: catIndex(), size: shown, pixelW: DEAL.px, cover: S.cover, photos: S.photos });
-        dealt.push(S.profile.style.look);
-        hands.push({ ...handNow(), layout });   // its structure is in the style and the layers it keeps (putHand puts both back)
-        // the hand shows before the next is dealt, and long enough after the last to be seen coming
-        const since = performance.now() - shownAt;
-        if (since < H.pace) await wait(H.pace - since);
-        dealShow(hands.length - 1, hands[hands.length - 1], cv);
-        shownAt = performance.now(); await nextPaint();
-      } catch (e) { console.error(e); }   // a hand that cannot be drawn is left out
-    }
+    const hands = await dealHands({ before, count: H.count, locks: S.settings.surprise.locks, px: DEAL.px, shown, each: async (i, h, cv) => {
+      // the hand shows before the next is dealt, and long enough after the last to be seen coming
+      const since = performance.now() - shownAt;
+      if (since < H.pace) await wait(H.pace - since);
+      dealShow(i, h, cv);
+      shownAt = performance.now(); await nextPaint();
+    } });
     if (!hands.length) throw new Error(t("deal.none"));
     await wait(H.pace * 2);   // a moment with every hand in view, then the first on the canvas, and marked
-    putHand(hands[0]);
     SURPRISE.last = { kept: 0, ms: Math.round(performance.now() - t0), hands: hands.map((h) => ({ look: h.style.look, layout: h.layout, template: layoutOf(h.style, sizeKey(shown)).template })) };   // for the self-test
-    touch({ profile: true, cover: true, panel: true, side: true, strip: true });
-    commitHistory(true);   // a step of its own even if the hand is the cover as it was: another hand taken, or the deal undone, leaves the step before it alone
-    SURPRISE.step = { idx: S.histIdx };
+    keepFirst(hands);
     dealKept(0);
   } catch (err) {
     if (before) { putHand(before); S.hist[S.histIdx] = snapshot(); touch({ panel: true, side: true }); }   // the cover as it was, and no step of undo for it
@@ -7526,12 +7653,8 @@ function dealMark() {
 /** Puts hand i on the canvas instead, while nothing has followed the run: still one step of undo. */
 function dealTake(i) {
   if (SURPRISE.busy || i === DEAL.kept || !DEAL.hands[i]) return;
-  clearTimeout(timers.hist); commitHistory();   // an edit made since is a step of its own, and the hands are past taking
-  if (!SURPRISE.step || S.histIdx !== SURPRISE.step.idx) return dealClose();
-  putHand(DEAL.hands[i]); DEAL.kept = i;
-  touch({ profile: true, cover: true, panel: true, side: true, strip: true });
-  S.hist[S.histIdx] = snapshot();
-  dealMark();
+  if (!takeHand(DEAL.hands[i])) return dealClose();
+  DEAL.kept = i; dealMark();
 }
 /**
  * Undo the deal: the cover as it was before the window's first deal (back through its steps of undo, which redo takes
@@ -7689,6 +7812,19 @@ function openMenu() {
 function closeMenu() {
   MENU.open = false; $("menu").hidden = true;
   const b = $("morebtn"); if (b) { b.classList.remove("on"); b.setAttribute("aria-expanded", "false"); }
+}
+/** Whether element a is a field words are typed into (not a slider, a colour, a switch). */
+const textField = (a) => !!a && (a.isContentEditable || a.tagName === "TEXTAREA" || (a.tagName === "INPUT" && !["range", "color", "checkbox", "radio", "button", "file"].includes(a.type)));
+/**
+ * Shuts what is open for a moment over the editor — the ⋯ menu, the bar's popover, a picker's list, a look, an effect
+ * or a layout shown on hover — and takes the focus out of a field being typed in, so the sheets drawn next are drawn whole.
+ */
+function closeTransient() {
+  closeMenu();
+  if (FTB.pop) { FTB.pop = ""; renderBar(); }
+  for (const b of document.querySelectorAll('[aria-expanded="true"]')) if (b._shut) b._shut(false);
+  endPreview("look", "fx", "layout");
+  if (textField(document.activeElement)) document.activeElement.blur();
 }
 function renderMenu() {
   const go = (fn) => () => { closeMenu(); fn(); };
@@ -7950,6 +8086,36 @@ for (const [side, id] of [["left", "left"], ["right", "right"]]) {
 
 // ---------- window-level events
 let dragDepth = 0;
+/** When words were last typed into a field (its input event): typing, for userBusy, is a field focused and typed into within 1.2 s. */
+const TYPED = { at: -Infinity };
+addEventListener("input", (e) => { if (textField(e.target)) TYPED.at = performance.now(); }, true);
+/**
+ * What the user is in the middle of, in a few words of English, or null: what a change made for them (an agent's) waits
+ * for. Always: the self-test, a question or a dialog open, Surprise me's window or its dealing, a press or a drag under
+ * way (on the canvas, a slider, a row of the Layers sheet, an asset, a channel's card, files over the window), a word
+ * being put together by an input method, typing; `strict` (for a change): Settings, the letter, crop and weave windows,
+ * the brush's panel open too, and an export of the sizes ticked under way.
+ */
+function userBusy(strict = false) {
+  const deal = $("deal");
+  if (SELFTESTING) return "the self-test is running";
+  if (ASK.answer) return "a question is waiting for an answer";
+  if (!$("modal").hidden) return "a dialog is open";
+  if (SURPRISE.busy) return "Surprise me is dealing";
+  if (deal && !deal.hidden) return "Surprise me's window is open";
+  if (PRESS.down || FTB.drag || LIVE || DRAFT.held || document.body.classList.contains("scrubbing")) return "the pointer is down on the cover or a slider";
+  if (dragDepth > 0 || dragId || DRAGGED_ASSET || document.querySelector(".lifted")) return "something is being dragged";
+  if (COMPOSING) return "a word is being typed with an input method";
+  if (textField(document.activeElement) && performance.now() - TYPED.at < 1200) return "the user is typing";
+  if (!strict) return null;
+  if (S.mode === "setup") return "Settings is open";
+  if (S.letterWin) return "the letter window is open";
+  if (S.cropWin) return "the crop window is open";
+  if (S.weaveWin) return "the weave window is open";
+  if (S.brushWin) return "the weave brush is in use";
+  if (exportingTicked) return "an export is under way";
+  return null;
+}
 const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
 // (with AI generate open, a picture is its reference instead: its drop zone lights up, body.gdrop)
 addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; document.body.classList.add(genOpen() ? "gdrop" : "drop"); });

@@ -240,8 +240,10 @@ export function normalizeExportSizes(raw) {
   }
   return out;
 }
-/** What a change of place or layout reaches (settings.scope): every size, those facing the size shown's way, or that size. */
-const SCOPES = ["all", "orient", "size"];
+/** What a change of place or layout reaches (settings.scope), from the widest: every size, those facing the size shown's way, or that size. */
+export const SCOPES = ["all", "orient", "size"];
+/** The formats exports are written in (settings.format). */
+export const FORMATS = ["png", "jpeg", "webp"];
 /**
  * The scope every start begins at, whatever it was when the app closed: the defaults' (settings.scope in defaults.json),
  * as shipped `orient`, every size facing the way the size shown does. So it is not kept (settingsToKeep).
@@ -260,7 +262,7 @@ export function normalizeSettings(raw) {
     lang: oneOf(s.lang, ["zh", "en"], D.lang, ""),
     profileId: str(s.profileId),
     scale: oneOf(Number(s.scale), [1, 2, 3, 4], D.scale, 2),
-    format: oneOf(s.format, ["png", "jpeg", "webp"], D.format, "png"),
+    format: oneOf(s.format, FORMATS, D.format, "png"),
     quality: Math.round(num(s.quality, num(D.quality, 92, 40, 100), 40, 100)),
     nameTemplate: str(s.nameTemplate) || nameTemplate(),
     exportSizes: normalizeExportSizes(s.exportSizes),
@@ -480,4 +482,14 @@ export function exportName(template, { index, cat, title, size, scale, ext }) {
     .replace(/\{size\}/g, `${size.w}x${size.h}`)
     .replace(/\{w\}/g, size.w).replace(/\{h\}/g, size.h);
   return `${clean(base) || "cover"}${scale > 1 ? "@" + scale + "x" : ""}.${ext}`;
+}
+
+/**
+ * The index among `categories` (a profile's channels) of the channel `key` names, as a row of a batch table names one:
+ * by its name or its code (the case and the spaces round them aside), or its number from 1 ("1" or "01"), the first
+ * that answers; -1 when none does, or `key` is empty.
+ */
+export function channelIndex(key, categories) {
+  const norm = (s) => String(s).trim().toLowerCase(), k = norm(key);
+  return k ? categories.findIndex((c, i) => norm(c.name) === k || norm(c.code) === k || String(i + 1) === k || String(i + 1).padStart(2, "0") === k) : -1;
 }
