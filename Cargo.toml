@@ -36,6 +36,28 @@ zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSString", "NSIndexSet"] }
 tempfile = "3"
+# Where the desktop app keeps its data (the same crate and version Tauri finds it with).
+dirs = "7"
+# The MCP endpoint's bearer token comes from the system's random source.
+getrandom = "0.4"
+# The MCP endpoint (Apache-2.0): both eras of the protocol, the stateless 2026-07-28 and the
+# `initialize` handshake of 2025-03-26 to 2025-11-25, over streamable HTTP. Pinned: it changes fast,
+# and the HTTP tests in core/tests/mcp_http.rs are what an upgrade has to pass.
+rmcp = { version = "=3.7.0", default-features = false, features = ["server", "base64", "transport-streamable-http-server", "transport-streamable-http-server-session"] }
+# Waiting for the page's answers, and the endpoint's runtime (the app's is Tauri's).
+tokio = { version = "1", features = ["net", "sync", "time", "macros", "rt"] }
+tokio-util = "0.7"
+# The MCP endpoint's HTTP server, on 127.0.0.1 only: axum's routes and layers, served by hyper itself
+# so that each connection has its timeouts and the endpoint can close every one when it stops.
+axum = { version = "0.8.9", default-features = false, features = ["json"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "service", "http1"] }
+http-body-util = "0.1"
+# On Windows the endpoint's port is bound for SmedCover alone (SO_EXCLUSIVEADDRUSE).
+socket2 = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
+# The HTTP tests call the endpoint as rmcp's own client does, in both eras (over plain HTTP: no TLS).
+reqwest = { version = "0.13", default-features = false }
 
 # Dependencies are optimised even in development builds: the image codecs are far too slow otherwise.
 # Cargo reads profiles only from the workspace's root.

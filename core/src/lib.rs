@@ -14,11 +14,16 @@
 //! * cutting the subject out of a photo, with Apple's Vision or with BiRefNet run by ONNX Runtime,
 //!   whose runtime and models it downloads ([`cut`]);
 //! * sending the request for an AI-generated asset, so it is not subject to the web view's
-//!   cross-origin rules ([`net`]).
+//!   cross-origin rules ([`net`]);
+//! * the MCP endpoint agents call SmedCover's tools through, each call handed to the page
+//!   ([`mcp`]);
+//! * where the desktop app keeps its data, for a command line or server on the same computer
+//!   ([`paths`]).
 //!
-//! Everything here is synchronous: a host waits for it off its interface thread (the app on Tauri's
-//! blocking pool). Errors are text, which the web view matches on ("timed out", "unsupported:",
-//! "cancelled", "model not downloaded").
+//! Everything here is synchronous but the MCP endpoint, which runs on the host's Tokio runtime: a
+//! host waits for the rest off its interface thread (the app on Tauri's blocking pool). Errors are
+//! text, which the web view matches on ("timed out", "unsupported:", "cancelled", "model not
+//! downloaded").
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -27,8 +32,10 @@ use std::sync::Arc;
 pub mod cut;
 pub mod fonts;
 pub mod image;
+pub mod mcp;
 pub mod net;
 pub mod outline;
+pub mod paths;
 pub mod store;
 
 pub use fonts::BundledFonts;
