@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { TOOLS, TOOL_BY, ERRORS, INSTRUCTIONS, FLAGS, toolsJson, toolsText, checkArgs, checkCall, toResult, toError, isError, ToolError, findSize, findChannel, findProfile, letterKeysOf, boxesOf, sheetPlan, widthFor, keyOf } from "../ui/js/tools.js";
 import { SCOPES, FORMATS, SURPRISE_LOCKS, normalizeSize, normalizeProfile } from "../ui/js/store.js";
-import { LOOK_IDS } from "../ui/js/style.js";
+import { LOOK_IDS, LOOKS } from "../ui/js/style.js";
 import { EFFECTS, BENDS } from "../ui/js/textfx.js";
 import { BEND_IDS, WEAVE_WAYS } from "../ui/js/layers.js";
 import { RULES } from "../ui/js/deal.js";
@@ -230,23 +230,46 @@ async function fakeApi() {
   const S = { profiles: [p, other], profile: p, cover, covers: { [cover.catId]: cover }, settings: normalizeSettings({ exportSizes: { [p.id]: { "900x383": false } } }), hist: ["a", "b", "c"], histIdx: 1,
     library: [{ pid: "pic1", name: "Beach", kind: "upload", at: 1700000000000 }, { pid: "pic2", name: "", kind: "ai", at: 0 }], systemFonts: ["Helvetica", "PingFang SC", "Menlo"], importedFonts: ["My Font"],
     latinFonts: new Set(["Bebas Neue", "Helvetica"]), assetFolders: [], sel: "1920x1080", layerId: "title", picked: [], ai: {}, imageAi: {} };
-  const travels = [];
+  const travels = [], calls = [];
+  const { adjust, insertAbove, moveLayer, stepIndex, duplicate, isRemovable } = await import("../ui/js/layers.js");
+  const { virtualSize } = await import("../ui/js/layout.js");
+  const frame = () => { const z = S.profile.sizes.find((s) => keyOf(s) === S.sel) || S.profile.sizes[0], [vw, vh] = virtualSize(z.w, z.h); return { vw, vh, key: keyOf(z), catId: S.cover.catId, group: [{ key: keyOf(z), vw, vh }] }; };
+  // what changes the window, much as app.js does it, each call noted in `calls`
+  const changes = {
+    touch: (f) => calls.push(["touch", f]), toast: (m) => calls.push(["toast", m]),
+    switchChannel: async (id) => { calls.push(["switchChannel", id]); S.cover = S.covers[id] || (S.covers[id] = normalizeCover({ catId: id }, S.profile)); S.layerId = "title"; },
+    switchProfile: async (id) => { calls.push(["switchProfile", id]); S.profile = S.profiles.find((q) => q.id === id); S.covers = {}; const c = normalizeCover({ catId: S.profile.categories[0].id }, S.profile); S.covers[c.catId] = S.cover = c; },
+    edit: (L, patch, scope) => { calls.push(["edit", L.id, patch, scope]); adjust(L, frame(), scope, patch); },
+    addLayer: (L, above) => { calls.push(["addLayer", L.type, above]); insertAbove(S.cover.layers, above, L); S.layerId = L.id; return L; },
+    addAsset: (ref, at, above) => { const L = newLayer("asset", { ref, tint: true }); if (at) { L.t.all.x = at.x; L.t.all.y = at.y; } if (ref.kind === "sticker") L.t.all.s = 0.3; return changes.addLayer(L, above); },
+    removeLayer: (id) => { calls.push(["removeLayer", id]); S.cover.layers = S.cover.layers.filter((l) => l.id !== id && l.of !== id); S.layerId = "bg"; },
+    duplicateLayer: (id) => { calls.push(["duplicateLayer", id]); const c = duplicate(S.cover.layers.find((l) => l.id === id)); insertAbove(S.cover.layers, id, c); S.layerId = c.id; return c; },
+    shiftLayer: (dir, id) => { calls.push(["shiftLayer", dir, id]); const to = stepIndex(S.cover.layers, id, dir, S.cover.catId); return to > 0 && moveLayer(S.cover.layers, id, to); },
+    restack: (id, to) => { calls.push(["restack", id, to]); return moveLayer(S.cover.layers, id, to); },
+    selectSize: (k) => { calls.push(["selectSize", k]); S.sel = k; },
+  };
   const api = {
+    ...changes, frame, cat: () => S.profile.categories.find((c) => c.id === S.cover.catId), selSize: () => S.profile.sizes.find((z) => keyOf(z) === S.sel), sizeKeys: () => S.profile.sizes.map(keyOf),
+    drawnNow: () => ({ _hits: [], _virtual: [frame().vw, frame().vh] }), inColumns: (L) => L.vertical === true, owner: (L) => L, passivesOf: () => [], fxSeedOf: () => 4242, alignedT: () => null, isRemovable,
     S, CAN: { cut: true, outlines: false, saveFiles: true }, HOST: "tauri", appVersion: async () => "0.3.1", BUNDLED_FONTS: ["Noto Sans SC", "Bebas Neue", "JetBrains Mono"],
-    cutReady: () => true, cutEngine: () => "vision", catIndex: () => p.categories.findIndex((c) => c.id === S.cover.catId), channelOf: (q) => q.categories[0].id,
+    cutReady: () => true, cutEngine: () => "vision", catIndex: () => S.profile.categories.findIndex((c) => c.id === S.cover.catId), channelOf: (q) => q.categories[0].id,
     layerName: (L) => `name of ${L.id}`, copiable: (L) => L.type !== "bg" && L.type !== "frame", pickedIds: () => (S.picked.length > 1 ? [...S.picked] : S.layerId === "bg" ? [] : [S.layerId]),
     coverOf: async (q, catId) => (q === p && S.covers[catId]) || normalizeCover({ catId }, q), layer: (id) => S.cover.layers.find((l) => l.id === id) || null,
     commitPending: () => travels.push("commit"), timeTravel: async (d) => { travels.push(d); S.histIdx += d; },
-    selectSize: (k) => { S.sel = k; }, selectLayer: (id) => { S.layerId = id; S.picked = []; }, pickLayers: (ids) => { S.picked = ids; S.layerId = ids.at(-1); },
+    selectLayer: (id) => { S.layerId = id; S.picked = []; }, pickLayers: (ids) => { S.picked = ids; S.layerId = ids.at(-1); },
   };
-  return { api, S, p, other, text, sticker, travels };
+  return { api, S, p, other, text, sticker, travels, calls, changes };
 }
 
-test("every tool has a command; those not done yet answer that they are not, before touching anything", async () => {
+/** The tools still to be done: each answers unavailable. One done is taken off the list; one forgotten fails the test below. */
+const PENDING = ["place_layer", "set_layer_effect", "set_layer_font", "set_layer_bend", "set_layer_color", "show_layer", "add_layer", "remove_layer", "reorder_layer", "add_photo", "crop_photo", "cut_out", "weave", "surprise", "pick_hand", "apply_cover_json", "open_project", "batch_covers", "export"];
+test("every tool has a command; those not done yet are these, and answer that they are not, before touching anything", async () => {
   const { makeCommands } = await import("../ui/js/commands.js");
   const cmds = makeCommands(new Proxy({}, { get: () => () => {} }));
   assert.deepEqual(Object.keys(cmds).sort(), TOOLS.map((d) => d.name).sort());
-  for (const n of ["set_text", "export", "surprise", "apply_cover_json"]) assert.deepEqual(await cmds[n]({}), toError("unavailable", "not implemented yet"), n);
+  assert.deepEqual(TOOLS.filter((d) => cmds[d.name].pending).map((d) => d.name), PENDING, "the tools not done yet");
+  assert.equal(TOOLS.length - PENDING.length, 12);
+  for (const n of PENDING) assert.deepEqual(await cmds[n]({}), toError("unavailable", "not implemented yet"), n);
 });
 
 test("the read-only commands answer from the state as it is, and read another channel without switching to it", async () => {
@@ -325,6 +348,45 @@ test("what a tool needs: a flag set to false asks for nothing, any other false s
   for (const [tool, args] of [["show_layer", { visible: false }], ["show_layer", { locked: false }], ["show_layer", { included: false }], ["set_layer_color", { plate: false }], ["set_layer_color", { tint: false }]])
     assert.equal(checkCall(TOOL_BY[tool], { layer: "x", ...args }), null, `${tool} ${JSON.stringify(args)}: false says something`);
 });
+
+test("a change is checked whole before anything is touched: refused, the window stays where it was and nothing is changed", async () => {
+  const { makeCommands } = await import("../ui/js/commands.js");
+  const { api, S, text, sticker, calls } = await fakeApi(), cmds = makeCommands(api), was = JSON.stringify(S);
+  const refusals = [
+    ["set_look", { look: "cyber", params: { nope: 1 } }, /Cyberpunk \(cyber\) has no setting "nope"; its settings are: split, tear/],
+    ["set_look", { params: JSON.parse('{"__proto__": 1}') }, /"params.__proto__" is no look's setting/],
+    ["set_look", { look: "cyber", params: { split: "x" } }, /"params.split" \(.*\) takes a number/],
+    ["set_channel", { channel: "nope", name: "x" }, /No channel "nope"/],
+    ["set_text", { title: "x", profile: "nobody" }, /No profile "nobody"/],
+  ];
+  for (const [tool, args, said] of refusals) await assert.rejects(cmds[tool](args), (e) => e instanceof ToolError && e.code === "invalid_arguments" && said.test(e.message), `${tool} ${JSON.stringify(args)}`);
+  assert.deepEqual(calls, [], "nothing that changes anything was called: no switch, no edit, no touch");
+  assert.equal(JSON.stringify(S), was, "the state as it was");
+});
+
+test("a change does what the editor does, where it is aimed: the window switched there first, one touch, the answer as the schema says", async () => {
+  const { makeCommands } = await import("../ui/js/commands.js");
+  const { api, S, p, text, sticker, calls } = await fakeApi(), cmds = makeCommands(api), film = S.cover.catId, used = JSON.stringify(S.settings.lookUse);
+  const touched = () => calls.filter((c) => c[0] === "touch").map((c) => c[1]);
+  // the words, on another channel: the window goes there first, and says so
+  const words = (await cmds.set_text({ channel: 1, title: "New *one*", tag: "EP\n3" })).structuredContent;
+  assert.deepEqual(calls.slice(0, 2).map((c) => c[0]), ["switchChannel", "toast"]);
+  assert.equal(S.cover.catId, p.categories[0].id); assert.equal(S.cover.title, "New *one*");
+  assert.deepEqual(words, { title: "New *one*", subtitle: S.cover.subtitle, tag: "EP 3", warnings: ["The tag is one line: its line breaks became spaces."] });
+  assert.deepEqual(touched(), [{ cover: true, panel: true, side: true }]);
+  // the look: clamped and said, not counted among the most used
+  const look = (await cmds.set_look({ look: "cyber", params: { split: 9, tearClear: 0.4 }, seed: 12, theme: "light" })).structuredContent;
+  assert.equal(S.profile.style.look, "cyber"); assert.equal(look.params.split, 2); assert.equal(look.params.tearClear, 1); assert.equal(look.seed, 12); assert.equal(S.profile.style.theme, "light");
+  assert.deepEqual(look.warnings, ['"split" goes from 0 to 2: 2, not 9.', '"tearClear" is a switch: 1 (1 on, 0 off).', "Cyberpunk has one ground of its own: the theme shows in the profile's other looks."]);
+  assert.equal(JSON.stringify(S.settings.lookUse), used);
+  assert.equal((await cmds.set_look({ resetParams: true })).structuredContent.params.split, lookOf("cyber").split, "back to its own");
+  // a channel: the window shows it, its colour as the profile keeps colours
+  assert.deepEqual((await cmds.set_channel({ channel: "Film Stories", name: "Films", color: "#AABBCC" })).structuredContent, { id: film, name: "Films", sub: p.categories[1].sub, code: p.categories[1].code, color: "#aabbcc" });
+  assert.equal(S.cover.catId, film);
+  assert.ok(!calls.some((c) => c[0] === "switchProfile"), "never another profile");
+});
+/** Look `id`'s own settings. */
+const lookOf = (id) => Object.fromEntries(LOOKS[id].params.map((d) => [d.key, d.def]));
 
 test("the queue runs one call at a time, in order; a call cancelled while it waits never runs", async () => {
   const { makeQueue, CANCELLED } = await import("../ui/js/agent.js");

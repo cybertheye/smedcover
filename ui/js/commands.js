@@ -3,13 +3,16 @@
 // result (toResult) or a failure (toError, or a ToolError thrown). `args` have been checked against the tool's schema
 // (checkCall) before; `ctx` is {progress(n, total, message), cancelled()}. A command that changes something runs inside
 // one step of undo when its tool says so (agentStep in app.js, see agent.js); a read-only one never switches the
-// window: it reads another channel's or profile's cover as it is kept (coverOf) and draws it with that profile.
+// window: it reads another channel's or profile's cover as it is kept (coverOf) and draws it with that profile. One that
+// changes the cover goes where it is aimed first (aim: the window switched there, the layer named found and checked,
+// before anything is touched), then does what the editor does for the same change: the same fields, the same touch().
 // No DOM at the top: Node imports this file (the tests); a canvas is made only when a preview is drawn.
-import { TOOLS, toResult, toError, ToolError, findProfile, findChannel, findSize, keyOf, letterKeysOf, boxesOf, sheetPlan, widthFor } from "./tools.js";
-import { LOOKS, LOOK_IDS, LOOK_TAGS } from "./style.js";
+import { TOOLS, toResult, toError, ToolError, findProfile, findChannel, findSize, keyOf, letterKeysOf, boxesOf, sheetPlan, widthFor, idsSaid } from "./tools.js";
+import { LOOKS, LOOK_IDS, LOOK_TAGS, lookParams } from "./style.js";
 import { EFFECTS, BENDS } from "./textfx.js";
 import { BEND_IDS, HEADLINES, LETTERED, isLayout, isRemovable } from "./layers.js";
 import { STICKERS, GRAPHICS, userAssets, canTint } from "./assets.js";
+import { t } from "./i18n.js";
 import { PLATFORMS } from "./platforms.js";
 import { SIZE_PRESETS } from "./presets.js";
 import { SURPRISE_LOCKS, sizeCaption, ratioText } from "./store.js";
@@ -23,10 +26,16 @@ const LOCKS = { look: "the look and its settings", theme: "the dark or light gro
 const OPTIONS = ["looks", "effects", "bends", "fonts", "platforms", "sizes", "locks"];
 const copy = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 const has = (s, q) => !q || String(s || "").toLowerCase().includes(String(q).trim().toLowerCase());
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+/** A call the cover cannot take as it is (a layer of the wrong kind, a font not there…): what is wrong, for the agent. */
+const refused = (message) => new ToolError("invalid_arguments", message);
+/** A colour as the layers keep it: "#rrggbb" in small letters. */
+const hex = (v) => v.toLowerCase();
 
 export function makeCommands(api) {
   const { S } = api;
-  const notYet = () => toError("unavailable", "not implemented yet");
+  const notYet = Object.assign(() => toError("unavailable", "not implemented yet"), { pending: true });   // a tool still to be done (the tests list them)
   /**
    * The profile, channel and cover a call names (args.profile, args.channel), else those the window shows; for another
    * profile, the channel it was last on. {p, index, catId}.
@@ -80,6 +89,41 @@ export function makeCommands(api) {
     return toResult({ structured: where(moved), text: moved ? undefined : `Nothing to ${dir < 0 ? "undo" : "redo"}.` });
   };
   const newCanvas = (w, h) => Object.assign(document.createElement("canvas"), { width: w, height: h });
+
+  // ---------- changing: where a change goes, and what it answers
+  /** Layer `id` of cover c; a ToolError naming some of those it has when it has none. */
+  const layerOf = (c, id) => c.layers.find((l) => l.id === id) || (() => { throw refused(`No layer "${id}" on this cover; its layers are: ${idsSaid(c.layers.map((l) => l.id))} (get_cover lists them).`); })();
+  /**
+   * The mutation target: where a tool that changes something acts, the window brought there first. Resolves the
+   * profile, channel and size `args` names (args.profile, args.channel, args.size; those shown when left out, another
+   * profile on the channel it was last on) and, with `layer` (an id: args.layer unless told; null for none), that layer
+   * of the channel's cover, read as it is kept (coverOf) and checked before anything is touched: one of `types` (else
+   * refused as not `what`), not locked with `unlocked`, and whatever check(L, c) says (L that layer or null, c that
+   * cover: a sentence refuses, null lets it be; it may check other ids of args against c). Only then is the window
+   * switched as the user switches it — switchProfile, switchChannel (each a new history, as the user's own switch:
+   * agentStep makes the change the first step of it), selectSize (no step) — a toast saying where it went. Resolves
+   * with {p, index, catId, z, f, L, switched}: the profile, the channel's index and id, the size on the canvas, frame()
+   * (its virtual canvas and the sizes facing its way), the layer on the cover now shown, whether the window switched.
+   * Throws a ToolError (invalid_arguments) for a profile, channel, size or layer that is not there or is refused, with
+   * the window as it was. The tools that change the cover all start here; those to come (photos, the cut-out, the
+   * weave, Surprise me, a project, a batch, an export) too.
+   */
+  async function aim(args, { layer = args.layer, types = null, what = "", unlocked = false, check = null } = {}) {
+    const { p, index, catId } = target(args), z = args.size !== undefined ? findSize(p.sizes, args.size) : null;
+    const c = layer != null || check ? await api.coverOf(p, catId) : null, L0 = layer != null ? layerOf(c, layer) : null;
+    if (L0 && types && !types.includes(L0.type)) throw refused(`"${L0.id}" is a layer of type ${L0.type}, not ${what}.`);
+    if (L0 && unlocked && L0.locked) throw refused(`"${L0.id}" is locked in place: unlock it first (show_layer with locked: false).`);
+    const no = check && check(L0, c);
+    if (no) throw refused(no);
+    const switched = p !== S.profile || S.cover.catId !== catId;
+    if (p !== S.profile) await api.switchProfile(p.id);
+    if (S.cover.catId !== catId) await api.switchChannel(catId);
+    if (switched) { const k = api.cat(); api.toast(t("agent.switched", S.profile.name, k.name || k.code || "—")); }
+    if (z && keyOf(z) !== S.sel) api.selectSize(keyOf(z));
+    const L = L0 && api.layer(L0.id);
+    if (L0 && !L) throw new ToolError("failed", `"${L0.id}" was not on the cover once the window had switched to it.`);
+    return { p: S.profile, index: api.catIndex(), catId, z: api.selSize(), f: api.frame(), L, switched };
+  }
 
   const commands = {
     get_context: async () => {
@@ -173,6 +217,53 @@ export function makeCommands(api) {
     },
     undo: travel(-1),
     redo: travel(1),
+
+    // ---- the words, the look, a channel
+    set_text: async (args) => {
+      await aim(args);
+      const c = S.cover, warnings = [];
+      for (const k of ["title", "subtitle", "tag"]) {
+        if (args[k] === undefined) continue;
+        let v = args[k].replace(/\r\n?/g, "\n");
+        if (k === "tag" && v.includes("\n")) { v = v.replace(/\s*\n\s*/g, " "); warnings.push("The tag is one line: its line breaks became spaces."); }
+        c[k] = v;   // as Cover → Title, Subtitle and Tag
+      }
+      api.touch({ cover: true, panel: true, side: true });   // the sheet and the layer's properties show them
+      return toResult({ structured: { title: c.title, subtitle: c.subtitle, tag: c.tag, ...(warnings.length ? { warnings } : {}) } });
+    },
+    set_look: async (args) => {
+      const { p } = target(args), id = args.look ?? p.style.look, lk = LOOKS[id], defs = new Map(lk.params.map((d) => [d.key, d]));
+      for (const [k, v] of Object.entries(args.params || {})) {   // against the look it is to have, before anything is touched; only its own keys are ever copied
+        if (["__proto__", "constructor", "prototype"].includes(k)) throw refused(`"params.${k}" is no look's setting.`);
+        const d = defs.get(k);
+        if (!d) throw refused(`${lk.name.en} (${id}) has no setting "${k}"; its settings are: ${[...defs.keys()].join(", ") || "none"}.`);
+        if (d.text ? typeof v !== "string" : typeof v !== "number") throw refused(`"params.${k}" (${d.name.en}) takes ${d.text ? "text" : "a number"}, not ${JSON.stringify(v)}.`);
+      }
+      await aim(args);   // the profile: its look is every channel's
+      const st = S.profile.style, warnings = [];
+      if (st.look !== id) st.look = id;   // as a look's card clicked (pickLook), not counted among the most used (countLook)
+      if (args.resetParams && ((st.lookArt && st.lookArt[id]) || !same(lookParams(id, st.lookParams[id]), lookParams(id, {})))) { delete st.lookParams[id]; if (st.lookArt) delete st.lookArt[id]; }   // as Restore under its settings
+      if (args.params) {
+        const vals = lookParams(id, st.lookParams[id]), next = { ...vals };
+        for (const [k, v] of Object.entries(args.params)) {
+          const d = defs.get(k), w = d.text ? lookParams(id, { [k]: v })[k] : d.toggle ? (v > 0 ? 1 : 0) : clamp(v, d.min, d.max);
+          if (w !== v) warnings.push(d.text ? `"${k}" keeps ${d.max} characters at most, without the spaces round them: "${w}".` : d.toggle ? `"${k}" is a switch: ${w} (1 on, 0 off).` : `"${k}" goes from ${d.min} to ${d.max}: ${w}, not ${v}.`);
+          next[k] = w;
+        }
+        if (!same(next, vals)) st.lookParams[id] = { ...vals, ...st.lookParams[id], ...next };   // as its settings tuned
+      }
+      if (args.theme !== undefined) { st.theme = args.theme; if (lk.oneTheme) warnings.push(`${lk.name.en} has one ground of its own: the theme shows in the profile's other looks.`); }   // as Dark and Light under the ground
+      if (args.seed !== undefined) { st.lookSeed = args.seed; if (!lk.seeded) warnings.push(`${lk.name.en} scatters nothing at random: the seed shows in the looks that do.`); }   // as Shuffle
+      api.touch({ profile: true, panel: true, side: true });
+      return toResult({ structured: { look: id, theme: st.theme, seed: st.lookSeed, params: lookParams(id, st.lookParams[id]), ...(warnings.length ? { warnings } : {}) } });
+    },
+    set_channel: async (args) => {
+      const { p, index } = await aim(args), c = p.categories[index];   // the window shows the channel worked on, as its card in Settings does
+      for (const k of ["name", "sub", "code"]) if (args[k] !== undefined) c[k] = args[k];
+      if (args.color !== undefined) c.color = hex(args.color);
+      api.touch({ profile: true, panel: true, side: true });   // the window's accent follows the channel colour (renderPanel)
+      return toResult({ structured: { id: c.id, name: c.name, sub: c.sub, code: c.code, color: c.color } });
+    },
   };
   for (const d of TOOLS) if (!commands[d.name]) commands[d.name] = notYet;
   return commands;

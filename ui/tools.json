@@ -659,7 +659,7 @@
     {
       "name": "set_text",
       "title": "Set the words",
-      "description": "Sets the cover's title, subtitle and/or tag (at least one). Mark highlighted words with *asterisks* (\"Make *this* stand out\") and break lines with \\n, as the editor does; \"\" empties one. One undo step. Returns the three as they now are.",
+      "description": "Sets the cover's title, subtitle and/or tag (at least one). Mark highlighted words with *asterisks* (\"Make *this* stand out\") and break lines with \\n, as the editor does (the tag is one line); \"\" empties one. One undo step. Returns the three as they now are.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -703,6 +703,12 @@
           },
           "tag": {
             "type": "string"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

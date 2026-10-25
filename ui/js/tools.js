@@ -136,9 +136,9 @@ export const TOOLS = [
 
   // ---- changing (each one step of undo)
   TOOL("set_text", "Set the words",
-    "Sets the cover's title, subtitle and/or tag (at least one). Mark highlighted words with *asterisks* (\"Make *this* stand out\") and break lines with \\n, as the editor does; \"\" empties one. One undo step. Returns the three as they now are.",
+    "Sets the cover's title, subtitle and/or tag (at least one). Mark highlighted words with *asterisks* (\"Make *this* stand out\") and break lines with \\n, as the editor does (the tag is one line); \"\" empties one. One undo step. Returns the three as they now are.",
     input({ profile: PROFILE, channel: CHANNEL, title: str("The title.", { maxLength: 2000 }), subtitle: str("The subtitle.", { maxLength: 2000 }), tag: str("The tag, the small label in a corner (\"EP.01\").", { maxLength: 200 }) }),
-    { needs: { any: ["title", "subtitle", "tag"] }, outputSchema: out({ title: { type: "string" }, subtitle: { type: "string" }, tag: { type: "string" } }) }),
+    { needs: { any: ["title", "subtitle", "tag"] }, outputSchema: out({ title: { type: "string" }, subtitle: { type: "string" }, tag: { type: "string" }, warnings: WARNINGS }) }),
   TOOL("set_look", "Set the look",
     "Sets the profile's look, which every channel of it shares, and/or its settings: params (the look's own settings by key, as list_options lists them; a value out of range is clamped and said in warnings, an unknown key refused), theme (a dark or light ground, for looks with two), seed (where the look scatters things), resetParams (its settings back to their defaults). Not counted among the user's most used looks. One undo step. Returns the look, theme, seed and settings as they now are.",
     input({ profile: PROFILE, look: pick(LOOK_IDS, "The look's id."), params: { type: "object", description: "The look's settings to change, by key: a number, or text for a text setting.", additionalProperties: { type: ["number", "string"] } },
@@ -395,6 +395,10 @@ export function findSize(sizes, want) {
   if (hits.length) throw new ToolError("invalid_arguments", `"${w}" is several of the profile's sizes (${hits.map(keyOf).join(", ")}); name one by its pixels.`);
   throw new ToolError("invalid_arguments", `The profile has no size "${w}"; its sizes are: ${all()}.`);
 }
+/**
+ * Ids said for a message: the first `most` of them, then how many more ("bg, title, … and 9 more").
+ */
+export const idsSaid = (ids, most = 12) => (ids.length > most ? `${ids.slice(0, most).join(", ")} … and ${ids.length - most} more` : ids.join(", "));
 /** The keys of the letters of `words` (a title's, a text layer's), as the weave and the ransom note name them (see weaveLetters in app.js): spaces left out. */
 export const letterKeysOf = (words) => parseTitle(String(words || "")).flatMap((runs, row) => { const cells = lineCells(runs); return keysOf(cells, row).filter((k, i) => !/^\s+$/.test(cells[i].ch)); });
 /** The width to draw size `z` at for its longer side to be `side` pixels (drawCover rounds the height from it). */
