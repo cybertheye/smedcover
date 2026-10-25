@@ -4724,3 +4724,41 @@ test("a look card's picture is kept from one launch to the next with what it was
   // the files no look has: a look retired, a write cut short (the store writes beside the file, then renames)
   assert.deepEqual(strayLookPics(["cel.json", "glass.json", "ghibli.json", "glass.tmp", ".DS_Store", "cel.json.bak"], ["cel", "glass", "cyber"]), ["ghibli.json", "glass.tmp", ".DS_Store", "cel.json.bak"]);
 });
+
+test("glyph outlines are kept from one launch to the next: those used last, at most so much, let go when traced from something else", async () => {
+  const O = await import("../ui/js/outlines.js?keep");   // a cache of its own
+  const A = [{ adv: 0.5, c: [[0, 0, 0.5, 0, 0.5, -0.7]] }], B = [{ adv: 0.3, c: [] }, { adv: 0.6, c: [[0, 0, 0.1, 0, 0.1, -0.2], [0.2, 0, 0.3, 0, 0.3, -0.1]] }];
+  assert.equal(O.keepOutlines("s1"), null, "nothing come: nothing to write");
+  O.primeOutline('900 120px "Bebas Neue", "Noto Sans SC", sans-serif', "Hi", A);
+  O.primeOutline('700 40px "My Font"', "夜", B);
+  O.primeOutline('400 12px "Nowhere"', "x", false);   // not to be had: kept too, not asked for again
+  const text = O.keepOutlines("s1"), file = JSON.parse(text);
+  assert.equal(file.v, O.OUTLINE_KEEP.v); assert.equal(file.sig, "s1");
+  assert.deepEqual(file.at.map(([k]) => k), ['900 px "Bebas Neue", "Noto Sans SC", sans-serif\nHi', '700 px "My Font"\n夜', '400 px "Nowhere"\nx'], "by font and text, whatever the size; the one used longest ago first");
+  assert.equal(O.keepOutlines("s1"), null, "written: nothing new since");
+  // read back into another cache: older than what is there already, which wins
+  const P = await import("../ui/js/outlines.js?read");
+  P.primeOutline('700 40px "My Font"', "夜", A);
+  assert.equal(P.keptOutlines(text, "s1"), 2, "the two it had not");
+  const back = JSON.parse(P.keepOutlines("s1"));
+  assert.deepEqual(back.at.map(([k]) => k), ['900 px "Bebas Neue", "Noto Sans SC", sans-serif\nHi', '400 px "Nowhere"\nx', '700 px "My Font"\n夜']);
+  assert.deepEqual(back.at[2][1], A, "its own, not the one kept");
+  assert.deepEqual(back.at[0][1], A); assert.equal(back.at[1][1], false);
+  // kept otherwise: traced from other fonts, another version of the file, cut short, not as written
+  const Q = await import("../ui/js/outlines.js?other");
+  for (const [bad, sig] of [[text, "s2"], [text.replace(`"v":${O.OUTLINE_KEEP.v}`, '"v":0'), "s1"], [text.slice(0, -9), "s1"], ["", "s1"], [null, "s1"], ["[]", "s1"]]) assert.equal(Q.keptOutlines(bad, sig), 0, String(bad).slice(0, 30) + " " + sig);
+  assert.ok(Q.keepOutlines("s2"), "another's let go: written over");
+  const odd = JSON.stringify({ v: O.OUTLINE_KEEP.v, sig: "s1", at: [["k\nok", A], ["k\nnot", [{ adv: "wide", c: [] }]], ["k\nflat", [{ adv: 1, c: [1, 2] }]], [3, A], "x", ["k\nno", false]] });
+  assert.equal(Q.keptOutlines(odd, "s1"), 2, "only the outlines as the native side gives them");
+  // a font imported again: what was traced with it goes (the families of the key, not the text)
+  O.forgetOutlines("Noto Sans SC");
+  assert.deepEqual(JSON.parse(O.keepOutlines("s1")).at.map(([k]) => k), ['700 px "My Font"\n夜', '400 px "Nowhere"\nx']);
+  O.forgetOutlines("Hi"); O.forgetOutlines("x");
+  assert.equal(O.keepOutlines("s1"), null, "nothing of those: nothing let go");
+  // at most OUTLINE_KEEP.max: those used longest ago go
+  const R = await import("../ui/js/outlines.js?max"), big = (n) => [{ adv: 1, c: [new Array(Math.floor(R.OUTLINE_KEEP.max / 4 / 7)).fill(n)] }];
+  for (let i = 0; i < 6; i++) R.primeOutline('400 10px "F"', "t" + i, big(i / 10));   // each a quarter of it, a little more
+  const all = R.keepOutlines("s"), at = JSON.parse(all).at.map(([k]) => k.split("\n")[1]);
+  assert.ok(all.length < R.OUTLINE_KEEP.max, `${all.length} characters`);
+  assert.deepEqual(at, ["t3", "t4", "t5"], "the three used last");
+});

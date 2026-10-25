@@ -288,7 +288,8 @@ are, so a preset deleted takes its chance with it.
 
 Other files: `assets/<id>.json` (My assets: images as data URLs, AI assets as specs; either may carry `folder`, the id of its folder), `asset-folders.json` (the folders of My assets, `[{id, name}]`, checked by `normalizeFolders`; an asset whose folder is gone counts as unfiled), `fonts/<name>.font` (imported
 fonts), `photos/<pid>` (pictures, originals and masks; see 6.3), `photo-library.json` (the photo shelf, the bitmap library: `[{pid, name, kind, at}]`, `kind` being `upload`, `ai` or `repaint`, newest first, checked by `normalizeLibrary`), `ai.json` (AI connection settings including the token; never exported with
-profiles or projects).
+profiles or projects), `lookcards/<look>.json` (the Look sheet's card pictures, kept from one launch to the next: `{sig,
+src}`, see 9.5) and `outlines.json` (the glyph outlines, kept likewise: see 6.2).
 
 A **profile file** (`.smedprofile.json`, version 3): `{app, kind: "profile", version, profile, assets, fonts}`; a whole backup adds `covers` (`{channel id: cover}`), `photos` (`{pid: {src, original, mask}}`) and `channel` (the one it was on). `exportProfile()` writes it, `profileActions.import()` reads it: always a new profile (a new id, the same channel ids), its covers checked by `channelCover()` and written under `covers/<new id>/`, the pictures into the photo store and the library.
 
@@ -802,6 +803,21 @@ taken from the next.
 once from a cache; the first time it returns nothing, sends for the outline, and the effect falls
 back to ordinary lettering. When the outline arrives the interface is told to redraw. For an export,
 `renderReady()` waits for every request and draws again, so the exported image has the effect.
+
+**Kept from one launch to the next** — an outline depends only on the font and the text, so what arrived is kept in
+the data folder (`outlines.json`: `keepOutlines()` gives its text, `{v, sig, at: [[key, glyphs], …]}`, the one used
+longest ago first; `keepOutlineFile()` in `app.js` writes it 4 s after the last to arrive). `start()` reads it beside
+the other files and puts it in the cache (`keptOutlines()`) before anything is drawn, so the canvas, the look cards and
+the 3D view draw with the outlines at once instead of sending for them all again and being drawn again as each comes.
+The cache, in memory and on disk, keeps those used last, `OUTLINE_KEEP.max` (8 MB of JSON) at most: a busy cover in
+all its looks took some 0.6 MB, and reading 8 MB adds about 40 ms to the start (the file is read while the system's
+fonts are listed, and parsed once they are). Only in the desktop app: a server's page cannot tell one version of the
+server from the next, and a plain browser has no outlines. An outline whose request failed (a server away for a
+moment) is false in memory but not kept, and one that comes for a font let go since (`era`) is dropped. `sig` (`outlineSig()`) is the app's version, the list of fonts installed and the fonts imported with the length of
+their files: any of them otherwise lets them all go, as an outline not to be had may be now, or another file be found
+for a family; a font imported in the session lets go of its own at once (`forgetOutlines()`, and `app_write` in
+`lib.rs` of the file found for it). `OUTLINE_KEEP.v` is
+raised when the Rust side traces otherwise.
 
 **Bends** are apart from the lettering: a headline's `bend` (one of `BENDS`; `bendAmt`, how far) goes
 with any `fx`, the look's own lettering included. `drawTitle` (and the free text's painter) hands each line

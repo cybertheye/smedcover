@@ -128,7 +128,11 @@ fn app_read(app: AppHandle, path: String) -> Res<Option<String>> {
 
 #[tauri::command]
 fn app_write(app: AppHandle, path: String, data: String) -> Res<()> {
-    store_write(&data_root(&app)?, &path, &data)
+    store_write(&data_root(&app)?, &path, &data)?;
+    if let Some(family) = path.strip_prefix("fonts/").and_then(|p| p.strip_suffix(".font")) {
+        forget_font(family); // imported (again): its outlines are traced from this file from now on
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -556,6 +560,15 @@ fn imported_font(app: &AppHandle, family: &str) -> Option<Vec<u8>> {
     base64::engine::general_purpose::STANDARD
         .decode(b64.trim())
         .ok()
+}
+
+/// Lets go of the file found for a family (see font_file), to be looked for again: a font imported under its name.
+fn forget_font(family: &str) {
+    if let Some(files) = FONT_FILES.get() {
+        if let Ok(mut files) = files.lock() {
+            files.remove(&family.trim().to_lowercase());
+        }
+    }
 }
 
 /// The fonts installed on the system (scanned the first time they are needed).

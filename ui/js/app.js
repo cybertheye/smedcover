@@ -13,7 +13,7 @@ import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
 import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, paintedWith, refitSizes, acrossSizes, cutFrom } from "./layers.js";
 import {
-  carryFonts, HOST, CAN, invoke, files, appBuild, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
+  carryFonts, HOST, CAN, invoke, files, appVersion, appBuild, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, CUSTOM_BY, normalizeSize, exportName, sizeCaption, ratioText,
   normalizeRecipes, SURPRISE_LOCKS, normalizeLayouts, LAYOUTS,
 } from "./store.js";
@@ -21,8 +21,8 @@ import { DEFAULTS, layOver } from "./defaults.js";
 
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, BENDS, effectUses, warpCorners, convexWarp, NO_COLUMNS } from "./textfx.js";
-import { onOutlines, outlinesPending, outlinesSettled, outlinesMissed } from "./outlines.js";
-import { LOOKPIC, lookPicSig, readLookPic, writeLookPic, strayLookPics } from "./lookpics.js";
+import { onOutlines, outlinesPending, outlinesSettled, outlinesMissed, OUTLINE_KEEP, keepOutlines, keptOutlines, forgetOutlines } from "./outlines.js";
+import { LOOKPIC, hashText, lookPicSig, readLookPic, writeLookPic, strayLookPics } from "./lookpics.js";
 import { RANSOM_FACES, useRansomFaces, ransomPending, ransomArrived, ransomPools, ransomLetters, ransomShown, papersFor, faceFont, faceHas, inksFor, cased, isCJK, EXTRAS, lineCells, keysOf } from "./ransom.js";
 import { parseTitle } from "./title.js";
 import { LOOKS, LOOK_IDS, LOOK_TAGS, LOOK_CATEGORIES, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
@@ -4592,6 +4592,7 @@ async function importFont() {
   const src = await readAs(f, "readAsDataURL");
   if (!(await registerFont(family, src))) { toast(t("msg.badFile")); return null; }
   await files.write(`fonts/${family}.font`, src).catch(fail);
+  forgetOutlines(family); later("outlines", 4000, keepOutlineFile);   // traced from another file, or a system font of that name, before
   toast(t("msg.fontAdded", family));
   return family;
 }
@@ -7166,7 +7167,7 @@ async function adoptFonts(list) {
     if (!f || typeof f.name !== "string" || typeof f.src !== "string" || !/^data:[\w/+.-]*;base64,/.test(f.src)) continue;
     const name = f.name.replace(/[^\w\u4e00-\u9fff -]+/g, " ").trim().slice(0, 80);
     if (!name || S.importedFonts.includes(name)) continue;
-    if (await registerFont(name, f.src)) await files.write(`fonts/${name}.font`, f.src).catch(fail);
+    if (await registerFont(name, f.src)) { await files.write(`fonts/${name}.font`, f.src).catch(fail); forgetOutlines(name); later("outlines", 4000, keepOutlineFile); }   // a system font of that name traced before
   }
 }
 /** Puts the pictures a file brought into the photo store (keeping their ids) and the bitmap library. */
@@ -8026,7 +8027,30 @@ addEventListener("keydown", (e) => {
 });
 
 // ---------- start
-onOutlines(() => { queueDraw(true, [...V3.sheets].filter(([, sh]) => sh.waits).map(([id]) => id)); later("lookcards", 300, refreshLookCards); });   // an outline that was sent for has arrived: draw again, this time with it (of the 3D view's sheets, those painted without one)
+onOutlines(() => { queueDraw(true, [...V3.sheets].filter(([, sh]) => sh.waits).map(([id]) => id)); later("lookcards", 300, refreshLookCards); later("outlines", 4000, keepOutlineFile); });   // an outline that was sent for has arrived: draw again, this time with it (of the 3D view's sheets, those painted without one), and keep it
+/**
+ * The glyph outlines kept from one launch to the next (see keepOutlines in outlines.js): `sig`, what they are traced
+ * from (outlineSig), known once the start has the fonts installed (null till then: nothing is written); `taken`, how
+ * many the start found kept, and `chars`, how long the file was (for the self-test).
+ */
+const OUTLINES = { sig: null, taken: 0, chars: 0, fonts: [] };
+/**
+ * What the outlines are traced from, which those kept must have been traced from too: the app's version (its fonts and
+ * the way it traces; a debug build of the same version is taken for it), the fonts installed, whose list changes as
+ * one is added or removed, and the fonts imported, by name and the length of their files (OUTLINES.fonts, read at the
+ * start). Any of them otherwise and they are all let go: an outline that could not be had may be now, or another file
+ * be found for a family. A font imported in the session lets go of its own at once (forgetOutlines).
+ */
+const outlineSig = (version) => hashText(JSON.stringify([version, S.systemFonts, OUTLINES.fonts]));
+/**
+ * Writes the outlines that came since to the data folder (OUTLINE_KEEP.file), for the next launch. Only in the desktop
+ * app: a server's page cannot tell one version of the server from the next (appVersion), and a plain browser has none.
+ */
+function keepOutlineFile() {
+  if (OUTLINES.sig === null || HOST !== "tauri") return Promise.resolve();
+  const text = keepOutlines(OUTLINES.sig);
+  return text ? files.write(OUTLINE_KEEP.file, text).catch((e) => console.error(e)) : Promise.resolve();
+}
 /**
  * What a failed read of something that, taken for not there, would be written over or cleared away stands for. A
  * file that is not there is no failure (it reads as null, a folder as []); where the data is on this computer (the
@@ -8054,6 +8078,7 @@ async function readCustom() {
   return { raw, tell: left.length ? () => toast(counted("msg.customLeft", left.length, left.slice(0, 4).join(", ") + (left.length > 4 ? "…" : ""))) : null };
 }
 async function start() {
+  const outlinesRead = CAN.outlines && HOST === "tauri" ? files.read(OUTLINE_KEEP.file).catch(() => null) : null;   // the outlines kept from the last launch, read meanwhile
   const custom = await readCustom();
   // the settings: custom.json's; until the app has written it, settings.json's too, where earlier versions kept them, read this once (custom.json is written below)
   S.settings = await readSettings(custom.raw, () => readJson("settings.json").catch(absent(null)));
@@ -8064,7 +8089,7 @@ async function start() {
   if (HOST === "tauri") ownTitleBar();
   setLang(S.settings.lang || detectLang());
   for (const name of await files.list("fonts").catch(() => [])) {   // nothing is written for a font missed
-    if (name.endsWith(".font")) { const src = await files.read("fonts/" + name).catch(() => null); if (src) await registerFont(name.slice(0, -5), src); }
+    if (name.endsWith(".font")) { const src = await files.read("fonts/" + name).catch(() => null); if (src) await registerFont(name.slice(0, -5), src); OUTLINES.fonts.push([name, src ? src.length : 0]); }   // what the outlines kept were traced from, in part
   }
   for (const a of await loadAssetRecords().catch(absent([]))) {
     let entry = null;
@@ -8085,6 +8110,11 @@ async function start() {
     const found = await invoke("list_system_fonts").catch(() => []);
     S.systemFonts = found.map((f) => f.name);
     for (const f of found) if (!f.cjk) S.latinFonts.add(f.name);
+  }
+  if (outlinesRead) {   // put in the cache before anything is drawn, so the start draws with them, not as they come
+    const text = await outlinesRead;
+    OUTLINES.sig = outlineSig(await appVersion()); OUTLINES.chars = text ? text.length : 0;
+    OUTLINES.taken = keptOutlines(text, OUTLINES.sig);
   }
   ransomFaces();
   S.profiles = await loadProfiles().catch(absent([]));

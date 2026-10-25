@@ -805,7 +805,7 @@ Tutorials,Another title,,
 
 ## Where your data lives
 
-Profiles, each channel's cover, assets, settings (`custom.json`, see below) and your own repaint styles (the `repaint-styles/` folder) are kept in the system's app data directory.
+Profiles, each channel's cover, assets, settings (`custom.json`, see below) and your own repaint styles (the `repaint-styles/` folder) are kept in the system's app data directory, with two things kept only to start faster: the Look sheet's card pictures (`lookcards/`) and the letter outlines the text effects use (`outlines.json`, 8 MB at most; both in the desktop app only). Either can be deleted at any time; it is made again.
 Exports are written only where you choose: each profile remembers the folder you chose for it (see *Save to* under [Export](#export)).
 
 | System | Location |
