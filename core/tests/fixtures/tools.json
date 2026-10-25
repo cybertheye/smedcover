@@ -1,0 +1,97 @@
+{
+  "format": 1,
+  "instructions": "SmedCover makes video cover images. A fixture for the Rust tests: call get_context first, then change the cover with set_text and look at it with render_preview.",
+  "tools": [
+    {
+      "name": "get_context",
+      "title": "Get context",
+      "description": "What is open: the profile, the cover, its layers and the selection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": { "type": "string" },
+          "layers": { "type": "integer" }
+        },
+        "required": ["profile", "layers"]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": ["desktop", "server"],
+        "timeoutMs": 30000
+      }
+    },
+    {
+      "name": "set_text",
+      "title": "Set text",
+      "description": "Changes the text of a text layer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "layer": { "type": "string", "description": "The layer's id." },
+          "text": { "type": "string" }
+        },
+        "required": ["layer", "text"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": ["desktop", "server"],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "render_preview",
+      "title": "Render preview",
+      "description": "The cover as it looks now, as a PNG.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "width": { "type": "integer", "minimum": 64, "maximum": 2048 }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": ["desktop", "server"],
+        "timeoutMs": 120000
+      }
+    },
+    {
+      "name": "export",
+      "title": "Export",
+      "description": "Exports the cover into the export folder, never over a file that is there.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": { "type": "string", "enum": ["png", "jpeg", "webp"] }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": ["desktop"],
+        "timeoutMs": 1800000
+      }
+    }
+  ]
+}
