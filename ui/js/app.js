@@ -11,7 +11,7 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, paintedWith, refitSizes, acrossSizes, cutFrom } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, paintedWith, refitSizes, acrossSizes, cutFrom, STICKER_SCALE } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, appVersion, appBuild, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, CUSTOM_BY, normalizeSize, exportName, sizeCaption, ratioText,
@@ -661,7 +661,7 @@ function addLayer(L, above = S.layerId === "bg" ? "bg" : S.layerId) {
 function addAsset(ref, at, above) {
   const L = newLayer("asset", { ref, tint: canTint(ref) });   // a vector asset follows the channel colour from the start, as its tile shows
   if (at) { L.t.all.x = at.x; L.t.all.y = at.y; }
-  if (ref.kind === "sticker") L.t.all.s = 0.3;
+  if (ref.kind === "sticker") L.t.all.s = STICKER_SCALE;
   if (above === undefined) addLayer(L); else addLayer(L, above);
   toast(t("assets.added", assetName(ref, getLang())));
   return L;
@@ -5175,7 +5175,7 @@ function writeSum(g) {
 function openSecs(box) {
   [...box.querySelectorAll(".psec")].forEach((g, i) => showSec(g, SECS.has(g.dataset.key) ? SECS.get(g.dataset.key) : i === 0));
 }
-/** Put a layer back where it was placed by default. */
+/** Puts a layer back where it was put on, at the sizes the scope reaches (resetPlacement: a photo filling the canvas fills it still, a sticker at the scale it is put on at), as place_layer's reset does. */
 function placementControls(L) {
   const f = frame();
   return el("button", { class: "btn wide", onclick: () => { resetPlacement(L, S.settings.scope, f.key, f.catId, f.group.map((g) => g.key)); touch({ cover: true, side: true }); } },

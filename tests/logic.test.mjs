@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { blockLayout, virtualSize, layout, TEMPLATES } from "../ui/js/layout.js";
 import { parseCsv, csvToJobs } from "../ui/js/csv.js";
 import { useFont, normalizeProfile, normalizeCover, normalizeSettings, exportName, channelIndex, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
-import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex, clipBase, clipEnd, normalizeScene, sceneOffsets, moveScene, resetScene, reorderLayout, orderLayout, layoutOrder } from "../ui/js/layers.js";
+import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, STICKER_SCALE, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex, clipBase, clipEnd, normalizeScene, sceneOffsets, moveScene, resetScene, reorderLayout, orderLayout, layoutOrder } from "../ui/js/layers.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "../ui/js/presets.js";
 import { platformsFor, RATIOS } from "../ui/js/platforms.js";
 
@@ -259,8 +259,8 @@ test("layer placement: one edit maps to every size, per-size edits stay local", 
   assert.ok(Math.abs(resolve(a, 1920, 1080, land.key).cx - 1152) < 1e-6);
   resetPlacement(a, "size", port.key);
   assert.ok(Math.abs(resolve(a, 1080, 1920, port.key).cx - 648) < 1e-6);
-  resetPlacement(a, "all");
-  { const d = resolve(a, 1920, 1080, land.key); assert.ok(d.cx === 960 && Math.abs(d.cy - 453.6) < 1e-6 && d.s === 0.35 && d.r === 0, JSON.stringify(d)); }
+  resetPlacement(a, "all");   // a sticker back at the scale it is put on at (addAsset), not newLayer's
+  { const d = resolve(a, 1920, 1080, land.key); assert.ok(d.cx === 960 && Math.abs(d.cy - 453.6) < 1e-6 && d.s === STICKER_SCALE && d.r === 0, JSON.stringify(d)); }
   // bound layers: offsets from the template; the category graphic is fine-tuned per category
   const g = newLayer("graphic");
   assert.deepEqual(resolve(g, 1920, 1080, land.key, "c1"), { dx: 0, dy: 0, s: 1, r: 0, kx: 1, ky: 1 });
@@ -269,6 +269,38 @@ test("layer placement: one edit maps to every size, per-size edits stay local", 
   assert.equal(resolve(g, 1920, 1080, land.key, "c2").dx, 0);
   adjust(g, { ...land, catId: "c2" }, "all", { ddx: 192 });
   assert.ok(Math.abs(resolve(g, 1920, 1080, land.key, "c1").dx - 232) < 1e-6);
+});
+
+test("Reset puts a layer back where it was put on: a photo filling the canvas fills it still, a sticker at the scale it is put on at", () => {
+  const land = { vw: 1920, vh: 1080, key: "1920x1080" }, port = { key: "1080x1920" };
+  const moved = (L) => { adjust(L, land, "all", { ddx: 300, ddy: -100, scale: 0.5, rot: 20, kx: 1.4 }); adjust(L, land, "size", { ddx: 50, scale: 1.2 }); return L; };
+  const all = (L) => { resetPlacement(L, "all", land.key); return L.t; };
+  // a background photo: in the middle, covering the canvas (s 1), not a print's 0.6
+  const bgPhoto = moved(newLayer("photo", { pid: "p1", fill: true }));
+  assert.deepEqual(all(bgPhoto), { all: { x: 0.5, y: 0.5, s: 1, r: 0, kx: 1, ky: 1 }, by: {} });
+  assert.equal(bgPhoto.fill, true, "it still fills the canvas");
+  // a print, as it is put on (0.6); a cut-out is no photo filling the canvas, whatever its fill says (the editor hides its Reset)
+  assert.deepEqual(all(moved(newLayer("photo", { pid: "p1" }))).all, { x: 0.5, y: 0.5, s: 0.6, r: 0, kx: 1, ky: 1 });
+  assert.equal(all(moved(newLayer("photo", { of: "x", fill: true, cut: true }))).all.s, 0.6);
+  // a sticker at the scale addAsset puts one on at; a graphic, the user's own and text at newLayer's
+  assert.equal(STICKER_SCALE, 0.3);
+  assert.deepEqual(all(moved(newLayer("asset", { ref: { kind: "sticker", id: "star" } }))).all, { x: 0.5, y: 0.42, s: STICKER_SCALE, r: 0, kx: 1, ky: 1 });
+  for (const ref of [{ kind: "graphic", id: "g" }, { kind: "user", id: "u" }]) assert.equal(all(moved(newLayer("asset", { ref }))).all.s, 0.35, ref.kind);
+  assert.deepEqual(all(moved(newLayer("text", { text: "Hi" }))).all, { x: 0.5, y: 0.42, s: 0.35, r: 0, kx: 1, ky: 1 });
+  assert.equal(all(moved(newLayer("solid", { color: "#123456" }))).all.s, 1);
+  // a layout part where the layout puts it
+  assert.deepEqual(all(moved(newLayer("title"))), { all: { x: 0, y: 0, s: 1, r: 0, kx: 1, ky: 1 }, by: {} });
+  // at one size, or those facing its way: their tunings alone go, the scale for every size kept (a sticker's, a photo's)
+  const st = moved(newLayer("asset", { ref: { kind: "sticker", id: "star" } }));
+  st.t.by[port.key] = { dx: 9, dy: 0, s: 2, r: 0, kx: 1, ky: 1 };
+  const s0 = st.t.all.s;
+  resetPlacement(st, "size", land.key);
+  assert.deepEqual([Object.keys(st.t.by), st.t.all.s], [[port.key], s0]);
+  resetPlacement(st, "orient", land.key, null, [land.key, port.key]);
+  assert.deepEqual([Object.keys(st.t.by), st.t.all.s], [[], s0]);
+  const fp = moved(newLayer("photo", { pid: "p1", fill: true })), fs0 = fp.t.all.s;
+  resetPlacement(fp, "size", land.key);
+  assert.deepEqual([Object.keys(fp.t.by), fp.t.all.s], [[], fs0]);
 });
 
 test("stretch: sides change one axis, everywhere or for one size", () => {

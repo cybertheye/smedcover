@@ -444,7 +444,11 @@ choices:
   the middle choice after the group of the size shown (*All wide*, *All square*, *All tall*).
 
 `resetPlacement()`, `moveScene()` and `resetScene()` take the same three, the group's size keys passed in, and so
-does the layout (see 5.2).
+does the layout (see 5.2). In scope `all`, `resetPlacement()` puts a layer back where it was put on: a layout part
+where the layout puts it, a layer that was added in the middle at the scale it is put on at (`newLayer()`'s, a sticker
+`STICKER_SCALE`, 0.3, as `addAsset()` puts one on), a photo filling the canvas filling it still (`s` 1) — the editor's
+Reset under a layer's properties and an agent's `place_layer` reset alike (a linked cut-out, whose Reset the editor
+hides, goes back over its photo there: `alignedT()`).
 
 ### 4.2 Lettering colours and headline layers
 

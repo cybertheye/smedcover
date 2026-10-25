@@ -564,6 +564,13 @@ test("a change does what the editor does, where it is aimed: the window switched
   stuck.t.all = { ...stuck.t.all, x: 0.9, s: 2 };
   await cmds.place_layer({ layer: st.id, reset: true });
   assert.deepEqual([stuck.t.all.x, stuck.t.all.s], [0.5, 0.3], "put back in the middle, at the size a sticker is put on at");
+  { // a photo filling the canvas fills it still, as the editor's Reset leaves it (resetPlacement)
+    const { newLayer } = await import("../ui/js/layers.js"), ground = newLayer("photo", { pid: "pic1", fill: true });
+    S.cover.layers.splice(1, 0, ground); ground.t.all = { ...ground.t.all, x: 0.7, s: 1.6 };
+    await cmds.place_layer({ layer: ground.id, reset: true });
+    assert.deepEqual([ground.t.all.x, ground.t.all.y, ground.t.all.s, ground.fill], [0.5, 0.5, 1, true]);
+    S.cover.layers.splice(1, 1);
+  }
   const cp = (await cmds.add_layer({ kind: "copy", of: "subtitle" })).structuredContent.layer;
   assert.equal(cp.kind, "copy"); assert.ok(calls.some((c) => c[0] === "duplicateLayer" && c[1] === "subtitle"));
   // a copy of a layer tuned at the size on the canvas, put where it is asked: there too, its tunings of place left behind

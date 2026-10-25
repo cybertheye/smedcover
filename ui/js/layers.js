@@ -929,16 +929,21 @@ export function adjust(layer, { vw, vh, key, catId, group }, scope, patch) {
     if (patch.ky) b.ky = lim(b.ky * patch.ky, 0.05, 20);
   }
 }
+/** The scale a sticker is put on at (addAsset in app.js), and put back at (resetPlacement): a little smaller than other layers. */
+export const STICKER_SCALE = 0.3;
 /**
  * Clears placement edits: scope "size" drops this size's fine-tuning, "orient" that of each size of `keys` (the sizes
- * facing the way this one does), "all" restores the default.
+ * facing the way this one does), "all" puts it back where it was put on — a layout part where the layout puts it, a
+ * layer that was added in the middle at the scale it is put on at (a sticker at STICKER_SCALE), a photo filling the
+ * canvas filling it still. The editor's Reset and an agent's place_layer reset both come here.
  */
 export function resetPlacement(layer, scope, key, catId, keys = [key]) {
   if (scope === "size" || scope === "orient") {
     for (const k of scope === "orient" ? keys : [key]) { delete layer.t.by[k]; if (catId) delete layer.t.by[`${k}@${catId}`]; }
     return;
   }
-  layer.t = newLayer(layer.type).t;
+  layer.t = newLayer(layer.type, { fill: fillsCanvas(layer) }).t;
+  if (layer.type === "asset" && layer.ref && layer.ref.kind === "sticker") layer.t.all.s = STICKER_SCALE;
 }
 
 // ---------- layout presets: where a cover's parts stand, without its look (kept in the settings, see normalizeLayouts in store.js)

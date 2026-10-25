@@ -434,11 +434,7 @@ export function makeCommands(api) {
         if (L.of) {   // a cut-out back over its photo, as Realign does: at every size
           L.t = api.alignedT(api.owner(L));
           if (scope !== "all") warnings.push(`"${L.id}" is a linked cut-out: it went back over its photo at every size, whatever the scope.`);
-        } else {
-          resetPlacement(L, scope, f.key, f.catId, f.group.map((g) => g.key));   // as Reset under the layer's properties
-          if (scope === "all" && fillsCanvas(L)) L.t.all.s = 1;   // a photo filling the canvas fills it still
-          else if (scope === "all" && L.type === "asset" && L.ref.kind === "sticker") L.t.all.s = 0.3;   // at the size a sticker is put on at (addAsset)
-        }
+        } else resetPlacement(L, scope, f.key, f.catId, f.group.map((g) => g.key));   // as Reset under the layer's properties: a photo filling the canvas fills it still, a sticker at the scale it is put on at
         api.touch({ cover: true, side: true });
       } else {
         if (L.crop || (L.type === "photo" && L.cut)) api.drawnNow();   // scaled and turned about what shows of it, as it is drawn now
@@ -564,7 +560,7 @@ export function makeCommands(api) {
       } });
       const at = args.at ? { x: args.at.x, y: args.at.y } : null;
       let L;
-      if (k === "asset") L = api.addAsset(ref, at, above);   // as its tile clicked (a sticker at 0.3)
+      if (k === "asset") L = api.addAsset(ref, at, above);   // as its tile clicked (a sticker at STICKER_SCALE)
       else if (k === "copy" && above === undefined) L = api.duplicateLayer(src.id);   // as Duplicate: just above what it copies, over what is clipped onto it
       else api.addLayer(L = k === "text" ? newLayer("text", { text: (args.text ?? t("layer.newText")).replace(/\r\n?/g, "\n") }) : k === "solid" ? newLayer("solid", { color: hex(args.color ?? api.cat().color) }) : duplicate(src), above);   // as Assets → Text and Colour
       const placed = (at && k !== "asset") || args.scale !== undefined;
