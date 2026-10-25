@@ -10,8 +10,8 @@
 import { TOOLS, toResult, toError, ToolError, findProfile, findChannel, findSize, keyOf, letterKeysOf, boxesOf, sheetPlan, widthFor, idsSaid, nearNames, placeAt, placePatch } from "./tools.js";
 import { LOOKS, LOOK_IDS, LOOK_TAGS, lookParams } from "./style.js";
 import { EFFECTS, BENDS, effectUses, NO_COLUMNS } from "./textfx.js";
-import { BEND_IDS, HEADLINES, LETTERED, isLayout, isRemovable, fillsCanvas, resetPlacement, keepTo, inSize } from "./layers.js";
-import { STICKERS, GRAPHICS, userAssets, canTint } from "./assets.js";
+import { BEND_IDS, HEADLINES, LETTERED, isLayout, isRemovable, newLayer, duplicate, fillsCanvas, resetPlacement, keepTo, inSize } from "./layers.js";
+import { STICKERS, GRAPHICS, userAssets, canTint, assetExists } from "./assets.js";
 import { t } from "./i18n.js";
 import { PLATFORMS } from "./platforms.js";
 import { SIZE_PRESETS } from "./presets.js";
@@ -135,6 +135,10 @@ export function makeCommands(api) {
   }
   /** What a tool that changed layer L answers: the layer as get_cover lists it, and what was clamped or will not show (warnings), when anything was. */
   const layerDone = (L, warnings = []) => toResult({ structured: { layer: layerOut(L, S.cover), ...(warnings.length ? { warnings } : {}) } });
+  /** Layer L's id and those of the layers linked to it (a photo's cut-outs). */
+  const withLinked = (L) => [L.id, ...(L.type === "photo" && !L.of ? api.passivesOf(L).map((l) => l.id) : [])];
+  /** The id of the layer `above` names on cover c ("top": its topmost), checked; for add_layer and reorder_layer. */
+  const aboveOf = (c, above) => (above === "top" ? c.layers.at(-1).id : layerOf(c, above).id);
   /** The fonts a layer can be set in: the bundled ones, those imported and those installed. */
   const fontsHere = () => [...new Set([...api.BUNDLED_FONTS, ...S.importedFonts, ...S.systemFonts])];
 
@@ -392,6 +396,52 @@ export function makeCommands(api) {
       if (!inSize(L, S.sel) && L.visible) warnings.push(`It is not shown at ${S.sel}, the size on the canvas.`);
       api.touch({ cover: true, side: true, panel: true });
       return layerDone(L, warnings);
+    },
+
+    // ---- the stack
+    add_layer: async (args) => {
+      const k = args.kind, only = { text: "text", color: "solid", asset: "asset", of: "copy" };
+      const odd = Object.keys(only).find((a) => args[a] !== undefined && only[a] !== k);
+      if (odd) throw refused(`"${odd}" is for kind "${only[odd]}", not "${k}".`);
+      if (k === "asset" && !args.asset) throw refused('kind "asset" needs "asset": {kind, id}, from list_library.');
+      if (k === "copy" && args.of === undefined) throw refused('kind "copy" needs "of": the id of the layer to copy.');
+      const ref = k === "asset" ? { kind: args.asset.kind, id: args.asset.id } : null;
+      if (ref && !assetExists(ref)) throw refused(`No ${ref.kind} "${ref.id}" (list_library lists them).`);
+      let above;
+      const { L: src } = await aim(args, { layer: k === "copy" ? args.of : null, check: (L, c) => {
+        if (k === "copy" && !api.copiable(L)) return `"${L.id}" cannot be copied: ${L.type === "bg" ? "the ground is one of a kind" : L.type === "frame" ? "the frame is one of a kind" : "a linked cut-out is made by cutting its photo out again"}.`;
+        above = args.above === undefined ? (k === "copy" ? undefined : aboveOf(c, "top")) : aboveOf(c, args.above);   // a copy goes just above what it copies, unless told
+        return null;
+      } });
+      const at = args.at ? { x: args.at.x, y: args.at.y } : null;
+      let L;
+      if (k === "asset") L = api.addAsset(ref, at, above);   // as its tile clicked (a sticker at 0.3)
+      else if (k === "copy" && above === undefined) L = api.duplicateLayer(src.id);   // as Duplicate: just above what it copies, over what is clipped onto it
+      else api.addLayer(L = k === "text" ? newLayer("text", { text: (args.text ?? t("layer.newText")).replace(/\r\n?/g, "\n") }) : k === "solid" ? newLayer("solid", { color: hex(args.color ?? api.cat().color) }) : duplicate(src), above);   // as Assets → Text and Colour
+      const placed = (at && k !== "asset") || args.scale !== undefined;
+      if (at && k !== "asset") { L.t.all.x = at.x; L.t.all.y = at.y; }
+      if (args.scale !== undefined) L.t.all.s = args.scale;
+      if (placed) api.touch({ cover: true });
+      return toResult({ structured: { layer: layerOut(L, S.cover) } });
+    },
+    remove_layer: async (args) => {
+      const { L } = await aim(args, { check: (L) => (isRemovable(L) ? null : L.type === "bg" ? "bg is the ground: it cannot be removed (hide it with show_layer for a clear ground)."
+        : `"${L.id}" is one of the layout's own parts: it cannot be removed. Hide it (show_layer, visible: false) or leave it out of the cover (included: false).`) });
+      const gone = withLinked(L);
+      api.removeLayer(L.id);   // as its ✕ and Delete: a photo takes its linked cut-outs with it
+      return toResult({ structured: { removed: gone } });
+    },
+    reorder_layer: async (args) => {
+      const { L } = await aim(args, { check: (L, c) => (L.type === "bg" ? "bg stays at the bottom." : args.above !== undefined && aboveOf(c, args.above) === L.id ? "A layer cannot go above itself." : null) });
+      const list = S.cover.layers, from = list.indexOf(L), warnings = [];
+      let moved;
+      if (args.to === "up" || args.to === "down") moved = api.shiftLayer(args.to === "up" ? 1 : -1, L.id);   // as ▲ and ▼ by the layer list: past the next layer of this cover
+      else {
+        const i = args.to === "top" ? list.length - 1 : args.to === "bottom" ? 1 : list.findIndex((l) => l.id === aboveOf(S.cover, args.above)), to = args.above === undefined ? i : from < i ? i : i + 1;
+        moved = to !== from && api.restack(L.id, to);   // as a row dropped on another in the layer list: the layout's parts so in the design too
+      }
+      if (!moved) warnings.push(`"${L.id}" is there already.`);
+      return toResult({ structured: { index: S.cover.layers.indexOf(L), layers: S.cover.layers.map((l) => l.id), ...(warnings.length ? { warnings } : {}) } });
     },
   };
   for (const d of TOOLS) if (!commands[d.name]) commands[d.name] = notYet;

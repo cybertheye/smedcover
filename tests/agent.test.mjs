@@ -262,13 +262,13 @@ async function fakeApi() {
 }
 
 /** The tools still to be done: each answers unavailable. One done is taken off the list; one forgotten fails the test below. */
-const PENDING = ["add_layer", "remove_layer", "reorder_layer", "add_photo", "crop_photo", "cut_out", "weave", "surprise", "pick_hand", "apply_cover_json", "open_project", "batch_covers", "export"];
+const PENDING = ["add_photo", "crop_photo", "cut_out", "weave", "surprise", "pick_hand", "apply_cover_json", "open_project", "batch_covers", "export"];
 test("every tool has a command; those not done yet are these, and answer that they are not, before touching anything", async () => {
   const { makeCommands } = await import("../ui/js/commands.js");
   const cmds = makeCommands(new Proxy({}, { get: () => () => {} }));
   assert.deepEqual(Object.keys(cmds).sort(), TOOLS.map((d) => d.name).sort());
   assert.deepEqual(TOOLS.filter((d) => cmds[d.name].pending).map((d) => d.name), PENDING, "the tools not done yet");
-  assert.equal(TOOLS.length - PENDING.length, 18);
+  assert.equal(TOOLS.length - PENDING.length, 21);
   for (const n of PENDING) assert.deepEqual(await cmds[n]({}), toError("unavailable", "not implemented yet"), n);
 });
 
@@ -388,6 +388,8 @@ test("a change is checked whole before anything is touched: refused, the window 
   const { makeCommands } = await import("../ui/js/commands.js");
   const { api, S, text, sticker, calls } = await fakeApi(), cmds = makeCommands(api), was = JSON.stringify(S);
   const refusals = [
+    ["remove_layer", { layer: "title" }, /"title" is one of the layout's own parts: it cannot be removed/],
+    ["remove_layer", { layer: "bg", channel: 1 }, /bg is the ground: it cannot be removed/],
     ["place_layer", { layer: "frame", x: 0.5 }, /The frame follows the template/],
     ["place_layer", { layer: "bg", scale: 2, channel: 1 }, /bg is the ground: it is not placed/],
     ["place_layer", { layer: text.id, x: 0.2, move: { dx: 0.1 } }, /Give "x" or "move.dx", not both/],
@@ -411,6 +413,13 @@ test("a change is checked whole before anything is touched: refused, the window 
     ["show_layer", { layer: "bg", opacity: 0.5 }, /bg has no opacity/],
     ["show_layer", { layer: "frame", locked: true }, /frame is never placed by hand/],
     ["show_layer", { layer: "title", sizes: ["5:1"] }, /no size "5:1"/],
+    ["add_layer", { kind: "copy", of: "frame" }, /"frame" cannot be copied: the frame is one of a kind/],
+    ["add_layer", { kind: "copy" }, /needs "of"/],
+    ["add_layer", { kind: "asset", asset: { kind: "sticker", id: "nope" } }, /No sticker "nope"/],
+    ["add_layer", { kind: "text", color: "#ffffff" }, /"color" is for kind "solid", not "text"/],
+    ["add_layer", { kind: "solid", above: "nope", channel: 1 }, /No layer "nope"/],
+    ["reorder_layer", { layer: "bg", to: "top" }, /bg stays at the bottom/],
+    ["reorder_layer", { layer: sticker.id, above: sticker.id }, /cannot go above itself/],
     ["set_channel", { channel: "nope", name: "x" }, /No channel "nope"/],
     ["set_text", { title: "x", profile: "nobody" }, /No profile "nobody"/],
   ];
@@ -488,6 +497,24 @@ test("a change does what the editor does, where it is aimed: the window switched
   assert.deepEqual([text.o, text.locked, text.sizes], [0.5, true, ["1920x1080", "1200x1200"]]);
   await cmds.show_layer({ layer: text.id, sizes: "all", locked: false });
   assert.ok(!("sizes" in text) && !text.locked);
+  // added: on top by default, a copy just above what it copies
+  const top = (await cmds.add_layer({ kind: "text", text: "Hi", at: { x: 0.2, y: 0.3 }, scale: 0.5 })).structuredContent.layer;
+  assert.equal(S.cover.layers.at(-1).id, top.id); assert.deepEqual([top.place.x, top.place.y, top.place.s], [0.2, 0.3, 0.5]); assert.equal(S.layerId, top.id);
+  const st = (await cmds.add_layer({ kind: "asset", asset: { kind: "sticker", id: "burst" }, above: "title" })).structuredContent.layer;
+  assert.equal(S.cover.layers.findIndex((l) => l.id === st.id), S.cover.layers.findIndex((l) => l.id === "title") + 1); assert.equal(st.place.s, 0.3);
+  const cp = (await cmds.add_layer({ kind: "copy", of: "subtitle" })).structuredContent.layer;
+  assert.equal(cp.kind, "copy"); assert.ok(calls.some((c) => c[0] === "duplicateLayer" && c[1] === "subtitle"));
+  const solid = (await cmds.add_layer({ kind: "solid" })).structuredContent.layer;
+  assert.equal(solid.color, "#aabbcc", "the channel colour");
+  // the stack
+  assert.equal((await cmds.reorder_layer({ layer: top.id, to: "bottom" })).structuredContent.index, 1);
+  const r = (await cmds.reorder_layer({ layer: top.id, above: "title" })).structuredContent;
+  assert.equal(r.layers[r.index - 1], "title");
+  const up = (await cmds.reorder_layer({ layer: solid.id, to: "up" })).structuredContent;
+  assert.deepEqual(up.warnings, [`"${solid.id}" is there already.`], "the top already");
+  // removed
+  assert.deepEqual((await cmds.remove_layer({ layer: top.id })).structuredContent, { removed: [top.id] });
+  assert.ok(!S.cover.layers.some((l) => l.id === top.id));
   assert.ok(!calls.some((c) => c[0] === "switchProfile"), "never another profile");
 });
 /** Look `id`'s own settings. */

@@ -2020,7 +2020,7 @@
     {
       "name": "add_layer",
       "title": "Add a layer",
-      "description": "Adds a layer just above `above` (a layer id, or \"top\", the default): kind \"text\" (its words in text; *highlight* and \\n as in a title), \"solid\" (a block of colour the canvas's size; color), \"asset\" (a sticker, a graphic or the user's own: asset {kind, id} from list_library) or \"copy\" (a copy of layer `of`: a layout part other than bg and frame, or a layer that was added). at {x, y} puts its centre there (shares of the canvas), scale sets its size. The new layer is selected. One undo step. Returns it as get_cover lists layers.",
+      "description": "Adds a layer just above `above` (a layer id, or \"top\"; by default the top, and a copy just above what it copies): kind \"text\" (its words in text; *highlight* and \\n as in a title), \"solid\" (a block of colour the canvas's size; color, by default the channel colour), \"asset\" (a sticker, a graphic or the user's own: asset {kind, id} from list_library) or \"copy\" (a copy of layer `of`: a layout part other than bg and frame, or a layer that was added). at {x, y} puts its centre there (shares of the canvas; for a copy of a layout part, its offset, as place_layer has it), scale sets its size (as place_layer's scale). The new layer is selected. One undo step. Returns it as get_cover lists layers.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2113,7 +2113,7 @@
           },
           "scale": {
             "type": "number",
-            "description": "Its size, 1 the canvas's (a solid) or as made.",
+            "description": "Its scale (a sticker 0.3, text 0.35, a solid 1: the canvas's size).",
             "minimum": 0.02,
             "maximum": 20
           }
@@ -2342,6 +2342,12 @@
             "type": "integer"
           },
           "layers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "warnings": {
             "type": "array",
             "items": {
               "type": "string"

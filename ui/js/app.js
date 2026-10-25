@@ -640,12 +640,14 @@ function addLayer(L, above = S.layerId === "bg" ? "bg" : S.layerId) {
   touch({ cover: true, side: true });
   return L;
 }
-function addAsset(ref, at) {
+/** Puts asset `ref` on the cover, its centre at `at` ({x, y}, shares of the canvas) when told, above layer `above` (the selected one, unless told: see addLayer), selected. Returns the layer. */
+function addAsset(ref, at, above) {
   const L = newLayer("asset", { ref, tint: canTint(ref) });   // a vector asset follows the channel colour from the start, as its tile shows
   if (at) { L.t.all.x = at.x; L.t.all.y = at.y; }
   if (ref.kind === "sticker") L.t.all.s = 0.3;
-  addLayer(L);
+  if (above === undefined) addLayer(L); else addLayer(L, above);
   toast(t("assets.added", assetName(ref, getLang())));
+  return L;
 }
 function removeLayer(id = S.layerId) {
   const L = layer(id);
