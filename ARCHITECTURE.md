@@ -594,11 +594,11 @@ size facing the canvas's way (the layout the canvas's size is drawn in, as it is
 canvas's size. The colour block's *Size & slant* (`blockSection()`, a group of its properties, so on its bar too) holds
 the template itself, named for the block (*Block position*: *Band* `stack`, *Side panel* `split`, *Slim banner*
 `banner`, `tpl.*` and their tips `tpl.*Tip`; one picked is one step of undo, and starts from the adjustments the
-profile keeps for it, else its defaults, as the template box's list does), *Mirror* at the end of its caption's line
-(the `flip` adjustment, the template box's swap, a checkbox through `layoutAdjuster()`'s `set()`: a band or a slim
-banner along the top, a panel on the left; its tip `props.blockFlipTip.<template>`; one step of undo), the template's two block sliders
-(`blockSliders()`, how much the block takes and how its edge leans, over
-`layoutAdjuster()`, which `templateControls()` builds on too) and *Block by orientation* (`byOrient()`, below), and lands where the Layout sheet's template box does
+profile keeps for it, else its defaults, as the template box's list does), *Mirror* under it
+(the `flip` adjustment, the template box's swap, a switch through `layoutAdjuster()`'s `set()`: a band or a slim
+banner along the top, a panel on the left; its tip `props.blockFlipTip.<template>`; one step of undo), the template's two block sliders,
+how much the block takes and how its edge leans, as scrub bars whose tick is what the template has by default
+(`templateDefault()`; the template box's are `blockSliders()`, over `layoutAdjuster()`, which `templateControls()` builds on too) and *Block by orientation* (`byOrient()`, below), and lands where the Layout sheet's template box does
 (`layoutScope()`): no buttons for the scope, its ⓘ saying which sizes it reaches and that it is switched under the
 canvas; and, when the size shown has its own layout, *This size has its own layout* with *Follow again* (with `all`
 the sliders then change the profile's own, which that size does not follow). A slider dragged draws the cover as a
@@ -1547,13 +1547,26 @@ repeatedly. A change that leaves the Look sheet as it is still has its cards dra
 what they show has changed (`refreshLookCards()`, see 9.5).
 
 There is no framework: each part is built with a small element helper, `el()`, and rebuilt whole
-when needed. The properties (`.props`, in the drawer) are groups one under another, each made by `psec()`: a line with
-its name (an ⓘ from `info()` whose click opens a bubble, `showTip`), what it is set to while shut (`secSum()`) and a
-chevron; open, its controls on a grid of three columns of its own (`.psec`: a control's own label | the control | its
-value), so a group's sliders, values and checkboxes line up. The group's body takes no box (`display:contents`): its
-children are the grid's items, a slider's three parts a column each, any other control across the three. A popover of
-the bar over the canvas lays a group out the same way. `layerSection()` makes the Layer group every layer has,
-and `swatch()` a small colour swatch (optionally automatic).
+when needed. The properties (`.props`, in the drawer) are groups one under another, each made by `psec()`: a line — its
+name on a button whose `::after` covers the whole line, an ⓘ from `info()` (a button too, whose click opens a bubble,
+`showTip`), what it is set to (`writeSum()`, from `secSum()`) and a chevron — over its controls, one under another
+(`.psec-b`). The controls are one family, each a row 34 px high (in `index.html` after `.psec`): `scrub()` a number, a
+bar with its name and value inside, dragged anywhere along it by how far the pointer goes (a press alone changes
+nothing), a tick at its default that a drag comes to rest on, a double-click typing the value in (`SHOWN`'s `text` and
+`read`, `typedValue()`), and a range input under it for Tab, the arrow keys (Shift: ten steps) and a screen reader;
+`switchRow()` (and `check()` over it) an on/off row ending in the app's switch, `.tog`; `segs()` a few ways side by side;
+`picker()` a choice among many, opening its list with `openPicker()` (`.pklist`, on the page, following its field: the
+arrows, Home, End and letters typed go through it, Enter or a click picks, Esc, Tab or a press elsewhere shuts it; the
+keys it takes go no further, so its Esc neither shuts the bar's popover nor lets go of the layer); `swatch()` a colour's
+row (the whole row opens the colour picker; *Automatic*, or the colour with the way back to it). A control told its
+default (`def`) says when it is off it with the class `chg`: a scrub bar's value or a colour then in the channel colour
+(`--acc-lite`), with ↺ beside it (`RESET_ICON`) in a rail 30 px wide down the group's right where only these stand;
+`secSum()` puts what is off its default first, and `writeSum()` marks the line with a dot. A control changed in place
+(a bar dragged, a switch clicked) writes its group's line again itself (`resum()`), the group not built anew, and while
+a bar is dragged (`body.scrubbing`) `renderSide()` waits for it to be let go. A popover of the bar over the canvas holds
+a group's controls the same way (with the rail only where the group has a ↺). `layerSection()` makes the Layer group
+every layer has. The other windows (the letter window, the brush's panel, Export, the Look sheet's parameters) keep
+their own sliders and boxes (`slider()`, `slider2()`, `select()`, `.chk`).
 The ⓘ is drawn (`INFO_ICON`), not the character, whose place in the line changes from font to font; `.info` sets its
 middle at the middle of the letters beside it, in a line of text (`vertical-align`) or a row of boxes (centred, then
 `top` for the line's middle being higher than the letters'). A caption with an ⓘ in a row is `capInfo()`, the row
@@ -1950,7 +1963,7 @@ preset's, as their cards are built anew, `renderBar()` the effect's, as its card
 are; `pickLook()` and `pickFx()` end theirs before putting theirs on.
 
 **Text effects as cards.** The Effect group of a lettered layer's properties (`fxControl()`; the bend is a group of its
-own after it, `bendControl()`) begins with `fxCards(L)`: Automatic, then the others in `FX_ORDER`, one order, so a card picked
+own further down, `bendControl()`, its list drawing each bend, `BEND_GLYPHS`) begins with `fxCards(L)`: Automatic, then the others in `FX_ORDER`, one order, so a card picked
 stays where it was. Every card is built; in the drawer, three to a row, those past `FX_FOLDED` (six) but the layer's own
 are hidden (`.folded`) until *See all* (`FX_UI.all`, for the session). In the bar's popover they are in pages of six side by side (`fxRow()`), each two
 rows of three filled row by row (each card's place set by `fxCards()` as `--r` and `--c`, the grid as many columns as
@@ -2015,9 +2028,13 @@ Meanwhile the drawer and the layer list show the background as ever, and the arr
 group selected, what can be done to the group), each group made by `psec()` (9.1). It is shut to begin with and kept as
 it was left (`settings.drawer`): `setDrawer()` opens or shuts it (*More…* on the bar, the button under the layer list,
 a double-click on the canvas), `columns()` gives its column to the canvas while it is shut (`.nodrawer`), and nothing is
-built in it then; in a narrow window, open, it stands in the sheet's place (above). A shut group says what it is set to, read off its own controls by `secSum()` — the menus' choices,
-the colours (or *Automatic*), the boxes ticked, the sliders off either end, how many sizes it shows at — so a new
-control is summed without being told how. `SECS` keeps, by name, which groups were last opened or shut by hand; a group
+built in it then; in a narrow window, open, it stands in the sheet's place (above). Its head (`drawerHead()`) is the
+layer's tile (`layerTile()`, as its row in the list has it), its name, what kind of layer it is and at which sizes it
+shows, then hide or show, duplicate and delete as the list's bar has them, and ✕. A lettering's groups come in the
+order they are most often changed (`headlineControls()`): Text, Effect, Colour, Lines, Bend, then *Plate & highlights*
+(`props.sec.platehi`: the plate, and the highlighted words' mark). A shut group says what it is set to, read off its
+own controls by `secSum()` — the choices, the colours (or *Automatic*), the switches on, the scrub bars off their
+defaults, how many sizes it shows at, what is off its default first — so a new control is summed without being told how. `SECS` keeps, by name, which groups were last opened or shut by hand; a group
 never touched is open when it is the first of its layer's (`openSecs()`).
 
 **Surprise me's window** (`#deal`, `dealOpen()`) lies over the whole of the app, the cover dimmed and blurred behind it
@@ -2284,6 +2301,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | add a template | `TEMPLATES` and `layout()` in `layout.js`, a name in `i18n.js` |
 | show the Layout sheet's template box again, or change the colour block's *Size & slant* (its *Block position*, *Mirror*, sliders and *Block by orientation*) | `TEMPLATE_BOX` and `layoutBox()`; `blockSection()`, `blockSliders()`, `layoutAdjuster()`, `layoutScope()` and `byOrient()` in `app.js`; `tpl.*` and `style.byOrient*` in `i18n.js` |
 | add a property to a layer | `PROPS` and `normalizeLayer()` in `layers.js`, `PAINT` in `render.js`, `typeControls()` in `app.js` (`headlineControls()` for the title and text layers) |
+| change the controls of the properties (a scrub bar, a switch, ways side by side, a choice among many, a colour), or the drawer's head | `scrub()` (`SHOWN`), `switchRow()` and `check()`, `segs()`, `picker()` and `openPicker()`, `swatch()`, `psec()`, `secSum()`, `drawerHead()` in `app.js`; `.psec`, `.bar`, `.rs`, `.swr`, `.tog`, `.pk`, `.pklist`, `.cb` and `#right .dhead` in `index.html` |
 | add an export format | `encode()` in `lib.rs`, `EXT` and the format pickers in `app.js` (`exportDialog()`, `sizesTab()`) |
 | add a drawing operation for AI assets | validation and `drawSpec()` in `spec.js`, the prompt and examples in `ai.js` |
 | add a kind of part to solids | validation and `pieces()` in `solid.js`, `solidPrompt()` and its examples in `ai.js` |

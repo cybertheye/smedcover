@@ -13,7 +13,7 @@
   /* Frosted glass over the cover: the page's ground is the cover itself, small and blurred (#ambient), and every
      panel is a pane of glass over it (.glass), letting its colours through. Where the glass would slow the canvas,
      or the web view cannot blur, html.solid makes the panes plain and translucent (see glassWatch in app.js). */
-  :root{color-scheme:dark;--bg:#0b0b11;--ink:#15151c;--acc:#fcee0a;--acc-ink:#15151c;
+  :root{color-scheme:dark;--bg:#0b0b11;--ink:#15151c;--acc:#fcee0a;--acc-ink:#15151c;--acc-lite:color-mix(in srgb,var(--acc) 55%,#fff);
         --text:#f5f5f7;--text2:rgba(245,245,247,.68);--text3:rgba(245,245,247,.5);
         --panel:rgba(255,255,255,.05);--line:rgba(255,255,255,.12);--line2:rgba(255,255,255,.24);
         --field:rgba(10,10,16,.32);
@@ -89,11 +89,13 @@
   .linkbtn:where(:hover:not(:disabled)){color:#ffe29a;text-decoration:underline;text-underline-offset:3px}   /* :where — the properties' own links keep their colour */
   .linkbtn:disabled{opacity:.35;cursor:default}
   .togrow{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border-radius:14px;background:rgba(0,0,0,.2);border:1px solid var(--line)}
-  .tog{width:40px;height:24px;border-radius:12px;background:rgba(255,255,255,.18);position:relative;border:0;cursor:pointer;padding:0;flex:none}
-  .tog::after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:9px;background:#fff;transition:left .15s}
-  .tog.on{background:#3ddc97}
-  .tog.on::after{left:19px}
-  .tog:disabled{opacity:.4;cursor:default}
+  /* the app's one switch: on, lit white as a segment chosen is, its knob dark at the right end */
+  .tog{width:36px;height:22px;border-radius:11px;background:rgba(255,255,255,.2);position:relative;border:0;cursor:pointer;padding:0;flex:none;transition:background .15s}
+  .tog::after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:8px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:left .15s,background .15s}
+  .tog.on{background:rgba(255,255,255,.9)}
+  .tog.on::after{left:17px;background:var(--ink);box-shadow:none}
+  .tog:disabled{opacity:.35;cursor:default}
+  .tog:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
   /* Layout → the layout presets, two to a row, each a card: this cover laid out by it, its name and a word under it;
      the canvas as it is first, outlined in the channel colour. Over a preset's picture, under the pointer, the way it
      is put on; at its corner ⋯, its menu. */
@@ -225,13 +227,17 @@
   /* a narrow window with the drawer open: the drawer takes the sheet's place, the dock's buttons bringing the sheet back */
   .body.tight{grid-template-columns:76px minmax(0,1fr) var(--rw,320px)}
   .body.tight #left{display:none}
-  #right .dhead{display:flex;align-items:center;gap:8px;margin:0 0 10px}
-  #right .dhead>div{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-  #right .dhead small{font-size:11.5px;color:var(--text3)}
+  /* the drawer's head: the layer's tile, as its row in the layer list has it, its name, what kind of layer it is and at
+     which sizes it shows; then hide, duplicate, delete and close */
+  #right .dhead{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:10px;row-gap:1px;margin:0 0 10px;padding-left:2px}
+  #right .dhead .th{grid-row:1/3}
   #right .dhead b{font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #right .dhead .x{flex:none;width:30px;height:30px;border-radius:10px;border:0;background:rgba(255,255,255,.08);color:var(--text);font-size:13px;cursor:pointer}
-  #right .dhead .x:hover{background:rgba(255,255,255,.16)}
-  #right .dfoot{display:flex;gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+  #right .dhead small{grid-column:2/4;font-size:12px;color:rgba(245,245,247,.72);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #right .dhead .acts{display:flex;gap:2px}
+  #right .dhead .ib{width:28px;height:28px;border-radius:8px;color:rgba(245,245,247,.82)}
+  #right .dhead .ib:hover:not(:disabled){color:#fff}
+  #right .dhead .ib svg{width:16px;height:16px}
+  .ib:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
   /* the dock: one button per sheet, the canvas's help at its foot */
   #dock{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 6px;border-radius:22px;min-height:0}
   #dock button{width:64px;height:64px;border:0;border-radius:16px;background:transparent;color:var(--text2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:12px;cursor:pointer;padding:0}
@@ -278,72 +284,167 @@
   .subtabs button.on{background:rgba(255,255,255,.9);color:var(--ink);font-weight:700}
   .peek{margin-top:8px;font-size:12px}.peek summary{cursor:pointer;opacity:.7}
   .peek pre{white-space:pre-wrap;max-height:220px;overflow:auto;margin:6px 0 0;padding:8px;border:1px solid var(--line2);font:12px/1.6 ui-monospace,monospace;opacity:.85}
-  /* The selected layer's properties, in the drawer: its groups one under another, each a line with its name, what it is
-     set to (while it is shut) and a chevron; open, its controls under it on a grid of three columns — a control's own
-     label, the control, its value — so a group's sliders, values and checkboxes line up. The body takes no box of its
-     own (display:contents): its children are the group's grid items. A slider's three parts take a column each;
-     anything else spans the three. A popover of the bar over the canvas lays out a group's controls the same way. */
+  /* The selected layer's properties, in the drawer: its groups one under another, each a line — its name, an ⓘ, what it
+     is set to while it is shut and a chevron, the whole line the button that opens and shuts it — over its controls,
+     one under another. One family of controls, each a row 34 px high: those that hold a value on a dark well (a scrub
+     bar, a colour, a choice among many, a few ways side by side), the on/off ones a row with the switch at its end.
+     Down the right runs a rail 30 px wide where only the ↺ stands that puts a control back to its default, so a look
+     down that edge finds every change; a value moved off its default is in the channel colour (--acc-lite), and its
+     group's line says so while shut: a dot, and that value first. A popover of the bar over the canvas holds a group's
+     controls the same way. */
   .props{display:flex;flex-direction:column}
-  .psec{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;column-gap:10px;row-gap:12px;align-items:center;padding:11px 2px;border-top:1px solid var(--line)}
-  .props>.psec:first-child{border-top:0;padding-top:2px}
-  .psec-b{display:contents}
+  .psec{border-top:1px solid rgba(255,255,255,.09)}
+  .props>.psec:first-child{border-top:0}
+  .psec-h{position:relative;display:flex;align-items:center;gap:6px;min-height:40px;margin:2px 0;padding:0 6px 0 8px;border-radius:10px;user-select:none;-webkit-user-select:none}
+  .psec-h:hover{background:rgba(255,255,255,.06)}
+  .psec-h:has(.tg:focus-visible){box-shadow:0 0 0 2px color-mix(in srgb,var(--acc) 80%,transparent)}
+  .psec-h .tg{flex:none;border:0;background:none;padding:0;color:var(--text);font:700 13px var(--ui);white-space:nowrap;cursor:pointer;outline:none}
+  .psec-h .tg::after{content:"";position:absolute;inset:0;border-radius:10px}   /* the whole line is its button */
+  .psec-h .info{z-index:1;top:0;width:22px;height:22px;margin-left:-3px;display:grid;place-items:center;border-radius:6px}
+  .psec-h .info svg{width:14px;height:14px}
+  .psec-h .sum{flex:1;min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:7px;font-size:12px;color:rgba(245,245,247,.74);white-space:nowrap}
+  .psec-h .sum .said{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .psec-h .sum em{font-style:normal;color:var(--acc-lite)}
+  .psec-h .sum .chg{flex:none;width:6px;height:6px;border-radius:3px;background:var(--acc)}
+  .psec.open>.psec-h .sum .said{display:none}   /* open, only the dot */
+  .psec-h .chev{flex:none;display:grid;width:16px;height:16px;color:rgba(245,245,247,.62);transition:transform .15s}
+  .psec-h:hover .chev{color:var(--text)}
+  .psec.open>.psec-h .chev{transform:rotate(90deg)}
   .psec:not(.open)>.psec-b{display:none}
-  .psec-h{grid-column:1/-1;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;cursor:pointer;user-select:none;min-width:0}
-  .psec-h .sum{flex:1;min-width:0;text-align:right;font-size:12px;font-weight:400;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .psec.open>.psec-h .sum{visibility:hidden}
-  .psec-h .chev{flex:none;width:7px;height:7px;margin:0 4px 3px 2px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);opacity:.45;transition:transform .15s}
-  .psec.open>.psec-h .chev{transform:rotate(45deg);margin-bottom:5px}
-  .psec-h:hover .chev{opacity:.9}
-  .psec-b>*{grid-column:1/-1;min-width:0;margin:0!important}
-  .psec-b>.sl{display:contents}
-  .psec-b>.sl>:nth-child(1){grid-column:1;white-space:nowrap;font-size:13px}
-  .psec-b>.sl>:nth-child(2){grid-column:2;width:100%;margin:0}
-  .psec-b>.sl>:nth-child(3){grid-column:3;font:600 12px var(--mono);text-align:right;opacity:.8;min-width:3.6em}
-  .psec-b>.sl.off>:nth-child(2){grid-column:2/-1;font-size:12px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}   /* one line, as tall as a slider's row: the whole reason is in the tip */
-  .psec-b>.sl.off>*{opacity:.5}
-  .psec-b>.chk{display:flex}
+  .psec-b{display:flex;flex-direction:column;gap:8px;min-width:0;padding:2px 2px 14px}
+  .psec-b>*{min-width:0;margin-top:0!important;margin-bottom:0!important;margin-left:0!important}
+  .psec-b>:not(.sc):not(.cr){margin-right:30px!important}   /* the rail */
+  .psec-b>.sc,.psec-b>.cr{margin-right:0!important}
+  .psec-b .hint{margin:0;color:rgba(245,245,247,.74)}
+  .psec-b .hint.err{color:#ff7a88}
+  .psec-b .cap{color:rgba(245,245,247,.74)}
+  .psec-b>.cap{margin:2px 30px -3px 2px!important;letter-spacing:0}   /* a caption, close to what it names */
+  .psec-b .ico{display:grid;place-items:center}
+  .psec-b textarea,.psec-b input[type=text]{width:auto}
+  .psec-b textarea{height:64px;padding:7px 10px;border-radius:10px;background:rgba(0,0,0,.28);font-size:14px;line-height:1.6}
+  .psec-b input[type=text]{height:34px;padding:0 10px;border-radius:10px;background:rgba(0,0,0,.28)}
+  .psec-b .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:0 12px;border-color:rgba(255,255,255,.2)}
+  .psec-b .btn.wide{width:auto}
+  .psec-b .btn svg{flex:none;width:15px;height:15px}
+  .psec-b .btn:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+  .psec-b>.row{margin:0;gap:8px}
+  .psec-b .seg{height:34px;padding:2px;gap:2px;border-radius:10px;background:rgba(0,0,0,.28)}
+  .psec-b .seg .btn{flex:1 1 0;min-width:0;min-height:0;height:28px;padding:0 6px;border:0;border-radius:8px;font-size:12.5px;overflow:hidden;text-overflow:ellipsis}
+  .psec-b .seg .btn svg{width:14px;height:14px}
+  .psec-b .seg .btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--acc)}
+  .psec-b .seg .btn:disabled{opacity:.45}
   .psep{height:8px}
-  .psec-b>.fxh{font-size:12px;font-weight:600;opacity:.75}
-  .psec-b>.fxs{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}
-  .psec-b>.fxs>span{opacity:.7}
-  .psec-b>.fxs>span.fxt{font-weight:600;opacity:.75}
-  .fxs .linkbtn,.artback .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+  .psec-b>.fxh{font-size:12px;font-weight:600;color:rgba(245,245,247,.74)}
+  .psec-b>.fxs{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:28px;font-size:12px;color:rgba(245,245,247,.74)}
+  .psec-b>.fxs>span.fxt{font-weight:600}
+  .artback .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
   .artback{margin:4px 0 0 92px}   /* under the figure's graphic, past the label column */
   .layscope .seg .btn{flex:1;padding-left:6px;padding-right:6px}   /* the Style tab's template box: the scope it changes, the toolbar's own */
-  .blockat-h{display:flex;align-items:center;justify-content:space-between;gap:8px}   /* Block position's caption, and Mirror at its end */
-  .blockat-h .cap,.blockat-h .chk{margin:0}
-  .blockat-h .chk{gap:6px;font-size:13px;white-space:nowrap}
-  .blockat .btn{min-width:0;padding-left:4px;padding-right:4px;overflow:hidden;text-overflow:ellipsis}   /* the colour block's position, in its properties: three to the row, in the drawer and the bar's popover */
   .layown{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;margin:0 0 10px;padding:6px 8px;border:1px dashed var(--acc)}
-  .sizes-ctl{margin:10px 0 4px}   /* the sizes a layer shows at, in its properties */
-  .sizes-ctl .cap{display:flex;align-items:center;gap:6px}
-  .sizes-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
-  .sizes-row .btn{padding:4px 8px;font:600 11px var(--mono);opacity:.55}
-  .sizes-row .btn.on{opacity:1}
-  .sizes-row .btn.here{box-shadow:inset 0 -2px 0 var(--acc)}   /* the size on the canvas */
-  .sizes-row .btn.away{border-style:dashed;opacity:.5}   /* clipped onto a layer not shown at that size: not shown there either */
-  .sizes-picks{display:flex;flex-wrap:wrap;gap:12px;margin-top:6px}
-  .sizes-picks .linkbtn.on{text-decoration:none;opacity:.5;cursor:default}
-  .layown .linkbtn,.sizes-picks .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
-  .fxs .linkbtn:disabled{opacity:.35;cursor:default;text-decoration:none}
-  .fxs>.fxa{display:flex;gap:12px}
+  .layown .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
+  /* a small text button, for what is done seldom or cannot be undone at a click: a look's effects cleared, a scene
+     object put back, every look effect removed (in the danger colour) */
+  .tbtn,.fxs .linkbtn,.sizes-picks .linkbtn{display:inline-flex;align-items:center;height:28px;padding:0 8px;border:0;border-radius:8px;background:none;color:rgba(245,245,247,.82);font:400 12px var(--ui);white-space:nowrap;text-decoration:none;cursor:pointer}
+  .tbtn:hover:not(:disabled),.fxs .linkbtn:hover:not(:disabled),.sizes-picks .linkbtn:hover:not(:disabled){background:rgba(255,255,255,.08);color:#fff;text-decoration:none}
+  .tbtn:focus-visible,.fxs .linkbtn:focus-visible,.sizes-picks .linkbtn:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+  .tbtn:disabled,.fxs .linkbtn:disabled{opacity:.35;cursor:default}
+  .tbtn.danger{color:#ff9a8a}
+  .tacts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:2px}
+  .fxs>.fxa{display:flex;gap:2px}
   .psec-b>.fxs>span.jump{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
-  .psec-b>.fxs>span.jump:hover{opacity:1}
+  .psec-b>.fxs>span.jump:hover{color:var(--text)}
+  /* the sizes a layer shows at, in its properties: one well, lit where it shows, the one on the canvas ringed in the
+     channel colour; the quick groups under it */
+  .sizes-ctl{display:flex;flex-direction:column;gap:6px}
+  .sizes-ctl .cap{display:flex;align-items:center;gap:4px;margin:2px 0 0 2px}
+  .sizes-row{display:flex;flex-wrap:wrap;gap:2px;min-height:34px;padding:2px;border-radius:10px;background:rgba(0,0,0,.28);border:1px solid var(--line)}
+  .sizes-row .btn{flex:1 0 auto;min-width:0;height:28px;padding:0 4px;border:0;border-radius:8px;background:transparent;color:rgba(245,245,247,.66);font:600 11px var(--mono)}
+  .sizes-row .btn:hover:not(:disabled){background:rgba(255,255,255,.08);color:var(--text)}
+  .sizes-row .btn.on,.sizes-row .btn.on:hover:not(:disabled){background:rgba(255,255,255,.9);color:var(--ink)}
+  .sizes-row .btn:disabled{opacity:1;cursor:default}   /* the last one lit: it stays */
+  .sizes-row .btn.here{box-shadow:inset 0 0 0 2px var(--acc)}   /* the size on the canvas */
+  .sizes-row .btn.away{opacity:.5;outline:1px dashed currentColor;outline-offset:-4px}   /* clipped onto a layer not shown at that size: not shown there either */
+  .sizes-row .btn:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+  .sizes-picks{display:flex;flex-wrap:wrap;gap:2px;margin-top:-2px}
+  .sizes-picks .linkbtn.on{background:rgba(255,255,255,.1);color:#fff;cursor:default}
   .scene-ping{position:fixed;width:20px;height:20px;margin:-10px 0 0 -10px;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px #000;pointer-events:none;z-index:30;animation:scene-ping .9s ease-out forwards}
   @keyframes scene-ping{from{transform:scale(1);opacity:1}to{transform:scale(3.2);opacity:0}}
   /* the ⓘ, its middle at the middle of the letters beside it, .35em over their baseline (the em the text's). In a row of
      boxes it is centred on the caption's line, whose middle (Noto Sans SC's, at any line height) is .1em higher than
      its letters' — hence top; in a line of text vertical-align puts it .1em higher than that first. So a caption
-     beside it in a row must not keep a margin of its own there (.capi). */
-  .info{display:inline-block;flex:none;position:relative;top:.1em;width:14px;height:14px;vertical-align:calc(.45em - 7px);opacity:.7;cursor:help}
+     beside it in a row must not keep a margin of its own there (.capi). A button, so Tab reaches it. */
+  .info{display:inline-block;flex:none;position:relative;top:.1em;width:14px;height:14px;vertical-align:calc(.45em - 7px);padding:0;border:0;background:none;color:inherit;font:inherit;opacity:.7;cursor:help}
   .info svg{display:block;width:100%;height:100%}
-  .info:hover{opacity:1;color:var(--acc)}
+  .info:hover,.info:focus-visible{opacity:1;color:var(--acc)}
+  .info:focus-visible{outline:2px solid var(--acc);outline-offset:1px;border-radius:50%}
   .sub{font-size:12px;opacity:.6;margin-bottom:6px;display:flex;align-items:center;gap:4px}
-  /* a colour: a row of its own, as a checkbox is — the swatch, its name, then "automatic" or a way back to it */
-  .sw{display:flex;align-items:center;gap:10px;min-height:22px}
-  .sw input[type=color]{width:30px;height:22px;padding:1px;background:var(--panel);border:1px solid var(--line2);border-radius:7px;cursor:pointer;flex:none}
-  .sw .auto{font-size:12px;opacity:.45}
-  .sw .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+  /* a scrub bar, the properties' slider (see scrub in app.js): its name and value inside a bar dragged anywhere along
+     it, the value following the pointer; the tick its default; a double-click types the value in */
+  .sc,.cr{display:grid;grid-template-columns:minmax(0,1fr) 28px;gap:2px;align-items:center}
+  .bar{position:relative;display:flex;align-items:center;justify-content:space-between;gap:8px;height:34px;padding:0 10px;border-radius:10px;background:rgba(0,0,0,.28);border:1px solid var(--line);overflow:hidden;cursor:ew-resize;user-select:none;-webkit-user-select:none;touch-action:none}
+  .bar:hover{border-color:rgba(255,255,255,.28)}
+  .bar .fill{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.13);pointer-events:none}
+  .bar:hover .fill{background:rgba(255,255,255,.17)}
+  .bar .fill::after{content:"";position:absolute;right:0;top:8px;bottom:8px;width:2px;border-radius:1px;background:rgba(255,255,255,.92)}
+  .bar .tick{position:absolute;bottom:0;width:1.5px;height:6px;margin-left:-.75px;background:rgba(255,255,255,.55);pointer-events:none}
+  .bar .lb{position:relative;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;color:rgba(245,245,247,.82);white-space:nowrap;pointer-events:none}
+  .bar output{position:relative;flex:none;font:600 12px var(--mono);color:var(--text);white-space:nowrap;pointer-events:none}
+  .sc.chg .bar output{color:var(--acc-lite)}
+  .bar input[type=range]{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;pointer-events:none}
+  .bar:has(input:focus-visible),.bar.typing{border-color:color-mix(in srgb,var(--acc) 80%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--acc) 20%,transparent)}
+  .bar.drag{border-color:rgba(255,255,255,.45);background:rgba(0,0,0,.34)}
+  .bar.drag .fill{background:rgba(255,255,255,.22)}
+  .bar.drag .fill::after{width:3px;top:5px;bottom:5px;background:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.18)}
+  body.scrubbing,body.scrubbing *{cursor:ew-resize!important}
+  .bar.typing{cursor:text;background:rgba(0,0,0,.4)}
+  .bar.typing .fill{opacity:.45}
+  .bar .num{position:relative;width:64px;height:24px;margin:0 -4px 0 auto;padding:0 6px;border:0;border-radius:6px;background:color-mix(in srgb,var(--acc) 26%,transparent);color:#fff;font:600 12px var(--mono);text-align:right}
+  .bar .num:focus{border:0;box-shadow:none}
+  .bar .unit{position:relative;font:600 12px var(--mono);color:rgba(245,245,247,.74)}
+  .bar.off{cursor:not-allowed;background:rgba(0,0,0,.18);border-style:dashed}
+  .bar.off .lb{color:var(--text3)}
+  .bar .why{position:relative;flex:1;min-width:0;text-align:right;font-size:12px;color:rgba(245,245,247,.74);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* the way back to a default, in the rail: shown only where a control is off its default */
+  .rs{width:28px;height:28px;border-radius:8px;border:0;background:transparent;color:rgba(245,245,247,.8);display:grid;place-items:center;padding:0;cursor:pointer}
+  .rs[hidden]{display:grid;visibility:hidden}   /* its place in the rail kept */
+  .rs svg{width:15px;height:15px}
+  .rs:hover{background:rgba(255,255,255,.1);color:#fff}
+  .rs:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+  /* a colour: the whole row opens the picker; automatic says so, a colour of one's own has the way back in the rail */
+  .cb{position:relative;display:flex;align-items:center;gap:10px;min-width:0;height:34px;padding:0 10px 0 8px;border-radius:10px;background:rgba(0,0,0,.28);border:1px solid var(--line);font-size:13px;cursor:pointer}
+  .cb:hover{border-color:rgba(255,255,255,.28)}
+  .cb:has(input:focus-visible){border-color:color-mix(in srgb,var(--acc) 80%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--acc) 20%,transparent)}
+  .cb input[type=color]{position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;border:0;opacity:0;cursor:pointer}
+  .cb .dot{flex:none;width:18px;height:18px;border-radius:50%;box-shadow:0 0 0 2px rgba(255,255,255,.42)}
+  .cb .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cb .auto{flex:none;padding:0 8px;border-radius:999px;background:rgba(255,255,255,.1);color:rgba(245,245,247,.82);font-size:11.5px;line-height:20px}
+  .cb .hex{flex:none;font:600 12px var(--mono)}
+  .cr.chg .hex{color:var(--acc-lite)}
+  /* on or off: a switch at the end of a row, the whole row its target */
+  .swr{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:34px;padding:0 4px 0 10px;border-radius:10px;font-size:13px;cursor:pointer}
+  .swr:hover{background:rgba(255,255,255,.06)}
+  .swr.dis{color:var(--text3);cursor:default}
+  .swr.dis:hover{background:none}
+  /* a choice among many: a field showing the one chosen, opening a list of them (.pklist, see picker in app.js) */
+  .pk{display:flex;align-items:center;gap:9px;width:auto;min-width:0;height:34px;padding:0 8px 0 7px;border-radius:10px;background:rgba(0,0,0,.28);border:1px solid var(--line);color:var(--text);font-size:13px;text-align:left;cursor:pointer}
+  .pk:hover:not(:disabled){border-color:rgba(255,255,255,.28)}
+  .pk[aria-expanded=true]{border-color:rgba(255,255,255,.45);background:rgba(0,0,0,.36)}
+  .pk:focus-visible{outline:none;border-color:color-mix(in srgb,var(--acc) 80%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--acc) 20%,transparent)}
+  .pk:disabled{opacity:.45;cursor:default}
+  .pk .pv{flex:none;display:grid;place-items:center;min-width:24px;height:22px;padding:0 3px;border-radius:6px;background:rgba(255,255,255,.08);color:#fff;font-size:12px;font-weight:800}
+  .pk .tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pk .chev{flex:none;display:grid;width:16px;height:16px;color:rgba(245,245,247,.7)}
+  .pk .pv svg,.pklist .gl svg{display:block;width:22px;height:14px}
+  .pklist{position:fixed;z-index:70;display:flex;flex-direction:column;gap:1px;padding:5px;overflow:auto;overscroll-behavior:contain;border-radius:14px;background-color:rgba(24,24,34,.9);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid rgba(255,255,255,.18);box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 18px 44px rgba(0,0,0,.5)}
+  html.solid .pklist{background-color:var(--solid2);-webkit-backdrop-filter:none;backdrop-filter:none}
+  .pklist .mi{flex:none;display:flex;align-items:center;gap:10px;width:100%;min-height:32px;padding:0 10px 0 8px;border:0;border-radius:8px;background:transparent;color:rgba(245,245,247,.88);font-size:13px;text-align:left;cursor:pointer;outline:none}
+  .pklist .mi:hover,.pklist .mi:focus{background:rgba(255,255,255,.1);color:#fff}
+  .pklist .mi:focus-visible{box-shadow:inset 0 0 0 2px var(--acc)}
+  .pklist .mi[aria-selected=true]{color:#fff;font-weight:700}
+  .pklist .mi .tx{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pklist .mi .ck{flex:none;display:grid;width:15px;height:15px;margin-left:auto}
+  .pklist .mi .gl{flex:none;display:grid;width:24px;color:rgba(245,245,247,.85)}
+  .pklist .grp{flex:none;padding:8px 10px 3px;font-size:11.5px;color:var(--text3)}
   .mine-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
   .mine-head .cap{margin:0}
   .mine-head .btn{padding:4px 9px;font-size:12px}
@@ -521,12 +622,12 @@
   .layer.hidden .th,.layer.hidden .nm{opacity:.45}   /* hidden: dimmed, its crossed eye kept in sight */
   .layer.dim{opacity:.35;cursor:not-allowed}   /* FOCUS is on another layer: it cannot be selected */
   .layer.away .th,.layer.away .nm,.layer.away .kind,.layer.away .badge,.layer.away .ic{opacity:.4}   /* kept to other sizes: not on the cover at this one (its line says so, its chip stays bright) */
-  .layer .th{width:36px;height:36px;border-radius:9px;overflow:hidden;display:grid;place-items:center;background:rgba(0,0,0,.35);box-shadow:0 0 0 1px rgba(255,255,255,.12);color:#fff;font:800 12px/1 var(--ui);white-space:nowrap}
-  .layer .th.one{font-size:16px}
-  .layer .th img{width:100%;height:100%;object-fit:cover;display:block}
-  .layer .th .ico{display:grid;place-items:center;opacity:.7}
-  .layer .th .ico svg{width:18px;height:18px}
-  .layer .th .ico.fill,.layer .th .ico.fill svg{width:100%;height:100%;opacity:1}
+  .layer .th,.dhead .th{width:36px;height:36px;border-radius:9px;overflow:hidden;display:grid;place-items:center;background:rgba(0,0,0,.35);box-shadow:0 0 0 1px rgba(255,255,255,.12);color:#fff;font:800 12px/1 var(--ui);white-space:nowrap}
+  .layer .th.one,.dhead .th.one{font-size:16px}
+  .layer .th img,.dhead .th img{width:100%;height:100%;object-fit:cover;display:block}
+  .layer .th .ico,.dhead .th .ico{display:grid;place-items:center;opacity:.7}
+  .layer .th .ico svg,.dhead .th .ico svg{width:18px;height:18px}
+  .layer .th .ico.fill,.layer .th .ico.fill svg,.dhead .th .ico.fill,.dhead .th .ico.fill svg{width:100%;height:100%;opacity:1}
   .layer .txt{min-width:0;display:flex;flex-direction:column;gap:2px}
   .layer .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:700}
   .layer .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--text3)}
@@ -598,6 +699,8 @@
   body.popdrag,body.popdrag *{cursor:grabbing!important;user-select:none;-webkit-user-select:none}
   #fpop .fpop-h{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px}
   #fpop .psec{border:0;padding:0}
+  #fpop .psec-b{padding:0}
+  #fpop .psec-b:not(:has(>.sc,>.cr))>*{margin-right:0!important}   /* a group with no way back to a default needs no rail there */
   #fpop.wide{width:380px}
   /* the text effects as cards (the Effect group, in the drawer and in its popover): the layer's first letter drawn in each */
   .fxdeck{display:flex;flex-direction:column;gap:8px}
@@ -678,7 +781,6 @@
   .wl{min-width:26px;height:30px;padding:0 4px;border:2px dashed var(--line2);background:none;color:#fff;font:700 17px var(--ui);line-height:1;cursor:pointer;opacity:.5}
   .wl.on{border:2px solid var(--acc);background:var(--acc);color:var(--ink);opacity:1}
   .wkey{display:flex;gap:12px;align-items:center;font-size:12px;opacity:.85}.wkey .wl{height:22px;min-width:22px;font-size:12px;cursor:default}
-  .weave-with{display:grid;gap:2px;margin-top:6px}
   /* the weave's brush: its panel over the left column, its ring under the pointer on the canvas (dashed while it takes the lettering behind) */
   #brushwin .sl{margin-top:0}
   #brushring{position:fixed;z-index:20;pointer-events:none;border-radius:50%;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(7,7,12,.85),inset 0 0 0 1px rgba(7,7,12,.85)}

@@ -329,7 +329,10 @@ const drafting = () => DRAFT.held || performance.now() < DRAFT.until;
 function draftTouch(opts, key = null) { DRAFT.until = performance.now() + 250; DRAFT.held = !!DRAFT.down && DRAFT.from === DRAFT.down; DRAFT.key = key; later("undraft", 270, () => DRAFT.held || queueDraw()); touch(opts); }
 /** The pointer let go (or the window left, a context menu opened, a slider's `change`, which comes as its knob is let go): a draft held till then is painted in full. */
 function letGo() { DRAFT.down = null; if (DRAFT.held) { DRAFT.held = false; DRAFT.until = 0; queueDraw(); } }
-addEventListener("pointerdown", (e) => { DRAFT.down = e.button === 0 && !e.ctrlKey && (e.target.type === "range" || e.target.id === "cv") ? e.target : null; }, true);   // a slider's knob, or a scene object on the canvas; not a right click (a Control-click on a Mac)
+addEventListener("pointerdown", (e) => {   // a slider's knob, a scrub bar (see scrub), or a scene object on the canvas; not a right click (a Control-click on a Mac)
+  const bar = e.target.closest && e.target.closest(".bar");
+  DRAFT.down = e.button === 0 && !e.ctrlKey && (e.target.type === "range" || e.target.id === "cv" || bar) ? bar || e.target : null;
+}, true);
 for (const type of ["input", "change", "click", "keydown"]) addEventListener(type, (e) => { DRAFT.from = e.target; }, true);
 addEventListener("pointermove", (e) => { DRAFT.from = e.target; if (DRAFT.down && !(e.buttons & 1)) letGo(); }, true);   // moved with no button down: the release was missed
 addEventListener("pointerup", letGo, true); addEventListener("pointercancel", letGo, true); addEventListener("contextmenu", letGo, true); addEventListener("blur", letGo);
@@ -873,14 +876,240 @@ function slider(labelKey, min, max, step, value, fmt, oninput) {
   return el("div", { class: "sl" }, el("span", {}, t(labelKey)),
     el("input", { type: "range", min, max, step, value, oninput: (e) => { const v = Number(e.target.value); out.textContent = fmt(v); oninput(v); } }), out);
 }
-function check(labelKey, checked, onchange) {
-  return el("label", { class: "chk" }, el("input", { type: "checkbox", checked, onchange: (e) => onchange(e.target.checked) }), t(labelKey));
-}
+/** An on/off setting of the selected layer's properties: a row with its name and the switch at its end (see switchRow). `opts` as there. */
+const check = (labelKey, checked, onchange, opts = {}) => switchRow(t(labelKey), checked, onchange, opts);
 function select(options, value, onchange) {   // options: [[value, label]] or {group, items}
   const opt = ([v, l]) => el("option", { value: v, selected: v === value }, l);
   return el("select", { onchange: (e) => onchange(e.target.value) }, options.map((o) => (Array.isArray(o) ? opt(o) : o.items.length ? el("optgroup", { label: o.group }, o.items.map(opt)) : null)));
 }
 const px = (v) => String(Math.round(v)), times = (v) => v.toFixed(2) + "×", pct = (v) => Math.round(v * 100) + "%";
+
+// ---------- the controls of the selected layer's properties (the drawer and the bar's popover)
+// One family, each a row 34 px high (see .psec in index.html): the scrub bar, the colour, the switch, the choice among
+// many; a few ways side by side are a .seg. A control that knows its default says when it is off it (the class chg, read
+// by its group's line, see secSum), and the scrub bar and the colour put it back with the ↺ in the rail beside them.
+const RESET_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 3.5V8H8"/></svg>';
+const CHEV_ICON = (d) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+/**
+ * How a scrub bar shows its value (`show`), and how it is typed: `text` in the field (no unit), `read` the typed
+ * words back to a value (NaN when they are none), `unit` after the field.
+ */
+const SHOWN = {
+  times: { show: times, text: (v) => v.toFixed(2), read: Number, unit: "×" },
+  pct: { show: pct, text: (v) => String(Math.round(v * 100)), read: (s) => Number(s) / 100, unit: "%" },
+  px: { show: (v) => `${Math.round(v)} px`, text: (v) => String(Math.round(v)), read: Number, unit: "px" },
+  num: { show: (v) => v.toFixed(2), text: (v) => v.toFixed(2), read: Number, unit: "" },
+};
+/** What was typed into a scrub bar, as a number of `fmt` (see SHOWN): full-width digits and a comma for the point taken too; NaN when it is none. */
+const typedValue = (s, fmt) => { const n = s.normalize("NFKC").replace(/,/g, ".").replace(/[^\d.+-]/g, ""); return n && !/^[+-]?\.?$/.test(n) ? fmt.read(n) : NaN; };
+/**
+ * A scrub bar, the properties' slider: its name and value inside a bar dragged anywhere along it, the value following
+ * the pointer as far as it moves (a press alone changes nothing, so it never jumps to where it was pressed); a tick at
+ * `def`, the value it has by default, which a drag comes to rest on within a few pixels. A double-click (or Enter) types
+ * the value in: Enter keeps it, Esc leaves it as it was, the arrows step it (Shift: ten steps). With the focus on it (a
+ * range input under it, which Tab reaches and a screen reader reads) the arrow keys, Home and End move it, Shift ten
+ * steps at a time. Off its default, the value is in the channel colour and a ↺ beside it puts it back. `fmt`: one of
+ * SHOWN. `off`: why it cannot be changed now, said in its place.
+ */
+function scrub(label, min, max, step, value, fmt, oninput, def = null, off = "") {
+  const at = (v) => clamp(max > min ? (v - min) / (max - min) : 0, 0, 1);
+  const onStep = (n) => Number((min + Math.round((n - min) / step) * step).toFixed(6));
+  const fill = el("span", { class: "fill" }), out = el("output", {});
+  const range = el("input", { type: "range", min, max, step, value, disabled: !!off, "aria-label": label });
+  const bar = el("label", { class: "bar" + (off ? " off" : ""), title: off || t("props.scrubTip") },
+    fill, def != null && el("span", { class: "tick", style: `left:${at(def) * 100}%` }), el("span", { class: "lb" }, label), off ? el("span", { class: "why" }, off) : out, range);
+  const rs = el("button", { type: "button", class: "rs", hidden: true, innerHTML: RESET_ICON, onclick: () => { put(def, true); range.focus({ preventScroll: true }); } });
+  const box = el("div", { class: "sc", dataset: def != null ? { def } : {} }, bar, rs);
+  let v = value;
+  const show = () => {
+    fill.style.width = at(v) * 100 + "%";
+    out.textContent = fmt.show(v);
+    range.value = v; range.setAttribute("aria-valuetext", fmt.show(v));
+    const chg = def != null && Math.abs(v - def) > 1e-6;
+    box.classList.toggle("chg", chg); rs.hidden = !chg;
+    if (def != null) { rs.title = t("props.resetTo", label, fmt.show(def)); rs.setAttribute("aria-label", rs.title); }
+  };
+  // to value n: one of its steps (`exact`, as typed or the default, as it is), within its ends
+  const put = (n, exact = false) => {
+    n = clamp(exact ? n : onStep(n), min, max);
+    if (fmt === SHOWN.px) n = Math.round(n);
+    if (n === v) return;
+    v = n; show(); oninput(v); resum(box);
+  };
+  show();
+  if (off) return box;
+  // dragged: by how far the pointer goes, the bar's width its whole range
+  bar.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || bar.classList.contains("typing")) return;
+    e.preventDefault(); range.focus({ preventScroll: true });
+    const x0 = e.clientX, v0 = v, w = bar.clientWidth || 1;
+    let moved = false;
+    try { bar.setPointerCapture(e.pointerId); } catch { /* a pointer the page did not see go down */ }
+    bar.onpointermove = (m) => {
+      const dx = m.clientX - x0;
+      if (!moved && Math.abs(dx) < 3) return;
+      if (!moved) { moved = true; bar.classList.add("drag"); document.body.classList.add("scrubbing"); }
+      let n = v0 + (dx / w) * (max - min);
+      if (def != null && Math.abs(at(n) - at(def)) * w < 6) return put(def, true);   // drawn to its default
+      put(n);
+    };
+    bar.onpointerup = bar.onpointercancel = bar.onlostpointercapture = () => {
+      bar.onpointermove = bar.onpointerup = bar.onpointercancel = bar.onlostpointercapture = null;
+      bar.classList.remove("drag"); document.body.classList.remove("scrubbing");
+    };
+  });
+  // typed: the number in a field in the value's place
+  const typeIn = () => {
+    if (bar.classList.contains("typing")) return;
+    const was = v, field = el("input", { type: "text", class: "num", value: fmt.text(v), spellcheck: false, inputMode: "decimal", "aria-label": label });
+    const unit = fmt.unit && el("span", { class: "unit" }, fmt.unit);
+    let done = false;
+    const end = (keep) => {
+      if (done) return;
+      done = true;
+      const n = typedValue(field.value, fmt);
+      if (keep && Number.isFinite(n)) put(n, true); else if (!keep) put(was, true);
+      field.replaceWith(out); if (unit) unit.remove();
+      bar.classList.remove("typing");
+      if (bar.isConnected) range.focus({ preventScroll: true });
+    };
+    field.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(e.key === "Enter"); }   // Esc not also shutting the bar's popover
+      else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const n = typedValue(field.value, fmt);
+        put((Number.isFinite(n) ? n : v) + (e.key === "ArrowUp" ? 1 : -1) * step * (e.shiftKey ? 10 : 1));
+        field.value = fmt.text(v); field.select();
+      }
+    });
+    field.addEventListener("blur", () => end(true));
+    field.addEventListener("pointerdown", (e) => e.stopPropagation());   // no drag from inside the field
+    bar.classList.add("typing");
+    out.replaceWith(field); if (unit) field.after(unit);
+    field.focus(); field.select();
+  };
+  bar.addEventListener("dblclick", typeIn);
+  range.addEventListener("input", () => put(Number(range.value)));   // the arrow keys, Home, End, Page Up and Down
+  range.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); return typeIn(); }
+    const dir = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[e.key];
+    if (dir && e.shiftKey) { e.preventDefault(); put(v + dir * step * 10); }
+  });
+  return box;
+}
+/**
+ * An on/off row: its name, and the switch at its end (the app's one switch, .tog); the whole row is its target.
+ * `disabled`, `title` (said on hover), `def` (what it is by default: another is said on its group's line).
+ */
+function switchRow(label, on, onchange, { disabled = false, title = null, def = null } = {}) {
+  const b = el("button", { type: "button", class: "tog" + (on ? " on" : ""), role: "switch", "aria-checked": String(on), disabled,
+    onclick: () => { on = !on; b.classList.toggle("on", on); b.setAttribute("aria-checked", String(on)); row.classList.toggle("chg", def != null && on !== def); onchange(on); resum(row); } });
+  const row = el("label", { class: "swr" + (disabled ? " dis" : "") + (def != null && on !== def ? " chg" : ""), title }, el("span", {}, label), b);
+  return row;
+}
+/**
+ * A few ways of doing a thing, side by side, the one chosen lit: [value, label, icon?, tip?] each; `name` says what
+ * it chooses (to a screen reader); `def` its way by default (another said on its group's line); `off`, all of it greyed.
+ */
+function segs(name, ways, value, onchange, { def = null, off = false, title = null } = {}) {
+  const box = el("div", { class: "seg" + (def != null && value !== def ? " chg" : ""), role: "radiogroup", "aria-label": name, title },
+    ways.map(([v, label, icon, tip]) => el("button", { type: "button", class: "btn" + (v === value ? " on" : ""), role: "radio", "aria-checked": String(v === value), disabled: off, title: tip || null, dataset: { v: String(v) },
+      onclick: () => {
+        if (v === value) return;
+        value = v;
+        for (const b of box.children) { const on = b.dataset.v === String(v); b.classList.toggle("on", on); b.setAttribute("aria-checked", String(on)); }
+        box.classList.toggle("chg", def != null && v !== def);
+        onchange(v); resum(box);
+      } }, icon && el("span", { class: "ico", innerHTML: icon }), el("span", {}, label))));
+  return box;
+}
+/** The pictures of the bends in their list (see BENDS in textfx.js): a line of letters as each bends it. */
+const BEND_GLYPHS = { "": "M3 8h18", arc: "M3 12C7 3 17 3 21 12", arcLow: "M3 4c4 9 14 9 18 0", circle: "M4 14a8 8 0 1 1 16 0", shell: "M3 7c4-5 14-5 18 0M3 13h18",
+  bulge: "M3 5c6-3 12-3 18 0M3 11c6 3 12 3 18 0", pinch: "M3 3c6 3 12 3 18 0M3 13c6-3 12-3 18 0", fisheye: "M3 8c0-6 18-6 18 0s-18 6-18 0", rise: "M3 13 21 3",
+  taper: "M3 3l18 3v4L3 13z", wave: "M3 8c3-5 6-5 9 0s6 5 9 0", flag: "M3 5c3-2 6-2 9 0s6 2 9 0M3 12c3-2 6-2 9 0s6 2 9 0" };
+const bendGlyph = (id) => `<svg viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${BEND_GLYPHS[id] || BEND_GLYPHS[""]}"/></svg>`;
+/**
+ * A choice among many (a font, a bend, a highlight's mark, a shape…): a field showing the one chosen, which opens the
+ * list of them (see openPicker). `options` as select's ([value, label] or {group, items}); `name` says what it chooses;
+ * `id` finds it again once the properties are built anew, for the focus; `pv` a mark before the choice (a node, or
+ * glyph(value)'s picture), `glyph(value)` a picture before each choice in the list; `font(value)`, the face a choice's
+ * name is shown in there; `def` its choice by default (another said on its group's line).
+ */
+function picker(options, value, onchange, { name = "", id = "", pv = null, glyph = null, font = null, def = null, disabled = false, title = null } = {}) {
+  const cur = options.flatMap((o) => (Array.isArray(o) ? [o] : o.items)).find(([v]) => v === value);
+  const mark = pv || (glyph && el("span", { innerHTML: glyph(value) }));
+  const b = el("button", { type: "button", class: "pk" + (def != null && value !== def ? " chg" : ""), "aria-haspopup": "listbox", "aria-expanded": "false", disabled, title,
+    "aria-label": name ? `${name}: ${cur ? cur[1] : ""}` : null, dataset: { pick: id },
+    onclick: () => (b._shut ? b._shut(true) : openPicker(b, options, value, onchange, { glyph, font })) },
+    mark && el("span", { class: "pv" }, mark), el("span", { class: "tx" }, cur ? cur[1] : ""), el("span", { class: "chev", innerHTML: CHEV_ICON("m6 9 6 6 6-6") }));
+  return b;
+}
+/**
+ * The list of picker `b`'s choices, under it (over it where the window has no room below), the one chosen ticked and
+ * in sight: a click or Enter takes one; the arrows, Home and End go through them, a letter or two typed to the next
+ * whose name starts so; Esc, Tab or a press anywhere else shuts it as it was. The focus goes back to the picker, found
+ * again by its id once the choice has built the properties anew.
+ */
+function openPicker(b, options, value, onchange, { glyph = null, font = null } = {}) {
+  if (document.querySelector(".pklist")) return;
+  const root = b.closest("#side, #fpop") || document.body, id = b.dataset.pick;
+  const item = ([v, label]) => el("button", { type: "button", class: "mi", role: "option", "aria-selected": String(v === value), tabIndex: -1, dataset: { v },
+    style: font && font(v) ? `font-family:"${font(v)}",var(--ui)` : null, onclick: () => choose(v) },
+    glyph && el("span", { class: "gl", innerHTML: glyph(v) }), el("span", { class: "tx" }, label), v === value && el("span", { class: "ck", innerHTML: CHEV_ICON("m5 12 5 5 9-10") }));
+  const list = el("div", { class: "pklist", role: "listbox", "aria-label": b.getAttribute("aria-label") || "" },
+    options.map((o) => (Array.isArray(o) ? item(o) : o.items.length ? [el("div", { class: "grp", role: "presentation" }, o.group), o.items.map(item)] : null)));
+  const items = () => [...list.querySelectorAll(".mi")];
+  let typed = "", typedAt = 0, frame = 0;
+  const place = () => {
+    if (!b.isConnected) return close(false);
+    const r = b.getBoundingClientRect(), w = Math.min(Math.max(r.width, 220), 340, innerWidth - 24);
+    const below = innerHeight - r.bottom - 12, above = r.top - 12, up = below < 200 && above > below;
+    list.style.width = w + "px"; list.style.left = clamp(r.left, 12, innerWidth - w - 12) + "px";
+    list.style.maxHeight = Math.min(360, up ? above : below) + "px";
+    list.style.top = (up ? r.top - 6 - list.offsetHeight : r.bottom + 6) + "px";
+    frame = requestAnimationFrame(place);   // following the field as the drawer scrolls or is laid out again
+  };
+  const away = (e) => { if (!list.contains(e.target) && !b.contains(e.target)) close(false); };
+  const close = (refocus) => {
+    cancelAnimationFrame(frame); list.remove(); b._shut = null;
+    removeEventListener("pointerdown", away, true);
+    b.setAttribute("aria-expanded", "false");
+    if (refocus && b.isConnected) b.focus({ preventScroll: true });
+  };
+  const choose = (v) => {
+    close(false);
+    if (v !== value) onchange(v);
+    const again = b.isConnected ? b : id && root.querySelector(`.pk[data-pick="${CSS.escape(id)}"]`);
+    if (again) again.focus({ preventScroll: true });
+  };
+  list.addEventListener("keydown", (e) => {
+    const all = items(), i = all.indexOf(document.activeElement);
+    const go = (j) => { e.preventDefault(); all[clamp(j, 0, all.length - 1)].focus(); };
+    if (e.key === "ArrowDown") go(i + 1);
+    else if (e.key === "ArrowUp") go(i - 1);
+    else if (e.key === "Home" || e.key === "PageUp") go(0);
+    else if (e.key === "End" || e.key === "PageDown") go(all.length - 1);
+    else if (e.key === "Escape") { e.preventDefault(); close(true); }
+    else if (e.key === "Tab") { e.preventDefault(); close(true); }
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (i >= 0) choose(all[i].dataset.v); }
+    else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {   // typed: to the next one whose name starts so
+      const now = performance.now();
+      typed = (now - typedAt < 700 ? typed : "") + e.key.toLowerCase(); typedAt = now;
+      const name = (n) => n.querySelector(".tx").textContent.toLowerCase(), from = typed.length > 1 ? i : i + 1;
+      const hit = [...all.slice(Math.max(0, from)), ...all.slice(0, Math.max(0, from))].find((n) => name(n).startsWith(typed));
+      if (hit) { e.preventDefault(); hit.focus(); }
+    }
+    e.stopPropagation();   // no key in the list reaches the window's (Esc there would shut the bar's popover, or let go of the layer)
+  });
+  b.setAttribute("aria-expanded", "true"); b._shut = close;
+  document.body.append(list);
+  addEventListener("pointerdown", away, true);
+  place();
+  const on = list.querySelector('.mi[aria-selected="true"]') || items()[0];
+  if (on) { on.scrollIntoView({ block: "nearest" }); on.focus({ preventScroll: true }); }
+}
+/** The line of the group of properties node `n` is in, written again after a change made in place (the group not built anew); none in the bar's popover. */
+const resum = (n) => { const g = n.closest(".psec"); if (g && g.querySelector(":scope > .psec-h .sum")) writeSum(g); };
 
 // ---------- the sheets (S.mode "edit")
 /** A sheet's heading: what it is for, in a word, and a line under it. */
@@ -2615,13 +2844,14 @@ function blockSection() {
   const step = (fn) => { clearTimeout(timers.hist); commitHistory(); fn(); commitHistory(); };   // its own step of undo
   // a position picked: the sliders follow it (from what the style keeps for it, else its defaults), as templateControls's list does
   const place = (v) => { if (v !== a.tpl) step(() => a.put(v, (st.layoutAdjust || {})[v] || templateDefault(v, orientOfKey(S.sel)), true)); };
-  const mirror = el("label", { class: "chk", title: t("props.blockFlipTip." + a.tpl) },
-    el("input", { type: "checkbox", checked: !!a.adj.flip, onchange: (e) => step(() => a.set("flip", e.target.checked, true)) }), t("props.blockFlip"));
+  // its size and lean as scrub bars, the tick at what the template has by default (the canvas's orientation's)
+  const d = templateDefault(a.tpl, orientOfKey(S.sel));
+  const slide = (k, label, step) => scrub(t(label), LAYOUT_LIMITS[k][0], LAYOUT_LIMITS[k][1], step, a.adj[k] ?? a.now[k], SHOWN.num, (v) => a.set(k, v), d[k] ?? null);
   return psec("props.sec.block", [
-    el("div", {}, el("div", { class: "blockat-h" }, cap("props.blockAt"), mirror), el("div", { class: "seg wide blockat" }, ["stack", "split", "banner"].map((k) =>
-      el("button", { class: "btn" + (a.tpl === k ? " on" : ""), title: t("tpl." + k + "Tip"), "aria-pressed": String(a.tpl === k), onclick: () => place(k) }, t("tpl." + k))))),
-    blockSliders(a), at.own,
-    el("div", {}, el("button", { class: "btn wide", title: t("style.byOrientTip"), onclick: byOrient }, t("style.byOrient")), el("div", { class: "hint" }, t("style.byOrientHint"))),
+    segs(t("props.blockAt"), ["stack", "split", "banner"].map((k) => [k, t("tpl." + k), null, t("tpl." + k + "Tip")]), a.tpl, place),
+    check("props.blockFlip", !!a.adj.flip, (on) => step(() => a.set("flip", on, true)), { title: t("props.blockFlipTip." + a.tpl), def: false }),
+    slide("size", a.tpl === "split" ? "style.laySide" : "style.layBand", 0.01), slide("slant", "style.laySlant", 0.005), at.own,
+    el("button", { class: "btn wide", title: t("style.byOrientTip"), onclick: byOrient }, t("style.byOrient")),
   ], `${t("props.blockHint")} ${at.says} ${t("style.scopeWhere")}`);
 }
 /** Block by orientation ("wide a side panel, tall a band, square a slim banner"): every size in its orientation's default layout (layoutByOrient in layout.js); one step of undo. */
@@ -4175,11 +4405,14 @@ function fontControl(L, bare = false) {
     { group: t("font.imported"), items: S.importedFonts.map(item) },
     { group: t("font.system"), items: S.systemFonts.map(item) }, ["+", t("font.add")]];
   if (L.font && !have.includes(L.font)) options.splice(1, 0, [L.font, `${L.font} · ${t("font.missing")}`]);   // set on another computer
-  return el("div", { title: t("props.font") }, !bare && cap("props.font"), select(options, L.font || "", async (v) => {
+  // the faces the app has read (bundled, imported) shown in their own face in the list: a system font's would be read only for that
+  const face = (v) => { const f = v.replace(/^~/, ""); return BUNDLED_FONTS.includes(f) || S.importedFonts.includes(f) ? f : null; };
+  return [!bare && cap("props.font"), picker(options, L.font || "", async (v) => {
     if (v !== "+") return set(v.replace(/^~/, ""));
     const family = await importFont();
     if (family) set(family); else renderSide();   // nothing chosen: put the menu back where it was
-  }), L.font && S.latinFonts.has(L.font) && el("div", { class: "hint" }, t("font.latinHint")));
+  }, { name: t("props.font"), id: "font", pv: el("span", { style: L.font ? `font-family:"${L.font}",var(--ui)` : null }, "Aa"), font: face, def: "" }),
+  L.font && S.latinFonts.has(L.font) && el("div", { class: "hint" }, t("font.latinHint"))];
 }
 
 // ---------- the Layers sheet's list, and the selected layer's properties in the drawer
@@ -4390,6 +4623,7 @@ const ICONS = Object.fromEntries(Object.entries({
   stack: '<path d="M8 1.8l6 3-6 3-6-3z"/><path d="M2 8.1l6 3 6-3"/><path d="M2 11.2l6 3 6-3"/>',   // sheets one over another: the 3D view
   focus: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2.6M8 11.6v2.6M1.8 8h2.6M11.6 8h2.6"/>',   // FOCUS: a sight on the one layer
   frame: '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/>',   // the corner brackets
+  close: '<path d="M4 4l8 8M12 4l-8 8"/>',   // the drawer's ✕
 }).map(([k, d]) => [k, `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`]));
 /**
  * A click on a name selects the layer like a click anywhere on its row; a second one soon after, on
@@ -4429,8 +4663,8 @@ function renameLayer(id) {
 // sit behind an ⓘ (hover, or click to read it as a toast); only warnings are written out.
 /** The ⓘ, drawn rather than the character, whose place in the line would change from font to font (see .info in index.html). */
 const INFO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M12 11v5.5"/><path d="M12 7.6h.01"/></svg>';
-/** An ⓘ that shows `text` on hover, and in a bubble beside it when clicked. */
-const info = (text) => el("span", { class: "info", title: text, innerHTML: INFO_ICON, onclick: (e) => { e.stopPropagation(); showTip(e.currentTarget, text); } });
+/** An ⓘ that shows `text` on hover, and in a bubble beside it when clicked (a button, so Tab reaches it and Enter reads it). */
+const info = (text) => el("button", { type: "button", class: "info", title: text, "aria-label": text, innerHTML: INFO_ICON, onclick: (e) => { e.preventDefault(); e.stopPropagation(); showTip(e.currentTarget, text); } });
 /** A bubble with `text` by element `at` (wrapped, unlike a toast); the next click anywhere closes it. */
 function showTip(at, text) {
   const tip = $("tip") || document.body.appendChild(el("div", { id: "tip", hidden: true }));
@@ -4448,63 +4682,81 @@ function showTip(at, text) {
  */
 const SECS = new Map();
 /**
- * One group of properties: a line with its name (and an ⓘ with `tip`), what it is set to while shut (see secSum)
- * and a chevron, a click on it opening or shutting it; then its controls.
+ * One group of properties: a line with its name (a button, the whole line its target; an ⓘ with `tip` beside it), what
+ * it is set to while it is shut (see secSum) and a chevron; then its controls.
  */
 const psec = (nameKey, kids, tip = "") => el("div", { class: "psec", dataset: { key: nameKey } },
-  el("div", { class: "psec-h", onclick: (e) => { const g = e.currentTarget.parentElement, open = !g.classList.contains("open"); SECS.set(nameKey, open); g.classList.toggle("open", open); g.querySelector(".sum").textContent = secSum(g); } },
-    el("span", {}, t(nameKey)), tip && info(tip), el("span", { class: "sum" }), el("span", { class: "chev" })),
+  el("div", { class: "psec-h" },
+    el("button", { type: "button", class: "tg", "aria-expanded": "false", onclick: (e) => { const g = e.currentTarget.closest(".psec"), open = !g.classList.contains("open"); SECS.set(nameKey, open); showSec(g, open); } }, t(nameKey)),
+    tip && info(tip), el("span", { class: "sum" }), el("span", { class: "chev", innerHTML: CHEV_ICON("m9 6 6 6-6 6") })),
   el("div", { class: "psec-b" }, kids));
+/** Group `g` opened or shut, its line saying so (and what it is set to). */
+function showSec(g, open) {
+  g.classList.toggle("open", open);
+  g.querySelector(".psec-h .tg").setAttribute("aria-expanded", String(open));
+  writeSum(g);
+}
 /**
- * What a group of properties is set to, in a few words: its menus' choices, its colours (or Automatic), the boxes
- * ticked, its sliders moved off either end, how many sizes it shows at; Off when nothing is ticked in a group of
- * boxes alone. Read off its controls, so a group says it without being told.
+ * What a group of properties is set to, in a few words: its choices, its colours (or Automatic), the switches on, its
+ * scrub bars off their defaults (one without a default: moved off either end, or 1×), how many sizes it shows at; Off
+ * when it has only switches, none on. Read off its controls, so a group says it without being told. {said: [[words,
+ * changed]], changed}: what is off its default (the class chg, see the controls) first, and whether anything is.
  */
 function secSum(g) {
   const bits = [];
   let boxes = 0;
-  for (const n of g.querySelector(".psec-b").querySelectorAll("select, .fxtile.on, .sw, .seg .btn.on, .sizes-row, input[type=checkbox], .sl:not(.off)")) {
-    if (n.tagName === "SELECT") bits.push(n.selectedOptions[0] ? n.selectedOptions[0].textContent : "");
-    else if (n.classList.contains("fxtile")) bits.push(n.dataset.name);   // the text effect's card picked
-    else if (n.classList.contains("sw")) bits.push(n.querySelector(".auto") ? t("props.inkIsAuto") : n.querySelector("input").value.toUpperCase());
-    else if (n.classList.contains("sizes-row")) { const on = n.querySelectorAll(".btn.on").length, all = n.children.length; if (all > 1) bits.push(on === all ? t("props.sum.allSizes") : t("props.sum.sizes", on, all)); }
-    else if (n.type === "checkbox") { boxes++; if (n.checked && !n.disabled) bits.push(n.parentElement.textContent); }
-    else if (n.classList.contains("sl")) {   // a slider at either end, or at 1× (a strength or a bend as it comes), says nothing
-      const r = n.querySelector("input[type=range]"), v = n.children[2].textContent;
-      if (r && r.value !== r.min && r.value !== r.max && v !== times(1)) bits.push(`${n.children[0].textContent} ${v}`);
+  for (const n of g.querySelector(".psec-b").querySelectorAll(".pk, .fxtile.on, .cr, .seg .btn.on, .sizes-row, .swr, .sc")) {
+    if (n.classList.contains("pk")) bits.push([n.querySelector(".tx").textContent, n.classList.contains("chg")]);
+    else if (n.classList.contains("fxtile")) bits.push([n.dataset.name, n.dataset.fx !== "auto"]);   // the text effect's card picked
+    else if (n.classList.contains("cr")) bits.push([n.querySelector(".hex") ? n.querySelector(".hex").textContent : t("props.inkIsAuto"), n.classList.contains("chg")]);
+    else if (n.classList.contains("sizes-row")) { const on = n.querySelectorAll(".btn.on").length, all = n.children.length; if (all > 1) bits.push([on === all ? t("props.sum.allSizes") : t("props.sum.sizes", on, all), on < all]); }
+    else if (n.classList.contains("swr")) { boxes++; const b = n.querySelector(".tog"); if (b.classList.contains("on") && !b.disabled) bits.push([n.firstChild.textContent, n.classList.contains("chg")]); else if (n.classList.contains("chg")) bits.push([`${n.firstChild.textContent} · ${t("props.sum.off")}`, true]); }
+    else if (n.classList.contains("sc")) {
+      const r = n.querySelector("input[type=range]"), out = n.querySelector("output"), chg = n.classList.contains("chg");
+      if (!r || !out || r.disabled) continue;
+      // without a default: at either end, or at 1× (a strength or a bend as it comes), it says nothing
+      if (chg || (n.dataset.def == null && r.value !== r.min && r.value !== r.max && out.textContent !== times(1))) bits.push([`${n.querySelector(".lb").textContent} ${out.textContent}`, chg]);
     }
-    else bits.push(n.textContent);
+    else bits.push([n.textContent, n.closest(".seg").classList.contains("chg")]);
   }
-  const said = [...new Set(bits.map((b) => b.trim()).filter(Boolean))];   // two colours both automatic: Automatic, once
-  return said.length ? said.slice(0, 3).join(" · ") : boxes ? t("props.sum.off") : "";
+  const seen = new Set(), said = bits.map(([w, c]) => [w.trim(), c]).filter(([w]) => w && !seen.has(w) && seen.add(w));   // two colours both automatic: Automatic, once
+  said.sort((a, b) => b[1] - a[1]);
+  return { said: said.length ? said.slice(0, 3) : boxes ? [[t("props.sum.off"), false]] : [], changed: said.some(([, c]) => c) };
 }
-/** Opens the groups of properties in `box` as last left (the first open, untouched) and writes what each shut one is set to. */
+/** Writes on group g's line what it is set to (see secSum): a dot when anything is off its default, those words in the channel colour. */
+function writeSum(g) {
+  const { said, changed } = secSum(g);
+  g.querySelector(".psec-h .sum").replaceChildren(...[changed && el("span", { class: "chg", title: t("props.sum.changed") }),
+    said.length > 0 && el("span", { class: "said" }, said.map(([w, c], i) => [i ? " · " : "", c ? el("em", {}, w) : w]))].filter(Boolean));
+}
+/** Opens the groups of properties in `box` as last left (the first open, untouched) and writes what each is set to. */
 function openSecs(box) {
-  [...box.querySelectorAll(".psec")].forEach((g, i) => {
-    const k = g.dataset.key;
-    g.classList.toggle("open", SECS.has(k) ? SECS.get(k) : i === 0);
-    g.querySelector(".sum").textContent = secSum(g);
-  });
+  [...box.querySelectorAll(".psec")].forEach((g, i) => showSec(g, SECS.has(g.dataset.key) ? SECS.get(g.dataset.key) : i === 0));
 }
 /** Put a layer back where it was placed by default. */
 function placementControls(L) {
   const f = frame();
-  return el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => { resetPlacement(L, S.settings.scope, f.key, f.catId, f.group.map((g) => g.key)); touch({ cover: true, side: true }); } }, `${t("props.reset")} · ${scopeName(S.settings.scope)}`);
+  return el("button", { class: "btn wide", onclick: () => { resetPlacement(L, S.settings.scope, f.key, f.catId, f.group.map((g) => g.key)); touch({ cover: true, side: true }); } },
+    el("span", { class: "ico", innerHTML: RESET_ICON }), `${t("props.reset")} · ${scopeName(S.settings.scope)}`);
 }
 /**
- * A colour of a layer, a row of its own as a checkbox is: the swatch (click to choose), its name, and —
- * with `auto`, where the layer may also have none and take what the look gives it — "automatic" while it
- * has none, or a link back to automatic once it has one. `shown` is the swatch's colour while automatic.
+ * A colour of a layer, a row of its own: the whole row opens the colour picker; its colour, its name, and — with
+ * `auto`, where the layer may also have none and take what the look gives it — "automatic" while it has none, or the
+ * colour it has, in the channel colour, with the way back to automatic (↺) in the rail beside it. `shown` is the
+ * swatch's colour while automatic.
  */
 function swatch(L, key, labelKey, shown, auto = true) {
   // a text layer of before may still be in the channel colour (color "accent"): choosing a colour, or automatic, ends that
-  const old = key === "ink" && L.color === "accent", own = !!L[key] || old;
+  const old = key === "ink" && L.color === "accent", own = !!L[key] || old, now = L[key] || (old ? cat().color : shown);
   const put = (v) => { holdLive(L.id); if (v) L[key] = v; else delete L[key]; if (key === "ink") delete L.color; touch({ cover: true }); };
-  return el("div", { class: "sw" },
-    el("input", { type: "color", title: labelKey ? t(labelKey) : null, value: L[key] || (old ? cat().color : shown), oninput: (e) => { put(e.target.value); later("side", 600, renderSide); } }),
-    labelKey && el("span", { class: "nm" }, t(labelKey)),
-    auto && (own ? el("button", { class: "linkbtn", title: t("props.inkAutoHint"), onclick: () => { put(""); renderSide(); } }, t("props.inkAuto"))
-      : el("span", { class: "auto", title: t("props.inkAutoHint") }, t("props.inkIsAuto"))));
+  const dot = el("span", { class: "dot", style: `background:${now}` });
+  const said = own || !auto ? el("span", { class: "hex" }, now.toUpperCase()) : el("span", { class: "auto" }, t("props.inkIsAuto"));
+  return el("div", { class: "cr" + (auto && own ? " chg" : "") },
+    el("label", { class: "cb", title: auto ? t("props.inkAutoHint") : null },
+      el("input", { type: "color", value: now, "aria-label": labelKey ? t(labelKey) : null,
+        oninput: (e) => { put(e.target.value); dot.style.background = e.target.value; if (said.classList.contains("hex")) said.textContent = e.target.value.toUpperCase(); later("side", 600, renderSide); } }),
+      dot, labelKey && el("span", { class: "nm" }, t(labelKey)), said),
+    auto && own ? el("button", { type: "button", class: "rs", title: t("props.inkAuto"), "aria-label": [labelKey && t(labelKey), t("props.inkAuto")].filter(Boolean).join(" · "), innerHTML: RESET_ICON, onclick: () => { put(""); renderSide(); } }) : el("span"));
 }
 /**
  * A headline's outline and shadow sliders. Not every text effect draws them (the flat looks' plain
@@ -4514,8 +4766,8 @@ function titleLines(L, set0) {
   const set = (k, v) => { holdLive(L.id); set0(k, v); };
   const use = effectUses(L.fx), name = (EFFECTS[use.id] || LOOKS[use.id]).name[getLang()];
   const line = (k, key) => (use[k]
-    ? slider(key, 0, 2, 0.05, L[k], times, (v) => set(k, v))
-    : el("div", { class: "sl off", title: t("props.fxIgnores", name) }, el("span", {}, t(key)), el("span", { class: "why" }, t("props.fxIgnores", name))));
+    ? scrub(t(key), 0, 2, 0.05, L[k] ?? 1, SHOWN.times, (v) => set(k, v), 1)
+    : scrub(t(key), 0, 2, 0.05, L[k] ?? 1, SHOWN.times, () => {}, null, t("props.fxIgnores", name)));
   return [line("stroke", "props.stroke"), line("shadow", "props.shadow")];
 }
 /** The text effect of a headline layer and how strong it is: {kids, tip}. */
@@ -4526,11 +4778,11 @@ function fxControl(L) {
   return {
     kids: [
       fxCards(L),
-      fx !== "auto" && kind !== "passes" && slider("props.fxAmt", 0, 2, 0.05, L.fxAmt ?? 1, times, (v) => { holdLive(L.id); set("fxAmt", v === 1 ? undefined : v, false); }),
+      fx !== "auto" && kind !== "passes" && scrub(t("props.fxAmt"), 0, 2, 0.05, L.fxAmt ?? 1, SHOWN.times, (v) => { holdLive(L.id); set("fxAmt", v === 1 ? undefined : v, false); }, 1),
       // the ransom note's letters dealt again: another face, paper, ink and angle for each (a reshaped edge: other spikes,
       // tears, cuts, drips, bites); and the ransom note's one by one, in a window of their own
-      EFFECTS[fx].seeded && el("button", { class: "btn wide", style: "margin-top:8px", title: t(fx === "ransom" ? "fx.reshuffleTip" : "fx.reshuffleEdgeTip"), onclick: () => { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === L.fxSeed); set("fxSeed", n, false); } }, t("fx.reshuffle")),
-      fx === "ransom" && el("button", { class: "btn wide letters-btn", style: "margin-top:8px", title: t("letters.openTip"), onclick: () => lettersOpen(L) }, t("letters.open")),
+      EFFECTS[fx].seeded && el("button", { class: "btn wide", title: t(fx === "ransom" ? "fx.reshuffleTip" : "fx.reshuffleEdgeTip"), onclick: () => { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === L.fxSeed); set("fxSeed", n, false); } }, t("fx.reshuffle")),
+      fx === "ransom" && el("button", { class: "btn wide letters-btn", title: t("letters.openTip"), onclick: () => lettersOpen(L) }, t("letters.open")),
     ],
     tip: [fx === "ransom" && t("fx.ransomHint"), EFFECTS[fx].kind === "outline" && fx !== "extrude" && t("fx.shapedHint"), kind === "outline" && !CAN.outlines && t("fx.needsApp"), cols && NO_COLUMNS.includes(fx) && t("fx.noColumns")].filter(Boolean).join(" "),
   };
@@ -4545,8 +4797,9 @@ function bendControl(L) {
   if (inColumns(L)) return { kids: [el("div", { class: "hint" }, t("fx.bendColumns"))], tip: "" };
   return {
     kids: [
-      select([["", t("bend.none")], ...Object.entries(BENDS).map(([id, b]) => [id, b.name[getLang()]])], L.bend || "", (v) => { if (v) L.bend = v; else { delete L.bend; delete L.bendAmt; } delete L.warp; delete L.reshape; touch({ cover: true, side: true }); }),
-      L.bend && !(L.bend === "taper" && L.warp) && slider("props.bendAmt", 0, 2, 0.05, L.bendAmt ?? 1, times, (v) => { holdLive(L.id); set("bendAmt", v === 1 ? undefined : v, false); }),
+      picker([["", t("bend.none")], ...Object.entries(BENDS).map(([id, b]) => [id, b.name[getLang()]])], L.bend || "", (v) => { if (v) L.bend = v; else { delete L.bend; delete L.bendAmt; } delete L.warp; delete L.reshape; touch({ cover: true, side: true }); },
+        { name: t("props.bend"), id: "bend", glyph: bendGlyph, def: "" }),
+      L.bend && !(L.bend === "taper" && L.warp) && scrub(t("props.bendAmt"), 0, 2, 0.05, L.bendAmt ?? 1, SHOWN.times, (v) => { holdLive(L.id); set("bendAmt", v === 1 ? undefined : v, false); }, 1),
       L.bend === "taper" && L.warp && el("button", { class: "btn wide", onclick: () => set("warp", undefined, true) }, t("fx.warpReset")),
       L.bend && L.bend !== "taper" && L.reshape && el("button", { class: "btn wide", onclick: () => set("reshape", undefined, true) }, t("fx.reshapeReset")),
     ],
@@ -4595,7 +4848,7 @@ function fxCards(L) {
   const card = (id, i) => {
     const e = EFFECTS[id], seed = e.seeded ? fxSeedOf(L) : 0, c = el("canvas", { width: FX_CARD.w, height: FX_CARD.h }), j = i % FX_FOLDED, across = FX_FOLDED / 2;
     // past FX_FOLDED, until See all: not shown in the drawer (the popover's pages show them), so their pictures wait to be scrolled to
-    const b = el("button", { class: "fxtile" + (id === cur ? " on" : "") + (i >= FX_FOLDED && id !== cur && !FX_UI.all ? " folded" : ""), "aria-pressed": String(id === cur), dataset: { name: e.name[lang] },
+    const b = el("button", { class: "fxtile" + (id === cur ? " on" : "") + (i >= FX_FOLDED && id !== cur && !FX_UI.all ? " folded" : ""), "aria-pressed": String(id === cur), dataset: { name: e.name[lang], fx: id },
       style: `--r:${1 + Math.floor(j / across)};--c:${1 + Math.floor(i / FX_FOLDED) * across + (j % across)}`,   // where it stands in its page of the popover
       title: id === "auto" ? e.name[lang] : `${e.name[lang]} · ${kinds[e.menu || e.kind]}`, onpointerenter: () => hoverFx(L, id), onclick: () => pickFx(L, id) },
       c, el("span", {}, id === "auto" ? t("fx.cardAuto").split(" · ").map((w, i) => [i ? " · " : "", el("i", {}, w)]) : e.name[lang]));   // Automatic's two halves, each whole on its line
@@ -4778,13 +5031,17 @@ const inColumns = (L) => L.vertical === true || columnsByLook(L);
  * ticked and greyed, saying where that is changed.
  */
 function columnControls(L) {
-  const byLook = !L.vertical && columnsByLook(L), lk = LOOKS[S.profile.style.look] || LOOKS.cel;
+  const byLook = !L.vertical && columnsByLook(L), lk = LOOKS[S.profile.style.look] || LOOKS.cel, on = !!L.vertical || byLook;
   return [
-    el("label", { class: "chk", title: t("props.verticalTip") }, el("input", { type: "checkbox", checked: L.vertical || byLook, disabled: byLook, onchange: (e) => { L.vertical = e.target.checked; touch({ cover: true, side: true }); } }), t("props.vertical")),
+    segs(t("props.dir"), [[false, t("props.horizontal"), DIR_ICONS.lines], [true, t("props.vertical"), DIR_ICONS.columns]], on, (v) => { L.vertical = v; touch({ cover: true, side: true }); },
+      { def: byLook ? null : false, off: byLook, title: t("props.verticalTip") }),
     byLook && el("div", { class: "hint" }, t("props.verticalByLook", lk.name[getLang()])),
-    (L.vertical || byLook) && el("label", { class: "chk", title: t("props.rulesTip") }, el("input", { type: "checkbox", checked: !!L.rules, onchange: (e) => { L.rules = e.target.checked; touch({ cover: true }); } }), t("props.rules")),
+    on && check("props.rules", !!L.rules, (v) => { L.rules = v; touch({ cover: true }); }, { title: t("props.rulesTip"), def: false }),
   ];
 }
+/** Lettering in lines across, or in columns (see columnControls). */
+const DIR_ICONS = Object.fromEntries(Object.entries({ lines: "M4 7h16M4 12h16M4 17h10", columns: "M17 4v16M12 4v16M7 4v10" })
+  .map(([k, d]) => [k, `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="${d}"/></svg>`]));
 /** The words a headline layer sets: the title's and the subtitle's are the cover's. */
 const wordsOf = (L) => (L.type === "title" ? S.cover.title : L.type === "subtitle" ? S.cover.subtitle : L.text || "");
 /** Whether the cover has a photo shown that the ransom note may cut letters from (see ransomOf in render.js). */
@@ -4941,29 +5198,34 @@ function inksShown(L) {
   return { ink: L.plate ? readsOn(L.plateInk || cat().color) : light ? "#07070c" : "#ffffff", mark,
     hi: L.hiPlate ? readsOn(L.hiPlateInk || mark) : L.hiMark && L.hiMark !== "circle" ? (L.ink || (L.plate ? readsOn(L.plateInk || cat().color) : light ? "#07070c" : "#ffffff")) : cat().color };
 }
-/** The title, subtitle and text layers alike: words, effect, bend, colours, lines, plate. */
+/**
+ * The title, subtitle and text layers alike, in the order they are most often changed: words (and face, and lines or
+ * columns), effect, colours, lines, bend; then what is under or round the words, the plate and the highlights' mark.
+ */
 function headlineControls(L, set) {
   const fx = fxControl(L), bend = bendControl(L), shown = inksShown(L);
   return [
     psec("props.sec.text", [
-      L.type === "text" && el("textarea", { value: L.text, spellcheck: false, style: "height:64px;margin-bottom:8px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
+      L.type === "text" && el("textarea", { value: L.text, spellcheck: false, "aria-label": t("props.sec.text"), oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
       // the title's words are the cover's, also in Cover → Title, which follows
-      L.type === "title" && el("textarea", { value: S.cover.title, spellcheck: false, style: "height:64px;margin-bottom:8px", oninput: (e) => { S.cover.title = e.target.value; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); } }),
+      L.type === "title" && el("textarea", { value: S.cover.title, spellcheck: false, "aria-label": t("props.sec.text"), oninput: (e) => { S.cover.title = e.target.value; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); } }),
       // so are the subtitle's, in Cover → Subtitle
-      L.type === "subtitle" && el("div", { style: "margin-bottom:8px" }, textInput(S.cover.subtitle, (v) => { S.cover.subtitle = v; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); }, { placeholder: t("cover.subtitlePh") })),
+      L.type === "subtitle" && textInput(S.cover.subtitle, (v) => { S.cover.subtitle = v; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); }, { placeholder: t("cover.subtitlePh"), "aria-label": t("props.sec.text") }),
       fontControl(L, true), ...columnControls(L)], t("props.textHint")),
     psec("props.sec.effect", fx.kids, fx.tip),
-    psec("props.bend", bend.kids, bend.tip),
     psec("props.sec.color", [
       swatch(L, "ink", "props.sw.text", shown.ink),
       swatch(L, "hi", "props.sw.hi", shown.hi),
       L.plate && swatch(L, "plateInk", "props.sw.plate", cat().color),
       (L.hiPlate || L.hiMark) && swatch(L, "hiPlateInk", "props.sw.hiPlate", shown.mark)], t("props.inkAutoHint")),
     psec("props.sec.lines", titleLines(L, set), t(L.plate ? "props.linesOnPlate" : "props.linesNoPlate")),
-    psec("props.sec.plate", [check("props.plateAdd", L.plate, (v) => set("plate", v, true))]),
-    // how the highlighted words are marked, besides their colour: plates under them, or a mark of them
-    psec("props.sec.hi", [select([["", t("hi.none")], ["plate", t("hi.plate")], ["circle", t("hi.circle")], ["marker", t("hi.marker")], ["block", t("hi.block")]], L.hiPlate ? "plate" : L.hiMark || "",
-      (v) => { delete L.hiPlate; delete L.hiMark; if (v === "plate") L.hiPlate = true; else if (v) L.hiMark = v; touch({ cover: true, side: true }); })], t("hi.hint")),
+    psec("props.bend", bend.kids, bend.tip),
+    // what is under the words or round the highlighted ones: a plate under them all; besides their colour, plates under
+    // the highlighted words, or a mark of them
+    psec("props.sec.platehi", [check("props.plateAdd", L.plate, (v) => set("plate", v, true), { def: false }),
+      el("div", { class: "cap" }, t("props.sec.hi")),
+      picker([["", t("hi.none")], ["plate", t("hi.plate")], ["circle", t("hi.circle")], ["marker", t("hi.marker")], ["block", t("hi.block")]], L.hiPlate ? "plate" : L.hiMark || "",
+        (v) => { delete L.hiPlate; delete L.hiMark; if (v === "plate") L.hiPlate = true; else if (v) L.hiMark = v; touch({ cover: true, side: true }); }, { name: t("props.sec.hi"), id: "hi", def: "" })], t("hi.hint")),
   ];
 }
 /** Removes the background of photo layer L (on), or puts it back: a linked cut-out is made a whole photo again, of its own. */
@@ -4980,41 +5242,40 @@ function photoControls(L, set) {
   const cut = (on) => cutPhoto(L, on);
   const from = !L.of && cutSource(L), had = from && passivesOf(from)[0];   // what Cut out subject cuts out of (see cutOut)
   const redo = !!had && cutSizes(from).every((k) => inSize(had, k)), keys = !L.of && scopeKeys();   // its cut-out is found again; else made, or put where the scope reaches too
-  const unlinkBtn = (L.of || linked.length > 0) && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => askUnlink(L) }, t("link.unlink"));
+  const unlinkBtn = (L.of || linked.length > 0) && el("button", { class: "btn wide", onclick: () => askUnlink(L) }, t("link.unlink"));
   const cropBtn = cropButton(L);
   return [
     !rec && el("div", { class: "hint err", style: "margin:0 0 10px" }, t("props.photoMissing")),
     psec("props.sec.cut", [
       canCut()
-        ? el("div", { class: L.of ? "" : "row", style: "margin-top:0" },
+        ? el("div", { class: L.of ? "" : "row" },
             el("button", { class: "btn" + (L.of ? " wide" : ""), disabled: CUT.busy, onclick: () => cut(!L.cut) }, t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut")),
             !L.of && el("button", { class: "btn", disabled: CUT.busy, title: t(redo ? "cut.againTip" : "cut.go"), onclick: () => cutOut(L) }, t(redo ? "cut.again" : "cut.goShort")))
         : el("div", { class: "hint", style: "margin:0" }, t("cutset.needsApp")),
       canCut() && keys && el("div", { class: "hint" }, sizesSaid("cut.scopeHint", keys)),   // the scope under the canvas keeps both to some sizes
-      L.cut && slider("props.feather", 0, 40, 1, L.feather, px, (v) => { holdLive(L.id); set("feather", v); }),
-      L.cut && slider("props.spread", 0, 40, 1, L.spread, px, (v) => { holdLive(L.id); set("spread", v); }),
+      L.cut && scrub(t("props.feather"), 0, 40, 1, L.feather, SHOWN.px, (v) => { holdLive(L.id); set("feather", v); }, 0),
+      L.cut && scrub(t("props.spread"), 0, 40, 1, L.spread, SHOWN.px, (v) => { holdLive(L.id); set("spread", v); }, 0),
       CUT.error && el("div", { class: "hint err" }, CUT.error),
-    CUT.needModel && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { S.tab.setup = "ai"; SET_UI.at = "cut"; setMode("setup"); } }, t("cut.goModel"))], t("cut.tip", t("cutset.engine." + cutEngine()))),
+    CUT.needModel && el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; SET_UI.at = "cut"; setMode("setup"); } }, t("cut.goModel"))], t("cut.tip", t("cutset.engine." + cutEngine()))),
     canWeave(L) && weaveControls(L),
     L.of
       ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")),
-          base && el("button", { class: "btn wide", style: "margin-top:8px", title: t("link.realignTip"), onclick: () => { L.t = alignedT(base); touch({ cover: true, side: true }); } }, t("link.realign")),
+          base && el("button", { class: "btn wide", title: t("link.realignTip"), onclick: () => { L.t = alignedT(base); touch({ cover: true, side: true }); } }, t("link.realign")),
           cropBtn, unlinkBtn], t("link.passiveMore"))
       : psec("props.sec.place", [check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
           linked.length > 0 && el("div", { class: "hint" }, t("link.leads", linked.map(layerName).join(" · "))), cropBtn, unlinkBtn],
           t(L.fill ? "props.fillHint" : "props.printHint")),
     psec("props.sec.picture", [
-      slider("props.blur", 0, 80, 1, L.blur, px, (v) => { holdLive(L.id); set("blur", v); }),
-      slider("props.dim", 0, 0.9, 0.01, L.dim, pct, (v) => { holdLive(L.id); set("dim", v); }),
-      check("props.treat", L.treat, (v) => set("treat", v))], t("props.treatTip")),
+      scrub(t("props.blur"), 0, 80, 1, L.blur, SHOWN.px, (v) => { holdLive(L.id); set("blur", v); }, 0),
+      scrub(t("props.dim"), 0, 0.9, 0.01, L.dim, SHOWN.pct, (v) => { holdLive(L.id); set("dim", v); }, 0),
+      check("props.treat", L.treat, (v) => set("treat", v), { def: true })], t("props.treatTip")),
     psec("props.sec.lines", [
-      slider("props.outline", 0, 40, 1, L.outline, px, (v) => { holdLive(L.id); set("outline", v); }),
-      slider("props.subjectShadow", 0, 1, 0.05, L.shadow, pct, (v) => { holdLive(L.id); set("shadow", v); }),
+      scrub(t("props.outline"), 0, 40, 1, L.outline, SHOWN.px, (v) => { holdLive(L.id); set("outline", v); }, 0),
+      scrub(t("props.subjectShadow"), 0, 1, 0.05, L.shadow, SHOWN.pct, (v) => { holdLive(L.id); set("shadow", v); }, 0),
       swatch(L, "ink", "props.sw.outline", "#ffffff"),
-      el("div", { style: "margin-top:12px" }, cap("props.edge"), el("div", { class: "seg wide" }, ["solid", "torn", "dash"].map((k) => {
-        const now = L.torn ? "torn" : L.dash ? "dash" : "solid";
-        return el("button", { class: "btn" + (now === k ? " on" : ""), onclick: () => { L.torn = k === "torn"; L.dash = k === "dash"; if (k !== "solid" && !(L.outline > 0)) L.outline = 16; touch({ cover: true, side: true, panel: true }); } }, t("props.edge." + k));   // with no outline yet, one to see it on
-      })))], t("props.photoLinesTip")),
+      el("div", { class: "cap" }, t("props.edge")),
+      segs(t("props.edge"), ["solid", "torn", "dash"].map((k) => [k, t("props.edge." + k)]), L.torn ? "torn" : L.dash ? "dash" : "solid",
+        (k) => { L.torn = k === "torn"; L.dash = k === "dash"; if (k !== "solid" && !(L.outline > 0)) L.outline = 16; touch({ cover: true, side: true, panel: true }); }, { def: "solid" })], t("props.photoLinesTip")),   // with no outline yet, one to see it on
   ];
 }
 
@@ -5048,11 +5309,11 @@ function weaveControls(L) {
   return psec("props.sec.weave", [
     check("weave.on", !!w, on),
     w && !below.length && el("div", { class: "hint" }, t("weave.none")),
-    w && below.length > 0 && el("div", { class: "weave-with" }, below.map((l) => el("label", { class: "chk" }, el("input", { type: "checkbox", checked: w.with.includes(l.id), onchange: (e) => tick(l, e.target.checked) }), layerName(l)))),
-    w && el("div", { style: "margin-top:10px" }, select(WEAVE_WAYS.map((k) => [k, k === "head" ? weaveT(L, "weave.by.head") : t("weave.by." + k)]), w.by, (v) => put({ by: v }))),
-    w && w.by === "head" && slider(L.type === "asset" ? "weave.line.asset" : "weave.line", 0.1, 0.9, 0.01, w.line, pct, (v) => { holdLive(L.id); L.weave = { ...L.weave, line: v }; touch({ cover: true }); }),
-    w && w.by === "letters" && el("button", { class: "btn wide", style: "margin-top:8px", disabled: !wovenOf(L).length, onclick: () => weaveOpen(L) }, t("weave.choose")),
-    w && w.by === "brush" && el("button", { class: "btn wide", style: "margin-top:8px", disabled: !wovenOf(L).length, onclick: () => brushOpen(L) }, t("weave.paint")),
+    w && below.length > 0 && below.map((l) => switchRow(layerName(l), w.with.includes(l.id), (yes) => tick(l, yes))),   // the lettering it weaves with, each on or off
+    w && picker(WEAVE_WAYS.map((k) => [k, k === "head" ? weaveT(L, "weave.by.head") : t("weave.by." + k)]), w.by, (v) => put({ by: v }), { name: t("props.sec.weave"), id: "weave" }),
+    w && w.by === "head" && scrub(t(L.type === "asset" ? "weave.line.asset" : "weave.line"), 0.1, 0.9, 0.01, w.line, SHOWN.pct, (v) => { holdLive(L.id); L.weave = { ...L.weave, line: v }; touch({ cover: true }); }, 0.3),
+    w && w.by === "letters" && el("button", { class: "btn wide", disabled: !wovenOf(L).length, onclick: () => weaveOpen(L) }, t("weave.choose")),
+    w && w.by === "brush" && el("button", { class: "btn wide", disabled: !wovenOf(L).length, onclick: () => brushOpen(L) }, t("weave.paint")),
   ], weaveT(L, "weave.tip"));
 }
 
@@ -5449,7 +5710,7 @@ function assetColour(L) {
     touch({ cover: true, side: true });
   };
   return psec("props.sec.color", [
-    select([!graphic && ["own", t("props.assetOwn")], ["channel", t("props.assetChannel")], ["custom", t("props.assetCustom")]].filter(Boolean), mode, choose),
+    picker([!graphic && ["own", t("props.assetOwn")], ["channel", t("props.assetChannel")], ["custom", t("props.assetCustom")]].filter(Boolean), mode, choose, { name: t("props.sec.color"), id: "assetink" }),
     mode === "custom" && swatch(L, "ink", "props.sw.color", cat().color, false)]);
 }
 function typeControls(L) {
@@ -5460,11 +5721,11 @@ function typeControls(L) {
     case "bg": {
       const oneTheme = (LOOKS[S.profile.style.look] || LOOKS.cel).oneTheme, covered = S.profile.style.theme === "light" && recordOf(mainPhoto());
       return psec("props.sec.ground", [
-        select([["grid", t("bg.base.grid")], ["look", t("bg.base.look")], ["clear", t("bg.base.clear")]], L.base, (v) => set("base", v)),
-        oneTheme ? el("div", { class: "hint", style: "margin:0" }, t("props.oneTheme")) : select([["dark", t("theme.dark")], ["light", t("theme.light")]], S.profile.style.theme, (v) => { S.profile.style.theme = v; touch({ profile: true, side: true }); })], [t("props.bgHint"), covered && t("props.lightUnderPhoto")].filter(Boolean).join(" "));
+        segs(t("props.sec.ground"), [["grid", t("bg.base.grid")], ["look", t("bg.base.look")], ["clear", t("bg.base.clear")]], L.base, (v) => set("base", v), { def: "grid" }),
+        oneTheme ? el("div", { class: "hint" }, t("props.oneTheme")) : segs(t("props.sec.ground"), [["dark", t("theme.dark")], ["light", t("theme.light")]], S.profile.style.theme, (v) => { S.profile.style.theme = v; touch({ profile: true, side: true }); })], [t("props.bgHint"), covered && t("props.lightUnderPhoto")].filter(Boolean).join(" "));
     }
     case "photo": return photoControls(L, set);
-    case "accent": return [psec("props.sec.shape", select(ACCENT_SHAPES.map((k) => [k, t("shape." + k)]), L.shape, (v) => set("shape", v, false))), blockSection()];
+    case "accent": return [psec("props.sec.shape", picker(ACCENT_SHAPES.map((k) => [k, t("shape." + k)]), L.shape, (v) => set("shape", v, true), { name: t("props.sec.shape"), id: "shape", def: "slant" })), blockSection()];
     case "brand": return [font(), ink(), psec("props.sec.show", check("props.rail", L.rail, (v) => set("rail", v)))];
     case "logo": return psec("props.sec.logo", logoControls(), t("props.logoHint"));
     case "title": case "subtitle": case "text": return headlineControls(L, set);
@@ -5532,8 +5793,8 @@ function lookFxSection(L) {
   };
   const rows = (look) => effectsFor(look, L.type).flatMap((e) => {
     const id = `${look}.${e.key}`, on = fx[id] > 0;
-    return [slider2(e.name[lang], 0, 1, 0.05, fx[id] || 0, (v) => { put(id, v); if ((v > 0) !== on) later("side", 400, renderSide); }),
-      ...(on ? (e.sub || []).map((s) => slider2("· " + s.name[lang], 0, 1, 0.05, fx[`${id}:${s.key}`] ?? s.def, (v) => put(`${id}:${s.key}`, v))) : [])];
+    return [scrub(e.name[lang], 0, 1, 0.05, fx[id] || 0, SHOWN.num, (v) => { put(id, v); if ((v > 0) !== on) later("side", 400, renderSide); }, 0),
+      ...(on ? (e.sub || []).map((s) => scrub("· " + s.name[lang], 0, 1, 0.05, fx[`${id}:${s.key}`] ?? s.def, SHOWN.num, (v) => put(`${id}:${s.key}`, v), s.def)) : [])];
   });
   // the borrowed looks: those added here, in order, then any with effects on the layer not among them (from before, or brought from another look)
   const lent = [...new Set(Object.keys(fx).filter((k) => !k.includes(":")).map((k) => k.split(".")[0]))];
@@ -5558,8 +5819,10 @@ function lookFxSection(L) {
     (list.length > 0 || left.length > 0) && el("div", { class: "fxh" }, t("lookfx.others")),
     list.flatMap((k) => [head(k, true), ...rows(k)]),
     (list.length > 0 || left.length > 0) && el("button", { class: "btn wide", onclick: () => borrowDialog(L, here, list) }, t("lookfx.borrowBtn")),
-    el("button", { class: "btn wide", title: t("lookfx.clearHint"), disabled: !any, onclick: () => { delete L.lookFx; touch({ cover: true, side: true }); } }, t("lookfx.clear")),
-    el("button", { class: "btn wide", title: t("lookfx.removeAllHint"), disabled: !any && !list.length, onclick: () => { delete L.lookFx; BORROWED.delete(L.id); touch({ cover: true, side: true }); } }, t("lookfx.removeAll")),
+    // seldom wanted, and the second not undone at a click: small, at the end
+    el("div", { class: "tacts" },
+      el("button", { type: "button", class: "tbtn", title: t("lookfx.clearHint"), disabled: !any, onclick: () => { delete L.lookFx; touch({ cover: true, side: true }); } }, t("lookfx.clear")),
+      el("button", { type: "button", class: "tbtn danger", title: t("lookfx.removeAllHint"), disabled: !any && !list.length, onclick: () => { delete L.lookFx; BORROWED.delete(L.id); touch({ cover: true, side: true }); } }, t("lookfx.removeAll"))),
   ], t("lookfx.hint"))];
 }
 /**
@@ -5673,7 +5936,7 @@ function layerSection(L) {
   const fixed = FIXED.includes(L.type), copy = L.type === "photo" && L.of;
   return [el("div", { class: "psep" }),
     psec("props.sec.layer", [
-      slider("props.o", 0, 1, 0.01, L.o, pct, (v) => { holdLive(L.id); L.o = v; touch({ cover: true }); }),
+      scrub(t("props.o"), 0, 1, 0.01, L.o, SHOWN.pct, (v) => { holdLive(L.id); L.o = v; touch({ cover: true }); }, 1),
       sizesControl(L),
       (isFree(L.type) || L.type === "title") && clipControl(L),
       !fixed && !copy && placementControls(L),   // a cut-out's (back over its photo) is with its placement
@@ -5708,9 +5971,8 @@ function clipControl(L) {
   let j = i - 1;
   while (j >= 0 && list[j].clip) j--;   // the base it has, or would have
   const base = j >= 0 && list[j].type !== "bg" ? list[j] : null;
-  return [el("label", { class: "chk" }, el("input", { type: "checkbox", checked: !!L.clip, disabled: !L.clip && !base,
-      onchange: (e) => { if (e.target.checked) L.clip = true; else delete L.clip; touch({ cover: true, side: true }); } }), t("props.clip")),
-    el("div", { class: "hint", style: "margin:2px 0 6px" }, base ? t(L.clip ? "props.clipOn" : "props.clipOff", layerName(base)) : t("props.clipNone"))];
+  return [check("props.clip", !!L.clip, (on) => { if (on) L.clip = true; else delete L.clip; touch({ cover: true, side: true }); }, { disabled: !L.clip && !base, def: false }),
+    el("div", { class: "hint" }, base ? t(L.clip ? "props.clipOn" : "props.clipOff", layerName(base)) : t("props.clipNone"))];
 }
 /** What FOCUS acts on: the selected group's movable layers, or the selected layer if it can be moved. */
 function focusTargets() {
@@ -5774,8 +6036,9 @@ function renderSide() {
   if (S.brushWin) brushShow();   // and the brush's panel
   const side = $("side"), y = side.scrollTop, L = layer(), here = S.cover.layers.filter((l) => appliesTo(l, cat().id) && !l.off);
   // keep typing in the text box alive across rebuilds
-  const typing = document.activeElement && [side, layerBox, POP].some((b) => b.contains(document.activeElement)) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename"));
+  const typing = document.activeElement && [side, layerBox, POP].some((b) => b.contains(document.activeElement)) && (document.activeElement.tagName === "TEXTAREA" || document.activeElement.classList.contains("rename") || document.activeElement.classList.contains("num"));   // a name, or a scrub bar's value, being typed
   if (typing) return;
+  if (document.body.classList.contains("scrubbing")) return later("side", 250, renderSide);   // a scrub bar being dragged: built anew once it is let go
   const i = L ? here.indexOf(L) : -1, many = group();
   const ib = (svg, title, off, onclick, on = false) => el("button", { class: "ib" + (on ? " on" : ""), title, disabled: off, innerHTML: svg, onclick });
   // the chips over the list (see LAYERS_UI): every layer, those the user added and the layout's own, each with how many
@@ -5808,22 +6071,37 @@ function renderSide() {
   layerPics();
   // what is selected, in the drawer on the right (nothing is built while it is shut)
   side.replaceChildren(...(!S.settings.drawer ? [] : [
-    el("div", { class: "dhead" }, el("div", {}, el("small", {}, t("drawer.title")), el("b", {}, many.length ? t("props.group", many.length) : L ? layerName(L) : "—")),
-      el("button", { class: "x", title: t("drawer.close"), onclick: () => setDrawer(false) }, "✕")),
+    drawerHead(L, many),
     many.length ? el("div", { class: "box" }, el("div", { class: "hint", style: "margin-top:0" }, many.map(layerName).join(" · ")),
       many.some((x) => x.locked) && el("div", { class: "hint" }, t("props.groupLocked")),
       el("div", { class: "hint" }, t("props.groupHint")),
       el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => focusAllows("bg") && selectLayer("bg") }, t("props.groupEnd")))
-    : L ? [el("div", { class: "props" }, typeControls(L), sceneSection(L), lookFxSection(L), layerSection(L)),
-        L.type !== "bg" && el("div", { class: "dfoot" },
-          copiable(L) && el("button", { class: "linkbtn", onclick: duplicateLayer }, t("drawer.dup")),
-          el("button", { class: "linkbtn", onclick: () => { L.visible = !L.visible; touch({ cover: true, side: true }); } }, t(L.visible ? "drawer.hide" : "drawer.show")))]
+    : L ? el("div", { class: "props" }, typeControls(L), sceneSection(L), lookFxSection(L), layerSection(L))
       : el("div", { class: "hint" }, t("layers.none"))]).flat().filter(Boolean));
   openSecs(side);
   side.scrollTop = y;
   // the selected layer's photo, in Assets → the cover's photos, is framed in the channel colour (without rebuilding that panel)
   for (const item of document.querySelectorAll("#panel .pitem")) item.classList.toggle("on", item.dataset.id === S.layerId);
   syncFocus(); markRows(); renderBar();
+}
+/**
+ * The drawer's head: the selected layer's tile (as its row in the layer list has it), its name, what kind of layer it
+ * is and at which sizes it shows; then, as the layer list's bar has them, hide or show it, a copy of it and delete it
+ * (the ground: none of them); and close. With a group selected, how many.
+ */
+function drawerHead(L, many) {
+  const ib = (svg, title, off, onclick, more = {}) => el("button", { type: "button", class: "ib", title, "aria-label": title, disabled: off, innerHTML: svg, onclick, ...more });
+  const close = ib(ICONS.close, t("drawer.close"), false, () => setDrawer(false), { dataset: { close: "1" } });
+  if (many.length || !L) return el("div", { class: "dhead" }, el("span"), el("b", {}, many.length ? t("props.group", many.length) : "—"), el("span", { class: "acts" }, close));
+  const all = sizeKeys(), lit = all.filter((k) => inSize(L, k)).length, own = L.type !== "bg";
+  const kind = L.copy ? t("layers.badge.copy") : isRemovable(L) ? t("drawer.kind.added") : t("drawer.kind.layout");
+  return el("div", { class: "dhead" }, layerTile(L), el("b", { title: layerName(L) }, layerName(L)),
+    el("span", { class: "acts" },
+      own && ib(L.visible ? ICONS.eyeOff : ICONS.eye, t(L.visible ? "drawer.hide" : "drawer.show"), false, () => { L.visible = !L.visible; touch({ cover: true, side: true }); }),
+      own && ib(ICONS.dup, t("drawer.dup"), !copiable(L), duplicateLayer),
+      own && ib(ICONS.trash, t(isRemovable(L) ? "layers.del" : "layers.delLayout"), !isRemovable(L), () => removeLayer()),
+      close),
+    el("small", {}, `${kind} · ${lit === all.length ? t("props.sum.allSizes") : t("props.sum.sizes", lit, all.length)}`));
 }
 /** The list's edges fade where rows go on past them: scrolled up under the chips, or on down under the Background's line (.lyscroll in index.html). */
 function listFades(list) {
@@ -5837,7 +6115,7 @@ function setDrawer(on) {
   S.settings.drawer = on; persistSettings();
   columns(); renderSide();
   // the button pressed gone, rebuilt with the sheet or with the drawer: to the drawer's ✕, or the sheet's own dock button
-  const to = on && fromSheet ? $("side").querySelector(".dhead button") : !on && fromDrawer ? $("dock").querySelector("button.on") : null;
+  const to = on && fromSheet ? $("side").querySelector(".dhead [data-close]") : !on && fromDrawer ? $("dock").querySelector("button.on") : null;
   if (to) to.focus({ preventScroll: true });
 }
 
@@ -5999,7 +6277,7 @@ function placeFrames() {
   }
 }
 addEventListener("pointerdown", (e) => {   // a click away from the bar and its popover shuts the popover
-  if (!FTB.pop || BAR.contains(e.target) || POP.contains(e.target) || (e.target.closest && e.target.closest("#tip"))) return;
+  if (!FTB.pop || BAR.contains(e.target) || POP.contains(e.target) || (e.target.closest && e.target.closest("#tip, .pklist"))) return;   // a picker's list is the popover's
   FTB.pop = ""; renderBar();
 }, true);
 /**
