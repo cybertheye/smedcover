@@ -1005,6 +1005,13 @@ fn selftest_perf() -> bool {
     selftest_root().is_some() && std::env::var_os("SMEDCOVER_SELFTEST_PERF").is_some()
 }
 
+/// In self-test mode, whether to call the agent tools too (SMEDCOVER_SELFTEST_AGENT): the page's dispatcher answers
+/// the read-only tools, the selection, undo and redo as an agent's calls, and reports under `agent`.
+#[tauri::command]
+fn selftest_agent() -> bool {
+    selftest_root().is_some() && std::env::var_os("SMEDCOVER_SELFTEST_AGENT").is_some()
+}
+
 /// What this build's interface is: a hash of `ui/` as it was built (build.rs). The look cards' pictures kept from
 /// one launch to the next carry it, so a build that draws otherwise does not take another's for its own. Under
 /// `tauri dev` (cfg `dev`, set by tauri-build) the interface is served from its folder as it is edited, without
@@ -1076,6 +1083,7 @@ pub fn run() {
             selftest_models,
             selftest_drag,
             selftest_perf,
+            selftest_agent,
             ui_build,
             move_pointer,
             selftest_photo,
