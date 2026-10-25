@@ -362,7 +362,7 @@ the right end of the brand row (`logoBox()` in `render.js`: right-aligned `LOGO`
 72 units in from the edge or a look's `logoInset`); the brand row's rail, or its number tag, stands to its
 left, and a look's own things in that corner move aside (`besideLogo()` in `looks/kit.js`; `env.logo` is the box,
 null when the layer is hidden or there is no logo). A `brand.logo` that is a picture's data URL rather than an id is drawn
-as that picture (`pictureOf()`, decoding it once): the layout editor's letter logo (see 9.4). `brand.counter` (false by default) says whether the brand
+as that picture (`pictureOf()`, decoding it once): the layout editor's stand-in logo (see 9.4). `brand.counter` (false by default) says whether the brand
 row shows the channel's number after `brand.unit`, and the number tag on a colour panel.
 
 **The subtitle**: its words are the cover's (`cover.subtitle`, beside `title` and `tag`); the `subtitle` layer
@@ -594,7 +594,9 @@ size facing the canvas's way (the layout the canvas's size is drawn in, as it is
 canvas's size. The colour block's *Size & slant* (`blockSection()`, a group of its properties, so on its bar too) holds
 the template itself, named for the block (*Block position*: *Band* `stack`, *Side panel* `split`, *Slim banner*
 `banner`, `tpl.*` and their tips `tpl.*Tip`; one picked is one step of undo, and starts from the adjustments the
-profile keeps for it, else its defaults, as the template box's list does), the template's two block sliders
+profile keeps for it, else its defaults, as the template box's list does), *Mirror* at the end of its caption's line
+(the `flip` adjustment, the template box's swap, a checkbox through `layoutAdjuster()`'s `set()`: a band or a slim
+banner along the top, a panel on the left; its tip `props.blockFlipTip.<template>`; one step of undo), the template's two block sliders
 (`blockSliders()`, how much the block takes and how its edge leans, over
 `layoutAdjuster()`, which `templateControls()` builds on too) and *Block by orientation* (`byOrient()`, below), and lands where the Layout sheet's template box does
 (`layoutScope()`): no buttons for the scope, its ⓘ saying which sizes it reaches and that it is switched under the
@@ -1674,7 +1676,7 @@ own (`defaultLayers()`, the corner brackets left out, each of `LAYOUT_PARTS` pla
 has it, `sizes` standing for `hide`; one it has no entry for as `newPreset()` has it; the graphic's places those of the
 canvas's channel, through `plainPlaces()`), drawn by `drawCover()` with a profile made for it — the cel look on its dark ground,
 no photos, the title, subtitle and tag in placeholder words (`layed.sample*`), the profile's brand row, the brand logo as a
-letter logo whatever the profile has (`letterLogo()`: the brand's initial, or L, on a rounded square in the channel colour,
+stand-in whatever the profile has (`letterLogo()`: the word LOGO, held to the square's width by `textLength`, on a rounded square in the channel colour,
 an SVG data URL as `brand.logo`, drawn once `pictureOf()` has it decoded), and the canvas's
 channel (a camera for a channel with no graphic, so there is one to place), and the block at the size shown
 (`presetLayout()`) as the style's template and adjustments. Its sizes are the profile's and the preset's own (`custom`,
@@ -2267,7 +2269,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | add a sticker | `stickers.js` |
 | add a colour block shape | `ACCENT_SHAPES` in `layers.js`, `paintAccent()` and `edgePoints()` in `render.js`, its tile in the Layout sheet (`SHAPE_ICONS` in `app.js`), a name in `i18n.js` |
 | add a template | `TEMPLATES` and `layout()` in `layout.js`, a name in `i18n.js` |
-| show the Layout sheet's template box again, or change the colour block's *Size & slant* (its *Block position*, sliders and *Block by orientation*) | `TEMPLATE_BOX` and `layoutBox()`; `blockSection()`, `blockSliders()`, `layoutAdjuster()`, `layoutScope()` and `byOrient()` in `app.js`; `tpl.*` and `style.byOrient*` in `i18n.js` |
+| show the Layout sheet's template box again, or change the colour block's *Size & slant* (its *Block position*, *Mirror*, sliders and *Block by orientation*) | `TEMPLATE_BOX` and `layoutBox()`; `blockSection()`, `blockSliders()`, `layoutAdjuster()`, `layoutScope()` and `byOrient()` in `app.js`; `tpl.*` and `style.byOrient*` in `i18n.js` |
 | add a property to a layer | `PROPS` and `normalizeLayer()` in `layers.js`, `PAINT` in `render.js`, `typeControls()` in `app.js` (`headlineControls()` for the title and text layers) |
 | add an export format | `encode()` in `lib.rs`, `EXT` and the format pickers in `app.js` (`exportDialog()`, `sizesTab()`) |
 | add a drawing operation for AI assets | validation and `drawSpec()` in `spec.js`, the prompt and examples in `ai.js` |

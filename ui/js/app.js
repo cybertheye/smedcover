@@ -2599,18 +2599,22 @@ function layoutScope(followed) {
 }
 /**
  * The colour block's properties: where it lies (Block position: a band along the foot, a panel at the side or a slim
- * banner — the template), how much of the canvas it takes and how its edge leans (the template's own sliders,
- * blockSliders), changed where the scope under the canvas says, as the Layout sheet's template box changes them
- * (layoutScope); a position picked is one step of undo, a slider dragged draws the cover as a draft (draftTouch), one
- * step of undo. Then Block by orientation (byOrient), every size at once.
+ * banner — the template — and, beside it, Mirror: the block on the other side, the `flip` adjustment the template box's
+ * swap set: a band or a slim banner along the top, a panel on the left), how much of the canvas it takes and how its
+ * edge leans (the template's own sliders, blockSliders), changed where the scope under the canvas says, as the Layout
+ * sheet's template box changes them (layoutScope); a position picked or Mirror switched is one step of undo, a slider
+ * dragged draws the cover as a draft (draftTouch), one step of undo. Then Block by orientation (byOrient), every size at once.
  */
 function blockSection() {
   const st = S.profile.style, at = layoutScope(() => touch({ profile: true, side: true }));
   const a = layoutAdjuster(st, shownAt(), (again) => (again ? touch({ profile: true, side: true }) : draftTouch({ profile: true })), at.to);
-  // a position picked: its own step of undo, the sliders following it (from what the style keeps for it, else its defaults), as templateControls's list does
-  const place = (v) => { if (v === a.tpl) return; clearTimeout(timers.hist); commitHistory(); a.put(v, (st.layoutAdjust || {})[v] || templateDefault(v, orientOfKey(S.sel)), true); commitHistory(); };
+  const step = (fn) => { clearTimeout(timers.hist); commitHistory(); fn(); commitHistory(); };   // its own step of undo
+  // a position picked: the sliders follow it (from what the style keeps for it, else its defaults), as templateControls's list does
+  const place = (v) => { if (v !== a.tpl) step(() => a.put(v, (st.layoutAdjust || {})[v] || templateDefault(v, orientOfKey(S.sel)), true)); };
+  const mirror = el("label", { class: "chk", title: t("props.blockFlipTip." + a.tpl) },
+    el("input", { type: "checkbox", checked: !!a.adj.flip, onchange: (e) => step(() => a.set("flip", e.target.checked, true)) }), t("props.blockFlip"));
   return psec("props.sec.block", [
-    el("div", {}, cap("props.blockAt"), el("div", { class: "seg wide blockat" }, ["stack", "split", "banner"].map((k) =>
+    el("div", {}, el("div", { class: "blockat-h" }, cap("props.blockAt"), mirror), el("div", { class: "seg wide blockat" }, ["stack", "split", "banner"].map((k) =>
       el("button", { class: "btn" + (a.tpl === k ? " on" : ""), title: t("tpl." + k + "Tip"), "aria-pressed": String(a.tpl === k), onclick: () => place(k) }, t("tpl." + k))))),
     blockSliders(a), at.own,
     el("div", {}, el("button", { class: "btn wide", title: t("style.byOrientTip"), onclick: byOrient }, t("style.byOrient")), el("div", { class: "hint" }, t("style.byOrientHint"))),
@@ -2988,14 +2992,14 @@ function deleteLayout(p, i, again) {
 /** A usual size facing each way, where the layout editor sees how big a block kept for that orientation is when it has no size facing so (see blockOf in layoutEditor). */
 const USUAL_SIZE = { wide: "1920x1080", square: "1200x1200", tall: "1080x1920" };
 /**
- * The brand logo as the layout editor draws it, the profile's own picture not being drawn there: a letter logo, the
- * brand's initial ("L" without a brand name) on a rounded square in the channel colour `color`, rimmed in white so it
- * shows on the colour block too, as the data URL of an SVG (drawn through pictureOf in render.js).
+ * The brand logo as the layout editor draws it, the profile's own picture not being drawn there: a stand-in, the word
+ * LOGO on a rounded square in the channel colour `color`, rimmed in white so it shows on the colour block too, as the
+ * data URL of an SVG (drawn through pictureOf in render.js). The word is held to the square's width inside its rim
+ * (textLength), whatever face sets it.
  */
-function letterLogo(name, color) {
-  const ch = ([...name.trim()][0] || "L").toUpperCase().replace(/[&<>"]/g, (m) => `&#${m.charCodeAt(0)};`);
+function letterLogo(color) {
   return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect x="4" y="4" width="112" height="112" rx="26" fill="${color}" stroke="#ffffff" stroke-width="8"/>`
-    + `<text x="60" y="62" text-anchor="middle" dominant-baseline="central" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue',Arial,sans-serif" font-size="68" font-weight="800" fill="${inkOn(color)}">${ch}</text></svg>`);
+    + `<text x="60" y="61" text-anchor="middle" dominant-baseline="central" textLength="86" lengthAdjust="spacingAndGlyphs" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="32" font-weight="800" fill="${inkOn(color)}">LOGO</text></svg>`);
 }
 /** The layout editor's stand-in for a picture element: an anonymous portrait, a grey head and shoulders on a lighter grey, as the data URL of an SVG (no one's photo). */
 const PORTRAIT = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="750" viewBox="0 0 600 750">`
@@ -3005,7 +3009,7 @@ const PORTRAIT = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg 
  * A layout preset's editor, a window from the Layout sheet's preset cards, on a canvas of its own: not the cover being edited
  * but the plainest there is — the cel look on its dark ground, none of the cover's photos or the user's layers, nor the corner
  * brackets — with nothing on it but what a preset places (LAYOUT_PARTS): the title, subtitle and tag in
- * words of the editor's own (layed.sample*), the profile's brand row, the brand logo as a letter logo (letterLogo: the
+ * words of the editor's own (layed.sample*), the profile's brand row, the brand logo as a stand-in (letterLogo: the
  * profile's own, or none, is not what is placed but where), the channel's name and graphic (the channel on
  * the canvas; a camera when it has no graphic, so there is something to place), and the colour block and its edge. It
  * is drawn at one size at a time, picked above it from the profile's sizes and the preset's own (`custom`, added there
@@ -3077,9 +3081,9 @@ function layoutEditor(p, i, fresh = false) {
   // the part selected one at the size shown: else the first there is (the title when there is none)
   const keepSel = () => { if (!part(E.sel) || !shownHere(part(E.sel)).includes(size().key)) E.sel = ids().find((id) => shownHere(part(id)).includes(size().key)) || "title"; };
   keepSel();
-  // what it is drawn with: words of its own, the profile's brand with a letter logo, the channel's name and graphic; the
+  // what it is drawn with: words of its own, the profile's brand with a stand-in logo, the channel's name and graphic; the
   // cel look on its dark ground, the block as the preset has it at the size
-  const words = { catId: c.id, title: t("layed.sampleTitle"), subtitle: t("layed.sampleSub"), tag: t("layed.sampleTag") }, logo = letterLogo(S.profile.brand.name, c.color);
+  const words = { catId: c.id, title: t("layed.sampleTitle"), subtitle: t("layed.sampleSub"), tag: t("layed.sampleTag") }, logo = letterLogo(c.color);
   const channel = { ...c, name: c.name || t("layed.sampleChannel"), graphic: c.graphic && c.graphic.kind !== "none" ? c.graphic : { kind: "graphic", id: "camera", labels: [], stamp: "" } };
   const profileAt = (key) => {
     const lay = presetLayout(E.p, key);
@@ -3363,7 +3367,7 @@ function layoutEditor(p, i, fresh = false) {
   m.hidden = false; m.onDismiss = cancel;
   LAYED.redraw = redraw;
   redraw();
-  pictureOf(logo, redraw);   // drawn again once the letter logo can be (and its sizes' pictures after it), and the portrait
+  pictureOf(logo, redraw);   // drawn again once the stand-in logo can be (and its sizes' pictures after it), and the portrait
   const portrait = () => { const pic = pictureOf(PORTRAIT); if (pic) photos.set("portrait", pic); return pic; };
   if (!portrait()) pictureOf(PORTRAIT, () => { portrait(); redraw(); });
 }
