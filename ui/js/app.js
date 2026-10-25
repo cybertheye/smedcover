@@ -195,9 +195,10 @@ function commitHistory(always = false) {
 }
 /**
  * What holds the undo history back: `history`, while a change of several parts is under way that is to be one step
- * (recordHistory waits, as it waits while Surprise me deals; whoever set it commits the step once it is over).
+ * (recordHistory waits, as it waits while Surprise me deals; whoever set it commits the step once it is over); `step`,
+ * the agent's step holding it (agentStep's token), which alone lets it go.
  */
-const HOLD = { history: false };
+const HOLD = { history: false, step: null };
 /** Records history a moment after the last change, so a drag or a burst of typing is one step. */
 function recordHistory() { later("hist", 500, () => (SURPRISE.busy || HOLD.history ? recordHistory() : commitHistory())); }   // not while Surprise me deals hands onto the cover
 /** Puts the profile and the cover of history entry `snap` (a snapshot()) back on the canvas, and saves them. */
@@ -232,13 +233,19 @@ async function timeTravel(step) {
  * (a new history began), as they were on arriving there, the switch kept as the user's own is. A switch begun and not
  * done (the profile, its covers or the cover replaced, no new history yet) is undone first, so the profile is put back
  * in its own place. The step put back is written again as it now is, as timeTravel does.
+ * `ctl` is given `abandon()`, which the shell calls when it lets go of the call (see agent.js): the step is committed as
+ * it stands and the history let go, so the user's changes from then on are steps of their own; whatever fn does or
+ * throws later touches the history no more than a change of the user's would (a later step holding it is its own: HOLD.step).
  */
-async function agentStep(fn) {
+async function agentStep(fn, ctl = {}) {
   commitPending();
-  const at = S.histIdx, hist = [...S.hist], snap = hist[at], epoch = HIST.epoch, dealt = SURPRISE.step, sel = [S.layerId, S.picked];
-  HOLD.history = true;
+  const at = S.histIdx, hist = [...S.hist], snap = hist[at], epoch = HIST.epoch, dealt = SURPRISE.step, sel = [S.layerId, S.picked], mine = {};
+  const own = () => HOLD.step === mine, end = () => { if (!own()) return; HOLD.step = null; HOLD.history = false; commitPending(); };
+  HOLD.history = true; HOLD.step = mine;
+  ctl.abandon = end;
   try { return await fn(); }
   catch (e) {
+    if (!own()) throw e;   // let go of: what it changed stays, as a change of the user's would (the shell drops its answer)
     clearTimeout(timers.hist);
     const moved = HIST.epoch !== epoch, goal = moved ? S.hist[0] : snap, { p, c } = JSON.parse(goal);   // back to where a switch arrived, else to before
     if (S.profile.id !== p.id || S.covers !== HIST.covers || S.cover.catId !== c.catId) {   // a switch begun and not done
@@ -251,7 +258,7 @@ async function agentStep(fn) {
     if (S.settings.profileId !== S.profile.id || S.settings.channels[S.profile.id] !== S.cover.catId) { S.settings.profileId = S.profile.id; S.settings.channels[S.profile.id] = S.cover.catId; persistSettings(); }   // the one shown is the one remembered
     S.hist[S.histIdx] = snapshot(); syncTop();
     throw e;
-  } finally { HOLD.history = false; commitPending(); }
+  } finally { end(); }
 }
 
 /**
@@ -8709,6 +8716,19 @@ async function agentToolsTest({ call, ok, r, no }) {
   try { await agentStep(async () => { S.cover.tag = "KEPT FIRST"; touch({ cover: true }); commitHistory(true); throw new Error("after a step of its own"); }); } catch (e) { void e; }
   r.rollback.redoKept = S.hist.length === len && S.histIdx === at && S.histIdx < S.hist.length - 1;
   if (!r.rollback.redoKept) no("agentStep: a step taken meanwhile cut off redo, or stayed, once the change failed");
+  { // a step let go of (the shell's abandon): committed as it stands, the history the user's again; settling in the middle of a later step, it leaves that one whole
+    const ctl = {}, i0 = S.histIdx;
+    let free = null;
+    const hung = agentStep(() => new Promise((done) => { free = done; S.cover.tag = "LET GO"; touch({ cover: true }); }), ctl);
+    ctl.abandon();
+    const committed = S.histIdx === i0 + 1 && JSON.parse(S.hist[S.histIdx]).c.tag === "LET GO" && !HOLD.history;
+    await agentStep(async () => { S.cover.tag = "LATER"; touch({ cover: true }); free(); await new Promise((done) => setTimeout(done, 30)); S.cover.subtitle = "Later, still one step"; touch({ cover: true }); });
+    await hung;
+    const last = JSON.parse(S.hist[S.histIdx]).c, whole = S.histIdx === i0 + 2 && last.tag === "LATER" && last.subtitle === "Later, still one step" && !HOLD.history && !HOLD.step;
+    r.rollback.abandoned = committed && whole;
+    if (!committed) no("agentStep: a step let go of was not committed as it stood, or kept the history held");
+    if (!whole) no("agentStep: a step let go of split a later step in two when it settled");
+  }
   // all as it was: the profile and this channel's cover, the other channels' covers, this channel shown
   for (const id of others) { if (kept[id]) S.covers[id] = channelCover(kept[id], S.profile, id); else delete S.covers[id]; }
   await restoreSnap(start); resetHistory();

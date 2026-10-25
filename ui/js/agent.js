@@ -183,9 +183,10 @@ function pulse() {
 
 // ---------- the dispatcher
 /**
- * The agent over what app.js gives it: `commands` (makeCommands' tools), `busy` (userBusy), `step` (agentStep: fn run
- * as one step of undo), `closeTransient` (the menu, popovers and hover previews shut, a field left), `host` ("desktop"
- * or "server": the tools offered there). handle(call, {progress}) takes a call {id, tool, args, timeoutMs?} and
+ * The agent over what app.js gives it: `commands` (makeCommands' tools), `busy` (userBusy), `step` (agentStep(fn,
+ * ctl): fn run as one step of undo; ctl.abandon(), which it sets, ends that step as it stands when the call is let go
+ * of), `closeTransient` (the menu, popovers and hover previews shut, a field left), `host` ("desktop" or "server": the
+ * tools offered there). handle(call, {progress}) takes a call {id, tool, args, timeoutMs?} and
  * resolves with the reply the host is sent — {id, ok: true, result} (a CallToolResult), {id, ok: false, error: {code,
  * message}} — or CANCELLED; it never rejects. `progress(p)` is told {progress, total?, message?} while it waits or
  * works. A call running is let go of (answered failed, the window given back, the queue going on; what it does later is
@@ -231,7 +232,7 @@ export function makeAgent({ commands, busy = () => null, step = (fn) => fn(), cl
           return null;
         }
       };
-      return { id, ok: true, result: await (def.history ? step(go) : go()) };
+      return { id, ok: true, result: await (def.history ? step(go, me.step) : go()) };
     } catch (e) {
       if (e instanceof ToolError) return fail(id, e.code, e.message);
       console.error(e);
@@ -244,13 +245,13 @@ export function makeAgent({ commands, busy = () => null, step = (fn) => fn(), cl
   function handle(call, { progress = () => {} } = {}) {
     const c = call && typeof call === "object" ? call : {}, { id = null, tool } = c, def = toolOf(tool), name = def ? def.name : String(tool);
     const ms = Number.isFinite(c.timeoutMs) && c.timeoutMs > 0 ? c.timeoutMs : def ? def.timeoutMs : 30000;
-    const me = { n: 0, lease: null, held: null, t0: performance.now() };
+    const me = { n: 0, lease: null, held: null, step: {}, t0: performance.now() };   // step: what agentStep gives the shell to end it with (abandon)
     const tell = (p) => {   // a word to the caller; it sets the call's timeout going again
       if (me.lease && me.lease.gone) return;
       if (me.lease) me.lease.touch();
       try { progress(p); } catch (e) { console.error(e); }
     };
-    const lapsed = (why) => { release(me.held); stop.delete(id); return fail(id, "failed", letGoSays(name, why, ms, !!me.held, me.t0)); };
+    const lapsed = (why) => { if (me.step.abandon) me.step.abandon(); release(me.held); stop.delete(id); return fail(id, "failed", letGoSays(name, why, ms, !!me.held, me.t0)); };
     const waiting = () => tell({ progress: ++me.n, message: "Waiting for an earlier call to finish." });
     return queue.push(id, (lease) => { me.lease = lease; return run({ ...c, id }, def, me, tell); }, { timeoutMs: ms, lapsed, waiting, every })
       .catch((e) => { console.error(e); release(me.held); return fail(id, "failed", `${name} failed: ${(e && e.message) || e}`); });

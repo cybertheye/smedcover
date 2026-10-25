@@ -675,7 +675,7 @@ test("the queue: a call waiting is cancelled (it never runs), the call running i
   assert.equal(told.length, n, "nothing told once a call runs or is cancelled");
 });
 
-test("the dispatcher lets go of a call that hangs: answered failed at its timeout, the window given back, the next call runs, a late failure not put back", async () => {
+test("the dispatcher lets go of a call that hangs: answered failed at its timeout, the window given back, the next call runs, a late failure not put back, its step ended as it stands", async () => {
   const { makeAgent, stepping } = await import("../ui/js/agent.js");
   const log = [];
   let held = null;
@@ -683,7 +683,7 @@ test("the dispatcher lets go of a call that hangs: answered failed at its timeou
   commands.undo = async () => { held = stepping(); return never(); };   // e.g. undo → timeTravel → applyFonts, waiting for good
   commands.set_look = async (args, ctx) => { await sleep(60); log.push(`set_look cancelled: ${ctx.cancelled()}`); throw new Error("half done"); };
   commands.set_text = async (args, ctx) => { for (let i = 0; i < 6; i++) { await sleep(30); ctx.progress(i + 1, 6); } return toResult({ structured: { words: true } }); };
-  const step = async (fn) => { log.push("step in"); try { return await fn(); } catch (e) { log.push("put back"); throw e; } finally { log.push("step out"); } };
+  const step = async (fn, ctl) => { log.push("step in"); ctl.abandon = () => log.push("abandoned"); try { return await fn(); } catch (e) { log.push("put back"); throw e; } finally { log.push("step out"); } };
   const agent = makeAgent({ commands, step, quietFor: () => Infinity, every: 20 });
   const progress = [];
   const hung = agent.handle({ id: 1, tool: "undo", args: {}, timeoutMs: 50 }), next = agent.handle({ id: 2, tool: "get_context", args: {} }, { progress: (p) => progress.push(p) });
@@ -694,13 +694,13 @@ test("the dispatcher lets go of a call that hangs: answered failed at its timeou
   assert.equal(stepping(), false, "the window is the user's again");
   assert.equal((await next).ok, true, "the call behind it runs");
   assert.ok(progress.some((p) => p.message === "Waiting for an earlier call to finish."), "and was told it waited");
-  // a step that fails after being let go: not put back over what the user has done since, its step ended by step's own finally
+  // a step that fails after being let go: not put back over what the user has done since, its step ended when it was let go of (abandon)
   const s = await agent.handle({ id: 3, tool: "set_look", args: { look: "cyber" }, timeoutMs: 30 });
   assert.match(s.error.message, /^set_look did not finish/);
   const warn = console.warn;
   console.warn = () => {};
   try { await sleep(60); } finally { console.warn = warn; }
-  assert.deepEqual(log, ["step in", "set_look cancelled: true", "step out"]);
+  assert.deepEqual(log, ["step in", "abandoned", "set_look cancelled: true", "step out"]);
   // a call that keeps saying how far it has got is never let go of, however long it takes
   const words = [], w = await agent.handle({ id: 4, tool: "set_text", args: { title: "x" }, timeoutMs: 100 }, { progress: (p) => words.push(p) });
   assert.equal(w.ok, true);
