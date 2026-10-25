@@ -35,11 +35,23 @@
   header{display:flex;align-items:center;gap:12px;height:56px;padding:0 10px 0 18px;border-radius:18px}
   header h1{font:400 26px "Bebas Neue",sans-serif;letter-spacing:.08em;margin:0 2px 0 0}
   header .sep{width:1px;height:24px;background:var(--line2)}
-  /* on a Mac the window's own close, minimise and zoom buttons float over the top bar's left end (macTitleBar in app.js) */
-  html.macbar header{padding-left:96px}
-  @media(max-width:1200px){html.macbar header .grp>span{display:none}}   /* "Saved as you go" gives the buttons' room back */
+  /* the window's close, minimise and zoom buttons sit at the top bar's left end (ownTitleBar in app.js): on a Mac its own
+     float over it; on Windows and Linux the page draws them (#winbtns), at the same place and size and in a Mac's colours */
+  html.ownbar header{padding-left:96px}
+  @media(max-width:1200px){html.ownbar header .grp>span{display:none}}   /* "Saved as you go" gives the buttons' room back */
   #winbar{position:fixed;left:0;right:0;top:0;height:22px;z-index:45;display:none}
   body:has(#settings:not([hidden])) #winbar,body:has(#modal:not([hidden])) #winbar,body:has(#deal:not([hidden])) #winbar{display:block}
+  #winbtns{position:fixed;left:30px;top:32px;z-index:46;display:flex;gap:6px}
+  html:not(.ownbar) #winbtns{display:none}   /* full screen */
+  #winbtns button{width:14px;height:16px;padding:0;border:0;background:none;display:grid;place-items:center}
+  #winbtns span{width:12px;height:12px;border-radius:50%;display:grid;place-items:center;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.2)}
+  #winbtns .close span{background:#ff5f57;color:#4d0000}
+  #winbtns .min span{background:#febc2e;color:#995700}
+  #winbtns .zoom span{background:#28c840;color:#006500}
+  #winbtns svg{opacity:0}
+  #winbtns:hover svg{opacity:1}   /* their signs while the pointer is over any of them */
+  #winbtns button:active span{filter:brightness(.78)}
+  #winbtns.idle:not(:hover) span{background:rgba(235,235,245,.22)}   /* grey while another window is the one in use */
   .crumb{display:flex;align-items:center;gap:4px;min-width:0}
   .crumb>span{color:var(--text3)}
   .crumb select{width:auto;max-width:190px;min-width:0;border:0;background:transparent;padding:6px 8px;border-radius:10px;cursor:pointer}
@@ -604,8 +616,8 @@
   /* Settings: a window over the editor, its pages on the left (what was the Setup mode) */
   #settings{position:fixed;inset:0;z-index:30;display:grid;place-items:center;background:rgba(5,5,10,.45)}
   #settings[hidden]{display:none}
-  html.macbar #settings,html.macbar #modal{padding-top:44px}   /* the window's buttons clear of its top left corner */
-  html.macbar #settings .win{height:min(820px,calc(100vh - 104px))}
+  html.ownbar #settings,html.ownbar #modal{padding-top:44px}   /* the window's buttons clear of its top left corner */
+  html.ownbar #settings .win{height:min(820px,calc(100vh - 104px))}
   #settings .win{width:min(1240px,calc(100vw - 48px));height:min(820px,calc(100vh - 48px));border-radius:28px;display:flex;overflow:hidden;background-color:rgba(22,22,30,.55);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 40px 120px rgba(0,0,0,.6)}
   html.solid #settings .win{background-color:var(--solid)}
   #setnav{width:236px;flex:none;padding:24px 14px 18px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:6px;background:rgba(0,0,0,.12)}
@@ -1009,7 +1021,7 @@
 </style>
 </head>
 <body>
-<div id="ambient"><canvas id="amb" width="48" height="27"></canvas></div>
+<div id="ambient"><canvas id="amb" width="48" height="27"></canvas><canvas id="amb0" width="48" height="27" hidden></canvas></div>
 <div class="app">
   <header id="top" class="glass"></header>
   <div class="body nodrawer" id="body">

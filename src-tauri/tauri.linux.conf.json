@@ -1,0 +1,15 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "SmedCover",
+        "width": 1560,
+        "height": 950,
+        "minWidth": 1080,
+        "minHeight": 640,
+        "decorations": false,
+        "dragDropEnabled": false
+      }
+    ]
+  }
+}

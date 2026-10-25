@@ -6359,6 +6359,7 @@ function syncTop() {
     el("button", { class: "btn cta glassy deal-btn", title: t("top.surpriseHint"), disabled: SURPRISE.busy, onclick: surprise }, ico("spark", 18), t(SURPRISE.busy ? "top.surpriseBusy" : "top.surprise"), el("kbd", {}, t("top.space"))),
     el("button", { class: "btn cta solid", title: t("top.exportTip", MOD_KEY + "E"), onclick: exportDialog }, ico("download", 18), t("top.export")),
     el("button", { class: "ibtn" + (MENU.open ? " on" : ""), id: "morebtn", title: t("top.more"), "aria-label": t("top.more"), "aria-haspopup": "menu", "aria-expanded": String(MENU.open), onclick: toggleMenu }, ico("more", 18)));
+  for (const b of document.querySelectorAll("#winbtns button")) b.setAttribute("aria-label", b.title = t("top.win." + b.className));   // drawn on Windows and Linux (ownTitleBar)
   document.body.dataset.drop = t("msg.dropHere");
   if (MENU.open) renderMenu();
 }
@@ -6444,28 +6445,65 @@ addEventListener("pointerup", () => {
 for (const k of ["pointercancel", "blur"]) addEventListener(k, () => { GLASS.down = GLASS.slow = false; GLASS.gaps = []; });
 addEventListener("pointermove", (e) => { if (GLASS.down && !(e.buttons & 1)) GLASS.down = GLASS.slow = false; }, true);   // the release was missed (the window moved, a list's popup): nothing to say
 /**
- * On a Mac the window has no title bar of its own (titleBarStyle "Overlay" in tauri.conf.json): its close, minimise and
- * zoom buttons float over the top bar's left end, which html.macbar leaves room for. The top bar (all but its buttons
- * and lists) and the window's margin move the window, and a double click there zooms it, as a title bar's would
+ * In the desktop app the window has no title bar of its own: on a Mac it is see-through (titleBarStyle "Overlay" in
+ * tauri.conf.json) and the window's close, minimise and zoom buttons float over the top bar's left end; on Windows and
+ * Linux there is none ("decorations": false in tauri.windows.conf.json and tauri.linux.conf.json), and the page draws
+ * the same three buttons there (#winbtns), in a Mac's colours, grey while another window is the one in use, their
+ * signs shown while the pointer is over them. html.ownbar leaves them room. The top bar (all but its buttons and lists)
+ * and the window's margin move the window, and a double click there zooms it, as a title bar's would
  * (data-tauri-drag-region, Tauri's own); while Settings, a dialog or Surprise me's window covers them, a strip along
  * the window's top (#winbar) does. A press there still takes the focus from a field, as a press on nothing would. In
- * full screen the buttons are gone, and so is their room (asked again once the way out of it has ended).
+ * full screen the buttons are gone, and so is their room (on a Mac asked again once the way out of it has ended).
  */
-function macTitleBar() {
+function ownTitleBar() {
   const top = $("top"), app = document.querySelector(".app"), bar = document.body.appendChild(el("div", { id: "winbar" })), html = document.documentElement;
   top.dataset.tauriDragRegion = "deep"; app.dataset.tauriDragRegion = ""; bar.dataset.tauriDragRegion = "";   // .app: its margin only, not what is in it
   for (const n of [top, app, bar]) n.addEventListener("pointerdown", (e) => { if (n === top ? !e.target.closest("button,select") : e.target === n) document.activeElement?.blur?.(); });   // .app: its margin, not the editor in it
-  const win = globalThis.__TAURI__.window.getCurrentWindow(), room = () => win.isFullscreen().then((full) => html.classList.toggle("macbar", !full)).catch(() => {});
-  html.classList.add("macbar");
-  addEventListener("resize", () => { later("macbar", 150, room); later("macbar-out", 1000, room); });
+  const win = globalThis.__TAURI__.window.getCurrentWindow(), room = () => win.isFullscreen().then((full) => html.classList.toggle("ownbar", !full)).catch(() => {});
+  if (!isMac) {
+    const sign = { close: "M3 3l4 4M7 3l-4 4", min: "M2.5 5h5", zoom: "M5 2.5v5M2.5 5h5" };
+    const button = (k, act) => el("button", { class: k, tabindex: "-1", onmousedown: (e) => e.preventDefault(), onclick: () => win[act]().catch(fail) },   // a field keeps its focus, as with a Mac's
+      el("span", { innerHTML: `<svg viewBox="0 0 10 10" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="${sign[k]}"/></svg>` }));
+    const box = document.body.appendChild(el("div", { id: "winbtns" }, button("close", "close"), button("min", "minimize"), button("zoom", "toggleMaximize")));
+    box.dataset.tauriDragRegion = "";   // between the buttons, as on the top bar under them
+    const used = (on) => box.classList.toggle("idle", !on);
+    win.isFocused().then(used).catch(() => {}); win.onFocusChanged(({ payload }) => used(payload)).catch(() => {});
+  }
+  html.classList.add("ownbar");
+  addEventListener("resize", () => { later("ownbar", 150, room); if (isMac) later("ownbar-out", 1000, room); });
 }
-/** The page's ground (#ambient): the cover as last drawn, tiny — CSS blurs it — so the glass takes its colours. */
+/**
+ * The page's ground (#ambient): the cover as last drawn, tiny — CSS blurs it — so the glass takes its colours. A new
+ * ground fades in: the ground as seen until now goes on a second canvas (#amb0) over the new one and fades out over
+ * 0.7 s, then is hidden, so the window has two blurred layers only while it fades. A change too small to show through
+ * the blur, or a wish for less motion (prefers-reduced-motion), is painted straight in.
+ */
+const AMB = { fade: null };   // the old ground's fade, while it runs
+const ambCtx = (c) => c.getContext("2d", { willReadFrequently: true });   // tiny, and read back (ambientMoved)
 function paintAmbient() {
-  const src = $("cv"), dst = $("amb");
+  const src = $("cv"), dst = $("amb"), old = $("amb0");
   if (!src.width || !src.height) return;
-  const h = Math.max(1, Math.round((48 * src.height) / src.width));
+  const h = Math.max(1, Math.round((48 * src.height) / src.width)), left = AMB.fade ? +getComputedStyle(old).opacity : 0;
+  AMB.fade?.cancel(); AMB.fade = null; old.hidden = true;
+  if (old.height !== dst.height) old.height = dst.height;
+  const o = ambCtx(old);
+  o.globalCompositeOperation = "destination-in"; o.fillStyle = `rgba(0,0,0,${left})`; o.fillRect(0, 0, 48, old.height);   // what is left of the ground before
+  o.globalCompositeOperation = "destination-over"; o.drawImage(dst, 0, 0); o.globalCompositeOperation = "source-over";   // over the one it was fading into
   if (dst.height !== h) dst.height = h;
-  const x = dst.getContext("2d"); x.clearRect(0, 0, 48, h); x.drawImage(src, 0, 0, 48, h);   // cleared: a see-through cover leaves nothing of the last behind
+  const x = ambCtx(dst); x.clearRect(0, 0, 48, h); x.drawImage(src, 0, 0, 48, h);   // cleared: a see-through cover leaves nothing of the last behind
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || !ambientMoved(old, dst)) return;
+  old.hidden = false;
+  const fade = AMB.fade = old.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 700, easing: "ease-in-out", fill: "forwards" });   // gone until hidden
+  fade.onfinish = () => { if (AMB.fade === fade) { old.hidden = true; fade.cancel(); AMB.fade = null; } };
+}
+/** Whether ground `b` looks other than ground `a` through the blur: their pixels apart by more than 2 in 255 on average. */
+function ambientMoved(a, b) {
+  if (a.height !== b.height) return true;
+  try {
+    const p = ambCtx(a).getImageData(0, 0, 48, a.height).data, q = ambCtx(b).getImageData(0, 0, 48, b.height).data;
+    let d = 0; for (let i = 0; i < p.length; i++) d += Math.abs(p[i] - q[i]);
+    return d / p.length > 2;
+  } catch { return true; }
 }
 const TABS = { edit: { content: contentSheet, look: lookSheet, layout: layoutSheet, assets: assetsSheet, layers: layersSheet }, setup: { brand: brandTab, sizes: sizesTab, ai: aiTab } };
 /** The dock's buttons, one per sheet, each opening its sheet; in Settings, its pages down the window's left. */
@@ -6677,7 +6715,7 @@ async function start() {
   setGlass(glassOn());
   const probe = document.body.appendChild(el("div", { style: "position:absolute;top:-99px;width:60px;height:60px;overflow:scroll" }));
   document.documentElement.classList.toggle("bars", probe.offsetWidth > probe.clientWidth); probe.remove();   // scrollbars that take room: drawn thin (index.html)
-  if (isMac) macTitleBar();
+  if (HOST === "tauri") ownTitleBar();
   setLang(S.settings.lang || detectLang());
   for (const name of await files.list("fonts").catch(() => [])) {   // nothing is written for a font missed
     if (name.endsWith(".font")) { const src = await files.read("fonts/" + name).catch(() => null); if (src) await registerFont(name.slice(0, -5), src); }

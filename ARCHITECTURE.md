@@ -1610,7 +1610,11 @@ scope, `#scope`, which wraps under the sizes when there is no room beside them) 
 `#side`), whose column goes to the canvas while it is shut (`.nodrawer`). The sheet and the drawer are dragged wider by
 their inner edges (`columns()`, kept in `settings.columns`), the canvas keeping `CENTRE_MIN` at the least. Behind it all lies the
 cover itself: `paintAmbient()` copies the main canvas, 48 pixels wide, into `#amb` a moment after each drawing
-(`later("ambient", …)` in `flushDraw()`), and CSS blurs and darkens it to fill the window (`#ambient`). Every panel
+(`later("ambient", …)` in `flushDraw()`), and CSS blurs and darkens it to fill the window (`#ambient`). A new ground
+fades in over 0.7 s: the ground as seen until then goes on a second canvas, `#amb0`, over the new one and fades out
+(`AMB.fade`, an animation of its opacity), then is hidden, so the window has two blurred layers only while it fades; a
+repaint during a fade starts from what is seen at that moment. A change too small to show through the blur
+(`ambientMoved()`: the pixels apart by 2 in 255 on average, or less), or `prefers-reduced-motion`, is painted straight in. Every panel
 over it is a pane of frosted glass (`.glass`: a translucent fill and `backdrop-filter`), so the window takes its colours
 from the cover being made. The glass is not free: the web view blurs again what lies under a pane whenever that
 changes, and while something is dragged that can cost frames. So where it cannot blur at all (`CAN_BLUR`), or the
@@ -1622,20 +1626,30 @@ gap of 90 passes 28 ms with the glass on, it marks them slow (`GLASS.slow`), and
 once on this computer (`settings.glassHint`) with a button that makes the panes plain; a drag that ends otherwise
 (`pointercancel`, the window's `blur`, a pointer moving with no button down) forgets it. The glass never changes by itself: only the user's hand turns it off.
 
-**The Mac title bar.** On macOS the window's title bar is see-through (`titleBarStyle: "Overlay"`, `hiddenTitle` and
-`trafficLightPosition` in `tauri.conf.json`), its buttons placed in the top bar's left end (the top bar sits 12 px in
-and is 56 px tall, so its middle is 40 px down). `macTitleBar()`, called from `start()` when `isMac`, sets `html.macbar`,
-which leaves the buttons room in the top bar and keeps Settings' window and the dialogs (`#modal`) clear of them, and marks the top bar
+**The title bar.** In the desktop app the window has no title bar of its own, on any system. On macOS it is see-through
+(`titleBarStyle: "Overlay"`, `hiddenTitle` and `trafficLightPosition` in `tauri.conf.json`), the system's buttons placed
+in the top bar's left end (the top bar sits 12 px in and is 56 px tall, so its middle is 40 px down). On Windows and
+Linux there is none (`"decorations": false` in `tauri.windows.conf.json` and `tauri.linux.conf.json`, Tauri's
+platform files, merged over `tauri.conf.json`; their `app.windows` replaces the whole list, so it repeats the window's
+other settings, and on Windows `"shadow": true` keeps its shadow and, on Windows 11, its rounded corners), and the page
+draws the same three buttons in the same place (`#winbtns`): 12 px circles 20 px apart, in a Mac's red, yellow and
+green, their ×, − and + shown while the pointer is over them, grey while another window is the one in use
+(`onFocusChanged`). They call the window's `close()`, `minimize()` and `toggleMaximize()` (nothing in the app holds a
+close back, so it closes as the system's button did), and a press on them leaves a field its focus, as a Mac's do.
+The window's edges still resize it: Tauri's runtime does that for a window without decorations (`undecorated_resizing`
+in tauri-runtime-wry), so the page has no edges of its own. `ownTitleBar()`, called from `start()` in the desktop app
+(`HOST === "tauri"`), sets `html.ownbar`, which leaves the buttons room in the top bar and keeps Settings' window and
+the dialogs (`#modal`) clear of them, and marks the top bar
 `data-tauri-drag-region="deep"` (Tauri's own: the window moves from anywhere in it but its buttons and lists, a double
 click zooms it) and `.app` a bare one (its margin). Settings, a dialog (`#modal`) and Surprise me's window cover both;
 while one is open a strip along the window's top, `#winbar` (22 px, clear of Surprise me's Undo below it), moves the
-window in their place. Tauri's script stops the press there, so a press on the top bar (not on its buttons or lists),
+window in their place; the drawn buttons stay over them all, as a Mac's do. Tauri's script stops the press there, so a press on the top bar (not on its buttons or lists),
 the margin itself or the strip takes the focus from a field by hand, as a press on nothing would. In a narrow window the top bar's lists give way (`.app`'s one column is
 `minmax(0,1fr)`, the lists' `min-width:0`) and below 1200 px *Saved as you go* goes, so ⋯ stays in the window. In full
-screen the buttons are gone: a resize asks `isFullscreen()` and takes their room away, and asks again a second later,
-as the way out of full screen is over only after its animation. Moving the window needs
-`core:window:allow-start-dragging` (`capabilities/default.json`).
-On Windows and Linux the system's own title bar stays.
+screen the buttons are gone: a resize asks `isFullscreen()` and takes their room (and the drawn buttons) away, and on a
+Mac asks again a second later, as the way out of full screen is over only after its animation. Moving the window needs
+`core:window:allow-start-dragging`, the drawn buttons `core:window:allow-minimize`, `allow-toggle-maximize` and
+`allow-close` (`capabilities/default.json`); `core:default` allows the double click's zoom.
 
 **Narrow windows.** With the drawer open the canvas could be squeezed between two side columns; so where it would be
 left narrower than `CENTRE_ROOMY` (560 px), `columns()` sets `.tight` on `#body`: the sheet's column is hidden and the
@@ -2076,6 +2090,8 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | add a sheet to the dock | its function in `TABS.edit` and an icon in `SHELL_ICONS` (`app.js`); `dock.*` and its heading's `sheet.*` in `i18n.js` |
 | add a page to Settings | its function in `TABS.setup` and an icon in the `icon` map inside `syncTabs()` (`app.js`); `tab.*` in `i18n.js` |
 | change when the note on slow glass shows, or how the panes go plain | `glassWatch()`, `setGlass()` and `CAN_BLUR` in `app.js`; `html.solid` in `index.html` |
-| move the Mac window's buttons, or what moves the window | `trafficLightPosition` in `tauri.conf.json`; `macTitleBar()` in `app.js`; `html.macbar` in `index.html` |
+| change how the ground behind the glass fades into a new cover | `paintAmbient()` and `ambientMoved()` in `app.js`; `#ambient` in `index.html` |
+| move the window's buttons, or what moves the window | `trafficLightPosition` in `tauri.conf.json` (Mac); `ownTitleBar()` in `app.js`; `html.ownbar` and `#winbtns` (Windows, Linux) in `index.html` |
+| change the window's size or other settings | `app.windows` in `tauri.conf.json`, and again in `tauri.windows.conf.json` and `tauri.linux.conf.json`, which replace that list whole |
 | change when the drawer takes the sheet's place, or the columns stack | `CENTRE_ROOMY`, `STACKED` and `columns()` in `app.js`; `.body.tight` and the `max-width: 1000px` rules in `index.html` |
 | add an interface string | `i18n.js`, in both languages; a test checks that both are present |
