@@ -393,6 +393,7 @@ function flushDraw() {
   if (S.letterWin) later("letters", 200, lettersShow);   // the ransom note's letters as now drawn (words typed, colours changed)
   if (S.weaveWin) later("weave", 200, weaveShow);   // the woven letters as now typed
   if (LAYED.redraw) later("layed", 80, LAYED.redraw);   // a layout preset's editor, with what arrived since (outlines, fonts)
+  if (onLayoutSheet()) later("presetpics", 500, refreshPresetPics);   // the preset cards' pictures follow the cover, the size and the profile (outlines arrived too), a moment after the last change
 }
 /**
  * Redraws at most once per frame, however many input events arrive. `stale` false: only what is selected
@@ -2583,20 +2584,29 @@ function layoutScope(followed) {
       el("button", { class: "linkbtn", title: t("style.followTip"), onclick: () => { followLayout(st, key); followed(); } }, t("style.follow"))) };
 }
 /**
- * The colour block's properties: how much of the canvas it takes and how its edge leans, the template's own sliders
- * (blockSliders), changed where the scope under the canvas says, as the Layout sheet's template box changes them
- * (layoutScope); dragged, the cover is drawn as a draft (draftTouch), one step of undo.
+ * The colour block's properties: where it lies (Block position: a band along the foot, a panel at the side or a slim
+ * banner — the template), how much of the canvas it takes and how its edge leans (the template's own sliders,
+ * blockSliders), changed where the scope under the canvas says, as the Layout sheet's template box changes them
+ * (layoutScope); a position picked is one step of undo, a slider dragged draws the cover as a draft (draftTouch), one
+ * step of undo. Then Block by orientation (byOrient), every size at once.
  */
 function blockSection() {
-  const at = layoutScope(() => touch({ profile: true, side: true }));
-  const a = layoutAdjuster(S.profile.style, shownAt(), (again) => (again ? touch({ profile: true, side: true }) : draftTouch({ profile: true })), at.to);
-  return psec("props.sec.block", [blockSliders(a), at.own], `${t("props.blockHint")} ${at.says} ${t("style.scopeWhere")}`);
+  const st = S.profile.style, at = layoutScope(() => touch({ profile: true, side: true }));
+  const a = layoutAdjuster(st, shownAt(), (again) => (again ? touch({ profile: true, side: true }) : draftTouch({ profile: true })), at.to);
+  // a position picked: its own step of undo, the sliders following it (from what the style keeps for it, else its defaults), as templateControls's list does
+  const place = (v) => { if (v === a.tpl) return; clearTimeout(timers.hist); commitHistory(); a.put(v, (st.layoutAdjust || {})[v] || templateDefault(v, orientOfKey(S.sel)), true); commitHistory(); };
+  return psec("props.sec.block", [
+    el("div", {}, cap("props.blockAt"), el("div", { class: "seg wide blockat" }, ["stack", "split", "banner"].map((k) =>
+      el("button", { class: "btn" + (a.tpl === k ? " on" : ""), title: t("tpl." + k + "Tip"), "aria-pressed": String(a.tpl === k), onclick: () => place(k) }, t("tpl." + k))))),
+    blockSliders(a), at.own,
+    el("div", {}, el("button", { class: "btn wide", title: t("style.byOrientTip"), onclick: byOrient }, t("style.byOrient")), el("div", { class: "hint" }, t("style.byOrientHint"))),
+  ], `${t("props.blockHint")} ${at.says} ${t("style.scopeWhere")}`);
 }
-/** "Wide split, tall stacked, square banner": every size in its orientation's default layout (layoutByOrient in layout.js); one step of undo. */
+/** Block by orientation ("wide a side panel, tall a band, square a slim banner"): every size in its orientation's default layout (layoutByOrient in layout.js); one step of undo. */
 function byOrient() {
   clearTimeout(timers.hist); commitHistory();
   layoutByOrient(S.profile.style, S.profile.sizes);
-  touch({ profile: true, panel: true });
+  touch({ profile: true, panel: true, side: true });
   commitHistory();   // its own step
   toast(t("style.byOrientDone"));
 }
@@ -3299,7 +3309,7 @@ function lookSheet() {
  * (null: none): `look`, the look of a look card; `fx`, a text effect's card, {id, fx, seed} (the layer, the effect,
  * the seed a lettering dealt by one is drawn with); `layout`, a layout preset's card, {id, name, p} (the preset, the
  * cover laid out by it at each drawing, see laidOut). Only the drawing takes it (paint, through previewed()): the profile
- * and the cover keep their own, so nothing of it is saved or undone; a click on the card (a preset's Apply to canvas)
+ * and the cover keep their own, so nothing of it is saved or undone; a click on the card (a preset's picture or name)
  * puts it on. `timer`: the moment being waited, for `wait` (the kind it will show).
  */
 const PREVIEW = { look: null, fx: null, layout: null, timer: 0, wait: "" };
@@ -3505,8 +3515,9 @@ function previewTag() {
   for (const c of document.querySelectorAll("#panel .preset")) c.classList.toggle("previewing", !!lay && c.dataset.id === lay.id);
 }
 /**
- * Whether the Layout sheet shows the template box (layoutBox): hidden for now, the colour block's size and slant in its
- * own properties (blockSection); layoutBox, templateControls and byOrient stay.
+ * Whether the Layout sheet shows the template box (layoutBox): hidden for now, the colour block's position (the
+ * template), size and slant and Block by orientation in its own properties (blockSection); layoutBox and
+ * templateControls stay.
  */
 const TEMPLATE_BOX = false;
 /** Layout: the layout presets, the template at this size (while TEMPLATE_BOX), the colour block's edge, which parts show, and all the layout hidden or put back in place. */
@@ -3526,27 +3537,118 @@ function layoutSheet() {
   ];
 }
 /**
- * Layout → the layout presets, each a card: its name (renamed where it is), put on the canvas, edited in the preset's
- * editor (layoutEditor), or deleted; a new one laid out in the editor from the start (each orientation in its default
- * layout, every part in it: see newPreset in layers.js), kept once saved there. Surprise me deals them by their chances.
+ * Layout → the layout presets, two to a row, each a card: this cover laid out by it (presetPic), its name, and a word
+ * while the canvas previews it; first the canvas as it is, marked Current. A preset's card under the pointer is
+ * previewed on the canvas (hoverPreset) and says over its picture that a click puts it on (applyLayout); its ⋯ renames
+ * it where it is, edits it in the preset's editor (layoutEditor), sets its chance in Surprise me (oddsDialog), or
+ * deletes it. ＋ New lays one out in the editor from the start (each orientation in its default layout, every part in
+ * it: see newPreset in layers.js), kept once saved there. Surprise me deals them by their chances.
  */
 function presetCards() {
   const list = S.settings.layouts;
-  const card = (p, i) => el("div", { class: "preset" + (PREVIEW.layout && PREVIEW.layout.id === p.id ? " previewing" : ""), dataset: { id: p.id }, onpointerenter: () => hoverPreset(p, i) },
-    el("div", { class: "preset-h" },
-      el("input", { type: "text", value: p.name, placeholder: layoutName(p, i), maxLength: LAYOUTS.name, spellcheck: false, title: t("layouts.renameTip"),
-        onkeydown: (e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") { e.stopPropagation(); e.target.value = p.name; e.target.blur(); } },
-        onchange: (e) => { p.name = e.target.value.trim().slice(0, LAYOUTS.name); persistSettings(); renderPanel(); } }),
-      el("span", { class: "pv" }, t("layouts.previewingCard"))),
-    el("div", { class: "acts" },
-      el("button", { class: "btn solid", title: t("layouts.applyTip"), onclick: () => applyLayout(p, i) }, t("layouts.apply")),
-      el("button", { class: "btn", onclick: () => { endPreview("layout"); layoutEditor(p, i); } }, t("layouts.edit")),
-      el("button", { class: "btn", onclick: () => { endPreview("layout"); deleteLayout(p, i, renderPanel); } }, t("layouts.delete"))));
+  for (const [id, pic] of PRESET_PICS.pics) if (id && !list.some((p) => p.id === id)) { PRESET_PICS.io.unobserve(pic.cv); PRESET_PICS.pics.delete(id); }   // a preset deleted
+  const now = el("div", { class: "preset now", title: t("layouts.nowTip"), onpointerenter: () => hoverPreset(null) },
+    el("div", { class: "pthumb" }, presetPic("", null).cv),
+    el("div", { class: "pcap" }, el("span", { class: "nm" }, t("layouts.now")), el("span", { class: "pv" }, t("layouts.current"))));
+  const card = (p, i) => {
+    const put = () => applyLayout(p, i), name = el("span", { class: "nm" }, layoutName(p, i));
+    const menu = el("div", { class: "chmenu", role: "menu", hidden: true },
+      el("button", { role: "menuitem", onclick: () => { shut(); renamePreset(name, p, i); } }, t("layouts.rename")),
+      el("button", { role: "menuitem", onclick: () => { shut(); endPreview("layout"); layoutEditor(p, i); } }, t("layouts.edit")),
+      el("button", { role: "menuitem", onclick: () => { shut(); endPreview("layout"); oddsDialog(true, "layouts"); } }, t("layouts.odds")),
+      el("button", { role: "menuitem", class: "danger", onclick: () => { shut(); endPreview("layout"); deleteLayout(p, i, renderPanel); } }, t("layouts.delete")));
+    const more = el("button", { class: "more", title: t("layouts.more"), "aria-label": t("layouts.more"), "aria-haspopup": "menu", "aria-expanded": "false",
+      onclick: () => { const open = menu.hidden; shutPresetMenus(); menu.hidden = !open; more.setAttribute("aria-expanded", String(open)); } }, "⋯");
+    const shut = () => { menu.hidden = true; more.setAttribute("aria-expanded", "false"); };
+    return el("div", { class: "preset" + (PREVIEW.layout && PREVIEW.layout.id === p.id ? " previewing" : ""), dataset: { id: p.id }, onpointerenter: () => hoverPreset(p, i) },
+      el("button", { class: "pthumb", title: t("layouts.applyTip"), "aria-label": `${layoutName(p, i)} · ${t("layouts.apply")}`, onclick: put }, presetPic(p.id, p).cv, el("span", { class: "go" }, el("span", {}, t("layouts.apply")))),
+      el("div", { class: "pcap", onclick: (e) => { if (e.target.tagName !== "INPUT") put(); } }, name, el("span", { class: "pv" }, t("layouts.previewingCard"))),
+      more, menu);
+  };
+  requestAnimationFrame(refreshPresetPics);   // the pictures in sight drawn where stale, once the cards are in the page
   return el("div", {},
     el("div", { class: "lhead", style: "margin-bottom:8px" }, capInfo("layouts.list", t("layouts.about")),
       el("button", { class: "linkbtn", disabled: list.length >= LAYOUTS.most, title: t("layouts.newTip"),
         onclick: () => layoutEditor(normalizeLayouts([{ ...newPreset(), id: newLayoutId(), name: nextLayoutName() }])[0], list.length, true) }, t("layouts.new"))),
-    list.length ? el("div", { class: "presets", onpointerleave: () => hoverPreset(null) }, list.map(card)) : el("div", { class: "hint", style: "margin:0" }, t("layouts.none")));
+    el("div", { class: "presets", onpointerleave: () => hoverPreset(null) }, now, list.map(card)),
+    !list.length && el("div", { class: "hint presets-none" }, t("layouts.none")));
+}
+/** Shuts the preset cards' ⋯ menus. */
+function shutPresetMenus() {
+  for (const m of document.querySelectorAll(".preset .chmenu")) m.hidden = true;
+  for (const b of document.querySelectorAll(".preset .more[aria-expanded=true]")) b.setAttribute("aria-expanded", "false");
+}
+// a press anywhere but on a preset card's ⋯ or its menu shuts the menu
+addEventListener("pointerdown", (e) => { if (!(e.target.closest && e.target.closest(".preset .chmenu, .preset .more"))) shutPresetMenus(); }, true);
+/** Renames preset `p` (the i-th) where its card shows its name (`name`): a field in its place, Enter (or leaving it) keeps what is typed, Escape the name as it was. */
+function renamePreset(name, p, i) {
+  let gone = false;
+  const back = (keep) => {
+    if (gone) return;
+    gone = true;
+    if (keep) { p.name = input.value.trim().slice(0, LAYOUTS.name); persistSettings(); }
+    name.textContent = layoutName(p, i);
+    input.replaceWith(name);
+  };
+  const input = el("input", { type: "text", value: p.name, placeholder: layoutName(p, i), maxLength: LAYOUTS.name, spellcheck: false, title: t("layouts.renameTip"),
+    onkeydown: (e) => { if (e.isComposing) return; if (e.key === "Enter") back(true); if (e.key === "Escape") { e.stopPropagation(); back(false); } },
+    onblur: () => back(true) });
+  name.replaceWith(input);
+  input.focus(); input.select();
+}
+/**
+ * Each layout preset card's picture, kept from one drawing of the Layout sheet to the next: {cv, p, sig, seen} by preset
+ * id ("" the canvas as it is), where `sig` is what it was drawn from (the cover, the profile, the size and the preset)
+ * and `seen` whether its card is in sight (`io`). Drawn one a frame, those in sight that are stale, a moment after a
+ * change; not while something is dragged. `round`: the drawing's turn (a newer one stops an older).
+ */
+const PRESET_PICS = { pics: new Map(), round: 0, io: null };
+const onLayoutSheet = () => S.mode === "edit" && !sheetHidden() && S.tab.edit === "layout";
+/** The card picture of preset `p` (null: the canvas as it is), keyed `id`: its canvas kept, watched for being in sight. */
+function presetPic(id, p) {
+  let pic = PRESET_PICS.pics.get(id);
+  if (!pic) {
+    pic = { cv: el("canvas", { width: 300, height: 169 }), p, sig: "", seen: false };
+    PRESET_PICS.pics.set(id, pic);
+    PRESET_PICS.io = PRESET_PICS.io || new IntersectionObserver((seen) => {
+      for (const e of seen) { const x = [...PRESET_PICS.pics.values()].find((q) => q.cv === e.target); if (x) x.seen = e.isIntersecting; }
+      if (seen.some((e) => e.isIntersecting)) refreshPresetPics();
+    });
+    PRESET_PICS.io.observe(pic.cv);
+  }
+  pic.p = p;
+  return pic;
+}
+/** What the preset cards' pictures are drawn from but the preset: the cover, the profile, the size on the canvas. */
+const presetBase = () => JSON.stringify([S.sel, S.cover.catId, S.cover.title, S.cover.subtitle, S.cover.tag, S.cover.layers, S.cover.scene, S.profile.brand, S.profile.categories, S.profile.sizes, S.profile.style, S.photos.size]);
+/**
+ * Draws the preset cards' pictures that are stale and in sight while the Layout sheet is open, as many a frame as fit in
+ * a few milliseconds (one at least): the cover at the size on the canvas, laid out by the preset as the canvas previews
+ * it (laidOut), twice as many pixels across as it is shown. Not while something is dragged (as the size thumbnails wait).
+ */
+function refreshPresetPics() {
+  if (!onLayoutSheet()) return;
+  const round = ++PRESET_PICS.round, base = presetBase(), z = selSize(), drawn = new Set();   // drawn: once a round (one waiting for outlines is drawn again once they come, see flushDraw)
+  let px = 0;   // the pictures' width in pixels, the same for every card: measured once the cards are laid out
+  const sigOf = (pic) => {
+    if (!px) { const box = pic.cv.parentNode; px = Math.round(2 * Math.min((box && box.clientWidth) || 150, (((box && box.clientHeight) || 84) * z.w) / z.h)); }
+    return `${base}|${px}|${pic.p ? JSON.stringify(pic.p) : ""}`;
+  };
+  const next = () => {
+    if (round !== PRESET_PICS.round || !onLayoutSheet()) return;
+    if (LIVE || drafting()) return setTimeout(next, 300);
+    const start = performance.now();
+    let pic;
+    while ((pic = [...PRESET_PICS.pics.values()].find((x) => x.seen && x.cv.isConnected && !drawn.has(x) && x.sig !== sigOf(x)))) {
+      const sig = sigOf(pic), { profile, cover } = pic.p ? laidOut(pic.p) : { profile: S.profile, cover: S.cover };
+      drawn.add(pic);
+      try { paint(pic.cv, z, px, cover, catIndex(), null, null, { profile }); pic.sig = outlinesPending() ? "" : sig; }   // waiting for outlines: drawn again once they come
+      catch (e) { console.error(e); pic.sig = sig; }   // one failing leaves the others to be drawn
+      finally { useLook(); }
+      if (performance.now() - start > 8) return requestAnimationFrame(next);   // the rest in the frames to come
+    }
+  };
+  requestAnimationFrame(next);
 }
 /** A preset's card under the pointer: the canvas shows the cover laid out by it a moment later (PREVIEW.layout); none: as it is. */
 function hoverPreset(p, i) {
@@ -6566,7 +6668,7 @@ function handSays(h) {
   const lang = getLang(), lk = LOOKS[h.style.look] || LOOKS.cel, title = h.layers.find((l) => l.id === "title");
   const fx = title && title.fx && title.fx !== "auto" && EFFECTS[title.fx] ? EFFECTS[title.fx].name[lang] : t("odds.ownLetters");
   const n = S.settings.layouts.findIndex((p) => p.id === h.layout);
-  const lay = n >= 0 ? layoutName(S.settings.layouts[n], n) : t("tpl." + layoutOf(h.style, S.sel).template).split(/[：:]/)[0];
+  const lay = n >= 0 ? layoutName(S.settings.layouts[n], n) : t("tpl." + layoutOf(h.style, S.sel).template);
   return [!lk.oneTheme && t("deal.ground." + h.style.theme), fx, lay].filter(Boolean).join(" · ");
 }
 /** Hand i, just dealt, in its place: its drawing at the size shown, its look, and what it is in a few words. */

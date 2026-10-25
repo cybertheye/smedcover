@@ -540,15 +540,19 @@ the other templates' kept), else each size of `keys` as its own; `followLayout(s
 The scope decides where a change of layout lands, as it does for a placement: `all` the profile's own, `orient` each
 size facing the canvas's way (the layout the canvas's size is drawn in, as it is now, put on each), `size` the
 canvas's size. The colour block's *Size & slant* (`blockSection()`, a group of its properties, so on its bar too) holds
-the template's two block sliders (`blockSliders()`, how much the block takes and how its edge leans, over
-`layoutAdjuster()`, which `templateControls()` builds on too) and lands where the Layout sheet's template box does
+the template itself, named for the block (*Block position*: *Band* `stack`, *Side panel* `split`, *Slim banner*
+`banner`, `tpl.*` and their tips `tpl.*Tip`; one picked is one step of undo, and starts from the adjustments the
+profile keeps for it, else its defaults, as the template box's list does), the template's two block sliders
+(`blockSliders()`, how much the block takes and how its edge leans, over
+`layoutAdjuster()`, which `templateControls()` builds on too) and *Block by orientation* (`byOrient()`, below), and lands where the Layout sheet's template box does
 (`layoutScope()`): no buttons for the scope, its ⓘ saying which sizes it reaches and that it is switched under the
 canvas; and, when the size shown has its own layout, *This size has its own layout* with *Follow again* (with `all`
 the sliders then change the profile's own, which that size does not follow). A slider dragged draws the cover as a
 draft (`draftTouch()`), one step of undo; a diamond let go on the canvas builds the drawer again, so the sliders follow.
 The strip marks a size with its own layout (`markStrip()`). The template box itself (`layoutBox()`: the template, the
-block's and the title box's sliders, the swap, the way back to the template's defaults, *Wide split, tall stacked, square
-banner*) is hidden for now (`TEMPLATE_BOX` false in `app.js`, its code kept): the template is changed by a layout preset. A diamond dragged on the canvas changes what the scope
+block's and the title box's sliders, the swap, the way back to the template's defaults, *Block by orientation*) is
+hidden for now (`TEMPLATE_BOX` false in `app.js`, its code kept): what of it is still wanted is in *Size & slant*, and
+a layout preset changes the template too. A diamond dragged on the canvas changes what the scope
 says, but with `all` on a size with its own layout it changes that one: it is the one drawn under the pointer. A
 template chosen for a size starts from the adjustments the profile keeps for that template. A size removed in Settings
 takes its own with it; `normalizeProfile()` keeps `layoutBy` only for the profile's sizes, templates there are, and
@@ -563,7 +567,7 @@ the profile's own layout stays where some sizes' default it is, else becomes the
 draw so is given its default as its own, and every earlier `layoutBy` goes. `normalizeProfile()` does it for a
 profile with no `style` at all, a new one (the starters, the full example: `starterProfile()`, `sampleProfile()`, the
 welcome dialog and *New* under *This profile*); a profile that has a style is drawn as it was, and for it
-`layoutByOrient()` is *Wide split, tall stacked, square banner* in the Layout sheet (`byOrient()`), one step of undo.
+`layoutByOrient()` is *Block by orientation* in the colour block's *Size & slant* (`byOrient()`), one step of undo.
 A size added in Settings → Sizes & export (`toggle` in `sizesTab()`) goes through `layoutAdded(style, sizes, key)`:
 drawn as the profile's other sizes facing its way are, where they are all drawn alike, else in its orientation's
 default, as its own where that is not the profile's. A template's defaults, `templateDefault(template, o)`, are those
@@ -1579,16 +1583,25 @@ so such a hand is dealt from the same random numbers as one with `keep` at 100%.
 keeps (its caption in the window names the preset); a hand is the whole style and the layers, so `putHand()`, and
 `dealTake()` through it, put its template, adjustments and parts back with it.
 
-The presets are made and seen at the top of the Layout sheet, a card each (`presetCards()`; their chances are set in
-the chances window, whose layout card points back here), each
-renamed where it is, edited (`layoutEditor()`), put on the canvas as one step of undo (`applyLayout()`, `putLayout()`
-again, at the profile's sizes: the parts locked stay, the block's layout too when the block is locked) or deleted once asked (`deleteLayout()`: its chance goes to the others as `rebalance()` sets an option to 0, `dropOption()`; none of them
-having any, the group goes and `keep` is certain again); *＋ New…* opens the editor on a new one (`newPreset()`: every part
+The presets are made and seen at the top of the Layout sheet, two to a row, a card each (`presetCards()`; their chances are set in
+the chances window, whose layout card points back here), after one for the canvas as it is (*Current*, outlined in
+`--acc`). Each card's picture is the cover at the size on the canvas laid out by the preset as the hover preview lays it
+out (`laidOut()`, below), so whatever a preset holds shows there; its canvas is kept from one drawing of the sheet to the
+next (`PRESET_PICS`, by preset id, "" the canvas's) with what it was drawn from (the cover, the profile, the size, the
+preset and its width in pixels, twice what is shown); `refreshPresetPics()` draws those stale and in sight (an
+`IntersectionObserver`) as many a frame as fit in 8 ms, one at least, never while something is dragged (`LIVE`,
+`drafting()`): when the sheet is drawn, as a card comes into sight, and half a second after the last canvas drawing
+(`flushDraw()`), so a change of the cover, the size or the profile, and outlines arrived, are followed. A preset's card,
+clicked, puts it on the canvas as one step of undo (`applyLayout()`, `putLayout()`
+again, at the profile's sizes: the parts locked stay, the block's layout too when the block is locked); its ⋯ menu (the
+channel cards' `.chmenu`) renames it where it is (`renamePreset()`), edits it (`layoutEditor()`), opens its chance
+(`oddsDialog(true, "layouts")`) or deletes it once asked (`deleteLayout()`: its chance goes to the others as `rebalance()` sets an option to 0, `dropOption()`; none of them
+having any, the group goes and `keep` is certain again); *＋ New* opens the editor on a new one (`newPreset()`: every part
 in it, where the template puts it), which is in the list once saved. A card under the pointer a moment shows the cover laid
 out by its preset on the canvas (`hoverPreset()`, `PREVIEW.layout`, see *Previews from cards* in 9.5): `laidOut(p)` puts it on
 copies of the profile's style and of the cover's layout parts — the other layers shared, as nothing there changes them —
 by `putLayout()` at the profile's sizes, as `applyLayout()` would, each time the canvas is drawn, so the preview follows
-whatever changes meanwhile; *Edit…* and *Delete* end it before they open their windows. *Save as layout*, a quiet underlined link in its own line
+whatever changes meanwhile; the menu's *Edit…*, chance and *Delete* end it before they open their windows. *Save as layout*, a quiet underlined link in its own line
 between the canvas and the tray under it, is hidden for now (`SAVE_AS_LAYOUT` false in `app.js`: the line stays empty and takes
 no room; the code below is kept) (`#toolsub`, filled by `syncToolbar()` while the editor is in front and empty in Settings:
 the stage, that line and the tray are each pinned to a row of their own of `#center`, so the stage keeps the row that grows;
@@ -1834,7 +1847,7 @@ waited for and the kind it will show. `previewSoon(kind, v, ok)` waits the momen
 the canvas back at once. Only the main canvas's drawing takes it: `paintFlat()` paints `previewed()` — the cover laid out
 by the preset (`laidOut()`), the profile in the look (`inLook()`), the layer in the effect, on copies, so nothing is saved,
 recorded or undone, and the thumbnails and exports keep the cover's own. `previewTag()` says over the canvas which, and
-how it is put on (a click on the card; for a preset, *Apply to canvas*), and marks the preset's card *Previewing*.
+how it is put on (a click on the card), and marks the preset's card *Previewing*.
 `endPreview(...kinds)` ends a preview of the kinds given, and one waiting: `renderPanel()` ends the look's and the
 preset's, as their cards are built anew, `renderBar()` the effect's, as its cards (in the drawer and the bar's popover)
 are; `pickLook()` and `pickFx()` end theirs before putting theirs on.
@@ -2172,7 +2185,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | add a sticker | `stickers.js` |
 | add a colour block shape | `ACCENT_SHAPES` in `layers.js`, `paintAccent()` and `edgePoints()` in `render.js`, its tile in the Layout sheet (`SHAPE_ICONS` in `app.js`), a name in `i18n.js` |
 | add a template | `TEMPLATES` and `layout()` in `layout.js`, a name in `i18n.js` |
-| show the Layout sheet's template box again, or change the colour block's *Size & slant* | `TEMPLATE_BOX` and `layoutBox()`; `blockSection()`, `blockSliders()`, `layoutAdjuster()` and `layoutScope()` in `app.js` |
+| show the Layout sheet's template box again, or change the colour block's *Size & slant* (its *Block position*, sliders and *Block by orientation*) | `TEMPLATE_BOX` and `layoutBox()`; `blockSection()`, `blockSliders()`, `layoutAdjuster()`, `layoutScope()` and `byOrient()` in `app.js`; `tpl.*` and `style.byOrient*` in `i18n.js` |
 | add a property to a layer | `PROPS` and `normalizeLayer()` in `layers.js`, `PAINT` in `render.js`, `typeControls()` in `app.js` (`headlineControls()` for the title and text layers) |
 | add an export format | `encode()` in `lib.rs`, `EXT` and the format pickers in `app.js` (`exportDialog()`, `sizesTab()`) |
 | add a drawing operation for AI assets | validation and `drawSpec()` in `spec.js`, the prompt and examples in `ai.js` |
@@ -2189,9 +2202,10 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | add a keyboard shortcut | the window's `keydown` listener in `app.js`, above `start()` (its order decides what a dialog, a field or Surprise me's window lets through); `MOD_KEY` writes it |
 | light another AI request | wrap it in `aiTracked()` with its service and settings (`app.js`, see 8.6) |
 | change what a layout preset holds | `LAYOUT_PARTS`, `takeParts()`, `takeLayout()`, `putLayout()`, `presetLayout()` and `setPresetLayout()` in `layers.js`, `normalizeLayouts()` in `store.js` |
+| change the Layout sheet's preset cards: their pictures, when those are drawn, a card's ⋯ menu | `presetCards()`, `presetPic()`, `refreshPresetPics()` (`PRESET_PICS`), `renamePreset()` and `laidOut()` in `app.js`; `.preset` in `index.html` |
 | change how the colour block is moved to a side in the preset editor | `sideToward()` and `onSide()` in `layout.js` |
 | change how one block change lands on blocks that lie otherwise (every size) | `sideLike()`, `scaleBlock()` and `blockValues()` in `layout.js`; `blockOf` in `layoutEditor()` |
-| change which sizes count as wide, square or tall, or each one's default layout (what a new profile, a size added, a new preset and *Wide split, tall stacked, square banner* give it) | `orientOf()`, `orientDefault()`, `layoutByOrient()`, `layoutAdded()` and `templateDefault()` in `layout.js`; `layout.byOrient` in `defaults.json` |
+| change which sizes count as wide, square or tall, or each one's default layout (what a new profile, a size added, a new preset and *Block by orientation* give it) | `orientOf()`, `orientDefault()`, `layoutByOrient()`, `layoutAdded()` and `templateDefault()` in `layout.js`; `layout.byOrient` in `defaults.json` |
 | change what a layer kept to some sizes is at the others | `coverAt()` in `render.js`; the list's labels `sizesNote()` in `app.js` |
 | change what goes with a photo whose background is removed at some sizes | `showApart()` (and `cutAt()`, `cutFrom()`) in `layers.js` |
 | change which sizes of another profile's a size takes the place of, when layers come from there | `standsFor()` in `layout.js`; `acrossSizes()` in `layers.js` |

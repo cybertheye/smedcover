@@ -94,17 +94,32 @@
   .tog.on{background:#3ddc97}
   .tog.on::after{left:19px}
   .tog:disabled{opacity:.4;cursor:default}
-  /* Layout → the layout presets, each a card */
-  .presets{display:grid;gap:8px}
-  .preset{display:grid;gap:8px;padding:10px;border-radius:14px;background:rgba(0,0,0,.2);border:1px solid var(--line)}
-  .preset input{padding:7px 10px;font-weight:700}
+  /* Layout → the layout presets, two to a row, each a card: this cover laid out by it, its name and a word under it;
+     the canvas as it is first, outlined in the channel colour. Over a preset's picture, under the pointer, the way it
+     is put on; at its corner ⋯, its menu. */
+  .presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .preset{position:relative;display:flex;flex-direction:column;border-radius:12px;background:rgba(0,0,0,.22);border:1px solid var(--line);min-width:0}
   .preset:hover{border-color:var(--line2)}
   .preset.previewing{border-color:rgba(255,255,255,.5)}
-  .preset-h{display:flex;align-items:center;gap:8px}
-  .preset-h input{flex:1;min-width:0}
-  .preset-h .pv{display:none;flex:none;font-size:12px;color:var(--text2);white-space:nowrap}
-  .preset.previewing .pv{display:inline}   /* the canvas shows the cover laid out by it (see hoverPreset) */
-  .preset .acts{justify-content:flex-start}
+  .preset.now{border:2px solid var(--acc)}
+  .preset .pthumb{position:relative;display:block;width:100%;aspect-ratio:16/9;padding:0;border:0;border-radius:10px 10px 0 0;overflow:hidden;background:rgba(0,0,0,.35);cursor:pointer}
+  .preset.now .pthumb{cursor:default}
+  .preset .pthumb canvas{display:block;width:100%;height:100%;object-fit:contain}   /* contain: a tall cover shown whole */
+  .preset .pthumb .go{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);opacity:0;transition:opacity .12s}
+  .preset .pthumb .go span{height:28px;padding:0 12px;border-radius:999px;background:rgba(255,255,255,.92);color:#15151c;font-size:12px;font-weight:700;display:flex;align-items:center;white-space:nowrap}
+  .preset:hover .pthumb .go,.preset .pthumb:focus-visible .go{opacity:1}
+  .preset .pcap{flex:1;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 9px;font-size:12px;min-width:0;cursor:pointer}
+  .preset.now .pcap{cursor:default}
+  .preset .pcap .nm{min-width:0;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere}   /* a long name on two lines at most */
+  .preset .pcap .pv{flex:none;color:var(--text2);white-space:nowrap}
+  .preset:not(.now):not(.previewing) .pcap .pv{display:none}   /* a preset's word, while the canvas shows the cover laid out by it (see hoverPreset) */
+  .preset .pcap input{flex:1;min-width:0;padding:2px 6px;font-size:12px;font-weight:700;border-radius:6px}
+  .preset .more{position:absolute;right:6px;top:6px;z-index:2;width:28px;height:22px;padding:0;border:0;border-radius:7px;background:rgba(20,20,28,.72);color:#fff;font-size:14px;line-height:1;cursor:pointer;opacity:0;transition:opacity .12s}
+  .preset:hover .more,.preset:focus-within .more,.preset .more[aria-expanded=true]{opacity:1}
+  .preset .more:hover{background:rgba(20,20,28,.92)}
+  .presets .preset .chmenu{right:6px;top:32px;white-space:nowrap}   /* its ⋯ menu: the channel cards' (Settings), under the ⋯ */
+  .presets .preset .chmenu[hidden]{display:none}
+  .presets-none{margin:8px 0 0!important}
   /* Assets → ways to add, four to a row; then shelves, each with its name, how many, and "All" */
   .quicks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
   .quick{height:68px;border-radius:14px;border:1px solid var(--line2);background:rgba(255,255,255,.07);color:var(--text);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:12px;cursor:pointer;padding:0}
@@ -294,6 +309,7 @@
   .fxs .linkbtn,.artback .linkbtn{border:0;background:none;color:var(--acc);font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
   .artback{margin:4px 0 0 92px}   /* under the figure's graphic, past the label column */
   .layscope .seg .btn{flex:1;padding-left:6px;padding-right:6px}   /* the Style tab's template box: the scope it changes, the toolbar's own */
+  .blockat .btn{min-width:0;padding-left:4px;padding-right:4px;overflow:hidden;text-overflow:ellipsis}   /* the colour block's position, in its properties: three to the row, in the drawer and the bar's popover */
   .layown{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;margin:0 0 10px;padding:6px 8px;border:1px dashed var(--acc)}
   .sizes-ctl{margin:10px 0 4px}   /* the sizes a layer shows at, in its properties */
   .sizes-ctl .cap{display:flex;align-items:center;gap:6px}
@@ -759,11 +775,11 @@
   .chcard input.chname{flex:1;font-weight:700;min-width:0}
   .chcard button.more{width:30px;height:30px;flex:none;border:0;border-radius:9px;background:transparent;color:var(--text2);font-size:16px;cursor:pointer}
   .chcard button.more:hover,.chcard button.more[aria-expanded=true]{background:rgba(255,255,255,.12);color:#fff}
-  .chcard .chmenu{position:absolute;right:10px;top:46px;z-index:3;display:flex;flex-direction:column;min-width:120px;padding:4px;border-radius:12px;background:var(--solid2);border:1px solid var(--line2);box-shadow:0 14px 34px rgba(0,0,0,.45)}
-  .chcard .chmenu button{border:0;background:transparent;color:var(--text);text-align:left;padding:8px 10px;border-radius:8px;font-size:13px;cursor:pointer}
-  .chcard .chmenu button:hover:not(:disabled){background:rgba(255,255,255,.1)}
-  .chcard .chmenu button:disabled{opacity:.35;cursor:default}
-  .chcard .chmenu .danger{color:#ff9a8a}
+  .chcard .chmenu,.preset .chmenu{position:absolute;right:10px;top:46px;z-index:3;display:flex;flex-direction:column;min-width:120px;padding:4px;border-radius:12px;background:var(--solid2);border:1px solid var(--line2);box-shadow:0 14px 34px rgba(0,0,0,.45)}
+  .chcard .chmenu button,.preset .chmenu button{border:0;background:transparent;color:var(--text);text-align:left;padding:8px 10px;border-radius:8px;font-size:13px;cursor:pointer}
+  .chcard .chmenu button:hover:not(:disabled),.preset .chmenu button:hover:not(:disabled){background:rgba(255,255,255,.1)}
+  .chcard .chmenu button:disabled,.preset .chmenu button:disabled{opacity:.35;cursor:default}
+  .chcard .chmenu .danger,.preset .chmenu .danger{color:#ff9a8a}
   .chcard .two{display:grid;grid-template-columns:minmax(0,1fr) 96px;gap:8px}
   .chcard .pill{position:absolute;right:12px;bottom:-11px;height:22px;padding:0 10px;border-radius:999px;background:var(--c);color:var(--acc-ink);font-size:11.5px;font-weight:700;display:flex;align-items:center}
   .chadd{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:150px;border-radius:16px;border:1.5px dashed rgba(255,255,255,.22);background:transparent;color:var(--text);cursor:pointer}
