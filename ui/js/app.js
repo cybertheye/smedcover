@@ -251,7 +251,7 @@ async function registerFont(family, dataUrl) {
  * measuring) only in the fonts that came with the system: one the user installed, or one macOS
  * downloads on demand (楷体, 行楷…), falls back to the default there while the canvas on screen shows
  * it. So a system font a layer is set in is tried on such a canvas, with characters it has, and one
- * that is not there is read from its files (font_faces, font_data in lib.rs) and added to the page,
+ * that is not there is read from its files (font_faces, font_data in core/src/fonts.rs) and added to the page,
  * where every canvas finds it. Per family: a promise of whether it was added; SYS_READ, the families whose reading is over.
  */
 const SYS_FACES = new Map(), SYS_READ = new Set();
@@ -1879,10 +1879,10 @@ async function dropFolder(id) {
 }
 
 // ---------- AI-generated assets
-// ---------- a photo's subject, cut out (Apple Vision, macOS 14+; see src-tauri/src/subject.rs)
+// ---------- a photo's subject, cut out (Apple Vision, macOS 14+; see core/src/cut/vision.rs)
 const CUT = { busy: false, error: "" };
 // Two ways: Apple Vision (macOS 14+, built in) and BiRefNet (any system, a model downloaded in Settings →
-// AI → Cut-out, run on this computer by ONNX Runtime; see src-tauri/src/matting.rs).
+// AI → Cut-out, run on this computer by ONNX Runtime; see core/src/cut/onnx.rs).
 const isMac = HOST === "tauri" && /Mac/i.test(navigator.userAgent);   // Vision is this computer's; a server's own is not known yet
 const canCut = () => CAN.cut;
 /** The way of cutting out in use: the one chosen, else Vision on a Mac and the light BiRefNet elsewhere. */
@@ -6823,7 +6823,7 @@ const toPng = (cv) => new Promise((res, rej) => cv.toBlob((b) => (b ? b.arrayBuf
 /** A canvas as a PNG in base64 (a data URL's data, without its head). */
 const pngBase64 = async (cv) => { const url = await readAs(new Blob([await toPng(cv)], { type: "image/png" }), "readAsDataURL"); return url.slice(url.indexOf(",") + 1); };
 /**
- * Body of a binary export call: [u32 LE length][JSON metadata][PNG bytes] (see parse_frame in lib.rs). The file is
+ * Body of a binary export call: [u32 LE length][JSON metadata][PNG bytes] (see parse_frame in core/src/image.rs). The file is
  * written in `out`'s format and quality ({format, quality}, each optional), else the settings'.
  */
 function framed(png, extra, { format = S.settings.format, quality = S.settings.quality } = {}) {

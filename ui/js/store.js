@@ -71,7 +71,7 @@ export const invoke = HOST === "tauri" ? (cmd, args, options) => T.core.invoke(c
   : (cmd) => Promise.reject(`${cmd}: there is no native side in a plain browser`);
 /** The app's version ("0.2.0"), as the app says it; "" where it is not known (a server's page, a plain browser). */
 export const appVersion = () => (T && T.app && T.app.getVersion ? T.app.getVersion().then(String, () => "") : Promise.resolve(""));
-/** The app's version and its build (ui_build in lib.rs: a hash of the interface as built, the same version built again told apart); "" outside the app. */
+/** The app's version and its build (ui_build in src-tauri/src/lib.rs: a hash of the interface as built, the same version built again told apart); "" outside the app. */
 export const appBuild = () => Promise.all([appVersion(), HOST === "tauri" ? invoke("ui_build").catch(() => "") : ""]).then(([v, b]) => (v && b ? `${v}+${b}` : v));
 
 const LS = "smedcover:";

@@ -417,10 +417,28 @@ pub fn run() {
         .setup(|app| {
             // The data folder, found once for every command: a self-test keeps its data in its own.
             let data = match selftest_root() {
-                Some(root) => root.join("data"),
-                None => app.path().app_data_dir()?,
+                Some(root) => Ok(root.join("data")),
+                None => app.path().app_data_dir().map_err(err),
             };
-            app.manage(Core::open(data, Arc::new(AssetFonts(app.handle().clone())))?);
+            let core = data.and_then(|d| {
+                Core::open(d.clone(), Arc::new(AssetFonts(app.handle().clone()))).map_err(|e| format!("{}: {e}", d.display()))
+            });
+            match core {
+                Ok(core) => {
+                    app.manage(core);
+                }
+                // nothing could be kept: said, then the app quits (an error out of setup would end it with no word,
+                // the window already up); the dialog's own way, for waiting on it here would hold the main thread
+                Err(e) => {
+                    let h = app.handle().clone();
+                    app.dialog()
+                        .message(format!("SmedCover 打不开它的数据文件夹，只能退出。\nSmedCover cannot open its data folder and has to quit.\n\n{e}"))
+                        .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+                        .title("SmedCover")
+                        .show(move |_| h.exit(1));
+                    return Ok(());
+                }
+            }
             // A self-test's window may open off screen — on another desktop, behind a full-screen app —
             // and WebKit then stops drawing for it: a canvas read back (an export, a PNG) waits for good,
             // every process idle. So in self-test mode the web view is told not to watch whether its window
