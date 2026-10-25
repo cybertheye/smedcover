@@ -81,7 +81,7 @@ ui/
   js/agent.js        agent 外壳：一次一个调用、等用户、一步进行时挡住窗口、放掉卡住的调用、开发用的钩子
   tools.json         宿主的 MCP 入口列出的工具，由 tools.js 生成（scripts/tools.mjs）
   fonts/             内置字体及许可
-core/src/            Rust 侧干活的部分，服务器也能共用（crate smedcover-core）：存储、导出、字体、轮廓、抠图、AI 请求（见第 10 节）
+core/src/            Rust 侧干活的部分，服务器也能共用（crate smedcover-core）：存储、导出、字体、轮廓、抠图、AI 请求、MCP 入口（见第 10 节）
 src-tauri/src/lib.rs 桌面应用：数据目录、命令（对 core/ 的薄封装）、对话框、自检
 tests/               不依赖 DOM 的模块的单元测试
 ```
@@ -816,7 +816,7 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 仓库根目录是一个 Cargo 工作区（`Cargo.toml`，一份 `Cargo.lock`，一个 `target/`），里面两个 crate：
 
-- **`core/`，crate `smedcover-core`**，干具体的活：存储（`store.rs`）、导出（`image.rs`）、字体和文字轮廓（`fonts.rs`、`outline.rs`）、抠图（`cut/`）、AI 请求（`net.rs`）。里面没有 Tauri，也没有网页视图，所以服务器能和应用一样用它。它全是同步的，错误是文字（`Res<T>` 即 `Result<T, String>`）：界面要靠这些文字判断（"timed out"、"unsupported:"、"cancelled"、"model not downloaded"）。`Core` 对应一个数据目录，由宿主指定（`Core::open(目录, bundled)`）；存储、按名字找到的字体和抠图模型都经过它。界面自带的字体通过 `BundledFonts` 交给它：应用从自己的资源里取（`AssetFonts`），服务器可以从它的 `ui/` 目录读。
+- **`core/`，crate `smedcover-core`**，干具体的活：存储（`store.rs`）、导出（`image.rs`）、字体和文字轮廓（`fonts.rs`、`outline.rs`）、抠图（`cut/`）、AI 请求（`net.rs`）、agent 调用的 MCP 入口（`mcp/`，见 10.6）、应用把数据放在哪里（`paths.rs`）。里面没有 Tauri，也没有网页视图，所以服务器能和应用一样用它。除了跑在宿主的 Tokio 运行时上的 MCP 入口，它全是同步的，错误是文字（`Res<T>` 即 `Result<T, String>`）：界面要靠这些文字判断（"timed out"、"unsupported:"、"cancelled"、"model not downloaded"）。`Core` 对应一个数据目录，由宿主指定（`Core::open(目录, bundled)`）；存储、按名字找到的字体和抠图模型都经过它。界面自带的字体通过 `BundledFonts` 交给它：应用从自己的资源里取（`AssetFonts`），服务器可以从它的 `ui/` 目录读。
 - **`src-tauri/`，桌面应用**：`setup` 只找一次数据目录（应用数据目录，或自检目录下的 `data/`），把它的 `Arc<Core>` 存成 Tauri 的状态。每个命令都是对 core 的薄封装，名字、参数、返回和错误都和原来一样；耗时的仍在阻塞线程池里等。只有桌面应用才有的留在这里：对话框（`save_image`、`pick_folder`、`save_text`）、`reveal_data_dir`、`move_pointer`、读二进制请求体（`frame_of`）、自检的命令和 `ui_build`。
 
 在根目录运行 `cargo test` 只测 core（工作区的默认成员），`cargo test --workspace`（`npm run test:rust`）连应用一起测；`tauri build` 和 `tauri dev` 从 `src-tauri/` 构建应用，产物在根目录的 `target/` 里。
@@ -865,6 +865,17 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 `pick_folder`、`save_text`（导出档案、工程、CSV 模板）、`list_system_fonts`（用 fontdb 枚举系统字体，并标出能否排中文；实际做事的是核心库的 `fonts::list_system`）、`reveal_data_dir`（在文件管理器里打开数据目录下的某个文件夹，只限数据目录内）、`move_pointer`（把系统指针移到窗口内容里的某个位置，逻辑像素：场景物件的「跳到拖拽点」）。
 
+### 10.6 通过 MCP 使用 agent（`core/src/mcp/`）
+
+agent 调用 11.1 那些工具的入口。它在 core 里，应用和服务器共用；应用这边的接线（`mcp_*` 命令、开关）还没写。
+
+- `tools.rs`：`ToolList::from_json(text, host)` 为一个宿主（`desktop`、`server`）读 `ui/tools.json`。格式不对、名字不合规或重复、参数结构不是对象的，都拒绝；去掉每个工具的 `x-smedcover`（它属于哪些宿主；它的 `timeoutMs`，没写就是 120 秒，最多两小时）；保留文件里的顺序和文件的 SHA-256（`hash()`），拿来和页面的 `toolsHash()` 比对。
+- `token.rs`、`config.rs`：持有者令牌（bearer token）是 `smc_` 加 32 个随机字节的 base64url，存成 `Secret`：它不打印自己（`Debug` 是 `***`），比较用常数时间。数据目录里的 `mcp.json` 是 `{on, port, token}`（一开始关着、端口 25277、一个新令牌）；只有 Rust 写它，先写临时文件再换上，Unix 上只有所有者能读；读不成设置的文件改名为 `mcp.json.bad` 放到一边，从头来。`paths.rs` 给出桌面应用的数据目录（`desktop_data_dir()`，和 Tauri 找到的一样），供同一台电脑上的命令行使用。
+- `bridge.rs`：每个调用经 `PageBridge` 交给页面。两种宿主都用的 `Dispatcher` 把 `{kind: "call", id, tool, args, client, timeoutMs}` 发给接上来的页面的 `PageSink`（`attach(sink, toolsHash)`：应用的 Tauri channel、服务器的 WebSocket），按 id 把页面的回答和进度送回去，调用方放弃时发 `{kind: "cancel", id}`。页面在路上时（`loading()`）调用最多等 30 秒，没有页面要来时立刻失败；页面沉默超过工具的超时就放弃（每次进度都重新计时），无论如何两小时后放弃；页面重新加载或关掉时失败（"改动可能已经做了，也可能没有"）；同时最多 16 个。回答里图片的 `data:` 前缀去掉，有结构化内容而没有文字时补上它的 JSON 文字（不是对象的结构化内容丢掉），超过 16 张图或 48 MB 的拒绝。
+- `server.rs`：`McpServer::start(addr, runtime)` 当场绑定 127.0.0.1（`port_in_use`、`port_forbidden`、`bind_failed`；从不换端口；Windows 上端口归入口独占），提供 `/mcp` 和 `/health`，直到 `Running::stop`，它关掉每一个连接。rmcp 不用会话，同时服务协议的两个时代：2026-07-28（`server/discover`；每个请求都带 `_meta` 和 `MCP-Protocol-Version`、`Mcp-Method`、`Mcp-Name` 请求头）和 2025-03-26 到 2025-11-25 的 `initialize` 握手。`Host` 或 `Origin` 不是本机回环名字的，拒绝；`/mcp` 要求 `Authorization: Bearer <令牌>`，rmcp 看到请求之前这个头已被去掉。请求体最大 32 MiB；请求头 10 秒内、请求体 30 秒内要到；被拒请求的请求体最多读 64 KiB、2 秒。`Stats` 记着最近 10 分钟见过的客户端、进行中的调用和最后一次调用。
+
+回答用服务器推送事件（SSE）而不是 JSON，这样长的调用（等用户的导出）不会因为客户端等不到响应头而被掐断（Node 的 `fetch` 5 分钟就放弃）；响应头发出后每 15 秒一条保活注释。`initialize` 时代响应头立刻发出。2026-07-28 时代 rmcp 要等到调用的第一条消息才发响应头：带 `progressToken` 的调用立刻收到进度 0，响应头随之发出；不带的，响应头和结果一起到，能等多久取决于客户端自己。没有会话，旧时代的客户端在 `initialize` 之后就认不出了：它的调用算在最近见过的、用同一修订版的唯一一个这种客户端头上；它的 `notifications/cancelled`（rmcp 没有会话时直接丢掉）只在毫无疑问是哪个调用时才生效。`core/tests/mcp_http.rs` 通过真正的 HTTP 把这些都试一遍，其中包括用 rmcp 自己的客户端走两个时代；`cargo run -p smedcover-core --example mcp_echo` 用一个把问题原样说回来的页面提供测试工具。
+
 ## 11. 宿主、能力和布局
 
 同一套界面运行在三种地方，叫**宿主**（`store.js` 的 `HOST`），页面加载时识别：
@@ -891,7 +902,7 @@ python3 -m http.server -d ui 4599
 
 ### 11.1 Agent：工具、命令、外壳
 
-agent（MCP 客户端，比如 Claude Code）通过工具操作 SmedCover，每个工具是对封面做的一件完整的事（改文字、摆放图层、画预览、导出），而不是读写文件。调用从哪里进来是宿主的事（桌面应用在 127.0.0.1 上的入口、服务器的 `/mcp`，见 TODO.md）；回答调用的是页面，分在三个模块里。
+agent（MCP 客户端，比如 Claude Code）通过工具操作 SmedCover，每个工具是对封面做的一件完整的事（改文字、摆放图层、画预览、导出），而不是读写文件。调用从哪里进来是宿主的事（桌面应用在 127.0.0.1 上的入口、服务器的 `/mcp`，见 10.6 和 TODO.md）；回答调用的是页面，分在三个模块里。
 
 `tools.js` 用数据定义每个工具（`TOOLS`）：名字、标题和英文说明（写给模型看：做什么、回答什么、拒绝什么）；参数结构（JSON Schema，每个对象都用 `additionalProperties: false` 封住，枚举就是应用自己的常量——`LOOK_IDS`、`EFFECTS`、`BEND_IDS`、`SURPRISE_LOCKS`、`WEAVE_WAYS`、`SCOPES`、`FORMATS`——全部内联，不用 `$ref`，顶层不用 `anyOf`，有的客户端不接受）；回答的结构；MCP 的标注（`readOnlyHint`；`destructiveHint` 为假时也写出来，因为 MCP 默认是真；`idempotentHint`；`add_photo` 的 `openWorldHint`）；以及只有页面读的：`history`（作为一步撤销运行）、`busy`（等用户的哪些事，`light` 或 `strict`）、`hosts`（`desktop`、`server`：选中、撤销和重做只属于桌面窗口）、`timeoutMs`（宿主等页面多久没消息就放弃：读半分钟，改一分钟，画预览、抽牌两分钟，抠图十分钟，导出半小时）、`needs`（参数结构不用组合关键字就说不出来的：几个参数里至少、恰好或至多一个）。`checkArgs(schema, args)` 按工具用到的那部分 JSON Schema 检查一次调用，用一句话告诉模型哪里不对（`"maxSide" must be at most 2048 (got 4000).`、`Unknown argument "colour" (this tool takes: …)`）；字符串只在有长度限制时才数字数，而且只数到够下结论为止，所以 `add_photo` 的 `source.data` 里一张 40 MB 的图一下就查完。`checkCall(def, args)` 再加上 `needs`。`toResult({structured, images, text})` 做出 MCP 的 `CallToolResult`（一段文字，默认是结构化回答的 JSON；每张 PNG 一个图片块；`structuredContent`），`toError(code, message)` 做出失败，`code` 是 `unknown_tool`、`invalid_arguments`、`not_allowed`、`busy`、`unavailable`、`failed` 之一（第一种宿主转成协议错误，其余转成 `isError`）。还有命令用来查找的函数：`findProfile()`（先按 id，再按名字）、`findChannel()`（先按 id，再按批量表格的认法，即 `store.js` 的 `channelIndex()`）、`findSize()`（像素、相差 1% 以内的比例、名字或说明；对上好几个就报错并列出它们）、`letterKeysOf()`（穿插窗口里给出的字的键）、`boxesOf()`（把一次绘制的 `_hits` 换成占画面的比例）、`sheetPlan()`（拼图里每个尺寸的位置）。
 
@@ -914,7 +925,7 @@ agent（MCP 客户端，比如 Claude Code）通过工具操作 SmedCover，每�
 | 层次 | 命令 | 覆盖 |
 |---|---|---|
 | 前端单元测试 | `npm test` | 布局、图层位置与层级、适用频道、CSV、数据校验（按档案的导出窗口里关掉的尺寸和文件夹、按风格的使用次数）、默认值和盖在上面的 `custom.json`、写进 `custom.json` 的设置（只写不一样的，读回来不变，从 `settings.json` 读一次）、文件名规则、「你看着办」的规则和概率（条的 `moveShare()`、圆点的 `dotsOf()` 和 `withDots()`、锁住版式）、每个风格的分类、素材库的数量与命名、风格的颜色映射与参数、贴纸描述与立体图形描述的校验与绘制、两种接口风格的请求与回复、3D 视图的投影、点选与标签、界面文字的中英文齐全、`ui/` 里没有原生的 `confirm()`、`alert()`、`prompt()`；agent 工具（`agent.test.mjs`）：每个定义完整、标注和规格一致、枚举就是应用的常量、`ui/tools.json` 是最新的、参数检查的结论和说法（40 MB 的字符串一下就查完，字数按 JSON Schema 的算法）、查找档案频道尺寸、回答的格式、在替身 `API` 上的只读命令、选中、撤销和重做、队列、`whenIdle()` 和调度器（卡住的调用到时、被取消或用户不等了就放掉，接着运行下一个，晚到的结果丢掉；排队的会被告知在等；每个调用都有回答） |
-| Rust 单元测试 | `cargo test --workspace`（`npm run test:rust`） | 路径沙盒、存储读写、帧解析、三种格式的编码、文件名处理、对本地模拟服务发请求、代理规则、从字体集里切出一个字面、描出的轮廓、按名字找字体（自带的、导入的、重新导入的）、抠图的模型和运行库安装包 |
+| Rust 单元测试 | `cargo test --workspace`（`npm run test:rust`） | 路径沙盒、存储读写、帧解析、三种格式的编码、文件名处理、对本地模拟服务发请求、代理规则、从字体集里切出一个字面、描出的轮廓、按名字找字体（自带的、导入的、重新导入的）、抠图的模型和运行库安装包；MCP 入口的工具清单（测试用的和 `ui/tools.json`）、令牌、`mcp.json` 和调度器（用暂停的时钟），以及在空闲端口上通过 HTTP（`core/tests/mcp_http.rs`）测协议的两个时代、rmcp 自己的客户端、令牌、`Host` 和 `Origin`、进度、取消、请求体和停止 |
 | 端到端自检 | `SMEDCOVER_SELFTEST=<目录> <可执行文件>` | 在真实的网页视图和 Rust 之间走完整导出流程 |
 
 自检模式下，应用改用指定目录存放数据，导出几张封面的三种格式，再用每一种其他风格各导出一张，写出 `report.json` 后退出。再设置 `SMEDCOVER_SELFTEST_AI=<模拟服务地址>`，还会用两种接口风格各生成一个素材并画到封面上。它能发现只在真实应用里出现的问题，例如上面提到的请求头问题。
