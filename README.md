@@ -701,11 +701,12 @@ Adjustments are stored as fractions of the picture, so one setting suits every s
 
 ## Settings
 
-Settings is a window over the editor: ⋯ → *Brand & channels*, *Sizes & export* or *AI* opens it at that page. Its nav, on the left, shows the profile (its name and how many channels) and the three pages; under them, *This profile*: *New*, *Duplicate*, *Import*, *Export* and *Delete this profile…*, which asks first (its channels and their covers go with it, and it cannot be undone). ✕ at its corner, Esc, or a click beside the window closes it.
+Settings is a window over the editor: ⋯ → *Brand & channels*, *Sizes & export*, *AI* or *Agents* opens it at that page. Its nav, on the left, shows the profile (its name and how many channels) and the pages; under them, *This profile*: *New*, *Duplicate*, *Import*, *Export* and *Delete this profile…*, which asks first (its channels and their covers go with it, and it cannot be undone). ✕ at its corner, Esc, or a click beside the window closes it.
 
 - **Brand & channels** — the profile's name, the brand name, and the brand logo, shown at the right end of the brand row on every channel's cover (*Upload* a PNG with a transparent background or an SVG, then *Replace* or *Remove*; on the cover it is the *Brand logo* layer, to move, resize or hide; looks that print something in that corner move it aside). *Show the number in the brand row*, a switch (off by default), with its *Number prefix* (“SERIES 01 / 05”) and a *Preview* of the row. Then the channels, a card each, three to a row (two in a narrower window): colour, name, sub-name, code, and graphic, shown as a small picture and its name — *Change…* opens a window of pictures to pick from: the channel graphics, my vector assets and the stickers by group (or none). With two channels or more, each card has a ⋮⋮ grip at its left (*Drag ⋮⋮ to reorder*, the page's caption says): drag a card by it and it rises and follows the pointer, a place in its colour opening where it would go and the others making room, the page scrolling when the pointer nears its top or foot; let go and it moves there, one step of undo (the brand row's number follows), or press Esc to leave it where it was. A card's ⋯ moves it up or down too, or deletes it; *＋ Add channel* is the last card. The channel on the canvas is outlined in its colour and marked *On the canvas*; while you work on another (click any of its fields or change its colour) the canvas switches to that channel, so the change shows at once.
 - **Sizes & export** — a row per size: a name of your own, its ratio, the platforms it is for, its pixels, and a switch to make covers at it (one at least). *＋ A size of your own* adds a width × height (64 to 8192). There is a preset for each ratio the platforms want, named after them: *Bilibili / YouTube · 16:9*, *Bilibili / Douyin / WeChat Channels · 4:3*, *Douyin / RED / WeChat Channels · 3:4*, *YouTube · 9:16*, *WeChat article · 1:1*, *WeChat article · 2.35:1*; a size of the same ratio, whatever its pixels, takes the same name, in the tray under the canvas and in Export (the thumbnails show only the ratio, such as 16:9; the name and the pixels on hover). A size can be given your own name instead. Under the sizes, the format, resolution and file names of [Export](#export), the folder exports are saved to (*Save to*, with *Change*), and the [batch export](#batch-export).
 - **AI** — three cards on one page: the *Text model* (assets from a sentence), the *Image model* (repainted and generated photos) and the *Cut-out*. Each has its light at its head (below), and beside it the model, or the cut-out's way, when the light is green, else what the light means (*Not set up*, *Working…*, *Last request failed*); the *Cut-out* has *Open the models folder* there too.
+- **Agents** (the desktop app) — the endpoint agents such as Claude Code reach this window through: see [Agents (MCP)](#agents-mcp).
 
 **The AI lights.** Each AI service has a light: grey while it is not set up; green when it is and its last request or connection test did not fail; amber while a request is under way; red when the last one failed, until one goes through or its settings change. Green says *Connected* once a request has gone through with these settings, *Ready* until then. An image model's *Test connection* that finds the model missing from the service's list, or a service that lists no models, changes the light neither way: it is not a failure, nor proof that it works. Only the requests you make light it — stickers and graphics, repaints, generated photos, cut-outs and *Test connection* — none is made to light it, and it is kept for the session alone. The three show as one in the ⋯ menu under *AI* (amber while any works, red when any failed, naming it when it is one, grey when none is set up, else green, with what is not set up) and beside *AI* in Settings' nav, and each on its own card.
 
@@ -747,6 +748,25 @@ The *Image model* card, on the same page as the *Text model*, has settings of it
 - *Test connection* makes no picture and costs nothing: OpenAI and Gemini are asked about the model; Seedream is sent an empty prompt to see how it refuses (so only the key is confirmed; the model name is fully confirmed by the first repaint). Success shows in green, failure in red (the text model's test too).
 - The output size follows the shape (a repaint the photo's, a new photo the canvas's): about 2.5 megapixels on OpenAI's newer models (the older gpt-image-1 has three fixed sizes), about 4 megapixels on Seedream; Gemini follows the photo sent when repainting and is asked for the nearest aspect ratio (such as 16:9) when generating.
 - When repainting, the photo (scaled to 1536 px on its longer side) and the style description are sent to the address you entered; when generating, the description and any reference picture (also 1536 px at most).
+
+## Agents (MCP)
+
+Agents such as Claude Code or Codex can make covers in SmedCover's window: change the words and the look, place, add and remove layers, add photos, draw previews, deal hands with Surprise me and export. Each change is one step of undo in the window you have open, so you see everything an agent does and can take it back. They reach it over MCP, at an endpoint on this computer only (127.0.0.1): nothing is sent anywhere else.
+
+1. ⋯ → *Agents* (Settings → *Agents*), and turn on *MCP endpoint*. It listens at `http://127.0.0.1:25277/mcp`; another port can be set (1024–65535), and if another program has the port the page says so.
+2. Copy the line for your agent from *Connect an agent*, the token already in it. For Claude Code, run in a terminal:
+
+   ```bash
+   claude mcp add --transport http smedcover http://127.0.0.1:25277/mcp --header "Authorization: Bearer <token>"
+   ```
+
+   For Codex, a `[mcp_servers.smedcover]` table to add to `~/.codex/config.toml`; for other clients, the JSON most of them take.
+3. Ask the agent for a cover, for example: “Make this week's cover: the title *Rainy Tokyo night walk*, in a night look, and show me a preview.”
+
+- While an agent's step runs the window is held, a pill at the top saying what it is doing (after 20 seconds it offers *Stop waiting*), and an agent waits while you are in the middle of something.
+- The token is kept in `mcp.json` in the data folder, which only you can read; it is shown hidden but for its end. *New token* (it asks first) makes the old one stop working at once. *Seen lately* lists the agents seen in the last 10 minutes and their calls.
+- The endpoint starts with the app while it is on, and stops when the app quits. While it runs the window keeps drawing when it is covered or on another desktop, so an agent's previews and exports do not wait for it to be seen.
+- A proxy set in the agent's environment (`HTTP_PROXY` and the like) must leave this computer out: `NO_PROXY=127.0.0.1,localhost`.
 
 ## Cover standards
 
@@ -805,7 +825,7 @@ Tutorials,Another title,,
 
 ## Where your data lives
 
-Profiles, each channel's cover, assets, settings (`custom.json`, see below) and your own repaint styles (the `repaint-styles/` folder) are kept in the system's app data directory, with two things kept only to start faster: the Look sheet's card pictures (`lookcards/`) and the letter outlines the text effects use (`outlines.json`, 8 MB at most; both in the desktop app only). Either can be deleted at any time; it is made again.
+Profiles, each channel's cover, assets, settings (`custom.json`, see below), the agents' endpoint (`mcp.json`, see [Agents](#agents-mcp)) and your own repaint styles (the `repaint-styles/` folder) are kept in the system's app data directory, with two things kept only to start faster: the Look sheet's card pictures (`lookcards/`) and the letter outlines the text effects use (`outlines.json`, 8 MB at most; both in the desktop app only). Either can be deleted at any time; it is made again.
 Exports are written only where you choose: each profile remembers the folder you chose for it (see *Save to* under [Export](#export)).
 
 | System | Location |
@@ -872,6 +892,8 @@ It also times every look effect on a layer as large as it gets, on a canvas as w
 To go through some looks only (the self-test makes several covers in each, so all of them take minutes), name them: `SMEDCOVER_SELFTEST_LOOKS=citypop,construct`.
 
 To time how soon things show after the start instead, add `SMEDCOVER_SELFTEST_PERF=1` (and a photo to fill the canvas, `SMEDCOVER_SELFTEST_PHOTO=/path/to/photo.jpg`): `report.json` then holds when each step of the start was over, how long the 3D view and the Look sheet's cards took to show, opened at once, and how many sheets and cards were drawn. Start it twice on the same folder to see a second launch.
+
+`SMEDCOVER_SELFTEST_AGENT=1` has the self-test call the agents' tools too, and `SMEDCOVER_SELFTEST_MCP=1` with it the app's own MCP endpoint, over HTTP with its token (`mcp` in `report.json`). `SMEDCOVER_SELFTEST_STAY=1` runs no self-test: the app keeps its data in that folder and otherwise runs as usual, its window open — a way to try things by hand, the endpoint among them, without touching your data.
 
 `.github/workflows/build.yml` builds installers on GitHub Actions (it has not been run yet): macOS for Apple silicon and for Intel, separately (`.dmg`, `.app.tar.gz`), Windows x64 (`.exe`, `.msi`), Linux x64 (`.deb`, `.rpm`, `.AppImage`).
 
