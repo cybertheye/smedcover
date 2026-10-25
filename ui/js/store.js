@@ -481,3 +481,13 @@ export function exportName(template, { index, cat, title, size, scale, ext }) {
     .replace(/\{w\}/g, size.w).replace(/\{h\}/g, size.h);
   return `${clean(base) || "cover"}${scale > 1 ? "@" + scale + "x" : ""}.${ext}`;
 }
+
+/**
+ * The index among `categories` (a profile's channels) of the channel `key` names, as a row of a batch table names one:
+ * by its name or its code (the case and the spaces round them aside), or its number from 1 ("1" or "01"), the first
+ * that answers; -1 when none does, or `key` is empty.
+ */
+export function channelIndex(key, categories) {
+  const norm = (s) => String(s).trim().toLowerCase(), k = norm(key);
+  return k ? categories.findIndex((c, i) => norm(c.name) === k || norm(c.code) === k || String(i + 1) === k || String(i + 1).padStart(2, "0") === k) : -1;
+}

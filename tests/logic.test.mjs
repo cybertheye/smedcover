@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { blockLayout, virtualSize, layout, TEMPLATES } from "../ui/js/layout.js";
 import { parseCsv, csvToJobs } from "../ui/js/csv.js";
-import { useFont, normalizeProfile, normalizeCover, normalizeSettings, exportName, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
+import { useFont, normalizeProfile, normalizeCover, normalizeSettings, exportName, channelIndex, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
 import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex, clipBase, clipEnd, normalizeScene, sceneOffsets, moveScene, resetScene, reorderLayout, orderLayout, layoutOrder } from "../ui/js/layers.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "../ui/js/presets.js";
 import { platformsFor, RATIOS } from "../ui/js/platforms.js";
@@ -360,6 +360,26 @@ test("exportName fills the template and strips unsafe characters", () => {
   assert.equal(exportName("{n}-{category}_{title}_{size}", { index: 0, cat, title: "一台相机\n记录*真实*的一周", size: { w: 1920, h: 1080 }, scale: 2, ext: "png" }), "01-街拍日记_一台相机 记录真实的一周_1920x1080@2x.png");
   assert.equal(exportName("../{code}/{title}", { index: 2, cat, title: "a/b:c", size: { w: 1, h: 1 }, scale: 1, ext: "jpg" }), "..SHOTabc.jpg");
   assert.equal(exportName("", { index: 0, cat: { name: "", code: "" }, title: "", size: { w: 10, h: 20 }, scale: 1, ext: "webp" }), "01-cover_untitled_10x20.webp");
+});
+
+test("a batch row's channel is found by its name or code, whatever the case and the spaces round them, or by its number from 1", () => {
+  const cats = [{ name: "日常", code: "DAY" }, { name: "Tech Talk", code: "TT" }, ...Array.from({ length: 8 }, (_, i) => ({ name: `c${i + 3}`, code: "" }))];
+  assert.equal(channelIndex("日常", cats), 0);
+  assert.equal(channelIndex("  tech talk ", cats), 1);
+  assert.equal(channelIndex("tt", cats), 1);
+  assert.equal(channelIndex("Day", cats), 0);
+  assert.equal(channelIndex("2", cats), 1);
+  assert.equal(channelIndex("02", cats), 1);
+  assert.equal(channelIndex("10", cats), 9);
+  assert.equal(channelIndex("010", cats), -1);
+  assert.equal(channelIndex("11", cats), -1);   // no eleventh
+  assert.equal(channelIndex("Vlog", cats), -1);
+  assert.equal(channelIndex("", cats), -1);   // no channel named: none, even with a channel of no code
+  assert.equal(channelIndex("   ", cats), -1);
+  assert.equal(channelIndex("x", []), -1);
+  // the first that answers, by any of the ways: a channel named "2" before the second one
+  assert.equal(channelIndex("2", [{ name: "2", code: "" }, { name: "b", code: "" }]), 0);
+  assert.equal(channelIndex("1", [{ name: "a", code: "" }, { name: "1", code: "" }]), 0);
 });
 
 test("free layers can be kept to some categories", () => {

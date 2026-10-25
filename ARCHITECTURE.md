@@ -2169,7 +2169,10 @@ names (`out`), and `runExport()` what shows its progress, in place of the settin
 them (NFC, one case: one file on APFS and NTFS), and one given already (a pattern without `{size}`, say) gets the size
 after it as `_<w>x<h>` (not when the name has it already), then a number (`apart()`), so no file of the export writes over another. Only the files of one export are kept apart: one of the same name already in the folder, from an earlier export, is replaced (`write_image` writes with `fs::write`). The row shows the folder with the home
 folder as ~ (`shortDir()`, but not `/Users/Shared` or `C:\Users\Public`), all of it on hover. The
-batch from a table goes through `exportMany()` too, at every size of the profile, whatever is switched on.
+batch from a table goes through `exportMany()` too, at every size of the profile, whatever is switched on: `batchJobs(rows)`
+makes a cover for each row, on the channel the row names (`channelIndex()` in `store.js`: its name or code, the case
+and the spaces round them aside, or its number, `2` or `02`), the one on the canvas where it names none here (counted,
+and said after the export).
 
 The file name pattern is `nameField()`, here and in Settings: the pattern, still the one string, cut at its tokens
 (`NAME_TOKEN`, `{category}` read as `{channel}`) into stretches of text and chips. Each stretch is an input as wide as

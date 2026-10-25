@@ -6,7 +6,7 @@ import { TIMING, layoutHandles, drawCover, sizeKey, hexToRgb, hitAt, hitsIn, han
 import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang, bothLangs } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
-import { useFont, startScope } from "./store.js";
+import { useFont, startScope, channelIndex } from "./store.js";
 import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
@@ -7032,19 +7032,25 @@ function nameField(example) {
   build();
   return wrap;
 }
+/**
+ * The covers a batch exports for rows of a table (csvToJobs): each on the channel its row names (channelIndex in
+ * store.js), or the one on the canvas where it names none this profile has; `unknown`, how many named one it has not.
+ */
+function batchJobs(rows) {
+  let unknown = 0;
+  const jobs = rows.map((r) => {
+    let index = channelIndex(r.category, S.profile.categories);
+    if (index < 0) { index = catIndex(); if (String(r.category).trim()) unknown++; }
+    return { index, cover: { ...coverFor(S.profile.categories[index].id), title: r.title, tag: r.tag, subtitle: r.subtitle } };   // that channel's own cover, with the row's words (no subtitle but the row's own)
+  });
+  return { jobs, unknown };
+}
 async function batchFromCsv() {
   const f = await pickFile(".csv,.tsv,.txt,text/csv");
   if (!f) return;
   const rows = csvToJobs(await readAs(f, "readAsText"));
   if (!rows.length) return toast(t("msg.batchEmpty"));
-  const norm = (s) => String(s).trim().toLowerCase();
-  let unknown = 0;
-  const jobs = rows.map((r) => {
-    const key = norm(r.category);
-    let index = S.profile.categories.findIndex((c, i) => key && (norm(c.name) === key || norm(c.code) === key || String(i + 1) === key || String(i + 1).padStart(2, "0") === key));
-    if (index < 0) { index = catIndex(); if (key) unknown++; }
-    return { index, cover: { ...coverFor(S.profile.categories[index].id), title: r.title, tag: r.tag, subtitle: r.subtitle } };   // that channel's own cover, with the row's words (no subtitle but the row's own)
-  });
+  const { jobs, unknown } = batchJobs(rows);
   for (const j of jobs) await loadPhotos(pidsOf(j.cover));
   await exportMany(jobs);
   if (unknown) setTimeout(() => toast(counted("msg.batchUnknown", unknown)), 3600);
