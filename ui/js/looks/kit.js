@@ -934,6 +934,33 @@ export function fxCanvas(slot, w, h) {
   return c;
 }
 /**
+ * A work canvas kept per slot, sized w × h (`grow`: at least so, never made smaller), on the graphics card, as
+ * fxCanvas's are not: for many copies of a picture laid over one another (copiesBehind), which the card draws at once,
+ * read back once as they are laid on the layer. Let go after a paint larger than an editor's canvas (letGoGpu).
+ */
+export function gpuCanvas(slot, w, h, grow = false) {
+  let c = GPU_WORK[slot];
+  if (!c) { c = GPU_WORK[slot] = document.createElement("canvas"); ON_GPU.add(c); }
+  if (grow ? c.width < w || c.height < h : c.width !== w || c.height !== h) { c.width = grow ? Math.max(c.width, w) : w; c.height = grow ? Math.max(c.height, h) : h; }
+  return c;
+}
+const GPU_WORK = {}, ON_GPU = new WeakSet(), GPU_BIG = 5e6;
+/**
+ * Lets the graphics card's work canvases (gpuCanvas) go once one of `px` pixels has been used, more than an editor's
+ * canvas has (an export's, up to 4 × its size: some 130 MB a canvas): kept, they and a layer's effects at that size
+ * could pass what the web view allows its canvases in all, past which a new one draws nothing.
+ */
+export function letGoGpu(px) {
+  if (px > GPU_BIG) for (const c of Object.values(GPU_WORK)) c.width = c.height = 0;
+}
+/** A copy of canvas `src` (or of its box B) on the graphics card (gpuCanvas, kept per slot): taken there once, to be drawn from many times. */
+export function onGpu(src, slot, B = null) {
+  const c = gpuCanvas(slot, B ? B.w : src.width, B ? B.h : src.height), g = c.getContext("2d");
+  g.globalCompositeOperation = "copy"; g.globalAlpha = 1;
+  if (B) g.drawImage(src, B.x0, B.y0, B.w, B.h, 0, 0, B.w, B.h); else g.drawImage(src, 0, 0);
+  return c;
+}
+/**
  * Many round dots in `colour` (a halftone: tens of thousands) laid on x as one shape would be, at alpha `a` in the way
  * `op` says; `each(dot)` calls dot(cx, cy, r) for every dot, in x's pixels, the dots of box B (a dot reaching past it,
  * as it did drawn as a path, is laid whole, within the canvas). They are worked out here, pixel by pixel (dotCover),
@@ -991,9 +1018,9 @@ export function region(x, B, slot) {
   g.globalCompositeOperation = "copy"; g.globalAlpha = 1; g.drawImage(x.canvas, B.x0, B.y0, B.w, B.h, 0, 0, B.w, B.h);
   return c;
 }
-/** A canvas's shape in one colour (kept per slot). */
-export function shapeIn(src, colour, slot) {
-  const c = fxCanvas(slot, src.width, src.height), g = c.getContext("2d");
+/** A canvas's shape in one colour (kept per slot, held in memory, or where `at` keeps it: gpuCanvas). */
+export function shapeIn(src, colour, slot, at = fxCanvas) {
+  const c = at(slot, src.width, src.height), g = c.getContext("2d");
   g.globalCompositeOperation = "copy"; g.drawImage(src, 0, 0); g.globalCompositeOperation = "source-in"; g.fillStyle = css(colour); g.fillRect(0, 0, c.width, c.height);
   return c;
 }
@@ -1156,11 +1183,49 @@ export function dripsBehind(x, B, a, E, colour, width) {
   for (const [hx, ht, hw, hh] of hl) g.fillRect(hx, ht, hw, hh);
   x.save(); x.globalCompositeOperation = "destination-over"; x.drawImage(c, B.x0, B.y0); x.restore();
 }
-/** Rings of colour round the layer, behind it: [[colour, distance in px]…], the first nearest. */
-export function ringsBehind(x, B, src, rings) {
-  x.save(); x.globalCompositeOperation = "destination-over";
-  rings.forEach(([colour, r], n) => { const s = shapeIn(src, colour, "fxRing" + n); for (let i = 0; i < 16; i++) { const t = (i / 16) * TAU; x.drawImage(s, B.x0 + Math.cos(t) * r, B.y0 + Math.sin(t) * r); } });
-  x.restore();
+/**
+ * Rings of colour round the layer, behind it: [[colour, distance in px]…], the first nearest; then `more`, copies of
+ * its shape in a colour behind them, [[colour, [[dx, dy], …], alpha]…] (a shadow, a block's depth), all laid at once
+ * (copiesBehind). The layer is taken to the graphics card once and each colour's shape made there once.
+ */
+export function ringsBehind(x, B, src, rings, more = []) {
+  if (!rings.length && !more.length) return;
+  const u = onGpu(src, "fxRingSrc"), shapes = new Map();
+  const shape = (colour) => { const k = css(colour); if (!shapes.has(k)) shapes.set(k, shapeIn(u, colour, "fxRing" + shapes.size, gpuCanvas)); return shapes.get(k); };
+  copiesBehind(x, B, [...rings.map(([colour, r]) => [shape(colour), round16(r), x.globalAlpha]), ...more.map(([colour, at, alpha]) => [shape(colour), at, alpha])]);
+}
+/** Sixteen offsets r px out, round a circle: a shape laid at each of them is the shape grown by r. */
+export const round16 = (r, dx = 0, dy = 0) => Array.from({ length: 16 }, (_, i) => { const t = (i / 16) * TAU; return [dx + Math.cos(t) * r, dy + Math.sin(t) * r]; });
+/**
+ * Where copies of a w × h picture at the offsets of `lists` ([[dx, dy], …] each) fall on a canvas made for them all:
+ * {ox, oy, w, h}, the picture's own place on it and the canvas's size, with a pixel to spare all round (a copy at a
+ * fraction of a pixel spreads into the next).
+ */
+export function behindBox(lists, w, h) {
+  let l = 0, t = 0, r = 0, b = 0;
+  for (const at of lists) for (const [dx, dy] of at) { l = Math.max(l, -dx); t = Math.max(t, -dy); r = Math.max(r, dx); b = Math.max(b, dy); }
+  const ox = Math.ceil(l) + 1, oy = Math.ceil(t) + 1;
+  return { ox, oy, w: w + ox + Math.ceil(r) + 1, h: h + oy + Math.ceil(b) + 1 };
+}
+/**
+ * Copies laid behind the layer as drawn one by one onto x in "destination-over" they would be: `list` is [[canvas,
+ * [[dx, dy], …], alpha], …], each canvas B's size laid at B moved by each offset, the first nearest the layer (x not
+ * transformed, nor clipped; no canvas of the list one of the slots used here). They are put together on a canvas of
+ * the graphics card's (gpuCanvas), each canvas taken there once, and laid behind at once: on the layer's canvas, held
+ * in memory, each copy is drawn a pixel at a time — the 96 of a two-tone outline (anime's keyline) round a layer
+ * filling the canvas took 1.4 s.
+ */
+export function copiesBehind(x, B, list) {
+  if (!list.some(([, at]) => at.length)) return;
+  const Q = behindBox(list.map(([, at]) => at), B.w, B.h), G = gpuCanvas("fxBehind", Q.w, Q.h, true), g = G.getContext("2d");
+  g.globalCompositeOperation = "source-over"; g.globalAlpha = 1; g.clearRect(0, 0, Q.w, Q.h);
+  for (const [s0, at, alpha] of list) {
+    const s = ON_GPU.has(s0) ? s0 : onGpu(s0, "fxBehindSrc");
+    g.globalCompositeOperation = "destination-over"; g.globalAlpha = alpha;
+    for (const [dx, dy] of at) g.drawImage(s, Q.ox + dx, Q.oy + dy);
+  }
+  x.save(); x.globalCompositeOperation = "destination-over"; x.globalAlpha = 1; x.drawImage(G, 0, 0, Q.w, Q.h, B.x0 - Q.ox, B.y0 - Q.oy, Q.w, Q.h); x.restore();
+  letGoGpu(Q.w * Q.h);
 }
 /** The layer's own colours pushed toward fewer steps (4 to a channel), mixed in by a: posterized by degrees. */
 export const posterize = (x, B, a) => eachPixel(x, B, a, (r, g, b, y, o) => { o[0] = Math.round(r / 85) * 85; o[1] = Math.round(g / 85) * 85; o[2] = Math.round(b / 85) * 85; });

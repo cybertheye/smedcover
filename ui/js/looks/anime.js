@@ -1,6 +1,6 @@
 // 90s cel animation, photographed on film
 // One look (see style.js for the hooks a look may have, and looks/kit.js for what the looks share).
-import { ANI, FX_ALL, FX_PHOTO, TAU, WORK, clamp, css, eachPixel, fall, fast, filmDust, godRays, grain, grey, gridPen, inkAs, lensFlare, mapped, mix, objAt, pad2, painters, rand, region, ringsBehind, shapeIn, shift, vignette, wash } from "./kit.js";
+import { ANI, FX_ALL, FX_PHOTO, TAU, WORK, clamp, css, eachPixel, fall, fast, filmDust, godRays, grain, grey, gridPen, inkAs, lensFlare, mapped, mix, objAt, pad2, painters, rand, region, ringsBehind, round16, shift, vignette, wash } from "./kit.js";
 import { fonts } from "../cel.js";
 
 const muted = (c) => mix(mix(c, grey(c), 0.2), ANI.cream, 0.08);   // paint, not light: a little greyer and warmer
@@ -128,9 +128,5 @@ anime.elementFx.push({ key: "keyline", name: { zh: "双色描边", en: "Two-tone
   paint(x, B, a, E) {
     const src = region(x, B, "fxKey"), k = E.k, line = 4 * k * a, wide = line + 9 * k * a, d = 7 * k * a;
     if (line < 0.3) return;
-    ringsBehind(x, B, src, [[ANI.line, line * 0.5], [ANI.line, line], ...[1, 2, 3].map((i) => [ANI.cream, line + ((wide - line) * i) / 3])]);
-    const sh = shapeIn(src, ANI.line, "fxKeyShadow");
-    x.save(); x.globalCompositeOperation = "destination-over"; x.globalAlpha = 0.5 * Math.min(1, a * 3);
-    for (let i = 0; i < 16; i++) { const t = (i / 16) * TAU; x.drawImage(sh, B.x0 + d + Math.cos(t) * wide, B.y0 + d + Math.sin(t) * wide); }
-    x.restore();
+    ringsBehind(x, B, src, [[ANI.line, line * 0.5], [ANI.line, line], ...[1, 2, 3].map((i) => [ANI.cream, line + ((wide - line) * i) / 3])], [[ANI.line, round16(wide, d, d), 0.5 * Math.min(1, a * 3)]]);   // and the shadow under them
   } });

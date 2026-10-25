@@ -4,7 +4,7 @@
 // channel colour, the only colour there is), a sheet folded in four, dust, columns of small print, a
 // serif title that seems to drift out of focus.
 // One look (see style.js for the hooks a look may have, and looks/kit.js for what the looks share).
-import { FX_ALL, FX_PHOTO, TAU, besideLogo, blurred, canPaint, css, dark, fall, fast, filmDust, fxCanvas, grain, graphicShape, greeked, grey, gridPen, lum, mapped, mix, objAt, openField, pad2, painters, parseColour, placeShape, rand, region, rounded, tonesFx, trail, upright, vignette, wash } from "./kit.js";
+import { FX_ALL, FX_PHOTO, TAU, besideLogo, blurred, canPaint, css, dark, fall, fast, filmDust, gpuCanvas, grain, graphicShape, greeked, grey, gridPen, letGoGpu, lum, mapped, mix, objAt, onGpu, openField, pad2, painters, parseColour, placeShape, rand, region, rounded, tonesFx, trail, upright, vignette, wash } from "./kit.js";
 import { fonts, spaced, spacedW } from "../cel.js";
 import { blockLayout } from "../layout.js";
 
@@ -168,10 +168,12 @@ monofilm.elementFx = [
   { key: "motion", name: { zh: "照片动态模糊", en: "Photo motion blur" }, for: FX_PHOTO, stage: "filter", reach: (B) => ({ l: B.w * 0.06, r: B.w * 0.06 }),
     /** The photo smeared sideways, as by a panning camera. */
     paint(x, B, a, E) {
-      const src = region(x, B, "fxA"), n = 8, step = (B.w * 0.006 + 2 * E.k) * a, c = fxCanvas("fxMo", B.w, B.h), g = c.getContext("2d");
+      // the 17 copies laid on a canvas of the graphics card's, the photo taken there once (see copiesBehind)
+      const src = onGpu(x.canvas, "fxMoSrc", B), n = 8, step = (B.w * 0.006 + 2 * E.k) * a, c = gpuCanvas("fxMo", B.w, B.h), g = c.getContext("2d");
       g.globalCompositeOperation = "source-over"; g.clearRect(0, 0, B.w, B.h);
       for (let i = 0; i <= 2 * n; i++) { g.globalAlpha = 1 / (i + 1); g.drawImage(src, (i - n) * step, 0); }
       x.save(); x.globalAlpha = Math.min(1, a * 1.4); x.drawImage(c, B.x0, B.y0); x.restore();
+      letGoGpu(B.w * B.h);
     } },
   { key: "collage", name: { zh: "照片拼贴", en: "Photo collage" }, for: FX_PHOTO, stage: "filter", reach: (B) => ({ l: B.w * 0.04, t: B.h * 0.06, r: B.w * 0.04, b: B.h * 0.06 }),
     /** The photo cut into three prints, each a little off and turned, with a white border. */

@@ -847,14 +847,21 @@ function wlBrush(x, list, f) {
  */
 function wlPaintPhoto(d, w, h, dk = dark, sd = seed, src = null) {
   if (typeof document === "undefined" || w < 4 || h < 4) return wlPixels(d, 1, dk);
-  const out = document.createElement("canvas"); out.width = w; out.height = h;
-  const sx = out.getContext("2d", { willReadFrequently: true }), memo = src && WL_STROKES.get(src), mk = wlStrokesKey(src, dk, sd);   // a blurred copy is a canvas filled again for each blur: its fillings count
-  const L = memo && memo.key === mk ? memo : wlLayStrokes(src, d, w, h, dk, sd, sx, out);
-  if (src && L !== memo) WL_STROKES.set(src, L);
-  sx.setTransform(1, 0, 0, 1, 0, 0); sx.imageSmoothingEnabled = true; sx.imageSmoothingQuality = "high";
-  sx.globalCompositeOperation = "copy"; sx.drawImage(L.under, 0, 0, w, h); sx.globalCompositeOperation = "source-over";
-  wlBrush(sx, L.all, w / L.aw); wlBrush(sx, L.lights, w / L.aw);
-  const px = sx.getImageData(0, 0, w, h).data;
+  const memo = src && WL_STROKES.get(src), mk = wlStrokesKey(src, dk, sd);
+  let L = memo && memo.key === mk ? memo : null;
+  if (!L) {   // laid out on canvases held in memory: the pixels themselves, without a picture to lay them out from
+    const out = src ? null : Object.assign(document.createElement("canvas"), { width: w, height: h });
+    L = wlLayStrokes(src, d, w, h, dk, sd, out && out.getContext("2d", { willReadFrequently: true }), out);   // a blurred copy is a canvas filled again for each blur: its fillings count
+    if (src) WL_STROKES.set(src, L); else out.width = out.height = 0;
+  }
+  // painted on a canvas of the graphics card's and read back once: there are as many strokes at any size (some 17,000), and
+  // a canvas held in memory fills them one by one — 0.14 s at a look card's size, 0.35 s at the editor's
+  const pc = document.createElement("canvas"); pc.width = w; pc.height = h;
+  const pg = pc.getContext("2d"); pg.imageSmoothingEnabled = true; pg.imageSmoothingQuality = "high";
+  pg.globalCompositeOperation = "copy"; pg.drawImage(L.under, 0, 0, w, h); pg.globalCompositeOperation = "source-over";
+  wlBrush(pg, L.all, w / L.aw); wlBrush(pg, L.lights, w / L.aw);
+  const px = pg.getImageData(0, 0, w, h).data;
+  pc.width = pc.height = 0;
   for (let i = 3; i < d.length; i += 4) { const a = d[i]; d[i - 3] = px[i - 3]; d[i - 2] = px[i - 2]; d[i - 1] = px[i - 1]; d[i] = a; }   // the picture's own alpha kept
 }
 /** The strokes a photo is painted in, laid out once for it, its ground and seed (see wlPaintPhoto): an export or a paint at another size lays the same ones again. */

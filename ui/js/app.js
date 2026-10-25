@@ -8261,9 +8261,10 @@ function libraryTiles(pick, redraw, removable = false, only = null) {
 /**
  * How long a look effect may take, alone on a layer as large as it gets (the self-test's fxTime), on a canvas as wide
  * as the editor's on a laptop (a large screen's is up to 2,880 px, some three times the pixels) and as a look card's
- * (`px`), in ms: past `slow` it is listed, past `max` an error. On an Apple M-series Mac the slowest took 1.2–1.4 s
- * and 0.4 s (the card's: painting a photo in strokes, which shrinks little with the canvas), so `max` leaves room for a
- * slower machine; Record sleeve's halftone, before its dots were worked out pixel by pixel, took 5.9 s and 1.8 s.
+ * (`px`), in ms: past `slow` it is listed, past `max` an error. On an Apple M-series Mac the slowest took 0.7 s and
+ * 0.3 s, both painting a photo in strokes (wasteland's, which shrinks little with the canvas), and the outlines 1.4 s
+ * before they were laid on the graphics card (see copiesBehind), so `max` leaves room for a slower machine; Record
+ * sleeve's halftone, before its dots were worked out pixel by pixel, took 5.9 s and 1.8 s.
  */
 const FX_BUDGET = { px: { editor: 1600, card: LOOKPIC.w }, slow: { editor: 100, card: 30 }, max: { editor: 4000, card: 1000 } };
 /** The looks the self-test goes through: those named in SMEDCOVER_SELFTEST_LOOKS (the new ones, say), or all of them. */

@@ -5,7 +5,7 @@
 // signboards and lanterns, strings of pennants. Everything in flat colour with crisp edges and fine
 // lines, never a gradient. Whites are clean, lines indigo, never black.
 // One look (see style.js for the hooks a look may have, and looks/kit.js for what the looks share).
-import { FX_ALL, FX_PHOTO, TAU, boost, clamp, css, eachPixel, fall, fast, grain, gridPen, lum, mapped, mix, onLayer, painters, parseColour, rand, region, ringsBehind, role, rounded, shapeIn, shapeOf, shift, slantPath, upright } from "./kit.js";
+import { FX_ALL, FX_PHOTO, TAU, boost, clamp, css, eachPixel, fall, fast, grain, gridPen, lum, mapped, mix, onLayer, painters, parseColour, rand, region, ringsBehind, role, rounded, shapeOf, shift, slantPath, upright } from "./kit.js";
 import { fonts, spaced, spacedW } from "../cel.js";
 
 const VV = {
@@ -312,9 +312,6 @@ vivid.elementFx.push({ key: "block", name: { zh: "日光立体", en: "Sunlit blo
   paint(x, B, a, E) {
     const src = region(x, B, "fxBlock"), k = E.k, depth = Math.min(B.h * 0.12, 40 * k) * a, line = 4 * k * a;
     onLayer(x, B, src, "multiply", 0.55 * a, (g) => { const gr = g.createLinearGradient(0, B.h * 0.5, 0, B.h * 0.6); gr.addColorStop(0, css(VV.butter, 0)); gr.addColorStop(1, css(VV.butter)); g.fillStyle = gr; g.fillRect(0, 0, B.w, B.h); });
-    if (line > 0.3) ringsBehind(x, B, src, [[VV.navy, line * 0.5], [VV.navy, line]]);
-    const s = shapeIn(src, VV.navy, "fxBlockDepth"), steps = Math.max(2, Math.min(14, Math.round(depth / (2 * k))));
-    x.save(); x.globalCompositeOperation = "destination-over";
-    if (depth > 0.3) for (let i = 1; i <= steps; i++) { const t = (depth * i) / steps; x.drawImage(s, B.x0 + t, B.y0 + t); }
-    x.restore();
+    const steps = Math.max(2, Math.min(14, Math.round(depth / (2 * k))));
+    ringsBehind(x, B, src, line > 0.3 ? [[VV.navy, line * 0.5], [VV.navy, line]] : [], depth > 0.3 ? [[VV.navy, Array.from({ length: steps }, (_, i) => [(depth * (i + 1)) / steps, (depth * (i + 1)) / steps]), x.globalAlpha]] : []);   // the outline, and the depth under it
   } });

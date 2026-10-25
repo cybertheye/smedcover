@@ -4800,3 +4800,26 @@ test("a halftone's dots worked out pixel by pixel: as much ink as their area, ne
   const buf = new Float32Array(1600).fill(0.5), got = dotCover(G, [20, 20, 1], buf);
   assert.equal(got, buf); assert.equal(buf[0], 0);
 });
+
+test("an outline round a layer is the layer laid at sixteen offsets round a circle, each where it was laid before", async () => {
+  const { round16 } = await import("../ui/js/looks/kit.js");
+  const at = round16(5, 2, 3), TAU = Math.PI * 2;
+  assert.equal(at.length, 16);
+  at.forEach(([x, y], i) => {
+    assert.equal(x, 2 + Math.cos((i / 16) * TAU) * 5); assert.equal(y, 3 + Math.sin((i / 16) * TAU) * 5);   // to the bit, as ringsBehind drew them one by one
+    assert.ok(Math.abs(Math.hypot(x - 2, y - 3) - 5) < 1e-9);
+  });
+});
+
+test("the canvas copies are laid on behind a layer holds every one of them with a pixel to spare, at any offsets", async () => {
+  const { behindBox, round16 } = await import("../ui/js/looks/kit.js");
+  const cases = [[round16(7.3)], [round16(4, 2.5, 2.5), [[0.4, 0.4], [13.7, 13.7]]], [[[-3.2, 0], [0, -0.6]]], [[[0, 0]]], [[]]];
+  for (const lists of cases) {
+    const w = 50, h = 30, Q = behindBox(lists, w, h);
+    assert.ok(Number.isInteger(Q.ox) && Number.isInteger(Q.oy) && Number.isInteger(Q.w) && Number.isInteger(Q.h));   // a fraction of an offset keeps its own place
+    for (const at of lists) for (const [dx, dy] of at) {
+      assert.ok(Q.ox + dx >= 1 && Q.oy + dy >= 1, `${dx},${dy} spills off the left or top`);
+      assert.ok(Q.ox + dx + w <= Q.w - 1 && Q.oy + dy + h <= Q.h - 1, `${dx},${dy} spills off the right or foot`);
+    }
+  }
+});
