@@ -816,7 +816,7 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 仓库根目录是一个 Cargo 工作区（`Cargo.toml`，一份 `Cargo.lock`，一个 `target/`），里面两个 crate：
 
-- **`core/`，crate `smedcover-core`**，干具体的活：存储（`store.rs`）、导出（`image.rs`）、字体和文字轮廓（`fonts.rs`、`outline.rs`）、抠图（`cut/`）、AI 请求（`net.rs`）。里面没有 Tauri，也没有网页视图，所以服务器能和应用一样用它。它全是同步的，错误是文字（`Res<T>` 即 `Result<T, String>`）：界面要靠这些文字判断（"timed out"、"unsupported:"、"cancelled"、"model not downloaded"）。`Core` 对应一个数据目录，由宿主指定（`Core::open(目录, bundled)`）；存储、按名字找到的字体和抠图模型都经过它。界面自带的字体通过 `BundledFonts` 交给它：应用从自己的资源里取（`AssetFonts`），服务器可以从它的 `ui/` 目录读。
+- **`core/`，crate `smedcover-core`**，干具体的活：存储（`store.rs`）、导出（`image.rs`）、字体和文字轮廓（`fonts.rs`、`outline.rs`）、抠图（`cut/`）、AI 请求（`net.rs`）、agent 指名要读的文件（`files.rs`）。里面没有 Tauri，也没有网页视图，所以服务器能和应用一样用它。它全是同步的，错误是文字（`Res<T>` 即 `Result<T, String>`）：界面要靠这些文字判断（"timed out"、"unsupported:"、"cancelled"、"model not downloaded"）。`Core` 对应一个数据目录，由宿主指定（`Core::open(目录, bundled)`）；存储、按名字找到的字体和抠图模型都经过它。界面自带的字体通过 `BundledFonts` 交给它：应用从自己的资源里取（`AssetFonts`），服务器可以从它的 `ui/` 目录读。
 - **`src-tauri/`，桌面应用**：`setup` 只找一次数据目录（应用数据目录，或自检目录下的 `data/`），把它的 `Arc<Core>` 存成 Tauri 的状态。每个命令都是对 core 的薄封装，名字、参数、返回和错误都和原来一样；耗时的仍在阻塞线程池里等。只有桌面应用才有的留在这里：对话框（`save_image`、`pick_folder`、`save_text`）、`reveal_data_dir`、`move_pointer`、读二进制请求体（`frame_of`）、自检的命令和 `ui_build`。
 
 在根目录运行 `cargo test` 只测 core（工作区的默认成员），`cargo test --workspace`（`npm run test:rust`）连应用一起测；`tauri build` 和 `tauri dev` 从 `src-tauri/` 构建应用，产物在根目录的 `target/` 里。
@@ -839,7 +839,7 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
    ```
 
    元信息放在请求体里而不是请求头里，是因为实测自定义请求头在真实应用中到不了 Rust。
-3. `save_image`（弹保存对话框）和 `write_image`（写入已选文件夹：档案的 `exportDirs`，在对话框里选过一次——`pick_folder`，或经 `save_image` 存文件的那个文件夹——之后记住；不是绝对路径的文件夹就拒绝；因为文件夹的缘故写不进去——这个，或系统报的任何错误——时界面会让用户另选，见 9.5）是异步命令，在工作线程上执行。目标格式是 PNG 时直接写盘；JPEG 先铺一层深色底再编码；WebP 用无损编码。
+3. `save_image`（弹保存对话框）和 `write_image`（写入已选文件夹：档案的 `exportDirs`，在对话框里选过一次——`pick_folder`，或经 `save_image` 存文件的那个文件夹——之后记住；不是绝对路径的文件夹就拒绝；因为文件夹的缘故写不进去——这个，或系统报的任何错误——时界面会让用户另选，见 9.5）是异步命令，在工作线程上执行。目标格式是 PNG 时直接写盘；JPEG 先铺一层深色底再编码；WebP 用无损编码。同名的文件会被覆盖；但元信息里带 `fresh: true` 时（agent 的导出，见 11.1）原文件不动，封面写到 `name-2.png`、`name-3.png`……里第一个没被占的名字下（`write_fresh()`，靠新建文件来占名字），`write_image` 回答实际写下的路径。
 4. 界面最多同时挂起两个写入请求，下一张封面在等待期间已经开始绘制。进度框显示张数，取消后停止派发新任务。
 
 文件名经过 `safe_name()` 处理，只保留最后一段，因此不能借文件名写到别的目录。
@@ -863,7 +863,7 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 ### 10.5 其他命令（`src-tauri/src/lib.rs`）
 
-`pick_folder`、`save_text`（导出档案、工程、CSV 模板）、`list_system_fonts`（用 fontdb 枚举系统字体，并标出能否排中文；实际做事的是核心库的 `fonts::list_system`）、`reveal_data_dir`（在文件管理器里打开数据目录下的某个文件夹，只限数据目录内）、`move_pointer`（把系统指针移到窗口内容里的某个位置，逻辑像素：场景物件的「跳到拖拽点」）。
+`pick_folder`、`save_text`（导出档案、工程、CSV 模板）、`list_system_fonts`（用 fontdb 枚举系统字体，并标出能否排中文；实际做事的是核心库的 `fonts::list_system`）、`reveal_data_dir`（在文件管理器里打开数据目录下的某个文件夹，只限数据目录内）、`move_pointer`（把系统指针移到窗口内容里的某个位置，逻辑像素：场景物件的「跳到拖拽点」）。`read_picture` 和 `read_project`（`core/src/files.rs`）读 agent 指名的文件（`add_photo` 的 `source.path`、`open_project` 的 `file`，见 11.1），别的一概不读：绝对路径、普通文件（链接会跟过去），要么是名字和内容都是图片的文件（按文件头认 PNG、JPEG、WebP、GIF、HEIC/HEIF、AVIF；最多 64 MB，原样以字节交出），要么是 UTF-8 的 `*.smedcover.json`（最多 128 MB，去掉字节顺序标记）。
 
 ## 11. 宿主、能力和布局
 

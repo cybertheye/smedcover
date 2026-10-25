@@ -14,7 +14,9 @@
 //! * cutting the subject out of a photo, with Apple's Vision or with BiRefNet run by ONNX Runtime,
 //!   whose runtime and models it downloads ([`cut`]);
 //! * sending the request for an AI-generated asset, so it is not subject to the web view's
-//!   cross-origin rules ([`net`]).
+//!   cross-origin rules ([`net`]);
+//! * reading a picture or a project file an agent names, and nothing else outside the data folder
+//!   ([`files`]).
 //!
 //! Everything here is synchronous: a host waits for it off its interface thread (the app on Tauri's
 //! blocking pool). Errors are text, which the web view matches on ("timed out", "unsupported:",
@@ -25,6 +27,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub mod cut;
+pub mod files;
 pub mod fonts;
 pub mod image;
 pub mod net;

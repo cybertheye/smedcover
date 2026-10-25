@@ -2234,7 +2234,7 @@ at its foot the service and its cost, and *Repaint the photo*.
 
 One Cargo workspace at the repository's root (`Cargo.toml`, one `Cargo.lock`, one `target/`), two crates:
 
-- **`core/`, the crate `smedcover-core`**, does the work: the store (`store.rs`), exporting (`image.rs`), fonts and the outlines of lettering (`fonts.rs`, `outline.rs`), the cut-out (`cut/`), AI requests (`net.rs`). Neither Tauri nor a web view comes into it, so a server can use it as the app does. All of it is synchronous, and its errors are text (`Res<T>`, a `Result<T, String>`): the interface matches on them ("timed out", "unsupported:", "cancelled", "model not downloaded"). `Core` is the core of one data folder, which the host names (`Core::open(folder, bundled)`); the store, the fonts found by name and the cut-out's models go through it. The fonts that come with the interface reach it through `BundledFonts`: the app answers from its assets (`AssetFonts`), a server can from its `ui/` folder.
+- **`core/`, the crate `smedcover-core`**, does the work: the store (`store.rs`), exporting (`image.rs`), fonts and the outlines of lettering (`fonts.rs`, `outline.rs`), the cut-out (`cut/`), AI requests (`net.rs`), the files an agent names (`files.rs`). Neither Tauri nor a web view comes into it, so a server can use it as the app does. All of it is synchronous, and its errors are text (`Res<T>`, a `Result<T, String>`): the interface matches on them ("timed out", "unsupported:", "cancelled", "model not downloaded"). `Core` is the core of one data folder, which the host names (`Core::open(folder, bundled)`); the store, the fonts found by name and the cut-out's models go through it. The fonts that come with the interface reach it through `BundledFonts`: the app answers from its assets (`AssetFonts`), a server can from its `ui/` folder.
 - **`src-tauri/`, the desktop app**: `setup` finds the data folder once (the app data directory, or a self-test's `data/`) and keeps its `Arc<Core>` as Tauri's state. Each command is a thin wrapper round the core, with the names, arguments, answers and errors it had; the slow ones wait on the blocking thread pool. What only a desktop app has stays here: the dialogs (`save_image`, `pick_folder`, `save_text`), `reveal_data_dir`, `move_pointer`, reading a binary request body (`frame_of`), the self-test's commands and `ui_build`.
 
 `cargo test` at the root tests the core alone (the workspace's default member), `cargo test --workspace` (`npm run test:rust`) the app as well; `tauri build` and `tauri dev` build the app from `src-tauri/`, into the root's `target/`.
@@ -2260,7 +2260,7 @@ canvas ──toBlob (async)──▶ PNG bytes ──binary frame──▶ Rust 
    ```
 
    The metadata travels in the body rather than in request headers because, in the real app, custom headers did not reach Rust.
-3. `save_image` (with a save dialog) and `write_image` (into a folder already chosen: the profile's, `exportDirs`, picked once in a dialog — `pick_folder`, or the folder a file was saved into through `save_image`'s — and kept; it refuses a path that is not an absolute folder; a write into it that fails for the folder's sake — that, or any error of the system's — has the interface ask for another, 9.5) are async commands that run on a worker thread. PNG is written as is; JPEG is flattened onto a dark matte and encoded; WebP is encoded lossless.
+3. `save_image` (with a save dialog) and `write_image` (into a folder already chosen: the profile's, `exportDirs`, picked once in a dialog — `pick_folder`, or the folder a file was saved into through `save_image`'s — and kept; it refuses a path that is not an absolute folder; a write into it that fails for the folder's sake — that, or any error of the system's — has the interface ask for another, 9.5) are async commands that run on a worker thread. PNG is written as is; JPEG is flattened onto a dark matte and encoded; WebP is encoded lossless. A file of the same name is written over, but with `fresh: true` in the metadata (an agent's exports, 11.1): then it is left alone and the cover goes under the first free name of `name-2.png`, `name-3.png`, … (`write_fresh()`, each name taken by making the file), and `write_image` answers the path it wrote.
 4. The interface keeps at most two writes pending, and is already painting the next cover while it waits. A progress dialog shows the count; cancelling stops new work from being dispatched.
 
 File names pass through `safe_name()`, which keeps only the last path component, so a name cannot be
@@ -2290,7 +2290,10 @@ message. It is sent from Rust to get around the cross-origin limits of a web vie
 enumerates installed fonts with fontdb and says which can set Chinese: `fonts::list_system` in the core) and `reveal_data_dir` (shows a
 folder of the data directory in the file manager — only inside the data directory), `move_pointer`
 (takes the system pointer to a place in the window's content, in logical pixels: a scene object's
-"take me to its handle").
+"take me to its handle"). `read_picture` and `read_project` (`core/src/files.rs`) read a file an agent names
+(`add_photo`'s `source.path`, `open_project`'s `file`, 11.1) and nothing else: an absolute path to a regular file
+(a link followed), a picture named and made as one (PNG, JPEG, WebP, GIF, HEIC/HEIF, AVIF by its first bytes; at
+most 64 MB, handed over as bytes) or a `*.smedcover.json` in UTF-8 (at most 128 MB, a byte-order mark left out).
 
 ## 11. Hosts, what each can do, and the layout
 
