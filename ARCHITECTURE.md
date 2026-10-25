@@ -2166,8 +2166,9 @@ into the folder — gone, moved, its disk away, no right to write, read-only, fu
 `write_image`'s "not a folder" — has `askOtherDir()` say so and ask for another, which is kept, and write them all
 there. Only what is not the folder's fault is reported as it is, the folder kept: a picture that could not be encoded, a
 file name the system refuses, a body that came wrong (the messages `encode`, `invalid file name`, `expected a binary
-body`: `NOT_THE_FOLDER`). `runExport()`, `nameFor()`, `framed()` and `renderReady()` take the format, resolution and
-names (`out`), and `runExport()` what shows its progress, in place of the settings' and the modal's. Within one export no two files get one name: `runExport()` keeps the names given, compared as the disk compares
+body`: `NOT_THE_FOLDER`). `runExport()`, `nameFor()` and `framed()` take the format, resolution and
+names (`out`), `renderFull()` and `renderReady()` the profile, the width in pixels and the resolution (`{profile, pixelW,
+scale}`), and `runExport()` what shows its progress, in place of the settings' and the modal's. Within one export no two files get one name: `runExport()` keeps the names given, compared as the disk compares
 them (NFC, one case: one file on APFS and NTFS), and one given already (a pattern without `{size}`, say) gets the size
 after it as `_<w>x<h>` (not when the name has it already), then a number (`apart()`), so no file of the export writes over another. Only the files of one export are kept apart: one of the same name already in the folder, from an earlier export, is replaced (`write_image` writes with `fs::write`). The row shows the folder with the home
 folder as ~ (`shortDir()`, but not `/Users/Shared` or `C:\Users\Public`), all of it on hover. The

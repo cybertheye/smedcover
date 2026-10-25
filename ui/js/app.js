@@ -1598,7 +1598,7 @@ async function addPhoto(src, at = null, name = "", fill = false) {
  * Puts a picture of the photo store on the cover as a photo layer, by addPhoto's rules (from the bitmap library, too):
  * above layer `above` (the selected one, unless told; see addLayer) where it does not fill the canvas.
  */
-async function placePhoto(pid, at = null, fill = false, above = undefined) {
+async function placePhoto(pid, at = null, fill = false, above) {
   if (!S.photos.has(pid)) await loadPhotos([pid]);
   if (!S.photos.has(pid)) { toast(t("msg.badFile")); return null; }
   if (fill) {
@@ -7482,17 +7482,17 @@ function settleCover() {
 /**
  * Deals `count` hands one after another (dealHand), each in a look of its own while there are looks left, `locks` left
  * alone, the cover put back as it was (`before`, a handNow() taken first) between two: each drawn at size `shown`, `px`
- * pixels wide, and handed to `each(i, hand, canvas)` (awaited) as it comes. Resolves with the hands, {style, layers,
+ * pixels wide (else DEAL.px as it is when that hand is drawn: the window may be resized while dealing), and handed to `each(i, hand, canvas)` (awaited) as it comes. Resolves with the hands, {style, layers,
  * scene, layout} each; the last one dealt is left on the cover. A hand that cannot be drawn is left out.
  */
-async function dealHands({ before = handNow(), count = RULES.hands.count, locks = S.settings.surprise.locks, px = DEAL.px, shown = selSize(), each = null } = {}) {
+async function dealHands({ before = handNow(), count = RULES.hands.count, locks = S.settings.surprise.locks, px = null, shown = selSize(), each = null } = {}) {
   const design = new Map(channelCover(null, S.profile, S.cover.catId).layers.map((l) => [l.id, l])), hands = [], dealt = [];
   for (let i = 0; i < count; i++) {
     if (i) putHand(before);
     try {
       const layout = dealHand(design, dealt, locks);
       const cv = el("canvas");
-      drawCover(cv, { profile: S.profile, catIndex: catIndex(), size: shown, pixelW: px, cover: S.cover, photos: S.photos });
+      drawCover(cv, { profile: S.profile, catIndex: catIndex(), size: shown, pixelW: px ?? DEAL.px, cover: S.cover, photos: S.photos });
       dealt.push(S.profile.style.look);
       hands.push({ ...handNow(), layout });   // its structure is in the style and the layers it keeps (putHand puts both back)
       if (each) await each(hands.length - 1, hands[hands.length - 1], cv);
@@ -7545,7 +7545,7 @@ async function surprise(e) {
     const shown = selSize(), t0 = performance.now(), H = RULES.hands;
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     let shownAt = 0;
-    const hands = await dealHands({ before, count: H.count, locks: S.settings.surprise.locks, px: DEAL.px, shown, each: async (i, h, cv) => {
+    const hands = await dealHands({ before, count: H.count, locks: S.settings.surprise.locks, shown, each: async (i, h, cv) => {
       // the hand shows before the next is dealt, and long enough after the last to be seen coming
       const since = performance.now() - shownAt;
       if (since < H.pace) await wait(H.pace - since);
@@ -8103,7 +8103,7 @@ function userBusy(strict = false) {
   if (!$("modal").hidden) return "a dialog is open";
   if (SURPRISE.busy) return "Surprise me is dealing";
   if (deal && !deal.hidden) return "Surprise me's window is open";
-  if (PRESS.down || FTB.drag || LIVE || DRAFT.held || document.body.classList.contains("scrubbing")) return "the pointer is down on the cover or a slider";
+  if (PRESS.down || LIVE || DRAFT.held || document.body.classList.contains("scrubbing")) return "the user is changing something on the cover or a slider";
   if (dragDepth > 0 || dragId || DRAGGED_ASSET || document.querySelector(".lifted")) return "something is being dragged";
   if (COMPOSING) return "a word is being typed with an input method";
   if (textField(document.activeElement) && performance.now() - TYPED.at < 1200) return "the user is typing";
