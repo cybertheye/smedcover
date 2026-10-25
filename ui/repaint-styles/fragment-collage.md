@@ -4,6 +4,7 @@ name.en: Funny fragment collage
 about.zh: 把照片里的人和物剪下来，重新组织成高对比的幽默拼贴：一个巨大的主体、几块放大的局部和重复的小细节，3–4 种强对比色，统一一种拼贴质感（撕纸复印、胶带便签、报纸票据或干净的数码拼贴）。
 about.en: Cuts the people and things in the photo out and reassembles them as a loud, funny collage: one big hero, a few enlarged details and a repeated small one, three or four high-contrast colours, and one collage material throughout (torn photocopy, tape and sticky notes, newsprint and tickets, or clean digital cut-outs).
 order: 20
+swatch: #ffbe0b #3a86ff #111111
 credit: Adapted from "fantasy-qiqiguaiguai-skill" by dacnay816y62-hub — https://github.com/dacnay816y62-hub/fantasy-qiqiguaiguai-skill (MIT)
 ---
 

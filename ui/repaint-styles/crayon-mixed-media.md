@@ -4,6 +4,7 @@ name.en: Crayon mixed media
 about.zh: 把照片重画成手感很重的混合媒材小画：细黑钢笔线搭结构，干蜡笔和彩铅的粗粝笔触上色，偶尔一块淡水彩表现透明和光，再嵌入一两小块真实照片碎片形成"真与画"的碰撞；线条稚拙、会抖、有断口，留大量纸白。
 about.en: Redraws the photo as a strongly hand-made mixed-media picture: thin black pen lines for structure, dry wax crayon and coloured pencil for colour, an occasional pale wash for transparency and light, and one or two small real photo fragments for a deliberate real-versus-drawn collision; naive, wobbling, broken lines and plenty of paper white.
 order: 20
+swatch: #e76f51 #2a9d8f #f4a261
 credit: Adapted from "heytea-style" by heytea-style contributors — https://github.com/Hchen1218/heytea-style (MIT); an unofficial visual study, not affiliated with any brand
 ---
 

@@ -4,6 +4,7 @@ name.en: Contemporary ink wash
 about.zh: 把墨、水、晕染和纸当作当代编辑设计的材料，而不是传统国画题材：照片主体保持可认，边缘逐渐化进墨晕、干笔断口和纸色空隙里；纸色按题材挑选（冷白、米白、雾灰、青瓷、淡靛、灰粉、赭黄……），留一大片安静的纸面，最多一处克制的现代点色。
 about.en: Treats ink, water, absorption and paper as materials of contemporary editorial design rather than as a traditional Chinese painting theme: the photo's subject stays recognisable while its edges dissolve into ink blooms, dry-brush breaks and paper-coloured gaps; the paper tone is chosen for the subject (cool white, rice, mist grey, celadon, pale indigo, rose-grey, ochre…), a large field of quiet paper is kept, with at most one restrained modern accent.
 order: 20
+swatch: #1a1a1a #7d8a86 #efe9dc
 credit: Adapted from "ink-wash-poster" by TwentyfiveBTea — https://github.com/TwentyfiveBTea/ink-wash-poster (AGPL-3.0)
 ---
 

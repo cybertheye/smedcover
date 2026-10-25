@@ -4,6 +4,7 @@ name.en: Release-print film
 about.zh: 仿 2383 电影拷贝片的调色：密实干净的暗部、柔和的高光肩部、减色法般厚实的色彩、按光源区分的冷暖，肤色保持自然；只在真正亮的高光边缘出现窄窄的暖红色光晕（halation），加细腻的 35mm 颗粒。画面内容和构图完全不变。
 about.en: A 2383-inspired release-print grade: dense, clean blacks, a soft highlight shoulder, rich subtractive-looking colour, warm and cool separated by the light itself, natural protected skin; a narrow warm red halation only on genuinely bright edges, and fine 35 mm grain. The picture's content and composition stay exactly as they are.
 order: 20
+swatch: #101418 #c0392b #e8c39e
 credit: Adapted from "kodak-2383-film-look" by Niko — https://github.com/N1kO724/kodak-2383-film-look (MIT); "2383" is used descriptively, not affiliated with Eastman Kodak
 ---
 

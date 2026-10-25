@@ -4,6 +4,7 @@ name.en: Duotone Screen Print
 about.zh: 这是一种以限墨双色、圆形半调网点、纸色留白与可控印刷误差为核心的编辑式印刷美学。融合复古杂志封面、丝网版画与 Riso 孔版印刷的视觉特征：通过网点大小和密度重建明暗，以主辅墨分工建立视觉层级，让纸张底色成为构图的一部分。整体大胆、克制、平面化，强调主体轮廓与构图秩序。复古感来自印刷逻辑，而不是泛黄、污渍或简单的颗粒滤镜。
 about.en: A two-ink editorial print aesthetic built around circular halftone dots, paper-white negative space, and controlled print imperfections. It combines the visual language of retro editorial covers, screen printing, and Riso zines. Tonal depth is reconstructed through dot size and density, while primary and secondary inks establish a clear visual hierarchy. The result is bold, restrained, graphic, and compositionally clear. Its vintage character comes from the logic of printmaking—not from yellowing, stains, or generic grain filters.
 order: 10
+swatch: #1d3557 #de4030 #f1e9d8
 credit: Adapted from "taxue-halftone" by taxueseek - https://github.com/taxueseek/taxue-halftone (MIT)
 ---
 

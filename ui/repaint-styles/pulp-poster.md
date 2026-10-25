@@ -4,6 +4,7 @@ name.en: 90s pulp movie poster
 about.zh: 把照片重做成九十年代通俗印刷电影海报的画面：一种高饱和平色铺满背景，主体压成硬边高反差的形状（人脸保留真实照片，建筑和物体做两三阶的分色），全画面只有三四种颜色，再加旧纸颗粒、折痕、轻微套色错位和不匀的油墨。
 about.en: Rebuilds the photo as the picture of a 1990s pulp-print movie poster: one high-chroma flat colour floods the background, the subject is pressed into hard-edged, high-contrast shapes (a face stays photographic, buildings and objects are posterised into two or three tones), three or four colours in all, with aged paper grain, a crease, slight misregistration and uneven ink.
 order: 20
+swatch: #e63946 #1d1d1d #f4d35e
 credit: Adapted from "neil-quentin" by Nealsun1993 — https://github.com/Nealsun1993/neil-quentin (MIT)
 ---
 

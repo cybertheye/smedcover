@@ -4,6 +4,7 @@ name.en: Tactile vintage editorial print illustration
 about.zh: 将照片转化为有呼吸感的复古编辑印刷插画，位于摄影与抽象图形之间。保留主体身份、关键关系、氛围、方向与长宽比；用不规则色块、粗糙油墨、干刷、纸张纹理和轻微套印偏差重建画面，而非简单叠加滤镜
 about.en: Turn a photograph into a tactile vintage editorial print illustration positioned between photography and abstract graphic art. Preserve subject identity, key relationships, atmosphere, orientation, and aspect ratio; rebuild the image with irregular color fields, rough ink, dry-brush marks, paper grain, and subtle print misregistration instead of applying a generic filter.
 order: 10
+swatch: #2e4a5a #d9793b #eadfc6
 credit: Adapted from "ai-editorial-print-studio" by liuzihe849-png - https://github.com/liuzihe849-png/ai-editorial-print-studio (MIT License)
 ---
 

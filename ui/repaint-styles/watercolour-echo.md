@@ -4,6 +4,7 @@ name.en: Watercolour memory fragment
 about.zh: 整张画面是暖象牙白的水彩纸，中间只留一个很小、很轻的水彩记忆残片：一个清楚可认的主体，加两到四处更淡、更不完整的辅助痕迹（地平线、倒影、影子、一抹色），八成以上是安静的留白。
 about.en: The whole picture is a sheet of warm ivory watercolour paper holding one very small, very light watercolour memory fragment: one clear subject plus two to four paler, less complete supporting traces (a horizon, a reflection, a shadow, a wash of colour), with more than eighty per cent quiet paper around it.
 order: 20
+swatch: #9bb7c9 #d8b4a0 #f6f0e3
 credit: Adapted from "photo-ink-echo" by zhouaria28-cloud — https://github.com/zhouaria28-cloud/photo-ink-echo (MIT)
 ---
 

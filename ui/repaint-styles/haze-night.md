@@ -4,6 +4,7 @@ name.en: Hazy night city
 about.zh: 把夜景或弱光环境照重建成风格化的摄影夜城：大片青绿、蓝绿或石油蓝的工业雾霾和城市光污染铺满天空与远景，小而集中的琥珀、暖白、信号红或洋红光源在其中燃烧，深而有层次的暗部，可选雨后湿地面的破碎倒影把两种颜色搅在一起。保留地点的辨识特征，材质仍是照片。
 about.en: Rebuilds a night or low-light scene as a stylised photographic night city: a broad field of cyan, teal or petrol-blue industrial haze and light pollution over sky and distance, small concentrated amber, warm-white, signal-red or magenta lights burning inside it, deep but structured darkness, and optionally post-rain ground whose broken reflections stir the two colours together. The place stays recognisable; the materials stay photographic.
 order: 20
+swatch: #22223b #9a8c98 #f2a65a
 credit: Adapted from "neil-night-skill" by Nealsun1993 — https://github.com/Nealsun1993/neil-night-skill (MIT)
 ---
 

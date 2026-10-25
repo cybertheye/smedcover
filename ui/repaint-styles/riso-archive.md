@@ -4,6 +4,7 @@ name.en: Riso archive print
 about.zh: 把照片拆成可观察的事实——数量、间距、遮挡、方向、色彩角色——再用 2–3 种孔版油墨重建成一小簇稀疏的印刷图形，浮在按照片冷暖挑选的纸上，六到八成五留白；颗粒、边缘渗墨和轻微套色错位。安静、像档案、像独立小志。
 about.en: Breaks the photo down into observable facts — counts, spacing, occlusion, direction, colour roles — and rebuilds them as a sparse little cluster of risograph marks in two or three inks, floating on paper whose temperature matches the photo, with 65–85% left empty; grain, ink bleed and slight misregistration. Quiet, archival, like an indie zine.
 order: 20
+swatch: #ff48b0 #0078bf #f4efe6
 credit: Adapted from "photo-riso-poster" by luckdvr — https://github.com/luckdvr/photo-riso-poster (MIT)
 ---
 

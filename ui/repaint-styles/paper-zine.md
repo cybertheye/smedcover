@@ -4,6 +4,7 @@ name.en: Paper zine micro-editorial
 about.zh: 一张扫描的旧纸，七到九成留白，只承载一个小小的视觉事件：照片里最有意味的主体缩成一小块淡化的照片碎片、剪影或墨块，带一处鲜明的高饱和色；复印、孔版颗粒或活字压印的质感。诗意、安静、像日韩独立小志。
 about.en: A scanned sheet of old paper, seventy to ninety per cent empty, carrying one small visual event: the photo's most telling subject shrunk to a faded photo fragment, silhouette or ink block, with one clear saturated accent; photocopy, risograph or letterpress texture. Poetic, quiet, like a Japanese or Korean indie zine.
 order: 20
+swatch: #6b6459 #e63946 #ece4d4
 credit: Adapted from "gc-minimal-zine-poster" by LiamGvchi — https://github.com/LiamGvchi/gc-minimal-zine-poster (MIT)
 ---
 

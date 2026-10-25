@@ -4,6 +4,7 @@ name.en: Little drawing on white paper
 about.zh: 把照片重画成一小幅手绘插画，落在大面积的白纸上：主体只占一成多，用铅笔边缘、笔刷痕和水彩的柔和，鲜艳的颜色只集中在这一小块里，八成以上留白，可以带一点很小的拼贴或印章暗示。
 about.en: Redraws the photo as a small hand-drawn illustration on a wide sheet of white paper: the subject takes little more than a tenth of the page, in pencil edges, brush marks and watercolour softness; vivid colour stays inside that small area, more than eighty per cent of the paper is left blank, with perhaps a tiny hint of collage or a stamp.
 order: 20
+swatch: #3d5a80 #e07a5f #fbfaf6
 credit: Adapted from "photo-revival" by FANTASY — https://github.com/dacnay816y62-hub/photo-revival (MIT)
 ---
 

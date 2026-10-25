@@ -4,6 +4,7 @@ name.en: Silhouette windows
 about.zh: 正负形互换的剪影拼贴：一大片手工裁切的平涂彩纸盖住照片，人物或主体的剪影被镂空成窗口，从窗口里露出原照片；另有几块同形的实心色块压在照片上。保留胶片原有的颗粒和色彩，纸面有纤维、墨色不匀和轻微套印偏差，配几颗手画的小星星。
 about.en: A positive–negative silhouette collage: a large hand-cut sheet of flat coloured paper covers the photo, the people's or subject's silhouettes cut out of it as windows through which the original photo shows, with a few matching solid shapes laid over the photo elsewhere. The photo keeps its own film grain and colour; the paper has fibres, uneven ink and slight registration drift, with a few hand-drawn little stars.
 order: 20
+swatch: #2a9d8f #f4d35e #f7f3ea
 credit: Adapted from "silhouette-group-collage" (剪影群像风格 Skill) by 理智画 — https://github.com/liuzihe849-png/silhouette-group-collage (MIT)
 ---
 

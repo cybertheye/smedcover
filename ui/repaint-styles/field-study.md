@@ -4,6 +4,7 @@ name.en: Minimal field study
 about.zh: 把照片当作一件"视觉标本"重绘成极简的编辑式插画：纯色暖奶油底，主体和辅助元素只占两到四成，2–5 种低饱和平涂色块，几根细而略带手抖的墨线，大面积安静留白；风景压成几层平面，群体变成有节奏的小形状。
 about.en: Redraws the photo as a "visual specimen" in a minimal editorial field-study illustration: a flat warm-cream ground, the subject and its few supports taking only twenty to forty per cent, two to five low-saturation flat colour shapes, a few thin, slightly shaky ink lines, and wide quiet space; landscapes become a few flat layers, groups become rhythms of small shapes.
 order: 20
+swatch: #6b7f5e #c98b5a #f3ead7
 credit: Adapted from "photo-to-minimal-illustration" by iamkong — https://github.com/iamkong/photo-to-minimal-illustration (MIT)
 ---
 

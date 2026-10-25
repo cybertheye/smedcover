@@ -4,6 +4,7 @@ name.en: Indie record sleeve
 about.zh: 把照片当作原始素材，重做成一张独立厂牌唱片的封面画面：先从画面情绪推断"音乐类型"（氛围、独立摇滚、朋克、电子、爵士、民谣、梦幻流行……），再选两到四种相称的处理——重新调色、颗粒与褪色、虚焦与光学位移、拼贴叠层、刻意的不完美——围绕一个象征性的视觉锚点，留出有意味的空白。
 about.en: Treats the photo as raw material and remakes it as the artwork of an independent-label record sleeve: first infer a "sound" from the picture's mood (ambient, indie rock, punk, electronic, jazz, folk, dream pop…), then choose two to four fitting treatments — colour reconstruction, grain and fading, soft focus and optical displacement, collage and layering, deliberate imperfection — around one symbolic visual anchor, with meaningful negative space.
 order: 20
+swatch: #2b2d42 #ef8354 #bfc0c0
 credit: Adapted from "vinyl-image-generator" by liigoQi — https://github.com/liigoQi/vinyl-image-generator (MIT)
 ---
 

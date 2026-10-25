@@ -4,6 +4,7 @@ name.en: Archive ink seal
 about.zh: 把照片压缩成一枚手工按压的印章图形，印在干净的暖白档案纸上：圆形、方框、长条、拱形或主体轮廓形的印，粗糙的丝网和干墨、磨损的网点、不均匀的压力和一点套色偏差，保留原图的颜色记忆，约七成留白。
 about.en: Compresses the photo into one hand-pressed seal printed on clean warm-white archival paper: a circular, square-framed, panoramic, arched or subject-shaped seal in rough screen print and dry ink, worn halftone, uneven pressure and a little registration error, keeping the photo's colour memory, with about seventy per cent blank paper.
 order: 20
+swatch: #a32b2b #3b3b3b #f5f0e6
 credit: Adapted from "skill-make-photo-stamp-archive" by Dlcccc71913 — https://github.com/Dlcccc71913/skill-make-photo-stamp-archive (MIT)
 ---
 

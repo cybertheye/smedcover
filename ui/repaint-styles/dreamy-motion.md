@@ -4,6 +4,7 @@ name.en: Dreamy motion editorial
 about.zh: 编辑式的"可控失焦"：保留一个清晰可认的主体，其余变成大块有方向的动态模糊——前景擦过镜头的虚影、中景被拖长的路人或物体、背景拉成光带；冷色场配一束暖光，胶片颗粒和轻微光晕。
 about.en: Editorial "controlled optical imperfection": one hero stays readable, everything else becomes large, directional motion — a near-lens sweep in the foreground, stretched passers-by or objects in the middle, light and colour pulled into trails behind; a cool field against one warm light, film grain and gentle halation.
 order: 20
+swatch: #a78bfa #f0abfc #93c5fd
 credit: Adapted from "dreamy-motion-editorial" by Dreamy Motion Editorial contributors — https://github.com/lzs0594/dreamy-motion-editorial (MIT)
 ---
 

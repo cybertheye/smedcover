@@ -4,6 +4,7 @@ name.en: Surreal pop collage
 about.zh: 照片主体去色成黑白，作为"现实锚"保留下来；天空、地面、墙面被两三块巨大的平涂色形替换，颜色从原图提纯、互补或反转而来；全图只有一个"不可能的巨物"，它来自画面里已有的东西或这个地方最出名的典故。明亮、梦幻，只有一处不对劲。
 about.en: The photo's subject turns black and white and stays as the "reality anchor"; sky, ground and walls are replaced by two or three huge flat matte colour shapes whose colours are purified, complemented or inverted from the photo; and there is exactly one impossible giant thing, taken from something already in the picture or from what the place is famous for. Bright, dreamlike, with only one thing wrong.
 order: 20
+swatch: #ff8fab #5ec8e5 #1a1a1a
 credit: Adapted from "surreal-pop-collage" by 2998980-hue — https://github.com/2998980-hue/surreal-pop-collage (MIT)
 ---
 

@@ -4,6 +4,7 @@ name.en: Ink relic print
 about.zh: 把照片压缩成一枚印在暖白纸上的现代版画"遗物"：深墨色块、柔化的边缘、负形切口、稀疏的线和刻度，保留主体与底座、道路、地平线这类完整关系，最多一点来自原图的暖色印章般的点缀，周围大片留白。像时间把照片压进了纸里。
 about.en: Compresses the photo into a modern printmaking "relic" on warm off-white paper: deep ink blocks, softened edges, negative-space cuts, sparse lines and ticks, keeping the subject together with its base, path or horizon, at most one small warm accent from the photo placed like a seal, with generous empty paper around it. As if time had pressed the photo into paper.
 order: 20
+swatch: #1c1c1c #b5482f #f2ede2
 credit: Adapted from "photo-relic-editorial" by wnby — https://github.com/wnby/photo-relic-editorial (MIT)
 ---
 

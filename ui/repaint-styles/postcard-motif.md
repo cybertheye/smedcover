@@ -4,6 +4,7 @@ name.en: Postcard motif
 about.zh: 从照片里挑出最好看、最有代表性的那一处——通常是最有颜色的部分（一片湖水、一道山脊、一扇爬满藤的窗、一朵花）——用水彩、水粉、墨线或剪纸重新画出来，保留原轮廓和颜色性格，放在安静的明信片纸面上，旁边最多配一个小的辅助图形。
 about.en: Picks the most attractive, most telling part of the photo — usually its strongest colour (a stretch of lake water, a ridge, a window wrapped in ivy, a flower) — and redraws it in watercolour, gouache, ink or cut paper, keeping its outline and colour character, set on a quiet postcard-paper field with at most one small supporting motif beside it.
 order: 20
+swatch: #3a7ca5 #6a994e #f2e8d5
 credit: Adapted from "photo-to-zine-postcard" by Enbozhao — https://github.com/Whiplashzeb/photo-to-zine-postcard (MIT)
 ---
 

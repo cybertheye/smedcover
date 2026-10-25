@@ -4,6 +4,7 @@ name.en: Travel sketch
 about.zh: 把照片画成一张十几分钟的现场速写：炭黑针管笔的线条松弛、会歪、会断，大胆省略五到七成细节，透视略被压扁；用干燥的纤维头马克笔一笔笔上色，颜色取自照片但偏灰偏旧，只涂三四成的物体，近一半纸面不上色。
 about.en: Draws the photo as a ten-to-fifteen-minute on-location sketch: loose, leaning, broken charcoal fineliner contours, half to two-thirds of the detail boldly left out, perspective gently compressed; colour laid in countable strokes of a dry fibre-tip marker, the photo's hues shifted toward grey, on only a third of the objects, with about half the paper left uncoloured.
 order: 20
+swatch: #2b2b2b #8aa1b1 #f5f1e8
 credit: Adapted from "photo-to-travel-sketch" by Liigo Qi — https://github.com/liigoQi/photo-to-travel-sketch (MIT)
 ---
 

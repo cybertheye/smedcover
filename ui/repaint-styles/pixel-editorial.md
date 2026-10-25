@@ -4,6 +4,7 @@ name.en: 8-bit pixel editorial
 about.zh: 把照片提炼成稀疏、抽象的 8-bit 像素画：大面积留白的纸面上一小簇粗像素块，或铺满画面的几块像素平面。不是像素滤镜，构图会重新安排。
 about.en: Distils the photo into a sparse, abstract 8-bit pixel piece — a small cluster of coarse blocks on a wide paper field, or a few broad pixel planes edge to edge. Not a pixel filter; the composition is rearranged.
 order: 10
+swatch: #1f1f24 #e4572e #efe9dc
 credit: Adapted from "Abstract 8-bit Instagram Pixel Editorial" by TwentyfiveBTea — https://github.com/TwentyfiveBTea/8bit-pixel-art (AGPL-3.0)
 ---
 

@@ -4,6 +4,7 @@ name.en: Fine bitmap print
 about.zh: 把照片主体转成大尺寸的细点阵印刷图像：由细小可见的方形像素和网点组成，靠疏密变化做出柔和的明暗过渡，阶梯状边缘、缺失像素的空隙、低分辨率扫描线；单色或近单色油墨（青蓝、品红、灰粉、紫、浅绿或黑），印在带纤维的暖白或浅灰纸上。不是复古游戏像素画。
 about.en: Turns the photo's subject into a large fine-bitmap print: built from small visible square pixels and halftone dots, soft tonal transitions made by density, stepped aliased edges, missing-pixel gaps and low-resolution scan lines; one or nearly one ink (cyan-blue, magenta, dusty rose, violet, pale green or black) on warm off-white or pale grey paper with fibres. Not retro game pixel art.
 order: 20
+swatch: #222222 #888888 #eeeeee
 credit: Adapted from "pixel-style-poster-skill" by v92388375-gif — https://github.com/v92388375-gif/pixel-style-poster-skill (MIT)
 ---
 
