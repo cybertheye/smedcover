@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { TOOLS, TOOL_BY, ERRORS, INSTRUCTIONS, FLAGS, toolsJson, toolsText, checkArgs, checkCall, toResult, toError, isError, ToolError, findSize, findChannel, findProfile, letterKeysOf, boxesOf, sheetPlan, widthFor, keyOf, placeAt, placePatch, nearNames, idsSaid } from "../ui/js/tools.js";
+import { TOOLS, TOOL_BY, ERRORS, INSTRUCTIONS, FLAGS, toolsJson, toolsText, checkArgs, checkCall, toResult, toError, isError, ToolError, findSize, findChannel, findProfile, letterKeysOf, boxesOf, sheetPlan, widthFor, keyOf, placeAt, placePatch, nearNames, idsSaid, imageType, coverDiff } from "../ui/js/tools.js";
 import { SCOPES, FORMATS, SURPRISE_LOCKS, normalizeSize, normalizeProfile } from "../ui/js/store.js";
 import { LOOK_IDS, LOOKS } from "../ui/js/style.js";
 import { EFFECTS, BENDS } from "../ui/js/textfx.js";
@@ -150,10 +150,15 @@ test("checkArgs says in a sentence what is wrong with a call's arguments", () =>
 });
 
 test("checkArgs counts a string's characters only against a length limit, and without spreading it: a 40 MB picture is checked at once", () => {
-  const big = "A".repeat(40 * 1024 * 1024), s = TOOL_BY.add_photo.inputSchema;
+  const big = "A".repeat(40 * 1024 * 1024), s = TOOL_BY.add_photo.inputSchema, cap = s.properties.source.properties.data.maxLength;
+  assert.equal(cap, 24 * 1024 * 1024, "a picture inline: 24 Mi characters at most");
+  assert.equal(TOOL_BY.open_project.inputSchema.properties.project.maxLength, cap, "and a project's text");
   let t0 = performance.now();
-  assert.equal(checkArgs(s, { source: { data: big } }), null);
-  assert.ok(performance.now() - t0 < 50, `no limit: not counted (${Math.round(performance.now() - t0)} ms)`);
+  assert.equal(checkArgs(s, { source: { data: big.slice(0, 20 * 1024 * 1024) } }), null);
+  assert.ok(performance.now() - t0 < 50, `within the limit in UTF-16 units: not counted (${Math.round(performance.now() - t0)} ms)`);
+  assert.equal(checkArgs(s, { source: { data: big } }), `"source.data" must be at most ${cap} characters long (it has ${big.length}).`);
+  assert.match(checkArgs(TOOL_BY.open_project.inputSchema, { project: big }), /"project" must be at most 25165824 characters long/);
+  assert.equal(checkArgs(TOOL_BY.open_project.inputSchema, { project: { kind: "project" } }), null, "an object has no length");
   t0 = performance.now();
   assert.equal(checkArgs({ type: "string", maxLength: 50 * 1024 * 1024 }, big), null);
   assert.equal(checkArgs({ type: "string", maxLength: 1000 }, big), '"arguments" must be at most 1000 characters long (it has more than 2000).');
@@ -291,15 +296,14 @@ async function fakeApi() {
   return { api, S, p, other, text, sticker, travels, calls, changes };
 }
 
-/** The tools still to be done: each answers unavailable. One done is taken off the list; one forgotten fails the test below. */
-const PENDING = ["add_photo", "crop_photo", "cut_out", "weave", "surprise", "pick_hand", "apply_cover_json", "open_project", "batch_covers", "export"];
-test("every tool has a command; those not done yet are these, and answer that they are not, before touching anything", async () => {
+test("every tool has a command, and every command is a tool's: none answers that it is not done yet", async () => {
   const { makeCommands } = await import("../ui/js/commands.js");
   const cmds = makeCommands(new Proxy({}, { get: () => () => {} }));
   assert.deepEqual(Object.keys(cmds).sort(), TOOLS.map((d) => d.name).sort());
-  assert.deepEqual(TOOLS.filter((d) => cmds[d.name].pending).map((d) => d.name), PENDING, "the tools not done yet");
-  assert.equal(TOOLS.length - PENDING.length, 21);
-  for (const n of PENDING) assert.deepEqual(await cmds[n]({}), toError("unavailable", "not implemented yet"), n);
+  for (const d of TOOLS) assert.equal(typeof cmds[d.name], "function", d.name);
+  assert.ok(TOOLS.every((d) => !cmds[d.name].pending), "nothing pending");
+  const src = await readFile(new URL("../ui/js/commands.js", import.meta.url), "utf8");
+  assert.ok(!/not implemented yet|notYet/.test(src), "no stand-in left");
 });
 
 test("the read-only commands answer from the state as it is, and read another channel without switching to it", async () => {
@@ -583,6 +587,300 @@ test("a change does what the editor does, where it is aimed: the window switched
 });
 /** Look `id`'s own settings. */
 const lookOf = (id) => Object.fromEntries(LOOKS[id].params.map((d) => [d.key, d.def]));
+
+/** A 1×1 PNG, in base64, and its bytes. */
+const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+const PNG = Uint8Array.from(Buffer.from(PNG_B64, "base64"));
+/**
+ * fakeApi() with what the photo, cut-out, weave, Surprise me, project and file tools reach, much as app.js does it,
+ * each call noted in `calls`; `project`, the project read_project reads.
+ */
+async function fakeFull() {
+  const f = await fakeApi(), { api, S, calls } = f;
+  const { newLayer, insertAbove, normalizeCrop } = await import("../ui/js/layers.js");
+  const { normalizeCover, channelIndex } = await import("../ui/js/store.js");
+  const project = { app: "smedcover", kind: "project", version: 4, profile: { id: "far", name: "Far away", categories: [{ id: "f1", name: "Far channel" }] }, catId: "f1", cover: { title: "From afar" } };
+  S.photos = new Map([["pic1", { src: "data:image/png;base64," + PNG_B64 }]]);
+  S.settings.surprise.locks = { theme: true };
+  let n = 0;
+  Object.assign(api, {
+    CAN: { ...api.CAN, files: true, relay: true },
+    invoke: async (cmd, a) => {
+      calls.push(["invoke", cmd, a]);
+      if (cmd === "read_picture") return a.path.endsWith(".png") ? PNG.buffer.slice(0) : Promise.reject("not a picture file: " + a.path);
+      if (cmd === "fetch_image") return { mime: "image/png", data: PNG_B64 };
+      if (cmd === "read_project") return a.path.endsWith(".smedcover.json") ? JSON.stringify(project) : Promise.reject("not a project file: " + a.path);
+      throw new Error(`no command ${cmd}`);
+    },
+    readAs: async (blob) => `data:${blob.type};base64,${Buffer.from(await blob.arrayBuffer()).toString("base64")}`,
+    putPhoto: async (src) => { calls.push(["putPhoto", src.slice(0, 22)]); if (!src.startsWith("data:image/png")) return null; const pid = `new${++n}`; S.photos.set(pid, { src }); return pid; },
+    keepPicture: (pid, name, kind) => { calls.push(["keepPicture", pid, name, kind]); S.library.unshift({ pid, name, kind, at: 1 }); },
+    placePhoto: async (pid, at, fill, above) => { calls.push(["placePhoto", pid, at, fill, above]); const L = newLayer("photo", { pid, ...(fill ? { fill: true } : {}) }); if (at) { L.t.all.x = at.x; L.t.all.y = at.y; } insertAbove(S.cover.layers, fill ? "bg" : above ?? S.layerId, L); S.layerId = L.id; return L; },
+    canCrop: (L) => L.type === "asset" || (L.type === "photo" && !L.fill), pictureSize: (L) => (L.type === "photo" ? [1000, 500] : [600, 600]),
+    setCrop: (L, c) => { const k = normalizeCrop(c); if (JSON.stringify(k) === JSON.stringify(L.crop || null)) return false; if (k) L.crop = k; else delete L.crop; calls.push(["setCrop", L.id]); return true; },
+    CUT: { busy: false, error: "" }, scopeKeys: (scope, key) => (scope === "size" ? [key] : null),
+    cutOut: async (L, keys) => { calls.push(["cutOut", L.id, keys]); const c = newLayer("photo", { of: L.id, cut: true }); if (keys) c.sizes = keys; insertAbove(S.cover.layers, "title", c); return c; },
+    weaveClose: () => calls.push(["weaveClose"]), brushClose: () => calls.push(["brushClose"]),
+    SURPRISE: { busy: false, step: null },
+    dealHands: async (o) => { calls.push(["dealHands", { count: o.count, locks: o.locks, px: o.px, busy: api.SURPRISE.busy }]); return Array.from({ length: o.count }, (_, i) => ({ style: { look: LOOK_IDS[i], theme: "dark" }, layers: [], layout: "keep" })); },
+    keepFirst: (hands) => { calls.push(["keepFirst", hands[0].style.look]); S.histIdx++; api.SURPRISE.step = { idx: S.histIdx }; },
+    takeHand: (h) => { calls.push(["takeHand", h.style.look]); return true; },
+    handSays: (h) => `says ${h.style.look}`,
+    channelCover: (raw, prof, catId) => normalizeCover({ ...raw, catId }, prof),
+    setCover: (c) => { calls.push(["setCover", c.catId]); S.cover = S.covers[c.catId] = c; },
+    loadPhotos: async (pids) => pids.filter((pid) => !S.photos.has(pid)),
+    pidsOf: (c) => new Set(c.layers.filter((l) => l.type === "photo" && l.pid).map((l) => l.pid)),
+    openProject: async (raw, ask) => {
+      const how = raw.profile && !S.profiles.some((q) => q.id === raw.profile.id) ? await ask(raw.profile.name) : null;
+      calls.push(["openProject", how]);
+      if (how === "new") { const q = normalizeProfile(raw.profile); S.profiles.push(q); S.profile = q; S.covers = {}; S.cover = S.covers.f1 = normalizeCover({ catId: "f1", title: raw.cover.title }, q); }
+      else S.cover.title = raw.cover.title;
+      return { profile: S.profile, catId: S.cover.catId };
+    },
+    coverFor: (id) => S.covers[id] || (S.covers[id] = normalizeCover({ catId: id }, S.profile)),
+    batchJobs: (rows) => ({ unknown: 0, jobs: rows.map((r) => {   // as batchJobs in app.js
+      let index = Number.isInteger(r.index) ? r.index : channelIndex(r.category, S.profile.categories);
+      if (index < 0) index = api.catIndex();
+      return { index, cover: { ...api.coverFor(S.profile.categories[index].id), title: r.title, tag: r.tag, subtitle: r.subtitle } };
+    }) }),
+    writeInto: async (dir, jobs, opts) => {
+      calls.push(["writeInto", dir, jobs.length, opts.fresh, opts.out]);
+      const pr = opts.progress(jobs.length), done = [];
+      for (const [i, job] of jobs.entries()) { if (pr.cancelled) break; pr.set(i, `f${i}.png`); done.push({ name: `f${i}.png`, path: `${dir}/f${i}-2.png`, job }); pr.set(i + 1); }
+      pr.close();
+      return { n: done.length, paths: done, err: null };
+    },
+  });
+  return { ...f, project };
+}
+
+test("the photo, cut-out, weave, Surprise me, project and file tools refuse what is wrong before anything is touched", async () => {
+  const { makeCommands } = await import("../ui/js/commands.js");
+  const { api, S, text, sticker, calls } = await fakeFull(), cmds = makeCommands(api), was = JSON.stringify(S, (k, v) => (v instanceof Map ? [...v.keys()] : v));
+  const d = "/tmp/out";
+  const refusals = [
+    ["add_photo", { source: { library: "nope" } }, /No picture "nope" in the library/],
+    ["add_photo", { source: { data: PNG_B64 }, fill: true, at: { x: 0.5, y: 0.5 } }, /"at" is for a print/],
+    ["add_photo", { source: { data: PNG_B64 }, fill: true, above: "title" }, /"above" is for a print/],
+    ["add_photo", { source: { data: Buffer.from("hello, world, this is text").toString("base64") } }, /holds no PNG, JPEG, WebP, GIF, HEIC or AVIF picture/],
+    ["add_photo", { source: { data: "data:text/plain;base64,aGk=" } }, /a data: URL of no picture/],
+    ["add_photo", { source: { data: "not base64 at all!" } }, /must be a picture in base64/],
+    ["add_photo", { source: { url: "ftp://example.com/a.png" } }, /"source.url" must be an http\(s\) link/],
+    ["add_photo", { source: { path: "/tmp/notes.txt" } }, /"source.path": not a picture file/],
+    ["add_photo", { source: { library: "pic1" }, above: "nope" }, /No layer "nope"/],
+    ["crop_photo", { layer: sticker.id, crop: { x: 0, y: 0 } }, /takes x, y, w and h, all four \(this one has x, y\)/],
+    ["crop_photo", { layer: sticker.id, crop: { x: 0, y: 0, w: 0.5, h: 0.5, pts: [[0, 0], [1, 0], [1, 1]] } }, /a rectangle \(x, y, w, h\) or a shape \(pts\), not both/],
+    ["crop_photo", { layer: sticker.id, crop: { pts: [[0, 0], [0.5, 0.5], [1, 1]] } }, /no area/],
+    ["crop_photo", { layer: "title", reset: true }, /"title" is a layer of type title, not a photo or an asset/],
+    ["cut_out", { layer: "title" }, /not a photo/],
+    ["weave", { layer: text.id, by: "head" }, /a layer of type text: weave takes a cut-out \(cut_out makes one\) or an asset/],
+    ["weave", { layer: sticker.id, front: JSON.parse('{"__proto__": "all"}') }, /"front.__proto__" is no layer's id/],
+    ["weave", { layer: sticker.id, front: { constructor: "all" } }, /"front.constructor" is no layer's id/],
+    ["weave", { layer: sticker.id, with: ["tag"] }, /"tag" is not a lettering layer below .*; those it can weave with: .*title/],
+    ["weave", { layer: sticker.id, front: { title: ["9|Z|9"] } }, /"front.title": "9\|Z\|9" is not one of title's letters/],
+    ["weave", { layer: sticker.id, front: { subtitle: "all" } }, /"subtitle" is not among the layers it weaves with \(title\)/],
+    ["weave", { layer: sticker.id, off: true, by: "head" }, /"off" goes alone/],
+    ["pick_hand", { hand: 1 }, /There is no surprise to take a hand of/],
+    ["open_project", { project: "{not json" }, /The project is not JSON/],
+    ["open_project", { project: { kind: "profile" } }, /That is no SmedCover project/],
+    ["open_project", { file: "/tmp/a.json" }, /^"file": not a project file: \/tmp\/a\.json\.$/],
+    ["export", { dir: "relative/out" }, /"dir" must be an absolute folder/],
+    ["export", {}, /has no export folder yet: pass dir/],
+    ["export", { dir: d, sizes: ["5:1"] }, /The profile has no size "5:1"/],
+    ["export", { dir: d, channels: ["nope"] }, /No channel "nope"/],
+    ["export", { dir: d, profile: "nobody" }, /No profile "nobody"/],
+    ["batch_covers", { csv: "Nope,Hello\nFilm Stories,Hi\nMissing,Bye", dir: d }, /names channels .* does not have: "Nope", "Missing"; its channels are: 1\. .*Nothing was written\./],
+    ["batch_covers", { jobs: [{ channel: "Film Stories", title: "a" }, { channel: "nope", title: "x" }], dir: d }, /No channel "nope"/],
+    ["batch_covers", { csv: "a", dir: d }, /The CSV has no row with a title/],
+  ];
+  for (const [tool, args, said] of refusals) await assert.rejects(cmds[tool](args), (e) => e instanceof ToolError && e.code === "invalid_arguments" && said.test(e.message), `${tool} ${JSON.stringify(args)}`);
+  // what the host cannot do: unavailable
+  const cannot = [
+    [{ ...api.CAN, cut: false }, "cut_out", { layer: "title" }, /cannot cut a subject out/],
+    [{ ...api.CAN, saveFiles: false }, "export", { dir: d }, /writes no files/],
+    [{ ...api.CAN, saveFiles: false }, "batch_covers", { csv: "1,a", dir: d }, /writes no files/],
+    [{ ...api.CAN, files: false }, "add_photo", { source: { path: "/tmp/a.png" } }, /reads no files of this computer/],
+    [{ ...api.CAN, files: false }, "open_project", { file: "/tmp/a.smedcover.json" }, /reads no files of this computer/],
+  ];
+  const can = api.CAN;
+  for (const [c, tool, args, said] of cannot) { api.CAN = c; await assert.rejects(cmds[tool](args), (e) => e.code === "unavailable" && said.test(e.message), tool); }
+  api.CAN = can;
+  api.cutReady = () => false; api.cutEngine = () => "birefnet-lite";
+  await assert.rejects(cmds.cut_out({ layer: "title" }), (e) => e.code === "unavailable" && /model \(birefnet-lite\) is not downloaded: the user can download it in Settings/.test(e.message));
+  assert.deepEqual(calls.filter((c) => c[0] !== "invoke"), [], "nothing that changes anything was called: no switch, no picture stored, nothing written");
+  assert.equal(JSON.stringify(S, (k, v) => (v instanceof Map ? [...v.keys()] : v)), was, "the state as it was");
+});
+
+test("the photo tools do what the editor does: a picture from a file, a link, the library or data put on as a print or the background, cropped, cut out and woven", async () => {
+  const { makeCommands } = await import("../ui/js/commands.js");
+  const { letterKeysOf: keys } = await import("../ui/js/tools.js");
+  const { api, S, sticker, calls } = await fakeFull(), cmds = makeCommands(api), ctx = { progress: () => {}, cancelled: () => false, say: () => {} };
+  // data: stored, kept in the library under the name given, a print above the selected layer
+  const one = (await cmds.add_photo({ source: { data: PNG_B64 }, name: "Dot", at: { x: 0.3, y: 0.6 } }, ctx)).structuredContent;
+  assert.equal(one.pid, "new1"); assert.equal(one.layer.type, "photo"); assert.deepEqual([one.layer.place.x, one.layer.place.y], [0.3, 0.6]);
+  assert.deepEqual(calls.filter((c) => c[0] === "keepPicture"), [["keepPicture", "new1", "Dot", "upload"]]);
+  assert.deepEqual(calls.find((c) => c[0] === "placePhoto"), ["placePhoto", "new1", { x: 0.3, y: 0.6 }, false, undefined], "above the selected layer: placePhoto's own default");
+  // a file: read by the host, named after it; a link: fetched by the host; the library: placed again, not kept twice
+  const two = (await cmds.add_photo({ source: { path: "/Users/me/Pictures/Holiday 2.png" }, above: "top" }, ctx)).structuredContent;
+  assert.ok(calls.some((c) => c[0] === "invoke" && c[1] === "read_picture" && c[2].path === "/Users/me/Pictures/Holiday 2.png"));
+  assert.ok(S.library.some((e) => e.pid === two.pid && e.name === "Holiday 2"));
+  assert.equal(S.cover.layers.at(-1).id, two.layer.id, "above the topmost");
+  const three = (await cmds.add_photo({ source: { url: "https://example.com/pics/sun%20set.png?x=1" } }, ctx)).structuredContent;
+  assert.ok(calls.some((c) => c[1] === "fetch_image" && c[2].url === "https://example.com/pics/sun%20set.png?x=1"));
+  assert.ok(S.library.some((e) => e.pid === three.pid && e.name === "sun set"));
+  const kept = S.library.length;
+  const four = (await cmds.add_photo({ source: { library: "pic1" }, fill: true }, ctx)).structuredContent;
+  assert.equal(four.pid, "pic1"); assert.equal(four.layer.fill, true); assert.equal(S.library.length, kept, "not kept twice");
+  await assert.rejects(cmds.add_photo({ source: { data: "data:image/gif;base64,R0lGODlhAQABAAAAACw=" } }, ctx), /could not be read here/);
+  // crop: a rectangle kept within the picture, a shape, a ratio of the picture's shape, the whole picture again
+  const P = S.cover.layers.find((l) => l.id === one.layer.id);
+  const rect = (await cmds.crop_photo({ layer: P.id, crop: { x: 0.6, y: 0.1, w: 0.6, h: 0.5 } })).structuredContent;
+  assert.deepEqual(rect.crop, { x: 0.6, y: 0.1, w: 0.4, h: 0.5 }); assert.match(rect.warnings[0], /kept within the picture/);
+  const free = (await cmds.crop_photo({ layer: P.id, crop: { pts: [[0.1, 0.1], [0.9, 0.2], [0.5, 0.9]] } })).structuredContent;
+  assert.deepEqual(free.crop.pts, [[0.1, 0.1], [0.9, 0.2], [0.5, 0.9]]);
+  const wide = (await cmds.crop_photo({ layer: P.id, ratio: "16:9" })).structuredContent.crop;
+  assert.ok(Math.abs((wide.w * 1000) / (wide.h * 500) - 16 / 9) < 2e-3, "16:9 on the picture (1000×500)");
+  assert.equal((await cmds.crop_photo({ layer: P.id, reset: true })).structuredContent.crop, null);
+  assert.match((await cmds.crop_photo({ layer: P.id, reset: true })).structuredContent.warnings[0], /was not cropped/);
+  await assert.rejects(cmds.crop_photo({ layer: four.layer.id, reset: true }), /fills the canvas: it is not cropped/);
+  // cut out: the sizes the scope asked reaches; a cut-out itself is refused
+  const cut = (await cmds.cut_out({ layer: P.id, size: "9:16", scope: "size" }, ctx)).structuredContent;
+  assert.deepEqual(cut.sizes, ["1080x1920"]); assert.deepEqual(calls.filter((c) => c[0] === "cutOut").at(-1), ["cutOut", P.id, ["1080x1920"]]);
+  assert.deepEqual((await cmds.cut_out({ layer: P.id }, ctx)).structuredContent.sizes, "all");
+  await assert.rejects(cmds.cut_out({ layer: cut.cutout }, ctx), /is a cut-out: cut out its photo/);
+  // a cut-out the user is making is waited for
+  api.CUT.busy = true; setTimeout(() => { api.CUT.busy = false; }, 250);
+  const t0 = performance.now();
+  await cmds.cut_out({ layer: P.id }, ctx);
+  assert.ok(performance.now() - t0 >= 200, "waited for the cut-out under way");
+  // weave: the first time as Weave switched on (the title, its head), then letter by letter, then off
+  const head = (await cmds.weave({ layer: sticker.id, line: 0.45 })).structuredContent.weave;
+  assert.deepEqual([head.with, head.by, head.line], [["title"], "head", 0.45]);
+  const letters = (await cmds.weave({ layer: sticker.id, by: "letters", with: ["title", "subtitle"], front: { title: "alternate", subtitle: ["0|S|1"] } })).structuredContent;
+  const all = keys(S.cover.title);
+  assert.deepEqual(letters.weave.front, { title: all.filter((_, i) => i % 2 === 0), subtitle: ["0|S|1"] }); assert.equal(letters.weave.line, 0.45, "the head's line kept for going back to it");
+  const fewer = (await cmds.weave({ layer: sticker.id, with: ["subtitle"] })).structuredContent.weave;
+  assert.deepEqual([fewer.with, Object.keys(fewer.front)], [["subtitle"], ["subtitle"]], "the letters of a layer no longer woven with go with it");
+  const brush = (await cmds.weave({ layer: sticker.id, strokes: [{ front: true, r: 0.05, pts: [[0.5, 0.2], [0.6, 0.25]] }] })).structuredContent;
+  assert.match(brush.warnings[0], /What the brush paints shows when by is "brush" \(it is "letters"\): kept for then/);
+  assert.deepEqual(brush.weave.strokes, [{ front: true, r: 0.05, pts: [[0.5, 0.2], [0.6, 0.25]] }]);
+  assert.equal((await cmds.weave({ layer: sticker.id, off: true })).structuredContent.weave, null);
+  assert.ok(!("weave" in sticker));
+  assert.match((await cmds.weave({ layer: sticker.id, off: true })).structuredContent.warnings[0], /was not woven/);
+});
+
+test("Surprise me deals as the window does, its locks this call's alone, and pick_hand takes another hand on the same step till the cover changes", async () => {
+  const { makeCommands } = await import("../ui/js/commands.js");
+  const { api, S, calls } = await fakeFull(), cmds = makeCommands(api), told = [];
+  const ctx = { progress: (n, total, message) => told.push(message), cancelled: () => false, say: () => {} };
+  const dealt = (await cmds.surprise({ count: 3, locks: ["look", "layout"], images: "none" }, ctx)).structuredContent;
+  assert.deepEqual(dealt.hands.map((h) => [h.hand, h.look, h.says]), LOOK_IDS.slice(0, 3).map((id, i) => [i + 1, id, `says ${id}`]));
+  assert.equal(dealt.kept, 1); assert.deepEqual(dealt.locks, ["look", "layout"]);
+  const deal = calls.find((c) => c[0] === "dealHands")[1];
+  assert.deepEqual(deal.locks, { look: true, layout: true }); assert.equal(deal.busy, true, "SURPRISE.busy while dealing"); assert.equal(deal.px, 400, "a hand 400 px on its longer side");
+  assert.equal(api.SURPRISE.busy, false); assert.deepEqual(S.settings.surprise.locks, { theme: true }, "the user's locks as they were");
+  assert.deepEqual(calls.find((c) => c[0] === "keepFirst"), ["keepFirst", LOOK_IDS[0]]);
+  assert.deepEqual((await cmds.pick_hand({ hand: 3 })).structuredContent, { kept: 3, look: LOOK_IDS[2], lookName: LOOKS[LOOK_IDS[2]].name.en });
+  await assert.rejects(cmds.pick_hand({ hand: 5 }), /dealt 3 hands: pick 1 to 3/);
+  S.histIdx++;   // a change made since: the hands are past taking
+  await assert.rejects(cmds.pick_hand({ hand: 2 }), /changed since the last surprise.*Deal again with surprise/);
+  // with no locks given, Surprise me's own
+  await cmds.surprise({ images: "none" }, ctx);
+  assert.deepEqual(calls.filter((c) => c[0] === "dealHands").at(-1)[1].locks, { theme: true });
+  assert.equal(calls.filter((c) => c[0] === "dealHands").at(-1)[1].count, RULES.hands.count);
+});
+
+test("apply_cover_json checks the cover as one read from its file and says what it corrected, dropped and put back, and what it names that is not here", async () => {
+  const { makeCommands } = await import("../ui/js/commands.js");
+  const { api, S, calls } = await fakeFull(), cmds = makeCommands(api);
+  const raw = JSON.parse(JSON.stringify(S.cover));
+  raw.title = "Applied"; raw.mood = "odd";
+  raw.layers = raw.layers.filter((l) => l.id !== "tag");   // a layout part left out
+  raw.layers.find((l) => l.id === "title").o = 7;   // out of range
+  raw.layers.find((l) => l.id === "title").wobble = true;   // no such field
+  raw.layers.push({ type: "photo", id: "ph1", pid: "gone" }, { type: "asset", id: "as1", ref: { kind: "sticker", id: "nope" } }, { type: "martian", id: "m1" });
+  const said = (await cmds.apply_cover_json({ cover: raw })).structuredContent;
+  assert.equal(S.cover.title, "Applied"); assert.ok(calls.some((c) => c[0] === "setCover"));
+  assert.ok(said.corrected.includes("layers.title.o"), JSON.stringify(said));
+  assert.ok(said.dropped.includes("mood") && said.dropped.includes("layers.title.wobble") && said.dropped.includes("layers.m1"), JSON.stringify(said.dropped));
+  assert.ok(said.restored.includes("layers.tag"));
+  assert.deepEqual(said.missingPhotos, ["gone"]); assert.deepEqual(said.missingAssets, ["sticker:nope"]);
+});
+
+test("open_project opens a project from a file or given whole, as a new profile or into the current one, and says which", async () => {
+  const { makeCommands } = await import("../ui/js/commands.js");
+  const { api, S, calls, project } = await fakeFull(), cmds = makeCommands(api);
+  const into = (await cmds.open_project({ project: JSON.stringify(project), as: "current" })).structuredContent;
+  assert.deepEqual(calls.filter((c) => c[0] === "openProject").at(-1), ["openProject", "current"]);
+  assert.equal(into.profile.created, false); assert.equal(S.cover.title, "From afar");
+  const made = (await cmds.open_project({ file: "/Users/me/Far.smedcover.json" })).structuredContent;
+  assert.ok(calls.some((c) => c[1] === "read_project" && c[2].path === "/Users/me/Far.smedcover.json"));
+  assert.deepEqual(made, { profile: { id: "far", name: "Far away", created: true }, channel: "f1" });
+  const again = (await cmds.open_project({ project, as: "current" })).structuredContent;
+  assert.equal(again.profile.created, false); assert.match(again.warnings[0], /Its profile, "Far away", is here: it opened there/);
+});
+
+test("export and batch_covers write as the Export window and a CSV do, into the folder given or the profile's, never over a file", async () => {
+  const { makeCommands } = await import("../ui/js/commands.js");
+  const { api, S, p, calls } = await fakeFull(), cmds = makeCommands(api), says = [];
+  const ctx = { progress: () => {}, cancelled: () => false, say: (s) => says.push(s) };
+  const ex = (await cmds.export({ dir: "/out", format: "jpeg", scale: 1 }, ctx)).structuredContent;
+  const w = calls.filter((c) => c[0] === "writeInto").at(-1);
+  const ticked = p.sizes.filter((z) => keyOf(z) !== "900x383");
+  assert.deepEqual([w[1], w[2], w[3], w[4].format, w[4].scale], ["/out", ticked.length, true, "jpeg", 1], "the sizes ticked, fresh: never over a file");
+  assert.deepEqual(ex.files.map((f) => [f.channel, f.size]), ticked.map((z) => [S.cover.catId, keyOf(z)]));
+  assert.equal(ex.files[0].path, "/out/f0-2.png", "the path written, as the host answers it"); assert.equal(ex.dir, "/out"); assert.ok(says.length > 0, "the pill says how far it has got");
+  assert.equal(S.settings.exportDirs[p.id], undefined, "the folder given is not kept");
+  S.settings.exportDirs[p.id] = "/kept";
+  const everything = (await cmds.export({ channels: "all", sizes: "all" }, ctx)).structuredContent;
+  assert.equal(everything.dir, "/kept"); assert.equal(everything.files.length, p.categories.length * p.sizes.length);
+  const two = (await cmds.export({ channels: [1, "Film Stories", 1], sizes: ["16:9", "1920x1080"] }, ctx)).structuredContent;
+  assert.deepEqual(two.files.map((f) => f.channel), [p.categories[0].id, p.categories[1].id], "each channel and size once");
+  // cancelled part-way: what was written, and said so
+  let left = 2;
+  const half = (await cmds.export({ sizes: "all" }, { ...ctx, cancelled: () => left-- <= 0 })).structuredContent;
+  assert.equal(half.cancelled, true); assert.ok(half.files.length < p.sizes.length);
+  // a batch: each job its channel's cover with its words, every size by default; a CSV row without a channel, the one shown
+  const shown = S.cover.catId, title = S.cover.title;
+  const batch = (await cmds.batch_covers({ jobs: [{ channel: 1, title: "One" }, { channel: "Film Stories", title: "Two", tag: "T" }], dir: "/b" }, ctx)).structuredContent;
+  assert.deepEqual(batch.files.map((f) => [f.channel, f.title]), [...p.sizes.map(() => [p.categories[0].id, "One"]), ...p.sizes.map(() => [p.categories[1].id, "Two"])]);
+  const csv = (await cmds.batch_covers({ csv: "channel,title,tag\n,Here,\n2,Second,EP", sizes: ["16:9"], dir: "/b" }, ctx)).structuredContent;
+  assert.deepEqual(csv.files.map((f) => [f.channel, f.title]), [[shown, "Here"], [p.categories[1].id, "Second"]]);
+  assert.equal(S.cover.title, title, "the covers in the window are not changed");
+});
+
+test("imageType tells a picture by its first bytes, as the host's read_picture does", () => {
+  const b = (s, more = []) => Uint8Array.from([...Buffer.from(s, "latin1"), ...more]);
+  assert.equal(imageType(PNG), "image/png");
+  assert.equal(imageType(PNG.buffer), "image/png", "an ArrayBuffer too");
+  assert.equal(imageType(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0])), "image/jpeg");
+  assert.equal(imageType(b("GIF89a")), "image/gif");
+  assert.equal(imageType(b("RIFF\x24\0\0\0WEBPVP8 ")), "image/webp");
+  assert.equal(imageType(b("\0\0\0\x18ftypheic")), "image/heic");
+  assert.equal(imageType(b("\0\0\0\x18ftypmif1")), "image/heif");
+  assert.equal(imageType(b("\0\0\0\x1cftypavif")), "image/avif");
+  assert.equal(imageType(b("\0\0\0\x18ftypisom")), null, "a video");
+  assert.equal(imageType(b("%PDF-1.7")), null);
+  assert.equal(imageType(new Uint8Array()), null);
+});
+
+test("coverDiff says what checking a cover given whole corrected, dropped and put back", async () => {
+  const { normalizeCover } = await import("../ui/js/store.js");
+  const { sampleProfile } = await import("../ui/js/presets.js");
+  const p = normalizeProfile(sampleProfile("en")), base = normalizeCover({ catId: p.categories[0].id, title: "T" }, p);
+  const same = JSON.parse(JSON.stringify(base));
+  assert.deepEqual(coverDiff(same, normalizeCover(JSON.parse(JSON.stringify(same)), p)), { corrected: [], dropped: [], restored: [], missingPhotos: [], missingAssets: [] }, "a cover as kept: nothing to say");
+  const raw = JSON.parse(JSON.stringify(base));
+  raw.title = 42; raw.extra = 1;
+  raw.layers.reverse();   // bg on top: put back at the bottom
+  raw.layers = raw.layers.filter((l) => l.id !== "subtitle");
+  raw.layers.push("junk", { type: "text", text: "no id" });
+  const fixed = normalizeCover(JSON.parse(JSON.stringify(raw)), p), d = coverDiff(raw, fixed, { hasPhoto: () => false });
+  assert.ok(d.corrected.includes("title") && d.corrected.includes("layers"), JSON.stringify(d));
+  assert.ok(d.dropped.includes("extra") && d.dropped.includes(`layers[${raw.layers.length - 2}]`) && d.dropped.includes(`layers[${raw.layers.length - 1}]`), JSON.stringify(d.dropped));
+  assert.ok(d.restored.includes("layers.subtitle"));
+  assert.deepEqual(coverDiff({ layers: "nope" }, base).corrected, ["layers"]);
+});
 
 test("the queue runs one call at a time, in order; a call cancelled while it waits never runs", async () => {
   const { makeQueue, CANCELLED } = await import("../ui/js/agent.js");

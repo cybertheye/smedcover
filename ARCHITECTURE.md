@@ -2372,7 +2372,8 @@ export) and `needs` (what a schema cannot say without a combinator: at least, ex
 arguments). `checkArgs(schema, args)` checks a call against the part of JSON Schema the tools use and says what is
 wrong in a sentence for the model (`"maxSide" must be at most 2048 (got 4000).`, `Unknown argument "colour" (this tool
 takes: …)`); a string's characters are counted only against a length limit, and no further than it needs, so a
-picture of 40 MB in `add_photo`'s `source.data` is checked at once. `checkCall(def, args)` adds `needs`, where a flag
+picture of 40 MB in `add_photo`'s `source.data` is checked at once (it and `open_project`'s `project` take 24 Mi
+characters at most; the descriptions send agents to a path or a link first). `checkCall(def, args)` adds `needs`, where a flag
 set to false (`FLAGS`: `reset`, `resetParams`, `reshuffle`, `off`) counts as left out and any other false says
 something (`visible: false`). `toResult({structured, images, text})` makes MCP's
 `CallToolResult` (a text block, by default the structured answer as JSON; each PNG an image block;
@@ -2381,8 +2382,11 @@ something (`visible: false`). `toResult({structured, images, text})` makes MCP's
 And the helpers the commands find things by: `findProfile()` (its id, then its name), `findChannel()` (its id, then as
 a batch table names one, `channelIndex()` in `store.js`), `findSize()` (pixels, a ratio within 1%, a name or caption;
 several matching is an error naming them), `letterKeysOf()` (the letter keys the weave window offers), `boxesOf()` (a
-drawing's `_hits` as shares of the image), `sheetPlan()` (a contact sheet's tiles), `nearNames()` (the fonts near one
-asked for that is not there), `idsSaid()` (a few ids for a message), and `placeAt()` and `placePatch()` (below).
+drawing's `_hits` as shares of the image), `sheetPlan()` (a contact sheet's tiles: below 24 px a tile, then smaller
+captions and gaps, never past 1.5 × the side), `nearNames()` (the fonts near one asked for that is not there), `idsSaid()`
+(a few ids for a message), `imageType()` (a picture's type by its first bytes, as `read_picture` tells it), `coverDiff()`
+(what checking a cover given whole corrected, dropped and put back, and the photos and assets it names that are not
+here), and `placeAt()` and `placePatch()` (below).
 
 `scripts/tools.mjs` writes `ui/tools.json` from `toolsJson()` before every build (`beforeBuildCommand`, as the repaint
 styles' `index.json` is written): `{format: 1, instructions, tools: [{name, title, description, inputSchema,
@@ -2415,10 +2419,28 @@ counting a look among the most used or a font among the recent ones. What was cl
 tool's terms (a layer added: its centre; a layout part, a copy of one or a linked cut-out: its offset; the scale without
 the canvas's height), and the patch `adjust()` applies in any scope to reach what is asked (`npm test` checks the round
 trip in all three scopes); its size, turn and stretch go first (a cut-out or a crop about its subject, the canvas drawn
-now with `drawnNow()`), then where it goes. Done: the read-only tools, the selection, undo and redo, and the changes of
-the words, the look, a channel, a layer's place, effect, font, bend, colours and showing, adding, removing and
-reordering layers; the photos, the cut-out, the weave, Surprise me, a project, a batch and an export answer
-`unavailable` for now (`pending`, which the tests list).
+now with `drawnNow()`), then where it goes.
+
+`add_photo` has its picture before anything is touched — a file read by the host (`read_picture`, 10.5), a link fetched
+by it (`fetch_image`; the plain page fetches it itself), the library's by its pid, data as given (its type by its first
+bytes) — then does what a photo uploaded does: `putPhoto()`, `keepPicture()`, `placePhoto(pid, at, fill, above)`.
+`crop_photo` is the crop window (`setCrop()`: a rectangle, a shape, a ratio fitted about what was kept, Reset; a
+rectangle needs all four sides). `cut_out` waits for a cut-out under way (`CUT.busy`), answers `unavailable` where no
+engine is ready (`cutReady()`: the model not downloaded), and is Cut out subject at the sizes the scope asked reaches
+(`cutOut(L, keys)`), a word to the caller every 5 s. `weave` is the weave's controls and its letter window
+(`normalizeWeave()`): `front`'s keys only ever the ids of the layers it weaves with, `__proto__` and the like refused, a
+first weave the title's as Weave switched on. `surprise` deals as Surprise me does, `SURPRISE.busy` set while it deals
+(`dealHands()`, then `keepFirst()`: one step), its locks the call's alone and never kept, no look counted among the most
+used (that is the window's Done); the hands are drawn 400 px on their longer side, each told to the caller as it comes,
+and answered on one labelled sheet (`each`, or none); `pick_hand` is a hand clicked in that window (`takeHand()`), on the
+same step, while `SURPRISE.step` is still the deal's — once anything followed it is refused, the agent told to deal
+again. `apply_cover_json` checks the cover as one read from its file (`channelCover()`, then `setCover()`) and says what
+that changed (`coverDiff()`); `open_project` is Open project (`openProject(raw, () => as)`), a file read by the host
+(`read_project`). `export` and `batch_covers` write as the Export window and a CSV imported do (`batchJobs()`,
+`writeInto()`; runExport's progress object tells the caller and the pill, `ctx.say()`), into `dir` or the profile's
+folder — never asking for one, a `dir` given not kept — switching to the profile asked first (`nameFor()` reads the one
+shown), and never over a file (`fresh`, 10.2); what a job names is found before anything is drawn or written, and a
+cancel stops between two files, answering those written. Every tool is done: `npm test` fails on a command that is not.
 
 `agent.js` is the shell. Calls run one at a time in the order they came (`makeQueue()`: a call cancelled while it
 waits never runs), one waiting behind another telling the caller so every 5 s. Each is checked (`checkCall()`; a name
@@ -2475,8 +2497,8 @@ frame waits for the fonts, otherwise the title would be fitted using the wrong g
 
 | Level | Command | Covers |
 |---|---|---|
-| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export's sizes switched off and folders and the looks' use, by profile and look), the defaults and `custom.json` laid over them, the settings written to `custom.json` (only what differs, read back the same, from `settings.json` once), file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string, no native `confirm()`, `alert()` or `prompt()` in `ui/`; the agent tools (`agent.test.mjs`): every definition whole and marked as the spec has it, the enums the app's constants, `ui/tools.json` up to date, the argument check's verdicts and sentences (a 40 MB string checked at once, characters counted as JSON Schema counts them), finding profiles, channels and sizes, the answers' shapes, the read-only commands, selection, undo and redo over a stand-in `API`, every tool a command and those not done yet listed, `place_layer`'s arithmetic (`placeAt()`, `placePatch()`) through `adjust()` and `resolve()` in all three scopes, a change refused before anything is touched (no switch, no edit) and one done as the editor does it, aimed where it is told, the queue, `whenIdle()` and the dispatcher (a call that hangs let go of at its timeout, on a cancel and when the user stops waiting, the next one run, a late answer dropped, its step ended as it stood; those waiting told so; every call answered) |
-| Rust unit tests | `cargo test --workspace` (`npm run test:rust`) | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling, requests against a local stand-in server, proxy rules, a face cut out of a font collection, traced outlines, fonts found by name (bundled, imported, imported again), the cut-out's models and packages |
+| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export's sizes switched off and folders and the looks' use, by profile and look), the defaults and `custom.json` laid over them, the settings written to `custom.json` (only what differs, read back the same, from `settings.json` once), file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string, no native `confirm()`, `alert()` or `prompt()` in `ui/`; the agent tools (`agent.test.mjs`): every definition whole and marked as the spec has it, the enums the app's constants, `ui/tools.json` up to date, the argument check's verdicts and sentences (a 40 MB string checked at once, characters counted as JSON Schema counts them), finding profiles, channels and sizes, the answers' shapes, the read-only commands, selection, undo and redo over a stand-in `API`, every tool a command (none pending), the photo, cut-out, weave, Surprise me, project and file tools refusing what is wrong before anything is touched and doing what the editor does (`coverDiff()`, `imageType()`), `place_layer`'s arithmetic (`placeAt()`, `placePatch()`) through `adjust()` and `resolve()` in all three scopes, a change refused before anything is touched (no switch, no edit) and one done as the editor does it, aimed where it is told, the queue, `whenIdle()` and the dispatcher (a call that hangs let go of at its timeout, on a cancel and when the user stops waiting, the next one run, a late answer dropped, its step ended as it stood; those waiting told so; every call answered) |
+| Rust unit tests | `cargo test --workspace` (`npm run test:rust`) | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling, an export never over a file (`fresh`), the files an agent names (`read_picture`, `read_project`: only pictures and projects, absolute, within their caps), requests against a local stand-in server, proxy rules, a face cut out of a font collection, traced outlines, fonts found by name (bundled, imported, imported again), the cut-out's models and packages |
 | End-to-end self-test | `SMEDCOVER_SELFTEST=<folder> <executable>` | the full export path between the real web view and Rust |
 
 In self-test mode the app keeps its data in the given folder, exports a few covers in all three

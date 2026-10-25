@@ -6981,12 +6981,13 @@ const NOT_THE_FOLDER = /encode|invalid file name|expected a binary body/i;
 /**
  * Writes jobs into folder `dir`, once, asking nothing: resolves with how many were written (as runExport), each file
  * written ({name, path, job}, in the order they were done) and what stopped it (null: nothing). `opts`: runExport's
- * ({progress, out}), `out` also the format and quality the files are written in.
+ * ({progress, out}), `out` also the format and quality the files are written in; `fresh`, never over a file (a name
+ * taken gets a number, see write_fresh in core/src/image.rs; an agent's exports), `path` then the name written.
  */
 async function writeInto(dir, jobs, opts = {}) {
   let err = null;
-  const paths = [];
-  const n = await runExport(jobs, async (bytes, name, job) => { paths.push({ name, path: await invoke("write_image", framed(bytes, { dir, name }, opts.out)), job }); }, (e) => { err = e; }, opts);
+  const paths = [], fresh = opts.fresh ? { fresh: true } : {};
+  const n = await runExport(jobs, async (bytes, name, job) => { paths.push({ name, path: await invoke("write_image", framed(bytes, { dir, name, ...fresh }, opts.out)), job }); }, (e) => { err = e; }, opts);
   return { n, paths, err };
 }
 /**
@@ -7113,12 +7114,13 @@ function nameField(example) {
 }
 /**
  * The covers a batch exports for rows of a table (csvToJobs): each on the channel its row names (channelIndex in
- * store.js), or the one on the canvas where it names none this profile has; `unknown`, how many named one it has not.
+ * store.js; a row's `index`, when it has one, the channel's own: an agent's batch_covers found it), or the one on the
+ * canvas where it names none this profile has; `unknown`, how many named one it has not.
  */
 function batchJobs(rows) {
   let unknown = 0;
   const jobs = rows.map((r) => {
-    let index = channelIndex(r.category, S.profile.categories);
+    let index = Number.isInteger(r.index) && S.profile.categories[r.index] ? r.index : channelIndex(r.category, S.profile.categories);
     if (index < 0) { index = catIndex(); if (String(r.category).trim()) unknown++; }
     return { index, cover: { ...coverFor(S.profile.categories[index].id), title: r.title, tag: r.tag, subtitle: r.subtitle } };   // that channel's own cover, with the row's words (no subtitle but the row's own)
   });
@@ -7441,6 +7443,12 @@ async function openProject(raw, ask) {
   touch({ cover: true, panel: true, side: true, strip: true });
   return { profile: S.profile, catId: S.cover.catId };
 }
+/** The project file of the cover on the canvas (version 4): the cover with its profile and channel, the pictures, vector assets and imported fonts it uses. */
+async function projectFile() {
+  const fonts = await embedFonts([S.cover.layers, S.profile.design.layers]);
+  return { app: "smedcover", kind: "project", version: 4, profileName: S.profile.name, profile: S.profile, catId: S.cover.catId, cover: S.cover,
+    photos: embedPhotos([S.cover]), assets: embedAssets(usedUserAssets(S.profile, S.cover)), fonts };
+}
 const projectActions = {
   /** A project file picked and opened (openProject), asking how where its profile is not here (askProjectProfile). */
   async open() {
@@ -7452,12 +7460,8 @@ const projectActions = {
       if (await openProject(raw, askProjectProfile)) toast(t("proj.opened", S.profile.name, cat().name || cat().code || "—"));
     } catch (e) { fail(e); }
   },
-  /** Version 4: the cover with its profile and channel, the pictures, vector assets and imported fonts it uses. */
   async save() {
-    const fonts = await embedFonts([S.cover.layers, S.profile.design.layers]);
-    saveText(`${(S.cover.title.split("\n")[0] || "cover").replace(/[*\\/:?"<>|]+/g, "").slice(0, 24) || "cover"}.smedcover.json`,
-      JSON.stringify({ app: "smedcover", kind: "project", version: 4, profileName: S.profile.name, profile: S.profile, catId: S.cover.catId, cover: S.cover,
-        photos: embedPhotos([S.cover]), assets: embedAssets(usedUserAssets(S.profile, S.cover)), fonts }));
+    saveText(`${(S.cover.title.split("\n")[0] || "cover").replace(/[*\\/:?"<>|]+/g, "").slice(0, 24) || "cover"}.smedcover.json`, JSON.stringify(await projectFile()));
   },
   reset() { setCover(channelCover(null, S.profile, S.cover.catId)); S.layerId = "title"; touch({ cover: true, panel: true, side: true }); },
 };
@@ -8590,10 +8594,10 @@ async function agentTest(dir) {
   if (!noStep) no("agentStep: a change of nothing made a step");
   if (!putBack) no("agentStep: a change that failed was not put back, or cut off redo");
   // what goes wrong answers as the host expects; a call waits for a dialog
-  const errs = { unknown: await call("draw_me"), invalid: await call("render_preview", { maxSide: 9 }), notYet: await call("crop_photo", { layer: "title", reset: true }) };
+  const errs = { unknown: await call("draw_me"), invalid: await call("render_preview", { maxSide: 9 }), refused: await call("crop_photo", { layer: "title", reset: true }), notHere: await call("add_photo", { source: { path: "/no/such/picture.png" } }) };
   r.answers = Object.fromEntries(Object.entries(errs).map(([k, x]) => [k, x.ok ? "ok" : x.error.code]));
-  if (r.answers.unknown !== "unknown_tool" || r.answers.invalid !== "invalid_arguments" || r.answers.notYet !== "unavailable") no(`errors answered ${JSON.stringify(r.answers)}`);
-  if (S.histIdx !== j0) no("a tool that is not done yet made a step");
+  if (r.answers.unknown !== "unknown_tool" || r.answers.invalid !== "invalid_arguments" || r.answers.refused !== "invalid_arguments" || r.answers.notHere !== "invalid_arguments") no(`errors answered ${JSON.stringify(r.answers)}`);
+  if (S.histIdx !== j0) no("a call refused made a step");
   $("modal").replaceChildren(el("div", { class: "dlg" }, "…")); $("modal").hidden = false;
   setTimeout(() => { $("modal").hidden = true; }, 300);
   const t0 = performance.now(), waited = await call("get_selection");
@@ -9615,7 +9619,7 @@ const drawnNow = () => { flushDraw(); return flatCanvas(); };
 const API = Object.freeze({
   S, CAN, HOST, appVersion, invoke, BUNDLED_FONTS, CUT, SURPRISE, HOLD,
   // what is shown, selected, and what a layer is
-  cat, catIndex, selSize, layer, frame, sizeKeys, scopeKeys, layerName, copiable, owner, passivesOf, recordOf, weavableOf, wovenOf, inColumns, canCrop, canCut, cutReady, cutEngine, exportDir, ticked, channelOf, pickedIds,
+  cat, catIndex, selSize, layer, frame, sizeKeys, scopeKeys, layerName, copiable, owner, passivesOf, recordOf, weavableOf, wovenOf, inColumns, canCrop, pictureSize, canCut, cutReady, cutEngine, exportDir, ticked, channelOf, pickedIds,
   // the history, and putting a change on the screen
   touch, commitHistory, commitPending, clearPendingHistory: () => clearTimeout(timers.hist), snapshot, restoreSnap, timeTravel, settleCover, setCover, channelCover, coverFor, coverOf, drawnNow, toast,
   // the window
@@ -9625,7 +9629,7 @@ const API = Object.freeze({
   // Surprise me
   dealHands, keepFirst, takeHand, handSays, handNow, putHand,
   // drawing and files
-  renderReady, toPng, pngBase64, runExport, writeInto, framed, nameFor, openProject,
+  renderReady, toPng, pngBase64, readAs, runExport, writeInto, framed, nameFor, batchJobs, openProject,
 });
 const COMMANDS = makeCommands(API);
 /** What the agent shell is given (see makeAgent in agent.js); `busy`, what of the user's a call waits for (userBusy). */

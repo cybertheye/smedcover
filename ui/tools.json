@@ -2417,7 +2417,7 @@
     {
       "name": "add_photo",
       "title": "Add a photo",
-      "description": "Puts a photo on the cover. source is exactly one of: path (an image file on this computer, absolute), url (an image on the web), library (a pid from list_library) or data (the image in base64, or a data: URL). fill: true makes it the background, filling the canvas; else it is placed as a print, its centre at `at` {x, y}. It goes above `above` (default the selected layer). The picture joins the bitmap library. One undo step. Returns the new layer and the picture's pid.",
+      "description": "Puts a photo on the cover. source is exactly one of: path (an image file on this computer, absolute: PNG, JPEG, WebP, GIF, HEIC or AVIF, at most 64 MB), url (an http(s) link to an image), library (a pid from list_library) or data (the image in base64, or a data: URL). Prefer a path or a url: data travels whole through the conversation, at most 24 Mi characters. fill: true makes it the background, filling the canvas, just above bg; else it is placed as a print, its centre at `at` {x, y}, just above `above` (a layer id or \"top\"; by default the selected layer). A new picture joins the bitmap library. One undo step. Returns the new layer and the picture's pid.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2453,7 +2453,8 @@
               },
               "data": {
                 "type": "string",
-                "description": "Base64, or a data: URL."
+                "description": "Base64, or a data: URL (prefer path or url).",
+                "maxLength": 25165824
               }
             },
             "minProperties": 1,
@@ -2622,7 +2623,7 @@
     {
       "name": "crop_photo",
       "title": "Crop a photo",
-      "description": "Crops a photo or asset layer: crop {x, y, w, h} (shares of the picture) or a free shape {pts: [[u, v], …]} (3 to 64 corners in order round it, shares of the picture), or ratio (\"photo\" or w:h) for the largest crop of that ratio about the middle, or reset: true for the whole picture. Not for a photo that fills the canvas. One undo step. Returns the crop as kept (null: none).",
+      "description": "Crops a photo or asset layer, as its crop window does: crop {x, y, w, h} (all four, shares of the picture: its left and top edges, its width and height) or a free shape {pts: [[u, v], …]} (3 to 64 corners in order round it, shares of the picture), or ratio (\"photo\" or w:h) for a crop of that ratio about as large as the one it has, about its middle, or reset: true for the whole picture. Not for a photo that fills the canvas. One undo step. Returns the crop as kept (null: none), and in warnings what was kept within the picture.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2716,6 +2717,12 @@
               "object",
               "null"
             ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -2740,7 +2747,7 @@
     {
       "name": "cut_out",
       "title": "Cut out a subject",
-      "description": "Cuts the subject out of a photo layer (on macOS with Vision, elsewhere with a downloaded model): a layer with the subject alone, linked to the photo, goes above the title so it can stand in front of it. scope keeps it to the sizes facing size's way, or to size alone. The first cut-out of a photo can take a while. One undo step. Returns the cut-out layer's id and the sizes it shows at.",
+      "description": "Cuts the subject out of a photo layer (on macOS with Vision, elsewhere with a downloaded model): a layer with the subject alone, linked to the photo, goes above the title so it can stand in front of it; a photo cut out already has its subject found again. scope keeps it to the sizes facing size's way, or to size alone (default all). The first cut-out of a photo can take a while. Answers unavailable where the host cannot cut out or the model is not downloaded (the user downloads it in Settings → AI → Cut-out). One undo step. Returns the cut-out layer's id and the sizes it shows at.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2823,7 +2830,7 @@
     {
       "name": "weave",
       "title": "Weave with the lettering",
-      "description": "Weaves a cut-out (or an asset) with the lettering below it, as a magazine's subject is with its masthead. by \"head\": its head in front, ending at line (0.1–0.9 of the subject's height from its top), the rest behind; \"letters\": front gives, for each lettering layer id, \"all\", \"none\", \"alternate\" or a list of letter keys (get_cover with letters: true) to put in front, the rest behind; \"brush\": strokes [{front, r, pts}] painted in the picture's own frame (pts as shares of its width and height, r of its longer side). with: the lettering layers it weaves with (default every one below it). off: true unweaves it. One undo step. Returns the weave as kept.",
+      "description": "Weaves a cut-out (or an asset) with the lettering below it, as a magazine's subject is with its masthead. by \"head\": its head in front, ending at line (0.1–0.9 of the subject's height from its top), the rest behind; \"letters\": front gives, for each lettering layer id, \"all\", \"none\", \"alternate\" or a list of letter keys (get_cover with letters: true) to put in front, the rest behind; \"brush\": strokes [{front, r, pts}] painted in the picture's own frame (pts as shares of its width and height, r of its longer side), in place of those it has. with: the lettering layers below it that it weaves with (a first weave: the title, else the nearest below). Each way's settings are kept when another is chosen. off: true unweaves it. One undo step. Returns the weave as kept, and in warnings what will not show as it is.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2948,6 +2955,12 @@
               "object",
               "null"
             ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -2972,7 +2985,7 @@
     {
       "name": "surprise",
       "title": "Surprise me",
-      "description": "Surprise me: deals count (default 6) variations of the cover — look, lettering, layout — and puts the first on the canvas. locks keeps these as they are, this time only: look, theme, lettering, places, layout. Returns each hand (its number, look, layout and a few words) and, by default, one contact sheet of them labelled from 1 (images: \"each\" for an image per hand, \"none\" for none). Take another with pick_hand. One undo step.",
+      "description": "Surprise me: deals count (default 6) variations of the cover — look, lettering, layout — at the size on the canvas, and puts the first on the canvas. locks keeps these as they are, this time only: look, theme, lettering, places, layout (default: those set in Surprise me's window). Not counted among the user's most used looks. Returns each hand (its number, look, layout and a few words) and, by default, one contact sheet of them labelled from 1 (images: \"each\" for an image per hand, \"none\" for none). Take another with pick_hand. One undo step.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3048,6 +3061,12 @@
           },
           "kept": {
             "type": "integer"
+          },
+          "locks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -3094,6 +3113,12 @@
         "properties": {
           "kept": {
             "type": "integer"
+          },
+          "look": {
+            "type": "string"
+          },
+          "lookName": {
+            "type": "string"
           }
         },
         "required": [
@@ -3118,7 +3143,7 @@
     {
       "name": "apply_cover_json",
       "title": "Apply a cover",
-      "description": "A last resort: replaces the cover with `cover`, a whole cover as SmedCover stores it ({title, subtitle, tag, layers}; get_cover with raw: true gives one to start from). It is checked as a file read from disk is: returns what was corrected or dropped, and the photos and assets it names that are not here. One undo step.",
+      "description": "A last resort: replaces the cover with `cover`, a whole cover as SmedCover stores it ({title, subtitle, tag, layers}; get_cover with raw: true gives one to start from). It is checked as a file read from disk is. Returns what was corrected (\"title\", \"layers.<id>.<field>\", \"layers\" for their order), dropped (a field or a layer it could not keep) and restored (a layout part it lacked, put back), and the photos (pids) and assets (kind:id) it names that are not here. One undo step.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3158,6 +3183,12 @@
               "type": "string"
             }
           },
+          "restored": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "missingPhotos": {
             "type": "array",
             "items": {
@@ -3170,7 +3201,14 @@
               "type": "string"
             }
           }
-        }
+        },
+        "required": [
+          "corrected",
+          "dropped",
+          "restored",
+          "missingPhotos",
+          "missingAssets"
+        ]
       },
       "annotations": {
         "title": "Apply a cover",
@@ -3190,7 +3228,7 @@
     {
       "name": "open_project",
       "title": "Open a project",
-      "description": "Opens a SmedCover project (a .smedcover.json file: a profile with its covers, photos, assets and fonts), from a file on this computer (file, an absolute path) or given whole (project, the object or its JSON text): as a new profile (as \"new\", the default) or over the current one (\"current\"). The window switches to it. Returns the profile and the channel opened.",
+      "description": "Opens a SmedCover project (a .smedcover.json file: a profile with its covers, photos, assets and fonts), from a file on this computer (file, an absolute path to a *.smedcover.json, at most 128 MB; preferred) or given whole (project, the object or its JSON text, at most 24 Mi characters). Its profile, when it is here, takes it; else `as` says where: a new profile (\"new\", the default) or the current one (\"current\"). The window switches to its profile and channel, its cover one step of undo there. Returns the profile (created: whether it was made new) and the channel opened.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3204,7 +3242,8 @@
               "object",
               "string"
             ],
-            "description": "The project, or its JSON text."
+            "description": "The project, or its JSON text.",
+            "maxLength": 25165824
           },
           "as": {
             "type": "string",
@@ -3236,6 +3275,12 @@
           },
           "channel": {
             "type": "string"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -3261,7 +3306,7 @@
     {
       "name": "batch_covers",
       "title": "Make covers in a batch",
-      "description": "Makes and exports a cover for each job, as importing a CSV does: jobs [{channel, title, tag?, subtitle?}] (channel by name, code or number) or csv (the same as text: channel, title, tag, subtitle, with or without a header row). Each starts from its channel's cover with the words replaced, at sizes (default every size of the profile), into folder dir (absolute; default the profile's export folder), in format, at scale (1–4×; default the export settings'). Never overwrites a file: a name taken gets a number. Nothing is written when a job names a channel the profile does not have. The covers in the window are not changed. Returns the folder and each file written.",
+      "description": "Makes and exports a cover for each job, as importing a CSV does: jobs [{channel, title, tag?, subtitle?}] (channel by id, name, code or number) or csv (the same as text: channel, title, tag, subtitle, with or without a header row; a row with no channel is the one shown). Each starts from its channel's cover with the words replaced, at sizes (default every size of the profile), into folder dir (absolute; default the profile's export folder), in format, at scale (1–4×; default the export settings'). Never overwrites a file: a name taken gets a number. Nothing is written when a job names a channel the profile does not have. The covers in the window are not changed. Only where the host writes files. Returns the folder and each file written (cancelled: true when the call was cancelled part-way).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3379,9 +3424,13 @@
                 }
               }
             }
+          },
+          "cancelled": {
+            "type": "boolean"
           }
         },
         "required": [
+          "dir",
           "files"
         ]
       },
@@ -3403,7 +3452,7 @@
     {
       "name": "export",
       "title": "Export",
-      "description": "Writes covers to image files: channels (default the one shown; \"all\" for every channel) at sizes (default those ticked in the Export window; \"all\" for every size), into dir (an absolute folder; default the profile's export folder — pass dir when it has none), in format (png, jpeg, webp) and at scale (1–4×; default the export settings'), each named by the export name pattern. Never overwrites a file: a name taken gets a number. Only where the host writes files. Returns the folder and each file's path.",
+      "description": "Writes covers to image files: channels (default the one shown; \"all\" for every channel) at sizes (default those ticked in the Export window; \"all\" for every size), into dir (an absolute folder; default the profile's export folder — pass dir when it has none), in format (png, jpeg, webp) and at scale (1–4×; default the export settings'), each named by the export name pattern. Never overwrites a file: a name taken gets a number. The folder given is not kept for the profile. Only where the host writes files. Returns the folder and each file's path (cancelled: true when the call was cancelled part-way).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3500,9 +3549,13 @@
                 }
               }
             }
+          },
+          "cancelled": {
+            "type": "boolean"
           }
         },
         "required": [
+          "dir",
           "files"
         ]
       },
