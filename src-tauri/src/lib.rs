@@ -9,7 +9,10 @@
 //!   as the [`Core`] the commands use;
 //! * the commands, most of them a thin wrapper round the core's work, the slow ones run off the
 //!   main thread;
-//! * what only the desktop has: the system's dialogs, the file manager, the pointer, the self-test.
+//! * what only the desktop has: the system's dialogs, the file manager, the pointer, the self-test;
+//! * the endpoint agents call over MCP, which the window answers ([`mcp`]).
+
+mod mcp;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,12 +24,13 @@ use smedcover_core::image::{encode, extension, parse_frame, safe_name, write_int
 use smedcover_core::outline::Outline;
 use smedcover_core::{err, net, BundledFonts, Core, Res};
 use tauri::ipc::{InvokeBody, Request};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 
 /// Folder given in `SMEDCOVER_SELFTEST`, if any. In that mode the app keeps its data there instead
 /// of the real app data directory, exports a few covers into it through the normal code path,
-/// writes `report.json` and quits — an end-to-end check of the web view / Rust bridge.
+/// writes `report.json` and quits — an end-to-end check of the web view / Rust bridge. (With
+/// SMEDCOVER_SELFTEST_STAY it only keeps its data there: see [`selftest_stay`].)
 fn selftest_root() -> Option<PathBuf> {
     std::env::var_os("SMEDCOVER_SELFTEST")
         .map(PathBuf::from)
@@ -36,6 +40,14 @@ fn selftest_root() -> Option<PathBuf> {
 #[tauri::command]
 fn selftest_dir() -> Option<String> {
     selftest_root().map(|p| p.display().to_string())
+}
+
+/// In self-test mode, whether the app is only to keep its data in the self-test's folder and otherwise run as it
+/// would (SMEDCOVER_SELFTEST_STAY): no self-test, the window left open, the agents' endpoint started if it is on —
+/// the app on a data folder of its own, to try something by hand (a new folder starts with the sample profile).
+#[tauri::command]
+fn selftest_stay() -> bool {
+    selftest_root().is_some() && std::env::var_os("SMEDCOVER_SELFTEST_STAY").is_some()
 }
 
 #[tauri::command]
@@ -404,6 +416,14 @@ pub fn run() {
             selftest_drag,
             selftest_perf,
             selftest_agent,
+            selftest_stay,
+            mcp::selftest_mcp,
+            mcp::mcp_status,
+            mcp::mcp_set,
+            mcp::mcp_token,
+            mcp::mcp_attach,
+            mcp::mcp_reply,
+            mcp::mcp_progress,
             ui_build,
             move_pointer,
             selftest_photo,
@@ -431,10 +451,8 @@ pub fn run() {
             let core = data.and_then(|d| {
                 Core::open(d.clone(), Arc::new(AssetFonts(app.handle().clone()))).map_err(|e| format!("{}: {e}", d.display()))
             });
-            match core {
-                Ok(core) => {
-                    app.manage(core);
-                }
+            let core = match core {
+                Ok(core) => core,
                 // nothing could be kept: said, then the app quits (an error out of setup would end it with no word,
                 // the window already up); the dialog's own way, for waiting on it here would hold the main thread
                 Err(e) => {
@@ -446,27 +464,53 @@ pub fn run() {
                         .show(move |_| h.exit(1));
                     return Ok(());
                 }
-            }
-            // A self-test's window may open off screen — on another desktop, behind a full-screen app —
-            // and WebKit then stops drawing for it: a canvas read back (an export, a PNG) waits for good,
-            // every process idle. So in self-test mode the web view is told not to watch whether its window
-            // can be seen (the setting WebKit's own tests use), and keeps drawing unseen.
-            #[cfg(target_os = "macos")]
+            };
+            // A self-test's window may open off screen — on another desktop, behind a full-screen app — and must
+            // keep drawing there (see mcp::keep_drawing).
             if selftest_root().is_some() {
-                use tauri::Manager;
-                for w in app.webview_windows().values() {
-                    let _ = w.with_webview(|wv| unsafe {
-                        let view = wv.inner() as *mut objc2::runtime::AnyObject;
-                        let sel = objc2::sel!(_setWindowOcclusionDetectionEnabled:);
-                        let can: bool = objc2::msg_send![view, respondsToSelector: sel];
-                        if can {
-                            let _: () = objc2::msg_send![view, _setWindowOcclusionDetectionEnabled: false];
-                        }
-                    });
-                }
+                mcp::keep_drawing(app.handle(), false);
             }
+            // The endpoint agents call: started now if it is on, its calls waiting for the window's page.
+            let selftest = selftest_root().map(|_| {
+                if std::env::var_os("SMEDCOVER_SELFTEST_STAY").is_some() {
+                    mcp::SelfTest::Stay
+                } else if std::env::var_os("SMEDCOVER_SELFTEST_MCP").is_some() {
+                    mcp::SelfTest::Mcp
+                } else {
+                    mcp::SelfTest::Run
+                }
+            });
+            match mcp::McpHost::open(app.handle(), core.data_dir().to_path_buf(), selftest) {
+                Ok(host) => {
+                    app.manage(host);
+                }
+                Err(e) => eprintln!("SmedCover: the agents' endpoint cannot be had: {e}"),
+            }
+            app.manage(core);
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running SmedCover");
+        // a page loading in the main window (a reload) takes the calls the last one had with it
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) && webview.label() == "main" {
+                if let Some(host) = webview.try_state::<Arc<mcp::McpHost>>() {
+                    host.reloading();
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building SmedCover")
+        .run(|app, event| match event {
+            RunEvent::WindowEvent { label, event: WindowEvent::Destroyed, .. } if label == "main" => {
+                if let Some(host) = app.try_state::<Arc<mcp::McpHost>>() {
+                    host.window_closed();
+                }
+            }
+            // the endpoint stops with the app, its port free
+            RunEvent::Exit => {
+                if let Some(host) = app.try_state::<Arc<mcp::McpHost>>() {
+                    tauri::async_runtime::block_on(host.shut());
+                }
+            }
+            _ => {}
+        });
 }

@@ -3313,10 +3313,13 @@ version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
  "objc2",
+ "serde_json",
  "smedcover-core",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tokio",
+ "ureq",
 ]
 
 [[package]]

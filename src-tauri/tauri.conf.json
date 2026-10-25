@@ -20,7 +20,8 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "trafficLightPosition": { "x": 30, "y": 40 },
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "backgroundThrottling": "disabled"
       }
     ],
     "security": {
