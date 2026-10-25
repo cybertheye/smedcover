@@ -522,9 +522,11 @@
   .layer .badge,.layer .sizes{flex:none;font-size:10.5px;line-height:16px;padding:0 6px;border:1px solid transparent;border-radius:6px;white-space:nowrap;cursor:help}
   .layer .badge{background:rgba(255,255,255,.1);color:var(--text2)}
   .layer .sizes{flex:0 1 auto;min-width:0;max-width:110px;overflow:hidden;text-overflow:ellipsis;border-color:color-mix(in srgb,var(--acc) 70%,transparent);color:color-mix(in srgb,var(--acc) 55%,#fff)}   /* shown at some sizes only */
-  /* a row's eye and lock show under the pointer and on the selected row, and always when not as they start (hidden, locked; the Background's padlock) */
-  .layer .ic{border:0;background:transparent;width:22px;height:24px;cursor:pointer;color:var(--text);opacity:.75;padding:0;display:none;place-items:center}
-  .layer:hover .ic,.layer.on .ic,.layer .ic.keep{display:grid}
+  /* a row's eye and lock show under the pointer and on the selected row, and always when not as they start (hidden, locked; the Background's padlock).
+     Hidden, they keep their room ahead of the chips, so the chips sit at the right end and the words beside them never
+     change width (and are cut short again) as the pointer passes; shown, they move to the end and the chips make way */
+  .layer .ic{border:0;background:transparent;width:22px;height:24px;cursor:pointer;color:var(--text);opacity:.75;padding:0;display:grid;place-items:center;visibility:hidden;order:-1}
+  .layer:hover .ic,.layer.on .ic,.layer .ic.keep{visibility:visible;order:1}
   .layer .ic svg{width:16px;height:16px}
   .layer .ic:hover{opacity:1}
   .layer .ic.pin{opacity:.45;cursor:help}

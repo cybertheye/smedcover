@@ -834,7 +834,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
     edit(L, e.altKey ? { rot: e.deltaY > 0 ? 2 : -2 } : { scale: Math.exp(-e.deltaY * 0.0015) });
     later("side", 250, renderSide);
   }, { passive: false });
-  $("stage").addEventListener("pointerdown", (e) => { if (e.target === $("stage") && S.mode === "edit" && S.cover && !S.focus && !S.brushWin) selectNothing(); });
+  $("center").addEventListener("pointerdown", (e) => { if ([$("center"), $("stage"), $("toolsub"), $("tray")].includes(e.target) && S.mode === "edit" && S.cover && !S.focus && !S.brushWin) selectNothing(); });
   // assets dragged from the library land where they are dropped
   cv.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("application/x-smed-asset") || e.dataTransfer.types.includes("application/x-smed-photo")) e.preventDefault(); });
   cv.addEventListener("drop", (e) => {
@@ -3452,7 +3452,7 @@ const lookOwn = (id) => { const st = S.profile.style; return JSON.stringify([st.
 function refreshLookCards() {
   if (!onLookSheet()) return;
   const base = lookBase(), look = S.profile.style.look, stale = [];
-  for (const [id, pic] of LOOKCARDS.pics) { if (!pic.cv.isConnected || pic.cv.parentNode.hidden) continue; pic.want = base + lookOwn(id); if (pic.sig !== pic.want) stale.push(id); }   // a card the search hides waits till it shows
+  for (const [id, pic] of LOOKCARDS.pics) { if (!pic.cv.isConnected || pic.cv.closest(".lookcard").hidden) continue; pic.want = base + lookOwn(id); if (pic.sig !== pic.want) stale.push(id); }   // a card the search hides waits till it shows
   if (!stale.length) return;
   LOOKCARDS.queue = stale.includes(look) ? [look, ...stale.filter((x) => x !== look)] : stale;
   drawLookCards(++LOOKCARDS.round);
@@ -3475,7 +3475,7 @@ function lookCards() {
   sortLooks(grid);
   requestAnimationFrame(() => {   // where it was; the first time, at the profile's look
     if (LOOKCARDS.scroll != null) grid.scrollTop = LOOKCARDS.scroll;
-    else { const on = grid.querySelector(".on"); if (on) grid.scrollTop = on.offsetTop - grid.offsetTop - 8; }
+    else { const on = grid.querySelector(".lookcard.on"); if (on) grid.scrollTop = on.offsetTop - grid.offsetTop - 8; }
   });
   LOOKCARDS.queue = stale.includes(st.look) ? [st.look, ...stale.filter((x) => x !== st.look)] : stale;
   drawLookCards(++LOOKCARDS.round);
@@ -3578,7 +3578,7 @@ function drawLookCards(round) {
     if (round !== LOOKCARDS.round || !onLookSheet()) return;
     if (LIVE || drafting()) return setTimeout(next, 300);
     let id;
-    do id = LOOKCARDS.queue.shift(); while (id && LOOKCARDS.pics.get(id) && LOOKCARDS.pics.get(id).cv.parentNode.hidden);
+    do id = LOOKCARDS.queue.shift(); while (id && LOOKCARDS.pics.get(id) && (LOOKCARDS.pics.get(id).cv.closest(".lookcard") || {}).hidden);
     if (!id) return;
     const pic = LOOKCARDS.pics.get(id);
     if (pic) {
@@ -5980,11 +5980,11 @@ function popTo(x, y) {
 POP.addEventListener("pointerdown", (e) => {
   if (e.button !== 0 || !popGrabs(e)) return;
   e.preventDefault();
-  const dx = POP.offsetLeft - e.clientX, dy = POP.offsetTop - e.clientY, end = () => { POP.onpointermove = POP.onpointerup = POP.onpointercancel = null; document.body.classList.remove("popdrag"); };
+  const dx = POP.offsetLeft - e.clientX, dy = POP.offsetTop - e.clientY, end = () => { POP.onpointermove = POP.onpointerup = POP.onpointercancel = POP.onlostpointercapture = null; document.body.classList.remove("popdrag"); };
   POP.setPointerCapture(e.pointerId);
   document.body.classList.add("popdrag");   // no text selected meanwhile
-  POP.onpointermove = (m) => popTo(dx + m.clientX, dy + m.clientY);
-  POP.onpointerup = POP.onpointercancel = end;
+  POP.onpointermove = (m) => (m.buttons & 1 ? popTo(dx + m.clientX, dy + m.clientY) : end());   // a release that never came (a menu took it) ends it
+  POP.onpointerup = POP.onpointercancel = POP.onlostpointercapture = end;
 });
 
 // ---------- the layers in 3D
