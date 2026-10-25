@@ -11,7 +11,7 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, CUSTOM_BY, normalizeSize, exportName, sizeCaption, ratioText,
@@ -2956,9 +2956,10 @@ function saveLayoutDialog() {
 }
 /**
  * What a layout preset's elements of the user's own are put on this cover with (see putLayout in layers.js): the
- * channel's, which assets are vector ones (those that take the channel colour), and the words and colour of a layer added.
+ * channel's, which assets are vector ones (those that take the channel colour, and an uploaded SVG, as the layer list
+ * counts them), and the words and colour of a layer added.
  */
-const presetEnv = () => ({ catId: cat().id, vector: canTint, words: t("layed.sampleText"), color: cat().color });
+const presetEnv = () => ({ catId: cat().id, vector: (ref) => canTint(ref) || (!!ref && ref.kind === "user" && /^data:image\/svg/.test(userAssets.get(ref.id)?.src || "")), words: t("layed.sampleText"), color: cat().color });
 /**
  * Puts layout preset `p` (the i-th) on the canvas, at the profile's sizes (those of the preset's own pass by): the
  * colour block's layout at each, for every cover of the profile (unless this cover's block is locked), and this cover's
@@ -3763,7 +3764,7 @@ function hoverPreset(p, i) {
  * the layers an element adds join and leave with it.
  */
 function laidOut(p) {
-  const env = presetEnv(), took = new Set(extrasOn(S.cover.layers, p, env));
+  const env = presetEnv(), took = new Set(extrasOn(S.cover.layers, p, env).flat());
   const style = copyOf(S.profile.style), layers = S.cover.layers.map((l) => (LAYOUT_PARTS.includes(l.id) || took.has(l) ? copyOf(l) : l));
   putLayout(style, layers, p, sizeKeys(), env);
   return { profile: { ...S.profile, style }, cover: { ...S.cover, layers } };
@@ -5570,7 +5571,7 @@ function borrowDialog(L, here, list) {
  */
 function dealPlaces(R, keep = []) {
   const P = RULES.places, between = (a, b) => a + R() * (b - a), round = (v, step) => Math.round(v / step) * step;
-  const fills = (L) => fillsCanvas(L) || (L.type === "solid" && L.t.all.s >= 0.98 && !L.t.all.r), woven = wovenIds(S.cover.layers);
+  const fills = (L) => fillsCanvas(L) || colourFills(L), woven = wovenIds(S.cover.layers);
   const movers = S.cover.layers.filter((L) => isFree(L.type) && L.visible && !L.locked && !L.of && !fills(L) && !woven.has(L.id) && !passivesOf(L).some((p) => woven.has(p.id)) && !keep.includes(L.id));
   if (!movers.length) return;
   const boxes = S.profile.sizes.filter((s) => s.on !== false).map((size) => {

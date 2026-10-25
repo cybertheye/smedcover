@@ -416,7 +416,7 @@ export function dealCover(st, cover, env) {
   // sizes, and its parts where it has them there, on the cover or left out, but for a part locked (the block locked,
   // the block as it was); the rest of the hand is dealt on it as on any other
   const preset = locks.places || locks.layout ? null : pickLayout(O.groups.layout, env.layouts, R);
-  const placed = preset ? putLayout(st, cover.layers, preset, env.sizes, env.put) : [];
+  const placed = preset ? putLayout(st, cover.layers, preset, env.sizes, { ...env.put, skip: wovenIds(cover.layers) }) : [];   // woven lettering stays where it is, as below
   // 1. the look, by its chance — none dealt already in this run while others are left — and a new seed for its random placement
   if (!locks.look) { st.look = pickLook(LOOK_IDS, R, O.groups.look, env.not || []); st.lookSeed = Math.floor(R() * 1000000); }
   // the title's length, the channel colour and the user's own recipe for the look turn its recipe (see recipeOf)

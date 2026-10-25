@@ -240,9 +240,12 @@ leaves the layer's own). A part locked stays as it is (its place, whether and wh
 block locked (`accent`) keeps the profile's block as well — its template, adjustments and `layoutBy` untouched —, where the
 block lies being that part's place as much as its `t` is. Then the elements of the user's own, in order (`putLayout(…, env)`, `env` = `{ catId, vector, words, color }`; the app's
 `presetEnv()`): `extrasOn()` gives each the next of the cover's layers of its kind, bottom first, on channel `catId`'s
-cover — `text` a text layer, `solid` a colour, `image` a photo neither filling the canvas (`fill`) nor a linked cut-out
-(`of`), `vector` an asset `env.vector(ref)` calls a vector one (the app's `canTint`: a sticker, a channel graphic, a
-sticker made as data; by default the first two) —, which takes its `t` (per size only at `keys`), the sizes it shows at
+cover — `text` a text layer, `solid` a colour not filling the canvas (`colourFills()`, a wash, as `dealPlaces()` has
+it), `image` a photo neither filling the canvas (`fill`) nor a linked cut-out (`of`), `vector` an asset `env.vector(ref)`
+calls a vector one (the app's: a sticker, a channel graphic, a sticker made as data, an uploaded SVG; by default the
+first two) —, passing by the ids of `env.skip` (Surprise me's woven lettering, `wovenIds()`), and with it the layers
+it is split into by size (`twins`: of a type, showing the same, kept to sizes apart, as `cutAt()` splits a photo),
+which it places together, each kept to those of its sizes it was at, so a split stays split; each takes its `t` (per size only at `keys`), the sizes it shows at
 (`keepTo`; at none, an empty `sizes`, there to be shown again) and a text one's `vertical`, a layer locked staying as it
 is; one whose kind the cover has none left of adds one (`extraLayer()`: a text layer of `env.words`, a solid of
 `env.color`, an asset of its sticker, tinted; no photo, a picture not being made up; nothing for one shown at none of

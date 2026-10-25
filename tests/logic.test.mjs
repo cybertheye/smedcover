@@ -4236,7 +4236,7 @@ test("a layout preset's elements put on a cover: each places the cover's next la
   const bg = add(newLayer("photo", { pid: "p1", fill: true })), cut = add(newLayer("photo", { pid: "", of: bg.id, cut: true })), print = add(newLayer("photo", { pid: "p2" }));
   const raster = add(newLayer("asset", { ref: { kind: "user", id: "u1" } })), star = add(newLayer("asset", { ref: { kind: "sticker", id: "burst" }, tint: true }));
   const had = new Set(L);
-  assert.deepEqual(extrasOn(L, preset, env), [mine, null, null, print, null, star, null], "each kind in order, the next of this channel's cover");
+  assert.deepEqual(extrasOn(L, preset, env), [[mine], [], [], [print], [], [star], []], "each kind in order, the next of this channel's cover");
   const placed = putLayout(p.style, L, preset, keys, env), text = L.find((l) => !had.has(l) && l.type === "text"), solid = L.find((l) => !had.has(l) && l.type === "solid");
   assert.deepEqual([L.length - had.size, text.text, solid.color], [2, "Your words", "#123456"], "a text layer and a colour added; no picture made up, nor the sticker shown nowhere");
   assert.ok(isAdded(text) && isAdded(solid), "the user's own layers, as any added");
@@ -4262,6 +4262,24 @@ test("a layout preset's elements put on a cover: each places the cover's next la
   assert.deepEqual(takeExtras(lay, [{ id: "x1", kind: "text" }, { id: "x2", kind: "vector", sticker: "burst" }], keys, [{ id: "x1", hide: ["720x720"] }]),
     [{ id: "x1", kind: "text", t: at(0.2, 0.3, 0.5), shown: true, hide: ["720x720", ...keys.filter((k) => k !== "1920x1080")], vertical: true },
      { id: "x2", kind: "vector", t: newLayer("asset").t, shown: false, sticker: "burst" }]);
+});
+
+test("a layout preset's elements pass by a colour filling the canvas, and place a photo cut out at some sizes as one, still split", async () => {
+  const { putLayout, cutAt, newPreset } = await import("../ui/js/layers.js");
+  const { normalizeLayouts } = await import("../ui/js/store.js");
+  const p = normalizeProfile(sampleProfile("en")), keys = p.sizes.map((z) => `${z.w}x${z.h}`), env = { catId: "c1", words: "w", color: "#123456" };
+  const at = (x, y, s) => ({ all: { x, y, s, r: 0, kx: 1, ky: 1 }, by: {} });
+  const preset = normalizeLayouts([{ id: "e", ...newPreset(), extras: [{ id: "s", kind: "solid", t: at(0.3, 0.72, 0.3), shown: true }, { id: "i", kind: "image", t: at(0.7, 0.5, 0.4), shown: true, hide: ["900x383"] }] }])[0];
+  const c = normalizeCover({}, p), L = c.layers;
+  const wash = newLayer("solid", { o: 0.4, color: "#000000" }), photo = newLayer("photo", { pid: "p1" });
+  L.push(wash, photo);
+  const copy = cutAt(L, photo, ["1080x1920", "1200x1600"], keys);
+  assert.deepEqual([copy.pid, copy.cut, copy.sizes, photo.sizes], ["p1", true, ["1200x1600", "1080x1920"], keys.filter((k) => k !== "1080x1920" && k !== "1200x1600")], "the photo split: whole at some sizes, cut out at the others");
+  const placed = putLayout(p.style, L, preset, keys, env), added = L.find((l) => l.type === "solid" && l !== wash);
+  assert.deepEqual([wash.t.all, added && added.t.all.s], [newLayer("solid").t.all, 0.3], "the wash as it was; a colour added for the element");
+  assert.deepEqual([photo.t.all.x, copy.t.all.x], [0.7, 0.7], "both parts of the photo placed by the one element");
+  assert.deepEqual([photo.sizes, copy.sizes], [keys.filter((k) => !["1080x1920", "1200x1600", "900x383"].includes(k)), ["1200x1600", "1080x1920"]], "still split, each at those of the element's sizes it was at");
+  assert.deepEqual(placed.slice(1), [photo.id, copy.id]);
 });
 
 test("Surprise me dealing a preset with elements of the user's own leaves the layers they place where it puts them", async () => {

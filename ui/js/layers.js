@@ -163,6 +163,8 @@ export function resetScene(cover, look, key, scope, sizeKey, keys = [sizeKey]) {
 }
 /** Whether a layer is a photo that fills the canvas (the cover's background photo, or another). */
 export const fillsCanvas = (L) => L.type === "photo" && L.fill && !L.of;
+/** Whether a layer is a colour as large as the canvas, upright (a wash over it, or a ground): one a new colour is, till it is moved and shrunk. */
+export const colourFills = (L) => L.type === "solid" && L.t.all.s >= 0.98 && !L.t.all.r;
 /** Shapes the colour block and its dividing edge can take ("slant" is the template's own). */
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes", "arc"];
 /** The text effects a headline can be given (painted in textfx.js). Absent on a layer means "auto": the look decides. */
@@ -949,10 +951,17 @@ export const EXTRA_STICKER = "burst";
 /** Whether an asset's picture is a vector one: a sticker, a channel graphic (the app counts the user's stickers made as data too, see canTint in assets.js). */
 const vectorRef = (ref) => !!ref && (ref.kind === "sticker" || ref.kind === "graphic");
 /**
- * Whether layer L is of the kind an element of `kind` places: text; a colour; a picture — a photo neither filling the
- * canvas nor a linked cut-out —; a vector sticker — an asset whose picture `vector` says is a vector one.
+ * Whether layer L is of the kind an element of `kind` places: text; a colour — not one filling the canvas, a wash over
+ * it —; a picture — a photo neither filling the canvas nor a linked cut-out —; a vector sticker — an asset whose
+ * picture `vector` says is a vector one.
  */
-const takes = (kind, L, vector) => (kind === "text" ? L.type === "text" : kind === "solid" ? L.type === "solid" : kind === "image" ? L.type === "photo" && !L.fill && !L.of : L.type === "asset" && vector(L.ref));
+const takes = (kind, L, vector) => (kind === "text" ? L.type === "text" : kind === "solid" ? L.type === "solid" && !colourFills(L) : kind === "image" ? L.type === "photo" && !L.fill && !L.of : L.type === "asset" && vector(L.ref));
+/**
+ * Whether layers a and b are one thing split by size (see showApart: shown through a copy at some sizes, as a photo cut
+ * out at some is): of a type, showing the same — picture, asset, words or colour —, each kept to sizes the other is not at.
+ */
+const what = (L) => (L.type === "photo" ? L.pid : L.type === "asset" ? L.ref && `${L.ref.kind}:${L.ref.id}` : L.type === "text" ? L.text : L.color);
+const twins = (a, b) => a.type === b.type && !!a.sizes && !!b.sizes && what(a) === what(b) && !a.sizes.some((k) => b.sizes.includes(k));
 /**
  * A new element of the user's own, of `kind`, under id `id`, as the layout editor adds it — the n-th of its kind, each
  * a little lower and further right than the one before, so they do not lie on one another: near the middle, at about the size a
@@ -984,16 +993,19 @@ export function insertExtra(layers, L, kind, vector = vectorRef) {
   return L;
 }
 /**
- * The layers of `layers` that layout preset `p`'s elements of the user's own place, in its order (null for one whose
- * kind the cover has none left of): each the next of its kind, bottom first, on channel `env.catId`'s cover (its
- * layers kept to other channels passed by), whose assets `env.vector(ref)` says are vector ones (see putLayout).
+ * The layers of `layers` that layout preset `p`'s elements of the user's own place, in its order, a list each (none for
+ * one whose kind the cover has none left of): each the next of its kind, bottom first, on channel `env.catId`'s cover
+ * (its layers kept to other channels passed by), whose assets `env.vector(ref)` says are vector ones, but those of
+ * `env.skip` (a set of ids: Surprise me's woven lettering, see dealCover) — with the layers it is split into by size
+ * (twins: a photo cut out at some sizes is two), which one element places together (see putLayout).
  */
 export function extrasOn(layers, p, env = {}) {
-  const used = new Set(), vector = env.vector || vectorRef;
+  const used = new Set(), vector = env.vector || vectorRef, free = (kind, l) => !used.has(l) && takes(kind, l, vector) && (env.catId == null || appliesTo(l, env.catId)) && !(env.skip && env.skip.has(l.id));
   return (p.extras || []).map((x) => {
-    const L = layers.find((l) => !used.has(l) && takes(x.kind, l, vector) && (env.catId == null || appliesTo(l, env.catId)));
-    if (L) used.add(L);
-    return L || null;
+    const L = layers.find((l) => free(x.kind, l)), group = L ? [L] : [];
+    if (L) for (const l of layers) if (l !== L && free(x.kind, l) && group.every((g) => twins(g, l))) group.push(l);
+    for (const l of group) used.add(l);
+    return group;
   });
 }
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -1125,9 +1137,10 @@ export function takeLayout(style, layers, keys, catId = null) {
  * preset is dealt (as dealCover leaves a locked layer where it is) or put on the canvas by hand; and the colour block locked keeps the profile's block as well (the template, its
  * adjustments, each size's own), the block being where that part stands as much as its place is.
  * Then the preset's elements of the user's own, in order (see extrasOn, with `env`: { catId, the cover's channel; vector(ref),
- * which assets are vector ones; words and color, those of a layer added }): each places the next of the cover's layers
- * of its kind — its place, the sizes it shows at (at none, kept to none, there to be shown again), a text one's words
- * in columns or not —, a layer locked staying as it is; where the cover has none of its kind left, one is added
+ * which assets are vector ones; skip, ids to pass by; words and color, those of a layer added }): each places the next
+ * of the cover's layers of its kind — its place, the sizes it shows at (at none, kept to none, there to be shown again;
+ * a layer split by size, each part at those of them it was at, so it stays split), a text one's words in columns or
+ * not —, a layer locked staying as it is; where the cover has none of its kind left, one is added
  * (extraLayer, insertExtra), but for a picture, and but where the element shows at none of `keys`. So the preset put
  * again places the same layers again, adding none. Added, they are the user's layers as any other (isAdded).
  * Returns the ids of the layers the elements place (for Surprise me to leave where they are put).
@@ -1151,14 +1164,15 @@ export function putLayout(style, layers, p, keys, env = {}) {
   }
   const on = extrasOn(layers, p, env), placed = [];
   (p.extras || []).forEach((x, i) => {
-    const at = x.shown ? keys.filter((k) => !(x.hide || []).includes(k)) : [];
-    let L = on[i];
-    if (!L) { if (!at.length || !(L = extraLayer(x, env))) return; insertExtra(layers, L, x.kind, env.vector); }
-    placed.push(L.id);
-    if (L.locked) return;
-    L.t = { all: { ...x.t.all }, by: Object.fromEntries(Object.entries(x.t.by || {}).filter(([k]) => keys.includes(k)).map(([k, v]) => [k, { ...v }])) };
-    keepTo(L, at, keys);
-    if (x.kind === "text" && typeof x.vertical === "boolean") L.vertical = x.vertical;
+    const at = x.shown ? keys.filter((k) => !(x.hide || []).includes(k)) : [], group = on[i];
+    if (!group.length) { const L = at.length && extraLayer(x, env); if (!L) return; insertExtra(layers, L, x.kind, env.vector); group.push(L); }
+    for (const L of group) {
+      placed.push(L.id);
+      if (L.locked) continue;
+      L.t = { all: { ...x.t.all }, by: Object.fromEntries(Object.entries(x.t.by || {}).filter(([k]) => keys.includes(k)).map(([k, v]) => [k, { ...v }])) };
+      keepTo(L, group.length > 1 ? at.filter((k) => L.sizes.includes(k)) : at, keys);
+      if (x.kind === "text" && typeof x.vertical === "boolean") L.vertical = x.vertical;
+    }
   });
   return placed;
 }
