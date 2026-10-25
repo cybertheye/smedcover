@@ -1538,25 +1538,25 @@ async function replacePhoto(L) {
 }
 
 /**
- * Adds a picture (a data URL) as a photo layer and selects it. The first photo of a cover fills the
- * canvas, as its background, just above the ground; the ones after it sit on the cover like prints,
- * above the selected layer — at `at` ({x, y}, fractions of the canvas) when given. Returns the layer.
+ * Adds a picture (a data URL) as a photo layer and selects it: like a print on the cover, the first one too (Fill the
+ * canvas, in its properties, makes it the background), above the selected layer — at `at` ({x, y}, fractions of the
+ * canvas) when given. `fill`: as the background instead, just above the ground (the self-test's). Returns the layer.
  */
-async function addPhoto(src, at = null, name = "") {
+async function addPhoto(src, at = null, name = "", fill = false) {
   const pid = await putPhoto(src);
   if (!pid) { toast(t("msg.badFile")); return null; }
   keepPicture(pid, name, "upload");
-  return placePhoto(pid, at);
+  return placePhoto(pid, at, fill);
 }
 /** Puts a picture of the photo store on the cover as a photo layer, by addPhoto's rules (from the bitmap library, too). */
-async function placePhoto(pid, at = null) {
+async function placePhoto(pid, at = null, fill = false) {
   if (!S.photos.has(pid)) await loadPhotos([pid]);
   if (!S.photos.has(pid)) { toast(t("msg.badFile")); return null; }
-  if (!mainPhoto()) {
+  if (fill) {
     const L = insertAbove(S.cover.layers, "bg", newLayer("photo", { pid, fill: true }));
     S.layerId = L.id; S.picked = [];
     touch({ cover: true, panel: true, side: true });
-    toast(t("cover.photoFilled"));
+    toast(t("cover.photoAdded"));
     return L;
   }
   const L = newLayer("photo", { pid });
@@ -1564,6 +1564,18 @@ async function placePhoto(pid, at = null) {
   addLayer(L); renderPanel();
   toast(t("cover.photoAdded"));
   return L;
+}
+/**
+ * A photo made to fill the canvas goes down to the ground, as a background: just above the Background layer and the
+ * photos filling the canvas there already (each with what is clipped onto it), what is clipped onto it going along;
+ * its cut-outs stay where they are, over it. Not one clipped onto a layer itself (a photo filling the lettering): it
+ * stays in what it is clipped to.
+ */
+function toGround(L) {
+  const ls = S.cover.layers, i = ls.indexOf(L), group = ls.splice(i, clipEnd(ls, i) - i + 1);
+  let at = ls.findIndex((l) => l.type === "bg") + 1;
+  while (at < ls.length && fillsCanvas(ls[at])) at = clipEnd(ls, at) + 1;
+  ls.splice(at, 0, ...group);
 }
 /**
  * Turns a cover of an earlier version into this one: the background photo kept beside the cover
@@ -5319,7 +5331,7 @@ function photoControls(L, set) {
       ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")),
           base && el("button", { class: "btn wide", title: t("link.realignTip"), onclick: () => { L.t = alignedT(base); touch({ cover: true, side: true }); } }, t("link.realign")),
           cropBtn, unlinkBtn], t("link.passiveMore"))
-      : psec("props.sec.place", [check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
+      : psec("props.sec.place", [check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; if (clipBase(S.cover.layers, S.cover.layers.indexOf(L)) < 0) toGround(L); } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
           linked.length > 0 && el("div", { class: "hint" }, t("link.leads", linked.map(layerName).join(" · "))), cropBtn, unlinkBtn],
           t(L.fill ? "props.fillHint" : "props.printHint")),
     psec("props.sec.picture", [
@@ -7777,7 +7789,7 @@ addEventListener("drop", async (e) => {
   e.preventDefault(); dragDepth = 0; document.body.classList.remove("drop", "gdrop");
   if (genOpen()) return genDropped(e.dataTransfer.files);
   if (SURPRISE.busy) return;   // hands are being dealt onto the cover
-  // dropped photos become photo layers: the first of a cover fills it; the others land where they were dropped
+  // dropped photos become photo layers, like prints (the first of a cover too), where they were dropped on the canvas
   const cv = $("cv"), b = cv.getBoundingClientRect(), over = S.mode === "edit" && e.clientX >= b.left && e.clientX <= b.right && e.clientY >= b.top && e.clientY <= b.bottom;
   const at = over ? { x: clamp((e.clientX - b.left) / b.width, 0, 1), y: clamp((e.clientY - b.top) / b.height, 0, 1) } : null;
   for (const f of [...e.dataTransfer.files].filter((x) => x.type.startsWith("image/"))) await addPhoto(await readAs(f, "readAsDataURL"), at, f.name.replace(/\.[^.]+$/, ""));
@@ -8083,8 +8095,8 @@ async function selfTest(dir) {
       const real = await invoke("selftest_photo").catch(() => null);
       if (real) {
         const keep = JSON.stringify(S.cover), t0 = performance.now();
-        S.cover.layers = S.cover.layers.filter((l) => l.type !== "photo");   // so the photo added is the cover's first, and fills it
-        const main = await addPhoto(real), filled = !!main && main.fill && S.cover.layers.indexOf(main) === 1;
+        S.cover.layers = S.cover.layers.filter((l) => l.type !== "photo");   // so the photo added is the cover's only one, filling it
+        const main = await addPhoto(real, null, "", true), filled = !!main && main.fill && S.cover.layers.indexOf(main) === 1;
         const front = await cutOut(main), ok = !!front, rec = recordOf(main), m = rec && rec.mask && rec.mask.img;
         const at = (id) => S.cover.layers.findIndex((l) => l.id === id);
         report.subject = { filled, kept: S.cover.layers.includes(main) && !main.cut, linked: !!front && front.of === main.id, selected: !!front && S.layerId === front.id, ok, ms: Math.round(performance.now() - t0), photo: sizeOf(rec.img), mask: m ? sizeOf(m) : null, aboveTitle: !!front && at(front.id) === at("title") + 1, error: CUT.error };
@@ -8114,7 +8126,7 @@ async function selfTest(dir) {
           const was = S.settings.cutEngine; S.settings.cutEngine = "birefnet-lite";
           setCover(normalizeCover(JSON.parse(keep), S.profile));
           S.cover.layers = S.cover.layers.filter((l) => l.type !== "photo");
-          const p = await addPhoto(real), t1 = performance.now(), cut = await cutOut(p), r = recordOf(p);
+          const p = await addPhoto(real, null, "", true), t1 = performance.now(), cut = await cutOut(p), r = recordOf(p);
           report.birefnet = { ok: !!cut, ms: Math.round(performance.now() - t1), mask: r && r.mask ? sizeOf(r.mask.img) : null, error: CUT.error };
           if (cut) { cut.outline = 8; p.blur = 10; S.cover.title = "*BiRefNet* cut-out\nin front"; report.birefnet.path = await invoke("write_image", framed(await toPng(renderFull(S.profile.sizes[0], S.cover, catIndex())), { dir, name: "subject-birefnet.png" })); }
           S.settings.cutEngine = was;
@@ -8234,7 +8246,7 @@ async function selfTest(dir) {
       // every kind, torn edges and tape, set by hand (letters cut from the photo, when the cover has one)
       titleLayer.letters = { "0|S|1": { kind: "deep" }, "0|P|1": { kind: "photo" }, "0|I|1": { kind: "tile", edge: "torn", tape: 1 }, "0|D|1": { kind: "cut" }, "0|E|1": { kind: "tile", edge: "torn" }, "0|M|1": { kind: "photo" }, "1|你|1": { kind: "photo" }, "1|看|1": { kind: "tile", edge: "torn", tape: 2 }, "1|着|1": { kind: "deep" } };
       const had = new Set(S.cover.layers.map((l) => l.id)), pic = await invoke("selftest_photo").catch(() => null);
-      if (pic && !letterPhoto()) await addPhoto(pic);
+      if (pic && !letterPhoto()) await addPhoto(pic, null, "", true);
       report.ransom.edited = { photo: letterPhoto(), path: await invoke("write_image", framed(await toPng(await renderReady(S.profile.sizes[0], S.cover, catIndex())), { dir, name: "fx-ransom-edited.png" })) };
       S.cover.layers = S.cover.layers.filter((l) => had.has(l.id));   // the photo added goes again
       delete titleLayer.letters; delete titleLayer.fxSeed; S.cover.title = fxTitle;
@@ -8292,7 +8304,7 @@ async function selfTest(dir) {
         const keep = JSON.stringify({ layers: S.cover.layers, title: S.cover.title }), keepSel = S.layerId, size = S.profile.sizes[0], [vw, vh] = virtualSize(size.w, size.h);
         S.cover.title = "WEAVE *穿插*\nIN FRONT 前后";
         S.cover.layers = S.cover.layers.filter((l) => l.type !== "photo");
-        const ph = await addPhoto(pic), front = ph && (await cutOut(ph));
+        const ph = await addPhoto(pic, null, "", true), front = ph && (await cutOut(ph));
         report.weave = { cut: !!front, error: CUT.error };
         if (front) {
           ph.blur = 10; ph.dim = 0.3; front.outline = 6;

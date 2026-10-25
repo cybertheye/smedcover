@@ -176,7 +176,7 @@ const STR = {
   "cover.subtitleHint": ["显示在标题下面，字比标题小，风格跟标题一致。清空就不显示；也可以在「版式 → 显示哪些元素」里关掉。", "Shown under the title, smaller, lettered as the title is. Empty it to leave it out, or switch it off under Layout → Which parts show."],
   "cover.tag": ["角标（可选）", "Corner tag (optional)"],
   "cover.tagPh": ["如 EP.03 / VLOG", "e.g. EP.03 / VLOG"],
-  "cover.photoHint": ["也可以把照片拖进窗口（拖到画布上就放在松手的位置）。封面的第一张照片铺满画布作为背景，之后的照片像相片一样放在画面上。点缩略图选中它的图层，鼠标移到缩略图上，右上角的 × 删除照片。去除背景、裁剪在画布上它的工具条里，模糊、压暗、描边等在工具条的「更多…」里。", "You can also drop photos onto the window (onto the canvas: where you let go). A cover's first photo fills the canvas as its background; the ones after it sit on the cover like prints. Click a thumbnail to select its layer; the × on its corner (on hover) deletes the photo. Removing the background and cropping are on its bar over the canvas; blur, dim, outline and the rest under More… on that bar."],
+  "cover.photoHint": ["也可以把照片拖进窗口（拖到画布上就放在松手的位置）。照片像相片一样放在画面上，第一张也一样；要它作为背景铺满画布，在它的属性里打开「铺满画布」。点缩略图选中它的图层，鼠标移到缩略图上，右上角的 × 删除照片。去除背景、裁剪在画布上它的工具条里，模糊、压暗、描边等在工具条的「更多…」里。", "You can also drop photos onto the window (onto the canvas: where you let go). Photos sit on the cover like prints, the first one too; to make one the background, filling the canvas, turn on Fill the canvas in its properties. Click a thumbnail to select its layer; the × on its corner (on hover) deletes the photo. Removing the background and cropping are on its bar over the canvas; blur, dim, outline and the rest under More… on that bar."],
   "cover.howShort": ["画布操作", "Canvas controls"],
   "cover.how": ["点选图层后拖动移动；拖四角缩放、拖四边拉伸、拖顶部圆点旋转。滚轮也可缩放，方向键微调，Delete 删除素材。在背景或色块上拖出方框可多选（完整框住的元素），Shift+点击 加减。", "Click a layer, drag to move; drag a corner to resize, a side to stretch, the top knob to rotate. Scroll also resizes, arrow keys nudge, Delete removes an added item. Drag a box on the background or the colour block to select what lies wholly inside it; Shift-click adds or removes one."],
 
@@ -236,7 +236,7 @@ const STR = {
   "assets.missing": ["（素材缺失）", "(missing asset)"],
 
   "style.lookHint": ["风格决定整张封面怎么画：背景、色块、文字、图形和贴纸一起换。内容和位置不变，随时可以切回来。", "The look decides how the whole cover is drawn: background, colour block, lettering, graphics and stickers change together. Content and placement stay as they are, and you can switch back at any time."],
-  "style.needsPhoto": ["先在「素材 → 上传照片」里放一张铺满画布的照片", "Add a photo that fills the canvas first (Assets → Upload photos)"],
+  "style.needsPhoto": ["先放一张照片，并在它的属性里打开「铺满画布」", "Add a photo first, and turn on Fill the canvas in its properties"],
   "style.shuffle": ["换一组随机位置", "Shuffle the random placement"],
   "style.shuffleHint": ["这个风格里有些元素（云、山、撕裂带、灰尘等）的位置是随机的，但会固定下来，预览和导出一致。不满意就再换一组。", "Some things in this look (clouds, hills, tears, dust…) fall at random but then stay put, so the export matches the preview. Shuffle again if you do not like where they fell."],
   "style.lookReset": ["恢复这个风格的默认参数", "Restore this look's defaults"],
@@ -853,7 +853,6 @@ const STR = {
   "cover.upload": ["上传照片", "Upload photos"],
   "gen.open": ["AI 生成", "AI generate"],
   "cover.photoSelect": ["选中这张照片的图层", "Select this photo's layer"],
-  "cover.photoFilled": ["已添加照片：封面的第一张照片铺满画布，作为背景", "Photo added: a cover's first photo fills the canvas, as its background"],
   "cover.removePhoto": ["删除这张照片", "Delete this photo"],
   "rep.running": ["AI 重绘中…", "Repainting…"],
   "rep.ready": ["AI 重绘 · 有新结果", "AI repaint · result ready"],
