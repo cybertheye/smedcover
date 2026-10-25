@@ -1915,9 +1915,9 @@ async function generatePhoto() {
   genRedraw();
 }
 function cancelGeneratePhoto() { GEN.job++; Object.assign(GEN, { busy: false, error: "", result: null }); genRedraw(); }
-/** Takes a picture as the reference for the next one made: sent along, at most 1536 px on its longer side. */
-async function pickGenRef() {
-  const f = await pickFile("image/png,image/jpeg,image/webp");
+/** Takes a picture as the reference for the next one made, `f` (one dropped) or one picked: sent along, at most 1536 px on its longer side. */
+async function pickGenRef(f = null) {
+  f = f || await pickFile("image/png,image/jpeg,image/webp");
   if (!f) return;
   const im = await loadImage(await readAs(f, "readAsDataURL"));
   if (!im) return toast(t("msg.badFile"));
@@ -1997,62 +1997,88 @@ function genDone(tab, error) {
 /** The text field being typed in inside `box` (one with a data-k), to give it back its focus and caret once `box` is built again. */
 function heldField(box) { const a = document.activeElement; return a && box.contains(a) && a.dataset && a.dataset.k ? { k: a.dataset.k, s: a.selectionStart, e: a.selectionEnd } : null; }
 function giveBack(box, h) { const f = h && box.querySelector(`[data-k="${h.k}"]`); if (!f) return; f.focus(); try { f.setSelectionRange(h.s, h.e); } catch (e) { /* not a text field */ } }
+/** Who the text model's requests go to, by its address: Anthropic or OpenAI for their own, else the host (a gateway, a local model). */
+function aiService(cfg) {
+  let host = "";
+  try { host = new URL(cfg.baseUrl).host; } catch (e) { /* no address yet */ }
+  return /(^|\.)anthropic\.com$/i.test(host) ? "Anthropic" : /(^|\.)openai\.com$/i.test(host) ? "OpenAI" : host || t("ai.styleShort." + cfg.style);
+}
+/** A picture dropped on the window while AI generate is open: the open tab's reference picture (not while it is making one). */
+function genDropped(files) {
+  const f = [...files].find((x) => x.type.startsWith("image/")), photo = GENWIN.tab === "photo";
+  if (!f || (photo ? GEN.busy || !imageReady(S.imageAi) : AI.busy || !aiReady(S.ai))) return;
+  (photo ? pickGenRef : pickReference)(f);
+}
+/** The marks of the two kinds a sticker is drawn as: a box built in three dimensions, and a flat sticker's starburst. */
+const KIND_ICONS = {
+  solid: '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg>',
+  flat: '<svg viewBox="0 0 40 40" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" aria-hidden="true"><path d="M20 4l4 9 9-4-3 10 9 3-9 4 4 9-10-3-4 9-4-9-10 3 4-9-9-4 9-3-3-10 9 4Z"/></svg>',
+};
 /**
- * AI generate: on the left what to make — the words, for a sticker the kind it is drawn as, a picture to go by — and
- * Generate; on the right what came back, saying what it was made from and which try it was, to put on the cover (a
- * photo; a sticker kept in My vector assets too), keep, or drop, and under it the strip of what the tab made this
- * session, to show one again. A generation goes on with the window shut and waits in it; a toast says when it is done.
+ * AI generate: across the top its name, the two tabs and what the tab makes. On the left what to make — the words, for
+ * a sticker the kind it is drawn as, a picture to go by (picked, or dropped on the window) — then which service and
+ * model it goes to and Generate, the window's main button until there is a result. On the right, on a checkerboard,
+ * what came back, saying what it was made from and which try it was, with Discard at its corner: a photo, or a sticker
+ * twice, in its own colours and in the channel's. Under it the strip of what the tab made this session, to show one
+ * again, and the result's actions: add it to the cover (a sticker kept in My vector assets too), or keep a sticker
+ * only. A generation goes on with the window shut and waits in it; a toast says when it is done.
  */
 function genWin(tab = GENWIN.tab) {
   GENWIN.tab = tab; GENWIN.dot.delete(tab);
-  const m = $("modal"), photo = tab === "photo", size = selSize(), held = heldField(m);
+  const m = $("modal"), photo = tab === "photo", size = selSize(), held = heldField(m), ch = cat();
   const ready = photo ? imageReady(S.imageAi) : aiReady(S.ai), busy = photo ? GEN.busy : AI.busy;
-  const head = el("div", { class: "xhead" },
-    el("div", {}, el("h2", {}, t("gen.title")), el("div", { class: "hint" }, photo ? t("gen.photoSub", caption(size)) : t("ai.card.textSub"))),
+  const r = ready ? (photo ? GEN.result : AI.result) : null, shown = madeOf(tab, r), error = photo ? GEN.error : AI.error;
+  const head = el("div", { class: "xhead ghead" },
+    el("h2", {}, t("gen.title")),
     el("div", { class: "seg" }, ["photo", "art"].map((k) => el("button", { class: "btn" + (k === tab ? " on" : "") + (GENWIN.dot.has(k) ? " dot" : ""), onclick: () => genWin(k) }, t("gen.tab." + k)))),
-    el("button", { class: "x", title: t("close"), onclick: closeModal }, "✕"));
-  const refZone = (ref, onPick, onDrop, refOn) => ref
-    ? el("div", { class: "gref" }, el("img", { src: ref.url, alt: "" }), el("span", {}, refOn), el("button", { class: "linkbtn", disabled: busy, onclick: onDrop }, t("ai.refRemove")))
-    : el("button", { class: "gref empty", disabled: busy, onclick: onPick }, t("gen.refAddLong"));
-  let form, result;
+    el("span", { class: "gsub" }, photo ? t("gen.photoSub", caption(size)) : t("gen.artSub")),
+    el("button", { class: "x", title: t("close"), "aria-label": t("close"), onclick: closeModal }, "✕"));
+  const field = (key, ...kids) => el("div", {}, el("div", { class: "cap" }, t(key)), ...kids);
+  const refZone = (ref, onPick, onRemove, refOn) => field("gen.ref", ref
+    ? el("div", { class: "gref" }, el("img", { src: ref.url, alt: "" }), el("span", {}, refOn), el("button", { class: "linkbtn", disabled: busy, onclick: onRemove }, t("ai.refRemove")))
+    : el("button", { class: "gref empty", disabled: busy, onclick: () => onPick() }, t("gen.refAddLong")));
+  // Generate, full width: the main button (in the accent) until a result is shown, whose Add to the cover is then;
+  // while it waits it counts the seconds, Stop waiting beside it
+  const go = (id, run, cancel, text) => el("div", { class: "ggo" },
+    el("button", { id, class: "btn go " + (r ? "cta glassy" : "solid"), disabled: busy, onclick: run }, text),
+    busy && el("button", { class: "btn", onclick: cancel }, t("ai.cancel")));
+  let form, stage, acts = null;
   if (!ready) {
-    form = [el("div", { class: "hint", style: "margin:0" }, t(photo ? "gen.needSetup" : "ai.needSetup")),
-      el("button", { class: "btn solid", onclick: () => { closeModal(); S.tab.setup = "ai"; SET_UI.at = photo ? "image" : "text"; setMode("setup"); } }, t(photo ? "rep.goSetup" : "ai.goSetup"))];
-    result = el("div", { class: "gempty" }, t("gen.notReady"));
+    form = el("div", { class: "gsetup" }, el("p", {}, t(photo ? "gen.needSetup" : "ai.needSetup")),
+      el("button", { class: "btn solid", onclick: () => { closeModal(); S.tab.setup = "ai"; SET_UI.at = photo ? "image" : "text"; setMode("setup"); } }, t(photo ? "rep.goSetup" : "ai.goSetup")));
   } else if (photo) {
-    const c = S.imageAi, r = GEN.result, shown = madeOf("photo", r);
-    form = [el("div", { class: "cap" }, t("gen.what")),
-      el("textarea", { value: GEN.prompt, spellcheck: false, maxLength: 2000, disabled: busy, dataset: { k: "gprompt" }, style: "height:110px;font-size:14px", placeholder: t(GEN.ref ? "gen.phRef" : "gen.ph"),
-        oninput: (e) => { GEN.prompt = e.target.value; const b = $("gen-go"); if (b && !GEN.busy) b.textContent = goText("photo"); } }),
-      el("div", { class: "cap" }, t("gen.ref")), refZone(GEN.ref, pickGenRef, () => { GEN.ref = null; genWin(); }, t("gen.refOn")),
-      el("div", { class: "hint" }, t("gen.hint", t("img.provider." + c.provider), c.model, caption(size))),
-      el("div", { class: "ggo" }, busy && el("button", { class: "btn", onclick: cancelGeneratePhoto }, t("ai.cancel")),
-        el("button", { id: "gen-go", class: "btn solid", disabled: busy, onclick: generatePhoto }, busy ? genBusyText() : goText("photo")))];
-    result = [shown && el("div", { class: "gmade-cap" }, madeSays(shown)),
-      r ? el("figure", { class: "gpic" }, el("img", { src: r.src, alt: "" }), el("figcaption", {}, `${r.w} × ${r.h}`))
-        : el("div", { class: "gempty" + (busy ? " busy" : "") }, busy ? t("gen.working") : GEN.error ? el("span", { class: "err" }, t("msg.failed", GEN.error)) : t("gen.emptyPhoto")),
-      (r || GENWIN.made.photo.length > 0) && el("div", { class: "gfoot" }, madeStrip("photo", shown, busy),
-        r && el("div", { class: "gacts" }, el("button", { class: "btn", onclick: () => dropMade("photo") }, t("ai.discard")), el("button", { class: "btn solid", onclick: keepGeneratedPhoto }, t("gen.keep"))))];
+    const c = S.imageAi;
+    form = [el("div", { class: "gfields" },
+        field("gen.what", el("textarea", { class: "tall", value: GEN.prompt, spellcheck: false, maxLength: 2000, disabled: busy, dataset: { k: "gprompt" }, placeholder: t(GEN.ref ? "gen.phRef" : "gen.ph"),
+          oninput: (e) => { GEN.prompt = e.target.value; const b = $("gen-go"); if (b && !GEN.busy) b.textContent = goText("photo"); } })),
+        refZone(GEN.ref, pickGenRef, () => { GEN.ref = null; genWin(); }, t("gen.refOn"))),
+      el("div", { class: "gnote" }, t("gen.hint", t("img.provider." + c.provider), c.model)),
+      go("gen-go", generatePhoto, cancelGeneratePhoto, busy ? genBusyText() : goText("photo"))];
+    stage = r && el("figure", { class: "gpic" }, el("img", { src: r.src, alt: "" }), el("figcaption", {}, `${r.w} × ${r.h}`));
+    acts = r && el("button", { class: "btn solid", onclick: keepGeneratedPhoto }, t("gen.keep"));
   } else {
-    const r = AI.result, shown = madeOf("art", r), kept = !!(shown && shown.kept && userAssets.has(shown.kept)), setKind = (k) => { S.ai = normalizeAi({ ...S.ai, kind: k }); persistAi(); genWin(); };
-    form = [el("div", { class: "cap" }, t("gen.what")),
-      el("textarea", { value: AI.target, spellcheck: false, maxLength: 300, disabled: busy, dataset: { k: "atarget" }, style: "height:84px;font-size:14px", placeholder: t(AI.image ? "ai.targetPhImage" : "ai.targetPh"),
-        oninput: (e) => { AI.target = e.target.value; const b = $("ai-go"); if (b && !AI.busy) b.textContent = goText("art"); }, onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); generateAsset(); } } }),
-      el("div", { class: "cap" }, t("gen.kind")),
-      el("div", { class: "gkinds" }, AI_KINDS.map((k) => el("button", { class: "gkind" + (S.ai.kind === k ? " on" : ""), disabled: busy, onclick: () => setKind(k) }, el("b", {}, t("ai.kind." + k)), el("small", {}, t("ai.kindHint." + k))))),
-      el("div", { class: "cap" }, t("gen.ref")), refZone(AI.image, pickReference, () => { AI.image = null; genWin(); }, t("ai.refOn")),
-      el("div", { class: "hint" }, t("ai.hint", S.ai.model)),
-      el("div", { class: "ggo" }, busy && el("button", { class: "btn", onclick: cancelGenerate }, t("ai.cancel")),
-        el("button", { id: "ai-go", class: "btn solid", disabled: busy, onclick: generateAsset }, busy ? aiBusyText() : goText("art")))];
-    result = [shown && el("div", { class: "gmade-cap" }, madeSays(shown)),
-      r ? [el("div", { class: "gspecs" }, el("figure", {}, specPreview(r, null), el("figcaption", {}, t("gen.ownColour"))), el("figure", {}, specPreview(r, cat().color), el("figcaption", {}, t("gen.channelColour", cat().name || cat().code)))),
-          el("div", { class: "hint" }, r.name[getLang()])]
-        : el("div", { class: "gempty" + (busy ? " busy" : "") }, busy ? t("gen.working") : AI.error ? el("span", { class: "err" }, t("msg.failed", AI.error)) : t("gen.emptyArt")),
-      (r || GENWIN.made.art.length > 0) && el("div", { class: "gfoot" }, madeStrip("art", shown, busy),
-        r && el("div", { class: "gacts" }, el("button", { class: "btn", onclick: () => dropMade("art") }, t("ai.discard")),
-          el("button", { class: "btn", disabled: kept, onclick: () => keepGenerated() }, t(kept ? "gen.kept" : "ai.keep")), el("button", { class: "btn solid", onclick: () => keepGenerated(true) }, t("gen.place"))))];
+    const kept = !!(shown && shown.kept && userAssets.has(shown.kept)), setKind = (k) => { S.ai = normalizeAi({ ...S.ai, kind: k }); persistAi(); genWin(); };
+    form = [el("div", { class: "gfields" },
+        field("gen.what", el("textarea", { value: AI.target, spellcheck: false, maxLength: 300, disabled: busy, dataset: { k: "atarget" }, placeholder: t(AI.image ? "ai.targetPhImage" : "ai.targetPh"),
+          oninput: (e) => { AI.target = e.target.value; const b = $("ai-go"); if (b && !AI.busy) b.textContent = goText("art"); }, onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); generateAsset(); } } })),
+        field("gen.kind", el("div", { class: "gkinds" }, AI_KINDS.map((k) => el("button", { class: "gkind" + (S.ai.kind === k ? " on" : ""), "aria-pressed": String(S.ai.kind === k), disabled: busy, onclick: () => setKind(k) },
+          el("span", { class: "ico", innerHTML: KIND_ICONS[k] }), el("b", {}, t("ai.kind." + k)), el("small", {}, t("ai.kindHint." + k)))))),
+        refZone(AI.image, pickReference, () => { AI.image = null; genWin(); }, t("ai.refOn"))),
+      el("div", { class: "gnote" }, t("ai.hint", aiService(S.ai), S.ai.model)),
+      go("ai-go", generateAsset, cancelGenerate, busy ? aiBusyText() : goText("art"))];
+    const name = r && r.name[getLang()];   // what it is called, and kept as: said on hover
+    stage = r && [el("figure", { title: name }, specPreview(r, null), el("figcaption", {}, t("gen.ownColour"))),
+      el("figure", { title: name }, specPreview(r, ch.color),el("figcaption", {}, t("gen.channelColour"), el("i", { class: "gdot", style: `background:${ch.color}` }), ch.name || ch.code))];
+    acts = r && [el("button", { class: "btn", disabled: kept, onclick: () => keepGenerated() }, t(kept ? "gen.kept" : "ai.keep")), el("button", { class: "btn solid", onclick: () => keepGenerated(true) }, t("gen.place"))];
   }
-  m.replaceChildren(el("div", { class: "dlg genw" }, head, el("div", { class: "genbody" }, el("div", { class: "gform" }, form), el("div", { class: "gresult" }, result))));
+  const view = el("div", { class: "gstage" + (r && !photo ? " two" : "") },
+    stage || el("div", { class: "gempty" + (busy ? " busy" : "") }, !ready ? t("gen.notReady") : busy ? t("gen.working") : error ? el("span", { class: "err" }, t("msg.failed", error)) : t(photo ? "gen.emptyPhoto" : "gen.emptyArt")),
+    shown && el("span", { class: "gsays" }, madeSays(shown)),
+    r && el("button", { class: "btn gdiscard", onclick: () => dropMade(tab) }, t("ai.discard")));
+  const strip = ready && madeStrip(tab, shown, busy);
+  m.replaceChildren(el("div", { class: "dlg genw" }, head,
+    el("div", { class: "genbody" }, el("div", { class: "gform" }, form),
+      el("div", { class: "gresult" }, view, (strip || acts) && el("div", { class: "gfoot" }, strip, acts && el("div", { class: "gacts" }, acts))))));
   m.hidden = false; m.onDismiss = closeModal;
   giveBack(m, held);
 }
@@ -2155,11 +2181,11 @@ async function keepGenerated(place = false) {
   genRedraw();
 }
 /**
- * Takes a picture as the reference for the next generation. It is scaled down to at most 768 px
- * and stored as JPEG: enough for a model to see what the thing is, and a fraction of the upload.
+ * Takes a picture as the reference for the next generation, `f` (one dropped) or one picked. It is scaled down to at
+ * most 768 px and stored as JPEG: enough for a model to see what the thing is, and a fraction of the upload.
  */
-async function pickReference() {
-  const f = await pickFile("image/png,image/jpeg,image/webp");
+async function pickReference(f = null) {
+  f = f || await pickFile("image/png,image/jpeg,image/webp");
   if (!f) return;
   const im = await loadImage(await readAs(f, "readAsDataURL"));
   if (!im) return toast(t("msg.badFile"));
@@ -2172,11 +2198,12 @@ async function pickReference() {
   AI.image = { mime: "image/jpeg", data: url.slice(url.indexOf(",") + 1), url };
   genRedraw();
 }
+/** A sticker or graphic made by AI, large on AI generate's checkerboard (at twice its size, for a sharp picture): in its own colours, or in `tint`. */
 function specPreview(spec, tint) {
-  const cv = el("canvas", { width: 220, height: 220 }), x = cv.getContext("2d");
-  x.translate(110, 110); x.scale(0.95, 0.95);
+  const cv = el("canvas", { width: 600, height: 460 }), x = cv.getContext("2d");
+  x.translate(300, 230); x.scale(2.1, 2.1);
   drawSpec(x, spec, tint);
-  return el("div", { class: "tile", style: "cursor:default" }, cv);
+  return cv;
 }
 /** Assets → AI stickers: the way to AI generate's sticker tab (with what is under way there). */
 function aiSection() {
@@ -6741,12 +6768,14 @@ for (const [side, id] of [["left", "left"], ["right", "right"]]) {
 // ---------- window-level events
 let dragDepth = 0;
 const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
-addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; document.body.classList.add("drop"); });
-addEventListener("dragleave", (e) => { if (hasFiles(e) && --dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("drop"); } });
+// (with AI generate open, a picture is its reference instead: its drop zone lights up, body.gdrop)
+addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; document.body.classList.add(genOpen() ? "gdrop" : "drop"); });
+addEventListener("dragleave", (e) => { if (hasFiles(e) && --dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("drop", "gdrop"); } });
 addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
 addEventListener("drop", async (e) => {
   if (!hasFiles(e)) return;
-  e.preventDefault(); dragDepth = 0; document.body.classList.remove("drop");
+  e.preventDefault(); dragDepth = 0; document.body.classList.remove("drop", "gdrop");
+  if (genOpen()) return genDropped(e.dataTransfer.files);
   if (SURPRISE.busy) return;   // hands are being dealt onto the cover
   // dropped photos become photo layers: the first of a cover fills it; the others land where they were dropped
   const cv = $("cv"), b = cv.getBoundingClientRect(), over = S.mode === "edit" && e.clientX >= b.left && e.clientX <= b.right && e.clientY >= b.top && e.clientY <= b.bottom;
