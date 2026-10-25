@@ -1,14 +1,40 @@
 # The Rust side of SmedCover is one Cargo workspace: one lock file and one target/ folder, here at the root.
-# `src-tauri/` is the desktop app; `tauri build` and `tauri dev` build it from its own folder.
+# `core/` (the package smedcover-core) does the work that is not the desktop window's own, for the app and a server
+# to share; `src-tauri/` is the desktop app, and `tauri build` and `tauri dev` build it from its own folder.
+# `cargo test` here tests the core alone, which needs neither Tauri nor a web view; `--workspace` tests the app too.
 [workspace]
 resolver = "2"
-members = ["src-tauri"]
+members = ["core", "src-tauri"]
+default-members = ["core"]
 
 [workspace.package]
 version = "0.3.1"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 authors = ["cybertheye"]
+
+# The versions every member uses (each takes those it needs with `{ workspace = true }`).
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+fontdb = "0.23"
+ureq = { version = "2", features = ["socks-proxy"] }
+ttf-parser = "0.25"
+base64 = "0.22"
+# The cross-platform subject cut-out: BiRefNet (MIT) run by ONNX Runtime (MIT), through `ort`
+# (MIT/Apache-2.0). Neither is built in: the runtime library (Microsoft's own release) and the model
+# are downloaded when the user asks for them, checked against their SHA-256, and loaded from the app
+# data folder. Runtime 1.23.2 is the last with an Intel Mac build, hence API 23.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-23"] }
+sha2 = "=0.10.9"
+flate2 = "=1.1.9"
+tar = "=0.4.46"
+zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
+# macOS only: the subject cut-out uses Apple's Vision framework, reached through the Objective-C runtime.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSString", "NSIndexSet"] }
+tempfile = "3"
 
 # Dependencies are optimised even in development builds: the image codecs are far too slow otherwise.
 # Cargo reads profiles only from the workspace's root.

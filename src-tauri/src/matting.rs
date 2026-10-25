@@ -339,7 +339,7 @@ mod tests {
         let data = PathBuf::from(std::env::var("SMEDCOVER_TEST_DATA").expect("SMEDCOVER_TEST_DATA"));
         let m = model("birefnet-lite").unwrap();
         let mut builder = ureq::AgentBuilder::new().timeout_read(std::time::Duration::from_secs(120));
-        if let Some(p) = crate::proxy_for(m.file.url, "") {   // the environment's proxy, as the app uses it
+        if let Some(p) = smedcover_core::net::proxy_for(m.file.url, "") {   // the environment's proxy, as the app uses it
             builder = builder.proxy(ureq::Proxy::new(&p).unwrap());
         }
         let agent = builder.build();

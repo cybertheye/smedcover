@@ -3120,8 +3120,8 @@ dependencies = [
  "objc2-foundation",
  "ort",
  "serde",
- "serde_json",
  "sha2",
+ "smedcover-core",
  "tar",
  "tauri",
  "tauri-build",
@@ -3130,6 +3130,18 @@ dependencies = [
  "ttf-parser",
  "ureq",
  "zip",
+]
+
+[[package]]
+name = "smedcover-core"
+version = "0.3.1"
+dependencies = [
+ "base64 0.22.1",
+ "image",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ureq",
 ]
 
 [[package]]

@@ -14,29 +14,27 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
 
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
-fontdb = "0.23"
-ureq = { version = "2", features = ["socks-proxy"] }
-ttf-parser = "0.25"
-base64 = "0.22"
-# The cross-platform subject cut-out: BiRefNet (MIT) run by ONNX Runtime (MIT), through `ort`
-# (MIT/Apache-2.0). Neither is built in: the runtime library (Microsoft's own release) and the model
-# are downloaded when the user asks for them, checked against their SHA-256, and loaded from the app
-# data folder. Runtime 1.23.2 is the last with an Intel Mac build, hence API 23.
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-23"] }
-sha2 = "=0.10.9"
-flate2 = "=1.1.9"
-tar = "=0.4.46"
-zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
+# What the app does for its window, Tauri aside (see ../core).
+smedcover-core = { path = "../core" }
+serde = { workspace = true }
+image = { workspace = true }
+fontdb = { workspace = true }
+ureq = { workspace = true }
+ttf-parser = { workspace = true }
+base64 = { workspace = true }
+# The cross-platform subject cut-out (see the workspace's Cargo.toml).
+ort = { workspace = true }
+sha2 = { workspace = true }
+flate2 = { workspace = true }
+tar = { workspace = true }
+zip = { workspace = true }
 
 # The subject cut-out uses Apple's Vision framework, reached through the Objective-C runtime.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSString", "NSIndexSet"] }
+objc2 = { workspace = true }
+objc2-foundation = { workspace = true }
