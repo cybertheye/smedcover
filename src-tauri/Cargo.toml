@@ -13,26 +13,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
-[dev-dependencies]
-tempfile = { workspace = true }
-
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 # What the app does for its window, Tauri aside (see ../core).
 smedcover-core = { path = "../core" }
-serde = { workspace = true }
-image = { workspace = true }
-ureq = { workspace = true }
 base64 = { workspace = true }
-# The cross-platform subject cut-out (see the workspace's Cargo.toml).
-ort = { workspace = true }
-sha2 = { workspace = true }
-flate2 = { workspace = true }
-tar = { workspace = true }
-zip = { workspace = true }
 
-# The subject cut-out uses Apple's Vision framework, reached through the Objective-C runtime.
+# A self-test's window keeps drawing when it cannot be seen: a setting of the web view reached through the
+# Objective-C runtime (see `run` in lib.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true }
-objc2-foundation = { workspace = true }

@@ -123,7 +123,7 @@ fn mask(photo: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 
 #[cfg(test)]
 mod tests {
-    /// A real photo is needed: SMEDCOVER_TEST_PHOTO=/path/to/photo.jpg cargo test -- --ignored subject
+    /// A real photo is needed: SMEDCOVER_TEST_PHOTO=/path/to/photo.jpg cargo test -p smedcover-core cut::vision -- --ignored
     #[test]
     #[ignore]
     fn subject_mask_of_a_photo() {

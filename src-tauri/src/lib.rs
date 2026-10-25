@@ -2,7 +2,8 @@
 //!
 //! All drawing happens in the web view (`ui/`). What the Rust side does for it is mostly in
 //! `smedcover-core` (`core/`), which a server can share: the sandboxed store, exporting covers,
-//! fonts and the outlines of lettering, and the AI request. This is the desktop app around it:
+//! fonts and the outlines of lettering, the subject cut-out and the AI request. This is the desktop
+//! app around it:
 //!
 //! * the data folder, found once at the start (the app data directory, or a self-test's) and kept
 //!   as the [`Core`] the commands use;
@@ -14,7 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use serde::Serialize;
+use smedcover_core::cut::{self, CutModel};
 use smedcover_core::fonts::{self, FontFaces, FontInfo};
 use smedcover_core::image::{encode, extension, parse_frame, safe_name, write_into, ExportMeta};
 use smedcover_core::outline::Outline;
@@ -22,9 +23,6 @@ use smedcover_core::{err, net, BundledFonts, Core, Res};
 use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
-
-mod matting;
-mod subject;
 
 /// Folder given in `SMEDCOVER_SELFTEST`, if any. In that mode the app keeps its data there instead
 /// of the real app data directory, exports a few covers into it through the normal code path,
@@ -132,52 +130,30 @@ fn write_image(request: Request<'_>) -> Res<String> {
 }
 
 /// Cuts the subject out of a photo (raw image bytes in the body): its mask as PNG bytes, the
-/// photo's size, opaque where the subject is. See `subject.rs`; macOS 14 and later.
+/// photo's size, opaque where the subject is. See `cut::vision` in the core; macOS 14 and later.
 #[tauri::command(async)]
 fn subject_mask(request: Request<'_>) -> Res<tauri::ipc::Response> {
     match request.body() {
-        InvokeBody::Raw(body) => Ok(tauri::ipc::Response::new(subject::mask_png(body)?)),
+        InvokeBody::Raw(body) => Ok(tauri::ipc::Response::new(cut::vision_mask(body)?)),
         _ => Err("expected a binary body".into()),
     }
 }
 
-// ---------------------------------------------------------------- the cut-out on any platform (BiRefNet, see matting.rs)
+// ---------------------------------------------------------------- the cut-out on any platform (BiRefNet: smedcover_core::cut::onnx)
 
-/// A cut-out model: its id, its size, and whether it has been downloaded.
-#[derive(Serialize)]
-struct CutModel {
-    id: &'static str,
-    bytes: u64,
-    have: bool,
-}
+/// The cut-out models: each one's id, its size, and whether it has been downloaded.
 #[tauri::command]
 fn cut_models(core: State<'_, Arc<Core>>) -> Res<Vec<CutModel>> {
-    let data = core.data_dir();
-    Ok(matting::MODELS.iter().map(|m| CutModel { id: m.id, bytes: m.file.bytes, have: matting::have(data, m) }).collect())
+    Ok(core.cut_models())
 }
-/// How a download is getting on, sent as the event `cut-model-progress`.
-#[derive(Clone, Serialize)]
-struct CutProgress {
-    id: String,
-    done: u64,
-    total: u64,
-}
-/// Downloads a cut-out model into the app data folder, telling the page how far it has got.
-/// The wait is per read, not for the whole file: a big model on a slow line takes long but is fine.
+/// Downloads a cut-out model into the app data folder, telling the page how far it has got with the
+/// event `cut-model-progress` (see `cut::download`).
 #[tauri::command]
 async fn cut_model_download(app: AppHandle, core: State<'_, Arc<Core>>, id: String, proxy: Option<String>) -> Res<()> {
-    let m = matting::model(&id)?;
-    let data = core.data_dir().to_path_buf();
-    let mut builder = ureq::AgentBuilder::new()
-        .timeout_connect(std::time::Duration::from_secs(30))
-        .timeout_read(std::time::Duration::from_secs(120));
-    if let Some(p) = net::proxy_for(m.file.url, proxy.as_deref().unwrap_or("")) {
-        builder = builder.proxy(ureq::Proxy::new(&p).map_err(|e| format!("proxy {p}: {e}"))?);
-    }
-    let agent = builder.build();
+    let core = core.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        matting::download(&agent, &data, m, |done, total| {
-            let _ = app.emit("cut-model-progress", CutProgress { id: id.clone(), done, total });
+        core.cut_model_download(&id, proxy.as_deref(), |progress| {
+            let _ = app.emit("cut-model-progress", progress);
         })
     })
     .await
@@ -185,24 +161,19 @@ async fn cut_model_download(app: AppHandle, core: State<'_, Arc<Core>>, id: Stri
 }
 #[tauri::command]
 fn cut_model_cancel() {
-    matting::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
+    cut::cancel_download();
 }
 #[tauri::command]
 fn cut_model_delete(core: State<'_, Arc<Core>>, id: String) -> Res<()> {
-    matting::remove(core.data_dir(), matting::model(&id)?)
+    core.cut_model_delete(&id)
 }
 /// Cuts the subject out of a photo (raw image bytes in the body) with the model named in the header
 /// `x-model`: its mask as PNG bytes, as `subject_mask` returns.
 #[tauri::command(async)]
 fn subject_mask_onnx(core: State<'_, Arc<Core>>, request: Request<'_>) -> Res<tauri::ipc::Response> {
     let id = request.headers().get("x-model").and_then(|v| v.to_str().ok()).ok_or("no model given")?;
-    let m = matting::model(id)?;
-    let data = core.data_dir();
-    if !matting::have(data, m) {
-        return Err("model not downloaded".into());
-    }
     match request.body() {
-        InvokeBody::Raw(body) => Ok(tauri::ipc::Response::new(matting::mask_png(data, m, body)?)),
+        InvokeBody::Raw(body) => Ok(tauri::ipc::Response::new(core.cut_onnx(id, body)?)),
         _ => Err("expected a binary body".into()),
     }
 }

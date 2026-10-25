@@ -31,7 +31,8 @@ sha2 = "=0.10.9"
 flate2 = "=1.1.9"
 tar = "=0.4.46"
 zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
-# macOS only: the subject cut-out uses Apple's Vision framework, reached through the Objective-C runtime.
+# macOS only, the Objective-C runtime: the subject cut-out uses Apple's Vision framework through it, and a
+# self-test reaches a setting of the web view.
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSString", "NSIndexSet"] }
 tempfile = "3"

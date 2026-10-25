@@ -11,6 +11,8 @@
 //!   ([`fonts`]);
 //! * tracing lettering: the outlines of a text's glyphs, for effects that reshape the letters
 //!   ([`outline`], in the fonts [`Core::text_outline`] finds);
+//! * cutting the subject out of a photo, with Apple's Vision or with BiRefNet run by ONNX Runtime,
+//!   whose runtime and models it downloads ([`cut`]);
 //! * sending the request for an AI-generated asset, so it is not subject to the web view's
 //!   cross-origin rules ([`net`]).
 //!
@@ -22,6 +24,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+pub mod cut;
 pub mod fonts;
 pub mod image;
 pub mod net;
@@ -93,6 +96,27 @@ impl Core {
             return Err("no usable font".to_string());
         }
         Ok(outline::trace(text, &fonts, weight.clamp(1.0, 1000.0)))
+    }
+
+    /// The cut-out models, and whether each has been downloaded into the data folder.
+    pub fn cut_models(&self) -> Vec<cut::CutModel> {
+        cut::models(&self.data)
+    }
+
+    /// Downloads a cut-out model into the data folder (see [`cut::download`]); blocks till it is done.
+    pub fn cut_model_download(&self, id: &str, proxy: Option<&str>, progress: impl Fn(cut::CutProgress)) -> Res<()> {
+        cut::download(&self.data, id, proxy, progress)
+    }
+
+    /// Removes a cut-out model from the data folder.
+    pub fn cut_model_delete(&self, id: &str) -> Res<()> {
+        cut::delete(&self.data, id)
+    }
+
+    /// Cuts the subject out of a photo (its encoded bytes) with the downloaded model `id`: its mask,
+    /// as [`cut::vision_mask`] makes it.
+    pub fn cut_onnx(&self, id: &str, photo: &[u8]) -> Res<Vec<u8>> {
+        cut::onnx_mask(&self.data, id, photo)
     }
 }
 

@@ -3113,21 +3113,11 @@ name = "smedcover"
 version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
- "flate2",
- "image",
  "objc2",
- "objc2-foundation",
- "ort",
- "serde",
- "sha2",
  "smedcover-core",
- "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
- "tempfile",
- "ureq",
- "zip",
 ]
 
 [[package]]
@@ -3135,13 +3125,20 @@ name = "smedcover-core"
 version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
+ "flate2",
  "fontdb",
  "image",
+ "objc2",
+ "objc2-foundation",
+ "ort",
  "serde",
  "serde_json",
+ "sha2",
+ "tar",
  "tempfile",
  "ttf-parser",
  "ureq",
+ "zip",
 ]
 
 [[package]]
