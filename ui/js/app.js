@@ -7325,44 +7325,51 @@ function embedPhotos(covers) {
   for (const pid of new Set(covers.flatMap((c) => [...pidsOf(c)]))) { const r = S.photos.get(pid); if (r) out[pid] = { src: r.src, original: r.original || null, mask: r.mask ? r.mask.src : null }; }
   return out;
 }
+/**
+ * Opens project file `raw` (parsed) into its own profile and channel: the profile here with its id, else as a new
+ * profile or into the current one (on its channel if this profile has it), as `ask(name)` answers ("new", "current", or
+ * null: not at all; asked only then). Files before version 4 have no profile: they open into the channel on the canvas.
+ * Undo brings back the cover it replaced. Resolves with the profile and channel it opened on ({profile, catId}), or null
+ * when not opened; throws msg.badFile when `raw` is no project.
+ */
+async function openProject(raw, ask) {
+  if (!raw || raw.kind !== "project" || !raw.cover) throw new Error(t("msg.badFile"));
+  let profile = S.profile, catId = S.cover.catId, across = null;   // across: the sizes of the profile the cover was made in, opened into another
+  const theirs = raw.profile && typeof raw.profile === "object" ? raw.profile : null;
+  const here = theirs && S.profiles.find((p) => p.id === theirs.id);
+  if (here) profile = here;
+  else if (theirs) {
+    const how = await ask(theirs.name || raw.profileName || "—");
+    if (!how) return null;
+    if (how === "new") { await adoptFonts(raw.fonts); profile = await addProfile(theirs, false); }
+    else across = normalizeProfile(theirs).sizes.map(sizeKey);
+  }
+  if (profile.categories.some((c) => c.id === raw.catId)) catId = raw.catId;
+  else if (profile !== S.profile) catId = channelOf(profile);
+  await adoptEmbedded(raw.assets);
+  await adoptFonts(raw.fonts);
+  await adoptPhotos(raw.photos, "lib.fromProject");
+  if (profile !== S.profile) await switchProfile(profile.id);
+  if (catId !== S.cover.catId) await switchChannel(catId);
+  clearTimeout(timers.hist); commitHistory();
+  if (across && Array.isArray(raw.cover.layers)) acrossSizes(raw.cover.layers, across, sizeKeys());   // what its layers keep by size, on this profile's sizes (as Copy from another channel puts it)
+  const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
+  const opened = await upgradeCover(normalizeCover(raw.cover, S.profile), { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
+  setCover(channelCover(opened, S.profile, catId));
+  await loadPhotos(pidsOf(S.cover));
+  S.layerId = "title"; S.picked = [];
+  touch({ cover: true, panel: true, side: true, strip: true });
+  return { profile: S.profile, catId: S.cover.catId };
+}
 const projectActions = {
-  /**
-   * A project file opens into its own profile and channel: the profile here with its id, else — asked —
-   * as a new profile, or into the current one (on its channel if this profile has it). Files before
-   * version 4 have no profile: they open into the channel on the canvas. Undo brings back the cover it replaced.
-   */
+  /** A project file picked and opened (openProject), asking how where its profile is not here (askProjectProfile). */
   async open() {
     const f = await pickFile(".json,application/json");
     if (!f) return;
     let raw;
     try { raw = JSON.parse(await readAs(f, "readAsText")); if (!raw || raw.kind !== "project" || !raw.cover) throw 0; } catch (e) { return toast(t("msg.badFile")); }
     try {
-      let profile = S.profile, catId = S.cover.catId, across = null;   // across: the sizes of the profile the cover was made in, opened into another
-      const theirs = raw.profile && typeof raw.profile === "object" ? raw.profile : null;
-      const here = theirs && S.profiles.find((p) => p.id === theirs.id);
-      if (here) profile = here;
-      else if (theirs) {
-        const how = await askProjectProfile(theirs.name || raw.profileName || "—");
-        if (!how) return;
-        if (how === "new") { await adoptFonts(raw.fonts); profile = await addProfile(theirs, false); }
-        else across = normalizeProfile(theirs).sizes.map(sizeKey);
-      }
-      if (profile.categories.some((c) => c.id === raw.catId)) catId = raw.catId;
-      else if (profile !== S.profile) catId = channelOf(profile);
-      await adoptEmbedded(raw.assets);
-      await adoptFonts(raw.fonts);
-      await adoptPhotos(raw.photos, "lib.fromProject");
-      if (profile !== S.profile) await switchProfile(profile.id);
-      if (catId !== S.cover.catId) await switchChannel(catId);
-      clearTimeout(timers.hist); commitHistory();
-      if (across && Array.isArray(raw.cover.layers)) acrossSizes(raw.cover.layers, across, sizeKeys());   // what its layers keep by size, on this profile's sizes (as Copy from another channel puts it)
-      const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
-      const opened = await upgradeCover(normalizeCover(raw.cover, S.profile), { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
-      setCover(channelCover(opened, S.profile, catId));
-      await loadPhotos(pidsOf(S.cover));
-      S.layerId = "title"; S.picked = [];
-      touch({ cover: true, panel: true, side: true, strip: true });
-      toast(t("proj.opened", S.profile.name, cat().name || cat().code || "—"));
+      if (await openProject(raw, askProjectProfile)) toast(t("proj.opened", S.profile.name, cat().name || cat().code || "—"));
     } catch (e) { fail(e); }
   },
   /** Version 4: the cover with its profile and channel, the pictures, vector assets and imported fonts it uses. */
