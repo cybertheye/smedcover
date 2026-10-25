@@ -30,6 +30,7 @@ import { sizeOf, PIXELS, dropCards } from "./photo.js";
 import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, moreChanged, sheetOrder, labelRoom, drawStack } from "./stack3d.js";
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt, coverCrop } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, AI_DEFAULTS, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
+import { makeCommands } from "./commands.js";
 
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
@@ -9301,6 +9302,26 @@ async function dragTest() {
   }
   await invoke("selftest_done", { report: JSON.stringify(report, null, 2) }).catch(() => null);
 }
+// ---------- what an agent's commands reach (makeCommands in commands.js, driven by agent.js): the state, and the app's
+// own ways of reading, changing, drawing and writing it, the same the editor uses
+/** The change still waiting to be recorded (recordHistory) made a step of undo now. */
+const commitPending = () => { clearTimeout(timers.hist); commitHistory(); };
+const API = Object.freeze({
+  S, CAN, HOST, appVersion, invoke, BUNDLED_FONTS, CUT, SURPRISE, HOLD,
+  // what is shown, selected, and what a layer is
+  cat, catIndex, selSize, layer, frame, sizeKeys, scopeKeys, layerName, copiable, owner, passivesOf, recordOf, weavableOf, wovenOf, inColumns, canCrop, canCut, cutReady, cutEngine, exportDir, ticked, channelOf, pickedIds,
+  // the history, and putting a change on the screen
+  touch, commitHistory, commitPending, clearPendingHistory: () => clearTimeout(timers.hist), snapshot, restoreSnap, timeTravel, settleCover, setCover, channelCover, coverFor, coverOf,
+  // the window
+  switchProfile, switchChannel, selectSize, selectLayer, pickLayers, closeTransient, weaveClose, brushClose, cropClose,
+  // changes
+  edit, addLayer, addAsset, removeLayer, duplicateLayer, shiftLayer, restack, setCrop, cutOut, putPhoto, placePhoto, keepPicture, loadPhotos, pidsOf, ensureFonts, fontsReading, outlinesPending, toGround,
+  // Surprise me
+  dealHands, keepFirst, takeHand, handSays, handNow, putHand,
+  // drawing and files
+  renderReady, toPng, pngBase64, runExport, writeInto, framed, nameFor, openProject,
+});
+const COMMANDS = makeCommands(API);
 // test hook: lets automated checks drive the app without the UI
 window.__smedcover = { S, drawCover, renderFull, nameFor, touch, addAsset, addLayer, newLayer, selectLayer, selectSize, setMode, layer, surprise, SURPRISE, brushOpen, brushClose };
 start().catch((e) => {

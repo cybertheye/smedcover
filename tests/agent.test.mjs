@@ -215,6 +215,104 @@ test("a lettering's letter keys are those the weave window offers: by line, the 
   assert.deepEqual(letterKeysOf(""), []);
 });
 
+/**
+ * A stand-in for what app.js hands the commands (API): the sample profile with a cover on its second channel holding a
+ * text layer and a sticker, a history of three steps at its second, and the window's state as plain fields.
+ */
+async function fakeApi() {
+  const { sampleProfile } = await import("../ui/js/presets.js");
+  const { normalizeCover, normalizeSettings } = await import("../ui/js/store.js");
+  const { newLayer } = await import("../ui/js/layers.js");
+  const p = normalizeProfile(sampleProfile("en")), other = normalizeProfile({ id: "two", name: "Second", categories: [{ id: "x", name: "Only" }] });
+  const cover = normalizeCover({ catId: p.categories[1].id, title: "Hello *world*\nagain", subtitle: "Sub", tag: "EP.02" }, p);
+  const text = newLayer("text", { text: "ON *A* PLATE", plate: true, plateInk: "#ffffff" }), sticker = newLayer("asset", { ref: { kind: "sticker", id: "burst" }, tint: true });
+  cover.layers.splice(cover.layers.length - 1, 0, text, sticker);
+  const S = { profiles: [p, other], profile: p, cover, covers: { [cover.catId]: cover }, settings: normalizeSettings({ exportSizes: { [p.id]: { "900x383": false } } }), hist: ["a", "b", "c"], histIdx: 1,
+    library: [{ pid: "pic1", name: "Beach", kind: "upload", at: 1700000000000 }, { pid: "pic2", name: "", kind: "ai", at: 0 }], systemFonts: ["Helvetica", "PingFang SC", "Menlo"], importedFonts: ["My Font"],
+    latinFonts: new Set(["Bebas Neue", "Helvetica"]), assetFolders: [], sel: "1920x1080", layerId: "title", picked: [], ai: {}, imageAi: {} };
+  const travels = [];
+  const api = {
+    S, CAN: { cut: true, outlines: false, saveFiles: true }, HOST: "tauri", appVersion: async () => "0.3.1", BUNDLED_FONTS: ["Noto Sans SC", "Bebas Neue", "JetBrains Mono"],
+    cutReady: () => true, cutEngine: () => "vision", catIndex: () => p.categories.findIndex((c) => c.id === S.cover.catId), channelOf: (q) => q.categories[0].id,
+    layerName: (L) => `name of ${L.id}`, copiable: (L) => L.type !== "bg" && L.type !== "frame", pickedIds: () => (S.picked.length > 1 ? [...S.picked] : S.layerId === "bg" ? [] : [S.layerId]),
+    coverOf: async (q, catId) => (q === p && S.covers[catId]) || normalizeCover({ catId }, q), layer: (id) => S.cover.layers.find((l) => l.id === id) || null,
+    commitPending: () => travels.push("commit"), timeTravel: async (d) => { travels.push(d); S.histIdx += d; },
+    selectSize: (k) => { S.sel = k; }, selectLayer: (id) => { S.layerId = id; S.picked = []; }, pickLayers: (ids) => { S.picked = ids; S.layerId = ids.at(-1); },
+  };
+  return { api, S, p, other, text, sticker, travels };
+}
+
+test("every tool has a command; those not done yet answer that they are not, before touching anything", async () => {
+  const { makeCommands } = await import("../ui/js/commands.js");
+  const cmds = makeCommands(new Proxy({}, { get: () => () => {} }));
+  assert.deepEqual(Object.keys(cmds).sort(), TOOLS.map((d) => d.name).sort());
+  for (const n of ["set_text", "export", "surprise", "apply_cover_json"]) assert.deepEqual(await cmds[n]({}), toError("unavailable", "not implemented yet"), n);
+});
+
+test("the read-only commands answer from the state as it is, and read another channel without switching to it", async () => {
+  const { makeCommands } = await import("../ui/js/commands.js");
+  const { api, S, p, other, text, sticker } = await fakeApi(), cmds = makeCommands(api), was = JSON.stringify(S);
+  const ctx = (await cmds.get_context({})).structuredContent;
+  assert.deepEqual(ctx.app, { version: "0.3.1", host: "tauri" });
+  assert.equal(ctx.can.live, true); assert.equal(ctx.can.cutReady, true); assert.equal(ctx.can.outlines, false);
+  assert.deepEqual(ctx.profiles.map((x) => x.id), [p.id, "two"]);
+  assert.deepEqual(ctx.profiles[0].channels.map((c) => c.id), p.categories.map((c) => c.id));
+  assert.deepEqual(ctx.profiles[0].sizes.map((z) => z.key), p.sizes.map((z) => `${z.w}x${z.h}`));
+  assert.deepEqual(ctx.profiles[0].sizes.map((z) => z.ticked), p.sizes.map((z) => `${z.w}x${z.h}` !== "900x383"));
+  assert.equal(ctx.profiles[0].sizes[3].orient, "tall");
+  assert.deepEqual(ctx.current, { profile: p.id, channel: S.cover.catId, size: "1920x1080", scope: S.settings.scope, layer: "title", layers: ["title"] });
+  assert.deepEqual(ctx.history, { canUndo: true, canRedo: true });
+  const cover = (await cmds.get_cover({ letters: true })).structuredContent;
+  assert.equal(cover.channel, S.cover.catId); assert.equal(cover.title, "Hello *world*\nagain");
+  assert.deepEqual(cover.layers.map((l) => l.id), S.cover.layers.map((l) => l.id), "bottom first, as the cover has them");
+  const L = (id) => cover.layers.find((l) => l.id === id);
+  assert.equal(L("title").kind, "layout"); assert.equal(L("title").removable, false); assert.equal(L("title").fx, "auto"); assert.equal(L("title").ink, "auto");
+  assert.equal(L("graphic").included, false, "left out of the cover"); assert.ok(!("included" in L("bg")));
+  assert.equal(L(text.id).kind, "free"); assert.equal(L(text.id).plate, true); assert.equal(L(text.id).plateInk, "#ffffff"); assert.equal(L(text.id).text, "ON *A* PLATE");
+  assert.deepEqual(L(text.id).letterKeys, letterKeysOf("ON *A* PLATE"));
+  assert.deepEqual(L("title").letterKeys, letterKeysOf("Hello *world*\nagain"));
+  assert.deepEqual(L(sticker.id).ref, { kind: "sticker", id: "burst" }); assert.equal(L(sticker.id).tint, true);
+  assert.deepEqual(L(sticker.id).place, sticker.t.all); assert.equal(L(sticker.id).sizes, "all");
+  assert.ok(!("raw" in cover) && !("letterKeys" in (await cmds.get_cover({})).structuredContent.layers.find((l) => l.id === "title")));
+  assert.deepEqual((await cmds.get_cover({ raw: true })).structuredContent.raw, JSON.parse(JSON.stringify(S.cover)));
+  const first = (await cmds.get_cover({ channel: 1 })).structuredContent;   // another channel, one with no cover yet: a new one
+  assert.equal(first.channel, p.categories[0].id); assert.equal(S.cover.catId, p.categories[1].id, "the window stays where it was");
+  assert.equal((await cmds.get_cover({ profile: "Second" })).structuredContent.channel, "x");
+  await assert.rejects(cmds.get_cover({ channel: "nope" }), /No channel "nope"/);
+  const opts = (await cmds.list_options({ only: ["fonts", "effects"], fontQuery: "ping" })).structuredContent;
+  assert.deepEqual(Object.keys(opts).sort(), ["effects", "fonts"]);
+  assert.deepEqual(opts.fonts.system, ["PingFang SC"]); assert.equal(opts.fonts.systemTotal, 3); assert.deepEqual(opts.fonts.imported, ["My Font"]);
+  assert.deepEqual(opts.effects.find((e) => e.id === "spiky"), { id: "spiky", name: "Spiky", zh: "刺边", kind: "outline", seeded: true, needsOutlines: true, available: false });
+  const all = (await cmds.list_options({})).structuredContent;
+  assert.deepEqual(all.looks.map((l) => l.id), LOOK_IDS);
+  assert.ok(all.looks.find((l) => l.id === "cyber").params.some((d) => d.key === "split" && d.max === 2));
+  assert.deepEqual(all.bends.map((b) => b.id), ["none", ...BEND_IDS]);
+  assert.deepEqual(all.locks.map((l) => l.id), SURPRISE_LOCKS);
+  assert.ok(all.platforms.find((x) => x.id === "bili").wide.includes("16:9"));
+  const lib = (await cmds.list_library({ query: "beach" })).structuredContent;
+  assert.deepEqual(lib.photos, [{ pid: "pic1", name: "Beach", kind: "upload", at: new Date(1700000000000).toISOString() }]);
+  assert.equal((await cmds.list_library({ kind: "stickers", limit: 5 })).structuredContent.stickers.length, 5);
+  assert.equal((await cmds.list_library({ kind: "stickers", limit: 5 })).structuredContent.more.stickers, 67);
+  assert.equal(JSON.stringify(S), was, "nothing read was changed");
+  assert.deepEqual((await cmds.get_selection({})).structuredContent, ctx.current);
+  void other;
+});
+
+test("select_layer selects as the user would, undo and redo go as far as the history does", async () => {
+  const { makeCommands } = await import("../ui/js/commands.js");
+  const { api, S, text, travels } = await fakeApi(), cmds = makeCommands(api);
+  assert.equal((await cmds.select_layer({ layer: text.id, size: "9:16" })).structuredContent.layer, text.id);
+  assert.equal(S.sel, "1080x1920");
+  assert.deepEqual((await cmds.select_layer({ layers: ["title", text.id] })).structuredContent.layers, ["title", text.id]);
+  await assert.rejects(cmds.select_layer({ layer: "nope" }), (e) => e.code === "invalid_arguments" && /No layer "nope" on this cover; its layers are: bg, accent/.test(e.message));
+  await assert.rejects(cmds.select_layer({ layers: ["bg", "title"] }), /"bg" cannot be selected with other layers/);
+  const undo = (await cmds.undo({ steps: 5 })).structuredContent;
+  assert.deepEqual(undo, { index: 0, steps: 1, canUndo: false, canRedo: true });
+  assert.deepEqual(travels, ["commit", -1], "the pending change made a step first, then one step back: there was no other");
+  assert.equal((await cmds.undo({})).content[0].text, "Nothing to undo.");
+  assert.deepEqual((await cmds.redo({ steps: 2 })).structuredContent, { index: 2, steps: 2, canUndo: true, canRedo: false });
+});
+
 test("render helpers: the width for a longer side, the layers' boxes as shares of the image, a contact sheet's plan", () => {
   assert.equal(widthFor({ w: 1920, h: 1080 }, 1024), 1024);
   assert.equal(Math.round((widthFor({ w: 1080, h: 1920 }, 1024) * 1920) / 1080), 1024);   // drawCover's height from it
