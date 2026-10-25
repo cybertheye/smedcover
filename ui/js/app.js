@@ -14,7 +14,7 @@ import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAs
 import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
-  deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, normalizeSize, exportName, sizeCaption, ratioText,
+  deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, CUSTOM_BY, normalizeSize, exportName, sizeCaption, ratioText,
   normalizeRecipes, SURPRISE_LOCKS, normalizeLayouts, LAYOUTS,
 } from "./store.js";
 import { DEFAULTS, layOver } from "./defaults.js";
@@ -163,10 +163,13 @@ const persistImageAi = () => later("imageAi", 400, () => writeJson("image-ai.jso
  * custom.json is first written over (null: none to keep).
  */
 const CUSTOM = { rest: {}, bad: null };
-/** Writes the user's settings to custom.json (only what differs from defaults.json, settingsToKeep), always under `settings`, even none. */
+/**
+ * Writes the user's settings to custom.json (only what differs from defaults.json, settingsToKeep), under `settings`,
+ * marked as the app's (`by`: one without the mark was written by hand, and settings.json is read with it, see readSettings).
+ */
 async function writeCustom() {
   if (CUSTOM.bad != null) { await files.write("custom.json.bad", CUSTOM.bad); CUSTOM.bad = null; }
-  await writeJson("custom.json", { settings: settingsToKeep(S.settings), ...CUSTOM.rest });
+  await writeJson("custom.json", { by: CUSTOM_BY, settings: settingsToKeep(S.settings), ...CUSTOM.rest });
 }
 const persistSettings = () => later("settings", 400, () => writeCustom().catch(fail));
 
@@ -7368,14 +7371,14 @@ async function readCustom() {
   try {
     raw = text ? JSON.parse(text.replace(/^\uFEFF/, "")) : null;
     if (raw != null && (typeof raw !== "object" || Array.isArray(raw))) throw new Error("not an object");
-  } catch (e) { layOver(null); CUSTOM.bad = text; return { raw: { settings: {} }, tell: () => toast(t("msg.customBad", e.message)) }; }
+  } catch (e) { layOver(null); CUSTOM.bad = text; return { raw: { by: CUSTOM_BY, settings: {} }, tell: () => toast(t("msg.customBad", e.message)) }; }
   const left = layOver(raw);
-  if (raw) { const { settings, ...rest } = raw; CUSTOM.rest = rest; }
+  if (raw) { const { by, settings, ...rest } = raw; CUSTOM.rest = rest; }
   return { raw, tell: left.length ? () => toast(counted("msg.customLeft", left.length, left.slice(0, 4).join(", ") + (left.length > 4 ? "…" : ""))) : null };
 }
 async function start() {
   const custom = await readCustom();
-  // the settings: custom.json's; with none there yet, settings.json's, where earlier versions kept them, read this once (custom.json is written below)
+  // the settings: custom.json's; until the app has written it, settings.json's too, where earlier versions kept them, read this once (custom.json is written below)
   S.settings = await readSettings(custom.raw, () => readJson("settings.json").catch(absent(null)));
   S.settings.scope = startScope();   // Applies to starts where the defaults say (All wide / square / tall), whatever it was at the close
   setGlass(glassOn());

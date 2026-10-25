@@ -171,6 +171,7 @@ test("the defaults: defaults.json, custom.json's modules besides the settings la
     assert.equal(DEFAULTS.profile.style.look, "cel", "each time from defaults.json as shipped");
     // none, or not an object: the shipped defaults
     assert.deepEqual([layOver(null), DEFAULTS], [[], SHIPPED]);
+    assert.deepEqual([layOver({ by: "app", settings: { lang: "en" } }), DEFAULTS], [[], SHIPPED], "the app's mark and its settings are no defaults");
     assert.deepEqual(layOver([1, 2]), ["(custom.json)"]);
     assert.deepEqual(DEFAULTS, SHIPPED);
   } finally { layOver(null); }
@@ -189,7 +190,7 @@ test("custom.json keeps the user's settings: only what differs from defaults.jso
   assert.deepEqual(Object.keys(kept).sort(), ["channels", "columns", "exportDirs", "exportSizes", "format", "glass", "glassHint", "lang", "layouts", "lookUse", "nameTemplate", "profileId", "recentFonts", "recipes", "scale", "cutProxy", "surprise"].sort(),
     "the quality and the drawer, as the defaults have them, left out");
   assert.deepEqual(normalizeSettings(JSON.parse(JSON.stringify(kept))), s, "written and read back: the same settings");
-  assert.deepEqual(await readSettings({ settings: kept, ui: { centreMin: 300 } }, () => assert.fail("settings.json is not read")), s);
+  assert.deepEqual(await readSettings({ by: "app", settings: kept, ui: { centreMin: 300 } }, () => assert.fail("settings.json is not read")), s);
   // a value equal to the default is not written (a later defaults.json reaches it); nor the scope, which every start sets
   assert.deepEqual(settingsToKeep(normalizeSettings({ lang: "", scale: 2, format: "png", quality: 92, glass: true, drawer: false, channels: {}, columns: { left: 0 } })), {});
   assert.deepEqual(settingsToKeep({ ...normalizeSettings({}), scope: "all" }), {});
@@ -210,12 +211,18 @@ test("the settings at start: custom.json's; with none there yet, settings.json's
   assert.equal(asked, 3);
   const s = await readSettings(null, legacy), kept = settingsToKeep(s);
   assert.deepEqual(kept, { lang: "zh", profileId: "brand", format: "webp", exportDirs: { brand: "D:\\covers" }, drawer: true, channels: { brand: "vlog" }, columns: { left: 0, right: 360, setup: 0 }, lookUse: { riso: 4 } });
-  // custom.json written from it: read from then on, settings.json no more; the scope back to the defaults'
-  assert.deepEqual(await readSettings({ settings: kept }, legacy), { ...normalizeSettings(old), scope: "orient" });
+  // custom.json written from it, marked as the app's: read from then on, settings.json no more; the scope back to the defaults'
+  assert.deepEqual(await readSettings({ by: "app", settings: kept }, legacy), { ...normalizeSettings(old), scope: "orient" });
   assert.equal(asked, 4);
   // settings set back to the defaults: none written, the settings kept all the same (settings.json is not read again)
-  assert.deepEqual(await readSettings({ settings: {} }, legacy), normalizeSettings({}));
+  assert.deepEqual(await readSettings({ by: "app", settings: {} }, legacy), normalizeSettings({}));
   assert.equal(asked, 4);
+  // a custom.json written by hand, as an earlier version had it: settings.json read too, the file's settings over it
+  const hand = await readSettings({ settings: { format: "jpeg", quality: 85 }, profile: { style: { look: "riso" } } }, legacy);
+  assert.equal(asked, 5);
+  assert.deepEqual(hand, normalizeSettings({ ...old, format: "jpeg", quality: 85 }));
+  assert.deepEqual([hand.profileId, hand.channels, hand.exportDirs, hand.lookUse, hand.format, hand.quality], ["brand", { brand: "vlog" }, { brand: "D:\\covers" }, { riso: 4 }, "jpeg", 85]);
+  assert.deepEqual(settingsToKeep(hand), { ...kept, format: "jpeg", quality: 85 }, "all of it written to custom.json then, marked");
 });
 
 test("usedUserAssets finds uploads referenced by categories and layers", () => {

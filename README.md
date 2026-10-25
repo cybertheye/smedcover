@@ -834,7 +834,7 @@ What you set in the app is kept in `custom.json`, in the data folder (above), la
 - It holds only what differs from `defaults.json`, and what has no default. A setting put back to its default is left out, so when a later version changes a default, a setting you never changed follows it.
 - Everything the app writes is under `settings`, Surprise me's chances and the columns' widths too: the other modules hold the defaults those are laid over and that *Reset* goes back to.
 - *Applies to* is not kept: every start begins at the default (`settings.scope`).
-- Earlier versions kept the settings in `settings.json`. The first start of this version reads it once and writes `custom.json` from it; `settings.json` stays where it is and is no longer written.
+- Earlier versions kept the settings in `settings.json`. The first start of this version reads it once and writes `custom.json` from it; `settings.json` stays where it is and is no longer written. A `custom.json` you wrote by hand, as the previous version suggested, is read with it, its settings winning, and then rewritten by the app.
 - A `custom.json` that is not valid JSON is not used: the app starts with the default settings, says so once at the foot of the window, and keeps the file as `custom.json.bad` before it writes a new one.
 - A page in a plain browser has no data folder: it keeps everything in the browser's storage, `custom.json` under the key `smedcover:custom.json`.
 

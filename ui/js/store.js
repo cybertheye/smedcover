@@ -299,15 +299,20 @@ export function settingsToKeep(s) {
   }
   return out;
 }
+/** The mark of a custom.json the app wrote (`by`, see writeCustom in app.js): one without it, if any, was written by hand. */
+export const CUSTOM_BY = "app";
 /**
- * The settings the app starts with: custom.json's (`custom`, the file as read), over defaults.json, normalised. With no
- * settings there (no custom.json, or one without them), those of settings.json, where they were kept before (`legacy`,
- * asked for only then: a function that reads it), once: from then on custom.json is written, and settings.json is left
- * as it was. A custom.json that is not JSON is read as `{ settings: {} }`, the defaults (see readCustom in app.js).
+ * The settings the app starts with: custom.json's (`custom`, the file as read), over defaults.json, normalised. Until
+ * there is a custom.json the app wrote (marked CUSTOM_BY), those of settings.json too, where they were kept before
+ * (`legacy`, asked for only then: a function that reads it), with the settings of a custom.json written by hand (as an
+ * earlier version had it) over them; from then on custom.json is written, and settings.json is left as it was. A
+ * custom.json that is not JSON is read as one the app wrote with no settings, the defaults (see readCustom in app.js).
  */
 export async function readSettings(custom, legacy) {
-  const own = custom && typeof custom === "object" && !Array.isArray(custom) && Object.hasOwn(custom, "settings");
-  return normalizeSettings(own ? custom.settings : await legacy());
+  const file = custom && typeof custom === "object" && !Array.isArray(custom) ? custom : {}, own = file.settings && typeof file.settings === "object" && !Array.isArray(file.settings) ? file.settings : {};
+  if (file.by === CUSTOM_BY) return normalizeSettings(own);
+  const old = await legacy();
+  return normalizeSettings({ ...(old && typeof old === "object" && !Array.isArray(old) ? old : {}), ...own });
 }
 /** How many layout presets are kept at most, how long a name may be, how many sizes of its own a preset may keep, and how many elements of the user's own it may have. */
 export const LAYOUTS = { most: 24, name: 40, custom: 12, extras: 8 };

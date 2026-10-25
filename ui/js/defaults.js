@@ -83,7 +83,7 @@ function fit(v, like, at, out) {
  * Lays `custom` (custom.json as read; null or undefined: none) over defaults.json as shipped, and makes DEFAULTS that,
  * in place (the same object). Every module but `settings`, which holds the user's settings rather than defaults (only
  * where they differ from these, see readSettings in store.js), and so leaves DEFAULTS.settings as shipped, what they
- * are told apart by. Key by key, as deep as it goes: a value is taken only where defaults.json has that key and a value
+ * are told apart by; nor the mark of a file the app wrote (`by`). Key by key, as deep as it goes: a value is taken only where defaults.json has that key and a value
  * of the same kind (a number for a number, text for text, true or false, a list for a list, an object for an object, see
  * layInto); anything else is let go and the default kept. Whether a value taken is within range is for whatever reads
  * it: the normalisers (normalizeProfile, oddsOf…) hold it there, as they do what the files hold. Returns the paths of
@@ -92,7 +92,7 @@ function fit(v, like, at, out) {
 export function layOver(custom) {
   const out = [], next = clone(SHIPPED);
   if (custom != null) {
-    if (kindOf(custom) === "object") { const { settings, ...rest } = custom; layInto(next, rest, SHIPPED, "", out); }
+    if (kindOf(custom) === "object") { const { by, settings, ...rest } = custom; layInto(next, rest, SHIPPED, "", out); }
     else out.push("(custom.json)");
   }
   for (const k of Object.keys(DEFAULTS)) delete DEFAULTS[k];

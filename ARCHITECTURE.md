@@ -174,15 +174,17 @@ modules as read }`. `settingsToKeep()` keeps only the fields that differ from `n
 the default is not written, so a later change to `defaults.json` reaches whoever never changed it, and what has no
 default is written once it holds something (the profile last open, `channels`, `columns`, `recentFonts`, `lookUse`,
 `layouts`, `recipes`, `exportDirs`…); never `scope`, which every start sets to the defaults' (`startScope()`).
-`settings` is written even when it is empty, which tells a `custom.json` the app wrote from one without settings. The
-user's values that have a default in another module stay under `settings` — Surprise me's chances (`surprise.odds`,
+The file is marked `"by": "app"` (`CUSTOM_BY`, which `layOver()` passes over), which tells a `custom.json` the app wrote
+from one written by hand. The user's values that have a default in another module stay under `settings` — Surprise me's chances (`surprise.odds`,
 over `surprise.odds` of `defaults.json`) and the columns' widths (`columns`, over `ui.columns`): those modules are what
 the chances window's reset and a column's double-click go back to, which laid over them the user's would become; and
 `layOver()` keeps only the keys `defaults.json` has, which the layout presets' ids in `odds.groups.layout` are not.
-Earlier versions kept the settings in `settings.json`: with none in `custom.json` (no file yet, or one without
-`settings`), `readSettings()` reads `settings.json` once and the start's `persistSettings()` writes `custom.json` from
-it; `settings.json` is left where it is, no longer written. A `custom.json` that is not JSON, or not an object, is read
-as `{ settings: {} }`, the defaults, and said once in a toast (`msg.customBad`); its text is kept (`CUSTOM.bad`) and
+Earlier versions kept the settings in `settings.json`: until a `custom.json` the app wrote is there (no file yet, or
+one written by hand, as the previous version had it), `readSettings()` reads `settings.json` too, the hand-written
+file's `settings` over it (`normalizeSettings({ ...settings.json, ...its settings })`), and the start's
+`persistSettings()` writes `custom.json` from that, marked; `settings.json` is left where it is, no longer written nor,
+once the mark is there, read. A `custom.json` that is not JSON, or not an object, is read as one the app wrote with no
+settings, the defaults, and said once in a toast (`msg.customBad`); its text is kept (`CUSTOM.bad`) and
 written to `custom.json.bad` before `custom.json` is next written, so it is never overwritten unseen.
 
 **Layout presets** (`settings.layouts`, for every profile, as the chances are): where a cover's parts stand, without its
