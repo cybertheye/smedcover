@@ -865,6 +865,8 @@ cd src-tauri && cargo test           # Rust 单元测试
 SMEDCOVER_SELFTEST=/一个空目录的绝对路径 src-tauri/target/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover
 ```
 
+它还会把每个风格效果放在尽量大的图层上，按编辑画布和风格卡片两种宽度各计一次时：超过 100 毫秒（卡片宽度 30 毫秒）的列在 `report.json` 的 `fxTime` 里，在卡片上也省不了多少时间的另外列出，超过 4 秒（卡片宽度 1 秒）的让自检失败。
+
 只想检查某几个风格时（自检会在每个风格里各画好几张，全部检查要好几分钟），把它们列出来：`SMEDCOVER_SELFTEST_LOOKS=citypop,construct`。
 
 想改测启动后各样东西多快出来时，加上 `SMEDCOVER_SELFTEST_PERF=1`（再给一张铺满画布的照片，`SMEDCOVER_SELFTEST_PHOTO=/照片/路径.jpg`）：`report.json` 里会写出启动每一步结束的时刻、启动后立刻打开 3D 视图和「风格」面板卡片各要多久出来，以及画了几张薄片和卡片。在同一个目录启动两次，就能看到第二次启动的情况。

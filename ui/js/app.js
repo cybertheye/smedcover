@@ -8258,6 +8258,14 @@ function libraryTiles(pick, redraw, removable = false, only = null) {
   })) : el("div", { class: "hint" }, t(waiting ? "lib.loading" : "lib.empty"));
 }
 
+/**
+ * How long a look effect may take, alone on a layer as large as it gets (the self-test's fxTime), on a canvas as wide
+ * as the editor's on a laptop (a large screen's is up to 2,880 px, some three times the pixels) and as a look card's
+ * (`px`), in ms: past `slow` it is listed, past `max` an error. On an Apple M-series Mac the slowest took 1.2–1.4 s
+ * and 0.4 s (the card's: painting a photo in strokes, which shrinks little with the canvas), so `max` leaves room for a
+ * slower machine; Record sleeve's halftone, before its dots were worked out pixel by pixel, took 5.9 s and 1.8 s.
+ */
+const FX_BUDGET = { px: { editor: 1600, card: LOOKPIC.w }, slow: { editor: 100, card: 30 }, max: { editor: 4000, card: 1000 } };
 /** The looks the self-test goes through: those named in SMEDCOVER_SELFTEST_LOOKS (the new ones, say), or all of them. */
 async function testedLooks() {
   const named = await invoke("selftest_looks").catch(() => null), want = named ? named.split(",").map((x) => x.trim()) : null;
@@ -8710,6 +8718,46 @@ async function selfTest(dir) {
       so.lookFx = { "velvet.check": 0.8, "court.varsity": 0.7 }; if (pr) pr.lookFx = { "cyano.duo": 1, "toon.burst": 0.5 };
       await shoot("borrowed", "velvet");
       S.profile.style.look = keepLook; S.cover.layers = S.cover.layers.filter((l) => !ours.includes(l));
+    }
+    // how long each look effect takes, at its own defaults, alone on a layer as large as one gets (a print filling the
+    // canvas, the last taken in; a colour filling it; a large word; a large sticker), on a canvas as wide as the editor's
+    // and as a look card's (FX_BUDGET.px). An effect is worked out again for every canvas a cover is drawn on (the size
+    // thumbnails, the look cards, the 3D view's sheets), so one whose work does not shrink with the canvas holds them all
+    // up: Record sleeve's halftone, filled as 57,000 circles, took seconds at either width. Past FX_BUDGET's `slow` it is
+    // listed (timed again first), past its `max` an error; one that takes on the card more than a quarter of what it does
+    // on the editor's canvas, and past `slow` there, is listed as shrinking little.
+    {
+      const pid = [...S.photos.keys()].at(-1), big = (L, s) => { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s }; return L; };
+      const on = { photo: pid ? newLayer("photo", { pid, fill: true }) : null, solid: big(newLayer("solid", { color: "#2a9df4" }), 1),
+        text: big(newLayer("text", { text: "LAYER *效果*" }), 0.9), asset: big(newLayer("asset", { ref: { kind: "sticker", id: "burst" }, tint: true }), 0.9) };
+      const ours = Object.values(on).filter(Boolean), size = S.profile.sizes[0], times = [], cv = document.createElement("canvas");
+      S.cover.layers.push(...ours);
+      const time = (L, id, w, amt) => {
+        L.lookFx = { [id]: amt };
+        Object.assign(FX_TIMING, { on: true, ms: {} });
+        try { drawCover(cv, { profile: S.profile, catIndex: catIndex(), size, pixelW: w, cover: S.cover, photos: S.photos, only: S.cover.layers.indexOf(L) }); }
+        finally { FX_TIMING.on = false; }
+        return FX_TIMING.ms[id] || 0;
+      };
+      for (const look of looks.filter((k) => (LOOKS[k].elementFx || []).length)) {
+        await step(`fxtime-${look}`);
+        for (const e of LOOKS[look].elementFx) for (const [type, L] of Object.entries(on)) {
+          if (!L || !effectsFor(look, type).includes(e)) continue;
+          const id = `${look}.${e.key}`;
+          for (const [where, w] of Object.entries(FX_BUDGET.px)) {
+            let ms = time(L, id, w, 1);
+            if (ms > FX_BUDGET.slow[where]) ms = Math.min(ms, time(L, id, w, 0.999));   // the machine busy for a moment: timed again, not kept from the first (see FX_KEPT in render.js)
+            times.push({ id, type, where, ms: Math.round(ms) });
+          }
+          L.lookFx = {};
+        }
+      }
+      S.cover.layers = S.cover.layers.filter((l) => !ours.includes(l)); cv.width = cv.height = 0;
+      const past = (k, where) => times.filter((t) => t.where === where && t.ms > FX_BUDGET[k][where]).sort((a, b) => b.ms - a.ms);
+      const over = [...past("max", "editor"), ...past("max", "card")];
+      const little = past("slow", "card").filter((c) => { const ed = times.find((t) => t.where === "editor" && t.id === c.id && t.type === c.type); return ed && c.ms > ed.ms / 4; });
+      report.fxTime = { photo: !!pid, timed: times.length, slow: { editor: past("slow", "editor"), card: past("slow", "card") }, shrinksLittle: little, over };
+      for (const t of over) report.errors.push(`look effect ${t.id} on ${t.type === "asset" ? "an" : "a"} ${t.type} took ${t.ms} ms on a canvas as wide as the ${t.where === "card" ? "look cards'" : "editor's"} (at most ${FX_BUDGET.max[t.where]} ms)`);
     }
     // each look's figure drawn from a sticker in the channel graphic's place (style.lookArt), with no photo
     // filling the canvas: the picture must change

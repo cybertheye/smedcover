@@ -867,6 +867,8 @@ and quits, without touching your real data.
 SMEDCOVER_SELFTEST=/absolute/empty/folder src-tauri/target/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover
 ```
 
+It also times every look effect on a layer as large as it gets, on a canvas as wide as the editor's and as a look card's: one that takes longer than 100 ms (30 ms on a card's) is listed under `fxTime` in `report.json`, as is one that hardly takes less on the card, and one that takes longer than 4 s (1 s on a card's) fails the self-test.
+
 To go through some looks only (the self-test makes several covers in each, so all of them take minutes), name them: `SMEDCOVER_SELFTEST_LOOKS=citypop,construct`.
 
 To time how soon things show after the start instead, add `SMEDCOVER_SELFTEST_PERF=1` (and a photo to fill the canvas, `SMEDCOVER_SELFTEST_PHOTO=/path/to/photo.jpg`): `report.json` then holds when each step of the start was over, how long the 3D view and the Look sheet's cards took to show, opened at once, and how many sheets and cards were drawn. Start it twice on the same folder to see a second launch.
