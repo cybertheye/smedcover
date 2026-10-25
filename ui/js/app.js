@@ -14,7 +14,7 @@ import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAs
 import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
-  deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
+  deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, normalizeSize, exportName, sizeCaption, ratioText,
   normalizeRecipes, SURPRISE_LOCKS, normalizeLayouts, LAYOUTS,
 } from "./store.js";
 import { DEFAULTS, layOver } from "./defaults.js";
@@ -157,7 +157,18 @@ const persistCover = () => { const c = S.cover, id = S.profile.id; later(`cover:
 const setCover = (c) => { S.cover = c; S.covers[c.catId] = c; return c; };
 const persistAi = () => later("ai", 400, () => writeJson("ai.json", S.ai).catch(fail));
 const persistImageAi = () => later("imageAi", 400, () => writeJson("image-ai.json", S.imageAi).catch(fail));
-const persistSettings = () => later("settings", 400, () => writeJson("settings.json", S.settings).catch(fail));
+/**
+ * custom.json as the app read it (see readCustom): the modules it has besides `settings`, written back as they were
+ * (the app writes only the settings), and the text of a file that was not JSON, copied to custom.json.bad before
+ * custom.json is first written over (null: none to keep).
+ */
+const CUSTOM = { rest: {}, bad: null };
+/** Writes the user's settings to custom.json (only what differs from defaults.json, settingsToKeep), always under `settings`, even none. */
+async function writeCustom() {
+  if (CUSTOM.bad != null) { await files.write("custom.json.bad", CUSTOM.bad); CUSTOM.bad = null; }
+  await writeJson("custom.json", { settings: settingsToKeep(S.settings), ...CUSTOM.rest });
+}
+const persistSettings = () => later("settings", 400, () => writeCustom().catch(fail));
 
 const snapshot = () => JSON.stringify({ p: S.profile, c: S.cover });
 function resetHistory() { S.hist = [snapshot()]; S.histIdx = 0; SURPRISE.step = null; dealClose(); syncTop(); }
@@ -7141,20 +7152,27 @@ onOutlines(() => { queueDraw(); later("lookcards", 300, refreshLookCards); });  
  */
 const absent = (v) => (e) => { if (HOST === "server") throw e; return v; };
 /**
- * custom.json, the user's own defaults, in the data folder (see defaults.js), laid over the app's before anything reads
- * them. Never written by the app: one that cannot be read is none. Returns what to tell the user of it once the window
- * is up — a file that is not JSON (the app's own defaults used), values it has that were let go — or null.
+ * custom.json, in the data folder: what the user set and wants kept, written by the app (persistSettings), laid out by
+ * the modules of defaults.json (see defaults.js). Its modules besides the settings are laid over the defaults before
+ * anything reads them (layOver). Returns the file as read (`raw`, for readSettings) and what to tell the user of it once
+ * the window is up (`tell`: a file that is not JSON, read as no settings, the defaults, and kept as custom.json.bad
+ * before it is written over; values it has that were let go; or null).
  */
-async function customDefaults() {
-  const text = await files.read("custom.json").catch(() => null);
+async function readCustom() {
+  const text = await files.read("custom.json").catch(absent(null));
   let raw = null;
-  try { raw = text ? JSON.parse(text.replace(/^\uFEFF/, "")) : null; } catch (e) { layOver(null); return () => toast(t("msg.customBad", e.message)); }
+  try {
+    raw = text ? JSON.parse(text.replace(/^\uFEFF/, "")) : null;
+    if (raw != null && (typeof raw !== "object" || Array.isArray(raw))) throw new Error("not an object");
+  } catch (e) { layOver(null); CUSTOM.bad = text; return { raw: { settings: {} }, tell: () => toast(t("msg.customBad", e.message)) }; }
   const left = layOver(raw);
-  return left.length ? () => toast(counted("msg.customLeft", left.length, left.slice(0, 4).join(", ") + (left.length > 4 ? "…" : ""))) : null;
+  if (raw) { const { settings, ...rest } = raw; CUSTOM.rest = rest; }
+  return { raw, tell: left.length ? () => toast(counted("msg.customLeft", left.length, left.slice(0, 4).join(", ") + (left.length > 4 ? "…" : ""))) : null };
 }
 async function start() {
-  const custom = await customDefaults();
-  S.settings = normalizeSettings(await readJson("settings.json").catch(absent(null)));
+  const custom = await readCustom();
+  // the settings: custom.json's; with none there yet, settings.json's, where earlier versions kept them, read this once (custom.json is written below)
+  S.settings = await readSettings(custom.raw, () => readJson("settings.json").catch(absent(null)));
   S.settings.scope = startScope();   // Applies to starts where the defaults say (All wide / square / tall), whatever it was at the close
   setGlass(glassOn());
   const probe = document.body.appendChild(el("div", { style: "position:absolute;top:-99px;width:60px;height:60px;overflow:scroll" }));
@@ -7196,14 +7214,14 @@ async function start() {
   S.covers = await loadCovers(S.profile);
   await migrateSession();
   const catId = channelOf(S.profile);
-  S.settings.channels[S.profile.id] = catId; persistSettings();
+  S.settings.channels[S.profile.id] = catId; persistSettings();   // custom.json written: at the first start, from settings.json's
   setCover(coverFor(catId));
   await loadPhotos(pidsOf(S.cover));
   persistCover();
   prunePhotos();
   await applyProfile();
   resetHistory();
-  if (custom) custom();   // what was wrong with custom.json
+  if (custom.tell) custom.tell();   // what was wrong with custom.json
   if (selftest) selfTest(selftest);
   else setTimeout(readLibrary, 1500);   // once the window is up: read the bitmap library in the background, ready for when it is opened
 }

@@ -37,7 +37,7 @@ Why it is split this way:
 
 - **What you see is what you export.** Preview and export run the same drawing code; only the pixel count differs.
 - **The drawing code runs in a plain browser**, so development and automated checks do not need the desktop app.
-- **The Rust side is small**, and so is its reach: the app data directory is read and written by relative paths only, which cannot leave it (10.1), and outside it the interface writes where the user picked in a dialog. That last rests on the interface: an export folder, once picked, is kept for its profile in `settings.json` (`exportDirs`, see 3) and handed back on every export, and `write_image` checks only that it is an absolute folder (10.2).
+- **The Rust side is small**, and so is its reach: the app data directory is read and written by relative paths only, which cannot leave it (10.1), and outside it the interface writes where the user picked in a dialog. That last rests on the interface: an export folder, once picked, is kept for its profile in `custom.json` (`exportDirs`, see 3) and handed back on every export, and `write_image` checks only that it is an absolute folder (10.2).
 
 ## 2. Files
 
@@ -72,7 +72,7 @@ ui/
   js/ai.js           AI generation: settings, requests for both API styles, the preset prompt (pure)
   js/store.js        data model, validation, persistence
   js/presets.js      starter profiles (the starter's name, brand and channels from defaults.json) and size presets (one for each ratio a platform wants)
-  js/defaults.js     the defaults: defaults.json read once, the user's custom.json laid over it (DEFAULTS, layOver)
+  js/defaults.js     the defaults: defaults.json read once, custom.json's modules but its settings laid over it (DEFAULTS, layOver)
   defaults.json      the app's defaults, by module: settings, profile, layout, surprise, ui
   js/csv.js          CSV reader for batch export (Settings → Sizes & export)
   js/i18n.js         interface strings (zh / en)
@@ -121,12 +121,12 @@ hand-edited files cannot crash the app.
 
 Earlier data: there used to be one cover, `session.json`, shared by every channel, whose layers could be kept to some channels with `cats`. While the current profile has no channel covers yet, `migrateSession()` splits it: one copy per channel, `channelCover()` keeping only the layers on that channel and dropping `cats`, the title and tag copied to each; the old file is renamed `session.migrated.json`, and `session-photo*` is first turned into a photo layer by `upgradeCover`, then deleted.
 
-**Settings** (`settings.json`): language, current profile, the channel each profile was last on
+**Settings** (`custom.json`, under `settings`, only what differs from the defaults: see below): language, current profile, the channel each profile was last on
 (`channels`), export scale, format, JPEG quality, file name pattern (`nameTemplate`, the one string whether it is edited
 as tags or as text, see 9.5), and by profile id the sizes the Export window leaves unticked (`exportSizes`:
 `{profile id: {size key: false}}`, only those unticked, so a size not named — one added since — is ticked; a profile with
 none unticked is not kept; `normalizeExportSizes`) and the folder its exports go into (`exportDirs`: `{profile id: path}`,
-none until the first export picks one); adjustment scope (`scope`: `all`, `orient` or `size`, see 4.1; kept, but every start sets it to the defaults' own, `startScope()`); how many times
+none until the first export picks one); adjustment scope (`scope`: `all`, `orient` or `size`, see 4.1; not kept: every start sets it to the defaults' own, `startScope()`); how many times
 each look was made a profile's on this computer, by its card or by a hand of Surprise me kept (`lookUse`: whole counts,
 only of looks there are and above 0 — the Look sheet's ★ Most used, 9.5); the looks liked there by the ♡ on their cards
 (`lookLikes`: look ids, the latest liked first, each once, only of looks there are — its ♥ Liked); and the user's own
@@ -138,8 +138,8 @@ the window (9.5), whether its panes are frosted glass (`glass`), whether the pro
 widths its columns were dragged to (`columns`). Deleting a profile (`profileActions.delete()`) drops its entries in
 `exportSizes` and `exportDirs`.
 
-**Defaults** (`ui/defaults.json`, shipped with the app; `custom.json` in the data folder, the user's own, written by
-hand): the defaults worth changing without touching the code, by module. `settings`: what `normalizeSettings()` falls
+**Defaults** (`ui/defaults.json`, shipped with the app; `custom.json` in the data folder, written by the app, never by
+hand, laid out by the same modules): the defaults worth changing without touching the code, by module. `settings`: what `normalizeSettings()` falls
 back to — the language (`""`, the system's), the export's resolution, format, JPEG quality and file names, the scope
 (and, through `startScope()`, the one every start begins at),
 the glass, the drawer, the cut-out's engine. `profile`: what a new profile starts with — its ground, look and seed
@@ -155,17 +155,35 @@ what the canvas keeps (`centreMin`, `centreRoomy`) and when dragging counts as s
 own protocol, a server's page and a plain browser alike, as the built-in repaint styles are read), the disk under Node
 for the tests; a top-level `await` either way — into `SHIPPED` (frozen) and `DEFAULTS`, the one object every module
 reads a default from when it needs it, never a copy taken as it loads. The first thing `start()` does is read
-`custom.json` (`customDefaults()`: `files.read`, so the data folder; in a plain browser, its storage under
-`smedcover:custom.json`) and lay it over (`layOver(custom)`, in place), before `normalizeSettings()` or anything else
-reads a default. It goes key by key, as deep as it goes: a value is taken only where `defaults.json` has that key and a
+`custom.json` (`readCustom()`: `files.read`, so the data folder; in a plain browser, its storage under
+`smedcover:custom.json`; on a server a failed read stops the start, as for the other files written over) and lay its
+modules but `settings` over the defaults (`layOver(custom)`, in place), before anything else reads a default. It goes key by key, as deep as it goes: a value is taken only where `defaults.json` has that key and a
 value of the same kind — a finite number, text, true or false, a list whose items are each of the kind of its first
 (an object item keeping what that first has), an object gone into key by key; an object left empty there (Surprise me's
 chances by look) takes any name with a number, text or true/false. Anything else is let go and the default kept, and
-`layOver()` returns the paths of what it let go. A file that is not JSON is taken for none. Either is said once, in a
-toast, when the window is up (`msg.customBad`, `msg.customLeft`): nothing in it stops the app from starting. Whether a
-value is within range is for what reads it — `normalizeSettings()`, `normalizeProfile()`, `oddsOf()`, `orientDefault()`,
-`column()` — which holds it there as it holds what the files hold. A default is what has not been set: a setting
-`settings.json` holds stays the user's, and a profile stays as it is.
+`layOver()` returns the paths of what it let go, said once in a toast when the window is up (`msg.customLeft`). The app
+writes none of these modules (they are written back as read, `CUSTOM.rest`). Whether a value is within range is for
+what reads it — `normalizeSettings()`, `normalizeProfile()`, `oddsOf()`, `orientDefault()`, `column()` — which holds it
+there as it holds what the files hold. A default is what has not been set: a profile stays as it is.
+
+`custom.json`'s `settings` are the user's settings themselves, not defaults: `layOver()` leaves them, so
+`DEFAULTS.settings` stays as shipped. `readSettings(custom, legacy)` (`store.js`) gives `normalizeSettings()` of them,
+`defaults.json`'s settings with the user's over them, `normalizeSettings()` staying the one place settings are checked.
+`persistSettings()` (`app.js`, debounced; `writeCustom()`) writes `{ settings: settingsToKeep(S.settings), …the other
+modules as read }`. `settingsToKeep()` keeps only the fields that differ from `normalizeSettings({})`: a value equal to
+the default is not written, so a later change to `defaults.json` reaches whoever never changed it, and what has no
+default is written once it holds something (the profile last open, `channels`, `columns`, `recentFonts`, `lookUse`,
+`layouts`, `recipes`, `exportDirs`…); never `scope`, which every start sets to the defaults' (`startScope()`).
+`settings` is written even when it is empty, which tells a `custom.json` the app wrote from one without settings. The
+user's values that have a default in another module stay under `settings` — Surprise me's chances (`surprise.odds`,
+over `surprise.odds` of `defaults.json`) and the columns' widths (`columns`, over `ui.columns`): those modules are what
+the chances window's reset and a column's double-click go back to, which laid over them the user's would become; and
+`layOver()` keeps only the keys `defaults.json` has, which the layout presets' ids in `odds.groups.layout` are not.
+Earlier versions kept the settings in `settings.json`: with none in `custom.json` (no file yet, or one without
+`settings`), `readSettings()` reads `settings.json` once and the start's `persistSettings()` writes `custom.json` from
+it; `settings.json` is left where it is, no longer written. A `custom.json` that is not JSON, or not an object, is read
+as `{ settings: {} }`, the defaults, and said once in a toast (`msg.customBad`); its text is kept (`CUSTOM.bad`) and
+written to `custom.json.bad` before `custom.json` is next written, so it is never overwritten unseen.
 
 **Layout presets** (`settings.layouts`, for every profile, as the chances are): where a cover's parts stand, without its
 look, which Surprise me deals by its chance (see 9.4) and which can be put on the canvas as it is.
@@ -498,7 +516,9 @@ Then `meetStandards()` holds the result to the cover standards (docs/cover-check
 look; a colour block the user resized or tilted stays where they put it (so a drag of its handles is not
 undone on the next frame), and so does one a default layout gives a size and slant (below): the bands of the tall and
 square sizes' defaults, 14% and 13% of the height, are too slim to hold the channel name, which the words' foot then
-keeps above them. On a cover the apps lay badges over (16:9, 4:3: `badged()`) nothing with words
+keeps above them; there it is lettered in the channel's colour, outlined, as off the band (the `catname` painter in
+`render.js`: a name that does not lie wholly on a colour block shown, both as placed, is lettered so by
+`drawCategory()`; its plate stays as it is). On a cover the apps lay badges over (16:9, 4:3: `badged()`) nothing with words
 in it, nor the graphic, reaches them (`FOOT` in `platforms.js`, 84% down): the channel name puts its
 sub-name beside it and moves up, and a colour block too shallow to hold it there grows (taking the tag,
 the graphic and the title's foot up with it). On every cover the words keep out of the bottom 14%, where the
@@ -1561,7 +1581,7 @@ first-run welcome, an export's progress.
 
 *Surprise me* (`surprise()`, from its button or Space, see *Keys* in 9.5) deals `RULES.hands.count` hands, six (`dealHand()`), each in a look of its own while a look with a chance is left (those dealt so far in the run go in as `env.not`), shows each in its window as it comes, and puts the first on the canvas; nothing is measured or scored. Hands go back onto the objects there are (the style, each layer by id), a hand that throws is left out, and if none can be dealt the cover is put back. Each hand is dealt by `dealCover(style, cover, env)` in `deal.js`, which holds all of Surprise me's rules: `RULES`, every number it deals by (how many hands and how fast they show; `RULES.odds`, the chances the user may set, kept in `defaults.json`; the sliders, the scene objects, what the cover brings, the letterings; the lettered layers' outline and shadow; the look effects; the places of the user's layers), so a number changed there changes the hands; `FAMILIES` and `RECIPES`, what suits each look; and the order a hand is dealt in — the layout (the canvas's, or a layout preset of the user's), the look and its seed, its sliders, its scene objects, the ground, the words put back (unless where things stand is locked), the title on top, each layer's own choices and letterings, look effects. `app.js` keeps only what needs the cover drawn: `surprise()`, `dealHand()` (`dealCover()`, then the user's layers placed by `dealPlaces()`, which reads `RULES.places`), the window (see 9.5), and the window and the sheet the chances are set in.
 
-The chances, `RULES.odds` (`surprise.odds` in `defaults.json`, read from `DEFAULTS` each time, so the user's `custom.json` may change them; `oddsOf()` holds each between 0 and 1), are of two kinds. `groups`, of which one option is dealt, their chances adding up to 1 (`ODD_OPTIONS`): the look (every look alike unless set), the colour block's shape (likewise), how many look effects a layer but the title and subtitle is given (none, one, two), and whether each is the look dealt's or another look's; and, for every look alike, the title's lettering (`own`, the look's own, or another), its bend (`none`, or one) and the ground (dark, light) — left empty in `RULES.odds`, they are what the looks' recipes give on average over the looks (`builtInGroup()`). `chances`, switches each on by a chance of its own: the brand row's rail; the plates under the channel name, the subtitle, a text layer; an asset tinted; the scene objects moved; the subtitle lettered like the title; and what a look's optional parts default to (`extra`, `toggleOn`, `toggleOff`, for a look whose recipe sets none: `partChance()`). What the user sets in Surprise me's chances (`oddsDialog()` in `app.js`, a window of its own, opened from Surprise me's window and the Look sheet; see below) is kept in `settings.surprise.odds` ({groups, chances}, only what was set); `oddsOf()` lays it over `RULES.odds` — a group of the user's made to add up to 1, an option it leaves out (a look added since) at 0, one adding up to nothing left to the rule's; `set` says which groups are the user's — and the hand is dealt by that (`env.odds`). `pickLook()` draws the look by its chance: none of `env.not` while another with a chance is left, none at 0.
+The chances, `RULES.odds` (`surprise.odds` in `defaults.json`, read from `DEFAULTS` each time, under the user's own in `settings.surprise.odds`; `oddsOf()` holds each between 0 and 1), are of two kinds. `groups`, of which one option is dealt, their chances adding up to 1 (`ODD_OPTIONS`): the look (every look alike unless set), the colour block's shape (likewise), how many look effects a layer but the title and subtitle is given (none, one, two), and whether each is the look dealt's or another look's; and, for every look alike, the title's lettering (`own`, the look's own, or another), its bend (`none`, or one) and the ground (dark, light) — left empty in `RULES.odds`, they are what the looks' recipes give on average over the looks (`builtInGroup()`). `chances`, switches each on by a chance of its own: the brand row's rail; the plates under the channel name, the subtitle, a text layer; an asset tinted; the scene objects moved; the subtitle lettered like the title; and what a look's optional parts default to (`extra`, `toggleOn`, `toggleOff`, for a look whose recipe sets none: `partChance()`). What the user sets in Surprise me's chances (`oddsDialog()` in `app.js`, a window of its own, opened from Surprise me's window and the Look sheet; see below) is kept in `settings.surprise.odds` ({groups, chances}, only what was set); `oddsOf()` lays it over `RULES.odds` — a group of the user's made to add up to 1, an option it leaves out (a look added since) at 0, one adding up to nothing left to the rule's; `set` says which groups are the user's — and the hand is dealt by that (`env.odds`). `pickLook()` draws the look by its chance: none of `env.not` while another with a chance is left, none at 0.
 
 The window has two columns. On the left the looks, a card each (`oddsLooks()`): the cover drawn in that look (`oddsPics()`: the Look sheet's card picture, `LOOKCARDS.pics`, where it was drawn from the cover as it now is, else drawn one a frame and kept there for the sheet too; `ODDS_UI.round` stops a drawing that a newer one replaced), its name, its share and a row of dots. A look's chance is set by its dots, which stand for chances as they are kept rather than for a new number: `d` dots lit are `DOTS[d]` times an even share (one over the number of looks), `DOTS` being `[0, 0.25, 0.5, 1, 2, 4]` — the leftmost off, each more twice as likely — and `EVEN_DOTS` (3) each look's while the user has set none. `withDots(mine, id, d)` sets look `id` alone, every other look's chance left exactly as it was (each an even share, while none was set), and `oddsOf()` makes the group add up to 1 as ever, so the hands are dealt as before until a dot is clicked; `dotsOf(v)` shows a chance kept (one set on the sliders of before, say) on the nearest dot by ratio, one at least for any chance, without changing it. A dot is clicked, or the row (a `slider` for the keyboard) stepped by the arrow keys, Home and End; a key that leaves the
 dots where they are (at an end of the row) changes nothing, so a chance between two dots stays as it is, and a change that
@@ -2151,7 +2171,7 @@ frame waits for the fonts, otherwise the title would be fitted using the wrong g
 
 | Level | Command | Covers |
 |---|---|---|
-| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export ticks and folders and the looks' use, by profile and look), the defaults and `custom.json` laid over them, file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string |
+| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export ticks and folders and the looks' use, by profile and look), the defaults and `custom.json` laid over them, the settings written to `custom.json` (only what differs, read back the same, from `settings.json` once), file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string |
 | Rust unit tests | `cd src-tauri && cargo test` | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling, requests against a local stand-in server, proxy rules |
 | End-to-end self-test | `SMEDCOVER_SELFTEST=<folder> <executable>` | the full export path between the real web view and Rust |
 
@@ -2219,4 +2239,5 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | change the window's size or other settings | `app.windows` in `tauri.conf.json`, and again in `tauri.windows.conf.json` and `tauri.linux.conf.json`, which replace that list whole |
 | change when the drawer takes the sheet's place, or the columns stack | `centreRoomy()`, `STACKED` and `columns()` in `app.js` (the widths, `ui` in `defaults.json`); `.body.tight` and the `max-width: 1000px` rules in `index.html` |
 | change a default: a setting's, a new profile's, each orientation's layout, Surprise me's chances, the window's numbers | `defaults.json`; for a key of its own, what reads it too (`normalizeSettings()` and `normalizeProfile()` in `store.js`, `starterProfile()` in `presets.js`, `orientDefault()` in `layout.js`, `RULES.odds` in `deal.js`, `column()` in `app.js`); how `custom.json` is laid over it, `layOver()` in `defaults.js` |
+| keep another setting of the user's | a field in `normalizeSettings()` (`store.js`), the one place settings are checked, with its default in `defaults.json`'s `settings` if it has one; set it on `S.settings` and call `persistSettings()` (`app.js`), which writes it to `custom.json` where it differs from the default (`settingsToKeep()`) |
 | add an interface string | `i18n.js`, in both languages; a test checks that both are present |

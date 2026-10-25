@@ -689,7 +689,7 @@ const STR = {
   "msg.batchUnknown": ["有 {0} 行的频道没匹配上，已用当前频道代替。", "{0} rows had an unknown channel; the current one was used."],
   "msg.batchUnknown.one": ["有 {0} 行的频道没匹配上，已用当前频道代替。", "{0} row had an unknown channel; the current one was used."],
   "msg.badFile": ["这个文件读不了。", "That file could not be read."],
-  "msg.customBad": ["custom.json 不是有效的 JSON（{0}），这次用的是自带的默认值。", "custom.json is not valid JSON ({0}); the app's own defaults are used this time."],
+  "msg.customBad": ["custom.json 不是有效的 JSON：这次用的是默认设置，原文件另存为 custom.json.bad（{0}）", "custom.json is not valid JSON: the default settings are used this time, and the file is kept as custom.json.bad ({0})"],
   "msg.customLeft": ["custom.json 里有 {0} 项没有用上（名字不认识，或类型不对）：{1}", "custom.json: {0} entries were left out (a name the app does not know, or a value of the wrong kind): {1}"],
   "msg.customLeft.one": ["custom.json 里有 {0} 项没有用上（名字不认识，或类型不对）：{1}", "custom.json: {0} entry was left out (a name the app does not know, or a value of the wrong kind): {1}"],
   "msg.confirmDelete": ["删除档案「{0}」？此操作不能撤销。", "Delete profile “{0}”? This cannot be undone."],

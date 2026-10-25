@@ -1,7 +1,9 @@
 // The app's defaults, in one file that can be changed without touching the code: defaults.json, shipped beside the
-// page (ui/defaults.json), organised by module, and over it custom.json, the user's own, written by hand and kept in the
-// app's data folder beside settings.json (read as the app starts, see layOver). Every module reads a default from
-// DEFAULTS when it needs it, never a copy taken as it loads, so what custom.json changes reaches all of them.
+// page (ui/defaults.json), organised by module. Beside it, in the app's data folder, custom.json, laid out by the same
+// modules: what the user set in the app and wants kept, written by the app, never by hand (see persistSettings and
+// readCustom in app.js). Its `settings` are the user's settings themselves, only where they differ from defaults.json,
+// read by readSettings in store.js; any other module it has is laid over defaults.json as the app starts (layOver).
+// Every module reads a default from DEFAULTS when it needs it, never a copy taken as it loads.
 //   settings  what normalizeSettings in store.js falls back to: the language, the export's resolution, format,
 //             quality and file names, the scope a change reaches, the glass, the drawer, the cut-out's engine
 //   profile   what a new profile starts with (store.js, presets.js): its look and ground, its sizes, the starter
@@ -27,9 +29,9 @@ async function read() {
   try { return JSON.parse(await shipped()); }
   catch (e) { if (!NODE && globalThis.document && document.body) document.body.textContent = `SmedCover could not read its defaults (defaults.json): ${e.message}`; throw e; }
 }
-/** defaults.json as shipped, never changed: what custom.json is checked against. */
+/** defaults.json as shipped, never changed: what custom.json is checked against and written beside. */
 export const SHIPPED = freeze(await read());
-/** The defaults in use: defaults.json with custom.json laid over it (layOver). The one object, for as long as the page lives. */
+/** The defaults in use: defaults.json with custom.json's modules besides `settings` laid over it (layOver). The one object, for as long as the page lives. */
 export const DEFAULTS = clone(SHIPPED);
 
 /** What kind of JSON value `v` is: "number" (a finite one), "string", "boolean", "array", "object", or "" for anything else (null). */
@@ -78,16 +80,21 @@ function fit(v, like, at, out) {
   return items;
 }
 /**
- * Lays the user's own defaults, `custom` (custom.json as read; null or undefined: none), over defaults.json as shipped,
- * and makes DEFAULTS that, in place (the same object). Key by key, as deep as it goes: a value is taken only where
- * defaults.json has that key and a value of the same kind (a number for a number, text for text, true or false, a list
- * for a list, an object for an object, see layInto); anything else is let go and the default kept. Whether a value
- * taken is within range is for whatever reads it: the normalisers (normalizeSettings, normalizeProfile…) hold it there,
- * as they do what the files hold. Returns the paths of what was let go ("settings.quality", "ui.colour").
+ * Lays `custom` (custom.json as read; null or undefined: none) over defaults.json as shipped, and makes DEFAULTS that,
+ * in place (the same object). Every module but `settings`, which holds the user's settings rather than defaults (only
+ * where they differ from these, see readSettings in store.js), and so leaves DEFAULTS.settings as shipped, what they
+ * are told apart by. Key by key, as deep as it goes: a value is taken only where defaults.json has that key and a value
+ * of the same kind (a number for a number, text for text, true or false, a list for a list, an object for an object, see
+ * layInto); anything else is let go and the default kept. Whether a value taken is within range is for whatever reads
+ * it: the normalisers (normalizeProfile, oddsOf…) hold it there, as they do what the files hold. Returns the paths of
+ * what was let go ("profile.sizes[1].w", "ui.colour").
  */
 export function layOver(custom) {
   const out = [], next = clone(SHIPPED);
-  if (custom != null) { if (kindOf(custom) === "object") layInto(next, custom, SHIPPED, "", out); else out.push("(custom.json)"); }
+  if (custom != null) {
+    if (kindOf(custom) === "object") { const { settings, ...rest } = custom; layInto(next, rest, SHIPPED, "", out); }
+    else out.push("(custom.json)");
+  }
   for (const k of Object.keys(DEFAULTS)) delete DEFAULTS[k];
   Object.assign(DEFAULTS, next);
   return out;

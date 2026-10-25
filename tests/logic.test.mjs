@@ -131,7 +131,7 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.deepEqual(useFont(["A", "B", "C"], "B"), ["B", "A", "C"]);                 // the latest first, once
 });
 
-test("the defaults: defaults.json, the user's custom.json laid over it key by key; a name it does not know or a value of the wrong kind let go, the default kept; read where they are used, held to range there", async () => {
+test("the defaults: defaults.json, custom.json's modules besides the settings laid over it key by key; a name it does not know or a value of the wrong kind let go, the default kept; read where they are used, held to range there", async () => {
   const { DEFAULTS, SHIPPED, layOver } = await import("../ui/js/defaults.js");
   const { RULES, oddsOf } = await import("../ui/js/deal.js");
   const same = DEFAULTS;
@@ -146,14 +146,15 @@ test("the defaults: defaults.json, the user's custom.json laid over it key by ke
       ui: { columns: { left: { width: 400 } }, glassSlowMs: "fast" },
       colour: "red",
     });
-    assert.deepEqual(left.sort(), ["colour", "profile.sizes[1].w", "profile.sizes[2]", "profile.starter.channels[0].mood", "settings.drawer", "settings.nope", "settings.scale", "surprise.odds.groups.lookFx.many", "ui.glassSlowMs"]);
+    assert.deepEqual(left.sort(), ["colour", "profile.sizes[1].w", "profile.sizes[2]", "profile.starter.channels[0].mood", "surprise.odds.groups.lookFx.many", "ui.glassSlowMs"]);
     assert.equal(DEFAULTS, same, "the one object, changed in place");
     assert.deepEqual(DEFAULTS.ui.columns, { ...SHIPPED.ui.columns, left: { min: 280, width: 400 } }, "the rest of an object kept");
     assert.deepEqual([DEFAULTS.ui.glassSlowMs, DEFAULTS.settings.drawer, DEFAULTS.surprise.odds.groups.lookFx], [28, false, { none: 1, one: 0.33, two: 0.22 }]);
-    // the settings: what a file leaves out is the default, what it has is its own
+    // custom.json's settings are the user's own (readSettings), not defaults: those stay defaults.json's
+    assert.deepEqual(DEFAULTS.settings, SHIPPED.settings);
     const s = normalizeSettings({});
-    assert.deepEqual([s.quality, s.format, s.scale, s.glass, s.drawer], [80, "webp", 2, false, false]);
-    assert.deepEqual([normalizeSettings({ quality: 60, glass: true }).quality, normalizeSettings({ quality: 60, glass: true }).glass], [60, true]);
+    assert.deepEqual([s.quality, s.format, s.scale, s.glass, s.drawer], [92, "png", 2, true, false]);
+    assert.deepEqual([normalizeSettings({ quality: 60, glass: false }).quality, normalizeSettings({ quality: 60, glass: false }).glass], [60, false]);
     // a new profile: its look, its sizes (one not given in full left out), the starter's name and channels
     const p = normalizeProfile(starterProfile("en", ""));
     assert.deepEqual([p.name, p.style.look, p.style.theme, p.sizes.map((z) => `${z.w}x${z.h}`)], ["Studio", "riso", "dark", ["1080x1350"]]);
@@ -163,9 +164,10 @@ test("the defaults: defaults.json, the user's custom.json laid over it key by ke
     // Surprise me's chances: read from the defaults each time, held between 0 and 1, each group adding up to 1
     assert.equal(RULES.odds.chances.extra, 0.1);
     assert.deepEqual([oddsOf().chances.rail, oddsOf().chances.extra, oddsOf().groups.look.riso], [1, 0.1, 1]);
-    // out of range: held there by what reads it
-    layOver({ settings: { quality: 500, format: "gif", lang: "fr" } });
+    // out of range (a defaults.json changed so): held there by what reads it
+    Object.assign(DEFAULTS.settings, { quality: 500, format: "gif", lang: "fr" });
     assert.deepEqual([normalizeSettings({}).quality, normalizeSettings({}).format, normalizeSettings({}).lang], [100, "png", ""]);
+    layOver({});
     assert.equal(DEFAULTS.profile.style.look, "cel", "each time from defaults.json as shipped");
     // none, or not an object: the shipped defaults
     assert.deepEqual([layOver(null), DEFAULTS], [[], SHIPPED]);
@@ -173,6 +175,47 @@ test("the defaults: defaults.json, the user's custom.json laid over it key by ke
     assert.deepEqual(DEFAULTS, SHIPPED);
   } finally { layOver(null); }
   assert.deepEqual(normalizeProfile(starterProfile("zh", "")).categories.map((c) => c.name), ["日常", "教程", "作品"], "the starter as shipped");
+});
+
+test("custom.json keeps the user's settings: only what differs from defaults.json and what has no default, never the scope; read back, the same settings", async () => {
+  const { settingsToKeep, readSettings } = await import("../ui/js/store.js");
+  const s = normalizeSettings({
+    lang: "en", profileId: "p1", scale: 3, format: "jpeg", quality: 92, nameTemplate: "{title}", glass: false, glassHint: true, drawer: false,
+    exportSizes: { p1: { "1920x1080": false } }, exportDirs: { p1: "/Users/x/Covers" }, channels: { p1: "tuto" }, columns: { left: 300 },
+    recentFonts: ["Inter"], lookUse: { cel: 2 }, recipes: { cel: { params: { rain: 0.5 } } }, cutProxy: "http://proxy:8080",
+    layouts: [{ id: "a1", name: "Mine", template: "split", parts: {} }], surprise: { locks: { look: true }, odds: { chances: { rail: 0.2 }, groups: { layout: { a1: 0.5 } } } },
+  });
+  const kept = settingsToKeep(s);
+  assert.deepEqual(Object.keys(kept).sort(), ["channels", "columns", "exportDirs", "exportSizes", "format", "glass", "glassHint", "lang", "layouts", "lookUse", "nameTemplate", "profileId", "recentFonts", "recipes", "scale", "cutProxy", "surprise"].sort(),
+    "the quality and the drawer, as the defaults have them, left out");
+  assert.deepEqual(normalizeSettings(JSON.parse(JSON.stringify(kept))), s, "written and read back: the same settings");
+  assert.deepEqual(await readSettings({ settings: kept, ui: { centreMin: 300 } }, () => assert.fail("settings.json is not read")), s);
+  // a value equal to the default is not written (a later defaults.json reaches it); nor the scope, which every start sets
+  assert.deepEqual(settingsToKeep(normalizeSettings({ lang: "", scale: 2, format: "png", quality: 92, glass: true, drawer: false, channels: {}, columns: { left: 0 } })), {});
+  assert.deepEqual(settingsToKeep({ ...normalizeSettings({}), scope: "all" }), {});
+  assert.deepEqual(settingsToKeep(null), {});
+});
+
+test("the settings at start: custom.json's; with none there yet, settings.json's as earlier versions wrote it, read once and kept from then on in custom.json", async () => {
+  const { settingsToKeep, readSettings } = await import("../ui/js/store.js");
+  // settings.json, as earlier versions wrote it: every field, the defaults' too
+  const old = { lang: "zh", profileId: "brand", scale: 2, format: "webp", quality: 92, nameTemplate: "{n}-{channel}_{title}_{size}", exportSizes: {}, exportDirs: { brand: "D:\\covers" },
+    scope: "size", hideScene: false, glass: true, glassHint: false, drawer: true, cutEngine: "", cutProxy: "", channels: { brand: "vlog" }, columns: { left: 0, right: 360, setup: 0 },
+    recentFonts: [], lookUse: { riso: 4 }, recipes: {}, layouts: [], surprise: { locks: {}, odds: {} } };
+  let asked = 0;
+  const legacy = async () => { asked++; return old; };
+  for (const custom of [null, {}, { ui: { glassSlowMs: 40 } }]) {   // no custom.json, or one without settings
+    assert.deepEqual(await readSettings(custom, legacy), normalizeSettings(old));
+  }
+  assert.equal(asked, 3);
+  const s = await readSettings(null, legacy), kept = settingsToKeep(s);
+  assert.deepEqual(kept, { lang: "zh", profileId: "brand", format: "webp", exportDirs: { brand: "D:\\covers" }, drawer: true, channels: { brand: "vlog" }, columns: { left: 0, right: 360, setup: 0 }, lookUse: { riso: 4 } });
+  // custom.json written from it: read from then on, settings.json no more; the scope back to the defaults'
+  assert.deepEqual(await readSettings({ settings: kept }, legacy), { ...normalizeSettings(old), scope: "orient" });
+  assert.equal(asked, 4);
+  // settings set back to the defaults: none written, the settings kept all the same (settings.json is not read again)
+  assert.deepEqual(await readSettings({ settings: {} }, legacy), normalizeSettings({}));
+  assert.equal(asked, 4);
 });
 
 test("usedUserAssets finds uploads referenced by categories and layers", () => {
@@ -3913,14 +3956,17 @@ test("the scope's middle choice: an edit reaches every size facing this one's wa
   assert.deepEqual(["all", "orient", "size", "both", undefined].map((scope) => normalizeSettings({ scope }).scope), ["all", "orient", "size", "orient", "orient"]);
 });
 
-test("the scope every start begins at: the defaults' (those facing the same way as shipped), whatever was kept; custom.json may name another, one that is none of the three let go", async () => {
+test("the scope every start begins at: the defaults' (those facing the same way as shipped), whatever was kept; defaults.json may name another, one that is none of the three let go", async () => {
   const { startScope } = await import("../ui/js/store.js");
   const { layOver } = await import("../ui/js/defaults.js");
   try {
     assert.equal(startScope(), "orient");
     layOver({ settings: { scope: "size" } });
+    assert.equal(startScope(), "orient", "custom.json's settings are the user's, not the defaults");
+    const D = (await import("../ui/js/defaults.js")).DEFAULTS;
+    D.settings.scope = "size";   // defaults.json saying so
     assert.deepEqual([startScope(), normalizeSettings({}).scope, normalizeSettings({ scope: "all" }).scope], ["size", "size", "all"], "a scope kept is the settings' own; the start sets it");
-    layOver({ settings: { scope: "both" } });
+    D.settings.scope = "both";
     assert.deepEqual([startScope(), normalizeSettings({}).scope], ["orient", "orient"]);
   } finally { layOver(null); }
 });

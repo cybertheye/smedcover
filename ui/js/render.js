@@ -125,7 +125,7 @@ export function offEdge(b, G) {
 }
 function drawCategory(ctx, cat, G, C, show) {
   const acc = rgb(C), c = G.cat;
-  let x = c.x, nameW = 0, fs = c.fs;
+  let x = c.x, nameW = 0, fs = c.fs, nameBox = null;
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "round";
   if (show.name && cat.name) {
     const glyphs = [...cat.name];
@@ -133,11 +133,14 @@ function drawCategory(ctx, cat, G, C, show) {
     const full = widthAt(fs);
     if (full > c.maxW) fs = Math.max(36, Math.floor((fs * c.maxW) / full));
     nameW = widthAt(fs);
+    nameBox = { x: x - 6, y: c.y - fs * 0.95, w: nameW + 12, h: fs * 1.12 };
     ctx.save();
     ctx.translate(x, c.y);
     if (!show.upright) ctx.transform(1, 0, -0.1, 1, 0, 0);   // slanted, but in a column (see turned)
     const each = (fn) => { let cx = 0; for (const g of glyphs) { fn(g, cx); cx += ctx.measureText(g).width + 6; } };
-    const onBand = c.onAccent && !show.upright;   // in a column it reaches off the band: lettered as off it, outlined
+    // in a column it reaches off the band: lettered as off it, outlined, in the channel's colour; so where the band is too
+    // slim to hold it, or it was moved off it (`off`, see the catname painter)
+    const onBand = c.onAccent && !show.upright && !(show.off && show.off(nameBox));
     if (show.ink) { ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.09; if (!onBand) each((g, cx) => ctx.strokeText(g, cx, 0)); ctx.fillStyle = ctx.strokeStyle = show.ink; ctx.lineWidth = fs * 0.02; each((g, cx) => { ctx.strokeText(g, cx, 0); ctx.fillText(g, cx, 0); }); }
     else if (onBand) { ctx.fillStyle = ctx.strokeStyle = INK; ctx.lineWidth = fs * 0.03; each((g, cx) => { ctx.strokeText(g, cx, 0); ctx.fillText(g, cx, 0); }); }
     else {
@@ -146,7 +149,6 @@ function drawCategory(ctx, cat, G, C, show) {
     }
     ctx.restore();
   }
-  const nameBox = nameW ? { x: x - 6, y: c.y - fs * 0.95, w: nameW + 12, h: fs * 1.12 } : null;
   if (!show.plate || !cat.sub) return nameBox;
   const pf = c.inline ? Math.round(fs * 0.5) : 44, ph = Math.round(pf * 1.22);
   ctx.font = `700 ${pf}px ${fonts.en}, ${fonts.cn}`;
@@ -234,14 +236,28 @@ export function paintAccent(ctx, shape, G, C) {
 // `fs`, the type size it set, as large as it shows.
 
 let probe = null;
+/** The throw-away context a painting is measured on (marked, so costly effects skip it). */
+const probing = () => { if (!probe) { probe = document.createElement("canvas").getContext("2d"); probe.canvas._probe = true; } return probe; };
+/**
+ * Where placed() puts point (x, y) of a layer it places by `box` (what its painting returns) and `tr`: a function of
+ * the point, giving [x, y] on the canvas.
+ */
+function placedAt(box, tr) {
+  const px = box.x + box.w / 2, py = box.y + box.h / 2, a = tr.r * RAD, cos = Math.cos(a), sin = Math.sin(a), sx = tr.s * tr.kx, sy = tr.s * tr.ky;
+  return (x, y) => { const ix = (x - px) * sx, iy = (y - py) * sy; return [px + tr.dx + ix * cos - iy * sin, py + tr.dy + ix * sin + iy * cos]; };
+}
+/** The box the colour block is placed by (see placed): round its polygon. */
+function accentBox(G) {
+  const xs = G.accent.map((p) => p[0]), ys = G.accent.map((p) => p[1]), x = Math.min(...xs), y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
 /**
  * Draws fn(ctx) moved / scaled / stretched / rotated about the centre of the box it returns
  * ({x,y,w,h} in untransformed units), and maps that box to the canvas. The box is found first by
  * running fn on a throw-away context, so the result does not depend on any earlier frame.
  */
 function placed(ctx, tr, fn, known) {
-  if (!probe) { probe = document.createElement("canvas").getContext("2d"); probe.canvas._probe = true; }   // marked, so costly effects skip it
-  const box = known || fn(probe);
+  const box = known || fn(probing());
   if (!box) return null;
   const px = box.x + box.w / 2, py = box.y + box.h / 2;
   ctx.save();
@@ -667,8 +683,7 @@ const PAINT = {
   },
   subject: () => null,   // a layer of earlier files, turned into a photo layer as it is read (see app.js)
   accent(ctx, L, tr, env) {
-    const xs = env.G.accent.map((p) => p[0]), ys = env.G.accent.map((p) => p[1]), x = Math.min(...xs), y = Math.min(...ys);
-    return placed(ctx, tr, (c) => paintAccent(c, L.shape, env.G, env.C), { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y });
+    return placed(ctx, tr, (c) => paintAccent(c, L.shape, env.G, env.C), accentBox(env.G));
   },
   graphic(ctx, L, tr, env) {
     const g = env.cat.graphic;
@@ -723,9 +738,20 @@ const PAINT = {
       : (c) => accentTag(styled(c, env.C, true), env.cover.tag, env.G.tag.x, env.G.tag.y, env.G.tag.fs, env.acc, L.ink || INK);
     return placed(ctx, tr, columned(L) ? turned(paint, env, rulesOf(L, env)) : paint);
   },
+  /**
+   * The channel name, and its sub-name's plate. Where the layout puts it on the colour block it is lettered in ink; where
+   * it does not sit on a block shown, as both are placed — the block too slim to hold it (meetStandards lifts it above
+   * the words' foot), either moved, the block hidden — in the channel's colour, outlined (drawCategory), as it is off
+   * the band, to read over the field or a photo. The plate stays as it is.
+   */
   catname(ctx, L, tr, env) {
-    const v = columned(L), paint = (c) => drawCategory(styled(c, env.C, true), env.cat, env.G, env.C, { name: L.showName, plate: L.plate, ink: L.ink, upright: v });
-    return placed(ctx, tr, v ? turned(paint, env, rulesOf(L, env)) : paint);
+    const v = columned(L), show = { name: L.showName, plate: L.plate, ink: L.ink, upright: v };
+    const paint = (c) => drawCategory(styled(c, env.C, true), env.cat, env.G, env.C, show);
+    if (v || !env.G.cat.onAccent) return placed(ctx, tr, v ? turned(paint, env, rulesOf(L, env)) : paint);
+    const box = paint(probing()), at = box && placedAt(box, tr);   // the box placed() places it by
+    const blocks = env.cover.layers.filter((l) => l.type === "accent" && l.visible && appliesTo(l, env.cat.id)).map((l) => { const to = placedAt(accentBox(env.G), env.resolve(l)); return env.G.accent.map(([x, y]) => to(x, y)); });
+    show.off = (b) => !blocks.some((poly) => [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]].every(([x, y]) => inPoly(poly, ...at(x, y))));
+    return placed(ctx, tr, paint, box);
   },
   frame(ctx, L, tr, env) {
     if (look().frame) look().frame(ctx, env, lookValues());

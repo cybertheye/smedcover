@@ -3,7 +3,8 @@
 //   profile  a brand: name, categories, style, fonts, output sizes, and its default layer stack
 //   cover    the cover being edited: category, title, subtitle, tag, and its own working copy of the layers
 //   assets   pictures the user uploaded (shared by all profiles)
-//   settings app-level preferences: language, active profile, export options
+//   settings app-level preferences: language, active profile, export options (kept in custom.json, only what
+//            differs from defaults.json, see settingsToKeep and readSettings)
 //
 // In the desktop app everything lives in the app data directory (through the Rust side), and so it does on a
 // SmedCover server, whose page reaches the same commands over HTTP (see HOST); when the page is opened in a
@@ -88,7 +89,7 @@ export const uid = () => Math.random().toString(36).slice(2, 10);
 const str = (v, d = "") => (typeof v === "string" ? v : d);
 const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Math.min(hi, Math.max(lo, Number(v))) : d);
 const color = (v) => (/^#[0-9a-f]{6}$/i.test(str(v)) ? v.toLowerCase() : "#fcee0a");
-/** `v` where it is one of `ok`, else the default `d` where that is (defaults.json, or the user's custom.json over it), else `hard`. */
+/** `v` where it is one of `ok`, else the default `d` where that is (defaults.json's), else `hard`. */
 const oneOf = (v, ok, d, hard) => (ok.includes(v) ? v : ok.includes(d) ? d : hard);
 /** Looks that are gone, and what a profile that used one gets instead: its first name, or the nearest look left. */
 const RETIRED = { ghibli: "vivid", bluetone: "cyano", redstreet: "negative", gilded: "glass" };
@@ -238,15 +239,15 @@ export function normalizeExportSizes(raw) {
 /** What a change of place or layout reaches (settings.scope): every size, those facing the size shown's way, or that size. */
 const SCOPES = ["all", "orient", "size"];
 /**
- * The scope every start begins at, whatever it was when the app closed: the defaults' (settings.scope in defaults.json,
- * the user's custom.json over it), as shipped `orient`, every size facing the way the size shown does.
+ * The scope every start begins at, whatever it was when the app closed: the defaults' (settings.scope in defaults.json),
+ * as shipped `orient`, every size facing the way the size shown does. So it is not kept (settingsToKeep).
  */
 export const startScope = () => oneOf(DEFAULTS.settings.scope, SCOPES, null, "orient");
 /** The file name pattern exports start with (settings.nameTemplate in defaults.json). */
 const nameTemplate = () => str(DEFAULTS.settings.nameTemplate).trim() || "{n}-{channel}_{title}_{size}";
 /**
  * The settings as kept, every field there and within range: one missing or not of its kind is the default (`settings` in
- * defaults.json, the user's custom.json over it, see defaults.js), held to the same range.
+ * defaults.json, see defaults.js), held to the same range. The one place they are checked, whatever they were read from.
  */
 export function normalizeSettings(raw) {
   const s = raw && typeof raw === "object" ? raw : {}, layouts = normalizeLayouts(s.layouts), D = DEFAULTS.settings;   // layouts: the user's layout presets, for every profile (Surprise me deals them by their chances)
@@ -283,6 +284,30 @@ export function normalizeSettings(raw) {
     layouts,
     surprise: normalizeSurprise(s.surprise, layouts.map((l) => l.id)),
   };
+}
+/**
+ * The settings as custom.json keeps them (its `settings`, written by the app): only what differs from the settings of
+ * none (normalizeSettings({}), defaults.json's), so a value equal to the default is not written and a later change to
+ * defaults.json reaches whoever never changed it; what has no default (the profile last open, each profile's channel,
+ * the columns' widths, the layout presets…) once it holds something. Not the scope, which every start sets to the
+ * defaults' (startScope). Read back by readSettings: normalizeSettings of it is the settings it was taken from.
+ */
+export function settingsToKeep(s) {
+  const d = normalizeSettings({}), out = {};
+  for (const [k, v] of Object.entries(s && typeof s === "object" ? s : {})) {
+    if (k in d && k !== "scope" && JSON.stringify(v) !== JSON.stringify(d[k])) out[k] = v;
+  }
+  return out;
+}
+/**
+ * The settings the app starts with: custom.json's (`custom`, the file as read), over defaults.json, normalised. With no
+ * settings there (no custom.json, or one without them), those of settings.json, where they were kept before (`legacy`,
+ * asked for only then: a function that reads it), once: from then on custom.json is written, and settings.json is left
+ * as it was. A custom.json that is not JSON is read as `{ settings: {} }`, the defaults (see readCustom in app.js).
+ */
+export async function readSettings(custom, legacy) {
+  const own = custom && typeof custom === "object" && !Array.isArray(custom) && Object.hasOwn(custom, "settings");
+  return normalizeSettings(own ? custom.settings : await legacy());
 }
 /** How many layout presets are kept at most, how long a name may be, and how many sizes of its own a preset may keep. */
 export const LAYOUTS = { most: 24, name: 40, custom: 12 };
