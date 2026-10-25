@@ -267,9 +267,12 @@ design leaves out `DEFAULT_OFF` (the channel name and graphic): `normalizeLayers
 when it puts back missing layout layers, which for a new profile is all of them; a profile's design and its
 covers still on the placeholder title were made to leave them out once (`lean: true`, in `loadCovers()`).
 The parts are stacked in the layer list's order: a row of the Layers sheet dropped on another goes directly above it
-(`moveLayer()`), on this cover alone. `orderLayout(layers, types)` (bottom-first types, the ground first; each layer the
-user added going with the layout layer it lies directly above) puts a whole cover in an order of types; the app calls it
-only through `reorderLayout()`, for the old default order.
+(`moveLayer()`). When that changes the order of the layout's own layers (`layoutOrder()`), the profile's design takes
+the new order too (`orderLayout(S.profile.design.layers, order)` in `layerRow()`'s drop), so a new channel's cover and
+*Empty this cover* stack them so, as the old Layout parts list did; the cover and the design are one undo step (one
+`touch()`). *Bring forward* and *Send backward* (`shiftLayer()`) change this cover alone. `orderLayout(layers, types)`
+(bottom-first types, the ground first; each layer the user added going with the layout layer it lies directly above)
+puts a whole cover or design in an order of types; `reorderLayout()` uses it for the old default order.
 
 **The brand logo**: `brand.logo` in the profile is the id of an asset of the user's (uploaded in Settings →
 Brand & channels or in the logo layer's properties, both `logoControls()`; so it travels with an exported profile: `usedUserAssets()` names it). The `logo` layer draws it at
@@ -488,9 +491,9 @@ of it), which every size follows, unless a size has a layout of its own: `style.
 adjust } }`, as a layer's `t.by` lies over `t.all`, except that it replaces rather than adds. `layoutOf(style, key)` in
 `layout.js` is the one place that answers which `{ template, adjust }` a size is drawn in, and everything that lays a
 cover out asks it: `paintCover()` (through `coverLayout(look, lay, w, h, parts)` in `render.js`, which is `L.layout`
-or `layout()`, `adjustLayout()` and `meetStandards()` in a row, and which the Layout sheet's sliders use too, to start
+or `layout()`, `adjustLayout()` and `meetStandards()` in a row, and which the colour block's sliders use too, to start
 from the layout as it would be drawn at the size shown: with the parts the cover has there, `coverAt()`, a part kept
-to other sizes left out), the canvas's diamonds, the Layout sheet, layout presets
+to other sizes left out), the canvas's diamonds, the colour block's *Size & slant*, layout presets
 (`takeLayout()` takes the block at each of the profile's sizes, `putLayout()` puts it there, see 3), the caption of each hand in Surprise me's window (`handSays()`). Hence thumbnails, exports, the 3D view and the cover
 standards follow it with nothing of their own. `ownLayout(style, key)` says whether a size has its own;
 `setLayoutOf(style, keys, lay)` writes one: `keys` null, the profile's own (the template chosen, its adjustments,
@@ -499,10 +502,16 @@ the other templates' kept), else each size of `keys` as its own; `followLayout(s
 
 The scope decides where a change of layout lands, as it does for a placement: `all` the profile's own, `orient` each
 size facing the canvas's way (the layout the canvas's size is drawn in, as it is now, put on each), `size` the
-canvas's size. The Layout sheet's template box (`layoutBox()`) has no buttons for the scope, only a line saying which
-sizes it reaches and that it is switched under the canvas; and, when the size shown
-has its own layout, *This size has its own layout* with
-*Follow again*; the strip marks such sizes (`markStrip()`). A diamond dragged on the canvas changes what the scope
+canvas's size. The colour block's *Size & slant* (`blockSection()`, a group of its properties, so on its bar too) holds
+the template's two block sliders (`blockSliders()`, how much the block takes and how its edge leans, over
+`layoutAdjuster()`, which `templateControls()` builds on too) and lands where the Layout sheet's template box does
+(`layoutScope()`): no buttons for the scope, its ⓘ saying which sizes it reaches and that it is switched under the
+canvas; and, when the size shown has its own layout, *This size has its own layout* with *Follow again* (with `all`
+the sliders then change the profile's own, which that size does not follow). A slider dragged draws the cover as a
+draft (`draftTouch()`), one step of undo; a diamond let go on the canvas builds the drawer again, so the sliders follow.
+The strip marks a size with its own layout (`markStrip()`). The template box itself (`layoutBox()`: the template, the
+block's and the title box's sliders, the swap, the way back to the template's own, *Wide side by side, tall and square
+stacked*) is hidden for now (`TEMPLATE_BOX` false in `app.js`, its code kept): the template is changed by a layout preset. A diamond dragged on the canvas changes what the scope
 says, but with `all` on a size with its own layout it changes that one: it is the one drawn under the pointer. A
 template chosen for a size starts from the adjustments the profile keeps for that template. A size removed in Settings
 takes its own with it; `normalizeProfile()` keeps `layoutBy` only for the profile's sizes, templates there are, and
@@ -1678,7 +1687,7 @@ deal is not made twice; a key held down (`e.repeat`) deals, opens, saves or expo
 **The dock and the sheets.** `syncTabs()` fills the dock with a button a sheet (`TABS.edit`; the icons `SHELL_ICONS`,
 drawn by `ico()`), one sheet open at a time (`S.tab.edit`, not saved; `showSheet()`): Content (`contentSheet()`: the channel and the
 cover's words, the long notes behind an ⓘ, *Copy from another channel…* at its foot), Look (`lookSheet()`), Layout
-(`layoutSheet()`: the layout presets, this size's template, the colour block's edge, which parts show; *Hide every
+(`layoutSheet()`: the layout presets, this size's template while `TEMPLATE_BOX` lets it show, the colour block's edge, which parts show; *Hide every
 layout part* and *Reset the layout parts' places* at its foot), Assets (`assetsSheet()`: the ways to add, the search, this cover's
 photos, then shelves showing their first two rows until *All*, `shelf()`, `SHELVES`) and Layers (`layersSheet()`).
 `renderPanel()` builds the open sheet whole; each but Layers begins with its own heading (`sheetHead()`). Whether a change bears on it is asked of
@@ -1779,7 +1788,7 @@ or hide them as the sheet changes. A press inside one goes through to the canvas
 **The bar over the canvas.** The selected layer's most used settings stand on a bar of glass over it (`BAR`, `#ftb`, in
 `#center`). `barItems(L)` says which, by the kind of layer — a lettering's font, effect, colour and columns; a photo's
 background, crop, AI repaint and another picture; an asset's colour and crop; a weave; a colour layer's colour; the
-colour block's shape; the ground — each a group of the properties (`sec`), shown in a popover under the bar (`POP`,
+colour block's shape, and its size and slant; the ground — each a group of the properties (`sec`), shown in a popover under the bar (`POP`,
 `#fpop`; `FTB.pop` the one open), controls of its own (`pop`: the font), or something it does (`act`); *More…* opens the
 drawer. A group's popover holds the drawer's own controls for it, built afresh by `secOf()` (it runs `typeControls()`
 and takes that group out), so the two never say different things and a control added to a group is on the bar too.
@@ -2042,6 +2051,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | add a sticker | `stickers.js` |
 | add a colour block shape | `ACCENT_SHAPES` in `layers.js`, `paintAccent()` and `edgePoints()` in `render.js`, a name in `i18n.js` |
 | add a template | `TEMPLATES` and `layout()` in `layout.js`, a name in `i18n.js` |
+| show the Layout sheet's template box again, or change the colour block's *Size & slant* | `TEMPLATE_BOX` and `layoutBox()`; `blockSection()`, `blockSliders()`, `layoutAdjuster()` and `layoutScope()` in `app.js` |
 | add a property to a layer | `PROPS` and `normalizeLayer()` in `layers.js`, `PAINT` in `render.js`, `typeControls()` in `app.js` (`headlineControls()` for the title and text layers) |
 | add an export format | `encode()` in `lib.rs`, `EXT` and the format pickers in `app.js` (`exportDialog()`, `sizesTab()`) |
 | add a drawing operation for AI assets | validation and `drawSpec()` in `spec.js`, the prompt and examples in `ai.js` |

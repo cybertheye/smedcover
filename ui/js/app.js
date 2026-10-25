@@ -11,7 +11,7 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, refitSizes, acrossSizes, cutFrom } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, normalizeSize, exportName, sizeCaption, ratioText,
@@ -684,7 +684,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
         setLayoutOf(st, keys, { template: lay.template, adjust: dragLayout(cv._layout, vw, vh, lay.adjust, lh.id, p.x, p.y, cv._titleBox) });
         moved = true; touch({ profile: true });
       };
-      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; if (moved && onStyleTab()) renderPanel(); };
+      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; if (moved) { if (onStyleTab()) renderPanel(); renderSide(); } };   // the colour block's sliders (blockSection) too
       return;
     }
     const sh = sceneGrip(e);
@@ -868,7 +868,8 @@ function contentSheet() {
 /**
  * Layout → which parts show: one switch for each of the template's layers but the ground, top first as in the layer
  * list. One switched off is left out of this cover (`off`, see layers.js): hidden, gone from the layer list; on again,
- * it is back as it was. The order they are stacked in is the layer list's (Layers).
+ * it is back as it was. The order they are stacked in is the layer list's (Layers), where a row dragged makes the new
+ * order the profile's default too.
  */
 function partsBox() {
   const list = S.cover.layers.filter((l) => isLayout(l) && l.type !== "bg").reverse();   // top first, as in the layer list
@@ -2373,6 +2374,24 @@ function removeAsset(id) {
  * named the other way); else a slider is on its way.
  */
 function templateControls(st, at, changed, to = null) {
+  const a = layoutAdjuster(st, at, changed, to), { tpl, adj, put, set } = a;
+  const split = tpl === "split", has = Object.keys(adj).length > 0;
+  return [
+    select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), tpl, (v) => put(v, (st.layoutAdjust || {})[v] || {}, true)),   // the adjustments' sliders follow the template chosen
+    el("div", { style: "margin-top:14px" }, cap("style.layout")),
+    blockSliders(a),
+    slider2(t("style.layTitleW"), LAYOUT_LIMITS.tw[0], LAYOUT_LIMITS.tw[1], 0.01, adj.tw ?? 1, (v) => set("tw", v)),
+    slider2(t("style.layTitleH"), LAYOUT_LIMITS.th[0], LAYOUT_LIMITS.th[1], 0.01, adj.th ?? 1, (v) => set("th", v)),
+    el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: !!adj.flip, onchange: (e) => set("flip", e.target.checked, true) }), el("span", {}, t(split ? "style.layFlipSplit" : "style.layFlipStack"))),
+    el("button", { class: "btn wide", style: "margin-top:10px", disabled: !has, onclick: () => put(tpl, {}, true) }, t("style.layReset")),
+  ];
+}
+/**
+ * What templateControls changes, for the colour block's own sliders too (blockSection): the template and adjustments
+ * `to` reaches (`tpl`, `adj`), where the block is drawn with them at `at` (`now`: {size, slant}, see layoutValues), and
+ * the way to change them — put(template, adjust, again) puts a layout there; set(key, value, again) one adjustment.
+ */
+function layoutAdjuster(st, at, changed, to = null) {
   const lay = () => (to ? layoutOf(st, to.key) : { template: st.template, adjust: (st.layoutAdjust || {})[st.template] || {} });
   const { template: tpl, adjust: adj } = lay();
   const now = at ? layoutValues(coverLayout(LOOKS[st.look] || LOOKS.cel, { template: tpl, adjust: adj }, at.w, at.h, at.parts), at.w, at.h) : { size: 0.3, slant: 0 };
@@ -2384,18 +2403,13 @@ function templateControls(st, at, changed, to = null) {
     if ((k === "size" || k === "slant") && a.size == null && a.slant == null) Object.assign(a, { size: now.size, slant: now.slant });
     put(tpl, { ...a, [k]: v }, again);
   };
-  const split = tpl === "split", has = Object.keys(adj).length > 0;
-  return [
-    select(["stack", "split", "banner"].map((k) => [k, t("tpl." + k)]), tpl, (v) => put(v, (st.layoutAdjust || {})[v] || {}, true)),   // the adjustments' sliders follow the template chosen
-    el("div", { style: "margin-top:14px" }, cap("style.layout")),
-    slider2(t(split ? "style.laySide" : "style.layBand"), LAYOUT_LIMITS.size[0], LAYOUT_LIMITS.size[1], 0.01, adj.size ?? now.size, (v) => set("size", v)),
-    slider2(t("style.laySlant"), LAYOUT_LIMITS.slant[0], LAYOUT_LIMITS.slant[1], 0.005, adj.slant ?? now.slant, (v) => set("slant", v)),
-    slider2(t("style.layTitleW"), LAYOUT_LIMITS.tw[0], LAYOUT_LIMITS.tw[1], 0.01, adj.tw ?? 1, (v) => set("tw", v)),
-    slider2(t("style.layTitleH"), LAYOUT_LIMITS.th[0], LAYOUT_LIMITS.th[1], 0.01, adj.th ?? 1, (v) => set("th", v)),
-    el("label", { class: "chk", style: "margin:10px 0 0" }, el("input", { type: "checkbox", checked: !!adj.flip, onchange: (e) => set("flip", e.target.checked, true) }), el("span", {}, t(split ? "style.layFlipSplit" : "style.layFlipStack"))),
-    el("button", { class: "btn wide", style: "margin-top:10px", disabled: !has, onclick: () => put(tpl, {}, true) }, t("style.layReset")),
-  ];
+  return { tpl, adj, now, put, set };
 }
+/** The colour block's two sliders, of layoutAdjuster's `a`: how much of the canvas it takes (the panel's width for Split, the band's height else), and how its edge leans. */
+const blockSliders = (a) => [
+  slider2(t(a.tpl === "split" ? "style.laySide" : "style.layBand"), LAYOUT_LIMITS.size[0], LAYOUT_LIMITS.size[1], 0.01, a.adj.size ?? a.now.size, (v) => a.set("size", v)),
+  slider2(t("style.laySlant"), LAYOUT_LIMITS.slant[0], LAYOUT_LIMITS.slant[1], 0.005, a.adj.slant ?? a.now.slant, (v) => a.set("slant", v)),
+];
 /**
  * The size on the canvas as templateControls wants it: its virtual canvas, and which parts that take room the cover has
  * there — as it is drawn there (coverAt in render.js), a part kept to other sizes left out, so the sliders start from
@@ -2410,14 +2424,34 @@ const shownAt = () => { const z = selSize(), [w, h] = virtualSize(z.w, z.h); ret
  * side, tall and square stacked" lays every size out by its orientation at once.
  */
 function layoutBox() {
-  const st = S.profile.style, key = S.sel, keys = scopeKeys(), own = ownLayout(st, key), z = selSize(), ratio = ratioText(z.w, z.h);
-  const reach = keys ? keys.map((k) => { const s = S.profile.sizes.find((x) => sizeKey(x) === k); return s ? ratioText(s.w, s.h) : k; }).join(" · ") : "";
+  const st = S.profile.style, at = layoutScope(() => touch({ profile: true, panel: true }));
   return el("div", { class: "box" }, capInfo("style.template", t("style.layHint")),
-    el("div", { class: "hint", style: "margin:0 0 10px" }, t("style.layTo." + S.settings.scope, reach), " ", t("style.scopeWhere")),
-    own && el("div", { class: "layown" }, el("span", {}, t(keys ? "style.own" : "style.ownAll", ratio)),
-      el("button", { class: "linkbtn", title: t("style.followTip"), onclick: () => { followLayout(st, key); touch({ profile: true, panel: true }); } }, t("style.follow"))),
-    templateControls(st, shownAt(), (again) => { if (!again) return draftTouch({ profile: true }); touch({ profile: true }); later("laybox", 60, renderPanel); }, keys && { key, keys }),
+    el("div", { class: "hint", style: "margin:0 0 10px" }, at.says, " ", t("style.scopeWhere")),
+    at.own,
+    templateControls(st, shownAt(), (again) => { if (!again) return draftTouch({ profile: true }); touch({ profile: true }); later("laybox", 60, renderPanel); }, at.to),
     el("button", { class: "btn wide", style: "margin-top:8px", title: t("style.byOrientTip"), onclick: byOrient }, t("style.byOrient")));
+}
+/**
+ * Where a change of the layout lands, as the scope under the canvas says (see layoutBox): `to`, what templateControls
+ * and layoutAdjuster take (null: the profile's own); `says`, which sizes, in a sentence; `own`, while the size on the
+ * canvas has a layout of its own, a line saying so with Follow again, after which `followed()` is called.
+ */
+function layoutScope(followed) {
+  const st = S.profile.style, key = S.sel, keys = scopeKeys(), z = selSize();
+  const reach = keys ? keys.map((k) => { const s = S.profile.sizes.find((x) => sizeKey(x) === k); return s ? ratioText(s.w, s.h) : k; }).join(" · ") : "";
+  return { to: keys && { key, keys }, says: t("style.layTo." + S.settings.scope, reach),
+    own: ownLayout(st, key) && el("div", { class: "layown" }, el("span", {}, t(keys ? "style.own" : "style.ownAll", ratioText(z.w, z.h))),
+      el("button", { class: "linkbtn", title: t("style.followTip"), onclick: () => { followLayout(st, key); followed(); } }, t("style.follow"))) };
+}
+/**
+ * The colour block's properties: how much of the canvas it takes and how its edge leans, the template's own sliders
+ * (blockSliders), changed where the scope under the canvas says, as the Layout sheet's template box changes them
+ * (layoutScope); dragged, the cover is drawn as a draft (draftTouch), one step of undo.
+ */
+function blockSection() {
+  const at = layoutScope(() => touch({ profile: true, side: true }));
+  const a = layoutAdjuster(S.profile.style, shownAt(), (again) => (again ? touch({ profile: true, side: true }) : draftTouch({ profile: true })), at.to);
+  return psec("props.sec.block", [blockSliders(a), at.own], `${t("props.blockHint")} ${at.says} ${t("style.scopeWhere")}`);
 }
 /** "Wide side by side, tall and square stacked": every size laid out by its orientation (layoutByOrient in layout.js); one step of undo. */
 function byOrient() {
@@ -3281,13 +3315,18 @@ function previewTag() {
   else if (lay) tag.textContent = t("layouts.previewing", lay.name);
   for (const c of document.querySelectorAll("#panel .preset")) c.classList.toggle("previewing", !!lay && c.dataset.id === lay.id);
 }
-/** Layout: the layout presets, the template at this size, the colour block's edge, which parts show, and all the layout hidden or put back in place. */
+/**
+ * Whether the Layout sheet shows the template box (layoutBox): hidden for now, the colour block's size and slant in its
+ * own properties (blockSection); layoutBox, templateControls and byOrient stay.
+ */
+const TEMPLATE_BOX = false;
+/** Layout: the layout presets, the template at this size (while TEMPLATE_BOX), the colour block's edge, which parts show, and all the layout hidden or put back in place. */
 function layoutSheet() {
   const off = layoutLayers().every((l) => !l.visible);
   return [
     sheetHead(t("sheet.layout"), t("sheet.layoutSub")),
     presetCards(),
-    layoutBox(),
+    TEMPLATE_BOX && layoutBox(),
     shapesSection(),
     partsBox(),
     el("div", { class: "sheet-foot" },
@@ -3736,8 +3775,12 @@ function layerRow(L) {
       e.preventDefault(); e.stopPropagation();
       const id = dragId; dragId = null;
       if (!id) return;
-      const from = S.cover.layers.findIndex((l) => l.id === id), to = S.cover.layers.indexOf(L);
-      if (moveLayer(S.cover.layers, id, from < to ? to : to + 1)) touch({ cover: true, side: true, panel: onCoverTab() }); else renderSide();
+      const from = S.cover.layers.findIndex((l) => l.id === id), to = S.cover.layers.indexOf(L), was = layoutOrder(S.cover.layers).join();
+      if (!moveLayer(S.cover.layers, id, from < to ? to : to + 1)) return renderSide();
+      // the layout's parts now stacked otherwise: the profile's design takes their order too, so new covers and Empty
+      // this cover have it (the layers the user added stay where they are in it); with the cover, one step of undo
+      const order = layoutOrder(S.cover.layers), design = order.join() !== was && orderLayout(S.profile.design.layers, order);
+      touch({ cover: true, profile: design, side: true, panel: onCoverTab() });
     } },
     layerWhat(L),
     el("span", { class: "nm", title: free ? t("layers.rename") : null, onclick: free ? (e) => nameClick(e, L) : null }, layerName(L),
@@ -4799,7 +4842,7 @@ function typeControls(L) {
         oneTheme ? el("div", { class: "hint", style: "margin:0" }, t("props.oneTheme")) : select([["dark", t("theme.dark")], ["light", t("theme.light")]], S.profile.style.theme, (v) => { S.profile.style.theme = v; touch({ profile: true, side: true }); })], [t("props.bgHint"), covered && t("props.lightUnderPhoto")].filter(Boolean).join(" "));
     }
     case "photo": return photoControls(L, set);
-    case "accent": return psec("props.sec.shape", select(ACCENT_SHAPES.map((k) => [k, t("shape." + k)]), L.shape, (v) => set("shape", v, false)));
+    case "accent": return [psec("props.sec.shape", select(ACCENT_SHAPES.map((k) => [k, t("shape." + k)]), L.shape, (v) => set("shape", v, false))), blockSection()];
     case "brand": return [font(), ink("#ffffff"), psec("props.sec.show", check("props.rail", L.rail, (v) => set("rail", v)))];
     case "logo": return psec("props.sec.logo", logoControls(), t("props.logoHint"));
     case "title": case "subtitle": case "text": return headlineControls(L, set);
@@ -5200,7 +5243,7 @@ function barItems(L) {
   }
   if (canWeave(L)) items.push(sec("props.sec.weave", t("props.sec.weave"), { on: !!L.weave }));
   if (T === "solid") items.push(sec("props.sec.color", t("bar.color"), { chip: L.color || cat().color }));
-  if (T === "accent") items.push(sec("props.sec.shape", t("props.sec.shape")));
+  if (T === "accent") items.push(sec("props.sec.shape", t("props.sec.shape")), sec("props.sec.block", t("props.sec.block")));
   if (T === "bg") items.push(sec("props.sec.ground", t("props.sec.ground")));
   items.push({ key: "more", label: t("bar.more"), title: t(S.settings.drawer ? "drawer.close" : "drawer.open"), on: S.settings.drawer, act: () => setDrawer(!S.settings.drawer) });
   return items;
