@@ -24,6 +24,8 @@ dirs = { workspace = true }
 # The MCP endpoint (see the workspace's Cargo.toml).
 rmcp = { workspace = true }
 getrandom = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
 
 # The subject cut-out uses Apple's Vision framework, reached through the Objective-C runtime.
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -32,3 +34,5 @@ objc2-foundation = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# A paused clock, for the waits and timeouts of the calls handed to the page.
+tokio = { workspace = true, features = ["test-util"] }

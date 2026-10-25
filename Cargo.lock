@@ -3268,6 +3268,8 @@ dependencies = [
  "sha2",
  "tar",
  "tempfile",
+ "tokio",
+ "tokio-util",
  "ttf-parser",
  "ureq",
  "zip",
