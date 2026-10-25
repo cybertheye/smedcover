@@ -7,10 +7,12 @@
 // — and runs as one step of undo when its tool says so (agentStep in app.js). A call is let go of — answered, the
 // window given back, the next call started, what it does later dropped — when nothing is heard from it for its
 // timeout, when the host cancels it, or when the user stops waiting. What each tool takes is checked first (checkCall
-// in tools.js); what it does is commands.js's. A transport brings the calls and takes the answers (see serve below);
-// the dev hook, globalThis.smedcoverAgent, runs the same dispatcher from the browser's console or a test. No DOM at
-// the top: Node imports this file for makeQueue, whenIdle and makeAgent.
+// in tools.js); what it does is commands.js's. A transport brings the calls and takes the answers (see serve below): in
+// the desktop app a Tauri channel handed to its endpoint (tauriTransport), which also brings the endpoint's status for
+// Settings → Agents (MCP, onMcpStatus); the dev hook, globalThis.smedcoverAgent, runs the same dispatcher from the
+// browser's console or a test. No DOM at the top: Node imports this file for makeQueue, whenIdle and makeAgent.
 import { TOOL_BY, toolsJson, toolsText, checkCall, isError, ToolError } from "./tools.js";
+import { HOST, invoke } from "./store.js";
 import { t } from "./i18n.js";
 
 /** What a call cancelled while it waited answers (nothing is sent for it: the host has let it go). */
@@ -284,11 +286,40 @@ export function serve(agent, transport) {
     },
     (id) => agent.cancel(id));
 }
-// TAURI TRANSPORT — to be written with the Rust side (agent-rust-design §4–§5; not there yet): once start() is done,
-// invoke("mcp_attach", {channel: new __TAURI__.core.Channel(), toolsHash: await toolsHash()}); the channel's messages
-// are {kind: "call", id, tool, args, client, timeoutMs} → onCall, {kind: "cancel", id} → onCancel, {kind: "status",
-// status} → the Settings page; reply(id, r) = invoke("mcp_reply", {reply: r}), progress(id, p) = invoke("mcp_progress",
-// {id, ...p}). Then serve(agent, tauriTransport()) in startAgent, under HOST === "tauri".
+/** The endpoint's status as the host last sent it (mcp.rs: {on, state, port, url, error?, page, clients, inFlight, lastCall, toolsMismatch…}), and who is told each one. */
+export const MCP = { status: null, told: new Set() };
+/** `fn(status)` is told each status the host sends from now on; returns what stops it. */
+export function onMcpStatus(fn) { MCP.told.add(fn); return () => MCP.told.delete(fn); }
+function heard(status) {
+  MCP.status = status;
+  for (const fn of MCP.told) try { fn(status); } catch (e) { console.error(e); }
+}
+/**
+ * The desktop app's transport: a Tauri Channel, handed to Rust with mcp_attach once listen() is called (the page has
+ * started), brings {kind: "call", id, tool, args, client?, timeoutMs} → onCall, {kind: "cancel", id} → onCancel and
+ * {kind: "status", status} → MCP (Settings → Agents); answers go back by mcp_reply, progress by mcp_progress. `attached`:
+ * mcp_attach's promise ({epoch, toolsMismatch, status}). A reload makes a new page, which attaches again (the host
+ * fails the calls the last one had).
+ */
+function tauriTransport() {
+  const transport = {
+    attached: null,
+    listen(onCall, onCancel) {
+      const ch = new globalThis.__TAURI__.core.Channel();
+      ch.onmessage = (m) => {
+        if (!m || typeof m !== "object") return;
+        if (m.kind === "call") onCall(m);
+        else if (m.kind === "cancel") onCancel(m.id);
+        else if (m.kind === "status") heard(m.status);
+      };
+      transport.attached = toolsHash().then((hash) => invoke("mcp_attach", { channel: ch, toolsHash: hash }))
+        .then((info) => { heard(info.status); return info; }, (e) => { console.error("[agent] mcp_attach:", e); return null; });
+    },
+    reply: (id, r) => { invoke("mcp_reply", { reply: r }).catch((e) => console.error("[agent] mcp_reply:", e)); },
+    progress: (id, p) => { invoke("mcp_progress", { id, ...p }).catch(() => {}); },
+  };
+  return transport;
+}
 
 /** SHA-256 of ui/tools.json as built (toolsText), in hex: the list this page answers to, for the host to compare with the file it serves. */
 export async function toolsHash() {
@@ -310,10 +341,20 @@ function devHook(agent) {
     tools: () => toolsJson(),
   });
 }
-/** Starts the agent shell over what app.js gives it (see makeAgent): the window's guards, the dev hook, and the host's transport. Returns the agent. */
+/**
+ * Starts the agent shell over what app.js gives it (see makeAgent): the window's guards, the dev hook, and the host's
+ * transport (the desktop app's channel: calls taken from now on). Returns the agent; `attached`, the transport's
+ * attach (resolves null where there is none, or it failed).
+ */
 export function startAgent(opts) {
   const agent = makeAgent(opts);
   guard();
   devHook(agent);
+  agent.attached = Promise.resolve(null);
+  if (HOST === "tauri") {
+    const transport = tauriTransport();
+    serve(agent, transport);
+    agent.attached = transport.attached;
+  }
   return agent;
 }

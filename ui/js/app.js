@@ -31,7 +31,8 @@ import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, moreChanged, sheetOrde
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt, coverCrop } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, AI_DEFAULTS, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 import { makeCommands } from "./commands.js";
-import { startAgent, stepping } from "./agent.js";
+import { toolsJson } from "./tools.js";
+import { startAgent, stepping, MCP, onMcpStatus } from "./agent.js";
 
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
@@ -2882,6 +2883,150 @@ function textAiPane() {
     el("div", { class: "wide" }, cap("ai.notes"), el("textarea", { value: c.notes, spellcheck: false, style: "height:84px;font-size:14px", placeholder: t("ai.notesPh"), oninput: (e) => set("notes", e.target.value) })),
     el("div", { class: "aifoot" }, testBtn, testLine(AI.test)),
     el("div", { class: "hint" }, t("ai.privacy")),
+  ];
+}
+
+// ---------- Settings → Agents: the MCP endpoint agents (Claude Code, Codex…) reach this window through (mcp.rs in the app)
+/** Whether the host has the endpoint: the desktop app's alone for now. */
+const CAN_AGENTS = HOST === "tauri";
+/**
+ * What the page keeps of it besides the status (agent.js's MCP, sent by the host as it changes): the token once read
+ * (shown or not), the port being typed (null: the one in force), a switch on its way, a read under way.
+ */
+const AGENTS = { token: "", show: false, port: null, busy: false, read: false };
+const isPort = (v) => /^\d+$/.test(String(v).trim()) && +v >= 1024 && +v <= 65535;
+/** The status and the token, read once, as the page first shows (later statuses come by themselves). */
+async function agentsRead() {
+  if (AGENTS.read) return;
+  AGENTS.read = true;
+  try {
+    const [status, token] = await Promise.all([invoke("mcp_status"), invoke("mcp_token")]);
+    MCP.status = status; AGENTS.token = token;
+  } catch (e) { fail(e); }
+  if (S.mode === "setup" && S.tab.setup === "agents") renderPanel();
+}
+/** Turns the endpoint on or off, on `port` if given; the status it answers is drawn. */
+async function mcpSet(on, port = null) {
+  if (AGENTS.busy) return;
+  AGENTS.busy = true; renderPanel();
+  try { MCP.status = await invoke("mcp_set", { on, port }); if (port != null) AGENTS.port = null; }
+  catch (e) { fail(e); }
+  AGENTS.busy = false; renderPanel(); mcpLightSync();
+}
+/** A new token, once the user says so: the old one stops working at once. */
+async function newToken() {
+  if (!(await askSure({ title: t("mcp.newSure"), body: t("mcp.newBody"), go: t("mcp.newGo") }))) return;
+  try { AGENTS.token = await invoke("mcp_token", { regenerate: true }); toast(t("mcp.newDone")); }
+  catch (e) { fail(e); }
+  renderPanel();
+}
+/** Puts `text` on the clipboard (a hidden field's copy where the clipboard's own way is refused), and says so. */
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const a = document.body.appendChild(el("textarea", { value: text, readOnly: true, style: "position:fixed;left:-9999px;opacity:0" }));
+    a.select(); document.execCommand("copy"); a.remove();
+  }
+  toast(t("mcp.copied"));
+}
+/** How long ago `at` (ms since 1970) was, in a few words. */
+function ago(at) {
+  const s = Math.max(0, Math.round((Date.now() - at) / 1000));
+  return s < 10 ? t("mcp.now") : s < 60 ? t("mcp.secs", s) : s < 3600 ? t("mcp.mins", Math.floor(s / 60)) : new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+/** The token as shown: hidden but for its last four characters, unless the user asked to see it. */
+const tokenShown = (token) => (AGENTS.show || !token ? token : "••••••••" + token.slice(-4));
+/** The lines that set an agent up, each [label key, text to copy, text shown]: Claude Code's command, Codex's config, a JSON one for other clients. */
+function setupLines(url, token) {
+  const lines = (tok) => [
+    ["mcp.claude", `claude mcp add --transport http smedcover ${url} --header "Authorization: Bearer ${tok}"`],
+    ["mcp.codex", `[mcp_servers.smedcover]\nurl = "${url}"\nhttp_headers = { "Authorization" = "Bearer ${tok}" }\ntool_timeout_sec = 1800`],
+    ["mcp.json", JSON.stringify({ mcpServers: { smedcover: { type: "http", url, headers: { Authorization: `Bearer ${tok}` } } } }, null, 2)],
+  ];
+  const shown = lines(tokenShown(token));
+  return lines(token).map(([key, text], i) => [key, text, shown[i][1]]);
+}
+/** The endpoint's state in a word, as a pill with its light: off, running (green), error (red). */
+function mcpPill(s) {
+  const k = s && s.on ? s.state : "off";
+  return el("span", { class: "mstate " + k, id: "mcp-pill" }, el("span", { class: "aidot" + (k === "running" ? " ok" : k === "error" ? " err" : "") }), t("mcp.state." + k));
+}
+/** Beside Agents in Settings' pages: its light, lit while the endpoint runs (red when it could not start). */
+function mcpLight() {
+  const s = MCP.status, k = s && s.on ? s.state : "off";
+  return el("span", { class: "light", "data-mcp": "nav" }, k !== "off" && el("span", { class: "aidot" + (k === "running" ? " ok" : " err"), title: t("mcp.state." + k) }));
+}
+const mcpLightSync = () => { const n = document.querySelector('[data-mcp="nav"]'); if (n) n.replaceWith(mcpLight()); };
+/** What the ⋯ menu says under Agents: off, or the port it runs on. */
+const mcpSays = () => { const s = MCP.status; return s && s.on && s.state === "running" ? t("mcp.menuOn", s.port) : t("mcp.state." + (s && s.on ? s.state : "off")); };
+/** Under the port: off, the address it runs at, or why it could not start (the port taken, kept by the system, or the system's own words). */
+function mcpLine(s) {
+  const e = s.on && s.state === "error" && s.error;
+  const says = !s.on ? t("mcp.offLine") : s.state === "running" ? t("mcp.runningAt", s.url) : e ? t("mcp.err." + (["port_in_use", "port_forbidden"].includes(e.code) ? e.code : "bind_failed"), s.port, e.message) : t("mcp.offLine");
+  return el("div", { class: "hint" + (e ? " err" : ""), id: "mcp-line" }, says);
+}
+/** The clients seen in the last 10 minutes, the calls running and the last call; a warning when the window's tools are not those the endpoint lists. */
+function mcpSeen(s) {
+  const lately = (s.clients || []).filter((c) => Date.now() - c.lastSeen < 600000), last = s.lastCall;
+  return el("section", { class: "scard aicard", id: "set-mcp-seen" },
+    el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("mcp.seen")), el("small", {}, t("mcp.seenSub")))),
+    el("div", { class: "mseen" },
+      lately.length ? lately.map((c) => el("div", { class: "mclient" }, el("span", { class: "aidot ok" }), el("b", {}, c.name || "?"), el("small", {}, c.version), el("span", { class: "grow" }), el("small", {}, counted("mcp.calls", c.calls)), el("span", {}, ago(c.lastSeen))))
+        : el("div", { class: "hint" }, t("mcp.noClients")),
+      el("div", { class: "mfacts" },
+        el("span", {}, t("mcp.inFlight", s.inFlight || 0)),
+        el("span", {}, last ? [t("mcp.last", last.tool, ago(last.at)), " · ", el("b", { class: last.ok ? "ok" : "bad" }, t(last.ok ? "mcp.ok" : "mcp.failed"))] : t("mcp.lastNone"))),
+      s.toolsMismatch && el("div", { class: "hint err" }, t("mcp.mismatch"))));
+}
+/** The parts of the page that follow the status as it comes (the pill, the line under the port, what was seen), drawn again in place, and the nav's light. */
+function agentsLive() {
+  mcpLightSync();
+  const s = MCP.status;
+  if (!s || !(S.mode === "setup" && S.tab.setup === "agents")) return;
+  for (const [id, make] of [["mcp-pill", mcpPill], ["mcp-line", mcpLine], ["set-mcp-seen", mcpSeen]]) { const n = document.getElementById(id); if (n) n.replaceWith(make(s)); }
+  const sw = document.querySelector("#set-mcp > .aih .tog");
+  if (sw && sw.classList.contains("on") !== !!s.on) renderPanel();   // turned on or off elsewhere
+  later("mcp-tick", 15000, agentsLive);   // "2 min ago" kept true while the page is shown
+}
+onMcpStatus(agentsLive);
+/**
+ * Settings → Agents: the switch that turns the endpoint on (what it lets agents do), its port and state, the token
+ * (hidden but for its end; shown, copied, or replaced after asking), the lines that set an agent up, ready to copy (Claude
+ * Code, Codex, any other client's JSON), and the clients seen lately with the calls. What is kept is mcp.json, Rust's:
+ * read and set through the mcp_* commands, never custom.json.
+ */
+function agentsTab() {
+  const s = MCP.status, head = el("div", { class: "sh" }, el("b", {}, t("tab.agents")), el("span", {}, t("mcp.pageSub")));
+  agentsRead();
+  if (!s) return [head, el("div", { class: "hint" }, t("mcp.reading"))];
+  later("mcp-tick", 15000, agentsLive);
+  const port = AGENTS.port ?? String(s.port), good = isPort(port), changed = good && +port !== s.port;
+  const portIn = textInput(port, (v) => { AGENTS.port = v; apply.disabled = AGENTS.busy || !(isPort(v) && +v !== s.port); bad.hidden = !String(v).trim() || isPort(v); },
+    { inputMode: "numeric", maxLength: 5, class: "mport", "aria-label": t("mcp.port"), onkeydown: (e) => { if (e.key === "Enter" && !apply.disabled) apply.click(); } });
+  const apply = el("button", { class: "btn", disabled: AGENTS.busy || !changed, onclick: () => mcpSet(!!s.on, +AGENTS.port) }, ico("check", 15), t("mcp.apply"));
+  const bad = el("div", { class: "hint err", hidden: good }, t("mcp.portBad"));
+  const url = `http://127.0.0.1:${s.port}/mcp`, tok = AGENTS.token;
+  const row = ([key, text, shown]) => el("div", { class: "mline" },
+    el("div", { class: "mlh" }, el("label", { class: "cap" }, t(key)), el("button", { class: "linkbtn", disabled: !tok, onclick: () => copyText(text) }, ico("copy", 15), t("mcp.copy"))),
+    el("pre", { class: "mcode" }, shown));
+  return [
+    head,
+    el("section", { class: "scard aicard", id: "set-mcp" },
+      el("div", { class: "aih" },
+        el("button", { type: "button", class: "tog" + (s.on ? " on" : ""), role: "switch", "aria-checked": String(!!s.on), "aria-label": t("mcp.switch"), disabled: AGENTS.busy, onclick: () => mcpSet(!s.on) }),
+        el("div", { class: "grow" }, el("b", {}, t("mcp.switch")), el("small", {}, t("mcp.switchSub"))), mcpPill(s)),
+      el("div", {}, el("label", { class: "cap" }, t("mcp.port"), el("small", {}, t("mcp.portSub"))), el("div", { class: "mrow" }, portIn, apply, mcpLine(s)), bad)),
+    el("section", { class: "scard aicard", id: "set-mcp-token" },
+      el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("mcp.token")), el("small", {}, t("mcp.tokenSub")))),
+      el("div", { class: "mrow mtoken" }, el("code", { class: "mcode" }, tok ? tokenShown(tok) : "…"),
+        el("button", { class: "btn", disabled: !tok, onclick: () => { AGENTS.show = !AGENTS.show; renderPanel(); } }, ico(AGENTS.show ? "eyeOff" : "eye", 15), t(AGENTS.show ? "mcp.hide" : "mcp.show")),
+        el("button", { class: "btn", disabled: !tok, onclick: () => copyText(tok) }, ico("copy", 15), t("mcp.copy")),
+        el("button", { class: "btn", disabled: !tok, onclick: newToken }, ico("reset", 15), t("mcp.newToken")))),
+    el("section", { class: "scard aicard", id: "set-mcp-connect" },
+      el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("mcp.connect")), el("small", {}, t("mcp.connectSub")))),
+      el("div", { class: "mlines" }, setupLines(url, tok).map(row)),
+      el("div", { class: "hint" }, t("mcp.proxy"))),
+    mcpSeen(s),
   ];
 }
 
@@ -7791,6 +7936,11 @@ const SHELL_ICONS = {
   eraser: '<path d="m7 21-4.3-4.3a2.4 2.4 0 0 1 0-3.4l9.6-9.6a2.4 2.4 0 0 1 3.4 0l5.6 5.6a2.4 2.4 0 0 1 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
   trash: '<path d="M3.5 6h17"/><path d="M8.5 6V4h7v2"/><path d="m18.5 6-1 14h-11l-1-14"/>',
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
+  // Settings → Agents: its page (a terminal's prompt), and its token's buttons
+  agent: '<rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="m7 10 3 2.5L7 15"/><path d="M12.5 15H17"/>',
+  copy: '<rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5.5a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/>',
+  eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="m3 3 18 18"/><path d="M10.6 5.1A9.6 9.6 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.1 4M6.6 6.6C3.7 8.4 2 12 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
 };
 const ico = (k, px = 20) => el("span", { class: "ico", style: `display:inline-grid;width:${px}px;height:${px}px`, innerHTML: `<svg viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SHELL_ICONS[k]}</svg>` });
 /** The top bar's lists' last entry, after a line: making a new profile, or channel (newFromTop). */
@@ -7906,6 +8056,7 @@ function renderMenu() {
       el("span", { class: "mt" }, el("span", {}, p.name), el("small", {}, counted("menu.channels", p.categories.length))))),
     CAN_PROJECT && [el("div", { class: "sep" }), el("div", { class: "mg" }, t("proj.group")),
       keyed(t("proj.open"), "O", projectActions.open), keyed(t("proj.save"), "S", projectActions.save)],
+    CAN_AGENTS && [el("div", { class: "sep" }), page("agents", mcpSays())],   // Settings → Agents, saying whether the endpoint is on
     el("div", { class: "sep" }),
     el("div", { class: "row", title: CAN_BLUR ? t("menu.glassTip") : null }, el("span", {}, t("menu.glass")),
       el("button", { class: "tog" + (on ? " on" : ""), role: "switch", "aria-checked": String(on), "aria-label": t("menu.glass"), disabled: !CAN_BLUR, onclick: () => { setGlass(!on, true); renderMenu(); } })),
@@ -8013,18 +8164,18 @@ function ambientMoved(a, b) {
     return d / p.length > 2;
   } catch { return true; }
 }
-const TABS = { edit: { content: contentSheet, look: lookSheet, layout: layoutSheet, assets: assetsSheet, layers: layersSheet }, setup: { brand: brandTab, sizes: sizesTab, ai: aiTab } };
+const TABS = { edit: { content: contentSheet, look: lookSheet, layout: layoutSheet, assets: assetsSheet, layers: layersSheet }, setup: { brand: brandTab, sizes: sizesTab, ai: aiTab, ...(CAN_AGENTS ? { agents: agentsTab } : {}) } };
 /** The dock's buttons, one per sheet, each opening its sheet; in Settings, its pages down the window's left. */
 function syncTabs() {
   if (S.mode === "setup") {
     const P = S.profile, act = (key) => el("button", { class: "btn" + (key === "delete" ? " danger" : ""), onclick: () => Promise.resolve(profileActions[key]()).catch((e) => { fail(e); syncTop(); renderPanel(); }) }, t("prof.nav." + key));
     const dots = `conic-gradient(${P.categories.map((c, i) => `${c.color} ${(i * 100) / P.categories.length}% ${((i + 1) * 100) / P.categories.length}%`).join(",")})`;
-    const icon = { brand: el("span", { class: "dots", style: `background:${dots}` }), sizes: ico("sizes", 18), ai: ico("spark", 18) };
+    const icon = { brand: el("span", { class: "dots", style: `background:${dots}` }), sizes: ico("sizes", 18), ai: ico("spark", 18), agents: ico("agent", 18) };
     $("setclose").title = t("set.close"); $("setclose").setAttribute("aria-label", t("set.close"));
     $("setnav").replaceChildren(el("div", { class: "cap" }, t("set.title")),
       el("div", { class: "who" }, el("span", { class: "av", style: `background:${cat().color};color:${inkOn(cat().color)}` }, [...(P.name || "?").trim()][0] || "?"),
         el("span", {}, el("b", {}, P.name), el("small", {}, counted("set.profileSub", P.categories.length)))),
-      ...Object.keys(TABS.setup).map((k) => el("button", { class: "sni" + (k === S.tab.setup ? " on" : ""), onclick: () => { S.tab.setup = k; syncTabs(); renderPanel(); $("setpanel").scrollTop = 0; } }, icon[k], t("tab." + k), k === "ai" && AI_SHOW.nav())),
+      ...Object.keys(TABS.setup).map((k) => el("button", { class: "sni" + (k === S.tab.setup ? " on" : ""), onclick: () => { S.tab.setup = k; syncTabs(); renderPanel(); $("setpanel").scrollTop = 0; } }, icon[k], t("tab." + k), k === "ai" && AI_SHOW.nav(), k === "agents" && mcpLight())),
       el("div", { class: "grow" }),
       el("div", { class: "cap" }, t("set.thisProfile")),
       el("div", { class: "pacts" }, act("new"), act("duplicate"), act("import"), act("export")), act("delete"));
@@ -8391,7 +8542,7 @@ async function start() {
   requestAnimationFrame(() => setTimeout(readLookPics));   // the look cards' pictures kept from the last launch, read after the canvas's first frame
   resetHistory();
   if (custom.tell) custom.tell();   // what was wrong with custom.json
-  if (selftest) selfTest(selftest);
+  if (selftest && !(await invoke("selftest_stay").catch(() => false))) selfTest(selftest);   // SMEDCOVER_SELFTEST_STAY: only its data folder, the app as it is otherwise
   else {
     setTimeout(readLibrary, 1500);   // once the window is up: read the bitmap library in the background, ready for when it is opened
     startAgent(agentOpts());   // an agent's calls taken from now on (agent.js)
@@ -8601,6 +8752,27 @@ async function agentTest(dir) {
   if (!waited.ok || r.waitedForDialog < 300) no(`a call did not wait for the dialog (${r.waitedForDialog} ms)`);
   S.cover.title = keep.title; S.cover.tag = keep.tag; touch({ cover: true, panel: true, side: true }); commitPending();
   await agentToolsTest({ call, ok, r, no });
+  r.ok = !r.errors.length;
+  return r;
+}
+/**
+ * With SMEDCOVER_SELFTEST_MCP, the app's own endpoint called over real HTTP with its token, once the page has attached
+ * (selftest_mcp in mcp.rs: initialize, tools/list, get_context and render_preview through to this page, a wrong token):
+ * the tools it lists are the desktop's, the context's profiles the window's, the preview a PNG 480 px on its longer side
+ * as it says, the wrong token refused, the client seen. Undefined when the endpoint is not the self-test's.
+ */
+async function mcpTest() {
+  const m = await invoke("selftest_mcp");
+  if (!m) return undefined;
+  const r = { ...m, errors: [] }, no = (e) => r.errors.push(e), p = m.preview;
+  const desktop = toolsJson().tools.filter((d) => d["x-smedcover"].hosts.includes("desktop")).length;
+  if (m.server !== "smedcover" || m.protocol !== "2025-06-18" || m.initialized !== 202) no(`initialize: ${m.server} ${m.protocol}, initialized ${m.initialized}`);
+  if (m.tools !== desktop || m.tools !== m.expectedTools) no(`tools/list: ${m.tools} tools, not the desktop's ${desktop}`);
+  if (m.toolsMismatch) no("the page's tools are not those the endpoint lists");
+  if (m.context.isError || m.context.profiles !== S.profiles.length) no(`get_context: ${m.context.profiles} profiles, not ${S.profiles.length}`);
+  if (p.isError || Math.max(p.width, p.height) !== 480 || p.width !== p.said[0] || p.height !== p.said[1] || p.bytes < 1000) no(`render_preview: ${p.width}×${p.height} (${p.bytes} bytes), said ${p.said.join("×")}`);
+  if (m.wrongToken !== 401) no(`a wrong token answered ${m.wrongToken}, not 401`);
+  if (!m.clientSeen) no("the self-test's client is not among those seen");
   r.ok = !r.errors.length;
   return r;
 }
@@ -8876,6 +9048,10 @@ async function selfTest(dir) {
       await step("agent");
       try { report.agent = await agentTest(dir); } catch (e) { report.agent = { ok: false, errors: [String((e && e.stack) || e)] }; }
       for (const e of report.agent.errors) report.errors.push(`agent: ${e}`);
+      // and through the app's own endpoint, over HTTP, as a client calls them (SMEDCOVER_SELFTEST_MCP)
+      await step("mcp");
+      try { report.mcp = await mcpTest(); } catch (e) { report.mcp = { ok: false, errors: [String((e && e.stack) || e)] }; }
+      for (const e of (report.mcp && report.mcp.errors) || []) report.errors.push(`mcp: ${e}`);
     }
     S.cover.title = "Self test\n*binary* export"; S.cover.tag = "EP.01";
     for (const format of ["png", "jpeg", "webp"]) {
