@@ -4774,3 +4774,29 @@ test("the ransom note finds its faces only once it is first drawn or asked what 
   assert.equal(calls, 1, "once");
   assert.equal(R.ransomArrived("Kaiti SC"), true); assert.deepEqual(R.ransomPending(), []);
 });
+
+test("a halftone's dots worked out pixel by pixel: as much ink as their area, never less where they overlap, whole past the box, at any shape of box", async () => {
+  const { dotCover, dotsBox } = await import("../ui/js/looks/kit.js");
+  const sum = (A) => A.reduce((t, v) => t + v, 0), G = { x0: 0, y0: 0, w: 40, h: 40 };
+  // a dot's ink is its area, on the whole (one a pixel or two across, softened, is a little over or under as it falls
+  // on the pixels): across the sizes where it is shared out among four pixels (under a pixel's area) and where its edge
+  // is softened, with no step between
+  for (const r of [0.2, 0.5, 0.56, 0.57, 0.58, 0.74, 0.76, 1, 2.5, 6]) {
+    let ink = 0;
+    for (let k = 0; k < 16; k++) ink += sum(dotCover(G, [20 + (k % 4) / 4 + 0.07, 20 + Math.floor(k / 4) / 4 + 0.03, r])) / 16;
+    assert.ok(Math.abs(ink / (Math.PI * r * r) - 1) < 0.03, `r ${r}: ${ink} against ${Math.PI * r * r}`);
+  }
+  // overlapping: no pixel covered more than once, nor less than by either dot
+  const one = dotCover(G, [10, 10, 0.7]), two = dotCover(G, [10, 10, 0.7, 10.2, 10.1, 0.7]);
+  assert.ok(two.every((v, q) => v <= 1 + 1e-6 && v >= one[q] - 1e-6));
+  // the box: B, grown to take the dots whole, within the canvas
+  assert.deepEqual(dotsBox({ x0: 10, y0: 10, w: 20, h: 20 }, [29, 12, 3], 100, 100), { x0: 10, y0: 8, w: 23, h: 22 });
+  assert.deepEqual(dotsBox({ x0: 0, y0: 0, w: 20, h: 20 }, [1, 1, 5], 30, 30), { x0: 0, y0: 0, w: 20, h: 20 }, "not past the canvas");
+  assert.equal(dotsBox({ x0: 0, y0: 0, w: 0, h: 0 }, [], 30, 30), null);
+  // a box laid on its side: the same dots, turned with it
+  const wide = dotCover({ x0: 0, y0: 0, w: 30, h: 20 }, [5, 7, 2, 22, 13, 3]), tall = dotCover({ x0: 0, y0: 0, w: 20, h: 30 }, [7, 5, 2, 13, 22, 3]);
+  for (let j = 0; j < 20; j++) for (let i = 0; i < 30; i++) assert.ok(Math.abs(wide[j * 30 + i] - tall[i * 20 + j]) < 1e-6);
+  // a buffer given is used, cleared first
+  const buf = new Float32Array(1600).fill(0.5), got = dotCover(G, [20, 20, 1], buf);
+  assert.equal(got, buf); assert.equal(buf[0], 0);
+});

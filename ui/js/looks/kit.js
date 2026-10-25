@@ -933,6 +933,58 @@ export function fxCanvas(slot, w, h) {
   if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
   return c;
 }
+/**
+ * Many round dots in `colour` (a halftone: tens of thousands) laid on x as one shape would be, at alpha `a` in the way
+ * `op` says; `each(dot)` calls dot(cx, cy, r) for every dot, in x's pixels, the dots of box B (a dot reaching past it,
+ * as it did drawn as a path, is laid whole, within the canvas). They are worked out here, pixel by pixel (dotCover),
+ * not drawn as paths: on a canvas held in memory (fxCanvas, as a layer's work canvas is) macOS's own drawing took some
+ * 60 µs a dot however they were batched — 57,000 dots, the halftone of a photo filling the canvas, 3 to 15 s at every
+ * size, a thumbnail's and a look card's too — where this takes 10 ms at a thumbnail's size and some 150 ms at the
+ * canvas's.
+ */
+export function fillDots(x, B, colour, a, op, each) {
+  const dots = [];
+  each((cx, cy, r) => { if (r > 0 && Number.isFinite(cx) && Number.isFinite(cy)) dots.push(cx, cy, r); });   // one not a number: that dot alone left out, as a path would
+  if (!dots.length) return;
+  const G = dotsBox(B, dots, x.canvas.width, x.canvas.height);
+  if (!G) return;
+  if (!DOTS.img || DOTS.img.width !== G.w || DOTS.img.height !== G.h) { DOTS.cover = new Float32Array(G.w * G.h); DOTS.img = new ImageData(G.w, G.h); } else DOTS.img.data.fill(0);
+  const A = dotCover(G, dots, DOTS.cover), d = DOTS.img.data;
+  for (let q = 0, o = 0; q < A.length; q++, o += 4) { const al = A[q]; if (al > 0) { d[o] = colour[0]; d[o + 1] = colour[1]; d[o + 2] = colour[2]; d[o + 3] = al * 255; } }
+  const c = fxCanvas("fxDots", G.w, G.h);
+  c.getContext("2d").putImageData(DOTS.img, 0, 0);
+  x.save(); x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = op; x.globalAlpha = a; x.drawImage(c, G.x0, G.y0); x.restore();
+}
+/** fillDots' cover of each pixel and the picture made of it, kept for the next of the same width and height. */
+const DOTS = { cover: null, img: null };
+/**
+ * The box the dots (`dots`: [cx, cy, r, …]) are worked out in: box B, grown to take every dot whole, within a canvas
+ * W × H; whole pixels, {x0, y0, w, h}, or null when it has no room.
+ */
+export function dotsBox(B, dots, W, H) {
+  let x0 = B.x0, y0 = B.y0, x1 = B.x0 + B.w, y1 = B.y0 + B.h;
+  for (let k = 0; k < dots.length; k += 3) { const r = dots[k + 2] + 1; x0 = Math.min(x0, dots[k] - r); y0 = Math.min(y0, dots[k + 1] - r); x1 = Math.max(x1, dots[k] + r); y1 = Math.max(y1, dots[k + 1] + r); }
+  x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0)); x1 = Math.min(W, Math.ceil(x1)); y1 = Math.min(H, Math.ceil(y1));
+  return x1 > x0 && y1 > y0 ? { x0, y0, w: x1 - x0, h: y1 - y0 } : null;
+}
+/**
+ * How much of each pixel of box G ({x0, y0, w, h}) the dots ([cx, cy, r, …]) cover, 0 to 1, row by row (in `into`, a
+ * Float32Array of G's size, when given). A dot's edge is softened over a pixel, as a canvas would, its radius taken a
+ * little in so that what it covers in all is its area (softened so, a dot of radius r covers π(r² + 1/12), or one under
+ * half a pixel π(r + ½)³ / 3); one of less than a pixel's area has it shared out among the four pixels round it, so a
+ * halftone too fine to show as dots gives the tone it would. Where dots overlap, the pixel is covered as by one over the other, never less than by either.
+ */
+export function dotCover(G, dots, into = null) {
+  const { w, h } = G, A = into && into.length === w * h ? into.fill(0) : new Float32Array(w * h);
+  const add = (i, j, c) => { if (i >= 0 && j >= 0 && i < w && j < h && c > 0) { const q = j * w + i; A[q] += Math.min(1, c) * (1 - A[q]); } };
+  for (let k = 0; k < dots.length; k += 3) {
+    const px = dots[k] - G.x0, py = dots[k + 1] - G.y0, r = dots[k + 2];
+    if (r * r * Math.PI < 1) { const fx = px - 0.5, fy = py - 0.5, i0 = Math.floor(fx), j0 = Math.floor(fy), u = fx - i0, v = fy - j0, s = Math.PI * r * r; add(i0, j0, (1 - u) * (1 - v) * s); add(i0 + 1, j0, u * (1 - v) * s); add(i0, j0 + 1, (1 - u) * v * s); add(i0 + 1, j0 + 1, u * v * s); continue; }
+    const re = r * r >= 1 / 3 ? Math.sqrt(r * r - 1 / 12) : Math.cbrt(3 * r * r) - 0.5, x0 = Math.max(0, Math.floor(px - re - 0.5)), x1 = Math.min(w - 1, Math.ceil(px + re + 0.5)), y0 = Math.max(0, Math.floor(py - re - 0.5)), y1 = Math.min(h - 1, Math.ceil(py + re + 0.5));
+    for (let j = y0; j <= y1; j++) { const dy = j + 0.5 - py; for (let i = x0; i <= x1; i++) { const dx = i + 0.5 - px, c = re + 0.5 - Math.sqrt(dx * dx + dy * dy); if (c > 0) { const q = j * w + i; A[q] += (c > 1 ? 1 : c) * (1 - A[q]); } } }
+  }
+  return A;
+}
 /** A copy of what the work canvas x holds in box B (a canvas of B's size, kept per slot). */
 export function region(x, B, slot) {
   const c = fxCanvas(slot, B.w, B.h), g = c.getContext("2d");

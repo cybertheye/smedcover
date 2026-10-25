@@ -3,7 +3,7 @@
 // the spectrum runs: threads of colour streaming to the edge and turning up at a right angle, dripping
 // down, ringing a dark vortex, running to the horizon, rolling in waves, stacked in blocks; a mat and frame.
 // One look (see style.js for the hooks a look may have, and looks/kit.js for what the looks share).
-import { FX_ALL, TAU, canPaint, cellsOf, clamp, css, dark, fall, fast, grain, graphicShape, grey, gridPen, inkAs, lumOf, mapped, mix, objAt, openField, painters, placeShape, rand, sampled, shapeCells, shapeOf, upright } from "./kit.js";
+import { FX_ALL, TAU, canPaint, cellsOf, clamp, css, dark, fall, fast, fillDots, grain, graphicShape, grey, gridPen, inkAs, lumOf, mapped, mix, objAt, openField, painters, placeShape, rand, sampled, shapeCells, shapeOf, upright } from "./kit.js";
 import { fonts, spaced, spacedW } from "../cel.js";
 import { blockLayout } from "../layout.js";
 
@@ -228,9 +228,9 @@ spectrum.elementFx = [
     paint(x, B, a, E, o) {
       const cs = Math.max(2, 2.6 * E.k), [d, cols, rows] = cellsOf(x, B, cs), ink = spInk();
       x.save(); x.globalCompositeOperation = "destination-out"; x.globalAlpha = a; x.fillRect(B.x0, B.y0, B.w, B.h); x.restore();
-      x.save(); x.globalAlpha = a; x.fillStyle = css(ink); x.beginPath();
-      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) { const q = (j * cols + i) * 4; if (d[q + 3] < 100) continue; const tone = clamp((1 - lumOf(d, q)) * (0.45 + 0.9 * o.depth) + 0.05); if (E.R(j * cols + i + 0.5) > tone) continue; const px = B.x0 + (i + E.R(i * 1.3 + j * 2.1 + 181)) * cs, py = B.y0 + (j + E.R(i * 2.7 + j * 1.1 + 182)) * cs, r = cs * (0.26 + 0.22 * tone); x.moveTo(px + r, py); x.arc(px, py, r, 0, TAU); }
-      x.fill(); x.restore();
+      fillDots(x, B, ink, a, "source-over", (dot) => {   // fine dots over the whole layer: tens of thousands (see fillDots)
+        for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) { const q = (j * cols + i) * 4; if (d[q + 3] < 100) continue; const tone = clamp((1 - lumOf(d, q)) * (0.45 + 0.9 * o.depth) + 0.05); if (E.R(j * cols + i + 0.5) > tone) continue; const px = B.x0 + (i + E.R(i * 1.3 + j * 2.1 + 181)) * cs, py = B.y0 + (j + E.R(i * 2.7 + j * 1.1 + 182)) * cs, r = cs * (0.26 + 0.22 * tone); dot(px, py, r); }
+      });
     } },
   { key: "lines", name: { zh: "线刻", en: "Line engraving" }, for: FX_ALL, stage: "fill",
     /** The layer engraved in level lines of ink, swelling where it is dark. */

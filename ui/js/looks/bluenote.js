@@ -1,6 +1,6 @@
 // jazz record sleeves of the 1950s and 60s
 // One look (see style.js for the hooks a look may have, and looks/kit.js for what the looks share).
-import { FX_PHOTO, TAU, boost, cellsOf, css, dark, dotScreen, grain, greeked, gridPen, inkAs, lumOf, mapped, mix, objAt, openField, painters, rand, tonesFx, upright, wash, wear } from "./kit.js";
+import { FX_PHOTO, TAU, boost, cellsOf, css, dark, dotScreen, fillDots, grain, greeked, gridPen, inkAs, lumOf, mapped, mix, objAt, openField, painters, rand, tonesFx, upright, wash, wear } from "./kit.js";
 import { fonts, spaced, spacedW } from "../cel.js";
 import { blockLayout } from "../layout.js";
 
@@ -141,12 +141,10 @@ export const bluenote = {
 /** A halftone of the layer itself: its own tone in dots of `ink` on `paper` (each colour, or null for none), `pitch` px apart. */
 function halftoneOf(x, B, a, pitch, ink, paper) {
   const [d, cols, rows] = cellsOf(x, B, pitch);
-  x.save();
-  x.globalCompositeOperation = "source-atop"; x.globalAlpha = a;
-  if (paper) { x.fillStyle = css(paper); x.fillRect(B.x0, B.y0, B.w, B.h); }
-  x.fillStyle = css(ink); x.beginPath();
-  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) { const q = (j * cols + i) * 4; if (d[q + 3] < 60) continue; const r = pitch * 0.62 * Math.sqrt(1 - lumOf(d, q)); if (r < 0.3) continue; const cx = B.x0 + (i + 0.5) * pitch, cy = B.y0 + (j + 0.5) * pitch; x.moveTo(cx + r, cy); x.arc(cx, cy, r, 0, TAU); }
-  x.fill(); x.restore();
+  if (paper) { x.save(); x.globalCompositeOperation = "source-atop"; x.globalAlpha = a; x.fillStyle = css(paper); x.fillRect(B.x0, B.y0, B.w, B.h); x.restore(); }
+  fillDots(x, B, ink, a, "source-atop", (dot) => {   // a photo filling the canvas: some 57,000 dots (see fillDots)
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) { const q = (j * cols + i) * 4; if (d[q + 3] < 60) continue; const r = pitch * 0.62 * Math.sqrt(1 - lumOf(d, q)); if (r < 0.3) continue; dot(B.x0 + (i + 0.5) * pitch, B.y0 + (j + 0.5) * pitch, r); }
+  });
 }
 bluenote.elementFx = [
   { key: "duo", name: { zh: "照片双色调", en: "Photo duotone" }, for: FX_PHOTO, stage: "filter",
