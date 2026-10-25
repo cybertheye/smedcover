@@ -5,11 +5,20 @@
 //! Both eras of the protocol are served, without sessions: 2026-07-28 (`server/discover`, each
 //! request carrying its own `_meta` and the `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name`
 //! headers, which rmcp checks), and the `initialize` handshake of 2025-03-26, 2025-06-18 and
-//! 2025-11-25 (a request without the header is taken as 2025-03-26). Answers are server-sent
-//! events: their headers go at once and a keep-alive comment every 15 s, so a call that takes long
-//! (an export waiting for the user) is not cut off by a client that waits only so long for headers
-//! or for bytes (Node's `fetch`, which most clients use, gives up after 5 minutes); progress the page
-//! reports goes before the result. Refusals (400, 401, 403, …) are plain.
+//! 2025-11-25 (a request without the header is taken as 2025-03-26). A JSON-RPC batch (an array,
+//! which 2025-03-26 allows) is not served: rmcp refuses it.
+//!
+//! Answers are server-sent events, so that a long call (an export waiting for the user) is not cut
+//! off by a client that waits only so long for an answer's headers (Node's `fetch`, which most
+//! clients use, gives up after 5 minutes): once the headers are out, a keep-alive comment follows
+//! every 15 s. When the headers go out depends on the era. In the `initialize` era rmcp sends them
+//! at once. In the 2026-07-28 era it builds the answer from the handler's first message and sends
+//! nothing before it, and nothing in its API sends headers sooner (a priming event needs an event
+//! store, and even then comes after that first message). So a call that names a `progressToken` is
+//! told progress 0 at once, which is that first message, and the page's own progress follows only
+//! when it is more than that; a 2026-07-28 call without a progress token gets its headers only with
+//! its result, and how long its client waits for headers is how long it may take. Refusals (400,
+//! 401, 403, …) are plain.
 //!
 //! In front of it, for every path: a `Host` that is not 127.0.0.1, localhost or [::1] is refused
 //! (403: another site's name resolving to this computer), and so is an `Origin` that is not one of
@@ -17,27 +26,41 @@
 //! `Authorization: Bearer <token>` (401 without it), and the header is taken off before rmcp sees
 //! the request. `/health` says `{"name": "smedcover", "version", "page"}` to anyone who may reach it.
 //!
-//! A client of the older era that cancels a call sends `notifications/cancelled` in a request of its
-//! own, which a session-less server cannot tie to the call; it is looked for here, and cancels the
-//! call in hand with that JSON-RPC id if there is exactly one.
+//! Connections: a request's headers must come within [`HEADER_TIMEOUT`] (else the connection is
+//! closed), an accepted request's body within [`BODY_TIMEOUT`] (else 408), and `/mcp` takes bodies
+//! up to [`MAX_BODY`] (a tool may carry a photo as base64). A refused request's body is read, and not
+//! kept, for at most [`REFUSED_BODY_BYTES`] and [`REFUSED_BODY_TIME`] (a connection closed on a
+//! body not read is reset, and the client may lose the refusal), and its connection is then closed.
+//! [`Running::stop`] closes every connection, the port being free again when it returns.
+//!
+//! A client of the older era cancels a call with `notifications/cancelled` in a request of its own,
+//! which a session-less server cannot tie to the call. It is looked for here, and cancels a call
+//! only when there is no doubt which: an older-era call in hand with that JSON-RPC id on the
+//! notification's protocol revision, from the same client when that can be told, the only one, and
+//! no call with that id on that revision ended in the last [`LATE_CANCEL`] (a late cancel for that
+//! one is likelier than one for another client's). Two clients' ids are their own and small, so they
+//! meet; a cancel that cannot be placed is ignored, and that call runs to its end.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::header::{AUTHORIZATION, HOST, ORIGIN, WWW_AUTHENTICATE};
-use axum::http::{HeaderMap, Method, StatusCode, Uri};
+use axum::http::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HOST, ORIGIN, WWW_AUTHENTICATE};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::{from_fn, from_fn_with_state, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use http_body_util::BodyExt;
+use hyper_util::rt::{TokioIo, TokioTimer};
+use hyper_util::service::TowerToHyperService;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, DiscoverResult, Implementation, InitializeRequestParams,
     InitializeResult, ListToolsResult, PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion, RequestId, ResultType,
@@ -51,7 +74,8 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, watch};
-use tokio::task::JoinHandle;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::task::{JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
 
 use super::bridge::{BridgeError, Call, ClientTag, PageBridge, Progress, ProgressFn};
@@ -64,8 +88,18 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The protocol revisions served, oldest first: 2024-11-05's HTTP with SSE is not.
 pub const PROTOCOL_VERSIONS: &[ProtocolVersion] =
     &[ProtocolVersion::V_2025_03_26, ProtocolVersion::V_2025_06_18, ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28];
-/// The largest request body taken.
-pub const MAX_BODY: usize = 4 * 1024 * 1024;
+/// The largest request body `/mcp` takes: a tool's arguments may carry a photo or a project as
+/// text (the page holds those to 24 Mi characters).
+pub const MAX_BODY: usize = 32 * 1024 * 1024;
+/// How long a client has to send a request's headers.
+pub const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a client has to send an accepted request's body.
+pub const BODY_TIMEOUT: Duration = Duration::from_secs(30);
+/// How much of a refused request's body is read, and for how long, before its connection is closed.
+pub const REFUSED_BODY_BYTES: usize = 64 * 1024;
+pub const REFUSED_BODY_TIME: Duration = Duration::from_secs(2);
+/// A cancel for an id that a call on the same revision ended with this lately is not placed.
+pub const LATE_CANCEL: Duration = Duration::from_secs(30);
 /// How long a client counts as seen.
 pub const CLIENT_WINDOW: Duration = Duration::from_secs(10 * 60);
 /// The hosts and origins the endpoint answers: this computer's loopback names.
@@ -101,16 +135,16 @@ impl McpServer {
             let _runtime = runtime.enter();
             tokio::net::TcpListener::from_std(listener).map_err(|e| BindError::from_io(port, &e))?
         };
-        let shutdown = stop.clone().cancelled_owned();
-        let task = runtime.spawn(async move {
-            let _ = axum::serve(listener, app).with_graceful_shutdown(shutdown).await;
-        });
-        Ok(Running { addr, stop, task: Some(task) })
+        let cut_off = CancellationToken::new();
+        let task = runtime.spawn(serve(listener, app, stop.clone(), cut_off.clone()));
+        Ok(Running { addr, stop, cut_off, task: Some(task) })
     }
 
-    /// The routes, for a host that serves them itself: `stop` ends the calls in hand when cancelled.
+    /// The routes, for a host that serves them itself: `stop` ends the calls in hand, and the
+    /// bodies being read, when cancelled.
     pub fn router(&self, stop: CancellationToken) -> Router {
         let calls = Arc::new(InHand::default());
+        let front = Front { calls: calls.clone(), stats: self.stats.clone(), stop: stop.clone() };
         let handler = Handler(Arc::new(Shared {
             bridge: self.bridge.clone(),
             tools: self.tools.clone(),
@@ -128,16 +162,18 @@ impl McpServer {
         let mcp = StreamableHttpService::new(move || Ok(handler.clone()), Arc::new(NeverSessionManager::default()), config);
         let mcp = Router::new()
             .route_service("/mcp", mcp)
-            .route_layer(from_fn_with_state(calls, cancelled_notifications))
+            .route_layer(from_fn_with_state(front, read_body))
             .route_layer(from_fn_with_state(self.token.clone(), bearer));
         Router::new().route("/health", get(health)).with_state(self.bridge.clone()).merge(mcp).layer(from_fn(loopback_only))
     }
 }
 
-/// The endpoint while it listens. Dropping it stops it too, without waiting.
+/// The endpoint while it listens. Dropping it stops it too, without waiting: the connections then
+/// close in their own time.
 pub struct Running {
     addr: SocketAddr,
     stop: CancellationToken,
+    cut_off: CancellationToken,
     task: Option<JoinHandle<()>>,
 }
 
@@ -156,9 +192,10 @@ impl Running {
         format!("http://{}/mcp", self.addr)
     }
 
-    /// Stops listening at once and ends the calls in hand (each is cancelled, and the page told);
-    /// waits up to `within` for the connections to close, then leaves them. The port is free again
-    /// when it returns. `false` if it had to leave connections behind.
+    /// Stops listening at once, ends the calls in hand (each is cancelled, and the page told) and
+    /// the bodies being read, and closes every connection as soon as its answer is out; one still
+    /// open after `within` is cut off. When it returns no connection is left and the port is free
+    /// again. `false` if a connection had to be cut off.
     pub async fn stop(mut self, within: Duration) -> bool {
         self.stop.cancel();
         let Some(mut task) = self.task.take() else {
@@ -167,7 +204,8 @@ impl Running {
         if tokio::time::timeout(within, &mut task).await.is_ok() {
             return true;
         }
-        task.abort();
+        // the serve task cuts the connections off and returns once each is gone
+        self.cut_off.cancel();
         let _ = task.await;
         false
     }
@@ -204,9 +242,9 @@ impl BindError {
     fn from_io(port: u16, e: &io::Error) -> BindError {
         match e.kind() {
             io::ErrorKind::AddrInUse => BindError::PortInUse(port),
-            // WSAEACCES (10013) on Windows; EACCES for a system port on Unix
+            // the standard library reads WSAEACCES (10013, a port Windows keeps) as this, and so
+            // EACCES (a system port) on Unix
             io::ErrorKind::PermissionDenied => BindError::PortForbidden(port),
-            _ if e.raw_os_error() == Some(10013) && cfg!(windows) => BindError::PortForbidden(port),
             _ => BindError::Failed { port, message: e.to_string() },
         }
     }
@@ -232,7 +270,7 @@ impl std::error::Error for BindError {}
 fn listen(addr: SocketAddr) -> io::Result<std::net::TcpListener> {
     use socket2::{Domain, Protocol, Socket, Type};
     use std::os::windows::io::AsRawSocket;
-    use windows_sys::Win32::Networking::WinSock::{setsockopt, SOCKET, SOL_SOCKET, SO_EXCLUSIVEADDRUSE};
+    use windows_sys::Win32::Networking::WinSock::{setsockopt, WSAGetLastError, SOCKET, SOL_SOCKET, SO_EXCLUSIVEADDRUSE};
     let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
     let on: i32 = 1;
     // SAFETY: the socket is open for the whole call, and the option is the i32 it points to
@@ -240,7 +278,9 @@ fn listen(addr: SocketAddr) -> io::Result<std::net::TcpListener> {
         setsockopt(socket.as_raw_socket() as SOCKET, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (&on as *const i32).cast(), std::mem::size_of::<i32>() as i32)
     };
     if failed != 0 {
-        return Err(io::Error::last_os_error());
+        // Winsock says why through WSAGetLastError, not GetLastError
+        // SAFETY: no arguments; it reads this thread's last Winsock error
+        return Err(io::Error::from_raw_os_error(unsafe { WSAGetLastError() }));
     }
     socket.bind(&addr.into())?;
     socket.listen(1024)?;
@@ -256,6 +296,51 @@ fn listen(addr: SocketAddr) -> io::Result<std::net::TcpListener> {
     let listener = std::net::TcpListener::bind(addr)?;
     listener.set_nonblocking(true)?;
     Ok(listener)
+}
+
+/// Takes connections till `stop`, then lets each finish the answer it is giving and close, and
+/// returns when the last has; once `cut_off` too, it cuts off those still open, and returns when
+/// they are gone.
+async fn serve(listener: TcpListener, app: Router, stop: CancellationToken, cut_off: CancellationToken) {
+    let mut connections = JoinSet::new();
+    loop {
+        tokio::select! {
+            _ = stop.cancelled() => break,
+            accepted = listener.accept() => match accepted {
+                Ok((stream, _)) => {
+                    connections.spawn(connection(stream, app.clone(), stop.clone()));
+                }
+                // out of file descriptors and the like: try again in a moment
+                Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+            },
+            Some(_) = connections.join_next(), if !connections.is_empty() => {}
+        }
+    }
+    drop(listener);
+    let all_closed = async { while connections.join_next().await.is_some() {} };
+    let cut = tokio::select! {
+        _ = all_closed => false,
+        _ = cut_off.cancelled() => true,
+    };
+    if cut {
+        connections.shutdown().await;
+    }
+}
+
+/// Serves one connection: HTTP/1.1, its requests' headers wanted within [`HEADER_TIMEOUT`]; once
+/// `stop` is cancelled it closes after the answer it is giving.
+async fn connection(stream: TcpStream, app: Router, stop: CancellationToken) {
+    let _ = stream.set_nodelay(true);
+    let mut http = hyper::server::conn::http1::Builder::new();
+    http.timer(TokioTimer::new()).header_read_timeout(HEADER_TIMEOUT);
+    let conn = http.serve_connection(TokioIo::new(stream), TowerToHyperService::new(app));
+    tokio::pin!(conn);
+    tokio::select! {
+        _ = conn.as_mut() => return,
+        _ = stop.cancelled() => {}
+    }
+    conn.as_mut().graceful_shutdown();
+    let _ = conn.await;
 }
 
 fn server_info(tools: &ToolList) -> ServerConfig {
@@ -287,7 +372,7 @@ impl Handler {
     /// requests cannot be tied to it; the one client of that era seen lately on the same revision is
     /// taken to be it, and if there are several, none is.
     fn client(&self, context: &RequestContext<RoleServer>, call: bool) -> Option<ClientTag> {
-        let protocol = context.protocol_version().map(|v| v.to_string()).unwrap_or_default();
+        let protocol = protocol_of(context);
         let client = match context.meta.client_info() {
             Some(c) => ClientTag { name: c.name, version: c.version },
             None => self.0.stats.only_client_on(&protocol)?,
@@ -339,6 +424,7 @@ impl ServerHandler for Handler {
             return Err(unknown());
         };
         let client = self.client(&context, true);
+        let protocol = protocol_of(&context);
         // progress the page reports goes to the client while the call runs, in order
         let (progress, mut told) = match context.meta.get_progress_token() {
             Some(token) => {
@@ -350,6 +436,8 @@ impl ServerHandler for Handler {
             }
             None => (None, None),
         };
+        // an older-era call may be cancelled by a notification of its own (see the module's notes)
+        let _in_hand = is_legacy(&protocol).then(|| self.0.calls.add(&context.id, &protocol, client.clone(), context.ct.clone()));
         let call = Call {
             tool: name.clone(),
             args: request.arguments.unwrap_or_default(),
@@ -358,31 +446,40 @@ impl ServerHandler for Handler {
             progress,
             cancel: context.ct.clone(),
         };
-        let _in_hand = self.0.calls.add(&context.id, context.ct.clone());
         let flight = self.0.stats.begin(&name);
         let answer = self.0.bridge.call(call);
         let answer = match told.as_mut() {
             None => answer.await,
             Some((token, rx)) => {
-                let tell = |p: Progress| {
+                // progress 0 at once: in the 2026-07-28 era it is what sends the answer's headers
+                let _ = context.peer.notify_progress(ProgressNotificationParam::new(token.clone(), 0.0)).await;
+                let mut last = 0.0;
+                let mut tell = |p: Progress| {
+                    let more = p.progress > last;
+                    if more {
+                        last = p.progress;
+                    }
                     let mut note = ProgressNotificationParam::new(token.clone(), p.progress);
                     note.total = p.total;
                     note.message = p.message;
-                    context.peer.notify_progress(note)
+                    let peer = &context.peer;
+                    async move {
+                        if more {
+                            let _ = peer.notify_progress(note).await;
+                        }
+                    }
                 };
                 tokio::pin!(answer);
                 let answer = loop {
                     tokio::select! {
                         biased;
-                        Some(p) = rx.recv() => {
-                            let _ = tell(p).await;
-                        }
+                        Some(p) = rx.recv() => tell(p).await,
                         answer = &mut answer => break answer,
                     }
                 };
                 // what the page said on its way to answering goes first
                 while let Ok(p) = rx.try_recv() {
-                    let _ = tell(p).await;
+                    tell(p).await;
                 }
                 answer
             }
@@ -405,12 +502,27 @@ impl ServerHandler for Handler {
     }
 }
 
-// ---- the calls in hand, by JSON-RPC id, for notifications/cancelled ----
+// ---- the older era's calls in hand, by JSON-RPC id, for notifications/cancelled ----
 
 #[derive(Default)]
 struct InHand {
     next: AtomicU64,
-    by_id: Mutex<HashMap<String, Vec<(u64, CancellationToken)>>>,
+    state: Mutex<InHandState>,
+}
+
+#[derive(Default)]
+struct InHandState {
+    /// The calls in hand by their JSON-RPC id (as JSON).
+    by_id: HashMap<String, Vec<InHandCall>>,
+    /// The id and revision of each call that ended in the last [`LATE_CANCEL`], and when.
+    ended: VecDeque<(String, String, Instant)>,
+}
+
+struct InHandCall {
+    n: u64,
+    protocol: String,
+    client: Option<ClientTag>,
+    cancel: CancellationToken,
 }
 
 struct InHandGuard<'a> {
@@ -419,21 +531,44 @@ struct InHandGuard<'a> {
     n: u64,
 }
 
+impl InHandState {
+    fn forget_old(&mut self) {
+        let now = Instant::now();
+        while self.ended.front().is_some_and(|(_, _, at)| now.duration_since(*at) > LATE_CANCEL) {
+            self.ended.pop_front();
+        }
+    }
+}
+
 impl InHand {
-    fn add(&self, id: &RequestId, cancel: CancellationToken) -> InHandGuard<'_> {
+    fn add(&self, id: &RequestId, protocol: &str, client: Option<ClientTag>, cancel: CancellationToken) -> InHandGuard<'_> {
         let key = serde_json::to_string(id).unwrap_or_default();
         let n = self.next.fetch_add(1, Ordering::SeqCst);
-        lock(&self.by_id).entry(key.clone()).or_default().push((n, cancel));
+        let call = InHandCall { n, protocol: protocol.to_string(), client, cancel };
+        lock(&self.state).by_id.entry(key.clone()).or_default().push(call);
         InHandGuard { calls: self, key, n }
     }
 
-    /// Cancels the call in hand with the JSON-RPC id `key`, if there is just one: two clients may use
-    /// the same id, and then which is meant cannot be told.
-    fn cancel(&self, key: &str) -> bool {
-        let by_id = lock(&self.by_id);
-        match by_id.get(key).map(Vec::as_slice) {
-            Some([(_, cancel)]) => {
-                cancel.cancel();
+    /// Cancels the call a `notifications/cancelled` for the JSON-RPC id `key` means, on `protocol`
+    /// and from `client` (when that can be told), if there is no doubt which (see the module's notes).
+    fn cancel(&self, key: &str, protocol: &str, client: Option<&ClientTag>) -> bool {
+        if !is_legacy(protocol) {
+            return false;
+        }
+        let mut state = lock(&self.state);
+        state.forget_old();
+        if state.ended.iter().any(|(k, p, _)| k == key && p == protocol) {
+            return false;
+        }
+        let mut meant = state
+            .by_id
+            .get(key)
+            .into_iter()
+            .flatten()
+            .filter(|c| c.protocol == protocol && client.is_none_or(|client| c.client.as_ref() == Some(client)));
+        match (meant.next(), meant.next()) {
+            (Some(call), None) => {
+                call.cancel.cancel();
                 true
             }
             _ => false,
@@ -443,28 +578,64 @@ impl InHand {
 
 impl Drop for InHandGuard<'_> {
     fn drop(&mut self) {
-        let mut by_id = lock(&self.calls.by_id);
-        if let Some(list) = by_id.get_mut(&self.key) {
-            list.retain(|(n, _)| *n != self.n);
-            if list.is_empty() {
-                by_id.remove(&self.key);
-            }
+        let mut state = lock(&self.calls.state);
+        let Some(list) = state.by_id.get_mut(&self.key) else {
+            return;
+        };
+        let protocol = list.iter().find(|c| c.n == self.n).map(|c| c.protocol.clone());
+        list.retain(|c| c.n != self.n);
+        if list.is_empty() {
+            state.by_id.remove(&self.key);
+        }
+        if let Some(protocol) = protocol {
+            state.forget_old();
+            state.ended.push_back((self.key.clone(), protocol, Instant::now()));
         }
     }
 }
 
-async fn cancelled_notifications(State(calls): State<Arc<InHand>>, request: Request, next: Next) -> Response {
+/// What the layer that reads `/mcp`'s bodies needs.
+#[derive(Clone)]
+struct Front {
+    calls: Arc<InHand>,
+    stats: Arc<Stats>,
+    stop: CancellationToken,
+}
+
+/// Reads a POST's body before rmcp does, within [`BODY_TIMEOUT`] and [`MAX_BODY`] and only till the
+/// endpoint stops, and looks in it for `notifications/cancelled`.
+async fn read_body(State(front): State<Front>, request: Request, next: Next) -> Response {
     if request.method() != Method::POST {
         return next.run(request).await;
     }
+    let too_large = || (StatusCode::PAYLOAD_TOO_LARGE, format!("Payload Too Large: SmedCover takes requests of up to {} MiB", MAX_BODY >> 20));
+    let declared = request.headers().get(CONTENT_LENGTH).and_then(|v| v.to_str().ok()?.parse::<u64>().ok());
+    if declared.is_some_and(|length| length > MAX_BODY as u64) {
+        return refuse(request, too_large().into_response()).await;
+    }
     let (parts, body) = request.into_parts();
-    let Ok(bytes) = axum::body::to_bytes(body, MAX_BODY).await else {
-        return (StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large").into_response();
+    let read = tokio::time::timeout(BODY_TIMEOUT, axum::body::to_bytes(body, MAX_BODY));
+    let bytes = tokio::select! {
+        read = read => match read {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(e)) if is_too_large(&e) => return closing(too_large().into_response()),
+            Ok(Err(_)) => return closing((StatusCode::BAD_REQUEST, "Bad Request: the body could not be read").into_response()),
+            Err(_) => return closing((StatusCode::REQUEST_TIMEOUT, "Request Timeout: the body did not come in time").into_response()),
+        },
+        _ = front.stop.cancelled() => {
+            return closing((StatusCode::SERVICE_UNAVAILABLE, "Service Unavailable: SmedCover's MCP endpoint is stopping").into_response());
+        }
     };
     if let Some(id) = cancelled_request(&bytes) {
-        calls.cancel(&id);
+        let protocol = parts.headers.get("mcp-protocol-version").and_then(|v| v.to_str().ok()).unwrap_or("2025-03-26");
+        let client = front.stats.only_client_on(protocol);
+        front.calls.cancel(&id, protocol, client.as_ref());
     }
     next.run(Request::from_parts(parts, Body::from(bytes))).await
+}
+
+fn is_too_large(e: &axum::Error) -> bool {
+    std::error::Error::source(e).is_some_and(|e| e.is::<http_body_util::LengthLimitError>())
 }
 
 /// The JSON-RPC id (as JSON) of the request a `notifications/cancelled` body cancels.
@@ -509,10 +680,24 @@ async fn loopback_only(request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
-/// `response`, once the request's body has been read: a connection closed on a body not read is
-/// reset, and the client may then lose the answer and see only that.
+/// `response` to a request that is refused, its connection to be closed after it; first some of
+/// the body is read and dropped (see the module's notes).
 async fn refuse(request: Request, response: Response) -> Response {
-    let _ = axum::body::to_bytes(request.into_body(), MAX_BODY).await;
+    let mut body = request.into_body();
+    let until = tokio::time::Instant::now() + REFUSED_BODY_TIME;
+    let mut read = 0;
+    while read <= REFUSED_BODY_BYTES {
+        match tokio::time::timeout_at(until, body.frame()).await {
+            Ok(Some(Ok(frame))) => read += frame.data_ref().map_or(0, |data| data.len()),
+            _ => break,
+        }
+    }
+    closing(response)
+}
+
+/// `response`, saying the connection closes after it.
+fn closing(mut response: Response) -> Response {
+    response.headers_mut().insert(CONNECTION, HeaderValue::from_static("close"));
     response
 }
 
@@ -649,7 +834,7 @@ impl Stats {
 
     /// The one client seen lately that uses `protocol`, a revision of the `initialize` era.
     fn only_client_on(&self, protocol: &str) -> Option<ClientTag> {
-        if !ProtocolVersion::known_up_to(&ProtocolVersion::LATEST_WITH_INITIALIZE).iter().any(|v| v.as_str() == protocol) {
+        if !is_legacy(protocol) {
             return None;
         }
         let mut inner = lock(&self.inner);
@@ -666,6 +851,17 @@ impl Stats {
         self.changed();
         Flight { stats: self, tool: tool.to_string(), ok: false, ended: false }
     }
+}
+
+/// The protocol revision of a request: its `_meta`'s, else its `MCP-Protocol-Version` header's
+/// (rmcp takes a request without either as 2025-03-26).
+fn protocol_of(context: &RequestContext<RoleServer>) -> String {
+    context.protocol_version().map(|v| v.to_string()).unwrap_or_default()
+}
+
+/// Whether `protocol` is a revision of the `initialize` era that is served.
+fn is_legacy(protocol: &str) -> bool {
+    PROTOCOL_VERSIONS.iter().any(|v| v.has_initialize() && v.as_str() == protocol)
 }
 
 /// A call under way, counted till it ends (or is dropped, its client gone).
@@ -757,9 +953,9 @@ mod tests {
         let app = Router::new()
             .route("/mcp", get(|headers: HeaderMap| async move { format!("authorization seen: {}", headers.contains_key(AUTHORIZATION)) }))
             .route_layer(from_fn_with_state(token.clone(), bearer));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/mcp", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let server = tokio::spawn(serve(listener, app, CancellationToken::new(), CancellationToken::new()));
         let ask = |auth: Option<String>| {
             let url = url.clone();
             tokio::task::spawn_blocking(move || {
@@ -809,19 +1005,36 @@ mod tests {
 
     #[test]
     fn a_cancel_names_one_call_or_none() {
+        const V: &str = "2025-06-18";
         let calls = InHand::default();
-        let (a, b, c) = (CancellationToken::new(), CancellationToken::new(), CancellationToken::new());
-        let _a = calls.add(&RequestId::Number(1), a.clone());
-        let _b = calls.add(&RequestId::Number(2), b.clone());
-        let c_guard = calls.add(&RequestId::Number(2), c.clone());
-        assert!(calls.cancel("1"));
+        let tag = |name: &str| ClientTag { name: name.into(), version: "1".into() };
+        let token = CancellationToken::new;
+        let (a, b, c, d) = (token(), token(), token(), token());
+        let _a = calls.add(&RequestId::Number(1), V, Some(tag("claude")), a.clone());
+        let _b = calls.add(&RequestId::Number(2), V, Some(tag("claude")), b.clone());
+        let c_guard = calls.add(&RequestId::Number(2), V, None, c.clone());
+        let _d = calls.add(&RequestId::Number(4), "2025-11-25", None, d.clone());
+        // another revision, the 2026-07-28 era, another client: not the call meant
+        assert!(!calls.cancel("1", "2025-11-25", None));
+        assert!(!calls.cancel("1", "2026-07-28", None));
+        assert!(!calls.cancel("1", V, Some(&tag("cursor"))));
+        assert!(!a.is_cancelled());
+        assert!(calls.cancel("1", V, Some(&tag("claude"))));
         assert!(a.is_cancelled());
-        assert!(!calls.cancel("2"), "two calls have id 2: neither is cancelled");
+        assert!(!calls.cancel("2", V, None), "two calls have id 2: neither is cancelled");
         assert!(!b.is_cancelled() && !c.is_cancelled());
+        // told whose, the one of that client's is meant
+        assert!(calls.cancel("2", V, Some(&tag("claude"))));
+        assert!(b.is_cancelled() && !c.is_cancelled());
+        // a call with that id just ended on that revision: the cancel may be its, late
         drop(c_guard);
-        assert!(calls.cancel("2"));
-        assert!(b.is_cancelled());
-        assert!(!calls.cancel("3"));
+        let e = token();
+        let _e = calls.add(&RequestId::Number(2), V, None, e.clone());
+        assert!(!calls.cancel("2", V, None));
+        assert!(!e.is_cancelled());
+        // and on another revision the ended one is no reason to doubt
+        assert!(calls.cancel("4", "2025-11-25", None));
+        assert!(!calls.cancel("3", V, None));
     }
 
     #[test]

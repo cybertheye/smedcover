@@ -18,7 +18,7 @@ use serde_json::{json, Map, Value};
 use smedcover_core::mcp::bridge::{
     read_result, BoxFut, BridgeError, Call, ClientTag, Dispatcher, PageBridge, PageReply, PageSink, PageState, Progress,
 };
-use smedcover_core::mcp::server::{BindError, McpServer, Running, Stats, VERSION};
+use smedcover_core::mcp::server::{BindError, McpServer, Running, Stats, MAX_BODY, REFUSED_BODY_BYTES, VERSION};
 use smedcover_core::mcp::{Host, Secret, ToolList};
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, Notify};
@@ -31,6 +31,7 @@ const TOOLS: &str = r#"{"format": 1, "instructions": "Tools for the tests.", "to
   {"name": "busy", "description": "The page is busy.", "inputSchema": {"type": "object"}, "annotations": {}},
   {"name": "stale", "description": "The page no longer has it.", "inputSchema": {"type": "object"}, "annotations": {}},
   {"name": "timeout", "description": "The page went quiet.", "inputSchema": {"type": "object"}, "annotations": {}},
+  {"name": "size", "description": "Says how long its data is.", "inputSchema": {"type": "object"}, "annotations": {"readOnlyHint": true}},
   {"name": "server_only", "description": "Not on the desktop.", "inputSchema": {"type": "object"}, "annotations": {}, "x-smedcover": {"hosts": ["server"]}}
 ]}"#;
 
@@ -89,6 +90,10 @@ impl PageBridge for FakeBridge {
                 "busy" => Err(BridgeError::Page { code: "busy".into(), message: "SmedCover is busy: exporting.".into() }),
                 "stale" => Err(BridgeError::Page { code: "unknown_tool".into(), message: "no such tool".into() }),
                 "timeout" => Err(BridgeError::Timeout),
+                "size" => {
+                    let size = call.args.get("data").and_then(Value::as_str).map_or(0, str::len);
+                    read_result(json!({"content": [{"type": "text", "text": size.to_string()}]}))
+                }
                 other => panic!("the page was asked for {other}"),
             }
         })
@@ -182,6 +187,11 @@ impl Endpoint {
         http("POST", &self.url("/mcp"), headers, Some(body.to_string())).await
     }
 
+    /// Sends a notification of the older era; its HTTP status.
+    async fn legacy_note(&self, body: String) -> u16 {
+        http("POST", &self.url("/mcp"), self.headers(Some(LEGACY)), Some(body)).await.status
+    }
+
     /// The parts of a call's result from a JSON-RPC response that should have one.
     async fn legacy_call(&self, id: u64, tool: &str, args: Value) -> Value {
         let reply = self.legacy(id, "tools/call", json!({"name": tool, "arguments": args})).await;
@@ -189,18 +199,81 @@ impl Endpoint {
         reply.only()
     }
 
-    /// Opens a tools/call on a connection of its own, which is left open.
-    fn open_call(&self, id: u64, tool: &str) -> TcpStream {
-        let body = json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": tool, "arguments": {}}}).to_string();
+    /// Opens a connection of its own and sends a POST to /mcp, with the token if `token`, the
+    /// headers `extra`, a body said to be `length` bytes long and only `body` of it; the connection
+    /// is left open.
+    fn open_post(&self, token: bool, extra: &[(&str, &str)], length: usize, body: &[u8]) -> TcpStream {
         let mut stream = TcpStream::connect(self.addr()).unwrap();
-        let mut head = format!("POST /mcp HTTP/1.1\r\nHost: {}\r\nContent-Length: {}\r\n", self.addr(), body.len());
-        for (name, value) in self.headers(Some(LEGACY)) {
+        let mut head = format!("POST /mcp HTTP/1.1\r\nHost: {}\r\nContent-Length: {length}\r\n", self.addr());
+        for (name, value) in self.headers(None) {
+            if token || name != "Authorization" {
+                head.push_str(&format!("{name}: {value}\r\n"));
+            }
+        }
+        for (name, value) in extra {
             head.push_str(&format!("{name}: {value}\r\n"));
         }
         head.push_str("\r\n");
         stream.write_all(head.as_bytes()).unwrap();
-        stream.write_all(body.as_bytes()).unwrap();
+        stream.write_all(body).unwrap();
         stream
+    }
+
+    /// Opens a tools/call of the older era on a connection of its own, which is left open.
+    fn open_call(&self, id: u64, tool: &str) -> TcpStream {
+        let body = json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": tool, "arguments": {}}}).to_string();
+        self.open_post(true, &[("MCP-Protocol-Version", LEGACY)], body.len(), body.as_bytes())
+    }
+
+    /// Opens a tools/call of the 2026-07-28 era on a connection of its own, which is left open.
+    fn open_modern_call(&self, id: u64, tool: &str, progress_token: Option<&str>) -> TcpStream {
+        let mut meta = modern_meta();
+        if let Some(token) = progress_token {
+            meta["progressToken"] = json!(token);
+        }
+        let body = json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": tool, "arguments": {}, "_meta": meta}}).to_string();
+        let extra = [("MCP-Protocol-Version", MODERN), ("Mcp-Method", "tools/call"), ("Mcp-Name", tool)];
+        self.open_post(true, &extra, body.len(), body.as_bytes())
+    }
+}
+
+/// Runs `f` off the runtime's threads.
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    tokio::task::spawn_blocking(f).await.unwrap()
+}
+
+/// The head of the answer coming on `stream` (lower case), if it comes within `wait`.
+fn read_head(stream: &mut TcpStream, wait: Duration) -> Option<String> {
+    stream.set_read_timeout(Some(wait)).unwrap();
+    let mut head = Vec::new();
+    let mut byte = [0u8; 1];
+    while !head.ends_with(b"\r\n\r\n") {
+        match stream.read(&mut byte) {
+            Ok(1) => head.push(byte[0]),
+            _ => return None,
+        }
+    }
+    Some(String::from_utf8_lossy(&head).to_lowercase())
+}
+
+/// What else comes on `stream` till the server closes it, and whether it did within `wait`.
+fn read_till_closed(stream: &mut TcpStream, wait: Duration) -> (String, bool) {
+    let until = Instant::now() + wait;
+    let mut text = Vec::new();
+    let mut buf = [0u8; 16 * 1024];
+    loop {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return (String::from_utf8_lossy(&text).into(), false);
+        }
+        stream.set_read_timeout(Some(left)).unwrap();
+        match stream.read(&mut buf) {
+            Ok(0) => return (String::from_utf8_lossy(&text).into(), true),
+            Ok(n) => text.extend_from_slice(&buf[..n]),
+            // reset by the server is closed too
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => return (String::from_utf8_lossy(&text).into(), true),
+            Err(_) => return (String::from_utf8_lossy(&text).into(), false),
+        }
     }
 }
 
@@ -309,7 +382,7 @@ async fn legacy_initialize_list_and_call() {
     let reply = e.legacy(2, "tools/list", json!({})).await;
     let listed = reply.only();
     let names: Vec<_> = listed["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
-    assert_eq!(names, ["echo", "image", "slow", "hang", "busy", "stale", "timeout"]);
+    assert_eq!(names, ["echo", "image", "slow", "hang", "busy", "stale", "timeout", "size"]);
     assert!(!reply.body.contains("x-smedcover"));
     assert!(listed["result"].get("resultType").is_none());
     assert_eq!(listed["result"]["tools"][0]["annotations"]["readOnlyHint"], true);
@@ -336,7 +409,7 @@ async fn legacy_initialize_list_and_call() {
     // a request with no version header is taken as 2025-03-26, and still served
     let reply = http("POST", &e.url("/mcp"), e.headers(None), Some(json!({"jsonrpc": "2.0", "id": 5, "method": "tools/list"}).to_string())).await;
     assert_eq!(reply.status, 200);
-    assert_eq!(reply.only()["result"]["tools"].as_array().unwrap().len(), 7);
+    assert_eq!(reply.only()["result"]["tools"].as_array().unwrap().len(), 8);
 
     let stats = e.stats.snapshot();
     let seen = stats.clients.iter().find(|c| c.name == "raw-legacy").expect("the client was seen");
@@ -353,16 +426,19 @@ async fn progress_comes_as_events_before_the_result() {
     assert_eq!(reply.status, 200);
     assert!(reply.is_events());
     let messages = reply.messages();
-    assert_eq!(messages.len(), 4, "{}", reply.body);
-    for (n, message) in messages[..3].iter().enumerate() {
+    assert_eq!(messages.len(), 5, "{}", reply.body);
+    // progress 0 at once, before the page has said anything
+    assert_eq!(messages[0]["method"], "notifications/progress");
+    assert_eq!(messages[0]["params"], json!({"progressToken": "p-1", "progress": 0.0}));
+    for (n, message) in messages[1..4].iter().enumerate() {
         assert_eq!(message["method"], "notifications/progress");
         assert_eq!(message["params"]["progressToken"], "p-1");
         assert_eq!(message["params"]["progress"], json!(n as f64 + 1.0));
         assert_eq!(message["params"]["total"], json!(3.0));
         assert_eq!(message["params"]["message"], format!("step {}", n + 1));
     }
-    assert_eq!(messages[3]["id"], 7);
-    assert_eq!(messages[3]["result"]["content"][0]["text"], "done");
+    assert_eq!(messages[4]["id"], 7);
+    assert_eq!(messages[4]["result"]["content"][0]["text"], "done");
     // without a progress token, the page's progress is not passed on
     let reply = e.legacy(8, "tools/call", json!({"name": "slow", "arguments": {}})).await;
     assert_eq!(reply.only()["result"]["content"][0]["text"], "done");
@@ -375,20 +451,8 @@ async fn a_long_calls_answer_starts_at_once() {
     let e = Endpoint::start();
     let mut stream = e.open_call(1, "hang");
     e.bridge.hung().await;
-    let (head, stream) = tokio::task::spawn_blocking(move || {
-        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-        let mut head = Vec::new();
-        let mut byte = [0u8; 1];
-        while !head.ends_with(b"\r\n\r\n") {
-            match stream.read(&mut byte) {
-                Ok(1) => head.push(byte[0]),
-                _ => break,
-            }
-        }
-        (String::from_utf8_lossy(&head).to_lowercase(), stream)
-    })
-    .await
-    .unwrap();
+    let (head, stream) = blocking(move || (read_head(&mut stream, Duration::from_secs(5)), stream)).await;
+    let head = head.expect("the answer started");
     assert!(head.starts_with("http/1.1 200"), "{head}");
     assert!(head.contains("content-type: text/event-stream"), "{head}");
     assert!(e.bridge.let_go.lock().unwrap().is_none(), "the call is still in hand");
@@ -413,7 +477,7 @@ async fn modern_discover_list_and_call() {
     assert_eq!(reply.status, 200, "{}", reply.body);
     let result = &reply.only()["result"];
     assert_eq!(result["resultType"], "complete");
-    assert_eq!(result["tools"].as_array().unwrap().len(), 7);
+    assert_eq!(result["tools"].as_array().unwrap().len(), 8);
     assert!(result["ttlMs"].is_u64() && result["cacheScope"].is_string());
 
     let args = json!({"layer": "title", "text": "Hi"});
@@ -426,6 +490,43 @@ async fn modern_discover_list_and_call() {
     assert_eq!(client, Some(ClientTag { name: "raw-modern".into(), version: "0.2".into() }));
     let seen = e.stats.snapshot().clients.into_iter().find(|c| c.name == "raw-modern").unwrap();
     assert_eq!((seen.protocol.as_str(), seen.calls), (MODERN, 1));
+}
+
+/// In the 2026-07-28 era a call with a progress token is told progress 0 at once, and that starts
+/// its answer; one without waits for the page, its headers with its result (see server.rs).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_long_modern_calls_answer_starts_at_once_when_it_takes_progress() {
+    let e = Endpoint::start();
+    let mut stream = e.open_modern_call(1, "hang", Some("p-9"));
+    e.bridge.hung().await;
+    let (got, stream) = blocking(move || {
+        let head = read_head(&mut stream, Duration::from_secs(5));
+        let mut event = Vec::new();
+        let mut byte = [0u8; 1];
+        while !event.ends_with(b"\n\n") && stream.read(&mut byte).is_ok_and(|n| n == 1) {
+            event.push(byte[0]);
+        }
+        ((head, String::from_utf8_lossy(&event).to_string()), stream)
+    })
+    .await;
+    let (head, event) = got;
+    let head = head.expect("the answer started");
+    assert!(head.starts_with("http/1.1 200") && head.contains("content-type: text/event-stream"), "{head}");
+    // the body is chunked: the event is the line that starts with data:
+    let data = event.lines().find_map(|line| line.strip_prefix("data:")).unwrap_or_else(|| panic!("{event}"));
+    let data: Value = serde_json::from_str(data.trim()).unwrap_or_else(|_| panic!("{event}"));
+    assert_eq!(data["method"], "notifications/progress");
+    assert_eq!(data["params"]["progressToken"], "p-9");
+    assert_eq!(data["params"]["progress"], json!(0.0));
+    assert!(e.bridge.let_go.lock().unwrap().is_none());
+    drop(stream);
+
+    // without a progress token nothing comes before the page answers
+    let mut stream = e.open_modern_call(2, "hang", None);
+    e.bridge.hung().await;
+    let (head, stream) = blocking(move || (read_head(&mut stream, Duration::from_millis(500)), stream)).await;
+    assert_eq!(head, None, "rmcp now sends headers early: server.rs's notes and this test can say so");
+    drop(stream);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -597,14 +698,21 @@ async fn stopped_and_started_again_on_the_same_port() {
     let e = Endpoint::start();
     let addr = e.addr();
     assert_eq!(get(&e.url("/health"), vec![]).await.status, 200);
-    // a call in hand when it stops is cancelled, and the stop does not wait for it
-    let stream = e.open_call(1, "hang");
+    // open when it stops: a connection kept alive after an answer, and one with a call in hand
+    let mut idle = TcpStream::connect(addr).unwrap();
+    idle.write_all(format!("GET /health HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes()).unwrap();
+    let (head, mut idle) = blocking(move || (read_head(&mut idle, Duration::from_secs(5)), idle)).await;
+    let head = head.unwrap();
+    assert!(head.starts_with("http/1.1 200") && !head.contains("connection: close"), "{head}");
+    let mut calling = e.open_call(1, "hang");
     e.bridge.hung().await;
+    // the call is cancelled, both connections closed, and the stop waits for neither
     let stopping = Instant::now();
     assert!(e.running.stop(Duration::from_secs(2)).await, "it stopped in time");
     assert!(stopping.elapsed() < Duration::from_secs(2));
     assert!(e.bridge.let_go_after(stopping).await < Duration::from_secs(1));
-    drop(stream);
+    let (closed, idle_closed) = blocking(move || (read_till_closed(&mut calling, Duration::from_secs(2)).1, read_till_closed(&mut idle, Duration::from_secs(2)).1)).await;
+    assert!(closed && idle_closed, "every connection is closed by the server");
     assert!(TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_err(), "nothing listens any more");
     // the same port again
     let running = e.server.start(addr, &Handle::current()).expect("the port is free again");
@@ -623,6 +731,143 @@ async fn a_port_in_use_is_said_and_not_swapped() {
     assert_eq!(error, BindError::PortInUse(addr.port()));
     assert_eq!(error.code(), "port_in_use");
     drop(taken);
+}
+
+/// A connection whose body is still coming when the endpoint stops is closed, and the stop is clean.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_body_still_coming_is_closed_by_stop() {
+    let e = Endpoint::start();
+    let addr = e.addr();
+    let body = json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "echo", "arguments": {}}}).to_string();
+    let mut slow = e.open_post(true, &[("MCP-Protocol-Version", LEGACY)], body.len(), &body.as_bytes()[..10]);
+    // the body is being waited for once the headers are in: an answer to a request behind it shows that
+    assert_eq!(get(&e.url("/health"), vec![]).await.status, 200);
+    let stopping = Instant::now();
+    assert!(e.running.stop(Duration::from_secs(2)).await, "nothing had to be cut off");
+    assert!(stopping.elapsed() < Duration::from_secs(1), "{:?}", stopping.elapsed());
+    let (answer, closed) = blocking(move || read_till_closed(&mut slow, Duration::from_secs(2))).await;
+    assert!(closed, "closed by the server");
+    assert!(answer.is_empty() || answer.starts_with("HTTP/1.1 503"), "{answer}");
+    let again = e.server.start(addr, &Handle::current()).expect("the port is free again");
+    drop(again);
+}
+
+/// A connection that has not finished when the stop's wait is over is cut off: it is gone, and the
+/// port free, when the stop returns.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_connection_still_busy_is_cut_off() {
+    let e = Endpoint::start();
+    let addr = e.addr();
+    // an answer of 32 MB that its client stops reading: the server cannot finish writing it
+    let data = "A".repeat(16 << 20);
+    let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "echo", "arguments": {"data": data}}}).to_string();
+    let mut busy = e.open_post(true, &[("MCP-Protocol-Version", LEGACY)], body.len(), body.as_bytes());
+    let mut busy = blocking(move || {
+        assert!(read_head(&mut busy, Duration::from_secs(10)).is_some_and(|h| h.starts_with("http/1.1 200")));
+        let mut some = vec![0u8; 64 * 1024];
+        busy.read_exact(&mut some).unwrap();
+        busy
+    })
+    .await;
+    let stopping = Instant::now();
+    assert!(!e.running.stop(Duration::from_millis(300)).await, "it had to be cut off");
+    let took = stopping.elapsed();
+    assert!(took >= Duration::from_millis(300) && took < Duration::from_secs(2), "{took:?}");
+    let (_, closed) = blocking(move || read_till_closed(&mut busy, Duration::from_secs(5))).await;
+    assert!(closed, "closed by the server");
+    drop(e.server.start(addr, &Handle::current()).expect("the port is free again"));
+}
+
+/// A refused request's body is not waited for: at most a little of it is read, then the refusal
+/// is sent and the connection closed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_refused_body_is_not_waited_for() {
+    let e = Endpoint::start();
+    // a mebibyte promised and just over the 64 KiB read of it sent: answered at once, the rest not
+    // waited for
+    let started = Instant::now();
+    let mut big = e.open_post(false, &[], 1 << 20, &vec![b' '; REFUSED_BODY_BYTES + 1]);
+    let (got, _) = blocking(move || {
+        let head = read_head(&mut big, Duration::from_secs(5));
+        (head, read_till_closed(&mut big, Duration::from_secs(5)).1)
+    })
+    .await;
+    let head = got.expect("refused");
+    assert!(head.starts_with("http/1.1 401") && head.contains("connection: close"), "{head}");
+    assert!(started.elapsed() < Duration::from_secs(1), "{:?}", started.elapsed());
+    // nothing of the body sent: answered when the short wait for it is over
+    let started = Instant::now();
+    let mut none = e.open_post(true, &[("Origin", "https://evil.example")], 1000, b"");
+    let (head, closed) = blocking(move || {
+        let head = read_head(&mut none, Duration::from_secs(5));
+        (head, read_till_closed(&mut none, Duration::from_secs(5)).1)
+    })
+    .await;
+    assert!(head.unwrap().starts_with("http/1.1 403"));
+    assert!(closed);
+    let took = started.elapsed();
+    assert!(took >= Duration::from_millis(1900) && took < Duration::from_secs(4), "{took:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bodies_up_to_32_mib() {
+    let e = Endpoint::start();
+    // a photo's worth of base64, more than the 4 MiB rmcp takes unless told
+    let data = "A".repeat(20 << 20);
+    let answer = e.legacy_call(1, "size", json!({"data": data})).await;
+    assert_eq!(answer["result"]["content"][0]["text"], (20 << 20).to_string());
+    // over 32 MiB: refused before it is read, but for the little a refusal reads
+    let started = Instant::now();
+    let mut stream = e.open_post(true, &[("MCP-Protocol-Version", LEGACY)], MAX_BODY + 1, &vec![b' '; REFUSED_BODY_BYTES + 1]);
+    let (head, closed) = blocking(move || {
+        let head = read_head(&mut stream, Duration::from_secs(5));
+        (head, read_till_closed(&mut stream, Duration::from_secs(5)).1)
+    })
+    .await;
+    let head = head.expect("refused");
+    assert!(head.starts_with("http/1.1 413") && head.contains("connection: close"), "{head}");
+    assert!(closed);
+    assert!(started.elapsed() < Duration::from_secs(1), "{:?}", started.elapsed());
+}
+
+/// A cancel is placed only where there is no doubt which call it means.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancels_that_cannot_be_placed_are_ignored() {
+    let e = Endpoint::start();
+    let init = json!({"protocolVersion": LEGACY, "capabilities": {}, "clientInfo": {"name": "raw-legacy", "version": "0.1"}});
+    assert_eq!(e.legacy(1, "initialize", init).await.status, 200);
+    let stream = e.open_call(77, "hang");
+    e.bridge.hung().await;
+    let note = |id: u64| json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": id}}).to_string();
+    // without the token: refused before anything is looked at
+    let without: Vec<_> = e.headers(Some(LEGACY)).into_iter().filter(|(n, _)| n != "Authorization").collect();
+    assert_eq!(http("POST", &e.url("/mcp"), without, Some(note(77))).await.status, 401);
+    // on another revision, or none (2025-03-26), or another id
+    for protocol in [Some("2025-11-25"), None] {
+        assert_eq!(http("POST", &e.url("/mcp"), e.headers(protocol), Some(note(77))).await.status, 202);
+    }
+    assert_eq!(e.legacy_note(note(78)).await, 202);
+    // the 2026-07-28 era does not cancel this way
+    let mut headers = e.headers(Some(MODERN));
+    headers.push(("Mcp-Method".into(), "notifications/cancelled".into()));
+    let _ = http("POST", &e.url("/mcp"), headers, Some(note(77))).await;
+    // none of those did (a cancel placed would have let the call go well within this): it lets go
+    // only after the one that is its own
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(e.bridge.let_go.lock().unwrap().is_none(), "an earlier cancel was placed");
+    let placed = Instant::now();
+    assert_eq!(e.legacy_note(note(77)).await, 202);
+    assert!(e.bridge.let_go_after(placed).await < Duration::from_secs(1));
+    assert!(e.bridge.let_go.lock().unwrap().is_some_and(|at| at >= placed));
+    drop(stream);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn batches_are_not_served() {
+    let e = Endpoint::start();
+    let batch = json!([{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1}}]);
+    let reply = http("POST", &e.url("/mcp"), e.headers(Some(LEGACY)), Some(batch.to_string())).await;
+    assert_eq!(reply.status, 415, "{}", reply.body);
 }
 
 // ---- rmcp's own client, in both eras ----
@@ -648,7 +893,7 @@ async fn rmcp_client_with_initialize() {
     assert_eq!(server.server_info.as_ref().map(|s| s.name.as_str()), Some("smedcover"));
     assert!(server.protocol_version.has_initialize());
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 7);
+    assert_eq!(tools.len(), 8);
     assert_eq!(tools[0].name, "echo");
     let result = client.call_tool(CallToolRequestParams::new("echo").with_arguments(args(json!({"a": [1, 2, 3]})))).await.unwrap();
     assert_eq!(result.structured_content, Some(json!({"a": [1, 2, 3]})));
@@ -668,7 +913,7 @@ async fn rmcp_client_with_discover() {
     let client = client_config("rmcp-modern").serve_with_lifecycle(rmcp_transport(&e), lifecycle).await.expect("discover");
     assert_eq!(client.peer_info().unwrap().protocol_version, ProtocolVersion::V_2026_07_28);
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.iter().map(|t| t.name.to_string()).collect::<Vec<_>>(), ["echo", "image", "slow", "hang", "busy", "stale", "timeout"]);
+    assert_eq!(tools.iter().map(|t| t.name.to_string()).collect::<Vec<_>>(), ["echo", "image", "slow", "hang", "busy", "stale", "timeout", "size"]);
     let result = client.call_tool(CallToolRequestParams::new("echo").with_arguments(args(json!({"x": "y"})))).await.unwrap();
     assert_eq!(result.structured_content, Some(json!({"x": "y"})));
     let result = client.call_tool(CallToolRequestParams::new("timeout")).await.unwrap();
@@ -703,10 +948,15 @@ async fn through_the_dispatcher_to_a_page() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     dispatcher.attach(Box::new(ChannelSink(tx)), "hash");
     let (cancels_tx, mut cancels) = mpsc::unbounded_channel::<(Value, Instant)>();
+    let hang_seen = Arc::new(Notify::new());
     let page = {
+        let hang_seen = hang_seen.clone();
         let dispatcher = dispatcher.clone();
         tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
+                if msg["tool"] == "hang" {
+                    hang_seen.notify_one();
+                }
                 match (msg["kind"].as_str(), msg["tool"].as_str()) {
                     (Some("call"), Some("echo")) => {
                         let reply = json!({"id": msg["id"], "ok": true, "result": {"structuredContent": {"asked": msg}}});
@@ -746,12 +996,7 @@ async fn through_the_dispatcher_to_a_page() {
         head.push_str(&format!("{name}: {value}\r\n"));
     }
     stream.write_all(format!("{head}\r\n{body}").as_bytes()).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while dispatcher.calls() == 0 {
-        assert!(Instant::now() < deadline, "the call reached the dispatcher");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    tokio::time::timeout(Duration::from_secs(10), hang_seen.notified()).await.expect("the page was given the call");
     let hung_up = Instant::now();
     stream.shutdown(std::net::Shutdown::Both).unwrap();
     drop(stream);

@@ -47,8 +47,12 @@ rmcp = { version = "=3.7.0", default-features = false, features = ["server", "ba
 # Waiting for the page's answers, and the endpoint's runtime (the app's is Tauri's).
 tokio = { version = "1", features = ["net", "sync", "time", "macros", "rt"] }
 tokio-util = "0.7"
-# The MCP endpoint's HTTP server, on 127.0.0.1 only.
-axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "json"] }
+# The MCP endpoint's HTTP server, on 127.0.0.1 only: axum's routes and layers, served by hyper itself
+# so that each connection has its timeouts and the endpoint can close every one when it stops.
+axum = { version = "0.8.9", default-features = false, features = ["json"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "service", "http1"] }
+http-body-util = "0.1"
 # On Windows the endpoint's port is bound for SmedCover alone (SO_EXCLUSIVEADDRUSE).
 socket2 = "0.6"
 windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
