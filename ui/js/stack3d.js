@@ -91,15 +91,17 @@ const fit1 = (ctx, s, max) => {   // s cut short with an ellipsis to fit max pix
   return s + "…";
 };
 /**
- * Paints the stack. o: {dpr, W, H (the canvas in CSS pixels), V (from fitView), sheets: [{id, img, z,
- * alpha, label, dim, mark: "" | "sel" | "hover" | "peek"}], deco (0–1: how much of the sheets' edges and
- * labels shows; 0 while the stack is closed flat), acc (the accent colour), room (the label column's width)}.
+ * Paints the stack. o: {dpr, W, H (the canvas in CSS pixels), V (from fitView), sheets: [{id, img, box (the part of
+ * img anything is painted on, as fractions of it: only that part is drawn; null: none), z, alpha, label, dim,
+ * mark: "" | "sel" | "hover" | "peek"}], deco (0–1: how much of the sheets' edges and
+ * labels shows; 0 while the stack is closed flat), acc (the accent colour), room (the label column's width), fast (it
+ * is opening, closing or being turned: the sheets drawn with plainer filtering)}.
  */
 export function drawStack(ctx, o) {
   const { dpr, V, deco } = o, { w, h } = V;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = o.fast ? "low" : "high";   // plain filtering while it moves
   const list = [...o.sheets].sort((p, q) => p.z - q.z), screen = () => ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const outline = (cs) => { ctx.beginPath(); cs.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.closePath(); };
   for (const sh of list) {
@@ -108,7 +110,8 @@ export function drawStack(ctx, o) {
     if (deco > 0) { ctx.globalAlpha = deco * (sh.dim ? 0.3 : 1); outline(cs); ctx.fillStyle = "rgba(255,255,255,0.035)"; ctx.fill(); }   // a pane of glass, so an all but empty layer still shows where it is
     ctx.setTransform(dpr * m.a, dpr * m.b, dpr * m.c, dpr * m.d, dpr * m.e, dpr * m.f);
     ctx.globalAlpha = sh.alpha * (sh.dim ? 0.18 : 1);
-    if (sh.img) ctx.drawImage(sh.img, 0, 0, w, h);
+    const b = sh.box === undefined ? { x: 0, y: 0, w: 1, h: 1 } : sh.box, iw = sh.img && sh.img.width, ih = sh.img && sh.img.height;
+    if (sh.img && b) ctx.drawImage(sh.img, b.x * iw, b.y * ih, b.w * iw, b.h * ih, b.x * w, b.y * h, b.w * w, b.h * h);   // a layer with little on it costs little
     screen();
     if (deco > 0) {
       ctx.globalAlpha = deco * (sh.dim ? 0.3 : 1); outline(cs);

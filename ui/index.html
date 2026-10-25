@@ -504,7 +504,15 @@
   .lyfilter .lytg{height:auto}
   .lyhint{margin-top:8px;line-height:1.5}
   /* a row: the grip, a tile of what the layer shows (layerTile), its name over what it holds, its chips, eye and lock */
-  .layers{display:grid;align-content:start;gap:3px;flex:1 1 auto;min-height:0;overflow-y:auto;padding:3px 0;margin:-3px 0}   /* (room for the drop line over the first row) */
+  /* the list: the rows scroll (as tall as they are, down to the bar at the foot at most), the Background under a line
+     below them always in sight; where rows go on past an edge they fade out there (listFades in app.js) */
+  .layers{flex:0 1 auto;min-height:0;display:flex;flex-direction:column}
+  .lyscroll{flex:0 1 auto;min-height:0;overflow-y:auto;display:grid;align-content:start;gap:3px;padding:3px 0;margin:-3px 0}   /* (room for the drop line over the first row) */
+  .lyscroll.up{-webkit-mask-image:linear-gradient(to bottom,transparent,#000 24px);mask-image:linear-gradient(to bottom,transparent,#000 24px)}
+  .lyscroll.down{-webkit-mask-image:linear-gradient(to top,transparent,#000 24px);mask-image:linear-gradient(to top,transparent,#000 24px)}
+  .lyscroll.up.down{-webkit-mask-image:linear-gradient(transparent,#000 24px,#000 calc(100% - 24px),transparent);mask-image:linear-gradient(transparent,#000 24px,#000 calc(100% - 24px),transparent)}
+  .lybase{flex:none;padding-top:4px}
+  .lybase::before{content:"";display:block;height:1px;margin:0 6px 4px;background:var(--line)}
   .layer{display:grid;grid-template-columns:14px 36px minmax(0,1fr) auto;align-items:center;gap:9px;border:1.5px solid transparent;border-radius:12px;padding:5px 6px 5px 2px;min-height:50px;box-sizing:border-box;cursor:pointer;user-select:none}
   .layer:hover{background:rgba(255,255,255,.07)}
   .layer.on{border-color:color-mix(in srgb,var(--acc) 75%,transparent);background:color-mix(in srgb,var(--acc) 15%,transparent)}

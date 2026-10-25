@@ -351,8 +351,9 @@ const V3 = {
   yaw: VIEW.yaw, pitch: VIEW.pitch, spread: VIEW.spread, aim: null,   // the view; aim: the view it is easing back to (Reset view)
   s: 0,                                   // the scale shown: eased towards the one that fits, and held while the view is dragged
   z: new Map(),                           // layer id -> its place in the stack as shown, easing towards where it is now
-  sheets: new Map(),                      // layer id -> {cv, mask, key}: the layer painted on its own
+  sheets: new Map(),                      // layer id -> {cv, mask, box, key}: the layer painted on its own
   stale: true,                            // the layers have changed since they were painted
+  todo: [], pw: 0, key: "", needs: 0, paintRaf: 0,   // the sheets still to paint, a few a frame, how wide and under what key (see paint3d)
   hover: "", peek: "",                    // the sheet under the pointer; the layer whose row in the list it is on
   drag: false, raf: 0, view: null, shown: [],   // the view and the sheets last drawn, to find what is under the pointer
 };
@@ -399,10 +400,13 @@ function drawThumbs() {
   };
   next();
 }
-let drawQueued = false;
+let drawQueued = false, drawStale = false;   // drawStale: the cover changed since the last draw (see queueDraw)
 function flushDraw() {
   if (!drawQueued) return;
-  drawQueued = false; ensureFonts(S.cover.layers); drawMain(); placeBar(); markStrip(); thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); later("ambient", 350, paintAmbient);
+  const changed = drawStale;
+  drawQueued = drawStale = false; ensureFonts(S.cover.layers); drawMain(); placeBar(); markStrip();
+  // the thumbnails and the window's ground show the cover: not drawn again for the 3D view opening, closing or a layer selected in it
+  if (changed || !V3.on) { thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); later("ambient", 350, paintAmbient); }
   placeFrames();   // the layout's parts framed, where the Layout sheet is open
   if (S.letterWin) later("letters", 200, lettersShow);   // the ransom note's letters as now drawn (words typed, colours changed)
   if (S.weaveWin) later("weave", 200, weaveShow);   // the woven letters as now typed
@@ -420,7 +424,7 @@ function flushDraw() {
 let framesRun = 0;
 const drawInFrame = (now) => { framesRun++; glassWatch(now); flushDraw(); };
 function queueDraw(stale = true) {
-  if (stale) V3.stale = true;
+  if (stale) V3.stale = drawStale = true;
   if (drawQueued) return;
   drawQueued = true;
   requestAnimationFrame(drawInFrame);
@@ -5766,14 +5770,16 @@ function renderSide() {
     onclick: () => { if (LAYERS_UI.filter !== k) { LAYERS_UI.filter = k; renderSide(); } } }, k === "all" ? t("layers.filter.all") : t("layers.filter." + k, here.filter(LAYER_FILTERS[k]).length));
   // what the bar's eye hides or shows: the group, or the selected layer; all of it shown again once none of it is showing
   const hides = many.length ? many : L ? [L] : [], showing = hides.some((l) => l.visible), gone = many.length ? !many.some(isAdded) : !(L && isRemovable(L));
-  const was = layerBox.querySelector(".layers"), top = was ? was.scrollTop : 0;   // the list scrolls on its own (index.html): kept where it was
+  const was = layerBox.querySelector(".lyscroll"), top = was ? was.scrollTop : 0;   // the list scrolls on its own (index.html): kept where it was
+  const rows = [...listed].reverse(), ground = rows.find((l) => l.type === "bg");   // the Background under a line at the list's foot, always in sight
   layerBox.replaceChildren(   // in the Layers sheet: its head, the chips, the list, and at its foot the selected layer and what can be done to it
     el("div", { class: "lyhead" }, el("div", { class: "lycount" }, el("b", {}, t("layers.title")), el("span", {}, counted("layers.count", here.length))),
       el("button", { class: "lytg" + (V3.to ? " on" : ""), title: t("v3.tip"), "aria-pressed": String(!!V3.to), onclick: () => set3d(!V3.to), innerHTML: `${ICONS.stack}<span>${t("v3.button")}</span>` })),
     el("div", {}, el("div", { class: "lyfilter" }, el("div", { class: "seg" }, Object.keys(LAYER_FILTERS).map(chip)),
         el("button", { class: "lytg" + (S.focus ? " on" : ""), title: t("focus.tip"), "aria-pressed": String(!!S.focus), onclick: () => setFocus(!S.focus), innerHTML: `${ICONS.focus}<span>${t("focus.label")}</span><kbd>F</kbd>` })),
       fk !== "all" && el("div", { class: "hint lyhint" }, t(listed.length ? "layers.filter.reorder" : "layers.filter.none"))),
-    el("div", { class: "layers" }, [...listed].reverse().map(layerRow)),
+    el("div", { class: "layers" }, el("div", { class: "lyscroll", onscroll: (e) => listFades(e.currentTarget) }, rows.filter((l) => l !== ground).map(layerRow)),
+      ground && el("div", { class: "lybase" }, layerRow(ground))),
     el("div", { class: "selbar" },
       el("span", { class: "who", title: !many.length && L ? layerName(L) : null }, many.length ? t("props.group", many.length) : L ? [t("layers.selected"), el("b", {}, layerName(L))] : t("layers.none")),
       ib(ICONS.dup, t("layers.dup"), !copiable(L) || many.length > 0, duplicateLayer),
@@ -5783,7 +5789,8 @@ function renderSide() {
       ib(ICONS.props, t(S.settings.drawer ? "drawer.close" : "drawer.open"), false, () => setDrawer(!S.settings.drawer), S.settings.drawer),
       el("span", { class: "sep" }),
       ib(ICONS.trash, t(gone && L && !many.length ? "layers.delLayout" : "layers.del"), gone, () => (many.length ? removeGroup() : removeLayer()))));
-  layerBox.querySelector(".layers").scrollTop = top;
+  const list = layerBox.querySelector(".lyscroll");
+  list.scrollTop = top; listFades(list); LIST_FIT.disconnect(); LIST_FIT.observe(list);
   layerPics();
   // what is selected, in the drawer on the right (nothing is built while it is shut)
   side.replaceChildren(...(!S.settings.drawer ? [] : [
@@ -5804,6 +5811,12 @@ function renderSide() {
   for (const item of document.querySelectorAll("#panel .pitem")) item.classList.toggle("on", item.dataset.id === S.layerId);
   syncFocus(); markRows(); renderBar();
 }
+/** The list's edges fade where rows go on past them: scrolled up under the chips, or on down under the Background's line (.lyscroll in index.html). */
+function listFades(list) {
+  list.classList.toggle("up", list.scrollTop > 1);
+  list.classList.toggle("down", list.scrollTop + list.clientHeight < list.scrollHeight - 1);
+}
+const LIST_FIT = new ResizeObserver((seen) => seen.forEach((e) => listFades(e.target)));   // the list grown or shrunk with the window
 /** Opens or shuts the drawer of the selected layer's properties on the right (kept in the settings); shut, the canvas takes its column. */
 function setDrawer(on) {
   const fromSheet = $("left").contains(document.activeElement), fromDrawer = $("right").contains(document.activeElement);
@@ -6037,7 +6050,7 @@ function set3d(on) {
 /** Takes the 3D view away at once (and the memory its sheets held); the canvas is painted first, so nothing flashes. */
 function close3d() {
   Object.assign(V3, { on: false, k: 0, from: 0, to: 0, hover: "", peek: "", drag: false });
-  V3.sheets.clear(); V3.z.clear(); V3.shown = []; V3.view = null;
+  V3.sheets.clear(); V3.z.clear(); V3.shown = []; V3.view = null; V3.todo = []; cancelAnimationFrame(V3.paintRaf); V3.paintRaf = 0;
   if (S.mode === "edit") drawMain();
   $("stage").classList.remove("v3", "v3open");
   markRows(); syncFocus(); placeBar(); placeFrames();
@@ -6122,17 +6135,39 @@ function maskOf(cv) {
   for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3];
   return { w, h, a };
 }
+/** The part of a sheet anything is painted on, as fractions of it (a cell of its mask round it), or null when nothing is: the stack draws only that part. */
+function inkBox(m) {
+  let x0 = m.w, y0 = m.h, x1 = -1, y1 = -1;
+  for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) if (m.a[y * m.w + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  if (x1 < 0) return null;
+  x0 = Math.max(0, x0 - 1); y0 = Math.max(0, y0 - 1); x1 = Math.min(m.w, x1 + 2); y1 = Math.min(m.h, y1 + 2);
+  return { x: x0 / m.w, y: y0 / m.h, w: (x1 - x0) / m.w, h: (y1 - y0) / m.h };
+}
+const SHEET_MS = 12;   // painting the sheets: about this long a frame, at least one sheet; the rest on the frames after
+/** The most pixels across a sheet is painted at: a sheet is seen smaller than the stage, and this many is plenty (fewer while a slider is dragged). */
+function sheetCap(W, H, vw, vh) {
+  const dpr = window.devicePixelRatio || 1;
+  return Math.round(Math.min(vw * 1.5, (Math.max(W, H) * 0.6 * (drafting() ? 1 : Math.min(2, dpr)) * vw) / Math.max(vw, vh)));
+}
+/** How many pixels across a sheet needs, seen at scale s (virtual pixels to the screen's), with a little to spare. */
+const sheetNeeds = (vw, s) => Math.round(vw * s * Math.min(2, window.devicePixelRatio || 1) * 1.2);
 /**
- * drawMain() while the 3D view is up: paints again the layers that changed, each on its own — while one
- * is being changed (see holdLive) just it, and what is clipped with it — then draws the stack.
+ * drawMain() while the 3D view is up: the layers that changed are to be painted again, each on its own — while one is
+ * being changed (see holdLive) just it, and what is clipped with it. They are painted a few a frame (paintSheets), the
+ * selected first, then from the top of the stack down, the stack drawn at once with the sheets there are: it opens
+ * without waiting for them all. A sheet is painted about as wide as it is seen with the stack open (V3.pw), not as wide
+ * as the cover on the canvas.
  */
 function paint3d() {
   const c = $("cv3d"), stage = $("stage"), dpr = window.devicePixelRatio || 1, W = stage.clientWidth, H = stage.clientHeight;
   if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
   const size = selSize(), [vw, vh] = virtualSize(size.w, size.h), list = here3d();
-  // a sheet is seen smaller than the canvas: about this many pixels across is plenty
-  const pw = Math.round(Math.min(vw * 1.5, (Math.max(W, H) * 0.6 * (drafting() ? 1 : Math.min(2, dpr)) * vw) / Math.max(vw, vh)));
-  const key = `${pw}|${sizeKey(size)}|${catIndex()}`;
+  // the scale the stack is seen at open, in the view as it is turned and spread now (as draw3d fits it)
+  const room = labelRoom(c.getContext("2d"), list.map(layerName)), gap = gapFor(list.length, vh, V3.spread);
+  const open = fitView(turn(V3.yaw, V3.pitch), vw, vh, 0, Math.max(0, list.length - 1) * gap, { x: 18, y: 18, w: Math.max(40, W - 36 - room), h: Math.max(40, H - 36 - 56) });
+  const needs = sheetNeeds(vw, open.s);
+  if (!V3.needs || needs > V3.needs * 1.3 || needs < V3.needs / 1.6) V3.needs = needs;   // painted again only once that is well off
+  const pw = Math.min(sheetCap(W, H, vw, vh), V3.needs), key = `${pw}|${sizeKey(size)}|${catIndex()}`;
   for (const id of V3.sheets.keys()) if (!list.some((l) => l.id === id)) V3.sheets.delete(id);
   if (V3.stale) {
     let only = null;
@@ -6146,16 +6181,29 @@ function paint3d() {
         for (let j = from; j <= clipEnd(S.cover.layers, from); j++) only.add(S.cover.layers[j].id);
       }
     }
-    for (const L of list) {
-      const sh = V3.sheets.get(L.id) || { cv: document.createElement("canvas") };
-      if (only && !only.has(L.id) && sh.key === key) continue;
-      drawCover(sh.cv, { profile: S.profile, catIndex: catIndex(), size, pixelW: pw, cover: S.cover, photos: S.photos, only: S.cover.layers.indexOf(L) });
-      sh.mask = maskOf(sh.cv); sh.key = key;
-      V3.sheets.set(L.id, sh);
-    }
-    V3.stale = false;
+    const picked = group().length ? group().map((L) => L.id) : [S.layerId], todo = list.filter((L) => !only || only.has(L.id) || (V3.sheets.get(L.id) || {}).key !== key).reverse();
+    V3.todo = [...todo.filter((L) => picked.includes(L.id)), ...todo.filter((L) => !picked.includes(L.id))].map((L) => L.id);
+    Object.assign(V3, { pw, key, stale: false });
   }
+  paintSheets(false);
   draw3d();
+}
+/** Paints the sheets still to be painted (V3.todo) for about SHEET_MS, and the rest on the frames after; the stack is drawn again with them. */
+function paintSheets(redraw = true) {
+  cancelAnimationFrame(V3.paintRaf); V3.paintRaf = 0;
+  if (!V3.on || !S.cover) return;
+  const t0 = performance.now(), size = selSize(), at = new Map(S.cover.layers.map((l, i) => [l.id, i]));
+  while (V3.todo.length) {
+    const id = V3.todo.shift();
+    if (!at.has(id)) continue;
+    const sh = V3.sheets.get(id) || { cv: document.createElement("canvas") };
+    drawCover(sh.cv, { profile: S.profile, catIndex: catIndex(), size, pixelW: V3.pw, cover: S.cover, photos: S.photos, only: at.get(id) });
+    sh.mask = maskOf(sh.cv); sh.box = inkBox(sh.mask); sh.key = V3.key;
+    V3.sheets.set(id, sh);
+    if (performance.now() - t0 > SHEET_MS) break;
+  }
+  if (V3.todo.length) V3.paintRaf = requestAnimationFrame(() => paintSheets());
+  if (redraw) tick3d();
 }
 /** Draws the stack as it stands now; true while something is still easing and wants another frame. */
 function draw3d() {
@@ -6195,12 +6243,14 @@ function draw3d() {
   else V3.s = V.s;
   V.s = V3.s;
   V3.view = V;
+  // turned or spread so the sheets are seen well larger than they were painted for: painted again, as wide as that
+  if (!more && !V3.drag && k === 1 && V3.needs && sheetNeeds(vw, V.s) > V3.needs * 1.3 && V3.pw < sheetCap(W, H, vw, vh)) queueDraw();
   V3.shown = list.map((L) => {
     const sh = V3.sheets.get(L.id);
-    return { id: L.id, img: sh && sh.cv, z: V3.z.get(L.id) * gap, alpha: seen(L) ? 1 : 0.35 * deco, hidden: !seen(L), label: label(L),
+    return { id: L.id, img: sh && sh.cv, box: sh && sh.box, z: V3.z.get(L.id) * gap, alpha: seen(L) ? 1 : 0.35 * deco, hidden: !seen(L), label: label(L),
       dim: !!V3.peek && V3.peek !== L.id, mark: picked.includes(L.id) ? "sel" : L.id === V3.hover || L.id === V3.peek ? "hover" : "" };
   });
-  drawStack(ctx, { dpr, W, H: H - 56 * k, V, sheets: V3.shown, deco, acc: cat().color, room });   // the labels clear of the bar at the foot
+  drawStack(ctx, { dpr, W, H: H - 56 * k, V, sheets: V3.shown, deco, acc: cat().color, room, fast: opening || V3.drag });   // the labels clear of the bar at the foot
   return more;
 }
 /** Draws the stack on the next frame, and on until it settles. */

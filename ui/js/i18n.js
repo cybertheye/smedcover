@@ -419,7 +419,7 @@ const STR = {
   "style.designSaved": ["已设为默认设计", "Saved as the default design"],
 
   "layers.title": ["图层", "Layers"],
-  "layers.count": ["{0} 层 · 上面的盖住下面的", "{0} layers · top in front"],
+  "layers.count": ["{0} 层", "{0} layers"],
   "layers.count.one": ["{0} 层", "{0} layer"],
   "layers.sub.away": ["这个尺寸不显示", "Not shown at this size"],
   "layers.sub.bg": ["{0}风格画的 · 总在最底", "{0} look · always at the bottom"],
