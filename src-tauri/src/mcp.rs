@@ -256,6 +256,11 @@ impl McpHost {
         self.awake.lock().unwrap_or_else(|e| e.into_inner()).take();
     }
 
+    /// Whether an agent's call is under way: waiting for the window, or being carried out there.
+    pub fn call_in_flight(&self) -> bool {
+        self.dispatcher.calls() > 0
+    }
+
     /// Tells the page each change of the endpoint and of the clients and calls, four times a second
     /// at most, and holds the app awake while a call is under way.
     async fn tell_page(self: Arc<Self>) {
@@ -401,6 +406,12 @@ fn png_size(png: &[u8]) -> (u32, u32) {
         }
         _ => (0, 0),
     }
+}
+
+/// Whether an agent's call is under way — for the commands only such a call may use (the files an
+/// agent names). False when the endpoint was never set up.
+pub fn agent_call_in_flight(app: &AppHandle) -> bool {
+    app.try_state::<Arc<McpHost>>().is_some_and(|h| h.call_in_flight())
 }
 
 /// The window keeps drawing when it cannot be seen (`unseen`), or watches again whether it can.

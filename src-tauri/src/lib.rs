@@ -293,17 +293,31 @@ async fn ai_request(
 
 // ---------------------------------------------------------------- files an agent names (the rules: smedcover_core::files)
 
-/// A picture on this computer for an agent's `add_photo` (see `files::read_picture`): its bytes, as they are.
+/// Refuses unless an agent's call is under way (the endpoint has one in hand), or the self-test runs, which calls the
+/// tools itself: a page cannot read files it names at any other time.
+fn agent_reads(app: &AppHandle) -> Res<()> {
+    if mcp::agent_call_in_flight(app) || (selftest_root().is_some() && !selftest_stay()) {
+        Ok(())
+    } else {
+        Err("not allowed: a file is read only for an agent's call under way".into())
+    }
+}
+
+/// A picture on this computer for an agent's `add_photo` (see `files::read_picture`): its bytes, as they are. Only
+/// while an agent's call is under way (see `agent_reads`).
 #[tauri::command]
-async fn read_picture(path: String) -> Res<tauri::ipc::Response> {
+async fn read_picture(app: AppHandle, path: String) -> Res<tauri::ipc::Response> {
+    agent_reads(&app)?;
     tauri::async_runtime::spawn_blocking(move || files::read_picture(Path::new(&path)).map(|(_, bytes)| tauri::ipc::Response::new(bytes)))
         .await
         .map_err(err)?
 }
 
-/// A project file on this computer for an agent's `open_project` (see `files::read_project`): its text.
+/// A project file on this computer for an agent's `open_project` (see `files::read_project`): its text. Only while an
+/// agent's call is under way (see `agent_reads`).
 #[tauri::command]
-async fn read_project(path: String) -> Res<String> {
+async fn read_project(app: AppHandle, path: String) -> Res<String> {
+    agent_reads(&app)?;
     tauri::async_runtime::spawn_blocking(move || files::read_project(Path::new(&path)))
         .await
         .map_err(err)?
