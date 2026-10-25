@@ -78,7 +78,7 @@ ui/
   js/i18n.js         interface strings (zh / en)
   js/tools.js        the agent tools (MCP) as data: names, descriptions, schemas, hints, what the page reads of each; the argument check, the answers' shapes, what the commands find things by (pure)
   js/commands.js     what each agent tool does, over the app's own functions (makeCommands(api))
-  js/agent.js        the agent shell: one call at a time, waiting for the user, the window held during a step, the dev hook
+  js/agent.js        the agent shell: one call at a time, waiting for the user, the window held during a step, a call that hangs let go of, the dev hook
   tools.json         the tools as the host's MCP endpoint lists them, written from tools.js (scripts/tools.mjs)
   fonts/             bundled fonts and their licences
 core/src/            the Rust side's work, which a server can share (the crate smedcover-core): store, export, fonts, outlines, cut-out, AI requests (10)
@@ -2368,7 +2368,8 @@ the page: half a minute to read, a minute to change, two to draw a preview or de
 export) and `needs` (what a schema cannot say without a combinator: at least, exactly or at most one of some
 arguments). `checkArgs(schema, args)` checks a call against the part of JSON Schema the tools use and says what is
 wrong in a sentence for the model (`"maxSide" must be at most 2048 (got 4000).`, `Unknown argument "colour" (this tool
-takes: …)`); `checkCall(def, args)` adds `needs`. `toResult({structured, images, text})` makes MCP's
+takes: …)`); a string's characters are counted only against a length limit, and no further than it needs, so a
+picture of 40 MB in `add_photo`'s `source.data` is checked at once. `checkCall(def, args)` adds `needs`. `toResult({structured, images, text})` makes MCP's
 `CallToolResult` (a text block, by default the structured answer as JSON; each PNG an image block;
 `structuredContent`) and `toError(code, message)` a failure, `code` one of `unknown_tool`, `invalid_arguments`,
 `not_allowed`, `busy`, `unavailable`, `failed` (the host makes a protocol error of the first, `isError` of the rest).
@@ -2395,27 +2396,43 @@ with `all`, every size on one captioned sheet. The read-only tools, the selectio
 answer `unavailable` for now.
 
 `agent.js` is the shell. Calls run one at a time in the order they came (`makeQueue()`: a call cancelled while it
-waits never runs; one running goes on, told through `ctx.cancelled()`). Each is checked (`checkCall()`), then waits
-till the user is in the middle of nothing (`whenIdle()` over `userBusy()`: a press, a drag, a dialog, typing; for a
-change Settings, the editor's windows and an export under way too) and their hands have been off the window for
-400 ms, telling the caller every 5 s that it waits (a progress message, which sets the host's timer going again), and
-answering `busy` after 30 s (10 s for a read). A call that changes something holds the window while it runs: the menu,
-popovers and hover previews shut and a field left (`closeTransient()`), `#agent` over the window (above the menu and
-dialogs, under a question, the title bar and the toast; `body.agent .app` takes no pointer), the keys, pastes and the
-wheel swallowed before anything sees them and a drop let go — not replayed: a step is short — and, after 150 ms, a pill
-of glass at the top saying what is being done (`agent.step.<tool>`), which a press pulses ("One moment"). One whose tool
-has `history` runs inside `agentStep(fn)` (`app.js`): the change the user was making becomes a step of its own first
-(`commitPending()`), `HOLD.history` keeps the debounced commit back, and the step is committed once — none when nothing
-changed. Should it fail part-way, the snapshot taken after the opening commit is put back (a step taken meanwhile,
-`keepFirst()`'s, let go), or, when it switched channel or profile, the cover as it was on arriving, the switch kept as
-the user's own is; the step put back is written again as it now is, as `timeTravel()` does, or the closing commit would
-take the difference for a change and cut off redo.
+waits never runs), one waiting behind another telling the caller so every 5 s. Each is checked (`checkCall()`; a name
+of `Object.prototype`'s is no tool), then waits till the user is in the middle of nothing (`whenIdle()` over
+`userBusy()`: a press, a drag, a dialog, typing; for a change Settings, the editor's windows and an export under way
+too) and their hands have been off the window for 400 ms, telling the caller every 5 s that it waits (a progress
+message, which sets the host's timer going again), and answering `busy` after 30 s (10 s for a read). Input is noted
+while a step runs too, and when the user pressed, typed or scrolled during one, the 400 ms run from its end: they get
+in before the next change, which waits while they press. A call that changes something holds the window while it runs:
+the menu, popovers and hover previews shut and a field left (`closeTransient()`), `#agent` over the window (above the
+menu and dialogs, under a question, the title bar and the toast; `body.agent .app` takes no pointer, nor does the
+toast's button, which would act mid-step), the keys, pastes and the wheel swallowed before anything sees them (by
+listeners added for the step and removed after it) and a drop let go — not replayed: a step is short — and, after
+150 ms, a pill of glass at the top saying what is being done (`agent.step.<tool>`), which a press pulses ("One
+moment"); after 20 s it says the step is taking longer than usual and offers to stop waiting (its button, or Esc). One
+whose tool has `history` runs inside `agentStep(fn)` (`app.js`): the change the user was making becomes a step of its
+own first (`commitPending()`), `HOLD.history` keeps the debounced commit back, and the step is committed once — none
+when nothing changed. Should it fail part-way, the snapshot taken after the opening commit is put back (a step taken
+meanwhile, `keepFirst()`'s, let go), or, when it switched channel or profile, the cover as it was on arriving, the
+switch kept as the user's own is; the step put back is written again as it now is, as `timeTravel()` does, or the
+closing commit would take the difference for a change and cut off redo.
+
+A call running is let go of — answered `failed`, the window given back, the next call started — when nothing is heard
+from it for its timeout (the call's `timeoutMs`, else its tool's; each word to the caller, its own progress or a wait,
+sets it going again), a second after the host cancels it (it is told at once, `ctx.cancelled()`, which an export checks
+between files, and answers as it likes if it ends within that second), or when the user stops waiting. It is not
+stopped — a promise cannot be — but `ctx.cancelled()` turns true for it, and what it answers later is dropped (the
+queue's `lease.gone`; `hold()`'s token, which `release()` must match, keeps it from letting go of a later step's
+window). Should a change fail after it was let go of, it is not put back over what the user has done since: its step
+ends through `agentStep`'s own `finally`, as one step of undo (till then `HOLD.history` stays on, and the user's own
+changes meanwhile join that step). The window is taken inside the call's `try`, so a throw in `closeTransient()` too is
+answered and the window given back; `handle()` and `serve()` answer every call.
 
 The dispatcher answers each call as the host is to be sent it: `{id, ok: true, result}` or `{id, ok: false, error:
 {code, message}}`. A transport brings the calls and takes the answers (`serve(agent, {listen, reply, progress})`); the
 desktop's — a Tauri `Channel` handed over with `mcp_attach`, answers by `mcp_reply` and `mcp_progress` — is to be
-written with the Rust side. Meanwhile `globalThis.smedcoverAgent.call(name, args)` runs the same dispatcher from the
-console or a test in a plain page (`tools()`: the list). `startAgent()` starts the shell at the end of `start()`, not
+written with the Rust side. Meanwhile `globalThis.smedcoverAgent.call(name, args, {onProgress, timeoutMs})` runs the
+same dispatcher from the console or a test in a plain page, `cancel(id)` cancels as a host would (`last`: the id of the
+call made last; `tools()`: the list). `startAgent()` starts the shell at the end of `start()`, not
 in self-test mode; there `SMEDCOVER_SELFTEST_AGENT=1` starts it in a step of its own (see 13).
 
 ## 12. Fonts
@@ -2428,7 +2445,7 @@ frame waits for the fonts, otherwise the title would be fitted using the wrong g
 
 | Level | Command | Covers |
 |---|---|---|
-| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export's sizes switched off and folders and the looks' use, by profile and look), the defaults and `custom.json` laid over them, the settings written to `custom.json` (only what differs, read back the same, from `settings.json` once), file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string, no native `confirm()`, `alert()` or `prompt()` in `ui/`; the agent tools (`agent.test.mjs`): every definition whole and marked as the spec has it, the enums the app's constants, `ui/tools.json` up to date, the argument check's verdicts and sentences, finding profiles, channels and sizes, the answers' shapes, the read-only commands, selection, undo and redo over a stand-in `API`, the queue, `whenIdle()` and the dispatcher |
+| Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export's sizes switched off and folders and the looks' use, by profile and look), the defaults and `custom.json` laid over them, the settings written to `custom.json` (only what differs, read back the same, from `settings.json` once), file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string, no native `confirm()`, `alert()` or `prompt()` in `ui/`; the agent tools (`agent.test.mjs`): every definition whole and marked as the spec has it, the enums the app's constants, `ui/tools.json` up to date, the argument check's verdicts and sentences (a 40 MB string checked at once, characters counted as JSON Schema counts them), finding profiles, channels and sizes, the answers' shapes, the read-only commands, selection, undo and redo over a stand-in `API`, the queue, `whenIdle()` and the dispatcher (a call that hangs let go of at its timeout, on a cancel and when the user stops waiting, the next one run, a late answer dropped; those waiting told so; every call answered) |
 | Rust unit tests | `cargo test --workspace` (`npm run test:rust`) | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling, requests against a local stand-in server, proxy rules, a face cut out of a font collection, traced outlines, fonts found by name (bundled, imported, imported again), the cut-out's models and packages |
 | End-to-end self-test | `SMEDCOVER_SELFTEST=<folder> <executable>` | the full export path between the real web view and Rust |
 
