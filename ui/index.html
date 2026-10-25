@@ -71,6 +71,7 @@
   .btn.solid{background:var(--acc);color:var(--acc-ink);border-color:transparent;font-weight:700}
   .btn.solid:hover:not(:disabled){background:var(--acc);filter:brightness(1.08)}
   .btn.wide{width:100%;padding:11px}
+  .btn:has(>.ico){display:inline-flex;align-items:center;justify-content:center;gap:7px}   /* a button with what it does drawn before its name */
   .btn.cta{height:40px;padding:0 18px;font-size:14px;display:inline-flex;align-items:center;gap:8px;border-radius:12px}
   .btn.cta svg{flex:none}
   .btn.cta.glassy{background:var(--glass2);border:1px solid rgba(255,255,255,.24);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.28)}
@@ -345,7 +346,8 @@
   .psec-b .btn.wide{width:auto}
   .psec-b .btn svg{flex:none;width:15px;height:15px}
   .psec-b .btn:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
-  .psec-b>.row{margin:0;gap:8px}
+  .psec-b>.row{margin:0;gap:8px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .psec-b>.row>.btn{min-width:0;padding:5px 10px;white-space:normal;line-height:1.25}   /* two side by side, a long name (with its icon) in two lines rather than past the edge */
   :is(.psec-b,.lgrid,#brush-box) .seg{min-height:34px;padding:2px;gap:2px;border-radius:10px;background:rgba(0,0,0,.28)}
   :is(.psec-b,.lgrid,#brush-box) .seg .btn{flex:1 1 0;min-width:0;min-height:28px;padding:3px 5px;border:0;border-radius:8px;font-size:12.5px;line-height:1.2;white-space:normal}   /* a long name in two lines rather than cut */
   :is(.psec-b,.lgrid,#brush-box) .seg .btn svg{width:14px;height:14px}
@@ -369,6 +371,7 @@
      object put back, every look effect removed (in the danger colour) */
   .fxs .linkbtn,.sizes-picks .linkbtn{font-size:12px}
   .tacts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:2px}
+  .tacts.mid{justify-content:center}
   .fxs>.fxa{display:flex;gap:2px}
   .psec-b>.fxs>span.jump{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
   .psec-b>.fxs>span.jump:hover{color:var(--text)}

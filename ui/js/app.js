@@ -2813,7 +2813,7 @@ function templateControls(st, at, changed, to = null) {
     scrub(t("style.layTitleW"), LAYOUT_LIMITS.tw[0], LAYOUT_LIMITS.tw[1], 0.01, adj.tw ?? 1, SHOWN.num, (v) => set("tw", v), 1),
     scrub(t("style.layTitleH"), LAYOUT_LIMITS.th[0], LAYOUT_LIMITS.th[1], 0.01, adj.th ?? 1, SHOWN.num, (v) => set("th", v), 1),
     check(split ? "style.layFlipSplit" : "style.layFlipStack", !!adj.flip, (on) => set("flip", on, true)),
-    el("button", { class: "btn wide", style: "margin-top:10px", disabled: sameLayout({ template: tpl, adjust: adj }, { template: tpl, adjust: byDefault }), onclick: () => put(tpl, byDefault, true) }, t("style.layReset")),
+    el("button", { class: "btn wide", style: "margin-top:10px", disabled: sameLayout({ template: tpl, adjust: adj }, { template: tpl, adjust: byDefault }), onclick: () => put(tpl, byDefault, true) }, ico("reset", 15), t("style.layReset")),
   ];
 }
 /**
@@ -2863,7 +2863,7 @@ function layoutBox() {
     el("div", { class: "hint", style: "margin:0 0 10px" }, at.says, " ", t("style.scopeWhere")),
     at.own,
     templateControls(st, shownAt(), (again) => { if (!again) return draftTouch({ profile: true }); touch({ profile: true }); later("laybox", 60, renderPanel); }, at.to),
-    el("button", { class: "btn wide", style: "margin-top:8px", title: t("style.byOrientTip"), onclick: byOrient }, t("style.byOrient")));
+    el("button", { class: "btn wide", style: "margin-top:8px", title: t("style.byOrientTip"), onclick: byOrient }, ico("sizes", 15), t("style.byOrient")));
 }
 /**
  * Where a change of the layout lands, as the scope under the canvas says (see layoutBox): `to`, what templateControls
@@ -2895,7 +2895,7 @@ function blockSection() {
     segs(t("props.blockAt"), ["stack", "split", "banner"].map((k) => [k, t("tpl." + k), null, t("tpl." + k + "Tip")]), a.tpl, place),
     check("props.blockFlip", !!a.adj.flip, (on) => step(() => a.set("flip", on, true)), { title: t("props.blockFlipTip." + a.tpl), def: false }),
     blockSliders(a), at.own,
-    el("button", { class: "btn wide", title: t("style.byOrientTip"), onclick: byOrient }, t("style.byOrient")),
+    el("button", { class: "btn wide", title: t("style.byOrientTip"), onclick: byOrient }, ico("sizes", 15), t("style.byOrient")),
   ], `${t("props.blockHint")} ${at.says} ${t("style.scopeWhere")}`);
 }
 /** Block by orientation ("wide a side panel, tall a band, square a slim banner"): every size in its orientation's default layout (layoutByOrient in layout.js); one step of undo. */
@@ -3620,8 +3620,8 @@ function layoutEditor(p, i, fresh = false) {
         adder),
       // an element of the user's own: what it does where the preset is put, behind an ⓘ
       el("div", { class: "ls-picked" }, el("span", {}, t("layed.picked", nameOf(E.sel)), x && " ", x && info(t("layed.extraHint." + x.kind))),
-        el("div", { class: "acts" }, !block && el("button", { class: "btn", title: t("layed.resetTip"), onclick: reset }, t("layed.reset")),
-          x && el("button", { class: "btn", onclick: () => dropExtra(x.id) }, t("layed.remove")))),
+        el("div", { class: "acts" }, !block && el("button", { class: "btn", title: t("layed.resetTip"), onclick: reset }, ico("reset", 15), t("layed.reset")),
+          x && el("button", { class: "btn", onclick: () => dropExtra(x.id) }, ico("trash", 15), t("layed.remove")))),
       el("div", { class: "ls-opts" },
         // the words of the part selected in a line or in columns, at every size (a lettered part's but the brand row's, a
         // text element's)
@@ -3637,7 +3637,7 @@ function layoutEditor(p, i, fresh = false) {
               return el("button", { class: "btn" + (on ? " on" : ""), "aria-pressed": String(on), title: on ? null : t("layed.sideTip"), onclick: () => toSide(v) }, t("layed.side." + v));
             }))),
           E.p.by && E.p.by[z.key] && el("div", { class: "layown" }, el("span", {}, t("style.own")), el("button", { class: "linkbtn", title: t("layed.followTip"), onclick: follow }, t("style.follow"))),
-          el("div", { class: "acts" }, el("button", { class: "btn", title: t("layed.blockResetTip"), onclick: resetBlock }, t("layed.blockReset"))),   // its place is its side, the buttons above
+          el("div", { class: "acts" }, el("button", { class: "btn", title: t("layed.blockResetTip"), onclick: resetBlock }, ico("reset", 15), t("layed.blockReset"))),   // its place is its side, the buttons above
           el("div", { class: "hint", style: "margin:0" }, t("layed.blockHint")))));
     const list = side.firstChild, opening = E.picking && !side.dataset.picking;
     list.scrollTop = was.list; side.lastChild.scrollTop = was.opts; side.dataset.sel = E.sel; side.dataset.picking = E.picking ? "1" : "";
@@ -3689,7 +3689,7 @@ function lookSheet() {
   const L = LOOKS[st.look] || LOOKS.cel, vals = lookParams(st.look, st.lookParams[st.look]);
   // seldom wanted: small, at the end, and shut off until a setting is the user's own (a setting changed lets it on, the sheet not built anew)
   const restore = el("button", { type: "button", class: "tbtn", disabled: !st.lookParams[st.look] && !(st.lookArt && st.lookArt[st.look]),
-    onclick: () => { delete st.lookParams[st.look]; if (st.lookArt) delete st.lookArt[st.look]; touch({ profile: true, panel: true }); } }, t("style.lookReset"));
+    onclick: () => { delete st.lookParams[st.look]; if (st.lookArt) delete st.lookArt[st.look]; touch({ profile: true, panel: true }); } }, ico("reset", 15), t("style.lookReset"));
   const tune = (k, v) => { st.lookParams[st.look] = { ...vals, ...st.lookParams[st.look], [k]: v }; restore.disabled = false; draftTouch({ profile: true }, k); };
   return [
     sheetHead(t("sheet.look"), t("sheet.lookSub")),
@@ -3707,8 +3707,8 @@ function lookSheet() {
           ? scrub(d.name[getLang()], d.min, d.max, d.step, vals[d.key], SHOWN.num, () => {}, null, t("style.needsPhoto"))   // nothing for it to act on yet
           : scrub(d.name[getLang()], d.min, d.max, d.step, vals[d.key], SHOWN.num, (v) => tune(d.key, v), d.def),
         d.key === L.art && lookArtRow()]),
-        L.seeded && el("button", { class: "btn wide", title: t("style.shuffleHint"), onclick: () => { st.lookSeed = Math.floor(Math.random() * 1000000); touch({ profile: true }); } }, t("style.shuffle")),
-        L.params.length > 0 && el("div", { class: "tacts" }, restore))),
+        L.seeded && el("button", { class: "btn wide", title: t("style.shuffleHint"), onclick: () => { st.lookSeed = Math.floor(Math.random() * 1000000); touch({ profile: true }); } }, ico("shuffle", 15), t("style.shuffle")),
+        L.params.length > 0 && el("div", { class: "tacts mid" }, restore))),
     recipeBox(),
   ];
 }
@@ -4233,7 +4233,7 @@ function logoControls() {
   const P = S.profile, a = P.brand.logo && userAssets.get(P.brand.logo);
   return el("div", { class: "logo-row" },
     el("span", { class: "lthumb" + (a ? "" : " none") }, a ? graphicThumb({ kind: "user", id: a.id }, cat().color, 40) : "＋"),
-    el("button", { class: "btn", onclick: uploadLogo }, t(a ? "brand.logoSwap" : "brand.logoUp")),
+    el("button", { class: "btn", onclick: uploadLogo }, ico("upload", 15), t(a ? "brand.logoSwap" : "brand.logoUp")),
     a ? el("button", { class: "linkbtn", onclick: () => { P.brand.logo = ""; touch({ profile: true, panel: true, side: true }); } }, t("brand.logoDrop")) : el("small", {}, t("brand.logoKind")));
 }
 /** What the brand row's number says on this channel's cover, as drawn (see the brand row in render.js). */
@@ -4846,8 +4846,8 @@ function fxControl(L) {
       fx !== "auto" && kind !== "passes" && scrub(t("props.fxAmt"), 0, 2, 0.05, L.fxAmt ?? 1, SHOWN.times, (v) => { holdLive(L.id); set("fxAmt", v === 1 ? undefined : v, false); }, 1),
       // the ransom note's letters dealt again: another face, paper, ink and angle for each (a reshaped edge: other spikes,
       // tears, cuts, drips, bites); and the ransom note's one by one, in a window of their own
-      EFFECTS[fx].seeded && el("button", { class: "btn wide", title: t(fx === "ransom" ? "fx.reshuffleTip" : "fx.reshuffleEdgeTip"), onclick: () => { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === L.fxSeed); set("fxSeed", n, false); } }, t("fx.reshuffle")),
-      fx === "ransom" && el("button", { class: "btn wide letters-btn", title: t("letters.openTip"), onclick: () => lettersOpen(L) }, t("letters.open")),
+      EFFECTS[fx].seeded && el("button", { class: "btn wide", title: t(fx === "ransom" ? "fx.reshuffleTip" : "fx.reshuffleEdgeTip"), onclick: () => { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === L.fxSeed); set("fxSeed", n, false); } }, ico("shuffle", 15), t("fx.reshuffle")),
+      fx === "ransom" && el("button", { class: "btn wide letters-btn", title: t("letters.openTip"), onclick: () => lettersOpen(L) }, ico("letters", 15), t("letters.open")),
     ],
     tip: [fx === "ransom" && t("fx.ransomHint"), EFFECTS[fx].kind === "outline" && fx !== "extrude" && t("fx.shapedHint"), kind === "outline" && !CAN.outlines && t("fx.needsApp"), cols && NO_COLUMNS.includes(fx) && t("fx.noColumns")].filter(Boolean).join(" "),
   };
@@ -4865,8 +4865,8 @@ function bendControl(L) {
       picker([["", t("bend.none")], ...Object.entries(BENDS).map(([id, b]) => [id, b.name[getLang()]])], L.bend || "", (v) => { if (v) L.bend = v; else { delete L.bend; delete L.bendAmt; } delete L.warp; delete L.reshape; touch({ cover: true, side: true }); },
         { name: t("props.bend"), id: "bend", glyph: bendGlyph, def: "" }),
       L.bend && !(L.bend === "taper" && L.warp) && scrub(t("props.bendAmt"), 0, 2, 0.05, L.bendAmt ?? 1, SHOWN.times, (v) => { holdLive(L.id); set("bendAmt", v === 1 ? undefined : v, false); }, 1),
-      L.bend === "taper" && L.warp && el("button", { class: "btn wide", onclick: () => set("warp", undefined, true) }, t("fx.warpReset")),
-      L.bend && L.bend !== "taper" && L.reshape && el("button", { class: "btn wide", onclick: () => set("reshape", undefined, true) }, t("fx.reshapeReset")),
+      L.bend === "taper" && L.warp && el("button", { class: "btn wide", onclick: () => set("warp", undefined, true) }, ico("reset", 15), t("fx.warpReset")),
+      L.bend && L.bend !== "taper" && L.reshape && el("button", { class: "btn wide", onclick: () => set("reshape", undefined, true) }, ico("reset", 15), t("fx.reshapeReset")),
     ],
     tip: L.bend ? `${t("fx.bendHint")} ${t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint")}` : t("fx.bendHint"),
   };
@@ -4923,7 +4923,7 @@ function fxCards(L) {
   return el("div", { class: "fxdeck" },
     el("div", { class: "fxhint" }, t("fx.cardsHint")),
     fxRow(el("div", { class: "fxgrid", style: `--cols:${Math.ceil(order.length / FX_FOLDED) * (FX_FOLDED / 2)}`, onpointerleave: () => hoverFx(L, null) }, order.map(card)), L),   // whole pages, the last one too
-    el("button", { class: "btn wide seeall", onclick: () => { FX_UI.all = !FX_UI.all; renderSide(); } }, FX_UI.all ? t("fx.seeFewer") : t("fx.seeAll", FX_ORDER.length - 1)));
+    el("button", { class: "btn wide seeall", onclick: () => { FX_UI.all = !FX_UI.all; renderSide(); } }, ico("grid", 15), FX_UI.all ? t("fx.seeFewer") : t("fx.seeAll", FX_ORDER.length - 1)));
 }
 /** Watches the effect rows' size (a popover laid out, the window resized), to say again at which ends there is more. */
 const FXROWS = new ResizeObserver((seen) => { for (const e of seen) fxRowEnds(e.target.parentElement); });
@@ -5152,7 +5152,7 @@ function lettersShow(now = false) {
     el("div", { class: "head" }, el("b", {}, `${t("props.sec.letters")} · ${layerName(L)}`), el("button", { class: "x", title: t("deal.close"), onclick: lettersClose }, "✕")),
     inner,
     el("div", { class: "hint" }, t("letters.hint")),
-    el("div", { class: "acts" }, el("button", { class: "btn", onclick: lettersClose }, t("deal.done"))));
+    el("div", { class: "acts" }, el("button", { class: "btn", onclick: lettersClose }, ico("check", 15), t("deal.done"))));
 }
 /**
  * The ransom note letter by letter (ransom.js): the extras the layer lets in; a strip of its letters as they
@@ -5198,7 +5198,7 @@ function letterControls(L) {
     cap("letters.extras"), extras,
     strip,
     picked ? letterEditor(L, picked, put, photo) : el("div", { class: "hint", style: "margin:6px 0 0" }, t("letters.pick")),
-    L.letters && el("div", { class: "tacts", style: "margin-top:8px" }, el("button", { type: "button", class: "tbtn", onclick: () => { delete L.letters; touch({ cover: true }); lettersShow(true); } }, t("letters.resetAll"))),
+    L.letters && el("div", { class: "tacts", style: "margin-top:8px" }, el("button", { type: "button", class: "tbtn", onclick: () => { delete L.letters; touch({ cover: true }); lettersShow(true); } }, ico("reset", 15), t("letters.resetAll"))),
   ];
 }
 /** The controls of one letter of the ransom note: {row, c (its cell), p (how it is dressed now)}; `put(key, patch)` sets what was chosen. */
@@ -5220,9 +5220,9 @@ function letterEditor(L, { row, c, p }, put, photo) {
   return el("div", { class: "ledit" },
     el("div", { class: "lhead" }, el("b", {}, `「${p.ch}」`), el("span", {}, t("letters.line", row + 1))),
     el("div", { class: "row", style: "margin-top:6px" },
-      el("button", { class: "btn", title: t("letters.oneTip"), onclick: () => { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === e.salt); put(key, { salt: n }); } }, t("letters.one")),
-      el("button", { class: "btn" + (p.locked ? " on" : ""), title: t("letters.lockTip"), onclick: () => put(key, { lock: p.locked ? undefined : { seed: L.fxSeed || 0, ...(p.face ? { face: { family: p.face.family, weight: p.face.weight, ...(p.face.italic ? { italic: true } : {}) } } : {}), paper: p.paper.css, ink: p.ink, hero: p.hero } }) }, t(p.locked ? "letters.unlock" : "letters.lock")),
-      el("button", { class: "btn", disabled: !L.letters || !L.letters[key], onclick: () => put(key, Object.fromEntries(Object.keys(e).map((k) => [k, undefined]))) }, t("letters.reset"))),
+      el("button", { class: "btn", title: t("letters.oneTip"), onclick: () => { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === e.salt); put(key, { salt: n }); } }, ico("shuffle", 15), t("letters.one")),
+      el("button", { class: "btn" + (p.locked ? " on" : ""), title: t("letters.lockTip"), onclick: () => put(key, { lock: p.locked ? undefined : { seed: L.fxSeed || 0, ...(p.face ? { face: { family: p.face.family, weight: p.face.weight, ...(p.face.italic ? { italic: true } : {}) } } : {}), paper: p.paper.css, ink: p.ink, hero: p.hero } }) }, ico("lock", 15), t(p.locked ? "letters.unlock" : "letters.lock")),
+      el("button", { class: "btn", disabled: !L.letters || !L.letters[key], onclick: () => put(key, Object.fromEntries(Object.keys(e).map((k) => [k, undefined]))) }, ico("reset", 15), t("letters.reset"))),
     el("div", { class: "lgrid" },
       el("span", {}, t("letters.kind")),
       picker([["", t("letters.random")], ...["tile", "bare", "cut", "deep", ...(photo ? ["photo"] : [])].map((k) => [k, t(`letters.kind.${k}`)])], e.kind || "", (v) => put(key, { kind: v || undefined }),
@@ -5311,25 +5311,25 @@ function photoControls(L, set) {
   const cut = (on) => cutPhoto(L, on);
   const from = !L.of && cutSource(L), had = from && passivesOf(from)[0];   // what Cut out subject cuts out of (see cutOut)
   const redo = !!had && cutSizes(from).every((k) => inSize(had, k)), keys = !L.of && scopeKeys();   // its cut-out is found again; else made, or put where the scope reaches too
-  const unlinkBtn = (L.of || linked.length > 0) && el("button", { class: "btn wide", onclick: () => askUnlink(L) }, t("link.unlink"));
+  const unlinkBtn = (L.of || linked.length > 0) && el("button", { class: "btn wide", onclick: () => askUnlink(L) }, ico("unlink", 15), t("link.unlink"));
   const cropBtn = cropButton(L);
   return [
     !rec && el("div", { class: "hint err", style: "margin:0 0 10px" }, t("props.photoMissing")),
     psec("props.sec.cut", [
       canCut()
         ? el("div", { class: L.of ? "" : "row" },
-            el("button", { class: "btn" + (L.of ? " wide" : ""), disabled: CUT.busy, onclick: () => cut(!L.cut) }, t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut")),
-            !L.of && el("button", { class: "btn", disabled: CUT.busy, title: t(redo ? "cut.againTip" : "cut.go"), onclick: () => cutOut(L) }, t(redo ? "cut.again" : "cut.goShort")))
+            el("button", { class: "btn" + (L.of ? " wide" : ""), disabled: CUT.busy, onclick: () => cut(!L.cut) }, ico("scissors", 15), t(CUT.busy ? "cut.busy" : L.cut ? "props.uncut" : "props.cut")),
+            !L.of && el("button", { class: "btn", disabled: CUT.busy, title: t(redo ? "cut.againTip" : "cut.go"), onclick: () => cutOut(L) }, ico("subject", 15), t(redo ? "cut.again" : "cut.goShort")))
         : el("div", { class: "hint", style: "margin:0" }, t("cutset.needsApp")),
       canCut() && keys && el("div", { class: "hint" }, sizesSaid("cut.scopeHint", keys)),   // the scope under the canvas keeps both to some sizes
       L.cut && scrub(t("props.feather"), 0, 40, 1, L.feather, SHOWN.px, (v) => { holdLive(L.id); set("feather", v); }, 0),
       L.cut && scrub(t("props.spread"), 0, 40, 1, L.spread, SHOWN.px, (v) => { holdLive(L.id); set("spread", v); }, 0),
       CUT.error && el("div", { class: "hint err" }, CUT.error),
-    CUT.needModel && el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; SET_UI.at = "cut"; setMode("setup"); } }, t("cut.goModel"))], t("cut.tip", t("cutset.engine." + cutEngine()))),
+    CUT.needModel && el("button", { class: "btn wide", onclick: () => { S.tab.setup = "ai"; SET_UI.at = "cut"; setMode("setup"); } }, ico("download", 15), t("cut.goModel"))], t("cut.tip", t("cutset.engine." + cutEngine()))),
     canWeave(L) && weaveControls(L),
     L.of
       ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")),
-          base && el("button", { class: "btn wide", title: t("link.realignTip"), onclick: () => { L.t = alignedT(base); touch({ cover: true, side: true }); } }, t("link.realign")),
+          base && el("button", { class: "btn wide", title: t("link.realignTip"), onclick: () => { L.t = alignedT(base); touch({ cover: true, side: true }); } }, ico("aim", 15), t("link.realign")),
           cropBtn, unlinkBtn], t("link.passiveMore"))
       : psec("props.sec.place", [check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; if (clipBase(S.cover.layers, S.cover.layers.indexOf(L)) < 0) toGround(L); } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
           linked.length > 0 && el("div", { class: "hint" }, t("link.leads", linked.map(layerName).join(" · "))), cropBtn, unlinkBtn],
@@ -5381,8 +5381,8 @@ function weaveControls(L) {
     w && below.length > 0 && below.map((l) => switchRow(layerName(l), w.with.includes(l.id), (yes) => tick(l, yes))),   // the lettering it weaves with, each on or off
     w && picker(WEAVE_WAYS.map((k) => [k, k === "head" ? weaveT(L, "weave.by.head") : t("weave.by." + k)]), w.by, (v) => put({ by: v }), { name: t("props.sec.weave"), id: "weave" }),
     w && w.by === "head" && scrub(t(L.type === "asset" ? "weave.line.asset" : "weave.line"), 0.1, 0.9, 0.01, w.line, SHOWN.pct, (v) => { holdLive(L.id); L.weave = { ...L.weave, line: v }; touch({ cover: true }); }, 0.3),
-    w && w.by === "letters" && el("button", { class: "btn wide", disabled: !wovenOf(L).length, onclick: () => weaveOpen(L) }, t("weave.choose")),
-    w && w.by === "brush" && el("button", { class: "btn wide", disabled: !wovenOf(L).length, onclick: () => brushOpen(L) }, t("weave.paint")),
+    w && w.by === "letters" && el("button", { class: "btn wide", disabled: !wovenOf(L).length, onclick: () => weaveOpen(L) }, ico("pick", 15), t("weave.choose")),
+    w && w.by === "brush" && el("button", { class: "btn wide", disabled: !wovenOf(L).length, onclick: () => brushOpen(L) }, ico("brush", 15), t("weave.paint")),
   ], weaveT(L, "weave.tip"));
 }
 
@@ -5415,7 +5415,7 @@ function weaveShow(now = false) {
     el("div", { class: "wkey" }, el("span", {}, el("span", { class: "wl on" }, "A"), " ", weaveT(L, "weave.inFront")), el("span", {}, el("span", { class: "wl" }, "A"), " ", weaveT(L, "weave.behind"))),
     inner,
     el("div", { class: "hint" }, weaveT(L, "weave.hint")),
-    el("div", { class: "acts" }, el("button", { class: "btn", onclick: weaveClose }, t("deal.done"))));
+    el("div", { class: "acts" }, el("button", { class: "btn", onclick: weaveClose }, ico("check", 15), t("deal.done"))));
 }
 /** Each layer cut-out (or asset) L weaves with: its name, all its letters in front or behind at once, and its letters line by line, each to click. */
 function weaveLetters(L) {
@@ -5487,8 +5487,8 @@ function brushShow(now = false) {
     inner,
     el("div", { class: "hint" }, weaveT(L, "brush.hint")),
     el("div", { class: "acts" },
-      el("button", { class: "btn", disabled: !(L.weave.strokes || []).length, onclick: () => brushClear(L) }, t("brush.clear")),
-      el("button", { class: "btn", onclick: brushClose }, t("deal.done"))));
+      el("button", { class: "btn", disabled: !(L.weave.strokes || []).length, onclick: () => brushClear(L) }, ico("eraser", 15), t("brush.clear")),
+      el("button", { class: "btn", onclick: brushClose }, ico("check", 15), t("deal.done"))));
 }
 /** Takes every stroke away: one step of undo, as a stroke is. */
 function brushClear(L) {
@@ -5598,7 +5598,7 @@ function cropSource(L) {
 /** The button opening the crop window for L, in its properties. */
 function cropButton(L) {
   const no = !canCrop(L), fills = L.type === "photo" && L.fill && !L.of;
-  return el("button", { class: "btn wide", style: "margin-top:8px", disabled: no, title: t(fills ? "crop.fillTip" : "crop.openTip"), onclick: () => cropOpen(L) }, t(L.crop && !no ? "crop.edit" : "crop.open"));
+  return el("button", { class: "btn wide", style: "margin-top:8px", disabled: no, title: t(fills ? "crop.fillTip" : "crop.openTip"), onclick: () => cropOpen(L) }, ico("crop", 15), t(L.crop && !no ? "crop.edit" : "crop.open"));
 }
 /** Crop c (see normalizeCrop; none for the whole picture) put on layer L and drawn as a drag is; whether it changed anything. */
 function setCrop(L, c) {
@@ -5764,7 +5764,7 @@ function cropShow(now = false) {
     el("div", { class: "chips small" }, CROP_RATIOS.map(chip)),
     size,
     el("div", { class: "hint" }, t(free ? "crop.hintFree" : "crop.hint")),
-    el("div", { class: "acts" }, el("button", { class: "btn", disabled: !L.crop, onclick: () => { put(WHOLE); cropShow(true); } }, t("crop.reset")), el("button", { class: "btn", onclick: cropClose }, t("deal.done"))));
+    el("div", { class: "acts" }, el("button", { class: "btn", disabled: !L.crop, onclick: () => { put(WHOLE); cropShow(true); } }, ico("reset", 15), t("crop.reset")), el("button", { class: "btn", onclick: cropClose }, ico("check", 15), t("deal.done"))));
   requestAnimationFrame(draw);
 }
 /**
@@ -5824,7 +5824,7 @@ function sceneSection(L) {
     ...Object.keys(scene).map((k) => el("div", { class: "fxs" },
       el("span", { class: "jump", title: t("scene.jumpTip"), onclick: () => jumpToScene(k) }, sceneName(k)),
       el("div", { class: "fxa" }, el("button", { class: "linkbtn", disabled: !isMoved(k), onclick: () => reset(k) }, t("scene.reset"))))),
-    el("button", { class: "btn wide", disabled: !Object.keys(scene).some(isMoved), onclick: () => reset(null) }, t("scene.resetAll")),
+    el("button", { class: "btn wide", disabled: !Object.keys(scene).some(isMoved), onclick: () => reset(null) }, ico("reset", 15), t("scene.resetAll")),
   ], t("scene.hint"))];
 }
 /**
@@ -5887,11 +5887,11 @@ function lookFxSection(L) {
     effectsFor(here, L.type).length ? rows(here) : el("div", { class: "hint", style: "margin:0" }, t("lookfx.none", name(here))),
     (list.length > 0 || left.length > 0) && el("div", { class: "fxh" }, t("lookfx.others")),
     list.flatMap((k) => [head(k, true), ...rows(k)]),
-    (list.length > 0 || left.length > 0) && el("button", { class: "btn wide", onclick: () => borrowDialog(L, here, list) }, t("lookfx.borrowBtn")),
+    (list.length > 0 || left.length > 0) && el("button", { class: "btn wide", onclick: () => borrowDialog(L, here, list) }, ico("borrow", 15), t("lookfx.borrowBtn")),
     // seldom wanted, and the second not undone at a click: small, at the end
     el("div", { class: "tacts" },
-      el("button", { type: "button", class: "tbtn", title: t("lookfx.clearHint"), disabled: !any, onclick: () => { delete L.lookFx; touch({ cover: true, side: true }); } }, t("lookfx.clear")),
-      el("button", { type: "button", class: "tbtn danger", title: t("lookfx.removeAllHint"), disabled: !any && !list.length, onclick: () => { delete L.lookFx; BORROWED.delete(L.id); touch({ cover: true, side: true }); } }, t("lookfx.removeAll"))),
+      el("button", { type: "button", class: "tbtn", title: t("lookfx.clearHint"), disabled: !any, onclick: () => { delete L.lookFx; touch({ cover: true, side: true }); } }, ico("reset", 15), t("lookfx.clear")),
+      el("button", { type: "button", class: "tbtn danger", title: t("lookfx.removeAllHint"), disabled: !any && !list.length, onclick: () => { delete L.lookFx; BORROWED.delete(L.id); touch({ cover: true, side: true }); } }, ico("trash", 15), t("lookfx.removeAll"))),
   ], t("lookfx.hint"))];
 }
 /**
@@ -6144,7 +6144,7 @@ function renderSide() {
     many.length ? el("div", { class: "box" }, el("div", { class: "hint", style: "margin-top:0" }, many.map(layerName).join(" · ")),
       many.some((x) => x.locked) && el("div", { class: "hint" }, t("props.groupLocked")),
       el("div", { class: "hint" }, t("props.groupHint")),
-      el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => focusAllows("bg") && selectLayer("bg") }, t("props.groupEnd")))
+      el("button", { class: "btn wide", style: "margin-top:10px", onclick: () => focusAllows("bg") && selectLayer("bg") }, ico("layers", 15), t("props.groupEnd")))
     : L ? el("div", { class: "props" }, typeControls(L), sceneSection(L), lookFxSection(L), layerSection(L))
       : el("div", { class: "hint" }, t("layers.none"))]).flat().filter(Boolean));
   openSecs(side);
@@ -7445,6 +7445,23 @@ const SHELL_ICONS = {
   upload: '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   heart: '<path d="M12 20s-7.5-4.6-7.5-10.1A4.4 4.4 0 0 1 12 7a4.4 4.4 0 0 1 7.5 2.9C19.5 15.4 12 20 12 20Z"/>',   // a look liked, in the Look sheet (filled by CSS where it is)
+  // the buttons among the properties' controls (and their windows'), each with what it does drawn before its name
+  reset: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 3.5V8H8"/>',
+  shuffle: '<path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="M4 4l5 5"/>',
+  letters: '<path d="m3 16 4-9 4 9"/><path d="M4.5 13h5"/><circle cx="17.5" cy="13" r="3"/><path d="M20.5 10v6"/>',
+  grid: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
+  unlink: '<path d="m18.8 12.3 1.7-1.7a5 5 0 0 0-7.1-7.1l-1.7 1.7"/><path d="m5.2 11.7-1.7 1.7a5 5 0 0 0 7.1 7.1l1.7-1.7"/><path d="M8 2v3M2 8h3M16 19v3M19 16h3"/>',
+  scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9"/><path d="M14.5 14.5 20 20"/><path d="M8.1 8.1 12 12"/>',
+  subject: '<circle cx="12" cy="8.5" r="3.5"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/><path d="M3 7V4.5A1.5 1.5 0 0 1 4.5 3H7M17 3h2.5A1.5 1.5 0 0 1 21 4.5V7" stroke-dasharray="2 2.2"/>',
+  aim: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>',
+  pick: '<path d="M14 4.1 12 6M5.1 8l-2.9-.8M6 12l-1.9 2M7.2 2.2 8 5.1"/><path d="M9 9.9a.5.5 0 0 1 .8-.5l11.5 4.8a.5.5 0 0 1-.1 1l-4.4 1.1a2 2 0 0 0-1.4 1.4l-1.1 4.4a.5.5 0 0 1-1 .1Z"/>',
+  brush: '<path d="m9.1 11.9 8-8.1a2.9 2.9 0 1 1 4.1 4.1l-8.1 8"/><path d="M7.1 14.9a3 3 0 0 0-3 3c0 1.3-2.5 1.5-2 2 1.1 1.1 2.5 2 4 2a4 4 0 0 0 4-4 3 3 0 0 0-3-3Z"/>',
+  crop: '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>',
+  borrow: '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M4 16V5a2 2 0 0 1 2-2h11"/><path d="M14.5 11.5v6M11.5 14.5h6"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  lock: '<rect x="4.5" y="11" width="15" height="10" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/>',
+  eraser: '<path d="m7 21-4.3-4.3a2.4 2.4 0 0 1 0-3.4l9.6-9.6a2.4 2.4 0 0 1 3.4 0l5.6 5.6a2.4 2.4 0 0 1 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
+  trash: '<path d="M3.5 6h17"/><path d="M8.5 6V4h7v2"/><path d="m18.5 6-1 14h-11l-1-14"/>',
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
 };
 const ico = (k, px = 20) => el("span", { class: "ico", style: `display:inline-grid;width:${px}px;height:${px}px`, innerHTML: `<svg viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SHELL_ICONS[k]}</svg>` });

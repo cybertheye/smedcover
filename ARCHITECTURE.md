@@ -1566,7 +1566,8 @@ the line's button);
 `secSum()` puts what is off its default first, and `writeSum()` marks the line with a dot. A control changed in place
 (a bar dragged, a switch clicked) writes its group's line again itself (`resum()`), the group not built anew, and while
 a bar is dragged (`body.scrubbing`) `renderSide()` waits for it to be let go. A popover of the bar over the canvas holds
-a group's controls the same way (with the rail only where the group has a ↺). `layerSection()` makes the Layer group
+a group's controls the same way. A button among them (and in their windows) shows what it does drawn before its name
+(`ico()`, from `SHELL_ICONS`). `layerSection()` makes the Layer group
 every layer has. Every other window takes the same family: Settings and Export (`segs()` for the format and the
 resolution, `qualityBar()` for the JPEG's quality, a `.tog` switch for each size to export, the AI's API style and key
 header as `segs()`, its timeouts and reply length as scrub bars of `SHOWN.sec` and `SHOWN.int`, the image service a
