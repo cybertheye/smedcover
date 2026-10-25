@@ -7,6 +7,10 @@
 //!   reached through [`Core`];
 //! * exporting covers: PNG bytes, framed with their metadata, converted to PNG, JPEG or WebP and
 //!   written ([`image`]);
+//! * listing the fonts installed on the system, and handing a system family's faces to the web view
+//!   ([`fonts`]);
+//! * tracing lettering: the outlines of a text's glyphs, for effects that reshape the letters
+//!   ([`outline`], in the fonts [`Core::text_outline`] finds);
 //! * sending the request for an AI-generated asset, so it is not subject to the web view's
 //!   cross-origin rules ([`net`]).
 //!
@@ -18,9 +22,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+pub mod fonts;
 pub mod image;
 pub mod net;
+pub mod outline;
 pub mod store;
+
+pub use fonts::BundledFonts;
 
 pub type Res<T> = Result<T, String>;
 pub fn err<E: std::fmt::Display>(e: E) -> String {
@@ -31,13 +39,16 @@ pub fn err<E: std::fmt::Display>(e: E) -> String {
 /// folder it is and keeps one `Arc<Core>` for as long as it runs.
 pub struct Core {
     data: PathBuf,
+    /// The fonts found by family name, the user's imported ones (in this data folder) among them.
+    fonts: fonts::Fonts,
 }
 
 impl Core {
-    /// The core for the data folder `data`, which is made if it is not there yet.
-    pub fn open(data: PathBuf) -> Res<Arc<Core>> {
+    /// The core for the data folder `data`, which is made if it is not there yet; `bundled` hands it
+    /// the fonts that come with the interface.
+    pub fn open(data: PathBuf, bundled: Arc<dyn BundledFonts>) -> Res<Arc<Core>> {
         fs::create_dir_all(&data).map_err(err)?;
-        Ok(Arc::new(Core { data }))
+        Ok(Arc::new(Core { data, fonts: fonts::Fonts::new(bundled) }))
     }
 
     /// The data folder.
@@ -57,7 +68,11 @@ impl Core {
 
     /// Writes a file of the store, and the folders it is in.
     pub fn write(&self, rel: &str, data: &str) -> Res<()> {
-        store::write(&self.data, rel, data)
+        store::write(&self.data, rel, data)?;
+        if let Some(family) = rel.strip_prefix("fonts/").and_then(|p| p.strip_suffix(".font")) {
+            self.fonts.forget(family); // imported (again): its outlines are traced from this file from now on
+        }
+        Ok(())
     }
 
     /// The names of the files in a folder of the store, sorted; none if it is not there.
@@ -68,5 +83,47 @@ impl Core {
     /// Deletes a file of the store; one that is not there is fine.
     pub fn delete(&self, rel: &str) -> Res<()> {
         store::delete(&self.data, rel)
+    }
+
+    /// The outlines of `text` set in the first of `families` that has each character: a font shipped
+    /// with the interface, one the user imported, or one installed on the system.
+    pub fn text_outline(&self, text: &str, families: &[String], weight: f32) -> Res<outline::Outline> {
+        let fonts: Vec<_> = families.iter().filter_map(|f| self.fonts.file(&self.data, f)).collect();
+        if fonts.is_empty() {
+            return Err("no usable font".to_string());
+        }
+        Ok(outline::trace(text, &fonts, weight.clamp(1.0, 1000.0)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The interface's fonts read from its folder, as a server has them.
+    struct UiFolder;
+    impl BundledFonts for UiFolder {
+        fn get(&self, path: &str) -> Option<Vec<u8>> {
+            fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui").join(path)).ok()
+        }
+    }
+
+    #[test]
+    fn text_outline_finds_bundled_and_imported_fonts_and_one_imported_again() {
+        use base64::Engine;
+        let dir = tempfile::tempdir().unwrap();
+        let core = Core::open(dir.path().join("data"), Arc::new(UiFolder)).unwrap();
+        assert!(core.data_dir().is_dir());
+        let out = core.text_outline("Ab", &["Bebas Neue".into()], 400.0).unwrap();
+        assert!(!out.missing && out.glyphs.len() == 2 && !out.glyphs[0].c.is_empty());
+        // a family no one has: not bundled, not imported, not installed (and that is remembered)
+        let family = "SmedCover Test Family 7f3a";
+        assert_eq!(core.text_outline("A", &[family.into()], 400.0).unwrap_err(), "no usable font");
+        // imported under that name, as the web view stores a font: found from then on
+        let font = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui/fonts/JetBrainsMono.ttf")).unwrap();
+        let url = format!("data:font/ttf;base64,{}", base64::engine::general_purpose::STANDARD.encode(font));
+        core.write(&format!("fonts/{family}.font"), &url).unwrap();
+        let out = core.text_outline("A", &[family.into()], 400.0).unwrap();
+        assert!(!out.missing && !out.glyphs[0].c.is_empty());
     }
 }

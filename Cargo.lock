@@ -3114,7 +3114,6 @@ version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
  "flate2",
- "fontdb",
  "image",
  "objc2",
  "objc2-foundation",
@@ -3127,7 +3126,6 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tempfile",
- "ttf-parser",
  "ureq",
  "zip",
 ]
@@ -3137,10 +3135,12 @@ name = "smedcover-core"
 version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
+ "fontdb",
  "image",
  "serde",
  "serde_json",
  "tempfile",
+ "ttf-parser",
  "ureq",
 ]
 

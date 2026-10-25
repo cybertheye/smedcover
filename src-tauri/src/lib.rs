@@ -1,25 +1,24 @@
 //! SmedCover — native shell for the cover generator.
 //!
 //! All drawing happens in the web view (`ui/`). What the Rust side does for it is mostly in
-//! `smedcover-core` (`core/`), which a server can share: the sandboxed store, exporting covers and
-//! the AI request. This is the desktop app around it:
+//! `smedcover-core` (`core/`), which a server can share: the sandboxed store, exporting covers,
+//! fonts and the outlines of lettering, and the AI request. This is the desktop app around it:
 //!
 //! * the data folder, found once at the start (the app data directory, or a self-test's) and kept
 //!   as the [`Core`] the commands use;
 //! * the commands, most of them a thin wrapper round the core's work, the slow ones run off the
 //!   main thread;
-//! * what only the desktop has: the system's dialogs, the file manager, the pointer, the self-test;
-//! * listing the fonts installed on the system;
-//! * tracing lettering: the outlines of a text's glyphs, for effects that reshape the letters.
+//! * what only the desktop has: the system's dialogs, the file manager, the pointer, the self-test.
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 
 use serde::Serialize;
+use smedcover_core::fonts::{self, FontFaces, FontInfo};
 use smedcover_core::image::{encode, extension, parse_frame, safe_name, write_into, ExportMeta};
-use smedcover_core::{err, net, Core, Res};
+use smedcover_core::outline::Outline;
+use smedcover_core::{err, net, BundledFonts, Core, Res};
 use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -56,11 +55,7 @@ fn app_read(core: State<'_, Arc<Core>>, path: String) -> Res<Option<String>> {
 
 #[tauri::command]
 fn app_write(core: State<'_, Arc<Core>>, path: String, data: String) -> Res<()> {
-    core.write(&path, &data)?;
-    if let Some(family) = path.strip_prefix("fonts/").and_then(|p| p.strip_suffix(".font")) {
-        forget_font(family); // imported (again): its outlines are traced from this file from now on
-    }
-    Ok(())
+    core.write(&path, &data) // a font imported (again) lets go of the file its outlines were traced from
 }
 
 #[tauri::command]
@@ -230,379 +225,53 @@ async fn save_text(app: AppHandle, name: String, text: String) -> Res<Option<Str
     Ok(Some(path.display().to_string()))
 }
 
-// ---------------------------------------------------------------- fonts
+// ---------------------------------------------------------------- fonts and glyph outlines (the work itself: smedcover_core::fonts, outline)
 
-/// A font family installed on this machine, and whether it can set Chinese.
-#[derive(Serialize)]
-struct FontInfo {
-    name: String,
-    cjk: bool,
+/// The fonts shipped with the interface, as the app has them: among its assets.
+struct AssetFonts(AppHandle);
+
+impl BundledFonts for AssetFonts {
+    fn get(&self, path: &str) -> Option<Vec<u8>> {
+        self.0.asset_resolver().get(path.to_string()).map(|asset| asset.bytes.to_vec())
+    }
 }
 
-/// The font families installed on this machine, sorted, without duplicates. A family counts as
-/// able to set Chinese when one of its faces has glyphs for a few everyday characters; a font
-/// without them leaves Chinese text to whatever the system falls back to.
+/// See `fonts::list_system`.
 #[tauri::command]
 async fn list_system_fonts() -> Vec<FontInfo> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let mut db = fontdb::Database::new();
-        db.load_system_fonts();
-        let mut found: std::collections::BTreeMap<String, bool> = std::collections::BTreeMap::new();
-        for face in db.faces() {
-            let Some((name, _)) = face.families.first() else { continue };
-            if name.starts_with('.') {
-                continue;
-            }
-            let known = found.get(name).copied().unwrap_or(false);
-            let cjk = known
-                || db
-                    .with_face_data(face.id, |data, index| {
-                        ttf_parser::Face::parse(data, index)
-                            .map(|f| "的封面".chars().all(|c| f.glyph_index(c).is_some()))
-                            .unwrap_or(false)
-                    })
-                    .unwrap_or(false);
-            found.insert(name.clone(), cjk);
-        }
-        let mut fonts: Vec<FontInfo> = found.into_iter().map(|(name, cjk)| FontInfo { name, cjk }).collect();
-        fonts.sort_by_key(|f| f.name.to_lowercase());
-        fonts
-    })
-    .await
-    .unwrap_or_default()
+    tauri::async_runtime::spawn_blocking(fonts::list_system)
+        .await
+        .unwrap_or_default()
 }
 
-// ---------------------------------------------------------------- glyph outlines
-
-/// One glyph of a traced text: how far the pen moves on (in ems), and its outline as closed
-/// polylines `[x0, y0, x1, y1, …]` in ems with y pointing down, curves already flattened.
-#[derive(Serialize, Debug, PartialEq)]
-struct Glyph {
-    adv: f32,
-    c: Vec<Vec<f32>>,
-}
-
-/// A traced text. `missing` is set when some character had no glyph in any of the fonts.
-#[derive(Serialize, Debug)]
-struct Outline {
-    glyphs: Vec<Glyph>,
-    missing: bool,
-}
-
-/// Collects a glyph's outline as polylines, scaled to ems and flipped to y-down.
-struct Flatten {
-    k: f32,
-    done: Vec<Vec<f32>>,
-    cur: Vec<f32>,
-    at: (f32, f32),
-}
-
-impl Flatten {
-    fn push(&mut self, x: f32, y: f32) {
-        self.cur.push((x * self.k * 1e4).round() / 1e4);
-        self.cur.push((-y * self.k * 1e4).round() / 1e4);
-        self.at = (x, y);
-    }
-    fn finish(&mut self) {
-        if self.cur.len() >= 6 {
-            self.done.push(std::mem::take(&mut self.cur));
-        } else {
-            self.cur.clear();
-        }
-    }
-}
-
-impl ttf_parser::OutlineBuilder for Flatten {
-    fn move_to(&mut self, x: f32, y: f32) {
-        self.finish();
-        self.push(x, y);
-    }
-    fn line_to(&mut self, x: f32, y: f32) {
-        self.push(x, y);
-    }
-    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        let (x0, y0) = self.at;
-        for i in 1..=6 {
-            let t = i as f32 / 6.0;
-            let u = 1.0 - t;
-            self.push(
-                u * u * x0 + 2.0 * u * t * x1 + t * t * x,
-                u * u * y0 + 2.0 * u * t * y1 + t * t * y,
-            );
-        }
-    }
-    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        let (x0, y0) = self.at;
-        for i in 1..=8 {
-            let t = i as f32 / 8.0;
-            let u = 1.0 - t;
-            self.push(
-                u * u * u * x0 + 3.0 * u * u * t * x1 + 3.0 * u * t * t * x2 + t * t * t * x,
-                u * u * u * y0 + 3.0 * u * u * t * y1 + 3.0 * u * t * t * y2 + t * t * t * y,
-            );
-        }
-    }
-    fn close(&mut self) {
-        self.finish();
-    }
-}
-
-/// Traces `text` with the first of `fonts` (font file bytes and face index) that has each
-/// character, at `weight` where a font is variable. No shaping: one glyph per character, laid
-/// side by side — which is all headline lettering needs.
-fn trace(text: &str, fonts: &[Arc<(Vec<u8>, u32)>], weight: f32) -> Outline {
-    let faces: Vec<ttf_parser::Face> = fonts
-        .iter()
-        .filter_map(|f| ttf_parser::Face::parse(&f.0, f.1).ok())
-        .map(|mut face| {
-            if face.is_variable() {
-                face.set_variation(ttf_parser::Tag::from_bytes(b"wght"), weight);
-            }
-            face
-        })
-        .collect();
-    let mut glyphs = Vec::new();
-    let mut missing = false;
-    for ch in text.chars() {
-        let found = faces
-            .iter()
-            .find_map(|face| face.glyph_index(ch).map(|id| (face, id)));
-        match found {
-            Some((face, id)) => {
-                let k = 1.0 / f32::from(face.units_per_em());
-                let mut flat = Flatten {
-                    k,
-                    done: Vec::new(),
-                    cur: Vec::new(),
-                    at: (0.0, 0.0),
-                };
-                face.outline_glyph(id, &mut flat);
-                flat.finish();
-                let adv = f32::from(face.glyph_hor_advance(id).unwrap_or(0)) * k;
-                glyphs.push(Glyph { adv, c: flat.done });
-            }
-            None => {
-                missing = missing || !ch.is_whitespace();
-                glyphs.push(Glyph {
-                    adv: 0.3,
-                    c: Vec::new(),
-                });
-            }
-        }
-    }
-    Outline { glyphs, missing }
-}
-
-/// Font files already found (or found to be absent), by lower-cased family name.
-static FONT_FILES: OnceLock<Mutex<HashMap<String, Option<Arc<(Vec<u8>, u32)>>>>> = OnceLock::new();
-/// The fonts installed on the system, scanned once.
-static SYSTEM_FONTS: OnceLock<fontdb::Database> = OnceLock::new();
-/// The fonts shipped with the interface, by family name.
-const BUNDLED_FONTS: [(&str, &str); 3] = [
-    ("noto sans sc", "fonts/NotoSansSC.ttf"),
-    ("bebas neue", "fonts/BebasNeue-Regular.ttf"),
-    ("jetbrains mono", "fonts/JetBrainsMono.ttf"),
-];
-
-/// The bytes of a font the user imported: it is stored as a data URL in the app data directory.
-fn imported_font(app: &AppHandle, family: &str) -> Option<Vec<u8>> {
-    use base64::Engine;
-    let text = app.try_state::<Arc<Core>>()?.read(&format!("fonts/{family}.font")).ok()??;
-    let b64 = text.split_once("base64,")?.1;
-    base64::engine::general_purpose::STANDARD
-        .decode(b64.trim())
-        .ok()
-}
-
-/// Lets go of the file found for a family (see font_file), to be looked for again: a font imported under its name.
-fn forget_font(family: &str) {
-    if let Some(files) = FONT_FILES.get() {
-        if let Ok(mut files) = files.lock() {
-            files.remove(&family.trim().to_lowercase());
-        }
-    }
-}
-
-/// The fonts installed on the system (scanned the first time they are needed).
-fn system_fonts() -> &'static fontdb::Database {
-    SYSTEM_FONTS.get_or_init(|| {
-        let mut db = fontdb::Database::new();
-        db.load_system_fonts();
-        db
-    })
-}
-
-/// Finds the file behind a family name: a bundled font, one the user imported, or a system font.
-fn font_file(app: &AppHandle, family: &str) -> Option<Arc<(Vec<u8>, u32)>> {
-    let key = family.trim().to_lowercase();
-    let files = FONT_FILES.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(known) = files.lock().ok()?.get(&key) {
-        return known.clone();
-    }
-    let bundled = BUNDLED_FONTS
-        .iter()
-        .find(|(name, _)| *name == key)
-        .and_then(|(_, path)| app.asset_resolver().get((*path).to_string()))
-        .map(|asset| (asset.bytes.to_vec(), 0));
-    let found = bundled
-        .or_else(|| imported_font(app, family.trim()).map(|bytes| (bytes, 0)))
-        .or_else(|| {
-            let db = system_fonts();
-            let id = db.query(&fontdb::Query {
-                families: &[fontdb::Family::Name(family.trim())],
-                weight: fontdb::Weight::BLACK,
-                ..fontdb::Query::default()
-            })?;
-            db.with_face_data(id, |data, index| (data.to_vec(), index))
-        })
-        .map(Arc::new);
-    files.lock().ok()?.insert(key, found.clone());
-    found
-}
-
-/// One face of a font file as a font file of its own, for the web view to load: a collection (.ttc)
-/// is cut down to the face at `index`, its table directory and the tables that points at; a single
-/// font is handed back as it is. None if the file is not what it claims.
-fn single_face(data: &[u8], index: u32) -> Option<Vec<u8>> {
-    let u32_at = |at: usize| data.get(at..at + 4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]));
-    if data.get(0..4)? != b"ttcf" {
-        return Some(data.to_vec());
-    }
-    if index >= u32_at(8)? {
-        return None;
-    }
-    let at = u32_at(12 + 4 * index as usize)? as usize;
-    let n = data.get(at + 4..at + 6).map(|b| u16::from_be_bytes([b[0], b[1]]))? as usize;
-    let mut out = data.get(at..at + 12)?.to_vec();
-    let (mut bodies, mut offset) = (Vec::with_capacity(n), 12 + 16 * n);
-    for i in 0..n {
-        let rec = at + 12 + 16 * i;
-        let (start, len) = (u32_at(rec + 8)? as usize, u32_at(rec + 12)? as usize);
-        bodies.push(data.get(start..start.checked_add(len)?)?);
-        out.extend_from_slice(data.get(rec..rec + 8)?); // tag and checksum
-        out.extend_from_slice(&(offset as u32).to_be_bytes());
-        out.extend_from_slice(&(len as u32).to_be_bytes());
-        offset += (len + 3) & !3;
-    }
-    for body in bodies {
-        out.extend_from_slice(body);
-        out.resize((out.len() + 3) & !3, 0);
-    }
-    Some(out)
-}
-
-/// The upright faces the system has of `family`, one per weight, lightest first (all its faces if it
-/// has no upright one).
-fn family_faces(family: &str) -> Vec<fontdb::ID> {
-    let name = family.trim();
-    let mut all: Vec<&fontdb::FaceInfo> = system_fonts()
-        .faces()
-        .filter(|f| f.families.iter().any(|(n, _)| n == name))
-        .collect();
-    if all.iter().any(|f| f.style == fontdb::Style::Normal && f.stretch == fontdb::Stretch::Normal) {
-        all.retain(|f| f.style == fontdb::Style::Normal && f.stretch == fontdb::Stretch::Normal);
-    }
-    all.sort_by_key(|f| f.weight.0);
-    all.dedup_by_key(|f| f.weight.0);
-    all.iter().map(|f| f.id).collect()
-}
-
-/// A few characters a font has, to try it with: those of the editor's own probe it has, or else the
-/// first it has.
-fn probe_text(face: &ttf_parser::Face) -> String {
-    let mut out: String = "封面Aa01".chars().filter(|&ch| face.glyph_index(ch).is_some()).collect();
-    if out.chars().count() >= 3 {
-        return out;
-    }
-    if let Some(cmap) = face.tables().cmap {
-        for table in cmap.subtables.into_iter().filter(|t| t.is_unicode()) {
-            table.codepoints(|cp| {
-                if out.chars().count() >= 8 || cp <= 0x20 {
-                    return;
-                }
-                if let Some(ch) = char::from_u32(cp).filter(|ch| !ch.is_whitespace() && !ch.is_control()) {
-                    if face.glyph_index(ch).is_some() && !out.contains(ch) {
-                        out.push(ch);
-                    }
-                }
-            });
-        }
-    }
-    out
-}
-
-/// A system family's faces as the web view is to load them (see font_data): the weight of each — a
-/// variable one's weight axis as a range, "min max" — and characters to try the family with.
-#[derive(Serialize, Debug)]
-struct FontFaces {
-    probe: String,
-    weights: Vec<String>,
-}
-
-/// WebKit sets a canvas that is not in the page — the effects' work canvases, an export — only in the
-/// fonts that came with the system; one the user installed, or one macOS downloads on demand, falls
-/// back to the default there. Such a family is loaded into the page from its files, where every canvas
-/// finds it (see ensureFont in app.js): font_faces says what there is, font_data hands over each face.
+/// A system family's faces, for the web view to load it from its files (see `fonts::faces`).
 #[tauri::command]
 async fn font_faces(family: String) -> Res<FontFaces> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let (db, ids) = (system_fonts(), family_faces(&family));
-        if ids.is_empty() {
-            return Err("no such font".to_string());
-        }
-        let mut out = FontFaces { probe: String::new(), weights: Vec::new() };
-        for id in ids {
-            let weight = db.face(id).map(|f| f.weight.0).unwrap_or(400).to_string();
-            let range = db
-                .with_face_data(id, |data, index| {
-                    let face = ttf_parser::Face::parse(data, index).ok()?;
-                    if out.probe.is_empty() {
-                        out.probe = probe_text(&face);
-                    }
-                    let axis = face.variation_axes().into_iter().find(|a| a.tag == ttf_parser::Tag::from_bytes(b"wght"))?;
-                    Some(format!("{} {}", axis.min_value.round(), axis.max_value.round()))
-                })
-                .flatten();
-            out.weights.push(range.unwrap_or(weight));
-        }
-        Ok(out)
-    })
-    .await
-    .map_err(err)?
+    tauri::async_runtime::spawn_blocking(move || fonts::faces(&family))
+        .await
+        .map_err(err)?
 }
 
-/// Face `n` of a system family (see font_faces), as a font file of its own (see single_face).
+/// Face `n` of a system family (see font_faces), as a font file of its own (see `fonts::face_data`).
 #[tauri::command]
 async fn font_data(family: String, n: usize) -> Res<tauri::ipc::Response> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let id = *family_faces(&family).get(n).ok_or("no such face")?;
-        system_fonts()
-            .with_face_data(id, |data, index| single_face(data, index))
-            .flatten()
-            .map(tauri::ipc::Response::new)
-            .ok_or_else(|| "unreadable font file".to_string())
-    })
-    .await
-    .map_err(err)?
+    tauri::async_runtime::spawn_blocking(move || fonts::face_data(&family, n).map(tauri::ipc::Response::new))
+        .await
+        .map_err(err)?
 }
 
 /// The outlines of `text` set in the first of `families` that has each character.
 #[tauri::command]
 async fn text_outline(
-    app: AppHandle,
+    core: State<'_, Arc<Core>>,
     text: String,
     families: Vec<String>,
     weight: f32,
 ) -> Res<Outline> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let fonts: Vec<_> = families.iter().filter_map(|f| font_file(&app, f)).collect();
-        if fonts.is_empty() {
-            return Err("no usable font".to_string());
-        }
-        Ok(trace(&text, &fonts, weight.clamp(1.0, 1000.0)))
-    })
-    .await
-    .map_err(err)?
+    let core = core.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || core.text_outline(&text, &families, weight))
+        .await
+        .map_err(err)?
 }
 
 // ---------------------------------------------------------------- AI request (the work itself: smedcover_core::net)
@@ -780,7 +449,7 @@ pub fn run() {
                 Some(root) => root.join("data"),
                 None => app.path().app_data_dir()?,
             };
-            app.manage(Core::open(data)?);
+            app.manage(Core::open(data, Arc::new(AssetFonts(app.handle().clone())))?);
             // A self-test's window may open off screen — on another desktop, behind a full-screen app —
             // and WebKit then stops drawing for it: a canvas read back (an export, a PNG) waits for good,
             // every process idle. So in self-test mode the web view is told not to watch whether its window
@@ -803,129 +472,4 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running SmedCover");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn bundled(name: &str) -> Arc<(Vec<u8>, u32)> {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../ui/fonts")
-            .join(name);
-        Arc::new((fs::read(path).unwrap(), 0))
-    }
-
-    #[test]
-    fn single_face_cuts_a_face_out_of_a_collection() {
-        let fonts = [bundled("BebasNeue-Regular.ttf"), bundled("JetBrainsMono.ttf")];
-        // a collection of the two: its header, both table directories, then every table, the directories pointing into it
-        let u32_at = |d: &[u8], at: usize| u32::from_be_bytes([d[at], d[at + 1], d[at + 2], d[at + 3]]) as usize;
-        let tables = |d: &[u8]| (u16::from_be_bytes([d[4], d[5]]) as usize, 12 + 16 * u16::from_be_bytes([d[4], d[5]]) as usize);
-        let mut ttc = b"ttcf\x00\x01\x00\x00\x00\x00\x00\x02".to_vec();
-        let dirs: Vec<usize> = fonts.iter().map(|f| tables(&f.0).1).collect();
-        let (mut at, mut data_at) = (20, 20 + dirs.iter().sum::<usize>());
-        for d in &dirs {
-            ttc.extend_from_slice(&(at as u32).to_be_bytes());
-            at += d;
-        }
-        let mut bodies = Vec::new();
-        for f in &fonts {
-            let (n, _) = tables(&f.0);
-            ttc.extend_from_slice(&f.0[0..12]);
-            for i in 0..n {
-                let rec = 12 + 16 * i;
-                let (start, len) = (u32_at(&f.0, rec + 8), u32_at(&f.0, rec + 12));
-                ttc.extend_from_slice(&f.0[rec..rec + 8]);
-                ttc.extend_from_slice(&(data_at as u32).to_be_bytes());
-                ttc.extend_from_slice(&(len as u32).to_be_bytes());
-                bodies.extend_from_slice(&f.0[start..start + len]);
-                bodies.resize((bodies.len() + 3) & !3, 0);
-                data_at = 20 + dirs.iter().sum::<usize>() + bodies.len();
-            }
-        }
-        ttc.extend_from_slice(&bodies);
-        for (i, f) in fonts.iter().enumerate() {
-            let face = single_face(&ttc, i as u32).unwrap();
-            assert_eq!(&face[0..4], &f.0[0..4]);
-            let (a, b) = (ttf_parser::Face::parse(&face, 0).unwrap(), ttf_parser::Face::parse(&f.0, 0).unwrap());
-            assert_eq!(a.number_of_glyphs(), b.number_of_glyphs());
-            assert_eq!(a.glyph_index('A'), b.glyph_index('A'));
-            assert_eq!(a.glyph_hor_advance(a.glyph_index('A').unwrap()), b.glyph_hor_advance(b.glyph_index('A').unwrap()));
-        }
-        assert!(single_face(&ttc, 2).is_none());
-        assert!(single_face(&ttc[..30], 1).is_none()); // cut short
-        assert_eq!(single_face(&fonts[0].0, 0).unwrap(), fonts[0].0); // one font: as it is
-    }
-
-    #[test]
-    fn probe_text_is_what_the_font_has() {
-        let face = |name: &str| bundled(name);
-        let (mono, cjk) = (face("JetBrainsMono.ttf"), face("NotoSansSC.ttf"));
-        assert_eq!(probe_text(&ttf_parser::Face::parse(&mono.0, 0).unwrap()), "Aa01"); // no Chinese in it
-        assert_eq!(probe_text(&ttf_parser::Face::parse(&cjk.0, 0).unwrap()), "封面Aa01");
-    }
-
-    #[test]
-    fn trace_gives_closed_outlines_in_ems() {
-        let out = trace("Ab 1", &[bundled("BebasNeue-Regular.ttf")], 400.0);
-        assert!(!out.missing);
-        assert_eq!(out.glyphs.len(), 4);
-        assert!(out.glyphs[2].c.is_empty() && out.glyphs[2].adv > 0.05); // the space: no outline, some advance
-        for g in [&out.glyphs[0], &out.glyphs[1], &out.glyphs[3]] {
-            assert!(g.adv > 0.2 && g.adv < 1.2, "advance {}", g.adv);
-            assert!(!g.c.is_empty());
-            for contour in &g.c {
-                assert!(contour.len() >= 6 && contour.len() % 2 == 0);
-                for (i, v) in contour.iter().enumerate() {
-                    // within the em box, and above the baseline (y points down, so negative) for capitals
-                    assert!(v.is_finite() && *v > -1.5 && *v < 1.5, "coordinate {v}");
-                    if i % 2 == 1 {
-                        assert!(*v <= 0.05, "a capital dips below the baseline: {v}");
-                    }
-                }
-            }
-        }
-        assert_eq!(out.glyphs[0].c.len(), 2); // "A": the outside and the counter
-    }
-
-    #[test]
-    fn trace_falls_back_between_fonts_and_follows_the_weight() {
-        let fonts = [bundled("BebasNeue-Regular.ttf"), bundled("NotoSansSC.ttf")];
-        let out = trace("A夜", &fonts, 900.0);
-        assert!(!out.missing);
-        assert!(!out.glyphs[1].c.is_empty()); // the CJK glyph came from the second font
-        assert!((out.glyphs[1].adv - 1.0).abs() < 0.05); // full width
-                                                         // a variable font is heavier at 900 than at 100: its strokes reach further
-        let reach = |weight: f32| {
-            let g = &trace("夜", &fonts[1..], weight).glyphs[0];
-            let xs: Vec<f32> =
-                g.c.iter()
-                    .flat_map(|c| c.iter().step_by(2).copied())
-                    .collect();
-            let area: f32 =
-                g.c.iter()
-                    .map(|c| {
-                        let n = c.len() / 2;
-                        (0..n)
-                            .map(|i| {
-                                let j = (i + 1) % n;
-                                c[2 * i] * c[2 * j + 1] - c[2 * j] * c[2 * i + 1]
-                            })
-                            .sum::<f32>()
-                            / 2.0
-                    })
-                    .sum();
-            (xs.len(), area.abs())
-        };
-        assert!(
-            reach(900.0).1 > reach(100.0).1 * 1.5,
-            "{:?} vs {:?}",
-            reach(900.0),
-            reach(100.0)
-        );
-        // a character no font has
-        let none = trace("A\u{10FFFF}", &fonts[..1], 400.0);
-        assert!(none.missing && none.glyphs.len() == 2);
-    }
 }

@@ -23,9 +23,7 @@ tauri-plugin-dialog = "2"
 smedcover-core = { path = "../core" }
 serde = { workspace = true }
 image = { workspace = true }
-fontdb = { workspace = true }
 ureq = { workspace = true }
-ttf-parser = { workspace = true }
 base64 = { workspace = true }
 # The cross-platform subject cut-out (see the workspace's Cargo.toml).
 ort = { workspace = true }
