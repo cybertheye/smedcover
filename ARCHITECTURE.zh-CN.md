@@ -9,7 +9,7 @@
 SmedCover 是一个 Tauri 2 应用，分成两半：
 
 - **界面（`ui/`）**：运行在系统自带的网页视图里，负责全部交互和**全部绘制**。纯 ES 模块，没有打包器、没有框架、没有运行时依赖。
-- **Rust 外壳（`src-tauri/`）**：只碰文件和网络，负责读写应用数据、把图片转码并写盘、弹出系统对话框、列出系统字体、发送生成素材的 AI 请求。
+- **Rust 侧**：只碰文件和网络，负责读写应用数据、把图片转码并写盘、弹出系统对话框、列出系统字体、发送生成素材的 AI 请求。具体的活在 `core/` 里（crate `smedcover-core`，不含 Tauri 和网页视图，服务器也能共用）；`src-tauri/` 是包在外面的桌面应用，它的命令只是薄薄一层转交（见第 10 节）。
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ flowchart LR
     render --> assets
     app --> store
   end
-  subgraph Rust["Rust src-tauri/"]
+  subgraph Rust["Rust core/ 与 src-tauri/"]
     fs["沙盒存储<br/>app_read / write / list / delete"]
     enc["图片转码写盘<br/>save_image / write_image"]
     misc["对话框、系统字体、自检"]
@@ -65,7 +65,7 @@ ui/
   js/looks/kit.js    各风格共用的部分：工具函数、场景物件、当前风格的状态（setLook）、风格效果的框架
   js/looks/<id>.js   每种风格一个文件（cel、cyber、riso……wasteland、facet）：风格对象、它自己的工具函数和图层效果
   js/spec.js         以数据描述的贴纸：校验与解释执行（AI 生成的素材）
-  （src-tauri/src/subject.rs：用 Vision 抠出照片主体的遮罩）
+  （core/src/cut/vision.rs：用 Vision 抠出照片主体的遮罩）
   js/repaint.js      照片重绘：三家图片服务的请求与回复、重绘提示词、内置风格的读取
   repaint-styles/    内置重绘风格，每个一个 `<id>.md`（开头是名称等信息），加上生成的清单 index.json
   js/solid.js        以数据描述的立体图形：校验，并用频道图形的渲染器绘制
@@ -77,7 +77,8 @@ ui/
   js/csv.js          批量导出用的 CSV 解析（「设置 → 尺寸与导出」）
   js/i18n.js         界面文字（中 / 英）
   fonts/             内置字体及许可
-src-tauri/src/lib.rs Rust 侧全部代码
+core/src/            Rust 侧干活的部分，服务器也能共用（crate smedcover-core）：存储、导出、字体、轮廓、抠图、AI 请求（见第 10 节）
+src-tauri/src/lib.rs 桌面应用：数据目录、命令（对 core/ 的薄封装）、对话框、自检
 tests/               不依赖 DOM 的模块的单元测试
 ```
 
@@ -338,7 +339,7 @@ tests/               不依赖 DOM 的模块的单元测试
 **异步与绘制**：取轮廓要一点时间，而绘制不能等。`outline()` 立即从缓存回答，第一次没有时返回空并发出请求，效果此时退回普通文字；
 轮廓到达后通知界面重画。导出时 `renderReady()` 会等所有请求完成再画一遍，保证导出图带效果。
 
-**留到下次启动**：轮廓只由字体和文字决定，所以到了的轮廓存在数据目录里（`outlines.json`：`keepOutlines()` 给出内容，`{v, sig, at: [[key, glyphs], …]}`，最久没用的在前；`app.js` 的 `keepOutlineFile()` 在最后一份到达 4 秒后写）。`start()` 和其他文件一起读它，在画任何东西之前放进缓存（`keptOutlines()`），所以画布、风格卡片和 3D 视图一开始就带着轮廓画，不用再全部重新去取、每到一份重画一次。缓存在内存和磁盘上都只留最近用过的，最多 `OUTLINE_KEEP.max`（8 MB 的 JSON）：一张较满的封面在所有风格下约用 0.6 MB；读 8 MB 让启动多花约 40 毫秒（读文件和列出系统字体同时进行，列完再解析）。只在桌面应用里留：服务器发的页面分不出服务器换了版本，普通浏览器没有轮廓。请求失败的轮廓（服务器一时连不上）在内存里记为取不到，但不存下；为已作废的字体发出、作废之后才回来的轮廓（`era`）直接丢掉。`sig`（`outlineSig()`）是应用版本、已安装字体的列表、导入的字体及其文件长度：任何一样变了就全部作废，因为之前取不到的轮廓现在可能有了，某个字体名也可能对应到另一个文件；当次会话里导入的字体立刻作废它自己的（`forgetOutlines()`，以及 `lib.rs` 的 `app_write` 让 Rust 侧忘掉为它找到的文件）。Rust 侧描轮廓的方式改了时提高 `OUTLINE_KEEP.v`。
+**留到下次启动**：轮廓只由字体和文字决定，所以到了的轮廓存在数据目录里（`outlines.json`：`keepOutlines()` 给出内容，`{v, sig, at: [[key, glyphs], …]}`，最久没用的在前；`app.js` 的 `keepOutlineFile()` 在最后一份到达 4 秒后写）。`start()` 和其他文件一起读它，在画任何东西之前放进缓存（`keptOutlines()`），所以画布、风格卡片和 3D 视图一开始就带着轮廓画，不用再全部重新去取、每到一份重画一次。缓存在内存和磁盘上都只留最近用过的，最多 `OUTLINE_KEEP.max`（8 MB 的 JSON）：一张较满的封面在所有风格下约用 0.6 MB；读 8 MB 让启动多花约 40 毫秒（读文件和列出系统字体同时进行，列完再解析）。只在桌面应用里留：服务器发的页面分不出服务器换了版本，普通浏览器没有轮廓。请求失败的轮廓（服务器一时连不上）在内存里记为取不到，但不存下；为已作废的字体发出、作废之后才回来的轮廓（`era`）直接丢掉。`sig`（`outlineSig()`）是应用版本、已安装字体的列表、导入的字体及其文件长度：任何一样变了就全部作废，因为之前取不到的轮廓现在可能有了，某个字体名也可能对应到另一个文件；当次会话里导入的字体立刻作废它自己的（`forgetOutlines()`，以及 `app_write`——`core/src/lib.rs` 的 `Core::write`——让 Rust 侧忘掉为它找到的文件）。Rust 侧描轮廓的方式改了时提高 `OUTLINE_KEEP.v`。
 
 **变形**和字形分开：标题类图层的 `bend`（`BENDS` 之一；`bendAmt` 是程度）可以和任何 `fx` 一起用，包括风格自带的字形。`drawTitle`（和自由文字的绘制）把每一行交给 `bentLine()`，同时给它一个"照原样画这一行"的函数：画在一张单独的画布上，用行坐标，四周留出字形会甩出去的空间（`P`，字号的 0.75），分辨率比下面的画布略高（拖动时略低）。`meshWarp()` 把这张图弯过去：源图切成边长约字号九分之一的三角形，结果的每个像素经由所在三角形反算回源图的位置，在四个像素之间按不透明度加权采样（所以没有暗边），每个像素只写一次（所以没有接缝），空的格子直接跳过。结果按决定这一行样子的一切（文字和强调、字体、效果和颜色、风格和它的参数、深浅底色和配置的随机种子、是否在拖动、之后新加载的字体）缓存在 `BENT` 里，最多 2400 万像素，所以移动、旋转弯过的标题或因为别的图层重画时，只是把它贴上去；描边类效果的字形轮廓还没到时临时画的那一行不缓存，轮廓到了会重新弯。变形在行的两端之外保持两端的样子（光晕、投影甩到那里的部分跟着两端弯，不会被抛远），结果的大小只由有内容的格子决定：透视拖过了地平线也只会让结果变粗，不会大到画不出来。因为先照原样画、再整体弯，字形做的一切——风格的工作画布、光晕、蒙版、强调词底牌——都会跟着弯，也不需要字形轮廓。`bendExtent()` 给出一行弯过之后超出原来框的距离（框边缘映射后的范围）；`fitLines()` 让弯过的整块正好放进标题框，`titleBlock()` 报告这一整块（副标题排在它下面，风格的背景避开它）。读到 `fx` 是某种变形的图层（以前它们是轮廓类效果，用通用描边字形画），改成 `fx: "cel"` 加同样的 `bend`，看起来和原来一样。
 
@@ -394,13 +395,13 @@ tests/               不依赖 DOM 的模块的单元测试
 
 旧数据：`upgradeCover` 把以前存在封面旁边的那一张照片（会话里的 `session-photo*`，第 2 版工程的 `photo*` 字段）变成背景照片图层，接过「背景」层原来的位置、模糊和压暗；以前的 `subject` 图层变成它的抠图副本。默认设计里不保留照片图层。
 
-### 6.4 抠图（`src-tauri/src/subject.rs`、`matting.rs`）
+### 6.4 抠图（`core/src/cut/`：`vision.rs`、`onnx.rs`）
 
 两种方式，界面按设置 `cutEngine` 选（`cutEngine()`：Mac 默认 Vision，其他系统默认 BiRefNet 轻量），结果格式相同。
 
-**BiRefNet（`matting.rs`，所有系统）**：`ort` 用 `load-dynamic` 方式，运行库不编进应用。用户下载模型时（`cut_model_download`，进度通过事件 `cut-model-progress` 发给界面，`cut_model_cancel` 取消），先下载本平台的 ONNX Runtime 1.23.2 官方包（最后一个有 Intel Mac 版的版本，所以 `ort` 用 API 23），从 .tgz/.zip 里只取出那一个库文件，再下载模型（onnx-community 的 BiRefNet_lite / BiRefNet ONNX）；每个文件边下边算 SHA-256，大小和校验值都对上才放到位，都在数据目录 `models/` 下。抠图（`subject_mask_onnx`，模型 id 放在请求头 `x-model`）：第一次时 `ort::init_from` 加载运行库，模型会话按 id 缓存；照片缩放到 1024×1024、按 ImageNet 均值方差归一化，取最后一张输出图做 sigmoid，再放大回照片尺寸，同样转成"只有透明度有意义"的 PNG。界面送去的照片最长 2048 像素。
+**BiRefNet（`onnx.rs`，所有系统）**：`ort` 用 `load-dynamic` 方式，运行库不编进应用。用户下载模型时（`cut_model_download`，进度通过事件 `cut-model-progress` 发给界面，`cut_model_cancel` 取消），先下载本平台的 ONNX Runtime 1.23.2 官方包（最后一个有 Intel Mac 版的版本，所以 `ort` 用 API 23），从 .tgz/.zip 里只取出那一个库文件，再下载模型（onnx-community 的 BiRefNet_lite / BiRefNet ONNX）；每个文件边下边算 SHA-256，大小和校验值都对上才放到位，都在数据目录 `models/` 下。抠图（`subject_mask_onnx`，模型 id 放在请求头 `x-model`）：第一次时 `ort::init_from` 加载运行库，模型会话按 id 缓存；照片缩放到 1024×1024、按 ImageNet 均值方差归一化，取最后一张输出图做 sigmoid，再放大回照片尺寸，同样转成"只有透明度有意义"的 PNG。界面送去的照片最长 2048 像素。
 
-**Apple Vision（`subject.rs`，macOS）**：
+**Apple Vision（`vision.rs`，macOS）**：
 
 `subject_mask` 把照片字节交给 Apple Vision 的 `VNGenerateForegroundInstanceMaskRequest`（macOS 14 起；通过 objc2 在运行时查找这个类，旧系统上报"需要 macOS 14"），取 `generateScaledMaskForImageForInstances` 得到与照片同尺寸的浮点遮罩，转成"只有透明度有意义"的 PNG 返回。界面先把照片画到画布上再编码成 JPEG 发送，所以 EXIF 方向已经摆正，遮罩与照片像素一一对应。遮罩存在照片记录上；图片换了（AI 重绘、还原原图）就清空，用到它的图层会自动重新抠。
 
@@ -779,7 +780,7 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 **素材面板的搜索。** `ASSETS_UI` 记着这次打开应用期间搜索框里的字（`q`）和照片架只看哪一种来源（`kind`）。框里有字时，`assetsFound()` 代替框下面的所有东西：按架子分开写搜到的东西（`shelf()` 用另外的键，所以在这里展开的架子不会让面板上的也展开）——照片架的照片按名字和来源，贴纸按中英文名字和所在的组，频道图形按名字，用户的矢量素材按名字（AI 素材取描述里的中英文名字）和所在的文件夹——每一块都和在架子上一样生成，所以点、拖、删都一样。`matches()` 要求每个词都找得到，比较前都经过 `folded()`（NFKC、统一大小写：全角字母数字当半角）；照片的来源按界面给它的每个名字找，缩略图上的和按钮上的，中英文都算（`i18n.js` 的 `bothLangs()`）。`assetSearch()` 在最后一次按键 120 毫秒后重建面板，输入法还在拼字时不重建（等 `compositionend`），`renderPanel()` 把焦点和光标还给搜索框（`heldField()`、`giveBack()`，和 AI 窗口一样；「风格」面板的搜索框也是）；✕ 或 Esc 清空。别的改动也不会在拼字中途重建面板：`COMPOSING` 是输入法正在拼字的那个输入框（窗口的 `compositionstart` 时记下，`compositionend` 或它失去焦点时清掉），它仍有焦点、又在面板（或「设置」那一页）里时，`renderPanel()` 过 150 毫秒再试。照片架里有不止一种来源时，`photoShelf()` 每种来源一个按钮（`LIBRARY_KINDS` 里照片架有的），`libraryTiles()` 接受一个筛选函数 `only`，来源和搜索都用它（`photoTiles()`）。
 
-**风格卡片。** 「风格」面板里每张卡片都是用那个风格画出来的这张封面（`lookCards()`），有多少风格就要画多少张封面，所以卡片的图留着（`LOOKCARDS.pics`），连同画它时依据的东西（`sig`：封面、尺寸、除风格以外的样式、风格自己的参数；`lookBase()`、`lookOwn()`）；过时的卡片一帧画一张，档案当前的风格先画，拖东西时不画（`drawLookCards()`），改动之后也只重画 `sig` 变了的（`refreshLookCards()`）。画的时候有轮廓还在路上、或封面用的某款字体正从文件读入（`fontsReading()`）的卡片不算画完（`sig` 为 ""），等它们到了再画。卡片的图会留到下次启动（`lookpics.js`）：画完的卡片过一会儿写进 `lookcards/<风格>.json`（`keepLookPics()`），是一张 300 像素宽、15–50 KB 的 JPEG（封面有透明处时用 PNG；一次写完再写下一次，`saving`），附 `lookPicSig()`：画它的依据、像素大小、应用的版本和构建（`appBuild()`：`lib.rs` 的 `ui_build`，`build.rs` 算的 `ui/` 的哈希；`tauri dev` 下是那些文件的名字、大小和时间的哈希，页面每加载一次重算一次；只在桌面应用里留，因为服务器发的页面分不出服务器换了版本）的哈希。第一帧画完后 `readLookPics()` 读回它们，放到各自的卡片上（`fromKept()`）：封面没变的就算画完，变了的先顶着，等重画。卡片的第一轮绘制会等这次读取（`LOOKPICS_WAIT`，最多 1 秒），所以从第二次启动起，面板一打开卡片就是满的，一张也不用画。所有卡片共同的依据（`lookBase()`）只算封面上已读入的照片和各自的长度，而不是照片库里有多少张（后台读入照片库会改变它），还算上图层用的每款字体还在不在，以及版式的默认值。鼠标在一张卡片上停 140 毫秒，画布就用它的风格画（`hoverLook()`、`PREVIEW.look`，见下）。点一下就换成档案的风格（`app.js` 的 `pickLook()`，不是 `deal.js` 里那个），并记一次（`countLook()`，记进 `settings.lookUse`）；`dealClose()` 也这样记：留下的那一手的风格和窗口第一次抽之前封面的风格不同时。每张卡片是并排的两个按钮，不是一个套着另一个：风格本身（`.lookpick`，图和名字，预览和换上都靠它），和盖在名字右端的 ♡（`likeButton()`、`.lookheart`），点它喜欢或取消喜欢这个风格（`likeLook()`：记进 `settings.lookLikes`，最近的在前），不换上也不预览（它拦下自己的点击，鼠标移到它上面就结束预览）。
+**风格卡片。** 「风格」面板里每张卡片都是用那个风格画出来的这张封面（`lookCards()`），有多少风格就要画多少张封面，所以卡片的图留着（`LOOKCARDS.pics`），连同画它时依据的东西（`sig`：封面、尺寸、除风格以外的样式、风格自己的参数；`lookBase()`、`lookOwn()`）；过时的卡片一帧画一张，档案当前的风格先画，拖东西时不画（`drawLookCards()`），改动之后也只重画 `sig` 变了的（`refreshLookCards()`）。画的时候有轮廓还在路上、或封面用的某款字体正从文件读入（`fontsReading()`）的卡片不算画完（`sig` 为 ""），等它们到了再画。卡片的图会留到下次启动（`lookpics.js`）：画完的卡片过一会儿写进 `lookcards/<风格>.json`（`keepLookPics()`），是一张 300 像素宽、15–50 KB 的 JPEG（封面有透明处时用 PNG；一次写完再写下一次，`saving`），附 `lookPicSig()`：画它的依据、像素大小、应用的版本和构建（`appBuild()`：`src-tauri/src/lib.rs` 的 `ui_build`，`build.rs` 算的 `ui/` 的哈希；`tauri dev` 下是那些文件的名字、大小和时间的哈希，页面每加载一次重算一次；只在桌面应用里留，因为服务器发的页面分不出服务器换了版本）的哈希。第一帧画完后 `readLookPics()` 读回它们，放到各自的卡片上（`fromKept()`）：封面没变的就算画完，变了的先顶着，等重画。卡片的第一轮绘制会等这次读取（`LOOKPICS_WAIT`，最多 1 秒），所以从第二次启动起，面板一打开卡片就是满的，一张也不用画。所有卡片共同的依据（`lookBase()`）只算封面上已读入的照片和各自的长度，而不是照片库里有多少张（后台读入照片库会改变它），还算上图层用的每款字体还在不在，以及版式的默认值。鼠标在一张卡片上停 140 毫秒，画布就用它的风格画（`hoverLook()`、`PREVIEW.look`，见下）。点一下就换成档案的风格（`app.js` 的 `pickLook()`，不是 `deal.js` 里那个），并记一次（`countLook()`，记进 `settings.lookUse`）；`dealClose()` 也这样记：留下的那一手的风格和窗口第一次抽之前封面的风格不同时。每张卡片是并排的两个按钮，不是一个套着另一个：风格本身（`.lookpick`，图和名字，预览和换上都靠它），和盖在名字右端的 ♡（`likeButton()`、`.lookheart`），点它喜欢或取消喜欢这个风格（`likeLook()`：记进 `settings.lookLikes`，最近的在前），不换上也不预览（它拦下自己的点击，鼠标移到它上面就结束预览）。
 
 卡片上方是 `lookFinder()`：一个搜索框，和每类风格一个按钮（`LOOK_CATEGORIES`；每个风格属于哪一类或哪几类在 `style.js` 的 `LOOK_TAGS` 里，测试保证每个风格至少一类、每类有好几个风格），有了记录后还有「★ 常用」（`mostUsed()`：次数最多的 `MOST_USED` 个，即 6 个），最后总有「♥ 喜欢」（`settings.lookLikes`，按它的顺序：`sortLooks()` 在这一类下用 CSS 的 `order` 排，档案当前的风格也在自己的位置；一个都没喜欢时，卡片下面那行字说怎么加，`noLooks()`；在这一类下喜欢或取消喜欢，卡片当场出现或藏起来，`findLooks(true)`，不滚回顶上）。`LOOK_UI` 记着这次打开应用期间打的字和选的分类。`lookFilter()` 是它们合成的判断——先看分类、常用或喜欢，再看打的每个词是否出现在风格的名字、`about` 或所属分类的名字里，都按中英文两种（`bothLangs()`），并和素材搜索一样经过 `folded()` 比较。它们只把卡片藏起来（`findLooks()` 给不通过的卡片设 `hidden`，不重建面板，所以搜索框的焦点不丢）：档案当前的风格从不藏，筛选时排在最前（`.finding`，CSS 的 `order`），只有「♥ 喜欢」例外：那里只有喜欢的风格（`ownAlways()`）；`drawLookCards()` 和 `refreshLookCards()` 跳过藏起来的卡片，露出来时才画；一个都没有时显示一行说明。输入法拼字时不筛选，拼完再筛。
 
@@ -807,13 +808,20 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 重绘窗口照设计稿（`Repaint.dc.html`）排布。左边是对比视图，`.repstage` 里的 `.cmp`；`.repstage` 是尺寸容器，所以视图按照片比例（`--ar`，用 `100cqw` 和 `100cqh` 算）占满能占的地方：底下是原图，上面是正在看的结果，从分界往右显示（按 `--at` 裁的 `clip-path`，`--at` 即 `REPWIN.at`，这次打开应用期间记着）；在视图上任意位置按下拖动，或在圆形把手上按方向键，移动分界（`repSplit()`），这期间窗口不重建。没有结果时，照片用的若已是重绘图，就拿它和原图对比。下面是 `REP.made` 的缩略图，正在看的有框，另一张在画时多一格数秒（`#rep-tile`，和按钮用同一个计时器更新），然后是「还原原图」「丢弃」（`dropResult()`）「再来一张」「用这张」。右边一栏中间可以滚动（`.repopts`，窗口重建时保留滚动位置）：跟随当前风格是一张带单选圆点的卡片，内置风格是带 `swatch` 颜色的卡片（点「全部 ›」之前是前八个，或前七个加上选中的），我的风格是一排小标签，选中的下面是它的编辑框，然后是补充说明；底部是使用的服务和费用说明，以及「重绘照片」。
 
-## 10. Rust 侧（`src-tauri/src/lib.rs`）
+## 10. Rust 侧（`core/`、`src-tauri/`）
 
-### 10.1 沙盒存储
+仓库根目录是一个 Cargo 工作区（`Cargo.toml`，一份 `Cargo.lock`，一个 `target/`），里面两个 crate：
+
+- **`core/`，crate `smedcover-core`**，干具体的活：存储（`store.rs`）、导出（`image.rs`）、字体和文字轮廓（`fonts.rs`、`outline.rs`）、抠图（`cut/`）、AI 请求（`net.rs`）。里面没有 Tauri，也没有网页视图，所以服务器能和应用一样用它。它全是同步的，错误是文字（`Res<T>` 即 `Result<T, String>`）：界面要靠这些文字判断（"timed out"、"unsupported:"、"cancelled"、"model not downloaded"）。`Core` 对应一个数据目录，由宿主指定（`Core::open(目录, bundled)`）；存储、按名字找到的字体和抠图模型都经过它。界面自带的字体通过 `BundledFonts` 交给它：应用从自己的资源里取（`AssetFonts`），服务器可以从它的 `ui/` 目录读。
+- **`src-tauri/`，桌面应用**：`setup` 只找一次数据目录（应用数据目录，或自检目录下的 `data/`），把它的 `Arc<Core>` 存成 Tauri 的状态。每个命令都是对 core 的薄封装，名字、参数、返回和错误都和原来一样；耗时的仍在阻塞线程池里等。只有桌面应用才有的留在这里：对话框（`save_image`、`pick_folder`、`save_text`）、`reveal_data_dir`、`move_pointer`、读二进制请求体（`frame_of`）、自检的命令和 `ui_build`。
+
+在根目录运行 `cargo test` 只测 core（工作区的默认成员），`cargo test --workspace`（`npm run test:rust`）连应用一起测；`tauri build` 和 `tauri dev` 从 `src-tauri/` 构建应用，产物在根目录的 `target/` 里。
+
+### 10.1 沙盒存储（`core/src/store.rs`）
 
 `app_read`、`app_write`、`app_list`、`app_delete` 只接受相对路径，由 `resolve()` 拼到应用数据目录下，并拒绝绝对路径和 `..`。界面因此无法读写目录之外的文件。写入采用"先写临时文件再改名"，避免中途退出留下半个文件。
 
-### 10.2 导出管线
+### 10.2 导出管线（`core/src/image.rs`）
 
 ```
 画布 ──toBlob（异步）──▶ PNG 字节 ──二进制帧──▶ Rust 工作线程 ──▶ PNG / JPEG / WebP 文件
@@ -832,13 +840,13 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 文件名经过 `safe_name()` 处理，只保留最后一段，因此不能借文件名写到别的目录。
 
-### 10.3 字形轮廓
+### 10.3 字形轮廓（`core/src/fonts.rs`、`outline.rs`）
 
-`text_outline` 见 6.2 节。字体文件按名字找到后会缓存，系统字体只扫描一次。
+`text_outline` 见 6.2 节。字体文件按名字找到后缓存在它那个数据目录的 `Core` 里（导入的字体属于那个目录），系统字体只扫描一次。
 
 `font_faces` 和 `font_data` 把一款系统字体的文件交给网页视图：前者说明有哪些正体字面（每个字重一个，可变字体给出字重轴的范围），并给出几个这款字体有的字；后者交出其中一个字面（字体集 `.ttc` 会裁成这个字面的表目录和它指向的那些表：`single_face()`）。WebKit 给不在页面里的画布（效果用的工作画布、导出、标题的测量）排字时，只认系统自带的字体：用户自己装的、或 macOS 按需下载的（楷体、行楷、魏碑……）在那里会退回默认字体，而屏幕上那块画布由 WebKit 的 GPU 进程来画，却能显示出来。所以编辑器（`app.js` 的 `ensureFont()`）在每次绘制和每次导出前，把图层用到的系统字体用它自己有的字放到这样的画布上试一下；够不着的就从文件读进来，每个字面以字体原名、按它自己的字重注册成 `FontFace`，这样每种字重的字都找到和用系统字体时一样的字面。自检会拿找到的第一款够不着的已安装字体验证这一点。
 
-### 10.4 AI 请求
+### 10.4 AI 请求（`core/src/net.rs`）
 
 `ai_request` 把界面构造好的请求（地址、请求头、JSON 正文）发出去，并把状态码和正文原样交还，错误回复也不例外，
 这样界面可以显示服务商自己的错误信息。由 Rust 发送是为了绕开网页视图的跨域限制。
@@ -849,7 +857,7 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 `fetch_image` 用于照片重绘时服务只回了一个图片链接的情况：下载它，确认是图片（看 `content-type`，不对就看文件头），以 base64 交给界面。
 
-### 10.5 其他命令
+### 10.5 其他命令（`src-tauri/src/lib.rs`）
 
 `pick_folder`、`save_text`（导出档案、工程、CSV 模板）、`list_system_fonts`（用 fontdb 枚举系统字体，并标出能否排中文）、`reveal_data_dir`（在文件管理器里打开数据目录下的某个文件夹，只限数据目录内）、`move_pointer`（把系统指针移到窗口内容里的某个位置，逻辑像素：场景物件的「跳到拖拽点」）。
 
@@ -886,7 +894,7 @@ python3 -m http.server -d ui 4599
 | 层次 | 命令 | 覆盖 |
 |---|---|---|
 | 前端单元测试 | `npm test` | 布局、图层位置与层级、适用频道、CSV、数据校验（按档案的导出窗口里关掉的尺寸和文件夹、按风格的使用次数）、默认值和盖在上面的 `custom.json`、写进 `custom.json` 的设置（只写不一样的，读回来不变，从 `settings.json` 读一次）、文件名规则、「你看着办」的规则和概率（条的 `moveShare()`、圆点的 `dotsOf()` 和 `withDots()`、锁住版式）、每个风格的分类、素材库的数量与命名、风格的颜色映射与参数、贴纸描述与立体图形描述的校验与绘制、两种接口风格的请求与回复、3D 视图的投影、点选与标签、界面文字的中英文齐全、`ui/` 里没有原生的 `confirm()`、`alert()`、`prompt()` |
-| Rust 单元测试 | `cd src-tauri && cargo test` | 路径沙盒、存储读写、帧解析、三种格式的编码、文件名处理、对本地模拟服务发请求、代理规则 |
+| Rust 单元测试 | `cargo test --workspace`（`npm run test:rust`） | 路径沙盒、存储读写、帧解析、三种格式的编码、文件名处理、对本地模拟服务发请求、代理规则、从字体集里切出一个字面、描出的轮廓、按名字找字体（自带的、导入的、重新导入的）、抠图的模型和运行库安装包 |
 | 端到端自检 | `SMEDCOVER_SELFTEST=<目录> <可执行文件>` | 在真实的网页视图和 Rust 之间走完整导出流程 |
 
 自检模式下，应用改用指定目录存放数据，导出几张封面的三种格式，再用每一种其他风格各导出一张，写出 `report.json` 后退出。再设置 `SMEDCOVER_SELFTEST_AI=<模拟服务地址>`，还会用两种接口风格各生成一个素材并画到封面上。它能发现只在真实应用里出现的问题，例如上面提到的请求头问题。
@@ -922,7 +930,7 @@ python3 -m http.server -d ui 4599
 | 让「版式」面板的版式框重新显示，或改色块的「大小与倾斜」（色块位置、镜像对调、滑条和「色块按方向摆」） | `app.js` 的 `TEMPLATE_BOX` 和 `layoutBox()`；`blockSection()`、`blockSliders()`、`layoutAdjuster()`、`layoutScope()` 和 `byOrient()`；`i18n.js` 的 `tpl.*` 和 `style.byOrient*` |
 | 给图层加一个属性 | `layers.js` 的 `PROPS` 和 `normalizeLayer()`，`render.js` 的 `PAINT`，`app.js` 的 `typeControls()`（标题和文字图层是 `headlineControls()`） |
 | 改属性里的控件（滑条、开关、并排的几种做法、选项多的选择、颜色），或属性抽屉的顶部 | `app.js` 的 `scrub()`（`SHOWN`）、`switchRow()` 和 `check()`、`segs()`、`picker()` 和 `openPicker()`、`swatch()`、`psec()`、`secSum()`、`drawerHead()`；`index.html` 的 `.psec`、`.bar`、`.rs`、`.swr`、`.tog`、`.pk`、`.pklist`、`.cb` 和 `#right .dhead` |
-| 加一种导出格式 | `lib.rs` 的 `encode()`，`app.js` 的 `EXT` 和两处格式选择（`exportDialog()`、`sizesTab()`） |
+| 加一种导出格式 | `core/src/image.rs` 的 `encode()`，`app.js` 的 `EXT` 和两处格式选择（`exportDialog()`、`sizesTab()`） |
 | 给 AI 素材加一种绘图操作 | `spec.js` 的校验和 `drawSpec()`，`ai.js` 的提示词和示例 |
 | 给立体图形加一种部件 | `solid.js` 的校验和 `pieces()`，`ai.js` 的 `solidPrompt()` 和示例 |
 | 改重绘向服务要的尺寸，或回来的图怎样对齐到照片 | `repaint.js` 的 `repaintSize()` 和 `coverCrop()`；`app.js` 的 `fitPicture()` |
