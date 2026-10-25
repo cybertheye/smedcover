@@ -13,7 +13,7 @@ import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
 import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, paintedWith, refitSizes, acrossSizes, cutFrom } from "./layers.js";
 import {
-  carryFonts, HOST, CAN, invoke, files, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
+  carryFonts, HOST, CAN, invoke, files, appBuild, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, CUSTOM_BY, normalizeSize, exportName, sizeCaption, ratioText,
   normalizeRecipes, SURPRISE_LOCKS, normalizeLayouts, LAYOUTS,
 } from "./store.js";
@@ -22,6 +22,7 @@ import { DEFAULTS, layOver } from "./defaults.js";
 import { normalizeSpec, parseSpec, drawSpec } from "./spec.js";
 import { EFFECTS, BENDS, effectUses, warpCorners, convexWarp, NO_COLUMNS } from "./textfx.js";
 import { onOutlines, outlinesPending, outlinesSettled, outlinesMissed } from "./outlines.js";
+import { LOOKPIC, lookPicSig, readLookPic, writeLookPic, strayLookPics } from "./lookpics.js";
 import { RANSOM_FACES, useRansomFaces, ransomPending, ransomArrived, ransomPools, ransomLetters, ransomShown, papersFor, faceFont, faceHas, inksFor, cased, isCJK, EXTRAS, lineCells, keysOf } from "./ransom.js";
 import { parseTitle } from "./title.js";
 import { LOOKS, LOOK_IDS, LOOK_TAGS, LOOK_CATEGORIES, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
@@ -244,9 +245,9 @@ async function registerFont(family, dataUrl) {
  * downloads on demand (楷体, 行楷…), falls back to the default there while the canvas on screen shows
  * it. So a system font a layer is set in is tried on such a canvas, with characters it has, and one
  * that is not there is read from its files (font_faces, font_data in lib.rs) and added to the page,
- * where every canvas finds it. Per family: a promise of whether it was added.
+ * where every canvas finds it. Per family: a promise of whether it was added; SYS_READ, the families whose reading is over.
  */
-const SYS_FACES = new Map();
+const SYS_FACES = new Map(), SYS_READ = new Set();
 let probe = null;
 /** Whether a canvas outside the page sets `text` in `family` (it measures otherwise than the fallbacks alone). */
 function reachable(family, text = "封面Aa01") {
@@ -265,7 +266,12 @@ function ensureFont(family) {
     for (const f of faces) document.fonts.add(f);
     queueDraw(true, setIn(family));
     return true;
-  }).catch(() => false).then((added) => { if (ransomArrived(family)) queueDraw(true, S.cover ? S.cover.layers.filter((L) => L.fx === "ransom").map((L) => L.id) : null); return added; }));   // there, or not to be had: the ransom note waits no more (see ransomFaces)
+  }).catch(() => false).then((added) => {   // there, or not to be had: the ransom note waits no more (see ransomFaces), nor do the look cards drawn meanwhile (see paintLookCard)
+    SYS_READ.add(family);
+    if (ransomArrived(family)) queueDraw(true, S.cover ? S.cover.layers.filter((L) => L.fx === "ransom").map((L) => L.id) : null);
+    later("lookcards", 300, refreshLookCards);
+    return added;
+  }));
   return SYS_FACES.get(family);
 }
 /**
@@ -274,8 +280,12 @@ function ensureFont(family) {
  * furniture, a photo's effects, by where its lines fall (see subtitlePlan in render.js, titleArea in kit.js). null: any.
  */
 const setIn = (family) => (!S.cover || S.cover.layers.some((L) => L.id === "title" && L.font === family) ? null : S.cover.layers.filter((L) => L.font === family).map((L) => L.id));
-/** Sees that the system fonts the layers are set in are there for every canvas (and the ransom note's faces, when a layer is lettered so); resolves once they are. */
-const ensureFonts = (layers) => Promise.all([...new Set([...layers.map((L) => L.font), ...(layers.some((L) => L.fx === "ransom") ? ransomPending() : [])].filter(Boolean))].map(ensureFont).filter(Boolean));
+/** The system fonts the layers are set in, and the ransom note's faces when a layer is lettered so. */
+const fontsOf = (layers) => [...new Set([...layers.map((L) => L.font), ...(layers.some((L) => L.fx === "ransom") ? ransomPending() : [])].filter(Boolean))];
+/** Sees that the fonts of the layers (fontsOf) are there for every canvas; resolves once they are. */
+const ensureFonts = (layers) => Promise.all(fontsOf(layers).map(ensureFont).filter(Boolean));
+/** Whether one of the fonts of the layers is still being read from its files: what is drawn meanwhile may be set in another. */
+const fontsReading = (layers) => fontsOf(layers).some((f) => SYS_FACES.has(f) && !SYS_READ.has(f));
 /** How many system fonts of each script the ransom note loads from their files at most (see ransomFaces). */
 const RANSOM_AWAY = 4;
 /**
@@ -3135,16 +3145,11 @@ function oddsLooks(sv, layouts, put, reset, again) {
 function oddsPics(list) {
   const base = lookBase(), round = ++ODDS_UI.round, wait = [];
   const copy = (pic, cv) => { cv.width = pic.cv.width; cv.height = pic.cv.height; cv.getContext("2d").drawImage(pic.cv, 0, 0); };
-  for (const [id, cv] of list) { const pic = LOOKCARDS.pics.get(id); if (pic && pic.sig === base + lookOwn(id)) copy(pic, cv); else wait.push([id, cv]); }
+  for (const [id, cv] of list) { const pic = lookPic(id, base); if (pic.sig === pic.want) copy(pic, cv); else wait.push([id, cv]); }
   const next = () => {
     if (round !== ODDS_UI.round || !wait.length || !wait[0][1].isConnected) return;   // drawn anew, or the window shut
-    const [id, cv] = wait.shift();
-    let pic = LOOKCARDS.pics.get(id);
-    if (!pic) { pic = { cv: el("canvas", { class: "lookpic", width: 300, height: 169 }), sig: "", want: "" }; LOOKCARDS.pics.set(id, pic); }
-    pic.want = base + lookOwn(id);
-    try { paint(pic.cv, selSize(), 300, S.cover, catIndex(), null, null, { profile: inLook(id) }); if (!outlinesPending()) pic.sig = pic.want; copy(pic, cv); }
-    catch (e) { console.error(e); }   // one look failing leaves the others to be drawn
-    finally { useLook(); }
+    const [id, cv] = wait.shift(), pic = lookPic(id, base);
+    paintLookCard(id, pic); copy(pic, cv);
     requestAnimationFrame(next);
   };
   requestAnimationFrame(next);
@@ -3759,15 +3764,142 @@ function endPreview(...kinds) {
   if (kinds.some((k) => PREVIEW[k])) { for (const k of kinds) PREVIEW[k] = null; previewTag(); queueDraw(); }
 }
 /**
- * Each look's card picture, kept from one drawing of the sheet to the next: {cv, sig, want} by look id, where `sig`
- * is what it was drawn from (the cover, the size, the style but its look, the look's own settings) and `want` what it
- * is to be drawn from. `queue`: the looks waiting to be drawn anew, the profile's first; `round`, the drawing's turn
- * (a newer one stops an older); `scroll`, where the cards were scrolled to.
+ * Each look's card picture, kept from one drawing of the sheet to the next: {cv, sig, want, shown} by look id, where
+ * `sig` is what it was drawn from (the cover, the size, the style but its look, the look's own settings), `want` what
+ * it is to be drawn from, and `shown` whether its canvas has a picture yet, drawn or the copy kept from the last
+ * launch (the self-test reads it). `queue`: the looks waiting to be drawn anew, the profile's first; `round`, the
+ * drawing's turn (a newer one stops an older); `scroll`, where the cards were scrolled to.
  */
 const LOOKCARDS = { pics: new Map(), queue: [], round: 0, scroll: null };
+/**
+ * The cards' pictures as kept in the data folder from one launch to the next (see lookpics.js): `kept`, those read
+ * and not on a card yet, {sig, img} by look id; `saved`, the sig of each look's file there; `dirty`, the looks drawn
+ * since, to be written (keepLookPics); `reading`, the reading of them, once (readLookPics); `wait`, the cards' drawing
+ * waiting for it, once a session, and `waited`, whether that is over (lookPicsWait); `app`, the app's version and
+ * build, which a picture is kept with; `saving`, the writing of them under way (keepLookPics).
+ */
+const LOOKPICS = { kept: new Map(), saved: new Map(), dirty: new Set(), reading: null, wait: null, waited: false, app: "", saving: null };
+/**
+ * How long the cards wait, at most, for the pictures kept to be read before they are drawn (ms): drawn meanwhile, the
+ * heavier looks hold the page for a frame each, and the reading, done between frames, waits on them — at the start,
+ * with the canvas and the size thumbnails being drawn too, it took a second or more so, where it is over in a moment
+ * once the page is free. Only a Look sheet opened as the app starts waits at all; a slow server, not more than this.
+ */
+const LOOKPICS_WAIT = 1000;
 const onLookSheet = () => S.mode === "edit" && !sheetHidden() && S.tab.edit === "look";
-const lookBase = () => { const st = S.profile.style; return JSON.stringify([S.sel, S.cover.catId, S.cover.title, S.cover.subtitle, S.cover.tag, S.cover.layers, S.cover.scene, S.profile.brand, S.profile.categories, S.photos.size, { ...st, look: 0, lookParams: 0, lookArt: 0 }]); };
+/**
+ * What every card is drawn from but its look. Of the photo store, which of the cover's pictures are read, and how long
+ * each picture and its subject's mask are (a repaint put in its place, the subject cut out again): not how many
+ * pictures it holds, which the library read in the background changes (readLibrary), so that every card would be
+ * drawn again, and none kept from the last launch would do. Whether each font the layers are set in is there (one
+ * uninstalled since is drawn in another), and the layout's defaults (defaults.json, which custom.json lays over).
+ */
+const lookBase = () => {
+  const st = S.profile.style, read = [...pidsOf(S.cover)].map((pid) => { const r = S.photos.get(pid); return r ? [r.src.length, r.mask ? r.mask.src.length : 0] : 0; });
+  const fonts = [...new Set(S.cover.layers.map((L) => L.font).filter(Boolean))].map((f) => BUNDLED_FONTS.includes(f) || S.importedFonts.includes(f) || S.systemFonts.includes(f));
+  return JSON.stringify([S.sel, S.cover.catId, S.cover.title, S.cover.subtitle, S.cover.tag, S.cover.layers, S.cover.scene, S.profile.brand, S.profile.categories, read, fonts, DEFAULTS.layout, { ...st, look: 0, lookParams: 0, lookArt: 0 }]);
+};
 const lookOwn = (id) => { const st = S.profile.style; return JSON.stringify([st.lookParams[id], (st.lookArt || {})[id]]); };
+/** Look `id`'s card picture, made the first time, what it is to be drawn from set (`base`, lookBase()); one with nothing on it yet takes the copy kept from the last launch, once that is read. */
+function lookPic(id, base) {
+  let pic = LOOKCARDS.pics.get(id);
+  if (!pic) { pic = { cv: el("canvas", { class: "lookpic", width: LOOKPIC.w, height: 169 }), sig: "", want: "", shown: false }; LOOKCARDS.pics.set(id, pic); }
+  pic.want = base + lookOwn(id);
+  if (!pic.shown && LOOKPICS.kept.has(id)) fromKept(id, pic);
+  return pic;
+}
+/** How many pixels a card is drawn at, at the size on the canvas (as drawCover sizes a canvas). */
+const cardSize = () => { const z = selSize(); return [LOOKPIC.w, Math.max(1, Math.round((LOOKPIC.w * z.h) / z.w))]; };
+/**
+ * Puts the copy of look `id`'s card kept from the last launch on its canvas: the card as it is to be where the copy
+ * was kept with what the card is to be drawn from now (it is not drawn again), else a stand-in till it is drawn.
+ */
+function fromKept(id, pic) {
+  const k = LOOKPICS.kept.get(id), [w, h] = cardSize();
+  LOOKPICS.kept.delete(id);
+  pic.cv.width = k.img.naturalWidth; pic.cv.height = k.img.naturalHeight;
+  pic.cv.getContext("2d").drawImage(k.img, 0, 0);
+  if (k.sig === lookPicSig(pic.want, w, h, LOOKPICS.app)) pic.sig = pic.want;
+  pic.shown = true;
+}
+/**
+ * Draws look `id`'s card as it is to be (`pic.want`). It is done unless an outline was on its way as it was drawn, or a
+ * font of the cover's was being read from its files (fontsReading): drawn again as they come (refreshLookCards), and
+ * not taken for done meanwhile should the cover go back to what it was drawn from before. A card done is written to
+ * the data folder a moment later (keepLookPics).
+ */
+function paintLookCard(id, pic) {
+  try {
+    paint(pic.cv, selSize(), LOOKPIC.w, S.cover, catIndex(), null, null, { profile: inLook(id) });
+    if (!outlinesPending() && !fontsReading(S.cover.layers)) { pic.sig = pic.want; LOOKPICS.dirty.add(id); later("lookpics", 2000, keepLookPics); }
+    else { pic.sig = ""; LOOKPICS.dirty.delete(id); }
+  } catch (e) { console.error(e); pic.sig = pic.want; LOOKPICS.dirty.delete(id); }   // one look failing leaves the others to be drawn
+  finally { useLook(); }
+  LOOKPICS.kept.delete(id); pic.shown = true;
+}
+/**
+ * Reads the cards' pictures kept from the last launch, once (after the canvas's first frame, or when the Look sheet is
+ * first built, whichever comes first): each put on its card at once where the card has nothing on it yet (fromKept).
+ * A file of a look there is no more, or one a write cut short left, is removed; one that cannot be read is passed
+ * by, and written over once its card is drawn. Only in the desktop app (see keepLookPics).
+ */
+function readLookPics() {
+  if (!LOOKPICS.reading) LOOKPICS.reading = (async () => {
+    LOOKPICS.app = await appBuild();
+    if (HOST !== "tauri") return;
+    const names = await files.list(LOOKPIC.dir).catch(() => []);
+    for (const f of strayLookPics(names, LOOK_IDS)) files.remove(`${LOOKPIC.dir}/${f}`).catch(() => null);
+    await Promise.all(LOOK_IDS.filter((id) => names.includes(id + ".json")).map(async (id) => {
+      const k = readLookPic(await files.read(`${LOOKPIC.dir}/${id}.json`).catch(() => null)), img = k && (await loadImage(k.src));
+      if (!img) return;
+      LOOKPICS.saved.set(id, k.sig);
+      const pic = LOOKCARDS.pics.get(id);
+      if (pic && pic.shown) return;   // drawn meanwhile
+      LOOKPICS.kept.set(id, { sig: k.sig, img });
+      if (pic) fromKept(id, pic);
+    }));
+  })().catch((e) => console.error(e));
+  return LOOKPICS.reading;
+}
+/** The reading of the pictures kept, waited for LOOKPICS_WAIT at most, from the first drawing of the cards: once a session, whichever round asks. */
+function lookPicsWait() {
+  if (!LOOKPICS.wait) LOOKPICS.wait = Promise.race([readLookPics(), new Promise((r) => setTimeout(r, LOOKPICS_WAIT))]).then(() => { LOOKPICS.waited = true; });
+  return LOOKPICS.wait;
+}
+/**
+ * Writes the cards drawn since (LOOKPICS.dirty) to the data folder, one after another, those still as they are to be:
+ * a JPEG each (a PNG where the cover is see-through), with what it was drawn from (lookPicSig); not one kept so
+ * already. One writing waits for the last (`saving`), so an older picture never lands after a newer. Only in the
+ * desktop app: in a plain browser everything lives in localStorage, whose room the profiles and covers need more, and a
+ * server's page cannot tell one version of the server from the next (appBuild), which the pictures are kept with.
+ */
+function keepLookPics() {
+  if (HOST !== "tauri") return Promise.resolve(LOOKPICS.dirty.clear());
+  return (LOOKPICS.saving = (LOOKPICS.saving || Promise.resolve()).then(saveLookPics).catch((e) => console.error(e)));
+}
+async function saveLookPics() {
+  await readLookPics();   // the app's version, which they are kept with
+  const ids = [...LOOKPICS.dirty];
+  LOOKPICS.dirty.clear();
+  for (const id of ids) {
+    const pic = LOOKCARDS.pics.get(id);
+    if (!pic || pic.sig !== pic.want) continue;   // to be drawn again
+    const sig = lookPicSig(pic.sig, pic.cv.width, pic.cv.height, LOOKPICS.app);
+    if (LOOKPICS.saved.get(id) === sig) continue;
+    try {
+      const type = seeThrough(pic.cv) ? "image/png" : "image/jpeg";   // JPEG would fill what is see-through (the Background layer hidden, a clear ground) with black
+      const blob = await new Promise((res) => pic.cv.toBlob(res, type, LOOKPIC.q));   // the canvas as it is now, whatever is drawn on it later
+      const src = blob && (await readAs(blob, "readAsDataURL"));
+      if (src) { await files.write(`${LOOKPIC.dir}/${id}.json`, writeLookPic(sig, src)); LOOKPICS.saved.set(id, sig); }
+    } catch (e) { console.error(e); }   // not kept: drawn again at the next launch; the others are written all the same
+  }
+}
+/** Whether a canvas has a pixel that is not wholly opaque. */
+function seeThrough(cv) {
+  const a = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+  for (let i = 3; i < a.length; i += 4) if (a[i] < 255) return true;
+  return false;
+}
 /** The cards in sight drawn anew where what they show has changed since (an edit while the Look sheet is open, outlines arrived). */
 function refreshLookCards() {
   if (!onLookSheet()) return;
@@ -3780,10 +3912,9 @@ function refreshLookCards() {
 function lookCards() {
   const st = S.profile.style, lang = getLang(), stale = [], shown = lookFilter();
   const base = lookBase();
+  readLookPics();   // the first time, if the start has not yet
   const card = (id) => {
-    let pic = LOOKCARDS.pics.get(id);
-    if (!pic) { pic = { cv: el("canvas", { class: "lookpic", width: 300, height: 169 }), sig: "", want: "" }; LOOKCARDS.pics.set(id, pic); }
-    pic.want = base + lookOwn(id);
+    const pic = lookPic(id, base);
     if (pic.sig !== pic.want) stale.push(id);
     const on = id === st.look;
     return el("div", { class: "lookcard" + (on ? " on" : ""), dataset: { id }, hidden: !shown(id) && !(on && ownAlways()) },
@@ -3895,20 +4026,22 @@ function findLooks(stay = false) {
   if (!stay) { grid.scrollTop = 0; LOOKCARDS.scroll = 0; hoverLook(null); }
   refreshLookCards();
 }
-/** Draws the cards waiting, one a frame, while the Look sheet is open; not while something is dragged (as the size thumbnails wait), nor one the search hides (drawn when it shows: refreshLookCards). */
+/**
+ * Draws the cards waiting, one a frame, while the Look sheet is open; not while something is dragged (as the size
+ * thumbnails wait), nor one the search hides (drawn when it shows: refreshLookCards), nor one the copy kept from the
+ * last launch has put right meanwhile; not before those copies are read, either, for LOOKPICS_WAIT at most.
+ */
 function drawLookCards(round) {
+  let waited = LOOKPICS.waited;
   const next = () => {
     if (round !== LOOKCARDS.round || !onLookSheet()) return;
     if (LIVE || drafting()) return setTimeout(next, 300);
+    if (!waited) { waited = true; return void lookPicsWait().then(() => requestAnimationFrame(next)); }
     let id;
-    do id = LOOKCARDS.queue.shift(); while (id && LOOKCARDS.pics.get(id) && (LOOKCARDS.pics.get(id).cv.closest(".lookcard") || {}).hidden);
+    do id = LOOKCARDS.queue.shift(); while (id && LOOKCARDS.pics.get(id) && (LOOKCARDS.pics.get(id).sig === LOOKCARDS.pics.get(id).want || (LOOKCARDS.pics.get(id).cv.closest(".lookcard") || {}).hidden));
     if (!id) return;
     const pic = LOOKCARDS.pics.get(id);
-    if (pic) {
-      try { paint(pic.cv, selSize(), 300, S.cover, catIndex(), null, null, { profile: inLook(id) }); if (!outlinesPending()) pic.sig = pic.want; }   // waiting for outlines: drawn again once they come
-      catch (e) { console.error(e); pic.sig = pic.want; }   // one look failing leaves the others to be drawn
-      finally { useLook(); }
-    }
+    if (pic) paintLookCard(id, pic);
     requestAnimationFrame(next);
   };
   requestAnimationFrame(next);
@@ -7971,6 +8104,7 @@ async function start() {
   persistCover();
   prunePhotos();
   await applyProfile();
+  requestAnimationFrame(() => setTimeout(readLookPics));   // the look cards' pictures kept from the last launch, read after the canvas's first frame
   resetHistory();
   if (custom.tell) custom.tell();   // what was wrong with custom.json
   if (selftest) selfTest(selftest);

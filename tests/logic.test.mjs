@@ -4706,3 +4706,21 @@ test("the 3D view paints again only the sheets that changed, and what shows them
   assert.equal(ids(paintedWith(layers, ["bg"])), "bg");
   assert.equal(ids(paintedWith(layers, [])), "");
 });
+
+test("a look card's picture is kept from one launch to the next with what it was drawn from", async () => {
+  const { LOOKPIC, hashText, lookPicSig, readLookPic, writeLookPic, strayLookPics } = await import("../ui/js/lookpics.js");
+  // what a picture is kept with: what it was drawn from, its pixels, the way it is kept and the app's version and build
+  assert.equal(hashText("look"), hashText("look"));
+  assert.match(hashText("look"), /^[0-9a-f]{1,14}$/);
+  assert.notEqual(hashText("look"), hashText("look "));
+  const want = JSON.stringify(["1920x1080", "k1", "Title", [{ id: "title", fx: "extrude" }]]) + JSON.stringify([{ grain: 0.4 }, null]), sig = lookPicSig(want, 300, 169, "0.2.0+ab12");
+  assert.equal(sig, lookPicSig(want, 300, 169, "0.2.0+ab12"), "the same card, the same signature");
+  for (const other of [lookPicSig(want + " ", 300, 169, "0.2.0+ab12"), lookPicSig(want, 300, 533, "0.2.0+ab12"), lookPicSig(want, 360, 203, "0.2.0+ab12"), lookPicSig(want, 300, 169, "0.2.0+cd34"), lookPicSig(want, 300, 169)]) assert.notEqual(other, sig, "another cover, size, card width or build");
+  assert.deepEqual([LOOKPIC.w, LOOKPIC.q, LOOKPIC.dir, Number.isInteger(LOOKPIC.v)], [300, 0.8, "lookcards", true]);
+  // the file: read back as written; one cut short, written by hand or by another version, none
+  const src = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==", text = writeLookPic(sig, src);
+  assert.deepEqual(readLookPic(text), { sig, src });
+  for (const bad of [null, "", "{", text.slice(0, -12), "[]", JSON.stringify({ sig }), JSON.stringify({ sig: "not hex", src }), JSON.stringify({ sig, src: "javascript:alert(1)" }), JSON.stringify({ sig, src: "data:image/jpeg;base64,abc def" })]) assert.equal(readLookPic(bad), null, String(bad));
+  // the files no look has: a look retired, a write cut short (the store writes beside the file, then renames)
+  assert.deepEqual(strayLookPics(["cel.json", "glass.json", "ghibli.json", "glass.tmp", ".DS_Store", "cel.json.bak"], ["cel", "glass", "cyber"]), ["ghibli.json", "glass.tmp", ".DS_Store", "cel.json.bak"]);
+});

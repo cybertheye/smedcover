@@ -985,6 +985,43 @@ fn selftest_drag() -> bool {
     selftest_root().is_some() && std::env::var_os("SMEDCOVER_SELFTEST_DRAG").is_some()
 }
 
+/// What this build's interface is: a hash of `ui/` as it was built (build.rs). The look cards' pictures kept from
+/// one launch to the next carry it, so a build that draws otherwise does not take another's for its own. Under
+/// `tauri dev` (cfg `dev`, set by tauri-build) the interface is served from its folder as it is edited, without
+/// building again: its hash is made then, each time the page asks (once a load: an edit reloads it), of the files'
+/// names, sizes and times there (see ui_stamp).
+/// A debug build made with `tauri build --debug` has its interface built in, as a release has.
+#[tauri::command]
+fn ui_build() -> String {
+    if cfg!(dev) {
+        let mut h = 0xcbf29ce484222325u64;
+        ui_stamp(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../ui")), &mut h);
+        format!("dev-{h:016x}")
+    } else {
+        env!("SMEDCOVER_UI_BUILD").to_string()
+    }
+}
+
+/// Hashes the names, sizes and times of the files under `dir` but hidden ones (FNV-1a, in order) into `h`: what a
+/// debug build's interface is (see ui_build), changed by any edit, without reading the files.
+fn ui_stamp(dir: &Path, h: &mut u64) {
+    let Ok(read) = fs::read_dir(dir) else { return };
+    let mut entries: Vec<_> = read.flatten().map(|e| e.path()).filter(|p| !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'))).collect();
+    entries.sort();
+    for path in entries {
+        let meta = fs::metadata(&path).ok();
+        let time = meta.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+        let len = meta.as_ref().map_or(0, |m| m.len());
+        for b in path.to_string_lossy().bytes().chain(len.to_le_bytes()).chain(time.to_le_bytes()) {
+            *h ^= b as u64;
+            *h = h.wrapping_mul(0x100000001b3);
+        }
+        if path.is_dir() {
+            ui_stamp(&path, h);
+        }
+    }
+}
+
 /// In self-test mode, the looks to go through, comma-separated (SMEDCOVER_SELFTEST_LOOKS), when only
 /// some are to be checked — the new ones, say; all of them otherwise.
 #[tauri::command]
@@ -1018,6 +1055,7 @@ pub fn run() {
             cut_model_delete,
             selftest_models,
             selftest_drag,
+            ui_build,
             move_pointer,
             selftest_photo,
             save_image,

@@ -1955,7 +1955,18 @@ kind and for the search alike (`photoTiles()`).
 look, so a card's picture is kept (`LOOKCARDS.pics`) with what it was drawn from (`sig`: the cover, the size, the style
 but its look, the look's own settings; `lookBase()`, `lookOwn()`); those that are stale are drawn one a frame, the
 profile's first, and not while anything is dragged (`drawLookCards()`), and after an edit only those whose `sig` changed
-(`refreshLookCards()`). A card under the pointer for 140 ms shows its look on the canvas (`hoverLook()`,
+(`refreshLookCards()`). A card drawn while an outline was on its way, or a font of the cover's was being read from its
+files (`fontsReading()`), is not done (`sig` ""), and is drawn again as they come. The pictures are kept from one launch
+to the next (`lookpics.js`): a card done is written a moment later (`keepLookPics()`) to `lookcards/<look>.json`, a
+300 px JPEG of 15–50 KB (a PNG where the cover is see-through; the writings one after another, `saving`) with `lookPicSig()`, a hash of what it was drawn from,
+its pixels and the app's version and build (`appBuild()`: `ui_build` in `lib.rs`, a hash of `ui/` made by `build.rs`,
+or under `tauri dev` of its files' names, sizes and times, made again at each load of the page; only in the desktop
+app, as a server's page cannot tell one version of the server from the next); after the first frame `readLookPics()` reads them and puts
+each on its card (`fromKept()`), done where the cover is as it was, a stand-in till drawn again where not. The cards'
+first drawing waits for that reading (`LOOKPICS_WAIT`, 1 s at most), so from the second launch on the sheet shows its
+cards at once and draws none. What every card is drawn from (`lookBase()`) counts the cover's pictures read and how
+long each is, not how many the photo store holds (the library read in the background would change that), whether each
+font of the layers is there, and the layout's defaults. A card under the pointer for 140 ms shows its look on the canvas (`hoverLook()`,
 `PREVIEW.look`, see below). A click makes it the profile's (`pickLook()` in `app.js`, not `deal.js`'s) and counts it
 (`countLook()`, into `settings.lookUse`), as `dealClose()` counts a hand of Surprise me kept in a look other than the
 cover had before the window's first deal. A card is two buttons side by side, not one in the other: the look (`.lookpick`,
