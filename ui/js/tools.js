@@ -118,8 +118,8 @@ export const TOOLS = [
     { annotations: READ, outputSchema: out({ profile: { type: "string" }, channel: { type: "string" }, title: { type: "string" }, subtitle: { type: "string" }, tag: { type: "string" }, look: { type: "string" }, theme: { type: "string" },
       layers: { type: "array", items: LAYER_OUT }, raw: { type: "object" } }, ["profile", "channel", "layers"]) }),
   TOOL("list_options", "List options",
-    "The values other tools accept. Returns looks (id, name, its kinds, oneTheme when it has a single ground, seeded when it scatters things at random, its settings — key, range, step, default — for set_look's params, its scene objects), text effects (id, name, kind, seeded, needsOutlines, available here), bends, fonts (bundled, imported, installed: filtered by fontQuery, at most 200 listed; latin: those that cannot set Chinese), the platforms and the ratios their covers use, size presets, and Surprise me's locks. `only` limits the answer to some of these.",
-    input({ only: list(pick(["looks", "effects", "bends", "fonts", "platforms", "sizes", "locks"], ""), "Only these groups.", { minItems: 1, uniqueItems: true }), fontQuery: str("Only installed fonts whose name has this in it (case aside).", { maxLength: 80 }) }),
+    "The values other tools accept. Returns looks (id, name, its kinds, a line on what it is drawn like and what it is for, oneTheme when it has a single ground, seeded when it scatters things at random), text effects (id, name, kind, seeded, needsOutlines, available here), bends, fonts (bundled, imported, installed: filtered by fontQuery, at most 200 listed; latin: those that cannot set Chinese), the platforms and the ratios their covers use, size presets, and Surprise me's locks. look: one look alone, all of it — what it is in full, its settings (key, range, step, default: set_look's params) and its scene objects. `only` limits the answer to some of these groups (with look and no only: the looks alone).",
+    input({ only: list(pick(["looks", "effects", "bends", "fonts", "platforms", "sizes", "locks"], ""), "Only these groups.", { minItems: 1, uniqueItems: true }), look: pick(LOOK_IDS, "This look alone, with its settings."), fontQuery: str("Only installed fonts whose name has this in it (case aside).", { maxLength: 80 }) }),
     { annotations: READ, outputSchema: out({ looks: { type: "array" }, effects: { type: "array" }, bends: { type: "array" }, fonts: { type: "object" }, platforms: { type: "array" }, sizes: { type: "array" }, locks: { type: "array" } }) }),
   TOOL("list_library", "List the library",
     "Pictures and assets that can be put on a cover. Returns photos (the bitmap library: pid — for add_photo's source.library —, name, kind upload/ai/repaint, when it was added), stickers and graphics (built in: id, name, group), and mine (the user's own assets: id, name, kind image/ai) — the ids for add_layer's asset. kind keeps one group; query, those whose name has the word in it; at most limit of each (default 100).",
@@ -140,7 +140,7 @@ export const TOOLS = [
     input({ profile: PROFILE, channel: CHANNEL, title: str("The title.", { maxLength: 2000 }), subtitle: str("The subtitle.", { maxLength: 2000 }), tag: str("The tag, the small label in a corner (\"EP.01\").", { maxLength: 200 }) }),
     { needs: { any: ["title", "subtitle", "tag"] }, outputSchema: out({ title: { type: "string" }, subtitle: { type: "string" }, tag: { type: "string" }, warnings: WARNINGS }) }),
   TOOL("set_look", "Set the look",
-    "Sets the profile's look, which every channel of it shares, and/or its settings: params (the look's own settings by key, as list_options lists them; a value out of range is clamped and said in warnings, an unknown key refused), theme (a dark or light ground, for looks with two), seed (where the look scatters things), resetParams (its settings back to their defaults). Not counted among the user's most used looks. One undo step. Returns the look, theme, seed and settings as they now are.",
+    "Sets the profile's look, which every channel of it shares, and/or its settings: params (the look's own settings by key, as list_options with look lists them; a value out of range is clamped and said in warnings, an unknown key refused), theme (a dark or light ground, for looks with two), seed (where the look scatters things), resetParams (its settings back to their defaults). Not counted among the user's most used looks. One undo step. Returns the look, theme, seed and settings as they now are.",
     input({ profile: PROFILE, look: pick(LOOK_IDS, "The look's id."), params: { type: "object", description: "The look's settings to change, by key: a number, or text for a text setting.", additionalProperties: { type: ["number", "string"] } },
       theme: pick(["dark", "light"], "The ground."), seed: int("Where the look scatters things at random.", 0, 999999), resetParams: bool("Its settings back to their defaults first.") }),
     { needs: { any: ["look", "params", "theme", "seed", "resetParams"] }, outputSchema: out({ look: { type: "string" }, theme: { type: "string" }, seed: { type: "integer" }, params: { type: "object" }, warnings: WARNINGS }, ["look"]) }),
@@ -496,7 +496,10 @@ export function boxesOf(hits, [vw, vh]) {
 /**
  * A contact sheet of `sizes` ([{w, h}]): each drawn at one height, in rows as wide as fit within `side` × 1.5, a caption
  * of `cap` pixels under each, `gap` between them — the height the tallest that lets the sheet fit that square, from
- * side / 2 down. Returns {width, height, tile: the drawings' height, tiles: [{x, y, w, h}] (the drawings, in order)}.
+ * side / 2 down. So many that they do not fit a pixel high with their captions: the gaps and captions halved till they
+ * do (a caller draws no caption too small to read), so the sheet stays within the square for any profile's sizes (at
+ * most 80, none past 128:1). Returns {width, height, tile: the drawings' height, tiles: [{x, y, w, h}] (the drawings,
+ * in order), gap, cap}.
  */
 export function sheetPlan(sizes, side, { gap = 16, cap = 30 } = {}) {
   const most = Math.round(side * 1.5);
@@ -509,8 +512,8 @@ export function sheetPlan(sizes, side, { gap = 16, cap = 30 } = {}) {
       tiles.push({ x, y, w, h: th });
       x += w + gap; width = Math.max(width, x);
     }
-    return { width, height: y + th + cap + gap, tile: th, tiles };
+    return { width, height: y + th + cap + gap, tile: th, tiles, gap, cap };
   };
-  for (let th = Math.round(side / 2); th > 24; th = Math.floor(th * 0.92)) { const p = flow(th); if (p.width <= most && p.height <= most) return p; }
-  return flow(24);
+  for (let th = Math.round(side / 2); th >= 1; th = th > 24 ? Math.floor(th * 0.92) : th - 1) { const p = flow(th); if (p.width <= most && p.height <= most) return p; }
+  return gap > 0 || cap > 0 ? sheetPlan(sizes, side, { gap: gap >> 1, cap: cap >> 1 }) : flow(1);
 }

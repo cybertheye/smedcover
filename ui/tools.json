@@ -393,7 +393,7 @@
     {
       "name": "list_options",
       "title": "List options",
-      "description": "The values other tools accept. Returns looks (id, name, its kinds, oneTheme when it has a single ground, seeded when it scatters things at random, its settings — key, range, step, default — for set_look's params, its scene objects), text effects (id, name, kind, seeded, needsOutlines, available here), bends, fonts (bundled, imported, installed: filtered by fontQuery, at most 200 listed; latin: those that cannot set Chinese), the platforms and the ratios their covers use, size presets, and Surprise me's locks. `only` limits the answer to some of these.",
+      "description": "The values other tools accept. Returns looks (id, name, its kinds, a line on what it is drawn like and what it is for, oneTheme when it has a single ground, seeded when it scatters things at random), text effects (id, name, kind, seeded, needsOutlines, available here), bends, fonts (bundled, imported, installed: filtered by fontQuery, at most 200 listed; latin: those that cannot set Chinese), the platforms and the ratios their covers use, size presets, and Surprise me's locks. look: one look alone, all of it — what it is in full, its settings (key, range, step, default: set_look's params) and its scene objects. `only` limits the answer to some of these groups (with look and no only: the looks alone).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -414,6 +414,47 @@
             "description": "Only these groups.",
             "minItems": 1,
             "uniqueItems": true
+          },
+          "look": {
+            "type": "string",
+            "enum": [
+              "cel",
+              "cyber",
+              "riso",
+              "anime",
+              "bluenote",
+              "editorial",
+              "songke",
+              "vivid",
+              "negative",
+              "cinema",
+              "cyano",
+              "monofilm",
+              "typo",
+              "toon",
+              "avant",
+              "collage",
+              "yellow",
+              "pitch",
+              "dots",
+              "neon",
+              "court",
+              "velvet",
+              "rave",
+              "chrome",
+              "netart",
+              "verse",
+              "glass",
+              "jelly",
+              "skies",
+              "spectrum",
+              "citypop",
+              "construct",
+              "deco",
+              "wasteland",
+              "facet"
+            ],
+            "description": "This look alone, with its settings."
           },
           "fontQuery": {
             "type": "string",
@@ -730,7 +771,7 @@
     {
       "name": "set_look",
       "title": "Set the look",
-      "description": "Sets the profile's look, which every channel of it shares, and/or its settings: params (the look's own settings by key, as list_options lists them; a value out of range is clamped and said in warnings, an unknown key refused), theme (a dark or light ground, for looks with two), seed (where the look scatters things), resetParams (its settings back to their defaults). Not counted among the user's most used looks. One undo step. Returns the look, theme, seed and settings as they now are.",
+      "description": "Sets the profile's look, which every channel of it shares, and/or its settings: params (the look's own settings by key, as list_options with look lists them; a value out of range is clamped and said in warnings, an unknown key refused), theme (a dark or light ground, for looks with two), seed (where the look scatters things), resetParams (its settings back to their defaults). Not counted among the user's most used looks. One undo step. Returns the look, theme, seed and settings as they now are.",
       "inputSchema": {
         "type": "object",
         "properties": {

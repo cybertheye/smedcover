@@ -29,6 +29,16 @@ const has = (s, q) => !q || String(s || "").toLowerCase().includes(String(q).tri
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const r4 = (v) => Math.round(v * 1e4) / 1e4;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+/** A time kept as milliseconds (a picture's in the library), as ISO 8601; null for none, or one no date can be (past ±8.64e15). */
+const when = (ms) => { const d = new Date(ms); return ms && Number.isFinite(d.getTime()) ? d.toISOString() : null; };
+/**
+ * A look's description in a line, for list_options: what it is drawn like (up to its first colon or semicolon) and what
+ * it is for (its "— for …" at the end), "Drawn like animation cels — for explainers, reviews, unboxings, everyday vlogs."
+ */
+function inALine(about) {
+  const s = String(about).trim(), head = s.split(/[:;]/)[0].replace(/[.\s]+$/, ""), tail = / — (for [^.—]+)/.exec(s);
+  return tail && !head.includes(tail[1]) ? `${head} — ${tail[1]}.` : `${head}.`;
+}
 /** A call the cover cannot take as it is (a layer of the wrong kind, a font not there…): what is wrong, for the agent. */
 const refused = (message) => new ToolError("invalid_arguments", message);
 /** A colour as the layers keep it: "#rrggbb" in small letters. */
@@ -165,21 +175,23 @@ export function makeCommands(api) {
         layers: c.layers.map((L) => layerOut(L, c, !!args.letters)), ...(args.raw ? { raw: copy(c) } : {}) } });
     },
     list_options: async (args) => {
-      const want = new Set(args.only || OPTIONS), out = {};
-      if (want.has("looks")) out.looks = LOOK_IDS.map((id) => {
-        const L = LOOKS[id];
-        return { id, name: L.name.en, zh: L.name.zh, kinds: LOOK_TAGS[id] || [], ...(L.oneTheme ? { oneTheme: true } : {}), ...(L.seeded ? { seeded: true } : {}), ...(L.about ? { about: L.about.en } : {}),
+      const want = new Set(args.only || (args.look ? ["looks"] : OPTIONS)), out = {};
+      // every look in a line (some 9 KB for them all); one asked for, all of it: what it is, its settings, its scene objects
+      if (want.has("looks")) out.looks = (args.look ? [args.look] : LOOK_IDS).map((id) => {
+        const L = LOOKS[id], brief = { id, name: L.name.en, kinds: LOOK_TAGS[id] || [], ...(L.oneTheme ? { oneTheme: true } : {}), ...(L.seeded ? { seeded: true } : {}), ...(L.about ? { about: args.look ? L.about.en : inALine(L.about.en) } : {}) };
+        if (!args.look) return brief;
+        return { ...brief,
           params: L.params.map((d) => (d.text ? { key: d.key, name: d.name.en, text: true, maxLength: d.max, default: d.def }
             : { key: d.key, name: d.name.en, min: d.min, max: d.max, step: d.step, default: d.def, ...(d.toggle ? { toggle: true } : {}), ...(d.needsPhoto ? { needsPhoto: true } : {}) })),
           scene: Object.keys(L.scene || {}) };
       });
-      if (want.has("effects")) out.effects = Object.entries(EFFECTS).map(([id, e]) => ({ id, name: e.name.en, zh: e.name.zh, kind: e.kind, seeded: !!e.seeded, needsOutlines: e.kind === "outline", available: api.CAN.outlines || e.kind !== "outline" }));
-      if (want.has("bends")) out.bends = [{ id: "none", name: "None", zh: "无" }, ...BEND_IDS.map((id) => ({ id, name: BENDS[id].name.en, zh: BENDS[id].name.zh }))];
+      if (want.has("effects")) out.effects = Object.entries(EFFECTS).map(([id, e]) => ({ id, name: e.name.en, kind: e.kind, seeded: !!e.seeded, needsOutlines: e.kind === "outline", available: api.CAN.outlines || e.kind !== "outline" }));
+      if (want.has("bends")) out.bends = [{ id: "none", name: "None" }, ...BEND_IDS.map((id) => ({ id, name: BENDS[id].name.en }))];
       if (want.has("fonts")) {
         const found = S.systemFonts.filter((f) => has(f, args.fontQuery));
         out.fonts = { bundled: [...api.BUNDLED_FONTS], imported: [...S.importedFonts], system: found.slice(0, 200), systemMatched: found.length, systemTotal: S.systemFonts.length, latin: [...S.latinFonts] };
       }
-      if (want.has("platforms")) out.platforms = PLATFORMS.map((p) => ({ id: p.id, name: p.name.en, zh: p.name.zh, wide: [...new Set(p.covers({ orient: "h", red: "3:4" }).map((c) => c.ratio))], tall: [...new Set(p.covers({ orient: "v", red: "3:4" }).map((c) => c.ratio))] }));
+      if (want.has("platforms")) out.platforms = PLATFORMS.map((p) => ({ id: p.id, name: p.name.en, wide: [...new Set(p.covers({ orient: "h", red: "3:4" }).map((c) => c.ratio))], tall: [...new Set(p.covers({ orient: "v", red: "3:4" }).map((c) => c.ratio))] }));
       if (want.has("sizes")) out.sizes = SIZE_PRESETS.map((z) => ({ key: keyOf(z), w: z.w, h: z.h, ratio: ratioText(z.w, z.h), caption: sizeCaption(z, "en") }));
       if (want.has("locks")) out.locks = SURPRISE_LOCKS.map((id) => ({ id, keeps: LOCKS[id] || id }));
       return toResult({ structured: out });
@@ -187,7 +199,7 @@ export function makeCommands(api) {
     list_library: async (args) => {
       const want = args.kind ? [args.kind] : ["photos", "stickers", "graphics", "mine"], most = args.limit ?? 100, q = args.query, out = {}, more = {};
       const keep = (k, all) => { out[k] = all.slice(0, most); if (all.length > most) more[k] = all.length - most; };
-      if (want.includes("photos")) keep("photos", S.library.filter((e) => has(e.name, q) || has(e.kind, q)).map((e) => ({ pid: e.pid, name: e.name, kind: e.kind, at: e.at ? new Date(e.at).toISOString() : null })));
+      if (want.includes("photos")) keep("photos", S.library.filter((e) => has(e.name, q) || has(e.kind, q)).map((e) => ({ pid: e.pid, name: e.name, kind: e.kind, at: when(e.at) })));
       if (want.includes("stickers")) keep("stickers", STICKERS.filter((s) => has(s.name.en, q) || has(s.name.zh, q) || has(s.id, q)).map((s) => ({ id: s.id, name: s.name.en, zh: s.name.zh, group: s.group })));
       if (want.includes("graphics")) keep("graphics", GRAPHICS.filter((g) => has(g.name.en, q) || has(g.name.zh, q) || has(g.id, q)).map((g) => ({ id: g.id, name: g.name.en, zh: g.name.zh })));
       if (want.includes("mine")) {
@@ -207,14 +219,16 @@ export function makeCommands(api) {
         return toResult({ structured: { sizes: [{ key: keyOf(z), caption: sizeCaption(z, "en"), x: 0, y: 0, w: width, h: height }], width, height, boxes, pending: pending() }, images: [data] });
       }
       // every size on one sheet, each at one height, captioned under it
-      const cap = Math.max(18, Math.min(44, Math.round(side * 0.028))), plan = sheetPlan(p.sizes, side, { cap, gap: Math.round(cap * 0.6) });
+      const want = Math.max(18, Math.min(44, Math.round(side * 0.028))), plan = sheetPlan(p.sizes, side, { cap: want, gap: Math.round(want * 0.6) }), cap = plan.cap;
       const sheet = newCanvas(plan.width, plan.height), x = sheet.getContext("2d"), sizes = [];
       x.fillStyle = "#14141c"; x.fillRect(0, 0, sheet.width, sheet.height);
       for (const [i, z] of p.sizes.entries()) {
         const t = plan.tiles[i], cv = await api.renderReady(z, c, index, { profile: p, pixelW: t.w }), said = `${sizeCaption(z, "en")} · ${z.w}×${z.h}`;
         x.drawImage(cv, t.x, t.y, t.w, t.h); cv.width = cv.height = 0;
-        x.fillStyle = "#e9e9f0"; x.font = `600 ${Math.round(cap * 0.52)}px -apple-system, "Helvetica Neue", Arial, sans-serif`; x.textBaseline = "middle";
-        x.fillText(said, t.x, t.y + t.h + cap / 2, t.w);
+        if (cap >= 10) {   // a sheet of so many sizes that their captions were made too small to read has none
+          x.fillStyle = "#e9e9f0"; x.font = `600 ${Math.round(cap * 0.52)}px -apple-system, "Helvetica Neue", Arial, sans-serif`; x.textBaseline = "middle";
+          x.fillText(said, t.x, t.y + t.h + cap / 2, t.w);
+        }
         sizes.push({ key: keyOf(z), caption: sizeCaption(z, "en"), x: t.x, y: t.y, w: t.w, h: t.h });
       }
       const data = await api.pngBase64(sheet), { width, height } = sheet;

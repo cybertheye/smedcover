@@ -335,15 +335,26 @@ test("the read-only commands answer from the state as it is, and read another ch
   const opts = (await cmds.list_options({ only: ["fonts", "effects"], fontQuery: "ping" })).structuredContent;
   assert.deepEqual(Object.keys(opts).sort(), ["effects", "fonts"]);
   assert.deepEqual(opts.fonts.system, ["PingFang SC"]); assert.equal(opts.fonts.systemTotal, 3); assert.deepEqual(opts.fonts.imported, ["My Font"]);
-  assert.deepEqual(opts.effects.find((e) => e.id === "spiky"), { id: "spiky", name: "Spiky", zh: "刺边", kind: "outline", seeded: true, needsOutlines: true, available: false });
-  const all = (await cmds.list_options({})).structuredContent;
+  assert.deepEqual(opts.effects.find((e) => e.id === "spiky"), { id: "spiky", name: "Spiky", kind: "outline", seeded: true, needsOutlines: true, available: false });
+  // every look in a line, its settings only when it is asked for alone: the whole answer a few thousand tokens, not sixteen
+  const all = (await cmds.list_options({})).structuredContent, size = JSON.stringify(all).length;
   assert.deepEqual(all.looks.map((l) => l.id), LOOK_IDS);
-  assert.ok(all.looks.find((l) => l.id === "cyber").params.some((d) => d.key === "split" && d.max === 2));
+  assert.ok(size < 24000, `list_options is ${size} characters`);
+  assert.ok(all.looks.every((l) => !("params" in l) && !("scene" in l) && !("zh" in l) && l.about && !l.about.includes("\n") && l.about.length < 200), "a look in a line");
+  assert.equal(all.looks.find((l) => l.id === "cel").about, "Drawn like animation cels — for explainers, reviews, unboxings, everyday vlogs.");
+  assert.ok(!/[一-鿿]/.test(JSON.stringify({ ...all, fonts: null })), "no Chinese names (the fonts are their own)");
+  const cyber = (await cmds.list_options({ look: "cyber" })).structuredContent;
+  assert.deepEqual(Object.keys(cyber), ["looks"], "a look alone: the looks alone");
+  assert.equal(cyber.looks.length, 1); assert.ok(cyber.looks[0].params.some((d) => d.key === "split" && d.max === 2)); assert.equal(cyber.looks[0].about, LOOKS.cyber.about.en);
+  assert.deepEqual(Object.keys((await cmds.list_options({ look: "cel", only: ["looks", "bends"] })).structuredContent).sort(), ["bends", "looks"]);
   assert.deepEqual(all.bends.map((b) => b.id), ["none", ...BEND_IDS]);
   assert.deepEqual(all.locks.map((l) => l.id), SURPRISE_LOCKS);
   assert.ok(all.platforms.find((x) => x.id === "bili").wide.includes("16:9"));
   const lib = (await cmds.list_library({ query: "beach" })).structuredContent;
   assert.deepEqual(lib.photos, [{ pid: "pic1", name: "Beach", kind: "upload", at: new Date(1700000000000).toISOString() }]);
+  S.library.push({ pid: "far", name: "Far future", kind: "upload", at: 9e15 });   // past what a date can be
+  assert.deepEqual((await cmds.list_library({ query: "future" })).structuredContent.photos, [{ pid: "far", name: "Far future", kind: "upload", at: null }]);
+  S.library.pop();
   assert.equal((await cmds.list_library({ kind: "stickers", limit: 5 })).structuredContent.stickers.length, 5);
   assert.equal((await cmds.list_library({ kind: "stickers", limit: 5 })).structuredContent.more.stickers, 67);
   assert.equal(JSON.stringify(S), was, "nothing read was changed");
@@ -794,4 +805,16 @@ test("render helpers: the width for a longer side, the layers' boxes as shares o
     for (let i = 1; i < plan.tiles.length; i++) { const a = plan.tiles[i - 1], b = plan.tiles[i]; assert.ok(b.y > a.y || b.x >= a.x + a.w, "no two overlap"); }
   }
   assert.ok(sheetPlan([{ w: 1920, h: 1080 }], 1024).tile >= 400, "one size alone is drawn large");
+  // as many sizes as a profile keeps, of every shape: smaller than 24 px, then with smaller captions, never past the square
+  const many = Array.from({ length: 80 }, (_, i) => [{ w: 8192, h: 64 }, { w: 64, h: 8192 }, { w: 1920, h: 1080 }, { w: 1080, h: 1920 }, { w: 900, h: 383 }][i % 5]);
+  for (const side of [128, 300, 1024]) for (const [gap, cap] of [[16, 30], [11, 18]]) {
+    const plan = sheetPlan(many, side, { gap, cap }), most = Math.round(side * 1.5);
+    assert.equal(plan.tiles.length, many.length);
+    assert.ok(plan.width <= most && plan.height <= most, `${side}: ${plan.width}×${plan.height} within ${most}`);
+    assert.ok(plan.tiles.every((t) => t.x >= 0 && t.y >= 0 && t.x + t.w <= plan.width && t.y + t.h + plan.cap <= plan.height && t.h === plan.tile), `${side}: on the sheet`);
+    for (let i = 1; i < plan.tiles.length; i++) { const a = plan.tiles[i - 1], b = plan.tiles[i]; assert.ok(b.y > a.y || b.x >= a.x + a.w, "no two overlap"); }
+    assert.ok(plan.cap <= cap && plan.gap <= gap);
+  }
+  const fine = sheetPlan(sizes, 1024, { gap: 11, cap: 18 });
+  assert.deepEqual([fine.gap, fine.cap], [11, 18], "a few sizes keep their captions");
 });
