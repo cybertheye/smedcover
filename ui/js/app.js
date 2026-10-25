@@ -1493,7 +1493,7 @@ const layersSheet = () => [layerBox];
 // Each asset may carry `folder`, the id of a folder in S.assetFolders; one whose folder is gone is
 // simply unfiled. A tile is filed by dragging it onto a folder (or onto "Unfiled" to take it out).
 let DRAGGED_ASSET = null;                                  // the tile being dragged, while it is: {kind, id}
-const FOLDERS = { closed: new Set(), confirmDrop: "" };    // folders shown shut; the folder whose delete awaits a second click
+const FOLDERS = { closed: new Set() };    // folders shown shut
 const persistFolders = () => writeJson("asset-folders.json", S.assetFolders).catch(fail);
 function mineSection(mine) {
   const known = new Set(S.assetFolders.map((f) => f.id)), loose = mine.filter((a) => !known.has(a.folder));
@@ -1508,13 +1508,13 @@ function mineSection(mine) {
 }
 /** One folder: its head (open or shut, the name — double-click to rename —, how many, delete) and its tiles. */
 function folderBox(f, items, tiles) {
-  const open = !FOLDERS.closed.has(f.id), sure = FOLDERS.confirmDrop === f.id;
+  const open = !FOLDERS.closed.has(f.id);
   return dropTarget(el("div", { class: "folder", dataset: { id: f.id } },
     el("div", { class: "fhead" },
       el("button", { class: "caret", title: t(open ? "assets.folderShut" : "assets.folderOpen"), onclick: () => { if (open) FOLDERS.closed.add(f.id); else FOLDERS.closed.delete(f.id); renderPanel(); } }, open ? "▾" : "▸"),
       el("span", { class: "fname", title: t("assets.folderRename"), ondblclick: () => renameFolder(f.id) }, f.name),
       el("span", { class: "fcount" }, String(items.length)),
-      el("button", { class: "btn", title: t("assets.folderDrop"), onclick: () => dropFolder(f.id) }, sure ? t("assets.folderDropSure") : "×")),
+      el("button", { class: "btn", title: t("assets.folderDrop"), onclick: () => dropFolder(f.id) }, "×")),
     open && (items.length ? tiles(items) : el("div", { class: "hint", style: "margin:0;padding:4px 10px 10px" }, t("assets.folderEmpty")))), f.id);
 }
 /** Lets a dragged asset of the user's be dropped on `node`, filing it in folder `folder` ("" = unfiled). */
@@ -1548,10 +1548,10 @@ function renameFolder(id) {
     onblur: () => { const v = input.value.trim(); if (v && v !== f.name) { f.name = v; persistFolders(); } renderPanel(); } });
   name.replaceWith(input); input.focus(); input.select();
 }
-/** Deletes a folder on the second click; its assets stay, unfiled. */
+/** Deletes a folder, once asked; its assets stay, unfiled. */
 async function dropFolder(id) {
-  if (FOLDERS.confirmDrop !== id) { FOLDERS.confirmDrop = id; return renderPanel(); }
-  FOLDERS.confirmDrop = "";
+  const f = S.assetFolders.find((x) => x.id === id);
+  if (!f || !(await askSure({ title: t("assets.folderDropSure", f.name), body: t("assets.folderDropBody"), go: t("ask.delete") }))) return;
   S.assetFolders = S.assetFolders.filter((f) => f.id !== id); persistFolders();
   for (const a of userAssets.values()) if (a.folder === id) { delete a.folder; await saveAssetRecord(a).catch(fail); }
   renderPanel();
@@ -1656,7 +1656,7 @@ function cutWhere(L) {
 // made: what this session's repaints of it brought back, oldest first, at most REP_MADE ({src, w, h, pid, as}: the
 // picture, its size, its place in the photo store, the name of what it was painted as, {zh, en}); result: the one of
 // them shown, waiting to be used or dropped; test: the image model's connection check
-const REP = { for: "", of: "", busy: false, job: 0, since: 0, error: "", made: [], result: null, test: null, confirmDrop: null };
+const REP = { for: "", of: "", busy: false, job: 0, since: 0, error: "", made: [], result: null, test: null };
 const REP_MADE = 12;
 /** Whether the open sheet shows the cover's own things — its words, its layout parts, its photos — which follow its layers. */
 const onCoverTab = () => S.mode === "edit" && !sheetHidden() && ["content", "layout", "assets"].includes(S.tab.edit);
@@ -1985,11 +1985,10 @@ function repaintWin() {
           el("textarea", { value: mine.body, spellcheck: false, style: "height:140px;font-size:13px", placeholder: t("rep.customPh"), dataset: { k: "stbody" }, oninput: (e) => rewrite(e.target.value) }),
           el("div", { class: "hint" }, t("rep.customHint", `repaint-styles/${mine.file}`)),
           el("button", { class: "linkbtn danger", onclick: async () => {
-            if (REP.confirmDrop !== mine.id) { REP.confirmDrop = mine.id; repaintWin(); return; }   // a second click confirms
-            REP.confirmDrop = null;
+            if (!(await askSure({ title: t("rep.dropSure", mine.name[lang]), body: t("rep.dropBody", `repaint-styles/${mine.file}`), go: t("ask.delete") }))) return;
             await files.remove(`${MY_DIR}/${mine.file}`).catch(fail);
             await rereadMyStyles(S.myStyles.filter((s) => s.id !== mine.id)); S.imageAi = normalizeImageAi({ ...c, source: "look" }); persistImageAi(); repaintWin();
-          } }, t(REP.confirmDrop === mine.id ? "rep.dropSure" : "rep.drop", mine.name[lang]))),
+          } }, t("rep.drop", mine.name[lang]))),
         el("div", {}, el("div", { class: "cap" }, t("rep.notes")),
           textInput(c.notes, (v) => set("notes", v), { placeholder: t("rep.notesPh"), maxLength: 600, disabled: REP.busy, dataset: { k: "notes" } }))),
       el("div", { class: "hint" }, t("rep.hint", t("img.provider." + c.provider), c.model)),
@@ -2067,9 +2066,11 @@ function showMade(tab, x) {
   else Object.assign(AI, { result: x.r, target: x.prompt, image: x.ref, error: "" });
   genWin();
 }
-/** Discards the result shown on tab `tab`, and takes it out of the strip. */
-function dropMade(tab) {
-  const r = tab === "photo" ? GEN.result : AI.result;
+/** Discards the result shown on tab `tab`, and takes it out of the strip; asked first where it is kept nowhere else (a picture is on the photo shelf already, a vector one only once saved). */
+async function dropMade(tab) {
+  const r = tab === "photo" ? GEN.result : AI.result, x = madeOf(tab, r);
+  if (tab !== "photo" && !(x && x.kept && userAssets.has(x.kept)) && !(await askSure({ title: t("ai.discardSure"), body: t("ai.discardBody"), go: t("ai.discard") }))) return;
+  if ((tab === "photo" ? GEN.result : AI.result) !== r) return;   // another shown meanwhile
   GENWIN.made[tab] = GENWIN.made[tab].filter((x) => x.r !== r);
   if (tab === "photo") GEN.result = null; else AI.result = null;
   genWin();
@@ -2415,7 +2416,7 @@ function aiTab() {
   ];
 }
 // ---------- Settings → AI → Cut-out: the way of cutting out, and the BiRefNet models
-const CUTDL = { id: "", done: 0, total: 0, error: "", confirmDrop: "" };   // the download running, if any
+const CUTDL = { id: "", done: 0, total: 0, error: "" };   // the download running, if any
 const mb = (n) => Math.round(n / 1048576);
 if (HOST === "tauri" && globalThis.__TAURI__.event) globalThis.__TAURI__.event.listen("cut-model-progress", (e) => {
   Object.assign(CUTDL, { done: e.payload.done, total: e.payload.total });
@@ -2440,8 +2441,7 @@ async function downloadModel(id) {
   refreshAiPage();
 }
 async function dropModel(id) {
-  if (CUTDL.confirmDrop !== id) { CUTDL.confirmDrop = id; return renderPanel(); }
-  CUTDL.confirmDrop = "";
+  if (!(await askSure({ title: t("cutset.dropSure", t("cutset.engine." + id)), body: t("cutset.dropBody"), go: t("ask.delete") }))) return;
   await invoke("cut_model_delete", { id }).catch(fail);
   await refreshCutModels(); renderPanel();
 }
@@ -2456,7 +2456,7 @@ function cutPane() {
         el("span", {}, el("b", {}, t("cutset.engine." + k)),
           el("small", { id: busy ? "cutdl-" + k : null }, k === "vision" ? t("cutset.builtIn") : busy ? t("cutset.starting") : !m ? t("cutset.unknown") : t(m.have ? "cutset.have" : "cutset.missing", mb(m.bytes))))),
       k !== "vision" && (busy ? el("button", { class: "btn", onclick: () => invoke("cut_model_cancel").catch(fail) }, t("cutset.cancel"))
-        : m && m.have ? el("button", { class: "linkbtn", onclick: () => dropModel(k) }, t(CUTDL.confirmDrop === k ? "cutset.dropSure" : "cutset.drop"))
+        : m && m.have ? el("button", { class: "linkbtn", onclick: () => dropModel(k) }, t("cutset.drop"))
         : el("button", { class: "btn", disabled: !!CUTDL.id, onclick: () => downloadModel(k) }, t("cutset.download"))));
   };
   return [
@@ -2510,9 +2510,9 @@ async function adoptAsset(name, src, id = assetIdFor(src)) {
   await saveAssetRecord(a).catch(fail);
   return id;
 }
-function removeAsset(id) {
+async function removeAsset(id) {
   const inUse = [...S.profiles.flatMap((p) => usedUserAssets(p, null)), ...usedUserAssets(null, S.cover)].includes(id);
-  if (inUse && !confirm(t("msg.assetInUse"))) return;
+  if (!(await askSure({ title: t("assets.removeSure"), body: t(inUse ? "msg.assetInUse" : "assets.removeBody"), go: t("ask.delete") }))) return;
   userAssets.delete(id);
   deleteAssetRecord(id).catch(fail);
   touch({ panel: true, side: true });
@@ -2746,7 +2746,7 @@ function oddsGroup(title, names, group, save, opts = {}) {
   const box = el("div", { class: "ogrp", id },
     el("div", { class: "ogl" }, el("b", {}, title), tip && info(tip), el("span", { class: "grow" }),
       long && el("button", { class: "linkbtn", onclick: () => again(!open) }, open ? t("odds.fold") : t("odds.unfold", names.length)),
-      el("button", { class: "linkbtn", onclick: () => { now = Object.fromEntries(names.map(([k]) => [k, 1 / names.length])); show(); save(now); } }, t("odds.evenBar")),
+      el("button", { class: "linkbtn", onclick: async () => { if (opts.sure && !(await opts.sure("even"))) return; now = Object.fromEntries(names.map(([k]) => [k, 1 / names.length])); show(); save(now); } }, t("odds.evenBar")),
       reset && el("button", { class: "linkbtn", onclick: reset }, t("odds.defaultBar"))),
     bar,
     open && el("div", { class: "olegend" }, parts.map((p) => p.item)),
@@ -2773,7 +2773,10 @@ function lookParts(look, redraw = renderPanel) {
   return [
     extras.length ? extras.map((d) => oddsChance(d.name[lang], partChance(d, r, odds), (v) => keep({ params: { ...(mine().params || {}), [d.key]: v } })))
       : el("div", { class: "hint", style: "margin:0" }, t("odds.noParts")),
-    extras.length > 0 && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { delete S.settings.recipes[look]; persistSettings(); redraw(); } }, t("recipe.reset")),
+    extras.length > 0 && el("button", { class: "btn wide", style: "margin-top:8px", onclick: async () => {
+      if (S.settings.recipes[look] && !(await askSure({ title: t("recipe.resetSure", L.name[lang]), body: t("recipe.resetBody"), go: t("odds.default") }))) return;
+      delete S.settings.recipes[look]; persistSettings(); redraw();
+    } }, t("recipe.reset")),
   ];
 }
 const RECIPE_UI = { open: false };   // whether the Look sheet's box is unfolded
@@ -2833,7 +2836,7 @@ function oddsLooks(sv, layouts, put, reset, again) {
   const out = [
     el("div", { class: "ocap" }, el("span", {}, t("odds.looksCap", LOOK_IDS.length), " ", info(t("odds.lookHint"))), el("span", {}, t("odds.lookShort", RULES.hands.count))),
     el("div", { class: "otools" }, filters, el("span", { class: "grow" }),
-      el("button", { class: "linkbtn", onclick: () => { put(Object.fromEntries(LOOK_IDS.map((k) => [k, 1 / LOOK_IDS.length]))); show(); } }, t("odds.even")),
+      el("button", { class: "linkbtn", onclick: async () => { if (odds().set.look && !(await askSure({ title: t("odds.evenSure", t("dock.look")), body: t("odds.groupBody"), go: t("odds.even") }))) return; put(Object.fromEntries(LOOK_IDS.map((k) => [k, 1 / LOOK_IDS.length]))); show(); } }, t("odds.even")),
       el("button", { class: "linkbtn", onclick: reset }, t("odds.default"))),
     el("div", { class: "olooks" }, list.map(card), !list.length && el("div", { class: "hint" }, t("odds.none"))),
     f === "all" && el("button", { class: "linkbtn ofold", onclick: () => { if (unfolded) ODDS_UI.open.delete("look"); else ODDS_UI.open.add("look"); again(); } }, unfolded ? t("odds.fold") : t("odds.moreLooks", LOOK_IDS.length - list.length)),
@@ -2881,16 +2884,19 @@ function oddsDialog(fresh = true, at = "") {
   const setGroup = (g, v) => { sv.odds = { ...sv.odds, groups: { ...(sv.odds.groups || {}), [g]: v } }; persistSettings(); };
   const dropGroup = (g) => { const groups = { ...(sv.odds.groups || {}) }; delete groups[g]; sv.odds = { ...sv.odds, groups }; persistSettings(); again(); };
   const setChance = (k, v) => { sv.odds = { ...sv.odds, chances: { ...(sv.odds.chances || {}), [k]: v } }; persistSettings(); };
-  const group = (g, names, more = {}) => oddsGroup(t("odds." + g), names, odds.groups[g], (v) => setGroup(g, v), { key: g, reset: () => dropGroup(g), ...more });
+  // Even out and Restore on a group whose chances the user set ask first: what was set would be gone
+  const sure = (g, what, name) => !(sv.odds.groups || {})[g] || askSure({ title: t(what === "even" ? "odds.evenSure" : "odds.defaultSure", name), body: t("odds.groupBody"), go: t(what === "even" ? "odds.even" : "odds.default") });
+  const unset = (g, name) => async () => { if (await sure(g, "default", name)) dropGroup(g); };
+  const group = (g, names, more = {}) => oddsGroup(t("odds." + g), names, odds.groups[g], (v) => setGroup(g, v), { key: g, reset: unset(g, t("odds." + g)), sure: (what) => sure(g, what, t("odds." + g)), ...more });
   const look = ODDS_UI.look && LOOKS[ODDS_UI.look] ? ODDS_UI.look : S.profile.style.look;
   const dlg = el("div", { class: "dlg odds" },
     el("div", { class: "head" },
       el("div", { class: "ttl" }, el("h2", {}, t("odds.title")), el("div", { class: "hint" }, t("odds.sub", RULES.hands.count), " ", info(t("odds.hint")))),
-      el("button", { class: "linkbtn", title: t("odds.reset"), onclick: () => { if (!confirm(t("odds.resetSure"))) return; sv.odds = {}; persistSettings(); again(); } }, t("odds.resetAll")),
+      el("button", { class: "linkbtn", title: t("odds.reset"), onclick: async () => { if (!(await askSure({ title: t("odds.resetSure"), body: t("odds.resetBody"), go: t("odds.resetGo") }))) return; sv.odds = {}; persistSettings(); again(); } }, t("odds.resetAll")),
       el("button", { class: "btn solid", onclick: done }, t("odds.done"))),
     el("div", { class: "ocols" },
       el("div", { class: "ocol" },
-        oddsLooks(sv, layouts, (v) => setGroup("look", v), () => dropGroup("look"), again),
+        oddsLooks(sv, layouts, (v) => setGroup("look", v), unset("look", t("dock.look")), again),
         el("div", { class: "ocard" }, el("div", { class: "ocard-h" }, el("b", {}, t("odds.byLook")), info(t("odds.byLookHint")), el("span", { class: "grow" }),
             select(LOOK_IDS.map((k) => [k, LOOKS[k].name[lang]]), look, (v) => { ODDS_UI.look = v; again(); })),
           el("div", { class: "orows" }, lookParts(look, again)))),
@@ -2985,8 +2991,8 @@ function applyLayout(p, i) {
   toast(t("layouts.applied", layoutName(p, i)));
 }
 /** Deletes layout preset `p` (the i-th), once asked: its chance goes to the others as when set to 0 (dropOption), or, when none has any, the canvas's own is certain again. */
-function deleteLayout(p, i, again) {
-  if (!confirm(t("layouts.deleteSure", layoutName(p, i)))) return;
+async function deleteLayout(p, i, again) {
+  if (!(await askSure({ title: t("layouts.deleteSure", layoutName(p, i)), body: t("layouts.deleteBody"), go: t("ask.delete") }))) return;
   const sv = S.settings.surprise, groups = { ...(sv.odds.groups || {}) };
   if (groups.layout) { const g = dropOption(oddsOf(sv.odds, S.settings.layouts).groups.layout, p.id); if (g) groups.layout = g; else delete groups.layout; }
   sv.odds = { ...sv.odds, groups };
@@ -3355,7 +3361,7 @@ function layoutEditor(p, i, fresh = false) {
         el("div", { class: "hint", style: "margin:0" }, t("layed.blockHint")))].filter(Boolean));
   };
   const back = () => { LAYED.redraw = null; closeModal(); if (S.mode === "edit" && S.tab.edit === "layout") renderPanel(); };   // back to the Layout sheet, where the presets are
-  const cancel = () => { if (E.dirty && !confirm(t("layed.discard"))) return; back(); };
+  const cancel = async () => { if (E.dirty && !(await askSure({ title: t("layed.discard"), body: t("layed.discardBody"), go: t("layed.discardGo") }))) return; back(); };
   const save = () => {
     const kept = normalizeLayouts([{ ...E.p, custom: E.custom, parts: takeParts(layers, keys(), p.parts, c.id), extras: takeExtras(layers, E.extras, keys(), p.extras || []), id: p.id, name: name.value }])[0];
     S.settings.layouts = fresh ? [...S.settings.layouts, kept] : S.settings.layouts.map((x) => (x.id === p.id ? kept : x)); persistSettings();
@@ -3941,6 +3947,14 @@ function logoControls() {
 const counterText = (P) => [P.brand.unit, P.categories.length > 1 ? `${String(catIndex() + 1).padStart(2, "0")} / ${String(P.categories.length).padStart(2, "0")}` : ""].filter(Boolean).join(" ");
 /** The brand row's preview: the brand's name, this channel's code on its colour, the number. */
 const brandPreview = (P) => [P.brand.name, cat().code && el("i", { style: `background:${cat().color};color:${inkOn(cat().color)}` }, cat().code), el("b", {}, counterText(P))];
+/** Adds a channel to the profile, "New channel", in the next colour and graphic; returns it. Settings → Brand's card to add one, and the top bar's channel list. */
+function addChannel() {
+  const P = S.profile, palette = ["#ffb703", "#fb5607", "#3a86ff", "#a855f7", "#06d6a0", "#ff5fa2"];
+  const c = { id: uid(), name: t("cat.new"), sub: "", code: "", color: palette[P.categories.length % palette.length], graphic: { kind: "graphic", id: GRAPHICS[P.categories.length % GRAPHICS.length].id, labels: [], stamp: "" } };
+  P.categories.push(c);
+  touch({ profile: true, cover: true, panel: true, side: true });
+  return c;
+}
 /**
  * Settings → Brand: the profile's name, the brand's name and logo, the number on the brand row (with a preview); then
  * the channels, a card each — its grip to drag it among the others (chDrag), colour, name, sub-name, code, graphic, ⋯
@@ -3955,16 +3969,20 @@ function brandTab() {
     // working on a channel shows that channel on the canvas
     const show = (e) => { if (!e.target.closest(".more, .chmenu, .grip") && S.cover.catId !== c.id) switchChannel(c.id); };   // not its ⋯ and menu, nor its grip: a re-render would take the click, or the drag
     const move = (to) => { P.categories.splice(to, 0, P.categories.splice(i, 1)[0]); SET_UI.menu = ""; struct(); };   // to place `to`: the ⋯ menu's Up and Down, and the card dragged by its grip
-    const remove = () => {
+    const remove = async () => {
       SET_UI.menu = "";
       if (P.categories.length < 2) { renderPanel(); return toast(t("msg.lastCategory")); }
-      const [gone] = P.categories.splice(i, 1);
+      renderPanel();   // its ⋯ menu shut while asked
+      if (!(await askSure({ title: t("cat.removeSure", c.name || c.code || "—"), body: t("cat.removeBody"), go: t("ask.delete") }))) return;
+      const at = P.categories.indexOf(c);
+      if (at < 0 || P !== S.profile || P.categories.length < 2) return;   // gone meanwhile
+      const [gone] = P.categories.splice(at, 1);
       delete S.covers[gone.id]; files.remove(coverPath(P.id, gone.id)).catch(() => null);   // its cover goes with it
       if (S.cover.catId === gone.id) { S.settings.channels[P.id] = P.categories[0].id; persistSettings(); setCover(coverFor(P.categories[0].id)); loadPhotos(pidsOf(S.cover)).then(() => queueDraw()); }
       else setCover(normalizeCover(S.cover, P));
       struct();
     };
-    return el("div", { class: "chcard" + (here ? " here" : ""), style: `--c:${c.color}`, onfocusin: show, onpointerdown: show, oninput: show },
+    return el("div", { class: "chcard" + (here ? " here" : ""), style: `--c:${c.color}`, dataset: { id: c.id }, onfocusin: show, onpointerdown: show, oninput: show },
       el("div", { class: "chrow" },
         P.categories.length > 1 && el("span", { class: "grip", title: t("cat.drag"), "aria-hidden": "true", onpointerdown: (e) => chDrag(e, move) }, "⋮⋮"),   // the ⋯ menu's Up and Down do it from the keyboard
         el("label", { class: "swc", title: t("cat.color") }, el("input", { type: "color", value: c.color, oninput: (e) => { c.color = e.target.value; e.target.closest(".chcard").style.setProperty("--c", c.color); document.documentElement.style.setProperty("--acc", c.color); touch({ profile: true }); } })),
@@ -3987,7 +4005,7 @@ function brandTab() {
   return [
     el("div", { class: "sh" }, el("b", {}, t("tab.brand")), el("span", {}, t("brand.pageSub"))),
     el("div", { class: "fields3" },
-      field("brand.profileName", "", textInput(P.name, (v) => { P.name = v; touch({ profile: true }); later("top", 600, () => { syncTop(); syncTabs(); }); })),
+      field("brand.profileName", "", textInput(P.name, (v) => { P.name = v; touch({ profile: true }); later("top", 600, () => { syncTop(); syncTabs(); }); }, { id: "prof-name" })),
       field("brand.name", t("brand.nameSub"), textInput(P.brand.name, (v) => { P.brand.name = v; touch({ profile: true }); redo(); })),
       field("brand.logo", t("brand.logoSub"), logoControls())),
     el("div", { class: "scard counter" },
@@ -3998,11 +4016,7 @@ function brandTab() {
       P.brand.counter && [el("span", { class: "lab" }, t("brand.preview")), preview]),
     el("div", { class: "cap" }, t("brand.channelsN", P.categories.length), el("small", {}, [P.categories.length > 1 && t("brand.channelsDrag"), t("brand.channelsSub")].filter(Boolean).join(" · "))),
     el("div", { class: "chgrid" }, P.categories.map(card),
-      el("button", { class: "chadd", onclick: () => {
-        const palette = ["#ffb703", "#fb5607", "#3a86ff", "#a855f7", "#06d6a0", "#ff5fa2"];
-        P.categories.push({ id: uid(), name: t("cat.new"), sub: "", code: "", color: palette[P.categories.length % palette.length], graphic: { kind: "graphic", id: GRAPHICS[P.categories.length % GRAPHICS.length].id, labels: [], stamp: "" } });
-        struct();
-      } }, el("b", {}, t("brand.add")), el("small", {}, t("brand.addSub")))),
+      el("button", { class: "chadd", onclick: () => addChannel() }, el("b", {}, t("brand.add")), el("small", {}, t("brand.addSub")))),
   ];
 }
 /**
@@ -6529,6 +6543,42 @@ function closeModal() { const m = $("modal"); m.hidden = true; m.replaceChildren
   m.addEventListener("pointerdown", (e) => { fromBackdrop = e.target === m; });
   m.addEventListener("click", (e) => { if (fromBackdrop && e.target === m && !m.dataset.sticky) (m.onDismiss || closeModal)(); });
 }
+/**
+ * Asks before something is done that cannot be taken back, and resolves true when the user says yes: `title`, the
+ * question; `body`, what it means (optional); `go`, the confirm button's words, red unless `danger` is false. Cancel,
+ * Esc and a click beside it answer no; the safe choice has the focus (the confirm button where `danger` is false), so
+ * Enter, which presses the button with the focus, says no unless the user moves to the other (Tab, kept within the two).
+ * A layer of its own (#ask), over whatever is open — Settings, a dialog in #modal, the layout editor — which stays as it
+ * was beneath. Never the browser's own confirm, alert or prompt: in the app's web view they do not wait for the
+ * answer, so what one guarded was done before the user had said anything (a test in tests/logic.test.mjs keeps them out).
+ */
+const ASK = { answer: null };
+function askSure({ title, body = "", go, danger = true }) {
+  if (ASK.answer) ASK.answer(false);   // one question at a time
+  return new Promise((resolve) => {
+    const box = $("ask"), back = document.activeElement;
+    const answer = (yes) => {
+      if (ASK.answer !== answer) return;
+      ASK.answer = null; box.hidden = true; box.replaceChildren();
+      if (back && back !== document.body && back.isConnected) back.focus({ preventScroll: true });   // the focus back where it was, if that is still there
+      resolve(yes);
+    };
+    ASK.answer = answer;
+    const no = el("button", { class: "btn wide", onclick: () => answer(false) }, t("exp.cancel"));
+    const yes = el("button", { class: "btn wide " + (danger ? "danger" : "solid"), onclick: () => answer(true) }, go);
+    box.replaceChildren(el("div", { class: "dlg", role: "alertdialog", "aria-modal": "true", "aria-label": title },
+      el("h2", {}, title), body && el("div", { class: "hint" }, body), el("div", { class: "askacts" }, no, yes)));
+    box.hidden = false;
+    (danger ? no : yes).focus({ preventScroll: true });
+  });
+}
+// a click beside the question is its no (pressed and let go there, as for #modal)
+{
+  const box = $("ask");
+  let fromBackdrop = false;
+  box.addEventListener("pointerdown", (e) => { fromBackdrop = e.target === box; });
+  box.addEventListener("click", (e) => { if (fromBackdrop && e.target === box && ASK.answer) ASK.answer(false); });
+}
 /** Whether the Export window ticks size z (settings.exportSizes keeps, by profile, the sizes left unticked: one not named is ticked). */
 const ticked = (z) => (S.settings.exportSizes[S.profile.id] || {})[sizeKey(z)] !== false;
 /** Ticks the profile's sizes keyed `keys` in the Export window and unticks the others (a size the profile no longer has is let go). */
@@ -6664,8 +6714,8 @@ const profileActions = {
   duplicate: () => addProfile({ ...JSON.parse(JSON.stringify(S.profile)), name: `${S.profile.name} ${t("msg.copy")}` }),
   async delete() {
     if (S.profiles.length < 2) return toast(t("msg.lastProfile"));
-    if (!confirm(t("msg.confirmDelete", S.profile.name))) return;
     const gone = S.profile;
+    if (!(await askSure({ title: t("msg.confirmDelete", gone.name), body: t("msg.confirmDeleteBody"), go: t("ask.delete") })) || gone !== S.profile) return;
     await switchProfile(S.profiles.find((p) => p !== gone).id);   // first: when the other one cannot be shown, nothing is deleted
     S.profiles = S.profiles.filter((p) => p !== gone);
     await deleteProfile(gone).catch(fail);
@@ -7051,8 +7101,36 @@ const SHELL_ICONS = {
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
 };
 const ico = (k, px = 20) => el("span", { class: "ico", style: `display:inline-grid;width:${px}px;height:${px}px`, innerHTML: `<svg viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SHELL_ICONS[k]}</svg>` });
+/** The top bar's lists' last entry, after a line: making a new profile, or channel (newFromTop). */
+const NEW_ONE = "+new";
 /**
- * The top bar: the profile and the channel; undo and redo; Surprise me, Export, and the ⋯ menu (the cover's
+ * A new profile (as Settings' New does) or channel (as its card to add one does, and the canvas on it), from the top
+ * bar's lists; then Settings opens at Brand & channels with its name chosen, to be typed over. The list goes back to
+ * what is shown first, so it never stays on the entry, whatever comes of it.
+ */
+async function newFromTop(kind) {
+  syncTop();
+  if (kind === "profile") await profileActions.new();
+  else await switchChannel(addChannel().id);
+  S.tab.setup = "brand"; setMode("setup");
+  const name = kind === "profile" ? $("prof-name") : $("setpanel").querySelector(`.chcard[data-id="${S.cover.catId}"] .chname`);
+  if (name) { name.scrollIntoView({ block: "center" }); name.focus({ preventScroll: true }); name.select(); }
+}
+/**
+ * A list of the top bar kept as wide as its widest profile or channel, as it was before it ended in making a new one
+ * (an entry longer than most names, which would leave a gap after the name shown): measured on a hidden copy of it.
+ */
+function fitList(s) {
+  const probe = el("select", { "aria-hidden": "true", tabIndex: -1, style: "position:absolute;visibility:hidden;pointer-events:none" }, [...s.options].filter((o) => o.value !== NEW_ONE).map((o) => el("option", {}, o.text)));
+  s.after(probe); s.style.width = `${probe.offsetWidth}px`; probe.remove();
+}
+/**
+ * A key on a closed list of the top bar: where the arrows change the choice at once (Windows, Linux; on a Mac they
+ * open the list), they stop at the last profile or channel rather than step onto making a new one.
+ */
+const stayOff = (e) => { if (MOD_KEY !== "⌘" && /^(ArrowDown|ArrowRight|PageDown|End)$/.test(e.key) && e.target.selectedIndex >= e.target.options.length - 2) e.preventDefault(); };
+/**
+ * The top bar: the profile and the channel (each list ending in making a new one); undo and redo; Surprise me, Export, and the ⋯ menu (the cover's
  * default design and Clear, the profile's settings, project files, the glass, the language).
  */
 function syncTop() {
@@ -7062,15 +7140,18 @@ function syncTop() {
     el("h1", {}, "SMEDCOVER"),
     el("div", { class: "sep" }),
     el("div", { class: "crumb" },
-      el("select", { title: t("top.profile"), onchange: (e) => switchProfile(e.target.value).catch((err) => { fail(err); syncTop(); }) }, S.profiles.map((p) => el("option", { value: p.id, selected: p.id === S.profile.id }, p.name))),
+      el("select", { title: t("top.profile"), onkeydown: stayOff, onchange: (e) => (e.target.value === NEW_ONE ? newFromTop("profile") : switchProfile(e.target.value)).catch((err) => { fail(err); syncTop(); }) },
+        S.profiles.map((p) => el("option", { value: p.id, selected: p.id === S.profile.id }, p.name)), el("hr"), el("option", { value: NEW_ONE }, t("top.newProfile"))),
       el("span", {}, "/"), el("span", { class: "dot" }),
-      S.cover && el("select", { title: t("top.channel"), onchange: (e) => switchChannel(e.target.value) }, S.profile.categories.map((k) => el("option", { value: k.id, selected: k.id === S.cover.catId }, k.name || k.code || "—")))),
+      S.cover && el("select", { title: t("top.channel"), onkeydown: stayOff, onchange: (e) => (e.target.value === NEW_ONE ? newFromTop("channel").catch((err) => { fail(err); syncTop(); }) : switchChannel(e.target.value)) },
+        S.profile.categories.map((k) => el("option", { value: k.id, selected: k.id === S.cover.catId }, k.name || k.code || "—")), el("hr"), el("option", { value: NEW_ONE }, t("top.newChannel")))),
     el("div", { class: "spacer" }),
     el("div", { class: "grp" }, step("top.undo", "undo", -1, S.histIdx <= 0), step("top.redo", "redo", 1, S.histIdx >= S.hist.length - 1), el("span", {}, t("top.saved"))),
     el("div", { class: "spacer" }),
     el("button", { class: "btn cta glassy deal-btn", title: t("top.surpriseHint"), disabled: SURPRISE.busy, onclick: surprise }, ico("spark", 18), t(SURPRISE.busy ? "top.surpriseBusy" : "top.surprise"), el("kbd", {}, t("top.space"))),
     el("button", { class: "btn cta solid", title: t("top.exportTip", MOD_KEY + "E"), onclick: exportDialog }, ico("download", 18), t("top.export")),
     el("button", { class: "ibtn" + (MENU.open ? " on" : ""), id: "morebtn", title: t("top.more"), "aria-label": t("top.more"), "aria-haspopup": "menu", "aria-expanded": String(MENU.open), onclick: toggleMenu }, ico("more", 18)));
+  for (const s of $("top").querySelectorAll(".crumb select")) fitList(s);
   for (const b of document.querySelectorAll("#winbtns button")) b.setAttribute("aria-label", b.title = t("top.win." + b.className));   // drawn on Windows and Linux (ownTitleBar)
   document.body.dataset.drop = t("msg.dropHere");
   if (MENU.open) renderMenu();
@@ -7103,7 +7184,7 @@ function renderMenu() {
     item(t("style.loadDesign"), t("menu.loadDesignSub"), loadDesign),
     item(t("menu.clear"), t("top.clearTip"), clearDialog, "danger"),
     el("div", { class: "sep" }),
-    el("div", { class: "mg" }, t("menu.profile", S.profile.name)),
+    el("div", { class: "mg" }, t("menu.profile")),   // what is under it opens Settings
     page("brand", counted("menu.channels", S.profile.categories.length)), page("sizes", counted("menu.sizes", S.profile.sizes.length)), page("ai", AI_SHOW.menu()),
     others.length > 0 && el("button", { class: "mi", role: "menuitem", "aria-expanded": String(!!MENU.profiles), onclick: () => { MENU.profiles = !MENU.profiles; renderMenu(); } },
       el("span", { class: "mt" }, el("span", {}, t("menu.switch"))), el("span", { class: "chev" + (MENU.profiles ? " open" : "") })),
@@ -7363,6 +7444,14 @@ addEventListener("keydown", (e) => {
   const cmd = (MOD_KEY === "⌘" ? e.metaKey : e.ctrlKey) && !e.shiftKey && !e.altKey;
   const a = document.activeElement, typing = /^(INPUT|TEXTAREA|SELECT)$/.test(a && a.tagName);
   if (cmd && (key === "s" || key === "o")) e.preventDefault();   // never the browser's own Save or Open, wherever they do nothing here
+  if (ASK.answer) {   // a question asked (askSure): Esc says no, Tab goes between its two buttons, Enter presses the one with the focus (the button's own); no key reaches what lies under it
+    if (e.repeat) return e.preventDefault();   // a key held from before it was asked answers nothing
+    if (key === "escape") { e.preventDefault(); return ASK.answer(false); }
+    const bs = [...$("ask").querySelectorAll("button")], i = bs.indexOf(a);
+    if (key === "tab") { e.preventDefault(); bs[(i + (e.shiftKey ? -1 : 1) + bs.length) % bs.length].focus(); }
+    else if (i < 0) e.preventDefault();   // the focus not on either (a click on its words): no key acts
+    return;
+  }
   if (key === "escape" && MENU.open) return closeMenu();
   const m = $("modal");   // a dialog open: Escape is its cancel (but in a text being typed), and no key reaches what lies under it
   if (!m.hidden) {
@@ -7553,8 +7642,9 @@ async function libraryFromFiles() {
   S.library = pids.map((pid) => ({ pid, name: "", kind: "upload", at: 0 }));
   persistLibrary();
 }
-/** Takes a picture out of the library; covers that use it keep it. */
-function dropPicture(pid) {
+/** Takes a picture out of the library, once asked; covers that use it keep it (one no cover uses is deleted at the next start, prunePhotos). */
+async function dropPicture(pid) {
+  if (!(await askSure({ title: t("lib.removeSure"), body: t("lib.removeBody"), go: t("lib.removeGo") }))) return;
   S.library = S.library.filter((e) => e.pid !== pid); persistLibrary();
   toast(t("lib.removed")); renderPanel();
 }

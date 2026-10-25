@@ -321,6 +321,18 @@ test("every interface string has both languages", async () => {
   for (const lang of ["zh", "en"]) { setLang(lang); for (const k of keys()) assert.ok(t(k).trim().length > 0, `${lang} ${k}`); }
 });
 
+test("no native confirm, alert or prompt in the UI: in the app's web view they do not wait for the answer (askSure in app.js asks instead)", async () => {
+  const { readdir, readFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const root = new URL("../ui/", import.meta.url).pathname;
+  const files = (await readdir(root, { recursive: true })).filter((f) => /\.(m?js|html)$/.test(f));
+  const call = /(?<![\w$.])(confirm|alert|prompt)\(/, named = /\b(window|globalThis|self|top|parent)\s*(\.|\[\s*["'`])\s*(confirm|alert|prompt)\b/;
+  const found = [];
+  for (const f of files) (await readFile(join(root, f), "utf8")).split("\n").forEach((line, i) => { if (call.test(line) || named.test(line)) found.push(`ui/${f}:${i + 1}: ${line.trim().slice(0, 120)}`); });
+  assert.ok(files.includes(join("js", "app.js")), "the UI's files were read");
+  assert.deepEqual(found, []);
+});
+
 test("size captions: custom name first, then the platforms the ratio is for and the ratio, never pixels", () => {
   assert.equal(ratioText(1920, 1080), "16:9");
   assert.equal(ratioText(1200, 1600), "3:4");

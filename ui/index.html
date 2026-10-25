@@ -40,7 +40,7 @@
   html.ownbar header{padding-left:96px}
   @media(max-width:1200px){html.ownbar header .grp>span{display:none}}   /* "Saved as you go" gives the buttons' room back */
   #winbar{position:fixed;left:0;right:0;top:0;height:22px;z-index:45;display:none}
-  body:has(#settings:not([hidden])) #winbar,body:has(#modal:not([hidden])) #winbar,body:has(#deal:not([hidden])) #winbar{display:block}
+  body:has(#settings:not([hidden])) #winbar,body:has(#modal:not([hidden])) #winbar,body:has(#ask:not([hidden])) #winbar,body:has(#deal:not([hidden])) #winbar{display:block}
   #winbtns{position:fixed;left:30px;top:32px;z-index:46;display:flex;gap:6px}
   html:not(.ownbar) #winbtns{display:none}   /* full screen */
   #winbtns button{width:14px;height:16px;padding:0;border:0;background:none;display:grid;place-items:center}
@@ -727,19 +727,28 @@
   body.dealing #deal .deal-undo,body.dealing #deal .deal-bar button{opacity:.5}
   @keyframes dealIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
   @media (prefers-reduced-motion:reduce){#deal figure.hand{animation:none}}
-  #modal{position:fixed;inset:0;background:rgba(5,5,10,.55);display:grid;place-items:center;z-index:40}
-  #modal[hidden]{display:none}
-  #modal .dlg{width:min(540px,92vw);max-height:88vh;overflow:auto;background-color:rgba(26,26,36,.78);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid rgba(255,255,255,.2);border-radius:24px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 40px 110px rgba(0,0,0,.6);padding:26px;display:grid;gap:14px}
-  html.solid #modal .dlg{background-color:var(--solid2);-webkit-backdrop-filter:none;backdrop-filter:none}
+  #modal,#ask{position:fixed;inset:0;background:rgba(5,5,10,.55);display:grid;place-items:center;z-index:40}
+  #modal[hidden],#ask[hidden]{display:none}
+  #modal .dlg,#ask .dlg{width:min(540px,92vw);max-height:88vh;overflow:auto;background-color:rgba(26,26,36,.78);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid rgba(255,255,255,.2);border-radius:24px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 40px 110px rgba(0,0,0,.6);padding:26px;display:grid;gap:14px}
+  html.solid #modal .dlg,html.solid #ask .dlg{background-color:var(--solid2);-webkit-backdrop-filter:none;backdrop-filter:none}
   #modal .bar{height:10px;border-radius:5px;overflow:hidden;background:rgba(255,255,255,.12)}
   #modal .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .15s}
   #modal .count{font:600 15px var(--mono)}
-  #modal h2{font:900 22px var(--ui);letter-spacing:.02em;margin:0}
+  #modal h2,#ask h2{font:900 22px var(--ui);letter-spacing:.02em;margin:0}
+  /* a question asked before something is done that cannot be taken back (askSure in app.js): a layer of its own over
+     Settings, a dialog or the layout editor; the safe choice has the focus, a destructive answer is red */
+  #ask{z-index:44}
+  #ask .dlg{width:min(440px,92vw)}
+  #ask .dlg .hint{margin:0;font-size:13px;opacity:.8}
+  #ask .askacts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px}
+  #ask .btn:focus-visible,#ask .btn:focus{outline:2px solid #fff;outline-offset:2px}
+  #ask .btn.danger{background:#e5484d;color:#fff;border-color:transparent;font-weight:700}
+  #ask .btn.danger:hover{background:#ec5d61;border-color:transparent}
 
   /* Settings: a window over the editor, its pages on the left (what was the Setup mode) */
   #settings{position:fixed;inset:0;z-index:30;display:grid;place-items:center;background:rgba(5,5,10,.45)}
   #settings[hidden]{display:none}
-  html.ownbar #settings,html.ownbar #modal{padding-top:44px}   /* the window's buttons clear of its top left corner */
+  html.ownbar #settings,html.ownbar #modal,html.ownbar #ask{padding-top:44px}   /* the window's buttons clear of its top left corner */
   html.ownbar #settings .win{height:min(820px,calc(100vh - 104px))}
   #settings .win{width:min(1240px,calc(100vw - 48px));height:min(820px,calc(100vh - 48px));border-radius:28px;display:flex;overflow:hidden;background-color:rgba(22,22,30,.55);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 40px 120px rgba(0,0,0,.6)}
   html.solid #settings .win{background-color:var(--solid)}
@@ -1250,6 +1259,7 @@
 <div id="menu" class="glass" hidden></div>
 <div id="toast"></div>
 <div id="modal" hidden></div>
+<div id="ask" hidden></div>
 <input type="file" id="file" hidden>
 <script type="module" src="js/app.js"></script>
 </body>
