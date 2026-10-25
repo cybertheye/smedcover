@@ -517,6 +517,13 @@ test("a change does what the editor does, where it is aimed: the window switched
   assert.equal(title.font, "Helvetica"); assert.match(font.warnings[0], /has no Chinese/); assert.equal(JSON.stringify(S.settings.recentFonts), recent);
   await cmds.set_layer_font({ layer: "title", vertical: true });
   assert.equal(title.font, "Helvetica"); assert.equal(title.vertical, true);
+  // lines asked for where the look sets the title in columns of itself (the editor greys Lines and Columns out there): done, and said
+  const lookWas = S.profile.style.look, columnsWas = api.inColumns;
+  S.profile.style.look = "songke"; api.inColumns = (L) => L.type === "title" || L.vertical === true;
+  const lines = (await cmds.set_layer_font({ layer: "title", vertical: false })).structuredContent;
+  assert.equal(title.vertical, false);
+  assert.ok(lines.warnings.some((w) => /look sets the title and the subtitle in columns itself \(its setting "vertical"\).*set_look with params \{"vertical": 0\}/.test(w)), JSON.stringify(lines.warnings));
+  S.profile.style.look = lookWas; api.inColumns = columnsWas; title.vertical = true;
   // a bend takes away a perspective dragged by hand; in columns it is kept for later, and said
   title.reshape = [[0.1, 0]];
   const bent = (await cmds.set_layer_bend({ layer: "title", bend: "arc", amount: 1.5 })).structuredContent;
@@ -528,6 +535,11 @@ test("a change does what the editor does, where it is aimed: the window switched
   assert.deepEqual([text.ink, text.hi, "plateInk" in text, tx.ink], ["#ff0000", "#00ff00", false, "#ff0000"]);
   await cmds.set_layer_color({ layer: sticker.id, tint: false });
   assert.equal(sticker.tint, false);
+  await cmds.set_layer_color({ layer: sticker.id, tint: true });
+  await cmds.set_layer_color({ layer: sticker.id, ink: "#00AA00" });
+  assert.deepEqual([sticker.ink, sticker.tint], ["#00aa00", false], "a colour of its own, as Colour → Custom: not the channel's");
+  await cmds.set_layer_color({ layer: sticker.id, ink: "auto" });
+  assert.deepEqual(["ink" in sticker, sticker.tint], [false, false], "its own colours again");
   const plate = (await cmds.set_layer_color({ layer: "title", plateInk: "#123456" })).structuredContent;
   assert.match(plate.warnings[0], /once there is a plate/);
   // shown, left out, kept to some sizes
@@ -543,8 +555,19 @@ test("a change does what the editor does, where it is aimed: the window switched
   assert.equal(S.cover.layers.at(-1).id, top.id); assert.deepEqual([top.place.x, top.place.y, top.place.s], [0.2, 0.3, 0.5]); assert.equal(S.layerId, top.id);
   const st = (await cmds.add_layer({ kind: "asset", asset: { kind: "sticker", id: "burst" }, above: "title" })).structuredContent.layer;
   assert.equal(S.cover.layers.findIndex((l) => l.id === st.id), S.cover.layers.findIndex((l) => l.id === "title") + 1); assert.equal(st.place.s, 0.3);
+  const stuck = S.cover.layers.find((l) => l.id === st.id);
+  stuck.t.all = { ...stuck.t.all, x: 0.9, s: 2 };
+  await cmds.place_layer({ layer: st.id, reset: true });
+  assert.deepEqual([stuck.t.all.x, stuck.t.all.s], [0.5, 0.3], "put back in the middle, at the size a sticker is put on at");
   const cp = (await cmds.add_layer({ kind: "copy", of: "subtitle" })).structuredContent.layer;
   assert.equal(cp.kind, "copy"); assert.ok(calls.some((c) => c[0] === "duplicateLayer" && c[1] === "subtitle"));
+  // a copy of a layer tuned at the size on the canvas, put where it is asked: there too, its tunings of place left behind
+  const sub = S.cover.layers.find((l) => l.id === "subtitle"), r4 = (v) => Math.round(v * 1e4) / 1e4;
+  sub.t.by[S.sel] = { dx: 300, dy: 40, s: 1.6, r: 5, kx: 1, ky: 1 };
+  const there = (await cmds.add_layer({ kind: "copy", of: "subtitle", at: { x: 0.1, y: -0.05 }, scale: 0.8 })).structuredContent.layer;
+  const copied = S.cover.layers.find((l) => l.id === there.id), at = placeAt(copied, api.frame());
+  assert.deepEqual([at.x, at.y, at.s, at.r].map(r4), [0.1, -0.05, 0.8, 5], "where it was asked, at the size it was tuned at too; its turn kept");
+  delete sub.t.by[S.sel];
   const solid = (await cmds.add_layer({ kind: "solid" })).structuredContent.layer;
   assert.equal(solid.color, "#aabbcc", "the channel colour");
   // the stack

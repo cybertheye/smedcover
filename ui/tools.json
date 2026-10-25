@@ -977,7 +977,7 @@
     {
       "name": "place_layer",
       "title": "Place a layer",
-      "description": "Moves, scales, turns or stretches a layer: absolute (x, y, scale, rotate, stretchX, stretchY), relative (move {dx, dy}, scaleBy, rotateBy), or reset: true for where the layout puts it. All are as the layer is at `size` (the one on the canvas when left out, which the window then shows): for a layer that was added x, y is its centre as shares of the canvas (0.5, 0.5 the middle); for a layout part or a copy of one, its offset from its place in the layout, likewise in shares of the canvas; scale is get_cover's place.s times what that size adds (a sticker is put on at 0.3, text at 0.35, a solid at 1, a layout part at 1). scope says which sizes the change reaches (all by default; the others move as far across their own canvas). A cut-out linked to a photo goes where its photo goes (move moves both; x and y are refused), its scale, turn and stretch its own. Not for bg, the frame or a locked layer, nor turning or stretching a photo that fills the canvas. One undo step. Returns its placement at `size` in the same terms, and its box there as render_preview gives boxes.",
+      "description": "Moves, scales, turns or stretches a layer: absolute (x, y, scale, rotate, stretchX, stretchY), relative (move {dx, dy}, scaleBy, rotateBy), or reset: true for where it was put on (see reset). All are as the layer is at `size` (the one on the canvas when left out, which the window then shows): for a layer that was added x, y is its centre as shares of the canvas (0.5, 0.5 the middle); for a layout part or a copy of one, its offset from its place in the layout, likewise in shares of the canvas; for a cut-out or a cropped photo, the centre of the whole picture's frame, not of the part that shows (box says where that landed); scale is get_cover's place.s times what that size adds (a sticker is put on at 0.3, text at 0.35, a solid at 1, a layout part at 1). scope says which sizes the change reaches (all by default; the others move as far across their own canvas). A cut-out linked to a photo goes where its photo goes (move moves both; x and y are refused), its scale, turn and stretch its own. Not for bg, the frame or a locked layer, nor turning or stretching a photo that fills the canvas. One undo step. Returns its placement at `size` in the same terms, and its box there as render_preview gives boxes.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1078,7 +1078,7 @@
           },
           "reset": {
             "type": "boolean",
-            "description": "Back to where the layout puts it, at the sizes scope reaches."
+            "description": "Back to where it was put on, at the sizes scope reaches: a layout part where the layout puts it, a layer that was added in the middle at the scale it is put on at, a photo filling the canvas filling it; a linked cut-out back over its photo at every size."
           }
         },
         "required": [
@@ -2061,7 +2061,7 @@
     {
       "name": "add_layer",
       "title": "Add a layer",
-      "description": "Adds a layer just above `above` (a layer id, or \"top\"; by default the top, and a copy just above what it copies): kind \"text\" (its words in text; *highlight* and \\n as in a title), \"solid\" (a block of colour the canvas's size; color, by default the channel colour), \"asset\" (a sticker, a graphic or the user's own: asset {kind, id} from list_library) or \"copy\" (a copy of layer `of`: a layout part other than bg and frame, or a layer that was added). at {x, y} puts its centre there (shares of the canvas; for a copy of a layout part, its offset, as place_layer has it), scale sets its size (as place_layer's scale). The new layer is selected. One undo step. Returns it as get_cover lists layers.",
+      "description": "Adds a layer just above `above` (a layer id, or \"top\"; by default the top, and a copy just above what it copies): kind \"text\" (its words in text; *highlight* and \\n as in a title), \"solid\" (a block of colour the canvas's size; color, by default the channel colour), \"asset\" (a sticker, a graphic or the user's own: asset {kind, id} from list_library) or \"copy\" (a copy of layer `of`: a layout part other than bg and frame, or a layer that was added). at {x, y} puts it there at every size, as place_layer's x and y in scope all (its centre as shares of the canvas; for a copy of a layout part, its offset from where the layout puts that part): a copy of a layer tuned at some sizes leaves those tunings of its place behind. scale sets its size at every size likewise (place_layer's scale). The new layer is selected. One undo step. Returns it as get_cover lists layers.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2337,7 +2337,7 @@
     {
       "name": "reorder_layer",
       "title": "Reorder a layer",
-      "description": "Moves a layer in the stack: to \"top\", \"bottom\", \"up\" or \"down\" one (past the next layer of this cover), or to just above layer `above`. Moving the layout's own parts orders them so in the profile's design too. One undo step. Returns its place in the stack (0 the bottom) and the layers' ids in order.",
+      "description": "Moves a layer in the stack: to \"top\", \"bottom\", or just above layer `above` (\"top\": the topmost), as a row dropped in the layer list — which orders the layout's own parts so in the profile's design too —; or \"up\" or \"down\" one, past the next layer of this cover, as its ▲ and ▼ do (this cover alone). One undo step. Returns its place in the stack (0 the bottom) and the layers' ids in order.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2368,7 +2368,7 @@
           },
           "above": {
             "type": "string",
-            "description": "The layer it goes just above."
+            "description": "The layer it goes just above, or \"top\"."
           }
         },
         "required": [

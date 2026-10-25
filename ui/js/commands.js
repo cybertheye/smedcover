@@ -308,8 +308,14 @@ export function makeCommands(api) {
         : L.of && moves ? `"${L.id}" is a cut-out linked to photo "${L.of}" and goes where it goes: place that, or move both with "move".` : null) });
       const scope = args.scope ?? "all", warnings = [];
       if (args.reset) {
-        if (L.of) L.t = api.alignedT(api.owner(L));   // a cut-out back over its photo, as Realign does
-        else resetPlacement(L, scope, f.key, f.catId, f.group.map((g) => g.key));   // as Reset under the layer's properties
+        if (L.of) {   // a cut-out back over its photo, as Realign does: at every size
+          L.t = api.alignedT(api.owner(L));
+          if (scope !== "all") warnings.push(`"${L.id}" is a linked cut-out: it went back over its photo at every size, whatever the scope.`);
+        } else {
+          resetPlacement(L, scope, f.key, f.catId, f.group.map((g) => g.key));   // as Reset under the layer's properties
+          if (scope === "all" && fillsCanvas(L)) L.t.all.s = 1;   // a photo filling the canvas fills it still
+          else if (scope === "all" && L.type === "asset" && L.ref.kind === "sticker") L.t.all.s = 0.3;   // at the size a sticker is put on at (addAsset)
+        }
         api.touch({ cover: true, side: true });
       } else {
         if (L.crop || (L.type === "photo" && L.cut)) api.drawnNow();   // scaled and turned about what shows of it, as it is drawn now
@@ -321,6 +327,7 @@ export function makeCommands(api) {
           const now = placeAt(L, f);
           for (const [k, v] of Object.entries(want)) if (Math.abs(now[k] - v) > 1e-6) warnings.push(`"${said[k]}" came to ${r4(now[k])}, not ${r4(v)}: as far as it goes${scope === "all" ? "" : ` at the sizes scope "${scope}" reaches`}.`);
         }
+        api.touch({ cover: true, side: true });   // as a drag let go of, or a nudge of the arrow keys: the layer list and the drawer follow
       }
       const cv = api.drawnNow(), box = boxesOf(cv._hits, cv._virtual || [f.vw, f.vh]).find((b) => b.id === L.id) || null;
       if (!box) warnings.push(`"${L.id}" is not drawn at ${f.key} (hidden, left out, or kept to other sizes).`);
@@ -354,6 +361,10 @@ export function makeCommands(api) {
       const { L } = await aim(args, { types: LETTERED, what: SAID.lettering }), warnings = [];
       if (font) L.font = font; else if (font === "") delete L.font;   // as the font menu (fontControl), but not put among the recent fonts
       if (args.vertical !== undefined) L.vertical = args.vertical;   // as Lines and Columns
+      if (args.vertical === false && api.inColumns(L)) {   // the look sets it in columns of itself, where the editor greys Lines and Columns out (props.verticalByLook)
+        const lk = LOOKS[S.profile.style.look] || LOOKS.cel, key = (lk.params.find((d) => d.key === "vertical") || {}).key;
+        warnings.push(`The ${lk.name.en} look sets the title and the subtitle in columns itself${key ? ` (its setting "${key}")` : ""}: they stay in columns till that is turned off${key ? ` (set_look with params {"${key}": 0})` : ""}.`);
+      }
       if (L.font && S.latinFonts.has(L.font)) warnings.push(`${L.font} has no Chinese: Chinese words are set in another face.`);
       api.touch({ cover: true, side: true });
       return layerDone(L, warnings);
@@ -383,6 +394,7 @@ export function makeCommands(api) {
         if (args[k] === undefined) continue;
         if (args[k] === "auto") delete L[k]; else L[k] = hex(args[k]);
         if (k === "ink" && L.type !== "asset" && L.type !== "photo") delete L.color;   // a text layer of before no longer in the channel colour
+        if (k === "ink" && L.type === "asset" && args.ink !== "auto" && L.ref.kind !== "graphic") L.tint = false;   // as Colour → Custom (assetColour): not the channel's
       }
       if (args.tint !== undefined && L.ref.kind !== "graphic") L.tint = args.tint;   // its own colours, or the channel's (assetColour)
       if (args.color !== undefined) L.color = hex(args.color);
@@ -435,7 +447,9 @@ export function makeCommands(api) {
       const placed = (at && k !== "asset") || args.scale !== undefined;
       if (at && k !== "asset") { L.t.all.x = at.x; L.t.all.y = at.y; }
       if (args.scale !== undefined) L.t.all.s = args.scale;
-      if (placed) api.touch({ cover: true });
+      // at every size, as place_layer in scope all puts it: a copy's tunings at some sizes (its original's) give way where at and scale say
+      if (placed) for (const b of Object.values(L.t.by)) { if (at) { b.dx = 0; b.dy = 0; } if (args.scale !== undefined) b.s = 1; }
+      if (placed) api.touch({ cover: true, side: true });
       return toResult({ structured: { layer: layerOut(L, S.cover) } });
     },
     remove_layer: async (args) => {
