@@ -1,0 +1,30 @@
+[package]
+name = "smedcover-core"
+version.workspace = true
+description = "SmedCover's core: what the desktop app and a server share, without Tauri or a web view"
+license.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+image = { workspace = true }
+fontdb = { workspace = true }
+ureq = { workspace = true }
+ttf-parser = { workspace = true }
+base64 = { workspace = true }
+# The cross-platform subject cut-out (see the workspace's Cargo.toml).
+ort = { workspace = true }
+sha2 = { workspace = true }
+flate2 = { workspace = true }
+tar = { workspace = true }
+zip = { workspace = true }
+
+# The subject cut-out uses Apple's Vision framework, reached through the Objective-C runtime.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
+objc2-foundation = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -9,7 +9,7 @@ For people who want to read or change the code. For how to use the app, see [REA
 SmedCover is a Tauri 2 app in two halves:
 
 - **The interface (`ui/`)** runs in the system web view and does all interaction and **all drawing**. Plain ES modules: no bundler, no framework, no runtime dependencies.
-- **The Rust shell (`src-tauri/`)** only touches files and the network: it reads and writes app data, converts and saves images, shows system dialogs, lists system fonts and sends the AI request for a generated asset.
+- **The Rust side** only touches files and the network: it reads and writes app data, converts and saves images, shows system dialogs, lists system fonts and sends the AI request for a generated asset. Its work is in `core/` (the crate `smedcover-core`, with neither Tauri nor a web view in it, so a server can share it); `src-tauri/` is the desktop app around it, its commands thin wrappers (10).
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ flowchart LR
     render --> assets
     app --> store
   end
-  subgraph Rust["Rust — src-tauri/"]
+  subgraph Rust["Rust — core/ and src-tauri/"]
     fs["sandboxed store<br/>app_read / write / list / delete"]
     enc["convert and save images<br/>save_image / write_image"]
     misc["dialogs, system fonts, self-test"]
@@ -65,7 +65,7 @@ ui/
   js/looks/kit.js    what the looks share: helpers, scene objects, the current look's state (setLook), effects' machinery
   js/looks/<id>.js   one file per look (cel, cyber, riso … wasteland, facet): its object, helpers and layer effects
   js/spec.js         stickers described as data: validation and interpreter (AI-generated assets)
-  (src-tauri/src/subject.rs: the photo's subject mask, from Vision)
+  (core/src/cut/vision.rs: the photo's subject mask, from Vision)
   js/repaint.js      photo repaint: the three image services' requests and replies, repaint prompts, reading built-in styles
   repaint-styles/    built-in repaint styles, one `<id>.md` each (names and notes in a header), plus the generated list index.json
   js/solid.js        3D objects described as data: validation, drawn with the channel graphics' renderer
@@ -77,7 +77,8 @@ ui/
   js/csv.js          CSV reader for batch export (Settings → Sizes & export)
   js/i18n.js         interface strings (zh / en)
   fonts/             bundled fonts and their licences
-src-tauri/src/lib.rs all of the Rust side
+core/src/            the Rust side's work, which a server can share (the crate smedcover-core): store, export, fonts, outlines, cut-out, AI requests (10)
+src-tauri/src/lib.rs the desktop app: the data folder, the commands (thin wrappers round core/), the dialogs, the self-test
 tests/               unit tests for the DOM-free modules
 ```
 
@@ -825,8 +826,8 @@ fonts are listed, and parsed once they are). Only in the desktop app: a server's
 server from the next, and a plain browser has no outlines. An outline whose request failed (a server away for a
 moment) is false in memory but not kept, and one that comes for a font let go since (`era`) is dropped. `sig` (`outlineSig()`) is the app's version, the list of fonts installed and the fonts imported with the length of
 their files: any of them otherwise lets them all go, as an outline not to be had may be now, or another file be found
-for a family; a font imported in the session lets go of its own at once (`forgetOutlines()`, and `app_write` in
-`lib.rs` of the file found for it). `OUTLINE_KEEP.v` is
+for a family; a font imported in the session lets go of its own at once (`forgetOutlines()`, and `app_write` —
+`Core::write` in `core/src/lib.rs` — of the file found for it). `OUTLINE_KEEP.v` is
 raised when the Rust side traces otherwise.
 
 **Bends** are apart from the lettering: a headline's `bend` (one of `BENDS`; `bendAmt`, how far) goes
@@ -1201,13 +1202,13 @@ Blur: canvas filters are not available in the macOS web view, so the gaussian bl
 
 Earlier data: `upgradeCover` turns the one photo kept beside the cover (the session's `session-photo*`, a version 2 project's `photo*` fields) into a background photo layer taking over the Background layer's place, blur and dim, and an earlier `subject` layer into its cut-out copy. A default design keeps no photo layers.
 
-### 6.4 The cut-out (`src-tauri/src/subject.rs`, `matting.rs`)
+### 6.4 The cut-out (`core/src/cut/`: `vision.rs`, `onnx.rs`)
 
 Two ways, chosen by the setting `cutEngine` (`cutEngine()`: Vision by default on a Mac, the light BiRefNet elsewhere); both return the same kind of mask.
 
-**BiRefNet (`matting.rs`, every system)**: `ort` is used with `load-dynamic`, so the runtime is not built in. When the user downloads a model (`cut_model_download`, progress sent as the event `cut-model-progress`, `cut_model_cancel` to stop), Microsoft's ONNX Runtime 1.23.2 package for the platform comes first (the last release with an Intel Mac build, hence `ort`'s API 23) and only the one library file is taken out of the .tgz / .zip; then the model (onnx-community's BiRefNet_lite / BiRefNet ONNX). Each file's SHA-256 is computed as it arrives, and it takes its place in the data folder's `models/` only when size and checksum match. Cutting out (`subject_mask_onnx`, the model id in the header `x-model`): `ort::init_from` loads the runtime the first time, the session is kept per model; the photo is scaled to 1024 × 1024 and normalised as ImageNet's, the last output map goes through a sigmoid and is scaled back to the photo's size, as the same alpha-only PNG. The interface sends photos of at most 2048 px.
+**BiRefNet (`onnx.rs`, every system)**: `ort` is used with `load-dynamic`, so the runtime is not built in. When the user downloads a model (`cut_model_download`, progress sent as the event `cut-model-progress`, `cut_model_cancel` to stop), Microsoft's ONNX Runtime 1.23.2 package for the platform comes first (the last release with an Intel Mac build, hence `ort`'s API 23) and only the one library file is taken out of the .tgz / .zip; then the model (onnx-community's BiRefNet_lite / BiRefNet ONNX). Each file's SHA-256 is computed as it arrives, and it takes its place in the data folder's `models/` only when size and checksum match. Cutting out (`subject_mask_onnx`, the model id in the header `x-model`): `ort::init_from` loads the runtime the first time, the session is kept per model; the photo is scaled to 1024 × 1024 and normalised as ImageNet's, the last output map goes through a sigmoid and is scaled back to the photo's size, as the same alpha-only PNG. The interface sends photos of at most 2048 px.
 
-**Apple Vision (`subject.rs`, macOS)**:
+**Apple Vision (`vision.rs`, macOS)**:
 
 `subject_mask` hands the photo's bytes to Apple Vision's `VNGenerateForegroundInstanceMaskRequest` (macOS 14 on; the class is looked up at run time through objc2, so an older system reports that it needs macOS 14), takes `generateScaledMaskForImageForInstances` — a float mask the photo's size — and returns it as a PNG in which only the alpha matters. The interface draws the photo on a canvas and sends that as JPEG, so EXIF orientation is already applied and the mask matches the photo pixel for pixel. The mask lives on the picture's record; when the picture changes (an AI repaint, or back to the original) it is cleared and the layers that use it are cut out again.
 
@@ -1989,7 +1990,7 @@ profile's first, and not while anything is dragged (`drawLookCards()`), and afte
 files (`fontsReading()`), is not done (`sig` ""), and is drawn again as they come. The pictures are kept from one launch
 to the next (`lookpics.js`): a card done is written a moment later (`keepLookPics()`) to `lookcards/<look>.json`, a
 300 px JPEG of 15–50 KB (a PNG where the cover is see-through; the writings one after another, `saving`) with `lookPicSig()`, a hash of what it was drawn from,
-its pixels and the app's version and build (`appBuild()`: `ui_build` in `lib.rs`, a hash of `ui/` made by `build.rs`,
+its pixels and the app's version and build (`appBuild()`: `ui_build` in `src-tauri/src/lib.rs`, a hash of `ui/` made by `build.rs`,
 or under `tauri dev` of its files' names, sizes and times, made again at each load of the page; only in the desktop
 app, as a server's page cannot tell one version of the server from the next); after the first frame `readLookPics()` reads them and puts
 each on its card (`fromKept()`), done where the cover is as it was, a stand-in till drawn again where not. The cards'
@@ -2223,16 +2224,23 @@ built again): the current look as a card with a radio, the built-in styles as ca
 until *All ›*, or the first seven and the one chosen), the user's own as chips with the selected one's editor, the note;
 at its foot the service and its cost, and *Repaint the photo*.
 
-## 10. The Rust side (`src-tauri/src/lib.rs`)
+## 10. The Rust side (`core/`, `src-tauri/`)
 
-### 10.1 Sandboxed store
+One Cargo workspace at the repository's root (`Cargo.toml`, one `Cargo.lock`, one `target/`), two crates:
+
+- **`core/`, the crate `smedcover-core`**, does the work: the store (`store.rs`), exporting (`image.rs`), fonts and the outlines of lettering (`fonts.rs`, `outline.rs`), the cut-out (`cut/`), AI requests (`net.rs`). Neither Tauri nor a web view comes into it, so a server can use it as the app does. All of it is synchronous, and its errors are text (`Res<T>`, a `Result<T, String>`): the interface matches on them ("timed out", "unsupported:", "cancelled", "model not downloaded"). `Core` is the core of one data folder, which the host names (`Core::open(folder, bundled)`); the store, the fonts found by name and the cut-out's models go through it. The fonts that come with the interface reach it through `BundledFonts`: the app answers from its assets (`AssetFonts`), a server can from its `ui/` folder.
+- **`src-tauri/`, the desktop app**: `setup` finds the data folder once (the app data directory, or a self-test's `data/`) and keeps its `Arc<Core>` as Tauri's state. Each command is a thin wrapper round the core, with the names, arguments, answers and errors it had; the slow ones wait on the blocking thread pool. What only a desktop app has stays here: the dialogs (`save_image`, `pick_folder`, `save_text`), `reveal_data_dir`, `move_pointer`, reading a binary request body (`frame_of`), the self-test's commands and `ui_build`.
+
+`cargo test` at the root tests the core alone (the workspace's default member), `cargo test --workspace` (`npm run test:rust`) the app as well; `tauri build` and `tauri dev` build the app from `src-tauri/`, into the root's `target/`.
+
+### 10.1 Sandboxed store (`core/src/store.rs`)
 
 `app_read`, `app_write`, `app_list` and `app_delete` take relative paths only. `resolve()` joins them
 to the app data directory and refuses absolute paths and `..`, so the interface cannot reach files
 outside it. Writes go to a temporary file that is then renamed, so quitting mid-write never leaves
 half a file.
 
-### 10.2 Export pipeline
+### 10.2 Export pipeline (`core/src/image.rs`)
 
 ```
 canvas ──toBlob (async)──▶ PNG bytes ──binary frame──▶ Rust worker thread ──▶ PNG / JPEG / WebP file
@@ -2252,13 +2260,13 @@ canvas ──toBlob (async)──▶ PNG bytes ──binary frame──▶ Rust 
 File names pass through `safe_name()`, which keeps only the last path component, so a name cannot be
 used to write into another directory.
 
-### 10.3 Glyph outlines
+### 10.3 Glyph outlines (`core/src/fonts.rs`, `outline.rs`)
 
-`text_outline`: see 6.2. A font file, once found by name, is cached, and installed fonts are scanned once.
+`text_outline`: see 6.2. A font file, once found by name, is cached in the `Core` of its data folder (an imported font is that folder's), and installed fonts are scanned once.
 
 `font_faces` and `font_data` hand the web view a system family's files: the first says which upright faces there are (one per weight, a variable font's weight axis as a range) and gives a few characters the family has, the second hands over one face (a collection, `.ttc`, cut down to the face's table directory and the tables it points at: `single_face()`). WebKit sets a canvas that is not in the page (the effects' work canvases, an export, the measuring of the title) only in the fonts that came with the system: one the user installed, or one macOS downloads on demand (Kaiti, Xingkai, Weibei…), falls back to the default there, while the canvas on screen, drawn by WebKit's GPU process, shows it. So the editor (`ensureFont()` in `app.js`) tries every system font a layer is set in on such a canvas, with characters it has, before each draw and each export; one that is out of reach is loaded from its files, each face a `FontFace` under the family's own name at its own weight, so every weight of lettering finds the face it did with the system font. The self-test checks it with the first installed font it finds out of reach.
 
-### 10.4 AI requests
+### 10.4 AI requests (`core/src/net.rs`)
 
 `ai_request` sends the request the interface built (URL, headers, JSON body) and hands back the
 status and body as they are — error replies included, so the interface can show the provider's own
@@ -2270,7 +2278,7 @@ message. It is sent from Rust to get around the cross-origin limits of a web vie
 
 `fetch_image` covers a repaint whose service answers with a link instead of the picture: it downloads it, checks that it is a picture (by `content-type`, else by its first bytes) and hands it over in base64.
 
-### 10.5 Other commands
+### 10.5 Other commands (`src-tauri/src/lib.rs`)
 
 `pick_folder`, `save_text` (profiles, projects, the CSV template), `list_system_fonts` (which
 enumerates installed fonts with fontdb and says which can set Chinese) and `reveal_data_dir` (shows a
@@ -2346,7 +2354,7 @@ frame waits for the fonts, otherwise the title would be fitted using the wrong g
 | Level | Command | Covers |
 |---|---|---|
 | Front-end unit tests | `npm test` | layout, layer placement and order, channels, CSV, data validation (the export's sizes switched off and folders and the looks' use, by profile and look), the defaults and `custom.json` laid over them, the settings written to `custom.json` (only what differs, read back the same, from `settings.json` once), file name pattern, Surprise me's rules and chances (the bars' `moveShare()`, the dots' `dotsOf()` and `withDots()`, the layout locked), every look's kinds, size and naming of the asset packs, colour mapping and parameters of looks, validating and drawing sticker and solid specs, requests and replies in both API styles, the 3D view's projection, picking and labels, both languages present for every string, no native `confirm()`, `alert()` or `prompt()` in `ui/` |
-| Rust unit tests | `cd src-tauri && cargo test` | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling, requests against a local stand-in server, proxy rules |
+| Rust unit tests | `cargo test --workspace` (`npm run test:rust`) | path sandbox, store round trip, frame parsing, encoding in the three formats, file name handling, requests against a local stand-in server, proxy rules, a face cut out of a font collection, traced outlines, fonts found by name (bundled, imported, imported again), the cut-out's models and packages |
 | End-to-end self-test | `SMEDCOVER_SELFTEST=<folder> <executable>` | the full export path between the real web view and Rust |
 
 In self-test mode the app keeps its data in the given folder, exports a few covers in all three
@@ -2392,7 +2400,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | show the Layout sheet's template box again, or change the colour block's *Size & slant* (its *Block position*, *Mirror*, sliders and *Block by orientation*) | `TEMPLATE_BOX` and `layoutBox()`; `blockSection()`, `blockSliders()`, `layoutAdjuster()`, `layoutScope()` and `byOrient()` in `app.js`; `tpl.*` and `style.byOrient*` in `i18n.js` |
 | add a property to a layer | `PROPS` and `normalizeLayer()` in `layers.js`, `PAINT` in `render.js`, `typeControls()` in `app.js` (`headlineControls()` for the title and text layers) |
 | change the controls of the properties (a scrub bar, a switch, ways side by side, a choice among many, a colour), or the drawer's head | `scrub()` (`SHOWN`), `switchRow()` and `check()`, `segs()`, `picker()` and `openPicker()`, `swatch()`, `psec()`, `secSum()`, `drawerHead()` in `app.js`; `.psec`, `.bar`, `.rs`, `.swr`, `.tog`, `.pk`, `.pklist`, `.cb` and `#right .dhead` in `index.html` |
-| add an export format | `encode()` in `lib.rs`, `EXT` and the format pickers in `app.js` (`exportDialog()`, `sizesTab()`) |
+| add an export format | `encode()` in `core/src/image.rs`, `EXT` and the format pickers in `app.js` (`exportDialog()`, `sizesTab()`) |
 | add a drawing operation for AI assets | validation and `drawSpec()` in `spec.js`, the prompt and examples in `ai.js` |
 | add a kind of part to solids | validation and `pieces()` in `solid.js`, `solidPrompt()` and its examples in `ai.js` |
 | change the shape a repaint is asked for, or how what comes back is fitted to its photo | `repaintSize()` and `coverCrop()` in `repaint.js`; `fitPicture()` in `app.js` |

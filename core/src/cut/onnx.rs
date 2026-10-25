@@ -5,7 +5,7 @@
 //! (Microsoft's own release, 1.23.2) and the model file are downloaded into the app data folder
 //! `models/`, each checked against its SHA-256, and loaded from there.
 //!
-//! In and out as with Vision (see `subject.rs`): the photo as encoded bytes, already upright; the
+//! In and out as with Vision (see `vision.rs`): the photo as encoded bytes, already upright; the
 //! mask as a PNG of the photo's size in which only the alpha channel matters.
 
 use image::{imageops::FilterType, ImageBuffer, ImageFormat, Luma, LumaA};
@@ -332,14 +332,14 @@ mod tests {
     }
 
     /// Downloads the runtime and the light model for real (about 235 MB) into SMEDCOVER_TEST_DATA:
-    /// SMEDCOVER_TEST_DATA=<folder> cargo test --lib matting::tests::downloads -- --ignored
+    /// SMEDCOVER_TEST_DATA=<folder> cargo test -p smedcover-core cut::onnx::tests::downloads -- --ignored
     #[test]
     #[ignore]
     fn downloads_the_runtime_and_the_light_model() {
         let data = PathBuf::from(std::env::var("SMEDCOVER_TEST_DATA").expect("SMEDCOVER_TEST_DATA"));
         let m = model("birefnet-lite").unwrap();
         let mut builder = ureq::AgentBuilder::new().timeout_read(std::time::Duration::from_secs(120));
-        if let Some(p) = crate::proxy_for(m.file.url, "") {   // the environment's proxy, as the app uses it
+        if let Some(p) = crate::net::proxy_for(m.file.url, "") {   // the environment's proxy, as the app uses it
             builder = builder.proxy(ureq::Proxy::new(&p).unwrap());
         }
         let agent = builder.build();
@@ -351,7 +351,7 @@ mod tests {
     }
 
     /// Needs the runtime and a model downloaded into a data folder, and a photo:
-    /// SMEDCOVER_TEST_DATA=<folder with models/> SMEDCOVER_TEST_PHOTO=<photo> cargo test --lib matting -- --ignored
+    /// SMEDCOVER_TEST_DATA=<folder with models/> SMEDCOVER_TEST_PHOTO=<photo> cargo test -p smedcover-core cut::onnx -- --ignored
     #[test]
     #[ignore]
     fn cuts_out_a_real_photo() {

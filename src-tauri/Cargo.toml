@@ -1,10 +1,10 @@
 [package]
 name = "smedcover"
-version = "0.3.1"
+version.workspace = true
 description = "Branded cover-image generator for video creators"
-license = "AGPL-3.0-or-later"
-authors = ["cybertheye"]
-edition = "2021"
+license.workspace = true
+authors.workspace = true
+edition.workspace = true
 
 [lib]
 name = "smedcover_lib"
@@ -13,34 +13,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
-[dev-dependencies]
-tempfile = "3"
-
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
-fontdb = "0.23"
-ureq = { version = "2", features = ["socks-proxy"] }
-ttf-parser = "0.25"
-base64 = "0.22"
-# The cross-platform subject cut-out: BiRefNet (MIT) run by ONNX Runtime (MIT), through `ort`
-# (MIT/Apache-2.0). Neither is built in: the runtime library (Microsoft's own release) and the model
-# are downloaded when the user asks for them, checked against their SHA-256, and loaded from the app
-# data folder. Runtime 1.23.2 is the last with an Intel Mac build, hence API 23.
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-23"] }
-sha2 = "=0.10.9"
-flate2 = "=1.1.9"
-tar = "=0.4.46"
-zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
+# What the app does for its window, Tauri aside (see ../core).
+smedcover-core = { path = "../core" }
+base64 = { workspace = true }
 
-# The subject cut-out uses Apple's Vision framework, reached through the Objective-C runtime.
+# A self-test's window keeps drawing when it cannot be seen: a setting of the web view reached through the
+# Objective-C runtime (see `run` in lib.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSString", "NSIndexSet"] }
-
-# Dependencies are optimised even in development builds: the image codecs are far too slow otherwise.
-[profile.dev.package."*"]
-opt-level = 3
+objc2 = { workspace = true }

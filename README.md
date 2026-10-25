@@ -852,10 +852,10 @@ Requires Rust, Node.js and the [Tauri prerequisites](https://tauri.app/start/pre
 ```bash
 npm install                          # installs the Tauri CLI only
 npm run dev                          # development window; press Cmd/Ctrl+R after editing the UI
-npm run build                        # release installers in src-tauri/target/release/bundle/
+npm run build                        # release installers in target/release/bundle/
 npm run tauri -- build --debug       # debug build; right-click in the window for the web inspector
 npm test                             # front-end unit tests
-cd src-tauri && cargo test           # Rust unit tests
+npm run test:rust                    # Rust unit tests (cargo test --workspace)
 ```
 
 JPEG and WebP export is much slower in a debug build; judge speed with a release build.
@@ -864,7 +864,7 @@ End-to-end self-test: the app exports a few covers through the real pipeline, wr
 and quits, without touching your real data.
 
 ```bash
-SMEDCOVER_SELFTEST=/absolute/empty/folder src-tauri/target/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover
+SMEDCOVER_SELFTEST=/absolute/empty/folder target/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover
 ```
 
 It also times every look effect on a layer as large as it gets, on a canvas as wide as the editor's and as a look card's: one that takes longer than 100 ms (30 ms on a card's) is listed under `fxTime` in `report.json`, as is one that hardly takes less on the card, and one that takes longer than 4 s (1 s on a card's) fails the self-test.
