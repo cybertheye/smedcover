@@ -634,7 +634,7 @@ marks over — with `frame.c` 0, the line translated so the column's middle fall
 `inColumn()`; `env.only` keeps it to some letters by `someLetters()`, a column counted as a line. Its box takes
 in the plate and what the effect throws past the type (`effectReach`), and its `fs` is the size of its
 characters, which the cover standards read (`typeSize()` in `check.js`). There is no bend: `bendOf()` gives
-none for a layer in columns, `layoutHandles()` no handles, and the properties a note in the bend menu's place
+none for a layer in columns, `layoutHandles()` no handles, and the Bend group a note in its menu's place
 (the bend is kept, for lines again).
 
 `inColumn(ctx, run)` in `textfx.js` turns the upright characters back wherever they are drawn while `run`
@@ -1768,9 +1768,14 @@ how it is put on (a click on the card; for a preset, *Apply to canvas*), and mar
 preset's, as their cards are built anew, `renderBar()` the effect's, as its cards (in the drawer and the bar's popover)
 are; `pickLook()` and `pickFx()` end theirs before putting theirs on.
 
-**Text effects as cards.** The Effect group of a lettered layer's properties (`fxControl()`) begins with `fxCards(L)`:
-Automatic, then the layer's own effect, then the others in `FX_ORDER`, the first `FX_FOLDED` (six) until *See all*
-(`FX_UI.all`, for the session). Each card is the layer's first letter (`firstLetter()`, the highlights' marks left out;
+**Text effects as cards.** The Effect group of a lettered layer's properties (`fxControl()`; the bend is a group of its
+own after it, `bendControl()`) begins with `fxCards(L)`: Automatic, then the layer's own effect, then the others in
+`FX_ORDER`. Every card is built; in the drawer, three to a row, those past `FX_FOLDED` (six) are hidden (`.folded`) until
+*See all* (`FX_UI.all`, for the session). In the bar's popover they are one row (`fxRow()`), six and an edge of the next
+in sight, the rest scrolled to sideways: `fxRowEnds()` marks the ends with more beyond them (as the row scrolls, and as
+`FXROWS`, a `ResizeObserver`, sees the popover laid out or the window resized), where the cards fade out under an arrow
+(a CSS mask) whose click glides the row on by six cards (`glide()`, eased over a few frames); the wheel turns the row
+until its end, then scrolls the popover. Each card is the layer's first letter (`firstLetter()`, the highlights' marks left out;
 a stand-in while it has none) drawn in that effect, in its face, colours and strengths, as the cover's look letters it.
 A picture is keyed by all it is drawn from — the effect, the seed, the letter, the face, the colours, the strengths, the
 look and its settings and seed, the ground, whether there is a photo, the channel colour — and drawn once into `FXPICS.pics`
@@ -1800,15 +1805,18 @@ every drawing, so they follow a drag, the window resized and the size shown, and
 or hide them as the sheet changes. A press inside one goes through to the canvas, where `layerAt()` takes that part (9.2).
 
 **The bar over the canvas.** The selected layer's most used settings stand on a bar of glass over it (`BAR`, `#ftb`, in
-`#center`). `barItems(L)` says which, by the kind of layer — a lettering's font, effect, colour and columns; a photo's
+`#center`). `barItems(L)` says which, by the kind of layer — a lettering's font | its colours (`dot`: a round button,
+split across for the words' and the highlighted words' colours, as its Colour group's swatches show them: `inksShown()`),
+effect (`icon`: a wand) and bend, and columns | *More…*, in a segment of its own; a photo's
 background, crop, AI repaint and another picture; an asset's colour and crop; a weave; a colour layer's colour; the
 colour block's shape, and its size and slant; the ground — each a group of the properties (`sec`), shown in a popover under the bar (`POP`,
-`#fpop`; `FTB.pop` the one open), controls of its own (`pop`: the font), or something it does (`act`); *More…* opens the
-drawer. A group's popover holds the drawer's own controls for it, built afresh by `secOf()` (it runs `typeControls()`
+`#fpop`; `FTB.pop` the one open, its button a light pill, `.open`), controls of its own (`pop`: the font), or something
+it does (`act`); *More…* opens the drawer. A group's popover holds the drawer's own controls for it, built afresh by `secOf()` (it runs `typeControls()`
 and takes that group out), so the two never say different things and a control added to a group is on the bar too.
 `renderBar()` builds it, from `renderSide()`, so it follows every change of the layer; the popover shuts on another
 layer, Esc or a press beside it. `placeBar()` puts the bar above the layer, clear of its turning knob, else under it,
-else inside its top (`onScreen()`: where the layer is drawn, from the canvas's hits), and `flushDraw()` places it again
+else inside its top (`onScreen()`: where the layer is drawn, from the canvas's hits), measured at the left edge so it
+wraps only in a canvas narrower than it, and `flushDraw()` places it again
 after every drawing. It is away while the pointer is down on the canvas (`FTB.drag`), while the layer is not drawn
 there (hidden, or kept to other sizes: `onScreen()` gives nothing), in 3D, while the brush paints, with a group selected
 and in Settings.
@@ -2086,7 +2094,7 @@ With `SMEDCOVER_SELFTEST_DRAG=1` the self-test times editing instead: it reads t
 | change what goes with a photo whose background is removed at some sizes | `showApart()` (and `cutAt()`, `cutFrom()`) in `layers.js` |
 | change which sizes of another profile's a size takes the place of, when layers come from there | `standsFor()` in `layout.js`; `acrossSizes()` in `layers.js` |
 | change how a free crop is kept, edited, painted or caught | `normalizeCrop()`, `CROP_AREA`, `hasArea()`, `polyArea()`, `cropPoly()`, `dragPoint()`, `addPoint()`, `dropPoint()`, `movePoly()`, `edgePoint()` and `inPoly()` in `layers.js`; `tracePoly()`, `cropShape()` and `hitAt()` in `render.js`; `cropShow()` and `cropDropPoint()` in `app.js` |
-| put a setting on the bar over the canvas | `barItems()` in `app.js`: a group of the properties by its key (`sec`), controls of its own (`pop`) or an action (`act`) |
+| put a setting on the bar over the canvas | `barItems()` in `app.js`: a group of the properties by its key (`sec`), controls of its own (`pop`) or an action (`act`); `dot`, `icon` and `sep` for how it looks |
 | add a sheet to the dock | its function in `TABS.edit` and an icon in `SHELL_ICONS` (`app.js`); `dock.*` and its heading's `sheet.*` in `i18n.js` |
 | add a page to Settings | its function in `TABS.setup` and an icon in the `icon` map inside `syncTabs()` (`app.js`); `tab.*` in `i18n.js` |
 | change when the note on slow glass shows, or how the panes go plain | `glassWatch()`, `setGlass()` and `CAN_BLUR` in `app.js`; `html.solid` in `index.html` |

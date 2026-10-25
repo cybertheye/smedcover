@@ -490,6 +490,8 @@ const STR = {
   "fx.cardAuto": ["自动 · 跟随风格", "Auto · the look's"],
   "fx.seeAll": ["看全部 {0} 种效果", "See all {0} effects"],
   "fx.seeFewer": ["收起", "Show fewer"],
+  "fx.prev": ["前面的效果", "Earlier effects"],
+  "fx.next": ["后面的效果", "More effects"],
   "fx.sample": ["字", "A"],
   "fx.previewing": ["预览：{0} · 点卡片换上，移开就恢复", "Preview: {0} · click its card to use it, move away to go back"],
   "msg.serverAway": ["连不上 SmedCover 服务器（{0}），编辑器没有启动，没有覆盖任何数据。请稍后刷新页面再试。", "Could not reach the SmedCover server ({0}). The editor did not start, so nothing was overwritten. Reload the page to try again."],

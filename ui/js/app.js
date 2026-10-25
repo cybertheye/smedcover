@@ -3975,14 +3975,11 @@ function titleLines(L, set0) {
     : el("div", { class: "sl off", title: t("props.fxIgnores", name) }, el("span", {}, t(key)), el("span", { class: "why" }, t("props.fxIgnores", name))));
   return [line("stroke", "props.stroke"), line("shadow", "props.shadow")];
 }
-/**
- * The text effect of a headline layer and how strong it is; its bend, how far it goes, and the
- * perspective's own corners: {kids, tip}. The bend goes with any effect.
- */
+/** The text effect of a headline layer and how strong it is: {kids, tip}. */
 function fxControl(L) {
   const set = (k, v, side) => { if (v === undefined) delete L[k]; else L[k] = v; touch({ cover: true, side }); };
   const fx = EFFECTS[L.fx] ? L.fx : "auto", kind = EFFECTS[fx].kind;   // an effect no longer in the menu (a look's lettering of before) is shown as automatic
-  const cols = inColumns(L);   // set in columns: no bend (the one it has is kept, for when it is in lines again)
+  const cols = inColumns(L);
   return {
     kids: [
       fxCards(L),
@@ -3991,25 +3988,38 @@ function fxControl(L) {
       // tears, cuts, drips, bites); and the ransom note's one by one, in a window of their own
       EFFECTS[fx].seeded && el("button", { class: "btn wide", style: "margin-top:8px", title: t(fx === "ransom" ? "fx.reshuffleTip" : "fx.reshuffleEdgeTip"), onclick: () => { let n; do n = 1 + Math.floor(Math.random() * 999998); while (n === L.fxSeed); set("fxSeed", n, false); } }, t("fx.reshuffle")),
       fx === "ransom" && el("button", { class: "btn wide letters-btn", style: "margin-top:8px", title: t("letters.openTip"), onclick: () => lettersOpen(L) }, t("letters.open")),
-      cols ? el("div", { class: "hint", style: "margin-top:12px" }, t("fx.bendColumns")) : el("div", { style: "margin-top:12px" }, cap("props.bend"),
-        select([["", t("bend.none")], ...Object.entries(BENDS).map(([id, b]) => [id, b.name[getLang()]])], L.bend || "", (v) => { if (v) L.bend = v; else { delete L.bend; delete L.bendAmt; } delete L.warp; delete L.reshape; touch({ cover: true, side: true }); })),
-      !cols && L.bend && !(L.bend === "taper" && L.warp) && slider("props.bendAmt", 0, 2, 0.05, L.bendAmt ?? 1, times, (v) => { holdLive(L.id); set("bendAmt", v === 1 ? undefined : v, false); }),
-      !cols && L.bend === "taper" && L.warp && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("warp", undefined, true) }, t("fx.warpReset")),
-      !cols && L.bend && L.bend !== "taper" && L.reshape && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => set("reshape", undefined, true) }, t("fx.reshapeReset")),
     ],
-    tip: [fx === "ransom" && t("fx.ransomHint"), EFFECTS[fx].kind === "outline" && fx !== "extrude" && t("fx.shapedHint"), !cols && L.bend && t("fx.bendHint"), !cols && L.bend && t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint"), kind === "outline" && !CAN.outlines && t("fx.needsApp"), cols && NO_COLUMNS.includes(fx) && t("fx.noColumns")].filter(Boolean).join(" "),
+    tip: [fx === "ransom" && t("fx.ransomHint"), EFFECTS[fx].kind === "outline" && fx !== "extrude" && t("fx.shapedHint"), kind === "outline" && !CAN.outlines && t("fx.needsApp"), cols && NO_COLUMNS.includes(fx) && t("fx.noColumns")].filter(Boolean).join(" "),
+  };
+}
+/**
+ * The bend of a headline layer, how far it goes, and the reset of the perspective's own corners or of the shape
+ * reshaped by its handles: {kids, tip}. The bend goes with any effect; set in columns there is none (the one it has
+ * is kept, for when it is in lines again), and a note says so.
+ */
+function bendControl(L) {
+  const set = (k, v, side) => { if (v === undefined) delete L[k]; else L[k] = v; touch({ cover: true, side }); };
+  if (inColumns(L)) return { kids: [el("div", { class: "hint" }, t("fx.bendColumns"))], tip: "" };
+  return {
+    kids: [
+      select([["", t("bend.none")], ...Object.entries(BENDS).map(([id, b]) => [id, b.name[getLang()]])], L.bend || "", (v) => { if (v) L.bend = v; else { delete L.bend; delete L.bendAmt; } delete L.warp; delete L.reshape; touch({ cover: true, side: true }); }),
+      L.bend && !(L.bend === "taper" && L.warp) && slider("props.bendAmt", 0, 2, 0.05, L.bendAmt ?? 1, times, (v) => { holdLive(L.id); set("bendAmt", v === 1 ? undefined : v, false); }),
+      L.bend === "taper" && L.warp && el("button", { class: "btn wide", onclick: () => set("warp", undefined, true) }, t("fx.warpReset")),
+      L.bend && L.bend !== "taper" && L.reshape && el("button", { class: "btn wide", onclick: () => set("reshape", undefined, true) }, t("fx.reshapeReset")),
+    ],
+    tip: L.bend ? `${t("fx.bendHint")} ${t(L.bend === "taper" ? "fx.warpHint" : "fx.reshapeHint")}` : t("fx.bendHint"),
   };
 }
 // ---------- the text effects as cards, each the layer's first letter drawn in it
 /**
- * The effect cards for this session: `all`, every effect shown (else the first FX_FOLDED); `seeds`, by layer id, the
- * seed a lettering dealt by one is shown and put on with for a layer with none of its own yet (each its own, so two
- * layers in it are not drawn alike).
+ * The effect cards for this session: `all`, every effect shown in the drawer (else the first FX_FOLDED); `seeds`, by
+ * layer id, the seed a lettering dealt by one is shown and put on with for a layer with none of its own yet (each its
+ * own, so two layers in it are not drawn alike).
  */
 const FX_UI = { all: false, seeds: new Map() };
 /** The effects in the order of their cards: Automatic, then by kind as the menu had them (layered, masked, outlined, letter by letter). */
 const FX_ORDER = ["passes", "mask", "outline", "letters"].flatMap((k) => Object.keys(EFFECTS).filter((id) => (EFFECTS[id].menu || EFFECTS[id].kind) === k));
-/** How many cards show until See all: Automatic, the layer's own and the first of the others. */
+/** How many cards the drawer shows until See all (Automatic, the layer's own and the first of the others); the popover's row as many in sight. */
 const FX_FOLDED = 6;
 /** What a card's letter is drawn on: a cover of this size, its letter a free text layer of this scale at its centre. */
 const FX_CARD = { w: 200, h: 100, s: 7.5 };
@@ -4026,9 +4036,10 @@ function firstLetter(L) {
 }
 /**
  * The text effects of headline layer L as cards, in the Effect group of the drawer and so in its popover on the bar:
- * Automatic first, then the layer's own, then the others up to FX_FOLDED, See all unfolding the rest. Each is the
- * layer's first letter in that effect, in its face and colours, as the cover's look letters it; under the pointer a
- * moment it shows on the canvas (PREVIEW.fx), a click puts it on.
+ * Automatic first, then the layer's own, then the others. In the drawer three to a row, up to FX_FOLDED, See all
+ * unfolding the rest; in the popover all in one row, six in sight and the rest scrolled to sideways (see fxRow). Each
+ * is the layer's first letter in that effect, in its face and colours, as the cover's look letters it; under the
+ * pointer a moment it shows on the canvas (PREVIEW.fx), a click puts it on.
  */
 function fxCards(L) {
   const lang = getLang(), st = S.profile.style, cur = EFFECTS[L.fx] ? L.fx : "auto";
@@ -4037,9 +4048,10 @@ function fxCards(L) {
   const from = [firstLetter(L), L.font || "", L.ink || "", L.hi || "", L.stroke ?? 1, L.shadow ?? 1, L.fxAmt ?? 1, st.look, st.lookParams[st.look] || null, st.lookSeed, st.theme, !!recordOf(mainPhoto()), cat().color];
   const kinds = { passes: t("fx.kind.passes"), mask: t("fx.kind.mask"), outline: t("fx.kind.outline"), letters: t("fx.kind.letters") };
   for (const w of FXPICS.watched) if (!w.isConnected) { FXPICS.seen.unobserve(w); FXPICS.watched.delete(w); }   // the cards of a drawing before the last, never seen
-  const card = (id) => {
+  const card = (id, i) => {
     const e = EFFECTS[id], seed = e.seeded ? fxSeedOf(L) : 0, c = el("canvas", { width: FX_CARD.w, height: FX_CARD.h });
-    const b = el("button", { class: "fxtile" + (id === cur ? " on" : ""), "aria-pressed": String(id === cur), dataset: { name: e.name[lang] },
+    // past FX_FOLDED, until See all: not shown in the drawer (the popover's row shows them), so their pictures wait to be scrolled to
+    const b = el("button", { class: "fxtile" + (id === cur ? " on" : "") + (i >= FX_FOLDED && !FX_UI.all ? " folded" : ""), "aria-pressed": String(id === cur), dataset: { name: e.name[lang] },
       title: id === "auto" ? e.name[lang] : `${e.name[lang]} · ${kinds[e.menu || e.kind]}`, onpointerenter: () => hoverFx(L, id), onclick: () => pickFx(L, id) },
       c, el("span", {}, id === "auto" ? t("fx.cardAuto").split(" · ").map((w, i) => [i ? " · " : "", el("i", {}, w)]) : e.name[lang]));   // Automatic's two halves, each whole on its line
     fxPic(JSON.stringify([id, seed, ...from]), { id, seed, ch: from[0], L }, c, b);
@@ -4047,8 +4059,54 @@ function fxCards(L) {
   };
   return el("div", { class: "fxdeck" },
     el("div", { class: "fxhint" }, t("fx.cardsHint")),
-    el("div", { class: "fxgrid", onpointerleave: () => hoverFx(L, null) }, (FX_UI.all ? order : order.slice(0, FX_FOLDED)).map(card)),
-    el("button", { class: "btn wide", onclick: () => { FX_UI.all = !FX_UI.all; renderSide(); } }, FX_UI.all ? t("fx.seeFewer") : t("fx.seeAll", FX_ORDER.length - 1)));
+    fxRow(el("div", { class: "fxgrid", onpointerleave: () => hoverFx(L, null) }, order.map(card))),
+    el("button", { class: "btn wide seeall", onclick: () => { FX_UI.all = !FX_UI.all; renderSide(); } }, FX_UI.all ? t("fx.seeFewer") : t("fx.seeAll", FX_ORDER.length - 1)));
+}
+/** Watches the effect rows' size (a popover laid out, the window resized), to say again at which ends there is more. */
+const FXROWS = new ResizeObserver((seen) => { for (const e of seen) fxRowEnds(e.target.parentElement); });
+/**
+ * The cards in `grid` as the bar's popover shows them, one row scrolled sideways: an arrow at either end where there
+ * is more that way, the cards there fading out under it, a click on it gliding the row on by six cards; the wheel
+ * turns the row too, until its end, then scrolls the popover as before. In the drawer the cards stay three to a row
+ * and the arrows are not shown.
+ */
+function fxRow(grid) {
+  const arrow = (dir) => el("button", { class: "fxarrow " + (dir < 0 ? "l" : "r"), tabindex: -1, title: t(dir < 0 ? "fx.prev" : "fx.next"), "aria-label": t(dir < 0 ? "fx.prev" : "fx.next"),
+    innerHTML: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${dir < 0 ? "M10 3 5 8l5 5" : "m6 3 5 5-5 5"}"/></svg>`,
+    onclick: () => { const k = grid.children; glide(grid, dir * 6 * (k.length > 1 ? k[1].offsetLeft - k[0].offsetLeft : grid.clientWidth / 6)); } });
+  grid.addEventListener("scroll", () => fxRowEnds(grid.parentElement), { passive: true });
+  grid.addEventListener("wheel", (e) => {
+    const max = grid.scrollWidth - grid.clientWidth, to = grid._to ?? grid.scrollLeft;
+    if (max < 1 || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || (e.deltaY < 0 ? to <= 0 : to >= max)) return;   // sideways already, or at its end: as the wheel goes
+    e.preventDefault();
+    glide(grid, e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY);   // a wheel counted in lines, or in pixels
+  }, { passive: false });
+  FXROWS.observe(grid);
+  return el("div", { class: "fxrow" }, grid, arrow(-1), arrow(1));
+}
+/** Says which ends of effect row `row` have more beyond them (`l`, `r`), for its arrows and fades. */
+function fxRowEnds(row) {
+  const g = row && row.firstElementChild;
+  if (!g || !g.isConnected) return;
+  const max = g.scrollWidth - g.clientWidth;
+  row.classList.toggle("l", max >= 1 && g.scrollLeft > 1);
+  row.classList.toggle("r", max >= 1 && g.scrollLeft < max - 1);
+}
+/** Scrolls `box` sideways by dx, easing in over a few frames; another turn of the wheel meanwhile goes on from where it is headed. */
+function glide(box, dx) {
+  const max = box.scrollWidth - box.clientWidth;
+  box._to = clamp((box._to ?? box.scrollLeft) + dx, 0, Math.max(0, max));
+  if (box._gliding) return;
+  box._gliding = true;
+  const step = () => {
+    const d = box._to - box.scrollLeft;
+    if (Math.abs(d) < 1 || !box.isConnected) { if (box.isConnected) box.scrollLeft = box._to; box._gliding = false; box._to = undefined; return; }
+    const was = box.scrollLeft;
+    box.scrollLeft += Math.sign(d) * Math.max(1, Math.abs(d) * 0.22);
+    if (box.scrollLeft === was) { box._gliding = false; box._to = undefined; return; }   // held where it is (its end)
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 /**
  * The effect cards' pictures, by what each is drawn from (see fxCards): {key, cv, of, done, faced, light, shows} — its
@@ -4316,12 +4374,23 @@ function letterEditor(L, { row, c, p }, put, photo) {
 const drawnWith = (L) => ransomShown(L.id) || { papers: papersFor({ C: hexToRgb(cat().color) }), C: hexToRgb(cat().color) };
 /** White or ink, whichever reads on colour "#rrggbb". */
 const readsOn = (hex) => { const c = hexToRgb(hex); return c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114 < 128 ? "#ffffff" : "#07070c"; };
-/** The title, subtitle and text layers alike: words, effect, colours, lines, plate. */
-function headlineControls(L, set) {
+/**
+ * The colours lettering layer L is shown in by the swatches of its Colour group while they are automatic, standing for
+ * what the look gives it: {ink} (its words), and for the title, subtitle and text also {hi, mark} (the highlighted
+ * words; the plates and marks under them).
+ */
+function inksShown(L) {
+  if (!HEADLINES.includes(L.type)) return { ink: L.type === "brand" ? "#ffffff" : "#07070c" };
   const light = S.profile.style.theme === "light" && !recordOf(mainPhoto()) && !(LOOKS[S.profile.style.look] || LOOKS.cel).oneTheme;
-  const fx = fxControl(L);
   // the plates' and marks' own colour when left automatic: the channel colour, or on a plate of that colour ink or white
-  const markAuto = L.plate && (!L.plateInk || L.plateInk.toLowerCase() === cat().color.toLowerCase()) ? readsOn(cat().color) : cat().color;
+  const mark = L.plate && (!L.plateInk || L.plateInk.toLowerCase() === cat().color.toLowerCase()) ? readsOn(cat().color) : cat().color;
+  // on plates of their own the words take what reads there; through a band or on a block set off, the lettering's colour
+  return { ink: L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff", mark,
+    hi: L.hiPlate ? readsOn(L.hiPlateInk || mark) : L.hiMark && L.hiMark !== "circle" ? (L.ink || (L.plate ? readsOn(L.plateInk || cat().color) : light ? "#07070c" : "#ffffff")) : cat().color };
+}
+/** The title, subtitle and text layers alike: words, effect, bend, colours, lines, plate. */
+function headlineControls(L, set) {
+  const fx = fxControl(L), bend = bendControl(L), shown = inksShown(L);
   return [
     psec("props.sec.text", [
       L.type === "text" && el("textarea", { value: L.text, spellcheck: false, style: "height:64px;margin-bottom:8px", oninput: (e) => { L.text = e.target.value; touch({ cover: true }); later("side", 700, renderSide); } }),
@@ -4331,12 +4400,12 @@ function headlineControls(L, set) {
       L.type === "subtitle" && el("div", { style: "margin-bottom:8px" }, textInput(S.cover.subtitle, (v) => { S.cover.subtitle = v; touch({ cover: true }); later("panel", 700, () => onCoverTab() && renderPanel()); }, { placeholder: t("cover.subtitlePh") })),
       fontControl(L, true), ...columnControls(L)], t("props.textHint")),
     psec("props.sec.effect", fx.kids, fx.tip),
+    psec("props.bend", bend.kids, bend.tip),
     psec("props.sec.color", [
-      swatch(L, "ink", "props.sw.text", L.plate ? "#ffffff" : light ? "#07070c" : "#ffffff"),
-      // on plates of their own the words take what reads there; through a band or on a block set off, the lettering's colour
-      swatch(L, "hi", "props.sw.hi", L.hiPlate ? readsOn(L.hiPlateInk || markAuto) : L.hiMark && L.hiMark !== "circle" ? (L.ink || (L.plate ? readsOn(L.plateInk || cat().color) : light ? "#07070c" : "#ffffff")) : cat().color),
+      swatch(L, "ink", "props.sw.text", shown.ink),
+      swatch(L, "hi", "props.sw.hi", shown.hi),
       L.plate && swatch(L, "plateInk", "props.sw.plate", cat().color),
-      (L.hiPlate || L.hiMark) && swatch(L, "hiPlateInk", "props.sw.hiPlate", markAuto)], t("props.inkAutoHint")),
+      (L.hiPlate || L.hiMark) && swatch(L, "hiPlateInk", "props.sw.hiPlate", shown.mark)], t("props.inkAutoHint")),
     psec("props.sec.lines", titleLines(L, set), t(L.plate ? "props.linesOnPlate" : "props.linesNoPlate")),
     psec("props.sec.plate", [check("props.plateAdd", L.plate, (v) => set("plate", v, true))]),
     // how the highlighted words are marked, besides their colour: plates under them, or a mark of them
@@ -4833,7 +4902,7 @@ function assetColour(L) {
 function typeControls(L) {
   const set = (k, v, side = false) => { L[k] = v; touch({ cover: true, side }); };
   const font = () => psec("props.sec.text", [fontControl(L, true), ...columnControls(L)], [L.type === "brand" ? "" : t(L.type === "catname" ? "props.catnameHint" : "props.boundHint"), L.type === "brand" && L.vertical ? t("props.verticalBrand") : ""].filter(Boolean).join(" "));
-  const ink = (shown) => psec("props.sec.color", swatch(L, "ink", "props.sw.text", shown), t("props.inkAutoHint"));
+  const ink = () => psec("props.sec.color", swatch(L, "ink", "props.sw.text", inksShown(L).ink), t("props.inkAutoHint"));
   switch (L.type) {
     case "bg": {
       const oneTheme = (LOOKS[S.profile.style.look] || LOOKS.cel).oneTheme, covered = S.profile.style.theme === "light" && recordOf(mainPhoto());
@@ -4843,11 +4912,11 @@ function typeControls(L) {
     }
     case "photo": return photoControls(L, set);
     case "accent": return [psec("props.sec.shape", select(ACCENT_SHAPES.map((k) => [k, t("shape." + k)]), L.shape, (v) => set("shape", v, false))), blockSection()];
-    case "brand": return [font(), ink("#ffffff"), psec("props.sec.show", check("props.rail", L.rail, (v) => set("rail", v)))];
+    case "brand": return [font(), ink(), psec("props.sec.show", check("props.rail", L.rail, (v) => set("rail", v)))];
     case "logo": return psec("props.sec.logo", logoControls(), t("props.logoHint"));
     case "title": case "subtitle": case "text": return headlineControls(L, set);
-    case "tag": return [font(), ink("#07070c")];
-    case "catname": return [psec("props.sec.show", [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v))]), font(), ink("#07070c")];
+    case "tag": return [font(), ink()];
+    case "catname": return [psec("props.sec.show", [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v))]), font(), ink()];
     case "graphic": return el("div", { class: "hint", style: "margin:0;grid-column:1/-1" }, t("props.graphicHint"));
     case "asset": return [canTint(L.ref) && assetColour(L), psec("crop.title", cropButton(L), t("crop.openTip")), weaveControls(L)];
     case "solid": return psec("props.sec.color", swatch(L, "color", "props.sw.color", cat().color, false));
@@ -5217,16 +5286,19 @@ for (const type of ["pointerup", "pointercancel"]) addEventListener(type, () => 
 /** What the effect a headline has is called (Auto when it has none of its own). */
 const fxLabel = (L) => (EFFECTS[L.fx] && L.fx !== "auto" ? EFFECTS[L.fx].name[getLang()] : t("bar.fxAuto"));
 /**
- * The bar's buttons for layer L: {key, label, title?, aa? (a font's mark before it), chip? (a colour before it), on?,
- * off?, and sec (the key of the group of properties the popover shows) or pop (the popover's controls) or act (what
- * a click does)}.
+ * The bar's buttons for layer L: {key, label, title?, aa? (a font's mark before it), chip? (a colour before it), dot?
+ * (the colours it is in, as a round button of its own, no label), icon? (a SHELL_ICONS key before it), sep? (a line
+ * before it), on?, off?, and sec (the key of the group of properties the popover shows) or pop (the popover's controls)
+ * or act (what a click does)}. A lettering's: its font | its colours, effect, bend, columns | More….
  */
 function barItems(L) {
   const T = L.type, items = [], sec = (key, label, more = {}) => ({ key, sec: key, label, ...more });
   if (LETTERED.includes(T)) {
     items.push({ key: "font", aa: true, label: L.font || t("bar.fontAuto"), title: t("props.font"), pop: () => [fontControl(L, true)] });
-    if (HEADLINES.includes(T)) items.push(sec("props.sec.effect", t("bar.effect", fxLabel(L))));
-    items.push(sec("props.sec.color", t("bar.color"), { chip: L.ink || null }));
+    // what its words and (the title, subtitle and text) its highlighted words are in, as the Colour group's swatches show them
+    const shown = inksShown(L), ink = L.ink || (L.color === "accent" ? cat().color : shown.ink);
+    items.push(sec("props.sec.color", "", { title: t("bar.color"), sep: true, dot: HEADLINES.includes(T) ? [ink, L.hi || shown.hi] : [ink] }));
+    if (HEADLINES.includes(T)) items.push(sec("props.sec.effect", t("bar.effect", fxLabel(L)), { icon: "wand" }), sec("props.bend", t("props.bend")));
     const byLook = columnsByLook(L);
     items.push({ key: "vertical", label: t("props.vertical"), title: t(byLook ? "props.verticalByLook" : "props.verticalTip", (LOOKS[S.profile.style.look] || LOOKS.cel).name[getLang()]), on: inColumns(L), off: byLook,
       act: () => { L.vertical = !L.vertical; touch({ cover: true, side: true }); } });
@@ -5260,15 +5332,18 @@ function renderBar() {
   if (!on || FTB.of !== (L && L.id)) FTB.pop = "";
   FTB.of = L ? L.id : "";
   const items = on ? barItems(L) : [];
-  BAR.replaceChildren(...items.flatMap((it, i) => [it.key === "more" && i > 0 && el("span", { class: "sep" }),
-    el("button", { class: (it.on || FTB.pop === it.key ? "on" : ""), title: it.title || null, disabled: !!it.off, dataset: { key: it.key },
+  // the button whose popover is open a light pill (one set on, as Vertical, only lit); More… a segment of its own
+  BAR.replaceChildren(...items.flatMap((it, i) => [(it.key === "more" || it.sep) && i > 0 && el("span", { class: "sep" }),
+    el("button", { class: [FTB.pop === it.key ? "open" : it.on && "on", it.dot && "dotbtn", it.key === "more" && "more"].filter(Boolean).join(" "), title: it.title || null, "aria-label": it.dot ? it.title : null,
+      "aria-expanded": it.act ? null : String(FTB.pop === it.key), disabled: !!it.off, dataset: { key: it.key },
       onclick: () => { if (it.act) { FTB.pop = ""; renderBar(); it.act(); } else { FTB.pop = FTB.pop === it.key ? "" : it.key; renderBar(); } } },
-      it.aa && el("span", { class: "aa" }, "Aa"), it.chip && el("span", { class: "chip", style: `background:${it.chip}` }), el("span", {}, it.label))]).filter(Boolean));
+      it.aa && el("span", { class: "aa" }, "Aa"), it.icon && ico(it.icon, 16), it.chip && el("span", { class: "chip", style: `background:${it.chip}` }),
+      it.dot ? el("span", { class: "dot", style: `background:${it.dot.length > 1 ? `linear-gradient(135deg, ${it.dot[0]} 50%, ${it.dot[1]} 50%)` : it.dot[0]}` }) : el("span", {}, it.label))]).filter(Boolean));
   const it = items.find((x) => x.key === FTB.pop && !x.act);
   const sec = it && it.sec && secOf(L, it.sec), kids = it ? (it.pop ? it.pop() : sec && sec.kids) : null;
   if (!kids) FTB.pop = "";
   POP.replaceChildren(...(kids ? [el("div", { class: "fpop-h" }, it.sec ? t(it.sec) : it.title || it.label, sec && sec.tip && info(sec.tip)), el("div", { class: "psec open" }, el("div", { class: "psec-b" }, kids))] : []));
-  POP.classList.toggle("wide", !!kids && it.sec === "props.sec.effect");   // the effects' cards three to a row
+  POP.classList.toggle("wide", !!kids && it.sec === "props.sec.effect");   // the effects' cards in a row, six in sight
   placeBar();
 }
 /** Where layer id is drawn on the canvas, in #center's pixels: {cx, cy, hw, hh, r} (its centre, half sizes, turn), or null when it is not drawn here. */
@@ -5286,6 +5361,7 @@ function placeBar() {
   if (!box) return;
   const stage = $("stage"), top = stage.offsetTop, bottom = top + stage.offsetHeight, wide = $("center").clientWidth;
   const a = (box.r * Math.PI) / 180, ex = Math.abs(box.hw * Math.cos(a)) + Math.abs(box.hh * Math.sin(a)), ey = Math.abs(box.hw * Math.sin(a)) + Math.abs(box.hh * Math.cos(a));
+  BAR.style.left = "0px";   // measured at the left, so its width is its own and not what room it had where it last stood (it wraps only in a canvas narrower than it)
   const turns = L.type !== "bg" && !FIXED.includes(L.type) && !box.fill, bw = BAR.offsetWidth, bh = BAR.offsetHeight;
   let y = box.cy - ey - (turns ? 54 : 12) - bh;   // above, clear of the turning handle
   if (y < top + 6) y = box.cy + ey + 14;   // under
@@ -6320,7 +6396,7 @@ function clearDialog() {
     el("button", { class: "btn wide", onclick: closeModal }, t("exp.cancel"))));
   m.hidden = false;
 }
-/** The shell's icons, 24 units across (the dock, the top bar, the menu). */
+/** The shell's icons, 24 units across (the dock, the top bar, the menu, the bar over the canvas). */
 const SHELL_ICONS = {
   content: '<path d="M5 6V4h14v2"/><path d="M12 4v16"/><path d="M9 20h6"/>',
   look: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5C21 6.6 17 3 12 3Z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/>',
@@ -6333,6 +6409,7 @@ const SHELL_ICONS = {
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
   redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
   spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
+  wand: '<path d="m5 19 9-9"/><path d="M15 4v2M19 8h2M18.5 5.5 20 4M13 6l3 3"/>',   // a text effect, on the bar over the canvas
   download: '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
   upload: '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
