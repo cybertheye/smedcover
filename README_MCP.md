@@ -43,7 +43,16 @@ The page has four cards:
 | *MCP endpoint* | The switch, the state's pill, *Port* with *Apply*, and a line beside it saying what the state means |
 | *Require a token* | A second switch, off by default (see [Require a token](#require-a-token)); while it is on, the token with *Show*, *Copy* and *New token* |
 | *Connect an agent* | The lines to copy, for the port in force (and with the token while one is required), and a note on proxies |
-| *Seen lately* | The agents seen in the last 10 minutes (name, version, number of calls, when), the calls running, the last call (done or failed), and a warning when the window's tools are not those the endpoint lists |
+| *Seen lately* | The agents seen in the last 10 minutes (name, version, number of calls, when; requests that could not be told to be any agent's as one more, *Unidentified agent*), the calls running, the last call (done or failed), and a warning when the window's tools are not those the endpoint lists |
+
+*Seen lately* lists an agent for 10 minutes after its last request, or the end of its last call. An agent of the
+2026-07-28 revision says who it is in every request. One of the older revisions (today's Claude Code, Codex, Cursor and
+Hermes Agent among them) says so only as it connects, so SmedCover gives it a session id then (`Mcp-Session-Id`),
+which it sends back with each request after, and knows it by that for as long as the app runs, however long it stays
+quiet; the id is used for nothing else. A request without an id, or with one SmedCover did not give (the app was started
+again since), is taken to be the agent that connected with the same `User-Agent` on the same revision, if only one did;
+else the only agent of that revision seen lately; else it is counted under *Unidentified agent*. So every call that comes
+in is counted, and *No agent in the last 10 minutes* shows only when nothing came in that time.
 
 The pill, and the line beside the port:
 
@@ -429,10 +438,12 @@ starts it again; no call takes more than two hours.
 
 ### Protocol
 
-- Streamable HTTP: `POST /mcp` only (`GET` and `DELETE` answer 405), without sessions. Answers come as server-sent
-  events, a keep-alive every 15 seconds once the headers are out, so a long call is not cut off by a client's wait for
-  headers. In the 2026-07-28 revision the headers go out early only when the call names a `progressToken`; otherwise
-  they come with the result.
+- Streamable HTTP: `POST /mcp` only (`GET` and `DELETE` answer 405), without sessions: the answer to `initialize`
+  carries an `Mcp-Session-Id`, but only to tell whose the requests after it are (see *Seen lately*), and a request with
+  an id SmedCover did not give is served like any other, never refused. Answers come as server-sent events, a
+  keep-alive every 15 seconds once the headers are out, so a long call is not cut off by a client's wait for headers.
+  In the 2026-07-28 revision the headers go out early only when the call names a `progressToken`; otherwise they come
+  with the result.
 - Revisions: 2026-07-28 (`server/discover`, every request on its own), and 2025-03-26, 2025-06-18 and 2025-11-25 through
   `initialize` (a request with no `MCP-Protocol-Version` is taken as 2025-03-26). Not served: 2024-11-05's HTTP with SSE,
   and JSON-RPC batches.
@@ -569,7 +580,7 @@ flowchart TD
 
 | File | What it does |
 |---|---|
-| `core/src/mcp/server.rs` | The HTTP server on 127.0.0.1: `/mcp` and `/health`, the checks in front, `Access`, the limits, the protocol revisions, the clients seen (`Stats`) |
+| `core/src/mcp/server.rs` | The HTTP server on 127.0.0.1: `/mcp` and `/health`, the checks in front, `Access`, the limits, the protocol revisions, the clients seen and how they are recognised (`Stats`, the session ids given) |
 | `core/src/mcp/bridge.rs` | `PageBridge` and `Dispatcher`: calls handed to the page and their answers back, progress, cancelling, timeouts, results checked |
 | `core/src/mcp/tools.rs` | `ToolList`: `ui/tools.json` read for one host (`desktop`, `server`), and its SHA-256 |
 | `core/src/mcp/config.rs` | `mcp.json` |

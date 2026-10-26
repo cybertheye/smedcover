@@ -405,11 +405,15 @@ impl McpHost {
     /// The self-test's check of its own endpoint, as a client would make it, over HTTP: as it is by
     /// default, no token wanted, `initialize` of 2025-06-18, `tools/list`, and `get_context` and
     /// `render_preview` called through to the page, none of them with a token (`open`: none was
-    /// wanted); then a token required, as the window's switch requires it ([`McpHost::require_token`]),
-    /// a request with none, one with a wrong token and one with the right one (`noToken`,
-    /// `wrongToken`, `rightToken`: their statuses); then none required again, as by default, and a
-    /// request with none (`openAgain`). `requireToken`: what the status said before, while and after.
-    /// What it found, for the page to check and report (`mcp` in report.json).
+    /// wanted), each after `initialize` with the session id it gave (`session`: whether it gave one),
+    /// another client saying hello in between (see [`selftest_client`]); then a token required, as
+    /// the window's switch requires it ([`McpHost::require_token`]), a request with none, one with a
+    /// wrong token and one with the right one (`noToken`, `wrongToken`, `rightToken`: their
+    /// statuses); then none required again, as by default, and a request with none (`openAgain`).
+    /// `requireToken`: what the status said before, while and after; `client` and `other`: the two
+    /// clients as the status's `clients` then show them (null for one not there), and `unidentified`
+    /// whether the requests no one could be told to have made were among them. What it found, for the
+    /// page to check and report (`mcp` in report.json).
     pub async fn selftest(&self) -> Res<Value> {
         let mut page = self.dispatcher.watch_page();
         tokio::time::timeout(Duration::from_secs(30), page.wait_for(|p| matches!(p, PageState::Ready { .. })))
@@ -421,19 +425,20 @@ impl McpHost {
         let expected = self.tools.entries().len();
         let before = self.status()["requireToken"].clone();
         let u = url.clone();
-        let mut found = tauri::async_runtime::spawn_blocking(move || selftest_client(&u)).await.map_err(err)??;
+        let (mut found, session) = tauri::async_runtime::spawn_blocking(move || selftest_client(&u)).await.map_err(err)??;
         found["open"] = json!(before == json!(false));
         // a token required, then none again whatever came of the requests (the self-test leaves it as
         // it is by default)
         let during = self.require_token(true)?["requireToken"].clone();
-        let u = url.clone();
+        let (u, s) = (url.clone(), session.clone());
         let asked = tauri::async_runtime::spawn_blocking(move || -> Res<[u16; 3]> {
-            Ok([status_of(&u, None)?, status_of(&u, Some("smc_not-the-token"))?, status_of(&u, Some(&token))?])
+            let s = s.as_deref();
+            Ok([status_of(&u, None, s)?, status_of(&u, Some("smc_not-the-token"), s)?, status_of(&u, Some(&token), s)?])
         })
         .await;
         let after = self.require_token(false)?["requireToken"].clone();
         let [none, wrong, right] = asked.map_err(err)??;
-        let again = tauri::async_runtime::spawn_blocking(move || status_of(&url, None)).await.map_err(err)??;
+        let again = tauri::async_runtime::spawn_blocking(move || status_of(&url, None, session.as_deref())).await.map_err(err)??;
         found["noToken"] = json!(none);
         found["wrongToken"] = json!(wrong);
         found["rightToken"] = json!(right);
@@ -442,7 +447,11 @@ impl McpHost {
         found["expectedTools"] = json!(expected);
         let status = self.status();
         found["toolsMismatch"] = status["toolsMismatch"].clone();
-        found["clientSeen"] = json!(status["clients"].as_array().is_some_and(|c| c.iter().any(|c| c["name"] == SELFTEST_CLIENT)));
+        let clients = status["clients"].as_array().cloned().unwrap_or_default();
+        let entry = |name: Value| clients.iter().find(|c| c["name"] == name).cloned().unwrap_or(Value::Null);
+        found["client"] = entry(json!(SELFTEST_CLIENT));
+        found["other"] = entry(json!(SELFTEST_OTHER));
+        found["unidentified"] = json!(!entry(Value::Null).is_null());
         Ok(found)
     }
 }
@@ -612,11 +621,20 @@ pub fn not_to_the_endpoint(app: &AppHandle, url: &str, proxy: Option<&str>) -> R
 // ---------------------------------------------------------------- the self-test's client
 
 const SELFTEST_CLIENT: &str = "smedcover-selftest";
+/// The client that says hello in the middle of the self-test's, and calls nothing.
+const SELFTEST_OTHER: &str = "smedcover-selftest-other";
+
+/// What the self-test's client is answered: the status, the message that answers its request (the
+/// body, or the data of the event that answers it), and the session id the answer gives, if any.
+struct Posted {
+    status: u16,
+    answer: Option<Value>,
+    session: Option<String>,
+}
 
 /// One JSON-RPC message of 2025-06-18 posted to `url` by the self-test's client, with `bearer` as its
-/// token if given: the status, and the message that answers it (the body, or the data of the event
-/// that answers it), its answer read to its end.
-fn post(agent: &ureq::Agent, url: &str, id: Option<u64>, method: &str, params: Value, bearer: Option<&str>) -> Res<(u16, Option<Value>)> {
+/// token and `session` as its `Mcp-Session-Id` if given, its answer read to its end.
+fn post(agent: &ureq::Agent, url: &str, id: Option<u64>, method: &str, params: Value, bearer: Option<&str>, session: Option<&str>) -> Res<Posted> {
     let mut body = json!({"jsonrpc": "2.0", "method": method, "params": params});
     if let Some(id) = id {
         body["id"] = json!(id);
@@ -629,11 +647,15 @@ fn post(agent: &ureq::Agent, url: &str, id: Option<u64>, method: &str, params: V
     if let Some(bearer) = bearer {
         request = request.set("Authorization", &format!("Bearer {bearer}"));
     }
+    if let Some(session) = session {
+        request = request.set("Mcp-Session-Id", session);
+    }
     let response = match request.send_string(&body.to_string()) {
         Ok(r) | Err(ureq::Error::Status(_, r)) => r,
         Err(e) => return Err(format!("{method}: no answer ({e})")),
     };
     let status = response.status();
+    let session = response.header("mcp-session-id").map(String::from);
     let mut text = String::new();
     std::io::Read::read_to_string(&mut response.into_reader(), &mut text).map_err(|e| format!("{method}: {e}"))?;
     let answer = text
@@ -642,55 +664,65 @@ fn post(agent: &ureq::Agent, url: &str, id: Option<u64>, method: &str, params: V
         .chain(std::iter::once(text.as_str()))
         .filter_map(|data| serde_json::from_str::<Value>(data.trim()).ok())
         .find(|m| id.is_some() && m["id"] == json!(id));
-    Ok((status, answer))
+    Ok(Posted { status, answer, session })
 }
 
-/// The status a `tools/list` posted to `url` with `bearer` as its token (none if not given) is
-/// answered with.
-fn status_of(url: &str, bearer: Option<&str>) -> Res<u16> {
+/// The status a `tools/list` posted to `url` with `bearer` as its token (none if not given) and
+/// `session` as its session id is answered with.
+fn status_of(url: &str, bearer: Option<&str>, session: Option<&str>) -> Res<u16> {
     let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(30)).build();
-    Ok(post(&agent, url, Some(9), "tools/list", json!({}), bearer)?.0)
+    Ok(post(&agent, url, Some(9), "tools/list", json!({}), bearer, session)?.status)
 }
 
 /// The self-test's client (see [`McpHost::selftest`]), on a thread of its own: the calls an agent
-/// set up as by default makes, without a token, each timed.
-fn selftest_client(url: &str) -> Res<Value> {
+/// set up as by default makes, without a token, each timed, each after `initialize` carrying the
+/// session id its answer gave. Another client says hello in between, on the same revision and with
+/// the same `User-Agent`, so that only the session id can tell whose the calls are. What it found,
+/// and the session id.
+fn selftest_client(url: &str) -> Res<(Value, Option<String>)> {
     let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(150)).build();
     let mut ms = serde_json::Map::new();
-    let mut ask = |id: Option<u64>, method: &str, params: Value| -> Res<(u16, Option<Value>)> {
+    let mut ask = |id: Option<u64>, method: &str, params: Value, session: Option<&str>| -> Res<Posted> {
         let t0 = Instant::now();
         let name = params_name(method, &json!({"params": params}));
-        let answer = post(&agent, url, id, method, params, None)?;
+        let answer = post(&agent, url, id, method, params, None, session)?;
         ms.insert(name, json!(t0.elapsed().as_millis() as u64));
         Ok(answer)
     };
-    let result = |method: &str, (status, answer): (u16, Option<Value>)| -> Res<Value> {
-        let answer = answer.ok_or_else(|| format!("{method}: no answer to it (HTTP {status})"))?;
+    let result = |method: &str, posted: Posted| -> Res<Value> {
+        let answer = posted.answer.ok_or_else(|| format!("{method}: no answer to it (HTTP {})", posted.status))?;
         if let Some(e) = answer.get("error") {
             return Err(format!("{method}: {e}"));
         }
         Ok(answer["result"].clone())
     };
-    let init = json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": SELFTEST_CLIENT, "version": VERSION}});
-    let init = result("initialize", ask(Some(1), "initialize", init)?)?;
-    let (initialized, _) = ask(None, "notifications/initialized", json!({}))?;
-    let tools = result("tools/list", ask(Some(2), "tools/list", json!({}))?)?["tools"].as_array().map_or(0, Vec::len);
-    let context = result("get_context", ask(Some(3), "tools/call", json!({"name": "get_context", "arguments": {}}))?)?;
-    let preview = result("render_preview", ask(Some(4), "tools/call", json!({"name": "render_preview", "arguments": {"maxSide": 480}}))?)?;
+    let hello = |name: &str| json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": name, "version": VERSION}});
+    let posted = ask(Some(1), "initialize", hello(SELFTEST_CLIENT), None)?;
+    let session = posted.session.clone();
+    let init = result("initialize", posted)?;
+    let other = post(&agent, url, Some(1), "initialize", hello(SELFTEST_OTHER), None, None)?;
+    result("another client's initialize", other)?;
+    let s = session.as_deref();
+    let initialized = ask(None, "notifications/initialized", json!({}), s)?.status;
+    let tools = result("tools/list", ask(Some(2), "tools/list", json!({}), s)?)?["tools"].as_array().map_or(0, Vec::len);
+    let context = result("get_context", ask(Some(3), "tools/call", json!({"name": "get_context", "arguments": {}}), s)?)?;
+    let preview = result("render_preview", ask(Some(4), "tools/call", json!({"name": "render_preview", "arguments": {"maxSide": 480}}), s)?)?;
     let png = preview["content"]
         .as_array()
         .and_then(|c| c.iter().find(|b| b["type"] == "image"))
         .and_then(|b| b["data"].as_str())
         .map(|data| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, data).unwrap_or_default());
     let (width, height) = png.as_deref().map_or((0, 0), png_size);
-    Ok(json!({
+    let found = json!({
         "protocol": init["protocolVersion"], "server": init["serverInfo"]["name"], "initialized": initialized,
+        "session": session.is_some(),
         "tools": tools,
         "context": {"isError": context["isError"], "profiles": context["structuredContent"]["profiles"].as_array().map_or(0, Vec::len)},
         "preview": {"isError": preview["isError"], "bytes": png.as_ref().map_or(0, Vec::len), "width": width, "height": height,
                     "said": [preview["structuredContent"]["width"], preview["structuredContent"]["height"]]},
         "ms": ms,
-    }))
+    });
+    Ok((found, session))
 }
 
 /// What a request's time is noted under: the tool it calls, else its method.
@@ -1156,7 +1188,7 @@ mod tests {
         let token = h.token(false).unwrap();
         let ask = |bearer: Option<&'static str>, token: Option<String>| {
             let url = url.clone();
-            tokio::task::spawn_blocking(move || status_of(&url, token.as_deref().or(bearer)).unwrap())
+            tokio::task::spawn_blocking(move || status_of(&url, token.as_deref().or(bearer), None).unwrap())
         };
         assert_eq!(ask(None, None).await.unwrap(), 200, "no token wanted");
         h.require_token(true).unwrap();

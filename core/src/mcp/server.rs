@@ -50,13 +50,27 @@
 //! body not read is reset, and the client may lose the refusal), and its connection is then closed.
 //! [`Running::stop`] closes every connection, the port being free again when it returns.
 //!
+//! Who a request comes from: a client of 2026-07-28 says so in every request's `_meta`. A client of
+//! the older revisions says so only in `initialize`, once for each connection it makes, and there are
+//! no sessions to tie its later requests to it; so the answer to an `initialize` carries an
+//! `Mcp-Session-Id`, a new random id (128 bits, base64url) that the client sends back with each later
+//! request, as those revisions have it, and that is used for nothing but telling whose a request is
+//! (rmcp, without sessions, does not look at it, and `GET` and `DELETE` still answer 405). A request
+//! whose id is not one given out — the app started again since, or the id forgotten among the
+//! [`MAX_KNOWN`] kept — is served all the same, never refused; it and a request without an id are
+//! taken to be the client that came with the same `User-Agent` on the same revision, if one alone
+//! did, else the one client of that revision seen lately (among those with that `User-Agent`, if
+//! any), else no one's, and are then counted as an unidentified client's. Who each client is, as its
+//! `initialize` said, is kept for as long as the [`Stats`] are (the app's lifetime), apart from
+//! whether it was seen lately, which counts from its last request or the end of its last call.
+//!
 //! A client of the older era cancels a call with `notifications/cancelled` in a request of its own,
 //! which a session-less server cannot tie to the call. It is looked for here, and cancels a call
 //! only when there is no doubt which: an older-era call in hand with that JSON-RPC id on the
-//! notification's protocol revision, from the same client when that can be told, the only one, and
-//! no call with that id on that revision ended in the last [`LATE_CANCEL`] (a late cancel for that
-//! one is likelier than one for another client's). Two clients' ids are their own and small, so they
-//! meet; a cancel that cannot be placed is ignored, and that call runs to its end.
+//! notification's protocol revision, from the same client when that can be told (as above), the only
+//! one, and no call with that id on that revision ended in the last [`LATE_CANCEL`] (a late cancel
+//! for that one is likelier than one for another client's). Two clients' ids are their own and small,
+//! so they meet; a cancel that cannot be placed is ignored, and that call runs to its end.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
@@ -69,12 +83,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HOST, ORIGIN, WWW_AUTHENTICATE};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
+use axum::http::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HOST, ORIGIN, USER_AGENT, WWW_AUTHENTICATE};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::{from_fn, from_fn_with_state, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use http_body_util::BodyExt;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::service::TowerToHyperService;
@@ -119,6 +135,16 @@ pub const REFUSED_BODY_TIME: Duration = Duration::from_secs(2);
 pub const LATE_CANCEL: Duration = Duration::from_secs(30);
 /// How long a client counts as seen.
 pub const CLIENT_WINDOW: Duration = Duration::from_secs(10 * 60);
+/// How many of the clients' `initialize`s are remembered, to recognise their later requests by:
+/// past that, the one whose id was used longest ago is forgotten.
+pub const MAX_KNOWN: usize = 256;
+/// The header that carries a connection's session id (lower case, as header names are told apart
+/// without case).
+pub const SESSION_ID: &str = "mcp-session-id";
+/// The most of a `User-Agent` kept and compared.
+const AGENT_BYTES: usize = 256;
+/// An `initialize` is looked for only in a body of up to this size.
+const INITIALIZE_BYTES: usize = 1024 * 1024;
 /// The hosts and origins the endpoint answers: this computer's loopback names.
 const LOOPBACK: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
 
@@ -423,19 +449,59 @@ struct Shared {
 struct Handler(Arc<Shared>);
 
 impl Handler {
-    /// The client making a request, noted as seen: as its `_meta` says in the 2026-07-28 era. A
-    /// client of the older era says who it is in `initialize` only, and without sessions its later
-    /// requests cannot be tied to it; the one client of that era seen lately on the same revision is
-    /// taken to be it, and if there are several, none is.
+    /// The client making a request, noted as seen (`None`, counted as an unidentified client's, when
+    /// it cannot be told): as its `_meta` says in the 2026-07-28 era. A client of the older era says
+    /// who it is in `initialize` only, and its later requests are recognised by the session id its
+    /// answer gave it, else by its `User-Agent`, else as the one client of its revision seen lately
+    /// (see the module's notes).
     fn client(&self, context: &RequestContext<RoleServer>, call: bool) -> Option<ClientTag> {
         let protocol = protocol_of(context);
         let client = match context.meta.client_info() {
-            Some(c) => ClientTag { name: c.name, version: c.version },
-            None => self.0.stats.only_client_on(&protocol)?,
+            Some(c) => Some(ClientTag { name: c.name, version: c.version }),
+            None => {
+                let caller = caller_of(context);
+                self.0.stats.recognise(caller.session.as_deref(), caller.agent.as_deref(), &protocol)
+            }
         };
-        self.0.stats.seen(&client, &protocol, call);
-        Some(client)
+        self.0.stats.seen(client.as_ref(), &protocol, call);
+        client
     }
+}
+
+/// Who a request to `/mcp` says it comes from in its headers, noted by [`read_body`] in the
+/// request's extensions (which rmcp hands the handler with the rest of the request's parts): the
+/// session id it carries, its `User-Agent`, and for an `initialize` the new session id its answer
+/// is to give.
+#[derive(Clone, Debug, Default)]
+struct Caller {
+    session: Option<String>,
+    agent: Option<String>,
+    new_session: Option<String>,
+}
+
+impl Caller {
+    fn of(headers: &HeaderMap) -> Caller {
+        let text = |name: &str| headers.get(name).and_then(|v| v.to_str().ok()).map(str::trim).filter(|v| !v.is_empty());
+        Caller {
+            session: text(SESSION_ID).map(String::from),
+            // to_str takes visible ASCII only, so a cut is never inside a character
+            agent: text(USER_AGENT.as_str()).map(|a| a[..a.len().min(AGENT_BYTES)].to_string()),
+            new_session: None,
+        }
+    }
+}
+
+/// What [`read_body`] noted of the request a handler answers (nothing for a request it did not see).
+fn caller_of(context: &RequestContext<RoleServer>) -> Caller {
+    context.extensions.get::<axum::http::request::Parts>().and_then(|p| p.extensions.get::<Caller>()).cloned().unwrap_or_default()
+}
+
+/// A new session id, 128 random bits in base64url (none if the system's random source fails: the
+/// client is then recognised as one without an id is).
+fn new_session_id() -> Option<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).ok()?;
+    Some(URL_SAFE_NO_PAD.encode(bytes))
 }
 
 impl ServerHandler for Handler {
@@ -447,12 +513,21 @@ impl ServerHandler for Handler {
         Cow::Borrowed(PROTOCOL_VERSIONS)
     }
 
+    /// The client is introduced: by the session id its answer carries (see [`read_body`]) and the
+    /// `User-Agent` it came with, on the revision agreed.
     async fn initialize(&self, request: InitializeRequestParams, context: RequestContext<RoleServer>) -> Result<InitializeResult, McpError> {
         context.peer.set_peer_info(request.clone());
         let result = self.negotiate_initialize(&request)?;
         let client = ClientTag { name: request.client_info.name.clone(), version: request.client_info.version.clone() };
-        self.0.stats.seen(&client, result.protocol_version.as_str(), false);
+        let (caller, protocol) = (caller_of(&context), result.protocol_version.as_str());
+        self.0.stats.introduce(caller.new_session.as_deref(), &client, caller.agent.as_deref(), protocol);
+        self.0.stats.seen(Some(&client), protocol, false);
         Ok(result)
+    }
+
+    async fn ping(&self, context: RequestContext<RoleServer>) -> Result<(), McpError> {
+        self.client(&context, false);
+        Ok(())
     }
 
     async fn discover(&self, context: RequestContext<RoleServer>) -> Result<DiscoverResult, McpError> {
@@ -502,7 +577,7 @@ impl ServerHandler for Handler {
             progress,
             cancel: context.ct.clone(),
         };
-        let flight = self.0.stats.begin(&name);
+        let flight = self.0.stats.begin(&name, call.client.clone(), &protocol);
         let answer = self.0.bridge.call(call);
         let answer = match told.as_mut() {
             None => answer.await,
@@ -659,7 +734,11 @@ struct Front {
 }
 
 /// Reads a POST's body before rmcp does, within [`BODY_TIMEOUT`] and [`MAX_BODY`] and only till the
-/// endpoint stops, and looks in it for `notifications/cancelled`.
+/// endpoint stops, and looks in it for `notifications/cancelled`; notes who the request says it
+/// comes from ([`Caller`]) for the handler, and gives the answer to an `initialize` that rmcp lets
+/// through a new session id, which the handler introduces the client by (see the module's notes).
+/// The `Mcp-Session-Id` a request carries is left for rmcp, which without sessions does not look at
+/// it.
 async fn read_body(State(front): State<Front>, request: Request, next: Next) -> Response {
     if request.method() != Method::POST {
         return next.run(request).await;
@@ -669,7 +748,7 @@ async fn read_body(State(front): State<Front>, request: Request, next: Next) -> 
     if declared.is_some_and(|length| length > MAX_BODY as u64) {
         return refuse(request, too_large().into_response()).await;
     }
-    let (parts, body) = request.into_parts();
+    let (mut parts, body) = request.into_parts();
     let read = tokio::time::timeout(BODY_TIMEOUT, axum::body::to_bytes(body, MAX_BODY));
     let bytes = tokio::select! {
         read = read => match read {
@@ -682,12 +761,33 @@ async fn read_body(State(front): State<Front>, request: Request, next: Next) -> 
             return closing((StatusCode::SERVICE_UNAVAILABLE, "Service Unavailable: SmedCover's MCP endpoint is stopping").into_response());
         }
     };
+    let mut caller = Caller::of(&parts.headers);
+    if is_initialize(&bytes) {
+        caller.new_session = new_session_id();
+    }
     if let Some(id) = cancelled_request(&bytes) {
         let protocol = parts.headers.get("mcp-protocol-version").and_then(|v| v.to_str().ok()).unwrap_or("2025-03-26");
-        let client = front.stats.only_client_on(protocol);
+        let client = front.stats.recognise(caller.session.as_deref(), caller.agent.as_deref(), protocol);
         front.calls.cancel(&id, protocol, client.as_ref());
     }
-    next.run(Request::from_parts(parts, Body::from(bytes))).await
+    let new_session = caller.new_session.clone();
+    parts.extensions.insert(caller);
+    let mut response = next.run(Request::from_parts(parts, Body::from(bytes))).await;
+    if let Some(id) = new_session.filter(|_| response.status().is_success()) {
+        if let Ok(id) = HeaderValue::from_str(&id) {
+            response.headers_mut().insert(HeaderName::from_static(SESSION_ID), id);
+        }
+    }
+    response
+}
+
+/// Whether a body is an `initialize` request: one small enough, naming the method, read as JSON.
+fn is_initialize(body: &[u8]) -> bool {
+    const METHOD: &[u8] = b"\"initialize\"";
+    if body.len() > INITIALIZE_BYTES || !body.windows(METHOD.len()).any(|w| w == METHOD) {
+        return false;
+    }
+    serde_json::from_slice::<Value>(body).is_ok_and(|m| m.get("method").and_then(Value::as_str) == Some("initialize") && m.get("id").is_some())
 }
 
 fn is_too_large(e: &axum::Error) -> bool {
@@ -786,18 +886,38 @@ async fn health(State(bridge): State<Arc<dyn PageBridge>>) -> Json<Value> {
 
 // ---- what the page is told about the clients ----
 
-/// A client seen in the last [`CLIENT_WINDOW`].
+/// A client seen in the last [`CLIENT_WINDOW`]: its last request, or the end of its last call, came
+/// that lately. The requests that could not be told to be any client's are counted as one more, the
+/// unidentified client, whose name and version are `None` (null, for the page).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientSeen {
-    pub name: String,
-    pub version: String,
+    /// The name and version it gave; both `None` for the unidentified client.
+    pub name: Option<String>,
+    pub version: Option<String>,
     /// The protocol revision it last used.
     pub protocol: String,
     /// When it was last seen, in milliseconds since 1970 (as JavaScript's `Date` takes it).
     pub last_seen: u64,
-    /// The tool calls it has made (that could be told to be its).
+    /// The tool calls it has made (that could be told to be its; the unidentified client's, those
+    /// that could not be told to be anyone's), counted from when it was first seen, or seen again
+    /// after the window.
     pub calls: u64,
+}
+
+impl ClientSeen {
+    /// Whether this is `client`'s entry (`None`: the unidentified client's).
+    fn is(&self, client: Option<&ClientTag>) -> bool {
+        match client {
+            Some(c) => self.name.as_deref() == Some(c.name.as_str()) && self.version.as_deref() == Some(c.version.as_str()),
+            None => self.name.is_none(),
+        }
+    }
+
+    /// The client, unless this is the unidentified one.
+    fn tag(&self) -> Option<ClientTag> {
+        Some(ClientTag { name: self.name.clone()?, version: self.version.clone()? })
+    }
 }
 
 /// The last tool call.
@@ -814,25 +934,44 @@ pub struct LastCall {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsSnapshot {
-    /// The clients seen in the last [`CLIENT_WINDOW`], the latest first.
+    /// The clients seen in the last [`CLIENT_WINDOW`], the latest first: the unidentified client
+    /// among them when requests that could not be told to be anyone's came in that time.
     pub clients: Vec<ClientSeen>,
     /// The tool calls under way.
     pub in_flight: usize,
     pub last_call: Option<LastCall>,
 }
 
-/// The clients seen lately and the calls under way. "Connected" can only mean "seen lately": a
-/// client of the 2026-07-28 era says who it is on every request and holds no connection open.
+/// The clients seen lately and the calls under way, and who the clients of the older era are, to
+/// recognise their requests by. "Connected" can only mean "seen lately": a client of the 2026-07-28
+/// era says who it is on every request and holds no connection open.
 pub struct Stats {
     inner: Mutex<StatsInner>,
     changes: watch::Sender<u64>,
+    /// The time, in milliseconds since 1970.
+    clock: Box<dyn Fn() -> u64 + Send + Sync>,
 }
 
 #[derive(Default)]
 struct StatsInner {
+    /// The clients seen in the last [`CLIENT_WINDOW`] (and those seen before, till they are pruned).
     clients: Vec<ClientSeen>,
+    /// The clients introduced by their `initialize`, [`MAX_KNOWN`] at most, the one whose session id
+    /// was used last at the back.
+    known: VecDeque<Known>,
     in_flight: usize,
     last_call: Option<LastCall>,
+}
+
+/// A client as its `initialize` introduced it: the session id its answer gave it, the `User-Agent`
+/// it came with and the revision agreed. It is used only to recognise the client's later requests,
+/// and kept apart from whether the client was seen lately ([`ClientSeen`]), so that a client not
+/// seen for a while is still known when it comes back.
+struct Known {
+    session: Option<String>,
+    client: ClientTag,
+    agent: Option<String>,
+    protocol: String,
 }
 
 impl Default for Stats {
@@ -843,13 +982,20 @@ impl Default for Stats {
 
 impl Stats {
     pub fn new() -> Stats {
-        Stats { inner: Mutex::new(StatsInner::default()), changes: watch::Sender::new(0) }
+        Stats::with_clock(now_ms)
+    }
+
+    /// Stats that tell the time by `clock`, in milliseconds since 1970: a test's may run ahead, to
+    /// see what is forgotten as time goes by and what is not.
+    pub fn with_clock(clock: impl Fn() -> u64 + Send + Sync + 'static) -> Stats {
+        Stats { inner: Mutex::new(StatsInner::default()), changes: watch::Sender::new(0), clock: Box::new(clock) }
     }
 
     /// The clients seen lately, the calls under way and the last call.
     pub fn snapshot(&self) -> StatsSnapshot {
+        let now = (self.clock)();
         let mut inner = lock(&self.inner);
-        prune(&mut inner.clients);
+        prune(&mut inner.clients, now);
         let mut clients = inner.clients.clone();
         clients.sort_by_key(|c| std::cmp::Reverse(c.last_seen));
         StatsSnapshot { clients, in_flight: inner.in_flight, last_call: inner.last_call.clone() }
@@ -865,49 +1011,93 @@ impl Stats {
         self.changes.send_modify(|n| *n = n.wrapping_add(1));
     }
 
-    fn seen(&self, client: &ClientTag, protocol: &str, call: bool) {
-        {
-            let mut inner = lock(&self.inner);
-            prune(&mut inner.clients);
-            let now = now_ms();
-            match inner.clients.iter_mut().find(|c| c.name == client.name && c.version == client.version) {
-                Some(seen) => {
-                    seen.last_seen = now;
-                    if !protocol.is_empty() {
-                        seen.protocol = protocol.to_string();
-                    }
-                    seen.calls += u64::from(call);
-                }
-                None => inner.clients.push(ClientSeen {
-                    name: client.name.clone(),
-                    version: client.version.clone(),
-                    protocol: protocol.to_string(),
-                    last_seen: now,
-                    calls: u64::from(call),
-                }),
-            }
-        }
+    /// `client` seen now (`None`: the unidentified client), on `protocol`, making a call if `call`.
+    fn seen(&self, client: Option<&ClientTag>, protocol: &str, call: bool) {
+        let now = (self.clock)();
+        note(&mut lock(&self.inner), client, protocol, call, now);
         self.changed();
     }
 
-    /// The one client seen lately that uses `protocol`, a revision of the `initialize` era.
-    fn only_client_on(&self, protocol: &str) -> Option<ClientTag> {
+    /// `client` introduced by an `initialize` on `protocol`, which came with `agent` as its
+    /// `User-Agent` and whose answer gives it `session`; the one whose id was used longest ago is
+    /// forgotten when [`MAX_KNOWN`] are already known.
+    fn introduce(&self, session: Option<&str>, client: &ClientTag, agent: Option<&str>, protocol: &str) {
+        let mut inner = lock(&self.inner);
+        if inner.known.len() >= MAX_KNOWN {
+            inner.known.pop_front();
+        }
+        let known = Known { session: session.map(String::from), client: client.clone(), agent: agent.map(String::from), protocol: protocol.to_string() };
+        inner.known.push_back(known);
+    }
+
+    /// The client that a request of `protocol` which does not say who it is comes from, as the
+    /// session id it carries (`session`) and its `User-Agent` (`agent`) tell: the client that id
+    /// was given to; else, on a revision of the `initialize` era, the client introduced on that
+    /// revision with that `User-Agent`, if one alone was; else the one client of that revision seen
+    /// lately (among those introduced with that `User-Agent`, if there are any); else none.
+    fn recognise(&self, session: Option<&str>, agent: Option<&str>, protocol: &str) -> Option<ClientTag> {
+        let now = (self.clock)();
+        let mut inner = lock(&self.inner);
+        if let Some(at) = session.and_then(|id| inner.known.iter().position(|k| k.session.as_deref() == Some(id))) {
+            // used: the last to be forgotten
+            let known = inner.known.remove(at)?;
+            let client = known.client.clone();
+            inner.known.push_back(known);
+            return Some(client);
+        }
         if !is_legacy(protocol) {
             return None;
         }
-        let mut inner = lock(&self.inner);
-        prune(&mut inner.clients);
-        let mut on = inner.clients.iter().filter(|c| c.protocol == protocol);
+        let mut by_agent: Vec<ClientTag> = Vec::new();
+        if agent.is_some() {
+            for known in inner.known.iter().filter(|k| k.agent.as_deref() == agent && k.protocol == protocol) {
+                if !by_agent.contains(&known.client) {
+                    by_agent.push(known.client.clone());
+                }
+            }
+        }
+        if let [client] = &by_agent[..] {
+            return Some(client.clone());
+        }
+        prune(&mut inner.clients, now);
+        let mut on = inner
+            .clients
+            .iter()
+            .filter(|c| c.protocol == protocol)
+            .filter_map(ClientSeen::tag)
+            .filter(|c| by_agent.is_empty() || by_agent.contains(c));
         match (on.next(), on.next()) {
-            (Some(c), None) => Some(ClientTag { name: c.name.clone(), version: c.version.clone() }),
+            (Some(c), None) => Some(c),
             _ => None,
         }
     }
 
-    fn begin(&self, tool: &str) -> Flight<'_> {
+    /// A call of `tool` begun, by `client` (`None`: one that could not be told) on `protocol`.
+    fn begin(&self, tool: &str, client: Option<ClientTag>, protocol: &str) -> Flight<'_> {
         lock(&self.inner).in_flight += 1;
         self.changed();
-        Flight { stats: self, tool: tool.to_string(), ok: false, ended: false }
+        Flight { stats: self, tool: tool.to_string(), client, protocol: protocol.to_string(), ok: false, ended: false }
+    }
+}
+
+/// `client` seen at `now` (see [`Stats::seen`]).
+fn note(inner: &mut StatsInner, client: Option<&ClientTag>, protocol: &str, call: bool, now: u64) {
+    prune(&mut inner.clients, now);
+    match inner.clients.iter_mut().find(|c| c.is(client)) {
+        Some(seen) => {
+            seen.last_seen = now;
+            if !protocol.is_empty() {
+                seen.protocol = protocol.to_string();
+            }
+            seen.calls += u64::from(call);
+        }
+        None => inner.clients.push(ClientSeen {
+            name: client.map(|c| c.name.clone()),
+            version: client.map(|c| c.version.clone()),
+            protocol: protocol.to_string(),
+            last_seen: now,
+            calls: u64::from(call),
+        }),
     }
 }
 
@@ -922,10 +1112,13 @@ fn is_legacy(protocol: &str) -> bool {
     PROTOCOL_VERSIONS.iter().any(|v| v.has_initialize() && v.as_str() == protocol)
 }
 
-/// A call under way, counted till it ends (or is dropped, its client gone).
+/// A call under way, counted till it ends (or is dropped, its client gone); its client is seen again
+/// as it ends, having been there till then.
 struct Flight<'a> {
     stats: &'a Stats,
     tool: String,
+    client: Option<ClientTag>,
+    protocol: String,
     ok: bool,
     ended: bool,
 }
@@ -940,17 +1133,23 @@ impl Flight<'_> {
 impl Drop for Flight<'_> {
     fn drop(&mut self) {
         {
+            let now = (self.stats.clock)();
             let mut inner = lock(&self.stats.inner);
             inner.in_flight -= 1;
-            inner.last_call = Some(LastCall { tool: std::mem::take(&mut self.tool), at: now_ms(), ok: self.ended && self.ok });
+            inner.last_call = Some(LastCall { tool: std::mem::take(&mut self.tool), at: now, ok: self.ended && self.ok });
+            // a client no longer seen lately when its long call ends comes back with that call
+            prune(&mut inner.clients, now);
+            let back = !inner.clients.iter().any(|c| c.is(self.client.as_ref()));
+            note(&mut inner, self.client.as_ref(), &self.protocol, back, now);
         }
         self.stats.changed();
     }
 }
 
-fn prune(clients: &mut Vec<ClientSeen>) {
+/// Forgets the clients not seen in the [`CLIENT_WINDOW`] before `now` (who they are stays known).
+fn prune(clients: &mut Vec<ClientSeen>, now: u64) {
     let window = u64::try_from(CLIENT_WINDOW.as_millis()).unwrap_or(u64::MAX);
-    let since = now_ms().saturating_sub(window);
+    let since = now.saturating_sub(window);
     clients.retain(|c| c.last_seen >= since);
 }
 
@@ -993,18 +1192,178 @@ mod tests {
         }
     }
 
+    fn tag(name: &str) -> ClientTag {
+        ClientTag { name: name.into(), version: "1".into() }
+    }
+
+    /// Stats whose clock is moved on by hand, from the time it is now.
+    fn stats_with_clock() -> (Stats, Arc<AtomicU64>) {
+        let ahead = Arc::new(AtomicU64::new(0));
+        let by = ahead.clone();
+        (Stats::with_clock(move || now_ms() + by.load(Ordering::SeqCst)), ahead)
+    }
+
+    const MINUTE: u64 = 60 * 1000;
+
+    /// What an `initialize` does to the stats: the client introduced, and seen.
+    fn initialize(stats: &Stats, session: Option<&str>, client: &ClientTag, agent: Option<&str>, protocol: &str) {
+        stats.introduce(session, client, agent, protocol);
+        stats.seen(Some(client), protocol, false);
+    }
+
     #[test]
     fn an_older_clients_calls_are_its_if_it_is_the_only_one() {
         let stats = Stats::new();
-        let tag = |name: &str| ClientTag { name: name.into(), version: "1".into() };
-        assert_eq!(stats.only_client_on("2025-06-18"), None);
-        stats.seen(&tag("claude-code"), "2025-06-18", false);
-        stats.seen(&tag("modern"), "2026-07-28", false);
-        assert_eq!(stats.only_client_on("2025-06-18"), Some(tag("claude-code")));
-        assert_eq!(stats.only_client_on("2025-11-25"), None, "another revision");
-        assert_eq!(stats.only_client_on("2026-07-28"), None, "that era says who it is");
-        stats.seen(&tag("cursor"), "2025-06-18", false);
-        assert_eq!(stats.only_client_on("2025-06-18"), None, "two of them: neither");
+        let recognise = |protocol: &str| stats.recognise(None, None, protocol);
+        assert_eq!(recognise("2025-06-18"), None);
+        stats.seen(Some(&tag("claude-code")), "2025-06-18", false);
+        stats.seen(Some(&tag("modern")), "2026-07-28", false);
+        assert_eq!(recognise("2025-06-18"), Some(tag("claude-code")));
+        assert_eq!(recognise("2025-11-25"), None, "another revision");
+        assert_eq!(recognise("2026-07-28"), None, "that era says who it is");
+        // requests no one could be told to have made are no client to take them to be
+        stats.seen(None, "2025-11-25", true);
+        assert_eq!(recognise("2025-11-25"), None);
+        stats.seen(Some(&tag("cursor")), "2025-06-18", false);
+        assert_eq!(recognise("2025-06-18"), None, "two of them: neither");
+    }
+
+    /// A request carrying the session id an `initialize` gave is that client's, whoever else is on its
+    /// revision with its `User-Agent`, and after it has not been seen for longer than the window.
+    #[test]
+    fn a_session_id_says_whose_a_request_is() {
+        const V: &str = "2025-06-18";
+        let (stats, ahead) = stats_with_clock();
+        initialize(&stats, Some("id-claude"), &tag("claude-code"), Some("node"), V);
+        initialize(&stats, Some("id-cursor"), &tag("cursor"), Some("node"), V);
+        assert_eq!(stats.recognise(Some("id-claude"), Some("node"), V), Some(tag("claude-code")));
+        assert_eq!(stats.recognise(Some("id-cursor"), Some("node"), V), Some(tag("cursor")));
+        // the same User-Agent and revision, two clients: without an id, neither
+        assert_eq!(stats.recognise(None, Some("node"), V), None);
+        assert_eq!(stats.recognise(Some("not-ours"), Some("node"), V), None);
+        // an id says who it is whatever revision the request says
+        assert_eq!(stats.recognise(Some("id-cursor"), None, "2025-03-26"), Some(tag("cursor")));
+        // eleven minutes on: neither is seen lately any more, but both are still known
+        ahead.store(11 * MINUTE, Ordering::SeqCst);
+        assert!(stats.snapshot().clients.is_empty());
+        let client = stats.recognise(Some("id-claude"), Some("node"), V);
+        assert_eq!(client, Some(tag("claude-code")));
+        stats.seen(client.as_ref(), V, true);
+        let seen = stats.snapshot().clients;
+        assert_eq!(seen.len(), 1);
+        assert_eq!((seen[0].name.as_deref(), seen[0].calls, seen[0].last_seen >= now_ms() + 10 * MINUTE), (Some("claude-code"), 1, true));
+    }
+
+    /// Without an id (or with one not given out), a request is the client's that came with its
+    /// `User-Agent` on its revision, if one alone did, even when it has not been seen lately; with
+    /// several, the one of them seen lately; with none, the one client of that revision seen lately.
+    #[test]
+    fn a_user_agent_says_whose_a_request_is_when_one_client_alone_came_with_it() {
+        const V: &str = "2025-06-18";
+        let (stats, ahead) = stats_with_clock();
+        initialize(&stats, Some("a"), &tag("claude-code"), Some("claude-cli/2.1"), V);
+        initialize(&stats, Some("b"), &tag("hermes"), Some("python-httpx/0.28"), V);
+        assert_eq!(stats.recognise(None, Some("python-httpx/0.28"), V), Some(tag("hermes")));
+        assert_eq!(stats.recognise(Some("from-before-a-restart"), Some("claude-cli/2.1"), V), Some(tag("claude-code")));
+        assert_eq!(stats.recognise(None, Some("python-httpx/0.28"), "2025-11-25"), None, "another revision");
+        assert_eq!(stats.recognise(None, Some("curl/8"), V), None, "an agent no one came with, and two clients seen lately");
+        assert_eq!(stats.recognise(None, None, V), None);
+        ahead.store(30 * MINUTE, Ordering::SeqCst);
+        assert_eq!(stats.recognise(None, Some("python-httpx/0.28"), V), Some(tag("hermes")), "known still, long after");
+        // another client with Hermes's User-Agent: of the two, the one seen lately
+        initialize(&stats, Some("c"), &tag("other-python"), Some("python-httpx/0.28"), V);
+        assert_eq!(stats.recognise(None, Some("python-httpx/0.28"), V), Some(tag("other-python")));
+        stats.seen(Some(&tag("hermes")), V, false);
+        assert_eq!(stats.recognise(None, Some("python-httpx/0.28"), V), None, "both seen lately");
+        // the same client introduced again with the same User-Agent is still one client
+        ahead.store(60 * MINUTE, Ordering::SeqCst);
+        initialize(&stats, Some("a2"), &tag("claude-code"), Some("claude-cli/2.1"), V);
+        assert_eq!(stats.recognise(None, Some("claude-cli/2.1"), V), Some(tag("claude-code")));
+    }
+
+    /// The requests that cannot be told to be anyone's are counted as the unidentified client's,
+    /// shown to the page with a null name, and a call's client is seen again as the call ends.
+    #[test]
+    fn requests_no_one_can_be_told_to_have_made_are_counted() {
+        let (stats, ahead) = stats_with_clock();
+        stats.seen(None, "2025-06-18", true);
+        stats.seen(None, "2025-11-25", false);
+        drop(stats.begin("export", None, "2025-11-25"));
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.clients.len(), 1);
+        let unidentified = &snapshot.clients[0];
+        assert_eq!((unidentified.name.as_deref(), unidentified.version.as_deref()), (None, None));
+        assert_eq!((unidentified.protocol.as_str(), unidentified.calls), ("2025-11-25", 1));
+        let shown = serde_json::to_value(&snapshot).unwrap();
+        assert!(shown["clients"][0]["name"].is_null() && shown["clients"][0]["version"].is_null(), "{shown}");
+        assert_eq!(shown["clients"][0]["calls"], 1);
+        // a call begun twelve minutes ago and ended now: its client is seen as it ends
+        stats.seen(Some(&tag("codex")), "2025-06-18", true);
+        let flight = stats.begin("export", Some(tag("codex")), "2025-06-18");
+        ahead.store(12 * MINUTE, Ordering::SeqCst);
+        assert!(stats.snapshot().clients.is_empty());
+        flight.end(true);
+        let seen = stats.snapshot().clients;
+        assert_eq!(seen.iter().map(|c| (c.name.as_deref(), c.calls)).collect::<Vec<_>>(), [(Some("codex"), 1)]);
+        assert_eq!(stats.snapshot().last_call.map(|c| c.at), Some(seen[0].last_seen));
+    }
+
+    /// No more than [`MAX_KNOWN`] clients' `initialize`s are kept: the one whose id was used longest
+    /// ago goes first.
+    #[test]
+    fn what_is_known_stays_bounded() {
+        const V: &str = "2025-06-18";
+        let stats = Stats::new();
+        let id = |n: usize| format!("id-{n}");
+        for n in 0..MAX_KNOWN {
+            stats.introduce(Some(&id(n)), &tag(&format!("client-{n}")), None, V);
+        }
+        // the first used again: the second is now the one used longest ago
+        assert_eq!(stats.recognise(Some(&id(0)), None, V), Some(tag("client-0")));
+        for n in MAX_KNOWN..MAX_KNOWN + 40 {
+            stats.introduce(Some(&id(n)), &tag(&format!("client-{n}")), None, V);
+        }
+        assert_eq!(lock(&stats.inner).known.len(), MAX_KNOWN);
+        assert_eq!(stats.recognise(Some(&id(0)), None, V), Some(tag("client-0")));
+        for n in 1..=40 {
+            assert_eq!(stats.recognise(Some(&id(n)), None, V), None, "{n} is forgotten");
+        }
+        assert_eq!(stats.recognise(Some(&id(41)), None, V), Some(tag("client-41")));
+        assert_eq!(stats.recognise(Some(&id(MAX_KNOWN + 39)), None, V), Some(tag(&format!("client-{}", MAX_KNOWN + 39))));
+    }
+
+    #[test]
+    fn initialize_requests_are_told() {
+        let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}});
+        assert!(is_initialize(init.to_string().as_bytes()));
+        assert!(is_initialize(br#"{"jsonrpc":"2.0","id":"a","method" : "initialize","params":{}}"#));
+        assert!(!is_initialize(br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#));
+        assert!(!is_initialize(br#"{"jsonrpc":"2.0","method":"initialize"}"#), "a notification is no request");
+        let call = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "set_text", "arguments": {"text": "initialize"}}});
+        assert!(!is_initialize(call.to_string().as_bytes()));
+        assert!(!is_initialize(b"[]") && !is_initialize(b"not json \"initialize\""));
+    }
+
+    #[test]
+    fn session_ids_are_new_each_time_and_fit_in_a_header() {
+        let (a, b) = (new_session_id().unwrap(), new_session_id().unwrap());
+        assert_ne!(a, b);
+        assert_eq!(a.len(), 22);
+        assert!(a.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_'), "{a}");
+        assert!(HeaderValue::from_str(&a).is_ok());
+    }
+
+    #[test]
+    fn a_caller_is_read_from_the_headers() {
+        let mut headers = HeaderMap::new();
+        assert!(Caller::of(&headers).session.is_none() && Caller::of(&headers).agent.is_none());
+        headers.insert(SESSION_ID, HeaderValue::from_static(" abc "));
+        headers.insert(USER_AGENT, HeaderValue::from_str(&"x".repeat(1000)).unwrap());
+        let caller = Caller::of(&headers);
+        assert_eq!(caller.session.as_deref(), Some("abc"));
+        assert_eq!(caller.agent.map(|a| a.len()), Some(AGENT_BYTES));
+        headers.insert(SESSION_ID, HeaderValue::from_static(""));
+        assert!(Caller::of(&headers).session.is_none());
     }
 
     /// `/mcp` wants the token while the access is a token's, wants none while it is open, the one in
@@ -1138,12 +1497,12 @@ mod tests {
         let stats = Stats::new();
         let changes = stats.changes();
         let client = ClientTag { name: "codex".into(), version: "1.0".into() };
-        stats.seen(&client, "2025-06-18", false);
-        stats.seen(&client, "2025-06-18", true);
-        let flight = stats.begin("get_context");
+        stats.seen(Some(&client), "2025-06-18", false);
+        stats.seen(Some(&client), "2025-06-18", true);
+        let flight = stats.begin("get_context", Some(client.clone()), "2025-06-18");
         assert_eq!(stats.snapshot().in_flight, 1);
         flight.end(true);
-        drop(stats.begin("export")); // its client went away
+        drop(stats.begin("export", Some(client.clone()), "2025-06-18")); // its client went away
         let snapshot = stats.snapshot();
         assert_eq!(snapshot.in_flight, 0);
         assert_eq!(snapshot.clients.len(), 1);

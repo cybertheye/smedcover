@@ -33,7 +33,9 @@ Claude Code、Codex、Cursor、Hermes Agent、OpenClaw 这类 agent，可以通�
 | 「开启 MCP 接口」 | 开关、状态小条、「端口」和「应用」，旁边一行字说明当前状态 |
 | 「要求令牌」 | 第二个开关，默认关（见[要求令牌](#要求令牌)）；打开时显示令牌，带「显示」「复制」「换新令牌」 |
 | 「连接 agent」 | 可以复制的几段配置，用的是当前端口（要求令牌时带上令牌），还有一条关于代理的提示 |
-| 「最近」 | 10 分钟内来过的 agent（名字、版本、调用次数、多久以前），正在进行的调用，上一次调用（完成还是失败）；窗口的工具和接口列出的不一致时有一条警告 |
+| 「最近」 | 10 分钟内来过的 agent（名字、版本、调用次数、多久以前；认不出是哪个 agent 的请求另算一个，「未识别的 agent」），正在进行的调用，上一次调用（完成还是失败）；窗口的工具和接口列出的不一致时有一条警告 |
+
+一个 agent 最后一次发请求、或者它最后一个调用结束之后的 10 分钟里，都列在「最近」里。2026-07-28 版本的 agent 每个请求都说自己是谁；旧版本的（如今的 Claude Code、Codex、Cursor、Hermes Agent 都是）只在连上时说一次，所以 SmedCover 那时给它一个会话 ID（`Mcp-Session-Id`），它之后每个请求都带回来，SmedCover 就凭它认出这个 agent，应用开着期间一直认得，不管它多久没动静；这个 ID 不作别的用。没带 ID 的请求，或者带的 ID 不是 SmedCover 给的（应用后来重启过），算作在同一个协议版本上、用同一个 `User-Agent` 连上的那个 agent（只有一个这样的时）；不然算作这个版本上最近来过的唯一一个 agent；再不然就记在「未识别的 agent」名下。所以进来的调用都会被算上，只有这段时间里什么都没进来时，才显示「10 分钟内没有 agent 来过」。
 
 状态小条，和端口旁边那行字：
 
@@ -349,7 +351,7 @@ agent 连上时，SmedCover 会先告诉它怎么用（MCP 的 instructions）�
 
 ### 协议
 
-- Streamable HTTP：只收 `POST /mcp`（`GET`、`DELETE` 回 405），不用会话。回答用服务器推送事件（SSE），响应头发出后每 15 秒一条保活，所以长的调用不会因为客户端等不到响应头而被掐断。在 2026-07-28 版本里，只有带 `progressToken` 的调用响应头才会提前发出；不带的，响应头和结果一起到。
+- Streamable HTTP：只收 `POST /mcp`（`GET`、`DELETE` 回 405），不用会话：`initialize` 的回答里带一个 `Mcp-Session-Id`，但只用来分辨之后的请求是谁发的（见「最近」）；带着不是 SmedCover 给的 ID 的请求照常处理，从不拒绝。回答用服务器推送事件（SSE），响应头发出后每 15 秒一条保活，所以长的调用不会因为客户端等不到响应头而被掐断。在 2026-07-28 版本里，只有带 `progressToken` 的调用响应头才会提前发出；不带的，响应头和结果一起到。
 - 支持的版本：2026-07-28（`server/discover`，每个请求各自独立），以及通过 `initialize` 握手的 2025-03-26、2025-06-18、2025-11-25（没带 `MCP-Protocol-Version` 的请求按 2025-03-26 算）。不支持：2024-11-05 的 HTTP+SSE，以及 JSON-RPC 批量请求。
 - 一个请求最大 32 MiB；一个结果最多 16 张图、48 MB；同时最多处理 16 个调用。
 
@@ -469,7 +471,7 @@ flowchart TD
 
 | 文件 | 做什么 |
 |---|---|
-| `core/src/mcp/server.rs` | 127.0.0.1 上的 HTTP 服务：`/mcp` 和 `/health`，前置检查，`Access`，各种上限，协议版本，见过的客户端（`Stats`） |
+| `core/src/mcp/server.rs` | 127.0.0.1 上的 HTTP 服务：`/mcp` 和 `/health`，前置检查，`Access`，各种上限，协议版本，见过的客户端和怎么认出它们（`Stats`，发出的会话 ID） |
 | `core/src/mcp/bridge.rs` | `PageBridge` 和 `Dispatcher`：把调用交给页面、把回答送回，进度、取消、超时，检查结果 |
 | `core/src/mcp/tools.rs` | `ToolList`：为一个宿主（`desktop`、`server`）读 `ui/tools.json`，以及文件的 SHA-256 |
 | `core/src/mcp/config.rs` | `mcp.json` |

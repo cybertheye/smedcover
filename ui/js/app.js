@@ -3052,14 +3052,22 @@ function mcpLine(s) {
   const says = k === "running" ? t("mcp.runningAt", s.url) : k === "switching" ? t("mcp.switchingLine") : e ? mcpWhy(e, s.port) : t("mcp.offLine");
   return el("div", { class: "hint" + (e ? " err" : ""), id: "mcp-line", role: "status", "aria-live": "polite" }, says);
 }
-/** The clients seen in the last 10 minutes, the calls running and the last call; a warning when the window's tools are not those the endpoint lists. */
+/**
+ * The clients seen in the last 10 minutes — the requests no client could be told to have made among them as one more, the
+ * unidentified agent (its name null) — the calls running and the last call; a warning when the window's tools are not
+ * those the endpoint lists. "No agent" only when nothing came in that time: no client, no call running, no call ended.
+ */
 function mcpSeen(s) {
   const lately = (s.clients || []).filter((c) => Date.now() - c.lastSeen < 600000), last = s.lastCall;
+  const quiet = !lately.length && !s.inFlight && !(last && Date.now() - last.at < 600000);
+  const who = (c) => c.name == null
+    ? [el("span", { class: "aidot" }), el("b", {}, t("mcp.unidentified"))]
+    : [el("span", { class: "aidot ok" }), el("b", {}, c.name || "?"), el("small", {}, c.version)];
   return el("section", { class: "scard aicard", id: "set-mcp-seen" },
     el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("mcp.seen")), el("small", {}, t("mcp.seenSub")))),
     el("div", { class: "mseen" },
-      lately.length ? lately.map((c) => el("div", { class: "mclient" }, el("span", { class: "aidot ok" }), el("b", {}, c.name || "?"), el("small", {}, c.version), el("span", { class: "grow" }), el("small", {}, counted("mcp.calls", c.calls)), el("span", {}, ago(c.lastSeen))))
-        : el("div", { class: "hint" }, t("mcp.noClients")),
+      lately.map((c) => el("div", { class: "mclient" }, who(c), el("span", { class: "grow" }), el("small", {}, counted("mcp.calls", c.calls)), el("span", {}, ago(c.lastSeen)))),
+      quiet && el("div", { class: "hint" }, t("mcp.noClients")),
       el("div", { class: "mfacts" },
         el("span", {}, t("mcp.inFlight", s.inFlight || 0)),
         el("span", {}, last ? [t("mcp.last", last.tool, ago(last.at)), " · ", el("b", { class: last.ok ? "ok" : "bad" }, t(last.ok ? "mcp.ok" : "mcp.failed"))] : t("mcp.lastNone"))),
@@ -9072,11 +9080,13 @@ async function agentSettingsTest({ call, ok, r, no }) {
 /**
  * With SMEDCOVER_SELFTEST_MCP, the app's own endpoint called over real HTTP, once the page has attached (selftest_mcp
  * in mcp.rs): as by default, no token wanted, initialize, tools/list, get_context and render_preview through to this
- * page, none with a token; then a token required as the Agents page's switch requires it, and none again. The tools it
- * lists are the desktop's, the context's profiles the window's, the preview a PNG 480 px on its longer side as it says;
- * with the token required, a request without one and one with a wrong one refused (401), one with it let in; none
- * required again, one without let in; the status saying so each time; the client seen. Undefined when the endpoint is not
- * the self-test's.
+ * page, none with a token, each after initialize with the session id it gave, another client saying hello in between on
+ * the same revision and with the same User-Agent; then a token required as the Agents page's switch requires it, and none
+ * again. The tools it lists are the desktop's, the context's profiles the window's, the preview a PNG 480 px on its longer
+ * side as it says; with the token required, a request without one and one with a wrong one refused (401), one with it let
+ * in; none required again, one without let in; the status saying so each time; initialize giving a session id, and the
+ * status's clients showing the self-test's client with its two calls, the other with none, and no unidentified agent
+ * (only the session id tells the two apart). Undefined when the endpoint is not the self-test's.
  */
 async function mcpTest() {
   const m = await invoke("selftest_mcp");
@@ -9092,7 +9102,10 @@ async function mcpTest() {
   if (m.noToken !== 401 || m.wrongToken !== 401 || m.rightToken !== 200) no(`with a token required, no token answered ${m.noToken}, a wrong one ${m.wrongToken}, the right one ${m.rightToken} (not 401, 401, 200)`);
   if (m.openAgain !== 200) no(`no token required again, a request without one answered ${m.openAgain}, not 200`);
   if (JSON.stringify(m.requireToken) !== "[false,true,false]") no(`the status said requireToken ${JSON.stringify(m.requireToken)} before, while and after it was required`);
-  if (!m.clientSeen) no("the self-test's client is not among those seen");
+  if (m.session !== true) no("initialize gave no Mcp-Session-Id");
+  if (!m.client || m.client.calls !== 2) no(`the self-test's client is not among those seen with its 2 calls: ${JSON.stringify(m.client)}`);
+  if (!m.other || m.other.calls !== 0) no(`the client that only said hello is not among those seen with no calls: ${JSON.stringify(m.other)}`);
+  if (m.unidentified) no("the self-test's requests, each with its session id, were counted as an unidentified agent's");
   r.ok = !r.errors.length;
   return r;
 }

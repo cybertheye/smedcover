@@ -8,8 +8,9 @@
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rmcp::model::{CallToolRequestParams, ClientCapabilities, ClientConfig, Implementation, ProtocolVersion};
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -130,6 +131,8 @@ struct Endpoint {
     bridge: Arc<FakeBridge>,
     access: Arc<RwLock<Access>>,
     stats: Arc<Stats>,
+    /// How far the stats' clock runs ahead of the time.
+    ahead: Arc<AtomicU64>,
     server: McpServer,
 }
 
@@ -148,10 +151,17 @@ impl Endpoint {
         let bridge = Arc::new(FakeBridge::default());
         let tools = Arc::new(ToolList::from_json(TOOLS, Host::Desktop).unwrap());
         let access = Arc::new(RwLock::new(access));
-        let stats = Arc::new(Stats::new());
+        let ahead = Arc::new(AtomicU64::new(0));
+        let by = ahead.clone();
+        let stats = Arc::new(Stats::with_clock(move || now_ms() + by.load(Ordering::SeqCst)));
         let server = McpServer::new(bridge.clone(), tools, access.clone(), stats.clone());
         let running = server.start(([127, 0, 0, 1], 0).into(), &Handle::current()).expect("a free port");
-        Endpoint { running, bridge, access, stats, server }
+        Endpoint { running, bridge, access, stats, ahead, server }
+    }
+
+    /// Moves the stats' clock on by `by`, as if that long had gone by.
+    fn later(&self, by: Duration) {
+        self.ahead.fetch_add(by.as_millis() as u64, Ordering::SeqCst);
     }
 
     fn addr(&self) -> SocketAddr {
@@ -208,6 +218,33 @@ impl Endpoint {
             headers.push(("Mcp-Name".into(), name.into()));
         }
         http("POST", &self.url("/mcp"), headers, Some(body.to_string())).await
+    }
+
+    /// A JSON-RPC request of the older era with the headers `extra` too (a session id, a
+    /// `User-Agent`).
+    async fn legacy_with(&self, id: u64, method: &str, params: Value, extra: &[(&str, &str)]) -> Reply {
+        let body = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        let mut headers = self.headers(Some(LEGACY));
+        headers.extend(extra.iter().map(|(n, v)| (n.to_string(), v.to_string())));
+        http("POST", &self.url("/mcp"), headers, Some(body.to_string())).await
+    }
+
+    /// An `initialize` of the older era from the client `name`, coming with `agent` as its
+    /// `User-Agent`: the session id its answer gives.
+    async fn introduce(&self, name: &str, agent: &str) -> String {
+        let init = json!({"protocolVersion": LEGACY, "capabilities": {}, "clientInfo": {"name": name, "version": "1.0"}});
+        let reply = self.legacy_with(1, "initialize", init, &[("User-Agent", agent)]).await;
+        assert_eq!(reply.status, 200, "{}", reply.body);
+        assert_eq!(reply.only()["result"]["protocolVersion"], LEGACY);
+        reply.header("mcp-session-id").expect("a session id").to_string()
+    }
+
+    /// Who the page was told made a call of `echo` sent with the headers `extra`.
+    async fn whose(&self, id: u64, extra: &[(&str, &str)]) -> Option<String> {
+        let reply = self.legacy_with(id, "tools/call", json!({"name": "echo", "arguments": {}}), extra).await;
+        assert_eq!(reply.status, 200, "{}", reply.body);
+        assert_eq!(reply.only()["id"], id);
+        self.bridge.last_call().1.map(|c| c.name)
     }
 
     /// Sends a notification of the older era; its HTTP status.
@@ -300,6 +337,10 @@ fn read_till_closed(stream: &mut TcpStream, wait: Duration) -> (String, bool) {
     }
 }
 
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+}
+
 fn modern_meta() -> Value {
     json!({
         "io.modelcontextprotocol/protocolVersion": MODERN,
@@ -387,7 +428,9 @@ async fn legacy_initialize_list_and_call() {
     let reply = http("POST", &e.url("/mcp"), e.headers(None), Some(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": init}).to_string())).await;
     assert_eq!(reply.status, 200, "{}", reply.body);
     assert!(reply.is_events(), "answers are events");
-    assert!(reply.header("mcp-session-id").is_none(), "no sessions");
+    // a session id, to recognise the client by (see a_session_id_tells_whose_requests_they_are)
+    let id = reply.header("mcp-session-id").expect("a session id");
+    assert!(id.len() == 22 && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_'), "{id}");
     assert!(reply.header("access-control-allow-origin").is_none());
     let result = &reply.only()["result"];
     assert_eq!(result["protocolVersion"], LEGACY);
@@ -422,7 +465,8 @@ async fn legacy_initialize_list_and_call() {
     assert!(result.get("resultType").is_none());
     let (tool, client, timeout) = e.bridge.last_call();
     assert_eq!((tool.as_str(), timeout), ("echo", Duration::from_secs(5)));
-    // the only client of that era seen lately: its calls are taken to be its
+    // sent without the session id, the call is recognised all the same: the client came with the
+    // same User-Agent, and no other did
     assert_eq!(client, Some(ClientTag { name: "raw-legacy".into(), version: "0.1".into() }));
 
     // an image, its data URL's prefix taken off
@@ -435,7 +479,7 @@ async fn legacy_initialize_list_and_call() {
     assert_eq!(reply.only()["result"]["tools"].as_array().unwrap().len(), 8);
 
     let stats = e.stats.snapshot();
-    let seen = stats.clients.iter().find(|c| c.name == "raw-legacy").expect("the client was seen");
+    let seen = stats.clients.iter().find(|c| c.name.as_deref() == Some("raw-legacy")).expect("the client was seen");
     assert_eq!((seen.protocol.as_str(), seen.calls), (LEGACY, 2));
     assert_eq!(stats.in_flight, 0);
     assert_eq!(stats.last_call.as_ref().map(|c| (c.tool.as_str(), c.ok)), Some(("image", true)));
@@ -511,8 +555,10 @@ async fn modern_discover_list_and_call() {
     assert_eq!(result["structuredContent"], args);
     let (_, client, _) = e.bridge.last_call();
     assert_eq!(client, Some(ClientTag { name: "raw-modern".into(), version: "0.2".into() }));
-    let seen = e.stats.snapshot().clients.into_iter().find(|c| c.name == "raw-modern").unwrap();
+    let seen = e.stats.snapshot().clients.into_iter().find(|c| c.name.as_deref() == Some("raw-modern")).unwrap();
     assert_eq!((seen.protocol.as_str(), seen.calls), (MODERN, 1));
+    // that era has no initialize, and is given no session id
+    assert!(reply.header("mcp-session-id").is_none());
 }
 
 /// In the 2026-07-28 era a call with a progress token is told progress 0 at once, and that starts
@@ -795,6 +841,12 @@ async fn get_and_delete_are_not_served() {
     headers.retain(|(n, _)| n != "Accept");
     headers.push(("Accept".into(), "text/event-stream".into()));
     assert_eq!(get(&e.url("/mcp"), headers.clone()).await.status, 405);
+    assert_eq!(http("DELETE", &e.url("/mcp"), headers.clone(), None).await.status, 405);
+    // with a session id given out, as a client closing its session sends it, as well
+    let init = json!({"protocolVersion": LEGACY, "capabilities": {}, "clientInfo": {"name": "raw-legacy", "version": "0.1"}});
+    let id = e.legacy(1, "initialize", init).await.header("mcp-session-id").expect("a session id").to_string();
+    headers.push(("Mcp-Session-Id".into(), id));
+    assert_eq!(get(&e.url("/mcp"), headers.clone()).await.status, 405);
     assert_eq!(http("DELETE", &e.url("/mcp"), headers, None).await.status, 405);
     assert_eq!(get(&e.url("/elsewhere"), vec![]).await.status, 404);
 }
@@ -1033,6 +1085,130 @@ async fn batches_are_not_served() {
     assert_eq!(reply.status, 415, "{}", reply.body);
 }
 
+// ---- who a request comes from ----
+
+/// The answer to an `initialize` carries a session id, used only to recognise the client by: a
+/// request carrying it is that client's, whoever else is on the same revision with the same
+/// `User-Agent`, and however long ago the client was last seen. One without it, or with an id not
+/// given out (the app started again since), is served all the same and taken to be the client that
+/// came with its `User-Agent`, if one alone did; else it is counted as the unidentified client's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_session_id_tells_whose_requests_they_are() {
+    let e = Endpoint::open();
+    let a = e.introduce("raw-a", "raw-a/1.0").await;
+    let b = e.introduce("raw-b", "raw-b/1.0").await;
+    let c = e.introduce("raw-c", "node").await;
+    let d = e.introduce("raw-d", "node").await;
+    assert!(a != b && a != c && a != d && b != c && b != d && c != d, "each its own");
+    let (a, b, c, d) = (a.as_str(), b.as_str(), c.as_str(), d.as_str());
+    // by their ids, though c and d came with the same User-Agent on the same revision
+    assert_eq!(e.whose(2, &[("Mcp-Session-Id", a), ("User-Agent", "raw-a/1.0")]).await.as_deref(), Some("raw-a"));
+    assert_eq!(e.whose(3, &[("Mcp-Session-Id", c), ("User-Agent", "node")]).await.as_deref(), Some("raw-c"));
+    assert_eq!(e.whose(4, &[("Mcp-Session-Id", d), ("User-Agent", "node")]).await.as_deref(), Some("raw-d"));
+    // an id says whose a request is whatever User-Agent comes with it
+    assert_eq!(e.whose(5, &[("Mcp-Session-Id", b), ("User-Agent", "something/else")]).await.as_deref(), Some("raw-b"));
+    // without one, by the User-Agent when one client alone came with it
+    assert_eq!(e.whose(6, &[("User-Agent", "raw-b/1.0")]).await.as_deref(), Some("raw-b"));
+    // an id not given out is no refusal: served, and recognised as one without
+    assert_eq!(e.whose(7, &[("Mcp-Session-Id", "from-before-a-restart"), ("User-Agent", "raw-a/1.0")]).await.as_deref(), Some("raw-a"));
+    // two clients came with this User-Agent, and both were seen lately: no one's, but counted
+    assert_eq!(e.whose(8, &[("Mcp-Session-Id", "from-before-a-restart"), ("User-Agent", "node")]).await, None);
+    assert_eq!(e.whose(9, &[("User-Agent", "node")]).await, None);
+    let shown = serde_json::to_value(e.stats.snapshot()).unwrap();
+    let entry = |name: Value| shown["clients"].as_array().unwrap().iter().find(|c| c["name"] == name).cloned().unwrap_or_else(|| panic!("{shown}"));
+    let unidentified = entry(Value::Null);
+    assert!(unidentified["version"].is_null() && unidentified["protocol"] == LEGACY && unidentified["lastSeen"].is_u64(), "{shown}");
+    assert_eq!(unidentified["calls"], 2);
+    for (name, calls) in [("raw-a", 2), ("raw-b", 2), ("raw-c", 1), ("raw-d", 1)] {
+        assert_eq!(entry(json!(name))["calls"], calls, "{name}: {shown}");
+    }
+
+    // eleven minutes on: no one has been seen lately, but who they are is known still
+    e.later(Duration::from_secs(11 * 60));
+    assert!(e.stats.snapshot().clients.is_empty());
+    assert_eq!(e.whose(10, &[("Mcp-Session-Id", c), ("User-Agent", "node")]).await.as_deref(), Some("raw-c"));
+    assert_eq!(e.whose(11, &[("User-Agent", "raw-b/1.0")]).await.as_deref(), Some("raw-b"));
+    // c alone of those who came with "node" is seen lately now: a request without an id is its
+    assert_eq!(e.whose(12, &[("User-Agent", "node")]).await.as_deref(), Some("raw-c"));
+    // seen lately again, each counted from its return
+    let seen = e.stats.snapshot().clients;
+    let names: Vec<_> = seen.iter().map(|c| (c.name.as_deref(), c.calls)).collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!(names.contains(&(Some("raw-c"), 2)) && names.contains(&(Some("raw-b"), 1)), "{names:?}");
+    // tools/list, and a ping, are its client's too, and count as seen without being calls
+    e.later(Duration::from_secs(11 * 60));
+    let reply = e.legacy_with(13, "tools/list", json!({}), &[("Mcp-Session-Id", d), ("User-Agent", "node")]).await;
+    assert_eq!(reply.status, 200);
+    let reply = e.legacy_with(14, "ping", json!({}), &[("Mcp-Session-Id", a)]).await;
+    assert_eq!((reply.status, &reply.only()["result"]), (200, &json!({})));
+    let seen = e.stats.snapshot().clients;
+    let names: Vec<_> = seen.iter().map(|c| (c.name.as_deref(), c.calls)).collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!(names.contains(&(Some("raw-d"), 0)) && names.contains(&(Some("raw-a"), 0)), "{names:?}");
+}
+
+/// A `notifications/cancelled` carrying a session id cancels that client's call with the id it
+/// names, and not another client's call with the same id.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cancel_with_a_session_id_is_its_clients() {
+    let e = Endpoint::open();
+    let a = e.introduce("raw-a", "node").await;
+    let b = e.introduce("raw-b", "node").await;
+    let open = |session: &str| {
+        let body = json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "hang", "arguments": {}}}).to_string();
+        e.open_post(true, &[("MCP-Protocol-Version", LEGACY), ("Mcp-Session-Id", session), ("User-Agent", "node")], body.len(), body.as_bytes())
+    };
+    let mut first = open(&a);
+    e.bridge.hung().await;
+    let mut second = open(&b);
+    e.bridge.hung().await;
+    let clients: Vec<_> = e.bridge.calls.lock().unwrap().iter().map(|(_, c, _)| c.as_ref().map(|c| c.name.clone())).collect();
+    assert_eq!(clients, [Some("raw-a".to_string()), Some("raw-b".to_string())]);
+    // without an id the cancel could be either's: ignored
+    let (note, url) = (json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 5}}).to_string(), e.url("/mcp"));
+    let send = |extra: Vec<(String, String)>| {
+        let mut headers = e.headers(Some(LEGACY));
+        headers.push(("User-Agent".into(), "node".into()));
+        headers.extend(extra);
+        http("POST", &url, headers, Some(note.clone()))
+    };
+    assert_eq!(send(vec![]).await.status, 202);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(e.bridge.let_go.lock().unwrap().is_none(), "a cancel that could be either's was placed");
+    // with b's id: b's call alone
+    let placed = Instant::now();
+    assert_eq!(send(vec![("Mcp-Session-Id".into(), b.clone())]).await.status, 202);
+    assert!(e.bridge.let_go_after(placed).await < Duration::from_secs(1));
+    let (answered, still, first) = blocking(move || {
+        let answered = read_till(&mut second, "cancelled", Duration::from_secs(5));
+        let still = read_till(&mut first, "cancelled", Duration::from_millis(500));
+        (answered, still, first)
+    })
+    .await;
+    assert!(answered.contains("cancelled"), "{answered}");
+    assert!(!still.contains("cancelled") && !still.contains("\"result\""), "a's call was answered: {still}");
+    drop(first);
+}
+
+/// What comes on `stream` till `words` do, it closes, or `wait` is over.
+fn read_till(stream: &mut TcpStream, words: &str, wait: Duration) -> String {
+    let until = Instant::now() + wait;
+    let mut text = Vec::new();
+    let mut buf = [0u8; 4096];
+    while !String::from_utf8_lossy(&text).contains(words) {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        stream.set_read_timeout(Some(left)).unwrap();
+        match stream.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => text.extend_from_slice(&buf[..n]),
+        }
+    }
+    String::from_utf8_lossy(&text).to_string()
+}
+
 // ---- rmcp's own client, in both eras ----
 
 /// rmcp's client for `e`, showing its token if it wants one.
@@ -1071,8 +1247,31 @@ async fn rmcp_client_with_initialize() {
     let result = client.call_tool(CallToolRequestParams::new("busy")).await.unwrap();
     assert_eq!(result.is_error, Some(true));
     assert!(client.call_tool(CallToolRequestParams::new("nope")).await.is_err());
-    assert!(e.stats.snapshot().clients.iter().any(|c| c.name == "rmcp-legacy"));
+    // rmcp's client sends back the session id it was given: its calls are its (the unknown tool's
+    // never reached the page, and is not counted)
+    assert_eq!(e.bridge.last_call().1.map(|c| c.name).as_deref(), Some("rmcp-legacy"));
+    let seen = e.stats.snapshot().clients;
+    assert!(seen.iter().any(|c| c.name.as_deref() == Some("rmcp-legacy") && c.calls == 3), "{seen:?}");
     client.cancel().await.unwrap();
+}
+
+/// Two of rmcp's clients at once, on the same revision and with the same (no) `User-Agent`: each
+/// sends back its own session id, and each call is its own client's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rmcp_clients_are_told_apart_by_their_session_ids() {
+    let e = Endpoint::open();
+    let one = client_config("rmcp-one").serve(rmcp_transport(&e)).await.expect("initialize");
+    let two = client_config("rmcp-two").serve(rmcp_transport(&e)).await.expect("initialize");
+    for (client, name) in [(&one, "rmcp-one"), (&two, "rmcp-two"), (&one, "rmcp-one"), (&one, "rmcp-one")] {
+        client.call_tool(CallToolRequestParams::new("echo").with_arguments(args(json!({"who": name})))).await.unwrap();
+        assert_eq!(e.bridge.last_call().1.map(|c| c.name).as_deref(), Some(name));
+    }
+    let seen = e.stats.snapshot().clients;
+    let calls = |name: &str| seen.iter().find(|c| c.name.as_deref() == Some(name)).map(|c| c.calls);
+    assert_eq!((calls("rmcp-one"), calls("rmcp-two")), (Some(3), Some(1)), "{seen:?}");
+    assert!(seen.iter().all(|c| c.name.is_some()), "none unidentified: {seen:?}");
+    one.cancel().await.unwrap();
+    two.cancel().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

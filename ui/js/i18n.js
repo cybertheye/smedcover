@@ -1309,6 +1309,7 @@ const STR = {
   "mcp.seen": ["最近", "Seen lately"],
   "mcp.seenSub": ["10 分钟内来过的 agent，和它们的调用", "Agents seen in the last 10 minutes, and their calls"],
   "mcp.noClients": ["10 分钟内没有 agent 来过", "No agent in the last 10 minutes"],
+  "mcp.unidentified": ["未识别的 agent", "Unidentified agent"],
   "mcp.calls": ["{0} 次调用", "{0} calls"],
   "mcp.calls.one": ["{0} 次调用", "{0} call"],
   "mcp.inFlight": ["正在进行的调用：{0}", "Calls running: {0}"],
