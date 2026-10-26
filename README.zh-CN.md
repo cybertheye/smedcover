@@ -889,7 +889,7 @@ SMEDCOVER_SELFTEST=/一个空目录的绝对路径 target/release/bundle/macos/S
 
 想改测启动后各样东西多快出来时，加上 `SMEDCOVER_SELFTEST_PERF=1`（再给一张铺满画布的照片，`SMEDCOVER_SELFTEST_PHOTO=/照片/路径.jpg`）：`report.json` 里会写出启动每一步结束的时刻、启动后立刻打开 3D 视图和「风格」面板卡片各要多久出来，以及画了几张薄片和卡片。在同一个目录启动两次，就能看到第二次启动的情况。
 
-`SMEDCOVER_SELFTEST_AGENT=1` 让自检也调用 agent 工具，再加 `SMEDCOVER_SELFTEST_MCP=1` 还会通过 HTTP 调用应用自己的 MCP 接口：先像默认那样不带令牌，再要求令牌试一遍，最后改回去（结果在 `report.json` 的 `mcp` 里）。`SMEDCOVER_SELFTEST_STAY=1` 不跑自检：应用把数据放在那个目录里，其他照常，窗口一直开着——想手动试点什么（包括接口）又不碰你自己的数据时用它。
+`SMEDCOVER_SELFTEST_AGENT=1` 让自检也调用 agent 工具，再加 `SMEDCOVER_SELFTEST_MCP=1` 还会通过 HTTP 调用应用自己的 MCP 接口：先像默认那样不带令牌，再要求令牌试一遍，最后改回去（结果在 `report.json` 的 `mcp` 里）；还会调用每个应用都在运行的命令行入口，带令牌和不带令牌各试一遍（`cli`）。`SMEDCOVER_SELFTEST_STAY=1` 不跑自检：应用把数据放在那个目录里，其他照常，窗口一直开着——想手动试点什么（包括接口）又不碰你自己的数据时用它。加上它时，`smedcover-app --cli` 就是命令行启动的那种应用：在 macOS 上窗口隐藏，标准输入关掉就退出；再加 `SMEDCOVER_SELFTEST_WELCOME=1`，空目录会停在首次启动的欢迎页上，而不是用示例档案开始。
 
 `.github/workflows/build.yml` 可在 GitHub Actions 上构建安装包（尚未实际运行过）：macOS 分 Apple 芯片和 Intel 两个版本（`.dmg`、`.app.tar.gz`），Windows x64（`.exe`、`.msi`），Linux x64（`.deb`、`.rpm`、`.AppImage`）。
 
