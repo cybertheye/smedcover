@@ -9062,8 +9062,10 @@ async function agentSettingsTest({ call, ok, r, no }) {
     }
     // "Agent access on" in the top bar, built with it, taking no room of its own (nothing else in the bar moves as it shows)
     const on = $("top").querySelector(".agentson");
-    out.agentsOn = on ? { text: on.textContent, width: on.getBoundingClientRect().width } : null;
+    const s = MCP.status, lit = !!(s && s.on) && mcpState(s) !== "error";   // as mcpLightSync has it: shown while the endpoint is on
+    out.agentsOn = on ? { text: on.textContent, width: on.getBoundingClientRect().width, endpointOn: lit, shown: document.documentElement.classList.contains("autopilot") } : null;
     if (!on || on.textContent !== t("top.agentsOn") || out.agentsOn.width !== 0) no(`"Agent access on" is not in the top bar as it should be: ${JSON.stringify(out.agentsOn)}`);
+    else if (out.agentsOn.shown !== lit) no(`"Agent access on" is ${out.agentsOn.shown ? "shown" : "hidden"} while the endpoint is ${lit ? "on" : "off"}`);
   } catch (e) { no(`Settings open with an agent: ${(e && e.message) || e}`); }
   finally { S.tab.setup = tab; setMode("edit"); r.settings = out; }
 }
