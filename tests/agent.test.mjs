@@ -757,9 +757,19 @@ test("the photo tools do what the editor does: a picture from a file, a link, th
   assert.ok(calls.some((c) => c[0] === "invoke" && c[1] === "read_picture" && c[2].path === "/Users/me/Pictures/Holiday 2.png"));
   assert.ok(S.library.some((e) => e.pid === two.pid && e.name === "Holiday 2"));
   assert.equal(S.cover.layers.at(-1).id, two.layer.id, "above the topmost");
+  S.imageAi = { proxy: "http://127.0.0.1:7890" };
   const three = (await cmds.add_photo({ source: { url: "https://example.com/pics/sun%20set.png?x=1" } }, ctx)).structuredContent;
-  assert.ok(calls.some((c) => c[1] === "fetch_image" && c[2].url === "https://example.com/pics/sun%20set.png?x=1"));
+  assert.deepEqual(calls.find((c) => c[1] === "fetch_image")[2], { url: "https://example.com/pics/sun%20set.png?x=1", proxy: "http://127.0.0.1:7890", timeout: 120, known: true }, "through the image AI's proxy, only a picture the photo store takes");
   assert.ok(S.library.some((e) => e.pid === three.pid && e.name === "sun set"));
+  S.imageAi = {};
+  { // what the host refuses the link for is the agent's to put right; the network's failing is not
+    const invoke = api.invoke;
+    for (const [said, code] of [["not a picture: the link leads to no PNG, JPEG, WebP, GIF, HEIC or AVIF image (it says image/svg+xml)", "invalid_arguments"], ["picture too big: the reply at https://example.com/a.png is more than 64 MB", "invalid_arguments"], ["connection refused", "failed"]]) {
+      api.invoke = async (cmd, a) => (cmd === "fetch_image" ? Promise.reject(said) : invoke(cmd, a));
+      await assert.rejects(cmds.add_photo({ source: { url: "https://example.com/a.png" } }, ctx), (e) => e.code === code && e.message.includes(said), said);
+    }
+    api.invoke = invoke;
+  }
   const kept = S.library.length;
   const four = (await cmds.add_photo({ source: { library: "pic1" }, fill: true }, ctx)).structuredContent;
   assert.equal(four.pid, "pic1"); assert.equal(four.layer.fill, true); assert.equal(S.library.length, kept, "not kept twice");

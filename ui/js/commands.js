@@ -64,8 +64,10 @@ const HAND = { side: 400, cols: 3 };
 const ODD_KEYS = ["__proto__", "constructor", "prototype"];
 /** A path an agent gives as a folder: absolute, on any system (the host checks it is a folder). */
 const ABSOLUTE = /^(\/|[A-Za-z]:[\\/]|\\\\)/;
-/** What a file a host reads for an agent says when it is not one it reads (read_picture, read_project in core/src/files.rs): the agent's to put right. */
+/** What a file a host reads for an agent says when it is not one it reads (read_picture, read_project in core/src/files.rs), or a link it fetches when it is not a picture it takes (fetch_image's known): the agent's to put right. */
 const NOT_READ = /^(not an absolute path|no such file|not a file|not a picture|not a project file|not UTF-8|picture too big|project too big)/;
+/** The most a picture an agent names may weigh, read or fetched (PICTURE_MAX in core/src/files.rs, AI_MAX_IMAGE_REPLY in net.rs). */
+const PICTURE_MAX = 64 * 1024 * 1024;
 /** A call's ctx when none is given (a test calling a command itself): nothing told, never cancelled. */
 const HUSHED = Object.freeze({ progress() {}, cancelled: () => false, say() {} });
 /** What a failure says, from an Error or the text a host's command rejects with. */
@@ -203,15 +205,19 @@ export function makeCommands(api) {
     }
     if (how === "url") {
       if (!/^https?:\/\/[^\s]+$/i.test(value.trim())) throw refused(`"source.url" must be an http(s) link; got ${JSON.stringify(value.slice(0, 80))}.`);
+      // only a picture the photo store takes, by its first bytes (known), at most PICTURE_MAX, through the proxy the
+      // image AI's own pictures at a link are fetched through (its settings'; else the environment's)
       const url = value.trim(), stop = ticking(ctx, "Fetching the picture.");
       try {
-        if (api.CAN.relay) { const { mime, data } = await api.invoke("fetch_image", { url, proxy: null, timeout: 120 }); return { src: `data:${mime};base64,${data}`, name: nameIn(new URL(url).pathname), type: mime }; }
+        const name = nameIn(new URL(url).pathname);
+        if (api.CAN.relay) { const { mime, data } = await api.invoke("fetch_image", { url, proxy: (S.imageAi && S.imageAi.proxy) || null, timeout: 120, known: true }); return { src: `data:${mime};base64,${data}`, name, type: mime }; }
         const r = await fetch(url);
         if (!r.ok) throw new Error(`the server answered ${r.status}`);
-        const blob = await r.blob();
-        if (!/^image\//.test(blob.type) && !imageType(await blob.slice(0, 16).arrayBuffer())) throw new Error("the link did not lead to a picture");
-        return { src: await api.readAs(blob, "readAsDataURL"), name: nameIn(new URL(url).pathname), type: blob.type };
-      } catch (e) { throw new ToolError("failed", `The picture at ${url} could not be fetched: ${why(e)}.`); }
+        const blob = await r.blob(), type = imageType(await blob.slice(0, 16).arrayBuffer());
+        if (blob.size > PICTURE_MAX) throw new Error(`picture too big: the reply at ${url} is more than ${PICTURE_MAX / 1048576} MB`);
+        if (!type) throw new Error("not a picture: the link leads to no PNG, JPEG, WebP, GIF, HEIC or AVIF image");
+        return { src: await api.readAs(blob.slice(0, blob.size, type), "readAsDataURL"), name, type };
+      } catch (e) { throw NOT_READ.test(why(e)) ? refused(`"source.url": ${why(e)}.`) : new ToolError("failed", `The picture at ${url} could not be fetched: ${why(e)}.`); }
       finally { stop(); }
     }
     // data: a data: URL as it is, or base64 alone, its type told by its first bytes

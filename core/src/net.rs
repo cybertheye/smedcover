@@ -164,9 +164,18 @@ pub fn ai_request(r: &AiRequest) -> Res<AiReply> {
     )
 }
 
-/// Downloads a picture an image model left at a link instead of sending it: `{mime, data}` with the
-/// bytes in base64. Only pictures are accepted, and no bigger than a reply with one inside may be.
-pub fn fetch_image(url: &str, proxy: &str, timeout_secs: u64) -> Res<FetchedImage> {
+/// Downloads a picture at a link: `{mime, data}` with the bytes in base64 — one an image model left at a link
+/// instead of sending it (a repaint), or one an agent's `add_photo` names (`known`). No bigger than a reply with a
+/// picture inside may be ([`AI_MAX_IMAGE_REPLY`]): a reply past that is refused ("picture too big:"), never cut short.
+/// With `known`, only a picture the photo store takes, told by its first bytes ([`crate::files::picture_type`]: PNG,
+/// JPEG, WebP, GIF, HEIC/HEIF, AVIF) whatever the reply's `content-type` says — an SVG, a BMP or a TIFF is refused
+/// ("not a picture:"); without, any `image/` type the reply says it is, else PNG, JPEG or WebP by its bytes.
+pub fn fetch_image(url: &str, proxy: &str, timeout_secs: u64, known: bool) -> Res<FetchedImage> {
+    fetch_capped(url, proxy, timeout_secs, known, AI_MAX_IMAGE_REPLY)
+}
+
+/// [`fetch_image`], at most `cap` bytes.
+fn fetch_capped(url: &str, proxy: &str, timeout_secs: u64, known: bool, cap: u64) -> Res<FetchedImage> {
     use base64::Engine;
     let agent = agent_for(url, proxy, timeout_secs)?;
     let response = agent.get(url).call().map_err(net_err)?;
@@ -174,10 +183,18 @@ pub fn fetch_image(url: &str, proxy: &str, timeout_secs: u64) -> Res<FetchedImag
     let mut bytes = Vec::new();
     response
         .into_reader()
-        .take(AI_MAX_IMAGE_REPLY)
+        .take(cap + 1)
         .read_to_end(&mut bytes)
         .map_err(net_err)?;
-    let mime = if mime.starts_with("image/") {
+    if bytes.len() as u64 > cap {
+        return Err(format!("picture too big: the reply at {url} is more than {} MB", cap.div_ceil(1024 * 1024)));
+    }
+    let mime = if known {
+        match crate::files::picture_type(&bytes) {
+            Some(mime) => mime.to_string(),
+            None => return Err(format!("not a picture: the link leads to no PNG, JPEG, WebP, GIF, HEIC or AVIF image (it says {})", if mime.is_empty() { "nothing of what it is" } else { mime.as_str() })),
+        }
+    } else if mime.starts_with("image/") {
         mime
     } else {
         match ::image::guess_format(&bytes) {
@@ -267,32 +284,69 @@ mod tests {
         assert!(seen.ends_with(r#"{"model":"m"}"#));
     }
 
+    /// A one-shot HTTP server on a free local port that answers a GET with `body` as `kind`.
+    fn serve_bytes(kind: &'static str, body: Vec<u8>) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/out.png", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+            }
+            write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: {kind}\r\ncontent-length: {}\r\n\r\n", body.len()).unwrap();
+            let _ = stream.write_all(&body);   // a client that has read its fill may have gone
+        });
+        (url, server)
+    }
+
     #[test]
     fn fetch_image_fetches_a_picture_and_refuses_anything_else() {
-        use std::io::{BufRead, BufReader, Write};
         let pic = png(&RgbaImage::from_pixel(2, 2, Rgba([255, 0, 0, 255])));
-        for (kind, body, ok) in [("application/octet-stream", pic.clone(), true), ("text/html", b"<html></html>".to_vec(), false)] {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            let url = format!("http://{}/out.png", listener.local_addr().unwrap());
-            let server = std::thread::spawn(move || {
-                let (mut stream, _) = listener.accept().unwrap();
-                let mut reader = BufReader::new(stream.try_clone().unwrap());
-                loop {
-                    let mut line = String::new();
-                    reader.read_line(&mut line).unwrap();
-                    if line == "\r\n" || line.is_empty() {
-                        break;
-                    }
-                }
-                write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: {kind}\r\ncontent-length: {}\r\n\r\n", body.len()).unwrap();
-                stream.write_all(&body).unwrap();
-            });
-            let got = fetch_image(&url, "", 20);
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"/>"#.to_vec();
+        let gif = b"GIF89a\x01\x00\x01\x00\x00\x00\x00;".to_vec();
+        // (what the reply says it is, its bytes, known: an agent's add_photo) → the type, or none
+        for (kind, body, known, want) in [
+            ("application/octet-stream", pic.clone(), false, Some("image/png")),   // told by the bytes when the header does not say
+            ("text/html", b"<html></html>".to_vec(), false, None),
+            ("image/svg+xml", svg.clone(), false, Some("image/svg+xml")),   // a repaint's link: as the reply says
+            ("image/svg+xml", svg, true, None),   // an agent's: only what the photo store takes
+            ("image/jpeg", pic.clone(), true, Some("image/png")),   // by its bytes, whatever the header says
+            ("application/octet-stream", gif, true, Some("image/gif")),
+            ("text/html", b"<html></html>".to_vec(), true, None),
+        ] {
+            let (url, server) = serve_bytes(kind, body);
+            let got = fetch_image(&url, "", 20, known).map(|img| img.mime);
             server.join().unwrap();
-            assert_eq!(got.is_ok(), ok, "{kind}");
-            if let Ok(img) = got {
-                assert_eq!(img.mime, "image/png");   // told by the bytes when the header does not say
-                assert!(img.data.starts_with("iVBORw0KGgo"));
+            assert_eq!(got.as_deref().ok(), want, "{kind}, known {known}: {got:?}");
+            if known && want.is_none() {
+                assert!(got.unwrap_err().starts_with("not a picture: the link leads to no PNG"), "{kind}");
+            }
+        }
+        let (url, server) = serve_bytes("image/png", pic.clone());
+        assert!(fetch_image(&url, "", 20, false).unwrap().data.starts_with("iVBORw0KGgo"));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn fetch_image_refuses_a_reply_past_its_cap_rather_than_cut_it_short() {
+        let pic = png(&RgbaImage::from_pixel(40, 40, Rgba([0, 90, 255, 255])));
+        let cap = pic.len() as u64;
+        for (known, extra) in [(false, 0usize), (true, 0), (false, 1), (true, 4096)] {
+            let mut body = pic.clone();
+            body.extend(std::iter::repeat_n(0u8, extra));   // a PNG with more after it: past the cap by `extra`
+            let (url, server) = serve_bytes("image/png", body);
+            let got = fetch_capped(&url, "", 20, known, cap).map(|img| img.mime);
+            server.join().unwrap();
+            if extra == 0 {
+                assert_eq!(got.unwrap(), "image/png", "at the cap: taken");
+            } else {
+                assert!(got.as_ref().unwrap_err().starts_with("picture too big: the reply at http://127.0.0.1:"), "{got:?}");
             }
         }
     }
