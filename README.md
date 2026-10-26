@@ -751,20 +751,22 @@ The *Image model* card, on the same page as the *Text model*, has settings of it
 
 ## Agents (MCP)
 
-Agents such as Claude Code or Codex can make covers in SmedCover's window: change the words and the look, place, add and remove layers, add photos, draw previews, deal hands with Surprise me and export. Each change is one step of undo in the window you have open, so you see everything an agent does and can take it back. They reach it over MCP, at an endpoint that listens on this computer only (127.0.0.1), with a token. What an agent reads through it — the cover, previews, photos, what it exports — goes to that agent and to the model it uses, as anything else you give it does; a photo it adds by link is downloaded by SmedCover; nothing else leaves.
+Agents such as Claude Code or Codex can make covers in SmedCover's window: change the words and the look, place, add and remove layers, add photos, draw previews, deal hands with Surprise me and export. Each change is one step of undo in the window you have open, so you see everything an agent does and can take it back. They reach it over MCP, at an endpoint that listens on this computer only (127.0.0.1). What an agent reads through it — the cover, previews, photos, what it exports — goes to that agent and to the model it uses, as anything else you give it does; a photo it adds by link is downloaded by SmedCover; nothing else leaves.
 
 1. ⋯ → *Agents* (Settings → *Agents*), and turn on *MCP endpoint*. It listens at `http://127.0.0.1:25277/mcp`; another port can be set (1024–65535), and if another program has the port the page says so.
-2. Copy the line for your agent from *Connect an agent*, the token already in it. For Claude Code, run in a terminal:
+2. Copy the line for your agent from *Connect an agent*. For Claude Code, run in a terminal:
 
    ```bash
-   claude mcp add --transport http --scope user smedcover http://127.0.0.1:25277/mcp --header "Authorization: Bearer <token>"
+   claude mcp add --transport http --scope user smedcover http://127.0.0.1:25277/mcp
    ```
 
-   (`--scope user`: for every folder you run Claude Code in.) For Codex, a `[mcp_servers.smedcover]` table to add to `~/.codex/config.toml`, which names the environment variable the token is in (`bearer_token_env_var = "SMEDCOVER_TOKEN"`) rather than holding it, and the line that sets that variable: an `export` for `~/.zshrc` or `~/.bashrc` (a `setx` to run once on Windows); Codex then has to be started from a new terminal. The JSON is for Claude Code's `.mcp.json` and Cursor's `mcp.json`.
+   (`--scope user`: for every folder you run Claude Code in.) For Codex, a `[mcp_servers.smedcover]` table to add to `~/.codex/config.toml` (its `url`, and `tool_timeout_sec = 1800`, as long as an export may take). The JSON is for Claude Code's `.mcp.json` and Cursor's `mcp.json`.
 3. Ask the agent for a cover, for example: “Make this week's cover: the title *Rainy Tokyo night walk*, in a night look, and show me a preview.”
 
+- No token is needed by default: any program on this computer may call the endpoint, as one running as you could read and write your files anyway, while web pages cannot (the endpoint refuses a request whose `Host` or `Origin` is not this computer's, and sends no CORS headers, so a browser does not send it a page's call). What the tools can do is bounded besides: each change is one step of undo, an export never writes over a file, and a file is read only for the call that names it.
+- For the extra layer, turn on *Require a token* on the same page: from the next request on, an agent must show the token (`Authorization: Bearer smc_…`), and *Connect an agent* gives the lines with it — Claude Code's command with `--header "Authorization: Bearer <token>"`, the JSON with its `headers`, and for Codex a table that names the environment variable the token is in (`bearer_token_env_var = "SMEDCOVER_TOKEN"`) rather than holding it, with the line that sets that variable: an `export` for `~/.zshrc` or `~/.bashrc` (a `setx` to run once on Windows); Codex then has to be started from a new terminal. Agents set up without the token must then be set up again; turned off, those set up with it go on working. The token is kept in `mcp.json` in the data folder, which only you can read, whether it is required or not; it is shown hidden but for its end. *New token* (it asks first) makes the old one stop working at once. A SmedCover server (`smedcover serve`, to come) will always want a token.
 - While an agent's step runs the window is held, a pill at the top saying what it is doing (after 20 seconds it offers *Stop waiting*), and an agent waits while you are in the middle of something.
-- The token is kept in `mcp.json` in the data folder, which only you can read; it is shown hidden but for its end. *New token* (it asks first) makes the old one stop working at once. *Seen lately* lists the agents seen in the last 10 minutes and their calls.
+- *Seen lately* lists the agents seen in the last 10 minutes and their calls.
 - The endpoint starts with the app while it is on, and stops when the app quits. On macOS, while it runs, the window keeps drawing when it is covered or on another desktop, so an agent's previews and exports do not wait for it to be seen; elsewhere there is no such setting (Windows slows a minimised window down), so keep it from being minimised while an agent works.
 - The page only has a file read for an agent's call that names it (`add_photo` by path, `open_project` by file), and only that file, while the call is under way.
 - A proxy set in the agent's environment (`HTTP_PROXY` and the like) must leave this computer out: `NO_PROXY=127.0.0.1,localhost`.
@@ -894,7 +896,7 @@ To go through some looks only (the self-test makes several covers in each, so al
 
 To time how soon things show after the start instead, add `SMEDCOVER_SELFTEST_PERF=1` (and a photo to fill the canvas, `SMEDCOVER_SELFTEST_PHOTO=/path/to/photo.jpg`): `report.json` then holds when each step of the start was over, how long the 3D view and the Look sheet's cards took to show, opened at once, and how many sheets and cards were drawn. Start it twice on the same folder to see a second launch.
 
-`SMEDCOVER_SELFTEST_AGENT=1` has the self-test call the agents' tools too, and `SMEDCOVER_SELFTEST_MCP=1` with it the app's own MCP endpoint, over HTTP with its token (`mcp` in `report.json`). `SMEDCOVER_SELFTEST_STAY=1` runs no self-test: the app keeps its data in that folder and otherwise runs as usual, its window open — a way to try things by hand, the endpoint among them, without touching your data.
+`SMEDCOVER_SELFTEST_AGENT=1` has the self-test call the agents' tools too, and `SMEDCOVER_SELFTEST_MCP=1` with it the app's own MCP endpoint, over HTTP: without a token, as by default, then with a token required, and back (`mcp` in `report.json`). `SMEDCOVER_SELFTEST_STAY=1` runs no self-test: the app keeps its data in that folder and otherwise runs as usual, its window open — a way to try things by hand, the endpoint among them, without touching your data.
 
 `.github/workflows/build.yml` builds installers on GitHub Actions (it has not been run yet): macOS for Apple silicon and for Intel, separately (`.dmg`, `.app.tar.gz`), Windows x64 (`.exe`, `.msi`), Linux x64 (`.deb`, `.rpm`, `.AppImage`).
 
