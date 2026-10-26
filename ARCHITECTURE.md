@@ -2346,6 +2346,8 @@ endpoint refuses. Both matter the more as by default the endpoint wants no token
 
 The endpoint agents call the tools of 11.1 through, in the core so that the app and a server share it; the app's side of it is `src-tauri/src/mcp.rs` (last in this list), the page's Settings → Agents (9.5) and its transport (11.1).
 
+Turning it on, setting an agent up and using it, from the user's side: [README_MCP.md](README_MCP.md).
+
 - `tools.rs`: `ToolList::from_json(text, host)` reads `ui/tools.json` for one host (`desktop`, `server`). It refuses another format, a name that is malformed or used twice and an input schema that is not an object's, takes `x-smedcover` off each tool (its hosts; its `timeoutMs`, 120 s if it has none, two hours at most), and keeps the file's order and its SHA-256 (`hash()`), which the page's `toolsHash()` is compared with.
 - `token.rs`, `config.rs`: the bearer token is `smc_` and 32 random bytes in base64url, a `Secret` that never prints itself (its `Debug` is `***`) and is compared in constant time. `mcp.json` in the data folder holds `{on, port, token, requireToken}` (off, port 25277, a new token, not required, to begin with; a missing `requireToken` is `false`, and one there but not a boolean `true` — a garbled setting fails closed — each filled in or put right and saved like the rest); the token is made and kept while none is required, so that requiring one has it ready and agents set up with it go on working; `McpConfig::access()` is the `Access` the settings start. Only Rust writes it, through a temporary file, readable by its owner alone on Unix; one that cannot be read as settings is put aside as `mcp.json.bad` and started over. `paths.rs` says where the desktop app keeps its data (`desktop_data_dir()`, as Tauri finds it), for a command line on the same computer.
 - `bridge.rs`: each call goes to the page through a `PageBridge`. The `Dispatcher` both hosts use sends `{kind: "call", id, tool, args, client, timeoutMs}` down the `PageSink` of the page that attached (`attach(sink, toolsHash)`: the app's Tauri channel, a server's WebSocket), routes the page's answer and progress back by id, and sends `{kind: "cancel", id}` when the caller gives up. A call waits up to 30 s for a page that is on its way (`loading()`), and fails at once when none is; it is given up when the page is quiet for longer than the tool's timeout (each word of progress starts that again) and in any case after two hours, and fails when its page reloads or goes ("the change may or may not have been applied"); 16 at most are in hand. A result's image loses a `data:` prefix, structured content with no text is added as JSON text (and dropped when it is not an object), and more than 16 images or 48 MB are refused.
@@ -2418,6 +2420,8 @@ An agent — an MCP client such as Claude Code — drives SmedCover through tool
 (set the words, place a layer, draw a preview, export), never a file read or written. Where the calls come in is the
 host's (the desktop app's endpoint on 127.0.0.1, a server's `/mcp`: 10.6 and TODO.md); what answers them is the page, in
 three modules.
+
+The tools by group with their arguments, and how a session goes for the user: [README_MCP.md](README_MCP.md).
 
 `tools.js` defines every tool as data (`TOOLS`): its name, title and English description (written for the model:
 what it does, what it answers, what it refuses), its input schema (JSON Schema, every object closed with

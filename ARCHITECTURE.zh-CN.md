@@ -871,6 +871,8 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 agent 调用 11.1 那些工具的入口。它在 core 里，应用和服务器共用；应用这边是 `src-tauri/src/mcp.rs`（本节最后一条）、页面的「设置 → Agent 接入」（9.5）和页面的传输（11.1）。
 
+从用户这边怎么打开、怎么配置 agent、怎么用，见 [README_MCP.zh-CN.md](README_MCP.zh-CN.md)。
+
 - `tools.rs`：`ToolList::from_json(text, host)` 为一个宿主（`desktop`、`server`）读 `ui/tools.json`。格式不对、名字不合规或重复、参数结构不是对象的，都拒绝；去掉每个工具的 `x-smedcover`（它属于哪些宿主；它的 `timeoutMs`，没写就是 120 秒，最多两小时）；保留文件里的顺序和文件的 SHA-256（`hash()`），拿来和页面的 `toolsHash()` 比对。
 - `token.rs`、`config.rs`：持有者令牌（bearer token）是 `smc_` 加 32 个随机字节的 base64url，存成 `Secret`：它不打印自己（`Debug` 是 `***`），比较用常数时间。数据目录里的 `mcp.json` 是 `{on, port, token, requireToken}`（一开始关着、端口 25277、一个新令牌、不要求令牌；`requireToken` 没有就算 `false`，有但不是布尔值就算 `true`——设置乱了就往严里算——和别的项一样补上或改正并马上保存）；不要求令牌时也照样生成并留着令牌，这样一打开「要求令牌」就有现成的，用它配置过的 agent 也一直能用；`McpConfig::access()` 是按这份设置启动时的 `Access`。只有 Rust 写它，先写临时文件再换上，Unix 上只有所有者能读；读不成设置的文件改名为 `mcp.json.bad` 放到一边，从头来。`paths.rs` 给出桌面应用的数据目录（`desktop_data_dir()`，和 Tauri 找到的一样），供同一台电脑上的命令行使用。
 - `bridge.rs`：每个调用经 `PageBridge` 交给页面。两种宿主都用的 `Dispatcher` 把 `{kind: "call", id, tool, args, client, timeoutMs}` 发给接上来的页面的 `PageSink`（`attach(sink, toolsHash)`：应用的 Tauri channel、服务器的 WebSocket），按 id 把页面的回答和进度送回去，调用方放弃时发 `{kind: "cancel", id}`。页面在路上时（`loading()`）调用最多等 30 秒，没有页面要来时立刻失败；页面沉默超过工具的超时就放弃（每次进度都重新计时），无论如何两小时后放弃；页面重新加载或关掉时失败（"改动可能已经做了，也可能没有"）；同时最多 16 个。回答里图片的 `data:` 前缀去掉，有结构化内容而没有文字时补上它的 JSON 文字（不是对象的结构化内容丢掉），超过 16 张图或 48 MB 的拒绝。
@@ -907,6 +909,8 @@ python3 -m http.server -d ui 4599
 ### 11.1 Agent：工具、命令、外壳
 
 agent（MCP 客户端，比如 Claude Code）通过工具操作 SmedCover，每个工具是对封面做的一件完整的事（改文字、摆放图层、画预览、导出），而不是读写文件。调用从哪里进来是宿主的事（桌面应用在 127.0.0.1 上的入口、服务器的 `/mcp`，见 10.6 和 TODO.md）；回答调用的是页面，分在三个模块里。
+
+按组列出的工具和参数，以及用户这边一次会话怎么进行，见 [README_MCP.zh-CN.md](README_MCP.zh-CN.md)。
 
 `tools.js` 用数据定义每个工具（`TOOLS`）：名字、标题和英文说明（写给模型看：做什么、回答什么、拒绝什么）；参数结构（JSON Schema，每个对象都用 `additionalProperties: false` 封住，枚举就是应用自己的常量——`LOOK_IDS`、`EFFECTS`、`BEND_IDS`、`SURPRISE_LOCKS`、`WEAVE_WAYS`、`SCOPES`、`FORMATS`——全部内联，不用 `$ref`，顶层不用 `anyOf`，有的客户端不接受）；回答的结构；MCP 的标注（`readOnlyHint`；`destructiveHint` 为假时也写出来，因为 MCP 默认是真——`export` 和 `batch_covers` 只写新文件、从不覆盖，也是假；`idempotentHint`；`add_photo` 的 `openWorldHint`）；以及只有页面读的：`history`（作为一步撤销运行）、`busy`（等用户的哪些事，`light` 或 `strict`）、`hosts`（`desktop`、`server`：选中、撤销和重做只属于桌面窗口）、`timeoutMs`（宿主等页面多久没消息就放弃：读半分钟，改一分钟，画预览、抽牌两分钟，抠图十分钟，导出半小时）、`needs`（参数结构不用组合关键字就说不出来的：几个参数里至少、恰好或至多一个）。`checkArgs(schema, args)` 按工具用到的那部分 JSON Schema 检查一次调用，用一句话告诉模型哪里不对（`"maxSide" must be at most 2048 (got 4000).`、`Unknown argument "colour" (this tool takes: …)`）；字符串只在有长度限制时才数字数，而且只数到够下结论为止，所以 `add_photo` 的 `source.data` 里一张 40 MB 的图一下就查完（它和 `open_project` 的 `project` 最多 24 Mi 个字符；工具说明让 agent 先给路径或链接）。`checkCall(def, args)` 再加上 `needs`，其中设为 false 的开关参数（`FLAGS`：`reset`、`resetParams`、`reshuffle`、`off`）当作没给，别的 false 都有意思（`visible: false`）。`toResult({structured, images, text})` 做出 MCP 的 `CallToolResult`（一段文字，默认是结构化回答的 JSON；每张 PNG 一个图片块；`structuredContent`），`toError(code, message)` 做出失败，`code` 是 `unknown_tool`、`invalid_arguments`、`not_allowed`、`busy`、`unavailable`、`failed` 之一（第一种宿主转成协议错误，其余转成 `isError`）。还有命令用来查找的函数：`findProfile()`（先按 id，再按名字）、`findChannel()`（先按 id，再按批量表格的认法，即 `store.js` 的 `channelIndex()`）、`findSize()`（像素、相差 1% 以内的比例、名字或说明；对上好几个就报错并列出它们）、`letterKeysOf()`（穿插窗口里给出的字的键）、`boxesOf()`（把一次绘制的 `_hits` 换成占画面的比例）、`sheetPlan()`（拼图里每个尺寸的位置：小到每格不足 24 像素还放不下，就缩小说明和间距，从不超出边长的 1.5 倍）、`nearNames()`（要的字体没有时，和它相近的字体）、`idsSaid()`（消息里列出几个 id）、`imageType()`（按文件头认图片类型，和 `read_picture` 的认法一样）、`coverDiff()`（整个给出的封面经过检查后改了什么、丢了什么、补回了什么，以及它提到却不在这里的照片和素材），以及 `placeAt()` 和 `placePatch()`（见下）。
 
