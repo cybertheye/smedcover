@@ -191,9 +191,9 @@ curl http://127.0.0.1:25277/health
 # {"name":"smedcover","version":"…","page":"ready"}
 ```
 
-`page` is `ready` once the window can take calls, `loading` while it starts or reloads. Close Settings before you ask
-the agent to change anything: while it is open, an agent's changes wait for you, and answer `busy` after 30 seconds.
-Then ask the agent for something concrete, for example:
+`page` is `ready` once the window can take calls, `loading` while it starts or reloads. Settings can stay open: the
+agent's changes go ahead at once, and the page Settings shows follows them. Then ask the agent for something concrete,
+for example:
 
 - “Make this week's cover: the title *Rainy Tokyo night walk*, in a night look, and show me a preview.”
 - “Put the photo `shot.jpg` from my Desktop on the VLOG channel's cover as the background, cut out the subject so it
@@ -369,10 +369,10 @@ SmedCover tells the agent how it works when it connects (MCP's instructions). A 
 
 - Calls run one at a time, in the order they came. One waiting behind another tells its agent so every 5 seconds.
 - An agent's call waits while you are in the middle of something: a press or a drag, typing, a dialog or a question
-  open, Surprise me's window. A change also waits while Settings, the letter, crop or weave window or the weave brush is
-  open, or while an export you started runs. It goes ahead once your hands have been off the window for 400 ms. After
-  30 seconds of waiting (10 for a read) it answers `busy`, and the agent tries again shortly. So close Settings while an
-  agent works.
+  open, Surprise me's window. A change also waits while the letter, crop or weave window or the weave brush is open, or
+  while an export you started runs. It goes ahead once your hands have been off the window for 400 ms. After 30 seconds
+  of waiting (10 for a read) it answers `busy`, and the agent tries again shortly. Settings open does not hold it back:
+  the page it shows is drawn again after each change, scrolled where it was, a field you were in given its caret back.
 - You wait while an agent's step runs: the window takes no input until it is done (keys, pastes and the wheel are
   swallowed, not replayed).
 
@@ -614,7 +614,7 @@ server (talked to from a phone through Slack, say). The desktop-only tools are n
 | The page says *Its settings could not be read* | `mcp.json` cannot be read (check its owner and permissions in the data folder). Nothing is written over it until it can be; then turn the switch on again. |
 | Nothing listens after a restart | The switch is kept in `mcp.json`, so check the page: off means it was turned off (or `mcp.json` was not JSON and was started over, which also made a new token); an error says why. |
 | The agent times out on a long call | Raise its timeout: Codex `tool_timeout_sec = 1800`, OpenClaw `requestTimeoutMs`, Hermes `timeout`. When a client gives up, SmedCover cancels the call: what it changed so far stays as one step; have the agent check with `get_cover`. |
-| `SmedCover is busy: …` | You were in the middle of something (Settings open, a dialog, typing, a drag) for as long as the call waits: 30 seconds for a change, 10 for a read. Finish it, or close Settings, and let the agent try again. |
+| `SmedCover is busy: …` | You were in the middle of something (a dialog, typing, a drag, the letter, crop or weave window) for as long as the call waits: 30 seconds for a change, 10 for a read. Finish it and let the agent try again. |
 | `SmedCover's window is not ready …` | The window is starting, reloading or showing the first-start welcome. Finish the welcome, wait a moment, and try again. |
 | `… the change may or may not have been applied` | The window reloaded or closed, or went quiet past the tool's timeout, while a call ran. Look at the window (or have the agent call `get_cover`) before going on. |
 | *An agent is working…* stays | After 20 seconds the pill offers *Stop waiting* (or press Esc): the window is yours again and the agent is told the step did not finish. A call is also given up by itself when nothing is heard from it for its timeout. What it changed stays as one step: undo it if you do not want it. |

@@ -2516,8 +2516,9 @@ says so as each of its pictures is taken in, and every 5 s besides (a big projec
 `agent.js` is the shell. Calls run one at a time in the order they came (`makeQueue()`: a call cancelled while it
 waits never runs), one waiting behind another telling the caller so every 5 s. Each is checked (`checkCall()`; a name
 of `Object.prototype`'s is no tool), then waits till the user is in the middle of nothing (`whenIdle()` over
-`userBusy()`: a press, a drag, a dialog, typing; for a change Settings, the editor's windows and an export under way
-too) and their hands have been off the window for 400 ms, telling the caller every 5 s that it waits (a progress
+`userBusy()`: a press, a drag, a dialog, typing; for a change the editor's windows and an export under way too, not
+Settings, whose page is drawn again once each change is over, `settingsFollow()`, its scroll kept and the field the
+change left given back its caret) and their hands have been off the window for 400 ms, telling the caller every 5 s that it waits (a progress
 message, which sets the host's timer going again), and answering `busy` after 30 s (10 s for a read). Input is noted
 while a step runs too, and when the user pressed, typed or scrolled during one, the 400 ms run from its end: they get
 in before the next change, which waits while they press. A call that changes something holds the window while it runs:

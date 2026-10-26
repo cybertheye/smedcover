@@ -90,10 +90,10 @@ const BOTH = ["desktop", "server"], DESKTOP = ["desktop"];
 /**
  * Each tool: `name`, `title`, `description` (English, for the model), `inputSchema` and `outputSchema` (JSON
  * Schema), `annotations` (MCP's hints); and what only the page reads: `history` (run as one step of undo, see
- * agentStep in app.js), `busy` (what of the user's waits it: "light", a press, a drag, a dialog, typing; "strict",
- * Settings and the editor's windows too), `hosts` (where it is offered), `timeoutMs` (how long the host waits for its
- * answer without word from the page), `needs` (beyond the schema: {any|one|most: [names]}, at least, exactly or at
- * most one of these arguments).
+ * agentStep in app.js), `busy` (what of the user's waits it: "light", a press, a drag, a dialog, typing; "strict", the
+ * editor's windows and an export under way too, not Settings), `hosts` (where it is offered), `timeoutMs` (how long
+ * the host waits for its answer without word from the page), `needs` (beyond the schema: {any|one|most: [names]}, at
+ * least, exactly or at most one of these arguments).
  */
 const TOOL = (name, title, description, inputSchema, { outputSchema, annotations = EDIT, history = !annotations.readOnlyHint, busy = annotations.readOnlyHint ? "light" : "strict", hosts = BOTH, timeoutMs = annotations.readOnlyHint ? 30000 : 60000, needs = null } = {}) =>
   ({ name, title, description, inputSchema, ...(outputSchema ? { outputSchema } : {}), annotations: { title, ...annotations }, history, busy, hosts, timeoutMs, ...(needs ? { needs } : {}) });

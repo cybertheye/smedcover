@@ -65,7 +65,7 @@ test("the tools are marked as the spec has them: reading, changing, writing file
   assert.equal(TOOL_BY.add_photo.annotations.openWorldHint, true);
   for (const n of LIVE) assert.deepEqual(TOOL_BY[n].hosts, ["desktop"], n);
   for (const d of TOOLS) if (!LIVE.includes(d.name)) assert.deepEqual(d.hosts, ["desktop", "server"], d.name);
-  for (const d of TOOLS) assert.equal(d.busy, d.annotations.readOnlyHint ? "light" : "strict", `${d.name}: a change waits for Settings and the editor's windows (another selection shuts them)`);
+  for (const d of TOOLS) assert.equal(d.busy, d.annotations.readOnlyHint ? "light" : "strict", `${d.name}: a change waits for the editor's windows (another selection shuts them) and an export`);
   const timeout = (n) => TOOL_BY[n].timeoutMs;
   for (const n of [...READS.filter((n) => n !== "render_preview"), "get_selection"]) assert.equal(timeout(n), 30000, n);
   assert.equal(timeout("render_preview"), 120000); assert.equal(timeout("surprise"), 120000);
@@ -1003,9 +1003,9 @@ test("whenIdle waits while the user is busy or has just touched the window, tell
   assert.equal(clock, 200, "polled every 100 ms");
   clock = 0; told = [];
   const strict = [];
-  assert.equal(await whenIdle(true, 12000, { ...env, busy: (s) => { strict.push(s); return "Settings is open"; } }), "Settings is open");
+  assert.equal(await whenIdle(true, 12000, { ...env, busy: (s) => { strict.push(s); return "the crop window is open"; } }), "the crop window is open");
   assert.ok(clock >= 12000 && strict.every((s) => s === true));
-  assert.deepEqual(told.map(([r, ms]) => [r, ms]), [["Settings is open", 5000], ["Settings is open", 10000]]);
+  assert.deepEqual(told.map(([r, ms]) => [r, ms]), [["the crop window is open", 5000], ["the crop window is open", 10000]]);
   clock = 0;
   let last = -100;   // input 100 ms before: waits till QUIET has passed
   assert.equal(await whenIdle(false, 5000, { ...env, quietFor: () => clock - last }), null);

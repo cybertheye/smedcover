@@ -31,7 +31,7 @@ import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, moreChanged, sheetOrde
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt, coverCrop } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, AI_DEFAULTS, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 import { makeCommands } from "./commands.js";
-import { toolsJson } from "./tools.js";
+import { toolsJson, TOOL_BY } from "./tools.js";
 import { startAgent, stepping, MCP, onMcpStatus, maskToken, setupLines } from "./agent.js";
 
 const $ = (id) => document.getElementById(id);
@@ -2496,9 +2496,23 @@ function genDone(tab, error) {
   const free = $("modal").hidden;
   toast(t(`gen.${error ? "failed" : "ready"}.${tab}`), false, free ? { label: t("gen.see"), run: () => { if ($("modal").hidden) genWin(tab); } } : null);
 }
-/** The text field being typed in inside `box` (one with a data-k), to give it back its focus and caret once `box` is built again. */
-function heldField(box) { const a = document.activeElement; return a && box.contains(a) && a.dataset && a.dataset.k ? { k: a.dataset.k, s: a.selectionStart, e: a.selectionEnd } : null; }
-function giveBack(box, h) { const f = h && box.querySelector(`[data-k="${h.k}"]`); if (!f) return; f.focus(); try { f.setSelectionRange(h.s, h.e); } catch (e) { /* not a text field */ } }
+/**
+ * The text field being typed in inside `box`, to give it back its focus and caret once `box` is built again (giveBack):
+ * one with a data-k, by it; with `any`, any other too, by its place among the box's fields of its kind (fieldKind: the
+ * second channel's name field), as Settings' pages have them.
+ */
+function heldField(box, any = false) {
+  const a = document.activeElement;
+  if (!a || !box.contains(a)) return null;
+  if (a.dataset && a.dataset.k) return { k: a.dataset.k, s: a.selectionStart, e: a.selectionEnd };
+  if (!any || !textField(a)) return null;
+  const kind = fieldKind(a);
+  return { kind, n: fieldsOf(box, kind).indexOf(a), s: a.selectionStart, e: a.selectionEnd };
+}
+/** What tells a field from others of a page drawn again without a data-k: its tag, type, class, placeholder, label and id. */
+const fieldKind = (f) => [f.tagName, f.type, f.className, f.placeholder, f.getAttribute("aria-label"), f.id].join("|");
+const fieldsOf = (box, kind) => [...box.querySelectorAll("input, textarea")].filter((f) => fieldKind(f) === kind);
+function giveBack(box, h) { const f = h && (h.k ? box.querySelector(`[data-k="${h.k}"]`) : fieldsOf(box, h.kind)[h.n]); if (!f) return; f.focus(); try { f.setSelectionRange(h.s, h.e); } catch (e) { /* not a text field */ } }
 /** Who the text model's requests go to, by its address: Anthropic or OpenAI for their own, else the host (a gateway, a local model). */
 function aiService(cfg) {
   let host = "";
@@ -8081,14 +8095,36 @@ function closeMenu() {
 const textField = (a) => !!a && (a.isContentEditable || a.tagName === "TEXTAREA" || (a.tagName === "INPUT" && !["range", "color", "checkbox", "radio", "button", "file"].includes(a.type)));
 /**
  * Shuts what is open for a moment over the editor — the ⋯ menu, the bar's popover, a picker's list, a look, an effect
- * or a layout shown on hover — and takes the focus out of a field being typed in, so the sheets drawn next are drawn whole.
+ * or a layout shown on hover — and takes the focus out of a field being typed in, so the sheets drawn next are drawn whole
+ * (and what the field holds is taken, by its change event). An agent's change does it as it begins; a field of Settings'
+ * page left so is noted (LEFT), for settingsFollow to give it back once the change is over.
  */
 function closeTransient() {
   closeMenu();
   if (FTB.pop) { FTB.pop = ""; renderBar(); }
   for (const b of document.querySelectorAll('[aria-expanded="true"]')) if (b._shut) b._shut(false);
   endPreview("look", "fx", "layout");
+  LEFT.field = S.mode === "setup" ? heldField($("setpanel"), true) : null;
+  if (LEFT.field) Object.assign(LEFT, { tab: S.tab.setup, profile: S.profile.id, channel: S.cover.catId });
   if (textField(document.activeElement)) document.activeElement.blur();
+}
+/** The field of Settings' page an agent's change took the focus from (closeTransient), and the page, profile and channel shown then. */
+const LEFT = { field: null, tab: "", profile: "", channel: "" };
+/**
+ * Settings' page, open while an agent's change was made (AGENT_COMMANDS: each command but the read-only ones, however it
+ * ended), drawn again as things now are — a channel renamed or recoloured on Brand & channels, a size ticked on Sizes &
+ * export — its scroll kept; and the field the change began by leaving given back its focus and caret, while nothing else
+ * has the focus and the window shows the page, profile and channel it did then (a field of a channel's card would take
+ * the window back to that channel), unless the call was let go of (`gone`: the window has been the user's since). The
+ * canvas behind and the layer list follow as with Settings shut; the sheet is drawn as Settings closes (setMode).
+ */
+function settingsFollow(gone = false) {
+  const left = LEFT.field, same = !gone && LEFT.tab === S.tab.setup && LEFT.profile === S.profile.id && LEFT.channel === S.cover.catId;
+  LEFT.field = null;
+  if (S.mode !== "setup" || !S.cover) return;
+  renderPanel();
+  const panel = $("setpanel"), y = panel.scrollTop, a = document.activeElement;
+  if (left && same && (!a || a === document.body)) { giveBack(panel, left); panel.scrollTop = y; }
 }
 function renderMenu() {
   const go = (fn) => () => { closeMenu(); fn(); };
@@ -8267,11 +8303,11 @@ function renderPanel() {
   if (COMPOSING && COMPOSING === document.activeElement && $(S.mode === "setup" ? "setpanel" : "panel").contains(COMPOSING)) return later("panel-ime", 150, renderPanel);   // an input method mid-word in it: once the word is done
   endPreview("look", "layout");   // their cards drawn anew
   useLook();
-  const panel = $(S.mode === "setup" ? "setpanel" : "panel"), y = panel.scrollTop, held = heldField(panel);
+  const panel = $(S.mode === "setup" ? "setpanel" : "panel"), y = panel.scrollTop, held = heldField(panel, S.mode === "setup");
   document.documentElement.style.setProperty("--acc", cat().color);
   document.documentElement.style.setProperty("--acc-ink", inkOn(cat().color));
   panel.replaceChildren(...TABS[S.mode][S.tab[S.mode]]().flat(Infinity).filter(Boolean));
-  giveBack(panel, held);   // a field being typed in (the Assets sheet's search) keeps its focus and caret
+  giveBack(panel, held);   // a field being typed in (the Assets sheet's search, any of Settings') keeps its focus and caret
   panel.scrollTop = y;
   if (S.mode === "setup") syncTabs();   // the nav's profile: its name, channels and colours, as the page now has them
   const at = S.mode === "setup" && SET_UI.at && document.getElementById("set-" + SET_UI.at);   // a card of the page asked for (see SET_UI)
@@ -8358,8 +8394,9 @@ addEventListener("input", (e) => { if (textField(e.target)) TYPED.at = performan
  * What the user is in the middle of, in a few words of English, or null: what a change made for them (an agent's) waits
  * for. Always: the self-test, a question or a dialog open, Surprise me's window or its dealing, a press or a drag under
  * way (on the canvas, a slider, a row of the Layers sheet, an asset, a channel's card, files over the window), a word
- * being put together by an input method, typing; `strict` (for a change): Settings, the letter, crop and weave windows,
- * the brush's panel open too, and an export of the sizes ticked under way.
+ * being put together by an input method, typing; `strict` (for a change): the letter, crop and weave windows, the brush's
+ * panel open too, and an export of the sizes ticked under way. Settings open holds nothing back: an agent works as soon
+ * as its endpoint is on, the page Settings shows drawn again after each change (settingsFollow).
  */
 function userBusy(strict = false) {
   const deal = $("deal");
@@ -8373,7 +8410,6 @@ function userBusy(strict = false) {
   if (COMPOSING) return "a word is being typed with an input method";
   if (textField(document.activeElement) && performance.now() - TYPED.at < 1200) return "the user is typing";
   if (!strict) return null;
-  if (S.mode === "setup") return "Settings is open";
   if (S.letterWin) return "the letter window is open";
   if (S.cropWin) return "the crop window is open";
   if (S.weaveWin) return "the weave window is open";
@@ -10032,8 +10068,11 @@ const API = Object.freeze({
   renderReady, toPng, pngBase64, readAs, runExport, writeInto, framed, nameFor, batchJobs, openProject,
 });
 const COMMANDS = makeCommands(API);
+/** The commands as an agent's calls run them: each that changes something draws an open Settings page again once it is over, however it ended (settingsFollow). */
+const AGENT_COMMANDS = Object.fromEntries(Object.entries(COMMANDS).map(([name, run]) => [name, TOOL_BY[name] && !TOOL_BY[name].annotations.readOnlyHint
+  ? async (args, ctx) => { try { return await run(args, ctx); } finally { settingsFollow(!!(ctx && ctx.cancelled())); } } : run]));
 /** What the agent shell is given (see makeAgent in agent.js); `busy`, what of the user's a call waits for (userBusy). */
-const agentOpts = (busy = userBusy) => ({ commands: COMMANDS, busy, step: agentStep, closeTransient, host: HOST === "server" ? "server" : "desktop" });
+const agentOpts = (busy = userBusy) => ({ commands: AGENT_COMMANDS, busy, step: agentStep, closeTransient, host: HOST === "server" ? "server" : "desktop" });
 // test hook: lets automated checks drive the app without the UI
 window.__smedcover = { S, drawCover, renderFull, nameFor, touch, addAsset, addLayer, newLayer, selectLayer, selectSize, setMode, layer, surprise, SURPRISE, brushOpen, brushClose };
 start().catch((e) => {
