@@ -2981,13 +2981,65 @@ function mcpLight() {
 }
 /**
  * The lights that follow the endpoint's state, as it changes: the one beside Agents in Settings' nav, drawn again, and the
- * top bar's turquoise edge while it runs (html.autopilot; the light running round it while an agent's step holds the
- * window is body.agent's, agent.js's: see #lamp in index.html).
+ * agents' lamp lighting the top bar's edge while it is on (html.autopilot; while it runs, and while it moves to another
+ * port, so the edge does not blink; not when it could not start). The comets running round it while an agent's change
+ * holds the window are body.agent's (lampWatch).
  */
 const mcpLightSync = () => {
-  document.documentElement.classList.toggle("autopilot", mcpState(MCP.status) === "running");
+  const s = MCP.status;
+  document.documentElement.classList.toggle("autopilot", !!(s && s.on) && mcpState(s) !== "error");
   const n = document.querySelector('[data-mcp="nav"]'); if (n) n.replaceWith(mcpLight());
 };
+// ---------- the agents' lamp: comets of light round the top bar's edge while an agent's change runs
+/**
+ * #lamp in index.html, over the top bar, its looks the --lamp-* properties there (read here: the lap, how many comets,
+ * their length and shades): while an agent's change holds the window (body.agent, which agent.js's hold and release
+ * set, so it ends however the change ends) its comets run round the bar's edge. Each is --lamp-steps segments of a
+ * dash pattern on one rect over the edge each, end to end behind its head, shaded from --lamp-head through --lamp-mid to
+ * --lamp-tail and fading, with a halo round its front half; the pattern repeats --lamp-comets times round the edge. Laid
+ * out in px from the edge's own length (getTotalLength: a WebKit may not honour pathLength) as a change begins, and again
+ * when the bar changes size or the settings changed, the comets going on where they were; moved by an animation of
+ * stroke-dashoffset each, played while a change runs and paused once the lamp has faded out (nothing painted while it is
+ * hidden). Asked for less motion, never laid out (index.html lights the edge instead).
+ */
+const LAMP = { anims: [], laid: "", period: 0, off: 0 };
+const LESS_MOTION = matchMedia("(prefers-reduced-motion: reduce)");
+const lampOn = () => document.body.classList.contains("agent") && !LESS_MOTION.matches;
+function lampLay() {
+  const svg = $("lamp"), top = $("top"), css = getComputedStyle(document.documentElement), v = (k) => css.getPropertyValue(k).trim();
+  const num = (k, d, lo, hi) => { const x = parseFloat(v(k)); return Number.isFinite(x) ? clamp(x, lo, hi) : d; };
+  const lap = /ms$/.test(v("--lamp-lap")) ? parseFloat(v("--lamp-lap")) : parseFloat(v("--lamp-lap")) * 1000;
+  const n = Math.round(num("--lamp-comets", 2, 1, 12)), k = Math.round(num("--lamp-steps", 8, 1, 24)), share = num("--lamp-length", 0.16, 0.01, 1 / n), fade = num("--lamp-tail-fade", 0.15, 0, 1);
+  const r = Math.max(0, (parseFloat(getComputedStyle(top).borderTopLeftRadius) || 0) - 0.5), box = svg.getBoundingClientRect();
+  const laid = [box.width, box.height, r, lap, n, k, share, fade].join();
+  if (laid === LAMP.laid || !box.width || !box.height) return;
+  const was = LAMP.anims[0], phase = was && LAMP.period ? (was.currentTime % LAMP.period) / LAMP.period : 0, running = was && was.playState === "running";
+  for (const a of LAMP.anims) a.cancel();
+  const rect = () => { const e = document.createElementNS("http://www.w3.org/2000/svg", "rect"); for (const [a, x] of [["width", "100%"], ["height", "100%"], ["rx", r]]) e.setAttribute(a, x); return e; };
+  const halo = rect(), parts = Array.from({ length: k }, rect);
+  svg.replaceChildren(halo, ...[...parts].reverse());   // the tail first, the head drawn last, over the rest
+  const edge = halo.getTotalLength() || 2 * (box.width + box.height) - (8 - 2 * Math.PI) * r, per = edge / n, comet = share * edge, seg = comet / k, dur = (Number.isFinite(lap) && lap > 0 ? lap : 6000) / n;
+  const mix = (t) => (t <= 0.25 ? `color-mix(in oklab, var(--lamp-head), var(--lamp-mid) ${(t * 400).toFixed(1)}%)` : `color-mix(in oklab, var(--lamp-mid), var(--lamp-tail) ${(((t - 0.25) * 400) / 3).toFixed(1)}%)`);   // the head a quarter of the way to the body, the body the rest of the way to the tail
+  // each dash begins `from` px behind the head, which starts at the rect's start and goes round with the pattern
+  const lay = (e, len, from, style) => { e.style.cssText = `stroke-dasharray:${len}px ${per - len}px;${style}`; return { e, off: from }; };
+  const laidOut = [lay(halo, comet / 2, comet / 2, "stroke:var(--lamp-glow);stroke-width:var(--lamp-halo);stroke-linecap:round"),
+    ...parts.map((e, i) => { const t = k > 1 ? i / (k - 1) : 0; return lay(e, seg, seg * (i + 1), `stroke:${mix(t)};stroke-opacity:${(1 - t * t * (1 - fade)).toFixed(3)};stroke-width:calc(var(--lamp-width) * ${(1.25 - 0.35 * t).toFixed(3)});stroke-linecap:${i ? "butt" : "round"}`); })];
+  LAMP.anims = laidOut.map(({ e, off }) => e.animate([{ strokeDashoffset: `${off}px` }, { strokeDashoffset: `${off - per}px` }], { duration: dur, iterations: Infinity }));
+  for (const a of LAMP.anims) { a.currentTime = phase * dur; if (!running) a.pause(); }
+  Object.assign(LAMP, { laid, period: dur });
+}
+/** Plays the comets as a change begins (laid out first, if the bar or the settings changed), and pauses them once the lamp has faded out after it. */
+function lampWatch() {
+  const go = () => {
+    clearTimeout(LAMP.off);
+    if (lampOn()) { lampLay(); for (const a of LAMP.anims) a.play(); }
+    else LAMP.off = setTimeout(() => { if (!lampOn()) for (const a of LAMP.anims) a.pause(); }, 400);   // after #lamp's fade (index.html)
+  };
+  new MutationObserver(go).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  new ResizeObserver(() => { if (LAMP.anims.length) lampLay(); }).observe($("top"));
+  LESS_MOTION.addEventListener("change", go);
+}
+lampWatch();
 /** What the ⋯ menu says under Agents: the port it runs on, else its state. */
 const mcpSays = () => { const s = MCP.status, k = mcpState(s); return k === "running" ? t("mcp.menuOn", s.port) : t("mcp.state." + k); };
 /** Why the endpoint is not running, as error `e` of its status says (at `port`): the port taken or kept by the system, mcp.json unreadable, or the system's own words. */
