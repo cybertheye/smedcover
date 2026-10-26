@@ -92,7 +92,23 @@ test("an attach that fails is tried again a moment later, then each time the win
   });
 });
 
-test("the lines that set an agent up: Claude Code's command, Codex's TOML naming the variable the token is in, the line that sets it, and the mcpServers JSON", () => {
+test("with no token wanted (the default), three lines set an agent up, none of them with a token: Claude Code's one-line command, Codex's TOML and the mcpServers JSON", () => {
+  const url = "http://127.0.0.1:25277/mcp";
+  for (const win of [false, true]) {
+    const lines = setupLines(url, null, win);
+    assert.deepEqual(lines.map((l) => l.key), ["mcp.claude", "mcp.codex", "mcp.json"], win ? "Windows" : "elsewhere");
+    const [claude, codex, json] = lines;
+    assert.equal(claude.text, `claude mcp add --transport http --scope user smedcover ${url}`);
+    assert.equal(codex.text, `[mcp_servers.smedcover]\nurl = "${url}"\ntool_timeout_sec = 1800`);
+    const values = Object.fromEntries(codex.text.split("\n").slice(1).map((l) => { const m = /^([a-z_]+) = (.+)$/.exec(l); assert.ok(m, l); return [m[1], m[2]]; }));
+    assert.deepEqual(values, { url: JSON.stringify(url), tool_timeout_sec: "1800" });
+    assert.deepEqual(JSON.parse(json.text), { mcpServers: { smedcover: { type: "http", url } } });
+    assert.equal(json.text, JSON.stringify({ mcpServers: { smedcover: { type: "http", url } } }, null, 2), "pretty-printed");
+    for (const { text } of lines) assert.doesNotMatch(text, /smc_|Bearer|Authorization|bearer_token_env_var|SMEDCOVER_TOKEN|setx|export|undefined|null/);
+  }
+});
+
+test("with a token required, four lines set an agent up: Claude Code's command with the token, Codex's TOML naming the variable the token is in, the line that sets it, and the mcpServers JSON with the token", () => {
   const url = "http://127.0.0.1:25277/mcp", token = "smc_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_abcde".slice(0, 43);
   const [claude, codex, env, json] = setupLines(url, token);
   assert.deepEqual([claude.key, codex.key, env.key, json.key], ["mcp.claude", "mcp.codex", "mcp.codexEnv", "mcp.json"]);
@@ -118,4 +134,7 @@ test("the lines that set an agent up: Claude Code's command, Codex's TOML naming
   }
   assert.doesNotThrow(() => JSON.parse(setupLines(url, masked)[3].text));
   assert.equal(maskToken(""), "");
+  // the token not read yet: still the four lines of a token wanted, never the open ones
+  assert.deepEqual(setupLines(url, "").map((l) => l.key), ["mcp.claude", "mcp.codex", "mcp.codexEnv", "mcp.json"]);
+  assert.deepEqual(setupLines(url, "", true).map((l) => l.key), ["mcp.claude", "mcp.codex", "mcp.codexEnvWin", "mcp.json"]);
 });

@@ -347,19 +347,24 @@ export const maskToken = (token) => (token ? "••••••••" + token.
 /** The environment variable Codex reads the token from (its config names it, bearer_token_env_var). */
 export const TOKEN_ENV = "SMEDCOVER_TOKEN";
 /**
- * The lines that set an agent up for the endpoint at `url` with `token` (the token itself, or maskToken()'s to show),
- * each {key: its label's string, text}: Claude Code's command (for the user, so it works from any folder), Codex's table
- * for ~/.codex/config.toml (its tool timeout raised to an export's half hour from its 60 s), which names the environment
- * variable the token is in rather than holding it, and the line that sets that variable (`setx` on Windows, `win`, else an
- * `export` for the shell's profile), and the mcpServers JSON that Claude Code's .mcp.json and Cursor's mcp.json take.
+ * The lines that set an agent up for the endpoint at `url`, each {key: its label's string, text}: Claude Code's command
+ * (for the user, so it works from any folder), Codex's table for ~/.codex/config.toml (its tool timeout raised to an
+ * export's half hour from its 60 s), and the mcpServers JSON that Claude Code's .mcp.json and Cursor's mcp.json take.
+ * `token`: null when none is wanted (the desktop's default), and then no line has one; else the token itself, or
+ * maskToken()'s to show, put in Claude Code's header and the JSON's, and Codex's table names the environment variable the
+ * token is in rather than holding it, a line of its own setting that variable (`setx` on Windows, `win`, else an `export`
+ * for the shell's profile).
  */
 export function setupLines(url, token, win = false) {
+  const wanted = token != null;
+  const codex = `[mcp_servers.smedcover]\nurl = "${url}"\n${wanted ? `bearer_token_env_var = "${TOKEN_ENV}"\n` : ""}tool_timeout_sec = 1800`;
+  const server = { type: "http", url, ...(wanted ? { headers: { Authorization: `Bearer ${token}` } } : {}) };
   return [
-    { key: "mcp.claude", text: `claude mcp add --transport http --scope user smedcover ${url} --header "Authorization: Bearer ${token}"` },
-    { key: "mcp.codex", text: `[mcp_servers.smedcover]\nurl = "${url}"\nbearer_token_env_var = "${TOKEN_ENV}"\ntool_timeout_sec = 1800` },
-    win ? { key: "mcp.codexEnvWin", text: `setx ${TOKEN_ENV} "${token}"` } : { key: "mcp.codexEnv", text: `export ${TOKEN_ENV}="${token}"` },
-    { key: "mcp.json", text: JSON.stringify({ mcpServers: { smedcover: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2) },
-  ];
+    { key: "mcp.claude", text: `claude mcp add --transport http --scope user smedcover ${url}${wanted ? ` --header "Authorization: Bearer ${token}"` : ""}` },
+    { key: "mcp.codex", text: codex },
+    wanted && (win ? { key: "mcp.codexEnvWin", text: `setx ${TOKEN_ENV} "${token}"` } : { key: "mcp.codexEnv", text: `export ${TOKEN_ENV}="${token}"` }),
+    { key: "mcp.json", text: JSON.stringify({ mcpServers: { smedcover: server } }, null, 2) },
+  ].filter(Boolean);
 }
 
 /** SHA-256 of ui/tools.json as built (toolsText), in hex: the list this page answers to, for the host to compare with the file it serves. */

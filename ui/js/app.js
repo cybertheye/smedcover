@@ -2919,6 +2919,17 @@ async function mcpSet(on, port = null) {
   catch (e) { fail(e); }
   AGENTS.busy = false; renderPanel(); mcpLightSync();
 }
+/**
+ * Whether an agent must show the token, from its next request on (the endpoint goes on running); the status it answers
+ * is drawn, the token's row and the lines following it. Turned off, the token is hidden again for when it is next on.
+ */
+async function mcpRequireToken(on) {
+  if (AGENTS.busy) return;
+  AGENTS.busy = true; renderPanel();
+  try { MCP.status = await invoke("mcp_require_token", { on }); if (!on) AGENTS.show = false; }
+  catch (e) { fail(e); }
+  AGENTS.busy = false; renderPanel();
+}
 /** A new token, once the user says so: the old one stops working at once. */
 async function newToken() {
   if (!(await askSure({ title: t("mcp.newSure"), body: t("mcp.newBody"), go: t("mcp.newGo") }))) return;
@@ -2988,16 +2999,18 @@ function agentsLive() {
   }
   const seen = document.getElementById("set-mcp-seen");
   if (seen) seen.replaceWith(mcpSeen(s));
-  const sw = document.querySelector("#set-mcp > .aih .tog");
-  if (sw && sw.classList.contains("on") !== !!s.on) renderPanel();   // turned on or off elsewhere
+  const sw = document.querySelector("#set-mcp > .aih .tog"), req = document.querySelector("#set-mcp-token > .aih .tog");
+  if ((sw && sw.classList.contains("on") !== !!s.on) || (req && req.classList.contains("on") !== !!s.requireToken)) renderPanel();   // turned on or off elsewhere
   later("mcp-tick", 15000, agentsLive);   // "2 min ago" kept true while the page is shown
 }
 onMcpStatus(agentsLive);
 /**
- * Settings → Agents: the switch that turns the endpoint on (what it lets agents do), its port and state, the token
- * (hidden but for its end; shown, copied, or replaced after asking), the lines that set an agent up, ready to copy (Claude
- * Code, Codex, any other client's JSON), and the clients seen lately with the calls. What is kept is mcp.json, Rust's:
- * read and set through the mcp_* commands, never custom.json.
+ * Settings → Agents: the switch that turns the endpoint on (what it lets agents do), its port and state; the switch that
+ * requires a token, off by default (agents on this computer then connect without one, web pages never), saying what it
+ * does and, on, that agents set up without the token must be set up again; while on, the token (hidden but for its end;
+ * shown, copied, or replaced after asking); the lines that set an agent up, ready to copy (Claude Code, Codex, any other
+ * client's JSON), with the token only while one is required; and the clients seen lately with the calls. What is kept is
+ * mcp.json, Rust's: read and set through the mcp_* commands, never custom.json.
  */
 function agentsTab() {
   const s = MCP.status, head = el("div", { class: "sh" }, el("b", {}, t("tab.agents")), el("span", {}, t("mcp.pageSub")));
@@ -3013,11 +3026,11 @@ function agentsTab() {
     { inputMode: "numeric", maxLength: 5, class: "mport", "aria-label": t("mcp.port"), onkeydown: (e) => { if (e.key === "Enter" && !apply.disabled) apply.click(); } });
   const apply = el("button", { class: "btn", disabled: AGENTS.busy || !changed, onclick: () => mcpSet(!!s.on, +AGENTS.port) }, ico("check", 15), t("mcp.apply"));
   const bad = el("div", { class: "hint err", hidden: good }, t("mcp.portBad"));
-  const url = `http://127.0.0.1:${s.port}/mcp`, tok = AGENTS.token, shown = AGENTS.show ? tok : maskToken(tok);
-  // each line shown with the token as it is shown; the one copied made with the token itself, when Copy is pressed
+  const url = `http://127.0.0.1:${s.port}/mcp`, wanted = !!s.requireToken, tok = AGENTS.token, shown = AGENTS.show ? tok : maskToken(tok);
+  // each line shown with the token as it is shown, if one is wanted; the one copied made with the token itself, when Copy is pressed
   const row = ({ key, text }, i) => el("div", { class: "mline" },
     el("div", { class: "mlh" }, el("label", { class: "cap" }, t(key)),
-      el("button", { class: "linkbtn", disabled: !tok, "aria-label": t("mcp.copyWhat", t(key)), onclick: () => copyText(setupLines(url, AGENTS.token, ON_WINDOWS)[i].text) }, ico("copy", 15), t("mcp.copy"))),
+      el("button", { class: "linkbtn", disabled: wanted && !tok, "aria-label": t("mcp.copyWhat", t(key)), onclick: () => copyText(setupLines(url, wanted ? AGENTS.token : null, ON_WINDOWS)[i].text) }, ico("copy", 15), t("mcp.copy"))),
     el("pre", { class: "mcode" }, text));
   return [
     head,
@@ -3027,14 +3040,17 @@ function agentsTab() {
         el("div", { class: "grow" }, el("b", {}, t("mcp.switch")), el("small", {}, t("mcp.switchSub"))), mcpPill(s)),
       el("div", {}, el("label", { class: "cap" }, t("mcp.port"), el("small", {}, t("mcp.portSub"))), el("div", { class: "mrow" }, portIn, apply, mcpLine(s)), bad)),
     el("section", { class: "scard aicard", id: "set-mcp-token" },
-      el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("mcp.token")), el("small", {}, t("mcp.tokenSub")))),
-      el("div", { class: "mrow mtoken" }, el("code", { class: "mcode" }, tok ? shown : "…"),
-        el("button", { class: "btn", disabled: !tok, onclick: () => { AGENTS.show = !AGENTS.show; renderPanel(); } }, ico(AGENTS.show ? "eyeOff" : "eye", 15), t(AGENTS.show ? "mcp.hide" : "mcp.show")),
-        el("button", { class: "btn", disabled: !tok, "aria-label": t("mcp.copyWhat", t("mcp.token")), onclick: () => copyText(AGENTS.token) }, ico("copy", 15), t("mcp.copy")),
-        el("button", { class: "btn", disabled: !tok, onclick: newToken }, ico("reset", 15), t("mcp.newToken")))),
+      el("div", { class: "aih" },
+        el("button", { type: "button", class: "tog" + (wanted ? " on" : ""), role: "switch", "aria-checked": String(wanted), "aria-label": t("mcp.require"), disabled: AGENTS.busy, onclick: () => mcpRequireToken(!wanted) }),
+        el("div", { class: "grow" }, el("b", {}, t("mcp.require")), el("small", {}, t(wanted ? "mcp.requireOn" : "mcp.requireOff")))),
+      wanted && el("div", {}, el("label", { class: "cap" }, t("mcp.token"), el("small", {}, t("mcp.tokenSub"))),
+        el("div", { class: "mrow mtoken" }, el("code", { class: "mcode" }, tok ? shown : "…"),
+          el("button", { class: "btn", disabled: !tok, onclick: () => { AGENTS.show = !AGENTS.show; renderPanel(); } }, ico(AGENTS.show ? "eyeOff" : "eye", 15), t(AGENTS.show ? "mcp.hide" : "mcp.show")),
+          el("button", { class: "btn", disabled: !tok, "aria-label": t("mcp.copyWhat", t("mcp.token")), onclick: () => copyText(AGENTS.token) }, ico("copy", 15), t("mcp.copy")),
+          el("button", { class: "btn", disabled: !tok, onclick: newToken }, ico("reset", 15), t("mcp.newToken"))))),
     el("section", { class: "scard aicard", id: "set-mcp-connect" },
-      el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("mcp.connect")), el("small", {}, t("mcp.connectSub")))),
-      el("div", { class: "mlines" }, setupLines(url, shown, ON_WINDOWS).map(row)),
+      el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("mcp.connect")), el("small", {}, t(wanted ? "mcp.connectSub" : "mcp.connectSubOpen")))),
+      el("div", { class: "mlines" }, setupLines(url, wanted ? shown : null, ON_WINDOWS).map(row)),
       el("div", { class: "hint" }, t("mcp.proxy"))),
     mcpSeen(s),
   ];
@@ -8794,10 +8810,13 @@ async function agentTest(dir) {
   return r;
 }
 /**
- * With SMEDCOVER_SELFTEST_MCP, the app's own endpoint called over real HTTP with its token, once the page has attached
- * (selftest_mcp in mcp.rs: initialize, tools/list, get_context and render_preview through to this page, a wrong token):
- * the tools it lists are the desktop's, the context's profiles the window's, the preview a PNG 480 px on its longer side
- * as it says, the wrong token refused, the client seen. Undefined when the endpoint is not the self-test's.
+ * With SMEDCOVER_SELFTEST_MCP, the app's own endpoint called over real HTTP, once the page has attached (selftest_mcp
+ * in mcp.rs): as by default, no token wanted, initialize, tools/list, get_context and render_preview through to this
+ * page, none with a token; then a token required as the Agents page's switch requires it, and none again. The tools it
+ * lists are the desktop's, the context's profiles the window's, the preview a PNG 480 px on its longer side as it says;
+ * with the token required, a request without one and one with a wrong one refused (401), one with it let in; none
+ * required again, one without let in; the status saying so each time; the client seen. Undefined when the endpoint is not
+ * the self-test's.
  */
 async function mcpTest() {
   const m = await invoke("selftest_mcp");
@@ -8809,7 +8828,10 @@ async function mcpTest() {
   if (m.toolsMismatch) no("the page's tools are not those the endpoint lists");
   if (m.context.isError || m.context.profiles !== S.profiles.length) no(`get_context: ${m.context.profiles} profiles, not ${S.profiles.length}`);
   if (p.isError || Math.max(p.width, p.height) !== 480 || p.width !== p.said[0] || p.height !== p.said[1] || p.bytes < 1000) no(`render_preview: ${p.width}×${p.height} (${p.bytes} bytes), said ${p.said.join("×")}`);
-  if (m.wrongToken !== 401) no(`a wrong token answered ${m.wrongToken}, not 401`);
+  if (m.open !== true) no("the endpoint wanted a token by default");
+  if (m.noToken !== 401 || m.wrongToken !== 401 || m.rightToken !== 200) no(`with a token required, no token answered ${m.noToken}, a wrong one ${m.wrongToken}, the right one ${m.rightToken} (not 401, 401, 200)`);
+  if (m.openAgain !== 200) no(`no token required again, a request without one answered ${m.openAgain}, not 200`);
+  if (JSON.stringify(m.requireToken) !== "[false,true,false]") no(`the status said requireToken ${JSON.stringify(m.requireToken)} before, while and after it was required`);
   if (!m.clientSeen) no("the self-test's client is not among those seen");
   r.ok = !r.errors.length;
   return r;
