@@ -599,14 +599,15 @@ export function makeCommands(api) {
       const kept = how === "library" ? S.library.find((e) => e.pid === value.trim()) : null;
       if (how === "library" && !kept) throw refused(`No picture "${value}" in the library (list_library lists its photos).`);
       const pic = kept ? null : await pictureFrom(how, value, ctx);   // read, fetched or checked before anything is touched
+      // decoded too, into the photo store but not written (putPhoto, save: false): a picture the web view cannot read
+      // (HEIC off macOS, base64 broken past its start) is refused with the window where it was, and nothing kept
+      const fresh = pic ? await api.putPhoto(pic.src, { save: false }) : null;
+      if (pic && !fresh) throw refused(`The picture could not be read here${/hei[cf]|avif/.test(pic.type || "") ? ` (${pic.type.slice(6).toUpperCase()} is read where the system reads it: on macOS)` : ""}.`);
       let above;
-      await aim(args, { check: (L, c) => { above = args.above === undefined ? undefined : aboveOf(c, args.above); return null; } });
-      let pid = kept && kept.pid;
-      if (!pid) {   // as a photo uploaded (uploadPhotos → addPhoto): into the photo store, and the bitmap library
-        pid = await api.putPhoto(pic.src);
-        if (!pid) throw refused(`The picture could not be read here${/hei[cf]|avif/.test(pic.type || "") ? ` (${pic.type.slice(6).toUpperCase()} is read where the system reads it: on macOS)` : ""}.`);
-        api.keepPicture(pid, args.name ?? pic.name, "upload");
-      }
+      try { await aim(args, { check: (L, c) => { above = args.above === undefined ? undefined : aboveOf(c, args.above); return null; } }); }
+      catch (e) { if (fresh) S.photos.delete(fresh); throw e; }   // refused, or the switch failed: the picture let go of again, no orphan left
+      const pid = kept ? kept.pid : fresh;
+      if (fresh) { api.savePhoto(fresh); api.keepPicture(fresh, args.name ?? pic.name, "upload"); }   // as a photo uploaded (uploadPhotos → addPhoto): its files written, and into the bitmap library
       const L = await api.placePhoto(pid, args.at ? { x: args.at.x, y: args.at.y } : null, !!args.fill, above);   // as a photo placed: a print above `above` (the selected layer), or the background where Fill the canvas takes it (toGround)
       if (!L) throw new ToolError("failed", `The picture "${pid}" could not be read from the photo store.`);
       return toResult({ structured: { layer: layerOut(L, S.cover), pid } });

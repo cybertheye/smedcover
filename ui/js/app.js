@@ -9963,7 +9963,7 @@ const API = Object.freeze({
   // the window
   switchProfile, switchChannel, selectSize, selectLayer, pickLayers, closeTransient, weaveClose, brushClose, cropClose,
   // changes
-  edit, addLayer, addAsset, removeLayer, duplicateLayer, shiftLayer, restack, alignedT, fxSeedOf, setCrop, cutOut, putPhoto, placePhoto, keepPicture, loadPhotos, pidsOf, ensureFonts, fontsReading, outlinesPending, toGround,
+  edit, addLayer, addAsset, removeLayer, duplicateLayer, shiftLayer, restack, alignedT, fxSeedOf, setCrop, cutOut, putPhoto, savePhoto, placePhoto, keepPicture, loadPhotos, pidsOf, ensureFonts, fontsReading, outlinesPending, toGround,
   // Surprise me
   dealHands, keepFirst, takeHand, handSays, handNow, putHand,
   // drawing and files

@@ -621,7 +621,8 @@ async function fakeFull() {
       throw new Error(`no command ${cmd}`);
     },
     readAs: async (blob) => `data:${blob.type};base64,${Buffer.from(await blob.arrayBuffer()).toString("base64")}`,
-    putPhoto: async (src) => { calls.push(["putPhoto", src.slice(0, 22)]); if (!src.startsWith("data:image/png")) return null; const pid = `new${++n}`; S.photos.set(pid, { src }); return pid; },
+    putPhoto: async (src, { save = true } = {}) => { calls.push(["putPhoto", src.slice(0, 22), save]); if (!src.startsWith("data:image/png")) return null; const pid = `new${++n}`; S.photos.set(pid, { src }); if (save) calls.push(["savePhoto", pid]); return pid; },
+    savePhoto: (pid) => calls.push(["savePhoto", pid]),
     keepPicture: (pid, name, kind) => { calls.push(["keepPicture", pid, name, kind]); S.library.unshift({ pid, name, kind, at: 1 }); },
     placePhoto: async (pid, at, fill, above) => {   // a background as toGround puts one: above bg and the photos filling the canvas there already
       calls.push(["placePhoto", pid, at, fill, above]);
@@ -682,6 +683,9 @@ test("the photo, cut-out, weave, Surprise me, project and file tools refuse what
     ["add_photo", { source: { url: "ftp://example.com/a.png" } }, /"source.url" must be an http\(s\) link/],
     ["add_photo", { source: { path: "/tmp/notes.txt" } }, /"source.path": not a picture file/],
     ["add_photo", { source: { library: "pic1" }, above: "nope" }, /No layer "nope"/],
+    ["add_photo", { source: { data: PNG_B64 }, above: "nope" }, /No layer "nope"/],   // decoded first, then let go of again
+    ["add_photo", { source: { path: "/tmp/a.png" }, channel: "nope" }, /No channel "nope"/],
+    ["add_photo", { source: { data: "data:image/gif;base64,R0lGODlhAQABAAAAACw=" }, channel: "nope" }, /could not be read here/],   // not decoded: refused before the channel is even looked for
     ["crop_photo", { layer: sticker.id, crop: { x: 0, y: 0 } }, /takes x, y, w and h, all four \(this one has x, y\)/],
     ["crop_photo", { layer: sticker.id, crop: { x: 0, y: 0, w: 0.5, h: 0.5, pts: [[0, 0], [1, 0], [1, 1]] } }, /a rectangle \(x, y, w, h\) or a shape \(pts\), not both/],
     ["crop_photo", { layer: sticker.id, crop: { pts: [[0, 0], [0.5, 0.5], [1, 1]] } }, /no area/],
@@ -721,7 +725,9 @@ test("the photo, cut-out, weave, Surprise me, project and file tools refuse what
   api.CAN = can;
   api.cutReady = () => false; api.cutEngine = () => "birefnet-lite";
   await assert.rejects(cmds.cut_out({ layer: "title" }), (e) => e.code === "unavailable" && /model \(birefnet-lite\) is not downloaded: the user can download it in Settings/.test(e.message));
-  assert.deepEqual(calls.filter((c) => c[0] !== "invoke"), [], "nothing that changes anything was called: no switch, no picture stored, nothing written");
+  // a picture decoded to be checked before anything is touched (putPhoto, save: false) is let go of again: the state below
+  assert.ok(calls.filter((c) => c[0] === "putPhoto").every((c) => c[2] === false), "a picture only decoded, never written");
+  assert.deepEqual(calls.filter((c) => c[0] !== "invoke" && c[0] !== "putPhoto"), [], "nothing that changes anything was called: no switch, no picture stored, nothing written");
   assert.equal(JSON.stringify(S, (k, v) => (v instanceof Map ? [...v.keys()] : v)), was, "the state as it was");
 });
 
@@ -733,6 +739,7 @@ test("the photo tools do what the editor does: a picture from a file, a link, th
   const one = (await cmds.add_photo({ source: { data: PNG_B64 }, name: "Dot", at: { x: 0.3, y: 0.6 } }, ctx)).structuredContent;
   assert.equal(one.pid, "new1"); assert.equal(one.layer.type, "photo"); assert.deepEqual([one.layer.place.x, one.layer.place.y], [0.3, 0.6]);
   assert.deepEqual(calls.filter((c) => c[0] === "keepPicture"), [["keepPicture", "new1", "Dot", "upload"]]);
+  assert.deepEqual(calls.filter((c) => ["putPhoto", "savePhoto", "switchChannel", "placePhoto"].includes(c[0])).map((c) => c[0]), ["putPhoto", "savePhoto", "placePhoto"], "decoded first, written once it is to be put on");
   assert.deepEqual(calls.find((c) => c[0] === "placePhoto"), ["placePhoto", "new1", { x: 0.3, y: 0.6 }, false, undefined], "above the selected layer: placePhoto's own default");
   // a file: read by the host, named after it; a link: fetched by the host; the library: placed again, not kept twice
   const two = (await cmds.add_photo({ source: { path: "/Users/me/Pictures/Holiday 2.png" }, above: "top" }, ctx)).structuredContent;

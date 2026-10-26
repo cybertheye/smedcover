@@ -2457,7 +2457,10 @@ now with `drawnNow()`), then where it goes.
 
 `add_photo` has its picture before anything is touched — a file read by the host (`read_picture`, 10.5), a link fetched
 by it (`fetch_image`; the plain page fetches it itself), the library's by its pid, data as given (its type by its first
-bytes) — then does what a photo uploaded does: `putPhoto()`, `keepPicture()`, `placePhoto(pid, at, fill, above)`.
+bytes), and decoded into the photo store, not yet written (`putPhoto(src, {save: false})`: a picture the web view cannot
+decode, a HEIC off macOS, is refused before the window switches; refused after, or the switch failing, it is taken out
+of the store again, no orphan left) — then does what a photo uploaded does: `savePhoto()`, `keepPicture()`,
+`placePhoto(pid, at, fill, above)`.
 `crop_photo` is the crop window (`setCrop()`: a rectangle, a shape, a ratio fitted about what was kept, Reset; a
 rectangle needs all four sides). `cut_out` waits for a cut-out under way (`CUT.busy`), answers `unavailable` where no
 engine is ready (`cutReady()`: the model not downloaded), and is Cut out subject at the sizes the scope asked reaches
