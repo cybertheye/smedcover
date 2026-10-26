@@ -57,6 +57,12 @@
 //! body not read is reset, and the client may lose the refusal), and its connection is then closed.
 //! [`Running::stop`] closes every connection, the port being free again when it returns.
 //!
+//! A call the page could not answer (no page, the page gone, a timeout, a cancel, too many calls, an
+//! answer that could not be read, or the page's own refusal) is a tool error: its text is what the
+//! agent is told, and its `_meta` says the same for a program to test, `{"smedcover/error": {"kind",
+//! "message"}}` ([`ERROR_META`], [`error_kind`]); never in `structuredContent`, which every tool's
+//! output schema describes and a client may check an error's against.
+//!
 //! Who a request comes from: a client of 2026-07-28 says so in every request's `_meta`. A client of
 //! the older revisions says so only in `initialize`, once for each connection it makes, and there are
 //! no sessions to tie its later requests to it; so the answer to an `initialize` carries an
@@ -108,7 +114,7 @@ use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::service::TowerToHyperService;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, DiscoverResult, Implementation, InitializeRequestParams,
-    InitializeResult, ListToolsResult, PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion, RequestId, ResultType,
+    InitializeResult, ListToolsResult, MetaObject, PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion, RequestId, ResultType,
     ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
@@ -167,6 +173,34 @@ const AGENT_BYTES: usize = 256;
 const INITIALIZE_BYTES: usize = 1024 * 1024;
 /// The hosts and origins the endpoint answers: this computer's loopback names.
 const LOOPBACK: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
+
+/// The key of a failed call's `_meta` that says what kind of failure it was (see [`error_kind`]).
+pub const ERROR_META: &str = "smedcover/error";
+
+/// The kind of failure a call that could not be answered is, as its `_meta` says it
+/// (`{"smedcover/error": {"kind", "message"}}`), for a program (the command line) to test, the
+/// text being for people: `not_ready` (no page, none came in time), `gone` (the page went before it
+/// answered: the window reloaded or closed, the app quitting), `timeout`, `cancelled`, `too_many`
+/// (16 calls in hand already), `malformed` (the page's answer could not be read), or the page's own
+/// code: `busy`, `invalid_arguments`, `not_allowed`, `unavailable`, `failed`, and the desktop's
+/// `needs_setup` (the app waits on its first start's welcome).
+pub fn error_kind(e: &BridgeError) -> &str {
+    match e {
+        BridgeError::PageGone(_) => "gone",
+        other => other.code(),
+    }
+}
+
+/// The tool error a call that could not be answered is answered with: the text the agent is told,
+/// and its kind in `_meta` (see [`error_kind`]).
+fn failed_call(e: &BridgeError) -> CallToolResult {
+    let message = e.to_string();
+    let mut result = CallToolResult::error(vec![ContentBlock::text(message.clone())]);
+    let mut meta = serde_json::Map::new();
+    meta.insert(ERROR_META.into(), json!({"kind": error_kind(e), "message": message}));
+    result.meta = Some(MetaObject(meta));
+    result
+}
 
 /// The header every request the app sends for its page carries (see `crate::net`); the endpoint
 /// refuses any request that has it, whatever its value. Lower case, as HTTP/1.1 header names are
@@ -683,7 +717,7 @@ impl ServerHandler for Handler {
             }
             Err(e) => {
                 flight.end(false);
-                Ok(CallToolResult::error(vec![ContentBlock::text(e.to_string())]).into())
+                Ok(failed_call(&e).into())
             }
         }
     }
@@ -1634,6 +1668,28 @@ mod tests {
         assert_eq!(caller.agent.map(|a| a.len()), Some(AGENT_BYTES));
         headers.insert(SESSION_ID, HeaderValue::from_static(""));
         assert!(Caller::of(&headers).session.is_none());
+    }
+
+    #[test]
+    fn a_failed_calls_kind_is_in_its_meta() {
+        let kinds = [
+            (BridgeError::NotReady, "not_ready"),
+            (BridgeError::PageGone("the window reloaded".into()), "gone"),
+            (BridgeError::Timeout, "timeout"),
+            (BridgeError::Cancelled, "cancelled"),
+            (BridgeError::TooMany, "too_many"),
+            (BridgeError::Malformed("no result".into()), "malformed"),
+            (BridgeError::Page { code: "needs_setup".into(), message: "not set up".into() }, "needs_setup"),
+            (BridgeError::Page { code: "invalid_arguments".into(), message: "no".into() }, "invalid_arguments"),
+        ];
+        for (e, kind) in kinds {
+            assert_eq!(error_kind(&e), kind);
+            let result = failed_call(&e);
+            assert_eq!(result.is_error, Some(true));
+            assert!(result.structured_content.is_none());
+            let meta = result.meta.expect("a _meta").0;
+            assert_eq!(meta[ERROR_META], json!({"kind": kind, "message": e.to_string()}), "{e:?}");
+        }
     }
 
     /// `/mcp` wants the token while the access is a token's, wants none while it is open, the one in

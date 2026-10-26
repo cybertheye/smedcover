@@ -633,10 +633,14 @@ async fn the_pages_failures_are_tool_errors_and_unknown_tools_are_protocol_error
     let answer = e.legacy_call(1, "busy", json!({})).await;
     assert_eq!(answer["result"]["isError"], true);
     assert_eq!(answer["result"]["content"], json!([{"type": "text", "text": "SmedCover is busy: exporting."}]));
-    assert!(answer["result"].get("structuredContent").is_none());
+    assert!(answer["result"].get("structuredContent").is_none(), "never what the tool's output schema describes");
+    // its kind, for a program to test, in _meta
+    assert_eq!(answer["result"]["_meta"], json!({"smedcover/error": {"kind": "busy", "message": "SmedCover is busy: exporting."}}));
     let answer = e.legacy_call(2, "timeout", json!({})).await;
     assert_eq!(answer["result"]["isError"], true);
-    assert!(answer["result"]["content"][0]["text"].as_str().unwrap().contains("did not answer in time"));
+    let text = answer["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("did not answer in time"));
+    assert_eq!(answer["result"]["_meta"]["smedcover/error"], json!({"kind": "timeout", "message": text}));
     for (id, tool) in [(3, "nope"), (4, "stale"), (5, "server_only")] {
         let answer = e.legacy_call(id, tool, json!({})).await;
         assert_eq!(answer["error"]["code"], -32602, "{tool}");
