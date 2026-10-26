@@ -6,12 +6,15 @@
 //! `mcp_require_token`, `mcp_token`).
 //!
 //! By default no token is wanted, so that one line sets an agent up (Figma's desktop app has its
-//! endpoint so too). The endpoint listens on 127.0.0.1 alone, and the core keeps web pages out by
-//! their `Host` and `Origin` whichever way it is (`smedcover_core::mcp::server`); a program running
-//! on this computer as the user could read and write the user's files anyway, so a token adds little
-//! there, and what the tools can do is bounded (each change undoable, an export never over a file, a
-//! file read only for the call in hand that names it). Whoever wants it turns *Require a token* on:
-//! from the next request on, an agent must show the token, which is kept all along.
+//! endpoint so too). The endpoint listens on 127.0.0.1 alone, but that is not the user alone: any
+//! program that can reach it — the user's, and also other accounts on the computer, containers,
+//! virtual machines and WSL with mirrored networking, sandboxed apps allowed the network — may then
+//! drive the window, have the app read any picture or project the user can read by naming its path,
+//! write new pictures into any folder the user can write, and fetch links. Web pages cannot: the core
+//! refuses their `Host` and `Origin` whichever way it is and sends no CORS headers
+//! (`smedcover_core::mcp::server`). *Require a token*, for a computer that is shared or runs
+//! containers, virtual machines or apps not trusted, has an agent show the token from the next
+//! request on; the token is kept all along.
 //!
 //! `mcp.json` in the data folder is Rust's alone: the page asks for what it shows, and every save is
 //! made under the host's one lock on its settings. The endpoint starts with the app when it is on
@@ -22,8 +25,10 @@
 //!
 //! The page is not trusted with more than the calls it is given: a file is read for it only while a
 //! call in hand names that very file ([`NamedFiles`], [`may_read`]), and the app's own requests on
-//! its behalf (`ai_request`, `fetch_image`) never reach the endpoint ([`not_to_the_endpoint`]), so
-//! the page cannot make calls of its own to have files read.
+//! its behalf (`ai_request`, `fetch_image`) never reach the endpoint — refused before they are sent
+//! when they name it ([`not_to_the_endpoint`], which says why), and by the endpoint whatever way they
+//! reach it, as they carry `smedcover_core::net::PAGE_MARKER` — so the page cannot make calls of its
+//! own to have files read.
 
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
@@ -81,7 +86,7 @@ struct Endpoint {
     cfg: McpConfig,
     running: Option<Running>,
     /// What went wrong: the port could not be had the last time the endpoint was to start, or
-    /// `mcp.json` could not be read (till it is saved again).
+    /// `mcp.json` could not be read (till it can be: nothing is saved over it meanwhile).
     trouble: Option<Trouble>,
     /// Stopping, to start again elsewhere or not at all.
     switching: bool,
@@ -116,7 +121,7 @@ impl McpHost {
         };
         let tools = Arc::new(tools.unwrap_or_else(|e| {
             eprintln!("SmedCover: the agents' tools could not be read, so the endpoint offers none: {e}");
-            ToolList::empty()
+            ToolList::empty(Host::Desktop)
         }));
         let window = app.clone();
         let runtime = tauri::async_runtime::handle().inner().clone();
@@ -126,8 +131,9 @@ impl McpHost {
     }
 
     /// The host itself, without Tauri: `runtime` serves the endpoint, `on_running` is told whether it
-    /// runs at each change. An `mcp.json` that cannot be read leaves it off, saying why (`config`),
-    /// till it is saved again.
+    /// runs at each change. An `mcp.json` that cannot be read leaves it off, saying why (`config`):
+    /// each change of the settings reads it again first, and none is saved over it while it cannot be
+    /// read.
     pub fn new(data: PathBuf, tools: Arc<ToolList>, selftest: Option<SelfTest>, runtime: Handle, on_running: OnRunning) -> Res<Arc<McpHost>> {
         let (mut cfg, trouble) = match McpConfig::load(&data) {
             Ok(cfg) => (cfg, None),
@@ -247,9 +253,9 @@ impl McpHost {
         status
     }
 
-    /// Turns the endpoint on or off, on `port` if given (else the one saved): saved first, then
-    /// started, stopped or moved (the page told it is switching meanwhile). A port that cannot be had
-    /// leaves it on but in error, saying why.
+    /// Turns the endpoint on or off, on `port` if given (else the one saved): saved first (never over
+    /// an `mcp.json` that cannot be read), then started, stopped or moved (the page told it is
+    /// switching meanwhile). A port that cannot be had leaves it on but in error, saying why.
     pub async fn set(&self, on: bool, port: Option<u16>) -> Res<Value> {
         let _one = self.switching.lock().await;
         if let Some(port) = port {
@@ -257,11 +263,11 @@ impl McpHost {
         }
         let stopping = {
             let mut s = self.lock();
-            let mut cfg = s.cfg.clone();
-            cfg.on = on;
-            cfg.port = port.unwrap_or(cfg.port);
-            cfg.save(&self.data)?;
-            s.cfg = cfg;
+            self.change(&mut s, |cfg| {
+                cfg.on = on;
+                cfg.port = port.unwrap_or(cfg.port);
+                Ok(())
+            })?;
             s.trouble = None;
             let keep = on && s.running.as_ref().is_some_and(|r| self.selftest || r.port() == s.cfg.port);
             let stopping = if keep { None } else { s.running.take() };
@@ -288,14 +294,15 @@ impl McpHost {
     /// endpoint goes on running, its calls in hand with it; an agent set up without the token is
     /// refused from then on, one set up with it goes on either way). Its status after.
     pub fn require_token(&self, on: bool) -> Res<Value> {
-        {
+        let done = {
             let mut s = self.lock();
-            let mut cfg = s.cfg.clone();
-            cfg.require_token = on;
-            self.put(&mut s, cfg)?;
-        }
+            self.change(&mut s, |cfg| {
+                cfg.require_token = on;
+                Ok(())
+            })
+        };
         self.changed();
-        Ok(self.status())
+        done.map(|()| self.status())
     }
 
     /// The token, after a new one has taken its place if `regenerate` (saved, then in force at once
@@ -304,22 +311,38 @@ impl McpHost {
     pub fn token(&self, regenerate: bool) -> Res<String> {
         let mut s = self.lock();
         if regenerate {
-            let mut cfg = s.cfg.clone();
-            cfg.token = Secret::generate()?;
-            self.put(&mut s, cfg)?;
+            self.change(&mut s, |cfg| {
+                cfg.token = Secret::generate()?;
+                Ok(())
+            })?;
         }
         Ok(s.cfg.token.expose().to_string())
     }
 
-    /// Saves `cfg` as `mcp.json` and has the server let in whom it says from the next request on;
-    /// an `mcp.json` that could not be read is said no more, being saved. `s` is the host's lock.
-    fn put(&self, s: &mut Endpoint, cfg: McpConfig) -> Res<()> {
+    /// Changes the settings with `edit`, saves them as `mcp.json` and has the server let in whom they
+    /// say from the next request on. While `mcp.json` could not be read it is read again first:
+    /// still unreadable, nothing is saved over it (the user's file, and the token agents were set up
+    /// with, are kept) and why is said; read now, the change is made to what it holds (the endpoint
+    /// itself left as it is). `s` is the host's lock.
+    fn change(&self, s: &mut Endpoint, edit: impl FnOnce(&mut McpConfig) -> Res<()>) -> Res<()> {
+        if matches!(s.trouble, Some(Trouble::Config(_))) {
+            match McpConfig::load(&self.data) {
+                Ok(cfg) => {
+                    *self.access.write().unwrap_or_else(|e| e.into_inner()) = cfg.access();
+                    s.cfg = cfg;
+                    s.trouble = None;
+                }
+                Err(e) => {
+                    s.trouble = Some(Trouble::Config(e.clone()));
+                    return Err(format!("{e} (SmedCover's settings for agents could not be read, so they are left as they are)"));
+                }
+            }
+        }
+        let mut cfg = s.cfg.clone();
+        edit(&mut cfg)?;
         cfg.save(&self.data)?;
         *self.access.write().unwrap_or_else(|e| e.into_inner()) = cfg.access();
         s.cfg = cfg;
-        if matches!(s.trouble, Some(Trouble::Config(_))) {
-            s.trouble = None;
-        }
         Ok(())
     }
 
@@ -570,7 +593,10 @@ fn this_computer(ip: &IpAddr) -> bool {
 /// Refuses a request the app would send for the page (`ai_request`, `fetch_image`) to the agents'
 /// endpoint itself, at `url` or through `proxy`, while it runs: such a request carries no `Origin`,
 /// so with no token wanted (the default), or with the token the page can read, the page could make
-/// calls of its own there, and have the files they name read. Blocking: a name may be looked up.
+/// calls of its own there, and have the files they name read. Blocking: a name may be looked up. It
+/// is the first line, which says why; a name resolved otherwise on connecting, a redirect, a `Host`
+/// of the page's or a request while the endpoint is between ports are the endpoint's to refuse, by
+/// the marker every such request carries (`smedcover_core::net::PAGE_MARKER`).
 pub fn not_to_the_endpoint(app: &AppHandle, url: &str, proxy: Option<&str>) -> Res<()> {
     let Some(port) = app.try_state::<Arc<McpHost>>().and_then(|h| h.running_port()) else {
         return Ok(());
@@ -985,7 +1011,7 @@ mod tests {
     // ---- switching the endpoint, the token
 
     fn host(data: &Path) -> Arc<McpHost> {
-        McpHost::new(data.to_path_buf(), Arc::new(ToolList::empty()), None, Handle::current(), Box::new(|_| {})).unwrap()
+        McpHost::new(data.to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), None, Handle::current(), Box::new(|_| {})).unwrap()
     }
 
     fn free_port() -> u16 {
@@ -1122,7 +1148,7 @@ mod tests {
     async fn the_self_tests_endpoint_begins_as_by_default_and_follows_the_switch() {
         let dir = tempfile::tempdir().unwrap();
         McpConfig { require_token: true, ..McpConfig::new().unwrap() }.save(dir.path()).unwrap();
-        let h = McpHost::new(dir.path().to_path_buf(), Arc::new(ToolList::empty()), Some(SelfTest::Mcp), Handle::current(), Box::new(|_| {})).unwrap();
+        let h = McpHost::new(dir.path().to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), Some(SelfTest::Mcp), Handle::current(), Box::new(|_| {})).unwrap();
         let s = h.status();
         assert_eq!((s["state"].as_str(), s["requireToken"].as_bool(), s["on"].as_bool()), (Some("running"), Some(false), Some(false)));
         assert!(wants(&h).is_none());
@@ -1152,5 +1178,64 @@ mod tests {
         assert_eq!(s["error"]["code"], "config");
         assert!(h.set(true, None).await.is_err(), "it cannot be saved either");
         assert_eq!(h.status()["error"]["code"], "config");
+        assert!(h.require_token(true).is_err() && h.token(true).is_err());
+        assert!(dir.path().join("mcp.json").is_dir(), "left as it was");
+        assert_eq!(h.status()["error"]["code"], "config");
+    }
+
+    /// An mcp.json that cannot be read (but could be written over) is never written over by a switch:
+    /// each refuses, saying why, the file as it was; once it can be read again, the change is made to
+    /// what it holds, its token kept.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_switch_never_saves_over_an_mcp_json_that_cannot_be_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("mcp.json");
+        let theirs = Secret::generate().unwrap();
+        McpConfig { on: false, port: free_port(), token: theirs.clone(), require_token: false }.save(dir.path()).unwrap();
+        let before = std::fs::read(&file).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&file).is_ok() {
+            return; // run as root: every file can be read, so there is nothing to try
+        }
+        let h = host(dir.path());
+        assert_eq!(h.status()["error"]["code"], "config");
+        let refused = h.require_token(true).unwrap_err();
+        assert!(refused.contains("could not be read"), "{refused}");
+        assert!(h.token(true).is_err() && h.set(true, None).await.is_err());
+        assert_eq!(h.status()["error"]["code"], "config", "still said");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(std::fs::read(&file).unwrap(), before, "the file as it was");
+        // readable again: the switch reads it first, and keeps its token
+        let s = h.require_token(true).unwrap();
+        assert!(s["requireToken"] == true && s.get("error").is_none());
+        assert_eq!(h.token(false).unwrap(), theirs.expose());
+        let saved = McpConfig::load(dir.path()).unwrap();
+        assert!(saved.require_token && saved.token.matches(theirs.expose()));
+    }
+
+    /// Turning the endpoint on, off or to another port keeps whether a token is required, and the
+    /// other way round.
+    #[tokio::test]
+    async fn the_two_switches_keep_each_others_setting() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = host(dir.path());
+        h.require_token(true).unwrap();
+        let port = free_port();
+        let s = h.set(true, Some(port)).await.unwrap();
+        assert_eq!((s["requireToken"].as_bool(), s["state"].as_str()), (Some(true), Some("running")));
+        let saved = McpConfig::load(dir.path()).unwrap();
+        assert!(saved.require_token && saved.on && saved.port == port, "set kept requireToken");
+        h.set(false, None).await.unwrap();
+        assert!(McpConfig::load(dir.path()).unwrap().require_token, "off, still required");
+        // the other way: the switch kept what set saved
+        let other = free_port();
+        h.set(true, Some(other)).await.unwrap();
+        let s = h.require_token(false).unwrap();
+        assert_eq!((s["on"].as_bool(), s["port"].as_u64(), s["state"].as_str()), (Some(true), Some(u64::from(other)), Some("running")));
+        let saved = McpConfig::load(dir.path()).unwrap();
+        assert!(!saved.require_token && saved.on && saved.port == other, "require_token kept on and the port");
+        h.shut().await;
     }
 }

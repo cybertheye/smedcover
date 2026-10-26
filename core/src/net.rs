@@ -1,11 +1,20 @@
 //! Sending the request for an AI-generated asset or a repainted photo, so it is not subject to the
 //! web view's cross-origin rules, and fetching a picture an image model left at a link.
+//!
+//! Every request sent here is the page's, and carries [`PAGE_MARKER`] (`X-SmedCover-Page: 1`), set
+//! after the page's own headers, which can neither drop it nor change it (one of that name among
+//! them is left out); a `Host` the page gives is left out too, the URL's own going instead. The
+//! agents' endpoint refuses any request with the marker (`mcp::server`), so the page cannot call it
+//! through the app, by whatever name, address, proxy or redirect: ureq keeps a request's headers when
+//! it follows a redirect (all but `Authorization`, `Cookie` and `Content-Length`), and a POST is not
+//! redirected at all.
 
 use std::io::{ErrorKind, Read};
 
 use ::image::ImageFormat;
 use serde::{Deserialize, Serialize};
 
+pub use crate::mcp::server::PAGE_MARKER;
 use crate::Res;
 
 /// How long an AI request may take unless the caller says otherwise, and the most of a reply
@@ -134,8 +143,13 @@ fn send(
     let get = method.eq_ignore_ascii_case("GET");
     let mut request = if get { agent.get(url) } else { agent.post(url) };
     for (name, value) in headers {
+        // ureq would send a Host of the page's choosing as it is; the marker is the app's alone
+        if name.trim().eq_ignore_ascii_case("host") || name.trim().eq_ignore_ascii_case(PAGE_MARKER) {
+            continue;
+        }
         request = request.set(name, value);
     }
+    let request = request.set(PAGE_MARKER, "1");
     match if get { request.call() } else { request.send_string(body) } {
         Ok(response) => Ok(AiReply {
             status: response.status(),
@@ -178,7 +192,7 @@ pub fn fetch_image(url: &str, proxy: &str, timeout_secs: u64, known: bool) -> Re
 fn fetch_capped(url: &str, proxy: &str, timeout_secs: u64, known: bool, cap: u64) -> Res<FetchedImage> {
     use base64::Engine;
     let agent = agent_for(url, proxy, timeout_secs)?;
-    let response = agent.get(url).call().map_err(net_err)?;
+    let response = agent.get(url).set(PAGE_MARKER, "1").call().map_err(net_err)?;
     let mime = response.content_type().to_ascii_lowercase();
     let mut bytes = Vec::new();
     response
@@ -284,23 +298,27 @@ mod tests {
         assert!(seen.ends_with(r#"{"model":"m"}"#));
     }
 
-    /// A one-shot HTTP server on a free local port that answers a GET with `body` as `kind`.
-    fn serve_bytes(kind: &'static str, body: Vec<u8>) -> (String, std::thread::JoinHandle<()>) {
+    /// A one-shot HTTP server on a free local port that answers a GET with `body` as `kind`, and
+    /// hands back the request's head.
+    fn serve_bytes(kind: &'static str, body: Vec<u8>) -> (String, std::thread::JoinHandle<String>) {
         use std::io::{BufRead, BufReader, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/out.png", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut head = String::new();
             loop {
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
                 if line == "\r\n" || line.is_empty() {
                     break;
                 }
+                head.push_str(&line);
             }
             write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: {kind}\r\ncontent-length: {}\r\n\r\n", body.len()).unwrap();
             let _ = stream.write_all(&body);   // a client that has read its fill may have gone
+            head
         });
         (url, server)
     }
@@ -349,6 +367,69 @@ mod tests {
                 assert!(got.as_ref().unwrap_err().starts_with("picture too big: the reply at http://127.0.0.1:"), "{got:?}");
             }
         }
+    }
+
+    /// The lines of a request's head that name `header`, in lower case.
+    fn lines_of(head: &str, header: &str) -> Vec<String> {
+        head.to_ascii_lowercase().lines().filter(|l| l.starts_with(&format!("{header}:"))).map(|l| l.trim().to_string()).collect()
+    }
+
+    #[test]
+    fn every_request_for_the_page_carries_the_marker_and_no_host_of_its_own() {
+        // the page's headers try to set the marker to something else, under another case, and to
+        // send another Host: one marker goes, the app's, and the URL's Host
+        let page = [
+            ("content-type", "application/json"),
+            ("X-SmedCover-Page", "0"),
+            ("x-smedcover-page", ""),
+            ("Host", "evil.example"),
+            ("HOST", "127.0.0.1:1"),
+            ("x-other", "kept"),
+        ]
+        .map(|(n, v)| (n.to_string(), v.to_string()));
+        for method in ["POST", "GET"] {
+            let (url, server) = serve_once("200 OK", "{}");
+            let at = url.split('/').nth(2).unwrap().to_string();
+            send(&url, method, &page, "{}", "", 20, AI_MAX_REPLY).unwrap();
+            let head = server.join().unwrap();
+            assert_eq!(lines_of(&head, PAGE_MARKER), ["x-smedcover-page: 1"], "{method}: {head}");
+            assert_eq!(lines_of(&head, "host"), [format!("host: {at}")], "{method}: {head}");
+            assert_eq!(lines_of(&head, "x-other"), ["x-other: kept"]);
+        }
+        // and without any header of the page's at all
+        let (url, server) = serve_once("200 OK", "{}");
+        send(&url, "POST", &[], "{}", "", 20, AI_MAX_REPLY).unwrap();
+        assert_eq!(lines_of(&server.join().unwrap(), PAGE_MARKER), ["x-smedcover-page: 1"]);
+        // a picture at a link too
+        let (url, server) = serve_bytes("image/png", png(&RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 255]))));
+        fetch_image(&url, "", 20, true).unwrap();
+        assert_eq!(lines_of(&server.join().unwrap(), PAGE_MARKER), ["x-smedcover-page: 1"]);
+    }
+
+    /// ureq follows a GET's redirect with the request's headers: the marker goes along.
+    #[test]
+    fn the_marker_follows_a_redirect() {
+        use std::io::{BufRead, BufReader, Write};
+        let (to, server) = serve_once("200 OK", "{}");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let from = format!("http://{}/moved", listener.local_addr().unwrap());
+        let redirecting = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+            }
+            write!(stream, "HTTP/1.1 302 Found\r\nlocation: {to}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").unwrap();
+        });
+        send(&from, "GET", &[], "", "", 20, AI_MAX_REPLY).unwrap();
+        redirecting.join().unwrap();
+        let head = server.join().unwrap();
+        assert!(head.to_ascii_lowercase().starts_with("get /v1/chat/completions"), "{head}");
+        assert_eq!(lines_of(&head, PAGE_MARKER), ["x-smedcover-page: 1"], "{head}");
     }
 
     #[test]

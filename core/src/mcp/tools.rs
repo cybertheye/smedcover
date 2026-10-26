@@ -67,9 +67,11 @@ pub struct ToolEntry {
     pub hosts: Vec<Host>,
 }
 
-/// The tools one host offers, in the file's order, with the file's instructions and its hash.
+/// The tools one host offers, in the file's order, with the file's instructions and its hash, and
+/// which host it was read for (a server's endpoint always wants a token: see `server.rs`).
 #[derive(Clone, Debug)]
 pub struct ToolList {
+    host: Host,
     instructions: Option<String>,
     tools: Vec<ToolEntry>,
     hash: String,
@@ -105,12 +107,17 @@ impl ToolList {
                 tools.push(entry);
             }
         }
-        Ok(ToolList { instructions, tools, hash: hash(text) })
+        Ok(ToolList { host, instructions, tools, hash: hash(text) })
     }
 
-    /// A list without tools, for a host that has not read its file.
-    pub fn empty() -> ToolList {
-        ToolList { instructions: None, tools: Vec::new(), hash: String::new() }
+    /// A list without tools, for `host` when it could not read its file.
+    pub fn empty(host: Host) -> ToolList {
+        ToolList { host, instructions: None, tools: Vec::new(), hash: String::new() }
+    }
+
+    /// The host the list was read for.
+    pub fn host(&self) -> Host {
+        self.host
     }
 
     /// What the file tells an agent about using the tools.

@@ -36,7 +36,8 @@ pub struct McpConfig {
     pub port: u16,
     pub token: Secret,
     /// Whether an agent must show the token (`requireToken`): off by default on the desktop, where any
-    /// program on this computer may call (see `server.rs`).
+    /// program that can reach 127.0.0.1 may then call, other accounts, containers and virtual
+    /// machines among them (see `server.rs`).
     pub require_token: bool,
 }
 
@@ -59,8 +60,9 @@ impl McpConfig {
     /// The settings saved in the data folder `data`. A file that is not there gives
     /// [`McpConfig::new`]'s; so does one that cannot be read as settings (not UTF-8, not JSON, not
     /// an object), which is first renamed [`BAD_FILE`]. A port out of range gives [`DEFAULT_PORT`];
-    /// a missing or malformed token is replaced with a new one; a `requireToken` that is missing or
-    /// not a boolean is `false`. Whatever had to be filled in is saved at once, so the token stays
+    /// a missing or malformed token is replaced with a new one; a missing `requireToken` is `false`,
+    /// and one that is there but not a boolean is `true` (a garbled setting fails closed). Whatever
+    /// had to be filled in or put right is saved at once, so the token stays
     /// the same from then on. On Unix a file others may read or write is made its owner's alone. Only
     /// a failure to read, rename or write the file is an error. Call it under the same lock as
     /// [`McpConfig::save`].
@@ -84,13 +86,15 @@ impl McpConfig {
         let on = saved.get("on").and_then(Value::as_bool);
         let port = saved.get("port").and_then(Value::as_u64).and_then(|p| u16::try_from(p).ok()).filter(|p| check_port(*p).is_ok());
         let token = saved.get("token").and_then(Value::as_str).and_then(Secret::parse);
-        let require_token = saved.get("requireToken").and_then(Value::as_bool);
-        let filled = on.is_none() || port.is_none() || token.is_none() || require_token.is_none();
+        // missing: not required, as by default; there but garbled: required, rather than open
+        let require_token = saved.get("requireToken").map(|v| v.as_bool());
+        let filled = on.is_none() || port.is_none() || token.is_none() || !matches!(require_token, Some(Some(_)));
+        let require_token = require_token.is_some_and(|v| v.unwrap_or(true));
         let token = match token {
             Some(token) => token,
             None => Secret::generate()?,
         };
-        let config = McpConfig { on: on.unwrap_or(false), port: port.unwrap_or(DEFAULT_PORT), token, require_token: require_token.unwrap_or(false) };
+        let config = McpConfig { on: on.unwrap_or(false), port: port.unwrap_or(DEFAULT_PORT), token, require_token };
         if filled {
             config.save(data)?;
         }
@@ -200,11 +204,14 @@ mod tests {
     }
 
     #[test]
-    fn require_token_missing_or_not_a_boolean_is_off_and_filled_in() {
+    fn require_token_missing_is_off_and_garbled_is_on_each_saved() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path();
         let token = Secret::generate().unwrap();
-        for (given, wanted) in [(None, false), (Some(json!(true)), true), (Some(json!(false)), false), (Some(json!("yes")), false), (Some(json!(1)), false), (Some(Value::Null), false)] {
+        // missing: off, as by default; there but not a boolean: on, failing closed
+        let garbled = [json!("yes"), json!("false"), json!(0), json!(1), Value::Null, json!([]), json!({})];
+        let cases = [(None, false), (Some(json!(true)), true), (Some(json!(false)), false)].into_iter().chain(garbled.into_iter().map(|g| (Some(g), true)));
+        for (given, wanted) in cases {
             let mut file = json!({"on": true, "port": 40002, "token": token.expose()});
             if let Some(given) = &given {
                 file["requireToken"] = given.clone();

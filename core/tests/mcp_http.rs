@@ -649,6 +649,13 @@ async fn only_this_computer_by_its_loopback_names() {
         assert_eq!(get(&e.url("/health"), vec![("Host".into(), evil_host.clone())]).await.status, 403, "{mode}");
         let localhost = format!("localhost:{}", e.addr().port());
         assert_eq!(http("POST", &e.url("/mcp"), with(&[("Host", &localhost)]), Some(list.clone())).await.status, 200, "{mode}");
+        // the app's own requests for its page carry the marker, whatever its value: refused, /health too
+        for marker in [("X-SmedCover-Page", "1"), ("x-smedcover-page", "0"), ("X-SMEDCOVER-PAGE", "")] {
+            let reply = http("POST", &e.url("/mcp"), with(&[marker]), Some(list.clone())).await;
+            assert_eq!(reply.status, 403, "{mode}: {marker:?}");
+            assert!(reply.body.contains("SmedCover's own window"), "{}", reply.body);
+        }
+        assert_eq!(get(&e.url("/health"), vec![("X-SmedCover-Page".into(), "1".into())]).await.status, 403, "{mode}");
         // a page on a loopback origin gets no further than its browser's preflight, which is never
         // told it may (no CORS headers), and the one POST it could send without one, of text/plain,
         // is refused before anything is called
@@ -734,6 +741,41 @@ async fn the_access_switches_while_it_runs() {
     assert!(e.bridge.let_go.lock().unwrap().is_none(), "the call in hand went on");
     let head = blocking(move || read_head(&mut hanging, Duration::from_secs(5))).await;
     assert!(head.is_some_and(|h| h.starts_with("http/1.1 200")), "the call's answer had begun");
+}
+
+/// An endpoint serving a server's tools wants a token whatever access it is given: open, it lets no
+/// one in; with a token, whoever shows it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_servers_endpoint_always_wants_a_token() {
+    let tools = Arc::new(ToolList::from_json(TOOLS, Host::Server).unwrap());
+    let access = Arc::new(RwLock::new(Access::Open));
+    let server = McpServer::new(Arc::new(FakeBridge::default()), tools, access.clone(), Arc::new(Stats::new()));
+    let running = server.start(([127, 0, 0, 1], 0).into(), &Handle::current()).unwrap();
+    let url = format!("http://{}/mcp", running.addr());
+    let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).to_string();
+    let ask = |auth: Option<String>| {
+        let mut headers = vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("Accept".to_string(), "application/json, text/event-stream".to_string()),
+            ("MCP-Protocol-Version".to_string(), LEGACY.to_string()),
+        ];
+        headers.extend(auth.map(|a| ("Authorization".to_string(), a)));
+        http("POST", &url, headers, Some(list.clone()))
+    };
+    let secret = Secret::generate().unwrap();
+    let right = format!("Bearer {}", secret.expose());
+    for auth in [None, Some("Bearer smc_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string()), Some(right.clone())] {
+        let reply = ask(auth).await;
+        assert_eq!(reply.status, 401, "open, for a server: no one in");
+        assert!(reply.header("www-authenticate").is_some_and(|c| c.starts_with("Bearer")));
+    }
+    *access.write().unwrap() = Access::Token(secret);
+    assert_eq!(ask(None).await.status, 401);
+    let reply = ask(Some(right)).await;
+    assert_eq!(reply.status, 200);
+    let names: Vec<_> = reply.only()["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
+    assert!(names.contains(&"server_only".to_string()), "the server's tools: {names:?}");
+    drop(running);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
