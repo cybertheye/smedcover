@@ -2482,7 +2482,10 @@ that changed (`coverDiff()`); `open_project` is Open project (`openProject(raw, 
 `writeInto()`; runExport's progress object tells the caller and the pill, `ctx.say()`), into `dir` or the profile's
 folder — never asking for one, a `dir` given not kept — switching to the profile asked first (`nameFor()` reads the one
 shown), and never over a file (`fresh`, 10.2); what a job names is found before anything is drawn or written, and a
-cancel stops between two files, answering those written. Every tool is done: `npm test` fails on a command that is not.
+cancel stops between two files, answering those written. A call's progress always rises (`rising()`, which every
+command is wrapped in): the host passes on only a word above the last, its message with it, so a file begun before the
+one before it is written is a thousandth above `done`, and the ticks every 5 s after a wait go on from it; `open_project`
+says so as each of its pictures is taken in, and every 5 s besides (a big project's take a while). Every tool is done: `npm test` fails on a command that is not.
 
 `agent.js` is the shell. Calls run one at a time in the order they came (`makeQueue()`: a call cancelled while it
 waits never runs), one waiting behind another telling the caller so every 5 s. Each is checked (`checkCall()`; a name

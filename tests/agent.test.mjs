@@ -656,9 +656,11 @@ async function fakeFull() {
     setCover: (c) => { calls.push(["setCover", c.catId]); S.cover = S.covers[c.catId] = c; },
     loadPhotos: async (pids) => pids.filter((pid) => !S.photos.has(pid)),
     pidsOf: (c) => new Set(c.layers.filter((l) => l.type === "photo" && l.pid).map((l) => l.pid)),
-    openProject: async (raw, ask) => {
+    openProject: async (raw, ask, { each } = {}) => {
       const how = raw.profile && !S.profiles.some((q) => q.id === raw.profile.id) ? await ask(raw.profile.name) : null;
       calls.push(["openProject", how]);
+      const pics = Object.keys(raw.photos || {});
+      pics.forEach((_, i) => each && each(i + 1, pics.length));
       if (how === "new") { const q = normalizeProfile(raw.profile); S.profiles.push(q); S.profile = q; S.covers = {}; S.cover = S.covers.f1 = normalizeCover({ catId: "f1", title: raw.cover.title }, q); }
       else S.cover.title = raw.cover.title;
       return { profile: S.profile, catId: S.cover.catId };
@@ -863,6 +865,27 @@ test("open_project opens a project from a file or given whole, as a new profile 
   assert.deepEqual(made, { profile: { id: "far", name: "Far away", created: true }, channel: "f1" });
   const again = (await cmds.open_project({ project, as: "current" })).structuredContent;
   assert.equal(again.profile.created, false); assert.match(again.warnings[0], /Its profile, "Far away", is here: it opened there/);
+  // the caller told as each of its pictures is taken in, each word above the last
+  const told = [], ctx = { progress: (n, total, message) => told.push([n, message]), cancelled: () => false, say: () => {} };
+  await cmds.open_project({ project: { ...project, photos: { a: {}, b: {}, c: {} } } }, ctx);
+  assert.deepEqual(told, [[1, "Took in picture 1 of 3 of the project."], [2, "Took in picture 2 of 3 of the project."], [3, "Took in picture 3 of 3 of the project."]]);
+});
+
+test("each call's progress rises, whoever sends it, so the host passes every word on: a file begun, one written, a tick after a wait", async () => {
+  const { rising, makeCommands } = await import("../ui/js/commands.js");
+  const sent = [], r = rising({ progress: (n, total, message) => sent.push([n, total, message]), cancelled: () => false, say: () => {} });
+  r.progress(0, 2, "Writing a"); r.progress(0, 2, "Writing b"); r.progress(1, 2, "1 written"); r.progress(1, 2, "Writing c"); r.progress(2, 2, "2 written");
+  r.progress(undefined, undefined, "tick"); r.progress(undefined, undefined, "tick"); r.progress(1, undefined, "late");
+  assert.deepEqual(sent.map((s) => s[0]), [0.001, 0.002, 1, 1.001, 2, 3, 4, 4.001]);
+  assert.ok(sent.every((s, i) => !i || s[0] > sent[i - 1][0]), "each above the last");
+  assert.deepEqual(sent.map((s) => s[2]), ["Writing a", "Writing b", "1 written", "Writing c", "2 written", "tick", "tick", "late"], "every message through");
+  assert.equal(typeof r.cancelled, "function"); assert.equal(typeof r.say, "function");
+  // an export's words: each above the last, the file begun counted as begun
+  const { api, p } = await fakeFull(), cmds = makeCommands(api), words = [];
+  await cmds.export({ dir: "/out", sizes: "all" }, { progress: (n, total, message) => words.push([n, total, message]), cancelled: () => false, say: () => {} });
+  assert.ok(words.every((w, i) => !i || w[0] > words[i - 1][0]), JSON.stringify(words.map((w) => w[0])));
+  assert.deepEqual(words.filter((w) => /^Writing/.test(w[2])).map((w) => w[2]), p.sizes.map((_, i) => `Writing f${i}.png (${i + 1} of ${p.sizes.length}).`));
+  assert.ok(words.every((w) => w[1] === p.sizes.length && w[0] <= w[1]), "never past the total");
 });
 
 test("export and batch_covers write as the Export window and a CSV do, into the folder given or the profile's, never over a file", async () => {

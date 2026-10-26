@@ -72,6 +72,16 @@ const PICTURE_MAX = 64 * 1024 * 1024;
 const HUSHED = Object.freeze({ progress() {}, cancelled: () => false, say() {} });
 /** What a failure says, from an Error or the text a host's command rejects with. */
 const why = (e) => String((e && e.message) || e);
+/**
+ * A call's ctx with its progress always rising, as MCP has it: the host passes a word on only when its progress is more
+ * than the last one's, its message dropped with it otherwise. `n` as given while that is more, else a thousandth above
+ * the last (a file begun before the one before it is written, say); none given (a tick, see ticking), the next whole
+ * number. Each call has its own (makeCommands wraps every command), so ticks after a wait go on from it.
+ */
+export function rising(ctx) {
+  let last = 0;
+  return { ...ctx, progress(n, total, message) { last = n == null ? Math.floor(last) + 1 : Math.max(n, Math.round(last * 1000 + 1) / 1000); ctx.progress(last, total, message); } };
+}
 
 export function makeCommands(api) {
   const { S } = api;
@@ -174,7 +184,7 @@ export function makeCommands(api) {
 
   // ---------- what the slower tools share
   /** Tells the caller every 5 s that `message` is still under way (each word sets the host's timer going again), till the function it returns is called. */
-  const ticking = (ctx, message) => { let n = 0; const id = setInterval(() => ctx.progress(++n, undefined, message), 5000); return () => clearInterval(id); };
+  const ticking = (ctx, message) => { const id = setInterval(() => ctx.progress(undefined, undefined, message), 5000); return () => clearInterval(id); };   // the next whole number (rising)
   /** Resolves once while() is false, telling the caller every 5 s; at most `most` ms (then a ToolError busy), and no longer once the call is cancelled. */
   async function waitWhile(cond, ctx, message, most = 300000) {
     if (!cond()) return;
@@ -267,9 +277,14 @@ export function makeCommands(api) {
    */
   async function writeOut(jobs, dir, args, ctx) {
     const total = jobs.length, out = { format: args.format ?? S.settings.format, scale: args.scale ?? S.settings.scale, quality: S.settings.quality };
+    let begun = 0;   // the files begun: up to two are written while the next is drawn, so `done` lags behind them
     const progress = () => ({
       get cancelled() { return ctx.cancelled(); },
-      set: (done, name) => { ctx.progress(done, total, name ? `Writing ${name} (${Math.min(done + 1, total)} of ${total}).` : `${done} of ${total} written.`); ctx.say(t("agent.exporting", Math.min(done + 1, total), total)); },
+      set: (done, name) => {   // done files written; a name, the file begun (its progress just above done's: rising)
+        if (name) begun++;
+        ctx.progress(done, total, name ? `Writing ${name} (${begun} of ${total}).` : `${done} of ${total} written.`);
+        ctx.say(t("agent.exporting", Math.min(Math.max(begun, 1), total), total));
+      },
       close: () => {},
     });
     const { n, paths, err } = await api.writeInto(dir, jobs, { out, progress, fresh: true });
@@ -749,7 +764,11 @@ export function makeCommands(api) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.kind !== "project" || !raw.cover || typeof raw.cover !== "object") throw refused('That is no SmedCover project: a project is what the app saves as a .smedcover.json ({"kind": "project", "cover": {…}, "profile": {…}, …}).');
       const as = args.as ?? "new", had = new Set(S.profiles.map((p) => p.id)), theirs = raw.profile && typeof raw.profile === "object" ? raw.profile : null, warnings = [];
       if (args.as !== undefined && (!theirs || had.has(theirs.id))) warnings.push(theirs ? `Its profile, "${theirs.name || theirs.id}", is here: it opened there ("as" is for a project whose profile is not).` : "It is a project from before profiles went with them: it opened into the channel on the canvas.");
-      const got = await api.openProject(raw, () => as);   // as Open project, its question answered by `as`
+      // as Open project, its question answered by `as`; the caller told as each picture is taken in, and every 5 s (a big project's take a while)
+      const stop = ticking(ctx, "Opening the project.");
+      let got;
+      try { got = await api.openProject(raw, () => as, { each: (done, total) => ctx.progress(undefined, undefined, `Took in picture ${done} of ${total} of the project.`) }); }
+      finally { stop(); }
       if (!got) throw new ToolError("failed", "The project was not opened.");
       const k = api.cat();
       api.toast(t("proj.opened", S.profile.name, k.name || k.code || "—"));
@@ -791,5 +810,7 @@ export function makeCommands(api) {
       return writeOut(jobs, dir, args, ctx);
     },
   };
+  // each call's word of progress above its last, whoever sends it (a wait, a tick, a file, a hand): rising
+  for (const [name, run] of Object.entries(commands)) commands[name] = (args, ctx = HUSHED) => run(args, rising(ctx));
   return commands;
 }
