@@ -84,6 +84,7 @@ ui/
 core/src/            Rust 侧干活的部分，服务器也能共用（crate smedcover-core）：存储、导出、字体、轮廓、抠图、AI 请求、MCP 入口（见第 10 节）
 src-tauri/src/lib.rs 桌面应用：数据目录、命令（对 core/ 的薄封装）、对话框、自检
 src-tauri/src/mcp.rs 桌面这边的 agent 入口：开关、窗口的 channel、mcp_* 命令（10.6）
+cli/src/             命令行 smedcover（crate smedcover-cli）：各个命令、找到或启动 App、它自己的 MCP 客户端（10.8）
 tests/               不依赖 DOM 的模块的单元测试
 ```
 
@@ -813,14 +814,15 @@ OpenAI 风格刻意不发送温度和长度参数，因为不同模型接受的�
 
 重绘窗口照设计稿（`Repaint.dc.html`）排布。左边是对比视图，`.repstage` 里的 `.cmp`；`.repstage` 是尺寸容器，所以视图按照片比例（`--ar`，用 `100cqw` 和 `100cqh` 算）占满能占的地方：底下是原图，上面是正在看的结果，从分界往右显示（按 `--at` 裁的 `clip-path`，`--at` 即 `REPWIN.at`，这次打开应用期间记着）；在视图上任意位置按下拖动，或在圆形把手上按方向键，移动分界（`repSplit()`），这期间窗口不重建。没有结果时，照片用的若已是重绘图，就拿它和原图对比。下面是 `REP.made` 的缩略图，正在看的有框，另一张在画时多一格数秒（`#rep-tile`，和按钮用同一个计时器更新），然后是「还原原图」「丢弃」（`dropResult()`）「再来一张」「用这张」。右边一栏中间可以滚动（`.repopts`，窗口重建时保留滚动位置）：跟随当前风格是一张带单选圆点的卡片，内置风格是带 `swatch` 颜色的卡片（点「全部 ›」之前是前八个，或前七个加上选中的），我的风格是一排小标签，选中的下面是它的编辑框，然后是补充说明；底部是使用的服务和费用说明，以及「重绘照片」。
 
-## 10. Rust 侧（`core/`、`src-tauri/`）
+## 10. Rust 侧（`core/`、`src-tauri/`、`cli/`）
 
-仓库根目录是一个 Cargo 工作区（`Cargo.toml`，一份 `Cargo.lock`，一个 `target/`），里面两个 crate：
+仓库根目录是一个 Cargo 工作区（`Cargo.toml`，一份 `Cargo.lock`，一个 `target/`），里面三个 crate：
 
 - **`core/`，crate `smedcover-core`**，干具体的活：存储（`store.rs`）、导出（`image.rs`）、字体和文字轮廓（`fonts.rs`、`outline.rs`）、抠图（`cut/`）、AI 请求（`net.rs`）、agent 指名要读的文件（`files.rs`）、agent 调用的 MCP 入口（`mcp/`，见 10.6）、一个数据目录只开一个桌面应用以及命令行靠它找到应用的 `cli.json`（`instance.rs`，见 10.7）、应用把数据放在哪里（`paths.rs`）。里面没有 Tauri，也没有网页视图，所以服务器能和应用一样用它。除了跑在宿主的 Tokio 运行时上的 MCP 入口，它全是同步的，错误是文字（`Res<T>` 即 `Result<T, String>`）：界面要靠这些文字判断（"timed out"、"unsupported:"、"cancelled"、"model not downloaded"）。`Core` 对应一个数据目录，由宿主指定（`Core::open(目录, bundled)`）；存储、按名字找到的字体和抠图模型都经过它。界面自带的字体通过 `BundledFonts` 交给它：应用从自己的资源里取（`AssetFonts`），服务器可以从它的 `ui/` 目录读。
 - **`src-tauri/`，桌面应用**：`setup` 只找一次数据目录（应用数据目录，或自检目录下的 `data/`），把它的 `Arc<Core>` 存成 Tauri 的状态。每个命令都是对 core 的薄封装，名字、参数、返回和错误都和原来一样；耗时的仍在阻塞线程池里等。只有桌面应用才有的留在这里：对话框（`save_image`、`pick_folder`、`save_text`）、`reveal_data_dir`、`move_pointer`、读二进制请求体（`frame_of`）、自检的命令和 `ui_build`；还有它这边的 agent 入口（`mcp.rs`，见 10.6）和命令行（`cli.rs`，见 10.7）。它的可执行文件叫 `smedcover-app`（`src-tauri/Cargo.toml` 里的 `[[bin]]`、`tauri.conf.json` 里的 `mainBinaryName`：`SmedCover.app/Contents/MacOS/smedcover-app`、`target/debug/smedcover-app`），应用的名字和图标不变；`smedcover` 这个名字留给命令行（`cli/`），它需要应用时会自己启动这个可执行文件。
+- **`cli/`，crate `smedcover-cli`**，命令行 `smedcover`（见 10.8）：独立于上面两个的小程序，只调用应用的工具，自己不画。
 
-在根目录运行 `cargo test` 只测 core（工作区的默认成员），`cargo test --workspace`（`npm run test:rust`）连应用一起测；`tauri build` 和 `tauri dev` 从 `src-tauri/` 构建应用，产物在根目录的 `target/` 里。
+在根目录运行 `cargo test` 测 core 和命令行（工作区的默认成员），`cargo test --workspace`（`npm run test:rust`）连应用一起测；`tauri build` 和 `tauri dev` 从 `src-tauri/` 构建应用，产物在根目录的 `target/` 里。
 
 ### 10.1 沙盒存储（`core/src/store.rs`）
 
@@ -891,6 +893,23 @@ agent 调用 11.1 那些工具的入口。它在 core 里，应用和服务器�
 - **一个数据目录只开一个应用。** Tauri 启动之前，`run()` 先算出数据目录（`paths::data_dir()`，命令行也按同样的规则找：自检目录的 `data/`；否则 `SMEDCOVER_DATA` 给的目录——命令行用 `--data` 时会给它启动的应用设上，不是绝对路径就从启动时所在的目录算；否则 `paths::desktop_data_dir()`，就是 Tauri 的 `app_data_dir()`），在那里的 `app.lock` 上拿一把排他锁，进程活多久就拿多久（`AppLock::take()`，`std::fs::File::try_lock()`；进程不管怎么结束系统都会放开它，这个文件不放内容，也从不删；这个用户写不了的锁文件——别的账户或 `sudo` 运行时留下的——以只读方式打开来锁，系统的锁允许这样；目录根本锁不了时在 stderr 上说一声，应用不加锁照常运行），崩溃的应用留下的 `cli.json` 当即删掉。锁已经被别的应用拿着，这个应用就不往下走（`cli::single_instance()`、`take_or_defer()`）：那个应用的 `cli.json` 说了它在哪里监听时（不管它是不是正在退出），为命令行启动的立刻以 `EXIT_ALREADY_RUNNING`（75）退出，命令行改用正在运行的那个；用户启动的则按文件里的端口和令牌给它发 `/app/show`，然后退出码 0。那里没有 `cli.json` 时，那个应用要么正在启动（入口一监听就会写：实测启动后 2 秒以内），要么正在退出（退出时已经删了，两个入口 2 秒内停下，每个最多 1 秒）：这次启动最多等 10 秒（`FIND_WITHIN`），等文件出现，或者等锁——那个应用一放开就拿过来，作为这个目录的应用启动；超时则退出码 75，用户启动的退出码 1，并在 stderr 上说明原因。在 macOS 上，从访达或程序坞再次打开同一个应用包根本走不到这一步：系统给正在运行的应用发 `RunEvent::Reopen`，为命令行启动的应用就此把窗口显示出来（它命令行这边的东西有没有准备好都一样）。自检目录是单独的目录，所以自检能和用户的应用、和别的自检同时运行。
 - **`smedcover-app --cli`**，命令行启动的应用（`Launch::from_args()`；`launchedBy: "cli"`）。主窗口不再由 Tauri 按配置创建（每个 `tauri*.conf.json` 里都是 `"create": false`，加上 `"label": "main"`）：`setup` 一开始就按同一份配置自己创建（`cli::make_window()`，`WebviewWindowBuilder::from_config`）——在 macOS 上为命令行启动时隐藏；其他平台显示出来但不抢焦点（`focused(false)`；那里没试过隐藏），除非应用要停在欢迎页上：命令行启动的窗口从不显示欢迎页（那里 `app_needs_setup` 会把窗口藏起来）；在那些平台上用户把窗口切到前面（`WindowEvent::Focused`，窗口创建 2 秒以后，`FOCUS_AFTER`——系统自己可能会让新窗口获得焦点），应用就归用户了。在 macOS 上，应用是一个辅助应用（`ActivationPolicy::Accessory`，在 `build()` 和 `run()` 之间设在 `App` 上，所以程序坞图标和菜单栏一刻也不出现），启动时不抢前台应用的焦点（`activate_ignoring_other_apps(false)`），并关掉 WebKit 对隐藏页面定时器的节流（网页视图的 `WKPreferences` 上的 `_setHiddenPageDOMTimerThrottlingEnabled:` 和 `_setHiddenPageDOMTimerThrottlingAutoIncreases:`，和遮挡检测那个设置一样是私有的，只在它应答时才发；不关的话，隐藏页面里导出要慢四到六倍）。页面隐藏时 `nextPaint()` 不再等一帧（根本不会来；以前每次都要等它 80 ms 的兜底）。命令行所在终端里的 Ctrl-C、终端被关掉，都停不了它（忽略 `SIGINT` 和 `SIGHUP`，`instance::ignore_interrupts()`）：由命令行来结束它。用户的 agent 入口即使开着，在它归用户之前也不启动（`McpHost::new(…, for_cli)`、`set_for_cli(false)`）：不让 agent 操纵一个谁也看不见的窗口，应用退出时也不必等 agent。两个入口有一个起不来，它就退出（1），而不是占着目录在看不见的地方一直运行；它往 stderr 上说的话不会让它出错（`say()`：管道可能已经没人读了）。
 - **退出。** 这样的应用在命令行说它做完了（`POST /app/done`）或者它的标准输入读到头时退出——命令行一直开着这个管道，读到头就是命令行结束了、崩溃了或被杀掉了（应用一启动就在单独的线程上读，不管入口有没有起来）；从不靠信号。从这一刻起 `cli.json` 写着 `"quitting": true`，应用照样能用：别的命令行找到它（以前找到的，或者现在才找到的）就用它，不说自己做完了（应用不是它启动的），它的每个请求都把退出往后推。`CliApp::finish()` 等到应用安静下来（`quiet()`：两个入口手上都没有调用，并且 2 秒内（`QUIET_FOR`）既没有带令牌的请求也没有调用，从最后一个请求——`AppControl::request` 记下的 `Instant`——、最后一个调用结束（比如一次长导出）、或者应用接到通知的那一刻算起，取最晚的那个），再给页面发 `app-quit`：页面执行 `flushWrites()`——所有还在等的保存：档案和封面，还有设置、AI 设置和自己的风格，都经 `laterWrite()` 保存——然后回 `app_quit`；应用随即退出，页面 5 秒还没回也照样退出，除非这期间又来了请求，那就再等它安静下来（再请页面写一次）。再发一次 `/app/done` 得到同样的回答，不会再开始什么；对用户启动的应用，或者后来已经显示给用户的应用，它回答 `{exiting: false}`，什么也不发生，标准输入读到头也不管。`POST /app/show`（还有第二次启动、重新打开、在 macOS 以外的平台上把窗口切到前面）显示窗口并把它带到前面，在 macOS 上让应用重新变成普通应用；从此它是用户的（`launchedBy: "user"`，`quitting: false`，`cli.json` 重写），开着的 agent 入口也启动，命令行做完后照样运行，也不再在看不见时照样绘制。这些状态归 `Lifecycle`（`done()`、`shown()`、`quitting()`），单独测试，`quiet()` 也用它自己的时钟单独测试。
+
+### 10.8 命令行（`cli/`）
+
+`smedcover`（见 README.zh-CN.md 的「命令行」）是 crate `smedcover-cli`，一个单独的可执行文件：没有 Tauri、没有网页视图、没有异步运行时，也不带 core 的任何东西（编解码、字体、抠图、入口的服务器都是应用的事），正式版 1.6 MB。依赖只有 clap、serde_json、base64、`dirs`（和 core 一样找数据目录：`paths.rs`，有测试和 `smedcover_core::paths` 对照）和 `ctrlc`。每个命令是对 11.1 那些工具的一两次调用，应用在窗口里照做，和 agent 的调用一样：
+
+| 命令 | 工具 |
+|---|---|
+| `profiles` | `get_context` |
+| `render` | `export` 一个频道、一个尺寸，导到文件旁边它自己的临时文件夹，再挪过去（没给尺寸时先用 `get_context` 找画布上的） |
+| `export`、`batch`、`import` | `export`、`batch_covers`（CSV 的文字）、`open_project`（文件，绝对路径） |
+| `tools`、`call` | `tools/list`；任意工具 |
+
+- `plan.rs` 按 `ui/tools.json` 里的名字和格式把参数变成工具的参数，在连 App 之前就检查（退出码 2，什么都不启动）。`build.rs` 从 `ui/tools.json` 读每个工具的 `x-smedcover.timeoutMs`（入口提供的列表里去掉了这一项），所以一次调用和应用等得一样久：从最后一次进度起，等工具的时间再多 10 秒；给了 `--timeout` 就总共等那么久。
+- `app.rs` 是它这边和应用的约定（见 10.7）：数据目录里的 `cli.json`；进程不在了，或者 `/health` 不是 SmedCover 用这个令牌回答的，这个文件就算过期。没有 App 时，它启动 `smedcover-app --cli`（在它自己的可执行文件旁边，链接会跟到底；或者 `SMEDCOVER_APP`），标准输入是一根整个过程都拿着的管道，放在单独的进程组里，好让 Ctrl-C 只到命令行；然后等 `ready`（每 100 毫秒看一次，最多 30 秒）。它以 75 退出，说明这个目录已经有别的 App 在跑，就改等那一个；`needsSetup` 是退出码 3。做完时它发 `/app/done`，放开管道，等 App 退出；不是它启动的 App，它不碰。
+- `mcp.rs` 是它的 MCP 客户端，协议 2025-06-18（`initialize`，把回答里的 `Mcp-Session-Id` 带回去，`notifications/initialized`，`tools/list`，带进度令牌的 `tools/call`），底下是 `http.rs`，一个只连 127.0.0.1 的 HTTP/1.1 客户端（正文按长度、分块或读到连接关闭）。回答（事件或 JSON）在单独的线程里读，调用方看着时间和 Ctrl-C；放弃时先发 `notifications/cancelled` 再挂断连接。用 rmcp 的客户端就要为几个本机请求带上 Tokio 和 reqwest。
+- `output.rs` 负责输出（结果到 stdout，进度和提示到 stderr，`--json`），语言由 `lang.rs` 定。
+- 测试：每个模块里的单元测试，以及 `tests/cli.rs`：它有自己的测试框架（`harness = false`），同一个程序也扮演它要用的 App（`support/fake.rs`，经 `SMEDCOVER_APP` 启动）：core 的 `McpServer::router` 前面加上 `/health`、`/app/show` 和 `/app/done`，`ui/tools.json` 的工具再加三个测试自己的，页面按工具的参数结构检查每次调用（`support/schema.rs`），`export` 和 `batch_covers` 写一些小文件。每个测试用自己的临时数据目录。
 
 ## 11. 宿主、能力和布局
 

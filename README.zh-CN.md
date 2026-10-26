@@ -766,6 +766,57 @@ Claude Code、Codex 这类 agent 可以在 SmedCover 的窗口里替你做封面
 
 Codex、Cursor、Hermes Agent、OpenClaw 等客户端怎么配，令牌，agent 的调用怎么等你，全部工具，实现结构，以及出问题时怎么办，见 [README_MCP.zh-CN.md](README_MCP.zh-CN.md)。
 
+## 命令行
+
+`smedcover` 让你在终端或脚本里出封面。它自己不画：它调用的是 agent 用的那些工具，活由 SmedCover 来干。SmedCover 开着时，就在那个窗口里做，每一步你都看得到，和看 agent 做一样。没开时，命令会为这一次启动它，在 macOS 上不显示窗口（Windows 和 Linux 上运行期间窗口会显示出来），命令做完它就退出。
+
+现在还没有安装：「设置 → Agent 接入」里会有一个按钮，把 `smedcover` 放进 PATH（Linux 的 `.deb` 和 `.rpm` 会直接装到 `/usr/bin`）。从源码构建：`cargo build --release -p smedcover-cli` 生成 `target/release/smedcover`；它会启动装在它旁边的 App（`smedcover-app`），或者环境变量 `SMEDCOVER_APP` 指定的那个。
+
+```bash
+smedcover profiles                                   # 档案，以及各自的频道（序号、名称、代号和 id）和尺寸
+smedcover render VLOG --size 16:9 -o cover.png       # 一个频道的封面、一个尺寸，写进一个文件
+smedcover render 2 -o ~/Desktop/cover.jpg            # 第二个频道、画布上的尺寸，按扩展名存成 JPEG
+smedcover export --channels all --sizes all --out covers
+smedcover export --profile "我的品牌" --channels 1,3 --sizes 16:9,9:16 --format webp --scale 2
+smedcover batch episodes.csv --sizes 16:9 --out covers    # 每行一张封面，和「批量出图」一样
+smedcover import brand.smedcover.json --as new       # 在 App 里打开一个工程文件
+smedcover tools                                      # 全部工具，每个一行
+smedcover call set_text '{"title": "雨夜*东京*漫步"}'
+smedcover call render_preview --save-images previews
+smedcover --json export --channels all | jq -r '.files[].path'
+```
+
+| 命令 | 做什么 | 工具 |
+|---|---|---|
+| `profiles` | 列出档案，每个档案的风格、导出文件夹、频道和尺寸（✓ 是导出窗口里打开的）；窗口里当前的标出来 | `get_context` |
+| `render <频道> -o <文件>` | 把一个频道的封面按一个尺寸（`--size`：像素、比例或名字；`--size-key`：`profiles` 列出的写法；不给就用画布上的）写进 `<文件>`，同名文件会被替换；输出它的路径 | `export` |
+| `export` | 把封面导出到一个文件夹，不覆盖文件（重名的加编号）：`--channels`（按 id、名称、代号或序号，逗号隔开，或者 `all`；不给就是当前频道）、`--sizes`（不给就是导出窗口里打开的）、`--out`（不给就是档案的导出文件夹；不存在会新建）；每个文件输出一行 | `export` |
+| `batch <文件.csv>` | 每一行做一张封面并导出（频道、标题、角标、副标题，同[批量出图](#批量出图)）；`-` 从标准输入读 CSV；`--sizes`（不给就是每个尺寸）、`--out` | `batch_covers` |
+| `import <文件>` | 打开一个工程文件（`.smedcover.json`），进它自己的档案；这台电脑上没有那个档案时，按 `--as new`（默认）或 `--as current` | `open_project` |
+| `tools` | 列出工具：名字和用途 | `tools/list` |
+| `call <工具> [json]` | 用一个 JSON 对象作参数调用任意工具（`-`：从标准输入读），输出它的回答；回答里的图片用 `--save-images 目录` 保存，不给就只描述一下 | 任意 |
+
+`render`、`export`、`batch` 都接受 `--profile`（按 id 或名字；不给就是当前档案）、`--format`（`png`、`jpg` 或 `jpeg`、`webp`；不给就按导出设置）和 `--scale`（1 到 4）。指定的不是当前档案时，窗口会切过去，和 agent 的调用一样，之后就停在那里。导出不会改封面；`call` 能调用任何工具，包括改封面的（每次改动都是窗口里的一步撤销）。
+
+每个命令都接受：
+
+- `--json`：把工具的结果按 JSON 输出（它的 `structuredContent`，格式就是 `smedcover tools --json` 里每个工具的 `outputSchema`；`call` 输出整个结果；`render` 输出文件的路径、频道和尺寸）。失败时输出 `{"error": {"kind", "message", "exit"}}`。
+- `--quiet`：不输出进度和提示；结果和错误照样输出。
+- `--timeout 秒数`：一次调用等这么久就放弃。不给时，只要 SmedCover 还在做，命令就一直等：每次有进度后，等 SmedCover 自己为这个工具等的那么久（见[超时、进度和取消](README_MCP.zh-CN.md#超时进度和取消)）。
+- `--data 目录`（或 `SMEDCOVER_DATA`）：用另一个数据文件夹，而不是 App 自己的；为命令启动的 App 也用它。
+- `--version`、`--help`（以及 `smedcover <命令> --help`）。
+
+结果写到标准输出；进度（*Writing …（3 of 12）*）和提示写到标准错误。命令说的语言跟 SmedCover 里设的一样，没设就跟系统（中文或英文）；SmedCover 回答的话照它自己的原话。Ctrl-C 取消正在进行的调用（已经改了的留着，是一步撤销），并让为命令启动的 App 退出。
+
+| 退出码 | 意思 |
+|---|---|
+| 0 | 完成 |
+| 1 | SmedCover 回答了一个错误（没有这个频道、窗口正忙、导出失败……） |
+| 2 | 命令写得不对：未知的命令或参数、不接受的值、不存在的文件。什么都没启动 |
+| 3 | 连不上或启动不了 SmedCover，或者它还要先设置：打开它一次，走完欢迎页 |
+| 4 | 没有及时回答：`--timeout`，或者 SmedCover 自己为这个工具等的时间到了；这次调用已取消 |
+| 130 | 被中断（Ctrl-C） |
+
 ## 封面标准
 
 版式自己守着几条规矩，所以不用再调，封面放进各平台的信息流里就看得清。每种风格、每个尺寸都一样：
@@ -873,6 +924,7 @@ npm run build                        # 正式版安装包，在 target/release/b
 npm run tauri -- build --debug       # 调试版，窗口内可右键打开开发者工具
 npm test                             # 前端单元测试
 npm run test:rust                    # Rust 单元测试（cargo test --workspace）
+cargo build --release -p smedcover-cli   # 命令行，target/release/smedcover（见「命令行」）
 ```
 
 调试版导出 JPEG、WebP 明显更慢，判断速度请用正式版。

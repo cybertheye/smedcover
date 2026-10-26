@@ -766,6 +766,57 @@ No token is needed by default. Then any program on this computer — other accou
 
 Codex, Cursor, Hermes Agent, OpenClaw and other clients, the token, how an agent's calls wait for you, every tool, how it is built and what to do when something goes wrong: [README_MCP.md](README_MCP.md).
 
+## Command line
+
+`smedcover` makes covers from a terminal or a script. It draws nothing itself: it calls the same tools agents use, and SmedCover does the work. When SmedCover is open, it works in that window, and you see each step, as you see an agent's. When it is not, the command starts it for the run, without its window on macOS (on Windows and Linux the window shows while the command runs), and it quits when the command is done.
+
+It is not installed yet: a button in Settings → *Agents* that puts `smedcover` on your PATH is coming (on Linux the `.deb` and `.rpm` will have it in `/usr/bin`). From the source, `cargo build --release -p smedcover-cli` makes `target/release/smedcover`; it starts the app installed beside it (`smedcover-app`), or the one the `SMEDCOVER_APP` environment variable names.
+
+```bash
+smedcover profiles                                   # the profiles, with their channels (by number, name, code and id) and sizes
+smedcover render VLOG --size 16:9 -o cover.png       # one channel's cover at one size, into a file
+smedcover render 2 -o ~/Desktop/cover.jpg            # the second channel at the size on the canvas, as JPEG (from the extension)
+smedcover export --channels all --sizes all --out covers
+smedcover export --profile "My brand" --channels 1,3 --sizes 16:9,9:16 --format webp --scale 2
+smedcover batch episodes.csv --sizes 16:9 --out covers    # a cover for each row, as Batch export does
+smedcover import brand.smedcover.json --as new       # opens a project file in the app
+smedcover tools                                      # every tool, a line each
+smedcover call set_text '{"title": "Rainy *Tokyo* night walk"}'
+smedcover call render_preview --save-images previews
+smedcover --json export --channels all | jq -r '.files[].path'
+```
+
+| Command | What it does | Tool |
+|---|---|---|
+| `profiles` | Lists the profiles, each with its look, export folder, channels and sizes (✓ those ticked in Export); the ones the window shows are marked | `get_context` |
+| `render <channel> -o <file>` | Writes one channel's cover at one size (`--size`: pixels, ratio or name; `--size-key`: as `profiles` lists it; else the one on the canvas) into `<file>`, replacing a file of that name; prints its path | `export` |
+| `export` | Writes covers into a folder, never over a file (a name taken gets a number): `--channels` (by id, name, code or number, comma-separated, or `all`; else the one shown), `--sizes` (else those ticked in Export), `--out` (else the profile's export folder; made when it is not there); prints each file | `export` |
+| `batch <file.csv>` | Makes and exports a cover for each row (channel, title, tag, subtitle, as in [Batch export](#batch-export)); `-` reads the CSV from the standard input; `--sizes` (else every size), `--out` | `batch_covers` |
+| `import <file>` | Opens a project file (`.smedcover.json`) into its profile, or as `--as new` (the default) or `--as current` says when its profile is not here | `open_project` |
+| `tools` | Lists the tools: each name and what it does | `tools/list` |
+| `call <tool> [json]` | Calls any tool with its arguments as a JSON object (`-`: from the standard input), and prints what it answers; the images it answers with are saved into `--save-images DIR`, else described | any |
+
+`render`, `export` and `batch` take `--profile` (by id or name; else the one shown), `--format` (`png`, `jpg` or `jpeg`, `webp`; else the export settings') and `--scale` (1 to 4). A profile other than the one shown takes the window there, as an agent's call does, and it stays there. Exporting changes no cover; `call` can call any tool, the ones that change the cover too (each change is one step of undo in the window).
+
+Every command takes:
+
+- `--json` prints the tool's result as JSON (its `structuredContent`, the shape `smedcover tools --json` gives as each tool's `outputSchema`; for `call`, the whole result; for `render`, the file's path, channel and size). A failure prints `{"error": {"kind", "message", "exit"}}`.
+- `--quiet` prints no progress and no notes; the results and errors still.
+- `--timeout SECS` gives up on a call after that long. Without it, the command waits as long as SmedCover keeps working on the call: as long as SmedCover itself waits for each tool (see [Timeouts](README_MCP.md#timeouts-progress-and-cancelling)), from its last word of progress.
+- `--data DIR` (or `SMEDCOVER_DATA`) works on another data folder than the app's own; the app started for the command is given it too.
+- `--version`, `--help` (and `smedcover <command> --help`).
+
+Results go to the standard output; progress (*Writing … (3 of 12)*) and notes go to the standard error. The command speaks the language set in SmedCover, else the system's (Chinese or English); what SmedCover answers is in its own words. Ctrl-C cancels the call under way (what it changed so far stays, one step of undo) and lets an app started for the command quit.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Done |
+| 1 | SmedCover answered an error (an unknown channel, a busy window, an export that failed…) |
+| 2 | The command was not right: an unknown command or flag, a value it does not take, a file that is not there. Nothing was started |
+| 3 | SmedCover could not be reached or started, or needs setting up first: open it once and finish the welcome |
+| 4 | No answer in time: `--timeout`, or SmedCover's own wait for the tool; the call was cancelled |
+| 130 | Interrupted (Ctrl-C) |
+
 ## Cover standards
 
 The layouts keep to a few rules, so a cover reads in the apps' feeds as it comes, in every look and size:
@@ -874,6 +925,7 @@ npm run build                        # release installers in target/release/bund
 npm run tauri -- build --debug       # debug build; right-click in the window for the web inspector
 npm test                             # front-end unit tests
 npm run test:rust                    # Rust unit tests (cargo test --workspace)
+cargo build --release -p smedcover-cli   # the command line, target/release/smedcover (see Command line)
 ```
 
 JPEG and WebP export is much slower in a debug build; judge speed with a release build.
