@@ -8117,8 +8117,7 @@ function renderMenu() {
       el("button", { class: "tog" + (on ? " on" : ""), role: "switch", "aria-checked": String(on), "aria-label": t("menu.glass"), disabled: !CAN_BLUR, onclick: () => { setGlass(!on, true); renderMenu(); } })),
     el("div", { class: "row" }, el("span", {}, t("langName")),
       el("div", { class: "seg" }, [["zh", "中文"], ["en", "English"]].map(([v, l]) => el("button", { class: "btn" + (v === getLang() ? " on" : ""),
-        onclick: go(() => { S.settings.lang = v; setLang(v); persistSettings(); setMode(S.mode); buildStrip(); }) }, l)))),
-    el("div", { class: "foot" }, t("menu.foot"))].flat().filter(Boolean));
+        onclick: go(() => { S.settings.lang = v; setLang(v); persistSettings(); setMode(S.mode); buildStrip(); }) }, l))))].flat().filter(Boolean));
 }
 addEventListener("pointerdown", (e) => { if (MENU.open && !$("menu").contains(e.target) && !(e.target.closest && e.target.closest("#morebtn"))) closeMenu(); });
 // Settings closes by its ✕, Esc, or a click beside its window

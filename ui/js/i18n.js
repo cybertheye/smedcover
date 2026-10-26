@@ -74,7 +74,6 @@ const STR = {
   "menu.sizes": ["{0} 个尺寸", "{0} sizes"],
   "menu.sizes.one": ["{0} 个尺寸", "{0} size"],
   "menu.switch": ["切换档案", "Switch profile"],
-  "menu.foot": ["不常用、影响整张封面或整个档案的操作都收在 ⋯ 里，红色的那项改动最大。", "What is seldom wanted, and what changes a whole cover or profile, is under ⋯; the red one changes the most."],
   "menu.clear": ["清空这张封面…", "Empty this cover…"],
   "menu.saveDesignSub": ["之后每张新封面都从现在这样开始", "Every new cover starts as this one is now"],
   "menu.loadDesignSub": ["回到档案的默认设计，可以撤销", "Back to the profile's default design; Undo brings this back"],
