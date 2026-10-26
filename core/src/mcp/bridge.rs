@@ -32,7 +32,8 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use rmcp::model::CallToolResult;
+/// What a call resolves with, as MCP has it (re-exported for a host that wraps a [`PageBridge`]).
+pub use rmcp::model::CallToolResult;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::sync::{oneshot, watch, Notify};

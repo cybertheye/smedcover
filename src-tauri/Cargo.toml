@@ -24,6 +24,11 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 ureq = { workspace = true }
 
+[dev-dependencies]
+# mcp.rs's tests: a data folder of their own, and the calls they hand the endpoint's gate.
+tempfile = { workspace = true }
+tokio-util = { workspace = true }
+
 # The window keeps drawing when it cannot be seen (a self-test, the agents' endpoint running): a setting of the web
 # view reached through the Objective-C runtime; and an activity held while an agent's call is under way, against App
 # Nap (see mcp.rs).

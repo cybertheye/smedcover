@@ -10,20 +10,27 @@
 //! for `selftest_mcp`), and stops when the app quits. While it runs the window keeps drawing when it
 //! cannot be seen — an agent's chat window is often in front of it — and, on macOS, the app holds an
 //! activity while a call is under way, so that App Nap does not slow it.
+//!
+//! The page is not trusted with more than the calls it is given: a file is read for it only while a
+//! call in hand names that very file ([`NamedFiles`], [`may_read`]), and the app's own requests on
+//! its behalf (`ai_request`, `fetch_image`) never reach the endpoint ([`not_to_the_endpoint`]), so
+//! the page cannot make calls of its own to have files read.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
-use smedcover_core::mcp::bridge::{PageProgress, PageReply};
+use serde_json::{json, Map, Value};
+use smedcover_core::mcp::bridge::{BoxFut, BridgeError, Call, CallToolResult, PageProgress, PageReply};
 use smedcover_core::mcp::config::check_port;
 use smedcover_core::mcp::server::VERSION;
 use smedcover_core::mcp::{BindError, Dispatcher, Host, McpConfig, McpServer, PageBridge, PageSink, PageState, Running, Secret, Stats, ToolList};
 use smedcover_core::{err, Res};
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Manager, State, Webview};
+use tokio::runtime::Handle;
 use tokio::sync::watch;
 
 /// How long a stop lets the connections finish the answers they are giving before it cuts them off.
@@ -31,25 +38,30 @@ const STOP_WITHIN: Duration = Duration::from_secs(2);
 /// The least time between two statuses sent to the page: four a second at most.
 const STATUS_EVERY: Duration = Duration::from_millis(250);
 
+/// Told whether the endpoint runs, each time something changes.
+type OnRunning = Box<dyn Fn(bool) + Send + Sync>;
+
 /// The endpoint as the app keeps it: the dispatcher the window attaches to, the tools of the bundled
-/// `tools.json` the desktop offers, the clients seen and the calls under way, the token (which the
-/// server reads at every request, so a new one takes over at once), and the settings with what came
-/// of them.
+/// `tools.json` the desktop offers, the clients seen and the calls under way, the files those calls
+/// name, the token (which the server reads at every request, so a new one takes over at once), and
+/// the settings with what came of them.
 pub struct McpHost {
-    app: AppHandle,
     data: PathBuf,
     dispatcher: Arc<Dispatcher>,
     tools: Arc<ToolList>,
     stats: Arc<Stats>,
+    named: Arc<NamedFiles>,
     token: Arc<RwLock<Secret>>,
     server: McpServer,
-    runtime: tokio::runtime::Handle,
+    runtime: Handle,
     /// `mcp.json` as saved, and the endpoint started from it: saved, started and stopped under it.
     state: Mutex<Endpoint>,
     /// One switch on, off or to another port at a time (a stop is waited for outside `state`).
     switching: tokio::sync::Mutex<()>,
     /// Changes when the endpoint or the window's page does, for the page to be told.
     news: watch::Sender<u64>,
+    /// The window keeps drawing unseen while the endpoint runs (see [`keep_drawing`]).
+    on_running: OnRunning,
     /// The activity held while a call is under way (macOS).
     awake: Mutex<Option<awake::Activity>>,
     /// The self-test's own endpoint (SMEDCOVER_SELFTEST_MCP): on a free port, `mcp.json` not turned on.
@@ -59,26 +71,35 @@ pub struct McpHost {
 struct Endpoint {
     cfg: McpConfig,
     running: Option<Running>,
-    /// Why the port could not be had, the last time the endpoint was to start.
-    error: Option<BindError>,
+    /// What went wrong: the port could not be had the last time the endpoint was to start, or
+    /// `mcp.json` could not be read (till it is saved again).
+    trouble: Option<Trouble>,
+    /// Stopping, to start again elsewhere or not at all.
+    switching: bool,
+}
+
+enum Trouble {
+    Bind(BindError),
+    Config(String),
 }
 
 /// The window's page, reached through the Tauri channel it handed over with `mcp_attach`. Sending
 /// queues a script for the web view and returns: it never waits for the page, nor calls back into
-/// the dispatcher.
-struct ChannelSink(Channel<Value>);
+/// the dispatcher. The message is written out once, not copied first (a call may carry a photo).
+struct ChannelSink(Channel);
 
 impl PageSink for ChannelSink {
     fn send(&self, msg: &Value) -> Result<(), String> {
-        self.0.send(msg.clone()).map_err(|e| e.to_string())
+        let text = serde_json::to_string(msg).map_err(|e| e.to_string())?;
+        self.0.send(InvokeResponseBody::Json(text)).map_err(|e| e.to_string())
     }
 }
 
 impl McpHost {
     /// The endpoint of the data folder `data`, its tools read from the app's own `tools.json`, its
-    /// settings from `mcp.json`; started if it is on, a page said to be on its way. `selftest`: the
-    /// app runs a self-test (it then starts only for SMEDCOVER_SELFTEST_MCP, on a free port and with a
-    /// new token).
+    /// settings from `mcp.json`; started if it is on, a page said to be on its way, the window told to
+    /// keep drawing unseen while it runs, and the page told each change. `selftest`: the app runs a
+    /// self-test (see [`SelfTest`]).
     pub fn open(app: &AppHandle, data: PathBuf, selftest: Option<SelfTest>) -> Res<Arc<McpHost>> {
         let tools = match app.asset_resolver().get("tools.json".to_string()) {
             Some(asset) => String::from_utf8(asset.bytes.to_vec()).map_err(err).and_then(|text| ToolList::from_json(&text, Host::Desktop)),
@@ -88,30 +109,51 @@ impl McpHost {
             eprintln!("SmedCover: the agents' tools could not be read, so the endpoint offers none: {e}");
             ToolList::empty()
         }));
-        let mut cfg = McpConfig::load(&data)?;
+        let window = app.clone();
+        let runtime = tauri::async_runtime::handle().inner().clone();
+        let host = McpHost::new(data, tools, selftest, runtime, Box::new(move |running| keep_drawing(&window, running)))?;
+        tauri::async_runtime::spawn(host.clone().tell_page());
+        Ok(host)
+    }
+
+    /// The host itself, without Tauri: `runtime` serves the endpoint, `on_running` is told whether it
+    /// runs at each change. An `mcp.json` that cannot be read leaves it off, saying why (`config`),
+    /// till it is saved again.
+    pub fn new(data: PathBuf, tools: Arc<ToolList>, selftest: Option<SelfTest>, runtime: Handle, on_running: OnRunning) -> Res<Arc<McpHost>> {
+        let (mut cfg, trouble) = match McpConfig::load(&data) {
+            Ok(cfg) => (cfg, None),
+            Err(e) => (McpConfig::new()?, Some(Trouble::Config(e))),
+        };
         let ours = selftest == Some(SelfTest::Mcp);
         if ours {
             cfg.token = Secret::generate()?;
             cfg.save(&data)?;
         }
         let dispatcher = Arc::new(Dispatcher::new());
-        dispatcher.loading();   // the window is starting: calls wait for its page
+        dispatcher.loading(); // the window is starting: calls wait for its page
         let stats = Arc::new(Stats::new());
+        let named = Arc::new(NamedFiles::default());
         let token = Arc::new(RwLock::new(cfg.token.clone()));
-        let server = McpServer::new(dispatcher.clone(), tools.clone(), token.clone(), stats.clone());
-        let start = if ours { Some(0) } else { (cfg.on && selftest.is_none_or(|s| s == SelfTest::Stay)).then_some(cfg.port) };
+        let gated = Arc::new(Gated { inner: dispatcher.clone(), named: named.clone() });
+        let server = McpServer::new(gated, tools.clone(), token.clone(), stats.clone());
+        let start = match (ours, &trouble) {
+            (true, _) => Some(0),
+            (false, None) => (cfg.on && selftest.is_none_or(|s| s == SelfTest::Stay)).then_some(cfg.port),
+            (false, Some(_)) => None,
+        };
         let host = Arc::new(McpHost {
-            app: app.clone(),
             data,
             dispatcher,
             tools,
             stats,
+            named,
             token,
             server,
-            runtime: tauri::async_runtime::handle().inner().clone(),
-            state: Mutex::new(Endpoint { cfg, running: None, error: None }),
+            runtime,
+            state: Mutex::new(Endpoint { cfg, running: None, trouble, switching: false }),
             switching: tokio::sync::Mutex::new(()),
             news: watch::Sender::new(0),
+            on_running,
             awake: Mutex::new(None),
             selftest: ours,
         });
@@ -120,7 +162,6 @@ impl McpHost {
             host.bind(&mut s, port);
         }
         host.changed();
-        tauri::async_runtime::spawn(host.clone().tell_page());
         Ok(host)
     }
 
@@ -133,11 +174,11 @@ impl McpHost {
         match self.server.start(SocketAddr::from(([127, 0, 0, 1], port)), &self.runtime) {
             Ok(running) => {
                 s.running = Some(running);
-                s.error = None;
+                s.trouble = None;
             }
             Err(e) => {
                 s.running = None;
-                s.error = Some(e);
+                s.trouble = Some(Trouble::Bind(e));
             }
         }
     }
@@ -146,18 +187,37 @@ impl McpHost {
     /// endpoint runs.
     fn changed(&self) {
         self.news.send_modify(|n| *n = n.wrapping_add(1));
-        keep_drawing(&self.app, self.lock().running.is_some());
+        let running = self.lock().running.is_some();
+        (self.on_running)(running);
     }
 
-    /// What Settings → Agents shows: `{on, state: "off" | "running" | "error", port, url, error?:
-    /// {code, message}, page: "none" | "loading" | "ready", tools, toolsMismatch, clients, inFlight,
-    /// lastCall}`. Never the token.
+    /// The port the endpoint listens on, while it does.
+    pub fn running_port(&self) -> Option<u16> {
+        self.lock().running.as_ref().map(Running::port)
+    }
+
+    /// What Settings → Agents shows: `{on, state: "off" | "running" | "switching" | "error", port,
+    /// url, error?: {code, message, detail?}, page: "none" | "loading" | "ready", tools,
+    /// toolsMismatch, clients, inFlight, lastCall}`; `code` is `port_in_use`, `port_forbidden`,
+    /// `bind_failed` (`detail`: the system's words) or `config` (`mcp.json` could not be read). Never
+    /// the token.
     pub fn status(&self) -> Value {
         let (on, state, port, error) = {
             let s = self.lock();
-            match (&s.running, &s.error) {
+            let error = s.trouble.as_ref().map(|t| match t {
+                Trouble::Bind(e) => {
+                    let mut error = json!({"code": e.code(), "message": e.to_string()});
+                    if let BindError::Failed { message, .. } = e {
+                        error["detail"] = json!(message);
+                    }
+                    error
+                }
+                Trouble::Config(why) => json!({"code": "config", "message": why}),
+            });
+            match (&s.running, error) {
                 (Some(running), _) => (s.cfg.on, "running", running.port(), None),
-                (None, Some(e)) => (s.cfg.on, "error", s.cfg.port, Some(json!({"code": e.code(), "message": e.to_string()}))),
+                (None, _) if s.switching => (s.cfg.on, "switching", s.cfg.port, None),
+                (None, Some(error)) => (s.cfg.on, "error", s.cfg.port, Some(error)),
                 (None, None) => (s.cfg.on, "off", s.cfg.port, None),
             }
         };
@@ -176,7 +236,8 @@ impl McpHost {
     }
 
     /// Turns the endpoint on or off, on `port` if given (else the one saved): saved first, then
-    /// started, stopped or moved. A port that cannot be had leaves it on but in error, saying why.
+    /// started, stopped or moved (the page told it is switching meanwhile). A port that cannot be had
+    /// leaves it on but in error, saying why.
     pub async fn set(&self, on: bool, port: Option<u16>) -> Res<Value> {
         let _one = self.switching.lock().await;
         if let Some(port) = port {
@@ -189,19 +250,19 @@ impl McpHost {
             cfg.port = port.unwrap_or(cfg.port);
             cfg.save(&self.data)?;
             s.cfg = cfg;
-            s.error = None;
+            s.trouble = None;
             let keep = on && s.running.as_ref().is_some_and(|r| self.selftest || r.port() == s.cfg.port);
-            if keep {
-                None
-            } else {
-                s.running.take()
-            }
+            let stopping = if keep { None } else { s.running.take() };
+            s.switching = stopping.is_some();
+            stopping
         };
         if let Some(running) = stopping {
+            self.changed();
             running.stop(STOP_WITHIN).await;
         }
         {
             let mut s = self.lock();
+            s.switching = false;
             if on && s.running.is_none() {
                 let port = s.cfg.port;
                 self.bind(&mut s, port);
@@ -221,12 +282,15 @@ impl McpHost {
             cfg.save(&self.data)?;
             *self.token.write().unwrap_or_else(|e| e.into_inner()) = cfg.token.clone();
             s.cfg = cfg;
+            if matches!(s.trouble, Some(Trouble::Config(_))) {
+                s.trouble = None;
+            }
         }
         Ok(s.cfg.token.expose().to_string())
     }
 
     /// The window's page is ready for calls, built with the `tools.json` whose hash is `tools_hash`.
-    pub fn attach(&self, channel: Channel<Value>, tools_hash: &str) -> Value {
+    pub fn attach(&self, channel: Channel, tools_hash: &str) -> Value {
         let epoch = self.dispatcher.attach(Box::new(ChannelSink(channel)), tools_hash);
         self.changed();
         let status = self.status();
@@ -254,11 +318,6 @@ impl McpHost {
             running.stop(Duration::from_secs(1)).await;
         }
         self.awake.lock().unwrap_or_else(|e| e.into_inner()).take();
-    }
-
-    /// Whether an agent's call is under way: waiting for the window, or being carried out there.
-    pub fn call_in_flight(&self) -> bool {
-        self.dispatcher.calls() > 0
     }
 
     /// Tells the page each change of the endpoint and of the clients and calls, four times a second
@@ -319,6 +378,154 @@ pub enum SelfTest {
     /// starts if it is on.
     Stay,
 }
+
+// ---------------------------------------------------------------- the files a call names
+
+/// What a file read for an agent is: a picture (`read_picture`) or a project (`read_project`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileKind {
+    Picture,
+    Project,
+}
+
+/// The file a call asks the app to read for it, if any: `add_photo`'s `source.path` (a picture),
+/// `open_project`'s `file` (a project), as the agent wrote it.
+pub fn file_named(tool: &str, args: &Map<String, Value>) -> Option<(FileKind, String)> {
+    let (kind, path) = match tool {
+        "add_photo" => (FileKind::Picture, args.get("source")?.get("path")?),
+        "open_project" => (FileKind::Project, args.get("file")?),
+        _ => return None,
+    };
+    Some((kind, path.as_str()?.to_string()))
+}
+
+/// The files the calls in hand name, each noted while its call is in hand (from the moment the
+/// endpoint takes it till it is answered, given up or cancelled).
+#[derive(Default)]
+pub struct NamedFiles {
+    next: AtomicU64,
+    held: Mutex<Vec<(u64, FileKind, String)>>,
+}
+
+/// One file noted for a call; dropping it lets the file go.
+pub struct Named {
+    files: Arc<NamedFiles>,
+    id: u64,
+}
+
+impl NamedFiles {
+    /// Notes the file call `tool` with `args` names, if it names one, till the guard is dropped.
+    pub fn hold(self: &Arc<Self>, tool: &str, args: &Map<String, Value>) -> Option<Named> {
+        let (kind, path) = file_named(tool, args)?;
+        let id = self.next.fetch_add(1, Ordering::SeqCst);
+        lock(&self.held).push((id, kind, path));
+        Some(Named { files: self.clone(), id })
+    }
+
+    /// Whether a call in hand names `path` as a file of `kind`.
+    pub fn allows(&self, kind: FileKind, path: &str) -> bool {
+        lock(&self.held).iter().any(|(_, k, p)| *k == kind && p == path)
+    }
+}
+
+impl Drop for Named {
+    fn drop(&mut self) {
+        lock(&self.files.held).retain(|(id, ..)| *id != self.id);
+    }
+}
+
+/// The dispatcher as the endpoint sees it: each call notes the file it names for as long as it is in
+/// hand.
+struct Gated {
+    inner: Arc<dyn PageBridge>,
+    named: Arc<NamedFiles>,
+}
+
+impl PageBridge for Gated {
+    fn call(&self, call: Call) -> BoxFut<'_, Result<CallToolResult, BridgeError>> {
+        let held = self.named.hold(&call.tool, &call.args);
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            let _held = held;
+            inner.call(call).await
+        })
+    }
+
+    fn page(&self) -> PageState {
+        self.inner.page()
+    }
+}
+
+/// Whether file `path` may be read for the page as a `kind`: only while a call in hand names that
+/// very file as one (`add_photo`'s `source.path` a picture, `open_project`'s `file` a project), or in
+/// the self-test proper (`selftest`), which calls the tools itself.
+pub fn may_read(named: &NamedFiles, selftest: bool, kind: FileKind, path: &str) -> Res<()> {
+    if selftest || named.allows(kind, path) {
+        Ok(())
+    } else {
+        Err("not allowed: a file is read only for an agent's call that names it".into())
+    }
+}
+
+/// [`may_read`] for the app: the files its endpoint's calls in hand name.
+pub fn agent_named(app: &AppHandle, selftest: bool, kind: FileKind, path: &str) -> Res<()> {
+    match app.try_state::<Arc<McpHost>>() {
+        Some(host) => may_read(&host.named, selftest, kind, path),
+        None => may_read(&NamedFiles::default(), selftest, kind, path),
+    }
+}
+
+// ---------------------------------------------------------------- the endpoint is not the page's to call
+
+/// Whether `url` (or a proxy given as `host:port`) leads to the agents' endpoint listening on `port`
+/// of this computer: its port that one, and its host a loopback one (127.0.0.0/8, ::1, `localhost`
+/// and the names under it), the unspecified address (which reaches this computer too), or a name
+/// `resolve` finds to be one of those.
+pub fn reaches_endpoint(url: &str, port: u16, resolve: &dyn Fn(&str, u16) -> Vec<IpAddr>) -> bool {
+    let parsed = tauri::Url::parse(url).ok().filter(|u| u.host_str().is_some());
+    let Some(u) = parsed.or_else(|| tauri::Url::parse(&format!("http://{url}")).ok()) else {
+        return false;
+    };
+    if u.port_or_known_default() != Some(port) {
+        return false;
+    }
+    let Some(host) = u.host_str() else {
+        return false;
+    };
+    let host = host.trim_start_matches('[').trim_end_matches(']').trim_end_matches('.').to_ascii_lowercase();
+    if host == "localhost" || host.ends_with(".localhost") {
+        return true;
+    }
+    match host.parse::<IpAddr>() {
+        Ok(ip) => this_computer(&ip),
+        Err(_) => resolve(&host, port).iter().any(this_computer),
+    }
+}
+
+/// Whether a connection to `ip` stays on this computer.
+fn this_computer(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(a) => a.is_loopback() || a.is_unspecified(),
+        IpAddr::V6(a) => a.is_loopback() || a.is_unspecified() || a.to_ipv4_mapped().is_some_and(|v| v.is_loopback() || v.is_unspecified()),
+    }
+}
+
+/// Refuses a request the app would send for the page (`ai_request`, `fetch_image`) to the agents'
+/// endpoint itself, at `url` or through `proxy`, while it runs: with the token the page could make
+/// calls of its own there, and have the files they name read. Blocking: a name may be looked up.
+pub fn not_to_the_endpoint(app: &AppHandle, url: &str, proxy: Option<&str>) -> Res<()> {
+    let Some(port) = app.try_state::<Arc<McpHost>>().and_then(|h| h.running_port()) else {
+        return Ok(());
+    };
+    let lookup = |host: &str, port: u16| -> Vec<IpAddr> { (host, port).to_socket_addrs().map(|a| a.map(|a| a.ip()).collect()).unwrap_or_default() };
+    let proxied = proxy.map(str::trim).filter(|p| !p.is_empty()).is_some_and(|p| reaches_endpoint(p, port, &lookup));
+    if proxied || reaches_endpoint(url, port, &lookup) {
+        return Err("not allowed: SmedCover's endpoint for agents is not to be called from the window".into());
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------- the self-test's client
 
 const SELFTEST_CLIENT: &str = "smedcover-selftest";
 
@@ -408,11 +615,11 @@ fn png_size(png: &[u8]) -> (u32, u32) {
     }
 }
 
-/// Whether an agent's call is under way — for the commands only such a call may use (the files an
-/// agent names). False when the endpoint was never set up.
-pub fn agent_call_in_flight(app: &AppHandle) -> bool {
-    app.try_state::<Arc<McpHost>>().is_some_and(|h| h.call_in_flight())
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
+
+// ---------------------------------------------------------------- drawing unseen, App Nap
 
 /// The window keeps drawing when it cannot be seen (`unseen`), or watches again whether it can.
 ///
@@ -420,7 +627,7 @@ pub fn agent_call_in_flight(app: &AppHandle) -> bool {
 /// app, under an agent's chat window — so a canvas read back from the graphics card (an export, a
 /// preview) waits for good. So while the endpoint runs, and always in self-test mode, the web view is
 /// told not to watch whether its window can be seen (the setting WebKit's own tests use). Elsewhere
-/// than on macOS nothing is done.
+/// than on macOS nothing is done (WebView2 and WebKitGTK have no such setting).
 pub fn keep_drawing(app: &AppHandle, unseen: bool) {
     #[cfg(target_os = "macos")]
     {
@@ -442,15 +649,16 @@ pub fn keep_drawing(app: &AppHandle, unseen: bool) {
 
 /// An activity held with the system while an agent's call is under way: on macOS, so that App Nap
 /// does not slow the app down while its window is hidden or covered (`NSProcessInfo`'s
-/// `beginActivityWithOptions:reason:`, user-initiated); elsewhere nothing.
+/// `beginActivityWithOptions:reason:`, user-initiated, idle sleep still allowed); elsewhere nothing.
 mod awake {
     #[cfg(target_os = "macos")]
     use objc2::{class, msg_send, rc::Retained, runtime::AnyObject};
 
-    /// `NSActivityUserInitiated`: the user asked for it (an agent's call is theirs), so neither App
-    /// Nap nor idle sleep comes while it runs.
+    /// `NSActivityUserInitiatedAllowingIdleSystemSleep`: the user asked for it (an agent's call is
+    /// theirs), so App Nap keeps away while it runs; the Mac may still sleep when idle, however long
+    /// an export goes on.
     #[cfg(target_os = "macos")]
-    const USER_INITIATED: u64 = 0x00FF_FFFF | (1 << 20);
+    const USER_INITIATED_ALLOWING_SLEEP: u64 = 0x00FF_FFFF & !(1 << 20);
 
     #[cfg(target_os = "macos")]
     pub struct Activity(Retained<AnyObject>);
@@ -472,7 +680,7 @@ mod awake {
                 if info.is_null() || text.is_null() {
                     return None;
                 }
-                let token: Option<Retained<AnyObject>> = msg_send![info, beginActivityWithOptions: USER_INITIATED, reason: text];
+                let token: Option<Retained<AnyObject>> = msg_send![info, beginActivityWithOptions: USER_INITIATED_ALLOWING_SLEEP, reason: text];
                 token.map(Activity)
             })
         }
@@ -523,9 +731,10 @@ pub fn mcp_token(h: State<'_, Arc<McpHost>>, regenerate: Option<bool>) -> Res<St
 }
 
 /// The main window's page takes the calls from now on, through `channel`; `tools_hash` is the
-/// SHA-256 of the `tools.json` it was built with. `{epoch, toolsMismatch, status}`.
+/// SHA-256 of the `tools.json` it was built with (empty if it could not say). `{epoch,
+/// toolsMismatch, status}`.
 #[tauri::command]
-pub fn mcp_attach(h: State<'_, Arc<McpHost>>, webview: Webview, channel: Channel<Value>, tools_hash: String) -> Res<Value> {
+pub fn mcp_attach(h: State<'_, Arc<McpHost>>, webview: Webview, channel: Channel, tools_hash: String) -> Res<Value> {
     if webview.label() != "main" {
         return Err("only SmedCover's main window takes agents' calls".into());
     }
@@ -558,6 +767,9 @@ pub async fn selftest_mcp(h: State<'_, Arc<McpHost>>) -> Res<Option<Value>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::{Ipv4Addr, TcpListener};
+    use std::path::Path;
+    use tokio_util::sync::CancellationToken;
 
     #[test]
     fn png_size_reads_the_header() {
@@ -581,5 +793,217 @@ mod tests {
         let call = json!({"params": {"name": "render_preview"}});
         assert_eq!(params_name("tools/call", &call), "render_preview");
         assert_eq!(params_name("tools/list", &json!({"params": {}})), "tools/list");
+    }
+
+    // ---- the read gate
+
+    fn args(v: Value) -> Map<String, Value> {
+        v.as_object().cloned().unwrap()
+    }
+
+    #[test]
+    fn the_file_a_call_names() {
+        assert_eq!(file_named("add_photo", &args(json!({"source": {"path": "/a/b.png"}}))), Some((FileKind::Picture, "/a/b.png".into())));
+        assert_eq!(file_named("open_project", &args(json!({"file": "/a/c.smedcover.json"}))), Some((FileKind::Project, "/a/c.smedcover.json".into())));
+        assert_eq!(file_named("add_photo", &args(json!({"source": {"url": "https://x.example/b.png"}}))), None);
+        assert_eq!(file_named("add_photo", &args(json!({"source": {"path": 7}}))), None);
+        assert_eq!(file_named("open_project", &args(json!({"project": "{}"}))), None);
+        // another tool's arguments name no file, whatever they hold
+        assert_eq!(file_named("set_text", &args(json!({"file": "/etc/passwd", "source": {"path": "/x.png"}}))), None);
+    }
+
+    #[test]
+    fn a_file_is_read_only_while_a_call_names_it_and_only_as_what_it_names() {
+        let named = Arc::new(NamedFiles::default());
+        let refused = |kind, path| may_read(&named, false, kind, path).is_err();
+        assert!(refused(FileKind::Picture, "/a/b.png"), "no call in hand");
+        let other = named.hold("render_preview", &args(json!({"maxSide": 640})));
+        assert!(other.is_none());
+        assert!(refused(FileKind::Picture, "/a/b.png"), "a call that names no file opens nothing");
+        let photo = named.hold("add_photo", &args(json!({"source": {"path": "/a/b.png"}}))).unwrap();
+        assert!(!refused(FileKind::Picture, "/a/b.png"));
+        assert!(refused(FileKind::Picture, "/a/other.png"), "only the file named");
+        assert!(refused(FileKind::Project, "/a/b.png"), "only as what it is named as");
+        let again = named.hold("add_photo", &args(json!({"source": {"path": "/a/b.png"}}))).unwrap();
+        drop(photo);
+        assert!(!refused(FileKind::Picture, "/a/b.png"), "another call names it still");
+        drop(again);
+        assert!(refused(FileKind::Picture, "/a/b.png"), "let go with the last call naming it");
+        // the self-test proper calls the tools itself
+        assert!(may_read(&named, true, FileKind::Project, "/a/c.smedcover.json").is_ok());
+    }
+
+    /// A page that notes whether the picture its call names may be read while it has the call.
+    struct Peek {
+        named: Arc<NamedFiles>,
+        seen: Mutex<Vec<bool>>,
+    }
+
+    impl PageBridge for Peek {
+        fn call(&self, call: Call) -> BoxFut<'_, Result<CallToolResult, BridgeError>> {
+            Box::pin(async move {
+                let path = call.args["source"]["path"].as_str().unwrap_or("").to_string();
+                lock(&self.seen).push(self.named.allows(FileKind::Picture, &path));
+                Err(BridgeError::Cancelled)
+            })
+        }
+
+        fn page(&self) -> PageState {
+            PageState::Ready { epoch: 1 }
+        }
+    }
+
+    fn call(tool: &str, a: Value) -> Call {
+        Call { tool: tool.into(), args: args(a), client: None, timeout: Duration::from_secs(5), progress: None, cancel: CancellationToken::new() }
+    }
+
+    #[tokio::test]
+    async fn the_endpoint_notes_a_calls_file_for_as_long_as_it_is_in_hand() {
+        let named = Arc::new(NamedFiles::default());
+        let peek = Arc::new(Peek { named: named.clone(), seen: Mutex::new(Vec::new()) });
+        let gated = Gated { inner: peek.clone(), named: named.clone() };
+        let _ = gated.call(call("add_photo", json!({"source": {"path": "/p/one.png"}}))).await;
+        assert_eq!(*lock(&peek.seen), [true], "readable while the page has the call");
+        assert!(!named.allows(FileKind::Picture, "/p/one.png"), "not once it is answered");
+        // a call given up before it is answered (its future dropped) lets its file go too
+        let pending = gated.call(call("add_photo", json!({"source": {"path": "/p/two.png"}})));
+        assert!(named.allows(FileKind::Picture, "/p/two.png"));
+        drop(pending);
+        assert!(!named.allows(FileKind::Picture, "/p/two.png"));
+    }
+
+    #[test]
+    fn requests_to_the_endpoint_itself_are_told() {
+        let none = |_: &str, _: u16| Vec::new();
+        let looped = |host: &str, _: u16| if host == "loop.example" { vec![IpAddr::V4(Ipv4Addr::LOCALHOST)] } else { vec![IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))] };
+        for url in [
+            "http://127.0.0.1:25277/mcp",
+            "http://127.9.9.9:25277/mcp",
+            "http://localhost:25277/mcp",
+            "http://LOCALHOST.:25277/mcp",
+            "http://api.localhost:25277/",
+            "http://[::1]:25277/mcp",
+            "http://[::ffff:127.0.0.1]:25277/mcp",
+            "http://0.0.0.0:25277/mcp",
+            "http://2130706433:25277/mcp",
+            "http://127.1:25277/mcp",
+            "127.0.0.1:25277",
+            "localhost:25277",
+            "socks5://127.0.0.1:25277",
+        ] {
+            assert!(reaches_endpoint(url, 25277, &none), "{url}");
+        }
+        assert!(reaches_endpoint("http://loop.example:25277/mcp", 25277, &looped), "a name that resolves to this computer");
+        for url in [
+            "http://127.0.0.1:25278/mcp",
+            "http://127.0.0.1/mcp",
+            "https://api.openai.com/v1/chat/completions",
+            "http://elsewhere.example:25277/mcp",
+            "http://192.168.1.4:25277/mcp",
+            "not a url",
+            "",
+        ] {
+            assert!(!reaches_endpoint(url, 25277, &looped), "{url}");
+        }
+        assert!(reaches_endpoint("http://localhost/", 80, &none), "the scheme's own port counts");
+    }
+
+    // ---- switching the endpoint, the token
+
+    fn host(data: &Path) -> Arc<McpHost> {
+        McpHost::new(data.to_path_buf(), Arc::new(ToolList::empty()), None, Handle::current(), Box::new(|_| {})).unwrap()
+    }
+
+    fn free_port() -> u16 {
+        TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    }
+
+    fn taken(port: u16) -> bool {
+        TcpListener::bind(("127.0.0.1", port)).is_err()
+    }
+
+    #[tokio::test]
+    async fn it_turns_on_moves_and_turns_off_saving_each() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = host(dir.path());
+        assert_eq!(h.status()["state"], "off");
+        assert_eq!(h.status()["on"], false);
+        let first = free_port();
+        let s = h.set(true, Some(first)).await.unwrap();
+        assert_eq!((s["state"].as_str(), s["port"].as_u64()), (Some("running"), Some(u64::from(first))));
+        assert_eq!(s["url"], format!("http://127.0.0.1:{first}/mcp"));
+        assert!(taken(first));
+        let saved = McpConfig::load(dir.path()).unwrap();
+        assert!(saved.on && saved.port == first);
+        assert_eq!(h.running_port(), Some(first));
+        // again on the same port: nothing moves
+        let s = h.set(true, None).await.unwrap();
+        assert_eq!(s["port"].as_u64(), Some(u64::from(first)));
+        // moved: the first port free again
+        let second = free_port();
+        let s = h.set(true, Some(second)).await.unwrap();
+        assert_eq!((s["state"].as_str(), s["port"].as_u64()), (Some("running"), Some(u64::from(second))));
+        assert!(!taken(first) && taken(second));
+        // off: the port free, off saved, the port kept
+        let s = h.set(false, None).await.unwrap();
+        assert_eq!((s["state"].as_str(), s["on"].as_bool()), (Some("off"), Some(false)));
+        assert!(!taken(second));
+        assert_eq!(h.running_port(), None);
+        let saved = McpConfig::load(dir.path()).unwrap();
+        assert!(!saved.on && saved.port == second);
+        // a system port is refused before anything is saved
+        assert!(h.set(true, Some(80)).await.is_err());
+        assert!(!McpConfig::load(dir.path()).unwrap().on);
+        // started with the app when saved on
+        h.set(true, None).await.unwrap();
+        h.shut().await;
+        assert!(!taken(second), "the app quitting frees the port");
+        let again = host(dir.path());
+        assert_eq!(again.status()["state"], "running");
+        again.shut().await;
+    }
+
+    #[tokio::test]
+    async fn a_port_in_use_is_said_and_on_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = host(dir.path());
+        let other = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = other.local_addr().unwrap().port();
+        let s = h.set(true, Some(port)).await.unwrap();
+        assert_eq!(s["state"], "error");
+        assert_eq!(s["error"]["code"], "port_in_use");
+        assert!(s["error"].get("detail").is_none());
+        assert_eq!(s["on"], true);
+        assert!(McpConfig::load(dir.path()).unwrap().on, "on stays saved");
+        drop(other);
+        let s = h.set(true, None).await.unwrap();
+        assert_eq!(s["state"], "running", "the port free, it starts on asking again");
+        h.shut().await;
+    }
+
+    #[tokio::test]
+    async fn a_new_token_is_saved_and_in_force_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = host(dir.path());
+        let old = h.token(false).unwrap();
+        assert_eq!(old, h.token(false).unwrap());
+        let new = h.token(true).unwrap();
+        assert_ne!(old, new);
+        assert!(McpConfig::load(dir.path()).unwrap().token.matches(&new));
+        let live = h.token.read().unwrap();
+        assert!(live.matches(&new) && !live.matches(&old), "the server checks the new one");
+        assert!(h.status().to_string().find(&new).is_none(), "the status never holds it");
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_mcp_json_is_said_and_left_off() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("mcp.json")).unwrap();
+        let h = host(dir.path());
+        let s = h.status();
+        assert_eq!((s["state"].as_str(), s["on"].as_bool()), (Some("error"), Some(false)));
+        assert_eq!(s["error"]["code"], "config");
+        assert!(h.set(true, None).await.is_err(), "it cannot be saved either");
+        assert_eq!(h.status()["error"]["code"], "config");
     }
 }

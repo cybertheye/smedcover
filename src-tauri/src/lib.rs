@@ -260,10 +260,11 @@ async fn text_outline(
 
 // ---------------------------------------------------------------- AI request (the work itself: smedcover_core::net)
 
-/// See `net::fetch_image`.
+/// See `net::fetch_image`. Never to the agents' endpoint (see `mcp::not_to_the_endpoint`).
 #[tauri::command]
-async fn fetch_image(url: String, proxy: Option<String>, timeout: Option<u64>) -> Res<net::FetchedImage> {
+async fn fetch_image(app: AppHandle, url: String, proxy: Option<String>, timeout: Option<u64>) -> Res<net::FetchedImage> {
     tauri::async_runtime::spawn_blocking(move || {
+        mcp::not_to_the_endpoint(&app, &url, proxy.as_deref())?;
         net::fetch_image(&url, proxy.as_deref().unwrap_or(""), timeout.unwrap_or(net::AI_TIMEOUT_SECS))
     })
     .await
@@ -273,9 +274,12 @@ async fn fetch_image(url: String, proxy: Option<String>, timeout: Option<u64>) -
 /// Sends one request to an AI model: an asset to generate, or a photo to repaint. The web view builds
 /// the request (see `ui/js/ai.js` and `ui/js/repaint.js`); sending it from here avoids the
 /// cross-origin limits a web view has. `image` allows the much bigger reply a picture makes; `method`
-/// "GET" asks without a body (checking a key and a model).
+/// "GET" asks without a body (checking a key and a model). Never to the agents' endpoint (see
+/// `mcp::not_to_the_endpoint`).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn ai_request(
+    app: AppHandle,
     url: String,
     headers: Vec<(String, String)>,
     body: String,
@@ -286,38 +290,36 @@ async fn ai_request(
 ) -> Res<net::AiReply> {
     let request = net::AiRequest { url, headers, body, proxy, timeout, image, method };
     // a reply can take minutes: wait for it on the blocking pool, not on a runtime worker
-    tauri::async_runtime::spawn_blocking(move || net::ai_request(&request))
-        .await
-        .map_err(err)?
+    tauri::async_runtime::spawn_blocking(move || {
+        mcp::not_to_the_endpoint(&app, &request.url, request.proxy.as_deref())?;
+        net::ai_request(&request)
+    })
+    .await
+    .map_err(err)?
 }
 
 // ---------------------------------------------------------------- files an agent names (the rules: smedcover_core::files)
 
-/// Refuses unless an agent's call is under way (the endpoint has one in hand), or the self-test runs, which calls the
-/// tools itself: a page cannot read files it names at any other time.
-fn agent_reads(app: &AppHandle) -> Res<()> {
-    if mcp::agent_call_in_flight(app) || (selftest_root().is_some() && !selftest_stay()) {
-        Ok(())
-    } else {
-        Err("not allowed: a file is read only for an agent's call under way".into())
-    }
+/// Whether the self-test proper runs, which calls the agents' tools itself (not SMEDCOVER_SELFTEST_STAY).
+fn selftest_calls_tools() -> bool {
+    selftest_root().is_some() && !selftest_stay()
 }
 
 /// A picture on this computer for an agent's `add_photo` (see `files::read_picture`): its bytes, as they are. Only
-/// while an agent's call is under way (see `agent_reads`).
+/// while a call in hand names this very picture (see `mcp::may_read`).
 #[tauri::command]
 async fn read_picture(app: AppHandle, path: String) -> Res<tauri::ipc::Response> {
-    agent_reads(&app)?;
+    mcp::agent_named(&app, selftest_calls_tools(), mcp::FileKind::Picture, &path)?;
     tauri::async_runtime::spawn_blocking(move || files::read_picture(Path::new(&path)).map(|(_, bytes)| tauri::ipc::Response::new(bytes)))
         .await
         .map_err(err)?
 }
 
-/// A project file on this computer for an agent's `open_project` (see `files::read_project`): its text. Only while an
-/// agent's call is under way (see `agent_reads`).
+/// A project file on this computer for an agent's `open_project` (see `files::read_project`): its text. Only while a
+/// call in hand names this very file (see `mcp::may_read`).
 #[tauri::command]
 async fn read_project(app: AppHandle, path: String) -> Res<String> {
-    agent_reads(&app)?;
+    mcp::agent_named(&app, selftest_calls_tools(), mcp::FileKind::Project, &path)?;
     tauri::async_runtime::spawn_blocking(move || files::read_project(Path::new(&path)))
         .await
         .map_err(err)?
