@@ -25,7 +25,7 @@
 
 - 封面引擎只有一份：网页里的 `ui/js`。新加命令层 `ui/js/commands.js`：工具就是函数，改动都过 `normalizeCover` 校验，每一步一条撤销；工具定义（名字、说明、参数、分级）导出成 `ui/tools.json`。
 - 干活的宿主两个：桌面 App；服务器程序 `smedcover serve`（无头 Chromium 打开同一份 `ui/`，`HOST === "server"`）。
-- MCP 是宿主的 HTTP 入口，不是单独的程序：列出工具，把调用交给页面的命令层，把结果（JSON、PNG）换回 MCP 的格式。桌面：`http://127.0.0.1:25277/mcp`，带令牌，设置里开关；服务器：`/mcp`。
+- MCP 是宿主的 HTTP 入口，不是单独的程序：列出工具，把调用交给页面的命令层，把结果（JSON、PNG）换回 MCP 的格式。桌面：`http://127.0.0.1:25277/mcp`，设置里开关，默认不要令牌（和 Figma 一样），可以打开"要求令牌"；服务器：`/mcp`，一定要令牌。
 - CLI：`smedcover` 的子命令，底下调 MCP 工具，自己不画；和 `serve` 是同一个可执行文件。
 - stdio 桥（`smedcover mcp`）：只给只会 stdio 的客户端，以后再做。
 - 代码都在这个仓库：`core/`（Rust 核心，从 `src-tauri/src/lib.rs` 拆出，App 和服务器共用）、`cli/`（`smedcover`）、`skill/`（skill 模板）。
@@ -36,6 +36,7 @@
 - `update_layer` 拆成几个小工具（位置缩放旋转、字效、字体、变形、显示和透明度）。
 - 排队：agent 的一步没做完时，你的操作等着；你正在拖动、输入或开着对话框时，agent 的调用等着。
 - 桌面 MCP 默认端口 25277（可以改）。
+- 桌面 MCP 默认不要令牌（和 Figma 一样）：只听 127.0.0.1，网页靠 Host 和 Origin 检查挡住；本机其他程序（包括别的账户、容器、虚拟机、沙盒 App）能连上，能让它按路径读图片和工程文件，这一点在设置页的提示里写明，电脑有别人用或跑着不信任的容器时请打开开关。App 页面自己发的请求带记号，接口拒收。设置里留"要求令牌"开关，默认关；打开后和原来一样，接入命令带令牌，Codex 从环境变量 `SMEDCOVER_TOKEN` 读。服务器版（`smedcover serve`）一定要令牌。
 - 服务器上的字体：先用应用自带的免费字体（Noto Sans SC、Bebas Neue、JetBrains Mono），另给一个方便装字体的办法（`smedcover fonts add <文件>`，或 MCP 工具）。
 - `check_cover` 第一版不做，`checkCover()` 的代码留着。
 - 命令行要用 App 而 App 没开时：在后台起一个不显示窗口的 App（要先实测 Mac 上能不能画完）；不行就在运行期间弹出窗口，跑完关掉。
@@ -47,7 +48,7 @@
    - 重构 `app.js`，把"做事"和"问用户"拆开（批量出图、打开工程文件、导出、加照片）。不改行为，用现有测试和自检验证。
    - 命令层和 `tools.json`：看、改、批量和导出三组。
    - 拆出 `core/`，App 改成依赖它。
-2. 场景 3（桌面 MCP）：App 里开 HTTP MCP；设置里开关，显示地址和连着的客户端，给一行可复制的接入命令；页面接收调用；排队和"agent 正在操作"的提示；选中、撤销、重做工具。
+2. 场景 3（桌面 MCP）：App 里开 HTTP MCP；设置里开关，显示地址和连着的客户端，给一行可复制的接入命令；"要求令牌"开关（默认关）；页面接收调用；排队和"agent 正在操作"的提示；选中、撤销、重做工具。
 3. 场景 2（CLI）：`batch`、`render`、`export`、`profiles`、`import`；App 没开时怎么启动；装进 PATH；打进安装包，CI 各平台构建。
 4. 场景 4（服务器）：`smedcover serve`（`/invoke`、`/mcp`、令牌，只听 127.0.0.1，systemd）；无头 Chromium；字体和装字体；`open_project` 导入档案；`export` 返回文件路径；`add_photo` 收本机路径；skill 模板。
 5. 以后：AI 生成类工具（花钱）；stdio 桥；手机布局、给人用的服务器网页、多用户登录。
