@@ -2144,7 +2144,7 @@ asks to know whether the editor is in front, so what goes with the editor follow
 3D view, the letter, crop and weave windows and the brush's panel close, and no key but Esc, undo and redo acts. Its nav
 (`syncTabs()` again, into `#setnav`) shows the profile (its name, how many channels, their colours), its pages (`TABS.setup`:
 `brandTab()`, `sizesTab()`, `aiTab()` and, in the desktop app (`CAN_AGENTS`), `agentsTab()`; `S.tab.setup`; beside *AI* the AI lights as one dot, `AI_SHOW.nav`, see 8.6; beside *Agents* the endpoint's light, `mcpLight()`) and the profile's actions (`profileActions`: new, duplicate,
-import, export, delete); `renderPanel()` draws the page into `#setpanel`. On Brand & channels, with two channels or more,
+import, export, delete); `renderPanel()` draws the page into `#setpanel`, but for its title (`.sh`), which goes into `#sethead` above it: held still while the page scrolls under it (what scrolls up fades out there), so the ✕ beside it is never over the page. On Brand & channels, with two channels or more,
 each card has a grip (⋮⋮) that `chDrag()` takes: the card is lifted out of the grid's flow (`.lifted`) and follows the
 pointer, which the grip captures, a place in its colour (`.chhole`) going before or after the card nearest the lifted
 one's middle (in its row, by which side of that card's middle; one card a row, by height), the page scrolling near its

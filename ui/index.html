@@ -918,7 +918,8 @@
   #setnav>.btn.danger{margin:2px 4px 0;border-color:transparent;background:transparent;color:#ff9a8a}
   #setnav>.btn.danger:hover{background:rgba(255,120,100,.12)}
   #settings .setbody{flex:1;min-width:0;position:relative;display:flex;flex-direction:column}
-  #settings .setbody>.scroll{flex:1;padding:26px 22px 40px 32px}
+  #settings .sethead{flex:none;min-height:62px;padding:26px 22px 0 32px}   /* the page's title and what it is for, held still: the page scrolls under it, never under the ✕ beside it */
+  #settings .setbody>.scroll{flex:1;padding:18px 22px 40px 32px;scroll-padding-top:18px;-webkit-mask-image:linear-gradient(transparent,#000 18px);mask-image:linear-gradient(transparent,#000 18px)}   /* what scrolls up fades out under the title */
   #settings .x{position:absolute;right:18px;top:18px;z-index:2;width:36px;height:36px;border-radius:11px;border:0;background:rgba(255,255,255,.08);color:#fff;font-size:14px;cursor:pointer}
   #settings .x:hover{background:rgba(255,255,255,.16)}
   /* the settings pages: a heading with a line under it; fields three to a row; cards of glass for what goes together */
@@ -1440,7 +1441,7 @@
     <aside id="right" class="glass"><div class="scroll" id="side"></div></aside>
   </div>
 </div>
-<div id="settings" hidden><div class="win glass"><nav id="setnav"></nav><div class="setbody"><button class="x" id="setclose">✕</button><div class="scroll" id="setpanel"></div></div></div></div>
+<div id="settings" hidden><div class="win glass"><nav id="setnav"></nav><div class="setbody"><div class="sethead" id="sethead"></div><button class="x" id="setclose">✕</button><div class="scroll" id="setpanel"></div></div></div></div>
 <div id="menu" class="glass" hidden></div>
 <div id="toast"></div>
 <div id="modal" hidden></div>

@@ -8306,7 +8306,9 @@ function renderPanel() {
   const panel = $(S.mode === "setup" ? "setpanel" : "panel"), y = panel.scrollTop, held = heldField(panel, S.mode === "setup");
   document.documentElement.style.setProperty("--acc", cat().color);
   document.documentElement.style.setProperty("--acc-ink", inkOn(cat().color));
-  panel.replaceChildren(...TABS[S.mode][S.tab[S.mode]]().flat(Infinity).filter(Boolean));
+  const kids = TABS[S.mode][S.tab[S.mode]]().flat(Infinity).filter(Boolean);
+  if (S.mode === "setup") $("sethead").replaceChildren(...(kids[0] instanceof Element && kids[0].matches(".sh") ? [kids.shift()] : []));   // the page's title over it, the page scrolling under it and the ✕ beside it (#settings .sethead)
+  panel.replaceChildren(...kids);
   giveBack(panel, held);   // a field being typed in (the Assets sheet's search, any of Settings') keeps its focus and caret
   panel.scrollTop = y;
   if (S.mode === "setup") syncTabs();   // the nav's profile: its name, channels and colours, as the page now has them
