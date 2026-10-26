@@ -65,7 +65,8 @@ A port that cannot be had leaves the endpoint on but in error. It never moves to
 and *Apply*, or free the port and turn the switch off and on again.
 
 Beside *Agents* in Settings' left column is a light: green while the endpoint runs, amber while it switches, red when it
-could not start, none while it is off. While it runs, the ⋯ menu's *Agents* line says *On · port 25277*.
+could not start, none while it is off. While it runs, the ⋯ menu's *Agents* line says *On · port 25277*, and the top
+bar's edge is a thin turquoise line with a soft glow, after the marker lamp a car shows while it drives itself.
 
 The endpoint starts with the app while it is on and stops when the app quits; the switch is kept, so it is on again at
 the next start. On macOS the window keeps drawing while the endpoint runs, even when it is covered or on
@@ -357,8 +358,9 @@ SmedCover tells the agent how it works when it connects (MCP's instructions). A 
 ### In the window
 
 - A change holds the window while it runs: an overlay covers it, and after 150 ms a pill of glass at the top says what is
-  being done (*Changing the words*, *Exporting 3 of 12*…). A press on the window pulses it (*One moment — almost done*);
-  keys, pastes and the wheel are swallowed, not replayed later.
+  being done (*Changing the words*, *Exporting 3 of 12*…), while two lights run round the top bar's turquoise edge (a
+  steady brighter glow instead when the system asks for less motion). A press on the window pulses it (*One moment —
+  almost done*); keys, pastes and the wheel are swallowed, not replayed later.
 - After 20 seconds the pill says *Taking longer than usual* and offers *Stop waiting* (or Esc): the window is yours again,
   and the agent is told the step did not finish.
 - A change aimed at another profile or channel switches the window there first, as you would, and a toast says where

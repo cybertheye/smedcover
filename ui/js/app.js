@@ -2923,6 +2923,7 @@ async function agentsRead() {
     const [status, token] = await Promise.all([invoke("mcp_status"), invoke("mcp_token")]);
     MCP.status = status; AGENTS.token = token;
   } catch (e) { AGENTS.read = false; AGENTS.error = String((e && e.message) || e); }
+  mcpLightSync();
   if (S.mode === "setup" && S.tab.setup === "agents") renderPanel();
 }
 /** Turns the endpoint on or off, on `port` if given; the status it answers is drawn. */
@@ -2942,7 +2943,7 @@ async function mcpRequireToken(on) {
   AGENTS.busy = true; renderPanel();
   try { MCP.status = await invoke("mcp_require_token", { on }); if (!on) AGENTS.show = false; }
   catch (e) { fail(e); }
-  AGENTS.busy = false; renderPanel();
+  AGENTS.busy = false; renderPanel(); mcpLightSync();
 }
 /** A new token, once the user says so: the old one stops working at once. */
 async function newToken() {
@@ -2978,7 +2979,15 @@ function mcpLight() {
   const k = mcpState(MCP.status);
   return el("span", { class: "light", "data-mcp": "nav" }, k !== "off" && el("span", { class: "aidot" + MCP_DOT[k], title: t("mcp.state." + k) }));
 }
-const mcpLightSync = () => { const n = document.querySelector('[data-mcp="nav"]'); if (n) n.replaceWith(mcpLight()); };
+/**
+ * The lights that follow the endpoint's state, as it changes: the one beside Agents in Settings' nav, drawn again, and the
+ * top bar's turquoise edge while it runs (html.autopilot; the light running round it while an agent's step holds the
+ * window is body.agent's, agent.js's: see #lamp in index.html).
+ */
+const mcpLightSync = () => {
+  document.documentElement.classList.toggle("autopilot", mcpState(MCP.status) === "running");
+  const n = document.querySelector('[data-mcp="nav"]'); if (n) n.replaceWith(mcpLight());
+};
 /** What the ⋯ menu says under Agents: the port it runs on, else its state. */
 const mcpSays = () => { const s = MCP.status, k = mcpState(s); return k === "running" ? t("mcp.menuOn", s.port) : t("mcp.state." + k); };
 /** Why the endpoint is not running, as error `e` of its status says (at `port`): the port taken or kept by the system, mcp.json unreadable, or the system's own words. */

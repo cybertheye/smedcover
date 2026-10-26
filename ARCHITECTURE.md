@@ -2177,7 +2177,7 @@ for its line), and the note that a proxy set in the agent's environment must lea
 `toolsMismatch`). The status is agent.js's `MCP`, read once with the token (`agentsRead()`; if that fails, why, and *Try
 again*) and then as the host sends it: `agentsLive()` changes the pill's and the line's words in place (both live
 regions, so a screen reader says them), draws what was seen again (every 15 s too while the page shows, for the times),
-the page anew when either switch was turned elsewhere, and the light in the nav, and the ⋯ menu's *Agents* line says it (`mcpSays()`). None of it is in `custom.json`:
+the page anew when either switch was turned elsewhere, and the light in the nav, and the ⋯ menu's *Agents* line says it (`mcpSays()`). While the endpoint runs the top bar's edge is the agents' lamp, turquoise after the marker lamp a car shows while it drives itself (SAE J3134): `mcpLightSync()`, where every status lands, puts `autopilot` on `<html>`, and `#top` takes `--autopilot-line` and a soft glow (the tokens on `:root`). None of it is in `custom.json`:
 `mcp.json` is Rust's, read and set through the `mcp_*` commands. ✕, Esc or a press beside it shuts it. The ways
 in from elsewhere open it at the card they mean: `SET_UI.at` names one to bring into view when the page is next drawn
 (`text`, `image`, `cut` or `batch`: the card whose id is `"set-" + SET_UI.at`) — *Set up an image model* or *Set up AI* in the repaint and generate
@@ -2527,7 +2527,10 @@ menu and dialogs, under a question, the title bar and the toast; `body.agent .ap
 toast's button, which would act mid-step), the keys, pastes and the wheel swallowed before anything sees them (by
 listeners added for the step and removed after it) and a drop let go — not replayed: a step is short — and, after
 150 ms, a pill of glass at the top saying what is being done (`agent.step.<tool>`), which a press pulses ("One
-moment"); after 20 s it says the step is taking longer than usual and offers to stop waiting (its button, or Esc). One
+moment"), and from that moment two lights running round the top bar's edge (`#lamp`, an SVG the grid lays over the
+bar: three dashes of one rounded rect, a fading tail behind a bright head, moved by `stroke-dashoffset` and paused while
+no step runs; `body.agent`, which `hold()` and `release()` set, drives it, so it ends however the step ends; a steady
+brighter glow where less motion is asked for); after 20 s it says the step is taking longer than usual and offers to stop waiting (its button, or Esc). One
 whose tool has `history` runs inside `agentStep(fn)` (`app.js`): the change the user was making becomes a step of its
 own first (`commitPending()`), `HOLD.history` keeps the debounced commit back, and the step is committed once — none
 when nothing changed. Should it fail part-way, the snapshot taken after the opening commit is put back and the

@@ -20,6 +20,7 @@
         --glass:rgba(255,255,255,.075);--glass2:rgba(255,255,255,.14);--solid:rgba(27,27,38,.94);--solid2:rgba(44,44,58,.96);
         --glass-line:rgba(255,255,255,.16);--glass-hi:inset 0 1px 0 rgba(255,255,255,.2);--glass-drop:0 24px 60px rgba(0,0,0,.38);
         --blur:blur(30px) saturate(170%);
+        --autopilot:#2ee6d6;--autopilot-hot:#c8fff8;--autopilot-line:rgba(46,230,214,.6);--autopilot-glow:rgba(46,230,214,.32);   /* the agents' lamp (#lamp) */
         --ui:"Noto Sans SC",-apple-system,"Segoe UI",sans-serif;--mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace}
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px;overflow:hidden}
@@ -35,6 +36,23 @@
   header{display:flex;align-items:center;gap:12px;height:56px;padding:0 10px 0 18px;border-radius:18px}
   header h1{font:400 26px "Bebas Neue",sans-serif;letter-spacing:.08em;margin:0 2px 0 0}
   header .sep{width:1px;height:24px;background:var(--line2)}
+  /* the agents' lamp, after the turquoise marker lamp a car shows while it drives itself (SAE J3134): while the endpoint
+     runs (html.autopilot, mcpLightSync in app.js) the top bar's edge is a thin turquoise line with a soft glow; while an
+     agent's step holds the window (body.agent, agent.js), from the moment its pill shows, two lights run round it (#lamp,
+     laid over the bar where the grid puts it: dashes of one rounded rect, a tail fading behind a bright head, moved along
+     by stroke-dashoffset; paused, and nothing painted, while no step runs). Asked for less motion, a steady brighter glow. */
+  #top{transition:border-color .4s,box-shadow .4s}
+  html.autopilot #top{border-color:var(--autopilot-line);box-shadow:var(--glass-hi),var(--glass-drop),0 0 14px var(--autopilot-glow)}
+  body.agent #top{border-color:var(--autopilot-line);box-shadow:var(--glass-hi),var(--glass-drop),0 0 20px var(--autopilot-glow);transition-delay:.15s}
+  #lamp{position:absolute;grid-area:1/1/2/2;left:.5px;top:.5px;width:calc(100% - 1px);height:calc(100% - 1px);overflow:visible;pointer-events:none;opacity:0;transition:opacity .35s;filter:drop-shadow(0 0 3px var(--autopilot)) drop-shadow(0 0 10px var(--autopilot))}
+  body.agent #lamp{opacity:1;transition-delay:.15s}
+  #lamp rect{fill:none;stroke-linecap:round;animation:lamp 6s linear infinite paused}
+  body.agent #lamp rect{animation-play-state:running}
+  #lamp .tail{stroke:var(--autopilot);stroke-opacity:.4;stroke-width:2;stroke-dasharray:16 34}
+  #lamp .mid{stroke:var(--autopilot);stroke-opacity:.85;stroke-width:2.25;stroke-dasharray:7 43;animation-delay:-.54s}
+  #lamp .head{stroke:var(--autopilot-hot);stroke-width:3;stroke-dasharray:2 48;animation-delay:-.84s}
+  @keyframes lamp{to{stroke-dashoffset:-100}}
+  @media (prefers-reduced-motion:reduce){#lamp{display:none}body.agent #top{box-shadow:var(--glass-hi),var(--glass-drop),0 0 0 1px var(--autopilot),0 0 28px var(--autopilot-glow)}}
   /* the window's close, minimise and zoom buttons sit at the top bar's left end (ownTitleBar in app.js): on a Mac its own
      float over it; on Windows and Linux the page draws them (#winbtns), at the same place and size and in a Mac's colours */
   html.ownbar header{padding-left:96px}
@@ -885,7 +903,7 @@
   #agent .pill .stop:hover{background:rgba(255,255,255,.22)}
   #agent .pill{position:absolute;left:50%;top:76px;transform:translate(-50%,-6px);display:flex;align-items:center;gap:10px;max-width:min(560px,86vw);padding:10px 18px;border-radius:999px;font:600 13.5px var(--ui);color:var(--text);white-space:nowrap;overflow:hidden;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none}
   #agent.on .pill{opacity:1;transform:translate(-50%,0)}
-  #agent .pill i{flex:none;width:9px;height:9px;border-radius:50%;background:var(--acc);animation:agentDot 1.1s ease-in-out infinite}
+  #agent .pill i{flex:none;width:9px;height:9px;border-radius:50%;background:var(--autopilot);box-shadow:0 0 8px var(--autopilot-glow);animation:agentDot 1.1s ease-in-out infinite}   /* the agents' lamp's turquoise */
   #agent .pill b{overflow:hidden;text-overflow:ellipsis}
   #agent .pill small{flex:none;font-weight:500;color:var(--text2)}
   #agent.pulse .pill{animation:agentPulse .45s ease-out}
@@ -1430,6 +1448,7 @@
 <div id="ambient"><canvas id="amb" width="48" height="27"></canvas><canvas id="amb0" width="48" height="27" hidden></canvas></div>
 <div class="app">
   <header id="top" class="glass"></header>
+  <svg id="lamp" aria-hidden="true"><rect class="tail" width="100%" height="100%" rx="17.5" pathLength="100"/><rect class="mid" width="100%" height="100%" rx="17.5" pathLength="100"/><rect class="head" width="100%" height="100%" rx="17.5" pathLength="100"/></svg>
   <div class="body nodrawer" id="body">
     <nav id="dock" class="glass"></nav>
     <aside id="left" class="glass"><div class="scroll" id="panel"></div></aside>
