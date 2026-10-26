@@ -751,21 +751,22 @@ The *Image model* card, on the same page as the *Text model*, has settings of it
 
 ## Agents (MCP)
 
-Agents such as Claude Code or Codex can make covers in SmedCover's window: change the words and the look, place, add and remove layers, add photos, draw previews, deal hands with Surprise me and export. Each change is one step of undo in the window you have open, so you see everything an agent does and can take it back. They reach it over MCP, at an endpoint on this computer only (127.0.0.1): nothing is sent anywhere else.
+Agents such as Claude Code or Codex can make covers in SmedCover's window: change the words and the look, place, add and remove layers, add photos, draw previews, deal hands with Surprise me and export. Each change is one step of undo in the window you have open, so you see everything an agent does and can take it back. They reach it over MCP, at an endpoint that listens on this computer only (127.0.0.1), with a token. What an agent reads through it — the cover, previews, photos, what it exports — goes to that agent and to the model it uses, as anything else you give it does; a photo it adds by link is downloaded by SmedCover; nothing else leaves.
 
 1. ⋯ → *Agents* (Settings → *Agents*), and turn on *MCP endpoint*. It listens at `http://127.0.0.1:25277/mcp`; another port can be set (1024–65535), and if another program has the port the page says so.
 2. Copy the line for your agent from *Connect an agent*, the token already in it. For Claude Code, run in a terminal:
 
    ```bash
-   claude mcp add --transport http smedcover http://127.0.0.1:25277/mcp --header "Authorization: Bearer <token>"
+   claude mcp add --transport http --scope user smedcover http://127.0.0.1:25277/mcp --header "Authorization: Bearer <token>"
    ```
 
-   For Codex, a `[mcp_servers.smedcover]` table to add to `~/.codex/config.toml`; for other clients, the JSON most of them take.
+   (`--scope user`: for every folder you run Claude Code in.) For Codex, a `[mcp_servers.smedcover]` table to add to `~/.codex/config.toml`, the token in `http_headers`; to keep it out of that file, put `bearer_token_env_var = "SMEDCOVER_TOKEN"` there instead and set that variable to the token. The JSON is for Claude Code's `.mcp.json` and Cursor's `mcp.json`.
 3. Ask the agent for a cover, for example: “Make this week's cover: the title *Rainy Tokyo night walk*, in a night look, and show me a preview.”
 
 - While an agent's step runs the window is held, a pill at the top saying what it is doing (after 20 seconds it offers *Stop waiting*), and an agent waits while you are in the middle of something.
 - The token is kept in `mcp.json` in the data folder, which only you can read; it is shown hidden but for its end. *New token* (it asks first) makes the old one stop working at once. *Seen lately* lists the agents seen in the last 10 minutes and their calls.
-- The endpoint starts with the app while it is on, and stops when the app quits. While it runs the window keeps drawing when it is covered or on another desktop, so an agent's previews and exports do not wait for it to be seen.
+- The endpoint starts with the app while it is on, and stops when the app quits. On macOS, while it runs, the window keeps drawing when it is covered or on another desktop, so an agent's previews and exports do not wait for it to be seen; elsewhere there is no such setting (Windows slows a minimised window down), so keep it from being minimised while an agent works.
+- The page only has a file read for an agent's call that names it (`add_photo` by path, `open_project` by file), and only that file, while the call is under way.
 - A proxy set in the agent's environment (`HTTP_PROXY` and the like) must leave this computer out: `NO_PROXY=127.0.0.1,localhost`.
 
 ## Cover standards

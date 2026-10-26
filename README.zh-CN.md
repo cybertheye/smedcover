@@ -751,21 +751,22 @@ SmedCover 不自带模型，也不提供账号。你需要一个兼容下面任�
 
 ## Agent 接入（MCP）
 
-Claude Code、Codex 这类 agent 可以在 SmedCover 的窗口里替你做封面：改文字、换风格、摆放和增删图层、加照片、出预览、用「你看着办」抽几手、导出。每一处改动都是你开着的这个窗口里的一步撤销，agent 做了什么你都看得到，也都能撤回。它们通过 MCP 连进来，接口只在这台电脑上（127.0.0.1），什么都不会发到别处。
+Claude Code、Codex 这类 agent 可以在 SmedCover 的窗口里替你做封面：改文字、换风格、摆放和增删图层、加照片、出预览、用「你看着办」抽几手、导出。每一处改动都是你开着的这个窗口里的一步撤销，agent 做了什么你都看得到，也都能撤回。它们带着令牌通过 MCP 连进来，接口只在这台电脑上监听（127.0.0.1）。agent 经它读到的东西——封面、预览、照片、导出的结果——会交给这个 agent 和它用的模型，和你交给它的其他东西一样；它按链接加的照片由 SmedCover 下载；除此之外什么都不会发出去。
 
 1. ⋯ →「Agent 接入」（即「设置 → Agent 接入」），打开「开启 MCP 接口」。它在 `http://127.0.0.1:25277/mcp` 上等着；可以换一个端口（1024–65535），端口被别的程序占着时页面上会说。
 2. 在「连接 agent」里复制你那个 agent 的那一段，令牌已经填好。Claude Code 在终端里运行：
 
    ```bash
-   claude mcp add --transport http smedcover http://127.0.0.1:25277/mcp --header "Authorization: Bearer <令牌>"
+   claude mcp add --transport http --scope user smedcover http://127.0.0.1:25277/mcp --header "Authorization: Bearer <令牌>"
    ```
 
-   Codex 是一段 `[mcp_servers.smedcover]`，加进 `~/.codex/config.toml`；其他客户端用大多数都认的那段 JSON。
+   （`--scope user`：在哪个目录里运行 Claude Code 都能用。）Codex 是一段 `[mcp_servers.smedcover]`，加进 `~/.codex/config.toml`，令牌写在 `http_headers` 里；不想把令牌写进这个文件，就改写 `bearer_token_env_var = "SMEDCOVER_TOKEN"`，再把这个环境变量设成令牌。那段 JSON 给 Claude Code 的 `.mcp.json` 和 Cursor 的 `mcp.json` 用。
 3. 让 agent 做封面，比如：「做这周的封面：标题《雨夜东京漫步》，用夜景风格，给我看个预览。」
 
 - agent 做一步时窗口会被挡住，顶上的小条写着它在做什么（20 秒后给出「不等了」）；你正忙着的时候，agent 会等你。
 - 令牌存在数据目录的 `mcp.json` 里，只有你自己能读；页面上只露出最后几位。「换新令牌」（会先问一句）让旧令牌立刻失效。「最近」列出 10 分钟内来过的 agent 和它们的调用。
-- 开着时接口随应用启动，应用退出时停下。接口开着时，窗口被挡住或在别的桌面上也照样绘制，agent 要的预览和导出不用等窗口露出来。
+- 开着时接口随应用启动，应用退出时停下。在 macOS 上，接口开着时窗口被挡住或在别的桌面上也照样绘制，agent 要的预览和导出不用等窗口露出来；别的系统没有这样的设置（Windows 会让最小化的窗口慢下来），agent 工作时别把窗口最小化。
+- 页面只会为 agent 指名了某个文件的调用（按路径 `add_photo`、按文件 `open_project`）读这一个文件，而且只在这个调用进行时。
 - agent 所在的环境如果设了代理（`HTTP_PROXY` 之类），要让它绕开本机：`NO_PROXY=127.0.0.1,localhost`。
 
 ## 封面标准
