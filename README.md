@@ -760,7 +760,7 @@ Agents such as Claude Code or Codex can make covers in SmedCover's window: chang
    claude mcp add --transport http --scope user smedcover http://127.0.0.1:25277/mcp --header "Authorization: Bearer <token>"
    ```
 
-   (`--scope user`: for every folder you run Claude Code in.) For Codex, a `[mcp_servers.smedcover]` table to add to `~/.codex/config.toml`, the token in `http_headers`; to keep it out of that file, put `bearer_token_env_var = "SMEDCOVER_TOKEN"` there instead and set that variable to the token. The JSON is for Claude Code's `.mcp.json` and Cursor's `mcp.json`.
+   (`--scope user`: for every folder you run Claude Code in.) For Codex, a `[mcp_servers.smedcover]` table to add to `~/.codex/config.toml`, which names the environment variable the token is in (`bearer_token_env_var = "SMEDCOVER_TOKEN"`) rather than holding it, and the line that sets that variable: an `export` for `~/.zshrc` or `~/.bashrc` (a `setx` to run once on Windows); Codex then has to be started from a new terminal. The JSON is for Claude Code's `.mcp.json` and Cursor's `mcp.json`.
 3. Ask the agent for a cover, for example: “Make this week's cover: the title *Rainy Tokyo night walk*, in a night look, and show me a preview.”
 
 - While an agent's step runs the window is held, a pill at the top saying what it is doing (after 20 seconds it offers *Stop waiting*), and an agent waits while you are in the middle of something.

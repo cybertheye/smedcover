@@ -2161,7 +2161,8 @@ the system keeps it, `mcp.json` could not be read, or the system's own words); t
 characters (`maskToken()`; hidden again whenever the page is left, in `renderPanel()`), with *Show*, *Copy* and *New
 token* (`newToken()`, which asks first through `askSure()`); the lines that set an agent up (agent.js's `setupLines()`:
 Claude Code's `claude mcp add --transport http --scope user …`, Codex's `[mcp_servers.smedcover]` with `url`,
-`http_headers` and `tool_timeout_sec`, the `mcpServers` JSON of Claude Code's `.mcp.json` and Cursor's `mcp.json`),
+`bearer_token_env_var` (the token kept out of its file, in `SMEDCOVER_TOKEN`, set by the next line: `export` for the
+shell's profile, `setx` on Windows) and `tool_timeout_sec`, the `mcpServers` JSON of Claude Code's `.mcp.json` and Cursor's `mcp.json`),
 shown with the token as it is shown and copied with the token itself, made when *Copy* is pressed (`copyText()`; each
 *Copy* named for its line), and the note that a proxy set in the agent's environment must leave this computer out; and
 *Seen lately* (`mcpSeen()`: the clients of the last 10 minutes, the calls running, the last call, a warning when

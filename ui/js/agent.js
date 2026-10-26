@@ -344,16 +344,20 @@ export function tauriTransport({ Channel = globalThis.__TAURI__ && globalThis.__
 }
 /** The token as shown: hidden but for its last four characters. */
 export const maskToken = (token) => (token ? "••••••••" + token.slice(-4) : "");
+/** The environment variable Codex reads the token from (its config names it, bearer_token_env_var). */
+export const TOKEN_ENV = "SMEDCOVER_TOKEN";
 /**
  * The lines that set an agent up for the endpoint at `url` with `token` (the token itself, or maskToken()'s to show),
  * each {key: its label's string, text}: Claude Code's command (for the user, so it works from any folder), Codex's table
- * for ~/.codex/config.toml (its tool timeout raised to an export's half hour from its 60 s), and the mcpServers JSON that
- * Claude Code's .mcp.json and Cursor's mcp.json take.
+ * for ~/.codex/config.toml (its tool timeout raised to an export's half hour from its 60 s), which names the environment
+ * variable the token is in rather than holding it, and the line that sets that variable (`setx` on Windows, `win`, else an
+ * `export` for the shell's profile), and the mcpServers JSON that Claude Code's .mcp.json and Cursor's mcp.json take.
  */
-export function setupLines(url, token) {
+export function setupLines(url, token, win = false) {
   return [
     { key: "mcp.claude", text: `claude mcp add --transport http --scope user smedcover ${url} --header "Authorization: Bearer ${token}"` },
-    { key: "mcp.codex", text: `[mcp_servers.smedcover]\nurl = "${url}"\nhttp_headers = { "Authorization" = "Bearer ${token}" }\ntool_timeout_sec = 1800` },
+    { key: "mcp.codex", text: `[mcp_servers.smedcover]\nurl = "${url}"\nbearer_token_env_var = "${TOKEN_ENV}"\ntool_timeout_sec = 1800` },
+    win ? { key: "mcp.codexEnvWin", text: `setx ${TOKEN_ENV} "${token}"` } : { key: "mcp.codexEnv", text: `export ${TOKEN_ENV}="${token}"` },
     { key: "mcp.json", text: JSON.stringify({ mcpServers: { smedcover: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2) },
   ];
 }

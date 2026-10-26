@@ -2,7 +2,7 @@
 // stand-in Channel, invoke and window, and the lines Settings → Agents gives to set an agent up.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { tauriTransport, setupLines, maskToken, MCP, onMcpStatus, toolsHash } from "../ui/js/agent.js";
+import { tauriTransport, setupLines, TOKEN_ENV, maskToken, MCP, onMcpStatus, toolsHash } from "../ui/js/agent.js";
 
 /** Tauri's Channel as the transport uses it: the page sets onmessage, Rust sends. */
 class FakeChannel {
@@ -92,27 +92,30 @@ test("an attach that fails is tried again a moment later, then each time the win
   });
 });
 
-test("the lines that set an agent up: Claude Code's command, Codex's TOML and the mcpServers JSON, the token in each", () => {
+test("the lines that set an agent up: Claude Code's command, Codex's TOML naming the variable the token is in, the line that sets it, and the mcpServers JSON", () => {
   const url = "http://127.0.0.1:25277/mcp", token = "smc_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_abcde".slice(0, 43);
-  const [claude, codex, json] = setupLines(url, token);
-  assert.deepEqual([claude.key, codex.key, json.key], ["mcp.claude", "mcp.codex", "mcp.json"]);
+  const [claude, codex, env, json] = setupLines(url, token);
+  assert.deepEqual([claude.key, codex.key, env.key, json.key], ["mcp.claude", "mcp.codex", "mcp.codexEnv", "mcp.json"]);
   assert.equal(claude.text, `claude mcp add --transport http --scope user smedcover ${url} --header "Authorization: Bearer ${token}"`);
-  // Codex: one table, each line a key and a TOML value (a string, an inline table of strings, an integer)
+  // Codex: one table, each line a key and a TOML value (strings and an integer), the token not in it but in a variable it names
   const lines = codex.text.split("\n");
   assert.equal(lines[0], "[mcp_servers.smedcover]");
   const values = Object.fromEntries(lines.slice(1).map((l) => { const m = /^([a-z_]+) = (.+)$/.exec(l); assert.ok(m, l); return [m[1], m[2]]; }));
-  assert.deepEqual(Object.keys(values), ["url", "http_headers", "tool_timeout_sec"]);
+  assert.deepEqual(Object.keys(values), ["url", "bearer_token_env_var", "tool_timeout_sec"]);
   assert.equal(values.url, JSON.stringify(url));
-  assert.equal(values.http_headers, `{ "Authorization" = "Bearer ${token}" }`);
+  assert.equal(values.bearer_token_env_var, JSON.stringify(TOKEN_ENV));
+  assert.ok(!codex.text.includes(token), "the token is not in Codex's file");
+  assert.equal(env.text, `export ${TOKEN_ENV}="${token}"`);
+  assert.deepEqual(setupLines(url, token, true)[2], { key: "mcp.codexEnvWin", text: `setx ${TOKEN_ENV} "${token}"` });
   assert.ok(Number.isInteger(+values.tool_timeout_sec) && +values.tool_timeout_sec >= 1800, "as long as an export may take");
   assert.deepEqual(JSON.parse(json.text), { mcpServers: { smedcover: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } });
   // shown masked: the token's end alone, in every line
   const masked = maskToken(token);
   assert.equal(masked, "••••••••" + token.slice(-4));
-  for (const { text } of setupLines(url, masked)) {
+  for (const { key, text } of setupLines(url, masked)) {
     assert.ok(!text.includes(token) && !text.includes(token.slice(4, 20)), "the token is not shown");
-    assert.ok(text.includes(masked));
+    assert.ok(key === "mcp.codex" || text.includes(masked));
   }
-  assert.doesNotThrow(() => JSON.parse(setupLines(url, masked)[2].text));
+  assert.doesNotThrow(() => JSON.parse(setupLines(url, masked)[3].text));
   assert.equal(maskToken(""), "");
 });

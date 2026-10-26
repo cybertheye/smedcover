@@ -760,7 +760,7 @@ Claude Code、Codex 这类 agent 可以在 SmedCover 的窗口里替你做封面
    claude mcp add --transport http --scope user smedcover http://127.0.0.1:25277/mcp --header "Authorization: Bearer <令牌>"
    ```
 
-   （`--scope user`：在哪个目录里运行 Claude Code 都能用。）Codex 是一段 `[mcp_servers.smedcover]`，加进 `~/.codex/config.toml`，令牌写在 `http_headers` 里；不想把令牌写进这个文件，就改写 `bearer_token_env_var = "SMEDCOVER_TOKEN"`，再把这个环境变量设成令牌。那段 JSON 给 Claude Code 的 `.mcp.json` 和 Cursor 的 `mcp.json` 用。
+   （`--scope user`：在哪个目录里运行 Claude Code 都能用。）Codex 是一段 `[mcp_servers.smedcover]`，加进 `~/.codex/config.toml`，里面不放令牌，只写令牌所在的环境变量（`bearer_token_env_var = "SMEDCOVER_TOKEN"`）；另一行设这个环境变量：加进 `~/.zshrc` 或 `~/.bashrc` 的 `export`（Windows 上是运行一次的 `setx`），之后要在新开的终端里启动 Codex。那段 JSON 给 Claude Code 的 `.mcp.json` 和 Cursor 的 `mcp.json` 用。
 3. 让 agent 做封面，比如：「做这周的封面：标题《雨夜东京漫步》，用夜景风格，给我看个预览。」
 
 - agent 做一步时窗口会被挡住，顶上的小条写着它在做什么（20 秒后给出「不等了」）；你正忙着的时候，agent 会等你。

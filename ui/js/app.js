@@ -2891,6 +2891,7 @@ function textAiPane() {
 }
 
 // ---------- Settings → Agents: the MCP endpoint agents (Claude Code, Codex…) reach this window through (mcp.rs in the app)
+const ON_WINDOWS = /Win/.test(navigator.platform || navigator.userAgent);   // how Codex's token is put in an environment variable
 /** Whether the host has the endpoint: the desktop app's alone for now. */
 const CAN_AGENTS = HOST === "tauri";
 /**
@@ -3016,7 +3017,7 @@ function agentsTab() {
   // each line shown with the token as it is shown; the one copied made with the token itself, when Copy is pressed
   const row = ({ key, text }, i) => el("div", { class: "mline" },
     el("div", { class: "mlh" }, el("label", { class: "cap" }, t(key)),
-      el("button", { class: "linkbtn", disabled: !tok, "aria-label": t("mcp.copyWhat", t(key)), onclick: () => copyText(setupLines(url, AGENTS.token)[i].text) }, ico("copy", 15), t("mcp.copy"))),
+      el("button", { class: "linkbtn", disabled: !tok, "aria-label": t("mcp.copyWhat", t(key)), onclick: () => copyText(setupLines(url, AGENTS.token, ON_WINDOWS)[i].text) }, ico("copy", 15), t("mcp.copy"))),
     el("pre", { class: "mcode" }, text));
   return [
     head,
@@ -3033,7 +3034,7 @@ function agentsTab() {
         el("button", { class: "btn", disabled: !tok, onclick: newToken }, ico("reset", 15), t("mcp.newToken")))),
     el("section", { class: "scard aicard", id: "set-mcp-connect" },
       el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("mcp.connect")), el("small", {}, t("mcp.connectSub")))),
-      el("div", { class: "mlines" }, setupLines(url, shown).map(row)),
+      el("div", { class: "mlines" }, setupLines(url, shown, ON_WINDOWS).map(row)),
       el("div", { class: "hint" }, t("mcp.proxy"))),
     mcpSeen(s),
   ];
