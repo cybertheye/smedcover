@@ -36,6 +36,10 @@ http-body-util = { workspace = true }
 objc2 = { workspace = true }
 objc2-foundation = { workspace = true }
 
+# A file an agent names is opened without waiting (files.rs).
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 # The endpoint's port is bound for SmedCover alone.
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }

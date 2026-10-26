@@ -53,6 +53,8 @@ axum = { version = "0.8.9", default-features = false, features = ["json"] }
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "service", "http1"] }
 http-body-util = "0.1"
+# On Unix a file an agent names is opened without waiting (O_NONBLOCK), so a FIFO cannot hold a thread (files.rs).
+libc = "0.2"
 # On Windows the endpoint's port is bound for SmedCover alone (SO_EXCLUSIVEADDRUSE).
 socket2 = "0.6"
 windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
