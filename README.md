@@ -762,7 +762,7 @@ Agents such as Claude Code or Codex can make covers in SmedCover's window: chang
 
 3. Ask the agent for a cover, for example: “Make this week's cover: the title *Rainy Tokyo night walk*, in a night look, and show me a preview.”
 
-No token is needed by default: any program on this computer can then use the endpoint, web pages cannot. Turn on *Require a token* on the same page if the computer is shared, or runs containers, virtual machines or apps you do not trust.
+No token is needed by default. Then any program on this computer — other accounts', containers' and virtual machines' too — can drive the window and have SmedCover read pictures and projects by naming their paths; web pages cannot. Turn on *Require a token* on the same page if the computer is shared, or runs containers, virtual machines or apps you do not trust: see [Require a token](README_MCP.md#require-a-token).
 
 Codex, Cursor, Hermes Agent, OpenClaw and other clients, the token, how an agent's calls wait for you, every tool, how it is built and what to do when something goes wrong: [README_MCP.md](README_MCP.md).
 
@@ -823,7 +823,7 @@ Tutorials,Another title,,
 
 ## Where your data lives
 
-Profiles, each channel's cover, assets, settings (`custom.json`, see below), the agents' endpoint (`mcp.json`, see [Agents](#agents-mcp)) and your own repaint styles (the `repaint-styles/` folder) are kept in the system's app data directory, with two things kept only to start faster: the Look sheet's card pictures (`lookcards/`) and the letter outlines the text effects use (`outlines.json`, 8 MB at most; both in the desktop app only). Either can be deleted at any time; it is made again.
+Profiles, each channel's cover, assets, settings (`custom.json`, see below), the agents' endpoint (`mcp.json`, see [README_MCP.md](README_MCP.md#mcpjson)) and your own repaint styles (the `repaint-styles/` folder) are kept in the system's app data directory, with two things kept only to start faster: the Look sheet's card pictures (`lookcards/`) and the letter outlines the text effects use (`outlines.json`, 8 MB at most; both in the desktop app only). Either can be deleted at any time; it is made again.
 Exports are written only where you choose: each profile remembers the folder you chose for it (see *Save to* under [Export](#export)).
 
 | System | Location |

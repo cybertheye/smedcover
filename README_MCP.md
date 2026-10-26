@@ -191,8 +191,9 @@ curl http://127.0.0.1:25277/health
 # {"name":"smedcover","version":"…","page":"ready"}
 ```
 
-`page` is `ready` once the window can take calls, `loading` while it starts or reloads. Then ask the agent for something
-concrete, for example:
+`page` is `ready` once the window can take calls, `loading` while it starts or reloads. Close Settings before you ask
+the agent to change anything: while it is open, an agent's changes wait for you, and answer `busy` after 30 seconds.
+Then ask the agent for something concrete, for example:
 
 - “Make this week's cover: the title *Rainy Tokyo night walk*, in a night look, and show me a preview.”
 - “Put the photo `shot.jpg` from my Desktop on the VLOG channel's cover as the background, cut out the subject so it
@@ -205,8 +206,11 @@ concrete, for example:
 - The agent must run on the same computer: the endpoint listens on 127.0.0.1 only.
 - An agent on another machine, such as a VPS, cannot reach it. That is what the planned server is for: SmedCover running
   on the same server as the agent.
-- An agent inside a Docker container gets 403 today: it reaches the computer under the name `host.docker.internal`, and
-  the endpoint takes no `Host` but `127.0.0.1`, `localhost` and `[::1]`.
+- An agent client in a Docker Desktop container usually gets 403: it addresses the computer as `host.docker.internal`,
+  and the endpoint takes no `Host` but `127.0.0.1`, `localhost` and `[::1]`. That keeps out ordinary clients only: a
+  program in the container that sends `Host: 127.0.0.1` itself gets through, which is what *Require a token* is for. On
+  Linux, a container on Docker Engine's bridge network cannot reach the endpoint at all; one with `--network host` uses
+  it as a program on this computer does.
 - An agent on this computer that you talk to through a chat gateway (Hermes with Slack on your phone, for one) works
   today, as long as the computer is awake, SmedCover is open and its endpoint is on.
 - It has not been tried with Hermes or OpenClaw yet. The tools' schemas avoid `$ref` and a top-level `anyOf`, but a few
@@ -220,7 +224,7 @@ The token is a secret an agent shows with every request, as `Authorization: Bear
 
 - The endpoint listens on 127.0.0.1 alone, so other computers, on your Wi-Fi or elsewhere, cannot reach it.
 - Web pages cannot use it. It refuses a request whose `Host` or `Origin` is not this computer's (403) and sends no CORS
-  headers, so a browser never sends it a page's call.
+  headers, so a page's call is refused (403 for a foreign `Origin`, 415 for a loopback one) or never sent.
 - SmedCover's own window cannot use it either. Every request the app sends for its page carries `X-SmedCover-Page`,
   which the endpoint refuses, and the app refuses to send the page's requests to this computer at the endpoint's port.
 
@@ -235,14 +239,17 @@ and WSL, and sandboxed apps allowed the network. Through it a program can:
 
 Turn it on when:
 
-- The computer is shared: another user account on this Mac stays logged in alongside yours (Fast User Switching), or
-  someone logs in remotely with an account of their own (SSH, or Screen Sharing as another user).
+- The computer is shared: another account is signed in alongside yours (Fast User Switching on a Mac, *Switch user* on
+  Windows, another session on Linux); someone signs in remotely with an account of their own (SSH, Remote Desktop,
+  Screen Sharing as another user); or services you installed run under accounts of their own (a web server, a
+  database), even with nobody signed in.
 - It runs containers, virtual machines (or WSL) or apps you do not trust.
 
 Not reasons to turn it on: other people using your own account (they can open SmedCover itself, and read `mcp.json`);
-other computers on your Wi-Fi (they cannot reach 127.0.0.1); web pages (kept out either way). A quick check: System
-Settings → Users & Groups. If yours is the only account there and no one logs in to this computer remotely, the first
-reason does not apply.
+other computers on your Wi-Fi (they cannot reach 127.0.0.1); web pages (kept out either way).
+
+A quick look at the accounts: on macOS, System Settings → Users & Groups; on Windows, Settings → Accounts → Other
+users; on Linux, `who` for who is signed in and `getent passwd` for service accounts.
 
 While it is on:
 
@@ -260,7 +267,7 @@ The lines with a token (`smc_…` stands for yours):
 claude mcp add --transport http --scope user smedcover http://127.0.0.1:25277/mcp --header "Authorization: Bearer smc_…"
 ```
 
-Codex reads the token from an environment variable, not from `config.toml`:
+SmedCover's lines have Codex read the token from an environment variable, so it is not kept in `config.toml`:
 
 ```toml
 [mcp_servers.smedcover]
@@ -314,6 +321,24 @@ OpenClaw keeps headers on the server entry:
 openclaw mcp set smedcover '{"url":"http://127.0.0.1:25277/mcp","transport":"streamable-http","requestTimeoutMs":1800000,"headers":{"Authorization":"Bearer smc_…"}}'
 ```
 
+A stdio-only client through `mcp-remote` sends the header with `--header`. Written as below, with no space in `args`
+and the token in `env`, it also works where Cursor, Codex CLI and Claude Desktop on Windows mangle spaces in
+arguments ([mcp-remote's README](https://github.com/geelen/mcp-remote)):
+
+```json
+{
+  "mcpServers": {
+    "smedcover": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:25277/mcp", "--header", "Authorization:${SMEDCOVER_AUTH}"],
+      "env": {
+        "SMEDCOVER_AUTH": "Bearer smc_…"
+      }
+    }
+  }
+}
+```
+
 A SmedCover server (`smedcover serve`, planned) will always want a token: an endpoint serving a server's tools lets no
 one in without one.
 
@@ -348,7 +373,8 @@ SmedCover tells the agent how it works when it connects (MCP's instructions). A 
   open, or while an export you started runs. It goes ahead once your hands have been off the window for 400 ms. After
   30 seconds of waiting (10 for a read) it answers `busy`, and the agent tries again shortly. So close Settings while an
   agent works.
-- What you do waits while an agent's step runs.
+- You wait while an agent's step runs: the window takes no input until it is done (keys, pastes and the wheel are
+  swallowed, not replayed).
 
 ### Undo
 
@@ -356,7 +382,8 @@ SmedCover tells the agent how it works when it connects (MCP's instructions). A 
 - `undo` and `redo` step through that same history, yours and the agent's alike.
 - `select_layer` is no step; `export` and `batch_covers` make no step and do not change the covers in the window.
 - A call that fails part-way is rolled back: the cover and the history as they were (photos it put in the library
-  stay).
+  stay). If it had switched to another channel or profile, the switch stays, and the cover there goes back to how it
+  was on arriving.
 - A switch to another channel or profile starts that one's own history, as it does when you switch.
 
 ### Timeouts, progress and cancelling
@@ -377,7 +404,9 @@ starts it again; no call takes more than two hours.
 - A call that names a `progressToken` is told how it gets on: waiting for you or for another call, each file of an
   export, each hand dealt, a cut-out every 5 seconds.
 - When the agent cancels a call, or hangs up: a call still waiting never runs; one running is told at once (an export
-  stops between two files) and let go of a second later.
+  stops between two files) and let go of a second later. Hanging up always cancels. A client of the older revisions
+  cancels with `notifications/cancelled` in a request of its own, which, without sessions, is acted on only when it can
+  be tied to exactly one call; otherwise it is ignored and the call runs to its end.
 - While the window is starting or reloading, a call waits up to 30 seconds for it.
 
 ### What comes back
@@ -385,13 +414,16 @@ starts it again; no call takes more than two hours.
 - A result has a text block (by default the structured answer as JSON) and `structuredContent`, which the tool's
   `outputSchema` describes.
 - `render_preview` and `surprise` return PNG images as image content.
-- A failure is a tool error with a sentence for the model: `invalid_arguments`, `not_allowed`, `busy`, `unavailable`
-  or `failed`. An unknown tool is a protocol error.
+- A failure reaches the agent as a tool error (`isError`) with one sentence for the model. Behind it is one of the
+  page's kinds (`invalid_arguments`, `not_allowed`, `busy`, `unavailable`, `failed`) or the endpoint's own: the window
+  not ready, gone, quiet past the tool's timeout, or 16 calls already in hand. An unknown tool is a protocol error.
 
 ### Protocol
 
 - Streamable HTTP: `POST /mcp` only (`GET` and `DELETE` answer 405), without sessions. Answers come as server-sent
-  events, a keep-alive every 15 seconds, so a long call is not cut off by a client's wait for headers.
+  events, a keep-alive every 15 seconds once the headers are out, so a long call is not cut off by a client's wait for
+  headers. In the 2026-07-28 revision the headers go out early only when the call names a `progressToken`; otherwise
+  they come with the result.
 - Revisions: 2026-07-28 (`server/discover`, every request on its own), and 2025-03-26, 2025-06-18 and 2025-11-25 through
   `initialize` (a request with no `MCP-Protocol-Version` is taken as 2025-03-26). Not served: 2024-11-05's HTTP with SSE,
   and JSON-RPC batches.
@@ -436,7 +468,7 @@ Arguments in bold are required. A tool that changes something is one step of und
 | `set_layer_effect` | A headline's text effect (the title, the subtitle or a text layer). Effects that need glyph outlines are refused where the host has none. | `profile`, `channel`, **`layer`**, `effect` (one of 19; `auto`: the look's), `amount` (0–2), `reshuffle`, `outline` (0–2), `shadow` (0–2) | |
 | `set_layer_font` | A lettering layer's font (installed, bundled or imported; `""` for the look's own), and/or set in columns. | `profile`, `channel`, **`layer`**, `font`, `vertical` | |
 | `set_layer_bend` | Bends a headline. | `profile`, `channel`, **`layer`**, **`bend`** (`none`, `arc`, `arcLow`, `circle`, `shell`, `bulge`, `pinch`, `fisheye`, `rise`, `taper`, `wave`, `flag`), `amount` (0–2, default 1) | |
-| `set_layer_color` | A layer's colours, each `#rrggbb` or `auto` (the look's): the words, the highlights, the plates under them; a vector asset following the channel colour; a solid's colour. | `profile`, `channel`, **`layer`**, `ink`, `hi`, `plate`, `plateInk`, `hiPlateInk`, `tint`, `color` | |
+| `set_layer_color` | A layer's colours. `ink` (a lettering layer's words; a photo's outline; a vector asset's colour), `hi` (the highlighted words), `plateInk` (the plate under the words) and `hiPlateInk` (the plates or marks under the highlights): each `#rrggbb` or `auto` (the look's). `plate`: true or false, a plate under a headline's or the channel name's words. `tint`: true or false, a vector asset following the channel colour. `color`: a solid layer's `#rrggbb`. | `profile`, `channel`, **`layer`**, `ink`, `hi`, `plate`, `plateInk`, `hiPlateInk`, `tint`, `color` | |
 
 ### Layers
 
@@ -555,8 +587,10 @@ files an agent names), §10.6 (the endpoint), §11.1 (the tools, the commands an
 - `cargo test --workspace` (`npm run test:rust`): the tool list, the token, `mcp.json`, the dispatcher, the app's side;
   and `core/tests/mcp_http.rs`, the endpoint over real HTTP on a free port: both protocol eras, rmcp's own client, the
   token, `Host`, `Origin` and the page's marker, progress, cancelling, bodies, stopping.
-- `cargo run -p smedcover-core --example mcp_echo` serves the test tools with a page that says back what it is asked,
-  to try a client against.
+- `cargo run -p smedcover-core --example mcp_echo -- [port] [seconds]`, to try a client against: it serves the four
+  tools of the test fixture (`core/tests/fixtures/tools.json`), not the app's 31, with a page that says back what it is
+  asked, on a free port unless told. It always wants a token: it prints its address and the path of a file only you
+  can read that holds the header, for `curl -H @<file>`, and stops after 300 seconds unless told otherwise.
 - The self-test, `SMEDCOVER_SELFTEST=<folder>`, with `SMEDCOVER_SELFTEST_AGENT=1` calls the tools through the window's
   dispatcher, and with `SMEDCOVER_SELFTEST_MCP=1` too the app's own endpoint over HTTP, on a free port, with and without a
   token. `SMEDCOVER_SELFTEST_STAY=1` runs no self-test: the app keeps its data in that folder and otherwise runs as
@@ -566,21 +600,21 @@ files an agent names), §10.6 (the endpoint), §11.1 (the tools, the commands an
 
 `smedcover serve` will run the same core with a headless Chromium opening the same `ui/` (the `"server"` host), serving
 `/mcp` for agents and `/invoke` for the page's commands, on 127.0.0.1 and always with a token, for an agent on the same
-server (talked to from a phone through Slack, say). The desktop-only tools are not offered there. See [TODO.md](TODO.md).
+server (talked to from a phone through Slack, say). The desktop-only tools are not offered on a server. See [TODO.md](TODO.md).
 
 ## Troubleshooting
 
 | What you see | Why, and what to do |
 |---|---|
 | 401 `Unauthorized: SmedCover wants the token …` | *Require a token* is on and the agent sent no token, or another one. Set the agent up again with the lines from *Connect an agent* (after *New token*, with the new one). For Codex, check `SMEDCOVER_TOKEN` is set in the terminal Codex starts from. |
-| 403 `Forbidden: Host header is not allowed` | The request named the computer otherwise than `127.0.0.1`, `localhost` or `[::1]`: an agent in a Docker container (`host.docker.internal`), or an address on the network. Run the agent on this computer and use `http://127.0.0.1:<port>/mcp`. |
+| 403 `Forbidden: Host header is not allowed` | The request's `Host` was not `127.0.0.1`, `localhost` or `[::1]`: an agent in a Docker container (`host.docker.internal`), or an address on the network. Run the agent on this computer and use `http://127.0.0.1:<port>/mcp`. |
 | 403 `Forbidden: Origin header is not allowed` | A browser page (or a web view) made the request. That is refused by design. |
 | 413 `Payload Too Large` | The request was over 32 MiB, usually a photo or a project sent whole. Give `add_photo` a `path` or `url`, and `open_project` a `file`. |
 | The page says *Another program uses port …* | Pick another port and *Apply*, then set the agent up again with the new lines; or close the program that has the port. |
 | The page says *Its settings could not be read* | `mcp.json` cannot be read (check its owner and permissions in the data folder). Nothing is written over it until it can be; then turn the switch on again. |
 | Nothing listens after a restart | The switch is kept in `mcp.json`, so check the page: off means it was turned off (or `mcp.json` was not JSON and was started over, which also made a new token); an error says why. |
 | The agent times out on a long call | Raise its timeout: Codex `tool_timeout_sec = 1800`, OpenClaw `requestTimeoutMs`, Hermes `timeout`. When a client gives up, SmedCover cancels the call: what it changed so far stays as one step; have the agent check with `get_cover`. |
-| `SmedCover is busy: …` | You were in the middle of something (Settings open, a dialog, typing, a drag) for 30 seconds. Finish it, or close Settings, and let the agent try again. |
+| `SmedCover is busy: …` | You were in the middle of something (Settings open, a dialog, typing, a drag) for as long as the call waits: 30 seconds for a change, 10 for a read. Finish it, or close Settings, and let the agent try again. |
 | `SmedCover's window is not ready …` | The window is starting, reloading or showing the first-start welcome. Finish the welcome, wait a moment, and try again. |
 | `… the change may or may not have been applied` | The window reloaded or closed, or went quiet past the tool's timeout, while a call ran. Look at the window (or have the agent call `get_cover`) before going on. |
 | *An agent is working…* stays | After 20 seconds the pill offers *Stop waiting* (or press Esc): the window is yours again and the agent is told the step did not finish. A call is also given up by itself when nothing is heard from it for its timeout. What it changed stays as one step: undo it if you do not want it. |

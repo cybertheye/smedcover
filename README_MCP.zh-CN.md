@@ -127,7 +127,7 @@ mcp_servers:
 hermes mcp test smedcover
 ```
 
-Hermes 给一个服务器的工具调用的超时是同一项下的 `timeout`。它的[文档](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp) 没写默认值，也没写单位；批量出图或导出超时的话，就把它调大。
+Hermes 里，这个服务器的工具调用超时由同一项下的 `timeout` 设定。它的[文档](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp)没写默认值，也没写单位；批量出图或导出超时的话，就把它调大。
 
 ### OpenClaw
 
@@ -168,7 +168,7 @@ curl http://127.0.0.1:25277/health
 # {"name":"smedcover","version":"…","page":"ready"}
 ```
 
-窗口能接调用时 `page` 是 `ready`，正在启动或重新加载时是 `loading`。然后让 agent 做件具体的事，比如：
+窗口能接调用时 `page` 是 `ready`，正在启动或重新加载时是 `loading`。让 agent 改东西之前，先把「设置」关上：「设置」开着时，agent 的改动会等你，等 30 秒还不行就回答 `busy`。然后让 agent 做件具体的事，比如：
 
 - 「做这周的封面：标题《雨夜东京漫步》，用夜景风格，给我看个预览。」
 - 「把桌面上的 `shot.jpg` 放到 VLOG 频道的封面上当背景，抠出主体让它站在标题前面，给我看 16:9 和 9:16 两个尺寸。」
@@ -178,7 +178,7 @@ curl http://127.0.0.1:25277/health
 
 - agent 必须在同一台电脑上运行：接口只听 127.0.0.1。
 - 别的机器上的 agent（比如 VPS 上的）连不上。计划中的服务器就是为这种情况做的：让 SmedCover 和 agent 跑在同一台服务器上。
-- Docker 容器里的 agent 现在会收到 403：它用 `host.docker.internal` 这个名字连到电脑，而接口只认 `127.0.0.1`、`localhost` 和 `[::1]` 这几个 `Host`。
+- Docker Desktop 容器里的 agent 客户端一般会收到 403：它用 `host.docker.internal` 这个名字称呼这台电脑，而接口只认 `127.0.0.1`、`localhost` 和 `[::1]` 这几个 `Host`。这只挡得住普通的客户端：容器里的程序自己发 `Host: 127.0.0.1` 就能进来，「要求令牌」就是为这种情况准备的。在 Linux 上，Docker Engine 桥接网络里的容器根本连不到接口；用 `--network host` 的容器，和这台电脑上的程序一样能用。
 - 在这台电脑上运行、你通过聊天网关和它对话的 agent（比如 Hermes 加手机上的 Slack），现在就能用，只要电脑醒着、SmedCover 开着、接口开着。
 - 还没有实际用 Hermes 和 OpenClaw 试过。工具的参数结构没有用 `$ref`，顶层也没有 `anyOf`，但有几个参数可以有两种写法（`"all"` 或一个列表；频道写名字或序号）；每种模型是不是都照单全收（比如 Gemini 对 JSON Schema 的要求更严），还要再查。
 
@@ -187,7 +187,7 @@ curl http://127.0.0.1:25277/health
 令牌是 agent 每次请求都要出示的一个密钥，写法是 `Authorization: Bearer smc_…`。默认不要求（Figma 的桌面应用也是这样），因为：
 
 - 接口只听 127.0.0.1，别的电脑（同一个 Wi-Fi 上的也一样）连不上。
-- 网页用不了它。`Host` 或 `Origin` 不是这台电脑的请求，它一律拒绝（403）；它也不发 CORS 头，浏览器不会替网页把调用发过来。
+- 网页用不了它。`Host` 或 `Origin` 不是这台电脑的请求，它一律拒绝（403）；它也不发 CORS 头，所以网页的调用要么被拒绝（`Origin` 是外面的回 403，是本机的回 415），要么根本发不出来。
 - SmedCover 自己的窗口也用不了它。应用替页面发的每个请求都带 `X-SmedCover-Page`，接口一见就拒绝；而且发往这台电脑上接口端口的页面请求，应用根本不发。
 
 不要求令牌时，这台电脑上的其他程序能做什么：凡是能连到 127.0.0.1 的程序，都不用令牌就能用这个接口——你自己的程序，也包括这台电脑上其他账户的程序、容器（Docker 之类）、虚拟机和 WSL，以及允许联网的沙盒应用。通过它，程序能：
@@ -199,10 +199,12 @@ curl http://127.0.0.1:25277/health
 
 这些时候请打开：
 
-- 电脑有别人用：这台 Mac 上另一个账户和你的同时登录着（快速用户切换），或者有人用他自己的账户远程登录（SSH，或以另一个用户身份屏幕共享）。
+- 电脑有别人用：另一个账户和你的同时登录着（Mac 上的快速用户切换、Windows 上的「切换用户」、Linux 上的另一个会话）；有人用他自己的账户远程登录（SSH、远程桌面，或以另一个用户身份屏幕共享）；或者你装的服务用它自己的账户运行（比如网站服务器、数据库），哪怕没有人登录。
 - 电脑上跑着你不放心的容器、虚拟机（或 WSL）或应用。
 
-这些不是打开的理由：别人用的是你自己的账户（他本来就能打开 SmedCover，也能读 `mcp.json`）；同一个 Wi-Fi 上的其他电脑（它们连不到 127.0.0.1）；网页（不管开不开都进不来）。简单查一下：打开「系统设置 → 用户与群组」，如果那里只有你一个账户，也没有人远程登录这台电脑，第一条就不用担心。
+这些不是打开的理由：别人用的是你自己的账户（他本来就能打开 SmedCover，也能读 `mcp.json`）；同一个 Wi-Fi 上的其他电脑（它们连不到 127.0.0.1）；网页（不管开不开都进不来）。
+
+查一下有哪些账户：macOS 看「系统设置 → 用户与群组」；Windows 看「设置 → 账户 → 其他用户」；Linux 用 `who` 看谁登录着，用 `getent passwd` 看服务账户。
 
 打开以后：
 
@@ -217,7 +219,7 @@ curl http://127.0.0.1:25277/health
 claude mcp add --transport http --scope user smedcover http://127.0.0.1:25277/mcp --header "Authorization: Bearer smc_…"
 ```
 
-Codex 从环境变量读令牌，不写进 `config.toml`：
+SmedCover 给出的配置让 Codex 从环境变量读令牌，所以令牌不写进 `config.toml`：
 
 ```toml
 [mcp_servers.smedcover]
@@ -271,6 +273,22 @@ OpenClaw 把请求头写在这一项里：
 openclaw mcp set smedcover '{"url":"http://127.0.0.1:25277/mcp","transport":"streamable-http","requestTimeoutMs":1800000,"headers":{"Authorization":"Bearer smc_…"}}'
 ```
 
+只支持 stdio 的客户端经 `mcp-remote` 连接时，用 `--header` 带上请求头。照下面这样写，`args` 里不留空格，令牌放在 `env` 里，在 Cursor、Codex CLI 和 Windows 上的 Claude Desktop 这些会把参数里的空格弄乱的客户端里也能用（见 [mcp-remote 的 README](https://github.com/geelen/mcp-remote)）：
+
+```json
+{
+  "mcpServers": {
+    "smedcover": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:25277/mcp", "--header", "Authorization:${SMEDCOVER_AUTH}"],
+      "env": {
+        "SMEDCOVER_AUTH": "Bearer smc_…"
+      }
+    }
+  }
+}
+```
+
 SmedCover 的服务器（`smedcover serve`，计划中）会一直要求令牌：提供服务器那套工具的接口，没有令牌谁也进不来。
 
 ## 一次会话怎么进行
@@ -295,14 +313,14 @@ agent 连上时，SmedCover 会先告诉它怎么用（MCP 的 instructions）�
 
 - 调用一次只做一个，按来的顺序。排在别的调用后面的，每 5 秒告诉 agent 一次它在等。
 - 你正忙着的时候，agent 的调用等你：按着、拖着、打字，开着对话框或问题，开着「你看着办」的窗口。改东西的调用还要等「设置」、逐字窗口、裁切窗口、穿插窗口和穿插笔刷关掉，以及你自己开始的导出做完。你的手离开窗口 400 毫秒后它才开始。等了 30 秒（读的工具等 10 秒）还不行，就回答 `busy`，agent 过一会儿再试。所以 agent 工作时请把「设置」关上。
-- agent 的一步进行时，你的操作等它。
+- agent 的一步进行时，你等它：这一步做完之前，窗口不接受任何输入（按键、粘贴和滚轮都被吞掉，事后也不补上）。
 
 ### 撤销
 
 - 每个改了封面的调用，是窗口历史里的一步撤销；什么都没改的，不算一步。
 - `undo` 和 `redo` 走的就是这同一份历史，你的步骤和 agent 的步骤都在里面。
 - `select_layer` 不算一步；`export` 和 `batch_covers` 不算一步，也不改窗口里的封面。
-- 调用做到一半失败，会退回去：封面和历史都回到之前的样子（它放进位图库的照片留着）。
+- 调用做到一半失败，会退回去：封面和历史都回到之前的样子（它放进位图库的照片留着）。如果它已经切到了别的频道或档案，就留在那里，那里的封面回到刚切过去时的样子。
 - 切到别的频道或档案，就从那里自己的历史开始，和你自己切换时一样。
 
 ### 超时、进度和取消
@@ -319,18 +337,18 @@ agent 连上时，SmedCover 会先告诉它怎么用（MCP 的 instructions）�
 
 - 被放弃的调用回答失败，窗口还给你，下一个调用开始。它已经改了的留着，算一步，可以撤销；agent 会被提醒先用 `get_cover` 看一下再继续。
 - 带了 `progressToken` 的调用会收到进度：在等你或等别的调用、导出的每个文件、抽出的每一手、抠图时每 5 秒一次。
-- agent 取消调用或者断开时：还在排队的不再运行；正在运行的马上知道（导出在两个文件之间停下），一秒后被放掉。
+- agent 取消调用或者断开时：还在排队的不再运行；正在运行的马上知道（导出在两个文件之间停下），一秒后不再等它。断开连接一定会取消调用。旧版本协议的客户端另发一个 `notifications/cancelled` 请求来取消，因为不用会话，只有能确定它指的是哪一个调用时才照办，否则不理，那个调用一直做到完。
 - 窗口正在启动或重新加载时，调用最多等它 30 秒。
 
 ### 返回什么
 
 - 结果里有一段文字（默认是结构化结果的 JSON）和 `structuredContent`，后者的结构由工具的 `outputSchema` 说明。
 - `render_preview` 和 `surprise` 还返回 PNG 图片（MCP 的 image content）。
-- 失败时是工具错误，附一句给模型看的话：`invalid_arguments`、`not_allowed`、`busy`、`unavailable` 或 `failed`。不存在的工具是协议错误。
+- 失败时，agent 收到的是工具错误（`isError`），附一句给模型看的话。背后是页面的几种情况（`invalid_arguments`、`not_allowed`、`busy`、`unavailable`、`failed`），或者接口自己的：窗口没准备好、窗口没了、沉默超过了工具的时限、手上已经有 16 个调用。不存在的工具是协议错误。
 
 ### 协议
 
-- Streamable HTTP：只收 `POST /mcp`（`GET`、`DELETE` 回 405），不用会话。回答用服务器推送事件（SSE），每 15 秒一条保活，所以长的调用不会因为客户端等不到响应头而被掐断。
+- Streamable HTTP：只收 `POST /mcp`（`GET`、`DELETE` 回 405），不用会话。回答用服务器推送事件（SSE），响应头发出后每 15 秒一条保活，所以长的调用不会因为客户端等不到响应头而被掐断。在 2026-07-28 版本里，只有带 `progressToken` 的调用响应头才会提前发出；不带的，响应头和结果一起到。
 - 支持的版本：2026-07-28（`server/discover`，每个请求各自独立），以及通过 `initialize` 握手的 2025-03-26、2025-06-18、2025-11-25（没带 `MCP-Protocol-Version` 的请求按 2025-03-26 算）。不支持：2024-11-05 的 HTTP+SSE，以及 JSON-RPC 批量请求。
 - 一个请求最大 32 MiB；一个结果最多 16 张图、48 MB；同时最多处理 16 个调用。
 
@@ -368,7 +386,7 @@ agent 连上时，SmedCover 会先告诉它怎么用（MCP 的 instructions）�
 | `set_layer_effect` | 改标题类图层（标题、副标题或文字图层）的文字效果。需要字形轮廓的效果，在没有轮廓的宿主上会被拒绝。 | `profile`、`channel`、**`layer`**、`effect`（19 个之一；`auto` 跟风格走）、`amount`（0–2）、`reshuffle`、`outline`（0–2）、`shadow`（0–2） | |
 | `set_layer_font` | 改文字图层的字体（已安装、内置或导入的；`""` 用风格自己的），和/或改成竖排。 | `profile`、`channel`、**`layer`**、`font`、`vertical` | |
 | `set_layer_bend` | 给标题类图层变形。 | `profile`、`channel`、**`layer`**、**`bend`**（`none`、`arc`、`arcLow`、`circle`、`shell`、`bulge`、`pinch`、`fisheye`、`rise`、`taper`、`wave`、`flag`）、`amount`（0–2，默认 1） | |
-| `set_layer_color` | 改图层的颜色，每项写 `#rrggbb` 或 `auto`（跟风格走）：文字、强调的词、文字下面的底板；矢量素材跟不跟频道色；纯色图层的颜色。 | `profile`、`channel`、**`layer`**、`ink`、`hi`、`plate`、`plateInk`、`hiPlateInk`、`tint`、`color` | |
+| `set_layer_color` | 改图层的颜色。`ink`（文字图层的字；照片的描边；矢量素材的颜色）、`hi`（强调的词）、`plateInk`（字下面的底板）和 `hiPlateInk`（强调的词下面的底板或标记）：每项写 `#rrggbb` 或 `auto`（跟风格走）。`plate`：true 或 false，标题类图层或频道名的字下面要不要底板。`tint`：true 或 false，矢量素材跟不跟频道色。`color`：纯色图层的 `#rrggbb`。 | `profile`、`channel`、**`layer`**、`ink`、`hi`、`plate`、`plateInk`、`hiPlateInk`、`tint`、`color` | |
 
 ### 图层
 
@@ -472,26 +490,26 @@ flowchart TD
 
 - `npm test`：工具定义和 `ui/tools.json` 是否最新、参数检查、在替身 `API` 上跑命令、排队和调度器（`tests/agent.test.mjs`），桌面的传输和接入配置（`tests/mcp.test.mjs`）。
 - `cargo test --workspace`（`npm run test:rust`）：工具清单、令牌、`mcp.json`、调度器、应用这边；以及 `core/tests/mcp_http.rs`，在一个空闲端口上通过真正的 HTTP 测接口：协议的两个时代、rmcp 自己的客户端、令牌、`Host`、`Origin` 和页面的标记、进度、取消、请求体、停止。
-- `cargo run -p smedcover-core --example mcp_echo` 用一个把问题原样说回来的页面提供测试工具，可以拿客户端来试。
+- `cargo run -p smedcover-core --example mcp_echo -- [端口] [秒数]`，可以拿客户端来试：它用一个把问题原样说回来的页面，提供测试用的四个工具（`core/tests/fixtures/tools.json`，不是应用的 31 个），不指定端口就用一个空闲的。它一定要令牌：会打印出地址，以及一个只有你能读、装着请求头的文件的路径，给 `curl -H @<文件>` 用；不另外指定，300 秒后停下。
 - 自检 `SMEDCOVER_SELFTEST=<文件夹>`：加 `SMEDCOVER_SELFTEST_AGENT=1` 时经窗口的调度器调用工具，再加 `SMEDCOVER_SELFTEST_MCP=1` 时还在空闲端口上通过 HTTP 调用应用自己的接口，带令牌和不带令牌都试。`SMEDCOVER_SELFTEST_STAY=1` 不跑自检：应用把数据放在那个文件夹里，其余照常运行，可以用 `curl` 手动试接口，不碰你的数据。
 
 ### 服务器模式（计划中）
 
-`smedcover serve` 会用同一个核心库，加一个无头 Chromium 打开同一份 `ui/`（`"server"` 宿主），提供给 agent 的 `/mcp` 和给页面命令用的 `/invoke`，只听 127.0.0.1，一定要令牌；给同一台服务器上的 agent 用（比如你在手机上通过 Slack 和它聊）。只在桌面应用里的工具那里没有。见 [TODO.md](TODO.md)。
+`smedcover serve` 会用同一个核心库，加一个无头 Chromium 打开同一份 `ui/`（`"server"` 宿主），提供给 agent 的 `/mcp` 和给页面命令用的 `/invoke`，只听 127.0.0.1，一定要令牌；给同一台服务器上的 agent 用（比如你在手机上通过 Slack 和它聊）。服务器上不提供只在桌面应用里的工具。见 [TODO.md](TODO.md)。
 
 ## 排查问题
 
 | 看到什么 | 原因和办法 |
 |---|---|
 | 401 `Unauthorized: SmedCover wants the token …` | 打开了「要求令牌」，agent 没带令牌或带错了。用「连接 agent」里的配置重新配置一次（换过新令牌的，用新的）。Codex 要检查启动它的终端里有没有设 `SMEDCOVER_TOKEN`。 |
-| 403 `Forbidden: Host header is not allowed` | 请求没用 `127.0.0.1`、`localhost` 或 `[::1]` 来称呼这台电脑：比如 Docker 容器里的 agent（`host.docker.internal`），或者用了局域网地址。让 agent 在这台电脑上运行，地址用 `http://127.0.0.1:<端口>/mcp`。 |
+| 403 `Forbidden: Host header is not allowed` | 请求的 Host 不是 `127.0.0.1`、`localhost` 或 `[::1]`：比如 Docker 容器里的 agent（`host.docker.internal`），或者用了局域网地址。让 agent 在这台电脑上运行，地址用 `http://127.0.0.1:<端口>/mcp`。 |
 | 403 `Forbidden: Origin header is not allowed` | 请求来自浏览器里的网页（或某个网页视图）。这是故意拒绝的。 |
 | 413 `Payload Too Large` | 请求超过了 32 MiB，通常是整张照片或整个工程直接塞进了请求。`add_photo` 改用 `path` 或 `url`，`open_project` 改用 `file`。 |
 | 页面上写「端口 … 已经被别的程序占用了」 | 换一个端口点「应用」，再用新的配置重新配置 agent；或者关掉占着端口的程序。 |
 | 页面上写「接口的设置读不了」 | `mcp.json` 读不了（看看数据目录里它的所有者和权限）。能读之前不会往它上面写东西；能读了以后，把开关再打开一次。 |
 | 重启之后接口没在听 | 开关记在 `mcp.json` 里，先看页面：如果是「未开启」，说明它被关掉了（或者 `mcp.json` 不是 JSON，被从头来过，这时令牌也换了新的）；如果出错，页面会写原因。 |
 | agent 在长的调用上超时 | 调大它的超时：Codex 的 `tool_timeout_sec = 1800`，OpenClaw 的 `requestTimeoutMs`，Hermes 的 `timeout`。客户端放弃时，SmedCover 会取消这个调用：已经改了的留着，算一步；让 agent 先用 `get_cover` 看一下。 |
-| `SmedCover is busy: …` | 你手上的事（开着「设置」、对话框，正在打字、拖动）持续了 30 秒。做完它或者关上「设置」，让 agent 再试。 |
+| `SmedCover is busy: …` | 你手上的事（开着「设置」、对话框，正在打字、拖动）一直没完，超过了调用肯等的时间：改的调用等 30 秒，读的调用等 10 秒。做完它或者关上「设置」，让 agent 再试。 |
 | `SmedCover's window is not ready …` | 窗口正在启动、重新加载，或者显示着第一次启动的欢迎页。完成欢迎页，等一下再试。 |
 | `… the change may or may not have been applied` | 调用进行时窗口重新加载或关掉了，或者沉默超过了工具的时限。先看看窗口（或者让 agent 调用 `get_cover`）再继续。 |
 | 「Agent 正在操作…」一直不消失 | 20 秒后小条会给出「不等了」（也可以按 Esc）：窗口还给你，agent 会收到这一步没做完。调用在超过时限没有消息时也会自己被放掉。它已经改了的留着，算一步，不想要就撤销。 |
