@@ -393,7 +393,7 @@
     {
       "name": "list_options",
       "title": "List options",
-      "description": "The values other tools accept. Returns looks (id, name, its kinds, a line on what it is drawn like and what it is for, oneTheme when it has a single ground, seeded when it scatters things at random), text effects (id, name, kind, seeded, needsOutlines, available here), bends, fonts (bundled, imported, installed: filtered by fontQuery, at most 200 listed; latin: those that cannot set Chinese), the platforms and the ratios their covers use, size presets, and Surprise me's locks. look: one look alone, all of it — what it is in full, its settings (key, range, step, default: set_look's params) and its scene objects. `only` limits the answer to some of these groups (with look and no only: the looks alone).",
+      "description": "The values other tools accept. Returns looks (id, name, its kinds, a line on what it is drawn like and what it is for, oneTheme when it has a single ground, seeded when it scatters things at random), text effects (id, name, kind, seeded, needsOutlines, available here), bends, fonts (bundled, imported, installed: filtered by fontQuery, at most 200 listed; latin: those listed that cannot set Chinese), the platforms and the ratios their covers use, size presets, and Surprise me's locks. look: one look alone, all of it — what it is in full, its settings (key, range, step, default: set_look's params) and its scene objects. `only` limits the answer to some of these groups (with look and no only: the looks alone).",
       "inputSchema": {
         "type": "object",
         "properties": {

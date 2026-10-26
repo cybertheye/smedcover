@@ -340,6 +340,17 @@ test("the read-only commands answer from the state as it is, and read another ch
   const opts = (await cmds.list_options({ only: ["fonts", "effects"], fontQuery: "ping" })).structuredContent;
   assert.deepEqual(Object.keys(opts).sort(), ["effects", "fonts"]);
   assert.deepEqual(opts.fonts.system, ["PingFang SC"]); assert.equal(opts.fonts.systemTotal, 3); assert.deepEqual(opts.fonts.imported, ["My Font"]);
+  assert.deepEqual(opts.fonts.latin, ["Bebas Neue"], "latin: of those listed (Helvetica, filtered out, is not)");
+  { // a well-stocked computer: 700 installed, most without Chinese; the answer lists 200 of them, and latin no more than it lists
+    const keep = [S.systemFonts, S.latinFonts];
+    S.systemFonts = Array.from({ length: 700 }, (_, i) => `Installed Family Number ${String(i).padStart(3, "0")}`); S.latinFonts = new Set([...S.systemFonts.slice(0, 650), "Bebas Neue"]);
+    const many = (await cmds.list_options({})).structuredContent, fonts = many.fonts;
+    assert.deepEqual([fonts.system.length, fonts.systemMatched, fonts.systemTotal], [200, 700, 700]);
+    assert.ok(fonts.latin.every((f) => fonts.system.includes(f) || fonts.bundled.includes(f)) && fonts.latin.length === 201, `${fonts.latin.length} latin`);
+    assert.ok(JSON.stringify(fonts).length < 16000, `the fonts are ${JSON.stringify(fonts).length} characters`);
+    assert.ok(JSON.stringify(many).length < 24000, `list_options is ${JSON.stringify(many).length} characters`);
+    [S.systemFonts, S.latinFonts] = keep;
+  }
   assert.deepEqual(opts.effects.find((e) => e.id === "spiky"), { id: "spiky", name: "Spiky", kind: "outline", seeded: true, needsOutlines: true, available: false });
   // every look in a line, its settings only when it is asked for alone: the whole answer a few thousand tokens, not sixteen
   const all = (await cmds.list_options({})).structuredContent, size = JSON.stringify(all).length;

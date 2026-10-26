@@ -311,8 +311,9 @@ export function makeCommands(api) {
       if (want.has("effects")) out.effects = Object.entries(EFFECTS).map(([id, e]) => ({ id, name: e.name.en, kind: e.kind, seeded: !!e.seeded, needsOutlines: e.kind === "outline", available: api.CAN.outlines || e.kind !== "outline" }));
       if (want.has("bends")) out.bends = [{ id: "none", name: "None" }, ...BEND_IDS.map((id) => ({ id, name: BENDS[id].name.en }))];
       if (want.has("fonts")) {
-        const found = S.systemFonts.filter((f) => has(f, args.fontQuery));
-        out.fonts = { bundled: [...api.BUNDLED_FONTS], imported: [...S.importedFonts], system: found.slice(0, 200), systemMatched: found.length, systemTotal: S.systemFonts.length, latin: [...S.latinFonts] };
+        // latin: of the fonts this answer lists, those that cannot set Chinese (of all 700 installed, some 13 KB more)
+        const found = S.systemFonts.filter((f) => has(f, args.fontQuery)), system = found.slice(0, 200), bundled = [...api.BUNDLED_FONTS], imported = [...S.importedFonts];
+        out.fonts = { bundled, imported, system, systemMatched: found.length, systemTotal: S.systemFonts.length, latin: [...new Set([...bundled, ...imported, ...system])].filter((f) => S.latinFonts.has(f)) };
       }
       if (want.has("platforms")) out.platforms = PLATFORMS.map((p) => ({ id: p.id, name: p.name.en, wide: [...new Set(p.covers({ orient: "h", red: "3:4" }).map((c) => c.ratio))], tall: [...new Set(p.covers({ orient: "v", red: "3:4" }).map((c) => c.ratio))] }));
       if (want.has("sizes")) out.sizes = SIZE_PRESETS.map((z) => ({ key: keyOf(z), w: z.w, h: z.h, ratio: ratioText(z.w, z.h), caption: sizeCaption(z, "en") }));
