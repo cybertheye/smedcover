@@ -10,8 +10,11 @@
 //! * the commands, most of them a thin wrapper round the core's work, the slow ones run off the
 //!   main thread;
 //! * what only the desktop has: the system's dialogs, the file manager, the pointer, the self-test;
-//! * the endpoint agents call over MCP, which the window answers ([`mcp`]).
+//! * the endpoint agents call over MCP, which the window answers ([`mcp`]);
+//! * the command line's side of the app: its endpoint and `cli.json`, the launch for it
+//!   (`smedcover-app --cli`), quitting when it is done, and one app for each data folder ([`cli`]).
 
+mod cli;
 mod mcp;
 
 use std::fs;
@@ -23,7 +26,7 @@ use smedcover_core::files;
 use smedcover_core::fonts::{self, FontFaces, FontInfo};
 use smedcover_core::image::{encode, extension, parse_frame, safe_name, write_into, ExportMeta};
 use smedcover_core::outline::Outline;
-use smedcover_core::{err, net, BundledFonts, Core, Res};
+use smedcover_core::{err, net, paths, BundledFonts, Core, Res};
 use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -373,6 +376,14 @@ fn selftest_perf() -> bool {
     selftest_root().is_some() && std::env::var_os("SMEDCOVER_SELFTEST_PERF").is_some()
 }
 
+/// In self-test mode, whether a data folder with no profile starts as a first start does (SMEDCOVER_SELFTEST_WELCOME,
+/// with SMEDCOVER_SELFTEST_STAY): the welcome asks for one, and no sample profile is made; the app waits on it as it
+/// would on the user's own data folder, the command line told that SmedCover needs setting up.
+#[tauri::command]
+fn selftest_welcome() -> bool {
+    selftest_root().is_some() && std::env::var_os("SMEDCOVER_SELFTEST_WELCOME").is_some()
+}
+
 /// In self-test mode, whether to call the agent tools too (SMEDCOVER_SELFTEST_AGENT): the page's dispatcher answers
 /// every tool as an agent's calls, writing a picture, a project and exports into the self-test folder, and reports
 /// under `agent`.
@@ -433,9 +444,31 @@ fn selftest_ai() -> Option<String> {
     std::env::var("SMEDCOVER_SELFTEST_AI").ok()
 }
 
+/// The data folder: a self-test's own (`data/` in its folder), else the app data directory, as Tauri's `app_data_dir()`
+/// finds it (`paths::desktop_data_dir`, the same folder, worked out before Tauri starts so that the folder's lock is
+/// taken first). `None` if the system has none for the user.
+fn data_folder() -> Option<PathBuf> {
+    match selftest_root() {
+        Some(root) => Some(root.join("data")),
+        None => paths::desktop_data_dir(),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let launch = cli::Launch::from_args(std::env::args_os().skip(1));
+    let data = data_folder();
+    // one app for each data folder: a second one goes no further (see cli::single_instance); the lock is held till the
+    // process ends
+    let _lock = data.as_deref().and_then(|d| cli::single_instance(d, launch));
+    // whether the page will wait on the first start's welcome (a self-test's folder gets the sample profile instead)
+    let first_start = data.as_deref().is_some_and(cli::no_profile_yet) && (selftest_root().is_none() || selftest_welcome());
+    let builder = tauri::Builder::default();
+    // launched for the command line, the app does not take the focus from the one in front as it starts
+    #[cfg(target_os = "macos")]
+    let builder = builder.activate_ignoring_other_apps(!launch.cli);
+    #[allow(unused_mut)]
+    let mut app = builder
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             app_read,
@@ -454,6 +487,10 @@ pub fn run() {
             selftest_perf,
             selftest_agent,
             selftest_stay,
+            selftest_welcome,
+            cli::selftest_cli,
+            cli::app_quit,
+            cli::app_needs_setup,
             mcp::selftest_mcp,
             mcp::mcp_status,
             mcp::mcp_set,
@@ -482,10 +519,12 @@ pub fn run() {
             selftest_looks,
             selftest_done
         ])
-        .setup(|app| {
+        .setup(move |app| {
+            // The main window, made here so that a launch for the command line can leave it hidden (cli::make_window).
+            cli::make_window(app, launch, first_start)?;
             // The data folder, found once for every command: a self-test keeps its data in its own.
-            let data = match selftest_root() {
-                Some(root) => Ok(root.join("data")),
+            let data = match data.clone() {
+                Some(data) => Ok(data),
                 None => app.path().app_data_dir().map_err(err),
             };
             let core = data.and_then(|d| {
@@ -493,6 +532,12 @@ pub fn run() {
             });
             let core = match core {
                 Ok(core) => core,
+                // launched for the command line: said on stderr, the window not to be shown
+                Err(e) if launch.cli => {
+                    eprintln!("SmedCover cannot open its data folder: {e}");
+                    app.handle().exit(1);
+                    return Ok(());
+                }
                 // nothing could be kept: said, then the app quits (an error out of setup would end it with no word,
                 // the window already up); the dialog's own way, for waiting on it here would hold the main thread
                 Err(e) => {
@@ -522,6 +567,14 @@ pub fn run() {
             });
             match mcp::McpHost::open(app.handle(), core.data_dir().to_path_buf(), selftest) {
                 Ok(host) => {
+                    host.set_needs_setup(first_start);
+                    // and the command line's, whatever the user's switch says, with the cli.json it is found by
+                    match cli::CliApp::start(app.handle(), host.clone(), core.data_dir().to_path_buf(), launch) {
+                        Ok(cli) => {
+                            app.manage(cli);
+                        }
+                        Err(e) => eprintln!("SmedCover: the command line's endpoint cannot be had: {e}"),
+                    }
                     app.manage(host);
                 }
                 Err(e) => eprintln!("SmedCover: the agents' endpoint cannot be had: {e}"),
@@ -538,19 +591,35 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("error while building SmedCover")
-        .run(|app, event| match event {
-            RunEvent::WindowEvent { label, event: WindowEvent::Destroyed, .. } if label == "main" => {
-                if let Some(host) = app.try_state::<Arc<mcp::McpHost>>() {
-                    host.window_closed();
-                }
+        .expect("error while building SmedCover");
+    // launched for the command line, an accessory on macOS: no Dock icon and no menu bar, set before the event loop starts
+    // so that none shows at all (the app becomes a regular one if the user is shown its window)
+    #[cfg(target_os = "macos")]
+    if launch.cli {
+        app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    }
+    app.run(|app, event| match event {
+        RunEvent::WindowEvent { label, event: WindowEvent::Destroyed, .. } if label == "main" => {
+            if let Some(host) = app.try_state::<Arc<mcp::McpHost>>() {
+                host.window_closed();
             }
-            // the endpoint stops with the app, its port free
-            RunEvent::Exit => {
-                if let Some(host) = app.try_state::<Arc<mcp::McpHost>>() {
-                    tauri::async_runtime::block_on(host.shut());
-                }
+        }
+        // opened again from the Finder or the Dock while it runs: the command line's app is shown to the user
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen { .. } => {
+            if let Some(cli) = app.try_state::<Arc<cli::CliApp>>() {
+                cli.reopened();
             }
-            _ => {}
-        });
+        }
+        // cli.json goes, and the endpoints stop with the app, their ports free
+        RunEvent::Exit => {
+            if let Some(cli) = app.try_state::<Arc<cli::CliApp>>() {
+                cli.remove_file();
+            }
+            if let Some(host) = app.try_state::<Arc<mcp::McpHost>>() {
+                tauri::async_runtime::block_on(host.shut());
+            }
+        }
+        _ => {}
+    });
 }

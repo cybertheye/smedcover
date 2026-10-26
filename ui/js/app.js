@@ -186,13 +186,15 @@ const timers = {};
 const later = (key, ms, fn) => { clearTimeout(timers[key]); timers[key] = setTimeout(fn, ms); };
 /** The layer list, kept from one drawing of the Layers sheet to the next (renderSide fills it, the sheet shows it). */
 const layerBox = el("div", { id: "layerbox" });   // the Layers sheet (see renderSide; its layout in index.html)
-/** The profile and cover saves still waiting, by key: flushWrites() runs them at once. */
+/** The saves still waiting, by key (the profile, the covers, the settings, the AI's, a style of one's own): flushWrites() runs them at once. */
 const WRITES = {};
 const laterWrite = (key, fn) => { WRITES[key] = fn; later(key, 400, () => { delete WRITES[key]; return fn(); }); };
-/** Writes every profile and cover save still waiting, before another profile is shown or read from its files. */
+/** Writes every save still waiting: before another profile is shown or read from its files, and before the app quits. */
 function flushWrites() {
   return Promise.all(Object.keys(WRITES).map((key) => { const fn = WRITES[key]; clearTimeout(timers[key]); delete WRITES[key]; return fn(); }));
 }
+// The app is to quit (the command line that started it is done, or gone, see src-tauri/src/cli.rs): what waits to be written is written first, then it may (app_quit)
+if (HOST === "tauri" && globalThis.__TAURI__.event) globalThis.__TAURI__.event.listen("app-quit", async () => { try { await flushWrites(); } finally { invoke("app_quit").catch(() => {}); } });
 /** Saves the profile on the canvas, to its own file (the one it is, even if another is shown by the time it is written). */
 const persistProfile = () => { const p = S.profile; laterWrite(`profile:${p.id}`, () => saveProfile(p).catch(fail)); };
 /** Where a cover is kept: one file for each channel of each profile. */
@@ -201,8 +203,8 @@ const coverPath = (profileId, catId) => `covers/${profileId}/${catId}.json`;
 const persistCover = () => { const c = S.cover, id = S.profile.id; laterWrite(`cover:${id}:${c.catId}`, () => writeJson(coverPath(id, c.catId), c).catch(fail)); };
 /** Makes `c` the cover on the canvas, and the one kept for its channel. */
 const setCover = (c) => { S.cover = c; S.covers[c.catId] = c; return c; };
-const persistAi = () => later("ai", 400, () => writeJson("ai.json", S.ai).catch(fail));
-const persistImageAi = () => later("imageAi", 400, () => writeJson("image-ai.json", S.imageAi).catch(fail));
+const persistAi = () => laterWrite("ai", () => writeJson("ai.json", S.ai).catch(fail));
+const persistImageAi = () => laterWrite("imageAi", () => writeJson("image-ai.json", S.imageAi).catch(fail));
 /**
  * custom.json as the app read it (see readCustom): the modules it has besides `settings`, written back as they were
  * (the app writes only the settings), and the text of a file that was not JSON, copied to custom.json.bad before
@@ -217,7 +219,7 @@ async function writeCustom() {
   if (CUSTOM.bad != null) { await files.write("custom.json.bad", CUSTOM.bad); CUSTOM.bad = null; }
   await writeJson("custom.json", { by: CUSTOM_BY, settings: settingsToKeep(S.settings), ...CUSTOM.rest });
 }
-const persistSettings = () => later("settings", 400, () => writeCustom().catch(fail));
+const persistSettings = () => laterWrite("settings", () => writeCustom().catch(fail));
 
 const snapshot = () => JSON.stringify({ p: S.profile, c: S.cover });
 /**
@@ -2251,7 +2253,7 @@ async function refreshMyStyles() {
   if (!(document.activeElement && document.activeElement.closest && document.activeElement.closest(".repw"))) repRedraw();
 }
 addEventListener("focus", () => { if (S.cover) refreshMyStyles(); });
-const saveMyStyle = (st) => later("style-" + st.id, 400, () => files.write(`${MY_DIR}/${st.file}`, writeStyle(st.meta, st.body)).catch(fail));
+const saveMyStyle = (st) => laterWrite("style-" + st.id, () => files.write(`${MY_DIR}/${st.file}`, writeStyle(st.meta, st.body)).catch(fail));
 /** Writes a new style file of the user's own and selects it. */
 async function addStyle(meta, body) {
   if (S.myStyles.length >= MAX_STYLES) return toast(t("rep.tooMany", MAX_STYLES));
@@ -7163,8 +7165,8 @@ function framed(png, extra, { format = S.settings.format, quality = S.settings.q
   out.set(meta, 4); out.set(png, 4 + meta.length);
   return out;
 }
-/** Resolves once the browser has had a chance to paint (or shortly after, when the window is hidden). */
-const nextPaint = () => new Promise((r) => { requestAnimationFrame(() => setTimeout(r, 0)); setTimeout(r, 80); });
+/** Resolves once the browser has had a chance to paint (or shortly after, when the window is covered); at once when the page is hidden (the app started hidden for the command line): no frame comes there. */
+const nextPaint = () => new Promise((r) => { if (document.hidden) return setTimeout(r, 0); requestAnimationFrame(() => setTimeout(r, 0)); setTimeout(r, 80); });
 function browserSave(name, href) { const a = el("a", { href, download: name }); document.body.append(a); a.click(); a.remove(); }
 function browserSaveCanvas(cv, name, { format = S.settings.format, quality = S.settings.quality } = {}) {   // plain-browser fallback: the browser encodes; a dark matte under JPEG
   let src = cv;
@@ -8459,6 +8461,11 @@ function renderPanel() {
   placeFrames();   // the layout's parts framed with the Layout sheet shown, and no longer with another
 }
 
+/** The first start's welcome, the app told meanwhile that it waits on it (the command line is then answered at once that it needs setting up). */
+async function firstStart() {
+  invoke("app_needs_setup", { needed: true }).catch(() => {});
+  try { return await welcome(); } finally { invoke("app_needs_setup", { needed: false }).catch(() => {}); }
+}
 function welcome() {
   return new Promise((resolve) => {
     const modal = $("modal"), name = textInput("", () => null);
@@ -8761,7 +8768,7 @@ async function start() {
   S.profiles = await loadProfiles().catch(absent([]));
   const selftest = CAN.selftest ? await invoke("selftest_dir").catch(() => null) : null;
   if (selftest && (await invoke("selftest_perf").catch(() => false))) for (const t of [TIMING, PIXELS, FX_TIMING]) Object.assign(t, { on: true, ms: {} });   // the first drawing timed, by layer (perfTest)
-  if (!S.profiles.length) await addProfile(selftest ? sampleProfile("en") : await welcome(), false);
+  if (!S.profiles.length) await addProfile(selftest && !(await invoke("selftest_welcome").catch(() => false)) ? sampleProfile("en") : await firstStart(), false);
   S.profile = S.profiles.find((p) => p.id === S.settings.profileId) || S.profiles[0];
   S.settings.profileId = S.profile.id;   // written with the channel below, once the covers are read
   const library = await readJson("photo-library.json").catch(absent(null));
@@ -9107,6 +9114,36 @@ async function mcpTest() {
   if (!m.client || m.client.calls !== 2) no(`the self-test's client is not among those seen with its 2 calls: ${JSON.stringify(m.client)}`);
   if (!m.other || m.other.calls !== 0) no(`the client that only said hello is not among those seen with no calls: ${JSON.stringify(m.other)}`);
   if (m.unidentified) no("the self-test's requests, each with its session id, were counted as an unidentified agent's");
+  r.ok = !r.errors.length;
+  return r;
+}
+/**
+ * The command line's endpoint called over real HTTP, once the page has attached (selftest_cli in cli.rs): cli.json in the
+ * data folder, only its owner's on Unix, of the contract's shape (format 1, this app's pid and the endpoint's port, a
+ * token, the app's version, launched by the user, ready); /health refused without the token and with a wrong one (401),
+ * with the page's marker or a web page's Origin (403), answering with it (ready, no setup needed); /app/show refused
+ * without it; /app/done, twice, leaving an app the user started running; and through its /mcp, initialize, tools/list and
+ * get_context, refused without the token, the client not among those Settings → Agents shows but in the command line's
+ * own stats with its one call.
+ */
+async function cliTest() {
+  const m = await invoke("selftest_cli");
+  if (!m) return undefined;
+  const r = { ...m, errors: [] }, no = (e) => r.errors.push(e), f = m.file, h = m.health;
+  const desktop = toolsJson().tools.filter((d) => d["x-smedcover"].hosts.includes("desktop")).length;
+  if ([...f.keys].sort().join(",") !== "format,launchedBy,pid,port,ready,token,version") no(`cli.json holds ${f.keys.join(", ")}`);
+  if (f.mode !== null && f.mode !== 0o600) no(`cli.json's mode is ${f.mode.toString(8)}, not 600`);
+  if (f.format !== 1 || !f.pid || !f.port || !f.token || f.launchedBy !== "user" || f.ready !== true) no(`cli.json says ${JSON.stringify(f)}`);
+  if (h.none !== 401 || h.wrong !== 401 || h.right !== 200) no(`/health answered ${h.none} without the token, ${h.wrong} with a wrong one, ${h.right} with it (not 401, 401, 200)`);
+  if (h.marker !== 403 || h.origin !== 403) no(`/health answered ${h.marker} with the page's marker, ${h.origin} with a web page's Origin (not 403)`);
+  if (!h.body || h.body.name !== "smedcover" || h.body.version !== f.version || h.body.ready !== true || h.body.needsSetup !== false) no(`/health said ${JSON.stringify(h.body)}`);
+  if (m.show.none !== 401) no(`/app/show answered ${m.show.none} without the token, not 401`);
+  if (m.done.some((d) => d.status !== 200 || !d.body || d.body.exiting !== false)) no(`/app/done to an app the user started: ${JSON.stringify(m.done)}`);
+  if (m.mcp.none !== 401) no(`/mcp answered ${m.mcp.none} without the token, not 401`);
+  if (m.mcp.tools !== desktop) no(`tools/list: ${m.mcp.tools} tools, not the desktop's ${desktop}`);
+  if (m.mcp.context.isError || m.mcp.context.profiles !== S.profiles.length) no(`get_context: ${m.mcp.context.profiles} profiles, not ${S.profiles.length}`);
+  if (m.mcp.shownInAgents) no("the command line's client is among those Settings → Agents shows");
+  if (m.mcp.counted !== 1) no(`the command line's own stats count its client's calls as ${m.mcp.counted}, not 1`);
   r.ok = !r.errors.length;
   return r;
 }
@@ -9552,6 +9589,10 @@ async function selfTest(dir) {
       await step("mcp");
       try { report.mcp = await mcpTest(); } catch (e) { report.mcp = { ok: false, errors: [String((e && e.stack) || e)] }; }
       for (const e of (report.mcp && report.mcp.errors) || []) report.errors.push(`mcp: ${e}`);
+      // and the command line's endpoint, which runs whatever the user's switch says
+      await step("cli");
+      try { report.cli = await cliTest(); } catch (e) { report.cli = { ok: false, errors: [String((e && e.stack) || e)] }; }
+      for (const e of (report.cli && report.cli.errors) || []) report.errors.push(`cli: ${e}`);
     }
     S.cover.title = "Self test\n*binary* export"; S.cover.tag = "EP.01";
     for (const format of ["png", "jpeg", "webp"]) {
