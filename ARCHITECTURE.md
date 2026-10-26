@@ -2516,9 +2516,10 @@ says so as each of its pictures is taken in, and every 5 s besides (a big projec
 `agent.js` is the shell. Calls run one at a time in the order they came (`makeQueue()`: a call cancelled while it
 waits never runs), one waiting behind another telling the caller so every 5 s. Each is checked (`checkCall()`; a name
 of `Object.prototype`'s is no tool), then waits till the user is in the middle of nothing (`whenIdle()` over
-`userBusy()`: a press, a drag, a dialog, typing; for a change the editor's windows and an export under way too, not
-Settings, whose page is drawn again once each change is over, `settingsFollow()`, its scroll kept and the field the
-change left given back its caret) and their hands have been off the window for 400 ms, telling the caller every 5 s that it waits (a progress
+`userBusy()`: a press, a drag, a dialog, typing; for a change the editor's windows and an export under way too, a
+colour being picked, and what the user has under way, `USER_OPS` — a file or folder being picked, a profile made,
+imported or deleted, a logo put in, a batch from a table, each wrapped in `userOp()` from its start to its end, so no
+change comes between its steps; not Settings itself) and their hands have been off the window for 400 ms, telling the caller every 5 s that it waits (a progress
 message, which sets the host's timer going again), and answering `busy` after 30 s (10 s for a read). Input is noted
 while a step runs too, and when the user pressed, typed or scrolled during one, the 400 ms run from its end: they get
 in before the next change, which waits while they press. A call that changes something holds the window while it runs:
@@ -2527,10 +2528,18 @@ menu and dialogs, under a question, the title bar and the toast; `body.agent .ap
 toast's button, which would act mid-step), the keys, pastes and the wheel swallowed before anything sees them (by
 listeners added for the step and removed after it) and a drop let go — not replayed: a step is short — and, after
 150 ms, a pill of glass at the top saying what is being done (`agent.step.<tool>`), which a press pulses ("One
-moment"), and from that moment two lights running round the top bar's edge (`#lamp`, an SVG the grid lays over the
-bar: three dashes of one rounded rect, a fading tail behind a bright head, moved by `stroke-dashoffset` and paused while
-no step runs; `body.agent`, which `hold()` and `release()` set, drives it, so it ends however the step ends; a steady
-brighter glow where less motion is asked for); after 20 s it says the step is taking longer than usual and offers to stop waiting (its button, or Esc). One
+moment"), and from that moment comets of light running round the top bar's edge (`#lamp`, an SVG the grid lays over
+the bar; `lampLay()` in `app.js` lays it out from the `--lamp-*` properties: each comet `--lamp-steps` segments end to
+end behind its head, one rect each, shaded from `--lamp-head` through `--lamp-mid` to `--lamp-tail` and fading, under a
+halo, the dash pattern repeating `--lamp-comets` times, all in px from the edge's own `getTotalLength()`; moved by one
+animation of `stroke-dashoffset` each and no filter, so only they are painted again; `body.agent`, which `hold()` and
+`release()` set, plays and pauses them (`lampWatch()`), so they stop however the step ends; a steady brighter glow where
+less motion is asked for); `closeTransient()` answers a note of the open Settings page (what it shows, `settingsSeen()`,
+and the field it took the focus from), and once the change is over, its step settled and before the window is given
+back, agent.js hands it to `follow` (`settingsFollow()`): the page is drawn again only if the change touched what it
+shows (while a change runs, its commands' own drawing of it waits), scrolled where it was, a focused control given its
+focus back by its `data-k` (`heldField()`, `giveBack()`: never by its place, never into another channel's card, a
+trimmed field given back what was typed) and the field left given back its caret, unless the call was let go of; after 20 s it says the step is taking longer than usual and offers to stop waiting (its button, or Esc). One
 whose tool has `history` runs inside `agentStep(fn)` (`app.js`): the change the user was making becomes a step of its
 own first (`commitPending()`), `HOLD.history` keeps the debounced commit back, and the step is committed once — none
 when nothing changed. Should it fail part-way, the snapshot taken after the opening commit is put back and the

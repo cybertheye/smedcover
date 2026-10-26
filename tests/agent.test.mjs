@@ -1131,6 +1131,43 @@ test("the dispatcher lets go of a call that hangs: answered failed at its timeou
   assert.deepEqual(words.map((p) => p.progress), [1, 2, 3, 4, 5, 6], "180 ms of work, never 100 without a word");
 });
 
+test("the dispatcher tells follow, with closeTransient's note, once a change is over and its step settled, before the window is given back; never after a read; what it throws is no call's answer; gone only when the call was let go of", async () => {
+  const { makeAgent, stepping } = await import("../ui/js/agent.js");
+  const log = [];
+  let k = 0;
+  const commands = Object.fromEntries(TOOLS.map((d) => [d.name, async () => { log.push(`run ${d.name}`); return toResult({ structured: {} }); }]));
+  commands.set_look = async () => { log.push("run set_look"); throw new ToolError("invalid_arguments", "no such look"); };
+  commands.redo = async () => { await sleep(80); log.push("run redo, late"); return toResult({ structured: {} }); };
+  commands.export = async (args, ctx) => { while (!ctx.cancelled()) await sleep(5); return toResult({ text: "Stopped." }); };
+  const step = async (fn) => { log.push("step in"); try { return await fn(); } finally { log.push("step out"); } };
+  const follow = (note, gone) => log.push(`follow ${note.n} ${gone} held:${stepping()}`);
+  const agent = makeAgent({ commands, step, closeTransient: () => ({ n: ++k }), follow, quietFor: () => Infinity, grace: 50 });
+  assert.equal((await agent.handle({ id: 1, tool: "set_text", args: { title: "x" } })).ok, true);
+  assert.equal((await agent.handle({ id: 2, tool: "get_cover", args: {} })).ok, true);
+  assert.equal((await agent.handle({ id: 3, tool: "set_look", args: { look: "cyber" } })).error.code, "invalid_arguments");
+  assert.deepEqual(log, ["step in", "run set_text", "step out", "follow 1 false held:true", "run get_cover", "step in", "run set_look", "step out", "follow 2 false held:true"]);
+  // let go of (its timeout): told when it ends at last, gone; a host's cancel heeded within the grace: not gone
+  log.length = 0;
+  const late = await agent.handle({ id: 4, tool: "redo", args: {}, timeoutMs: 20 });
+  assert.match(late.error.message, /^redo did not finish/);
+  await sleep(120);
+  assert.deepEqual(log, ["run redo, late", "follow 3 true held:false"]);
+  log.length = 0;
+  const ex = agent.handle({ id: 5, tool: "export", args: {} });
+  await sleep(10);
+  agent.cancel(5);
+  assert.equal((await ex).ok, true);
+  assert.deepEqual(log, ["follow 4 false held:true"]);
+  // a follow that throws: logged, the call answered as it would have been
+  const said = console.error;
+  console.error = () => {};
+  try {
+    const broken = makeAgent({ commands, follow: () => { throw new Error("the page would not draw"); }, quietFor: () => Infinity });
+    assert.equal((await broken.handle({ id: 6, tool: "set_text", args: { title: "y" } })).ok, true);
+    assert.equal(stepping(), false, "the window given back");
+  } finally { console.error = said; }
+});
+
 test("the dispatcher: a call the host cancels while it runs is let go of after a moment, the window given back; one waiting never runs", async () => {
   const { makeAgent, stepping, CANCELLED } = await import("../ui/js/agent.js");
   let ran = [];

@@ -192,8 +192,12 @@ function pulse() {
 /**
  * The agent over what app.js gives it: `commands` (makeCommands' tools), `busy` (userBusy), `step` (agentStep(fn,
  * ctl): fn run as one step of undo; ctl.abandon(), which it sets, ends that step as it stands when the call is let go
- * of), `closeTransient` (the menu, popovers and hover previews shut, a field left), `host` ("desktop" or "server": the
- * tools offered there). handle(call, {progress}) takes a call {id, tool, args, timeoutMs?} and
+ * of), `closeTransient` (the menu, popovers and hover previews shut, a field left; what it answers is the call's own
+ * note of the window as the change began), `follow(note, gone)` (told once a change is over and its step of undo
+ * settled, committed or put back, before the window is given back: `note`, closeTransient's; `gone`, whether the call
+ * was let go of meanwhile, the window the user's since — app.js draws an open Settings page again if the change touched
+ * what it shows; what it throws is logged, never the call's answer), `host` ("desktop" or "server": the tools offered
+ * there). handle(call, {progress}) takes a call {id, tool, args, timeoutMs?} and
  * resolves with the reply the host is sent — {id, ok: true, result} (a CallToolResult), {id, ok: false, error: {code,
  * message}} — or CANCELLED; it never rejects. `progress(p)` is told {progress, total?, message?} while it waits or
  * works. A call running is let go of (answered failed, the window given back, the queue going on; what it does later is
@@ -203,7 +207,7 @@ function pulse() {
  * or for the user, says so every `every` ms. cancel(id): a call waiting never runs (true); one running is told (its
  * ctx.cancelled(), which an export checks between files) and let go of.
  */
-export function makeAgent({ commands, busy = () => null, step = (fn) => fn(), closeTransient = () => {}, host = "desktop", quietFor = () => performance.now() - INPUT.at, grace = GRACE, stopAfter = STOP_AFTER, every = EVERY }) {
+export function makeAgent({ commands, busy = () => null, step = (fn) => fn(), closeTransient = () => {}, follow = () => {}, host = "desktop", quietFor = () => performance.now() - INPUT.at, grace = GRACE, stopAfter = STOP_AFTER, every = EVERY }) {
   const queue = makeQueue(), stop = new Set();
   const fail = (id, code, message) => ({ id, ok: false, error: { code, message } });
   /** The tool called `name`, when there is one and a command for it (not one of Object.prototype's names). */
@@ -227,7 +231,7 @@ export function makeAgent({ commands, busy = () => null, step = (fn) => fn(), cl
     const changes = !def.annotations.readOnlyHint, base = me.n;
     const ctx = { progress: (progress, total, message) => tell({ progress: base + progress, ...(total == null ? {} : { total: base + total }), ...(message ? { message } : {}) }), cancelled: gone, say: (text) => pillSays(me.held, text) };
     try {
-      if (changes) { me.t0 = performance.now(); me.held = holding(() => queue.letGo(id, "stopped")); hold(me.held, def.name, stopAfter); closeTransient(); }
+      if (changes) { me.t0 = performance.now(); me.held = holding(() => queue.letGo(id, "stopped")); hold(me.held, def.name, stopAfter); me.note = closeTransient(); }
       const go = async () => {
         try {
           const r = await commands[def.name](args, ctx);
@@ -245,6 +249,7 @@ export function makeAgent({ commands, busy = () => null, step = (fn) => fn(), cl
       console.error(e);
       return fail(id, "failed", `${def.name} failed: ${(e && e.message) || e}`);
     } finally {
+      if (changes) try { follow(me.note, me.lease.gone); } catch (e) { console.error(e); }   // the step settled, the window still held (unless let go of)
       release(me.held);
       stop.delete(id);
     }
@@ -252,7 +257,7 @@ export function makeAgent({ commands, busy = () => null, step = (fn) => fn(), cl
   function handle(call, { progress = () => {} } = {}) {
     const c = call && typeof call === "object" ? call : {}, { id = null, tool } = c, def = toolOf(tool), name = def ? def.name : String(tool);
     const ms = Number.isFinite(c.timeoutMs) && c.timeoutMs > 0 ? c.timeoutMs : def ? def.timeoutMs : 30000;
-    const me = { n: 0, lease: null, held: null, step: {}, t0: performance.now() };   // step: what agentStep gives the shell to end it with (abandon)
+    const me = { n: 0, lease: null, held: null, step: {}, note: undefined, t0: performance.now() };   // step: what agentStep gives the shell to end it with (abandon); note: closeTransient's, for follow
     const tell = (p) => {   // a word to the caller; it sets the call's timeout going again
       if (me.lease && me.lease.gone) return;
       if (me.lease) me.lease.touch();
