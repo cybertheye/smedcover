@@ -2402,7 +2402,7 @@ what it does, what it answers, what it refuses), its input schema (JSON Schema, 
 `additionalProperties: false`, the enums the app's own constants — `LOOK_IDS`, `EFFECTS`, `BEND_IDS`,
 `SURPRISE_LOCKS`, `WEAVE_WAYS`, `SCOPES`, `FORMATS` — inlined, no `$ref`, and no `anyOf` at the top, which some clients
 refuse), its output schema, MCP's hints (`readOnlyHint`; `destructiveHint` said where it is false too, MCP's default
-being true; `idempotentHint`; `openWorldHint` for `add_photo`), and what only the page reads: `history` (run as one
+being true — `export` and `batch_covers`, which write new files and never over one, among them; `idempotentHint`; `openWorldHint` for `add_photo`), and what only the page reads: `history` (run as one
 step of undo), `busy` (what of the user's it waits for, `light` or `strict`), `hosts` (`desktop`, `server`: the
 selection, undo and redo are the desktop window's alone), `timeoutMs` (how long the host waits without a word from
 the page: half a minute to read, a minute to change, two to draw a preview or deal, ten to cut out, half an hour to

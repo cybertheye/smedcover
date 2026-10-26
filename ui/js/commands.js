@@ -290,7 +290,7 @@ export function makeCommands(api) {
     const { n, paths, err } = await api.writeInto(dir, jobs, { out, progress, fresh: true });
     const files = paths.map(({ path, job }) => ({ path, channel: S.profile.categories[job.index].id, title: job.cover.title, size: keyOf(job.size) }));
     if (err) {
-      if (!files.length && /^not a folder/i.test(why(err))) throw refused(`"dir" is no folder here: ${dir}.`);
+      if (!files.length && /^not a folder/i.test(why(err))) throw refused(args.dir !== undefined ? `"dir" is no folder here: ${dir}.` : `The profile's export folder, ${dir}, is no folder here (moved, deleted, or its disk away): pass dir (an absolute folder), or the user chooses another in the Export window.`);
       throw new ToolError("failed", `${files.length ? `${files.length} of ${total} files were written into ${dir} (${files.map((f) => f.path).join(", ")}), then` : `Nothing was written into ${dir}:`} ${why(err)}`);
     }
     return toResult({ structured: { dir, files, ...(n < total ? { cancelled: true } : {}) } });
@@ -501,10 +501,11 @@ export function makeCommands(api) {
       if (want && !font) { const near = nearNames(want, all); throw refused(`No font "${want}" here${near.length ? `; near it: ${near.join(", ")}` : ""} (list_options with fontQuery lists the installed ones).`); }
       const { L } = await aim(args, { types: LETTERED, what: SAID.lettering }), warnings = [];
       if (font) L.font = font; else if (font === "") delete L.font;   // as the font menu (fontControl), but not put among the recent fonts
-      if (args.vertical !== undefined) L.vertical = args.vertical;   // as Lines and Columns
-      if (args.vertical === false && api.inColumns(L)) {   // the look sets it in columns of itself, where the editor greys Lines and Columns out (props.verticalByLook)
+      // as Lines and Columns, which the editor greys out where the look sets the layer in columns of itself (columnControls): then left as it is
+      if (args.vertical !== undefined && !(!L.vertical && api.columnsByLook(L))) L.vertical = args.vertical;
+      if (args.vertical !== undefined && !L.vertical && api.columnsByLook(L)) {
         const lk = LOOKS[S.profile.style.look] || LOOKS.cel, key = (lk.params.find((d) => d.key === "vertical") || {}).key;
-        warnings.push(`The ${lk.name.en} look sets the title and the subtitle in columns itself${key ? ` (its setting "${key}")` : ""}: they stay in columns till that is turned off${key ? ` (set_look with params {"${key}": 0})` : ""}.`);
+        warnings.push(`The ${lk.name.en} look sets the title and the subtitle in columns itself${key ? ` (its setting "${key}")` : ""}: they stay in columns till that is turned off${key ? ` (set_look with params {"${key}": 0})` : ""}, and Lines and Columns are left as they are${args.vertical ? " (in columns already)" : ""}.`);
       }
       if (L.font && S.latinFonts.has(L.font)) warnings.push(`${L.font} has no Chinese: Chinese words are set in another face.`);
       api.touch({ cover: true, side: true });
@@ -647,8 +648,9 @@ export function makeCommands(api) {
       const warnings = [], want = args.reset ? null : args.ratio ? fitCrop(L.crop || WHOLE, args.ratio === "photo" ? 1 : (ratioOf(args.ratio) * size[1]) / size[0]) : c.pts ? { pts: c.pts } : { x: c.x, y: c.y, w: c.w, h: c.h };
       const n = normalizeCrop(want);
       if (c && !c.pts && n && ["x", "y", "w", "h"].some((k) => Math.abs(n[k] - c[k]) > 1e-4)) warnings.push(`The crop was kept within the picture: x ${n.x}, y ${n.y}, w ${n.w}, h ${n.h}.`);
-      if (c && !n) warnings.push(`The ${c.pts ? "shape" : "rectangle"} is the whole picture: no crop.`);
-      if (!api.setCrop(L, want)) warnings.push(L.crop ? "It was cropped so already." : "It was not cropped.");
+      const whole = c && !n, changed = api.setCrop(L, want);   // one word for one thing: a whole picture asked for where there was no crop is that alone
+      if (whole) warnings.push(`The ${c.pts ? "shape" : "rectangle"} is the whole picture: no crop${changed ? "" : ", and it was not cropped"}.`);
+      else if (!changed) warnings.push(L.crop ? "It was cropped so already." : "It was not cropped.");
       return toResult({ structured: { crop: L.crop ? copy(L.crop) : null, ...(warnings.length ? { warnings } : {}) } });
     },
     cut_out: async (args, ctx = HUSHED) => {
@@ -727,7 +729,8 @@ export function makeCommands(api) {
         if (want === "each") for (const cv of cvs) images.push(await api.pngBase64(cv));
         if (want === "sheet") { const sheet = handSheet(cvs, hands, 0); images.push(await api.pngBase64(sheet)); sheet.width = sheet.height = 0; }
       } finally { for (const cv of cvs) cv.width = cv.height = 0; }
-      return toResult({ structured: { hands: hands.map(handOut), kept: 1, locks: SURPRISE_LOCKS.filter((k) => locks[k]) }, images });
+      // the locks as they held: places keeps the layout too (no layout preset dealt, dealCover)
+      return toResult({ structured: { hands: hands.map(handOut), kept: 1, locks: SURPRISE_LOCKS.filter((k) => locks[k] || (k === "layout" && locks.places)) }, images });
     },
     pick_hand: async (args) => {
       const live = !!dealt && !!dealt.step && api.SURPRISE.step === dealt.step && S.histIdx === dealt.step.idx;

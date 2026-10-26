@@ -2417,7 +2417,7 @@
     {
       "name": "add_photo",
       "title": "Add a photo",
-      "description": "Puts a photo on the cover. source is exactly one of: path (an image file on this computer, absolute: PNG, JPEG, WebP, GIF, HEIC or AVIF, at most 64 MB), url (an http(s) link to an image of those kinds, at most 64 MB; fetched through the proxy the user set for image AI), library (a pid from list_library) or data (the image in base64, or a data: URL). Prefer a path or a url: data travels whole through the conversation, at most 24 Mi characters. fill: true makes it the background, filling the canvas, as Fill the canvas does: above bg and the photos filling the canvas there already, so it shows over them; else it is placed as a print, its centre at `at` {x, y}, just above `above` (a layer id or \"top\"; by default the selected layer). A new picture joins the bitmap library. One undo step. Returns the new layer and the picture's pid.",
+      "description": "Puts a photo on the cover. source is exactly one of: path (an image file on this computer, absolute: PNG, JPEG, WebP, GIF, HEIC or AVIF, at most 64 MB), url (an http(s) link to an image of those kinds, at most 64 MB; fetched through the proxy the user set for image AI), library (a pid from list_library) or data (the image in base64, or a data: URL). Prefer a path or a url: data travels whole through the conversation, at most 24 Mi characters (and the request 32 MiB in all). fill: true makes it the background, filling the canvas, as Fill the canvas does: above bg and the photos filling the canvas there already, so it shows over them; else it is placed as a print, its centre at `at` {x, y}, just above `above` (a layer id or \"top\"; by default the selected layer). A new picture joins the bitmap library. One undo step. Returns the new layer and the picture's pid.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3228,7 +3228,7 @@
     {
       "name": "open_project",
       "title": "Open a project",
-      "description": "Opens a SmedCover project (a .smedcover.json file: a profile with its covers, photos, assets and fonts), from a file on this computer (file, an absolute path to a *.smedcover.json, at most 128 MB; preferred) or given whole (project, the object or its JSON text, at most 24 Mi characters). Its profile, when it is here, takes it; else `as` says where: a new profile (\"new\", the default) or the current one (\"current\"). The window switches to its profile and channel, its cover one step of undo there. Returns the profile (created: whether it was made new) and the channel opened.",
+      "description": "Opens a SmedCover project (a .smedcover.json file: a profile with its covers, photos, assets and fonts), from a file on this computer (file, an absolute path to a *.smedcover.json, at most 128 MB; preferred) or given whole (project, the object or its JSON text, at most 24 Mi characters, and the request 32 MiB in all in UTF-8: past it, the endpoint answers 413). Its profile, when it is here, takes it; else `as` says where: a new profile (\"new\", the default) or the current one (\"current\"). The window switches to its profile and channel, its cover one step of undo there. Returns the profile (created: whether it was made new) and the channel opened.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3306,7 +3306,7 @@
     {
       "name": "batch_covers",
       "title": "Make covers in a batch",
-      "description": "Makes and exports a cover for each job, as importing a CSV does: jobs [{channel, title, tag?, subtitle?}] (channel by id, name, code or number) or csv (the same as text: channel, title, tag, subtitle, with or without a header row; a row with no channel is the one shown). Each starts from its channel's cover with the words replaced, at sizes (default every size of the profile), into folder dir (absolute; default the profile's export folder), in format, at scale (1–4×; default the export settings'). Never overwrites a file: a name taken gets a number. Nothing is written when a job names a channel the profile does not have. The covers in the window are not changed. Only where the host writes files. Returns the folder and each file written (cancelled: true when the call was cancelled part-way).",
+      "description": "Makes and exports a cover for each job, as importing a CSV does: jobs [{channel, title, tag?, subtitle?}] (channel by id, name, code or number) or csv (the same as text: channel, title, tag, subtitle, with or without a header row; a row with no channel is the one shown). Each starts from its channel's cover with the words replaced, at sizes (default every size of the profile), into folder dir (absolute; default the profile's export folder), in format, at scale (1–4×; default the export settings'). Writes new files and never overwrites one: a name taken gets a number. Nothing is written when a job names a channel the profile does not have. The covers in the window are not changed. Only where the host writes files. Returns the folder and each file written (cancelled: true when the call was cancelled part-way).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3437,7 +3437,7 @@
       "annotations": {
         "title": "Make covers in a batch",
         "readOnlyHint": false,
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
       },
@@ -3452,7 +3452,7 @@
     {
       "name": "export",
       "title": "Export",
-      "description": "Writes covers to image files: channels (default the one shown; \"all\" for every channel) at sizes (default those ticked in the Export window; \"all\" for every size), into dir (an absolute folder; default the profile's export folder — pass dir when it has none), in format (png, jpeg, webp) and at scale (1–4×; default the export settings'), each named by the export name pattern. Never overwrites a file: a name taken gets a number. The folder given is not kept for the profile. Only where the host writes files. Returns the folder and each file's path (cancelled: true when the call was cancelled part-way).",
+      "description": "Writes covers to image files: channels (default the one shown; \"all\" for every channel) at sizes (default those ticked in the Export window; \"all\" for every size), into dir (an absolute folder; default the profile's export folder — pass dir when it has none), in format (png, jpeg, webp) and at scale (1–4×; default the export settings'), each named by the export name pattern. Writes new files and never overwrites one: a name taken gets a number. The folder given is not kept for the profile. Only where the host writes files. Returns the folder and each file's path (cancelled: true when the call was cancelled part-way).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3562,7 +3562,7 @@
       "annotations": {
         "title": "Export",
         "readOnlyHint": false,
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false
       },

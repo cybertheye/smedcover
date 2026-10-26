@@ -56,7 +56,11 @@ test("every tool is defined in full: a snake_case name, a title, a description, 
 
 test("the tools are marked as the spec has them: reading, changing, writing files, the window", () => {
   for (const n of READS) assert.equal(TOOL_BY[n].annotations.readOnlyHint, true, n);
-  for (const n of ["export", "batch_covers", "remove_layer"]) assert.equal(TOOL_BY[n].annotations.destructiveHint, true, n);
+  assert.equal(TOOL_BY.remove_layer.annotations.destructiveHint, true);
+  for (const n of ["export", "batch_covers"]) {   // new files only, never over one: no destruction, but each call writes more
+    assert.deepEqual([TOOL_BY[n].annotations.readOnlyHint, TOOL_BY[n].annotations.destructiveHint, TOOL_BY[n].annotations.idempotentHint], [false, false, false], n);
+    assert.match(TOOL_BY[n].description, /Writes new files and never overwrites one/, n);
+  }
   for (const d of TOOLS) if (/^(set|add)_/.test(d.name)) assert.equal(d.annotations.destructiveHint, false, d.name);
   assert.equal(TOOL_BY.add_photo.annotations.openWorldHint, true);
   for (const n of LIVE) assert.deepEqual(TOOL_BY[n].hosts, ["desktop"], n);
@@ -286,7 +290,7 @@ async function fakeApi() {
   };
   const api = {
     ...changes, frame, cat: () => S.profile.categories.find((c) => c.id === S.cover.catId), selSize: () => S.profile.sizes.find((z) => keyOf(z) === S.sel), sizeKeys: () => S.profile.sizes.map(keyOf),
-    drawnNow: () => ({ _hits: [], _virtual: [frame().vw, frame().vh] }), inColumns: (L) => L.vertical === true, owner: (L) => L, passivesOf: () => [], fxSeedOf: () => 4242, alignedT: () => null, isRemovable,
+    drawnNow: () => ({ _hits: [], _virtual: [frame().vw, frame().vh] }), inColumns: (L) => L.vertical === true, columnsByLook: () => false, owner: (L) => L, passivesOf: () => [], fxSeedOf: () => 4242, alignedT: () => null, isRemovable,
     S, CAN: { cut: true, outlines: false, saveFiles: true }, HOST: "tauri", appVersion: async () => "0.3.1", BUNDLED_FONTS: ["Noto Sans SC", "Bebas Neue", "JetBrains Mono"],
     cutReady: () => true, cutEngine: () => "vision", catIndex: () => S.profile.categories.findIndex((c) => c.id === S.cover.catId), channelOf: (q) => q.categories[0].id,
     layerName: (L) => `name of ${L.id}`, copiable: (L) => L.type !== "bg" && L.type !== "frame", pickedIds: () => (S.picked.length > 1 ? [...S.picked] : S.layerId === "bg" ? [] : [S.layerId]),
@@ -535,11 +539,18 @@ test("a change does what the editor does, where it is aimed: the window switched
   assert.equal(title.font, "Helvetica"); assert.equal(title.vertical, true);
   // lines asked for where the look sets the title in columns of itself (the editor greys Lines and Columns out there): done, and said
   const lookWas = S.profile.style.look, columnsWas = api.inColumns;
-  S.profile.style.look = "songke"; api.inColumns = (L) => L.type === "title" || L.vertical === true;
-  const lines = (await cmds.set_layer_font({ layer: "title", vertical: false })).structuredContent;
+  S.profile.style.look = "songke"; api.inColumns = (L) => L.type === "title" || L.vertical === true; api.columnsByLook = (L) => L.type === "title";
+  const lines = (await cmds.set_layer_font({ layer: "title", vertical: false })).structuredContent;   // set in columns by hand too: the editor lets that go
   assert.equal(title.vertical, false);
   assert.ok(lines.warnings.some((w) => /look sets the title and the subtitle in columns itself \(its setting "vertical"\).*set_look with params \{"vertical": 0\}/.test(w)), JSON.stringify(lines.warnings));
-  S.profile.style.look = lookWas; api.inColumns = columnsWas; title.vertical = true;
+  // by the look alone, Lines and Columns greyed out in the editor: neither written, and said
+  for (const v of [true, false]) {
+    delete title.vertical;
+    const said = (await cmds.set_layer_font({ layer: "title", vertical: v })).structuredContent;
+    assert.ok(!("vertical" in title), `vertical: ${v} not written`);
+    assert.equal(said.warnings.filter((w) => /left as they are/.test(w)).length, 1, JSON.stringify(said.warnings));
+  }
+  S.profile.style.look = lookWas; api.inColumns = columnsWas; api.columnsByLook = () => false; title.vertical = true;
   // a bend takes away a perspective dragged by hand; in columns it is kept for later, and said
   title.reshape = [[0.1, 0]];
   const bent = (await cmds.set_layer_bend({ layer: "title", bend: "arc", amount: 1.5 })).structuredContent;
@@ -789,6 +800,10 @@ test("the photo tools do what the editor does: a picture from a file, a link, th
   assert.ok(Math.abs((wide.w * 1000) / (wide.h * 500) - 16 / 9) < 2e-3, "16:9 on the picture (1000×500)");
   assert.equal((await cmds.crop_photo({ layer: P.id, reset: true })).structuredContent.crop, null);
   assert.match((await cmds.crop_photo({ layer: P.id, reset: true })).structuredContent.warnings[0], /was not cropped/);
+  // the whole picture asked for: one word, whether there was a crop to take away or none
+  assert.deepEqual((await cmds.crop_photo({ layer: P.id, crop: { x: 0, y: 0, w: 1, h: 1 } })).structuredContent.warnings, ["The rectangle is the whole picture: no crop, and it was not cropped."]);
+  await cmds.crop_photo({ layer: P.id, crop: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } });
+  assert.deepEqual((await cmds.crop_photo({ layer: P.id, crop: { pts: [[0, 0], [1, 0], [1, 1], [0, 1]] } })).structuredContent, { crop: null, warnings: ["The shape is the whole picture: no crop."] });
   await assert.rejects(cmds.crop_photo({ layer: four.layer.id, reset: true }), /fills the canvas: it is not cropped/);
   // cut out: the sizes the scope asked reaches; a cut-out itself is refused
   const cut = (await cmds.cut_out({ layer: P.id, size: "9:16", scope: "size" }, ctx)).structuredContent;
@@ -831,6 +846,8 @@ test("Surprise me deals as the window does, its locks this call's alone, and pic
   await assert.rejects(cmds.pick_hand({ hand: 5 }), /dealt 3 hands: pick 1 to 3/);
   S.histIdx++;   // a change made since: the hands are past taking
   await assert.rejects(cmds.pick_hand({ hand: 2 }), /changed since the last surprise.*Deal again with surprise/);
+  // the locks as they held: places keeps the layout too
+  assert.deepEqual((await cmds.surprise({ count: 2, locks: ["places"], images: "none" }, ctx)).structuredContent.locks, ["places", "layout"]);
   // with no locks given, Surprise me's own
   await cmds.surprise({ images: "none" }, ctx);
   assert.deepEqual(calls.filter((c) => c[0] === "dealHands").at(-1)[1].locks, { theme: true });
@@ -904,6 +921,13 @@ test("export and batch_covers write as the Export window and a CSV do, into the 
   assert.equal(everything.dir, "/kept"); assert.equal(everything.files.length, p.categories.length * p.sizes.length);
   const two = (await cmds.export({ channels: [1, "Film Stories", 1], sizes: ["16:9", "1920x1080"] }, ctx)).structuredContent;
   assert.deepEqual(two.files.map((f) => f.channel), [p.categories[0].id, p.categories[1].id], "each channel and size once");
+  // a folder that is not there: said as the one given, or the profile's kept one
+  const writes = api.writeInto;
+  api.writeInto = async () => ({ n: 0, paths: [], err: new Error("not a folder: /gone") });
+  await assert.rejects(cmds.export({ dir: "/gone" }, ctx), (e) => e.code === "invalid_arguments" && e.message === '"dir" is no folder here: /gone.');
+  S.settings.exportDirs[p.id] = "/gone";
+  await assert.rejects(cmds.export({}, ctx), (e) => e.code === "invalid_arguments" && /^The profile's export folder, \/gone, is no folder here .*: pass dir/.test(e.message) && !/"dir" is/.test(e.message));
+  api.writeInto = writes; S.settings.exportDirs[p.id] = "/kept";
   // cancelled part-way: what was written, and said so
   let left = 2;
   const half = (await cmds.export({ sizes: "all" }, { ...ctx, cancelled: () => left-- <= 0 })).structuredContent;

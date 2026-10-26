@@ -9988,7 +9988,7 @@ const drawnNow = () => { flushDraw(); return flatCanvas(); };
 const API = Object.freeze({
   S, CAN, HOST, appVersion, invoke, BUNDLED_FONTS, CUT, SURPRISE, HOLD,
   // what is shown, selected, and what a layer is
-  cat, catIndex, selSize, layer, frame, sizeKeys, scopeKeys, layerName, copiable, owner, passivesOf, recordOf, weavableOf, wovenOf, inColumns, canCrop, pictureSize, canCut, cutReady, cutEngine, exportDir, ticked, channelOf, pickedIds,
+  cat, catIndex, selSize, layer, frame, sizeKeys, scopeKeys, layerName, copiable, owner, passivesOf, recordOf, weavableOf, wovenOf, inColumns, columnsByLook, canCrop, pictureSize, canCut, cutReady, cutEngine, exportDir, ticked, channelOf, pickedIds,
   // the history, and putting a change on the screen
   touch, commitHistory, commitPending, clearPendingHistory: () => clearTimeout(timers.hist), snapshot, restoreSnap, timeTravel, settleCover, setCover, channelCover, coverFor, coverOf, drawnNow, toast,
   // the window
