@@ -3034,65 +3034,14 @@ function mcpLight() {
 }
 /**
  * The lights that follow the endpoint's state, as it changes: the one beside Agents in Settings' nav, drawn again, and the
- * agents' lamp lighting the top bar's edge while it is on (html.autopilot; while it runs, and while it moves to another
- * port, so the edge does not blink; not when it could not start). The comets running round it while an agent's change
- * holds the window are body.agent's (lampWatch).
+ * agents' lamp — the top bar's edge lit, "Agent access on" beside Surprise me — while it is on (html.autopilot; while it
+ * runs, and while it moves to another port, so they do not blink; not when it could not start).
  */
 const mcpLightSync = () => {
   const s = MCP.status;
   document.documentElement.classList.toggle("autopilot", !!(s && s.on) && mcpState(s) !== "error");
   const n = document.querySelector('[data-mcp="nav"]'); if (n) n.replaceWith(mcpLight());
 };
-// ---------- the agents' lamp: comets of light round the top bar's edge while an agent's change runs
-/**
- * #lamp in index.html, over the top bar, its looks the --lamp-* properties there (read here: the lap, how many comets,
- * their length and shades): while an agent's change holds the window (body.agent, which agent.js's hold and release
- * set, so it ends however the change ends) its comets run round the bar's edge. Each is --lamp-steps segments of a
- * dash pattern on one rect over the edge each, end to end behind its head, shaded from --lamp-head through --lamp-mid to
- * --lamp-tail and fading, with a halo round its front half; the pattern repeats --lamp-comets times round the edge. Laid
- * out in px from the edge's own length (getTotalLength: a WebKit may not honour pathLength) as a change begins, and again
- * when the bar changes size or the settings changed, the comets going on where they were; moved by an animation of
- * stroke-dashoffset each, played while a change runs and paused once the lamp has faded out (nothing painted while it is
- * hidden). Asked for less motion, never laid out (index.html lights the edge instead).
- */
-const LAMP = { anims: [], laid: "", period: 0, off: 0 };
-const LESS_MOTION = matchMedia("(prefers-reduced-motion: reduce)");
-const lampOn = () => document.body.classList.contains("agent") && !LESS_MOTION.matches;
-function lampLay() {
-  const svg = $("lamp"), top = $("top"), css = getComputedStyle(document.documentElement), v = (k) => css.getPropertyValue(k).trim();
-  const num = (k, d, lo, hi) => { const x = parseFloat(v(k)); return Number.isFinite(x) ? clamp(x, lo, hi) : d; };
-  const lap = /ms$/.test(v("--lamp-lap")) ? parseFloat(v("--lamp-lap")) : parseFloat(v("--lamp-lap")) * 1000;
-  const n = Math.round(num("--lamp-comets", 2, 1, 12)), k = Math.round(num("--lamp-steps", 8, 1, 24)), share = num("--lamp-length", 0.16, 0.01, 1 / n), fade = num("--lamp-tail-fade", 0.15, 0, 1);
-  const r = Math.max(0, (parseFloat(getComputedStyle(top).borderTopLeftRadius) || 0) - 0.5), box = svg.getBoundingClientRect();
-  const laid = [box.width, box.height, r, lap, n, k, share, fade].join();
-  if (laid === LAMP.laid || !box.width || !box.height) return;
-  const was = LAMP.anims[0], phase = was && LAMP.period ? (was.currentTime % LAMP.period) / LAMP.period : 0, running = was && was.playState === "running";
-  for (const a of LAMP.anims) a.cancel();
-  const rect = () => { const e = document.createElementNS("http://www.w3.org/2000/svg", "rect"); for (const [a, x] of [["width", "100%"], ["height", "100%"], ["rx", r]]) e.setAttribute(a, x); return e; };
-  const halo = rect(), parts = Array.from({ length: k }, rect);
-  svg.replaceChildren(halo, ...[...parts].reverse());   // the tail first, the head drawn last, over the rest
-  const edge = halo.getTotalLength() || 2 * (box.width + box.height) - (8 - 2 * Math.PI) * r, per = edge / n, comet = share * edge, seg = comet / k, dur = (Number.isFinite(lap) && lap > 0 ? lap : 6000) / n;
-  const mix = (t) => (t <= 0.25 ? `color-mix(in oklab, var(--lamp-head), var(--lamp-mid) ${(t * 400).toFixed(1)}%)` : `color-mix(in oklab, var(--lamp-mid), var(--lamp-tail) ${(((t - 0.25) * 400) / 3).toFixed(1)}%)`);   // the head a quarter of the way to the body, the body the rest of the way to the tail
-  // each dash begins `from` px behind the head, which starts at the rect's start and goes round with the pattern
-  const lay = (e, len, from, style) => { e.style.cssText = `stroke-dasharray:${len}px ${per - len}px;${style}`; return { e, off: from }; };
-  const laidOut = [lay(halo, comet / 2, comet / 2, "stroke:var(--lamp-glow);stroke-width:var(--lamp-halo);stroke-linecap:round"),
-    ...parts.map((e, i) => { const t = k > 1 ? i / (k - 1) : 0; return lay(e, seg, seg * (i + 1), `stroke:${mix(t)};stroke-opacity:${(1 - t * t * (1 - fade)).toFixed(3)};stroke-width:calc(var(--lamp-width) * ${(1.25 - 0.35 * t).toFixed(3)});stroke-linecap:${i ? "butt" : "round"}`); })];
-  LAMP.anims = laidOut.map(({ e, off }) => e.animate([{ strokeDashoffset: `${off}px` }, { strokeDashoffset: `${off - per}px` }], { duration: dur, iterations: Infinity }));
-  for (const a of LAMP.anims) { a.currentTime = phase * dur; if (!running) a.pause(); }
-  Object.assign(LAMP, { laid, period: dur });
-}
-/** Plays the comets as a change begins (laid out first, if the bar or the settings changed), and pauses them once the lamp has faded out after it. */
-function lampWatch() {
-  const go = () => {
-    clearTimeout(LAMP.off);
-    if (lampOn()) { lampLay(); for (const a of LAMP.anims) a.play(); }
-    else LAMP.off = setTimeout(() => { if (!lampOn()) for (const a of LAMP.anims) a.pause(); }, 400);   // after #lamp's fade (index.html)
-  };
-  new MutationObserver(go).observe(document.body, { attributes: true, attributeFilter: ["class"] });
-  new ResizeObserver(() => { if (LAMP.anims.length) lampLay(); }).observe($("top"));
-  LESS_MOTION.addEventListener("change", go);
-}
-lampWatch();
 /** What the ⋯ menu says under Agents: the port it runs on, else its state. */
 const mcpSays = () => { const s = MCP.status, k = mcpState(s); return k === "running" ? t("mcp.menuOn", s.port) : t("mcp.state." + k); };
 /** Why the endpoint is not running, as error `e` of its status says (at `port`): the port taken or kept by the system, mcp.json unreadable, or the system's own words. */
@@ -8203,30 +8152,30 @@ function syncTop() {
     el("div", { class: "spacer" }),
     el("div", { class: "grp" }, step("top.undo", "undo", -1, S.histIdx <= 0), step("top.redo", "redo", 1, S.histIdx >= S.hist.length - 1), el("span", {}, t("top.saved"))),
     el("div", { class: "spacer" }),
-    el("span", { class: "atwork", "aria-hidden": "true" }, el("span", { class: "in" }, el("i"), el("b", {}, t("top.atWork")))),   // while an agent's change runs (body.agent): the pill says it aloud
+    el("span", { class: "agentson", "aria-hidden": "true" }, el("span", { class: "in" }, el("i"), el("b", {}, t("top.agentsOn")))),   // while the endpoint is on (html.autopilot): Settings → Agents says it, and the pill an agent's change
     el("button", { class: "btn cta glassy deal-btn", title: t("top.surpriseHint"), disabled: SURPRISE.busy, onclick: surprise }, ico("spark", 18), t(SURPRISE.busy ? "top.surpriseBusy" : "top.surprise"), el("kbd", {}, t("top.space"))),
     el("button", { class: "btn cta solid", title: t("top.exportTip", MOD_KEY + "E"), onclick: exportDialog }, ico("download", 18), t("top.export")),
     el("button", { class: "ibtn" + (MENU.open ? " on" : ""), id: "morebtn", title: t("top.more"), "aria-label": t("top.more"), "aria-haspopup": "menu", "aria-expanded": String(MENU.open), onclick: toggleMenu }, ico("more", 18)));
   for (const s of $("top").querySelectorAll(".crumb select")) fitList(s);
-  fitAtWork();
+  fitAgentsOn();
   for (const b of document.querySelectorAll("#winbtns button")) b.setAttribute("aria-label", b.title = t("top.win." + b.className));   // drawn on Windows and Linux (ownTitleBar)
   document.body.dataset.drop = t("msg.dropHere");
   if (MENU.open) renderMenu();
 }
 /**
- * "Agent at work" beside Surprise me (.atwork, shown while an agent's change runs: index.html) is laid over the room left
+ * "Agent access on" beside Surprise me (.agentson, shown while the endpoint is on: index.html) is laid over the room left
  * of the button, the spacer before it: the words and their light where they fit there, the light alone (.dot) where only
  * it does, neither (.none) where not even it does or the bar has wrapped them apart — never over another control.
  */
-function fitAtWork() {
-  const a = $("top").querySelector(".atwork"), room = a && a.previousElementSibling;
+function fitAgentsOn() {
+  const a = $("top").querySelector(".agentson"), room = a && a.previousElementSibling;
   if (!a || !room) return;
   a.classList.remove("dot", "none");
   const r = room.getBoundingClientRect(), b = a.getBoundingClientRect(), inner = a.firstElementChild, light = inner.firstElementChild;
   const free = Math.abs(r.top + r.bottom - b.top - b.bottom) < 8 ? r.width : 0;   // on one line of the bar (it wraps in a narrow window)
   if (inner.offsetWidth > free) a.classList.add(light.offsetWidth <= free ? "dot" : "none");
 }
-new ResizeObserver(() => fitAtWork()).observe($("top"));
+new ResizeObserver(() => fitAgentsOn()).observe($("top"));
 // ---------- the ⋯ menu
 const MENU = { open: false, profiles: false };
 /** String `key` with a count: `key`.one for one ("1 channel"), else `key` ("5 channels"). */
@@ -9045,8 +8994,9 @@ async function agentTest(dir) {
  * width typed for a size of one's own kept, a size's name being typed in (a space at its end) keeping its focus and
  * caret — and the page drawn again by hand keeps them too; a channel renamed draws Brand & channels again, its name field
  * given back its focus and caret; a change waits while something of the user's is under way (userOp), and a colour field
- * with the focus holds one back; the agents' lamp is laid out in px round the top bar's edge (getTotalLength, as this web
- * view has it) and paused after. Settings shut again, the channel's name and the page as they were.
+ * keeping the focus with its picker shut holds none back; a test's answer put off while a field had the focus is shown
+ * once a change is over; "Agent access on" is in the top bar, taking no room of its own. Settings shut again, the
+ * channel's name and the page as they were.
  */
 async function agentSettingsTest({ call, ok, r, no }) {
   const wait = (ms) => new Promise((done) => setTimeout(done, ms)), tab = S.tab.setup, panel = $("setpanel"), out = {};
@@ -9110,15 +9060,10 @@ async function agentSettingsTest({ call, ok, r, no }) {
       if (!out.answerShown) no("a test's answer put off while a field had the focus was not shown after an agent's change");
       AI.test = test; model.blur(); renderPanel();
     }
-    // the agents' lamp, laid out by the changes above
-    if (!LESS_MOTION.matches) {
-      const rects = [...$("lamp").querySelectorAll("rect")], edge = rects[0] ? rects[0].getTotalLength() : 0, n = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--lamp-comets")) || 2;
-      const dash = rects[0] ? rects[0].style.strokeDasharray.split(/[ ,]+/).map(parseFloat) : [];
-      out.lamp = { rects: rects.length, edge: Math.round(edge), period: Math.round((dash[0] || 0) + (dash[1] || 0)), paused: LAMP.anims.every((a) => a.playState !== "running") };
-      if (rects.length < 2 || !edge || Math.abs(out.lamp.period - edge / n) > 1) no(`the agents' lamp is not laid out round the top bar's edge: ${JSON.stringify(out.lamp)}`);
-      await wait(500);
-      if (!LAMP.anims.every((a) => a.playState !== "running")) no("the agents' lamp still runs with no change under way");
-    }
+    // "Agent access on" in the top bar, built with it, taking no room of its own (nothing else in the bar moves as it shows)
+    const on = $("top").querySelector(".agentson");
+    out.agentsOn = on ? { text: on.textContent, width: on.getBoundingClientRect().width } : null;
+    if (!on || on.textContent !== t("top.agentsOn") || out.agentsOn.width !== 0) no(`"Agent access on" is not in the top bar as it should be: ${JSON.stringify(out.agentsOn)}`);
   } catch (e) { no(`Settings open with an agent: ${(e && e.message) || e}`); }
   finally { S.tab.setup = tab; setMode("edit"); r.settings = out; }
 }

@@ -66,7 +66,8 @@ and *Apply*, or free the port and turn the switch off and on again.
 
 Beside *Agents* in Settings' left column is a light: green while the endpoint runs, amber while it switches, red when it
 could not start, none while it is off. While it runs, the ⋯ menu's *Agents* line says *On · port 25277*, and the
-agents' lamp lights the top bar's edge: a thin dawn-coloured line with a soft glow.
+agents' lamp lights the top bar's edge (a thin dawn-coloured line with a soft glow) and shows *Agent access on* beside
+*Surprise me*, after a small turquoise light (the light alone where the bar has no room for the words).
 
 The endpoint starts with the app while it is on and stops when the app quits; the switch is kept, so it is on again at
 the next start. On macOS the window keeps drawing while the endpoint runs, even when it is covered or on
@@ -359,10 +360,8 @@ SmedCover tells the agent how it works when it connects (MCP's instructions). A 
 ### In the window
 
 - A change holds the window while it runs: an overlay covers it, and after 150 ms a pill of glass at the top says what is
-  being done (*Changing the words*, *Exporting 3 of 12*…), while two comets of dawn-coloured light (a near-white head,
-  a peach body, a lavender tail) run round the top bar's edge (a steady brighter glow instead when the system asks for
-  less motion), and *Agent at work* shows beside *Surprise me*, after a breathing light (the light alone where the bar
-  has no room for the words). A press on the window pulses it (*One moment —
+  being done (*Changing the words*, *Exporting 3 of 12*…), and the light before *Agent access on* in the top bar
+  breathes (it stays still when the system asks for less motion). A press on the window pulses the pill (*One moment —
   almost done*); keys, pastes and the wheel are swallowed, not replayed later.
 - After 20 seconds the pill says *Taking longer than usual* and offers *Stop waiting* (or Esc): the window is yours again,
   and the agent is told the step did not finish.

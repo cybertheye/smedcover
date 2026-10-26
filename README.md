@@ -753,7 +753,7 @@ The *Image model* card, on the same page as the *Text model*, has settings of it
 
 Agents such as Claude Code or Codex can make covers in SmedCover's window: change the words and the look, place, add and remove layers, add photos, draw previews, deal hands with Surprise me and export. Each change is one step of undo in the window you have open, so you see everything an agent does and can take it back. They reach it over MCP, at an endpoint that listens on this computer only (127.0.0.1). What an agent reads through it goes to that agent and to the model it uses, as anything else you give it does.
 
-1. ⋯ → *Agents* (Settings → *Agents*), and turn on *MCP endpoint*. It listens at `http://127.0.0.1:25277/mcp`; another port can be set (1024–65535). While it is on, the agents' lamp lights the top bar's edge in the colours of dawn, and while an agent's change runs, two comets of light run round it and *Agent at work* shows beside *Surprise me*.
+1. ⋯ → *Agents* (Settings → *Agents*), and turn on *MCP endpoint*. It listens at `http://127.0.0.1:25277/mcp`; another port can be set (1024–65535). While it is on, the agents' lamp lights the top bar's edge in the colours of dawn and *Agent access on* shows beside *Surprise me*, after a small turquoise light, which breathes while an agent's change runs.
 2. Copy the line for your agent from *Connect an agent*. For Claude Code, run in a terminal:
 
    ```bash

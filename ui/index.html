@@ -22,17 +22,21 @@
         --blur:blur(30px) saturate(170%);
         --ui:"Noto Sans SC",-apple-system,"Segoe UI",sans-serif;--mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace}
   /* ===== The agents' lamp over the top bar — change it here, and only here =====
-     While the agents' endpoint runs, the top bar's edge is lit (--lamp-line) with a soft glow round it (--lamp-glow,
-     --lamp-glow-size). While an agent's change runs, comets of light go round that edge (#lamp; laid out by lampLay in
-     app.js, which reads the ones marked JS): each shades from its head through its body to its tail (--lamp-head, a near
-     white; --lamp-mid, peach; --lamp-tail, lavender: a dawn), fading to --lamp-tail-fade at its end and narrowing from
-     --lamp-width, a halo of --lamp-glow --lamp-halo wide round its front half, the whole at --lamp-strength. Asked for less
-     motion, no comets: the edge in --lamp-mid with twice the glow. The pill over the window while a change runs has a dot
-     of --lamp-mid. */
-  :root{--lamp-line:rgba(255,212,188,.45);--lamp-glow:rgba(196,160,255,.22);--lamp-glow-size:14px;
-        --lamp-head:#fffaf2;--lamp-mid:#ffc6a0;--lamp-tail:#a58cff;--lamp-tail-fade:.15;
-        --lamp-width:2px;--lamp-halo:7px;--lamp-strength:1;
-        --lamp-lap:6s;--lamp-comets:2;--lamp-length:.16;--lamp-steps:14}   /* JS: the lap's time, how many comets (evenly apart), each one's length (a share of the edge), the shades it is drawn in */
+     While the agents' endpoint is on (html.autopilot), the top bar's edge is lit and "Agent 已接入" / "Agent access on"
+     stands left of Surprise me, after a light:
+       --lamp-line        the edge's colour
+       --lamp-line-width  how thick the edge is (1px as the bar's own border; more grows inward, the bar not moved)
+       --lamp-glow        the soft glow round the edge
+       --lamp-glow-size   how far that glow reaches
+       --lamp-head, --lamp-mid, --lamp-tail   the words' colours, left to right (a dawn: near white, peach, lavender);
+                          --lamp-mid is also the dot of the pill over the window while an agent's change runs
+       --lamp-dot         the light before the words (the turquoise of a car's lamp while it drives itself)
+       --lamp-dot-core    the light's bright middle
+       --lamp-dot-glow    the light's halo
+     The light is steady; it breathes while an agent's change runs (body.agent), and never where less motion is asked for. */
+  :root{--lamp-line:rgba(255,212,188,.45);--lamp-line-width:1px;--lamp-glow:rgba(196,160,255,.22);--lamp-glow-size:14px;
+        --lamp-head:#fffaf2;--lamp-mid:#ffc6a0;--lamp-tail:#a58cff;
+        --lamp-dot:#2ee6d6;--lamp-dot-core:#c8fff8;--lamp-dot-glow:rgba(46,230,214,.32)}
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px;overflow:hidden}
   button,input,select,textarea{font:inherit;color:inherit}
@@ -47,35 +51,31 @@
   header{display:flex;align-items:center;gap:12px;height:56px;padding:0 10px 0 18px;border-radius:18px}
   header h1{font:400 26px "Bebas Neue",sans-serif;letter-spacing:.08em;margin:0 2px 0 0}
   header .sep{width:1px;height:24px;background:var(--line2)}
-  /* the agents' lamp (its settings: the --lamp-* block above): while the endpoint runs (html.autopilot, mcpLightSync in
-     app.js) the top bar's edge is lit; while an agent's change holds the window (body.agent, agent.js), from the moment its
-     pill shows, its comets run round it (#lamp, laid over the bar where the grid puts it: lampLay's segments of rects, no
-     filter, so nothing but they is painted again as they move, and paused, nothing painted, while no change runs) */
+  /* the agents' lamp (its settings: the --lamp-* block above): while the endpoint is on (html.autopilot, mcpLightSync in
+     app.js) the top bar's edge is lit — its border in --lamp-line, and, thicker than the border, a ring of it inside
+     (an inset shadow: round at the corners as the bar is, nothing in the bar moved) — with a glow round it; an agent's
+     change running leaves the edge as it is */
   #top{transition:border-color .4s,box-shadow .4s}
-  html.autopilot #top,body.agent #top{border-color:var(--lamp-line);box-shadow:var(--glass-hi),var(--glass-drop),0 0 var(--lamp-glow-size) var(--lamp-glow)}
-  body.agent #top{box-shadow:var(--glass-hi),var(--glass-drop),0 0 calc(var(--lamp-glow-size) * 1.4) var(--lamp-glow);transition-delay:.15s}
-  #lamp{position:absolute;grid-area:1/1/2/2;left:.5px;top:.5px;width:calc(100% - 1px);height:calc(100% - 1px);overflow:visible;pointer-events:none;opacity:0;transition:opacity .35s}
-  body.agent #lamp{opacity:var(--lamp-strength);transition-delay:.15s}
-  #lamp rect{fill:none}
-  @media (prefers-reduced-motion:reduce){#lamp{display:none}body.agent #top{border-color:var(--lamp-mid);box-shadow:var(--glass-hi),var(--glass-drop),0 0 calc(var(--lamp-glow-size) * 2) var(--lamp-glow)}}
+  html.autopilot #top{border-color:var(--lamp-line);box-shadow:var(--glass-hi),var(--glass-drop),0 0 var(--lamp-glow-size) var(--lamp-glow),inset 0 0 0 max(0px,calc(var(--lamp-line-width) - 1px)) var(--lamp-line)}   /* the glass's own shadows first, so the light fades in and out */
   /* the window's close, minimise and zoom buttons sit at the top bar's left end (ownTitleBar in app.js): on a Mac its own
      float over it; on Windows and Linux the page draws them (#winbtns), at the same place and size and in a Mac's colours */
   html.ownbar header{padding-left:96px}
   @media(max-width:1200px){html.ownbar header .grp>span{display:none}}   /* "Saved as you go" gives the buttons' room back */
-  /* while an agent's change holds the window (body.agent), from the moment its pill shows: "Agent at work" left of Surprise
-     me, after a light that breathes, in the agents' lamp's colours (the --lamp-* block), laid over the room there with no
-     width of its own (the gap it adds taken back), so nothing else in the bar moves; the words left out where they do not
-     fit, the light too where not even it does (fitAtWork in app.js: .dot, .none). Less motion: the light still. */
-  #top .atwork{position:relative;align-self:stretch;width:0;margin-left:-12px;pointer-events:none}
-  #top .atwork.none{display:none}
-  #top .atwork .in{position:absolute;right:0;top:50%;display:flex;align-items:center;gap:9px;white-space:nowrap;transform:translateY(-50%);opacity:0;transition:opacity .35s}
-  body.agent #top .atwork .in{opacity:1;transition-delay:.15s}
-  #top .atwork i{flex:none;width:8px;height:8px;border-radius:50%;background:var(--lamp-mid);box-shadow:0 0 0 3px var(--lamp-glow),0 0 12px var(--lamp-glow);animation:atBreath 1.6s ease-in-out infinite paused}
-  body.agent #top .atwork i{animation-play-state:running}
-  #top .atwork b{font:600 13px var(--ui);letter-spacing:.02em;background:linear-gradient(90deg,var(--lamp-head),var(--lamp-mid) 45%,var(--lamp-tail));-webkit-background-clip:text;background-clip:text;color:transparent}
-  #top .atwork.dot b{display:none}
-  @keyframes atBreath{50%{opacity:.5;transform:scale(.78)}}
-  @media (prefers-reduced-motion:reduce){#top .atwork i{animation:none}}
+  /* while the endpoint is on (html.autopilot, as the edge): "Agent access on" left of Surprise me, after a light, in the
+     agents' lamp's colours (the --lamp-* block), laid over the room there with no width of its own (the gap it adds taken
+     back), so nothing else in the bar moves; the words left out where they do not fit, the light too where not even it
+     does (fitAgentsOn in app.js: .dot, .none). The light breathes while an agent's change runs (body.agent), never where
+     less motion is asked for. */
+  #top .agentson{position:relative;align-self:stretch;width:0;margin-left:-12px;pointer-events:none}
+  #top .agentson.none{display:none}
+  #top .agentson .in{position:absolute;right:0;top:50%;display:flex;align-items:center;gap:9px;white-space:nowrap;transform:translateY(-50%);opacity:0;transition:opacity .35s}
+  html.autopilot #top .agentson .in{opacity:1}
+  #top .agentson i{flex:none;width:8px;height:8px;border-radius:50%;background:radial-gradient(circle,var(--lamp-dot-core) 0 25%,var(--lamp-dot) 70%);box-shadow:0 0 0 3px var(--lamp-dot-glow),0 0 12px var(--lamp-dot-glow)}
+  body.agent #top .agentson i{animation:breathe 1.6s ease-in-out infinite}
+  #top .agentson b{font:600 13px var(--ui);letter-spacing:.02em;background:linear-gradient(90deg,var(--lamp-head),var(--lamp-mid) 45%,var(--lamp-tail));-webkit-background-clip:text;background-clip:text;color:transparent}
+  #top .agentson.dot b{display:none}
+  @keyframes breathe{50%{opacity:.5;transform:scale(.78)}}
+  @media (prefers-reduced-motion:reduce){body.agent #top .agentson i{animation:none}}
   #winbar{position:fixed;left:0;right:0;top:0;height:22px;z-index:45;display:none}
   body:has(#settings:not([hidden])) #winbar,body:has(#modal:not([hidden])) #winbar,body:has(#ask:not([hidden])) #winbar,body:has(#deal:not([hidden])) #winbar{display:block}
   #winbtns{position:fixed;left:30px;top:32px;z-index:46;display:flex;gap:6px}
@@ -1468,7 +1468,6 @@
 <div id="ambient"><canvas id="amb" width="48" height="27"></canvas><canvas id="amb0" width="48" height="27" hidden></canvas></div>
 <div class="app">
   <header id="top" class="glass"></header>
-  <svg id="lamp" aria-hidden="true"></svg>
   <div class="body nodrawer" id="body">
     <nav id="dock" class="glass"></nav>
     <aside id="left" class="glass"><div class="scroll" id="panel"></div></aside>

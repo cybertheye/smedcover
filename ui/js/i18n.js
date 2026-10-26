@@ -64,7 +64,7 @@ const STR = {
   "set.thisProfile": ["这个档案", "This profile"],
   "set.close": ["关闭设置", "Close settings"],
   "top.saved": ["已自动保存", "Saved as you go"],
-  "top.atWork": ["Agent 正在操作", "Agent at work"],
+  "top.agentsOn": ["Agent 已接入", "Agent access on"],
   "top.more": ["更多", "More"],
   "top.channel": ["频道", "Channel"],
   "top.newChannel": ["＋ 新建频道…", "+ New channel…"],

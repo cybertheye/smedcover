@@ -2177,7 +2177,7 @@ for its line), and the note that a proxy set in the agent's environment must lea
 `toolsMismatch`). The status is agent.js's `MCP`, read once with the token (`agentsRead()`; if that fails, why, and *Try
 again*) and then as the host sends it: `agentsLive()` changes the pill's and the line's words in place (both live
 regions, so a screen reader says them), draws what was seen again (every 15 s too while the page shows, for the times),
-the page anew when either switch was turned elsewhere, and the light in the nav, and the ⋯ menu's *Agents* line says it (`mcpSays()`). While the endpoint is on (running, or moving to another port) the agents' lamp lights the top bar's edge: `mcpLightSync()`, where every status lands, puts `autopilot` on `<html>`, and `#top` takes `--lamp-line` and a soft glow of `--lamp-glow`. All the lamp's looks are the `--lamp-*` properties in one block on `:root` in `index.html`, the colours of dawn: a near-white head, a peach body, a lavender tail. None of it is in `custom.json`:
+the page anew when either switch was turned elsewhere, and the light in the nav, and the ⋯ menu's *Agents* line says it (`mcpSays()`). While the endpoint is on (running, or moving to another port) the agents' lamp is lit: `mcpLightSync()`, where every status lands, puts `autopilot` on `<html>`, and `#top` takes `--lamp-line` as its border, a ring of it inside as much thicker as `--lamp-line-width` says (an inset shadow: round at the corners, nothing in the bar moved) and a soft glow of `--lamp-glow`; and *Agent access on* stands left of Surprise me (`.agentson`, built by `syncTop()` with the rest of the bar, shown by `html.autopilot`; its words a gradient from `--lamp-head` through `--lamp-mid` to `--lamp-tail`, after a light of `--lamp-dot`, `--lamp-dot-core` and `--lamp-dot-glow`, the turquoise of a car's lamp while it drives itself, which breathes while an agent's change runs, `body.agent`, never where less motion is asked for; laid over the room there with no width of its own, so nothing in the bar moves, its words left out where they do not fit and the light too where not even it does, `fitAgentsOn()`; hidden from screen readers). All the lamp's looks are the `--lamp-*` properties in one block on `:root` in `index.html`, each said there. None of it is in `custom.json`:
 `mcp.json` is Rust's, read and set through the `mcp_*` commands. ✕, Esc or a press beside it shuts it. The ways
 in from elsewhere open it at the card they mean: `SET_UI.at` names one to bring into view when the page is next drawn
 (`text`, `image`, `cut` or `batch`: the card whose id is `"set-" + SET_UI.at`) — *Set up an image model* or *Set up AI* in the repaint and generate
@@ -2532,16 +2532,8 @@ menu and dialogs, under a question, the title bar and the toast; `body.agent .ap
 toast's button, which would act mid-step), the keys, pastes and the wheel swallowed before anything sees them (by
 listeners added for the step and removed after it) and a drop let go — not replayed: a step is short — and, after
 150 ms, a pill of glass at the top saying what is being done (`agent.step.<tool>`), which a press pulses ("One
-moment"), and from that moment comets of light running round the top bar's edge (`#lamp`, an SVG the grid lays over
-the bar; `lampLay()` in `app.js` lays it out from the `--lamp-*` properties: each comet `--lamp-steps` segments end to
-end behind its head, one rect each, shaded from `--lamp-head` through `--lamp-mid` to `--lamp-tail` and fading, under a
-halo, the dash pattern repeating `--lamp-comets` times, all in px from the edge's own `getTotalLength()`; moved by one
-animation of `stroke-dashoffset` each and no filter, so only they are painted again; `body.agent`, which `hold()` and
-`release()` set, plays and pauses them (`lampWatch()`), so they stop however the step ends; a steady brighter glow where
-less motion is asked for), and *Agent at work* left of Surprise me in the top bar (`.atwork`, built by `syncTop()` with
-the rest of the bar and shown by `body.agent`, after a light that breathes, in the lamp's colours; laid over the room
-there with no width of its own, so nothing in the bar moves, its words left out where they do not fit and the light too
-where not even it does, `fitAtWork()`; hidden from screen readers, the pill saying it); `closeTransient()` answers a note of the open Settings page (the page and profile shown, and
+moment"), and from that moment the light before *Agent access on* in the top bar breathing (`body.agent`, which
+`hold()` and `release()` set, so it stops however the step ends; the bar's edge is left as it is); `closeTransient()` answers a note of the open Settings page (the page and profile shown, and
 the field it took the focus from; a colour field it leaves too, which in WebKit ends its picker), and once the change is
 over, its step settled and before the window is given back, agent.js hands it to `follow` (`settingsFollow()`): the page
 is drawn again only if what it shows (`settingsSeen()`) is no longer what it was last drawn, typed or picked in with
