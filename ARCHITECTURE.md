@@ -1916,11 +1916,11 @@ me (its key, Space, in a `kbd` on it), Export (its tip naming ⌘E), and ⋯ (`M
 as the default design* and *Restore the default design*, `saveDesign()` and `loadDesign()`; *Empty this cover…*,
 `clearDialog()`), the profile's three Settings pages, each saying what it holds (how many channels, how many sizes,
 through `counted(key, n, …)`, which picks a string's `.one` form for one; every count whose wording changes for one
-goes through it; *AI*'s line is the three AI lights as one, `AI_SHOW.menu`, see 8.6), the other
+goes through it; *AI*'s line is the three AI lights as one, `AI_SHOW.menu`, see 8.6) and, right under *AI* in the
+desktop app, *Agents* (Settings → Agents, saying whether the endpoint is on and its port, `mcpSays()`), the other
 profiles to switch to (unfolded on asking, `MENU.profiles`), *Project file* (*Open project…* and *Save project*,
 `projectActions`, each made by `keyed()` with its key in a `kbd` at its end and `aria-keyshortcuts`; left out where the
-host can neither save nor download a file, `CAN_PROJECT`), *Agents* in the desktop app (Settings → Agents, saying
-whether the endpoint is on and its port, `mcpSays()`), the glass and the language. A press beside it, or Esc,
+host can neither save nor download a file, `CAN_PROJECT`), the glass and the language. A press beside it, or Esc,
 shuts it. A key is written as `MOD_KEY` has it: ⌘ on a Mac, Ctrl+ elsewhere — and the app's own shortcuts (⌘E, ⌘S,
 ⌘O) are taken so too (`cmd`: the Meta key alone on a Mac, where Control and a letter move the caret in a field; Ctrl
 elsewhere; neither with Shift or Alt).

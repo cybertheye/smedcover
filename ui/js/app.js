@@ -8141,13 +8141,13 @@ function renderMenu() {
     el("div", { class: "sep" }),
     el("div", { class: "mg" }, t("menu.profile")),   // what is under it opens Settings
     page("brand", counted("menu.channels", S.profile.categories.length)), page("sizes", counted("menu.sizes", S.profile.sizes.length)), page("ai", AI_SHOW.menu()),
+    CAN_AGENTS && page("agents", mcpSays()),   // Settings → Agents, saying whether the endpoint is on
     others.length > 0 && el("button", { class: "mi", role: "menuitem", "aria-expanded": String(!!MENU.profiles), onclick: () => { MENU.profiles = !MENU.profiles; renderMenu(); } },
       el("span", { class: "mt" }, el("span", {}, t("menu.switch"))), el("span", { class: "chev" + (MENU.profiles ? " open" : "") })),
     MENU.profiles && others.map((p) => el("button", { class: "mi sub", role: "menuitem", onclick: go(() => switchProfile(p.id).catch((err) => { fail(err); syncTop(); })) },
       el("span", { class: "mt" }, el("span", {}, p.name), el("small", {}, counted("menu.channels", p.categories.length))))),
     CAN_PROJECT && [el("div", { class: "sep" }), el("div", { class: "mg" }, t("proj.group")),
       keyed(t("proj.open"), "O", projectActions.open), keyed(t("proj.save"), "S", projectActions.save)],
-    CAN_AGENTS && [el("div", { class: "sep" }), page("agents", mcpSays())],   // Settings → Agents, saying whether the endpoint is on
     el("div", { class: "sep" }),
     el("div", { class: "row", title: CAN_BLUR ? t("menu.glassTip") : null }, el("span", {}, t("menu.glass")),
       el("button", { class: "tog" + (on ? " on" : ""), role: "switch", "aria-checked": String(on), "aria-label": t("menu.glass"), disabled: !CAN_BLUR, onclick: () => { setGlass(!on, true); renderMenu(); } })),
