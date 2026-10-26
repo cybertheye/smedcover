@@ -12,8 +12,8 @@
 //! - It quits on `/app/done` (when the command line started it), when its standard input ends, or after two minutes.
 //! - What it does goes into `fake-app.log` in its data folder, a line each: `<pid> <what>`.
 //! - `FAKE_MODE` (commas between): `already_running` (exit 75 at once), `crash` (exit 1 at once), `needs_setup`.
-//!   `FAKE_CLI_JSON_MS`: how long before it writes `cli.json` (0); `FAKE_READY_MS`: how long more before it is ready
-//!   (150); `FAKE_VERSION`: the version it says.
+//!   `FAKE_CLI_JSON_MS`: how long before it writes `cli.json` (0); `FAKE_CLI_JSON_AFTER`: a file it waits for before
+//!   it writes it; `FAKE_READY_MS`: how long more before it is ready (150); `FAKE_VERSION`: the version it says.
 
 use std::collections::HashMap;
 use std::env;
@@ -195,6 +195,12 @@ async fn serve(data: PathBuf, for_cli: bool, needs_setup: bool) -> ! {
         let app = app.clone();
         async move {
             tokio::time::sleep(millis("FAKE_CLI_JSON_MS", 0)).await;
+            if let Some(go) = env::var_os("FAKE_CLI_JSON_AFTER").map(PathBuf::from) {
+                let until = std::time::Instant::now() + Duration::from_secs(30);
+                while !go.exists() && std::time::Instant::now() < until {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
             app.write_cli_json();
             log(&app.data, "listening");
             tokio::time::sleep(millis("FAKE_READY_MS", 150)).await;

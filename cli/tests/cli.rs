@@ -112,8 +112,8 @@ fn main() {
 /// A test's own folder (removed after it), with the data folder in it.
 struct Folder {
     _root: tempfile::TempDir,
-    /// The folder by its own path, links followed (on macOS the temporary folder is under a link, /var to
-    /// /private/var, and the command line, run in it, sees it by the path it leads to).
+    /// The folder by the path the command line, run in it, sees it by: on macOS the temporary folder is under a link
+    /// (/var to /private/var), followed; on Windows it is taken as it is (canonical there is a \\?\ path).
     base: PathBuf,
     data: PathBuf,
 }
@@ -121,7 +121,7 @@ struct Folder {
 impl Folder {
     fn new() -> Folder {
         let root = tempfile::tempdir().unwrap();
-        let base = fs::canonicalize(root.path()).unwrap();
+        let base = if cfg!(unix) { fs::canonicalize(root.path()).unwrap() } else { root.path().to_path_buf() };
         let data = base.join("data");
         fs::create_dir_all(&data).unwrap();
         Folder { _root: root, base, data }
@@ -170,7 +170,7 @@ fn smedcover(folder: &Folder, args: &[&str]) -> Command {
         .env("SMEDCOVER_APP", env::current_exe().unwrap())
         .env("SMEDCOVER_DATA", &folder.data)
         .env("LANG", "en_US.UTF-8");
-    for name in ["SMEDCOVER_SELFTEST", "SMEDCOVER_SELFTEST_STAY", "LC_ALL", "LC_MESSAGES", "FAKE_MODE", "FAKE_CLI_JSON_MS", "FAKE_READY_MS", "FAKE_VERSION"] {
+    for name in ["SMEDCOVER_SELFTEST", "SMEDCOVER_SELFTEST_STAY", "LC_ALL", "LC_MESSAGES", "FAKE_MODE", "FAKE_CLI_JSON_MS", "FAKE_CLI_JSON_AFTER", "FAKE_READY_MS", "FAKE_VERSION"] {
         cmd.env_remove(name);
     }
     cmd
@@ -317,12 +317,18 @@ fn starts_the_app_and_lets_it_go() {
 
 fn uses_the_app_already_running_when_the_one_started_defers() {
     let folder = Folder::new();
-    // an app starting, its cli.json not written yet: the command line starts one, which finds it and defers (75)
-    let _app = user_app(&folder, &[("FAKE_CLI_JSON_MS", "1500")]);
-    assert!(folder.wait_for("start", Duration::from_secs(10)));
+    // an app starting, its cli.json not written yet (till the test says): the command line starts one, which finds it
+    // and defers (75), and then waits for the one starting
+    let go = folder.path("go");
+    let _app = user_app(&folder, &[("FAKE_CLI_JSON_AFTER", go.to_str().unwrap())]);
+    assert!(folder.wait_for("start", Duration::from_secs(20)));
     let mut cmd = smedcover(&folder, &["profiles"]);
     cmd.env("FAKE_MODE", "already_running");
-    let ran = run(cmd);
+    let started = Instant::now();
+    let child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    assert!(folder.wait_for("exit 75", Duration::from_secs(20)), "{:?}", folder.log());
+    fs::write(&go, "").unwrap();
+    let ran = finish(child, started);
     assert_eq!(ran.code, 0, "{ran:?}");
     assert!(ran.stdout.contains("Mine  (id p1)"), "{ran:?}");
     let log = folder.log();
