@@ -457,6 +457,7 @@ pub fn run() {
             mcp::selftest_mcp,
             mcp::mcp_status,
             mcp::mcp_set,
+            mcp::mcp_require_token,
             mcp::mcp_token,
             mcp::mcp_attach,
             mcp::mcp_reply,

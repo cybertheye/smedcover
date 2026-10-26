@@ -20,11 +20,23 @@
 //! its result, and how long its client waits for headers is how long it may take. Refusals (400,
 //! 401, 403, …) are plain.
 //!
-//! In front of it, for every path: a `Host` that is not 127.0.0.1, localhost or [::1] is refused
-//! (403: another site's name resolving to this computer), and so is an `Origin` that is not one of
-//! those (403: a web page in a browser); no CORS headers are ever sent. `/mcp` also wants
-//! `Authorization: Bearer <token>` (401 without it), and the header is taken off before rmcp sees
-//! the request. `/health` says `{"name": "smedcover", "version", "page"}` to anyone who may reach it.
+//! In front of it, for every path and whoever may call: a `Host` that is not 127.0.0.1, localhost or
+//! [::1] is refused (403: another site's name resolving to this computer, DNS rebinding), and so is
+//! an `Origin` that is not one of those over http(s) (403: a web page in a browser, which always sends
+//! one on a POST; the app's own web view, `tauri://localhost` or `http://tauri.localhost`, among
+//! them). No CORS headers are ever sent, so even a page on a loopback origin gets no further than its
+//! browser's preflight: rmcp takes only `Content-Type: application/json`, which a page cannot send
+//! without one.
+//!
+//! Who may call `/mcp` is the host's [`Access`], read at every request, so a change is in force from
+//! the next one. [`Access::Open`] (the desktop's default) lets every request through: the endpoint
+//! listens on 127.0.0.1 alone and web pages are kept out as above, a program running on this
+//! computer as the user can read and write the user's files anyway, and what the tools can do is
+//! bounded (each change undoable, an export never over a file, a file read only for the call in hand
+//! that names it). [`Access::Token`] wants `Authorization: Bearer <token>` (401 without it, or with
+//! another): the desktop's when the user asks for it, and a server's (`smedcover serve`) always. In
+//! both the header is taken off before rmcp sees the request. `/health` says `{"name": "smedcover",
+//! "version", "page"}` to anyone who may reach it.
 //!
 //! Connections: a request's headers must come within [`HEADER_TIMEOUT`] (else the connection is
 //! closed), an accepted request's body within [`BODY_TIMEOUT`] (else 408), and `/mcp` takes bodies
@@ -105,21 +117,44 @@ pub const CLIENT_WINDOW: Duration = Duration::from_secs(10 * 60);
 /// The hosts and origins the endpoint answers: this computer's loopback names.
 const LOOPBACK: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
 
+/// Who may call `/mcp` (see the module's notes). Whichever it is, the `Host` and `Origin` checks
+/// keep web pages out. Its `Debug` does not show the token.
+#[derive(Clone, Debug)]
+pub enum Access {
+    /// Any client that reaches it, with or without an `Authorization` header (one sent anyway is not
+    /// looked at): the desktop app's default.
+    Open,
+    /// Only a client that shows this token, as `Authorization: Bearer <token>`: the desktop app's when
+    /// the user turns *Require a token* on. A server host (`smedcover serve`) always passes this.
+    Token(Secret),
+}
+
+impl Access {
+    /// Whether a request whose `Authorization` header gave `given` may call: `None`, no header;
+    /// `Some(None)`, one that is not `Bearer <token>`.
+    fn lets_in(&self, given: Option<Option<&str>>) -> bool {
+        match self {
+            Access::Open => true,
+            Access::Token(token) => given.flatten().is_some_and(|given| token.matches(given)),
+        }
+    }
+}
+
 /// The endpoint, ready to be started (and started again, on another port or after being stopped).
 #[derive(Clone)]
 pub struct McpServer {
     bridge: Arc<dyn PageBridge>,
     tools: Arc<ToolList>,
-    token: Arc<RwLock<Secret>>,
+    access: Arc<RwLock<Access>>,
     stats: Arc<Stats>,
 }
 
 impl McpServer {
-    /// An endpoint whose calls go to `bridge`, offering `tools`, for clients that show `token` (which
-    /// the host may change while it runs: the next request is checked against the new one), and
-    /// keeping account in `stats`.
-    pub fn new(bridge: Arc<dyn PageBridge>, tools: Arc<ToolList>, token: Arc<RwLock<Secret>>, stats: Arc<Stats>) -> McpServer {
-        McpServer { bridge, tools, token, stats }
+    /// An endpoint whose calls go to `bridge`, offering `tools`, to the clients `access` lets in
+    /// (which the host may change while it runs, open or another token: each request is checked
+    /// against it as it is then), and keeping account in `stats`.
+    pub fn new(bridge: Arc<dyn PageBridge>, tools: Arc<ToolList>, access: Arc<RwLock<Access>>, stats: Arc<Stats>) -> McpServer {
+        McpServer { bridge, tools, access, stats }
     }
 
     /// Listens on `addr` (the host passes 127.0.0.1 and the user's port; port 0 takes any free one)
@@ -163,7 +198,7 @@ impl McpServer {
         let mcp = Router::new()
             .route_service("/mcp", mcp)
             .route_layer(from_fn_with_state(front, read_body))
-            .route_layer(from_fn_with_state(self.token.clone(), bearer));
+            .route_layer(from_fn_with_state(self.access.clone(), bearer));
         Router::new().route("/health", get(health)).with_state(self.bridge.clone()).merge(mcp).layer(from_fn(loopback_only))
     }
 }
@@ -654,12 +689,11 @@ fn cancelled_request(body: &[u8]) -> Option<String> {
 
 // ---- in front of every route ----
 
-async fn bearer(State(token): State<Arc<RwLock<Secret>>>, mut request: Request, next: Next) -> Response {
+/// Lets a request to `/mcp` through if the [`Access`] in force then does (401 if not, saying how the
+/// token was missing or wrong), the `Authorization` header taken off either way.
+async fn bearer(State(access): State<Arc<RwLock<Access>>>, mut request: Request, next: Next) -> Response {
     let given = request.headers().get(AUTHORIZATION).map(|v| v.to_str().ok().and_then(token::bearer));
-    let ok = match given {
-        Some(Some(given)) => token.read().unwrap_or_else(|e| e.into_inner()).matches(given),
-        _ => false,
-    };
+    let ok = access.read().unwrap_or_else(|e| e.into_inner()).lets_in(given);
     if !ok {
         let challenge = if given.is_some() { r#"Bearer realm="SmedCover", error="invalid_token""# } else { r#"Bearer realm="SmedCover""# };
         let message = "Unauthorized: SmedCover wants the token shown in its MCP settings, as Authorization: Bearer <token>";
@@ -928,6 +962,11 @@ mod tests {
         for bad in ["null", "https://evil.example", "http://localhost.evil.example", "file://", "chrome-extension://abc", "http://127.0.0.1.nip.io", ""] {
             assert!(!origin_allowed(bad), "{bad}");
         }
+        // the app's own web view (macOS and Linux, Windows): with no token wanted, this is what keeps
+        // its page from calling the endpoint itself with fetch()
+        for own in ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "ipc://localhost"] {
+            assert!(!origin_allowed(own), "{own}");
+        }
     }
 
     #[test]
@@ -944,15 +983,16 @@ mod tests {
         assert_eq!(stats.only_client_on("2025-06-18"), None, "two of them: neither");
     }
 
-    /// `/mcp` wants the token, and rmcp is not shown it.
+    /// `/mcp` wants the token while the access is a token's, wants none while it is open, the one in
+    /// force at each request; and rmcp is never shown the header.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn the_token_is_wanted_and_then_taken_off() {
+    async fn the_token_is_wanted_when_asked_for_and_always_taken_off() {
         let secret = Secret::generate().unwrap();
         let good = format!("Bearer {}", secret.expose());
-        let token = Arc::new(RwLock::new(secret));
+        let access = Arc::new(RwLock::new(Access::Token(secret.clone())));
         let app = Router::new()
             .route("/mcp", get(|headers: HeaderMap| async move { format!("authorization seen: {}", headers.contains_key(AUTHORIZATION)) }))
-            .route_layer(from_fn_with_state(token.clone(), bearer));
+            .route_layer(from_fn_with_state(access.clone(), bearer));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/mcp", listener.local_addr().unwrap());
         let server = tokio::spawn(serve(listener, app, CancellationToken::new(), CancellationToken::new()));
@@ -982,10 +1022,27 @@ mod tests {
         assert!(challenge.unwrap().contains(r#"error="invalid_token""#));
         let (status, _, _) = ask(Some(good[7..].to_string())).await.unwrap();
         assert_eq!(status, 401, "the token without the scheme");
-        // a new token: the old one is turned away from the next request on
-        *token.write().unwrap() = Secret::generate().unwrap();
+        // open: every request through, a header sent anyway (right, wrong, of another scheme) not
+        // looked at and taken off all the same
+        *access.write().unwrap() = Access::Open;
+        for auth in [None, Some(good.clone()), Some("Bearer smc_wrong".into()), Some("Basic dXNlcjpwYXNz".into())] {
+            let (status, challenge, body) = ask(auth).await.unwrap();
+            assert_eq!((status, challenge, body.as_str()), (200, None, "authorization seen: false"));
+        }
+        // a token again: wanted from the next request on, and a new one turns the old away
+        *access.write().unwrap() = Access::Token(secret);
+        assert_eq!(ask(None).await.unwrap().0, 401);
+        assert_eq!(ask(Some(good.clone())).await.unwrap().0, 200);
+        *access.write().unwrap() = Access::Token(Secret::generate().unwrap());
         assert_eq!(ask(Some(good)).await.unwrap().0, 401);
         server.abort();
+    }
+
+    #[test]
+    fn access_does_not_show_its_token() {
+        let secret = Secret::generate().unwrap();
+        let shown = format!("{:?} {:?}", Access::Token(secret.clone()), Access::Open);
+        assert!(!shown.contains(secret.expose()), "{shown}");
     }
 
     #[test]

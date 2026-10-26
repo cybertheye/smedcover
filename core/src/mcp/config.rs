@@ -1,7 +1,10 @@
-//! `mcp.json` in the data folder: whether the endpoint is on, its port, and its token,
-//! `{"on": false, "port": 25277, "token": "smc_…"}`. Only the Rust side reads and writes it (the
-//! page asks for what it shows); it is written to a temporary file that then takes its place, and on
-//! Unix only its owner may read it.
+//! `mcp.json` in the data folder: whether the endpoint is on, its port, its token and whether an
+//! agent must show it, `{"on": false, "port": 25277, "token": "smc_…", "requireToken": false}`.
+//! Only the Rust side reads and writes it (the page asks for what it shows); it is written to a
+//! temporary file that then takes its place, and on Unix only its owner may read it.
+//!
+//! The token is made and kept even while none is required, so that turning *Require a token* on has
+//! one ready, and agents set up with it go on working whichever way the switch is.
 //!
 //! The temporary file's name is always the same (`mcp.json.tmp`), so a host saves from one place at
 //! a time: under the lock it keeps its settings in.
@@ -12,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
+use super::server::Access;
 use super::token::Secret;
 use crate::{err, Res};
 
@@ -31,21 +35,35 @@ pub struct McpConfig {
     pub on: bool,
     pub port: u16,
     pub token: Secret,
+    /// Whether an agent must show the token (`requireToken`): off by default on the desktop, where any
+    /// program on this computer may call (see `server.rs`).
+    pub require_token: bool,
 }
 
 impl McpConfig {
-    /// Off, on [`DEFAULT_PORT`], with a new token.
+    /// Off, on [`DEFAULT_PORT`], with a new token that is not required.
     pub fn new() -> Res<McpConfig> {
-        Ok(McpConfig { on: false, port: DEFAULT_PORT, token: Secret::generate()? })
+        Ok(McpConfig { on: false, port: DEFAULT_PORT, token: Secret::generate()?, require_token: false })
+    }
+
+    /// Who may call the endpoint these settings start: anyone, or only a client showing the token
+    /// when it is required.
+    pub fn access(&self) -> Access {
+        if self.require_token {
+            Access::Token(self.token.clone())
+        } else {
+            Access::Open
+        }
     }
 
     /// The settings saved in the data folder `data`. A file that is not there gives
     /// [`McpConfig::new`]'s; so does one that cannot be read as settings (not UTF-8, not JSON, not
     /// an object), which is first renamed [`BAD_FILE`]. A port out of range gives [`DEFAULT_PORT`];
-    /// a missing or malformed token is replaced with a new one. Whatever had to be filled in is saved
-    /// at once, so the token stays the same from then on. On Unix a file others may read or write is
-    /// made its owner's alone. Only a failure to read, rename or write the file is an error. Call it
-    /// under the same lock as [`McpConfig::save`].
+    /// a missing or malformed token is replaced with a new one; a `requireToken` that is missing or
+    /// not a boolean is `false`. Whatever had to be filled in is saved at once, so the token stays
+    /// the same from then on. On Unix a file others may read or write is made its owner's alone. Only
+    /// a failure to read, rename or write the file is an error. Call it under the same lock as
+    /// [`McpConfig::save`].
     pub fn load(data: &Path) -> Res<McpConfig> {
         let path = data.join(FILE);
         let bytes = match fs::read(&path) {
@@ -66,12 +84,13 @@ impl McpConfig {
         let on = saved.get("on").and_then(Value::as_bool);
         let port = saved.get("port").and_then(Value::as_u64).and_then(|p| u16::try_from(p).ok()).filter(|p| check_port(*p).is_ok());
         let token = saved.get("token").and_then(Value::as_str).and_then(Secret::parse);
-        let filled = on.is_none() || port.is_none() || token.is_none();
+        let require_token = saved.get("requireToken").and_then(Value::as_bool);
+        let filled = on.is_none() || port.is_none() || token.is_none() || require_token.is_none();
         let token = match token {
             Some(token) => token,
             None => Secret::generate()?,
         };
-        let config = McpConfig { on: on.unwrap_or(false), port: port.unwrap_or(DEFAULT_PORT), token };
+        let config = McpConfig { on: on.unwrap_or(false), port: port.unwrap_or(DEFAULT_PORT), token, require_token: require_token.unwrap_or(false) };
         if filled {
             config.save(data)?;
         }
@@ -82,7 +101,8 @@ impl McpConfig {
     /// saves under one lock: the temporary file's name is always the same.
     pub fn save(&self, data: &Path) -> Res<()> {
         fs::create_dir_all(data).map_err(|e| format!("{FILE}: {e}"))?;
-        let text = serde_json::to_string_pretty(&json!({"on": self.on, "port": self.port, "token": self.token.expose()})).map_err(err)?;
+        let text = serde_json::to_string_pretty(&json!({"on": self.on, "port": self.port, "token": self.token.expose(), "requireToken": self.require_token}))
+            .map_err(err)?;
         write_private(&data.join(FILE), format!("{text}\n").as_bytes()).map_err(|e| format!("{FILE}: {e}"))
     }
 }
@@ -154,23 +174,48 @@ mod tests {
     fn round_trip() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
-        // nothing there: off, the default port, a new token, saved at once
+        // nothing there: off, the default port, a new token not required, saved at once
         let first = McpConfig::load(&data).unwrap();
-        assert!(!first.on);
+        assert!(!first.on && !first.require_token);
         assert_eq!(first.port, DEFAULT_PORT);
+        assert!(matches!(first.access(), Access::Open));
         assert!(data.join(FILE).is_file());
         let again = McpConfig::load(&data).unwrap();
         assert!(again.token.matches(first.token.expose()), "the token stays");
         // changed and saved
-        let changed = McpConfig { on: true, port: 40001, token: Secret::generate().unwrap() };
+        let changed = McpConfig { on: true, port: 40001, token: Secret::generate().unwrap(), require_token: true };
         changed.save(&data).unwrap();
         let read = McpConfig::load(&data).unwrap();
-        assert!(read.on);
+        assert!(read.on && read.require_token);
         assert_eq!(read.port, 40001);
         assert!(read.token.matches(changed.token.expose()));
+        assert!(matches!(read.access(), Access::Token(t) if t.matches(changed.token.expose())));
         let saved: Value = serde_json::from_str(&fs::read_to_string(data.join(FILE)).unwrap()).unwrap();
-        assert_eq!(saved, json!({"on": true, "port": 40001, "token": changed.token.expose()}));
+        assert_eq!(saved, json!({"on": true, "port": 40001, "token": changed.token.expose(), "requireToken": true}));
         assert!(!data.join("mcp.json.tmp").exists());
+        // and off again, the token kept
+        McpConfig { require_token: false, ..read.clone() }.save(&data).unwrap();
+        let open = McpConfig::load(&data).unwrap();
+        assert!(!open.require_token && open.token.matches(changed.token.expose()));
+    }
+
+    #[test]
+    fn require_token_missing_or_not_a_boolean_is_off_and_filled_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let token = Secret::generate().unwrap();
+        for (given, wanted) in [(None, false), (Some(json!(true)), true), (Some(json!(false)), false), (Some(json!("yes")), false), (Some(json!(1)), false), (Some(Value::Null), false)] {
+            let mut file = json!({"on": true, "port": 40002, "token": token.expose()});
+            if let Some(given) = &given {
+                file["requireToken"] = given.clone();
+            }
+            fs::write(data.join(FILE), file.to_string()).unwrap();
+            let read = McpConfig::load(data).unwrap();
+            assert_eq!(read.require_token, wanted, "{given:?}");
+            assert!(read.on && read.port == 40002 && read.token.matches(token.expose()), "the rest is kept: {given:?}");
+            let saved: Value = serde_json::from_slice(&fs::read(data.join(FILE)).unwrap()).unwrap();
+            assert_eq!(saved["requireToken"], json!(wanted), "saved as read: {given:?}");
+        }
     }
 
     #[test]
@@ -207,8 +252,8 @@ mod tests {
 
     #[test]
     fn debug_does_not_show_the_token() {
-        let config = McpConfig::new().unwrap();
-        assert!(!format!("{config:?}").contains(config.token.expose()));
+        let config = McpConfig { require_token: true, ..McpConfig::new().unwrap() };
+        assert!(!format!("{config:?} {:?}", config.access()).contains(config.token.expose()));
     }
 
     #[cfg(unix)]

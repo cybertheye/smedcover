@@ -2,8 +2,9 @@
 //! 25277): raw requests in both eras of the protocol, rmcp's own client in both, and the
 //! dispatcher behind it, against a page that is played here.
 //!
-//! The token is never put in a failure's message: requests are made by helpers that do not print
-//! what they send.
+//! The endpoint wants a token unless a test says otherwise (`Endpoint::open()`, the desktop's
+//! default). The token is never put in a failure's message: requests are made by helpers that do not
+//! print what they send.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -19,7 +20,7 @@ use smedcover_core::mcp::bridge::{
     read_result, BoxFut, BridgeError, Call, ClientTag, Dispatcher, PageBridge, PageReply, PageSink, PageState, Progress,
 };
 use smedcover_core::mcp::server::{BindError, McpServer, Running, Stats, MAX_BODY, REFUSED_BODY_BYTES, VERSION};
-use smedcover_core::mcp::{Host, Secret, ToolList};
+use smedcover_core::mcp::{Access, Host, Secret, ToolList};
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, Notify};
 
@@ -127,20 +128,30 @@ impl FakeBridge {
 struct Endpoint {
     running: Running,
     bridge: Arc<FakeBridge>,
-    secret: Arc<RwLock<Secret>>,
+    access: Arc<RwLock<Access>>,
     stats: Arc<Stats>,
     server: McpServer,
 }
 
 impl Endpoint {
+    /// An endpoint that wants a token, as a server's always does.
     fn start() -> Endpoint {
+        Endpoint::start_with(Access::Token(Secret::generate().unwrap()))
+    }
+
+    /// One that wants none, as the desktop's by default.
+    fn open() -> Endpoint {
+        Endpoint::start_with(Access::Open)
+    }
+
+    fn start_with(access: Access) -> Endpoint {
         let bridge = Arc::new(FakeBridge::default());
         let tools = Arc::new(ToolList::from_json(TOOLS, Host::Desktop).unwrap());
-        let secret = Arc::new(RwLock::new(Secret::generate().unwrap()));
+        let access = Arc::new(RwLock::new(access));
         let stats = Arc::new(Stats::new());
-        let server = McpServer::new(bridge.clone(), tools, secret.clone(), stats.clone());
+        let server = McpServer::new(bridge.clone(), tools, access.clone(), stats.clone());
         let running = server.start(([127, 0, 0, 1], 0).into(), &Handle::current()).expect("a free port");
-        Endpoint { running, bridge, secret, stats, server }
+        Endpoint { running, bridge, access, stats, server }
     }
 
     fn addr(&self) -> SocketAddr {
@@ -151,17 +162,29 @@ impl Endpoint {
         format!("http://{}{path}", self.addr())
     }
 
-    fn token(&self) -> String {
-        self.secret.read().unwrap().expose().to_string()
+    /// The token the endpoint wants, if it wants one.
+    fn token(&self) -> Option<String> {
+        match &*self.access.read().unwrap() {
+            Access::Token(secret) => Some(secret.expose().to_string()),
+            Access::Open => None,
+        }
     }
 
-    /// The headers a client of `protocol` sends with a JSON-RPC message.
+    /// Who may call from the next request on.
+    fn set_access(&self, access: Access) {
+        *self.access.write().unwrap() = access;
+    }
+
+    /// The headers a client of `protocol` sends with a JSON-RPC message: the token's, if one is
+    /// wanted, among them.
     fn headers(&self, protocol: Option<&str>) -> Vec<(String, String)> {
         let mut headers = vec![
-            ("Authorization".to_string(), format!("Bearer {}", self.token())),
             ("Content-Type".to_string(), "application/json".to_string()),
             ("Accept".to_string(), "application/json, text/event-stream".to_string()),
         ];
+        if let Some(token) = self.token() {
+            headers.insert(0, ("Authorization".to_string(), format!("Bearer {token}")));
+        }
         if let Some(protocol) = protocol {
             headers.push(("MCP-Protocol-Version".into(), protocol.into()));
         }
@@ -589,40 +612,138 @@ async fn the_token_is_wanted() {
     let reply = http("POST", &e.url("/mcp"), wrong, Some(list.clone())).await;
     assert_eq!(reply.status, 401);
     assert!(reply.header("www-authenticate").unwrap().contains("invalid_token"));
-    let token = e.token();
+    let token = e.token().unwrap();
     assert!(!reply.body.contains(&token) && !reply.headers.iter().any(|(_, v)| v.contains(&token)), "the answer gives nothing away");
     assert_eq!(http("POST", &e.url("/mcp"), e.headers(Some(LEGACY)), Some(list.clone())).await.status, 200);
     // a new token: the old one is turned away at once
     let old = e.headers(Some(LEGACY));
-    *e.secret.write().unwrap() = Secret::generate().unwrap();
+    e.set_access(Access::Token(Secret::generate().unwrap()));
     assert_eq!(http("POST", &e.url("/mcp"), old, Some(list.clone())).await.status, 401);
     assert_eq!(http("POST", &e.url("/mcp"), e.headers(Some(LEGACY)), Some(list)).await.status, 200);
     // /health wants none
     assert_eq!(get(&e.url("/health"), vec![]).await.status, 200);
 }
 
+/// Web pages are kept out whoever may call: with a token wanted and, as strictly, with none.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn only_this_computer_by_its_loopback_names() {
-    let e = Endpoint::start();
-    let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).to_string();
-    let with = |extra: &[(&str, &str)]| {
+    for e in [Endpoint::start(), Endpoint::open()] {
+        let mode = if e.token().is_some() { "token" } else { "open" };
+        let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).to_string();
+        let with = |extra: &[(&str, &str)]| {
+            let mut headers = e.headers(Some(LEGACY));
+            headers.extend(extra.iter().map(|(n, v)| (n.to_string(), v.to_string())));
+            headers
+        };
+        // another site, a sandboxed or file page, and the app's own web view (macOS and Linux, Windows)
+        for origin in ["https://evil.example", "null", "http://localhost.evil.example:5173", "tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"] {
+            let reply = http("POST", &e.url("/mcp"), with(&[("Origin", origin)]), Some(list.clone())).await;
+            assert_eq!(reply.status, 403, "{mode}: {origin}");
+            assert!(reply.header("access-control-allow-origin").is_none());
+        }
+        for origin in ["http://localhost:5173", "http://127.0.0.1", "https://[::1]:8443"] {
+            assert_eq!(http("POST", &e.url("/mcp"), with(&[("Origin", origin)]), Some(list.clone())).await.status, 200, "{mode}: {origin}");
+        }
+        let evil_host = format!("evil.example:{}", e.addr().port());
+        assert_eq!(http("POST", &e.url("/mcp"), with(&[("Host", &evil_host)]), Some(list.clone())).await.status, 403, "{mode}");
+        assert_eq!(get(&e.url("/health"), vec![("Host".into(), evil_host.clone())]).await.status, 403, "{mode}");
+        let localhost = format!("localhost:{}", e.addr().port());
+        assert_eq!(http("POST", &e.url("/mcp"), with(&[("Host", &localhost)]), Some(list.clone())).await.status, 200, "{mode}");
+        // a page on a loopback origin gets no further than its browser's preflight, which is never
+        // told it may (no CORS headers), and the one POST it could send without one, of text/plain,
+        // is refused before anything is called
+        let preflight = vec![
+            ("Origin".to_string(), "http://localhost:5173".to_string()),
+            ("Access-Control-Request-Method".to_string(), "POST".to_string()),
+            ("Access-Control-Request-Headers".to_string(), "content-type".to_string()),
+        ];
+        let reply = http("OPTIONS", &e.url("/mcp"), preflight, None).await;
+        assert!(!(200..300).contains(&reply.status), "{mode}: the preflight answered {}", reply.status);
+        assert!(reply.headers.iter().all(|(n, _)| !n.to_ascii_lowercase().starts_with("access-control-")), "{mode}: no CORS headers");
+        let calls = e.bridge.calls.lock().unwrap().len();
+        let call = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "echo", "arguments": {}}}).to_string();
+        let mut simple: Vec<_> = with(&[("Origin", "http://localhost:5173")]).into_iter().filter(|(n, _)| n != "Content-Type").collect();
+        simple.push(("Content-Type".into(), "text/plain;charset=UTF-8".into()));
+        assert_eq!(http("POST", &e.url("/mcp"), simple, Some(call)).await.status, 415, "{mode}");
+        assert_eq!(e.bridge.calls.lock().unwrap().len(), calls, "{mode}: nothing was called");
+    }
+}
+
+// ---- no token wanted: the desktop's default ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn open_access_wants_no_token() {
+    let e = Endpoint::open();
+    assert!(e.headers(None).iter().all(|(n, _)| n != "Authorization"), "no token is sent");
+    let init = json!({"protocolVersion": LEGACY, "capabilities": {}, "clientInfo": {"name": "raw-open", "version": "0.1"}});
+    let body = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": init}).to_string();
+    let reply = http("POST", &e.url("/mcp"), e.headers(None), Some(body)).await;
+    assert_eq!(reply.status, 200, "{}", reply.body);
+    assert_eq!(reply.only()["result"]["serverInfo"]["name"], "smedcover");
+    assert_eq!(e.legacy_note(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}).to_string()).await, 202);
+    assert_eq!(e.legacy(2, "tools/list", json!({})).await.only()["result"]["tools"].as_array().unwrap().len(), 8);
+    let answer = e.legacy_call(3, "echo", json!({"text": "no token"})).await;
+    assert_eq!(answer["result"]["structuredContent"], json!({"text": "no token"}));
+    assert_eq!(e.bridge.last_call().0, "echo");
+    // a header sent anyway, a token's or not, right or wrong, is not looked at
+    for auth in ["Bearer smc_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "Bearer whatever", "Basic dXNlcjpwYXNz", "nonsense"] {
         let mut headers = e.headers(Some(LEGACY));
-        headers.extend(extra.iter().map(|(n, v)| (n.to_string(), v.to_string())));
-        headers
+        headers.push(("Authorization".into(), auth.into()));
+        let call = json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "echo", "arguments": {"n": 4}}});
+        let reply = http("POST", &e.url("/mcp"), headers, Some(call.to_string())).await;
+        assert_eq!(reply.status, 200, "{auth}");
+        assert!(reply.header("www-authenticate").is_none());
+        assert_eq!(reply.only()["result"]["structuredContent"], json!({"n": 4}));
+    }
+    // the 2026-07-28 era too
+    let reply = e.modern(5, "tools/call", json!({"name": "echo", "arguments": {"m": 1}}), Some("echo")).await;
+    assert_eq!(reply.status, 200, "{}", reply.body);
+    assert_eq!(reply.only()["result"]["structuredContent"], json!({"m": 1}));
+}
+
+/// Who may call is read at every request: switched while the endpoint runs, it is in force from the
+/// next request, without a restart, and a call in hand goes on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_access_switches_while_it_runs() {
+    let e = Endpoint::open();
+    let (list, url) = (json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).to_string(), e.url("/mcp"));
+    let ask = |auth: Option<&str>| {
+        let mut headers = e.headers(Some(LEGACY));
+        headers.retain(|(n, _)| n != "Authorization");
+        if let Some(auth) = auth {
+            headers.push(("Authorization".to_string(), auth.to_string()));
+        }
+        http("POST", &url, headers, Some(list.clone()))
     };
-    for origin in ["https://evil.example", "null", "http://localhost.evil.example:5173"] {
-        let reply = http("POST", &e.url("/mcp"), with(&[("Origin", origin)]), Some(list.clone())).await;
-        assert_eq!(reply.status, 403, "{origin}");
-        assert!(reply.header("access-control-allow-origin").is_none());
-    }
-    for origin in ["http://localhost:5173", "http://127.0.0.1", "https://[::1]:8443"] {
-        assert_eq!(http("POST", &e.url("/mcp"), with(&[("Origin", origin)]), Some(list.clone())).await.status, 200, "{origin}");
-    }
-    let evil_host = format!("evil.example:{}", e.addr().port());
-    assert_eq!(http("POST", &e.url("/mcp"), with(&[("Host", &evil_host)]), Some(list.clone())).await.status, 403);
-    assert_eq!(get(&e.url("/health"), vec![("Host".into(), evil_host.clone())]).await.status, 403);
-    let localhost = format!("localhost:{}", e.addr().port());
-    assert_eq!(http("POST", &e.url("/mcp"), with(&[("Host", &localhost)]), Some(list)).await.status, 200);
+    assert_eq!(ask(None).await.status, 200);
+    let mut hanging = e.open_call(9, "hang");
+    e.bridge.hung().await;
+    let secret = Secret::generate().unwrap();
+    let right = format!("Bearer {}", secret.expose());
+    e.set_access(Access::Token(secret));
+    let reply = ask(None).await;
+    assert_eq!(reply.status, 401);
+    assert_eq!(reply.header("www-authenticate"), Some(r#"Bearer realm="SmedCover""#));
+    assert_eq!(ask(Some("Bearer smc_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")).await.status, 401);
+    assert_eq!(ask(Some(&right)).await.status, 200);
+    // open again: no token wanted, and one shown does no harm
+    e.set_access(Access::Open);
+    assert_eq!(ask(None).await.status, 200);
+    assert_eq!(ask(Some(&right)).await.status, 200);
+    // the call begun before the switches is still in hand, its answer begun
+    assert!(e.bridge.let_go.lock().unwrap().is_none(), "the call in hand went on");
+    let head = blocking(move || read_head(&mut hanging, Duration::from_secs(5))).await;
+    assert!(head.is_some_and(|h| h.starts_with("http/1.1 200")), "the call's answer had begun");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rmcp_client_without_a_token_when_none_is_wanted() {
+    let e = Endpoint::open();
+    let client = client_config("rmcp-open").serve(rmcp_transport(&e)).await.expect("initialize without a token");
+    assert_eq!(client.list_all_tools().await.unwrap().len(), 8);
+    let result = client.call_tool(CallToolRequestParams::new("echo").with_arguments(args(json!({"open": true})))).await.unwrap();
+    assert_eq!(result.structured_content, Some(json!({"open": true})));
+    client.cancel().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -872,9 +993,15 @@ async fn batches_are_not_served() {
 
 // ---- rmcp's own client, in both eras ----
 
+/// rmcp's client for `e`, showing its token if it wants one.
 fn rmcp_transport(e: &Endpoint) -> StreamableHttpClientTransport<reqwest::Client> {
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
-    StreamableHttpClientTransport::with_client(client, StreamableHttpClientTransportConfig::with_uri(e.url("/mcp")).auth_header(e.token()))
+    let config = StreamableHttpClientTransportConfig::with_uri(e.url("/mcp"));
+    let config = match e.token() {
+        Some(token) => config.auth_header(token),
+        None => config,
+    };
+    StreamableHttpClientTransport::with_client(client, config)
 }
 
 fn client_config(name: &str) -> ClientConfig {
@@ -938,8 +1065,8 @@ impl PageSink for ChannelSink {
 async fn through_the_dispatcher_to_a_page() {
     let dispatcher = Arc::new(Dispatcher::new());
     let tools = Arc::new(ToolList::from_json(TOOLS, Host::Desktop).unwrap());
-    let secret = Arc::new(RwLock::new(Secret::generate().unwrap()));
-    let server = McpServer::new(dispatcher.clone(), tools, secret.clone(), Arc::new(Stats::new()));
+    let secret = Secret::generate().unwrap();
+    let server = McpServer::new(dispatcher.clone(), tools, Arc::new(RwLock::new(Access::Token(secret.clone()))), Arc::new(Stats::new()));
     let running = server.start(([127, 0, 0, 1], 0).into(), &Handle::current()).unwrap();
     let url = format!("http://{}", running.addr());
     assert_eq!(serde_json::from_str::<Value>(&get(&format!("{url}/health"), vec![]).await.body).unwrap()["page"], "none");
@@ -973,7 +1100,7 @@ async fn through_the_dispatcher_to_a_page() {
     assert_eq!(serde_json::from_str::<Value>(&get(&format!("{url}/health"), vec![]).await.body).unwrap()["page"], "ready");
 
     let headers = vec![
-        ("Authorization".to_string(), format!("Bearer {}", secret.read().unwrap().expose())),
+        ("Authorization".to_string(), format!("Bearer {}", secret.expose())),
         ("Content-Type".to_string(), "application/json".to_string()),
         ("Accept".to_string(), "application/json, text/event-stream".to_string()),
     ];

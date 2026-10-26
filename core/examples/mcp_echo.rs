@@ -4,8 +4,9 @@
 //! app's 25277 while the app may be running), each call answered with what it was asked, and
 //! `render_preview` with a 1×1 PNG. It stops after `seconds` (300 unless told).
 //!
-//! The token is not printed: the header that carries it is written to a file only its owner may
-//! read, whose path is printed, for `curl -H @<file>`.
+//! It wants a token, as a server always does ([`Access::Token`]). The token is not printed: the
+//! header that carries it is written to a file only its owner may read, whose path is printed, for
+//! `curl -H @<file>`.
 
 use std::fs;
 use std::io::Write;
@@ -14,7 +15,7 @@ use std::time::Duration;
 
 use serde_json::json;
 use smedcover_core::mcp::bridge::{read_result, BoxFut, BridgeError, Call, PageBridge, PageState};
-use smedcover_core::mcp::server::{McpServer, Stats};
+use smedcover_core::mcp::server::{Access, McpServer, Stats};
 use smedcover_core::mcp::{Host, Secret, ToolList};
 
 const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -46,7 +47,7 @@ async fn main() {
     let secret = Secret::generate().expect("a token");
     let header_file = std::env::temp_dir().join(format!("smedcover-mcp-echo-{}.header", std::process::id()));
     write_private(&header_file, &format!("Authorization: Bearer {}\n", secret.expose()));
-    let server = McpServer::new(Arc::new(EchoPage), Arc::new(tools), Arc::new(RwLock::new(secret)), Arc::new(Stats::new()));
+    let server = McpServer::new(Arc::new(EchoPage), Arc::new(tools), Arc::new(RwLock::new(Access::Token(secret))), Arc::new(Stats::new()));
     let running = server.start(([127, 0, 0, 1], port).into(), &tokio::runtime::Handle::current()).unwrap_or_else(|e| panic!("{e}"));
     println!("{}", running.url());
     println!("{}", header_file.display());

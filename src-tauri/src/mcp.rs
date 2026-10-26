@@ -2,7 +2,16 @@
 //! `smedcover_core::mcp`): the [`McpHost`] kept as Tauri's state, the window's channel as the
 //! dispatcher's [`PageSink`], and the commands the page uses — to take the calls and answer them
 //! (`mcp_attach`, `mcp_reply`, `mcp_progress`) and, in Settings → Agents, to turn the endpoint on and
-//! off, choose its port and see its token (`mcp_status`, `mcp_set`, `mcp_token`).
+//! off, choose its port, require a token or not, and see the token (`mcp_status`, `mcp_set`,
+//! `mcp_require_token`, `mcp_token`).
+//!
+//! By default no token is wanted, so that one line sets an agent up (Figma's desktop app has its
+//! endpoint so too). The endpoint listens on 127.0.0.1 alone, and the core keeps web pages out by
+//! their `Host` and `Origin` whichever way it is (`smedcover_core::mcp::server`); a program running
+//! on this computer as the user could read and write the user's files anyway, so a token adds little
+//! there, and what the tools can do is bounded (each change undoable, an export never over a file, a
+//! file read only for the call in hand that names it). Whoever wants it turns *Require a token* on:
+//! from the next request on, an agent must show the token, which is kept all along.
 //!
 //! `mcp.json` in the data folder is Rust's alone: the page asks for what it shows, and every save is
 //! made under the host's one lock on its settings. The endpoint starts with the app when it is on
@@ -26,7 +35,7 @@ use serde_json::{json, Map, Value};
 use smedcover_core::mcp::bridge::{BoxFut, BridgeError, Call, CallToolResult, PageProgress, PageReply};
 use smedcover_core::mcp::config::check_port;
 use smedcover_core::mcp::server::VERSION;
-use smedcover_core::mcp::{BindError, Dispatcher, Host, McpConfig, McpServer, PageBridge, PageSink, PageState, Running, Secret, Stats, ToolList};
+use smedcover_core::mcp::{Access, BindError, Dispatcher, Host, McpConfig, McpServer, PageBridge, PageSink, PageState, Running, Secret, Stats, ToolList};
 use smedcover_core::{err, Res};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Manager, State, Webview};
@@ -43,15 +52,15 @@ type OnRunning = Box<dyn Fn(bool) + Send + Sync>;
 
 /// The endpoint as the app keeps it: the dispatcher the window attaches to, the tools of the bundled
 /// `tools.json` the desktop offers, the clients seen and the calls under way, the files those calls
-/// name, the token (which the server reads at every request, so a new one takes over at once), and
-/// the settings with what came of them.
+/// name, who may call (which the server reads at every request, so a token required or a new one
+/// takes over at once), and the settings with what came of them.
 pub struct McpHost {
     data: PathBuf,
     dispatcher: Arc<Dispatcher>,
     tools: Arc<ToolList>,
     stats: Arc<Stats>,
     named: Arc<NamedFiles>,
-    token: Arc<RwLock<Secret>>,
+    access: Arc<RwLock<Access>>,
     server: McpServer,
     runtime: Handle,
     /// `mcp.json` as saved, and the endpoint started from it: saved, started and stopped under it.
@@ -126,16 +135,18 @@ impl McpHost {
         };
         let ours = selftest == Some(SelfTest::Mcp);
         if ours {
+            // the self-test begins as the app does by default, no token wanted; it has one made
             cfg.token = Secret::generate()?;
+            cfg.require_token = false;
             cfg.save(&data)?;
         }
         let dispatcher = Arc::new(Dispatcher::new());
         dispatcher.loading(); // the window is starting: calls wait for its page
         let stats = Arc::new(Stats::new());
         let named = Arc::new(NamedFiles::default());
-        let token = Arc::new(RwLock::new(cfg.token.clone()));
+        let access = Arc::new(RwLock::new(cfg.access()));
         let gated = Arc::new(Gated { inner: dispatcher.clone(), named: named.clone() });
-        let server = McpServer::new(gated, tools.clone(), token.clone(), stats.clone());
+        let server = McpServer::new(gated, tools.clone(), access.clone(), stats.clone());
         let start = match (ours, &trouble) {
             (true, _) => Some(0),
             (false, None) => (cfg.on && selftest.is_none_or(|s| s == SelfTest::Stay)).then_some(cfg.port),
@@ -147,7 +158,7 @@ impl McpHost {
             tools,
             stats,
             named,
-            token,
+            access,
             server,
             runtime,
             state: Mutex::new(Endpoint { cfg, running: None, trouble, switching: false }),
@@ -197,13 +208,14 @@ impl McpHost {
     }
 
     /// What Settings → Agents shows: `{on, state: "off" | "running" | "switching" | "error", port,
-    /// url, error?: {code, message, detail?}, page: "none" | "loading" | "ready", tools,
-    /// toolsMismatch, clients, inFlight, lastCall}`; `code` is `port_in_use`, `port_forbidden`,
-    /// `bind_failed` (`detail`: the system's words) or `config` (`mcp.json` could not be read). Never
-    /// the token.
+    /// url, requireToken, error?: {code, message, detail?}, page: "none" | "loading" | "ready",
+    /// tools, toolsMismatch, clients, inFlight, lastCall}`; `code` is `port_in_use`,
+    /// `port_forbidden`, `bind_failed` (`detail`: the system's words) or `config` (`mcp.json` could
+    /// not be read). Never the token.
     pub fn status(&self) -> Value {
-        let (on, state, port, error) = {
+        let (on, state, port, error, require_token) = {
             let s = self.lock();
+            let require_token = s.cfg.require_token;
             let error = s.trouble.as_ref().map(|t| match t {
                 Trouble::Bind(e) => {
                     let mut error = json!({"code": e.code(), "message": e.to_string()});
@@ -215,15 +227,15 @@ impl McpHost {
                 Trouble::Config(why) => json!({"code": "config", "message": why}),
             });
             match (&s.running, error) {
-                (Some(running), _) => (s.cfg.on, "running", running.port(), None),
-                (None, _) if s.switching => (s.cfg.on, "switching", s.cfg.port, None),
-                (None, Some(error)) => (s.cfg.on, "error", s.cfg.port, Some(error)),
-                (None, None) => (s.cfg.on, "off", s.cfg.port, None),
+                (Some(running), _) => (s.cfg.on, "running", running.port(), None, require_token),
+                (None, _) if s.switching => (s.cfg.on, "switching", s.cfg.port, None, require_token),
+                (None, Some(error)) => (s.cfg.on, "error", s.cfg.port, Some(error), require_token),
+                (None, None) => (s.cfg.on, "off", s.cfg.port, None, require_token),
             }
         };
         let mismatch = self.dispatcher.page_tools_hash().is_some_and(|h| h != self.tools.hash());
         let mut status = json!({
-            "on": on, "state": state, "port": port, "url": format!("http://127.0.0.1:{port}/mcp"),
+            "on": on, "state": state, "port": port, "url": format!("http://127.0.0.1:{port}/mcp"), "requireToken": require_token,
             "page": self.dispatcher.page().as_str(), "tools": self.tools.entries().len(), "toolsMismatch": mismatch,
         });
         if let Some(error) = error {
@@ -272,21 +284,43 @@ impl McpHost {
         Ok(self.status())
     }
 
-    /// The token, after a new one has taken its place if `regenerate` (saved, then in force at once:
-    /// a client still showing the old one is refused from its next request).
+    /// Whether an agent must show the token: saved, then in force from the next request on (the
+    /// endpoint goes on running, its calls in hand with it; an agent set up without the token is
+    /// refused from then on, one set up with it goes on either way). Its status after.
+    pub fn require_token(&self, on: bool) -> Res<Value> {
+        {
+            let mut s = self.lock();
+            let mut cfg = s.cfg.clone();
+            cfg.require_token = on;
+            self.put(&mut s, cfg)?;
+        }
+        self.changed();
+        Ok(self.status())
+    }
+
+    /// The token, after a new one has taken its place if `regenerate` (saved, then in force at once
+    /// if it is required: a client still showing the old one is refused from its next request). It
+    /// is kept, and can be shown and changed, while none is required.
     pub fn token(&self, regenerate: bool) -> Res<String> {
         let mut s = self.lock();
         if regenerate {
             let mut cfg = s.cfg.clone();
             cfg.token = Secret::generate()?;
-            cfg.save(&self.data)?;
-            *self.token.write().unwrap_or_else(|e| e.into_inner()) = cfg.token.clone();
-            s.cfg = cfg;
-            if matches!(s.trouble, Some(Trouble::Config(_))) {
-                s.trouble = None;
-            }
+            self.put(&mut s, cfg)?;
         }
         Ok(s.cfg.token.expose().to_string())
+    }
+
+    /// Saves `cfg` as `mcp.json` and has the server let in whom it says from the next request on;
+    /// an `mcp.json` that could not be read is said no more, being saved. `s` is the host's lock.
+    fn put(&self, s: &mut Endpoint, cfg: McpConfig) -> Res<()> {
+        cfg.save(&self.data)?;
+        *self.access.write().unwrap_or_else(|e| e.into_inner()) = cfg.access();
+        s.cfg = cfg;
+        if matches!(s.trouble, Some(Trouble::Config(_))) {
+            s.trouble = None;
+        }
+        Ok(())
     }
 
     /// The window's page is ready for calls, built with the `tools.json` whose hash is `tools_hash`.
@@ -345,10 +379,14 @@ impl McpHost {
         }
     }
 
-    /// The self-test's check of its own endpoint, as a client would make it: over HTTP, with the
-    /// token, `initialize` of 2025-06-18, `tools/list`, and `get_context` and `render_preview`
-    /// called through to the page; and a request with a wrong token. What it found, for the page to
-    /// check and report (`mcp` in report.json).
+    /// The self-test's check of its own endpoint, as a client would make it, over HTTP: as it is by
+    /// default, no token wanted, `initialize` of 2025-06-18, `tools/list`, and `get_context` and
+    /// `render_preview` called through to the page, none of them with a token (`open`: none was
+    /// wanted); then a token required, as the window's switch requires it ([`McpHost::require_token`]),
+    /// a request with none, one with a wrong token and one with the right one (`noToken`,
+    /// `wrongToken`, `rightToken`: their statuses); then none required again, as by default, and a
+    /// request with none (`openAgain`). `requireToken`: what the status said before, while and after.
+    /// What it found, for the page to check and report (`mcp` in report.json).
     pub async fn selftest(&self) -> Res<Value> {
         let mut page = self.dispatcher.watch_page();
         tokio::time::timeout(Duration::from_secs(30), page.wait_for(|p| matches!(p, PageState::Ready { .. })))
@@ -356,9 +394,28 @@ impl McpHost {
             .map_err(|_| "the window's page did not attach within 30 s".to_string())?
             .map_err(err)?;
         let url = self.lock().running.as_ref().map(Running::url).ok_or("the self-test's endpoint is not running")?;
-        let token = self.token.read().unwrap_or_else(|e| e.into_inner()).expose().to_string();
+        let token = self.token(false)?;
         let expected = self.tools.entries().len();
-        let mut found = tauri::async_runtime::spawn_blocking(move || selftest_client(&url, &token)).await.map_err(err)??;
+        let before = self.status()["requireToken"].clone();
+        let u = url.clone();
+        let mut found = tauri::async_runtime::spawn_blocking(move || selftest_client(&u)).await.map_err(err)??;
+        found["open"] = json!(before == json!(false));
+        // a token required, then none again whatever came of the requests (the self-test leaves it as
+        // it is by default)
+        let during = self.require_token(true)?["requireToken"].clone();
+        let u = url.clone();
+        let asked = tauri::async_runtime::spawn_blocking(move || -> Res<[u16; 3]> {
+            Ok([status_of(&u, None)?, status_of(&u, Some("smc_not-the-token"))?, status_of(&u, Some(&token))?])
+        })
+        .await;
+        let after = self.require_token(false)?["requireToken"].clone();
+        let [none, wrong, right] = asked.map_err(err)??;
+        let again = tauri::async_runtime::spawn_blocking(move || status_of(&url, None)).await.map_err(err)??;
+        found["noToken"] = json!(none);
+        found["wrongToken"] = json!(wrong);
+        found["rightToken"] = json!(right);
+        found["openAgain"] = json!(again);
+        found["requireToken"] = json!([before, during, after]);
         found["expectedTools"] = json!(expected);
         let status = self.status();
         found["toolsMismatch"] = status["toolsMismatch"].clone();
@@ -511,7 +568,8 @@ fn this_computer(ip: &IpAddr) -> bool {
 }
 
 /// Refuses a request the app would send for the page (`ai_request`, `fetch_image`) to the agents'
-/// endpoint itself, at `url` or through `proxy`, while it runs: with the token the page could make
+/// endpoint itself, at `url` or through `proxy`, while it runs: such a request carries no `Origin`,
+/// so with no token wanted (the default), or with the token the page can read, the page could make
 /// calls of its own there, and have the files they name read. Blocking: a name may be looked up.
 pub fn not_to_the_endpoint(app: &AppHandle, url: &str, proxy: Option<&str>) -> Res<()> {
     let Some(port) = app.try_state::<Arc<McpHost>>().and_then(|h| h.running_port()) else {
@@ -529,59 +587,70 @@ pub fn not_to_the_endpoint(app: &AppHandle, url: &str, proxy: Option<&str>) -> R
 
 const SELFTEST_CLIENT: &str = "smedcover-selftest";
 
-/// The self-test's client (see [`McpHost::selftest`]), on a thread of its own: each request's
-/// answer, an event stream, read to its end.
-fn selftest_client(url: &str, token: &str) -> Res<Value> {
+/// One JSON-RPC message of 2025-06-18 posted to `url` by the self-test's client, with `bearer` as its
+/// token if given: the status, and the message that answers it (the body, or the data of the event
+/// that answers it), its answer read to its end.
+fn post(agent: &ureq::Agent, url: &str, id: Option<u64>, method: &str, params: Value, bearer: Option<&str>) -> Res<(u16, Option<Value>)> {
+    let mut body = json!({"jsonrpc": "2.0", "method": method, "params": params});
+    if let Some(id) = id {
+        body["id"] = json!(id);
+    }
+    let mut request = agent
+        .post(url)
+        .set("Content-Type", "application/json")
+        .set("Accept", "application/json, text/event-stream")
+        .set("MCP-Protocol-Version", "2025-06-18");
+    if let Some(bearer) = bearer {
+        request = request.set("Authorization", &format!("Bearer {bearer}"));
+    }
+    let response = match request.send_string(&body.to_string()) {
+        Ok(r) | Err(ureq::Error::Status(_, r)) => r,
+        Err(e) => return Err(format!("{method}: no answer ({e})")),
+    };
+    let status = response.status();
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut response.into_reader(), &mut text).map_err(|e| format!("{method}: {e}"))?;
+    let answer = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:"))
+        .chain(std::iter::once(text.as_str()))
+        .filter_map(|data| serde_json::from_str::<Value>(data.trim()).ok())
+        .find(|m| id.is_some() && m["id"] == json!(id));
+    Ok((status, answer))
+}
+
+/// The status a `tools/list` posted to `url` with `bearer` as its token (none if not given) is
+/// answered with.
+fn status_of(url: &str, bearer: Option<&str>) -> Res<u16> {
+    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(30)).build();
+    Ok(post(&agent, url, Some(9), "tools/list", json!({}), bearer)?.0)
+}
+
+/// The self-test's client (see [`McpHost::selftest`]), on a thread of its own: the calls an agent
+/// set up as by default makes, without a token, each timed.
+fn selftest_client(url: &str) -> Res<Value> {
     let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(150)).build();
     let mut ms = serde_json::Map::new();
-    let mut post = |id: Option<u64>, method: &str, params: Value, bearer: &str| -> Res<(u16, Option<Value>)> {
+    let mut ask = |id: Option<u64>, method: &str, params: Value| -> Res<(u16, Option<Value>)> {
         let t0 = Instant::now();
-        let mut body = json!({"jsonrpc": "2.0", "method": method, "params": params});
-        if let Some(id) = id {
-            body["id"] = json!(id);
-        }
-        let request = agent
-            .post(url)
-            .set("Authorization", &format!("Bearer {bearer}"))
-            .set("Content-Type", "application/json")
-            .set("Accept", "application/json, text/event-stream")
-            .set("MCP-Protocol-Version", "2025-06-18");
-        let response = match request.send_string(&body.to_string()) {
-            Ok(r) | Err(ureq::Error::Status(_, r)) => r,
-            Err(e) => return Err(format!("{method}: no answer ({e})")),
-        };
-        let status = response.status();
-        let mut text = String::new();
-        std::io::Read::read_to_string(&mut response.into_reader(), &mut text).map_err(|e| format!("{method}: {e}"))?;
-        let name = params_name(method, &body);
+        let name = params_name(method, &json!({"params": params}));
+        let answer = post(&agent, url, id, method, params, None)?;
         ms.insert(name, json!(t0.elapsed().as_millis() as u64));
-        // the answer: the body, or the data of the event that answers this request
-        let answer = text
-            .lines()
-            .filter_map(|line| line.strip_prefix("data:"))
-            .chain(std::iter::once(text.as_str()))
-            .filter_map(|data| serde_json::from_str::<Value>(data.trim()).ok())
-            .find(|m| id.is_some() && m["id"] == json!(id));
-        Ok((status, answer))
+        Ok(answer)
     };
-    let result = |method: &str, answer: Option<Value>| -> Res<Value> {
-        let answer = answer.ok_or_else(|| format!("{method}: no answer to it"))?;
+    let result = |method: &str, (status, answer): (u16, Option<Value>)| -> Res<Value> {
+        let answer = answer.ok_or_else(|| format!("{method}: no answer to it (HTTP {status})"))?;
         if let Some(e) = answer.get("error") {
             return Err(format!("{method}: {e}"));
         }
         Ok(answer["result"].clone())
     };
     let init = json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": SELFTEST_CLIENT, "version": VERSION}});
-    let (_, answer) = post(Some(1), "initialize", init, token)?;
-    let init = result("initialize", answer)?;
-    let (initialized, _) = post(None, "notifications/initialized", json!({}), token)?;
-    let (_, answer) = post(Some(2), "tools/list", json!({}), token)?;
-    let tools = result("tools/list", answer)?["tools"].as_array().map_or(0, Vec::len);
-    let (_, answer) = post(Some(3), "tools/call", json!({"name": "get_context", "arguments": {}}), token)?;
-    let context = result("get_context", answer)?;
-    let (_, answer) = post(Some(4), "tools/call", json!({"name": "render_preview", "arguments": {"maxSide": 480}}), token)?;
-    let preview = result("render_preview", answer)?;
-    let (refused, _) = post(Some(5), "tools/list", json!({}), "smc_not-the-token")?;
+    let init = result("initialize", ask(Some(1), "initialize", init)?)?;
+    let (initialized, _) = ask(None, "notifications/initialized", json!({}))?;
+    let tools = result("tools/list", ask(Some(2), "tools/list", json!({}))?)?["tools"].as_array().map_or(0, Vec::len);
+    let context = result("get_context", ask(Some(3), "tools/call", json!({"name": "get_context", "arguments": {}}))?)?;
+    let preview = result("render_preview", ask(Some(4), "tools/call", json!({"name": "render_preview", "arguments": {"maxSide": 480}}))?)?;
     let png = preview["content"]
         .as_array()
         .and_then(|c| c.iter().find(|b| b["type"] == "image"))
@@ -594,7 +663,6 @@ fn selftest_client(url: &str, token: &str) -> Res<Value> {
         "context": {"isError": context["isError"], "profiles": context["structuredContent"]["profiles"].as_array().map_or(0, Vec::len)},
         "preview": {"isError": preview["isError"], "bytes": png.as_ref().map_or(0, Vec::len), "width": width, "height": height,
                     "said": [preview["structuredContent"]["width"], preview["structuredContent"]["height"]]},
-        "wrongToken": refused,
         "ms": ms,
     }))
 }
@@ -722,6 +790,12 @@ pub fn mcp_status(h: State<'_, Arc<McpHost>>) -> Value {
 #[tauri::command]
 pub async fn mcp_set(h: State<'_, Arc<McpHost>>, on: bool, port: Option<u16>) -> Res<Value> {
     h.set(on, port).await
+}
+
+/// Whether an agent must show the token (see [`McpHost::require_token`]); its status after.
+#[tauri::command]
+pub fn mcp_require_token(h: State<'_, Arc<McpHost>>, on: bool) -> Res<Value> {
+    h.require_token(on)
 }
 
 /// The token, a new one first if `regenerate` (see [`McpHost::token`]).
@@ -985,14 +1059,87 @@ mod tests {
     async fn a_new_token_is_saved_and_in_force_at_once() {
         let dir = tempfile::tempdir().unwrap();
         let h = host(dir.path());
+        h.require_token(true).unwrap();
         let old = h.token(false).unwrap();
         assert_eq!(old, h.token(false).unwrap());
         let new = h.token(true).unwrap();
         assert_ne!(old, new);
         assert!(McpConfig::load(dir.path()).unwrap().token.matches(&new));
-        let live = h.token.read().unwrap();
-        assert!(live.matches(&new) && !live.matches(&old), "the server checks the new one");
+        assert!(wants(&h).is_some_and(|live| live.matches(&new) && !live.matches(&old)), "the server checks the new one");
         assert!(h.status().to_string().find(&new).is_none(), "the status never holds it");
+        // made while none is required: kept, and the one wanted once it is
+        h.require_token(false).unwrap();
+        let newer = h.token(true).unwrap();
+        assert!(wants(&h).is_none() && McpConfig::load(dir.path()).unwrap().token.matches(&newer));
+        h.require_token(true).unwrap();
+        assert!(wants(&h).is_some_and(|live| live.matches(&newer)));
+    }
+
+    /// The token the server wants now, if it wants one.
+    fn wants(h: &McpHost) -> Option<Secret> {
+        match &*h.access.read().unwrap() {
+            Access::Token(secret) => Some(secret.clone()),
+            Access::Open => None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_token_is_wanted_only_when_required_and_from_then_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = host(dir.path());
+        // by default none, and the endpoint started so
+        let s = h.set(true, Some(free_port())).await.unwrap();
+        assert_eq!((s["state"].as_str(), s["requireToken"].as_bool()), (Some("running"), Some(false)));
+        assert!(wants(&h).is_none());
+        let token = h.token(false).unwrap();
+        let port = h.running_port().unwrap();
+        // required: saved, in force with the token kept, the endpoint not restarted
+        let s = h.require_token(true).unwrap();
+        assert_eq!(s["requireToken"], true);
+        assert!(s.to_string().find(&token).is_none(), "the status never holds the token");
+        assert!(wants(&h).is_some_and(|live| live.matches(&token)));
+        assert_eq!((h.running_port(), s["state"].as_str()), (Some(port), Some("running")), "the same port, never stopped");
+        let saved = McpConfig::load(dir.path()).unwrap();
+        assert!(saved.require_token && saved.on && saved.token.matches(&token));
+        // started with the app as saved
+        h.shut().await;
+        let again = host(dir.path());
+        assert_eq!(again.status()["requireToken"], true);
+        assert!(wants(&again).is_some_and(|live| live.matches(&token)));
+        // not required again: the token still kept, the same
+        let s = again.require_token(false).unwrap();
+        assert_eq!(s["requireToken"], false);
+        assert!(wants(&again).is_none());
+        let saved = McpConfig::load(dir.path()).unwrap();
+        assert!(!saved.require_token && saved.token.matches(&token));
+        assert_eq!(again.token(false).unwrap(), token);
+        again.shut().await;
+    }
+
+    /// The self-test's endpoint begins with no token wanted, whatever its folder's mcp.json says, and
+    /// over HTTP the self-test's requests are answered as the switch has it at each.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_self_tests_endpoint_begins_as_by_default_and_follows_the_switch() {
+        let dir = tempfile::tempdir().unwrap();
+        McpConfig { require_token: true, ..McpConfig::new().unwrap() }.save(dir.path()).unwrap();
+        let h = McpHost::new(dir.path().to_path_buf(), Arc::new(ToolList::empty()), Some(SelfTest::Mcp), Handle::current(), Box::new(|_| {})).unwrap();
+        let s = h.status();
+        assert_eq!((s["state"].as_str(), s["requireToken"].as_bool(), s["on"].as_bool()), (Some("running"), Some(false), Some(false)));
+        assert!(wants(&h).is_none());
+        let url = format!("http://127.0.0.1:{}/mcp", h.running_port().unwrap());
+        let token = h.token(false).unwrap();
+        let ask = |bearer: Option<&'static str>, token: Option<String>| {
+            let url = url.clone();
+            tokio::task::spawn_blocking(move || status_of(&url, token.as_deref().or(bearer)).unwrap())
+        };
+        assert_eq!(ask(None, None).await.unwrap(), 200, "no token wanted");
+        h.require_token(true).unwrap();
+        assert_eq!(ask(None, None).await.unwrap(), 401);
+        assert_eq!(ask(Some("smc_not-the-token"), None).await.unwrap(), 401);
+        assert_eq!(ask(None, Some(token)).await.unwrap(), 200);
+        h.require_token(false).unwrap();
+        assert_eq!(ask(None, None).await.unwrap(), 200);
+        h.shut().await;
     }
 
     #[tokio::test]
