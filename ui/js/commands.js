@@ -595,7 +595,7 @@ export function makeCommands(api) {
     add_photo: async (args, ctx = HUSHED) => {
       const how = Object.keys(args.source)[0], value = args.source[how];
       if (args.fill && args.at) throw refused('"at" is for a print: a photo that fills the canvas fills it.');
-      if (args.fill && args.above !== undefined) throw refused('"above" is for a print: a photo that fills the canvas goes just above bg, as the background.');
+      if (args.fill && args.above !== undefined) throw refused('"above" is for a print: a photo that fills the canvas goes down to the ground as the background, above bg and the photos filling the canvas there already.');
       const kept = how === "library" ? S.library.find((e) => e.pid === value.trim()) : null;
       if (how === "library" && !kept) throw refused(`No picture "${value}" in the library (list_library lists its photos).`);
       const pic = kept ? null : await pictureFrom(how, value, ctx);   // read, fetched or checked before anything is touched
@@ -607,7 +607,7 @@ export function makeCommands(api) {
         if (!pid) throw refused(`The picture could not be read here${/hei[cf]|avif/.test(pic.type || "") ? ` (${pic.type.slice(6).toUpperCase()} is read where the system reads it: on macOS)` : ""}.`);
         api.keepPicture(pid, args.name ?? pic.name, "upload");
       }
-      const L = await api.placePhoto(pid, args.at ? { x: args.at.x, y: args.at.y } : null, !!args.fill, above);   // as a photo placed: a print above `above` (the selected layer), or the background
+      const L = await api.placePhoto(pid, args.at ? { x: args.at.x, y: args.at.y } : null, !!args.fill, above);   // as a photo placed: a print above `above` (the selected layer), or the background where Fill the canvas takes it (toGround)
       if (!L) throw new ToolError("failed", `The picture "${pid}" could not be read from the photo store.`);
       return toResult({ structured: { layer: layerOut(L, S.cover), pid } });
     },

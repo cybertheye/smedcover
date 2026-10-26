@@ -623,7 +623,13 @@ async function fakeFull() {
     readAs: async (blob) => `data:${blob.type};base64,${Buffer.from(await blob.arrayBuffer()).toString("base64")}`,
     putPhoto: async (src) => { calls.push(["putPhoto", src.slice(0, 22)]); if (!src.startsWith("data:image/png")) return null; const pid = `new${++n}`; S.photos.set(pid, { src }); return pid; },
     keepPicture: (pid, name, kind) => { calls.push(["keepPicture", pid, name, kind]); S.library.unshift({ pid, name, kind, at: 1 }); },
-    placePhoto: async (pid, at, fill, above) => { calls.push(["placePhoto", pid, at, fill, above]); const L = newLayer("photo", { pid, ...(fill ? { fill: true } : {}) }); if (at) { L.t.all.x = at.x; L.t.all.y = at.y; } insertAbove(S.cover.layers, fill ? "bg" : above ?? S.layerId, L); S.layerId = L.id; return L; },
+    placePhoto: async (pid, at, fill, above) => {   // a background as toGround puts one: above bg and the photos filling the canvas there already
+      calls.push(["placePhoto", pid, at, fill, above]);
+      const L = newLayer("photo", { pid, ...(fill ? { fill: true } : {}) }), ls = S.cover.layers;
+      if (at) { L.t.all.x = at.x; L.t.all.y = at.y; }
+      if (fill) { let i = 1; while (i < ls.length && ls[i].type === "photo" && ls[i].fill && !ls[i].of) i++; ls.splice(i, 0, L); } else insertAbove(ls, above ?? S.layerId, L);
+      S.layerId = L.id; return L;
+    },
     canCrop: (L) => L.type === "asset" || (L.type === "photo" && !L.fill), pictureSize: (L) => (L.type === "photo" ? [1000, 500] : [600, 600]),
     setCrop: (L, c) => { const k = normalizeCrop(c); if (JSON.stringify(k) === JSON.stringify(L.crop || null)) return false; if (k) L.crop = k; else delete L.crop; calls.push(["setCrop", L.id]); return true; },
     CUT: { busy: false, error: "" }, scopeKeys: (scope, key) => (scope === "size" ? [key] : null),
@@ -739,6 +745,9 @@ test("the photo tools do what the editor does: a picture from a file, a link, th
   const kept = S.library.length;
   const four = (await cmds.add_photo({ source: { library: "pic1" }, fill: true }, ctx)).structuredContent;
   assert.equal(four.pid, "pic1"); assert.equal(four.layer.fill, true); assert.equal(S.library.length, kept, "not kept twice");
+  const five = (await cmds.add_photo({ source: { library: "pic1" }, fill: true }, ctx)).structuredContent;
+  assert.ok(S.cover.layers.findIndex((l) => l.id === five.layer.id) > S.cover.layers.findIndex((l) => l.id === four.layer.id), "a second background over the first, as Fill the canvas puts it");
+  S.cover.layers = S.cover.layers.filter((l) => l.id !== five.layer.id);
   await assert.rejects(cmds.add_photo({ source: { data: "data:image/gif;base64,R0lGODlhAQABAAAAACw=" } }, ctx), /could not be read here/);
   // crop: a rectangle kept within the picture, a shape, a ratio of the picture's shape, the whole picture again
   const P = S.cover.layers.find((l) => l.id === one.layer.id);

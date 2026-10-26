@@ -2417,7 +2417,7 @@
     {
       "name": "add_photo",
       "title": "Add a photo",
-      "description": "Puts a photo on the cover. source is exactly one of: path (an image file on this computer, absolute: PNG, JPEG, WebP, GIF, HEIC or AVIF, at most 64 MB), url (an http(s) link to an image), library (a pid from list_library) or data (the image in base64, or a data: URL). Prefer a path or a url: data travels whole through the conversation, at most 24 Mi characters. fill: true makes it the background, filling the canvas, just above bg; else it is placed as a print, its centre at `at` {x, y}, just above `above` (a layer id or \"top\"; by default the selected layer). A new picture joins the bitmap library. One undo step. Returns the new layer and the picture's pid.",
+      "description": "Puts a photo on the cover. source is exactly one of: path (an image file on this computer, absolute: PNG, JPEG, WebP, GIF, HEIC or AVIF, at most 64 MB), url (an http(s) link to an image), library (a pid from list_library) or data (the image in base64, or a data: URL). Prefer a path or a url: data travels whole through the conversation, at most 24 Mi characters. fill: true makes it the background, filling the canvas, as Fill the canvas does: above bg and the photos filling the canvas there already, so it shows over them; else it is placed as a print, its centre at `at` {x, y}, just above `above` (a layer id or \"top\"; by default the selected layer). A new picture joins the bitmap library. One undo step. Returns the new layer and the picture's pid.",
       "inputSchema": {
         "type": "object",
         "properties": {

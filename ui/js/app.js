@@ -1645,7 +1645,8 @@ async function replacePhoto(L) {
 /**
  * Adds a picture (a data URL) as a photo layer and selects it: like a print on the cover, the first one too (Fill the
  * canvas, in its properties, makes it the background), above the selected layer — at `at` ({x, y}, fractions of the
- * canvas) when given. `fill`: as the background instead, just above the ground (the self-test's). Returns the layer.
+ * canvas) when given. `fill`: as the background instead, down on the ground as Fill the canvas takes it (the
+ * self-test's, an agent's add_photo). Returns the layer.
  */
 async function addPhoto(src, at = null, name = "", fill = false) {
   const pid = await putPhoto(src);
@@ -1655,13 +1656,16 @@ async function addPhoto(src, at = null, name = "", fill = false) {
 }
 /**
  * Puts a picture of the photo store on the cover as a photo layer, by addPhoto's rules (from the bitmap library, too):
- * above layer `above` (the selected one, unless told; see addLayer) where it does not fill the canvas.
+ * above layer `above` (the selected one, unless told; see addLayer) where it does not fill the canvas; filling it, as
+ * the background where Fill the canvas takes a photo (toGround): above the Background layer and the photos filling
+ * the canvas there already, so it shows.
  */
 async function placePhoto(pid, at = null, fill = false, above) {
   if (!S.photos.has(pid)) await loadPhotos([pid]);
   if (!S.photos.has(pid)) { toast(t("msg.badFile")); return null; }
   if (fill) {
-    const L = insertAbove(S.cover.layers, "bg", newLayer("photo", { pid, fill: true }));
+    const L = newLayer("photo", { pid, fill: true });
+    S.cover.layers.push(L); toGround(L);   // on top first, so that nothing clipped is taken down with it
     S.layerId = L.id; S.picked = [];
     touch({ cover: true, panel: true, side: true });
     toast(t("cover.photoAdded"));
@@ -8947,6 +8951,8 @@ async function agentFilesTest({ call, ok, r, no, dir }) {
   const f = (r.files = { tools: [], refused: [] }), start = snapshot(), home = S.profile.id, homeCat = S.cover.catId;
   const { change, refuse, same } = agentSteps({ call, ok, no }, f);
   const at = (id) => S.cover.layers.findIndex((l) => l.id === id), bytesOf = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  /** Whether photo `id` lies where Fill the canvas takes one (toGround): above bg and the photos filling the canvas there already, under every other layer and photo filling it. */
+  const grounded = (id) => { const ls = S.cover.layers, i = at(id); return i > 0 && ls.slice(1, i).every((l) => fillsCanvas(l) || l.clip) && !ls.slice(i + 1).some((l, k) => fillsCanvas(l) && clipBase(ls, i + 1 + k) < 0); };
   // a picture of the self-test's own, drawn here and written into its folder: a sky, a hill, a figure
   const pic = el("canvas", { width: 960, height: 640 }), g = pic.getContext("2d"), sky = g.createLinearGradient(0, 0, 0, 640);
   sky.addColorStop(0, "#5aa0e8"); sky.addColorStop(1, "#f6d29a"); g.fillStyle = sky; g.fillRect(0, 0, 960, 640);
@@ -8958,7 +8964,7 @@ async function agentFilesTest({ call, ok, r, no, dir }) {
   const added = await change("add_photo", { source: { path }, at: { x: 0.72, y: 0.62 } }), printId = added && added.layer.id;
   if (added && (!layer(printId) || !S.library.some((e) => e.pid === added.pid && e.name === "agent-photo"))) no("add_photo: the picture from a file is not on the cover, or not in the library under its file's name");
   const filled = added && (await change("add_photo", { source: { library: added.pid }, fill: true }));
-  if (filled && (!filled.layer.fill || at(filled.layer.id) !== 1)) no("add_photo: the library's picture does not fill the canvas just above bg");
+  if (filled && (!filled.layer.fill || !grounded(filled.layer.id))) no("add_photo: the library's picture does not fill the canvas above bg and the photos filling it there already");
   const dot = el("canvas", { width: 64, height: 64 }), dg = dot.getContext("2d");
   dg.fillStyle = "#ffcc00"; dg.fillRect(0, 0, 64, 64);
   const data = await change("add_photo", { source: { data: dot.toDataURL("image/png") }, at: { x: 0.2, y: 0.2 }, name: "agent-dot" });
@@ -8981,7 +8987,11 @@ async function agentFilesTest({ call, ok, r, no, dir }) {
   const real = await invoke("selftest_photo").catch(() => null);
   let woven = null;
   if (real && CAN.cut && cutReady()) {
-    const ph = await change("add_photo", { source: { data: real }, fill: true }), t0 = performance.now(), cut = ph && (await change("cut_out", { layer: ph.layer.id }));
+    const ph = await change("add_photo", { source: { data: real }, fill: true });
+    // a second background: over the library's picture, which it hides, as Fill the canvas would put it (not under it, unseen)
+    if (ph && (!grounded(ph.layer.id) || (filled && layer(filled.layer.id) && at(ph.layer.id) < at(filled.layer.id)))) no("add_photo: a second photo filling the canvas is not over the first");
+    f.ground = ph ? S.cover.layers.filter((l) => fillsCanvas(l)).map((l) => l.id === ph.layer.id ? "self-test photo" : filled && l.id === filled.layer.id ? "library picture" : l.id) : null;
+    const t0 = performance.now(), cut = ph && (await change("cut_out", { layer: ph.layer.id }));
     f.cut = { ms: Math.round(performance.now() - t0), ok: !!cut, error: CUT.error || null };
     const c = cut && layer(cut.cutout);
     if (cut && (!c || c.of !== ph.layer.id || at(c.id) <= at("title"))) no("cut_out: the cut-out is not linked to its photo, above the title");
