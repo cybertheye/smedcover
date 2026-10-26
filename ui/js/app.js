@@ -3006,8 +3006,11 @@ function agentsLive() {
 onMcpStatus(agentsLive);
 /**
  * Settings → Agents: the switch that turns the endpoint on (what it lets agents do), its port and state; the switch that
- * requires a token, off by default (agents on this computer then connect without one, web pages never), saying what it
- * does and, on, that agents set up without the token must be set up again; while on, the token (hidden but for its end;
+ * requires a token, off by default (any program that can reach 127.0.0.1 then connects without one — other accounts,
+ * containers, virtual machines and sandboxed apps among them — web pages never), saying so and when to turn it on (a
+ * computer shared, or running containers, virtual machines or apps not trusted) and, on, that agents set up without the
+ * token must be set up again (a refusal, such as an mcp.json that cannot be read, said as other failures are, by fail());
+ * while on, the token (hidden but for its end;
  * shown, copied, or replaced after asking); the lines that set an agent up, ready to copy (Claude Code, Codex, any other
  * client's JSON), with the token only while one is required; and the clients seen lately with the calls. What is kept is
  * mcp.json, Rust's: read and set through the mcp_* commands, never custom.json.

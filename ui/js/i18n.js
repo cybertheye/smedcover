@@ -1283,7 +1283,7 @@ const STR = {
   "mcp.err.bind_failed": ["没能在端口 {0} 上启动：{1}", "Could not start on port {0}: {1}"],
   "mcp.err.config": ["接口的设置读不了，所以没开：{0}", "Its settings could not be read, so the endpoint is off: {0}"],
   "mcp.require": ["要求令牌", "Require a token"],
-  "mcp.requireOff": ["关着时，这台电脑上的 agent 不用令牌就能连上（带着令牌配置过的也照样能连），网页连不上。打开后，agent 要出示令牌才能用。", "Off: agents on this computer connect without a token (those set up with one still do), and web pages cannot. On: an agent must show the token."],
+  "mcp.requireOff": ["关着时，这台电脑上的程序（包括其他账户、容器、虚拟机和沙盒应用）不用令牌就能操作这个窗口、按路径读图片和工程；网页不行。电脑有别人用、跑着容器或虚拟机、或装了不放心的应用时，请打开。", "Off: any program on this computer (other accounts, containers, VMs and sandboxed apps too) can drive this window and have it read pictures and projects by path, without a token; web pages cannot. Turn it on if the computer is shared or runs containers, VMs or apps you don't trust."],
   "mcp.requireOn": ["agent 要出示令牌才能连上：之前没带令牌配置的 agent，要用下面带令牌的那几段重新配置一次。", "An agent must show the token to connect: agents set up without it must be set up again with the lines below."],
   "mcp.token": ["访问令牌", "Token"],
   "mcp.tokenSub": ["像密码一样保管它", "Keep it like a password"],

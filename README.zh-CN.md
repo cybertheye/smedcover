@@ -763,8 +763,8 @@ Claude Code、Codex 这类 agent 可以在 SmedCover 的窗口里替你做封面
    （`--scope user`：在哪个目录里运行 Claude Code 都能用。）Codex 是一段 `[mcp_servers.smedcover]`，加进 `~/.codex/config.toml`（写着 `url`，还有 `tool_timeout_sec = 1800`，一次导出可能要这么久）。那段 JSON 给 Claude Code 的 `.mcp.json` 和 Cursor 的 `mcp.json` 用。
 3. 让 agent 做封面，比如：「做这周的封面：标题《雨夜东京漫步》，用夜景风格，给我看个预览。」
 
-- 默认不用令牌：这台电脑上的程序都能调用这个接口——以你的身份运行的程序本来就能读写你的文件；网页调用不了（`Host` 或 `Origin` 不是这台电脑的请求，接口一律拒绝，而且它不发 CORS 头，浏览器不会替网页把调用发过来）。工具能做的事本来也有边界：每一处改动都是一步撤销，导出从不覆盖已有的文件，只为指名了某个文件的那次调用读那一个文件。
-- 想多一层保护，就在同一页打开「要求令牌」：从下一个请求起，agent 要出示令牌（`Authorization: Bearer smc_…`）才能用，「连接 agent」给出带令牌的几段——Claude Code 的命令多一个 `--header "Authorization: Bearer <令牌>"`，JSON 多一个 `headers`；Codex 的那段里不放令牌，只写令牌所在的环境变量（`bearer_token_env_var = "SMEDCOVER_TOKEN"`），另一行设这个环境变量：加进 `~/.zshrc` 或 `~/.bashrc` 的 `export`（Windows 上是运行一次的 `setx`），之后要在新开的终端里启动 Codex。之前没带令牌配置的 agent，这时要重新配置一次；再关掉时，带着令牌配置过的 agent 照样能用。不管要不要求，令牌都存在数据目录的 `mcp.json` 里，只有你自己能读；页面上只露出最后几位。「换新令牌」（会先问一句）让旧令牌立刻失效。SmedCover 的服务器（`smedcover serve`，还没做）会一直要求令牌。
+- 默认不用令牌。这时凡是能连到这台电脑 127.0.0.1 的程序都能用这个接口：你自己的程序，也包括这台电脑上的其他账户、容器（Docker 之类）、虚拟机和 WSL，以及允许联网的沙盒应用。通过它，程序能操作这个窗口，按路径让 SmedCover 读你能读的任何图片或工程，往你能写的任何文件夹里写新的图片，还能让它去下载链接。网页用不了：`Host` 或 `Origin` 不是这台电脑的请求，接口一律拒绝，而且它不发 CORS 头，浏览器不会替网页把调用发过来；SmedCover 自己的窗口也没法借应用连过去。
+- 电脑有别人用，或者跑着容器、虚拟机，或者装了你不放心的应用时，就在同一页打开「要求令牌」：从下一个请求起，agent 要出示令牌（`Authorization: Bearer smc_…`）才能用，「连接 agent」给出带令牌的几段——Claude Code 的命令多一个 `--header "Authorization: Bearer <令牌>"`，JSON 多一个 `headers`；Codex 的那段里不放令牌，只写令牌所在的环境变量（`bearer_token_env_var = "SMEDCOVER_TOKEN"`），另一行设这个环境变量：加进 `~/.zshrc` 或 `~/.bashrc` 的 `export`（Windows 上是运行一次的 `setx`），之后要在新开的终端里启动 Codex。之前没带令牌配置的 agent，这时要重新配置一次；再关掉时，带着令牌配置过的 agent 照样能用。不管要不要求，令牌都存在数据目录的 `mcp.json` 里，只有你自己能读；页面上只露出最后几位。「换新令牌」（会先问一句）让旧令牌立刻失效。SmedCover 的服务器（`smedcover serve`，还没做）会一直要求令牌。
 - agent 做一步时窗口会被挡住，顶上的小条写着它在做什么（20 秒后给出「不等了」）；你正忙着的时候，agent 会等你。
 - 「最近」列出 10 分钟内来过的 agent 和它们的调用。
 - 开着时接口随应用启动，应用退出时停下。在 macOS 上，接口开着时窗口被挡住或在别的桌面上也照样绘制，agent 要的预览和导出不用等窗口露出来；别的系统没有这样的设置（Windows 会让最小化的窗口慢下来），agent 工作时别把窗口最小化。
