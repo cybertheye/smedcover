@@ -361,7 +361,8 @@ SmedCover tells the agent how it works when it connects (MCP's instructions). A 
 - A change holds the window while it runs: an overlay covers it, and after 150 ms a pill of glass at the top says what is
   being done (*Changing the words*, *Exporting 3 of 12*…), while two comets of dawn-coloured light (a near-white head,
   a peach body, a lavender tail) run round the top bar's edge (a steady brighter glow instead when the system asks for
-  less motion). A press on the window pulses it (*One moment —
+  less motion), and *Agent at work* shows beside *Surprise me*, after a breathing light (the light alone where the bar
+  has no room for the words). A press on the window pulses it (*One moment —
   almost done*); keys, pastes and the wheel are swallowed, not replayed later.
 - After 20 seconds the pill says *Taking longer than usual* and offers *Stop waiting* (or Esc): the window is yours again,
   and the agent is told the step did not finish.

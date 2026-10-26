@@ -2534,7 +2534,10 @@ end behind its head, one rect each, shaded from `--lamp-head` through `--lamp-mi
 halo, the dash pattern repeating `--lamp-comets` times, all in px from the edge's own `getTotalLength()`; moved by one
 animation of `stroke-dashoffset` each and no filter, so only they are painted again; `body.agent`, which `hold()` and
 `release()` set, plays and pauses them (`lampWatch()`), so they stop however the step ends; a steady brighter glow where
-less motion is asked for); `closeTransient()` answers a note of the open Settings page (what it shows, `settingsSeen()`,
+less motion is asked for), and *Agent at work* left of Surprise me in the top bar (`.atwork`, built by `syncTop()` with
+the rest of the bar and shown by `body.agent`, after a light that breathes, in the lamp's colours; laid over the room
+there with no width of its own, so nothing in the bar moves, its words left out where they do not fit and the light too
+where not even it does, `fitAtWork()`; hidden from screen readers, the pill saying it); `closeTransient()` answers a note of the open Settings page (what it shows, `settingsSeen()`,
 and the field it took the focus from), and once the change is over, its step settled and before the window is given
 back, agent.js hands it to `follow` (`settingsFollow()`): the page is drawn again only if the change touched what it
 shows (while a change runs, its commands' own drawing of it waits), scrolled where it was, a focused control given its

@@ -62,6 +62,20 @@
      float over it; on Windows and Linux the page draws them (#winbtns), at the same place and size and in a Mac's colours */
   html.ownbar header{padding-left:96px}
   @media(max-width:1200px){html.ownbar header .grp>span{display:none}}   /* "Saved as you go" gives the buttons' room back */
+  /* while an agent's change holds the window (body.agent), from the moment its pill shows: "Agent at work" left of Surprise
+     me, after a light that breathes, in the agents' lamp's colours (the --lamp-* block), laid over the room there with no
+     width of its own (the gap it adds taken back), so nothing else in the bar moves; the words left out where they do not
+     fit, the light too where not even it does (fitAtWork in app.js: .dot, .none). Less motion: the light still. */
+  #top .atwork{position:relative;align-self:stretch;width:0;margin-left:-12px;pointer-events:none}
+  #top .atwork.none{display:none}
+  #top .atwork .in{position:absolute;right:0;top:50%;display:flex;align-items:center;gap:9px;white-space:nowrap;transform:translateY(-50%);opacity:0;transition:opacity .35s}
+  body.agent #top .atwork .in{opacity:1;transition-delay:.15s}
+  #top .atwork i{flex:none;width:8px;height:8px;border-radius:50%;background:var(--lamp-mid);box-shadow:0 0 0 3px var(--lamp-glow),0 0 12px var(--lamp-glow);animation:atBreath 1.6s ease-in-out infinite paused}
+  body.agent #top .atwork i{animation-play-state:running}
+  #top .atwork b{font:600 13px var(--ui);letter-spacing:.02em;background:linear-gradient(90deg,var(--lamp-head),var(--lamp-mid) 45%,var(--lamp-tail));-webkit-background-clip:text;background-clip:text;color:transparent}
+  #top .atwork.dot b{display:none}
+  @keyframes atBreath{50%{opacity:.5;transform:scale(.78)}}
+  @media (prefers-reduced-motion:reduce){#top .atwork i{animation:none}}
   #winbar{position:fixed;left:0;right:0;top:0;height:22px;z-index:45;display:none}
   body:has(#settings:not([hidden])) #winbar,body:has(#modal:not([hidden])) #winbar,body:has(#ask:not([hidden])) #winbar,body:has(#deal:not([hidden])) #winbar{display:block}
   #winbtns{position:fixed;left:30px;top:32px;z-index:46;display:flex;gap:6px}

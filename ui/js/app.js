@@ -8176,14 +8176,30 @@ function syncTop() {
     el("div", { class: "spacer" }),
     el("div", { class: "grp" }, step("top.undo", "undo", -1, S.histIdx <= 0), step("top.redo", "redo", 1, S.histIdx >= S.hist.length - 1), el("span", {}, t("top.saved"))),
     el("div", { class: "spacer" }),
+    el("span", { class: "atwork", "aria-hidden": "true" }, el("span", { class: "in" }, el("i"), el("b", {}, t("top.atWork")))),   // while an agent's change runs (body.agent): the pill says it aloud
     el("button", { class: "btn cta glassy deal-btn", title: t("top.surpriseHint"), disabled: SURPRISE.busy, onclick: surprise }, ico("spark", 18), t(SURPRISE.busy ? "top.surpriseBusy" : "top.surprise"), el("kbd", {}, t("top.space"))),
     el("button", { class: "btn cta solid", title: t("top.exportTip", MOD_KEY + "E"), onclick: exportDialog }, ico("download", 18), t("top.export")),
     el("button", { class: "ibtn" + (MENU.open ? " on" : ""), id: "morebtn", title: t("top.more"), "aria-label": t("top.more"), "aria-haspopup": "menu", "aria-expanded": String(MENU.open), onclick: toggleMenu }, ico("more", 18)));
   for (const s of $("top").querySelectorAll(".crumb select")) fitList(s);
+  fitAtWork();
   for (const b of document.querySelectorAll("#winbtns button")) b.setAttribute("aria-label", b.title = t("top.win." + b.className));   // drawn on Windows and Linux (ownTitleBar)
   document.body.dataset.drop = t("msg.dropHere");
   if (MENU.open) renderMenu();
 }
+/**
+ * "Agent at work" beside Surprise me (.atwork, shown while an agent's change runs: index.html) is laid over the room left
+ * of the button, the spacer before it: the words and their light where they fit there, the light alone (.dot) where only
+ * it does, neither (.none) where not even it does or the bar has wrapped them apart — never over another control.
+ */
+function fitAtWork() {
+  const a = $("top").querySelector(".atwork"), room = a && a.previousElementSibling;
+  if (!a || !room) return;
+  a.classList.remove("dot", "none");
+  const r = room.getBoundingClientRect(), b = a.getBoundingClientRect(), inner = a.firstElementChild, light = inner.firstElementChild;
+  const free = Math.abs(r.top + r.bottom - b.top - b.bottom) < 8 ? r.width : 0;   // on one line of the bar (it wraps in a narrow window)
+  if (inner.offsetWidth > free) a.classList.add(light.offsetWidth <= free ? "dot" : "none");
+}
+new ResizeObserver(() => fitAtWork()).observe($("top"));
 // ---------- the ⋯ menu
 const MENU = { open: false, profiles: false };
 /** String `key` with a count: `key`.one for one ("1 channel"), else `key` ("5 channels"). */
