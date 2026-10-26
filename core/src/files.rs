@@ -47,28 +47,62 @@ pub fn picture_type(bytes: &[u8]) -> Option<&'static str> {
 }
 
 /// The file at `path`, checked: absolute, there, a regular file (a link is followed), no bigger than `max`, and read
-/// no further than that (a file growing meanwhile is refused, not cut short).
+/// no further than that (a file growing meanwhile is refused, not cut short). It is opened first and all the rest is
+/// asked of the file opened, which is the one read: a path swapped meanwhile for something else (a FIFO, a folder) is
+/// never read. On Unix it is opened without waiting (`O_NONBLOCK`, which changes nothing for a regular file), or
+/// opening a FIFO would wait for a writer, holding a thread of the blocking pool for ever.
 fn read_capped(path: &Path, max: u64, what: &str) -> Res<Vec<u8>> {
     if !path.is_absolute() {
         return Err(format!("not an absolute path: {}", path.display()));
     }
-    let meta = fs::metadata(path).map_err(|e| match e.kind() {
-        std::io::ErrorKind::NotFound => format!("no such file: {}", path.display()),
-        _ => format!("{}: {e}", path.display()),
+    let not_a_file = || format!("not a file: {}", path.display());
+    let file = open_to_read(path).map_err(|e| {
+        if fs::metadata(path).is_ok_and(|m| !m.is_file()) {
+            not_a_file()   // a folder, which Windows does not open as a file; a socket
+        } else if is_not_there(&e) {
+            format!("no such file: {}", path.display())
+        } else {
+            format!("{}: {e}", path.display())
+        }
     })?;
+    let meta = file.metadata().map_err(err)?;
     if !meta.is_file() {
-        return Err(format!("not a file: {}", path.display()));
+        return Err(not_a_file());
     }
     let too_big = |n: u64| format!("{what} too big: {} is {} MB, at most {} MB", path.display(), n.div_ceil(1024 * 1024), max / (1024 * 1024));
     if meta.len() > max {
         return Err(too_big(meta.len()));
     }
     let mut bytes = Vec::with_capacity(meta.len() as usize);
-    fs::File::open(path).map_err(err)?.take(max + 1).read_to_end(&mut bytes).map_err(err)?;
+    file.take(max + 1).read_to_end(&mut bytes).map_err(err)?;
     if bytes.len() as u64 > max {
         return Err(too_big(bytes.len() as u64));
     }
     Ok(bytes)
+}
+
+/// `path` opened to be read, without waiting on Unix (see [`read_capped`]).
+fn open_to_read(path: &Path) -> std::io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    options.open(path)
+}
+
+/// Whether opening a path failed because there is no file there to have: nothing at it, a part of it that is no
+/// folder (`/etc/passwd/x.png`), a name too long, links that go round in a loop — the agent's to put right, as a path
+/// to nothing is.
+fn is_not_there(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind::{InvalidFilename, NotADirectory, NotFound};
+    #[cfg(unix)]
+    if e.raw_os_error().is_some_and(|code| [libc::ENOENT, libc::ENOTDIR, libc::ENAMETOOLONG, libc::ELOOP].contains(&code)) {
+        return true;
+    }
+    matches!(e.kind(), NotFound | NotADirectory | InvalidFilename)
 }
 
 /// A picture on this computer, for an agent's `add_photo`: its type (by its bytes) and its bytes. Only an absolute
@@ -134,6 +168,10 @@ mod tests {
         fs::create_dir(at("folder.png")).unwrap();
         assert!(read_picture(&at("folder.png")).unwrap_err().starts_with("not a file:"));
         assert!(read_picture(&at("gone.png")).unwrap_err().starts_with("no such file:"));
+        // a path through a file as if it were a folder (ENOTDIR on Unix) is a path to nothing, as one not there is
+        let through = at("photo.PNG").join("x.png");
+        assert!(read_picture(&through).unwrap_err().starts_with("no such file:"), "{}", read_picture(&through).unwrap_err());
+        assert!(read_picture(&at("gone").join("x.png")).unwrap_err().starts_with("no such file:"));
         assert!(read_picture(Path::new("photo.png")).unwrap_err().starts_with("not an absolute path:"));
         assert!(read_picture(Path::new("../photo.png")).unwrap_err().starts_with("not an absolute path:"));
         // past the cap: refused before it is read
@@ -151,6 +189,37 @@ mod tests {
         assert_eq!(read_picture(&dir.path().join("link.png")).unwrap().0, "image/png");
         std::os::unix::fs::symlink(dir.path(), dir.path().join("dir.png")).unwrap();
         assert!(read_picture(&dir.path().join("dir.png")).unwrap_err().starts_with("not a file:"));
+        // links in a loop: a path to nothing
+        std::os::unix::fs::symlink(dir.path().join("b.png"), dir.path().join("a2.png")).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("a2.png"), dir.path().join("b.png")).unwrap();
+        assert!(read_picture(&dir.path().join("a2.png")).unwrap_err().starts_with("no such file:"));
+    }
+
+    /// A FIFO with no writer, named as a picture and as a project, directly and through a link: refused at once as no
+    /// file, never waited on (opened without waiting, then asked what it is). Before, a FIFO put in a file's place
+    /// between the check of the path and the opening blocked a thread of the blocking pool for ever.
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_is_refused_at_once_never_waited_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = |n: &str| {
+            let at = dir.path().join(n);
+            let c = std::ffi::CString::new(at.to_str().unwrap()).unwrap();
+            // SAFETY: a NUL-terminated path that lives for the call
+            assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0, "mkfifo {}", at.display());
+            at
+        };
+        let (pic, proj) = (fifo("pipe.png"), fifo("pipe.smedcover.json"));
+        std::os::unix::fs::symlink(&pic, dir.path().join("link.png")).unwrap();
+        let link = dir.path().join("link.png");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            tx.send((read_picture(&pic).map(|_| ()), read_picture(&link).map(|_| ()), read_project(&proj).map(|_| ()))).unwrap();
+        });
+        let (a, b, c) = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("reading a FIFO waited");
+        for got in [a, b, c] {
+            assert!(got.as_ref().unwrap_err().starts_with("not a file:"), "{got:?}");
+        }
     }
 
     #[test]

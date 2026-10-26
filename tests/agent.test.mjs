@@ -56,7 +56,11 @@ test("every tool is defined in full: a snake_case name, a title, a description, 
 
 test("the tools are marked as the spec has them: reading, changing, writing files, the window", () => {
   for (const n of READS) assert.equal(TOOL_BY[n].annotations.readOnlyHint, true, n);
-  for (const n of ["export", "batch_covers", "remove_layer"]) assert.equal(TOOL_BY[n].annotations.destructiveHint, true, n);
+  assert.equal(TOOL_BY.remove_layer.annotations.destructiveHint, true);
+  for (const n of ["export", "batch_covers"]) {   // new files only, never over one: no destruction, but each call writes more
+    assert.deepEqual([TOOL_BY[n].annotations.readOnlyHint, TOOL_BY[n].annotations.destructiveHint, TOOL_BY[n].annotations.idempotentHint], [false, false, false], n);
+    assert.match(TOOL_BY[n].description, /Writes new files and never overwrites one/, n);
+  }
   for (const d of TOOLS) if (/^(set|add)_/.test(d.name)) assert.equal(d.annotations.destructiveHint, false, d.name);
   assert.equal(TOOL_BY.add_photo.annotations.openWorldHint, true);
   for (const n of LIVE) assert.deepEqual(TOOL_BY[n].hosts, ["desktop"], n);
@@ -286,7 +290,7 @@ async function fakeApi() {
   };
   const api = {
     ...changes, frame, cat: () => S.profile.categories.find((c) => c.id === S.cover.catId), selSize: () => S.profile.sizes.find((z) => keyOf(z) === S.sel), sizeKeys: () => S.profile.sizes.map(keyOf),
-    drawnNow: () => ({ _hits: [], _virtual: [frame().vw, frame().vh] }), inColumns: (L) => L.vertical === true, owner: (L) => L, passivesOf: () => [], fxSeedOf: () => 4242, alignedT: () => null, isRemovable,
+    drawnNow: () => ({ _hits: [], _virtual: [frame().vw, frame().vh] }), inColumns: (L) => L.vertical === true, columnsByLook: () => false, owner: (L) => L, passivesOf: () => [], fxSeedOf: () => 4242, alignedT: () => null, isRemovable,
     S, CAN: { cut: true, outlines: false, saveFiles: true }, HOST: "tauri", appVersion: async () => "0.3.1", BUNDLED_FONTS: ["Noto Sans SC", "Bebas Neue", "JetBrains Mono"],
     cutReady: () => true, cutEngine: () => "vision", catIndex: () => S.profile.categories.findIndex((c) => c.id === S.cover.catId), channelOf: (q) => q.categories[0].id,
     layerName: (L) => `name of ${L.id}`, copiable: (L) => L.type !== "bg" && L.type !== "frame", pickedIds: () => (S.picked.length > 1 ? [...S.picked] : S.layerId === "bg" ? [] : [S.layerId]),
@@ -340,6 +344,17 @@ test("the read-only commands answer from the state as it is, and read another ch
   const opts = (await cmds.list_options({ only: ["fonts", "effects"], fontQuery: "ping" })).structuredContent;
   assert.deepEqual(Object.keys(opts).sort(), ["effects", "fonts"]);
   assert.deepEqual(opts.fonts.system, ["PingFang SC"]); assert.equal(opts.fonts.systemTotal, 3); assert.deepEqual(opts.fonts.imported, ["My Font"]);
+  assert.deepEqual(opts.fonts.latin, ["Bebas Neue"], "latin: of those listed (Helvetica, filtered out, is not)");
+  { // a well-stocked computer: 700 installed, most without Chinese; the answer lists 200 of them, and latin no more than it lists
+    const keep = [S.systemFonts, S.latinFonts];
+    S.systemFonts = Array.from({ length: 700 }, (_, i) => `Installed Family Number ${String(i).padStart(3, "0")}`); S.latinFonts = new Set([...S.systemFonts.slice(0, 650), "Bebas Neue"]);
+    const many = (await cmds.list_options({})).structuredContent, fonts = many.fonts;
+    assert.deepEqual([fonts.system.length, fonts.systemMatched, fonts.systemTotal], [200, 700, 700]);
+    assert.ok(fonts.latin.every((f) => fonts.system.includes(f) || fonts.bundled.includes(f)) && fonts.latin.length === 201, `${fonts.latin.length} latin`);
+    assert.ok(JSON.stringify(fonts).length < 16000, `the fonts are ${JSON.stringify(fonts).length} characters`);
+    assert.ok(JSON.stringify(many).length < 24000, `list_options is ${JSON.stringify(many).length} characters`);
+    [S.systemFonts, S.latinFonts] = keep;
+  }
   assert.deepEqual(opts.effects.find((e) => e.id === "spiky"), { id: "spiky", name: "Spiky", kind: "outline", seeded: true, needsOutlines: true, available: false });
   // every look in a line, its settings only when it is asked for alone: the whole answer a few thousand tokens, not sixteen
   const all = (await cmds.list_options({})).structuredContent, size = JSON.stringify(all).length;
@@ -524,11 +539,18 @@ test("a change does what the editor does, where it is aimed: the window switched
   assert.equal(title.font, "Helvetica"); assert.equal(title.vertical, true);
   // lines asked for where the look sets the title in columns of itself (the editor greys Lines and Columns out there): done, and said
   const lookWas = S.profile.style.look, columnsWas = api.inColumns;
-  S.profile.style.look = "songke"; api.inColumns = (L) => L.type === "title" || L.vertical === true;
-  const lines = (await cmds.set_layer_font({ layer: "title", vertical: false })).structuredContent;
+  S.profile.style.look = "songke"; api.inColumns = (L) => L.type === "title" || L.vertical === true; api.columnsByLook = (L) => L.type === "title";
+  const lines = (await cmds.set_layer_font({ layer: "title", vertical: false })).structuredContent;   // set in columns by hand too: the editor lets that go
   assert.equal(title.vertical, false);
   assert.ok(lines.warnings.some((w) => /look sets the title and the subtitle in columns itself \(its setting "vertical"\).*set_look with params \{"vertical": 0\}/.test(w)), JSON.stringify(lines.warnings));
-  S.profile.style.look = lookWas; api.inColumns = columnsWas; title.vertical = true;
+  // by the look alone, Lines and Columns greyed out in the editor: neither written, and said
+  for (const v of [true, false]) {
+    delete title.vertical;
+    const said = (await cmds.set_layer_font({ layer: "title", vertical: v })).structuredContent;
+    assert.ok(!("vertical" in title), `vertical: ${v} not written`);
+    assert.equal(said.warnings.filter((w) => /left as they are/.test(w)).length, 1, JSON.stringify(said.warnings));
+  }
+  S.profile.style.look = lookWas; api.inColumns = columnsWas; api.columnsByLook = () => false; title.vertical = true;
   // a bend takes away a perspective dragged by hand; in columns it is kept for later, and said
   title.reshape = [[0.1, 0]];
   const bent = (await cmds.set_layer_bend({ layer: "title", bend: "arc", amount: 1.5 })).structuredContent;
@@ -564,6 +586,13 @@ test("a change does what the editor does, where it is aimed: the window switched
   stuck.t.all = { ...stuck.t.all, x: 0.9, s: 2 };
   await cmds.place_layer({ layer: st.id, reset: true });
   assert.deepEqual([stuck.t.all.x, stuck.t.all.s], [0.5, 0.3], "put back in the middle, at the size a sticker is put on at");
+  { // a photo filling the canvas fills it still, as the editor's Reset leaves it (resetPlacement)
+    const { newLayer } = await import("../ui/js/layers.js"), ground = newLayer("photo", { pid: "pic1", fill: true });
+    S.cover.layers.splice(1, 0, ground); ground.t.all = { ...ground.t.all, x: 0.7, s: 1.6 };
+    await cmds.place_layer({ layer: ground.id, reset: true });
+    assert.deepEqual([ground.t.all.x, ground.t.all.y, ground.t.all.s, ground.fill], [0.5, 0.5, 1, true]);
+    S.cover.layers.splice(1, 1);
+  }
   const cp = (await cmds.add_layer({ kind: "copy", of: "subtitle" })).structuredContent.layer;
   assert.equal(cp.kind, "copy"); assert.ok(calls.some((c) => c[0] === "duplicateLayer" && c[1] === "subtitle"));
   // a copy of a layer tuned at the size on the canvas, put where it is asked: there too, its tunings of place left behind
@@ -614,9 +643,16 @@ async function fakeFull() {
       throw new Error(`no command ${cmd}`);
     },
     readAs: async (blob) => `data:${blob.type};base64,${Buffer.from(await blob.arrayBuffer()).toString("base64")}`,
-    putPhoto: async (src) => { calls.push(["putPhoto", src.slice(0, 22)]); if (!src.startsWith("data:image/png")) return null; const pid = `new${++n}`; S.photos.set(pid, { src }); return pid; },
+    putPhoto: async (src, { save = true } = {}) => { calls.push(["putPhoto", src.slice(0, 22), save]); if (!src.startsWith("data:image/png")) return null; const pid = `new${++n}`; S.photos.set(pid, { src }); if (save) calls.push(["savePhoto", pid]); return pid; },
+    savePhoto: (pid) => calls.push(["savePhoto", pid]),
     keepPicture: (pid, name, kind) => { calls.push(["keepPicture", pid, name, kind]); S.library.unshift({ pid, name, kind, at: 1 }); },
-    placePhoto: async (pid, at, fill, above) => { calls.push(["placePhoto", pid, at, fill, above]); const L = newLayer("photo", { pid, ...(fill ? { fill: true } : {}) }); if (at) { L.t.all.x = at.x; L.t.all.y = at.y; } insertAbove(S.cover.layers, fill ? "bg" : above ?? S.layerId, L); S.layerId = L.id; return L; },
+    placePhoto: async (pid, at, fill, above) => {   // a background as toGround puts one: above bg and the photos filling the canvas there already
+      calls.push(["placePhoto", pid, at, fill, above]);
+      const L = newLayer("photo", { pid, ...(fill ? { fill: true } : {}) }), ls = S.cover.layers;
+      if (at) { L.t.all.x = at.x; L.t.all.y = at.y; }
+      if (fill) { let i = 1; while (i < ls.length && ls[i].type === "photo" && ls[i].fill && !ls[i].of) i++; ls.splice(i, 0, L); } else insertAbove(ls, above ?? S.layerId, L);
+      S.layerId = L.id; return L;
+    },
     canCrop: (L) => L.type === "asset" || (L.type === "photo" && !L.fill), pictureSize: (L) => (L.type === "photo" ? [1000, 500] : [600, 600]),
     setCrop: (L, c) => { const k = normalizeCrop(c); if (JSON.stringify(k) === JSON.stringify(L.crop || null)) return false; if (k) L.crop = k; else delete L.crop; calls.push(["setCrop", L.id]); return true; },
     CUT: { busy: false, error: "" }, scopeKeys: (scope, key) => (scope === "size" ? [key] : null),
@@ -631,9 +667,11 @@ async function fakeFull() {
     setCover: (c) => { calls.push(["setCover", c.catId]); S.cover = S.covers[c.catId] = c; },
     loadPhotos: async (pids) => pids.filter((pid) => !S.photos.has(pid)),
     pidsOf: (c) => new Set(c.layers.filter((l) => l.type === "photo" && l.pid).map((l) => l.pid)),
-    openProject: async (raw, ask) => {
+    openProject: async (raw, ask, { each } = {}) => {
       const how = raw.profile && !S.profiles.some((q) => q.id === raw.profile.id) ? await ask(raw.profile.name) : null;
       calls.push(["openProject", how]);
+      const pics = Object.keys(raw.photos || {});
+      pics.forEach((_, i) => each && each(i + 1, pics.length));
       if (how === "new") { const q = normalizeProfile(raw.profile); S.profiles.push(q); S.profile = q; S.covers = {}; S.cover = S.covers.f1 = normalizeCover({ catId: "f1", title: raw.cover.title }, q); }
       else S.cover.title = raw.cover.title;
       return { profile: S.profile, catId: S.cover.catId };
@@ -669,6 +707,9 @@ test("the photo, cut-out, weave, Surprise me, project and file tools refuse what
     ["add_photo", { source: { url: "ftp://example.com/a.png" } }, /"source.url" must be an http\(s\) link/],
     ["add_photo", { source: { path: "/tmp/notes.txt" } }, /"source.path": not a picture file/],
     ["add_photo", { source: { library: "pic1" }, above: "nope" }, /No layer "nope"/],
+    ["add_photo", { source: { data: PNG_B64 }, above: "nope" }, /No layer "nope"/],   // decoded first, then let go of again
+    ["add_photo", { source: { path: "/tmp/a.png" }, channel: "nope" }, /No channel "nope"/],
+    ["add_photo", { source: { data: "data:image/gif;base64,R0lGODlhAQABAAAAACw=" }, channel: "nope" }, /could not be read here/],   // not decoded: refused before the channel is even looked for
     ["crop_photo", { layer: sticker.id, crop: { x: 0, y: 0 } }, /takes x, y, w and h, all four \(this one has x, y\)/],
     ["crop_photo", { layer: sticker.id, crop: { x: 0, y: 0, w: 0.5, h: 0.5, pts: [[0, 0], [1, 0], [1, 1]] } }, /a rectangle \(x, y, w, h\) or a shape \(pts\), not both/],
     ["crop_photo", { layer: sticker.id, crop: { pts: [[0, 0], [0.5, 0.5], [1, 1]] } }, /no area/],
@@ -708,7 +749,9 @@ test("the photo, cut-out, weave, Surprise me, project and file tools refuse what
   api.CAN = can;
   api.cutReady = () => false; api.cutEngine = () => "birefnet-lite";
   await assert.rejects(cmds.cut_out({ layer: "title" }), (e) => e.code === "unavailable" && /model \(birefnet-lite\) is not downloaded: the user can download it in Settings/.test(e.message));
-  assert.deepEqual(calls.filter((c) => c[0] !== "invoke"), [], "nothing that changes anything was called: no switch, no picture stored, nothing written");
+  // a picture decoded to be checked before anything is touched (putPhoto, save: false) is let go of again: the state below
+  assert.ok(calls.filter((c) => c[0] === "putPhoto").every((c) => c[2] === false), "a picture only decoded, never written");
+  assert.deepEqual(calls.filter((c) => c[0] !== "invoke" && c[0] !== "putPhoto"), [], "nothing that changes anything was called: no switch, no picture stored, nothing written");
   assert.equal(JSON.stringify(S, (k, v) => (v instanceof Map ? [...v.keys()] : v)), was, "the state as it was");
 });
 
@@ -720,18 +763,32 @@ test("the photo tools do what the editor does: a picture from a file, a link, th
   const one = (await cmds.add_photo({ source: { data: PNG_B64 }, name: "Dot", at: { x: 0.3, y: 0.6 } }, ctx)).structuredContent;
   assert.equal(one.pid, "new1"); assert.equal(one.layer.type, "photo"); assert.deepEqual([one.layer.place.x, one.layer.place.y], [0.3, 0.6]);
   assert.deepEqual(calls.filter((c) => c[0] === "keepPicture"), [["keepPicture", "new1", "Dot", "upload"]]);
+  assert.deepEqual(calls.filter((c) => ["putPhoto", "savePhoto", "switchChannel", "placePhoto"].includes(c[0])).map((c) => c[0]), ["putPhoto", "savePhoto", "placePhoto"], "decoded first, written once it is to be put on");
   assert.deepEqual(calls.find((c) => c[0] === "placePhoto"), ["placePhoto", "new1", { x: 0.3, y: 0.6 }, false, undefined], "above the selected layer: placePhoto's own default");
   // a file: read by the host, named after it; a link: fetched by the host; the library: placed again, not kept twice
   const two = (await cmds.add_photo({ source: { path: "/Users/me/Pictures/Holiday 2.png" }, above: "top" }, ctx)).structuredContent;
   assert.ok(calls.some((c) => c[0] === "invoke" && c[1] === "read_picture" && c[2].path === "/Users/me/Pictures/Holiday 2.png"));
   assert.ok(S.library.some((e) => e.pid === two.pid && e.name === "Holiday 2"));
   assert.equal(S.cover.layers.at(-1).id, two.layer.id, "above the topmost");
+  S.imageAi = { proxy: "http://127.0.0.1:7890" };
   const three = (await cmds.add_photo({ source: { url: "https://example.com/pics/sun%20set.png?x=1" } }, ctx)).structuredContent;
-  assert.ok(calls.some((c) => c[1] === "fetch_image" && c[2].url === "https://example.com/pics/sun%20set.png?x=1"));
+  assert.deepEqual(calls.find((c) => c[1] === "fetch_image")[2], { url: "https://example.com/pics/sun%20set.png?x=1", proxy: "http://127.0.0.1:7890", timeout: 120, known: true }, "through the image AI's proxy, only a picture the photo store takes");
   assert.ok(S.library.some((e) => e.pid === three.pid && e.name === "sun set"));
+  S.imageAi = {};
+  { // what the host refuses the link for is the agent's to put right; the network's failing is not
+    const invoke = api.invoke;
+    for (const [said, code] of [["not a picture: the link leads to no PNG, JPEG, WebP, GIF, HEIC or AVIF image (it says image/svg+xml)", "invalid_arguments"], ["picture too big: the reply at https://example.com/a.png is more than 64 MB", "invalid_arguments"], ["connection refused", "failed"]]) {
+      api.invoke = async (cmd, a) => (cmd === "fetch_image" ? Promise.reject(said) : invoke(cmd, a));
+      await assert.rejects(cmds.add_photo({ source: { url: "https://example.com/a.png" } }, ctx), (e) => e.code === code && e.message.includes(said), said);
+    }
+    api.invoke = invoke;
+  }
   const kept = S.library.length;
   const four = (await cmds.add_photo({ source: { library: "pic1" }, fill: true }, ctx)).structuredContent;
   assert.equal(four.pid, "pic1"); assert.equal(four.layer.fill, true); assert.equal(S.library.length, kept, "not kept twice");
+  const five = (await cmds.add_photo({ source: { library: "pic1" }, fill: true }, ctx)).structuredContent;
+  assert.ok(S.cover.layers.findIndex((l) => l.id === five.layer.id) > S.cover.layers.findIndex((l) => l.id === four.layer.id), "a second background over the first, as Fill the canvas puts it");
+  S.cover.layers = S.cover.layers.filter((l) => l.id !== five.layer.id);
   await assert.rejects(cmds.add_photo({ source: { data: "data:image/gif;base64,R0lGODlhAQABAAAAACw=" } }, ctx), /could not be read here/);
   // crop: a rectangle kept within the picture, a shape, a ratio of the picture's shape, the whole picture again
   const P = S.cover.layers.find((l) => l.id === one.layer.id);
@@ -743,6 +800,10 @@ test("the photo tools do what the editor does: a picture from a file, a link, th
   assert.ok(Math.abs((wide.w * 1000) / (wide.h * 500) - 16 / 9) < 2e-3, "16:9 on the picture (1000×500)");
   assert.equal((await cmds.crop_photo({ layer: P.id, reset: true })).structuredContent.crop, null);
   assert.match((await cmds.crop_photo({ layer: P.id, reset: true })).structuredContent.warnings[0], /was not cropped/);
+  // the whole picture asked for: one word, whether there was a crop to take away or none
+  assert.deepEqual((await cmds.crop_photo({ layer: P.id, crop: { x: 0, y: 0, w: 1, h: 1 } })).structuredContent.warnings, ["The rectangle is the whole picture: no crop, and it was not cropped."]);
+  await cmds.crop_photo({ layer: P.id, crop: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } });
+  assert.deepEqual((await cmds.crop_photo({ layer: P.id, crop: { pts: [[0, 0], [1, 0], [1, 1], [0, 1]] } })).structuredContent, { crop: null, warnings: ["The shape is the whole picture: no crop."] });
   await assert.rejects(cmds.crop_photo({ layer: four.layer.id, reset: true }), /fills the canvas: it is not cropped/);
   // cut out: the sizes the scope asked reaches; a cut-out itself is refused
   const cut = (await cmds.cut_out({ layer: P.id, size: "9:16", scope: "size" }, ctx)).structuredContent;
@@ -785,6 +846,8 @@ test("Surprise me deals as the window does, its locks this call's alone, and pic
   await assert.rejects(cmds.pick_hand({ hand: 5 }), /dealt 3 hands: pick 1 to 3/);
   S.histIdx++;   // a change made since: the hands are past taking
   await assert.rejects(cmds.pick_hand({ hand: 2 }), /changed since the last surprise.*Deal again with surprise/);
+  // the locks as they held: places keeps the layout too
+  assert.deepEqual((await cmds.surprise({ count: 2, locks: ["places"], images: "none" }, ctx)).structuredContent.locks, ["places", "layout"]);
   // with no locks given, Surprise me's own
   await cmds.surprise({ images: "none" }, ctx);
   assert.deepEqual(calls.filter((c) => c[0] === "dealHands").at(-1)[1].locks, { theme: true });
@@ -819,6 +882,27 @@ test("open_project opens a project from a file or given whole, as a new profile 
   assert.deepEqual(made, { profile: { id: "far", name: "Far away", created: true }, channel: "f1" });
   const again = (await cmds.open_project({ project, as: "current" })).structuredContent;
   assert.equal(again.profile.created, false); assert.match(again.warnings[0], /Its profile, "Far away", is here: it opened there/);
+  // the caller told as each of its pictures is taken in, each word above the last
+  const told = [], ctx = { progress: (n, total, message) => told.push([n, message]), cancelled: () => false, say: () => {} };
+  await cmds.open_project({ project: { ...project, photos: { a: {}, b: {}, c: {} } } }, ctx);
+  assert.deepEqual(told, [[1, "Took in picture 1 of 3 of the project."], [2, "Took in picture 2 of 3 of the project."], [3, "Took in picture 3 of 3 of the project."]]);
+});
+
+test("each call's progress rises, whoever sends it, so the host passes every word on: a file begun, one written, a tick after a wait", async () => {
+  const { rising, makeCommands } = await import("../ui/js/commands.js");
+  const sent = [], r = rising({ progress: (n, total, message) => sent.push([n, total, message]), cancelled: () => false, say: () => {} });
+  r.progress(0, 2, "Writing a"); r.progress(0, 2, "Writing b"); r.progress(1, 2, "1 written"); r.progress(1, 2, "Writing c"); r.progress(2, 2, "2 written");
+  r.progress(undefined, undefined, "tick"); r.progress(undefined, undefined, "tick"); r.progress(1, undefined, "late");
+  assert.deepEqual(sent.map((s) => s[0]), [0.001, 0.002, 1, 1.001, 2, 3, 4, 4.001]);
+  assert.ok(sent.every((s, i) => !i || s[0] > sent[i - 1][0]), "each above the last");
+  assert.deepEqual(sent.map((s) => s[2]), ["Writing a", "Writing b", "1 written", "Writing c", "2 written", "tick", "tick", "late"], "every message through");
+  assert.equal(typeof r.cancelled, "function"); assert.equal(typeof r.say, "function");
+  // an export's words: each above the last, the file begun counted as begun
+  const { api, p } = await fakeFull(), cmds = makeCommands(api), words = [];
+  await cmds.export({ dir: "/out", sizes: "all" }, { progress: (n, total, message) => words.push([n, total, message]), cancelled: () => false, say: () => {} });
+  assert.ok(words.every((w, i) => !i || w[0] > words[i - 1][0]), JSON.stringify(words.map((w) => w[0])));
+  assert.deepEqual(words.filter((w) => /^Writing/.test(w[2])).map((w) => w[2]), p.sizes.map((_, i) => `Writing f${i}.png (${i + 1} of ${p.sizes.length}).`));
+  assert.ok(words.every((w) => w[1] === p.sizes.length && w[0] <= w[1]), "never past the total");
 });
 
 test("export and batch_covers write as the Export window and a CSV do, into the folder given or the profile's, never over a file", async () => {
@@ -837,6 +921,13 @@ test("export and batch_covers write as the Export window and a CSV do, into the 
   assert.equal(everything.dir, "/kept"); assert.equal(everything.files.length, p.categories.length * p.sizes.length);
   const two = (await cmds.export({ channels: [1, "Film Stories", 1], sizes: ["16:9", "1920x1080"] }, ctx)).structuredContent;
   assert.deepEqual(two.files.map((f) => f.channel), [p.categories[0].id, p.categories[1].id], "each channel and size once");
+  // a folder that is not there: said as the one given, or the profile's kept one
+  const writes = api.writeInto;
+  api.writeInto = async () => ({ n: 0, paths: [], err: new Error("not a folder: /gone") });
+  await assert.rejects(cmds.export({ dir: "/gone" }, ctx), (e) => e.code === "invalid_arguments" && e.message === '"dir" is no folder here: /gone.');
+  S.settings.exportDirs[p.id] = "/gone";
+  await assert.rejects(cmds.export({}, ctx), (e) => e.code === "invalid_arguments" && /^The profile's export folder, \/gone, is no folder here .*: pass dir/.test(e.message) && !/"dir" is/.test(e.message));
+  api.writeInto = writes; S.settings.exportDirs[p.id] = "/kept";
   // cancelled part-way: what was written, and said so
   let left = 2;
   const half = (await cmds.export({ sizes: "all" }, { ...ctx, cancelled: () => left-- <= 0 })).structuredContent;

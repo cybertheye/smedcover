@@ -11,10 +11,10 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, paintedWith, refitSizes, acrossSizes, cutFrom } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, paintedWith, refitSizes, acrossSizes, cutFrom, STICKER_SCALE } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, appVersion, appBuild, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
-  deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, CUSTOM_BY, normalizeSize, exportName, sizeCaption, ratioText,
+  deleteAssetRecord, usedUserAssets, withPids, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, CUSTOM_BY, normalizeSize, exportName, sizeCaption, ratioText,
   normalizeRecipes, SURPRISE_LOCKS, normalizeLayouts, LAYOUTS,
 } from "./store.js";
 import { DEFAULTS, layOver } from "./defaults.js";
@@ -661,7 +661,7 @@ function addLayer(L, above = S.layerId === "bg" ? "bg" : S.layerId) {
 function addAsset(ref, at, above) {
   const L = newLayer("asset", { ref, tint: canTint(ref) });   // a vector asset follows the channel colour from the start, as its tile shows
   if (at) { L.t.all.x = at.x; L.t.all.y = at.y; }
-  if (ref.kind === "sticker") L.t.all.s = 0.3;
+  if (ref.kind === "sticker") L.t.all.s = STICKER_SCALE;
   if (above === undefined) addLayer(L); else addLayer(L, above);
   toast(t("assets.added", assetName(ref, getLang())));
   return L;
@@ -1645,7 +1645,8 @@ async function replacePhoto(L) {
 /**
  * Adds a picture (a data URL) as a photo layer and selects it: like a print on the cover, the first one too (Fill the
  * canvas, in its properties, makes it the background), above the selected layer — at `at` ({x, y}, fractions of the
- * canvas) when given. `fill`: as the background instead, just above the ground (the self-test's). Returns the layer.
+ * canvas) when given. `fill`: as the background instead, down on the ground as Fill the canvas takes it (the
+ * self-test's, an agent's add_photo). Returns the layer.
  */
 async function addPhoto(src, at = null, name = "", fill = false) {
   const pid = await putPhoto(src);
@@ -1655,13 +1656,16 @@ async function addPhoto(src, at = null, name = "", fill = false) {
 }
 /**
  * Puts a picture of the photo store on the cover as a photo layer, by addPhoto's rules (from the bitmap library, too):
- * above layer `above` (the selected one, unless told; see addLayer) where it does not fill the canvas.
+ * above layer `above` (the selected one, unless told; see addLayer) where it does not fill the canvas; filling it, as
+ * the background where Fill the canvas takes a photo (toGround): above the Background layer and the photos filling
+ * the canvas there already, so it shows.
  */
 async function placePhoto(pid, at = null, fill = false, above) {
   if (!S.photos.has(pid)) await loadPhotos([pid]);
   if (!S.photos.has(pid)) { toast(t("msg.badFile")); return null; }
   if (fill) {
-    const L = insertAbove(S.cover.layers, "bg", newLayer("photo", { pid, fill: true }));
+    const L = newLayer("photo", { pid, fill: true });
+    S.cover.layers.push(L); toGround(L);   // on top first, so that nothing clipped is taken down with it
     S.layerId = L.id; S.picked = [];
     touch({ cover: true, panel: true, side: true });
     toast(t("cover.photoAdded"));
@@ -5180,7 +5184,7 @@ function writeSum(g) {
 function openSecs(box) {
   [...box.querySelectorAll(".psec")].forEach((g, i) => showSec(g, SECS.has(g.dataset.key) ? SECS.get(g.dataset.key) : i === 0));
 }
-/** Put a layer back where it was placed by default. */
+/** Puts a layer back where it was put on, at the sizes the scope reaches (resetPlacement: a photo filling the canvas fills it still, a sticker at the scale it is put on at), as place_layer's reset does. */
 function placementControls(L) {
   const f = frame();
   return el("button", { class: "btn wide", onclick: () => { resetPlacement(L, S.settings.scope, f.key, f.catId, f.group.map((g) => g.key)); touch({ cover: true, side: true }); } },
@@ -7447,12 +7451,32 @@ async function adoptFonts(list) {
     if (await registerFont(name, f.src)) { await files.write(`fonts/${name}.font`, f.src).catch(fail); forgetOutlines(name); later("outlines", 4000, keepOutlineFile); }   // a system font of that name traced before
   }
 }
-/** Puts the pictures a file brought into the photo store (keeping their ids) and the bitmap library. */
-async function adoptPhotos(photos, nameKey) {
+/**
+ * Puts the pictures a file brought into the photo store and the bitmap library, and resolves with the ids that changed
+ * (a Map: the file's pid → the store's, for withPids). A picture keeps its id where the store has none of that id; under
+ * an id taken — by another picture, or one that could not be read to tell (the folder not listed, its files not read) —
+ * it comes in under an id of its own, so a file never puts its picture in place of one the covers here show (beyond
+ * undo: the store is no step); the same picture, all three files alike, is the one there. `each(done, total)` is told as
+ * each one is in.
+ */
+async function adoptPhotos(photos, nameKey, each = null) {
   const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
-  for (const [pid, p] of Object.entries(photos && typeof photos === "object" ? photos : {})) {
-    if (/^[\w-]{1,40}$/.test(pid) && p && pic(p.src) && (await putPhoto(pic(p.src), { original: pic(p.original), mask: pic(p.mask), pid }))) keepPicture(pid, t(nameKey), "upload");
+  const list = Object.entries(photos && typeof photos === "object" ? photos : {}).filter(([pid, p]) => /^[\w-]{1,40}$/.test(pid) && p && pic(p.src));
+  const listed = list.length ? await files.list("photos").catch(() => null) : [], renamed = new Map();
+  const stored = listed && new Set(listed.map((f) => f.replace(/\.(original|mask)$/, "")));
+  const taken = (pid) => !stored || stored.has(pid) || S.photos.has(pid) || S.library.some((e) => e.pid === pid);
+  for (const [i, [pid, p]] of list.entries()) {
+    const src = pic(p.src), original = pic(p.original), mask = pic(p.mask);
+    const rec = taken(pid) && (await readPhoto(pid)) && S.photos.get(pid);
+    if (rec && rec.src === src && (rec.original || "") === original && ((rec.mask && rec.mask.src) || "") === mask) keepPicture(pid, t(nameKey), "upload");   // the same picture: the one there
+    else {
+      const id = taken(pid) ? "p" + uid() : pid;
+      if (id !== pid) renamed.set(pid, id);
+      if (await putPhoto(src, { original, mask, pid: id })) keepPicture(id, t(nameKey), "upload");
+    }
+    if (each) each(i + 1, list.length);
   }
+  return renamed;
 }
 /** Shows another profile, on the channel it was last on, with its own covers as they were left. */
 async function switchProfile(id) {
@@ -7499,8 +7523,8 @@ const profileActions = {
       await adoptFonts(raw.fonts);
       const p = await addProfile(raw.profile || raw, false), covers = raw.covers && typeof raw.covers === "object" ? raw.covers : null;
       if (covers) {   // version 3 with covers: a whole profile, moved or backed up
-        await adoptPhotos(raw.photos, "lib.fromProfile");
-        for (const c of p.categories) if (covers[c.id] && typeof covers[c.id] === "object") await writeJson(coverPath(p.id, c.id), await upgradeCover(channelCover(covers[c.id], p, c.id), null)).catch(fail);
+        const renamed = await adoptPhotos(raw.photos, "lib.fromProfile");   // its pictures under ids of their own where those here are others'
+        for (const c of p.categories) if (covers[c.id] && typeof covers[c.id] === "object") await writeJson(coverPath(p.id, c.id), await upgradeCover(channelCover(withPids(covers[c.id], renamed), p, c.id), null)).catch(fail);
         if (p.categories.some((c) => c.id === raw.channel)) S.settings.channels[p.id] = raw.channel;
       }
       await switchProfile(p.id);
@@ -7561,10 +7585,12 @@ function embedPhotos(covers) {
  * Opens project file `raw` (parsed) into its own profile and channel: the profile here with its id, else as a new
  * profile or into the current one (on its channel if this profile has it), as `ask(name)` answers ("new", "current", or
  * null: not at all; asked only then). Files before version 4 have no profile: they open into the channel on the canvas.
- * Undo brings back the cover it replaced. Resolves with the profile and channel it opened on ({profile, catId}), or null
- * when not opened; throws msg.badFile when `raw` is no project.
+ * Its pictures come in under ids of their own where those here are other pictures (adoptPhotos), its layers following
+ * them (withPids); `each(done, total)` is told as each is in. Undo brings back the cover it replaced. Resolves with the
+ * profile and channel it opened on ({profile, catId}), or null when not opened; throws msg.badFile when `raw` is no
+ * project.
  */
-async function openProject(raw, ask) {
+async function openProject(raw, ask, { each = null } = {}) {
   if (!raw || raw.kind !== "project" || !raw.cover) throw new Error(t("msg.badFile"));
   let profile = S.profile, catId = S.cover.catId, across = null;   // across: the sizes of the profile the cover was made in, opened into another
   const theirs = raw.profile && typeof raw.profile === "object" ? raw.profile : null;
@@ -7580,13 +7606,13 @@ async function openProject(raw, ask) {
   else if (profile !== S.profile) catId = channelOf(profile);
   await adoptEmbedded(raw.assets);
   await adoptFonts(raw.fonts);
-  await adoptPhotos(raw.photos, "lib.fromProject");
+  const cover = withPids(raw.cover, await adoptPhotos(raw.photos, "lib.fromProject", each));   // a picture here never replaced by the file's
   if (profile !== S.profile) await switchProfile(profile.id);
   if (catId !== S.cover.catId) await switchChannel(catId);
   clearTimeout(timers.hist); commitHistory();
-  if (across && Array.isArray(raw.cover.layers)) acrossSizes(raw.cover.layers, across, sizeKeys());   // what its layers keep by size, on this profile's sizes (as Copy from another channel puts it)
+  if (across && Array.isArray(cover.layers)) acrossSizes(cover.layers, across, sizeKeys());   // what its layers keep by size, on this profile's sizes (as Copy from another channel puts it)
   const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
-  const opened = await upgradeCover(normalizeCover(raw.cover, S.profile), { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
+  const opened = await upgradeCover(normalizeCover(cover, S.profile), { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
   setCover(channelCover(opened, S.profile, catId));
   await loadPhotos(pidsOf(S.cover));
   S.layerId = "title"; S.picked = [];
@@ -8953,6 +8979,8 @@ async function agentFilesTest({ call, ok, r, no, dir }) {
   const f = (r.files = { tools: [], refused: [] }), start = snapshot(), home = S.profile.id, homeCat = S.cover.catId;
   const { change, refuse, same } = agentSteps({ call, ok, no }, f);
   const at = (id) => S.cover.layers.findIndex((l) => l.id === id), bytesOf = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  /** Whether photo `id` lies where Fill the canvas takes one (toGround): above bg and the photos filling the canvas there already, under every other layer and photo filling it. */
+  const grounded = (id) => { const ls = S.cover.layers, i = at(id); return i > 0 && ls.slice(1, i).every((l) => fillsCanvas(l) || l.clip) && !ls.slice(i + 1).some((l, k) => fillsCanvas(l) && clipBase(ls, i + 1 + k) < 0); };
   // a picture of the self-test's own, drawn here and written into its folder: a sky, a hill, a figure
   const pic = el("canvas", { width: 960, height: 640 }), g = pic.getContext("2d"), sky = g.createLinearGradient(0, 0, 0, 640);
   sky.addColorStop(0, "#5aa0e8"); sky.addColorStop(1, "#f6d29a"); g.fillStyle = sky; g.fillRect(0, 0, 960, 640);
@@ -8964,7 +8992,7 @@ async function agentFilesTest({ call, ok, r, no, dir }) {
   const added = await change("add_photo", { source: { path }, at: { x: 0.72, y: 0.62 } }), printId = added && added.layer.id;
   if (added && (!layer(printId) || !S.library.some((e) => e.pid === added.pid && e.name === "agent-photo"))) no("add_photo: the picture from a file is not on the cover, or not in the library under its file's name");
   const filled = added && (await change("add_photo", { source: { library: added.pid }, fill: true }));
-  if (filled && (!filled.layer.fill || at(filled.layer.id) !== 1)) no("add_photo: the library's picture does not fill the canvas just above bg");
+  if (filled && (!filled.layer.fill || !grounded(filled.layer.id))) no("add_photo: the library's picture does not fill the canvas above bg and the photos filling it there already");
   const dot = el("canvas", { width: 64, height: 64 }), dg = dot.getContext("2d");
   dg.fillStyle = "#ffcc00"; dg.fillRect(0, 0, 64, 64);
   const data = await change("add_photo", { source: { data: dot.toDataURL("image/png") }, at: { x: 0.2, y: 0.2 }, name: "agent-dot" });
@@ -8987,7 +9015,11 @@ async function agentFilesTest({ call, ok, r, no, dir }) {
   const real = await invoke("selftest_photo").catch(() => null);
   let woven = null;
   if (real && CAN.cut && cutReady()) {
-    const ph = await change("add_photo", { source: { data: real }, fill: true }), t0 = performance.now(), cut = ph && (await change("cut_out", { layer: ph.layer.id }));
+    const ph = await change("add_photo", { source: { data: real }, fill: true });
+    // a second background: over the library's picture, which it hides, as Fill the canvas would put it (not under it, unseen)
+    if (ph && (!grounded(ph.layer.id) || (filled && layer(filled.layer.id) && at(ph.layer.id) < at(filled.layer.id)))) no("add_photo: a second photo filling the canvas is not over the first");
+    f.ground = ph ? S.cover.layers.filter((l) => fillsCanvas(l)).map((l) => l.id === ph.layer.id ? "self-test photo" : filled && l.id === filled.layer.id ? "library picture" : l.id) : null;
+    const t0 = performance.now(), cut = ph && (await change("cut_out", { layer: ph.layer.id }));
     f.cut = { ms: Math.round(performance.now() - t0), ok: !!cut, error: CUT.error || null };
     const c = cut && layer(cut.cutout);
     if (cut && (!c || c.of !== ph.layer.id || at(c.id) <= at("title"))) no("cut_out: the cut-out is not linked to its photo, above the title");
@@ -9043,6 +9075,15 @@ async function agentFilesTest({ call, ok, r, no, dir }) {
   if (asCurrent && (asCurrent.profile.created || S.profile.id !== home || S.cover.title !== "From a *project*")) no(`open_project into the current profile: ${JSON.stringify(asCurrent)}`);
   await refuse("open_project", { file: `${dir}/data/custom.json` });
   f.project = { asNew: asNew && asNew.profile, asCurrent: asCurrent && asCurrent.profile };
+  // a project bringing another picture under a pid that is here: it comes in under one of its own, the one here as it was
+  const theirs = Object.keys(proj.photos || {})[0];
+  if (theirs && S.photos.has(theirs)) {
+    const mine = S.photos.get(theirs).src, dotSrc = dot.toDataURL("image/png"), { profile: _gone, ...bare } = copyOf(proj);   // no profile: into the channel shown
+    const other = await change("open_project", { project: { ...bare, photos: { [theirs]: { src: dotSrc, original: null, mask: null } } } });
+    const shown = S.cover.layers.filter((l) => l.type === "photo" && !l.of).map((l) => l.pid), came = shown.find((pid) => pid !== theirs && S.photos.get(pid)?.src === dotSrc);
+    f.project.collided = { pid: theirs, cameAs: came || null, kept: S.photos.get(theirs)?.src === mine };
+    if (other && (S.photos.get(theirs)?.src !== mine || !came || shown.includes(theirs))) no(`open_project: a project's picture under the pid ${theirs}, here another, ${S.photos.get(theirs)?.src !== mine ? "replaced the one here" : "did not come in under a pid of its own"}`);
+  } else f.project.collided = { skipped: "the project has no picture" };
   // exports into a folder of the self-test's, twice: the second never over the first's files; the folder not kept
   await files.write("agent-export/.keep", "");
   const out = `${dir}/data/agent-export`, two = S.profile.sizes.slice(0, 2).map(sizeKey), j0 = S.histIdx, dirs = JSON.stringify(S.settings.exportDirs);
@@ -9953,13 +9994,13 @@ const drawnNow = () => { flushDraw(); return flatCanvas(); };
 const API = Object.freeze({
   S, CAN, HOST, appVersion, invoke, BUNDLED_FONTS, CUT, SURPRISE, HOLD,
   // what is shown, selected, and what a layer is
-  cat, catIndex, selSize, layer, frame, sizeKeys, scopeKeys, layerName, copiable, owner, passivesOf, recordOf, weavableOf, wovenOf, inColumns, canCrop, pictureSize, canCut, cutReady, cutEngine, exportDir, ticked, channelOf, pickedIds,
+  cat, catIndex, selSize, layer, frame, sizeKeys, scopeKeys, layerName, copiable, owner, passivesOf, recordOf, weavableOf, wovenOf, inColumns, columnsByLook, canCrop, pictureSize, canCut, cutReady, cutEngine, exportDir, ticked, channelOf, pickedIds,
   // the history, and putting a change on the screen
   touch, commitHistory, commitPending, clearPendingHistory: () => clearTimeout(timers.hist), snapshot, restoreSnap, timeTravel, settleCover, setCover, channelCover, coverFor, coverOf, drawnNow, toast,
   // the window
   switchProfile, switchChannel, selectSize, selectLayer, pickLayers, closeTransient, weaveClose, brushClose, cropClose,
   // changes
-  edit, addLayer, addAsset, removeLayer, duplicateLayer, shiftLayer, restack, alignedT, fxSeedOf, setCrop, cutOut, putPhoto, placePhoto, keepPicture, loadPhotos, pidsOf, ensureFonts, fontsReading, outlinesPending, toGround,
+  edit, addLayer, addAsset, removeLayer, duplicateLayer, shiftLayer, restack, alignedT, fxSeedOf, setCrop, cutOut, putPhoto, savePhoto, placePhoto, keepPicture, loadPhotos, pidsOf, ensureFonts, fontsReading, outlinesPending, toGround,
   // Surprise me
   dealHands, keepFirst, takeHand, handSays, handNow, putHand,
   // drawing and files

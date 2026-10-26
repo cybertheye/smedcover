@@ -3338,6 +3338,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "image",
+ "libc",
  "objc2",
  "objc2-foundation",
  "ort",

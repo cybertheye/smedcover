@@ -64,12 +64,24 @@ const HAND = { side: 400, cols: 3 };
 const ODD_KEYS = ["__proto__", "constructor", "prototype"];
 /** A path an agent gives as a folder: absolute, on any system (the host checks it is a folder). */
 const ABSOLUTE = /^(\/|[A-Za-z]:[\\/]|\\\\)/;
-/** What a file a host reads for an agent says when it is not one it reads (read_picture, read_project in core/src/files.rs): the agent's to put right. */
+/** What a file a host reads for an agent says when it is not one it reads (read_picture, read_project in core/src/files.rs), or a link it fetches when it is not a picture it takes (fetch_image's known): the agent's to put right. */
 const NOT_READ = /^(not an absolute path|no such file|not a file|not a picture|not a project file|not UTF-8|picture too big|project too big)/;
+/** The most a picture an agent names may weigh, read or fetched (PICTURE_MAX in core/src/files.rs, AI_MAX_IMAGE_REPLY in net.rs). */
+const PICTURE_MAX = 64 * 1024 * 1024;
 /** A call's ctx when none is given (a test calling a command itself): nothing told, never cancelled. */
 const HUSHED = Object.freeze({ progress() {}, cancelled: () => false, say() {} });
 /** What a failure says, from an Error or the text a host's command rejects with. */
 const why = (e) => String((e && e.message) || e);
+/**
+ * A call's ctx with its progress always rising, as MCP has it: the host passes a word on only when its progress is more
+ * than the last one's, its message dropped with it otherwise. `n` as given while that is more, else a thousandth above
+ * the last (a file begun before the one before it is written, say); none given (a tick, see ticking), the next whole
+ * number. Each call has its own (makeCommands wraps every command), so ticks after a wait go on from it.
+ */
+export function rising(ctx) {
+  let last = 0;
+  return { ...ctx, progress(n, total, message) { last = n == null ? Math.floor(last) + 1 : Math.max(n, Math.round(last * 1000 + 1) / 1000); ctx.progress(last, total, message); } };
+}
 
 export function makeCommands(api) {
   const { S } = api;
@@ -172,7 +184,7 @@ export function makeCommands(api) {
 
   // ---------- what the slower tools share
   /** Tells the caller every 5 s that `message` is still under way (each word sets the host's timer going again), till the function it returns is called. */
-  const ticking = (ctx, message) => { let n = 0; const id = setInterval(() => ctx.progress(++n, undefined, message), 5000); return () => clearInterval(id); };
+  const ticking = (ctx, message) => { const id = setInterval(() => ctx.progress(undefined, undefined, message), 5000); return () => clearInterval(id); };   // the next whole number (rising)
   /** Resolves once while() is false, telling the caller every 5 s; at most `most` ms (then a ToolError busy), and no longer once the call is cancelled. */
   async function waitWhile(cond, ctx, message, most = 300000) {
     if (!cond()) return;
@@ -203,15 +215,19 @@ export function makeCommands(api) {
     }
     if (how === "url") {
       if (!/^https?:\/\/[^\s]+$/i.test(value.trim())) throw refused(`"source.url" must be an http(s) link; got ${JSON.stringify(value.slice(0, 80))}.`);
+      // only a picture the photo store takes, by its first bytes (known), at most PICTURE_MAX, through the proxy the
+      // image AI's own pictures at a link are fetched through (its settings'; else the environment's)
       const url = value.trim(), stop = ticking(ctx, "Fetching the picture.");
       try {
-        if (api.CAN.relay) { const { mime, data } = await api.invoke("fetch_image", { url, proxy: null, timeout: 120 }); return { src: `data:${mime};base64,${data}`, name: nameIn(new URL(url).pathname), type: mime }; }
+        const name = nameIn(new URL(url).pathname);
+        if (api.CAN.relay) { const { mime, data } = await api.invoke("fetch_image", { url, proxy: (S.imageAi && S.imageAi.proxy) || null, timeout: 120, known: true }); return { src: `data:${mime};base64,${data}`, name, type: mime }; }
         const r = await fetch(url);
         if (!r.ok) throw new Error(`the server answered ${r.status}`);
-        const blob = await r.blob();
-        if (!/^image\//.test(blob.type) && !imageType(await blob.slice(0, 16).arrayBuffer())) throw new Error("the link did not lead to a picture");
-        return { src: await api.readAs(blob, "readAsDataURL"), name: nameIn(new URL(url).pathname), type: blob.type };
-      } catch (e) { throw new ToolError("failed", `The picture at ${url} could not be fetched: ${why(e)}.`); }
+        const blob = await r.blob(), type = imageType(await blob.slice(0, 16).arrayBuffer());
+        if (blob.size > PICTURE_MAX) throw new Error(`picture too big: the reply at ${url} is more than ${PICTURE_MAX / 1048576} MB`);
+        if (!type) throw new Error("not a picture: the link leads to no PNG, JPEG, WebP, GIF, HEIC or AVIF image");
+        return { src: await api.readAs(blob.slice(0, blob.size, type), "readAsDataURL"), name, type };
+      } catch (e) { throw NOT_READ.test(why(e)) ? refused(`"source.url": ${why(e)}.`) : new ToolError("failed", `The picture at ${url} could not be fetched: ${why(e)}.`); }
       finally { stop(); }
     }
     // data: a data: URL as it is, or base64 alone, its type told by its first bytes
@@ -261,15 +277,20 @@ export function makeCommands(api) {
    */
   async function writeOut(jobs, dir, args, ctx) {
     const total = jobs.length, out = { format: args.format ?? S.settings.format, scale: args.scale ?? S.settings.scale, quality: S.settings.quality };
+    let begun = 0;   // the files begun: up to two are written while the next is drawn, so `done` lags behind them
     const progress = () => ({
       get cancelled() { return ctx.cancelled(); },
-      set: (done, name) => { ctx.progress(done, total, name ? `Writing ${name} (${Math.min(done + 1, total)} of ${total}).` : `${done} of ${total} written.`); ctx.say(t("agent.exporting", Math.min(done + 1, total), total)); },
+      set: (done, name) => {   // done files written; a name, the file begun (its progress just above done's: rising)
+        if (name) begun++;
+        ctx.progress(done, total, name ? `Writing ${name} (${begun} of ${total}).` : `${done} of ${total} written.`);
+        ctx.say(t("agent.exporting", Math.min(Math.max(begun, 1), total), total));
+      },
       close: () => {},
     });
     const { n, paths, err } = await api.writeInto(dir, jobs, { out, progress, fresh: true });
     const files = paths.map(({ path, job }) => ({ path, channel: S.profile.categories[job.index].id, title: job.cover.title, size: keyOf(job.size) }));
     if (err) {
-      if (!files.length && /^not a folder/i.test(why(err))) throw refused(`"dir" is no folder here: ${dir}.`);
+      if (!files.length && /^not a folder/i.test(why(err))) throw refused(args.dir !== undefined ? `"dir" is no folder here: ${dir}.` : `The profile's export folder, ${dir}, is no folder here (moved, deleted, or its disk away): pass dir (an absolute folder), or the user chooses another in the Export window.`);
       throw new ToolError("failed", `${files.length ? `${files.length} of ${total} files were written into ${dir} (${files.map((f) => f.path).join(", ")}), then` : `Nothing was written into ${dir}:`} ${why(err)}`);
     }
     return toResult({ structured: { dir, files, ...(n < total ? { cancelled: true } : {}) } });
@@ -311,8 +332,9 @@ export function makeCommands(api) {
       if (want.has("effects")) out.effects = Object.entries(EFFECTS).map(([id, e]) => ({ id, name: e.name.en, kind: e.kind, seeded: !!e.seeded, needsOutlines: e.kind === "outline", available: api.CAN.outlines || e.kind !== "outline" }));
       if (want.has("bends")) out.bends = [{ id: "none", name: "None" }, ...BEND_IDS.map((id) => ({ id, name: BENDS[id].name.en }))];
       if (want.has("fonts")) {
-        const found = S.systemFonts.filter((f) => has(f, args.fontQuery));
-        out.fonts = { bundled: [...api.BUNDLED_FONTS], imported: [...S.importedFonts], system: found.slice(0, 200), systemMatched: found.length, systemTotal: S.systemFonts.length, latin: [...S.latinFonts] };
+        // latin: of the fonts this answer lists, those that cannot set Chinese (of all 700 installed, some 13 KB more)
+        const found = S.systemFonts.filter((f) => has(f, args.fontQuery)), system = found.slice(0, 200), bundled = [...api.BUNDLED_FONTS], imported = [...S.importedFonts];
+        out.fonts = { bundled, imported, system, systemMatched: found.length, systemTotal: S.systemFonts.length, latin: [...new Set([...bundled, ...imported, ...system])].filter((f) => S.latinFonts.has(f)) };
       }
       if (want.has("platforms")) out.platforms = PLATFORMS.map((p) => ({ id: p.id, name: p.name.en, wide: [...new Set(p.covers({ orient: "h", red: "3:4" }).map((c) => c.ratio))], tall: [...new Set(p.covers({ orient: "v", red: "3:4" }).map((c) => c.ratio))] }));
       if (want.has("sizes")) out.sizes = SIZE_PRESETS.map((z) => ({ key: keyOf(z), w: z.w, h: z.h, ratio: ratioText(z.w, z.h), caption: sizeCaption(z, "en") }));
@@ -434,11 +456,7 @@ export function makeCommands(api) {
         if (L.of) {   // a cut-out back over its photo, as Realign does: at every size
           L.t = api.alignedT(api.owner(L));
           if (scope !== "all") warnings.push(`"${L.id}" is a linked cut-out: it went back over its photo at every size, whatever the scope.`);
-        } else {
-          resetPlacement(L, scope, f.key, f.catId, f.group.map((g) => g.key));   // as Reset under the layer's properties
-          if (scope === "all" && fillsCanvas(L)) L.t.all.s = 1;   // a photo filling the canvas fills it still
-          else if (scope === "all" && L.type === "asset" && L.ref.kind === "sticker") L.t.all.s = 0.3;   // at the size a sticker is put on at (addAsset)
-        }
+        } else resetPlacement(L, scope, f.key, f.catId, f.group.map((g) => g.key));   // as Reset under the layer's properties: a photo filling the canvas fills it still, a sticker at the scale it is put on at
         api.touch({ cover: true, side: true });
       } else {
         if (L.crop || (L.type === "photo" && L.cut)) api.drawnNow();   // scaled and turned about what shows of it, as it is drawn now
@@ -483,10 +501,11 @@ export function makeCommands(api) {
       if (want && !font) { const near = nearNames(want, all); throw refused(`No font "${want}" here${near.length ? `; near it: ${near.join(", ")}` : ""} (list_options with fontQuery lists the installed ones).`); }
       const { L } = await aim(args, { types: LETTERED, what: SAID.lettering }), warnings = [];
       if (font) L.font = font; else if (font === "") delete L.font;   // as the font menu (fontControl), but not put among the recent fonts
-      if (args.vertical !== undefined) L.vertical = args.vertical;   // as Lines and Columns
-      if (args.vertical === false && api.inColumns(L)) {   // the look sets it in columns of itself, where the editor greys Lines and Columns out (props.verticalByLook)
+      // as Lines and Columns, which the editor greys out where the look sets the layer in columns of itself (columnControls): then left as it is
+      if (args.vertical !== undefined && !(!L.vertical && api.columnsByLook(L))) L.vertical = args.vertical;
+      if (args.vertical !== undefined && !L.vertical && api.columnsByLook(L)) {
         const lk = LOOKS[S.profile.style.look] || LOOKS.cel, key = (lk.params.find((d) => d.key === "vertical") || {}).key;
-        warnings.push(`The ${lk.name.en} look sets the title and the subtitle in columns itself${key ? ` (its setting "${key}")` : ""}: they stay in columns till that is turned off${key ? ` (set_look with params {"${key}": 0})` : ""}.`);
+        warnings.push(`The ${lk.name.en} look sets the title and the subtitle in columns itself${key ? ` (its setting "${key}")` : ""}: they stay in columns till that is turned off${key ? ` (set_look with params {"${key}": 0})` : ""}, and Lines and Columns are left as they are${args.vertical ? " (in columns already)" : ""}.`);
       }
       if (L.font && S.latinFonts.has(L.font)) warnings.push(`${L.font} has no Chinese: Chinese words are set in another face.`);
       api.touch({ cover: true, side: true });
@@ -564,7 +583,7 @@ export function makeCommands(api) {
       } });
       const at = args.at ? { x: args.at.x, y: args.at.y } : null;
       let L;
-      if (k === "asset") L = api.addAsset(ref, at, above);   // as its tile clicked (a sticker at 0.3)
+      if (k === "asset") L = api.addAsset(ref, at, above);   // as its tile clicked (a sticker at STICKER_SCALE)
       else if (k === "copy" && above === undefined) L = api.duplicateLayer(src.id);   // as Duplicate: just above what it copies, over what is clipped onto it
       else api.addLayer(L = k === "text" ? newLayer("text", { text: (args.text ?? t("layer.newText")).replace(/\r\n?/g, "\n") }) : k === "solid" ? newLayer("solid", { color: hex(args.color ?? api.cat().color) }) : duplicate(src), above);   // as Assets → Text and Colour
       const placed = (at && k !== "asset") || args.scale !== undefined;
@@ -599,19 +618,20 @@ export function makeCommands(api) {
     add_photo: async (args, ctx = HUSHED) => {
       const how = Object.keys(args.source)[0], value = args.source[how];
       if (args.fill && args.at) throw refused('"at" is for a print: a photo that fills the canvas fills it.');
-      if (args.fill && args.above !== undefined) throw refused('"above" is for a print: a photo that fills the canvas goes just above bg, as the background.');
+      if (args.fill && args.above !== undefined) throw refused('"above" is for a print: a photo that fills the canvas goes down to the ground as the background, above bg and the photos filling the canvas there already.');
       const kept = how === "library" ? S.library.find((e) => e.pid === value.trim()) : null;
       if (how === "library" && !kept) throw refused(`No picture "${value}" in the library (list_library lists its photos).`);
       const pic = kept ? null : await pictureFrom(how, value, ctx);   // read, fetched or checked before anything is touched
+      // decoded too, into the photo store but not written (putPhoto, save: false): a picture the web view cannot read
+      // (HEIC off macOS, base64 broken past its start) is refused with the window where it was, and nothing kept
+      const fresh = pic ? await api.putPhoto(pic.src, { save: false }) : null;
+      if (pic && !fresh) throw refused(`The picture could not be read here${/hei[cf]|avif/.test(pic.type || "") ? ` (${pic.type.slice(6).toUpperCase()} is read where the system reads it: on macOS)` : ""}.`);
       let above;
-      await aim(args, { check: (L, c) => { above = args.above === undefined ? undefined : aboveOf(c, args.above); return null; } });
-      let pid = kept && kept.pid;
-      if (!pid) {   // as a photo uploaded (uploadPhotos → addPhoto): into the photo store, and the bitmap library
-        pid = await api.putPhoto(pic.src);
-        if (!pid) throw refused(`The picture could not be read here${/hei[cf]|avif/.test(pic.type || "") ? ` (${pic.type.slice(6).toUpperCase()} is read where the system reads it: on macOS)` : ""}.`);
-        api.keepPicture(pid, args.name ?? pic.name, "upload");
-      }
-      const L = await api.placePhoto(pid, args.at ? { x: args.at.x, y: args.at.y } : null, !!args.fill, above);   // as a photo placed: a print above `above` (the selected layer), or the background
+      try { await aim(args, { check: (L, c) => { above = args.above === undefined ? undefined : aboveOf(c, args.above); return null; } }); }
+      catch (e) { if (fresh) S.photos.delete(fresh); throw e; }   // refused, or the switch failed: the picture let go of again, no orphan left
+      const pid = kept ? kept.pid : fresh;
+      if (fresh) { api.savePhoto(fresh); api.keepPicture(fresh, args.name ?? pic.name, "upload"); }   // as a photo uploaded (uploadPhotos → addPhoto): its files written, and into the bitmap library
+      const L = await api.placePhoto(pid, args.at ? { x: args.at.x, y: args.at.y } : null, !!args.fill, above);   // as a photo placed: a print above `above` (the selected layer), or the background where Fill the canvas takes it (toGround)
       if (!L) throw new ToolError("failed", `The picture "${pid}" could not be read from the photo store.`);
       return toResult({ structured: { layer: layerOut(L, S.cover), pid } });
     },
@@ -628,8 +648,9 @@ export function makeCommands(api) {
       const warnings = [], want = args.reset ? null : args.ratio ? fitCrop(L.crop || WHOLE, args.ratio === "photo" ? 1 : (ratioOf(args.ratio) * size[1]) / size[0]) : c.pts ? { pts: c.pts } : { x: c.x, y: c.y, w: c.w, h: c.h };
       const n = normalizeCrop(want);
       if (c && !c.pts && n && ["x", "y", "w", "h"].some((k) => Math.abs(n[k] - c[k]) > 1e-4)) warnings.push(`The crop was kept within the picture: x ${n.x}, y ${n.y}, w ${n.w}, h ${n.h}.`);
-      if (c && !n) warnings.push(`The ${c.pts ? "shape" : "rectangle"} is the whole picture: no crop.`);
-      if (!api.setCrop(L, want)) warnings.push(L.crop ? "It was cropped so already." : "It was not cropped.");
+      const whole = c && !n, changed = api.setCrop(L, want);   // one word for one thing: a whole picture asked for where there was no crop is that alone
+      if (whole) warnings.push(`The ${c.pts ? "shape" : "rectangle"} is the whole picture: no crop${changed ? "" : ", and it was not cropped"}.`);
+      else if (!changed) warnings.push(L.crop ? "It was cropped so already." : "It was not cropped.");
       return toResult({ structured: { crop: L.crop ? copy(L.crop) : null, ...(warnings.length ? { warnings } : {}) } });
     },
     cut_out: async (args, ctx = HUSHED) => {
@@ -708,7 +729,8 @@ export function makeCommands(api) {
         if (want === "each") for (const cv of cvs) images.push(await api.pngBase64(cv));
         if (want === "sheet") { const sheet = handSheet(cvs, hands, 0); images.push(await api.pngBase64(sheet)); sheet.width = sheet.height = 0; }
       } finally { for (const cv of cvs) cv.width = cv.height = 0; }
-      return toResult({ structured: { hands: hands.map(handOut), kept: 1, locks: SURPRISE_LOCKS.filter((k) => locks[k]) }, images });
+      // the locks as they held: places keeps the layout too (no layout preset dealt, dealCover)
+      return toResult({ structured: { hands: hands.map(handOut), kept: 1, locks: SURPRISE_LOCKS.filter((k) => locks[k] || (k === "layout" && locks.places)) }, images });
     },
     pick_hand: async (args) => {
       const live = !!dealt && !!dealt.step && api.SURPRISE.step === dealt.step && S.histIdx === dealt.step.idx;
@@ -745,7 +767,11 @@ export function makeCommands(api) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.kind !== "project" || !raw.cover || typeof raw.cover !== "object") throw refused('That is no SmedCover project: a project is what the app saves as a .smedcover.json ({"kind": "project", "cover": {…}, "profile": {…}, …}).');
       const as = args.as ?? "new", had = new Set(S.profiles.map((p) => p.id)), theirs = raw.profile && typeof raw.profile === "object" ? raw.profile : null, warnings = [];
       if (args.as !== undefined && (!theirs || had.has(theirs.id))) warnings.push(theirs ? `Its profile, "${theirs.name || theirs.id}", is here: it opened there ("as" is for a project whose profile is not).` : "It is a project from before profiles went with them: it opened into the channel on the canvas.");
-      const got = await api.openProject(raw, () => as);   // as Open project, its question answered by `as`
+      // as Open project, its question answered by `as`; the caller told as each picture is taken in, and every 5 s (a big project's take a while)
+      const stop = ticking(ctx, "Opening the project.");
+      let got;
+      try { got = await api.openProject(raw, () => as, { each: (done, total) => ctx.progress(undefined, undefined, `Took in picture ${done} of ${total} of the project.`) }); }
+      finally { stop(); }
       if (!got) throw new ToolError("failed", "The project was not opened.");
       const k = api.cat();
       api.toast(t("proj.opened", S.profile.name, k.name || k.code || "—"));
@@ -787,5 +813,7 @@ export function makeCommands(api) {
       return writeOut(jobs, dir, args, ctx);
     },
   };
+  // each call's word of progress above its last, whoever sends it (a wait, a tick, a file, a hand): rising
+  for (const [name, run] of Object.entries(commands)) commands[name] = (args, ctx = HUSHED) => run(args, rising(ctx));
   return commands;
 }

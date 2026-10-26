@@ -260,12 +260,13 @@ async fn text_outline(
 
 // ---------------------------------------------------------------- AI request (the work itself: smedcover_core::net)
 
-/// See `net::fetch_image`. Never to the agents' endpoint (see `mcp::not_to_the_endpoint`).
+/// See `net::fetch_image`; `known` (an agent's `add_photo`): only a picture the photo store takes, by its bytes.
+/// Never to the agents' endpoint (see `mcp::not_to_the_endpoint`).
 #[tauri::command]
-async fn fetch_image(app: AppHandle, url: String, proxy: Option<String>, timeout: Option<u64>) -> Res<net::FetchedImage> {
+async fn fetch_image(app: AppHandle, url: String, proxy: Option<String>, timeout: Option<u64>, known: Option<bool>) -> Res<net::FetchedImage> {
     tauri::async_runtime::spawn_blocking(move || {
         mcp::not_to_the_endpoint(&app, &url, proxy.as_deref())?;
-        net::fetch_image(&url, proxy.as_deref().unwrap_or(""), timeout.unwrap_or(net::AI_TIMEOUT_SECS))
+        net::fetch_image(&url, proxy.as_deref().unwrap_or(""), timeout.unwrap_or(net::AI_TIMEOUT_SECS), known.unwrap_or(false))
     })
     .await
     .map_err(err)?
