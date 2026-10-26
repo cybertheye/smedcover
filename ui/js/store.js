@@ -469,6 +469,15 @@ export function usedUserAssets(profile, cover) {
   for (const L of [...(profile ? profile.design.layers : []), ...(cover ? cover.layers : [])]) if (L.type === "asset" && L.ref.kind === "user") ids.add(L.ref.id);
   return [...ids];
 }
+/**
+ * Cover `c` as a file has it (raw), its photo layers showing the pictures `renamed` names them by (a Map: the file's
+ * pid → the store's, adoptPhotos in app.js); `c` itself when none is renamed. A photo layer's `pid` is all of a cover
+ * that names a picture (a cut-out names its photo layer; a design keeps no photos).
+ */
+export function withPids(c, renamed) {
+  if (!renamed || !renamed.size || !c || typeof c !== "object" || !Array.isArray(c.layers)) return c;
+  return { ...c, layers: c.layers.map((l) => (l && l.type === "photo" && typeof l.pid === "string" && renamed.has(l.pid) ? { ...l, pid: renamed.get(l.pid) } : l)) };
+}
 export const deleteProfile = (p) => files.remove(`profiles/${p.id}.json`);
 
 /** File name for an exported cover, from the user's template. Characters unsafe in file names are dropped. */

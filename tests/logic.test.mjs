@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { blockLayout, virtualSize, layout, TEMPLATES } from "../ui/js/layout.js";
 import { parseCsv, csvToJobs } from "../ui/js/csv.js";
-import { useFont, normalizeProfile, normalizeCover, normalizeSettings, exportName, channelIndex, usedUserAssets, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
+import { useFont, normalizeProfile, normalizeCover, normalizeSettings, exportName, channelIndex, usedUserAssets, withPids, normalizeSize, ratioText, sizeCaption } from "../ui/js/store.js";
 import { LETTERED, ACCENT_SHAPES, BOUND_TYPES, defaultLayers, normalizeLayers, newLayer, resolve, adjust, resetPlacement, STICKER_SCALE, insertAbove, moveLayer, duplicate, isPickable, appliesTo, stepIndex, clipBase, clipEnd, normalizeScene, sceneOffsets, moveScene, resetScene, reorderLayout, orderLayout, layoutOrder } from "../ui/js/layers.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "../ui/js/presets.js";
 import { platformsFor, RATIOS } from "../ui/js/platforms.js";
@@ -230,6 +230,21 @@ test("usedUserAssets finds uploads referenced by categories and layers", () => {
   const c = normalizeCover({ layers: [{ type: "asset", ref: { kind: "user", id: "u3" } }] }, p);
   assert.deepEqual(usedUserAssets(p, null).sort(), ["u1", "u2"]);
   assert.deepEqual(usedUserAssets(null, c), ["u3"]);
+});
+
+test("withPids has a file's photo layers show its pictures under the ids they came in under, nothing else touched", () => {
+  const raw = { title: "T", layers: [{ type: "bg" }, { type: "photo", id: "a", pid: "p1", fill: true }, { type: "photo", id: "b", pid: "p1" }, { type: "photo", id: "c", pid: "p2" }, { type: "photo", id: "d", of: "a", cut: true },
+    { type: "asset", id: "e", pid: "p1", ref: { kind: "sticker", id: "star" } }, { type: "photo", id: "f", pid: "constructor" }, null] };
+  const was = JSON.stringify(raw), out = withPids(raw, new Map([["p1", "pNEW"]]));
+  assert.deepEqual(out.layers.map((l) => l && l.pid), [undefined, "pNEW", "pNEW", "p2", undefined, "p1", "constructor", null], "photo layers alone; a name of Object.prototype's is no id renamed");
+  assert.equal(JSON.stringify(raw), was, "the file's cover as it was");
+  assert.equal(out.layers[3], raw.layers[3], "a layer not renamed is the same");
+  assert.equal(out.title, "T");
+  assert.equal(withPids(raw, new Map()), raw); assert.equal(withPids(raw, null), raw);
+  for (const odd of [null, "x", { layers: "no" }]) assert.equal(withPids(odd, new Map([["p1", "q"]])), odd);
+  // through normalizeCover, as openProject reads it
+  const c = normalizeCover(withPids({ catId: "c1", layers: raw.layers.filter(Boolean) }, new Map([["p2", "p9"]])), normalizeProfile({ categories: [{ id: "c1" }] }));
+  assert.deepEqual(c.layers.filter((l) => l.type === "photo" && !l.of).map((l) => l.pid).sort(), ["constructor", "p1", "p1", "p9"]);
 });
 
 test("normalizeLayers keeps every bound layer once, the background at the bottom", () => {

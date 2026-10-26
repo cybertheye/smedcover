@@ -14,7 +14,7 @@ import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAs
 import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, paintedWith, refitSizes, acrossSizes, cutFrom, STICKER_SCALE } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, appVersion, appBuild, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
-  deleteAssetRecord, usedUserAssets, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, CUSTOM_BY, normalizeSize, exportName, sizeCaption, ratioText,
+  deleteAssetRecord, usedUserAssets, withPids, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, CUSTOM_BY, normalizeSize, exportName, sizeCaption, ratioText,
   normalizeRecipes, SURPRISE_LOCKS, normalizeLayouts, LAYOUTS,
 } from "./store.js";
 import { DEFAULTS, layOver } from "./defaults.js";
@@ -7446,12 +7446,32 @@ async function adoptFonts(list) {
     if (await registerFont(name, f.src)) { await files.write(`fonts/${name}.font`, f.src).catch(fail); forgetOutlines(name); later("outlines", 4000, keepOutlineFile); }   // a system font of that name traced before
   }
 }
-/** Puts the pictures a file brought into the photo store (keeping their ids) and the bitmap library. */
-async function adoptPhotos(photos, nameKey) {
+/**
+ * Puts the pictures a file brought into the photo store and the bitmap library, and resolves with the ids that changed
+ * (a Map: the file's pid → the store's, for withPids). A picture keeps its id where the store has none of that id; under
+ * an id taken — by another picture, or one that could not be read to tell (the folder not listed, its files not read) —
+ * it comes in under an id of its own, so a file never puts its picture in place of one the covers here show (beyond
+ * undo: the store is no step); the same picture, all three files alike, is the one there. `each(done, total)` is told as
+ * each one is in.
+ */
+async function adoptPhotos(photos, nameKey, each = null) {
   const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
-  for (const [pid, p] of Object.entries(photos && typeof photos === "object" ? photos : {})) {
-    if (/^[\w-]{1,40}$/.test(pid) && p && pic(p.src) && (await putPhoto(pic(p.src), { original: pic(p.original), mask: pic(p.mask), pid }))) keepPicture(pid, t(nameKey), "upload");
+  const list = Object.entries(photos && typeof photos === "object" ? photos : {}).filter(([pid, p]) => /^[\w-]{1,40}$/.test(pid) && p && pic(p.src));
+  const listed = list.length ? await files.list("photos").catch(() => null) : [], renamed = new Map();
+  const stored = listed && new Set(listed.map((f) => f.replace(/\.(original|mask)$/, "")));
+  const taken = (pid) => !stored || stored.has(pid) || S.photos.has(pid) || S.library.some((e) => e.pid === pid);
+  for (const [i, [pid, p]] of list.entries()) {
+    const src = pic(p.src), original = pic(p.original), mask = pic(p.mask);
+    const rec = taken(pid) && (await readPhoto(pid)) && S.photos.get(pid);
+    if (rec && rec.src === src && (rec.original || "") === original && ((rec.mask && rec.mask.src) || "") === mask) keepPicture(pid, t(nameKey), "upload");   // the same picture: the one there
+    else {
+      const id = taken(pid) ? "p" + uid() : pid;
+      if (id !== pid) renamed.set(pid, id);
+      if (await putPhoto(src, { original, mask, pid: id })) keepPicture(id, t(nameKey), "upload");
+    }
+    if (each) each(i + 1, list.length);
   }
+  return renamed;
 }
 /** Shows another profile, on the channel it was last on, with its own covers as they were left. */
 async function switchProfile(id) {
@@ -7498,8 +7518,8 @@ const profileActions = {
       await adoptFonts(raw.fonts);
       const p = await addProfile(raw.profile || raw, false), covers = raw.covers && typeof raw.covers === "object" ? raw.covers : null;
       if (covers) {   // version 3 with covers: a whole profile, moved or backed up
-        await adoptPhotos(raw.photos, "lib.fromProfile");
-        for (const c of p.categories) if (covers[c.id] && typeof covers[c.id] === "object") await writeJson(coverPath(p.id, c.id), await upgradeCover(channelCover(covers[c.id], p, c.id), null)).catch(fail);
+        const renamed = await adoptPhotos(raw.photos, "lib.fromProfile");   // its pictures under ids of their own where those here are others'
+        for (const c of p.categories) if (covers[c.id] && typeof covers[c.id] === "object") await writeJson(coverPath(p.id, c.id), await upgradeCover(channelCover(withPids(covers[c.id], renamed), p, c.id), null)).catch(fail);
         if (p.categories.some((c) => c.id === raw.channel)) S.settings.channels[p.id] = raw.channel;
       }
       await switchProfile(p.id);
@@ -7560,10 +7580,12 @@ function embedPhotos(covers) {
  * Opens project file `raw` (parsed) into its own profile and channel: the profile here with its id, else as a new
  * profile or into the current one (on its channel if this profile has it), as `ask(name)` answers ("new", "current", or
  * null: not at all; asked only then). Files before version 4 have no profile: they open into the channel on the canvas.
- * Undo brings back the cover it replaced. Resolves with the profile and channel it opened on ({profile, catId}), or null
- * when not opened; throws msg.badFile when `raw` is no project.
+ * Its pictures come in under ids of their own where those here are other pictures (adoptPhotos), its layers following
+ * them (withPids); `each(done, total)` is told as each is in. Undo brings back the cover it replaced. Resolves with the
+ * profile and channel it opened on ({profile, catId}), or null when not opened; throws msg.badFile when `raw` is no
+ * project.
  */
-async function openProject(raw, ask) {
+async function openProject(raw, ask, { each = null } = {}) {
   if (!raw || raw.kind !== "project" || !raw.cover) throw new Error(t("msg.badFile"));
   let profile = S.profile, catId = S.cover.catId, across = null;   // across: the sizes of the profile the cover was made in, opened into another
   const theirs = raw.profile && typeof raw.profile === "object" ? raw.profile : null;
@@ -7579,13 +7601,13 @@ async function openProject(raw, ask) {
   else if (profile !== S.profile) catId = channelOf(profile);
   await adoptEmbedded(raw.assets);
   await adoptFonts(raw.fonts);
-  await adoptPhotos(raw.photos, "lib.fromProject");
+  const cover = withPids(raw.cover, await adoptPhotos(raw.photos, "lib.fromProject", each));   // a picture here never replaced by the file's
   if (profile !== S.profile) await switchProfile(profile.id);
   if (catId !== S.cover.catId) await switchChannel(catId);
   clearTimeout(timers.hist); commitHistory();
-  if (across && Array.isArray(raw.cover.layers)) acrossSizes(raw.cover.layers, across, sizeKeys());   // what its layers keep by size, on this profile's sizes (as Copy from another channel puts it)
+  if (across && Array.isArray(cover.layers)) acrossSizes(cover.layers, across, sizeKeys());   // what its layers keep by size, on this profile's sizes (as Copy from another channel puts it)
   const pic = (v) => (typeof v === "string" && v.startsWith("data:image/") ? v : "");
-  const opened = await upgradeCover(normalizeCover(raw.cover, S.profile), { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
+  const opened = await upgradeCover(normalizeCover(cover, S.profile), { src: pic(raw.photo), original: pic(raw.photoOriginal), mask: pic(raw.photoMask) });   // version 2 kept one photo beside the cover
   setCover(channelCover(opened, S.profile, catId));
   await loadPhotos(pidsOf(S.cover));
   S.layerId = "title"; S.picked = [];
@@ -9047,6 +9069,15 @@ async function agentFilesTest({ call, ok, r, no, dir }) {
   if (asCurrent && (asCurrent.profile.created || S.profile.id !== home || S.cover.title !== "From a *project*")) no(`open_project into the current profile: ${JSON.stringify(asCurrent)}`);
   await refuse("open_project", { file: `${dir}/data/custom.json` });
   f.project = { asNew: asNew && asNew.profile, asCurrent: asCurrent && asCurrent.profile };
+  // a project bringing another picture under a pid that is here: it comes in under one of its own, the one here as it was
+  const theirs = Object.keys(proj.photos || {})[0];
+  if (theirs && S.photos.has(theirs)) {
+    const mine = S.photos.get(theirs).src, dotSrc = dot.toDataURL("image/png"), { profile: _gone, ...bare } = copyOf(proj);   // no profile: into the channel shown
+    const other = await change("open_project", { project: { ...bare, photos: { [theirs]: { src: dotSrc, original: null, mask: null } } } });
+    const shown = S.cover.layers.filter((l) => l.type === "photo" && !l.of).map((l) => l.pid), came = shown.find((pid) => pid !== theirs && S.photos.get(pid)?.src === dotSrc);
+    f.project.collided = { pid: theirs, cameAs: came || null, kept: S.photos.get(theirs)?.src === mine };
+    if (other && (S.photos.get(theirs)?.src !== mine || !came || shown.includes(theirs))) no(`open_project: a project's picture under the pid ${theirs}, here another, ${S.photos.get(theirs)?.src !== mine ? "replaced the one here" : "did not come in under a pid of its own"}`);
+  } else f.project.collided = { skipped: "the project has no picture" };
   // exports into a folder of the self-test's, twice: the second never over the first's files; the folder not kept
   await files.write("agent-export/.keep", "");
   const out = `${dir}/data/agent-export`, two = S.profile.sizes.slice(0, 2).map(sizeKey), j0 = S.histIdx, dirs = JSON.stringify(S.settings.exportDirs);
