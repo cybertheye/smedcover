@@ -303,27 +303,59 @@ function heard(status) {
  * The desktop app's transport: a Tauri Channel, handed to Rust with mcp_attach once listen() is called (the page has
  * started), brings {kind: "call", id, tool, args, client?, timeoutMs} → onCall, {kind: "cancel", id} → onCancel and
  * {kind: "status", status} → MCP (Settings → Agents); answers go back by mcp_reply, progress by mcp_progress. `attached`:
- * mcp_attach's promise ({epoch, toolsMismatch, status}). A reload makes a new page, which attaches again (the host
- * fails the calls the last one had).
+ * the first attach's promise ({epoch, toolsMismatch, status}, or null when it failed twice). A tools.json that cannot be
+ * hashed attaches with an empty hash (the host then says the tools differ); an attach that fails is tried again after
+ * `retryMs`, and then each time the window comes back (focused, or shown again) till one works. A reload makes a new
+ * page, which attaches again (the host fails the calls the last one had). Tauri's Channel and invoke, the hash and the
+ * window are given in a test.
  */
-function tauriTransport() {
+export function tauriTransport({ Channel = globalThis.__TAURI__ && globalThis.__TAURI__.core.Channel, call = invoke, hash = toolsHash, win = globalThis, retryMs = 1000 } = {}) {
   const transport = {
     attached: null,
     listen(onCall, onCancel) {
-      const ch = new globalThis.__TAURI__.core.Channel();
+      const ch = new Channel();
       ch.onmessage = (m) => {
         if (!m || typeof m !== "object") return;
         if (m.kind === "call") onCall(m);
         else if (m.kind === "cancel") onCancel(m.id);
         else if (m.kind === "status") heard(m.status);
       };
-      transport.attached = toolsHash().then((hash) => invoke("mcp_attach", { channel: ch, toolsHash: hash }))
-        .then((info) => { heard(info.status); return info; }, (e) => { console.error("[agent] mcp_attach:", e); return null; });
+      let first = null, waiting = false;
+      transport.attached = new Promise((r) => { first = r; });
+      const back = () => { if (!waiting) return; waiting = false; win.removeEventListener("focus", back); win.removeEventListener("visibilitychange", back); attach(2); };
+      async function attach(tries) {
+        let h = "";
+        try { h = await hash(); } catch (e) { console.error("[agent] tools.json could not be hashed:", e); }
+        try {
+          const info = await call("mcp_attach", { channel: ch, toolsHash: h });
+          heard(info.status); first(info);
+          return;
+        } catch (e) { console.error("[agent] mcp_attach:", e); }
+        if (tries === 0) { setTimeout(() => attach(1), retryMs); return; }
+        first(null);
+        if (!waiting && win.addEventListener) { waiting = true; win.addEventListener("focus", back); win.addEventListener("visibilitychange", back); }
+      }
+      attach(0);
     },
-    reply: (id, r) => { invoke("mcp_reply", { reply: r }).catch((e) => console.error("[agent] mcp_reply:", e)); },
-    progress: (id, p) => { invoke("mcp_progress", { id, ...p }).catch(() => {}); },
+    reply: (id, r) => { call("mcp_reply", { reply: r }).catch((e) => console.error("[agent] mcp_reply:", e)); },
+    progress: (id, p) => { call("mcp_progress", { id, ...p }).catch(() => {}); },
   };
   return transport;
+}
+/** The token as shown: hidden but for its last four characters. */
+export const maskToken = (token) => (token ? "••••••••" + token.slice(-4) : "");
+/**
+ * The lines that set an agent up for the endpoint at `url` with `token` (the token itself, or maskToken()'s to show),
+ * each {key: its label's string, text}: Claude Code's command (for the user, so it works from any folder), Codex's table
+ * for ~/.codex/config.toml (its tool timeout raised to an export's half hour from its 60 s), and the mcpServers JSON that
+ * Claude Code's .mcp.json and Cursor's mcp.json take.
+ */
+export function setupLines(url, token) {
+  return [
+    { key: "mcp.claude", text: `claude mcp add --transport http --scope user smedcover ${url} --header "Authorization: Bearer ${token}"` },
+    { key: "mcp.codex", text: `[mcp_servers.smedcover]\nurl = "${url}"\nhttp_headers = { "Authorization" = "Bearer ${token}" }\ntool_timeout_sec = 1800` },
+    { key: "mcp.json", text: JSON.stringify({ mcpServers: { smedcover: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2) },
+  ];
 }
 
 /** SHA-256 of ui/tools.json as built (toolsText), in hex: the list this page answers to, for the host to compare with the file it serves. */

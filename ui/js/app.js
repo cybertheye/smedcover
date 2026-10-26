@@ -32,7 +32,7 @@ import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, leg
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, AI_DEFAULTS, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 import { makeCommands } from "./commands.js";
 import { toolsJson } from "./tools.js";
-import { startAgent, stepping, MCP, onMcpStatus } from "./agent.js";
+import { startAgent, stepping, MCP, onMcpStatus, maskToken, setupLines } from "./agent.js";
 
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
@@ -2891,18 +2891,19 @@ function textAiPane() {
 const CAN_AGENTS = HOST === "tauri";
 /**
  * What the page keeps of it besides the status (agent.js's MCP, sent by the host as it changes): the token once read
- * (shown or not), the port being typed (null: the one in force), a switch on its way, a read under way.
+ * (shown or not: hidden again whenever the page is left, see renderPanel), the port being typed (null: the one in
+ * force), a switch on its way, whether they were read, and why they could not be.
  */
-const AGENTS = { token: "", show: false, port: null, busy: false, read: false };
+const AGENTS = { token: "", show: false, port: null, busy: false, read: false, error: "" };
 const isPort = (v) => /^\d+$/.test(String(v).trim()) && +v >= 1024 && +v <= 65535;
-/** The status and the token, read once, as the page first shows (later statuses come by themselves). */
+/** The status and the token, read once, as the page first shows (later statuses come by themselves); on failure, why, to try again. */
 async function agentsRead() {
   if (AGENTS.read) return;
-  AGENTS.read = true;
+  AGENTS.read = true; AGENTS.error = "";
   try {
     const [status, token] = await Promise.all([invoke("mcp_status"), invoke("mcp_token")]);
     MCP.status = status; AGENTS.token = token;
-  } catch (e) { fail(e); }
+  } catch (e) { AGENTS.read = false; AGENTS.error = String((e && e.message) || e); }
   if (S.mode === "setup" && S.tab.setup === "agents") renderPanel();
 }
 /** Turns the endpoint on or off, on `port` if given; the status it answers is drawn. */
@@ -2934,36 +2935,29 @@ function ago(at) {
   const s = Math.max(0, Math.round((Date.now() - at) / 1000));
   return s < 10 ? t("mcp.now") : s < 60 ? t("mcp.secs", s) : s < 3600 ? t("mcp.mins", Math.floor(s / 60)) : new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
-/** The token as shown: hidden but for its last four characters, unless the user asked to see it. */
-const tokenShown = (token) => (AGENTS.show || !token ? token : "••••••••" + token.slice(-4));
-/** The lines that set an agent up, each [label key, text to copy, text shown]: Claude Code's command, Codex's config, a JSON one for other clients. */
-function setupLines(url, token) {
-  const lines = (tok) => [
-    ["mcp.claude", `claude mcp add --transport http smedcover ${url} --header "Authorization: Bearer ${tok}"`],
-    ["mcp.codex", `[mcp_servers.smedcover]\nurl = "${url}"\nhttp_headers = { "Authorization" = "Bearer ${tok}" }\ntool_timeout_sec = 1800`],
-    ["mcp.json", JSON.stringify({ mcpServers: { smedcover: { type: "http", url, headers: { Authorization: `Bearer ${tok}` } } } }, null, 2)],
-  ];
-  const shown = lines(tokenShown(token));
-  return lines(token).map(([key, text], i) => [key, text, shown[i][1]]);
-}
-/** The endpoint's state in a word, as a pill with its light: off, running (green), error (red). */
+/** The endpoint's state in a word: off, running, switching (stopping, or moving to another port), or error (it could not start, or mcp.json could not be read). */
+const mcpState = (s) => (s && ["running", "switching", "error"].includes(s.state) ? s.state : "off");
+const MCP_DOT = { running: " ok", switching: " busy", error: " err" };
+/** The endpoint's state as a pill with its light: off, running (green), switching (amber), error (red). Said aloud as it changes. */
 function mcpPill(s) {
-  const k = s && s.on ? s.state : "off";
-  return el("span", { class: "mstate " + k, id: "mcp-pill" }, el("span", { class: "aidot" + (k === "running" ? " ok" : k === "error" ? " err" : "") }), t("mcp.state." + k));
+  const k = mcpState(s);
+  return el("span", { class: "mstate " + k, id: "mcp-pill", role: "status", "aria-live": "polite" }, el("span", { class: "aidot" + (MCP_DOT[k] || "") }), t("mcp.state." + k));
 }
-/** Beside Agents in Settings' pages: its light, lit while the endpoint runs (red when it could not start). */
+/** Beside Agents in Settings' pages: its light, lit while the endpoint runs (amber while it switches, red when it could not start). */
 function mcpLight() {
-  const s = MCP.status, k = s && s.on ? s.state : "off";
-  return el("span", { class: "light", "data-mcp": "nav" }, k !== "off" && el("span", { class: "aidot" + (k === "running" ? " ok" : " err"), title: t("mcp.state." + k) }));
+  const k = mcpState(MCP.status);
+  return el("span", { class: "light", "data-mcp": "nav" }, k !== "off" && el("span", { class: "aidot" + MCP_DOT[k], title: t("mcp.state." + k) }));
 }
 const mcpLightSync = () => { const n = document.querySelector('[data-mcp="nav"]'); if (n) n.replaceWith(mcpLight()); };
-/** What the ⋯ menu says under Agents: off, or the port it runs on. */
-const mcpSays = () => { const s = MCP.status; return s && s.on && s.state === "running" ? t("mcp.menuOn", s.port) : t("mcp.state." + (s && s.on ? s.state : "off")); };
-/** Under the port: off, the address it runs at, or why it could not start (the port taken, kept by the system, or the system's own words). */
+/** What the ⋯ menu says under Agents: the port it runs on, else its state. */
+const mcpSays = () => { const s = MCP.status, k = mcpState(s); return k === "running" ? t("mcp.menuOn", s.port) : t("mcp.state." + k); };
+/** Why the endpoint is not running, as error `e` of its status says (at `port`): the port taken or kept by the system, mcp.json unreadable, or the system's own words. */
+const mcpWhy = (e, port) => (e.code === "port_in_use" || e.code === "port_forbidden" ? t("mcp.err." + e.code, port) : e.code === "config" ? t("mcp.err.config", e.message) : t("mcp.err.bind_failed", port, e.detail || e.message));
+/** Beside the port: off, the address it runs at, switching, or why it could not start. Said aloud as it changes. */
 function mcpLine(s) {
-  const e = s.on && s.state === "error" && s.error;
-  const says = !s.on ? t("mcp.offLine") : s.state === "running" ? t("mcp.runningAt", s.url) : e ? t("mcp.err." + (["port_in_use", "port_forbidden"].includes(e.code) ? e.code : "bind_failed"), s.port, e.message) : t("mcp.offLine");
-  return el("div", { class: "hint" + (e ? " err" : ""), id: "mcp-line" }, says);
+  const k = mcpState(s), e = k === "error" && s.error;
+  const says = k === "running" ? t("mcp.runningAt", s.url) : k === "switching" ? t("mcp.switchingLine") : e ? mcpWhy(e, s.port) : t("mcp.offLine");
+  return el("div", { class: "hint" + (e ? " err" : ""), id: "mcp-line", role: "status", "aria-live": "polite" }, says);
 }
 /** The clients seen in the last 10 minutes, the calls running and the last call; a warning when the window's tools are not those the endpoint lists. */
 function mcpSeen(s) {
@@ -2983,7 +2977,12 @@ function agentsLive() {
   mcpLightSync();
   const s = MCP.status;
   if (!s || !(S.mode === "setup" && S.tab.setup === "agents")) return;
-  for (const [id, make] of [["mcp-pill", mcpPill], ["mcp-line", mcpLine], ["set-mcp-seen", mcpSeen]]) { const n = document.getElementById(id); if (n) n.replaceWith(make(s)); }
+  for (const [id, make] of [["mcp-pill", mcpPill], ["mcp-line", mcpLine]]) {   // the live regions kept, their words changed, so a screen reader says them
+    const n = document.getElementById(id), fresh = make(s);
+    if (n && n.textContent !== fresh.textContent) { n.className = fresh.className; n.replaceChildren(...fresh.childNodes); }
+  }
+  const seen = document.getElementById("set-mcp-seen");
+  if (seen) seen.replaceWith(mcpSeen(s));
   const sw = document.querySelector("#set-mcp > .aih .tog");
   if (sw && sw.classList.contains("on") !== !!s.on) renderPanel();   // turned on or off elsewhere
   later("mcp-tick", 15000, agentsLive);   // "2 min ago" kept true while the page is shown
@@ -2997,18 +2996,24 @@ onMcpStatus(agentsLive);
  */
 function agentsTab() {
   const s = MCP.status, head = el("div", { class: "sh" }, el("b", {}, t("tab.agents")), el("span", {}, t("mcp.pageSub")));
-  agentsRead();
-  if (!s) return [head, el("div", { class: "hint" }, t("mcp.reading"))];
+  if (!AGENTS.error) agentsRead();   // after a failure, only when asked again
+  if (!s) {
+    return [head, AGENTS.error
+      ? el("div", { class: "mrow" }, el("div", { class: "hint err" }, t("mcp.readFailed", AGENTS.error)), el("button", { class: "btn", onclick: () => { AGENTS.error = ""; renderPanel(); } }, ico("reset", 15), t("mcp.retry")))
+      : el("div", { class: "hint" }, t("mcp.reading"))];
+  }
   later("mcp-tick", 15000, agentsLive);
   const port = AGENTS.port ?? String(s.port), good = isPort(port), changed = good && +port !== s.port;
   const portIn = textInput(port, (v) => { AGENTS.port = v; apply.disabled = AGENTS.busy || !(isPort(v) && +v !== s.port); bad.hidden = !String(v).trim() || isPort(v); },
     { inputMode: "numeric", maxLength: 5, class: "mport", "aria-label": t("mcp.port"), onkeydown: (e) => { if (e.key === "Enter" && !apply.disabled) apply.click(); } });
   const apply = el("button", { class: "btn", disabled: AGENTS.busy || !changed, onclick: () => mcpSet(!!s.on, +AGENTS.port) }, ico("check", 15), t("mcp.apply"));
   const bad = el("div", { class: "hint err", hidden: good }, t("mcp.portBad"));
-  const url = `http://127.0.0.1:${s.port}/mcp`, tok = AGENTS.token;
-  const row = ([key, text, shown]) => el("div", { class: "mline" },
-    el("div", { class: "mlh" }, el("label", { class: "cap" }, t(key)), el("button", { class: "linkbtn", disabled: !tok, onclick: () => copyText(text) }, ico("copy", 15), t("mcp.copy"))),
-    el("pre", { class: "mcode" }, shown));
+  const url = `http://127.0.0.1:${s.port}/mcp`, tok = AGENTS.token, shown = AGENTS.show ? tok : maskToken(tok);
+  // each line shown with the token as it is shown; the one copied made with the token itself, when Copy is pressed
+  const row = ({ key, text }, i) => el("div", { class: "mline" },
+    el("div", { class: "mlh" }, el("label", { class: "cap" }, t(key)),
+      el("button", { class: "linkbtn", disabled: !tok, "aria-label": t("mcp.copyWhat", t(key)), onclick: () => copyText(setupLines(url, AGENTS.token)[i].text) }, ico("copy", 15), t("mcp.copy"))),
+    el("pre", { class: "mcode" }, text));
   return [
     head,
     el("section", { class: "scard aicard", id: "set-mcp" },
@@ -3018,13 +3023,13 @@ function agentsTab() {
       el("div", {}, el("label", { class: "cap" }, t("mcp.port"), el("small", {}, t("mcp.portSub"))), el("div", { class: "mrow" }, portIn, apply, mcpLine(s)), bad)),
     el("section", { class: "scard aicard", id: "set-mcp-token" },
       el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("mcp.token")), el("small", {}, t("mcp.tokenSub")))),
-      el("div", { class: "mrow mtoken" }, el("code", { class: "mcode" }, tok ? tokenShown(tok) : "…"),
+      el("div", { class: "mrow mtoken" }, el("code", { class: "mcode" }, tok ? shown : "…"),
         el("button", { class: "btn", disabled: !tok, onclick: () => { AGENTS.show = !AGENTS.show; renderPanel(); } }, ico(AGENTS.show ? "eyeOff" : "eye", 15), t(AGENTS.show ? "mcp.hide" : "mcp.show")),
-        el("button", { class: "btn", disabled: !tok, onclick: () => copyText(tok) }, ico("copy", 15), t("mcp.copy")),
+        el("button", { class: "btn", disabled: !tok, "aria-label": t("mcp.copyWhat", t("mcp.token")), onclick: () => copyText(AGENTS.token) }, ico("copy", 15), t("mcp.copy")),
         el("button", { class: "btn", disabled: !tok, onclick: newToken }, ico("reset", 15), t("mcp.newToken")))),
     el("section", { class: "scard aicard", id: "set-mcp-connect" },
       el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("mcp.connect")), el("small", {}, t("mcp.connectSub")))),
-      el("div", { class: "mlines" }, setupLines(url, tok).map(row)),
+      el("div", { class: "mlines" }, setupLines(url, shown).map(row)),
       el("div", { class: "hint" }, t("mcp.proxy"))),
     mcpSeen(s),
   ];
@@ -8213,6 +8218,7 @@ addEventListener("focusin", (e) => { KEYFOCUS = e.target instanceof Element && e
 addEventListener("pointerdown", () => { KEYFOCUS = null; }, true);
 function renderPanel() {
   if (!S.cover) return;
+  if (!(S.mode === "setup" && S.tab.setup === "agents")) AGENTS.show = false;   // the agents' token hidden again once its page is left
   if (COMPOSING && COMPOSING === document.activeElement && $(S.mode === "setup" ? "setpanel" : "panel").contains(COMPOSING)) return later("panel-ime", 150, renderPanel);   // an input method mid-word in it: once the word is done
   endPreview("look", "layout");   // their cards drawn anew
   useLook();
