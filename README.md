@@ -882,7 +882,7 @@ End-to-end self-test: the app exports a few covers through the real pipeline, wr
 and quits, without touching your real data.
 
 ```bash
-SMEDCOVER_SELFTEST=/absolute/empty/folder target/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover
+SMEDCOVER_SELFTEST=/absolute/empty/folder target/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover-app
 ```
 
 It also times every look effect on a layer as large as it gets, on a canvas as wide as the editor's and as a look card's: one that takes longer than 100 ms (30 ms on a card's) is listed under `fxTime` in `report.json`, as is one that hardly takes less on the card, and one that takes longer than 4 s (1 s on a card's) fails the self-test.

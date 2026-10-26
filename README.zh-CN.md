@@ -880,7 +880,7 @@ npm run test:rust                    # Rust 单元测试（cargo test --workspac
 端到端自检：应用用真实流程导出几张封面、写一份 `report.json` 后退出，不碰你的真实数据。
 
 ```bash
-SMEDCOVER_SELFTEST=/一个空目录的绝对路径 target/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover
+SMEDCOVER_SELFTEST=/一个空目录的绝对路径 target/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover-app
 ```
 
 它还会把每个风格效果放在尽量大的图层上，按编辑画布和风格卡片两种宽度各计一次时：超过 100 毫秒（卡片宽度 30 毫秒）的列在 `report.json` 的 `fxTime` 里，在卡片上也省不了多少时间的另外列出，超过 4 秒（卡片宽度 1 秒）的让自检失败。
