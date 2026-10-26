@@ -3053,12 +3053,13 @@ function mcpLine(s) {
   return el("div", { class: "hint" + (e ? " err" : ""), id: "mcp-line", role: "status", "aria-live": "polite" }, says);
 }
 /**
- * The clients seen in the last 10 minutes — the requests no client could be told to have made among them as one more, the
- * unidentified agent (its name null) — the calls running and the last call; a warning when the window's tools are not
- * those the endpoint lists. "No agent" only when nothing came in that time: no client, no call running, no call ended.
+ * The clients seen in the last 10 minutes, or with a call running (inFlight) however long ago they last asked — the
+ * requests no client could be told to have made among them as one more, the unidentified agent (its name null) — the
+ * calls running and the last call; a warning when the window's tools are not those the endpoint lists. "No agent" only
+ * when nothing came in that time: no client, no call running, no call ended.
  */
 function mcpSeen(s) {
-  const lately = (s.clients || []).filter((c) => Date.now() - c.lastSeen < 600000), last = s.lastCall;
+  const lately = (s.clients || []).filter((c) => c.inFlight > 0 || Date.now() - c.lastSeen < 600000), last = s.lastCall;
   const quiet = !lately.length && !s.inFlight && !(last && Date.now() - last.at < 600000);
   const who = (c) => c.name == null
     ? [el("span", { class: "aidot" }), el("b", {}, t("mcp.unidentified"))]

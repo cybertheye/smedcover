@@ -533,6 +533,7 @@ async fn modern_discover_list_and_call() {
     let e = Endpoint::start();
     let reply = e.modern(1, "server/discover", json!({}), None).await;
     assert_eq!(reply.status, 200, "{}", reply.body);
+    assert!(reply.header("mcp-session-id").is_none(), "that era has no sessions, and is given no id");
     let result = &reply.only()["result"];
     assert_eq!(result["resultType"], "complete");
     let versions: Vec<_> = result["supportedVersions"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
@@ -1128,13 +1129,16 @@ async fn a_session_id_tells_whose_requests_they_are() {
     assert!(e.stats.snapshot().clients.is_empty());
     assert_eq!(e.whose(10, &[("Mcp-Session-Id", c), ("User-Agent", "node")]).await.as_deref(), Some("raw-c"));
     assert_eq!(e.whose(11, &[("User-Agent", "raw-b/1.0")]).await.as_deref(), Some("raw-b"));
+    // with an id not given out, the User-Agent of a client not seen lately is not enough (after a
+    // restart another client may have come with it since): no one's
+    assert_eq!(e.whose(20, &[("Mcp-Session-Id", "from-before-a-restart"), ("User-Agent", "raw-a/1.0")]).await, None);
     // c alone of those who came with "node" is seen lately now: a request without an id is its
     assert_eq!(e.whose(12, &[("User-Agent", "node")]).await.as_deref(), Some("raw-c"));
     // seen lately again, each counted from its return
     let seen = e.stats.snapshot().clients;
     let names: Vec<_> = seen.iter().map(|c| (c.name.as_deref(), c.calls)).collect();
-    assert_eq!(names.len(), 2, "{names:?}");
-    assert!(names.contains(&(Some("raw-c"), 2)) && names.contains(&(Some("raw-b"), 1)), "{names:?}");
+    assert_eq!(names.len(), 3, "{names:?}");
+    assert!(names.contains(&(Some("raw-c"), 2)) && names.contains(&(Some("raw-b"), 1)) && names.contains(&(None, 1)), "{names:?}");
     // tools/list, and a ping, are its client's too, and count as seen without being calls
     e.later(Duration::from_secs(11 * 60));
     let reply = e.legacy_with(13, "tools/list", json!({}), &[("Mcp-Session-Id", d), ("User-Agent", "node")]).await;
@@ -1164,6 +1168,11 @@ async fn a_cancel_with_a_session_id_is_its_clients() {
     e.bridge.hung().await;
     let clients: Vec<_> = e.bridge.calls.lock().unwrap().iter().map(|(_, c, _)| c.as_ref().map(|c| c.name.clone())).collect();
     assert_eq!(clients, [Some("raw-a".to_string()), Some("raw-b".to_string())]);
+    // eleven minutes on, both calls still running: both clients still count as seen
+    e.later(Duration::from_secs(11 * 60));
+    let seen: Vec<_> = e.stats.snapshot().clients.into_iter().map(|c| (c.name, c.in_flight)).collect();
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    assert!(seen.contains(&(Some("raw-a".into()), 1)) && seen.contains(&(Some("raw-b".into()), 1)), "{seen:?}");
     // without an id the cancel could be either's: ignored
     let (note, url) = (json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 5}}).to_string(), e.url("/mcp"));
     let send = |extra: Vec<(String, String)>| {

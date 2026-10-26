@@ -45,14 +45,18 @@ The page has four cards:
 | *Connect an agent* | The lines to copy, for the port in force (and with the token while one is required), and a note on proxies |
 | *Seen lately* | The agents seen in the last 10 minutes (name, version, number of calls, when; requests that could not be told to be any agent's as one more, *Unidentified agent*), the calls running, the last call (done or failed), and a warning when the window's tools are not those the endpoint lists |
 
-*Seen lately* lists an agent for 10 minutes after its last request, or the end of its last call. An agent of the
-2026-07-28 revision says who it is in every request. One of the older revisions (today's Claude Code, Codex, Cursor and
-Hermes Agent among them) says so only as it connects, so SmedCover gives it a session id then (`Mcp-Session-Id`),
-which it sends back with each request after, and knows it by that for as long as the app runs, however long it stays
-quiet; the id is used for nothing else. A request without an id, or with one SmedCover did not give (the app was started
-again since), is taken to be the agent that connected with the same `User-Agent` on the same revision, if only one did;
-else the only agent of that revision seen lately; else it is counted under *Unidentified agent*. So every call that comes
-in is counted, and *No agent in the last 10 minutes* shows only when nothing came in that time.
+*Seen lately* lists an agent for 10 minutes after its last request or the end of its last call, and for as long as a
+call of its runs. An agent of the 2026-07-28 revision says who it is in every request. One of the older revisions
+(today's Claude Code, Codex, Cursor and Hermes Agent among them) says so only as it connects, so SmedCover gives it a
+session id then (`Mcp-Session-Id`), which it sends back with each request after. SmedCover knows it by that while the
+app runs, however long it stays quiet, keeping the ids of the last 256 connections, 8 of any one agent (one that
+connects for every call, or to check that the endpoint is there, replaces only its own); the id is used for nothing
+else. A request without an id is taken to be the agent that connected with the same `User-Agent` on the same revision,
+if only one did; one with an id SmedCover did not give (the app was started again since) only if that agent was seen
+lately too, as another may have connected with the same `User-Agent` in between. Else it is taken to be the only agent
+of that revision seen lately, unless that one only ever connected with another `User-Agent`; else it is counted under
+*Unidentified agent*. So every call that comes in is counted, and *No agent in the last 10 minutes* shows only when
+nothing came in that time.
 
 The pill, and the line beside the port:
 
@@ -424,7 +428,8 @@ starts it again; no call takes more than two hours.
 - When the agent cancels a call, or hangs up: a call still waiting never runs; one running is told at once (an export
   stops between two files) and let go of a second later. Hanging up always cancels. A client of the older revisions
   cancels with `notifications/cancelled` in a request of its own, which, without sessions, is acted on only when it can
-  be tied to exactly one call; otherwise it is ignored and the call runs to its end.
+  be tied to exactly one call; otherwise it is ignored and the call runs to its end. One carrying the session id is
+  looked for among the calls of that connection only.
 - While the window is starting or reloading, a call waits up to 30 seconds for it.
 
 ### What comes back
@@ -440,7 +445,9 @@ starts it again; no call takes more than two hours.
 
 - Streamable HTTP: `POST /mcp` only (`GET` and `DELETE` answer 405), without sessions: the answer to `initialize`
   carries an `Mcp-Session-Id`, but only to tell whose the requests after it are (see *Seen lately*), and a request with
-  an id SmedCover did not give is served like any other, never refused. Answers come as server-sent events, a
+  an id SmedCover did not give is served like any other, never refused. A client holding an id may send `GET /mcp` (to
+  listen for the server's own messages) and `DELETE /mcp` (to end its session) with it: both answer 405, which the
+  TypeScript, Python and rmcp SDKs take as not offered, and go on. Answers come as server-sent events, a
   keep-alive every 15 seconds once the headers are out, so a long call is not cut off by a client's wait for headers.
   In the 2026-07-28 revision the headers go out early only when the call names a `progressToken`; otherwise they come
   with the result.
