@@ -375,8 +375,9 @@ SmedCover tells the agent how it works when it connects (MCP's instructions). A 
 - Calls run one at a time, in the order they came. One waiting behind another tells its agent so every 5 seconds.
 - An agent's call waits while you are in the middle of something: a press or a drag, typing, a dialog or a question
   open, Surprise me's window. Typing counts until 1.2 seconds after your last key. A change also waits while the letter,
-  crop or weave window or the weave brush is open, while a file, folder or colour is being picked, while a profile is
-  being made, imported or deleted, a logo put in or a batch exported from a table, or while an export you started runs.
+  crop or weave window or the weave brush is open, while a file or folder is being picked or the colour picker is open,
+  while a profile is being made, duplicated, imported or deleted, a logo put in or covers exported from a table, or while
+  an export you started runs. A colour field that keeps the focus after its picker is shut holds nothing back.
   It goes ahead once your hands have been off the window for 400 ms. After 30 seconds of waiting (10 for a read) it
   answers `busy`, and the agent tries again shortly.
 - Settings open does not hold a change back by itself. The page it shows is drawn again after a change only when the
@@ -623,7 +624,7 @@ server (talked to from a phone through Slack, say). The desktop-only tools are n
 | The page says *Its settings could not be read* | `mcp.json` cannot be read (check its owner and permissions in the data folder). Nothing is written over it until it can be; then turn the switch on again. |
 | Nothing listens after a restart | The switch is kept in `mcp.json`, so check the page: off means it was turned off (or `mcp.json` was not JSON and was started over, which also made a new token); an error says why. |
 | The agent times out on a long call | Raise its timeout: Codex `tool_timeout_sec = 1800`, OpenClaw `requestTimeoutMs`, Hermes `timeout`. When a client gives up, SmedCover cancels the call: what it changed so far stays as one step; have the agent check with `get_cover`. |
-| `SmedCover is busy: …` | You were in the middle of something (a dialog, typing, a drag, a file or colour being picked, the letter, crop or weave window) for as long as the call waits: 30 seconds for a change, 10 for a read. Finish it and let the agent try again. |
+| `SmedCover is busy: …` | You were in the middle of something (a dialog, typing, a drag, a file being picked or the colour picker open, a profile being made or imported, the letter, crop or weave window: the message says which) for as long as the call waits: 30 seconds for a change, 10 for a read. Finish it and let the agent try again. |
 | `SmedCover's window is not ready …` | The window is starting, reloading or showing the first-start welcome. Finish the welcome, wait a moment, and try again. |
 | `… the change may or may not have been applied` | The window reloaded or closed, or went quiet past the tool's timeout, while a call ran. Look at the window (or have the agent call `get_cover`) before going on. |
 | *An agent is working…* stays | After 20 seconds the pill offers *Stop waiting* (or press Esc): the window is yours again and the agent is told the step did not finish. A call is also given up by itself when nothing is heard from it for its timeout. What it changed stays as one step: undo it if you do not want it. |

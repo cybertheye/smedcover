@@ -2516,10 +2516,14 @@ says so as each of its pictures is taken in, and every 5 s besides (a big projec
 `agent.js` is the shell. Calls run one at a time in the order they came (`makeQueue()`: a call cancelled while it
 waits never runs), one waiting behind another telling the caller so every 5 s. Each is checked (`checkCall()`; a name
 of `Object.prototype`'s is no tool), then waits till the user is in the middle of nothing (`whenIdle()` over
-`userBusy()`: a press, a drag, a dialog, typing; for a change the editor's windows and an export under way too, a
-colour being picked, and what the user has under way, `USER_OPS` — a file or folder being picked, a profile made,
-imported or deleted, a logo put in, a batch from a table, each wrapped in `userOp()` from its start to its end, so no
-change comes between its steps; not Settings itself) and their hands have been off the window for 400 ms, telling the caller every 5 s that it waits (a progress
+`userBusy()`: a press, a drag, a dialog, typing; for a change the editor's windows and an export under way too, the
+colour picker open (`colourPicking()`: the focused colour field `:open` where the web view knows it, else pressed or
+picked in within 4 s — a field merely keeping the focus after its picker is shut holds nothing back), and what the user
+has under way, `USER_OPS`, each with its own words for the message — a file being picked (`pickFiles()`, till its
+change or cancel, the window used again, or a second after it is back in front where no cancel comes; a choice coming
+later still taken), a folder being picked, a profile made, duplicated, imported or deleted, a logo going in, covers
+exported from a table, each from its start to its end (`userOp(fn, why)`), so no change comes between its steps; not
+Settings itself) and their hands have been off the window for 400 ms, telling the caller every 5 s that it waits (a progress
 message, which sets the host's timer going again), and answering `busy` after 30 s (10 s for a read). Input is noted
 while a step runs too, and when the user pressed, typed or scrolled during one, the 400 ms run from its end: they get
 in before the next change, which waits while they press. A call that changes something holds the window while it runs:
@@ -2537,10 +2541,14 @@ animation of `stroke-dashoffset` each and no filter, so only they are painted ag
 less motion is asked for), and *Agent at work* left of Surprise me in the top bar (`.atwork`, built by `syncTop()` with
 the rest of the bar and shown by `body.agent`, after a light that breathes, in the lamp's colours; laid over the room
 there with no width of its own, so nothing in the bar moves, its words left out where they do not fit and the light too
-where not even it does, `fitAtWork()`; hidden from screen readers, the pill saying it); `closeTransient()` answers a note of the open Settings page (what it shows, `settingsSeen()`,
-and the field it took the focus from), and once the change is over, its step settled and before the window is given
-back, agent.js hands it to `follow` (`settingsFollow()`): the page is drawn again only if the change touched what it
-shows (while a change runs, its commands' own drawing of it waits), scrolled where it was, a focused control given its
+where not even it does, `fitAtWork()`; hidden from screen readers, the pill saying it); `closeTransient()` answers a note of the open Settings page (the page and profile shown, and
+the field it took the focus from; a colour field it leaves too, which in WebKit ends its picker), and once the change is
+over, its step settled and before the window is given back, agent.js hands it to `follow` (`settingsFollow()`): the page
+is drawn again only if what it shows (`settingsSeen()`) is no longer what it was last drawn, typed or picked in with
+(`SET_UI.drawn`), or a drawing of something it cannot tell was put off meanwhile (`SET_UI.pending`: a test's answer that
+came during the change) — so a test's answer put off while a field had the focus is not lost — never by a call let go of
+while another call's change runs (that one's follow catches up); while a change runs, its commands' own drawing of the
+page waits; scrolled where it was, a focused control given its
 focus back by its `data-k` (`heldField()`, `giveBack()`: never by its place, never into another channel's card, a
 trimmed field given back what was typed) and the field left given back its caret, unless the call was let go of; after 20 s it says the step is taking longer than usual and offers to stop waiting (its button, or Esc). One
 whose tool has `history` runs inside `agentStep(fn)` (`app.js`): the change the user was making becomes a step of its

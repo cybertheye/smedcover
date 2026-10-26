@@ -133,34 +133,49 @@ function toast(msg, sticky = false, act = null) {
 const fail = (e) => toast(t("msg.failed", e && e.message ? e.message : String(e)));
 
 /**
- * What the user has under way that an agent's change waits for (userBusy), each counted from its start to its end however
- * it ends (userOp): a file or folder being picked, the system's dialog open; a profile made, duplicated, imported or
- * deleted; a logo put in; a batch exported from a table — their steps awaited one after another, which a change of an
- * agent's must not come between (its step of undo would take the user's change with it, or put a switch of profile back).
+ * What the user has under way that an agent's change waits for (userBusy, which says the newest), each with what it is in
+ * a few words, from its start to its end however it ends: a file being picked, the system's dialog open (pickFiles); a
+ * folder being picked; a profile being made, duplicated, imported or deleted; a logo going in; covers exported from a
+ * table — their steps awaited one after another, which a change of an agent's must not come between (its step of undo
+ * would take the user's change with it, or put a switch of profile back). Each counts for five minutes at the most,
+ * should a system dialog never say it was shut.
  */
-const USER_OPS = { n: 0 };
-/** Runs fn as something of the user's under way (USER_OPS): for five minutes at the most, should a system dialog never say it was shut. */
-async function userOp(fn) {
-  let on = true;
-  const off = () => { if (on) { on = false; USER_OPS.n--; } }, cap = setTimeout(off, 300000);
-  USER_OPS.n++;
-  try { return await fn(); } finally { clearTimeout(cap); off(); }
+const USER_OPS = new Set();
+/** Counts something of the user's as under way, `why` (USER_OPS), till end() is called — or for five minutes at the most. */
+function userMark(why) {
+  const mark = { why, end: () => { clearTimeout(cap); USER_OPS.delete(mark); } }, cap = setTimeout(() => mark.end(), 300000);
+  USER_OPS.add(mark);
+  return mark;
+}
+/** Runs fn as something of the user's under way, `why` (USER_OPS), till it ends however it ends. */
+async function userOp(fn, why) {
+  const mark = userMark(why);
+  try { return await fn(); } finally { mark.end(); }
 }
 /**
- * Opens the system file picker and resolves with the chosen files (empty when cancelled: the input's cancel event, or,
- * where a web view sends none, the window left for the dialog and back in front with nothing chosen a second later).
+ * Opens the system file picker and resolves with the chosen files: none when it is cancelled (its cancel event) or the
+ * window is used again with nothing chosen (a press or a key in it: the dialog is shut by then). The pick holds an
+ * agent's change back (USER_OPS) till then — or, where a web view says nothing of a dialog cancelled, till a second after
+ * the window is back in front (its focus); a choice that comes later than that is still taken, not dropped.
  */
 function pickFiles(accept, multiple = false) {
-  return userOp(() => new Promise((resolve) => {
-    const f = $("file");
-    let done = false;
-    const back = () => setTimeout(() => end([...f.files]), 1000), left = () => addEventListener("focus", back, { once: true });
-    const end = (files) => { if (done) return; done = true; removeEventListener("blur", left); removeEventListener("focus", back); f.onchange = f.oncancel = null; resolve(files); };
+  return new Promise((resolve) => {
+    const f = $("file"), mark = userMark("a file is being picked");
+    let done = false, timer = 0;
+    const back = () => { timer = setTimeout(mark.end, 1000); }, left = () => addEventListener("focus", back, { once: true }), used = () => end([...f.files]);
+    const end = (files) => {
+      if (done) return;
+      done = true; clearTimeout(timer); mark.end(); f.onchange = f.oncancel = null;
+      removeEventListener("blur", left); removeEventListener("focus", back);
+      for (const type of ["pointerdown", "keydown"]) removeEventListener(type, used, true);
+      resolve(files);
+    };
     f.accept = accept; f.multiple = multiple; f.value = "";
     f.onchange = () => end([...f.files]); f.oncancel = () => end([]);
-    addEventListener("blur", left, { once: true });
+    addEventListener("blur", left, { once: true });   // the window's own, as the dialog takes the front: not a field's (they do not bubble)
+    for (const type of ["pointerdown", "keydown"]) addEventListener(type, used, true);
     f.click();
-  }));
+  });
 }
 const pickFile = async (accept) => (await pickFiles(accept))[0] || null;
 const readAs = (file, how) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r[how](file); });
@@ -2543,7 +2558,7 @@ function ctlKey(c) {
  */
 function giveBack(box, h) {
   if (!h) return;
-  const same = h.k ? [...box.querySelectorAll(`[data-k="${h.k}"]`)] : [...box.querySelectorAll(CONTROLS)].filter((c) => ctlKey(c) === h.key), f = same.length === 1 ? same[0] : null;
+  const same = h.k ? [...box.querySelectorAll("[data-k]")].filter((c) => c.dataset.k === h.k) : [...box.querySelectorAll(CONTROLS)].filter((c) => ctlKey(c) === h.key), f = same.length === 1 ? same[0] : null;   // keys compared, not put in a selector: an id may hold anything
   const card = f && f.closest(".chcard");
   if (!f || f.disabled || (card && card.dataset.id !== S.cover.catId)) return;
   if (h.v != null && f.value !== h.v && f.value.trim() === h.v.trim()) f.value = h.v;
@@ -2865,6 +2880,7 @@ if (HOST === "tauri" && globalThis.__TAURI__.event) globalThis.__TAURI__.event.l
 /** Draws Settings → AI again once something there finished (a test, a download), but not under a field being typed in: once it is left. */
 function refreshAiPage() {
   if (!(S.mode === "setup" && S.tab.setup === "ai")) return;
+  if (stepping()) { SET_UI.pending = true; return; }   // an agent's change under way: drawn once it is over (settingsFollow)
   const a = document.activeElement;
   if (a && $("setpanel").contains(a) && (a.tagName === "TEXTAREA" || a.tagName === "INPUT" && !/^(radio|checkbox|range)$/.test(a.type))) return later("aipage", 600, refreshAiPage);
   renderPanel();
@@ -4737,22 +4753,29 @@ async function adoptImage(f, name = "asset") {
   const src = svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(sizedSvg(await readAs(f, "readAsText")))}` : await readAs(f, "readAsDataURL");
   return adoptAsset(f.name.replace(/\.[^.]+$/, "").slice(0, 60) || name, src);
 }
-/** Uploads a picture as the profile's brand logo: kept with the user's assets (so it travels with an exported profile), shown on this cover. Something of the user's under way till it is in (userOp). */
-const uploadLogo = () => userOp(async () => {
-  const id = await adoptImage(await pickFile("image/png,image/jpeg,image/webp,image/svg+xml"), "logo");
-  if (id === undefined) return;
+/** Uploads a picture as the profile's brand logo: kept with the user's assets (so it travels with an exported profile), shown on this cover. Something of the user's under way from the file picked till it is in (userOp). */
+async function uploadLogo() {
+  const f = await pickFile("image/png,image/jpeg,image/webp,image/svg+xml");
+  if (f) await userOp(() => logoIn(f), "a logo is going in");
+}
+async function logoIn(f) {
+  const id = await adoptImage(f, "logo");
   if (!id) return toast(t("msg.badFile"));
   S.profile.brand.logo = id;
   const L = layer("logo");
   if (L) { delete L.off; L.visible = true; }   // uploading one is wanting it on the cover
   touch({ profile: true, cover: true, panel: true, side: true });
-});
+}
 /**
  * The settings window's state: `at`, a card of the page to bring into view when it is next drawn ("batch", "image",
  * "cut"); `menu`, the channel whose ⋯ is open; `custom`, the width and height typed for a size of one's own, as typed;
- * `follow`, while settingsFollow draws the page in the middle of an agent's step.
+ * `follow`, while settingsFollow draws the page in the middle of an agent's step; `drawn`, what the page showed
+ * (settingsSeen) as it was last drawn, or typed or picked in; `pending`, a drawing asked for while an agent's change ran
+ * and put off till it is over.
  */
-const SET_UI = { at: "", menu: "", custom: { w: "1280", h: "720" }, follow: false };
+const SET_UI = { at: "", menu: "", custom: { w: "1280", h: "720" }, follow: false, drawn: "", pending: false };
+// what is typed or picked in Settings' page is shown by the field itself: the page as drawn now has it
+for (const type of ["input", "change"]) $("setpanel").addEventListener(type, () => { if (S.mode === "setup" && S.cover) SET_UI.drawn = settingsSeen(); });
 /** The profile's logo: its picture (or a place for one), Upload or Replace, Remove. In Settings → Brand, and the logo layer's properties. */
 function logoControls() {
   const P = S.profile, a = P.brand.logo && userAssets.get(P.brand.logo);
@@ -7253,7 +7276,7 @@ const keepExportDir = (dir) => { S.settings.exportDirs[S.profile.id] = dir; pers
 const shortDir = (dir) => dir.replace(/^(\/Users\/(?!Shared(?:\/|$))[^/]+|\/home\/[^/]+|[A-Za-z]:\\Users\\(?!Public(?:\\|$))[^\\]+)(?=[\\/]|$)/, "~");
 /** Asks for the folder to export into and keeps it for the profile; resolves with it, or null when none was chosen. The dialog is the user's under way (userOp). */
 function pickExportDir() {
-  return userOp(async () => { try { const dir = await invoke("pick_folder"); if (dir) keepExportDir(dir); return dir || null; } catch (e) { fail(e); return null; } });
+  return userOp(async () => { try { const dir = await invoke("pick_folder"); if (dir) keepExportDir(dir); return dir || null; } catch (e) { fail(e); return null; } }, "a folder is being picked");
 }
 /** Writing into `dir` failed (it is gone, its disk away, or it cannot be written into): says so and asks for another; resolves with it, or null. */
 function askOtherDir(dir, err) {
@@ -7417,17 +7440,19 @@ function batchJobs(rows) {
   });
   return { jobs, unknown };
 }
-/** Settings → Sizes & export's batch from a table: a file picked, its rows exported. Something of the user's under way till it is done (userOp). */
-const batchFromCsv = () => userOp(async () => {
+/** Settings → Sizes & export's batch from a table: a file picked, its rows exported. Something of the user's under way from the file picked till it is done (userOp). */
+async function batchFromCsv() {
   const f = await pickFile(".csv,.tsv,.txt,text/csv");
-  if (!f) return;
+  if (f) await userOp(() => batchFrom(f), "covers are being exported from a table");
+}
+async function batchFrom(f) {
   const rows = csvToJobs(await readAs(f, "readAsText"));
   if (!rows.length) return toast(t("msg.batchEmpty"));
   const { jobs, unknown } = batchJobs(rows);
   for (const j of jobs) await loadPhotos(pidsOf(j.cover));
   await exportMany(jobs);
   if (unknown) setTimeout(() => toast(counted("msg.batchUnknown", unknown)), 3600);
-});
+}
 function csvTemplate() {
   const zh = getLang() === "zh", c = S.profile.categories;
   const lines = [zh ? "频道,标题,角标,副标题" : "channel,title,tag,subtitle", `${c[0].name},"${zh ? "第一行\\n*第二行*" : "First line\\n*second line*"}",EP.01,${zh ? "一句话补充标题" : "A line to go with it"}`, `${(c[1] || c[0]).name},${zh ? "另一个标题" : "Another title"},,`];
@@ -7636,12 +7661,12 @@ async function addProfile(raw, activate = true) {
   if (activate) await switchProfile(p.id);
   return p;
 }
-/** Settings' profile actions; each that changes the profiles is something of the user's under way till it is done (userOp). */
+/** Settings' profile actions; each that changes the profiles is something of the user's under way till it is done (userOp; an import from its file picked). */
 const profileActions = {
-  new: () => userOp(() => addProfile(starterProfile(getLang(), ""))),
-  duplicate: () => userOp(() => addProfile({ ...JSON.parse(JSON.stringify(S.profile)), name: `${S.profile.name} ${t("msg.copy")}` })),
-  delete: () => userOp(() => profileDelete()),
-  import: () => userOp(() => profileImport()),
+  new: () => userOp(() => addProfile(starterProfile(getLang(), "")), "a profile is being made"),
+  duplicate: () => userOp(() => addProfile({ ...JSON.parse(JSON.stringify(S.profile)), name: `${S.profile.name} ${t("msg.copy")}` }), "a profile is being duplicated"),
+  delete: () => userOp(() => profileDelete(), "a profile is being deleted"),
+  import: () => profileImport(),
   export: () => profileExportDialog(),
 };
 /** Deletes the profile shown, once the user says so: the other one shown first, then this one's file and covers. */
@@ -7659,7 +7684,9 @@ async function profileDelete() {
 /** A profile file: a new profile (its own id), with the covers of its channels if the file has them. */
 async function profileImport() {
   const f = await pickFile(".json,application/json");
-  if (!f) return;
+  if (f) await userOp(() => profileFrom(f), "a profile is being imported");
+}
+async function profileFrom(f) {
   try {
     const raw = JSON.parse(await readAs(f, "readAsText"));
     if (!raw || typeof raw !== "object") throw 0;
@@ -8132,7 +8159,7 @@ async function newFromTop(kind) {
   if (kind === "profile") await profileActions.new();
   else await switchChannel(addChannel().id);
   S.tab.setup = "brand"; setMode("setup");
-  const name = kind === "profile" ? $("prof-name") : $("setpanel").querySelector(`.chcard[data-id="${S.cover.catId}"] .chname`);
+  const name = kind === "profile" ? $("prof-name") : $("setpanel").querySelector(`.chcard[data-id="${CSS.escape(S.cover.catId)}"] .chname`);
   if (name) { name.scrollIntoView({ block: "center" }); name.focus({ preventScroll: true }); name.select(); }
 }
 /**
@@ -8217,28 +8244,44 @@ function closeMenu() {
 }
 /** Whether element a is a field words are typed into (not a slider, a colour, a switch). */
 const textField = (a) => !!a && (a.isContentEditable || a.tagName === "TEXTAREA" || (a.tagName === "INPUT" && !["range", "color", "checkbox", "radio", "button", "file"].includes(a.type)));
+/** When a colour field was last pressed, clicked (a label's click too), or picked in: see colourPicking. */
+const COLOUR = { at: -Infinity };
+for (const type of ["pointerdown", "click", "input", "change"]) addEventListener(type, (e) => { if (e.target && e.target.type === "color") COLOUR.at = performance.now(); }, true);
+const OPEN_KNOWN = !!(globalThis.CSS && CSS.supports && CSS.supports("selector(:open)"));
+/**
+ * Whether the system's colour picker is open, for userBusy: the field with the focus a colour's and its picker open
+ * (:open, where the web view knows it), else that field pressed or picked in within the last 4 s. A field merely keeping
+ * the focus after its picker was shut (as a label's click leaves it) holds nothing back.
+ */
+function colourPicking() {
+  const a = document.activeElement;
+  if (!a || a.type !== "color") return false;
+  return OPEN_KNOWN ? a.matches(":open") : performance.now() - COLOUR.at < 4000;
+}
 /**
  * Shuts what is open for a moment over the editor — the ⋯ menu, the bar's popover, a picker's list, a look, an effect
  * or a layout shown on hover — and takes the focus out of a field being typed in, so the sheets drawn next are drawn whole
- * (and what the field holds is taken, by its change event). An agent's change does it as it begins, and is answered what
- * settingsFollow needs once the change is over: with Settings open, what its page shows (settingsSeen), the page and
- * profile, and the field it took the focus from; else null.
+ * (and what the field holds is taken, by its change event), and out of a colour field (in WebKit that ends its picker, so
+ * no colour it is still sending lands in an agent's step). An agent's change does it as it begins, and is answered what
+ * settingsFollow needs once the change is over: with Settings open, the page and profile shown and the field it took the
+ * focus from; else null.
  */
 function closeTransient() {
   closeMenu();
   if (FTB.pop) { FTB.pop = ""; renderBar(); }
   for (const b of document.querySelectorAll('[aria-expanded="true"]')) if (b._shut) b._shut(false);
   endPreview("look", "fx", "layout");
-  const typing = textField(document.activeElement);
-  const note = S.mode === "setup" && S.cover ? { seen: settingsSeen(), tab: S.tab.setup, profile: S.profile.id, field: typing ? heldField($("setpanel"), true) : null } : null;
-  if (typing) document.activeElement.blur();
+  const a = document.activeElement, typing = textField(a);
+  const note = S.mode === "setup" && S.cover ? { tab: S.tab.setup, profile: S.profile.id, field: typing ? heldField($("setpanel"), true) : null } : null;
+  if (typing || (a && a.type === "color")) a.blur();
   return note;
 }
 /**
- * What the open Settings page shows, as a string, to tell whether an agent's change touched it (settingsFollow): the nav's
- * profile (its name, its channels' names and colours, the one shown, how many profiles there are) and the page's own —
- * Brand & channels the brand and the channels, Sizes & export the sizes and the export's settings, AI the services and
- * what was learnt of them, Agents the endpoint's switches. Most of an agent's changes are the cover's alone: none of it.
+ * What the open Settings page shows, as a string, to tell whether it is out of date (settingsFollow, against SET_UI.drawn,
+ * what it was as the page was last drawn or typed in): the nav's profile (its name, its channels' names and colours, the
+ * one shown, how many profiles there are) and the page's own — Brand & channels the brand and the channels, Sizes &
+ * export the sizes and the export's settings, AI the services and what was learnt of them, Agents the endpoint's
+ * switches. Most of an agent's changes are the cover's alone: none of it.
  */
 function settingsSeen() {
   const P = S.profile, se = S.settings, m = MCP.status || {};
@@ -8248,17 +8291,20 @@ function settingsSeen() {
 }
 /**
  * Settings' page, open while an agent's change was made, once the change is over and its step of undo settled (agent.js
- * calls it, `note` closeTransient's as the change began, before the window is given back): drawn again when the change
- * touched what it shows (settingsSeen) — a channel renamed or recoloured, another profile shown — and only then, its
- * scroll kept and the focused control given its focus back (renderPanel; while a change runs, the drawing its commands
- * ask for waits for this); else left as it is, but for the example file name, which has the cover's words. The field the
- * change began by leaving gets its focus and caret back, while nothing else has the focus and the window shows the page
- * and profile it did, unless the call was let go of (`gone`: the window has been the user's since). The canvas behind
- * and the layer list follow as with Settings shut; the sheet is drawn as Settings closes (setMode).
+ * calls it, `note` closeTransient's as the change began, before the window is given back): drawn again when what it
+ * shows is no longer what it was last drawn with (settingsSeen against SET_UI.drawn: a channel renamed or recoloured by
+ * the change, another profile shown, or a test's answer that came while a field had the focus and its drawing was put
+ * off), or when a drawing of something the page cannot tell was asked for meanwhile (SET_UI.pending), and only then,
+ * its scroll kept and the focused control given its focus back (renderPanel; while a change runs, the drawing its
+ * commands ask for waits for this); else left as it is, but for the example file name, which has the cover's words. The
+ * field the change began by leaving gets its focus and caret back, while nothing else has the focus and the window shows
+ * the page and profile it did, unless the call was let go of (`gone`: the window has been the user's since; while
+ * another call's change runs, that call's own follow catches up). The canvas behind and the layer list follow as with
+ * Settings shut; the sheet is drawn as Settings closes (setMode).
  */
 function settingsFollow(note, gone = false) {
-  if (!note || S.mode !== "setup" || !S.cover) return;
-  if (settingsSeen() !== note.seen) { SET_UI.follow = true; try { renderPanel(); } finally { SET_UI.follow = false; } }
+  if (!note || S.mode !== "setup" || !S.cover || (gone && stepping())) return;
+  if (SET_UI.pending || settingsSeen() !== SET_UI.drawn) { SET_UI.follow = true; try { renderPanel(); } finally { SET_UI.follow = false; } }
   else { const ex = document.getElementById("exp-example"); if (ex) ex.textContent = t("exp.example", nameFor(selSize(), S.cover, catIndex())); }
   const a = document.activeElement;
   if (!gone && note.field && note.tab === S.tab.setup && note.profile === S.profile.id && (!a || a === document.body)) giveBack($("setpanel"), note.field);
@@ -8449,7 +8495,7 @@ function renderPanel() {
   panel.replaceChildren(...kids);
   giveBack(panel, held);   // a field being typed in (the Assets sheet's search, any of Settings') keeps its focus and caret
   panel.scrollTop = y;
-  if (S.mode === "setup") syncTabs();   // the nav's profile: its name, channels and colours, as the page now has them
+  if (S.mode === "setup") { syncTabs(); SET_UI.drawn = settingsSeen(); SET_UI.pending = false; }   // the nav's profile: its name, channels and colours, as the page now has them; what the page was drawn with
   const at = S.mode === "setup" && SET_UI.at && document.getElementById("set-" + SET_UI.at);   // a card of the page asked for (see SET_UI)
   if (at) { SET_UI.at = ""; at.scrollIntoView({ block: "start" }); }
   placeFrames();   // the layout's parts framed with the Layout sheet shown, and no longer with another
@@ -8534,12 +8580,12 @@ addEventListener("input", (e) => { if (textField(e.target)) TYPED.at = performan
  * What the user is in the middle of, in a few words of English, or null: what a change made for them (an agent's) waits
  * for. Always: the self-test, a question or a dialog open, Surprise me's window or its dealing, a press or a drag under
  * way (on the canvas, a slider, a row of the Layers sheet, an asset, a channel's card, files over the window), a word
- * being put together by an input method, typing; `strict` (for a change): something of the user's under way (USER_OPS: a
- * file or folder being picked, a profile made, imported or deleted, a logo put in, a batch from a table), a colour being
- * picked (its field has the focus: the system's picker may be open, and would change a channel or layer the change may
- * replace), the letter, crop and weave windows, the brush's panel open too, and an export of the sizes ticked under way.
- * Settings open holds nothing else back: an agent works as soon as its endpoint is on, the page Settings shows drawn again
- * after a change only when it touched what the page shows (settingsFollow).
+ * being put together by an input method, typing; `strict` (for a change): something of the user's under way, in its own
+ * words (USER_OPS: a file or folder being picked, a profile being made, duplicated, imported or deleted, a logo going in,
+ * covers exported from a table), the colour picker open (colourPicking: it would change a channel or layer the change
+ * may replace), the letter, crop and weave windows, the brush's panel open too, and an export of the sizes ticked under
+ * way. Settings open holds nothing else back: an agent works as soon as its endpoint is on, the page Settings shows
+ * drawn again after a change only when what it shows is out of date (settingsFollow).
  */
 function userBusy(strict = false) {
   const deal = $("deal");
@@ -8553,8 +8599,8 @@ function userBusy(strict = false) {
   if (COMPOSING) return "a word is being typed with an input method";
   if (textField(document.activeElement) && performance.now() - TYPED.at < 1200) return "the user is typing";
   if (!strict) return null;
-  if (USER_OPS.n > 0) return "the user is picking a file or folder, or making, importing or deleting a profile";
-  if (document.activeElement && document.activeElement.type === "color") return "a colour is being picked";
+  if (USER_OPS.size) return [...USER_OPS].pop().why;
+  if (colourPicking()) return "a colour is being picked";
   if (S.letterWin) return "the letter window is open";
   if (S.cropWin) return "the crop window is open";
   if (S.weaveWin) return "the weave window is open";
@@ -9004,10 +9050,11 @@ async function agentTest(dir) {
  */
 async function agentSettingsTest({ call, ok, r, no }) {
   const wait = (ms) => new Promise((done) => setTimeout(done, ms)), tab = S.tab.setup, panel = $("setpanel"), out = {};
+  const byKey = (k) => [...panel.querySelectorAll("[data-k]")].find((e) => e.dataset.k === k) || null;
   const typeIn = (f, v) => { f.focus(); f.value = v; f.dispatchEvent(new Event("input", { bubbles: true })); if (f.type !== "number") f.setSelectionRange(v.length, v.length); };
   try {
     S.tab.setup = "sizes"; setMode("setup");
-    const w = panel.querySelector('[data-k="size:custom:w"]'), name = panel.querySelector(`[data-k="size:${S.sel}:name"]`), list = panel.querySelector(".szlist"), had = name ? name.value : "";
+    const w = byKey("size:custom:w"), name = byKey(`size:${S.sel}:name`), list = panel.querySelector(".szlist"), had = name ? name.value : "";
     if (!w || !name) no("Settings → Sizes & export: the custom width or the size's name has no data-k");
     else {
       typeIn(w, "1919"); typeIn(name, "Ag ");
@@ -9018,32 +9065,50 @@ async function agentSettingsTest({ call, ok, r, no }) {
       if (out.coverOnly.redrawn) no("a change of the cover's alone drew Settings' page again");
       if (!out.coverOnly.focused || name.value !== "Ag " || name.selectionStart !== 3) no(`the size's name being typed in lost its focus or caret: ${JSON.stringify(out.coverOnly)}`);
       renderPanel();
-      const w2 = panel.querySelector('[data-k="size:custom:w"]'), n2 = panel.querySelector(`[data-k="size:${S.sel}:name"]`);
+      const w2 = byKey("size:custom:w"), n2 = byKey(`size:${S.sel}:name`);
       out.drawnAgain = { width: w2 && w2.value, focused: document.activeElement === n2, value: n2 && n2.value, caret: n2 && n2.selectionStart };
       if (!w2 || w2.value !== "1919") no("the width typed for a size of one's own did not outlast the page drawn again");
       if (!n2 || document.activeElement !== n2 || n2.value !== "Ag " || n2.selectionStart !== 3) no(`drawn again, the size's name did not keep its focus, what was typed or its caret: ${JSON.stringify(out.drawnAgain)}`);
       typeIn(n2, had); n2.blur(); SET_UI.custom.w = "1280";
     }
     S.tab.setup = "brand"; renderPanel();
-    const c = cat(), i = S.profile.categories.indexOf(c) + 1, was = c.name, k = `ch:${c.id}:name`, f = panel.querySelector(`[data-k="${k}"]`);
+    const c = cat(), i = S.profile.categories.indexOf(c) + 1, was = c.name, k = `ch:${c.id}:name`, f = byKey(k);
     if (!f) no("Settings → Brand & channels: the shown channel's name has no data-k");
     else {
       f.focus(); f.setSelectionRange(2, 2);
       await wait(500);
-      const x = await call("set_channel", { channel: i, name: was + " ·" }), g = panel.querySelector(`[data-k="${k}"]`);
+      const x = await call("set_channel", { channel: i, name: was + " ·" }), g = byKey(k);
       out.renamed = { ok: x.ok, redrawn: g !== f, value: g && g.value, focused: document.activeElement === g, caret: g && g.selectionStart, channel: S.cover.catId === c.id };
       if (!x.ok || !g || g === f || g.value !== was + " ·") no(`a channel renamed with Settings open was not shown: ${JSON.stringify(out.renamed)}`);
       if (document.activeElement !== g || g.selectionStart !== 2 || S.cover.catId !== c.id) no(`the channel's name field did not get its focus and caret back: ${JSON.stringify(out.renamed)}`);
       await ok("set_channel", { channel: i, name: was });
       // something of the user's under way holds a change back; a colour being picked too
-      const busy = userOp(() => wait(600)), t0 = performance.now();
+      const busy = userOp(() => wait(600), "a profile is being made"), t0 = performance.now();
       await ok("set_text", { title: "After the user" });
       out.waitedForUser = Math.round(performance.now() - t0);
       await busy;
       if (out.waitedForUser < 550) no(`a change did not wait for the user's own (${out.waitedForUser} ms)`);
-      const swatch = $("setpanel").querySelector(`[data-k="ch:${c.id}:color"]`);
-      if (swatch) { swatch.focus(); SELFTESTING = false; try { out.colour = userBusy(true); } finally { SELFTESTING = true; } swatch.blur(); }
-      if (out.colour !== "a colour is being picked") no(`a colour field with the focus does not hold a change back (${out.colour})`);
+      // a colour field keeping the focus, its picker shut, holds nothing back; picked in a moment ago (where the web view cannot tell an open picker), it does
+      const swatch = byKey(`ch:${c.id}:color`), busyNow = () => { SELFTESTING = false; try { return userBusy(true); } finally { SELFTESTING = true; } };
+      if (swatch) {
+        COLOUR.at = -Infinity; swatch.focus(); out.colourShut = busyNow();
+        if (!OPEN_KNOWN) { COLOUR.at = performance.now(); out.colourPicked = busyNow(); }
+        swatch.blur();
+      }
+      if (out.colourShut === "a colour is being picked") no("a colour field keeping the focus, its picker shut, holds a change back");
+      if (!OPEN_KNOWN && out.colourPicked !== "a colour is being picked") no(`a colour picked in a moment ago does not hold a change back (${out.colourPicked})`);
+    }
+    // Settings → AI: a test's answer that came while a field had the focus (its drawing put off) is shown once a change is over
+    S.tab.setup = "ai"; renderPanel();
+    const model = byKey("ai:model"), test = AI.test;
+    if (model) {
+      model.focus(); AI.test = { ok: true, text: "Self-test answer" }; refreshAiPage();
+      await wait(800);
+      await ok("set_text", { title: "With an answer waiting" });
+      const foot = $("set-text") && $("set-text").querySelector(".aifoot");
+      out.answerShown = !!foot && foot.textContent.includes("Self-test answer");
+      if (!out.answerShown) no("a test's answer put off while a field had the focus was not shown after an agent's change");
+      AI.test = test; model.blur(); renderPanel();
     }
     // the agents' lamp, laid out by the changes above
     if (!LESS_MOTION.matches) {
