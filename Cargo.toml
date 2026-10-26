@@ -1,11 +1,13 @@
 # The Rust side of SmedCover is one Cargo workspace: one lock file and one target/ folder, here at the root.
 # `core/` (the package smedcover-core) does the work that is not the desktop window's own, for the app and a server
-# to share; `src-tauri/` is the desktop app, and `tauri build` and `tauri dev` build it from its own folder.
-# `cargo test` here tests the core alone, which needs neither Tauri nor a web view; `--workspace` tests the app too.
+# to share; `src-tauri/` is the desktop app, and `tauri build` and `tauri dev` build it from its own folder; `cli/`
+# (the package smedcover-cli) is the command line, `smedcover`, which calls the app's tools and draws nothing itself.
+# `cargo test` here tests the core and the command line, which need neither Tauri nor a web view; `--workspace` tests
+# the app too.
 [workspace]
 resolver = "2"
-members = ["core", "src-tauri"]
-default-members = ["core"]
+members = ["core", "src-tauri", "cli"]
+default-members = ["core", "cli"]
 
 [workspace.package]
 version = "0.3.1"
@@ -60,6 +62,10 @@ socket2 = "0.6"
 windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
 # The HTTP tests call the endpoint as rmcp's own client does, in both eras (over plain HTTP: no TLS).
 reqwest = { version = "0.13", default-features = false }
+# The command line's arguments (without colours, which it does not use), and its Ctrl-C, which cancels the call under
+# way before it exits.
+clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions", "env"] }
+ctrlc = "3.5"
 
 # Dependencies are optimised even in development builds: the image codecs are far too slow otherwise.
 # Cargo reads profiles only from the workspace's root.

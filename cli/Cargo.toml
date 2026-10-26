@@ -1,0 +1,50 @@
+[package]
+name = "smedcover-cli"
+version.workspace = true
+description = "SmedCover's command line, smedcover: covers made from a terminal by the app's own tools, over MCP"
+license.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "smedcover"
+path = "src/main.rs"
+
+[lib]
+name = "smedcover_cli"
+path = "src/lib.rs"
+
+# It reaches the app over plain HTTP on 127.0.0.1 with a client of its own (src/http.rs), and speaks MCP itself
+# (src/mcp.rs): no async runtime, no TLS, and nothing of the core's (image codecs, fonts, the cut-out, the endpoint's
+# server), which it does not need; where the app keeps its data it works out as the core does (src/paths.rs).
+[dependencies]
+serde_json = { workspace = true }
+base64 = { workspace = true }
+dirs = { workspace = true }
+clap = { workspace = true }
+ctrlc = { workspace = true }
+
+# Whether the app's process is still there (kill with no signal).
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+# The tools' timeouts, read from ui/tools.json as it is built (build.rs).
+[build-dependencies]
+serde_json = { workspace = true }
+
+# The tests play the app (tests/cli.rs): the core's own endpoint, with a page played there, and the routes only the
+# command line uses.
+[dev-dependencies]
+smedcover-core = { path = "../core" }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio-util = { workspace = true }
+axum = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+
+[[test]]
+name = "cli"
+path = "tests/cli.rs"
+# Its own main: the same program is the tests and, started by the command line under test, the app it plays.
+harness = false
