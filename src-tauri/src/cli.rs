@@ -14,19 +14,27 @@
 //!   command line is answered that SmedCover needs setting up.
 //! * **Quitting**: it quits once the command line says it is done (`POST /app/done`) or once its
 //!   standard input, which the command line holds open, reaches its end (the command line ended,
-//!   crashed or was killed): when the calls in hand are answered, the page is asked to write what waits
-//!   (the event `app-quit`: its `flushWrites()`, then `app_quit`) and the app exits, 5 s at most after
-//!   it asked. Not if the window has been shown to the user by then (`POST /app/show`, a second launch
-//!   on the folder, on macOS the app opened again from the Finder): the app is theirs from then on
-//!   (`launchedBy: "user"`, on macOS a regular app with its Dock icon), and goes on as any other.
+//!   crashed or was killed). From then `cli.json` is gone, so that no other command line picks the
+//!   app up; another that already uses it (it found the app the first one started) goes on: the app
+//!   waits till no call is in hand and none has come for [`QUIET_FOR`] (from its last request, or the
+//!   moment it was told), then asks the page to write what waits (the event `app-quit`: its
+//!   `flushWrites()`, then `app_quit`) and exits, 5 s at most after it asked. Not if the window has
+//!   been shown to the user by then (`POST /app/show`, a second launch on the folder, on macOS the app
+//!   opened again from the Finder), whichever way the command line was done: the app is theirs from
+//!   then on (`launchedBy: "user"`, `cli.json` written again, on macOS a regular app with its Dock
+//!   icon), and goes on as any other.
 //! * **The endpoint**: every app starts the command line's endpoint (`McpHost::start_cli`) as it
 //!   starts, whatever the user's switch for agents says, and writes `cli.json`
 //!   (`smedcover_core::instance`) once it listens, again whenever `ready` or `launchedBy` changes, and
 //!   removes it as it quits.
-//! * **One app for each data folder**: `app.lock` is taken before anything else is done
-//!   ([`single_instance`]). When another app holds it, a launch of the user's asks that one to show its
-//!   window (`POST /app/show`, with the token its `cli.json` gives) and quits; one for the command line
-//!   quits with `EXIT_ALREADY_RUNNING` (75), and the command line uses the app that runs.
+//! * **One app for each data folder** (`smedcover_core::paths::data_dir`: a self-test's, else
+//!   `SMEDCOVER_DATA`'s, else the app's own): `app.lock` is taken before anything else is done
+//!   ([`single_instance`]). When another app holds it and its `cli.json` says where it listens, a
+//!   launch of the user's asks that one to show its window (`POST /app/show`, with the token the file
+//!   gives) and quits; one for the command line quits with `EXIT_ALREADY_RUNNING` (75), and the
+//!   command line uses the app that runs. With no `cli.json` there, the other app is starting (it
+//!   writes one in a moment) or quitting (it has removed it): the launch waits [`FIND_WITHIN`] at most
+//!   for the file, or for the lock, which it then takes, starting as the folder's app.
 
 use std::ffi::OsString;
 use std::io::{ErrorKind, Read};
@@ -49,8 +57,11 @@ pub const CLI_ARG: &str = "--cli";
 const QUIT_EVENT: &str = "app-quit";
 /// How long the page has to answer it.
 const QUIT_WITHIN: Duration = Duration::from_secs(5);
-/// How long a second launch waits for the first app's `cli.json` (the first may be starting yet).
+/// How long a second launch waits for the first app's `cli.json`, or for its lock (the first may be
+/// starting yet, or quitting).
 const FIND_WITHIN: Duration = Duration::from_secs(10);
+/// How long the command line's app waits, once it is to quit, for no call to have come.
+const QUIET_FOR: Duration = Duration::from_secs(2);
 
 /// How the app was launched.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,43 +94,72 @@ impl Launch {
 
 // ---------------------------------------------------------------- one app for each data folder
 
-/// The lock on `app.lock` in the data folder `data`, to be held for as long as the app runs. When
-/// another app holds it, this one goes no further: launched for the command line it exits with
-/// [`EXIT_ALREADY_RUNNING`]; launched by the user it asks the other to show its window, then exits
-/// (0, or 1 when the other could not be asked, saying why on stderr). `None` when the folder cannot be
-/// locked at all (said on stderr): the app then runs without, as it did before there was a lock.
+/// The lock on `app.lock` in the data folder `data`, to be held for as long as the app runs (a
+/// `cli.json` left there by an app that crashed is removed at once). When another app holds it, this
+/// one goes no further: launched for the command line it exits with [`EXIT_ALREADY_RUNNING`];
+/// launched by the user it asks the other to show its window, then exits (0, or 1 when the other
+/// could not be asked, saying why on stderr). See [`take_or_defer`] for an app that is starting or
+/// quitting. `None` when the folder cannot be locked at all (said on stderr): the app then runs
+/// without, as it did before there was a lock.
 pub fn single_instance(data: &Path, launch: Launch) -> Option<AppLock> {
-    match AppLock::take(data) {
-        Ok(Some(lock)) => Some(lock),
-        Ok(None) if launch.cli => std::process::exit(EXIT_ALREADY_RUNNING),
-        Ok(None) => match show_running(data) {
-            Ok(()) => std::process::exit(0),
-            Err(e) => {
-                eprintln!("SmedCover already runs on {}, but it could not be asked to show its window: {e}", data.display());
-                std::process::exit(1)
-            }
-        },
-        Err(e) => {
+    match take_or_defer(data, launch, FIND_WITHIN) {
+        Taken::Lock(lock) => {
+            let _ = CliFile::remove(data);
+            Some(lock)
+        }
+        Taken::Unlocked(e) => {
             eprintln!("SmedCover: {e}; it runs without the lock that keeps a second app off its data folder");
             None
+        }
+        Taken::Exit(code, why) => {
+            if let Some(why) = why {
+                eprintln!("SmedCover already runs on {}, but it could not be asked to show its window: {why}", data.display());
+            }
+            std::process::exit(code)
         }
     }
 }
 
-/// Asks the app that runs on the data folder `data` to show its window, as its `cli.json` says where,
-/// waiting [`FIND_WITHIN`] at most for that file and its answer (that app may be starting yet).
-fn show_running(data: &Path) -> Res<()> {
-    let until = Instant::now() + FIND_WITHIN;
+/// What a launch comes to on its data folder.
+#[derive(Debug)]
+pub enum Taken {
+    /// The folder's lock: this is the folder's app.
+    Lock(AppLock),
+    /// The folder cannot be locked at all (why): the app runs without.
+    Unlocked(String),
+    /// Another app runs on the folder: this one exits with that code (and says why, if given).
+    Exit(i32, Option<String>),
+}
+
+/// Takes the data folder's lock, or defers to the app that holds it: while that app's `cli.json`
+/// says where it listens, a launch for the command line exits with [`EXIT_ALREADY_RUNNING`] at once,
+/// and the user's asks it to show its window ([`ask_to_show`]) and exits 0. While there is no
+/// `cli.json`, that app is starting (it writes one once its endpoint listens) or quitting (it has
+/// removed it): the launch waits for the one or the lock, trying each again every 100 ms for `within`
+/// at most, and takes the lock once the other app has let it go. Past `within`, it exits as above, 1
+/// for the user's launch whose other app could not be asked.
+pub fn take_or_defer(data: &Path, launch: Launch, within: Duration) -> Taken {
+    let until = Instant::now() + within;
     loop {
-        let asked = match CliFile::load(data)? {
-            Some(file) => ask_to_show(&file),
-            None => Err(format!("it has written no {CLI_FILE} yet")),
-        };
-        match asked {
-            Ok(()) => return Ok(()),
-            Err(e) if Instant::now() >= until => return Err(e),
-            Err(_) => std::thread::sleep(Duration::from_millis(100)),
+        match AppLock::take(data) {
+            Ok(Some(lock)) => return Taken::Lock(lock),
+            Err(e) => return Taken::Unlocked(e),
+            Ok(None) => {}
         }
+        let file = CliFile::load(data).ok().flatten();
+        let last = Instant::now() >= until;
+        match file {
+            Some(_) if launch.cli => return Taken::Exit(EXIT_ALREADY_RUNNING, None),
+            Some(file) => match ask_to_show(&file) {
+                Ok(()) => return Taken::Exit(0, None),
+                Err(e) if last => return Taken::Exit(1, Some(e)),
+                Err(_) => {}
+            },
+            None if last && launch.cli => return Taken::Exit(EXIT_ALREADY_RUNNING, None),
+            None if last => return Taken::Exit(1, Some(format!("it has no {CLI_FILE}"))),
+            None => {}
+        }
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -310,16 +350,22 @@ impl CliApp {
         self.state().life.quitting()
     }
 
-    /// Writes `cli.json` as things are now (not once it is removed).
+    /// Writes `cli.json` as things are now; removes it while the app is to quit, so that no other
+    /// command line picks it up (and it is written again if the user is shown the window meanwhile);
+    /// leaves it alone once it is removed for good.
     fn write_file(&self) {
         let _one = lock(&self.writing);
-        let (launched_by, ready, gone) = {
+        let (launched_by, ready, gone, quitting) = {
             let s = self.state();
-            (s.life.launched_by, s.ready, s.gone)
+            (s.life.launched_by, s.ready, s.gone, s.life.quitting())
         };
         let Some((port, token)) = self.endpoint.get().filter(|_| !gone) else { return };
-        let file = CliFile { pid: std::process::id(), port: *port, token: token.clone(), version: VERSION.to_string(), launched_by, ready };
-        if let Err(e) = file.save(&self.data) {
+        let done = if quitting {
+            CliFile::remove(&self.data)
+        } else {
+            CliFile { pid: std::process::id(), port: *port, token: token.clone(), version: VERSION.to_string(), launched_by, ready }.save(&self.data)
+        };
+        if let Err(e) = done {
             eprintln!("SmedCover: {e}");
         }
     }
@@ -378,25 +424,31 @@ impl CliApp {
     pub fn finish(&self) -> bool {
         let done = self.state().life.done();
         if done == Some(true) {
+            self.write_file(); // cli.json goes: no other command line is to pick the app up now
             if let Some(me) = self.me.upgrade() {
-                tauri::async_runtime::spawn(me.quit_when_idle());
+                tauri::async_runtime::spawn(me.quit_when_idle(now_ms()));
             }
         }
         done.is_some()
     }
 
-    /// Quits once the calls in hand are answered (another command line's, an agent's) and the page has
-    /// written what waits ([`QUIT_EVENT`], answered by `app_quit`), or [`QUIT_WITHIN`] after it was
-    /// asked; never once the app is the user's.
-    async fn quit_when_idle(self: Arc<Self>) {
-        while self.host.calls_in_hand() > 0 {
+    /// Quits once no call is in hand (the command line's, another command line's that found the app
+    /// before it was to quit, an agent's) and none has come for [`QUIET_FOR`], from its last request
+    /// or from `since`, when the app was told; then once the page has written what waits
+    /// ([`QUIT_EVENT`], answered by `app_quit`), or [`QUIT_WITHIN`] after it was asked. Never once the
+    /// app is the user's.
+    async fn quit_when_idle(self: Arc<Self>, since: u64) {
+        loop {
             if !self.quitting() {
                 return;
             }
+            let cli = self.host.cli_stats();
+            let last = cli.clients.iter().map(|c| c.last_seen).chain([since]).max().unwrap_or(since);
+            let quiet = self.host.calls_in_hand() == 0 && cli.in_flight == 0 && now_ms().saturating_sub(last) >= QUIET_FOR.as_millis() as u64;
+            if quiet {
+                break;
+            }
             tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        if !self.quitting() {
-            return;
         }
         let asked = self.app.get_webview_window("main").is_some() && self.app.emit_to("main", QUIT_EVENT, ()).is_ok();
         if asked {
@@ -456,6 +508,11 @@ fn watch_stdin(cli: Arc<CliApp>) {
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The time in milliseconds since 1970, as the endpoint's stats tell it.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
 // ---------------------------------------------------------------- the commands
@@ -632,6 +689,45 @@ mod tests {
         // one the user started is never the command line's to quit
         let mut theirs = Lifecycle::new(LaunchedBy::User);
         assert_eq!((theirs.done(), theirs.done(), theirs.quitting()), (None, None, false));
+    }
+
+    /// A second launch on a folder whose app is quitting (its lock held, no cli.json) waits for the lock
+    /// and takes it; one whose app runs and says where defers to it; one past its wait gives up.
+    #[test]
+    fn a_launch_takes_the_lock_or_defers_to_the_app_that_holds_it() {
+        let (cli, user) = (Launch { cli: true }, Launch { cli: false });
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().to_path_buf();
+        // the folder free: its lock
+        let first = match take_or_defer(&data, cli, Duration::from_millis(100)) {
+            Taken::Lock(lock) => lock,
+            other => panic!("{other:?}"),
+        };
+        // held, with no cli.json, never let go: given up after the wait
+        let t0 = Instant::now();
+        assert!(matches!(take_or_defer(&data, cli, Duration::from_millis(300)), Taken::Exit(EXIT_ALREADY_RUNNING, None)));
+        assert!(t0.elapsed() >= Duration::from_millis(300), "it waited");
+        assert!(matches!(take_or_defer(&data, user, Duration::from_millis(200)), Taken::Exit(1, Some(_))));
+        // held, the other quitting: let go in a moment, and taken
+        let quitting = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(first);
+        });
+        let second = match take_or_defer(&data, cli, Duration::from_secs(5)) {
+            Taken::Lock(lock) => lock,
+            other => panic!("{other:?}"),
+        };
+        quitting.join().unwrap();
+        // held by an app whose cli.json says where it listens: the command line's launch defers at once
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let file = CliFile { pid: std::process::id(), port, token: Secret::generate().unwrap(), version: VERSION.into(), launched_by: LaunchedBy::User, ready: true };
+        file.save(&data).unwrap();
+        let t0 = Instant::now();
+        assert!(matches!(take_or_defer(&data, cli, Duration::from_secs(5)), Taken::Exit(EXIT_ALREADY_RUNNING, None)));
+        assert!(t0.elapsed() < Duration::from_secs(1));
+        // the user's asks it to show its window: nothing answers on that port, so it gives up after its wait
+        assert!(matches!(take_or_defer(&data, user, Duration::from_millis(300)), Taken::Exit(1, Some(_))));
+        drop(second);
     }
 
     #[test]

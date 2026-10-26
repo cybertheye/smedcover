@@ -36,7 +36,7 @@ use tauri_plugin_dialog::DialogExt;
 /// writes `report.json` and quits — an end-to-end check of the web view / Rust bridge. (With
 /// SMEDCOVER_SELFTEST_STAY it only keeps its data there: see [`selftest_stay`].)
 fn selftest_root() -> Option<PathBuf> {
-    std::env::var_os("SMEDCOVER_SELFTEST")
+    std::env::var_os(paths::SELFTEST_ENV)
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
 }
@@ -444,14 +444,12 @@ fn selftest_ai() -> Option<String> {
     std::env::var("SMEDCOVER_SELFTEST_AI").ok()
 }
 
-/// The data folder: a self-test's own (`data/` in its folder), else the app data directory, as Tauri's `app_data_dir()`
-/// finds it (`paths::desktop_data_dir`, the same folder, worked out before Tauri starts so that the folder's lock is
-/// taken first). `None` if the system has none for the user.
+/// The data folder (`paths::data_dir`, which a command line finds it by too): a self-test's own (`data/` in its
+/// folder), else SMEDCOVER_DATA's (the command line's `--data`), else the app data directory, as Tauri's
+/// `app_data_dir()` finds it (`paths::desktop_data_dir`, the same folder). Worked out before Tauri starts, so that the
+/// folder's lock is taken first. `None` if the system has none for the user.
 fn data_folder() -> Option<PathBuf> {
-    match selftest_root() {
-        Some(root) => Some(root.join("data")),
-        None => paths::desktop_data_dir(),
-    }
+    paths::data_dir()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
