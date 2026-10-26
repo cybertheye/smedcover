@@ -8,7 +8,8 @@
 //!   required;
 //! * [`bridge`]: each call handed to the page and its answer back;
 //! * [`server`]: the HTTP server, `/mcp` and `/health` on 127.0.0.1, and who may call it
-//!   ([`Access`]).
+//!   ([`Access`]); and the command line's endpoint, the same with routes of its own for the app
+//!   ([`AppControl`]).
 //!
 //! A host reads its `tools.json` into a [`ToolList`] and `mcp.json` into an [`McpConfig`], keeps a
 //! [`Dispatcher`] its page attaches to, and starts an [`McpServer`] on the port when the endpoint is
@@ -24,6 +25,6 @@ pub mod tools;
 
 pub use bridge::{BridgeError, Call, Dispatcher, PageBridge, PageSink, PageState};
 pub use config::McpConfig;
-pub use server::{Access, BindError, McpServer, Running, Stats, StatsSnapshot};
+pub use server::{Access, AppControl, BindError, McpServer, Running, Stats, StatsSnapshot};
 pub use token::Secret;
 pub use tools::{Host, ToolList};

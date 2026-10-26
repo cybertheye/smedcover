@@ -43,6 +43,13 @@
 //! [`Access::Open`] lets no one in. In both the header is taken off before rmcp sees the request.
 //! `/health` says `{"name": "smedcover", "version", "page"}` to anyone who may reach it.
 //!
+//! The command line's endpoint (the app's, beside the one the user turns on: see [`AppControl`] and
+//! `crate::instance`) is served by [`McpServer::with_app`], with the same `/mcp`, and its own routes:
+//! `GET /health`, which says whether calls are taken (`ready`: the page has attached) and whether the
+//! app waits on its first start's welcome (`needsSetup`) too, `POST /app/show` and `POST /app/done`.
+//! There every route wants the token, `/health` too ([`Access::Open`] lets no one in), behind the same
+//! `Host`, `Origin` and [`PAGE_MARKER`] checks as the rest.
+//!
 //! Connections: a request's headers must come within [`HEADER_TIMEOUT`] (else the connection is
 //! closed), an accepted request's body within [`BODY_TIMEOUT`] (else 408), and `/mcp` takes bodies
 //! up to [`MAX_BODY`] (a tool may carry a photo as base64). A refused request's body is read, and not
@@ -92,7 +99,7 @@ use axum::http::header::{AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HOST, ORIGIN
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::{from_fn, from_fn_with_state, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -109,7 +116,7 @@ use rmcp::transport::streamable_http_server::session::never::NeverSessionManager
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, watch};
 use tokio::net::{TcpListener, TcpStream};
@@ -190,12 +197,28 @@ impl Access {
     }
 }
 
-/// What the layer that wants the token needs: the access in force, and whether an open one lets
-/// anyone in.
+/// What the layer that wants the token needs: the access in force, whether an open one lets
+/// anyone in, and where the token is to be found, for the refusal to say.
 #[derive(Clone)]
 struct Gate {
     access: Arc<RwLock<Access>>,
     open_allowed: bool,
+    found_in: &'static str,
+}
+
+/// What the command line asks of the app whose endpoint it calls, besides the tools: the routes of an
+/// endpoint served with [`McpServer::with_app`] (see the module's notes). Each answers at once, what
+/// it asks for being done by the app in its own time.
+pub trait AppControl: Send + Sync + 'static {
+    /// What `/health` says besides the name, the version, the page and `ready`: `needsSetup`.
+    fn health(&self) -> Map<String, Value>;
+    /// `POST /app/show`: the window shown and brought to the front, and an app the command line
+    /// started hidden made the user's (it goes on when the command line is done); the answer.
+    fn show(&self) -> Value;
+    /// `POST /app/done`: the command line that started the app is done with it, so it quits (what the
+    /// page has to write written first), unless it is the user's by then; asked again, the same. The
+    /// answer.
+    fn done(&self) -> Value;
 }
 
 /// The endpoint, ready to be started (and started again, on another port or after being stopped).
@@ -205,6 +228,7 @@ pub struct McpServer {
     tools: Arc<ToolList>,
     access: Arc<RwLock<Access>>,
     stats: Arc<Stats>,
+    app: Option<Arc<dyn AppControl>>,
 }
 
 impl McpServer {
@@ -214,7 +238,14 @@ impl McpServer {
     /// [`Host::Server`] it wants a token whatever it is given: [`Access::Open`] then lets no one in
     /// (401), so a server cannot be opened without one.
     pub fn new(bridge: Arc<dyn PageBridge>, tools: Arc<ToolList>, access: Arc<RwLock<Access>>, stats: Arc<Stats>) -> McpServer {
-        McpServer { bridge, tools, access, stats }
+        McpServer { bridge, tools, access, stats, app: None }
+    }
+
+    /// The command line's endpoint: as this one, with `/health`, `/app/show` and `/app/done` answered
+    /// by `app`, and every route wanting the token ([`Access::Open`] lets no one in).
+    pub fn with_app(mut self, app: Arc<dyn AppControl>) -> McpServer {
+        self.app = Some(app);
+        self
     }
 
     /// Listens on `addr` (the host passes 127.0.0.1 and the user's port; port 0 takes any free one)
@@ -255,11 +286,24 @@ impl McpServer {
             .with_max_request_body_bytes(MAX_BODY)
             .with_cancellation_token(stop);
         let mcp = StreamableHttpService::new(move || Ok(handler.clone()), Arc::new(NeverSessionManager::default()), config);
+        let gate = match self.app {
+            None => Gate { access: self.access.clone(), open_allowed: self.tools.host() == Host::Desktop, found_in: "shown in its MCP settings" },
+            Some(_) => Gate { access: self.access.clone(), open_allowed: false, found_in: "in its data folder's cli.json" },
+        };
         let mcp = Router::new()
             .route_service("/mcp", mcp)
             .route_layer(from_fn_with_state(front, read_body))
-            .route_layer(from_fn_with_state(Gate { access: self.access.clone(), open_allowed: self.tools.host() == Host::Desktop }, bearer));
-        Router::new().route("/health", get(health)).with_state(self.bridge.clone()).merge(mcp).layer(from_fn(loopback_only))
+            .route_layer(from_fn_with_state(gate.clone(), bearer));
+        let rest = match &self.app {
+            None => Router::new().route("/health", get(health)).with_state(self.bridge.clone()),
+            Some(app) => Router::new()
+                .route("/health", get(app_health))
+                .route("/app/show", post(app_show))
+                .route("/app/done", post(app_done))
+                .with_state(AppRoutes { bridge: self.bridge.clone(), app: app.clone() })
+                .route_layer(from_fn_with_state(gate, bearer)),
+        };
+        rest.merge(mcp).layer(from_fn(loopback_only))
     }
 }
 
@@ -848,7 +892,7 @@ async fn bearer(State(gate): State<Gate>, mut request: Request, next: Next) -> R
     let ok = gate.access.read().unwrap_or_else(|e| e.into_inner()).lets_in(given, gate.open_allowed);
     if !ok {
         let challenge = if given.is_some() { r#"Bearer realm="SmedCover", error="invalid_token""# } else { r#"Bearer realm="SmedCover""# };
-        let message = "Unauthorized: SmedCover wants the token shown in its MCP settings, as Authorization: Bearer <token>";
+        let message = format!("Unauthorized: SmedCover wants the token {}, as Authorization: Bearer <token>", gate.found_in);
         return refuse(request, (StatusCode::UNAUTHORIZED, [(WWW_AUTHENTICATE, challenge)], message).into_response()).await;
     }
     request.headers_mut().remove(AUTHORIZATION);
@@ -913,6 +957,30 @@ fn origin_allowed(origin: &str) -> bool {
 
 async fn health(State(bridge): State<Arc<dyn PageBridge>>) -> Json<Value> {
     Json(json!({"name": SERVER_NAME, "version": VERSION, "page": bridge.page().as_str()}))
+}
+
+/// What the command line's routes need: the page, and the app that answers them.
+#[derive(Clone)]
+struct AppRoutes {
+    bridge: Arc<dyn PageBridge>,
+    app: Arc<dyn AppControl>,
+}
+
+/// The command line's `/health`: the endpoint's, with `ready` (the page has attached: calls are taken)
+/// and what the app adds (`needsSetup`).
+async fn app_health(State(routes): State<AppRoutes>) -> Json<Value> {
+    let page = routes.bridge.page();
+    let mut answer = json!({"name": SERVER_NAME, "version": VERSION, "page": page.as_str(), "ready": matches!(page, super::PageState::Ready { .. })});
+    answer.as_object_mut().expect("an object").extend(routes.app.health());
+    Json(answer)
+}
+
+async fn app_show(State(routes): State<AppRoutes>) -> Json<Value> {
+    Json(routes.app.show())
+}
+
+async fn app_done(State(routes): State<AppRoutes>) -> Json<Value> {
+    Json(routes.app.done())
 }
 
 // ---- what the page is told about the clients ----
@@ -1577,7 +1645,7 @@ mod tests {
         let access = Arc::new(RwLock::new(Access::Token(secret.clone())));
         let app = Router::new()
             .route("/mcp", get(|headers: HeaderMap| async move { format!("authorization seen: {}", headers.contains_key(AUTHORIZATION)) }))
-            .route_layer(from_fn_with_state(Gate { access: access.clone(), open_allowed: true }, bearer));
+            .route_layer(from_fn_with_state(Gate { access: access.clone(), open_allowed: true, found_in: "shown in its MCP settings" }, bearer));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/mcp", listener.local_addr().unwrap());
         let server = tokio::spawn(serve(listener, app, CancellationToken::new(), CancellationToken::new()));

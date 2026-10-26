@@ -18,7 +18,8 @@
 //! * reading a picture or a project file an agent names, and nothing else outside the data folder
 //!   ([`files`]);
 //! * the MCP endpoint agents call SmedCover's tools through, each call handed to the page
-//!   ([`mcp`]);
+//!   ([`mcp`]), and the command line's endpoint beside it;
+//! * one desktop app for each data folder, and the file a command line finds it by ([`instance`]);
 //! * where the desktop app keeps its data, for a command line or server on the same computer
 //!   ([`paths`]).
 //!
@@ -35,6 +36,7 @@ pub mod cut;
 pub mod files;
 pub mod fonts;
 pub mod image;
+pub mod instance;
 pub mod mcp;
 pub mod net;
 pub mod outline;

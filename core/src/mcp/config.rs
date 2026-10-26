@@ -120,8 +120,8 @@ pub fn check_port(port: u16) -> Res<u16> {
 }
 
 /// Writes `bytes` to a temporary file beside `path`, readable by its owner only on Unix, then puts
-/// it in `path`'s place.
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// it in `path`'s place (`cli.json` is written so too, see `crate::instance`).
+pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = temp_path(path);
     let mut options = fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);

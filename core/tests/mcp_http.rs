@@ -1,6 +1,7 @@
 //! The MCP endpoint over real HTTP, on 127.0.0.1 and a port the system picks (never the app's
 //! 25277): raw requests in both eras of the protocol, rmcp's own client in both, and the
-//! dispatcher behind it, against a page that is played here.
+//! dispatcher behind it, against a page that is played here; and the command line's endpoint, its
+//! own routes answered by an app played here too, and the `cli.json` it is found by.
 //!
 //! The endpoint wants a token unless a test says otherwise (`Endpoint::open()`, the desktop's
 //! default). The token is never put in a failure's message: requests are made by helpers that do not
@@ -8,7 +9,7 @@
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -21,7 +22,8 @@ use smedcover_core::mcp::bridge::{
     read_result, BoxFut, BridgeError, Call, ClientTag, Dispatcher, PageBridge, PageReply, PageSink, PageState, Progress,
 };
 use smedcover_core::mcp::server::{BindError, McpServer, Running, Stats, MAX_BODY, REFUSED_BODY_BYTES, VERSION};
-use smedcover_core::mcp::{Access, Host, Secret, ToolList};
+use smedcover_core::instance::{self, CliFile, LaunchedBy};
+use smedcover_core::mcp::{Access, AppControl, Host, Secret, ToolList};
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, Notify};
 
@@ -1389,4 +1391,143 @@ async fn through_the_dispatcher_to_a_page() {
     assert!(running.stop(Duration::from_secs(2)).await);
     dispatcher.close("the test is over");
     page.abort();
+}
+
+// ---- the command line's endpoint ----
+
+/// The app's side of the command line's routes, played: it counts what it is asked.
+#[derive(Default)]
+struct FakeApp {
+    shown: AtomicU64,
+    done: AtomicU64,
+    needs_setup: AtomicBool,
+}
+
+impl AppControl for FakeApp {
+    fn health(&self) -> Map<String, Value> {
+        let mut extra = Map::new();
+        extra.insert("needsSetup".into(), json!(self.needs_setup.load(Ordering::SeqCst)));
+        extra
+    }
+
+    fn show(&self) -> Value {
+        self.shown.fetch_add(1, Ordering::SeqCst);
+        json!({"ok": true, "launchedBy": "user"})
+    }
+
+    fn done(&self) -> Value {
+        let n = self.done.fetch_add(1, Ordering::SeqCst);
+        json!({"ok": true, "exiting": true, "asked": n + 1})
+    }
+}
+
+/// The command line's endpoint over the test page, wanting `access`'s token (none is let in with
+/// none), its own routes answered by the app played here.
+fn cli_endpoint(access: Access) -> (Running, Arc<FakeApp>, Option<String>) {
+    let token = match &access {
+        Access::Token(secret) => Some(secret.expose().to_string()),
+        Access::Open => None,
+    };
+    let app = Arc::new(FakeApp::default());
+    let tools = Arc::new(ToolList::from_json(TOOLS, Host::Desktop).unwrap());
+    let server = McpServer::new(Arc::new(FakeBridge::default()), tools, Arc::new(RwLock::new(access)), Arc::new(Stats::new())).with_app(app.clone());
+    let running = server.start(([127, 0, 0, 1], 0).into(), &Handle::current()).expect("a free port");
+    (running, app, token)
+}
+
+fn json_headers(mut headers: Vec<(String, String)>) -> Vec<(String, String)> {
+    headers.push(("Content-Type".to_string(), "application/json".to_string()));
+    headers.push(("Accept".to_string(), "application/json, text/event-stream".to_string()));
+    headers
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_command_lines_routes_want_the_token() {
+    let (running, app, token) = cli_endpoint(Access::Token(Secret::generate().unwrap()));
+    let url = |path: &str| format!("http://{}{path}", running.addr());
+    let auth = vec![("Authorization".to_string(), format!("Bearer {}", token.unwrap()))];
+    let wrong = vec![("Authorization".to_string(), "Bearer smc_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string())];
+    for (method, path) in [("GET", "/health"), ("POST", "/app/show"), ("POST", "/app/done")] {
+        let none = http(method, &url(path), vec![], (method == "POST").then(String::new)).await;
+        assert_eq!(none.status, 401, "{method} {path} without the token");
+        assert!(none.body.contains("cli.json"), "the refusal says where the token is: {}", none.body);
+        assert_eq!(http(method, &url(path), wrong.clone(), (method == "POST").then(String::new)).await.status, 401, "{method} {path} with a wrong one");
+    }
+    assert_eq!((app.shown.load(Ordering::SeqCst), app.done.load(Ordering::SeqCst)), (0, 0), "nothing was asked of the app");
+    // with it: /health says whether calls are taken and whether the app needs setting up
+    let health = get(&url("/health"), auth.clone()).await;
+    assert_eq!(health.status, 200);
+    assert_eq!(
+        serde_json::from_str::<Value>(&health.body).unwrap(),
+        json!({"name": "smedcover", "version": VERSION, "page": "ready", "ready": true, "needsSetup": false})
+    );
+    app.needs_setup.store(true, Ordering::SeqCst);
+    assert_eq!(serde_json::from_str::<Value>(&get(&url("/health"), auth.clone()).await.body).unwrap()["needsSetup"], true);
+    let shown = http("POST", &url("/app/show"), auth.clone(), Some(String::new())).await;
+    assert_eq!((shown.status, serde_json::from_str::<Value>(&shown.body).unwrap()), (200, json!({"ok": true, "launchedBy": "user"})));
+    for n in 1..=2 {
+        let done = http("POST", &url("/app/done"), auth.clone(), Some(String::new())).await;
+        assert_eq!(done.status, 200);
+        assert_eq!(serde_json::from_str::<Value>(&done.body).unwrap()["asked"], n, "each one reaches the app, which answers each");
+    }
+    assert_eq!((app.shown.load(Ordering::SeqCst), app.done.load(Ordering::SeqCst)), (1, 2));
+    // only their own methods
+    assert_eq!(get(&url("/app/done"), auth.clone()).await.status, 405);
+    assert_eq!(http("POST", &url("/health"), auth.clone(), Some(String::new())).await.status, 405);
+    // web pages are kept out, and the window's own requests
+    for (name, value) in [("Origin", "https://evil.example"), ("Origin", "tauri://localhost"), ("X-SmedCover-Page", "1")] {
+        let mut headers = auth.clone();
+        headers.push((name.to_string(), value.to_string()));
+        assert_eq!(get(&url("/health"), headers.clone()).await.status, 403, "{name}: {value}");
+        assert_eq!(http("POST", &url("/app/done"), headers, Some(String::new())).await.status, 403, "{name}: {value}");
+    }
+    assert_eq!(app.done.load(Ordering::SeqCst), 2, "refused before the app was asked");
+    // and /mcp is the endpoint's, with the token
+    let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).to_string();
+    let listed = http("POST", &url("/mcp"), json_headers(auth.clone()), Some(list.clone())).await;
+    assert_eq!(listed.status, 200, "{}", listed.body);
+    assert!(listed.only()["result"]["tools"].as_array().is_some_and(|t| !t.is_empty()));
+    assert_eq!(http("POST", &url("/mcp"), json_headers(vec![]), Some(list)).await.status, 401);
+    assert!(running.stop(Duration::from_secs(2)).await);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_command_lines_endpoint_lets_no_one_in_without_a_token() {
+    let (running, app, _) = cli_endpoint(Access::Open);
+    let url = |path: &str| format!("http://{}{path}", running.addr());
+    assert_eq!(get(&url("/health"), vec![]).await.status, 401);
+    assert_eq!(http("POST", &url("/app/done"), vec![("Authorization".into(), "Bearer anything".into())], Some(String::new())).await.status, 401);
+    let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).to_string();
+    assert_eq!(http("POST", &url("/mcp"), json_headers(vec![]), Some(list)).await.status, 401);
+    assert_eq!(app.done.load(Ordering::SeqCst), 0);
+    assert!(running.stop(Duration::from_secs(2)).await);
+}
+
+fn cli_file(running: &Running, token: &Secret) -> CliFile {
+    CliFile { pid: std::process::id(), port: running.addr().port(), token: token.clone(), version: VERSION.into(), launched_by: LaunchedBy::Cli, ready: true }
+}
+
+/// A `cli.json` is taken for a running app's only while its endpoint answers `/health` as
+/// SmedCover's, with its token.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cli_json_is_found_by_its_endpoint_answering() {
+    let secret = Secret::generate().unwrap();
+    let (running, _app, _) = cli_endpoint(Access::Token(secret.clone()));
+    let dir = tempfile::tempdir().unwrap();
+    let file = cli_file(&running, &secret);
+    file.save(dir.path()).unwrap();
+    let data = dir.path().to_path_buf();
+    let found = blocking(move || instance::find(&data, Duration::from_secs(5))).await.expect("its app runs");
+    assert_eq!((found.port, found.launched_by, found.ready), (running.addr().port(), LaunchedBy::Cli, true));
+    let health = blocking(move || file.health(Duration::from_secs(5))).await.unwrap();
+    assert_eq!((health["name"].as_str(), health["ready"].as_bool()), (Some("smedcover"), Some(true)));
+    // another token (an app's before this one, on the same port by chance): stale
+    cli_file(&running, &Secret::generate().unwrap()).save(dir.path()).unwrap();
+    let data = dir.path().to_path_buf();
+    assert!(blocking(move || instance::find(&data, Duration::from_secs(5))).await.is_none());
+    // the app gone: stale
+    cli_file(&running, &secret).save(dir.path()).unwrap();
+    assert!(running.stop(Duration::from_secs(2)).await);
+    let data = dir.path().to_path_buf();
+    assert!(blocking(move || instance::find(&data, Duration::from_secs(2))).await.is_none());
 }
