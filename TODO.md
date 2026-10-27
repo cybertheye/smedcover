@@ -40,6 +40,12 @@
 - 服务器上的字体：先用应用自带的免费字体（Noto Sans SC、Bebas Neue、JetBrains Mono），另给一个方便装字体的办法（`smedcover fonts add <文件>`，或 MCP 工具）。
 - `check_cover` 第一版不做，`checkCover()` 的代码留着。
 - 命令行要用 App 而 App 没开时：在后台起一个不显示窗口的 App（要先实测 Mac 上能不能画完）；不行就在运行期间弹出窗口，跑完关掉。
+- 命令行（2026-10-26 定）：
+  - 命令叫 `smedcover`，是单独的小程序（`cli/`，不依赖 Tauri，以后 `smedcover serve` 也在它里面）；App 的可执行文件改名为 `smedcover-app`（App 名字和图标不变）。
+  - 和 App 说话：App 开着就在本机随机端口开一个命令行专用入口，一定要令牌，端口和令牌写在数据文件夹里只有本人能读的文件中；和设置里的 MCP 开关无关。App 开着就在开着的窗口里做；没开就后台起一个不显示窗口的 App，做完退出。
+  - 只允许一个 App 在跑（single instance）：命令行起的后台 App 跑着时你再打开 SmedCover，就把它的窗口显示出来，做完也不退出。
+  - 第一版命令：`profiles`、`render`、`export`、`batch`、`import`，加 `tools`（列出工具）和 `call`（直接调任意工具，参数给 JSON）；都支持 `--json` 输出，失败时退出码非 0。
+  - 装进 PATH：设置里一个按钮（像 VS Code 的"安装 code 命令"）。macOS 建链接到 `/usr/local/bin`（要管理员密码），Windows 加进用户 PATH；Linux 的 deb/rpm 安装时自带。按钮旁边能卸载。
 
 **任务**
 
