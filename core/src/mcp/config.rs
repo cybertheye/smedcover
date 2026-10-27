@@ -6,8 +6,9 @@
 //! The token is made and kept even while none is required, so that turning *Require a token* on has
 //! one ready, and agents set up with it go on working whichever way the switch is.
 //!
-//! The temporary file's name is always the same (`mcp.json.tmp`), so a host saves from one place at
-//! a time: under the lock it keeps its settings in.
+//! It is saved through a temporary file of a name of its own each time (`mcp.json.<random>.tmp`), made
+//! new, never one already there nor through a link someone put in its place; a host saves from one
+//! place at a time all the same, under the lock it keeps its settings in.
 
 use std::fs;
 use std::io::{ErrorKind, Write};
@@ -120,21 +121,26 @@ pub fn check_port(port: u16) -> Res<u16> {
 }
 
 /// Writes `bytes` to a temporary file beside `path`, readable by its owner only on Unix, then puts
-/// it in `path`'s place.
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let tmp = temp_path(path);
+/// it in `path`'s place (`cli.json` is written so too, see `crate::instance`). The temporary file has
+/// a random name and is made new (`create_new`: never a file already there, nor followed through a
+/// link put in its place, in a data folder others could write in); the rename replaces `path`
+/// itself, a link there included, never what it points to.
+pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp = temp_path(path)?;
     let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
+    let mut made = false;
     let result = (|| {
         let mut file = options.open(&tmp)?;
+        made = true;
         #[cfg(unix)]
         {
-            // the mode above applies to a file that is made; one left over keeps its own
+            // whatever the umask took away or left
             use std::os::unix::fs::PermissionsExt;
             file.set_permissions(fs::Permissions::from_mode(0o600))?;
         }
@@ -143,7 +149,7 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         drop(file);
         fs::rename(&tmp, path)
     })();
-    if result.is_err() {
+    if result.is_err() && made {
         let _ = fs::remove_file(&tmp);
     }
     result
@@ -164,10 +170,13 @@ fn owner_only(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn temp_path(path: &Path) -> PathBuf {
+/// `<name>.<16 random hex digits>.tmp` beside `path`.
+fn temp_path(path: &Path) -> std::io::Result<PathBuf> {
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random).map_err(std::io::Error::other)?;
     let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(".tmp");
-    path.with_file_name(name)
+    name.push(format!(".{}.tmp", random.iter().map(|b| format!("{b:02x}")).collect::<String>()));
+    Ok(path.with_file_name(name))
 }
 
 #[cfg(test)]
@@ -196,7 +205,7 @@ mod tests {
         assert!(matches!(read.access(), Access::Token(t) if t.matches(changed.token.expose())));
         let saved: Value = serde_json::from_str(&fs::read_to_string(data.join(FILE)).unwrap()).unwrap();
         assert_eq!(saved, json!({"on": true, "port": 40001, "token": changed.token.expose(), "requireToken": true}));
-        assert!(!data.join("mcp.json.tmp").exists());
+        assert!(fs::read_dir(&data).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().ends_with(".tmp")), "no temporary file left");
         // and off again, the token kept
         McpConfig { require_token: false, ..read.clone() }.save(&data).unwrap();
         let open = McpConfig::load(&data).unwrap();
@@ -261,6 +270,22 @@ mod tests {
     fn debug_does_not_show_the_token() {
         let config = McpConfig { require_token: true, ..McpConfig::new().unwrap() };
         assert!(!format!("{config:?} {:?}", config.access()).contains(config.token.expose()));
+    }
+
+    /// A link put where the file goes is replaced, never written through; one put where the old
+    /// temporary file went is left alone.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_is_never_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let elsewhere = dir.path().join("elsewhere.txt");
+        fs::write(&elsewhere, "theirs").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, dir.path().join("mcp.json.tmp")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, dir.path().join(FILE)).unwrap();
+        McpConfig::new().unwrap().save(dir.path()).unwrap();
+        assert_eq!(fs::read_to_string(&elsewhere).unwrap(), "theirs", "nothing written through either link");
+        assert!(!fs::symlink_metadata(dir.path().join(FILE)).unwrap().file_type().is_symlink(), "the link replaced by the file");
+        assert!(McpConfig::load(dir.path()).is_ok());
     }
 
     #[cfg(unix)]

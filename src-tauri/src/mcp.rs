@@ -29,10 +29,17 @@
 //! when they name it ([`not_to_the_endpoint`], which says why), and by the endpoint whatever way they
 //! reach it, as they carry `smedcover_core::net::PAGE_MARKER` — so the page cannot make calls of its
 //! own to have files read.
+//!
+//! Beside it runs the command line's endpoint ([`McpHost::start_cli`]), started with the app whatever
+//! the user's switch says, on a free port with a token of its own that `cli.json` gives the command
+//! line (see `crate::cli`): the same tools through the same dispatcher, each call's file noted as
+//! the user's endpoint's are, the same requests of the page's refused; its clients are counted apart
+//! and never shown in Settings → Agents, and while the app waits on its first start's welcome its
+//! calls are answered at once that SmedCover needs setting up ([`SetupGate`]).
 
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant};
 
@@ -40,7 +47,9 @@ use serde_json::{json, Map, Value};
 use smedcover_core::mcp::bridge::{BoxFut, BridgeError, Call, CallToolResult, PageProgress, PageReply};
 use smedcover_core::mcp::config::check_port;
 use smedcover_core::mcp::server::VERSION;
-use smedcover_core::mcp::{Access, BindError, Dispatcher, Host, McpConfig, McpServer, PageBridge, PageSink, PageState, Running, Secret, Stats, ToolList};
+use smedcover_core::mcp::{
+    Access, AppControl, BindError, Dispatcher, Host, McpConfig, McpServer, PageBridge, PageSink, PageState, Running, Secret, Stats, StatsSnapshot, ToolList,
+};
 use smedcover_core::{err, Res};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Manager, State, Webview};
@@ -52,7 +61,8 @@ const STOP_WITHIN: Duration = Duration::from_secs(2);
 /// The least time between two statuses sent to the page: four a second at most.
 const STATUS_EVERY: Duration = Duration::from_millis(250);
 
-/// Told whether the endpoint runs, each time something changes.
+/// Told whether the window is to keep drawing when it cannot be seen (the endpoint runs, or the
+/// command line is at work), each time that may have changed.
 type OnRunning = Box<dyn Fn(bool) + Send + Sync>;
 
 /// The endpoint as the app keeps it: the dispatcher the window attaches to, the tools of the bundled
@@ -80,6 +90,15 @@ pub struct McpHost {
     awake: Mutex<Option<awake::Activity>>,
     /// The self-test's own endpoint (SMEDCOVER_SELFTEST_MCP): on a free port, `mcp.json` not turned on.
     selftest: bool,
+    /// The command line's endpoint, while it runs (see [`McpHost::start_cli`]).
+    cli: Mutex<Option<Running>>,
+    /// Its clients and calls, kept apart from the user's endpoint's.
+    cli_stats: Arc<Stats>,
+    /// Whether the app waits on its first start's welcome (the data folder has no profile yet).
+    setup: watch::Sender<bool>,
+    /// Whether the app was started for the command line and is still its: the window then keeps
+    /// drawing unseen, and the app is kept awake (macOS), for as long as it runs.
+    for_cli: AtomicBool,
 }
 
 struct Endpoint {
@@ -113,8 +132,9 @@ impl McpHost {
     /// The endpoint of the data folder `data`, its tools read from the app's own `tools.json`, its
     /// settings from `mcp.json`; started if it is on, a page said to be on its way, the window told to
     /// keep drawing unseen while it runs, and the page told each change. `selftest`: the app runs a
-    /// self-test (see [`SelfTest`]).
-    pub fn open(app: &AppHandle, data: PathBuf, selftest: Option<SelfTest>) -> Res<Arc<McpHost>> {
+    /// self-test (see [`SelfTest`]); `for_cli`: the app was launched for the command line (see
+    /// [`McpHost::new`]).
+    pub fn open(app: &AppHandle, data: PathBuf, selftest: Option<SelfTest>, for_cli: bool) -> Res<Arc<McpHost>> {
         let tools = match app.asset_resolver().get("tools.json".to_string()) {
             Some(asset) => String::from_utf8(asset.bytes.to_vec()).map_err(err).and_then(|text| ToolList::from_json(&text, Host::Desktop)),
             None => Err("tools.json is not among the app's files".to_string()),
@@ -125,7 +145,7 @@ impl McpHost {
         }));
         let window = app.clone();
         let runtime = tauri::async_runtime::handle().inner().clone();
-        let host = McpHost::new(data, tools, selftest, runtime, Box::new(move |running| keep_drawing(&window, running)))?;
+        let host = McpHost::new(data, tools, selftest, for_cli, runtime, Box::new(move |running| keep_drawing(&window, running)))?;
         tauri::async_runtime::spawn(host.clone().tell_page());
         Ok(host)
     }
@@ -133,8 +153,11 @@ impl McpHost {
     /// The host itself, without Tauri: `runtime` serves the endpoint, `on_running` is told whether it
     /// runs at each change. An `mcp.json` that cannot be read leaves it off, saying why (`config`):
     /// each change of the settings reads it again first, and none is saved over it while it cannot be
-    /// read.
-    pub fn new(data: PathBuf, tools: Arc<ToolList>, selftest: Option<SelfTest>, runtime: Handle, on_running: OnRunning) -> Res<Arc<McpHost>> {
+    /// read. `for_cli`: the app is the command line's, launched for it and not seen: the endpoint for
+    /// agents is not started, though on, till the app is the user's ([`McpHost::set_for_cli`]) — no
+    /// agent is to drive a window no one sees, and the command line's app does not wait for agents
+    /// before it quits.
+    pub fn new(data: PathBuf, tools: Arc<ToolList>, selftest: Option<SelfTest>, for_cli: bool, runtime: Handle, on_running: OnRunning) -> Res<Arc<McpHost>> {
         let (mut cfg, trouble) = match McpConfig::load(&data) {
             Ok(cfg) => (cfg, None),
             Err(e) => (McpConfig::new()?, Some(Trouble::Config(e))),
@@ -155,7 +178,7 @@ impl McpHost {
         let server = McpServer::new(gated, tools.clone(), access.clone(), stats.clone());
         let start = match (ours, &trouble) {
             (true, _) => Some(0),
-            (false, None) => (cfg.on && selftest.is_none_or(|s| s == SelfTest::Stay)).then_some(cfg.port),
+            (false, None) => (cfg.on && !for_cli && selftest.is_none_or(|s| s == SelfTest::Stay)).then_some(cfg.port),
             (false, Some(_)) => None,
         };
         let host = Arc::new(McpHost {
@@ -173,6 +196,10 @@ impl McpHost {
             on_running,
             awake: Mutex::new(None),
             selftest: ours,
+            cli: Mutex::new(None),
+            cli_stats: Arc::new(Stats::new()),
+            setup: watch::Sender::new(false),
+            for_cli: AtomicBool::new(for_cli),
         });
         if let Some(port) = start {
             let mut s = host.lock();
@@ -201,16 +228,99 @@ impl McpHost {
     }
 
     /// Something the page shows changed: it is told, and the window keeps drawing unseen while the
-    /// endpoint runs.
+    /// endpoint runs (see [`McpHost::keep_unseen`]).
     fn changed(&self) {
         self.news.send_modify(|n| *n = n.wrapping_add(1));
+        self.keep_unseen();
+    }
+
+    /// Whether the command line is at work: the app was started for it, or a call of its is under
+    /// way.
+    fn cli_busy(&self) -> bool {
+        self.for_cli.load(Ordering::SeqCst) || self.cli_stats.snapshot().in_flight > 0
+    }
+
+    /// The window keeps drawing when it cannot be seen while the endpoint runs and while the command
+    /// line is at work (a terminal in front of the window, the window hidden for the command line).
+    fn keep_unseen(&self) {
         let running = self.lock().running.is_some();
-        (self.on_running)(running);
+        (self.on_running)(running || self.cli_busy());
     }
 
     /// The port the endpoint listens on, while it does.
     pub fn running_port(&self) -> Option<u16> {
         self.lock().running.as_ref().map(Running::port)
+    }
+
+    /// The ports the page's own requests may not reach: the endpoint's while it runs, and the command
+    /// line's.
+    pub fn endpoint_ports(&self) -> Vec<u16> {
+        self.running_port().into_iter().chain(self.cli_port()).collect()
+    }
+
+    // ---- the command line's endpoint
+
+    /// Starts the command line's endpoint on a free port of 127.0.0.1 with a new token: the tools of
+    /// the user's endpoint through the same dispatcher, each call's file noted as theirs are
+    /// ([`Gated`]), refused at once while the app waits on its first start's welcome ([`SetupGate`]);
+    /// its clients and calls counted in stats of its own, which [`McpHost::status`] never shows; and
+    /// its own routes (`/health`, `/app/show`, `/app/done`) answered by `app`. Its port and token, for
+    /// `cli.json`. It stops when the app quits ([`McpHost::shut`]).
+    pub fn start_cli(&self, app: Arc<dyn AppControl>) -> Res<(u16, Secret)> {
+        let token = Secret::generate()?;
+        let gated: Arc<dyn PageBridge> = Arc::new(Gated { inner: self.dispatcher.clone(), named: self.named.clone() });
+        let bridge = Arc::new(SetupGate { inner: gated, setup: self.setup.subscribe() });
+        let access = Arc::new(RwLock::new(Access::Token(token.clone())));
+        let server = McpServer::new(bridge, self.tools.clone(), access, self.cli_stats.clone()).with_app(app);
+        let running = server.start(SocketAddr::from(([127, 0, 0, 1], 0)), &self.runtime).map_err(|e| e.to_string())?;
+        let port = running.port();
+        *lock(&self.cli) = Some(running);
+        Ok((port, token))
+    }
+
+    /// The port the command line's endpoint listens on, while it does.
+    pub fn cli_port(&self) -> Option<u16> {
+        lock(&self.cli).as_ref().map(Running::port)
+    }
+
+    /// The command line's clients and calls (never shown in Settings → Agents).
+    pub fn cli_stats(&self) -> StatsSnapshot {
+        self.cli_stats.snapshot()
+    }
+
+    /// Whether the app waits on its first start's welcome: the page says so as it shows it, and again
+    /// once it is answered; the app may say so first, from its data folder having no profile.
+    pub fn set_needs_setup(&self, needed: bool) {
+        self.setup.send_replace(needed);
+    }
+
+    pub fn needs_setup(&self) -> bool {
+        *self.setup.borrow()
+    }
+
+    /// Whether the app is the command line's (started for it, and not shown to the user since): the
+    /// window then keeps drawing unseen, and the app is kept awake, for as long as it is. No longer
+    /// the command line's, the endpoint for agents starts if it is on (it was held back).
+    pub fn set_for_cli(&self, on: bool) {
+        let was = self.for_cli.swap(on, Ordering::SeqCst);
+        if was && !on && !self.selftest {
+            let mut s = self.lock();
+            if s.cfg.on && s.running.is_none() && !s.switching && s.trouble.is_none() {
+                let port = s.cfg.port;
+                self.bind(&mut s, port);
+            }
+        }
+        self.changed();
+    }
+
+    /// Whether there is a page to take calls, and each change to it.
+    pub fn watch_page(&self) -> watch::Receiver<PageState> {
+        self.dispatcher.watch_page()
+    }
+
+    /// The calls in hand, either endpoint's: waiting for the page, or for its answer.
+    pub fn calls_in_hand(&self) -> usize {
+        self.dispatcher.calls()
     }
 
     /// What Settings → Agents shows: `{on, state: "off" | "running" | "switching" | "error", port,
@@ -366,33 +476,44 @@ impl McpHost {
         self.dispatcher.close("SmedCover's window closed");
     }
 
-    /// The app quits: the calls in hand fail, and the endpoint stops, its port free.
+    /// The app quits: the calls in hand fail, and both endpoints stop, their ports free.
     pub async fn shut(&self) {
         let _one = self.switching.lock().await;
         self.dispatcher.close("SmedCover is quitting");
         let running = self.lock().running.take();
-        if let Some(running) = running {
+        let cli = lock(&self.cli).take();
+        for running in running.into_iter().chain(cli) {
             running.stop(Duration::from_secs(1)).await;
         }
         self.awake.lock().unwrap_or_else(|e| e.into_inner()).take();
     }
 
     /// Tells the page each change of the endpoint and of the clients and calls, four times a second
-    /// at most, and holds the app awake while a call is under way.
+    /// at most, and holds the app awake while a call is under way (either endpoint's) and for as long
+    /// as the app is the command line's; the window kept drawing unseen while the command line is at
+    /// work.
     async fn tell_page(self: Arc<Self>) {
         let mut stats = self.stats.changes();
+        let mut cli = self.cli_stats.changes();
         let mut news = self.news.subscribe();
+        let mut cli_was = false;
         loop {
             tokio::select! {
                 changed = stats.changed() => if changed.is_err() { return },
+                changed = cli.changed() => if changed.is_err() { return },
                 changed = news.changed() => if changed.is_err() { return },
             }
             let status = self.status();
-            let busy = status["inFlight"].as_u64().is_some_and(|n| n > 0);
+            let cli_busy = self.cli_busy();
+            if cli_busy != cli_was {
+                cli_was = cli_busy;
+                self.keep_unseen();
+            }
+            let busy = status["inFlight"].as_u64().is_some_and(|n| n > 0) || cli_busy;
             {
                 let mut awake = self.awake.lock().unwrap_or_else(|e| e.into_inner());
                 if busy && awake.is_none() {
-                    *awake = awake::Activity::begin("An agent's call to SmedCover is under way");
+                    *awake = awake::Activity::begin("An agent's or the command line's call to SmedCover is under way");
                 } else if !busy {
                     awake.take();
                 }
@@ -545,6 +666,48 @@ impl PageBridge for Gated {
     }
 }
 
+/// What the command line's calls are answered while the app waits on its first start's welcome.
+pub fn needs_setup_error() -> BridgeError {
+    BridgeError::Page {
+        code: "needs_setup".into(),
+        message: "SmedCover is not set up yet: open it once and finish its welcome (your brand, or the sample), then try again.".into(),
+    }
+}
+
+/// The dispatcher as the command line's endpoint sees it: while the app waits on its first start's
+/// welcome (`setup` true), which the page attaches only after, a call is answered at once that
+/// SmedCover needs setting up ([`needs_setup_error`]), and so is one waiting for the page when the
+/// welcome shows, rather than after the 30 s a call waits for a page on its way.
+struct SetupGate {
+    inner: Arc<dyn PageBridge>,
+    setup: watch::Receiver<bool>,
+}
+
+impl PageBridge for SetupGate {
+    fn call(&self, call: Call) -> BoxFut<'_, Result<CallToolResult, BridgeError>> {
+        let mut setup = self.setup.clone();
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            if *setup.borrow_and_update() {
+                return Err(needs_setup_error());
+            }
+            let welcome = async {
+                if setup.wait_for(|needed| *needed).await.is_err() {
+                    std::future::pending::<()>().await; // the host is gone: the call is left to the page
+                }
+            };
+            tokio::select! {
+                answer = inner.call(call) => answer,
+                _ = welcome => Err(needs_setup_error()),
+            }
+        })
+    }
+
+    fn page(&self) -> PageState {
+        self.inner.page()
+    }
+}
+
 /// Whether file `path` may be read for the page as a `kind`: only while a call in hand names that
 /// very file as one (`add_photo`'s `source.path` a picture, `open_project`'s `file` a project), or in
 /// the self-test proper (`selftest`), which calls the tools itself.
@@ -607,13 +770,19 @@ fn this_computer(ip: &IpAddr) -> bool {
 /// of the page's or a request while the endpoint is between ports are the endpoint's to refuse, by
 /// the marker every such request carries (`smedcover_core::net::PAGE_MARKER`).
 pub fn not_to_the_endpoint(app: &AppHandle, url: &str, proxy: Option<&str>) -> Res<()> {
-    let Some(port) = app.try_state::<Arc<McpHost>>().and_then(|h| h.running_port()) else {
-        return Ok(());
-    };
+    let ports = app.try_state::<Arc<McpHost>>().map(|h| h.endpoint_ports()).unwrap_or_default();
+    to_none_of(&ports, url, proxy)
+}
+
+/// [`not_to_the_endpoint`] for the endpoints on `ports` (the user's while it runs, the command
+/// line's).
+fn to_none_of(ports: &[u16], url: &str, proxy: Option<&str>) -> Res<()> {
     let lookup = |host: &str, port: u16| -> Vec<IpAddr> { (host, port).to_socket_addrs().map(|a| a.map(|a| a.ip()).collect()).unwrap_or_default() };
-    let proxied = proxy.map(str::trim).filter(|p| !p.is_empty()).is_some_and(|p| reaches_endpoint(p, port, &lookup));
-    if proxied || reaches_endpoint(url, port, &lookup) {
-        return Err("not allowed: SmedCover's endpoint for agents is not to be called from the window".into());
+    let proxy = proxy.map(str::trim).filter(|p| !p.is_empty());
+    for &port in ports {
+        if proxy.is_some_and(|p| reaches_endpoint(p, port, &lookup)) || reaches_endpoint(url, port, &lookup) {
+            return Err("not allowed: SmedCover's endpoints for agents and the command line are not to be called from the window".into());
+        }
     }
     Ok(())
 }
@@ -626,15 +795,15 @@ const SELFTEST_OTHER: &str = "smedcover-selftest-other";
 
 /// What the self-test's client is answered: the status, the message that answers its request (the
 /// body, or the data of the event that answers it), and the session id the answer gives, if any.
-struct Posted {
-    status: u16,
-    answer: Option<Value>,
-    session: Option<String>,
+pub(crate) struct Posted {
+    pub(crate) status: u16,
+    pub(crate) answer: Option<Value>,
+    pub(crate) session: Option<String>,
 }
 
 /// One JSON-RPC message of 2025-06-18 posted to `url` by the self-test's client, with `bearer` as its
 /// token and `session` as its `Mcp-Session-Id` if given, its answer read to its end.
-fn post(agent: &ureq::Agent, url: &str, id: Option<u64>, method: &str, params: Value, bearer: Option<&str>, session: Option<&str>) -> Res<Posted> {
+pub(crate) fn post(agent: &ureq::Agent, url: &str, id: Option<u64>, method: &str, params: Value, bearer: Option<&str>, session: Option<&str>) -> Res<Posted> {
     let mut body = json!({"jsonrpc": "2.0", "method": method, "params": params});
     if let Some(id) = id {
         body["id"] = json!(id);
@@ -751,8 +920,10 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 ///
 /// WebKit stops drawing for a window that cannot be seen — on another desktop, behind a full-screen
 /// app, under an agent's chat window — so a canvas read back from the graphics card (an export, a
-/// preview) waits for good. So while the endpoint runs, and always in self-test mode, the web view is
-/// told not to watch whether its window can be seen (the setting WebKit's own tests use). Elsewhere
+/// preview) waits for good. So while the endpoint runs, while the command line is at work (a call of
+/// its under way, a terminal often in front of the window; the whole time in an app started for it,
+/// its window hidden), and always in self-test mode, the web view is told not to watch whether its
+/// window can be seen (the setting WebKit's own tests use). Elsewhere
 /// than on macOS nothing is done (WebView2 and WebKitGTK have no such setting).
 pub fn keep_drawing(app: &AppHandle, unseen: bool) {
     #[cfg(target_os = "macos")]
@@ -1043,7 +1214,7 @@ mod tests {
     // ---- switching the endpoint, the token
 
     fn host(data: &Path) -> Arc<McpHost> {
-        McpHost::new(data.to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), None, Handle::current(), Box::new(|_| {})).unwrap()
+        McpHost::new(data.to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), None, false, Handle::current(), Box::new(|_| {})).unwrap()
     }
 
     fn free_port() -> u16 {
@@ -1180,7 +1351,7 @@ mod tests {
     async fn the_self_tests_endpoint_begins_as_by_default_and_follows_the_switch() {
         let dir = tempfile::tempdir().unwrap();
         McpConfig { require_token: true, ..McpConfig::new().unwrap() }.save(dir.path()).unwrap();
-        let h = McpHost::new(dir.path().to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), Some(SelfTest::Mcp), Handle::current(), Box::new(|_| {})).unwrap();
+        let h = McpHost::new(dir.path().to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), Some(SelfTest::Mcp), false, Handle::current(), Box::new(|_| {})).unwrap();
         let s = h.status();
         assert_eq!((s["state"].as_str(), s["requireToken"].as_bool(), s["on"].as_bool()), (Some("running"), Some(false), Some(false)));
         assert!(wants(&h).is_none());
@@ -1269,5 +1440,163 @@ mod tests {
         let saved = McpConfig::load(dir.path()).unwrap();
         assert!(!saved.require_token && saved.on && saved.port == other, "require_token kept on and the port");
         h.shut().await;
+    }
+
+    // ---- the command line's endpoint
+
+    /// The command line's own routes, which these tests do not call.
+    struct NoApp;
+
+    impl AppControl for NoApp {
+        fn health(&self) -> Map<String, Value> {
+            Map::new()
+        }
+
+        fn show(&self) -> Value {
+            json!({})
+        }
+
+        fn done(&self) -> Value {
+            json!({})
+        }
+    }
+
+    /// A host offering `get_context` alone.
+    fn host_with_a_tool(data: &Path) -> Arc<McpHost> {
+        let tools = r#"{"format": 1, "tools": [{"name": "get_context", "description": "What there is.", "inputSchema": {"type": "object"}, "annotations": {"readOnlyHint": true}}]}"#;
+        let tools = Arc::new(ToolList::from_json(tools, Host::Desktop).unwrap());
+        McpHost::new(data.to_path_buf(), tools, None, false, Handle::current(), Box::new(|_| {})).unwrap()
+    }
+
+    /// In an app launched for the command line the endpoint for agents, though on, starts only once
+    /// the app is the user's.
+    #[tokio::test]
+    async fn the_agents_endpoint_waits_till_the_command_lines_app_is_the_users() {
+        let dir = tempfile::tempdir().unwrap();
+        let port = free_port();
+        McpConfig { on: true, port, ..McpConfig::new().unwrap() }.save(dir.path()).unwrap();
+        let h = McpHost::new(dir.path().to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), None, true, Handle::current(), Box::new(|_| {})).unwrap();
+        assert_eq!((h.status()["on"].as_bool(), h.running_port()), (Some(true), None), "on, not started");
+        assert!(!taken(port));
+        h.set_for_cli(true);
+        assert_eq!(h.running_port(), None, "still the command line's");
+        h.set_for_cli(false);
+        assert_eq!(h.running_port(), Some(port), "the user's now: started");
+        assert_eq!(h.status()["state"], "running");
+        h.shut().await;
+        // one the user started starts it with the app, as before
+        let theirs = McpHost::new(dir.path().to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), None, false, Handle::current(), Box::new(|_| {})).unwrap();
+        assert_eq!(theirs.running_port(), Some(port));
+        theirs.shut().await;
+    }
+
+    /// The page, played: each call it is given is answered with its tool's name.
+    struct EchoPage(tokio::sync::mpsc::UnboundedSender<Value>);
+
+    impl PageSink for EchoPage {
+        fn send(&self, msg: &Value) -> Result<(), String> {
+            self.0.send(msg.clone()).map_err(|e| e.to_string())
+        }
+    }
+
+    fn attach_page(h: &Arc<McpHost>) -> tokio::task::JoinHandle<()> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        h.dispatcher.attach(Box::new(EchoPage(tx)), "");
+        let h = h.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = rx.recv().await {
+                if msg["kind"] == "call" {
+                    let reply = json!({"id": msg["id"], "ok": true, "result": {"content": [{"type": "text", "text": msg["tool"]}]}});
+                    h.dispatcher.reply(serde_json::from_value(reply).unwrap());
+                }
+            }
+        })
+    }
+
+    /// `get_context` called on the endpoint at `port` with `token`, after an initialize from the
+    /// client `name`: the HTTP status, and the call's result if there is one; and how long it took.
+    async fn cli_call(port: u16, token: Option<String>, name: &'static str) -> (u16, Option<Value>, Duration) {
+        tokio::task::spawn_blocking(move || {
+            let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(60)).build();
+            let url = format!("http://127.0.0.1:{port}/mcp");
+            let hello = json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": name, "version": "1"}});
+            let init = post(&agent, &url, Some(1), "initialize", hello, token.as_deref(), None).unwrap();
+            if init.status != 200 {
+                return (init.status, None, Duration::ZERO);
+            }
+            let t0 = Instant::now();
+            let call = json!({"name": "get_context", "arguments": {}});
+            let posted = post(&agent, &url, Some(2), "tools/call", call, token.as_deref(), init.session.as_deref()).unwrap();
+            (posted.status, posted.answer.map(|a| a["result"].clone()), t0.elapsed())
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_command_lines_endpoint_runs_beside_the_users_and_is_counted_apart() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = host_with_a_tool(dir.path());
+        assert_eq!(h.status()["state"], "off", "the user's endpoint is off");
+        let (port, token) = h.start_cli(Arc::new(NoApp)).unwrap();
+        assert!(taken(port));
+        assert_eq!(h.cli_port(), Some(port));
+        assert_eq!(h.endpoint_ports(), vec![port], "the page's own requests may not reach it");
+        let page = attach_page(&h);
+        let (status, result, _) = cli_call(port, Some(token.expose().to_string()), "smedcover-cli").await;
+        assert_eq!(status, 200);
+        assert_eq!(result.unwrap()["content"][0]["text"], "get_context", "through the dispatcher to the page");
+        let cli = h.cli_stats();
+        assert_eq!((cli.clients.len(), cli.clients[0].name.as_deref(), cli.clients[0].calls), (1, Some("smedcover-cli"), 1));
+        assert_eq!(h.status()["clients"], json!([]), "Settings → Agents is not shown the command line");
+        assert!(h.status()["lastCall"].is_null());
+        // its token alone, whatever the user's switch says
+        assert_eq!(cli_call(port, None, "someone").await.0, 401);
+        let users = h.token(false).unwrap();
+        assert_eq!(cli_call(port, Some(users), "someone").await.0, 401, "not the user's endpoint's token");
+        // the user's endpoint on too: both ports kept from the page
+        let theirs = free_port();
+        h.set(true, Some(theirs)).await.unwrap();
+        assert_eq!(h.endpoint_ports(), vec![theirs, port]);
+        assert!(to_none_of(&h.endpoint_ports(), &format!("http://127.0.0.1:{port}/health"), None).is_err());
+        assert!(to_none_of(&h.endpoint_ports(), "https://api.openai.com/v1/chat/completions", Some(&format!("127.0.0.1:{port}"))).is_err(), "nor through a proxy");
+        assert!(to_none_of(&h.endpoint_ports(), "https://api.openai.com/v1/chat/completions", None).is_ok());
+        h.shut().await;
+        assert!(!taken(port) && !taken(theirs), "both stop with the app");
+        assert_eq!(h.cli_port(), None);
+        page.abort();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_command_line_is_told_at_once_that_the_app_needs_setting_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = host_with_a_tool(dir.path());
+        let (port, token) = h.start_cli(Arc::new(NoApp)).unwrap();
+        let token = token.expose().to_string();
+        // the first start's welcome showing: no page will attach till it is answered
+        h.set_needs_setup(true);
+        assert!(h.needs_setup());
+        let (status, result, took) = cli_call(port, Some(token.clone()), "smedcover-cli").await;
+        let result = result.unwrap();
+        assert_eq!((status, result["isError"].as_bool()), (200, Some(true)));
+        assert!(result["content"][0]["text"].as_str().unwrap().contains("not set up yet"), "{result}");
+        assert!(took < Duration::from_secs(2), "at once, not after the 30 s a call waits for a page ({took:?})");
+        // a call waiting for the page as it starts, then the welcome shown: answered then
+        h.set_needs_setup(false);
+        let waiting = tokio::spawn(cli_call(port, Some(token.clone()), "smedcover-cli"));
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(!waiting.is_finished(), "it waits for the page on its way");
+        let shown = Instant::now();
+        h.set_needs_setup(true);
+        let (_, result, _) = waiting.await.unwrap();
+        assert!(shown.elapsed() < Duration::from_secs(2));
+        assert!(result.unwrap()["content"][0]["text"].as_str().unwrap().contains("not set up yet"));
+        // set up: the page attaches and the calls go through
+        h.set_needs_setup(false);
+        let page = attach_page(&h);
+        let (_, result, _) = cli_call(port, Some(token), "smedcover-cli").await;
+        assert_eq!(result.unwrap()["content"][0]["text"], "get_context");
+        h.shut().await;
+        page.abort();
     }
 }

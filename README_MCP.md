@@ -439,7 +439,11 @@ starts it again; no call takes more than two hours.
 - `render_preview` and `surprise` return PNG images as image content.
 - A failure reaches the agent as a tool error (`isError`) with one sentence for the model. Behind it is one of the
   page's kinds (`invalid_arguments`, `not_allowed`, `busy`, `unavailable`, `failed`) or the endpoint's own: the window
-  not ready, gone, quiet past the tool's timeout, or 16 calls already in hand. An unknown tool is a protocol error.
+  not ready, gone, quiet past the tool's timeout, or 16 calls already in hand. For a program to test, the error's `_meta`
+  says which, as `{"smedcover/error": {"kind", "message"}}`: `kind` is `not_ready`, `gone`, `timeout`, `cancelled`,
+  `too_many`, `malformed`, one of the page's above, or `needs_setup` (the app waits on its first start's welcome; the
+  command line's endpoint only). Never in `structuredContent`, which the tool's `outputSchema` describes. An unknown
+  tool is a protocol error.
 
 ### Protocol
 

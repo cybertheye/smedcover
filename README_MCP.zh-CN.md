@@ -347,7 +347,7 @@ agent 连上时，SmedCover 会先告诉它怎么用（MCP 的 instructions）�
 
 - 结果里有一段文字（默认是结构化结果的 JSON）和 `structuredContent`，后者的结构由工具的 `outputSchema` 说明。
 - `render_preview` 和 `surprise` 还返回 PNG 图片（MCP 的 image content）。
-- 失败时，agent 收到的是工具错误（`isError`），附一句给模型看的话。背后是页面的几种情况（`invalid_arguments`、`not_allowed`、`busy`、`unavailable`、`failed`），或者接口自己的：窗口没准备好、窗口没了、沉默超过了工具的时限、手上已经有 16 个调用。不存在的工具是协议错误。
+- 失败时，agent 收到的是工具错误（`isError`），附一句给模型看的话。背后是页面的几种情况（`invalid_arguments`、`not_allowed`、`busy`、`unavailable`、`failed`），或者接口自己的：窗口没准备好、窗口没了、沉默超过了工具的时限、手上已经有 16 个调用。给程序判断用的，错误的 `_meta` 里写着是哪种：`{"smedcover/error": {"kind", "message"}}`，`kind` 是 `not_ready`、`gone`、`timeout`、`cancelled`、`too_many`、`malformed`、上面页面的几种之一，或者 `needs_setup`（应用停在首次启动的欢迎页上；只有命令行的入口会这样）。从不放进 `structuredContent`：那是工具的 `outputSchema` 描述的。不存在的工具是协议错误。
 
 ### 协议
 

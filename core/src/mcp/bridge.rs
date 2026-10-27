@@ -137,7 +137,7 @@ impl BridgeError {
     pub fn code(&self) -> &str {
         match self {
             BridgeError::NotReady => "not_ready",
-            BridgeError::PageGone(_) => "page_gone",
+            BridgeError::PageGone(_) => "gone",
             BridgeError::Timeout => "timeout",
             BridgeError::Cancelled => "cancelled",
             BridgeError::TooMany => "too_many",
