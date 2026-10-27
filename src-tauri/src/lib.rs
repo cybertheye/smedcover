@@ -455,10 +455,18 @@ fn data_folder() -> Option<PathBuf> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let launch = cli::Launch::from_args(std::env::args_os().skip(1));
+    // launched for the command line, Ctrl-C in its terminal and the terminal closing do not stop the app: the command
+    // line ends it
+    if launch.cli {
+        smedcover_core::instance::ignore_interrupts();
+    }
     let data = data_folder();
     // one app for each data folder: a second one goes no further (see cli::single_instance); the lock is held till the
     // process ends
     let _lock = data.as_deref().and_then(|d| cli::single_instance(d, launch));
+    if let Some(data) = data.as_deref() {
+        cli::warn_if_shared(data);
+    }
     // whether the page will wait on the first start's welcome (a self-test's folder gets the sample profile instead)
     let first_start = data.as_deref().is_some_and(cli::no_profile_yet) && (selftest_root().is_none() || selftest_welcome());
     let builder = tauri::Builder::default();
@@ -518,6 +526,10 @@ pub fn run() {
             selftest_done
         ])
         .setup(move |app| {
+            // launched for the command line, its standard input watched from the start: at its end the app quits
+            if launch.cli {
+                cli::watch_stdin(app.handle().clone());
+            }
             // The main window, made here so that a launch for the command line can leave it hidden (cli::make_window).
             cli::make_window(app, launch, first_start)?;
             // The data folder, found once for every command: a self-test keeps its data in its own.
@@ -532,7 +544,7 @@ pub fn run() {
                 Ok(core) => core,
                 // launched for the command line: said on stderr, the window not to be shown
                 Err(e) if launch.cli => {
-                    eprintln!("SmedCover cannot open its data folder: {e}");
+                    cli::say(&format!("SmedCover cannot open its data folder: {e}"));
                     app.handle().exit(1);
                     return Ok(());
                 }
@@ -563,19 +575,31 @@ pub fn run() {
                     mcp::SelfTest::Run
                 }
             });
-            match mcp::McpHost::open(app.handle(), core.data_dir().to_path_buf(), selftest) {
-                Ok(host) => {
-                    host.set_needs_setup(first_start);
-                    // and the command line's, whatever the user's switch says, with the cli.json it is found by
-                    match cli::CliApp::start(app.handle(), host.clone(), core.data_dir().to_path_buf(), launch) {
-                        Ok(cli) => {
-                            app.manage(cli);
-                        }
-                        Err(e) => eprintln!("SmedCover: the command line's endpoint cannot be had: {e}"),
-                    }
-                    app.manage(host);
+            // Either endpoint missing, an app launched for the command line, which no one sees, has nothing to do: it
+            // quits (1) rather than hold the folder unseen.
+            let host = match mcp::McpHost::open(app.handle(), core.data_dir().to_path_buf(), selftest, launch.cli) {
+                Ok(host) => Some(host),
+                Err(e) => {
+                    cli::say(&format!("SmedCover: the agents' endpoint cannot be had: {e}"));
+                    None
                 }
-                Err(e) => eprintln!("SmedCover: the agents' endpoint cannot be had: {e}"),
+            };
+            if let Some(host) = host {
+                host.set_needs_setup(first_start);
+                // and the command line's, whatever the user's switch says, with the cli.json it is found by
+                match cli::CliApp::start(app.handle(), host.clone(), core.data_dir().to_path_buf(), launch) {
+                    Ok(cli) => {
+                        app.manage(cli);
+                    }
+                    Err(e) if launch.cli => {
+                        cli::say(&format!("SmedCover: the command line's endpoint cannot be had: {e}"));
+                        app.handle().exit(1);
+                    }
+                    Err(e) => cli::say(&format!("SmedCover: the command line's endpoint cannot be had: {e}")),
+                }
+                app.manage(host);
+            } else if launch.cli {
+                app.handle().exit(1);
             }
             app.manage(core);
             Ok(())
@@ -596,19 +620,26 @@ pub fn run() {
     if launch.cli {
         app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     }
-    app.run(|app, event| match event {
+    app.run(move |app, event| match event {
         RunEvent::WindowEvent { label, event: WindowEvent::Destroyed, .. } if label == "main" => {
             if let Some(host) = app.try_state::<Arc<mcp::McpHost>>() {
                 host.window_closed();
             }
         }
-        // opened again from the Finder or the Dock while it runs: the command line's app is shown to the user
-        #[cfg(target_os = "macos")]
-        RunEvent::Reopen { .. } => {
+        // the command line's window brought to the front by the user (it shows elsewhere than on macOS): it is theirs
+        RunEvent::WindowEvent { label, event: WindowEvent::Focused(true), .. } if label == "main" => {
             if let Some(cli) = app.try_state::<Arc<cli::CliApp>>() {
-                cli.reopened();
+                cli.focused();
             }
         }
+        // opened again from the Finder or the Dock while it runs: the command line's app is shown to the user (and the
+        // window of one whose command line's side is not there yet)
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen { .. } => match app.try_state::<Arc<cli::CliApp>>() {
+            Some(cli) => cli.reopened(),
+            None if launch.cli => cli::show_window(app, true),
+            None => {}
+        },
         // cli.json goes, and the endpoints stop with the app, their ports free
         RunEvent::Exit => {
             if let Some(cli) = app.try_state::<Arc<cli::CliApp>>() {

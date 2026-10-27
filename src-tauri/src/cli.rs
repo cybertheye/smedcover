@@ -10,44 +10,54 @@
 //!   private settings like the occlusion one `mcp::keep_drawing` uses: without them an export there
 //!   takes four to six times as long), the window keeps drawing unseen and App Nap is kept away for as
 //!   long as it runs. Elsewhere its window is shown without taking the focus where the system allows
-//!   (hidden is not tried there). The window is never shown with the first start's welcome in it: the
-//!   command line is answered that SmedCover needs setting up.
+//!   (hidden is not tried there), and becomes the user's when they bring it to the front. The window is
+//!   never shown with the first start's welcome in it: the command line is answered that SmedCover
+//!   needs setting up. The user's endpoint for agents is not started while the app is the command
+//!   line's (no agent drives a window no one sees), Ctrl-C and a closed terminal do not stop it
+//!   (`instance::ignore_interrupts`), and an app whose endpoint for the command line cannot be had
+//!   quits at once (1) rather than running unseen.
 //! * **Quitting**: it quits once the command line says it is done (`POST /app/done`) or once its
 //!   standard input, which the command line holds open, reaches its end (the command line ended,
-//!   crashed or was killed). From then `cli.json` is gone, so that no other command line picks the
-//!   app up; another that already uses it (it found the app the first one started) goes on: the app
-//!   waits till no call is in hand and none has come for [`QUIET_FOR`] (from its last request, or the
-//!   moment it was told), then asks the page to write what waits (the event `app-quit`: its
-//!   `flushWrites()`, then `app_quit`) and exits, 5 s at most after it asked. Not if the window has
-//!   been shown to the user by then (`POST /app/show`, a second launch on the folder, on macOS the app
-//!   opened again from the Finder), whichever way the command line was done: the app is theirs from
-//!   then on (`launchedBy: "user"`, `cli.json` written again, on macOS a regular app with its Dock
-//!   icon), and goes on as any other.
+//!   crashed or was killed); the stdin is watched from the start, the endpoint there or not. From
+//!   then `cli.json` says `"quitting": true` and the app goes on taking calls: another command line
+//!   that found it (before or since) uses it without saying it is done, each request of theirs putting
+//!   the quitting off. The app waits till no call is in hand and none has come for [`QUIET_FOR`] (from
+//!   the last request showing the token, or from the moment it was told: [`quiet`]), then asks the
+//!   page to write what waits (the event `app-quit`: its `flushWrites()`, then `app_quit`), 5 s at most,
+//!   and exits — unless a request came meanwhile, when it waits again. Not if the window has been shown
+//!   to the user by then (`POST /app/show`, a second launch on the folder, on macOS the app opened
+//!   again from the Finder), whichever way the command line was done: the app is theirs from then on
+//!   (`launchedBy: "user"`, `quitting: false`, on macOS a regular app with its Dock icon, the user's
+//!   endpoint for agents started if it is on), and goes on as any other. Nothing it says on the way
+//!   out may fail it ([`say`]: stderr may be a pipe no one reads).
 //! * **The endpoint**: every app starts the command line's endpoint (`McpHost::start_cli`) as it
 //!   starts, whatever the user's switch for agents says, and writes `cli.json`
-//!   (`smedcover_core::instance`) once it listens, again whenever `ready` or `launchedBy` changes, and
-//!   removes it as it quits.
+//!   (`smedcover_core::instance`) once it listens, again whenever `ready`, `launchedBy` or `quitting`
+//!   changes, and removes it as it exits (its own only).
 //! * **One app for each data folder** (`smedcover_core::paths::data_dir`: a self-test's, else
 //!   `SMEDCOVER_DATA`'s, else the app's own): `app.lock` is taken before anything else is done
 //!   ([`single_instance`]). When another app holds it and its `cli.json` says where it listens, a
 //!   launch of the user's asks that one to show its window (`POST /app/show`, with the token the file
 //!   gives) and quits; one for the command line quits with `EXIT_ALREADY_RUNNING` (75), and the
-//!   command line uses the app that runs. With no `cli.json` there, the other app is starting (it
-//!   writes one in a moment) or quitting (it has removed it): the launch waits [`FIND_WITHIN`] at most
-//!   for the file, or for the lock, which it then takes, starting as the folder's app.
+//!   command line uses the app that runs, quitting or not. With no `cli.json` there, the other app is
+//!   starting (it writes one once its endpoint listens) or exiting (it removed it as it exits, its
+//!   endpoints then stopping within 2 s): the launch waits [`FIND_WITHIN`] at most for the file, or for
+//!   the lock, which it then takes, starting as the folder's app. A data folder others may write in is
+//!   said on stderr: it is to be the user's alone.
 
 use std::ffi::OsString;
-use std::io::{ErrorKind, Read};
+use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
-use smedcover_core::instance::{AppLock, CliFile, LaunchedBy, CLI_FILE, EXIT_ALREADY_RUNNING};
+use smedcover_core::instance::{self, AppLock, CliFile, LaunchedBy, CLI_FILE, EXIT_ALREADY_RUNNING};
 use smedcover_core::mcp::server::VERSION;
 use smedcover_core::mcp::{AppControl, PageState, Secret};
 use smedcover_core::{err, Res};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::sync::watch;
 
 use crate::mcp::McpHost;
 
@@ -57,11 +67,16 @@ pub const CLI_ARG: &str = "--cli";
 const QUIT_EVENT: &str = "app-quit";
 /// How long the page has to answer it.
 const QUIT_WITHIN: Duration = Duration::from_secs(5);
-/// How long a second launch waits for the first app's `cli.json`, or for its lock (the first may be
-/// starting yet, or quitting).
+/// How long a second launch waits for the first app's `cli.json`, or for its lock: the first may be
+/// starting yet (it writes the file once its endpoint listens, within 2 s of starting as measured), or
+/// exiting (from the file removed to its endpoints stopped, 2 s at most; a quitting app keeps its file
+/// till then).
 const FIND_WITHIN: Duration = Duration::from_secs(10);
-/// How long the command line's app waits, once it is to quit, for no call to have come.
+/// How long the command line's app waits, once it is to quit, for no request to have come.
 const QUIET_FOR: Duration = Duration::from_secs(2);
+/// How long after the window is made an app launched for the command line takes the window brought to
+/// the front for the user's doing (elsewhere than on macOS; a system may focus a new window itself).
+const FOCUS_AFTER: Duration = Duration::from_secs(2);
 
 /// How the app was launched.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,12 +123,12 @@ pub fn single_instance(data: &Path, launch: Launch) -> Option<AppLock> {
             Some(lock)
         }
         Taken::Unlocked(e) => {
-            eprintln!("SmedCover: {e}; it runs without the lock that keeps a second app off its data folder");
+            say(&format!("SmedCover: {e}; it runs without the lock that keeps a second app off its data folder"));
             None
         }
         Taken::Exit(code, why) => {
             if let Some(why) = why {
-                eprintln!("SmedCover already runs on {}, but it could not be asked to show its window: {why}", data.display());
+                say(&format!("SmedCover already runs on {}, but it could not be asked to show its window: {why}", data.display()));
             }
             std::process::exit(code)
         }
@@ -132,12 +147,12 @@ pub enum Taken {
 }
 
 /// Takes the data folder's lock, or defers to the app that holds it: while that app's `cli.json`
-/// says where it listens, a launch for the command line exits with [`EXIT_ALREADY_RUNNING`] at once,
-/// and the user's asks it to show its window ([`ask_to_show`]) and exits 0. While there is no
-/// `cli.json`, that app is starting (it writes one once its endpoint listens) or quitting (it has
-/// removed it): the launch waits for the one or the lock, trying each again every 100 ms for `within`
-/// at most, and takes the lock once the other app has let it go. Past `within`, it exits as above, 1
-/// for the user's launch whose other app could not be asked.
+/// says where it listens (quitting or not), a launch for the command line exits with
+/// [`EXIT_ALREADY_RUNNING`] at once, and the user's asks it to show its window ([`ask_to_show`]) and
+/// exits 0. While there is no `cli.json`, that app is starting (it writes one once its endpoint
+/// listens) or exiting (it removed it as it exits): the launch waits for the one or the lock, trying
+/// each again every 100 ms for `within` at most, and takes the lock once the other app has let it
+/// go. Past `within`, it exits as above, 1 for the user's launch whose other app could not be asked.
 pub fn take_or_defer(data: &Path, launch: Launch, within: Duration) -> Taken {
     let until = Instant::now() + within;
     loop {
@@ -167,6 +182,20 @@ fn ask_to_show(file: &CliFile) -> Res<()> {
     let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(5)).build();
     agent.post(&file.url("/app/show")).set("Authorization", &format!("Bearer {}", file.token.expose())).send_string("").map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Says on stderr when the data folder `data` may be written by others than its owner (Unix): the
+/// app's lock, `cli.json` and the token in it are kept there, so it is to be the user's alone.
+pub fn warn_if_shared(data: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if std::fs::metadata(data).is_ok_and(|m| m.permissions().mode() & 0o022 != 0) {
+            say(&format!("SmedCover: others than its owner may write in its data folder {}; it is to be the user's alone", data.display()));
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = data;
 }
 
 /// Whether the data folder `data` has no profile yet (no `profiles/*.json`): the page will then wait
@@ -233,7 +262,7 @@ fn timers_unthrottled(window: &tauri::WebviewWindow) {
 
 /// Shows the main window and brings it to the front; `was_cli`: the app was the command line's, and
 /// on macOS becomes a regular app again first (its Dock icon, its menu bar).
-fn show_window(app: &AppHandle, was_cli: bool) {
+pub fn show_window(app: &AppHandle, was_cli: bool) {
     #[cfg(target_os = "macos")]
     if was_cli {
         let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
@@ -259,17 +288,30 @@ pub struct CliApp {
     /// The endpoint's port and token, once it listens.
     endpoint: OnceLock<(u16, Secret)>,
     state: Mutex<CliState>,
-    /// `cli.json` is written from one place at a time (its temporary file has one name), and not
-    /// again once it is removed.
+    /// `cli.json` is written from one place at a time, and not again once it is removed.
     writing: Mutex<()>,
+    /// Counts the page's answers to [`QUIT_EVENT`] (`app_quit`).
+    flushed: watch::Sender<u64>,
+    /// When the app (its window) was made.
+    made: Instant,
 }
 
 struct CliState {
     life: Lifecycle,
     /// The page has attached: calls are taken.
     ready: bool,
-    /// `cli.json` is removed: the app is quitting.
+    /// `cli.json` is removed: the app exits.
     gone: bool,
+    /// When a request showing the token last reached the command line's endpoint.
+    last_request: Option<Instant>,
+}
+
+/// Whether an app that is to quit may now: no call in hand, and no request for [`QUIET_FOR`], counted
+/// from the last one (`last_request`) or from when the app was told it was to quit (`told`), whichever
+/// came later.
+fn quiet(now: Instant, told: Instant, last_request: Option<Instant>, calls: usize) -> bool {
+    let since = last_request.map_or(told, |r| r.max(told));
+    calls == 0 && now.saturating_duration_since(since) >= QUIET_FOR
 }
 
 /// Whose the app is, and whether it is to quit.
@@ -313,8 +355,7 @@ impl Lifecycle {
 
 impl CliApp {
     /// Starts the command line's endpoint for the app (see [`McpHost::start_cli`]), writes `cli.json`
-    /// and keeps it as the page comes and goes; launched for the command line, the app is the command
-    /// line's ([`McpHost::set_for_cli`]) and watches its standard input.
+    /// and keeps it as the page comes and goes (its standard input is watched apart: [`watch_stdin`]).
     pub fn start(app: &AppHandle, host: Arc<McpHost>, data: PathBuf, launch: Launch) -> Res<Arc<CliApp>> {
         let cli = Arc::new_cyclic(|me| CliApp {
             me: me.clone(),
@@ -322,17 +363,15 @@ impl CliApp {
             host: host.clone(),
             data,
             endpoint: OnceLock::new(),
-            state: Mutex::new(CliState { life: Lifecycle::new(launch.launched_by()), ready: false, gone: false }),
+            state: Mutex::new(CliState { life: Lifecycle::new(launch.launched_by()), ready: false, gone: false, last_request: None }),
             writing: Mutex::new(()),
+            flushed: watch::Sender::new(0),
+            made: Instant::now(),
         });
         let endpoint = host.start_cli(cli.clone())?;
         let _ = cli.endpoint.set(endpoint);
-        host.set_for_cli(launch.cli);
         cli.write_file();
         tauri::async_runtime::spawn(cli.clone().follow_page());
-        if launch.cli {
-            watch_stdin(cli.clone());
-        }
         Ok(cli)
     }
 
@@ -350,9 +389,7 @@ impl CliApp {
         self.state().life.quitting()
     }
 
-    /// Writes `cli.json` as things are now; removes it while the app is to quit, so that no other
-    /// command line picks it up (and it is written again if the user is shown the window meanwhile);
-    /// leaves it alone once it is removed for good.
+    /// Writes `cli.json` as things are now (not once it is removed for good).
     fn write_file(&self) {
         let _one = lock(&self.writing);
         let (launched_by, ready, gone, quitting) = {
@@ -360,23 +397,29 @@ impl CliApp {
             (s.life.launched_by, s.ready, s.gone, s.life.quitting())
         };
         let Some((port, token)) = self.endpoint.get().filter(|_| !gone) else { return };
-        let done = if quitting {
-            CliFile::remove(&self.data)
-        } else {
-            CliFile { pid: std::process::id(), port: *port, token: token.clone(), version: VERSION.to_string(), launched_by, ready }.save(&self.data)
-        };
-        if let Err(e) = done {
-            eprintln!("SmedCover: {e}");
+        let file = CliFile { pid: std::process::id(), port: *port, token: token.clone(), version: VERSION.to_string(), launched_by, ready, quitting };
+        if let Err(e) = file.save(&self.data) {
+            say(&format!("SmedCover: {e}"));
         }
     }
 
-    /// Removes `cli.json`, for good: the app quits.
+    /// Removes `cli.json`, for good, if it is this app's: the app exits.
     pub fn remove_file(&self) {
         let _one = lock(&self.writing);
         self.state().gone = true;
-        if let Err(e) = CliFile::remove(&self.data) {
-            eprintln!("SmedCover: {e}");
+        if let Err(e) = instance::remove_if(&self.data, std::process::id()) {
+            say(&format!("SmedCover: {e}"));
         }
+    }
+
+    /// When a request showing the token last reached the command line's endpoint.
+    fn last_request(&self) -> Option<Instant> {
+        self.state().last_request
+    }
+
+    /// The calls in hand, either endpoint's, those the command line's is answering itself among them.
+    fn calls(&self) -> usize {
+        self.host.calls_in_hand() + self.host.cli_stats().in_flight
     }
 
     /// Keeps `ready` in `cli.json` as the page attaches, reloads and goes.
@@ -402,8 +445,12 @@ impl CliApp {
     /// The window shown to the user, and brought to the front: an app that was the command line's is
     /// the user's from then on, and does not quit when the command line is done (`cli.json` says so).
     pub fn show_to_user(&self) {
-        let was_cli = self.state().life.shown();
-        if was_cli {
+        let (was_cli, was_quitting) = {
+            let mut s = self.state();
+            let quitting = s.life.quitting();
+            (s.life.shown(), quitting)
+        };
+        if was_cli || was_quitting {
             self.host.set_for_cli(false);
             self.write_file();
         }
@@ -419,47 +466,65 @@ impl CliApp {
         }
     }
 
+    /// The window was brought to the front (it shows elsewhere than on macOS; there the command line's is
+    /// never shown but to the user): past [`FOCUS_AFTER`] from its making, the user's doing, so the app is
+    /// theirs from then on.
+    pub fn focused(&self) {
+        if self.launched_by() == LaunchedBy::Cli && self.made.elapsed() >= FOCUS_AFTER {
+            self.show_to_user();
+        }
+    }
+
     /// The command line is done with the app: it quits, unless it is the user's (see the module's
     /// notes). Whether it is quitting; asked again, the same, and the quitting begun once.
     pub fn finish(&self) -> bool {
         let done = self.state().life.done();
         if done == Some(true) {
-            self.write_file(); // cli.json goes: no other command line is to pick the app up now
+            self.write_file(); // "quitting": true — another command line may use the app, but is not to say it is done
             if let Some(me) = self.me.upgrade() {
-                tauri::async_runtime::spawn(me.quit_when_idle(now_ms()));
+                tauri::async_runtime::spawn(me.quit_when_idle(Instant::now()));
             }
         }
         done.is_some()
     }
 
-    /// Quits once no call is in hand (the command line's, another command line's that found the app
-    /// before it was to quit, an agent's) and none has come for [`QUIET_FOR`], from its last request
-    /// or from `since`, when the app was told; then once the page has written what waits
-    /// ([`QUIT_EVENT`], answered by `app_quit`), or [`QUIT_WITHIN`] after it was asked. Never once the
-    /// app is the user's.
-    async fn quit_when_idle(self: Arc<Self>, since: u64) {
+    /// Quits once it is [`quiet`] (no call in hand, no request for [`QUIET_FOR`] since the last or
+    /// since `told`) and the page has written what waits ([`QUIT_EVENT`], answered by `app_quit`), or
+    /// [`QUIT_WITHIN`] after it was asked; a request that came meanwhile has it wait to be quiet again.
+    /// Never once the app is the user's.
+    async fn quit_when_idle(self: Arc<Self>, told: Instant) {
         loop {
+            while !quiet(Instant::now(), told, self.last_request(), self.calls()) {
+                if !self.quitting() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
             if !self.quitting() {
                 return;
             }
-            let cli = self.host.cli_stats();
-            let last = cli.clients.iter().map(|c| c.last_seen).chain([since]).max().unwrap_or(since);
-            let quiet = self.host.calls_in_hand() == 0 && cli.in_flight == 0 && now_ms().saturating_sub(last) >= QUIET_FOR.as_millis() as u64;
-            if quiet {
-                break;
+            let asked_at = Instant::now();
+            let mut answered = self.flushed.subscribe();
+            answered.borrow_and_update();
+            let asked = self.app.get_webview_window("main").is_some() && self.app.emit_to("main", QUIT_EVENT, ()).is_ok();
+            let flushed = asked && tokio::time::timeout(QUIT_WITHIN, answered.changed()).await.is_ok_and(|r| r.is_ok());
+            if !self.quitting() {
+                return;
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        let asked = self.app.get_webview_window("main").is_some() && self.app.emit_to("main", QUIT_EVENT, ()).is_ok();
-        if asked {
-            tokio::time::sleep(QUIT_WITHIN).await;
-        }
-        if self.quitting() {
-            if asked {
-                eprintln!("SmedCover: the window did not say within {} s that it had written what waited; quitting all the same", QUIT_WITHIN.as_secs());
+            if self.last_request().is_some_and(|r| r > asked_at) || self.calls() > 0 {
+                continue; // another command line came meanwhile: it is waited for, and the page asked again
+            }
+            if asked && !flushed {
+                say(&format!("SmedCover: the window did not say within {} s that it had written what waited; quitting all the same", QUIT_WITHIN.as_secs()));
             }
             self.app.exit(0);
+            return;
         }
+    }
+
+    /// The page has written what waited, answering [`QUIT_EVENT`].
+    pub fn flushed(&self) {
+        self.flushed.send_modify(|n| *n = n.wrapping_add(1));
     }
 }
 
@@ -479,12 +544,17 @@ impl AppControl for CliApp {
         let exiting = self.finish();
         json!({"ok": true, "exiting": exiting, "launchedBy": self.launched_by().as_str()})
     }
+
+    fn request(&self) {
+        self.state().last_request = Some(Instant::now());
+    }
 }
 
-/// Watches the standard input the command line holds open, on a thread of its own: at its end the
-/// command line is done with the app, or gone ([`CliApp::finish`]). One that cannot be read is not
-/// watched (said on stderr): the app then quits only when the command line says it is done.
-fn watch_stdin(cli: Arc<CliApp>) {
+/// Watches the standard input the command line holds open, on a thread of its own, from the app's
+/// start: at its end the command line is done with the app, or gone ([`CliApp::finish`]); before the
+/// command line's side is there, the app just exits. One that cannot be read is not watched (said on
+/// stderr): the app then quits only when the command line says it is done.
+pub fn watch_stdin(app: AppHandle) {
     let watch = move || {
         let mut stdin = std::io::stdin();
         let mut buf = [0u8; 4096];
@@ -494,34 +564,41 @@ fn watch_stdin(cli: Arc<CliApp>) {
                 Ok(_) => {}
                 Err(e) if e.kind() == ErrorKind::Interrupted => {}
                 Err(e) => {
-                    eprintln!("SmedCover: its standard input cannot be read ({e}), so it quits only when the command line says it is done");
+                    say(&format!("SmedCover: its standard input cannot be read ({e}), so it quits only when the command line says it is done"));
                     return;
                 }
             }
         }
-        cli.finish();
+        match app.try_state::<Arc<CliApp>>() {
+            Some(cli) => {
+                cli.finish();
+            }
+            None => app.exit(0),
+        }
     };
     if let Err(e) = std::thread::Builder::new().name("smedcover-stdin".into()).spawn(watch) {
-        eprintln!("SmedCover: its standard input cannot be watched ({e})");
+        say(&format!("SmedCover: its standard input cannot be watched ({e})"));
     }
+}
+
+/// Says `text` on stderr, a failure to (a pipe no one reads any more) not failing the app as
+/// `eprintln!` would.
+pub fn say(text: &str) {
+    let _ = writeln!(std::io::stderr(), "{text}");
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The time in milliseconds since 1970, as the endpoint's stats tell it.
-fn now_ms() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
-}
-
 // ---------------------------------------------------------------- the commands
 
-/// The page has written what waited ([`QUIT_EVENT`]): the app exits, if it is still to quit.
+/// The page has written what waited ([`QUIT_EVENT`]): the app exits, if it is still to quit and no
+/// command line came meanwhile (see [`CliApp::quit_when_idle`]).
 #[tauri::command]
 pub fn app_quit(app: AppHandle) {
-    if app.try_state::<Arc<CliApp>>().is_some_and(|cli| cli.quitting()) {
-        app.exit(0);
+    if let Some(cli) = app.try_state::<Arc<CliApp>>() {
+        cli.flushed();
     }
 }
 
@@ -547,7 +624,7 @@ const SELFTEST_CLI_CLIENT: &str = "smedcover-selftest-cli";
 /// In self-test mode, the command line's endpoint called over HTTP as the command line calls it, once
 /// the page has attached (see `cliTest` in app.js); null otherwise. What it found: `file`, what
 /// `cli.json` holds (its keys, its mode on Unix, whether its pid and port are this app's and endpoint's
-/// and its token one, its version, `launchedBy`, `ready`); `health`, the statuses `/health` answers
+/// and its token one, its version, `launchedBy`, `ready`, `quitting`); `health`, the statuses `/health` answers
 /// without the token, with a wrong one and with it (and its answer then), and with it and the page's
 /// marker or a web page's `Origin`; `show`, what `/app/show` answers without the token; `done`,
 /// `/app/done` twice with it (an app the user started goes on); `mcp`, `/mcp` without the token, and
@@ -639,6 +716,7 @@ fn selftest_client(data: &Path, port: u16) -> Res<Value> {
         "file": {
             "keys": keys, "mode": mode, "format": raw["format"], "pid": file.pid == std::process::id(), "port": file.port == port,
             "token": token.starts_with(smedcover_core::mcp::token::PREFIX), "version": file.version, "launchedBy": file.launched_by.as_str(), "ready": file.ready,
+            "quitting": file.quitting,
         },
         "health": health, "show": show, "done": done,
         "mcp": {"none": none, "tools": tools, "context": {"isError": context["isError"], "profiles": context["structuredContent"]["profiles"].as_array().map_or(0, Vec::len)}},
@@ -691,8 +769,9 @@ mod tests {
         assert_eq!((theirs.done(), theirs.done(), theirs.quitting()), (None, None, false));
     }
 
-    /// A second launch on a folder whose app is quitting (its lock held, no cli.json) waits for the lock
-    /// and takes it; one whose app runs and says where defers to it; one past its wait gives up.
+    /// A second launch on a folder whose app is starting or exiting (its lock held, no cli.json) waits
+    /// for the lock and takes it; one whose app runs and says where, quitting or not, defers to it; one
+    /// past its wait gives up.
     #[test]
     fn a_launch_takes_the_lock_or_defers_to_the_app_that_holds_it() {
         let (cli, user) = (Launch { cli: true }, Launch { cli: false });
@@ -708,7 +787,7 @@ mod tests {
         assert!(matches!(take_or_defer(&data, cli, Duration::from_millis(300)), Taken::Exit(EXIT_ALREADY_RUNNING, None)));
         assert!(t0.elapsed() >= Duration::from_millis(300), "it waited");
         assert!(matches!(take_or_defer(&data, user, Duration::from_millis(200)), Taken::Exit(1, Some(_))));
-        // held, the other quitting: let go in a moment, and taken
+        // held, the other exiting: let go in a moment, and taken
         let quitting = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(300));
             drop(first);
@@ -718,9 +797,10 @@ mod tests {
             other => panic!("{other:?}"),
         };
         quitting.join().unwrap();
-        // held by an app whose cli.json says where it listens: the command line's launch defers at once
+        // held by an app whose cli.json says where it listens (quitting: it is usable all the same): the
+        // command line's launch defers at once
         let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        let file = CliFile { pid: std::process::id(), port, token: Secret::generate().unwrap(), version: VERSION.into(), launched_by: LaunchedBy::User, ready: true };
+        let file = CliFile { pid: std::process::id(), port, token: Secret::generate().unwrap(), version: VERSION.into(), launched_by: LaunchedBy::User, ready: true, quitting: true };
         file.save(&data).unwrap();
         let t0 = Instant::now();
         assert!(matches!(take_or_defer(&data, cli, Duration::from_secs(5)), Taken::Exit(EXIT_ALREADY_RUNNING, None)));
@@ -728,6 +808,46 @@ mod tests {
         // the user's asks it to show its window: nothing answers on that port, so it gives up after its wait
         assert!(matches!(take_or_defer(&data, user, Duration::from_millis(300)), Taken::Exit(1, Some(_))));
         drop(second);
+    }
+
+    /// The quiet an app that is to quit waits for: no call in hand, and 2 s with no request, counted from
+    /// the last request or from when it was told, whichever came later.
+    #[test]
+    fn the_quiet_before_quitting() {
+        let told = Instant::now();
+        let s = |n: u64| Duration::from_millis(n);
+        assert!(!quiet(told, told, None, 0), "not at once");
+        assert!(!quiet(told + s(1999), told, None, 0));
+        assert!(quiet(told + s(2000), told, None, 0), "2 s after it was told, no request since");
+        // a request before it was told counts from when it was told
+        assert!(quiet(told + s(2000), told, Some(told - s(500)), 0));
+        // one after puts it off, from that request
+        assert!(!quiet(told + s(3000), told, Some(told + s(1500)), 0));
+        assert!(quiet(told + s(3500), told, Some(told + s(1500)), 0));
+        // a call in hand, however long ago the last request
+        assert!(!quiet(told + s(60_000), told, Some(told), 1));
+        assert!(!quiet(told + s(60_000), told, None, 3));
+        // a clock that seems to go back (an Instant does not, but saturating) is not quiet
+        assert!(!quiet(told, told + s(10), None, 0));
+    }
+
+    /// The command line done (by /app/done, or by its standard input's end: the same `finish`) quits
+    /// its app once, the user shown the window meanwhile keeps it, and the user's app never quits for
+    /// the command line, however it says it is done.
+    #[test]
+    fn done_and_stdins_end_are_the_same_and_the_users_app_stays() {
+        for _how in ["/app/done", "stdin's end"] {
+            let mut life = Lifecycle::new(LaunchedBy::Cli);
+            assert_eq!(life.done(), Some(true));
+            assert!(life.quitting());
+            // the other way of saying it as well (the command line closes its stdin after /app/done)
+            assert_eq!(life.done(), Some(false), "begun once");
+            assert!(life.shown(), "shown while it waited to quit");
+            assert!(!life.quitting(), "the quitting put off for good");
+            assert_eq!(life.done(), None);
+        }
+        let mut theirs = Lifecycle::new(LaunchedBy::User);
+        assert_eq!((theirs.done(), theirs.quitting()), (None, false));
     }
 
     #[test]

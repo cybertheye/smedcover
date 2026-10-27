@@ -9120,7 +9120,7 @@ async function mcpTest() {
 /**
  * The command line's endpoint called over real HTTP, once the page has attached (selftest_cli in cli.rs): cli.json in the
  * data folder, only its owner's on Unix, of the contract's shape (format 1, this app's pid and the endpoint's port, a
- * token, the app's version, launched by the user, ready); /health refused without the token and with a wrong one (401),
+ * token, the app's version, launched by the user, ready, not quitting); /health refused without the token and with a wrong one (401),
  * with the page's marker or a web page's Origin (403), answering with it (ready, no setup needed); /app/show refused
  * without it; /app/done, twice, leaving an app the user started running; and through its /mcp, initialize, tools/list and
  * get_context, refused without the token, the client not among those Settings → Agents shows but in the command line's
@@ -9131,9 +9131,9 @@ async function cliTest() {
   if (!m) return undefined;
   const r = { ...m, errors: [] }, no = (e) => r.errors.push(e), f = m.file, h = m.health;
   const desktop = toolsJson().tools.filter((d) => d["x-smedcover"].hosts.includes("desktop")).length;
-  if ([...f.keys].sort().join(",") !== "format,launchedBy,pid,port,ready,token,version") no(`cli.json holds ${f.keys.join(", ")}`);
+  if ([...f.keys].sort().join(",") !== "format,launchedBy,pid,port,quitting,ready,token,version") no(`cli.json holds ${f.keys.join(", ")}`);
   if (f.mode !== null && f.mode !== 0o600) no(`cli.json's mode is ${f.mode.toString(8)}, not 600`);
-  if (f.format !== 1 || !f.pid || !f.port || !f.token || f.launchedBy !== "user" || f.ready !== true) no(`cli.json says ${JSON.stringify(f)}`);
+  if (f.format !== 1 || !f.pid || !f.port || !f.token || f.launchedBy !== "user" || f.ready !== true || f.quitting !== false) no(`cli.json says ${JSON.stringify(f)}`);
   if (h.none !== 401 || h.wrong !== 401 || h.right !== 200) no(`/health answered ${h.none} without the token, ${h.wrong} with a wrong one, ${h.right} with it (not 401, 401, 200)`);
   if (h.marker !== 403 || h.origin !== 403) no(`/health answered ${h.marker} with the page's marker, ${h.origin} with a web page's Origin (not 403)`);
   if (!h.body || h.body.name !== "smedcover" || h.body.version !== f.version || h.body.ready !== true || h.body.needsSetup !== false) no(`/health said ${JSON.stringify(h.body)}`);

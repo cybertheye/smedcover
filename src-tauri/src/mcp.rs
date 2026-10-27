@@ -132,8 +132,9 @@ impl McpHost {
     /// The endpoint of the data folder `data`, its tools read from the app's own `tools.json`, its
     /// settings from `mcp.json`; started if it is on, a page said to be on its way, the window told to
     /// keep drawing unseen while it runs, and the page told each change. `selftest`: the app runs a
-    /// self-test (see [`SelfTest`]).
-    pub fn open(app: &AppHandle, data: PathBuf, selftest: Option<SelfTest>) -> Res<Arc<McpHost>> {
+    /// self-test (see [`SelfTest`]); `for_cli`: the app was launched for the command line (see
+    /// [`McpHost::new`]).
+    pub fn open(app: &AppHandle, data: PathBuf, selftest: Option<SelfTest>, for_cli: bool) -> Res<Arc<McpHost>> {
         let tools = match app.asset_resolver().get("tools.json".to_string()) {
             Some(asset) => String::from_utf8(asset.bytes.to_vec()).map_err(err).and_then(|text| ToolList::from_json(&text, Host::Desktop)),
             None => Err("tools.json is not among the app's files".to_string()),
@@ -144,7 +145,7 @@ impl McpHost {
         }));
         let window = app.clone();
         let runtime = tauri::async_runtime::handle().inner().clone();
-        let host = McpHost::new(data, tools, selftest, runtime, Box::new(move |running| keep_drawing(&window, running)))?;
+        let host = McpHost::new(data, tools, selftest, for_cli, runtime, Box::new(move |running| keep_drawing(&window, running)))?;
         tauri::async_runtime::spawn(host.clone().tell_page());
         Ok(host)
     }
@@ -152,8 +153,11 @@ impl McpHost {
     /// The host itself, without Tauri: `runtime` serves the endpoint, `on_running` is told whether it
     /// runs at each change. An `mcp.json` that cannot be read leaves it off, saying why (`config`):
     /// each change of the settings reads it again first, and none is saved over it while it cannot be
-    /// read.
-    pub fn new(data: PathBuf, tools: Arc<ToolList>, selftest: Option<SelfTest>, runtime: Handle, on_running: OnRunning) -> Res<Arc<McpHost>> {
+    /// read. `for_cli`: the app is the command line's, launched for it and not seen: the endpoint for
+    /// agents is not started, though on, till the app is the user's ([`McpHost::set_for_cli`]) — no
+    /// agent is to drive a window no one sees, and the command line's app does not wait for agents
+    /// before it quits.
+    pub fn new(data: PathBuf, tools: Arc<ToolList>, selftest: Option<SelfTest>, for_cli: bool, runtime: Handle, on_running: OnRunning) -> Res<Arc<McpHost>> {
         let (mut cfg, trouble) = match McpConfig::load(&data) {
             Ok(cfg) => (cfg, None),
             Err(e) => (McpConfig::new()?, Some(Trouble::Config(e))),
@@ -174,7 +178,7 @@ impl McpHost {
         let server = McpServer::new(gated, tools.clone(), access.clone(), stats.clone());
         let start = match (ours, &trouble) {
             (true, _) => Some(0),
-            (false, None) => (cfg.on && selftest.is_none_or(|s| s == SelfTest::Stay)).then_some(cfg.port),
+            (false, None) => (cfg.on && !for_cli && selftest.is_none_or(|s| s == SelfTest::Stay)).then_some(cfg.port),
             (false, Some(_)) => None,
         };
         let host = Arc::new(McpHost {
@@ -195,7 +199,7 @@ impl McpHost {
             cli: Mutex::new(None),
             cli_stats: Arc::new(Stats::new()),
             setup: watch::Sender::new(false),
-            for_cli: AtomicBool::new(false),
+            for_cli: AtomicBool::new(for_cli),
         });
         if let Some(port) = start {
             let mut s = host.lock();
@@ -295,9 +299,17 @@ impl McpHost {
     }
 
     /// Whether the app is the command line's (started for it, and not shown to the user since): the
-    /// window then keeps drawing unseen, and the app is kept awake, for as long as it is.
+    /// window then keeps drawing unseen, and the app is kept awake, for as long as it is. No longer
+    /// the command line's, the endpoint for agents starts if it is on (it was held back).
     pub fn set_for_cli(&self, on: bool) {
-        self.for_cli.store(on, Ordering::SeqCst);
+        let was = self.for_cli.swap(on, Ordering::SeqCst);
+        if was && !on && !self.selftest {
+            let mut s = self.lock();
+            if s.cfg.on && s.running.is_none() && !s.switching && s.trouble.is_none() {
+                let port = s.cfg.port;
+                self.bind(&mut s, port);
+            }
+        }
         self.changed();
     }
 
@@ -1202,7 +1214,7 @@ mod tests {
     // ---- switching the endpoint, the token
 
     fn host(data: &Path) -> Arc<McpHost> {
-        McpHost::new(data.to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), None, Handle::current(), Box::new(|_| {})).unwrap()
+        McpHost::new(data.to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), None, false, Handle::current(), Box::new(|_| {})).unwrap()
     }
 
     fn free_port() -> u16 {
@@ -1339,7 +1351,7 @@ mod tests {
     async fn the_self_tests_endpoint_begins_as_by_default_and_follows_the_switch() {
         let dir = tempfile::tempdir().unwrap();
         McpConfig { require_token: true, ..McpConfig::new().unwrap() }.save(dir.path()).unwrap();
-        let h = McpHost::new(dir.path().to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), Some(SelfTest::Mcp), Handle::current(), Box::new(|_| {})).unwrap();
+        let h = McpHost::new(dir.path().to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), Some(SelfTest::Mcp), false, Handle::current(), Box::new(|_| {})).unwrap();
         let s = h.status();
         assert_eq!((s["state"].as_str(), s["requireToken"].as_bool(), s["on"].as_bool()), (Some("running"), Some(false), Some(false)));
         assert!(wants(&h).is_none());
@@ -1453,7 +1465,29 @@ mod tests {
     fn host_with_a_tool(data: &Path) -> Arc<McpHost> {
         let tools = r#"{"format": 1, "tools": [{"name": "get_context", "description": "What there is.", "inputSchema": {"type": "object"}, "annotations": {"readOnlyHint": true}}]}"#;
         let tools = Arc::new(ToolList::from_json(tools, Host::Desktop).unwrap());
-        McpHost::new(data.to_path_buf(), tools, None, Handle::current(), Box::new(|_| {})).unwrap()
+        McpHost::new(data.to_path_buf(), tools, None, false, Handle::current(), Box::new(|_| {})).unwrap()
+    }
+
+    /// In an app launched for the command line the endpoint for agents, though on, starts only once
+    /// the app is the user's.
+    #[tokio::test]
+    async fn the_agents_endpoint_waits_till_the_command_lines_app_is_the_users() {
+        let dir = tempfile::tempdir().unwrap();
+        let port = free_port();
+        McpConfig { on: true, port, ..McpConfig::new().unwrap() }.save(dir.path()).unwrap();
+        let h = McpHost::new(dir.path().to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), None, true, Handle::current(), Box::new(|_| {})).unwrap();
+        assert_eq!((h.status()["on"].as_bool(), h.running_port()), (Some(true), None), "on, not started");
+        assert!(!taken(port));
+        h.set_for_cli(true);
+        assert_eq!(h.running_port(), None, "still the command line's");
+        h.set_for_cli(false);
+        assert_eq!(h.running_port(), Some(port), "the user's now: started");
+        assert_eq!(h.status()["state"], "running");
+        h.shut().await;
+        // one the user started starts it with the app, as before
+        let theirs = McpHost::new(dir.path().to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), None, false, Handle::current(), Box::new(|_| {})).unwrap();
+        assert_eq!(theirs.running_port(), Some(port));
+        theirs.shut().await;
     }
 
     /// The page, played: each call it is given is answered with its tool's name.
