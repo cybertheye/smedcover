@@ -4,7 +4,9 @@
 //! `app.lock` is taken by the app as it starts, an exclusive lock on the file held for as long as it
 //! runs ([`AppLock::take`]); the system lets it go when the app ends, however it ends (quit, crashed,
 //! killed), so a lock that cannot be had means that another app runs on that folder now. The file
-//! holds nothing and is never taken away (two apps could then lock two files of the same name). A
+//! holds nothing and is never taken away (two apps could then lock two files of the same name); one
+//! this user may not write (made by a run under another account, `sudo`) is locked opened for reading,
+//! which the system's locks allow. A
 //! second app on the folder asks the first to show its window and quits; one started for the
 //! command line (`smedcover-app --cli`) quits with [`EXIT_ALREADY_RUNNING`] instead, and the command
 //! line uses the app that runs. A self-test's data folder is a folder of its own, so a self-test
@@ -14,15 +16,19 @@
 //! `crate::mcp::server`'s `AppControl`):
 //!
 //! ```json
-//! {"format": 1, "pid": 12345, "port": 51234, "token": "smc_…", "version": "0.3.1", "launchedBy": "user", "ready": true}
+//! {"format": 1, "pid": 12345, "port": 51234, "token": "smc_…", "version": "0.3.1", "launchedBy": "user", "ready": true, "quitting": false}
 //! ```
 //!
 //! `launchedBy` is `"cli"` for an app the command line started (hidden on macOS, quitting when the
 //! command line is done) and `"user"` for any other, or for one the user has since shown; `ready` says
-//! whether the window's page has attached, so that calls are taken. The app writes it once the
-//! endpoint listens, again whenever `ready` or `launchedBy` changes, and removes it when it quits as it
-//! should; it is written through a temporary file that then takes its place, and on Unix only its
-//! owner may read it (it holds the token). One that is left (the app crashed or was killed) is stale:
+//! whether the window's page has attached, so that calls are taken; `quitting`, that the command line
+//! that started the app is done with it, which quits once no call has come for a moment — another
+//! command line may still use it meanwhile, each request putting the quitting off, but is not to say
+//! it is done (one missing is `false`). The app writes it once the endpoint listens, again whenever
+//! `ready`, `launchedBy` or `quitting` changes, and removes it as it exits (only its own: [`remove_if`]);
+//! it is written through a temporary file of a name of its own, made new, that then takes its place,
+//! and on Unix only its owner may read it (it holds the token). One that is left (the app crashed or
+//! was killed) is stale:
 //! [`find`] takes a file for a running app only when its process is alive (on Unix; Windows is asked
 //! nothing, the endpoint telling) and its endpoint answers `/health`, with the token, as SmedCover's.
 
@@ -58,12 +64,17 @@ pub struct AppLock {
 
 impl AppLock {
     /// Takes the lock on `app.lock` in the data folder `data` (both made if they are not there):
-    /// `None` when another holds it, that is another app runs on that folder. An error when the file
-    /// cannot be had or the system cannot lock it (a file system without locks): the app then runs
-    /// without, as it did before there was a lock.
+    /// `None` when another holds it, that is another app runs on that folder. A file this user may not
+    /// write is locked opened for reading. An error when the file cannot be had at all or the system
+    /// cannot lock it (a file system without locks): the app then runs without, as it did before there
+    /// was a lock.
     pub fn take(data: &Path) -> Res<Option<AppLock>> {
         fs::create_dir_all(data).map_err(|e| format!("{LOCK_FILE}: {e}"))?;
-        let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(data.join(LOCK_FILE)).map_err(|e| format!("{LOCK_FILE}: {e}"))?;
+        let path = data.join(LOCK_FILE);
+        let file = match OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path) {
+            Ok(file) => file,
+            Err(e) => File::open(&path).map_err(|_| format!("{LOCK_FILE}: {e}"))?,
+        };
         match file.try_lock() {
             Ok(()) => Ok(Some(AppLock { _file: file })),
             Err(TryLockError::WouldBlock) => Ok(None),
@@ -115,6 +126,8 @@ pub struct CliFile {
     pub launched_by: LaunchedBy,
     /// Whether the window's page has attached and calls are taken.
     pub ready: bool,
+    /// Whether the command line that started the app is done with it (see the module's notes).
+    pub quitting: bool,
 }
 
 impl CliFile {
@@ -122,11 +135,12 @@ impl CliFile {
     pub fn to_json(&self) -> Value {
         json!({
             "format": CLI_FORMAT, "pid": self.pid, "port": self.port, "token": self.token.expose(), "version": self.version,
-            "launchedBy": self.launched_by.as_str(), "ready": self.ready,
+            "launchedBy": self.launched_by.as_str(), "ready": self.ready, "quitting": self.quitting,
         })
     }
 
-    /// The file read from its JSON: `None` for another format, or a field missing or not what it should be.
+    /// The file read from its JSON: `None` for another format, or a field missing or not what it should
+    /// be (`quitting` may be missing: `false`).
     pub fn from_json(value: &Value) -> Option<CliFile> {
         if value.get("format")?.as_u64()? != CLI_FORMAT {
             return None;
@@ -138,12 +152,12 @@ impl CliFile {
             version: value.get("version")?.as_str()?.to_string(),
             launched_by: LaunchedBy::parse(value.get("launchedBy")?.as_str()?)?,
             ready: value.get("ready")?.as_bool()?,
+            quitting: value.get("quitting").map_or(Some(false), Value::as_bool)?,
         })
     }
 
-    /// Saves it as `cli.json` in the data folder `data`, through a temporary file of a name that is
-    /// always the same (so the app writes it from one place at a time), readable by its owner alone on
-    /// Unix.
+    /// Saves it as `cli.json` in the data folder `data`, through a temporary file of a name of its own,
+    /// made new (never through a link put there), readable by its owner alone on Unix.
     pub fn save(&self, data: &Path) -> Res<()> {
         let text = serde_json::to_string_pretty(&self.to_json()).map_err(err)?;
         write_private(&data.join(CLI_FILE), format!("{text}\n").as_bytes()).map_err(|e| format!("{CLI_FILE}: {e}"))
@@ -191,6 +205,28 @@ impl CliFile {
     }
 }
 
+/// Removes `cli.json` from the data folder `data` if it is the process `pid`'s, or is not one at all:
+/// never another app's, which may have written its own since (an app that ran without the lock).
+pub fn remove_if(data: &Path, pid: u32) -> Res<()> {
+    match CliFile::load(data) {
+        Ok(Some(file)) if file.pid != pid => Ok(()),
+        _ => CliFile::remove(data),
+    }
+}
+
+/// An app launched for the command line is not stopped by the terminal the command line runs in:
+/// Ctrl-C (`SIGINT`, which a terminal sends its whole foreground group) and the terminal closing
+/// (`SIGHUP`) are ignored on Unix, the command line ending the app itself (`/app/done`, or its
+/// standard input). Elsewhere nothing is done.
+pub fn ignore_interrupts() {
+    #[cfg(unix)]
+    // SAFETY: setting a signal's disposition to "ignore" runs no code of ours on the signal
+    unsafe {
+        libc::signal(libc::SIGINT, libc::SIG_IGN);
+        libc::signal(libc::SIGHUP, libc::SIG_IGN);
+    }
+}
+
 /// The app running on the data folder `data`, as its `cli.json` says: `None` when there is none, or
 /// the file is stale (its process gone, or its endpoint not answering `/health` as SmedCover's with
 /// its token within `wait`). Blocking: the endpoint is asked over HTTP.
@@ -221,7 +257,7 @@ mod tests {
     use super::*;
 
     fn file(port: u16) -> CliFile {
-        CliFile { pid: std::process::id(), port, token: Secret::generate().unwrap(), version: "0.3.1".into(), launched_by: LaunchedBy::Cli, ready: false }
+        CliFile { pid: std::process::id(), port, token: Secret::generate().unwrap(), version: "0.3.1".into(), launched_by: LaunchedBy::Cli, ready: false, quitting: false }
     }
 
     #[test]
@@ -240,6 +276,21 @@ mod tests {
         assert!(data.join(LOCK_FILE).is_file(), "the file is left");
     }
 
+    /// A lock file this user may not write (left by a run under another account) is locked opened
+    /// for reading, and still keeps a second app off.
+    #[cfg(unix)]
+    #[test]
+    fn a_lock_file_that_cannot_be_written_is_locked_all_the_same() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(LOCK_FILE), "").unwrap();
+        fs::set_permissions(dir.path().join(LOCK_FILE), fs::Permissions::from_mode(0o444)).unwrap();
+        let first = AppLock::take(dir.path()).unwrap().expect("locked, read-only");
+        assert!(AppLock::take(dir.path()).unwrap().is_none(), "a second app kept off");
+        drop(first);
+        assert!(AppLock::take(dir.path()).unwrap().is_some());
+    }
+
     #[test]
     fn cli_json_is_written_read_and_removed() {
         let dir = tempfile::tempdir().unwrap();
@@ -250,16 +301,28 @@ mod tests {
         let saved: Value = serde_json::from_slice(&fs::read(data.join(CLI_FILE)).unwrap()).unwrap();
         assert_eq!(
             saved,
-            json!({"format": 1, "pid": std::process::id(), "port": 51234, "token": f.token.expose(), "version": "0.3.1", "launchedBy": "cli", "ready": false})
+            json!({"format": 1, "pid": std::process::id(), "port": 51234, "token": f.token.expose(), "version": "0.3.1", "launchedBy": "cli", "ready": false, "quitting": false})
         );
-        assert!(!data.join("cli.json.tmp").exists(), "written through a temporary file, then put in place");
+        let left: Vec<_> = fs::read_dir(data).unwrap().flatten().map(|e| e.file_name()).filter(|n| n.to_string_lossy().ends_with(".tmp")).collect();
+        assert!(left.is_empty(), "written through a temporary file, then put in place: {left:?}");
         let read = CliFile::load(data).unwrap().unwrap();
         assert_eq!((read.pid, read.port, read.version.as_str(), read.launched_by, read.ready), (f.pid, 51234, "0.3.1", LaunchedBy::Cli, false));
         assert!(read.token.matches(f.token.expose()));
         // rewritten as it changes
         CliFile { ready: true, launched_by: LaunchedBy::User, ..f.clone() }.save(data).unwrap();
         let read = CliFile::load(data).unwrap().unwrap();
-        assert!(read.ready && read.launched_by == LaunchedBy::User);
+        assert!(read.ready && read.launched_by == LaunchedBy::User && !read.quitting);
+        CliFile { quitting: true, ..f.clone() }.save(data).unwrap();
+        assert!(CliFile::load(data).unwrap().unwrap().quitting);
+        // removed only by the app it is: another's is left
+        remove_if(data, f.pid.wrapping_add(1)).unwrap();
+        assert!(data.join(CLI_FILE).exists(), "another app's");
+        remove_if(data, f.pid).unwrap();
+        assert!(!data.join(CLI_FILE).exists(), "its own");
+        fs::write(data.join(CLI_FILE), "not one").unwrap();
+        remove_if(data, f.pid).unwrap();
+        assert!(!data.join(CLI_FILE).exists(), "one that is not a cli.json");
+        f.save(data).unwrap();
         CliFile::remove(data).unwrap();
         assert!(!data.join(CLI_FILE).exists());
         CliFile::remove(data).unwrap();
@@ -272,7 +335,7 @@ mod tests {
         let data = dir.path();
         let good = file(40000).to_json();
         let mut cases: Vec<Value> = vec![json!([1, 2]), json!({})];
-        for (key, bad) in [("format", json!(2)), ("pid", json!(-1)), ("port", json!(0)), ("port", json!(70000)), ("token", json!("smc_short")), ("launchedBy", json!("agent")), ("ready", json!("yes")), ("version", json!(3))] {
+        for (key, bad) in [("format", json!(2)), ("pid", json!(-1)), ("port", json!(0)), ("port", json!(70000)), ("token", json!("smc_short")), ("launchedBy", json!("agent")), ("ready", json!("yes")), ("quitting", json!("yes")), ("version", json!(3))] {
             let mut v = good.clone();
             v[key] = bad;
             cases.push(v);
@@ -288,6 +351,10 @@ mod tests {
         assert!(CliFile::load(data).unwrap().is_none(), "not JSON");
         fs::write(data.join(CLI_FILE), good.to_string()).unwrap();
         assert!(CliFile::load(data).unwrap().is_some(), "the good one");
+        let mut older = good.clone();
+        older.as_object_mut().unwrap().remove("quitting");
+        fs::write(data.join(CLI_FILE), older.to_string()).unwrap();
+        assert!(CliFile::load(data).unwrap().is_some_and(|f| !f.quitting), "one without quitting: not quitting");
     }
 
     #[cfg(unix)]

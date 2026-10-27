@@ -1405,6 +1405,7 @@ struct FakeApp {
     shown: AtomicU64,
     done: AtomicU64,
     needs_setup: AtomicBool,
+    requests: AtomicU64,
 }
 
 impl AppControl for FakeApp {
@@ -1422,6 +1423,10 @@ impl AppControl for FakeApp {
     fn done(&self) -> Value {
         let n = self.done.fetch_add(1, Ordering::SeqCst);
         json!({"ok": true, "exiting": true, "asked": n + 1})
+    }
+
+    fn request(&self) {
+        self.requests.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -1458,6 +1463,7 @@ async fn the_command_lines_routes_want_the_token() {
         assert_eq!(http(method, &url(path), wrong.clone(), (method == "POST").then(String::new)).await.status, 401, "{method} {path} with a wrong one");
     }
     assert_eq!((app.shown.load(Ordering::SeqCst), app.done.load(Ordering::SeqCst)), (0, 0), "nothing was asked of the app");
+    assert_eq!(app.requests.load(Ordering::SeqCst), 0, "a request refused is not a command line at work");
     // with it: /health says whether calls are taken and whether the app needs setting up
     let health = get(&url("/health"), auth.clone()).await;
     assert_eq!(health.status, 200);
@@ -1475,6 +1481,7 @@ async fn the_command_lines_routes_want_the_token() {
         assert_eq!(serde_json::from_str::<Value>(&done.body).unwrap()["asked"], n, "each one reaches the app, which answers each");
     }
     assert_eq!((app.shown.load(Ordering::SeqCst), app.done.load(Ordering::SeqCst)), (1, 2));
+    assert_eq!(app.requests.load(Ordering::SeqCst), 5, "each request with the token told: two /health, a show, two done");
     // only their own methods
     assert_eq!(get(&url("/app/done"), auth.clone()).await.status, 405);
     assert_eq!(http("POST", &url("/health"), auth.clone(), Some(String::new())).await.status, 405);
@@ -1491,6 +1498,7 @@ async fn the_command_lines_routes_want_the_token() {
     let listed = http("POST", &url("/mcp"), json_headers(auth.clone()), Some(list.clone())).await;
     assert_eq!(listed.status, 200, "{}", listed.body);
     assert!(listed.only()["result"]["tools"].as_array().is_some_and(|t| !t.is_empty()));
+    assert_eq!(app.requests.load(Ordering::SeqCst), 8, "and /mcp's, the two with another method (405) but the token among them");
     assert_eq!(http("POST", &url("/mcp"), json_headers(vec![]), Some(list)).await.status, 401);
     assert!(running.stop(Duration::from_secs(2)).await);
 }
@@ -1508,7 +1516,7 @@ async fn the_command_lines_endpoint_lets_no_one_in_without_a_token() {
 }
 
 fn cli_file(running: &Running, token: &Secret) -> CliFile {
-    CliFile { pid: std::process::id(), port: running.addr().port(), token: token.clone(), version: VERSION.into(), launched_by: LaunchedBy::Cli, ready: true }
+    CliFile { pid: std::process::id(), port: running.addr().port(), token: token.clone(), version: VERSION.into(), launched_by: LaunchedBy::Cli, ready: true, quitting: false }
 }
 
 /// A `cli.json` is taken for a running app's only while its endpoint answers `/health` as

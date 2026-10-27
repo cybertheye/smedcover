@@ -63,11 +63,15 @@ mod tests {
     #[test]
     fn the_data_folder_is_a_self_tests_else_the_one_given_else_the_apps() {
         let own = desktop_data_dir();
+        // absolute on every system (a path from / is not on Windows)
+        let base = std::env::temp_dir();
+        let (st, elsewhere, given) = (base.join("st"), base.join("elsewhere"), base.join("smedcover-data"));
+        assert!(st.is_absolute());
         assert_eq!(data_dir_from(None, None), own);
-        assert_eq!(data_dir_from(Some("/tmp/st".into()), Some("/elsewhere".into())), Some(PathBuf::from("/tmp/st/data")), "a self-test's first");
+        assert_eq!(data_dir_from(Some(st.clone().into()), Some(elsewhere.into())), Some(st.join("data")), "a self-test's first");
         assert_eq!(data_dir_from(Some("relative/st".into()), None), own, "a self-test's folder only when absolute");
-        assert_eq!(data_dir_from(None, Some("/srv/smedcover".into())), Some(PathBuf::from("/srv/smedcover")));
-        assert_eq!(data_dir_from(Some("st".into()), Some("/srv/smedcover".into())), Some(PathBuf::from("/srv/smedcover")));
+        assert_eq!(data_dir_from(None, Some(given.clone().into())), Some(given.clone()));
+        assert_eq!(data_dir_from(Some("st".into()), Some(given.clone().into())), Some(given));
         assert_eq!(data_dir_from(None, Some("".into())), own, "an empty one is not there");
         let relative = data_dir_from(None, Some("some/folder".into())).unwrap();
         assert!(relative.is_absolute() && relative.ends_with("some/folder"), "taken from the folder started in: {relative:?}");

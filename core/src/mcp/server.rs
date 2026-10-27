@@ -185,10 +185,7 @@ pub const ERROR_META: &str = "smedcover/error";
 /// code: `busy`, `invalid_arguments`, `not_allowed`, `unavailable`, `failed`, and the desktop's
 /// `needs_setup` (the app waits on its first start's welcome).
 pub fn error_kind(e: &BridgeError) -> &str {
-    match e {
-        BridgeError::PageGone(_) => "gone",
-        other => other.code(),
-    }
+    e.code()
 }
 
 /// The tool error a call that could not be answered is answered with: the text the agent is told,
@@ -253,6 +250,9 @@ pub trait AppControl: Send + Sync + 'static {
     /// page has to write written first), unless it is the user's by then; asked again, the same. The
     /// answer.
     fn done(&self) -> Value;
+    /// A request showing the token reached one of the endpoint's routes (`/mcp`, `/health`, `/app/…`):
+    /// a command line is at work (one quitting, the app waits for them to be quiet).
+    fn request(&self) {}
 }
 
 /// The endpoint, ready to be started (and started again, on another port or after being stopped).
@@ -324,10 +324,11 @@ impl McpServer {
             None => Gate { access: self.access.clone(), open_allowed: self.tools.host() == Host::Desktop, found_in: "shown in its MCP settings" },
             Some(_) => Gate { access: self.access.clone(), open_allowed: false, found_in: "in its data folder's cli.json" },
         };
-        let mcp = Router::new()
-            .route_service("/mcp", mcp)
-            .route_layer(from_fn_with_state(front, read_body))
-            .route_layer(from_fn_with_state(gate.clone(), bearer));
+        let mut mcp = Router::new().route_service("/mcp", mcp).route_layer(from_fn_with_state(front, read_body));
+        if let Some(app) = &self.app {
+            mcp = mcp.route_layer(from_fn_with_state(app.clone(), noted));
+        }
+        let mcp = mcp.route_layer(from_fn_with_state(gate.clone(), bearer));
         let rest = match &self.app {
             None => Router::new().route("/health", get(health)).with_state(self.bridge.clone()),
             Some(app) => Router::new()
@@ -335,6 +336,7 @@ impl McpServer {
                 .route("/app/show", post(app_show))
                 .route("/app/done", post(app_done))
                 .with_state(AppRoutes { bridge: self.bridge.clone(), app: app.clone() })
+                .route_layer(from_fn_with_state(app.clone(), noted))
                 .route_layer(from_fn_with_state(gate, bearer)),
         };
         rest.merge(mcp).layer(from_fn(loopback_only))
@@ -1007,6 +1009,13 @@ async fn app_health(State(routes): State<AppRoutes>) -> Json<Value> {
     let mut answer = json!({"name": SERVER_NAME, "version": VERSION, "page": page.as_str(), "ready": matches!(page, super::PageState::Ready { .. })});
     answer.as_object_mut().expect("an object").extend(routes.app.health());
     Json(answer)
+}
+
+/// Tells the app each request that reached the command line's routes, the token shown (it is inside
+/// the layer that wants the token).
+async fn noted(State(app): State<Arc<dyn AppControl>>, request: Request, next: Next) -> Response {
+    app.request();
+    next.run(request).await
 }
 
 async fn app_show(State(routes): State<AppRoutes>) -> Json<Value> {

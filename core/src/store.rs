@@ -7,7 +7,13 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::{err, Res};
 
-/// Resolves `rel` inside `root`, refusing absolute paths and any `..` component.
+/// The data folder's files that are Rust's alone, which the page's store never reads, writes or
+/// deletes: the agents' settings and token, the command line's file and its token, the folder's
+/// lock (and their temporary files, `<name>.<…>`).
+pub const RUST_ONLY: [&str; 3] = ["mcp.json", "cli.json", "app.lock"];
+
+/// Resolves `rel` inside `root`, refusing absolute paths, any `..` component, and the files that are
+/// Rust's alone ([`RUST_ONLY`], in any case, as a file system may not tell cases apart).
 pub fn resolve(root: &Path, rel: &str) -> Res<PathBuf> {
     let rel_path = Path::new(rel);
     let safe = !rel.is_empty()
@@ -16,6 +22,13 @@ pub fn resolve(root: &Path, rel: &str) -> Res<PathBuf> {
             .all(|c| matches!(c, Component::Normal(_)));
     if !safe {
         return Err(format!("invalid path: {rel}"));
+    }
+    let mut parts = rel_path.components();
+    if let (Some(Component::Normal(first)), None) = (parts.next(), parts.next()) {
+        let name = first.to_string_lossy().to_lowercase();
+        if RUST_ONLY.iter().any(|own| name == *own || name.starts_with(&format!("{own}."))) {
+            return Err(format!("not allowed: {rel} is SmedCover's own"));
+        }
     }
     Ok(root.join(rel_path))
 }
@@ -77,6 +90,13 @@ mod tests {
         assert_eq!(resolve(root, "a/./b").unwrap(), root.join("a/b"));
         for bad in ["", "../x", "a/../../x", "a/..", "/etc/passwd", "./x"] {
             assert!(resolve(root, bad).is_err(), "{bad} should be rejected");
+        }
+        // Rust's own files, whatever their case, and their temporary files
+        for own in ["mcp.json", "cli.json", "app.lock", "CLI.json", "Mcp.Json", "cli.json.0123456789abcdef.tmp", "mcp.json.bad", "a/../cli.json"] {
+            assert!(resolve(root, own).is_err(), "{own} should be refused");
+        }
+        for fine in ["profiles/cli.json", "cli.json5", "my-mcp.json", "fonts/app.lock.font"] {
+            assert!(resolve(root, fine).is_ok(), "{fine} is the page's");
         }
     }
 
