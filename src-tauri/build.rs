@@ -25,5 +25,31 @@ fn main() {
     hash_dir(Path::new("../ui"), &mut h);
     println!("cargo:rustc-env=SMEDCOVER_UI_BUILD={h:016x}");
     println!("cargo:rerun-if-changed=../ui");
+    without_sidecar();
     tauri_build::build()
+}
+
+/// Hands tauri-build the configuration without `bundle.externalBin`. The command line, `smedcover`, is in the installers
+/// beside the app (tauri.conf.json's `bundle.externalBin`): `scripts/sidecar.mjs`, run before `tauri build`, builds it
+/// into `binaries/smedcover-<target triple>`, which the bundler takes from there itself. tauri-build would copy that
+/// file too, into `target/<profile>/` for `tauri dev`, and that cannot be: plain cargo (`cargo test --workspace`, `cargo
+/// build`) has no such file, and tauri-build fails without it; `target/<profile>/smedcover` is where cargo puts the
+/// command line it builds, which a copy of another build's would replace (the command line's tests run that file); and
+/// tauri-build refuses a sidecar of this package's name (`smedcover`). So it is not told of it: `TAURI_CONFIG`, which it
+/// merges into the configuration as a JSON merge patch (`tauri build --config`'s, when given), is given one that takes
+/// `externalBin` out, the rest of it as it was. The app finds the command line beside its executable either way
+/// (install.rs). A `TAURI_CONFIG` that is not a JSON object is left for tauri-build to refuse.
+fn without_sidecar() {
+    let mut patch = match std::env::var("TAURI_CONFIG") {
+        Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(v) if v.is_object() => v,
+            _ => return,
+        },
+        Err(_) => serde_json::json!({}),
+    };
+    if !patch["bundle"].is_object() {
+        patch["bundle"] = serde_json::json!({});
+    }
+    patch["bundle"]["externalBin"] = serde_json::Value::Null;
+    std::env::set_var("TAURI_CONFIG", patch.to_string());
 }

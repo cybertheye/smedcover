@@ -18,6 +18,8 @@ path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# build.rs hands tauri-build the configuration without bundle.externalBin (see there).
+serde_json = { workspace = true }
 
 [dependencies]
 tauri = { version = "2", features = [] }

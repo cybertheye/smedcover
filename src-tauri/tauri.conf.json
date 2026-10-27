@@ -6,7 +6,7 @@
   "identifier": "com.cyven.smedcover",
   "build": {
     "frontendDist": "../ui",
-    "beforeBuildCommand": "npm run styles && npm run tools",
+    "beforeBuildCommand": "npm run styles && npm run tools && npm run sidecar",
     "beforeDevCommand": "npm run styles && npm run tools"
   },
   "app": {
@@ -40,6 +40,7 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": ["binaries/smedcover"]
   }
 }

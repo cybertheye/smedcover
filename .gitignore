@@ -2,5 +2,7 @@ node_modules/
 /target/
 src-tauri/target/
 src-tauri/gen/
+# the command line built for the installers (scripts/sidecar.mjs)
+src-tauri/binaries/
 .DS_Store
 .gstack/
