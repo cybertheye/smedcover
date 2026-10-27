@@ -30,7 +30,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -102,6 +102,8 @@ struct App {
     runtime: Handle,
     /// `cli.json` is written from one place at a time.
     writing: Mutex<()>,
+    /// When a request showing the token last came, to any route (`AppControl::request`), in ms since 1970.
+    last_request: AtomicU64,
 }
 
 impl App {
@@ -113,14 +115,11 @@ impl App {
             let life = self.life.lock().unwrap();
             (life.launched_by, life.quitting)
         };
-        let mut file = json!({
+        let text = json!({
             "format": 1, "pid": std::process::id(), "port": *self.port.lock().unwrap(), "token": self.token.expose(),
-            "version": self.version, "launchedBy": launched_by, "ready": self.ready.load(Ordering::SeqCst),
-        });
-        if quitting {
-            file["quitting"] = json!(true);
-        }
-        let text = file.to_string();
+            "version": self.version, "launchedBy": launched_by, "ready": self.ready.load(Ordering::SeqCst), "quitting": quitting,
+        })
+        .to_string();
         let tmp = self.data.join(format!("cli.json.{}.tmp", std::process::id()));
         let mut options = fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
@@ -161,15 +160,16 @@ impl App {
         true
     }
 
-    /// Quits once no call is in hand and none has come for 2 s, from the last request or `since`; not once it is the
-    /// user's.
+    /// Quits once no call is in hand and nothing has come for 2 s, from the latest of the last request (to any route,
+    /// `/health` too), the end of the last call (a client is seen at it) and `since`, when it was told; not once it is
+    /// the user's.
     async fn quit_when_idle(&self, since: u64, why: &str) {
         loop {
             if !self.life.lock().unwrap().quitting {
                 return;
             }
             let seen = self.stats.snapshot();
-            let last = seen.clients.iter().map(|c| c.last_seen).chain([since]).max().unwrap_or(since);
+            let last = seen.clients.iter().map(|c| c.last_seen).chain([since, self.last_request.load(Ordering::SeqCst)]).max().unwrap_or(since);
             if self.in_hand.load(Ordering::SeqCst) == 0 && seen.in_flight == 0 && now_ms().saturating_sub(last) >= QUIET_FOR_MS {
                 break;
             }
@@ -196,6 +196,10 @@ impl AppControl for Control {
         *self.0.life.lock().unwrap() = Life { launched_by: "user", quitting: false };
         self.0.write_cli_json();
         json!({"ok": true, "launchedBy": "user"})
+    }
+
+    fn request(&self) {
+        self.0.last_request.store(now_ms(), Ordering::SeqCst);
     }
 
     fn done(&self) -> Value {
@@ -256,6 +260,7 @@ async fn serve(data: PathBuf, for_cli: bool, modes: Modes) -> ! {
         in_hand: in_hand.clone(),
         runtime: Handle::current(),
         writing: Mutex::new(()),
+        last_request: AtomicU64::new(0),
     });
     let page = Arc::new(FakePage { data: data.clone(), schemas, modes, ready: ready.clone(), in_hand });
     let server = McpServer::new(page, list, Arc::new(RwLock::new(Access::Token(secret))), stats).with_app(Arc::new(Control(app.clone())));

@@ -3,7 +3,7 @@
 //!
 //! - While the app runs it serves its tools on a port of its own for the command line, wanting a token of its own,
 //!   and says where in `cli.json` in the data folder: `{"format": 1, "pid", "port", "token", "version", "launchedBy":
-//!   "user" | "cli", "ready", "quitting"?}`, readable by its owner alone. `GET /health` there (with the token) says `{"name":
+//!   "user" | "cli", "ready", "quitting"}`, readable by its owner alone. `GET /health` there (with the token) says `{"name":
 //!   "smedcover", "version", "page", "ready", "needsSetup"}`. A `cli.json` whose process is gone, whose port refuses,
 //!   or whose `/health` is not SmedCover's with that token is stale: no app. One that is not the user's own, or that
 //!   others may read, is not taken at all.
