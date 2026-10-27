@@ -893,6 +893,8 @@ To time how soon things show after the start instead, add `SMEDCOVER_SELFTEST_PE
 
 `SMEDCOVER_SELFTEST_AGENT=1` has the self-test call the agents' tools too, and `SMEDCOVER_SELFTEST_MCP=1` with it the app's own MCP endpoint, over HTTP: without a token, as by default, then with a token required, and back (`mcp` in `report.json`); and the command line's endpoint, which every app runs, with its token and without (`cli`). `SMEDCOVER_SELFTEST_STAY=1` runs no self-test: the app keeps its data in that folder and otherwise runs as usual, its window open — a way to try things by hand, the endpoint among them, without touching your data. With it, `smedcover-app --cli` is the app as the command line starts it, its window hidden on macOS, quitting when its standard input closes; `SMEDCOVER_SELFTEST_WELCOME=1` as well starts an empty folder at the first start's welcome rather than with the sample profile.
 
+`SMEDCOVER_DATA=/a/folder` gives the app another data folder than its own, for any launch, the normal one too (the command line sets it for its `--data`); the self-test's folder still comes first. Keep it a folder that only you can write in: the app's lock, the command line's `cli.json` and the tokens are kept there.
+
 `.github/workflows/build.yml` builds installers on GitHub Actions (it has not been run yet): macOS for Apple silicon and for Intel, separately (`.dmg`, `.app.tar.gz`), Windows x64 (`.exe`, `.msi`), Linux x64 (`.deb`, `.rpm`, `.AppImage`).
 
 ## To do
