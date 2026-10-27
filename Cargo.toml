@@ -60,6 +60,9 @@ libc = "0.2"
 # On Windows the endpoint's port is bound for SmedCover alone (SO_EXCLUSIVEADDRUSE).
 socket2 = "0.6"
 windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
+# On Windows the command line is put on the user's PATH in the registry (the same crate and version the Windows build of
+# the app's resources already brings).
+winreg = "0.56"
 # The HTTP tests call the endpoint as rmcp's own client does, in both eras (over plain HTTP: no TLS).
 reqwest = { version = "0.13", default-features = false }
 # The command line's arguments (without colours, which it does not use), and its Ctrl-C, which cancels the call under

@@ -2966,9 +2966,11 @@ const CAN_AGENTS = HOST === "tauri";
 /**
  * What the page keeps of it besides the status (agent.js's MCP, sent by the host as it changes): the token once read
  * (shown or not: hidden again whenever the page is left, see renderPanel), the port being typed (null: the one in
- * force), a switch on its way, whether they were read, and why they could not be.
+ * force), a switch on its way, whether they were read, and why they could not be; and of the command line (cliCard)
+ * its status, whether it was read since the page was shown, an install or uninstall on its way, and whether the last
+ * one's password prompt was cancelled.
  */
-const AGENTS = { token: "", show: false, port: null, busy: false, read: false, error: "" };
+const AGENTS = { token: "", show: false, port: null, busy: false, read: false, error: "", cli: null, cliSeen: false, cliBusy: false, cliCancelled: false };
 const isPort = (v) => /^\d+$/.test(String(v).trim()) && +v >= 1024 && +v <= 65535;
 /** The status and the token, read once, as the page first shows (later statuses come by themselves); on failure, why, to try again. */
 async function agentsRead() {
@@ -3076,6 +3078,51 @@ function mcpSeen(s) {
         el("span", {}, last ? [t("mcp.last", last.tool, ago(last.at)), " · ", el("b", { class: last.ok ? "ok" : "bad" }, t(last.ok ? "mcp.ok" : "mcp.failed"))] : t("mcp.lastNone"))),
       s.toolsMismatch && el("div", { class: "hint err" }, t("mcp.mismatch"))));
 }
+// the command line, smedcover, put on the PATH (install.rs in the app): its card, the page's last
+/** The command line's status, read as the page is shown (each time: what is in /usr/local/bin may have changed meanwhile) and after a failed install or uninstall; a host without it has no card. */
+async function cliRead() {
+  try { AGENTS.cli = await invoke("cli_status"); } catch { AGENTS.cli = null; }
+  AGENTS.cliCancelled = false;
+  if (S.mode === "setup" && S.tab.setup === "agents") renderPanel();
+}
+/** Installs or uninstalls it (`cmd`: cli_install, cli_uninstall), the administrator's prompt in the page's language; the prompt cancelled is said on the card alone (not installed, cancelled), a failure as others are. */
+async function cliDo(cmd) {
+  if (AGENTS.cliBusy) return;
+  AGENTS.cliBusy = true; renderPanel();
+  try {
+    const s = await invoke(cmd, { prompt: t(cmd === "cli_install" ? "cli.prompt" : "cli.promptOff") });
+    AGENTS.cli = s; AGENTS.cliCancelled = !!s.cancelled;
+    if (!s.cancelled) toast(t(cmd === "cli_install" ? "cli.done" : "cli.undone"));
+  } catch (e) { fail(e); cliRead(); }
+  AGENTS.cliBusy = false; renderPanel();
+}
+/** The card's pill and its light, for each state: installed green, another copy's amber, something not SmedCover's red, the others grey. */
+const CLI_PILL = { installed: "running", package: "running", elsewhere: "switching", foreign: "error" }, CLI_DOT = { running: " ok", switching: " busy", error: " err" };
+/**
+ * Settings → Agents' card for the command line: what it is; its state and a line on it — installed (on macOS a link in
+ * /usr/local/bin to this app's, on Windows the app's folder on the user's PATH, on Linux the package's), another copy's
+ * link (where it leads), something not SmedCover's in its place (what, left alone, said so), not installed (cancelled,
+ * quietly, when the password prompt was), nothing to install (a development build, an AppImage, a copy without it) —
+ * with Install, Use this copy or Uninstall as it allows; and the line to try it with, to copy.
+ */
+function cliCard() {
+  const c = AGENTS.cli;
+  if (!c) return null;
+  const k = c.state === "absent" && AGENTS.cliCancelled ? "cancelled" : c.state, os = c.os === "windows" ? "Win" : "Mac", pill = CLI_PILL[k] || "";
+  const what = c.what === "link" ? t("cli.what.link", c.to) : t("cli.what." + (c.what || "file"));
+  const says = { absent: t("cli.line.absent" + os, c.at), cancelled: t("cli.line.absent" + os, c.at), installed: t("cli.line.installed" + os, c.at), elsewhere: t("cli.line.elsewhere", c.at, c.to), foreign: t("cli.line.foreign", c.at, what),
+    package: t("cli.line.package", c.at), appimage: t("cli.line.appimage"), dev: t(c.there ? "cli.line.dev" : "cli.line.devNone", c.cli), missing: t("cli.line.missing") }[k] || "";
+  const acts = { absent: ["install"], installed: ["uninstall"], elsewhere: ["use", "uninstall"] }[c.state] || [];
+  return el("section", { class: "scard aicard", id: "set-cli" },
+    el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("cli.title")), el("small", {}, t("cli.sub"))),
+      el("span", { class: "mstate " + pill, role: "status", "aria-live": "polite" }, el("span", { class: "aidot" + (CLI_DOT[pill] || "") }), t("cli.state." + k))),
+    el("div", { class: "mrow" },
+      acts.map((a) => el("button", { class: "btn", disabled: AGENTS.cliBusy, onclick: () => cliDo(a === "uninstall" ? "cli_uninstall" : "cli_install") }, ico(a === "uninstall" ? "unlink" : "download", 15), t("cli." + a))),
+      el("div", { class: "hint" + (k === "foreign" ? " err" : "") }, says)),
+    el("div", { class: "mline" },
+      el("div", { class: "mlh" }, el("label", { class: "cap" }, t("cli.try")), el("button", { class: "linkbtn", "aria-label": t("mcp.copyWhat", t("cli.try")), onclick: () => copyText("smedcover --help") }, ico("copy", 15), t("mcp.copy"))),
+      el("pre", { class: "mcode" }, "smedcover --help")));
+}
 /** The parts of the page that follow the status as it comes (the pill, the line under the port, what was seen), drawn again in place, and the nav's light. */
 function agentsLive() {
   mcpLightSync();
@@ -3100,12 +3147,14 @@ onMcpStatus(agentsLive);
  * token must be set up again (a refusal, such as an mcp.json that cannot be read, said as other failures are, by fail());
  * while on, the token (hidden but for its end;
  * shown, copied, or replaced after asking); the lines that set an agent up, ready to copy (Claude Code, Codex, any other
- * client's JSON), with the token only while one is required; and the clients seen lately with the calls. What is kept is
- * mcp.json, Rust's: read and set through the mcp_* commands, never custom.json.
+ * client's JSON), with the token only while one is required; the clients seen lately with the calls; and the command
+ * line, put on the PATH from here (cliCard). What is kept is mcp.json, Rust's: read and set through the mcp_* commands,
+ * never custom.json.
  */
 function agentsTab() {
   const s = MCP.status, head = el("div", { class: "sh" }, el("b", {}, t("tab.agents")), el("span", {}, t("mcp.pageSub")));
   if (!AGENTS.error) agentsRead();   // after a failure, only when asked again
+  if (!AGENTS.cliSeen) { AGENTS.cliSeen = true; cliRead(); }   // again each time the page is shown (renderPanel)
   if (!s) {
     return [head, AGENTS.error
       ? el("div", { class: "mrow" }, el("div", { class: "hint err" }, t("mcp.readFailed", AGENTS.error)), el("button", { class: "btn", onclick: () => { AGENTS.error = ""; renderPanel(); } }, ico("reset", 15), t("mcp.retry")))
@@ -3144,6 +3193,7 @@ function agentsTab() {
       el("div", { class: "mlines" }, setupLines(url, wanted ? shown : null, ON_WINDOWS).map(row)),
       el("div", { class: "hint" }, t("mcp.proxy"))),
     mcpSeen(s),
+    cliCard(),
   ];
 }
 
@@ -8443,7 +8493,7 @@ addEventListener("pointerdown", () => { KEYFOCUS = null; }, true);
 function renderPanel() {
   if (!S.cover) return;
   if (S.mode === "setup" && stepping() && !SET_UI.follow) return;   // an agent's change under way: Settings' page is drawn once it is over, if it touched what the page shows (settingsFollow)
-  if (!(S.mode === "setup" && S.tab.setup === "agents")) AGENTS.show = false;   // the agents' token hidden again once its page is left
+  if (!(S.mode === "setup" && S.tab.setup === "agents")) { AGENTS.show = false; AGENTS.cliSeen = false; }   // the agents' token hidden again once its page is left, the command line's status read again as it is next shown
   if (COMPOSING && COMPOSING === document.activeElement && $(S.mode === "setup" ? "setpanel" : "panel").contains(COMPOSING)) return later("panel-ime", 150, renderPanel);   // an input method mid-word in it: once the word is done
   endPreview("look", "layout");   // their cards drawn anew
   useLook();
@@ -9148,6 +9198,33 @@ async function cliTest() {
   return r;
 }
 /**
+ * The command line put on the PATH (install.rs), as Settings → Agents' card does it, in a folder of the self-test's that
+ * stands for /usr/local/bin (SMEDCOVER_SELFTEST_CLI_BIN, an empty one; macOS): this app's smedcover found in its bundle,
+ * not installed, installed (a link there to it, no password asked), installed again with nothing to do, uninstalled, not
+ * installed. A build not in a bundle says it is a development build and goes no further; elsewhere than on macOS only
+ * the status is read.
+ */
+async function cliInstallTest() {
+  const bin = await invoke("selftest_cli_bin").catch(() => null);
+  if (!bin) return undefined;
+  const r = { bin, steps: [], errors: [] }, no = (e) => r.errors.push(e);
+  const go = async (cmd) => { const s = await invoke(cmd, cmd === "cli_status" ? {} : { prompt: "self-test" }); r.steps.push(`${cmd}: ${s.state}${s.cancelled ? ", cancelled" : ""}`); return s; };
+  const s = await go("cli_status");
+  Object.assign(r, { os: s.os, cli: s.cli, at: s.at });
+  if (!s.test) no("the status does not say a self-test's folder stands for /usr/local/bin");
+  if (s.os === "macos" && s.state !== "dev") {
+    if (!/\.app\/Contents\/MacOS\/smedcover$/.test(s.cli || "") || !s.there) no(`this app's command line is not in its bundle: ${s.cli} (there: ${s.there})`);
+    if ((s.at || "").replace(/\/+/g, "/") !== `${bin}/smedcover`.replace(/\/+/g, "/")) no(`the link would be ${s.at}, not in ${bin}`);
+    if (s.state !== "absent") no(`before installing: ${s.state}, not absent`);
+    for (const [cmd, want] of [["cli_install", "installed"], ["cli_install", "installed"], ["cli_uninstall", "absent"]]) {
+      const a = await go(cmd);
+      if (a.state !== want || a.cancelled) no(`${cmd}: ${a.state}${a.cancelled ? ", cancelled" : ""}, not ${want}`);
+    }
+  }
+  r.ok = !r.errors.length;
+  return r;
+}
+/**
  * The self-test's checks of an agent's change through the dispatcher (agentTest's `call`, `ok` and `no`), noted in
  * `log.tools` and `log.refused`. change(tool, args, steps): `steps` new steps of undo (1; 0 for nothing changed;
  * "switch": the window switched, the change the first step of a new history), then undone (back to the state before it,
@@ -9594,6 +9671,9 @@ async function selfTest(dir) {
       try { report.cli = await cliTest(); } catch (e) { report.cli = { ok: false, errors: [String((e && e.stack) || e)] }; }
       for (const e of (report.cli && report.cli.errors) || []) report.errors.push(`cli: ${e}`);
     }
+    // the command line put on the PATH, in a folder of the self-test's (SMEDCOVER_SELFTEST_CLI_BIN)
+    try { report.cliInstall = await cliInstallTest(); } catch (e) { report.cliInstall = { ok: false, errors: [String((e && e.stack) || e)] }; }
+    for (const e of (report.cliInstall && report.cliInstall.errors) || []) report.errors.push(`cliInstall: ${e}`);
     S.cover.title = "Self test\n*binary* export"; S.cover.tag = "EP.01";
     for (const format of ["png", "jpeg", "webp"]) {
       S.settings.format = format; await step(`export ${format}`);

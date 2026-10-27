@@ -42,3 +42,9 @@ tokio-util = { workspace = true }
 # Nap (see mcp.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true }
+
+# The command line put on the user's PATH (install.rs): the registry's HKCU\Environment, and the broadcast that tells
+# running programs the environment changed.
+[target.'cfg(windows)'.dependencies]
+winreg = { workspace = true }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

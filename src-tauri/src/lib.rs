@@ -12,9 +12,11 @@
 //! * what only the desktop has: the system's dialogs, the file manager, the pointer, the self-test;
 //! * the endpoint agents call over MCP, which the window answers ([`mcp`]);
 //! * the command line's side of the app: its endpoint and `cli.json`, the launch for it
-//!   (`smedcover-app --cli`), quitting when it is done, and one app for each data folder ([`cli`]).
+//!   (`smedcover-app --cli`), quitting when it is done, and one app for each data folder ([`cli`]);
+//! * the command line put on the PATH, from Settings → Agents ([`install`]).
 
 mod cli;
+mod install;
 mod mcp;
 
 use std::fs;
@@ -497,6 +499,10 @@ pub fn run() {
             cli::selftest_cli,
             cli::app_quit,
             cli::app_needs_setup,
+            install::cli_status,
+            install::cli_install,
+            install::cli_uninstall,
+            install::selftest_cli_bin,
             mcp::selftest_mcp,
             mcp::mcp_status,
             mcp::mcp_set,

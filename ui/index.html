@@ -1062,7 +1062,7 @@
   .cutrow label>span{display:flex;flex-direction:column;gap:2px;min-width:0}
   .cutrow b{font-size:13.5px}
   .cutrow small{font-size:12px;color:var(--text3)}
-  /* Settings → Agents (agentsTab in app.js): the switch with its state, the port, the token, the lines to copy, what was seen */
+  /* Settings → Agents (agentsTab in app.js): the switch with its state, the port, the token, the lines to copy, what was seen, the command line */
   .aih>.tog{align-self:flex-start;margin-top:2px}
   .mstate{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--text3);padding:3px 10px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
   .mstate.running{color:var(--text);border-color:rgba(61,220,151,.45)}
@@ -1086,6 +1086,8 @@
   .mfacts{display:flex;flex-wrap:wrap;gap:6px 20px;font-size:12.5px;color:var(--text2)}
   .mfacts b.ok{color:#3ddc97;font-weight:600}
   .mfacts b.bad{color:#ff7a88;font-weight:600}
+  #set-cli .mrow>.hint{word-break:normal;overflow-wrap:anywhere}   /* a sentence, its paths broken where they must be */
+  #set-cli .mrow>.hint:first-child{margin-left:0}   /* no button before it */
   @media(max-width:1360px){.chgrid{grid-template-columns:1fr 1fr}}
   @media(max-width:1100px){.fields3,.chgrid{grid-template-columns:1fr 1fr}.szrow{grid-template-columns:minmax(100px,1fr) 56px 90px auto}.szrow .plats{display:none}}
   /* Export: this channel's cover at each size, ticked or not, the format, resolution and names, then Only this size and
