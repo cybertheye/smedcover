@@ -1,7 +1,8 @@
 # Builds SmedCover installers for macOS, Windows and Linux on GitHub's machines.
 #
 #   - Run it by hand:  GitHub → Actions → "Build SmedCover" → Run workflow.
-#     The installers appear as downloadable artifacts on that run's page.
+#     The installers appear as downloadable artifacts on that run's page, and the command line alone
+#     (smedcover-cli-<platform>: smedcover in a .tar.gz, smedcover.exe on Windows) beside them.
 #   - Push a version tag (git tag v0.1.0 && git push origin v0.1.0):
 #     same build, and the installers are also attached to a draft GitHub Release.
 name: Build SmedCover
@@ -75,6 +76,8 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace --locked
 
+      # beforeBuildCommand builds the command line, smedcover, for the job's target first (scripts/sidecar.mjs: with
+      # --target x86_64-apple-darwin on the Intel job, cross-compiled), and the installers carry it beside the app.
       - name: Build installers
         uses: tauri-apps/tauri-action@v0
         env:
@@ -100,3 +103,35 @@ jobs:
             target/**/release/bundle/deb/*.deb
             target/**/release/bundle/rpm/*.rpm
             target/**/release/bundle/appimage/*.AppImage
+
+      # The command line in the app's bundle (macOS) and in the .deb's /usr/bin (Linux).
+      - name: Check the installers carry the command line
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            find target -path '*/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover' | grep .
+          else
+            dpkg-deb -c target/release/bundle/deb/*.deb | grep -E '/usr/bin/smedcover$'
+          fi
+
+      # The command line alone, for servers and scripts: the one the installers carry, as scripts/sidecar.mjs built it.
+      # In a .tar.gz on macOS and Linux, which keeps it executable (an artifact's zip does not); the .exe on Windows.
+      - name: Pack the command line
+        shell: bash
+        run: |
+          mkdir cli-dist
+          for f in src-tauri/binaries/smedcover-*; do
+            case "$f" in
+              *.exe) cp "$f" cli-dist/smedcover.exe ;;
+              *) cp "$f" cli-dist/smedcover && tar -C cli-dist -czf cli-dist/smedcover-${{ matrix.artifact }}.tar.gz smedcover && rm cli-dist/smedcover ;;
+            esac
+          done
+          ls -l cli-dist
+
+      - name: Upload the command line
+        uses: actions/upload-artifact@v4
+        with:
+          name: smedcover-cli-${{ matrix.artifact }}
+          if-no-files-found: error
+          path: cli-dist/*
