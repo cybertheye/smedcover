@@ -905,11 +905,13 @@ agent 调用 11.1 那些工具的入口。它在 core 里，应用和服务器�
 | `export`、`batch`、`import` | `export`、`batch_covers`（CSV 的文字）、`open_project`（文件，绝对路径） |
 | `tools`、`call` | `tools/list`；任意工具 |
 
-- `plan.rs` 按 `ui/tools.json` 里的名字和格式把参数变成工具的参数，在连 App 之前就检查（退出码 2，什么都不启动）。`build.rs` 从 `ui/tools.json` 读每个工具的 `x-smedcover.timeoutMs`（入口提供的列表里去掉了这一项），所以一次调用和应用等得一样久：从最后一次进度起，等工具的时间再多 10 秒；给了 `--timeout` 就总共等那么久。
-- `app.rs` 是它这边和应用的约定（见 10.7）：数据目录里的 `cli.json`；进程不在了，或者 `/health` 不是 SmedCover 用这个令牌回答的，这个文件就算过期。没有 App 时，它启动 `smedcover-app --cli`（在它自己的可执行文件旁边，链接会跟到底；或者 `SMEDCOVER_APP`），标准输入是一根整个过程都拿着的管道，放在单独的进程组里，好让 Ctrl-C 只到命令行；然后等 `ready`（每 100 毫秒看一次，最多 30 秒）。它以 75 退出，说明这个目录已经有别的 App 在跑，就改等那一个；`needsSetup` 是退出码 3。做完时它发 `/app/done`，放开管道，等 App 退出；不是它启动的 App，它不碰。
-- `mcp.rs` 是它的 MCP 客户端，协议 2025-06-18（`initialize`，把回答里的 `Mcp-Session-Id` 带回去，`notifications/initialized`，`tools/list`，带进度令牌的 `tools/call`），底下是 `http.rs`，一个只连 127.0.0.1 的 HTTP/1.1 客户端（正文按长度、分块或读到连接关闭）。回答（事件或 JSON）在单独的线程里读，调用方看着时间和 Ctrl-C；放弃时先发 `notifications/cancelled` 再挂断连接。用 rmcp 的客户端就要为几个本机请求带上 Tokio 和 reqwest。
-- `output.rs` 负责输出（结果到 stdout，进度和提示到 stderr，`--json`），语言由 `lang.rs` 定。
-- 测试：每个模块里的单元测试，以及 `tests/cli.rs`：它有自己的测试框架（`harness = false`），同一个程序也扮演它要用的 App（`support/fake.rs`，经 `SMEDCOVER_APP` 启动）：core 的 `McpServer::router` 前面加上 `/health`、`/app/show` 和 `/app/done`，`ui/tools.json` 的工具再加三个测试自己的，页面按工具的参数结构检查每次调用（`support/schema.rs`），`export` 和 `batch_covers` 写一些小文件。每个测试用自己的临时数据目录。
+- `paths.rs` 按应用自己的规则找数据目录（`smedcover_core::paths::data_dir`：自检目录下的 `data/`，否则 `--data` 或 `SMEDCOVER_DATA`，否则桌面应用的；有测试逐种情况对照两者），所以命令行和它启动的 App 不会各找各的；指定的目录经 `SMEDCOVER_DATA` 交给 App。
+- `plan.rs` 按 `ui/tools.json` 里的名字和格式把参数变成工具的参数，在连 App 之前就检查（退出码 2，什么都不启动）。`build.rs` 从 `ui/tools.json` 读每个工具的 `x-smedcover.timeoutMs`（入口提供的列表里去掉了这一项）和 `readOnlyHint`，所以一次调用和应用等得一样久——从最后一次进度起，等工具的时间再多 10 秒；给了 `--timeout` 就总共等那么久；比表新的工具，等到任何调用最长能等的时间，以应用自己的等待为准——命令行也知道哪些调用可以再发一次。
+- `app.rs` 是它这边和应用的约定（见 10.7）。`cli.json` 只在是这个用户自己的、别人读不了时才用（Unix）；进程不在了，或者 `/health` 不是 SmedCover 用这个令牌回答的，就算过期；写着 `quitting: true` 的照常用（每个请求都推迟它退出），所以接连运行的命令共用一个 App。没有 App 时，它启动 `smedcover-app --cli`（在它自己的可执行文件旁边，链接会跟到底；macOS 上没有就用 `/Applications/SmedCover.app` 里的；或者 `SMEDCOVER_APP`），标准输入是一根整个过程都拿着的管道，放在单独的进程组里，好让 Ctrl-C 只到命令行；然后等 `ready`（每 100 毫秒看一次，最多 30 秒）。它以 75 退出，说明这个目录已经有别的 App 在跑，就改等那一个；等的那个先走了，就再启动一个，只一次；`needsSetup` 是退出码 3。做完时它发 `/app/done`，放开管道，不等 App 退出；不是它启动的 App，它不碰。
+- `mcp.rs` 是它的 MCP 客户端，协议 2025-06-18（`initialize`，把回答里的 `Mcp-Session-Id` 带回去，`notifications/initialized`，`tools/list`，带进度令牌的 `tools/call`），底下是 `http.rs`，一个只连 127.0.0.1 的 HTTP/1.1 客户端（正文按长度、分块或读到连接关闭）。请求在调用方的线程上发出，回答（连同响应头）在单独的线程里读，调用方看着时间和 Ctrl-C；放弃时先发 `notifications/cancelled`（最多等一秒让应用收下）再挂断连接。它的错误分得清请求根本没到应用（`Refused`）、应用回答的不是 MCP（`Unreachable`）和回答中途断了（`Gone`）：前两种在还没发出任何会改动东西的调用时，`lib.rs` 会再连一次应用；最后一种从不再试。用 rmcp 的客户端就要为几个本机请求带上 Tokio 和 reqwest。
+- `lib.rs` 把每个失败变成退出码、种类和文字（`Fail`）：种类取工具错误结果 `_meta["smedcover/error"]` 里给的（`not_ready`、`gone`、`needs_setup` 退出码 3，`timeout` 4，其余 1），从不去匹配它的文字。`render` 只挪它自己临时文件夹里的文件，第二次 Ctrl-C 也会删掉这个文件夹（`interrupt.rs`：手上什么都没有时，第一次就马上退出）。
+- `output.rs` 负责输出（结果到 stdout，进度和提示到 stderr；`--json` 不管发生什么都只输出一份），进度行按字符在终端里占的列数截到终端宽度，用回车加空格原地刷新；语言由 `lang.rs` 定，和应用一样：`custom.json` 里应用的设置（应用还没写它时，`settings.json` 的设置垫在下面），否则系统的首选语言，否则语言环境变量，否则中文，同 `detectLang()`。
+- 测试：每个模块里的单元测试，以及 `tests/cli.rs`：它有自己的测试框架（`harness = false`，可以指定要跑的名字，也认 `--skip`），同一个程序也扮演它要用的 App（`support/fake.rs`，经 `SMEDCOVER_APP` 启动）：core 的命令行入口（`McpServer::with_app`，`AppControl` 和应用的一样），`ui/tools.json` 的工具再加三个测试自己的，页面在就绪前是 `loading`，按工具的参数结构检查每次调用（`support/schema.rs`），`export` 和 `batch_covers` 写一些小文件，退出也和应用一样（`quitting: true`，最后一个请求 2 秒后退出；归用户之后，标准输入读到头也不管）。每个测试用自己的临时数据目录；一个只回答 `/health`、对 `/mcp` 不回答或拒绝的替身，扮演出毛病的 App。
 
 ## 11. 宿主、能力和布局
 

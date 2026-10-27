@@ -768,7 +768,7 @@ Codex、Cursor、Hermes Agent、OpenClaw 等客户端怎么配，令牌，agent 
 
 ## 命令行
 
-`smedcover` 让你在终端或脚本里出封面。它自己不画：它调用的是 agent 用的那些工具，活由 SmedCover 来干。SmedCover 开着时，就在那个窗口里做，每一步你都看得到，和看 agent 做一样。没开时，命令会为这一次启动它，在 macOS 上不显示窗口（Windows 和 Linux 上运行期间窗口会显示出来），命令做完它就退出。
+`smedcover` 让你在终端或脚本里出封面。它自己不画：它调用的是 agent 用的那些工具，活由 SmedCover 来干。SmedCover 开着时，就在那个窗口里做，每一步你都看得到，和看 agent 做一样。没开时，命令会为这一次启动它，在 macOS 上不显示窗口（Windows 和 Linux 上运行期间窗口会显示出来），命令做完它先把该存的存好再退出：最后一个用它的命令结束约 2 秒后，所以接连运行的命令（脚本里的）共用一个 App。这期间你打开了它的窗口（从访达或程序坞，或者再打开一次 SmedCover），它就归你了，不会退出。
 
 现在还没有安装：「设置 → Agent 接入」里会有一个按钮，把 `smedcover` 放进 PATH（Linux 的 `.deb` 和 `.rpm` 会直接装到 `/usr/bin`）。从源码构建：`cargo build --release -p smedcover-cli` 生成 `target/release/smedcover`；它会启动装在它旁边的 App（`smedcover-app`），或者环境变量 `SMEDCOVER_APP` 指定的那个。
 
@@ -800,19 +800,19 @@ smedcover --json export --channels all | jq -r '.files[].path'
 
 每个命令都接受：
 
-- `--json`：把工具的结果按 JSON 输出（它的 `structuredContent`，格式就是 `smedcover tools --json` 里每个工具的 `outputSchema`；`call` 输出整个结果；`render` 输出文件的路径、频道和尺寸）。失败时输出 `{"error": {"kind", "message", "exit"}}`。
+- `--json`：把工具的结果按 JSON 输出（它的 `structuredContent`，格式就是 `smedcover tools --json` 里每个工具的 `outputSchema`；`call` 输出整个结果；`render` 输出文件的路径、频道和尺寸）：不管发生什么，都只输出一份。失败时输出 `{"error": {"kind", "message", "exit"}}`，kind 是 SmedCover 给的那一种（`busy`、`invalid_arguments`、`needs_setup`、`timeout`……），它没给就是命令行自己的（`usage`、`unreachable`、`timeout`、`interrupted`……）；导出中途停下时，输出它的结果（已经写好的文件），里面带着 `error`。clap 读不懂的命令行（未知的参数）只输出用法提示。
 - `--quiet`：不输出进度和提示；结果和错误照样输出。
-- `--timeout 秒数`：一次调用等这么久就放弃。不给时，只要 SmedCover 还在做，命令就一直等：每次有进度后，等 SmedCover 自己为这个工具等的那么久（见[超时、进度和取消](README_MCP.zh-CN.md#超时进度和取消)）。
-- `--data 目录`（或 `SMEDCOVER_DATA`）：用另一个数据文件夹，而不是 App 自己的；为命令启动的 App 也用它。
+- `--timeout 秒数`：每一次调用等这么久就放弃（不给 `--size` 的 `render` 会调用两次）。不给时，只要 SmedCover 还在做，命令就一直等：每次有进度后，等 SmedCover 自己为这个工具等的那么久（见[超时、进度和取消](README_MCP.zh-CN.md#超时进度和取消)）。
+- `--data 目录`（或 `SMEDCOVER_DATA`）：用另一个数据文件夹，而不是 App 自己的；为命令启动的 App 也用它。自检目录（`SMEDCOVER_SELFTEST`）优先，命令和 App 都一样。
 - `--version`、`--help`（以及 `smedcover <命令> --help`）。
 
-结果写到标准输出；进度（*Writing …（3 of 12）*）和提示写到标准错误。命令说的语言跟 SmedCover 里设的一样，没设就跟系统（中文或英文）；SmedCover 回答的话照它自己的原话。Ctrl-C 取消正在进行的调用（已经改了的留着，是一步撤销），并让为命令启动的 App 退出。
+结果写到标准输出；进度（*Writing …（3 of 12）*，在终端里是原地刷新的一行）和提示写到标准错误。命令说的语言跟 SmedCover 里设的一样，没设就跟系统（中文或英文）；SmedCover 回答的话照它自己的原话。还没连上 SmedCover 时按 Ctrl-C，命令马上结束；连上之后，它取消正在进行的调用（已经改了的留着，是一步撤销），并让为命令启动的 App 退出；再按一次就马上结束。在会改动东西的调用发出之前 SmedCover 走了（比如它正在退出），命令会再连一次它或新的 App；改动已经发出后就不会再试。
 
 | 退出码 | 意思 |
 |---|---|
 | 0 | 完成 |
-| 1 | SmedCover 回答了一个错误（没有这个频道、窗口正忙、导出失败……） |
-| 2 | 命令写得不对：未知的命令或参数、不接受的值、不存在的文件。什么都没启动 |
+| 1 | SmedCover 回答了一个错误（没有这个频道、窗口正忙、导出失败或中途停下……） |
+| 2 | 命令写得不对：未知的命令或参数、不接受的值、不存在的文件——这些在连 SmedCover 之前就查出来了，什么都没启动（不过 `--out` 指定的文件夹会先建好）；或者 SmedCover 没有这个工具（`call`），这由它来说 |
 | 3 | 连不上或启动不了 SmedCover，或者它还要先设置：打开它一次，走完欢迎页 |
 | 4 | 没有及时回答：`--timeout`，或者 SmedCover 自己为这个工具等的时间到了；这次调用已取消 |
 | 130 | 被中断（Ctrl-C） |

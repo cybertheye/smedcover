@@ -768,7 +768,7 @@ Codex, Cursor, Hermes Agent, OpenClaw and other clients, the token, how an agent
 
 ## Command line
 
-`smedcover` makes covers from a terminal or a script. It draws nothing itself: it calls the same tools agents use, and SmedCover does the work. When SmedCover is open, it works in that window, and you see each step, as you see an agent's. When it is not, the command starts it for the run, without its window on macOS (on Windows and Linux the window shows while the command runs), and it quits when the command is done.
+`smedcover` makes covers from a terminal or a script. It draws nothing itself: it calls the same tools agents use, and SmedCover does the work. When SmedCover is open, it works in that window, and you see each step, as you see an agent's. When it is not, the command starts it for the run, without its window on macOS (on Windows and Linux the window shows while the command runs), and it quits once the command is done, saving what it has to first: about 2 seconds after the last command that uses it, so that commands run one after another (a script's) share one app. Should you open its window meanwhile (from the Finder or the Dock, or by opening SmedCover again), it is yours and stays.
 
 It is not installed yet: a button in Settings → *Agents* that puts `smedcover` on your PATH is coming (on Linux the `.deb` and `.rpm` will have it in `/usr/bin`). From the source, `cargo build --release -p smedcover-cli` makes `target/release/smedcover`; it starts the app installed beside it (`smedcover-app`), or the one the `SMEDCOVER_APP` environment variable names.
 
@@ -800,19 +800,19 @@ smedcover --json export --channels all | jq -r '.files[].path'
 
 Every command takes:
 
-- `--json` prints the tool's result as JSON (its `structuredContent`, the shape `smedcover tools --json` gives as each tool's `outputSchema`; for `call`, the whole result; for `render`, the file's path, channel and size). A failure prints `{"error": {"kind", "message", "exit"}}`.
+- `--json` prints the tool's result as JSON (its `structuredContent`, the shape `smedcover tools --json` gives as each tool's `outputSchema`; for `call`, the whole result; for `render`, the file's path, channel and size): one document, whatever happens. A failure prints `{"error": {"kind", "message", "exit"}}`, its kind SmedCover's own when it gave one (`busy`, `invalid_arguments`, `needs_setup`, `timeout`…), else the command line's (`usage`, `unreachable`, `timeout`, `interrupted`…); an export stopped part-way prints its result, the files written so far, with the `error` in it. A command line clap cannot read (an unknown flag) prints its usage message only.
 - `--quiet` prints no progress and no notes; the results and errors still.
-- `--timeout SECS` gives up on a call after that long. Without it, the command waits as long as SmedCover keeps working on the call: as long as SmedCover itself waits for each tool (see [Timeouts](README_MCP.md#timeouts-progress-and-cancelling)), from its last word of progress.
-- `--data DIR` (or `SMEDCOVER_DATA`) works on another data folder than the app's own; the app started for the command is given it too.
+- `--timeout SECS` gives up on each call after that long (`render` without `--size` makes two). Without it, the command waits as long as SmedCover keeps working on the call: as long as SmedCover itself waits for each tool (see [Timeouts](README_MCP.md#timeouts-progress-and-cancelling)), from its last word of progress.
+- `--data DIR` (or `SMEDCOVER_DATA`) works on another data folder than the app's own; the app started for the command is given it too. A self-test's folder (`SMEDCOVER_SELFTEST`) comes first, for the command as for the app.
 - `--version`, `--help` (and `smedcover <command> --help`).
 
-Results go to the standard output; progress (*Writing … (3 of 12)*) and notes go to the standard error. The command speaks the language set in SmedCover, else the system's (Chinese or English); what SmedCover answers is in its own words. Ctrl-C cancels the call under way (what it changed so far stays, one step of undo) and lets an app started for the command quit.
+Results go to the standard output; progress (*Writing … (3 of 12)*, one line drawn over in a terminal) and notes go to the standard error. The command speaks the language set in SmedCover, else the system's (Chinese or English); what SmedCover answers is in its own words. Ctrl-C before SmedCover is reached ends the command at once; after, it cancels the call under way (what it changed so far stays, one step of undo) and lets an app started for the command quit; a second Ctrl-C ends it at once. When SmedCover goes away before anything that changes something was sent (it was quitting, say), the command reaches it, or a new one, once more; never once a change is on its way.
 
 | Exit code | Meaning |
 |---|---|
 | 0 | Done |
-| 1 | SmedCover answered an error (an unknown channel, a busy window, an export that failed…) |
-| 2 | The command was not right: an unknown command or flag, a value it does not take, a file that is not there. Nothing was started |
+| 1 | SmedCover answered an error (an unknown channel, a busy window, an export that failed or was stopped part-way…) |
+| 2 | The command was not right: an unknown command or flag, a value it does not take, a file that is not there — found before SmedCover is reached, so nothing is started (a folder `--out` names is made first, though); or a tool SmedCover does not have (`call`), which it says |
 | 3 | SmedCover could not be reached or started, or needs setting up first: open it once and finish the welcome |
 | 4 | No answer in time: `--timeout`, or SmedCover's own wait for the tool; the call was cancelled |
 | 130 | Interrupted (Ctrl-C) |
