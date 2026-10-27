@@ -1,7 +1,7 @@
 //! What the command line prints: results on the standard output, short and plain (or the tool's result as JSON with
 //! `--json`), progress and notes on the standard error (none with `--quiet`), errors on the standard error always.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -21,13 +21,15 @@ pub struct Out {
     pub lang: Lang,
     /// Whether the standard error is a terminal, where progress is one line drawn over.
     tty: bool,
-    /// The progress line last shown.
-    last: RefCell<Option<String>>,
+    /// The progress line last shown, and how wide it was drawn.
+    last: RefCell<Option<(String, usize)>>,
+    /// Whether a JSON document has been printed: `--json` prints one, whatever happens.
+    printed: Cell<bool>,
 }
 
 impl Out {
     pub fn new(json: bool, quiet: bool, lang: Lang) -> Out {
-        Out { json, quiet, lang, tty: io::stderr().is_terminal(), last: RefCell::new(None) }
+        Out { json, quiet, lang, tty: io::stderr().is_terminal(), last: RefCell::new(None), printed: Cell::new(false) }
     }
 
     /// A result, as text: a line, or lines.
@@ -38,8 +40,11 @@ impl Out {
         }
     }
 
-    /// A result, as JSON.
+    /// A result, as JSON: the one document `--json` prints (a second is not printed).
     pub fn json_value(&self, value: &Value) {
+        if self.printed.replace(true) {
+            return;
+        }
         let text = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
         emit(&mut io::stdout().lock(), &format!("{text}\n"));
     }
@@ -62,34 +67,98 @@ impl Out {
             return;
         };
         let mut last = self.last.borrow_mut();
-        if last.as_deref() == Some(line.as_str()) {
+        if last.as_ref().is_some_and(|(l, _)| *l == line) {
             return;
         }
         let mut err = io::stderr().lock();
         if self.tty {
-            emit(&mut err, &format!("\r\x1b[2K{}", fit(&line, 100)));
+            // drawn over with a carriage return and spaces, which every terminal takes (no escape sequences: a Windows
+            // console without them shows them as they are), and never wider than the terminal, or it would wrap
+            let line = fit_width(&line, terminal_width().saturating_sub(1));
+            let width = display_width(&line);
+            let clear = last.as_ref().map_or(0, |(_, w)| *w).saturating_sub(width);
+            emit(&mut err, &format!("\r{line}{}", " ".repeat(clear)));
+            *last = Some((line, width));
         } else {
             emit(&mut err, &format!("{line}\n"));
+            *last = Some((line, 0));
         }
-        *last = Some(line);
     }
 
     /// Ends the progress line, if one is drawn over.
     pub fn end_progress(&self) {
-        if self.last.borrow_mut().take().is_some() && self.tty {
-            emit(&mut io::stderr().lock(), "\r\x1b[2K");
+        if let Some((_, width)) = self.last.borrow_mut().take() {
+            if self.tty {
+                emit(&mut io::stderr().lock(), &format!("\r{}\r", " ".repeat(width)));
+            }
         }
     }
 
-    /// Why the command failed: on the standard error, and with `--json` as JSON on the standard output too, so that a
-    /// script reading it has something to read.
+    /// Why the command failed: on the standard error, and with `--json` as JSON on the standard output too, unless a
+    /// document was printed already (the one it prints then says so itself), so that a script reading it has one
+    /// document to read.
     pub fn fail(&self, fail: &Fail) {
         self.end_progress();
         emit(&mut io::stderr().lock(), &format!("smedcover: {}\n", fail.message()));
         if self.json {
-            self.json_value(&json!({"error": {"kind": fail.kind(), "message": fail.message(), "exit": fail.code()}}));
+            self.json_value(&json!({"error": fail.to_json()}));
         }
     }
+}
+
+/// How many columns the terminal on the standard error has: as it says (Unix), else `COLUMNS`, else 80.
+pub fn terminal_width() -> usize {
+    #[cfg(unix)]
+    {
+        // SAFETY: TIOCGWINSZ fills the winsize given, which lives through the call
+        let mut size: libc::winsize = unsafe { std::mem::zeroed() };
+        if unsafe { libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut size) } == 0 && size.ws_col > 0 {
+            return usize::from(size.ws_col);
+        }
+    }
+    std::env::var("COLUMNS").ok().and_then(|c| c.trim().parse().ok()).filter(|c| *c > 0).unwrap_or(80)
+}
+
+/// How many columns a character takes in a terminal: two for the wide ones (CJK, full-width forms, most emoji),
+/// none for those that combine with the one before, one for the others.
+fn char_width(c: char) -> usize {
+    let c = c as u32;
+    let combining = matches!(c, 0x0300..=0x036F | 0x200B..=0x200F | 0x20D0..=0x20FF | 0xFE00..=0xFE0F | 0xFE20..=0xFE2F);
+    let wide = matches!(c,
+        0x1100..=0x115F | 0x2E80..=0x303E | 0x3041..=0x33FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xA000..=0xA4CF
+        | 0xAC00..=0xD7A3 | 0xF900..=0xFAFF | 0xFE30..=0xFE4F | 0xFF00..=0xFF60 | 0xFFE0..=0xFFE6
+        | 0x1F300..=0x1F64F | 0x1F900..=0x1F9FF | 0x20000..=0x3FFFD);
+    if combining {
+        0
+    } else if wide {
+        2
+    } else {
+        1
+    }
+}
+
+/// How many columns `text` takes in a terminal.
+pub fn display_width(text: &str) -> usize {
+    text.chars().map(char_width).sum()
+}
+
+/// `text` cut to `most` columns, with … where it was cut.
+pub fn fit_width(text: &str, most: usize) -> String {
+    if display_width(text) <= most {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for c in text.chars() {
+        let w = char_width(c);
+        if used + w + 1 > most {
+            break;
+        }
+        out.push(c);
+        used += w;
+    }
+    out.push('…');
+    out
 }
 
 /// Writes all of `text`, a closed pipe (`| head`) not a failure.
@@ -321,6 +390,12 @@ fn save_image(dir: &Path, tool: &str, n: usize, mime: &str, data: &[u8]) -> io::
     Err(io::Error::new(io::ErrorKind::AlreadyExists, "no free name"))
 }
 
+/// The kind of failure a tool's error result says it is, for a program to test (`_meta["smedcover/error"].kind`:
+/// `busy`, `needs_setup`, `timeout`, …), if it says.
+pub fn error_kind(result: &Value) -> Option<&str> {
+    result.get("_meta")?.get("smedcover/error")?.get("kind")?.as_str().filter(|k| !k.is_empty())
+}
+
 /// The text of a result's text blocks, for an error.
 pub fn text_of(result: &Value) -> String {
     result["content"]
@@ -435,8 +510,23 @@ mod tests {
     }
 
     #[test]
-    fn an_errors_text() {
-        let r = json!({"isError": true, "content": [{"type": "text", "text": " No channel \"x\". "}, {"type": "image", "data": ""}]});
+    fn an_errors_text_and_kind() {
+        let r = json!({"isError": true, "content": [{"type": "text", "text": " No channel \"x\". "}, {"type": "image", "data": ""}],
+                       "_meta": {"smedcover/error": {"kind": "invalid_arguments", "message": "No channel \"x\"."}}});
         assert_eq!(text_of(&r), "No channel \"x\".");
+        assert_eq!(error_kind(&r), Some("invalid_arguments"));
+        assert_eq!(error_kind(&json!({"isError": true, "content": []})), None);
+        assert_eq!(error_kind(&json!({"_meta": {"smedcover/error": {"kind": ""}}})), None);
+    }
+
+    #[test]
+    fn widths_in_a_terminal() {
+        assert_eq!(display_width("Writing a.png (3 of 12)."), 24);
+        assert_eq!(display_width("导出 3/12"), 9);
+        assert_eq!(display_width("e\u{301}"), 1, "a combining accent takes no column");
+        assert_eq!(fit_width("一二三四五", 7), "一二三…");
+        assert_eq!(fit_width("一二三四五", 10), "一二三四五");
+        assert_eq!(fit_width("abcdefgh", 5), "abcd…");
+        assert!(terminal_width() > 0);
     }
 }

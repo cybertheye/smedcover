@@ -32,14 +32,13 @@ libc = { workspace = true }
 [build-dependencies]
 serde_json = { workspace = true }
 
-# The tests play the app (tests/cli.rs): the core's own endpoint, with a page played there, and the routes only the
-# command line uses.
+# The tests play the app (tests/cli.rs): the core's own command-line endpoint (McpServer::with_app), with a page played
+# there.
 [dev-dependencies]
 smedcover-core = { path = "../core" }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-util = { workspace = true }
-axum = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 

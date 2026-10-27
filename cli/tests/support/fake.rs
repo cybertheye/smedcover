@@ -1,19 +1,28 @@
-//! The app, played: what the command line expects of SmedCover, with a page played here behind the core's own
-//! endpoint. It is this test program started again with `SMEDCOVER_FAKE_APP` set (by a test, or by the command line
-//! under test, which passes its environment on), so no app is needed and nothing of the user's is touched.
+//! The app, played: what the command line expects of SmedCover, as the app does it (ARCHITECTURE.md 10.7,
+//! `src-tauri/src/cli.rs`), with a page played here behind the core's own endpoint. It is this test program started
+//! again with `SMEDCOVER_FAKE_APP` set (by a test, or by the command line under test, which passes its environment
+//! on), so no app is needed and nothing of the user's is touched.
 //!
-//! - It keeps its data in `SMEDCOVER_DATA` (else `SMEDCOVER_SELFTEST`'s `data/`, as the app does), writes `cli.json`
-//!   there (`launchedBy` "cli" when started with `--cli`, else "user"), and serves on a port of its own, with a token
-//!   of its own: `/health`, `/app/show`, `/app/done`, and `/mcp`, which is the core's (`McpServer::router`), the
-//!   tools of `ui/tools.json` and three more for the tests (`fail_tool`, `slow_tool`, `quiet_tool`).
-//! - Its page checks every call's arguments against the tool's schema (as the real page's `checkCall` does) and
-//!   answers `get_context`, `export`, `batch_covers` (writing small files), `open_project` and `render_preview` as the
-//!   app would; any other tool says back what it was asked.
-//! - It quits on `/app/done` (when the command line started it), when its standard input ends, or after two minutes.
+//! - It keeps its data where the app would (`smedcover_core::paths::data_dir`: a self-test's `data/`, else
+//!   `SMEDCOVER_DATA`), writes `cli.json` there (`launchedBy` "cli" when started with `--cli`, else "user") once it
+//!   listens and again when it is ready, and serves the core's command-line endpoint (`McpServer::with_app`): `/mcp`
+//!   with the tools of `ui/tools.json` and three more for the tests (`fail_tool`, `slow_tool`, `quiet_tool`), and
+//!   `/health`, `/app/show` and `/app/done`, answered here as the app answers them, every route wanting the token.
+//! - Its page is `loading` till it is ready; it checks every call's arguments against the tool's schema (as the real
+//!   page's `checkCall` does) and answers `get_context`, `export`, `batch_covers` (writing small files),
+//!   `open_project` and `render_preview` as the app would; any other tool says back what it was asked.
+//! - Told the command line is done (`/app/done`, or the end of its standard input) while it is the command line's, it
+//!   says `quitting: true` in `cli.json`, is still used by any command line that finds it, and quits (taking `cli.json`
+//!   away) once no call is in hand and none has come for 2 s; the user's (started
+//!   without `--cli`, or shown since with `/app/show`) it goes on, and the end of its input is let be. A test's own
+//!   app played (`FAKE_TEST_OWNED`) quits at its input's end whatever it is, so that a test leaves nothing running.
+//!   It quits after two minutes in any case (`FAKE_LIFETIME_MS`).
 //! - What it does goes into `fake-app.log` in its data folder, a line each: `<pid> <what>`.
-//! - `FAKE_MODE` (commas between): `already_running` (exit 75 at once), `crash` (exit 1 at once), `needs_setup`.
-//!   `FAKE_CLI_JSON_MS`: how long before it writes `cli.json` (0); `FAKE_CLI_JSON_AFTER`: a file it waits for before
-//!   it writes it; `FAKE_READY_MS`: how long more before it is ready (150); `FAKE_VERSION`: the version it says.
+//! - `FAKE_MODE` (commas between): `already_running` (exit 75 at once), `crash` (exit 1 at once), `needs_setup` (the
+//!   first start's welcome: `needsSetup` from the first `/health`, every call refused so), `export_cancelled` (an
+//!   export stops after its first file, as when it is cancelled in the window). `FAKE_CLI_JSON_MS`: how long before it
+//!   writes `cli.json` (0); `FAKE_CLI_JSON_AFTER`: a file it waits for before it writes it; `FAKE_READY_MS`: how long
+//!   more before it is ready (150); `FAKE_VERSION`: the version it says.
 
 use std::collections::HashMap;
 use std::env;
@@ -21,32 +30,27 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Json, Router};
 use hyper_util::rt::TokioIo;
 use hyper_util::service::TowerToHyperService;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use smedcover_core::mcp::bridge::{read_result, BoxFut, BridgeError, Call, CallToolResult, PageBridge, PageState, Progress};
-use smedcover_core::mcp::server::{Access, McpServer, Stats};
+use smedcover_core::mcp::server::{Access, AppControl, McpServer, Stats};
 use smedcover_core::mcp::{Host, Secret, ToolList};
-use tokio::sync::Notify;
+use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 
 use super::schema;
 
 /// Set, the program is the app played, not the tests.
 pub const ENV: &str = "SMEDCOVER_FAKE_APP";
-/// The exit code of an app that finds another already running on its folder (the command line's `ALREADY_RUNNING`).
-pub const ALREADY_RUNNING: i32 = 75;
-/// How long it runs at most.
-const LIFETIME: Duration = Duration::from_secs(120);
+/// The exit code of an app that finds another already running on its folder.
+pub const ALREADY_RUNNING: i32 = smedcover_core::instance::EXIT_ALREADY_RUNNING;
+/// How long the command line's app waits, once it is to quit, for no call to have come (the app's `QUIET_FOR`).
+const QUIET_FOR_MS: u64 = 2000;
 
 const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
@@ -59,10 +63,7 @@ const TEST_TOOLS: &str = r#"[
 
 /// The app's data folder, as it finds it.
 pub fn data_folder() -> PathBuf {
-    match env::var_os("SMEDCOVER_DATA").filter(|d| !d.is_empty()) {
-        Some(data) => PathBuf::from(data),
-        None => PathBuf::from(env::var_os("SMEDCOVER_SELFTEST").expect("a data folder for the app played")).join("data"),
-    }
+    smedcover_core::paths::data_dir().expect("a data folder for the app played")
 }
 
 /// Notes what the app did, in its data folder's `fake-app.log`.
@@ -73,30 +74,53 @@ pub fn log(data: &Path, what: &str) {
     }
 }
 
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+fn millis(name: &str, default: u64) -> Duration {
+    Duration::from_millis(env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default))
+}
+
+/// Whose the app is, and whether it is to quit (the app's `Lifecycle`).
+struct Life {
+    launched_by: &'static str,
+    quitting: bool,
+}
+
+/// The app's side of the command line: `cli.json`, the routes, quitting.
 struct App {
     data: PathBuf,
-    token: String,
+    token: Secret,
     version: String,
     port: Mutex<u16>,
-    ready: AtomicBool,
+    ready: Arc<AtomicBool>,
     needs_setup: bool,
-    launched_by: Mutex<String>,
-    done: Notify,
-    /// Whether `/app/done` came (the standard input's end may come before its quitting does).
-    done_asked: AtomicBool,
+    life: Mutex<Life>,
+    stats: Arc<Stats>,
+    in_hand: Arc<AtomicUsize>,
+    runtime: Handle,
+    /// `cli.json` is written from one place at a time.
+    writing: Mutex<()>,
 }
 
 impl App {
-    fn allowed(&self, headers: &HeaderMap) -> bool {
-        headers.get("authorization").and_then(|v| v.to_str().ok()) == Some(format!("Bearer {}", self.token).as_str())
-    }
-
+    /// Writes `cli.json` as things are now (`quitting: true` while the app is to quit: it is still used, each request
+    /// putting the quitting off).
     fn write_cli_json(&self) {
-        let text = json!({
-            "format": 1, "pid": std::process::id(), "port": *self.port.lock().unwrap(), "token": self.token,
-            "version": self.version, "launchedBy": *self.launched_by.lock().unwrap(), "ready": self.ready.load(Ordering::SeqCst),
-        })
-        .to_string();
+        let _one = self.writing.lock().unwrap();
+        let (launched_by, quitting) = {
+            let life = self.life.lock().unwrap();
+            (life.launched_by, life.quitting)
+        };
+        let mut file = json!({
+            "format": 1, "pid": std::process::id(), "port": *self.port.lock().unwrap(), "token": self.token.expose(),
+            "version": self.version, "launchedBy": launched_by, "ready": self.ready.load(Ordering::SeqCst),
+        });
+        if quitting {
+            file["quitting"] = json!(true);
+        }
+        let text = file.to_string();
         let tmp = self.data.join(format!("cli.json.{}.tmp", std::process::id()));
         let mut options = fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
@@ -110,9 +134,75 @@ impl App {
     }
 
     fn quit(&self, why: &str) -> ! {
+        // held till the process ends: cli.json is not written again
+        let _one = self.writing.lock().unwrap_or_else(|e| e.into_inner());
         let _ = fs::remove_file(self.data.join("cli.json"));
         log(&self.data, &format!("exit {why}"));
         std::process::exit(0);
+    }
+
+    /// The command line is done with the app: it quits, unless it is the user's. Whether it is quitting.
+    fn finish(self: &Arc<Self>, why: &'static str) -> bool {
+        let begins = {
+            let mut life = self.life.lock().unwrap();
+            if life.launched_by == "user" {
+                return false;
+            }
+            let begins = !life.quitting;
+            life.quitting = true;
+            begins
+        };
+        if begins {
+            // cli.json says so: another command line still uses the app, each of its requests putting the quitting off
+            self.write_cli_json();
+            let me = self.clone();
+            self.runtime.spawn(async move { me.quit_when_idle(now_ms(), why).await });
+        }
+        true
+    }
+
+    /// Quits once no call is in hand and none has come for 2 s, from the last request or `since`; not once it is the
+    /// user's.
+    async fn quit_when_idle(&self, since: u64, why: &str) {
+        loop {
+            if !self.life.lock().unwrap().quitting {
+                return;
+            }
+            let seen = self.stats.snapshot();
+            let last = seen.clients.iter().map(|c| c.last_seen).chain([since]).max().unwrap_or(since);
+            if self.in_hand.load(Ordering::SeqCst) == 0 && seen.in_flight == 0 && now_ms().saturating_sub(last) >= QUIET_FOR_MS {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        self.quit(why);
+    }
+}
+
+/// The routes only the command line's endpoint has, as the app answers them (`CliApp`'s `AppControl`).
+struct Control(Arc<App>);
+
+impl AppControl for Control {
+    fn health(&self) -> Map<String, Value> {
+        let mut extra = Map::new();
+        extra.insert("needsSetup".into(), json!(self.0.needs_setup));
+        // the version the test asks it to say, over the core's own
+        extra.insert("version".into(), json!(self.0.version));
+        extra
+    }
+
+    fn show(&self) -> Value {
+        log(&self.0.data, "show");
+        *self.0.life.lock().unwrap() = Life { launched_by: "user", quitting: false };
+        self.0.write_cli_json();
+        json!({"ok": true, "launchedBy": "user"})
+    }
+
+    fn done(&self) -> Value {
+        let user = self.0.life.lock().unwrap().launched_by == "user";
+        log(&self.0.data, if user { "done (stays: the user's)" } else { "done" });
+        let exiting = self.0.finish("done");
+        json!({"ok": true, "exiting": exiting, "launchedBy": self.0.life.lock().unwrap().launched_by})
     }
 }
 
@@ -133,15 +223,17 @@ pub fn main() -> ! {
     }
     let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("a runtime");
     let for_cli = args.iter().any(|a| a == "--cli");
-    let needs_setup = has("needs_setup");
-    runtime.block_on(serve(data, for_cli, needs_setup))
+    let modes = Modes { needs_setup: has("needs_setup"), export_cancelled: has("export_cancelled") };
+    runtime.block_on(serve(data, for_cli, modes))
 }
 
-fn millis(name: &str, default: u64) -> Duration {
-    Duration::from_millis(env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default))
+#[derive(Clone, Copy)]
+struct Modes {
+    needs_setup: bool,
+    export_cancelled: bool,
 }
 
-async fn serve(data: PathBuf, for_cli: bool, needs_setup: bool) -> ! {
+async fn serve(data: PathBuf, for_cli: bool, modes: Modes) -> ! {
     let mut tools: Value = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../ui/tools.json"))).unwrap();
     let extra: Value = serde_json::from_str(TEST_TOOLS).unwrap();
     tools["tools"].as_array_mut().unwrap().extend(extra.as_array().unwrap().iter().cloned());
@@ -149,25 +241,25 @@ async fn serve(data: PathBuf, for_cli: bool, needs_setup: bool) -> ! {
         tools["tools"].as_array().unwrap().iter().map(|t| (t["name"].as_str().unwrap().to_string(), t["inputSchema"].clone())).collect();
     let list = Arc::new(ToolList::from_json(&tools.to_string(), Host::Desktop).expect("the tools"));
     let secret = Secret::generate().expect("a token");
+    let ready = Arc::new(AtomicBool::new(false));
+    let in_hand = Arc::new(AtomicUsize::new(0));
+    let stats = Arc::new(Stats::new());
     let app = Arc::new(App {
         data: data.clone(),
-        token: secret.expose().to_string(),
+        token: secret.clone(),
         version: env::var("FAKE_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string()),
         port: Mutex::new(0),
-        ready: AtomicBool::new(false),
-        needs_setup,
-        launched_by: Mutex::new(if for_cli { "cli" } else { "user" }.to_string()),
-        done: Notify::new(),
-        done_asked: AtomicBool::new(false),
+        ready: ready.clone(),
+        needs_setup: modes.needs_setup,
+        life: Mutex::new(Life { launched_by: if for_cli { "cli" } else { "user" }, quitting: false }),
+        stats: stats.clone(),
+        in_hand: in_hand.clone(),
+        runtime: Handle::current(),
+        writing: Mutex::new(()),
     });
-    let page = Arc::new(FakePage { data: data.clone(), schemas, needs_setup });
-    let server = McpServer::new(page, list, Arc::new(RwLock::new(Access::Token(secret))), Arc::new(Stats::new()));
-    let routes = Router::new()
-        .route("/health", get(health))
-        .route("/app/show", post(show))
-        .route("/app/done", post(done))
-        .with_state(app.clone())
-        .fallback_service(server.router(CancellationToken::new()));
+    let page = Arc::new(FakePage { data: data.clone(), schemas, modes, ready: ready.clone(), in_hand });
+    let server = McpServer::new(page, list, Arc::new(RwLock::new(Access::Token(secret))), stats).with_app(Arc::new(Control(app.clone())));
+    let routes = server.router(CancellationToken::new());
     let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.expect("a port");
     *app.port.lock().unwrap() = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
@@ -181,19 +273,25 @@ async fn serve(data: PathBuf, for_cli: bool, needs_setup: bool) -> ! {
             });
         }
     });
-    // its standard input's end: the command line that holds it gone (a user's app played here quits so too, so that a
-    // test that fails leaves nothing running)
-    let ended = Arc::new(Notify::new());
-    let tell = ended.clone();
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 256];
-        let mut stdin = std::io::stdin();
-        while matches!(stdin.read(&mut buf), Ok(n) if n > 0) {}
-        tell.notify_one();
-    });
-    let starting = {
+    // its standard input's end: the command line that holds it gone
+    let test_owned = env::var_os("FAKE_TEST_OWNED").is_some();
+    {
         let app = app.clone();
-        async move {
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 256];
+            let mut stdin = std::io::stdin();
+            while matches!(stdin.read(&mut buf), Ok(n) if n > 0) {}
+            if test_owned {
+                app.quit("test-over");
+            }
+            let user = app.life.lock().unwrap().launched_by == "user";
+            log(&app.data, if user { "stdin-eof (stays: the user's)" } else { "stdin-eof" });
+            app.finish("stdin-eof");
+        });
+    }
+    {
+        let app = app.clone();
+        tokio::spawn(async move {
             tokio::time::sleep(millis("FAKE_CLI_JSON_MS", 0)).await;
             if let Some(go) = env::var_os("FAKE_CLI_JSON_AFTER").map(PathBuf::from) {
                 let until = std::time::Instant::now() + Duration::from_secs(30);
@@ -207,59 +305,27 @@ async fn serve(data: PathBuf, for_cli: bool, needs_setup: bool) -> ! {
             app.ready.store(true, Ordering::SeqCst);
             app.write_cli_json();
             log(&app.data, "ready");
-            std::future::pending::<()>().await;
-        }
-    };
-    tokio::select! {
-        _ = starting => unreachable!(),
-        _ = app.done.notified() => app.quit("done"),
-        _ = ended.notified() => app.quit(if app.done_asked.load(Ordering::SeqCst) { "done" } else { "stdin-eof" }),
-        _ = tokio::time::sleep(LIFETIME) => app.quit("lifetime"),
-    }
-}
-
-async fn health(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    if !app.allowed(&headers) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    let ready = app.ready.load(Ordering::SeqCst);
-    Json(json!({"name": "smedcover", "version": app.version, "page": if ready { "ready" } else { "loading" }, "ready": ready, "needsSetup": app.needs_setup && ready}))
-        .into_response()
-}
-
-async fn show(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    if !app.allowed(&headers) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    log(&app.data, "show");
-    *app.launched_by.lock().unwrap() = "user".into();
-    app.write_cli_json();
-    Json(json!({})).into_response()
-}
-
-async fn done(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    if !app.allowed(&headers) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    if app.launched_by.lock().unwrap().as_str() == "cli" {
-        log(&app.data, "done");
-        app.done_asked.store(true, Ordering::SeqCst);
-        let quit = app.clone();
-        tokio::spawn(async move {
-            // the answer goes out first
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            quit.done.notify_one();
         });
-    } else {
-        log(&app.data, "done (stays: the user's)");
     }
-    Json(json!({})).into_response()
+    tokio::time::sleep(millis("FAKE_LIFETIME_MS", 120_000)).await;
+    app.quit("lifetime")
 }
 
 struct FakePage {
     data: PathBuf,
     schemas: HashMap<String, Value>,
-    needs_setup: bool,
+    modes: Modes,
+    ready: Arc<AtomicBool>,
+    in_hand: Arc<AtomicUsize>,
+}
+
+/// Counts a call in hand while it runs.
+struct InHand<'a>(&'a AtomicUsize);
+
+impl Drop for InHand<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 fn ok(structured: Value) -> Result<CallToolResult, BridgeError> {
@@ -273,10 +339,15 @@ fn refused(message: String) -> Result<CallToolResult, BridgeError> {
 impl PageBridge for FakePage {
     fn call(&self, call: Call) -> BoxFut<'_, Result<CallToolResult, BridgeError>> {
         Box::pin(async move {
+            self.in_hand.fetch_add(1, Ordering::SeqCst);
+            let _in_hand = InHand(&self.in_hand);
             let args = Value::Object(call.args.clone());
             log(&self.data, &format!("call {} {args}", call.tool));
-            if self.needs_setup {
-                return Err(BridgeError::NotReady);
+            if self.modes.needs_setup {
+                return Err(BridgeError::Page {
+                    code: "needs_setup".into(),
+                    message: "SmedCover is not set up yet: open it once and finish its welcome, then try again.".into(),
+                });
             }
             if let Some(schema) = self.schemas.get(&call.tool) {
                 if let Err(why) = schema::check(schema, &args, &call.tool) {
@@ -296,7 +367,7 @@ impl PageBridge for FakePage {
                     ok(json!({"profile": {"id": "p9", "name": "Imported", "created": args["as"] != "current"}, "channel": "c1", "warnings": []}))
                 }
                 "render_preview" => read_result(json!({"content": [{"type": "image", "data": PNG, "mimeType": "image/png"}, {"type": "text", "text": "{\"size\":\"1920x1080\"}"}]})),
-                "fail_tool" => Err(BridgeError::Page { code: "failed".into(), message: "The fake page could not do it.".into() }),
+                "fail_tool" => Err(BridgeError::Page { code: "busy".into(), message: "The fake page could not do it.".into() }),
                 "slow_tool" => {
                     tokio::select! {
                         _ = call.cancel.cancelled() => {
@@ -317,7 +388,11 @@ impl PageBridge for FakePage {
     }
 
     fn page(&self) -> PageState {
-        PageState::Ready { epoch: 1 }
+        if self.ready.load(Ordering::SeqCst) {
+            PageState::Ready { epoch: 1 }
+        } else {
+            PageState::Loading
+        }
     }
 }
 
@@ -359,7 +434,7 @@ impl FakePage {
         let total = jobs.len();
         let mut files = Vec::new();
         for (i, (channel, title, size)) in jobs.into_iter().enumerate() {
-            if call.cancel.is_cancelled() {
+            if call.cancel.is_cancelled() || (self.modes.export_cancelled && i == 1) {
                 return ok(json!({"dir": dir.to_string_lossy(), "files": files, "cancelled": true}));
             }
             let name = format!("{}_{}.{ext}", safe(&channel), safe(&size));

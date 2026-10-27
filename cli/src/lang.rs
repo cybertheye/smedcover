@@ -1,15 +1,17 @@
-//! The language the command line speaks, Chinese or English, as the app picks its own: the language set in the app
-//! (`custom.json`'s `settings.lang`), else the system's — the locale's environment (`LC_ALL`, `LC_MESSAGES`, `LANG`),
-//! else, on macOS and Windows, the user's preferred language — else English. What the app answers (a tool's error,
-//! its progress) is in the words it says them in.
+//! The language the command line speaks, Chinese or English, picked as the app picks its own
+//! (`S.settings.lang || detectLang()` in `app.js`): the language set in the app (`custom.json`'s `settings.lang`; until
+//! the app has written that file, the earlier `settings.json`'s under it, as `readSettings` reads them), else the
+//! system's, as the web view's `navigator.language` has it — the user's preferred language on macOS and Windows, the
+//! locale's environment (`LC_ALL`, `LC_MESSAGES`, `LANG`) elsewhere and when the system says none — else Chinese, as
+//! `detectLang()` falls back to. What the app answers (a tool's error, its progress) is in the words it says them in.
 
 use std::fs;
 use std::path::Path;
 
 use serde_json::Value;
 
-/// The most of `custom.json` read to find the language.
-const MAX_CUSTOM: u64 = 8 * 1024 * 1024;
+/// The most of a settings file read to find the language.
+const MAX_SETTINGS: u64 = 8 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lang {
@@ -29,24 +31,37 @@ impl Lang {
     /// The language for the data folder `data`, as in the module's notes.
     pub fn detect(data: Option<&Path>) -> Lang {
         data.and_then(app_setting)
-            .or_else(|| from_env(|k| std::env::var(k).ok()))
             .or_else(|| system().as_deref().map(of_tag))
-            .unwrap_or(Lang::En)
+            .or_else(|| from_env(|k| std::env::var(k).ok()))
+            .unwrap_or(Lang::Zh)
+    }
+}
+
+fn read_json(path: &Path) -> Option<Value> {
+    let file = fs::File::open(path).ok()?;
+    if file.metadata().ok()?.len() > MAX_SETTINGS {
+        return None;
+    }
+    serde_json::from_reader(std::io::BufReader::new(file)).ok()
+}
+
+fn lang_in(settings: Option<&Value>) -> Option<Lang> {
+    match settings?.get("lang")?.as_str()? {
+        "zh" => Some(Lang::Zh),
+        "en" => Some(Lang::En),
+        _ => None,
     }
 }
 
 /// The language chosen in the app, if one is.
 fn app_setting(data: &Path) -> Option<Lang> {
-    let file = fs::File::open(data.join("custom.json")).ok()?;
-    if file.metadata().ok()?.len() > MAX_CUSTOM {
-        return None;
+    let custom = read_json(&data.join("custom.json"));
+    let own = lang_in(custom.as_ref().and_then(|c| c.get("settings")));
+    // a custom.json the app wrote holds all its settings; before it has, settings.json's are read under it
+    if custom.as_ref().and_then(|c| c.get("by")).and_then(Value::as_str) == Some("app") {
+        return own;
     }
-    let custom: Value = serde_json::from_reader(std::io::BufReader::new(file)).ok()?;
-    match custom.get("settings")?.get("lang")?.as_str()? {
-        "zh" => Some(Lang::Zh),
-        "en" => Some(Lang::En),
-        _ => None,
-    }
+    own.or_else(|| lang_in(read_json(&data.join("settings.json")).as_ref()))
 }
 
 /// The locale's environment, the first of `LC_ALL`, `LC_MESSAGES` and `LANG` that is set.
@@ -106,6 +121,7 @@ fn system() -> Option<String> {
     Some(if id & 0x3ff == 0x04 { "zh" } else { "en" }.to_string())
 }
 
+/// Elsewhere the web view takes the language from the locale's environment.
 #[cfg(not(any(target_os = "macos", windows)))]
 fn system() -> Option<String> {
     None
@@ -136,17 +152,32 @@ mod tests {
     #[test]
     fn the_apps_own_setting_comes_first() {
         let dir = tempfile::tempdir().unwrap();
+        let at = |name: &str, text: &str| fs::write(dir.path().join(name), text).unwrap();
         assert_eq!(app_setting(dir.path()), None);
-        fs::write(dir.path().join("custom.json"), r#"{"by": 1, "settings": {"lang": "zh", "scale": 2}}"#).unwrap();
+        at("custom.json", r#"{"by": "app", "settings": {"lang": "zh", "scale": 2}}"#);
         assert_eq!(app_setting(dir.path()), Some(Lang::Zh));
         assert_eq!(Lang::detect(Some(dir.path())), Lang::Zh);
-        fs::write(dir.path().join("custom.json"), r#"{"settings": {"lang": "en"}}"#).unwrap();
+        at("custom.json", r#"{"by": "app", "settings": {"lang": "en"}}"#);
         assert_eq!(Lang::detect(Some(dir.path())), Lang::En);
         // following the system ("" in the defaults), or a file that is not JSON: no setting
-        fs::write(dir.path().join("custom.json"), r#"{"settings": {"lang": ""}}"#).unwrap();
+        at("custom.json", r#"{"by": "app", "settings": {"lang": ""}}"#);
         assert_eq!(app_setting(dir.path()), None);
-        fs::write(dir.path().join("custom.json"), "not json").unwrap();
+        at("custom.json", "not json");
         assert_eq!(app_setting(dir.path()), None);
+    }
+
+    #[test]
+    fn the_earlier_settings_json_until_the_app_has_written_custom_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = |name: &str, text: &str| fs::write(dir.path().join(name), text).unwrap();
+        at("settings.json", r#"{"lang": "zh", "scale": 2}"#);
+        assert_eq!(app_setting(dir.path()), Some(Lang::Zh), "no custom.json yet");
+        at("custom.json", r#"{"settings": {"scale": 1}}"#);
+        assert_eq!(app_setting(dir.path()), Some(Lang::Zh), "one written by hand: settings.json's under it");
+        at("custom.json", r#"{"settings": {"lang": "en"}}"#);
+        assert_eq!(app_setting(dir.path()), Some(Lang::En), "its own over settings.json's");
+        at("custom.json", r#"{"by": "app", "settings": {}}"#);
+        assert_eq!(app_setting(dir.path()), None, "the app's: settings.json no longer read");
     }
 
     #[test]

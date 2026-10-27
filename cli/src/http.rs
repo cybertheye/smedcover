@@ -48,9 +48,33 @@ impl HangUp {
     }
 }
 
+/// A request sent, its answer not read yet ([`Sent::answer`]).
+pub struct Sent {
+    reader: BufReader<TcpStream>,
+    method: String,
+}
+
+impl Sent {
+    /// Reads the answer's head; its body is the caller's to read. Each read waits as long as the connection's read
+    /// timeout says (none: as long as it takes, till the connection is hung up).
+    pub fn answer(mut self) -> io::Result<Response> {
+        let (status, headers) = read_head(&mut self.reader)?;
+        let body = body_of(self.reader, &headers, status, &self.method)?;
+        Ok(Response { status, headers, body })
+    }
+}
+
 /// Sends `req` to the app on `port` and reads the answer's head; its body is the caller's to read. `read_timeout`:
 /// how long each read may wait (`None`: as long as it takes, for an answer that comes as events).
 pub fn send(port: u16, req: &Request, read_timeout: Option<Duration>) -> io::Result<(Response, HangUp)> {
+    let (sent, hang_up) = start(port, req, read_timeout)?;
+    Ok((sent.answer()?, hang_up))
+}
+
+/// Connects to the app on `port` and sends `req`, without waiting for the answer: it is read with [`Sent::answer`],
+/// on another thread if need be, while the caller keeps the [`HangUp`]. A failure here means the request never
+/// reached the app whole: nothing listens, or the connection was refused or broken while it was being sent.
+pub fn start(port: u16, req: &Request, read_timeout: Option<Duration>) -> io::Result<(Sent, HangUp)> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)?;
     let _ = stream.set_nodelay(true);
@@ -74,10 +98,7 @@ pub fn send(port: u16, req: &Request, read_timeout: Option<Duration>) -> io::Res
     writer.write_all(head.as_bytes())?;
     writer.write_all(req.body)?;
     writer.flush()?;
-    let mut reader = BufReader::new(stream);
-    let (status, headers) = read_head(&mut reader)?;
-    let body = body_of(reader, &headers, status, req.method)?;
-    Ok((Response { status, headers, body }, hang_up))
+    Ok((Sent { reader: BufReader::new(stream), method: req.method.to_string() }, hang_up))
 }
 
 /// An answer's headers, by name and value, in the order they came.

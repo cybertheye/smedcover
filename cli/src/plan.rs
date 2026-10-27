@@ -46,7 +46,7 @@ pub fn render_format(flag: Option<&str>, target: &Path, lang: Lang) -> Result<Op
     let asked = flag.and_then(format);
     let by_name = format_of_file(target);
     match (asked, by_name) {
-        (Some(a), Some(b)) if a != b => Err(Fail::Usage(lang.pick(
+        (Some(a), Some(b)) if a != b => Err(Fail::usage(lang.pick(
             format!("--format {} does not match the file's extension ({}): give one or the other, or make them agree.", flag.unwrap_or(a), target.display()),
             format!("--format {} 和文件的扩展名对不上（{}）：只给其中一个，或者让两者一致。", flag.unwrap_or(a), target.display()),
         ))),
@@ -63,16 +63,16 @@ pub fn list(text: &str, flag: &str, most: usize, lang: Lang) -> Result<Value, Fa
     }
     let items: Vec<&str> = text.split(',').map(str::trim).collect();
     if items.iter().any(|i| i.is_empty()) {
-        return Err(Fail::Usage(lang.pick(
+        return Err(Fail::usage(lang.pick(
             format!("{flag} wants names separated by commas, or `all`; one of them is empty: {text:?}"),
             format!("{flag} 要用逗号隔开的名字，或者 `all`；其中有一个是空的：{text:?}"),
         )));
     }
     if items.iter().any(|i| i.eq_ignore_ascii_case("all")) {
-        return Err(Fail::Usage(lang.pick(format!("{flag}: `all` goes alone."), format!("{flag}：`all` 只能单独用。"))));
+        return Err(Fail::usage(lang.pick(format!("{flag}: `all` goes alone."), format!("{flag}：`all` 只能单独用。"))));
     }
     if items.len() > most {
-        return Err(Fail::Usage(lang.pick(format!("{flag} takes {most} at most."), format!("{flag} 最多 {most} 个。"))));
+        return Err(Fail::usage(lang.pick(format!("{flag} takes {most} at most."), format!("{flag} 最多 {most} 个。"))));
     }
     Ok(json!(items))
 }
@@ -86,12 +86,12 @@ pub fn folder(dir: &Path, cwd: &Path, lang: Lang) -> Result<PathBuf, Fail> {
 
 fn check_path(path: &Path, lang: Lang) -> Result<(), Fail> {
     match path.to_str() {
-        None => Err(Fail::Usage(lang.pick(
+        None => Err(Fail::usage(lang.pick(
             format!("The path is not text the app can take: {}", path.display()),
             format!("这个路径不是 App 能接受的文字：{}", path.display()),
         ))),
         Some(p) if p.chars().count() > MAX_PATH => {
-            Err(Fail::Usage(lang.pick(format!("The path is longer than {MAX_PATH} characters."), format!("路径超过 {MAX_PATH} 个字符。"))))
+            Err(Fail::usage(lang.pick(format!("The path is longer than {MAX_PATH} characters."), format!("路径超过 {MAX_PATH} 个字符。"))))
         }
         Some(_) => Ok(()),
     }
@@ -148,10 +148,10 @@ pub fn batch_args(csv: &str, common: Common) -> Value {
 pub fn csv_text(text: String, lang: Lang) -> Result<String, Fail> {
     let text = text.strip_prefix('\u{feff}').map(str::to_string).unwrap_or(text);
     if text.trim().is_empty() {
-        return Err(Fail::Usage(lang.pick("The CSV is empty.".into(), "CSV 是空的。".into())));
+        return Err(Fail::usage(lang.pick("The CSV is empty.", "CSV 是空的。")));
     }
     if text.chars().count() > MAX_CSV {
-        return Err(Fail::Usage(lang.pick(
+        return Err(Fail::usage(lang.pick(
             format!("The CSV is longer than the app takes at once ({MAX_CSV} characters): split it."),
             format!("CSV 太长，App 一次最多收 {MAX_CSV} 个字符：拆开分几次。"),
         )));
@@ -163,7 +163,7 @@ pub fn csv_text(text: String, lang: Lang) -> Result<String, Fail> {
 pub fn import_args(file: &Path, into: Option<&str>, cwd: &Path, lang: Lang) -> Result<Value, Fail> {
     let file = absolute(file, cwd);
     if !file.is_file() {
-        return Err(Fail::Usage(lang.pick(format!("No such file: {}", file.display()), format!("没有这个文件：{}", file.display()))));
+        return Err(Fail::usage(lang.pick(format!("No such file: {}", file.display()), format!("没有这个文件：{}", file.display()))));
     }
     check_path(&file, lang)?;
     let mut args = json!({"file": file.to_string_lossy()});
@@ -180,11 +180,11 @@ pub fn call_args(text: Option<&str>, lang: Lang) -> Result<Value, Fail> {
     };
     match serde_json::from_str::<Value>(text) {
         Ok(Value::Object(args)) => Ok(Value::Object(args)),
-        Ok(_) => Err(Fail::Usage(lang.pick(
-            "The arguments must be a JSON object, such as {\"title\": \"Hello\"}.".into(),
-            "参数必须是一个 JSON 对象，比如 {\"title\": \"你好\"}。".into(),
+        Ok(_) => Err(Fail::usage(lang.pick(
+            "The arguments must be a JSON object, such as {\"title\": \"Hello\"}.",
+            "参数必须是一个 JSON 对象，比如 {\"title\": \"你好\"}。",
         ))),
-        Err(e) => Err(Fail::Usage(lang.pick(format!("The arguments are not JSON: {e}"), format!("参数不是 JSON：{e}")))),
+        Err(e) => Err(Fail::usage(lang.pick(format!("The arguments are not JSON: {e}"), format!("参数不是 JSON：{e}")))),
     }
 }
 
@@ -193,14 +193,14 @@ pub fn render_target(output: &Path, cwd: &Path, lang: Lang) -> Result<(PathBuf, 
     let target = absolute(output, cwd);
     check_path(&target, lang)?;
     if target.file_name().is_none() || target.is_dir() {
-        return Err(Fail::Usage(lang.pick(
+        return Err(Fail::usage(lang.pick(
             format!("-o wants a file to write, not a folder: {}", target.display()),
             format!("-o 要的是文件，不是文件夹：{}", target.display()),
         )));
     }
     let parent = target.parent().map(Path::to_path_buf).unwrap_or_else(|| cwd.to_path_buf());
     if !parent.is_dir() {
-        return Err(Fail::Usage(lang.pick(format!("No such folder: {}", parent.display()), format!("没有这个文件夹：{}", parent.display()))));
+        return Err(Fail::usage(lang.pick(format!("No such folder: {}", parent.display()), format!("没有这个文件夹：{}", parent.display()))));
     }
     Ok((target, parent))
 }
@@ -233,7 +233,7 @@ pub fn default_size(context: &Value, profile: Option<&str>, lang: Lang) -> Resul
     };
     let Some(found) = found else {
         let all: Vec<String> = profiles.iter().map(|p| format!("{} (id {})", p["name"].as_str().unwrap_or(""), p["id"].as_str().unwrap_or(""))).collect();
-        return Err(Fail::Tool(lang.pick(
+        return Err(Fail::tool("invalid_arguments", lang.pick(
             format!("No profile \"{}\"; the profiles are: {}.", profile.unwrap_or(shown), all.join(", ")),
             format!("没有档案「{}」；现有的档案：{}。", profile.unwrap_or(shown), all.join("、")),
         )));
@@ -250,7 +250,7 @@ pub fn default_size(context: &Value, profile: Option<&str>, lang: Lang) -> Resul
         .or_else(|| sizes.first())
         .and_then(|z| z["key"].as_str())
         .map(str::to_string)
-        .ok_or_else(|| Fail::Tool(lang.pick("The profile has no sizes.".into(), "这个档案没有尺寸。".into())))
+        .ok_or_else(|| Fail::tool("invalid_arguments", lang.pick("The profile has no sizes.", "这个档案没有尺寸。")))
 }
 
 #[cfg(test)]
@@ -261,7 +261,7 @@ mod tests {
 
     fn usage(r: Result<impl std::fmt::Debug, Fail>) -> String {
         match r {
-            Err(Fail::Usage(m)) => m,
+            Err(f) if f.code() == crate::exit::USAGE => f.message().to_string(),
             other => panic!("a usage error, not {other:?}"),
         }
     }
@@ -364,7 +364,7 @@ mod tests {
         let mut not_shown = context.clone();
         not_shown["current"]["profile"] = json!("p2");
         assert_eq!(default_size(&not_shown, Some("Mine"), EN).unwrap(), "1080x1920", "the first ticked");
-        assert!(matches!(default_size(&context, Some("nope"), EN), Err(Fail::Tool(m)) if m.contains("Mine (id p1)")));
-        assert!(matches!(default_size(&context, Some("p3"), EN), Err(Fail::Tool(m)) if m.contains("no sizes")));
+        assert!(matches!(default_size(&context, Some("nope"), EN), Err(f) if f.code() == 1 && f.message().contains("Mine (id p1)")));
+        assert!(matches!(default_size(&context, Some("p3"), EN), Err(f) if f.code() == 1 && f.message().contains("no sizes")));
     }
 }
