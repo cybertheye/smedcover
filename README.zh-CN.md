@@ -706,7 +706,7 @@ Repaint the attached photograph as a loose watercolour painting …
 - **品牌与频道**：档案名称、品牌名，以及品牌 Logo，放在品牌行右端，这个档案所有频道的封面共用（「上传」透明底的 PNG 或 SVG，之后可以「更换」或「移除」；封面上它是「品牌 Logo」图层，可以移动、缩放或隐藏；在这个角上印了字的风格会把字让到 Logo 左边）。「在品牌行显示编号」是一个开关（默认关），旁边是「编号前缀」（「SERIES 01 / 05」）和品牌行的「预览」。下面是频道，每个一张卡片，一行三张（窗口较窄时两张）：主色、名称、副名、代号和频道图形；频道图形显示为一张小图和名字，点「更换…」弹出窗口，从频道图形、我的矢量素材和各组贴纸的小图里选（也可以选「无图形」）。有两个以上频道时，每张卡片左边有一个 ⋮⋮ 把手（页面上方写着「拖 ⋮⋮ 排顺序」）：按住它拖，卡片浮起来跟着鼠标走，要放的地方空出一个它颜色的位置，别的卡片让开，鼠标靠近页面顶部或底部时页面会滚动；松手就挪到那里，算一步撤销（品牌行的编号跟着变），按 Esc 则留在原处。卡片上的 ⋯ 也可以上移、下移，或者删除；最后一张是「＋ 添加频道」。画布上正在显示的频道，卡片用它的颜色框起来，标着「画布上显示中」；编辑别的频道（点它的任何一项或改颜色）时，画布会自动切到那个频道，改动立刻能看到。
 - **尺寸与导出**：每个尺寸一行：自己起的名字、比例、适用的平台、像素，以及一个开关，决定要不要这个尺寸（至少留一个）。「＋ 自定义尺寸」添加一个宽 × 高（64 到 8192）。平台要的每种比例各有一个预设，按平台命名：「B站 / YouTube · 16:9」「B站 / 抖音 / 视频号 · 4:3」「抖音 / 小红书 / 视频号 · 3:4」「YouTube · 9:16」「公众号 · 1:1」「公众号 · 2.35:1」；同一比例的尺寸不管多少像素都叫这个名字，画布下方那一条里和导出窗口里都这样显示（缩略图只显示比例，比如 16:9，名字和像素在鼠标悬停时显示）。也可以给尺寸起自己的名字。尺寸下面是[导出](#导出)的格式、清晰度和文件名规则，导出保存到哪个文件夹（「保存到」，带「更改」），以及[批量出图](#批量出图)。
 - **AI**：一页三张卡片：「文本模型」（一句话生成贴纸和立体图形）、「图片模型」（照片重绘、AI 生成照片）和「抠图」。每张卡片顶上有它的指示灯（见下），绿灯时旁边写着现在用的模型（抠图写着用哪种方式），否则写着指示灯的意思（「还没设置」「正在请求…」「上次出错」）；「抠图」卡片顶上还有「打开模型文件夹」。
-- **Agent 接入**（桌面应用）：让 Claude Code 这类 agent 连进这个窗口的接口，见 [Agent 接入（MCP）](#agent-接入mcp)。
+- **Agent 接入**（桌面应用）：让 Claude Code 这类 agent 连进这个窗口的接口，见 [Agent 接入（MCP）](#agent-接入mcp)；还有「命令行工具」，把 `smedcover` 放进 PATH，见 [命令行](#命令行)。
 
 **AI 指示灯**：每个 AI 服务有一盏灯。没设置时是灰的；设置好了、上一次请求或测试连接没出错时是绿的；正在请求时是黄的；上一次出错了是红的，直到有一次请求成功，或者改了它的设置。绿灯在用这套设置成功请求过一次后写「已连接」，之前写「已就绪」。图片模型「测试连接」时，服务的模型列表里没有这个模型，或者服务不提供模型列表，指示灯两头都不变：既不算出错，也不算确认能用。只有你自己发出的请求才点亮它——生成贴纸和图形、重绘照片、生成照片、抠图和「测试连接」——不会为了点灯另发请求，也只记在这次打开的应用里。三盏灯在「⋯」菜单的「AI」下面合成一盏（有一个在请求就是黄的，有出错的就是红的，只有一个时写出是哪个，都没设置是灰的，否则是绿的，并写出哪些未设置），「设置」左边一列的「AI」旁边也有，每张卡片上是它自己的那盏。
 
@@ -770,7 +770,13 @@ Codex、Cursor、Hermes Agent、OpenClaw 等客户端怎么配，令牌，agent 
 
 `smedcover` 让你在终端或脚本里出封面。它自己不画：它调用的是 agent 用的那些工具，活由 SmedCover 来干。SmedCover 开着时，就在那个窗口里做，每一步你都看得到，和看 agent 做一样。没开时，命令会为这一次启动它，在 macOS 上不显示窗口（Windows 和 Linux 上运行期间窗口会显示出来），命令做完它先把该存的存好再退出：最后一个用它的命令结束约 2 秒后，所以接连运行的命令（脚本里的）共用一个 App。这期间你打开了它的窗口（从访达或程序坞，或者再打开一次 SmedCover），它就归你了，不会退出。
 
-现在还没有安装：「设置 → Agent 接入」里会有一个按钮，把 `smedcover` 放进 PATH（Linux 的 `.deb` 和 `.rpm` 会直接装到 `/usr/bin`）。从源码构建：`cargo build --release -p smedcover-cli` 生成 `target/release/smedcover`；它会启动装在它旁边的 App（`smedcover-app`），或者环境变量 `SMEDCOVER_APP` 指定的那个。
+每个安装包都把它装在 App 旁边：macOS 上是 `SmedCover.app/Contents/MacOS/smedcover`，Windows 上是 SmedCover 安装目录里的 `smedcover.exe`，`.deb` 和 `.rpm` 装到 `/usr/bin/smedcover`。要在终端里直接用，打开「设置 → Agent 接入 → 命令行工具」，点「安装」：
+
+- **macOS**：在 `/usr/local/bin/smedcover` 放一个指向 App 里那个命令的链接。系统会要管理员密码，除非你自己就能写 `/usr/local/bin`（Intel Mac 上装过 Homebrew 时就是这样）。这个名字已经指向另一份 SmedCover（旧版本，或者你挪过位置的 App）时，卡片会说出来，「改为指向这个 App」就改过来；如果是别的不属于 SmedCover 的东西，卡片也会说，但不会动它。「卸载」只删 SmedCover 的链接。App 挪了位置，要再装一次。
+- **Windows**：把 SmedCover 的安装目录加进你自己的 PATH（只对你这个账户，不改系统的），之后新开的终端里就有 `smedcover`。「卸载」把它拿掉。
+- **Linux**：`.deb` 和 `.rpm` 已经装进 PATH 了，不用再做什么。AppImage 里的命令在终端里用不了，要用请装安装包。
+
+装好后试试 `smedcover --help`。它会启动装在它旁边的 App（`smedcover-app`；macOS 上找不到时用 `/Applications/SmedCover.app`），或者环境变量 `SMEDCOVER_APP` 指定的那个。从源码构建：`cargo build --release -p smedcover-cli` 生成 `target/release/smedcover`；开发版的卡片会说它在哪里，不安装。
 
 ```bash
 smedcover profiles                                   # 档案，以及各自的频道（序号、名称、代号和 id）和尺寸
@@ -920,7 +926,7 @@ smedcover --json export --channels all | jq -r '.files[].path'
 ```bash
 npm install                          # 只安装 Tauri 命令行
 npm run dev                          # 开发窗口，改完界面按 Cmd/Ctrl+R 刷新
-npm run build                        # 正式版安装包，在 target/release/bundle/
+npm run build                        # 正式版安装包，在 target/release/bundle/，带命令行（先由 npm run sidecar 构建）
 npm run tauri -- build --debug       # 调试版，窗口内可右键打开开发者工具
 npm test                             # 前端单元测试
 npm run test:rust                    # Rust 单元测试（cargo test --workspace）
@@ -943,9 +949,11 @@ SMEDCOVER_SELFTEST=/一个空目录的绝对路径 target/release/bundle/macos/S
 
 `SMEDCOVER_SELFTEST_AGENT=1` 让自检也调用 agent 工具，再加 `SMEDCOVER_SELFTEST_MCP=1` 还会通过 HTTP 调用应用自己的 MCP 接口：先像默认那样不带令牌，再要求令牌试一遍，最后改回去（结果在 `report.json` 的 `mcp` 里）；还会调用每个应用都在运行的命令行入口，带令牌和不带令牌各试一遍（`cli`）。`SMEDCOVER_SELFTEST_STAY=1` 不跑自检：应用把数据放在那个目录里，其他照常，窗口一直开着——想手动试点什么（包括接口）又不碰你自己的数据时用它。加上它时，`smedcover-app --cli` 就是命令行启动的那种应用：在 macOS 上窗口隐藏，标准输入关掉就退出；再加 `SMEDCOVER_SELFTEST_WELCOME=1`，空目录会停在首次启动的欢迎页上，而不是用示例档案开始。
 
+`SMEDCOVER_SELFTEST_CLI_BIN=/某个空目录` 让自检像「设置 → Agent 接入」在 `/usr/local/bin` 里那样，把命令行装进这个目录，不要密码，再卸掉（`report.json` 里的 `cliInstall`；macOS，App 在 `.app` 包里时）。
+
 `SMEDCOVER_DATA=/某个目录` 让应用换一个数据目录，不管怎么启动都算，正常启动也一样（命令行的 `--data` 就是设它）；自检目录仍然优先。这个目录应当只有你自己能写：应用的锁、命令行的 `cli.json` 和令牌都放在那里。
 
-`.github/workflows/build.yml` 可在 GitHub Actions 上构建安装包（尚未实际运行过）：macOS 分 Apple 芯片和 Intel 两个版本（`.dmg`、`.app.tar.gz`），Windows x64（`.exe`、`.msi`），Linux x64（`.deb`、`.rpm`、`.AppImage`）。
+`.github/workflows/build.yml` 可在 GitHub Actions 上构建安装包（尚未实际运行过）：macOS 分 Apple 芯片和 Intel 两个版本（`.dmg`、`.app.tar.gz`），Windows x64（`.exe`、`.msi`），Linux x64（`.deb`、`.rpm`、`.AppImage`），每个都带命令行；另外每个平台单独有一份命令行 `smedcover-cli-<平台>`（`.tar.gz` 里的 `smedcover`；Windows 是 `smedcover.exe`）。
 
 ## 待办
 

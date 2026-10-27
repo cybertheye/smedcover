@@ -18,7 +18,7 @@ Claude Code、Codex、Cursor、Hermes Agent、OpenClaw 这类 agent，可以通�
 - agent 在你开着的窗口里干活：改文字、换风格，摆放、增删图层，加照片、裁切、抠图，出预览，用「你看着办」抽几手，导出，批量出图。你看着它一步步做。每一处改动都是窗口里的一步撤销，哪一步都能撤回。
 - 它通过一个只在这台电脑上监听的接口连进窗口：`http://127.0.0.1:25277/mcp`（MCP 的 Streamable HTTP）。
 - agent 经它读到的东西（封面、预览、照片、导出的结果）会交给这个 agent 和它用的模型，和你交给它的其他东西一样。它按链接加的照片由 SmedCover 下载。除此之外什么都不会发出去。
-- 现在只有桌面应用有。计划中、还没做的（见 [TODO.md](TODO.md)）：命令行（`smedcover batch`、`render`、`export`、`profiles`、`import`），底下调同一套工具；没有窗口的服务器（`smedcover serve`），给服务器上的 agent 用，一定要令牌。
+- 现在桌面应用有，命令行 `smedcover`（`batch`、`render`、`export`、`profiles`、`import`、`call`，见 [命令行](README.zh-CN.md#命令行)）底下调的也是同一套工具。计划中、还没做的（见 [TODO.md](TODO.md)）：没有窗口的服务器（`smedcover serve`），给服务器上的 agent 用，一定要令牌。
 
 ## 打开接口
 
