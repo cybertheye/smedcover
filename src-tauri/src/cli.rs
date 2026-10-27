@@ -21,8 +21,9 @@
 //!   crashed or was killed); the stdin is watched from the start, the endpoint there or not. From
 //!   then `cli.json` says `"quitting": true` and the app goes on taking calls: another command line
 //!   that found it (before or since) uses it without saying it is done, each request of theirs putting
-//!   the quitting off. The app waits till no call is in hand and none has come for [`QUIET_FOR`] (from
-//!   the last request showing the token, or from the moment it was told: [`quiet`]), then asks the
+//!   the quitting off. The app waits till no call is in hand and neither a request nor a call has come
+//!   for [`QUIET_FOR`] (from the last request showing the token, the end of the last call, or the moment
+//!   it was told: [`quiet`]), then asks the
 //!   page to write what waits (the event `app-quit`: its `flushWrites()`, then `app_quit`), 5 s at most,
 //!   and exits — unless a request came meanwhile, when it waits again. Not if the window has been shown
 //!   to the user by then (`POST /app/show`, a second launch on the folder, on macOS the app opened
@@ -306,11 +307,12 @@ struct CliState {
     last_request: Option<Instant>,
 }
 
-/// Whether an app that is to quit may now: no call in hand, and no request for [`QUIET_FOR`], counted
-/// from the last one (`last_request`) or from when the app was told it was to quit (`told`), whichever
-/// came later.
-fn quiet(now: Instant, told: Instant, last_request: Option<Instant>, calls: usize) -> bool {
-    let since = last_request.map_or(told, |r| r.max(told));
+/// Whether an app that is to quit may now: no call in hand, and for [`QUIET_FOR`] no request and no
+/// call, counted from the last request (`last_request`), the last moment a call was seen in hand
+/// (`last_busy`: a long call's end) or the moment the app was told it was to quit (`told`), whichever
+/// came last.
+fn quiet(now: Instant, told: Instant, last_request: Option<Instant>, last_busy: Option<Instant>, calls: usize) -> bool {
+    let since = [last_request, last_busy].into_iter().flatten().fold(told, Instant::max);
     calls == 0 && now.saturating_duration_since(since) >= QUIET_FOR
 }
 
@@ -488,15 +490,23 @@ impl CliApp {
         done.is_some()
     }
 
-    /// Quits once it is [`quiet`] (no call in hand, no request for [`QUIET_FOR`] since the last or
-    /// since `told`) and the page has written what waits ([`QUIT_EVENT`], answered by `app_quit`), or
+    /// Quits once it is [`quiet`] (no call in hand, and for [`QUIET_FOR`] no request and no call, since
+    /// the last of either or since `told`) and the page has written what waits ([`QUIT_EVENT`], answered by `app_quit`), or
     /// [`QUIT_WITHIN`] after it was asked; a request that came meanwhile has it wait to be quiet again.
     /// Never once the app is the user's.
     async fn quit_when_idle(self: Arc<Self>, told: Instant) {
+        let mut last_busy = None;
         loop {
-            while !quiet(Instant::now(), told, self.last_request(), self.calls()) {
+            loop {
                 if !self.quitting() {
                     return;
+                }
+                let calls = self.calls();
+                if calls > 0 {
+                    last_busy = Some(Instant::now());
+                }
+                if quiet(Instant::now(), told, self.last_request(), last_busy, calls) {
+                    break;
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
@@ -816,19 +826,22 @@ mod tests {
     fn the_quiet_before_quitting() {
         let told = Instant::now();
         let s = |n: u64| Duration::from_millis(n);
-        assert!(!quiet(told, told, None, 0), "not at once");
-        assert!(!quiet(told + s(1999), told, None, 0));
-        assert!(quiet(told + s(2000), told, None, 0), "2 s after it was told, no request since");
+        assert!(!quiet(told, told, None, None, 0), "not at once");
+        assert!(!quiet(told + s(1999), told, None, None, 0));
+        assert!(quiet(told + s(2000), told, None, None, 0), "2 s after it was told, no request since");
         // a request before it was told counts from when it was told
-        assert!(quiet(told + s(2000), told, Some(told - s(500)), 0));
+        assert!(quiet(told + s(2000), told, Some(told - s(500)), None, 0));
         // one after puts it off, from that request
-        assert!(!quiet(told + s(3000), told, Some(told + s(1500)), 0));
-        assert!(quiet(told + s(3500), told, Some(told + s(1500)), 0));
+        assert!(!quiet(told + s(3000), told, Some(told + s(1500)), None, 0));
+        assert!(quiet(told + s(3500), told, Some(told + s(1500)), None, 0));
         // a call in hand, however long ago the last request
-        assert!(!quiet(told + s(60_000), told, Some(told), 1));
-        assert!(!quiet(told + s(60_000), told, None, 3));
+        assert!(!quiet(told + s(60_000), told, Some(told), Some(told + s(59_900)), 1));
+        assert!(!quiet(told + s(60_000), told, None, None, 3));
+        // a long call (its request long before) ended: 2 s from its end
+        assert!(!quiet(told + s(61_000), told, Some(told), Some(told + s(60_000)), 0), "1 s after the call ended");
+        assert!(quiet(told + s(62_000), told, Some(told), Some(told + s(60_000)), 0));
         // a clock that seems to go back (an Instant does not, but saturating) is not quiet
-        assert!(!quiet(told, told + s(10), None, 0));
+        assert!(!quiet(told, told + s(10), None, None, 0));
     }
 
     /// The command line done (by /app/done, or by its standard input's end: the same `finish`) quits
