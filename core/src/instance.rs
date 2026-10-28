@@ -56,7 +56,9 @@ pub const EXIT_ALREADY_RUNNING: i32 = 75;
 
 // ---------------------------------------------------------------- app.lock
 
-/// The data folder's lock, held till it is dropped (the app keeps it for as long as it runs).
+/// The data folder's lock, held till it is dropped (the app keeps it for as long as it runs). Its
+/// descriptor is closed on exec, as every file Rust opens: a process the app starts holds a copy of it,
+/// and so the lock, only till that process runs its program (see the tests' `take_soon`).
 #[derive(Debug)]
 pub struct AppLock {
     _file: File,
@@ -260,6 +262,24 @@ mod tests {
         CliFile { pid: std::process::id(), port, token: Secret::generate().unwrap(), version: "0.3.1".into(), launched_by: LaunchedBy::Cli, ready: false, quitting: false }
     }
 
+    /// The lock of `data`, taken once it is let go. A process being started (`Command::spawn`, as
+    /// another test of this binary does) is given a copy of every descriptor of this one, the lock's
+    /// among them, which the system closes only as that process runs its program (close-on-exec): till
+    /// then the lock is held by it too, so a lock let go here may still be held for a moment. Seen in
+    /// two runs out of five with that test beside these; never long.
+    fn take_soon(data: &Path) -> Option<AppLock> {
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(lock) = AppLock::take(data).unwrap() {
+                return Some(lock);
+            }
+            if std::time::Instant::now() >= until {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn a_second_taker_of_the_lock_is_refused_till_the_first_lets_go() {
         let dir = tempfile::tempdir().unwrap();
@@ -272,7 +292,7 @@ mod tests {
         let other = dir.path().join("other");
         assert!(AppLock::take(&other).unwrap().is_some());
         drop(first);
-        assert!(AppLock::take(&data).unwrap().is_some(), "let go when the first goes");
+        assert!(take_soon(&data).is_some(), "let go when the first goes");
         assert!(data.join(LOCK_FILE).is_file(), "the file is left");
     }
 
@@ -288,7 +308,7 @@ mod tests {
         let first = AppLock::take(dir.path()).unwrap().expect("locked, read-only");
         assert!(AppLock::take(dir.path()).unwrap().is_none(), "a second app kept off");
         drop(first);
-        assert!(AppLock::take(dir.path()).unwrap().is_some());
+        assert!(take_soon(dir.path()).is_some(), "let go when the first goes");
     }
 
     #[test]
