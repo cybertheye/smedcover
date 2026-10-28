@@ -9218,11 +9218,18 @@ async function cliInstallTest() {
   const bin = await invoke("selftest_cli_bin").catch(() => null);
   if (!bin) return undefined;
   const r = { bin, steps: [], errors: [] }, no = (e) => r.errors.push(e);
+  // each step noted, a refusal ({kind, message}) among them, as an error and the end of the steps
   const go = async (cmd) => {
-    const s = await invoke(cmd, cmd === "cli_status" ? {} : { prompt: "self-test" }).catch((e) => { throw new Error(e && e.kind ? `${cmd}: ${e.kind}: ${e.message}` : String(e)); });   // a refusal is {kind, message}
-    r.steps.push(`${cmd}: ${s.state}${s.cancelled ? ", cancelled" : ""}`); return s;
+    try {
+      const s = await invoke(cmd, cmd === "cli_status" ? {} : { prompt: "self-test" });
+      r.steps.push(`${cmd}: ${s.state}${s.cancelled ? ", cancelled" : ""}`); return s;
+    } catch (e) {
+      const said = e && e.kind ? `${e.kind}: ${e.message}` : String((e && e.message) || e);
+      r.steps.push(`${cmd}: refused, ${said}`); no(`${cmd}: ${said}`); return null;
+    }
   };
   const s = await go("cli_status");
+  if (!s) { r.ok = false; return r; }
   Object.assign(r, { os: s.os, cli: s.cli, at: s.at });
   if (!s.test) no("the status does not say a self-test's folder stands for /usr/local/bin");
   if (s.os === "macos" && s.state !== "dev") {
@@ -9231,6 +9238,7 @@ async function cliInstallTest() {
     if (s.state !== "absent") no(`before installing: ${s.state}, not absent`);
     for (const [cmd, want] of [["cli_install", "installed"], ["cli_install", "installed"], ["cli_uninstall", "absent"]]) {
       const a = await go(cmd);
+      if (!a) break;
       if (a.state !== want || a.cancelled) no(`${cmd}: ${a.state}${a.cancelled ? ", cancelled" : ""}, not ${want}`);
     }
   }
