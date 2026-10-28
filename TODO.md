@@ -56,8 +56,8 @@
    - 拆出 `core/`，App 改成依赖它。
 2. 场景 3（桌面 MCP）：App 里开 HTTP MCP；设置里开关，显示地址和连着的客户端，给一行可复制的接入命令；"要求令牌"开关（默认关）；页面接收调用；排队和"agent 正在操作"的提示；选中、撤销、重做工具。
 3. 场景 2（CLI）：`batch`、`render`、`export`、`profiles`、`import`；App 没开时怎么启动；装进 PATH；打进安装包，CI 各平台构建。
-   - 做完了（2026-10-28）：命令和 App 那边（A、B）；打进安装包（`bundle.externalBin`，`scripts/sidecar.mjs` 在 `tauri build` 前按目标平台编好；单用 cargo 不需要它）；CI 每个平台带上它，另外单独上传一份命令行；设置 → Agent 接入里的「命令行工具」：macOS 在 `/usr/local/bin` 建链接（要管理员密码，取消了就是「未安装（已取消）」，别人的文件不动），Windows 加进用户 PATH，Linux 的 deb/rpm 自带。
-   - 还没实测：Windows（PATH 按钮、安装包里的 `smedcover.exe`）、Linux 的 deb/rpm、第一次 CI（Intel 交叉编译、新上传的命令行）。
+   - 做完了（2026-10-28）：命令和 App 那边（A、B）；打进安装包（`bundle.externalBin`，`scripts/sidecar.mjs` 在 `tauri build` 前按目标平台编好；单用 cargo 不需要它）；CI 每个平台带上它，另外单独上传一份命令行；设置 → Agent 接入里的「命令行工具」：macOS 在 `/usr/local/bin` 建链接（要管理员密码，取消了就是「未安装（已取消）」，别人的文件不动），Windows 复制到 `%LOCALAPPDATA%\com.cyven.smedcover\bin` 再加进用户 PATH（卸载 App 时 NSIS 钩子删掉它），Linux 的 deb/rpm 自带；从磁盘映像或临时位置运行时不装，先移到「应用程序」。
+   - 还没实测：Windows（PATH 按钮、复制出来的命令、NSIS 卸载钩子、安装包里的 `smedcover.exe`；MSI 卸载会留下那个文件夹）、Linux 的 deb/rpm、第一次 CI（Intel 交叉编译、新上传的命令行）。
 4. 场景 4（服务器）：`smedcover serve`（`/invoke`、`/mcp`、令牌，只听 127.0.0.1，systemd）；无头 Chromium；字体和装字体；`open_project` 导入档案；`export` 返回文件路径；`add_photo` 收本机路径；skill 模板。
 5. 以后：AI 生成类工具（花钱）；stdio 桥；手机布局、给人用的服务器网页、多用户登录。
 

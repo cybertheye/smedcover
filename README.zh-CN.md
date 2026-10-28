@@ -772,11 +772,11 @@ Codex、Cursor、Hermes Agent、OpenClaw 等客户端怎么配，令牌，agent 
 
 每个安装包都把它装在 App 旁边：macOS 上是 `SmedCover.app/Contents/MacOS/smedcover`，Windows 上是 SmedCover 安装目录里的 `smedcover.exe`，`.deb` 和 `.rpm` 装到 `/usr/bin/smedcover`。要在终端里直接用，打开「设置 → Agent 接入 → 命令行工具」，点「安装」：
 
-- **macOS**：在 `/usr/local/bin/smedcover` 放一个指向 App 里那个命令的链接。系统会要管理员密码，除非你自己就能写 `/usr/local/bin`（Intel Mac 上装过 Homebrew 时就是这样）。这个名字已经指向另一份 SmedCover（旧版本，或者你挪过位置的 App）时，卡片会说出来，「改为指向这个 App」就改过来；如果是别的不属于 SmedCover 的东西，卡片也会说，但不会动它。「卸载」只删 SmedCover 的链接。App 挪了位置，要再装一次。
-- **Windows**：把 SmedCover 的安装目录加进你自己的 PATH（只对你这个账户，不改系统的），之后新开的终端里就有 `smedcover`。「卸载」把它拿掉。
+- **macOS**：在 `/usr/local/bin/smedcover` 放一个指向 App 里那个命令的链接。系统会要管理员密码，除非你自己就能写 `/usr/local/bin`（Intel Mac 上装过 Homebrew 时就是这样）。这个名字已经指向另一份 SmedCover（旧版本，或者你挪过位置的 App）时，卡片会说出来，「改为指向这个 App」就改过来；如果是别的不属于 SmedCover 的东西，卡片也会说，但不会动它。「卸载」只删 SmedCover 的链接。App 挪了位置，要再装一次。直接从磁盘映像里、或者在下载的位置打开（系统这时会把它放到一个临时位置运行）时不安装：请先把 SmedCover 移到「应用程序」文件夹，从那里打开，再安装。
+- **Windows**：把 `smedcover.exe` 复制到一个单独的文件夹 `%LOCALAPPDATA%\com.cyven.smedcover\bin`（旁边一个小文件 `app-path` 写着 App 在哪里，命令靠它启动 App），再把这个文件夹加进你自己的 PATH（只对你这个账户，不改系统的），之后新开的终端里就有 `smedcover`。PATH 里只有这个命令，没有 App 的其他程序（比如卸载程序）。更新以后 SmedCover 启动时会重新复制一份。「卸载」把这个文件夹从 PATH 里拿掉并删除；卸载 SmedCover 时（`.exe` 安装包）这个文件夹也会删掉（PATH 里留下的那一项指向不存在的文件夹，不影响什么）。
 - **Linux**：`.deb` 和 `.rpm` 已经装进 PATH 了，不用再做什么。AppImage 里的命令在终端里用不了，要用请装安装包。
 
-装好后试试 `smedcover --help`。它会启动装在它旁边的 App（`smedcover-app`；macOS 上找不到时用 `/Applications/SmedCover.app`），或者环境变量 `SMEDCOVER_APP` 指定的那个。从源码构建：`cargo build --release -p smedcover-cli` 生成 `target/release/smedcover`；开发版的卡片会说它在哪里，不安装。
+装好后试试 `smedcover --help`。它会启动装在它旁边的 App（`smedcover-app`；macOS 上找不到时用 `/Applications/SmedCover.app`；Windows 上复制出来的那份用 `app-path` 写的那个），或者环境变量 `SMEDCOVER_APP` 指定的那个。从源码构建：`cargo build --release -p smedcover-cli` 生成 `target/release/smedcover`；开发版的卡片会说它在哪里，不安装。
 
 ```bash
 smedcover profiles                                   # 档案，以及各自的频道（序号、名称、代号和 id）和尺寸
