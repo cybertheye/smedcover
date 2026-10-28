@@ -116,14 +116,12 @@ jobs:
           if [ "$RUNNER_OS" = macOS ]; then
             find target -path '*/release/bundle/macos/SmedCover.app/Contents/MacOS/smedcover' | grep .
           else
-            dpkg-deb -c target/release/bundle/deb/*.deb | grep -E '/usr/bin/smedcover$'
+            dpkg-deb -c target/release/bundle/deb/*.deb | grep -E '(^|[ /])usr/bin/smedcover$'
           fi
 
-      # And in the NSIS installer, listed by 7-Zip (on the Windows runner): not yet known to list Tauri's installers as
-      # expected, so it reports without failing the build; to be made a check once a run shows its listing.
+      # And in the NSIS installer, listed by 7-Zip (on the Windows runner; 0.4.0's build listed smedcover.exe there).
       - name: Check the Windows installer carries the command line
         if: runner.os == 'Windows'
-        continue-on-error: true
         shell: bash
         run: 7z l target/release/bundle/nsis/*.exe | grep -iE '(^|[\\/ ])smedcover\.exe$'
 
