@@ -41,6 +41,21 @@ test("the command line in the installers: externalBin, built before each build, 
   assert.match(read("src-tauri/build.rs"), /without_sidecar\(\);\n\s*tauri_build::build\(\)/);
 });
 
+test("Windows' copy of the command line: one name for the file naming the app, and the uninstaller's hook removing the folder", () => {
+  const named = (p) => (/const APP_PATH: &str = "([^"]+)";/.exec(read(p)) || [])[1];
+  assert.equal(named("cli/src/app.rs"), "app-path");
+  assert.equal(named("src-tauri/src/install.rs"), "app-path", "install.rs writes what the command line reads");
+  const conf = JSON.parse(read("src-tauri/tauri.conf.json"));
+  assert.equal(conf.bundle.windows.nsis.installerHooks, "windows/hooks.nsh");
+  const hooks = read("src-tauri/windows/hooks.nsh");
+  assert.match(hooks, /^!macro NSIS_HOOK_POSTUNINSTALL$/m);
+  for (const f of ["smedcover.exe", "app-path"]) assert.ok(hooks.includes(`Delete "$LOCALAPPDATA\\\${BUNDLEID}\\bin\\${f}"`), f);
+  assert.ok(hooks.includes(`RMDir "$LOCALAPPDATA\\\${BUNDLEID}\\bin"`), "the folder, only when empty");
+  assert.match(hooks, /\$\{If\} \$UpdateMode <> 1/, "not on an update");
+  assert.match(read("src-tauri/src/install.rs"), /const IDENTIFIER: &str = "com\.cyven\.smedcover";/);
+  assert.equal(conf.identifier, "com.cyven.smedcover", "${BUNDLEID} is the folder install.rs uses");
+});
+
 test("the sidecar's name and its build for each target", () => {
   assert.equal(sidecarName("aarch64-apple-darwin"), "smedcover-aarch64-apple-darwin");
   assert.equal(sidecarName("x86_64-apple-darwin"), "smedcover-x86_64-apple-darwin");

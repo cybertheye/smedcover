@@ -469,6 +469,10 @@ pub fn run() {
     if let Some(data) = data.as_deref() {
         cli::warn_if_shared(data);
     }
+    // on Windows, the command line's copy on the user's PATH made this app's, if it is installed (see install.rs)
+    if cfg!(windows) {
+        std::thread::spawn(install::refresh);
+    }
     // whether the page will wait on the first start's welcome (a self-test's folder gets the sample profile instead)
     let first_start = data.as_deref().is_some_and(cli::no_profile_yet) && (selftest_root().is_none() || selftest_welcome());
     let builder = tauri::Builder::default();

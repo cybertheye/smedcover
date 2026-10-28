@@ -41,6 +41,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/smedcover"]
+    "externalBin": ["binaries/smedcover"],
+    "windows": {
+      "nsis": { "installerHooks": "windows/hooks.nsh" }
+    }
   }
 }

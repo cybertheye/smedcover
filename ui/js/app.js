@@ -3085,7 +3085,11 @@ async function cliRead() {
   AGENTS.cliCancelled = false;
   if (S.mode === "setup" && S.tab.setup === "agents") renderPanel();
 }
-/** Installs or uninstalls it (`cmd`: cli_install, cli_uninstall), the administrator's prompt in the page's language; the prompt cancelled is said on the card alone (not installed, cancelled), a failure as others are. */
+/**
+ * Installs or uninstalls it (`cmd`: cli_install, cli_uninstall), the administrator's prompt in the page's language; the
+ * prompt cancelled is said on the card alone (not installed, cancelled); a refusal or a failure, `{kind, message}`
+ * (install.rs's Fail), in the page's words for its kind (the system's own for `failed`).
+ */
 async function cliDo(cmd) {
   if (AGENTS.cliBusy) return;
   AGENTS.cliBusy = true; renderPanel();
@@ -3093,17 +3097,23 @@ async function cliDo(cmd) {
     const s = await invoke(cmd, { prompt: t(cmd === "cli_install" ? "cli.prompt" : "cli.promptOff") });
     AGENTS.cli = s; AGENTS.cliCancelled = !!s.cancelled;
     if (!s.cancelled) toast(t(cmd === "cli_install" ? "cli.done" : "cli.undone"));
-  } catch (e) { fail(e); cliRead(); }
+  } catch (e) {
+    const kind = e && typeof e === "object" && e.kind;
+    toast(t("msg.failed", ["foreign", "moved", "nothing", "changed"].includes(kind) ? t("cli.err." + kind, (AGENTS.cli && AGENTS.cli.at) || "") : (e && e.message) || String(e)));
+    cliRead();
+  }
   AGENTS.cliBusy = false; renderPanel();
 }
-/** The card's pill and its light, for each state: installed green, another copy's amber, something not SmedCover's red, the others grey. */
-const CLI_PILL = { installed: "running", package: "running", elsewhere: "switching", foreign: "error" }, CLI_DOT = { running: " ok", switching: " busy", error: " err" };
+/** The card's pill and its light, for each state: installed green, another copy's and an app to be moved first amber, something not SmedCover's red, the others grey. */
+const CLI_PILL = { installed: "running", package: "running", elsewhere: "switching", moved: "switching", foreign: "error" }, CLI_DOT = { running: " ok", switching: " busy", error: " err" };
 /**
  * Settings → Agents' card for the command line: what it is; its state and a line on it — installed (on macOS a link in
- * /usr/local/bin to this app's, on Windows the app's folder on the user's PATH, on Linux the package's), another copy's
+ * /usr/local/bin to this app's, on Windows its copy's folder on the user's PATH, on Linux the package's), another copy's
  * link (where it leads), something not SmedCover's in its place (what, left alone, said so), not installed (cancelled,
- * quietly, when the password prompt was), nothing to install (a development build, an AppImage, a copy without it) —
- * with Install, Use this copy or Uninstall as it allows; and the line to try it with, to copy.
+ * quietly, when the password prompt was), an app run from a disk image or moved aside by the system (to be moved to
+ * Applications first), nothing to install (a development build, an AppImage, a copy not a package's, a copy without
+ * it) — with Install, Use this copy or Uninstall as it allows; and the line to try it with, to copy. Shown whether the
+ * endpoint's status could be read or not.
  */
 function cliCard() {
   const c = AGENTS.cli;
@@ -3111,7 +3121,7 @@ function cliCard() {
   const k = c.state === "absent" && AGENTS.cliCancelled ? "cancelled" : c.state, os = c.os === "windows" ? "Win" : "Mac", pill = CLI_PILL[k] || "";
   const what = c.what === "link" ? t("cli.what.link", c.to) : t("cli.what." + (c.what || "file"));
   const says = { absent: t("cli.line.absent" + os, c.at), cancelled: t("cli.line.absent" + os, c.at), installed: t("cli.line.installed" + os, c.at), elsewhere: t("cli.line.elsewhere", c.at, c.to), foreign: t("cli.line.foreign", c.at, what),
-    package: t("cli.line.package", c.at), appimage: t("cli.line.appimage"), dev: t(c.there ? "cli.line.dev" : "cli.line.devNone", c.cli), missing: t("cli.line.missing") }[k] || "";
+    moved: t("cli.line.moved"), package: t("cli.line.package", c.at), appimage: t("cli.line.appimage"), unpackaged: t("cli.line.unpackaged", c.cli), dev: t(c.there ? "cli.line.dev" : "cli.line.devNone", c.cli), missing: t("cli.line.missing") }[k] || "";
   const acts = { absent: ["install"], installed: ["uninstall"], elsewhere: ["use", "uninstall"] }[c.state] || [];
   return el("section", { class: "scard aicard", id: "set-cli" },
     el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("cli.title")), el("small", {}, t("cli.sub"))),
@@ -3158,7 +3168,7 @@ function agentsTab() {
   if (!s) {
     return [head, AGENTS.error
       ? el("div", { class: "mrow" }, el("div", { class: "hint err" }, t("mcp.readFailed", AGENTS.error)), el("button", { class: "btn", onclick: () => { AGENTS.error = ""; renderPanel(); } }, ico("reset", 15), t("mcp.retry")))
-      : el("div", { class: "hint" }, t("mcp.reading"))];
+      : el("div", { class: "hint" }, t("mcp.reading")), cliCard()];
   }
   later("mcp-tick", 15000, agentsLive);
   const port = AGENTS.port ?? String(s.port), good = isPort(port), changed = good && +port !== s.port;
@@ -9201,14 +9211,17 @@ async function cliTest() {
  * The command line put on the PATH (install.rs), as Settings → Agents' card does it, in a folder of the self-test's that
  * stands for /usr/local/bin (SMEDCOVER_SELFTEST_CLI_BIN, an empty one; macOS): this app's smedcover found in its bundle,
  * not installed, installed (a link there to it, no password asked), installed again with nothing to do, uninstalled, not
- * installed. A build not in a bundle says it is a development build and goes no further; elsewhere than on macOS only
- * the status is read.
+ * installed. A build not in a bundle says it is a development build and goes no further. Elsewhere than on macOS the
+ * app gives no such folder (selftest_cli_bin is null) and nothing is done.
  */
 async function cliInstallTest() {
   const bin = await invoke("selftest_cli_bin").catch(() => null);
   if (!bin) return undefined;
   const r = { bin, steps: [], errors: [] }, no = (e) => r.errors.push(e);
-  const go = async (cmd) => { const s = await invoke(cmd, cmd === "cli_status" ? {} : { prompt: "self-test" }); r.steps.push(`${cmd}: ${s.state}${s.cancelled ? ", cancelled" : ""}`); return s; };
+  const go = async (cmd) => {
+    const s = await invoke(cmd, cmd === "cli_status" ? {} : { prompt: "self-test" }).catch((e) => { throw new Error(e && e.kind ? `${cmd}: ${e.kind}: ${e.message}` : String(e)); });   // a refusal is {kind, message}
+    r.steps.push(`${cmd}: ${s.state}${s.cancelled ? ", cancelled" : ""}`); return s;
+  };
   const s = await go("cli_status");
   Object.assign(r, { os: s.os, cli: s.cli, at: s.at });
   if (!s.test) no("the status does not say a self-test's folder stands for /usr/local/bin");

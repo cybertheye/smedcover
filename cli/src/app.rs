@@ -8,7 +8,8 @@
 //!   or whose `/health` is not SmedCover's with that token is stale: no app. One that is not the user's own, or that
 //!   others may read, is not taken at all.
 //! - With no app running, the command line starts one: `smedcover-app --cli`, beside its own executable (links
-//!   followed; on macOS, else in `/Applications/SmedCover.app`) or `SMEDCOVER_APP`, with its standard input a pipe
+//!   followed; on macOS, else in `/Applications/SmedCover.app`), or the one an `app-path` file beside it names (the
+//!   copy on Windows' PATH), or `SMEDCOVER_APP`, with its standard input a pipe
 //!   held open while it works (the app quits when it reaches its end: the command line gone), its output to nothing
 //!   (or `logs/cli-app.log`, when the data folder has a `logs/`), the environment passed on (and `SMEDCOVER_DATA`,
 //!   when a data folder was named), and out of the terminal's reach for Ctrl-C (a process group of its own), which the
@@ -201,19 +202,37 @@ pub fn pid_alive(pid: u32) -> bool {
     }
 }
 
-/// The app's executable: `SMEDCOVER_APP`, else `smedcover-app` beside this executable (a link to it followed, as
-/// the one on the PATH is), else, on macOS, the one in `/Applications`.
+/// The app's executable: `SMEDCOVER_APP`, else the one an [`APP_PATH`] file beside this executable names, else
+/// `smedcover-app` beside this executable (a link to it followed, as the one on the PATH is), else, on macOS, the one
+/// in `/Applications`.
 pub fn app_executable() -> Result<PathBuf, String> {
-    if let Some(app) = env::var_os("SMEDCOVER_APP").filter(|a| !a.is_empty()) {
-        return Ok(PathBuf::from(app));
-    }
     let me = env::current_exe().map_err(|e| e.to_string())?;
     let me = fs::canonicalize(&me).unwrap_or(me);
-    let beside = me.with_file_name(format!("smedcover-app{}", env::consts::EXE_SUFFIX));
-    if cfg!(target_os = "macos") && !beside.is_file() && Path::new(MAC_APP).is_file() {
-        return Ok(PathBuf::from(MAC_APP));
+    Ok(app_executable_for(&me, env::var_os("SMEDCOVER_APP"), cfg!(target_os = "macos").then_some(Path::new(MAC_APP))))
+}
+
+/// The file beside a copy of the command line that names the app's executable (its whole path, as text): the copy
+/// Settings → Agents puts on the PATH on Windows, in a folder of its own (the app's `install.rs`), which has no app
+/// beside it.
+pub const APP_PATH: &str = "app-path";
+
+/// [`app_executable`] for the command line at `me` (links followed), `SMEDCOVER_APP` as `from_env`, and the place the
+/// app is looked for last (`/Applications` on macOS): an `app-path` file beside `me` is taken as it names the app, there
+/// or not (the error then says where it was looked for).
+fn app_executable_for(me: &Path, from_env: Option<std::ffi::OsString>, last: Option<&Path>) -> PathBuf {
+    if let Some(app) = from_env.filter(|a| !a.is_empty()) {
+        return PathBuf::from(app);
     }
-    Ok(beside)
+    if let Ok(named) = fs::read_to_string(me.with_file_name(APP_PATH)) {
+        if !named.trim().is_empty() {
+            return PathBuf::from(named.trim());
+        }
+    }
+    let beside = me.with_file_name(format!("smedcover-app{}", env::consts::EXE_SUFFIX));
+    match last {
+        Some(last) if !beside.is_file() && last.is_file() => last.to_path_buf(),
+        _ => beside,
+    }
 }
 
 /// The app being worked with, and whether this command started it.
@@ -546,5 +565,30 @@ mod tests {
         std::io::Write::write_all(&mut out, b"new").unwrap();
         assert_eq!(fs::read(logs.join("cli-app.log")).unwrap(), b"new");
         assert_eq!(fs::metadata(logs.join("cli-app.log.1")).unwrap().len(), MAX_LOG + 1);
+    }
+
+    #[test]
+    fn the_app_is_found_by_the_environment_the_app_path_file_beside_or_its_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = |name: &str| format!("{name}{}", env::consts::EXE_SUFFIX);
+        let me = dir.path().join(exe("smedcover"));
+        let beside = dir.path().join(exe("smedcover-app"));
+        let last = dir.path().join("Applications/SmedCover.app/Contents/MacOS/smedcover-app");
+        fs::create_dir_all(last.parent().unwrap()).unwrap();
+        fs::write(&last, "app").unwrap();
+        // nothing beside it: the last place (macOS's /Applications), else beside it, there or not
+        assert_eq!(app_executable_for(&me, None, Some(&last)), last);
+        assert_eq!(app_executable_for(&me, None, None), beside);
+        fs::write(&beside, "app").unwrap();
+        assert_eq!(app_executable_for(&me, None, Some(&last)), beside, "the app beside it first");
+        // an app-path file beside it (Windows' copy on the PATH) names the app, there or not; empty, it names none
+        let named = dir.path().join("Program Files/SmedCover/smedcover-app.exe");
+        fs::write(dir.path().join(APP_PATH), format!("{}\r\n", named.display())).unwrap();
+        assert_eq!(app_executable_for(&me, None, Some(&last)), named);
+        fs::write(dir.path().join(APP_PATH), "  \n").unwrap();
+        assert_eq!(app_executable_for(&me, None, Some(&last)), beside);
+        // SMEDCOVER_APP before all (an empty one is none)
+        assert_eq!(app_executable_for(&me, Some("/x/app".into()), Some(&last)), PathBuf::from("/x/app"));
+        assert_eq!(app_executable_for(&me, Some("".into()), Some(&last)), beside);
     }
 }
