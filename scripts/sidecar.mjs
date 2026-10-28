@@ -29,7 +29,8 @@ export function plan(triple, host, debug) {
   return { args, built: path.join(...(triple !== host ? [triple] : []), debug ? "debug" : "release", exe) };
 }
 
-const ran = process.argv[1] && path.resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase();
+/** Whether this file is the one node was told to run (through a link too), not one a test imports. */
+const ran = (() => { try { return !!process.argv[1] && fs.realpathSync(process.argv[1]).toLowerCase() === fs.realpathSync(fileURLToPath(import.meta.url)).toLowerCase(); } catch { return false; } })();
 if (ran) {
   const host = /^host: (.+)$/m.exec(execFileSync("rustc", ["-vV"], { encoding: "utf8" }))[1].trim();
   const triple = process.argv[2] || process.env.TAURI_ENV_TARGET_TRIPLE || host;
@@ -38,7 +39,8 @@ if (ran) {
   const { args, built } = plan(triple, host, debug);
   console.log(`sidecar: cargo ${args.join(" ")}`);
   const run = spawnSync("cargo", args, { cwd: ROOT, stdio: "inherit" });
-  if (run.status !== 0) process.exit(run.status ?? 1);
+  if (run.error) { console.error(`sidecar: cargo could not be run: ${run.error.message}`); process.exit(1); }
+  if (run.status !== 0) process.exit(run.status || 1);   // a signal leaves no status
   const { target_directory } = JSON.parse(execFileSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], { cwd: ROOT, encoding: "utf8", maxBuffer: 64 << 20 }));
   const from = path.join(target_directory, built), to = path.join(ROOT, "src-tauri", "binaries", sidecarName(triple));
   fs.mkdirSync(path.dirname(to), { recursive: true });
