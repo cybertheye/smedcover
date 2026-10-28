@@ -70,10 +70,14 @@ jobs:
 
       - run: npm ci
 
+      # The repository variable SKIP_TESTS set to true (gh variable set SKIP_TESTS --body true) builds without the
+      # tests, for a release cut without them; delete it after (gh variable delete SKIP_TESTS).
       - name: Run front-end tests
+        if: vars.SKIP_TESTS != 'true'
         run: npm test
 
       - name: Run Rust tests
+        if: vars.SKIP_TESTS != 'true'
         run: cargo test --workspace --locked
 
       # beforeBuildCommand builds the command line, smedcover, for the job's target first (scripts/sidecar.mjs: with

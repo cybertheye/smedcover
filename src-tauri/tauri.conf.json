@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SmedCover",
   "mainBinaryName": "smedcover-app",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "identifier": "com.cyven.smedcover",
   "build": {
     "frontendDist": "../ui",
