@@ -400,6 +400,7 @@ fn start(o: &Opts) -> Result<Started, Fail> {
         cmd.env("SMEDCOVER_DATA", o.data);
     }
     own_group(&mut cmd);
+    keep_own_handles();
     let mut child = cmd.spawn().map_err(|e| {
         Fail::app("no_app", lang.pick(format!("Could not start SmedCover ({}): {e}", exe.display()), format!("启动不了 SmedCover（{}）：{e}", exe.display())))
     })?;
@@ -442,6 +443,30 @@ fn own_group(cmd: &mut Command) {
 
 #[cfg(not(any(unix, windows)))]
 fn own_group(_: &mut Command) {}
+
+/// On Windows a process started is handed every handle of this one that may be inherited (the standard library starts
+/// it so), this command line's own standard input, output and error among them, which it was itself handed so: the app
+/// would hold the pipe a script reads the command's output from till the app quits, and the script, waiting for that
+/// pipe's end, would wait for the app rather than for the command — for good, if the user has opened the app's window
+/// meanwhile. They are made this process's alone first; the app is given its own, as `start` sets them, all the same.
+#[cfg(windows)]
+fn keep_own_handles() {
+    use windows_sys::Win32::Foundation::{SetHandleInformation, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+    for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: GetStdHandle takes no pointer, and SetHandleInformation is given a handle of this process's (one that
+        // cannot be changed so, a console's on an old system, is left as it is)
+        unsafe {
+            let handle = GetStdHandle(which);
+            if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
+                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn keep_own_handles() {}
 
 impl AppLink {
     /// Whether this command started the app.

@@ -28,6 +28,10 @@ ctrlc = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
+# The app started kept from this process's own standard handles (app.rs, keep_own_handles).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console"] }
+
 # The tools' timeouts, read from ui/tools.json as it is built (build.rs).
 [build-dependencies]
 serde_json = { workspace = true }

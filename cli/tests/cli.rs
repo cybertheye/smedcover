@@ -340,7 +340,9 @@ enum Stub {
 }
 
 /// A stand-in on a port of its own that answers `/health` as `name` does and `/mcp` as `stub` says, with a `cli.json`
-/// leading to it (this process's pid); how many `/mcp` requests came, so far.
+/// leading to it (this process's pid); how many `/mcp` requests came, so far. It reads a request's body before it
+/// answers, as the endpoint does a refused one's: a connection closed with some of it unread is reset, and Windows then
+/// drops the answer the command line has not read yet, which it would take for the app gone.
 fn stub_app(folder: &Folder, name: &'static str, stub: Stub) -> Arc<AtomicUsize> {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -353,9 +355,16 @@ fn stub_app(folder: &Folder, name: &'static str, stub: Stub) -> Arc<AtomicUsize>
             let mut first = String::new();
             let _ = reader.read_line(&mut first);
             let mut line = String::new();
+            let mut length = 0;
             while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                if let Some((header, value)) = line.split_once(':') {
+                    if header.eq_ignore_ascii_case("content-length") {
+                        length = value.trim().parse().unwrap_or(0);
+                    }
+                }
                 line.clear();
             }
+            let _ = reader.by_ref().take(length).read_to_end(&mut Vec::new());
             let mut stream = stream;
             if first.starts_with("GET /health") {
                 let body = json!({"name": name, "version": env!("CARGO_PKG_VERSION"), "page": "ready", "ready": true, "needsSetup": false}).to_string();
