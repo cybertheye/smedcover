@@ -969,9 +969,32 @@ async fn a_body_still_coming_is_closed_by_stop() {
 }
 
 /// A connection that has not finished when the stop's wait is over is cut off: it is gone, and the
-/// port free, when the stop returns.
+/// port free, when the stop returns. Here a request whose head stops coming half way: hyper does
+/// not take it for idle, and would wait for the rest for the server's `HEADER_TIMEOUT`, 10 s.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_connection_still_busy_is_cut_off() {
+async fn a_head_still_coming_is_cut_off() {
+    let e = Endpoint::start();
+    let addr = e.addr();
+    let mut busy = TcpStream::connect(addr).unwrap();
+    busy.write_all(format!("POST /mcp HTTP/1.1\r\nHost: {addr}\r\n").as_bytes()).unwrap();
+    // time for the server to read it: a connection it has read nothing on is closed at once
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let stopping = Instant::now();
+    assert!(!e.running.stop(Duration::from_millis(300)).await, "it had to be cut off");
+    let took = stopping.elapsed();
+    assert!(took >= Duration::from_millis(300) && took < Duration::from_secs(2), "{took:?}");
+    let (answer, closed) = blocking(move || read_till_closed(&mut busy, Duration::from_secs(5))).await;
+    assert!(closed, "closed by the server");
+    assert!(answer.is_empty(), "{answer}");
+    drop(e.server.start(addr, &Handle::current()).expect("the port is free again"));
+}
+
+/// The same for an answer its client stops reading. Not on Windows: there the system takes the
+/// whole answer into its own buffers (a socket left at the default send buffer is sized
+/// dynamically), so the server finishes writing it and the stop is clean.
+#[cfg(not(windows))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_answer_not_read_is_cut_off() {
     let e = Endpoint::start();
     let addr = e.addr();
     // an answer of 32 MB that its client stops reading: the server cannot finish writing it
