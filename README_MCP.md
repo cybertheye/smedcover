@@ -26,7 +26,7 @@ session goes, every tool, how it is built, and what to do when something goes wr
 - What an agent reads through it (the cover, previews, photos, what it exports) goes to that agent and to the model it
   uses, as anything else you give it does. A photo it adds by link is downloaded by SmedCover. Nothing else leaves.
 - It is in the desktop app, and the command line, `smedcover` (`batch`, `render`, `export`, `profiles`, `import`, `call`:
-  [Command line](README.md#command-line)), calls the same tools. Planned, not made yet ([TODO.md](TODO.md)): a server with
+  [README_CLI.md](README_CLI.md)), calls the same tools. Planned, not made yet ([TODO.md](TODO.md)): a server with
   no window (`smedcover serve`) for an agent on a server, which always wants a token.
 
 ## Turning it on

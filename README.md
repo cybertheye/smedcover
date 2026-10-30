@@ -806,7 +806,7 @@ smedcover --json export --channels all | jq -r '.files[].path'
 
 Every command takes:
 
-- `--json` prints the tool's result as JSON (its `structuredContent`, the shape `smedcover tools --json` gives as each tool's `outputSchema`; for `call`, the whole result; for `render`, the file's path, channel and size): one document, whatever happens. A failure prints `{"error": {"kind", "message", "exit"}}`, its kind SmedCover's own when it gave one (`busy`, `invalid_arguments`, `needs_setup`, `timeout`…), else the command line's (`usage`, `unreachable`, `timeout`, `interrupted`…); an export stopped part-way prints its result, the files written so far, with the `error` in it. A command line clap cannot read (an unknown flag) prints its usage message only.
+- `--json` prints the tool's result as JSON (its `structuredContent`, the shape `smedcover tools --json` gives as each tool's `outputSchema`; for `call`, the whole result; for `render`, the file's path, channel and size): one document, whatever happens. A failure prints `{"error": {"kind", "message", "exit"}}`, its kind SmedCover's own when it gave one (`busy`, `invalid_arguments`, `needs_setup`, `timeout`…), else the command line's (`usage`, `unreachable`, `timeout`, `interrupted`…); an export SmedCover answers was cut short (`"cancelled": true`) prints its result, the files written so far, with the `error` in it; one stopped with *Stop waiting* in the window fails as `failed` and lists no files, though those written stay in its folder. A command line clap cannot read (an unknown flag) prints its usage message only.
 - `--quiet` prints no progress and no notes; the results and errors still.
 - `--timeout SECS` gives up on each call after that long (`render` without `--size` makes two). Without it, the command waits as long as SmedCover keeps working on the call: as long as SmedCover itself waits for each tool (see [Timeouts](README_MCP.md#timeouts-progress-and-cancelling)), from its last word of progress.
 - `--data DIR` (or `SMEDCOVER_DATA`) works on another data folder than the app's own; the app started for the command is given it too. A self-test's folder (`SMEDCOVER_SELFTEST`) comes first, for the command as for the app.
@@ -822,6 +822,8 @@ Results go to the standard output; progress (*Writing … (3 of 12)*, one line d
 | 3 | SmedCover could not be reached or started, or needs setting up first: open it once and finish the welcome |
 | 4 | No answer in time: `--timeout`, or SmedCover's own wait for the tool; the call was cancelled |
 | 130 | Interrupted (Ctrl-C) |
+
+Every command and flag in full, what `--json` prints for each, the error kinds, how a run goes with the app, scripting it and what to do when something goes wrong: [README_CLI.md](README_CLI.md).
 
 ## Cover standards
 

@@ -806,7 +806,7 @@ smedcover --json export --channels all | jq -r '.files[].path'
 
 每个命令都接受：
 
-- `--json`：把工具的结果按 JSON 输出（它的 `structuredContent`，格式就是 `smedcover tools --json` 里每个工具的 `outputSchema`；`call` 输出整个结果；`render` 输出文件的路径、频道和尺寸）：不管发生什么，都只输出一份。失败时输出 `{"error": {"kind", "message", "exit"}}`，kind 是 SmedCover 给的那一种（`busy`、`invalid_arguments`、`needs_setup`、`timeout`……），它没给就是命令行自己的（`usage`、`unreachable`、`timeout`、`interrupted`……）；导出中途停下时，输出它的结果（已经写好的文件），里面带着 `error`。clap 读不懂的命令行（未知的参数）只输出用法提示。
+- `--json`：把工具的结果按 JSON 输出（它的 `structuredContent`，格式就是 `smedcover tools --json` 里每个工具的 `outputSchema`；`call` 输出整个结果；`render` 输出文件的路径、频道和尺寸）：不管发生什么，都只输出一份。失败时输出 `{"error": {"kind", "message", "exit"}}`，kind 是 SmedCover 给的那一种（`busy`、`invalid_arguments`、`needs_setup`、`timeout`……），它没给就是命令行自己的（`usage`、`unreachable`、`timeout`、`interrupted`……）；SmedCover 回答导出被中途截断（`"cancelled": true`）时，输出它的结果（已经写好的文件），里面带着 `error`；在窗口里点「不等了」停下的，以 `failed` 失败，不列文件，不过已经写好的留在文件夹里。clap 读不懂的命令行（未知的参数）只输出用法提示。
 - `--quiet`：不输出进度和提示；结果和错误照样输出。
 - `--timeout 秒数`：每一次调用等这么久就放弃（不给 `--size` 的 `render` 会调用两次）。不给时，只要 SmedCover 还在做，命令就一直等：每次有进度后，等 SmedCover 自己为这个工具等的那么久（见[超时、进度和取消](README_MCP.zh-CN.md#超时进度和取消)）。
 - `--data 目录`（或 `SMEDCOVER_DATA`）：用另一个数据文件夹，而不是 App 自己的；为命令启动的 App 也用它。自检目录（`SMEDCOVER_SELFTEST`）优先，命令和 App 都一样。
@@ -822,6 +822,8 @@ smedcover --json export --channels all | jq -r '.files[].path'
 | 3 | 连不上或启动不了 SmedCover，或者它还要先设置：打开它一次，走完欢迎页 |
 | 4 | 没有及时回答：`--timeout`，或者 SmedCover 自己为这个工具等的时间到了；这次调用已取消 |
 | 130 | 被中断（Ctrl-C） |
+
+每个命令和参数的完整说明、每个命令 `--json` 输出什么、错误种类、命令和 App 之间一次运行怎么进行、怎么写脚本，以及出问题时怎么办，见 [README_CLI.zh-CN.md](README_CLI.zh-CN.md)。
 
 ## 封面标准
 
