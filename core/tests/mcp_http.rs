@@ -1251,6 +1251,9 @@ fn read_till(stream: &mut TcpStream, words: &str, wait: Duration) -> String {
 
 /// rmcp's client for `e`, showing its token if it wants one.
 fn rmcp_transport(e: &Endpoint) -> StreamableHttpClientTransport<reqwest::Client> {
+    // Built with the app, reqwest has rustls but no provider for it, which it would panic for: the one tauri-plugin-updater
+    // installs (ring's). Built alone, reqwest has no TLS, and this changes nothing for it.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
     let config = StreamableHttpClientTransportConfig::with_uri(e.url("/mcp"));
     let config = match e.token() {

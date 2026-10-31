@@ -137,3 +137,21 @@ test("a .sig checked as the updater checks it: the file, the key, the version in
   assert.throws(() => checkSignature(file, "not a signature", pubkey), /not a minisign signature/);
 });
 
+test("updates in the app: the plugin, where it reads, and the commands Settings → About calls", () => {
+  assert.match(read("src-tauri/Cargo.toml"), /^tauri-plugin-updater = "2\.14"$/m, "2.14: the version signed in a package checked");
+  const lib = read("src-tauri/src/lib.rs");
+  assert.match(lib, /\.plugin\(tauri_plugin_updater::Builder::new\(\)\.build\(\)\)/);
+  assert.match(lib, /\.manage\(update::Updates::default\(\)\)/);
+  const app = read("ui/js/app.js");
+  for (const cmd of ["update_status", "update_check", "update_download", "update_cancel", "update_install", "update_release_page", "selftest_updates"]) {
+    assert.ok(lib.includes(`update::${cmd},`), `${cmd} is a command`);
+    assert.ok(app.includes(`"${cmd}"`), `the page calls ${cmd}`);
+  }
+  const u = JSON.parse(read("src-tauri/tauri.conf.json")).plugins.updater;
+  // the manifest the job `updater` puts on each release, the latest one's
+  assert.deepEqual(u.endpoints, ["https://github.com/cybertheye/smedcover/releases/latest/download/latest.json"]);
+  assert.equal(u.requireSignedVersion, true);
+  assert.equal(u.windows.installMode, "passive");
+  assert.match(read(".github/workflows/build.yml"), /gh release upload "\$GITHUB_REF_NAME" latest\.json/);
+});
+

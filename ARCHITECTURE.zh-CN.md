@@ -930,6 +930,20 @@ agent 调用 11.1 那些工具的入口。它在 core 里，应用和服务器�
 
 各平台的代码用 `cfg!` 而不是 `#[cfg]` 来选，所以在 macOS 上构建时全部都会编译（Linux 和 Windows 的几种状态、Windows 的副本也在那里测）；只有读写注册表的调用（还有 macOS 的 `statfs`）只在各自的系统上有（别的平台上会说不支持，也从不调用）。在 macOS 上自检目录可以代替 `/usr/local/bin`：`SMEDCOVER_SELFTEST_CLI_BIN`（绝对路径，只在有 `SMEDCOVER_SELFTEST` 时读，别的系统上不管），在那里安装和卸载从不通过提示框，状态里是 `test: true`（13）。
 
+### 10.10 更新（`src-tauri/src/update.rs`、`scripts/updater.mjs`）
+
+**发布出去的东西。** 推送标签的构建（`.github/workflows/build.yml`）给每个更新时要用的安装包签名：`src-tauri/tauri.release.conf.json` 打开 `bundle.createUpdaterArtifacts`，`tauri build` 用仓库 secrets 里的密钥（`TAURI_SIGNING_PRIVATE_KEY`，密码 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`）签名，每个包旁边一个 `.sig`：minisign 格式，Ed25519 签的是文件的 BLAKE2b-512，另外签一行写着版本的可信注释（`version:0.6.0`）。只有 CI 带上这个文件，所以 `npm run build` 不需要密钥。每个平台构建完，`scripts/updater.mjs verify` 用 Node 自带的加密库核对它的打包目录（每个更新包都有 `.sig`，用 `tauri.conf.json` 的 `plugins.updater.pubkey` 对应的私钥签、签的是这次构建的版本）；所有平台都构建完后，`updater` 任务下载草稿 release，把每个文件再核对一遍（`manifest`），上传 `latest.json`：`{version, notes, pub_date, platforms}`，每个文件放在 `{os}-{arch}-{installer}` 下（`darwin-aarch64-app`、`windows-x86_64-nsis`、`windows-x86_64-msi`、`linux-x86_64-appimage`、`-deb`、`-rpm`），更新器先找这一项（App 是从哪种安装包装的，打包时写进了可执行文件），找不到再用 `{os}-{arch}`（NSIS 安装程序、AppImage）。只由这一个任务写：tauri-action 自己的（`includeUpdaterJson`）关掉了，四个任务轮流读写同一个文件会互相丢掉条目。标签不是 `v<版本>`，或者有平台没有签好名的文件，这个任务就失败；有平台构建失败就不会有 `latest.json`。`notes` 目前是空的。
+
+**App 这边**（tauri-plugin-updater 2.14，在 `lib.rs` 里注册；状态放在 `Updates` 里）。`tauri.conf.json` 的 `plugins.updater`：地址 `https://github.com/cybertheye/smedcover/releases/latest/download/latest.json`（最新已发布版本的；草稿不算，所以点发布才会推送更新）；`requireSignedVersion`（清单本身没有签名：不开的话，一份把新版本号和旧版本的包、签名配在一起的清单，就能让 App 装回旧版本）；Windows 的 `installMode: passive`；公钥。给「设置 → 关于」（`app.js` 的 `aboutTab()`）用的命令：
+
+- `update_status` → `{version, place, found, downloaded, downloading}`：`place` 是 `installed`、`dev`（macOS：不在 `.app` 包里；其他系统：`tauri::utils::platform::bundle_type()` 为空，打包时没有标记）或 `moved`（macOS：在磁盘映像的卷上，或被 App Translocation 挪开，`install::moved`）；`found` 是找到的新版本（`version`、`date`、`notes`），App 运行期间一直存在 `Updates` 里，页面重新加载后还在。
+- `update_check(proxy)`：插件的检查，走给定的代理（`updProxy()`：抠图的，没有就用 AI 服务的；只写 `host:port` 的当成 http），没给就用系统和环境变量的代理（reqwest 自己处理），最多 30 秒。为别的版本下载好的内容会丢掉。
+- `update_download`：插件的下载，放在一个任务里，`update_cancel` 用它的 abort handle 取消；超时放宽到一小时（检查用的超时管的是整个请求）；进度通过 `update-progress`（`{version, done, total}`，最多每 150 毫秒一次）；下载时就按签名和签的版本核对（插件的 `download` 会验证），只为仍是当前找到的那个版本保留。
+- `update_install`：`place` 不是 `installed` 时拒绝（`{kind: "place", place}`）；有调用在进行时拒绝（`busy`：`McpHost::calls_in_hand()` 加上命令行端点的 `in_flight`）；没有为找到的版本下载好内容时拒绝（`none`）。页面在调用前先执行 `flushWrites()`。插件再核对一遍然后安装（macOS：原地替换 `.app` 包；Linux：替换 AppImage，或者通过 `pkexec` 安装 `.deb`、`.rpm`；Windows：启动安装程序，passive 模式，`on_before_exit` 之后进程立刻退出，它做的就是 `RunEvent::Exit` 会做的事：删掉 `cli.json`，`McpHost::shut()`）；然后 `request_restart()`，先走 `ExitRequested` 和 `Exit`（`cli.json` 删掉，端点停下），Tauri 再重新启动 App（macOS 上通过 `open -n`，即 LaunchServices）。新 App 找不到 `cli.json`，就等数据文件夹的锁（`cli::take_or_defer`，`FIND_WITHIN`），直到旧的退出。
+- `update_release_page(version)`：在浏览器里打开这个版本的发布页面（`…/releases/tag/v<版本>`，版本只能由版本号用的字符组成；用 `open`、`explorer`、`xdg-open`）。
+
+失败按种类区分：`network`、`notfound`（`ReleaseNotFound`：没有地址给出清单，404 也算）、`platform`（没有这个系统的条目）、`signature`（minisign 的错误、签的版本缺失或不一致）、`auth`（取消了密码框）、`cancelled`、`busy`、`place`、`none`、`failed`；页面用自己的话说出每一种（`upd.err.*`）。设了 `SMEDCOVER_SELFTEST_UPDATES`（并且有 `SMEDCOVER_SELFTEST`）时，`update_check` 读那份清单（`selftest_updates`），自检换成 `updateTest()`（状态、检查、下载、安装、`report.json`），装完不重新打开：在 macOS 上，系统打开的新 App 不带自检的环境变量，会打开用户自己的数据文件夹。`http://` 的清单 release 构建会拒绝（`InsecureTransportProtocol`），debug 构建可以用。
+
 ## 11. 宿主、能力和布局
 
 同一套界面运行在三种地方，叫**宿主**（`store.js` 的 `HOST`），页面加载时识别：

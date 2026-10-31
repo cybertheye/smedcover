@@ -3217,6 +3217,116 @@ function agentsTab() {
   ];
 }
 
+// ---------- Settings → About: this version, and updates (update.rs in the app)
+/** Whether the host updates itself: the desktop app's alone. */
+const CAN_UPDATE = HOST === "tauri";
+/**
+ * The updates as the page knows them: the host's status (update_status: this version, where it runs, the newer one
+ * found, the version downloaded, whether a download is under way), read as the page loads; what is being done (`check`,
+ * `download`, `install`); when the last check was; how far the download has got (update-progress); and the last refusal
+ * or failure, `{kind, message}` (update.rs), said in the page's words for its kind.
+ */
+const UPD = { status: null, read: false, doing: "", checkedAt: 0, progress: null, error: null };
+/** A proxy the user gave SmedCover (the cut-out's downloads', else an AI service's): updates go through it too, else through the system's. */
+const updProxy = () => S.settings.cutProxy || (S.ai && S.ai.proxy) || (S.imageAi && S.imageAi.proxy) || null;
+const onAbout = () => S.mode === "setup" && S.tab.setup === "about";
+async function updRead() {
+  if (UPD.read) return;
+  UPD.read = true;
+  try { UPD.status = await invoke("update_status"); } catch (e) { UPD.read = false; UPD.error = { kind: "failed", message: String((e && e.message) || e) }; }
+  if (onAbout()) renderPanel();
+}
+/** Does `cmd` (update_check, update_download, update_install), `doing` meanwhile: the status it answers drawn, a refusal or a failure said (a download cancelled is not). */
+async function updDo(doing, cmd, args) {
+  if (UPD.doing) return;
+  UPD.doing = doing; UPD.error = null;
+  if (doing === "download") UPD.progress = null;
+  renderPanel();
+  try {
+    const s = await invoke(cmd, args);
+    if (s) UPD.status = s;
+    if (doing === "check") UPD.checkedAt = Date.now();
+  } catch (e) {
+    const err = e && e.kind ? e : { kind: "failed", message: String((e && e.message) || e) };
+    if (err.kind !== "cancelled") UPD.error = err;
+    UPD.status = await invoke("update_status").catch(() => UPD.status);
+  }
+  UPD.doing = "";
+  if (onAbout()) renderPanel();
+}
+const updCheck = () => updDo("check", "update_check", { proxy: updProxy() });
+const updDownload = () => updDo("download", "update_download");
+/** Installs the version downloaded once what waits is written: the app then starts again, this page with it (on Windows its installer does), or says why not. */
+async function updInstall() {
+  if (UPD.doing) return;
+  await flushWrites();
+  return updDo("install", "update_install");
+}
+const updProgress = (p) => (p && p.total ? t("upd.progress", Math.floor((100 * p.done) / Math.max(1, p.total)), mb(p.done), mb(p.total)) : t("upd.progressSome", mb(p ? p.done : 0)));
+if (HOST === "tauri" && globalThis.__TAURI__.event) globalThis.__TAURI__.event.listen("update-progress", (e) => {
+  UPD.progress = e.payload;
+  const line = document.getElementById("upd-progress");
+  if (line) line.textContent = updProgress(e.payload);
+});
+if (CAN_UPDATE) updRead();
+/** Where the updates are: being checked, downloaded or installed; the version found downloaded (`ready`) or not (`found`); none found (`latest`); not checked yet. */
+function updState() {
+  const s = UPD.status || {};
+  if (UPD.doing === "check" || UPD.doing === "install") return UPD.doing === "check" ? "checking" : "installing";
+  if (UPD.doing === "download" || s.downloading) return "downloading";
+  if (s.found) return s.downloaded === s.found.version ? "ready" : "found";
+  return UPD.checkedAt ? "latest" : "unknown";
+}
+const UPD_PILL = { latest: "running", found: "switching", ready: "switching", downloading: "switching", checking: "switching", installing: "switching" };
+/** ⋯'s line for About: the newer version found, else this one. */
+const updSays = () => { const s = UPD.status; return !s ? "" : s.found ? t("upd.menuFound", s.found.version) : "SmedCover " + s.version; };
+/** A day as the page's language writes it. */
+const updDay = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString(getLang() === "en" ? "en" : "zh-CN", { year: "numeric", month: "long", day: "numeric" }); };
+/**
+ * Settings → About: this version; Check for updates; the newer version found, with its notes on its release page, to
+ * download (its progress said as it comes, Cancel) and then to install (Restart to update), the app starting again. A
+ * copy that cannot update itself where it is — a development build, or on macOS one run from a disk image or moved aside
+ * by the system — still checks, and says what to do instead.
+ */
+function aboutTab() {
+  const head = el("div", { class: "sh" }, el("b", {}, t("tab.about")), el("span", {}, t("upd.pageSub")));
+  updRead();
+  const s = UPD.status;
+  if (!s) return [head, el("div", { class: "hint" + (UPD.error ? " err" : "") }, UPD.error ? t("upd.err.failed", UPD.error.message) : t("mcp.reading"))];
+  const k = updState(), f = s.found, here = s.place === "installed", err = UPD.error;
+  const pill = err ? "error" : UPD_PILL[k] || "";
+  const btn = (icon, label, fn) => el("button", { class: "btn", disabled: !!UPD.doing, onclick: fn }, icon && ico(icon, 15), label);
+  const notes = f && btn("help", t("upd.notes"), () => invoke("update_release_page", { version: f.version }).catch(fail));
+  const acts = {
+    unknown: [btn("reset", t("upd.check"), updCheck)],
+    latest: [btn("reset", t("upd.checkAgain"), updCheck)],
+    checking: [btn(null, t("upd.checking"), null)],
+    found: [here && btn("download", t("upd.download", f && f.version), updDownload), notes],
+    downloading: [el("button", { class: "btn", onclick: () => invoke("update_cancel").catch(fail) }, t("upd.cancel"))],
+    ready: [here && btn("reset", t("upd.install"), updInstall), notes],
+    installing: [btn(null, t("upd.installing"), null)],
+  }[k];
+  const time = UPD.checkedAt && new Date(UPD.checkedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const line = err
+    ? (err.kind === "place" ? t("upd.line." + err.place, f && f.version) : t("upd.err." + err.kind, err.message))
+    : {
+      unknown: t("upd.line.unknown"),
+      latest: t("upd.line.latest", s.version, time),
+      checking: t("upd.line.checking"),
+      found: here ? (f && f.date ? t("upd.line.found", f.version, updDay(f.date)) : t("upd.line.foundNoDate", f && f.version)) : t("upd.line." + s.place, f && f.version),
+      downloading: updProgress(UPD.progress),
+      ready: t("upd.line.ready", f && f.version),
+      installing: t("upd.line.installing"),
+    }[k];
+  return [
+    head,
+    el("section", { class: "scard aicard", id: "set-about" },
+      el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, "SmedCover " + s.version), el("small", {}, t("upd.sub"))),
+        el("span", { class: "mstate " + pill, role: "status", "aria-live": "polite" }, el("span", { class: "aidot" + (CLI_DOT[pill] || "") }), t("upd.state." + (err ? "error" : k)))),
+      el("div", { class: "mrow" }, acts, el("div", { class: "hint" + (err ? " err" : ""), id: k === "downloading" && !err ? "upd-progress" : null }, line))),
+  ];
+}
+
 /** Stores an image in the library (memory + disk). Returns its id, or null if unreadable. */
 async function adoptAsset(name, src, id = assetIdFor(src)) {
   if (userAssets.has(id)) return id;
@@ -8250,6 +8360,8 @@ const SHELL_ICONS = {
   eraser: '<path d="m7 21-4.3-4.3a2.4 2.4 0 0 1 0-3.4l9.6-9.6a2.4 2.4 0 0 1 3.4 0l5.6 5.6a2.4 2.4 0 0 1 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
   trash: '<path d="M3.5 6h17"/><path d="M8.5 6V4h7v2"/><path d="m18.5 6-1 14h-11l-1-14"/>',
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
+  // Settings → About: its page (an i in a ring)
+  about: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><path d="M12 7.5h.01"/>',
   // Settings → Agents: its page (a terminal's prompt), and its token's buttons
   agent: '<rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="m7 10 3 2.5L7 15"/><path d="M12.5 15H17"/>',
   copy: '<rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5.5a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/>',
@@ -8391,12 +8503,13 @@ function closeTransient() {
  * what it was as the page was last drawn or typed in): the nav's profile (its name, its channels' names and colours, the
  * one shown, how many profiles there are) and the page's own — Brand & channels the brand and the channels, Sizes &
  * export the sizes and the export's settings, AI the services and what was learnt of them, Agents the endpoint's
- * switches. Most of an agent's changes are the cover's alone: none of it.
+ * switches, About the updates. Most of an agent's changes are the cover's alone: none of it.
  */
 function settingsSeen() {
   const P = S.profile, se = S.settings, m = MCP.status || {};
   const page = { brand: () => [P.brand, P.categories, SET_UI.menu], sizes: () => [P.sizes, se.format, se.scale, se.quality, se.nameTemplate, exportDir()],
-    ai: () => [S.ai, S.imageAi, AI.test, REP.test, CUTDL.id, CUTDL.error, S.cutModels, se.cutEngine, se.cutProxy], agents: () => [m.on, m.requireToken, m.port, m.state] }[S.tab.setup];
+    ai: () => [S.ai, S.imageAi, AI.test, REP.test, CUTDL.id, CUTDL.error, S.cutModels, se.cutEngine, se.cutProxy], agents: () => [m.on, m.requireToken, m.port, m.state],
+    about: () => [UPD.status, UPD.doing, UPD.error, UPD.checkedAt] }[S.tab.setup];
   return JSON.stringify([S.tab.setup, P.id, P.name, P.categories.map((c) => [c.id, c.name, c.color]), S.cover.catId, S.profiles.length, page ? page() : null]);
 }
 /**
@@ -8435,6 +8548,7 @@ function renderMenu() {
     el("div", { class: "mg" }, t("menu.profile")),   // what is under it opens Settings
     page("brand", counted("menu.channels", S.profile.categories.length)), page("sizes", counted("menu.sizes", S.profile.sizes.length)), page("ai", AI_SHOW.menu()),
     CAN_AGENTS && page("agents", mcpSays()),   // Settings → Agents, saying whether the endpoint is on
+    CAN_UPDATE && page("about", updSays()),   // Settings → About, saying this version, or the newer one found
     others.length > 0 && el("button", { class: "mi", role: "menuitem", "aria-expanded": String(!!MENU.profiles), onclick: () => { MENU.profiles = !MENU.profiles; renderMenu(); } },
       el("span", { class: "mt" }, el("span", {}, t("menu.switch"))), el("span", { class: "chev" + (MENU.profiles ? " open" : "") })),
     MENU.profiles && others.map((p) => el("button", { class: "mi sub", role: "menuitem", onclick: go(() => switchProfile(p.id).catch((err) => { fail(err); syncTop(); })) },
@@ -8547,13 +8661,13 @@ function ambientMoved(a, b) {
     return d / p.length > 2;
   } catch { return true; }
 }
-const TABS = { edit: { content: contentSheet, look: lookSheet, layout: layoutSheet, assets: assetsSheet, layers: layersSheet }, setup: { brand: brandTab, sizes: sizesTab, ai: aiTab, ...(CAN_AGENTS ? { agents: agentsTab } : {}) } };
+const TABS = { edit: { content: contentSheet, look: lookSheet, layout: layoutSheet, assets: assetsSheet, layers: layersSheet }, setup: { brand: brandTab, sizes: sizesTab, ai: aiTab, ...(CAN_AGENTS ? { agents: agentsTab } : {}), ...(CAN_UPDATE ? { about: aboutTab } : {}) } };
 /** The dock's buttons, one per sheet, each opening its sheet; in Settings, its pages down the window's left. */
 function syncTabs() {
   if (S.mode === "setup") {
     const P = S.profile, act = (key) => el("button", { class: "btn" + (key === "delete" ? " danger" : ""), onclick: () => Promise.resolve(profileActions[key]()).catch((e) => { fail(e); syncTop(); renderPanel(); }) }, t("prof.nav." + key));
     const dots = `conic-gradient(${P.categories.map((c, i) => `${c.color} ${(i * 100) / P.categories.length}% ${((i + 1) * 100) / P.categories.length}%`).join(",")})`;
-    const icon = { brand: el("span", { class: "dots", style: `background:${dots}` }), sizes: ico("sizes", 18), ai: ico("spark", 18), agents: ico("agent", 18) };
+    const icon = { brand: el("span", { class: "dots", style: `background:${dots}` }), sizes: ico("sizes", 18), ai: ico("spark", 18), agents: ico("agent", 18), about: ico("about", 18) };
     $("setclose").title = t("set.close"); $("setclose").setAttribute("aria-label", t("set.close"));
     $("setnav").replaceChildren(el("div", { class: "cap" }, t("set.title")),
       el("div", { class: "who" }, el("span", { class: "av", style: `background:${cat().color};color:${inkOn(cat().color)}` }, [...(P.name || "?").trim()][0] || "?"),
@@ -9642,12 +9756,42 @@ async function agentFilesTest({ call, ok, r, no, dir }) {
   await restoreSnap(start); resetHistory();
   if (S.cover.catId !== homeCat) no("the agent's file tools test did not end on the channel it began on");
 }
+/**
+ * An update from the self-test's manifest (SMEDCOVER_SELFTEST_UPDATES) instead of the self-test, as Settings → About does
+ * it: the status, a check, the newer version found downloaded (its progress told as it comes) and installed; the app is
+ * not started again (update.rs). report.json says this version and where it runs, what was found, how much came in how
+ * many words of progress, whether it was installed, and each step with what refused or failed it (`failed`, its kind).
+ */
+async function updateTest() {
+  const r = { steps: [], errors: [] };
+  const go = async (cmd, args) => {
+    try { const s = await invoke(cmd, args); r.steps.push(`${cmd}: ok`); return { s }; } catch (e) {
+      const said = e && e.kind ? `${e.kind}: ${e.message}` : String((e && e.message) || e);
+      r.steps.push(`${cmd}: ${said}`); r.errors.push(`${cmd}: ${said}`); r.failed = (e && e.kind) || "failed"; return null;
+    }
+  };
+  let words = 0;
+  const unlisten = await globalThis.__TAURI__.event.listen("update-progress", (e) => { words++; r.done = e.payload.done; r.total = e.payload.total; });
+  const status = await go("update_status");
+  if (status) Object.assign(r, { version: status.s.version, place: status.s.place });
+  const check = status && (await go("update_check", { proxy: null }));
+  r.found = check && check.s.found ? check.s.found.version : null;
+  if (r.found) {
+    const got = await go("update_download");
+    r.downloaded = got ? got.s.downloaded : null; r.progressWords = words;
+    if (got) r.installed = !!(await go("update_install"));
+  }
+  unlisten();
+  r.ok = !r.errors.length;
+  await invoke("selftest_done", { report: JSON.stringify(r, null, 2) });
+}
 /** SMEDCOVER_SELFTEST mode: export real covers in every format through the normal path, report, quit. */
 let SELFTESTING = false;   // the self-test running: its requests and cut-outs leave the AI lights alone (aiTracked)
 async function selfTest(dir) {
   SELFTESTING = true;
   if (await invoke("selftest_perf").catch(() => false)) return perfTest().catch((e) => invoke("selftest_done", { report: JSON.stringify({ error: String((e && e.stack) || e) }) }));
   if (await invoke("selftest_drag").catch(() => false)) return dragTest().catch((e) => invoke("selftest_done", { report: JSON.stringify({ error: String((e && e.stack) || e) }) }));
+  if (await invoke("selftest_updates").catch(() => null)) return updateTest().catch((e) => invoke("selftest_done", { report: JSON.stringify({ error: String((e && e.stack) || e) }) }));
   const report = { ok: false, files: [], errors: [] }, looks = await testedLooks();
   report.lookIds = looks.length === LOOK_IDS.length ? "all" : looks;
   // Each step is noted in selftest-progress.txt (in the data folder) as it starts, so a run that stalls

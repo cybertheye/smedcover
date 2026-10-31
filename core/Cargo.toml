@@ -52,3 +52,6 @@ tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }
 # The HTTP tests (tests/mcp_http.rs) use rmcp's client too.
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
 reqwest = { workspace = true }
+# Built with the app (`cargo test --workspace`), reqwest has rustls without a provider (tauri-plugin-updater's
+# `rustls-no-provider`): those tests install ring's, the one the updater installs.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

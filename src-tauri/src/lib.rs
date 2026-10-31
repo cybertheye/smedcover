@@ -13,11 +13,13 @@
 //! * the endpoint agents call over MCP, which the window answers ([`mcp`]);
 //! * the command line's side of the app: its endpoint and `cli.json`, the launch for it
 //!   (`smedcover-app --cli`), quitting when it is done, and one app for each data folder ([`cli`]);
-//! * the command line put on the PATH, from Settings → Agents ([`install`]).
+//! * the command line put on the PATH, from Settings → Agents ([`install`]);
+//! * updates, from Settings → About ([`update`]).
 
 mod cli;
 mod install;
 mod mcp;
+mod update;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -482,6 +484,8 @@ pub fn run() {
     #[allow(unused_mut)]
     let mut app = builder
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(update::Updates::default())
         .invoke_handler(tauri::generate_handler![
             app_read,
             app_write,
@@ -507,6 +511,13 @@ pub fn run() {
             install::cli_install,
             install::cli_uninstall,
             install::selftest_cli_bin,
+            update::update_status,
+            update::update_check,
+            update::update_download,
+            update::update_cancel,
+            update::update_install,
+            update::update_release_page,
+            update::selftest_updates,
             mcp::selftest_mcp,
             mcp::mcp_status,
             mcp::mcp_set,

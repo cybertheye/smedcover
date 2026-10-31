@@ -24,6 +24,9 @@ serde_json = { workspace = true }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+# Updates (see update.rs): 2.10 installs from a .deb and an .rpm, 2.14 checks the version signed in a package
+# (plugins.updater.requireSignedVersion).
+tauri-plugin-updater = "2.14"
 # What the app does for its window, Tauri aside (see ../core).
 smedcover-core = { path = "../core" }
 base64 = { workspace = true }

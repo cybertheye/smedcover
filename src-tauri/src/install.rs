@@ -161,7 +161,7 @@ const OS: &str = if cfg!(target_os = "macos") { "macos" } else if cfg!(windows) 
 
 /// This app's executable: links followed on Unix (as the command line finds the app beside itself); on Windows the
 /// path as the system gives it (`canonicalize` would make it `\\?\C:\…`, which is not for a PATH).
-fn exe() -> Option<PathBuf> {
+pub(crate) fn exe() -> Option<PathBuf> {
     let exe = env::current_exe().ok()?;
     Some(if cfg!(windows) { exe } else { fs::canonicalize(&exe).unwrap_or(exe) })
 }
@@ -172,7 +172,7 @@ fn cargo_dir(dir: &Path) -> bool {
 }
 
 /// Whether `dir` is a bundle's `Contents/MacOS` (`<name>.app/Contents/MacOS`).
-fn bundle_dir(dir: &Path) -> bool {
+pub(crate) fn bundle_dir(dir: &Path) -> bool {
     dir.file_name().is_some_and(|n| n == "MacOS")
         && dir.parent().is_some_and(|c| c.file_name().is_some_and(|n| n == "Contents") && c.parent().and_then(Path::extension).is_some_and(|e| e == "app"))
 }
@@ -234,7 +234,7 @@ pub fn link_state(link: &Path, cli: &Path) -> State {
 /// Whether an app in `dir` is run from where it will not stay: moved aside by App Translocation (a downloaded app
 /// opened where it was, run from a random folder under `/private/var/folders/…/AppTranslocation/`), or on a read-only
 /// volume (a disk image).
-fn moved(dir: &Path) -> bool {
+pub(crate) fn moved(dir: &Path) -> bool {
     dir.components().any(|c| c.as_os_str() == "AppTranslocation") || read_only(dir)
 }
 
