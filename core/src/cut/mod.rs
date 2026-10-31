@@ -184,11 +184,12 @@ pub fn cancel_download() {
 }
 
 /// Removes a cut-out model from the data folder, with what of it was downloaded (and the runtime once
-/// no model is left).
-pub fn delete(data: &Path, id: &str) -> Res<()> {
+/// no model is left); with `parts`, only what a download of it fetched and did not finish (its part, and
+/// the runtime's while the runtime is missing), a file in place, one imported by hand too, kept.
+pub fn delete(data: &Path, id: &str, parts: bool) -> Res<()> {
     let m = onnx::model(id)?;
     let _busy = busy()?;
-    onnx::remove(data, m)
+    if parts { onnx::discard(data, m) } else { onnx::remove(data, m) }
 }
 
 /// The mask of the photo's subject made with the model `id`, which must have been downloaded.
@@ -243,6 +244,13 @@ mod tests {
         assert_eq!(errors, [("notes.txt", "file"), ("model.onnx", "checksum"), ("gone.onnx", "file")]);
         assert!(r.refused[0].error.contains("is 5 bytes") && r.refused[0].error.contains("224005088"), "{}", r.refused[0].error);
         assert!(!onnx::model_part(&data, &onnx::MODELS[0]).exists(), "a refused file leaves no part");
+        // a download's part is kept when an import of that file fails
+        std::fs::create_dir_all(data.join("models")).unwrap();
+        std::fs::write(onnx::model_part(&data, &onnx::MODELS[0]), b"half a download").unwrap();
+        let r = import(&data, &[fake.clone()], |_| {}).unwrap();
+        assert_eq!(r.refused.len(), 1);
+        assert_eq!(std::fs::read(onnx::model_part(&data, &onnx::MODELS[0])).unwrap(), b"half a download");
+        assert!(!onnx::model_part(&data, &onnx::MODELS[0]).with_extension("import").exists());
         let seen = seen.into_inner();
         assert!(seen.iter().all(|(id, phase, _, total)| id == "birefnet-lite" && *phase == "importing" && *total == onnx::MODELS[0].file.bytes));
         assert_eq!(seen.last().unwrap().2, onnx::MODELS[0].file.bytes);
@@ -271,7 +279,7 @@ mod tests {
         let held = busy().unwrap();
         let dir = tempfile::tempdir().unwrap();
         assert!(download(dir.path(), "birefnet-lite", None, None, |_| {}).unwrap_err().starts_with("busy: "));
-        assert!(delete(dir.path(), "birefnet-lite").unwrap_err().starts_with("busy: "));
+        assert!(delete(dir.path(), "birefnet-lite", false).unwrap_err().starts_with("busy: "));
         drop(held);
         assert!(download(dir.path(), "nope", None, None, |_| {}).unwrap_err().starts_with("unknown model"));
     }

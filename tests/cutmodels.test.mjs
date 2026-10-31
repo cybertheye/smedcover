@@ -24,6 +24,8 @@ test("each model's row: busy, there, partly there, its file without the runtime,
   assert.deepEqual(cutRow(m, { id: "birefnet" }), { state: "missing", mb: 224 });
   assert.deepEqual(cutRow({ ...m, partial: 120 * MB, files: [runtime(30 * MB), modelFile("BiRefNet_lite-ONNX", 90 * MB)] }), { state: "partial", mb: 302, partMb: 120 });
   assert.deepEqual(cutRow({ ...m, model: true, files: [runtime(0), modelFile("BiRefNet_lite-ONNX", 224 * MB)] }), { state: "noRuntime", mb: 78 });
+  // its file there and part of the runtime: still the runtime missing, never "partial" (whose Discard once took the file)
+  assert.deepEqual(cutRow({ ...m, model: true, partial: 30 * MB, files: [runtime(30 * MB), modelFile("BiRefNet_lite-ONNX", 224 * MB)] }), { state: "noRuntime", mb: 78, partMb: 30 });
   assert.deepEqual(cutRow({ ...m, have: true, model: true, runtime: true }), { state: "have", mb: 224 });
   assert.deepEqual(cutRow(undefined), { state: "unknown" });
   // an older app's item, {id, bytes, have} alone

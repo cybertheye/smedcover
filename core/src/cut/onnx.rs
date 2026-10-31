@@ -209,7 +209,8 @@ pub fn clean_parts(data: &Path) {
         let Ok(entries) = std::fs::read_dir(&dir) else { continue };
         for e in entries.flatten() {
             let path = e.path();
-            if path.extension().is_some_and(|x| x == "part") && !keep.contains(&path) && path.is_file() {
+            let stray = path.extension().is_some_and(|x| x == "part" && !keep.contains(&path) || x == "import");   // an import a crash left
+            if stray && path.is_file() {
                 let _ = std::fs::remove_file(&path);
             }
         }
@@ -260,10 +261,13 @@ pub fn import(data: &Path, from: &Path, report: &mut dyn FnMut(&'static str, Opt
         let runtime = RUNTIME.as_ref().map(|r| format!(", or ONNX Runtime 1.23.2 for this system ({}, {} bytes)", r.package.sources[0].url.rsplit('/').next().unwrap_or(""), r.package.bytes)).unwrap_or_default();
         return Err(format!("file: {name} is not a cut-out file: it is {bytes} bytes; expected the light model ({} bytes), the full model ({} bytes){runtime}", MODELS[0].file.bytes, MODELS[1].file.bytes));
     };
-    let part = match m {
+    // copied beside the download's part, never into it: a file that turns out wrong (or a disk taken out half way)
+    // must not cost a download that can be resumed
+    let download_part = match m {
         Some(m) => model_part(data, m),
         None => runtime_part(data, runtime()?),
     };
+    let part = download_part.with_extension("import");
     std::fs::create_dir_all(part.parent().unwrap_or(data)).map_err(|e| format!("disk: {e}"))?;
     let copied = (|| -> Result<(), String> {
         let mut out = std::fs::File::create(&part).map_err(|e| format!("disk: {e}"))?;
@@ -305,6 +309,7 @@ pub fn import(data: &Path, from: &Path, report: &mut dyn FnMut(&'static str, Opt
             unpacked.map_err(|e| format!("disk: {e}"))?;
         }
     }
+    let _ = std::fs::remove_file(&download_part);   // what a download had of it is not wanted now
     Ok((what, m))
 }
 
@@ -351,6 +356,22 @@ fn copy_to(from: &mut impl Read, to: &Path) -> Result<(), String> {
     drop(out);
     std::fs::rename(&part, to).map_err(|e| e.to_string())
 }
+/// Removes what a download of model `m` has fetched so far and not finished: its part, and the runtime's
+/// when the runtime is not there yet. Files in place stay.
+pub fn discard(data: &Path, m: &Model) -> Result<(), String> {
+    let mut parts = vec![model_part(data, m)];
+    if !have_runtime(data) {
+        parts.push(runtime_part(data, runtime()?));
+    }
+    for f in parts {
+        match std::fs::remove_file(f) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.to_string()),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// Removes a model's file and its part; the runtime goes too (and its part) once no model is left.
 pub fn remove(data: &Path, m: &Model) -> Result<(), String> {
     unload();
@@ -449,6 +470,17 @@ mod tests {
         assert!(old.iter().all(|f| !f.exists()));
         assert!(data.join("models/birefnet-lite.onnx").exists());
         assert!(model_part(data, m).file_name().unwrap().to_str().unwrap().starts_with("birefnet.58f621f00f5d7560"));
+        // a crashed import's copy is cleaned too
+        std::fs::write(data.join("models/birefnet.58f621f00f5d7560.import"), b"x").unwrap();
+        clean_parts(data);
+        assert!(!data.join("models/birefnet.58f621f00f5d7560.import").exists());
+        // discarding takes the parts and leaves the files in place
+        std::fs::write(file(data, m), b"imported by hand").unwrap();
+        discard(data, m).unwrap();
+        assert!(!keep[0].exists() && !keep[1].exists(), "the model's part and the runtime's (the runtime not there)");
+        assert!(file(data, m).exists(), "a model in place stays");
+        std::fs::remove_file(file(data, m)).unwrap();
+        std::fs::write(&keep[0], b"x").unwrap();
         // removing a model takes its part; the runtime goes with the last
         remove(data, m).unwrap();
         assert!(!model_part(data, m).exists());

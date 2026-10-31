@@ -157,6 +157,10 @@ pub fn fetch(d: &Download, what: &'static str, part: &Path, opts: &Options, repo
     let (mut i, mut strikes) = (0, 0);
     let mut retry: Option<Retry> = None;
     while i < sources.len() && strikes < STRIKES {
+        if CANCEL.load(Ordering::SeqCst) {
+            let _ = p.file.sync_all();
+            return Err("cancelled".into());
+        }
         let src = sources[i];
         let choice = net::proxy_choice(src.url, opts.proxy);
         let retrying = retry.take().map(|r| Retry { to: src.host, ..r });
@@ -180,7 +184,9 @@ pub fn fetch(d: &Download, what: &'static str, part: &Path, opts: &Options, repo
             }
             Err(Stop::Disk(e)) => return Err(format!("disk: {e}")),
             Err(Stop::Failed { kind, why, restart }) => {
-                let progressed = p.have >= before + PROGRESS;
+                // what came counts only if it is kept: a part started over (a wrong file, more sent than the file
+                // is) is a strike, or one source sending too much would be asked again for ever
+                let progressed = !restart && p.have >= before + PROGRESS;
                 if restart {
                     p.restart().map_err(disk)?;
                 }
@@ -248,7 +254,11 @@ fn attempt(d: &Download, src: &'static Source, choice: &ProxyChoice, p: &mut Par
     if p.have > 0 {
         request = request.set("Range", &format!("bytes={}-", p.have));
     }
-    let reply = match request.call() {
+    let answered = request.call();
+    if CANCEL.load(Ordering::SeqCst) {
+        return Err(Stop::Cancelled);
+    }
+    let reply = match answered {
         Ok(r) => r,
         Err(ureq::Error::Status(416, _)) if p.have == d.bytes => return Ok(()),
         Err(ureq::Error::Status(416, _)) => return Err(Stop::Failed { kind: "http", why: "HTTP 416 (the part asked for is not there)".into(), restart: true }),
@@ -263,13 +273,16 @@ fn attempt(d: &Download, src: &'static Source, choice: &ProxyChoice, p: &mut Par
             }
         }
         200 => {
-            if p.have > 0 {
-                p.restart()?;   // the source ignores ranges: from the start
+            // the whole file, the source ignoring the range: the part is given up for it only when the reply says it is
+            // the file's length (a captive portal's or a proxy's page, a mirror's error page, answers 200 too)
+            let length = reply.header("content-length").and_then(|n| n.trim().parse::<u64>().ok());
+            match length {
+                Some(n) if n != d.bytes => return Err(Stop::Failed { kind: "http", why: format!("would send {n} bytes, {} were expected", d.bytes), restart: false }),
+                None if p.have > 0 => return Err(Stop::Failed { kind: "http", why: "ignores the range asked for and does not say how much it sends".into(), restart: false }),
+                _ => {}
             }
-            if let Some(n) = reply.header("content-length").and_then(|n| n.trim().parse::<u64>().ok()) {
-                if n != d.bytes {
-                    return Err(Stop::Failed { kind: "http", why: format!("would send {n} bytes, {} were expected", d.bytes), restart: false });
-                }
+            if p.have > 0 {
+                p.restart()?;
             }
         }
         code => return Err(Stop::Failed { kind: "http", why: format!("HTTP {code}"), restart: false }),
@@ -387,6 +400,10 @@ pub(crate) mod tests {
         Hang,
         /// The file from the range's start, waiting half a second after `at` bytes.
         Pause { at: u64 },
+        /// A 200 with no length, then `n` bytes.
+        Unsized(usize),
+        /// A 200 saying `n` bytes, and sending them (a portal's page).
+        Page(usize),
     }
 
     /// A stand-in HTTP server for `body`: each request is answered as `plan` says for its number (from 0)
@@ -428,6 +445,8 @@ pub(crate) mod tests {
                     Answer::Status(code) => stream.write_all(format!("HTTP/1.1 {code} X\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").as_bytes()),
                     Answer::BadRange => stream.write_all(format!("HTTP/1.1 206 Partial Content\r\ncontent-range: bytes 0-{}/{len}\r\ncontent-length: {len}\r\nconnection: close\r\n\r\n", len - 1).as_bytes()).and_then(|_| stream.write_all(&body)),
                     Answer::Hang => Ok(()),
+                    Answer::Unsized(n) => stream.write_all(b"HTTP/1.1 200 OK\r\nconnection: close\r\n\r\n").and_then(|_| stream.write_all(&vec![1u8; n])),
+                    Answer::Page(n) => stream.write_all(format!("HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {n}\r\nconnection: close\r\n\r\n").as_bytes()).and_then(|_| stream.write_all(&vec![b'<'; n])),
                     Answer::Pause { at } => {
                         let from = range.unwrap_or(0);
                         let mid = (from + at).min(len) as usize;
@@ -712,6 +731,55 @@ pub(crate) mod tests {
         let why = &steps.iter().filter_map(|s| s.retry.clone()).next().unwrap().why;
         assert!(why.starts_with("network: ") && why.contains("timed out"), "{why}");
         drop(silent);
+    }
+
+    #[test]
+    fn a_source_sending_more_than_the_file_is_left_not_asked_for_ever() {
+        let _g = setup();
+        let b = body(MB);
+        let (big, seen) = stand_in(b.clone(), |_, _| Answer::Unsized(3 * MB));
+        let (good, _) = stand_in(b.clone(), |_, _| Answer::File { cut: None });
+        let d = catalog(&b, &[big.clone(), good]);
+        let dir = tempfile::tempdir().unwrap();
+        run(d, &dir.path().join("1.part"), "auto").0.unwrap();
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        // alone, it ends
+        let d = catalog(&b, &[big]);
+        let e = run(d, &dir.path().join("2.part"), "auto").0.unwrap_err();
+        assert!(e.starts_with("http: ") && e.contains("more than"), "{e}");
+    }
+
+    #[test]
+    fn a_page_answering_200_leaves_the_part_alone() {
+        let _g = setup();
+        let b = body(2 * MB);
+        let (portal, _) = stand_in(b.clone(), |_, _| Answer::Page(5));
+        let (no_length, _) = stand_in(b.clone(), |_, _| Answer::Unsized(2 * MB));
+        let d = catalog(&b, &[portal, no_length]);
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join(part_name(d));
+        std::fs::write(&part, &b[..MB + 7]).unwrap();
+        let e = run(d, &part, "auto").0.unwrap_err();
+        assert!(e.contains("would send 5 bytes") && e.contains("does not say how much"), "{e}");
+        assert_eq!(std::fs::read(&part).unwrap(), b[..MB + 7], "the part as it was");
+    }
+
+    #[test]
+    fn a_cancel_while_sources_fail_is_a_cancel() {
+        let _g = setup();
+        let b = body(100);
+        let (a, _) = stand_in(b.clone(), |_, _| Answer::Status(503));
+        let (bb, seen_b) = stand_in(b.clone(), |_, _| Answer::Status(503));
+        let d = catalog(&b, &[a, bb]);
+        let dir = tempfile::tempdir().unwrap();
+        let r = fetch(d, "test", &dir.path().join("p.part"), &Options { proxy: "", source: "auto", waits: QUICK }, &mut |s| {
+            if s.phase == "connecting" {
+                CANCEL.store(true, Ordering::SeqCst);   // pressed while the first source is asked
+            }
+        });
+        CANCEL.store(false, Ordering::SeqCst);
+        assert_eq!(r.unwrap_err(), "cancelled");
+        assert!(seen_b.lock().unwrap().is_empty(), "the next source not asked");
     }
 
     #[test]

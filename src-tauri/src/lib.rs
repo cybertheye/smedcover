@@ -204,9 +204,10 @@ async fn cut_model_import(app: AppHandle, core: State<'_, Arc<Core>>) -> Res<Opt
 fn cut_model_cancel() {
     cut::cancel_download();
 }
+/// Removes a cut-out model; with `parts`, only what a download of it left unfinished (Discard).
 #[tauri::command]
-fn cut_model_delete(core: State<'_, Arc<Core>>, id: String) -> Res<()> {
-    core.cut_model_delete(&id)
+fn cut_model_delete(core: State<'_, Arc<Core>>, id: String, parts: Option<bool>) -> Res<()> {
+    core.cut_model_delete(&id, parts.unwrap_or(false))
 }
 /// Cuts the subject out of a photo (raw image bytes in the body) with the model named in the header
 /// `x-model`: its mask as PNG bytes, as `subject_mask` returns.

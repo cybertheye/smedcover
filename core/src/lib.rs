@@ -126,8 +126,8 @@ impl Core {
     }
 
     /// Removes a cut-out model from the data folder.
-    pub fn cut_model_delete(&self, id: &str) -> Res<()> {
-        cut::delete(&self.data, id)
+    pub fn cut_model_delete(&self, id: &str, parts: bool) -> Res<()> {
+        cut::delete(&self.data, id, parts)
     }
 
     /// Cuts the subject out of a photo (its encoded bytes) with the downloaded model `id`: its mask,

@@ -2936,11 +2936,11 @@ async function importModels() {
   }
   refreshAiPage();
 }
-/** Removes a model, or (`partial`) what came of it so far. */
+/** Removes a model, or (`partial`) only what a download of it fetched and did not finish: a file in place (one imported by hand too) stays. */
 async function dropModel(id, partial = false) {
   const name = t("cutset.engine." + id);
   if (!(await askSure({ title: t(partial ? "cutset.discardSure" : "cutset.dropSure", name), body: t(partial ? "cutset.discardBody" : "cutset.dropBody"), go: t("ask.delete") }))) return;
-  await invoke("cut_model_delete", { id }).catch(fail);
+  await invoke("cut_model_delete", { id, parts: partial }).catch(fail);
   CUTDL.error = null; CUTDL.note = "";
   await refreshCutModels(); renderPanel();
 }
@@ -2970,13 +2970,13 @@ function cutPane() {
   const row = (k) => {
     const r = k === "vision" ? { state: "builtIn" } : cutRow(S.cutModels.find((x) => x.id === k), CUTDL), off = !!CUTDL.id;
     const says = { builtIn: () => t("cutset.builtIn"), unknown: () => t("cutset.unknown"), have: () => t("cutset.have", r.mb), missing: () => t("cutset.missing", r.mb),
-      partial: () => t("cutset.partial", r.partMb, r.mb), noRuntime: () => t("cutset.noRuntime", r.mb) };
+      partial: () => t("cutset.partial", r.partMb, r.mb), noRuntime: () => (r.partMb ? t("cutset.noRuntimePart", r.partMb, r.mb) : t("cutset.noRuntime", r.mb)) };
     const acts = r.state === "builtIn" ? null
       : r.state === "busy" ? el("button", { class: "btn", onclick: () => invoke("cut_model_cancel").catch(fail) }, t("cutset.cancel"))
       : r.state === "have" ? el("button", { class: "linkbtn", onclick: () => dropModel(k) }, t("cutset.drop"))
       : el("div", { class: "cutacts" },
-        r.state === "partial" && el("button", { class: "linkbtn", disabled: off, title: t("cutset.discardTip"), onclick: () => dropModel(k, true) }, t("cutset.discard")),
-        el("button", { class: "btn", disabled: off, onclick: () => downloadModel(k) }, t(r.state === "partial" ? "cutset.resume" : "cutset.download")));
+        r.partMb > 0 && el("button", { class: "linkbtn", disabled: off, title: t("cutset.discardTip"), onclick: () => dropModel(k, true) }, t("cutset.discard")),
+        el("button", { class: "btn", disabled: off, onclick: () => downloadModel(k) }, t(r.partMb > 0 ? "cutset.resume" : "cutset.download")));
     return el("div", { class: "cutrow" + (now === k ? " on" : "") },
       el("label", {}, el("input", { type: "radio", name: "cutway", checked: now === k, onchange: () => setting("cutEngine", k, true) }),
         el("span", {}, el("b", {}, t("cutset.engine." + k)), r.state === "busy" ? line() : el("small", {}, says[r.state]()))),

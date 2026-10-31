@@ -21,9 +21,9 @@ export function cutErr(e) {
 
 /**
  * What a model's row says (`m` an item of cut_models, `dl` the download or import under way, {id}):
- * busy; have; partial (some of what is missing came already: a download resumes it); noRuntime (its file is there,
- * brought in by hand, the runtime not); missing; unknown (no state could be read). `mb` is what is still to come,
- * `partMb` what of it is there.
+ * busy; have; noRuntime (its file is there, brought in by hand, the runtime not); partial (some of what is missing
+ * came already); missing; unknown (no state could be read). `mb` is what is still to come, `partMb` (when some of it
+ * came: a download resumes it, Discard drops it) what of it is there.
  */
 export function cutRow(m, dl = {}) {
   if (!m) return { state: "unknown" };
@@ -31,8 +31,9 @@ export function cutRow(m, dl = {}) {
   if (m.have) return { state: "have", mb: mb(m.bytes) };
   const need = Array.isArray(m.files) ? m.files.filter((f) => f.have < f.bytes) : [];
   const left = need.length ? need.reduce((a, f) => a + f.bytes, 0) : m.bytes;
-  if (m.partial > 0) return { state: "partial", mb: mb(left), partMb: mb(m.partial) };
-  if (m.model && m.runtime === false) return { state: "noRuntime", mb: mb(left) };
+  const part = m.partial > 0 ? { partMb: mb(m.partial) } : {};
+  if (m.model && m.runtime === false) return { state: "noRuntime", mb: mb(left), ...part };
+  if (m.partial > 0) return { state: "partial", mb: mb(left), ...part };
   return { state: "missing", mb: mb(m.bytes) };
 }
 
