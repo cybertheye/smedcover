@@ -370,7 +370,9 @@ impl Running {
     /// Stops listening at once, ends the calls in hand (each is cancelled, and the page told) and
     /// the bodies being read, and closes every connection as soon as its answer is out; one still
     /// open after `within` is cut off. When it returns no connection is left and the port is free
-    /// again. `false` if a connection had to be cut off.
+    /// again, but for a process the app is starting just then: given a copy of every descriptor of
+    /// the app's, the listening socket's among them, it holds the port till it runs its program
+    /// (close-on-exec), a few milliseconds. `false` if a connection had to be cut off.
     pub async fn stop(mut self, within: Duration) -> bool {
         self.stop.cancel();
         let Some(mut task) = self.task.take() else {

@@ -1217,13 +1217,42 @@ mod tests {
         McpHost::new(data.to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), None, false, Handle::current(), Box::new(|_| {})).unwrap()
     }
 
+    /// A port of 127.0.0.1 an endpoint may bind at once (see [`free_soon`]).
     fn free_port() -> u16 {
-        TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+        let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        assert!(free_soon(port));
+        port
     }
 
     fn taken(port: u16) -> bool {
         TcpListener::bind(("127.0.0.1", port)).is_err()
     }
+
+    /// Whether `port`, let go by an endpoint stopping (or by a socket bound to find or try it), is
+    /// free once it may be, within 5 s, and an endpoint may then bind it at once. A process being
+    /// started (`osascript`, as the install tests of this binary on macOS do) is given a copy of every
+    /// descriptor of this one, a listening socket among them, which the system closes only as that
+    /// process runs its program (close-on-exec): till then the port is held by it too, so a port let
+    /// go here may still be taken for a moment. Seen in one run out of 150 of this binary's tests, six
+    /// at once; never long (14 ms at most, with a thread starting processes all the while). The look
+    /// binds the port too, so once it is free this waits [`SETTLED`] more, for a process started
+    /// while it looked to run its program.
+    fn free_soon(port: u16) -> bool {
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if !taken(port) {
+                std::thread::sleep(SETTLED);
+                return true;
+            }
+            if std::time::Instant::now() >= until {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// How long a process being started may hold a copy of this one's descriptors, at most.
+    const SETTLED: Duration = Duration::from_millis(50);
 
     #[tokio::test]
     async fn it_turns_on_moves_and_turns_off_saving_each() {
@@ -1246,11 +1275,11 @@ mod tests {
         let second = free_port();
         let s = h.set(true, Some(second)).await.unwrap();
         assert_eq!((s["state"].as_str(), s["port"].as_u64()), (Some("running"), Some(u64::from(second))));
-        assert!(!taken(first) && taken(second));
+        assert!(free_soon(first) && taken(second));
         // off: the port free, off saved, the port kept
         let s = h.set(false, None).await.unwrap();
         assert_eq!((s["state"].as_str(), s["on"].as_bool()), (Some("off"), Some(false)));
-        assert!(!taken(second));
+        assert!(free_soon(second));
         assert_eq!(h.running_port(), None);
         let saved = McpConfig::load(dir.path()).unwrap();
         assert!(!saved.on && saved.port == second);
@@ -1260,7 +1289,7 @@ mod tests {
         // started with the app when saved on
         h.set(true, None).await.unwrap();
         h.shut().await;
-        assert!(!taken(second), "the app quitting frees the port");
+        assert!(free_soon(second), "the app quitting frees the port");
         let again = host(dir.path());
         assert_eq!(again.status()["state"], "running");
         again.shut().await;
@@ -1477,13 +1506,14 @@ mod tests {
         McpConfig { on: true, port, ..McpConfig::new().unwrap() }.save(dir.path()).unwrap();
         let h = McpHost::new(dir.path().to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), None, true, Handle::current(), Box::new(|_| {})).unwrap();
         assert_eq!((h.status()["on"].as_bool(), h.running_port()), (Some(true), None), "on, not started");
-        assert!(!taken(port));
+        assert!(free_soon(port));
         h.set_for_cli(true);
         assert_eq!(h.running_port(), None, "still the command line's");
         h.set_for_cli(false);
         assert_eq!(h.running_port(), Some(port), "the user's now: started");
         assert_eq!(h.status()["state"], "running");
         h.shut().await;
+        assert!(free_soon(port), "the app quitting frees the port");
         // one the user started starts it with the app, as before
         let theirs = McpHost::new(dir.path().to_path_buf(), Arc::new(ToolList::empty(Host::Desktop)), None, false, Handle::current(), Box::new(|_| {})).unwrap();
         assert_eq!(theirs.running_port(), Some(port));
@@ -1562,7 +1592,7 @@ mod tests {
         assert!(to_none_of(&h.endpoint_ports(), "https://api.openai.com/v1/chat/completions", Some(&format!("127.0.0.1:{port}"))).is_err(), "nor through a proxy");
         assert!(to_none_of(&h.endpoint_ports(), "https://api.openai.com/v1/chat/completions", None).is_ok());
         h.shut().await;
-        assert!(!taken(port) && !taken(theirs), "both stop with the app");
+        assert!(free_soon(port) && free_soon(theirs), "both stop with the app");
         assert_eq!(h.cli_port(), None);
         page.abort();
     }
