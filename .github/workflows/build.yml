@@ -119,7 +119,7 @@ jobs:
             dpkg-deb -c target/release/bundle/deb/*.deb | grep -E '(^|[ /])usr/bin/smedcover$'
           fi
 
-      # And in the NSIS installer, listed by 7-Zip (on the Windows runner; 0.4.0's build listed smedcover.exe there).
+      # And in the NSIS installer, listed by 7-Zip (on the Windows runner; the command line's first build, tagged 0.4.0 and never released, listed smedcover.exe there).
       - name: Check the Windows installer carries the command line
         if: runner.os == 'Windows'
         shell: bash

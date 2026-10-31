@@ -93,7 +93,7 @@ the SmedCover app at …* (exit 3).
 ### Check it
 
 ```bash
-smedcover --version        # smedcover 0.4.0
+smedcover --version        # smedcover 0.5.0
 smedcover profiles         # starts SmedCover if it is not open, and lists your profiles
 ```
 
@@ -475,6 +475,6 @@ done
 | `The profile "…" has no export folder yet: pass dir …` (exit 1) | Give `--out`, or choose the profile's folder in Export once. |
 | `The user stopped waiting for … after … s; the window is theirs again.` (exit 1) | *Stop waiting* (or Esc) was pressed in the window. An export's files written by then stay in its folder. |
 | `The export was stopped part-way.` (exit 1) | SmedCover cut the export short. The files written so far are printed. |
-| `Note: SmedCover 0.4.0 is running; this command line is 0.3.2.` | The command on the PATH is another copy's. On macOS, *Use this copy* in Settings → *Agents* → *Command line*; on Windows, open SmedCover once after the update. |
+| `Note: SmedCover 0.5.1 is running; this command line is 0.5.0.` | The command on the PATH is another copy's. On macOS, *Use this copy* in Settings → *Agents* → *Command line*; on Windows, open SmedCover once after the update. |
 | `SmedCover went away before it answered` (exit 3) | The app quit or was closed during the call. The change may or may not be done: look at the window before running it again. |
 | `Note: SMEDCOVER_SELFTEST names the data folder …` | A self-test's folder is set in this terminal: `unset SMEDCOVER_SELFTEST` to use `--data`. |

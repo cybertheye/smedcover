@@ -78,7 +78,7 @@ App `target/debug/smedcover-app`；设置里的卡片会说它在哪里，不安
 ### 确认装好了
 
 ```bash
-smedcover --version        # smedcover 0.4.0
+smedcover --version        # smedcover 0.5.0
 smedcover profiles         # SmedCover 没开就先启动它，然后列出你的档案
 ```
 
@@ -430,6 +430,6 @@ done
 | `The profile "…" has no export folder yet: pass dir …`（退出码 1） | 给 `--out`，或者在「导出」里给这个档案选一次文件夹。 |
 | `The user stopped waiting for … after … s; the window is theirs again.`（退出码 1） | 有人在窗口里点了「不等了」（或者按了 Esc）。导出到那时写好的文件留在它的文件夹里。 |
 | 「导出中途停下了。」（退出码 1） | SmedCover 把导出中途截断了。已经写好的文件会列出来。 |
-| 「注意：运行中的 SmedCover 是 0.4.0，命令行是 0.3.2。」 | PATH 里的命令是另一份 SmedCover 的。macOS 上，在「设置 → Agent 接入 → 命令行工具」里点「改为指向这个 App」；Windows 上，更新后打开一次 SmedCover。 |
+| 「注意：运行中的 SmedCover 是 0.5.1，命令行是 0.5.0。」 | PATH 里的命令是另一份 SmedCover 的。macOS 上，在「设置 → Agent 接入 → 命令行工具」里点「改为指向这个 App」；Windows 上，更新后打开一次 SmedCover。 |
 | 「SmedCover 没等回答就断开了」（退出码 3） | 调用中途 App 退出或被关掉了。改动可能做了，也可能没做：再运行之前先看看窗口。 |
 | 「注意：SMEDCOVER_SELFTEST 指定了数据文件夹……」 | 这个终端里设了自检目录：`unset SMEDCOVER_SELFTEST` 之后 `--data` 才起作用。 |
