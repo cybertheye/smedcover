@@ -279,7 +279,9 @@ export function normalizeSettings(raw) {
     drawer: flag(s.drawer, D.drawer === true),   // the drawer of the selected layer's properties open on the right (see setDrawer in app.js)
     // how a photo's subject is cut out: "vision" (macOS), "birefnet-lite" or "birefnet" (any system, a downloaded model); "" = the system's own choice
     cutEngine: oneOf(s.cutEngine, ["vision", "birefnet-lite", "birefnet"], D.cutEngine, ""),
-    cutProxy: str(s.cutProxy).trim().slice(0, 300),   // a proxy for downloading the models ("" = the environment's)
+    cutProxy: str(s.cutProxy).trim().slice(0, 300),   // a proxy for downloading the models ("" = the system's, else the environment's)
+    // where the models are downloaded from: "auto" (Hugging Face, then its mirror hf-mirror.com), or one of them alone
+    cutSource: oneOf(s.cutSource, ["auto", "huggingface", "hf-mirror"], D.cutSource, "auto"),
     // the channel each profile was last on: {profileId: channelId} (each channel of each profile has a cover of its own)
     channels: Object.fromEntries(Object.entries(s.channels && typeof s.channels === "object" ? s.channels : {}).filter(([k, v]) => typeof v === "string" && /^[\w-]{1,60}$/.test(k)).slice(0, 200)),
     // the side columns' widths in px, as dragged (0 = the default): left and right while editing, left in Setup

@@ -25,6 +25,7 @@ import { onOutlines, outlinesPending, outlinesSettled, outlinesMissed, OUTLINE_K
 import { LOOKPIC, hashText, lookPicSig, readLookPic, writeLookPic, strayLookPics } from "./lookpics.js";
 import { RANSOM_FACES, useRansomFaces, findRansomFaces, ransomPending, ransomArrived, ransomPools, ransomLetters, ransomShown, papersFor, faceFont, faceHas, inksFor, cased, isCJK, EXTRAS, lineCells, keysOf } from "./ransom.js";
 import { parseTitle } from "./title.js";
+import { cutErr, cutRow, cutProgress, progressText, pickCutEngine, filesByHand, CUT_SOURCES, CUT_ERRORS, mb } from "./cutmodels.js";
 import { LOOKS, LOOK_IDS, LOOK_TAGS, LOOK_CATEGORIES, setLook, lookParams, effectsFor, FX_TYPES, FX_TIMING } from "./style.js";
 import { sizeOf, PIXELS, dropCards } from "./photo.js";
 import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, moreChanged, sheetOrder, labelRoom, drawStack } from "./stack3d.js";
@@ -1997,7 +1998,7 @@ const CUT = { busy: false, error: "" };
 const isMac = HOST === "tauri" && /Mac/i.test(navigator.userAgent);   // Vision is this computer's; a server's own is not known yet
 const canCut = () => CAN.cut;
 /** The way of cutting out in use: the one chosen, else Vision on a Mac and the light BiRefNet elsewhere. */
-const cutEngine = () => { const e = S.settings.cutEngine; return e === "vision" ? (isMac ? "vision" : "birefnet-lite") : e || (isMac ? "vision" : "birefnet-lite"); };
+const cutEngine = () => pickCutEngine(S.settings.cutEngine, S.cutModels, { mac: isMac, server: HOST === "server" });
 /** Whether the model a BiRefNet way needs is downloaded. */
 const cutReady = (engine = cutEngine()) => engine === "vision" || S.cutModels.some((m) => m.id === engine && m.have);
 /** The photo as JPEG bytes, upright, no bigger than `max` on its longer side. */
@@ -2881,13 +2882,14 @@ function aiTab() {
     card("cut", t("cutset.intro"), cutPane(), [aiPill("cut"), CAN.cut && CAN.folders && el("button", { class: "linkbtn", onclick: () => invoke("reveal_data_dir", { dir: "models" }).catch(fail) }, t("cutset.folder"))]),
   ];
 }
-// ---------- Settings → AI → Cut-out: the way of cutting out, and the BiRefNet models
-const CUTDL = { id: "", done: 0, total: 0, error: "" };   // the download running, if any
-const mb = (n) => Math.round(n / 1048576);
+// ---------- Settings → AI → Cut-out: the way of cutting out, and the BiRefNet models (their states, progress and errors: cutmodels.js)
+// The download or import under way ({id}: a model's, or "import"), its latest progress (cut-model-progress), the last error
+// ({kind, detail}: cutErr), and what an import left to do; whether "Download by hand" is open.
+const CUTDL = { id: "", p: null, error: null, note: "", byHand: false };
 if (HOST === "tauri" && globalThis.__TAURI__.event) globalThis.__TAURI__.event.listen("cut-model-progress", (e) => {
-  Object.assign(CUTDL, { done: e.payload.done, total: e.payload.total });
-  const bar = document.getElementById("cutdl-" + e.payload.id);
-  if (bar) bar.textContent = t("cutset.progress", Math.floor((100 * e.payload.done) / Math.max(1, e.payload.total)), mb(e.payload.done), mb(e.payload.total));
+  CUTDL.p = e.payload;
+  const line = document.getElementById("cutdl-line");
+  if (line) line.textContent = progressText(cutProgress(e.payload), t);
 });
 /** Draws Settings → AI again once something there finished (a test, a download), but not under a field being typed in: once it is left. */
 function refreshAiPage() {
@@ -2898,40 +2900,100 @@ function refreshAiPage() {
   renderPanel();
 }
 async function refreshCutModels() { S.cutModels = CAN.cut ? await invoke("cut_models").catch(() => []) : []; }
+/** After a download or an import: the models read again, the lights, and the photo waiting for a model told it is there. */
+async function cutSettled() {
+  CUTDL.id = ""; CUTDL.p = null;
+  await refreshCutModels(); aiLightsSync();
+  if (cutReady()) { CUT.needModel = false; CUT.error = ""; }
+}
+/** Downloads a model (and the runtime, if it is missing), resuming what an earlier try left, through the proxy and from the source chosen. */
 async function downloadModel(id) {
   if (CUTDL.id) return;
-  Object.assign(CUTDL, { id, done: 0, total: 0, error: "" }); renderPanel();
-  try { await invoke("cut_model_download", { id, proxy: S.settings.cutProxy || null }); }
-  catch (e) { const msg = String(e && e.message ? e.message : e); CUTDL.error = /cancelled/.test(msg) ? "" : t("msg.failed", msg); }
-  CUTDL.id = ""; await refreshCutModels(); aiLightsSync();
-  if (S.cutModels.some((m) => m.id === id && m.have)) { CUT.needModel = false; CUT.error = ""; toast(t("cutset.done", t("cutset.engine." + id))); }
+  Object.assign(CUTDL, { id, p: null, error: null, note: "" }); renderPanel();
+  try { await invoke("cut_model_download", { id, proxy: S.settings.cutProxy || null, source: S.settings.cutSource || "auto" }); }
+  catch (e) { CUTDL.error = cutErr(e); }
+  await cutSettled();
+  if (S.cutModels.some((m) => m.id === id && m.have)) toast(t("cutset.done", t("cutset.engine." + id)));
   refreshAiPage();
 }
-async function dropModel(id) {
-  if (!(await askSure({ title: t("cutset.dropSure", t("cutset.engine." + id)), body: t("cutset.dropBody"), go: t("ask.delete") }))) return;
+/** Brings in files downloaded by hand: the app asks for them in its own dialog, tells each by its size, checks its SHA-256 and puts it in place. */
+async function importModels() {
+  if (CUTDL.id) return;
+  Object.assign(CUTDL, { id: "import", p: null, error: null, note: "" }); renderPanel();
+  let r = null;
+  try { r = await invoke("cut_model_import"); }
+  catch (e) { CUTDL.error = cutErr(e); }
+  await cutSettled();
+  if (r) {
+    const got = r.installed.map((f) => (f.what === "runtime" ? t("cutset.file.runtime") : t("cutset.engine." + f.id)));
+    if (got.length) toast(t("cutset.imported", got.join(" + ")));
+    if (r.missing.includes("runtime")) CUTDL.note = t("cutset.importMissing", t("cutset.file.runtime"));
+    if (r.refused.length) {
+      const first = cutErr(r.refused[0].error) || { kind: "other" };
+      const why = (f) => { const d = (cutErr(f.error) || { detail: f.error }).detail; return d.startsWith(f.name) ? d : `${f.name}: ${d}`; };   // the core's errors name the file already, most of them
+      CUTDL.error = { kind: first.kind, detail: r.refused.map(why).join("; ") };
+    }
+  }
+  refreshAiPage();
+}
+/** Removes a model, or (`partial`) what came of it so far. */
+async function dropModel(id, partial = false) {
+  const name = t("cutset.engine." + id);
+  if (!(await askSure({ title: t(partial ? "cutset.discardSure" : "cutset.dropSure", name), body: t(partial ? "cutset.discardBody" : "cutset.dropBody"), go: t("ask.delete") }))) return;
   await invoke("cut_model_delete", { id }).catch(fail);
+  CUTDL.error = null; CUTDL.note = "";
   await refreshCutModels(); renderPanel();
+}
+/** The files a download fetches, with their links and the mirrors', to fetch in a browser and bring in with Import from file. */
+function cutByHand() {
+  const files = filesByHand(S.cutModels);
+  if (!files.length) return null;
+  const name = (f) => (f.what === "runtime" ? t("cutset.file.runtimeFor") : t("cutset.engine." + f.id));
+  return el("details", { class: "wide byhand", open: CUTDL.byHand, ontoggle: (e) => (CUTDL.byHand = e.target.open) },
+    el("summary", {}, t("cutset.byHand")),
+    el("div", { class: "hint" }, t("cutset.byHandBody")),
+    files.map((f) => el("div", { class: "byhandfile" },
+      el("div", {}, el("b", {}, name(f)), el("small", {}, " · " + mb(f.bytes) + " MB")),
+      [f.url, ...f.mirrors].map((u) => el("div", { class: "byhandurl" }, el("code", {}, u), el("button", { type: "button", class: "linkbtn", onclick: () => copyText(u) }, t("cutset.copyLink")))))));
+}
+/** An error of a download or an import: what it means and what to do, then what each source said. */
+function cutErrLine(err) {
+  if (!err) return null;
+  const known = CUT_ERRORS.includes(err.kind);
+  return el("div", { class: "hint err" }, known ? t("cutset.err." + err.kind) : t("msg.failed", err.detail), known && err.detail && el("small", { class: "cutwhy" }, err.detail));
 }
 function cutPane() {
   if (!CAN.cut) return [el("div", { class: "hint", style: "margin:0" }, t("cutset.needsApp"))];
   const engines = [isMac && "vision", "birefnet-lite", "birefnet"].filter(Boolean), now = cutEngine();
   const setting = (k, v, redraw) => { S.settings[k] = v; persistSettings(); if (redraw) renderPanel(); };
+  const line = () => el("small", { id: "cutdl-line" }, CUTDL.p ? progressText(cutProgress(CUTDL.p), t) : t("cutset.starting"));
   const row = (k) => {
-    const m = S.cutModels.find((x) => x.id === k), busy = !!m && CUTDL.id === k;
+    const r = k === "vision" ? { state: "builtIn" } : cutRow(S.cutModels.find((x) => x.id === k), CUTDL), off = !!CUTDL.id;
+    const says = { builtIn: () => t("cutset.builtIn"), unknown: () => t("cutset.unknown"), have: () => t("cutset.have", r.mb), missing: () => t("cutset.missing", r.mb),
+      partial: () => t("cutset.partial", r.partMb, r.mb), noRuntime: () => t("cutset.noRuntime", r.mb) };
+    const acts = r.state === "builtIn" ? null
+      : r.state === "busy" ? el("button", { class: "btn", onclick: () => invoke("cut_model_cancel").catch(fail) }, t("cutset.cancel"))
+      : r.state === "have" ? el("button", { class: "linkbtn", onclick: () => dropModel(k) }, t("cutset.drop"))
+      : el("div", { class: "cutacts" },
+        r.state === "partial" && el("button", { class: "linkbtn", disabled: off, title: t("cutset.discardTip"), onclick: () => dropModel(k, true) }, t("cutset.discard")),
+        el("button", { class: "btn", disabled: off, onclick: () => downloadModel(k) }, t(r.state === "partial" ? "cutset.resume" : "cutset.download")));
     return el("div", { class: "cutrow" + (now === k ? " on" : "") },
       el("label", {}, el("input", { type: "radio", name: "cutway", checked: now === k, onchange: () => setting("cutEngine", k, true) }),
-        el("span", {}, el("b", {}, t("cutset.engine." + k)),
-          el("small", { id: busy ? "cutdl-" + k : null }, k === "vision" ? t("cutset.builtIn") : busy ? t("cutset.starting") : !m ? t("cutset.unknown") : t(m.have ? "cutset.have" : "cutset.missing", mb(m.bytes))))),
-      k !== "vision" && (busy ? el("button", { class: "btn", onclick: () => invoke("cut_model_cancel").catch(fail) }, t("cutset.cancel"))
-        : m && m.have ? el("button", { class: "linkbtn", onclick: () => dropModel(k) }, t("cutset.drop"))
-        : el("button", { class: "btn", disabled: !!CUTDL.id, onclick: () => downloadModel(k) }, t("cutset.download"))));
+        el("span", {}, el("b", {}, t("cutset.engine." + k)), r.state === "busy" ? line() : el("small", {}, says[r.state]()))),
+      acts);
   };
   return [
     el("div", { class: "cutrows" }, engines.map(row)),
     !cutReady(now) && el("div", { class: "hint err" }, t("cutset.wayMissing")),
-    CUTDL.error && el("div", { class: "hint err" }, CUTDL.error),
+    CUTDL.id === "import" && el("div", { class: "hint" }, line()),
+    cutErrLine(CUTDL.error),
+    CUTDL.note && el("div", { class: "hint" }, CUTDL.note),
     el("div", { class: "hint" }, t("cutset.speed")),
+    el("div", {}, el("label", { class: "cap" }, t("cutset.source"), " ", info(t("cutset.sourceHint"))),
+      segs(t("cutset.source"), CUT_SOURCES.map((k) => [k, t("cutset.source." + k)]), S.settings.cutSource || "auto", (v) => setting("cutSource", v), { off: !!CUTDL.id })),
     el("div", {}, el("label", { class: "cap" }, t("cutset.proxy"), " ", info(t("cutset.proxyHint"))), textInput(S.settings.cutProxy, (v) => setting("cutProxy", v.trim()), { dataset: { k: "cut:proxy" }, placeholder: "http://127.0.0.1:7890" })),
+    el("div", { class: "wide cutimport" }, el("button", { class: "btn", disabled: !!CUTDL.id, onclick: importModels }, t("cutset.import")), info(t("cutset.importTip"))),
+    cutByHand(),
     el("div", { class: "hint" }, t("cutset.licence")),
   ];
 }
@@ -8521,7 +8583,7 @@ function closeTransient() {
 function settingsSeen() {
   const P = S.profile, se = S.settings, m = MCP.status || {};
   const page = { brand: () => [P.brand, P.categories, SET_UI.menu], sizes: () => [P.sizes, se.format, se.scale, se.quality, se.nameTemplate, exportDir()],
-    ai: () => [S.ai, S.imageAi, AI.test, REP.test, CUTDL.id, CUTDL.error, S.cutModels, se.cutEngine, se.cutProxy], agents: () => [m.on, m.requireToken, m.port, m.state] }[S.tab.setup];
+    ai: () => [S.ai, S.imageAi, AI.test, REP.test, CUTDL.id, CUTDL.error, CUTDL.note, S.cutModels, se.cutEngine, se.cutProxy, se.cutSource], agents: () => [m.on, m.requireToken, m.port, m.state] }[S.tab.setup];
   return JSON.stringify([S.tab.setup, P.id, P.name, P.categories.map((c) => [c.id, c.name, c.color]), S.cover.catId, S.profiles.length, page ? page() : null]);
 }
 /**

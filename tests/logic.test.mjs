@@ -103,7 +103,9 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.notEqual(c.layers, p.design.layers);                       // a copy, not the same array
   const own = normalizeCover({ layers: [{ type: "title", stroke: 0.5 }] }, p);
   assert.equal(own.layers.find((l) => l.id === "title").stroke, 0.5);
-  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", exportSizes: {}, exportDirs: {}, scope: "size", hideScene: false, glass: true, glassHint: false, drawer: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], lookUse: {}, lookLikes: [], recipes: {}, layouts: normalizeSettings({}).layouts, surprise: { locks: {}, odds: {} } });
+  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", exportSizes: {}, exportDirs: {}, scope: "size", hideScene: false, glass: true, glassHint: false, drawer: false, cutEngine: "", cutProxy: "", cutSource: "auto", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], lookUse: {}, lookLikes: [], recipes: {}, layouts: normalizeSettings({}).layouts, surprise: { locks: {}, odds: {} } });
+  // where the cut-out models come from: one of the sources, else automatic
+  assert.deepEqual(["hf-mirror", "huggingface", "auto", "github", 3, undefined].map((cutSource) => normalizeSettings({ cutSource }).cutSource), ["hf-mirror", "huggingface", "auto", "auto", "auto", "auto"]);
   // how often each look was picked: whole counts of looks there are, none at 0, in the registry's order
   assert.deepEqual(normalizeSettings({ lookUse: { riso: 2.7, cel: 3, nope: 5, cyber: -1, deco: "4", neon: "x", facet: 0, songke: 9e9 } }).lookUse, { cel: 3, riso: 2, songke: 1e6, deco: 4 });
   assert.deepEqual([normalizeSettings({ lookUse: [3] }).lookUse, normalizeSettings({ lookUse: "cel" }).lookUse], [{}, {}]);
@@ -226,7 +228,7 @@ test("the settings at start: custom.json's; with none there yet, settings.json's
   const { settingsToKeep, readSettings } = await import("../ui/js/store.js");
   // settings.json, as earlier versions wrote it: every field, the defaults' too
   const old = { lang: "zh", profileId: "brand", scale: 2, format: "webp", quality: 92, nameTemplate: "{n}-{channel}_{title}_{size}", exportSizes: {}, exportDirs: { brand: "D:\\covers" },
-    scope: "size", hideScene: false, glass: true, glassHint: false, drawer: true, cutEngine: "", cutProxy: "", channels: { brand: "vlog" }, columns: { left: 0, right: 360, setup: 0 },
+    scope: "size", hideScene: false, glass: true, glassHint: false, drawer: true, cutEngine: "", cutProxy: "", cutSource: "auto", channels: { brand: "vlog" }, columns: { left: 0, right: 360, setup: 0 },
     recentFonts: [], lookUse: { riso: 4 }, recipes: {}, layouts: [], surprise: { locks: {}, odds: {} } };
   let asked = 0;
   const legacy = async () => { asked++; return old; };
