@@ -2,7 +2,8 @@
 //! the ONNX form published by onnx-community on Hugging Face, run by ONNX Runtime (MIT) through `ort`.
 //!
 //! Neither comes with the app. When the user asks for a model, the runtime library for this platform
-//! (Microsoft's own release, 1.23.2) and the model file are downloaded into the app data folder
+//! (Microsoft's own release, 1.23.2, from GitHub) and the model file (from Hugging Face, or its mirror
+//! hf-mirror.com, at a fixed commit of the model's repository) are downloaded into the app data folder
 //! `models/`, each checked against its SHA-256, and loaded from there.
 //!
 //! In and out as with Vision (see `vision.rs`): the photo as encoded bytes, already upright; the
@@ -16,9 +17,17 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-/// A file to download: where from, how big, and its SHA-256 (hex).
-pub struct Download {
+/// A place a file can be downloaded from: `id` is what a user's choice of source names (`huggingface`,
+/// `hf-mirror`, `github`), `host` what the user is told.
+pub struct Source {
+    pub id: &'static str,
+    pub host: &'static str,
     pub url: &'static str,
+}
+/// A file to download: where from (in the order tried), how big, and its SHA-256 (hex). Whichever
+/// source it comes from, it is the same file, checked against the same size and hash.
+pub struct Download {
+    pub sources: &'static [Source],
     pub bytes: u64,
     pub sha256: &'static str,
 }
@@ -26,9 +35,20 @@ pub struct Model {
     pub id: &'static str,
     pub file: Download,
 }
+/// A file of a Hugging Face repository at a fixed commit (never `main`, which can move under the hash):
+/// from Hugging Face, then from hf-mirror.com, which serves the same paths (and sends a visitor from outside
+/// China on to Hugging Face).
+macro_rules! hugging_face {
+    ($repo:literal, $commit:literal, $path:literal) => {
+        &[
+            Source { id: "huggingface", host: "huggingface.co", url: concat!("https://huggingface.co/", $repo, "/resolve/", $commit, "/", $path) },
+            Source { id: "hf-mirror", host: "hf-mirror.com", url: concat!("https://hf-mirror.com/", $repo, "/resolve/", $commit, "/", $path) },
+        ]
+    };
+}
 pub const MODELS: [Model; 2] = [
-    Model { id: "birefnet-lite", file: Download { url: "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model.onnx", bytes: 224_005_088, sha256: "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333" } },
-    Model { id: "birefnet", file: Download { url: "https://huggingface.co/onnx-community/BiRefNet-ONNX/resolve/main/onnx/model.onnx", bytes: 972_666_916, sha256: "58f621f00f5d756097615970a88a791584600dcf7c45b18a0a6267535a1ebd3c" } },
+    Model { id: "birefnet-lite", file: Download { sources: hugging_face!("onnx-community/BiRefNet_lite-ONNX", "de15b22ba131738a16dff04aab8bdf8dc32e3ac1", "onnx/model.onnx"), bytes: 224_005_088, sha256: "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333" } },
+    Model { id: "birefnet", file: Download { sources: hugging_face!("onnx-community/BiRefNet-ONNX", "534d3c82d3bb8b2f0867db6dfbc3a525b8e42f67", "onnx/model.onnx"), bytes: 972_666_916, sha256: "58f621f00f5d756097615970a88a791584600dcf7c45b18a0a6267535a1ebd3c" } },
 ];
 
 /// The runtime package for this platform, and the name of the library in it.
@@ -39,7 +59,11 @@ pub struct Runtime {
 macro_rules! runtime {
     ($name:literal, $bytes:literal, $sha:literal, $lib:literal) => {
         Some(Runtime {
-            package: Download { url: concat!("https://github.com/microsoft/onnxruntime/releases/download/v1.23.2/", $name), bytes: $bytes, sha256: $sha },
+            package: Download {
+                sources: &[Source { id: "github", host: "github.com", url: concat!("https://github.com/microsoft/onnxruntime/releases/download/v1.23.2/", $name) }],
+                bytes: $bytes,
+                sha256: $sha,
+            },
             library: $lib,
         })
     };
@@ -196,7 +220,7 @@ pub fn download(agent: &ureq::Agent, data: &Path, m: &Model, progress: impl Fn(u
 /// Streams `d` into `to`, checking its size and SHA-256; removes `to` if anything is wrong.
 fn fetch(agent: &ureq::Agent, d: &Download, to: &Path, progress: impl Fn(u64)) -> Result<(), String> {
     let result = (|| {
-        let reply = agent.get(d.url).call().map_err(|e| format!("download: {e}"))?;
+        let reply = agent.get(d.sources[0].url).call().map_err(|e| format!("download: {e}"))?;
         let mut reader = reply.into_reader();
         let mut out = std::fs::File::create(to).map_err(|e| e.to_string())?;
         let (mut hash, mut done, mut last, mut buf) = (Sha256::new(), 0u64, 0u64, vec![0u8; 1 << 20]);
@@ -300,6 +324,60 @@ mod tests {
     }
 
     #[test]
+    fn models_come_from_a_fixed_commit_on_hugging_face_or_its_mirror() {
+        let commit = |url: &str| url.split("/resolve/").nth(1).and_then(|r| r.split('/').next()).map(str::to_string);
+        for m in &MODELS {
+            let ids: Vec<_> = m.file.sources.iter().map(|s| s.id).collect();
+            assert_eq!(ids, ["huggingface", "hf-mirror"], "{}", m.id);
+            for s in m.file.sources {
+                assert!(s.url.starts_with(&format!("https://{}/", s.host)), "{}", s.url);
+                let c = commit(s.url).unwrap();
+                assert!(c.len() == 40 && c.bytes().all(|b| b.is_ascii_hexdigit()), "{}: a commit, never a branch", s.url);
+            }
+            // the mirror's path is Hugging Face's
+            let path = |s: &Source| s.url.splitn(4, '/').nth(3).unwrap().to_string();
+            assert_eq!(path(&m.file.sources[0]), path(&m.file.sources[1]));
+        }
+        let r = RUNTIME.as_ref().unwrap();
+        assert!(r.package.sources.len() == 1 && r.package.sources[0].url.starts_with("https://github.com/microsoft/onnxruntime/releases/download/v1.23.2/"));
+    }
+
+    /// Asks each source of each model, without downloading it, whether it has the file this catalog
+    /// names: Hugging Face says the size and SHA-256 of what it would send (x-linked-size, x-linked-etag).
+    /// A source that cannot be reached from here is only reported; one of each model's must answer.
+    /// `cargo test -p smedcover-core cut::onnx::tests::sources_have -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn sources_have_the_files_named() {
+        for m in &MODELS {
+            let mut answered = 0;
+            for s in m.file.sources {
+                let mut builder = ureq::AgentBuilder::new().redirects(0).timeout(std::time::Duration::from_secs(20));
+                if let Some(p) = crate::net::proxy_for(s.url, "") {
+                    builder = builder.proxy(ureq::Proxy::new(&p).unwrap());
+                }
+                let reply = match builder.build().head(s.url).call() {
+                    Ok(r) => r,
+                    Err(ureq::Error::Status(_, r)) => r,
+                    Err(e) => {
+                        eprintln!("{}: not reached: {e}", s.url);
+                        continue;
+                    }
+                };
+                answered += 1;
+                if reply.header("location").is_some_and(|l| l.starts_with("https://huggingface.co/")) {
+                    eprintln!("{}: sent on to Hugging Face (from outside China)", s.url);
+                    continue;
+                }
+                assert_eq!(reply.header("x-linked-size"), Some(m.file.bytes.to_string().as_str()), "{}", s.url);
+                assert_eq!(reply.header("x-linked-etag").map(|e| e.trim_matches('"')), Some(m.file.sha256), "{}", s.url);
+                eprintln!("{}: has it", s.url);
+            }
+            assert!(answered > 0, "no source of {} answered", m.id);
+        }
+    }
+
+    #[test]
     fn unpacks_one_file_from_either_kind_of_package() {
         let dir = tempfile::tempdir().unwrap();
         // a .tgz with the library two folders down, among other files
@@ -339,7 +417,7 @@ mod tests {
         let data = PathBuf::from(std::env::var("SMEDCOVER_TEST_DATA").expect("SMEDCOVER_TEST_DATA"));
         let m = model("birefnet-lite").unwrap();
         let mut builder = ureq::AgentBuilder::new().timeout_read(std::time::Duration::from_secs(120));
-        if let Some(p) = crate::net::proxy_for(m.file.url, "") {   // the environment's proxy, as the app uses it
+        if let Some(p) = crate::net::proxy_for(m.file.sources[0].url, "") {   // the environment's proxy, as the app uses it
             builder = builder.proxy(ureq::Proxy::new(&p).unwrap());
         }
         let agent = builder.build();

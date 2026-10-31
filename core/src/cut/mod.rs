@@ -47,7 +47,7 @@ pub fn download(data: &Path, id: &str, proxy: Option<&str>, progress: impl Fn(Cu
     let mut builder = ureq::AgentBuilder::new()
         .timeout_connect(std::time::Duration::from_secs(30))
         .timeout_read(std::time::Duration::from_secs(120));
-    if let Some(p) = net::proxy_for(m.file.url, proxy.unwrap_or("")) {
+    if let Some(p) = net::proxy_for(m.file.sources[0].url, proxy.unwrap_or("")) {
         builder = builder.proxy(ureq::Proxy::new(&p).map_err(|e| format!("proxy {p}: {e}"))?);
     }
     let agent = builder.build();
