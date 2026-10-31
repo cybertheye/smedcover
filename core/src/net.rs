@@ -8,8 +8,12 @@
 //! through the app, by whatever name, address, proxy or redirect: ureq keeps a request's headers when
 //! it follows a redirect (all but `Authorization`, `Cookie` and `Content-Length`), and a POST is not
 //! redirected at all.
+//!
+//! Every request sent from the core over TLS (these, and the cut-out's downloads) trusts what the
+//! system trusts ([`tls`]).
 
 use std::io::{ErrorKind, Read};
+use std::sync::{Arc, OnceLock};
 
 use ::image::ImageFormat;
 use serde::{Deserialize, Serialize};
@@ -56,10 +60,57 @@ fn read_capped(response: ureq::Response, cap: u64) -> Res<String> {
     Ok(text)
 }
 
+/// The TLS settings of every request the core sends: the system's own verifier, so that what the
+/// system trusts is trusted — on Windows its certificate store, with a root an antivirus scanning HTTPS
+/// or a company's inspecting proxy put there (Mozilla's roots alone, ureq's own, refuse those:
+/// UnknownIssuer); macOS's keychain and its trust settings; on Linux /etc/ssl, and Mozilla's roots
+/// besides, for a system without ca-certificates. The updater's reqwest trusts the same. Built once.
+pub fn tls() -> Res<Arc<rustls::ClientConfig>> {
+    static TLS: OnceLock<Result<Arc<rustls::ClientConfig>, String>> = OnceLock::new();
+    TLS.get_or_init(|| {
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+        let verifier = rustls_platform_verifier::Verifier::new_with_extra_roots(webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().cloned(), provider.clone());
+        #[cfg(not(all(unix, not(target_vendor = "apple"), not(target_os = "android"))))]
+        let verifier = rustls_platform_verifier::Verifier::new(provider.clone());
+        let verifier = verifier.map_err(|e| format!("tls: the system's certificates: {e}"))?;
+        let config = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .map_err(|e| format!("tls: {e}"))?
+            .dangerous()   // the "custom" verifier is the system's own, nothing is left unchecked
+            .with_custom_certificate_verifier(Arc::new(verifier))
+            .with_no_client_auth();
+        Ok(Arc::new(config))
+    })
+    .clone()
+}
+
+/// Whether a request failed in TLS (a certificate refused, a handshake that broke off): rustls's
+/// error somewhere in the chain, ureq having wrapped it in an io::Error, whose source() skips it.
+pub(crate) fn is_tls(e: &(dyn std::error::Error + 'static)) -> bool {
+    let mut cause = Some(e);
+    while let Some(c) = cause {
+        if c.downcast_ref::<rustls::Error>().is_some() {
+            return true;
+        }
+        if let Some(inner) = c.downcast_ref::<std::io::Error>().and_then(|io| io.get_ref()) {
+            if inner.downcast_ref::<rustls::Error>().is_some() {
+                return true;
+            }
+        }
+        cause = c.source();
+    }
+    false
+}
+
 /// A request's error as text, a wait that ran out always saying "timed out", which is what the web
 /// view looks for to explain it (ai.timedOut in app.js): Windows words it "os error 10060" alone.
+/// One of TLS starts "tls: ".
 fn net_err<E: std::error::Error + 'static>(e: E) -> String {
     let text = e.to_string();
+    if is_tls(&e) {
+        return format!("tls: {text}");
+    }
     let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&e);
     while let Some(c) = cause {
         let io = c.downcast_ref::<std::io::Error>();
@@ -77,7 +128,7 @@ fn agent_for(url: &str, proxy: &str, timeout_secs: u64) -> Res<ureq::Agent> {
         return Err(format!("invalid URL: {url}"));
     }
     let timeout = std::time::Duration::from_secs(timeout_secs.clamp(5, 1800));
-    let mut builder = ureq::AgentBuilder::new().timeout(timeout);
+    let mut builder = ureq::AgentBuilder::new().timeout(timeout).tls_config(tls()?);
     if let Some(p) = proxy_for(url, proxy) {
         builder = builder.proxy(ureq::Proxy::new(&p).map_err(|e| format!("proxy {p}: {e}"))?);
     }
@@ -466,6 +517,30 @@ mod tests {
             assert_eq!(reply.status, 401, "{url}: {}", reply.text);
             assert!(reply.text.contains("error"), "{url}: {}", reply.text);
         }
+    }
+
+    /// Needs the network: `cargo test -p smedcover-core net::tests::tls -- --ignored --nocapture`. A host
+    /// the system trusts is reached; one whose certificate is its own, or for another name, or out of
+    /// date, is refused with a "tls: " error.
+    #[test]
+    #[ignore]
+    fn tls_trusts_what_the_system_trusts_and_nothing_else() {
+        for url in ["https://huggingface.co/api/models/onnx-community/BiRefNet_lite-ONNX", "https://github.com/"] {
+            let reply = send(url, "GET", &[], "", "", 30, AI_MAX_REPLY).unwrap_or_else(|e| panic!("{url}: {e}"));
+            assert!(reply.status < 500, "{url}: {}", reply.status);
+        }
+        for url in ["https://self-signed.badssl.com/", "https://wrong.host.badssl.com/", "https://expired.badssl.com/"] {
+            let e = send(url, "GET", &[], "", "", 30, AI_MAX_REPLY).unwrap_err();
+            eprintln!("{url}: {e}");
+            assert!(e.starts_with("tls: "), "{url}: {e}");
+        }
+    }
+
+    #[test]
+    fn tls_is_built_and_kept() {
+        let a = tls().unwrap();
+        assert!(Arc::ptr_eq(&a, &tls().unwrap()));
+        assert!(!a.crypto_provider().cipher_suites.is_empty());
     }
 
     #[test]

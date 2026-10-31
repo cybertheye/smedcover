@@ -22,6 +22,13 @@ serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 fontdb = "0.23"
 ureq = { version = "2", features = ["socks-proxy"] }
+# The TLS of every request the core sends (net::tls): ureq's rustls, with ring as ureq has it, and the system's own
+# verifier, so that what the system trusts is trusted (on Windows its certificate store, with a root an antivirus or a
+# company's inspecting proxy added; macOS's keychain; Linux's /etc/ssl), as the updater's reqwest already does. On
+# Linux, Mozilla's roots besides, for a system without ca-certificates.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-platform-verifier = "0.7"
+webpki-root-certs = "1"
 ttf-parser = "0.25"
 base64 = "0.22"
 # The cross-platform subject cut-out: BiRefNet (MIT) run by ONNX Runtime (MIT), through `ort`

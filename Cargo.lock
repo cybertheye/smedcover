@@ -3631,6 +3631,7 @@ dependencies = [
  "reqwest",
  "rmcp",
  "rustls",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "sha2",
@@ -3641,6 +3642,7 @@ dependencies = [
  "tokio-util",
  "ttf-parser",
  "ureq",
+ "webpki-root-certs",
  "windows-sys 0.61.2",
  "zip 8.6.0",
 ]

@@ -12,6 +12,8 @@ serde_json = { workspace = true }
 image = { workspace = true }
 fontdb = { workspace = true }
 ureq = { workspace = true }
+rustls = { workspace = true }
+rustls-platform-verifier = { workspace = true }
 ttf-parser = { workspace = true }
 base64 = { workspace = true }
 # The cross-platform subject cut-out (see the workspace's Cargo.toml).
@@ -40,6 +42,10 @@ objc2-foundation = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
+# Mozilla's roots, besides the system's (net::tls).
+[target.'cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))'.dependencies]
+webpki-root-certs = { workspace = true }
+
 # The endpoint's port is bound for SmedCover alone.
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
@@ -52,6 +58,3 @@ tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }
 # The HTTP tests (tests/mcp_http.rs) use rmcp's client too.
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
 reqwest = { workspace = true }
-# Built with the app (`cargo test --workspace`), reqwest has rustls without a provider (tauri-plugin-updater's
-# `rustls-no-provider`): those tests install ring's, the one the updater installs.
-rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
