@@ -955,7 +955,9 @@ SMEDCOVER_SELFTEST=/一个空目录的绝对路径 target/release/bundle/macos/S
 
 `SMEDCOVER_DATA=/某个目录` 让应用换一个数据目录，不管怎么启动都算，正常启动也一样（命令行的 `--data` 就是设它）；自检目录仍然优先。这个目录应当只有你自己能写：应用的锁、命令行的 `cli.json` 和令牌都放在那里。
 
-`.github/workflows/build.yml` 可在 GitHub Actions 上构建安装包（尚未实际运行过）：macOS 分 Apple 芯片和 Intel 两个版本（`.dmg`、`.app.tar.gz`），Windows x64（`.exe`、`.msi`），Linux x64（`.deb`、`.rpm`、`.AppImage`），每个都带命令行；另外每个平台单独有一份命令行 `smedcover-cli-<平台>`（`.tar.gz` 里的 `smedcover`；Windows 是 `smedcover.exe`）。
+`.github/workflows/build.yml` 在 GitHub Actions 上构建安装包：macOS 分 Apple 芯片和 Intel 两个版本（`.dmg`、`.app.tar.gz`），Windows x64（`.exe`、`.msi`），Linux x64（`.deb`、`.rpm`、`.AppImage`），每个都带命令行；另外每个平台单独有一份命令行 `smedcover-cli-<平台>`（`.tar.gz` 里的 `smedcover`；Windows 是 `smedcover.exe`）。推送版本标签时，安装包会挂到一个草稿 release 上，点发布才公开。
+
+更新时要用到的安装包（除 `.dmg` 外都是）在那里为更新器签名，每个旁边一个 `.sig`：`src-tauri/tauri.release.conf.json` 让 `tauri build` 用仓库 secrets 里的密钥 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 签名，它的公钥是 `tauri.conf.json` 的 `plugins.updater.pubkey`；`node scripts/updater.mjs verify` 用这个公钥逐个核对，并核对签的是不是这次构建的版本。标签构建在所有平台都构建完后，把更新器读的清单 `latest.json` 放到草稿 release 上：版本号，以及每个平台、每种安装包的下载地址和签名；生成前把下载下来的每个文件再核对一遍（`node scripts/updater.mjs manifest`）；有平台构建失败就不生成。`npm run build` 不签名，也不需要密钥。想像 GitHub 上那样给自己的构建签名，设好这两个环境变量，再运行 `npm run tauri -- build --config src-tauri/tauri.release.conf.json`。密钥不在仓库里：丢了，已装好的副本就再也收不到更新；被别人拿到，他就能签出 App 会安装的包。
 
 ## 待办
 

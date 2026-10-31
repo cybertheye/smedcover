@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sidecarName, plan } from "../scripts/sidecar.mjs";
+import { REQUIRED, checkSignature, isUpdaterPackage, manifest, publicKey, updaterTarget } from "../scripts/updater.mjs";
 
 /** A file of the repository, its line ends as Unix's (a Windows checkout may have made them \r\n). */
 const read = (p) => readFileSync(fileURLToPath(new URL("../" + p, import.meta.url)), "utf8").replace(/\r\n/g, "\n");
@@ -69,3 +70,70 @@ test("the sidecar's name and its build for each target", () => {
   // another's (the Intel Mac's, built on an Apple-silicon runner): --target, into target/<triple>/
   assert.deepEqual(plan("x86_64-apple-darwin", "aarch64-apple-darwin", false), { args: [...base, "--release", "--target", "x86_64-apple-darwin"], built: join("x86_64-apple-darwin", "release", "smedcover") });
 });
+
+test("the updater's signing: the public key in the app, the installers signed on GitHub only, their manifest written once", () => {
+  const conf = JSON.parse(read("src-tauri/tauri.conf.json"));
+  assert.equal(publicKey(conf.plugins.updater.pubkey).id.length, 8, "plugins.updater.pubkey is a minisign public key");
+  assert.equal(conf.bundle.createUpdaterArtifacts, undefined, "a build of one's own needs no key");
+  assert.deepEqual(JSON.parse(read("src-tauri/tauri.release.conf.json")), { bundle: { createUpdaterArtifacts: true } });
+  const yml = read(".github/workflows/build.yml");
+  assert.match(yml, /args: --config src-tauri\/tauri\.release\.conf\.json \$\{\{ matrix\.args \}\}/);
+  for (const k of ["TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"]) assert.ok(yml.includes(`${k}: \${{ secrets.${k} }}`), k);
+  assert.match(yml, /includeUpdaterJson: false/, "not by each of the four jobs");
+  assert.match(yml, /node scripts\/updater\.mjs verify target\/release\/bundle target\/\*\/release\/bundle/);
+  assert.match(yml, /needs: build\n\s+if: startsWith\(github\.ref, 'refs\/tags\/'\)/);
+  assert.match(yml, /node scripts\/updater\.mjs manifest release --repo "\$GITHUB_REPOSITORY" --tag "\$GITHUB_REF_NAME" --out latest\.json/);
+});
+
+test("what each of a release's files updates, and the manifest made of them", () => {
+  // v0.5.0's files, as tauri-action named them
+  assert.deepEqual(updaterTarget("SmedCover_aarch64.app.tar.gz"), { os: "darwin", arch: "aarch64", installer: "app" });
+  assert.deepEqual(updaterTarget("SmedCover_x64.app.tar.gz"), { os: "darwin", arch: "x86_64", installer: "app" });
+  assert.deepEqual(updaterTarget("SmedCover_0.5.0_x64-setup.exe"), { os: "windows", arch: "x86_64", installer: "nsis" });
+  assert.deepEqual(updaterTarget("SmedCover_0.5.0_x64_en-US.msi"), { os: "windows", arch: "x86_64", installer: "msi" });
+  assert.deepEqual(updaterTarget("SmedCover_0.5.0_amd64.AppImage"), { os: "linux", arch: "x86_64", installer: "appimage" });
+  assert.deepEqual(updaterTarget("SmedCover_0.5.0_amd64.deb"), { os: "linux", arch: "x86_64", installer: "deb" });
+  assert.deepEqual(updaterTarget("SmedCover-0.5.0-1.x86_64.rpm"), { os: "linux", arch: "x86_64", installer: "rpm" });
+  for (const n of ["SmedCover_0.5.0_aarch64.dmg", "SmedCover_0.5.0_x64.dmg", "SmedCover_x64.app.tar.gz.sig", "latest.json", "smedcover-linux.tar.gz", "smedcover.exe"]) {
+    assert.equal(updaterTarget(n), null, n);
+  }
+  // in a bundle folder, before tauri-action names them
+  for (const n of ["SmedCover.app.tar.gz", "SmedCover_0.5.0_x64-setup.exe", "SmedCover_0.5.0_x64_en-US.msi", "SmedCover_0.5.0_amd64.AppImage", "SmedCover_0.5.0_amd64.deb", "SmedCover-0.5.0-1.x86_64.rpm"]) {
+    assert.ok(isUpdaterPackage(n), n);
+  }
+  for (const n of ["SmedCover_0.5.0_x64.dmg", "SmedCover.app.tar.gz.sig", "smedcover.exe"]) assert.ok(!isUpdaterPackage(n), n);
+
+  const names = ["SmedCover_aarch64.app.tar.gz", "SmedCover_x64.app.tar.gz", "SmedCover_0.6.0_x64-setup.exe", "SmedCover_0.6.0_x64_en-US.msi",
+    "SmedCover_0.6.0_amd64.AppImage", "SmedCover_0.6.0_amd64.deb", "SmedCover-0.6.0-1.x86_64.rpm", "SmedCover_0.6.0_x64.dmg"];
+  const m = manifest({ version: "0.6.0", pubDate: "2026-11-01T00:00:00.000Z", repo: "cybertheye/smedcover", tag: "v0.6.0", files: names.map((name) => ({ name, signature: `sig of ${name}` })) });
+  assert.equal(m.version, "0.6.0");
+  assert.equal(m.notes, "");
+  assert.equal(m.pub_date, "2026-11-01T00:00:00.000Z");
+  assert.deepEqual(Object.keys(m.platforms), ["darwin-aarch64", "darwin-aarch64-app", "darwin-x86_64", "darwin-x86_64-app", "linux-x86_64",
+    "linux-x86_64-appimage", "linux-x86_64-deb", "linux-x86_64-rpm", "windows-x86_64", "windows-x86_64-msi", "windows-x86_64-nsis"]);
+  for (const k of REQUIRED) assert.ok(m.platforms[k], k);
+  assert.deepEqual(m.platforms["windows-x86_64-msi"], { signature: "sig of SmedCover_0.6.0_x64_en-US.msi", url: "https://github.com/cybertheye/smedcover/releases/download/v0.6.0/SmedCover_0.6.0_x64_en-US.msi" });
+  // the fallback, for an app that cannot tell what it came from: the NSIS installer, the AppImage
+  assert.equal(m.platforms["windows-x86_64"], m.platforms["windows-x86_64-nsis"]);
+  assert.equal(m.platforms["linux-x86_64"], m.platforms["linux-x86_64-appimage"]);
+  assert.equal(m.platforms["darwin-x86_64"].url, "https://github.com/cybertheye/smedcover/releases/download/v0.6.0/SmedCover_x64.app.tar.gz");
+  // with no NSIS installer, the MSI
+  const msiOnly = manifest({ version: "0.6.0", repo: "o/r", tag: "v0.6.0", files: [{ name: "SmedCover_0.6.0_x64_en-US.msi", signature: "s" }] });
+  assert.equal(msiOnly.platforms["windows-x86_64"].url, "https://github.com/o/r/releases/download/v0.6.0/SmedCover_0.6.0_x64_en-US.msi");
+});
+
+test("a .sig checked as the updater checks it: the file, the key, the version in the signed comment", () => {
+  // made with `tauri signer generate` (a key made for this test alone, not the app's) and `tauri signer sign --app-version 0.6.0`
+  const pubkey = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENGMjExNDcxRUM0QThFRjYKUldUMmprcnNjUlFoejRkb0NNSTkxTndUY0h6NVhITHEwK1RPUWRHYXVydFdXZGpZVmZoYnNhSVAK";
+  const sig = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUMmprcnNjUlFoenpSaEcxSXBXM3pCRHoyQzFYTUJoK0kvK1JpZXB6OWlJVWM1OFpPdi9aNTlyYkFHaTFQRmVHUVMzeFVkU1dqZTV3WTc0R05oWEhpTjZqNmdKN2FuaHdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNDQ1Mjk3CWZpbGU6c2FtcGxlLmJpbgl2ZXJzaW9uOjAuNi4wCmFwRXBaR2lwUTRLblNBWVpjaFlNUUQ3R0JMaEx4OE15Zk5Pc0JQTmZHL3hwZDdYazlJalRJd2VGOXBpejZva2NaQm4vNFdrYXdwemlyMFlqOGZNa0JBPT0K";
+  const file = Buffer.from("SmedCover updater test\n");
+  assert.deepEqual(checkSignature(file, sig, pubkey), { timestamp: "1793445297", file: "sample.bin", version: "0.6.0" });
+  assert.throws(() => checkSignature(Buffer.from("SmedCover updater test!\n"), sig, pubkey), /does not match the file/);
+  const appKey = JSON.parse(read("src-tauri/tauri.conf.json")).plugins.updater.pubkey;
+  assert.throws(() => checkSignature(file, sig, appKey), /another key/);
+  // another version written into the comment: its own signature no longer holds
+  const text = Buffer.from(sig, "base64").toString("utf8").replace("version:0.6.0", "version:0.6.1");
+  assert.throws(() => checkSignature(file, Buffer.from(text).toString("base64"), pubkey), /trusted comment is not signed/);
+  assert.throws(() => checkSignature(file, "not a signature", pubkey), /not a minisign signature/);
+});
+
