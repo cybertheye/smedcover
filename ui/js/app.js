@@ -3217,7 +3217,7 @@ function agentsTab() {
   ];
 }
 
-// ---------- Settings → About: this version, and updates (update.rs in the app)
+// ---------- About: this version, and updates (update.rs in the app), from the dock's foot
 /** Whether the host updates itself: the desktop app's alone. */
 const CAN_UPDATE = HOST === "tauri";
 /**
@@ -3229,19 +3229,26 @@ const CAN_UPDATE = HOST === "tauri";
 const UPD = { status: null, read: false, doing: "", checkedAt: 0, progress: null, error: null };
 /** A proxy the user gave SmedCover (the cut-out's downloads', else an AI service's): updates go through it too, else through the system's. */
 const updProxy = () => S.settings.cutProxy || (S.ai && S.ai.proxy) || (S.imageAi && S.imageAi.proxy) || null;
-const onAbout = () => S.mode === "setup" && S.tab.setup === "about";
+/** Whether the About window is the dialog open. */
+const aboutOpen = () => !!$("modal").querySelector(":scope > .dlg.updwin");
+/** What the updates now are, shown: the dock's About button (a dot once a newer version is found), and the About window if it is open. */
+function updShown() {
+  const b = document.querySelector("#dock .upd");
+  if (b) { b.classList.toggle("new", !!(UPD.status && UPD.status.found)); b.title = updTip(); }
+  if (aboutOpen()) aboutDialog();
+}
 async function updRead() {
   if (UPD.read) return;
   UPD.read = true;
   try { UPD.status = await invoke("update_status"); } catch (e) { UPD.read = false; UPD.error = { kind: "failed", message: String((e && e.message) || e) }; }
-  if (onAbout()) renderPanel();
+  updShown();
 }
 /** Does `cmd` (update_check, update_download, update_install), `doing` meanwhile: the status it answers drawn, a refusal or a failure said (a download cancelled is not). */
 async function updDo(doing, cmd, args) {
   if (UPD.doing) return;
   UPD.doing = doing; UPD.error = null;
   if (doing === "download") UPD.progress = null;
-  renderPanel();
+  updShown();
   try {
     const s = await invoke(cmd, args);
     if (s) UPD.status = s;
@@ -3252,11 +3259,11 @@ async function updDo(doing, cmd, args) {
     UPD.status = await invoke("update_status").catch(() => UPD.status);
   }
   UPD.doing = "";
-  if (onAbout()) renderPanel();
+  updShown();
 }
 const updCheck = () => updDo("check", "update_check", { proxy: updProxy() });
 const updDownload = () => updDo("download", "update_download");
-/** Installs the version downloaded once what waits is written: the app then starts again, this page with it (on Windows its installer does), or says why not. */
+/** Installs the version downloaded once what waits is written: the app then starts again (on Windows its installer starts it), or says why not. */
 async function updInstall() {
   if (UPD.doing) return;
   await flushWrites();
@@ -3278,21 +3285,29 @@ function updState() {
   return UPD.checkedAt ? "latest" : "unknown";
 }
 const UPD_PILL = { latest: "running", found: "switching", ready: "switching", downloading: "switching", checking: "switching", installing: "switching" };
-/** ⋯'s line for About: the newer version found, else this one. */
-const updSays = () => { const s = UPD.status; return !s ? "" : s.found ? t("upd.menuFound", s.found.version) : "SmedCover " + s.version; };
+/** The dock's About button's tip: the newer version found, else what it opens. */
+const updTip = () => { const s = UPD.status; return s && s.found ? t("upd.menuFound", s.found.version) : t("upd.rail"); };
 /** A day as the page's language writes it. */
 const updDay = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString(getLang() === "en" ? "en" : "zh-CN", { year: "numeric", month: "long", day: "numeric" }); };
 /**
- * Settings → About: this version; Check for updates; the newer version found, with its notes on its release page, to
- * download (its progress said as it comes, Cancel) and then to install (Restart to update), the app starting again. A
- * copy that cannot update itself where it is — a development build, or on macOS one run from a disk image or moved aside
- * by the system — still checks, and says what to do instead.
+ * About, a window of its own from the button at the dock's foot: this version; Check for updates; the newer version
+ * found, with its notes on its release page, to download (its progress said as it comes, Cancel) and then to install
+ * (Restart to update), the app starting again. A copy that cannot update itself where it is — a development build, or
+ * on macOS one run from a disk image or moved aside by the system — still checks, and says what to do instead. Drawn
+ * again where it is as the updates change (updShown); another dialog open is never covered by it.
  */
-function aboutTab() {
-  const head = el("div", { class: "sh" }, el("b", {}, t("tab.about")), el("span", {}, t("upd.pageSub")));
+function aboutDialog() {
+  const m = $("modal");
+  if (!m.hidden && !aboutOpen()) return;
   updRead();
-  const s = UPD.status;
-  if (!s) return [head, el("div", { class: "hint" + (UPD.error ? " err" : "") }, UPD.error ? t("upd.err.failed", UPD.error.message) : t("mcp.reading"))];
+  const s = UPD.status, close = el("button", { class: "x", title: t("close"), "aria-label": t("close"), onclick: closeModal }, "✕");
+  const head = el("div", { class: "xhead" }, el("div", {}, el("h2", {}, "SmedCover" + (s ? " " + s.version : "")), el("div", { class: "hint" }, t("upd.pageSub"))), close);
+  const show = (...body) => {
+    m.onDismiss = null;
+    m.replaceChildren(el("div", { class: "dlg updwin", role: "dialog", "aria-modal": "true", "aria-label": t("tab.about") }, head, ...body));
+    m.hidden = false;
+  };
+  if (!s) return show(el("div", { class: "hint" + (UPD.error ? " err" : "") }, UPD.error ? t("upd.err.failed", UPD.error.message) : t("mcp.reading")));
   const k = updState(), f = s.found, here = s.place === "installed", err = UPD.error;
   const pill = err ? "error" : UPD_PILL[k] || "";
   const btn = (icon, label, fn) => el("button", { class: "btn", disabled: !!UPD.doing, onclick: fn }, icon && ico(icon, 15), label);
@@ -3318,13 +3333,11 @@ function aboutTab() {
       ready: t("upd.line.ready", f && f.version),
       installing: t("upd.line.installing"),
     }[k];
-  return [
-    head,
-    el("section", { class: "scard aicard", id: "set-about" },
-      el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, "SmedCover " + s.version), el("small", {}, t("upd.sub"))),
-        el("span", { class: "mstate " + pill, role: "status", "aria-live": "polite" }, el("span", { class: "aidot" + (CLI_DOT[pill] || "") }), t("upd.state." + (err ? "error" : k)))),
-      el("div", { class: "mrow" }, acts, el("div", { class: "hint" + (err ? " err" : ""), id: k === "downloading" && !err ? "upd-progress" : null }, line))),
-  ];
+  show(
+    el("div", { class: "ustate" }, el("span", { class: "mstate " + pill, role: "status", "aria-live": "polite" }, el("span", { class: "aidot" + (CLI_DOT[pill] || "") }), t("upd.state." + (err ? "error" : k))),
+      el("div", { class: "hint" + (err ? " err" : ""), id: k === "downloading" && !err ? "upd-progress" : null }, line)),
+    el("div", { class: "mrow" }, acts),
+    el("div", { class: "hint foot" }, t("upd.sub")));
 }
 
 /** Stores an image in the library (memory + disk). Returns its id, or null if unreadable. */
@@ -8503,13 +8516,12 @@ function closeTransient() {
  * what it was as the page was last drawn or typed in): the nav's profile (its name, its channels' names and colours, the
  * one shown, how many profiles there are) and the page's own — Brand & channels the brand and the channels, Sizes &
  * export the sizes and the export's settings, AI the services and what was learnt of them, Agents the endpoint's
- * switches, About the updates. Most of an agent's changes are the cover's alone: none of it.
+ * switches. Most of an agent's changes are the cover's alone: none of it.
  */
 function settingsSeen() {
   const P = S.profile, se = S.settings, m = MCP.status || {};
   const page = { brand: () => [P.brand, P.categories, SET_UI.menu], sizes: () => [P.sizes, se.format, se.scale, se.quality, se.nameTemplate, exportDir()],
-    ai: () => [S.ai, S.imageAi, AI.test, REP.test, CUTDL.id, CUTDL.error, S.cutModels, se.cutEngine, se.cutProxy], agents: () => [m.on, m.requireToken, m.port, m.state],
-    about: () => [UPD.status, UPD.doing, UPD.error, UPD.checkedAt] }[S.tab.setup];
+    ai: () => [S.ai, S.imageAi, AI.test, REP.test, CUTDL.id, CUTDL.error, S.cutModels, se.cutEngine, se.cutProxy], agents: () => [m.on, m.requireToken, m.port, m.state] }[S.tab.setup];
   return JSON.stringify([S.tab.setup, P.id, P.name, P.categories.map((c) => [c.id, c.name, c.color]), S.cover.catId, S.profiles.length, page ? page() : null]);
 }
 /**
@@ -8548,7 +8560,6 @@ function renderMenu() {
     el("div", { class: "mg" }, t("menu.profile")),   // what is under it opens Settings
     page("brand", counted("menu.channels", S.profile.categories.length)), page("sizes", counted("menu.sizes", S.profile.sizes.length)), page("ai", AI_SHOW.menu()),
     CAN_AGENTS && page("agents", mcpSays()),   // Settings → Agents, saying whether the endpoint is on
-    CAN_UPDATE && page("about", updSays()),   // Settings → About, saying this version, or the newer one found
     others.length > 0 && el("button", { class: "mi", role: "menuitem", "aria-expanded": String(!!MENU.profiles), onclick: () => { MENU.profiles = !MENU.profiles; renderMenu(); } },
       el("span", { class: "mt" }, el("span", {}, t("menu.switch"))), el("span", { class: "chev" + (MENU.profiles ? " open" : "") })),
     MENU.profiles && others.map((p) => el("button", { class: "mi sub", role: "menuitem", onclick: go(() => switchProfile(p.id).catch((err) => { fail(err); syncTop(); })) },
@@ -8661,13 +8672,13 @@ function ambientMoved(a, b) {
     return d / p.length > 2;
   } catch { return true; }
 }
-const TABS = { edit: { content: contentSheet, look: lookSheet, layout: layoutSheet, assets: assetsSheet, layers: layersSheet }, setup: { brand: brandTab, sizes: sizesTab, ai: aiTab, ...(CAN_AGENTS ? { agents: agentsTab } : {}), ...(CAN_UPDATE ? { about: aboutTab } : {}) } };
-/** The dock's buttons, one per sheet, each opening its sheet; in Settings, its pages down the window's left. */
+const TABS = { edit: { content: contentSheet, look: lookSheet, layout: layoutSheet, assets: assetsSheet, layers: layersSheet }, setup: { brand: brandTab, sizes: sizesTab, ai: aiTab, ...(CAN_AGENTS ? { agents: agentsTab } : {}) } };
+/** The dock's buttons, one per sheet, each opening its sheet, and at its foot About (the desktop app's) and the help; in Settings, its pages down the window's left. */
 function syncTabs() {
   if (S.mode === "setup") {
     const P = S.profile, act = (key) => el("button", { class: "btn" + (key === "delete" ? " danger" : ""), onclick: () => Promise.resolve(profileActions[key]()).catch((e) => { fail(e); syncTop(); renderPanel(); }) }, t("prof.nav." + key));
     const dots = `conic-gradient(${P.categories.map((c, i) => `${c.color} ${(i * 100) / P.categories.length}% ${((i + 1) * 100) / P.categories.length}%`).join(",")})`;
-    const icon = { brand: el("span", { class: "dots", style: `background:${dots}` }), sizes: ico("sizes", 18), ai: ico("spark", 18), agents: ico("agent", 18), about: ico("about", 18) };
+    const icon = { brand: el("span", { class: "dots", style: `background:${dots}` }), sizes: ico("sizes", 18), ai: ico("spark", 18), agents: ico("agent", 18) };
     $("setclose").title = t("set.close"); $("setclose").setAttribute("aria-label", t("set.close"));
     $("setnav").replaceChildren(el("div", { class: "cap" }, t("set.title")),
       el("div", { class: "who" }, el("span", { class: "av", style: `background:${cat().color};color:${inkOn(cat().color)}` }, [...(P.name || "?").trim()][0] || "?"),
@@ -8680,6 +8691,7 @@ function syncTabs() {
   }
   const shown = (k) => k === S.tab.edit && !sheetHidden();
   $("dock").replaceChildren(...Object.keys(TABS.edit).map((k) => el("button", { class: shown(k) ? "on" : "", "aria-pressed": String(shown(k)), onclick: () => showSheet(k) }, ico(k, 22), t("dock." + k))),
+    ...(CAN_UPDATE ? [el("button", { class: "upd" + (UPD.status && UPD.status.found ? " new" : ""), title: updTip(), "aria-label": t("upd.rail"), onclick: () => aboutDialog() }, ico("about", 20))] : []),
     el("button", { class: "help", title: t("cover.how"), "aria-label": t("cover.howShort"), onclick: (e) => showTip(e.currentTarget, t("cover.how")) }, ico("help", 20)));
 }
 /** Shows sheet `k` in the left column, the drawer shut where it had taken the sheet's place. */

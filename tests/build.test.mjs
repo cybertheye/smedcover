@@ -137,7 +137,7 @@ test("a .sig checked as the updater checks it: the file, the key, the version in
   assert.throws(() => checkSignature(file, "not a signature", pubkey), /not a minisign signature/);
 });
 
-test("updates in the app: the plugin, where it reads, and the commands Settings → About calls", () => {
+test("updates in the app: the plugin, where it reads, and the commands the About window calls", () => {
   assert.match(read("src-tauri/Cargo.toml"), /^tauri-plugin-updater = "2\.14"$/m, "2.14: the version signed in a package checked");
   const lib = read("src-tauri/src/lib.rs");
   assert.match(lib, /\.plugin\(tauri_plugin_updater::Builder::new\(\)\.build\(\)\)/);

@@ -1372,6 +1372,7 @@ const STR = {
   "cli.done": ["已安装 smedcover", "smedcover is installed"],
   "cli.undone": ["已卸载 smedcover", "smedcover is uninstalled"],
 
+  "upd.rail": ["关于与更新", "About and updates"],
   "upd.pageSub": ["版本与更新 · 新版本来自 GitHub 上发布的版本", "Version and updates · new versions come from the releases on GitHub"],
   "upd.sub": ["更新会下载完整的新版本，核对签名后才安装；档案、照片和设置都不受影响", "An update downloads the whole new version and checks its signature before installing it; your profiles, photos and settings are left as they are"],
   "upd.state.unknown": ["未检查", "Not checked"],

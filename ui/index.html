@@ -293,7 +293,10 @@
   #dock button{width:64px;height:64px;border:0;border-radius:16px;background:transparent;color:var(--text2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:12px;cursor:pointer;padding:0}
   #dock button:hover{background:rgba(255,255,255,.08);color:var(--text)}
   #dock button.on{background:rgba(255,255,255,.18);color:#fff;font-weight:500;box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
-  #dock .help{width:44px;height:44px;margin-top:auto;color:var(--text3)}
+  #dock .help,#dock .upd{width:44px;height:44px;margin-top:auto;color:var(--text3)}
+  #dock .upd+.help{margin-top:0}
+  #dock .upd{position:relative}
+  #dock .upd.new::after{content:"";position:absolute;top:8px;right:8px;width:8px;height:8px;border-radius:50%;background:#3ddc97;box-shadow:0 0 0 2px rgba(10,10,16,.85)}   /* a newer version found */
   .sheet-h{display:flex;flex-direction:column;gap:4px;margin-bottom:2px}
   .sheet-h b{font-size:19px;font-weight:700}
   /* overflow-y:scroll, not auto with scrollbar-gutter:stable: WebKit keeps a gutter as wide as its own scrollbar (17 px)
@@ -908,6 +911,10 @@
   #modal .dlg.welcome .head h2{flex:1;min-width:0}
   /* a question asked before something is done that cannot be taken back (askSure in app.js): a layer of its own over
      Settings, a dialog or the layout editor; the safe choice has the focus, a destructive answer is red */
+  #modal .dlg.updwin{width:min(480px,92vw);background-color:rgba(26,26,36,.2)}   /* About: this version and its updates */
+  #modal .dlg.updwin .ustate{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  #modal .dlg.updwin .ustate .hint{margin:0;flex:1;min-width:200px}
+  #modal .dlg.updwin .foot{margin:0;font-size:12px;opacity:.6;border-top:1px solid var(--line);padding-top:12px}
   #ask{z-index:44}
   #ask .dlg{width:min(440px,92vw)}
   #ask .dlg .hint{margin:0;font-size:13px;opacity:.8}
@@ -1466,7 +1473,7 @@
   /* the phone's own arrangement goes under body[data-layout="phone"] (see arrange() in app.js): a narrow touch screen, whatever the host */
   /* a narrow window: everything one under another, the dock a row of buttons (narrower than the desktop app's window can be: 1080) */
   @media(max-width:1000px){html,body{overflow:auto}.app{height:auto}.body,.body.nodrawer{grid-template-columns:1fr}.split{display:none}.body .scroll{overflow:visible;padding-right:18px}#right>.scroll{padding-right:14px}#stage{height:60vh}
-    #dock{flex-direction:row;overflow-x:auto}#dock .help{margin:0 0 0 auto}header{height:auto;flex-wrap:wrap;padding:8px 10px 8px 16px}
+    #dock{flex-direction:row;overflow-x:auto}#dock .help,#dock .upd{margin:0 0 0 auto}#dock .upd+.help{margin:0}header{height:auto;flex-wrap:wrap;padding:8px 10px 8px 16px}
     #settings .win{flex-direction:column}#setnav{width:auto;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}#setnav .grow,#setnav .who{display:none}}
 </style>
 </head>
