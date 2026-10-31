@@ -130,6 +130,54 @@ pub fn download(data: &Path, id: &str, proxy: Option<&str>, source: Option<&str>
     Ok(())
 }
 
+/// A file brought in by hand, and what it was (`model` with its `id`, or `runtime`).
+#[derive(Serialize, Debug)]
+pub struct Imported {
+    pub name: String,
+    pub what: &'static str,
+    pub id: Option<&'static str>,
+}
+/// A file that could not be brought in, and why (`file:`, `checksum:`, `disk:`, `cancelled`).
+#[derive(Serialize, Debug)]
+pub struct Refused {
+    pub name: String,
+    pub error: String,
+}
+/// What importing files did: what each was, what was refused, and what is still missing for a model
+/// whose file came (`runtime`: the ONNX Runtime package was not among them and is not there).
+#[derive(Serialize, Debug, Default)]
+pub struct Imports {
+    pub installed: Vec<Imported>,
+    pub refused: Vec<Refused>,
+    pub missing: Vec<&'static str>,
+}
+
+/// Brings files in by hand (downloaded in a browser, copied from another computer): each a model
+/// file or this system's ONNX Runtime package, told by its size, checked against its SHA-256 as it is
+/// copied, then put in place. `progress` hears of each as a download's (`phase: importing`, `id` the
+/// model's or `runtime`). One at a time with downloads (`busy:`); [`cancel_download`] stops it.
+pub fn import(data: &Path, files: &[std::path::PathBuf], progress: impl Fn(CutProgress)) -> Res<Imports> {
+    let _busy = busy()?;
+    download::CANCEL.store(false, Ordering::SeqCst);
+    let mut out = Imports::default();
+    for path in files {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string());
+        let mut report = |what: &'static str, m: Option<&'static onnx::Model>, done, total| {
+            let id = m.map_or("runtime", |m| m.id).to_string();
+            progress(CutProgress { id, done, total, phase: "importing", file: what, source: None, via: None, proxy: None, resumed_from: 0, retry: None });
+        };
+        match onnx::import(data, path, &mut report) {
+            Ok((what, m)) => out.installed.push(Imported { name, what, id: m.map(|m| m.id) }),
+            Err(e) if e == "cancelled" => return Err(e),
+            Err(error) => out.refused.push(Refused { name, error }),
+        }
+    }
+    if out.installed.iter().any(|i| i.what == "model") && !onnx::have_runtime(data) {
+        out.missing.push("runtime");
+    }
+    Ok(out)
+}
+
 /// Stops the download that is running; what came is kept, and the next download resumes from it.
 pub fn cancel_download() {
     download::CANCEL.store(true, Ordering::SeqCst);
@@ -176,6 +224,45 @@ mod tests {
         let lite = &models(data)[0];
         assert_eq!((lite.files[0].have, lite.files[1].have, lite.partial), (300, 1000, 1300));
         assert_eq!(models(data)[1].partial, 300, "the runtime's part counts for every model");
+    }
+
+    #[test]
+    fn imports_are_told_by_size_and_checked_by_hash() {
+        let _g = download::tests::SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let (data, files) = (dir.path().join("data"), dir.path().join("in"));
+        std::fs::create_dir_all(&files).unwrap();
+        // a file of no known size; one of the light model's size but not its bytes (sparse: no 224 MB written)
+        std::fs::write(files.join("notes.txt"), b"hello").unwrap();
+        let fake = files.join("model.onnx");
+        std::fs::File::create(&fake).unwrap().set_len(onnx::MODELS[0].file.bytes).unwrap();
+        let seen = std::cell::RefCell::new(Vec::new());
+        let r = import(&data, &[files.join("notes.txt"), fake.clone(), files.join("gone.onnx")], |p| seen.borrow_mut().push((p.id, p.phase, p.done, p.total))).unwrap();
+        assert!(r.installed.is_empty() && r.missing.is_empty());
+        let errors: Vec<_> = r.refused.iter().map(|f| (f.name.as_str(), f.error.split(':').next().unwrap())).collect();
+        assert_eq!(errors, [("notes.txt", "file"), ("model.onnx", "checksum"), ("gone.onnx", "file")]);
+        assert!(r.refused[0].error.contains("is 5 bytes") && r.refused[0].error.contains("224005088"), "{}", r.refused[0].error);
+        assert!(!onnx::model_part(&data, &onnx::MODELS[0]).exists(), "a refused file leaves no part");
+        let seen = seen.into_inner();
+        assert!(seen.iter().all(|(id, phase, _, total)| id == "birefnet-lite" && *phase == "importing" && *total == onnx::MODELS[0].file.bytes));
+        assert_eq!(seen.last().unwrap().2, onnx::MODELS[0].file.bytes);
+    }
+
+    /// Imports the light model and this system's runtime package from SMEDCOVER_TEST_IMPORT (a folder
+    /// with model.onnx and the package as GitHub names it) into a new data folder.
+    #[test]
+    #[ignore]
+    fn imports_real_files() {
+        let _g = download::tests::SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let from = std::path::PathBuf::from(std::env::var("SMEDCOVER_TEST_IMPORT").expect("SMEDCOVER_TEST_IMPORT"));
+        let dir = tempfile::tempdir().unwrap();
+        let r = onnx::RUNTIME.as_ref().unwrap();
+        let package = from.join(r.package.sources[0].url.rsplit('/').next().unwrap());
+        let got = import(dir.path(), &[from.join("model.onnx")], |_| {}).unwrap();
+        assert_eq!(got.missing, ["runtime"]);
+        let got = import(dir.path(), &[package], |_| {}).unwrap();
+        assert!(got.refused.is_empty() && got.missing.is_empty(), "{got:?}");
+        assert!(models(dir.path())[0].have);
     }
 
     #[test]

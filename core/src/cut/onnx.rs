@@ -238,6 +238,76 @@ pub fn download(data: &Path, m: &Model, opts: &super::download::Options, report:
     }
     Ok(())
 }
+/// What a file brought in by hand is, told by its size: one of the models, or this system's runtime
+/// package. Its hash is checked as it is copied.
+pub fn identify(bytes: u64) -> Option<(&'static str, Option<&'static Model>, &'static Download)> {
+    if let Some(m) = MODELS.iter().find(|m| m.file.bytes == bytes) {
+        return Some(("model", Some(m), &m.file));
+    }
+    RUNTIME.as_ref().filter(|r| r.package.bytes == bytes).map(|r| ("runtime", None, &r.package))
+}
+
+/// Puts a file brought in by hand (one downloaded in a browser, copied from another computer) in its
+/// place: identified by its size ([`identify`]), copied into its part while hashed (reporting how much),
+/// checked against its SHA-256, then renamed into place (a model) or unpacked (the runtime package).
+pub fn import(data: &Path, from: &Path, report: &mut dyn FnMut(&'static str, Option<&'static Model>, u64, u64)) -> Result<(&'static str, Option<&'static Model>), String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Write;
+    let name = from.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| from.display().to_string());
+    let mut src = std::fs::File::open(from).map_err(|e| format!("file: {name}: {e}"))?;
+    let bytes = src.metadata().map_err(|e| format!("file: {name}: {e}"))?.len();
+    let Some((what, m, d)) = identify(bytes) else {
+        let runtime = RUNTIME.as_ref().map(|r| format!(", or ONNX Runtime 1.23.2 for this system ({}, {} bytes)", r.package.sources[0].url.rsplit('/').next().unwrap_or(""), r.package.bytes)).unwrap_or_default();
+        return Err(format!("file: {name} is not a cut-out file: it is {bytes} bytes; expected the light model ({} bytes), the full model ({} bytes){runtime}", MODELS[0].file.bytes, MODELS[1].file.bytes));
+    };
+    let part = match m {
+        Some(m) => model_part(data, m),
+        None => runtime_part(data, runtime()?),
+    };
+    std::fs::create_dir_all(part.parent().unwrap_or(data)).map_err(|e| format!("disk: {e}"))?;
+    let copied = (|| -> Result<(), String> {
+        let mut out = std::fs::File::create(&part).map_err(|e| format!("disk: {e}"))?;
+        let (mut hash, mut done, mut buf, mut last) = (Sha256::new(), 0u64, vec![0u8; 1 << 20], std::time::Instant::now());
+        report(what, m, 0, bytes);
+        loop {
+            if super::download::CANCEL.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err("cancelled".into());
+            }
+            let k = src.read(&mut buf).map_err(|e| format!("file: {name}: {e}"))?;
+            if k == 0 {
+                break;
+            }
+            out.write_all(&buf[..k]).map_err(|e| format!("disk: {e}"))?;
+            hash.update(&buf[..k]);
+            done += k as u64;
+            if last.elapsed() >= std::time::Duration::from_millis(200) {
+                report(what, m, done, bytes);
+                last = std::time::Instant::now();
+            }
+        }
+        out.sync_all().map_err(|e| format!("disk: {e}"))?;
+        report(what, m, done, bytes);
+        if done != d.bytes || format!("{:x}", hash.finalize()) != d.sha256 {
+            return Err(format!("checksum: {name} is the size of the {} but not the file expected (its SHA-256 differs)", if what == "model" { "model" } else { "runtime package" }));
+        }
+        Ok(())
+    })();
+    if let Err(e) = copied {
+        let _ = std::fs::remove_file(&part);
+        return Err(e);
+    }
+    match m {
+        Some(m) => super::download::put_in_place(&part, &file(data, m)).map_err(|e| format!("disk: {e}"))?,
+        None => {
+            let r = runtime()?;
+            let unpacked = unpack(&part, r.library, &library(data, r));
+            let _ = std::fs::remove_file(&part);
+            unpacked.map_err(|e| format!("disk: {e}"))?;
+        }
+    }
+    Ok((what, m))
+}
+
 /// Takes the file named `name` (wherever it sits) out of a .tgz or .zip package into `to`.
 fn unpack(package: &Path, name: &str, to: &Path) -> Result<(), String> {
     let found = if is_zip(package)? {

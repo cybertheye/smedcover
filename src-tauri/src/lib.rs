@@ -180,6 +180,26 @@ async fn cut_model_download(app: AppHandle, core: State<'_, Arc<Core>>, id: Stri
     .await
     .map_err(err)?
 }
+/// Brings cut-out files in by hand: the user picks them (a model file, the ONNX Runtime package for
+/// this system, downloaded in a browser or copied from another computer); each is told by its size,
+/// checked against its SHA-256 and put in place, with `cut-model-progress` events (`phase: importing`).
+/// Null when nothing was picked.
+#[tauri::command]
+async fn cut_model_import(app: AppHandle, core: State<'_, Arc<Core>>) -> Res<Option<cut::Imports>> {
+    let Some(picked) = app.dialog().file().add_filter("BiRefNet, ONNX Runtime", &["onnx", "zip", "tgz"]).blocking_pick_files() else {
+        return Ok(None);
+    };
+    let files = picked.into_iter().map(|f| f.into_path().map_err(err)).collect::<Res<Vec<_>>>()?;
+    let core = core.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        core.cut_model_import(&files, |progress| {
+            let _ = app.emit("cut-model-progress", progress);
+        })
+    })
+    .await
+    .map_err(err)?
+    .map(Some)
+}
 #[tauri::command]
 fn cut_model_cancel() {
     cut::cancel_download();
@@ -497,6 +517,7 @@ pub fn run() {
             subject_mask_onnx,
             cut_models,
             cut_model_download,
+            cut_model_import,
             cut_model_cancel,
             cut_model_delete,
             selftest_models,

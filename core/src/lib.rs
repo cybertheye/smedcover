@@ -120,6 +120,11 @@ impl Core {
         cut::download(&self.data, id, proxy, source, progress)
     }
 
+    /// Brings cut-out files in by hand (see [`cut::import`]); blocks till they are in.
+    pub fn cut_model_import(&self, files: &[PathBuf], progress: impl Fn(cut::CutProgress)) -> Res<cut::Imports> {
+        cut::import(&self.data, files, progress)
+    }
+
     /// Removes a cut-out model from the data folder.
     pub fn cut_model_delete(&self, id: &str) -> Res<()> {
         cut::delete(&self.data, id)
