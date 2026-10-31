@@ -84,6 +84,8 @@ export const FREE_TYPES = ["asset", "text", "photo", "solid"];
  * background photo's subject cut out, is now a photo layer (see upgradeCover in app.js).
  */
 export const LEGACY_TYPES = ["subject"];
+/** Channel graphics that are gone, and the one a channel or a layer that used one gets instead (see graphics.js). */
+export const RETIRED_GRAPHICS = new Map([["pencil", "robot"]]);
 /** Layers the user added: the free ones, and copies of layout layers. */
 export const isAdded = (layer) => FREE_TYPES.includes(layer.type) || layer.copy === true;
 /** Layers the user can delete: those they added. */
@@ -467,7 +469,7 @@ function normalizeLayer(raw, catIds, sizeKeys) {
     case "asset": {
       const r = raw.ref;
       if (!r || !["graphic", "sticker", "user"].includes(r.kind) || typeof r.id !== "string") return null;
-      L.ref = { kind: r.kind, id: r.id }; L.tint = raw.tint === true;
+      L.ref = { kind: r.kind, id: r.kind === "graphic" && RETIRED_GRAPHICS.get(r.id) || r.id }; L.tint = raw.tint === true;
       const crop = normalizeCrop(raw.crop);
       if (crop) L.crop = crop;
       const weave = normalizeWeave(raw.weave);

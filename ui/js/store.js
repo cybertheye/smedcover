@@ -12,7 +12,7 @@
 import { platformsFor, ratioOf } from "./platforms.js";
 import { TEMPLATES, ORIENTS, normalizeAdjust, layoutByOrient } from "./layout.js";
 import { LOOKS, LOOK_IDS, lookParams } from "./style.js";
-import { normalizeLayers, normalizeScene, normalizeT, BOUND_TYPES, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, EXTRA_STICKER } from "./layers.js";
+import { normalizeLayers, normalizeScene, normalizeT, BOUND_TYPES, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, EXTRA_STICKER, RETIRED_GRAPHICS } from "./layers.js";
 import { DEFAULTS } from "./defaults.js";
 
 const T = globalThis.__TAURI__;
@@ -103,8 +103,8 @@ const KINDS = ["graphic", "sticker", "user"];
 function normalizeGraphic(g) {
   if (!g || typeof g !== "object") return { kind: "none" };
   const extra = { labels: Array.isArray(g.labels) ? g.labels.map(String).slice(0, 4) : [], stamp: str(g.stamp) };
-  if (g.type === "builtin") return { kind: "graphic", id: str(g.id, "camera"), ...extra };   // v1
-  if (KINDS.includes(g.kind) && str(g.id)) return { kind: g.kind, id: g.id, ...extra };
+  if (g.type === "builtin") return { kind: "graphic", id: RETIRED_GRAPHICS.get(g.id) || str(g.id, "camera"), ...extra };   // v1
+  if (KINDS.includes(g.kind) && str(g.id)) return { kind: g.kind, id: g.kind === "graphic" && RETIRED_GRAPHICS.get(g.id) || g.id, ...extra };
   return { kind: "none" };
 }
 /** An output size. `label` is the description a preset of before gave it ("4:5 · Instagram"); `name` is what the user calls it. */

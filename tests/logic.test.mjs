@@ -389,6 +389,16 @@ test("the graphic library has 20 uniquely named category graphics", async () => 
   for (const g of GRAPHICS) assert.ok(g.name.zh && g.name.en && typeof g.draw === "function" && g.fit > 0, g.id);
 });
 
+test("the pencil graphic is retired: a channel or a layer that had it gets the brick robot", async () => {
+  const { GRAPHICS } = await import("../ui/js/assets.js");
+  assert.ok(GRAPHICS.some((g) => g.id === "robot") && !GRAPHICS.some((g) => g.id === "pencil"));
+  const p = normalizeProfile({ categories: [{ id: "a", graphic: { kind: "graphic", id: "pencil" } }, { id: "b", graphic: { type: "builtin", id: "pencil" } },
+    { id: "c", graphic: { kind: "sticker", id: "pencil" } }, { id: "d", graphic: { kind: "graphic", id: "constructor" } }] });
+  assert.deepEqual(p.categories.map((c) => c.graphic.id), ["robot", "robot", "pencil", "constructor"]);
+  const ls = normalizeLayers([{ type: "asset", id: "g1", ref: { kind: "graphic", id: "pencil" } }, { type: "asset", id: "s1", ref: { kind: "sticker", id: "pencil" } }]);
+  assert.deepEqual(["g1", "s1"].map((id) => ls.find((l) => l.id === id).ref.id), ["robot", "pencil"]);
+});
+
 test("every interface string has both languages", async () => {
   const { keys, t, setLang } = await import("../ui/js/i18n.js");
   globalThis.document = { ...globalThis.document, documentElement: {} };
