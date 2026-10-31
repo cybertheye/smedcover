@@ -153,7 +153,7 @@ widths its columns were dragged to (`columns`). Deleting a profile (`profileActi
 hand, laid out by the same modules): the defaults worth changing without touching the code, by module. `settings`: what `normalizeSettings()` falls
 back to — the language (`""`, the system's), the export's resolution, format, JPEG quality and file names, the scope
 (and, through `startScope()`, the one every start begins at),
-the glass, the drawer, the cut-out's engine. `profile`: what a new profile starts with — its ground, look and seed
+the glass, the drawer, the cut-out's engine, the layout presets the app comes with (`layouts`, see below). `profile`: what a new profile starts with — its ground, look and seed
 (`style`), its sizes (`sizes`; `SIZE_PRESETS` in `presets.js` stays the list Settings offers), and the starter's name,
 brand and channels (`starter`, read by `starterProfile()`; a name given per language, `{zh, en}`). `layout`: the layout
 each orientation is given by default (`byOrient`, see 5.2: what a new profile, a size added to one, a new layout preset
@@ -202,12 +202,21 @@ Earlier versions kept the settings in `settings.json`: until a `custom.json` the
 one written by hand, as the previous version had it), `readSettings()` reads `settings.json` too, the hand-written
 file's `settings` over it (`normalizeSettings({ ...settings.json, ...its settings })`), and the start's
 `persistSettings()` writes `custom.json` from that, marked; `settings.json` is left where it is, no longer written nor,
-once the mark is there, read. A `custom.json` that is not JSON, or not an object, is read as one the app wrote with no
+once the mark is there, read. It had every field then, so an empty list of layout presets there is none of the user's
+own (`readSettings()` drops it), and the presets the app comes with are theirs. A `custom.json` that is not JSON, or not an object, is read as one the app wrote with no
 settings, the defaults, and said once in a toast (`msg.customBad`); its text is kept (`CUSTOM.bad`) and
 written to `custom.json.bad` before `custom.json` is next written, so it is never overwritten unseen.
 
 **Layout presets** (`settings.layouts`, for every profile, as the chances are): where a cover's parts stand, without its
-look, which Surprise me deals by its chance (see 9.4) and which can be put on the canvas as it is.
+look, which Surprise me deals by its chance (see 9.4) and which can be put on the canvas as it is. Until the user has a
+list of their own (no `layouts` in `custom.json`'s `settings`), `normalizeSettings()` takes `defaults.json`'s
+`settings.layouts`, the presets the app comes with (原始, 三分, 叠压 and C字, copied as they were from a `custom.json` the app wrote): as any setting, `settingsToKeep()` leaves them out
+while they are as shipped, so a later version's reach whoever never touched them; one made, changed or deleted, and
+the whole list is written to `custom.json`, the user's from then on, an empty one too. Their ids must be good ones (as
+they are, copied from a `custom.json` the app wrote): one with none is given a new one each time it is normalised, and
+so differs from the default every time. The chance Surprise me deals them by goes in `defaults.json`'s
+`surprise.odds.groups.layout` (`oddsOf()` takes the ids of the presets there are); with none there it is 0, as a
+preset the user makes has.
 
 ```jsonc
 [{ "id": "k3j9x0ab", "name": "Poster",
@@ -267,8 +276,9 @@ it is split into by size (`twins`: of a type, showing the same, kept to sizes ap
 which it places together, each kept to those of its sizes it was at, so a split stays split; each takes its `t` (per size only at `keys`), the sizes it shows at
 (`keepTo`; at none, an empty `sizes`, there to be shown again) and a text one's `vertical`, a layer locked staying as it
 is; one whose kind the cover has none left of adds one (`extraLayer()`: a text layer of `env.words`, a solid of
-`env.color`, an asset of its sticker, tinted; no photo, a picture not being made up; nothing for one shown at none of
-`keys`), put over the last of its kind (past what is clipped onto it) or else a colour over the colour block and words or
+`env.color`, an asset of its sticker, tinted; a photo only of the picture `env.image` names — the stand-in portrait
+when a preset is put on by its card (`standIn()`, below), none when Surprise me deals it, which adds no photo; nothing
+for one shown at none of `keys`), put over the last of its kind (past what is clipped onto it) or else a colour over the colour block and words or
 a sticker on top (`insertExtra()`). So the preset put again places the same layers and adds none; added, they are the
 user's (`isAdded`). It returns the ids of the layers the elements place, which Surprise me leaves where they are (see 9.4). `setPresetLayout(preset, scope, key, fn)` is how the editor
 changes the block (see 9.4): `fn(lay, at, here)` makes of a layout what it becomes, and each layout the scope reaches from
@@ -363,7 +373,13 @@ a placeholder subtitle (`subbed: true`).
 
 **Layout parts left out**: a layout layer but the ground may carry `off: true` (the Layout sheet's *Which parts
 show*, `partsBox()`, a switch per part): it is then hidden, and the editor leaves it out of the layer list, the 3D view
-and *Hide every layout part*; switched on again it is back, and shown (`visible`), even if its eye had hidden it before. *Empty this cover* keeps what the cover leaves out
+and *Hide every layout part*; switched on again it is back, and shown (`visible`), even if its eye had hidden it before. A switch is lit by the size on
+the canvas: where its part is not left out and shows at that size (`inSize`: a preset put on may keep a part to some
+sizes), unlit else, its title saying where it shows (`sizesNote()`), as its row in the layer list does (greyed, *Not
+shown at this size*). A click shows or hides the part at the sizes the scope reaches (`scopeKeys()`, all of them for
+every size) with `keepTo()`, the others as they were; shown at none, it is left out (`off`), and one left out comes
+back at the sizes the scope reaches. A part selected that no longer shows at this size gives the selection back to the
+ground. *Empty this cover* keeps what the cover leaves out
 and what it has. A new
 design leaves out `DEFAULT_OFF` (the channel name and graphic): `normalizeLayers()` puts those in left out
 when it puts back missing layout layers, which for a new profile is all of them; a profile's design and its
@@ -1729,10 +1745,25 @@ keeps (its caption in the window names the preset); a hand is the whole style an
 with none has none).
 
 The presets are made and seen at the top of the Layout sheet, two to a row, a card each (`presetCards()`; their chances are set in
-the chances window, whose layout card points back here), after one for the canvas as it is (*Current*, outlined in
-`--acc`). Each card's picture is the cover at the size on the canvas laid out by the preset as the hover preview lays it
+the chances window, whose layout card points back here). Above them, a line between (`.presets-sep`), are two cards of
+the canvas's own: *Last layout* and *Current layout* (`.now`, outlined in `--acc`, which a click does nothing on). The
+last layout is kept in `LAST_LAYOUT`, by the profile's and the channel's ids (`coverKey()`), so it counts only on that
+cover, for the session: before `applyLayout()` puts a preset on, `layoutState(style, layers)` in `layers.js` takes the
+profile style's colour block (the template, the templates' adjustments, each size's own: `block`) and where each layer
+stands, the sizes it shows at, whether it is left out, its eye and which way its words run (`places`, by id); after, the
+layers the preset added (`added`). Its card, clicked (`putLastBack()`, one step of
+undo), puts it back with `restoreLayout(style, layers, e)`: the layers of `added` taken away (and the cut-outs linked to
+a photo among them), those of `gone` put back in (copies, each above the layer it was above, bottom first), each layer it
+has a place for back where it stood and as it showed (one left out or brought back in with its eye as it was), a layer
+locked left alone, the colour block locked keeping the block too; fonts, colours and effects are not in it and stay as
+they are. It returns the layout it replaced (the layers taken away in `gone`, those put back in `added`), the last one
+from then on, so a second click goes back again. The hover preview and the card's picture both go through `laidOut()`,
+which, given the last layout (it has `places`), puts it back with `restoreLayout()` on copies of the style and of the
+layers it holds; `PREVIEW.layout` is then `{id: "@last", name, p}`, and the two cards' pictures are kept in
+`PRESET_PICS` as `LAST_PIC` (`@last`) and `NOW_PIC` (`@now`, its `p` null: the canvas as it is). With no last layout
+the card is greyed (`.none`), saying no preset has been put on yet. Each card's picture is the cover at the size on the canvas laid out by the preset as the hover preview lays it
 out (`laidOut()`, below), so whatever a preset holds shows there; its canvas is kept from one drawing of the sheet to the
-next (`PRESET_PICS`, by preset id, "" the canvas's) with what it was drawn from (`base`: the cover, the profile and
+next (`PRESET_PICS`, by preset id) with what it was drawn from (`base`: the cover, the profile and
 the size, worked out once a round for all of them; `own`: the preset and the width in pixels, the screen's own, twice
 what is shown on a Retina one, once a round each); `refreshPresetPics()` draws those stale and in sight (an
 `IntersectionObserver`) as a drag's frames are drawn (`o.fast` in `drawCover()`: the effects that cost whole-canvas
@@ -1741,7 +1772,17 @@ page is idle (`whenIdle()`: `requestIdleCallback`, or a short timer in a web vie
 while it has room, never while something is dragged (`LIVE`, `drafting()`): when the sheet is drawn, as a card comes into sight, and half a second after the last canvas drawing
 (`flushDraw()`), so a change of the cover, the size or the profile, and outlines arrived, are followed. A preset's card,
 clicked, puts it on the canvas as one step of undo (`applyLayout()`, `putLayout()`
-again, at the profile's sizes, with `presetEnv()`: the parts locked stay, the block's layout too when the block is locked); its ⋯ menu (the
+again, at the profile's sizes, with `presetEnv()`: the parts locked stay, the block's layout too when the block is locked). A
+picture element of the preset with no photo on the cover to place adds a photo layer of the stand-in portrait:
+`standIn()` puts the editor's anonymous portrait (`FACE`: its size, its ground's gradient and its three shapes as SVG
+paths; the editor draws it as the SVG `PORTRAIT`, this draws it on a canvas as a PNG, so it can be cut out and repainted
+as any photo) in the photo store under the one id `portrait` (`STAND_IN`), one picture for every cover; `applyLayout()`
+writes its files once a cover has it, and `prunePhotos()` lets them go at a start once none has. Its row in the layer
+list says *A stand-in: replace it with your picture* (`layerSub()`); *Replace photo…* gives that cover a picture of its
+own, under a new id, leaving the others as they were. The cards' pictures and the hover preview show it too
+(`laidOut()` passes it once the photo store has it; with a preset that has a picture element in the sheet,
+`presetCards()` fetches it first and draws the pictures again once it comes), so a picture is what a click puts on.
+Surprise me adds no photo. A card's ⋯ menu (the
 channel cards' `.chmenu`) renames it where it is (`renamePreset()`), edits it (`layoutEditor()`), opens its chance
 (`oddsDialog(true, "layouts")`) or deletes it once asked (`deleteLayout()`: its chance goes to the others as `rebalance()` sets an option to 0, `dropOption()`; none of them
 having any, the group goes and `keep` is certain again); *＋ New* opens the editor on a new one (`newPreset()`: every part

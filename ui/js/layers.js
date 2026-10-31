@@ -998,7 +998,8 @@ export function newExtra(kind, id, n = 0) {
 /**
  * A layer for element `x` of a preset where a cover has none of its kind left (see putLayout), or for the layout
  * editor to draw it by: words (`env.words`), a block of `env.color` (the channel's), the element's sticker in the
- * channel colour; a picture only of the photo `env.image` names (the editor's stand-in): none is made up for a cover.
+ * channel colour; a picture only of the photo `env.image` names (the editor's stand-in, or the stand-in portrait a
+ * preset put on by its card gives a cover: see applyLayout in app.js), none where it names none (Surprise me).
  */
 export function extraLayer(x, env = {}) {
   if (x.kind === "text") return newLayer("text", { text: env.words || "Text" });
@@ -1161,11 +1162,11 @@ export function takeLayout(style, layers, keys, catId = null) {
  * preset is dealt (as dealCover leaves a locked layer where it is) or put on the canvas by hand; and the colour block locked keeps the profile's block as well (the template, its
  * adjustments, each size's own), the block being where that part stands as much as its place is.
  * Then the preset's elements of the user's own, in order (see extrasOn, with `env`: { catId, the cover's channel; vector(ref),
- * which assets are vector ones; skip, ids to pass by; words and color, those of a layer added }): each places the next
+ * which assets are vector ones; skip, ids to pass by; words, color and image, those of a layer added }): each places the next
  * of the cover's layers of its kind — its place, the sizes it shows at (at none, kept to none, there to be shown again;
  * a layer split by size, each part at those of them it was at, so it stays split), a text one's words in columns or
  * not —, a layer locked staying as it is; where the cover has none of its kind left, one is added
- * (extraLayer, insertExtra), but for a picture, and but where the element shows at none of `keys`. So the preset put
+ * (extraLayer, insertExtra), but for a picture with no `env.image`, and but where the element shows at none of `keys`. So the preset put
  * again places the same layers again, adding none. Added, they are the user's layers as any other (isAdded).
  * Returns the ids of the layers the elements place (for Surprise me to leave where they are put).
  */
@@ -1199,6 +1200,54 @@ export function putLayout(style, layers, p, keys, env = {}) {
     }
   });
   return placed;
+}
+/** What a layer's place is, as a layout taken to be put back has it (see layoutState): where it stands, the sizes it shows at, whether it is left out, which way its words run. */
+const PLACE_KEYS = ["t", "sizes", "off", "vertical"];
+/**
+ * The layout `style` (a profile's) and `layers` (a cover's) have now, to be put back later (restoreLayout): { block,
+ * places, added, gone } — the colour block (the template, each template's adjustments, each size's own: { template,
+ * layoutAdjust, layoutBy }), each layer's place by id (PLACE_KEYS, and its eye, `visible`), and none added or gone since.
+ */
+export function layoutState(style, layers) {
+  return { block: clone({ template: style.template, layoutAdjust: style.layoutAdjust || {}, layoutBy: style.layoutBy || null }),
+    places: Object.fromEntries(layers.map((l) => [l.id, clone(Object.fromEntries([...PLACE_KEYS, "visible"].filter((k) => k in l).map((k) => [k, l[k]])))])), added: [], gone: [] };
+}
+/**
+ * Puts layout `e` (layoutState's) back onto `style` and `layers`, in place — the layout alone: fonts, colours and effects
+ * stay as they are. The colour block, unless it is locked; each layer's place as `e` has it, a layer locked staying as it
+ * is (its eye too, but where it comes to be left out or back in); the layers put on since `e` was taken (`added`, ids)
+ * taken away, a photo's linked cut-outs with it, and those `e` had that `layers` has not (`gone`: { layer, under }, a copy
+ * and the id of the layer it was over) back over the layer they were over. Returns the layout that puts `style` and
+ * `layers` back as they were, so putting that back goes back again: what is taken away here is its `gone`, what comes
+ * back its `added`.
+ */
+export function restoreLayout(style, layers, e) {
+  const back = layoutState(style, layers), block = layers.find((l) => l.id === "accent");
+  if (!(block && block.locked)) {
+    style.template = e.block.template; style.layoutAdjust = clone(e.block.layoutAdjust);
+    if (e.block.layoutBy) style.layoutBy = clone(e.block.layoutBy); else delete style.layoutBy;
+  }
+  // away: the layers added since, each kept with the layer under it as they stood, bottom first, so they come back in order
+  const away = new Set();
+  for (const id of e.added) {
+    const L = layers.find((l) => l.id === id);
+    if (L && !L.locked) for (const X of [L, ...layers.filter((l) => L.type === "photo" && l.of === L.id)]) away.add(X);
+  }
+  layers.forEach((l, i) => { if (away.has(l)) back.gone.push({ layer: clone(l), under: i > 0 ? layers[i - 1].id : "" }); });
+  for (let i = layers.length - 1; i >= 0; i--) if (away.has(layers[i])) layers.splice(i, 1);
+  for (const L of layers) {
+    const q = e.places[L.id];
+    if (!q || L.locked) continue;
+    const off = !!L.off;
+    for (const k of PLACE_KEYS) if (k in q) L[k] = clone(q[k]); else delete L[k];
+    if (!!L.off !== off && "visible" in q) L.visible = q.visible;
+  }
+  for (const { layer, under } of e.gone) {
+    if (layers.some((l) => l.id === layer.id)) continue;
+    insertAbove(layers, under, clone(layer));
+    back.added.push(layer.id);
+  }
+  return back;
 }
 
 /** Inserts `layer` directly above the layer with id `aboveId` (or on top when there is none). */

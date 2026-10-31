@@ -103,7 +103,7 @@ test("normalizeCover starts from the profile's design and normalizeSettings clam
   assert.notEqual(c.layers, p.design.layers);                       // a copy, not the same array
   const own = normalizeCover({ layers: [{ type: "title", stroke: 0.5 }] }, p);
   assert.equal(own.layers.find((l) => l.id === "title").stroke, 0.5);
-  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", exportSizes: {}, exportDirs: {}, scope: "size", hideScene: false, glass: true, glassHint: false, drawer: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], lookUse: {}, lookLikes: [], recipes: {}, layouts: [], surprise: { locks: {}, odds: {} } });
+  assert.deepEqual(normalizeSettings({ scale: 7, format: "gif", quality: 500, scope: "size" }), { lang: "", profileId: "", scale: 2, format: "png", quality: 100, nameTemplate: "{n}-{channel}_{title}_{size}", exportSizes: {}, exportDirs: {}, scope: "size", hideScene: false, glass: true, glassHint: false, drawer: false, cutEngine: "", cutProxy: "", channels: {}, columns: { left: 0, right: 0, setup: 0 }, recentFonts: [], lookUse: {}, lookLikes: [], recipes: {}, layouts: normalizeSettings({}).layouts, surprise: { locks: {}, odds: {} } });
   // how often each look was picked: whole counts of looks there are, none at 0, in the registry's order
   assert.deepEqual(normalizeSettings({ lookUse: { riso: 2.7, cel: 3, nope: 5, cyber: -1, deco: "4", neon: "x", facet: 0, songke: 9e9 } }).lookUse, { cel: 3, riso: 2, songke: 1e6, deco: 4 });
   assert.deepEqual([normalizeSettings({ lookUse: [3] }).lookUse, normalizeSettings({ lookUse: "cel" }).lookUse], [{}, {}]);
@@ -197,6 +197,31 @@ test("custom.json keeps the user's settings: only what differs from defaults.jso
   assert.deepEqual(settingsToKeep(null), {});
 });
 
+test("the layout presets the app comes with: defaults.json's, until the user has a list of their own (an empty one too); not written while they are as shipped; dealt by the defaults' chances", async () => {
+  const { settingsToKeep, readSettings } = await import("../ui/js/store.js");
+  const { DEFAULTS, SHIPPED, layOver } = await import("../ui/js/defaults.js");
+  const { oddsOf } = await import("../ui/js/deal.js");
+  try {
+    // as shipped: kept as they are (their ids too, else each start would differ from the default and write them)
+    assert.ok(SHIPPED.settings.layouts.length > 0);
+    assert.deepEqual(normalizeSettings({}).layouts, SHIPPED.settings.layouts);
+    assert.deepEqual(settingsToKeep(normalizeSettings({})), {});
+    DEFAULTS.settings.layouts = [{ id: "ship1", name: "Poster", template: "split", parts: {} }, { id: "ship2", name: "Strip", template: "stack", parts: {} }];   // defaults.json saying so
+    const s = normalizeSettings({});
+    assert.deepEqual(s.layouts.map((p) => p.id), ["ship1", "ship2"]);
+    assert.deepEqual(settingsToKeep(s), {}, "as shipped: not written, so a later defaults.json reaches it");
+    assert.deepEqual((await readSettings({ by: "app", settings: {} }, () => assert.fail("settings.json is not read"))).layouts, s.layouts);
+    // a list of the user's own: written whole, and read back instead of the shipped ones
+    const mine = settingsToKeep({ ...s, layouts: [s.layouts[1]] });
+    assert.deepEqual(normalizeSettings(JSON.parse(JSON.stringify(mine))).layouts.map((p) => p.id), ["ship2"]);
+    const none = settingsToKeep({ ...s, layouts: [] });
+    assert.deepEqual([none, normalizeSettings(none).layouts], [{ layouts: [] }, []], "every one deleted: an empty list of the user's own, not the shipped ones again");
+    // Surprise me: defaults.json's chances may name them
+    DEFAULTS.surprise.odds.groups.layout = { keep: 0.5, ship1: 0.5 };
+    assert.deepEqual(oddsOf(null, s.layouts).groups.layout, { keep: 0.5, ship1: 0.5, ship2: 0 });
+  } finally { layOver(null); }
+});
+
 test("the settings at start: custom.json's; with none there yet, settings.json's as earlier versions wrote it, read once and kept from then on in custom.json", async () => {
   const { settingsToKeep, readSettings } = await import("../ui/js/store.js");
   // settings.json, as earlier versions wrote it: every field, the defaults' too
@@ -205,14 +230,16 @@ test("the settings at start: custom.json's; with none there yet, settings.json's
     recentFonts: [], lookUse: { riso: 4 }, recipes: {}, layouts: [], surprise: { locks: {}, odds: {} } };
   let asked = 0;
   const legacy = async () => { asked++; return old; };
+  const { layouts, ...rest } = old, read = normalizeSettings(rest);   // its empty list of layout presets none of the user's own: the app's
+  assert.deepEqual(layouts, []);
   for (const custom of [null, {}, { ui: { glassSlowMs: 40 } }]) {   // no custom.json, or one without settings
-    assert.deepEqual(await readSettings(custom, legacy), normalizeSettings(old));
+    assert.deepEqual(await readSettings(custom, legacy), read);
   }
   assert.equal(asked, 3);
   const s = await readSettings(null, legacy), kept = settingsToKeep(s);
   assert.deepEqual(kept, { lang: "zh", profileId: "brand", format: "webp", exportDirs: { brand: "D:\\covers" }, drawer: true, channels: { brand: "vlog" }, columns: { left: 0, right: 360, setup: 0 }, lookUse: { riso: 4 } });
   // custom.json written from it, marked as the app's: read from then on, settings.json no more; the scope back to the defaults'
-  assert.deepEqual(await readSettings({ by: "app", settings: kept }, legacy), { ...normalizeSettings(old), scope: "orient" });
+  assert.deepEqual(await readSettings({ by: "app", settings: kept }, legacy), { ...read, scope: "orient" });
   assert.equal(asked, 4);
   // settings set back to the defaults: none written, the settings kept all the same (settings.json is not read again)
   assert.deepEqual(await readSettings({ by: "app", settings: {} }, legacy), normalizeSettings({}));
@@ -220,7 +247,7 @@ test("the settings at start: custom.json's; with none there yet, settings.json's
   // a custom.json written by hand, as an earlier version had it: settings.json read too, the file's settings over it
   const hand = await readSettings({ settings: { format: "jpeg", quality: 85 }, profile: { style: { look: "riso" } } }, legacy);
   assert.equal(asked, 5);
-  assert.deepEqual(hand, normalizeSettings({ ...old, format: "jpeg", quality: 85 }));
+  assert.deepEqual(hand, normalizeSettings({ ...rest, format: "jpeg", quality: 85 }));
   assert.deepEqual([hand.profileId, hand.channels, hand.exportDirs, hand.lookUse, hand.format, hand.quality], ["brand", { brand: "vlog" }, { brand: "D:\\covers" }, { riso: 4 }, "jpeg", 85]);
   assert.deepEqual(settingsToKeep(hand), { ...kept, format: "jpeg", quality: 85 }, "all of it written to custom.json then, marked");
 });
@@ -2713,7 +2740,7 @@ test("layout presets: kept clean in the settings, ids as they are, only what a p
   assert.deepEqual(s.layouts.map((p) => p.id), ["a1", "b2"]);
   assert.deepEqual(s.surprise.odds.groups, { layout: { keep: 0.2, a1: 0.5 }, look: { deco: 1 } });
   assert.deepEqual(normalizeSurprise({ odds: { groups: { layout: { keep: 1, "k-9_x": 0.5, "x y": 1 } } } }).odds.groups.layout, { keep: 1, "k-9_x": 0.5 }, "without the presets at hand, any id-like name");
-  assert.deepEqual(normalizeSettings({}).layouts, []);
+  assert.deepEqual([normalizeSettings({ layouts: [] }).layouts, normalizeSettings({ layouts: "x" }).layouts.length > 0], [[], true], "an empty list the user's own; anything else none: the app's");
 });
 
 test("layout presets in Surprise me's chances: a group of the canvas's own and each preset, the canvas's certain to begin with; set, moved and deleted like any other", async () => {
@@ -4342,6 +4369,46 @@ test("a layout preset's elements put on a cover: each places the cover's next la
   assert.deepEqual(takeExtras(lay, [{ id: "x1", kind: "text" }, { id: "x2", kind: "vector", sticker: "burst" }], keys, [{ id: "x1", hide: ["720x720"] }]),
     [{ id: "x1", kind: "text", t: at(0.2, 0.3, 0.5), shown: true, hide: ["720x720", ...keys.filter((k) => k !== "1920x1080")], vertical: true },
      { id: "x2", kind: "vector", t: newLayer("asset").t, shown: false, sticker: "burst" }]);
+});
+
+test("the layout before a preset was put on, put back: the block and each layer's place as they were, the layers it added taken away (a photo's cut-out with it), the rest as it is now; put back again, as it was after", async () => {
+  const { putLayout, layoutState, restoreLayout, newPreset } = await import("../ui/js/layers.js");
+  const { normalizeLayouts } = await import("../ui/js/store.js");
+  const p = normalizeProfile(sampleProfile("en")), keys = p.sizes.map((z) => `${z.w}x${z.h}`), env = { catId: "c1", words: "w", color: "#123456", image: "portrait" };
+  const at = (x, y, s) => ({ all: { x, y, s, r: 0, kx: 1, ky: 1 }, by: {} });
+  const made = newPreset();
+  made.template = "stack"; made.parts.title.t = at(0.2, 0.3, 0.8); made.parts.title.vertical = true; made.parts.catname.shown = false; made.parts.tag.hide = [keys[0]];
+  const preset = normalizeLayouts([{ id: "e", ...made, extras: [{ id: "t1", kind: "text", t: at(0.1, 0.2, 0.4), shown: true }, { id: "t2", kind: "text", t: at(0.3, 0.4, 0.5), shown: true }, { id: "i1", kind: "image", t: at(0.7, 0.5, 0.3), shown: true }] }])[0];
+  const c = normalizeCover({}, p), L = c.layers, mine = newLayer("text", { text: "mine" });
+  L.push(mine);
+  const catname = L.find((l) => l.id === "catname");
+  delete catname.off; catname.visible = true;   // shown to begin with
+  const block = (st) => JSON.stringify([st.template, st.layoutAdjust || {}, st.layoutBy || null]);
+  const places = () => JSON.stringify(L.map((l) => [l.id, l.t, l.sizes, l.off, l.vertical, l.visible]));
+  const before = { block: block(p.style), places: places() };
+  const was = layoutState(p.style, L);
+  putLayout(p.style, L, preset, keys, env);
+  was.added = L.filter((l) => !(l.id in was.places)).map((l) => l.id);
+  const photo = L.find((l) => l.type === "photo"), text = L.find((l) => l.type === "text" && l !== mine);
+  assert.deepEqual([was.added.length, photo.pid, catname.off, L.find((l) => l.id === "title").vertical], [2, "portrait", true, true], "a text layer and the stand-in added; the channel name left out; the title in columns");
+  // since: a cut-out of the photo, the title's font, the tag locked where the preset put it
+  const cut = insertAbove(L, photo.id, newLayer("photo", { pid: "", of: photo.id, cut: true }));
+  L.find((l) => l.id === "title").font = "Inter";
+  const tag = L.find((l) => l.id === "tag");
+  tag.locked = true;
+  const after = { block: block(p.style), places: places(), tag: JSON.stringify([tag.t, tag.sizes]) }, gone = L.filter((l) => [text, photo, cut].includes(l)).map((l) => l.id);
+  const back = restoreLayout(p.style, L, was);
+  assert.equal(block(p.style), before.block, "the block as it was");
+  assert.deepEqual(L.map((l) => l.id), JSON.parse(before.places).map(([id]) => id), "the layers it added gone, the photo's cut-out with it");
+  const tagless = (s) => JSON.stringify(JSON.parse(s).filter(([id]) => id !== "tag"));
+  assert.equal(tagless(places()), tagless(before.places), "each place, the sizes it shows at, left out or not (its eye with it), which way its words run, as they were");
+  assert.deepEqual([JSON.stringify([tag.t, tag.sizes]), L.find((l) => l.id === "title").font], [after.tag, "Inter"], "a layer locked stays; a font as it is now");
+  assert.deepEqual([back.added, back.gone.map((g) => g.layer.id)], [[], gone], "kept to come back, bottom first");
+  // put back again: as it was after, the layers back where they were
+  const again = restoreLayout(p.style, L, back);
+  assert.deepEqual([block(p.style), places()], [after.block, after.places]);
+  assert.deepEqual([again.added, again.gone], [gone, []]);
+  assert.equal(L.indexOf(L.find((l) => l.id === cut.id)), L.indexOf(L.find((l) => l.id === photo.id)) + 1, "the cut-out over its photo again");
 });
 
 test("a layout preset's elements pass by a colour filling the canvas, and place a photo cut out at some sizes as one, still split", async () => {

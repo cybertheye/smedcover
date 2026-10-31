@@ -150,15 +150,12 @@
   .preset{position:relative;display:flex;flex-direction:column;border-radius:12px;background:rgba(0,0,0,.22);border:1px solid var(--line);min-width:0}
   .preset:hover{border-color:var(--line2)}
   .preset.previewing{border-color:rgba(255,255,255,.5)}
-  .preset.now{border:2px solid var(--acc)}
   .preset .pthumb{position:relative;display:block;width:100%;aspect-ratio:16/9;padding:0;border:0;border-radius:10px 10px 0 0;overflow:hidden;background:rgba(0,0,0,.35);cursor:pointer}
-  .preset.now .pthumb{cursor:default}
   .preset .pthumb canvas{display:block;width:100%;height:100%;object-fit:contain}   /* contain: a tall cover shown whole */
   .preset .pthumb .go{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);opacity:0;transition:opacity .12s}
   .preset .pthumb .go span{height:28px;padding:0 12px;border-radius:999px;background:rgba(255,255,255,.92);color:#15151c;font-size:12px;font-weight:700;display:flex;align-items:center;white-space:nowrap}
   .preset:hover .pthumb .go,.preset .pthumb:focus-visible .go{opacity:1}
   .preset .pcap{flex:1;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 9px;font-size:12px;min-width:0;cursor:pointer}
-  .preset.now .pcap{cursor:default}
   .preset .pcap .nm{min-width:0;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere}   /* a long name on two lines at most */
   .preset .pcap .pv{flex:none;color:var(--text2);white-space:nowrap}
   .preset:not(.now):not(.previewing) .pcap .pv{display:none}   /* a preset's word, while the canvas shows the cover laid out by it (see hoverPreset) */
@@ -169,6 +166,12 @@
   .presets .preset .chmenu{right:6px;top:32px;white-space:nowrap}   /* its ⋯ menu: the channel cards' (Settings), under the ⋯ */
   .presets .preset .chmenu[hidden]{display:none}
   .presets-none{margin:8px 0 0!important}
+  .preset.now{border:2px solid var(--acc)}   /* the canvas as it is */
+  .preset.now .pthumb,.preset.now .pcap,.preset.none .pthumb,.preset.none .pcap{cursor:default}
+  .preset.none{opacity:.45}   /* no last layout yet */
+  .preset.none:hover{border-color:var(--line)}
+  .preset .pthumb .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0 10px;text-align:center;color:var(--text2);font-size:12px}
+  .presets-sep{height:1px;margin:14px 0;background:var(--line2)}   /* the canvas's own cards above, the presets under */
   /* Assets → ways to add, four to a row; then shelves, each with its name, how many, and "All" */
   .quicks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
   .quick{height:68px;border-radius:14px;border:1px solid var(--line2);background:rgba(255,255,255,.07);color:var(--text);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:12px;cursor:pointer;padding:0}

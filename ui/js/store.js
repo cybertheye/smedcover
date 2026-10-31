@@ -256,7 +256,10 @@ const nameTemplate = () => str(DEFAULTS.settings.nameTemplate).trim() || "{n}-{c
  * defaults.json, see defaults.js), held to the same range. The one place they are checked, whatever they were read from.
  */
 export function normalizeSettings(raw) {
-  const s = raw && typeof raw === "object" ? raw : {}, layouts = normalizeLayouts(s.layouts), D = DEFAULTS.settings;   // layouts: the user's layout presets, for every profile (Surprise me deals them by their chances)
+  const s = raw && typeof raw === "object" ? raw : {}, D = DEFAULTS.settings;
+  // layouts: the user's layout presets, for every profile (Surprise me deals them by their chances); with no list of
+  // their own, those defaults.json ships (none, an empty list of their own, is theirs)
+  const layouts = normalizeLayouts(Array.isArray(s.layouts) ? s.layouts : D.layouts);
   const flag = (v, d) => (typeof v === "boolean" ? v : d);
   return {
     lang: oneOf(s.lang, ["zh", "en"], D.lang, ""),
@@ -311,14 +314,17 @@ export const CUSTOM_BY = "app";
  * The settings the app starts with: custom.json's (`custom`, the file as read), over defaults.json, normalised. Until
  * there is a custom.json the app wrote (marked CUSTOM_BY), those of settings.json too, where they were kept before
  * (`legacy`, asked for only then: a function that reads it), with the settings of a custom.json written by hand (as an
- * earlier version had it) over them; from then on custom.json is written, and settings.json is left as it was. A
- * custom.json that is not JSON is read as one the app wrote with no settings, the defaults (see readCustom in app.js).
+ * earlier version had it) over them; from then on custom.json is written, and settings.json is left as it was. Its
+ * empty list of layout presets is none of the user's own (settings.json had every field, as they were then), so the
+ * presets the app comes with are theirs. A custom.json that is not JSON is read as one the app wrote with no settings,
+ * the defaults (see readCustom in app.js).
  */
 export async function readSettings(custom, legacy) {
   const file = custom && typeof custom === "object" && !Array.isArray(custom) ? custom : {}, own = file.settings && typeof file.settings === "object" && !Array.isArray(file.settings) ? file.settings : {};
   if (file.by === CUSTOM_BY) return normalizeSettings(own);
-  const old = await legacy();
-  return normalizeSettings({ ...(old && typeof old === "object" && !Array.isArray(old) ? old : {}), ...own });
+  const old = await legacy(), was = old && typeof old === "object" && !Array.isArray(old) ? { ...old } : {};
+  if (Array.isArray(was.layouts) && !was.layouts.length) delete was.layouts;
+  return normalizeSettings({ ...was, ...own });
 }
 /** How many layout presets are kept at most, how long a name may be, how many sizes of its own a preset may keep, and how many elements of the user's own it may have. */
 export const LAYOUTS = { most: 24, name: 40, custom: 12, extras: 8 };

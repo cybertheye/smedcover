@@ -11,7 +11,7 @@ import { platformsFor } from "./platforms.js";
 import { boxOf, overlap } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, paintedWith, refitSizes, acrossSizes, cutFrom, STICKER_SCALE } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, layoutState, restoreLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, paintedWith, refitSizes, acrossSizes, cutFrom, STICKER_SCALE } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, appVersion, appBuild, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, withPids, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, CUSTOM_BY, normalizeSize, exportName, sizeCaption, ratioText,
@@ -1305,18 +1305,28 @@ function contentSheet() {
 }
 /**
  * Layout → which parts show: one switch for each of the template's layers but the ground, top first as in the layer
- * list. One switched off is left out of this cover (`off`, see layers.js): hidden, gone from the layer list; on again,
- * it is back as it was. The order they are stacked in is the layer list's (Layers), where a row dragged makes the new
- * order the profile's default too.
+ * list, lit where the part is on the cover at the size on the canvas — not left out (`off`, see layers.js), and at
+ * this size (`sizes`: a layout preset put on may keep a part to some sizes). A click shows it, or takes it away, at the
+ * sizes the scope reaches (scopeKeys: every size, those facing this way, this one), the others as they were; taken
+ * away from every size it is left out of this cover: hidden, gone from the layer list, and on again at the sizes the
+ * scope reaches as it was. The order they are stacked in is the layer list's (Layers), where a row dragged makes the
+ * new order the profile's default too.
  */
 function partsBox() {
-  const list = S.cover.layers.filter((l) => isLayout(l) && l.type !== "bg").reverse();   // top first, as in the layer list
+  const list = S.cover.layers.filter((l) => isLayout(l) && l.type !== "bg").reverse(), all = sizeKeys();   // top first, as in the layer list
+  const here = (L) => !L.off && inSize(L, S.sel);
   const flip = (L) => {
-    if (L.off) { delete L.off; L.visible = true; } else { L.off = true; L.visible = false; if (S.layerId === L.id) S.layerId = "bg"; }
+    const reach = scopeKeys() || all, at = L.off ? [] : all.filter((k) => inSize(L, k));
+    const next = here(L) ? at.filter((k) => !reach.includes(k)) : [...at, ...reach];
+    if (next.length) { if (L.off) { delete L.off; L.visible = true; } keepTo(L, next, all); } else { L.off = true; L.visible = false; }
+    if (S.layerId === L.id && !here(L)) S.layerId = "bg";   // not on the canvas now
     touch({ cover: true, side: true, panel: true });
   };
-  const chip = (L) => el("button", { class: "part" + (L.off ? " off" : ""), "aria-pressed": String(!L.off), title: `${layerName(L)} · ${t("cover.part." + L.type)}`, onclick: () => flip(L) },
-    el("span", { class: "eye", innerHTML: L.off ? EYE_OFF : EYE_ON }), el("span", {}, layerName(L)));
+  const chip = (L) => {
+    const on = here(L), note = !L.off && sizesNote(L);
+    return el("button", { class: "part" + (on ? "" : " off"), "aria-pressed": String(on), title: [layerName(L), t("cover.part." + L.type), note].filter(Boolean).join(" · "), onclick: () => flip(L) },
+      el("span", { class: "eye", innerHTML: on ? EYE_ON : EYE_OFF }), el("span", {}, layerName(L)));
+  };
   return el("div", {}, capInfo("cover.parts", t("cover.partsTip")), el("div", { class: "parts" }, list.map(chip)), el("div", { class: "hint" }, t("cover.partsHint")));
 }
 const EYE_ON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -3677,20 +3687,51 @@ function saveLayoutDialog() {
  */
 const presetEnv = () => ({ catId: cat().id, vector: (ref) => canTint(ref) || (!!ref && ref.kind === "user" && /^data:image\/svg/.test(userAssets.get(ref.id)?.src || "")), words: t("layed.sampleText"), color: cat().color });
 /**
+ * The Layout sheet's Last layout of each cover, for as long as the app is open, by coverKey (the profile and the
+ * channel): the layout it had before a preset was last put on it by its card (layoutState in layers.js, with the
+ * layers that preset added as `added`), which putLastBack puts back.
+ */
+const LAST_LAYOUT = new Map();
+const coverKey = () => `${S.profile.id}/${cat().id}`;
+/**
  * Puts layout preset `p` (the i-th) on the canvas, at the profile's sizes (those of the preset's own pass by): the
  * colour block's layout at each, for every cover of the profile (unless this cover's block is locked), and this cover's
  * layout parts but those locked, and the layers its elements of the user's own place, added where it has none of their
- * kind (putLayout); one step of undo.
+ * kind (putLayout) — a picture element's as a photo of the stand-in portrait (standIn), which the user replaces with
+ * theirs; one step of undo. The layout from before is kept as the cover's Last layout (LAST_LAYOUT).
  */
-function applyLayout(p, i) {
+async function applyLayout(p, i) {
   closeModal();
+  const image = (p.extras || []).some((x) => x.kind === "image") ? await standIn() : "";
   clearTimeout(timers.hist); commitHistory();
-  putLayout(S.profile.style, S.cover.layers, p, sizeKeys(), presetEnv());
+  const was = layoutState(S.profile.style, S.cover.layers);
+  putLayout(S.profile.style, S.cover.layers, p, sizeKeys(), { ...presetEnv(), image });
+  was.added = S.cover.layers.filter((l) => !(l.id in was.places)).map((l) => l.id);
+  LAST_LAYOUT.set(coverKey(), was);
+  if (image && S.cover.layers.some((l) => l.type === "photo" && l.pid === image)) savePhoto(image);   // its files, for the cover to show it after a restart (prunePhotos lets them go once no cover does)
   S.picked = [];
-  if (layer() && layer().off) S.layerId = "bg";   // the part selected is left out now
+  if (layer() && (layer().off || !inSize(layer(), S.sel))) S.layerId = "bg";   // the part selected is not on the canvas now
   touch({ profile: true, cover: true, panel: true, side: true, strip: true });
   commitHistory();   // its own step (and the hands of a deal are past taking)
   toast(t("layouts.applied", layoutName(p, i)));
+}
+/**
+ * Puts the cover's Last layout back (restoreLayout in layers.js): the colour block and each layer's place, the sizes it
+ * shows at and which way its words run as they were before a preset was last put on, the layers that preset added taken
+ * away; fonts, colours and effects as they are. The layout it replaces becomes the Last layout, so a second click goes
+ * back again. One step of undo.
+ */
+function putLastBack() {
+  const key = coverKey(), e = LAST_LAYOUT.get(key);
+  if (!e) return;
+  closeModal();
+  clearTimeout(timers.hist); commitHistory();
+  LAST_LAYOUT.set(key, restoreLayout(S.profile.style, S.cover.layers, e));
+  S.picked = [];
+  if (!layer() || layer().off || !inSize(layer(), S.sel)) S.layerId = "bg";   // the layer selected is gone, or not on the canvas now
+  touch({ profile: true, cover: true, panel: true, side: true, strip: true });
+  commitHistory();
+  toast(t("layouts.lastApplied"));
 }
 /** Deletes layout preset `p` (the i-th), once asked: its chance goes to the others as when set to 0 (dropOption), or, when none has any, the canvas's own is certain again. */
 async function deleteLayout(p, i, again) {
@@ -3713,10 +3754,35 @@ function letterLogo(color) {
   return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect x="4" y="4" width="112" height="112" rx="26" fill="${color}" stroke="#ffffff" stroke-width="8"/>`
     + `<text x="60" y="61" text-anchor="middle" dominant-baseline="central" textLength="86" lengthAdjust="spacingAndGlyphs" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="32" font-weight="800" fill="${inkOn(color)}">LOGO</text></svg>`);
 }
-/** The layout editor's stand-in for a picture element: an anonymous portrait, a grey head and shoulders on a lighter grey, as the data URL of an SVG (no one's photo). */
-const PORTRAIT = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="750" viewBox="0 0 600 750">`
-  + `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#dcdfe5"/><stop offset="1" stop-color="#b8bcc5"/></linearGradient></defs><rect width="600" height="750" fill="url(#g)"/>`
-  + `<g fill="#878c97"><circle cx="300" cy="290" r="130"/><rect x="248" y="380" width="104" height="110" rx="36"/><path d="M60 750c0-175 105-292 240-292s240 117 240 292z"/></g></svg>`);
+/**
+ * The stand-in for a picture element of a layout preset: an anonymous portrait, a grey head and shoulders on a lighter
+ * grey (no one's photo), its width and height, the ground's colours from top to foot, and the figure's shapes as SVG
+ * paths — the head, the neck, the shoulders. The layout editor draws it as an SVG (PORTRAIT); a cover is given it as a
+ * photo (standIn).
+ */
+const FACE = { w: 600, h: 750, ground: ["#dcdfe5", "#b8bcc5"], ink: "#878c97",
+  shapes: ["M170 290a130 130 0 1 0 260 0a130 130 0 1 0-260 0z", "M284 380h32a36 36 0 0 1 36 36v38a36 36 0 0 1-36 36h-32a36 36 0 0 1-36-36v-38a36 36 0 0 1 36-36z", "M60 750c0-175 105-292 240-292s240 117 240 292z"] };
+/** The anonymous portrait (FACE) as the data URL of an SVG: the layout editor's stand-in for a picture element. */
+const PORTRAIT = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${FACE.w}" height="${FACE.h}" viewBox="0 0 ${FACE.w} ${FACE.h}">`
+  + `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${FACE.ground[0]}"/><stop offset="1" stop-color="${FACE.ground[1]}"/></linearGradient></defs><rect width="${FACE.w}" height="${FACE.h}" fill="url(#g)"/>`
+  + `<g fill="${FACE.ink}">${FACE.shapes.map((d) => `<path d="${d}"/>`).join("")}</g></svg>`);
+/** The photo store's id of the stand-in portrait a cover is given for a layout preset's picture element where it has no photo to place (see applyLayout). */
+const STAND_IN = "portrait";
+/**
+ * The stand-in portrait in the photo store, its id ("" if it cannot be had): read from its files when a cover has it
+ * already, else drawn (FACE, on a canvas: a PNG, as any photo, so a cut-out or a repaint can take it), its files written
+ * once a cover has it (applyLayout). One picture for every cover; replacing it on one (replacePhoto) gives that one a
+ * new picture of its own.
+ */
+async function standIn() {
+  if (S.photos.has(STAND_IN) || (await readPhoto(STAND_IN))) return S.photos.has(STAND_IN) ? STAND_IN : "";
+  const c = el("canvas", { width: FACE.w, height: FACE.h }), x = c.getContext("2d"), g = x.createLinearGradient(0, 0, 0, FACE.h);
+  g.addColorStop(0, FACE.ground[0]); g.addColorStop(1, FACE.ground[1]);
+  x.fillStyle = g; x.fillRect(0, 0, FACE.w, FACE.h);
+  x.fillStyle = FACE.ink;
+  for (const d of FACE.shapes) x.fill(new Path2D(d));
+  return (await putPhoto(c.toDataURL("image/png"), { pid: STAND_IN, save: false })) || "";
+}
 /**
  * A layout preset's editor, a window from the Layout sheet's preset cards, on a canvas of its own: not the cover being edited
  * but the plainest there is — the cel look on its dark ground, none of the cover's photos or the user's layers, nor the corner
@@ -4506,18 +4572,31 @@ function layoutSheet() {
   ];
 }
 /**
- * Layout → the layout presets, two to a row, each a card: this cover laid out by it (presetPic), its name, and a word
- * while the canvas previews it; first the canvas as it is, marked Current. A preset's card under the pointer is
- * previewed on the canvas (hoverPreset) and says over its picture that a click puts it on (applyLayout); its ⋯ renames
- * it where it is, edits it in the preset's editor (layoutEditor), sets its chance in Surprise me (oddsDialog), or
- * deletes it. ＋ New lays one out in the editor from the start (each orientation in its default layout, every part in
- * it: see newPreset in layers.js), kept once saved there. Surprise me deals them by their chances.
+ * Layout → first the canvas's own layouts, two cards in a row: Last layout, the cover's before a preset was last put on
+ * it by its card (LAST_LAYOUT), previewed under the pointer as a preset is and put back by a click (putLastBack) —
+ * greyed, saying so, until there is one —, and Current layout, the canvas as it is (outlined in the accent). Under a
+ * line, the layout presets, two to a row, each a card: this cover laid out by it (presetPic), its name, and a word
+ * while the canvas previews it. A preset's card under the pointer is previewed on the canvas (hoverPreset) and says over its picture that a click puts
+ * it on (applyLayout); its ⋯ renames it where it is, edits it in the preset's editor (layoutEditor), sets its chance in
+ * Surprise me (oddsDialog), or deletes it. ＋ New lays one out in the editor from the start (each orientation in its
+ * default layout, every part in it: see newPreset in layers.js), kept once saved there. Surprise me deals them by
+ * their chances. With a picture element in any, the stand-in portrait is had first (standIn), for the pictures and the
+ * previews to show it where a click would put it.
  */
 function presetCards() {
-  const list = S.settings.layouts;
-  for (const [id, pic] of PRESET_PICS.pics) if (id && !list.some((p) => p.id === id)) { PRESET_PICS.io.unobserve(pic.cv); PRESET_PICS.pics.delete(id); }   // a preset deleted
-  const now = el("div", { class: "preset now", title: t("layouts.nowTip"), onpointerenter: () => hoverPreset(null) },
-    el("div", { class: "pthumb" }, presetPic("", null).cv),
+  const list = S.settings.layouts, last = LAST_LAYOUT.get(coverKey());
+  for (const [id, pic] of PRESET_PICS.pics) if (!(id === NOW_PIC || (id === LAST_PIC && last) || list.some((p) => p.id === id))) { PRESET_PICS.io.unobserve(pic.cv); PRESET_PICS.pics.delete(id); }   // a preset deleted, no Last layout
+  if (!S.photos.has(STAND_IN) && list.some((p) => (p.extras || []).some((x) => x.kind === "image"))) standIn().then((pid) => { if (pid) refreshPresetPics(); });   // the pictures drawn again with it (presetBase counts the photos)
+  const lastCard = last
+    ? el("div", { class: "preset" + (PREVIEW.layout && PREVIEW.layout.id === LAST_PIC ? " previewing" : ""), dataset: { id: LAST_PIC },
+        onpointerenter: () => previewSoon("layout", { id: LAST_PIC, name: t("layouts.last"), p: last }, () => onLayoutSheet() && LAST_LAYOUT.get(coverKey()) === last) },
+        el("button", { class: "pthumb", title: t("layouts.lastTip"), "aria-label": `${t("layouts.last")} · ${t("layouts.lastGo")}`, onclick: putLastBack }, presetPic(LAST_PIC, last).cv, el("span", { class: "go" }, el("span", {}, t("layouts.lastGo")))),
+        el("div", { class: "pcap", onclick: putLastBack }, el("span", { class: "nm" }, t("layouts.last")), el("span", { class: "pv" }, t("layouts.previewingCard"))))
+    : el("div", { class: "preset none", title: t("layouts.lastNoneTip"), onpointerenter: () => hoverPreset(null) },
+        el("div", { class: "pthumb" }, el("span", { class: "empty" }, t("layouts.lastNone"))),
+        el("div", { class: "pcap" }, el("span", { class: "nm" }, t("layouts.last"))));
+  const nowCard = el("div", { class: "preset now", title: t("layouts.nowTip"), onpointerenter: () => hoverPreset(null) },
+    el("div", { class: "pthumb" }, presetPic(NOW_PIC, null).cv),
     el("div", { class: "pcap" }, el("span", { class: "nm" }, t("layouts.now")), el("span", { class: "pv" }, t("layouts.current"))));
   const card = (p, i) => {
     const put = () => applyLayout(p, i), name = el("span", { class: "nm" }, layoutName(p, i));
@@ -4536,10 +4615,12 @@ function presetCards() {
   };
   requestAnimationFrame(refreshPresetPics);   // the pictures in sight drawn where stale, once the cards are in the page
   return el("div", {},
+    el("div", { class: "presets", onpointerleave: () => hoverPreset(null) }, lastCard, nowCard),
+    el("div", { class: "presets-sep", role: "separator" }),
     el("div", { class: "lhead", style: "margin-bottom:8px" }, capInfo("layouts.list", t("layouts.about")),
       el("button", { class: "linkbtn", disabled: list.length >= LAYOUTS.most, title: t("layouts.newTip"),
         onclick: () => layoutEditor(normalizeLayouts([{ ...newPreset(), id: newLayoutId(), name: nextLayoutName() }])[0], list.length, true) }, t("layouts.new"))),
-    el("div", { class: "presets", onpointerleave: () => hoverPreset(null) }, now, list.map(card)),
+    el("div", { class: "presets", onpointerleave: () => hoverPreset(null) }, list.map(card)),
     !list.length && el("div", { class: "hint presets-none" }, t("layouts.none")));
 }
 /** Shuts the preset cards' ⋯ menus. */
@@ -4567,14 +4648,16 @@ function renamePreset(name, p, i) {
 }
 /**
  * Each layout preset card's picture, kept from one drawing of the Layout sheet to the next: {cv, p, base, own, seen} by
- * preset id ("" the canvas as it is), where `base` is what it was drawn from but the preset (presetBase: the cover, the
+ * preset id (NOW_PIC the canvas as it is, LAST_PIC its Last layout), where `base` is what it was drawn from but the preset (presetBase: the cover, the
  * profile, the size), `own` the preset and the picture's width, and `seen` whether its card is in sight (`io`). Those in
  * sight that are stale are drawn when the page is idle, a moment after a change; not while something is dragged.
  * `round`: the drawing's turn (a newer one stops an older).
  */
 const PRESET_PICS = { pics: new Map(), round: 0, io: null };
+/** The keys of the Current layout's and the Last layout's pictures in PRESET_PICS (no preset's id has an @). */
+const NOW_PIC = "@now", LAST_PIC = "@last";
 const onLayoutSheet = () => S.mode === "edit" && !sheetHidden() && S.tab.edit === "layout";
-/** The card picture of preset `p` (null: the canvas as it is), keyed `id`: its canvas kept, watched for being in sight. */
+/** The card picture of preset `p` (null: the canvas as it is; the Last layout, see laidOut), keyed `id`: its canvas kept, watched for being in sight. */
 function presetPic(id, p) {
   let pic = PRESET_PICS.pics.get(id);
   if (!pic) {
@@ -4608,7 +4691,7 @@ function refreshPresetPics() {
   let px = 0;   // the pictures' width in pixels, the same for every card: measured once the cards are laid out
   const ownOf = (pic) => {
     if (!px) { const box = pic.cv.parentNode; px = Math.round(Math.min(2, devicePixelRatio || 1) * Math.min((box && box.clientWidth) || 150, (((box && box.clientHeight) || 84) * z.w) / z.h)); }
-    if (!owns.has(pic)) owns.set(pic, `${px}|${pic.p ? JSON.stringify(pic.p) : ""}`);
+    if (!owns.has(pic)) owns.set(pic, `${px}|${JSON.stringify(pic.p)}`);
     return owns.get(pic);
   };
   const stale = (x) => {
@@ -4639,10 +4722,17 @@ function hoverPreset(p, i) {
  * The profile and the cover as applyLayout would leave them with preset `p` put on, at the profile's sizes: copies, made
  * as the canvas is drawn, so they follow whatever changes meanwhile — the style, the layout parts and the layers the
  * preset's elements place (extrasOn) copied, the others shared, as nothing changes them, in a list of its own, which
- * the layers an element adds join and leave with it.
+ * the layers an element adds join and leave with it (a picture element's, of the stand-in portrait once the photo store
+ * has it: see standIn). The Last layout (a layout as layoutState took it, with its `places`): put back as putLastBack
+ * would, on copies of the style and of the layers it places, in a list of its own.
  */
 function laidOut(p) {
-  const env = presetEnv(), took = new Set(extrasOn(S.cover.layers, p, env).flat());
+  if (p.places) {
+    const style = copyOf(S.profile.style), layers = S.cover.layers.map((l) => (l.id in p.places ? copyOf(l) : l));
+    restoreLayout(style, layers, p);
+    return { profile: { ...S.profile, style }, cover: { ...S.cover, layers } };
+  }
+  const env = { ...presetEnv(), image: S.photos.has(STAND_IN) ? STAND_IN : "" }, took = new Set(extrasOn(S.cover.layers, p, env).flat());
   const style = copyOf(S.profile.style), layers = S.cover.layers.map((l) => (LAYOUT_PARTS.includes(l.id) || took.has(l) ? copyOf(l) : l));
   putLayout(style, layers, p, sizeKeys(), env);
   return { profile: { ...S.profile, style }, cover: { ...S.cover, layers } };
@@ -5111,7 +5201,7 @@ function layerSub(L) {
   if (T === "brand") return [S.profile.brand.name, cat().code].map(oneLine).filter(Boolean).join(" · ");
   if (T === "text") return L.name ? words(L.text) : L.font || t("bar.fontAuto");   // its words are its name, unless it was renamed
   if (LETTERING[T]) return words(LETTERING[T](L));
-  if (T === "photo" || T === "subject") { const b = L.of ? layer(L.of) : L, e = b && S.library.find((x) => x.pid === b.pid); return e ? e.name : ""; }
+  if (T === "photo" || T === "subject") { const b = L.of ? layer(L.of) : L, e = b && S.library.find((x) => x.pid === b.pid); return e ? e.name : b && b.pid === STAND_IN ? t("layers.sub.standIn") : ""; }
   if (T === "asset") return t(rasterAsset(L) ? "layers.kind.image" : "layers.kind.svg");
   if (T === "solid") return [String(L.color || "").toUpperCase(), L.o < 1 && `${Math.round(L.o * 100)}%`].filter(Boolean).join(" · ");   // and how see-through
   if (T === "accent") return t("shape." + (L.shape || "slant")).replace(/\s*[（(][^（()）]*[)）]$/, "");   // its edge, without "(default)"

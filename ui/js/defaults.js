@@ -5,7 +5,8 @@
 // read by readSettings in store.js; any other module it has is laid over defaults.json as the app starts (layOver).
 // Every module reads a default from DEFAULTS when it needs it, never a copy taken as it loads.
 //   settings  what normalizeSettings in store.js falls back to: the language, the export's resolution, format,
-//             quality and file names, the scope a change reaches, the glass, the drawer, the cut-out's engine
+//             quality and file names, the scope a change reaches, the glass, the drawer, the cut-out's engine, the
+//             layout presets the app comes with
 //   profile   what a new profile starts with (store.js, presets.js): its look and ground, its sizes, the starter
 //             profile's name, brand and channels
 //   layout    the layout each orientation is given (layout.js)
