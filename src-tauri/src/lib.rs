@@ -167,12 +167,13 @@ fn cut_models(core: State<'_, Arc<Core>>) -> Res<Vec<CutModel>> {
     Ok(core.cut_models())
 }
 /// Downloads a cut-out model into the app data folder, telling the page how far it has got with the
-/// event `cut-model-progress` (see `cut::download`).
+/// event `cut-model-progress` (see `cut::download`): through the proxy given, else the system's; from
+/// `source` (`auto`, `huggingface`, `hf-mirror`).
 #[tauri::command]
-async fn cut_model_download(app: AppHandle, core: State<'_, Arc<Core>>, id: String, proxy: Option<String>) -> Res<()> {
+async fn cut_model_download(app: AppHandle, core: State<'_, Arc<Core>>, id: String, proxy: Option<String>, source: Option<String>) -> Res<()> {
     let core = core.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        core.cut_model_download(&id, proxy.as_deref(), |progress| {
+        core.cut_model_download(&id, proxy.as_deref(), source.as_deref(), |progress| {
             let _ = app.emit("cut-model-progress", progress);
         })
     })

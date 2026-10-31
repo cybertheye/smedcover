@@ -110,11 +110,15 @@ pub(crate) fn is_tls(e: &(dyn std::error::Error + 'static)) -> bool {
 /// view looks for to explain it (ai.timedOut in app.js): Windows words it "os error 10060" alone.
 /// One of TLS starts "tls: ".
 fn net_err<E: std::error::Error + 'static>(e: E) -> String {
+    describe(&e)
+}
+/// [`net_err`], of an error borrowed.
+pub(crate) fn describe(e: &(dyn std::error::Error + 'static)) -> String {
     let text = e.to_string();
-    if is_tls(&e) {
+    if is_tls(e) {
         return format!("tls: {text}");
     }
-    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&e);
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(e);
     while let Some(c) = cause {
         let io = c.downcast_ref::<std::io::Error>();
         if io.is_some_and(|io| io.kind() == ErrorKind::TimedOut) {

@@ -11,10 +11,8 @@
 
 use image::{imageops::FilterType, ImageBuffer, ImageFormat, Luma, LumaA};
 use ort::{session::Session, value::Tensor};
-use sha2::{Digest, Sha256};
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 /// A place a file can be downloaded from: `id` is what a user's choice of source names (`huggingface`,
@@ -95,7 +93,7 @@ const STD: [f32; 3] = [0.229, 0.224, 0.225];
 pub fn model(id: &str) -> Result<&'static Model, String> {
     MODELS.iter().find(|m| m.id == id).ok_or_else(|| format!("unknown model: {id}"))
 }
-fn runtime() -> Result<&'static Runtime, String> {
+pub fn runtime() -> Result<&'static Runtime, String> {
     RUNTIME.as_ref().ok_or_else(|| "no ONNX Runtime for this platform".to_string())
 }
 /// Where a model's file is kept, under the app data folder.
@@ -108,8 +106,7 @@ fn library(data: &Path, r: &Runtime) -> PathBuf {
 }
 /// Whether a model can be used: its file is there, whole, and so is the runtime.
 pub fn have(data: &Path, m: &Model) -> bool {
-    let whole = std::fs::metadata(file(data, m)).map(|f| f.len() == m.file.bytes).unwrap_or(false);
-    whole && runtime().map(|r| library(data, r).is_file()).unwrap_or(false)
+    have_model(data, m) && have_runtime(data)
 }
 
 /// The runtime, loaded once per run of the app (it cannot be swapped once loaded).
@@ -182,78 +179,64 @@ pub fn mask_png(data: &Path, m: &Model, photo: &[u8]) -> Result<Vec<u8>, String>
     Ok(out)
 }
 
-// ---------------------------------------------------------------- downloads
+// ---------------------------------------------------------------- the files on disk
 
-/// Set to stop a download that is running.
-pub static CANCEL: AtomicBool = AtomicBool::new(false);
-
-/// Downloads what model `m` needs that is not there yet — the runtime, then the model — reporting
-/// (bytes so far, bytes in all) as it goes. Every file is checked against its size and SHA-256
-/// before it takes its place, so a broken or altered download leaves nothing behind.
-pub fn download(agent: &ureq::Agent, data: &Path, m: &Model, progress: impl Fn(u64, u64)) -> Result<(), String> {
-    CANCEL.store(false, Ordering::SeqCst);
-    let r = runtime()?;
-    let lib = library(data, r);
-    let need_runtime = !lib.is_file();
-    let need_model = std::fs::metadata(file(data, m)).map(|f| f.len() != m.file.bytes).unwrap_or(true);
-    let total = if need_runtime { r.package.bytes } else { 0 } + if need_model { m.file.bytes } else { 0 };
-    let mut base = 0;
-    if need_runtime {
-        let dir = data.join("models").join("runtime");
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let package = dir.join("package.part");
-        fetch(agent, &r.package, &package, |done| progress(base + done, total))?;
-        let unpacked = unpack(&package, r.library, &lib);
-        let _ = std::fs::remove_file(&package);
-        unpacked?;
-        base += r.package.bytes;
-    }
-    if need_model {
-        let target = file(data, m);
-        let part = target.with_extension("onnx.part");
-        fetch(agent, &m.file, &part, |done| progress(base + done, total))?;
-        std::fs::rename(&part, &target).map_err(|e| e.to_string())?;
-    }
-    progress(total, total);
-    Ok(())
+/// Where the part of a model's file is kept while it comes: named by the hash it must have, so a part
+/// of another version of it is never resumed.
+pub fn model_part(data: &Path, m: &Model) -> PathBuf {
+    data.join("models").join(format!("{}.{}", m.id, super::download::part_name(&m.file)))
 }
-/// Streams `d` into `to`, checking its size and SHA-256; removes `to` if anything is wrong.
-fn fetch(agent: &ureq::Agent, d: &Download, to: &Path, progress: impl Fn(u64)) -> Result<(), String> {
-    let result = (|| {
-        let reply = agent.get(d.sources[0].url).call().map_err(|e| format!("download: {e}"))?;
-        let mut reader = reply.into_reader();
-        let mut out = std::fs::File::create(to).map_err(|e| e.to_string())?;
-        let (mut hash, mut done, mut last, mut buf) = (Sha256::new(), 0u64, 0u64, vec![0u8; 1 << 20]);
-        loop {
-            if CANCEL.load(Ordering::SeqCst) {
-                return Err("cancelled".to_string());
-            }
-            let k = reader.read(&mut buf).map_err(|e| format!("download: {e}"))?;
-            if k == 0 {
-                break;
-            }
-            out.write_all(&buf[..k]).map_err(|e| e.to_string())?;
-            hash.update(&buf[..k]);
-            done += k as u64;
-            if done - last >= 2 << 20 {
-                progress(done);
-                last = done;
-            }
-        }
-        out.flush().map_err(|e| e.to_string())?;
-        if done != d.bytes {
-            return Err(format!("the download is {done} bytes, {} were expected", d.bytes));
-        }
-        let got = format!("{:x}", hash.finalize());
-        if got != d.sha256 {
-            return Err(format!("the download's checksum is wrong ({got})"));
-        }
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(to);
+/// Where the part of the runtime package is kept while it comes.
+pub fn runtime_part(data: &Path, r: &Runtime) -> PathBuf {
+    data.join("models").join("runtime").join(super::download::part_name(&r.package))
+}
+/// Whether the runtime library is there.
+pub fn have_runtime(data: &Path) -> bool {
+    runtime().map(|r| library(data, r).is_file()).unwrap_or(false)
+}
+/// Whether a model's file is there, whole.
+pub fn have_model(data: &Path, m: &Model) -> bool {
+    std::fs::metadata(file(data, m)).map(|f| f.len() == m.file.bytes).unwrap_or(false)
+}
+/// Removes the parts no download of this version would resume (an older app's, a file of another
+/// version, a library half taken out of its package).
+pub fn clean_parts(data: &Path) {
+    let mut keep: Vec<PathBuf> = MODELS.iter().map(|m| model_part(data, m)).collect();
+    if let Some(r) = RUNTIME.as_ref() {
+        keep.push(runtime_part(data, r));
     }
-    result
+    for dir in [data.join("models"), data.join("models").join("runtime")] {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for e in entries.flatten() {
+            let path = e.path();
+            if path.extension().is_some_and(|x| x == "part") && !keep.contains(&path) && path.is_file() {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+}
+/// Downloads what model `m` needs that is not there yet — the runtime, then the model — telling
+/// `report` how each goes (`runtime` or `model`, and its step). Every file is checked against its size
+/// and SHA-256 before it takes its place, so a broken or altered download leaves nothing in use.
+pub fn download(data: &Path, m: &Model, opts: &super::download::Options, report: &mut dyn FnMut(&'static str, super::download::Step)) -> Result<(), String> {
+    use super::download::{fetch, put_in_place};
+    let r = runtime()?;
+    clean_parts(data);
+    let disk = |e: std::io::Error| format!("disk: {e}");
+    if !have_runtime(data) {
+        std::fs::create_dir_all(data.join("models").join("runtime")).map_err(disk)?;
+        let part = runtime_part(data, r);
+        fetch(&r.package, "runtime", &part, opts, &mut |s| report("runtime", s))?;
+        report("runtime", super::download::Step { phase: "unpacking", done: r.package.bytes, ..Default::default() });
+        unpack(&part, r.library, &library(data, r)).map_err(|e| format!("disk: {e}"))?;
+        let _ = std::fs::remove_file(&part);
+    }
+    if !have_model(data, m) {
+        let part = model_part(data, m);
+        fetch(&m.file, "model", &part, opts, &mut |s| report("model", s))?;
+        put_in_place(&part, &file(data, m)).map_err(disk)?;
+    }
+    Ok(())
 }
 /// Takes the file named `name` (wherever it sits) out of a .tgz or .zip package into `to`.
 fn unpack(package: &Path, name: &str, to: &Path) -> Result<(), String> {
@@ -298,14 +281,16 @@ fn copy_to(from: &mut impl Read, to: &Path) -> Result<(), String> {
     drop(out);
     std::fs::rename(&part, to).map_err(|e| e.to_string())
 }
-/// Removes a model's file; the runtime goes too once no model is left.
+/// Removes a model's file and its part; the runtime goes too (and its part) once no model is left.
 pub fn remove(data: &Path, m: &Model) -> Result<(), String> {
     unload();
-    match std::fs::remove_file(file(data, m)) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.to_string()),
-        _ => {}
+    for f in [file(data, m), model_part(data, m)] {
+        match std::fs::remove_file(f) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.to_string()),
+            _ => {}
+        }
     }
-    if !MODELS.iter().any(|x| file(data, x).exists()) && LOADED.get().is_none() {
+    if !MODELS.iter().any(|x| file(data, x).exists() || model_part(data, x).exists()) && LOADED.get().is_none() {
         let _ = std::fs::remove_dir_all(data.join("models").join("runtime"));
     }
     Ok(())
@@ -314,6 +299,7 @@ pub fn remove(data: &Path, m: &Model) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn models_are_known_by_id() {
@@ -376,6 +362,32 @@ mod tests {
     }
 
     #[test]
+    fn parts_of_another_version_are_cleaned_and_this_one_s_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let rt = data.join("models/runtime");
+        std::fs::create_dir_all(&rt).unwrap();
+        let m = model("birefnet").unwrap();
+        let keep = [model_part(data, m), runtime_part(data, RUNTIME.as_ref().unwrap())];
+        let old = [data.join("models/birefnet.onnx.part"), rt.join("package.part"), rt.join("libonnxruntime.1.23.2.part"), data.join("models/birefnet.0123456789abcdef.part")];
+        for f in keep.iter().chain(&old) {
+            std::fs::write(f, b"x").unwrap();
+        }
+        std::fs::write(data.join("models/birefnet-lite.onnx"), b"m").unwrap();
+        clean_parts(data);
+        assert!(keep.iter().all(|f| f.exists()));
+        assert!(old.iter().all(|f| !f.exists()));
+        assert!(data.join("models/birefnet-lite.onnx").exists());
+        assert!(model_part(data, m).file_name().unwrap().to_str().unwrap().starts_with("birefnet.58f621f00f5d7560"));
+        // removing a model takes its part; the runtime goes with the last
+        remove(data, m).unwrap();
+        assert!(!model_part(data, m).exists());
+        assert!(rt.exists(), "birefnet-lite is still there");
+        remove(data, model("birefnet-lite").unwrap()).unwrap();
+        assert!(!rt.exists());
+    }
+
+    #[test]
     fn unpacks_one_file_from_either_kind_of_package() {
         let dir = tempfile::tempdir().unwrap();
         // a .tgz with the library two folders down, among other files
@@ -407,20 +419,26 @@ mod tests {
         assert_eq!(std::fs::read(dir.path().join("out3")).unwrap(), b"DLL");
     }
 
-    /// Downloads the runtime and the light model for real (about 235 MB) into SMEDCOVER_TEST_DATA:
-    /// SMEDCOVER_TEST_DATA=<folder> cargo test -p smedcover-core cut::onnx::tests::downloads -- --ignored
+    /// Downloads the runtime and the light model for real (about 235 MB) into SMEDCOVER_TEST_DATA, as
+    /// the app does (the proxy found as it finds it; SMEDCOVER_TEST_SOURCE: auto, huggingface, hf-mirror):
+    /// SMEDCOVER_TEST_DATA=<folder> cargo test -p smedcover-core cut::onnx::tests::downloads -- --ignored --nocapture
     #[test]
     #[ignore]
     fn downloads_the_runtime_and_the_light_model() {
         let data = PathBuf::from(std::env::var("SMEDCOVER_TEST_DATA").expect("SMEDCOVER_TEST_DATA"));
+        let source = std::env::var("SMEDCOVER_TEST_SOURCE").unwrap_or_else(|_| "auto".into());
         let m = model("birefnet-lite").unwrap();
-        let builder = ureq::AgentBuilder::new().timeout_read(std::time::Duration::from_secs(120)).tls_config(crate::net::tls().unwrap());
-        let agent = crate::net::with_proxy(builder, &crate::net::proxy_choice(m.file.sources[0].url, "")).unwrap().build();   // as the app chooses it
-        let (seen, all) = (std::cell::Cell::new(0u64), std::cell::Cell::new(0u64));
-        download(&agent, &data, m, |done, total| { assert!(done >= seen.get() && done <= total); seen.set(done); all.set(total); }).unwrap();
+        let opts = crate::cut::download::Options { proxy: "", source: &source, waits: crate::cut::download::WAITS };
+        let mut last = ("", "");
+        download(&data, m, &opts, &mut |what, s| {
+            if (what, s.phase) != last {
+                eprintln!("{what}: {} {} MB from {:?} via {:?} {:?} (resumed from {} MB) {:?}", s.phase, s.done >> 20, s.source, s.via, s.proxy, s.resumed_from >> 20, s.retry);
+                last = (what, s.phase);
+            }
+        })
+        .unwrap();
         assert!(have(&data, m));
-        assert_eq!(seen.get(), all.get());   // all of what was missing (nothing, when both are there already)
-        assert!(!data.join("models/runtime/package.part").exists());
+        assert!(!model_part(&data, m).exists() && !runtime_part(&data, RUNTIME.as_ref().unwrap()).exists());
     }
 
     /// Needs the runtime and a model downloaded into a data folder, and a photo:

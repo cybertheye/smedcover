@@ -116,8 +116,8 @@ impl Core {
     }
 
     /// Downloads a cut-out model into the data folder (see [`cut::download`]); blocks till it is done.
-    pub fn cut_model_download(&self, id: &str, proxy: Option<&str>, progress: impl Fn(cut::CutProgress)) -> Res<()> {
-        cut::download(&self.data, id, proxy, progress)
+    pub fn cut_model_download(&self, id: &str, proxy: Option<&str>, source: Option<&str>, progress: impl Fn(cut::CutProgress)) -> Res<()> {
+        cut::download(&self.data, id, proxy, source, progress)
     }
 
     /// Removes a cut-out model from the data folder.
