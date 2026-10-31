@@ -352,11 +352,9 @@ mod tests {
         for m in &MODELS {
             let mut answered = 0;
             for s in m.file.sources {
-                let mut builder = ureq::AgentBuilder::new().redirects(0).timeout(std::time::Duration::from_secs(20));
-                if let Some(p) = crate::net::proxy_for(s.url, "") {
-                    builder = builder.proxy(ureq::Proxy::new(&p).unwrap());
-                }
-                let reply = match builder.build().head(s.url).call() {
+                let builder = ureq::AgentBuilder::new().redirects(0).timeout(std::time::Duration::from_secs(20)).tls_config(crate::net::tls().unwrap());
+                let agent = crate::net::with_proxy(builder, &crate::net::proxy_choice(s.url, "")).unwrap().build();
+                let reply = match agent.head(s.url).call() {
                     Ok(r) => r,
                     Err(ureq::Error::Status(_, r)) => r,
                     Err(e) => {
@@ -416,11 +414,8 @@ mod tests {
     fn downloads_the_runtime_and_the_light_model() {
         let data = PathBuf::from(std::env::var("SMEDCOVER_TEST_DATA").expect("SMEDCOVER_TEST_DATA"));
         let m = model("birefnet-lite").unwrap();
-        let mut builder = ureq::AgentBuilder::new().timeout_read(std::time::Duration::from_secs(120));
-        if let Some(p) = crate::net::proxy_for(m.file.sources[0].url, "") {   // the environment's proxy, as the app uses it
-            builder = builder.proxy(ureq::Proxy::new(&p).unwrap());
-        }
-        let agent = builder.build();
+        let builder = ureq::AgentBuilder::new().timeout_read(std::time::Duration::from_secs(120)).tls_config(crate::net::tls().unwrap());
+        let agent = crate::net::with_proxy(builder, &crate::net::proxy_choice(m.file.sources[0].url, "")).unwrap().build();   // as the app chooses it
         let (seen, all) = (std::cell::Cell::new(0u64), std::cell::Cell::new(0u64));
         download(&agent, &data, m, |done, total| { assert!(done >= seen.get() && done <= total); seen.set(done); all.set(total); }).unwrap();
         assert!(have(&data, m));

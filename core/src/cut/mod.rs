@@ -44,14 +44,11 @@ pub fn models(data: &Path) -> Vec<CutModel> {
 /// whole file: a big model on a slow line takes long but is fine.
 pub fn download(data: &Path, id: &str, proxy: Option<&str>, progress: impl Fn(CutProgress)) -> Res<()> {
     let m = onnx::model(id)?;
-    let mut builder = ureq::AgentBuilder::new()
+    let builder = ureq::AgentBuilder::new()
         .timeout_connect(std::time::Duration::from_secs(30))
         .timeout_read(std::time::Duration::from_secs(120))
         .tls_config(net::tls()?);
-    if let Some(p) = net::proxy_for(m.file.sources[0].url, proxy.unwrap_or("")) {
-        builder = builder.proxy(ureq::Proxy::new(&p).map_err(|e| format!("proxy {p}: {e}"))?);
-    }
-    let agent = builder.build();
+    let agent = net::with_proxy(builder, &net::proxy_choice(m.file.sources[0].url, proxy.unwrap_or("")))?.build();
     onnx::download(&agent, data, m, |done, total| {
         progress(CutProgress { id: id.to_string(), done, total });
     })

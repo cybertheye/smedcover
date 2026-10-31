@@ -3636,6 +3636,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "socket2",
+ "system-configuration",
  "tar",
  "tempfile",
  "tokio",
@@ -3644,6 +3645,7 @@ dependencies = [
  "ureq",
  "webpki-root-certs",
  "windows-sys 0.61.2",
+ "winreg",
  "zip 8.6.0",
 ]
 

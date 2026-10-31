@@ -21,6 +21,9 @@ use serde::{Deserialize, Serialize};
 pub use crate::mcp::server::PAGE_MARKER;
 use crate::Res;
 
+pub mod proxy;
+pub use proxy::{proxy_choice, ProxyChoice, Via};
+
 /// How long an AI request may take unless the caller says otherwise, and the most of a reply
 /// that is read. Models that reason before answering can need several minutes.
 pub const AI_TIMEOUT_SECS: u64 = 300;
@@ -122,48 +125,24 @@ fn net_err<E: std::error::Error + 'static>(e: E) -> String {
     text
 }
 
-/// An agent for `url`: the timeout, and the proxy if one applies.
+/// An agent for `url`: the timeout, the system's trust ([`tls`]), and the proxy if one applies
+/// ([`proxy_choice`]: the one given, else the environment's, else the system's).
 fn agent_for(url: &str, proxy: &str, timeout_secs: u64) -> Res<ureq::Agent> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err(format!("invalid URL: {url}"));
     }
     let timeout = std::time::Duration::from_secs(timeout_secs.clamp(5, 1800));
-    let mut builder = ureq::AgentBuilder::new().timeout(timeout).tls_config(tls()?);
-    if let Some(p) = proxy_for(url, proxy) {
-        builder = builder.proxy(ureq::Proxy::new(&p).map_err(|e| format!("proxy {p}: {e}"))?);
-    }
-    Ok(builder.build())
+    let builder = ureq::AgentBuilder::new().timeout(timeout).tls_config(tls()?);
+    Ok(with_proxy(builder, &proxy_choice(url, proxy))?.build())
 }
 
-/// Whether a URL points at this machine (a local model server), which no proxy should sit in front of.
-fn is_local(url: &str) -> bool {
-    let rest = url.split("://").nth(1).unwrap_or("");
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let host = authority.rsplit('@').next().unwrap_or("");
-    let host = match host.strip_prefix('[') {
-        Some(v6) => v6.split(']').next().unwrap_or(""),
-        None => host.split(':').next().unwrap_or(""),
-    };
-    host.eq_ignore_ascii_case("localhost") || host == "::1" || host.starts_with("127.")
-}
-
-/// The proxy to use for `url`: the one given, else — for hosts that are not this machine — the
-/// one in the usual environment variables.
-pub fn proxy_for(url: &str, given: &str) -> Option<String> {
-    if !given.trim().is_empty() {
-        return Some(given.trim().to_string());
-    }
-    if is_local(url) {
-        return None;
-    }
-    let names: &[&str] = if url.starts_with("https://") {
-        &["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"]
-    } else {
-        &["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"]
-    };
-    names
-        .iter()
-        .find_map(|n| std::env::var(n).ok().filter(|v| !v.trim().is_empty()))
+/// An agent's builder with the proxy chosen, if any; a proxy that cannot be read is an error, never
+/// left out.
+pub fn with_proxy(builder: ureq::AgentBuilder, choice: &ProxyChoice) -> Res<ureq::AgentBuilder> {
+    Ok(match &choice.proxy {
+        Some(p) => builder.proxy(ureq::Proxy::new(p).map_err(|e| format!("proxy {}: {e}", proxy::shown(p)))?),
+        None => builder,
+    })
 }
 
 /// POSTs a JSON body to an http(s) URL with the given headers, optionally through a proxy.
@@ -568,34 +547,8 @@ mod tests {
     }
 
     #[test]
-    fn local_hosts_never_go_through_the_environment_proxy() {
-        for url in [
-            "http://localhost:11434/v1",
-            "http://127.0.0.1/x",
-            "https://LOCALHOST",
-            "http://[::1]:8080/v1",
-            "http://user@127.0.0.1:1/x",
-        ] {
-            assert!(is_local(url), "{url}");
-            assert_eq!(proxy_for(url, ""), None, "{url}");
-        }
-        for url in [
-            "https://api.openai.com/v1",
-            "https://localhost.example.com",
-            "http://10.0.0.2:8000",
-        ] {
-            assert!(!is_local(url), "{url}");
-        }
-        // a proxy given explicitly always wins, and a bad one is an error rather than ignored
-        assert_eq!(
-            proxy_for("http://localhost/x", " http://127.0.0.1:7890 "),
-            Some("http://127.0.0.1:7890".to_string())
-        );
-        assert!(
-            post_json("https://example.com", &[], "{}", "nonsense://x", 20, AI_MAX_REPLY)
-                .unwrap_err()
-                .starts_with("proxy")
-        );
+    fn a_proxy_that_cannot_be_read_is_an_error_rather_than_ignored() {
+        assert!(post_json("https://example.com", &[], "{}", "nonsense://x", 20, AI_MAX_REPLY).unwrap_err().starts_with("proxy"));
     }
 
     #[test]
