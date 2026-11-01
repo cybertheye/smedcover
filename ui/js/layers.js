@@ -37,6 +37,7 @@
 // A layout preset (see takeLayout) is where the layout's parts stand, which of them it has and the colour block's
 // layout, for every size: kept in the settings, dealt by Surprise me, put on a cover as it is.
 import { ORIENTS, orientDefault, orientOfKey, layoutOf, sameLayout, virtualSize, sizeOfKey, standsFor } from "./layout.js";
+import { normalizeTilt } from "./tilt.js";
 
 // the layout layers, bottom first: in the layer list, from the top, corner brackets, title, subtitle,
 // brand logo, brand row, tag, channel name, channel graphic, colour block, background
@@ -302,7 +303,7 @@ const PROPS = {
   tag: { vertical: false, rules: false },
   catname: { showName: true, plate: true, vertical: false, rules: false },
   frame: {},
-  asset: { ref: null, tint: false },   // + `ink`: a colour of the user's for a vector asset, over its own and the channel's; + `crop` (a free one too) and `weave`, as a photo's (see canWeave)
+  asset: { ref: null, tint: false },   // + `ink`: a colour of the user's for a vector asset, over its own and the channel's; + `crop` (a free one too) and `weave`, as a photo's (see canWeave); + `tiltX`, `tiltY`, `persp`, as a photo's
   /** A block of one colour, the canvas's size at scale 1 (so it can be a ground, or moved and shrunk into a band). */
   solid: { color: "#ffd60a" },
   text: { text: "", stroke: 1, shadow: 1, plate: false, vertical: false, rules: false },
@@ -333,6 +334,9 @@ const PROPS = {
    * see normalizeWeave). Each way keeps its data while another is chosen. Only a cut-out is woven; a whole photo
    * again keeps it, for when it is cut out once more. An asset weaves the same way (see canWeave), its picture the
    * box it is drawn in and its subject what it draws there.
+   * + `tiltX`, `tiltY`, `persp`: turned in 3D about its own across and up axes (degrees), seen with that perspective
+   * (0–1), each only when it is not the default (see tilt.js). Not shown while it fills the canvas; a woven layer
+   * turned is not woven until it is flat again.
    */
   photo: { pid: "", of: "", fill: false, blur: 0, dim: 0, treat: true, cut: false, feather: 0, spread: 0, outline: 0, torn: false, dash: false, shadow: 0 },
 };
@@ -460,6 +464,7 @@ function normalizeLayer(raw, catIds, sizeKeys) {
       if (weave) L.weave = weave;
       if (!L.pid && !L.of) return null;   // nothing to show
       if (typeof raw.ink === "string" && /^#[0-9a-f]{6}$/i.test(raw.ink)) L.ink = raw.ink.toLowerCase();
+      Object.assign(L, normalizeTilt(raw));   // turned in 3D (see tilt.js; kept on a photo filling the canvas, shown once it no longer does)
       break;
     }
     case "subject":
@@ -475,6 +480,7 @@ function normalizeLayer(raw, catIds, sizeKeys) {
       const weave = normalizeWeave(raw.weave);
       if (weave) L.weave = weave;
       if (typeof raw.ink === "string" && /^#[0-9a-f]{6}$/i.test(raw.ink)) L.ink = raw.ink.toLowerCase();
+      Object.assign(L, normalizeTilt(raw));   // turned in 3D (see tilt.js)
       break;
     }
     case "solid": L.color = typeof raw.color === "string" && /^#[0-9a-f]{6}$/i.test(raw.color) ? raw.color.toLowerCase() : "#ffd60a"; break;

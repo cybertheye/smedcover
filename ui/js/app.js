@@ -32,6 +32,7 @@ import { VIEW, LIMITS, turn, gapFor, fitView, sheetUnder, moreChanged, sheetOrde
 import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, legacyStyles, userStyle, writeStyle, freeId, promptOf, normalizeImageAi, imageReady, imageEndpoint, buildImageRequest, readImageReply, refusedParam, imageCheck, readImageCheck, repaintPrompt, generatePrompt, coverCrop } from "./repaint.js";
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, AI_DEFAULTS, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 import { makeCommands } from "./commands.js";
+import { TILT, tiltOf, setTilt } from "./tilt.js";
 import { toolsJson } from "./tools.js";
 import { startAgent, stepping, MCP, onMcpStatus, maskToken, setupLines, setupAsk } from "./agent.js";
 
@@ -665,7 +666,7 @@ function holdLive(id) { goLive(id); later("live", 300, endLive); }
  */
 function edit(L, patch, scope = S.settings.scope) {
   const A = owner(L);
-  if (A === L) { adjust(L, frame(), scope, patch); if (L.crop || (L.type === "photo" && L.cut)) aboutSubject(L, patch, scope); }
+  if (A === L) { adjust(L, frame(), scope, patch); if (L.crop || (L.type === "photo" && L.cut) || tiltOf(L)) aboutSubject(L, patch, scope); }   // a turned layer: about the box round it as it shows
   else {
     const { ddx, ddy, ...own } = patch;
     if (ddx || ddy) adjust(A, frame(), scope, { ddx, ddy });
@@ -2087,7 +2088,8 @@ async function cutOut(L, keys = scopeKeys()) {
   if (had) { touch({ cover: true, side: true, panel: true }); toast(t("cut.redone")); return had; }
   const c = newLayer("photo", { of: L.id, cut: true, own: true });
   c.t = alignedT(L);
-  if (L.crop && !L.fill) c.crop = normalizeCrop(L.crop);   // of what the photo keeps (a copy: a free crop's corners its own)
+  if (L.crop && !L.fill) c.crop = normalizeCrop(L.crop);
+  setTilt(c, { tiltX: L.tiltX || 0, tiltY: L.tiltY || 0, persp: L.persp });   // turned as its photo is, so it stays over it (see tilt.js)   // of what the photo keeps (a copy: a free crop's corners its own)
   if (L.cats) c.cats = [...L.cats];
   keepTo(c, want, all);
   const at = (id) => S.cover.layers.findIndex((l) => l.id === id);
@@ -6309,11 +6311,12 @@ function photoControls(L, set) {
     canWeave(L) && weaveControls(L),
     L.of
       ? psec("props.sec.place", [el("div", { class: "hint", style: "margin:0" }, t("link.follows2", base ? layerName(base) : "—")),
-          base && el("button", { class: "btn wide", title: t("link.realignTip"), onclick: () => { L.t = alignedT(base); touch({ cover: true, side: true }); } }, ico("aim", 15), t("link.realign")),
+          base && el("button", { class: "btn wide", title: t("link.realignTip"), onclick: () => { L.t = alignedT(base); setTilt(L, { tiltX: base.tiltX || 0, tiltY: base.tiltY || 0, persp: base.persp }); touch({ cover: true, side: true }); } }, ico("aim", 15), t("link.realign")),
           cropBtn, unlinkBtn], t("link.passiveMore"))
       : psec("props.sec.place", [check("props.fill", L.fill, (v) => { set("fill", v, true); if (v) { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 1 }; L.t.by = {}; if (clipBase(S.cover.layers, S.cover.layers.indexOf(L)) < 0) toGround(L); } else { L.t.all = { ...L.t.all, x: 0.5, y: 0.5, s: 0.6 }; } touch({ cover: true, side: true, panel: true }); }),
           linked.length > 0 && el("div", { class: "hint" }, t("link.leads", linked.map(layerName).join(" · "))), cropBtn, unlinkBtn],
           t(L.fill ? "props.fillHint" : "props.printHint")),
+    turnControls(L),
     psec("props.sec.picture", [
       scrub(t("props.blur"), 0, 80, 1, L.blur, SHOWN.px, (v) => { holdLive(L.id); set("blur", v); }, 0),
       scrub(t("props.dim"), 0, 0.9, 0.01, L.dim, SHOWN.pct, (v) => { holdLive(L.id); set("dim", v); }, 0),
@@ -6355,6 +6358,7 @@ function weaveControls(L) {
     put({ with: yes ? [...now.with.filter((id) => id !== l.id), l.id] : now.with.filter((id) => id !== l.id), front });
   };
   if (!w && !below.length) return psec("props.sec.weave", el("div", { class: "hint", style: "margin:0" }, t("weave.none")), weaveT(L, "weave.tip"));
+  if (tiltOf(L)) return psec("props.sec.weave", el("div", { class: "hint", style: "margin:0" }, weaveT(L, "weave.turned")), weaveT(L, "weave.tip"));   // its weave kept, for when it is flat again
   return psec("props.sec.weave", [
     check("weave.on", !!w, on),
     w && !below.length && el("div", { class: "hint" }, t("weave.none")),
@@ -6781,10 +6785,36 @@ function typeControls(L) {
     case "tag": return [font(), ink()];
     case "catname": return [psec("props.sec.show", [check("props.showName", L.showName, (v) => set("showName", v)), check("props.plate", L.plate, (v) => set("plate", v))]), font(), ink()];
     case "graphic": return el("div", { class: "hint", style: "margin:0;grid-column:1/-1" }, t("props.graphicHint"));
-    case "asset": return [canTint(L.ref) && assetColour(L), psec("crop.title", cropButton(L), t("crop.openTip")), weaveControls(L)];
+    case "asset": return [canTint(L.ref) && assetColour(L), psec("crop.title", cropButton(L), t("crop.openTip")), turnControls(L), weaveControls(L)];
     case "solid": return psec("props.sec.color", swatch(L, "color", "props.sw.color", cat().color, false));
   }
   return null;
+}
+/**
+ * Turning photo or asset L in 3D (see tilt.js): sideways and back, in degrees, and the perspective, each repainting
+ * the layer alone while dragged (holdLive); *Flat again* once it is turned. A turn takes the weave's windows away (a
+ * layer turned is not woven); turning to flat or away from it builds the drawer anew (the Weave group says so). A
+ * photo filling the canvas does not turn: its turn is kept, for when it no longer fills it.
+ */
+function turnControls(L) {
+  if (L.type === "photo" && L.fill && !L.of) return psec("props.sec.turn", el("div", { class: "hint", style: "margin:0" }, t("props.turnFill")), t("props.turnTip"));
+  const put = (k, v) => {
+    const was = !!tiltOf(L);
+    holdLive(L.id);
+    if (!setTilt(L, { [k]: v })) return;
+    if (tiltOf(L)) { weaveClose(); brushClose(); }
+    if (was === !!tiltOf(L)) return touch({ cover: true });
+    // built anew (stepped from the keyboard: a drag waits to be let go), the focus stays on the bar of that name
+    const name = document.activeElement && document.activeElement.closest && document.activeElement.closest(".bar") ? document.activeElement.getAttribute("aria-label") : null;
+    touch({ cover: true, side: true });
+    const again = name && document.querySelector(`#side .bar input[aria-label="${CSS.escape(name)}"]`);
+    if (again) again.focus({ preventScroll: true });
+  };
+  return psec("props.sec.turn", [
+    scrub(t("props.turnY"), -TILT.most, TILT.most, 1, L.tiltY || 0, SHOWN.deg, (v) => put("tiltY", v), 0),
+    scrub(t("props.turnX"), -TILT.most, TILT.most, 1, L.tiltX || 0, SHOWN.deg, (v) => put("tiltX", v), 0),
+    scrub(t("props.persp"), 0, 1, 0.05, L.persp ?? TILT.persp, SHOWN.pct, (v) => put("persp", v), TILT.persp),
+    tiltOf(L) && el("button", { class: "btn wide", style: "margin-top:8px", onclick: () => { setTilt(L, { tiltX: 0, tiltY: 0 }); touch({ cover: true, side: true }); } }, ico("reset", 15), t("props.turnFlat"))], t("props.turnTip"));
 }
 /** The name of the current look's scene object `key`. */
 const sceneName = (key) => { const s = (LOOKS[S.profile.style.look] || LOOKS.cel).scene; return (s && s[key] && s[key][getLang()]) || key; };

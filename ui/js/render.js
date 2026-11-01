@@ -10,6 +10,8 @@ import { resolve, appliesTo, inSize, isLayout, fillsCanvas, clipBase, clipEnd, s
 import { setLook, setFast, isFast, look, lookValues, noteReads, readsInto, styled, layerEffects, paintEffects, setScene, scenePlaced, wherePainted, columned, columnBoxOf, fall } from "./style.js";
 import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped, effectReach, inColumn } from "./textfx.js";
 import { ransomEpoch } from "./ransom.js";
+import { tiltOf, tiltMatrix, tiltHit, tiltSpan, cornersOf, boxOf, mul3, scale3, shift3 } from "./tilt.js";
+import { warpOnto } from "./warp.js";
 
 export const sizeKey = (size) => `${size.w}x${size.h}`;
 /** For checks of speed: while `on`, the time each layer took to paint is added up in `ms` (by id), and still runs repainted are counted. */
@@ -538,6 +540,87 @@ function lookGrid(ctx, env) {
   const color = env.th.grid(env.C), own = look().gridLines;
   if (own) own(ctx, env, color); else grid(ctx, color, env.w, env.h);
 }
+/** Where asset layer L (half its box `half`, placed by `tr`) is caught: its box, or what its crop keeps of it; and its card (see paintTurned). */
+function assetHit(L, tr, half) {
+  const c = L.crop, x = c ? (c.x * 2 - 1) * half.hw : 0, y = c ? (c.y * 2 - 1) * half.hh : 0, w = c ? c.w * 2 * half.hw : 0, h = c ? c.h * 2 * half.hh : 0;
+  const rect = { x: -half.hw, y: -half.hh, iw: 2 * half.hw, ih: 2 * half.hh };
+  const sx = tr.s * tr.kx, sy = tr.s * tr.ky, a = tr.r * RAD, ix = (x + w / 2) * sx, iy = (y + h / 2) * sy;
+  const hit = c ? { cx: tr.cx + ix * Math.cos(a) - iy * Math.sin(a), cy: tr.cy + ix * Math.sin(a) + iy * Math.cos(a), hw: (w / 2) * Math.abs(sx), hh: (h / 2) * Math.abs(sy), r: tr.r, px: tr.cx, py: tr.cy }
+    : { cx: tr.cx, cy: tr.cy, hw: half.hw * tr.s * tr.kx, hh: half.hh * tr.s * tr.ky, r: tr.r };
+  hit.pf = photoMap({ x: rect.x * tr.s, y: rect.y * tr.s, iw: rect.iw * tr.s, ih: rect.ih * tr.s }, tr);   // the box it is drawn in, on the canvas
+  if (c && c.pts) hit.poly = c.pts.map(([u, v]) => onCanvas(hit.pf, u, v));
+  // its card: the whole box it is drawn in, and room round it for what a sticker draws past it (a glow, a shadow)
+  const cw = 2 * half.hw * Math.abs(sx), ch = 2 * half.hh * Math.abs(sy);
+  hit.card = { cx: tr.cx, cy: tr.cy, w: cw, h: ch, r: tr.r, reach: Math.max(cw, ch) * 0.15 + 24 };
+  return hit;
+}
+/**
+ * How far past its rectangle (`rect`, in its frame's units) a photo layer paints: its outline, a torn edge, its shadow,
+ * a cut-out's soft edge spreading out (`spread`, itself in the frame's units); `k` makes that room the same on the
+ * canvas however the frame is stretched (`bt`: its placement; null for a photo filling the canvas).
+ */
+function photoReach(L, rect, w, bt) {
+  const torn = L.torn && L.outline > 0, spread = L.cut && L.spread > 0 ? (L.spread * Math.max(rect.iw, rect.ih)) / 1920 : 0;   // the outward soft edge, in the frame's units
+  const reach = (L.outline > 0 ? L.outline : 0) + (torn ? L.outline * 0.25 + 18 : 0) + (L.shadow > 0 ? w * 0.03 : 0) + spread * 3 + 4;
+  return { spread, reach, k: 1 / Math.max(0.05, Math.min(Math.abs(bt ? bt.kx : 1), Math.abs(bt ? bt.ky : 1))) };
+}
+/** A context that is no context: PAINT's photo and asset, handed it, say where the layer goes (its hit, its card) and paint nothing. */
+const MEASURE = Object.freeze({ measure: true });
+/** A canvas the flat picture of a layer turned in 3D is painted on (see paintTurned), on the graphics card or, for look effects that read it back, in memory. */
+const TURN = { card: null, mem: null };
+/**
+ * Paints layer L turned in 3D (`turn`, see tilt.js) onto `c` (a context on a canvas of W × H pixels, kx × ky to the
+ * virtual unit), at opacity `alpha`: flat as ever, on a canvas of its own round what of it the turn brings into view
+ * (so a card reaching past the canvas, turned, shows what lay outside), its look effects (`fx`) added there; then
+ * through the turn (warp.js). Its hit: the box round it as it shows, caught within its outline (tiltHit).
+ */
+function paintTurned(c, L, tr, env, turn, fx, alpha, kx, ky, W, H) {
+  const flat = PAINT[L.type](MEASURE, L, tr, env), card = flat && flat.card;
+  if (!card) return flat;
+  const m = tiltMatrix(card.cx, card.cy, card.r, turn.x, turn.y, turn.p, Math.max(card.w, card.h));
+  const mp = mul3(mul3(scale3(kx, ky), m), scale3(1 / kx, 1 / ky));   // in the canvas's pixels
+  const grow = card.reach + (fx.length ? Math.max(card.w, card.h) * 0.25 + 64 : 0) + 2 / kx;   // look effects may stand well past what they are on
+  const b = boxOf(cornersOf({ cx: card.cx, cy: card.cy, hw: card.w / 2 + grow, hh: card.h / 2 + grow, r: card.r }).map(([x, y]) => [x * kx, y * ky]));
+  const { from, to } = tiltSpan(b, mp, { x0: 0, y0: 0, x1: W, y1: H });
+  if (!from) return tiltHit(flat, m);   // nothing of it on the canvas
+  // the flat picture's canvas: its pixels, at most twice the canvas's and 8192 a side, painted smaller past that
+  const x0 = Math.floor(from.x0), y0 = Math.floor(from.y0), fw = Math.ceil(from.x1) - x0, fh = Math.ceil(from.y1) - y0;
+  const f = Math.min(1, Math.sqrt((2 * W * H) / (fw * fh)), 8192 / fw, 8192 / fh), cw = Math.max(1, Math.ceil(fw * f)), ch = Math.max(1, Math.ceil(fh * f));
+  const slot = fx.length ? "mem" : "card";
+  let cvs = TURN[slot];
+  if (!cvs) { cvs = TURN[slot] = document.createElement("canvas"); if (fx.length) cvs.getContext("2d", { willReadFrequently: true }); }
+  if (cvs.width !== cw || cvs.height !== ch) { cvs.width = cw; cvs.height = ch; }
+  const g = cvs.getContext("2d");
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = "source-over"; g.clearRect(0, 0, cw, ch);
+  g.setTransform(kx * f, 0, 0, ky * f, -x0 * f, -y0 * f);
+  // a fill of the whole canvas while it is painted (a look's wash over a photo, its ground under one) covers the part of
+  // it past the canvas too, so what turns into view is washed as what was on it (a gradient's ends carried on past it)
+  const bleed = { w: env.w, h: env.h, x0: x0 / kx, y0: y0 / ky, x1: (x0 + fw) / kx, y1: (y0 + fh) / ky };
+  let hit;
+  try { BLEED.on = bleed; hit = PAINT[L.type](g, L, tr, env); } finally { BLEED.on = null; }
+  if (!hit) return null;
+  if (fx.length) paintEffects(g, pixelBox({ ...hit, cx: hit.cx - x0 / kx, cy: hit.cy - y0 / ky }, kx * f, ky * f, cw, ch), fx, L, kx * f, env.C);
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
+  // from the flat picture's pixels: back onto the canvas's, then through the turn
+  warpOnto(c, cvs, mul3(mp, mul3(shift3(x0, y0), scale3(1 / f, 1 / f))), { x0: Math.floor(to.x0), y0: Math.floor(to.y0), x1: Math.ceil(to.x1), y1: Math.ceil(to.y1) }, alpha);
+  letGo(cvs);   // an export's (see BIG_PX)
+  // turned and scaled about the card's centre (px, py): the editor keeps what shows in place about the box round it (aboutSubject)
+  const out = tiltHit(hit, m);
+  if (out.px == null) Object.assign(out, { px: card.cx, py: card.cy });
+  return out;
+}
+/**
+ * While a turned layer is painted flat (see paintTurned): `on`, the virtual canvas's size and the box of the part of the
+ * flat picture it reaches; a fillRect of exactly the whole virtual canvas then fills that box, whatever context it is on
+ * (the layer's own, or a work canvas of PAINT.photo's). Every other fill is as it was.
+ */
+const BLEED = { on: null, own: null };
+function bleedFill(x, y, w, h) {
+  const b = BLEED.on;
+  if (b && x === 0 && y === 0 && w === b.w && h === b.h) return BLEED.own.call(this, Math.min(0, b.x0), Math.min(0, b.y0), Math.max(b.w, b.x1) - Math.min(0, b.x0), Math.max(b.h, b.y1) - Math.min(0, b.y0));
+  return BLEED.own.call(this, x, y, w, h);
+}
+if (typeof CanvasRenderingContext2D !== "undefined") { BLEED.own = CanvasRenderingContext2D.prototype.fillRect; CanvasRenderingContext2D.prototype.fillRect = bleedFill; }
 const PAINT = {
   /**
    * The Background, in three: its base — "grid", the look's ground (its `background` with nothing on it, else the
@@ -621,6 +704,8 @@ const PAINT = {
       hit = { cx: bt.cx + x * Math.cos(a) - y * Math.sin(a), cy: bt.cy + x * Math.sin(a) + y * Math.cos(a), hw: hw * Math.abs(bt.kx), hh: hh * Math.abs(bt.ky), r: bt.r };
     }
     if (bt) Object.assign(hit, { px: bt.cx, py: bt.cy, pw: rect.iw, ph: rect.ih });   // the frame: its centre and size
+    // the card a turn in 3D turns (see paintTurned): the frame on the canvas, and how far past it the photo paints
+    if (bt) { const { reach, k } = photoReach(L, rect, w, fills ? null : bt); hit.card = { cx: bt.cx, cy: bt.cy, w: rect.iw * Math.abs(bt.kx), h: rect.ih * Math.abs(bt.ky), r: bt.r, reach: reach * k * Math.max(Math.abs(bt.kx), Math.abs(bt.ky)) }; }
     hit.pf = photoMap(rect, fills ? null : bt);   // where the picture is: the map from its own fractions to the canvas (the weave's brush paints by it)
     if (poly) hit.poly = poly.map(([u, v]) => onCanvas(hit.pf, u, v));   // a free crop: caught within its shape alone
     if (!M) return hit;
@@ -644,9 +729,10 @@ const PAINT = {
     // While a photo is dragged, a costly one (cut out, outlined, shadowed) only slides its last image — as it was
     // before any lettering woven with it was let through, which is cut again where the lettering is now.
     const costly = L.cut || L.outline > 0 || L.shadow > 0, torn = L.torn && L.outline > 0, dashed = !torn && L.dash && L.outline > 0;
-    const stamp = [W, H, L.cut, L.feather, L.spread, L.outline, torn, dashed, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? rect.iw.toFixed(1) : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`, crop ? cropKey(crop) : ""].join("|");
+    const stamp = [W, H, L.cut, L.feather, L.spread, L.outline, torn, dashed, L.shadow, L.ink, L.blur, L.dim, L.treat, fills, rec.src && rec.src.length, mask && mask.src, look().id, env.C.join(), fills ? rect.iw.toFixed(1) : `${bt.s}|${bt.r}|${bt.kx}|${bt.ky}`, crop ? cropKey(crop) : "", M.a, M.d].join("|");   // M.a, M.d: the canvas's scale (a turned photo's own canvas, painted smaller when it is very large: see paintTurned)
     const at = fills ? [rect.x, rect.y] : [bt.cx, bt.cy], keep = PHOTO.slides.get(L.id);
-    if (costly && isFast() && keep && keep.stamp === stamp) { layDown(keep.img, keep.bx + (at[0] - keep.at[0]) * M.a, keep.by + (at[1] - keep.at[1]) * M.d); return hit; }
+    // (laid where it was, as far as the photo has moved, and as far as the canvas painted on has: a photo turned in 3D is painted on one round it, see paintTurned)
+    if (costly && isFast() && keep && keep.stamp === stamp) { layDown(keep.img, keep.bx + (at[0] - keep.at[0]) * M.a + M.e - keep.e, keep.by + (at[1] - keep.at[1]) * M.d + M.f - keep.f); return hit; }
     const inFrame = (c, fn) => { c.save(); frame(c); fn(c); c.restore(); };
     const treat = (c) => {   // the look paints on the whole canvas (its washes cover it); the photo itself goes in its frame
       const draw = (grey = 0, treat = null) => inFrame(c, (x) => drawPhotoAt(x, im, rect.x, rect.y, rect.iw, rect.ih, L.blur, env.hiRes, grey, treat && treat.draw && mask ? { ...treat, mask } : treat));   // treat: { key, fn(RGBA, w, h) }, the look's own recolouring of the photo itself; a look that draws the photo by its own shapes works them out of what a cut-out keeps
@@ -663,8 +749,7 @@ const PAINT = {
     }
     // The work canvases cover only where the photo can reach — its rectangle, grown by the outline and
     // the shadow — not the whole canvas: compositing a canvas costs every pixel of it.
-    const spread = L.cut && L.spread > 0 ? (L.spread * Math.max(rect.iw, rect.ih)) / 1920 : 0;   // the outward soft edge, in the frame's units
-    const reach = (L.outline > 0 ? L.outline : 0) + (torn ? L.outline * 0.25 + 18 : 0) + (L.shadow > 0 ? w * 0.03 : 0) + spread * 3 + 4, k = 1 / Math.max(0.05, Math.min(Math.abs(fills ? 1 : bt.kx), Math.abs(fills ? 1 : bt.ky)));
+    const { spread, reach, k } = photoReach(L, rect, w, fills ? null : bt);
     const corners = [[cr.x - reach * k, cr.y - reach * k], [cr.x + cr.iw + reach * k, cr.y - reach * k], [cr.x + cr.iw + reach * k, cr.y + cr.ih + reach * k], [cr.x - reach * k, cr.y + cr.ih + reach * k]].map(([x, y]) => F.transformPoint({ x, y }));
     const bx = Math.max(0, Math.floor(Math.min(...corners.map((p) => p.x)))), by = Math.max(0, Math.floor(Math.min(...corners.map((p) => p.y))));
     const bw = Math.min(W, Math.ceil(Math.max(...corners.map((p) => p.x)))) - bx, bh = Math.min(H, Math.ceil(Math.max(...corners.map((p) => p.y)))) - by;
@@ -690,7 +775,7 @@ const PAINT = {
     if (isFast()) {   // kept for the frames to come (a copy: the work canvases are reused)
       const img = keep && keep.img.width === bw && keep.img.height === bh ? keep.img : Object.assign(document.createElement("canvas"), { width: bw, height: bh });
       const g = img.getContext("2d"); g.clearRect(0, 0, bw, bh); g.drawImage(out.canvas, 0, 0);
-      PHOTO.slides.set(L.id, { stamp, img, at, bx, by });
+      PHOTO.slides.set(L.id, { stamp, img, at, bx, by, e: M.e, f: M.f });
     } else PHOTO.slides.delete(L.id);
     layDown(out.canvas, bx, by, true);
     return hit;
@@ -789,6 +874,7 @@ const PAINT = {
     // a colour of the user's takes the channel colour's place
     const C = L.ink ? hexToRgb(L.ink) : env.C, tint = L.tint || !!L.ink, half = assetHalf(L.ref);
     if (!half) return null;
+    if (ctx === MEASURE) return assetHit(L, tr, half);
     // the box it is drawn in, in its own units, and its frame: from those units to the canvas's pixels
     const rect = { x: -half.hw, y: -half.hh, iw: 2 * half.hw, ih: 2 * half.hh }, M = ctx.getTransform ? ctx.getTransform() : null;
     const c = L.crop, x = c ? (c.x * 2 - 1) * half.hw : 0, y = c ? (c.y * 2 - 1) * half.hh : 0, w = c ? c.w * 2 * half.hw : 0, h = c ? c.h * 2 * half.hh : 0;
@@ -813,13 +899,7 @@ const PAINT = {
         ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(body.canvas, bx, by); ctx.restore();
       }
     }
-    // where it is caught: its box, or what its crop keeps of it
-    const sx = tr.s * tr.kx, sy = tr.s * tr.ky, a = tr.r * RAD, ix = (x + w / 2) * sx, iy = (y + h / 2) * sy;
-    const hit = c ? { cx: tr.cx + ix * Math.cos(a) - iy * Math.sin(a), cy: tr.cy + ix * Math.sin(a) + iy * Math.cos(a), hw: (w / 2) * Math.abs(sx), hh: (h / 2) * Math.abs(sy), r: tr.r, px: tr.cx, py: tr.cy }
-      : { cx: tr.cx, cy: tr.cy, hw: half.hw * tr.s * tr.kx, hh: half.hh * tr.s * tr.ky, r: tr.r };
-    hit.pf = photoMap({ x: rect.x * tr.s, y: rect.y * tr.s, iw: rect.iw * tr.s, ih: rect.ih * tr.s }, tr);   // the box it is drawn in, on the canvas
-    if (c && c.pts) hit.poly = c.pts.map(([u, v]) => onCanvas(hit.pf, u, v));
-    return hit;
+    return assetHit(L, tr, half);
   },
   /** One colour, the canvas's size at scale 1 (free layers are scaled against a 1080-high canvas). */
   solid(ctx, L, tr, env) {
@@ -1569,12 +1649,12 @@ function paintCover(cv, o) {
       let hit, woven = null;
       const t0 = TIMING.on ? performance.now() : 0, mine = noted && new Set(), above = noted && readsInto(mine);
       try {
-      const fx = layerEffects(L);
-      woven = L.weave && canWeave(L) ? wovenFront(i) : null;
+      const fx = layerEffects(L), turn = tiltOf(L);
+      woven = L.weave && canWeave(L) && !turn ? wovenFront(i) : null;   // a layer turned in 3D is not woven (see tilt.js)
       // a cut-out or an asset lets its woven lettering through as it is painted, or with look effects after them (see PAINT.photo)
       env.woven = woven && { ...woven, later: fx.length > 0 }; env.letThrough = null;
       let from = null, slot = null, kept = null;
-      if (fx.length && (L.type === "photo" || (L.type === "asset" && L.weave))) {
+      if (fx.length && !turn && (L.type === "photo" || (L.type === "asset" && L.weave))) {
         // kept as painted before any lettering woven with it is let through, so the weave is not part of what decides it;
         // one made while nothing was dragged serves the frames of a drag too, one made in a draft never a still cover
         // (see fxServes). A woven asset's too (the lettering under it dragged repaints it), by the asset it draws and the
@@ -1588,7 +1668,8 @@ function paintCover(cv, o) {
         kept = FX_KEPT.get(slot);
         if (!fxServes(kept, from, paintLevel())) kept = null;
       }
-      if (kept) {
+      if (turn) hit = paintTurned(c, L, tr, env, turn, fx, L.o * dim, kx, ky, cv.width, cv.height);   // turned in 3D: on a canvas of its own, then through the turn
+      else if (kept) {
         FX_KEPT.delete(slot); FX_KEPT.set(slot, kept);   // the newest again
         let img = kept.img;
         if (woven && kept.cut) { const s = sheet(3, img.width, img.height, new DOMMatrix()); s.drawImage(img, 0, 0); kept.cut(woven)(s, kept.got.x0, kept.got.y0); img = s.canvas; }

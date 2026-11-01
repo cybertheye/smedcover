@@ -21,6 +21,7 @@ import { csvToJobs } from "./csv.js";
 import { RULES } from "./deal.js";
 import { orientOf } from "./layout.js";
 import { aiReady } from "./ai.js";
+import { TILT, TILTS, tiltOf, setTilt } from "./tilt.js";
 import { imageReady } from "./repaint.js";
 
 /** What each of Surprise me's locks leaves alone, for list_options. */
@@ -116,6 +117,7 @@ export function makeCommands(api) {
     if (L.type === "asset") Object.assign(o, { ref: { ...L.ref }, tint: !!L.tint, ...(canTint(L.ref) ? { ink: L.ink || "auto" } : {}) });
     if (L.type === "solid") o.color = L.color;
     if (L.crop) o.crop = copy(L.crop);
+    if (TILTS.includes(L.type)) o.tilt = { x: L.tiltX || 0, y: L.tiltY || 0, perspective: L.persp ?? TILT.persp };   // turned in 3D (see tilt.js)
     if (L.weave) o.weave = copy(L.weave);
     if (letters && HEADLINES.includes(L.type)) o.letterKeys = letterKeysOf(wordsOf(L, c));
     return o;
@@ -652,6 +654,20 @@ export function makeCommands(api) {
       if (whole) warnings.push(`The ${c.pts ? "shape" : "rectangle"} is the whole picture: no crop${changed ? "" : ", and it was not cropped"}.`);
       else if (!changed) warnings.push(L.crop ? "It was cropped so already." : "It was not cropped.");
       return toResult({ structured: { crop: L.crop ? copy(L.crop) : null, ...(warnings.length ? { warnings } : {}) } });
+    },
+    tilt_layer: async (args) => {
+      if (args.reset && (args.tiltX !== undefined || args.tiltY !== undefined)) throw refused('"reset" makes it flat: give it alone, or tiltX and tiltY without it.');
+      const { L } = await aim(args, { types: TILTS, what: "a photo or an asset", check: (L) => (fillsCanvas(L) ? `"${L.id}" fills the canvas: it does not turn in 3D (turn its fill off first, by apply_cover_json or in the window).` : null) });
+      const warnings = [], want = args.reset ? { tiltX: 0, tiltY: 0 } : { ...(args.tiltX !== undefined ? { tiltX: args.tiltX } : {}), ...(args.tiltY !== undefined ? { tiltY: args.tiltY } : {}) };
+      if (args.perspective !== undefined) want.persp = args.perspective;
+      const changed = setTilt(L, want);   // as the 3D turn group: what is the default taken away, a turned layer's weave windows shut
+      if (tiltOf(L)) { if (S.weaveWin) api.weaveClose(); if (S.brushWin) api.brushClose(); }
+      const angled = args.reset || args.tiltX !== undefined || args.tiltY !== undefined;
+      if (!changed) warnings.push(tiltOf(L) ? "It was turned so already." : angled ? "It was flat already." : "Its perspective was so already.");
+      if (tiltOf(L) && L.weave) warnings.push("It is woven with lettering: turned, it is not woven until it is flat again (its weave is kept).");
+      if (changed && args.perspective !== undefined && !tiltOf(L)) warnings.push("It is flat: the perspective shows once it is turned.");
+      api.touch({ cover: true, side: true });
+      return layerDone(L, warnings);
     },
     cut_out: async (args, ctx = HUSHED) => {
       if (!api.CAN.cut) throw new ToolError("unavailable", "This host cannot cut a subject out (the desktop app can).");

@@ -167,7 +167,7 @@ openclaw mcp set smedcover '{"url":"http://127.0.0.1:25277/mcp","transport":"str
 
 ### 确认连上了
 
-在 Claude Code 里运行 `/mcp`，能看到 `smedcover` 已连接，有 31 个工具。也可以在终端里查 `/health`，它不要令牌：
+在 Claude Code 里运行 `/mcp`，能看到 `smedcover` 已连接，有 32 个工具。也可以在终端里查 `/health`，它不要令牌：
 
 ```bash
 curl http://127.0.0.1:25277/health
@@ -361,7 +361,7 @@ agent 连上时，SmedCover 会先告诉它怎么用（MCP 的 instructions）�
 
 ## 工具
 
-全部 31 个，按用途分组。工具的定义以 `ui/tools.json` 为准：它由 `npm run tools` 从 `ui/js/tools.js` 生成（每次打包前也会生成），两者不一致时 `npm test` 会失败。agent 从 `tools/list` 读到每个工具完整的英文说明、参数结构和返回结构；下面只说每个工具是做什么的。
+全部 32 个，按用途分组。工具的定义以 `ui/tools.json` 为准：它由 `npm run tools` 从 `ui/js/tools.js` 生成（每次打包前也会生成），两者不一致时 `npm test` 会失败。agent 从 `tools/list` 读到每个工具完整的英文说明、参数结构和返回结构；下面只说每个工具是做什么的。
 
 大多数工具都有的参数：
 
@@ -412,6 +412,7 @@ agent 连上时，SmedCover 会先告诉它怎么用（MCP 的 instructions）�
 |---|---|---|---|
 | `add_photo` | 往封面上加一张照片。`source` 只能是其中一种：`path`（图片文件的绝对路径）、`url`（http 或 https 链接，走图像 AI 设置里的代理下载）、`library`（pid）、`data`（base64 或 `data:` URL，最多 24 Mi 个字符；尽量用路径或链接）。支持 PNG、JPEG、WebP、GIF、HEIC、AVIF，最大 64 MB。`fill` 让它铺满画布当背景，否则作为一张照片放在 `at`。新图片会进位图库。 | `profile`、`channel`、**`source`**、`at`、`fill`、`name`（在图库里的名字）、`above` | 会下载链接 |
 | `crop_photo` | 裁切照片或素材图层：`crop`（`{x, y, w, h}`，或自由形状 `{pts}`）、`ratio`、`reset` 三选一。铺满画布的照片不行。 | `profile`、`channel`、**`layer`**、`crop`、`ratio`（`photo`、`1:1`、`4:3`、`3:4`、`16:9`、`9:16`）、`reset` | |
+| `tilt_layer` | 把照片或素材图层当成卡片，绕它自己的轴做 3D 旋转：`tiltX` 让上沿往远处去，`tiltY` 让右边往远处去（负数是下沿、左边），各在 ±80° 以内；`perspective` 是透视 0–1（没设过是 0.5）；`reset` 转回平面。`get_cover` 会列出每层的 `tilt`。铺满画布的照片不行；转了 3D 的图层不穿插，转回平面才恢复。 | `profile`、`channel`、**`layer`**、`tiltX`、`tiltY`、`perspective`、`reset` | |
 | `cut_out` | 抠出照片的主体（macOS 上用 Vision，其他系统用下载的模型），成为一个和照片关联的图层，放在标题上面。模型没下载时回答 `unavailable`（在「设置 → AI → 抠图」里下载）。 | `profile`、`channel`、**`layer`**、`size`、`scope` | |
 | `weave` | 让抠图或素材和下面的文字穿插：按头部（`line`）、逐字（`front`）或笔刷（`strokes`）；`off` 取消穿插。 | `profile`、`channel`、**`layer`**、`off`、`by`（`head`、`letters`、`brush`）、`with`（和哪些文字图层穿插）、`line`（0.1–0.9）、`front`、`strokes` | |
 
@@ -497,7 +498,7 @@ flowchart TD
 
 - `npm test`：工具定义和 `ui/tools.json` 是否最新、参数检查、在替身 `API` 上跑命令、排队和调度器（`tests/agent.test.mjs`），桌面的传输和接入配置（`tests/mcp.test.mjs`）。
 - `cargo test --workspace`（`npm run test:rust`）：工具清单、令牌、`mcp.json`、调度器、应用这边；以及 `core/tests/mcp_http.rs`，在一个空闲端口上通过真正的 HTTP 测接口：协议的两个时代、rmcp 自己的客户端、令牌、`Host`、`Origin` 和页面的标记、进度、取消、请求体、停止。
-- `cargo run -p smedcover-core --example mcp_echo -- [端口] [秒数]`，可以拿客户端来试：它用一个把问题原样说回来的页面，提供测试用的四个工具（`core/tests/fixtures/tools.json`，不是应用的 31 个），不指定端口就用一个空闲的。它一定要令牌：会打印出地址，以及一个只有你能读、装着请求头的文件的路径，给 `curl -H @<文件>` 用；不另外指定，300 秒后停下。
+- `cargo run -p smedcover-core --example mcp_echo -- [端口] [秒数]`，可以拿客户端来试：它用一个把问题原样说回来的页面，提供测试用的四个工具（`core/tests/fixtures/tools.json`，不是应用的 32 个），不指定端口就用一个空闲的。它一定要令牌：会打印出地址，以及一个只有你能读、装着请求头的文件的路径，给 `curl -H @<文件>` 用；不另外指定，300 秒后停下。
 - 自检 `SMEDCOVER_SELFTEST=<文件夹>`：加 `SMEDCOVER_SELFTEST_AGENT=1` 时经窗口的调度器调用工具，再加 `SMEDCOVER_SELFTEST_MCP=1` 时还在空闲端口上通过 HTTP 调用应用自己的接口，带令牌和不带令牌都试。`SMEDCOVER_SELFTEST_STAY=1` 不跑自检：应用把数据放在那个文件夹里，其余照常运行，可以用 `curl` 手动试接口，不碰你的数据。
 
 ### 服务器模式（计划中）

@@ -205,7 +205,7 @@ If it refuses a plain `http://` address, add `"--allow-http"` after the address.
 
 ### Check that it works
 
-In Claude Code, `/mcp` shows `smedcover` connected, with 31 tools. From a terminal, `/health` answers without a token:
+In Claude Code, `/mcp` shows `smedcover` connected, with 32 tools. From a terminal, `/health` answers without a token:
 
 ```bash
 curl http://127.0.0.1:25277/health
@@ -468,7 +468,7 @@ starts it again; no call takes more than two hours.
 
 ## Tools
 
-All 31, grouped by what they do. `ui/tools.json` is the definition: it is written from `ui/js/tools.js` by
+All 32, grouped by what they do. `ui/tools.json` is the definition: it is written from `ui/js/tools.js` by
 `npm run tools` (before every build too), and `npm test` fails when the two disagree. Agents read each tool's full
 description, its argument schema and its answer's schema from `tools/list`; below is what each is for.
 
@@ -524,6 +524,7 @@ Arguments in bold are required. A tool that changes something is one step of und
 |---|---|---|---|
 | `add_photo` | Puts a photo on the cover. `source` is exactly one of `path` (an image file, absolute), `url` (http or https, fetched through the proxy set for image AI), `library` (a pid) or `data` (base64 or a `data:` URL, at most 24 Mi characters; prefer a path or a link). PNG, JPEG, WebP, GIF, HEIC or AVIF, 64 MB at most. `fill` makes it the background; otherwise it is a print at `at`. A new picture joins the library. | `profile`, `channel`, **`source`**, `at`, `fill`, `name` (its name in the library), `above` | fetches links |
 | `crop_photo` | Crops a photo or asset layer: exactly one of `crop` (`{x, y, w, h}`, or a free shape `{pts}`), `ratio` or `reset`. Not for a photo filling the canvas. | `profile`, `channel`, **`layer`**, `crop`, `ratio` (`photo`, `1:1`, `4:3`, `3:4`, `16:9`, `9:16`), `reset` | |
+| `tilt_layer` | Turns a photo or asset layer in 3D, as a card about its own axes: `tiltX` its top edge going away, `tiltY` its right side (negative: the bottom, the left), each within ±80°, seen with `perspective` 0–1 (0.5 until set); `reset` makes it flat. `get_cover` lists each one's `tilt`. Not for a photo filling the canvas; a layer turned is not woven till it is flat again. | `profile`, `channel`, **`layer`**, `tiltX`, `tiltY`, `perspective`, `reset` | |
 | `cut_out` | Cuts the subject out of a photo (on macOS with Vision, elsewhere with the downloaded model) into a layer linked to the photo, above the title. Answers `unavailable` while the model is not downloaded (Settings → AI → *Cut-out*). | `profile`, `channel`, **`layer`**, `size`, `scope` | |
 | `weave` | Weaves a cut-out or an asset with the lettering below it: by its head (`line`), by letter (`front`), or by brush (`strokes`); `off` unweaves it. | `profile`, `channel`, **`layer`**, `off`, `by` (`head`, `letters`, `brush`), `with` (the lettering layers), `line` (0.1–0.9), `front`, `strokes` | |
 
@@ -625,7 +626,7 @@ files an agent names), §10.6 (the endpoint), §11.1 (the tools, the commands an
   and `core/tests/mcp_http.rs`, the endpoint over real HTTP on a free port: both protocol eras, rmcp's own client, the
   token, `Host`, `Origin` and the page's marker, progress, cancelling, bodies, stopping.
 - `cargo run -p smedcover-core --example mcp_echo -- [port] [seconds]`, to try a client against: it serves the four
-  tools of the test fixture (`core/tests/fixtures/tools.json`), not the app's 31, with a page that says back what it is
+  tools of the test fixture (`core/tests/fixtures/tools.json`), not the app's 32, with a page that says back what it is
   asked, on a free port unless told. It always wants a token: it prints its address and the path of a file only you
   can read that holds the header, for `curl -H @<file>`, and stops after 300 seconds unless told otherwise.
 - The self-test, `SMEDCOVER_SELFTEST=<folder>`, with `SMEDCOVER_SELFTEST_AGENT=1` calls the tools through the window's

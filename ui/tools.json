@@ -223,7 +223,7 @@
     {
       "name": "get_cover",
       "title": "Get a cover",
-      "description": "A channel's cover as it is now, read without switching the window: its title, subtitle and tag, the profile's look and theme, and its layers, bottom first. Each layer: id (name layers by it in other tools), type, kind (\"layout\": one of the layout's own parts, which can be hidden or left out of the cover but not removed; \"free\": a layer that was added, or of a kind from an earlier version; \"copy\": a copy of a layout part), its name as the editor shows it, visible, opacity, locked, included (a layout part on the cover or left out), removable (whether remove_layer takes it), copyable, place (x, y; s its scale, r its turn in degrees, kx and ky its stretch — for a layer that was added x, y is its centre as shares of the canvas, for a layout part or a copy of one its offset from where the layout puts it, for a linked cut-out its offset from its photo), tunedAt (sizes it was moved at alone), sizes (those it shows at, or \"all\"), and what its type has: text, font, ink, hi, plate, plateInk, hiPlateInk, hiMark (what marks the highlighted words: none, plate, circle, marker or block), fx and fxAmt (text effect), outline and shadow (their weights), bend and bendAmt, vertical, a photo's pid, fill, cut and of (the photo a cut-out is linked to), an asset's ref and tint, a solid's color, crop, weave, and clip (true: shown only within the layer below). letters: true adds each lettering layer's letterKeys (for weave's front). raw: true adds the cover as SmedCover stores it (for apply_cover_json).",
+      "description": "A channel's cover as it is now, read without switching the window: its title, subtitle and tag, the profile's look and theme, and its layers, bottom first. Each layer: id (name layers by it in other tools), type, kind (\"layout\": one of the layout's own parts, which can be hidden or left out of the cover but not removed; \"free\": a layer that was added, or of a kind from an earlier version; \"copy\": a copy of a layout part), its name as the editor shows it, visible, opacity, locked, included (a layout part on the cover or left out), removable (whether remove_layer takes it), copyable, place (x, y; s its scale, r its turn in degrees, kx and ky its stretch — for a layer that was added x, y is its centre as shares of the canvas, for a layout part or a copy of one its offset from where the layout puts it, for a linked cut-out its offset from its photo), tunedAt (sizes it was moved at alone), sizes (those it shows at, or \"all\"), and what its type has: text, font, ink, hi, plate, plateInk, hiPlateInk, hiMark (what marks the highlighted words: none, plate, circle, marker or block), fx and fxAmt (text effect), outline and shadow (their weights), bend and bendAmt, vertical, a photo's pid, fill, cut and of (the photo a cut-out is linked to), an asset's ref and tint, a solid's color, crop, weave, a photo's or asset's tilt (its turn in 3D: x and y in degrees, perspective; see tilt_layer), and clip (true: shown only within the layer below). letters: true adds each lettering layer's letterKeys (for weave's front). raw: true adds the cover as SmedCover stores it (for apply_cover_json).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2731,6 +2731,175 @@
       },
       "annotations": {
         "title": "Crop a photo",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-smedcover": {
+        "hosts": [
+          "desktop",
+          "server"
+        ],
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "tilt_layer",
+      "title": "Turn a picture in 3D",
+      "description": "Turns a photo or asset layer in 3D, as its 3D turn group does: as a card about its own axes (those of its turn on the canvas, so a card turned on the canvas tips about its own edges), tiltX degrees about its across axis (its top edge going away; negative, its bottom), tiltY about its up axis (its right side going away; negative, its left), each within ±80; perspective 0–1 (0.5 until set; 0 squeezes it with none) how much its near side grows and its far side shrinks. reset: true makes it flat again (its perspective kept). It still moves, scales and turns as ever (place_layer), and its box (render_preview) is the box round it as it shows. Not for a photo that fills the canvas. A layer turned is not woven (its weave is kept for when it is flat again). One undo step. Returns the layer, its tilt as kept.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "The profile, by id or name. The one shown in the window when left out."
+          },
+          "channel": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "The channel, by id, name, code or number from 1. The one shown when left out."
+          },
+          "layer": {
+            "type": "string",
+            "description": "The layer's id, as get_cover lists it (the layout's own parts are named by their type: title, subtitle, tag, brand, …)."
+          },
+          "tiltX": {
+            "type": "number",
+            "description": "Degrees about its across axis: its top edge going away.",
+            "minimum": -80,
+            "maximum": 80
+          },
+          "tiltY": {
+            "type": "number",
+            "description": "Degrees about its up axis: its right side going away.",
+            "minimum": -80,
+            "maximum": 80
+          },
+          "perspective": {
+            "type": "number",
+            "description": "How strong the perspective is: 0 none, 1 the strongest.",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "reset": {
+            "type": "boolean",
+            "description": "Flat again (tiltX and tiltY 0)."
+          }
+        },
+        "required": [
+          "layer"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "layout",
+                  "free",
+                  "copy"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "visible": {
+                "type": "boolean"
+              },
+              "opacity": {
+                "type": "number"
+              },
+              "locked": {
+                "type": "boolean"
+              },
+              "included": {
+                "type": "boolean"
+              },
+              "removable": {
+                "type": "boolean"
+              },
+              "copyable": {
+                "type": "boolean"
+              },
+              "place": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "s": {
+                    "type": "number"
+                  },
+                  "r": {
+                    "type": "number"
+                  },
+                  "kx": {
+                    "type": "number"
+                  },
+                  "ky": {
+                    "type": "number"
+                  }
+                }
+              },
+              "tunedAt": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sizes": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "all"
+                    ]
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "kind"
+            ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "layer"
+        ]
+      },
+      "annotations": {
+        "title": "Turn a picture in 3D",
         "readOnlyHint": false,
         "destructiveHint": false,
         "idempotentHint": true,
