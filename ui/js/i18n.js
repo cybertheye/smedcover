@@ -803,6 +803,7 @@ const STR = {
   "ai.light.errOf": ["{0}上次出错", "{0}: last request failed"],
   "ai.light.notSetOf": ["{0}未设置", "{0} not set up"],
   "ai.light.and": ["、", ", "],
+  "ai.light.of": ["{0}：{1}", "{0}: {1}"],
   "ai.styleShort.openai": ["OpenAI 兼容", "OpenAI-style"],
   "ai.styleShort.anthropic": ["Anthropic", "Anthropic"],
   "cutset.unknown": ["读不到这个模型的状态，可以重新下载", "Its state could not be read; it can be downloaded again"],
@@ -1378,7 +1379,6 @@ const STR = {
   "mcp.mins": ["{0} 分钟前", "{0} min ago"],
   // Settings → Command line: smedcover, put on the PATH, its commands and options
   "cli.sub": ["在终端或脚本里用 smedcover 导出、批量出图、渲染封面", "smedcover in a terminal or a script: export, batch, render covers"],
-  "cli.menuSub": ["在终端和脚本里出封面", "Covers from a terminal or a script"],
   "cli.how": ["每个命令都通过 agent 用的那些工具交给 SmedCover 去做，出的封面和窗口导出的一样。SmedCover 开着时就在这个窗口里做，每一步都看得到，改动都能撤销；没开时为这一次启动它，做完约 2 秒后自己退出。什么都不会离开这台电脑。", "Each command has SmedCover do the work, through the same tools agents use, so its covers are those the window exports. With SmedCover open it is done in this window, each step to be seen and each change undone; else SmedCover is started for it and quits about 2 seconds after. Nothing leaves this computer."],
   "cli.path": ["加进 PATH", "On your PATH"],
   "cli.pathSub": ["装好后，在任何终端里都能直接输入 smedcover", "Once installed, any terminal has the smedcover command"],

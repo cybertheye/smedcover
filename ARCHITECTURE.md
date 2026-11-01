@@ -1590,7 +1590,7 @@ model missing from the service's list (`notListed`) or a service that lists none
 nor proof that it works; and the cut-out in `ensureMask()`, counting a photo with no subject found as no failure. A
 request sent with settings other than those in force, and every request of the self-test (`SELFTESTING`, against its
 stand-in server and on its own photos), leaves the lights alone. Where it is shown, each place is an element marked `data-ai` (`AI_SHOW`: the cards' heads, `aiPill()`, the ⋯
-menu's line under *AI* and the dot beside *AI* in Settings' nav), and `aiLightsSync()` builds those again, and nothing
+menu's line under *AI* and the three dots beside *AI* in Settings' nav), and `aiLightsSync()` builds those again, and nothing
 else, as a request begins or ends, a setting is typed (the text and image panes' `set`) or a model has downloaded.
 
 ## 9. Interaction (`app.js`)
@@ -2192,7 +2192,7 @@ one the cover had before the first deal, `DEAL.from`, and nothing has been undon
 asks to know whether the editor is in front, so what goes with the editor follows: the bar over the canvas is away, the
 3D view, the letter, crop and weave windows and the brush's panel close, and no key but Esc, undo and redo acts. Its nav
 (`syncTabs()` again, into `#setnav`) shows the profile (its name, how many channels, their colours), its pages (`TABS.setup`:
-`brandTab()`, `sizesTab()`, `aiTab()` and, in the desktop app (`CAN_AGENTS`), `agentsTab()` and `cliTab()`; `S.tab.setup`; beside *AI* the AI lights as one dot, `AI_SHOW.nav`, see 8.6; beside *Agents* the endpoint's light, `mcpLight()`; beside *Command line* its Beta tag, `betaTag()`, as in its heading and the ⋯ menu) and the profile's actions (`profileActions`: new, duplicate,
+`brandTab()`, `sizesTab()`, `aiTab()` and, in the desktop app (`CAN_AGENTS`), `agentsTab()` and `cliTab()`; `S.tab.setup`; beside *AI* the three AI lights, one dot each in the cards' order (text, image, cut-out), each titled with its service and what it says, `AI_SHOW.nav`, see 8.6; beside *Agents* the endpoint's light, `mcpLight()`; beside *Command line* its Beta tag, `betaTag()`, as in its heading; it is not in the ⋯ menu) and the profile's actions (`profileActions`: new, duplicate,
 import, export, delete); `renderPanel()` draws the page into `#setpanel`, but for its title (`.sh`), which goes into `#sethead` above it: held still while the page scrolls under it (what scrolls up fades out there), so the ✕ beside it is never over the page. On Brand & channels, with two channels or more,
 each card has a grip (⋮⋮) that `chDrag()` takes: the card is lifted out of the grid's flow (`.lifted`) and follows the
 pointer, which the grip captures, a place in its colour (`.chhole`) going before or after the card nearest the lifted

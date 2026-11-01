@@ -2815,7 +2815,8 @@ const testLine = (r) => r && el("div", { class: `hint ${r.ok === true ? "ok" : r
 // ---------- the AI services' lights: grey, not set up; green, set up and its last request or connection test did not
 // fail; amber, a request under way; red, its last request or test failed, until one goes through or its settings
 // change. Lit by the requests the user makes, none made to light it; kept for this session only, nothing saved. Shown
-// in the ⋯ menu's AI (all three as one), beside AI in Settings' nav, and on each card's head in Settings → AI.
+// in the ⋯ menu's AI (all three as one), beside AI in Settings' nav (one each, in the cards' order), and on each card's
+// head in Settings → AI.
 const AI_SERVICES = ["text", "image", "cut"];
 /** For each service: how many of its requests are under way; the settings (aiSig) its last one failed with, and those one went through with. */
 const AI_LIGHT = Object.fromEntries(AI_SERVICES.map((k) => [k, { busy: 0, failed: "", worked: "" }]));
@@ -2862,7 +2863,7 @@ function aiPill(k) {
 const AI_SHOW = {
   text: () => aiPill("text"), image: () => aiPill("image"), cut: () => aiPill("cut"),
   menu: () => { const a = aiAll(); return el("span", { class: "light", "data-ai": "menu" }, aiDot(a.s), el("span", {}, a.say)); },
-  nav: () => { const a = aiAll(); return el("span", { class: "light", "data-ai": "nav" }, aiDot(a.s, a.say)); },
+  nav: () => el("span", { class: "light lights", "data-ai": "nav" }, AI_SERVICES.map((k) => aiDot(aiLight(k), t("ai.light.of", t("ai.card." + k), aiSays(k))))),
 };
 /** The lights shown, drawn again as they now are (a request begun or ended, a setting typed in), and nothing else. */
 function aiLightsSync() { for (const n of document.querySelectorAll("[data-ai]")) n.replaceWith(AI_SHOW[n.dataset.ai]()); }
@@ -3226,7 +3227,7 @@ function cliCard() {
       el("div", { class: "mlh" }, el("label", { class: "cap" }, t("cli.try")), el("button", { class: "linkbtn", "aria-label": t("mcp.copyWhat", t("cli.try")), onclick: () => copyText("smedcover --help") }, ico("copy", 15), t("mcp.copy"))),
       el("pre", { class: "mcode" }, "smedcover --help")));
 }
-/** A tag saying a page is still in trial (Beta), its title saying what that means: beside its name in Settings' nav, its heading and the ⋯ menu. */
+/** A tag saying a page is still in trial (Beta), its title saying what that means: beside its name in Settings' nav, and in its heading. */
 const betaTag = () => el("span", { class: "beta", title: t("tag.betaTip") }, t("tag.beta"));
 /**
  * The commands, as cli/src/args.rs has them (`smedcover <command> --help`): each one's name, an example to copy (that
@@ -8699,7 +8700,6 @@ function renderMenu() {
     el("div", { class: "mg" }, t("menu.profile")),   // what is under it opens Settings
     page("brand", counted("menu.channels", S.profile.categories.length)), page("sizes", counted("menu.sizes", S.profile.sizes.length)), page("ai", AI_SHOW.menu()),
     CAN_AGENTS && page("agents", mcpSays()),   // Settings → Agents, saying whether the endpoint is on
-    CAN_AGENTS && item([t("tab.cli"), betaTag()], t("cli.menuSub"), () => { S.tab.setup = "cli"; setMode("setup"); }),   // Settings → Command line
     others.length > 0 && el("button", { class: "mi", role: "menuitem", "aria-expanded": String(!!MENU.profiles), onclick: () => { MENU.profiles = !MENU.profiles; renderMenu(); } },
       el("span", { class: "mt" }, el("span", {}, t("menu.switch"))), el("span", { class: "chev" + (MENU.profiles ? " open" : "") })),
     MENU.profiles && others.map((p) => el("button", { class: "mi sub", role: "menuitem", onclick: go(() => switchProfile(p.id).catch((err) => { fail(err); syncTop(); })) },
