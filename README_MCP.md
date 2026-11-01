@@ -5,7 +5,7 @@ English · [中文](README_MCP.zh-CN.md)
 Agents such as Claude Code, Codex, Cursor, Hermes Agent or OpenClaw can make covers in SmedCover's open window over
 MCP (the Model Context Protocol). This page covers turning the endpoint on, connecting an agent, the token, how a
 session goes, every tool, how it is built, and what to do when something goes wrong. The rest of the app:
-[README.md](README.md); how it works inside: [ARCHITECTURE.md](ARCHITECTURE.md).
+[the user guide](docs/guide.md); how it works inside: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 - [What it is](#what-it-is)
 - [Turning it on](#turning-it-on)
@@ -89,7 +89,7 @@ setting (Windows slows a minimised window down): keep the window from being mini
 
 ### `mcp.json`
 
-The endpoint's settings are in `mcp.json` in the data folder (where it is: [README.md](README.md#where-your-data-lives)).
+The endpoint's settings are in `mcp.json` in the data folder (where it is: [Where your data lives](docs/guide.md#where-your-data-lives)).
 It is there from the first start.
 
 | Field | Meaning | To begin with |

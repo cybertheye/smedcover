@@ -2,7 +2,7 @@
 
 [English](README_MCP.md) · 中文
 
-Claude Code、Codex、Cursor、Hermes Agent、OpenClaw 这类 agent，可以通过 MCP（Model Context Protocol）在你开着的 SmedCover 窗口里做封面。这一页讲怎么打开接口、怎么连接 agent、令牌、一次会话怎么进行、全部工具、实现结构，以及出问题时怎么办。应用的其他部分见 [README.zh-CN.md](README.zh-CN.md)，实现原理见 [ARCHITECTURE.zh-CN.md](ARCHITECTURE.zh-CN.md)。
+Claude Code、Codex、Cursor、Hermes Agent、OpenClaw 这类 agent，可以通过 MCP（Model Context Protocol）在你开着的 SmedCover 窗口里做封面。这一页讲怎么打开接口、怎么连接 agent、令牌、一次会话怎么进行、全部工具、实现结构，以及出问题时怎么办。应用的其他部分见 [使用手册](docs/guide.zh-CN.md)，实现原理见 [ARCHITECTURE.zh-CN.md](ARCHITECTURE.zh-CN.md)。
 
 - [这是什么](#这是什么)
 - [打开接口](#打开接口)
@@ -61,7 +61,7 @@ Claude Code、Codex、Cursor、Hermes Agent、OpenClaw 这类 agent，可以通�
 
 ### `mcp.json`
 
-接口的设置存在数据目录的 `mcp.json` 里（数据目录在哪里见 [README.zh-CN.md](README.zh-CN.md#数据存在哪里)）。第一次启动就有。
+接口的设置存在数据目录的 `mcp.json` 里（数据目录在哪里见 [数据存在哪里](docs/guide.zh-CN.md#数据存在哪里)）。第一次启动就有。
 
 | 字段 | 含义 | 一开始 |
 |---|---|---|

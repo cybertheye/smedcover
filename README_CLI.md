@@ -5,7 +5,7 @@ English · [中文](README_CLI.zh-CN.md)
 `smedcover`, SmedCover's command line, makes covers from a terminal or a script: one channel's cover into a file, every
 channel at every size into a folder, a cover for each row of a CSV, or any call an agent could make. This page covers
 installing it, every command and flag, what it prints, its exit codes, how a run goes with the app, scripting it, and
-what to do when something goes wrong. The rest of the app: [README.md](README.md); agents over MCP:
+what to do when something goes wrong. The rest of the app: [the user guide](docs/guide.md); agents over MCP:
 [README_MCP.md](README_MCP.md); how it works inside: [ARCHITECTURE.md](ARCHITECTURE.md) (10.7 to 10.9).
 
 - [What it is](#what-it-is)
@@ -75,7 +75,7 @@ cargo build --release -p smedcover-cli      # target/release/smedcover
 A development build's command line is `target/debug/smedcover` (`cargo build -p smedcover-cli`, or a plain
 `cargo build`), beside the app `npm run tauri dev` makes, `target/debug/smedcover-app`; its card in Settings says where
 it is and installs nothing. `tauri build` puts the command into every installer itself
-([Run and build from source](README.md#run-and-build-from-source)).
+([Run and build from source](docs/guide.md#run-and-build-from-source)).
 
 ### Which app it starts
 
@@ -203,7 +203,7 @@ to the standard error after.
 | `--out DIR` | The folder, made if it is not there (default: the profile's export folder) |
 
 - It never writes over a file: a name taken gets a number. Each file is named by the export's file name pattern
-  ([Export](README.md#export)).
+  ([Export](docs/guide.md#export)).
 - A profile that has no export folder yet wants `--out`. The folder `--out` names is not kept for the profile.
 - Exporting changes no cover. Stopped in the window (*Stop waiting* on the pill that shows while a call runs, offered
   after 20 seconds, or Esc), the command fails (exit 1, kind `failed`); the files written by then stay in the folder,
@@ -216,7 +216,7 @@ smedcover batch FILE.csv [--sizes LIST] [--out DIR] [--profile P] [--format F] [
 smedcover batch - < FILE.csv
 ```
 
-Makes a cover for each row of a CSV and exports it, as [Batch export](README.md#batch-export) does, and prints each
+Makes a cover for each row of a CSV and exports it, as [Batch export](docs/guide.md#batch-export) does, and prints each
 file as `export` does.
 
 ```csv
@@ -240,7 +240,7 @@ Tutorials,"First line\nsecond line",,
 smedcover import FILE.smedcover.json [--as new|current]
 ```
 
-Opens a project file ([Project files](README.md#project-files)) into its own profile, and the window goes to it. When
+Opens a project file ([Project files](docs/guide.md#project-files)) into its own profile, and the window goes to it. When
 this computer does not have its profile, `--as new` (the default) imports it as a new profile, and `--as current` puts
 it into the current one. Prints the profile and channel it opened in (*new* or *already here*), and any warning (a font
 it could not find, say). Undo in the window brings back the cover it replaced.
@@ -464,7 +464,7 @@ done
 | `smedcover: command not found` | It is not on the PATH: Settings → *Command line* → *Install*. On Windows, open a new terminal after installing. On Linux, an AppImage's cannot be used: install the `.deb` or the `.rpm`. |
 | `Could not find the SmedCover app at …` | The command is not beside its app (moved, or copied elsewhere). Install it again from Settings, or set `SMEDCOVER_APP` to the app's executable (`…/SmedCover.app/Contents/MacOS/smedcover-app` on macOS). |
 | `Open SmedCover once and finish setting it up, then try again.` | SmedCover has no profile yet. Open it and finish the welcome. |
-| `SmedCover was not ready within 30 seconds` | It started but did not get ready. In parentheses, when there is one, why its `cli.json` was not taken (one others may read, or not yours: check the data folder's owner). To see what the app says, make a folder `logs` in the data folder ([where](README.md#where-your-data-lives)): an app started for the command writes its output to `logs/cli-app.log` there. |
+| `SmedCover was not ready within 30 seconds` | It started but did not get ready. In parentheses, when there is one, why its `cli.json` was not taken (one others may read, or not yours: check the data folder's owner). To see what the app says, make a folder `logs` in the data folder ([where](docs/guide.md#where-your-data-lives)): an app started for the command writes its output to `logs/cli-app.log` there. |
 | `SmedCover quit before it was ready` | It could not start: run it from the Finder or the Start menu to see why, or read `logs/cli-app.log` (above). |
 | `SmedCover is busy: …` (exit 1) | You were in the middle of something in the window (the message says what) for as long as the call waits. Finish it and run the command again. |
 | `SmedCover did not answer in time, so the call was given up; …` (exit 4), `… did not finish: nothing was heard from it for … s …` (exit 1), `No word from SmedCover for … s` (exit 4) | The call went quiet past its tool's wait: SmedCover's own, or the command's, 10 seconds longer. On Windows, a minimised window is slowed down: keep it on screen. What it changed so far stays: look at the window before going on. |

@@ -4,7 +4,7 @@
 
 `smedcover` 是 SmedCover 的命令行，让你在终端或脚本里出封面：把一个频道的封面写进一个文件，把每个频道的每个尺寸导出到一个文件夹，按
 CSV 每行做一张封面，或者做 agent 能做的任何一次调用。这一页讲怎么安装、每个命令和参数、它输出什么、退出码、它和 App 之间一次运行怎么进行、
-怎么写脚本，以及出问题时怎么办。应用的其他部分见 [README.zh-CN.md](README.zh-CN.md)，agent 接入（MCP）见
+怎么写脚本，以及出问题时怎么办。应用的其他部分见 [使用手册](docs/guide.zh-CN.md)，agent 接入（MCP）见
 [README_MCP.zh-CN.md](README_MCP.zh-CN.md)，实现原理见 [ARCHITECTURE.zh-CN.md](ARCHITECTURE.zh-CN.md)（10.7 到 10.9）。
 
 - [这是什么](#这是什么)
@@ -62,7 +62,7 @@ cargo build --release -p smedcover-cli      # target/release/smedcover
 ```
 
 开发版的命令行是 `target/debug/smedcover`（`cargo build -p smedcover-cli`，或者直接 `cargo build`），旁边是 `npm run tauri dev` 生成的
-App `target/debug/smedcover-app`；设置里的卡片会说它在哪里，不安装。`tauri build` 会自己把命令放进每个安装包（见[从源码运行和打包](README.zh-CN.md#从源码运行和打包)）。
+App `target/debug/smedcover-app`；设置里的卡片会说它在哪里，不安装。`tauri build` 会自己把命令放进每个安装包（见[从源码运行和打包](docs/guide.zh-CN.md#从源码运行和打包)）。
 
 ### 会启动哪个 App
 
@@ -182,7 +182,7 @@ smedcover export [--channels 列表] [--sizes 列表] [--out 目录] [--profile 
 | `--sizes 列表` | 尺寸，按像素、比例或名字，逗号隔开（最多 80 个），或者 `all`（不给就是导出窗口里打开的） |
 | `--out 目录` | 文件夹，不存在会新建（不给就是档案的导出文件夹） |
 
-- 从不覆盖文件：重名的加编号。文件名按导出的文件名规则来（见[导出](README.zh-CN.md#导出)）。
+- 从不覆盖文件：重名的加编号。文件名按导出的文件名规则来（见[导出](docs/guide.zh-CN.md#导出)）。
 - 档案还没有导出文件夹时，要给 `--out`。`--out` 指定的文件夹不会记到档案上。
 - 导出不改封面。在窗口里不等了（调用进行时出现的小条上的「不等了」，20 秒后出现，或者按 Esc）时，命令以失败结束（退出码 1，种类
   `failed`）；到那时已经写好的文件留在文件夹里，但不会列出来。
@@ -194,7 +194,7 @@ smedcover batch 文件.csv [--sizes 列表] [--out 目录] [--profile 档案] [-
 smedcover batch - < 文件.csv
 ```
 
-按 CSV 每行做一张封面并导出，和[批量出图](README.zh-CN.md#批量出图)一样；输出的文件和 `export` 一样。
+按 CSV 每行做一张封面并导出，和[批量出图](docs/guide.zh-CN.md#批量出图)一样；输出的文件和 `export` 一样。
 
 ```csv
 channel,title,tag,subtitle
@@ -215,7 +215,7 @@ VLOG,"雨夜*东京*漫步",EP.12,从涩谷走到新宿
 smedcover import 文件.smedcover.json [--as new|current]
 ```
 
-打开一个工程文件（见[工程文件](README.zh-CN.md#工程文件)），进它自己的档案，窗口也切过去。这台电脑上没有它的档案时，`--as new`（默认）把它
+打开一个工程文件（见[工程文件](docs/guide.zh-CN.md#工程文件)），进它自己的档案，窗口也切过去。这台电脑上没有它的档案时，`--as new`（默认）把它
 导入成一个新档案，`--as current` 放进当前档案。输出它打开到哪个档案和频道（「新建的」或「原有的」），以及提醒（比如找不到某个字体）。在窗口里
 撤销，就回到它替换掉的那张封面。
 
@@ -419,7 +419,7 @@ done
 | `smedcover: command not found` | 它不在 PATH 里：「设置 → 命令行工具」，点「安装」。Windows 上装好后要新开一个终端。Linux 上 AppImage 里的用不了：装 `.deb` 或 `.rpm`。 |
 | 「在 … 找不到 SmedCover App。」 | 命令不在它的 App 旁边（挪过，或者复制到了别处）。从设置里再装一次，或者把 `SMEDCOVER_APP` 设成 App 的可执行文件（macOS 上是 `…/SmedCover.app/Contents/MacOS/smedcover-app`）。 |
 | 「请先打开 SmedCover，完成首次设置，然后再试。」 | SmedCover 还没有档案。打开它，走完欢迎页。 |
-| 「SmedCover 30 秒内没有就绪」 | 它启动了，但没有就绪。括号里有原因时，说的是 `cli.json` 为什么没被采用（别人也能读，或者不是你的：查一下数据文件夹的所有者）。想看 App 说了什么，就在数据文件夹（[在哪里](README.zh-CN.md#数据存在哪里)）里建一个 `logs` 文件夹：为命令启动的 App 会把输出写进那里的 `logs/cli-app.log`。 |
+| 「SmedCover 30 秒内没有就绪」 | 它启动了，但没有就绪。括号里有原因时，说的是 `cli.json` 为什么没被采用（别人也能读，或者不是你的：查一下数据文件夹的所有者）。想看 App 说了什么，就在数据文件夹（[在哪里](docs/guide.zh-CN.md#数据存在哪里)）里建一个 `logs` 文件夹：为命令启动的 App 会把输出写进那里的 `logs/cli-app.log`。 |
 | 「SmedCover 没等就绪就退出了」 | 它启动不起来：从访达或开始菜单打开它看看原因，或者看 `logs/cli-app.log`（同上）。 |
 | `SmedCover is busy: …`（退出码 1） | 你在窗口里手上有事（消息里说是哪件），一直没完，超过了调用肯等的时间。做完它，再运行一次命令。 |
 | `SmedCover did not answer in time, so the call was given up; …`（退出码 4）、`… did not finish: nothing was heard from it for … s …`（退出码 1）、「SmedCover … 秒没有动静」（退出码 4） | 调用沉默的时间超过了工具的时限：SmedCover 自己的，或者命令的（再多 10 秒）。Windows 上窗口最小化会被放慢：让它留在屏幕上。已经改了的留着：继续之前先看看窗口。 |
