@@ -25,8 +25,8 @@ pub mod proxy;
 pub use proxy::{proxy_choice, ProxyChoice, Via};
 
 /// How long an AI request may take unless the caller says otherwise, and the most of a reply
-/// that is read. Models that reason before answering can need several minutes.
-pub const AI_TIMEOUT_SECS: u64 = 300;
+/// that is read. Models that reason before answering, and image models, can need many minutes.
+pub const AI_TIMEOUT_SECS: u64 = 1800;
 pub const AI_MAX_REPLY: u64 = 4 * 1024 * 1024;
 /// A reply carrying a picture (a repainted photo, as base64) is allowed to be this big.
 pub const AI_MAX_IMAGE_REPLY: u64 = 64 * 1024 * 1024;

@@ -2703,7 +2703,7 @@ function imageAiPane() {
     field("ai.baseUrl", "baseUrl", { fill: d.baseUrl }, ep),
     field("ai.token", "token", { type: "password", placeholder: t("ai.tokenPh"), autocomplete: "off" }),
     field("ai.model", "model", { placeholder: t("img.modelPh", d.model), fill: d.model }, el("div", { class: "hint" }, t("img.modelHint." + c.provider))),
-    scrub(t("ai.timeout"), 30, 1800, 30, c.timeout, SHOWN.sec, (v) => set("timeout", v), 300),
+    scrub(t("ai.timeout"), 30, 1800, 30, c.timeout, SHOWN.sec, (v) => set("timeout", v), 1800),
     field("ai.proxy", "proxy", { fill: PROXY_FILL }),
     el("div", { class: "aifoot" }, testBtn, testLine(REP.test), info(t("img.testHint"))),
     el("div", { class: "hint" }, t("img.privacy")),
@@ -3059,9 +3059,9 @@ const CAN_AGENTS = HOST === "tauri";
 /**
  * What the page keeps of it besides the status (agent.js's MCP, sent by the host as it changes): the token once read
  * (shown or not: hidden again whenever the page is left, see renderPanel), the port being typed (null: the one in
- * force), a switch on its way, whether they were read, and why they could not be; and of the command line (cliCard)
- * its status, whether it was read since the page was shown, an install or uninstall on its way, and whether the last
- * one's password prompt was cancelled.
+ * force), a switch on its way, whether they were read, and why they could not be; and of the command line (cliTab's
+ * cliCard) its status, whether it was read since its page was shown, an install or uninstall on its way, and whether
+ * the last one's password prompt was cancelled.
  */
 const AGENTS = { token: "", show: false, port: null, busy: false, read: false, error: "", cli: null, cliSeen: false, cliBusy: false, cliCancelled: false };
 const isPort = (v) => /^\d+$/.test(String(v).trim()) && +v >= 1024 && +v <= 65535;
@@ -3171,12 +3171,12 @@ function mcpSeen(s) {
         el("span", {}, last ? [t("mcp.last", last.tool, ago(last.at)), " · ", el("b", { class: last.ok ? "ok" : "bad" }, t(last.ok ? "mcp.ok" : "mcp.failed"))] : t("mcp.lastNone"))),
       s.toolsMismatch && el("div", { class: "hint err" }, t("mcp.mismatch"))));
 }
-// the command line, smedcover, put on the PATH (install.rs in the app): its card, the page's last
-/** The command line's status, read as the page is shown (each time: what is in /usr/local/bin may have changed meanwhile) and after a failed install or uninstall; a host without it has no card. */
+// ---------- Settings → Command line (beta): smedcover put on the PATH (install.rs in the app), and what it can do
+/** The command line's status, read as its page is shown (each time: what is in /usr/local/bin may have changed meanwhile) and after a failed install or uninstall; a host without it has no card. */
 async function cliRead() {
   try { AGENTS.cli = await invoke("cli_status"); } catch { AGENTS.cli = null; }
   AGENTS.cliCancelled = false;
-  if (S.mode === "setup" && S.tab.setup === "agents") renderPanel();
+  if (S.mode === "setup" && S.tab.setup === "cli") renderPanel();
 }
 /**
  * Installs or uninstalls it (`cmd`: cli_install, cli_uninstall), the administrator's prompt in the page's language; the
@@ -3200,7 +3200,7 @@ async function cliDo(cmd) {
 /** The card's pill and its light, for each state: installed green, another copy's and an app to be moved first amber, something not SmedCover's red, the others grey. */
 const CLI_PILL = { installed: "running", package: "running", elsewhere: "switching", moved: "switching", foreign: "error" }, CLI_DOT = { running: " ok", switching: " busy", error: " err" };
 /**
- * Settings → Agents' card for the command line: what it is; its state and a line on it — installed (on macOS a link in
+ * Settings → Command line's first card, putting it on the PATH: its state and a line on it — installed (on macOS a link in
  * /usr/local/bin to this app's, on Windows its copy's folder on the user's PATH, on Linux the package's), another copy's
  * link (where it leads), something not SmedCover's in its place (what, left alone, said so), not installed (cancelled,
  * quietly, when the password prompt was), an app run from a disk image or moved aside by the system (to be moved to
@@ -3217,7 +3217,7 @@ function cliCard() {
     moved: t("cli.line.moved"), package: t("cli.line.package", c.at), appimage: t("cli.line.appimage"), unpackaged: t("cli.line.unpackaged", c.cli), dev: t(c.there ? "cli.line.dev" : "cli.line.devNone", c.cli), missing: t("cli.line.missing") }[k] || "";
   const acts = { absent: ["install"], installed: ["uninstall"], elsewhere: ["use", "uninstall"] }[c.state] || [];
   return el("section", { class: "scard aicard", id: "set-cli" },
-    el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("cli.title")), el("small", {}, t("cli.sub"))),
+    el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("cli.path")), el("small", {}, t("cli.pathSub"))),
       el("span", { class: "mstate " + pill, role: "status", "aria-live": "polite" }, el("span", { class: "aidot" + (CLI_DOT[pill] || "") }), t("cli.state." + k))),
     el("div", { class: "mrow" },
       acts.map((a) => el("button", { class: "btn", disabled: AGENTS.cliBusy, onclick: () => cliDo(a === "uninstall" ? "cli_uninstall" : "cli_install") }, ico(a === "uninstall" ? "unlink" : "download", 15), t("cli." + a))),
@@ -3225,6 +3225,62 @@ function cliCard() {
     el("div", { class: "mline" },
       el("div", { class: "mlh" }, el("label", { class: "cap" }, t("cli.try")), el("button", { class: "linkbtn", "aria-label": t("mcp.copyWhat", t("cli.try")), onclick: () => copyText("smedcover --help") }, ico("copy", 15), t("mcp.copy"))),
       el("pre", { class: "mcode" }, "smedcover --help")));
+}
+/** A tag saying a page is still in trial (Beta), its title saying what that means: beside its name in Settings' nav, its heading and the ⋯ menu. */
+const betaTag = () => el("span", { class: "beta", title: t("tag.betaTip") }, t("tag.beta"));
+/**
+ * The commands, as cli/src/args.rs has them (`smedcover <command> --help`): each one's name, an example to copy (that
+ * runs as it is, a channel by its number, files in the folder the terminal is in), and its own arguments as its help
+ * writes them, each said in the page's words (cli.arg.<key>).
+ */
+const CLI_COMMANDS = [
+  { k: "profiles", ex: "smedcover profiles", args: [] },
+  { k: "render", ex: "smedcover render 1 -o cover.png", args: [["<CHANNEL>", "channel"], ["-o, --output <FILE>", "output"], ["--size <SIZE>", "size"], ["--size-key <KEY>", "sizeKey"]] },
+  { k: "export", ex: "smedcover export --channels all --sizes all --out covers", args: [["--channels <LIST>", "channels"], ["--sizes <LIST>", "sizes"], ["--out <DIR>", "out"]] },
+  { k: "batch", ex: "smedcover batch covers.csv --out covers", args: [["<CSV>", "csv"], ["--sizes <LIST>", "batchSizes"], ["--out <DIR>", "out"]] },
+  { k: "import", ex: "smedcover import cover.smedcover.json", args: [["<FILE>", "project"], ["--as <new|current>", "as"]] },
+  { k: "tools", ex: "smedcover tools", args: [["--json", "toolsJson"]] },
+  { k: "call", ex: "smedcover call render_preview --save-images previews", args: [["<TOOL>", "tool"], ["[ARGUMENTS]", "arguments"], ["--save-images <DIR>", "saveImages"]] },
+];
+/** What every command takes (before or after it), and what render, export and batch take besides; each said in the page's words (cli.opt.<key>). */
+const CLI_GLOBAL = [["--json", "json"], ["-q, --quiet", "quiet"], ["--timeout <SECS>", "timeout"], ["--data <DIR>", "data"], ["-V, --version", "version"], ["-h, --help", "help"]];
+const CLI_COVER_OPTS = [["--profile <PROFILE>", "profile"], ["--format <FORMAT>", "format"], ["--scale <SCALE>", "scale"]];
+/** Flags and what they do, two columns: the flag as the help writes it, then what it does. */
+const cliFlags = (rows, pre) => el("dl", { class: "cliargs" }, rows.flatMap(([flag, key]) => [el("dt", {}, flag), el("dd", {}, t(pre + key))]));
+/** Settings → Command line's card of the commands: each one's name and what it does, an example to copy, and its arguments. */
+function cliCommands() {
+  const row = (c) => el("div", { class: "clicmd" },
+    el("div", { class: "mlh" },
+      el("div", { class: "clihead" }, el("code", { class: "cliname" }, c.k), el("span", {}, t("cli.cmd." + c.k))),
+      el("button", { class: "linkbtn", "aria-label": t("mcp.copyWhat", c.ex), onclick: () => copyText(c.ex) }, ico("copy", 15), t("mcp.copy"))),
+    el("pre", { class: "mcode" }, c.ex),
+    c.args.length > 0 && cliFlags(c.args, "cli.arg."));
+  return el("section", { class: "scard aicard", id: "set-cli-commands" },
+    el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("cli.cmds")), el("small", {}, t("cli.cmdsSub")))),
+    el("div", { class: "clicmds" }, CLI_COMMANDS.map(row)));
+}
+/** Settings → Command line's card of the options every command takes, those of the commands that write covers, and the exit codes a script can test. */
+function cliOptions() {
+  return el("section", { class: "scard aicard", id: "set-cli-options" },
+    el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("cli.opts")), el("small", {}, t("cli.optsSub")))),
+    cliFlags(CLI_GLOBAL, "cli.opt."),
+    el("div", {}, el("label", { class: "cap" }, t("cli.optsCover")), cliFlags(CLI_COVER_OPTS, "cli.opt.")),
+    el("div", {}, el("label", { class: "cap" }, t("cli.exits")), el("dl", { class: "cliargs" }, ["0", "1", "2", "3", "4", "130"].flatMap((c) => [el("dt", {}, c), el("dd", {}, t("cli.exit." + c))]))));
+}
+/**
+ * Settings → Command line (beta), the desktop app's: what smedcover is and how it works (through the app, in its window
+ * when it is open); putting it on the PATH (cliCard, its status read again each time the page is shown); the commands,
+ * each with an example to copy and its arguments; the options they all take, and the exit codes.
+ */
+function cliTab() {
+  if (!AGENTS.cliSeen) { AGENTS.cliSeen = true; cliRead(); }   // again each time the page is shown (renderPanel)
+  return [
+    el("div", { class: "sh" }, el("b", {}, t("tab.cli"), betaTag()), el("span", {}, t("cli.sub"))),
+    el("div", { class: "hint" }, t("cli.how")),
+    cliCard(),
+    cliCommands(),
+    cliOptions(),
+  ];
 }
 /** The parts of the page that follow the status as it comes (the pill, the line under the port, what was seen), drawn again in place, and the nav's light. */
 function agentsLive() {
@@ -3250,18 +3306,17 @@ onMcpStatus(agentsLive);
  * token must be set up again (a refusal, such as an mcp.json that cannot be read, said as other failures are, by fail());
  * while on, the token (hidden but for its end;
  * shown, copied, or replaced after asking); the lines that set an agent up, ready to copy (Claude Code, Codex, any other
- * client's JSON), with the token only while one is required; the clients seen lately with the calls; and the command
- * line, put on the PATH from here (cliCard). What is kept is mcp.json, Rust's: read and set through the mcp_* commands,
- * never custom.json.
+ * client's JSON), with the token only while one is required; and the clients seen lately with the calls. The command
+ * line has a page of its own (cliTab). What is kept is mcp.json, Rust's: read and set through the mcp_* commands, never
+ * custom.json.
  */
 function agentsTab() {
   const s = MCP.status, head = el("div", { class: "sh" }, el("b", {}, t("tab.agents")), el("span", {}, t("mcp.pageSub")));
   if (!AGENTS.error) agentsRead();   // after a failure, only when asked again
-  if (!AGENTS.cliSeen) { AGENTS.cliSeen = true; cliRead(); }   // again each time the page is shown (renderPanel)
   if (!s) {
     return [head, AGENTS.error
       ? el("div", { class: "mrow" }, el("div", { class: "hint err" }, t("mcp.readFailed", AGENTS.error)), el("button", { class: "btn", onclick: () => { AGENTS.error = ""; renderPanel(); } }, ico("reset", 15), t("mcp.retry")))
-      : el("div", { class: "hint" }, t("mcp.reading")), cliCard()];
+      : el("div", { class: "hint" }, t("mcp.reading"))];
   }
   later("mcp-tick", 15000, agentsLive);
   const port = AGENTS.port ?? String(s.port), good = isPort(port), changed = good && +port !== s.port;
@@ -3296,7 +3351,6 @@ function agentsTab() {
       el("div", { class: "mlines" }, setupLines(url, wanted ? shown : null, ON_WINDOWS).map(row)),
       el("div", { class: "hint" }, t("mcp.proxy"))),
     mcpSeen(s),
-    cliCard(),
   ];
 }
 
@@ -8460,6 +8514,8 @@ const SHELL_ICONS = {
   about: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><path d="M12 7.5h.01"/>',
   // Settings → Agents: its page (a terminal's prompt), and its token's buttons
   agent: '<rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="m7 10 3 2.5L7 15"/><path d="M12.5 15H17"/>',
+  // Settings → Command line: its page (a prompt and its cursor, unframed)
+  cli: '<path d="m4.5 6.5 5.5 5.5-5.5 5.5"/><path d="M12 18h7.5"/>',
   copy: '<rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5.5a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/>',
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
   eyeOff: '<path d="m3 3 18 18"/><path d="M10.6 5.1A9.6 9.6 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.1 4M6.6 6.6C3.7 8.4 2 12 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
@@ -8643,6 +8699,7 @@ function renderMenu() {
     el("div", { class: "mg" }, t("menu.profile")),   // what is under it opens Settings
     page("brand", counted("menu.channels", S.profile.categories.length)), page("sizes", counted("menu.sizes", S.profile.sizes.length)), page("ai", AI_SHOW.menu()),
     CAN_AGENTS && page("agents", mcpSays()),   // Settings → Agents, saying whether the endpoint is on
+    CAN_AGENTS && item([t("tab.cli"), betaTag()], t("cli.menuSub"), () => { S.tab.setup = "cli"; setMode("setup"); }),   // Settings → Command line
     others.length > 0 && el("button", { class: "mi", role: "menuitem", "aria-expanded": String(!!MENU.profiles), onclick: () => { MENU.profiles = !MENU.profiles; renderMenu(); } },
       el("span", { class: "mt" }, el("span", {}, t("menu.switch"))), el("span", { class: "chev" + (MENU.profiles ? " open" : "") })),
     MENU.profiles && others.map((p) => el("button", { class: "mi sub", role: "menuitem", onclick: go(() => switchProfile(p.id).catch((err) => { fail(err); syncTop(); })) },
@@ -8755,18 +8812,18 @@ function ambientMoved(a, b) {
     return d / p.length > 2;
   } catch { return true; }
 }
-const TABS = { edit: { content: contentSheet, look: lookSheet, layout: layoutSheet, assets: assetsSheet, layers: layersSheet }, setup: { brand: brandTab, sizes: sizesTab, ai: aiTab, ...(CAN_AGENTS ? { agents: agentsTab } : {}) } };
+const TABS = { edit: { content: contentSheet, look: lookSheet, layout: layoutSheet, assets: assetsSheet, layers: layersSheet }, setup: { brand: brandTab, sizes: sizesTab, ai: aiTab, ...(CAN_AGENTS ? { agents: agentsTab, cli: cliTab } : {}) } };
 /** The dock's buttons, one per sheet, each opening its sheet, and at its foot About (the desktop app's) and the help; in Settings, its pages down the window's left. */
 function syncTabs() {
   if (S.mode === "setup") {
     const P = S.profile, act = (key) => el("button", { class: "btn" + (key === "delete" ? " danger" : ""), onclick: () => Promise.resolve(profileActions[key]()).catch((e) => { fail(e); syncTop(); renderPanel(); }) }, t("prof.nav." + key));
     const dots = `conic-gradient(${P.categories.map((c, i) => `${c.color} ${(i * 100) / P.categories.length}% ${((i + 1) * 100) / P.categories.length}%`).join(",")})`;
-    const icon = { brand: el("span", { class: "dots", style: `background:${dots}` }), sizes: ico("sizes", 18), ai: ico("spark", 18), agents: ico("agent", 18) };
+    const icon = { brand: el("span", { class: "dots", style: `background:${dots}` }), sizes: ico("sizes", 18), ai: ico("spark", 18), agents: ico("agent", 18), cli: ico("cli", 18) };
     $("setclose").title = t("set.close"); $("setclose").setAttribute("aria-label", t("set.close"));
     $("setnav").replaceChildren(el("div", { class: "cap" }, t("set.title")),
       el("div", { class: "who" }, el("span", { class: "av", style: `background:${cat().color};color:${inkOn(cat().color)}` }, [...(P.name || "?").trim()][0] || "?"),
         el("span", {}, el("b", {}, P.name), el("small", {}, counted("set.profileSub", P.categories.length)))),
-      ...Object.keys(TABS.setup).map((k) => el("button", { class: "sni" + (k === S.tab.setup ? " on" : ""), onclick: () => { S.tab.setup = k; syncTabs(); renderPanel(); $("setpanel").scrollTop = 0; } }, icon[k], t("tab." + k), k === "ai" && AI_SHOW.nav(), k === "agents" && mcpLight())),
+      ...Object.keys(TABS.setup).map((k) => el("button", { class: "sni" + (k === S.tab.setup ? " on" : ""), onclick: () => { S.tab.setup = k; syncTabs(); renderPanel(); $("setpanel").scrollTop = 0; } }, icon[k], t("tab." + k), k === "ai" && AI_SHOW.nav(), k === "agents" && mcpLight(), k === "cli" && betaTag())),
       el("div", { class: "grow" }),
       el("div", { class: "cap" }, t("set.thisProfile")),
       el("div", { class: "pacts" }, act("new"), act("duplicate"), act("import"), act("export")), act("delete"));
@@ -8802,7 +8859,8 @@ addEventListener("pointerdown", () => { KEYFOCUS = null; }, true);
 function renderPanel() {
   if (!S.cover) return;
   if (S.mode === "setup" && stepping() && !SET_UI.follow) return;   // an agent's change under way: Settings' page is drawn once it is over, if it touched what the page shows (settingsFollow)
-  if (!(S.mode === "setup" && S.tab.setup === "agents")) { AGENTS.show = false; AGENTS.cliSeen = false; }   // the agents' token hidden again once its page is left, the command line's status read again as it is next shown
+  if (!(S.mode === "setup" && S.tab.setup === "agents")) AGENTS.show = false;   // the agents' token hidden again once its page is left
+  if (!(S.mode === "setup" && S.tab.setup === "cli")) AGENTS.cliSeen = false;   // the command line's status read again as its page is next shown
   if (COMPOSING && COMPOSING === document.activeElement && $(S.mode === "setup" ? "setpanel" : "panel").contains(COMPOSING)) return later("panel-ime", 150, renderPanel);   // an input method mid-word in it: once the word is done
   endPreview("look", "layout");   // their cards drawn anew
   useLook();

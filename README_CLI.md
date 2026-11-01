@@ -49,7 +49,7 @@ Every installer has it beside the app:
 
 ### On the PATH
 
-To have `smedcover` in a terminal: Settings → *Agents* → *Command line* → *Install*.
+To have `smedcover` in a terminal: Settings → *Command line* (Beta) → *On your PATH* → *Install*. The page also lists each command with its arguments (and an example to copy), the options they all take, and the exit codes.
 
 - **macOS**: a link `/usr/local/bin/smedcover` to the one in the app. The system asks for an administrator's password,
   unless you may write in `/usr/local/bin` (Homebrew leaves it so on an Intel Mac). The card says when that name is
@@ -461,7 +461,7 @@ done
 
 | What you see | Why, and what to do |
 |---|---|
-| `smedcover: command not found` | It is not on the PATH: Settings → *Agents* → *Command line* → *Install*. On Windows, open a new terminal after installing. On Linux, an AppImage's cannot be used: install the `.deb` or the `.rpm`. |
+| `smedcover: command not found` | It is not on the PATH: Settings → *Command line* → *Install*. On Windows, open a new terminal after installing. On Linux, an AppImage's cannot be used: install the `.deb` or the `.rpm`. |
 | `Could not find the SmedCover app at …` | The command is not beside its app (moved, or copied elsewhere). Install it again from Settings, or set `SMEDCOVER_APP` to the app's executable (`…/SmedCover.app/Contents/MacOS/smedcover-app` on macOS). |
 | `Open SmedCover once and finish setting it up, then try again.` | SmedCover has no profile yet. Open it and finish the welcome. |
 | `SmedCover was not ready within 30 seconds` | It started but did not get ready. In parentheses, when there is one, why its `cli.json` was not taken (one others may read, or not yours: check the data folder's owner). To see what the app says, make a folder `logs` in the data folder ([where](README.md#where-your-data-lives)): an app started for the command writes its output to `logs/cli-app.log` there. |
@@ -475,6 +475,6 @@ done
 | `The profile "…" has no export folder yet: pass dir …` (exit 1) | Give `--out`, or choose the profile's folder in Export once. |
 | `The user stopped waiting for … after … s; the window is theirs again.` (exit 1) | *Stop waiting* (or Esc) was pressed in the window. An export's files written by then stay in its folder. |
 | `The export was stopped part-way.` (exit 1) | SmedCover cut the export short. The files written so far are printed. |
-| `Note: SmedCover 0.6.2 is running; this command line is 0.6.1.` | The command on the PATH is another copy's. On macOS, *Use this copy* in Settings → *Agents* → *Command line*; on Windows, open SmedCover once after the update. |
+| `Note: SmedCover 0.6.2 is running; this command line is 0.6.1.` | The command on the PATH is another copy's. On macOS, *Use this copy* in Settings → *Command line*; on Windows, open SmedCover once after the update. |
 | `SmedCover went away before it answered` (exit 3) | The app quit or was closed during the call. The change may or may not be done: look at the window before running it again. |
 | `Note: SMEDCOVER_SELFTEST names the data folder …` | A self-test's folder is set in this terminal: `unset SMEDCOVER_SELFTEST` to use `--data`. |

@@ -1111,6 +1111,21 @@
   .mfacts b.bad{color:#ff7a88;font-weight:600}
   #set-cli .mrow>.hint{word-break:normal;overflow-wrap:anywhere}   /* a sentence, its paths broken where they must be */
   #set-cli .mrow>.hint:first-child{margin-left:0}   /* no button before it */
+  /* Settings → Command line (cliTab in app.js): the Beta tag; the commands, each its name and what it does, an example and its arguments; the options, two columns */
+  .beta{display:inline-flex;align-items:center;flex:none;height:18px;padding:0 7px;margin-left:8px;border-radius:999px;border:1px solid rgba(255,201,60,.45);background:rgba(255,201,60,.1);color:#ffe29a;font:700 10.5px/1 var(--ui);letter-spacing:.06em;text-transform:uppercase;vertical-align:middle;cursor:default}
+  #setnav .sni:has(>.beta){white-space:nowrap}   /* its name on one line, the tag at the end */
+  #setnav .sni .beta{margin-left:auto;height:16px;padding:0 5px;font-size:9.5px}
+  .sh b .beta{position:relative;top:-2px;margin-left:10px}
+  #menu .mi .mt>span>.beta{height:16px;padding:0 6px;font-size:10px}
+  .clicmds{display:grid;gap:18px}
+  .clicmd{min-width:0;padding-top:16px;border-top:1px solid var(--line)}
+  .clicmd:first-child{padding-top:0;border-top:0}
+  .clihead{display:flex;align-items:baseline;gap:10px;min-width:0;font-size:13px;color:var(--text2)}
+  .cliname{flex:none;font:700 13px var(--mono);color:var(--text)}
+  .cliargs{display:grid;grid-template-columns:minmax(150px,max-content) minmax(0,1fr);gap:6px 16px;margin:10px 0 0;font-size:12.5px;line-height:1.5}
+  .cliargs dt{font:12px/1.6 var(--mono);color:var(--text);white-space:nowrap}
+  .cliargs dd{margin:0;color:var(--text2)}
+  .aicard>div>.cliargs{margin-top:4px}
   @media(max-width:1360px){.chgrid{grid-template-columns:1fr 1fr}}
   @media(max-width:1100px){.fields3,.chgrid{grid-template-columns:1fr 1fr}.szrow{grid-template-columns:minmax(100px,1fr) 56px 90px auto}.szrow .plats{display:none}}
   /* Export: this channel's cover at each size, ticked or not, the format, resolution and names, then Only this size and

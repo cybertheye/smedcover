@@ -155,3 +155,22 @@ test("updates in the app: the plugin, where it reads, and the commands the About
   assert.match(read(".github/workflows/build.yml"), /gh release upload "\$GITHUB_REF_NAME" latest\.json/);
 });
 
+
+test("Settings → Command line lists the command line's commands and flags as cli/src/args.rs has them, in both languages", async () => {
+  const { keys, bothLangs } = await import("../ui/js/i18n.js");
+  const args = read("cli/src/args.rs"), app = read("ui/js/app.js");
+  const enumBody = args.slice(args.indexOf("pub enum Command {"), args.indexOf("\n}\n", args.indexOf("pub enum Command {")));
+  const commands = [...enumBody.matchAll(/^    ([A-Z][a-z]+)\b/gm)].map((m) => m[1].toLowerCase());
+  assert.deepEqual(commands, ["profiles", "render", "export", "batch", "import", "tools", "call"]);
+  assert.deepEqual(keys().filter((k) => k.startsWith("cli.cmd.")).map((k) => k.slice(8)).sort(), [...commands].sort(), "a string for each command, none for one gone");
+  const listed = app.slice(app.indexOf("const CLI_COMMANDS = ["), app.indexOf("];", app.indexOf("const CLI_COMMANDS = [")));
+  assert.deepEqual([...listed.matchAll(/\{ k: "([a-z]+)"/g)].map((m) => m[1]), commands, "the page's commands, in the help's order");
+  // each long flag the command line takes is on the page (clap's own --help and --version aside, listed by hand)
+  const longs = new Set([...args.matchAll(/#\[arg\([^\n]*\blong\b(?: = "([a-z-]+)")?[^\n]*\)\]\s*\n\s*(?:pub )?([a-z_]+):/g)].map((m) => m[1] || m[2].replace(/_/g, "-")));
+  assert.ok(longs.size >= 15, `the flags read: ${[...longs]}`);
+  for (const flag of longs) assert.match(app, new RegExp(`\\["(?:-[a-zA-Z], )?--${flag}\\b`), `--${flag} is on the page`);
+  for (const k of keys().filter((k) => /^cli\.(cmd|arg|opt|exit)\./.test(k))) {
+    const [zh, en] = bothLangs(k);
+    assert.ok(zh && en && zh !== en, `${k} in both languages`);
+  }
+});

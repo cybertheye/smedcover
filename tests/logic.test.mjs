@@ -608,9 +608,9 @@ test("spec: found inside a chatty or fenced reply", () => {
 });
 
 test("ai: settings are normalised and endpoints are joined for both styles", () => {
-  assert.deepEqual(normalizeAi(null), { style: "openai", baseUrl: "", token: "", model: "", auth: "key", maxTokens: 4096, timeout: 300, proxy: "", notes: "", kind: "solid" });
+  assert.deepEqual(normalizeAi(null), { style: "openai", baseUrl: "", token: "", model: "", auth: "key", maxTokens: 4096, timeout: 1800, proxy: "", notes: "", kind: "solid" });
   assert.deepEqual(["flat", "solid", "x"].map((kind) => normalizeAi({ kind }).kind), ["flat", "solid", "solid"]);
-  assert.deepEqual([5, 99999, "x", 120].map((timeout) => normalizeAi({ timeout }).timeout), [30, 1800, 300, 120]);
+  assert.deepEqual([5, 99999, "x", 120].map((timeout) => normalizeAi({ timeout }).timeout), [30, 1800, 1800, 120]);
   assert.equal(normalizeAi({ style: "x", maxTokens: 9e9 }).maxTokens, 64000);
   assert.equal(aiReady(normalizeAi({ baseUrl: "https://a.b/v1", model: "m" })), true);
   assert.equal(aiReady(normalizeAi({ baseUrl: "a.b/v1", model: "m" })), false);

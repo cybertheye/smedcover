@@ -41,7 +41,7 @@ export function normalizeImageAi(raw) {
   return {
     provider: IMAGE_PROVIDERS.includes(a.provider) ? a.provider : "openai",
     baseUrl: str(a.baseUrl, 400), token: str(a.token, 4000), model: str(a.model, 200),
-    timeout: Number.isFinite(secs) && secs > 0 ? Math.min(1800, Math.max(30, secs)) : 300,
+    timeout: Number.isFinite(secs) && secs > 0 ? Math.min(1800, Math.max(30, secs)) : 1800,
     proxy: str(a.proxy, 300),
     source,                   // where the style comes from: "look", "preset:<id>" (a built-in style), or "my:<id>" (one of the user's)
     notes: str(a.notes, 600), // a word added to any source

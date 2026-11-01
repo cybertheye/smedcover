@@ -8,7 +8,7 @@
 import { LOOKS } from "./style.js";
 
 export const AI_STYLES = ["openai", "anthropic"];
-export const AI_DEFAULTS = { style: "openai", baseUrl: "", token: "", model: "", auth: "key", maxTokens: 4096, timeout: 300, proxy: "", notes: "", kind: "solid" };
+export const AI_DEFAULTS = { style: "openai", baseUrl: "", token: "", model: "", auth: "key", maxTokens: 4096, timeout: 1800, proxy: "", notes: "", kind: "solid" };
 export const AI_PLACEHOLDER = {
   openai: { baseUrl: "https://api.openai.com/v1" },
   anthropic: { baseUrl: "https://api.anthropic.com" },

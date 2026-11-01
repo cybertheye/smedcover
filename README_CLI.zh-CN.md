@@ -43,7 +43,7 @@ CSV 每行做一张封面，或者做 agent 能做的任何一次调用。这一
 
 ### 加进 PATH
 
-要在终端里直接用 `smedcover`：打开「设置 → Agent 接入 → 命令行工具」，点「安装」。
+要在终端里直接用 `smedcover`：打开「设置 → 命令行工具」（Beta），在「加进 PATH」卡片上点「安装」。这一页还列出了每个命令和它的参数（各带一个可以复制的例子）、通用参数和退出码。
 
 - **macOS**：在 `/usr/local/bin/smedcover` 放一个指向 App 里那个命令的链接。系统会要管理员密码，除非你自己就能写 `/usr/local/bin`（Intel
   Mac 上装过 Homebrew 时就是这样）。这个名字已经指向另一份 SmedCover（旧版本，或者你挪过位置的 App）时，卡片会说出来，「改为指向这个 App」
@@ -416,7 +416,7 @@ done
 
 | 看到什么 | 原因和办法 |
 |---|---|
-| `smedcover: command not found` | 它不在 PATH 里：「设置 → Agent 接入 → 命令行工具」，点「安装」。Windows 上装好后要新开一个终端。Linux 上 AppImage 里的用不了：装 `.deb` 或 `.rpm`。 |
+| `smedcover: command not found` | 它不在 PATH 里：「设置 → 命令行工具」，点「安装」。Windows 上装好后要新开一个终端。Linux 上 AppImage 里的用不了：装 `.deb` 或 `.rpm`。 |
 | 「在 … 找不到 SmedCover App。」 | 命令不在它的 App 旁边（挪过，或者复制到了别处）。从设置里再装一次，或者把 `SMEDCOVER_APP` 设成 App 的可执行文件（macOS 上是 `…/SmedCover.app/Contents/MacOS/smedcover-app`）。 |
 | 「请先打开 SmedCover，完成首次设置，然后再试。」 | SmedCover 还没有档案。打开它，走完欢迎页。 |
 | 「SmedCover 30 秒内没有就绪」 | 它启动了，但没有就绪。括号里有原因时，说的是 `cli.json` 为什么没被采用（别人也能读，或者不是你的：查一下数据文件夹的所有者）。想看 App 说了什么，就在数据文件夹（[在哪里](README.zh-CN.md#数据存在哪里)）里建一个 `logs` 文件夹：为命令启动的 App 会把输出写进那里的 `logs/cli-app.log`。 |
@@ -430,6 +430,6 @@ done
 | `The profile "…" has no export folder yet: pass dir …`（退出码 1） | 给 `--out`，或者在「导出」里给这个档案选一次文件夹。 |
 | `The user stopped waiting for … after … s; the window is theirs again.`（退出码 1） | 有人在窗口里点了「不等了」（或者按了 Esc）。导出到那时写好的文件留在它的文件夹里。 |
 | 「导出中途停下了。」（退出码 1） | SmedCover 把导出中途截断了。已经写好的文件会列出来。 |
-| 「注意：运行中的 SmedCover 是 0.6.2，命令行是 0.6.1。」 | PATH 里的命令是另一份 SmedCover 的。macOS 上，在「设置 → Agent 接入 → 命令行工具」里点「改为指向这个 App」；Windows 上，更新后打开一次 SmedCover。 |
+| 「注意：运行中的 SmedCover 是 0.6.2，命令行是 0.6.1。」 | PATH 里的命令是另一份 SmedCover 的。macOS 上，在「设置 → 命令行工具」里点「改为指向这个 App」；Windows 上，更新后打开一次 SmedCover。 |
 | 「SmedCover 没等回答就断开了」（退出码 3） | 调用中途 App 退出或被关掉了。改动可能做了，也可能没做：再运行之前先看看窗口。 |
 | 「注意：SMEDCOVER_SELFTEST 指定了数据文件夹……」 | 这个终端里设了自检目录：`unset SMEDCOVER_SELFTEST` 之后 `--data` 才起作用。 |
