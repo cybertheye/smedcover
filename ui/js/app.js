@@ -7,8 +7,8 @@ import { csvToJobs } from "./csv.js";
 import { t, setLang, getLang, detectLang, bothLangs } from "./i18n.js";
 import { sampleProfile, starterProfile, SIZE_PRESETS } from "./presets.js";
 import { useFont, startScope, channelIndex, SCOPES } from "./store.js";
-import { platformsFor } from "./platforms.js";
-import { boxOf, overlap } from "./check.js";
+import { platformsFor, OVERLAY_FOOT } from "./platforms.js";
+import { boxOf, overlap, inOverlayFoot } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
 import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, layoutState, restoreLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, paintedWith, refitSizes, acrossSizes, cutFrom, STICKER_SCALE } from "./layers.js";
@@ -251,6 +251,7 @@ const HOLD = { history: false, step: null };
 function recordHistory() { later("hist", 500, () => (SURPRISE.busy || HOLD.history ? recordHistory() : commitHistory())); }   // not while Surprise me deals hands onto the cover
 /** Puts the profile and the cover of history entry `snap` (a snapshot()) back on the canvas, and saves them. */
 async function restoreSnap(snap) {
+  FOOTWARN.ask = FOOTWARN.soon = null;   // a placement's check still to come is not of what undo or redo puts back
   const { p, c } = JSON.parse(snap);
   const profile = normalizeProfile(p);
   S.profiles[S.profiles.findIndex((x) => x.id === S.profile.id)] = profile;
@@ -525,7 +526,7 @@ let drawQueued = false, drawStale = false;   // drawStale: the cover changed sin
 function flushDraw() {
   if (!drawQueued) return;
   const changed = drawStale;
-  drawQueued = drawStale = false; ensureFonts(S.cover.layers); drawMain(); placeBar(); markStrip();
+  drawQueued = drawStale = false; ensureFonts(S.cover.layers); drawMain(); placeBar(); markStrip(); footCheck();
   // the thumbnails and the window's ground show the cover: not drawn again for the 3D view opening, closing or a layer selected in it
   if (changed || !V3.on) { thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); later("ambient", 350, paintAmbient); }
   placeFrames();   // the layout's parts framed, where the Layout sheet is open
@@ -820,7 +821,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
   cv.addEventListener("pointerdown", (e) => {
     if (S.mode !== "edit") return;
     if (S.brushWin) return brushDown(e);   // the weave's brush: the canvas only paints
-    const done = (moved) => () => { cv.onpointermove = null; endLive(); if (moved()) renderSide(); };
+    const done = (moved, ids) => () => { cv.onpointermove = null; endLive(); if (moved()) { renderSide(); placed(ids); } };
     // a handle of the layout itself (the diamonds): dragging it changes the template for every cover of this profile
     const at0 = virtualPoint(e), lh = diamond(e);
     if (lh && lh.id[0] === "w") {   // a corner of the perspective: the lettering's block is reshaped
@@ -866,7 +867,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
         setLayoutOf(st, keys, { template: lay.template, adjust: dragLayout(cv._layout, vw, vh, lay.adjust, lh.id, p.x, p.y, cv._titleBox) });
         moved = true; touch({ profile: true });
       };
-      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; if (moved) { if (onStyleTab()) renderPanel(); renderSide(); } };   // the colour block's sliders (blockSection) too
+      cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; if (moved) { if (onStyleTab()) renderPanel(); renderSide(); placed(); } };   // the colour block's sliders (blockSection) too; the layout's words, wherever they went
       return;
     }
     const sh = sceneGrip(e);
@@ -904,7 +905,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
         else edit(L, { ky: now.ly / prev.ly });
         prev = now;
       };
-      cv.onpointerup = cv.onpointercancel = done(() => moved);
+      cv.onpointerup = cv.onpointercancel = done(() => moved, [L.id]);
       return;
     }
     if (S.focus) return focusDrag(e);
@@ -926,7 +927,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
     cv.setPointerCapture(e.pointerId);
     goLive(L.id);
     cv.onpointermove = (m) => { const p = virtualPoint(m); moved = true; edit(L, { ddx: p.x - last.x, ddy: p.y - last.y }); last = p; };
-    cv.onpointerup = cv.onpointercancel = done(() => moved);
+    cv.onpointerup = cv.onpointercancel = done(() => moved, [L.id]);
   });
   // The selection rectangle is a box laid over the canvas, not drawn on it: the cover is not
   // repainted while it is dragged (with a look's effects a repaint can take tens of milliseconds).
@@ -963,7 +964,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
       moved = true; last = p;
       if (group().length) editAll(list, d); else edit(list[0], d);
     };
-    cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; endLive(); if (moved) renderSide(); };
+    cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; endLive(); if (moved) { renderSide(); placed(list.map((x) => x.id)); } };
   }
   /** Drags every movable member of the group together; a click without a drag selects just the one clicked. */
   function dragGroup(e, many, L) {
@@ -972,7 +973,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
     cv.setPointerCapture(e.pointerId);
     if (list.length) goLive(list.map((x) => x.id));
     cv.onpointermove = (m) => { if (!list.length) return; const p = virtualPoint(m); moved = true; editAll(list, { ddx: p.x - last.x, ddy: p.y - last.y }); last = p; };
-    cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; endLive(); if (moved) renderSide(); else selectLayer(L.id); };
+    cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; endLive(); if (moved) { renderSide(); placed(list.map((x) => x.id)); } else selectLayer(L.id); };
   }
   cv.addEventListener("wheel", (e) => {
     if (S.mode !== "edit") return;
@@ -984,7 +985,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
     selectLayer(L.id);
     goLive(L.id); later("live", 300, endLive);
     edit(L, e.altKey ? { rot: e.deltaY > 0 ? 2 : -2 } : { scale: Math.exp(-e.deltaY * 0.0015) });
-    later("side", 250, renderSide);
+    later("side", 250, renderSide); placedSoon([L.id]);
   }, { passive: false });
   $("center").addEventListener("pointerdown", (e) => { if ([$("center"), $("stage"), $("toolsub"), $("tray")].includes(e.target) && S.mode === "edit" && S.cover && !S.focus && !S.brushWin) selectNothing(); });
   // assets dragged from the library land where they are dropped
@@ -5450,6 +5451,63 @@ function layerRow(L) {
 }
 /** Where the words a lettering layer sets come from: the cover, the channel, the brand or the layer itself. */
 const LETTERING = { title: () => S.cover.title, subtitle: () => S.cover.subtitle, tag: () => S.cover.tag, catname: () => cat().name, brand: () => S.profile.brand.name, text: (L) => L.text };
+// ---------- the band at the cover's foot the apps lay their marks over (OVERLAY_FOOT in platforms.js): words put there by hand are warned of
+/**
+ * What is to be checked once the cover is next painted (placed): {where, ids}, the cover and size it was asked on and
+ * the layers moved ("all": every lettering layer, as a layout's handle moves them), or null; the wheel's and the arrows'
+ * layers gathered till they rest (placedSoon), the same way; and the layers already warned of, by profile, channel,
+ * size and layer — warned of again only once they have left the band and been put back. Kept for this session only.
+ */
+const FOOTWARN = { ask: null, soon: null, said: new Set() };
+/** The cover and size shown, as FOOTWARN keys them. */
+const footWhere = () => `${S.profile.id}/${S.cover.catId}/${frame().key}/`;
+/**
+ * After a placement by hand on the canvas — a drag, a handle, the wheel, the arrows; not an agent's change, undo or a
+ * layout — of the layers `ids` (none given: every lettering layer, as a layout's handle moves them): their check, after
+ * the paint that shows where they went (footCheck, from flushDraw), if that is of the same cover and size.
+ */
+function placed(ids = null) {
+  const where = footWhere(), was = FOOTWARN.ask && FOOTWARN.ask.where === where ? FOOTWARN.ask.ids : null;
+  FOOTWARN.ask = { where, ids: !ids || was === "all" ? "all" : new Set([...(was || []), ...ids]) };
+  queueDraw(false);
+}
+/** placed() for the wheel and the arrows, once they rest (400 ms), for every layer turned or nudged meanwhile; dropped by undo or redo, or once the cover or size shown is another. */
+function placedSoon(ids) {
+  const where = footWhere(), s = FOOTWARN.soon && FOOTWARN.soon.where === where ? FOOTWARN.soon : (FOOTWARN.soon = { where, ids: new Set() });
+  for (const id of ids) s.ids.add(id);
+  later("placed", 400, () => { const r = FOOTWARN.soon; FOOTWARN.soon = null; if (r && r.where === footWhere()) placed([...r.ids]); });
+}
+/**
+ * After each paint of the canvas: the layers warned of that have left the band are forgotten; then, if a placement asked,
+ * the lettering layers it moved that now reach into the band (inOverlayFoot in check.js), and were not warned of yet, are:
+ * a word at the foot of the window, and the band shown on the canvas meanwhile (footBand).
+ */
+function footCheck() {
+  const cv = $("cv"), ask = FOOTWARN.ask;
+  FOOTWARN.ask = null;   // asked of this paint alone: not carried to a later one (the 3D view's, then whatever comes after it)
+  if (V3.on || !cv._hits || !cv._virtual) return;
+  const vh = cv._virtual[1], where = footWhere();
+  const words = cv._hits.filter((h) => LETTERING[h.type]), under = new Set(words.filter((h) => inOverlayFoot(h, vh)).map((h) => h.id));
+  for (const h of words) if (!under.has(h.id)) FOOTWARN.said.delete(where + h.id);
+  if (!ask || ask.where !== where || S.mode !== "edit") return;
+  const fresh = [...under].filter((id) => (ask.ids === "all" || ask.ids.has(id)) && !FOOTWARN.said.has(where + id));
+  if (!fresh.length) return;
+  for (const id of fresh) FOOTWARN.said.add(where + id);
+  toast(t("foot.warn"), false, { label: t("foot.ok"), run: () => footBand(false) });
+  footBand(true);
+}
+let footTimer;
+/** The band over the canvas's foot, striped, in the stage (under the layer's bar), for as long as the word about it shows (6 s), or till it is dismissed. */
+function footBand(on) {
+  const stage = $("stage"), band = $("footband") || stage.appendChild(el("div", { id: "footband", "aria-hidden": "true" }));
+  clearTimeout(footTimer);
+  if (on) {
+    const r = $("cv").getBoundingClientRect(), s = stage.getBoundingClientRect(), h = r.height * (1 - OVERLAY_FOOT);
+    Object.assign(band.style, { left: r.left - s.left + "px", top: r.bottom - h - s.top + "px", width: r.width + "px", height: h + "px" });
+    footTimer = setTimeout(() => footBand(false), 6000);
+  }
+  band.classList.toggle("on", on);
+}
 /** Words on one line: the highlight's asterisks out, the line breaks spaces. */
 const oneLine = (s) => String(s || "").replace(/\*/g, "").replace(/\s+/g, " ").trim();
 /**
@@ -9071,13 +9129,13 @@ addEventListener("keydown", (e) => {
   const many = group(), step0 = e.shiftKey ? 10 : 1, nudge = { arrowleft: [-step0, 0], arrowright: [step0, 0], arrowup: [0, -step0], arrowdown: [0, step0] }[key];
   if (many.length) {   // a group: delete and the arrows act on all of it
     if (key === "delete" || key === "backspace") { e.preventDefault(); return removeGroup(); }
-    if (nudge) { e.preventDefault(); editAll(movers(many), { ddx: nudge[0], ddy: nudge[1] }); }
+    if (nudge) { e.preventDefault(); const list = movers(many); editAll(list, { ddx: nudge[0], ddy: nudge[1] }); placedSoon(list.map((x) => x.id)); }
     return;
   }
   if (!L) return;
   if (key === "delete" || key === "backspace") { e.preventDefault(); return removeLayer(); }
   const step = e.shiftKey ? 10 : 1, move = { arrowleft: [-step, 0], arrowright: [step, 0], arrowup: [0, -step], arrowdown: [0, step] }[key];
-  if (move && !L.locked && !FIXED.includes(L.type)) { e.preventDefault(); edit(L, { ddx: move[0], ddy: move[1] }); later("side", 250, renderSide); }
+  if (move && !L.locked && !FIXED.includes(L.type)) { e.preventDefault(); edit(L, { ddx: move[0], ddy: move[1] }); later("side", 250, renderSide); placedSoon([L.id]); }
 });
 
 // ---------- start

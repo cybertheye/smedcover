@@ -4970,3 +4970,23 @@ test("the canvas copies are laid on behind a layer holds every one of them with 
     }
   }
 });
+
+test("words reaching into the bottom 13%, where the apps lay their marks, are told from those above it, turned or not", async () => {
+  const { inOverlayFoot } = await import("../ui/js/check.js");
+  const { OVERLAY_FOOT, WORDS_FOOT } = await import("../ui/js/platforms.js");
+  assert.equal(OVERLAY_FOOT, 0.87);
+  assert.ok(WORDS_FOOT < OVERLAY_FOOT, "the layouts keep their words above the band, so they are never warned of");
+  const h = 1080, at = (bottom, hh = 40, r = 0) => ({ cx: 960, cy: bottom - hh, hw: 300, hh, r });
+  assert.equal(inOverlayFoot(at(0.86 * h), h), false, "above it");
+  assert.equal(inOverlayFoot(at(0.872 * h), h), false, "an edge only grazing it");
+  assert.equal(inOverlayFoot(at(0.9 * h), h), true, "into it");
+  assert.equal(inOverlayFoot(at(h + 20), h), true, "past the foot, part still on the cover");
+  assert.equal(inOverlayFoot({ cx: 960, cy: h + 100, hw: 300, hh: 40, r: 0 }, h), false, "wholly off the cover");
+  // a line turned 30° reaches lower than its own height says
+  assert.equal(inOverlayFoot(at(0.85 * h, 40, 0), h), false);
+  assert.equal(inOverlayFoot(at(0.85 * h, 40, 30), h), true);
+  // a headline's box of line boxes: the room under its letters (0.12 of its type size) is not judged
+  const headline = (bottom) => ({ cx: 960, cy: bottom - 174, hw: 575, hh: 174, r: 0, fs: 150 });
+  assert.equal(inOverlayFoot(headline(0.87 * h + 18), h), false, "only the room under the letters reaches in");
+  assert.equal(inOverlayFoot(headline(0.87 * h + 30), h), true, "the letters do");
+});

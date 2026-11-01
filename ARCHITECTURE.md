@@ -597,7 +597,17 @@ in it, nor the graphic, reaches them (`FOOT` in `platforms.js`, 84% down): the c
 sub-name beside it and moves up, and a colour block too shallow to hold it there grows (taking the tag,
 the graphic and the title's foot up with it). On every cover the words keep out of the bottom 14%, where the
 apps show plays and views (`wordsFoot()`: the badges' line on a badged cover, else `WORDS_FOOT` in `platforms.js`,
-86% down): the channel name, the tag and the title's box stay above it. The title's box keeps room for two lines at the type size
+86% down): the channel name, the tag and the title's box stay above it. Words put lower by hand are warned of: the
+band is the bottom 13% (`OVERLAY_FOOT`, 87% down, just under the layouts' line so they never are), and a lettering
+layer (`LETTERING`: the title, subtitle, tag, channel name, brand and text of one's own) dragged, scaled, turned,
+wheeled or nudged with the arrows into it, or moved there by a layout's handle, makes `placed(ids)` ask (the wheel and
+the arrows once they rest, `placedSoon()`; undo and redo drop what is still to come, and so does another cover or
+size shown), and `footCheck()`, after the paint that shows where it went (from `flushDraw()`), says so once — a toast with *Got it*,
+and the band striped over the canvas's foot meanwhile (`footBand()`, in the stage, under the layer's bar). It judges
+the hit's box (`inOverlayFoot()` in `check.js`: 0.4% of the height into it, not wholly off the cover; a headline's
+box less the room under its letters, 0.12 of its type size), and says it once a layer, size and channel, again only
+after the layer has left the band (`FOOTWARN`, for the session). An agent's change, undo and a layout dealt never ask.
+The title's box keeps room for two lines at the type size
 the narrowest feed showing that ratio needs (`feedOf()`; 14 px in the feed), the block giving way while it
 still holds the name, and with a subtitle (`parts.subtitle`) room for its line too. On *Stack* with the block along the foot the graphic, the cover's picture until a photo comes, takes at least 12% of
 the canvas (`ART_HALF`, half the box a graphic is drawn in); on a landscape cover it first slides right, and

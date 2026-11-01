@@ -555,6 +555,10 @@
   .chips.small button.on{background:rgba(255,255,255,.9);color:var(--ink);border-color:transparent}
   .chips.small{gap:4px}.chips.small button{padding:4px 8px;font-size:12px;font-weight:500}
   .recipe summary{cursor:pointer;margin:0;list-style:none}.recipe summary::-webkit-details-marker{display:none}.recipe summary::before{content:"▸ "}.recipe[open] summary::before{content:"▾ "}.recipe[open] summary{margin-bottom:8px}   /* Surprise me's recipe for the look, folded by default */
+  /* the band at the cover's foot the apps lay their marks over (footBand in app.js), shown while the word about words put there does */
+  #footband{position:absolute;z-index:3;pointer-events:none;opacity:0;transition:opacity .25s;border-top:1.5px dashed rgba(255,201,60,.95);background:repeating-linear-gradient(-45deg,rgba(255,201,60,.24) 0 8px,rgba(255,201,60,.08) 8px 16px)}
+  #footband.on{opacity:1}
+  @media (prefers-reduced-motion:reduce){#footband{transition:none}}
   #marquee{position:fixed;z-index:20;pointer-events:none;border:1.5px dashed #fff;outline:1px solid rgba(7,7,12,.85);background:rgba(255,255,255,.08)}
   .about{font-size:12.5px;line-height:1.75;margin-top:10px;padding:10px 12px;border-left:2px solid var(--line2);background:rgba(255,255,255,.03);opacity:.85}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}

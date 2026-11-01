@@ -1,7 +1,7 @@
 // The cover standards: will the cover be read, seen and left uncovered on the platforms it is made for?
 // Rule by rule, as docs/cover-check.zh-CN.md sets them out. Pure. The layouts keep to them by
 // themselves (meetStandards in layout.js); the tests measure painted covers against them here.
-import { isRatio, wanted } from "./platforms.js";
+import { isRatio, wanted, OVERLAY_FOOT } from "./platforms.js";
 
 /** Where each rule draws its lines. Those not from a standard are starting values, to be tuned on real covers. */
 export const LIMITS = {
@@ -24,6 +24,17 @@ export function boxOf(hit) {
   const a = (hit.r || 0) * Math.PI / 180, c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
   const hw = c * hit.hw + s * hit.hh, hh = s * hit.hw + c * hit.hh;
   return { x0: hit.cx - hw, y0: hit.cy - hh, x1: hit.cx + hw, y1: hit.cy + hh };
+}
+/**
+ * Whether a hit on a cover `h` high reaches into the band the apps lay their marks over (OVERLAY_FOOT): further into
+ * it than 0.4% of the height (an outline's or a shadow's edge only grazing it is not), and not wholly off the cover.
+ * Where the hit says its type size (`fs`), its box is a stack of line boxes, the last of which keeps room under the
+ * letters (the line's own gap, a descender's place): 0.12 of the size is taken off its top and foot, so it is the
+ * letters that are judged, not that room.
+ */
+export function inOverlayFoot(hit, h) {
+  const b = boxOf(Number.isFinite(hit.fs) ? { ...hit, hh: Math.max(0, hit.hh - 0.12 * hit.fs) } : hit);
+  return b.y1 > (OVERLAY_FOOT + 0.004) * h && b.y0 < h;
 }
 /** The share of box a lying inside box b. */
 export function overlap(a, b) {

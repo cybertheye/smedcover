@@ -6,6 +6,8 @@ const STR = {
   "tab.agents": ["Agent 接入", "Agents"],
   "tab.cli": ["命令行工具", "Command line"],
   "tag.beta": ["Beta", "Beta"],
+  "foot.warn": ["封面底部 13% 是平台叠加播放量、点赞、时长等标记的地方，放在这里的文字可能会被挡住", "Platforms lay play counts, likes and the duration over the bottom 13% of a cover: words here may be covered"],
+  "foot.ok": ["知道了", "Got it"],
   "tag.betaTip": ["试用中：命令和参数以后可能还会变", "In trial: its commands and options may still change"],
   "tab.about": ["关于", "About"],
   "dock.content": ["内容", "Content"],

@@ -21,6 +21,12 @@ export const RATIOS = {
 export const FOOT = 0.84;
 /** On any cover, how far down words may go, as a share of its height: the apps show plays and views over the bottom 14% of their cards (see wordsFoot in layout.js). */
 export const WORDS_FOOT = 0.86;
+/**
+ * The band at the foot of any cover the apps lay their marks over (the play count, the likes, the duration), as where it
+ * begins, a share of the height: the bottom 13%. Words put into it by hand are warned of (inOverlayFoot in check.js);
+ * the layouts keep theirs above WORDS_FOOT, a little higher, so they never are.
+ */
+export const OVERLAY_FOOT = 0.87;
 // what the apps lay over a cover, estimated: the bottom corners of a video card
 const BILI_ZONES = [{ x0: 0.78, y0: FOOT, x1: 1, y1: 1, what: "duration" }, { x0: 0, y0: FOOT, x1: 0.5, y1: 1, what: "plays" }];
 const YT_ZONES = [{ x0: 0.82, y0: 0.85, x1: 1, y1: 1, what: "duration" }];
