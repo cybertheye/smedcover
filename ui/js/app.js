@@ -1006,7 +1006,26 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
 
 // ---------- small form helpers
 const cap = (key, extra = "") => el("label", { class: "cap" }, t(key) + extra);
-function textInput(value, oninput, props = {}) { return el("input", { type: "text", value, spellcheck: false, oninput: (e) => oninput(e.target.value), ...props }); }
+/**
+ * A text field. `fill`: a value the field may well want, shown as its placeholder unless it has its own; Tab in the
+ * field while it is empty fills it in, as typed, and the cursor stays there (a second Tab moves on). A small Tab key at
+ * the field's end says so while it is empty and has the focus.
+ */
+function textInput(value, oninput, props = {}) {
+  const { fill, ...rest } = props;
+  const input = el("input", { type: "text", value, spellcheck: false, oninput: (e) => oninput(e.target.value), ...rest });
+  if (!fill) return input;
+  if (!rest.placeholder) input.placeholder = fill;
+  if (!rest.title) input.title = t("form.tabFill", fill);
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab" || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.isComposing || input.value !== "") return;
+    e.preventDefault();
+    input.value = fill;
+    input.setSelectionRange(fill.length, fill.length);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  return el("span", { class: "fillin" }, input, el("kbd", { class: "tabkey", "aria-hidden": "true" }, "Tab"));
+}
 /** An on/off setting: a row with its name and the switch at its end (see switchRow). `opts` as there. */
 const check = (labelKey, checked, onchange, opts = {}) => switchRow(t(labelKey), checked, onchange, opts);
 const times = (v) => v.toFixed(2) + "×", pct = (v) => Math.round(v * 100) + "%";
@@ -2681,11 +2700,11 @@ function imageAiPane() {
   const field = (key, k, props = {}, under = null) => el("div", {}, cap(key), textInput(c[k], (v) => set(k, v), { ...props, dataset: { k: "img:" + k } }), under);
   return [
     el("div", {}, cap("img.provider"), picker(IMAGE_PROVIDERS.map((k) => [k, t("img.provider." + k)]), c.provider, (v) => set("provider", v, true), { name: t("img.provider"), id: "imgprovider" })),
-    field("ai.baseUrl", "baseUrl", { placeholder: d.baseUrl }, ep),
+    field("ai.baseUrl", "baseUrl", { fill: d.baseUrl }, ep),
     field("ai.token", "token", { type: "password", placeholder: t("ai.tokenPh"), autocomplete: "off" }),
-    field("ai.model", "model", { placeholder: t("img.modelPh", d.model) }, el("div", { class: "hint" }, t("img.modelHint." + c.provider))),
+    field("ai.model", "model", { placeholder: t("img.modelPh", d.model), fill: d.model }, el("div", { class: "hint" }, t("img.modelHint." + c.provider))),
     scrub(t("ai.timeout"), 30, 1800, 30, c.timeout, SHOWN.sec, (v) => set("timeout", v), 300),
-    field("ai.proxy", "proxy", { placeholder: "http://127.0.0.1:7890" }),
+    field("ai.proxy", "proxy", { fill: PROXY_FILL }),
     el("div", { class: "aifoot" }, testBtn, testLine(REP.test), info(t("img.testHint"))),
     el("div", { class: "hint" }, t("img.privacy")),
   ];
@@ -2882,6 +2901,8 @@ function aiTab() {
     card("cut", t("cutset.intro"), cutPane(), [aiPill("cut"), CAN.cut && CAN.folders && el("button", { class: "linkbtn", onclick: () => invoke("reveal_data_dir", { dir: "models" }).catch(fail) }, t("cutset.folder"))]),
   ];
 }
+/** The proxy a proxy field offers to fill in with Tab: Clash's own port, where most proxy programs listen on this computer. */
+const PROXY_FILL = "http://127.0.0.1:7890";
 // ---------- Settings → AI → Cut-out: the way of cutting out, and the BiRefNet models (their states, progress and errors: cutmodels.js)
 // The download or import under way ({id}: a model's, or "import"), its latest progress (cut-model-progress), the last error
 // ({kind, detail}: cutErr), and what an import left to do; whether "Download by hand" is open.
@@ -2991,7 +3012,7 @@ function cutPane() {
     el("div", { class: "hint" }, t("cutset.speed")),
     el("div", {}, el("label", { class: "cap" }, t("cutset.source"), " ", info(t("cutset.sourceHint"))),
       segs(t("cutset.source"), CUT_SOURCES.map((k) => [k, t("cutset.source." + k)]), S.settings.cutSource || "auto", (v) => setting("cutSource", v), { off: !!CUTDL.id })),
-    el("div", {}, el("label", { class: "cap" }, t("cutset.proxy"), " ", info(t("cutset.proxyHint"))), textInput(S.settings.cutProxy, (v) => setting("cutProxy", v.trim()), { dataset: { k: "cut:proxy" }, placeholder: "http://127.0.0.1:7890" })),
+    el("div", {}, el("label", { class: "cap" }, t("cutset.proxy"), " ", info(t("cutset.proxyHint"))), textInput(S.settings.cutProxy, (v) => setting("cutProxy", v.trim()), { dataset: { k: "cut:proxy" }, fill: PROXY_FILL })),
     el("div", { class: "wide cutimport" }, el("button", { class: "btn", disabled: !!CUTDL.id, onclick: importModels }, t("cutset.import")), info(t("cutset.importTip"))),
     cutByHand(),
     el("div", { class: "hint" }, t("cutset.licence")),
@@ -3016,7 +3037,7 @@ function textAiPane() {
   };
   return [
     el("div", {}, cap("ai.style"), segs(t("ai.style"), AI_STYLES.map((k) => [k, t("ai.styleShort." + k), null, t("ai.style." + k)]), c.style, (k) => set("style", k, true))),
-    field("ai.baseUrl", "baseUrl", { placeholder: ph.baseUrl }, ep),
+    field("ai.baseUrl", "baseUrl", { fill: ph.baseUrl }, ep),
     field("ai.token", "token", { type: "password", placeholder: t("ai.tokenPh"), autocomplete: "off" }),
     field("ai.model", "model", { placeholder: t("ai.modelPh") }),
     c.style === "anthropic" && [
@@ -3024,7 +3045,7 @@ function textAiPane() {
       scrub(t("ai.maxTokens"), 512, 64000, 256, c.maxTokens, SHOWN.int, (v) => set("maxTokens", v), AI_DEFAULTS.maxTokens),
     ],
     el("div", { class: "scrow" }, scrub(t("ai.timeout"), 30, 1800, 30, c.timeout, SHOWN.sec, (v) => set("timeout", v), AI_DEFAULTS.timeout), info(t("ai.timeoutHint"))),
-    field("ai.proxy", "proxy", { placeholder: "http://127.0.0.1:7890" }),
+    field("ai.proxy", "proxy", { fill: PROXY_FILL }),
     el("div", { class: "wide" }, cap("ai.notes"), el("textarea", { value: c.notes, spellcheck: false, style: "height:84px;font-size:14px", placeholder: t("ai.notesPh"), dataset: { k: "ai:notes" }, oninput: (e) => set("notes", e.target.value) })),
     el("div", { class: "aifoot" }, testBtn, testLine(AI.test)),
     el("div", { class: "hint" }, t("ai.privacy")),

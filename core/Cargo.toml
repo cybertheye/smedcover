@@ -37,8 +37,6 @@ http-body-util = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true }
 objc2-foundation = { workspace = true }
-# The system's proxy (net::proxy).
-system-configuration = { workspace = true }
 
 # A file an agent names is opened without waiting (files.rs).
 [target.'cfg(unix)'.dependencies]
@@ -48,11 +46,10 @@ libc = { workspace = true }
 [target.'cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))'.dependencies]
 webpki-root-certs = { workspace = true }
 
-# The endpoint's port is bound for SmedCover alone; the system's proxy, in the registry (net::proxy).
+# The endpoint's port is bound for SmedCover alone.
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows-sys = { workspace = true }
-winreg = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

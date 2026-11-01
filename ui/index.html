@@ -1073,6 +1073,11 @@
   .cutrow b{font-size:13.5px}
   .cutrow small{font-size:12px;color:var(--text3)}
   .cutacts{display:flex;align-items:center;gap:10px;flex-shrink:0}
+  /* a field with a value Tab fills in (textInput's fill): the Tab key shown at its end while it is empty and has the focus */
+  .fillin{position:relative;display:block;min-width:0}
+  .fillin>.tabkey{position:absolute;right:9px;top:50%;transform:translateY(-50%);font:600 10.5px/1 inherit;letter-spacing:.02em;padding:3px 6px;border-radius:5px;border:1px solid var(--line);color:var(--text3);background:rgba(255,255,255,.06);pointer-events:none;opacity:0;transition:opacity .15s}
+  .fillin>input:focus:placeholder-shown+.tabkey{opacity:1}
+  .fillin>input:focus:placeholder-shown{padding-right:52px}
   .hint .cutwhy{display:block;margin-top:4px;font-size:11.5px;color:var(--text3);word-break:break-word}
   .cutimport{display:flex;align-items:center;gap:8px}
   .byhand>summary{cursor:pointer;font-size:12.5px;color:var(--text2)}

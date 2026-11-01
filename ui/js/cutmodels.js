@@ -66,7 +66,7 @@ export function cutProgress(p) {
     default: out.push(["cutset.progress", pct, mb(p.done), mb(p.total)]);
   }
   if (p.phase === "downloading" && p.resumedFrom > 0) out.push(["cutset.resumed", mb(p.resumedFrom)]);
-  if ((p.phase === "connecting" || p.phase === "downloading") && ["settings", "environment", "system", "direct"].includes(p.via)) out.push(["cutset.via." + p.via, p.proxy || ""]);
+  if ((p.phase === "connecting" || p.phase === "downloading") && ["settings", "environment", "direct"].includes(p.via)) out.push(["cutset.via." + p.via, p.proxy || ""]);
   return out;
 }
 

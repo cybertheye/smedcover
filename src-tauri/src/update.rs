@@ -16,7 +16,8 @@
 //!   exit, where `cli.json` goes and the endpoints stop, and the new app takes the data folder's lock once this one has
 //!   let it go (`cli::take_or_defer`). On Windows the installer is started (passive: its progress alone, no questions)
 //!   and the app exits at once, having done the same first ([`leave`]); the installer starts it again.
-//! * **The proxy**: the one the page gives (one the user gave SmedCover), else the system's or the environment's.
+//! * **The proxy**: the one the page gives (one the user gave SmedCover), else the environment's, else none: never the
+//!   system's, which reqwest would find by itself, as the core's requests never use it (`smedcover_core::net::proxy`).
 //!
 //! Refusals and failures are kinds, which the page says in its language: `network`, `notfound` (no manifest where it
 //! should be), `platform` (none for this system), `signature` (not the package signed: never installed), `cancelled`,
@@ -148,6 +149,12 @@ fn proxy_url(proxy: Option<&str>) -> Result<Option<Url>, Value> {
     Url::parse(&full).map(Some).map_err(|e| fail("failed", format!("proxy {p}: {e}")))
 }
 
+/// The environment's proxy for GitHub's https (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`), as the core's requests find it.
+fn environment_proxy() -> Option<Url> {
+    let choice = smedcover_core::net::proxy_choice("https://github.com/", "");
+    choice.proxy.and_then(|p| proxy_url(Some(&p)).ok().flatten())
+}
+
 /// What the app does as it exits, done before the Windows installer has it exit at once (`std::process::exit`, no run
 /// loop gone through): `cli.json` removed and the endpoints stopped, as `RunEvent::Exit` does.
 fn leave(app: &AppHandle) {
@@ -174,9 +181,10 @@ pub fn update_status(app: AppHandle, u: State<'_, Updates>) -> Value {
 #[tauri::command]
 pub async fn update_check(app: AppHandle, u: State<'_, Updates>, proxy: Option<String>) -> Result<Value, Value> {
     let mut builder = app.updater_builder().timeout(CHECK_WITHIN);
-    if let Some(p) = proxy_url(proxy.as_deref())? {
-        builder = builder.proxy(p);
-    }
+    builder = match proxy_url(proxy.as_deref())?.or(environment_proxy()) {
+        Some(p) => builder.proxy(p),
+        None => builder.no_proxy(),   // not the system's, which reqwest would otherwise find
+    };
     if let Some(url) = selftest_updates() {
         let url = Url::parse(&url).map_err(|e| fail("failed", format!("{TEST_ENV}: {e}")))?;
         builder = builder.endpoints(vec![url]).map_err(|e| fail(kind_of(&e), e))?;

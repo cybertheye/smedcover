@@ -46,7 +46,7 @@ pub struct CutFile {
 /// `done` of `total` bytes, over all the files still missing. `phase`: `connecting` (each attempt
 /// starts so), `checking` (the bytes already in a part, hashed again), `downloading`, `verifying`,
 /// `unpacking` (the runtime), `importing`. `file`: `runtime` or `model`. `source`: the host asked;
-/// `via`: how its proxy was found (`settings`, `environment`, `system`, `direct`), `proxy` which
+/// `via`: how its proxy was found (`settings`, `environment`, `direct`), `proxy` which
 /// (host:port, no credentials). `resumedFrom`: the bytes of the file there when this attempt began.
 /// `retry`: on an attempt after one that failed, from where, why, and to where.
 #[derive(Clone, Serialize)]
@@ -105,7 +105,7 @@ pub fn models(data: &Path) -> Vec<CutModel> {
 /// Downloads a cut-out model into the data folder (the runtime first, if it is missing), telling
 /// `progress` how far it has got; returns once it is there, has failed or was cancelled
 /// ([`cancel_download`], which keeps what came for the next try). `proxy`: the one given (a setting),
-/// else the environment's or the system's is found; `source`: `auto` (Hugging Face, then hf-mirror.com,
+/// else the environment's, else none; `source`: `auto` (Hugging Face, then hf-mirror.com,
 /// the one that last worked first), or one of them alone. Errors start with their kind (see
 /// [`download`]); a second download while one runs is refused (`busy:`).
 pub fn download(data: &Path, id: &str, proxy: Option<&str>, source: Option<&str>, progress: impl Fn(CutProgress)) -> Res<()> {

@@ -9,7 +9,7 @@ const modelFile = (id, have, bytes = 224 * MB) => ({ what: "model", url: `https:
 
 test("errors are told by their kind; a cancel is nothing", () => {
   assert.deepEqual(cutErr("network: huggingface.co (direct): timed out; hf-mirror.com (direct): HTTP 403"), { kind: "network", detail: "huggingface.co (direct): timed out; hf-mirror.com (direct): HTTP 403" });
-  assert.deepEqual(cutErr(new Error("tls: github.com (the system's proxy 127.0.0.1:7890): invalid peer certificate: UnknownIssuer")).kind, "tls");
+  assert.deepEqual(cutErr(new Error("tls: github.com (the proxy in Settings 127.0.0.1:7890): invalid peer certificate: UnknownIssuer")).kind, "tls");
   for (const k of ["proxy", "http", "checksum", "disk", "file", "busy"]) assert.equal(cutErr(`${k}: x`).kind, k);
   assert.equal(cutErr("cancelled"), null);
   assert.equal(cutErr(""), null);
@@ -34,9 +34,9 @@ test("each model's row: busy, there, partly there, its file without the runtime,
 
 test("progress: what it is doing, where it resumed, how it is connected", () => {
   const t = (k, ...a) => `${k}(${a.join(",")})`;
-  const base = { id: "birefnet-lite", done: 120 * MB, total: 240 * MB, file: "model", source: "hf-mirror.com", via: "system", proxy: "127.0.0.1:7890", resumedFrom: 0 };
+  const base = { id: "birefnet-lite", done: 120 * MB, total: 240 * MB, file: "model", source: "hf-mirror.com", via: "settings", proxy: "127.0.0.1:7890", resumedFrom: 0 };
   assert.deepEqual(cutProgress({ id: "x", done: 50 * MB, total: 200 * MB }), [["cutset.progress", 25, 50, 200]], "an older app's payload");
-  assert.deepEqual(cutProgress({ ...base, phase: "downloading" }), [["cutset.progressFrom", 50, 120, 240, { key: "cutset.file.model" }, "hf-mirror.com"], ["cutset.via.system", "127.0.0.1:7890"]]);
+  assert.deepEqual(cutProgress({ ...base, phase: "downloading" }), [["cutset.progressFrom", 50, 120, 240, { key: "cutset.file.model" }, "hf-mirror.com"], ["cutset.via.settings", "127.0.0.1:7890"]]);
   assert.deepEqual(cutProgress({ ...base, phase: "downloading", resumedFrom: 60 * MB, via: "direct", proxy: null }).slice(1), [["cutset.resumed", 60], ["cutset.via.direct", ""]]);
   assert.deepEqual(cutProgress({ ...base, phase: "connecting", source: "huggingface.co" })[0], ["cutset.phase.connecting", "huggingface.co"]);
   assert.deepEqual(cutProgress({ ...base, phase: "connecting", retry: { from: "huggingface.co", why: "network: Connection Failed: Connect error: connection timed out", to: "hf-mirror.com" } })[0],
@@ -47,7 +47,8 @@ test("progress: what it is doing, where it resumed, how it is connected", () => 
   assert.deepEqual(cutProgress({ ...base, phase: "verifying" }), [["cutset.phase.verifying"]]);
   assert.deepEqual(cutProgress({ ...base, phase: "unpacking", file: "runtime" }), [["cutset.phase.unpacking"]]);
   assert.deepEqual(cutProgress({ ...base, phase: "importing", file: "runtime" }), [["cutset.phase.importing", 50, { key: "cutset.file.runtime" }]]);
-  assert.equal(progressText(cutProgress({ ...base, phase: "downloading" }), t), "cutset.progressFrom(50,120,240,cutset.file.model(),hf-mirror.com) · cutset.via.system(127.0.0.1:7890)");
+  assert.deepEqual(cutProgress({ ...base, phase: "connecting", via: "system" }), [["cutset.phase.connecting", "hf-mirror.com"]], "an older app's way, no longer said");
+  assert.equal(progressText(cutProgress({ ...base, phase: "downloading" }), t), "cutset.progressFrom(50,120,240,cutset.file.model(),hf-mirror.com) · cutset.via.settings(127.0.0.1:7890)");
   assert.deepEqual(cutProgress(null), []);
 });
 
