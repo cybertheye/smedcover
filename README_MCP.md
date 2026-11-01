@@ -34,7 +34,7 @@ session goes, every tool, how it is built, and what to do when something goes wr
 1. ⋯ → *Agents* (Settings → *Agents*), and turn on *MCP endpoint*.
 2. It listens at `http://127.0.0.1:25277/mcp`. To use another port, type it under *Port* (1024–65535) and press
    *Apply* or Enter.
-3. Copy the line for your agent from *Connect an agent* (next section).
+3. Copy the sentence from *Connect an agent* and send it to your agent (next section).
 
 The page has four cards:
 
@@ -42,7 +42,7 @@ The page has four cards:
 |---|---|
 | *MCP endpoint* | The switch, the state's pill, *Port* with *Apply*, and a line beside it saying what the state means |
 | *Require a token* | A second switch, off by default (see [Require a token](#require-a-token)); while it is on, the token with *Show*, *Copy* and *New token* |
-| *Connect an agent* | The lines to copy, for the port in force (and with the token while one is required), and a note on proxies |
+| *Connect an agent* | The sentence to send your agent, for the port in force (and with the token while one is required); under *Set it up by hand*, folded, the lines for Claude Code, Codex and the JSON, and a note on proxies |
 | *Seen lately* | The agents seen in the last 10 minutes (name, version, number of calls, when; requests that could not be told to be any agent's as one more, *Unidentified agent*), the calls running, the last call (done or failed), and a warning when the window's tools are not those the endpoint lists |
 
 *Seen lately* lists an agent for 10 minutes after its last request or the end of its last call, and for as long as a
@@ -107,8 +107,14 @@ It is there from the first start.
 
 ## Connecting an agent
 
-By default no token is needed, so one line sets an agent up. The lines below use port 25277; if you changed it, the
-lines on the *Connect an agent* card have yours.
+By default no token is needed. The quickest way: copy the sentence on the *Connect an agent* card and send it to your
+agent. It works out where its own config is and writes SmedCover in:
+
+> Add the MCP server smedcover to your user-level config: Streamable HTTP at http://127.0.0.1:25277/mcp, a 1800-second
+> tool timeout; if your environment sets a proxy, keep 127.0.0.1 off it.
+
+The agent may need restarting before it sees the tools. To do it yourself, the lines below are those under *Set it up by
+hand* on the card. They use port 25277; if you changed it, the card's have yours.
 
 ### Claude Code
 
@@ -272,8 +278,8 @@ While it is on:
 - The token is shown hidden but for its last four characters. *Show* shows it, *Copy* copies it, and *New token* (it asks
   first) makes a new one: the old one stops working at once, and agents set up with it must take the new one.
 - It is in force from the next request. The endpoint does not restart, and the calls under way go on.
-- *Connect an agent* gives the lines with the token. They are shown with it hidden; *Copy* copies them with the token
-  itself.
+- *Connect an agent* gives the sentence with the token, and *Set it up by hand* the lines with it. They are shown with
+  it hidden; *Copy* copies them with the token itself.
 - Agents set up without the token get 401 and must be set up again. Turned off again, agents set up with it go on
   working (the header is not looked at).
 
@@ -637,7 +643,7 @@ server (talked to from a phone through Slack, say). The desktop-only tools are n
 
 | What you see | Why, and what to do |
 |---|---|
-| 401 `Unauthorized: SmedCover wants the token …` | *Require a token* is on and the agent sent no token, or another one. Set the agent up again with the lines from *Connect an agent* (after *New token*, with the new one). For Codex, check `SMEDCOVER_TOKEN` is set in the terminal Codex starts from. |
+| 401 `Unauthorized: SmedCover wants the token …` | *Require a token* is on and the agent sent no token, or another one. Set the agent up again with the sentence or the lines from *Connect an agent* (after *New token*, with the new one). For Codex, check `SMEDCOVER_TOKEN` is set in the terminal Codex starts from. |
 | 403 `Forbidden: Host header is not allowed` | The request's `Host` was not `127.0.0.1`, `localhost` or `[::1]`: an agent in a Docker container (`host.docker.internal`), or an address on the network. Run the agent on this computer and use `http://127.0.0.1:<port>/mcp`. |
 | 403 `Forbidden: Origin header is not allowed` | A browser page (or a web view) made the request. That is refused by design. |
 | 413 `Payload Too Large` | The request was over 32 MiB, usually a photo or a project sent whole. Give `add_photo` a `path` or `url`, and `open_project` a `file`. |

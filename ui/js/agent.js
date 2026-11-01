@@ -371,6 +371,13 @@ export function setupLines(url, token, win = false) {
     { key: "mcp.json", text: JSON.stringify({ mcpServers: { smedcover: server } }, null, 2) },
   ].filter(Boolean);
 }
+/**
+ * The one sentence that sets an agent up, in the page's language, for the user to send it: the server's name, its
+ * transport and `url`, the header with `token` when one is wanted (null: none, as in setupLines; else the token or its
+ * maskToken()), the tool timeout Codex's table has, and the proxy kept off this computer. The agent works out where its
+ * own config is and how to write it there.
+ */
+export const setupAsk = (url, token) => t("mcp.ask", url, token != null ? t("mcp.askToken", token) : "");
 
 /** SHA-256 of ui/tools.json as built (toolsText), in hex: the list this page answers to, for the host to compare with the file it serves. */
 export async function toolsHash() {

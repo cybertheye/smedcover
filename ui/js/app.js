@@ -33,7 +33,7 @@ import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, leg
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, AI_DEFAULTS, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 import { makeCommands } from "./commands.js";
 import { toolsJson } from "./tools.js";
-import { startAgent, stepping, MCP, onMcpStatus, maskToken, setupLines } from "./agent.js";
+import { startAgent, stepping, MCP, onMcpStatus, maskToken, setupLines, setupAsk } from "./agent.js";
 
 const $ = (id) => document.getElementById(id);
 const EXT = { png: "png", jpeg: "jpg", webp: "webp" };
@@ -3060,12 +3060,12 @@ const ON_WINDOWS = /Win/.test(navigator.platform || navigator.userAgent);   // h
 const CAN_AGENTS = HOST === "tauri";
 /**
  * What the page keeps of it besides the status (agent.js's MCP, sent by the host as it changes): the token once read
- * (shown or not: hidden again whenever the page is left, see renderPanel), the port being typed (null: the one in
+ * (shown or not: hidden again whenever the page is left, see renderPanel), whether Set it up by hand is unfolded, the port being typed (null: the one in
  * force), a switch on its way, whether they were read, and why they could not be; and of the command line (cliTab's
  * cliCard) its status, whether it was read since its page was shown, an install or uninstall on its way, and whether
  * the last one's password prompt was cancelled.
  */
-const AGENTS = { token: "", show: false, port: null, busy: false, read: false, error: "", cli: null, cliSeen: false, cliBusy: false, cliCancelled: false };
+const AGENTS = { token: "", show: false, byHand: false, port: null, busy: false, read: false, error: "", cli: null, cliSeen: false, cliBusy: false, cliCancelled: false };
 const isPort = (v) => /^\d+$/.test(String(v).trim()) && +v >= 1024 && +v <= 65535;
 /** The status and the token, read once, as the page first shows (later statuses come by themselves); on failure, why, to try again. */
 async function agentsRead() {
@@ -3307,8 +3307,9 @@ onMcpStatus(agentsLive);
  * computer shared, or running containers, virtual machines or apps not trusted) and, on, that agents set up without the
  * token must be set up again (a refusal, such as an mcp.json that cannot be read, said as other failures are, by fail());
  * while on, the token (hidden but for its end;
- * shown, copied, or replaced after asking); the lines that set an agent up, ready to copy (Claude Code, Codex, any other
- * client's JSON), with the token only while one is required; and the clients seen lately with the calls. The command
+ * shown, copied, or replaced after asking); the sentence that sets an agent up, ready to copy and send it (setupAsk),
+ * and under Set it up by hand, folded (AGENTS.byHand), the lines that do it (Claude Code, Codex, any other client's
+ * JSON) with the proxy's note, the token in them only while one is required; and the clients seen lately with the calls. The command
  * line has a page of its own (cliTab). What is kept is mcp.json, Rust's: read and set through the mcp_* commands, never
  * custom.json.
  */
@@ -3350,8 +3351,14 @@ function agentsTab() {
           el("button", { class: "btn", disabled: !tok, onclick: newToken }, ico("reset", 15), t("mcp.newToken"))))),
     el("section", { class: "scard aicard", id: "set-mcp-connect" },
       el("div", { class: "aih" }, el("div", { class: "grow" }, el("b", {}, t("mcp.connect")), el("small", {}, t(wanted ? "mcp.connectSub" : "mcp.connectSubOpen")))),
-      el("div", { class: "mlines" }, setupLines(url, wanted ? shown : null, ON_WINDOWS).map(row)),
-      el("div", { class: "hint" }, t("mcp.proxy"))),
+      el("div", { class: "mline" },
+        el("div", { class: "mlh" }, el("label", { class: "cap" }, t("mcp.askCap")),
+          el("button", { class: "linkbtn", disabled: wanted && !tok, "aria-label": t("mcp.copyWhat", t("mcp.askCap")), onclick: () => copyText(setupAsk(url, wanted ? AGENTS.token : null)) }, ico("copy", 15), t("mcp.copy"))),
+        el("pre", { class: "mcode" }, setupAsk(url, wanted ? shown : null))),
+      el("details", { class: "byhand", open: AGENTS.byHand, ontoggle: (e) => (AGENTS.byHand = e.target.open) },
+        el("summary", {}, t("mcp.byHand")),
+        el("div", { class: "mlines" }, setupLines(url, wanted ? shown : null, ON_WINDOWS).map(row)),
+        el("div", { class: "hint" }, t("mcp.proxy")))),
     mcpSeen(s),
   ];
 }

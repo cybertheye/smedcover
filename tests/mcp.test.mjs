@@ -2,7 +2,8 @@
 // stand-in Channel, invoke and window, and the lines Settings → Agents gives to set an agent up.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { tauriTransport, setupLines, TOKEN_ENV, maskToken, MCP, onMcpStatus, toolsHash } from "../ui/js/agent.js";
+import { tauriTransport, setupLines, setupAsk, TOKEN_ENV, maskToken, MCP, onMcpStatus, toolsHash } from "../ui/js/agent.js";
+import { setLang } from "../ui/js/i18n.js";
 
 /** Tauri's Channel as the transport uses it: the page sets onmessage, Rust sends. */
 class FakeChannel {
@@ -137,4 +138,25 @@ test("with a token required, four lines set an agent up: Claude Code's command w
   // the token not read yet: still the four lines of a token wanted, never the open ones
   assert.deepEqual(setupLines(url, "").map((l) => l.key), ["mcp.claude", "mcp.codex", "mcp.codexEnv", "mcp.json"]);
   assert.deepEqual(setupLines(url, "", true).map((l) => l.key), ["mcp.claude", "mcp.codex", "mcp.codexEnvWin", "mcp.json"]);
+});
+
+test("one sentence sets an agent up, in either language: the server's name, its transport and address, the timeout and the proxy, and the token only when one is wanted (shown masked, copied whole)", () => {
+  const url = "http://127.0.0.1:25277/mcp", token = "smc_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_abcde".slice(0, 43);
+  const was = globalThis.document;
+  globalThis.document = { ...was, documentElement: {} };   // setLang marks the page's language
+  try {
+    for (const lang of ["zh", "en"]) {
+      setLang(lang);
+      const open = setupAsk(url, null);
+      for (const part of ["smedcover", "Streamable HTTP", url, "1800", "127.0.0.1"]) assert.ok(open.includes(part), `${lang}: ${part}`);
+      assert.doesNotMatch(open, /Bearer|Authorization|undefined|null|\{\d\}/, lang);
+      assert.equal(open.split("\n").length, 1, `${lang}: one line`);
+      const withToken = setupAsk(url, token);
+      assert.ok(withToken.includes(`${url}`) && withToken.includes(`Authorization: Bearer ${token}`), lang);
+      assert.equal(withToken.replace(lang === "zh" ? `，请求头 Authorization: Bearer ${token}` : `, header Authorization: Bearer ${token}`, ""), open, `${lang}: the header alone added`);
+      const masked = setupAsk(url, maskToken(token));
+      assert.ok(masked.includes(maskToken(token)) && !masked.includes(token.slice(4, 20)), `${lang}: the token is not shown`);
+      assert.ok(setupAsk(url, "").includes("Bearer"), `${lang}: the token not read yet still asks for the header`);
+    }
+  } finally { setLang("zh"); if (was) globalThis.document = was; else delete globalThis.document; }
 });
