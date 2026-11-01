@@ -41,10 +41,10 @@ WeChat Channels and WeChat articles ask for, all at once.
 ## Agents (MCP)
 
 Settings → *Agents*: turn on *MCP endpoint*, then copy the sentence under *Connect an agent* and send
-it to your agent, which adds SmedCover to its own config. For Claude Code, by hand:
+it to your agent, which adds SmedCover to its own config.
 
 ```bash
-claude mcp add --transport http --scope user smedcover http://127.0.0.1:25277/mcp
+Add the MCP server smedcover to your user-level config: Streamable HTTP at http://127.0.0.1:25277/mcp, a 1800-second tool timeout; if your environment sets a proxy, keep 127.0.0.1 off it.
 ```
 
 Then ask it for a cover. Every change is one step of undo in the window. More: [README_MCP.md](README_MCP.md).

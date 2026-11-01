@@ -38,10 +38,10 @@
 
 ## Agent 接入（MCP）
 
-设置 →「Agent 接入」：打开「开启 MCP 接口」，然后把「连接 agent」下面那句话复制给你的 agent，它会自己把 SmedCover 写进配置。Claude Code 也可以手动加：
+设置 →「Agent 接入」：打开「开启 MCP 接口」，然后把「连接 agent」下面那句话复制给你的 agent，它会自己把 SmedCover 写进配置。
 
 ```bash
-claude mcp add --transport http --scope user smedcover http://127.0.0.1:25277/mcp
+请把 MCP 服务器 smedcover 加到你的用户级配置里：Streamable HTTP，地址 http://127.0.0.1:25277/mcp，工具调用超时 1800 秒；如果你的环境设了代理，让 127.0.0.1 不走代理。
 ```
 
 然后让它做封面就行。它的每一处改动都是窗口里的一步撤销。详见 [README_MCP.zh-CN.md](README_MCP.zh-CN.md)。
