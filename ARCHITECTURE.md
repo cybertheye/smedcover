@@ -605,8 +605,8 @@ the arrows once they rest, `placedSoon()`; undo and redo drop what is still to c
 size shown), and `footCheck()`, after the paint that shows where it went (from `flushDraw()`), says so once — a toast with *Got it*,
 and the band striped over the canvas's foot meanwhile (`footBand()`, in the stage, under the layer's bar). It judges
 the hit's box (`inOverlayFoot()` in `check.js`: 0.4% of the height into it, not wholly off the cover; a headline's
-box less the room under its letters, 0.12 of its type size), and says it once a layer, size and channel, again only
-after the layer has left the band (`FOOTWARN`, for the session). An agent's change, undo and a layout dealt never ask.
+box less the room under its letters, 0.12 of its type size), and says it once on this computer: `settings.footHint`,
+kept in custom.json, says it was, and from then on nothing is asked. An agent's change, undo and a layout dealt never ask.
 The title's box keeps room for two lines at the type size
 the narrowest feed showing that ratio needs (`feedOf()`; 14 px in the feed), the block giving way while it
 still holds the name, and with a subtitle (`parts.subtitle`) room for its line too. On *Stack* with the block along the foot the graphic, the cover's picture until a photo comes, takes at least 12% of

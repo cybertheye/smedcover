@@ -5454,11 +5454,11 @@ const LETTERING = { title: () => S.cover.title, subtitle: () => S.cover.subtitle
 // ---------- the band at the cover's foot the apps lay their marks over (OVERLAY_FOOT in platforms.js): words put there by hand are warned of
 /**
  * What is to be checked once the cover is next painted (placed): {where, ids}, the cover and size it was asked on and
- * the layers moved ("all": every lettering layer, as a layout's handle moves them), or null; the wheel's and the arrows'
- * layers gathered till they rest (placedSoon), the same way; and the layers already warned of, by profile, channel,
- * size and layer — warned of again only once they have left the band and been put back. Kept for this session only.
+ * the layers moved ("all": every lettering layer, as a layout's handle moves them), or null; and the wheel's and the
+ * arrows' layers gathered till they rest (placedSoon), the same way. Nothing is asked once the note was shown: it is
+ * said once on this computer (settings.footHint).
  */
-const FOOTWARN = { ask: null, soon: null, said: new Set() };
+const FOOTWARN = { ask: null, soon: null };
 /** The cover and size shown, as FOOTWARN keys them. */
 const footWhere = () => `${S.profile.id}/${S.cover.catId}/${frame().key}/`;
 /**
@@ -5467,32 +5467,30 @@ const footWhere = () => `${S.profile.id}/${S.cover.catId}/${frame().key}/`;
  * the paint that shows where they went (footCheck, from flushDraw), if that is of the same cover and size.
  */
 function placed(ids = null) {
+  if (S.settings.footHint) return;
   const where = footWhere(), was = FOOTWARN.ask && FOOTWARN.ask.where === where ? FOOTWARN.ask.ids : null;
   FOOTWARN.ask = { where, ids: !ids || was === "all" ? "all" : new Set([...(was || []), ...ids]) };
   queueDraw(false);
 }
 /** placed() for the wheel and the arrows, once they rest (400 ms), for every layer turned or nudged meanwhile; dropped by undo or redo, or once the cover or size shown is another. */
 function placedSoon(ids) {
+  if (S.settings.footHint) return;
   const where = footWhere(), s = FOOTWARN.soon && FOOTWARN.soon.where === where ? FOOTWARN.soon : (FOOTWARN.soon = { where, ids: new Set() });
   for (const id of ids) s.ids.add(id);
   later("placed", 400, () => { const r = FOOTWARN.soon; FOOTWARN.soon = null; if (r && r.where === footWhere()) placed([...r.ids]); });
 }
 /**
- * After each paint of the canvas: the layers warned of that have left the band are forgotten; then, if a placement asked,
- * the lettering layers it moved that now reach into the band (inOverlayFoot in check.js), and were not warned of yet, are:
- * a word at the foot of the window, and the band shown on the canvas meanwhile (footBand).
+ * After each paint of the canvas, if a placement asked of it (on this cover and size, in the editor): when a lettering
+ * layer it moved now reaches into the band (inOverlayFoot in check.js), a word at the foot of the window and the band
+ * shown on the canvas meanwhile (footBand) — once on this computer: settings.footHint, kept, says it was.
  */
 function footCheck() {
   const cv = $("cv"), ask = FOOTWARN.ask;
   FOOTWARN.ask = null;   // asked of this paint alone: not carried to a later one (the 3D view's, then whatever comes after it)
-  if (V3.on || !cv._hits || !cv._virtual) return;
-  const vh = cv._virtual[1], where = footWhere();
-  const words = cv._hits.filter((h) => LETTERING[h.type]), under = new Set(words.filter((h) => inOverlayFoot(h, vh)).map((h) => h.id));
-  for (const h of words) if (!under.has(h.id)) FOOTWARN.said.delete(where + h.id);
-  if (!ask || ask.where !== where || S.mode !== "edit") return;
-  const fresh = [...under].filter((id) => (ask.ids === "all" || ask.ids.has(id)) && !FOOTWARN.said.has(where + id));
-  if (!fresh.length) return;
-  for (const id of fresh) FOOTWARN.said.add(where + id);
+  if (!ask || S.settings.footHint || V3.on || !cv._hits || !cv._virtual || ask.where !== footWhere() || S.mode !== "edit") return;
+  const vh = cv._virtual[1];
+  if (!cv._hits.some((h) => LETTERING[h.type] && (ask.ids === "all" || ask.ids.has(h.id)) && inOverlayFoot(h, vh))) return;
+  S.settings.footHint = true; persistSettings();
   toast(t("foot.warn"), false, { label: t("foot.ok"), run: () => footBand(false) });
   footBand(true);
 }

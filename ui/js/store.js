@@ -276,6 +276,7 @@ export function normalizeSettings(raw) {
     hideScene: flag(s.hideScene, D.hideScene === true),   // the scene objects' handles hidden on the canvas
     glass: flag(s.glass, D.glass !== false),   // the panels frosted glass over the cover (false: plain, translucent; see setGlass in app.js)
     glassHint: s.glassHint === true,   // the note offering plain panels, when dragging was slow with the glass, was shown (see glassWatch)
+    footHint: s.footHint === true,   // the note on words put into the bottom 13%, where the apps lay their marks, was shown (see footCheck in app.js)
     drawer: flag(s.drawer, D.drawer === true),   // the drawer of the selected layer's properties open on the right (see setDrawer in app.js)
     // how a photo's subject is cut out: "vision" (macOS), "birefnet-lite" or "birefnet" (any system, a downloaded model); "" = the system's own choice
     cutEngine: oneOf(s.cutEngine, ["vision", "birefnet-lite", "birefnet"], D.cutEngine, ""),
