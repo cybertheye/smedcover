@@ -453,7 +453,8 @@
               "deco",
               "wasteland",
               "facet",
-              "chroma"
+              "chroma",
+              "aura"
             ],
             "description": "This look alone, with its settings."
           },
@@ -818,7 +819,8 @@
               "deco",
               "wasteland",
               "facet",
-              "chroma"
+              "chroma",
+              "aura"
             ],
             "description": "The look's id."
           },

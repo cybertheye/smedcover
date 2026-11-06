@@ -388,7 +388,7 @@ agent 连上时，SmedCover 会先告诉它怎么用（MCP 的 instructions）�
 | 工具 | 做什么 | 参数 | 标记 |
 |---|---|---|---|
 | `set_text` | 改标题、副标题、角标（至少一个）。和编辑器里一样，`*星号*` 标出强调的词，`\n` 换行；`""` 清空。 | `profile`、`channel`、`title`、`subtitle`、`tag` | |
-| `set_look` | 改档案的风格（它的所有频道共用）和/或风格的设置。超出范围的设置会被拉回范围内，并写在 `warnings` 里。 | `profile`、`look`（36 个之一）、`params`（风格自己的设置，按键名）、`theme`（`dark`、`light`）、`seed`（0–999999）、`resetParams` | |
+| `set_look` | 改档案的风格（它的所有频道共用）和/或风格的设置。超出范围的设置会被拉回范围内，并写在 `warnings` 里。 | `profile`、`look`（37 个之一）、`params`（风格自己的设置，按键名）、`theme`（`dark`、`light`）、`seed`（0–999999）、`resetParams` | |
 | `set_channel` | 改一个频道：名称、下面那行副名、代号、颜色。 | `profile`、**`channel`**、`name`、`sub`、`code`、`color`（`#rrggbb`） | |
 | `set_layer_effect` | 改标题类图层（标题、副标题或文字图层）的文字效果。需要字形轮廓的效果，在没有轮廓的宿主上会被拒绝。 | `profile`、`channel`、**`layer`**、`effect`（19 个之一；`auto` 跟风格走）、`amount`（0–2）、`reshuffle`、`outline`（0–2）、`shadow`（0–2） | |
 | `set_layer_font` | 改文字图层的字体（已安装、内置或导入的；`""` 用风格自己的），和/或改成竖排。 | `profile`、`channel`、**`layer`**、`font`、`vertical` | |

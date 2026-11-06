@@ -733,7 +733,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli", "gilded"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid", "glass"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
@@ -901,7 +901,7 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
 
 test("the poster looks: many settings each, their own grounds, flat layouts (all but the collage, on the slanted ones), and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
-  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma"]) {
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura"]) {
     const L = LOOKS[id];
     assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
     assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
@@ -1449,6 +1449,140 @@ test("the chroma field: palettes of saturated fields whose lettering reads on th
     assert.deepEqual(fills.map((v) => parseColour(v).slice(0, 3)), [p0.type, p0.hi], "the type colour, the highlight");
     assert.deepEqual([...seen], ["palette"], "the lettering reads the palette alone");
   }
+  setLook("cel");
+});
+
+test("the aura gradient: its palettes and grounds; the channel's light in its hue; lights the same for the same seed and none without the aura; mixed lights take their colours, heat runs up its ramp; the title kept readable; places clear of the words where there is room, nothing left out, each slider sizing its own part where it stands; a photo spread over its ramp; every slider at either end; what it keeps let go", async () => {
+  const L = LOOKS.aura, { auBlobs, auChan, auDuotone, auFreeAll, auGuard, auLegible, auMemory, auPal, auPhotoRamp, auPixels, auSpot, auThermal, AU_PALETTES } = (await import("../ui/js/style.js")).__test;
+  const lumOf = (c) => (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255, hue = (c) => Math.atan2(Math.sqrt(3) * (c[1] - c[2]), 2 * c[0] - c[1] - c[2]);
+  // six palettes, each with a night and a pale ground; a heat palette's ramp runs from its ground up; the slider picks one, held within the list
+  assert.deepEqual(AU_PALETTES.map((P) => P.id), ["dusk", "electric", "cyan", "warp", "thermal", "holo"]);
+  for (const P of AU_PALETTES) {
+    assert.ok(P.name.zh && P.name.en && P.dark.hi.length === 3 && P.light.hi.length === 3, P.id);
+    assert.ok(lumOf(P.dark.ground) < 0.06 && lumOf(P.light.ground) > 0.82, `${P.id}: a night and a pale ground`);
+    for (const side of [P.dark, P.light]) if (side.ramp) assert.deepEqual(side.ramp[0][1], side.ground, `${P.id}: the ramp starts at the ground`);
+    if (P.dark.ramp) assert.ok(lumOf(P.dark.ramp.at(-1)[1]) > 0.8, `${P.id}: hot to near white on the night`);
+    assert.ok(auPhotoRamp(P).length >= 5 && lumOf(auPhotoRamp(P)[0][1]) < 0.05, `${P.id}: a photo's ramp from the dark`);
+    for (const [onDark, side] of [[true, P.dark], [false, P.light]]) for (const c of side.hi) { const l = lumOf(auLegible(c, onDark)); assert.ok(onDark ? l >= 0.64 : l <= 0.2, `${P.id}: a highlight reads on its ground (${l.toFixed(2)})`); }
+  }
+  assert.equal(auPal({ palette: 9 }).id, "holo"); assert.equal(auPal({}).id, "dusk");
+  for (const onDark of [true, false]) for (const palette of [0, 4]) {
+    setLook("aura", { palette }, 3, onDark);
+    const field = parseColour(L.theme({}, [40, 120, 220], lookValues()).field);
+    assert.ok(onDark ? lumOf(field) < 0.06 : lumOf(field) > 0.82, `the ground: ${field}`);
+  }
+  // the channel's light: its hue, light enough to glow on the night; a grey channel colour gives the palette's own light
+  for (const c of [[214, 28, 42], [6, 214, 160], [255, 183, 3], [40, 60, 200]]) { const r = auChan(c, true); assert.ok(Math.abs(hue(r) - hue(c)) < 0.2 && lumOf(r) > 0.2, `${c} -> ${r.map(Math.round)}`); }
+  assert.deepEqual(auChan([128, 128, 128], true, [1, 2, 3]), [1, 2, 3]);
+  // the lights: the same for the same seed, others for another; none without the aura; the channel's among a mass palette's lights, apart in a heat palette's
+  const room = { x: 1400, y: 760 }, words = { x: 80, y: 200, w: 1100, h: 400 }, P0 = AU_PALETTES[0], P4 = AU_PALETTES[4];
+  setLook("aura", {}, 3, true);
+  const A = auBlobs(1920, 1080, P0, lookValues(), [40, 120, 220], room, true, words), A2 = auBlobs(1920, 1080, P0, lookValues(), [40, 120, 220], room, true, words);
+  assert.deepEqual(A, A2, "the same seed, the same lights");
+  setLook("aura", {}, 11, true);
+  assert.notDeepEqual(auBlobs(1920, 1080, P0, lookValues(), [40, 120, 220], room, true, words).list.map((b) => b.x), A.list.map((b) => b.x), "another seed, other lights");
+  assert.deepEqual(auBlobs(1920, 1080, P0, { aura: 0, chan: 1, smear: 1 }, [40, 120, 220], room, true), { list: [], chan: null }, "no aura, no lights");
+  setLook("aura", {}, 3, true);
+  assert.ok(A.list.some((b) => b.c && Math.abs(hue(b.c) - hue(auChan([40, 120, 220], true))) < 0.01) && A.chan === null, "the channel's light among the mass palette's");
+  const H = auBlobs(1920, 1080, P4, lookValues(), [40, 120, 220], room, true, words);
+  assert.ok(H.chan && H.list.every((b) => b.c === null), "a heat palette's lights carry no colour; the channel's apart");
+  const at = (B, x, y) => B.list.find((b) => Math.abs(b.x - x) < 1 && Math.abs(b.y - y) < 1);
+  const hidden = auBlobs(1920, 1080, P0, lookValues(), [40, 120, 220], room, true, { x: 0, y: 0, w: 1920, h: 1080 }), open = auBlobs(1920, 1080, P0, lookValues(), [40, 120, 220], room, true, null);
+  assert.ok(hidden.list.every((b, i) => b.s < open.list[i].s), "a light centred under the words is dimmer");
+  assert.ok(at(A, A.list[0].x, A.list[0].y));
+  // the grid: no light, the ground; a mass light's middle its colour; heat brighter toward the hot middle
+  const F0 = { list: [], chan: null, lut: null, ground: [9, 8, 26], g0: 0.3, hot: 0, warp: null, ripple: 0 };
+  assert.deepEqual([...auPixels(4, 3, 1, 400, 300, F0).slice(0, 4)], [9, 8, 26, 255]);
+  const one = { x: 200, y: 150, rx: 80, ry: 80, irx: 1 / 80, iry: 1 / 80, cs: 1, sn: 0, s: 20, c: [255, 86, 166], hard: false };
+  const M = auPixels(40, 30, 0, 400, 300, { ...F0, list: [one] }), mid = (15 * 40 + 20) * 4;
+  assert.ok(Math.abs(M[mid] - 255) < 12 && Math.abs(M[mid + 1] - 86) < 12, `the light's middle its colour: ${[...M.slice(mid, mid + 3)]}`);
+  const lut = (await import("../ui/js/style.js")).__test.toneTable(P4.dark.ramp), Q = auPixels(40, 30, 0, 400, 300, { ...F0, list: [{ ...one, c: null, s: 3 }], lut });
+  assert.ok(lumOf([...Q.slice(mid, mid + 3)]) > lumOf([...Q.slice((15 * 40 + 5) * 4, (15 * 40 + 5) * 4 + 3)]) + 0.3, "hotter, lighter, toward the middle");
+  // held readable: within the title's box no lighter than its cap on the night (no darker on the pale ground), far from it as it was
+  const glow = () => { const d = new Uint8ClampedArray(40 * 30 * 4); for (let i = 0; i < d.length; i += 4) { d[i] = 250; d[i + 1] = 200; d[i + 2] = 255; d[i + 3] = 255; } return d; };
+  const box = { x: 100, y: 100, w: 100, h: 60 }, inside = (15 * 40 + 15) * 4, far = (2 * 40 + 38) * 4;
+  const night = glow(); auGuard(night, 40, 30, 0, 10, 10, box, 40, true);
+  assert.ok(lumOf([...night.slice(inside, inside + 3)]) < 0.5 && night[far] === 250, "the night held dark under the words (a soft knee: some of the light kept)");
+  const day = new Uint8ClampedArray(40 * 30 * 4).fill(40); auGuard(day, 40, 30, 0, 10, 10, box, 40, false);
+  assert.ok(lumOf([...day.slice(inside, inside + 3)]) >= 0.6 && day[far] === 40, "the pale ground held pale under the words");
+  const hot = glow(); auGuard(hot, 40, 30, 0, 10, 10, box, 40, true, 0.34, 0.62, lut);
+  const stepped = [...hot.slice(inside, inside + 3)];
+  assert.ok(lumOf(stepped) <= 0.35 && stepped[0] > stepped[1], `a heat palette steps down its ramp, not to olive: ${stepped}`);
+  // a place clear of the boxes, within the field, as near as can be to the one wanted; none where there is no room
+  const Fd = { x0: 40, y0: 40, x1: 1880, y1: 1040 }, keep = [{ x: 80, y: 150, w: 1200, h: 600 }], S0 = auSpot(Fd, keep, 300, 200, [1500, 800]);
+  assert.ok(S0 && !overlapsBox(keep[0], { x: S0.x - 150, y: S0.y - 100, w: 300, h: 200 }) && S0.x + 150 <= 1880 && S0.y + 100 <= 1040, JSON.stringify(S0));
+  assert.equal(auSpot(Fd, [{ x: 0, y: 0, w: 1920, h: 1080 }], 300, 200, [1500, 800]), null);
+  // a part's place, never none (auBest): at the first size with a place clear of all of it; with none, off the colour block before all, then reaching least behind the words, then least over the parts before it
+  const { auBest, auPlan } = await import("../ui/js/looks/aura.js"), { setScene, scenePlaced } = await import("../ui/js/looks/kit.js");
+  const blk = [{ x: 1300, y: 0, w: 620, h: 1080 }], boxAt = (B, [bw, bh]) => ({ x: B.x - bw / 2, y: B.y - bh / 2, w: bw, h: bh }), two = [[600, 400], [300, 200]];
+  const B1 = auBest(Fd, two, blk, keep, [], [1500, 800]);
+  assert.ok(B1.i === 1 && !overlapsBox(keep[0], boxAt(B1, two[1])) && !overlapsBox(blk[0], boxAt(B1, two[1])), `smaller where the larger finds no clear place: ${JSON.stringify(B1)}`);
+  const B2 = auBest(Fd, two, blk, [{ x: 0, y: 0, w: 1300, h: 1080 }], [], [1500, 800]), B3 = auBest(Fd, two, [], [{ x: 0, y: 0, w: 960, h: 1080 }], [{ x: 960, y: 0, w: 960, h: 1080 }], [200, 500]);
+  assert.ok(B2 && !overlapsBox(blk[0], boxAt(B2, two[B2.i])) && B2.x - two[B2.i][0] / 2 >= 40, `no room: behind the words, still off the block: ${JSON.stringify(B2)}`);
+  assert.ok(!overlapsBox({ x: 0, y: 0, w: 960, h: 1080 }, boxAt(B3, two[B3.i])), `over a part rather than behind the words: ${JSON.stringify(B3)}`);
+  // the scene on covers of every template and shape, the title as it will be set: every part there with its handle, the capsule and the cube on the canvas and off the colour block; as any scene slider moves no part goes and none moves; a drag of one moves nothing else; and every piece of the Swiss details there by its threshold, however little room
+  const was = globalThis.document, pen = (rec = null) => {
+    const st = [], t = { canvas: { width: 1920, height: 1080 }, font: "10px x", getTransform: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }), measureText: (s) => ({ width: [...s].length * parseFloat(/([\d.]+)px/.exec(t.font)[1]) * 0.6 }), save: () => st.push(t.font), restore: () => { if (st.length) t.font = st.pop(); }, arc: (x, y, r) => rec && rec.push(r), rotate: () => rec && rec.push("turned"), createLinearGradient: () => ({ addColorStop() {} }), createRadialGradient: () => ({ addColorStop() {} }) };
+    return new Proxy(t, { get: (o, k) => (k in o ? o[k] : () => {}), set: (o, k, v) => { o[k] = v; return true; } });
+  };
+  const all = { orb: 1, cube: 1, ribbon: 1, orbit: 1, details: 1 }, capBox = (O) => { const r = O.th / 2, hw = (O.len / 2 - r) * Math.abs(Math.cos(O.ang)) + r, hh = (O.len / 2 - r) * Math.abs(Math.sin(O.ang)) + r; return { x: O.x - hw, y: O.y - hh, w: hw * 2, h: hh * 2 }; };
+  const where = (P) => ({ orb: [P.orb.x, P.orb.y], cube: [P.cube.x, P.cube.y], ribbon: [P.ribbon.x, 0], orbit: [P.orbit.x, P.orbit.y] });
+  globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => pen() }) };
+  try {
+    for (const tp of ["stack", "split", "banner"]) for (const [w, h] of [[1920, 1080], [1080, 1080], [1080, 1920], [1920, 817]]) for (const title of ["Write your title\n*one line* each", "Short"]) {
+      const cov = { w, h, C: [40, 120, 220], photo: null, hasBrand: true, graphic: { ref: {}, draw: () => true }, cat: { code: "AB", name: "Street" }, cover: { title, tag: "EP.07", layers: ["title", "graphic", "accent", "tag", "brand"].map((id) => ({ id, type: id, visible: true })) }, o: { profile: { brand: { name: "Pixel Harbor" }, categories: [{}, {}] }, catIndex: 0, size: { w, h } }, G: L.layout(tp, w, h) };
+      const at = `${tp} ${w}x${h} "${title.slice(0, 5)}"`, A = cov.G.accent, block = { x: Math.min(...A.map((q) => q[0])), y: Math.min(...A.map((q) => q[1])), w: Math.max(...A.map((q) => q[0])) - Math.min(...A.map((q) => q[0])), h: Math.max(...A.map((q) => q[1])) - Math.min(...A.map((q) => q[1])) };
+      setLook("aura", all, 3, true); setScene({}, w, h, 1);
+      const P = auPlan(pen(), cov, lookValues()), ref = where(P);
+      assert.ok(["orb", "cube", "ribbon", "orbit"].every((k) => P[k] && scenePlaced().some((q) => q.key === k)), `${at}: every part there, with its handle`);
+      for (const b of [capBox(P.orb), { x: P.cube.x - P.cube.s * 0.68, y: P.cube.y - P.cube.s * 0.68, w: P.cube.s * 1.36, h: P.cube.s * 1.36 }]) assert.ok(b.x >= 0 && b.y >= 0 && b.x + b.w <= w && b.y + b.h <= h && !overlapsBox(b, block), `${at}: on the canvas, off the colour block: ${JSON.stringify(b)}`);
+      for (const key of ["orb", "cube", "ribbon", "orbit"]) for (const v of [0.05, 0.4, 0.8]) {
+        setLook("aura", { ...all, [key]: v }, 3, true);
+        const now = where(auPlan(pen(), cov, lookValues()));
+        for (const k of Object.keys(ref)) assert.ok(Math.hypot(now[k][0] - ref[k][0], now[k][1] - ref[k][1]) < 0.5, `${at}: the ${k} moves as ${key} goes to ${v}`);
+      }
+      setLook("aura", all, 3, true); setScene({ orb: [0.1, -0.1] }, w, h, 1);
+      const moved = where(auPlan(pen(), cov, lookValues()));
+      assert.ok(Math.hypot(moved.orb[0] - ref.orb[0], moved.orb[1] - ref.orb[1]) > 50 && ["cube", "ribbon", "orbit"].every((k) => Math.hypot(moved[k][0] - ref[k][0], moved[k][1] - ref[k][1]) < 0.5), `${at}: the capsule dragged takes nothing with it`);
+      setScene({}, w, h, 1);
+      const k = Math.min(1.35, Math.max(0.7, Math.min(w, h) / 1080));
+      for (const d of [0.2, 0.4, 0.6, 0.8]) {
+        const rec = [];
+        setLook("aura", { ...all, details: d }, 3, true); L.frame(pen(rec), cov, lookValues());
+        const has = (r) => rec.some((q) => typeof q === "number" && Math.abs(q - r) < 1e-6), got = [has(40 * k * 0.13), has(12.5 * k * 0.3), has(4.2 * k), rec.includes("turned")];
+        assert.deepEqual(got, [d > 0.15, d > 0.3, d > 0.5, d > 0.65], `${at}: the index, the labels, the leader, the edge line at details ${d}`);
+      }
+    }
+  } finally { globalThis.document = was; setScene({}, 1920, 1080, 1); }
+  // a photo's light spread over its own range onto the ramp: a dull grey photo still runs from the ramp's foot to its top
+  const photo = new Uint8ClampedArray(64 * 4); for (let i = 0; i < 64; i++) { const v = 100 + i * 0.8; photo.set([v, v, v, 255], i * 4); }
+  auThermal(photo, lut, 1);
+  assert.ok(lumOf([...photo.slice(0, 3)]) < 0.06 && lumOf([...photo.slice(63 * 4, 63 * 4 + 3)]) > 0.8, `spread over the ramp: ${[...photo.slice(0, 3)]} … ${[...photo.slice(252, 255)]}`);
+  const duo = new Uint8ClampedArray(16 * 16 * 4); for (let i = 0; i < 256; i++) duo.set([i, i, i, 255], i * 4);
+  auDuotone(duo, 16, 16, AU_PALETTES[1], true);
+  assert.ok(duo[2] > duo[0] && lumOf([...duo.slice(0, 3)]) < lumOf([...duo.slice(1020, 1023)]), "the electric duotone: blue, dark to light");
+  // every slider at either end, both grounds: the background, the frame and the finish paint and return without a canvas
+  const env = { w: 1920, h: 1080, C: [40, 120, 220], photo: null, cat: { code: "AB", name: "x" }, cover: { layers: [], tag: "EP.01" }, o: { profile: { brand: { name: "B" }, categories: [{}] }, catIndex: 0, size: { w: 1920, h: 1080 } }, G: L.layout("stack", 1920, 1080) };
+  const ctx0 = new Proxy({ canvas: null, font: "900 100px x" }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: (t, k, v) => { t[k] = v; return true; } });
+  for (const onDark of [true, false]) for (const q of L.params) for (const v of [q.min, q.max]) {
+    setLook("aura", { [q.key]: v }, 3, onDark);
+    assert.equal(L.background(ctx0, env, { grid: false }, lookValues()), true, `${q.key} = ${v}: the ground`);
+    assert.equal(L.background(ctx0, env, { grid: true, ground: false }, lookValues()), true, `${q.key} = ${v}: the scene`);
+    L.frame(ctx0, env, lookValues()); L.post(ctx0, 1920, 1080, [40, 120, 220], lookValues(), 1, []);
+  }
+  // the lettering: the plain words in the ink of the ground, the highlighted ones in a colour of the layer's own when it has one, spaced or not
+  for (const onDark of [true, false]) for (const spaced of [0, 1]) {
+    const fills = [], ctx = new Proxy({ canvas: null, font: "900 100px x" }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (str) => ({ width: [...str].length * 40 }) : k === "createLinearGradient" ? () => ({ addColorStop() {} }) : () => {}), set: (t, k, v) => { if (k === "fillStyle") fills.push(v); t[k] = v; return true; } });
+    setLook("aura", { spaced }, 3, onDark);
+    L.runs(ctx, (fn) => { fn({ t: "Ab", hi: false }, 0); fn({ t: "cd", hi: true }, 80); }, { fs: 100, strokeAmt: 1, shadowAmt: 1, C: [40, 120, 220], hi: [255, 0, 0], unit: 1 }, lookValues());
+    const plain = parseColour(fills[0]);
+    assert.ok(onDark ? lumOf(plain) > 0.9 : lumOf(plain) < 0.1, `the words ${onDark ? "white on the night" : "near black on the pale ground"}: ${plain}`);
+    assert.equal(fills.at(-1), "rgba(255,0,0,1)", "the highlighted words in the layer's own colour");
+  }
+  assert.ok(L.params.length >= 8 && L.params.length <= 15 && Object.keys(L.scene).length === 4 && L.elementFx.some((e) => e.for.length === 1 && e.for[0] === "photo"));
+  // what it keeps goes as another look is chosen
+  assert.equal(L.leave, auFreeAll);
+  auFreeAll(); assert.equal(auMemory(), 0);
   setLook("cel");
 });
 
