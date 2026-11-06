@@ -454,7 +454,8 @@
               "wasteland",
               "facet",
               "chroma",
-              "aura"
+              "aura",
+              "infrared"
             ],
             "description": "This look alone, with its settings."
           },
@@ -820,7 +821,8 @@
               "wasteland",
               "facet",
               "chroma",
-              "aura"
+              "aura",
+              "infrared"
             ],
             "description": "The look's id."
           },

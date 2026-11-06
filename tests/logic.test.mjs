@@ -733,7 +733,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli", "gilded"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid", "glass"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
@@ -901,7 +901,7 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
 
 test("the poster looks: many settings each, their own grounds, flat layouts (all but the collage, on the slanted ones), and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
-  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura"]) {
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared"]) {
     const L = LOOKS[id];
     assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
     assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
@@ -930,7 +930,7 @@ test("the poster looks: many settings each, their own grounds, flat layouts (all
 
 test("a look's figure drawn from a graphic: each such look names its slider, and a profile keeps the graphic put in its place", () => {
   const arts = LOOK_IDS.filter((id) => LOOKS[id].art);
-  assert.deepEqual(arts.sort(), ["avant", "chroma", "chrome", "cinema", "citypop", "construct", "cyano", "deco", "dots", "facet", "glass", "jelly", "monofilm", "negative", "neon", "netart", "rave", "spectrum", "toon", "velvet", "verse", "yellow"]);
+  assert.deepEqual(arts.sort(), ["avant", "chroma", "chrome", "cinema", "citypop", "construct", "cyano", "deco", "dots", "facet", "glass", "infrared", "jelly", "monofilm", "negative", "neon", "netart", "rave", "spectrum", "toon", "velvet", "verse", "yellow"]);
   for (const id of arts) { const d = LOOKS[id].params.find((q) => q.key === LOOKS[id].art); assert.ok(d && !d.text && !d.toggle && !d.needsPhoto, `${id}: the picker sits under a slider`); }
   const p = normalizeProfile({ style: { lookArt: { jelly: { kind: "sticker", id: "star" }, citypop: { kind: "user", id: "u9", extra: 1 }, deco: { kind: "bogus", id: "x" }, cel: { kind: "graphic", id: "gear" }, nope: { kind: "graphic", id: "gear" }, toon: { kind: "graphic" } } } });
   assert.deepEqual(p.style.lookArt, { jelly: { kind: "sticker", id: "star" }, citypop: { kind: "user", id: "u9" } });   // only looks with a figure, only real references
@@ -1310,6 +1310,135 @@ test("the origami noir: a picture cut into facets that cover it, each the mean o
   setLook("cel");
 });
 const overlapsBox = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+test("the infrared ghost: a photo graded into infrared, foliage and skin glowing, the sky dark, its reds kept, its shadows folded into light; a night and an overexposed day; the scene laid out clear of the words; the machine's lines the same for the same seed, the channel and the brand in them; every part by its own slider; what it keeps let go", async () => {
+  const L = LOOKS.infrared, { irPixels, irGrey, irRedness, irPlace, irLines, irThin, irFreeAll } = (await import("../ui/js/style.js")).__test;
+  const lumOf = (c) => (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255;
+  assert.ok(L.params.length >= 8 && L.params.length <= 15 && L.seeded && !L.oneTheme && L.art === "figure" && typeof L.layout === "function", `${L.params.length} settings, seeded, both grounds, a figure, flat layouts of its own`);
+  assert.ok(Object.keys(L.scene).length >= 1 && Object.keys(L.scene).length <= 5 && L.scene[L.art] && L.elementFx.length >= 2 && L.elementFx.length <= 4 && L.elementFx.some((e) => e.for.length === 1 && e.for[0] === "photo"), "scene objects (the ghost one of them) and effects, one for photos");
+  // the photo's grade: green foliage and warm skin go light, a blue sky dark; a strong red kept as the look's red, or grey without; alpha kept
+  const px = (cols, amt = 1, inv = 0, keep = 0) => { const d = new Uint8ClampedArray(cols.flat()); irPixels(d, amt, inv, keep); return [...Array(cols.length).keys()].map((i) => [...d.slice(i * 4, i * 4 + 4)]); };
+  const [leaf, skin, sky, red, grey] = px([[60, 140, 50, 255], [225, 180, 150, 255], [90, 140, 230, 255], [220, 30, 35, 255], [128, 128, 128, 200]], 1, 0, 1);
+  assert.ok(lumOf(leaf) > 0.75, `foliage glows: ${leaf}`);
+  assert.ok(lumOf(skin) > 0.7, `skin glows: ${skin}`);
+  assert.ok(lumOf(sky) < 0.3 && lumOf(sky) < lumOf(px([[90, 140, 230, 255]], 0)[0]), `the blue sky goes dark: ${sky}`);
+  assert.ok(red[0] > red[1] * 3 && red[0] > red[2] * 3, `a red kept red: ${red}`);
+  assert.equal(grey[3], 200, "alpha kept");
+  const [redAsGrey] = px([[220, 30, 35, 255]], 1, 0, 0);
+  assert.ok(Math.abs(redAsGrey[0] - redAsGrey[1]) < 8 && Math.abs(redAsGrey[1] - redAsGrey[2]) < 8, `without keeping, a red goes grey: ${redAsGrey}`);
+  assert.deepEqual(px([[90, 140, 60, 255]], 0, 0, 0), [[90, 140, 60, 255]], "at nothing, nothing changes");
+  const [black, white] = px([[8, 8, 8, 255], [250, 250, 250, 255]], 1, 1, 0);
+  assert.ok(lumOf(black) > 0.8 && lumOf(white) > 0.9, `folded over, the shadows turn light and the lights stay: ${black}, ${white}`);
+  assert.ok(lumOf(px([[8, 8, 8, 255]], 1, 0.5, 0)[0]) > lumOf(px([[8, 8, 8, 255]], 1, 0, 0)[0]) + 0.3, "partly: by degrees");
+  assert.ok(irRedness(220, 30, 35) > 0.6 && irRedness(128, 128, 128) === 0 && irRedness(60, 140, 50) === 0, "what is red");
+  assert.ok(lumOf(irGrey([40, 200, 60])) > 0.7 && irGrey([210, 30, 40])[0] > irGrey([210, 30, 40])[1] * 2, "a colour of the graphics as the infrared shows it: a green light, a red red");
+  // its grounds: a night near black, an overexposed white-grey day; the lettering on each the other way
+  for (const [onDark, ok] of [[true, (l) => l < 0.1], [false, (l) => l > 0.6]]) {
+    setLook("infrared", {}, 3, onDark);
+    const th = L.theme({}, [40, 120, 220], lookValues());
+    assert.ok(ok(lumOf(parseColour(th.field))) && Math.abs(lumOf(parseColour(th.field)) - lumOf(parseColour(th.titleFill))) > 0.6, `${onDark ? "night" : "day"}: ${th.field} / ${th.titleFill}`);
+  }
+  // the scene's places: the red tree beside the title when there is room, else on the field's far side; the code block inside the field and clear of every box kept; behind the words when there is no room
+  const F = { x0: 0, y0: 0, x1: 1920, y1: 918 }, T = { x: 80, y: 150, w: 900, h: 460 }, tag = { x: 64, y: 640, w: 420, h: 140 }, keep = [{ x: T.x - 30, y: T.y - 30, w: T.w + 60, h: T.h + 60 }, tag, { x: 0, y: 0, w: 900, h: 150 }];
+  const P = irPlace(F, T, keep, { red: 0.75, figure: 0.5 }, 15);
+  assert.ok(P.tree.x - P.tree.cw / 2 >= T.x + T.w && P.crown.x + P.crown.w <= F.x1, `the red tree beside the title: ${JSON.stringify(P.crown)}`);
+  assert.ok(P.data && P.data.x >= F.x0 && P.data.x + P.data.w <= F.x1 && P.data.y + P.data.h <= F.y1 && !keep.some((k) => overlapsBox(k, P.data)), `the code block clear: ${JSON.stringify(P.data)}`);
+  assert.ok(P.ghost && !keep.some((k) => overlapsBox(k, { x: P.ghost.x - P.ghost.h * 0.35, y: P.ghost.foot - P.ghost.h, w: P.ghost.h * 0.7, h: P.ghost.h })), "the ghost clear of the words");
+  // the ghost and the clouds are never left out, and their sliders only size them where they stand: clear of the words where there is room, behind them where there is none
+  const crowded = { x: 80, y: 130, w: 1500, h: 520 }, ckeep = [{ x: crowded.x - 30, y: crowded.y - 30, w: crowded.w + 60, h: crowded.h + 60 }, tag, { x: 0, y: 0, w: 900, h: 150 }];
+  for (const [TT, KK] of [[T, keep], [crowded, ckeep]]) {
+    const rows = [0.05, 0.5, 0.75, 0.8, 1].map((v) => irPlace(F, TT, KK, { red: 0.75, figure: v, clouds: v }, 15));
+    assert.ok(rows.every((Q) => Q.ghost && Q.ghost.x === rows[0].ghost.x && Q.ghost.foot === rows[0].ghost.foot), `the ghost there and still at every size: ${rows.map((Q) => Q.ghost && Math.round(Q.ghost.x))}`);
+    assert.ok(rows[4].ghost.h > rows[2].ghost.h && rows[2].ghost.h > rows[0].ghost.h, "the ghost taller as its slider rises");
+    assert.ok(rows.every((Q) => Q.clouds.length === 6 && JSON.stringify(Q.clouds) === JSON.stringify(rows[0].clouds)), "six clouds, the same places at every size");
+  }
+  assert.ok(P.clouds.filter((c) => { const s = c.s0 * 1.3; return !overlapsBox({ x: c.x - s * 1.3, y: c.y - s * 0.6, w: s * 2.6, h: s * 0.9 }, T); }).length >= 4, "where the sky has room, most clouds clear of the title");
+  assert.ok(!keep.some((k) => overlapsBox(k, { x: P.sun.x - P.sun.r, y: P.sun.y - P.sun.r, w: P.sun.r * 2, h: P.sun.r * 2 })), "the sun clear of the words");
+  const wide = irPlace(F, { x: 80, y: 150, w: 1760, h: 460 }, [{ x: 50, y: 120, w: 1820, h: 520 }], { red: 0.75 }, 15);
+  assert.ok(wide.tree.x > F.x0 + 1920 * 0.42 && wide.tree.x < F.x1, "a title across the field: the tree on its far side");
+  const none = irPlace(F, T, [{ x: 0, y: 0, w: 1920, h: 918 }], { red: 0.75 }, 15).data;
+  assert.ok(none && none.x >= F.x0 && none.x + none.w <= F.x1 && none.y >= F.y0 && none.y + none.h <= F.y1, `no room: the code block behind the words, inside the field: ${JSON.stringify(none)}`);
+  // the code block, its five marks and the three near pines never left out, and still as the red's slider moves (it sizes the red tree alone); the marks clear of the words where there is room; the pines within the field
+  const f2 = 15 * 0.82, mark = (m) => ({ x: m.x - f2, y: m.y - f2 * 1.4, w: f2 * 12, h: f2 * 2 });
+  for (const [TT, KK] of [[T, keep], [crowded, ckeep], [{ x: 80, y: 130, w: 1760, h: 700 }, [{ x: 50, y: 100, w: 1820, h: 760 }]]]) {
+    const rows = [0, 0.3, 0.75, 1].map((r) => irPlace(F, TT, KK, { red: r, trees: 1 }, 15)), same = (f) => rows.every((Q) => JSON.stringify(f(Q)) === JSON.stringify(f(rows[0])));
+    assert.ok(rows.every((Q) => Q.data && Q.marks.length === 5 && Q.pines.length === 3), "the code block, five marks, three pines");
+    assert.ok(same((Q) => Q.data) && same((Q) => Q.marks) && same((Q) => Q.pines), `none moved by the red: ${rows.map((Q) => JSON.stringify(Q.pines.map((q) => Math.round(q.x))))}`);
+    assert.ok(rows[0].marks.every((m) => { const b = mark(m); return b.x >= F.x0 && b.x + b.w <= F.x1 && b.y >= F.y0 && b.y + b.h <= F.y1; }) && rows[0].pines.every((q) => q.x >= F.x0 - q.cw * 0.3 && q.x <= F.x1 + q.cw * 0.3), "the marks inside the field, the pines within it");
+  }
+  assert.ok(P.marks.filter((m) => !keep.some((k) => overlapsBox(k, mark(m)))).length === 5 && P.marks.every((m, i) => P.marks.every((n, j) => i === j || !overlapsBox(mark(m), mark(n)))), `where there is room, the marks clear of the words and of each other: ${JSON.stringify(P.marks)}`);
+  // the prism light: a patch each side of the source at every strength, inside the field however near its edge the source stands; where it has room, at the same share of the streak's length whatever its length
+  const { irPrismAt } = await import("../ui/js/looks/infrared.js");
+  for (const f of [0.02, 0.16, 0.5, 0.84, 0.98]) {
+    const sx = F.x0 + 1920 * f, rows = [0.05, 0.5, 1].map((a) => irPrismAt(F, sx, sx, 83, a, 2180)), share = (Q, a) => Q.map((q) => ((q.x - sx) / (1920 * (0.45 + 0.4 * a))).toFixed(6)).join();
+    assert.ok(rows.every((Q) => Q.length === 2 && Q[0].x <= Q[1].x && Q.every((q) => q.x - q.w / 2 >= F.x0 - 0.5 && q.x + q.w / 2 <= F.x1 + 0.5)), `the source at ${Math.round(sx)}: both patches inside the field: ${rows.map((Q) => Q.map((q) => Math.round(q.x)))}`);
+    if (f > 0.1 && f < 0.9) assert.ok(rows.every((Q) => Q[0].x < sx && Q[1].x > sx) && [0.05, 0.5, 1].every((a, i) => share(rows[i], a) === share(rows[0], 0.05)), "either side of it, each at its own share of the streak");
+  }
+  const dragged = irPrismAt(F, 900, 1300, 83, 0.5, 2180), home = irPrismAt(F, 1300, 1300, 83, 0.5, 2180), edge = irPrismAt(F, 1900, 1300, 83, 0.5, 2180);
+  assert.ok(dragged.every((q, i) => Math.abs(q.x - home[i].x + 400) < 1e-6), "dragged, the patches go with the source");
+  assert.ok(edge.every((q) => q.x + q.w / 2 <= F.x1 + 1e-6), "dragged to the edge, kept inside the field");
+  for (const [w, h] of [[1080, 1752], [1200, 1200], [900, 383]]) { const Q = irPlace({ x0: 0, y0: 0, x1: w, y1: h }, null, [], { red: 0.75 }, 15); assert.ok(Q.crown.x >= 0 && Q.crown.x + Q.crown.w <= w && Q.crown.y >= 0 && Q.shore < h, `${w}×${h}: the tree within the field`); }
+  // the machine's lines: the same for the same seed and channel, the channel's code and the brand in them, line by line
+  setLook("infrared", {}, 3, true);
+  const lines = irLines("vlog", "Pixel Harbor", 13, 2190), text = lines.map(([, t]) => t).join("\n");
+  assert.deepEqual(irLines("vlog", "Pixel Harbor", 13, 2190), lines, "the same seed, the same lines");
+  assert.ok(text.includes('channel["VLOG"]') && text.includes('"Pixel Harbor"') && /0x[0-9A-F]{6}/.test(text) && /\d+\.\d\d \/ \d+\.\d\d/.test(text), text);
+  assert.equal(irLines("vlog", "B", 4, 2190).length, 4);
+  setLook("infrared", {}, 9876, true);
+  assert.notDeepEqual(irLines("vlog", "Pixel Harbor", 13, 2190), lines, "another seed, other numbers");
+  // the thin grotesk: the title's weight taken down, whatever it was given as
+  assert.deepEqual(["900 120px \"Noto Sans SC\"", "bold 20px x", "20px x", ""].map(irThin), ["300 120px \"Noto Sans SC\"", "300 20px x", "300 20px x", ""]);
+  // every part of the scene comes in by its own slider alone, on each ground; the photo graded through drawPhotoAt's treatment, by the sliders that change it
+  const rec = () => { const n = { paints: 0 }; return [n, new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 50 }) : k === "createLinearGradient" || k === "createRadialGradient" || k === "createPattern" ? () => ({ addColorStop() {} }) : (...a) => { if (["fill", "fillRect", "stroke", "drawImage", "fillText"].includes(k)) n.paints++; return {}; }), set: () => true })]; };
+  const env = { w: 1920, h: 1080, C: [252, 238, 10], cat: { code: "AB", name: "x" }, photo: null, o: { profile: { brand: { name: "B" }, categories: [{}] }, catIndex: 0, size: { w: 1920, h: 1080 } }, G: L.layout("stack", 1920, 1080) };
+  const least = Object.fromEntries(L.params.filter((d) => !d.text).map((d) => [d.key, d.min]));
+  for (const key of ["trees", "red", "wash", "clouds", "fog", "flare", "lens", "data"]) for (const onDark of [true, false]) {   // (the water mirrors what is painted: it needs a canvas to read)
+    setLook("infrared", { ...least, [key]: 0.6 }, 3, onDark); const [n, ctx] = rec();
+    assert.equal(L.background(ctx, env, { grid: true, ground: false }, lookValues()), true);
+    assert.ok(n.paints > 0, `${key} (${onDark ? "night" : "day"}) paints its part`);
+  }
+  const treated = (p) => { setLook("infrared", p, 3, true); let t = "none"; L.background(rec()[1], { ...env, photo: {}, drawPhoto: (grey = 0, treat = null) => { t = treat ? treat.key : null; } }, { grid: false, fill: true }, lookValues()); return t; };
+  assert.equal(treated({ ir: 0, invert: 0 }), null, "the photo as it is");
+  assert.ok(treated({}) && treated({}) === treated({}) && treated({}) !== treated({ invert: 0.5 }) && treated({}) !== treated({ red: 0.2 }), "graded once for its sliders");
+  // the lettering, where there is no canvas to work on: the plain letters in the ground's own, the highlighted ones in the red, the font as it was after
+  for (const onDark of [true, false]) {
+    const fills = [], ctx = new Proxy({ canvas: null, font: "900 100px x" }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (str) => ({ width: [...str].length * 40 }) : () => {}), set: (t, k, v) => { if (k === "fillStyle") fills.push(v); t[k] = v; return true; } });
+    setLook("infrared", {}, 3, onDark);
+    L.runs(ctx, (fn) => { fn({ t: "Ab", hi: false }, 0); fn({ t: "cd", hi: true }, 80); }, { fs: 100, strokeAmt: 1, shadowAmt: 1, C: [40, 120, 220], unit: 1 }, lookValues());
+    const [plain, hi] = [fills[0], fills.at(-1)].map((v) => parseColour(v));
+    assert.ok(onDark ? lumOf(plain) > 0.8 : lumOf(plain) < 0.15, `the letters ${onDark ? "pale on the night" : "dark on the day"}: ${plain}`);
+    assert.ok(hi[0] > hi[1] * 3, `the highlighted words in the red: ${hi}`);
+    assert.equal(ctx.font, "900 100px x", "the font as it was");
+  }
+  // the ghost, a scene object: its handle there whenever its slider is above nothing, none at nothing; drawn where its handle is, still as its slider sizes it, moved as it is dragged; mirrored in the water standing on the shore, and dragged down into the water, standing in it, painted over it
+  const { setScene, scenePlaced, WORK: W0 } = await import("../ui/js/looks/kit.js"), was = globalThis.document;
+  let log = [];
+  const pen = () => { const t = { canvas: { width: 1920, height: 1080 }, getTransform: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }), measureText: (s) => ({ width: [...s].length * 6 }),
+      getImageData: (x, y, w, h) => { const d = new Uint8ClampedArray(w * h * 4); for (let i = 0; i < w * h; i++) if (Math.abs((i % w) - w / 2) < w * 0.1 && Math.abs(((i / w) | 0) - h / 2) < h * 0.3) d[i * 4 + 3] = 255; return { data: d, width: w, height: h }; },   // the figure: a solid upright block
+      translate: (x, y) => log.push(["at", x, y]), drawImage: (src) => { if (src === W0.reflect) log.push(["water"]); },
+      createLinearGradient: () => ({ addColorStop() {} }), createRadialGradient: () => ({ addColorStop() {} }), createPattern: () => ({}) };
+    return new Proxy(t, { get: (o, k) => (k in o ? o[k] : () => ({})), set: (o, k, v) => { o[k] = v; return true; } }); };
+  globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => pen() }) };
+  try {
+    const genv = { ...env, graphic: { ref: { id: "ghost" }, draw: () => true }, cover: { title: "Write your title", layers: [] } };
+    const paint = (figure, off = null) => { irFreeAll(); setLook("infrared", { figure }, 3, true); setScene(off ? { figure: off } : {}, 1920, 1080, 1); log = []; L.background(pen(), genv, { grid: true, ground: false }, lookValues()); const at = scenePlaced().find((q) => q.key === "figure"); return at && { ...at, drawn: log.findIndex((e) => e[0] === "at" && Math.abs(e[1] - at.x) < 1e-6 && Math.abs(e[2] - at.y) < 1e-6), water: log.map((e, i) => (e[0] === "water" ? i : -1)).filter((i) => i >= 0) }; };
+    assert.equal(paint(0), undefined, "at nothing, no ghost and no handle");
+    const rows = [0.05, 0.5, 0.75, 0.8, 1].map((v) => paint(v));
+    assert.ok(rows.every((q) => q && q.drawn >= 0), `a handle at every size, the ghost drawn at it: ${rows.map((q) => q && Math.round(q.x))}`);
+    assert.ok(rows.every((q) => q.x === rows[0].x) && rows[4].y < rows[0].y, "still as its slider rises, only taller (its handle at its middle)");
+    assert.ok(rows[2].water.length && rows[2].drawn < rows[2].water[0], "on the shore, painted before the water mirrors it");
+    const moved = paint(0.75, [0.1, -0.05]), wet = paint(0.75, [0.1, 0.15]);
+    assert.ok(Math.abs(moved.x - rows[2].x - 192) < 1e-6 && Math.abs(moved.y - rows[2].y + 54) < 1e-6 && moved.drawn >= 0, `dragged, drawn where it is dragged: ${JSON.stringify(moved)}`);
+    assert.ok(wet.drawn > wet.water.at(-1), "dragged down into the water, painted over it");
+  } finally { globalThis.document = was; setScene({}, 1920, 1080, 1); irFreeAll(); }
+  // what it keeps goes as another look is chosen
+  assert.equal(L.leave, irFreeAll);
+  const { WORK } = await import("../ui/js/looks/kit.js");
+  WORK.irBack = new Map([["8x8", { c: { width: 8, height: 8 }, key: "k" }]]); WORK.irSoft = { width: 4, height: 4 };
+  irFreeAll();
+  assert.ok(!("irBack" in WORK) && !("irSoft" in WORK), "let go");
+  setLook("cel");
+});
 
 test("the chroma field: palettes of saturated fields whose lettering reads on the sky; the title wholly on the sky, the scene clear of it; the block in the channel colour unless it would vanish; grass the same for the same seed; a photo posterised into the palette", async () => {
   const L = LOOKS.chroma, { chBlades, chBlock, chFields, chFreeAll, chHorizon, chPal, chPlan, chStops, chTritone } = (await import("../ui/js/style.js")).__test;
