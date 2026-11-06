@@ -805,6 +805,30 @@
   #partframes[hidden]{display:none}
   #partframes .pframe{position:absolute;box-sizing:border-box;border:1.5px dashed rgba(255,255,255,.8);border-radius:4px;background:rgba(255,255,255,.05);box-shadow:0 0 0 1px rgba(7,7,12,.3),inset 0 0 0 1px rgba(7,7,12,.3)}   /* edged in dark, to read on a light ground too */
   #partframes .ptag{position:absolute;height:20px;padding:0 7px;border-radius:6px;background:rgba(20,20,28,.78);color:#fff;font-size:11px;line-height:20px;white-space:nowrap}
+  /* the layout guide over the cover (placeGuides in app.js): a canvas of its own laid on the cover's, the stage's first
+     child after it, so under the tags laid over the cover (FOCUS's, the preview's), the bar and every window; never the
+     checkerboard of a cover without its background (#stage.alpha canvas) */
+  #stage #guides{position:absolute;pointer-events:none;border-radius:6px;box-shadow:none;background:none}
+  #stage #guides[hidden]{display:none}
+  /* Layout → the layout guide: its switch at its heading's end; each guide a row (its kind in its colour, what it is,
+     the way to its settings, its eye and its remove), its settings under it while open; Add a guide at the foot */
+  .guides>.lhead{margin-bottom:8px}
+  .glist{display:flex;flex-direction:column;gap:6px}
+  .gitem{border-radius:12px;background:rgba(0,0,0,.2);border:1px solid var(--line)}
+  .grow{display:flex;align-items:center;gap:2px;padding:3px}
+  .ghead{flex:1;min-width:0;display:flex;align-items:center;gap:9px;height:32px;padding:0 8px 0 3px;border:0;border-radius:9px;background:none;color:var(--text);font:500 13px var(--ui);text-align:left;cursor:pointer}
+  .ghead:hover{background:rgba(255,255,255,.07)}
+  .ghead:focus-visible,.gbtn:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+  .gico{flex:none;display:grid;place-items:center;width:26px;height:26px;border-radius:7px;background:color-mix(in srgb,var(--gc) 34%,rgba(255,255,255,.06));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--gc) 55%,transparent);color:#fff}
+  .gnm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ghead .chev{flex:none;display:grid;color:var(--text3)}
+  .gbtn{flex:none;display:grid;place-items:center;width:30px;height:30px;padding:0;border:0;border-radius:8px;background:none;color:var(--text2);cursor:pointer}
+  .gbtn:hover{background:rgba(255,255,255,.08);color:var(--text)}
+  .grow.hid .ghead{color:var(--text3)}.grow.hid .gico{opacity:.4}
+  .gedit{padding:6px 10px 12px;border-top:1px solid rgba(255,255,255,.07)}
+  .gfoot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px}
+  .gfoot .linkbtn{margin-left:-8px}
+  .gfoot .hint{margin:0;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .layer.clip .nm::before{content:"↓ ";color:var(--acc)}
   .layer .rename{font-size:13px;padding:2px 6px;min-width:0;width:100%}
 

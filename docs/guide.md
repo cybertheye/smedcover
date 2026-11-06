@@ -22,7 +22,7 @@ The cover, small and blurred, fills the window behind everything, and every pane
 - **Dock** — on the left, five buttons, each opening its sheet beside it, one at a time:
   - **Content** — the channel, and the cover's words: title, subtitle, corner tag. Longer notes sit behind ⓘ; *Copy from another channel…* is at its foot.
   - **Look** — a search field and chips over the cards, then every look as a card with this cover drawn in it; under the cards, the look's own settings and how Surprise me deals it. See [Looks](#looks).
-  - **Layout** — your layout presets as cards, the colour block's edge, which layout parts show; *Hide every layout part* and *Reset the layout parts' places* at its foot. While it is open the canvas frames each layout part (see [Which parts show](#which-parts-show)).
+  - **Layout** — your layout presets as cards, the colour block's edge, which layout parts show, the [layout guide](#layout-guide) over the canvas; *Hide every layout part* and *Reset the layout parts' places* at its foot. While it is open the canvas frames each layout part (see [Which parts show](#which-parts-show)).
   - **Assets** — *Text*, *Colour*, *Upload photos* and *AI generate*, a search field, then the photos on this cover, then the shelves: the photo shelf, stickers, channel graphics, my vector assets, AI stickers & graphics. See [Assets](#assets).
   - **Layers** — chips to show all the layers or some, the layer list; under it, the selected layer and what can be done to it. See [Layers](#layers).
 
@@ -69,6 +69,17 @@ The cover, small and blurred, fills the window behind everything, and every pane
 The order they are stacked in is the layer list's: drag a row in the *Layers* sheet to change it. The new order is the profile's default order from then on: a new channel's cover and *Empty this cover…* stack the layout's parts so (the layers you added are not part of it). The cover and the default change together, one step of undo.
 
 While the *Layout* sheet is open, the canvas frames every layout part drawn at the size shown — the title, subtitle, tag, brand row, channel name and graphic, logo and colour block, not the background (nor the corner brackets, a part hidden or one locked) — in a dashed line named as the layer list names it; the selected part keeps its own frame and handles instead. The frames follow every change, a drag, the window resized and the size shown, and go when another sheet, the 3D view, Settings or the drawer takes the sheet's place, or while the letter, crop or weave window is open or the weave's brush paints. A press anywhere inside a frame (its whole box, the colour block's too, regardless of its slanted edge) takes that part and drags it, as a press on the part does, so a part lying under another, or under a photo, is reached by its frame: where frames lie one in another, the smallest wins, unless what you press is smaller still (a sticker on the title, say) or is the layer already selected, which keeps the press.
+
+### Layout guide
+
+*Layout guide*, in the *Layout* sheet under *Which parts show*, lays columns, rows or a grid over the canvas to line things up by, as Figma's layout guides do. Its switch (or **⌃G**, Control-G, on a Mac; **Ctrl+G** or Ctrl+Shift+4 elsewhere, in the editor with no field holding the focus) shows or hides it. Switched on for the first time it starts with six columns stretched across the cover, a gutter of 20 px, no margin and the width worked out (*Auto*), in red (`#FF0000`) at 10%; switched off, it keeps its guides for the next time.
+
+- **Only for the eye.** It is drawn over the editor's canvas alone: never on the cover, its thumbnails, the layout presets' pictures or an export. The 3D view and Settings hide it.
+- **Each guide** is a row: its kind in its colour and what it is (*6 columns · Stretch*, *Grid · 10 px*), a click opening its settings under it (one at a time), its eye to hide it without losing it, and − to remove it. *＋ Add a guide* puts another over the others (up to eight); where they overlap their colours add up. Removing the last one switches the guide off.
+- **Its settings**, as in Figma: *Columns*, *Rows* or *Grid*. Columns and rows have a *Count* (1 to 48) and a *Type*: *Stretch* fills the cover between the margins at either side, the *Width* (rows: *Height*) worked out and shown as *Auto · 303.3 px*; *Left*, *Center* and *Right* (rows: *Top*, *Center*, *Bottom*) give each a width of its own, from that side by the *Offset* (centred, none), the width they had when stretched to begin with. Then the *Gutter* between them. A grid has the *Size* of its square cells, and is neither drawn nor snapped to where a cell would be under 4 pixels of the screen. Each has its *Colour* and *Opacity*. A bar dragged repaints the guide alone, not the cover.
+- **Its numbers are the cover's own pixels**, as a Figma frame's are: on a size of 1920 × 1080 a gutter of 20 is 20 of its pixels, on 3840 × 2160 the same 20, so it looks finer there. The foot of the section says which size it is counting in.
+- **Snapping.** While it shows, a layer dragged on the canvas (a group of them, or the layer FOCUS works on, too) comes to rest where its left or right edge or its centre nears a column's edge, its centre a column's middle, its top, bottom or centre a row's edge or middle, or any of them a grid line, within 6 pixels of the screen; the line it rests on is drawn at full strength while it holds. A turned layer is taken by the box round it. Hold **⌘** (Ctrl on Windows and Linux) while dragging to move freely; on a Mac Control does it too once the drag has begun (pressed first, Control makes the press a right click). Hiding the guide during a drag (⌃G) lets the rest of that drag go freely. The arrow keys, the handles and the wheel do not snap, nor a photo filling the canvas.
+- It is the same for every profile, channel and size, and kept on this computer (`settings.guide` in `custom.json`). What a new guide is comes from `defaults.json` (`layout.guide`, see [Defaults and your settings](#defaults-and-your-settings-customjson)).
 
 ### Photos
 
@@ -191,7 +202,8 @@ Repaint the attached photograph as a loose watercolour painting …
 | Click | Select the topmost layer |
 | Click inside a layout part's dashed frame, with the *Layout* sheet open | Select that part, even one under another layer (see [Which parts show](#which-parts-show)) |
 | Double-click | Open the properties drawer |
-| Drag | Move |
+| Drag | Move; with the [layout guide](#layout-guide) shown, it snaps to its columns, rows or grid (⌘ or Ctrl held: freely) |
+| ⌃G (Ctrl+G elsewhere) | Show or hide the [layout guide](#layout-guide) |
 | Drag a corner | Resize |
 | Drag a side | Stretch horizontally or vertically |
 | Drag the top knob | Rotate |
@@ -918,11 +930,11 @@ The defaults the app starts from are in `defaults.json`, which comes with the ap
 |---|---|
 | `settings` | what a setting is until you choose one: the language (`""` follows the system), the export's `scale`, `format`, `quality` and file names (`nameTemplate`), what *Applies to* is at every start (`scope`), the frosted `glass`, the `drawer` open, the cut-out's engine (`cutEngine`), and the layout presets the app comes with (`layouts`, kept as yours are in `custom.json`): your list until you have one of your own, which you do once you make, change or delete one |
 | `profile` | what a new profile starts with: its ground, look and seed (`style`), its `sizes`, and the starter's name, brand and channels (`starter`; a name may be given in each language, `{ "zh": …, "en": … }`) |
-| `layout` | the layout each orientation is given (`byOrient`: `wide`, `square`, `tall`, each a template and its adjustments) |
+| `layout` | the layout each orientation is given (`byOrient`: `wide`, `square`, `tall`, each a template and its adjustments); what a new [layout guide](#layout-guide) is (`guide`: its `kind`, `count`, `align`, `width`, `margin`, `gutter`, grid `size`, `color` and `opacity`) |
 | `surprise` | Surprise me's chances (`odds`), under those you set in its chances window |
 | `ui` | the side columns' least and first widths in px (`columns`), the room the canvas keeps (`centreMin`, `centreRoomy`), how slow dragging must be, in ms between frames, for the note on the glass (`glassSlowMs`) |
 
-What you set in the app is kept in `custom.json`, in the data folder (above), laid out by the same modules: the language, the export's options and folders, the glass, the drawer, the columns' widths, the profile and channel you were last on, your layout presets, Surprise me's locks and chances, the fonts you used last, and so on. The app writes it as you go; you never edit it.
+What you set in the app is kept in `custom.json`, in the data folder (above), laid out by the same modules: the language, the export's options and folders, the glass, the drawer, the columns' widths, the layout guide, the profile and channel you were last on, your layout presets, Surprise me's locks and chances, the fonts you used last, and so on. The app writes it as you go; you never edit it.
 
 - It holds only what differs from `defaults.json`, and what has no default. A setting put back to its default is left out, so when a later version changes a default, a setting you never changed follows it.
 - Everything the app writes is under `settings`, Surprise me's chances and the columns' widths too: the other modules hold the defaults those are laid over and that *Reset* goes back to.

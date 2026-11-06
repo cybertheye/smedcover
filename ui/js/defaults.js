@@ -9,7 +9,7 @@
 //             layout presets the app comes with
 //   profile   what a new profile starts with (store.js, presets.js): its look and ground, its sizes, the starter
 //             profile's name, brand and channels
-//   layout    the layout each orientation is given (layout.js)
+//   layout    the layout each orientation is given (layout.js); a new layout guide over the canvas (guide, guides.js)
 //   surprise  Surprise me's chances, under the user's own (RULES.odds in deal.js)
 //   ui        the window's numbers (app.js): the side columns' widths, the room the canvas keeps, the note on slow glass
 // In the page it is fetched, as the built-in repaint styles are; under Node (the tests) read from the disk.

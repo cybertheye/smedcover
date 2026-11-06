@@ -42,7 +42,8 @@
       "wide": { "template": "split", "adjust": { "size": 0.21, "slant": 0.17, "tw": 1, "th": 1, "flip": false } },
       "tall": { "template": "stack", "adjust": { "size": 0.14, "slant": 0.08, "tw": 1, "th": 1, "flip": false } },
       "square": { "template": "banner", "adjust": { "size": 0.13, "slant": 0, "tw": 1, "th": 1, "flip": false } }
-    }
+    },
+    "guide": { "kind": "columns", "count": 6, "align": "stretch", "width": 100, "margin": 0, "gutter": 20, "size": 10, "color": "#FF0000", "opacity": 0.1 }
   },
   "surprise": {
     "odds": {

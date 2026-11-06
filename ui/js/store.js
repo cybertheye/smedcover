@@ -14,6 +14,7 @@ import { TEMPLATES, ORIENTS, normalizeAdjust, layoutByOrient } from "./layout.js
 import { LOOKS, LOOK_IDS, lookParams } from "./style.js";
 import { normalizeLayers, normalizeScene, normalizeT, BOUND_TYPES, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, EXTRA_STICKER, RETIRED_GRAPHICS } from "./layers.js";
 import { DEFAULTS } from "./defaults.js";
+import { normalizeGuides } from "./guides.js";
 
 const T = globalThis.__TAURI__;
 /**
@@ -274,6 +275,7 @@ export function normalizeSettings(raw) {
       .filter(([k, v]) => /^[\w-]{1,60}$/.test(k) && typeof v === "string" && v.trim() && v.length <= 4096).slice(0, 200)),
     scope: oneOf(s.scope, SCOPES, D.scope, "orient"),   // what a change of place or layout reaches: every size, those facing the way this one does (see orientOf in layout.js), or this one
     hideScene: flag(s.hideScene, D.hideScene === true),   // the scene objects' handles hidden on the canvas
+    guide: normalizeGuides(s.guide),   // the layout guide over the editor's canvas: shown or not (⌃G) and its columns, rows and grids (guides.js), for every profile and size
     glass: flag(s.glass, D.glass !== false),   // the panels frosted glass over the cover (false: plain, translucent; see setGlass in app.js)
     glassHint: s.glassHint === true,   // the note offering plain panels, when dragging was slow with the glass, was shown (see glassWatch)
     footHint: s.footHint === true,   // the note on words put into the bottom 13%, where the apps lay their marks, was shown (see footCheck in app.js)

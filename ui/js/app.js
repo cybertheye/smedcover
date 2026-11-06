@@ -33,6 +33,7 @@ import { IMAGE_PROVIDERS, IMAGE_DEFAULTS, MAX_STYLES, loadStyles, styleText, leg
 import { AI_STYLES, AI_KINDS, AI_PLACEHOLDER, AI_DEFAULTS, normalizeAi, aiReady, endpoint, buildRequest, readReply, buildPrompt, retryMessage, withImage } from "./ai.js";
 import { makeCommands } from "./commands.js";
 import { TILT, tiltOf, setTilt } from "./tilt.js";
+import { GUIDES_MOST, GUIDE_LIMITS, GRID_FINEST, SNAP_PX, guideDefaults, newGuide, autoWidth, snapTargets, snapAxis, paintGuides } from "./guides.js";
 import { toolsJson } from "./tools.js";
 import { startAgent, stepping, MCP, onMcpStatus, maskToken, setupLines, setupAsk } from "./agent.js";
 
@@ -531,6 +532,7 @@ function flushDraw() {
   // the thumbnails and the window's ground show the cover: not drawn again for the 3D view opening, closing or a layer selected in it
   if (changed || !V3.on) { thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); later("ambient", 350, paintAmbient); }
   placeFrames();   // the layout's parts framed, where the Layout sheet is open
+  placeGuides();   // the layout guide over the canvas, where it is shown
   if (S.letterWin) later("letters", 200, lettersShow);   // the ransom note's letters as now drawn (words typed, colours changed)
   if (S.weaveWin) later("weave", 200, weaveShow);   // the woven letters as now typed
   if (LAYED.redraw) later("layed", 80, LAYED.redraw);   // a layout preset's editor, with what arrived since (outlines, fonts)
@@ -822,7 +824,7 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
   cv.addEventListener("pointerdown", (e) => {
     if (S.mode !== "edit") return;
     if (S.brushWin) return brushDown(e);   // the weave's brush: the canvas only paints
-    const done = (moved, ids) => () => { cv.onpointermove = null; endLive(); if (moved()) { renderSide(); placed(ids); } };
+    const done = (moved, ids) => () => { cv.onpointermove = null; GUIDE.hot = null; endLive(); placeGuides(); if (moved()) { renderSide(); placed(ids); } };
     // a handle of the layout itself (the diamonds): dragging it changes the template for every cover of this profile
     const at0 = virtualPoint(e), lh = diamond(e);
     if (lh && lh.id[0] === "w") {   // a corner of the perspective: the lettering's block is reshaped
@@ -924,10 +926,11 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
     if (many.some((x) => x.id === L.id)) return dragGroup(e, many, L);
     selectLayer(L.id);
     if (L.locked || L.type === "bg") return;
-    let last = virtualPoint(e), moved = false;
+    let moved = false;
+    const step = dragMover([L], virtualPoint(e), (ddx, ddy) => edit(L, { ddx, ddy }));   // resting on the layout guide where it shows
     cv.setPointerCapture(e.pointerId);
     goLive(L.id);
-    cv.onpointermove = (m) => { const p = virtualPoint(m); moved = true; edit(L, { ddx: p.x - last.x, ddy: p.y - last.y }); last = p; };
+    cv.onpointermove = (m) => { moved = true; step(virtualPoint(m), freeDrag(m)); };
     cv.onpointerup = cv.onpointercancel = done(() => moved, [L.id]);
   });
   // The selection rectangle is a box laid over the canvas, not drawn on it: the cover is not
@@ -957,24 +960,22 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
   function focusDrag(e) {
     const list = focusTargets();
     if (!list.length) return;
-    let last = virtualPoint(e), moved = false;
+    let moved = false;
+    const step = dragMover(list, virtualPoint(e), (ddx, ddy) => (group().length ? editAll(list, { ddx, ddy }) : edit(list[0], { ddx, ddy })));
     cv.setPointerCapture(e.pointerId);
     goLive(list.map((x) => x.id));
-    cv.onpointermove = (m) => {
-      const p = virtualPoint(m), d = { ddx: p.x - last.x, ddy: p.y - last.y };
-      moved = true; last = p;
-      if (group().length) editAll(list, d); else edit(list[0], d);
-    };
-    cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; endLive(); if (moved) { renderSide(); placed(list.map((x) => x.id)); } };
+    cv.onpointermove = (m) => { moved = true; step(virtualPoint(m), freeDrag(m)); };
+    cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; GUIDE.hot = null; endLive(); placeGuides(); if (moved) { renderSide(); placed(list.map((x) => x.id)); } };
   }
   /** Drags every movable member of the group together; a click without a drag selects just the one clicked. */
   function dragGroup(e, many, L) {
     const list = movers(many);
-    let last = virtualPoint(e), moved = false;
+    let moved = false;
+    const step = dragMover(list, virtualPoint(e), (ddx, ddy) => editAll(list, { ddx, ddy }));   // the group's box resting on the layout guide where it shows
     cv.setPointerCapture(e.pointerId);
     if (list.length) goLive(list.map((x) => x.id));
-    cv.onpointermove = (m) => { if (!list.length) return; const p = virtualPoint(m); moved = true; editAll(list, { ddx: p.x - last.x, ddy: p.y - last.y }); last = p; };
-    cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; endLive(); if (moved) { renderSide(); placed(list.map((x) => x.id)); } else selectLayer(L.id); };
+    cv.onpointermove = (m) => { if (!list.length) return; moved = true; step(virtualPoint(m), freeDrag(m)); };
+    cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; GUIDE.hot = null; endLive(); placeGuides(); if (moved) { renderSide(); placed(list.map((x) => x.id)); } else selectLayer(L.id); };
   }
   cv.addEventListener("wheel", (e) => {
     if (S.mode !== "edit") return;
@@ -1350,6 +1351,109 @@ function partsBox() {
       el("span", { class: "eye", innerHTML: on ? EYE_ON : EYE_OFF }), el("span", {}, layerName(L)));
   };
   return el("div", {}, capInfo("cover.parts", t("cover.partsTip")), el("div", { class: "parts" }, list.map(chip)), el("div", { class: "hint" }, t("cover.partsHint")));
+}
+/** The pictures of the layout guide's kinds and its remove button. */
+const GUIDE_ICONS = {
+  columns: '<rect x="4" y="4.5" width="4" height="15" rx="1"/><rect x="10" y="4.5" width="4" height="15" rx="1"/><rect x="16" y="4.5" width="4" height="15" rx="1"/>',
+  rows: '<rect x="4.5" y="4" width="15" height="4" rx="1"/><rect x="4.5" y="10" width="15" height="4" rx="1"/><rect x="4.5" y="16" width="15" height="4" rx="1"/>',
+  grid: '<rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M9.33 4v16M14.67 4v16M4 9.33h16M4 14.67h16"/>',
+  minus: '<path d="M6 12h12"/>',
+};
+const guideIcon = (k, px = 16) => `<svg viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${GUIDE_ICONS[k]}</svg>`;
+/** A guide in a few words, as its row in the Layout sheet names it: "6 columns · Stretch", "Grid 10 px". */
+function guideSummary(g) {
+  if (g.kind === "grid") return t("guide.sum.grid", g.size);
+  const rows = g.kind === "rows", align = { stretch: "guide.stretch", start: rows ? "guide.top" : "guide.left", center: "guide.center", end: rows ? "guide.bottom" : "guide.right" }[g.align];
+  return `${t(`guide.sum.${g.kind}${g.count === 1 ? "1" : ""}`, g.count)} · ${t(align)}`;
+}
+/**
+ * Layout → the layout guide (see "the layout guide" above placeGuides): its switch, shown or not over the canvas (⌃G);
+ * on, each guide a row — its kind and what it is in a few words, which opens its settings under it (one open at a
+ * time, as Figma's popover shows one), its eye and its remove — and Add a guide. Its settings, as Figma has them:
+ * columns, rows or a grid; their count, how they stand (stretched with the width worked out, or from one side or the
+ * middle at a width of their own), the margin (or the offset from that side) and the gutter; a grid's cell size; the
+ * colour and its opacity. A bar dragged paints the guide alone, the cover as it is.
+ */
+function guideSection() {
+  const gd = S.settings.guide;
+  const head = el("div", { class: "lhead" }, capInfo("guide.title", t("guide.about", guideKey(), freeKey())),
+    el("button", { type: "button", class: "tog" + (gd.on ? " on" : ""), role: "switch", "aria-checked": String(gd.on), "aria-label": t("guide.show"), title: t("guide.showTip", guideKey()), onclick: () => setGuide(!gd.on) }));
+  if (!gd.on) return el("div", { class: "guides" }, head, el("div", { class: "hint" }, t("guide.offHint", guideKey())));
+  const z = selSize();
+  return el("div", { class: "guides" }, head,
+    el("div", { class: "glist" }, gd.list.map((g, i) => guideRow(g, i))),
+    el("div", { class: "gfoot" },
+      el("button", { type: "button", class: "linkbtn", disabled: gd.list.length >= GUIDES_MOST, title: gd.list.length >= GUIDES_MOST ? t("guide.full", GUIDES_MOST) : null,
+        onclick: () => { gd.list.push(newGuide()); GUIDE.open = gd.list.length - 1; guideChanged(true); } }, t("guide.add")),
+      el("span", { class: "hint" }, t("guide.units", `${z.w} × ${z.h}`))));
+}
+/** Guide `g`, the i-th, in the Layout sheet: its row, and its settings under it while open. */
+function guideRow(g, i) {
+  const gd = S.settings.guide, open = GUIDE.open === i, D = guideDefaults(), z = selSize();
+  const rows = g.kind === "rows", len = rows ? z.h : z.w;
+  // how far each bar goes: as far as makes sense on the size shown (a column as wide as the cover, a margin half of it,
+  // a cell as big as its short side), never short of the value it has, nor past what a guide may hold
+  const upTo = (k, room) => Math.min(GUIDE_LIMITS[k][1], Math.max(Math.round(room), g[k], D[k]));
+  const sum = el("span", { class: "gnm" }, guideSummary(g));
+  const autoText = () => t("guide.auto", Math.round(autoWidth(g, len) * 10) / 10);
+  // a value changed in place (a bar dragged): the guide painted and its row's words written again, the sheet left as it is
+  let widthBar = null;
+  const set = (k, v) => {
+    g[k] = v; sum.textContent = guideSummary(g);
+    const why = widthBar && widthBar.querySelector(".why");
+    if (why) { why.textContent = autoText(); widthBar.querySelector(".bar").title = why.textContent; }
+    guideChanged();
+  };
+  const row = el("div", { class: "grow" + (open ? " open" : "") + (g.shown ? "" : " hid") },
+    el("button", { type: "button", class: "ghead", "aria-expanded": String(open), title: t(open ? "guide.collapse" : "guide.expand"),
+      onclick: () => { GUIDE.open = open ? -1 : i; renderPanel(); } },
+      el("span", { class: "gico", style: `--gc:${g.color}`, innerHTML: guideIcon(g.kind) }), sum,
+      el("span", { class: "chev", innerHTML: CHEV_ICON(open ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6") })),
+    el("button", { type: "button", class: "gbtn", "aria-pressed": String(g.shown), title: t(g.shown ? "guide.hide" : "guide.unhide"), "aria-label": t(g.shown ? "guide.hide" : "guide.unhide"), innerHTML: g.shown ? EYE_ON : EYE_OFF,
+      onclick: () => { g.shown = !g.shown; guideChanged(true); } }),
+    el("button", { type: "button", class: "gbtn", title: t("guide.remove"), "aria-label": t("guide.remove"), innerHTML: guideIcon("minus", 14),
+      onclick: () => {
+        gd.list.splice(i, 1);
+        if (!gd.list.length) gd.on = false;   // none left: the switch off, and on again it starts with a new one
+        GUIDE.open = GUIDE.open === i ? -1 : GUIDE.open > i ? GUIDE.open - 1 : GUIDE.open;
+        guideChanged(true);
+      } }));
+  if (!open) return el("div", { class: "gitem" }, row);
+  const L = GUIDE_LIMITS, kids = [
+    segs(t("guide.kind"), [["columns", t("guide.columns"), guideIcon("columns", 14)], ["rows", t("guide.rows"), guideIcon("rows", 14)], ["grid", t("guide.grid"), guideIcon("grid", 14)]], g.kind,
+      (v) => { g.kind = v; guideChanged(true); }),
+  ];
+  if (g.kind === "grid") kids.push(scrub(t("guide.size"), L.size[0], upTo("size", Math.min(z.w, z.h) / 2), 1, g.size, SHOWN.px, (v) => set("size", v), D.size));
+  else {
+    const side = (v) => t({ stretch: "guide.stretch", start: rows ? "guide.top" : "guide.left", center: "guide.center", end: rows ? "guide.bottom" : "guide.right" }[v]);
+    kids.push(
+      scrub(t("guide.count"), L.count[0], L.count[1], 1, g.count, SHOWN.int, (v) => set("count", v), D.count),
+      segs(t("guide.align"), ["stretch", "start", "center", "end"].map((v) => [v, side(v)]), g.align, (v) => {
+        if (g.align === "stretch") g.width = clamp(Math.round(autoWidth(g, len)) || g.width, L.width[0], L.width[1]);   // from stretched: each the width it had, as Figma does
+        g.align = v; guideChanged(true);
+      }));
+    const wname = t(rows ? "guide.height" : "guide.width");
+    widthBar = g.align === "stretch" ? scrub(wname, L.width[0], upTo("width", len), 1, autoWidth(g, len), SHOWN.px, () => {}, null, autoText())
+      : scrub(wname, L.width[0], upTo("width", len), 1, g.width, SHOWN.px, (v) => set("width", v), D.width);
+    kids.push(widthBar);
+    if (g.align !== "center") kids.push(scrub(t(g.align === "stretch" ? "guide.margin" : "guide.offset"), L.margin[0], upTo("margin", len / 2), 1, g.margin, SHOWN.px, (v) => set("margin", v), D.margin));
+    kids.push(scrub(t("guide.gutter"), L.gutter[0], upTo("gutter", len / 4), 1, g.gutter, SHOWN.px, (v) => set("gutter", v), D.gutter));
+  }
+  // the colour: its row as a layer's colour is (see swatch), its ↺ shown in place while it is off the default (the row
+  // not built anew under the colour picker, which may still be open)
+  const dot = el("span", { class: "dot" }), hex = el("span", { class: "hex" }), pick = el("input", { type: "color", "aria-label": t("guide.color") });
+  const back = el("button", { type: "button", class: "rs", title: t("props.resetTo", t("guide.color"), D.color), "aria-label": t("props.resetTo", t("guide.color"), D.color), innerHTML: RESET_ICON });
+  const colourRow = el("div", { class: "cr" }, el("label", { class: "cb" }, pick, dot, el("span", { class: "nm" }, t("guide.color")), hex), back);
+  const showColour = (c) => {
+    dot.style.background = c; hex.textContent = c; pick.value = c.toLowerCase(); row.querySelector(".gico").style.setProperty("--gc", c);
+    colourRow.classList.toggle("chg", c !== D.color); back.hidden = c === D.color;
+  };
+  pick.oninput = () => { const c = pick.value.toUpperCase(); showColour(c); set("color", c); };
+  back.onclick = () => { showColour(D.color); set("color", D.color); pick.focus({ preventScroll: true }); };
+  showColour(g.color);
+  kids.push(colourRow,
+    scrub(t("guide.opacity"), 0, 1, 0.01, g.opacity, SHOWN.pct, (v) => set("opacity", Math.round(v * 100) / 100), D.opacity));
+  return el("div", { class: "gitem" }, row, el("div", { class: "gedit psec-b" }, kids));
 }
 const EYE_ON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_OFF = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7c1.8 0 3.4-.5 4.8-1.3"/></svg>';
@@ -4826,7 +4930,7 @@ function previewTag() {
  * templateControls stay.
  */
 const TEMPLATE_BOX = false;
-/** Layout: the layout presets, the template at this size (while TEMPLATE_BOX), the colour block's edge, which parts show, and all the layout hidden or put back in place. */
+/** Layout: the layout presets, the template at this size (while TEMPLATE_BOX), the colour block's edge, which parts show, the layout guide over the canvas, and all the layout hidden or put back in place. */
 function layoutSheet() {
   const off = layoutLayers().every((l) => !l.visible);
   return [
@@ -4835,6 +4939,7 @@ function layoutSheet() {
     TEMPLATE_BOX && layoutBox(),
     shapesSection(),
     partsBox(),
+    guideSection(),
     el("div", { class: "sheet-foot" },
       el("div", { class: "togrow", title: t("layout.tip") },
         el("div", { style: "flex:1;min-width:0" }, el("div", { style: "font-weight:700" }, t("layout.hideAll")), el("div", { class: "hint", style: "margin:2px 0 0" }, t("layout.hideAllSub"))),
@@ -7355,6 +7460,97 @@ function placeFrames() {
     f.tag.style.top = Math.max(2, y - ey + (inside ? 4 : 0)) + "px";
   }
 }
+// ---------- the layout guide (guides.js): columns, rows or a grid over the canvas to line things up by, as Figma's
+// layout guides are; shown or not by the Layout sheet's switch or ⌃G, kept on this computer for every profile and
+// size, its numbers the size's own pixels. A canvas of its own laid over the cover's, as the parts' frames are, never
+// drawn on the cover: so it is in no thumbnail, preset picture or export, and a change to it paints it alone, not the
+// cover. A layer dragged while it shows comes to rest on its columns' edges and middles and its rows' and grid's lines
+// (guideSnap), the line it rests on drawn at full strength meanwhile; with Control held it moves freely.
+/** hot: the lines a drag rests on ({x, y} in the cover's pixels), or null; open: the guide whose settings show in the Layout sheet (-1: none); drawn: what the guide's canvas was last painted from. */
+const GUIDE = { hot: null, open: 0, drawn: "" };
+const GUIDE_CV = el("canvas", { id: "guides", "aria-hidden": "true", hidden: true });
+$("stage").append(GUIDE_CV);
+/**
+ * A drag that moves freely, the guide shown or not: ⌘ or Control held (on a Mac a press with Control down is a right
+ * click, so ⌘ is the one to hold from the start there; Control works once the drag is under way).
+ */
+const freeDrag = (e) => e.metaKey || e.ctrlKey;
+/** The key a drag is held free by, as it is written (see freeDrag). */
+const freeKey = () => (MOD_KEY === "⌘" ? "⌘" : "Ctrl");
+/** The key that shows or hides the guide, as Figma's, as it is written: Control-G (⌃G on a Mac); Ctrl+Shift+4 too (isGuideKey). */
+const guideKey = () => (MOD_KEY === "⌘" ? "⌃G" : "Ctrl+G");
+const isGuideKey = (e) => e.ctrlKey && !e.metaKey && !e.altKey && ((!e.shiftKey && e.key.toLowerCase() === "g") || (e.shiftKey && e.code === "Digit4"));
+/** Whether the guide shows over the canvas now: switched on with a guide shown, in the editor, on the flat canvas. */
+const guidesShown = () => S.mode === "edit" && !!S.cover && !V3.on && S.settings.guide.on && S.settings.guide.list.some((g) => g.shown);
+/** Lays the guide's canvas over the cover's, at the screen's pixels, and paints it where what it shows has changed (see paintGuides). */
+function placeGuides() {
+  const cv = $("cv"), on = guidesShown();
+  GUIDE_CV.hidden = !on;
+  if (!on) { GUIDE.drawn = ""; return; }
+  const size = selSize(), dpr = window.devicePixelRatio || 1, w = cv.offsetWidth, h = cv.offsetHeight, W = Math.max(1, Math.round(w * dpr)), H = Math.max(1, Math.round(h * dpr));
+  Object.assign(GUIDE_CV.style, { left: cv.offsetLeft + "px", top: cv.offsetTop + "px", width: w + "px", height: h + "px" });
+  const key = JSON.stringify([S.settings.guide.list, size.w, size.h, W, H, GUIDE.hot]);
+  if (key === GUIDE.drawn) return;
+  GUIDE.drawn = key;
+  if (GUIDE_CV.width !== W) GUIDE_CV.width = W;
+  if (GUIDE_CV.height !== H) GUIDE_CV.height = H;
+  paintGuides(GUIDE_CV.getContext("2d"), S.settings.guide.list, size.w, size.h, W, H, GUIDE.hot, dpr);
+}
+/** A change to the guide: kept, and painted; the Layout sheet built again where `rebuild` (what it shows of the guide changed). */
+function guideChanged(rebuild = false) {
+  persistSettings(); placeGuides();
+  if (rebuild && S.mode === "edit" && S.tab.edit === "layout") renderPanel();
+}
+/**
+ * Shows the guide over the canvas, or hides it (its guides kept for the next time). Shown with none, it starts with
+ * a new one (newGuide: six columns stretched across, a gutter of 20 px and no margin, in red at 10%), its settings open.
+ */
+function setGuide(on) {
+  const gd = S.settings.guide;
+  if (on && !gd.list.length) { gd.list.push(newGuide()); GUIDE.open = 0; }
+  if (on && !gd.list.some((g) => g.shown)) for (const g of gd.list) g.shown = true;   // every one hidden: shown, or the switch would show nothing
+  gd.on = on;
+  guideChanged(true);
+}
+/**
+ * While the layers of `list` are dragged on the canvas with the guide shown, what brings the drag to rest on it: a
+ * function of the move so far (dx, dy in the canvas's virtual units, `k` of them to a pixel of the screen; `free`,
+ * Control held: as it is) to the move to make, which marks the lines it rests on meanwhile (GUIDE.hot). The layers
+ * are taken as the box round them as they were drawn when the drag began (turned ones by the box round them turned).
+ * null where nothing snaps: the guide not shown, none of them drawn here, or one filling the canvas.
+ */
+function guideSnap(list) {
+  const cv = $("cv");
+  if (!guidesShown() || !cv._hits || !cv._virtual || !list.length || list.some(fillsCanvas)) return null;
+  const ids = new Set(list.map((L) => L.id)), hits = cv._hits.filter((h) => ids.has(h.id));
+  if (!hits.length) return null;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const h of hits) {
+    const a = ((h.r || 0) * Math.PI) / 180, ex = Math.abs(h.hw * Math.cos(a)) + Math.abs(h.hh * Math.sin(a)), ey = Math.abs(h.hw * Math.sin(a)) + Math.abs(h.hh * Math.cos(a));
+    x0 = Math.min(x0, h.cx - ex); x1 = Math.max(x1, h.cx + ex); y0 = Math.min(y0, h.cy - ey); y1 = Math.max(y1, h.cy + ey);
+  }
+  const size = selSize(), [vw, vh] = cv._virtual, fx = vw / size.w, fy = vh / size.h;
+  const to = snapTargets(S.settings.guide.list, size.w, size.h, fx, fy, (GRID_FINEST * size.w) / Math.max(1, cv.offsetWidth));   // a grid too fine to be drawn is not snapped to
+  return (dx, dy, k, free) => {
+    if (free || !guidesShown()) { GUIDE.hot = null; return { x: dx, y: dy }; }   // ⌘ or Control held, or the guide hidden meanwhile (⌃G)
+    const sx = snapAxis(x0, x1, dx, to.x, SNAP_PX * k), sy = snapAxis(y0, y1, dy, to.y, SNAP_PX * k);
+    GUIDE.hot = sx.at == null && sy.at == null ? null : { x: sx.at == null ? [] : [sx.at / fx], y: sy.at == null ? [] : [sy.at / fy] };
+    return { x: sx.d, y: sy.d };
+  };
+}
+/**
+ * A drag's move on the canvas, snapping to the guide where it shows (guideSnap): `step(p)` for each point of the
+ * pointer (a virtualPoint, and the event's Control), which calls `move(ddx, ddy)` with what to move by since the last.
+ */
+function dragMover(list, from, move) {
+  const snap = guideSnap(list);
+  let last = from, put = { x: 0, y: 0 };
+  return (p, free) => {
+    if (!snap) { move(p.x - last.x, p.y - last.y); last = p; return; }
+    const to = snap(p.x - from.x, p.y - from.y, p.k, free);
+    move(to.x - put.x, to.y - put.y); put = to;
+  };
+}
 addEventListener("pointerdown", (e) => {   // a click away from the bar and its popover shuts the popover
   if (!FTB.pop || BAR.contains(e.target) || POP.contains(e.target) || (e.target.closest && e.target.closest("#tip, .pklist"))) return;   // a picker's list is the popover's
   FTB.pop = ""; renderBar();
@@ -7425,7 +7621,7 @@ function close3d() {
   V3.changed = null;   // nothing kept to paint again
   if (S.mode === "edit") drawMain();
   $("stage").classList.remove("v3", "v3open");
-  markRows(); syncFocus(); placeBar(); placeFrames();
+  markRows(); syncFocus(); placeBar(); placeFrames(); placeGuides();
 }
 /** The 3D view's canvas and its bar of controls, put in the stage once. */
 function stage3d() {
@@ -8925,7 +9121,7 @@ function syncTabs() {
   const shown = (k) => k === S.tab.edit && !sheetHidden();
   $("dock").replaceChildren(...Object.keys(TABS.edit).map((k) => el("button", { class: shown(k) ? "on" : "", "aria-pressed": String(shown(k)), onclick: () => showSheet(k) }, ico(k, 22), t("dock." + k))),
     ...(CAN_UPDATE ? [el("button", { class: "upd" + (UPD.status && UPD.status.found ? " new" : ""), title: updTip(), "aria-label": t("upd.rail"), onclick: () => aboutDialog() }, ico("about", 20))] : []),
-    el("button", { class: "help", title: t("cover.how"), "aria-label": t("cover.howShort"), onclick: (e) => showTip(e.currentTarget, t("cover.how")) }, ico("help", 20)));
+    el("button", { class: "help", title: t("cover.how", guideKey(), freeKey()), "aria-label": t("cover.howShort"), onclick: (e) => showTip(e.currentTarget, t("cover.how", guideKey(), freeKey())) }, ico("help", 20)));
 }
 /** Shows sheet `k` in the left column, the drawer shut where it had taken the sheet's place. */
 function showSheet(k) {
@@ -9156,6 +9352,7 @@ addEventListener("keydown", (e) => {
   if (key === " " && !mod && !e.altKey && S.mode === "edit" && !MENU.open && !FTB.pop && !V3.on && !LIVE && !FTB.drag && !S.letterWin && !S.cropWin && !S.weaveWin) { e.preventDefault(); if (!e.repeat) surprise(e); return; }
   if (S.mode !== "edit") return;
   if (cmd && key === "e") { e.preventDefault(); if (e.repeat) return; closeMenu(); return exportDialog(); }
+  if (isGuideKey(e)) { e.preventDefault(); if (!e.repeat) setGuide(!S.settings.guide.on); return; }   // the layout guide shown or hidden, as Figma's ⌃G
   const L = layer();
   if (mod && key === "d") { e.preventDefault(); return group().length ? null : duplicateLayer(); }
   if (key === "escape") return V3.to ? set3d(false) : S.focus ? setFocus(false) : selectNothing();
