@@ -95,8 +95,9 @@ import { aura, auBlobs, auChan, auDuotone, auFreeAll, auGuard, auLegible, auMemo
 import { infrared, irFreeAll, irGrey, irLines, irPixels, irPlace, irRedness, irThin } from "./looks/infrared.js";
 import { mondo, moColossusAt, moFreeAll, moHot, moInks, moMemory, moPixels, moPlan, moSet } from "./looks/mondo.js";
 import { cosmo, cmBeamPath, cmFade, cmFreeAll, cmGrade, cmPlan, cmPlanetCols } from "./looks/cosmo.js";
+import { matrix, mxAlert, mxDropPlan, mxDrops, mxFigurePlan, mxFreeAll, mxGlyph, mxLines, mxMemory, mxPixels, mxRamp, mxRelief, mxSlide, mxWindowPlan } from "./looks/matrix.js";
 
-Object.assign(LOOKS, { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant, collage, yellow, pitch, dots, neon, court, velvet, rave, chrome, netart, verse, glass, jelly, skies, spectrum, citypop, construct, deco, wasteland, facet, chroma, aura, infrared, mondo, cosmo });
+Object.assign(LOOKS, { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant, collage, yellow, pitch, dots, neon, court, velvet, rave, chrome, netart, verse, glass, jelly, skies, spectrum, citypop, construct, deco, wasteland, facet, chroma, aura, infrared, mondo, cosmo, matrix });
 houseLook(cel);
 
 export { FX_STAGES, FX_TIMING, FX_TYPES, INK, LOOKS, asColumn, columnBoxOf, columned, css, effectsFor, fall, isFast, layerEffects, look, lookParams, lookState, lookValues, noteReads, paintEffects, parseColour, readsInto, role, scenePlaced, setFast, setLook, setScene, styled, wherePainted } from "./looks/kit.js";
@@ -118,7 +119,7 @@ export const LOOK_TAGS = {
   glass: ["illustration"], jelly: ["illustration"], skies: ["illustration"], spectrum: ["print", "experimental"],
   citypop: ["night", "illustration"], construct: ["poster"], deco: ["night", "illustration"], wasteland: ["illustration"],
   facet: ["night", "illustration"],
-  chroma: ["illustration", "poster"], aura: ["poster", "experimental"], infrared: ["experimental"], mondo: ["poster", "print"], cosmo: ["poster", "print"],
+  chroma: ["illustration", "poster"], aura: ["poster", "experimental"], infrared: ["experimental"], mondo: ["poster", "print"], cosmo: ["poster", "print"], matrix: ["night", "experimental"],
 };
 /** Internals the tests reach for. */
-export const __test = { toneTable, hueTurn, joinCells, celPixels, dkPixels, dkSpot, wlPixels, wlHot, wlBlock, wlMemory, fcDelaunay, fcFacets, fcGrade, fcRim, fcTones, fcLetters, fcWord, fcSignAt, fcMemory, fcFreeAll, auBlobs, auChan, auDuotone, auFreeAll, auGuard, auLegible, auMemory, auPal, auPhotoRamp, auPixels, auSpot, auThermal, AU_PALETTES, moSet, moHot, moInks, moPlan, moPixels, moColossusAt, moMemory, moFreeAll, cmBeamPath, cmFade, cmFreeAll, cmGrade, cmPlan, cmPlanetCols, chBlades, chBlock, chFields, chFreeAll, chHorizon, chPal, chPlan, chStops, chTritone, irPixels, irGrey, irRedness, irPlace, irLines, irThin, irFreeAll };
+export const __test = { toneTable, hueTurn, joinCells, celPixels, dkPixels, dkSpot, wlPixels, wlHot, wlBlock, wlMemory, fcDelaunay, fcFacets, fcGrade, fcRim, fcTones, fcLetters, fcWord, fcSignAt, fcMemory, fcFreeAll, auBlobs, auChan, auDuotone, auFreeAll, auGuard, auLegible, auMemory, auPal, auPhotoRamp, auPixels, auSpot, auThermal, AU_PALETTES, moSet, moHot, moInks, moPlan, moPixels, moColossusAt, moMemory, moFreeAll, cmBeamPath, cmFade, cmFreeAll, cmGrade, cmPlan, cmPlanetCols, mxRamp, mxAlert, mxGlyph, mxDrops, mxDropPlan, mxLines, mxWindowPlan, mxFigurePlan, mxRelief, mxPixels, mxSlide, mxMemory, mxFreeAll, chBlades, chBlock, chFields, chFreeAll, chHorizon, chPal, chPlan, chStops, chTritone, irPixels, irGrey, irRedness, irPlace, irLines, irThin, irFreeAll };

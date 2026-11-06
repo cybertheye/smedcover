@@ -733,7 +733,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared", "mondo", "cosmo"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared", "mondo", "cosmo", "matrix"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli", "gilded"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid", "glass"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
@@ -901,7 +901,7 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
 
 test("the poster looks: many settings each, their own grounds, flat layouts (all but the collage, on the slanted ones), and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
-  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared", "mondo", "cosmo"]) {
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared", "mondo", "cosmo", "matrix"]) {
     const L = LOOKS[id];
     assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
     assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
@@ -930,7 +930,7 @@ test("the poster looks: many settings each, their own grounds, flat layouts (all
 
 test("a look's figure drawn from a graphic: each such look names its slider, and a profile keeps the graphic put in its place", () => {
   const arts = LOOK_IDS.filter((id) => LOOKS[id].art);
-  assert.deepEqual(arts.sort(), ["avant", "chroma", "chrome", "cinema", "citypop", "construct", "cyano", "deco", "dots", "facet", "glass", "infrared", "jelly", "mondo", "monofilm", "negative", "neon", "netart", "rave", "spectrum", "toon", "velvet", "verse", "yellow"]);
+  assert.deepEqual(arts.sort(), ["avant", "chroma", "chrome", "cinema", "citypop", "construct", "cyano", "deco", "dots", "facet", "glass", "infrared", "jelly", "matrix", "mondo", "monofilm", "negative", "neon", "netart", "rave", "spectrum", "toon", "velvet", "verse", "yellow"]);
   for (const id of arts) { const d = LOOKS[id].params.find((q) => q.key === LOOKS[id].art); assert.ok(d && !d.text && !d.toggle && !d.needsPhoto, `${id}: the picker sits under a slider`); }
   const p = normalizeProfile({ style: { lookArt: { jelly: { kind: "sticker", id: "star" }, citypop: { kind: "user", id: "u9", extra: 1 }, deco: { kind: "bogus", id: "x" }, cel: { kind: "graphic", id: "gear" }, nope: { kind: "graphic", id: "gear" }, toon: { kind: "graphic" } } } });
   assert.deepEqual(p.style.lookArt, { jelly: { kind: "sticker", id: "star" }, citypop: { kind: "user", id: "u9" } });   // only looks with a figure, only real references
@@ -1695,6 +1695,113 @@ test("the chroma field: palettes of saturated fields whose lettering reads on th
     assert.deepEqual([...seen], ["palette"], "the lettering reads the palette alone");
   }
   setLook("cel");
+});
+
+test("the phosphor terminal: one hue from the glass to white-green, or the channel's; a photo graded into it; rain the same for the same seed, its heads white-hot; windows and the hologram clear of the words where there is room, never left out, each where it stands as the sliders move; the status line and the tears always there; the title readable on both grounds; what it keeps let go as it is left", async () => {
+  const L = LOOKS.matrix, { mxRamp, mxAlert, mxGlyph, mxDrops, mxDropPlan, mxLines, mxWindowPlan, mxFigurePlan, mxRelief, mxPixels, mxSlide, mxMemory, mxFreeAll } = (await import("../ui/js/style.js")).__test;
+  const lumOf = (c) => (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255, hue = (c) => (Math.atan2(Math.sqrt(3) * (c[1] - c[2]), 2 * c[0] - c[1] - c[2]) * 180) / Math.PI;
+  const contrast = (a, b) => { const l = (c) => { const v = c.map((x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; }; const [p, q] = [l(a), l(b)].sort((m, n) => n - m); return (p + 0.05) / (q + 0.05); };
+  // the ramp: one green, from the unlit glass to white-green, each step lighter; the channel's hue in its place when asked, a grey channel a white tube
+  const G = mxRamp([255, 120, 0]), steps = ["void", "deep", "dim", "mid", "phos", "hot", "white"].map((k) => G[k]);
+  for (let i = 1; i < steps.length; i++) assert.ok(lumOf(steps[i]) > lumOf(steps[i - 1]), `step ${i} lighter`);
+  for (const c of [G.dim, G.mid, G.phos, G.hot, G.paper, G.ink]) assert.ok(Math.abs(hue(c) - hue(G.phos)) < 22 && c[1] > c[0] && c[1] > c[2], `one green: ${c.map(Math.round)}`);
+  assert.ok(Math.abs(hue(mxRamp([255, 120, 0], 1).phos) - hue([255, 120, 0])) < 6, "an amber tube for an orange channel");
+  const white = mxRamp([128, 128, 128], 1).phos;
+  assert.ok(Math.max(...white) - Math.min(...white) < 30, `a grey channel: a white tube, ${white.map(Math.round)}`);
+  // the alert: the channel colour, unless it would read as the phosphor
+  assert.deepEqual(mxAlert([230, 40, 60], G), [230, 40, 60]);
+  assert.deepEqual(mxAlert([60, 230, 90], G), [255, 64, 92]);
+  // the photo graded into it: dark to the glass, light to white-green, every tone green, alpha kept; at 0 untouched
+  const px = new Uint8ClampedArray([0, 0, 0, 255, 128, 128, 128, 255, 255, 255, 255, 255, 230, 30, 30, 200, 9, 9, 9, 0]);
+  mxPixels(px, 1, G);
+  const at = (i) => [px[i * 4], px[i * 4 + 1], px[i * 4 + 2]];
+  assert.ok(lumOf(at(0)) < 0.03 && lumOf(at(2)) > 0.8 && lumOf(at(1)) > lumOf(at(0)) && lumOf(at(1)) < lumOf(at(2)), "by lightness");
+  for (const i of [1, 2, 3]) assert.ok(at(i)[1] >= at(i)[0] && at(i)[1] >= at(i)[2], `green: ${at(i)}`);
+  assert.deepEqual([px[15], px[19], ...at(4)], [200, 0, 9, 9, 9], "alpha kept, a see-through pixel left alone");
+  const same = new Uint8ClampedArray([200, 10, 10, 255]); mxPixels(same, 0, G); assert.deepEqual([...same], [200, 10, 10, 255]);
+  // a torn band of the photo: bands slid sideways, the same for the same seed
+  const band = () => { const d = new Uint8ClampedArray(40 * 30 * 4); for (let i = 0; i < d.length; i += 4) d[i] = (i / 4) % 40; mxSlide(d, 40, 30, 5, 6400); return d; };
+  assert.deepEqual([...band()], [...band()]);
+  // the rain: the same drops for the same seed, others for another; each drop's head the brightest, white-hot, its tail fading up the column
+  const drops = (sd) => { setLook("matrix", null, sd, true); const out = []; mxDrops(1920, 1080, 30, 0.5, 5500, (x, y, g, b, heat) => out.push([x, y, g, b, heat])); return out; };
+  const a = drops(11), b = drops(11), c = drops(987);
+  assert.ok(a.length > 300); assert.deepEqual(a, b); assert.notDeepEqual(a, c);
+  assert.ok(a.every(([x, y, g, bb]) => x >= 0 && x <= 1920 + 30 && y >= 0 && y < 1080 + 40 && g >= 0 && bb > 0 && bb <= 1), "every glyph on the canvas");
+  assert.ok(a.filter((q) => q[4] === 2).every((q) => q[3] === 1) && a.some((q) => q[4] === 2), "the heads white-hot");
+  setLook("matrix", null, 11, true);
+  const P = mxDropPlan(1920, 1080, 30, 0.5, 5500), tail = [];
+  const col = P.drops.find((d) => P.drops.filter((e) => e.c === d.c).length === 1 && d.head < P.rows && d.head - P.lens[d.li] > 0 && P.lens[d.li] > 8);   // a column of one drop, all of it on the canvas
+  mxDrops(1920, 1080, 30, 0.5, 5500, (x, y, g, bb, heat) => { if (Math.abs(x - col.c * P.cw) < 0.01 && heat === 0) tail.push([y, bb]); });
+  const up = tail.filter(([y]) => y < col.head * P.rh).sort((p, q) => q[0] - p[0]);   // from the head up
+  assert.ok(up.length > 2 && up[0][1] > up.at(-1)[1], "the tail fades up the column");
+  assert.equal(new Set([...Array(40).keys()].map((i) => mxGlyph(i * 3.3, true))).size, 2, "a binary column: 0s and 1s");
+  // the windows: lettered from the channel and the brand; never over the words, the tag or each other where there is room; one by one, each with its place whatever the slider; behind the words where there is none, never left out
+  const W = { code: "SHOT", low: "shot", name: "Street", brand: "pixel-harbor", n: 0 };
+  assert.ok(mxLines(0, W, 6500).some(([t]) => t.includes("pixel-harbor")) && mxLines(1, W, 6500).some(([t]) => t.includes("/dev/shot")));
+  const F = { x0: 0, y0: 0, x1: 1920, y1: 1080 }, words = { x: 60, y: 260, w: 1200, h: 420 }, tag = { x: 60, y: 760, w: 420, h: 140 }, onF = (w) => w.x >= 0 && w.x + w.w <= 1920 && w.y >= 0 && w.y + w.h <= 1080;
+  const four = mxWindowPlan(F, 1080, 4, [words, tag]);
+  for (const n of [1, 2, 3, 4]) {
+    const plan = mxWindowPlan(F, 1080, n, [words, tag]);
+    assert.deepEqual(plan, four.slice(0, n), `${n}: the first ${n} of the four, where they stand with all four`);
+    for (const w of plan) assert.ok(!overlapsBox(w, words) && !overlapsBox(w, tag) && onF(w), JSON.stringify(w));
+    for (const p of plan) for (const q of plan) if (p !== q) assert.ok(!overlapsBox(p, q), "not over each other");
+  }
+  const crowd = mxWindowPlan(F, 1080, 3, [{ x: 0, y: 0, w: 1920, h: 1080 }]);
+  assert.ok(crowd.length === 3 && crowd.every(onF) && new Set(crowd.map((b) => `${b.x}|${b.y}`)).size === 3, `no room: behind the words, each its own place: ${JSON.stringify(crowd)}`);
+  // the hologram: clear of the words where there is room, its foot on the floor; faint behind them where there is none, never left out; found at its largest, so its slider only sizes it, its foot kept
+  for (const T of [words, { x: 60, y: 120, w: 1500, h: 300 }, { x: 900, y: 600, w: 900, h: 400 }]) {
+    const H = mxFigurePlan(F, 0.9, 0.55, [T], T);
+    assert.ok(!H.faint && !overlapsBox(T, { x: H.cx - H.half * 0.86, y: H.cy - H.size * 0.44, w: H.half * 1.72, h: H.size * 0.88 }) && H.size > 200, JSON.stringify(H));
+    const sizes = [0.05, 0.3, 0.55, 0.8, 1].map((amt) => mxFigurePlan(F, 0.9, amt, [T], T));
+    for (const q of sizes) assert.ok(Math.abs(q.cx - H.cx) < 0.01 && Math.abs(q.cy + q.size / 2 - (H.cy + H.size / 2)) < 0.01 && JSON.stringify(q.room) === JSON.stringify(H.room) && !q.faint, `its foot and its room kept as it grows: ${JSON.stringify(q)}`);
+    assert.ok(sizes.every((q, i) => !i || q.size > sizes[i - 1].size), "it grows with its slider");
+  }
+  const faint = mxFigurePlan(F, 0.9, 0.55, [{ x: 0, y: 0, w: 1920, h: 1080 }]);
+  assert.ok(faint.faint && faint.size > 200 && faint.cx - faint.half >= 0 && faint.cx + faint.half <= 1920 && faint.cy + faint.size / 2 <= 1080, JSON.stringify(faint));
+  // the windows keep clear of where the hologram stands at its largest (on or not), so neither of its sliders moves them; over it only where there is no other room
+  const H0 = mxFigurePlan(F, 0.9, 0.55, [words, tag], words), byH = mxWindowPlan(F, 1080, 4, [words, tag], [H0.room]);
+  assert.ok(byH.length === 4 && byH.every((w) => !overlapsBox(w, words) && !overlapsBox(w, tag)) && byH.filter((w) => !overlapsBox(w, H0.room)).length >= 3, JSON.stringify(byH));
+  // its relief: lit from the upper left, nothing where the shape is not
+  const n = 40, cov = new Uint8Array(n * n).map((_, q) => (Math.hypot((q % n) - 19.5, Math.floor(q / n) - 19.5) < 15 ? 255 : 0)), rl = mxRelief(cov, n, n);
+  assert.equal(rl[0], -1);
+  assert.ok(rl[12 * n + 12] > rl[27 * n + 27], "the upper left lit, the lower right in shade");
+  assert.ok([...rl].every((v) => v === -1 || (v >= 0 && v <= 1)));
+  // the grounds: the glass and the lit screen, the title reading on each; the panel dark on both
+  for (const onDark of [true, false]) {
+    setLook("matrix", null, 3, onDark);
+    const th = L.theme({}, [255, 183, 3], lookValues()), field = parseColour(th.field), ink = parseColour(th.titleFill);
+    assert.ok(onDark ? lumOf(field) < 0.03 : lumOf(field) > 0.35, `${onDark ? "the glass" : "the lit screen"}: ${field}`);
+    assert.ok(contrast(field, ink) > 7, `the title reads: ${contrast(field, ink).toFixed(1)}`);
+    assert.ok(lumOf(parseColour(L.accent.fill([255, 183, 3]))) < 0.03, "a dark terminal panel");
+  }
+  // every slider at either end, the others as they are, paints and returns
+  const env = { w: 1920, h: 1080, C: [40, 120, 220], photo: null, cat: { code: "AB", name: "x" }, o: { profile: { brand: { name: "B" }, categories: [{}] }, catIndex: 0, size: { w: 1920, h: 1080 } }, G: L.layout("stack", 1920, 1080) };
+  const ctx0 = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
+  for (const onDark of [true, false]) for (const q of L.params.filter((d) => !d.text)) for (const v of [q.min, q.max]) { setLook("matrix", { [q.key]: v }, 3, onDark); assert.equal(L.background(ctx0, env, { grid: true }, lookValues()), true, `${q.key} = ${v}`); L.post(ctx0, 1920, 1080, env.C, lookValues(), 1, []); L.frame(ctx0, env, lookValues()); }
+  // the status line: with every one of its places taken (the tag at the foot's left, the graphic down the right), still there, where it reaches least over them
+  const said = [], rec = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...s].length * 8 }) : k === "fillText" ? (s, x, y) => said.push([s, x, y]) : () => ({})), set: () => true });
+  const packed = { ...env, hasBrand: true, graphic: { ref: {} }, cover: { layers: [{ id: "graphic", type: "graphic", visible: true }] }, o: { ...env.o, profile: { brand: { name: "B" }, categories: [{}, {}, {}] } }, G: { tag: { x: 40, y: 990, fs: 60 }, art: { x: 1700, y: 540, s: 1.7 } } };
+  setLook("matrix", null, 3, true); L.frame(rec, packed, lookValues());
+  assert.equal(said.filter(([s]) => s.includes(".SYS")).length, 1, "the status line drawn though every place is taken");
+  // the signal tears: as many bands as the slider says however much lettering there is, across it as little as they can
+  const was = globalThis.document, cuts = [], tv = new Proxy({ canvas: { width: 1920, height: 1080 } }, { get: (t, k) => (k in t ? t[k] : k === "createRadialGradient" || k === "createLinearGradient" ? () => ({ addColorStop() {} }) : (...a) => { if (k === "fillRect" && a[2] === 1920) cuts.push(a); return {}; }), set: () => true });
+  const lettering = [...Array(8).keys()].map((i) => ({ type: "title", cx: 960, cy: 70 + i * 125, hw: 800, hh: 52, r: 0 }));   // lines of lettering from head to foot
+  globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => new Proxy({}, { get: () => () => ({}), set: () => true }) }) };
+  try { setLook("matrix", { glitch: 1, glow: 0, scan: 0, curve: 0 }, 3, true); L.post(tv, 1920, 1080, env.C, lookValues(), 1, lettering); } finally { globalThis.document = was; }
+  assert.equal(cuts.length, 7, `seven torn bands with the slider at its most, lettering or not: ${cuts.length}`);
+  // the lettering without a canvas: the plain letters in the code's colour, the highlighted ones cut out of a block of it
+  for (const onDark of [true, false]) {
+    const fills = [], rects = [], ctx = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (str) => ({ width: [...str].length * 40 }) : k === "fillRect" ? (...r) => rects.push(r) : () => {}), set: (t, k, v) => { if (k === "fillStyle") fills.push(v); t[k] = v; return true; } });
+    setLook("matrix", null, 3, onDark);
+    L.runs(ctx, (fn) => { fn({ t: "Ab", hi: false }, 0); fn({ t: "cd", hi: true }, 80); }, { fs: 100, strokeAmt: 1, shadowAmt: 1, C: [40, 120, 220], unit: 1 }, lookValues());
+    const field = parseColour(L.theme({}, [40, 120, 220], lookValues()).field), last = parseColour(fills.at(-1));
+    assert.equal(rects.length, 1, "one block under the highlighted run");
+    assert.ok(contrast(last, field) < 1.3, `the highlighted letters cut in the ground's colour: ${last}`);
+  }
+  // what it keeps goes as another look is chosen
+  assert.equal(L.leave, mxFreeAll);
+  setLook("matrix"); setLook("cel");
+  assert.equal(mxMemory(), 0);
 });
 
 test("retro-futurism: black space or cream paper, colours faded as old print, the main planet in the channel's hue, a photo graded as an old print and given a paper border; the scene on the canvas and off the colour block at every size, in every template, mostly clear of the words, the same for the same seed; no part going or moving as a slider moves; the beam beside the words or passing behind them, its sweep a seventies swoop; each part by its own slider", async () => {
