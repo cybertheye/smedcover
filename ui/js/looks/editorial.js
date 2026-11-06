@@ -1,6 +1,6 @@
 // editorial: the pages of a magazine
 // One look (see style.js for the hooks a look may have, and looks/kit.js for what the looks share).
-import { FX_PHOTO, boost, css, dark, every, grain, graphicTop, greeked, gridPath, gridPen, inkAs, mapped, mix, openField, pad2, painters, rand, shift, titleArea, tonesFx, upright, wash } from "./kit.js";
+import { FX_PHOTO, boost, css, dark, every, grain, greeked, gridPath, gridPen, inkAs, keepOthers, mapped, mix, openField, pad2, painters, rand, shift, titleArea, tonesFx, upright, wash } from "./kit.js";
 import { fonts, spaced, spacedW } from "../cel.js";
 import { blockLayout } from "../layout.js";
 
@@ -8,25 +8,62 @@ const ED = { paper: [246, 243, 236], ink: [20, 20, 20], night: [18, 18, 18] };
 // the serif face is one of the profile's fonts (see fonts.serif in cel.js)
 const edInk = () => (dark ? ED.paper : ED.ink), edGround = () => (dark ? ED.night : ED.paper);
 /**
- * The page's text, where the column rule leaves room on the right: a large opening quotation mark in
- * the channel colour (growing and deepening with Quotation mark) and, under it, two narrow columns of
- * body text set as greeked lines, filling in paragraph by paragraph, top to bottom, as Body columns
- * rises. Nothing where the room is too narrow.
+ * Where the page's text stands, { x0, x1, y0, y1 } (a pure function of the cover, so no slider moves it): beside the
+ * words where the column rule leaves room on the right (past the rule and the title, as it always stood); where that
+ * is too narrow (a long title, Split, a square or tall page), under the words, else over them — each in the open field
+ * and off the colour block (where its edge leans too), the corner tag, the graphic, the logo and the channel name on
+ * the field cut out of it the way that leaves the text the most. Where none of these is clear at 220 × 160, the one of
+ * them at that size reaching least behind the words and the rest (they lie over the text: it is never left out).
+ */
+export function edRoom(ctx, env) {
+  const { w } = env, F = openField(env), E = env.G && env.G.edge, c = env.G && env.G.cat, T = titleArea(ctx, env), MW = 220, MH = 160;
+  const x0 = F.x0 + 40, x1 = F.x1 - 72, y0 = Math.max(F.y0, 0) + 172, y1 = F.y1 - 44, lo = Math.max(F.y0, 0) + 16, [ax, ay, bx, by] = E ? E.line : [0, 0, 1, 0];
+  const yAt = (x) => ay + ((by - ay) * (x - ax)) / (bx - ax || 1), xAt = (y) => ax + ((bx - ax) * (y - ay)) / (by - ay || 1);
+  // a room kept off the colour block over its own span (an edge that leans met at its nearer end), as far from it as from the field's sides
+  const fit = (r) => (F.side === "below" ? { ...r, y1: Math.min(r.y1, yAt(r.x0) - 44, yAt(r.x1) - 44) } : F.side === "above" ? { ...r, y0: Math.max(r.y0, yAt(r.x0) + 172, yAt(r.x1) + 172) } : F.side === "right" ? { ...r, x1: Math.min(r.x1, xAt(r.y0) - 72, xAt(r.y1) - 72) } : F.side === "left" ? { ...r, x0: Math.max(r.x0, xAt(r.y0) + 40, xAt(r.y1) + 40) } : r);
+  const words = T ? [{ x: T.x - 30, y: T.y - 30, w: T.w + 60, h: T.h + 60 }] : [], others = keepOthers(env), L = env.cover && env.cover.layers && env.cover.layers.find((l) => l.id === "catname" && l.visible), k = env.cat;
+  if (env.logo) others.push({ x: env.logo.x - 20, y: env.logo.y - 20, w: env.logo.w + 40, h: env.logo.h + 40 });
+  if (c && !c.onAccent && L) {   // the channel name on the field and its plate (under it, or inline beside it), as wide as their characters can set
+    const name = L.showName !== false && k && k.name ? [...k.name].length * (c.fs + 6) : 0, sub = L.plate !== false && k && k.sub ? [...k.sub].length * (c.inline ? c.fs * 0.4 : 34) + 60 : 0, nw = Math.min(c.maxW || 600, k ? name : 900);
+    others.push({ x: c.x - 24, y: c.y - c.fs * 1.05, w: (c.inline ? nw + (sub && 34 + sub) : Math.max(nw, sub)) + 48, h: c.fs * 1.4 + 24 + (sub && !c.inline ? 80 : 0) });
+  }
+  const size = (r) => Math.max(0, r.x1 - r.x0) * Math.max(0, r.y1 - r.y0), big = (r) => r.x1 - r.x0 >= MW && r.y1 - r.y0 >= MH;
+  const use = (r) => Math.min(r.x1 - r.x0, 866) * (r.y1 - r.y0 - 90);   // what the text can fill: two columns of 420 at most, under the mark's room
+  const meet = (r, b) => Math.max(0, Math.min(r.x1, b.x + b.w) - Math.max(r.x0, b.x)) * Math.max(0, Math.min(r.y1, b.y + b.h) - Math.max(r.y0, b.y));
+  const behind = (r) => [...words, ...others].reduce((s, b) => s + meet(r, b), 0) / Math.max(1, size(r));
+  // room r with the boxes of `bs` it meets cut out of it, each on whichever side leaves the best (big enough first, then the most for the text); `fall`: or left in where cutting leaves too little, the best then reaching least behind them
+  const cut = (r, bs, fall = false) => {
+    const i = bs.findIndex((b) => meet(r, b)), b = bs[i], rest = bs.slice(i + 1);
+    const better = (a, q) => (big(q) !== big(a) ? (big(q) ? q : a) : fall && behind(q) !== behind(a) ? (behind(q) < behind(a) ? q : a) : use(q) > use(a) ? q : a);
+    return i < 0 ? r : [...(fall ? [r] : []), { ...r, x1: Math.min(r.x1, b.x) }, { ...r, x0: Math.max(r.x0, b.x + b.w) }, { ...r, y1: Math.min(r.y1, b.y) }, { ...r, y0: Math.max(r.y0, b.y + b.h) }].map((q) => cut(q, rest, fall)).reduce(better);
+  };
+  const beside = { x0: Math.max(x0, Math.round(w * 0.64) + 30, T ? T.x + T.w + 60 : 0), x1, y0, y1 };
+  const under = T && { x0: Math.max(x0, T.x), x1, y0: T.y + T.h + 40, y1 }, over = T && { x0: Math.max(x0, T.x), x1, y0, y1: T.y - 40 };
+  const rooms = [beside, under, over].filter(Boolean).map(fit), clear = rooms.map((r) => cut(r, others)).find(big);
+  if (clear) return clear;
+  // nothing clear: each at its least size, reaching behind the words (and behind the rest, where cutting them out leaves too little); the one reaching least behind them
+  const [b, u, o] = rooms, at = [{ ...b, x0: Math.max(F.x0 + 16, Math.min(b.x0, b.x1 - MW)) }, ...(T ? [{ ...u, y0: Math.max(lo, Math.min(u.y0, u.y1 - MH)) }, { ...o, y1: Math.max(o.y1, o.y0 + MH) }] : [])].map((r) => cut(fit(r), others, true));
+  const key = (r) => (big(r) ? behind(r) : 10 - Math.max(0, use(r)) / 1e7);
+  return at.reduce((a, r) => (key(r) < key(a) ? r : a));
+}
+/**
+ * The page's text in its room (see edRoom): a large opening quotation mark in the channel colour (growing and
+ * deepening with Quotation mark) at its head and, under the room the mark takes at its largest (on or not, so it moves
+ * nothing), two narrow columns of body text set as greeked lines, filling in paragraph by paragraph, top to bottom, as
+ * Body columns rises, the rows cut to the room.
  */
 function edColumns(ctx, env, p) {
-  const { w, C } = env, F = openField(env), T = titleArea(ctx, env), x0 = Math.max(F.x0 + 40, Math.round(w * 0.64) + 30, T ? T.x + T.w + 60 : 0), x1 = F.x1 - 72, y0 = Math.max(F.y0, 0) + 172, y1 = Math.min(F.y1 - 44, graphicTop(env, x0, x1));
-  if (x1 - x0 < 220 || y1 - y0 < 160) return;
-  let top = y0;
+  if (p.quote <= 0 && p.text <= 0) return;
+  const { C } = env, { x0, x1, y0, y1 } = edRoom(ctx, env), top = y0 + 90;
   if (p.quote > 0) {
     const fs = 90 + 130 * p.quote;
     ctx.save(); ctx.font = `700 ${fs}px ${fonts.serif}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = css(C, 0.3 + 0.7 * p.quote);
     shift("quote", x0 + fs * 0.18, y0 + fs * 0.3, ctx);   // a scene object
     ctx.fillText("\u201C", x0 - fs * 0.06, y0 + fs * 0.62); ctx.restore();
-    top = y0 + 30 + 60 * p.quote;
   }
   if (p.text <= 0) return;
-  const lh = 15, gap = 26, cw = (x1 - x0 - gap) / 2, rows = Math.floor((y1 - top) / lh), ink = css(edInk(), dark ? 0.34 : 0.42);
-  let left = Math.round(p.text * rows * 2);
+  const lh = 15, gap = 26, cw = Math.min(420, (x1 - x0 - gap) / 2), rows = Math.floor((y1 - top) / lh), ink = css(edInk(), dark ? 0.34 : 0.42);
+  let left = Math.ceil(p.text * rows * 2);   // a line at least, once it is on
   for (let c = 0; c < 2 && left > 0; c++) {
     let y = top, k = 0;
     while (left > 0 && y + lh <= y1) {

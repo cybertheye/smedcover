@@ -623,15 +623,20 @@ function fcKeep(ctx, env) {
 }
 /**
  * Where the neon stands: { x (its middle), y (its foot), H (a letter's height), W, T (the word's width and
- * height), down (stacked down a tower), box (what it takes, its glow's margin and all) }, or null when there is
- * no room for it. Across the skyline first: H tall at most and no wider than 0.6 of the field, its foot a little
- * above the street (behind the near towers' tops), the tallest that fits at the first of a few heights, as near
- * 0.66 across as the room clear of what `keep` holds (see fcKeep) lets it. Where the room is narrow, stacked down
- * the side of a tower, as a blade sign is, its letters a little apart (see fcLetters), as near the right as it can
- * be — when its letters so stand a fifth taller than they would across, or there is no room across at all.
- * Never behind the words, never sunk among the towers.
+ * height), down (stacked down a tower), box (what it takes, its glow's margin and all) }, its letters H tall at
+ * most, the street at `base`, where it may also lie up to `rise` higher or `sink` lower (the sign stands on it and
+ * moves with it). Found at its largest, its place moves with neither its own slider nor the street's (fcScaled
+ * draws it at its slider's size where it stands, up to what fits there). Across the skyline first: no wider than
+ * 0.6 of the field, its foot a little above the street (behind the near towers' tops), the tallest that fits at the
+ * first of a few heights, as near 0.66 across as the room clear of what `keep` holds (see fcKeep) lets it. Where the
+ * room is narrow, stacked down the side of a tower, as a blade sign is, its letters a little apart (see fcLetters),
+ * as near the right as it can be — when its letters so stand a fifth taller than they would across, or there is no
+ * room across at all. Clear of them wherever the street may lie, unless clear of them with the street at `base` it
+ * stands half as tall again; with no room clear at all, across, as large as the field holds it, where the least of
+ * it lies behind them (they lie over it). Always within the field, never sunk among the towers, never left out (null
+ * only for a word with no width).
  */
-export function fcSignAt(ctx, F, base, H, word, keep) {
+export function fcSignAt(ctx, F, base, H, word, keep, rise = 0, sink = 0) {
   const fw = F.x1 - F.x0, fh = F.y1 - F.y0, m = fh * 0.03, per = fcLetters(ctx, 0, 100, word).total / 100;   // per: the word's width for each unit of its height
   if (!(per > 0)) return null;
   const boxes = keep.map((k) => ({ x: k.x - m, y: k.y - m, w: k.w + 2 * m, h: k.h + 2 * m }));
@@ -643,23 +648,76 @@ export function fcSignAt(ctx, F, base, H, word, keep) {
     for (const [a, c] of room) if (c - a >= need) { const x = clamp(F.x0 + fw * t, a + need / 2, c - need / 2); if (at === null || Math.abs(x - F.x0 - fw * t) < Math.abs(at - F.x0 - fw * t)) at = x; }
     return at;
   };
-  let across = null, down = null;
-  for (let h = Math.min(H, (fw * 0.6) / Math.max(0.3, per)); h >= Math.max(fh * 0.06, H * 0.22) && !across; h *= 0.94) {
-    for (const f of [0.22, 0.15, 0.3, 0.09]) {   // its foot this far above the street: about the skyline's height first
-      const y = base - fh * f, need = h * per + h * 0.3, x = y - h * 1.15 < F.y0 + m ? null : free(y - h * 1.15, y, need, 0.66);
-      if (x !== null) { across = { x, y, H: h, W: h * per, T: h, down: false, box: { x: x - need / 2, y: y - h * 1.15, w: need, h: h * 1.15 } }; break; }
-    }
-  }
   const V = fcLetters(ctx, 0, 100, word, true), vw = V.W / 100, vt = V.T / 100;   // the column's width and height for each unit of a letter's
-  for (let h = Math.min(H, (fh * 0.62) / vt); h >= fh * 0.045 && !down; h *= 0.94) {
-    if (across && h < across.H * 1.2) break;
-    const pad = h * 0.18, need = h * vw + 2 * pad + h * 0.24;
-    for (const f of [0.12, 0.2, 0.06, 0.28]) {
-      const y = base - fh * f, top = y - h * vt - pad - h * 0.12, x = top < F.y0 + m ? null : free(top, y + pad, need, 0.86);
-      if (x !== null) { down = { x, y, H: h, W: h * vw, T: h * vt, down: true, box: { x: x - need / 2, y: top, w: need, h: y + pad - top } }; break; }
+  /** The tallest sign clear of them with the street from `up` higher to `dn` lower than `base` (within the field with it at its highest), or null. */
+  const find = (up, dn) => {
+    let across = null, down = null;
+    for (let h = Math.min(H, (fw * 0.6) / Math.max(0.3, per)); h >= Math.max(fh * 0.06, H * 0.22) && !across; h *= 0.94) {
+      for (const f of [0.22, 0.15, 0.3, 0.09]) {   // its foot this far above the street: about the skyline's height first
+        const y = base - fh * f, need = h * per + h * 0.3, x = y - h * 1.15 - rise < F.y0 + m ? null : free(y - h * 1.15 - up, y + dn, need, 0.66);
+        if (x !== null) { across = { x, y, H: h, W: h * per, T: h, down: false, box: { x: x - need / 2, y: y - h * 1.15, w: need, h: h * 1.15 } }; break; }
+      }
+    }
+    for (let h = Math.min(H, (fh * 0.62) / vt); h >= fh * 0.045 && !down; h *= 0.94) {
+      if (across && h < across.H * 1.2) break;
+      const pad = h * 0.18, need = h * vw + 2 * pad + h * 0.24;
+      for (const f of [0.12, 0.2, 0.06, 0.28]) {
+        const y = base - fh * f, top = y - h * vt - pad - h * 0.12, x = top - rise < F.y0 + m ? null : free(top - up, y + pad + dn, need, 0.86);
+        if (x !== null) { down = { x, y, H: h, W: h * vw, T: h * vt, down: true, box: { x: x - need / 2, y: top, w: need, h: y + pad - top } }; break; }
+      }
+    }
+    return down || across;
+  };
+  const all = find(rise, sink), here = rise || sink ? find(0, 0) : all, S = all && (!here || all.H * 1.5 >= here.H) ? all : here;   // clear wherever the street may lie, unless clear where it lies at `base` it stands half as tall again
+  if (S) return S;
+  let best = null;   // no room clear: across, as large as the field holds it at each height, where the least of it (wherever the street lies) is behind them, as near 0.66 across as that lets it
+  for (const f of [0.22, 0.15, 0.3, 0.09]) {
+    const y = base - fh * f, h = Math.min(H, (fw * 0.6) / Math.max(0.3, per), (fw - 2 * m) / (per + 0.3), (y - rise - F.y0 - m) / 1.15), need = h * per + h * 0.3, x0 = F.x0 + m + need / 2, x1 = F.x1 - m - need / 2;
+    if (!(h > 0)) continue;
+    for (let i = 0; i <= 24; i++) {
+      const x = x0 + ((x1 - x0) * i) / 24, b = { x: x - need / 2, y: y - h * 1.15 - rise, w: need, h: h * 1.15 + rise + sink };
+      const v = fcBehind(b, boxes) / (b.w * b.h) + (0.05 * Math.abs(x - F.x0 - fw * 0.66)) / fw + (h < Math.max(fh * 0.06, H * 0.22) ? 1 : 0);
+      if (!best || v < best.v) best = { v, x, y, H: h, W: h * per, T: h, down: false, box: { x: b.x, y: y - h * 1.15, w: need, h: h * 1.15 } };
     }
   }
-  return down || across;
+  if (best) delete best.v;
+  return best;
+}
+/** Sign S (see fcSignAt) at k of its size where it stands — the middle of its foot kept — and `dy` lower. */
+export const fcScaled = (S, k, dy = 0) => ({ ...S, y: S.y + dy, H: S.H * k, W: S.W * k, T: S.T * k, box: { x: S.x + (S.box.x - S.x) * k, y: S.y + dy + (S.box.y - S.y) * k, w: S.box.w * k, h: S.box.h * k } });
+/** How much of box b lies behind the boxes in `list` (the area of each overlap, added up). */
+const fcBehind = (b, list) => list.reduce((s, k) => s + Math.max(0, Math.min(b.x + b.w, k.x + k.w) - Math.max(b.x, k.x)) * Math.max(0, Math.min(b.y + b.h, k.y + k.h) - Math.max(b.y, k.y)), 0);
+/**
+ * Where the folded figure stands: { x (its middle), foot, k (how much of the street's rise or fall its foot follows),
+ * size (its height) }, found at its largest (`size`) with the street at `base`, where it may also lie up to `rise`
+ * higher or `sink` lower, so its slider only sizes it there (up to what fits there) and the street moves it only as it
+ * moves the street. On the street (k 1), or nearer on the wet street (k 0.3), at the first of its places clear of
+ * what `keep` holds and of the neon's room `sign` (its box at its largest with the street at `base`, undragged,
+ * whether it shows or not: neither the neon's sliders nor its drag move the figure), smaller if need be, to 0.4 of
+ * its least size (its slider's 0.25 of 0.65) — clear wherever the street may lie, unless clear with it at `base` it
+ * stands half as tall again; else, at that, where it reaches least behind them, the words before the neon: never
+ * left out. Within the field's sides. `half`: half its width for each unit of its height (see fcFigure). Pure.
+ */
+export function fcFigureAt(F, base, rise, sink, half, size, keep, sign) {
+  const fw = F.x1 - F.x0, least = (size * 0.4 * 0.25) / 0.65, box = (x, foot, s, up = 0, dn = 0) => ({ x: x - s * half, y: foot - s * 1.04 - up, w: s * half * 2, h: s * 1.08 + up + dn });   // its box, the street from `up` higher to `dn` lower
+  const xs = [0.84, 0.62, 0.42, 0.2, 0.92, ...[...Array(24).keys()].map((i) => 0.96 - i * 0.04)].map((t) => F.x0 + fw * t), feet = [[base, 1], [base + (F.y1 - base) * 0.7, 0.3]];
+  const room = (k, up, dn) => (sign ? [{ ...sign, y: sign.y - (1 - k) * up, h: sign.h + (1 - k) * (up + dn) }] : []);   // the neon moves with the street, by as much more than the figure does
+  const find = (up, dn) => {
+    for (let s = size; s >= least; s *= 0.88) for (const [foot, k] of feet) for (const x of xs) {
+      if (x - s * half >= F.x0 && x + s * half <= F.x1 && !keep.some((q) => overlaps(q, box(x, foot, s, k * up, k * dn))) && !room(k, up, dn).some((q) => overlaps(q, box(x, foot, s)))) return { x, foot, k, size: s };
+    }
+    return null;
+  };
+  const all = find(rise, sink), here = rise || sink ? find(0, 0) : all, Q = all && (!here || all.size * 1.5 >= here.size) ? all : here;
+  if (Q) return Q;
+  let best = null;
+  const s = least;
+  for (const [foot, k] of feet) for (const x0 of xs) {
+    const x = clamp(x0, F.x0 + s * half, Math.max(F.x0 + s * half, F.x1 - s * half)), v = fcBehind(box(x, foot, s, k * rise, k * sink), keep) * 4 + fcBehind(box(x, foot, s), room(k, rise, sink));
+    if (!best || v < best.v) best = { v, x, foot, k, size: s };
+  }
+  delete best.v;
+  return best;
 }
 /** A string split into what is read as one character each (an emoji with its joiners, a letter with its accents). */
 const fcGraphemes = (s) => (typeof Intl !== "undefined" && Intl.Segmenter ? [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(s)].map((g) => g.segment) : [...s]);
@@ -1070,8 +1128,9 @@ export const facet = {
     const base = up ? (Math.round((F.y1 - fh * 0.3 * p.wet) * mt.d + mt.f) - mt.f) / mt.d : F.y1 - fh * 0.3 * p.wet;   // the street's line, on whole pixels (see fcBack)
     if (L.ground !== false) fcGround(ctx, w, h, fcSky(wm), 3500);
     if (!L.grid) return true;
-    const word = fcWord(p.word || env.cat.code || env.cat.name || "NOIR"), keep = fcKeep(ctx, env);
-    const S0 = p.neon > 0 && word ? fcSignAt(ctx, F, base, fh * (0.16 + 0.22 * p.neon), word, keep) : null, [sx, sy] = S0 ? objAt("sign", S0.x, S0.y, ctx) : [0, 0], sH = S0 ? S0.H : 0, sA = S0 ? 1 : 0, sW = S0 ? S0.W : 0, sD = !!S0 && S0.down;   // a scene object, its foot behind the near towers (stacked down a blade: on a tower of its own)
+    const word = fcWord(p.word || env.cat.code || env.cat.name || "NOIR"), keep = fcKeep(ctx, env), b0 = F.y1 - fh * 0.12;   // b0: the street where Wet ground first puts it (0.4); it lies 0.18 of the field higher at most, 0.12 lower
+    const S1 = (p.neon > 0 || p.figure > 0) && word ? fcSignAt(ctx, F, b0, fh * 0.38, word, keep, fh * 0.18, fh * 0.12) : null;   // the neon at its largest, wherever the street lies (see fcSignAt): its room, kept whether it shows or not
+    const S0 = p.neon > 0 && S1 ? fcScaled(S1, Math.min(1, (fh * (0.16 + 0.22 * p.neon)) / S1.H), base - b0) : null, [sx, sy] = S0 ? objAt("sign", S0.x, S0.y, ctx) : [0, 0], sH = S0 ? S0.H : 0, sA = S0 ? 1 : 0, sW = S0 ? S0.W : 0, sD = !!S0 && S0.down;   // a scene object, its foot behind the near towers (stacked down a blade: on a tower of its own)
     const pd = sH * 0.18, hw = (sW + 2 * pd) * 1.2;   // a blade's margin; half its tower's face
     const far = base - fh * (0.24 + 0.5 * p.towers), near = base - fh * (0.1 + 0.48 * p.towers), lx = sH > 0 ? sx : F.x0 + fw * 0.7, glow = sH > 0 ? rim : null;   // the light the towers turn to
     const back = (lw) => (x) => {   // the city behind, its haze and the neon letters at lamplight lw: kept on a layer of their own (see fcBack)
@@ -1104,19 +1163,12 @@ export const facet = {
     }
     if (p.wet > 0) fcFloor(ctx, F, base, p.wet, rim, tube, sH > 0 ? { cx: sx, H: sH, word, a: Math.min(1, p.neon * 3) * sA, down: sD } : null, 3570);
     fcBlinds(ctx, F, p.blinds, light, 3580);
-    if (p.figure > 0) {   // a scene object: on the street, or nearer on the wet street, at the first of its places clear of the words, the tag, the channel graphic and the neon, smaller if need be (to 0.4 of its size), else left out
-      const S = canPaint(ctx) && graphicShape(env), size0 = Math.min(fh, fw * 0.7) * (0.25 + 0.4 * p.figure);
+    if (p.figure > 0) {   // a scene object: on the street, or nearer on the wet street, where fcFigureAt finds it at its largest (clear of the words, the tag, the channel graphic and the neon's room if it can be), at its slider's size there, up to what fits there
+      const S = canPaint(ctx) && graphicShape(env);
       if (S) {
-        const b = S.box, half = ((b.x1 - b.x0) / Math.max(1, b.y1 - b.y0)) * 0.5 + 0.04, sb = S0 && { ...S0.box, x: S0.box.x + sx - S0.x, y: S0.box.y + sy - S0.y };   // half its width, for each unit of its height (see fcFigure)
-        const clear = sb ? [...keep, sb] : keep, box = (x, foot, size) => ({ x: x - size * half, y: foot - size * 1.04, w: size * half * 2, h: size * 1.08 });
-        const xs = [0.84, 0.62, 0.42, 0.2, 0.92, ...[...Array(24).keys()].map((i) => 0.96 - i * 0.04)].map((t) => F.x0 + fw * t), feet = [base, base + (F.y1 - base) * 0.7];
-        const fits = ([x, foot], size) => x - size * half >= F.x0 && x + size * half <= F.x1 && !clear.some((k) => overlaps(k, box(x, foot, size)));
-        let size = size0, at;
-        while (size >= size0 * 0.4 && (at = feet.flatMap((foot) => xs.map((x) => [x, foot])).find((q) => fits(q, size))) === undefined) size *= 0.88;
-        if (at !== undefined) {
-          const [cx, cy] = objAt("figure", at[0], at[1] - size * 0.5, ctx);
-          fcFigure(ctx, S, cx, cy, size, rim, Math.min(1, p.figure * 4), E);
-        }
+        const b = S.box, half = ((b.x1 - b.x0) / Math.max(1, b.y1 - b.y0)) * 0.5 + 0.04, Q = fcFigureAt(F, b0, fh * 0.18, fh * 0.12, half, Math.min(fh, fw * 0.7) * 0.65, keep, S1 && S1.box), size = Math.min(Q.size, Math.min(fh, fw * 0.7) * (0.25 + 0.4 * p.figure));   // half its width, for each unit of its height (see fcFigure)
+        const [cx, cy] = objAt("figure", Q.x, Q.foot + (base - b0) * Q.k - size * 0.5, ctx);
+        fcFigure(ctx, S, cx, cy, size, rim, Math.min(1, p.figure * 4), E);
       }
     }
     fcRain(ctx, F, p.rain, 3590);

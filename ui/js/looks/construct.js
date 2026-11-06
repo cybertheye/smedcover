@@ -138,14 +138,43 @@ function cnTruss(ctx, xn, xf, y, d0, d1, col, lit) {
   });
   bar(X(0), y - D(0) / 2, X(1), y - D(1) / 2, d0 * 0.1); bar(X(0), y + D(0) / 2, X(1), y + D(1) / 2, d0 * 0.1);
 }
-/** Bars and blocks set about the edges of the field: tall bars of ink and of red, squares of grey, stacks of short rules, a block of bare paper with a hairline round it — `n`, the last by degrees, kept off the boxes in `avoid`. */
+/** The other places an item of the bars, the construction lines or the small type may take (see cnPlaces), by number. */
+const CN_OTHERS = Array.from({ length: 10 }, (_, j) => j + 1);
+/**
+ * Where each item of a part stands, by its number: of its places (`spots`, a list of boxes per item, its own first and
+ * then a few others, all seeded), its own where that keeps off the boxes in `avoid` (the words, the tag, the graphic);
+ * else the first of the others that keeps off them and off the room the other items take (on or not), else the first
+ * that keeps off them, else its own — behind them (they lie over it), never left out. So an item's place hangs on its
+ * number, the cover and the seed alone: its slider only brings it in.
+ */
+export function cnPlaces(spots, avoid) {
+  const off = (b, list) => !list.some((a) => overlaps(a, b)), own = spots.map((s) => s[0]), free = own.map((b) => off(b, avoid)), out = [];
+  spots.forEach((s, i) => {
+    if (free[i]) { out.push(s[0]); return; }
+    const taken = [...out, ...own.filter((b, q) => q > i && free[q])];
+    out.push(s.find((b) => off(b, avoid) && off(b, taken)) || s.find((b) => off(b, avoid)) || s[0]);
+  });
+  return out;
+}
+/** Where the 14 bars and blocks of cnBars stand (see cnPlaces): each at its own place about the edges of the field, else at one of ten others about them, within the field. */
+export function cnBarsAt(F, avoid, k0) {
+  const fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh);
+  return cnPlaces(Array.from({ length: 14 }, (_, i) => {
+    const kind = i % 5, r = rand(i * 4.3 + k0 + 4), w = kind === 0 || kind === 3 ? u * (0.008 + r * 0.018) : kind === 1 ? u * (0.04 + r * 0.07) : kind === 2 ? u * (0.05 + r * 0.05) : u * (0.08 + r * 0.08);
+    const h = kind === 0 || kind === 3 ? fh * (0.14 + rand(i * 5.1 + k0 + 5) * 0.32) : kind === 1 ? w : kind === 2 ? u * 0.06 : u * (0.05 + r * 0.06);
+    const own = rand(i * 1.9 + k0) < 0.5 ? F.x0 + fw * (0.02 + rand(i * 2.3 + k0 + 1) * 0.28) : F.x1 - fw * (0.04 + rand(i * 2.7 + k0 + 2) * 0.28);
+    return [{ x: own, y: F.y0 + fh * (0.08 + rand(i * 3.1 + k0 + 3) * 0.8), w, h }, ...CN_OTHERS.map((j) => {
+      const q = k0 + 100 + j * 7.31, d = fw * (0.02 + rand(i * 2.3 + q + 1) * 0.28);
+      return { x: rand(i * 1.9 + q) < 0.5 ? F.x0 + d : F.x1 - w - d, y: F.y0 + fh * 0.04 + Math.max(0, fh * 0.92 - h) * rand(i * 3.1 + q + 3), w, h };
+    })];
+  }), avoid);
+}
+/** Bars and blocks set about the edges of the field: tall bars of ink and of red, squares of grey, stacks of short rules, a block of bare paper with a hairline round it — `n`, the last by degrees, each kept off the boxes in `avoid` where it can be (see cnBarsAt). */
 function cnBars(ctx, F, n, red, avoid, k0) {
-  const fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), ink = cnInk();
+  const ink = cnInk(), at = cnBarsAt(F, avoid, k0);
   ctx.save();
   for (let i = 0; i < Math.ceil(n); i++) {
-    const kind = i % 5, left = rand(i * 1.9 + k0) < 0.5, x = left ? F.x0 + fw * (0.02 + rand(i * 2.3 + k0 + 1) * 0.28) : F.x1 - fw * (0.04 + rand(i * 2.7 + k0 + 2) * 0.28), y = F.y0 + fh * (0.08 + rand(i * 3.1 + k0 + 3) * 0.8), r = rand(i * 4.3 + k0 + 4);
-    const box = kind === 0 || kind === 3 ? { x, y, w: u * (0.008 + r * 0.018), h: fh * (0.14 + rand(i * 5.1 + k0 + 5) * 0.32) } : kind === 1 ? { x, y, w: u * (0.04 + r * 0.07), h: u * (0.04 + r * 0.07) } : kind === 2 ? { x, y, w: u * (0.05 + r * 0.05), h: u * 0.06 } : { x, y, w: u * (0.08 + r * 0.08), h: u * (0.05 + r * 0.06) };
-    if (avoid.some((b) => overlaps(b, box))) continue;
+    const kind = i % 5, r = rand(i * 4.3 + k0 + 4), box = at[i];
     ctx.globalAlpha = clamp(n - i);
     if (kind === 0) { ctx.fillStyle = css(ink); ctx.fillRect(box.x, box.y, box.w, box.h); }
     else if (kind === 3) { ctx.fillStyle = css(red); ctx.fillRect(box.x, box.y, box.w * 1.4, box.h * 0.8); }
@@ -155,9 +184,21 @@ function cnBars(ctx, F, n, red, avoid, k0) {
   }
   ctx.restore();
 }
-/** Construction lines: long hairlines through the vanishing point (vx, vy), level ones, arcs about it, dot grids, crosshairs, a line of red — `n`, the last by degrees; the grids and crosshairs kept off `avoid`. */
+/** Where the dot grids and crosshairs of cnLines stand, by number (null for the other lines): each at its own place, else at one of ten others in the field (see cnPlaces). */
+export function cnLinesAt(F, avoid, k0) {
+  const fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), idx = [3, 4, 9, 10], out = Array(14).fill(null);   // kinds 3 and 4 of i % 6
+  const at = cnPlaces(idx.map((i) => {
+    const grid = i % 6 === 3, s = u * (grid ? 0.018 : 0.03), bw = grid ? s * 6 : s * 2, bh = grid ? s * 4 : s * 2, ox = grid ? 0 : s;
+    return [0, ...CN_OTHERS].map((j) => (j
+      ? { x: F.x0 + fw * 0.05 + Math.max(0, fw * 0.9 - bw) * rand(i * 2.1 + k0 + 100 + j * 7.31), y: F.y0 + fh * 0.08 + Math.max(0, fh * 0.84 - bh) * rand(i * 3.7 + k0 + 101 + j * 7.31), w: bw, h: bh }
+      : { x: F.x0 + fw * (0.05 + 0.9 * rand(i * 2.1 + k0)) - ox, y: F.y0 + fh * (0.08 + 0.84 * rand(i * 3.7 + k0 + 1)) - ox, w: bw, h: bh }));
+  }), avoid);
+  idx.forEach((i, q) => (out[i] = at[q]));
+  return out;
+}
+/** Construction lines: long hairlines through the vanishing point (vx, vy), level ones, arcs about it, dot grids, crosshairs, a line of red — `n`, the last by degrees; the grids and crosshairs kept off `avoid` where they can be (see cnLinesAt). */
 function cnLines(ctx, F, vx, vy, n, red, avoid, k0) {
-  const fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), R = Math.hypot(fw, fh), ink = cnInk();
+  const fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), R = Math.hypot(fw, fh), ink = cnInk(), at = cnLinesAt(F, avoid, k0);
   ctx.save(); ctx.lineCap = "butt";
   for (let i = 0; i < Math.ceil(n); i++) {
     const kind = i % 6, r1 = rand(i * 2.1 + k0), r2 = rand(i * 3.7 + k0 + 1), x = F.x0 + fw * (0.05 + 0.9 * r1), y = F.y0 + fh * (0.08 + 0.84 * r2);
@@ -165,24 +206,32 @@ function cnLines(ctx, F, vx, vy, n, red, avoid, k0) {
     if (kind === 0) { const a = r1 * Math.PI; ctx.beginPath(); ctx.moveTo(vx - Math.cos(a) * R, vy - Math.sin(a) * R); ctx.lineTo(vx + Math.cos(a) * R, vy + Math.sin(a) * R); ctx.stroke(); }
     else if (kind === 1) { ctx.beginPath(); ctx.moveTo(F.x0, y); ctx.lineTo(F.x1, y); ctx.stroke(); }
     else if (kind === 2) { const a0 = r2 * TAU; ctx.beginPath(); ctx.arc(vx, vy, u * (0.15 + r1 * 0.4), a0, a0 + Math.PI * (0.5 + r2)); ctx.stroke(); }
-    else if (kind === 3) { const s = u * 0.018, box = { x, y, w: s * 6, h: s * 4 }; if (avoid.some((b) => overlaps(b, box))) continue; ctx.beginPath(); for (let q = 0; q < 24; q++) { const dx = x + (q % 6) * s, dy = y + Math.floor(q / 6) * s; ctx.moveTo(dx + 1.8, dy); ctx.arc(dx, dy, 1.8, 0, TAU); } ctx.fill(); }
-    else if (kind === 4) { const s = u * 0.03, box = { x: x - s, y: y - s, w: s * 2, h: s * 2 }; if (avoid.some((b) => overlaps(b, box))) continue; ctx.beginPath(); ctx.moveTo(x - s, y); ctx.lineTo(x + s, y); ctx.moveTo(x, y - s); ctx.lineTo(x, y + s); ctx.moveTo(x + s * 0.45, y); ctx.arc(x, y, s * 0.45, 0, TAU); ctx.stroke(); }
+    else if (kind === 3) { const s = u * 0.018, { x, y } = at[i]; ctx.beginPath(); for (let q = 0; q < 24; q++) { const dx = x + (q % 6) * s, dy = y + Math.floor(q / 6) * s; ctx.moveTo(dx + 1.8, dy); ctx.arc(dx, dy, 1.8, 0, TAU); } ctx.fill(); }
+    else if (kind === 4) { const s = u * 0.03, x = at[i].x + s, y = at[i].y + s; ctx.beginPath(); ctx.moveTo(x - s, y); ctx.lineTo(x + s, y); ctx.moveTo(x, y - s); ctx.lineTo(x, y + s); ctx.moveTo(x + s * 0.45, y); ctx.arc(x, y, s * 0.45, 0, TAU); ctx.stroke(); }
     else { ctx.strokeStyle = css(red); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x - fw * 0.3, y + fh * 0.3); ctx.lineTo(x + fw * 0.3, y - fh * 0.3); ctx.stroke(); }
   }
   ctx.restore();
 }
+/** Where the 7 pieces of cnMarks stand (see cnPlaces): each on its own one of six places of the layout, a little off it, else at one of ten others in the field. */
+export function cnMarksAt(F, avoid, k0) {
+  const fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), lh = u * 0.016, bw = u * 0.2, at = [[0.05, 0.6], [0.44, 0.86], [0.84, 0.08], [0.9, 0.48], [0.3, 0.05], [0.6, 0.07]];
+  return cnPlaces(Array.from({ length: 7 }, (_, i) => {
+    const [fx, fy] = at[i % at.length], w = i % 6 === 3 ? lh * 4 : bw, h = i % 6 === 3 ? bw : lh * 6;
+    return [{ x: F.x0 + fw * (fx + (rand(i * 2.3 + k0) - 0.5) * 0.06), y: F.y0 + fh * (fy + (rand(i * 3.1 + k0 + 1) - 0.5) * 0.06), w, h },
+      ...CN_OTHERS.map((j) => ({ x: F.x0 + fw * 0.03 + Math.max(0, fw * 0.94 - w) * rand(i * 2.3 + k0 + 100 + j * 7.31), y: F.y0 + fh * 0.04 + Math.max(0, fh * 0.92 - h) * rand(i * 3.1 + k0 + 101 + j * 7.31), w, h }))];
+  }), avoid);
+}
 /**
  * Small type set as furniture, as these posters set it — greeked, not words: a block of lines, a short
  * thick rule of red over a few lines, bullets of small squares with lines beside them, a column of lines
- * turned on its side, a slab of ink with paper lines in it, an arrow. `n`, each kept off `avoid`.
+ * turned on its side, a slab of ink with paper lines in it, an arrow. `n`, each kept off `avoid` where it
+ * can be (see cnMarksAt).
  */
 function cnMarks(ctx, F, n, red, avoid, k0) {
-  const fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), ink = cnInk(), lh = u * 0.016, at = [[0.05, 0.6], [0.44, 0.86], [0.84, 0.08], [0.9, 0.48], [0.3, 0.05], [0.6, 0.07]];
+  const fw = F.x1 - F.x0, fh = F.y1 - F.y0, u = Math.min(fw, fh), ink = cnInk(), lh = u * 0.016, at = cnMarksAt(F, avoid, k0);
   ctx.save();
   for (let i = 0; i < Math.ceil(n); i++) {
-    const [fx, fy] = at[i % at.length], x = F.x0 + fw * (fx + (rand(i * 2.3 + k0) - 0.5) * 0.06), y = F.y0 + fh * (fy + (rand(i * 3.1 + k0 + 1) - 0.5) * 0.06), kind = i % 6, bw = u * 0.2;
-    const box = kind === 3 ? { x, y, w: lh * 4, h: bw } : { x, y, w: bw, h: lh * 6 };
-    if (avoid.some((b) => overlaps(b, box))) continue;
+    const { x, y } = at[i], kind = i % 6, bw = u * 0.2;
     ctx.globalAlpha = clamp(n - i);
     if (kind === 0) greeked(ctx, x, y, bw, 5, lh, css(ink, 0.85), 2900 + i * 13);
     else if (kind === 1) { ctx.fillStyle = css(red); ctx.fillRect(x, y, bw * 0.35, lh * 0.9); greeked(ctx, x, y + lh * 2, bw * 0.8, 3, lh, css(ink, 0.85), 2910 + i * 13); }

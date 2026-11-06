@@ -547,9 +547,10 @@ function wlForest(ctx, P, base, tall, depth, amt, k0) {
 /**
  * Power poles in a line running off toward the horizon, from the nearest at (x0, base0) to the far ones by
  * (vx, vy): each a tapering post with crossarms and insulators, a transformer on the nearest, and wires
- * sagging from each to the next; the further, the more lost in the haze. `n` poles (the last by degrees).
+ * sagging from each to the next and from the nearest out past the edge; the further, the more lost in the haze.
+ * `n` poles (the last by degrees).
  */
-function wlPoles(ctx, P, x0, base0, h0, vx, vy, n, k0, sx = x0, out = true) {
+function wlPoles(ctx, P, x0, base0, h0, vx, vy, n, k0, sx = x0) {
   const { u } = P, b = wlBatch(), lit = wlBatch(), poles = [];
   for (let i = 0; i < Math.ceil(n); i++) {
     const t = 1 / (1 + i * 0.85), x = vx + (x0 - vx) * t, base = vy + (base0 - vy) * t, hh = h0 * t, w = Math.max(1.2, u * 0.007 * t), a = clamp(n - i), top = base - hh, c = wlTone(P, top + hh * 0.3, (1 - t) * 0.75 + 0.04);
@@ -571,7 +572,7 @@ function wlPoles(ctx, P, x0, base0, h0, vx, vy, n, k0, sx = x0, out = true) {
     }
     ctx.stroke();
   }
-  if (poles.length && out) {   // wires from the nearest out past the edge (`out`)
+  if (poles.length) {   // wires from the nearest out past the edge
     const A = poles[0], away = Math.sign(A.x - vx) || 1;
     ctx.strokeStyle = css(A.c, A.a); ctx.lineWidth = Math.max(0.8, A.w * 0.22); ctx.beginPath();
     for (const q of [-0.9, -0.3, 0.3, 0.9]) { const ax = A.x + q * A.hh * 0.1, ay = A.top + A.hh * 0.04; ctx.moveTo(ax, ay); ctx.quadraticCurveTo(ax + away * u * 0.4, ay + A.hh * 0.14, ax + away * u * 0.9, ay + A.hh * 0.06); }
@@ -1121,13 +1122,12 @@ export const wasteland = {
     wlMist(ctx, P, H + u * 0.055, u * 0.08, p.haze * (dark ? 0.3 : 0.32), 4720, onto);
     const figS = u * (0.055 + 0.06 * p.figure), figX = sun0[0] - side * fw * 0.09;   // where the lone figure stands (see below)
     if (p.poles > 0) {   // a scene object: the line of poles moves with the nearest
-      const b0 = F.y1 - fh * 0.04, tall = Math.min(fh, u * 1.25) * 0.72, vx = P.at(0.3), tg = env.G && env.G.tag, arm = tall * 0.14;
+      const b0 = F.y1 - fh * 0.04, tall = Math.min(fh, u * 1.25) * 0.72, vx = P.at(0.3), tg = env.G && env.G.tag, arm = tall * 0.14, fr = u * 0.0575;   // fr: half the lone figure's width at its largest
       let x0 = P.at(0.93);
       if (tg && x0 + arm > tg.x - 20 && x0 - arm < tg.x + 400 && b0 > tg.y - 20) x0 = vx > x0 ? tg.x + 400 + arm : tg.x - 20 - arm;   // clear of the corner tag (keepClear's box), toward the far poles
-      const byFigure = p.figure > 0 && Math.abs(x0 - figX) < arm + figS * 0.5;
-      if (byFigure) x0 = figX + (vx > x0 ? 1 : -1) * (arm + figS * 0.5);   // and of the lone figure, on past it (its wires out past the edge would cross it: none)
+      if (Math.abs(x0 - figX) < arm + fr) x0 = figX + (vx > x0 ? 1 : -1) * (arm + fr);   // and of the lone figure at its largest, whether it is there or not (so its slider moves nothing here), on past it: its wires out past the edge run behind it
       const h0 = Math.max(tall * 0.4, b0 - P.below(x0, b0 - tall, u * 0.08)), [qx, qy] = objAt("pole", x0, b0 - h0 * 0.5, ctx);   // the nearest standing clear of the title
-      wlLay(ctx, "wlPoles", `${look}|${p.poles}|${sun0[0]}|${h0}|${x0}|${byFigure}`, { x: Math.min(x0, vx) - u * 1.0, y: b0 - h0 * 1.12, w: Math.abs(x0 - vx) + u * 2, h: h0 * 1.2 }, (x) => wlPoles(x, P, x0, b0, h0, vx, H + fh * 0.01, 1 + 5 * p.poles, 4760, sun0[0], !byFigure), qx - x0, qy - (b0 - h0 * 0.5), true);
+      wlLay(ctx, "wlPoles", `${look}|${p.poles}|${sun0[0]}|${h0}|${x0}`, { x: Math.min(x0, vx) - u * 1.0, y: b0 - h0 * 1.12, w: Math.abs(x0 - vx) + u * 2, h: h0 * 1.2 }, (x) => wlPoles(x, P, x0, b0, h0, vx, H + fh * 0.01, 1 + 5 * p.poles, 4760, sun0[0]), qx - x0, qy - (b0 - h0 * 0.5), true);
     }
     if (p.water > 0) wlWater(ctx, P, p.water, p.sun > 0 ? sx : undefined, glow, onto);
     if (p.debris > 0) wlLay(ctx, "wlDebris", `${look}|${p.debris}`, { x: F.x0, y: H, w: fw, h: F.y1 - H + 2 }, (x) => wlDebris(x, P, p.debris, 4780));

@@ -1072,6 +1072,33 @@ test("the city pop night and the constructivist poster: many layers each, their 
   setLook("cel");
 });
 
+test("the constructivist poster's bars, dot grids and crosshairs, and small type: each at its own place where that keeps clear of the words, else at another clear one, else behind them — never left out, so every step of a slider brings one in", async () => {
+  const { cnBarsAt, cnLinesAt, cnMarksAt } = await import("../ui/js/looks/construct.js");
+  const { overlaps } = await import("../ui/js/looks/kit.js");
+  setLook("construct", null, 7, false);
+  const F = { x0: 0, y0: 0, x1: 1920, y1: 918 }, words = [{ x: 50, y: 120, w: 1820, h: 520 }], hit = (b) => words.some((a) => overlaps(a, b));   // a title across the field
+  for (const [at, k0, n] of [[cnBarsAt, 3040, 14], [cnLinesAt, 3060, 4], [cnMarksAt, 3070, 7]]) {
+    const own = at(F, [], k0).filter(Boolean), now = at(F, words, k0).filter(Boolean);
+    assert.equal(now.length, n, `${at.name}: every item has its place`);
+    now.forEach((b, i) => {
+      if (!hit(own[i])) assert.deepEqual(b, own[i], `${at.name} ${i}: clear at its own place, it stays there`);
+      else if (b.x !== own[i].x || b.y !== own[i].y) assert.ok(!hit(b) && b.x >= F.x0 && b.x + b.w <= F.x1 && b.y >= F.y0 && b.y + b.h <= F.y1, `${at.name} ${i}: moved, to a clear place in the field`);
+    });
+    assert.ok(now.filter((b) => !hit(b)).length > own.filter((b) => !hit(b)).length, `${at.name}: more of them clear of the words than at their own places`);
+    assert.deepEqual(at(F, words, k0), at(F, words, k0), "a pure function of the field, the boxes and the seed");
+  }
+  // through the painter, with the graphic over the whole field (no place clear): the old code left every bar and every piece of small type out
+  const G = LOOKS.construct.layout("stack", 1920, 1080), env = { w: 1920, h: 1080, G: { ...G, art: { ...G.art, s: 3 } }, C: [40, 120, 220], graphic: {}, hasBrand: true, o: { catIndex: 0 }, cover: { title: "", layers: [{ id: "graphic", visible: true }] } };
+  const zero = { machine: 0, wedges: 0, circle: 0, rays: 0, truss: 0, bars: 0, lines: 0, marks: 0, water: 0 };
+  for (const [key, N] of [["bars", 14], ["lines", 14], ["marks", 7]]) for (const v of [0.05, 0.25, 0.5, 0.75, 1]) {
+    const seen = { alpha: 0, fill: 0, stroke: 0 }, ctx = new Proxy({}, { get: (o, k) => (k === "fill" || k === "stroke" ? () => seen[k]++ : () => ({ addColorStop() {} })), set: (o, k) => { if (k === "globalAlpha") seen.alpha++; return true; } });
+    setLook("construct", { ...zero, [key]: v }, 7, false);
+    LOOKS.construct.background(ctx, env, { ground: false, grid: true }, lookValues());
+    assert.equal(key === "lines" ? seen.fill + seen.stroke : seen.alpha, Math.ceil(v * N), `${key} at ${v}: every item it brings in is drawn`);
+  }
+  setLook("cel");
+});
+
 test("the dark deco: Gotham's night by default, a crimson sky and black and gold by degrees, the channel colour as floodlight; a photo painted into the night", async () => {
   const L = LOOKS.deco;
   assert.ok(L.params.length >= 12 && L.seeded && L.oneTheme && typeof L.layout === "function", `${L.params.length} settings, seeded, night only, flat layouts of its own`);
@@ -1153,6 +1180,13 @@ test("the silent wasteland: a dusk or a snowfield with one hot accent, a scene t
     assert.equal(L.background(ctx, env, { grid: true, ground: false }, lookValues()), true);
     assert.ok(n.paints > 0, `${key} (${onDark ? "dusk" : "snow"}) paints its part`);
   }
+  // the power poles' wires out past the edge drawn whatever the lone figure's slider, the poles where they were: the nearest keeps clear of the room the figure takes at its largest, there or not (here a tag that would send the pole onto the figure)
+  {
+    const G = L.layout("stack", 1080, 1920), at = { ...env, w: 1080, h: 1920, G: { ...G, tag: { ...G.tag, x: 653 } }, o: { ...env.o, size: { w: 1080, h: 1920 } } };
+    const curves = (poles, figure) => { const pts = []; setLook("wasteland", { ...least, poles, figure }, 3, true); L.background(new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "quadraticCurveTo" ? (...a) => pts.push(a.map(Math.round).join()) : k === "measureText" ? () => ({ width: 50 }) : String(k).startsWith("create") ? () => ({ addColorStop() {} }) : () => ({})), set: () => true }), at, { grid: true, ground: false }, lookValues()); return pts; };
+    const bare = curves(0.2, 0);
+    for (const figure of [0.05, 0.5, 1]) { const all = curves(0.2, figure); assert.deepEqual([all.length - curves(0, figure).length, all.slice(0, bare.length)], [bare.length, bare], `the poles and every wire as they were, the figure at ${figure}`); }
+  }
   // the block's surface painted inside it, stroke by stroke, and its edge broken along whatever shape it has (dead grass on an edge facing the sky)
   for (const [nx, ny] of [[0, -1], [0, 1], [-1, 0]]) {
     const [n, ctx] = rec();
@@ -1192,7 +1226,7 @@ test("the silent wasteland: a dusk or a snowfield with one hot accent, a scene t
   setLook("cel");
 });
 
-test("the origami noir: a picture cut into facets that cover it, each the mean of what it covers, the same for the same picture; graded into a teal night, amber and a strong red kept; the neon in the channel's hue; a fog on the light ground, the near towers dark against it; towers folded of a lit plane and a shaded one, parting as they near; a refined cut keeps a small dark feature; a cut-out's facets whole, its mask its edge; a warm highlight warm, lips red; the neon's word cut at a word, its letters whole, side by side or stacked, placed clear of the words, down a tower where the room is narrow, or not at all; what it keeps let go as it is left", async () => {
+test("the origami noir: a picture cut into facets that cover it, each the mean of what it covers, the same for the same picture; graded into a teal night, amber and a strong red kept; the neon in the channel's hue; a fog on the light ground, the near towers dark against it; towers folded of a lit plane and a shaded one, parting as they near; a refined cut keeps a small dark feature; a cut-out's facets whole, its mask its edge; a warm highlight warm, lips red; the neon's word cut at a word, its letters whole, side by side or stacked, placed clear of the words wherever the street lies, down a tower where the room is narrow, behind them where there is none; the folded figure always somewhere; what it keeps let go as it is left", async () => {
   const L = LOOKS.facet, { fcDelaunay, fcFacets, fcGrade, fcRim, fcTones, fcLetters, fcWord, fcSignAt, fcFreeAll } = (await import("../ui/js/style.js")).__test;
   assert.ok(L.params.length >= 12 && L.seeded && !L.oneTheme && L.art === "figure" && typeof L.layout === "function", `${L.params.length} settings, seeded, both grounds, a figure, flat layouts of its own`);
   assert.ok(Object.keys(L.scene).length >= 4 && L.elementFx.length >= 4, "scene objects and effects");
@@ -1290,12 +1324,29 @@ test("the origami noir: a picture cut into facets that cover it, each the mean o
   assert.deepEqual([V.xs.map((x, i) => x + V.ws[i] / 2), V.ys[1], V.ys[0] < V.ys[1] - 100, V.T > 200], [[300, 300], 0, true, true]);
   // the neon's word: in capitals, whole words while they fit in eight, else the first word's first eight
   assert.deepEqual(["Pixel Harbor", "noir", "Tokyo 2", "NOIRCITYNIGHTS", "  "].map(fcWord), ["PIXEL", "NOIR", "TOKYO 2", "NOIRCITY", ""]);
-  // the neon's place: clear of the words (and the tag, the graphic), its foot above the street; with no room, none
+  // the neon's place: clear of the words (and the tag, the graphic), its foot above the street; with no room clear, across behind them, as large as asked, within the field: never left out
+  const { fcScaled, fcFigureAt } = await import("../ui/js/looks/facet.js");
   const Fd = { x0: 0, y0: 0, x1: 1920, y1: 1080 }, words = { x: 80, y: 120, w: 900, h: 700 }, S0 = fcSignAt(ctx0, Fd, 1000, 300, "SHOT", [words]);
   assert.ok(S0 && !overlapsBox(words, { x: S0.x - S0.W / 2, y: S0.y - S0.H, w: S0.W, h: S0.H }) && S0.y < 1000, `clear of the words: ${JSON.stringify(S0)}`);
-  assert.equal(fcSignAt(ctx0, Fd, 1000, 300, "SHOT", [{ x: 0, y: 0, w: 1920, h: 1080 }]), null, "no room: no sign");
+  const B = fcSignAt(ctx0, Fd, 1000, 300, "SHOT", [{ x: 0, y: 0, w: 1920, h: 1080 }]);
+  assert.ok(B && !B.down && B.H === 300 && B.box.x >= 0 && B.box.x + B.box.w <= 1920 && B.box.y >= 0 && B.y < 1000, `no room clear: behind the words, still there: ${JSON.stringify(B)}`);
   const narrow = { x: 0, y: 0, w: 1780, h: 1080 }, D = fcSignAt(ctx0, Fd, 1000, 300, "SHOT", [narrow]);   // a narrow column beside the words: stacked down a tower there
   assert.ok(D && D.down && !overlapsBox(narrow, D.box) && D.box.x + D.box.w <= 1920 && D.box.h > D.box.w * 3, `down a tower: ${JSON.stringify(D)}`);
+  // found at its largest wherever the street may lie (Wet ground: up to 0.18 of the field above where it first puts it, 0.12 below) and drawn at its slider's size where it stands (fcScaled): neither slider moves it; a strip the sinking street would take it onto is kept clear of at every height and size
+  const b0 = 1080 * 0.88, strip = { x: 1000, y: 800, w: 900, h: 40 }, kept = [words, strip], W = fcSignAt(ctx0, Fd, b0, 1080 * 0.38, "SHOT", kept, 1080 * 0.18, 1080 * 0.12), here = fcSignAt(ctx0, Fd, b0, 1080 * 0.38, "SHOT", kept);
+  assert.ok(overlapsBox(strip, { ...here.box, y: here.box.y + 1080 * 0.12 }), "judged where the street first lies alone, the street sinking would take it onto the strip");
+  for (const dy of [-0.18, -0.06, 0, 0.12].map((d) => d * 1080)) for (const k of [0.42, 0.74, 1]) {
+    const Z = fcScaled(W, k, dy), b = Z.box;
+    assert.ok(Z.x === W.x && Z.y === W.y + dy && Z.H === W.H * k && !kept.some((q) => overlapsBox(q, b)) && b.y >= 0 && b.x >= W.box.x - 1e-6 && b.x + b.w <= W.box.x + W.box.w + 1e-6 && b.y >= W.box.y + dy - 1e-6, `clear wherever the street lies, at any size, within its room: ${dy}, ${k}`);
+  }
+  // the folded figure: found at its largest wherever the street lies, clear of the words and of the neon's room at its largest (undragged, whether it shows or not), within the field's sides; with no room at all, still there, at 0.4 of its least size
+  const room = fcSignAt(ctx0, Fd, b0, 1080 * 0.38, "SHOT", [words], 1080 * 0.18, 1080 * 0.12).box, Q = fcFigureAt(Fd, b0, 1080 * 0.18, 1080 * 0.12, 0.5, 1080 * 0.65, [words], room);
+  for (const dy of [-0.18, 0, 0.12].map((d) => d * 1080)) for (const s of [Q.size, Q.size * 0.6]) {
+    const fb = { x: Q.x - s * 0.5, y: Q.foot + dy * Q.k - s * 1.04, w: s, h: s * 1.08 };
+    assert.ok(fb.x >= 0 && fb.x + fb.w <= 1920 && !overlapsBox(words, fb) && !overlapsBox({ ...room, y: room.y + dy }, fb), `the figure clear of the words and the neon: ${dy}, ${s}`);
+  }
+  const none = fcFigureAt(Fd, b0, 1080 * 0.18, 1080 * 0.12, 0.5, 700, [{ x: 0, y: 0, w: 1920, h: 1080 }], room);
+  assert.ok(none && none.x - none.size * 0.5 >= 0 && none.x + none.size * 0.5 <= 1920 && Math.abs(none.size - (700 * 0.4 * 0.25) / 0.65) < 1e-6, `no room: the figure still there: ${JSON.stringify(none)}`);
   // what it keeps goes as another look is chosen
   assert.equal(L.leave, fcFreeAll);
   // the lettering, where there is no canvas to work on: the plain letters in paper (ink on the fog), the highlighted ones in the neon
@@ -1553,6 +1604,19 @@ test("the infrared ghost: a photo graded into infrared, foliage and skin glowing
   WORK.irBack = new Map([["8x8", { c: { width: 8, height: 8 }, key: "k" }]]); WORK.irSoft = { width: 4, height: 4 };
   irFreeAll();
   assert.ok(!("irBack" in WORK) && !("irSoft" in WORK), "let go");
+  setLook("cel");
+});
+
+test("the monochrome film's photo collage: as many pieces as its slider says, none left out for the title (behind it where there is no room), each the same piece as the slider rises", () => {
+  const L = LOOKS.monofilm;
+  for (const [w, h] of [[1920, 1080], [1080, 1920], [1200, 1200]]) for (const tpl of ["stack", "split", "banner"]) for (const big of [false, true]) {
+    const G0 = L.layout(tpl, w, h), G = big ? { ...G0, title: { x: 0, y: 0, w, h } } : G0;   // a title over the whole canvas: no room clear of it
+    const pieces = (v) => { const out = []; const ctx = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "strokeRect" ? (...a) => out.push(a) : k === "createLinearGradient" || k === "createRadialGradient" || k === "createPattern" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
+      setLook("monofilm", { collage: v, motion: 0 }, 3, false); L.background(ctx, { w, h, C: [200, 40, 40], G, photo: {}, drawPhoto() {} }, { grid: true, fill: true }, lookValues()); return out; };
+    const rows = [0.05, 0.5, 1].map((v) => [v, pieces(v)]);
+    assert.ok(rows.every(([v, r]) => r.length === Math.round(1 + 3 * v) && r.every(([x, y, a, b]) => x + a > 0 && y + b > 0 && x < w && y < h)), `${w}x${h} ${tpl}${big ? ", the title over all" : ""}: ${rows.map(([v, r]) => r.length)}`);
+    assert.ok(rows.every(([, r]) => r.every(([, , a, b], i) => a === rows[2][1][i][2] && b === rows[2][1][i][3])), "each piece the same as the slider rises");
+  }
   setLook("cel");
 });
 
@@ -2118,6 +2182,33 @@ test("looks that are about arrangement bring flat-edged layouts", async () => {
   }
   assert.ok(blockLayout("stack", 1920, 1080, { band: 0.5 }).accent[0][1] < blockLayout("stack", 1920, 1080, { band: 0.2 }).accent[0][1]);
   assert.equal(LOOKS.riso.layout, undefined);                    // the others keep the profile's slanted layouts
+});
+
+test("the magazine page's quotation mark and body columns: on the page whenever their sliders are up — beside the words, else under or over them, behind them where nothing is clear — off the block, and neither slider moving the other", async () => {
+  const { edRoom } = await import("../ui/js/looks/editorial.js");
+  const { adjustLayout } = await import("../ui/js/layout.js");
+  const { openField, setScene, scenePlaced, titleArea } = await import("../ui/js/looks/kit.js");
+  const ctx = (log) => new Proxy({ font: "10px x", measureText(s) { return { width: [...String(s)].length * Number(/(\d+(?:\.\d+)?)px/.exec(this.font)[1]) * 0.55 }; } }, { get: (o, k) => (k in o ? o[k] : k === "fillText" ? (s, x, y) => log.push(["T", s, x, y]) : k === "fillRect" ? (...a) => log.push(["R", ...a]) : () => ({})), set: (o, k, v) => { o[k] = v; return true; } });
+  for (const [w, h] of [[1920, 1080], [1200, 1200], [1080, 1920]]) for (const t of ["stack", "split", "banner"]) for (const adj of [{}, { flip: true }, { slant: 0.2 }]) for (const title of ["Short", "A much longer headline\nover two long lines here"]) {
+    const G = adjustLayout(LOOKS.editorial.layout(t, w, h), w, h, adj), where = `${t} ${w}x${h} ${JSON.stringify(adj)} "${title.slice(0, 6)}"`;
+    const env = { w, h, G, C: [200, 30, 30], hasBrand: true, graphic: {}, cat: { name: "频道", sub: "SUB" }, o: { catIndex: 0 }, cover: { title, layers: [{ id: "title", type: "title", visible: true }, { id: "graphic", visible: true }, { id: "catname", visible: true }] } };
+    const R = edRoom(ctx([]), env), F = openField(env), [ax, ay, bx, by] = G.edge.line, side = (x, y) => (x - ax) * (by - ay) - (y - ay) * (bx - ax), inward = side(ax + G.edge.nx * 100, ay + G.edge.ny * 100);
+    assert.ok(R.x1 - R.x0 >= 220 && R.y1 - R.y0 >= 160 && R.x0 >= F.x0 && R.x1 <= F.x1 && R.y0 >= F.y0 && R.y1 <= F.y1, `${where}: a room in the field, ${JSON.stringify(R)}`);
+    for (const [x, y] of [[R.x0, R.y0], [R.x1, R.y0], [R.x0, R.y1], [R.x1, R.y1]]) assert.ok(side(x, y) * inward > 0, `${where}: off the block, where its edge leans too`);
+    const run = (quote, text) => { setLook("editorial", { numeral: 0, quote, text }, 3, false); setScene({}, w, h, 1); const log = []; LOOKS.editorial.background(ctx(log), env, { ground: false, grid: true }, lookValues()); return { q: log.filter((e) => e[0] === "T"), t: log.filter((e) => e[0] === "R"), handle: scenePlaced().some((p) => p.key === "quote") }; };
+    const full = run(0.5, 1).t, still = run(0, 0.5).t, mark = run(0.5, 0).q;
+    for (const v of [0.05, 0.3, 1]) {
+      const a = run(v, 0.5), b = run(0.5, v);
+      assert.ok(a.q.length === 1 && a.handle, `${where}: the quotation mark and its handle at ${v}`);
+      assert.deepEqual(a.t, still, `${where}: the quotation mark moves no line of the text`);
+      assert.ok(b.t.length > 0 && JSON.stringify(full.slice(0, b.t.length)) === JSON.stringify(b.t), `${where}: the body columns at ${v}, each line where it stands at full`);
+      assert.deepEqual(b.q, mark, `${where}: the text moves no quotation mark`);
+    }
+    for (const e of full) assert.ok(e[1] >= R.x0 && e[1] + e[3] <= R.x1 + 1e-6 && e[2] >= R.y0 && e[2] + e[4] <= R.y1 + 1e-6, `${where}: the rows cut to the room`);
+    if (t === "stack" && w === 1920 && !adj.flip && !adj.slant && title === "Short") assert.deepEqual([R.x0, R.y0, R.x1], [Math.round(w * 0.64) + 30, 172, w - 72], "beside a short title, where the column rule leaves room, as it always stood");
+    if (t === "split" && w === 1920 && !adj.flip && !adj.slant) { const T = titleArea(ctx([]), env); assert.ok(R.y0 >= T.y + T.h, `${where}: no room beside the words on Split (there was nothing): under them`); }
+  }
+  setLook("cel");
 });
 
 test("templates can be adjusted, and their halves swapped", async () => {

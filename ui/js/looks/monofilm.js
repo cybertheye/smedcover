@@ -53,8 +53,8 @@ export const monofilm = {
         for (let i = 0; i < n; i++) {
           const rw = w * (0.12 + rand(i * 3.1 + 320) * 0.16), rh = rw * (0.62 + rand(i * 4.7 + 321) * 0.5);
           let rx = 0, ry = 0, ok = false;
-          for (let t = 0; t < 10 && !ok; t++) { rx = w * (0.08 + rand(i * 5.3 + t * 11.3 + 322) * 0.84) - rw / 2; ry = h * (0.1 + rand(i * 6.1 + t * 13.7 + 323) * 0.8) - rh / 2; ok = clear(rx, ry, rw, rh); }   // clear of the title
-          if (!ok) continue;
+          for (let t = 0; t < 10 && !ok; t++) { rx = w * (0.08 + rand(i * 5.3 + t * 11.3 + 322) * 0.84) - rw / 2; ry = h * (0.1 + rand(i * 6.1 + t * 13.7 + 323) * 0.8) - rh / 2; ok = clear(rx, ry, rw, rh); }   // clear of the title if it can be
+          if (!ok) { rx = w * (0.08 + rand(i * 5.3 + 322) * 0.84) - rw / 2; ry = h * (0.1 + rand(i * 6.1 + 323) * 0.8) - rh / 2; }   // else at its first place, behind the title: never left out
           const dx = (rand(i * 7.7 + 324) - 0.5) * u * 0.12 * p.collage, dy = (rand(i * 8.3 + 325) - 0.5) * u * 0.08 * p.collage;
           ctx.save(); ctx.beginPath(); ctx.rect(rx + dx, ry + dy, rw, rh); ctx.clip();
           ctx.translate(dx * 0.4, dy * 0.4); ctx.fillStyle = css(ground); ctx.fillRect(rx - dx, ry - dy, rw + Math.abs(dx) * 2, rh + Math.abs(dy) * 2);
