@@ -130,6 +130,8 @@ export const RECIPES = {
   deco: { family: "light", own: 0.95, bend: 0, params: { red: 0.2, rain: 0.2, airship: 0.25, sign: 0.3, arch: 0.25, figure: 0.25, gilt: 0.15 }, tune: (p) => { if (p.rain > 0) p.fog = Math.max(p.fog, 0.45); } },   // rain comes with mist
   wasteland: { family: "print", own: 0.9, dark: 0.65, fx: { worn: 3, plain: 2, torn: 1, eroded: 1 }, bend: 0.03, bends: { arc: 1 }, params: { chan: 0.25 }, tune: (p) => { if (p.smoke > 0.6) p.haze = Math.max(p.haze, 0.45); } },   // a heavy plume hangs in a haze
   facet: { family: "light", own: 0.9, bend: 0.05, bends: { arc: 1 }, params: { blinds: 0.25, figure: 0.25, bars: 0.3 }, tune: (p) => { if (p.rain > 0.5) p.wet = Math.max(p.wet, 0.35); } },   // heavy rain leaves the street wet
+  chroma: { family: "print", own: 0.92, dark: 0.5, fx: { plain: 3, bluenote: 2, worn: 1, dots: 1 }, bend: 0.03, bends: { arc: 1 }, params: { lines: 0.25, houses: 0.25, hills: 0.3, walls: 0.2, chan: 0.2 },
+    tune: (p, R) => { p.palette = 1 + Math.floor(R() * 7); if (p.walls > 0) { p.hills = 0; p.houses = 0; } } },   // any of its palettes; Barragán's walls stand alone, a world of their own
 };
 /**
  * What a cover brings to a hand: `long` (a line of its title longer than 8 characters' width, or three

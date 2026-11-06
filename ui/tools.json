@@ -452,7 +452,8 @@
               "construct",
               "deco",
               "wasteland",
-              "facet"
+              "facet",
+              "chroma"
             ],
             "description": "This look alone, with its settings."
           },
@@ -816,7 +817,8 @@
               "construct",
               "deco",
               "wasteland",
-              "facet"
+              "facet",
+              "chroma"
             ],
             "description": "The look's id."
           },

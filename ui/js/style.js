@@ -90,8 +90,9 @@ import { construct, joinCells } from "./looks/construct.js";
 import { deco, dkPixels, dkSpot } from "./looks/deco.js";
 import { wasteland, wlBlock, wlHot, wlMemory, wlPixels } from "./looks/wasteland.js";
 import { facet, fcDelaunay, fcFacets, fcFreeAll, fcGrade, fcLetters, fcMemory, fcRim, fcSignAt, fcTones, fcWord } from "./looks/facet.js";
+import { chroma, chBlades, chBlock, chFields, chFreeAll, chHorizon, chPal, chPlan, chStops, chTritone } from "./looks/chroma.js";
 
-Object.assign(LOOKS, { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant, collage, yellow, pitch, dots, neon, court, velvet, rave, chrome, netart, verse, glass, jelly, skies, spectrum, citypop, construct, deco, wasteland, facet });
+Object.assign(LOOKS, { cel, cyber, riso, anime, bluenote, editorial, songke, vivid, negative, cinema, cyano, monofilm, typo, toon, avant, collage, yellow, pitch, dots, neon, court, velvet, rave, chrome, netart, verse, glass, jelly, skies, spectrum, citypop, construct, deco, wasteland, facet, chroma });
 houseLook(cel);
 
 export { FX_STAGES, FX_TIMING, FX_TYPES, INK, LOOKS, asColumn, columnBoxOf, columned, css, effectsFor, fall, isFast, layerEffects, look, lookParams, lookState, lookValues, noteReads, paintEffects, parseColour, readsInto, role, scenePlaced, setFast, setLook, setScene, styled, wherePainted } from "./looks/kit.js";
@@ -113,6 +114,7 @@ export const LOOK_TAGS = {
   glass: ["illustration"], jelly: ["illustration"], skies: ["illustration"], spectrum: ["print", "experimental"],
   citypop: ["night", "illustration"], construct: ["poster"], deco: ["night", "illustration"], wasteland: ["illustration"],
   facet: ["night", "illustration"],
+  chroma: ["illustration", "poster"],
 };
 /** Internals the tests reach for. */
-export const __test = { toneTable, hueTurn, joinCells, celPixels, dkPixels, dkSpot, wlPixels, wlHot, wlBlock, wlMemory, fcDelaunay, fcFacets, fcGrade, fcRim, fcTones, fcLetters, fcWord, fcSignAt, fcMemory, fcFreeAll };
+export const __test = { toneTable, hueTurn, joinCells, celPixels, dkPixels, dkSpot, wlPixels, wlHot, wlBlock, wlMemory, fcDelaunay, fcFacets, fcGrade, fcRim, fcTones, fcLetters, fcWord, fcSignAt, fcMemory, fcFreeAll, chBlades, chBlock, chFields, chFreeAll, chHorizon, chPal, chPlan, chStops, chTritone };
