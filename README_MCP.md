@@ -500,7 +500,7 @@ Arguments in bold are required. A tool that changes something is one step of und
 | Tool | What it does | Arguments | Marks |
 |---|---|---|---|
 | `set_text` | Sets the title, subtitle and/or tag (at least one). `*Asterisks*` highlight words and `\n` breaks a line, as in the editor; `""` empties one. | `profile`, `channel`, `title`, `subtitle`, `tag` | |
-| `set_look` | Sets the profile's look, which all its channels share, and/or its settings. A setting out of range is clamped and said in `warnings`. | `profile`, `look` (one of 39), `params` (the look's settings by key), `theme` (`dark`, `light`), `seed` (0–999999), `resetParams` | |
+| `set_look` | Sets the profile's look, which all its channels share, and/or its settings. A setting out of range is clamped and said in `warnings`. | `profile`, `look` (one of 40), `params` (the look's settings by key), `theme` (`dark`, `light`), `seed` (0–999999), `resetParams` | |
 | `set_channel` | Changes a channel: its name, the line under it, its code, its colour. | `profile`, **`channel`**, `name`, `sub`, `code`, `color` (`#rrggbb`) | |
 | `set_layer_effect` | A headline's text effect (the title, the subtitle or a text layer). Effects that need glyph outlines are refused where the host has none. | `profile`, `channel`, **`layer`**, `effect` (one of 19; `auto`: the look's), `amount` (0–2), `reshuffle`, `outline` (0–2), `shadow` (0–2) | |
 | `set_layer_font` | A lettering layer's font (installed, bundled or imported; `""` for the look's own), and/or set in columns. | `profile`, `channel`, **`layer`**, `font`, `vertical` | |

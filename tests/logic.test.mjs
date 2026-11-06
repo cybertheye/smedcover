@@ -733,7 +733,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared", "mondo"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared", "mondo", "cosmo"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli", "gilded"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid", "glass"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
@@ -901,7 +901,7 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
 
 test("the poster looks: many settings each, their own grounds, flat layouts (all but the collage, on the slanted ones), and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
-  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared", "mondo"]) {
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared", "mondo", "cosmo"]) {
     const L = LOOKS[id];
     assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
     assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
@@ -1693,6 +1693,108 @@ test("the chroma field: palettes of saturated fields whose lettering reads on th
     readsInto(was);
     assert.deepEqual(fills.map((v) => parseColour(v).slice(0, 3)), [p0.type, p0.hi], "the type colour, the highlight");
     assert.deepEqual([...seen], ["palette"], "the lettering reads the palette alone");
+  }
+  setLook("cel");
+});
+
+test("retro-futurism: black space or cream paper, colours faded as old print, the main planet in the channel's hue, a photo graded as an old print and given a paper border; the scene on the canvas and off the colour block at every size, in every template, mostly clear of the words, the same for the same seed; no part going or moving as a slider moves; the beam beside the words or passing behind them, its sweep a seventies swoop; each part by its own slider", async () => {
+  const L = LOOKS.cosmo, { cmBeamPath, cmFade, cmFreeAll, cmGrade, cmPlan, cmPlanetCols } = (await import("../ui/js/style.js")).__test;
+  const lumOf = (c) => (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255, satOf = ([r, g, b]) => (Math.max(r, g, b) - Math.min(r, g, b)) / Math.max(1, r, g, b), hue = (c) => Math.atan2(Math.sqrt(3) * (c[1] - c[2]), 2 * c[0] - c[1] - c[2]);
+  assert.ok(L.params.length >= 8 && L.params.length <= 15 && L.seeded && !L.oneTheme && typeof L.layout === "function", `${L.params.length} settings, seeded, both grounds, flat layouts of its own`);
+  assert.ok(Object.keys(L.scene).length >= 1 && Object.keys(L.scene).length <= 4 && L.elementFx.length >= 2 && L.elementFx.some((e) => e.for.includes("photo")), "scene objects, and effects (one for photos)");
+  assert.equal(L.leave, cmFreeAll);
+  // the grounds: a black space, a cream paper
+  setLook("cosmo", {}, 3, true);
+  const night = parseColour(L.theme({}, [40, 120, 220], lookValues()).field);
+  setLook("cosmo", {}, 3, false);
+  const paper = parseColour(L.theme({}, [40, 120, 220], lookValues()).field);
+  assert.ok(lumOf(night) < 0.1 && lumOf(paper) > 0.75 && paper[0] > paper[2] + 15, `space ${night}, cream paper ${paper}`);
+  // faded as old print: less saturated, the hue kept; the main planet a banded giant in the channel's hue, a grey channel a cratered moon
+  for (const c of [[255, 0, 0], [0, 200, 80], [30, 60, 255]]) { const f = cmFade(c); assert.ok(satOf(f) < satOf(c) && Math.abs(hue(f) - hue(c)) < 0.1, `${c} -> ${f.map(Math.round)}`); }
+  for (const c of [[214, 28, 42], [6, 214, 160], [40, 60, 200], [255, 183, 3]]) { const P = cmPlanetCols(c); assert.ok(P.kind === "bands" && Math.abs(hue(P.base) - hue(c)) < 0.25 && lumOf(P.light) > lumOf(P.base) && lumOf(P.base) > lumOf(P.dark), `${c}: ${P.base.map(Math.round)}`); }
+  assert.equal(cmPlanetCols([128, 128, 128]).kind, "rock");
+  // the photo: blacks lifted, the lights to cream, a strong red faded but red, alpha kept, nothing at nothing
+  const px = (cols, a = 1) => { const d = new Uint8ClampedArray(cols.flat()); cmGrade(d, a); return [...Array(cols.length).keys()].map((i) => [...d.slice(i * 4, i * 4 + 4)]); };
+  const [black, white, red, see] = px([[0, 0, 0, 255], [255, 255, 255, 255], [220, 30, 30, 255], [128, 128, 128, 120]]);
+  assert.ok(lumOf(black) > 0.07 && lumOf(black) < 0.16, `the blacks lifted: ${black}`);
+  assert.ok(white[0] > 235 && white[0] > white[2] + 25, `the lights to cream: ${white}`);
+  assert.ok(red[0] > red[1] * 2.5 && satOf(red) < satOf([220, 30, 30]), `a red faded, still red: ${red}`);
+  assert.equal(see[3], 120, "alpha kept");
+  assert.deepEqual(px([[90, 140, 60, 255]], 0), [[90, 140, 60, 255]], "at nothing, nothing changes");
+  // a print on the collage: a margin of cream paper, its corners rounded off, the picture inside as it was
+  const PW = 60, PH = 40, d = new Uint8ClampedArray(PW * PH * 4);
+  for (let i = 0; i < PW * PH; i++) d.set([20, 60, 200, 255], i * 4);
+  cmGrade(d, 0, PW, PH, 1);
+  const at = (x, y) => [...d.slice((y * PW + x) * 4, (y * PW + x) * 4 + 4)];
+  assert.ok(at(0, 0)[3] === 0 && lumOf(at(PW / 2, 1)) > 0.8 && at(PW / 2, 1)[3] === 255, "a cream margin, the corner clear");
+  assert.deepEqual(at(PW / 2, PH / 2), [20, 60, 200, 255], "the picture inside untouched");
+  // the scene's plan, everything on: every part there, each whole on the canvas and off the colour block (a layer over the scene, under which a part would be lost), most of them clear of the words, the tag, the graphic, the brand row and the logo (layers over it too: a part goes behind them where there is no room); the beam clear of the words beside them, else fading out behind them
+  const ctx = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...s].length * 46 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
+  const envOf = (tp, w, h, title) => ({ w, h, C: [40, 120, 220], photo: null, hasBrand: true, graphic: { ref: {}, draw: () => true }, cat: { code: "AB", name: "x" }, cover: { title, tag: "EP.07", layers: [{ id: "title", type: "title", visible: true }, { id: "graphic", type: "graphic", visible: true }] }, o: { profile: { brand: { name: "B" }, categories: [{}] }, catIndex: 0, size: { w, h } }, G: L.layout(tp, w, h) });
+  const all = { planet: 1, planets: 1, galaxy: 1, sparkles: 1, ufo: 1, tech: 1, sunset: 1, rainbow: 1 };
+  const tilt = (G) => [G.R * Math.hypot(Math.cos(G.ang), 0.42 * Math.sin(G.ang)), G.R * Math.hypot(Math.sin(G.ang), 0.42 * Math.cos(G.ang))];   // the galaxy's half-extents, a disc tilted and foreshortened
+  const boxes = (P) => [["main planet", P.planet.x, P.planet.y, P.planet.r, P.planet.r], ["galaxy", P.galaxy.x, P.galaxy.y, ...tilt(P.galaxy)], ["saucer", P.ufo.x, P.ufo.y, P.ufo.s * 0.5, P.ufo.s * 0.2], ...P.smalls.map((s) => ["small planet", s.x, s.y, s.P.ring ? s.r * 2.15 : s.r, s.r]), ...P.disks.map((D) => ["disk", D.x, D.y, D.s * (D.tape ? 0.95 : 0.75), D.s * (D.tape ? 0.95 : 0.75)]), ["sun", P.sun.x, P.sun.y, P.sun.r, 0]];
+  const dist = (x, y, b) => Math.hypot(Math.max(b.x - x, 0, x - b.x - b.w), Math.max(b.y - y, 0, y - b.y - b.h));
+  let beside = 0, behind = 0, small = 0, clear = 0;
+  for (const onDark of [true, false]) for (const tp of ["stack", "split", "banner"]) for (const [w, h] of [[1920, 1080], [1440, 1080], [1080, 1080], [1080, 1440], [1080, 1920], [1920, 817]]) for (const title of ["Write your title\n*one line* each", "Short"]) {
+    setLook("cosmo", all, 3, onDark);
+    const env = envOf(tp, w, h, title), P = cmPlan(ctx, env, lookValues()), where = `${onDark ? "dark" : "light"} ${tp} ${w}x${h} "${title.split("\n")[0]}"`, u = Math.min(w, h);
+    assert.ok(P.planet && P.planet.r > u * 0.06 && P.galaxy && P.ufo && P.sun && P.beam && P.smalls.length === 6 && P.disks.length === 4 && P.sparkles.length === 12, `${where}: every part there`);
+    const [ax, ay] = env.G.edge.line, n = [env.G.edge.nx, env.G.edge.ny];   // the block's edges are straight in its own layouts
+    for (const [what, x, y, hx, hy] of boxes(P)) {
+      assert.ok(x - hx >= -0.5 && x + hx <= w + 0.5 && y - hy >= -0.5 && y + hy <= h + 0.5, `${where}: the ${what} past the canvas's edge (${Math.round(x)}, ${Math.round(y)})`);
+      if (what !== "sun") assert.ok((x - ax) * n[0] + (y - ay) * n[1] >= Math.abs(n[0]) * hx + Math.abs(n[1]) * hy - 0.5, `${where}: the ${what} under the colour block`);   // the sun's foot goes behind the peaks on the horizon
+    }
+    for (const [x, y, r] of [[P.galaxy.x, P.galaxy.y, P.galaxy.R * 0.6], [P.ufo.x, P.ufo.y, P.ufo.s * 0.55], ...P.smalls.map((s) => [s.x, s.y, s.P.ring ? s.r * 2.15 : s.r]), ...P.disks.map((D) => [D.x, D.y, D.s * (D.tape ? 0.95 : 0.75)])]) { small++; if (P.keep.every((b) => dist(x, y, b) >= r - 0.5)) clear++; }
+    const B = P.beam;
+    if (B.gap) { behind++; assert.ok(B.gap[0] <= P.T.y && B.gap[1] >= P.T.y + P.T.h, `${where}: the beam fades out behind all the words`); }
+    else { beside++; for (const b of P.words) assert.ok(B.x + B.W / 2 <= b.x || B.x - B.W / 2 >= b.x + b.w, `${where}: the beam beside the words crosses them`); }
+  }
+  assert.ok(beside > 15 && behind > 15, `the beam beside the words (${beside}) or behind them (${behind})`);
+  assert.ok(clear >= small * 0.8, `the galaxy, the saucer, the small planets and the disks clear of the words and the rest kept off: ${clear} of ${small}`);
+  // a slider sizes and fades its own part where it stands: as any slider moves, no part goes and none moves (the beam alone keeps to the main planet's near side)
+  const parts = (P) => ({ "main planet": P.planet, galaxy: P.galaxy, saucer: P.ufo, sun: P.sun && { x: P.sun.x, y: 0 }, ...Object.fromEntries(P.smalls.map((s) => [`small planet ${s.k}`, s])), ...Object.fromEntries(P.disks.map((D, k) => [`disk ${k}`, D])) });
+  for (const [tp, w, h] of [["stack", 1920, 1080], ["split", 1080, 1080], ["banner", 1080, 1920]]) {
+    const env = envOf(tp, w, h, "Short");
+    setLook("cosmo", all, 3, true);
+    const ref = parts(cmPlan(ctx, env, lookValues()));
+    for (const key of ["planet", "planets", "galaxy", "rainbow", "bend", "sunset", "ufo", "tech", "sparkles"]) for (const v of [0.05, 0.3, 0.6, 0.85]) {
+      setLook("cosmo", { ...all, [key]: v }, 3, true);
+      const now = parts(cmPlan(ctx, env, lookValues()));
+      for (const [what, q] of Object.entries(ref)) {
+        const o = now[what];
+        if (!o) assert.ok((key === "planets" && what.startsWith("small planet")) || (key === "tech" && what.startsWith("disk")), `${tp} ${w}x${h}: the ${what} gone as ${key} goes to ${v}`);   // those two bring their parts in one after another
+        else assert.ok(Math.hypot(o.x - q.x, o.y - q.y) < 0.5, `${tp} ${w}x${h}: the ${what} moves as ${key} goes to ${v}`);
+      }
+    }
+  }
+  // the same seed, the same scene; another seed, another
+  setLook("cosmo", all, 3, true);
+  const env = envOf("stack", 1920, 1080, "Short"), one = JSON.stringify(cmPlan(ctx, env, lookValues())), again = JSON.stringify(cmPlan(ctx, env, lookValues()));
+  setLook("cosmo", all, 4, true);
+  assert.ok(one === again && JSON.stringify(cmPlan(ctx, env, lookValues())) !== one, "deterministic by the seed");
+  // the beam's path: straight down at no sweep; swept, down then on an elbow into a level run out past the side
+  const F = { x0: 0, y0: 0, x1: 1920, y1: 900 }, B0 = { W: 160, dir: -1, y1: 920 }, straight = cmBeamPath(B0, 1300, -20, 0, 1920, F), swept = cmBeamPath(B0, 1300, -20, 1, 1920, F);
+  assert.ok(straight.pts.every(([x]) => x === 1300) && straight.pts.at(-1)[1] >= 900 && straight.ws.every((v) => v === 160), "straight down, one width");
+  const last = swept.pts.at(-1), level = swept.pts.slice(-20);
+  assert.ok(last[0] < 0 && level.every(([, y]) => Math.abs(y - last[1]) < 1e-6) && last[1] < 900 && swept.pts.slice(0, 20).every(([x]) => x === 1300), "down, then level out past the side");
+  // the scene: with every slider at its least, nothing; each part's own slider alone brings it in
+  const rec = () => { const c = { paints: 0 }; return [c, new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 50 }) : k === "createLinearGradient" || k === "createRadialGradient" || k === "createPattern" ? () => ({ addColorStop() {} }) : (...a) => { if (["fill", "fillRect", "stroke", "drawImage"].includes(k)) c.paints++; return {}; }), set: () => true })]; };
+  const least = Object.fromEntries(L.params.map((q) => [q.key, q.min])), envB = { ...envOf("stack", 1920, 1080, "Short"), cover: undefined };
+  for (const key of ["stars", "sparkles", "planet", "planets", "galaxy", "rainbow", "sunset", "clouds", "ufo", "tech"]) for (const onDark of [true, false]) {
+    setLook("cosmo", { ...least, [key]: 0.6 }, 3, onDark); const [c, x] = rec();
+    assert.equal(L.background(x, envB, { grid: true, ground: false }, lookValues()), true);
+    assert.ok(c.paints > 0, `${key} (${onDark ? "space" : "paper"}) paints its part`);
+  }
+  // the lettering: plain words in cream on the space, ink on paper, over drops in the rainbow's colours; highlighted words striped in the rainbow
+  for (const onDark of [true, false]) {
+    const fills = [], lx = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...s].length * 40 }) : k === "createLinearGradient" ? () => ({ addColorStop() {}, rainbow: true }) : () => {}), set: (t, k, v) => { if (k === "fillStyle") fills.push(v); t[k] = v; return true; } });
+    setLook("cosmo", {}, 3, onDark);
+    L.runs(lx, (fn) => { fn({ t: "Ab", hi: false }, 0); fn({ t: "cd", hi: true }, 80); }, { fs: 100, strokeAmt: 1, shadowAmt: 1, C: [40, 120, 220], unit: 1 }, lookValues());
+    const plain = parseColour(fills.at(-2)), drops = fills.slice(0, 10).filter((_, i) => i % 2 === 0).map(parseColour);
+    assert.ok(onDark ? lumOf(plain) > 0.8 : lumOf(plain) < 0.15, `the letters ${onDark ? "cream on the space" : "ink on paper"}: ${plain}`);
+    assert.ok(new Set(drops.map((c) => c.join())).size === 5 && drops.every((c) => satOf(c) > 0.3), "five drops, each a colour of the rainbow");
+    assert.ok(fills.at(-1).rainbow, "the highlighted words striped in the rainbow");
   }
   setLook("cel");
 });

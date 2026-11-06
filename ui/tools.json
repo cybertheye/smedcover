@@ -456,7 +456,8 @@
               "chroma",
               "aura",
               "infrared",
-              "mondo"
+              "mondo",
+              "cosmo"
             ],
             "description": "This look alone, with its settings."
           },
@@ -824,7 +825,8 @@
               "chroma",
               "aura",
               "infrared",
-              "mondo"
+              "mondo",
+              "cosmo"
             ],
             "description": "The look's id."
           },
