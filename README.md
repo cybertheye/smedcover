@@ -23,7 +23,7 @@ WeChat Channels and WeChat articles ask for, all at once.
 ## Features
 
 - **Every size from one design**: 16:9, 4:3, 3:4, 9:16, 1:1, 2.35:1. The layouts keep the words clear of the play counts and durations the platforms lay over a cover.
-- **38 looks**, and **Surprise me** (Space) to deal a new look, layout and colours in one go.
+- **39 looks**, and **Surprise me** (Space) to deal a new look, layout and colours in one go.
 - **Photos and cut-outs**: remove the background on this computer (nothing is uploaded), weave the subject in front of or behind the title, crop, or turn a photo in 3D.
 - **A canvas to collage on**: layers, text effects, fonts, clipping masks, stickers and your own vector assets.
 - **AI, if you want it**: generate or repaint photos with an image model (OpenAI, Gemini, Seedream) and draw vector stickers with a text model. Bring your own key, gateway or local model; SmedCover ships none.

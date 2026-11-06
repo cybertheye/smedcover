@@ -733,7 +733,7 @@ test("looks: parameters default, clamp and are kept per look in a profile", () =
   assert.deepEqual(Object.keys(p.style.lookParams).sort(), LOOK_IDS.filter((id) => LOOKS[id].params.length).sort());   // every look with sliders, none unknown
   assert.equal(normalizeProfile({ style: { look: "vaporwave" } }).style.look, "cel");
   assert.deepEqual([undefined, 123456, -42.6, 5e9, "x"].map((lookSeed) => normalizeProfile({ style: { lookSeed } }).style.lookSeed), [7, 123456, 43, 0, 7]);
-  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared"]);
+  assert.deepEqual(LOOK_IDS, ["cel", "cyber", "riso", "anime", "bluenote", "editorial", "songke", "vivid", "negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared", "mondo"]);
   assert.equal(normalizeProfile({ style: { look: "brick" } }).style.look, "cel");   // a look that was withdrawn falls back to the house look
   assert.deepEqual(["bluetone", "redstreet", "ghibli", "gilded"].map((look) => normalizeProfile({ style: { look } }).style.look), ["cyano", "negative", "vivid", "glass"]);   // retired looks: the nearest one left
   for (const id of LOOK_IDS) { assert.ok(LOOKS[id].name.zh && LOOKS[id].name.en); for (const q of LOOKS[id].params) assert.ok(q.name.zh && q.name.en && (q.text ? typeof q.def === "string" && q.max > 0 : q.min <= q.def && q.def <= q.max), `${id}.${q.key}`); }
@@ -901,7 +901,7 @@ test("the summer illustration look: channel colours made vivid, greys kept, the 
 
 test("the poster looks: many settings each, their own grounds, flat layouts (all but the collage, on the slanted ones), and painting without a canvas does no harm", () => {
   const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
-  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared"]) {
+  for (const id of ["negative", "cinema", "cyano", "monofilm", "typo", "toon", "avant", "collage", "yellow", "pitch", "dots", "neon", "court", "velvet", "rave", "chrome", "netart", "verse", "glass", "jelly", "skies", "spectrum", "citypop", "construct", "deco", "wasteland", "facet", "chroma", "aura", "infrared", "mondo"]) {
     const L = LOOKS[id];
     assert.ok(L.params.length >= 7, `${id}: ${L.params.length} settings`);
     assert.ok(L.name.zh && L.about.zh && L.prompt && L.solidPrompt && L.repaint("#ff0000"), id);
@@ -930,7 +930,7 @@ test("the poster looks: many settings each, their own grounds, flat layouts (all
 
 test("a look's figure drawn from a graphic: each such look names its slider, and a profile keeps the graphic put in its place", () => {
   const arts = LOOK_IDS.filter((id) => LOOKS[id].art);
-  assert.deepEqual(arts.sort(), ["avant", "chroma", "chrome", "cinema", "citypop", "construct", "cyano", "deco", "dots", "facet", "glass", "infrared", "jelly", "monofilm", "negative", "neon", "netart", "rave", "spectrum", "toon", "velvet", "verse", "yellow"]);
+  assert.deepEqual(arts.sort(), ["avant", "chroma", "chrome", "cinema", "citypop", "construct", "cyano", "deco", "dots", "facet", "glass", "infrared", "jelly", "mondo", "monofilm", "negative", "neon", "netart", "rave", "spectrum", "toon", "velvet", "verse", "yellow"]);
   for (const id of arts) { const d = LOOKS[id].params.find((q) => q.key === LOOKS[id].art); assert.ok(d && !d.text && !d.toggle && !d.needsPhoto, `${id}: the picker sits under a slider`); }
   const p = normalizeProfile({ style: { lookArt: { jelly: { kind: "sticker", id: "star" }, citypop: { kind: "user", id: "u9", extra: 1 }, deco: { kind: "bogus", id: "x" }, cel: { kind: "graphic", id: "gear" }, nope: { kind: "graphic", id: "gear" }, toon: { kind: "graphic" } } } });
   assert.deepEqual(p.style.lookArt, { jelly: { kind: "sticker", id: "star" }, citypop: { kind: "user", id: "u9" } });   // only looks with a figure, only real references
@@ -1307,6 +1307,122 @@ test("the origami noir: a picture cut into facets that cover it, each the mean o
     assert.ok(onDark ? lumOf(plain) > 0.8 : lumOf(plain) < 0.3, `the letters ${onDark ? "pale on the night" : "dark on the fog"}: ${plain}`);
     assert.deepEqual(hi.slice(0, 3).map(Math.round), fcRim([40, 120, 220]).map((v) => v | 0), "the highlighted words in the neon");
   }
+  setLook("cel");
+});
+
+test("the screen-print odyssey: five ink sets on a night stock or on cream, the channel's hot ink, a vista that keeps clear of the title where it can and behind it where it cannot (nothing left out, each part sized by its own slider where it stands, none moved by another's), a photo printed in the five inks through screens, the same for the same seed; what it keeps let go as it is left", async () => {
+  const L = LOOKS.mondo, { moSet, moHot, moInks, moPlan, moPixels, moColossusAt, moFreeAll } = (await import("../ui/js/style.js")).__test;
+  const lumOf = (c) => (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255, top = (c) => c.indexOf(Math.max(...c.slice(0, 3)));
+  assert.ok(L.params.length >= 8 && L.params.length <= 15 && L.seeded && !L.oneTheme && L.art === "colossus" && typeof L.layout === "function" && L.leave === moFreeAll, `${L.params.length} settings, seeded, both grounds, flat layouts, a figure, leave()`);
+  assert.ok(Object.keys(L.scene).length >= 3 && L.elementFx.length >= 3 && L.elementFx.some((e) => e.for.length === 1 && e.for[0] === "photo"), "scene objects, and effects, one for photos");
+  // the five ink sets, by the slider's steps (the nearest between them)
+  assert.deepEqual([0, 0.25, 0.5, 0.75, 1].map((v) => moSet(v).id), ["dune", "story", "glacier", "jungle", "temple"]);
+  assert.deepEqual([0.1, 0.4, 0.9, NaN].map((v) => moSet(v).id), ["dune", "glacier", "temple", "dune"]);
+  // the grounds: a night stock, a cream one; the title in an ink that stands off the sky behind it on either
+  for (const onDark of [true, false]) for (const v of [0, 0.25, 0.5, 0.75, 1]) {
+    setLook("mondo", { inks: v }, 3, onDark);
+    const field = parseColour(L.theme({}, [40, 120, 220], lookValues()).field), I = moInks(lookValues(), [40, 120, 220]);
+    assert.ok(onDark ? lumOf(field) < 0.1 : lumOf(field) > 0.75, `${I.set} ${onDark ? "night" : "cream"}: ${field}`);
+    assert.ok(Math.abs(lumOf(I.title) - lumOf(I.sky[0])) > 0.4 && Math.abs(lumOf(I.title) - lumOf(I.sky[1])) > 0.3, `${I.set}: the title off the sky (${I.title.map(Math.round)} on ${I.sky[0].map(Math.round)})`);
+    assert.ok(onDark ? lumOf(I.sky[3]) > lumOf(I.sky[0]) : lumOf(I.sky[3]) < lumOf(I.sky[0]), `${I.set}: the sky steps toward the horizon's glow`);
+    assert.ok(lumOf(I.far) > lumOf(I.farShade) && lumOf(I.mesa[2]) > lumOf(I.mesaShade[2]), `${I.set}: faces to the light lighter than those in shade`);
+  }
+  // the hot ink: the channel colour's hue, its value where it reads on both stocks; a grey gives the set's own lit ink
+  for (const C of [[20, 30, 120], [252, 238, 10], [6, 214, 160], [230, 20, 40], [250, 250, 250]]) {
+    const h = moHot(C, moSet(0));
+    assert.ok(lumOf(h) >= 0.25 && lumOf(h) <= 0.66, `${C} -> ${h.map(Math.round)}`);
+    if (C[0] !== C[1]) assert.equal(top(h), top(C), `${C}: its hue kept`);
+  }
+  assert.deepEqual(moHot([128, 128, 128], moSet(0)), moSet(0).lit, "a grey: the lit ink");
+  // the plan, for a title in the upper left of a cover with its block on the right: the horizon under the title, the sun
+  // clear of it and of the block, the spire under the sun, nothing standing under the title higher than its foot
+  setLook("mondo", {}, 3, true);
+  const env = { w: 1920, h: 1080, C: [40, 120, 220], cat: { code: "AB", name: "x" }, G: L.layout("split", 1920, 1080) };
+  const T = { x: 80, y: 150, w: 820, h: 420 }, keep = [{ x: T.x - 30, y: T.y - 30, w: T.w + 60, h: T.h + 60 }, { x: 64, y: 650, w: 420, h: 150 }];
+  const P = moPlan({}, env, lookValues(), { T, keep }), [sx, sy] = P.sun0, sun = { x: sx - P.sr, y: sy - P.sr, w: P.sr * 2, h: P.sr * 2 };
+  assert.ok(P.H > T.y + T.h && P.side === -1, `the horizon (${P.H.toFixed(0)}) under the title, on the left`);
+  assert.ok(!keep.some((b) => overlapsBox(b, sun)) && sx + P.sr < env.G.accent[0][0] && sy < P.H, `the sun clear of the title and the block: ${sx.toFixed(0)}, ${sy.toFixed(0)}`);
+  assert.ok(P.tx === sx && P.room(P.tx - 40, P.tx + 40, P.H) < sy, "the spire under the sun, with room to rise to it");
+  assert.ok(P.room(600, 880, P.H) >= keep[0].y + keep[0].h && P.room(100, 300, 720) === null, "under the title only up to its foot, nothing where the tag stands on the ground");
+  assert.deepEqual(moPlan({}, env, lookValues(), { T, keep }).sun0, P.sun0, "the same plan for the same cover");
+  // a title across the whole field: the sun sets low (half hidden) rather than cross it; a colossus finds its own room beside the spire
+  const wide = moPlan({}, env, lookValues(), { T: { x: 80, y: 150, w: 1300, h: 500 }, keep: [{ x: 50, y: 120, w: 1360, h: 560 }] });
+  assert.ok(wide.sun0[1] - wide.sr >= 680 - 1, `the sun under the title's box: ${wide.sun0[1].toFixed(0)}`);
+  const col = moColossusAt(P, 1, 0.8), colBox = col && { x: col.cx - col.size / 2, y: P.H - col.size, w: col.size, h: col.size };
+  assert.ok(col && col.size > 60 && !keep.some((b) => overlapsBox(b, colBox)), `the colossus clear of the boxes: ${JSON.stringify(col)}`);
+  // nothing left out for want of room: where the boxes leave none, a part stands behind them (they lie over the scene); each found at its largest, so its slider sizes it where it stands and no other slider moves it
+  const { moBanks, moBars, moPeaks, moMesas, moRocks, moCaveEdge, moAvoid } = await import("../ui/js/looks/mondo.js");
+  const deep = { T: { x: 80, y: 150, w: 1300, h: 640 }, keep: [{ x: 50, y: 120, w: 1360, h: 700 }, { x: 64, y: 650, w: 420, h: 150 }] };   // a title standing on the land, over the spire's foot
+  const env3 = { ...env, hasBrand: true };
+  for (const g of [{ T, keep }, deep]) {
+    const at = (vals) => { setLook("mondo", vals, 3, true); const q = lookValues(), Q = moPlan({}, env3, q, g), c = moColossusAt(Q, 1.4, q.colossus); return { q, Q, c, avoid: moAvoid(Q, c, 1.4) }; };
+    const where = ({ q, Q, c, avoid }) => JSON.stringify({ sun: Q.sun0[0], tx: Q.tx, sR: Q.sR, banks: moBanks(Q), bars: moBars(Q), peaks: moPeaks(Q, { ...q, range: 1 }), mesas: moMesas(Q, { ...q, land: 1 }), rocks: moRocks(Q), col: [c.cx, c.big], fig: Q.fig, cave: moCaveEdge(Q, 0.6, env3, avoid) });
+    const base = where(at({}));
+    for (const key of ["sun", "rays", "clouds", "range", "land", "tower", "figure", "colossus", "cave"]) for (const v of [0, 0.3, 1]) assert.equal(where(at({ [key]: v })), base, `${g === deep ? "a deep title" : "the title"}: ${key} at ${v} moves nothing`);
+    for (const v of [0.05, 0.4, 1]) {
+      const { q, Q, c, avoid } = at({ sun: v, clouds: v, range: v, land: v, tower: v, figure: v, colossus: v, cave: v });
+      assert.ok(Q.sr > 0 && Q.sr <= Q.sR + 1e-9 && Q.sun0[1] + Q.sr * 0.3 <= Q.H + Q.sr && Q.spire(v) > Q.fh * 0.06, `${v}: the sun and the spire there`);
+      assert.equal(moBanks(Q).slice(0, Math.round(v * 6)).length, Math.round(v * 6), "every bank of cloud the slider asks for");
+      assert.equal(moBars(Q).length, 8); assert.equal(moRocks(Q).length, 9);
+      const n = (nk) => Math.max(3, Math.round(Q.fw / (Q.u * nk))) + 2, peaks = moPeaks(Q, q);
+      assert.ok(peaks[0].length === n(0.13) && peaks[1].length === n(0.2) && peaks.flat().every((pk) => pk.h > 0), "every crystal peak, behind the title where it stands on its ground");
+      assert.ok(c && c.size >= Q.fh * 0.12 - 1e-9 && Math.abs(c.cx - Q.tx) > 1 && c.cx - (c.size * 1.4) / 2 >= Q.In.x0 && c.cx + (c.size * 1.4) / 2 <= Q.In.x1, `the colossus there, beside the spire (never in its place), on the field: ${JSON.stringify(c)}`);
+      for (const [cx, by, bw] of moBanks(Q)) assert.ok(cx - bw / 2 >= Q.In.x0 && cx + bw / 2 <= Q.In.x1, "the banks of cloud off the block");
+      const tips = moCaveEdge(Q, v, env3, avoid).tips, words = [...g.keep, { x: 0, y: 0, w: 1920, h: 124 }];
+      assert.ok(tips.every((t) => !words.some((b) => t[0] > b.x && t[0] < b.x + b.w && t[1] > b.y && t[1] < b.y + b.h)), "the stalactites' tips clear of the words");
+    }
+    // the stalactites as the rock grows: none lost (each shortened to the room under it), the overhang stepping back clear of the words
+    const seen = new Set();
+    for (let v = 0.05; v <= 1.001; v += 0.05) { const { Q, avoid } = at({ cave: v }), now = new Set(moCaveEdge(Q, v, env3, avoid).tips.map((t) => Math.round(t[0]))); for (const x of seen) assert.ok(now.has(x), `the stalactite at ${x} kept at ${v.toFixed(2)}`); for (const x of now) seen.add(x); }
+    assert.ok(g === deep || seen.size >= 1, `stalactites hang from the overhang: ${seen.size}`);   // (under a deep title and the brand row there is no overhang left at the top)
+  }
+  // a title down to the spire's foot, leaving it no room to read: the spire stands behind it at its own height (the colossus never takes its place, above)
+  { setLook("mondo", { tower: 0.5, colossus: 1 }, 3, true); const Q = moPlan({}, env3, lookValues(), deep), r = Q.room(Q.tx - Q.u * 0.06, Q.tx + Q.u * 0.06, Q.H); assert.ok((r === null || Q.H - r <= Q.fh * 0.06) && Math.abs(Q.spire(0.5) - Q.fh * 0.4) < 1e-6, `the spire behind the title: ${Q.spire(0.5)}`); }
+  // a photo printed in the inks: every pixel one of the five, its darks the key and its lights the glow, alpha kept; nothing at nothing; the same twice
+  const w = 64, h = 48, px = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const o = (y * w + x) * 4, v = Math.round((x / (w - 1)) * 255); px.set([v, v * 0.8, 255 - v, y === 0 && x === 3 ? 120 : 255], o); }
+  const I = moInks(lookValues(), [40, 120, 220], true), inks = [I.key, I.deep, I.cool, I.lit, I.glow].map((c) => c.map(Math.round).join());
+  const a = px.slice(), b = px.slice(), none = px.slice();
+  moPixels(a, w, h, I, 1, 0.75); moPixels(b, w, h, I, 1, 0.75); moPixels(none, w, h, I, 0, 0.75);
+  assert.deepEqual([...a], [...b], "the same print twice");
+  assert.deepEqual([...none], [...px], "at nothing, nothing changes");
+  const at = (x, y) => [...a.slice((y * w + x) * 4, (y * w + x) * 4 + 3)].join();
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) assert.ok(inks.includes(at(x, y)), `${x}, ${y}: ${at(x, y)} is one of the inks`);
+  assert.equal(at(0, 20), inks[0], "the darkest the key"); assert.equal(at(w - 1, 20), inks[4], "the lightest the glow");
+  assert.equal(a[3 * 4 + 3], 120, "alpha kept");
+  const kinds = new Set(); for (let x = 0; x < w; x++) kinds.add(at(x, 30));
+  assert.ok(kinds.size === 5, "all five inks across the gradient");
+  const screened = (row) => { let n = 0; for (let x = 1; x < w; x++) if (at(x, row) !== at(x - 1, row)) n++; return n; };
+  const hard = px.slice(); moPixels(hard, w, h, I, 1, 0);
+  let flips = 0; for (let x = 1; x < w; x++) if ([...hard.slice((30 * w + x) * 4, (30 * w + x) * 4 + 3)].join() !== [...hard.slice((30 * w + x - 1) * 4, (30 * w + x - 1) * 4 + 3)].join()) flips++;
+  assert.ok(flips === 4 && screened(30) > 4, `screens dither between the steps (${screened(30)} changes), hard steps without them (${flips})`);
+  // painting without a canvas: every slider at either end, on either ground, does no harm and paints the scene
+  const proxy = () => new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? () => ({ width: 10 }) : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => ({})), set: () => true });
+  const env2 = { ...env, photo: null, o: { profile: { brand: { name: "B" }, categories: [{}] }, catIndex: 0, size: { w: 1920, h: 1080 } } };
+  for (const onDark of [true, false]) for (const q of L.params) for (const v of [q.min, q.max]) {
+    setLook("mondo", { [q.key]: v }, 3, onDark);
+    assert.equal(L.background(proxy(), env2, { grid: true }, lookValues()), true, `${q.key} = ${v}`);
+    L.post(proxy(), 1920, 1080, [40, 120, 220], lookValues(), 1, []); L.frame(proxy(), env2, lookValues());
+  }
+  // a photo: printed once (drawPhotoAt keeps the treatment by its key) whatever the slider fading it in, and as it is under it
+  const drawn = (photo) => { setLook("mondo", { photo }, 3, true); const calls = []; L.background(proxy(), { ...env2, photo: {}, drawPhoto: (g = 0, t = null) => calls.push(t ? t.key : "as it is") }, { grid: false, fill: true }, lookValues()); return calls; };
+  const [full, some, off] = [drawn(1), drawn(0.4), drawn(0)];
+  assert.deepEqual([full.length, off], [1, ["as it is"]], "all printed, or not at all");
+  assert.deepEqual(some, ["as it is", full[0]], "faded in over the photo, from the same printed copy");
+  // the lettering, where there is no canvas to work on: the plain letters in the title ink, the highlighted ones in the hot ink (deeper on the cream)
+  for (const onDark of [true, false]) {
+    const fills = [], ctx = new Proxy({ canvas: null }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (str) => ({ width: [...str].length * 40 }) : () => {}), set: (t, k, v) => { if (k === "fillStyle") fills.push(v); t[k] = v; return true; } });
+    setLook("mondo", {}, 3, onDark);
+    const I2 = moInks(lookValues(), [230, 20, 40]);
+    L.runs(ctx, (fn) => { fn({ t: "Ab", hi: false }, 0); fn({ t: "cd", hi: true }, 80); }, { fs: 100, strokeAmt: 1, shadowAmt: 1, C: [230, 20, 40], unit: 1 }, lookValues());
+    const [plain, hi] = [fills.at(-3), fills.at(-1)].map((v) => parseColour(v));
+    assert.deepEqual(plain.slice(0, 3), I2.title.map((v) => v | 0), "the plain letters in the title ink");
+    assert.ok(top(hi) === 0 && (onDark ? lumOf(hi) > 0.25 : lumOf(hi) <= 0.35), `the highlighted words in the hot ink: ${hi}`);
+  }
+  // what it keeps goes as another look is chosen (setLook calls the look left's leave)
+  const own = L.leave; let left = 0; L.leave = () => left++;
+  try { setLook("mondo", {}, 3, true); setLook("mondo", {}, 4, false); setLook("cel"); setLook("cel"); } finally { L.leave = own; }
+  assert.equal(left, 1, "left once, when another look is chosen");
   setLook("cel");
 });
 const overlapsBox = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
