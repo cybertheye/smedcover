@@ -29,7 +29,7 @@ The cover, small and blurred, fills the window behind everything, and every pane
   At the dock's foot, **?** shows *Canvas controls*: how the mouse and keys work on the canvas.
 - **Centre** — the canvas. Under it a tray: the size shown, a thumbnail of every output size (click one to show that size on the canvas), and *Applies to*.
 - **Bar over the canvas** — the selected layer's most used settings, on a bar over it: for lettering its font, then a round button showing its colours (the words' and, split across it, the highlighted words'), *Effect* (with the effect it has) and *Bend* on the title, subtitle and text layers, and *Vertical*; for a photo *Remove the background*, *Crop…*, *AI repaint* and *Replace photo…*; for an asset *Colour*, *Crop…* and *Weave*; for a colour layer *Colour*; for a photo with its background removed or a cut-out also *Weave*; for the colour block *Shape* and *Size & slant*; for the background *Ground*. Each opens its group of properties in a small popover under the bar (its button lit while it is open), or does what it says; *More…*, in a segment of its own at the end, opens the drawer. Drag a popover by its head, or by any part of it that is not a control (the hand shows where; a short bar marks its top edge), to move it out of the way of what it changes: it stays where you put it while it is open, kept inside the window, and opens under the bar again the next time. The bar goes while the canvas is dragged, with several layers selected, in 3D and in Settings; a click beside the cover, or Esc, selects nothing and puts it and its popover away until you choose a layer again (on the canvas, in the layer list).
-- **Properties drawer** — on the right, everything about the selected layer. It is shut to begin with, and the canvas takes its room; it opens from *More…* on the bar, from the button under the layer list, or with a double-click on the canvas, and stays open or shut as you left it. Its head shows the layer's tile, as its row in the layer list has it, its name, what kind of layer it is (a layout layer, one you added, a copy) and at which sizes it shows; then *Hide* (*Show*), *Duplicate*, *Delete* (greyed on a layout layer, which is hidden instead) and ✕, which shuts it. In a narrow window (below about 1350 px wide) the open sheet makes way for the drawer, the dock staying; a dock button shuts the drawer and shows that sheet again. The windows that open over the sheet open over the drawer then.
+- **Properties drawer** — on the right, everything about the selected layer. It is shut to begin with, and the canvas takes its room; it opens from *More…* on the bar, from the button under the layer list, or with a double-click on the canvas (on anything but a lettering whose words you type, which a double-click opens for typing), and stays open or shut as you left it. Its head shows the layer's tile, as its row in the layer list has it, its name, what kind of layer it is (a layout layer, one you added, a copy) and at which sizes it shows; then *Hide* (*Show*), *Duplicate*, *Delete* (greyed on a layout layer, which is hidden instead) and ✕, which shuts it. In a narrow window (below about 1350 px wide) the open sheet makes way for the drawer, the dock staying; a dock button shuts the drawer and shows that sheet again. The windows that open over the sheet open over the drawer then.
 - **Settings** — a window over the editor, opened from ⋯. See [Settings](#settings).
 - **Frosted glass** — where the web view cannot blur, or with *Frosted glass* off in ⋯, the panes are plain and translucent instead. The glass changes only by your hand: if the canvas draws slowly while something is dragged, a note says so once, when you let go, with a button to make the panes plain.
 - **Dialogs** — a click on the dimmed page outside a dialog cancels it (a press inside dragged out does not). Two stay: the first-run welcome, where a starting point must be chosen, and an export's progress, which only its own *Cancel* stops.
@@ -202,7 +202,8 @@ Repaint the attached photograph as a loose watercolour painting …
 |---|---|
 | Click | Select the topmost layer |
 | Click inside a layout part's dashed frame, with the *Layout* sheet open | Select that part, even one under another layer (see [Which parts show](#which-parts-show)) |
-| Double-click | Open the properties drawer |
+| Double-click a lettering whose words you type (title, subtitle, corner tag, a text layer, the channel name, the brand row) | Type its words right there (see [Typing on the canvas](#typing-on-the-canvas)) |
+| Double-click anything else | Open the properties drawer |
 | Drag | Move; with the [layout guide](#layout-guide) shown, it snaps to its columns, rows or grid (⌘ or Ctrl held: freely) |
 | ⌃G (Ctrl+G elsewhere) | Show or hide the [layout guide](#layout-guide) |
 | Drag a corner | Resize |
@@ -219,6 +220,16 @@ Repaint the attached photograph as a loose watercolour painting …
 | ⌘Z (Ctrl+Z elsewhere), with Shift to redo | Undo / redo |
 
 Every layer except Background and Corner brackets can be moved, resized, stretched and rotated.
+
+### Typing on the canvas
+
+Double-click a lettering whose words you type in a field — the title, the subtitle, the corner tag, a text layer, the channel name, the brand row — and a field opens over it on the canvas, where its bar was, with its words selected: type to replace them, or click in them to change a part. The cover follows each key, as it follows the fields of the sheets, and those fields show what you typed.
+
+- **The channel name** has two fields, its name and its sub-name (Tab goes between them). It is the channel's: every cover of that channel changes, as the line under the fields says. **The brand row** types the brand's name, which every cover shares.
+- **The title and a text layer** are lines, one line on the cover each: Enter starts a new one, and **⌘Enter** (Ctrl+Enter elsewhere) or **Esc** ends the typing. The others are one line: **Enter** or **Esc** ends it. A click anywhere else ends it too. What you typed stays.
+- An input method works as in any field: while it is composing, Enter takes the word it offers.
+- While you type, the canvas's keys do nothing (Space deals no hand, Delete removes no layer, the arrows move the caret) and ⌘Z undoes your typing in the field. Once it is over, all of it is one step of undo.
+- The field is not laid on the lettering itself: the lettering is fitted to its box, bent, set in columns or cut from letters, and a caret there would not stand where its letters do. A locked layer is typed in its sheet, as the canvas does not pick it.
 
 ### One collage, every size
 

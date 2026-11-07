@@ -11,7 +11,7 @@ import { platformsFor, OVERLAY_FOOT } from "./platforms.js";
 import { boxOf, overlap, inOverlayFoot } from "./check.js";
 import { baseRecipe, RULES, dealCover, oddsOf, moveShare, dropOption, partChance, ODD_OPTIONS, DOTS, EVEN_DOTS, dotsOf, withDots } from "./deal.js";
 import { GRAPHICS, STICKERS, STICKER_GROUPS, userAssets, putUserAsset, putSpecAsset, assetIdFor, assetExists, assetName, canTint, drawAsset, assetHalf } from "./assets.js";
-import { ACCENT_SHAPES, LETTERED, HEADLINES, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, layoutState, restoreLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, paintedWith, refitSizes, acrossSizes, cutFrom, STICKER_SCALE } from "./layers.js";
+import { ACCENT_SHAPES, LETTERED, HEADLINES, wordFields, newLayer, isFree, isAdded, isLayout, isRemovable, COPYABLE, fillsCanvas, isPickable, colourFills, appliesTo, inSize, keepTo, sizesFor, cutAt, stepIndex, adjust, resetPlacement, insertAbove, moveLayer, duplicate, copyFreeLayers, clipBase, clipEnd, moveScene, resetScene, sceneOffsets, resolve as placeOf, reorderLayout, orderLayout, layoutOrder, DEFAULT_OFF, normalizeCrop, dragCrop, drawnCrop, fitCrop, cropPoly, dragPoint, addPoint, dropPoint, movePoly, edgePoint, inPoly, hasArea, CROP_PTS, weavable, frontOf, LAYOUT_PARTS, COLUMN_PARTS, EXTRA_KINDS, newExtra, extraLayer, insertExtra, extrasOn, takeExtras, takeLayout, takeParts, putLayout, layoutState, restoreLayout, presetLayout, setPresetLayout, newPreset, plainPlaces, defaultLayers, WEAVE_WAYS, WEAVE_MAX, BRUSH_R, strokePoints, photoPoint, photoLong, brushNext, canWeave, wovenIds, paintedWith, refitSizes, acrossSizes, cutFrom, STICKER_SCALE } from "./layers.js";
 import {
   carryFonts, HOST, CAN, invoke, files, appVersion, appBuild, uid, readJson, writeJson, loadProfiles, saveProfile, deleteProfile, loadAssetRecords, saveAssetRecord,
   deleteAssetRecord, usedUserAssets, withPids, normalizeFolders, normalizeProfile, normalizeCover, normalizeSettings, settingsToKeep, readSettings, CUSTOM_BY, normalizeSize, exportName, sizeCaption, ratioText,
@@ -250,7 +250,7 @@ function commitHistory(always = false) {
  */
 const HOLD = { history: false, step: null };
 /** Records history a moment after the last change, so a drag or a burst of typing is one step. */
-function recordHistory() { later("hist", 500, () => (SURPRISE.busy || HOLD.history ? recordHistory() : commitHistory())); }   // not while Surprise me deals hands onto the cover
+function recordHistory() { later("hist", 500, () => (SURPRISE.busy || HOLD.history || TEDIT.on ? recordHistory() : commitHistory())); }   // not while Surprise me deals hands onto the cover, nor while words are typed on the canvas (one step: see endWords)
 /** Puts the profile and the cover of history entry `snap` (a snapshot()) back on the canvas, and saves them. */
 async function restoreSnap(snap) {
   FOOTWARN.ask = FOOTWARN.soon = null;   // a placement's check still to come is not of what undo or redo puts back
@@ -528,7 +528,7 @@ let drawQueued = false, drawStale = false;   // drawStale: the cover changed sin
 function flushDraw() {
   if (!drawQueued) return;
   const changed = drawStale;
-  drawQueued = drawStale = false; ensureFonts(S.cover.layers); drawMain(); placeBar(); markStrip(); footCheck();
+  drawQueued = drawStale = false; ensureFonts(S.cover.layers); drawMain(); placeBar(); placeWords(); markStrip(); footCheck();
   // the thumbnails and the window's ground show the cover: not drawn again for the 3D view opening, closing or a layer selected in it
   if (changed || !V3.on) { thumbsRound++; later("thumbs", LIVE ? 400 : 140, drawThumbs); later("ambient", 350, paintAmbient); }
   placeFrames();   // the layout's parts framed, where the Layout sheet is open
@@ -815,9 +815,17 @@ const CURSOR = { rot: "crosshair", n: "ns-resize", s: "ns-resize", e: "ew-resize
     cv.style.cursor = !L || L.type === "bg" ? "default" : fillsCanvas(L) ? "move" : "grab";
   });
   cv.addEventListener("pointerleave", () => { const ring = $("brushring"); if (ring && !BRUSH.stroke) ring.hidden = true; });
-  cv.addEventListener("dblclick", (e) => {   // a scene object's handle: back where the layout puts it; anything else: its properties, in the drawer
+  // a scene object's handle: back where the layout puts it; a lettering whose words are typed in a field: its words, typed
+  // there (editWords); anything else: its properties, in the drawer
+  cv.addEventListener("dblclick", (e) => {
     const sh = S.mode === "edit" && !S.brushWin && sceneGrip(e);
-    if (!sh) { if (S.mode === "edit" && !S.brushWin && !group().length && !S.settings.drawer) setDrawer(true); return; }
+    if (!sh) {
+      if (S.mode !== "edit" || S.brushWin) return;
+      const L = !V3.on && !S.cropWin && !S.weaveWin && layerAt(e);
+      if (L && wordFields(L)) return editWords(L);
+      if (!group().length && !S.settings.drawer) setDrawer(true);
+      return;
+    }
     resetScene(S.cover, S.profile.style.look, sh.key, S.settings.scope, frame().key, scopeKeys());
     touch({ cover: true, side: true });
   });
@@ -7394,7 +7402,7 @@ function onScreen(id) {
 /** Puts the bar over the selected layer and its popover under the bar; hides them while they would be in the way. */
 function placeBar() {
   if (PREVIEW.fx && !BAR.hidden) return;   // an effect previewed from its card: the bar and its popover stay, or the card would move from under the pointer
-  const L = layer(), box = S.mode === "edit" && L && L.id !== FTB.away && BAR.childElementCount && !V3.on && !FTB.drag && !S.brushWin && onScreen(L.id);
+  const L = layer(), box = S.mode === "edit" && L && L.id !== FTB.away && BAR.childElementCount && !V3.on && !FTB.drag && !S.brushWin && !TEDIT.on && onScreen(L.id);   // its words typed on the canvas: the field in its place
   BAR.hidden = !box; POP.hidden = !box || !POP.childElementCount;
   if (!box) return;
   const stage = $("stage"), top = stage.offsetTop, bottom = top + stage.offsetHeight, wide = $("center").clientWidth;
@@ -7413,6 +7421,95 @@ function placeBar() {
   const px = Math.max(6, Math.min(x + (b ? b.offsetLeft : 0), wide - pw - 6)), under = y + bh + 8, below = under + ph <= bottom - 6 || y - ph - 8 < top;
   POP.style.left = px + "px"; POP.style.top = (below ? under : y - ph - 8) + "px";
   if (below && under + ph > $("center").clientHeight - 6) POP.style.maxHeight = Math.max(140, $("center").clientHeight - 6 - under) + "px";   // under, kept in the window (a tall one, the effects' cards, scrolls)
+}
+// ---------- words typed on the canvas
+// A lettering whose words are typed in a field — the title, the subtitle, the tag, a text layer (the cover's words, a
+// text layer's own), the channel name and its sub-name (the channel's, on all its covers), the brand row's name (the
+// brand's, on every cover; see WORDS in layers.js) — has them typed on the canvas too: double-clicked, a field for each
+// stands in the bar's place over it, its words all selected, and the cover follows each key as it follows the sheets'
+// fields (the same words: those fields show what was typed). Not typed on the lettering itself: it is drawn, fitted to
+// its box, bent, set in columns or cut letter by letter, and a caret laid over it would not stand where its letters do;
+// a field of the page's own takes an input method's words as they are composed, and its own keys (the arrows, ⌘Z)
+// are its own, none reaching the canvas. Enter ends it, Esc too, and anything pressed outside it; where the words are
+// lines (the title's, a text layer's) Enter starts another and ⌘Enter (Ctrl+Enter) ends it. What was typed stays, all
+// of it one step of undo.
+/** id: the lettering whose words are typed, on `cover`; side: where the field stands by it ("above", "below"), kept while it fits; box: where the lettering was last drawn, for words emptied (nothing drawn); on: open. */
+const TEDIT = { id: "", cover: null, side: "", box: null, on: false };
+const TEDIT_EL = el("div", { id: "tedit", class: "glass", hidden: true });
+$("center").append(TEDIT_EL);
+// a press on the field's frame, not one of its fields, takes the focus from neither (it would end the typing)
+TEDIT_EL.addEventListener("mousedown", (e) => { if (!/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) e.preventDefault(); });
+TEDIT_EL.addEventListener("focusout", (e) => { if (TEDIT.on && !TEDIT_EL.contains(e.relatedTarget)) endWords(); });
+// a press anywhere else ends it, before what the press does (on the canvas, a press may keep the focus where it was)
+addEventListener("pointerdown", (e) => { if (TEDIT.on && !TEDIT_EL.contains(e.target)) endWords(); }, true);
+/** Whose words a field of WORDS is (see wordFields): the cover, the layer, the channel on the canvas, or the brand. */
+const wordsHolder = (f, L) => ({ cover: S.cover, layer: L, channel: cat(), brand: S.profile.brand })[f.of];
+/** A field as tall as its lines (six at most, then it scrolls). */
+const fitField = (x) => { if (x.tagName !== "TEXTAREA") return; x.style.height = "auto"; x.style.height = Math.min(x.scrollHeight + 2, 150) + "px"; };
+/** Opens the words of lettering L for typing on the canvas (see above); nothing for a layer with none. */
+function editWords(L) {
+  const fields = wordFields(L);
+  if (!fields) return;
+  endWords();
+  if (S.layerId !== L.id || group().length) selectLayer(L.id);
+  commitPending();   // what was changed before is a step of its own
+  FTB.pop = "";   // a popover open goes with the bar
+  Object.assign(TEDIT, { id: L.id, cover: S.cover, side: "", box: null, on: true });
+  const reach = fields[0].of, inputs = fields.map((f) => {
+    const own = wordsHolder(f, L), props = { value: own[f.key] || "", spellcheck: false, "aria-label": t(f.name) };
+    const x = f.lines ? el("textarea", { ...props, rows: 1 }) : el("input", { type: "text", ...props });
+    x.addEventListener("input", () => { own[f.key] = x.value; fitField(x); wordsTyped(reach); });
+    x.addEventListener("keydown", (e) => {
+      if (e.isComposing || e.keyCode === 229) return;   // an input method's words being composed: Enter takes the word it offers
+      if (e.key === "Escape" || (e.key === "Enter" && (!f.lines || e.metaKey || e.ctrlKey))) { e.preventDefault(); e.stopPropagation(); endWords(); }
+    });
+    return x;
+  });
+  const ends = fields.some((f) => f.lines) ? t("tedit.endLines", MOD_KEY) : t("tedit.end");
+  TEDIT_EL.replaceChildren(...inputs.map((x, i) => (inputs.length > 1 ? el("label", {}, el("span", {}, t(fields[i].name)), x) : x)),
+    el("div", { class: "hint" }, reach === "channel" || reach === "brand" ? `${t(`tedit.reach.${reach}`)} · ${ends}` : ends));
+  TEDIT_EL.hidden = false;
+  placeBar(); placeWords();
+  inputs.forEach(fitField);
+  inputs[0].focus({ preventScroll: true }); inputs[0].select();
+}
+/** What follows a key typed in place: the words kept (the cover's, or the profile's: the channel's and the brand's), and the sheet, the drawer and the top bar showing them a moment after. */
+function wordsTyped(reach) {
+  touch(reach === "cover" || reach === "layer" ? { cover: true } : { profile: true });
+  later("panel", 600, () => onCoverTab() && renderPanel());
+  later("side", 600, renderSide);
+  if (reach === "channel") later("top", 300, syncTop);
+}
+/** Ends the typing on the canvas, its words kept: one step of undo for all of it. */
+function endWords() {
+  if (!TEDIT.on) return;
+  Object.assign(TEDIT, { id: "", cover: null, side: "", box: null, on: false });
+  TEDIT_EL.hidden = true; TEDIT_EL.replaceChildren();
+  commitPending();
+  placeBar();
+}
+/**
+ * Puts the field by the lettering it types, where the bar would be: above it, clear of its turning handle; under it, or
+ * inside its top, where there is no room; on the side it took while that still fits, so it does not jump as the words
+ * grow. Ends it when its lettering is gone: another cover, the editor left, the 3D view, the layer deleted or hidden.
+ */
+function placeWords() {
+  if (!TEDIT.on) return;
+  const L = S.mode === "edit" && S.cover === TEDIT.cover && !V3.on && layer(TEDIT.id);
+  if (!L || !L.visible) return endWords();
+  const box = onScreen(L.id) || TEDIT.box;   // its words emptied, nothing drawn: where it last was
+  if (!box) return;
+  TEDIT.box = box;
+  const stage = $("stage"), top = stage.offsetTop, bottom = top + stage.offsetHeight, wide = $("center").clientWidth;
+  const a = (box.r * Math.PI) / 180, ex = Math.abs(box.hw * Math.cos(a)) + Math.abs(box.hh * Math.sin(a)), ey = Math.abs(box.hw * Math.sin(a)) + Math.abs(box.hh * Math.cos(a));
+  const w = Math.round(Math.min(wide - 12, Math.max(300, Math.min(560, ex * 2))));
+  TEDIT_EL.style.width = w + "px";
+  const h = TEDIT_EL.offsetHeight, above = box.cy - ey - (FIXED.includes(L.type) || box.fill ? 12 : 54) - h, below = box.cy + ey + 14;
+  const fitsAbove = above >= top + 6, fitsBelow = below + h <= bottom - 6;
+  const side = TEDIT.side === "below" && fitsBelow ? "below" : fitsAbove ? "above" : fitsBelow ? "below" : "";
+  if (side) TEDIT.side = side;
+  const y = side === "above" ? above : side === "below" ? below : Math.max(top + 6, box.cy - ey + 8);   // no room either way: inside its top
+  TEDIT_EL.style.left = Math.max(6, Math.min(box.cx - w / 2, wide - w - 6)) + "px"; TEDIT_EL.style.top = y + "px";
 }
 /** Frames layer id on the canvas while its row in the list is under the pointer. */
 function hoverShow(id) {

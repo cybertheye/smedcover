@@ -2312,6 +2312,31 @@ background, as `pickedIds()` counts it, its id kept in `FTB.away`), until a laye
 background's too, lets `FTB.away` go, and so does `renderBar()` once another layer is selected by any other way.
 Meanwhile the drawer and the layer list show the background as ever, and the arrows and Delete act on nothing.
 
+**Words typed on the canvas.** A lettering whose words are typed in a field has them typed on the canvas too, from a
+double-click on it (the canvas's `dblclick`: a scene object's handle is put back first; else `layerAt()`, and a layer
+with words opens them, anything else the drawer as before; not in 3D, cropping or weaving). Which layers and words is
+`WORDS` in `layers.js` (`wordFields(L)`), by type, so a copy of a layout layer has its original's: the cover's title
+(lines), subtitle and tag, a text layer's own text (lines), the channel's name and sub-name, the brand's name; each
+field names whose words they are (`of`: cover, layer, channel, brand; `wordsHolder()` finds that object), the key, its
+name for the field and whether it is lines. `editWords(L)` selects the layer, commits what was waiting
+(`commitPending()`), closes the bar's popover and puts a field for each in `TEDIT_EL` (`#tedit`, in `#center`, the
+bar hidden meanwhile: `placeBar()` waits on `TEDIT.on`): a textarea for lines, as tall as they are (`fitField()`, six at
+most), else an input, the name over each where there are two, and a line under them of what ends it and, for the
+channel's and the brand's, whose words they are. The first field's words are all selected. Each key sets the words
+where they are kept and `wordsTyped()` saves them as the sheets' fields do (`touch()`: the cover, or the profile), the
+sheet and the drawer rebuilt a moment after and the top bar for a channel's name. The words are not typed on the
+lettering itself: it is fitted, bent, set in columns or cut letter by letter, and a caret over it would not stand by its
+letters; the page's own field takes an input method's composition, and its keys stay in it (the window's keydown
+listener passes over a field being typed in). Enter ends it in an input, ⌘Enter or Ctrl+Enter in a textarea (Enter is a
+new line there), Esc in either, never while an input method composes (`isComposing`, key code 229); so does focus
+leaving the field (`focusout`) and any press outside it (a capturing `pointerdown`: a press on the canvas may keep the
+focus where it was); a press on its frame takes no focus. `endWords()` keeps what was typed and commits it: while it is
+open `recordHistory()` waits on `TEDIT.on`, so all of it is one step. `placeWords()`, from `flushDraw()`, puts it where
+the bar would be (above the lettering clear of its turning handle, else under it, else inside its top), at least 300 px
+wide and at most 560, on the side it took while that still fits, so it does not jump as the words grow; at the box last
+drawn when its words are emptied and nothing is drawn; and ends it when the lettering is gone (another cover, the editor
+left, the 3D view, the layer deleted or hidden).
+
 **The drawer.** Everything about the selected layer is in the drawer on the right (`renderSide()`, into `#side`; with a
 group selected, what can be done to the group), each group made by `psec()` (9.1). It is shut to begin with and kept as
 it was left (`settings.drawer`): `setDrawer()` opens or shuts it (*More…* on the bar, the button under the layer list,

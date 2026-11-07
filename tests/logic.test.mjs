@@ -4853,6 +4853,28 @@ test("with the layout guide shown, the layers above the ground painted once more
   assert.ok(moved.filter((k) => k === "drawImage").length >= 1 && moved.length > freshDone.length + 2, "what is kept laid down, the title painted");
 });
 
+test("the words typed on the canvas: a lettering's fields, the cover's, a text layer's own, the channel's name and sub-name, the brand's name; lines for the title and a text layer alone", async () => {
+  const { WORDS, wordFields } = await import("../ui/js/layers.js");
+  const { keys, bothLangs } = await import("../ui/js/i18n.js");
+  assert.deepEqual(Object.keys(WORDS).sort(), ["brand", "catname", "subtitle", "tag", "text", "title"]);
+  const of = (type) => wordFields(type === "text" || type === "asset" ? newLayer(type, type === "asset" ? { ref: { kind: "sticker", id: "star" } } : {}) : newLayer(type));
+  assert.deepEqual(of("title").map((f) => [f.of, f.key, !!f.lines]), [["cover", "title", true]]);
+  assert.deepEqual([of("subtitle"), of("tag")].map((x) => x.map((f) => [f.of, f.key, !!f.lines])), [[["cover", "subtitle", false]], [["cover", "tag", false]]]);
+  assert.deepEqual(of("text").map((f) => [f.of, f.key, !!f.lines]), [["layer", "text", true]]);
+  assert.deepEqual(of("catname").map((f) => [f.of, f.key]), [["channel", "name"], ["channel", "sub"]], "two fields: the name and the sub-name");
+  assert.deepEqual(of("brand").map((f) => [f.of, f.key]), [["brand", "name"]]);
+  for (const type of ["bg", "accent", "graphic", "logo", "frame", "asset"]) assert.equal(of(type), null, type);
+  assert.equal(wordFields(null), null);
+  // each field's words are where it says, on a cover as made, and its name is a string in both languages
+  const p = normalizeProfile(sampleProfile("en")), c = normalizeCover({ title: "Hi", subtitle: "sub", tag: "EP.01" }, p), L = newLayer("text", { text: "mine" });
+  const holder = { cover: c, layer: L, channel: p.categories[0], brand: p.brand };
+  for (const f of Object.values(WORDS).flat()) {
+    assert.equal(typeof holder[f.of][f.key], "string", `${f.of}.${f.key}`);
+    assert.ok(keys().includes(f.name) && bothLangs(f.name).every((s) => s.length > 0), f.name);
+  }
+  for (const k of ["tedit.end", "tedit.endLines", "tedit.reach.channel", "tedit.reach.brand"]) assert.equal(bothLangs(k).length, 2, k);
+});
+
 /** A profile as profiles were before each orientation had a layout of its own by default: a style of its own, every size in Stack as it comes. */
 const asWas = (raw = sampleProfile("en")) => normalizeProfile({ ...raw, style: { template: "stack" } });
 /** A layout preset's colour block as new ones were made before then: wide sizes in Split, the others in Stack, each as the template comes. */

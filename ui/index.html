@@ -743,6 +743,15 @@
      the layer under the pointer in the list */
   #ftb{position:absolute;z-index:20;display:flex;flex-wrap:wrap;align-items:center;gap:2px;padding:4px;border-radius:14px;white-space:nowrap;max-width:calc(100% - 12px)}
   #ftb[hidden],#fpop[hidden],#hoverbox[hidden]{display:none}
+  /* a lettering's words typed on the canvas (editWords in app.js): in the bar's place over it, a field for each, its
+     name over it where it has two (a channel's name and sub-name), a line of what ends it under them */
+  #tedit{position:absolute;z-index:21;display:flex;flex-direction:column;gap:6px;padding:8px;border-radius:14px;box-sizing:border-box;background-color:rgba(24,24,34,.78)}
+  #tedit[hidden]{display:none}
+  html.solid #tedit{background-color:var(--solid)}
+  #tedit label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text2)}
+  #tedit textarea,#tedit input[type=text]{width:100%;box-sizing:border-box;font-size:15px;line-height:1.5;padding:7px 10px}
+  #tedit textarea{height:auto;resize:none;overflow-y:auto}
+  #tedit .hint{margin:0 2px;font-size:11px}
   #ftb,#fpop{background-color:rgba(24,24,34,.66)}   /* over the cover itself, darker glass than the panels', to read on a light one */
   html.solid #ftb,html.solid #fpop{background-color:var(--solid)}
   #ftb button{height:32px;border:0;border-radius:10px;background:transparent;color:var(--text);font-size:13px;padding:0 10px;cursor:pointer;display:flex;align-items:center;gap:6px;max-width:190px}

@@ -164,6 +164,23 @@ export function resetScene(cover, look, key, scope, sizeKey, keys = [sizeKey]) {
   }
   cover.scene = normalizeScene(cover.scene);
 }
+/**
+ * The words of each lettering that are typed in a field, as the canvas also types them in place (see editWords in
+ * app.js), by layer type: for each field, whose words they are — the cover's (its title, subtitle and tag), the layer's
+ * own (a text layer's), the channel's (its name and sub-name: every cover of the channel) or the brand's (its name:
+ * every cover) — the key they are kept under there, its name (an i18n key) and whether its words are lines (Enter
+ * starts another). A copy of a layout layer is lettered with the same words, so it has the same fields.
+ */
+export const WORDS = {
+  title: [{ of: "cover", key: "title", name: "cover.title", lines: true }],
+  subtitle: [{ of: "cover", key: "subtitle", name: "cover.subtitle" }],
+  tag: [{ of: "cover", key: "tag", name: "cover.tag" }],
+  text: [{ of: "layer", key: "text", name: "props.sec.text", lines: true }],
+  catname: [{ of: "channel", key: "name", name: "cat.name" }, { of: "channel", key: "sub", name: "cat.subShort" }],
+  brand: [{ of: "brand", key: "name", name: "brand.name" }],
+};
+/** The fields of lettering L's words (see WORDS), or null for a layer with none. */
+export const wordFields = (L) => (L && WORDS[L.type]) || null;
 /** Whether a layer is a photo that fills the canvas (the cover's background photo, or another). */
 export const fillsCanvas = (L) => L.type === "photo" && L.fill && !L.of;
 /** Whether a layer is a colour as large as the canvas, upright (a wash over it, or a ground): one a new colour is, till it is moved and shrunk. */
