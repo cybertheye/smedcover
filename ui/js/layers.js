@@ -168,6 +168,17 @@ export function resetScene(cover, look, key, scope, sizeKey, keys = [sizeKey]) {
 export const fillsCanvas = (L) => L.type === "photo" && L.fill && !L.of;
 /** Whether a layer is a colour as large as the canvas, upright (a wash over it, or a ground): one a new colour is, till it is moved and shrunk. */
 export const colourFills = (L) => L.type === "solid" && L.t.all.s >= 0.98 && !L.t.all.r;
+/**
+ * Where the cover's ground ends: the index of the first layer above the background and the layers right over it that
+ * fill the canvas (photos laid as the background, colours as large as it), with what is clipped onto them. The editor's
+ * layout guide shows over the ground and under every layer from here up (see placeGuides in app.js): a layer filling
+ * the canvas would hide it everywhere.
+ */
+export function groundEnd(layers) {
+  let g = layers.length && layers[0].type === "bg" ? 1 : 0;
+  while (g < layers.length && (fillsCanvas(layers[g]) || colourFills(layers[g]))) g = clipEnd(layers, g) + 1;
+  return g;
+}
 /** Shapes the colour block and its dividing edge can take ("slant" is the template's own). */
 export const ACCENT_SHAPES = ["slant", "flat", "reverse", "zigzag", "wave", "steps", "torn", "chevron", "scallop", "double", "stripes", "arc"];
 /** The text effects a headline can be given (painted in textfx.js). Absent on a layer means "auto": the look decides. */

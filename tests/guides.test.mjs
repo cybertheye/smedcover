@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { GUIDE_LIMITS, GUIDES_MOST, normalizeGuide, normalizeGuides, guideDefaults, newGuide, autoWidth, guideSpans, gridLines, snapTargets, snapAxis, paintGuides } from "../ui/js/guides.js";
 import { normalizeSettings, settingsToKeep, readSettings } from "../ui/js/store.js";
+import { newLayer, groundEnd } from "../ui/js/layers.js";
 import { DEFAULTS, SHIPPED, layOver } from "../ui/js/defaults.js";
 
 const near = (a, b, tol = 1e-6) => assert.ok(Math.abs(a - b) <= tol, `${a} vs ${b}`);
@@ -105,10 +106,13 @@ test("a drag comes to rest where an edge or the centre nears a line, the nearest
   assert.deepEqual(snapAxis(0, 10, 50, { edge: [], mid: [] }, 6), { d: 50, at: null });
 });
 
-/** A 2D context that keeps the rectangles it is told to fill, with the colour each was filled in. */
+/** A 2D context that keeps the rectangles it is told to fill, with the colour each was filled in, and the pictures laid on it (`drawn`: each with how it was laid on and where). */
 function recorder() {
-  const rects = [];
-  return { rects, fillStyle: "", clearRect() { rects.length = 0; }, fillRect(x, y, w, h) { rects.push([this.fillStyle, x, y, w, h]); } };
+  const rects = [], drawn = [];
+  return { rects, drawn, fillStyle: "", globalCompositeOperation: "source-over",
+    clearRect() { rects.length = 0; drawn.length = 0; },
+    fillRect(x, y, w, h) { rects.push([this.fillStyle, x, y, w, h]); },
+    drawImage(img, x, y, w, h) { drawn.push([img, this.globalCompositeOperation, x, y, w, h]); } };
 }
 
 test("the guide painted: columns and rows as bands in whole device pixels, a grid as lines one pixel wide, too fine a grid left out, the line a drag rests on at full strength", () => {
@@ -129,4 +133,33 @@ test("the guide painted: columns and rows as bands in whole device pixels, a gri
   assert.deepEqual(c.rects, [], "nothing shown, no line either");
   paintGuides(c, [{ ...newGuide(), count: 1, color: "#00FF00" }], 1000, 500, 1000, 500, { x: [300], y: [250] }, 2);
   assert.deepEqual(c.rects, [["rgba(0,255,0,0.1)", 0, 0, 1000, 500], ["rgba(0,255,0,0.9)", 299, 0, 2, 500], ["rgba(0,255,0,0.9)", 0, 249, 1000, 2]]);
+});
+
+test("guides crossing add up: each band laid over what is there, nothing taken away", () => {
+  const c = recorder();
+  paintGuides(c, [{ ...newGuide(), count: 2, gutter: 20 }, { ...newGuide(), kind: "rows", count: 1, margin: 100, color: "#0000FF", opacity: 0.5 }], 1000, 500, 500, 250);
+  assert.deepEqual(c.rects, [["rgba(255,0,0,0.1)", 0, 0, 245, 250], ["rgba(255,0,0,0.1)", 255, 0, 245, 250], ["rgba(0,0,255,0.5)", 0, 50, 500, 150]], "the row over the columns, laid on as they are");
+  assert.deepEqual([c.drawn, c.globalCompositeOperation], [[], "source-over"], "nothing taken away under it");
+});
+
+test("the guide under the layers: cut away where the layers above the ground paint, over the whole canvas, before the line a drag rests on", () => {
+  const c = recorder(), above = { above: true }, cols = { ...newGuide(), count: 2, gutter: 20 };
+  paintGuides(c, [cols], 1000, 500, 500, 250, { x: [500], y: [] }, 1, above);
+  assert.deepEqual(c.drawn, [[above, "destination-out", 0, 0, 500, 250]], "laid over the whole of it, taking the guide away where it paints");
+  assert.equal(c.globalCompositeOperation, "source-over", "left as it was");
+  assert.deepEqual(c.rects, [["rgba(255,0,0,0.1)", 0, 0, 245, 250], ["rgba(255,0,0,0.1)", 255, 0, 245, 250], ["rgba(255,0,0,0.9)", 250, 0, 1, 250]], "the line a drag rests on after it, over everything");
+  paintGuides(c, [{ ...cols, kind: "grid", size: 4 }], 1000, 500, 500, 250, null, 1, above);
+  assert.deepEqual([c.rects, c.drawn], [[], []], "nothing painted: nothing to cut");
+});
+
+test("the cover's ground: the background, and the layers right over it filling the canvas with what is clipped onto them", () => {
+  const bg = newLayer("bg"), title = newLayer("title"), photo = newLayer("photo", { pid: "p", fill: true }), small = newLayer("photo", { pid: "q" });
+  const colour = newLayer("solid", { color: "#123456" }), turned = newLayer("solid", { color: "#123456" }), onPhoto = newLayer("asset", { ref: { kind: "sticker", id: "star" }, clip: true });
+  turned.t.all.r = 10;
+  assert.equal(groundEnd([bg, title]), 1, "the background alone");
+  assert.equal(groundEnd([bg, photo, colour, title]), 3, "a photo laid as the background and a colour as large as the canvas over it");
+  assert.equal(groundEnd([bg, photo, onPhoto, title]), 3, "what is clipped onto the photo with it");
+  assert.equal(groundEnd([bg, small, photo, title]), 1, "a photo not filling the canvas ends it, whatever is above");
+  assert.equal(groundEnd([bg, turned, title]), 1, "a colour turned does not fill it");
+  assert.equal(groundEnd([bg, photo]), 2, "nothing above it");
 });

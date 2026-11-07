@@ -4,7 +4,8 @@
 // own pixels, as a frame's are in Figma, so 20 px of gutter is 20 of the size's pixels whatever size is shown.
 // Pure functions, no DOM: what a guide is (normalizeGuide, newGuide), where its columns, rows or lines fall on a cover
 // of w × h pixels (guideSpans, gridLines), where a layer dragged comes to rest by them (snapTargets, snapAxis), and how
-// they are painted on a canvas of their own (paintGuides).
+// they are painted on a canvas of their own (paintGuides): laid over the cover, but cut away where the layers above
+// its ground paint, so it shows over the ground and under every other layer.
 
 import { DEFAULTS } from "./defaults.js";
 
@@ -144,27 +145,33 @@ export const GRID_FINEST = 4;
 /**
  * Paints the guides of `list` that are shown over the whole of `ctx`'s canvas, W × H device pixels standing for a cover
  * of w × h: columns and rows as bands of their colour, a grid as lines one device pixel wide, each guide over the one
- * before it (where they overlap, as in Figma, they add up); then `hot`, the lines a drag has come to rest on
- * ({x: [], y: []} in the cover's pixels), at full strength in the colour of the first guide shown, a pixel of the
- * screen wide (`dpr` device pixels).
+ * before it (where they overlap, as in Figma, they add up). Then, given `under` (a canvas or image laid over the whole
+ * of it: the layers above the cover's ground painted alone), the guides are cut away wherever it paints, as much as it
+ * does, so they lie under those layers and show only over the ground (and through what is see-through). Then `hot`,
+ * the lines a drag has come to rest on ({x: [], y: []} in the cover's pixels), over all of it, at full strength in the
+ * colour of the first guide shown, a pixel of the screen wide (`dpr` device pixels).
  */
-export function paintGuides(ctx, list, w, h, W, H, hot = null, dpr = 1) {
+export function paintGuides(ctx, list, w, h, W, H, hot = null, dpr = 1, under = null) {
   ctx.clearRect(0, 0, W, H);
   const kx = W / w, ky = H / h, shown = (list || []).filter((g) => g.shown);
+  let painted = false;
   for (const g of shown) {
     ctx.fillStyle = rgba(g.color, g.opacity);
     if (g.kind === "grid") {
       if ((g.size * Math.min(kx, ky)) / dpr < GRID_FINEST) continue;
       for (const v of gridLines(g.size, w)) ctx.fillRect(Math.min(W - 1, Math.round(v * kx)), 0, 1, H);
       for (const v of gridLines(g.size, h)) ctx.fillRect(0, Math.min(H - 1, Math.round(v * ky)), W, 1);
+      painted = true;
       continue;
     }
     const across = g.kind === "columns", k = across ? kx : ky;
     for (const [a, b] of guideSpans(g, across ? w : h)) {
       const p = Math.round(a * k), q = Math.max(p + 1, Math.round(b * k));   // whole device pixels: crisp edges, and never thinner than one
       if (across) ctx.fillRect(p, 0, q - p, H); else ctx.fillRect(0, p, W, q - p);
+      painted = true;
     }
   }
+  if (painted && under) { ctx.globalCompositeOperation = "destination-out"; ctx.drawImage(under, 0, 0, W, H); ctx.globalCompositeOperation = "source-over"; }
   if (!hot || !shown.length) return;
   const lw = Math.max(1, Math.round(dpr)), at = (v, k, n) => clamp(Math.round(v * k - lw / 2), 0, n - lw);
   ctx.fillStyle = rgba(shown[0].color, 0.9);

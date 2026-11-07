@@ -6,7 +6,7 @@ import { virtualSize, layout, adjustLayout, meetStandards, wordsFoot, layoutOf }
 import { drawTitle, drawTitleVertical, titleBlockVertical, parseTitle, subtitleFit, subtitleColumns, setLine, passOf, hasCJK, someLetters } from "./title.js";
 import { photoRect, drawPhotoAt, sizeOf, blurChannel, pxTime, setDraft, isDraft } from "./photo.js";
 import { drawAsset, assetHalf, userAssets, assetExists } from "./assets.js";
-import { resolve, appliesTo, inSize, isLayout, fillsCanvas, clipBase, clipEnd, sceneOffsets, headLine, frontOf, brushesFront, brushToDo, photoMap, onCanvas, inPoly, edgePoint, canWeave, opaqueBox, HEADLINES } from "./layers.js";
+import { resolve, appliesTo, inSize, isLayout, fillsCanvas, groundEnd, clipBase, clipEnd, sceneOffsets, headLine, frontOf, brushesFront, brushToDo, photoMap, onCanvas, inPoly, edgePoint, canWeave, opaqueBox, HEADLINES } from "./layers.js";
 import { setLook, setFast, isFast, look, lookValues, noteReads, readsInto, styled, layerEffects, paintEffects, setScene, scenePlaced, wherePainted, columned, columnBoxOf, fall } from "./style.js";
 import { paintRuns, warpCorners, bentLine, bendExtent, bendRest, reshaped, effectReach, inColumn } from "./textfx.js";
 import { ransomEpoch } from "./ransom.js";
@@ -951,6 +951,8 @@ const SPOT_DIM = 0.3;   // FOCUS: the layers not worked on, this see-through (se
 // a clipping group (see clipBase in layers.js) is painted on clipGround — the base, then each layer
 // clipped onto it painted on clipOne and laid on only where the base is — and then laid down as one
 let clipGround = null, clipOne = null;
+/** The layers above the ground painted alone, for the editor's layout guide to be cut by (see o.above): `c` the canvas, `n` how many times it has been painted. */
+const ABOVE = { c: null, n: 0 };
 /** A canvas the size of cv, cleared, its context scaled to the virtual canvas. */
 function freshCanvas(c, cv, kx, ky) {
   if (c.width !== cv.width || c.height !== cv.height) { c.width = cv.width; c.height = cv.height; }
@@ -1491,6 +1493,10 @@ function dashedLine(shape, grow, colour, perCover) {
  *   o.picked   ids of the layers in a group selection, outlined without handles (editor only)
  *   o.spot     ids of the layers kept bright, every other one dimmed (the editor's FOCUS); a clipping
  *              group is dimmed or not as a whole
+ *   o.above    true while the editor's layout guide shows over this canvas: the layers above the ground (see
+ *              groundEnd in layers.js) are painted once more, alone, onto a canvas of their own, left as
+ *              cv._above = {c, at} (`at` new each time), where they paint the guide is cut away (see placeGuides
+ *              in app.js); the cover itself is painted as ever. Without it, cv._above is null (editor only)
  *   o.only     index of the one layer to paint, on its own (the layer panel's 3D view): as if shown, in
  *              its base's shape when clipped onto one; the rest of the cover still sets the scene for it
  * Leaves cv._hits behind: one entry per drawn layer, bottom first, for pointer hit-testing.
@@ -1751,22 +1757,27 @@ function paintCover(cv, o) {
   for (const i of moving) moved.add(i);
   setFast(!!o.fast || (!noted && moving.length > 0)); setDraft(moving.length > 0 || !!o.draft);   // a drag's frames are drawn coarser here and there; a draft's photos, faster
   let scene = null;   // in a frame that keeps runs of layers: the scene objects placed, those of a kept run as it placed them
+  // with the layout guide shown (o.above), where the ground ends: a run of layers kept ends there too, so what is kept of
+  // those above it is theirs alone
+  const ground = o.above ? groundEnd(cover.layers) : -1;
+  let runs = null, live = null;
   if (!moving.length && !noted) cv._hits = paintRange(ctx, 0, n);
   else {
     // Layers are being dragged (or read a look's setting being dragged). The cover is cut into runs of
     // layers that move and runs that do not; each still run is painted once into an image kept in o.live
     // (o.draft), and each frame only blits those and repaints the moving runs. (Dragging the background
     // photo moves it and its cut-out copy above the title: the four layers between them stay one image.)
-    const live = o.live || noted, still = new Set(moving), runs = [];
+    const still = new Set(moving);
+    live = o.live || noted; runs = [];
     scene = scenePlaced();   // what was placed before the layers; each run's own are added below, in order (a still run's, kept with it)
     for (let i = 0; i < n; i++) {
       const mv = still.has(i), last = runs[runs.length - 1];
-      if (last && last.moving === mv) last.to = i + 1; else runs.push({ from: i, to: i + 1, moving: mv });
+      if (last && last.moving === mv && i !== ground) last.to = i + 1; else runs.push({ from: i, to: i + 1, moving: mv });
     }
     // a draft's kept runs hold for this cover at this size and for the look's other values as they are: the cover as
     // given (o.cover), whose identity holds from frame to frame, not as drawn at this size (coverAt), a copy each time
     // a layer is kept to other sizes
-    const stamp = `${cv.width}x${cv.height}|${n}|${[...still].sort((a, b) => a - b).join(",")}|${o.spot ? o.spot.join(",") : ""}` + (noted ? `|${objId(o.cover)}|${key}|${o.catIndex}|${JSON.stringify({ ...lookValues(), [noted.key]: null })}` : "");
+    const stamp = `${cv.width}x${cv.height}|${n}|${[...still].sort((a, b) => a - b).join(",")}|${o.spot ? o.spot.join(",") : ""}|${ground}` + (noted ? `|${objId(o.cover)}|${key}|${o.catIndex}|${JSON.stringify({ ...lookValues(), [noted.key]: null })}` : "");
     if (live.stamp !== stamp) {
       live.stamp = stamp; if (TIMING.on) TIMING.rebuilt++;
       live.runs = runs.map((r) => {
@@ -1788,6 +1799,19 @@ function paintCover(cv, o) {
     });
     cv._hits = hits;
   }
+  if (o.above) {
+    // The layers above the ground once more, alone, for the layout guide to be cut by where they paint: a still run of
+    // them laid down as it is kept, the rest painted again (the cover is painted as it was, a layer blending with what is
+    // under it blending with it; the scene objects placed again are where they were, and their hits are not wanted).
+    const u = freshCanvas(ABOVE.c = ABOVE.c || document.createElement("canvas"), cv, kx, ky);
+    if (!runs) paintRange(u, ground, n);
+    else runs.forEach((r, i) => {
+      if (r.from < ground) return;
+      if (r.moving) { paintRange(u, r.from, r.to); return; }
+      u.save(); u.setTransform(1, 0, 0, 1, 0, 0); u.drawImage(live.runs[i].img, 0, 0); u.restore();
+    });
+    cv._above = { c: ABOVE.c, at: ++ABOVE.n };
+  } else if (cv._above) { cv._above = null; if (ABOVE.c) ABOVE.c.width = ABOVE.c.height = 0; }   // the guide hidden: the canvas let go
   const atPost = scenePlaced().length;
   if (L0.post && cover.layers[0].visible) {   // not over a hidden background; over a see-through base only where something is painted
     const post = (x) => L0.post(x, w, h, C, lookValues(), kx, cv._hits);

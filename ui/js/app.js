@@ -499,7 +499,7 @@ function paintFlat() {
   if (!draft && !LIVE) dropCards();   // painted still: the drag or the draft is over, and the photos' copies on the graphics card can go
   const shown = previewed();   // a look, a text effect or a layout preset previewed from its card, on this canvas only (see PREVIEW)
   paint(cv, size, Math.min(vw * 1.5, vw * k * (draft ? 1 : window.devicePixelRatio || 1)), shown.cover, catIndex(), S.mode === "edit" ? S.layerId : null, S.mode === "edit" ? LIVE : null,
-    { draft: DRAFT.kept || draft, ...(S.mode === "edit" ? { picked: group().map((L) => L.id), sceneHandles: !S.settings.hideScene, spot: S.focus ? spotIds() : null, brush: S.brushWin } : {}),
+    { draft: DRAFT.kept || draft, ...(S.mode === "edit" ? { picked: group().map((L) => L.id), sceneHandles: !S.settings.hideScene, spot: S.focus ? spotIds() : null, brush: S.brushWin, above: guidesShown() } : {}),
       ...(shown.profile !== S.profile ? { profile: shown.profile } : {}) });
   const clear = !layer("bg").visible;
   stage.classList.toggle("alpha", clear); $("strip").classList.toggle("alpha", clear);
@@ -7464,10 +7464,14 @@ function placeFrames() {
 // layout guides are; shown or not by the Layout sheet's switch or ⌃G, kept on this computer for every profile and
 // size, its numbers the size's own pixels. A canvas of its own laid over the cover's, as the parts' frames are, never
 // drawn on the cover: so it is in no thumbnail, preset picture or export, and a change to it paints it alone, not the
-// cover. A layer dragged while it shows comes to rest on its columns' edges and middles and its rows' and grid's lines
-// (guideSnap), the line it rests on drawn at full strength meanwhile; with Control held it moves freely.
-/** hot: the lines a drag rests on ({x, y} in the cover's pixels), or null; open: the guide whose settings show in the Layout sheet (-1: none); drawn: what the guide's canvas was last painted from. */
-const GUIDE = { hot: null, open: 0, drawn: "" };
+// cover. It lies under the layers all the same: while it shows, the cover's canvas paints the layers above its ground
+// (the background and what fills the canvas over it, see groundEnd in layers.js) once more on their own (o.above in
+// render.js), and the guide is cut away where they paint, so it shows over the ground and under the rest, through what
+// is see-through as much as that is. A layer dragged while it shows comes to rest on its columns' edges and middles and
+// its rows' and grid's lines (guideSnap), the line it rests on drawn at full strength over everything meanwhile; with
+// Control held it moves freely.
+/** hot: the lines a drag rests on ({x, y} in the cover's pixels), or null; open: the guide whose settings show in the Layout sheet (-1: none); drawn: what the guide's canvas was last painted from; asked: a painting of the cover asked for, to cut the guide by. */
+const GUIDE = { hot: null, open: 0, drawn: "", asked: false };
 const GUIDE_CV = el("canvas", { id: "guides", "aria-hidden": "true", hidden: true });
 $("stage").append(GUIDE_CV);
 /**
@@ -7480,21 +7484,28 @@ const freeKey = () => (MOD_KEY === "⌘" ? "⌘" : "Ctrl");
 /** The key that shows or hides the guide, as Figma's, as it is written: Control-G (⌃G on a Mac); Ctrl+Shift+4 too (isGuideKey). */
 const guideKey = () => (MOD_KEY === "⌘" ? "⌃G" : "Ctrl+G");
 const isGuideKey = (e) => e.ctrlKey && !e.metaKey && !e.altKey && ((!e.shiftKey && e.key.toLowerCase() === "g") || (e.shiftKey && e.code === "Digit4"));
-/** Whether the guide shows over the canvas now: switched on with a guide shown, in the editor, on the flat canvas. */
-const guidesShown = () => S.mode === "edit" && !!S.cover && !V3.on && S.settings.guide.on && S.settings.guide.list.some((g) => g.shown);
-/** Lays the guide's canvas over the cover's, at the screen's pixels, and paints it where what it shows has changed (see paintGuides). */
+/** Whether the guide shows over the canvas now: switched on with a guide shown, in the editor, on the flat canvas. (Hoisted: the cover's painting asks it.) */
+function guidesShown() { return S.mode === "edit" && !!S.cover && !V3.on && S.settings.guide.on && S.settings.guide.list.some((g) => g.shown); }
+/**
+ * Lays the guide's canvas over the cover's, at the screen's pixels, and paints it where what it shows has changed (see
+ * paintGuides), cut by the layers above the ground as the cover's canvas last painted them (cv._above). Just shown,
+ * before the cover has been painted so, it waits hidden for that painting, asked for once: shown uncut, it would lie
+ * over everything for a frame.
+ */
 function placeGuides() {
-  const cv = $("cv"), on = guidesShown();
-  GUIDE_CV.hidden = !on;
-  if (!on) { GUIDE.drawn = ""; return; }
+  const cv = $("cv"), on = guidesShown(), above = on && cv._above;
+  if (!on || above) GUIDE.asked = false;
+  else if (!GUIDE.asked) { GUIDE.asked = true; queueDraw(false); }
+  GUIDE_CV.hidden = !above;
+  if (!above) { GUIDE.drawn = ""; return; }
   const size = selSize(), dpr = window.devicePixelRatio || 1, w = cv.offsetWidth, h = cv.offsetHeight, W = Math.max(1, Math.round(w * dpr)), H = Math.max(1, Math.round(h * dpr));
   Object.assign(GUIDE_CV.style, { left: cv.offsetLeft + "px", top: cv.offsetTop + "px", width: w + "px", height: h + "px" });
-  const key = JSON.stringify([S.settings.guide.list, size.w, size.h, W, H, GUIDE.hot]);
+  const key = JSON.stringify([S.settings.guide.list, size.w, size.h, W, H, GUIDE.hot, above.at]);
   if (key === GUIDE.drawn) return;
   GUIDE.drawn = key;
   if (GUIDE_CV.width !== W) GUIDE_CV.width = W;
   if (GUIDE_CV.height !== H) GUIDE_CV.height = H;
-  paintGuides(GUIDE_CV.getContext("2d"), S.settings.guide.list, size.w, size.h, W, H, GUIDE.hot, dpr);
+  paintGuides(GUIDE_CV.getContext("2d"), S.settings.guide.list, size.w, size.h, W, H, GUIDE.hot, dpr, above.c);
 }
 /** A change to the guide: kept, and painted; the Layout sheet built again where `rebuild` (what it shows of the guide changed). */
 function guideChanged(rebuild = false) {

@@ -4813,6 +4813,46 @@ async function drawnAt(p, cover, size, photos = null) {
   try { const cv = canvas(); drawCover(cv, { profile: p, catIndex: 0, size, pixelW: 200, cover, photos: photos || new Map() }); return cv; } finally { globalThis.document = was; }
 }
 
+/**
+ * Draws `cover` as drawnAt does, with drawCover's options `extra`, on `cv` (a new canvas when none), each canvas made
+ * keeping in `calls` the name of each thing it was told to do, in order.
+ */
+async function paintedOn(p, cover, size, extra = {}, cv = null) {
+  const { drawCover } = await import("../ui/js/render.js");
+  const ctxOf = (c) => new Proxy({ canvas: c, globalAlpha: 1, font: "900 100px X", lineWidth: 1 }, { get: (t, k) => (k in t ? t[k] : k === "measureText" ? (s) => ({ width: [...String(s)].length * 50 })
+    : k === "createLinearGradient" || k === "createRadialGradient" || k === "createPattern" ? () => ({ addColorStop() {} }) : k === "getImageData" ? (x, y, w, h) => ({ data: new Uint8ClampedArray(Math.max(4, w * h * 4)) })
+    : (...a) => { c.calls.push(k); return {}; }), set: (t, k, v) => { t[k] = v; return true; } });
+  const canvas = () => { const c = { width: 0, height: 0, calls: [] }; c.getContext = () => ctxOf(c); return c; }, was = globalThis.document;
+  globalThis.document = { createElement: canvas, fonts: { size: 0 } };
+  try { cv = cv || canvas(); cv.calls.length = 0; drawCover(cv, { profile: p, catIndex: 0, size, pixelW: 200, cover, photos: new Map(), ...extra }); return cv; } finally { globalThis.document = was; }
+}
+
+test("with the layout guide shown, the layers above the ground painted once more on a canvas of their own, the cover itself as ever", async () => {
+  const p = normalizeProfile(sampleProfile("en")), size = p.sizes[0], c = normalizeCover({ title: "Hello", subtitle: "sub", tag: "EP.01" }, p);
+  const freshDone = ["setTransform", "clearRect", "scale"];   // what a canvas made ready is told (freshCanvas)
+  const plain = await paintedOn(p, c, size), cv = await paintedOn(p, c, size, { above: true });
+  assert.deepEqual(cv.calls, plain.calls, "the cover painted as it was");
+  assert.ok(!plain._above, "none without the guide");
+  const u = cv._above.c, at = cv._above.at;
+  assert.deepEqual([u.width, u.height], [cv.width, cv.height], "as large as the cover's canvas");
+  assert.ok(u.calls.length > freshDone.length, "the layers above the ground painted on it");
+  // the ground alone (every other layer hidden): nothing on it
+  const bare = { ...c, layers: c.layers.map((l, i) => (i === 0 ? l : { ...l, visible: false })) };
+  await paintedOn(p, bare, size, { above: true }, cv);
+  assert.deepEqual(cv._above.c.calls.slice(-freshDone.length), freshDone);
+  assert.ok(cv._above.at > at, "painted anew: a new count");
+  const kept = cv._above.c;
+  await paintedOn(p, c, size, {}, cv);
+  assert.equal(cv._above, null, "the guide hidden: none");
+  assert.deepEqual([kept.width, kept.height], [0, 0], "and its canvas let go");
+  // while the title is dragged: the ground ends a run of its own, the layers above it laid on that canvas or painted there
+  const runsOf = async (extra) => { const live = { ids: ["title"] }; const d = await paintedOn(p, c, size, { live, ...extra }); return [live.runs.length, d]; };
+  const [n0] = await runsOf({}), [n1, dragged] = await runsOf({ above: true });
+  assert.equal(n1, n0 + 1, "the run under the title cut where the ground ends");
+  const moved = dragged._above.c.calls;
+  assert.ok(moved.filter((k) => k === "drawImage").length >= 1 && moved.length > freshDone.length + 2, "what is kept laid down, the title painted");
+});
+
 /** A profile as profiles were before each orientation had a layout of its own by default: a style of its own, every size in Stack as it comes. */
 const asWas = (raw = sampleProfile("en")) => normalizeProfile({ ...raw, style: { template: "stack" } });
 /** A layout preset's colour block as new ones were made before then: wide sizes in Split, the others in Stack, each as the template comes. */
